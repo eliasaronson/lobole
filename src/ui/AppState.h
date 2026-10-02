@@ -7,6 +7,7 @@
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
 #include "core/Primitives.h" // the primitive tool's spec (PrimitiveSession)
+#include "core/Requirements.h"
 #include "core/cam/CamAdaptive.h" // AdaptiveCache, AdaptiveRequest
 #include "core/cam/CamJob.h"
 #include "core/cam/CamPicks.h"   // FaceRegion -- the only thing this header
@@ -1059,6 +1060,14 @@ struct AppState {
   // (or a lone part's envelope), read by lookup() in every part; their cells
   // are seeded into projectSymbols by SyncProjectScope.
   std::vector<lookuptable::Table> projectTables;
+  // The project's design requirements (docs/requirements/README.md): saved
+  // in `requirements/` beside project.json (or a lone part's envelope), each
+  // with the evidence its last check took. An edit or a check marks
+  // projectMetaDirty; `requirementsEdits` counts both, so the panel knows
+  // its rows are out of date without hashing every frame.
+  std::vector<req::Requirement> requirements;
+  uint64_t nextRequirementId = 1;
+  uint64_t requirementsEdits = 0;
   SymbolTable projectSymbols;
   ProjectVarHistory projectVarHistory; // cross-tab undo for project-var edits
 

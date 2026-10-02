@@ -417,8 +417,10 @@ struct MotionStudy {
   std::optional<uint64_t> configuration;
 };
 
-// A CLEARANCE the designer declared, held by the document and re-checked on
-// demand (docs/assemblies/README.md#clearance-assertions).
+// A CLEARANCE the designer declared, as an assembly saved before v160 holds
+// it. It loads, and is moved into the project's requirements on open
+// (docs/requirements/README.md#clearance-assertions): a declared clearance
+// is a clearance requirement now, and an assembly writes none.
 //
 // The drone's `verify()` says "prop tip to arm is at least 2 mm" in a python
 // script, and so does the engine's, and the clamp's. That is design intent
@@ -693,9 +695,8 @@ public:
 
   // Whether the assembly has changed since it was saved — Document::SaveStamp
   // for an assembly: the version plus the saved-state edits that must not
-  // look like a change to the model (the units; a verdict verify_assertions
-  // records), which MarkEdited counts. Dirty tracking and autosave compare
-  // this, never Version().
+  // look like a change to the model (the units), which MarkEdited counts. Dirty
+  // tracking and autosave compare this, never Version().
   uint64_t SaveStamp() const { return m_version + m_edits; }
   void MarkEdited() { ++m_edits; }
 

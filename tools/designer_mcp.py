@@ -502,6 +502,23 @@ The loop that works — follow it every time:
    (attach it to that face). rpc('extract_variables') without `apply` is a
    dry run proposing a named variable per literal; with apply: true it is
    one undo step and the geometry does not move.
+8. STATE THE REQUIREMENTS, AND CHECK THEM BEFORE DELIVERING. What the
+   design is FOR -- "deflects at most 2 mm at 3 g", "the camera clears the
+   yoke through the tilt", "every bearing seat passes", "under 400 g" -- goes
+   into the project with rpc('add_requirement', {name, measure, bound,
+   source}), not into your head or a comment: a measure names what to read
+   by stable reference (a study's probe or peak, a clearance between two
+   occurrences, mass, check_fits / check_seat / check_fasteners /
+   check_literals, a motion study clean, cam_verify) and a bound (at_most,
+   at_least, within, or pass; a value may be an expression over the
+   variables). Before you say a design is done, run
+   rpc('check_requirements', {async: true}) and poll study_status {job},
+   then list_requirements: only `pass` is a pass. `stale` means the model
+   changed after the check, `unresolved` that a reference is gone or the
+   measure could not be taken, `unchecked` that it was never checked or was
+   edited since -- report every one of those as NOT met, with its note.
+   Re-checking an unchanged design costs nothing (the evidence and the
+   study results are reused by input hash).
 
 "This", "here", "the selected": read get_state's `selection` (and
 `selection_items`) BEFORE acting — that is what the user means. When it is

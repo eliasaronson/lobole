@@ -197,9 +197,9 @@ such pair would hang the sweep.
 
 Some solid in solid is meant: an engaged thread, a retaining ring gripping
 its groove, a press fit. `Measure::ContactBetween` — the one boolean the
-named pair, the exact sweep, `contact_report`, an exact motion study and a
-clearance assertion all take — removes each from the overlap before it is
-weighed, as an exact annulus, and reports it apart from the clash:
+named pair, the exact sweep, `contact_report`, an exact motion study and an
+exact clearance requirement all take — removes each from the overlap before
+it is weighed, as an exact annulus, and reports it apart from the clash:
 
 - an engaged thread: `engaged_thread_pairs`, `thread_engagement_volume`
   ([threads](../modeling/holes-and-threads.md));
@@ -335,8 +335,10 @@ bodies are not counted twice.
 `check_fit`, `set_tolerance`, `list_tolerances`, `stack_up`, `check_fits`
 and the print allowance (`set_print_process`, `get_print_process`,
 `print_allowance`) are described in [../tolerances/README.md](../tolerances/README.md). Declared clearances
-between occurrences (`add_assertion`, `verify_assertions`) are assembly
-state.
+between occurrences (`add_assertion`, `verify_assertions`) are clearance
+requirements, and every check here can be one: a requirement holds the
+measure and its bound in the project and records evidence of what it
+measured ([requirements](../requirements/README.md)).
 
 ## Before delivering a model
 

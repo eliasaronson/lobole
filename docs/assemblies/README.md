@@ -32,7 +32,6 @@ an error):
 | relations | couplings between two mates' DOFs ([relations.md](relations.md)) |
 | exploded views | named display offsets |
 | motion studies | one mate DOF driven over a range, clash-checked |
-| clearance assertions | declared minimum gaps, re-checked on demand |
 | configurations | occurrence/mate/relation suppression and held mate DOFs ([../configurations/README.md](../configurations/README.md)) |
 | FEM studies | studies on the assembly ([../simulation/README.md](../simulation/README.md)) |
 
@@ -43,7 +42,7 @@ references another document. So an assembly regenerates by a placement pass
 
 On disk it shares the one `designer-document` format and `kVersion` with parts
 (discriminated by `kind: "assembly"`), one file per item under
-`occurrences/`, `mates/`, `exploded/`, `relations/`, `assertions/`, `motion/`
+`occurrences/`, `mates/`, `exploded/`, `relations/`, `motion/`
 and `studies/`, so disjoint edits merge without conflict. Field-level detail
 is in [../versioning/format.md](../versioning/format.md).
 
@@ -213,8 +212,8 @@ inner mate values with their `path`. Clash checks key a flexible placement's
 bodies per inner occurrence, so a plunger is checked against its barrel and
 against the engine, and the rigid-pair rule compares those leaves' own
 transforms. The GLB export writes one node per moving inner occurrence, and
-live playback moves each one. A clearance assertion's key hashes the inner
-poses. An exploded view moves the unit by its own step, and a moving part by
+live playback moves each one. A clearance requirement's input hash reads
+the inner poses (the occurrence as saved). An exploded view moves the unit by its own step, and a moving part by
 a step of its own on top (below).
 
 **In the GUI** ([panels](../ui/panels.md#assembly-tab-the-model-panel)). The
@@ -517,15 +516,14 @@ placed fastener against its current stack. The standards and sizing are in
 
 ## Clearance assertions
 
-`add_assertion {name, a, b, min_mm, mode?, why?}` declares a minimum gap
-between two top-level occurrences (by id), held in the document.
-`verify_assertions` re-checks and records the verdict (`holds`, `violated`,
-`unverifiable` when an occurrence no longer resolves); in mesh mode the
-tessellation tolerance is subtracted from the measured gap. `list_assertions`
-reports without re-checking, and reads `stale` when the placed geometry of the
-two subtrees has changed since (a content hash, not the assembly's version
-counter, so an unrelated edit or a reload does not make every assertion
-stale).
+A declared clearance between two top-level occurrences is a project
+requirement ([requirements](../requirements/README.md#clearance-assertions)):
+`add_assertion {name, a, b, min_mm, mode?, why?}` states one on the active
+assembly, `verify_assertions` measures them (in mesh mode the tessellation
+tolerance is subtracted from the measured gap), `list_assertions` reports
+without measuring (`stale` when either occurrence, or what it places, has
+changed since), and an assembly saved with `assertions/` loads them as
+requirements.
 
 ## Clash sweeps: what a check costs
 
@@ -683,7 +681,8 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
 - BOM and hardware: `bom`, `export_bom`, `add_fastener`, `fit_fastener`,
   `check_fasteners`.
 - Clearances: `add_assertion`, `list_assertions`, `remove_assertion`,
-  `verify_assertions`.
+  `verify_assertions` (requirements, in
+  `src/remote/RemoteRequirements.cpp`).
 - `edit_in_context`.
 
 The Python SDK (`tools/designer_sdk.py`) wraps these on `Asm`: `gear`,
@@ -697,7 +696,7 @@ one.
 
 | path | what |
 |---|---|
-| `src/core/Occurrence.{h,cpp}` | the model: occurrences, connectors, mates, relations, views, studies, assertions; `CamLift` |
+| `src/core/Occurrence.{h,cpp}` | the model: occurrences, connectors, mates, relations, views, studies, the clearance assertions an old file carries; `CamLift` |
 | `src/core/AssemblySolve.{h,cpp}` | connector frames, relation propagation, the placement pass, attachments, `Flatten`, `ResolvePath`, `WouldCycle`, `SubtreeVersions`, `MassProperties` |
 | `src/core/AssemblyFlexible.cpp` | flexible sub-assemblies: `ExpandFlexible`, `CollapseFlexible`, `FlexibleRefusal`, mates named `{path, mate}` |
 | `src/core/AssemblyLoopSolve.{h,cpp}` | the loop solve; `MateAdjustFor`, `DeriveMateDofs` |

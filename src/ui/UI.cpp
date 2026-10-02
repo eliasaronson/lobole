@@ -38,6 +38,7 @@
 #include "ui/PreviewHandles.h"
 #include "ui/PrimitiveTool.h"
 #include "ui/RendererSync.h"
+#include "ui/RequirementsPanel.h"
 #include "ui/SceneOverlays.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/SettingsWindow.h"
@@ -876,6 +877,7 @@ void DrawUI(AppState& state) {
   PollDiskState(state); // F8 — before the panels, so all of them agree
   DrawHistoryPanel(state);
   DrawConflictsPanel(state);
+  DrawRequirementsPanel(state); // the project's, so on every kind of tab
   DrawCamPanel(state);
   DrawTerminalPanel(state);
   DrawSettingsWindow(state);

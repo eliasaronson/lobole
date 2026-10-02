@@ -158,6 +158,10 @@ struct OpenProgress {
 ReadProject(const std::string& path, OpenProgress* progress = nullptr);
 bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error);
 
+// Moves every assembly's pre-v160 clearance assertions into the project's
+// requirements (docs/requirements/README.md#clearance-assertions).
+void AdoptAssertionsAsRequirements(AppState& state);
+
 // ReadProject then AdoptProject, synchronously: what every caller that needs
 // the answer before it returns uses (the RPC, restore, merge, sync, tests).
 // The opens a person starts go through StartOpenProject (ui/OpenJob.h).

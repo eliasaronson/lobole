@@ -111,6 +111,7 @@ add_executable(designer_tests
     test_expression.cpp
     test_lookup_table.cpp
     test_literals.cpp
+    test_requirements.cpp
     test_variables.cpp
     test_datum.cpp
     test_primitives.cpp
@@ -643,6 +644,17 @@ add_test(NAME press_fit_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/press_fit_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(press_fit_smoke PROPERTIES TIMEOUT 120)
+
+# Design requirements (docs/requirements/README.md): each measure kind passes
+# and fails, a model edit makes only what it reaches stale, an edited
+# requirement reads unchecked, a deleted reference unresolved, a re-check of
+# an unchanged design measures nothing, the async check is a job, the
+# refusals name the vocabulary, and both project forms carry the evidence.
+# Headless.
+add_test(NAME requirements_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/requirements_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(requirements_smoke PROPERTIES TIMEOUT 240)
 
 # Project tables and lookup() over RPC: both row forms, a variable and a
 # feature reading one, the refusals naming what exists, undo, and the tables

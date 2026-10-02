@@ -152,6 +152,13 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.projectParameters = state.document->TakeParameters();
   state.projectTables = state.document->TakeTables();
   state.projectVarHistory = {};
+  // The requirements a lone part carries are the project's
+  // (docs/requirements/README.md#saved-form); validated when it was read.
+  state.requirements = req::ListFromJson(state.document->TakeRequirementsRaw());
+  state.nextRequirementId = 1;
+  for (const req::Requirement& r : state.requirements)
+    state.nextRequirementId = std::max(state.nextRequirementId, r.id + 1);
+  state.requirementsEdits++;
   state.document->SetProjectSymbols(&state.projectSymbols);
   state.document->SetProjectParameters(&state.projectParameters);
   {

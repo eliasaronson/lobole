@@ -13,6 +13,8 @@
 #include "core/fem/FemStudy.h"
 #include "core/tube/Rules.h"
 
+#include <nlohmann/json.hpp>
+
 #include <algorithm>
 #include <cstdint>
 #include <functional>
@@ -201,6 +203,19 @@ public:
   }
   std::vector<lookuptable::Table> TakeTables() {
     return std::exchange(m_tables, {});
+  }
+
+  // The project's requirements (docs/requirements/README.md) riding this
+  // document, as their saved JSON list: a single-part file is the whole
+  // project, so they are written into it and taken back out on load
+  // (TakeRequirementsRaw), like the tables above. Validated when read
+  // (req::ListFromJson); the app holds the parsed list.
+  const nlohmann::json& GetRequirementsRaw() const { return m_requirements; }
+  void SetRequirementsRaw(nlohmann::json list) {
+    m_requirements = std::move(list);
+  }
+  nlohmann::json TakeRequirementsRaw() {
+    return std::exchange(m_requirements, nlohmann::json::array());
   }
 
   // ---- Parameters (variables) -------------------------------------------
@@ -715,6 +730,7 @@ private:
   catalog::Json m_generator = nullptr;
   catalog::Json m_catalogs = catalog::Json::array();
   std::vector<lookuptable::Table> m_tables;
+  nlohmann::json m_requirements = nlohmann::json::array();
   std::vector<Parameter> m_parameters;
   std::vector<Tolerance> m_tolerances;
   std::vector<fem::Study> m_studies;

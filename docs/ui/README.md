@@ -31,7 +31,8 @@ the dockspace; and the **document tab bar** at the bottom.
   Tabs can be grouped into folders (flyouts). Switching tabs stashes the
   active document and cancels a pending preview.
 - **The left dock node** holds the panels as tabs: Model, Variables,
-  Configurations, History, Conflicts, and the CAM panel on a job tab
+  Configurations, History, Conflicts, Requirements (while the project states
+  any), and the CAM panel on a job tab
   (`src/ui/PanelTitles.h`). Panel tabs are **icons**; the name is in the
   tooltip and each panel draws its own heading, because at the default split
   the words were truncated to `Mo…`. The `###id` part of each title is what
@@ -223,7 +224,8 @@ every creation tool to it. The rule, its examples and the gate are in
 - **Panels:** `FeatureTreePanel.cpp`, `OccurrencePanel.cpp`, `CamPanel.cpp`,
   `CamGenerate.cpp`, `StudyPanel.cpp`, `DrawingPanel.cpp`,
   `VariablesPanel.cpp`, `ConfigurationsPanel.cpp`, `HistoryPanel.cpp`,
-  `ConflictsPanel.cpp`, `SettingsWindow.cpp`, `TerminalPanel.cpp`.
+  `ConflictsPanel.cpp`, `RequirementsPanel.cpp`, `SettingsWindow.cpp`,
+  `TerminalPanel.cpp`.
 - **Numbers:** `ExprInput.cpp`, `ExprComplete.cpp`.
 - **Jobs:** `BackgroundJob(s).h`, `CamJobs.cpp`, `ImportJob.cpp`,
   `OpenJob.cpp`, `SyncJob.cpp`, `TopoJob.h`.

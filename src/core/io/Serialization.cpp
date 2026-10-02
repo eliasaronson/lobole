@@ -1,6 +1,7 @@
 #include "core/io/Serialization.h"
 
 #include "core/MotionStudy.h"
+#include "core/Requirements.h"
 #include "core/io/GeometryCache.h"
 #include "core/io/SerializationInternal.h"
 
@@ -249,6 +250,10 @@ json DocumentEnvelope(const Document& doc) {
   // in for the write like its variables).
   if (!doc.GetTables().empty())
     j["tables"] = lookuptable::ToJson(doc.GetTables());
+  // v160: the project's requirements a single-part file carries
+  // (docs/requirements/README.md#saved-form), folded in like the tables.
+  if (doc.GetRequirementsRaw().is_array() && !doc.GetRequirementsRaw().empty())
+    j["requirements"] = doc.GetRequirementsRaw();
   j["version"] = kVersion;
   if (doc.Rollback() >= 0) {
     j["rollback"] = doc.Rollback();
@@ -898,6 +903,10 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     doc->SetCommitGeometry(index.value("commit_geometry", true));
     doc->SetCatalogsRaw(index.value("catalogs", json::array()));
     doc->SetTablesRaw(lookuptable::ListFromJson(index.value("tables", json())));
+    // Refused, not dropped, when one names a measure this build does not
+    // know: the requirement would load as something it is not.
+    doc->SetRequirementsRaw(req::ListToJson(
+        req::ListFromJson(index.value("requirements", json()))));
     doc->SetGeneratorRaw(index.value("generator", json(nullptr)));
     for (const auto& pj : index.value("parameters", json::array())) {
       doc->SetParameter(pj.at("name").get<std::string>(),
@@ -1636,6 +1645,10 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     doc->SetCommitGeometry(j.value("commit_geometry", true));
     doc->SetCatalogsRaw(j.value("catalogs", json::array()));
     doc->SetTablesRaw(lookuptable::ListFromJson(j.value("tables", json())));
+    // Refused, not dropped, when one names a measure this build does not
+    // know: the requirement would load as something it is not.
+    doc->SetRequirementsRaw(
+        req::ListToJson(req::ListFromJson(j.value("requirements", json()))));
     doc->SetGeneratorRaw(j.value("generator", json(nullptr)));
     // Parameters first: features' expressions evaluate against them on the
     // regeneration each AddFeature triggers.

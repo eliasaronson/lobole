@@ -38,7 +38,7 @@ the container they live in `project.json` and each part's `index.json`
 | `src/core/io/SerializationInternal.h` | `kFormat`, `kVersion` and its per-version comments, shared JSON helpers |
 | `src/core/io/Serialization.cpp` | envelopes, `Save`/`Load`, `SaveDir`/`LoadDir`, assemblies, drawings, jobs, load refusals |
 | `src/core/io/SerializeFeatures.cpp` | `FeatureToJson` / `FeatureFromJson`, sketch entities and constraints |
-| `src/core/io/SerializeAssembly.cpp` | occurrences, mates, relations, exploded views, assertions |
+| `src/core/io/SerializeAssembly.cpp` | occurrences, mates, relations, exploded views, the clearance assertions an old file carries |
 | `src/core/io/SerializeStudies.cpp` | FEM and topology studies |
 | `src/core/io/SerializeConfigurations.cpp` | part and assembly configurations |
 | `src/core/io/SerializeCam.cpp` | CAM setups, tools, operations |
@@ -169,7 +169,7 @@ read clean and was dropped on close without a prompt. So
   touched. An undo back to exactly the saved content still reads dirty: the
   stamp only grows, which errs towards one prompt too many.
 - **The other document kinds have their own**: `AssemblyDocument::SaveStamp`
-  (its units, a verdict `verify_assertions` records), `cam::JobDocument::
+  (its units), `cam::JobDocument::
   SaveStamp` (a job's `Version()` is only a cache key; `MarkJobEdited` and
   every `JobUndoGuard` that records a step count the edit, which is how the
   CAM RPCs reach it), and a drawing's `Version()`, which every drawing edit
@@ -181,7 +181,8 @@ Each slot remembers the stamp it was saved at (`AppState::lastSavedVersion`
 for the active tab, `PartSlot::lastSavedVersion` for the rest), and
 `ProjectDirty` is true when any slot's stamp differs or `projectMetaDirty`
 is set — which is now only for what belongs to no document: adding,
-deleting or renaming a document, folders, catalogs. `MarkProjectSaved` /
+deleting or renaming a document, folders, catalogs, requirements and their
+evidence. `MarkProjectSaved` /
 `MarkProjectOpened` re-stamp every slot. Opening a sketch moves the view
 rollback and regenerates without being an edit, so it re-stamps a clean
 document (`SetViewRollbackKeepingDirt`).

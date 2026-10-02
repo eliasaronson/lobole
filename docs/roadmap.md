@@ -121,14 +121,6 @@ them:
   in-document form, for a composite that recurs across projects. An
   interpreter inside regeneration is not the answer: it brings a sandbox, a
   pinned runtime version and a new determinism gate.
-- **Design requirements stored with the project.** A generator's acceptance
-  criteria live in its own script, so a later edit cannot be checked against
-  them and a check run before an edit looks like one run after it. The
-  direction: a persisted `Requirement` (target by stable id, bounds, source,
-  revision), one result envelope for every check (`fits`, assertions,
-  contact, motion) bound to the model revision it read, with `stale` and
-  `unresolved` as real outcomes, and requirement edits that are explicit and
-  invalidate old evidence.
 - **Typed contracts for more RPCs.** Only `geometry_snapshot` and
   `validate_snapshot` have machine-readable request and result schemas
   ([scripting/rpc.md](scripting/rpc.md#typed-inspection-contracts)); every

@@ -47,6 +47,7 @@ import functools
 import math
 import os
 import sys
+import time
 from typing import TYPE_CHECKING
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -485,6 +486,92 @@ class App:
     def new(self):
         self.call("new_project")
         return self
+
+    # ---- Requirements (docs/requirements/README.md) -----------------------
+
+    def require(self, name, measure, bound=None, source="", **bound_kw):
+        """State a requirement the design must meet, held by the project:
+
+            app.require("lens at 3 g", {"kind": "study_probe", ...},
+                        at_most=2.0, source="the shot must stay sharp")
+            app.require("seats", {"kind": "check_seat", ...})   # passes
+
+        The bound is `bound` ({kind, value|min|max}) or one keyword:
+        `at_most=`, `at_least=` or `within=(min, max)`, each a number or an
+        expression over the project's variables; a verdict measure takes
+        none (its bound is `pass`). Returns the requirement's id. If a
+        requirement of this name exists it is EDITED instead (its revision
+        moves and its evidence goes), so a generator re-run states the same
+        set rather than a second copy of it."""
+        if bound is None:
+            if len(bound_kw) > 1:
+                raise SdkError(f"one bound, not {sorted(bound_kw)}")
+            if not bound_kw:
+                bound = {"kind": "pass"}
+            else:
+                (kind, v), = bound_kw.items()
+                if kind == "within":
+                    bound = {"kind": "within", "min": v[0], "max": v[1]}
+                elif kind in ("at_most", "at_least"):
+                    bound = {"kind": kind, "value": v}
+                else:
+                    raise SdkError(f"unknown bound {kind!r} (accepted: "
+                                   "at_most, at_least, within)")
+        elif bound_kw:
+            raise SdkError("pass `bound` or one bound keyword, not both")
+        have = {r["name"]: r for r in
+                self.call("list_requirements")["requirements"]}
+        if name in have:
+            r = have[name]
+            if (r["measure"] == measure and r["bound"] == bound
+                    and r.get("source", "") == source):
+                return r["id"]
+            self.call("set_requirement", id=r["id"], measure=measure,
+                      bound=bound, source=source)
+            return r["id"]
+        return self.call("add_requirement", name=name, measure=measure,
+                         bound=bound, source=source)["id"]
+
+    def verify_requirements(self, ids=None, recompute=False, poll=1.0,
+                           timeout=3600.0, raise_on_failure=True):
+        """Check the project's requirements and wait for the answer: as a
+        job (check_requirements {async}) followed by id, since a check may
+        run studies. Returns list_requirements' answer. Raises SdkError
+        naming every requirement that is not `pass` -- a fail, and also a
+        stale, unresolved or unchecked one, none of which is a pass -- unless
+        `raise_on_failure` is False."""
+        params = {"async": True, "recompute": recompute}
+        if ids is not None:
+            params["ids"] = list(ids)
+        r = self.call("check_requirements", **params)
+        if r.get("job"):
+            deadline = time.monotonic() + timeout
+            while True:
+                st = self.call("study_status", job=r["job"])
+                if not st.get("running"):
+                    break
+                if time.monotonic() > deadline:
+                    self.call("cancel_study", job=r["job"])
+                    raise SdkError(f"check_requirements: not done in "
+                                   f"{timeout:g} s; cancelled")
+                time.sleep(poll)
+            if st.get("outcome") != "done":
+                raise SdkError(f"check_requirements: the check {st.get('outcome')}"
+                               f": {st.get('error', st.get('cancel_reason'))}")
+        out = self.call("list_requirements")
+        if ids is not None:
+            want = set(ids)
+            out["requirements"] = [x for x in out["requirements"]
+                                   if x["id"] in want]
+        bad = [x for x in out["requirements"] if x["state"] != "pass"]
+        if bad and raise_on_failure:
+            raise SdkError("requirements not met: " + "; ".join(
+                f"{x['name']}: {x['state']}"
+                + (f" ({x['value']:g} {x.get('unit', '')})"
+                   if "value" in x else "")
+                + (f" -- {x['note']}" if x.get("note") else "")
+                for x in bad))
+        return out
 
 
 def _open_tab(app, name, kind, create, reuse=False):
@@ -2959,6 +3046,17 @@ VERDICT_CONTRACTS = {
         # when it stopped early. They are still `consumed` — the whole point
         # of the gate — but their absence is not a rename.
         "optional": {"truncated", "truncation", "pairs_unchecked"},
+    },
+    # App.verify_requirements raises on every row whose state is not `pass`
+    # (docs/requirements/README.md#states): stale, unresolved and unchecked
+    # included, none of which is a pass.
+    "App.verify_requirements": {
+        "rpc": "list_requirements",
+        "consumed": {"requirements"},
+        "ignored": {
+            "summary": "the count of each state in `requirements`",
+            "all_pass": "the same as every row in `requirements` passing",
+        },
     },
 }
 

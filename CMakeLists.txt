@@ -375,6 +375,7 @@ set(core_sources
     src/core/Expression.cpp
     src/core/LookupTable.cpp
     src/core/Literals.cpp
+    src/core/Requirements.cpp
     src/core/catalog/Catalog.cpp
     src/core/io/GeometryCache.cpp
     src/core/parts/AxisStack.cpp
@@ -759,6 +760,7 @@ set(app_sources
     src/ui/VariablesPanel.cpp
     src/ui/TablesPanel.cpp
     src/ui/LiteralsPanel.cpp
+    src/ui/RequirementsPanel.cpp
     src/ui/LiteralActions.cpp
     src/ui/HistoryPanel.cpp
     src/ui/ConflictsPanel.cpp
@@ -849,6 +851,7 @@ set(app_sources
     src/remote/RemoteConfigurations.cpp
     src/remote/RemoteSheetMetal.cpp
     src/remote/RemoteTube.cpp
+    src/remote/RemoteRequirements.cpp
     src/remote/RemoteSimulation.cpp
     src/remote/RemoteCam.cpp
     src/remote/RemoteInspection.cpp

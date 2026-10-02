@@ -1,0 +1,9 @@
+{"features": 2, "bodies": 1, "volumes": [72.0],
+ "requirements": [
+   {"name": "pad volume", "kind": "volume", "bound": "at_most",
+    "revision": 2, "evidence": true},
+   {"name": "no stray literals", "kind": "check_literals", "bound": "pass",
+    "revision": 1, "evidence": false},
+   {"name": "pad mass", "kind": "mass", "bound": "within", "revision": 1,
+    "evidence": false}
+ ]}

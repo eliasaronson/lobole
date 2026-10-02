@@ -65,7 +65,7 @@ uint64_t StudySubject(bool hasId, uint64_t id, bool hasStudy, uint64_t study) {
 
 bool IsStudyJobKind(const std::string& kind) {
   return kind == "motion" || kind == "topo" || kind == "study" ||
-         kind == "mesh" || kind == "check";
+         kind == "mesh" || kind == "check" || kind == "requirements";
 }
 
 // The study jobs there are to ask about: running, then recently ended.

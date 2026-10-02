@@ -85,7 +85,9 @@ motion side is also in
 **A job id.** `BackgroundJob::id` (`src/ui/BackgroundJob.h`) is handed out
 by `StartBackgroundJob` from a session counter and never reused. An async
 `run_study`, `run_motion_study` or `mesh_study`, and a `check_topology`
-that has something to solve, answers `job: <id>` (and `kind`). `study_status {job}` reports a running job (kind, study, label,
+that has something to solve, answers `job: <id>` (and `kind`); so does
+`check_requirements {async}`, whose job (kind `requirements`) runs studies
+of its own ([requirements](../requirements/README.md#checking-is-a-job)). `study_status {job}` reports a running job (kind, study, label,
 fraction, elapsed, cancellable, whether it outlives its client) and, once
 it has ended, how: `outcome` done, cancelled or failed, with `error` or
 `cancel_reason`; the registry keeps the last 64 ended jobs for that

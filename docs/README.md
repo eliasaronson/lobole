@@ -39,6 +39,7 @@ sits beside it only where the README would be too long.
 | [packaging](packaging/README.md) | building for other machines |
 | [scripting](scripting/README.md) | the RPC, MCP server, Python SDK |
 | [inspect](inspect/README.md) | measure, mass properties, sections, checks |
+| [requirements](requirements/README.md) | what a design is for, stated in the project and checked against it |
 | [simulation](simulation/README.md) | FEM studies |
 | [topopt](topopt/README.md) | topology optimization |
 | [drawings](drawings/README.md) | 2D drafting |

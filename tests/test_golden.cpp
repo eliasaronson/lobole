@@ -5,6 +5,7 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/Requirements.h"
 #include "core/Units.h"
 #include "core/cam/CamJob.h"
 #include "core/cam/CamNames.h"
@@ -866,6 +867,22 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     CHECK(doc.GetCatalogs() == expect.at("catalogs"));
   AssertTolerances(doc, expect);
   AssertSheetMetal(doc, expect);
+  // v160: the project's requirements a lone part carries, read back as
+  // the requirements they are (docs/requirements/README.md#saved-form).
+  {
+    const auto list = req::ListFromJson(doc.GetRequirementsRaw());
+    const nlohmann::json want =
+        expect.value("requirements", nlohmann::json::array());
+    REQUIRE(list.size() == want.size());
+    for (size_t i = 0; i < list.size(); i++) {
+      INFO("requirement " << i);
+      CHECK(list[i].name == want[i].at("name").get<std::string>());
+      CHECK(list[i].Kind() == want[i].at("kind").get<std::string>());
+      CHECK(list[i].bound.kind == want[i].at("bound").get<std::string>());
+      CHECK(list[i].revision == want[i].at("revision").get<int>());
+      CHECK(list[i].evidence.taken == want[i].at("evidence").get<bool>());
+    }
+  }
   CHECK(doc.FeatureCount() == expect.at("features").get<size_t>());
   REQUIRE(doc.GetBodies().size() == expect.at("bodies").get<size_t>());
   std::vector<double> volumes;

@@ -239,6 +239,7 @@ here; the golden corpus and git history cover them.
 | 157 | An attached occurrence may name the faces it is seated on: `attach_seat` {`face`, `axis`: {`feature_id`, `element`}, `inner_path`?}, the planar face it bears on and the cylinder or cone whose axis centres it (a fastener: its hole's face and bore); with it, `attach_offset`/`attach_rotation` are in the seat's frame, so the piece follows a hole that moves inside its part. Written only with `attached_to`; a seat missing either face is refused on load. A rider without one keeps the part-frame offset, and a fastener is seated in the hole under it on its first solve ([attached, and mated](../parts/README.md#attached-and-mated)). Golden `assembly/v157-attach-seat` |
 | 158 | A CAM operation's `cutter_comp`: `off` (the default, not written) or `wear`, on profile, pocket and drill: the finished wall passes post under G41/G42 with a lead-in and a lead-out, the path still the tool centre, so the controller's tool table holds the wear alone. An unknown value is refused ([cutter compensation](../cam/post.md#cutter-compensation)). Golden `job/v158-cam-cutter-comp` |
 | 159 | A saved motion result (`motion/<id>-<slug>.result.json`) lists the press fits its exact checks relieved: `press_fits` [{`a`, `b`, `a_name`, `b_name`, `a_inner`?, `b_inner`?, `fit`, `interference_mm`, `max_interference_mm`, `volume_mm3`}], omitted when there are none ([press fits](../tolerances/README.md#press-fits)). The bands that decide them are stamped on bodies from the tolerances, print process and bearings already saved, never saved themselves; they are inputs of a run's hash, so a result stored before a tolerance edit reads stale. Golden `assembly/v159-press-fit` (an exact motion study of a 6005 at its K7 seat's interference; the single-file form carries no results, and `tests/test_press_fits.cpp` round-trips one) |
+| 160 | Design requirements ([requirements](../requirements/README.md)), project-level: one file each in `requirements/<id>-<slug>.json` beside `project.json` (which carries `requirements_next_id`), or a lone part's envelope's `requirements` list, each {`id`, `name`, `source`?, `revision`, `measure` {`kind`, `document`?, the kind's keys}, `bound` {`kind`: `at_most`\|`at_least` {`value`} \| `within` {`min`, `max`} \| `pass`; a value a number or an expression}, `evidence`? {`pass`, `value`?, `unit`?, `error`?, `input_hash`, `revision`, `limit`?/`limit_min`?/`limit_max`?, `detail`?, `checked_at`?}}. An unknown measure kind, key or bound kind is refused on load. An assembly's `assertions/` (v100) still loads, as clearance requirements, and is no longer written. Golden `v160-requirements` |
 
 ## The directory form
 
@@ -281,12 +282,13 @@ report the same kind as `type`) plus
 `dx` / `dy` / `ball_rotation` where its type uses them; `a` and `b` are
 connectors `{occurrence, anchor}`. An exploded view is `{id, name, steps:
 [{occurrence, offset}]}` and is view state only: the applied view and factor
-are never serialized. Mates, exploded views, relations, assertions, motion
-studies and FEM studies share the assembly's one never-reused id counter.
+are never serialized. Mates, exploded views, relations, motion studies and
+FEM studies share the assembly's one never-reused id counter.
 
 Directory form: `index.json` (kind + id lists) plus `occurrences/`, `mates/`,
-`exploded/`, `relations/`, `assertions/`, `motion/` and `studies/`, one file
-per item, each directory absent when it would be empty. A motion or FEM
+`exploded/`, `relations/`, `motion/` and `studies/`, one file per item, each
+directory absent when it would be empty. An `assertions/` directory (v100)
+is read, as the project's clearance requirements, and not written again. A motion or FEM
 study's result sits beside it as `<id>-<slug>.result.json` (v153), with the
 input hash that produced it, and its arrays in `<id>-<slug>.result.bin`
 (v154).
@@ -303,5 +305,7 @@ A multi-document project is a directory with `project.json`:
 `type` is `part`, `assembly`, `drawing` or `job`, stored under `parts/`,
 `assemblies/`, `drawings/` or `jobs/`; `id` is the stable per-document id and
 `folder` an optional tab-bar folder. Optional keys: project-scope
-`parameters`, `folders`, `sections`, `catalogs`. The envelope stays at
+`parameters`, `folders`, `sections`, `catalogs`, `tables`,
+`requirements_next_id`; the project's requirements are files under
+`requirements/` beside it (v160). The envelope stays at
 version 2 because every later key is additive and ignorable.

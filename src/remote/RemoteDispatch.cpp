@@ -36,6 +36,7 @@
 #include "remote/RemoteModeling.h"
 #include "remote/RemoteMotion.h"
 #include "remote/RemoteProject.h"
+#include "remote/RemoteRequirements.h"
 #include "remote/RemoteSheetMetal.h"
 #include "remote/RemoteSimulation.h"
 #include "remote/RemoteTube.h"
@@ -569,6 +570,7 @@ const remote::MethodDoc* FindMethod(const std::string& m) {
     add(remote::SheetMetalMethodDocs());
     add(remote::TubeMethodDocs());
     add(remote::SimulationMethodDocs());
+    add(remote::RequirementMethodDocs());
     return out;
   }();
   const auto it = byName.find(m);
@@ -607,6 +609,7 @@ static bool IsKnownMethod(const std::string& m) {
     add(remote::SheetMetalMethodDocs());
     add(remote::TubeMethodDocs());
     add(remote::SimulationMethodDocs());
+    add(remote::RequirementMethodDocs());
     return s;
   }();
   return known.count(m) != 0;
@@ -939,7 +942,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         remote::ConfigurationMethodDocs(),
         remote::SheetMetalMethodDocs(),
         remote::TubeMethodDocs(),
-        remote::SimulationMethodDocs()};
+        remote::SimulationMethodDocs(),
+        remote::RequirementMethodDocs()};
     for (const auto& t : tables)
       addDocs(t);
     if (!only.empty() && methods.empty()) {
@@ -1634,6 +1638,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (auto r = remote::HandleAssemblyRpc(state, m, p))
     return *r;
   if (auto r = remote::HandleProjectRpc(state, m, p))
+    return *r;
+  if (auto r = remote::HandleRequirementsRpc(state, m, p))
     return *r;
   if (m == "fit_view") {
     // The aspect of the PICTURE being framed, when that is not the viewport.

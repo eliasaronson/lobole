@@ -24,6 +24,10 @@ reports done, a person before a review. Every box is one RPC call. The MCP
 - [ ] Multi-body part: `contact_report` on the part tab reports ONE component.
       Overlapping bodies join like a weld at this scope, so do not assert
       `clashes` empty here.
+- [ ] What the design is for is stated as requirements (`add_requirement`:
+      a measure, a bound, a source) and `check_requirements` leaves every
+      one `pass`; a `stale`, `unresolved` or `unchecked` one is not met
+      ([requirements](../requirements/README.md)).
 
 ## Assemblies
 

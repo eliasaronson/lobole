@@ -36,6 +36,7 @@
 #include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/Requirements.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
@@ -110,6 +111,113 @@
 namespace ui {
 
 namespace {
+
+// The project's requirements, one file each under `requirements/`
+// (docs/requirements/README.md#saved-form). A file no longer wanted is
+// removed; an unchanged one is not rewritten.
+bool WriteRequirements(const AppState& state, const std::filesystem::path& dir,
+                       std::string* error) {
+  namespace fs = std::filesystem;
+  const fs::path rdir = dir / "requirements";
+  std::error_code ec;
+  if (!state.requirements.empty())
+    fs::create_directories(rdir, ec);
+  std::set<std::string> wanted;
+  for (const req::Requirement& r : state.requirements) {
+    const std::string file =
+        std::to_string(r.id) + "-" + req::Slug(r.name) + ".json";
+    if (!DocumentIO::WriteTextAtomic(rdir / file, req::ToJson(r).dump(2) + "\n",
+                                     error))
+      return false;
+    wanted.insert(file);
+  }
+  for (const auto& entry : fs::directory_iterator(rdir, ec))
+    if (entry.path().extension() == ".json" &&
+        !wanted.contains(entry.path().filename().string()))
+      fs::remove(entry.path(), ec);
+  if (state.requirements.empty())
+    fs::remove(rdir, ec); // only when empty: a stray file keeps it
+  return true;
+}
+
+std::vector<req::Requirement>
+ReadRequirements(const std::filesystem::path& dir) {
+  namespace fs = std::filesystem;
+  std::vector<req::Requirement> out;
+  std::error_code ec;
+  std::vector<fs::path> files;
+  for (const auto& entry : fs::directory_iterator(dir / "requirements", ec))
+    if (entry.path().extension() == ".json")
+      files.push_back(entry.path());
+  std::set<uint64_t> ids;
+  for (const fs::path& f : files) {
+    std::ifstream in(f);
+    nlohmann::json j;
+    try {
+      in >> j;
+    } catch (const std::exception& e) {
+      throw std::runtime_error("requirements/" + f.filename().string() + ": " +
+                               e.what());
+    }
+    out.push_back(req::FromJson(j));
+    if (!ids.insert(out.back().id).second)
+      throw std::runtime_error("two requirement files share id " +
+                               std::to_string(out.back().id));
+  }
+  std::sort(out.begin(), out.end(),
+            [](const req::Requirement& a, const req::Requirement& b) {
+              return a.id < b.id;
+            });
+  return out;
+}
+
+// A lone part's file names no document id: it reopens with a fresh one, and
+// its requirements are re-pointed at it (AdoptProject). They fold into it
+// only when they name it, or none.
+bool LoneRequirementsFit(const AppState& state) {
+  for (const req::Requirement& r : state.requirements)
+    if (r.measure.contains("document") &&
+        (state.parts.empty() || r.Document() != state.parts[0].id))
+      return false;
+  return true;
+}
+
+} // namespace
+
+// The declared clearances an assembly saved before v160 (`assertions/`)
+// are clearance requirements now (docs/requirements/README.md
+// #clearance-assertions): each is moved out of its assembly into the
+// project's list, its floor the bound and its `why` the source. The last
+// verdict does not come along: it was keyed on a bounding-box hash, not on
+// the input hash a requirement's evidence names, so it reads unchecked.
+void AdoptAssertionsAsRequirements(AppState& state) {
+  for (size_t i = 0; i < state.parts.size(); i++) {
+    if (state.parts[i].kind != DocKind::Assembly)
+      continue;
+    AssemblyDocument* a = SlotAssembly(state, i);
+    if (a == nullptr || a->GetAssertions().empty())
+      continue;
+    for (const ClearanceAssertion& c : a->GetAssertions()) {
+      req::Requirement r;
+      r.id = state.nextRequirementId++;
+      r.name = c.name;
+      r.source = c.why;
+      r.measure = {{"kind", "clearance"},
+                   {"document", state.parts[i].id},
+                   {"a", c.a},
+                   {"b", c.b},
+                   {"mode", c.mode}};
+      r.bound.kind = "at_least";
+      r.bound.value = c.minMm;
+      state.requirements.push_back(std::move(r));
+    }
+    a->GetAssertions().clear();
+    // Moved, and saved where they now live on the next save.
+    state.projectMetaDirty = true;
+  }
+}
+
+namespace {
 // Imports made before the project had a home stage their .brep sidecars
 // under the app state dir (ImportStepAsAssembly). A save gives them a home:
 // copy each staged file into <project>/imported/ (keeping the per-import
@@ -182,7 +290,8 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
   // — flat has room for one `parameters` list).
   if (state.parts.size() == 1 && state.parts[0].kind == DocKind::Part &&
       state.document->GetParameters().empty() && state.tabFolders.empty() &&
-      state.sections.empty() && state.parts[0].folder.empty()) {
+      state.sections.empty() && state.parts[0].folder.empty() &&
+      LoneRequirementsFit(state)) {
     // Fold the project scope into the doc for the write (they reload as project
     // scope), then restore the (empty) local table.
     std::vector<Parameter> localBackup = state.document->TakeParameters();
@@ -190,8 +299,10 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
     state.document->SetCatalogsRaw(state.catalogs);
     state.document->SetParametersRaw(state.projectParameters);
     state.document->SetTablesRaw(state.projectTables);
+    state.document->SetRequirementsRaw(req::ListToJson(state.requirements));
     auto r = DocumentIO::Save(*state.document, path);
     state.document->SetTablesRaw({});
+    state.document->TakeRequirementsRaw();
     state.document->SetParametersRaw(std::move(localBackup));
     state.document->SetCatalogsRaw(catalogBackup);
     if (!r && error)
@@ -311,6 +422,13 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
         entry["folder"] = slot.folder;
       index["documents"].push_back(std::move(entry));
     }
+    // Requirements (v160, docs/requirements/README.md#saved-form): one
+    // file each under requirements/, so two people stating two of them, or
+    // checking them on two branches, touch different files.
+    if (!WriteRequirements(state, dir, error))
+      return false;
+    if (state.nextRequirementId > 1)
+      index["requirements_next_id"] = state.nextRequirementId;
     std::ofstream out(dir / "project.json");
     if (!out) {
       if (error)
@@ -553,6 +671,11 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     state.tabFolders.clear();
     state.nextPartId = 1;
     EnsureParts(state, fs::path(path).stem().string());
+    // The lone part's file names no document id; it is the one document,
+    // so every requirement that names one names it.
+    for (req::Requirement& r : state.requirements)
+      if (r.measure.contains("document"))
+        r.measure["document"] = state.parts.front().id;
     StampDiskState(state, path); // F8 — see the container branch below
     return true;
   }
@@ -564,6 +687,9 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     // one would load with every lookup in it broken.
     auto loadedTables =
         lookuptable::ListFromJson(index.value("tables", nlohmann::json()));
+    // Refused too: a requirement naming a measure this build does not know
+    // would load as something it is not.
+    auto loadedRequirements = ReadRequirements(fs::path(path));
 
     // This branch never goes through ReplaceDocument, so it releases the
     // per-part render cache itself — same id-reuse hazard.
@@ -630,6 +756,12 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     state.projectParameters.clear();
     state.projectTables = std::move(loadedTables);
     state.projectVarHistory = {};
+    state.requirements = std::move(loadedRequirements);
+    state.nextRequirementId = index.value("requirements_next_id", uint64_t{1});
+    for (const req::Requirement& r : state.requirements)
+      state.nextRequirementId = std::max(state.nextRequirementId, r.id + 1);
+    AdoptAssertionsAsRequirements(state);
+    state.requirementsEdits++;
     for (const auto& pj : index.value("parameters", nlohmann::json::array()))
       state.projectParameters.push_back({pj.at("name").get<std::string>(),
                                          pj.at("expression").get<std::string>(),

@@ -1,9 +1,12 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "core/Command.h"
 #include "core/MassProps.h"
 #include "core/features/DerivedFeature.h"
+#include "remote/RemoteRequirements.h"
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/OpenJob.h"
+#include "ui/PanelTitles.h"
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h"
 
@@ -1762,5 +1765,70 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
 
     fs::remove_all(two);
     fs::remove_all(one);
+  };
+
+  // The Requirements panel (docs/requirements/README.md#the-panel): it
+  // appears when the project states a requirement, Check measures them as
+  // a job, the states it shows are the evidence's, and an edit to the model
+  // makes them stale until checked again.
+  t = IM_REGISTER_TEST(engine, "requirements", "panel_checks_and_goes_stale");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx); // 2 x 2 x 2: 8 mm3
+    ctx->Yield(2);
+    IM_CHECK(ImGui::FindWindowByName(ui::kPanelRequirements) == nullptr);
+    const uint64_t part = s_App->parts[s_App->activePart].id;
+    const auto make = [part](uint64_t id, const char* name, double most) {
+      req::Requirement r;
+      r.id = id;
+      r.name = name;
+      r.measure = {{"kind", "volume"}, {"document", part}};
+      r.bound = req::BoundFromJson({{"kind", "at_most"}, {"value", most}});
+      return r;
+    };
+    s_App->requirements = {make(1, "fits the pocket", 10.0),
+                           make(2, "fits the small pocket", 5.0)};
+    s_App->nextRequirementId = 3;
+    s_App->requirementsEdits++;
+    ctx->Yield(3);
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelRequirements);
+    IM_CHECK(panel != nullptr);
+    IM_CHECK(panel->DockId != 0); // in the left dock, not over the viewport
+    ctx->ItemClick(panel->TabId);
+    ctx->Yield(2);
+    const auto states = [] {
+      const nlohmann::json rows =
+          remote::RequirementRows(*s_App).at("requirements");
+      return rows[0].at("state").get<std::string>() + "," +
+             rows[1].at("state").get<std::string>();
+    };
+    IM_CHECK_STR_EQ(states().c_str(), "unchecked,unchecked");
+
+    ctx->SetRef("//###Requirements");
+    ctx->ItemClick("Check###req_check");
+    IM_CHECK(WaitForJobs(ctx, "requirements"));
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(states().c_str(), "pass,fail");
+    IM_CHECK(s_App->requirements[0].evidence.value.has_value());
+    IM_CHECK(std::abs(*s_App->requirements[0].evidence.value - 8.0) < 1e-6);
+
+    // The box grows: what was measured is not the model any more.
+    auto* box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(box != nullptr);
+    const nlohmann::json before = DocumentIO::FeatureToJson(*box);
+    box->width = 3.0;
+    const nlohmann::json after = DocumentIO::FeatureToJson(*box);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(states().c_str(), "stale,stale");
+
+    ctx->ItemClick("Check###req_check");
+    IM_CHECK(WaitForJobs(ctx, "requirements"));
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(states().c_str(), "fail,fail"); // 12 mm3 now
+    s_App->requirements.clear();
+    s_App->requirementsEdits++;
+    ctx->Yield(2);
   };
 }

@@ -254,6 +254,7 @@ void BeginDockspace(AppState& state) {
         redock(kPanelHistory, model->DockId);
         redock(kPanelConflicts, model->DockId);
         redock(kPanelCam, model->DockId);
+        redock(kPanelRequirements, model->DockId);
       }
     }
   }
@@ -385,6 +386,8 @@ void BeginDockspace(AppState& state) {
     // not a permanent tab — but when it appears it belongs here.
     ImGui::DockBuilderDockWindow(kPanelConflicts, left);
     ImGui::DockBuilderDockWindow(kPanelCam, left); // ditto
+    // Exists only while the project states requirements.
+    ImGui::DockBuilderDockWindow(kPanelRequirements, left);
     // A window this rebuild did NOT give a home must forget its old one.
     // The terminal is docked only when its preference is on, so rebuilding
     // with it off deletes its node while the window keeps pointing at the

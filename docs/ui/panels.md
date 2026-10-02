@@ -315,7 +315,8 @@ the panel keeps the count of stale views as a line pointing at the toolbar.
 ## Other dock panels
 
 Variables (with the document's Units section), Configurations, History,
-Conflicts, the CAM panel on a job tab, and the Terminal (right-hand node,
+Conflicts, Requirements ([the panel](../requirements/README.md#the-panel)),
+the CAM panel on a job tab, and the Terminal (right-hand node,
 [terminal.md](terminal.md)). Their titles and ids are in
 `src/ui/PanelTitles.h`.
 

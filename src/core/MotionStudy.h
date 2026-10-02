@@ -174,6 +174,14 @@ uint64_t InputKey(const AssemblyDocument& asmDoc,
                   const assembly::AssemblyResolver& assemblies,
                   const MotionStudy& study);
 
+// The same inputs without a study: the assembly's own content through every
+// sub-assembly, and every placed (part, configuration) by its bodies. What
+// a requirement on the assembly (a clearance, check_seat, check_fasteners)
+// was measured against (docs/requirements/README.md#evidence).
+uint64_t AssemblyInputKey(const AssemblyDocument& asmDoc,
+                          const assembly::PartResolver& parts,
+                          const assembly::AssemblyResolver& assemblies);
+
 // The driver value at parameter t (0..1): `from + t * (to - from)`.
 double ValueAt(const MotionStudy& study, double t);
 

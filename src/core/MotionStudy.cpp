@@ -80,6 +80,32 @@ uint64_t InputKey(const AssemblyDocument& asmDoc,
   return h.Digest();
 }
 
+uint64_t AssemblyInputKey(const AssemblyDocument& asmDoc,
+                          const assembly::PartResolver& parts,
+                          const assembly::AssemblyResolver& assemblies) {
+  inputhash::Hasher h;
+  h.Str("assembly/1");
+  HashAssembly(h, asmDoc);
+  for (const auto& [id, version] :
+       assembly::SubtreeVersions(asmDoc, parts, assemblies)) {
+    (void)version;
+    if (const AssemblyDocument* sub = assemblies ? assemblies(id) : nullptr) {
+      h.U64(id);
+      HashAssembly(h, *sub);
+    }
+  }
+  for (const auto& [part, configuration] :
+       assembly::SubtreePartConfigurations(asmDoc, assemblies)) {
+    h.U64(part);
+    h.U64(configuration);
+    if (const Document* doc = parts ? parts(part, configuration) : nullptr)
+      h.Bodies(doc->GetBodies());
+    else
+      h.U64(0);
+  }
+  return h.Digest();
+}
+
 double ValueAt(const MotionStudy& study, double t) {
   return study.from + t * (study.to - study.from);
 }

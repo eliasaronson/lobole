@@ -35,6 +35,8 @@ inline constexpr const char* kPanelHistory =
 inline constexpr const char* kPanelConflicts =
     ICON_FA_CODE_MERGE "###Conflicts";
 inline constexpr const char* kPanelCam = ICON_FA_INDUSTRY "###CamPanel";
+inline constexpr const char* kPanelRequirements =
+    ICON_FA_LIST_CHECK "###Requirements";
 inline constexpr const char* kPanelTerminal =
     ICON_FA_TERMINAL "###TerminalPanel";
 
@@ -55,6 +57,7 @@ inline constexpr PanelInfo kPanels[] = {
     {kPanelHistory, "History"},
     {kPanelConflicts, "Conflicts"},
     {kPanelCam, "CAM"},
+    {kPanelRequirements, "Requirements"},
     {kPanelTerminal, "Terminal"},
 };
 

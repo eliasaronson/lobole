@@ -19,7 +19,15 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    159; // v159: a saved motion result lists the press fits its exact checks
+    160; // v160: the project's requirements (docs/requirements/README.md):
+         //      `requirements/<id>-<slug>.json` beside project.json, each
+         //      {id, name, source?, revision, measure {kind, document, ...},
+         //      bound {kind, value|min|max}, evidence?}, and
+         //      `requirements_next_id` in project.json; a lone part carries
+         //      them as `requirements` in its envelope. A measure or bound
+         //      kind this build does not know is refused on load. Saved
+         //      assembly `assertions` load as clearance requirements.
+         // v159: a saved motion result lists the press fits its exact checks
          //      relieved, `press_fits` [{a, b, a_name, b_name, a_inner?,
          //      b_inner?, fit, interference_mm, max_interference_mm,
          //      volume_mm3}]; omitted when there are none

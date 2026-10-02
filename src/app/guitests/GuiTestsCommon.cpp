@@ -96,6 +96,10 @@ void ResetAppForTest() {
   // test's "click the section button" into a click that CLOSES it.
   ui::ClearSections(*s_App);
   s_App->sectionToolOpen = false;
+  // Project state no document owns: a predecessor's requirements would put
+  // the Requirements panel in the left dock in front of the next test's.
+  s_App->requirements.clear();
+  s_App->requirementsEdits++;
   // Every other floating tool window, for the same reason: one left open by
   // a test that stopped early covers the viewport, and the next test's clicks
   // land on it (docs/ui/testing.md#independence-any-partition-is-valid).
