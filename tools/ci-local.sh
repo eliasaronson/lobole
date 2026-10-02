@@ -170,12 +170,15 @@ run_build() {
 
 started=$SECONDS
 failures=0
+# Compilers from free memory, not cores (tools/build-jobs, ~1.5 GB each): at
+# one per core the containers' builds took the host's memory.
+jobs="$("$root/tools/build-jobs")"
 
 # ---- job 1: what build-and-test does, using this machine's toolchain -------
 if [ "$run_nix" = 1 ]; then
   step "build-and-test (local toolchain)"
   run_build release -S . -B .ci-local/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -- .ci-local/build -j$(nproc)
+    -- .ci-local/build -j"$jobs"
   run_tests headless "headless suite" \
     "$root/tools/ctest" --test-dir .ci-local/build -LE gui -j"$(nproc)" --output-on-failure
 
@@ -188,7 +191,7 @@ if [ "$run_nix" = 1 ]; then
 
   step "build without the test engine"
   run_build no-te -S . -B .ci-local/build-no-te -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TEST_ENGINE=OFF \
-    -- .ci-local/build-no-te -j$(nproc)
+    -- .ci-local/build-no-te -j"$jobs"
   if nix-shell shell.nix --run "python3 tests/headless_smoke.py .ci-local/build-no-te/designer" > /dev/null \
      && ! .ci-local/build-no-te/designer --gui-tests --hidden 2>/dev/null; then
     ok "engine-free build works and refuses --gui-tests"
@@ -203,7 +206,7 @@ if [ "$run_nix" = 1 ]; then
   # Spectra-less link -- and neither could be seen from a nix build.
   step "build without CAM"
   run_build no-cam -S . -B .ci-local/build-nocam -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_CAM=OFF \
-    -- .ci-local/build-nocam -j$(nproc)
+    -- .ci-local/build-nocam -j"$jobs"
   run_tests nocam "CAM-free suite" \
     "$root/tools/ctest" --test-dir .ci-local/build-nocam -LE gui -j"$(nproc)" --output-on-failure
 fi
@@ -215,7 +218,7 @@ if [ "$run_asan" = 1 ]; then
   # uses, so an incremental developer build and this share their objects.
   source "$root/tools/sanitizer-env.sh"
   run_build asan -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON \
-    -- build-asan -j$(nproc) --target designer designer_tests
+    -- build-asan -j"$jobs" --target designer designer_tests
   run_tests asan "sanitized suite" \
     "$root/tools/ctest" --test-dir build-asan -LE gui -j"$(nproc)" --output-on-failure -E "$SANITIZER_TEST_EXCLUDE"
 fi
@@ -265,7 +268,7 @@ if [ "$run_containers" = 1 ]; then
       docker run --rm -v "$root:/src:ro" -v "$root/$build_dir:/b" "$tag" bash -c "
          set -o pipefail
          cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release &&
-         cmake --build /b -j\$(nproc) && $ctest_cmd"
+         cmake --build /b -j$jobs && $ctest_cmd"
   done
 fi
 
@@ -293,6 +296,9 @@ if [ "$run_pixel" = 1 ]; then
   pixel_cmd="python3 tests/render_pixel_smoke.py /b/designer --require-baseline"
   [ "$pixel_record" = 1 ] && pixel_cmd="python3 tests/render_pixel_smoke.py /b/designer --record"
   # --user: a root-owned PNG in tests/golden/ is a file nobody can commit.
+  # The ccache mount must exist first, or docker creates it owned by root and
+  # the --user build cannot write it ("ccache: Permission denied").
+  mkdir -p "$root/.ci-local/ccache"
   run_tests pixel "pixel gate" \
     docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
       -v "$root:/src" -v "$root/$build_dir:/b" -v "$root/.ci-local/ccache:/tmp/ccache" \
@@ -302,7 +308,7 @@ if [ "$run_pixel" = 1 ]; then
          [ -n \"\$VK_DRIVER_FILES\" ] || { echo 'no lavapipe ICD in the image'; exit 1; }
          cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release \
                -DCMAKE_C_COMPILER_LAUNCHER=ccache -DCMAKE_CXX_COMPILER_LAUNCHER=ccache &&
-         cmake --build /b -j\$(nproc) --target designer &&
+         cmake --build /b -j$jobs --target designer &&
          cd /src && $pixel_cmd"
 fi
 
