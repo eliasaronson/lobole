@@ -85,7 +85,13 @@ mkdir -p "$OUT"
 # without -fno-omit-frame-pointer, so fp unwinding loses most of the stack.
 # dwarf makes a bigger perf.data and is the only mode that produces a usable
 # call graph here.
-PERF_RECORD=(perf record -e cpu-clock -F "$FREQ" --call-graph dwarf
+#
+# perf is resolved ONCE to its store path, so the recorder is a plain child of
+# this script rather than of a nix-shell wrapper: --app has to own the
+# processes it starts (below).
+PERF="$(nix-shell -p perf --run 'command -v perf')"
+[ -x "$PERF" ] || { echo "profile: could not fetch perf" >&2; exit 1; }
+PERF_RECORD=("$PERF" record -e cpu-clock -F "$FREQ" --call-graph dwarf
              -o "$OUT/perf.data")
 
 case "$MODE" in
@@ -115,29 +121,76 @@ if [ "$MODE" = app ]; then
   # script runs beside it. The app is stopped with SIGTERM once the script
   # finishes: perf writes perf.data when its child exits, so a killed app is a
   # lost profile — never SIGKILL here.
-  nix-shell -p perf --run \
-    "${PERF_RECORD[*]} -- '$BIN' --headless --remote $PORT" &
+  #
+  # It is stopped by its PID, never by a pattern: `pkill -f "designer ...
+  # $PORT"` matches anything with that text on its command line, the shell
+  # running it included (CLAUDE.md, "kill by a pid"). The pid is the one the
+  # instance reports in `ping`, accepted only as perf's own child: a port
+  # somebody else bound between scratch_port.py and our launch must not hand
+  # us THEIR pid.
+  #
+  # And nothing is left behind, whichever process goes first:
+  #   - perf: the app runs --exit-with-parent and perf is its parent, so the
+  #     kernel sends it SIGTERM (src/app/ParentWatch.h);
+  #   - this script, SIGKILL included: perf runs under `setpriv --pdeathsig
+  #     TERM`, so it stops, writes its data and takes the app with it; on any
+  #     other exit the EXIT trap stops the app by pid;
+  #   - the driver: reported, and the app stopped as on success.
+  PDEATH=()
+  if command -v setpriv >/dev/null; then
+    PDEATH=(setpriv --pdeathsig TERM --)
+  else
+    echo "profile: no setpriv — a SIGKILLed profile.sh would leave perf running"
+  fi
+  "${PDEATH[@]}" "${PERF_RECORD[@]}" -- \
+    "$BIN" --headless --remote "$PORT" --exit-with-parent &
   RECORD_PID=$!
-  # Wait for the port rather than sleeping: a fixed sleep is either a race or
-  # wasted profile.
-  for _ in $(seq 1 100); do
-    if python3 -c "import socket,sys; s=socket.socket()
-s.settimeout(0.2)
-sys.exit(0 if s.connect_ex(('127.0.0.1',$PORT))==0 else 1)"; then break; fi
+  APP_PID=""
+  stop_app() {
+    if [ -n "$APP_PID" ]; then
+      kill -TERM "$APP_PID" 2>/dev/null || true
+    else # it never answered: perf (and with it the app) is what to stop
+      kill -TERM "$RECORD_PID" 2>/dev/null || true
+    fi
+    wait "$RECORD_PID" 2>/dev/null || true
+  }
+  trap stop_app EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  # Wait for the instance to answer rather than sleeping: a fixed sleep is
+  # either a race or wasted profile. Gives up when perf does.
+  ping_pid() {
+    python3 "$ROOT/tools/designer_remote.py" "$PORT" ping 2>/dev/null |
+      python3 -c 'import json, sys; print(json.load(sys.stdin).get("pid", ""))' \
+        2>/dev/null || true
+  }
+  for _ in $(seq 1 150); do
+    kill -0 "$RECORD_PID" 2>/dev/null || break
+    CAND="$(ping_pid)"
+    if [ -n "$CAND" ] && [ "$(sed -n 's/^PPid:[[:space:]]*//p' \
+        "/proc/$CAND/status" 2>/dev/null)" = "$RECORD_PID" ]; then
+      APP_PID="$CAND"
+      break
+    fi
     sleep 0.2
   done
+  if [ -z "$APP_PID" ]; then
+    echo "profile: no instance of ours answered on port $PORT" >&2
+    exit 1
+  fi
+  echo "profile: app pid $APP_PID, under perf $RECORD_PID"
   set +e
   nix-shell "$ROOT/shell.nix" --run \
     "DESIGNER_PORT=$PORT python3 '$ARG'"
   SCRIPT_STATUS=$?
   set -e
-  # SIGTERM the APP, not the perf wrapper — killing the wrapper orphans the
-  # child, the trap this repo has hit twice with xvfb-run.
-  pkill -TERM -f "designer --headless --remote $PORT" || true
-  wait "$RECORD_PID" 2>/dev/null || true
+  # SIGTERM the APP, not perf: perf would stop recording and leave the app
+  # to --exit-with-parent, and the profile would end before the app did.
+  stop_app
+  trap - EXIT INT TERM
   [ "$SCRIPT_STATUS" = 0 ] || echo "profile: driver script exited $SCRIPT_STATUS"
 else
-  nix-shell -p perf --run "${PERF_RECORD[*]} -- ${WORKLOAD[*]@Q}"
+  "${PERF_RECORD[@]}" -- "${WORKLOAD[@]}"
 fi
 
 [ -s "$OUT/perf.data" ] || { echo "profile: no samples recorded" >&2; exit 1; }
