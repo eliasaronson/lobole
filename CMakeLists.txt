@@ -378,6 +378,7 @@ set(core_sources
     src/core/parts/AxisStack.cpp
     src/core/parts/BearingSeat.cpp
     src/core/parts/BearingTable.cpp
+    src/core/parts/RetainingRingTable.cpp
     src/core/parts/FastenerProfile.cpp
     src/core/parts/FastenerTable.cpp
     src/core/io/AtomicWrite.cpp
@@ -397,6 +398,8 @@ set(core_sources
     src/core/sketch/SketchSelection.cpp
     src/core/features/ExtrudeFeature.cpp
     src/core/features/BearingFeature.cpp
+    src/core/features/RetainingRingFeature.cpp
+    src/core/features/RetainingRingGrooveFeature.cpp
     src/core/features/FastenerFeature.cpp
     src/core/features/DerivedFeature.cpp
     src/core/features/DatumPlaneFeature.cpp
@@ -800,6 +803,7 @@ set(app_sources
     src/ui/FlexibleActions.cpp
     src/ui/TessellationCache.cpp
     src/ui/BearingActions.cpp
+    src/ui/RetainingRingActions.cpp
     src/ui/FastenerActions.cpp
     src/ui/MotionActions.cpp
     src/ui/MotionVideo.cpp

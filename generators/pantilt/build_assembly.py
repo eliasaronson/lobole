@@ -158,11 +158,11 @@ def check_seats(app, asm, placed):
     the yoke and the tilt shaft turn by joints of their own, and a second
     revolute through each bearing would close a redundant loop.
 
-    What ISO 15 cannot judge stays unverified and is listed with its reason,
-    not read as a pass: how far a shoulder may reach is a supplier's
-    abutment dimension (no supplier catalog is installed), and a ring that
-    no shoulder locates axially says so. A ring with no seat, or a check
-    that fails, stops the stage."""
+    Every shoulder is judged against SKF's abutment limits, built in
+    (docs/parts/README.md#abutment-limits). What cannot be judged stays
+    unverified and is listed with its reason, not read as a pass: a ring
+    that no shoulder locates axially says so. A ring with no seat, or a
+    check that fails, stops the stage."""
     asm.activate()
     out = []
     for b in placed:

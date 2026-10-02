@@ -131,7 +131,9 @@ are not saved as project requirements.
 `record.check_seat(occurrence=N)` (RPC `check_seat {occurrence, catalog,
 revision, hash}`) does the same for a PLACED bearing, with the observations
 measured off the seats it is mated to instead of typed, beside the checks
-ISO 15 itself supports ([README.md](README.md#fits-and-seats)).
+ISO 15 itself supports and SKF's abutment limits, which are built in
+([README.md](README.md#fits-and-seats)). An imported catalog is how another
+supplier's limits are judged on top.
 
 A passing report means only that these four supplied numbers satisfy these
 supplied limits. It does not evaluate loads, speed, temperature, bearing life,

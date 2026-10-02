@@ -31,6 +31,7 @@ add_executable(designer_tests
     test_determinism.cpp
     test_parts.cpp
     test_bearings.cpp
+    test_retaining_rings.cpp
     test_fits.cpp
     test_tolerances.cpp
     test_print_allowance.cpp

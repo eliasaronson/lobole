@@ -365,6 +365,24 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "608", "618/4"; anything else is refused naming what is carried)}} — in
   an ASSEMBLY, prefer `fit_bearing`, which reads the size off the shaft or
   bore you pick and mates it there (docs/parts/README.md#bearings).
+- RetainingRing (a DIN 471/472 circlip — thickness and free diameter come
+  from the table): {{"type": "RetainingRing", "name": str, "standard":
+  "din471" (external, a shaft, sizes 3-56) | "din472" (internal, a bore,
+  sizes 8-72), "size": num (the nominal shaft or bore diameter, mm)}} — in
+  an ASSEMBLY, `add_retaining_ring` places one; `list_retaining_rings`
+  answers the table, its groove dimensions included.
+- RetainingRingGroove (the groove a ring sits in, cut in a part):
+  {{"type": "RetainingRingGroove", "name": str, "face": {{"feature_id",
+  "element"}} (a CYLINDRICAL face: a shaft takes din471, a bore din472),
+  "from": {{"feature_id", "element"}} (a circular edge at ONE END of that
+  face: the side of what the ring holds, e.g. the shoulder a bearing sits
+  against), "offset": num (mm from that edge to the groove's near flank —
+  the bearing's width, for a bearing between the shoulder and the ring),
+  "offset_expr"?: str, "standard"?: str (must be the face's)}} — the
+  groove's diameter and width come from the table for the face's
+  diameter; it is REFUSED when the face is not a carried size, the groove
+  runs off the face, or less than the table's edge distance n is left past
+  it (docs/parts/README.md#the-groove).
 
 Call the `describe` tool for the authoritative method/type/enum lists.
 

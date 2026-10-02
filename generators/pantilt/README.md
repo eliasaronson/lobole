@@ -175,13 +175,14 @@ reason (a frame built from a cylindrical face takes the face's seam as X:
   it ([both rings](../../docs/parts/README.md#both-rings); not `mate_other`,
   which would close a second joint through each bearing beside the yoke's
   and the shaft's own). Every ring's diameter passes; every ring that sits
-  on a shoulder is seated on it with a fillet under r_s min. What stays
-  unverified, ring by ring in the report with its reason: every shoulder's
-  diameter (how far a shoulder may reach is a supplier's abutment
-  dimension, not ISO 15's, and no supplier catalog is installed), and two
-  inner rings no shoulder locates -- the lower 6005's on the yoke's journal
-  and the -Y 6002's on the tilt shaft (below, Known). A ring with no seat,
-  or a check that fails, stops the stage.
+  on a shoulder is seated on it, and every shoulder and fillet is inside
+  SKF's abutment limits (d_a, D_a, r_a;
+  [abutment limits](../../docs/parts/README.md#abutment-limits)), so six of
+  the eight bearings pass outright. What stays unverified, ring by ring in
+  the report with its reason: two inner rings no shoulder locates -- the
+  lower 6005's on the yoke's journal and the -Y 6002's on the tilt shaft
+  (below, Known). A ring with no seat, or a check that fails, stops the
+  stage.
 - **Bought parts.** 2 x 6005, 2 x 6002, 4 x 609; 4 x ISO 4762 M4x14 into
   the plate; 8 x M4x25 with ISO 4032 nuts and ISO 7089 washers through the
   worm blocks; 2 x M4x30 and 2 x M4x40 through the yoke's foot flanges; and
@@ -256,10 +257,11 @@ real bore size error, which is the K7 question above.
 - Two inner rings are not located axially: the lower 6005's (nothing
   retains the yoke against lifting off; gravity holds it) and the -Y
   6002's (the tilt shaft ends flush with the arm). `check_seat` says so for
-  each; a nut, a circlip or a printed cap is not modelled.
-- No bearing's shoulder diameter is judged: that is a supplier's abutment
-  dimension, and judging it needs that supplier's catalog installed
-  ([catalogs](../../docs/parts/catalogs.md)).
+  each. A DIN 471 circlip and its groove can now be modelled
+  ([retaining rings](../../docs/parts/README.md#retaining-rings)), but
+  placing the ring in its groove is not built yet and this generator cuts
+  none: each journal would need the groove and its land (m + n) past its
+  bearing, which the tilt shaft, flush with the arm, does not have.
 - The M4 threads are tapped by hand: an M4 thread mill would be a 2.4 mm
   head on a router. The check lists them as not cut by the job, and
   `cam.py` stops on anything else it lists.

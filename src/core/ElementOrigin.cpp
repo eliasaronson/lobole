@@ -32,6 +32,9 @@ constexpr RoleSpelling kRoles[] = {
     {ElementRole::InnerSide, "inner_side"},
     {ElementRole::OuterSide, "outer_side"},
     {ElementRole::Shield, "shield"},
+    {ElementRole::RingSide, "ring_side"},
+    {ElementRole::GrooveFloor, "groove_floor"},
+    {ElementRole::GrooveFlank, "groove_flank"},
 };
 
 bool AllDigits(const std::string& s) {
@@ -150,6 +153,15 @@ bool DecodeSeed(const std::vector<std::string>& words, ElementOrigin& o) {
                : side == "inner_side" ? ElementRole::InnerSide
                : side == "outer_side" ? ElementRole::OuterSide
                                       : ElementRole::Shield;
+      return true;
+    }
+    // A retaining ring's sides, and the groove one sits in, its two flanks
+    // told apart the same way (docs/parts/README.md#retaining-rings).
+    if (side == "ring_side" || side == "groove_flank" ||
+        last == "groove_floor") {
+      o.role = side == "ring_side"      ? ElementRole::RingSide
+               : side == "groove_flank" ? ElementRole::GrooveFlank
+                                        : ElementRole::GrooveFloor;
       return true;
     }
   }

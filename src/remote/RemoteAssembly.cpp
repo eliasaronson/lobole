@@ -12,6 +12,7 @@
 #include "core/features/FrameFeature.h"
 #include "core/io/Serialization.h"
 #include "core/parts/BearingTable.h"
+#include "core/parts/RetainingRingTable.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteProject.h"
 #include "ui/DocumentSlots.h"
@@ -22,6 +23,7 @@
 #include "ui/BearingActions.h"
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/FlexibleActions.h"
+#include "ui/RetainingRingActions.h"
 #include <map>
 #include <set>
 
@@ -422,9 +424,46 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "the journal and the housing bore from that row's d, D and B, instead "
      "of typing a table out of a catalogue. An unknown series is refused "
      "naming the carried ones; a bore past the largest carried is refused "
-     "saying how far the table reaches.",
+     "saying how far the table reaches. Each row also carries the "
+     "supplier's abutment limits check_seat judges a shoulder by (d_a_min_mm, "
+     "d_a_max_mm for the shaft shoulder, D_a_max_mm for the housing's, "
+     "r_a_max_mm for either fillet; SKF's, null where SKF prints none), so "
+     "the shoulders are modelled inside them.",
      "min_bore_mm, series", remote::NoFlags,
-     "bearings[]{designation,series,d_mm,D_mm,B_mm,r_min_mm}"},
+     "bearings[]{designation,series,d_mm,D_mm,B_mm,r_min_mm,d_a_min_mm,"
+     "d_a_max_mm,D_a_max_mm,r_a_max_mm}"},
+    {"add_retaining_ring",
+     "Place a DIN 471 (external, for a shaft) or DIN 472 (internal, for a "
+     "bore) retaining ring in the active assembly where told "
+     "(docs/parts/README.md#retaining-rings). `standard` is din471 or "
+     "din472; `size` the nominal shaft or bore diameter in mm (25) — 3 to 56 "
+     "for din471, 8 to 72 for din472. Thickness, free diameter and section "
+     "are READ from the table (Seeger-Orbis's DIN 471/472 data charts); a "
+     "size it does not carry is refused naming the nearest and the list. "
+     "One generated part per spec (\"DIN 471 25x1.2\"), so `bom` "
+     "aggregates (standard din471, designation 25x1.2). Refused on a part "
+     "tab. {position (model mm), orientation [x,y,z,w]} place it: its axis "
+     "is local +Z, side A (`ring_side_a`) on z = 0. It is drawn at its FREE "
+     "diameter, so in its groove it overlaps the floor by (d2 - d3)/2. Its "
+     "groove is a RetainingRingGroove feature on the part (add_feature). "
+     "Placing a ring INTO its groove is not built yet: position it yourself.",
+     "orientation, position, size, standard", remote::NoFlags,
+     "occurrence, part"},
+    {"list_retaining_rings",
+     "The DIN 471 / DIN 472 table this build carries "
+     "(docs/parts/README.md#retaining-rings): {standard, min_size_mm?} "
+     "answers its rows whose nominal size is at least min_size_mm, smallest "
+     "first, each {size_mm (the shaft or bore diameter), designation, s_mm "
+     "(thickness), d3_mm (free diameter: a 471 ring's inside, a 472 ring's "
+     "outside), a_mm (lug height max), b_mm (section), d5_mm (lug hole "
+     "min), groove {d2_mm (diameter), m_mm (width min), t_mm (depth), n_mm "
+     "(edge distance min)}}, and the `source` the table was typed from. So a "
+     "generator models a journal long enough for its groove and land (B + "
+     "m + n past a shoulder) before cutting it. An unknown standard is "
+     "refused naming din471 and din472.",
+     "min_size_mm, standard", remote::NoFlags,
+     "standard, source, rings[]{size_mm,designation,s_mm,d3_mm,a_mm,b_mm,"
+     "d5_mm,groove{d2_mm,m_mm,t_mm,n_mm}}"},
     {"fit_bearing",
      "Put a bearing on a picked SEAT and mate it there "
      "(docs/parts/README.md#bearings). `seat` is {feature_id, element, "
@@ -460,19 +499,30 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "(`found: coaxial`), since a one-solid bearing in a mechanism is mated "
      "to one seat only — the journal/bore diameter (must be the ring's "
      "basic size), whether the ring sits on its shoulder, the fillet into "
-     "the shoulder (must not exceed r_s min) and the shoulder's diameter "
-     "(must reach past the chamfer). All in mm. How far a shoulder may reach "
-     "is a supplier's abutment dimension, not ISO 15's: pass an installed "
-     "catalog {catalog, revision, hash, designation?} and its limits are "
-     "checked against the same measurements (designation defaults to the "
-     "bearing's). Each check is pass, fail or unverified with a reason; an "
-     "ring with no seat found is unverified, never a pass.",
+     "the shoulder and the shoulder's diameter. All in mm. The shoulder and "
+     "fillet are judged against the SUPPLIER'S abutment limits, carried for "
+     "every bearing SKF lists (SKF Rolling bearings, PUB BU/P1 17000 EN, "
+     "2018, table 1.1; docs/parts/README.md#abutment-limits): a shaft "
+     "shoulder below d_a min FAILS (the ring is unsupported), above d_a max "
+     "FAILS (it reaches the shield), a housing shoulder's bore above D_a max "
+     "FAILS, a fillet above r_a max FAILS, each naming its `limit`; a limit "
+     "SKF does not print (d_a max for a size it lists no capped variant of; "
+     "every limit for a size it does not make, judged then only against the "
+     "ring's chamfer) is unverified with the reason, and the row used comes "
+     "back as `abutment` (null for a size SKF does not list). An installed "
+     "catalog {catalog, revision, hash, "
+     "designation?} is checked against the same measurements on top "
+     "(designation defaults to the bearing's). Each check is pass, fail or "
+     "unverified with a reason; a ring with no seat found is unverified, "
+     "never a pass.",
      "catalog, designation, hash, occurrence, revision", remote::NoFlags,
-     "occurrence, designation, d, D, B, r_min, seats[]{ring,mate,found?,"
+     "occurrence, designation, d, D, B, r_min, abutment{source,d_a_min,"
+     "d_a_max,D_a_max,r_a_max,variant}, seats[]{ring,mate,found?,"
      "part?,occurrence?,inner_path?,feature_id?,"
      "face?,diameter?,shoulder?,shoulder_diameter?,fillet_radius?,gap_mm?,"
      "error?}, checks[]{characteristic,status,observed?,required?,minimum?,"
-     "maximum?,reason?}, measurements, catalog?, status, evidence"},
+     "maximum?,limit?,source?,variant?,reason?}, measurements, catalog?, "
+     "status, evidence"},
     {"export_bom",
      "Export the BOM as CSV {path}: the bom rows, with a `configuration` "
      "column after `part`.",
@@ -1021,14 +1071,82 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     if (rows.empty())
       throw std::runtime_error(why);
     json out = json::array();
-    for (const parts::BearingRow* r : rows)
-      out.push_back({{"designation", r->designation},
-                     {"series", r->series},
-                     {"d_mm", r->d},
-                     {"D_mm", r->D},
-                     {"B_mm", r->B},
-                     {"r_min_mm", r->rMin}});
+    for (const parts::BearingRow* r : rows) {
+      json row = {{"designation", r->designation},
+                  {"series", r->series},
+                  {"d_mm", r->d},
+                  {"D_mm", r->D},
+                  {"B_mm", r->B},
+                  {"r_min_mm", r->rMin}};
+      // The supplier's abutment limits, so a generator models its shoulders
+      // inside them; null where the catalogue prints none
+      // (docs/parts/README.md#abutment-limits).
+      const parts::BearingAbutment* a = parts::AbutmentOf(r->designation);
+      const auto has = [&](double v) {
+        return a != nullptr && parts::BearingAbutment::Has(v) ? json(v)
+                                                              : json(nullptr);
+      };
+      row["d_a_min_mm"] = has(a != nullptr ? a->daMin : 0.0);
+      row["d_a_max_mm"] = has(a != nullptr ? a->daMax : 0.0);
+      row["D_a_max_mm"] = has(a != nullptr ? a->DaMax : 0.0);
+      row["r_a_max_mm"] = has(a != nullptr ? a->raMax : 0.0);
+      out.push_back(std::move(row));
+    }
     return json{{"bearings", std::move(out)}};
+  }
+  if (m == "add_retaining_ring") {
+    glm::dvec3 position(0.0);
+    if (p.contains("position")) {
+      const auto& v = p.at("position");
+      position = glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
+                            v.at(2).get<double>());
+    }
+    glm::dquat orientation(1.0, 0.0, 0.0, 0.0);
+    if (p.contains("orientation")) {
+      const auto q = p.at("orientation");
+      orientation = glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
+                               q.at(1).get<double>(), q.at(2).get<double>());
+    }
+    std::string error;
+    const uint64_t id = ui::AddRetainingRing(
+        state, p.at("standard").get<std::string>(), p.at("size").get<double>(),
+        position, orientation, &error);
+    if (id == 0)
+      throw std::runtime_error(error);
+    const Occurrence* placed = state.assembly->FindById(id);
+    return json{{"occurrence", id},
+                {"part", placed != nullptr ? placed->name : std::string{}}};
+  }
+  if (m == "list_retaining_rings") {
+    const std::string name = p.at("standard").get<std::string>();
+    parts::RetainingRingStandard which{};
+    if (!parts::RetainingRingStandardFromString(name, which))
+      throw std::runtime_error(
+          "unknown retaining ring standard \"" + name +
+          "\" — accepted: " + parts::KnownRetainingRingStandards());
+    const double minSize = p.value("min_size_mm", 0.0);
+    json out = json::array();
+    for (const parts::RetainingRingRow& r : parts::RetainingRings(which)) {
+      if (r.d1 < minSize - 1e-9)
+        continue;
+      out.push_back(
+          {{"size_mm", r.d1},
+           {"designation", parts::RetainingRingDesignation(which, r)},
+           {"s_mm", r.s},
+           {"d3_mm", r.d3},
+           {"a_mm", r.a},
+           {"b_mm", r.b},
+           {"d5_mm", r.d5},
+           {"groove",
+            {{"d2_mm", r.d2}, {"m_mm", r.m}, {"t_mm", r.t}, {"n_mm", r.n}}}});
+    }
+    if (out.empty())
+      throw std::runtime_error(
+          "no " + name + " ring is " + std::to_string(minSize) +
+          " mm or larger: it carries " + parts::KnownRetainingRingSizes(which));
+    return json{{"standard", name},
+                {"source", parts::RetainingRingSource(which)},
+                {"rings", std::move(out)}};
   }
   if (m == "fit_bearing") {
     ui::RimPick seat;

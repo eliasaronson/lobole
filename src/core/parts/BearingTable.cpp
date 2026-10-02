@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdio>
+#include <limits>
 
 namespace parts {
 
@@ -235,6 +236,103 @@ std::optional<BearingBand> BoreTolerance(double d) {
 
 std::optional<BearingBand> OutsideTolerance(double D) {
   return Band(std::begin(kOutsideSteps), std::end(kOutsideSteps), D);
+}
+
+namespace {
+
+constexpr double kNone = std::numeric_limits<double>::quiet_NaN();
+
+// SKF, "Rolling bearings", PUB BU/P1 17000 EN (2018), product table 1.1
+// "Single row deep groove ball bearings", pp. 260-273: the columns
+// "Abutment and fillet dimensions" — d_a min, d_a max, D_a max, r_a max, mm.
+// bd_warehouse's SKF-derived open-bearing table (d_a, D_a, r_a; bores to
+// 10 mm) agrees with every row it has, 619/8's open-row d_a min of 10 among
+// them.
+//
+// SKF prints d_a max only for a CAPPED bearing: a shoulder above it reaches
+// the shield or seal. The open row's column is a dash. The body is drawn
+// shielded, so each row below is read ENTIRE from the 2Z row where SKF lists
+// one, else from the capped row it lists (2RS1 for the 618/619 sizes from
+// 20 mm), else from the open row with no d_a max. Only 619/8 differs between
+// its open and 2Z rows (d_a min 10 against 9.5).
+//
+// Not here because SKF lists no such bearing: 618/3, 619/3, 605, 606. Those
+// stay unverified rather than borrowing a neighbour's numbers.
+const BearingAbutment kAbutments[] = {
+    // designation, d_a min, d_a max, variant, D_a max, r_a max
+    {"618/4", 4.6, kNone, nullptr, 8.4, 0.1},
+    {"618/5", 5.8, kNone, nullptr, 10.2, 0.1},
+    {"618/6", 6.8, kNone, nullptr, 12.2, 0.1},
+    {"618/7", 7.8, kNone, nullptr, 13.2, 0.1},
+    {"618/8", 9.4, kNone, nullptr, 14.6, 0.2},
+    {"618/9", 10.4, kNone, nullptr, 15.6, 0.2},
+    {"61800", 12, 12.5, "2Z", 17, 0.3},
+    {"61801", 14, 14.7, "2Z", 19, 0.3},
+    {"61802", 17, 17.8, "2Z", 22, 0.3},
+    {"61803", 19, 19.6, "2Z", 24, 0.3},
+    {"61804", 22, 23.6, "2RS1", 30, 0.3},
+    {"61805", 27, 27.3, "2RS1", 35, 0.3},
+    {"61806", 32, 32.5, "2RS1", 40, 0.3},
+    {"619/4", 4.8, 5.8, "2Z", 10.2, 0.1},
+    {"619/5", 6.4, 7.5, "2Z", 11.6, 0.2},
+    {"619/6", 7.4, 8, "2Z", 13.6, 0.2},
+    {"619/7", 9, 9.7, "2Z", 15, 0.3},
+    {"619/8", 9.5, 9.8, "2Z", 17, 0.3},
+    {"619/9", 11, 11.5, "2Z", 18, 0.3},
+    {"61900", 12, 12.9, "2Z", 20, 0.3},
+    {"61901", 14, 15.8, "2Z", 22, 0.3},
+    {"61902", 17, 18.3, "2Z", 26, 0.3},
+    {"61903", 19, 20.3, "2Z", 28, 0.3},
+    {"61904", 22, 23, "2RS1", 35, 0.3},
+    {"61905", 27, 29, "2RS1", 40, 0.3},
+    {"61906", 32, 34, "2RS1", 45, 0.3},
+    {"604", 5.4, 6, "2Z", 10.6, 0.2},
+    {"607", 9, 11, "2Z", 17, 0.3},
+    {"608", 10, 12, "2Z", 20, 0.3},
+    {"609", 11, 14.3, "2Z", 22, 0.3},
+    {"6000", 12, 14.7, "2Z", 24, 0.3},
+    {"6001", 14, 16.9, "2Z", 26, 0.3},
+    {"6002", 17, 20.4, "2Z", 30, 0.3},
+    {"6003", 19, 22.9, "2Z", 33, 0.3},
+    {"6004", 23.2, 27.1, "2Z", 38.8, 0.6},
+    {"6005", 28.2, 31.9, "2Z", 43.8, 0.6},
+    {"6006", 34.6, 38.1, "2Z", 50, 1},
+    {"623", 4.2, 5.1, "2Z", 8.8, 0.1},
+    {"624", 5.8, 6.6, "2Z", 11.2, 0.2},
+    {"625", 7.4, 8.3, "2Z", 13.6, 0.3},
+    {"626", 8.4, 11, "2Z", 16.6, 0.3},
+    {"627", 9.4, 12.1, "2Z", 19.6, 0.3},
+    {"628", 10.4, 14.4, "2Z", 21.6, 0.3},
+    {"629", 11.4, 14.7, "2Z", 23.6, 0.3},
+    {"6200", 14.2, 16.9, "2Z", 25.8, 0.6},
+    {"6201", 16.2, 18.4, "2Z", 27.8, 0.6},
+    {"6202", 19.2, 21.6, "2Z", 30.8, 0.6},
+    {"6203", 21.2, 24.4, "2Z", 35.8, 0.6},
+    {"6204", 25.6, 28.7, "2Z", 41.4, 1},
+    {"6205", 30.6, 34.3, "2Z", 46.4, 1},
+    {"6206", 35.6, 40.3, "2Z", 56, 1},
+    {"634", 6.4, 8.3, "2Z", 13.6, 0.3},
+    {"635", 7.4, 10.6, "2Z", 16.6, 0.3},
+    {"6300", 14.2, 17.4, "2Z", 30.8, 0.6},
+    {"6301", 17.6, 19.4, "2Z", 31.4, 1},
+    {"6302", 20.6, 23.6, "2Z", 36.4, 1},
+    {"6303", 22.6, 26.4, "2Z", 41.4, 1},
+    {"6304", 27, 30.3, "2Z", 45, 1},
+    {"6305", 32, 36.5, "2Z", 55, 1},
+    {"6306", 37, 44.5, "2Z", 65, 1},
+};
+
+} // namespace
+
+const BearingAbutment* AbutmentOf(const std::string& designation) {
+  for (const BearingAbutment& a : kAbutments)
+    if (designation == a.designation)
+      return &a;
+  return nullptr;
+}
+
+const char* AbutmentSource() {
+  return "SKF Rolling bearings, PUB BU/P1 17000 EN (2018), table 1.1";
 }
 
 } // namespace parts

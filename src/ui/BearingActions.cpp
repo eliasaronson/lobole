@@ -452,12 +452,29 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
   if (row == nullptr)
     throw std::runtime_error(bearing->GetError());
 
+  // The supplier's abutment limits (docs/parts/README.md#abutment-limits);
+  // null for a designation the catalogue does not list.
+  const parts::BearingAbutment* abut = parts::AbutmentOf(row->designation);
+  const std::string source = parts::AbutmentSource();
+
   json out = {{"occurrence", occurrence},
               {"designation", row->designation},
               {"d", row->d},
               {"D", row->D},
               {"B", row->B},
               {"r_min", row->rMin}};
+  if (abut != nullptr) {
+    json a = {{"source", source},
+              {"d_a_min", abut->daMin},
+              {"D_a_max", abut->DaMax},
+              {"r_a_max", abut->raMax}};
+    a["d_a_max"] = parts::BearingAbutment::Has(abut->daMax) ? json(abut->daMax)
+                                                            : json(nullptr);
+    a["variant"] = abut->variant != nullptr ? json(abut->variant) : json();
+    out["abutment"] = std::move(a);
+  } else {
+    out["abutment"] = nullptr;
+  }
 
   // The bearing's two side planes, in the world.
   const glm::dmat4 bw = OccurrenceMatrix(*occ);
@@ -546,42 +563,112 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
            {"reason", gap <= 0.01 ? "the ring's side face is on the shoulder"
                                   : "the ring sits " + Mm(gap) +
                                         " mm off its shoulder"}});
-    const bool filletOk = end->filletRadius <= row->rMin + 1e-9;
-    check({{"characteristic", ring + "_fillet_radius"},
-           {"observed", end->filletRadius},
-           {"maximum", row->rMin},
-           {"units", "mm"},
-           {"status", filletOk ? "pass" : "fail"},
-           {"reason",
-            filletOk ? "the fillet clears the ring's chamfer (r_s min)"
-                     : "the fillet is larger than the ring's chamfer (r_s "
-                       "min " +
-                           Mm(row->rMin) +
-                           "), so the ring rides up it instead of seating"}});
-    // The shoulder has to reach past the ring's chamfer to give it anything
-    // to bear on. Beyond that, how far it may reach is a supplier's abutment
-    // dimension (d_a, D_a), not ISO 15's — the catalog's to judge.
-    const double chamferEdge =
-        bore ? row->d + 2.0 * row->rMin : row->D - 2.0 * row->rMin;
-    const bool reaches = bore ? end->shoulderDiameter > chamferEdge
-                              : end->shoulderDiameter < chamferEdge;
+    // The fillet: the supplier's r_a max where the abutment table has one
+    // (docs/parts/README.md#abutment-limits), else the ring's own chamfer.
+    const bool haveRa =
+        abut != nullptr && parts::BearingAbutment::Has(abut->raMax);
+    const double filletMax = haveRa ? abut->raMax : row->rMin;
+    const std::string filletLimit =
+        haveRa ? "r_a max " + Mm(filletMax) + " (" + source + ")"
+               : "the ring's chamfer, r_s min " + Mm(filletMax);
+    const bool filletOk = end->filletRadius <= filletMax + 1e-9;
+    json fillet = {{"characteristic", ring + "_fillet_radius"},
+                   {"observed", end->filletRadius},
+                   {"maximum", filletMax},
+                   {"limit", haveRa ? "r_a max" : "r_s min"},
+                   {"units", "mm"},
+                   {"status", filletOk ? "pass" : "fail"},
+                   {"reason", filletOk
+                                  ? "the fillet is within " + filletLimit
+                                  : "the fillet is larger than " + filletLimit +
+                                        ", so the ring rides up it "
+                                        "instead of seating"}};
+    if (haveRa)
+      fillet["source"] = source;
+    check(std::move(fillet));
     json sh = {{"characteristic", ring + "_shoulder_diameter"},
                {"observed", end->shoulderDiameter},
                {"units", "mm"}};
-    if (!reaches) {
-      sh[bore ? "minimum" : "maximum"] = chamferEdge;
-      sh["status"] = "fail";
-      sh["reason"] = "the shoulder does not reach past the ring's chamfer, "
-                     "so the ring's side face bears on nothing";
-    } else if (catalogEntry != nullptr) {
-      sh["status"] = "pass";
-      sh["reason"] = "it reaches past the ring's chamfer; the supplier's "
-                     "abutment limits are judged under `catalog`";
+    const double obs = end->shoulderDiameter;
+    if (abut != nullptr) {
+      // The supplier's abutment limits. A shaft shoulder below d_a min
+      // leaves the ring's side face unsupported; above d_a max it reaches
+      // the shield (or seal) and leaves no ring face for a puller. A housing
+      // shoulder whose bore is above D_a max leaves the outer ring
+      // unsupported. A limit the catalogue does not print stays unverified.
+      sh["source"] = source;
+      if (abut->variant != nullptr)
+        sh["variant"] = std::string(row->designation) + "-" + abut->variant;
+      if (bore) {
+        sh["minimum"] = abut->daMin;
+        const bool haveMax = parts::BearingAbutment::Has(abut->daMax);
+        if (haveMax)
+          sh["maximum"] = abut->daMax;
+        if (obs < abut->daMin - 1e-6) {
+          sh["status"] = "fail";
+          sh["limit"] = "d_a min";
+          sh["reason"] = "the shaft shoulder (Ø" + Mm(obs) +
+                         ") is below d_a min " + Mm(abut->daMin) +
+                         ": too low, the ring's side face is unsupported";
+        } else if (haveMax && obs > abut->daMax + 1e-6) {
+          sh["status"] = "fail";
+          sh["limit"] = "d_a max";
+          sh["reason"] = "the shaft shoulder (Ø" + Mm(obs) +
+                         ") is above d_a max " + Mm(abut->daMax) + " of the " +
+                         sh.at("variant").get<std::string>() +
+                         ": too high, it reaches the shield and leaves no "
+                         "ring face for a puller";
+        } else if (!haveMax) {
+          sh["status"] = "unverified";
+          sh["limit"] = "d_a max";
+          sh["reason"] = "it meets d_a min " + Mm(abut->daMin) +
+                         "; the catalogue prints d_a max only for a capped "
+                         "bearing and lists no capped " +
+                         std::string(row->designation) +
+                         ", so how high it may reach is not judged";
+        } else {
+          sh["status"] = "pass";
+          sh["reason"] =
+              "within d_a " + Mm(abut->daMin) + " to " + Mm(abut->daMax);
+        }
+      } else {
+        sh["maximum"] = abut->DaMax;
+        if (obs > abut->DaMax + 1e-6) {
+          sh["status"] = "fail";
+          sh["limit"] = "D_a max";
+          sh["reason"] = "the housing shoulder's bore (Ø" + Mm(obs) +
+                         ") is above D_a max " + Mm(abut->DaMax) +
+                         ": too large, the outer ring's side face is "
+                         "unsupported";
+        } else {
+          sh["status"] = "pass";
+          sh["reason"] = "within D_a max " + Mm(abut->DaMax) +
+                         " (the catalogue gives no lower limit for a "
+                         "housing shoulder)";
+        }
+      }
     } else {
-      sh["status"] = "unverified";
-      sh["reason"] = "how far a shoulder may reach is the supplier's abutment "
-                     "dimension, not ISO 15's — pass an installed catalog to "
-                     "judge it";
+      // No abutment row for this designation: the shoulder has to reach
+      // past the ring's chamfer to give it anything to bear on, and beyond
+      // that only an installed catalog can judge it.
+      const double chamferEdge =
+          bore ? row->d + 2.0 * row->rMin : row->D - 2.0 * row->rMin;
+      const bool reaches = bore ? obs > chamferEdge : obs < chamferEdge;
+      if (!reaches) {
+        sh[bore ? "minimum" : "maximum"] = chamferEdge;
+        sh["status"] = "fail";
+        sh["reason"] = "the shoulder does not reach past the ring's chamfer, "
+                       "so the ring's side face bears on nothing";
+      } else if (catalogEntry != nullptr) {
+        sh["status"] = "pass";
+        sh["reason"] = "it reaches past the ring's chamfer; the supplier's "
+                       "abutment limits are judged under `catalog`";
+      } else {
+        sh["status"] = "unverified";
+        sh["reason"] = std::string(source) + " lists no " + row->designation +
+                       ", so how far its shoulder may reach is not judged — "
+                       "pass an installed catalog to judge it";
+      }
     }
     check(std::move(sh));
     seats.push_back(std::move(s));
@@ -732,7 +819,8 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
   }
   out["status"] = fail ? "fail" : missing ? "unverified" : "pass";
   out["evidence"] = "measured from the model: the placed bearing's ISO 15 "
-                    "dimensions and the seats it is mated to; load, speed, "
+                    "dimensions, the seats it sits on and the supplier's "
+                    "abutment limits (`abutment`); load, speed, "
                     "temperature and fit selection are not evaluated";
   return out;
 }

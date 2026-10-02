@@ -19,7 +19,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    155; // v155: sketch constraint refs reach an ellipse's (or elliptical
+    156; // v156: two feature types — RetainingRing {standard: din471|din472,
+         //      size} (a generated retaining ring) and RetainingRingGroove
+         //      {face, from, offset (+_expr), standard?} (its groove cut in a
+         //      shaft or bore) (docs/parts/README.md#retaining-rings).
+         // v155: sketch constraint refs reach an ellipse's (or elliptical
          //      arc's) axis ends, which 3/4 (major) and 5/6 (minor), and an
          //      ellipse with r_minor > r_major (or r_minor <= 0) is refused
          //      on load (docs/sketching/README.md#ellipses-and-splines).

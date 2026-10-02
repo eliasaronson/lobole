@@ -35,6 +35,7 @@
 #include "core/features/FastenerFeature.h"
 #include "core/features/FilletFeature.h"
 #include "core/features/HoleFeature.h"
+#include "core/features/RetainingRingFeature.h"
 #include "core/io/Autosaver.h"
 #include "core/io/GitVault.h"
 #include "core/io/ImportAssembly.h"
@@ -42,6 +43,7 @@
 #include "core/parts/AxisStack.h"
 #include "core/parts/FastenerProfile.h"
 #include "core/parts/FastenerTable.h"
+#include "core/parts/RetainingRingTable.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
 #include "render/IBLTextures.h"
@@ -162,6 +164,17 @@ BomTable ComputeBomOf(AppState& state,
     } else if (const BearingFeature* bearing = SoleBearingOf(part)) {
       fresh.standard = "iso15"; // docs/parts/README.md#bearings
       fresh.designation = bearing->designation;
+    } else if (const RetainingRingFeature* ring = SoleRetainingRingOf(part)) {
+      // docs/parts/README.md#retaining-rings: "din471", "25x1.2".
+      parts::RetainingRingStandard which{};
+      const parts::RetainingRingRow* row =
+          parts::RetainingRingStandardFromString(ring->standard, which)
+              ? parts::FindRetainingRing(which, ring->size)
+              : nullptr;
+      if (row != nullptr) {
+        fresh.standard = ring->standard;
+        fresh.designation = parts::RetainingRingSize(*row);
+      }
     }
     if (!part) {
       fresh.partName = "(missing part)"; // dangling reference — mass unknown

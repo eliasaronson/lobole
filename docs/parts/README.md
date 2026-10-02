@@ -1,7 +1,7 @@
 # Standard parts
 
-Bought hardware — screws, nuts, washers, bearings — generated from vendored ISO
-dimension tables and placed in assemblies, so the BOM lists what to buy, mass
+Bought hardware — screws, nuts, washers, bearings, retaining rings —
+generated from vendored ISO and DIN dimension tables and placed in assemblies, so the BOM lists what to buy, mass
 properties include the hardware, and interference and contact checks see it.
 A fastener's size and length are **derived** from the hole it is picked in,
 never typed: a wrong-length screw looks right in the viewport.
@@ -295,9 +295,10 @@ naming every one carried, and a shield or seal suffix (`6200-2Z`, `608ZZ`)
 is refused naming the bare designation, since the BOM would otherwise call a
 sealed bearing open. It also carries ISO 492's normal-class tolerances on
 the mean bore and outside diameter (0/−8 µm on a 6200's bore), which is what
-`check_fits` reads for a ring. Load ratings, speeds and abutment dimensions
-are a supplier's, not the standard's; they come from an imported catalog
-([catalogs.md](catalogs.md)).
+`check_fits` reads for a ring. Abutment dimensions are a supplier's, not the
+standard's, and are carried from one cited catalogue
+([abutment limits](#abutment-limits)); load ratings and speeds come from an
+imported catalog ([catalogs.md](catalogs.md)).
 
 **The body** (`BearingFeature`, `src/core/features/BearingFeature.{h,cpp}`,
 JSON type `Bearing`, format v141) is one solid of revolution drawn as a
@@ -316,6 +317,37 @@ Its axis is local +Z with side A on z = 0.
 Its faces are named by what they are: `<id>/bore`, `/outside`,
 `/inner_side_a|b` and `/outer_side_a|b` (a shaft shoulder bears on the inner
 ring, a housing's on the outer), `/shield_a|b`.
+
+### Abutment limits
+
+How far a shoulder must and may reach is not in ISO 15; each supplier
+publishes it. `parts::AbutmentOf` (`BearingTable`) carries, for every
+designation of the table SKF lists, the "Abutment and fillet dimensions" of
+SKF's *Rolling bearings* catalogue, PUB BU/P1 17000 EN (2018), product table
+1.1 "Single row deep groove ball bearings", pp. 260-273:
+
+| limit | judges | too far means |
+|---|---|---|
+| d_a min | the shaft shoulder's diameter, from below | the inner ring's side face is unsupported |
+| d_a max | the shaft shoulder's diameter, from above | it reaches the shield, and leaves no ring face for a puller |
+| D_a max | the housing shoulder's bore, from above | the outer ring's side face is unsupported |
+| r_a max | either fillet | the ring rides up it instead of seating |
+
+- SKF prints d_a max only for a CAPPED bearing; the open row's column is a
+  dash. The body is drawn shielded, so every limit of a row is read from
+  the 2Z row, or from the capped row SKF lists where it lists no 2Z (2RS1
+  for 61804-61806 and 61904-61906), or from the open row with no d_a max
+  where it lists no capped one (618/4-618/9). The row names its `variant`.
+- A value SKF does not publish is absent, not invented. SKF lists no 618/3,
+  619/3, 605 or 606, so those have no row, and SKF gives no D_a min for a
+  deep-groove ball bearing.
+- bd_warehouse's SKF-derived table (bores to 10 mm) agrees with every row
+  it has; `tests/test_bearings.cpp` checks rows against the catalogue.
+
+`list_bearings` returns each row's limits (`d_a_min_mm`, `d_a_max_mm`,
+`D_a_max_mm`, `r_a_max_mm`, null where absent) so a generator models its
+shoulders inside them, and `check_seat` judges against them
+([fits and seats](#fits-and-seats)).
 
 ### Placing one on a seat
 
@@ -361,13 +393,21 @@ refused asking for the rim.
 - **`check_seat {occurrence}`** (`ui::CheckSeat`) checks a placed bearing
   against the seats its rings are mated to, read with the same `SeatOf`: the
   seat is the ring's basic size, the ring sits on its shoulder (within
-  0.01 mm), the fillet does not exceed r_s min, and the shoulder reaches past
-  the ring's chamfer. How far a shoulder may reach is an abutment dimension
-  the standard does not give, so it is unverified unless an installed catalog
-  is passed (`catalog`, `revision`, `hash`, `designation?`), whose limits are
-  then checked against the same measurements. Both rings are checked, the
-  one no mate reaches through the seat it sits on ([both rings](#both-rings));
-  a ring with no seat found is unverified, never a pass.
+  0.01 mm), and the shoulder and its fillet are within the supplier's
+  [abutment limits](#abutment-limits): a shaft shoulder below d_a min or
+  above d_a max, a housing shoulder's bore above D_a max, a fillet above
+  r_a max each FAIL, the check naming its `limit`, `source` and `variant`.
+  A limit the catalogue does not print is unverified with the reason — d_a
+  max for 618/4-618/9; every limit for 618/3, 619/3, 605 and 606, whose
+  shoulder is then judged only to reach past the ring's chamfer and whose
+  fillet against r_s min. The row used is returned as `abutment` (null for
+  those four). An installed catalog (`catalog`, `revision`, `hash`,
+  `designation?`) is checked against the same measurements on top. Both
+  rings are checked, the one no mate reaches through the seat it sits on
+  ([both rings](#both-rings)); a ring with no seat found is unverified,
+  never a pass. A ring with no shoulder at the end it sits at is
+  `<ring>_ring_located: unverified`; a retaining ring in a groove is not yet
+  read as locating it ([retaining rings](#retaining-rings)).
 
 ### Both rings
 
@@ -410,22 +450,105 @@ would put it, and Place re-arms for the next seat.
 
 ### Tests
 
-`tests/test_bearings.cpp` (the table against ISO 15, the refusals, ISO 492
+`tests/test_bearings.cpp` (the table against ISO 15, the abutment rows
+against SKF's and the absent ones absent, the refusals, ISO 492
 bands, the body's named faces and its volume by Pappus, round trip, placing
 on a journal by face and by rim, a housing bore, a part-tab refusal, the BOM,
-`check_fits` on a k5 journal, `check_seat` with a square shoulder, a fillet
-too large and a catalog, both rings — the housing found under an unmated
+`check_fits` on a k5 journal, `check_seat` with a square shoulder inside
+d_a, one below d_a min, one above d_a max, a housing shoulder past D_a max,
+a fillet past r_a max, a 606 SKF does not list, and a catalog, both rings — the housing found under an unmated
 outer ring, a wrong-size bore failing, `mate_other`'s revolute moving
 nothing, and the answer when nothing is there), GUI `parts/a_bearing_is_placed_on_a_picked_shaft`.
 Golden `v141-bearing`.
 
+## Retaining rings
+
+DIN 471 rings for shafts and DIN 472 rings for bores, and the groove each
+sits in — what locates a bearing ring on the side its shoulder does not.
+
+**The table** (`src/core/parts/RetainingRingTable.{h,cpp}`) is typed from
+Seeger-Orbis's data charts, "Seeger-Rings for shafts A3 - A56 / DIN 471"
+and "Seeger-Rings for bores J8 - J58" and "J60 - J150 / DIN 472" (the
+Seeger catalogue's sections 10 and 11, the datasheet PDFs on
+seeger-orbis.com): DIN 471 sizes 3 to 56, DIN 472 sizes 8 to 72 (the
+largest outside diameter the bearing table carries, a 6306's, is 72). Per
+size, the ring — thickness s, free diameter d3 (a 471 ring's inside, a 472
+ring's outside), lug height a, section b, lug hole d5 — and the groove —
+diameter d2, width m (min), depth t, edge distance n (min). A fixed scope:
+a size it does not carry is refused naming the nearest and the full list
+("no DIN 471 ring for a Ø43 shaft — the nearest carried are 42 or 44"),
+and a standard other than `din471` or `din472` is refused naming both.
+
+**The ring** (`RetainingRingFeature`,
+`src/core/features/RetainingRingFeature.{h,cpp}`, JSON type
+`RetainingRing` {standard, size}, format v156) is SIMPLIFIED: a flat annulus
+s thick at the FREE diameter with the table's section b — no opening and no
+lugs, whose angular extent the table does not give. A 471 ring's inside is
+d3, its outside d3 + 2b; a 472's outside d3, its inside d3 - 2b. Free, a 471
+ring is smaller than its groove (d3 < d2; that grip is what holds it), so in
+its groove the drawn ring overlaps the floor by (d2 - d3)/2. Axis +Z, side A
+on z = 0; faces `<id>/bore`, `/outside`, `/ring_side_a|b`. Steel.
+
+`add_retaining_ring {standard, size, position?, orientation?}`
+(`ui::AddRetainingRing`, `src/ui/RetainingRingActions.{h,cpp}`) places one
+where told, as `add_bearing` does: one generated part per spec, named
+`DIN 471 25x1.2`, in "Standard parts", refused on a part tab and refused
+before a tab is made for an unknown size. `bom` counts it as bought,
+`standard` `din471`, `designation` `25x1.2`. `list_retaining_rings
+{standard, min_size_mm?}` answers the table, groove included.
+
+### The groove
+
+`RetainingRingGrooveFeature` (`src/core/features/RetainingRingGrooveFeature.{h,cpp}`,
+JSON type `RetainingRingGroove`, v156) cuts the groove in a part:
+
+- `face`: a cylindrical face — a shaft takes `din471`, a bore's wall
+  `din472`, read from the face's normal like a Thread's. `standard?` may
+  name it; the other one is refused.
+- `from`: a circular edge at ONE END of that face, the side of what the
+  ring holds — the rim where a journal meets the shoulder its bearing sits
+  on. `offset` (+`offset_expr`) is the distance from it into the face to
+  the groove's NEAR flank, the one the ring bears on: the bearing's width,
+  for a bearing held between the shoulder and the ring.
+- The groove is the row for the face's diameter: d2 deep, m wide. Refused,
+  never adjusted, when the face's diameter is not a carried size, the
+  groove runs off the face, or less than the edge distance n is left past
+  it — the land that carries the ring's thrust toward the free end; the
+  refusal says the largest offset that fits.
+- Faces `<id>/groove_floor`, `/groove_flank_a` (the near flank) and
+  `/groove_flank_b`, roles `groove_floor` and `groove_flank`.
+
+So a journal for a bearing located by a ring is B + m + n long past its
+shoulder at least, and `list_retaining_rings` gives m and n before anything
+is cut.
+
+### Placing a ring in its groove: not built
+
+The ring is placed where told; nothing yet puts it in its groove, mates it,
+or lets `check_seat` read it as locating a bearing ring. That waits for the
+fastener rework that makes placed hardware follow its hole's named faces,
+and is to be built on it rather than on `attachedTo`/`attachOffset`: the
+ring's `ring_side_a` on the groove's `groove_flank_a`, its axis on the
+groove's, and the overlap of the free ring with the floor treated as
+intended.
+
+`tests/test_retaining_rings.cpp`: the table against the charts at several
+sizes and against itself (t is half of d1 - d2 on every row), the refusals,
+both rings' bodies and named faces, a groove cut on a Ø25 shaft from the
+shoulder and from the free end (its floor, flanks and removed volume), a
+groove in a Ø47 bore, every groove refusal, round trip, and placing and
+counting rings in an assembly. Golden `v156-retaining-ring`.
+
 ## RPCs
 
 `list_bearings {series?, min_bore_mm?}` (the table's rows, smallest bore
-first: what a generator sizes a journal and a housing from before anything is
-placed), `add_bearing {designation, position?, orientation?}`, `fit_bearing {seat,
+first, each with its abutment limits: what a generator sizes a journal, its
+shoulder and a housing from before anything is placed), `add_bearing
+{designation, position?, orientation?}`, `fit_bearing {seat,
 designation?, series?, dry_run?}`, `check_seat {occurrence, catalog?,
-revision?, hash?, designation?}`;
+revision?, hash?, designation?}`; `list_retaining_rings {standard,
+min_size_mm?}`, `add_retaining_ring {standard, size, position?,
+orientation?}`;
 `add_fastener {standard, size, length?, drive?, position?, orientation?}`
 (places where told), `fit_fastener {rim, standard?, drive?, size?, nut?,
 washer_under_head?, washer_under_nut?, washer?, far_end?, dry_run?}`,
@@ -460,6 +583,9 @@ ghost count tracks the options, place, joined, check). Goldens
   browser.
 - Bearings beyond deep-groove ball bearings at bores 3 to 30 mm; shield and
   seal variants as their own designations; a bearing whose rings turn.
+- A retaining ring placed in its groove, and read by `check_seat` as
+  locating a ring ([retaining rings](#placing-a-ring-in-its-groove-not-built));
+  a ring's opening and lugs; DIN 6799 (E-clips) and heavy-duty rings.
 - Folding hardware in the Occurrences tree.
 - A ghost on hover before the rim is picked.
 - Attachment chains (an attached occurrence's parent is never itself chased)

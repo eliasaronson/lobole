@@ -28,6 +28,8 @@
 #include "core/features/PipeFeature.h"
 #include "core/features/RefineFeature.h"
 #include "core/features/RefoldFeature.h"
+#include "core/features/RetainingRingFeature.h"
+#include "core/features/RetainingRingGrooveFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/ShellFeature.h"
@@ -959,6 +961,20 @@ json FeatureToJson(const Feature& feature) {
       j["drive"] = fastener->drive;
   } else if (auto* bearing = dynamic_cast<const BearingFeature*>(&feature)) {
     j["designation"] = bearing->designation; // v141
+  } else if (auto* ring = dynamic_cast<const RetainingRingFeature*>(&feature)) {
+    j["standard"] = ring->standard; // v156
+    j["size"] = ring->size;
+  } else if (auto* groove =
+                 dynamic_cast<const RetainingRingGrooveFeature*>(&feature)) {
+    j["face"] = {{"feature_id", groove->face.featureId}, // v156
+                 {"element", groove->face.name}};
+    j["from"] = {{"feature_id", groove->from.featureId},
+                 {"element", groove->from.name}};
+    j["offset"] = groove->offset;
+    if (!groove->offsetExpr.empty())
+      j["offset_expr"] = groove->offsetExpr;
+    if (!groove->standard.empty())
+      j["standard"] = groove->standard;
   } else if (auto* import = dynamic_cast<const ImportFeature*>(&feature)) {
     j["path"] = import->path;
     if (import->keepOrigin) // v97; absent = centred, as every older file was
@@ -1513,6 +1529,27 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "naming the ones carried. Faces are named <id>/bore, /outside, "
      "/inner_side_a|b, /outer_side_a|b, /shield_a|b; side A on z = 0 "
      "(docs/parts/README.md#bearings)"},
+    {"RetainingRing", 156,
+     "standard: din471 (external, for a shaft, sizes 3-56) | din472 "
+     "(internal, for a bore, sizes 8-72); size: the nominal shaft or bore "
+     "diameter in mm (25). Thickness, free diameter and section are READ "
+     "from the table; a size it does not carry is refused naming the nearest "
+     "and the list. A flat annulus at the FREE diameter (no opening, no "
+     "lugs). Faces <id>/bore, /outside, /ring_side_a|b; axis +Z, side A on "
+     "z = 0. In an assembly, add_retaining_ring places one "
+     "(docs/parts/README.md#retaining-rings)"},
+    {"RetainingRingGroove", 156,
+     "face {feature_id, element} (a CYLINDRICAL face: a shaft takes din471, "
+     "a bore din472), from {feature_id, element} (a circular edge at ONE END "
+     "of that face: the side of what the ring holds, e.g. the shoulder a "
+     "bearing sits on), offset (+_expr) mm from that edge to the groove's "
+     "near flank (the bearing's width, for a bearing held between a "
+     "shoulder and the ring), standard? (must be the face's). Cuts the "
+     "table's groove: diameter d2, width m. REFUSED when the face's diameter "
+     "is not a carried size, when the groove runs off the face, or when "
+     "less than the edge distance n is left past it. Faces <id>/groove_floor, "
+     "/groove_flank_a (the near flank, the one a ring bears on), "
+     "/groove_flank_b (docs/parts/README.md#the-groove)"},
     {"BaseFlange", 109,
      "sketch_id, reversed?, regions? - the FIRST wall of a sheet part: the "
      "closed profile thickened by the document's sheet-metal thickness, so "
@@ -2094,6 +2131,22 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "Bearing") {
     out = std::make_unique<BearingFeature>(
         name, j.at("designation").get<std::string>());
+  } else if (type == "RetainingRing") { // v156
+    // An unknown standard or size is refused by Execute, naming what is
+    // carried — the same door add_feature and a file come in by.
+    out = std::make_unique<RetainingRingFeature>(
+        name, j.at("standard").get<std::string>(), j.at("size").get<double>());
+  } else if (type == "RetainingRingGroove") { // v156
+    const auto ref = [&](const char* key) {
+      const json& rj = j.at(key);
+      return ElementRef{rj.at("feature_id").get<uint64_t>(),
+                        rj.at("element").get<std::string>()};
+    };
+    auto groove = std::make_unique<RetainingRingGrooveFeature>(
+        name, ref("face"), ref("from"), j.at("offset").get<double>());
+    groove->offsetExpr = j.value("offset_expr", std::string{});
+    groove->standard = j.value("standard", std::string{});
+    out = std::move(groove);
   } else if (type == "Import") {
     auto imp =
         std::make_unique<ImportFeature>(name, j.at("path").get<std::string>());

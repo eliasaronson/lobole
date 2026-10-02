@@ -75,6 +75,66 @@ TEST_CASE("The bearing table is ISO 15's", "[parts][bearing]") {
   CHECK(parts::BearingsForOutside(30.0).size() == 2); // 61903 and 6200
 }
 
+TEST_CASE("The abutment limits are SKF's", "[parts][bearing]") {
+  // Typed from SKF "Rolling bearings", PUB BU/P1 17000 EN (2018), table 1.1,
+  // the "Abutment and fillet dimensions" columns of the 2Z row (the body is
+  // drawn shielded): d_a min, d_a max, D_a max, r_a max.
+  struct Want {
+    const char* designation;
+    double daMin, daMax, DaMax, raMax;
+    const char* variant;
+  };
+  const Want wants[] = {
+      {"6005", 28.2, 31.9, 43.8, 0.6, "2Z"},
+      {"6002", 17, 20.4, 30, 0.3, "2Z"},
+      {"608", 10, 12, 20, 0.3, "2Z"},
+      {"609", 11, 14.3, 22, 0.3, "2Z"},
+      {"6200", 14.2, 16.9, 25.8, 0.6, "2Z"},
+      {"6306", 37, 44.5, 65, 1.0, "2Z"},
+      // No 2Z listed: the sealed 2RS1 row.
+      {"61804", 22, 23.6, 30, 0.3, "2RS1"},
+  };
+  for (const Want& w : wants) {
+    INFO(w.designation);
+    const parts::BearingAbutment* a = parts::AbutmentOf(w.designation);
+    REQUIRE(a != nullptr);
+    CHECK(a->daMin == w.daMin);
+    CHECK(a->daMax == w.daMax);
+    CHECK(a->DaMax == w.DaMax);
+    CHECK(a->raMax == w.raMax);
+    CHECK(std::string(a->variant) == w.variant);
+  }
+  // A limit SKF does not print is absent, not invented: no capped 618/4, so
+  // no d_a max; and no row at all for the ISO 15 sizes SKF does not list.
+  const parts::BearingAbutment* small = parts::AbutmentOf("618/4");
+  REQUIRE(small != nullptr);
+  CHECK_FALSE(parts::BearingAbutment::Has(small->daMax));
+  CHECK(small->variant == nullptr);
+  CHECK(small->daMin == 4.6);
+  for (const char* none : {"618/3", "619/3", "605", "606"}) {
+    INFO(none);
+    CHECK(parts::FindBearing(none) != nullptr);
+    CHECK(parts::AbutmentOf(none) == nullptr);
+  }
+  // Every carried row is a designation of the ISO 15 table, and its limits
+  // lie between the rings: the shaft shoulder above the bore, the housing's
+  // below the outside, a fillet no larger than the chamfer it clears.
+  int rows = 0;
+  for (const parts::BearingRow& r : parts::AllBearings()) {
+    const parts::BearingAbutment* a = parts::AbutmentOf(r.designation);
+    if (a == nullptr)
+      continue;
+    INFO(r.designation);
+    rows++;
+    CHECK(a->daMin > r.d);
+    CHECK(a->DaMax < r.D);
+    if (parts::BearingAbutment::Has(a->daMax))
+      CHECK(a->daMax >= a->daMin);
+    CHECK(a->raMax <= r.rMin + 1e-9);
+  }
+  CHECK(rows == static_cast<int>(parts::AllBearings().size()) - 4);
+}
+
 TEST_CASE("An unknown bearing is refused naming what is carried",
           "[parts][bearing]") {
   std::string why;
@@ -249,9 +309,10 @@ struct Rig {
 };
 
 // A stepped shaft: a Ø20 x 10 collar at z 0..10 and a Ø10 x 40 journal on
-// it, optionally with a fillet of `fillet` where they meet. Placed once in
-// an assembly "Rig", which is left active.
-void BuildRig(Rig& rig, double fillet = 0.0) {
+// it (other radii when given), optionally with a fillet of `fillet` where
+// they meet. Placed once in an assembly "Rig", which is left active.
+void BuildRig(Rig& rig, double fillet = 0.0, double collarRadius = 10.0,
+              double journalRadius = 5.0) {
   ui::AppState& state = rig.state;
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
@@ -260,9 +321,10 @@ void BuildRig(Rig& rig, double fillet = 0.0) {
   ui::SetActivePart(state, rig.shaftTab);
   Document& doc = *state.document;
   doc.AddFeature(std::make_unique<CylinderFeature>(
-      "Collar", glm::dvec3(0, 0, 0), glm::dvec3(0, 0, 1), 10.0, 10.0));
+      "Collar", glm::dvec3(0, 0, 0), glm::dvec3(0, 0, 1), collarRadius, 10.0));
   doc.AddFeature(std::make_unique<CylinderFeature>(
-      "Journal", glm::dvec3(0, 0, 10), glm::dvec3(0, 0, 1), 5.0, 40.0));
+      "Journal", glm::dvec3(0, 0, 10), glm::dvec3(0, 0, 1), journalRadius,
+      40.0));
   doc.AddFeature(std::make_unique<BooleanFeature>(
       "Join", doc.GetFeature(0)->GetId(), doc.GetFeature(1)->GetId(),
       BooleanOp::Union));
@@ -272,7 +334,7 @@ void BuildRig(Rig& rig, double fillet = 0.0) {
     for (const auto& [index, mapped] : body.elementMap.edgeNames) {
       const auto edge = Measure::DescribeEdgeAt(body, index);
       if (edge && edge->kind == "circle" &&
-          std::abs(edge->radius - 5.0) < 1e-6 &&
+          std::abs(edge->radius - journalRadius) < 1e-6 &&
           std::abs(edge->midpoint.z - 10.0) < 1e-6)
         return ElementRef{body.createdBy, mapped};
     }
@@ -289,7 +351,8 @@ void BuildRig(Rig& rig, double fillet = 0.0) {
   rig.shaftFeature = body.createdBy;
   for (const auto& [index, mapped] : body.elementMap.names) {
     const auto face = Measure::DescribeFaceAt(body, index);
-    if (face && face->kind == "cylinder" && std::abs(face->radius - 5.0) < 1e-6)
+    if (face && face->kind == "cylinder" &&
+        std::abs(face->radius - journalRadius) < 1e-6)
       rig.journal = ElementRef{body.createdBy, mapped};
   }
   REQUIRE(rig.journal.IsSet());
@@ -505,8 +568,9 @@ TEST_CASE("check_fits reads a bearing seat with the ring's own band",
 TEST_CASE("check_seat reads a placed bearing and the seat it is on",
           "[actions][parts][bearing]") {
   SECTION("A square shoulder") {
+    // Ø16: inside SKF's d_a 14.2 to 16.9 for a 6200-2Z.
     Rig rig;
-    BuildRig(rig);
+    BuildRig(rig, 0.0, /*collarRadius=*/8.0);
     ui::AppState& state = rig.state;
     ui::BearingRequest place;
     place.designation = "6200";
@@ -521,7 +585,7 @@ TEST_CASE("check_seat reads a placed bearing and the seat it is on",
     REQUIRE(r.at("seats").size() == 1);
     CHECK(r.at("seats")[0].at("ring") == "inner");
     CHECK_THAT(r.at("seats")[0].at("shoulder_diameter").get<double>(),
-               WithinAbs(20.0, 1e-6));
+               WithinAbs(16.0, 1e-6));
     const auto status = [&](const std::string& what) {
       for (const auto& c : r.at("checks"))
         if (c.at("characteristic") == what)
@@ -531,8 +595,14 @@ TEST_CASE("check_seat reads a placed bearing and the seat it is on",
     CHECK(status("shaft_diameter") == "pass");
     CHECK(status("inner_ring_seated") == "pass");
     CHECK(status("inner_fillet_radius") == "pass");
-    // How far a shoulder may reach is not ISO 15's to say.
-    CHECK(status("inner_shoulder_diameter") == "unverified");
+    // How far a shoulder may reach is not ISO 15's to say; SKF's abutment
+    // table says it.
+    CHECK(status("inner_shoulder_diameter") == "pass");
+    CHECK(r.at("abutment").at("d_a_min") == 14.2);
+    CHECK(r.at("abutment").at("d_a_max") == 16.9);
+    CHECK(r.at("abutment").at("variant") == "2Z");
+    CHECK_THAT(r.at("abutment").at("source").get<std::string>(),
+               ContainsSubstring("17000"));
     // And the outer ring is in no housing yet: never a pass.
     CHECK(status("housing_diameter") == "unverified");
     CHECK(r.at("status") == "unverified");
@@ -547,12 +617,12 @@ TEST_CASE("check_seat reads a placed bearing and the seat it is on",
     const catalog::Json entry = catalog::Preview(
         "designation,bore_diameter,outer_diameter,width,shaft_min,shaft_max,"
         "shoulder_min,shoulder_max,fillet_radius_max\n"
-        "6200,10,30,9,9.99,10.01,14,18,0.6\n",
+        "6200,10,30,9,9.99,10.01,12,15,0.6\n",
         "csv", options);
     const nlohmann::json withCatalog =
         ui::CheckSeat(state, fit.occurrence, &entry, "");
     INFO(withCatalog.dump(2));
-    // The Ø20 shoulder is past the supplier's 18 mm maximum.
+    // The Ø16 shoulder is past this supplier's 15 mm maximum.
     CHECK(withCatalog.at("catalog").at("status") == "fail");
     CHECK(withCatalog.at("status") == "fail");
 
@@ -585,9 +655,71 @@ TEST_CASE("check_seat reads a placed bearing and the seat it is on",
         found = true;
         CHECK(c.at("status") == "fail");
         CHECK_THAT(c.at("observed").get<double>(), WithinAbs(1.0, 1e-6));
+        // Judged against the supplier's r_a max, not the ring's chamfer.
+        CHECK(c.at("limit") == "r_a max");
+        CHECK(c.at("maximum") == 0.6);
       }
     CHECK(found);
     CHECK(r.at("status") == "fail");
+  }
+  // SKF's abutment limits for a 6200-2Z: d_a 14.2 to 16.9 (PUB BU/P1 17000
+  // EN, table 1.1). Each shoulder reaches past the ring's chamfer (Ø11.2),
+  // so it is the supplier's limit that judges it, and is named.
+  const auto shoulder = [](double collarRadius) {
+    Rig rig;
+    BuildRig(rig, 0.0, collarRadius);
+    ui::BearingRequest place;
+    place.designation = "6200";
+    const ui::BearingFit fit = ui::FitBearing(
+        rig.state, ui::RimPick{rig.shaftOcc, rig.journal}, place);
+    REQUIRE(fit.ok);
+    const nlohmann::json r =
+        ui::CheckSeat(rig.state, fit.occurrence, nullptr, "");
+    for (const auto& c : r.at("checks"))
+      if (c.at("characteristic") == "inner_shoulder_diameter")
+        return c;
+    return nlohmann::json();
+  };
+  SECTION("A shaft shoulder below d_a min leaves the ring unsupported") {
+    const nlohmann::json c = shoulder(6.5); // Ø13
+    INFO(c.dump(2));
+    CHECK(c.at("status") == "fail");
+    CHECK(c.at("limit") == "d_a min");
+    CHECK(c.at("minimum") == 14.2);
+    CHECK_THAT(c.at("reason").get<std::string>(), ContainsSubstring("too low"));
+  }
+  SECTION("A shaft shoulder above d_a max reaches the shield") {
+    const nlohmann::json c = shoulder(10.0); // Ø20
+    INFO(c.dump(2));
+    CHECK(c.at("status") == "fail");
+    CHECK(c.at("limit") == "d_a max");
+    CHECK(c.at("maximum") == 16.9);
+    CHECK(c.at("variant") == "6200-2Z");
+    CHECK_THAT(c.at("reason").get<std::string>(),
+               ContainsSubstring("too high"));
+  }
+  SECTION("A bearing the catalogue does not list stays unverified") {
+    // ISO 15 has a 606 (6x17x6); SKF's catalogue lists none.
+    Rig rig;
+    BuildRig(rig, 0.0, /*collarRadius=*/5.0, /*journalRadius=*/3.0);
+    ui::BearingRequest place;
+    place.designation = "606";
+    const ui::BearingFit fit = ui::FitBearing(
+        rig.state, ui::RimPick{rig.shaftOcc, rig.journal}, place);
+    REQUIRE(fit.ok);
+    const nlohmann::json r =
+        ui::CheckSeat(rig.state, fit.occurrence, nullptr, "");
+    INFO(r.dump(2));
+    CHECK(r.at("abutment").is_null());
+    bool found = false;
+    for (const auto& c : r.at("checks"))
+      if (c.at("characteristic") == "inner_shoulder_diameter") {
+        found = true;
+        CHECK(c.at("status") == "unverified");
+        CHECK_THAT(c.at("reason").get<std::string>(),
+                   ContainsSubstring("lists no 606"));
+      }
+    CHECK(found);
   }
   SECTION("Not a bearing") {
     Rig rig;
@@ -663,7 +795,32 @@ TEST_CASE("A bearing goes in a housing bore by its outside",
       CHECK(c.at("status") == "pass");
     if (c.at("characteristic") == "outer_ring_seated")
       CHECK(c.at("status") == "pass");
+    // A Ø20 step is inside SKF's D_a max of 25.8 for a 6200-2Z.
+    if (c.at("characteristic") == "outer_shoulder_diameter")
+      CHECK(c.at("status") == "pass");
   }
+
+  // Opened to Ø27 under the ring, the step is past D_a max: the outer
+  // ring's side face is left unsupported.
+  Document* housingDoc = state.parts[tab].doc.get();
+  REQUIRE(housingDoc != nullptr);
+  auto* through = dynamic_cast<CylinderFeature*>(housingDoc->GetFeature(1));
+  REQUIRE(through != nullptr);
+  through->radius = 13.5;
+  REQUIRE(housingDoc->Regenerate());
+  const nlohmann::json wide = ui::CheckSeat(state, fit.occurrence, nullptr, "");
+  INFO(wide.dump(2));
+  bool judged = false;
+  for (const auto& c : wide.at("checks"))
+    if (c.at("characteristic") == "outer_shoulder_diameter") {
+      judged = true;
+      CHECK(c.at("status") == "fail");
+      CHECK(c.at("limit") == "D_a max");
+      CHECK(c.at("maximum") == 25.8);
+      CHECK_THAT(c.at("observed").get<double>(), WithinAbs(27.0, 1e-6));
+    }
+  CHECK(judged);
+  CHECK(wide.at("status") == "fail");
 }
 
 // A seat on a printed part is modelled at its size plus the process

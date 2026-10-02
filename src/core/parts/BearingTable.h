@@ -13,11 +13,12 @@
 // naming what it does carry, never interpolated. A bearing at a size nobody
 // makes is plausible and cannot be bought.
 //
-// What is NOT here, on purpose: load ratings, limiting speeds, abutment
-// (shoulder) dimensions. ISO 15 does not state them — they are each
-// supplier's, and they differ — so they come from an imported engineering
-// catalog (docs/parts/catalogs.md), which `check_seat` reads alongside a
-// placed bearing.
+// Abutment (shoulder) limits are not ISO 15's either — they are a
+// supplier's, and suppliers differ — so they are carried apart, from ONE
+// cited catalogue (BearingAbutment below), and `check_seat` judges a
+// shoulder against them without an import. Load ratings and limiting speeds
+// are not here: they come from an imported engineering catalog
+// (docs/parts/catalogs.md).
 namespace parts {
 
 struct BearingRow {
@@ -72,5 +73,32 @@ struct BearingBand {
 };
 [[nodiscard]] std::optional<BearingBand> BoreTolerance(double d);
 [[nodiscard]] std::optional<BearingBand> OutsideTolerance(double D);
+
+// A supplier's abutment and fillet dimensions for one designation
+// (docs/parts/README.md#abutment-limits): how far a shaft shoulder must and
+// may reach (d_a min, d_a max), how far a housing shoulder may reach inward
+// before it stops supporting the ring (D_a max), and the largest fillet into
+// either (r_a max). From the catalogue AbutmentSource() names. A limit it
+// does not publish is NaN (`Has`), never invented: SKF prints d_a max only
+// for a capped bearing, and no D_a min for a deep-groove ball bearing.
+struct BearingAbutment {
+  const char* designation;
+  double daMin; // shaft shoulder: below it the ring's side is unsupported
+  double daMax; // shaft shoulder: above it the shoulder reaches the shield
+  // The capped variant every limit is read from ("2Z", "2RS1") — the body is
+  // drawn shielded — or null when SKF lists none and the open row (which
+  // has no d_a max) is used.
+  const char* variant;
+  double DaMax; // housing shoulder's bore: above it the ring is unsupported
+  double raMax; // the largest fillet radius into either shoulder
+  [[nodiscard]] static bool Has(double v) { return v == v; } // not NaN
+};
+
+// The row for a designation, or null when the catalogue lists no such
+// bearing (618/3, 619/3, 605 and 606 are ISO 15 sizes SKF does not make).
+[[nodiscard]] const BearingAbutment* AbutmentOf(const std::string& designation);
+// The catalogue and edition the abutment rows were typed from — what a check
+// names as the source of a limit.
+[[nodiscard]] const char* AbutmentSource();
 
 } // namespace parts

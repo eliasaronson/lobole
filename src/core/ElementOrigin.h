@@ -32,7 +32,13 @@ enum class ElementRole {
   InnerSide, // an inner-ring side face (a shaft shoulder bears on it)
   OuterSide, // an outer-ring side face (a housing shoulder bears on it)
   Shield,    // a recessed shield face
-  Unknown,   // a seed this decoder does not know
+  // A generated retaining ring's flat side (its bore and outside are Bore
+  // and Outside), and the groove one sits in
+  // (docs/parts/README.md#retaining-rings).
+  RingSide,
+  GrooveFloor,
+  GrooveFlank,
+  Unknown, // a seed this decoder does not know
 };
 
 // "start_cap", "end_cap", "side", ... -- the spelling the RPC uses.
