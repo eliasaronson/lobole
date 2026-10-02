@@ -156,7 +156,9 @@ list kept elsewhere drifts.
   a mechanism before it earns that label: the ones that looked like it here
   were real bugs (a version number used as a document identity, a port race,
   a heap corruption, and femgpu "TopologyOptimize…": an unconverged fp32
-  solve).
+  solve). A GUI test failing only while others build: replay it with the
+  runner's `--slow-frames 160` / `--slow-jobs 3000`, which make it fail on a
+  quiet machine (docs/ui/testing.md#wait-on-the-condition-not-a-frame-count).
   `tests/smoke_app.py` is the one launcher for smokes, and keeps the app's log.
 - **An OpenCASCADE boolean MODIFIES its arguments** (it writes the p-curves it
   computes onto their edges). Two threads running booleans on pairs that share

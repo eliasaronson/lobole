@@ -806,7 +806,9 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(glm::length(fitted) > 100.0f); // it really is off the origin
 
     ctx->MenuClick("View/Standard Views/Front");
-    ctx->Yield(180); // AlignToFace animates
+    // AlignToFace animates, on the wall clock: wait for it to land.
+    WaitFor(ctx, "the view to land",
+            [] { return !s_App->camera->IsAnimating(); });
     ctx->LogInfo("target after Front: %.1f %.1f %.1f",
                  s_App->camera->GetTarget().x, s_App->camera->GetTarget().y,
                  s_App->camera->GetTarget().z);
@@ -2207,12 +2209,8 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->renderJob.active && s_App->renderJob.quick);
     IM_CHECK(s_App->renderJob.outlines);
     IM_CHECK_EQ(s_App->renderJob.lineWeight, 2.0f);
-    int frames = 0;
-    while (s_App->renderJob.active && frames < 2000) {
-      ctx->Yield();
-      ++frames;
-    }
-    IM_CHECK(!s_App->renderJob.active);
+    IM_CHECK(WaitFor(ctx, "the still render",
+                     [] { return !s_App->renderJob.active; }));
     IM_CHECK(s_App->renderJob.success);
     IM_CHECK(std::filesystem::exists("render.png"));
     IM_CHECK(std::filesystem::file_size("render.png", ec) > 0);

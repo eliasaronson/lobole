@@ -1,3 +1,4 @@
+#include "app/FramePacer.h" // kCooldownSeconds
 #include "app/guitests/GuiTestsCommon.h"
 #include "ui/DocumentSlots.h"
 #include "ui/Icons.h"
@@ -660,19 +661,32 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     // The cooldown is wall time, so this loop watches the clock, not a frame
     // count — test-mode frames are fast until the pacer slows them.
     s_App->pacerForceEnable = true;
-    const double start = ImGui::GetTime();
-    while (ImGui::GetTime() - start < 1.6 && s_App->pacerIdleFrames == before)
-      ctx->Yield();
-    IM_CHECK(s_App->pacerIdleFrames > before);
+    // (Not ImGui::GetTime(): a suite run counts that in frames.)
+    IM_CHECK(WaitFor(
+        ctx, "the pacer to rest",
+        [&] { return s_App->pacerIdleFrames > before; },
+        app::FramePacer::kCooldownSeconds + 5.0));
 
     // Mouse motion is activity: the pacer returns to full rate and the idle
     // counter freezes for at least the cooldown window.
     ctx->MouseMoveToPos(ImVec2(300.0f, 300.0f));
     ctx->MouseMoveToPos(ImVec2(420.0f, 340.0f));
+    const auto woke = std::chrono::steady_clock::now();
     ctx->Yield(2);
     const uint64_t afterWake = s_App->pacerIdleFrames;
-    ctx->Yield(5);
-    IM_CHECK_EQ(s_App->pacerIdleFrames, afterWake);
+    // Frames INSIDE the cooldown, which is wall time: five frames of 160 ms
+    // on a loaded machine outlast it, and the pacer is right to rest again.
+    // Asked with 0.3 s to spare, since the pacer saw the wake a frame or two
+    // before this thread could note the time.
+    const auto inside =
+        std::chrono::duration<double>(app::FramePacer::kCooldownSeconds - 0.3);
+    for (int i = 0; i < 5 && std::chrono::steady_clock::now() - woke < inside;
+         i++)
+      ctx->Yield();
+    if (std::chrono::steady_clock::now() - woke < inside)
+      IM_CHECK_EQ(s_App->pacerIdleFrames, afterWake);
+    else
+      ctx->LogInfo("frames outlasted the cooldown; nothing to hold");
 
     s_App->pacerForceEnable = false;
     ctx->Yield();

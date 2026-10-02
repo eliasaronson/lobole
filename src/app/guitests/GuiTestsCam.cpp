@@ -475,7 +475,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
                               glm::vec3(0, 1, 0));
     ctx->Yield(2);
     ToolbarClick(ctx, "###tb_job_spindle"); // the job bar's own button
-    ctx->Yield(150); // AlignToFace animates; wait for it to land
+    // AlignToFace animates; wait for it to land.
+    WaitFor(ctx, "the view to land",
+            [] { return !s_App->camera->IsAnimating(); });
     glm::vec3 fwd = glm::normalize(s_App->camera->GetForward());
     IM_CHECK(std::abs(fwd.z + 1.0f) < 0.02f); // looking along -Z
     IM_CHECK(std::abs(fwd.x) < 0.02f);
@@ -490,7 +492,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
                               glm::vec3(0, 1, 0));
     ctx->Yield(2);
     ToolbarClick(ctx, "###tb_job_spindle");
-    ctx->Yield(150);
+    WaitFor(ctx, "the view to land",
+            [] { return !s_App->camera->IsAnimating(); });
     fwd = glm::normalize(s_App->camera->GetForward());
     // A job tab draws SETUP space, so the spindle is world +Z whatever the
     // part is clamped like — there is no frame left to come back through.
@@ -1216,12 +1219,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     double worstMs = 0.0;
     const auto t0 = std::chrono::steady_clock::now();
     while (ui::BackgroundJobRunning(*s_App, "cam")) {
-      const auto f0 = std::chrono::steady_clock::now();
+      // What the frame COST, not how long it waited for a core
+      // (MainThreadCpuMs): a loaded machine stretches every frame.
+      const double f0 = MainThreadCpuMs();
       ctx->Yield();
-      const double ms = std::chrono::duration<double, std::milli>(
-                            std::chrono::steady_clock::now() - f0)
-                            .count();
-      worstMs = std::max(worstMs, ms);
+      worstMs = std::max(worstMs, MainThreadCpuMs() - f0);
       framesWhileRunning++;
       if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(60))
         break;
@@ -1415,11 +1417,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       if (const ui::CamPassProgress p = ui::CamPassProgressOf(*s_App);
           p.running && (p.total == 0 || p.done >= p.total))
         countsSane = false;
-      const auto f0 = std::chrono::steady_clock::now();
+      const double f0 = MainThreadCpuMs(); // the frame's cost, not its wait
       ctx->Yield();
-      worstMs = std::max(worstMs, std::chrono::duration<double, std::milli>(
-                                      std::chrono::steady_clock::now() - f0)
-                                      .count());
+      worstMs = std::max(worstMs, MainThreadCpuMs() - f0);
       frames++;
       if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(120))
         break;
@@ -1624,21 +1624,29 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // as a tube, which is the cost the plan named as the one to measure.
     s_App->camPlaying = true;
     s_App->camPlaybackSpeed = 20.0f;
-    double worstMs = 0.0;
+    double worstMs = 0.0, totalMs = 0.0;
     int frames = 0;
     const auto t0 = std::chrono::steady_clock::now();
     while (std::chrono::steady_clock::now() - t0 < std::chrono::seconds(3) &&
            s_App->camPlaying) {
-      const auto f0 = std::chrono::steady_clock::now();
+      const double f0 = MainThreadCpuMs();
       ctx->Yield();
-      worstMs = std::max(worstMs, std::chrono::duration<double, std::milli>(
-                                      std::chrono::steady_clock::now() - f0)
-                                      .count());
+      const double cost = MainThreadCpuMs() - f0;
+      worstMs = std::max(worstMs, cost);
+      totalMs += cost;
       frames++;
     }
     s_App->camPlaying = false;
-    ctx->LogInfo("%d frames playing, worst %.1f ms", frames, worstMs);
-    IM_CHECK(frames >= 10);
+    ctx->LogInfo("%d frames playing, %.1f ms of main-thread CPU each, worst "
+                 "%.1f ms",
+                 frames, frames > 0 ? totalMs / frames : 0.0, worstMs);
+    // Interactive: a frame of playback costs under 300 ms of the main thread
+    // on average, so more than three a second on a core of its own. This
+    // counted frames in 3 s of WALL time (>= 10, the same rate), which a
+    // loaded machine fails with frames that cost nothing and waited for a
+    // core.
+    IM_CHECK(frames >= 2);
+    IM_CHECK(totalMs / frames < 300.0);
 
     // And it all goes back: the part stands still once the playback ends.
     ui::EndCamPlayback(*s_App);

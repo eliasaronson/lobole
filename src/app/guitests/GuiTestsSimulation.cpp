@@ -780,12 +780,14 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
 #ifdef HAVE_NETGEN
     // Run from the window; the result lands on the assembly and is fresh.
     ctx->ItemClick("//Simulation###ToolWindow/###study_run");
-    for (int i = 0; i < 6000 && !s_App->assembly->StudyResults(studyId); ++i) {
-      const fem::Study* cur = s_App->assembly->FindStudy(studyId);
-      if (cur && !cur->error.empty())
-        break;
-      ctx->Yield();
-    }
+    WaitFor(
+        ctx, "the assembly study's result",
+        [&] {
+          const fem::Study* now = s_App->assembly->FindStudy(studyId);
+          return s_App->assembly->StudyResults(studyId) != nullptr ||
+                 (now != nullptr && !now->error.empty());
+        },
+        120.0);
     const fem::Study* cur = s_App->assembly->FindStudy(studyId);
     IM_CHECK(cur != nullptr);
     if (!cur->error.empty())

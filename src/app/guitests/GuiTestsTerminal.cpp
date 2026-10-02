@@ -6,6 +6,33 @@
 // shard partition from the binary's own --gui-test-list and asserts every
 // listed test ran, so a case renamed or lost in the split fails the runner
 // loudly instead of silently disappearing.
+
+#ifdef HAVE_TERMINAL
+namespace {
+// Whether rows [first, last] of the active tab's screen show `needle` (last
+// < 0: to the bottom).
+bool ScreenShows(const char* needle, int first = 0, int last = -1) {
+  const term::Screen* screen = ui::TerminalScreenOf(*s_App);
+  if (screen == nullptr)
+    return false;
+  const int end = last < 0 ? screen->Rows() - 1 : last;
+  for (int r = first; r <= end && r < screen->Rows(); r++)
+    if (screen->Line(r).find(needle) != std::string::npos)
+      return true;
+  return false;
+}
+
+// A child process writes when the scheduler lets it: waited for by what it
+// wrote, against the clock, not a count of frames.
+bool WaitForOutput(ImGuiTestContext* ctx, const char* needle, int first = 0,
+                   int last = -1) {
+  const std::string what = std::string("'") + needle + "' on the terminal";
+  return WaitFor(ctx, what.c_str(),
+                 [&] { return ScreenShows(needle, first, last); });
+}
+} // namespace
+#endif
+
 void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
   (void)t;
@@ -63,16 +90,14 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
     // DockNode->SelectedTabId. None makes the body submit. The remaining
     // suspect is which node the window lands in after a rebuild, not when.
     ImGuiWindow* win = nullptr;
-    for (int i = 0; i < 90; i++) {
-      ctx->Yield();
-      // NoError, or the first miss poisons the context and the loop can
-      // never succeed however long it waits (see the note above).
+    WaitFor(ctx, "the terminal docked with its shell running", [&] {
+      // NoError, or the first miss poisons the context and the wait can
+      // never succeed however long it lasts (see the note above).
       win = ctx->WindowInfo("//Terminal###TerminalPanel",
                             ImGuiTestOpFlags_NoError)
                 .Window;
-      if (win != nullptr && win->DockId != 0 && ui::TerminalRunning(*s_App))
-        break;
-    }
+      return win != nullptr && win->DockId != 0 && ui::TerminalRunning(*s_App);
+    });
     IM_CHECK(win != nullptr);
     IM_CHECK(win->DockId != 0); // docked, not floating over the model tree
     // And it opened a shell by itself: the chooser it used to show was a
@@ -153,14 +178,7 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
                              {"-c", "printf 'hello-from-panel'; sleep 30"});
     // Frames are what pump the session, so this is also the proof that the
     // panel drains its PTY while drawing.
-    bool seen = false;
-    for (int i = 0; i < 200 && !seen; i++) {
-      ctx->Yield();
-      const term::Screen* screen = ui::TerminalScreenOf(*s_App);
-      if (screen != nullptr)
-        seen = screen->Line(0).find("hello-from-panel") != std::string::npos;
-    }
-    IM_CHECK(seen);
+    IM_CHECK(WaitForOutput(ctx, "hello-from-panel", 0, 0));
     IM_CHECK(ui::TerminalRunning(*s_App));
 
     // Turning the preference off ends the session — a process kept alive
@@ -178,14 +196,7 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
 
     ui::StartTerminalCommand(*s_App, "/bin/sh",
                              {"-c", "printf 'copyme-token\\n'; sleep 30"});
-    bool seen = false;
-    for (int i = 0; i < 200 && !seen; i++) {
-      ctx->Yield();
-      const term::Screen* screen = ui::TerminalScreenOf(*s_App);
-      if (screen != nullptr)
-        seen = screen->Line(0).find("copyme-token") != std::string::npos;
-    }
-    IM_CHECK(seen);
+    IM_CHECK(WaitForOutput(ctx, "copyme-token", 0, 0));
 
     // Drag across the first line, from its start to past the token.
     ImGuiWindow* win = ctx->WindowInfo("//Terminal###TerminalPanel").Window;
@@ -256,16 +267,7 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
     // Typing reaches the process...
     ctx->KeyChars("hi");
     ctx->KeyPress(ImGuiKey_Enter);
-    bool echoed = false;
-    for (int i = 0; i < 200 && !echoed; i++) {
-      ctx->Yield();
-      const term::Screen* screen = ui::TerminalScreenOf(*s_App);
-      if (screen == nullptr)
-        continue;
-      for (int r = 0; r < screen->Rows() && !echoed; r++)
-        echoed = screen->Line(r).find("got:hi") != std::string::npos;
-    }
-    IM_CHECK(echoed);
+    IM_CHECK(WaitForOutput(ctx, "got:hi"));
 
     // ...and Ctrl+Z here suspends a job rather than undoing a feature. This
     // is the whole reason the gate exists: one chord, two meanings, and the
@@ -303,14 +305,7 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
     // `cat` echoes whatever it is given, so the paste is visible as output.
     ui::StartTerminalCommand(*s_App, "/bin/sh",
                              {"-c", "printf 'pasteme\n'; cat"});
-    bool seen = false;
-    for (int i = 0; i < 200 && !seen; i++) {
-      ctx->Yield();
-      const term::Screen* screen = ui::TerminalScreenOf(*s_App);
-      if (screen != nullptr)
-        seen = screen->Line(0).find("pasteme") != std::string::npos;
-    }
-    IM_CHECK(seen);
+    IM_CHECK(WaitForOutput(ctx, "pasteme", 0, 0));
 
     ImGuiTestItemInfo grid =
         ctx->ItemInfo("//Terminal###TerminalPanel/###term_grid");
@@ -337,16 +332,7 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
 
     ctx->MouseClick(ImGuiMouseButton_Middle);
     ctx->KeyPress(ImGuiKey_Enter); // so `cat` flushes the line back
-    bool echoed = false;
-    for (int i = 0; i < 200 && !echoed; i++) {
-      ctx->Yield();
-      const term::Screen* sc = ui::TerminalScreenOf(*s_App);
-      if (sc == nullptr)
-        continue;
-      for (int r = 1; r < sc->Rows() && !echoed; r++)
-        echoed = sc->Line(r).find("pasteme") != std::string::npos;
-    }
-    IM_CHECK(echoed);
+    IM_CHECK(WaitForOutput(ctx, "pasteme", 1));
     // ...and it was the SELECTION, not the clipboard.
     bool wrong = false;
     const term::Screen* sc = ui::TerminalScreenOf(*s_App);
@@ -394,12 +380,8 @@ void RegisterTerminalGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(ui::TerminalActiveTab(*s_App), 0);
     IM_CHECK(ui::TerminalTabScreen(*s_App, 1) != nullptr);
 
-    bool finished = false;
-    for (int i = 0; i < 600 && !finished; i++) {
-      ctx->Yield();
-      finished = !ui::TerminalTabRunning(*s_App, 1); // ran to completion
-    }
-    IM_CHECK(finished);
+    IM_CHECK(WaitFor(ctx, "the background tab's command to finish",
+                     [] { return !ui::TerminalTabRunning(*s_App, 1); }));
 
     // ...and its output really landed, rather than the child having died.
     const term::Screen* bg = ui::TerminalTabScreen(*s_App, 1);

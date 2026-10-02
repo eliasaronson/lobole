@@ -36,6 +36,7 @@ there is no compositor, occlusion or screen lock to throttle presentation.
 | `--in-order` | declared order, no shuffle |
 | `--record-times` | refresh `tools/gui-test-times.txt`, which balances the shards |
 | `-L <label>` | all ctest tests with that label |
+| `--slow-frames MS`, `--slow-jobs MS` | a loaded machine, simulated ([below](#wait-on-the-condition-not-a-frame-count)) |
 
 - Each shard gets its own `XDG_STATE_HOME` and `XDG_CONFIG_HOME`, so shards
   never share the recent-projects list or `settings.json`, and no run writes
@@ -123,6 +124,52 @@ test ran before, so it appears and disappears with the partition. **Ask with
 `ImGuiTestOpFlags_NoError` whenever "absent" is a legitimate answer.**
 `ItemExists` already does. Isolation cannot fix this one: it is inside one
 test, and running each test in a fresh process would hide it.
+
+## Wait on the condition, not a frame count
+
+A test that gives something asynchronous a fixed number of frames —
+`ctx->Yield(3)` after starting a job, `for (i < 600 && …)` — is a guess at how
+long a worker takes measured in frames, and both halves move under load: the
+worker is starved, and a frame can take 250 ms. Such a test passes alone and
+on a quiet machine and fails, a different one each run, while another agent
+is building.
+
+- **Waiting** is `WaitFor(ctx, "what", [] { return condition; })` from
+  `GuiTestsCommon.h`: a frame at a time until the condition holds, bounded
+  by WALL time (`kWaitSeconds`, under the engine's 300 s watchdog), logging
+  what it waited for when it gives up. `WaitForJobs(ctx, kind)`,
+  `WaitForOpen` and `WaitForStudyResult` are the common ones. A short
+  `Yield(n)` is still right for UI that settles synchronously (a window
+  appearing the frame after a click); never for a worker, a child process
+  or anything off the frame.
+- **Wait for the thing that lands**, not for "some result": a motion study's
+  previous verdict stays up while a new run is in flight, so a test that
+  waits for `MotionResultFor != nullptr` reads the old one.
+- **ImGui's clock counts frames** in a suite run (`ConfigFixedDeltaTime` =
+  1/60 s, `main.cpp`). The engine injects input a frame at a time, but ImGui
+  judges it by the clock: its double-click is two presses within 0.3 s, and
+  the engine's are two frames apart, so with 150 ms frames every
+  `ItemDoubleClick` in the suite was two single clicks and the editor it
+  opens never appeared. Wall time is for what really is wall time (a
+  worker's deadline, the idle pacer's cooldown): `std::chrono::steady_clock`,
+  not `ImGui::GetTime()`.
+- **A bound on what a frame costs** ("no frame ran the pass", "playback
+  stays interactive") reads `MainThreadCpuMs()`, the main thread's CPU
+  clock, not a stopwatch round `Yield()`: under load a frame that computed
+  nothing still takes 250 ms of wall time waiting for a core.
+
+Load reproduces this badly: the burners `tools/with-cpu-load.sh` starts are
+niced (`--contend` unnices them), and the app outruns them. The runner
+reproduces it on a quiet machine instead, deterministically:
+
+| flag | what it simulates |
+|---|---|
+| `--slow-frames MS` | every frame takes at least MS (`--gui-test-min-frame-ms`) |
+| `--slow-jobs MS` | no background job is done sooner than MS after it started (`--gui-test-job-latency-ms`, `ui::SetTestJobLatency`) |
+
+Both come before `-f`, and a failed shard's `reproduce.sh` carries them.
+`--slow-frames 160` and `--slow-jobs 3000` are levels the whole suite
+passes at.
 
 ## Making a widget addressable
 

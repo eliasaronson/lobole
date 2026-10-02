@@ -13,6 +13,7 @@
 // rather than silently disappearing.
 void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   s_App = state;
+  NoteMainThread(); // tests run on the engine's coroutine thread
   // Every job undo guard also compares the job's content while the suite
   // runs, and RunTestWithReset fails a test that edited a job without saying
   // so (ui::SetJobEditAudit).

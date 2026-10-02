@@ -1,6 +1,7 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/AssemblySolve.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/DocumentSlots.h"
 #include "ui/FlexibleActions.h"
 #include "ui/MotionActions.h"
@@ -366,9 +367,11 @@ void RegisterFlexibleGuiTests(ImGuiTestEngine* engine) {
 
     // Preview it: the crank turns through the run, pose by pose.
     ctx->ItemClick("//Motion###ToolWindow/###motion_preview");
-    for (int i = 0; i < 600 && ui::MotionResultFor(*s_App, studyId) == nullptr;
-         i++)
-      ctx->Yield();
+    // The run landed: no job left, not merely some result present.
+    WaitFor(ctx, "the preview's run", [&] {
+      return !ui::BackgroundJobRunning(*s_App, "motion") &&
+             ui::MotionResultFor(*s_App, studyId) != nullptr;
+    });
     const motion::Result* run = ui::MotionResultFor(*s_App, studyId);
     IM_CHECK(run != nullptr);
     IM_CHECK(run->samples.size() > 2);

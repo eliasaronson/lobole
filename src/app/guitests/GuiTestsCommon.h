@@ -68,6 +68,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <functional>
 #include <string>
 #include <unordered_map>
 
@@ -146,6 +147,31 @@ void PrimitiveOnBasePlane(ImGuiTestContext* ctx, const char* tbId,
 
 void BuildCantileverStudy(ImGuiTestContext* ctx, double height);
 bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId);
+
+// --- Waiting for something asynchronous --------------------------------------
+//
+// Wait on the CONDITION, never a frame count
+// (docs/ui/testing.md#wait-on-the-condition-not-a-frame-count). Yields a
+// frame at a time until `done()` holds, bounded by WALL time: a frame count
+// is a guess at how long a worker takes, and someone else's build makes it
+// wrong. Returns whether it held; a timeout is logged as an error naming
+// `what`, so the IM_CHECK the caller puts on the result reads as the cause.
+// Stops early once the test is in error.
+constexpr double kWaitSeconds = 60.0; // under the engine's 300 s watchdog
+bool WaitFor(ImGuiTestContext* ctx, const char* what,
+             const std::function<bool()>& done, double seconds = kWaitSeconds);
+// Every background job of `kind` finished and applied (ui/BackgroundJobs.h).
+bool WaitForJobs(ImGuiTestContext* ctx, const char* kind);
+// No project open in flight, the modal or not (ui/OpenJob.h).
+bool WaitForOpen(ImGuiTestContext* ctx);
+
+// The CPU time the app's MAIN thread has used, in ms. What a frame COST, for
+// a test that bounds it ("no frame ran the pass"): under load a frame's WALL
+// time grows while it waits for a core, and a 250 ms wall bound fails on a
+// frame that computed nothing. Wall time where there is no per-thread clock.
+// NoteMainThread is called once, from the main thread, at registration.
+void NoteMainThread();
+double MainThreadCpuMs();
 
 // --- U10 defaults gate: the tool table and its preconditions ---------------
 enum class Needs {

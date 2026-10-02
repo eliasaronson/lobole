@@ -5,11 +5,20 @@
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/UnfoldFeature.h"
 
+#include "ui/BackgroundJobs.h"
 #include "ui/DocumentSlots.h"
 #include "ui/JobActions.h"
+#include "ui/OpenJob.h"
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h" // SelectFeature (the fixtures)
 #include "ui/ViewActions.h"
+
+#include <chrono>
+
+#if defined(__linux__)
+#include <pthread.h>
+#include <time.h>
+#endif
 
 // Tests run inside the live application and reach it through the AppState.
 ui::AppState* s_App = nullptr;
@@ -383,6 +392,65 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
   IM_CHECK(std::abs(force.magnitude - 100.0) < 1e-9);
 }
 
+bool WaitFor(ImGuiTestContext* ctx, const char* what,
+             const std::function<bool()>& done, double seconds) {
+  const auto t0 = std::chrono::steady_clock::now();
+  int frames = 0;
+  while (!done()) {
+    const double waited =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+            .count();
+    if (ctx->IsError())
+      return false;
+    if (waited > seconds) {
+      IM_ERRORF("waited %.0f s (%d frames) for %s", waited, frames, what);
+      return false;
+    }
+    ctx->Yield();
+    frames++;
+  }
+  return true;
+}
+
+bool WaitForJobs(ImGuiTestContext* ctx, const char* kind) {
+  const std::string what = std::string("the '") + kind + "' jobs";
+  return WaitFor(ctx, what.c_str(),
+                 [kind] { return !ui::BackgroundJobRunning(*s_App, kind); });
+}
+
+#if defined(__linux__)
+namespace {
+pthread_t g_mainThread{};
+bool g_haveMainThread = false;
+} // namespace
+void NoteMainThread() {
+  g_mainThread = pthread_self();
+  g_haveMainThread = true;
+}
+double MainThreadCpuMs() {
+  clockid_t clock{};
+  timespec ts{};
+  if (g_haveMainThread && pthread_getcpuclockid(g_mainThread, &clock) == 0 &&
+      clock_gettime(clock, &ts) == 0)
+    return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
+  return std::chrono::duration<double, std::milli>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+#else
+void NoteMainThread() {}
+double MainThreadCpuMs() {
+  return std::chrono::duration<double, std::milli>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
+}
+#endif
+
+bool WaitForOpen(ImGuiTestContext* ctx) {
+  return WaitFor(ctx, "the project to open",
+                 [] { return !ui::OpenRunning(*s_App); });
+}
+
 // The solve runs on a worker thread now (clicking Run used to block the
 // draw), so pump frames until the result lands. Bounded: a hang must fail
 // the test rather than spin forever.
@@ -397,12 +465,14 @@ void BuildCantileverStudy(ImGuiTestContext* ctx, double height) {
 // reporting it as the engine's 300 s watchdog abort rather than as the
 // missing mesher.
 bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
-  for (int i = 0; i < 6000 && !Doc()->StudyResults(studyId); ++i) {
-    const fem::Study* s = Doc()->FindStudy(studyId);
-    if (s && !s->error.empty())
-      break;
-    ctx->Yield();
-  }
+  WaitFor(
+      ctx, "a study result",
+      [studyId] {
+        const fem::Study* s = Doc()->FindStudy(studyId);
+        return Doc()->StudyResults(studyId) != nullptr ||
+               (s != nullptr && !s->error.empty());
+      },
+      120.0);
   if (Doc()->StudyResults(studyId))
     return true;
   // An IM_CHECK here would return from THIS function and let the test walk on

@@ -299,7 +299,9 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)0); // a fresh document
     ctx->MenuClick("File/Open Recent/###recent0");
-    ctx->Yield(2);
+    // An open is a job: quick ones land at the end of the frame, a loaded
+    // machine's after the modal.
+    IM_CHECK(WaitForOpen(ctx));
     IM_CHECK(Doc()->FeatureCount() > 0); // the box came back
     IM_CHECK_EQ(s_App->projectPath, dir.string());
 
@@ -949,6 +951,10 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     // where it sits. Ids differ between the two runs and are left out.
     const auto sheetState = [&] {
       std::vector<std::string> rows;
+      // No drawing is a failure the size checks report; a null walked into
+      // here was a segfault that took the shard's other tests with it.
+      if (!s_App->drawing)
+        return rows;
       for (const DrawingView& v : s_App->drawing->GetViews()) {
         char buf[160];
         snprintf(buf, sizeof buf, "%s scale=%.4f at (%.3f, %.3f)",
@@ -1468,13 +1474,10 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     // Wait for the state the assertions need rather than guessing a frame
     // count — the row list is only read once the panel is actually up, and a
     // fixed Yield(4) passed alone while failing in the full suite.
-    for (int i = 0; i < 90; i++) {
-      if (panel->DockNode->SelectedTabId == panel->TabId &&
-          !s_App->historyLog.empty())
-        break;
-      ctx->Yield();
-    }
-    IM_CHECK(!s_App->historyLog.empty());
+    IM_CHECK(WaitFor(ctx, "the History panel up with its log", [&] {
+      return panel->DockNode->SelectedTabId == panel->TabId &&
+             !s_App->historyLog.empty();
+    }));
     const float rightEdge = panel->InnerRect.Max.x;
     // 1 px of slack: rounding, not a missing button.
     IM_CHECK_LE(ctx->ItemInfo("//###History/###hist_name_go").RectFull.Max.x,
@@ -1710,13 +1713,10 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::OpenRunning(*s_App)); // a job, not a call
     const char* cancel = "//Opening project###open_project_modal/"
                          "Cancel###open_cancel";
-    for (int i = 0; i < 200 && !ctx->ItemExists(cancel); i++)
-      ctx->Yield();
-    IM_CHECK(ctx->ItemExists(cancel));
+    IM_CHECK(WaitFor(ctx, "the open modal's Cancel",
+                     [&] { return ctx->ItemExists(cancel); }));
     ctx->ItemClick(cancel);
-    for (int i = 0; i < 2000 && ui::OpenRunning(*s_App); i++)
-      ctx->Yield();
-    IM_CHECK(!ui::OpenRunning(*s_App));
+    IM_CHECK(WaitForOpen(ctx));
     IM_CHECK_EQ(s_App->projectPath, one.string());
     IM_CHECK_EQ(s_App->parts.size(), tabsBefore);
     IM_CHECK(s_App->openError.empty()); // a cancel is not a failure
@@ -1726,12 +1726,11 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     slow.delayEachMs = 200;
     IM_CHECK(ui::StartOpenProject(*s_App, two.string(), &err, slow));
     bool sawModal = false;
-    for (int i = 0; i < 2000 && ui::OpenRunning(*s_App); i++) {
-      ctx->Yield();
+    IM_CHECK(WaitFor(ctx, "the slow open", [&] {
       sawModal = sawModal || ctx->ItemExists(cancel);
-    }
+      return !ui::OpenRunning(*s_App);
+    }));
     IM_CHECK(sawModal);
-    IM_CHECK(!ui::OpenRunning(*s_App));
     IM_CHECK_EQ(s_App->projectPath, two.string());
     IM_CHECK_EQ(s_App->parts.size(), (size_t)2);
     IM_CHECK_EQ(s_App->openRebuiltParts,
@@ -1745,8 +1744,13 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
 
     // And a project that loads quickly opens at the end of the frame that
     // asked, with no modal at all -- the way every baked open has always
-    // looked.
-    IM_CHECK(ui::StartOpenProject(*s_App, one.string(), &err));
+    // looked. "Quickly" is the quiet wait's to judge, and a loaded machine
+    // can take longer than the default 300 ms over a read that is instant on
+    // a quiet one -- when the modal is right. So the quiet wait here is one
+    // no machine misses: what is asserted is what happens INSIDE it.
+    ui::OpenJobOptions quick;
+    quick.quietWaitMs = 30000;
+    IM_CHECK(ui::StartOpenProject(*s_App, one.string(), &err, quick));
     // (Not ItemExists: the engine remembers the Cancel button from the
     // modals above after they close. Whether any popup is open is the state.)
     IM_CHECK(!ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId));
