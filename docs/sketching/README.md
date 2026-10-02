@@ -284,6 +284,18 @@ swaps the axes and turns a quarter when the third click is the longer); a
 **circle-shaped** one (rMajor = rMinor) has no focus direction, so it stays
 rigid — its centre free, every other point riding it.
 
+That last bit has to be the same wherever the sketch solves, because a
+project's parts load on worker threads and the chain hash reads it.
+FreeCAD's PlaneGCS ordered a subsystem's unknowns, and the two-priority
+solve's, by their **addresses**, and which of the solver's parameter blocks
+sits lower is the heap's choice — a worker's arena chose differently from
+the main one, so a held ellipse solved to a different ulp about one load in
+five. The vendored copy keeps the declared order (`SubSystem::initialize`,
+`System::solve(subsysA, subsysB)`); `[parallel]` in
+`tests/test_sketch_curves.cpp` solves with the heap's small blocks handed
+out in shuffled orders, and on eight threads at once, and requires the same
+bits.
+
 An **elliptical arc** is a `GCS::ArcOfEllipse` with real start/end points
 (1/2) and its end parameters as unknowns. PlaneGCS measures the parameter
 from the major axis, as the model stores `startParam`/`endParam`, so they
@@ -634,8 +646,8 @@ link; `modify_feature` with an edited sketch JSON covers them.
 - `tests/test_sketch_curves.cpp` `[ellipse]` `[spline]` `[refusal]` —
   ellipses, elliptical arcs and splines solved: DOF, radii by axis-end
   distance through an extrude and a revolve, tangency checked as directions
-  at the joint, points on the curves, drags, bit-identical re-solves, and
-  the refusals.
+  at the joint, points on the curves, drags, bit-identical re-solves (also
+  across heap layouts and threads, `[parallel]`), and the refusals.
 
 ## Not built
 

@@ -20,7 +20,12 @@ original per-file copyright headers:
 - replaced FreeCAD configuration/console includes with `FreeCADCompat.h`;
 - replaced `SketcherGlobal.h` with the local `SketcherExport.h` visibility shim;
 - replaced FreeCAD's Boost adjacency-list wrapper with
-  `<boost/graph/adjacency_list.hpp>`.
+  `<boost/graph/adjacency_list.hpp>`;
+- set Eigen's thread count once per process instead of in every
+  `System` constructor (a data race when sketches solve side by side);
+- ordered a subsystem's unknowns, and the two-priority solve's, as they
+  were declared instead of by address, so a solve's result does not depend
+  on where the heap put its parameters.
 
 It is deliberately built as a shared library so users can relink or replace it.
 The modified source is included in every Designer source release.

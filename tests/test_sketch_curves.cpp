@@ -13,8 +13,12 @@
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <nlohmann/json.hpp>
+#include <random>
+#include <thread>
 
 using Catch::Matchers::ContainsSubstring;
 using Catch::Matchers::WithinAbs;
@@ -535,6 +539,139 @@ TEST_CASE("A constraint the solver cannot hold is refused, naming what its "
              ContainsSubstring("a point and a line, circle, arc, ellipse"));
   CHECK_THAT(bad[3].reason, ContainsSubstring("two lines, two circles/arcs"));
   CHECK_THAT(bad[4].reason, ContainsSubstring("is no point of an ellipse"));
+}
+
+namespace {
+
+// Every number a solve leaves on the curves, in entity order.
+std::vector<double> SolvedNumbers(const SketchFeature& s) {
+  std::vector<double> out;
+  auto v2 = [&](glm::dvec2 p) {
+    out.push_back(p.x);
+    out.push_back(p.y);
+  };
+  for (const sketch::Entity& e : s.entities)
+    std::visit(
+        [&](const auto& x) {
+          using T = std::decay_t<decltype(x)>;
+          if constexpr (std::is_same_v<T, sketch::Point>)
+            v2(x.p);
+          else if constexpr (std::is_same_v<T, sketch::Ellipse>) {
+            v2(x.center);
+            out.insert(out.end(), {x.rMajor, x.rMinor, x.rotation});
+          } else if constexpr (std::is_same_v<T, sketch::EllipseArc>) {
+            v2(x.center);
+            out.insert(out.end(), {x.rMajor, x.rMinor, x.rotation, x.startParam,
+                                   x.endParam});
+          } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
+            for (glm::dvec2 p : x.poles)
+              v2(p);
+          }
+        },
+        e);
+  return out;
+}
+
+// The sketches whose solve the soft shape holds' second-priority pass decides:
+// the v155 golden's (an ellipse turned level and resized, a point put on it),
+// and an elliptical arc, a spline and an ellipse solved together.
+std::vector<SketchFeature> HeldSketches() {
+  std::vector<SketchFeature> out;
+  {
+    SketchFeature s = MakeSketch();
+    const uint32_t el = s.AddEntity(sketch::Ellipse{{0, 0}, 25.0, 10.0, 0.3});
+    sketch::Point p{{0, 12}};
+    p.construction = true;
+    const uint32_t pt = s.AddEntity(p);
+    s.constraints.push_back(Con(K::Fixed, {el, 0}));
+    s.constraints.push_back(Con(K::Horizontal, {el, 0}));
+    s.constraints.push_back(
+        Con(K::Distance, {el, 0}, {el, sketch::kEllipseMajorPos}, 30.0));
+    s.constraints.push_back(
+        Con(K::Distance, {el, 0}, {el, sketch::kEllipseMinorPos}, 10.0));
+    s.constraints.push_back(Con(K::PointOnLine, {pt, 0}, {el, 0}));
+    out.push_back(std::move(s));
+  }
+  {
+    SketchFeature s = MakeSketch();
+    const uint32_t ea =
+        s.AddEntity(sketch::EllipseArc{{0.1, 0.2}, 2.3, 1.1, 0.7, 0.3, 2.9});
+    const uint32_t el =
+        s.AddEntity(sketch::Ellipse{{5.1, 1.3}, 1.7, 0.9, -0.4});
+    const uint32_t sp =
+        s.AddEntity(sketch::BSpline{{{0, 3}, {1, 5}, {3, 5.5}, {4, 3.3}}});
+    const uint32_t p = s.AddEntity(sketch::Point{{2, 5}});
+    s.constraints.push_back(Con(K::Horizontal, {el, 0}));
+    s.constraints.push_back(
+        Con(K::Distance, {el, 0}, {el, sketch::kEllipseMajorPos}, 2.0));
+    s.constraints.push_back(Con(K::Distance, {ea, 0}, {ea, 3}, 2.5));
+    s.constraints.push_back(Con(K::PointOnLine, {p, 0}, {sp, 0}));
+    s.constraints.push_back(Con(K::PointOnLine, {p, 0}, {el, 0}));
+    s.constraints.push_back(Con(K::Coincident, {ea, 2}, {sp, 0}));
+    out.push_back(std::move(s));
+  }
+  return out;
+}
+
+std::vector<double> SolveFresh(SketchFeature s) {
+  sketch::Solver solver;
+  solver.Load(s);
+  const sketch::SolveResult r = solver.Solve();
+  if (r.ok)
+    solver.WriteBack(s.entities);
+  return SolvedNumbers(s);
+}
+
+// Hands the next small allocations back at addresses in a seeded order, as a
+// worker thread's own heap (or any earlier work on this one) would: the
+// solver's parameters live in separate blocks, and which of them sits at the
+// lower address is the heap's business, not the sketch's.
+void ScrambleSmallBlocks(unsigned seed) {
+  std::vector<void*> blocks;
+  for (size_t size : {512u, 576u, 64u, 128u, 256u})
+    for (int i = 0; i < 7; i++)
+      blocks.push_back(std::malloc(size));
+  std::mt19937 rng(seed);
+  std::shuffle(blocks.begin(), blocks.end(), rng);
+  for (void* b : blocks)
+    std::free(b);
+}
+
+} // namespace
+
+// A project's parts load on worker threads (ReadProject), and the v155 golden
+// hashed differently there about one load in five: PlaneGCS ordered its
+// unknowns by their ADDRESSES, so the soft holds' second-priority solve took
+// a different path to a different last bit wherever the heap laid the
+// solver's blocks out differently.
+TEST_CASE("A held curve solves to the same bits wherever its parameters live",
+          "[solver][ellipse][spline][parallel]") {
+  for (const SketchFeature& s : HeldSketches()) {
+    const std::vector<double> want = SolveFresh(s);
+    for (unsigned seed = 1; seed <= 48; seed++) {
+      ScrambleSmallBlocks(seed);
+      INFO("seed " << seed);
+      REQUIRE(SolveFresh(s) == want);
+    }
+  }
+}
+
+TEST_CASE("A held curve solves to the same bits on many threads at once",
+          "[solver][ellipse][spline][parallel]") {
+  for (const SketchFeature& s : HeldSketches()) {
+    const std::vector<double> want = SolveFresh(s);
+    std::vector<std::vector<double>> got(8 * 6);
+    std::vector<std::thread> threads;
+    for (int t = 0; t < 8; t++)
+      threads.emplace_back([&, t] {
+        for (int i = 0; i < 6; i++)
+          got[t * 6 + i] = SolveFresh(s);
+      });
+    for (std::thread& t : threads)
+      t.join();
+    for (const auto& g : got)
+      CHECK(g == want);
+  }
 }
 
 #endif // HAVE_PLANEGCS

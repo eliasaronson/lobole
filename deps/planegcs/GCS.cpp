@@ -4541,18 +4541,24 @@ int System::solve(SubSystem* subsysA, SubSystem* subsysB, bool /*isFine*/, bool 
     int xsizeB = subsysB->pSize();
     int csizeA = subsysA->cSize();
 
-    VEC_pD plistAB(xsizeA + xsizeB);
+    VEC_pD plistAB;
     {
         VEC_pD plistA, plistB;
         subsysA->getParamList(plistA);
         subsysB->getParamList(plistB);
 
-        std::sort(plistA.begin(), plistA.end());
-        std::sort(plistB.begin(), plistB.end());
-
-        VEC_pD::const_iterator it;
-        it = std::set_union(plistA.begin(), plistA.end(), plistB.begin(), plistB.end(), plistAB.begin());
-        plistAB.resize(it - plistAB.begin());
+        // Designer: A's parameters, then B's that A lacks, each in its
+        // subsystem's (declared) order -- not sorted by ADDRESS as FreeCAD
+        // did, which made the second-priority solve's arithmetic, and so its
+        // last bits, depend on where the heap put the parameters
+        // (SubSystem::initialize says more).
+        const SET_pD inA(plistA.begin(), plistA.end());
+        plistAB = plistA;
+        for (double* p : plistB) {
+            if (inA.count(p) == 0) {
+                plistAB.push_back(p);
+            }
+        }
     }
     int xsize = plistAB.size();
 

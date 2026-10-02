@@ -60,7 +60,6 @@ void SubSystem::initialize(VEC_pD& params, MAP_pD_pD& reductionmap)
     // relevant for the constraints listed in clist
     VEC_pD tmpplist;
     {
-        SET_pD s1(params.begin(), params.end());
         SET_pD s2;
         for (std::vector<Constraint*>::iterator constr = clist.begin(); constr != clist.end();
              ++constr) {
@@ -68,7 +67,17 @@ void SubSystem::initialize(VEC_pD& params, MAP_pD_pD& reductionmap)
             VEC_pD constr_params = (*constr)->params();
             s2.insert(constr_params.begin(), constr_params.end());
         }
-        std::set_intersection(s1.begin(), s1.end(), s2.begin(), s2.end(), std::back_inserter(tmpplist));
+        // Designer: in the order of `params` (the declared unknowns), not
+        // the order of their ADDRESSES, which FreeCAD's set_intersection
+        // gave. The unknowns' order steers the solver's arithmetic, and the
+        // heap decides which of two parameter blocks sits lower -- a worker
+        // thread's arena differently from the main one -- so the same sketch
+        // solved to different last bits on different threads.
+        for (double* p : params) {
+            if (s2.erase(p) != 0) {  // erase: each parameter once
+                tmpplist.push_back(p);
+            }
+        }
     }
 
     plist.clear();
