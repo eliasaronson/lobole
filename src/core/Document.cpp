@@ -1,4 +1,5 @@
 #include "core/Document.h"
+#include "core/FitBands.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/RetainingRingGrooveFeature.h"
@@ -483,6 +484,7 @@ bool Document::Regenerate() {
                m_bodies.size(), upTo, datums, bakedWarnings.size());
       stampAppearance();
       stampMaterial();
+      fitband::Stamp(*this, m_bodies);
       return datumsOk;
     }
     LOG_INFO("Baked geometry does not match the recipe; rebuilding");
@@ -563,6 +565,10 @@ bool Document::Regenerate() {
   }
   stampAppearance();
   stampMaterial();
+  // The size bands its round faces carry (core/FitBands.h): read from the
+  // tolerances and the print process, which are outside the chain hash, so
+  // like the appearance they are stamped here and not by a feature.
+  fitband::Stamp(*this, m_bodies);
   return allOk;
 }
 
@@ -627,14 +633,22 @@ const Tolerance& Document::SetTolerance(Tolerance t) {
   // the same ordered pair of faces cannot be two distances apart. A face's own
   // size and a distance measured from it are different subjects, so they
   // coexist. Replacing in place keeps list order stable for a UI listing them.
+  Tolerance* stored = nullptr;
   for (Tolerance& existing : m_tolerances) {
     if (&existing == ToleranceForSubject(t.ref, t.ref2)) {
       existing = std::move(t);
-      return existing;
+      stored = &existing;
+      break;
     }
   }
-  m_tolerances.push_back(std::move(t));
-  return m_tolerances.back();
+  if (stored == nullptr) {
+    m_tolerances.push_back(std::move(t));
+    stored = &m_tolerances.back();
+  }
+  // A tolerance rebuilds nothing, but it is a size band the contact checks
+  // read off the bodies (core/FitBands.h).
+  fitband::Stamp(*this, m_bodies);
+  return *stored;
 }
 
 bool Document::RemoveTolerance(uint64_t id) {
@@ -642,6 +656,7 @@ bool Document::RemoveTolerance(uint64_t id) {
     if (it->id == id) {
       m_tolerances.erase(it);
       MarkEdited();
+      fitband::Stamp(*this, m_bodies);
       return true;
     }
   }
@@ -652,6 +667,7 @@ void Document::RestoreTolerance(Tolerance t) {
   EnsureNextIdAtLeast(t.id + 1);
   m_tolerances.push_back(std::move(t));
   MarkEdited();
+  fitband::Stamp(*this, m_bodies);
 }
 
 fem::Study& Document::AddStudy(const std::string& name) {
@@ -893,6 +909,8 @@ void Document::SetPrintProcess(std::optional<printfit::Process> p) {
   if (std::any_of(m_features.begin(), m_features.end(),
                   [](const auto& f) { return PrintDrivesGeometry(*f); }))
     Regenerate();
+  // A printed face's band is read at the size it prints (core/FitBands.h).
+  fitband::Stamp(*this, m_bodies);
 }
 
 void Document::EvaluateParameters() {

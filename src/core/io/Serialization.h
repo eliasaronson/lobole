@@ -187,6 +187,7 @@ bool StudyResultToJson(const fem::StudyRuntime& rt, nlohmann::json& out);
 fem::StudyRuntime StudyResultFromJson(const nlohmann::json& j);
 // A motion study's result (v153), the same way: every sample's poses (in the
 // binary value since v154), mate values, clashes and unknown contacts, the
+// press fits it relieved (v159), the
 // pair counts, and its input hash.
 nlohmann::json MotionResultToJson(const motion::Result& result);
 motion::Result MotionResultFromJson(const nlohmann::json& j);

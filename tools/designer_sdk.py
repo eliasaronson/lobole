@@ -2917,6 +2917,9 @@ VERDICT_CONTRACTS = {
             "pairs_box_cleared": "coverage detail",
             "elapsed_s": "cost, not correctness",
             "occurrences": "how many were swept",
+            "press_fits": "overlaps the size bands allow, relieved and so "
+                          "not clashes (docs/tolerances/README.md"
+                          "#press-fits); a fit past its band is in `pairs`",
         },
         "optional": {"truncated", "truncation", "pairs_unchecked"},
     },
@@ -2948,6 +2951,9 @@ VERDICT_CONTRACTS = {
             "unmated_contacts": "parts that touch without a mate — designed "
                                 "contact is normal in an engine, so this is "
                                 "advisory and printed, never raised",
+            "press_fits": "overlaps the size bands allow, relieved and so "
+                          "touching rather than clashing "
+                          "(docs/tolerances/README.md#press-fits)",
         },
         # Present only when they APPLY: the sweep says how far it got only
         # when it stopped early. They are still `consumed` — the whole point

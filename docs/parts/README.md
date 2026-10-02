@@ -618,7 +618,11 @@ a name several placements answer to is refused naming them.
   `ring_grip_volume`), the exact sweep, `contact_report`, an exact motion
   study (which bypasses its contact cache for a body with grips, as for
   threads) — and needs no assembly: the seat is how a ring gets there, the
-  grip is why it may be there. The mesh mode of a sweep has no grips and
+  grip is why it may be there. It is the same designed-overlap step that
+  relieves a press fit
+  ([designed overlaps](../inspect/README.md#designed-overlaps)): a ring has
+  no tolerance to read, so its grip is stamped rather than inferred from
+  bands. The mesh mode of a sweep has no grips and
   reports the overlap, as it does a thread. The geometry cache carries the
   grips (`kGeometryFormat` 5), so a reopened project relieves them too.
 - **It locates a bearing.** `check_seat` reads a bearing ring that has no

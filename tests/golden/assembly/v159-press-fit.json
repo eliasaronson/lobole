@@ -1,0 +1,79 @@
+{
+  "format": "designer-document",
+  "version": 159,
+  "kind": "assembly",
+  "occurrences": [
+    {
+      "type": "Occurrence",
+      "id": 1,
+      "name": "Housing",
+      "part_id": 1,
+      "ref_kind": "part",
+      "configuration_id": 0,
+      "part_version": null,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "visible": true,
+      "fixed": true
+    },
+    {
+      "type": "Occurrence",
+      "id": 2,
+      "name": "ISO 15 6005",
+      "part_id": 2,
+      "ref_kind": "part",
+      "configuration_id": 0,
+      "part_version": null,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "visible": true,
+      "fixed": true
+    },
+    {
+      "type": "Occurrence",
+      "id": 3,
+      "name": "Arm",
+      "part_id": 3,
+      "ref_kind": "part",
+      "configuration_id": 0,
+      "part_version": null,
+      "transform": {
+        "position": [0.0, 0.0, 0.0],
+        "orientation": [0.0, 0.0, 0.0, 1.0]
+      },
+      "visible": true,
+      "fixed": false
+    }
+  ],
+  "mates": [
+    {
+      "type": "Mate",
+      "id": 4,
+      "name": "axle",
+      "mate_type": "revolute",
+      "a": {"occurrence": 1, "anchor": {"origin": true}},
+      "b": {"occurrence": 3, "anchor": {"origin": true}},
+      "flipped": false,
+      "offset": 0.0,
+      "rotation": 0.0
+    }
+  ],
+  "motion": [
+    {
+      "type": "MotionStudy",
+      "id": 5,
+      "name": "turn",
+      "driver_mate": 4,
+      "driver_dof": "rotation",
+      "from": 0.0,
+      "to": 1.5707963267948966,
+      "samples": 4,
+      "check_clash": true,
+      "clash_mode": "exact"
+    }
+  ]
+}

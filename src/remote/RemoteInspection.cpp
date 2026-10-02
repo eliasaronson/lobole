@@ -595,11 +595,60 @@ void AttachSweepCoverage(nlohmann::json& out, const SweepPlan& plan,
 // that is a guessing game, and it cost four build-and-look cycles on the
 // carburettor round. Omitted entirely when the pair merely touches or is
 // clear, so its presence means "there is solid in solid, here".
+// What a MESH check relieves of a designed overlap: nothing. Triangles carry
+// no threads, grips or bands, so an engaged thread, a ring in its groove and
+// a press fit all read as the overlap they are, and only the exact check
+// tells them from a clash.
+constexpr const char* kMeshRelievesNothing =
+    "nothing: an engaged thread, a ring in its groove and a press fit read as "
+    "the overlap they are; mode exact relieves them";
+
+// The press fits a contact check relieved, and the round overlaps it would
+// not (docs/tolerances/README.md#press-fits): a fit is not a clash, and a
+// clash next to a banded face says why it is not a fit.
+json PressFitsJson(const Measure::SetContact& c) {
+  json out = json::array();
+  for (const Measure::SetContact::PressFit& f : c.pressFits)
+    out.push_back({{"fit", f.fit},
+                   {"diameter_mm", f.diameter},
+                   {"interference_mm", f.interference},
+                   {"max_interference_mm", f.maxInterference},
+                   {"engaged_length_mm", f.length},
+                   {"volume_mm3", f.volume}});
+  return out;
+}
+json FitsRefusedJson(const Measure::SetContact& c) {
+  json out = json::array();
+  for (const Measure::SetContact::FitRefused& f : c.fitsRefused) {
+    json r{{"fit", f.fit}, {"reason", f.reason}};
+    if (f.maxInterference != 0.0 || f.interference != 0.0) {
+      r["interference_mm"] = f.interference;
+      r["max_interference_mm"] = f.maxInterference;
+    }
+    if (f.excess > 0.0)
+      r["excess_mm"] = f.excess;
+    out.push_back(std::move(r));
+  }
+  return out;
+}
+// Onto a pair's entry: what was relieved as a press fit, and why a round
+// overlap was not. Omitted when there is neither.
+void AddPressFits(json& j, const Measure::SetContact& c) {
+  if (!c.pressFits.empty()) {
+    j["press_fits"] = PressFitsJson(c);
+    j["press_fit_volume"] = c.pressFitVolume;
+  }
+  if (!c.fitsRefused.empty())
+    j["press_fit_refused"] = FitsRefusedJson(c);
+}
+
 void AddOverlapSite(json& j, const Measure::SetContact& c) {
   j["engaged_thread_pairs"] = c.engagedThreadPairs;
   j["thread_engagement_volume"] = c.threadEngagementVolume;
   j["ring_grip_pairs"] = c.ringGripPairs;
   j["ring_grip_volume"] = c.ringGripVolume;
+  j["press_fit_pairs"] = c.pressFits.size();
+  AddPressFits(j, c);
   if (!c.overlaps)
     return;
   remote::AddOverlapSite(j, c.centroid, c.overlapMin, c.overlapMax);
@@ -1013,7 +1062,20 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`bbox_min_mm`/`bbox_max_mm`, the overlap solid's centre and world "
      "bounds in millimetres; a mesh check knows only THAT they overlap, so "
      "its sweep entries carry `within_min_mm`/`within_max_mm` instead — the "
-     "region the two sides' boxes share, which holds the overlap somewhere.",
+     "region the two sides' boxes share, which holds the overlap somewhere. "
+     "DESIGNED overlaps are relieved by the exact check and reported apart "
+     "(docs/inspect/README.md#designed-overlaps): an engaged thread "
+     "(`engaged_thread_pairs`), a ring in its groove (`ring_grip_pairs`) "
+     "and a PRESS FIT — two coaxial round faces, one inside the other, whose "
+     "size bands (a tolerance, a bearing's ISO 492 band, read at the printed "
+     "size on a printed part) allow the interference: a named pair gives "
+     "`press_fit_pairs` and `press_fits` [{fit, diameter_mm, "
+     "interference_mm, max_interference_mm, engaged_length_mm, "
+     "volume_mm3}], the exact sweep a top-level `press_fits` [{a, b, fits, "
+     "volume_mm3}]. A round overlap beside a banded face that is NOT a fit "
+     "(past the band, a clearance fit, no band on one side, off-axis) stays "
+     "a clash with `press_fit_refused` [{fit, reason, excess_mm?}]. Mesh "
+     "mode relieves none of these, and says so in `relieves`.",
      "a, b, deadline_s, max_pairs, mode, touch_tol"},
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
@@ -1034,12 +1096,18 @@ static constexpr MethodDoc InspectionMethods[] = {
      "(default 20000 — an imported mesh is one face per TRIANGLE) is NOT "
      "checked and is listed in `not_checked` with its face count: the "
      "deadline stops new dispatches and cannot preempt a boolean already "
-     "running, so one such pair does not slow the sweep down, it hangs it.",
+     "running, so one such pair does not slow the sweep down, it hangs it. "
+     "A PRESS FIT the bands allow is relieved, not a clash: its pair is "
+     "`touching` and carries `press_fits`, and `press_fits` lists every one "
+     "(docs/tolerances/README.md#press-fits); a clash beside a banded round "
+     "face carries `press_fit_refused` saying why it is not a fit.",
      "deadline_s, exact_face_budget, max_pairs, near_tol, touch_tol",
      remote::NoFlags,
-     "connected, components, pairs[]{a, b, state, distance, volume}, "
+     "connected, components, pairs[]{a, b, state, distance, volume, "
+     "press_fits?}, "
      "near_misses[]{a, b, distance}, clashes[]{a, b, volume, centroid_mm, "
-     "bbox_min_mm, bbox_max_mm}, touch_tol, "
+     "bbox_min_mm, bbox_max_mm, press_fit_refused?}, press_fits[]{a, b, "
+     "fits, volume_mm3}, touch_tol, "
      "near_tol, scope?, bodies?"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
@@ -1701,6 +1769,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           bool clash = false;
           Measure::SetContact contact; // exact mode only
         };
+        // The pairs the exact check relieved as press fits: not clashes, so
+        // not in `pairs`, and listed apart so a clean sweep still says what
+        // it took to be deliberate (docs/tolerances/README.md#press-fits).
+        json pressFits = json::array();
         RunSweep(
             plan, deadline,
             [&](size_t ki, size_t kj) {
@@ -1716,6 +1788,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
               return a;
             },
             [&](size_t ki, size_t kj, const PairAnswer& a) {
+              if (!a.contact.pressFits.empty()) {
+                json fit{{"a", occs[keep[ki]].label},
+                         {"b", occs[keep[kj]].label},
+                         {"fits", PressFitsJson(a.contact)},
+                         {"volume_mm3", a.contact.pressFitVolume}};
+                nameSides(fit, occs[keep[ki]], occs[keep[kj]]);
+                pressFits.push_back(std::move(fit));
+              }
               if (!a.clash)
                 return;
               any = true;
@@ -1732,6 +1812,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                   remote::AddOverlapSite(hit, a.contact.centroid,
                                          a.contact.overlapMin,
                                          a.contact.overlapMax);
+                if (!a.contact.fitsRefused.empty())
+                  hit["press_fit_refused"] = FitsRefusedJson(a.contact);
               }
               pairs.push_back(std::move(hit));
             });
@@ -1747,8 +1829,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                  {"pairs", pairs},
                  {"clashes", pairs},
                  {"mode", mode}};
-        if (mode == "mesh")
+        if (mode == "mesh") {
           out["deflection_mm"] = meshDeflection.load();
+          out["relieves"] = kMeshRelievesNothing;
+        } else {
+          out["press_fits"] = pressFits;
+        }
         // This sweep declines nothing: the face budget is contact_report's,
         // where a pair of imported meshes can hang a boolean.
         AttachSweepCoverage(out, plan, keep.size(), maxPairs, deadline);
@@ -1770,6 +1856,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         json out{{"clash", hit},  {"state", hit ? "clash" : "clear"},
                  {"mode", mode},  {"deflection_mm", meshDeflection.load()},
                  {"a", ta.label}, {"b", tb.label}};
+        out["relieves"] = kMeshRelievesNothing;
         nameSides(out, ta, tb);
         return out;
       }
@@ -2350,7 +2437,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         return parent[i] == i ? i : parent[i] = find(parent[i]);
       };
       json pairs = json::array(), nearMisses = json::array(),
-           clashes = json::array();
+           clashes = json::array(), pressFits = json::array();
       for (size_t i = 0; i < ents.size(); ++i)
         for (size_t j = i + 1; j < ents.size(); ++j) {
           if (boxGap(ents[i], ents[j]) > nearTol)
@@ -2372,6 +2459,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                            {"state", st},
                            {"distance", c->distance},
                            {"volume", c->volume}});
+          AddPressFits(pairs.back(), *c);
+          if (!c->pressFits.empty())
+            pressFits.push_back({{"a", ents[i].body->name},
+                                 {"b", ents[j].body->name},
+                                 {"fits", PressFitsJson(*c)},
+                                 {"volume_mm3", c->pressFitVolume}});
           if (std::string_view(st) != "clear")
             parent[find(i)] = find(j);
           if (std::string_view(st) == "clash") {
@@ -2401,6 +2494,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                   {"pairs", pairs},
                   {"near_misses", nearMisses},
                   {"clashes", clashes},
+                  {"press_fits", pressFits},
                   {"touch_tol", touchTol},
                   {"near_tol", nearTol}};
       if (!skipped.empty())
@@ -2468,7 +2562,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       return parent[i] == i ? i : parent[i] = find(parent[i]);
     };
     json pairs = json::array(), nearMisses = json::array(),
-         clashes = json::array();
+         clashes = json::array(), pressFits = json::array();
     std::set<std::pair<uint64_t, uint64_t>> touchingIds;
     // Closest first, and bounded: on a 253-occurrence arm this loop is
     // 31,878 pairs, and the ones sharing a PCB all pass the box test.
@@ -2521,6 +2615,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                            {"state", st},
                            {"distance", c->distance},
                            {"volume", c->volume}});
+          AddPressFits(pairs.back(), *c);
+          if (!c->pressFits.empty())
+            pressFits.push_back({{"a", ents[i].occ->name},
+                                 {"b", ents[j].occ->name},
+                                 {"a_id", ents[i].occ->id},
+                                 {"b_id", ents[j].occ->id},
+                                 {"fits", PressFitsJson(*c)},
+                                 {"volume_mm3", c->pressFitVolume}});
           if (std::string_view(st) != "clear") {
             parent[find(i)] = find(j);
             touchingIds.insert({std::min(ents[i].occ->id, ents[j].occ->id),
@@ -2554,6 +2656,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 {"pairs", pairs},
                 {"near_misses", nearMisses},
                 {"clashes", clashes},
+                {"press_fits", pressFits},
                 {"touch_tol", touchTol},
                 {"near_tol", nearTol}};
     AttachSweepCoverage(out, plan, ents.size(), maxPairs, deadline,

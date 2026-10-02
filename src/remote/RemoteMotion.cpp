@@ -84,7 +84,8 @@ constexpr MethodDoc MotionMethods[] = {
      "project carries -- (the study's definition, "
      "every occurrence and its placement, every mate and its current "
      "value, relations, configurations, and the placed parts' exact "
-     "geometry and materials) is answered from it, `reused: true`, nothing "
+     "geometry, materials and size bands) is answered from it, `reused: "
+     "true`, nothing "
      "computed; `input_hash` names the inputs; `recompute: true` runs "
      "anyway. Synchronous by default and "
      "returns the COLLISION TABLE — per sample: the driver value, whether "
@@ -106,7 +107,13 @@ constexpr MethodDoc MotionMethods[] = {
      "its motor and its screws, so the pairs already in contact at the "
      "first sample are counted and the rest are listed), `worst_sample`, "
      "`table` (the same as text, for a report), "
-     "`deflection_mm` for a mesh check, and `pairs_checked`. "
+     "`deflection_mm` for a mesh check, and `pairs_checked`. An exact "
+     "check relieves an engaged thread, a ring in its groove and a PRESS "
+     "FIT (two coaxial round faces whose size bands allow the overlap, "
+     "docs/tolerances/README.md#press-fits); `press_fits` lists each "
+     "relieved pair once {a, b, a_name, b_name, fit, interference_mm, "
+     "max_interference_mm, volume_mm3}, and a mesh run says it relieves "
+     "none (`relieves`) except on rigid pairs. "
      "include_poses adds, per sample, every occurrence's placement "
      "(`poses`: position mm, orientation quaternion [x,y,z,w]) and every "
      "moving mate's value (`mates`: {mate, name, rotation_deg, offset} — "
@@ -363,6 +370,29 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
       {"table", motion::Table(r, s)}};
   if (s.clashMode == "mesh" && s.checkClash)
     out["deflection_mm"] = r.deflectionMm;
+  // The press fits an exact check relieved, once per pair: not clashes, and
+  // listed so a clean run still says what it took to be deliberate
+  // (docs/tolerances/README.md#press-fits). A mesh check relieves none.
+  if (s.checkClash) {
+    json fits = json::array();
+    for (const motion::PressFit& f : r.pressFits) {
+      json fj{{"a", f.a},
+              {"b", f.b},
+              {"a_name", f.aName},
+              {"b_name", f.bName},
+              {"fit", f.fit},
+              {"interference_mm", f.interference},
+              {"max_interference_mm", f.maxInterference},
+              {"volume_mm3", f.volume}};
+      AddSidePaths(fj, f.a, f.aInner, f.b, f.bInner);
+      fits.push_back(std::move(fj));
+    }
+    out["press_fits"] = std::move(fits);
+    if (s.clashMode == "mesh")
+      out["relieves"] = "nothing: a mesh check sees an engaged thread, a ring "
+                        "in its groove and a press fit as the overlap they "
+                        "are, except on a rigid pair, which is checked exactly";
+  }
   if (r.cancelled)
     out["cancelled"] = true;
   if (!r.error.empty())

@@ -19,7 +19,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    158; // v158: a CAM operation's `cutter_comp`: off (omitted) | wear --
+    159; // v159: a saved motion result lists the press fits its exact checks
+         //      relieved, `press_fits` [{a, b, a_name, b_name, a_inner?,
+         //      b_inner?, fit, interference_mm, max_interference_mm,
+         //      volume_mm3}]; omitted when there are none
+         //      (docs/tolerances/README.md#press-fits).
+         // v158: a CAM operation's `cutter_comp`: off (omitted) | wear --
          //      profile, pocket and drill post their finished wall passes
          //      under G41/G42 with the tool table holding the wear alone
          //      (docs/cam/post.md#cutter-compensation). An unknown value is

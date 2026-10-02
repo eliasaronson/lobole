@@ -313,6 +313,7 @@ set(core_sources
     src/core/PrintSplit.cpp
     src/core/ThreadStandards.cpp
     src/core/FitStandards.cpp
+    src/core/FitBands.cpp
     src/core/PrintAllowance.cpp
     src/core/SheetMetal.cpp
     src/core/features/BaseFlangeFeature.cpp

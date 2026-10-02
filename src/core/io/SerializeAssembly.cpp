@@ -702,6 +702,38 @@ json ClashToJson(const motion::Clash& c) {
   return j;
 }
 
+// v159: a press fit the run relieved (docs/tolerances/README.md#press-fits).
+json PressFitToJson(const motion::PressFit& f) {
+  json j = {{"a", f.a},
+            {"b", f.b},
+            {"a_name", f.aName},
+            {"b_name", f.bName},
+            {"fit", f.fit},
+            {"interference_mm", f.interference},
+            {"max_interference_mm", f.maxInterference},
+            {"volume_mm3", f.volume}};
+  if (f.aInner != 0)
+    j["a_inner"] = f.aInner;
+  if (f.bInner != 0)
+    j["b_inner"] = f.bInner;
+  return j;
+}
+
+motion::PressFit PressFitFromJson(const json& j) {
+  motion::PressFit f;
+  f.a = j.at("a").get<uint64_t>();
+  f.b = j.at("b").get<uint64_t>();
+  f.aInner = j.value("a_inner", uint64_t{0});
+  f.bInner = j.value("b_inner", uint64_t{0});
+  f.aName = j.value("a_name", std::string{});
+  f.bName = j.value("b_name", std::string{});
+  f.fit = j.at("fit").get<std::string>();
+  f.interference = j.at("interference_mm").get<double>();
+  f.maxInterference = j.at("max_interference_mm").get<double>();
+  f.volume = j.at("volume_mm3").get<double>();
+  return f;
+}
+
 motion::Clash ClashFromJson(const json& j) {
   motion::Clash c;
   c.a = j.at("a").get<uint64_t>();
@@ -840,6 +872,12 @@ json MotionResultToJson(const motion::Result& r) {
               {"cancelled", r.cancelled}};
   if (!r.error.empty())
     out["error"] = r.error;
+  if (!r.pressFits.empty()) {
+    json fits = json::array();
+    for (const motion::PressFit& f : r.pressFits)
+      fits.push_back(PressFitToJson(f));
+    out["press_fits"] = std::move(fits);
+  }
   if (r.inputHash != 0)
     out["input_hash"] = inputhash::Hex(r.inputHash);
   out["placements"] = w.F64(table);
@@ -946,6 +984,8 @@ motion::Result MotionResultFromJson(const json& j) {
   r.seconds = j.value("seconds", 0.0);
   r.cancelled = j.value("cancelled", false);
   r.error = j.value("error", std::string{});
+  for (const json& fj : j.value("press_fits", json::array()))
+    r.pressFits.push_back(PressFitFromJson(fj));
   if (j.contains("input_hash") &&
       !inputhash::FromHex(j.at("input_hash").get<std::string>(), r.inputHash))
     throw std::runtime_error("motion result: input_hash " +

@@ -306,6 +306,8 @@ struct Hit {
   bool hit = false, known = false;
   double volume = 0.0, deflection = 0.0;
   glm::dvec3 centroid{0.0}, bboxMin{0.0}, bboxMax{0.0};
+  // The press fits the exact check relieved (Measure::SetContact).
+  std::vector<Measure::SetContact::PressFit> pressFits;
 };
 
 // The boolean. ContactBetween, not InterferenceVolume: it is the same boolean
@@ -321,9 +323,13 @@ Hit ExactHit(const Placed& a, const Placed& b,
   std::vector<Body> ba(1), bb(1);
   ba[0] = *a.body;
   bb[0] = *b.body;
+  // The contact cache keys on the shapes alone, so a pair whose answer
+  // depends on more than its shapes -- an engaged thread, a ring's grip, a
+  // press fit's bands -- is asked directly.
+  const bool fitted = !ba[0].fitBands.empty() && !bb[0].fitBands.empty();
   const auto answer =
       contacts && ba[0].threadRegions.empty() && bb[0].threadRegions.empty() &&
-              ba[0].ringGrips.empty() && bb[0].ringGrips.empty()
+              ba[0].ringGrips.empty() && bb[0].ringGrips.empty() && !fitted
           ? contacts->Check(ba[0].shape, a.world, bb[0].shape, b.world)
           : collide::ExactContactCache::Answer{
                 Measure::ContactBetween(ba, a.world, bb, b.world, false),
@@ -336,6 +342,7 @@ Hit ExactHit(const Placed& a, const Placed& b,
     h.bboxMin = c->overlapMin;
     h.bboxMax = c->overlapMax;
     h.hit = c->volume > 1e-9;
+    h.pressFits = c->pressFits;
   }
   return h;
 }
@@ -548,6 +555,10 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
   // that is inherently sequential, so it lives here and not in the workers.
   // `pairsChecked` counts every check answered, repeats included.
   std::vector<std::map<std::pair<Key, Key>, Clash>> found(placed.size());
+  std::set<std::pair<Key, Key>> pressFitted;
+  for (const PressFit& f : out.pressFits)
+    pressFitted.insert({std::min(Key{f.a, f.aInner}, Key{f.b, f.bInner}),
+                        std::max(Key{f.a, f.aInner}, Key{f.b, f.bInner})});
   for (size_t k = 0; k < cands.size(); k++) {
     const Cand& cd = cands[k];
     if (cd.s >= complete)
@@ -574,6 +585,24 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
       out.clean = false;
     }
     out.deflectionMm = std::max(out.deflectionMm, h.deflection);
+    // A press fit, once per pair over the run: the first sample that
+    // relieved it (docs/tolerances/README.md#press-fits).
+    if (!h.pressFits.empty() && pressFitted.insert(cd.key).second) {
+      PressFit f;
+      f.a = p1.key.first;
+      f.aInner = p1.key.second;
+      f.b = p2.key.first;
+      f.bInner = p2.key.second;
+      f.aName = p1.name;
+      f.bName = p2.name;
+      for (const Measure::SetContact::PressFit& pf : h.pressFits) {
+        f.fit += (f.fit.empty() ? "" : "; ") + pf.fit;
+        f.interference = std::max(f.interference, pf.interference);
+        f.maxInterference = std::max(f.maxInterference, pf.maxInterference);
+        f.volume += pf.volume;
+      }
+      out.pressFits.push_back(std::move(f));
+    }
     if (!h.hit || found[cd.s].count(cd.key))
       continue;
     Clash c;

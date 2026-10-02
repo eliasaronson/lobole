@@ -185,6 +185,21 @@ void Hasher::Bodies(const std::vector<Body>& bodies) {
       F64(g.size);
       U64(g.groove ? 1 : 0);
     }
+    // A press fit's bands decide what a clash check relieves. Only when
+    // there are any, so a body without keeps the hash it always had.
+    if (!b.fitBands.empty()) {
+      Str("fit_bands");
+      U64(b.fitBands.size());
+      for (const FitBand& f : b.fitBands) {
+        U64(f.face.featureId);
+        Str(f.face.name);
+        F64(f.lower);
+        F64(f.upper);
+        F64(f.allowance);
+        U64(static_cast<uint64_t>(f.side));
+        Str(f.label);
+      }
+    }
     // A load or a refinement resolves its face through these.
     U64(b.createdBy);
     U64(b.elementMap.names.size());

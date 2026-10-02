@@ -1,5 +1,6 @@
 #include "core/Measure.h"
 #include "core/Angles.h"
+#include "core/FitBands.h"
 
 #include "core/MeshCollide.h"
 
@@ -61,7 +62,9 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <limits>
+#include <map>
 #include <set>
 
 namespace Measure {
@@ -348,7 +351,8 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
                                          const glm::dmat4& xfB) {
   const auto threaded = [](const auto& bodies) {
     return std::any_of(bodies.begin(), bodies.end(), [](const Body& b) {
-      return !b.threadRegions.empty() || !b.ringGrips.empty();
+      return !b.threadRegions.empty() || !b.ringGrips.empty() ||
+             !b.fitBands.empty();
     });
   };
   if (threaded(bodiesA) || threaded(bodiesB)) {
@@ -589,6 +593,38 @@ static std::vector<GripSpan> GripSpans(const Body& body,
   return out;
 }
 
+// Removes from `overlap` the annulus between radii rIn and rOut about the
+// axis through `origin` along `axis`, from `lo` to `hi` along it: the
+// designed overlap of a ring in its groove or of a press fit, both of which
+// are an annulus between two coaxial cylinders over the length they engage.
+// The caller pads the radii and the span by a hair, so the cut does not
+// leave a sliver of the two cylinders' own coincident faces behind.
+static TopoDS_Shape CutAnnulus(const TopoDS_Shape& overlap,
+                               const glm::dvec3& origin, const glm::dvec3& axis,
+                               double rIn, double rOut, double lo, double hi,
+                               const char* what) {
+  const glm::dvec3 start = origin + lo * axis;
+  const gp_Ax2 ax(gp_Pnt(start.x, start.y, start.z),
+                  gp_Dir(axis.x, axis.y, axis.z));
+  const double h = hi - lo;
+  BRepAlgoAPI_Cut tube;
+  BuildQuery(tube, BRepPrimAPI_MakeCylinder(ax, rOut, h).Shape(),
+             BRepPrimAPI_MakeCylinder(ax, std::max(rIn, 1e-3), h).Shape());
+  if (!tube.IsDone())
+    throw Standard_Failure((std::string(what) + " tool failed").c_str());
+  BRepAlgoAPI_Cut cut;
+  BuildQuery(cut, overlap, tube.Shape());
+  if (!cut.IsDone())
+    throw Standard_Failure((std::string(what) + " subtraction failed").c_str());
+  return cut.Shape();
+}
+
+static double VolumeOf(const TopoDS_Shape& s) {
+  GProp_GProps props;
+  BRepGProp::VolumeProperties(s, props);
+  return std::max(0.0, props.Mass());
+}
+
 // Removes from `overlap` the grip of a ring seated in its groove
 // (docs/parts/README.md#a-ring-in-its-groove): the annulus between the
 // free ring's grip face and the groove's floor, over the ring's thickness —
@@ -624,21 +660,238 @@ static TopoDS_Shape RemoveRingGrip(TopoDS_Shape overlap,
       constexpr double kPad = 1e-3;
       const double rIn = std::min(groove.radius, ring.radius) - kPad;
       const double rOut = std::max(groove.radius, ring.radius) + kPad;
-      const glm::dvec3 start = groove.origin + (lo - kPad) * groove.axis;
-      const gp_Ax2 ax(gp_Pnt(start.x, start.y, start.z),
-                      gp_Dir(groove.axis.x, groove.axis.y, groove.axis.z));
-      const double h = hi - lo + 2.0 * kPad;
-      BRepAlgoAPI_Cut tube;
-      BuildQuery(tube, BRepPrimAPI_MakeCylinder(ax, rOut, h).Shape(),
-                 BRepPrimAPI_MakeCylinder(ax, std::max(rIn, 1e-3), h).Shape());
-      if (!tube.IsDone())
-        throw Standard_Failure("ring grip tool failed");
-      BRepAlgoAPI_Cut cut;
-      BuildQuery(cut, overlap, tube.Shape());
-      if (!cut.IsDone())
-        throw Standard_Failure("ring grip subtraction failed");
-      overlap = cut.Shape();
+      overlap = CutAnnulus(overlap, groove.origin, groove.axis, rIn, rOut,
+                           lo - kPad, hi + kPad, "ring grip");
       ++gripped;
+    }
+  return overlap;
+}
+
+// One round face of a placed body, for the press-fit step: its band (null
+// for a face that carries none, read only to say so), whether it is a bore,
+// and its cylinder.
+struct BandSpan {
+  const FitBand* band = nullptr;
+  bool bore = false;
+  glm::dvec3 origin{0.0}, axis{0.0, 0.0, 1.0};
+  double radius = 0.0, lo = 0.0, hi = 0.0;
+};
+
+static std::optional<BandSpan> SpanOfFace(const TopoDS_Face& face) {
+  const auto bore = fitband::IsBore(face);
+  if (!bore)
+    return std::nullopt;
+  BRepAdaptor_Surface surface(face);
+  const gp_Cylinder cylinder = surface.Cylinder();
+  const gp_Pnt o = cylinder.Location();
+  const gp_Dir d = cylinder.Axis().Direction();
+  double lo = surface.FirstVParameter(), hi = surface.LastVParameter();
+  if (lo > hi)
+    std::swap(lo, hi);
+  BandSpan s;
+  s.bore = *bore;
+  s.origin = {o.X(), o.Y(), o.Z()};
+  s.axis = {d.X(), d.Y(), d.Z()};
+  s.radius = cylinder.Radius();
+  s.lo = lo;
+  s.hi = hi;
+  return s;
+}
+
+// Every round face of `body`, placed as `placed`, with the band it carries
+// (FitBand). The unbanded ones are the far side of a banded face, read only
+// to say that they carry none.
+static std::vector<BandSpan> BandSpans(const Body& body,
+                                       const TopoDS_Shape& placed) {
+  std::map<int, const FitBand*> banded;
+  for (const FitBand& band : body.fitBands)
+    if (const auto index = body.elementMap.Resolve(band.face.name))
+      banded[*index] = &band;
+  std::vector<BandSpan> out;
+  int index = 0;
+  for (TopExp_Explorer ex(placed, TopAbs_FACE); ex.More(); ex.Next(), ++index)
+    if (auto s = SpanOfFace(TopoDS::Face(ex.Current()))) {
+      const auto it = banded.find(index);
+      s->band = it != banded.end() ? it->second : nullptr;
+      out.push_back(*s);
+    }
+  return out;
+}
+
+// A millimetre value as a person writes it: 47, 8.2, 46.982.
+static std::string Mm(double v) {
+  char buf[48];
+  std::snprintf(buf, sizeof buf, "%.4f", v);
+  std::string s = buf;
+  while (!s.empty() && s.back() == '0')
+    s.pop_back();
+  if (!s.empty() && s.back() == '.')
+    s.pop_back();
+  return s == "-0" ? "0" : s;
+}
+
+// How far off the bore's axis the shaft's may lie, over the length the two
+// engage, and still be ONE fit (docs/tolerances/README.md#press-fits): a
+// tenth of a micrometre, the ring grip's own. A mate places a fit exactly
+// coaxial; anything further off is a part that is not where its fit says.
+constexpr double kFitCoaxialMm = 1e-4;
+
+// The press-fit half of the designed-overlap step
+// (docs/tolerances/README.md#press-fits). For a bore of one side and a shaft
+// of the other, coaxial and engaged, the shaft larger than the bore: when
+// both carry a band and the fit they make allows the interference the model
+// shows, the annulus between them over the engaged length is relieved and
+// listed in `pressFits`; otherwise the overlap stays a clash and
+// `fitsRefused` says why. A pair of faces neither of which carries a band is
+// none of this step's business.
+static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
+                                     const std::vector<BandSpan>& a,
+                                     const std::vector<BandSpan>& b,
+                                     Measure::SetContact& out) {
+  for (const BandSpan& x : a)
+    for (const BandSpan& y : b) {
+      if (x.band == nullptr && y.band == nullptr)
+        continue;
+      if (x.bore == y.bore)
+        continue;
+      const BandSpan& bore = x.bore ? x : y;
+      const BandSpan& shaft = x.bore ? y : x;
+      if (shaft.radius - bore.radius <= 1e-7)
+        continue; // the shaft is not larger: these two do not overlap
+      const double dot = glm::dot(bore.axis, shaft.axis);
+      if (std::abs(dot) < 0.99)
+        continue; // crossing, not one inside the other
+      // The engaged length, along the bore's axis.
+      const glm::dvec3 p0 = shaft.origin + shaft.lo * shaft.axis;
+      const glm::dvec3 p1 = shaft.origin + shaft.hi * shaft.axis;
+      const double s0 = glm::dot(p0 - bore.origin, bore.axis);
+      const double s1 = glm::dot(p1 - bore.origin, bore.axis);
+      const double lo = std::max(bore.lo, std::min(s0, s1));
+      const double hi = std::min(bore.hi, std::max(s0, s1));
+      if (hi - lo <= 1e-6)
+        continue; // side by side on one axis: not engaged
+      // How far the shaft's axis strays from the bore's at either end of it.
+      const auto offAxis = [&](double s) {
+        const double t = std::abs(s1 - s0) > 1e-12 ? (s - s0) / (s1 - s0) : 0.0;
+        const glm::dvec3 p = p0 + t * (p1 - p0);
+        const glm::dvec3 d = p - bore.origin;
+        return glm::length(d - glm::dot(d, bore.axis) * bore.axis);
+      };
+      const double off = std::max(offAxis(lo), offAxis(hi));
+      if (off >= bore.radius)
+        continue; // not one inside the other at all
+      const bool coaxial = off <= kFitCoaxialMm;
+
+      Measure::SetContact::FitRefused refused;
+      const auto refuse = [&](std::string reason) {
+        refused.reason = std::move(reason);
+        out.fitsRefused.push_back(refused);
+      };
+      if (bore.band == nullptr || shaft.band == nullptr) {
+        // One side banded, the other not: the overlap has no fit behind it.
+        // Said only of a coaxial pair, the one a fit could have been.
+        if (!coaxial)
+          continue;
+        const BandSpan& has = bore.band != nullptr ? bore : shaft;
+        refused.fit = "Ø" + Mm(2.0 * has.radius) + " " + has.band->label;
+        refuse(std::string("the ") + (has.bore ? "shaft" : "bore") + " (Ø" +
+               Mm(2.0 * (has.bore ? shaft.radius : bore.radius)) +
+               " modelled) carries no size band, so the " +
+               Mm(2.0 * (shaft.radius - bore.radius)) + " mm it overlaps the " +
+               (has.bore ? "bore" : "shaft") +
+               " is not a fit; set_tolerance on that face");
+        continue;
+      }
+      // As made: a printed face prints at its modelled size less the
+      // process's allowance.
+      const double db = 2.0 * bore.radius - bore.band->allowance;
+      const double ds = 2.0 * shaft.radius - shaft.band->allowance;
+      const double interference = ds - db;
+      const double maxInterference = shaft.band->upper - bore.band->lower;
+      // The basic size the two bands share: a size B with both made
+      // diameters inside their bands about it, the roundest such number.
+      // Empty past the band, where the bore's made size names the fit.
+      double basic = db;
+      {
+        const double bLo =
+            std::max(ds - shaft.band->upper, db - bore.band->upper);
+        const double bHi =
+            std::min(ds - shaft.band->lower, db - bore.band->lower);
+        for (double scale : {1.0, 10.0, 100.0, 1000.0}) {
+          const double c = std::ceil(bLo * scale - 1e-6) / scale;
+          if (bLo <= bHi + 1e-9 && c <= bHi + 1e-9) {
+            basic = c;
+            break;
+          }
+        }
+      }
+      refused.fit =
+          "Ø" + Mm(basic) + " " + bore.band->label + " / " + shaft.band->label;
+      refused.interference = interference;
+      refused.maxInterference = maxInterference;
+      if (!coaxial) {
+        char buf[200];
+        std::snprintf(buf, sizeof buf,
+                      "not coaxial: the shaft's axis is %.4f mm off the "
+                      "bore's over the length they engage, and a fit is "
+                      "relieved only within %.4f mm",
+                      off, kFitCoaxialMm);
+        refuse(buf);
+        continue;
+      }
+      if (bore.band->side == FitBand::Side::Shaft ||
+          shaft.band->side == FitBand::Side::Hole) {
+        const bool boreWrong = bore.band->side == FitBand::Side::Shaft;
+        refuse(std::string("the ") + (boreWrong ? "bore" : "shaft") +
+               " carries a " + (boreWrong ? "shaft" : "hole") + " band (" +
+               (boreWrong ? bore.band->label : shaft.band->label) +
+               "), so the pair is not a fit");
+        continue;
+      }
+      if (maxInterference <= 1e-9) {
+        char buf[200];
+        std::snprintf(buf, sizeof buf,
+                      "a clearance fit allows no interference (at least "
+                      "%.4f mm clearance), and the model overlaps by %.4f mm "
+                      "on the diameter",
+                      -maxInterference, 2.0 * (shaft.radius - bore.radius));
+        refuse(buf);
+        continue;
+      }
+      if (interference > maxInterference + 1e-7) {
+        refused.excess = interference - maxInterference;
+        char buf[240];
+        std::snprintf(buf, sizeof buf,
+                      "past the band: %.4f mm interference on the diameter "
+                      "where the fit allows at most %.4f mm — %.4f mm too "
+                      "much",
+                      interference, maxInterference, refused.excess);
+        refuse(buf);
+        continue;
+      }
+      // Axially, the engaged length and a little past each end of it: a
+      // ring's or a pin's chamfer runs from its cylinder down through the
+      // annulus, and the part of it inside the bore is the same press. Ten
+      // times the radial interference takes a lead-in down to about 6
+      // degrees; the radii bound the cut either way.
+      constexpr double kPad = 1e-3;
+      const double ends = kPad + 10.0 * (shaft.radius - bore.radius);
+      const double before = VolumeOf(overlap);
+      overlap =
+          CutAnnulus(overlap, bore.origin, bore.axis, bore.radius - kPad,
+                     shaft.radius + kPad, lo - ends, hi + ends, "press fit");
+      const double relieved = std::max(0.0, before - VolumeOf(overlap));
+      if (relieved <= 1e-9)
+        continue; // the faces overlap, their solids did not: nothing to say
+      Measure::SetContact::PressFit fit;
+      fit.fit = refused.fit;
+      fit.diameter = basic;
+      fit.interference = interference;
+      fit.maxInterference = maxInterference;
+      fit.length = hi - lo;
+      fit.volume = relieved;
+      out.pressFits.push_back(std::move(fit));
+      out.pressFitVolume += relieved;
     }
   return overlap;
 }
@@ -732,9 +985,18 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
     struct Placed {
       TopoDS_Shape shape;
       const CADShape* source = nullptr; // for the mesh cache, keyed on it
+      const Body* body = nullptr;
       Bnd_Box box;
       std::vector<Measure::ThreadSpan> threads;
       std::vector<GripSpan> grips;
+      // Its round faces and their bands, read the first time an overlap
+      // with a banded body asks (BandSpans).
+      std::optional<std::vector<BandSpan>> spans;
+      const std::vector<BandSpan>& Spans() {
+        if (!spans)
+          spans = BandSpans(*body, shape);
+        return *spans;
+      }
     };
     const auto place = [](const std::vector<Body>& bodies,
                           const TopLoc_Location& loc) {
@@ -744,6 +1006,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
           continue;
         Placed p;
         p.source = &b.shape;
+        p.body = &b;
         p.shape = b.shape.GetShape().Moved(loc);
         p.threads = ThreadSpans(b, loc);
         p.grips = GripSpans(b, loc);
@@ -752,8 +1015,8 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
       }
       return out;
     };
-    const std::vector<Placed> pa = place(bodiesA, la);
-    const std::vector<Placed> pb = place(bodiesB, lb);
+    std::vector<Placed> pa = place(bodiesA, la);
+    std::vector<Placed> pb = place(bodiesB, lb);
     if (pa.empty() || pb.empty())
       return std::nullopt;
 
@@ -787,25 +1050,29 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
         const auto threaded =
             RemoveThreadEngagement(common.Shape(), pa[i].threads, pb[j].threads,
                                    out.engagedThreadPairs);
-        const bool gripping = !pa[i].grips.empty() && !pb[j].grips.empty();
-        const auto overlap =
-            gripping ? RemoveRingGrip(threaded, pa[i].grips, pb[j].grips,
-                                      out.ringGripPairs)
-                     : threaded;
+        if (!pa[i].threads.empty() && !pb[j].threads.empty())
+          out.threadEngagementVolume +=
+              std::max(0.0, VolumeOf(common.Shape()) - VolumeOf(threaded));
+        // The designed-overlap step: what the model says is MEANT to be
+        // solid in solid. A ring in its groove (RingGrip,
+        // docs/parts/README.md#a-ring-in-its-groove) and a press fit
+        // (FitBand, docs/tolerances/README.md#press-fits) are both an
+        // annulus between two coaxial cylinders, relieved exactly; anything
+        // else either pair overlaps is left, a clash. Every contact check
+        // comes through here, so every one honours both.
+        TopoDS_Shape overlap = threaded;
+        if (!pa[i].grips.empty() && !pb[j].grips.empty()) {
+          const double before = VolumeOf(overlap);
+          overlap = RemoveRingGrip(overlap, pa[i].grips, pb[j].grips,
+                                   out.ringGripPairs);
+          out.ringGripVolume += std::max(0.0, before - VolumeOf(overlap));
+        }
+        if ((!pa[i].body->fitBands.empty() || !pb[j].body->fitBands.empty()) &&
+            VolumeOf(overlap) > 1e-9)
+          overlap =
+              RelievePressFits(overlap, pa[i].Spans(), pb[j].Spans(), out);
         GProp_GProps props;
         BRepGProp::VolumeProperties(overlap, props);
-        if (!pa[i].threads.empty() && !pb[j].threads.empty()) {
-          GProp_GProps raw, after;
-          BRepGProp::VolumeProperties(common.Shape(), raw);
-          BRepGProp::VolumeProperties(threaded, after);
-          out.threadEngagementVolume +=
-              std::max(0.0, raw.Mass() - after.Mass());
-        }
-        if (gripping) {
-          GProp_GProps before;
-          BRepGProp::VolumeProperties(threaded, before);
-          out.ringGripVolume += std::max(0.0, before.Mass() - props.Mass());
-        }
         const double v = std::max(0.0, props.Mass());
         out.volume += v;
         if (v > 0.0) {

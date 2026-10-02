@@ -58,6 +58,19 @@ struct Clash {
   glm::dvec3 withinMin{0.0}, withinMax{0.0};
 };
 
+// A pair whose overlap is a PRESS FIT the bands allow
+// (docs/tolerances/README.md#press-fits): relieved, not a clash, and listed
+// once per pair over the whole run — the first sample that found it.
+struct PressFit {
+  uint64_t a = 0, b = 0;
+  uint64_t aInner = 0, bInner = 0; // as Clash
+  std::string aName, bName;
+  std::string fit;           // "Ø47 K7 / 6005 outside (ISO 492 normal)"
+  double interference = 0.0; // as made, on the diameter, mm
+  double maxInterference = 0.0;
+  double volume = 0.0; // relieved, mm3
+};
+
 struct UnknownContact {
   uint64_t a = 0, b = 0;
   std::string aName, bName;
@@ -122,6 +135,9 @@ struct Result {
   // computed again.
   size_t pairsRepeated = 0;
   size_t pairsUnknown = 0;
+  // Every press fit an exact check relieved (PressFit, above). A mesh check
+  // relieves none, and reports such a pair as the clash its triangles see.
+  std::vector<PressFit> pressFits;
   bool checkedClashes = false;
   size_t pairsChecked = 0; // over all samples
   double seconds = 0.0;

@@ -34,6 +34,7 @@ add_executable(designer_tests
     test_retaining_rings.cpp
     test_fits.cpp
     test_tolerances.cpp
+    test_press_fits.cpp
     test_print_allowance.cpp
     test_serialization.cpp
     test_baked_geometry.cpp
@@ -633,6 +634,15 @@ add_test(NAME tolerances_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tolerances_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(tolerances_smoke PROPERTIES TIMEOUT 120)
+
+# Press fits (docs/tolerances/README.md#press-fits): a bearing modelled at its
+# K7 seat's interference is relieved and listed as a press fit by the named
+# pair, the exact sweep, contact_report and an exact motion study, and an H7
+# seat turns the same overlap back into a clash in each. Headless.
+add_test(NAME press_fit_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/press_fit_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(press_fit_smoke PROPERTIES TIMEOUT 120)
 
 # Project tables and lookup() over RPC: both row forms, a variable and a
 # feature reading one, the refusals naming what exists, undo, and the tables

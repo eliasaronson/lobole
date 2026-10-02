@@ -6,6 +6,7 @@
 #include "core/SheetMetal.h"
 #include "core/Units.h"
 
+#include <cstdint>
 #include <functional>
 #include <glm/glm.hpp>
 #include <map>
@@ -113,6 +114,33 @@ struct FaceBand {
   ElementRef reference; // set: a distance from `face` to it
   double lower = 0.0, upper = 0.0;
   std::string label;
+};
+
+// A SIZE BAND on a round face, as the contact checks read it
+// (docs/tolerances/README.md#press-fits): how far the face's diameter may come
+// out from the size it is made at, from a size tolerance (an ISO 286 class or
+// explicit deviations) or a generated bearing ring's ISO 492 band. Two
+// coaxial faces of placed parts, one inside the other, both banded, whose fit
+// allows interference, are a PRESS FIT: Measure::ContactBetween relieves
+// their overlap up to the fit's maximum interference, and anything past it is
+// still a clash. Stamped on a part's bodies by the Document from what it
+// already stores (core/FitBands.h): tolerances live outside the regeneration
+// chain, so no feature can stamp them. Transient, never saved.
+struct FitBand {
+  ElementRef face;
+  // Signed deviations on the DIAMETER, mm, from the size the face is MADE at
+  // (the modelled diameter, less `allowance` on a printed part).
+  double lower = 0.0, upper = 0.0;
+  // A printed part's process allowance on the diameter
+  // (docs/tolerances/README.md#printed-parts): the model carries it, so the
+  // print comes out at the modelled diameter less this. 0 otherwise.
+  double allowance = 0.0;
+  // Which side the band itself says it is: an uppercase class or a bearing's
+  // bore is a hole, a lowercase class or a bearing's outside a shaft.
+  // Explicit deviations say neither, and the geometry decides.
+  enum class Side : uint8_t { Either, Hole, Shaft };
+  Side side = Side::Either;
+  std::string label; // "K7", "+0.010/-0.020", "6005 outside (ISO 492 normal)"
 };
 
 // A bend a sheet feature MADE, written down rather than measured back off the
@@ -244,6 +272,9 @@ struct Body {
   std::vector<HoleMark> holes;
   // The size tolerances a CAM job read off its part (FaceBand, above).
   std::vector<FaceBand> bands;
+  // Every size band its round faces carry, for the contact checks' press
+  // fits (FitBand, above).
+  std::vector<FitBand> fitBands;
 };
 
 class Feature;

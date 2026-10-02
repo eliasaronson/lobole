@@ -115,6 +115,31 @@ struct SetContact {
   // the floor is its grip, relieved the same way.
   size_t ringGripPairs = 0;
   double ringGripVolume = 0.0;
+  // A PRESS FIT (FitBand, docs/tolerances/README.md#press-fits): two coaxial
+  // banded round faces, one inside the other, whose fit allows interference.
+  // Their overlap is relieved up to the fit's maximum interference, over the
+  // length the two faces engage, and listed here rather than as a clash.
+  struct PressFit {
+    std::string fit;              // "Ø47 K7 / 6005 outside (ISO 492 normal)"
+    double diameter = 0.0;        // the basic size the two bands share, mm
+    double interference = 0.0;    // as made, on the diameter, mm
+    double maxInterference = 0.0; // the most the two bands allow, mm
+    double length = 0.0;          // engaged, mm
+    double volume = 0.0;          // relieved, mm3
+  };
+  std::vector<PressFit> pressFits;
+  double pressFitVolume = 0.0;
+  // An overlap between two coaxial round faces, at least one of them banded,
+  // that is NOT relieved — and why: past the band (`excess` the interference
+  // beyond what the fit allows, mm on the diameter), a fit that allows no
+  // interference, a side with no band, a band on the wrong side, or two
+  // faces not coaxial. Its overlap stays in `volume`, a clash.
+  struct FitRefused {
+    std::string fit; // as PressFit's, or the one face that has a band
+    std::string reason;
+    double interference = 0.0, maxInterference = 0.0, excess = 0.0;
+  };
+  std::vector<FitRefused> fitsRefused;
 
   double volume = 0.0;   // total pairwise intersection volume
   double distance = 0.0; // min body-to-body separation, 0 when overlapping

@@ -193,6 +193,38 @@ shapes carry more than `exact_face_budget` faces between them (default 20000
 `not_checked`: the deadline cannot preempt a boolean already running, so one
 such pair would hang the sweep.
 
+### Designed overlaps
+
+Some solid in solid is meant: an engaged thread, a retaining ring gripping
+its groove, a press fit. `Measure::ContactBetween` — the one boolean the
+named pair, the exact sweep, `contact_report`, an exact motion study and a
+clearance assertion all take — removes each from the overlap before it is
+weighed, as an exact annulus, and reports it apart from the clash:
+
+- an engaged thread: `engaged_thread_pairs`, `thread_engagement_volume`
+  ([threads](../modeling/holes-and-threads.md));
+- a ring in its groove (`RingGrip`): `ring_grip_pairs`, `ring_grip_volume`
+  ([a ring in its groove](../parts/README.md#a-ring-in-its-groove));
+- a press fit, two coaxial round faces whose size bands allow the overlap
+  ([press fits](../tolerances/README.md#press-fits)): on the named pair
+  `press_fit_pairs`, `press_fits` [{fit, diameter_mm, interference_mm,
+  max_interference_mm, engaged_length_mm, volume_mm3}] and
+  `press_fit_volume`; on every `contact_report` pair it applies to, the same
+  `press_fits`; and a top-level `press_fits` list [{a, b, fits, volume_mm3}]
+  on the exact sweep and on `contact_report`. A round overlap next to a
+  banded face that is NOT a fit stays a clash and carries
+  `press_fit_refused` [{fit, reason, excess_mm?}] saying why.
+
+A relieved pair is in contact, so `contact_report` counts it `touching` and
+it joins its component. The ring grip and the press fit are one
+designed-overlap step in `ContactBetween` (`RemoveRingGrip`, then
+`RelievePressFits`, `src/core/Measure.cpp`), run only when a pair actually
+overlaps and a side carries a grip or a band. An exact motion study lists
+its press fits once per pair
+([motion studies](../assemblies/README.md#motion-studies)). A mesh check has
+no threads, grips or bands: its answers carry `relieves` saying so, and an
+exact re-run is the one that tells a fit from a clash.
+
 ### Mesh mode
 
 `interference {mode: mesh}` (and the motion study's default check) answers
@@ -379,7 +411,9 @@ placement-keyed cache; a pin in a clearance hole reads clear), and the
 headless smokes `measure_smoke`, `contact_smoke`, `compare_smoke`,
 `query_smoke`, `strict_inputs_smoke`, `papercuts_smoke`,
 `sweep_parallel_smoke` (a one-thread sweep and an all-thread sweep give
-byte-identical reports). GUI: the `measure/*` and `section/*` cases in the
+byte-identical reports). Designed overlaps: `test_thread.cpp`,
+`test_retaining_rings.cpp`, `test_press_fits.cpp` and `press_fit_smoke`
+([press fits](../tolerances/README.md#tests)). GUI: the `measure/*` and `section/*` cases in the
 GUI suite, and the measure parity phase in `remote_smoke`.
 
 ## What it does not do yet

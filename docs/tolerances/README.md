@@ -118,6 +118,59 @@ I/O, mirroring `ThreadStandards`:
 
 Worst case only: no statistical stack-up, no form or position tolerances.
 
+## Press fits
+
+A dowel pin drawn 0.02 mm over its bore, a bearing modelled at its seat's
+interference: an overlap the tolerances allow is not a clash, and the
+contact checks know it from the bands the model already carries. No flag
+and no mate is needed, and nothing new is saved.
+
+- **The bands** (`FitBand`, `core/Feature.h`): every round face with a size
+  tolerance — its class's band at the size the face is made at, or its
+  explicit deviations — and a generated bearing's bore and outside with
+  their ISO 492 normal bands. On a printed part the face is made at its
+  modelled diameter less the process allowance
+  ([printed parts](#printed-parts)), and its band is read there; a printed
+  face still needs a tolerance to have a band. `fitband::Stamp`
+  (`src/core/FitBands.{h,cpp}`) puts them on the part's bodies after every
+  regeneration and every tolerance or print-process edit, so every copy of a
+  body that reaches a contact check carries them, as a ring carries its
+  grip. Tolerances stay outside the regeneration chain: the stamp is the
+  Document's, like a body's appearance, and a tolerance edit still rebuilds
+  nothing.
+- **A press fit** is a bore of one placed body and a shaft of another (read
+  off each face's outward normal), coaxial, engaged along the axis, the shaft
+  larger, both banded, whose bands allow the interference the model shows:
+  as made (a printed side's allowance taken off), the shaft's diameter less
+  the bore's is at most the shaft's upper deviation less the bore's lower.
+  `Measure::ContactBetween` relieves exactly the annulus between the two
+  cylinders over the length they engage (and a hair past each end, ten times
+  the radial interference, which takes a chamfer's run through the
+  annulus). Whatever else the pair overlaps is still a clash.
+- **Not a press fit, still a clash**, with the reason in `press_fit_refused`
+  {fit, reason, interference_mm?, max_interference_mm?, excess_mm?}: past
+  the band (`excess_mm`, the interference beyond what the fit allows, and
+  nothing relieved), a fit that allows no interference (a clearance fit), a
+  band on the wrong side (a hole class on the shaft), one side with no band
+  ("the shaft (Ø8.024 modelled) carries no size band"), or two faces whose
+  axes are more than 0.1 µm apart over the engaged length. Two faces neither
+  of which is banded are plain geometry, and nothing is said.
+- **What is reported**: the fit as `"Ø<basic> <hole band> / <shaft band>"`
+  ("Ø47 K7 / 6005 outside (ISO 492 normal)", "Ø8 H7 / p6"), the basic being
+  the roundest size both made diameters lie within their bands about; the
+  interference as made and the most the bands allow, on the diameter; the
+  engaged length; and the relieved volume. Where each check puts it is in
+  [../inspect/README.md](../inspect/README.md#designed-overlaps).
+- **Pairing is geometric.** Two coaxial banded faces of placed parts are
+  found as a ring's grip is, so a fit needs no mate and holds on a part tab's
+  bodies too. A mate that names the two faces (the pairing `check_fits`
+  reads) places them exactly coaxial, so it is the same pair.
+
+`check_fits` is a different question and unchanged: it reads a fit off a
+mate at ONE basic size, and two faces modelled at different diameters are
+`unverified` there. A model drawn at the interference is what this section
+is for.
+
 ## CAM
 
 A CAM job cuts a toleranced round face, and a floor or shoulder whose
@@ -294,7 +347,17 @@ slot's own stack), so it undoes on its own tab like an edit made there.
 `tests/test_fits.cpp` (the tables, J and j cell for cell and their
 refusals), `tests/test_tolerances.cpp` (storage,
 replace-per-subject, zero rebuilds, undo, round-trip, sizes and distances
-coexisting, stack signs and refusals), `tests/tolerances_smoke.py` (RPC:
+coexisting, stack signs and refusals), `tests/test_press_fits.cpp` (a dowel
+pin at the top of H7/p6 relieved by exactly its annulus, 0.01 mm past it a
+clash naming the excess, no band, one band, a clearance fit, a band on the
+wrong side and a micrometre off-axis each a clash saying so, a collar's
+overlap beside a fit still a clash, a printed bore read at what it prints, a
+6005 at its K7 seat's interference, a motion result keeping its press fits,
+and golden `assembly/v159-press-fit` run as an exact motion study),
+`tests/press_fit_smoke.py` (the K7 bearing a press fit in the named pair,
+the exact sweep, `contact_report` and an exact motion study, the mesh modes
+saying they relieve nothing, and an H7 seat a clash in each, the stored
+motion run invalidated by the tolerance edit), `tests/tolerances_smoke.py` (RPC:
 set/list/clear/undo, `check_fits` off mates including the sub-assembly walk),
 `tests/drawing_smoke.py` (callouts), `tests/test_print_allowance.cpp` (the
 table, its inverse, refusals, storage, the fit and thread sentences),

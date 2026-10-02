@@ -323,6 +323,18 @@ omitted = whichever is active).
   `bbox_min_mm`/`bbox_max_mm`; a mesh check knows only that two bodies
   overlap and gives `within_min_mm`/`within_max_mm`, the region their boxes
   share.
+- An exact check relieves what is meant to overlap — an engaged thread, a
+  ring in its groove, a press fit
+  ([designed overlaps](../inspect/README.md#designed-overlaps)) — and the
+  run lists its press fits once per pair, the first sample that found them,
+  as `press_fits` [{a, b, a_name, b_name, fit, interference_mm,
+  max_interference_mm, volume_mm3}], saved with the result (v159). A mesh
+  check relieves none and says so (`relieves`), except on a rigid pair,
+  which is always checked exactly. A pair whose answer depends on more than
+  its two shapes (a thread, a grip, a band on each side) is asked directly
+  rather than from the [contact cache](#exact-contact-reuse-across-motion-runs),
+  and the bands are inputs of the run's hash, so a tolerance edit makes a
+  stored run stale.
 - `run_motion_study` runs on a copy of the assembly, so the document is left
   where it was; `leave_at` (`"start"`, `"last"` or a sample index) poses
   the live assembly at a sample afterwards so the far end of the travel can
@@ -341,7 +353,8 @@ omitted = whichever is active).
 - A run is answered from a stored one when its inputs hash the same
   (`motion::InputKey`: the definition, every occurrence and placement,
   every mate with its current value, relations, configurations and the
-  placed parts' geometry and materials): `reused: true`, nothing computed,
+  placed parts' geometry, materials and size bands): `reused: true`,
+  nothing computed,
   `recompute: true` to run anyway. So `run_motion_study {leave_at}` after
   a run costs one solve. The result is saved with the project
   (`motion/<id>-<slug>.result.json` with its placements in `.result.bin`,
