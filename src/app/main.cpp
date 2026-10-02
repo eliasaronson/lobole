@@ -5,6 +5,7 @@
 #include "app/FramePacer.h"
 #include "app/GuiTests.h"
 #include "app/HeadlessMain.h"
+#include "app/ParentWatch.h"
 #include "cad/FaceSelector.h"
 #include "common/DesignerVersion.h"
 #include "common/DevicePreference.h"
@@ -1495,6 +1496,10 @@ void printUsage(const char* programName) {
   std::cout << "  --hidden             Never show the window (offscreen "
                "--remote sessions, e.g. automated tests)"
             << std::endl;
+  std::cout << "  --exit-with-parent   Exit (SIGTERM) when the launching "
+               "process dies; for test launchers.\n                       "
+               "DESIGNER_EXIT_WITH_PARENT=<launcher pid> does the same"
+            << std::endl;
   std::cout << "  --perf-hud           Show the frame-time overlay from "
                "launch (also Ctrl+Shift+F, or the\n                       "
                "frame_stats RPC; off by default)"
@@ -1523,6 +1528,7 @@ struct CommandLineArgs {
   bool headless = false;
   bool offscreen = false;
   bool hidden = false;
+  bool exitWithParent = false; // app/ParentWatch.h
   // 0 is BOTH "not asked for" and, once asked for, "let the OS choose" —
   // so the request is a separate flag rather than a magic value.
   int remotePort = 0;
@@ -1622,6 +1628,8 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       args.perfHud = true;
     } else if (arg == "--hidden") {
       args.hidden = true;
+    } else if (arg == "--exit-with-parent") {
+      args.exitWithParent = true;
     } else if (arg == "--record") {
       if (i + 1 < argc) {
         args.recordPath = argv[i + 1];
@@ -2128,6 +2136,10 @@ static int RunOffscreen(const CommandLineArgs& args) {
 int main(int argc, char** argv) {
   InstallCrashHandler(); // fatal-signal backtraces in dev-watch logs
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
+  // Before any thread: a test's instance dies with the test
+  // (app/ParentWatch.h).
+  if (const int status = ArmExitWithParent(args.exitWithParent); status >= 0)
+    return status;
 
   // The frame watchdog (common/Watchdog.h): a stalled main thread is logged
   // with what it was doing and its stack. Every loop below beats it.

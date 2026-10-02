@@ -49,6 +49,15 @@ engine. `--offscreen` conflicts with `--headless`, `--hidden` and
 `--gui-tests` and requires `--remote`; each conflict is refused at argument
 parsing rather than resolved by precedence.
 
+An instance a program starts for its own use should die with that program:
+`--exit-with-parent`, or `DESIGNER_EXIT_WITH_PARENT=<launcher pid>`, has the
+kernel send it SIGTERM when its parent exits — SIGKILL included, where no
+cleanup code runs — and the headless and offscreen loops stop cleanly on it.
+The variable names the launcher, so an instance whose launcher died before
+it started exits at once too; a value that is not a pid is refused. Linux
+only (`prctl(PR_SET_PDEATHSIG)`); `tests/smoke_app.py` and the MCP server's
+autostart set it.
+
 An offscreen instance has no panels, so the viewport is the whole
 framebuffer, and it projects the document into the renderers only when
 something looks (see CLAUDE.md, "Driving / screenshotting the running app").
