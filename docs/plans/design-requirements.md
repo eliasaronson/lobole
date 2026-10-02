@@ -73,7 +73,7 @@ results. This is a format change.
 - `src/ui/RequirementsPanel.cpp`;
 - `tools/designer_sdk.py`, `tools/designer_mcp.py`;
 - `generators/pantilt/`;
-- docs: a new `docs/requirements/README.md`;
+- docs: a new README for a `requirements` docs area;
 - `docs/versioning/format.md`.
 
 ## Verification

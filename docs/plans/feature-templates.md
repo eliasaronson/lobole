@@ -56,7 +56,7 @@ which literal values become parameters. The literals lint and
 - the template library in `src/core/` and its serialization;
 - the RPCs;
 - `src/ui/` (save and insert sessions);
-- docs: a new `docs/modeling/templates.md`;
+- docs: a new templates page in the modeling docs;
 - `docs/versioning/format.md`.
 
 ## Verification
