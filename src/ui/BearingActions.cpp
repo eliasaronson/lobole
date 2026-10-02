@@ -533,13 +533,14 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
       const double t0 = glm::dot(off, dir);
       const double t1 = t0 + rr->s * glm::dot(rz, dir);
       const double lo = std::min(t0, t1), hi = std::max(t0, t1);
-      // Outside the bearing's width, on one side or the other.
-      const double gap = hi <= 1e-6            ? -hi
-                         : lo >= row->B - 1e-6 ? lo - row->B
-                                               : -1.0;
+      // Beside the bearing, on whichever side its middle is: its gap to that
+      // side face, which may be a hair negative where the two only touch
+      // (the 0.01 mm a ring is "seated" within on a shoulder).
+      const double raw = 0.5 * (lo + hi) < 0.5 * row->B ? -hi : lo - row->B;
       const double play = std::max(0.0, rr->m - rr->s) + 0.01;
-      if (gap < 0.0 || gap > play)
+      if (raw < -0.01 || raw > play)
         continue;
+      const double gap = std::max(0.0, raw);
       const double reach = bore ? rr->d2 + 2.0 * rr->b : rr->d2 - 2.0 * rr->b;
       const std::string ringName = bore ? "inner" : "outer";
       const std::string designation =
