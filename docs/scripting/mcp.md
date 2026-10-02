@@ -138,7 +138,9 @@ with `mass_properties` and `render_sheet`, gate assemblies on
 `extract_variables` to name them,
 [../variables/README.md](../variables/README.md#literals-that-should-be-expressions)),
 read `get_state`'s selection before acting on "this" or "the selected" and
-ask rather than guess when it is empty, and run
+ask rather than guess when it is empty, state what the design is for as
+[requirements](../requirements/README.md) and check them before delivering
+(only `pass` is met), and run
 [the review checklist](../inspect/review-checklist.md) before delivery.
 Changing it changes what the benchmark measures.
 

@@ -282,11 +282,14 @@ mass. 4 mm is the bound: the head as designed moves the lens a fifth under
 it at worst, on a rigid journal (the journal's own bend is the beam
 estimate below, beside it).
 
-**A heavier camera.** `load_kg` 1.5 to 1.8 on `yoke_topo.dsgn`, and every
-requirement reads stale before anything is measured: the lens is as long as
-makes the mass, so the swing, the arms and the tilt axis grow with it, and
-the study's forces are the mass's. Checked again (one job, about five
-minutes: the yoke's static and both motion studies run again):
+**A heavier camera.** `load_kg` 1.5 to 1.8, and every requirement reads
+stale before anything is measured, in `yoke_topo.dsgn` and `cam.dsgn` alike:
+the head is sized from its load. The lens is as long as makes the mass, so
+the swing, the arms and the tilt axis grow with it; the worm pair is sized
+from the tilt torque, so the wheel, the base plate under it (108 to 187 cm3)
+and its program change too; and the study's forces are the mass's. Checked
+again on `yoke_topo.dsgn` (one job, about seven minutes on a loaded machine:
+the yoke's static and both motion studies run again):
 
 | requirement | 1.5 kg | 1.8 kg |
 |---|---|---|
@@ -298,13 +301,18 @@ minutes: the yoke's static and both motion studies run again):
 | pan 360, tilt +-90 move clean | pass | fail |
 | camera, cradle clear the yoke through the tilt | 1.2 mm, pass | unresolved |
 
-The lens is not all it says. The taller yoke renames the bores of its
+The lens is not all they say. The regenerated yoke renames the bores of its
 joint screws (`face '39/p1/bore;M39' not found ... modified by a later
-feature`), so three screws lose their seats, and with them the mechanism
-no longer solves at any sample: the clearance through the tilt is
-unresolved, never a pass. The head is parametric in the camera only as far
-as its sizes; that rename is the next thing to fix before it is in its
-mass.
+feature`), so three screws lose their seats, and with them the mechanism no
+longer solves at any sample, so the clearance through the tilt is
+unresolved, never a pass ([Known](#known)).
+
+**Edits that reach less.** A requirement's own bound tightened (the
+sideways lens to 3.0 mm) reads unchecked and nothing else moves; checking
+it again answers from the stored study in 0.02 s, a fail at 3.20 mm. On
+`cam.dsgn`, Top's facing pass made conventional (`climb` off) makes the two
+plate CAM requirements stale and leaves the seven of the assembly current;
+the check measures the two (3.5 s) and they pass.
 
 The base plate's requirements are in `cam.dsgn` with the assembly's (the CAM
 stage opens `pantilt.dsgn`), the lens's in `yoke_topo.dsgn`.
@@ -388,6 +396,11 @@ real bore size error, which is the K7 question above.
 
 ## Known
 
+- A heavier camera (`load_kg`) regenerates a yoke whose joint screws'
+  bores are renamed by a later feature, so three of them lose their seats
+  and the assembly no longer solves ([requirements](#requirements)): the
+  head is parametric in its load as far as its sizes, not yet in its
+  hardware.
 - The camera screw engages 4.23 mm of thread in the camera, under the
   one diameter `check_fasteners` asks; the camera's socket is 5.5 mm deep
   by design and the depth is ASSUMED from makers' manuals (above, sizes).

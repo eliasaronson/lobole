@@ -103,6 +103,13 @@ Only what `describe` cannot express:
   an instance -- a `Param` value keeps its formula -- returning a `Feature`
   whose `.features` are the features it expanded into, each asked for its
   faces like any.
+- **Requirements** ([requirements](../requirements/README.md)):
+  `app.require(name, measure, at_most= | at_least= | within=(lo, hi),
+  source=)` states one, or edits the one of that name (so a generator
+  re-run states the same set); `app.verify_requirements()` checks them as a
+  job, waits, and raises naming every one that is not `pass` (stale,
+  unresolved and unchecked included), or returns the rows with
+  `raise_on_failure=False`.
 
 Rules the hand-written layer follows: every method is a composition of
 documented RPCs and never sends a field the RPC does not have; every method
