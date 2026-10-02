@@ -66,10 +66,14 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
     {{"type": "arc", "center": [u,v], "radius": num,
       "start_angle": rad, "end_angle": rad}}
     {{"type": "ellipse", "center": [u,v], "r_major": num, "r_minor": num,
-      "rotation": rad}}
+      "rotation": rad}} — r_major >= r_minor. Constraint refs: [id, 0] the
+      centre, [id, 3]/[id, 4] the major-axis ends, [id, 5]/[id, 6] the minor;
+      a radius is a "distance" from [id, 0] to [id, 3] or [id, 5]
     {{"type": "ellipse_arc", "center": [u,v], "r_major": num, "r_minor": num,
-      "rotation": rad, "start_param": rad, "end_param": rad}}
+      "rotation": rad, "start_param": rad, "end_param": rad}} — [id, 1]/[id, 2]
+      its ends, 3..6 its axis ends as for ellipse
     {{"type": "spline", "poles": [[u,v], ...], "degree"?: int (default 3)}}
+      — [id, k] is pole k; the first and last poles are its ends
     {{"type": "text", "text": str (one line), "height": CAP height mm,
       "anchor": [u,v], "font"?: "sans" (outline, default) | "hershey"
       (single stroke: open curves for engraving, NO profile), "angle_deg"?:

@@ -36,7 +36,8 @@ for agents.
     variable that sizes the rest of the part; a text label's anchor
     `x y`, `height`, `angle_deg` (degrees) and `spacing`. They are stored as
     `<field>_expr` keys on the entity. Ellipses and arc angles cannot be
-    driven. An `_expr` key the entity does not have (`radius_expr` on a
+    driven (an ellipse's radius is a distance from its centre to an axis
+    end, which can: [../sketching/README.md](../sketching/README.md#ellipses-and-splines)). An `_expr` key the entity does not have (`radius_expr` on a
     circle, whose field is `r`) is refused naming the ones it takes, not
     dropped: dropped, the dimension would silently freeze at its literal.
 
