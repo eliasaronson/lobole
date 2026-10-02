@@ -750,6 +750,23 @@ void DrawCamPanel(AppState& state) {
     return;
   }
   PanelHeading(kPanelCam);
+  // Which rows are open is ImGui's, stored in this window by setup id -- and
+  // every job counts its ids from the same start, so a job's "Back" setup
+  // came up open because ANOTHER job's setup of that id had been, in an
+  // earlier project or on the other job tab (cam/two_setups_are_open_at_once
+  // after cam/delete_reaches_every_row_kind). What is open is per job.
+  {
+    static uint64_t shownGeneration = ~uint64_t{0};
+    static uint64_t shownJob = 0;
+    const uint64_t jobSlot = state.activePart < state.parts.size()
+                                 ? state.parts[state.activePart].id
+                                 : 0;
+    if (shownGeneration != state.projectGeneration || shownJob != jobSlot) {
+      ImGui::GetStateStorage()->Clear();
+      shownGeneration = state.projectGeneration;
+      shownJob = jobSlot;
+    }
+  }
 
   std::vector<cam::Setup>& setups = state.job->GetSetups();
   if (setups.empty()) {
