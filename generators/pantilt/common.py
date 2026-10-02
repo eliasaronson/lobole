@@ -147,6 +147,61 @@ def groove(part, radius, rim_z, offset, name):
     return part.app.add_feature(feature=feature)
 
 
+# Every bearing the head presses into a housing sits in the same seat: a
+# counterbore the bearing's outside diameter wide and its width deep, cut
+# into the face it is pressed in from. Drawn once, saved as a feature
+# template (docs/modeling/templates.md), and placed as an instance on each
+# housing -- the base plate's pocket, the pan wheel's counterbore and the
+# yoke's two tilt seats -- so the seat is one definition with four sets of
+# values, not four copies of two features.
+SEAT = "bearing seat"
+
+
+def define_bearing_seat(part, face, D, B):
+    """Save the bearing seat template in the project's library, drawn on
+    `face` of `part` with the variables `D` (the bearing's outside
+    diameter) and `B` (its width) -- Params, so they become the template's
+    parameters D and B -- and the centre's offset along the face's v as a
+    third, `v`. The two features are taken out again: the part's own seat
+    is an instance like every other (bearing_seat)."""
+    sk = part.sketch(on=face, name="Bearing seat")
+    sk.circle((0, 0), d=D)
+    sketch = sk.add()
+    cut = part.cut(sketch, B, reversed=True, name="Bearing seat")
+    cut_id = cut.feature.id if hasattr(cut, "feature") else cut.id
+    part.save_template(
+        SEAT, [sketch, cut_id],
+        literals=[{"feature": sketch, "path": "entities/0/cy",
+                   "param": "v"}],
+        rename={D.expr: "D", B.expr: "B"},
+        comments={"D": "mm, the bearing's outside diameter as modelled "
+                       "(a printed housing's allows for the print)",
+                  "B": "mm, the bearing's width: how deep it is pressed in",
+                  "v": "mm, the seat's centre along the face's v"},
+        comment="a counterbore a bearing is pressed into: D across, B deep",
+        replace=True)
+    part.app.delete_feature(feature_id=cut_id)
+    part.app.delete_feature(feature_id=sketch.id)
+
+
+def bearing_seat(part, on, D, B, v=0.0, name="Bearing seat"):
+    """An instance of the bearing seat template standing on `on` (a face or
+    a frame): `D` across and `B` deep, its centre `v` along the frame's v.
+    Each a number or a Param; a Param stays its variable."""
+    return part.template(SEAT, on, {"D": D, "B": B, "v": v}, name=name)
+
+
+def template_part(feats, name, type_):
+    """The ids of the features named `name` of type `type_` in a part's
+    get_state rows -- a Template instance named `name` answering with the
+    features it expanded into of that type."""
+    out = [f["id"] for f in feats if f["name"] == name and f["type"] == type_]
+    out += [e["id"] for f in feats
+            if f["name"] == name and f["type"] == "Template"
+            for e in f.get("expanded", []) if e["type"] == type_]
+    return out
+
+
 def ring_groove_face(part):
     """The floor of the part's retaining ring groove, as a face ref."""
     floors = [f for f in part.body().faces(kind="cylinder")

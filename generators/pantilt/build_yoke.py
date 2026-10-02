@@ -300,10 +300,12 @@ def yoke(app, S, name="yoke", design="solid"):
     if design == "lightened":
         lighten(part, S, model, planes)
     # The tilt bearings, pressed in from outside onto a shoulder.
+    # The bearing seat template (common.bearing_seat), on each arm's outer
+    # face's plane, its centre up the arm at the tilt axis.
     for sign in (1, -1):
-        sk = part.sketch(on=planes[("arm_out", sign)], name="Tilt bearing")
-        sk.circle((0, zt_tilt), d=model("hole", S["main_brg_D"]))
-        part.cut(sk.add(), X.main_brg_B, reversed=True, name="Tilt bearing")
+        common.bearing_seat(part, planes[("arm_out", sign)],
+                            model("hole", S["main_brg_D"]), X.main_brg_B,
+                            v=zt_tilt, name="Tilt bearing")
     sk = part.sketch(on=planes[("arm_out", 1)], name="Tilt relief")
     sk.circle((0, zt_tilt), d=model("hole", S["relief_d"]))
     part.cut(sk.add(), 1.0, end_mode="through_all", reversed=True,
