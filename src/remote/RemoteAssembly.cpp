@@ -70,6 +70,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "id, occurrence"},
     {"list_occurrences",
      "List occurrences with transforms, state and ref_kind (part|assembly); a "
+     "rider (`attached_to`, a placed fastener) names the faces it is seated "
+     "on (its hole) in `attach_seat`, says `attach_error` when they no longer "
+     "resolve and `attach_warning` when it rides at a fixed offset; a "
      "sub-assembly also reports leaf_count and the leaves' paths. "
      "{bounds: true} adds each one's WORLD bbox_min/bbox_max — the extent "
      "where it actually sits, which get_state cannot give you because its "
@@ -78,7 +81,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "bounds", remote::NoFlags,
      "occurrences[]{type,id,name,part_id,ref_kind,part_version,transform,"
      "visible,fixed,configuration_id,attached_to?,attach_offset?,attach_"
-     "rotation?,material?,flexible?,inner_poses?,inner_mate_dofs?,bbox_min?,"
+     "rotation?,attach_seat?{face,axis,inner_path?},attach_error?,"
+     "attach_warning?,material?,flexible?,inner_poses?,inner_mate_dofs?,bbox_"
+     "min?,"
      "bbox_max?,leaf_count?,leaves?}"},
     {"set_occurrence_transform",
      "Set an occurrence's world transform {id, transform: {position, "
@@ -285,7 +290,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "missed, and which mates were redundant but consistent (three bolts "
      "through a flange: satisfied, saying nothing new — not an error). "
      "ALWAYS present: errored_mates, placed, occurrences, placed_by_mates, "
-     "placed_by_transform, mates[]. ONLY when the assembly has mate loops: "
+     "placed_by_transform, mates[]. `errored_attachments` and "
+     "`attachment_errors` only when a rider's seat no longer resolves (it "
+     "stays where it was; the error says which face). ONLY when the "
+     "assembly has mate loops: "
      "loop_mates, dof, loops_closed, residual_mm, redundant_mates — a tree "
      "assembly has no loop to report on, so read them with a default. A "
      "mate whose loop did not close carries its OWN `residual_mm`. When a "
@@ -301,7 +309,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "could not move.",
      "", remote::NoFlags,
      "errored_mates,placed,occurrences,placed_by_mates,placed_by_transform,"
-     "mates[]{id,name,status,error?,residual_mm?},loop_mates?,dof?,"
+     "mates[]{id,name,status,error?,residual_mm?},errored_attachments?,"
+     "attachment_errors?[]{occurrence,name,error},loop_mates?,dof?,"
      "loops_closed?,residual_mm?,redundant_mates?,"
      "suspects?[]{mate,name,tilt_deg,connector?,closes,sole},"
      "flexible?[]{occurrence,name,configuration_id,placed_by_mates?,"
@@ -374,7 +383,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "a pattern mates at its own hole, so deleting one leaves the parts held "
      "by the others. The extra mates across an interface already joined are "
      "consistent, and solve_assembly lists them in `redundant_mates` rather "
-     "than as errors.",
+     "than as errors. Each piece RIDES the part it bears on and follows "
+     "its HOLE (the face and bore it is seated on, by name) when the hole "
+     "moves inside that part; a piece that could not be tied to a hole is "
+     "listed in "
+     "`warnings`.",
      "drive, dry_run, far_end, nut, rim, size, standard, washer, "
      "washer_under_head, washer_under_nut"},
     {"bom",
@@ -390,7 +403,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "is wrong with it (docs/parts/README.md). A length derived from other "
      "documents' geometry cannot be a live binding (A2), so a stack that "
      "changed under a screw has to be REPORTED — this is that report: too "
-     "short, bottoming out in a blind hole, or spanning nothing at all. "
+     "short, longer than its stack needs (a shorter stocked length spans "
+     "it), bottoming out in a blind hole, spanning nothing at all, or no "
+     "longer in its hole (the hole it follows was deleted or renamed). "
      "Nothing is stored to make it work: a placed fastener's position and "
      "orientation are its rim and its axis, so it also checks one nobody "
      "derived. Returns `examined` and `skipped` beside `ok`/`findings`: empty "
@@ -1013,7 +1028,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                 // spans. EMPTY when they were already held — the second bolt
                 // through one bracket adds nothing, and saying so is how a
                 // caller tells that from a failure to make one.
-                {"mates", fit.mates}};
+                {"mates", fit.mates},
+                {"warnings", fit.warnings}};
   }
   if (m == "add_fastener") {
     glm::dvec3 position(0.0);
@@ -1378,6 +1394,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     json arr = json::array();
     for (const Occurrence& o : state.assembly->GetOccurrences()) {
       json oj = DocumentIO::OccurrenceToJson(o);
+      if (!o.attachError.empty())
+        oj["attach_error"] = o.attachError;
+      if (!o.attachWarning.empty())
+        oj["attach_warning"] = o.attachWarning;
       if (wantBounds) {
         glm::dvec3 bmn(0.0), bmx(0.0);
         bool have = false;
@@ -2511,6 +2531,19 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // sub-assembly's and are not in `mates` above.
     if (json rows = FlexibleRows(state, rep); !rows.empty())
       out["flexible"] = std::move(rows);
+    // A rider whose hole is gone stays where it was: said here, in the
+    // answer to the solve that found it
+    // (docs/parts/README.md#attached-and-mated).
+    if (rep.erroredAttachments > 0) {
+      out["errored_attachments"] = rep.erroredAttachments;
+      json lost = json::array();
+      for (const Occurrence& o : state.assembly->GetOccurrences())
+        if (!o.attachError.empty())
+          lost.push_back(json{{"occurrence", o.id},
+                              {"name", o.name},
+                              {"error", o.attachError}});
+      out["attachment_errors"] = std::move(lost);
+    }
     if (rep.loopMates > 0) {
       out["loop_mates"] = rep.loopMates;
       out["dof"] = rep.dof;

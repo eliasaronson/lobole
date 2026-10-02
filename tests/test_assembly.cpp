@@ -222,11 +222,44 @@ TEST_CASE("Frozen v72 assembly golden carries an attachment",
   // Moving what it rides on carries it, which is the whole point: the
   // placement is DERIVED while the attachment stands.
   asmDoc->FindById(1)->position = glm::vec3(0.0f, 25.0f, 0.0f);
-  CHECK(assembly::ApplyAttachments(*asmDoc) == 1);
+  CHECK(assembly::ApplyAttachments(*asmDoc, nullptr) == 1);
   CHECK_THAT(asmDoc->FindById(2)->position.y, WithinAbs(25.0f, 1e-4f));
   CHECK_THAT(asmDoc->FindById(2)->position.x, WithinAbs(4.0f, 1e-4f));
   // Idempotent: re-running with nothing changed moves nothing.
-  CHECK(assembly::ApplyAttachments(*asmDoc) == 0);
+  CHECK(assembly::ApplyAttachments(*asmDoc, nullptr) == 0);
+}
+
+// A FROZEN golden for the seat an attachment follows (v157): the rider names
+// its parent's face and the bore whose axis centres it, and its offset is in
+// the SEAT's frame
+// (docs/parts/README.md#attached-and-mated).
+TEST_CASE("Frozen v157 assembly golden carries the seat a rider follows",
+          "[assembly][golden]") {
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
+                          "assembly" / "v157-attach-seat.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc);
+  const Occurrence* screw = asmDoc->FindById(2);
+  REQUIRE(screw != nullptr);
+  CHECK(screw->attachedTo == 1);
+  REQUIRE(screw->attachSeat.IsSet());
+  CHECK(screw->attachSeat.face.featureId == 3);
+  CHECK(screw->attachSeat.face.name == "1/face5;M3");
+  CHECK(screw->attachSeat.axis.name == "2/face0;M3");
+  CHECK(screw->attachSeat.innerPath.empty());
+  CHECK_THAT(screw->attachOffset.z, WithinAbs(1.6, 1e-12));
+  // Written back the way it was read.
+  const nlohmann::json j = DocumentIO::OccurrenceToJson(*screw);
+  CHECK(j.at("attach_seat").at("face").at("element") == "1/face5;M3");
+  CHECK_FALSE(j.at("attach_seat").contains("inner_path"));
+  // With no part to resolve its hole in, the rider stays put and SAYS so
+  // rather than falling back to the plate's frame.
+  int errored = 0;
+  CHECK(assembly::ApplyAttachments(*asmDoc, nullptr, nullptr, &errored) == 0);
+  CHECK(errored == 1);
+  CHECK_FALSE(asmDoc->FindById(2)->attachError.empty());
+  CHECK_THAT(asmDoc->FindById(2)->position.z, WithinAbs(11.6, 1e-12));
 }
 
 TEST_CASE("Frozen v23 assembly golden loads at the exact schema",

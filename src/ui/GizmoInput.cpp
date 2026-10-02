@@ -1018,7 +1018,8 @@ bool HandleGizmoInput(AppState& state, const Ray& screenRay, bool clicked,
     // solve, and the composition is a few matrix multiplies per rider.
     for (const Occurrence& rider : state.assembly->GetOccurrences())
       if (rider.attachedTo == occ->id) {
-        assembly::ApplyAttachments(*state.assembly);
+        assembly::ApplyAttachments(*state.assembly, PartResolverFor(state),
+                                   AssemblyResolverFor(state));
         break;
       }
     PushOccurrenceLive(state, occ->id);

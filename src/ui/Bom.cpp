@@ -219,6 +219,19 @@ FastenerReport CheckFasteners(AppState& state) {
   std::vector<FastenerCheck>& out = report.findings;
   if (!state.assembly)
     return report;
+  // A piece whose HOLE no longer resolves stands where the hole used to be
+  // (docs/parts/README.md#attached-and-mated). That is the finding: what its
+  // axis now crosses is a measurement of the wrong place.
+  std::set<uint64_t> lost;
+  for (const Occurrence& o : state.assembly->GetOccurrences()) {
+    if (o.attachError.empty())
+      continue;
+    lost.insert(o.id);
+    const FastenerFeature* f = SoleFastenerOf(OccurrencePartDoc(state, o));
+    out.push_back({o.id, f != nullptr ? f->Designation() : o.name,
+                   "is not in its hole: " + o.attachError +
+                       ". Re-fit it from the rim, or delete it."});
+  }
   const std::vector<assembly::FlatInstance> flat = FlattenActiveAssembly(state);
 
   // Every body once, tagged with the instance it came from, so a fastener can
@@ -244,7 +257,8 @@ FastenerReport CheckFasteners(AppState& state) {
 
   for (size_t i = 0; i < flat.size(); i++) {
     const FastenerFeature* screw = SoleFastenerOf(flat[i].part);
-    if (screw == nullptr || !flat[i].visible)
+    if (screw == nullptr || !flat[i].visible ||
+        lost.contains(flat[i].rootOccurrenceId))
       continue;
     const parts::Profile* profile = parts::ProfileFor(screw->standard);
     if (profile == nullptr || profile->kind != parts::Kind::Screw)
@@ -398,6 +412,21 @@ FastenerReport CheckFasteners(AppState& state) {
                       " too short: its stack is now " + Mm(grip) +
                       " and it is " + Mm(screw->length) +
                       " under the head. Re-fit it, or re-derive from the rim.";
+        out.push_back(finding);
+        continue;
+      }
+      // The other way a stack changes under a screw: it got THINNER (a
+      // plate made thinner, the nut following its face in), and the screw
+      // now stands out past its nut by more than a stocked length's step.
+      // The fit snaps UP to the shortest length that spans, so a screw a
+      // shorter stocked length would span is longer than any fit makes.
+      const std::optional<double> needed =
+          parts::SnapLength(screw->standard, screw->size, grip, nullptr);
+      if (needed && *needed < screw->length - 1e-3) {
+        finding.why = "is longer than its stack needs: the stack is now " +
+                      Mm(grip) + ", it is " + Mm(screw->length) +
+                      " under the head, and a stocked " + Mm(*needed) +
+                      " spans it. Re-fit it from the rim.";
         out.push_back(finding);
       }
       continue;

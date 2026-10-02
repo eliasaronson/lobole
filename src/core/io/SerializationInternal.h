@@ -19,7 +19,14 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    156; // v156: two feature types — RetainingRing {standard: din471|din472,
+    157; // v157: an attached occurrence may name the faces it is SEATED on,
+         //      `attach_seat` {face, axis: {feature_id, element},
+         //      inner_path?} (a fastener: its hole's face and bore); with it
+         //      `attach_offset`/`attach_rotation` are in the seat's frame, so
+         //      it follows a hole that moves inside its part. Omitted
+         //      otherwise; both faces or the load is refused
+         //      (docs/parts/README.md#attached-and-mated).
+         // v156: two feature types — RetainingRing {standard: din471|din472,
          //      size} (a generated retaining ring) and RetainingRingGroove
          //      {face, from, offset (+_expr), standard?} (its groove cut in a
          //      shaft or bore) (docs/parts/README.md#retaining-rings).

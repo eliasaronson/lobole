@@ -9,6 +9,7 @@
 #include "cad/CADKernel.h"
 #include "core/Document.h"
 #include "core/MassProps.h"
+#include "core/Measure.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -17,6 +18,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstdio>
+#include <map>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -604,8 +606,320 @@ std::optional<glm::dmat4> ConnectorLocalFrame(const Connector& c,
               " on its part (feature deleted or contributing nothing?)");
 }
 
-int ApplyAttachments(AssemblyDocument& asmDoc) {
+namespace {
+// One face of a seat, resolved as a mate connector on it would be. A memo
+// (per ApplyAttachments call) answers a face many riders share once: every
+// screw of a pattern bears on the same plate face, and resolving a face
+// computes its centroid.
+using FaceMemo =
+    std::map<std::string, std::pair<std::optional<glm::dmat4>, std::string>>;
+
+std::optional<glm::dmat4>
+SeatFaceFrame(const ElementRef& face, const std::vector<uint64_t>& innerPath,
+              const Occurrence& parent, const AssemblyDocument& asmDoc,
+              const PartResolver& partById, const AssemblyResolver& asmById,
+              std::string& why, FaceMemo* memo) {
+  std::string key;
+  if (memo != nullptr) {
+    key = std::to_string(parent.id) + "/" + std::to_string(face.featureId) +
+          "/" + face.name;
+    for (const uint64_t step : innerPath)
+      key += "|" + std::to_string(step);
+    if (const auto it = memo->find(key); it != memo->end()) {
+      why = it->second.second;
+      return it->second.first;
+    }
+  }
+  Connector c;
+  c.occurrenceId = parent.id;
+  c.innerPath = innerPath;
+  c.anchor.face = face;
+  const auto frame = ConnectorLocalFrame(c, asmDoc, partById, &why, asmById);
+  if (memo != nullptr)
+    (*memo)[key] = {frame, why};
+  return frame;
+}
+
+std::optional<glm::dmat4> SeatFrameMemo(const AttachSeat& seat,
+                                        const Occurrence& parent,
+                                        const AssemblyDocument& asmDoc,
+                                        const PartResolver& partById,
+                                        const AssemblyResolver& asmById,
+                                        std::string* whyNot, FaceMemo* memo) {
+  const auto fail = [&](std::string why) -> std::optional<glm::dmat4> {
+    if (whyNot)
+      *whyNot = std::move(why);
+    return std::nullopt;
+  };
+  if (!seat.IsSet())
+    return fail("it names no seat");
+  if (!partById)
+    return fail("nothing resolves the part it is seated in");
+  std::string why;
+  const auto onFace = SeatFaceFrame(seat.face, seat.innerPath, parent, asmDoc,
+                                    partById, asmById, why, memo);
+  if (!onFace)
+    return fail("its face: " + why);
+  const auto onAxis = SeatFaceFrame(seat.axis, seat.innerPath, parent, asmDoc,
+                                    partById, asmById, why, memo);
+  if (!onAxis)
+    return fail("its axis: " + why);
+  const glm::dvec3 n = glm::normalize(glm::dvec3((*onFace)[2]));
+  const glm::dvec3 inPlane((*onFace)[3]);
+  const glm::dvec3 d = glm::normalize(glm::dvec3((*onAxis)[2]));
+  const glm::dvec3 onLine((*onAxis)[3]);
+  // Square, as a hole is to the face it opens in and a groove's floor to
+  // its flank. An axis that has tilted off its face (the names now meaning
+  // different faces) has no one point to seat anything at, and picking one
+  // is how hardware ends up in a wall.
+  const double c0 = glm::dot(d, n);
+  if (std::abs(c0) < 1.0 - 1e-6)
+    return fail("its axis is no longer square to its face (" +
+                FormatDeg(std::acos(std::min(1.0, std::abs(c0)))) + " off)");
+  const glm::dvec3 origin = onLine + d * (glm::dot(inPlane - onLine, n) / c0);
+  // The twist about the axis from the PARENT's axes, never a face's own
+  // parametrization, which a regeneration is free to change.
+  const glm::dvec3 xHint = std::abs(n.x) < 0.9 ? glm::dvec3(1.0, 0.0, 0.0)
+                                               : glm::dvec3(0.0, 1.0, 0.0);
+  return FrameMatrix(origin, xHint, n);
+}
+} // namespace
+
+std::optional<glm::dmat4>
+SeatFrame(const AttachSeat& seat, const Occurrence& parent,
+          const AssemblyDocument& asmDoc, const PartResolver& partById,
+          const AssemblyResolver& asmById, std::string* whyNot) {
+  return SeatFrameMemo(seat, parent, asmDoc, partById, asmById, whyNot,
+                       nullptr);
+}
+
+bool SeatRider(const AssemblyDocument& asmDoc, Occurrence& rider,
+               const AttachSeat& seat, const PartResolver& partById,
+               const AssemblyResolver& asmById, std::string* whyNot) {
+  const Occurrence* parent =
+      rider.attachedTo != 0 ? asmDoc.FindById(rider.attachedTo) : nullptr;
+  if (parent == nullptr) {
+    if (whyNot)
+      *whyNot = "it rides on nothing";
+    return false;
+  }
+  const auto frame =
+      SeatFrame(seat, *parent, asmDoc, partById, asmById, whyNot);
+  if (!frame)
+    return false;
+  glm::dvec3 pos;
+  glm::dquat rot;
+  Decompose(glm::inverse(PlacementOf(*parent) * *frame) * PlacementOf(rider),
+            pos, rot);
+  rider.attachSeat = seat;
+  rider.seatCacheDoc = 0; // a new seat: resolve it afresh
+  rider.attachOffset = pos;
+  rider.attachRotation = rot;
+  rider.attachWarning.clear();
+  rider.attachError.clear();
+  return true;
+}
+
+namespace {
+// The parts under `parent` a hole can be in, each with its placement in the
+// parent's space and the path a Connector names it by.
+struct HoleLeaf {
+  const Document* part = nullptr;
+  glm::dmat4 unit{1.0};
+  std::vector<uint64_t> innerPath;
+};
+
+std::vector<HoleLeaf> LeavesOf(const AssemblyDocument& asmDoc,
+                               const Occurrence& parent,
+                               const PartResolver& partById,
+                               const AssemblyResolver& asmById) {
+  std::vector<HoleLeaf> out;
+  if (!partById)
+    return out;
+  if (parent.refKind == OccurrenceRef::Part) {
+    if (const Document* part = partById(parent.partId, parent.configurationId))
+      out.push_back({part, glm::dmat4(1.0), {}});
+    return out;
+  }
+  const auto flat = Flatten(asmDoc, partById, asmById);
+  if (!flat)
+    return out;
+  const glm::dmat4 toUnit = glm::inverse(PlacementOf(parent));
+  for (const FlatInstance& inst : *flat)
+    if (inst.rootOccurrenceId == parent.id && inst.part != nullptr)
+      out.push_back({inst.part, toUnit * inst.world, inst.innerIds});
+  return out;
+}
+} // namespace
+
+std::optional<AttachSeat>
+FindHoleSeat(const AssemblyDocument& asmDoc, const Occurrence& parent,
+             const glm::dmat4& riderWorld, const PartResolver& partById,
+             const AssemblyResolver& asmById, std::string* whyNot) {
+  const auto fail = [&](std::string why) -> std::optional<AttachSeat> {
+    if (whyNot)
+      *whyNot = std::move(why);
+    return std::nullopt;
+  };
+  const std::vector<HoleLeaf> leaves =
+      LeavesOf(asmDoc, parent, partById, asmById);
+  if (leaves.empty())
+    return fail("its part is not loaded");
+  // The piece's axis in the parent's space: a fastener's origin is its
+  // bearing face and its Z the axis it sits on.
+  const glm::dmat4 rider = glm::inverse(PlacementOf(parent)) * riderWorld;
+  const glm::dvec3 at(rider[3]);
+  const glm::dvec3 axis = glm::normalize(glm::dvec3(rider[2]));
+  // Coincidence, not a design size: what OCC's exact geometry and a pose
+  // written in floats agree to.
+  constexpr double kOn = 1e-3;     // mm
+  constexpr double kSquare = 1e-6; // 1 - |cos|
+  const auto offAxis = [&](const glm::dvec3& p) {
+    const glm::dvec3 v = p - at;
+    return glm::length(v - glm::dot(v, axis) * axis);
+  };
+
+  struct Face {
+    const HoleLeaf* leaf;
+    const Body* body;
+    int index;
+    double s;
+    glm::dvec3 point, normal;
+  };
+  std::optional<Face> best;
+  std::vector<CADShape::FaceSnap> snaps;
+  for (const HoleLeaf& leaf : leaves) {
+    for (const Body& body : leaf.part->GetBodies()) {
+      if (body.reference)
+        continue;
+      for (const auto& [index, name] : body.elementMap.names) {
+        glm::dvec3 c, n, u;
+        if (!body.shape.FacePlane(index, c, n, u))
+          continue;
+        const glm::dvec3 nu =
+            glm::normalize(glm::dvec3(leaf.unit * glm::dvec4(n, 0.0)));
+        if (std::abs(glm::dot(nu, axis)) < 1.0 - kSquare)
+          continue;
+        const glm::dvec3 cu(leaf.unit * glm::dvec4(c, 1.0));
+        // The piece stands on the face's OUTSIDE, on it or beyond it by
+        // what is stacked between (a washer under a head).
+        const double s = glm::dot(at - cu, nu);
+        if (s < -kOn || (best && s >= best->s))
+          continue;
+        // ...and the face is this hole's: a circle of its edge on the axis.
+        snaps.clear();
+        body.shape.FaceSnapPoints(index, snaps);
+        const bool rimmed =
+            std::any_of(snaps.begin(), snaps.end(), [&](const auto& sp) {
+              return sp.circleCenter &&
+                     offAxis(glm::dvec3(leaf.unit *
+                                        glm::dvec4(sp.point, 1.0))) < kOn;
+            });
+        if (rimmed)
+          best = Face{&leaf, &body, index, s, cu, nu};
+      }
+    }
+  }
+  if (!best)
+    return fail("no face of " + parent.name +
+                " with a hole on the piece's axis faces it");
+
+  // The bore: coaxial, and opening in that face's plane. A cylinder running
+  // INTO the material first (the bore under a counterbore floor), then any
+  // cylinder, then a cone (a countersink, whose rim is on the face).
+  const HoleLeaf& leaf = *best->leaf;
+  const Body& body = *best->body;
+  int bore = -1;
+  int rank = 4;
+  for (const auto& [index, name] : body.elementMap.names) {
+    glm::dvec3 o, a, x;
+    if (body.shape.FacePlane(index, o, a, x) ||
+        !body.shape.FaceAxis(index, o, a, x))
+      continue;
+    const auto info = Measure::DescribeFaceAt(body, index);
+    if (!info || (info->kind != "cylinder" && info->kind != "cone"))
+      continue;
+    const glm::dvec3 au =
+        glm::normalize(glm::dvec3(leaf.unit * glm::dvec4(a, 0.0)));
+    if (std::abs(glm::dot(au, axis)) < 1.0 - kSquare ||
+        offAxis(glm::dvec3(leaf.unit * glm::dvec4(o, 1.0))) > kOn)
+      continue;
+    snaps.clear();
+    body.shape.FaceSnapPoints(index, snaps);
+    bool inPlane = false, behind = false;
+    for (const auto& sp : snaps) {
+      if (!sp.circleCenter)
+        continue;
+      const double h = glm::dot(
+          glm::dvec3(leaf.unit * glm::dvec4(sp.point, 1.0)) - best->point,
+          best->normal);
+      inPlane |= std::abs(h) < kOn;
+      behind |= h < -kOn;
+    }
+    if (!inPlane)
+      continue;
+    const int r = info->kind == "cylinder" ? (behind ? 0 : 1) : 2;
+    if (r < rank) {
+      rank = r;
+      bore = index;
+    }
+  }
+  if (bore < 0)
+    return fail("the face it bears on in " + parent.name +
+                " has no bore on the piece's axis");
+  AttachSeat seat;
+  seat.face = ElementRef{body.createdBy, body.elementMap.names.at(best->index)};
+  seat.axis = ElementRef{body.createdBy, body.elementMap.names.at(bore)};
+  seat.innerPath = leaf.innerPath;
+  return seat;
+}
+
+bool BindRiderToHole(const AssemblyDocument& asmDoc, Occurrence& rider,
+                     const PartResolver& partById,
+                     const AssemblyResolver& asmById) {
+  rider.attachSearched = true;
+  const Occurrence* parent =
+      rider.attachedTo != 0 ? asmDoc.FindById(rider.attachedTo) : nullptr;
+  if (parent == nullptr)
+    return false;
+  std::string why;
+  const auto seat = FindHoleSeat(asmDoc, *parent, PlacementOf(rider), partById,
+                                 asmById, &why);
+  if (!seat || !SeatRider(asmDoc, rider, *seat, partById, asmById, &why)) {
+    rider.attachWarning = "rides " + parent->name +
+                          " at a fixed offset: " + why +
+                          ", so it will not follow a hole if the part changes";
+    return false;
+  }
+  return true;
+}
+
+int BindRidersToHoles(AssemblyDocument& asmDoc, const PartResolver& partById,
+                      const AssemblyResolver& asmById) {
+  int bound = 0;
+  for (Occurrence& o : asmDoc.GetOccurrences()) {
+    if (o.attachedTo == 0 || o.attachSeat.IsSet() || o.attachSearched)
+      continue;
+    const Occurrence* parent = asmDoc.FindById(o.attachedTo);
+    if (parent == nullptr || parent->attachedTo != 0)
+      continue; // ApplyAttachments leaves these alone too
+    // Where the old offset puts it NOW: the parent may have moved since the
+    // rider's pose was written.
+    Decompose(PlacementOf(*parent) *
+                  glm::translate(glm::dmat4(1.0), o.attachOffset) *
+                  glm::mat4_cast(o.attachRotation),
+              o.position, o.orientation);
+    if (BindRiderToHole(asmDoc, o, partById, asmById))
+      bound++;
+  }
+  return bound;
+}
+
+int ApplyAttachments(AssemblyDocument& asmDoc, const PartResolver& partById,
+                     const AssemblyResolver& asmById, int* errored) {
   int moved = 0;
+  int failed = 0;
+  FaceMemo memo;
   for (Occurrence& o : asmDoc.GetOccurrences()) {
     if (o.attachedTo == 0)
       continue;
@@ -614,7 +928,42 @@ int ApplyAttachments(AssemblyDocument& asmDoc) {
       continue; // the parent went; the rider keeps its last pose
     if (parent->attachedTo != 0)
       continue; // one level (see the header)
-    const glm::dmat4 world = PlacementOf(*parent) *
+    glm::dmat4 seat(1.0);
+    if (o.attachSeat.IsSet()) {
+      // The part the seat is in, when the parent places one directly: what
+      // the cached frame was resolved against. A path into a sub-assembly
+      // is resolved every time (a flexible unit moves what is inside it).
+      const Document* leaf =
+          partById && o.attachSeat.innerPath.empty() &&
+                  parent->refKind == OccurrenceRef::Part
+              ? partById(parent->partId, parent->configurationId)
+              : nullptr;
+      if (leaf != nullptr && o.seatCacheDoc == leaf->InstanceId() &&
+          o.seatCacheVersion == leaf->Version()) {
+        seat = o.seatCacheFrame;
+      } else {
+        std::string why;
+        const auto frame = SeatFrameMemo(o.attachSeat, *parent, asmDoc,
+                                         partById, asmById, &why, &memo);
+        o.seatCacheDoc = 0;
+        if (!frame) {
+          // Left where it was, and SAID: a screw standing where its hole
+          // used to be is the plausible-and-wrong this must not be quiet
+          // about.
+          o.attachError = "its seat in " + parent->name + " is gone: " + why;
+          failed++;
+          continue;
+        }
+        o.attachError.clear();
+        seat = *frame;
+        if (leaf != nullptr) {
+          o.seatCacheDoc = leaf->InstanceId();
+          o.seatCacheVersion = leaf->Version();
+          o.seatCacheFrame = seat;
+        }
+      }
+    }
+    const glm::dmat4 world = PlacementOf(*parent) * seat *
                              glm::translate(glm::dmat4(1.0), o.attachOffset) *
                              glm::mat4_cast(o.attachRotation);
     glm::dvec3 pos;
@@ -626,6 +975,8 @@ int ApplyAttachments(AssemblyDocument& asmDoc) {
       moved++;
     }
   }
+  if (errored)
+    *errored = failed;
   return moved;
 }
 
@@ -1417,7 +1768,8 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
 
   // Riders last: their parents have just been placed, and an attachment is a
   // composition off the result rather than an input to it.
-  report.placed += ApplyAttachments(asmDoc);
+  report.placed +=
+      ApplyAttachments(asmDoc, partById, asmById, &report.erroredAttachments);
 
   // Every relation the solve could apply must now HOLD. One that does not is
   // a degree of freedom driven twice by relations that disagree — in a tree

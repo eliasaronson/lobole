@@ -337,7 +337,7 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
                      const std::string& size, double length,
                      const std::string& drive, const glm::dvec3& position,
                      const glm::dquat& orientation, std::string* error,
-                     uint64_t ridesOn = 0);
+                     uint64_t ridesOn = 0, std::string* warning = nullptr);
 
 // The rim, as a pick names it: WHICH occurrence, and which circular edge on
 // it (docs/parts/README.md#deriving-a-fastener-from-a-hole).
@@ -396,6 +396,10 @@ struct FastenerFit {
   // stack the first already joined adds its own (redundant but consistent;
   // docs/assemblies/solver.md#closing-loops).
   std::vector<uint64_t> mates;
+  // What was placed but could not be tied to its hole: a piece that rides
+  // its part at a fixed offset will not follow the hole if the part changes
+  // (docs/parts/README.md#attached-and-mated), and the fit says so.
+  std::vector<std::string> warnings;
 };
 
 // What to put on the axis

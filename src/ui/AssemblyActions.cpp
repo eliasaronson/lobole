@@ -267,6 +267,11 @@ assembly::SolveReport SolveActiveAssemblyReport(AppState& state,
   if (!state.assembly)
     return {};
   const assembly::PartResolver resolve = PartResolverFor(state);
+  // A rider from before v157 rides its part's frame: seat it in the hole
+  // under it once, so it follows from here on
+  // (docs/parts/README.md#attached-and-mated). A no-op once looked at.
+  assembly::BindRidersToHoles(*state.assembly, resolve,
+                              AssemblyResolverFor(state));
   const assembly::SolveReport rep = assembly::Solve(
       *state.assembly, resolve, AssemblyResolverFor(state), driven, diagnose);
   state.assembly->BumpVersion(); // solved transforms changed → renderer resync

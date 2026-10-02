@@ -39,6 +39,7 @@
 #include "ui/ViewActions.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include <set>
 
@@ -55,6 +56,7 @@
 #include "core/features/SplitFeature.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/GitVault.h"
+#include "core/io/Serialization.h"
 #include "core/parts/FastenerTable.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
@@ -1581,13 +1583,15 @@ TEST_CASE("A placed fastener rides on the part it bears on",
   const glm::vec3 nutWas = occOf(fit.placed[3])->position;
   state.assembly->FindById(topOcc)->position += glm::vec3(0.0f, 5.0f, 0.0f);
   state.assembly->FindById(bottomOcc)->position += glm::vec3(0.0f, 5.0f, 0.0f);
-  CHECK(assembly::ApplyAttachments(*state.assembly) == 4);
+  CHECK(assembly::ApplyAttachments(*state.assembly,
+                                   ui::PartResolverFor(state)) == 4);
   CHECK_THAT(occOf(fit.placed[0])->position.y,
              WithinAbs(screwWas.y + 5.0, 1e-4));
   CHECK_THAT(occOf(fit.placed[3])->position.y, WithinAbs(nutWas.y + 5.0, 1e-4));
   // And nothing else moved: an attachment is a composition, so re-running it
   // with nothing changed is a no-op rather than a slow drift.
-  CHECK(assembly::ApplyAttachments(*state.assembly) == 0);
+  CHECK(assembly::ApplyAttachments(*state.assembly,
+                                   ui::PartResolverFor(state)) == 0);
 
   // Deleting the plate takes what rides on it — a screw whose plate is gone
   // is not a screw, and an orphan is the floating hardware this was for.
@@ -1596,6 +1600,174 @@ TEST_CASE("A placed fastener rides on the part it bears on",
   CHECK(occOf(fit.placed[0]) == nullptr);
   CHECK(occOf(fit.placed[1]) == nullptr);
   CHECK(occOf(fit.placed[3]) != nullptr); // the nut rides the OTHER plate
+}
+
+TEST_CASE("A placed fastener follows its hole when the hole moves in its part",
+          "[actions][parts]") {
+  // Found on the pan/tilt head: `base_t` 2 mm more moved the yoke's geometry
+  // 2 mm up its own Z, and the twelve pieces fit_fastener had placed stayed
+  // at the offset they were placed at, 2 mm into the yoke. The plate did
+  // not MOVE — its hole did, inside it — so riding the plate's frame was not
+  // enough (docs/parts/README.md#attached-and-mated).
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const DrilledPlate top = MakePlate(state, "Top", 12.0, 6.6, -1.0, 0.0);
+  const DrilledPlate bottom = MakePlate(state, "Bottom", 26.0, 6.6, -1.0, 0.0);
+  ui::SetActivePart(state, ui::AddAssembly(state, "Bolted"));
+  const auto place = [&](const char* part, glm::vec3 at) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = at;
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t topOcc = place("Top", glm::vec3(0.0f));
+  place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
+
+  ui::FastenerRequest request;
+  request.nut = "iso4032";
+  request.washerUnderHead = true;
+  request.washerUnderNut = true;
+  const ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{topOcc, top.topRim}, request);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  REQUIRE(fit.placed.size() == 4); // screw, washer, washer, nut
+  CHECK(fit.warnings.empty());
+  const auto occOf = [&](uint64_t id) { return state.assembly->FindById(id); };
+  // Every piece is tied to a hole: the head end's to Top's top face and
+  // bore, the far end's to Bottom's under face and bore.
+  for (const uint64_t id : fit.placed) {
+    INFO(occOf(id)->name << " " << occOf(id)->attachWarning);
+    CHECK(occOf(id)->attachSeat.IsSet());
+  }
+  CHECK(occOf(fit.placed[0])->attachSeat.face.featureId ==
+        occOf(fit.placed[1])->attachSeat.face.featureId);
+  CHECK(occOf(fit.placed[3])->attachSeat.face.name ==
+        occOf(fit.placed[2])->attachSeat.face.name);
+
+  // Placing moved nothing, and a solve with nothing changed moves nothing.
+  std::vector<glm::dvec3> was;
+  for (const uint64_t id : fit.placed)
+    was.push_back(occOf(id)->position);
+  const assembly::SolveReport still = ui::SolveActiveAssemblyReport(state);
+  CHECK(still.erroredAttachments == 0);
+  for (size_t i = 0; i < was.size(); i++)
+    CHECK(glm::length(occOf(fit.placed[i])->position - was[i]) < 1e-6);
+  CHECK(ui::CheckFasteners(state).findings.empty());
+
+  // A file from before v157 rides the PART's frame: the nut written that
+  // way is tied to its hole by the first solve, where it already stands.
+  {
+    Occurrence* nut = occOf(fit.placed[3]);
+    const Occurrence* parent = occOf(nut->attachedTo);
+    const glm::dquat inv = glm::inverse(parent->orientation);
+    nut->attachSeat = {};
+    nut->attachOffset = inv * (nut->position - parent->position);
+    nut->attachRotation = inv * nut->orientation;
+    nut->attachSearched = false;
+    CHECK(ui::SolveActiveAssemblyReport(state).erroredAttachments == 0);
+    CHECK(nut->attachSeat.IsSet());
+    CHECK(nut->attachWarning.empty());
+    CHECK(glm::length(nut->position - was[3]) < 1e-6);
+  }
+
+  // Top 5 mm thicker (its top face rises) and BOTH bores 3 mm along X. The
+  // plates do not move; their holes do.
+  const auto reshape = [&](const DrilledPlate& plate, double thickness,
+                           double boreX) {
+    Document* doc = ui::PartDocById(state, plate.partId);
+    REQUIRE(doc != nullptr);
+    for (const auto& f : doc->GetFeatures()) {
+      if (auto* box = dynamic_cast<BoxFeature*>(f.get()))
+        box->depth = thickness;
+      if (auto* bore = dynamic_cast<CylinderFeature*>(f.get())) {
+        bore->height = thickness + 2.0;
+        bore->center.x = boreX;
+      }
+    }
+    doc->Regenerate();
+    for (const auto& f : doc->GetFeatures())
+      REQUIRE(f->GetError().empty());
+  };
+  reshape(top, 17.0, 3.0);
+  reshape(bottom, 26.0, 3.0);
+  const assembly::SolveReport moved = ui::SolveActiveAssemblyReport(state);
+  CHECK(moved.erroredAttachments == 0);
+  // The head end rose with Top's face; the far end stayed with Bottom's.
+  // Both moved with their bores.
+  const glm::dvec3 up(3.0, 0.0, 5.0), across(3.0, 0.0, 0.0);
+  CHECK(glm::length(occOf(fit.placed[0])->position - (was[0] + up)) < 1e-6);
+  CHECK(glm::length(occOf(fit.placed[1])->position - (was[1] + up)) < 1e-6);
+  CHECK(glm::length(occOf(fit.placed[2])->position - (was[2] + across)) < 1e-6);
+  CHECK(glm::length(occOf(fit.placed[3])->position - (was[3] + across)) < 1e-6);
+
+  // The stack under the screw is now 5 mm longer than it was sized for:
+  // 1.6 + 17 + 26 + 1.6 + a 5.2 nut = 51.4 against an M6x50.
+  {
+    const ui::FastenerReport report = ui::CheckFasteners(state);
+    REQUIRE(report.findings.size() == 1);
+    INFO(report.findings.front().why);
+    CHECK(report.findings.front().occurrence == fit.placed[0]);
+    CHECK(report.findings.front().why.find("too short") != std::string::npos);
+  }
+  // ...and THINNER, 6 mm: 40.4, which an M6x45 spans.
+  reshape(top, 6.0, 3.0);
+  CHECK(ui::SolveActiveAssemblyReport(state).erroredAttachments == 0);
+  CHECK(glm::length(occOf(fit.placed[0])->position -
+                    (was[0] + glm::dvec3(3.0, 0.0, -6.0))) < 1e-6);
+  {
+    const ui::FastenerReport report = ui::CheckFasteners(state);
+    REQUIRE(report.findings.size() == 1);
+    INFO(report.findings.front().why);
+    CHECK(report.findings.front().why.find("longer than its stack needs") !=
+          std::string::npos);
+    CHECK(report.findings.front().why.find("45 mm") != std::string::npos);
+  }
+
+  // The hole is gone (Top's drilling suppressed): the head end cannot stand
+  // anywhere true. It stays where it was and says so — in the solve, on the
+  // occurrence, and in the fastener check — never quietly.
+  const glm::dvec3 headWas = occOf(fit.placed[0])->position;
+  {
+    Document* doc = ui::PartDocById(state, top.partId);
+    for (const auto& f : doc->GetFeatures())
+      if (dynamic_cast<BooleanFeature*>(f.get()) != nullptr)
+        f->SetSuppressed(true);
+    doc->Regenerate();
+  }
+  const assembly::SolveReport lost = ui::SolveActiveAssemblyReport(state);
+  CHECK(lost.erroredAttachments == 2); // the screw and its washer
+  INFO(occOf(fit.placed[0])->attachError);
+  CHECK(occOf(fit.placed[0])->attachError.find("seat in Top is gone") !=
+        std::string::npos);
+  CHECK(occOf(fit.placed[1])->attachError.size() > 0);
+  CHECK(occOf(fit.placed[3])->attachError.empty()); // Bottom's is still there
+  CHECK(glm::length(occOf(fit.placed[0])->position - headWas) < 1e-9);
+  const ui::FastenerReport report = ui::CheckFasteners(state);
+  size_t notInHole = 0;
+  for (const ui::FastenerCheck& c : report.findings)
+    if (c.why.find("is not in its hole") != std::string::npos)
+      notInHole++;
+  CHECK(notInHole == 2);
+
+  // Saved and read back, the hole travels with the rider.
+  const nlohmann::json j = DocumentIO::OccurrenceToJson(*occOf(fit.placed[0]));
+  REQUIRE(j.contains("attach_seat"));
+  const Occurrence back = DocumentIO::OccurrenceFromJson(j);
+  CHECK(back.attachSeat.face.name ==
+        occOf(fit.placed[0])->attachSeat.face.name);
+  CHECK(back.attachSeat.axis.name ==
+        occOf(fit.placed[0])->attachSeat.axis.name);
+  // Half a hole is refused, not read as "no hole" (which would put the
+  // offset in the part's frame and load it somewhere else).
+  nlohmann::json half = j;
+  half["attach_seat"].erase("axis");
+  CHECK_THROWS_WITH(DocumentIO::OccurrenceFromJson(half),
+                    Catch::Matchers::ContainsSubstring("attach_seat needs"));
 }
 
 TEST_CASE("A hole that says what it is for is believed over its diameter",

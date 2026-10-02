@@ -39,6 +39,21 @@ json OccurrenceToJson(const Occurrence& o) {
     j["attach_offset"] = {o.attachOffset.x, o.attachOffset.y, o.attachOffset.z};
     j["attach_rotation"] = {o.attachRotation.x, o.attachRotation.y,
                             o.attachRotation.z, o.attachRotation.w};
+    // v157: the faces it is seated on, by name; the offset is then in the
+    // seat's frame (docs/parts/README.md#attached-and-mated). Omitted when
+    // it rides the part's own frame, so a v72..v156 rider re-saves
+    // unchanged.
+    if (o.attachSeat.IsSet()) {
+      json seat{{"face",
+                 {{"feature_id", o.attachSeat.face.featureId},
+                  {"element", o.attachSeat.face.name}}},
+                {"axis",
+                 {{"feature_id", o.attachSeat.axis.featureId},
+                  {"element", o.attachSeat.axis.name}}}};
+      if (!o.attachSeat.innerPath.empty())
+        seat["inner_path"] = o.attachSeat.innerPath;
+      j["attach_seat"] = std::move(seat);
+    }
   }
   // v56: which configuration of the reference this placement uses; 0 (and
   // absent, in every older file) = that document's active one.
@@ -113,6 +128,31 @@ Occurrence OccurrenceFromJson(const json& j) {
     o.attachRotation =
         glm::dquat((*it)[3].get<double>(), (*it)[0].get<double>(),
                    (*it)[1].get<double>(), (*it)[2].get<double>());
+  }
+  if (const auto it = j.find("attach_seat"); it != j.end()) { // v157
+    // Both faces or nothing: a seat named by its face alone has no axis, and
+    // reading it as "no seat" would quietly put the offset in the PART's
+    // frame — the rider would load somewhere else and look placed.
+    const auto ref = [&](const char* key) {
+      const auto f = it->find(key);
+      if (f == it->end() || !f->is_object() ||
+          f->value("feature_id", uint64_t{0}) == 0 ||
+          f->value("element", std::string{}).empty())
+        throw std::runtime_error(
+            "occurrence '" + o.name + "': attach_seat needs `" + key +
+            "` as {feature_id, element}; it has " + it->dump());
+      return ElementRef{f->at("feature_id").get<uint64_t>(),
+                        f->at("element").get<std::string>()};
+    };
+    if (o.attachedTo == 0)
+      throw std::runtime_error("occurrence '" + o.name +
+                               "': attach_seat without attached_to — a seat "
+                               "is on the part it rides on");
+    o.attachSeat.face = ref("face");
+    o.attachSeat.axis = ref("axis");
+    if (it->contains("inner_path"))
+      o.attachSeat.innerPath =
+          it->at("inner_path").get<std::vector<uint64_t>>();
   }
   o.flexible = j.value("flexible", false); // v129
   for (const json& pj : j.value("inner_poses", json::array())) {

@@ -201,6 +201,8 @@ FlexibleExpansion ExpandFlexible(const AssemblyDocument& parent,
       if (o->attachedTo != 0) {
         const auto it = ex.occIdOf.find({F.id, o->attachedTo});
         o->attachedTo = it != ex.occIdOf.end() ? it->second : 0;
+        if (o->attachedTo == 0)
+          o->attachSeat = {};
       }
     }
     // A connector on a moving occurrence is re-pointed at its expanded

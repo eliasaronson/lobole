@@ -49,6 +49,20 @@ struct InnerMateDof {
   glm::dquat ballRotation{1.0, 0.0, 0.0, 0.0};
 };
 
+// Where an attached occurrence is SEATED on its parent, by name: the planar
+// face it bears on (`face`) and the cylinder or cone whose axis centres it
+// (`axis`) — a screw's hole (its head's face and the bore, or the far face
+// for a nut), a ring's groove (a flank and the groove's floor), a part on a
+// shaft (a shoulder and the journal). Nothing in it is a fastener's: any
+// standard part seated on two named faces rides this way. `innerPath`
+// reaches a part inside a sub-assembly parent, as a Connector's does.
+struct AttachSeat {
+  ElementRef face;
+  ElementRef axis;
+  std::vector<uint64_t> innerPath;
+  bool IsSet() const { return face.IsSet() && axis.IsSet(); }
+};
+
 struct Occurrence {
   uint64_t id = 0;     // stable, unique within the assembly, never reused
   std::string name;    // display label (cosmetic)
@@ -83,6 +97,28 @@ struct Occurrence {
   uint64_t attachedTo = 0;
   glm::dvec3 attachOffset{0.0};
   glm::dquat attachRotation{1.0, 0.0, 0.0, 0.0};
+
+  // The SEAT it rides on (v157; docs/parts/README.md#attached-and-mated).
+  // Set, `attachOffset`/`attachRotation` are its placement in the seat's
+  // frame — derived on every solve from these named faces of the parent
+  // (assembly::SeatFrame) — so a hole that moves INSIDE its part, a plate
+  // made thicker, takes the screw with it. Unset, they are in the parent's
+  // own frame, which is what every file before v157 means.
+  AttachSeat attachSeat;
+  // Transient, never saved. `attachError`: the seat no longer resolves, so
+  // the rider is left where it last was and SAYS so (like a mate's `error`).
+  // `attachWarning`: a rider with no seat, riding at a fixed offset.
+  // `attachSearched`: BindRidersToHoles looked for its hole this session.
+  std::string attachError;
+  std::string attachWarning;
+  bool attachSearched = false;
+  // Transient: the seat's frame as last resolved, and the part document
+  // (InstanceId, Version) it was resolved in. Resolving a face computes its
+  // centroid, which is most of a solve's attachment time, and a part that
+  // did not regenerate cannot have moved its seat.
+  uint64_t seatCacheDoc = 0;
+  uint64_t seatCacheVersion = 0;
+  glm::dmat4 seatCacheFrame{1.0};
 
   // Which CONFIGURATION of the referenced document this placement uses
   // (A5, v56; a part's since v135); 0 = whatever that document's active

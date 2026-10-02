@@ -47,6 +47,9 @@ using AssemblyResolver =
 struct SolveReport {
   int placed = 0;       // occurrences positioned by a mate (excludes anchors)
   int erroredMates = 0; // mates left in an error state this solve
+  // Riders whose hole no longer resolves (Occurrence::attachError): left
+  // where they were, and counted here so a solve's answer says so.
+  int erroredAttachments = 0;
 
   // ---- A6: what the numeric loop pass found -------------------------------
   // All zero/empty on a loop-free assembly, which never enters that pass.
@@ -108,15 +111,70 @@ ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
 // Re-seat everything that RIDES on something else: an occurrence with
 // `attachedTo` gets its placement recomputed from its parent's, so a screw
 // follows the plate it is bolted to (docs/parts/README.md#attached-and-mated).
+// A rider with an `attachSeat` is placed from that seat's frame (SeatFrame),
+// so it also follows the seat — a hole, a groove — when it moves INSIDE the
+// part; one whose seat no longer resolves keeps its pose and gets
+// `attachError`, counted in `*errored`. `partById` resolves those seats;
+// nullptr leaves a seated rider in error rather than guessing.
 //
 // Composition, not constraint — it runs AFTER the solve rather than inside
 // it, because there is nothing to solve: a zero-DOF leaf's pose is a matrix
-// multiply. Returns how many moved.
+// multiply. A seat's frame is cached on the rider against the part's
+// regeneration, and each face is resolved once per call however many riders
+// share it (every screw of a pattern bears on one face). Returns how many
+// moved.
 //
 // ONE LEVEL, on purpose. An attachment whose parent is itself attached is
 // left alone rather than chased: chains want a rigid-group feature with its
 // own UI, and inventing one here would be building for a case nobody has.
-int ApplyAttachments(AssemblyDocument& asmDoc);
+int ApplyAttachments(AssemblyDocument& asmDoc, const PartResolver& partById,
+                     const AssemblyResolver& asmById = nullptr,
+                     int* errored = nullptr);
+
+// The frame of the seat `seat` names on `parent`, in the parent's own space
+// (a sub-assembly's unit space when `seat.innerPath` is set): origin where
+// the axis face's axis meets the seat face's plane, Z the seat face's
+// outward normal, X the parent's X projected into that plane (Y when X is
+// square to it). Each face is resolved through ConnectorLocalFrame, as a
+// mate connector on it would be, so a rider behaves as a concentric +
+// coincident mate to the two faces. nullopt with `whyNot` when either face
+// is gone or the axis is no longer square to the face.
+std::optional<glm::dmat4>
+SeatFrame(const AttachSeat& seat, const Occurrence& parent,
+          const AssemblyDocument& asmDoc, const PartResolver& partById,
+          const AssemblyResolver& asmById, std::string* whyNot = nullptr);
+
+// Seats `rider` (attached, its pose already set) on `seat` of its parent:
+// re-expresses `attachOffset`/`attachRotation` in the seat's frame, so it
+// stays exactly where it is now and follows the seat from here on. False
+// with `whyNot` (and nothing changed) when the seat does not resolve. The
+// general entry point: any standard part placed against two named faces.
+bool SeatRider(const AssemblyDocument& asmDoc, Occurrence& rider,
+               const AttachSeat& seat, const PartResolver& partById,
+               const AssemblyResolver& asmById, std::string* whyNot = nullptr);
+
+// The HOLE a fastener placed at `riderWorld` sits in on `parent`, as a seat:
+// the nearest planar face of the parent square to the piece's Z, facing it,
+// with a circular edge centred on that axis (the face), and a coaxial
+// cylinder — else a cone — with a circle in that face's plane (the axis).
+// nullopt with `whyNot` when there is none.
+std::optional<AttachSeat>
+FindHoleSeat(const AssemblyDocument& asmDoc, const Occurrence& parent,
+             const glm::dmat4& riderWorld, const PartResolver& partById,
+             const AssemblyResolver& asmById, std::string* whyNot = nullptr);
+
+// Seats `rider` (attached, its pose already set) in the hole under it:
+// FindHoleSeat, then SeatRider. False with `attachWarning` set when there is
+// none — it then rides at its offset in the parent's frame.
+bool BindRiderToHole(const AssemblyDocument& asmDoc, Occurrence& rider,
+                     const PartResolver& partById,
+                     const AssemblyResolver& asmById);
+
+// Every attached occurrence with no seat that has not been looked at this
+// session (a file from before v157): its pose from the old offset, then
+// BindRiderToHole. Returns how many it seated.
+int BindRidersToHoles(AssemblyDocument& asmDoc, const PartResolver& partById,
+                      const AssemblyResolver& asmById);
 
 // Relations (docs/assemblies/relations.md): make every relation hold
 // by setting the dependent mate's DOF from the driving one. `drivenMateId`

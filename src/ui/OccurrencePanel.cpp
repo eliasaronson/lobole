@@ -1181,12 +1181,17 @@ void DrawOccurrencePanel(AppState& state) {
       row.eyeId = "###occ_eye_" + suffix;
       if (o.fixed)
         row.tailGlyph = ICON_FA_ANCHOR; // was "(fixed)" appended to the name
+      // A rider whose hole is gone says so in the list, where a person
+      // looks for what holds the assembly
+      // (docs/parts/README.md#attached-and-mated).
       if (o.attachedTo != 0)
-        row.tail = "attached";
+        row.tail = o.attachError.empty() ? "attached" : "hole lost";
       else if (o.flexible)
         row.tail = "flexible";
       row.tooltip = std::string(isSub ? "Assembly: " : "Part: ") +
                     RefNameById(state, o) +
+                    (o.attachError.empty() ? "" : "\n" + o.attachError) +
+                    (o.attachWarning.empty() ? "" : "\n" + o.attachWarning) +
                     (o.flexible ? "\nFlexible: its mechanism moves here" : "") +
                     (o.fixed ? "\nFixed (grounded)" : "") +
                     (o.visible ? "" : "\nHidden") + "\nDouble-click to edit";
@@ -1249,8 +1254,12 @@ void DrawOccurrencePanel(AppState& state) {
       return; // the panel is now drawing a different document
     case After::Detach:
       SnapshotAssembly(state);
-      if (Occurrence* d = asmDoc.FindById(afterId))
+      if (Occurrence* d = asmDoc.FindById(afterId)) {
         d->attachedTo = 0;
+        d->attachSeat = {}; // free: no parent, so no hole in it either
+        d->attachError.clear();
+        d->attachWarning.clear();
+      }
       asmDoc.BumpVersion();
       break;
     case After::Delete:

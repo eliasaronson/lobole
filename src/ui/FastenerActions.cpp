@@ -95,7 +95,7 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
                      const std::string& size, double length,
                      const std::string& drive, const glm::dvec3& position,
                      const glm::dquat& orientation, std::string* error,
-                     uint64_t ridesOn) {
+                     uint64_t ridesOn, std::string* warning) {
   const auto fail = [&](const std::string& why) -> uint64_t {
     if (error)
       *error = why;
@@ -162,7 +162,18 @@ uint64_t AddFastener(AppState& state, const std::string& standard,
     occ.attachOffset = inv * (position - parent->position);
     occ.attachRotation = inv * orientation;
   }
-  return state.assembly->AddOccurrence(occ);
+  const uint64_t id = state.assembly->AddOccurrence(occ);
+  // ...and to the HOLE it sits in, so it follows the hole when that moves
+  // inside the part (docs/parts/README.md#attached-and-mated). A piece put
+  // down off any hole rides the part's frame, and the caller hears why.
+  if (Occurrence* placed = state.assembly->FindById(id);
+      placed != nullptr && placed->attachedTo != 0 &&
+      !assembly::BindRiderToHole(*state.assembly, *placed,
+                                 PartResolverFor(state),
+                                 AssemblyResolverFor(state)) &&
+      warning != nullptr)
+    *warning = placed->name + " " + placed->attachWarning;
+  return id;
 }
 
 namespace {
@@ -979,12 +990,15 @@ FastenerFit FitFastenerToHole(AppState& state, const RimPick& rim,
     const PlannedPart& part = fit.plan[i];
     // The drive is the SCREW's — it is first — because a washer has no recess
     // and handing it one is refused by the standard that does not have it.
+    std::string loose;
     const uint64_t id =
         AddFastener(state, part.standard, part.size, part.length,
                     i == 0 ? request.drive : std::string{}, part.position,
-                    part.orientation, &fit.why, part.ridesOn);
+                    part.orientation, &fit.why, part.ridesOn, &loose);
     if (id == 0)
       return fail(fit.why);
+    if (!loose.empty())
+      fit.warnings.push_back(std::move(loose));
     fit.placed.push_back(id);
     for (const Occurrence& o : state.assembly->GetOccurrences())
       if (o.id == id)
