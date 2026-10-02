@@ -86,26 +86,42 @@ def main():
         # darkens only where the post meets the plate; everything else is open
         # sky. A post is the shape that made the original bug visible: tall,
         # thin, and far from the region it wrongly darkened.
+        #
+        # The scene is a quarter scale, 100 mm across, and that is load-
+        # bearing. The AO kernel is capped at 2.5 model units (crevice
+        # scale, which is the point of the effect), and the frame below must
+        # RESOLVE it: at 400 mm across a pixel spanned 0.74 mm, the kernel 3
+        # px, and reading the depth at the nearest pixel put every open face
+        # under a uniform 3% self-occlusion floor the same size as the slot's
+        # own AO. The old world-fixed light rig happened to saturate the
+        # open faces and hide it; the camera-relative one did not
+        # (docs/rendering/README.md#the-light-rig). Here the kernel is ~13 px
+        # and the floor is gone, so what the test measures is occlusion.
         d.call("new_project")
-        shapes.box(d, (0, 0, 0), (400, 10, 200), "Plate")
-        # Two walls 2 mm apart at one end: a slot narrower than the AO
+        shapes.box(d, (0, 0, 0), (100, 2.5, 50), "Plate")
+        # Two walls 0.5 mm apart at one end: a slot narrower than the AO
         # kernel, so occlusion there is strong and LOCAL. A lone post gives
-        # almost nothing to measure — the radius is crevice-scale (capped at
-        # 2.5 model units), which is the whole point of the effect.
+        # almost nothing to measure — the radius is crevice-scale.
         walls_ids = [
-            shapes.box(d, (330, 10, 40), (14, 70, 120), "Wall A")["id"],
-            shapes.box(d, (346, 10, 40), (14, 70, 120), "Wall B")["id"]]
+            shapes.box(d, (82.5, 2.5, 10), (3.5, 17.5, 30), "Wall A")["id"],
+            shapes.box(d, (86.5, 2.5, 10), (3.5, 17.5, 30), "Wall B")["id"]]
+        # Mid grey (linear 0.2), not the default near-white: AO darkens the
+        # AMBIENT term, and a face the lights drive to 255 shows none of it,
+        # so which faces could show occlusion would depend on where the
+        # lights stand rather than on where the occlusion is.
+        for i, _ in enumerate(d.call("get_state")["bodies"]):
+            d.call("set_appearance", body=i, color=[0.2, 0.2, 0.2])
 
         # A fixed camera: this test compares regions by screen fraction, so it
         # must not depend on fit heuristics that change with the model. The
         # scene above is staged with its slot rising along +Y, so the up is
         # pinned explicitly rather than inheriting the world default. The
-        # distance frames the scene as 520 mm did through the old 45 deg
+        # distance frames the scene as 130 mm did through the old 45 deg
         # lens: at 30 deg the walls filled the frame, and the half-res
         # upsample then straddled far more depth edges than it does in any
         # real view, and the diff crossed the 1.0 bound below.
-        d.call("set_camera", target=[200, 40, 100],
-               direction=[-0.35, 0.55, 0.75], up=[0, 1, 0], distance=804)
+        d.call("set_camera", target=[50, 10, 25],
+               direction=[-0.35, 0.55, 0.75], up=[0, 1, 0], distance=201)
         # Shadows OFF in both frames. With them on, the difference between
         # AO-on and AO-off is largest inside shadows — not because AO is wrong
         # there, but because ACES is steeper in dark regions. That artifact of
@@ -201,7 +217,8 @@ def main():
         # >=8, not the >=4 the full tier uses: half-RES AO carries a faint
         # (4-7/255) wash on open surfaces — coarse-depth self-occlusion bias,
         # measured IDENTICAL before and after the upsample landed (18.9k px
-        # in both), so it is the AO computation, not the upsample. The
+        # in both, at the old 400 mm scale), so it is the AO computation, not
+        # the upsample. The
         # locality invariant is about REAL occlusion being displaced, and the
         # strong pixels are where half matches full (2.9k px in both).
         occluded_h = [(x, y) for y in range(0, h, 2) for x in range(0, w, 2)

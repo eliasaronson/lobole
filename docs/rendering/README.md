@@ -322,7 +322,12 @@ ambient/IBL term only (direct light is occluded by the shadow map). The AO
 is sampled relative to the 3D viewport sub-rect, not the whole framebuffer.
 Targets are recreated on swapchain rebuild. AO features narrower than about
 two full-resolution pixels cannot be resolved by the half tier; `full` is
-the reference.
+the reference. Where the kernel (capped at 2.5 model units) spans only a few
+pixels, as on a 400 mm part framed whole, each sample's depth is read at the
+nearest prepass pixel and the error puts a uniform ~3% self-occlusion on
+OPEN faces, as large as a crease's own AO there. It is faint (a few /255,
+and none on a face the lights saturate), but it is why
+`render_ao_smoke` stages a 100 mm scene, where the kernel is ~13 px.
 
 The FEM field overlay gets no shadows or AO (it is not in the prepass).
 Ghosts receive both and cast neither.
