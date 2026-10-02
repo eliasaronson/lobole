@@ -27,6 +27,7 @@
 #include "ui/CamJobs.h"
 #include "ui/CamPanel.h" // RefreshCamToolpaths
 #include "ui/CamPlayback.h"
+#include "ui/CamSetupSheet.h"
 #include "ui/CamTool.h"        // CamFixturesChanged
 #include "ui/DocumentSlots.h"  // JobUndoGuard
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
@@ -389,7 +390,16 @@ constexpr MethodDoc kCamMethods[] = {
      "bool (profile: leave the wall on a tangent arc of the tool's radius "
      "instead of stopping against it -- no dwell mark; every depth pass "
      "leaves at the same point, so each arc cuts one stepdown of the waste; "
-     "refused inside an opening with no room for it), finish_tool?: number "
+     "refused inside an opening with no room for it), cutter_comp?: "
+     "off|wear (profile, pocket and drill-bore: post each finished wall pass "
+     "under G41/G42 D<tool> with a lead-in line and arc and a lead-out on the "
+     "waste side, the path still the tool centre, so the controller's tool "
+     "table holds only the WEAR -- 0 cuts what was verified, +0.02 on the "
+     "diameter leaves 0.01 more on each wall; on a rough-then-finish op the "
+     "finish only. Refused on a post without compensation (grbl), on a "
+     "profile `on` its contour, with lead_arcs, where the leads have no room, "
+     "and where a turn is too tight to offset by a tenth of the cutter), "
+     "finish_tool?: number "
      "(rough with `tool` "
      "leaving finish_stock -- derived as a tenth of its diameter -- then "
      "take the wall in one full-depth pass with this tool; two toolpaths "
@@ -463,7 +473,8 @@ constexpr MethodDoc kCamMethods[] = {
      "thread's depth does not fit the tap-drill bore, a flat wider than the "
      "thread's root (P/8: too fine a thread), a profile shallower than the "
      "thread (the neck would rub), and a machine that posts no arcs.",
-     "bottom_z, climb, corner_relief, cut_angle_deg, depth_mm, edge_size, "
+     "bottom_z, climb, corner_relief, cut_angle_deg, cutter_comp, depth_mm, "
+     "edge_size, "
      "enabled, finish_stock, finish_tool, index_a_deg, lead_arcs, lead_mm, "
      "name, "
      "peck, rest_from_tool, rotary_pattern, "
@@ -480,7 +491,8 @@ constexpr MethodDoc kCamMethods[] = {
      "cutter), one you typed is kept, and a tool this setup does not have is "
      "refused. The tool's reach is checked as add_cam_op checks it: refused "
      "when the shank would be driven into a wall, `warnings` otherwise.",
-     "bottom_z, climb, corner_relief, cut_angle_deg, depth_mm, edge_size, "
+     "bottom_z, climb, corner_relief, cut_angle_deg, cutter_comp, depth_mm, "
+     "edge_size, "
      "enabled, finish_stock, finish_tool, id, index_a_deg, lead_arcs, "
      "lead_mm, name, "
      "peck, rest_from_tool, rotary_pattern, "
@@ -504,7 +516,8 @@ constexpr MethodDoc kCamMethods[] = {
      "are "
      "the same MILLIMETRES — stepdown, edge_size and the rest — and stepover "
      "is the same FRACTION of the tool diameter.",
-     "bottom_z, climb, corner_relief, cut_angle_deg, depth_mm, edge_size, "
+     "bottom_z, climb, corner_relief, cut_angle_deg, cutter_comp, depth_mm, "
+     "edge_size, "
      "enabled, finish_stock, finish_tool, index_a_deg, lead_arcs, lead_mm, "
      "name, "
      "peck, rest_from_tool, rotary_pattern, "
@@ -575,6 +588,9 @@ constexpr MethodDoc kCamMethods[] = {
      "file_warnings (with first_file_warning: what a CONTROLLER may refuse "
      "though the parser survived it, such as a nested comment Mach3 will not "
      "load), "
+     "cutter_comp (the ops the file compensates with G41/G42: checked as "
+     "programmed, i.e. with no wear in the controller's tool table, and "
+     "said in `says`), "
      "holder_collisions (with worst_holder_depth_mm/_at/_line: the collet "
      "nut driven into material the cutter never touched -- silent unless the "
      "tool states overall_length and collar_diameter), "
@@ -650,7 +666,9 @@ constexpr MethodDoc kCamMethods[] = {
      "play?, close?, resolution?: the height map's cell size in mm, echoed as "
      "resolution_mm}. Returns {open, at, distance_mm, total_mm, "
      "cutting_minutes, removed_mm3, operation, tool, feed_mm_min, line, "
-     "position, starts_from, earlier_setups_not_read?}. The stock starts "
+     "position, starts_from, earlier_setups_not_read?, cutter_comp (the ops "
+     "compensated in the controller, played as programmed: no wear)}. The "
+     "stock starts "
      "from what the job's EARLIER setups left (`starts_from` names them; "
      "empty = the fresh stock), so an indexed setup after a turning one "
      "plays against the turned part. The cursor is PATH DISTANCE, not a "
@@ -671,7 +689,8 @@ constexpr MethodDoc kCamMethods[] = {
      "not follow (`skipped`), how much cutting lay beyond the travel and is "
      "missing from the file (`clipped_mm`), the cycle time "
      "(`cutting_minutes`, rapids only when the setup states a traverse rate), "
-     "and `warnings`. Writes a "
+     "and `warnings`. Refused on a post without cutter compensation when an "
+     "op asks for it (cutter_comp). Writes a "
      "file; it does not send it "
      "to a machine. With split_output on the setup, `path` is the base and "
      "one file per tool is written beside it as `<base>-T<n>.<ext>` (no "
@@ -680,6 +699,29 @@ constexpr MethodDoc kCamMethods[] = {
      "Waits for its passes off the frame, as cam_toolpath does; a cancelled "
      "pass refuses the call and writes nothing.",
      "job, path, post, setup"},
+    {"export_setup_sheet",
+     "Write a setup's SETUP SHEET {job?, setup, path (a .pdf), program?, "
+     "picture?: bool, default true}: the printable page that goes to the "
+     "machine with the program -- the job and setup, the program's file name "
+     "(`program`, else the one Save G-code writes beside the project), the "
+     "machine and post, the part and its material grade, the stock's size, "
+     "the work zero (which corner, which face, and what to set when touching "
+     "off on the blank before the face op), safe Z, how it is held and each "
+     "fixture's position, a picture of the setup (the job tab showing this "
+     "setup from the iso view: the part on its stock, the fixtures; needs a "
+     "renderer -- under --headless the sheet says it has none, and "
+     "`warnings` too), every tool in the order it is loaded (number, type, "
+     "diameter, flutes, stickout and holder, rpm, feeds, the ops it cuts and "
+     "its minutes), the operations in cutting order (type, tool, Z range in "
+     "the program's coordinates, the line each starts on, minutes, the bands "
+     "aimed at and the comp), the cycle time, and the notes: each band the "
+     "program aims at, what the tool table holds for a compensated op "
+     "(cutter_comp) and how to re-cut, and to gauge before the setup is "
+     "broken. Refused while a pass is pending, and for a setup that does "
+     "not post. Returns {path, program, picture, cycle_minutes, tools, "
+     "operations, warnings}. Writes a file; waits for its passes off the "
+     "frame, as cam_post does.",
+     "job, path, picture, program, setup", remote::NotInBatch},
 };
 
 cam::Side SideFrom(const std::string& s) {
@@ -1285,6 +1327,10 @@ json VerifyAnswer(ui::AppState& state, const VerifyRun& w) {
       {"first_file_error", v.firstFileError},
       {"file_warnings", v.fileWarnings},
       {"first_file_warning", v.firstFileWarning},
+      // The ops under cutter compensation in the controller: checked as
+      // programmed, i.e. with no wear in the tool table
+      // (docs/cam/post.md#cutter-compensation).
+      {"cutter_comp", v.compensatedOps},
       // Cutting that bit deeper than its op's passes take
       // (docs/cam/simulation.md#bite), as a full-width equivalent.
       {"over_bites", v.overBites},
@@ -2786,6 +2832,17 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
              // was seeded with (empty = the fresh stock), and any that could
              // not be read.
              {"starts_from", state.camPlaybackSeededFrom},
+             // What the playback cannot show: the ops the controller
+             // compensates are played as programmed, with no wear
+             // (docs/cam/post.md#cutter-compensation).
+             {"cutter_comp",
+              [&] {
+                json ops = json::array();
+                for (const cam::Toolpath& tp : state.camToolpaths)
+                  if (!tp.comps.empty() && tp.error.empty())
+                    ops.push_back(tp.operationId);
+                return ops;
+              }()},
              {"segments", tl.Segments()},
              {"position", {pos.x, pos.y, pos.z}}};
     if (!state.camPlaybackNotSeeded.empty())
@@ -2829,6 +2886,33 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       return json{
           {"pending", pending}, {"queued_passes", queued}, {"job", "cam"}};
     }
+  }
+
+  if (m == "export_setup_sheet") {
+    // `job` is read in the preamble, before the active job is looked up.
+    // rpc-params: job
+    const cam::Setup& setup = RequireSetup(*job, p.at("setup").get<uint64_t>());
+    // Every parameter read and checked before anything is touched.
+    const std::string path = p.at("path").get<std::string>();
+    if (path.empty() || std::filesystem::path(path).extension() != ".pdf")
+      throw std::runtime_error("path must name a .pdf file; got '" + path +
+                               "'");
+    const std::string program = p.value("program", std::string());
+    const bool picture = p.value("picture", true);
+    const std::vector<cam::Toolpath> paths =
+        ui::GenerateCamToolpathsNow(state, setup);
+    ui::SetupSheetResult result;
+    std::string error;
+    if (!ui::ExportSetupSheet(state, setup.id, paths, path, program, picture,
+                              result, &error))
+      throw std::runtime_error(error);
+    return json{{"path", path},
+                {"program", result.program},
+                {"picture", result.picture},
+                {"cycle_minutes", result.cycleMinutes},
+                {"tools", result.tools},
+                {"operations", result.operations},
+                {"warnings", result.warnings}};
   }
 
   if (m == "cam_toolpath" || m == "cam_post") {
@@ -3275,7 +3359,7 @@ private:
 std::unique_ptr<CamParking>
 ParkCamRequest(ui::AppState& state, const std::string& m, const RpcParams& p) {
   if (m != "cam_toolpath" && m != "cam_post" && m != "cam_verify" &&
-      m != "cam_simulate")
+      m != "cam_simulate" && m != "export_setup_sheet")
     return nullptr;
   try {
     // The poller's form answers at once, and closing a simulation reads

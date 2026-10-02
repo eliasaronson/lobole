@@ -2187,6 +2187,51 @@ def main():
             expect("G2 " in part and "M30" in part, "the tool's file is complete")
             d.call("set_cam_setup", id=cam_setup, split_output=False)
 
+            # Cutter compensation (docs/cam/post.md#cutter-compensation): by
+            # name, read back, an unknown mode refused naming both, and the
+            # file says G41/G42 and G40 with the tool's D.
+            prof = d.call("list_cam_setups")["setups"][0]["operations"][0]
+            d.call("set_cam_op", id=prof["id"], cutter_comp="wear")
+            back = d.call("list_cam_setups")["setups"][0]["operations"][0]
+            expect(back.get("cutter_comp") == "wear",
+                   f"cutter_comp applies and reads back: {back}")
+            try:
+                d.call("set_cam_op", id=prof["id"], cutter_comp="control")
+                raise AssertionError("an unknown cutter_comp must refuse")
+            except RuntimeError as e:
+                expect("off, wear" in str(e),
+                       f"the refusal names the modes there are: {e}")
+            d.call("cam_post", setup=cam_setup, path=nc)
+            comp = open(nc).read()
+            expect(("G41 D1" in comp or "G42 D1" in comp) and "\nG40\n" in comp
+                   and "(comp op " in comp,
+                   "a compensated profile posts G41/G42 D1 ... G40 and says so")
+            ver = d.call("cam_verify", setup=cam_setup)
+            expect(ver.get("cutter_comp") == [prof["id"]] and
+                   any("compensated in the controller" in s
+                       for s in ver.get("says", [])),
+                   f"the verdict says the op is compensated: "
+                   f"{ver.get('cutter_comp')}")
+            # The setup sheet: a PDF, and under --headless no picture, said.
+            sheet = os.path.join(tmp, "sheet.pdf")
+            made = d.call("export_setup_sheet", setup=cam_setup, path=sheet)
+            pdf = open(sheet, "rb").read()
+            expect(pdf.startswith(b"%PDF-1.4") and b"%%EOF" in pdf[-16:],
+                   "export_setup_sheet writes a PDF")
+            expect(made["picture"] is False and
+                   any("no renderer" in w for w in made["warnings"]),
+                   f"headless, the sheet says it has no picture: {made}")
+            expect(made["tools"] == 1 and made["operations"] == 1,
+                   f"one tool, one op: {made}")
+            try:
+                d.call("export_setup_sheet", setup=cam_setup,
+                       path=os.path.join(tmp, "sheet.png"))
+                raise AssertionError("a setup sheet that is not a .pdf must "
+                                     "refuse")
+            except RuntimeError as e:
+                expect(".pdf" in str(e), f"the refusal says what it writes: {e}")
+            d.call("set_cam_op", id=prof["id"], cutter_comp="off")
+
             # R9 (2026-08-26): a typed top_z below the stock top warns at
             # toolpath time, naming the op and both heights — the verifier's
             # later "rapid through material at line N" names neither.
@@ -2445,7 +2490,8 @@ def main():
                 "number": 2, "name": "finisher", "diameter": 3.0})
             enums = {"side": ["outside", "inside", "on"],
                      "corner_relief": ["none", "dogbone", "tbone"],
-                     "rotary_pattern": ["parallel", "spiral"]}
+                     "rotary_pattern": ["parallel", "spiral"],
+                     "cutter_comp": ["off", "wear"]}
             # Not fields to poke: identity, the type itself, and `tool`, whose
             # change re-derives the stepdown (Retool) by design.
             fixed = {"id", "type", "tool", "targets", "derived"}

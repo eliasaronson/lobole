@@ -361,6 +361,7 @@ set(core_sources
     src/core/cam/CamOpFields.cpp
     src/core/cam/CamSketchCurves.cpp
     src/core/cam/CamPost.cpp
+    src/core/cam/CamSetupSheet.cpp
     src/core/cam/CamRotaryFeed.cpp
     src/core/drawing/DrawingExport.cpp
     src/core/drawing/DrawingDimension.cpp
@@ -541,6 +542,7 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
                              src/core/cam/CamStrategies.cpp
                              src/core/cam/CamEngrave.cpp
                              src/core/cam/CamThreadMill.cpp
+                             src/core/cam/CamComp.cpp
                              src/core/cam/CamSurfaceStrategies.cpp
                              src/core/cam/CamGcode.cpp
                              src/core/cam/CamRotary.cpp
@@ -771,6 +773,7 @@ set(app_sources
     src/ui/CamTool.cpp
     src/ui/CamTree.cpp
     src/ui/CamGenerate.cpp
+    src/ui/CamSetupSheet.cpp
     src/ui/PerfHud.cpp
     src/ui/TerminalPanel.cpp
     src/ui/SketchToolbar.cpp

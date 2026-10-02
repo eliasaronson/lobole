@@ -11,14 +11,14 @@ every configuration (it is part of the document model), with or without
 ## Dialects
 
 A narrow interface with one row per controller (`kDialects`), differing in
-three places: the tool change, the program end and nothing else in the
-motion words.
+the tool change, the program end, and what the controller can do: helical
+arcs and cutter compensation.
 
-| post | tool change | end |
-|---|---|---|
-| `mach3` | `T<n> M6`, then `M0 (change tool, set Z zero, then cycle start)` — manual | `M30` |
-| `linuxcnc` | `T<n> M6` — the controller's tool table does the rest | `M2` |
-| `grbl` | `T<n>` (no `M6`: GRBL ignores it unless built for a changer), `M5`, a comment naming the tool and "set Z zero, then cycle start", `M0` — a feed hold every GRBL honours | `M2` |
+| post | tool change | end | G41/G42 |
+|---|---|---|---|
+| `mach3` | `T<n> M6`, then `M0 (change tool, set Z zero, then cycle start)` — manual | `M30` | yes |
+| `linuxcnc` | `T<n> M6` — the controller's tool table does the rest | `M2` | yes |
+| `grbl` | `T<n>` (no `M6`: GRBL ignores it unless built for a changer), `M5`, a comment naming the tool and "set Z zero, then cycle start", `M0` — a feed hold every GRBL honours | `M2` | no |
 
 The bare `T<n>` on GRBL moves nothing and costs nothing, and it is what makes
 the FILE say which cutter each move belongs to; without it every reader,
@@ -47,6 +47,9 @@ dialect needs canned cycles translated. The post id is the machine's
   person typed is sanitised: G-code comments do not nest, so a parenthesis in a
   tool's name would be a file the controller refuses to load; brackets stand
   in, and newlines go.
+- **Cutter compensation**, per compensated op, in the header: `(comp op 7:
+  G41 D6 WEAR - ...)`, what the tool table's entry holds and the wear the
+  program was checked to take ([below](#cutter-compensation)).
 - **Modal**: nothing is restated that has not changed.
 - **Retracts touch Z alone.** A retract before anything has moved must not
   pass modal X/Y that nothing set (no `Xnan` can reach a file; a test asserts
@@ -122,6 +125,93 @@ of a helix for one circle. A thread mill is refused on a machine set to post
 no arcs, and on a post without helical arcs
 ([operations.md](operations.md#thread-mill)).
 
+## Cutter compensation
+
+An operation can post its finished walls under cutter radius compensation
+(`Operation::cutterComp`, `cutter_comp`: `off` | `wear`, on profile, pocket
+and drill), so a wall the machine cuts off size is corrected at the machine:
+gauge it, type the error into the tool table, run the pass again. The
+motivating case is the pan/tilt base plate's Ø47 K7 seat, 25 µm wide on a
+router whose runout alone takes half of that
+([generators/pantilt](../../generators/pantilt/README.md#the-base-plate-on-the-6090)).
+
+**Wear mode, only.** The file is the tool centre, exactly as without
+compensation, and goes under `G41`/`G42 D<tool>`, so the controller's tool
+table holds only the WEAR, not the cutter's radius. The other convention, "in
+control" (the part contour posted, the table holding the whole radius), is
+not offered:
+
+- the verifier, the playback, the holder and fixture checks and the band
+  judgment all read the posted file ([one engine](simulation.md#one-engine)).
+  A wear-mode file is the cut they read; with no wear entered it cuts what was
+  verified. An in-control file would need a second implementation of the
+  controller's offsetting to know where the tool goes, and its disagreements
+  with Mach3's would be invisible;
+- a router's tool table is usually empty. In control, an empty entry cuts
+  every wall a radius into the part; in wear mode, the verified program.
+
+**The sign.** `G41` (tool left of the path) when the wall is on the right of
+travel — climb — and `G42` when it is on the left, so in both a POSITIVE entry
+moves the tool away from the wall: the table's diameter is the error to take
+off. +0.02 leaves 0.01 more on each wall (a bore 0.02 smaller, a boss 0.02
+bigger); a negative entry takes more (RS274/NGC controllers swap the side for a
+negative diameter). A wall cannot be put back, so a bore that comes out over is
+cut first with a positive entry and gauged. The D word is the tool's number.
+
+**What is compensated.** The strategies declare each pass that follows a
+finished wall (`Toolpath::Wall`, `DeclareWall`): a profile's laps, a pocket's
+wall rings (level 0, islands too), a bore's wall ring (its helix and the flat
+turn). On a rough-then-finish op the finish only — the rough's wall is the
+finish's stock. `CompensateWalls` (`CamComp.cpp`) then gives each one:
+
+- **a lead-in**: a line half the cutter's radius long, then a quarter arc of
+  half its radius tangent into the wall pass's first point. `G41`/`G42` goes on
+  its own line before the line. A wall pass starts after a rapid down to the
+  rapid floor (above the stock) or by a link at depth through what the inner
+  rings cleared, so the lead-in is in air or in cleared material; the rapids
+  and the link are rerouted to the line's start.
+- **a lead-out**: a quarter arc away from the wall, then the line, `G40` on its
+  own line before it, so the controller's taper back to the programmed path
+  happens away from the wall and leaves no mark. The retract rises over the
+  line's end.
+- **room**: every lead point on the waste side of the pass — inside the bore,
+  pocket or opening it walks round, outside a part — or the op is refused,
+  naming the wall. A compensated profile starts every pass at the same point
+  (the lead-arc rule, [profile](operations.md#profile)) and does not stay
+  down between passes, so its leads stack into the waste a stepdown each.
+
+The run between `G41` and `G40` is written like any other moves (arcs fitted,
+straight runs merged), but no arc or merged run crosses either end
+(`Toolpath::Comp`, checked before the post trusts it: a clip or merge that
+changed it refuses the post).
+
+**What a controller can offset, checked.** The program is checked for a wear of
+up to a tenth of the cutter's diameter either way (`CompCheckedWear`: 0.6 mm in
+the table for a 6 mm cutter, far more than runout and deflection, and small
+enough that an outside corner's own radius — the cutter's — still offsets).
+Offsetting by w takes `w tan(theta/2)` off each segment at a turn of theta
+toward the offset; a segment shorter than its two ends take, or a path that
+doubles back, is where LinuxCNC refuses ("gouging") and Mach3 cuts the wrong
+thing. Such a place refuses the op, in the file's coordinates: an inside
+corner of the part whose radius is within that wear of the cutter's (a sharp
+inside corner is a sharp corner of the tool path and compensates fine), or a
+corner relief's bite.
+
+**Refused**: on a post without compensation (`grbl`, the `G41/G42` column;
+`CutterCompRefusal`, at post time, naming the op and the posts that have it);
+on a profile `on` its contour (no wall to move); with `lead_arcs` (two
+lead-outs); on a hole the cutter's size (a plunge has no wall); where the
+leads have no room; where a turn is too tight; where the machine's travel or
+the rotary's holding clips part of the run.
+
+**The file says it** in the header, per op:
+`(comp op 7: G41 D6 WEAR - tool 6's diameter in the tool table is the wear
+alone: 0 cuts as programmed, +0.02 leaves 0.01 more on each wall; checked to
++-0.6)`, and the setup sheet says how to use it
+([setup.md](setup.md#the-setup-sheet)). The verifier and the playback simulate
+the nominal tool — the file with no wear — and say so
+([simulation.md](simulation.md#the-verifier)).
+
 ## Tool changes
 
 A tool change is emitted on every change of tool number in the order the
@@ -172,6 +262,9 @@ What the verifier cannot check for you, in the order it matters:
    not acceptable.
 6. **A rotary job's feed model**: confirm with one timed move
    ([rotary.md](rotary.md#feed-on-a-turning-cut)).
+7. **A compensated op's tool table entry**: the wear alone, never the
+   cutter's diameter ([cutter compensation](#cutter-compensation)). The
+   header names the entry; set it before the first run.
 
 ## Goldens
 

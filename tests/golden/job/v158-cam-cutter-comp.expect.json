@@ -1,0 +1,15 @@
+{
+  "job_parts": [
+    "Base plate"
+  ],
+  "cam_op_types": [
+    "drill",
+    "profile",
+    "drill"
+  ],
+  "cam_op_cutter_comp": [
+    "wear",
+    "wear",
+    "off"
+  ]
+}

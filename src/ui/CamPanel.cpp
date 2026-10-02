@@ -89,6 +89,8 @@ void KeepPreviousMoves(const cam::Toolpath& previous, cam::Toolpath& fresh) {
   fresh.tabs = previous.tabs;
   fresh.grooves = previous.grooves;
   fresh.arcs = previous.arcs;
+  fresh.walls = previous.walls;
+  fresh.comps = previous.comps;
   fresh.threads = previous.threads;
   fresh.fits = previous.fits;
   fresh.strategy = previous.strategy;
@@ -594,6 +596,19 @@ bool DrawCamOpSettings(AppState& state, cam::Setup& setupRef,
     ImGui::SetItemTooltip("Leave the wall on a tangent arc of the tool's "
                           "radius instead of stopping against it and "
                           "lifting -- the stop is the dwell mark.");
+  }
+  if (cam::OpTypeHas(op.type, cam::OpField::CutterComp)) {
+    ImGui::SameLine();
+    bool comp = op.cutterComp != cam::CutterComp::Off;
+    if (ImGui::Checkbox("Comp###cam_comp", &comp)) {
+      op.cutterComp = comp ? cam::CutterComp::Wear : cam::CutterComp::Off;
+      touched(op.id);
+    }
+    ImGui::SetItemTooltip(
+        "Cutter compensation, wear mode: the finished walls go under G41/G42 "
+        "D<tool>, the path still the tool centre, so the controller's tool "
+        "table holds only the WEAR. 0 cuts what was verified; a bore measured "
+        "0.02 over is re-cut with +0.02 in the table. Not on GRBL.");
   }
   if (cam::OpTypeHas(op.type, cam::OpField::Peck)) {
     ImGui::SameLine();

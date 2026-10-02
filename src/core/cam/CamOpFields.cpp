@@ -24,6 +24,7 @@ const OpFieldRow kRows[] = {
     {"tabs", OpField::Tabs, &Operation::tabCount, kOpFieldByHand},
     {"corner_relief", OpField::CornerRelief, &Operation::cornerRelief},
     {"lead_arcs", OpField::LeadArcs, &Operation::leadArcs},
+    {"cutter_comp", OpField::CutterComp, &Operation::cutterComp},
     {"drilled_bores", OpField::DrilledBores, &Operation::drilledBores},
     {"peck", OpField::Peck, &Operation::peck},
     {"edge_size", OpField::EdgeSize, &Operation::edgeSize},
@@ -47,6 +48,11 @@ const OpFieldRow kRows[] = {
 const char* NameOf(Side v) { return SideName(v); }
 const char* NameOf(CornerRelief v) { return CornerReliefName(v); }
 const char* NameOf(RotaryPattern v) { return RotaryPatternName(v); }
+const char* NameOf(CutterComp v) { return CutterCompName(v); }
+bool FromName(const std::string& s, CutterComp& out) {
+  return TryCutterCompFromName(s, out);
+}
+std::string NamesOf(CutterComp*) { return CutterCompNameList(); }
 bool FromName(const std::string& s, Side& out) {
   return TrySideFromName(s, out);
 }

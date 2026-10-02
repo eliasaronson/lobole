@@ -166,7 +166,7 @@ runs again when they land
 ([simulation.md](../cam/simulation.md#leftover-another-setup-removes)).
 
 **RPC semantics: synchronous, off the frame.** `cam_toolpath`, `cam_post`,
-`cam_verify` and `cam_simulate` answer with complete toolpaths, but the
+`cam_verify`, `cam_simulate` and `export_setup_sheet` answer with complete toolpaths, but the
 server parks them while the passes they read cut on the worker (and
 `cam_verify`'s simulation on a `cam-verify` job), answering when those land
 ([cam/README.md](../cam/README.md#requests-that-wait)). The handlers

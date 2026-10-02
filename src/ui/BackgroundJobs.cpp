@@ -2,6 +2,9 @@
 
 #include "ui/AppState.h"
 #include "ui/RendererSync.h"
+#ifdef HAVE_CAM
+#include "ui/CamSetupSheet.h"
+#endif
 
 #include <algorithm>
 #include <chrono>
@@ -17,6 +20,11 @@ void PollBackgroundJobs(AppState& state) {
   // (docs/ui/long-operations.md#what-is-not-on-the-registry says why that is
   // the one candidate for a real background render thread later).
   PumpRenderJob(state);
+#ifdef HAVE_CAM
+  // The Generate window's setup sheet: its picture is a capture, taken here
+  // rather than inside the window's drawing.
+  PumpSetupSheet(state);
+#endif
 
   // (A git fetch/push/clone is a "sync" entry in the registry below — A3
   // phase 2 — and was the one polled from a collapsible TreeNode.)

@@ -55,7 +55,7 @@ minutes.
 | `build_yoke.py` | the yoke, modelled where it stands, its frames the layout: the design re-modelled over its topology result (A-frame arms, a web under the tilt worm, a windowed base on a keel grillage, foot flanges bolted to the base), and the phase-5 solid and the topology envelope as variants `build_yoke_topo.py` builds | `yoke.dsgn` |
 | `build_assembly.py` | the assembly: mates, the camera screw as the ASME B18.3 1/4-20 it is bought as (`add_fastener`), bearings by `fit_bearing`, the two DIN 471 rings by `fit_retaining_ring`, both rings of each bearing by `check_seat` (all eight must pass), screws by `fit_fastener` and `check_fasteners`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, clearance assertions verified at both ends of the tilt, renders | `pantilt.dsgn` |
 | `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): a static study of the solid yoke and one of the head's, each with the three as load cases, the lens carried from the seats (`probe_study`), and the pan journal's own bend, which no study sees, by beam; the yoke cut for the printer (`split_for_printing`) with the pieces' STLs; stills; the envelope's topology study (the three cases at once, the worms' blocks as keep-outs), its pictures and its check (`check_topology`) -- kept in `yoke_envelope.dsgn`, reused while the envelope, its cases and keep-outs are the same and the result is not stale, `--fresh-topology` to run it again; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_envelope.dsgn`, `yoke_print_*.stl` |
-| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm and required ok AND complete with no toolpath warning and the thread judged in its band, posted, the K7 seat judged in its band and the uncut features checked to be only the hand-tapped M4s; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `cam_report.json` |
+| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm and required ok AND complete with no toolpath warning and the thread judged in its band, posted, the K7 seat judged in its band and the uncut features checked to be only the hand-tapped M4s, and a setup sheet for each; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `nc/base_plate - {Top,Underside} setup sheet.pdf`, `cam_report.json` |
 | `build_drawings.py` | three A3 sheets ([below](#drawings-and-renders)): the base plate's shop drawing, the head's assembly drawing with balloons and the parts list, and the print sheet; each exported and `check_drawing`ed, and the stage stops on a sheet that is not clean. It only draws: what the sheets order by is the model's | `drawings.dsgn`, `drawings/{base_plate,assembly,print}.{pdf,svg}`, `drawings_report.json` |
 | `build_renders.py` | path-traced stills of the head: hero, tilted 35 degrees by its worm, from below, exploded along its own axes | `renders/{hero,tilted,low,exploded}.png` |
 
@@ -249,7 +249,8 @@ reason (a frame built from a cylindrical face takes the face's seam as X:
   the 10 mm cutter's 22 mm of flute reaches from the blank's top, a
   millimetre short (adaptive, 1 mm engagement, 10 mm deep), the 6005's
   seat (bored with the 10 mm leaving 0.2, finished with a fresh 6 mm in one
-  full-depth pass, then a spring pass: the same lap again), the relief, the
+  full-depth pass, then a spring pass: the same lap again, both under
+  cutter compensation), the relief, the
   four M4 tap holes (3.3 mm 118 degree drill, pecked, to the point the
   model has; tap them M4 by hand, 5.9 deep), the seat-mouth and rim
   chamfers. 26.8 min.
@@ -283,12 +284,25 @@ router does not hold 25 µm unaided: spindle runout (an ER20 collet, 10-20
 µm), the finisher's deflection and the steppers' reversal at the quadrants
 each take a part of it, and all push the bore over size, which is the loose
 side. What the band needs from the 6090: the finish and spring passes (in
-the program), then a measured bore -- cut the seat, gauge it before the
-setup is broken, and if it is over, re-post the finish with the finisher's
-diameter raised by the excess (the path is tool-centre; there is no G41 to
-trim) and cut it again. Expect about +0.01 to +0.04 as cut. If it will not
-come into the band, a bearing retaining compound (Loctite 641/638-class)
-on a slip fit is the honest fallback, not a pressed K7.
+the program), then a measured bore, corrected at the machine. Both passes
+are posted under cutter compensation in wear mode (`G41 D6`,
+[cutter compensation](../../docs/cam/post.md#cutter-compensation)): the
+file is still the tool centre the check read, and tool 6's diameter in
+Mach3's tool table holds only the wear. A bore cannot be made smaller
+again, and this one comes out over, so the first run leaves it small on
+purpose: +0.04 in the table, cut the seat, gauge it before the setup is
+broken, take the shortfall off the entry and run the finish and the spring
+pass again (the setup sheet gives their lines). Expect about +0.01 to
++0.04 of oversize as cut. If it will not come into the band, a bearing
+retaining compound (Loctite 641/638-class) on a slip fit is the honest
+fallback, not a pressed K7.
+
+**Setup sheets.** Each setup posts with its sheet beside the program
+(`nc/base_plate - <setup> setup sheet.pdf`,
+[the setup sheet](../../docs/cam/setup.md#the-setup-sheet)): the blank,
+the zero and where to touch off, the jaws, the tools in the order they are
+loaded with their stickout, the operations with the line each starts on,
+the K7 band and what the tool table holds, and the M4s left to tap.
 
 **Not measured -- measure these at the machine** (`UNMEASURED` in `cam.py`):
 the traverse rate and the travel (the chess job's numbers); the spindle's

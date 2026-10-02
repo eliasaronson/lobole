@@ -566,6 +566,18 @@ take the neck as reach (`ReachLength`, [setup.md](setup.md#reach)); and the
 tool glyph draws the head, the neck and the shank above it. A thread mill
 cuts threads and nothing else: any other operation refuses it.
 
+## Cutter compensation
+
+`cutterComp` (`cutter_comp`: `off` | `wear`) on profile, pocket and drill
+posts their finished wall passes under `G41`/`G42` with a lead-in and a
+lead-out on the waste side, the path still the tool centre, so a wall the
+machine cuts off size is corrected in the controller's tool table and re-run
+([post.md](post.md#cutter-compensation)). A profile with it starts every pass
+at the same point and lifts between passes, as with lead arcs, and refuses
+`on` its contour and `lead_arcs`; a drill compensates a bore's wall ring and
+refuses a hole the cutter's size; a pocket its wall rings, islands too. On a
+rough-then-finish op the finish is compensated, the rough is not.
+
 ## Rough then finish
 
 `finishTool` / `finishStock` on profile, pocket, face, drill, adaptive and

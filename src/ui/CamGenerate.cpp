@@ -276,6 +276,17 @@ void DrawCamGenerateWindow(AppState& state) {
       }
     }
   }
+  if (!state.camToolpaths.empty()) {
+    ImGui::SameLine();
+    if (ImGui::Button("Setup sheet###cam_setup_sheet"))
+      state.camSheetPending = true; // PumpSetupSheet, on the next frame
+    ImGui::SetItemTooltip(
+        "A printable page for the machine (PDF, beside the project): the "
+        "stock, the work zero, the fixtures and a picture of the setup, every "
+        "tool in order with its stickout, feeds and minutes, the operations, "
+        "the cycle time, the bands to gauge and what the tool table holds "
+        "for a compensated op.");
+  }
   if (!state.camLastPost.empty())
     ImGui::TextDisabled("%s", state.camLastPost.c_str());
 

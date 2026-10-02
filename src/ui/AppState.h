@@ -1898,6 +1898,10 @@ struct AppState {
   bool camShowToolpath = true;
   double camSafeZEdit = 5.0;
   std::string camLastPost;
+  // The Generate window's "Setup sheet" button: written on the next pump of
+  // the frame (PumpSetupSheet), outside the window's drawing, because its
+  // picture is a capture (docs/cam/setup.md#the-setup-sheet).
+  bool camSheetPending = false;
   // The verb session (G2): a Tool window, NOT a mode — CAM does not take the
   // viewport over, and modes have a known exit-bug class here (U11).
   bool camToolOpen = false;

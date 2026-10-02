@@ -30,19 +30,20 @@ constexpr OpTypeRow kRows[] = {
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
          OpField::Side | OpField::Tabs | OpField::CornerRelief |
          OpField::LeadArcs | OpField::DrilledBores | OpField::Finish |
-         OpField::FullWidth | OpField::Indexed},
+         OpField::FullWidth | OpField::Indexed | OpField::CutterComp},
     {OpType::Pocket, "pocket", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
          OpField::Side | OpField::Stepover | OpField::UseOutline |
          OpField::CornerRelief | OpField::Finish | OpField::ClearsInside |
-         OpField::NeedsFlatFloor | OpField::Indexed},
+         OpField::NeedsFlatFloor | OpField::Indexed | OpField::CutterComp},
     {OpType::Face, "face", false,
      OpField::Stepdown | OpField::StockToLeave | OpField::Climb |
          OpField::Stepover | OpField::Finish | OpField::NeedsFlatFloor |
          OpField::Indexed},
     {OpType::Drill, "drill", false,
      OpField::StockToLeave | OpField::Stepover | OpField::Peck |
-         OpField::Finish | OpField::FullWidth | OpField::Indexed},
+         OpField::Finish | OpField::FullWidth | OpField::Indexed |
+         OpField::CutterComp},
     {OpType::Adaptive, "adaptive", true,
      OpField::Stepdown | OpField::StockToLeave | OpField::Side |
          OpField::Stepover | OpField::UseOutline | OpField::Finish |
@@ -189,6 +190,10 @@ constexpr SideRow kSideRows[] = {
     {Side::Inside, "inside"},
     {Side::On, "on"},
 };
+constexpr CutterCompRow kCutterCompRows[] = {
+    {CutterComp::Off, "off"},
+    {CutterComp::Wear, "wear"},
+};
 constexpr CornerReliefRow kCornerReliefRows[] = {
     {CornerRelief::None, "none"},
     {CornerRelief::Dogbone, "dogbone"},
@@ -303,6 +308,33 @@ bool TryCornerReliefFromName(const std::string& s, CornerRelief& out) {
 std::string CornerReliefNameList() {
   std::string known;
   for (const CornerReliefRow& row : kCornerReliefRows)
+    known += (known.empty() ? "" : ", ") + std::string(row.name);
+  return known;
+}
+
+std::span<const CutterCompRow> CutterComps() { return kCutterCompRows; }
+
+const char* CutterCompName(CutterComp c) {
+  for (const CutterCompRow& row : kCutterCompRows)
+    if (row.comp == c)
+      return row.name;
+  throw std::logic_error("cam::CutterComp " +
+                         std::to_string(static_cast<int>(c)) +
+                         " has no row in CamNames.cpp");
+}
+
+bool TryCutterCompFromName(const std::string& s, CutterComp& out) {
+  for (const CutterCompRow& row : kCutterCompRows)
+    if (s == row.name) {
+      out = row.comp;
+      return true;
+    }
+  return false;
+}
+
+std::string CutterCompNameList() {
+  std::string known;
+  for (const CutterCompRow& row : kCutterCompRows)
     known += (known.empty() ? "" : ", ") + std::string(row.name);
   return known;
 }

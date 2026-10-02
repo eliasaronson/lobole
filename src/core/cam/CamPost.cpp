@@ -197,15 +197,19 @@ struct Dialect {
   // Mach3's helical interpolation, LinuxCNC's G2/G3 with the third axis
   // linear, GRBL 1.1's arcs with Z.
   bool helical;
+  // G41/G42 with a D register, G40 to cancel
+  // (docs/cam/post.md#cutter-compensation): Mach3 and LinuxCNC, from the
+  // RS274/NGC interpreter both descend from. GRBL has no cutter compensation.
+  bool cutterComp;
 };
 
 constexpr Dialect kDialects[] = {
-    {"mach3", ToolChange::Manual, "M30", true},
-    {"linuxcnc", ToolChange::Table, "M2", true},
+    {"mach3", ToolChange::Manual, "M30", true, true},
+    {"linuxcnc", ToolChange::Table, "M2", true, true},
     // Every G word in the preamble is GRBL-legal (G91.1 included, since 1.1),
     // and the drill posts plain moves, so nothing needs translating -- the
     // difference is only the tool change and the end word.
-    {"grbl", ToolChange::Pause, "M2", true},
+    {"grbl", ToolChange::Pause, "M2", true, false},
 };
 
 // --- C7: fitting arcs back onto the polyline -------------------------------
@@ -306,7 +310,7 @@ Circle FitCircle(const std::vector<glm::dvec2>& pts) {
 // 40 x 20 pocket posted 29,856 lines with arcs turned off — the setting a
 // controller that mishandles arcs is left with, and those are the slow ones.
 size_t LastCollinear(const std::vector<Move>& moves, size_t i,
-                     const glm::dvec3& from, double tol) {
+                     const glm::dvec3& from, double tol, size_t end) {
   // Bounded: a run of thousands is merged in chunks rather than costing
   // O(n^2) over the whole thing.
   constexpr size_t kMaxRun = 256;
@@ -319,7 +323,7 @@ size_t LastCollinear(const std::vector<Move>& moves, size_t i,
   if (i > 0 && first.hasA && moves[i - 1].hasA &&
       Emitter::Differs(first.a, moves[i - 1].a))
     return i;
-  for (size_t j = i + 1; j < moves.size() && j - i < kMaxRun; j++) {
+  for (size_t j = i + 1; j < end && j - i < kMaxRun; j++) {
     const Move& m = moves[j];
     if (m.kind != first.kind || Emitter::Differs(m.feed, first.feed) ||
         m.hasA != first.hasA || (m.hasA && Emitter::Differs(m.a, first.a)))
@@ -350,8 +354,8 @@ double SweptAngle(const glm::dvec2& centre, const glm::dvec2& from,
 // index of the last move the arc absorbs, or `first - 1` when there is no
 // arc — so the caller emits a line and steps on.
 size_t FitArc(const std::vector<Move>& moves, size_t first, Circle& circle,
-              bool& clockwise) {
-  if (first == 0 || first + kMinArcSegments > moves.size())
+              bool& clockwise, size_t end) {
+  if (first == 0 || first + kMinArcSegments > end)
     return first - 1;
   const glm::dvec3 start = moves[first - 1].to;
   const double z = start.z;
@@ -380,14 +384,14 @@ size_t FitArc(const std::vector<Move>& moves, size_t first, Circle& circle,
            std::abs(m.to.z - z) < 1e-9 && std::abs(m.feed - feed) < 1e-9;
   };
   for (size_t k = first; k < first + kMinArcSegments; k++)
-    if (k >= moves.size() || !usable(moves[k]))
+    if (k >= end || !usable(moves[k]))
       return first - 1;
 
   // Grow the run one move at a time, refitting the whole thing each step: a
   // fit is only trusted against the points it was made from.
   std::vector<glm::dvec2> pts{glm::dvec2(start)};
   size_t last = first - 1;
-  for (size_t k = first; k < moves.size(); k++) {
+  for (size_t k = first; k < end; k++) {
     if (!usable(moves[k]))
       break;
     pts.push_back(glm::dvec2(moves[k].to));
@@ -513,6 +517,47 @@ bool PostWritesHelicalArcs(const std::string& id) {
   return d != nullptr && d->helical;
 }
 
+bool PostWritesCutterComp(const std::string& id) {
+  const Dialect* d = Find(id);
+  return d != nullptr && d->cutterComp;
+}
+
+std::string CutterCompRefusal(const std::string& postId,
+                              const std::vector<Toolpath>& paths) {
+  const Dialect* dialect = Find(postId);
+  for (const Toolpath& tp : paths) {
+    if (!tp.error.empty())
+      continue;
+    // Checked before it is trusted, as a declared arc is: a run a clip or a
+    // merge has changed since is not one the controller can be told about.
+    size_t after = 0;
+    for (const Toolpath::Comp& c : tp.comps) {
+      bool ok = c.first >= 1 && c.first >= after && c.first < c.last &&
+                c.last < tp.moves.size();
+      for (size_t k = c.first; ok && k <= c.last; k++)
+        ok = tp.moves[k].kind != Move::Kind::Rapid;
+      if (!ok)
+        return "op " + std::to_string(tp.operationId) +
+               "'s compensated wall pass was changed after it was made: "
+               "generate it again";
+      after = c.last + 1;
+    }
+    if (!tp.comps.empty() && dialect != nullptr && !dialect->cutterComp) {
+      std::string with;
+      for (const Dialect& d : kDialects)
+        if (d.cutterComp)
+          with += (with.empty() ? "" : ", ") + std::string(d.id);
+      return "post '" + postId +
+             "' has no cutter compensation (G41/G42), and op " +
+             std::to_string(tp.operationId) +
+             " asks for it: turn its cutter_comp off, or post to a "
+             "controller that has it (" +
+             with + ")";
+    }
+  }
+  return {};
+}
+
 bool PostProcess(const std::string& postId, const Setup& setup,
                  const std::vector<Toolpath>& paths, const PostOptions& opts,
                  std::string& out, std::string* error) {
@@ -531,6 +576,11 @@ bool PostProcess(const std::string& postId, const Setup& setup,
   // refused, naming what to state
   // (docs/cam/rotary.md#how-the-rotary-is-installed).
   if (const std::string why = MountRefusal(setup); !why.empty()) {
+    if (error != nullptr)
+      *error = why;
+    return false;
+  }
+  if (const std::string why = CutterCompRefusal(postId, paths); !why.empty()) {
     if (error != nullptr)
       *error = why;
     return false;
@@ -571,6 +621,31 @@ bool PostProcess(const std::string& postId, const Setup& setup,
                   f.label + " " + Num(f.Min(), 4) + "-" + Num(f.Max(), 4) +
                   ", aimed at " + Num(f.aim, 4));
       }
+    // Each compensated op, and what its tool table entry must hold
+    // (docs/cam/post.md#cutter-compensation): the wear alone, since the
+    // file is already the tool centre.
+    std::vector<uint64_t> compSaid;
+    for (const Toolpath& tp : paths) {
+      if (!tp.error.empty() || tp.comps.empty() ||
+          std::find(compSaid.begin(), compSaid.end(), tp.operationId) !=
+              compSaid.end())
+        continue;
+      compSaid.push_back(tp.operationId);
+      bool left = false, right = false;
+      for (const Toolpath::Comp& c : tp.comps)
+        (c.left ? left : right) = true;
+      const std::string t = std::to_string(tp.toolNumber);
+      const double wear = tp.comps.front().checkedWear;
+      e.Comment("comp op " + std::to_string(tp.operationId) + ": " +
+                (left && right ? "G41/G42"
+                 : left        ? "G41"
+                               : "G42") +
+                " D" + t + " WEAR - tool " + t +
+                "'s diameter in the tool table is the wear alone: 0 cuts as "
+                "programmed, +0.02 leaves 0.01 more on each wall; checked to "
+                "+-" +
+                Num(wear, 3));
+    }
   }
   // Absolute, mm, XY plane, cancel any leftover cutter comp or canned cycle:
   // a preamble that assumes the machine is in a known state is how a job
@@ -707,8 +782,36 @@ bool PostProcess(const std::string& postId, const Setup& setup,
     // else in such a path is a straight move.
     const bool declared = !tp.arcs.empty();
     size_t nextArc = 0;
+    // Compensated runs (docs/cam/post.md#cutter-compensation): G41/G42 before
+    // the lead-in line, G40 before the lead-out line, each of them written as
+    // its own move -- a line the controller turns compensation on or off
+    // along -- and no arc or merged run across either.
+    std::vector<size_t> bounds;
+    for (const Toolpath::Comp& c : tp.comps) {
+      bounds.push_back(c.first);
+      bounds.push_back(c.last);
+    }
+    std::sort(bounds.begin(), bounds.end());
+    size_t nextComp = 0;
     for (size_t i = 0; i < tp.moves.size();) {
       const Move& m = tp.moves[i];
+      const bool boundary = std::binary_search(bounds.begin(), bounds.end(), i);
+      // Moves at or past the next boundary are not this run's.
+      const auto nb = std::upper_bound(bounds.begin(), bounds.end(), i);
+      const size_t runEnd = nb == bounds.end() ? tp.moves.size() : *nb;
+      if (boundary) {
+        while (nextComp < tp.comps.size() && tp.comps[nextComp].last < i)
+          nextComp++;
+        const Toolpath::Comp& c = tp.comps[nextComp];
+        if (c.first == i)
+          e.Raw(std::string(c.left ? "G41" : "G42") + " D" +
+                std::to_string(tp.toolNumber));
+        else
+          e.Raw("G40");
+        e.Motion("G1", m.to, m.feed, m.hasA, m.a);
+        i++;
+        continue;
+      }
       if (declared) {
         while (nextArc < tp.arcs.size() && tp.arcs[nextArc].first < i)
           nextArc++;
@@ -726,7 +829,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
       Circle circle;
       bool clockwise = false;
       const size_t last = opts.fitArcs && !declared
-                              ? FitArc(tp.moves, i, circle, clockwise)
+                              ? FitArc(tp.moves, i, circle, clockwise, runEnd)
                               : i - 1;
       if (opts.fitArcs && !declared && i > 0 && last >= i) {
         e.Arc(clockwise, tp.moves[last].to, circle.centre, tp.moves[i].feed);
@@ -747,9 +850,9 @@ bool PostProcess(const std::string& postId, const Setup& setup,
         e.Retract(setup.safeZ);
       const char* code = m.kind == Move::Kind::Rapid ? "G0" : "G1";
       // A straight run collapses to its endpoint. Same line, fewer of them.
-      size_t straightTo =
-          i > 0 ? LastCollinear(tp.moves, i, tp.moves[i - 1].to, kArcTolerance)
-                : i;
+      size_t straightTo = i > 0 ? LastCollinear(tp.moves, i, tp.moves[i - 1].to,
+                                                kArcTolerance, runEnd)
+                                : i;
       // …but never past the start of an arc. The first points of an arc that
       // leaves tangentially ARE collinear with the line feeding into it, to
       // well inside this tolerance, so an unchecked run swallowed them and
@@ -764,7 +867,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
         for (size_t k = i + 1; k <= straightTo; k++) {
           Circle ahead;
           bool aheadCw = false;
-          if (FitArc(tp.moves, k, ahead, aheadCw) >= k) {
+          if (FitArc(tp.moves, k, ahead, aheadCw, runEnd) >= k) {
             straightTo = k - 1;
             break;
           }

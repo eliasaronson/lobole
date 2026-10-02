@@ -379,6 +379,55 @@ two of them; `GenerateAll` ranks them by the same rule (`ToolRank`), and a
 finishing tool ranks where its operation first appears. `splitOutput` writes one program per tool and forces tool order
 (the panel says so); see [post.md](post.md#files).
 
+## The setup sheet
+
+The page that goes to the machine with a program: one PDF per setup
+(`cam::SetupSheet`, `WriteSetupSheetPdf` in `core/cam/CamSetupSheet.cpp`, A4
+portrait in base-14 Helvetica like a drawing's PDF, as many pages as its tables
+take; `ui::SetupSheetOf` in `src/ui/CamSetupSheet.cpp` fills it from the job).
+It posts the setup first and refuses one that does not post, so it never
+describes a program that does not exist. It says:
+
+- the job and setup, the project and the date; the program's file name
+  (the one Save G-code writes beside the project, or the RPC's `program`) in
+  the footer of every page; the machine and post;
+- the part and its material's grade (the material library's `GradeOf`, as a
+  drawing's title block); the stock's size and how it was derived;
+- the work zero: which corner ([work origin](#work-origin)), which face Z0 is
+  on, and — when the face op has stock to take first — what to set when
+  touching off on the blank ("set Z+1.300"); safe Z in the program's
+  coordinates; how it is held, and each fixture where the program sees it;
+- a picture: the job tab showing this setup from the iso view, framed for the
+  page, through the quick still (`captureRaster`) — the part where it sits in
+  the stock, the fixtures ghosted; the camera and the shown setup are put
+  back. Under `--headless` there is no renderer and the sheet says so;
+- a plan from above in the program's coordinates: the stock dashed, the part's
+  section halfway up, each fixture's footprint, and the zero marked with X+
+  and Y+, which the picture cannot show;
+- the notes, before the tables so a sheet that runs over keeps them on its
+  first page: each toleranced wall and floor the program aims at (each wall
+  once, with every op that cuts it), each milled thread against its class
+  (a go/no-go gauge), each compensated op and what its tool table entry holds
+  and how to re-cut it, from which lines
+  ([cutter compensation](post.md#cutter-compensation)), what the job leaves
+  undone (threads no thread mill targets: by hand), "gauge before the setup is
+  broken" whenever there is a band, and what to check at the machine;
+- every tool in the order it is loaded: number, name, type, diameter, flutes,
+  stickout and holder (`?` where the tool does not state them, which is also
+  a holder check that did not run), rpm, feed and plunge, the ops it cuts and
+  its minutes;
+- the operations in cutting order: type, tool, Z range in the program's
+  coordinates, the line each starts on (a rough and its finish are two),
+  minutes, and the bands, the comp, a fall-back strategy or why one is not in
+  the program; and the cycle time with the tool changes.
+
+`export_setup_sheet {setup, path, program?, picture?}` writes it (a `.pdf`,
+refused otherwise; parked like `cam_post` until its passes are cut); the
+Generate window's **Setup sheet** writes `<project> - <setup> setup
+sheet.pdf` beside the project, as Save G-code does, from the next frame (the
+picture is a capture). `generators/pantilt/cam.py` writes one beside each
+program.
+
 ## Undo
 
 A job tab has its own undo stack (`JobHistory`, full `JobDocument` snapshots,

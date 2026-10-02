@@ -61,10 +61,9 @@ them:
 - **Distance tolerances between walls** in CAM: a floor or shoulder is cut
   to its band ([tolerance bands](cam/operations.md#tolerance-bands)), a
   slot's width between two walls as modelled.
-- **Cutter radius compensation** (G41/G42) in the posts.
 - **Workholding follow-ons:** generated vises and toe clamps, the spindle nose
-  as a collision body, holding the
-  part down on 3D operations (tabs are profile-only), and a setup sheet.
+  as a collision body, and holding the
+  part down on 3D operations (tabs are profile-only).
 - **Other processes:** lathe turning (4th-axis milling of a turned part
   exists, [rotary](cam/rotary.md)); laser, plasma and waterjet posts (the
   posts are milling dialects); nesting sheet blanks.

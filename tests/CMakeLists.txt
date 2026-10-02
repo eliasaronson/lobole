@@ -102,6 +102,8 @@ add_executable(designer_tests
     test_cam_engrave.cpp
     test_cam_thread.cpp
     test_cam_honest.cpp
+    test_cam_comp.cpp
+    test_cam_setup_sheet.cpp
     test_command_modify.cpp
     test_reorder.cpp
     test_remove_features.cpp

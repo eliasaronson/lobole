@@ -222,6 +222,35 @@ std::string TooTightForTool(const Clipper2Lib::Paths64& region,
          " mm of room. Leave less stock, or use a smaller cutter.";
 }
 
+void DeclareWall(Toolpath& tp, size_t before, bool materialInside) {
+  const std::vector<Move>& m = tp.moves;
+  size_t first = before;
+  while (first < m.size() && m[first].kind == Move::Kind::Rapid)
+    first++;
+  if (first >= m.size() || first == 0)
+    return;
+  if (m[first - 1].kind != Move::Kind::Rapid)
+    first++; // a link at depth from the ring before: not the wall
+  size_t last = m.size() - 1;
+  while (last > first && m[last].kind == Move::Kind::Rapid)
+    last--;
+  if (first >= m.size() || last < first || m[last].kind == Move::Kind::Rapid)
+    return;
+  double area2 = 0.0;
+  glm::dvec2 prev(m[first - 1].to);
+  const glm::dvec2 start = prev;
+  for (size_t k = first; k <= last; k++) {
+    const glm::dvec2 p(m[k].to);
+    area2 += prev.x * p.y - p.x * prev.y;
+    prev = p;
+  }
+  area2 += prev.x * start.y - start.x * prev.y;
+  // Clockwise round the material, or anticlockwise inside it: the material
+  // is on the right of travel.
+  const bool ccw = area2 > 0.0;
+  tp.walls.push_back({first, last, ccw != materialInside});
+}
+
 void Emit(Toolpath& tp, Move::Kind kind, const glm::dvec3& to, double feed) {
   Move m;
   m.kind = kind;

@@ -372,6 +372,10 @@ struct Verdict {
   std::string firstFileError;
   int fileWarnings = 0;
   std::string firstFileWarning;
+  // The operations the file puts under cutter compensation
+  // (docs/cam/post.md#cutter-compensation): checked as programmed, which is
+  // what they cut with no wear in the controller's tool table.
+  std::vector<uint64_t> compensatedOps;
   int outsideTravel = 0;
   int firstOutsideLine = 0;
   double worstOvershoot = 0.0; // mm past the limit, on `outsideAxis`

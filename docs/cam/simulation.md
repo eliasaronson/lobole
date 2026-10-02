@@ -157,6 +157,14 @@ about 40 ms is meshing the part for `SampleModel`. The chess set's CAM
 - **File errors and warnings.** What the parser could not read (a NaN
   coordinate, a zero feed) counts against `ok`; what a controller may refuse
   though the parser survived it (a nested comment) is a warning.
+- **Cutter compensation is read as programmed.** A `G41`/`G42` op
+  ([post.md](post.md#cutter-compensation)) posts the tool centre, so the file
+  read with no wear is the cut the controller makes with an empty tool table
+  entry; the parser records the ops (`GProgram::compensatedOps`), and the
+  verdict (`Verdict::compensatedOps`, `cam_verify`'s `cutter_comp`) and the
+  playback (`cam_simulate`'s `cutter_comp`) say that what the machine cuts
+  moves by whatever the table adds. A compensated op verifies exactly as it
+  does uncompensated: the leads are in air or in cleared material.
 
 ### Engraved grooves
 

@@ -1,3 +1,4 @@
+#include "core/cam/CamComp.h"
 #include "core/cam/CamMount.h"
 #include "core/cam/CamToolpath.h"
 
@@ -659,6 +660,20 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
   const double bottom = op.bottomZ + op.stockToLeave;
   const std::vector<double> passes = DepthPasses(op);
   std::string why;
+  // Cutter compensation (docs/cam/post.md#cutter-compensation) moves the tool
+  // off a WALL, and brings its own lead-in and lead-out.
+  const bool comp = op.cutterComp != CutterComp::Off;
+  if (comp && op.side == Side::On) {
+    tp.error = "cutter compensation moves the tool off a wall, and a profile "
+               "ON its contour has none: give it a side, or turn cutter_comp "
+               "off";
+    return;
+  }
+  if (comp && op.leadArcs) {
+    tp.error = "cutter compensation brings its own lead-in and lead-out: "
+               "turn lead_arcs off for this operation";
+    return;
+  }
   // A wall names its contour by POSITION, not by value. The outline it lies
   // on changes with depth wherever a feature opens part-way down, so the
   // mid-height loop `PickedWallContour` returns is right at one height and
@@ -958,7 +973,9 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
           for (const glm::dvec2& c : corners)
             tp.reliefs.push_back({c, radius * 2.0});
       }
-      if (lead > 0.0 && pts.size() >= 2) {
+      // A compensated pass starts where the last one did, like a lead arc,
+      // so its lead-in and lead-out stack into the waste a stepdown each.
+      if ((lead > 0.0 || comp) && pts.size() >= 2) {
         if (leadAt.size() <= loop)
           leadAt.resize(loop + 1);
         if (!leadAt[loop]) {
@@ -988,13 +1005,17 @@ void GenerateProfile(const Setup& setup, const Operation& op, const Tool& tool,
       // loop, no lead-out to leave by, and a pass still to come. The next
       // pass ramps on from where this lap ended (EmitLoop, `stillDown`).
       // Several loops alternate pass by pass, so the tool has to travel.
-      const bool stayDown = lead <= 0.0 && paths.size() == 1 && !lastPass;
+      const bool stayDown =
+          lead <= 0.0 && !comp && paths.size() == 1 && !lastPass;
+      const size_t before = tp.moves.size();
       resume[loop] =
           EmitLoop(tp, setup, tool, pts, z, setup.safeZ, stockTop, op.tabCount,
                    op.tabWidth, bottom + op.tabHeight,
                    pass == 0 ? op.topZ : passes[pass - 1], Entry::Ramp,
-                   resume[loop], /*retract=*/!stayDown, lead,
+                   comp ? 0.0 : resume[loop], /*retract=*/!stayDown, lead,
                    op.side == Side::Outside, lastPass ? &tp.tabs : nullptr);
+      if (comp)
+        DeclareWall(tp, before, /*materialInside=*/op.side == Side::Outside);
     }
   }
   // A pass that stayed down for a next one that never came (the contour ran
@@ -1114,6 +1135,7 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       int level = 0;
       int parent = -1;
       std::vector<int> kids;
+      bool island = false;
     };
     std::vector<PocketLoop> loops;
     // Drop a loop that clears nothing
@@ -1143,6 +1165,9 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
         swept = Clipper2Lib::Union(swept, band, Clipper2Lib::FillRule::NonZero);
         PocketLoop l;
         l.path = path;
+        // Clipper winds an island's ring the other way from the outline's:
+        // the material is INSIDE it.
+        l.island = !Clipper2Lib::IsPositive(path);
         Orient(l.path, op.climb, /*insideMaterial=*/true);
         l.pts = FromClipper(l.path);
         l.level = static_cast<int>(level);
@@ -1246,10 +1271,16 @@ void GeneratePocket(const Setup& setup, const Operation& op, const Tool& tool,
       EmitHelix(tp, tool, centre, helixRadius, std::max(entryZ, z), z,
                 setup.safeZ, stockTop, kDeflection);
     }
-    for (const int i : order)
+    for (const int i : order) {
+      const size_t before = tp.moves.size();
       EmitRing(tp, setup, tool,
                WallRelief(op, tool, loops[i].pts, loops[i].level == 0, tp), z,
                stockTop, step, entryZ);
+      // The wall rings, for cutter compensation
+      // (docs/cam/post.md#cutter-compensation).
+      if (loops[i].level == 0 && op.cutterComp != CutterComp::Off)
+        DeclareWall(tp, before, /*materialInside=*/loops[i].island);
+    }
     Emit(tp, Move::Kind::Rapid,
          {tp.moves.back().to.x, tp.moves.back().to.y, setup.safeZ}, 0.0);
     entryZ = z;
@@ -1657,9 +1688,15 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
           if (rings.back() > step * 0.5 && wall > tool.diameter * 0.5)
             rings.push_back(std::min(rings.back(), step * 0.5));
           std::sort(rings.begin(), rings.end()); // inner first, the wall last
-          for (const double r : rings)
-            EmitHelix(tp, tool, centre, r, op.topZ, op.bottomZ, setup.safeZ,
-                      stockTop, kDeflection);
+          for (size_t k = 0; k < rings.size(); k++) {
+            const size_t before = tp.moves.size();
+            EmitHelix(tp, tool, centre, rings[k], op.topZ, op.bottomZ,
+                      setup.safeZ, stockTop, kDeflection);
+            // The wall ring, for cutter compensation
+            // (docs/cam/post.md#cutter-compensation).
+            if (k + 1 == rings.size() && op.cutterComp != CutterComp::Off)
+              DeclareWall(tp, before, /*materialInside=*/false);
+          }
           // Out of the finished hole straight up, then over: one rapid to
           // the centre at safe Z from the wall ring's bottom climbed and
           // travelled at once.
@@ -1668,6 +1705,13 @@ void GenerateDrill(const Setup& setup, const Operation& op, const Tool& tool,
           Emit(tp, Move::Kind::Rapid, {centre.x, centre.y, setup.safeZ}, 0.0);
           break;
         }
+      }
+      if (op.cutterComp != CutterComp::Off) {
+        tp.error = "tool " + std::to_string(op.toolNumber) +
+                   " is the size of a hole it is asked to compensate: a "
+                   "plunge has no wall for the controller to move. Bore it "
+                   "with a smaller tool, or turn cutter_comp off";
+        return;
       }
       found++;
       const glm::dvec3 centre(origin.x, origin.y, 0.0);
@@ -1885,6 +1929,11 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
         arc.last += tp.moves.size();
         tp.arcs.push_back(arc);
       }
+      for (Toolpath::Wall wall : sub.walls) {
+        wall.first += tp.moves.size();
+        wall.last += tp.moves.size();
+        tp.walls.push_back(wall);
+      }
       tp.threads.insert(tp.threads.end(), sub.threads.begin(),
                         sub.threads.end());
       tp.moves.insert(tp.moves.end(), sub.moves.begin(), sub.moves.end());
@@ -1904,6 +1953,22 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
   if (tp.moves.empty() && tp.error.empty() && !tp.pending)
     tp.error = "this operation produced no toolpath — check its depths "
                "against the model";
+  // Cutter compensation (docs/cam/post.md#cutter-compensation): the wall
+  // passes the strategy declared get their leads, and are checked for what
+  // a controller can offset.
+  if (tp.error.empty() && !tp.pending && op.cutterComp != CutterComp::Off &&
+      OpTypeHas(op.type, OpField::CutterComp)) {
+    std::string why;
+    if (tp.walls.empty())
+      why = "cutter compensation found no wall pass in this operation to "
+            "compensate";
+    else if (!CompensateWalls(tp, *tool, setup.origin, why))
+      tp.moves.clear();
+    if (!why.empty()) {
+      tp.moves.clear();
+      tp.error = why;
+    }
+  }
   if (tp.error.empty())
     fits.Declare(op.id, tp);
   // Cut what fits: clipped HERE, at the one place every toolpath is made,
@@ -1942,6 +2007,7 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
     }
   }
   glm::dvec3 bedLo(0.0), bedHi(0.0);
+  const double clippedBefore = tp.clippedMm + tp.holdingClippedMm;
   if (tp.error.empty() && MachineBoundsFramed(setup, bodies, bedLo, bedHi)) {
     ClipToMachine(tp, bedLo, bedHi, setup.safeZ,
                   tool != nullptr ? tool->feedPlunge : 100.0);
@@ -1959,6 +2025,17 @@ Toolpath GenerateFramed(const Setup& setup, const Operation& op,
           "'s travel, so none of it is in the file: move the part on the "
           "stock, or cut it in a second setup with the sheet slid along";
     }
+  }
+  // A compensated run is one piece from G41 to G40: clipped, it would be
+  // a run the controller is told to compensate with its lead-in or its
+  // lead-out missing.
+  if (tp.error.empty() && !tp.comps.empty() &&
+      (tp.holdingClippedMm > 0.0 || tp.clippedMm > clippedBefore)) {
+    tp.moves.clear();
+    tp.comps.clear();
+    tp.error = "part of a compensated wall pass lies beyond the machine's "
+               "travel or in its holding, and cutter compensation needs the "
+               "whole pass: move the part, or turn cutter_comp off";
   }
   // The index this setup is cut at rides on every move, so the post emits it
   // and the machine is never asked to guess which way the part is facing.
@@ -2068,6 +2145,11 @@ std::vector<Toolpath> GenerateAtIndices(
         turn.hasA = true;
         turn.a = a;
         tp.moves.push_back(turn);
+      }
+      for (Toolpath::Comp c : piece.comps) {
+        c.first += tp.moves.size();
+        c.last += tp.moves.size();
+        tp.comps.push_back(c);
       }
       tp.moves.insert(tp.moves.end(), piece.moves.begin(), piece.moves.end());
       // Reliefs, tabs and grooves are not carried: each is a place in ONE

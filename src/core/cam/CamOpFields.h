@@ -29,7 +29,8 @@ namespace cam {
 using OpMember =
     std::variant<double Operation::*, bool Operation::*, int Operation::*,
                  Side Operation::*, CornerRelief Operation::*,
-                 RotaryPattern Operation::*, std::vector<double> Operation::*>;
+                 RotaryPattern Operation::*, CutterComp Operation::*,
+                 std::vector<double> Operation::*>;
 
 enum OpFieldFlag : unsigned {
   // Named here -- so the owned list, describe and the capability gate see it

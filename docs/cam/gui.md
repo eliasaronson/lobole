@@ -269,7 +269,9 @@ the tool window.
   reach that is only just, or rubs, is said under the settings
   ([setup.md](setup.md#reach)). The settings show only the fields the type
   has (the capability table): tool as `T1 T2 …` buttons, depths,
-  stepdown/stepover, leave, tabs, corner relief, finish tool, Over openings,
+  stepdown/stepover, leave, tabs, corner relief, finish tool, lead arcs,
+  **Comp** (`###cam_comp`: cutter compensation in wear mode on a profile,
+  pocket or drill, [post.md](post.md#cutter-compensation)), Over openings,
   the rotary pattern as a radio pair, an engraving's width (for a V-bit) and
   depth, and so on. On a machine with a rotary axis the indices the
   operation is cut at are **chips**, `A0 A90 A180 A270`
@@ -379,8 +381,9 @@ The toolbar's Generate (and the active setup's status glyph) opens a tool window
 found: generate and verify, the verdict sentences (Good/Warn/Bad, the same
 text `cam_verify` returns as `says`) with the cutter findings and machine
 lines, the output options — cutting order (`Cut`: authored/tool/part) and
-**One file per tool** — **Show path**, and **Save G-code**
-([post.md](post.md#files)). A generate on a job tab defers the slow passes to
+**One file per tool** — **Show path**, **Save G-code**
+([post.md](post.md#files)) and **Setup sheet**, the page for the machine
+written beside the project ([setup.md](setup.md#the-setup-sheet)). A generate on a job tab defers the slow passes to
 the background ([README.md](README.md#background-work)); the toolpaths fill in
 as they land and a progress row shows the batch. The "N mm of cutting" total is
 cached on the toolpaths' key.

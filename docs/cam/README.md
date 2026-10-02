@@ -20,10 +20,10 @@ Topic pages:
 
 | page | what |
 |---|---|
-| [setup.md](setup.md) | machine profiles, setups, parts and placements, the fixturing frame, stock, work origin, safe Z, the work area, fixtures, cutting order, undo |
+| [setup.md](setup.md) | machine profiles, setups, parts and placements, the fixturing frame, stock, work origin, safe Z, the work area, fixtures, cutting order, the setup sheet, undo |
 | [operations.md](operations.md) | operation types, how the verbs derive them, the 2.5D strategies, rough-then-finish, 3-axis surfacing, the capability and field tables |
 | [rotary.md](rotary.md) | the indexed and the continuous 4th axis: patterns, feed compensation, A winding, the rotary verifier and picture |
-| [post.md](post.md) | dialects, what the file says, work origin in the file, arcs, tool changes, clipping to the machine, file names, what to check at the machine |
+| [post.md](post.md) | dialects, what the file says, work origin in the file, arcs, cutter compensation, tool changes, clipping to the machine, file names, what to check at the machine |
 | [simulation.md](simulation.md) | the verifier, the verdict, holder/fixture/travel checks, cutter findings, and the cutting simulation |
 | [gui.md](gui.md) | the job tab: toolbar verbs, verb windows, the CAM panel, what the viewport draws, Generate, Simulate, gizmos, Preferences › Machines |
 
@@ -170,7 +170,8 @@ as `belowStock` / `below_stock_mm`, not as a gouge.
 | generation | `CamToolpath.h` (the engine's API), `CamToolpathInternal.h`, `CamStrategies.cpp` (2.5D), `CamAdaptive.{h,cpp}` (libarea bridge), `CamSurfaceStrategies.cpp` (3-axis and rotary surfacing), `CamSurface.{h,cpp}` (patterns), `CamSurfaceStore.{h,cpp}` (surfacing passes kept on disk), `CamDropCutter.{h,cpp}` (cutter-location surface), `CamEngrave.{h,cpp}` (engraving), `CamThreadMill.{h,cpp}` (thread milling, and judging a thread) |
 | sketch curves | `CamSketchCurves.cpp` (`SketchEntityCurves`, the one resolver from a sketch entity to curves in model space, and the engraving's groove, frame, surface probe and stroke order; built with CAM off too), `ui::JobSketchCurves` in `JobActions.cpp` |
 | layout, order, travel | `CamTravel.cpp` (`CheckPlacements`, `PlacementRefusal`, `CuttingOrder`, `MachineWarning`, `ClipToMachine`, `GenerateAll`) |
-| post | `CamPost.{h,cpp}`, `CamRotaryFeed.{h,cpp}` |
+| post | `CamPost.{h,cpp}`, `CamRotaryFeed.{h,cpp}`, `CamComp.{h,cpp}` (cutter compensation's leads and checks) |
+| setup sheet | `CamSetupSheet.{h,cpp}` (the page, every configuration), `src/ui/CamSetupSheet.{h,cpp}` (what it says, the picture) |
 | parse and verify | `CamGcode.{h,cpp}` (parser), `CamVerify.{h,cpp}` (height map, verdict, `Explain`, `MachineLines`), `CamFindings.cpp` (bands judged, holes and threads uncut), `CamRotary.{h,cpp}` (radius map), `CamFeeds.{h,cpp}` (chip load, reach) |
 | simulation | `CamSim.{h,cpp}` (`Timeline`, `StockSim`, `RotaryStockSim`), `CamStockMesh.{h,cpp}` (stock and tool meshes), `src/render/StockRenderer.{h,cpp}` |
 | serialization | `src/core/io/SerializeCam.cpp`, the job section of `Serialization.cpp` |
@@ -192,7 +193,7 @@ the right name is scrap.
 | fixtures | `add_job_fixture`, `set_job_fixture`, `remove_job_fixture` |
 | setups | `add_cam_setup`, `list_cam_setups`, `set_cam_setup` (also edits a tool: `{id, tool: {number, …}}`), `remove_cam_setup` |
 | operations | `add_cam_op`, `set_cam_op`, `move_cam_op`, `remove_cam_op`, `cam_derive_op` (the dry run) |
-| output | `cam_toolpath` (`async` hands slow passes to a `cam` background job), `cam_verify`, `cam_simulate`, `cam_post` -- each waits off the frame ([requests that wait](#requests-that-wait)) |
+| output | `cam_toolpath` (`async` hands slow passes to a `cam` background job), `cam_verify`, `cam_simulate`, `cam_post`, `export_setup_sheet` ([setup.md](setup.md#the-setup-sheet)) -- each waits off the frame ([requests that wait](#requests-that-wait)) |
 
 `add_cam_op` without `top_z`/`bottom_z` derives them through the same
 `cam::DeriveOperation` the GUI verbs use, so a script and a person get the
@@ -300,8 +301,8 @@ Turn generate from 78 to 101 s to 53 to 72
 
 ## Requests that wait
 
-`cam_toolpath`, `cam_post`, `cam_verify` and `cam_simulate` answer with
-complete toolpaths, but do not compute on the frame, where a real job would
+`cam_toolpath`, `cam_post`, `cam_verify`, `cam_simulate` and
+`export_setup_sheet` answer with complete toolpaths, but do not compute on the frame, where a real job would
 hold the app for minutes. The server PARKS such a request (`ParkCamRequest`, `src/remote/RemoteCam.cpp`):
 
 - it queues every pass the request reads on the `cam` worker
@@ -368,7 +369,9 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   (`test_cam_workholding.cpp`), engraving and its grooves in the verifier
   (`test_cam_engrave.cpp`), thread milling -- FreeCAD's numbers, the posted
   helix, the refusals and the verifier's thread report
-  (`test_cam_thread.cpp`), tolerance bands, offcuts, drill points and what
+  (`test_cam_thread.cpp`), cutter compensation -- the G41/G40 shape, the
+  verdict equal to the uncompensated program's, the refusals
+  (`test_cam_comp.cpp`), the setup sheet's PDF (`test_cam_setup_sheet.cpp`), tolerance bands, offcuts, drill points and what
   a job does not cut (`test_cam_honest.cpp`), and the capability table enforced
   (`test_cam_capability.cpp`: every field a type does not declare is poked,
   and the moves must not change; every field round-trips through save and
@@ -424,7 +427,6 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   round a cylinder).
 - **Simulation extras**: colour by operation, a deviation map, a dirty-rect
   stock remesh.
-- **A setup sheet.**
 - **Distance tolerances.** A band is read off a round face's size only
   ([tolerance bands](operations.md#tolerance-bands)); a slot width or a
   shoulder-to-seat length is cut as modelled.

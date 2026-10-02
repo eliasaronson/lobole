@@ -378,6 +378,17 @@ enum class Side { Outside, Inside, On };
 // the joint, not a fact about the part.
 enum class CornerRelief { None, Dogbone, TBone };
 
+// Cutter radius compensation in the controller
+// (docs/cam/post.md#cutter-compensation). Off: the file is the tool centre and
+// nothing else, as always. Wear: the SAME tool-centre path, posted under
+// G41/G42 with the tool's D register, so the controller's tool table holds
+// only the wear -- 0 cuts what was verified, and a measured bore is corrected
+// at the machine without re-posting. The other convention ("in control": the
+// part contour posted, the table holding the whole radius) is deliberately
+// not offered: its file is not the cut the verifier reads, and an empty table
+// cuts every wall a radius into the part.
+enum class CutterComp { Off, Wear };
+
 // How a rotary finish covers the part
 // (docs/cam/rotary.md#patterns-rotary_pattern). Parallel: passes ALONG the
 // axis, each at one A, the part turning between them -- a rotary raster.
@@ -421,6 +432,10 @@ struct Operation {
   // the stop is the dwell mark. The ramp is the entry, so there is no lead
   // in: the tool arrives at the wall descending, already moving along it.
   bool leadArcs = false;
+  // Profile, pocket and drill (a bore), v158: post the finishing wall passes
+  // under cutter compensation (docs/cam/post.md#cutter-compensation). On a
+  // rough-then-finish op, the finishing toolpath only.
+  CutterComp cutterComp = CutterComp::Off;
   // Profile, cutting INSIDE a level face: leave the BORES up to this
   // diameter alone -- they are drilled. 0, the default, cuts every opening.
   //
@@ -993,6 +1008,28 @@ struct Toolpath {
     }
   };
   std::vector<Fit> fits;
+  // A pass that follows a finished WALL (docs/cam/post.md#cutter-compensation),
+  // declared by the strategy that cut it: moves [first, last] are the pass
+  // with the tool down, starting where move first - 1 ends, the material on
+  // the right of travel when `materialRight`. Read only when the operation
+  // asks for cutter compensation, which turns each into a `Comp`.
+  struct Wall {
+    size_t first = 0, last = 0;
+    bool materialRight = true;
+  };
+  std::vector<Wall> walls;
+  // A run the controller compensates: G41 (left) or G42 before move `first`,
+  // the lead-in line; G40 before move `last`, the lead-out line. Everything
+  // between is the lead-in arc, the wall pass and the lead-out arc. The moves
+  // are the tool centre with no wear -- the cut the verifier reads.
+  struct Comp {
+    size_t first = 0, last = 0;
+    bool left = true;
+    // The wear (on the diameter, mm) the run was checked to compensate either
+    // way: a tenth of the cutter.
+    double checkedWear = 0.0;
+  };
+  std::vector<Comp> comps;
   // The finishing half of a rough-then-finish operation (R6): the same
   // operationId as the roughing toolpath, the finishing tool's number.
   bool finish = false;

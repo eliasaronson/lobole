@@ -38,6 +38,16 @@ struct PostOptions {
 // Mach3, LinuxCNC and GRBL all do; the column exists so a controller that
 // does not is one row, and the refusal is already written.
 [[nodiscard]] bool PostWritesHelicalArcs(const std::string& id);
+// Whether this dialect's controller compensates the cutter's radius: G41/G42
+// with a D register, G40 to cancel (docs/cam/post.md#cutter-compensation).
+// Mach3 and LinuxCNC do; GRBL does not.
+[[nodiscard]] bool PostWritesCutterComp(const std::string& id);
+// Why `paths` cannot be posted to `postId` for their cutter compensation, or
+// empty: an op that asks for it on a post without it, or a compensated run
+// a clip or a merge has changed since it was made. PostProcess refuses with
+// this.
+[[nodiscard]] std::string CutterCompRefusal(const std::string& postId,
+                                            const std::vector<Toolpath>& paths);
 
 // The G-code for `paths`, in the order given. Returns false and fills
 // `error` on an unknown post id; a toolpath carrying its own error is

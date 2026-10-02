@@ -66,6 +66,10 @@ struct GProgram {
   // whole module exists to catch (a tool named "6 mm flat 2F (through cuts)"
   // did it). Warnings, not errors: the parse itself is fine.
   std::vector<std::string> warnings;
+  // The operations (by their `(op N)`) that turn cutter compensation on
+  // (G41/G42, docs/cam/post.md#cutter-compensation). Read as programmed: the
+  // file is the tool centre, so this is the cut with no wear in the table.
+  std::vector<uint64_t> compensatedOps;
 };
 
 // Modal G-code: G0/G1 with X/Y/Z/F, T for the tool, M6 for a tool change,

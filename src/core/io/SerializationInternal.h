@@ -19,7 +19,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    157; // v157: an attached occurrence may name the faces it is SEATED on,
+    158; // v158: a CAM operation's `cutter_comp`: off (omitted) | wear --
+         //      profile, pocket and drill post their finished wall passes
+         //      under G41/G42 with the tool table holding the wear alone
+         //      (docs/cam/post.md#cutter-compensation). An unknown value is
+         //      refused.
+         // v157: an attached occurrence may name the faces it is SEATED on,
          //      `attach_seat` {face, axis: {feature_id, element},
          //      inner_path?} (a fastener: its hole's face and bore); with it
          //      `attach_offset`/`attach_rotation` are in the seat's frame, so

@@ -455,6 +455,8 @@ void CancelCamPasses(AppState& state) {
       tp.tabs.clear();
       tp.grooves.clear();
       tp.arcs.clear();
+      tp.walls.clear();
+      tp.comps.clear();
       tp.threads.clear();
       tp.fits.clear();
       tp.strategy.clear();

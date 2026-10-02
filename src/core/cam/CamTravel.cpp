@@ -728,6 +728,9 @@ std::vector<Toolpath> GenerateOpFramed(const Setup& setup, const Operation& op,
     rough.bottomZ -= op.finishStock;
   rough.cornerRelief = CornerRelief::None; // the finish clears the corners
   rough.leadArcs = false;
+  // Compensation is for the wall the finish leaves: the rough's wall is
+  // the finish's stock (docs/cam/post.md#cutter-compensation).
+  rough.cutterComp = CutterComp::Off;
   out.push_back(GenerateFramed(setup, rough, framed, ctx));
 
   Operation finish = op;

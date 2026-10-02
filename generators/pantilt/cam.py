@@ -6,14 +6,16 @@
 Opens scratch/pantilt/pantilt.dsgn (the assembly stage put the bearing
 seat's K7 on the plate), makes a job on the base plate from a saw-cut blank,
 cuts it in two vise setups, verifies and posts each, and writes the programs
-to scratch/pantilt/nc/ and a report to scratch/pantilt/cam_report.json.
+and their setup sheets to scratch/pantilt/nc/ and a report to
+scratch/pantilt/cam_report.json.
 `--shots` plays each setup back and screenshots it: that needs an instance
 that draws toolpaths (tools/headless-preview.sh --gui PORT).
 
 - **Top** (as modelled; the blank in the vise by its lower 8 mm, on
   parallels): face, clear the waste round the disc down to 2 mm over the
   jaws, the bearing seat (rough with the 10 mm, finish with a fresh 6 mm,
-  spring pass), the relief, the four M4 tap holes, chamfers.
+  spring pass, both under cutter compensation in wear mode), the relief,
+  the four M4 tap holes, chamfers.
 - **Underside** (flipped; the vise on the finished Ø73.6 by its top 10 mm):
   face to thickness, clear the rest of the waste (0.5 mm into what Top
   cleared), the 5/16 tap bore and the 3/8-16 UNC-2B thread, chamfers.
@@ -226,9 +228,24 @@ class Job:
             except Exception as e:
                 post = {"refused": str(e)}
                 print(f"  !! post refused: {e}")
+            # The page that goes to the machine with the program
+            # (docs/cam/setup.md#the-setup-sheet); without a renderer it
+            # says it has no picture.
+            sheet_path = f"{out_stem} - {name} setup sheet.pdf"
+            try:
+                sheet = app.call("export_setup_sheet", job=self.job,
+                                 setup=sid, path=sheet_path,
+                                 program=nc.rsplit("/", 1)[-1],
+                                 _timeout=1800)
+                print(f"  setup sheet {sheet_path.rsplit('/', 1)[-1]}"
+                      f"{'' if sheet.get('picture') else ' (no picture)'}")
+            except Exception as e:
+                sheet = {"refused": str(e)}
+                print(f"  !! setup sheet refused: {e}")
             print(f"  ({time.monotonic() - t0:.1f} s)")
             report["setups"][name] = {"id": sid, "toolpath": tp, "verify": v,
-                                      "post": post, "nc": nc}
+                                      "post": post, "nc": nc,
+                                      "sheet": sheet}
         return report
 
 
@@ -354,10 +371,14 @@ def main():
     # The pan bearing's seat (K7): bored with the 10 mm leaving 0.2 mm,
     # finished with the fresh 6 mm in one full-depth pass, then a spring
     # pass -- the same lap again, to take what the cutter's deflection left.
+    # Both finishing walls under cutter compensation, wear mode: the bore
+    # gauged before the vise opens, its error typed into T6's diameter in
+    # Mach3's tool table, and the finish and spring pass run again
+    # (docs/cam/post.md#cutter-compensation).
     job.op(top, "Bearing seat", type="drill", tool=1, target=seat,
-           finish_tool=6, finish_stock=0.2)
+           finish_tool=6, finish_stock=0.2, cutter_comp="wear")
     job.op(top, "Bearing seat spring pass", type="profile", tool=6,
-           side="inside", target=seat, stepdown=0)
+           side="inside", target=seat, stepdown=0, cutter_comp="wear")
     job.op(top, "Relief", type="drill", tool=1, target=relief)
     job.op(top, "M4 tap holes", type="drill", tool=3,
            targets=screws)
@@ -436,6 +457,8 @@ def main():
                 problems.append(f"{sname}: not cut: {u.get('what')}")
         if "refused" in s.get("post", {}):
             problems.append(f"{sname}: post refused")
+        if "refused" in s.get("sheet", {}):
+            problems.append(f"{sname}: setup sheet refused")
         total += s.get("post", {}).get("cutting_minutes", 0.0)
     print(f"total cycle time {total:.1f} min")
     if problems:

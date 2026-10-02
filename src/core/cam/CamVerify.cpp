@@ -1613,6 +1613,7 @@ Inspection Inspect(const std::string& gcode, const Setup& setup,
           "the A axis MOVES in this file and this is the 3-axis check: its "
           "stock is a height map, which cannot represent a part that turns";
   }
+  out.verdict.compensatedOps = program.compensatedOps;
   out.verdict.fileWarnings = static_cast<int>(program.warnings.size());
   if (!program.warnings.empty())
     out.verdict.firstFileWarning = program.warnings.front();
@@ -2162,6 +2163,20 @@ std::vector<VerdictLine> Explain(const Verdict& v, double tolerance,
                   v.fileWarnings, v.fileWarnings == 1 ? "" : "s",
                   v.firstFileWarning.c_str());
     out.push_back({VerdictLine::Level::Warn, buf});
+  }
+  if (!v.compensatedOps.empty()) {
+    std::string ops;
+    for (const uint64_t op : v.compensatedOps)
+      ops += (ops.empty() ? "" : ", ") + std::to_string(op);
+    std::snprintf(buf, sizeof(buf),
+                  "Op%s %s %s compensated in the controller (G41/G42): "
+                  "checked as programmed, which is what %s with no wear in "
+                  "the tool table. What the machine cuts moves by whatever "
+                  "the table adds.",
+                  v.compensatedOps.size() == 1 ? "" : "s", ops.c_str(),
+                  v.compensatedOps.size() == 1 ? "is" : "are",
+                  v.compensatedOps.size() == 1 ? "it cuts" : "they cut");
+    out.push_back({VerdictLine::Level::Good, buf});
   }
   if (v.holderCollisions > 0) {
     // No graze band here. A rapid brushing a scallop it cut itself is a rub;

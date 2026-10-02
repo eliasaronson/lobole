@@ -1,0 +1,93 @@
+{
+  "format": "designer-document",
+  "version": 158,
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "source": 2,
+      "name": "Base plate"
+    }
+  ],
+  "cam": [
+    {
+      "id": 3,
+      "name": "Top",
+      "safe_z": 15.0,
+      "machine": {
+        "name": "6090",
+        "post": "mach3"
+      },
+      "tools": [
+        {
+          "number": 1,
+          "name": "10 mm flat",
+          "diameter": 10.0
+        },
+        {
+          "number": 6,
+          "name": "6 mm finisher",
+          "diameter": 6.0
+        }
+      ],
+      "placements": [
+        {
+          "id": 10,
+          "part": 1
+        }
+      ],
+      "operations": [
+        {
+          "id": 4,
+          "name": "Bearing seat",
+          "type": "drill",
+          "tool": 1,
+          "top_z": 22.0,
+          "bottom_z": 13.0,
+          "finish_tool": 6,
+          "finish_stock": 0.2,
+          "cutter_comp": "wear",
+          "targets": [
+            {
+              "part": 1,
+              "feature_id": 2,
+              "element": "5/side;Bearing pocket"
+            }
+          ]
+        },
+        {
+          "id": 5,
+          "name": "Bearing seat spring pass",
+          "type": "profile",
+          "tool": 6,
+          "side": "inside",
+          "top_z": 22.0,
+          "bottom_z": 13.0,
+          "cutter_comp": "wear",
+          "targets": [
+            {
+              "part": 1,
+              "feature_id": 2,
+              "element": "5/side;Bearing pocket"
+            }
+          ]
+        },
+        {
+          "id": 6,
+          "name": "Relief",
+          "type": "drill",
+          "tool": 1,
+          "top_z": 13.0,
+          "bottom_z": 10.0,
+          "targets": [
+            {
+              "part": 1,
+              "feature_id": 2,
+              "element": "7/side;Relief"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

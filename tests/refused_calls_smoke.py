@@ -310,8 +310,12 @@ def main():
                     ("Dwg", "export_drawing", {"path": path("d.svg")}),
                     ("Job", "cam_post",
                      {"setup": setup, "path": path("j.nc")}),
+                    ("Job", "export_setup_sheet",
+                     {"setup": setup, "path": path("j.pdf"),
+                      "program": "j.nc", "picture": False}),
                 ]
-                cam_only = ("machine_part", "save_machine", "cam_post")
+                cam_only = ("machine_part", "save_machine", "cam_post",
+                            "export_setup_sheet")
                 return [b for b in every if cam or b[1] not in cam_only]
 
             baselines = make_baselines()

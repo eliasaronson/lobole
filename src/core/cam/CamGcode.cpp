@@ -149,6 +149,14 @@ GProgram ParseGcode(std::string_view text, char rotaryWord) {
           mode = static_cast<int>(value);
           rapid = mode == 0;
           motion = true;
+        } else if (value == 41.0 || value == 42.0) {
+          // Cutter compensation on (docs/cam/post.md#cutter-compensation).
+          // The file is the tool centre and the controller adds only the
+          // wear, so what is read here is the NOMINAL cut -- the program as
+          // it runs with no wear entered -- and the op is said.
+          if (std::find(out.compensatedOps.begin(), out.compensatedOps.end(),
+                        op) == out.compensatedOps.end())
+            out.compensatedOps.push_back(op);
         } else if (value == 92.0) {
           // Set the named axes' CURRENT position to the values given, moving
           // nothing. The post writes it for A alone, after a spiral has

@@ -94,6 +94,8 @@ enum class OpField : uint32_t {
   EngraveDepth = 1u << 24,
   // A thread mill's radial passes (v145).
   ThreadPasses = 1u << 25,
+  // Cutter compensation in the controller on the wall passes (v158).
+  CutterComp = 1u << 26,
 };
 
 constexpr OpField operator|(OpField a, OpField b) {
@@ -188,6 +190,17 @@ std::span<const CornerReliefRow> CornerReliefs();
 const char* CornerReliefName(CornerRelief r);
 bool TryCornerReliefFromName(const std::string& s, CornerRelief& out);
 std::string CornerReliefNameList();
+
+// Cutter compensation, by name: off, wear
+// (docs/cam/post.md#cutter-compensation).
+struct CutterCompRow {
+  CutterComp comp;
+  const char* name;
+};
+std::span<const CutterCompRow> CutterComps();
+const char* CutterCompName(CutterComp c);
+bool TryCutterCompFromName(const std::string& s, CutterComp& out);
+std::string CutterCompNameList();
 
 // The rotary finish's pattern, refused by name like every enum here.
 struct RotaryPatternRow {

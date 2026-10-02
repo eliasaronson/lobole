@@ -62,6 +62,8 @@ constexpr FieldPoke kPokes[] = {
      [](cam::Operation& o) { o.cornerRelief = cam::CornerRelief::Dogbone; }},
     {cam::OpField::LeadArcs, "lead_arcs",
      [](cam::Operation& o) { o.leadArcs = true; }},
+    {cam::OpField::CutterComp, "cutter_comp",
+     [](cam::Operation& o) { o.cutterComp = cam::CutterComp::Wear; }},
     {cam::OpField::DrilledBores, "drilled_bores",
      [](cam::Operation& o) { o.drilledBores = 12.0; }},
     {cam::OpField::Peck, "peck", [](cam::Operation& o) { o.peck = 2.0; }},

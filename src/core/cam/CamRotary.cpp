@@ -1024,6 +1024,7 @@ RotaryInspection InspectRotary(const std::string& gcode, const Setup& setup,
   out.verdict.fileErrors = static_cast<int>(program.errors.size());
   if (!program.errors.empty())
     out.verdict.firstFileError = program.errors.front();
+  out.verdict.compensatedOps = program.compensatedOps;
   out.verdict.fileWarnings = static_cast<int>(program.warnings.size());
   if (!program.warnings.empty())
     out.verdict.firstFileWarning = program.warnings.front();

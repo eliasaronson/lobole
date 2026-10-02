@@ -113,6 +113,17 @@ void AssertCamShapes(const std::vector<cam::Setup>& setups,
         got.push_back(op.climb);
     CHECK(got == want);
   }
+  // v158: cutter compensation in the controller, by name; an op that says
+  // nothing loads as off.
+  if (expect.contains("cam_op_cutter_comp")) {
+    const auto want =
+        expect.at("cam_op_cutter_comp").get<std::vector<std::string>>();
+    std::vector<std::string> got;
+    for (const cam::Setup& setup : setups)
+      for (const cam::Operation& op : setup.operations)
+        got.push_back(cam::CutterCompName(op.cutterComp));
+    CHECK(got == want);
+  }
   if (expect.contains("cam_op_types")) {
     const auto want = expect.at("cam_op_types").get<std::vector<std::string>>();
     std::vector<std::string> got;

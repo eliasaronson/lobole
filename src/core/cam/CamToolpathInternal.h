@@ -179,6 +179,14 @@ double EmitLoop(Toolpath& tp, const Setup& setup, const Tool& tool,
                 bool materialInside = true,
                 std::vector<Toolpath::Tab>* tabsOut = nullptr);
 
+// Declare the moves emitted since `before` a WALL pass (Toolpath::Wall,
+// docs/cam/post.md#cutter-compensation): from the first move with the tool
+// down -- or the one after it, when that first move is a link at depth from
+// the previous ring -- to the last one before any retract. Which side the
+// material is on is said by the caller: inside the loop the pass walks round
+// (an outside profile, an island), or outside it (a bore, a pocket's wall).
+void DeclareWall(Toolpath& tp, size_t before, bool materialInside);
+
 // Nothing to do: the part is clamped as modelled and the table is square. The
 // common case, and worth not building a matrix for — this is on the per-point
 // path that draws every backplot.
