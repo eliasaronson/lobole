@@ -50,8 +50,12 @@ struct Arc {
   uint32_t id = 0;
   bool construction = false;
 };
-// A full ellipse: major axis is `rotation` radians from the +U axis. `which`
-// 0 addresses the centre.
+// A full ellipse: major axis is `rotation` radians from the +U axis, and
+// rMajor >= rMinor (a file saying otherwise is refused on load). `which` 0
+// addresses the centre, 3/4 the major-axis ends (+û, −û) and 5/6 the
+// minor-axis ends (+v̂, −v̂) — solver points tied to the ellipse, so a radius
+// is a distance from the centre to an axis end and dragging an end resizes
+// and turns it (docs/sketching/README.md#ellipses-and-splines).
 struct Ellipse {
   glm::dvec2 center;
   double rMajor;
@@ -64,10 +68,9 @@ struct Ellipse {
 // from `startParam` to `endParam` (the ellipse parameter t of the point
 // C + rMajor·cos t·û + rMinor·sin t·v̂, radians). Like Arc it is CCW-always —
 // `endParam` is normalized so the sweep (endParam − startParam) lies in
-// (0, 2π]. `which` 0 = centre, 1 = start point, 2 = end point. This is to
-// Ellipse what Arc is to Circle (the elliptical arc commercial CAD offers;
-// Designer has no full draw tool for it in v1 — it exists for import + profile
-// use).
+// (0, 2π]. `which` 0 = centre, 1 = start point, 2 = end point, 3..6 its
+// ellipse's axis ends as for Ellipse. This is to Ellipse what Arc is to
+// Circle.
 struct EllipseArc {
   glm::dvec2 center;
   double rMajor;
@@ -81,13 +84,14 @@ struct EllipseArc {
 // A non-rational, clamped, uniform B-spline through its control `poles`
 // (the fitted-spline entity a parametric import carries; sketch phase L).
 // `which` addresses pole k, so each pole is a movable solver point
-// (Coincident/Distance/Fixed on a pole work) — the v1 "rigid net"
-// treatment, mirroring the Ellipse centre.
-// The curve interpolates its first and last poles (clamped). `degree` is
-// cubic, reduced to poles-1 when there are too few poles. Weights and an
-// explicit knot vector are not stored in v1 — they are the clamped-uniform
-// defaults (see BSplineKnots), keeping serialization small and every pole
-// addressable by `PointRef::which` (uint8_t; poles capped at 255).
+// (Coincident/Distance/Fixed on a pole work); the solver also knows the
+// curve, so a point can lie on it and a curve can be tangent to its ends.
+// The curve interpolates its first and last poles (clamped), so those poles
+// ARE its ends; a spline whose first and last poles are equal is closed.
+// `degree` is cubic, reduced to poles-1 when there are too few poles. Weights
+// and an explicit knot vector are not stored in v1 — they are the
+// clamped-uniform defaults (see BSplineKnots), keeping serialization small and
+// every pole addressable by `PointRef::which` (uint8_t; poles capped at 255).
 struct BSpline {
   std::vector<glm::dvec2> poles;
   int degree = 3;
@@ -236,15 +240,50 @@ inline std::vector<glm::dvec2> BSplineSampleUV(const BSpline& s,
 // Builds an ellipse from three clicks: centre, a point on the major axis (sets
 // rMajor + rotation), and a third point whose perpendicular distance to the
 // major axis sets rMinor.
+// A third click farther out than the second makes the SECOND axis the major
+// one: the result is the same curve with the radii swapped and the rotation
+// turned a quarter, because rMajor >= rMinor is what the model (and OCC's
+// gp_Elips) holds.
 inline Ellipse EllipseFromClicks(glm::dvec2 center, glm::dvec2 majorEnd,
                                  glm::dvec2 minorPt) {
   const glm::dvec2 maj = majorEnd - center;
-  const double rMajor = glm::length(maj);
-  const double rotation = std::atan2(maj.y, maj.x);
+  double rMajor = glm::length(maj);
+  double rotation = std::atan2(maj.y, maj.x);
   // Perpendicular (minor-axis) direction, and the third point's distance to it.
   const glm::dvec2 minorDir(-std::sin(rotation), std::cos(rotation));
-  const double rMinor = std::abs(glm::dot(minorPt - center, minorDir));
+  double rMinor = std::abs(glm::dot(minorPt - center, minorDir));
+  if (rMinor > rMajor) {
+    std::swap(rMajor, rMinor);
+    rotation += M_PI / 2.0;
+  }
   return Ellipse{center, rMajor, rMinor, rotation};
+}
+
+// The `which` of an ellipse's (or elliptical arc's) axis ends.
+inline constexpr uint8_t kEllipseMajorPos = 3; // C + rMajor·û
+inline constexpr uint8_t kEllipseMajorNeg = 4; // C − rMajor·û
+inline constexpr uint8_t kEllipseMinorPos = 5; // C + rMinor·v̂
+inline constexpr uint8_t kEllipseMinorNeg = 6; // C − rMinor·v̂
+
+// UV of an axis end (which 3..6) of the ellipse (center, radii, rotation);
+// the centre for any other `which`.
+inline glm::dvec2 EllipseAxisEndUV(glm::dvec2 center, double rMajor,
+                                   double rMinor, double rotation,
+                                   uint8_t which) {
+  const glm::dvec2 u(std::cos(rotation), std::sin(rotation));
+  const glm::dvec2 v(-u.y, u.x);
+  switch (which) {
+  case kEllipseMajorPos:
+    return center + rMajor * u;
+  case kEllipseMajorNeg:
+    return center - rMajor * u;
+  case kEllipseMinorPos:
+    return center + rMinor * v;
+  case kEllipseMinorNeg:
+    return center - rMinor * v;
+  default:
+    return center;
+  }
 }
 
 // UV of a point on the ellipse at parametric angle `t` (before/after rotation).
@@ -281,7 +320,7 @@ inline glm::dvec2 EllipseArcPointUV(const EllipseArc& e, uint8_t which) {
     return EllipseArcEvalUV(e, e.startParam);
   if (which == 2)
     return EllipseArcEvalUV(e, e.endParam);
-  return e.center;
+  return EllipseAxisEndUV(e.center, e.rMajor, e.rMinor, e.rotation, which);
 }
 
 // Samples the elliptical arc into a polyline along its CCW sweep. `segs` <= 0
@@ -547,7 +586,8 @@ inline glm::dvec2 EntityPointUV(const Entity& e, uint8_t which) {
         else if constexpr (std::is_same_v<T, Arc>)
           return ArcPointUV(g, which);
         else if constexpr (std::is_same_v<T, Ellipse>)
-          return g.center; // only the centre (which 0)
+          return EllipseAxisEndUV(g.center, g.rMajor, g.rMinor, g.rotation,
+                                  which); // centre, or an axis end (3..6)
         else if constexpr (std::is_same_v<T, EllipseArc>)
           return EllipseArcPointUV(g, which);
         else if constexpr (std::is_same_v<T, Text>)
@@ -570,9 +610,9 @@ inline glm::dvec2 EntityPointUV(const Entity& e, uint8_t which) {
 //   BSpline "p<k>x" "p<k>y"       (pole k, from 0)
 //   Text   "x" "y" (anchor) "height" "angle_deg" "spacing" — the angle's
 //          expression speaks DEGREES, as the angle dimension's does
-// Ellipse fields are not expression-drivable in v1 (the solver treats
-// ellipses as rigid anyway). Serialized as "<field>_expr" keys on the entity
-// JSON; stored on SketchFeature::entityExprs.
+// Ellipse fields are not expression-drivable: drive a distance from the
+// centre to an axis end instead. Serialized as "<field>_expr" keys on the
+// entity JSON; stored on SketchFeature::entityExprs.
 std::vector<std::string> EntityExprFields(const Entity& e);
 // {pole index, is x} for a spline field "p<k>x"/"p<k>y", else nullopt.
 std::optional<std::pair<size_t, bool>> PoleField(const std::string& field);

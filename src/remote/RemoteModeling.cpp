@@ -395,7 +395,12 @@ static constexpr MethodDoc ModelingMethods[] = {
      "distance/radius/diameter and RADIANS for angle (or pass value_deg, "
      "never both — more than a full turn is refused as degrees). `expr` is "
      "an expression in the document's base units, where angles are DEGREES: "
-     "\"45\", \"45deg\" and \"0.785rad\" all mean the same 45 degrees.",
+     "\"45\", \"45deg\" and \"0.785rad\" all mean the same 45 degrees. "
+     "Refs are [entity_id, which]: an ellipse's 0 = centre, 3/4 = "
+     "major-axis ends, 5/6 = minor-axis ends (a radius is a `distance` from "
+     "0 to 3 or 5); a spline's k = pole k. A constraint the solver cannot "
+     "represent (radius on an ellipse, tangent to a spline away from its "
+     "end) is refused naming what its kind takes.",
      "*", remote::NeedsPart},
     {"add_constraints",
      "Append MANY constraints in one solve+regen+undo step: "
@@ -1422,8 +1427,14 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     const auto build = [&](const json& spec) -> sketch::Constraint {
       sketch::Constraint c;
       auto it = kinds.find(spec.at("kind").get<std::string>());
-      if (it == kinds.end())
-        throw std::runtime_error("unknown constraint kind");
+      if (it == kinds.end()) {
+        std::string known;
+        for (const auto& [name, kind] : kinds)
+          known += (known.empty() ? "" : ", ") + name;
+        throw std::runtime_error("unknown constraint kind \"" +
+                                 spec.at("kind").get<std::string>() +
+                                 "\". Known kinds: " + known);
+      }
       c.kind = it->second;
       if (c.kind == sketch::ConstraintKind::Angle) {
         // `value` was DEGREES here and RADIANS in the same field of the same
@@ -1464,6 +1475,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     };
 
     json before = DocumentIO::FeatureToJson(*sk);
+    const size_t had = sk->constraints.size();
     size_t added = 0;
     if (m == "add_constraints") {
       for (const json& spec : p.at("constraints"))
@@ -1474,6 +1486,18 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     }
     sketch::Solver solver;
     solver.Load(*sk);
+    // A constraint the solver cannot represent is refused, naming what its
+    // kind takes, and the sketch is left as it was -- accepted, it would
+    // solve as if absent while the sketch looked constrained.
+    for (const auto& bad : solver.UnsupportedConstraints()) {
+      if (bad.index < had)
+        continue; // already in the sketch: its regen warning says so
+      sk->constraints.resize(had);
+      throw std::runtime_error(
+          (added > 1 ? "constraints[" + std::to_string(bad.index - had) + "]: "
+                     : std::string()) +
+          bad.reason);
+    }
     if (solver.Solve().ok)
       solver.WriteBack(sk->entities);
     sk->RegenerateDerived();

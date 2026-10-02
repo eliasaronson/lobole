@@ -3,6 +3,7 @@
 #include "core/features/SketchFeature.h"
 
 #include <glm/glm.hpp>
+#include <string>
 #include <vector>
 
 namespace sketch {
@@ -61,6 +62,17 @@ public:
   // the last Solve — PlaneGCS's dependent-parameter diagnosis mapped back to
   // entities. Empty when the sketch is fully constrained (or unsolved).
   std::vector<uint32_t> UnderDefinedEntities() const;
+
+  // The constraints Load could not represent, each with why and what its
+  // kind accepts. Load's dispatch IS the validator: add_constraint, the GUI
+  // and the sketch's regeneration warning all read this, so what is refused
+  // and what is solved cannot drift apart
+  // (docs/sketching/README.md#refusals).
+  struct Unsupported {
+    size_t index = 0; // into SketchFeature::constraints
+    std::string reason;
+  };
+  const std::vector<Unsupported>& UnsupportedConstraints() const;
 
 private:
   struct Impl;

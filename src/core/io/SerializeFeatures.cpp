@@ -157,6 +157,25 @@ double AngleRadians(const json& j, const char* radKey, const char* degKey,
   return rad;
 }
 
+// An ellipse's r_major or r_minor, refused unless 0 < r_minor <= r_major
+// (v155). The solver measures the major axis from the focus and OCC's
+// gp_Elips will not build the other order, so a swapped pair would load,
+// look like an ellipse, and fail at the first extrude -- or worse, have its
+// axis ends (which 3..6) mean the other axis.
+double EllipseRadius(const json& j, bool major) {
+  const double a = j.at("r_major").get<double>();
+  const double b = j.at("r_minor").get<double>();
+  if (!(b > 0.0) || !(a >= b)) {
+    std::ostringstream why;
+    why << j.at("type").get<std::string>() << " needs 0 < r_minor <= r_major, "
+        << "got r_major " << a << ", r_minor " << b
+        << " — for an ellipse longer across than along `rotation`, swap the "
+           "radii and add 90 degrees to the rotation";
+    throw std::runtime_error(why.str());
+  }
+  return major ? a : b;
+}
+
 sketch::Entity EntityFromJson(const json& j) {
   const std::string type = j.at("type").get<std::string>();
   // Pre-v4 files have no "id"; leave it 0 so Load can detect and migrate.
@@ -205,17 +224,16 @@ sketch::Entity EntityFromJson(const json& j) {
     e = sketch::Arc{Vec2FromJson(j.at("center")), j.at("radius").get<double>(),
                     start, end};
   } else if (type == "ellipse") {
-    e = sketch::Ellipse{Vec2FromJson(j.at("center")),
-                        j.at("r_major").get<double>(),
-                        j.at("r_minor").get<double>(),
+    e = sketch::Ellipse{Vec2FromJson(j.at("center")), EllipseRadius(j, true),
+                        EllipseRadius(j, false),
                         AngleRadians(j, "rotation", "rotation_deg")};
   } else if (type == "ellipse_arc") { // v46
     // start_param/end_param are the ellipse PARAMETER, not an angle from the
     // centre, so they get no _deg twin — naming one would be a lie about what
     // the number means. A full-turn sweep is legal here for the same reason.
     e = sketch::EllipseArc{Vec2FromJson(j.at("center")),
-                           j.at("r_major").get<double>(),
-                           j.at("r_minor").get<double>(),
+                           EllipseRadius(j, true),
+                           EllipseRadius(j, false),
                            AngleRadians(j, "rotation", "rotation_deg"),
                            j.at("start_param").get<double>(),
                            j.at("end_param").get<double>()};
@@ -1714,14 +1732,20 @@ static constexpr SketchEntityInfo kSketchEntityTypes[] = {
      "circle, not an arc), which is what catches degrees passed as radians. "
      "get_state reports the radian pair (+_expr: cx, cy, r)"},
     {"ellipse", 9,
-     "center [x,y], r_major, r_minor, and EITHER rotation in RADIANS OR "
-     "rotation_deg in degrees — not both"},
+     "center [x,y], r_major >= r_minor > 0, and EITHER rotation in RADIANS "
+     "OR rotation_deg in degrees — not both. which 0 = centre, 3/4 = the "
+     "major-axis ends, 5/6 = the minor-axis ends: a radius is a `distance` "
+     "from 0 to 3 or 5, and horizontal/vertical on the ellipse levels its "
+     "major axis"},
     {"ellipse_arc", 46,
-     "center [x,y], r_major, r_minor, rotation (RADIANS) or rotation_deg; "
-     "start_param, end_param — the ellipse PARAMETER t in (r_major·cos t, "
-     "r_minor·sin t), which is not the angle from the centre unless the "
-     "ellipse is a circle, so it has no _deg twin"},
-    {"spline", 40, "poles [[x,y], ...], degree? (default 3)"},
+     "center [x,y], r_major >= r_minor > 0, rotation (RADIANS) or "
+     "rotation_deg; start_param, end_param — the ellipse PARAMETER t in "
+     "(r_major·cos t, r_minor·sin t), which is not the angle from the centre "
+     "unless the ellipse is a circle, so it has no _deg twin. which 0 = "
+     "centre, 1/2 = start/end, 3..6 = the axis ends as for ellipse"},
+    {"spline", 40,
+     "poles [[x,y], ...], degree? (default 3). which k = pole k; the first "
+     "and last poles are the curve's ends, and equal ones close it"},
     {"text", 137,
      "text (UTF-8, one line), height (the CAP height, mm), anchor [x,y], "
      "font? (sans = outline, the default; hershey = single stroke, for "

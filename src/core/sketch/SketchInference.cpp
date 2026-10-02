@@ -15,7 +15,8 @@ constexpr double kAngleSinTol = 0.0349; // sin(2 deg): parallel/perpendicular
 double Cross(glm::dvec2 a, glm::dvec2 b) { return a.x * b.y - a.y * b.x; }
 
 // Visits every named vertex of an entity: Point(0), Line(0,1), Circle/Ellipse
-// centre(0), Arc centre(0)/start(1)/end(2) — the coincident and alignment
+// centre(0), Arc centre(0)/start(1)/end(2), an ellipse's axis ends (3..6),
+// spline poles, a label's anchor and corners — the coincident and alignment
 // candidate set (each is a real solver point, so constraints can bind to it).
 template <class F> void ForEachVertex(const Entity& e, F fn) {
   if (auto* p = std::get_if<Point>(&e))
@@ -29,12 +30,17 @@ template <class F> void ForEachVertex(const Entity& e, F fn) {
     fn(uint8_t{0}, a->center);
     fn(uint8_t{1}, ArcPointUV(*a, 1));
     fn(uint8_t{2}, ArcPointUV(*a, 2));
-  } else if (auto* el = std::get_if<Ellipse>(&e))
-    fn(uint8_t{0}, el->center);
-  else if (auto* ea = std::get_if<EllipseArc>(&e)) {
+  } else if (std::holds_alternative<Ellipse>(e)) {
+    // The centre and the four axis ends (which 3..6).
+    fn(uint8_t{0}, EntityPointUV(e, 0));
+    for (uint8_t w = kEllipseMajorPos; w <= kEllipseMinorNeg; w++)
+      fn(w, EntityPointUV(e, w));
+  } else if (auto* ea = std::get_if<EllipseArc>(&e)) {
     fn(uint8_t{0}, ea->center);
     fn(uint8_t{1}, EllipseArcPointUV(*ea, 1));
     fn(uint8_t{2}, EllipseArcPointUV(*ea, 2));
+    for (uint8_t w = kEllipseMajorPos; w <= kEllipseMinorNeg; w++)
+      fn(w, EllipseArcPointUV(*ea, w));
   } else if (auto* bs = std::get_if<BSpline>(&e)) {
     const size_t nPoles = std::min<size_t>(bs->poles.size(), 256);
     for (size_t k = 0; k < nPoles; k++)

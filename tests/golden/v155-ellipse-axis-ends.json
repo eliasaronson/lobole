@@ -1,0 +1,26 @@
+{
+  "format": "designer-document",
+  "version": 155,
+  "parameters": [
+    {"name": "a", "expression": "30", "comment": "the major radius"}
+  ],
+  "features": [
+    {"type": "Sketch", "name": "Oval", "id": 1, "next_entity_id": 3,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "ellipse", "id": 1, "center": [0, 0],
+        "r_major": 25.0, "r_minor": 10.0, "rotation": 0.3},
+       {"type": "point", "id": 2, "p": [0, 12], "construction": true}
+     ],
+     "constraints": [
+       {"kind": "fixed", "a": [1, 0], "b": [0, 0], "value": 0},
+       {"kind": "horizontal", "a": [1, 0], "b": [0, 0], "value": 0},
+       {"kind": "distance", "a": [1, 0], "b": [1, 3], "value": 25,
+        "expr": "a"},
+       {"kind": "distance", "a": [1, 0], "b": [1, 5], "value": 10},
+       {"kind": "point_on_line", "a": [2, 0], "b": [1, 0], "value": 0}
+     ]},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 5.0, "mode": "new_body", "reversed": false}
+  ]
+}

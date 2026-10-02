@@ -19,7 +19,11 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    154; // v154: a study or motion result's numeric arrays move out of its
+    155; // v155: sketch constraint refs reach an ellipse's (or elliptical
+         //      arc's) axis ends, which 3/4 (major) and 5/6 (minor), and an
+         //      ellipse with r_minor > r_major (or r_minor <= 0) is refused
+         //      on load (docs/sketching/README.md#ellipses-and-splines).
+         // v154: a study or motion result's numeric arrays move out of its
          //      .result.json into a <base>.result.bin beside it (raw
          //      little-endian f32 fields, u16/u32 indices, f64 placements),
          //      each named in the json by {type, offset, count}; the json

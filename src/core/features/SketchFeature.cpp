@@ -1219,6 +1219,22 @@ bool SketchFeature::Execute(RegenContext& ctx) {
     }
   }
 
+  // A constraint the solver cannot represent (a file written by hand, or by
+  // a build that accepted it) solves as if it were not there. Say so: the
+  // sketch looks constrained and is not (docs/sketching/README.md#refusals).
+  // add_constraint and the GUI refuse these, so only a loaded sketch has one.
+  sketch::Solver solver;
+  if (!constraints.empty()) {
+    solver.Load(*this);
+    const auto& bad = solver.UnsupportedConstraints();
+    if (!bad.empty())
+      SetWarning("constraint " + std::to_string(bad.front().index) +
+                 " is not solved: " + bad.front().reason +
+                 (bad.size() > 1
+                      ? " (and " + std::to_string(bad.size() - 1) + " more)"
+                      : ""));
+  }
+
   const bool exprDriven =
       std::any_of(constraints.begin(), constraints.end(),
                   [](const sketch::Constraint& c) {
@@ -1237,8 +1253,8 @@ bool SketchFeature::Execute(RegenContext& ctx) {
   // refreshed from the parameter table by Document::Regenerate (via
   // VisitExprs); re-solve so the rest of the sketch follows (the driven
   // coordinates themselves are solver-fixed and cannot move).
-  sketch::Solver solver;
-  solver.Load(*this);
+  if (constraints.empty())
+    solver.Load(*this); // otherwise loaded above, from the same entities
   const sketch::SolveResult result = solver.Solve();
   if (!result.ok) {
     // Keep the last good entity positions instead of failing the history —

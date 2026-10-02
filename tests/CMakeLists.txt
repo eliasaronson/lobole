@@ -122,6 +122,7 @@ add_executable(designer_tests
     test_external.cpp
     test_spline.cpp
     test_ellipse_arc.cpp
+    test_sketch_curves.cpp
     test_sketch_text.cpp
     test_reference_image.cpp
     test_pattern.cpp

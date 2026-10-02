@@ -522,6 +522,54 @@ def main():
         expect(abs(boss_after["volume"] - boss_before["volume"]) < 1e-9,
                "cosmetic thread left the volume untouched")
 
+        phase("Ellipse radii through add_constraint, and refusals")
+        # An ellipse is solved: its radii are distances from the centre to
+        # its axis ends (which 3 major, 5 minor), driven by a variable; a
+        # radius on it is REFUSED naming that form, and the sketch is left
+        # alone (docs/sketching/README.md#refusals).
+        d.call("new_project")
+        d.call("set_variable", name="oval_a", expression="30")
+        sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Oval",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [
+                {"type": "ellipse", "center": [0, 0], "r_major": 20,
+                 "r_minor": 8, "rotation_deg": 25},
+                {"type": "spline", "poles": [[40, 0], [45, 10], [55, 10],
+                                             [60, 0]]},
+                {"type": "circle", "center": [80, 0], "radius": 3}]})
+        el, sp, ci = sk["entity_ids"]
+        expect_error(d, "add_constraint", "dimension `distance` from its "
+                     "centre", sketch_id=sk["id"], kind="radius",
+                     refs=[[el, 0]], value=5)
+        expect_error(d, "add_constraint", "a spline is tangent only",
+                     sketch_id=sk["id"], kind="tangent",
+                     refs=[[ci, 0], [sp, 0]])
+        expect_error(d, "add_constraint", "Known kinds:", sketch_id=sk["id"],
+                     kind="radius_major", refs=[[el, 0]], value=5)
+        d.call("add_constraints", sketch_id=sk["id"], constraints=[
+            {"kind": "fixed", "refs": [[el, 0]]},
+            {"kind": "horizontal", "refs": [[el, 0]]},
+            {"kind": "distance", "refs": [[el, 0], [el, 3]],
+             "expr": "oval_a"},
+            {"kind": "distance", "refs": [[el, 0], [el, 5]], "value": 10}])
+        state = d.call("get_state")
+        sk_state = [f for f in state["features"] if f["id"] == sk["id"]][0]
+        expect("error" not in sk_state and "warning" not in sk_state,
+               "the oval sketch solved clean")
+        d.call("add_feature", feature={
+            "type": "Extrude", "name": "Oval pad", "sketch_id": sk["id"],
+            "distance": 2.0, "mode": "new_body",
+            "regions": [[el]]})
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - math.pi * 30 * 10 * 2) < 1e-2,
+               f"the oval pads at its dimensioned size ({vol})")
+        d.call("set_variable", name="oval_a", expression="40")
+        vol = d.call("get_state")["bodies"][0]["volume"]
+        expect(abs(vol - math.pi * 40 * 10 * 2) < 1e-2,
+               f"the oval follows its variable ({vol})")
+
         phase("Draft")
         # Draft (M8): taper a box's side faces; volume drops
         d.call("new_project")
