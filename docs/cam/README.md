@@ -249,6 +249,52 @@ background job (inline in the GUI suite, which turns deferral off). The worker i
 because the sectioning booleans are non-destructive (`BuildQuery`) and it
 works on copies of the framed bodies.
 
+## Why CAM stays on the CPU
+
+Most of CAM's heavy work is a cutter shape (`TipHeight`) swept over a grid:
+the planar and rotary carves of verification and playback, and the
+cutter-location surfaces of surfacing. Each was prototyped as a float32
+compute shader on the compute library the topology solver uses, and measured
+against the CPU on the chess set. None earned a second implementation. The
+prototypes are on branches `gpu-rotary-carve-prototype`,
+`gpu-planar-carve-prototype` and `gpu-cl-surface-prototype`, each with a
+hidden `[.bench]` case in `femgpu_tests`.
+
+| | CPU, 22 threads | RTX 4060 laptop | where it is used |
+|---|---|---|---|
+| rotary check's walk, knights Turn | 0.98 s at 0.5 mm, 6 s at 0.25 mm | 0.1 s, 0.3 s | a check of 1.45 s at the panel's 0.5 mm |
+| planar check's carve, board Top / Face | 27 / 33 ms at 0.4 mm | 7 / 7 ms | a check of 0.2 to 0.35 s |
+| `RotaryCL`, knights Finish / Rest | 5.6 / 24 to 30 s | 0.68 / 2.75 s idle, 2 to 30 s while another process renders | a cold Turn generate of 63 to 86 s, read back from disk on every later run |
+
+- **The gain is modest where each is used.** A check is mostly parse,
+  sampling and compare. A surfacing pass is cut once per geometry change on
+  a background job, and is then read back from disk
+  ([Background work](#background-work)).
+- **The GPU is the viewport's.** With another process rendering, the CL
+  kernel ran 1 to 10 times slower, once slower than the CPU, and a rest
+  pass's kernel is seconds in one dispatch.
+- **CI gains nothing.** llvmpipe is 1 to 3 times slower than the CPU on every
+  candidate.
+- **Float32 agrees** with a tolerance, not to the bit: maps to 1.6e-5 mm or
+  better. Ties are decided by the cutter's wall
+  ([simulation.md](simulation.md#the-cutters-wall)). Without it, a cell on
+  the wall falls by the last bit of rounding, which miscounted rapids through
+  stock. The CL kernel's one tie was the same: the footprint's rim when the
+  radius is a whole number of cells.
+- **A kernel's shape, should one be needed:** per-tile move lists in file
+  order and one dispatch for a carve (rapids need the order); one invocation
+  per cell with `RotaryCL`'s pruning for a CL surface; readback through a
+  host-cached copy (reading a storage buffer's own mapping cost 170 ms for
+  8 MB).
+
+Where the CPU's time goes instead. The carves run in bands on every core
+([simulation.md](simulation.md#on-every-core),
+[rotary.md](rotary.md#on-every-core)). `RotaryCL` is on every core (8.6
+times one thread) and is about 55% of a cold turning generate. A rest pass's
+two tool envelopes are most of the rest. A third of `RotaryCL`'s time is the
+3 to 4% of cells off the part, whose footprint is the whole turn because
+their arc is measured at a radius of 0.01 mm.
+
 ## Requests that wait
 
 `cam_toolpath`, `cam_post`, `cam_verify` and `cam_simulate` answer with
@@ -304,7 +350,7 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
 
 ## Tests
 
-- Headless, `tests/test_cam*.cpp` (`tools/ctest -L cam`), fixtures in
+- Headless, `tests/test_cam*.cpp` (`ctest -L cam`), fixtures in
   `tests/cam_fixtures.h`: toolpath geometry against known shapes
   (`test_cam.cpp`), setups/frames/stock/origin (`test_cam_setup.cpp`),
   machine profiles, dialects and the frozen G-code goldens
@@ -376,7 +422,6 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
 - **Simulation extras**: colour by operation, a deviation map, a dirty-rect
   stock remesh.
 - **A setup sheet.**
-- **Distance tolerances between walls.** A round face's size band and a
-  level floor's or shoulder's distance band are aimed at
-  ([tolerance bands](operations.md#tolerance-bands)); a slot's width between
-  two walls is cut as modelled.
+- **Distance tolerances.** A band is read off a round face's size only
+  ([tolerance bands](operations.md#tolerance-bands)); a slot width or a
+  shoulder-to-seat length is cut as modelled.
