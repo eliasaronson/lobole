@@ -76,9 +76,9 @@ already orthonormal is kept bit for bit, so a plane saves and loads unchanged.
 | `Line` | `a, b` | `line` | two free points |
 | `Circle` | `center, radius` | `circle` | centre point + radius |
 | `Arc` | `center, radius, startAngle, endAngle` | `arc` | centre, start, end points + radius + angles, tied by `addConstraintArcRules` |
-| `Ellipse` | `center, rMajor, rMinor, rotation` | `ellipse` | centre only; radii and rotation rigid |
-| `EllipseArc` | ellipse + `startParam, endParam` | `ellipse_arc` | centre only; rigid |
-| `BSpline` | `poles, degree` | `spline` | each pole a free point; no inter-pole rules |
+| `Ellipse` | `center, rMajor, rMinor, rotation` | `ellipse` | `GCS::Ellipse` (centre, focus, minor radius); axis ends are points tied to it ([below](#ellipses-and-splines)) |
+| `EllipseArc` | ellipse + `startParam, endParam` | `ellipse_arc` | `GCS::ArcOfEllipse`: the ellipse plus start/end points and params, tied by `addConstraintArcOfEllipseRules` |
+| `BSpline` | `poles, degree` | `spline` | `GCS::BSpline` over the poles (each a free point), knots and weights fixed |
 | `Text` | `anchor, text, font, height, angle, halign, valign, spacing` | `text` | the anchor a free point; the glyphs rigid; the box corners ride the anchor ([Text](#text)) |
 
 Every entity also has `id` and `construction`. Rules that hold everywhere:
@@ -115,8 +115,9 @@ an id is **refused on load**. `IndexOfEntity(id)` is a linear scan (sketches
 are small, and a cached map is a desync risk).
 
 `PointRef {entity, which}` addresses a point: Line 0 = `a`, 1 = `b`; Circle
-and Ellipse 0 = centre; Arc and EllipseArc 0 = centre, 1 = start, 2 = end;
-BSpline k = pole k; Text 0 = anchor, 1..4 = the box corners (bottom-left,
+and Ellipse 0 = centre; Arc and EllipseArc 0 = centre, 1 = start, 2 = end; Ellipse
+and EllipseArc 3/4 = the major-axis ends (+û, −û), 5/6 = the minor-axis
+ends (+v̂, −v̂); BSpline k = pole k; Text 0 = anchor, 1..4 = the box corners (bottom-left,
 bottom-right, top-right, top-left). `kWholeEntity` (0xFF) marks a *selection* of the whole
 entity; constraints never use it.
 
@@ -196,27 +197,115 @@ returns `SIZE_MAX` for them, so **any code resolving a ref by index must test
 
 Notes on how they map to PlaneGCS (`Solver::Load`):
 
-- Horizontal/Vertical take either one line, or two points (`a`, `b`) — the
-  two-point form is what alignment inference emits.
-- PointOnLine also accepts a circle or arc as `b` (point on curve).
+- Horizontal/Vertical take one line, an ellipse or elliptical arc (its major
+  axis, ends 3–4), or two points (`a`, `b`) — the two-point form is what
+  alignment inference emits.
+- PointOnLine is point-on-CURVE: `b` may be a line, circle, arc, ellipse,
+  elliptical arc (its whole ellipse, as an arc's is its circle) or spline.
 - Symmetric uses `c` as the symmetry line (or a point).
 - Fixed holds a point's parameters out of the unknowns; it adds no equation.
 - Concentric is a coincident of the two centres; Collinear is Parallel plus
   a point-on-line.
 - Tangent's side (which side of the line the curve sits on) is taken from the
   current geometry at load, so a solve never flips a circle across its line.
-- A line tangent to an arc it meets at an end (a Coincident joins the line's
-  end to the arc's start or end — every fillet, every slot) is an angle at
-  that point (`addConstraintAngleViaPoint`, 0 or π as the geometry already
-  is), not the centre-to-line distance. Held exactly, the distance form and
-  "the shared end lies on the arc" are the same equation to first order, so
-  every fillet read as one redundant constraint and a phantom DOF.
+- Two curves that meet at an end (a Coincident joins an end of one to an end
+  of the other — every fillet, every slot, a spline running into a line;
+  ends are a line's 0/1, an arc's or elliptical arc's 1/2, a spline's first
+  and last pole) are tangent THERE, as an angle at that point
+  (`addConstraintAngleViaPoint`, 0 or π as the geometry already is), not
+  the centre-to-line distance. Held exactly, the distance form and "the
+  shared end lies on the arc" are the same equation to first order, so every
+  fillet read as one redundant constraint and a phantom DOF. A spline's
+  tangent at an end is its end leg (pole 0→1, or the last two).
+- Without a shared end, Tangent takes a line and a circle/arc (signed
+  distance), a line and an ellipse/elliptical arc
+  (`addConstraintTangent(Line&, Ellipse&)`, unsigned: a line cannot cross
+  an ellipse without cutting it, so it keeps its side), or two circles/arcs
+  (inside or outside as they are at load).
 - Angle is stored in **radians**; its expression is written in degrees
   (`VisitExprs` converts).
-- Radius/Diameter/Equal/Tangent accept circles and arcs.
+- Radius/Diameter accept circles and arcs; Equal two lines, two
+  circles/arcs, or two ellipses/elliptical arcs (both radii); Concentric any
+  two of circle, arc, ellipse, elliptical arc.
 
 An unknown kind string is refused on load (`ConstraintKindFromString`), never
 read as some default kind.
+
+#### Refusals
+
+A constraint the solver cannot represent — a radius on an ellipse, a
+tangent between a circle and a spline, a ref to a point an entity does not
+have — is never added to nothing. `Solver::Load` records each one with the
+reason and what its kind takes (`UnsupportedConstraints()`); the dispatch IS
+the validator, so what is refused and what is solved cannot drift apart.
+`add_constraint(s)` refuses with that text and leaves the sketch as it was;
+the GUI's constraint commands show it ("Not added: …") and add nothing; a
+sketch LOADED with one (hand-written JSON, an older build) carries a
+regeneration warning naming the constraint, because it solves as if absent
+while the sketch looks constrained.
+
+### Ellipses and splines
+
+An ellipse is PlaneGCS's own `GCS::Ellipse`: centre, `focus1` (at
+`√(a² − b²)` from the centre along `rotation`) and the minor radius b —
+exactly its five degrees of freedom, so nothing holds it together. Its
+**axis ends** (`which` 3/4 major, 5/6 minor) are solver points tied to it by
+`addConstraintInternalAlignmentPoint2Ellipse` (tag 0, definitional): two
+unknowns and two equations each, so the DOF stays 5, and radii and
+orientation become ordinary point constraints:
+
+- a radius is a `distance` from the centre (0) to an axis end (3 or 5) —
+  `radius` on an ellipse is refused, since picking one of its two radii for
+  the caller would be a substitute;
+- Horizontal/Vertical on an ellipse levels its major axis;
+- an axis end can be made coincident, fixed, dimensioned or dragged.
+
+The focus is an unknown like any point, so the smallest step in the
+unknowns is NOT the smallest change in the shape: a coincident that moved
+the centre left the focus behind and reshaped the ellipse (1.5 × 0.5 came
+out 0.85 × 0.68, turned 100°), and levelling one shrank it. So each ellipse
+carries **soft holds** on its focal distance, minor radius and turn (and an
+elliptical arc on its two end parameters): constraints with a negative tag,
+which PlaneGCS solves as a second priority — minimised within what the real
+constraints allow, never counted in the DOF or the diagnosis. Their
+minimisation stops near 1e-9, so `Solver::Load` first solves with the holds
+HARD (tag 0, in a throwaway system): when the constraints can be met by
+moving ellipses whole, that answer keeps their shape exactly, and the real
+system starts already solved. Dragging the centre therefore translates an
+ellipse; dragging an axis end resizes and turns it.
+
+The write-back is `rMajor = √(|F−C|² + b²)`, `rotation = atan2(F − C)`
+(kept within half a turn of the stored one). When the focus offset (to
+1e-12 of the size) and b come back unmoved, the stored `rMajor`/`rotation`
+are kept bit for bit: re-deriving them through the focus rounds by an ulp,
+and a sketch re-solved on every regeneration would walk. An ellipse is
+`rMajor >= rMinor > 0` (refused on load otherwise; `EllipseFromClicks`
+swaps the axes and turns a quarter when the third click is the longer); a
+**circle-shaped** one (rMajor = rMinor) has no focus direction, so it stays
+rigid — its centre free, every other point riding it.
+
+An **elliptical arc** is a `GCS::ArcOfEllipse` with real start/end points
+(1/2) and its end parameters as unknowns. PlaneGCS measures the parameter
+from the major axis, as the model stores `startParam`/`endParam`, so they
+write back directly, renormalized CCW like an `Arc`'s. DOF 7.
+
+A **spline** is a `GCS::BSpline` over its pole points, with the
+clamped-uniform knots (`BSplineKnots`) and unit weights, both fixed. A
+clamped spline's ends ARE poles 0 and n−1, so they need no points of their
+own. A spline whose first and last poles are equal is closed, and a
+definitional coincident keeps it closed (skipped when both are held — say
+expression-driven — since it would have no unknown). Point-on-spline adds
+one unknown, the point's curve parameter, seeded at the nearest point. DOF
+2 per pole (2 fewer when closed).
+
+In the GUI the axis ends are dots and pick points (inference snaps to them
+too), so dragging one resizes and turns the ellipse. Dragging an ellipse or
+elliptical arc by its BODY drags its centre (the holds carry the rest);
+dragging a spline by its body moves every pole by the cursor's delta — it
+translates rather than reshaping around one pulled pole. The Dimension tool on an ellipse's body places its major radius
+(centre → major end); the minor radius is the centre and a minor end. Tests:
+`tests/test_sketch_curves.cpp` `[ellipse]` `[spline]`, golden
+`v155-ellipse-axis-ends`.
 
 ### Derived ops (linked generative geometry)
 
@@ -541,13 +630,20 @@ link; `modify_feature` with an edited sketch JSON covers them.
 - Goldens: `tests/golden/v03-legacy-sketch` (index refs and rigid rects
   migrate), `v35-linked-copy`, `v38-entity-exprs`, `v40-spline`,
   `v46-ellipse-arc`, `v49-reference-image`, `v50-linear-pattern-2d`,
-  `v51-mirror-and-center-ref`, `v137-text`.
+  `v51-mirror-and-center-ref`, `v137-text`, `v155-ellipse-axis-ends`.
+- `tests/test_sketch_curves.cpp` `[ellipse]` `[spline]` `[refusal]` —
+  ellipses, elliptical arcs and splines solved: DOF, radii by axis-end
+  distance through an extrude and a revolve, tangency checked as directions
+  at the joint, points on the curves, drags, bit-identical re-solves, and
+  the refusals.
 
 ## Not built
 
-- Ellipses, elliptical arcs and splines are only partly solved (centre /
-  poles as points; radii, rotation and shape rigid; no tangent or
-  point-on-curve to them) — [../plans/sketch-curve-solving.md](../plans/sketch-curve-solving.md).
+- Tangency to a spline away from its ends, or between an ellipse and a
+  circle or another ellipse without a shared end; an ellipse's radii as
+  expression-driven entity fields (drive the distance to an axis end).
+- Spline weights and knots as unknowns (rational or non-uniform splines);
+  continuity at a closed spline's seam beyond C0.
 - Linked copies across parts: a cross-part paste is always a plain copy.
 - Offset as a regenerating op (it bakes).
 - Transferring a dimension from a deleted entity onto a coincident survivor.
