@@ -183,7 +183,20 @@ Each column of the kernel is bounded again by its OWN highest cell over the
 rows the footprint covers there (a per-column strip maximum): on a part that
 is not round the block's maximum is a nose or an ear most columns never come
 near, and the knights blank's finish went from 18 s to 7 and its rest pass
-from 99 s to 54, the passes unchanged to the byte. `RotaryCL` and the
+from 99 s to 54, the passes unchanged to the byte. A kernel that reaches
+round the WHOLE turn -- every cell off the part, whose arc is measured at
+0.01 mm, and any on it within a few cells' arc of the axis -- walks each
+column highest first instead of round the axis, and stops at the first row
+whose height, less the drop straight across, cannot beat the best contact.
+Walked round the axis it met nearly every row: a turned column stands at
+nearly one radius all the way round, so no row ended the walk early. Those
+cells are 3 to 4% of the knights' grids and were a third of the time. In
+three interleaved pairs of cold Turn generates on one build (a loaded
+machine, so ranges), the finish's surface took 5.1 to 7.9 s instead of 7.7
+to 9.5, the rest pass's own 18 to 22 s instead of 31 to 49, and the whole
+generate 53 to 72 s instead of 78 to 101 -- every surface the same cell for
+cell and the three posted files the same to the byte (`cam rotary: a kernel
+round the whole turn equals the walk round it`). `RotaryCL` and the
 model's radius field it dilates (`SampleModelRotary`, which splats
 triangles and raises a cell by compare-and-swap) both run on every core,
 and neither depends on the thread count: a cell is a maximum, whatever

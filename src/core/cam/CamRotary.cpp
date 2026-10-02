@@ -502,6 +502,68 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
     return static_cast<double>(m);
   };
 
+  // How far round the axis a cell's kernel reaches, in cells. The arc a
+  // theta step spans depends on the radius, so it is measured at the cell's
+  // OWN: a kernel in cells would be a different physical size at every
+  // radius, which is the conflation the whole `ArcAt` derivation exists to
+  // avoid. Never more than half way round: near the axis a cell's arc is
+  // tiny, the kernel would otherwise wrap onto itself, and the wrap below
+  // assumes one lap at most.
+  const auto arcOf = [&](double here) {
+    return model.ArcAt(std::max(here, 0.01));
+  };
+  const auto reachOf = [&](double arc) {
+    return std::min(static_cast<int>(std::ceil(R / std::max(arc, 1e-6))) + 1,
+                    n / 2);
+  };
+  // A kernel that reaches half way round both ways is the WHOLE TURN: every
+  // row of a column is under it, each at its distance round from the
+  // centre. That is every cell off the part (its arc is measured at
+  // 0.01 mm) and any on it within a few cells' arc of the axis -- 3 to 4% of
+  // the knights' grid and, walked row by row, a third of this function's
+  // time: a turned column stands at nearly one radius all the way round, so
+  // the bound that ends a walk is never met before the far side.
+  //
+  // So such a kernel walks each column in order of HEIGHT instead, highest
+  // first. Its drop only grows with the distance, so once a row's height
+  // less the drop at zero distance round cannot beat the best contact,
+  // neither can any row after it. The same candidates as the walk round
+  // the axis and the same maximum, cell for cell
+  // (`cam rotary: a kernel round the whole turn equals the walk round it`):
+  // only the order they are met in changes, and a maximum has none.
+  const auto wholeTurn = [&](int dj) { return 2 * dj + 1 >= n; };
+  std::vector<std::vector<int>> byHeight(static_cast<size_t>(model.nx));
+  {
+    // Only the columns such a kernel can reach: within `di` of one of its
+    // cells.
+    std::vector<char> centres(static_cast<size_t>(model.nx), 0);
+    parallel::For(static_cast<size_t>(model.nx), [&](size_t ii) {
+      const int i = static_cast<int>(ii);
+      for (int j = 0; j < n && centres[ii] == 0; j++)
+        if (wholeTurn(reachOf(arcOf(model.At(i, j)))))
+          centres[ii] = 1;
+    });
+    std::vector<char> reached(static_cast<size_t>(model.nx), 0);
+    for (int i = 0; i < model.nx; i++)
+      if (centres[static_cast<size_t>(i)] != 0)
+        for (int k = std::max(0, i - di); k <= std::min(model.nx - 1, i + di);
+             k++)
+          reached[static_cast<size_t>(k)] = 1;
+    parallel::For(static_cast<size_t>(model.nx), [&](size_t ii) {
+      if (reached[ii] == 0)
+        return;
+      const int i = static_cast<int>(ii);
+      std::vector<int>& rows = byHeight[ii];
+      for (int j = 0; j < n; j++)
+        if (model.At(i, j) > 0.0f)
+          rows.push_back(j); // off the part: nothing there to rest on
+      std::sort(rows.begin(), rows.end(), [&](int p, int q) {
+        const float hp = model.At(i, p), hq = model.At(i, q);
+        return hp != hq ? hp > hq : p < q;
+      });
+    });
+  }
+
   // Over THETA ROWS, each writing only its own: nothing is shared, so the
   // rows are independent exactly as the planar drop cutter's are, and it
   // uses the same `parallel::For`. This function ran on one core and `perf`
@@ -511,17 +573,9 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
   parallel::For(static_cast<size_t>(n), [&](size_t jj) {
     const int j = static_cast<int>(jj);
     for (int i = 0; i < model.nx; i++) {
-      // The arc a theta step spans depends on the radius, so it is measured
-      // at the cell's OWN. A kernel in cells would be a different physical
-      // size at every radius, which is the conflation the whole `ArcAt`
-      // derivation exists to avoid.
-      const double here = model.At(i, j);
-      const double arc = model.ArcAt(std::max(here, 0.01));
-      // Never more than half way round: near the axis a cell's arc is tiny,
-      // the kernel would otherwise wrap onto itself, and the wrap below
-      // assumes one lap at most.
-      const int dj = std::min(
-          static_cast<int>(std::ceil(R / std::max(arc, 1e-6))) + 1, n / 2);
+      const double arc = arcOf(model.At(i, j));
+      const int dj = reachOf(arc);
+      const bool round = wholeTurn(dj);
       const double top = maxUnder(i - di, i + di, j - dj, j + dj);
       double best = 0.0;
       bool touched = false;
@@ -543,6 +597,30 @@ RadiusMap RotaryCL(const RadiusMap& model, const Tool& tool) {
         const int ni = i + a;
         if (ni < 0 || ni >= model.nx)
           continue;
+        if (round) {
+          // The whole column, highest first: every later row stands no
+          // higher and drops no less than `drop0`, the drop straight across.
+          const double drop0 = TipHeight(tool, std::sqrt(ax2));
+          for (const int row : byHeight[static_cast<size_t>(ni)]) {
+            const double s = model.At(ni, row);
+            if (touched && s - drop0 <= best)
+              break;
+            // Its distance round from the centre, the shorter way: the
+            // offset the walk round the axis meets it at.
+            int b = std::abs(row - j);
+            b = std::min(b, n - b);
+            const double by = b * arc;
+            const double d2 = ax2 + by * by;
+            if (d2 > R2)
+              continue;
+            const double tip = s - TipHeight(tool, std::sqrt(d2));
+            if (!touched || tip > best) {
+              best = tip;
+              touched = true;
+            }
+          }
+          continue;
+        }
         // The rows of this column under the footprint, and the highest the
         // model stands in them: a column whose highest cannot beat `best`
         // at this offset is passed over whole.

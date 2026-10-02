@@ -956,6 +956,118 @@ TEST_CASE("cam rotary: the model samples the same on one thread and on many",
   CHECK(differ == 0);
 }
 
+// A kernel that reaches round the whole turn -- every cell off the part,
+// whose arc is measured at 0.01 mm, and any within a few cells' arc of the
+// axis -- walks each column highest first instead of round the axis
+// (docs/cam/rotary.md#continuous-surface_rotary). Only the order changes, so
+// the surface must be the full kernel's to the bit: here off the part past
+// both ends AND through a hole in the middle, on a neck thinner than a cell
+// is wide, and on a turned section standing at nearly one radius all the way
+// round (where the walk meets the most rows before it can stop) -- for a
+// ball, a flat and a V-bit, on one thread and on every core.
+TEST_CASE("cam rotary: a kernel round the whole turn equals the walk round it",
+          "[cam][rotary]") {
+  cam::RadiusMap model = cam::MakeRotaryStock(0.0, 20.0, 5.0, 0.2);
+  const int n = model.nTheta;
+  for (int j = 0; j < n; j++)
+    for (int i = 0; i < model.nx; i++) {
+      const double x = model.CellX(i);
+      const double th = model.CellTheta(j);
+      double r = 0.0; // off the part, past both ends
+      if (x > 2.0 && x <= 6.0)
+        r = 4.0 + 0.002 * std::round(std::sin(7.0 * th) * 4.0); // turned
+      else if (x > 6.0 && x <= 7.0)
+        r = 0.25; // a neck: on the part, a few cells' arc from the axis
+      else if (x > 7.0 && x <= 12.0)
+        r = (x > 9.0 && x <= 10.5 && th > 1.0 && th < 1.6)
+                ? 0.0 // a hole through it: off the part INSIDE it
+                : 3.5 + 0.8 * std::sin(3.0 * th);
+      else if (x > 12.0 && x <= 18.0) // a square section
+        r = 3.0 / std::max(std::abs(std::cos(th)), std::abs(std::sin(th)));
+      model.Set(i, j, static_cast<float>(r));
+    }
+  // The full kernel, in RotaryCL's own arithmetic.
+  const auto full = [&](const cam::Tool& tool) {
+    cam::RadiusMap out = model;
+    const double R = tool.diameter * 0.5;
+    const int di = static_cast<int>(std::ceil(R / model.res)) + 1;
+    for (int j = 0; j < n; j++)
+      for (int i = 0; i < model.nx; i++) {
+        const double arc = model.ArcAt(std::max<double>(model.At(i, j), 0.01));
+        const int dj = std::min(
+            static_cast<int>(std::ceil(R / std::max(arc, 1e-6))) + 1, n / 2);
+        double best = 0.0;
+        bool touched = false;
+        for (int a = -di; a <= di; a++)
+          for (int b = -dj; b <= dj; b++) {
+            const int ni = i + a;
+            if (ni < 0 || ni >= model.nx)
+              continue;
+            const double ax = a * model.res;
+            const double by = b * arc;
+            const double d2 = ax * ax + by * by;
+            if (d2 > R * R)
+              continue;
+            const double s = model.At(ni, ((j + b) % n + n) % n);
+            if (s <= 0.0)
+              continue;
+            const double tip = s - cam::TipHeight(tool, std::sqrt(d2));
+            if (!touched || tip > best) {
+              best = tip;
+              touched = true;
+            }
+          }
+        out.Set(i, j, static_cast<float>(touched ? best : 0.0));
+      }
+    return out;
+  };
+  // What the case is about: whole-turn kernels, both off the part (ends and
+  // hole) and on it (the neck).
+  size_t offEnds = 0, offHole = 0, onNeck = 0;
+  for (int j = 0; j < n; j++)
+    for (int i = 0; i < model.nx; i++) {
+      const double x = model.CellX(i);
+      if (model.At(i, j) <= 0.0f)
+        (x > 7.0 && x <= 12.0 ? offHole : offEnds)++;
+      else if (model.At(i, j) < 0.3f)
+        onNeck++;
+    }
+  REQUIRE(offEnds > 0);
+  REQUIRE(offHole > 0);
+  REQUIRE(onNeck > 0);
+
+  for (const auto type :
+       {cam::ToolType::Ball, cam::ToolType::Flat, cam::ToolType::VBit}) {
+    cam::Tool tool;
+    tool.number = 1;
+    tool.diameter = 3.0;
+    tool.type = type;
+    tool.tipAngleDeg = 60.0;
+    const cam::RadiusMap want = full(tool);
+    for (const char* threads : {"1", ""}) {
+      cam::RadiusMap got;
+      if (*threads != '\0') {
+        ScopedThreads pin(threads);
+        got = cam::RotaryCL(model, tool);
+      } else {
+        got = cam::RotaryCL(model, tool); // every core
+      }
+      REQUIRE(got.r.size() == want.r.size());
+      size_t differ = 0, reached = 0;
+      for (size_t k = 0; k < got.r.size(); k++) {
+        differ += got.r[k] != want.r[k];
+        reached += model.r[k] <= 0.0f && got.r[k] > 0.0f;
+      }
+      INFO("tool type " << static_cast<int>(type) << ", threads "
+                        << (*threads != '\0' ? threads : "all"));
+      CHECK(differ == 0);
+      // Off-part cells the cutter reaches from the part: what the walk was
+      // for, and what a pass running past the ends reads.
+      CHECK(reached > 0);
+    }
+  }
+}
+
 namespace {
 
 // A turned part with several passes -- a rough in layers, then a finish --

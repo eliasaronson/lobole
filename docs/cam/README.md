@@ -291,9 +291,12 @@ Where the CPU's time goes instead. The carves run in bands on every core
 ([simulation.md](simulation.md#on-every-core),
 [rotary.md](rotary.md#on-every-core)). `RotaryCL` is on every core (8.6
 times one thread) and is about 55% of a cold turning generate. A rest pass's
-two tool envelopes are most of the rest. A third of `RotaryCL`'s time is the
-3 to 4% of cells off the part, whose footprint is the whole turn because
-their arc is measured at a radius of 0.01 mm.
+two tool envelopes are most of the rest. A third of `RotaryCL`'s time in the
+table above was the 3 to 4% of cells off the part, whose footprint is the
+whole turn because their arc is measured at a radius of 0.01 mm; such a
+kernel now walks each column highest first, which took the knights' cold
+Turn generate from 78 to 101 s to 53 to 72
+([rotary.md](rotary.md#continuous-surface_rotary)).
 
 ## Requests that wait
 
