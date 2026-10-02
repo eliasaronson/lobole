@@ -60,7 +60,29 @@ minutes.
 | `build_renders.py` | path-traced stills of the head: hero, tilted 35 degrees by its worm, from below, exploded along its own axes | `renders/{hero,tilted,low,exploded}.png` |
 
 `spec.py` holds the derivation; `common.py` the connection, the print
-allowance lookup and the frame helper.
+allowance lookup, the frame and plane helpers, and `named(S)`, the
+variables as `Param`s.
+
+**Every part is lint-clean** (`check_literals`,
+[literals](../../docs/variables/README.md#literals-that-should-be-expressions)):
+no feature stands at a world height a face is already at, and no number
+equals a variable. A sketch goes ON the face it belongs to where that face
+is a disc on the axis its sketch is drawn about (the plate's and the pan
+wheel's tops, the knob's, the collars' ends the journals and the tilt
+shaft stand on); everywhere else -- the worm's ends, which its thread
+moves off the axis, and the yoke and cradle, modelled where they stand --
+on a plane `common.plane` places by its variable (a Frame with a `Param`
+origin). Coordinates, distances and frames are `Param` arithmetic over
+`named(S)`, so the document carries the formula. `base_t` 2 mm more
+regenerates every part without an error: the plate's pocket, relief and
+`seat` frame rise with its top, the yoke -- base, arms, bearing bores,
+ledge and its eight frames -- 2 mm up its own Z, and the assembly solves
+with the pan wheel, cradle and camera 2 mm higher. What does not follow is
+the bought hardware: a fastener `fit_fastener` placed rides on its
+occurrence at the offset it was placed at
+([attachments](../../docs/assemblies/README.md#occurrences)), not on its
+hole, so the yoke's joint screws and the pan blocks' nuts and washers stand
+2 mm into the yoke (12 clashes) until the assembly stage runs again.
 
 ## Sizes
 

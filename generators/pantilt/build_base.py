@@ -35,18 +35,21 @@ def base_plate(app, S):
     ]:
         P[name] = part.param(name, expr, comment=comment, scope="project")
     S.update(spec.values(part))
+    X = common.named(S)
     body = part.cylinder("Top", r=P["base_r"], height=P["base_t"],
                          name="Plate")
     t = S["base_t"]
-    sk = part.sketch(Plane.xy(t), name="Bearing pocket")
-    sk.circle((0, 0), d=Param(S["pan_brg_D"], "pan_brg_D"))
-    part.cut(sk.add(), Param(S["pan_brg_B"], "pan_brg_B"), reversed=True,
-             name="Bearing pocket")
-    sk = part.sketch(Plane.xy(t), name="Relief")
-    sk.circle((0, 0), d=Param(S["pan_relief_d"], "pan_relief_d"))
-    part.cut(sk.add(), Param(S["pan_brg_B"] + S["run_gap"],
-                             "pan_brg_B + run_gap"),
-             reversed=True, name="Relief")
+    # Everything from the top is drawn ON the top face (the plate's end
+    # cap, asked again after each cut that renames it), so it stands where
+    # base_t puts the face.
+    plate = body.feature
+    sk = part.sketch(on=plate.end_cap(), name="Bearing pocket")
+    sk.circle((0, 0), d=X.pan_brg_D)
+    part.cut(sk.add(), X.pan_brg_B, reversed=True, name="Bearing pocket")
+    sk = part.sketch(on=plate.end_cap(), name="Relief")
+    sk.circle((0, 0), d=X.pan_relief_d)
+    part.cut(sk.add(), X.pan_brg_B + X.run_gap, reversed=True,
+             name="Relief")
     # The tripod thread, tapped up from the underside.
     sk = part.sketch(Plane.xy(0, flip=True), name="Tripod")
     sk.point((0, 0))
@@ -60,9 +63,10 @@ def base_plate(app, S):
                     name="Tripod hole")
     bore = [f for f in tri.bores()][0]
     part.thread(bore, "3/8-16 UNC-2B")
-    sk = part.sketch(Plane.xy(t), name="Wheel screws")
-    for x, y in common.bolt_points(S["screw_pcd"] / 2):
-        sk.point((x, y))
+    top = plate.end_cap()
+    sk = part.sketch(on=top, name="Wheel screws")
+    for x, y in common.bolt_points(X.screw_pcd / 2):
+        sk.point(common.on_face_uv(top, (x, y, 0.0)))
     part.hole(sk.add(), d=1.0, depth=8.0,
               fit={"thread": SCREW, "kind": "tapped"}, name="Wheel screws")
     # The edges the 6090 breaks (generators/pantilt/cam.py), in the model:
@@ -81,7 +85,7 @@ def base_plate(app, S):
     part.chamfer(edges, P["edge_break"], name="Edge breaks")
     # The grade it is cut from (cam.py's blank, the drawing's title block).
     part.material("aluminum_6082_t6")
-    common.frame(part, "seat", (0, 0, t), (0, 0, 1), (1, 0, 0))
+    common.frame(part, "seat", (0, 0, X.base_t), (0, 0, 1), (1, 0, 0))
     part.check()
     return part
 
@@ -89,21 +93,23 @@ def base_plate(app, S):
 def pan_wheel(app, S):
     part = app.part("pan_wheel")
     model = common.printed(part)
-    face = S["wheel_face"]
+    X = common.named(S)
     blank = part.cylinder("Top", d="wheel_rim_d", height="wheel_face",
                           name="Blank")
     rim = blank.faces(kind="cylinder")[0]
-    sk = part.sketch(Plane.xy(face), name="Bearing counterbore")
+    # Drawn ON the blank's top face, as the plate's are on its.
+    sk = part.sketch(on=blank.feature.end_cap(), name="Bearing counterbore")
     sk.circle((0, 0), d=model("hole", S["pan_brg_D"]))
-    part.cut(sk.add(), Param(S["pan_brg_B"], "pan_brg_B"), reversed=True,
+    part.cut(sk.add(), X.pan_brg_B, reversed=True,
              name="Bearing counterbore")
-    sk = part.sketch(Plane.xy(face), name="Relief")
+    sk = part.sketch(on=blank.feature.end_cap(), name="Relief")
     sk.circle((0, 0), d=model("hole", S["pan_relief_d"]))
     part.cut(sk.add(), 1.0, reversed=True, end_mode="through_all",
              name="Relief")
-    sk = part.sketch(Plane.xy(face), name="Screws")
-    for x, y in common.bolt_points(S["screw_pcd"] / 2):
-        sk.point((x, y))
+    top = blank.feature.end_cap()
+    sk = part.sketch(on=top, name="Screws")
+    for x, y in common.bolt_points(X.screw_pcd / 2):
+        sk.point(common.on_face_uv(top, (x, y, 0.0)))
     # ISO 4762 M4: head 7 across, 4 high; the counterbore clears it.
     part.hole(sk.add(), d=1.0, through=True, kind="counterbore",
               fit={"thread": SCREW, "kind": "normal"},
@@ -118,9 +124,10 @@ def pan_wheel(app, S):
     part.material("petg")
     common.frame(part, "seat", (0, 0, 0), (0, 0, 1), (1, 0, 0))
     # The yoke turns on the wheel's top face: the upper bearing's outer side.
-    common.frame(part, "top", (0, 0, face), (0, 0, 1), (1, 0, 0))
+    common.frame(part, "top", (0, 0, X.wheel_face), (0, 0, 1), (1, 0, 0))
     # The mesh reference: the blank's X (where a tooth stands) at mid-face.
-    common.frame(part, "mesh", (0, 0, face / 2), (0, 0, 1), (1, 0, 0))
+    common.frame(part, "mesh", (0, 0, X.wheel_face / 2), (0, 0, 1),
+                 (1, 0, 0))
     part.check()
     return part, r
 

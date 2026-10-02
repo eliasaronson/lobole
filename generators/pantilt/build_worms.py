@@ -65,20 +65,30 @@ def worm(app, S):
     r = part.worm(face, starts=int(S["worm_starts"]), hand="right",
                   backlash=S["worm_backlash"], name="Worm")
     print("worm report:", r.get("report", {}).get("locking"))
+    X = common.named(S)
     journal = model("shaft", S["worm_brg_d"])
-    out = s + S["block_t"] + S["run_gap"]
-    knob_end = out + S["knob_bore"] - S["nozzle"]
-    for sign, end in ((1, knob_end), (-1, out)):
-        z0 = sign * L / 2
-        sk = part.sketch(Plane.xy(z0, flip=sign < 0), name="Collar")
-        sk.circle((0, 0), d=Param(S["worm_collar_d"], "worm_collar_d"))
-        part.extrude(sk.add(), s - L / 2, mode="add", name="Collar")
-        sk = part.sketch(Plane.xy(sign * s, flip=sign < 0), name="Journal")
+    # From a block's inboard face out: the block, a running gap, and on the
+    # knob's end as far into the knob as its bore less a layer.
+    past = X.block_t + X.run_gap
+    for sign, beyond in ((1, past + X.knob_bore - X.nozzle), (-1, past)):
+        # The blank's ends are the worm's thread's too (their centroid is
+        # off the axis), so each collar stands on a plane at the end the
+        # worm's length puts there.
+        end = common.plane(part, "Collar " + ("+Z" if sign > 0 else "-Z"),
+                           "xy", X.worm_len / 2 if sign > 0
+                           else -X.worm_len / 2, flip=sign < 0)
+        sk = part.sketch(on=end, name="Collar")
+        sk.circle((0, 0), d=X.worm_collar_d)
+        collar = part.extrude(sk.add(), X.worm_span - X.worm_len / 2,
+                              mode="add", name="Collar")
+        # The journal stands on the collar's end.
+        sk = part.sketch(on=collar.end_cap(), name="Journal")
         sk.circle((0, 0), d=journal)
-        part.extrude(sk.add(), end - s, mode="add", name="Journal")
+        part.extrude(sk.add(), beyond, mode="add", name="Journal")
     part.material("petg")
     common.frame(part, "axis", (0, 0, 0), (0, 0, 1), (1, 0, 0))
-    common.frame(part, "knob", (0, 0, out), (0, 0, 1), (1, 0, 0))
+    common.frame(part, "knob", (0, 0, X.worm_span + past), (0, 0, 1),
+                 (1, 0, 0))
     part.check()
     return part, r
 
@@ -105,10 +115,12 @@ def block(app, S):
     # Two screws up from the underside, counterbored to leave a web at the
     # top: a block hangs from the yoke the right way up and stands on the
     # ledge upside down, so the heads are in the counterbores either way.
-    y = h / 2 + S["block_flange"] / 2
-    sk = part.sketch(Plane.xy(-h / 2, flip=True), name="Screws")
+    X = common.named(S)
+    y = X.block_h / 2 + X.block_flange / 2
+    under = common.plane(part, "Screws", "xy", -X.block_h / 2, flip=True)
+    sk = part.sketch(on=under, name="Screws")
     for sy in (1, -1):
-        sk.point((t / 2, sy * y))
+        sk.point((X.block_t / 2, y if sy > 0 else -y))
     part.hole(sk.add(), d=1.0, through=True, kind="counterbore",
               fit={"thread": "M4", "kind": "normal"},
               cb_diameter=model("hole", S["m4_cb_d"]),
@@ -129,8 +141,11 @@ def knob(app, S):
              name="Bore")
     # A grip: flutes round the rim, one per 4 mm of circumference.
     n = max(6, int(3.14159 * S["knob_d"] / 4))
-    sk = part.sketch(Plane.xy(S["knob_h"]), name="Flute")
-    sk.circle((S["knob_d"] / 2, 0), d=S["knob_d"] / n * 0.8)
+    X = common.named(S)
+    top = body.feature.end_cap()
+    sk = part.sketch(on=top, name="Flute")
+    sk.circle(common.on_face_uv(top, (X.knob_d / 2, 0.0, 0.0)),
+              d=X.knob_d / n * 0.8)
     flute = part.cut(sk.add(), 1.0, end_mode="through_all", reversed=True,
                      name="Flute")
     part.pattern(flute, n, circular="z", name="Flutes")

@@ -74,9 +74,54 @@ def printed(part):
 
 
 def frame(part, name, origin, z, x):
-    """An explicit named frame: what a mate anchors to by name."""
-    return part.frame(name, origin=tuple(float(c) for c in origin),
-                      z=tuple(z), x=tuple(x))
+    """An explicit named frame: what a mate anchors to by name. An origin
+    coordinate given as a Param (`named(S)`) stays its variable, so the
+    frame follows it."""
+    return part.frame(name, origin=tuple(
+        c if isinstance(c, (Param, str)) else float(c) for c in origin),
+        z=tuple(z), x=tuple(x))
+
+
+class named(dict):
+    """The project's variables as Params: `X = named(S)`, then `X.tilt_z`
+    is the number AND the name, and Python arithmetic on them hands the
+    document the formula (designer_sdk.Param). A layout written in these
+    follows its variables; one written in `S[...]` floats is numbers."""
+
+    def __init__(self, S):
+        super().__init__({k: Param(v, k) for k, v in S.items()})
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name) from None
+
+
+# The world planes a sketch is drawn on, as Plane.xy/xz/yz give them:
+# (the axis the offset is along, the normal, the u axis), plain and flipped.
+_PLANES = {
+    ("xy", False): (2, (0, 0, 1), (1, 0, 0)),
+    ("xy", True): (2, (0, 0, -1), (1, 0, 0)),
+    ("xz", False): (1, (0, -1, 0), (1, 0, 0)),
+    ("xz", True): (1, (0, 1, 0), (-1, 0, 0)),
+    ("yz", False): (0, (1, 0, 0), (0, 1, 0)),
+    ("yz", True): (0, (-1, 0, 0), (0, -1, 0)),
+}
+
+
+def plane(part, name, kind, at, flip=False):
+    """Where a sketch stands when no face of the part is there to stand it
+    on: the plane `Plane.<kind>(at, flip)` draws on, as a Frame whose
+    origin is `at` -- a Param, so the plane is the variable's and follows
+    it (a world plane at a number stays where it was put; check_literals
+    reports one a face lies on). Sketch on it with
+    `part.sketch(on=common.plane(...))`; its u and v are Plane's, so a
+    profile drawn for Plane.<kind> is drawn the same on it."""
+    axis, z, x = _PLANES[(kind, flip)]
+    origin = [0.0, 0.0, 0.0]
+    origin[axis] = at
+    return frame(part, f"{name} plane", origin, z, x)
 
 
 def save(app, name):
@@ -104,6 +149,34 @@ def drop_default_part(app):
     for p in app.call("list_parts")["parts"]:
         if p["name"] == "Part 1":
             app.call("delete_part", part=p["id"])
+
+
+def on_face_uv(face, point):
+    """A world point (x, y, z), each a Param or a number, as (u, v) on a
+    face-attached sketch of `face` -- the face's own frame, asked of the
+    app (origin its centroid, u its X: the kernel's to choose). Kept as
+    Param arithmetic, so a hole drawn at `X.screw_pcd / 2` on the face
+    stays that expression; the face's centroid must be where the
+    expression is measured from, so a face whose centroid is off the
+    origin in its plane is refused rather than baked in as a number."""
+    f = face.frame()
+    off = [o - f.z[i] * sum(a * b for a, b in zip(f.origin, f.z))
+           for i, o in enumerate(f.origin)]
+    if max(abs(c) for c in off) > 1e-9:
+        raise SystemExit(f"face {face.name}: its centroid {list(f.origin)} "
+                         f"is off the axis; put the sketch on a plane")
+
+    def dot(axis):
+        out = 0.0
+        for c, p in zip(axis, point):
+            if abs(c) < 1e-12 or (not isinstance(p, Param) and p == 0):
+                continue
+            term = p if abs(c - 1) < 1e-12 else (
+                -p if abs(c + 1) < 1e-12 else p * c)
+            out = term if (not isinstance(out, Param) and out == 0) \
+                else out + term
+        return out
+    return dot(f.x), dot(f.y)
 
 
 def bolt_points(radius, n=4, start_deg=45.0):

@@ -56,15 +56,16 @@ def tilt_wheel(app, S):
     part = app.part("tilt_wheel")
     model = common.printed(part)
     declare(part, S)
-    F = S["wheel_face"]
+    X = common.named(S)
     blank = part.cylinder("Top", d="wheel_rim_d", height="wheel_face",
                           name="Blank")
     rim = blank.faces(kind="cylinder")[0]
-    c = S["tilt_collar"]
     sk = part.sketch(Plane.xy(0, flip=True), name="Collar")
-    sk.circle((0, 0), d=Param(S["main_collar_d"], "main_collar_d"))
-    part.extrude(sk.add(), Param(c, "tilt_collar"), mode="add", name="Collar")
-    sk = part.sketch(Plane.xy(-c, flip=True), name="Shaft")
+    sk.circle((0, 0), d=X.main_collar_d)
+    collar = part.extrude(sk.add(), X.tilt_collar, mode="add",
+                          name="Collar")
+    # The shaft stands on the collar's end.
+    sk = part.sketch(on=collar.end_cap(), name="Shaft")
     sk.circle((0, 0), d=model("shaft", S["main_brg_d"]))
     part.extrude(sk.add(), Param(2 * S["arm_out"], "2 * arm_out"),
                  mode="add", name="Shaft")
@@ -73,9 +74,10 @@ def tilt_wheel(app, S):
                         name="Tilt wheel")
     part.material("petg")
     common.frame(part, "axis", (0, 0, 0), (0, 0, 1), (1, 0, 0))
-    common.frame(part, "mesh", (0, 0, F / 2), (0, 0, 1), (1, 0, 0))
-    common.frame(part, "cradle", (0, 0, -(S["arm_out"] + c)), (0, 0, 1),
+    common.frame(part, "mesh", (0, 0, X.wheel_face / 2), (0, 0, 1),
                  (1, 0, 0))
+    common.frame(part, "cradle", (0, 0, -(X.arm_out + X.tilt_collar)),
+                 (0, 0, 1), (1, 0, 0))
     part.check()
     return part, r
 
@@ -84,36 +86,47 @@ def cradle(app, S):
     """The camera plate on two cheeks, in tilt-axis coordinates."""
     part = app.part("cradle")
     model = common.printed(part)
+    X = common.named(S)
     w, sx, sz, pt = S["cam_w"], S["seat_x"], S["seat_z"], S["plate_t"]
-    sk = part.sketch(Plane.xy(sz - pt), name="Plate")
+    # Its planes are the variables', in tilt-axis coordinates: the plate's
+    # underside, the cheeks' outer faces at the camera's width, the plate's
+    # top (the plate's own faces are off the axis the sketches are drawn
+    # about, so the planes are frames placed by the variables).
+    under = X.seat_z - X.plate_t
+    sk = part.sketch(on=common.plane(part, "Plate", "xy", under),
+                     name="Plate")
     sk.rect((sx - S["cam_d"] / 2, -w / 2), (sx + S["cam_d"] / 2, w / 2))
-    part.extrude(sk.add(), Param(pt, "plate_t"), name="Plate")
-    br = S["boss_r"]
+    part.extrude(sk.add(), X.plate_t, name="Plate")
+    br = X.boss_r
     for sign in (1, -1):
         # the cheek's outer face is the plate's end; drawn on it, extruded in
-        pl = Plane.xz(sign * w / 2, flip=sign > 0)
-        sk = part.sketch(pl, name="Cheek")
+        side = common.plane(part, "Cheek " + ("+Y" if sign > 0 else "-Y"),
+                            "xz", X.cam_w / 2 if sign > 0 else -X.cam_w / 2,
+                            flip=sign > 0)
+        sk = part.sketch(on=side, name="Cheek")
         u = (lambda x: -x) if sign > 0 else (lambda x: x)
-        sk.polyline([(u(-br), 0), (u(-br), sz - pt), (u(br), sz - pt),
-                     (u(br), 0)], close=False)
+        sk.polyline([(u(-br), 0.0), (u(-br), under), (u(br), under),
+                     (u(br), 0.0)], close=False)
         sk.arc((0, 0), br, 180, 360)
-        part.extrude(sk.add(), Param(S["cheek_t"], "cheek_t"), mode="add",
-                     reversed=True, name="Cheek")
-    sk = part.sketch(Plane.xz(w / 2, flip=True), name="Shaft bore")
+        part.extrude(sk.add(), X.cheek_t, mode="add", reversed=True,
+                     name="Cheek")
+        if sign > 0:
+            outer = side
+    sk = part.sketch(on=outer, name="Shaft bore")
     sk.circle((0, 0), d=model("hole", S["main_brg_d"]))
     part.cut(sk.add(), 1.0, end_mode="through_all", reversed=True,
              name="Shaft bore")
-    sk = part.sketch(Plane.xy(sz), name="Camera slot")
+    sk = part.sketch(on=common.plane(part, "Camera slot", "xy", X.seat_z),
+                     name="Camera slot")
     half = S["slot_l"] / 2
     sk.slot((sx - half, 0), (sx + half, 0),
             model("hole", S["cam_screw_clear"]))
-    part.cut(sk.add(), Param(pt, "plate_t"), reversed=True,
-             name="Camera slot")
+    part.cut(sk.add(), X.plate_t, reversed=True, name="Camera slot")
     part.material("petg")
     # Z along the tilt axis, X down: at zero tilt the shaft's X is down.
     common.frame(part, "shaft", (0, 0, 0), (0, 1, 0), (0, 0, -1))
-    common.frame(part, "seat", (sx, 0, sz), (0, 0, 1), (1, 0, 0))
-    common.frame(part, "screw", (sx, 0, sz - pt), (0, 0, 1), (1, 0, 0))
+    common.frame(part, "seat", (X.seat_x, 0, X.seat_z), (0, 0, 1), (1, 0, 0))
+    common.frame(part, "screw", (X.seat_x, 0, under), (0, 0, 1), (1, 0, 0))
     part.check()
     return part
 
