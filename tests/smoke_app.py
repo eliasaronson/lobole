@@ -44,6 +44,18 @@ and `.proc`. Extra CLI arguments and environment go in as keyword
 arguments; a temporary XDG_CONFIG_HOME is set up by default so a suite run
 cannot rewrite the developer's own preferences (tests/fem_smoke.py learned
 that one the hard way).
+
+THE APP DIES WITH ITS LAUNCHER
+------------------------------
+Every launch sets DESIGNER_EXIT_WITH_PARENT to this process's pid, so the
+kernel sends the app SIGTERM when this process dies — however it dies. The
+`finally:` and `with` cleanup here never runs on SIGKILL (a ctest timeout, an
+agent stopping a test), and two `--headless --remote 0` instances orphaned
+that way were found still serving nothing 16 hours later
+(src/app/ParentWatch.h). The death signal follows the THREAD that forked, so
+a launch from anything but the main thread is refused rather than left to
+kill its app when that thread ends. The app's pid is printed to stderr — kill
+it by that, never by a pattern.
 """
 import contextlib
 import os
@@ -53,6 +65,7 @@ import subprocess
 import sys
 import traceback
 import tempfile
+import threading
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -241,6 +254,45 @@ def _archive_failure(app_log):
         pass
 
 
+OWNER_FILE = "smoke_app.owner"
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _sweep_orphaned_scratch():
+    """Remove scratch dirs whose launcher AND app are both gone.
+
+    A launcher that was SIGKILLed never ran its rmtree; its app now exits with
+    it, but the directory stays. Only a directory that names its owners is
+    touched — one without the owner file is not provably ours to delete — and
+    a pid that has been reused merely keeps a directory one sweep longer.
+    """
+    root = tempfile.gettempdir()
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    for name in names:
+        if not name.startswith("designer_smoke_"):
+            continue
+        path = os.path.join(root, name)
+        try:
+            with open(os.path.join(path, OWNER_FILE)) as f:
+                pids = [int(p) for p in f.read().split()]
+        except (OSError, ValueError):
+            continue
+        if pids and not any(_alive(p) for p in pids):
+            shutil.rmtree(path, ignore_errors=True)
+
+
 def _spawn(binary, extra_args, env, timeout, headless):
     """Launch, wait for the app to name its port, return (proc, port, log, tmp).
 
@@ -248,8 +300,18 @@ def _spawn(binary, extra_args, env, timeout, headless):
     and the string "offscreen" runs --offscreen (real renderer, no window) —
     which, like headless, must work with no display server at all.
     """
+    # The pid named below must be the parent the kernel watches, and that is
+    # the forking THREAD: a worker thread that returns would take the app
+    # with it, mid-test, for no visible reason.
+    if threading.current_thread() is not threading.main_thread():
+        raise RuntimeError("smoke_app launches only from the main thread: "
+                           "the app exits when the thread that started it "
+                           "does (DESIGNER_EXIT_WITH_PARENT)")
+    _sweep_orphaned_scratch()
     tmp = tempfile.mkdtemp(prefix="designer_smoke_")
     e = dict(os.environ if env is None else env)
+    # Dies with THIS process, even one killed by SIGKILL (see the docstring).
+    e["DESIGNER_EXIT_WITH_PARENT"] = str(os.getpid())
     if headless:
         # No display: these paths run under ctest with no X, and a stray
         # DISPLAY makes it look like the windowed path is wanted. ONLY for
@@ -280,6 +342,11 @@ def _spawn(binary, extra_args, env, timeout, headless):
     with open(log_path, "w") as log:
         proc = subprocess.Popen(cmd, env=e, stdout=log,
                                 stderr=subprocess.STDOUT)
+    # Who owns this directory, for the sweep in the next launch.
+    with open(os.path.join(tmp, OWNER_FILE), "w") as f:
+        f.write(f"{os.getpid()} {proc.pid}\n")
+    print(f"smoke_app: designer pid {proc.pid}, scratch {tmp}",
+          file=sys.stderr)
 
     port = None
     deadline = time.time() + timeout

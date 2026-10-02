@@ -411,7 +411,13 @@ by the same name drift apart without any test noticing:
   (`launch_app()`); `tests/config_isolation_lint.py` fails any script that
   spawns the binary directly. It keeps the app's log, prints it on failure,
   and archives the log, traceback and a `reproduce.sh` under
-  `$XDG_STATE_HOME/designer/smoke-failures/`.
+  `$XDG_STATE_HOME/designer/smoke-failures/`. Every launch sets
+  `DESIGNER_EXIT_WITH_PARENT=<its pid>`, so the app gets SIGTERM when the
+  test dies however it dies — a SIGKILLed smoke used to leave its instance
+  serving nothing under init for hours (`src/app/ParentWatch.h`,
+  `tests/exit_with_parent_smoke.py`). It prints the app's pid; kill by that.
+  The MCP server's autostart arms the same; `headless-preview.sh` and
+  `dev-watch.sh` do not, because their instances are meant to outlive them.
 - The GUI runner shards, shuffles by default and prints the seed that
   replays the run; a failing shard is archived under
   `$XDG_STATE_HOME/designer/gui-failures/` with its exact filter and a

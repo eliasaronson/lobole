@@ -810,6 +810,13 @@ add_test(NAME watchdog_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(watchdog_smoke PROPERTIES TIMEOUT 120)
 
+# An app a test launched dies with the test, SIGKILL included: smoke_app arms
+# DESIGNER_EXIT_WITH_PARENT for every launch (src/app/ParentWatch.h).
+add_test(NAME exit_with_parent_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/exit_with_parent_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(exit_with_parent_smoke PROPERTIES TIMEOUT 90)
+
 # The quick still: the raster renderers into an image of exactly W x H, path
 # parameters refused, the viewport left as it was
 # (docs/rendering/still-render.md#quick-mode). A renderer, not ray tracing.
