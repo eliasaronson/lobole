@@ -1159,6 +1159,10 @@ TEST_CASE("every verdict RPC attaches a receipt", "[convention][receipt]") {
       // never a pass" — in its own words; the receipt makes it the common
       // ones.
       {"check_fits", "src/remote/RemoteInspection.cpp", true},
+      // A requirement that is stale, unresolved or unchecked is an
+      // unverifiable claim, never a pass (docs/requirements/README.md).
+      {"check_requirements", "src/remote/RemoteRequirements.cpp", true},
+      {"verify_assertions", "src/remote/RemoteRequirements.cpp", true},
   };
 
   std::set<std::string> attachesReceipt;
