@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Stage 3: what turns about the tilt axis -- the tilt wheel on its shaft,
-the cradle (the camera plate), the camera and its screw. Opens worms.dsgn,
-saves tilt.dsgn.
+the cradle (the camera plate) and the camera. Opens worms.dsgn, saves
+tilt.dsgn. The camera screw is bought, an ASME B18.3 standard part, and
+the assembly places it (build_assembly.py).
 
     python3 generators/pantilt/build_tilt.py --port N
 
@@ -19,34 +20,22 @@ import spec
 
 
 def declare(part, S):
+    # The camera's own sizes are spec.py's (CAMERA): how far it swings
+    # under the tilt axis sizes the pan journal, in the first stage.
     for name, expr, comment in [
-        # The load, drawn: a full-frame mirrorless body and a zoom.
-        ("cam_w", "130", "mm, body width (along the tilt axis)"),
-        ("cam_h", "95", "mm, body height"),
-        ("cam_d", "75", "mm, body depth"),
-        ("lens_d", "75", "mm, lens barrel"),
-        ("cam_rho", "1.04", "g/cm3: plastic_black, what the camera is drawn in"),
-        ("lens_l", "(load_kg * 1000000 / cam_rho - cam_w * cam_h * cam_d) / "
-                   "(pi * lens_d^2 / 4)",
-         "mm, long enough that body and lens weigh load_kg"),
-        ("cam_m_body", "cam_w * cam_h * cam_d * cam_rho / 1000000", "kg"),
-        ("cam_m_lens", "load_kg - cam_m_body", "kg"),
-        ("cam_cx", "cam_m_lens * (cam_d / 2 + lens_l / 2) / load_kg",
-         "mm, the camera's CoM in front of its tripod socket"),
-        ("cam_cz", "cam_h / 2", "mm, the CoM above the socket (lens on axis)"),
-        ("seat_x", "com_fwd - cam_cx", "mm, the socket in front of the axis"),
-        ("seat_z", "com_up - cam_cz", "mm, the cradle's top above the axis"),
         ("cam_socket", "0.3 in", "mm, the camera's 1/4-20 socket depth"),
         ("cam_screw_eng", "0.2 in", "mm, the screw's engagement in it"),
         ("cam_screw_clear", "0.266 in", "mm, ASME close clearance for 1/4"),
         # The cradle and the arms it turns between.
-        ("plate_t", "2 * print_wall", "mm, the cradle's plate"),
         ("cheek_t", "2 * print_wall", "mm"),
         ("boss_r", "main_brg_d / 2 + 2 * print_wall", "mm, round the shaft"),
         ("slot_l", "com_fwd / 2", "mm, the camera slides +-com_fwd/4 to "
                                   "balance"),
         ("main_collar_d", "main_brg_d + 0.25 * (main_brg_D - main_brg_d)",
          "mm, bears on the inner ring only"),
+        ("relief_d", "(main_brg_d + main_brg_D) / 2",
+         "mm, in the arms under the tilt bearings' inner rings, so they "
+         "turn free of the shoulders"),
         ("arm_t", "main_brg_B + print_wall", "mm, a bearing and a shoulder"),
         ("arm_in", "cam_w / 2 + run_gap", "mm, the arms clear the camera"),
         ("arm_out", "arm_in + arm_t", "mm, the arms' outer faces"),
@@ -159,34 +148,6 @@ def camera(app, S):
     return part, mp
 
 
-def camera_screw(app, S):
-    """The 1/4-20 camera screw: bought, so a plain part with a cosmetic
-    thread. Its head's top face is its frame, shank up +Z."""
-    part = app.part("camera_screw")
-    part.activate()
-    major = 6.35  # 1/4 in, the designation's own diameter
-    head_d, head_h = 2.5 * major, major
-    # The head hangs under Top; the shank stands on its top face.
-    head = part.cylinder("Top", d=head_d, height=head_h, reversed=True,
-                         name="Head")
-    shank_l = S["plate_t"] + S["cam_screw_eng"]
-    shank = part.cylinder(head.face(normal=(0, 0, 1)), d=major,
-                          height=shank_l, name="Shank")
-    face = shank.faces(kind="cylinder")[0]
-    bodies = part.bodies()
-    part.app.add_feature(feature={"type": "Boolean", "name": "Screw",
-                                  "target_id": bodies[0].created_by,
-                                  "tool_id": bodies[1].created_by,
-                                  "op": "union"})
-    face = [f for f in part.body().faces(kind="cylinder")
-            if abs(f.radius - major / 2) < 1e-3][0]
-    part.thread(face, "1/4-20 UNC-2A", allow_engagement=True)
-    part.material("steel")
-    common.frame(part, "head", (0, 0, 0), (0, 0, 1), (1, 0, 0))
-    part.check()
-    return part
-
-
 def main():
     a = common.args()
     app = common.connect(a.port)
@@ -199,8 +160,6 @@ def main():
     clock("cradle")
     camera(app, S)
     clock("camera")
-    camera_screw(app, S)
-    clock("camera screw")
     common.check_regen(app, "tilt")
     common.save(app, "tilt.dsgn")
 

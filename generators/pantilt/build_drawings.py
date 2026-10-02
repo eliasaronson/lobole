@@ -8,8 +8,9 @@ Three sheets:
 
 - **base_plate**: what a machinist makes the 6082-T6 plate from -- its
   top, the section A-A through the bearing seat and the tripod thread,
-  DETAIL C of the seat's shoulder at 5:1, and its underside; the Ø32 K7
-  seat with its limits, the 3/8-16 UNC-2B thread and the four M4 tapped
+  DETAIL C of the seat's shoulder at 5:1, and its underside; the pan
+  bearing's K7 seat with its limits, the 3/8-16 UNC-2B thread and the
+  four M4 tapped
   holes as callouts the model writes, the chamfers, datum features A and B
   and the feature control frames that name them (the seat perpendicular to
   A, its shoulder's runout to B, the M4s' position to A and B), the
@@ -26,17 +27,16 @@ Geometry is picked by what it IS (a circle of the seat's diameter, the
 plate's bottom face in the section), from the project variables, not by
 toponame strings that a remodel would rename.
 
-Before the sheets, `as_ordered` gives the model the two things the sheets
-order by: the plate's grade (6082-T6) and the 1/4-20 camera screw as the
-ASME B18.3 part it is bought as. Both belong upstream (build_base.py,
-build_tilt.py and build_assembly.py); they are made here so the drawing
-stage can be re-run on its own from cam.dsgn.
+The stage only draws: what the sheets order by -- the plate's grade
+(build_base.py) and the camera screw as the ASME B18.3 part it is bought as
+(build_assembly.py) -- is the model's.
 """
 import datetime
 import json
 
 import common
 from common import OUT
+import spec
 
 DRAW = OUT / "drawings"
 DRAW.mkdir(parents=True, exist_ok=True)
@@ -108,7 +108,7 @@ def base_plate_sheet(app, V):
     beside it, the notes and the title block in the corner."""
     s = 2.0
     t, R = V["base_t"], V["base_r"]
-    seat_d, seat_b = V["main_brg_D"], V["main_brg_B"]
+    seat_d, seat_b = V["pan_brg_D"], V["pan_brg_B"]
     # MATERIAL is left blank: the sheet writes the part's grade.
     app.call("create_drawing", name="base_plate drawing", sheet={
         "size": "a3", "landscape": True,
@@ -117,7 +117,9 @@ def base_plate_sheet(app, V):
             "author": AUTHOR, "date": DATE,
             "notes": "General tolerances ISO 2768-mK"}})
     tx, ty = 150.0, 200.0     # the top view's centre (the pan axis)
-    px, py = tx, 50.0         # the section's: the axis at the underside
+    # The section's centre (the axis at the underside): under the top view
+    # by the plate's height and the room for the seat's Ø and its frame.
+    px, py = tx, ty - s * (R + t) - 27.0
     bx, by = 335.0, 200.0     # the underside's, at 1:1: it shows one hole
     top = app.call("add_drawing_view", source="base_plate",
                    orientation="top", scale=s, position=[tx, ty],
@@ -137,7 +139,8 @@ def base_plate_sheet(app, V):
     # Top: the disc, the relief seen through the seat, the M4 pattern.
     rim = one(circles(gt, 2 * R, s), "plate rim in the top view")
     dim(app, top, "diameter", [ref(rim)], (-14, -5))
-    relief = one(circles(gt, V["relief_d"], s), "relief in the top view")
+    relief = one(circles(gt, V["pan_relief_d"], s),
+                 "relief in the top view")
     dim(app, top, "diameter", [ref(relief)], (70, -48))
     m4 = circles(gt, V["m4_tap_drill"], s)
     m4 = sorted(m4, key=lambda e: (-e["center"][1], e["center"][0]))
@@ -223,16 +226,18 @@ def base_plate_sheet(app, V):
         diameter=True, datums=["A", "B"])
 
     # DETAIL C: the seat's shoulder and the relief under it, at 5:1 -- the
-    # 1.2 step between the seat's floor and the relief's that the section's
-    # 9 and 10.2 only say by subtraction.
+    # step between the seat's floor and the relief's, which the section's
+    # two depths only say by subtraction.
     detail_sheet(app, V, sec)
 
     # What the frames and dimensions cannot say, ruled, on the title block.
+    # The stock is the CAM job's blank (cam.py, its report).
+    plate = json.loads((OUT / "cam_report.json").read_text())["blank"]["plate"]
     notes = "\n".join([
         "NOTES",
-        "1\tSTOCK: 30 THICK PLATE, EN 485-2",
+        f"1\tSTOCK: {plate:g} THICK PLATE, EN 485-2",
         "2\tM4 HOLES: TAP BY HAND",
-        "3\tØ32 K7 SEAT: GAUGE BEFORE THE SETUP IS BROKEN",
+        f"3\tØ{seat_d:g} K7 SEAT: GAUGE BEFORE THE SETUP IS BROKEN",
         "4\tBREAK ALL OTHER EDGES 0.2 MAX; NO BURRS IN THE SEAT",
     ])
     app.call("add_drawing_note", text=notes, position=[410, 58])
@@ -256,8 +261,8 @@ def detail_sheet(app, V, sec):
     """DETAIL C of the section: the seat's shoulder at 5:1, its width and
     the step down to the relief, and the shoulder's runout to B (what the
     bearing's outer ring is squared by)."""
-    t, seat_b = V["base_t"], V["main_brg_B"]
-    seat_r, relief_r = V["main_brg_D"] / 2, V["relief_d"] / 2
+    t, seat_b = V["base_t"], V["pan_brg_B"]
+    seat_r, relief_r = V["pan_brg_D"] / 2, V["pan_relief_d"] / 2
     floor_z, relief_z = t - seat_b, t - V["relief_depth"]
     s, R = 5.0, 4.5
     cx, cz = 0.5 * (seat_r + relief_r), 0.5 * (floor_z + relief_z)
@@ -420,12 +425,24 @@ def print_sheet(app, V):
              position=[400, top - row_h * len(rows)])
     top -= row_h * len(rows) + 12
     # The allowances, asked of the app's table for each printed fit.
-    fits = [
-        ("6002 outer ring seat", "hole", V["main_brg_D"]),
-        ("6002 relief", "hole", V["relief_d"]),
-        ("6002 journal (yoke, tilt shaft)", "shaft", V["main_brg_d"]),
-        ("609 outer ring seat (blocks)", "hole", V["worm_brg_D"]),
-        ("609 journal (worm)", "shaft", V["worm_brg_d"]),
+    pan, tilt, worm = (spec.designation(app, V[k]) for k in (
+        "pan_brg_d", "main_brg_d", "worm_brg_d"))
+    if pan == tilt:  # PANTILT_PAN_BEARING=tilt: one pair size
+        fits = [
+            (f"{pan} outer ring seat", "hole", V["main_brg_D"]),
+            (f"{pan} relief", "hole", V["relief_d"]),
+            (f"{pan} journal (yoke, tilt shaft)", "shaft", V["main_brg_d"])]
+    else:
+        fits = [
+            (f"{pan} outer ring seat (pan wheel)", "hole", V["pan_brg_D"]),
+            (f"{pan} relief (pan wheel)", "hole", V["pan_relief_d"]),
+            (f"{pan} journal (yoke)", "shaft", V["pan_brg_d"]),
+            (f"{tilt} outer ring seat (arms)", "hole", V["main_brg_D"]),
+            (f"{tilt} relief (arms)", "hole", V["relief_d"]),
+            (f"{tilt} journal (tilt shaft)", "shaft", V["main_brg_d"])]
+    fits += [
+        (f"{worm} outer ring seat (blocks)", "hole", V["worm_brg_D"]),
+        (f"{worm} journal (worm)", "shaft", V["worm_brg_d"]),
         ("M4 counterbore", "hole", V["m4_cb_d"]),
     ]
     rows = ["PRINTED-FIT ALLOWANCES (FDM, PETG)",
@@ -440,55 +457,6 @@ def print_sheet(app, V):
     return export(app, "print")
 
 
-def camera_screw_length(V):
-    """The longest ASME B18.3 length (1/8 in. steps to 1 in.) that does not
-    reach past the camera's socket: the plain part's shank was the cradle's
-    plate plus the engagement."""
-    shank_in = (V["plate_t"] + V["cam_screw_eng"]) / 25.4
-    eighths = int(shank_in * 8 + 1e-9)
-    return eighths / 8 * 25.4
-
-
-def as_ordered(app, V):
-    """The plate's grade, and the camera screw as the bought part it is."""
-    plate = app.part("base_plate", create=False)
-    plate.material("aluminum_6082_t6")
-    parts = app.call("list_parts")["parts"]
-    head = next(p["id"] for p in parts if p["name"] == "pantilt")
-    app.call("set_active_part", part=head)
-    occs = app.call("list_occurrences")["occurrences"]
-    names = {p["id"]: p["name"] for p in parts}
-    old = next((o for o in occs if names.get(o["part_id"]) == "camera_screw"),
-               None)
-    if old is None:
-        return  # already the standard part
-    cradle = next(o for o in occs if names.get(o["part_id"]) == "cradle")
-    # The plain part was modelled to the fastener convention: the head's
-    # bearing face on z = 0, the shank up +z. So the standard part stands
-    # exactly where it stood.
-    tf = old["transform"]
-    screw = app.call("add_fastener", standard="asme_b18_3", size="1/4-20",
-                     length=camera_screw_length(V), position=tf["position"],
-                     orientation=tf["orientation"])
-    for m in app.call("list_mates")["mates"]:
-        if m["name"] == "camera screw":
-            app.call("remove_mate", id=m["id"])
-    app.call("remove_occurrence", occurrence=old["id"])
-    app.call("rename_occurrence", occurrence=screw["occurrence"],
-             name="camera screw")
-    # Fastened to the cradle where it stands, so it tilts with it. `pose`
-    # reads the joint off where the two already are: nothing moves.
-    mate = app.call("add_mate", type="fastened", name="camera screw",
-                    a={"occurrence": cradle["id"], "frame": "screw"},
-                    b={"occurrence": screw["occurrence"], "origin": True},
-                    derive="pose")
-    status = next(m for m in app.call("list_mates")["mates"]
-                  if m["id"] == mate["id"])
-    if status["status"] != "satisfied":
-        raise SystemExit(f"drawings: the camera screw's mate: {status}")
-    print(f"camera screw: {screw['part']}")
-
-
 def main():
     a = common.args()
     app = common.connect(a.port)
@@ -497,10 +465,8 @@ def main():
     plate = app.part("base_plate", create=False)
     plate.activate()
     V = variables(app)
-    as_ordered(app, V)
-    plate.activate()
     # What the drawing measures to, derived the way build_base.py made it.
-    V["relief_depth"] = V["main_brg_B"] + V["run_gap"]
+    V["relief_depth"] = V["pan_brg_B"] + V["run_gap"]
     V["tripod_drill"] = 0.3125 * 25.4  # 5/16 tap drill, the Hole's diameter
     V["tripod_depth"] = V["tripod_len"] + 2 * V["tripod_pitch"]
     V["m4_tap_drill"] = 3.3
@@ -515,6 +481,10 @@ def main():
     (OUT / "drawings_report.json").write_text(json.dumps(
         {k: {"ok": v["ok"], "issues": v["issues"]} for k, v in report.items()},
         indent=1))
+    dirty = [k for k, v in report.items() if not v["ok"]]
+    if dirty:
+        raise SystemExit(f"drawings: check_drawing found issues on "
+                         f"{', '.join(dirty)} (drawings_report.json)")
     print("done")
 
 

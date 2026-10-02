@@ -52,8 +52,9 @@ UNMEASURED = [
     "is not measured",
     "the vise is taken as a 100 mm vise with 32 mm jaws, the fixed jaw "
     "trammed along machine X; jaw height and width are not measured",
-    "the parallels under the blank in Top must hold it 22 mm proud of the "
-    "jaws (an 8 mm grip); their height is not measured",
+    "the parallels under the blank in Top must hold it {proud:g} mm proud "
+    "of the jaws (gripped by its lower {grip:g} mm); their height is not "
+    "measured",
     "the ER20 nuts are taken as 35 mm across and each tool's stickout as "
     "set in TOOLS; measure both, since the holder check reads them",
     "what a bore comes out at on this machine (backlash, steps/mm, frame "
@@ -342,14 +343,17 @@ def main():
     jaw_top = lo[2] - B["under"] + GRIP_BLANK
     jaws(app, J, top, B["side"] / 2, jaw_top, "blank")
     job.op(top, "Face", type="face", tool=1, stepdown=FACE_STEP)
-    # The waste round the disc, down to just above the jaws: cleared, not
-    # profiled, so no frame is left to saw off or to fall into the cutter.
+    # The waste round the disc, down to just above the jaws -- or as deep as
+    # the cutter's flutes reach from the blank's top, a millimetre short, if
+    # that is less (the Underside clears the rest): cleared, not profiled,
+    # so no frame is left to saw off or to fall into the cutter.
+    reach = next(t["flute_length"] for t in TOOLS if t["number"] == 1) - 1.0
+    clear_z = max(jaw_top + JAW_CLEAR, hi[2] + B["top"] - reach)
     job.op(top, "Clear round", type="adaptive", tool=1, target=rim,
-           bottom_z=jaw_top + JAW_CLEAR, stepover=ADAPTIVE_STEP,
-           stepdown=CLEAR_STEP)
-    # The 6002's seat (K7): bored with the 10 mm leaving 0.2 mm, finished
-    # with the fresh 6 mm in one full-depth pass, then a spring pass -- the
-    # same lap again, to take what the cutter's deflection left.
+           bottom_z=clear_z, stepover=ADAPTIVE_STEP, stepdown=CLEAR_STEP)
+    # The pan bearing's seat (K7): bored with the 10 mm leaving 0.2 mm,
+    # finished with the fresh 6 mm in one full-depth pass, then a spring
+    # pass -- the same lap again, to take what the cutter's deflection left.
     job.op(top, "Bearing seat", type="drill", tool=1, target=seat,
            finish_tool=6, finish_stock=0.2)
     job.op(top, "Bearing seat spring pass", type="profile", tool=6,
@@ -370,7 +374,7 @@ def main():
     jaws(app, J, under, B["across"] / 2, -(hi[2] - GRIP_DISC), "disc")
     job.op(under, "Face", type="face", tool=1, stepdown=FACE_STEP)
     job.op(under, "Clear round", type="adaptive", tool=1,
-           target=rim, bottom_z=-(jaw_top + JAW_CLEAR + OVERLAP),
+           target=rim, bottom_z=-(clear_z + OVERLAP),
            stepover=ADAPTIVE_STEP, stepdown=CLEAR_STEP)
     job.op(under, "Tripod tap bore", type="drill", tool=6,
            target=tripod)
@@ -388,7 +392,8 @@ def main():
     clock("toolpaths, verify, post")
     report["blank"] = B
     report["tolerances"] = tol
-    report["unmeasured"] = UNMEASURED
+    report["unmeasured"] = [u.format(proud=B["plate"] - GRIP_BLANK,
+                                     grip=GRIP_BLANK) for u in UNMEASURED]
     if a.shots:
         report["shots"] = shots(app, J, job.setups)
         clock("playback shots")
@@ -406,6 +411,10 @@ def main():
             problems.append(f"{sname}: not safe")
         if not v.get("complete", False):
             problems.append(f"{sname}: not complete")
+        # A toolpath warning is a feeds finding (a cutter cutting with its
+        # shank): the job is not one to run as it stands.
+        for w in s.get("toolpath", {}).get("warnings") or []:
+            problems.append(f"{sname}: {w}")
         if v.get("cuts_nothing"):
             problems.append(f"{sname}: its program cuts nothing")
         if v.get("failed_ops"):

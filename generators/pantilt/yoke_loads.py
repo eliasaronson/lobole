@@ -102,6 +102,35 @@ def case(S, G, name, tilt_deg, accel):
             "lens": lens_point(S, G, t)}
 
 
+def journal(S, G, c):
+    """The pan journal's own bend under case `c`, which no study sees: each
+    fixes the journal's face and the collar's, so the yoke's statics are of
+    the yoke ON a rigid journal. A beam estimate: the moment of the loads on
+    the yoke about the collar's centre (its pan component is the worm's to
+    hold, not the journal's to bend), carried by the journal from the
+    collar to the upper bearing's centre, then dying out to the lower one
+    (two bearings, radial at both, `wheel_face` apart); the yoke turns with
+    the journal's end, the lens with it."""
+    zt = S["tilt_z"]
+    top = S["base_t"] + S["wheel_face"]
+    O = (0.0, 0.0, top)
+    at = {"bore_pos": (0.0, G["y_pos"], zt), "bore_neg": (0.0, G["y_neg"], zt),
+          "shoulder_pos": (0.0, G["y_pos"], zt), "ledge": G["worm"]}
+    m = _add(*[_cross(_add(at[k], _scale(-1, O)), f)
+               for k, f in c["loads"].items()])
+    bend = (m[0], m[1], 0.0)
+    mag = math.sqrt(bend[0] ** 2 + bend[1] ** 2)
+    d = S["pan_brg_d"]
+    ei = S["petg_e_mpa"] * math.pi * d ** 4 / 64.0
+    theta = mag * (S["pan_brg_B"] / 2 + S["wheel_face"] / 3) / ei
+    axis = _scale(1.0 / mag, bend) if mag > 0 else (0.0, 0.0, 0.0)
+    moved = _cross(_scale(theta, axis), _add(c["lens"], _scale(-1, O)))
+    return {"moment_nmm": mag,
+            "stress_mpa": 32.0 * mag / (math.pi * d ** 3),
+            "tilt_arcmin": math.degrees(theta) * 60.0,
+            "lens_mm": math.sqrt(sum(x * x for x in moved))}
+
+
 def lens_point(S, G, t):
     lx, lz = _rot_y(G["lens"], t)
     return (lx, 0.0, S["tilt_z"] + lz)

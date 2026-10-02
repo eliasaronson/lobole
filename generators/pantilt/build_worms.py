@@ -30,8 +30,8 @@ def declare(part, S):
          "from the head's side, so the screw is short"),
         ("block_t", "worm_brg_B + print_wall",
          "mm, along the worm: the bearing and a shoulder"),
-        ("block_h", "worm_brg_D + 2 * print_wall",
-         "mm, the bearing and a wall either side"),
+        # block_h is spec.py's: the yoke's base stands on it, and so does
+        # the pan journal's lever.
         ("block_flange", "m4_cb_d + 2 * print_wall",
          "mm, each side, for a counterbored screw"),
         ("block_w", "block_h + 2 * block_flange", "mm, across the worm"),

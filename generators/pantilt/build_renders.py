@@ -63,18 +63,23 @@ def explode_steps(occs):
     put("tilt block A", add(T, (-42, 0, 0)))
     put("tilt block B", add(T, (42, 0, 0)))
     put("tilt knob", add(T, (-66, 0, 0)))
+    # The bearings, told apart by where they stand (their sizes are the
+    # spec's): on the pan axis, the plate's top between the pair; on the
+    # tilt axis; or on a worm's.
+    plate_top = named["base plate"]["bbox_max"][2]
+    pan_worm_x = centre(named["pan worm"])[0]
     for o in occs:
         c = centre(o)
-        if o["part"] == "ISO 15 6002":
-            if abs(c[1]) < 1.0:  # the pan pair: under and over the wheel
-                off[o["id"]] = (0, 0, -95) if c[2] < 25.0 else (0, 0, -30)
-            else:                # the tilt pair: out of each arm
-                off[o["id"]] = (0, 60 if c[1] > 0 else -60, 0)
-        elif o["part"] == "ISO 15 609":
-            if c[2] < 100.0:     # the pan worm's, along Y
-                off[o["id"]] = add(G, (0, 22 if c[1] > 0 else -22, 0))
-            else:                # the tilt worm's, along X
-                off[o["id"]] = add(T, (22 if c[0] > 0 else -22, 0, 0))
+        if not o["part"].startswith("ISO 15 "):
+            continue
+        if abs(c[0]) < 1.0 and abs(c[1]) < 1.0:  # the pan pair
+            off[o["id"]] = (0, 0, -95) if c[2] < plate_top else (0, 0, -30)
+        elif abs(c[0]) < 1.0:    # the tilt pair: out of each arm
+            off[o["id"]] = (0, 60 if c[1] > 0 else -60, 0)
+        elif abs(c[0] - pan_worm_x) < 1.0:  # the pan worm's, along Y
+            off[o["id"]] = add(G, (0, 22 if c[1] > 0 else -22, 0))
+        else:                    # the tilt worm's, along X
+            off[o["id"]] = add(T, (22 if c[0] > 0 else -22, 0, 0))
     # Fasteners ride with what they are attached to, then leave their hole:
     # a screw away from its nut, the nut and washer the other way.
     fasteners = [o for o in occs if o["part"].startswith("ISO 4")

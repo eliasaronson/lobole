@@ -11,8 +11,8 @@ the +Y arm that stands the tilt worm's blocks under the tilt wheel.
 
 How tall the arms are is the camera's: the tilt axis sits as far above the
 base as the camera and cradle reach below it anywhere in +-90 degrees of
-tilt, plus a clearance. That reach is computed here from the camera's and
-cradle's own variables and declared as `cam_swing`.
+tilt, plus a clearance. That reach is `cam_swing`, computed by spec.swing
+from the camera's and cradle's own variables in the first stage.
 """
 import math
 
@@ -21,43 +21,15 @@ from common import Plane, Param
 import spec
 
 
-def swing(S):
-    """The deepest the camera or the cradle reaches below the tilt axis,
-    anywhere in +-90 degrees: max over the tilt of x sin(t) - z cos(t), over
-    the corners of their outlines in the plane the tilt turns them in (the
-    lens is a cylinder along X, so its outline there is a rectangle)."""
-    sx, sz, d = S["seat_x"], S["seat_z"], S["cam_d"]
-    pts = []
-    for x in (sx - d / 2, sx + d / 2):
-        for z in (sz - S["plate_t"], sz + S["cam_h"]):
-            pts.append((x, z))
-    lx0 = sx + d / 2
-    for x in (lx0, lx0 + S["lens_l"]):
-        for z in (sz + S["cam_cz"] - S["lens_d"] / 2,
-                  sz + S["cam_cz"] + S["lens_d"] / 2):
-            pts.append((x, z))
-    deepest = 0.0
-    for i in range(-900, 901):
-        t = math.radians(i / 10.0)
-        for x, z in pts:
-            deepest = max(deepest, x * math.sin(t) - z * math.cos(t))
-    return deepest
-
-
 def declare(part, S):
     S.update(spec.values(part))
-    part.param("cam_swing", round(swing(S), 3),
-               comment="mm, the deepest the camera or cradle reaches below "
-                       "the tilt axis over +-90 deg (build_yoke.swing)",
-               scope="project")
+    # cam_swing, cam_clear and yoke_base_t are spec.py's: the pan journal
+    # is sized by how high they stand the load over it.
     for name, expr, comment in [
-        ("cam_clear", "4 * run_gap", "mm, the camera over the yoke at full "
-                                     "tilt"),
         ("z_mesh_pan", "base_t + wheel_face / 2",
          "mm, the pan wheel's mid-plane: the pan worm's axis"),
         ("yoke_zb", "z_mesh_pan + block_h / 2",
          "mm, the yoke's underside: the pan blocks hang from it"),
-        ("yoke_base_t", "4 * print_wall", "mm"),
         ("yoke_zt", "yoke_zb + yoke_base_t", "mm, the yoke's top"),
         ("tilt_z", "yoke_zt + cam_swing + cam_clear", "mm, the tilt axis"),
         ("arm_w", "main_brg_D + 4 * print_wall", "mm, fore and aft"),
@@ -78,6 +50,11 @@ def declare(part, S):
     ]:
         part.param(name, expr, comment=comment, scope="project")
     S.update(spec.values(part))
+    lever = S["tilt_z"] + S["lever"] - (S["base_t"] + S["wheel_face"])
+    if abs(lever - S["pan_lever"]) > 1e-6:
+        raise SystemExit(f"yoke: the load stands {lever:.3f} mm over the pan "
+                         f"collar, and spec.py sized the journal for "
+                         f"{S['pan_lever']:.3f}: the two layouts disagree")
 
 
 def arm_side(S, design, sign):
@@ -268,16 +245,16 @@ def yoke(app, S, name="yoke", design="solid"):
     # journal down through both bearings.
     top = S["base_t"] + S["wheel_face"]
     sk = part.sketch(Plane.xy(zb, flip=True), name="Pan collar")
-    sk.circle((0, 0), d=Param(S["main_collar_d"], "main_collar_d"))
+    sk.circle((0, 0), d=Param(S["pan_collar_d"], "pan_collar_d"))
     part.extrude(sk.add(), zb - top, mode="add", name="Pan collar")
     # Through the wheel's bearing AND the plate's under it: a journal only
     # the wheel's long (as phase 5 had it) hangs the whole yoke, and its
     # moment, on one bearing's inner ring.
     sk = part.sketch(Plane.xy(top, flip=True), name="Pan journal")
-    sk.circle((0, 0), d=model("shaft", S["main_brg_d"]))
-    part.extrude(sk.add(), Param(S["wheel_face"] + S["main_brg_B"]
+    sk.circle((0, 0), d=model("shaft", S["pan_brg_d"]))
+    part.extrude(sk.add(), Param(S["wheel_face"] + S["pan_brg_B"]
                                  - S["nozzle"],
-                                 "wheel_face + main_brg_B - nozzle"),
+                                 "wheel_face + pan_brg_B - nozzle"),
                  mode="add", name="Pan journal")
     if design != "solid":
         # The hub: the base deepened down to the wheel's top (a running gap

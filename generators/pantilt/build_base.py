@@ -26,11 +26,9 @@ def base_plate(app, S):
          "mm, inside the pan worm's swing"),
         ("tripod_len", "0.375 in", "mm, 3/8-16 engaged one diameter deep"),
         ("tripod_pitch", "0.0625 in", "mm, 16 TPI"),
-        ("base_t", "tripod_len + 2 * tripod_pitch + main_brg_B / 3 + "
-                   "main_brg_B", "mm: tap drill, a web, the bearing pocket"),
-        ("relief_d", "(main_brg_d + main_brg_D) / 2",
-         "mm, under the inner ring so it turns free of the shoulder"),
-        ("screw_pcd", "base_r + main_brg_D / 2",
+        ("base_t", "tripod_len + 2 * tripod_pitch + pan_brg_B / 3 + "
+                   "pan_brg_B", "mm: tap drill, a web, the bearing pocket"),
+        ("screw_pcd", "base_r + pan_brg_D / 2",
          "mm, the wheel's screws, midway between pocket and rim"),
         ("edge_break", "0.5", "mm, the chamfer on every machined rim: "
          "modelled, so the CAM's chamfers are the part's"),
@@ -41,13 +39,13 @@ def base_plate(app, S):
                          name="Plate")
     t = S["base_t"]
     sk = part.sketch(Plane.xy(t), name="Bearing pocket")
-    sk.circle((0, 0), d=Param(S["main_brg_D"], "main_brg_D"))
-    part.cut(sk.add(), Param(S["main_brg_B"], "main_brg_B"), reversed=True,
+    sk.circle((0, 0), d=Param(S["pan_brg_D"], "pan_brg_D"))
+    part.cut(sk.add(), Param(S["pan_brg_B"], "pan_brg_B"), reversed=True,
              name="Bearing pocket")
     sk = part.sketch(Plane.xy(t), name="Relief")
-    sk.circle((0, 0), d=P["relief_d"])
-    part.cut(sk.add(), Param(S["main_brg_B"] + S["run_gap"],
-                             "main_brg_B + run_gap"),
+    sk.circle((0, 0), d=Param(S["pan_relief_d"], "pan_relief_d"))
+    part.cut(sk.add(), Param(S["pan_brg_B"] + S["run_gap"],
+                             "pan_brg_B + run_gap"),
              reversed=True, name="Relief")
     # The tripod thread, tapped up from the underside.
     sk = part.sketch(Plane.xy(0, flip=True), name="Tripod")
@@ -78,10 +76,11 @@ def base_plate(app, S):
                            where=lambda e: abs(e.midpoint[2] - z) < 1e-3)
     tripod_r = bore.radius
     edges = (rims(S["base_r"], t) + rims(S["base_r"], 0.0) +
-             rims(S["main_brg_D"] / 2, t) + rims(tripod_r, 0.0))
+             rims(S["pan_brg_D"] / 2, t) + rims(tripod_r, 0.0))
     assert len(edges) >= 4, edges
     part.chamfer(edges, P["edge_break"], name="Edge breaks")
-    part.material("aluminum")
+    # The grade it is cut from (cam.py's blank, the drawing's title block).
+    part.material("aluminum_6082_t6")
     common.frame(part, "seat", (0, 0, t), (0, 0, 1), (1, 0, 0))
     part.check()
     return part
@@ -95,11 +94,11 @@ def pan_wheel(app, S):
                           name="Blank")
     rim = blank.faces(kind="cylinder")[0]
     sk = part.sketch(Plane.xy(face), name="Bearing counterbore")
-    sk.circle((0, 0), d=model("hole", S["main_brg_D"]))
-    part.cut(sk.add(), Param(S["main_brg_B"], "main_brg_B"), reversed=True,
+    sk.circle((0, 0), d=model("hole", S["pan_brg_D"]))
+    part.cut(sk.add(), Param(S["pan_brg_B"], "pan_brg_B"), reversed=True,
              name="Bearing counterbore")
     sk = part.sketch(Plane.xy(face), name="Relief")
-    sk.circle((0, 0), d=model("hole", S["relief_d"]))
+    sk.circle((0, 0), d=model("hole", S["pan_relief_d"]))
     part.cut(sk.add(), 1.0, reversed=True, end_mode="through_all",
              name="Relief")
     sk = part.sketch(Plane.xy(face), name="Screws")

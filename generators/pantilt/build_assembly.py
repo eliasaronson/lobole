@@ -51,13 +51,12 @@ def place(app, asm, S):
         ("pan_knob", "knob", "pan knob"), ("tilt_knob", "knob", "tilt knob"),
         ("tilt_wheel", "tilt_wheel", "tilt wheel"),
         ("cradle", "cradle", "cradle"), ("camera", "camera", "camera"),
-        ("screw", "camera_screw", "camera screw"),
     ]:
         o[key] = asm.place(part, name=name)
     return o
 
 
-def mate(app, asm, o):
+def mate(app, asm, o, S):
     m = {}
     m["wheel"] = asm.fasten((o["base"], "seat"), (o["wheel"], "seat"),
                             name="pan wheel on plate")
@@ -79,26 +78,49 @@ def mate(app, asm, o):
                name="cradle on shaft")
     asm.fasten((o["cradle"], "seat"), (o["camera"], "socket"),
                name="camera on cradle")
-    asm.fasten((o["cradle"], "screw"), (o["screw"], "head"),
-               name="camera screw")
+    o["screw"] = camera_screw(app, asm, o["cradle"], S)
     r = asm.solve()
     if r.get("errored_mates"):
         raise SystemExit(f"mates did not solve: {r['errored_mates']}")
     return m
 
 
+def camera_screw_length(S):
+    """The longest ASME B18.3 length (1/8 in. steps to 1 in.) that does not
+    reach past the camera's socket: the cradle's plate plus the
+    engagement."""
+    shank_in = (S["plate_t"] + S["cam_screw_eng"]) / 25.4
+    return int(shank_in * 8 + 1e-9) / 8 * 25.4
+
+
+def camera_screw(app, asm, cradle, S):
+    """The 1/4-20 camera screw, bought: an ASME B18.3 socket head cap screw
+    from the app's table, fastened to the cradle's `screw` frame (the head's
+    bearing face, the shank up +z: the fastener's own origin)."""
+    asm.activate()
+    r = app.add_fastener(standard="asme_b18_3", size="1/4-20",
+                         length=camera_screw_length(S))
+    app.rename_occurrence(occurrence=r["occurrence"], name="camera screw")
+    app.add_mate(type="fastened", name="camera screw", flipped=False,
+                 a={"occurrence": cradle.id, "frame": "screw"},
+                 b={"occurrence": r["occurrence"], "origin": True})
+    print(f"  camera screw: {r['part']}")
+    return r["occurrence"]
+
+
 def bearings(app, asm, o, S):
     """Each bearing fitted to the housing bore it presses into."""
     main = spec.designation(app, S["main_brg_d"])
+    pan = spec.designation(app, S["pan_brg_d"])
     worm = spec.designation(app, S["worm_brg_d"])
     seats = []
     # A seat is the housing's counterbore: its radius is the bearing's
     # outside, as modelled (plus the print allowance on a printed part).
     plate = app.part("base_plate", create=False)
     seats.append(("pan lower", o["base"], plate,
-                  faces_r(plate, S["main_brg_D"] / 2), main))
+                  faces_r(plate, S["pan_brg_D"] / 2), pan))
     for key, pname, D, des, label in [
-        ("wheel", "pan_wheel", S["main_brg_D"], main, "pan upper"),
+        ("wheel", "pan_wheel", S["pan_brg_D"], pan, "pan upper"),
         ("yoke", "yoke", S["main_brg_D"], main, "tilt"),
     ]:
         part = app.part(pname, create=False)
@@ -119,6 +141,8 @@ def bearings(app, asm, o, S):
         for f in faces:
             r = app.fit_bearing(seat=dict(f.ref, occurrence=occ.id),
                                 designation=des)
+            if len(faces) > 1:  # the arms' pair: which arm
+                label = f"tilt {'+' if f.centroid[1] > 0 else '-'}Y"
             out.append({"seat": label, "designation": r["designation"],
                         "occurrence": r["occurrence"],
                         "part": part.name, "face": f.ref,
@@ -128,14 +152,48 @@ def bearings(app, asm, o, S):
 
 
 def check_seats(app, asm, placed):
+    """Both rings of every bearing, each on the seat it sits on: the one its
+    `Bearing seat` mate names, and the other read through the coaxial
+    cylinder under it (docs/parts/README.md#both-rings). Not `mate_other`:
+    the yoke and the tilt shaft turn by joints of their own, and a second
+    revolute through each bearing would close a redundant loop.
+
+    What ISO 15 cannot judge stays unverified and is listed with its reason,
+    not read as a pass: how far a shoulder may reach is a supplier's
+    abutment dimension (no supplier catalog is installed), and a ring that
+    no shoulder locates axially says so. A ring with no seat, or a check
+    that fails, stops the stage."""
     asm.activate()
     out = []
     for b in placed:
         r = app.check_seat(occurrence=b["occurrence"])
-        out.append({"seat": b["seat"], "status": r["status"],
-                    "checks": [(c["characteristic"], c["status"],
-                                c.get("reason", "")) for c in r["checks"]]})
-        print(f"  check_seat {b['seat']}: {r['status']}")
+        rings = {}
+        for seat in r["seats"]:
+            ring = seat["ring"]
+            if seat.get("error") or "part" not in seat:
+                raise SystemExit(f"check_seat {b['seat']}: no seat for the "
+                                 f"{ring} ring: {seat}")
+            size = "shaft_diameter" if ring == "inner" else "housing_diameter"
+            mine = [c for c in r["checks"]
+                    if c["characteristic"].startswith(ring + "_")
+                    or c["characteristic"] == size]
+            rings[ring] = {
+                "seat": seat["part"],
+                "found": "mate" if seat.get("mate") else seat.get("found"),
+                "diameter_mm": seat.get("diameter"),
+                "checks": {c["characteristic"]: c["status"] for c in mine},
+                "unverified": {c["characteristic"]: c.get("reason", "")
+                               for c in mine if c["status"] == "unverified"}}
+        failed = [c for c in r["checks"] if c["status"] == "fail"]
+        if failed or set(rings) != {"inner", "outer"}:
+            raise SystemExit(f"check_seat {b['seat']}: {r['status']}, rings "
+                             f"{sorted(rings)}, failed {failed}")
+        out.append({"seat": b["seat"], "designation": b["designation"],
+                    "status": r["status"], "rings": rings})
+        print(f"  check_seat {b['seat']}: {r['status']}; " + "; ".join(
+            f"{k} on {v['seat']} ({v['found']}): " + ", ".join(
+                f"{c} {st}" for c, st in v["checks"].items())
+            for k, v in sorted(rings.items(), reverse=True)))
     return out
 
 
@@ -396,7 +454,7 @@ def main():
     asm = app.assembly("pantilt")
     asm.activate()
     o = place(app, asm, S)
-    m = mate(app, asm, o)
+    m = mate(app, asm, o, S)
     clock("placed and mated")
     placed = bearings(app, asm, o, S)
     REPORT["bearings"] = placed

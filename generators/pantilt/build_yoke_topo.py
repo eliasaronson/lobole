@@ -90,7 +90,7 @@ def faces_of(part, S, model):
         "ledge": one("the ledge's top",
                      lambda f: plane_at(f, 2, S["ledge_z"], 1)),
         "journal": one("the pan journal",
-                       lambda f: cyl(f, model("shaft", S["main_brg_d"]) / 2)),
+                       lambda f: cyl(f, model("shaft", S["pan_brg_d"]) / 2)),
         "collar": one("the pan collar's face",
                       lambda f: plane_at(f, 2, S["base_t"] + S["wheel_face"],
                                          -1)),
@@ -216,13 +216,17 @@ def statics(app, part, S, F, G, cases, clock):
             "bore_neg_mm": probe["bore_neg"]["translation_mm"],
             "worm_x_mm": ledge["displacement_at_mm"][0],
             **lens,
+            # What the study cannot see: the pan journal bending under it.
+            "journal": yoke_loads.journal(S, G, c),
         }
+        j = out["journal"]
         print(f"  {part.name}, {c['name']}: max "
               f"{out['max_displacement_mm']:.3f} mm, lens "
               f"{out['lens_magnitude_mm']:.3f} mm "
               f"(pitch {out['camera_pitch_arcmin']:.2f}'), vm {vm:.2f} MPa, "
-              f"FoS {out['fos_yield']:.1f} (layers {out['fos_layers']:.1f})",
-              flush=True)
+              f"FoS {out['fos_yield']:.1f} (layers {out['fos_layers']:.1f}); "
+              f"the journal, by beam: {j['stress_mpa']:.1f} MPa, lens "
+              f"{j['lens_mm']:.2f} mm more", flush=True)
         rows.append(out)
     clock(f"statics {part.name}")
     return rows
