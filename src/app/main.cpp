@@ -2714,6 +2714,17 @@ int main(int argc, char** argv) {
   testEngineIO.ConfigLogToTTY = args.runGuiTests;
   testEngineIO.ConfigWatchdogWarning = 60.0f;
   testEngineIO.ConfigWatchdogKillTest = 300.0f;
+  // A suite run counts ImGui's clock in FRAMES, one 60th of a second each
+  // (the frame cap's own rate, so a quiet machine sees no change). The engine
+  // injects input a frame at a time, but ImGui judges it by the clock: its
+  // double-click is two presses two frames apart that land within 0.3 s, so
+  // with 150 ms frames under someone else's build every double-click in the
+  // suite was two single clicks and the editor it opens never appeared
+  // (docs/ui/testing.md#wait-on-the-condition-not-a-frame-count). Not for an
+  // interactive app the engine merely serves (remote ui_action): its clock is
+  // the user's.
+  if (args.runGuiTests)
+    testEngineIO.ConfigFixedDeltaTime = 1.0f / 60.0f;
   ImGuiTestEngine_Start(testEngine, ImGui::GetCurrentContext());
   RegisterGuiTests(testEngine, &g_App);
   if (args.runGuiTests && !args.guiTestSequence.empty()) {
