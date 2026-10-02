@@ -216,13 +216,10 @@ json AddTemplateFeature(ui::AppState& state, Document& doc, const json& fj) {
   const size_t index = ui::PlaceTemplateInstance(state, std::move(tf));
   const auto* placed =
       dynamic_cast<const TemplateFeature*>(doc.GetFeature(index));
-  json features = json::array();
+  json features = placed->ExpandedRows();
   json ids = json::array();
-  for (const auto& f : placed->Expanded()) {
-    features.push_back(
-        {{"id", f->GetId()}, {"type", f->TypeName()}, {"name", f->GetName()}});
-    ids.push_back(f->GetId());
-  }
+  for (const json& f : features)
+    ids.push_back(f.at("id"));
   return json{{"index", index},
               {"id", placed->GetId()},
               {"ids", std::move(ids)},

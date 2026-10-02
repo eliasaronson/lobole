@@ -430,6 +430,12 @@ TEST_CASE("a save, reload and regenerate gives the same geometry and names",
     CHECK(back->GetBodies()[0].elementMap.names == names.names);
     CHECK(back->GetTemplates().size() == 1);
     CHECK(Instance(*back, a).definition == t);
+    // What it is made of, whether or not it executed (the directory form
+    // opens from baked geometry and executes nothing).
+    const json rows = Instance(*back, a).ExpandedRows();
+    REQUIRE(rows.size() == 2);
+    CHECK(rows[1]["id"] == Instance(*back, a).IdOf(2));
+    CHECK(rows[1]["type"] == "Extrude");
     // Its id counter is past every id an instance owns.
     CHECK(back->AllocateId() > Instance(*back, a).IdOf(2));
     std::error_code ec;

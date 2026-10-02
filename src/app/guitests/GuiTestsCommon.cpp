@@ -1,5 +1,6 @@
 #include "app/guitests/GuiTestsCommon.h"
 
+#include "core/Primitives.h"
 #include "core/SheetMetal.h"
 #include "core/features/CornerReliefFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
@@ -11,6 +12,7 @@
 #include "ui/OpenJob.h"
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h" // SelectFeature (the fixtures)
+#include "ui/TemplateActions.h"
 #include "ui/ViewActions.h"
 
 #include <chrono>
@@ -483,7 +485,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[37] = {
+const ToolCase kToolCases[38] = {
     // The primitives stand on something: each arms a face/plane pick, and
     // the Top plane of an empty part is enough for its defaults.
     {"box", "###tb_box", Needs::Nothing, Expect::PickThenChanges},
@@ -492,6 +494,10 @@ const ToolCase kToolCases[37] = {
     {"derive", "###tb_derive", Needs::Nothing, Expect::RefusesUntilPicked},
     {"sphere", "###tb_sphere", Needs::Nothing, Expect::PickThenChanges},
     {"cylinder", "###tb_cylinder", Needs::Nothing, Expect::PickThenChanges},
+    // A template stands where a primitive does: given the Top plane, the
+    // library's template with the values it was saved with makes its block
+    // again (docs/modeling/templates.md#in-the-gui).
+    {"template", "###tb_template", Needs::Template, Expect::PickThenChanges},
     {"curve3d", "###tb_curve3d", Needs::Nothing, Expect::Changes},
     {"datum_plane", "###tb_datum_plane", Needs::Nothing, Expect::Changes},
     {"datum_axis", "###tb_datum_axis", Needs::Nothing, Expect::Changes},
@@ -762,6 +768,23 @@ void SetupFor(ImGuiTestContext* ctx, Needs needs) {
         std::make_unique<ModifyFeatureCommand>(index, before, after), *Doc());
     ctx->Yield();
     ToolbarClick(ctx, "###tb_sk_finish");
+    break;
+  }
+  case Needs::Template: {
+    // Setup, not the tool under test: a block saved as a template straight
+    // through the verb Save as template calls.
+    const primitive::Added block =
+        primitive::Add(*Doc(), *s_App->commands,
+                       primitive::SpecFromJson({{"type", "Box"},
+                                                {"on", "Top"},
+                                                {"width", 2.0},
+                                                {"depth", 2.0},
+                                                {"height", 1.0}}));
+    tmpl::SaveSpec spec;
+    spec.name = "block";
+    spec.featureIds = {block.sketchId, block.solidId};
+    ui::SaveTemplate(*s_App, spec, /*replace=*/false, nullptr);
+    IM_CHECK_SILENT(!s_App->projectTemplates.empty());
     break;
   }
   case Needs::ProfileAndPath:

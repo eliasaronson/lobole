@@ -259,13 +259,15 @@ MakeTemplateInstance(AppState& state, const std::string& name,
 size_t PlaceTemplateInstance(AppState& state,
                              std::unique_ptr<TemplateFeature> instance) {
   Document& doc = *state.document;
+  const size_t depth = state.commands->UndoDepth();
   state.commands->Execute(
       std::make_unique<AddFeatureCommand>(std::move(instance)), doc);
   const size_t index = doc.FeatureCount() - 1;
   const Feature* added = doc.GetFeature(index);
   if (!added->GetError().empty() && !added->ErrorAfterEarlierFailure()) {
     const std::string why = added->GetError();
-    state.commands->Undo(doc);
+    // Taken back out and forgotten: no redo brings a refused instance back.
+    state.commands->RollbackSince(depth, doc);
     throw std::runtime_error(why);
   }
   return index;
@@ -325,6 +327,15 @@ std::string UnlinkTemplate(AppState& state, uint64_t featureId,
   TemplateFeature* tf = ActiveInstance(state, featureId, &index, &why);
   if (tf == nullptr)
     return why;
+  // A part opened from baked geometry executed nothing, so the instance has
+  // no features to hand over yet: build the part once, for real.
+  if (tf->Expanded().empty() && tf->GetError().empty()) {
+    state.document->ClearRegenCache();
+    state.document->Regenerate();
+    tf = ActiveInstance(state, featureId, &index, &why);
+    if (tf == nullptr)
+      return why;
+  }
   std::vector<std::unique_ptr<Feature>> plain = tf->Unlinked(&why);
   if (plain.empty())
     return Quoted(tf->GetName()) + ": " + why;

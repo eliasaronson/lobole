@@ -105,8 +105,16 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
   // "type" is the FromJson dispatch key; the rest are the get_state envelope
   // (index/error state stamped AROUND the dialect), so a read-modify-write of
   // a get_state feature entry — a legitimate agent pattern — stays valid.
-  static const std::set<std::string> kAllow = {
-      "type", "index", "error", "warning", "after_earlier_failure", "report"};
+  // A template instance's row adds what get_state says about it
+  // (template_changed, expanded).
+  static const std::set<std::string> kAllow = {"type",
+                                               "index",
+                                               "error",
+                                               "warning",
+                                               "after_earlier_failure",
+                                               "report",
+                                               "template_changed",
+                                               "expanded"};
   // The round trip alone is not enough: a key whose value is EMPTY
   // serializes back to nothing, so `"external": []` on a sketch (a filter
   // that found no edges — the SO-101 gripper's) was refused as an unknown

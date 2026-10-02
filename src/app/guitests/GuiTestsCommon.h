@@ -192,7 +192,10 @@ enum class Needs {
   SheetFlanged,
   SheetUnfolded,
   // Two walls meeting at a square corner, for the corner relief.
-  SheetCornered
+  SheetCornered,
+  // A template in the project's library (a block's sketch and extrude),
+  // for the Insert template tool.
+  Template
 };
 enum class Expect {
   Changes,            // accept with defaults => the model is different
@@ -207,7 +210,7 @@ struct ToolCase {
   Needs needs;
   Expect expect;
 };
-extern const ToolCase kToolCases[37];
+extern const ToolCase kToolCases[38];
 const ToolCase* FindToolCase(const char* testName);
 
 void EnterHoleSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);

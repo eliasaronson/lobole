@@ -154,6 +154,24 @@ def main():
         expect(len(rs) == 2 and all(x["template_changed"] is False
                                     for x in rs), rs)
         expect([e["id"] for e in rs[0]["expanded"]] == a["ids"], rs[0])
+        # The seat's floor, asked by what made it: the instance stands for
+        # its features, and the cut it expanded into answers by its own id.
+        for maker in (a["id"], a["ids"][1]):
+            le = d.call("list_elements", made_by=maker, role="end_cap")
+            floors = [f for b in le["bodies"] for f in b["faces"]]
+            expect(len(floors) == 1 and floors[0]["made_by"] == a["ids"][1],
+                   le)
+
+        # A read-modify-write of the instance's get_state row: a wider seat,
+        # and one undo puts it back.
+        row = next(x for x in rows(d) if x["id"] == a["id"])
+        row["parameters"]["D"] = 24
+        r = d.call("modify_feature", feature_id=a["id"], feature=row)
+        expect(r["regen"]["ok"], r)
+        expect(close(volume(d), expected(30) - math.pi * (12 ** 2 - 11 ** 2) * 7),
+               "the wider seat did not cut")
+        d.call("undo")
+        expect(close(volume(d), expected(30)), "undo did not narrow it")
 
         # Upstream: the block 5 higher; both seats follow (the lower one's
         # diameter is an expression of h).
@@ -228,6 +246,14 @@ def main():
         expect(len(lib[0]["instances"]) == 2, lib)
         d.call("set_active_part", part="host")
         expect(close(volume(d), deeper), (volume(d), deeper))
+        # Opened from baked geometry, nothing executed: the rows still say
+        # what an instance is made of, and unlink still hands it over.
+        expect([e["id"] for e in rows(d)[0]["expanded"]] == a["ids"],
+               rows(d)[0])
+        un = d.call("unlink_template", feature_id=b["id"])
+        expect(un["features"] == b["ids"], un)
+        expect(close(volume(d), deeper), "unlink after an open moved it")
+        d.call("undo")
         expect(d.call("delete_template", name="bearing seat") == {}, "")
         expect(all(x["template_changed"] is None for x in rows(d)), rows(d))
         print("templates_smoke: ok")

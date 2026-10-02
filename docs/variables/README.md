@@ -273,6 +273,11 @@ applies a plan.
   refused ("run the dry run again"); an apply that would leave a touched
   feature broken is rolled back and says which.
 
+Save as template ([templates](../modeling/templates.md#saving-one)) reads
+the same walk: the literals of the features it saves are offered as the
+template's parameters, named as `extract_variables` would name them, and
+every variable the features read becomes one.
+
 ## Rename and delete
 
 - **Rename.** `Document::RenameParameter` rewrites every parameter and

@@ -1922,6 +1922,68 @@ class Part(_Tab):
         f.update(kw)
         return self._feature(f)
 
+    # --- templates (docs/modeling/templates.md) ---------------------------
+    def save_template(self, name, features, literals=None, strings=None,
+                      rename=None, comments=None, comment="", replace=False,
+                      dry_run=False):
+        """Save `features` of this part (Feature/Body objects or ids) as a
+        template in the project's library. Every variable they read becomes
+        a parameter of its name (or `rename`'s); `literals` makes literal
+        fields parameters, as {feature, path, param} dicts (a check_literals
+        path: "distance", "entities/0/r"); what a sketch stands on becomes
+        the reference parameter `on`. `replace` saves the next revision of a
+        template of that name. Returns the app's answer."""
+        def fid(x):
+            if isinstance(x, Body) and getattr(x, "feature", None) is not None:
+                return x.feature.id
+            return _id(x)
+        kw = {"name": name, "feature_ids": [fid(f) for f in features]}
+        if literals:
+            kw["literals"] = [{"feature_id": fid(l["feature"]),
+                               "path": l["path"], "param": l["param"]}
+                              for l in literals]
+        if strings:
+            kw["strings"] = [dict(s_, feature_id=fid(s_.pop("feature")))
+                             for s_ in (dict(x) for x in strings)]
+        if rename:
+            kw["rename"] = dict(rename)
+        if comments:
+            kw["comments"] = dict(comments)
+        if comment:
+            kw["comment"] = comment
+        if replace:
+            kw["replace"] = True
+        if dry_run:
+            kw["dry_run"] = True
+        self.activate()
+        return self.app.save_template(**kw)
+
+    def template(self, template, on, params, name=None):
+        """An instance of the library's `template` standing on `on` (a Face,
+        a DatumPlane, a Frame, a Sketch or "Top"/"Front"/"Right"), with a
+        value for EVERY parameter in `params` -- a number, a Param or an
+        expression string for a number (a Param keeps its formula), a str
+        for a string, a Face for a reference. Returns its Feature; its
+        `.features` are the features it expanded into, each a Feature whose
+        faces can be asked for like any (the instance's own faces are named
+        under their ids)."""
+        values = {}
+        for k, v in params.items():
+            if isinstance(v, Param):
+                values[k] = v.expr
+            elif isinstance(v, (Face, Edge)):
+                values[k] = dict(v.ref)
+            else:
+                values[k] = v
+        f = {"type": "Template", "template": template, "on": _on(on),
+             "parameters": values}
+        if name:
+            f["name"] = name
+        r = self._add(f)
+        feat = Feature(self, dict(r, name=name or template, type="Template"))
+        feat.features = [Feature(self, dict(x)) for x in r.get("features", [])]
+        return feat
+
     def thread(self, face, designation, allow_engagement=False, minimum_engagement=0,
                modeled=False, hand="right"):
         """Annotate actual manufacturing geometry; engagement is explicit opt-in.

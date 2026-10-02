@@ -1217,12 +1217,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         const std::optional<bool> changed = ui::TemplateChanged(state, *tf);
         f["template_changed"] =
             changed.has_value() ? json(*changed) : json(nullptr);
-        json expanded = json::array();
-        for (const auto& e : tf->Expanded())
-          expanded.push_back({{"id", e->GetId()},
-                              {"type", e->TypeName()},
-                              {"name", e->GetName()}});
-        f["expanded"] = std::move(expanded);
+        f["expanded"] = tf->ExpandedRows();
       }
       // A worm or a wheel says what it built: the sizes that follow from
       // its blank, the lead angle and whether the pair self-locks.

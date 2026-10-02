@@ -253,6 +253,13 @@ B --Esc / Cancel / Ctrl+Z--> [idle] (both removed; the document as it was)
   it (the app's one polarity, [viewport-handles.md](viewport-handles.md#snapping-one-polarity));
   Escape mid-drag puts the offset back.
 
+**Insert template** (`###tb_template`) borrows the same pick with
+`SketchPurpose::Template`: a template stands where a primitive does, and
+`BeginPlacedOn` / `BeginPlacedOnFace` (`src/ui/PrimitiveTool.cpp`) answer the
+pick for whichever tool armed it. A pick opens a preview instance with the
+template's own saved values; with an empty library the pick's window says so
+and every pick refuses ([templates](../modeling/templates.md#in-the-gui)).
+
 The stored `BoxFeature` / `CylinderFeature` / `SphereFeature` remain only so
 old documents load and as test fixtures (`AddFixtureBox` in the GUI suite);
 the feature editor still edits one that a file brought in.

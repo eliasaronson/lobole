@@ -78,6 +78,12 @@ public:
     return m_expanded;
   }
 
+  // What it expands into, read off the definition: each template feature's
+  // document id, type and name, [{id, type, name}]. Unlike Expanded() it
+  // needs no Execute -- a part opened from baked geometry executes nothing,
+  // and its instances still say what they are made of.
+  nlohmann::json ExpandedRows() const;
+
   // The features this instance would hand the tree on unlink: built from
   // the last expansion, with each expression the template's parameters
   // replaced by the instance's values (tmpl::SubstituteParams), so the plain

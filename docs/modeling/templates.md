@@ -112,6 +112,11 @@ ids, so:
 - unlink hands the tree the same features with the same ids, so every name
   and every reference to one survives it.
 
+`list_elements` decodes such a face's maker as the expanded feature's
+id; `made_by` takes that id, or the instance, which stands for every
+feature it expanded into (a seat's floor is `made_by: <instance>, role:
+end_cap`).
+
 The document keeps its id counter past the ids an instance owns
 (`Document::InsertFeature`), a feature naming one depends on the instance
 (`Document::FirstConsumerIndex`), `Document::OwnerIndex` finds the instance

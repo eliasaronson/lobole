@@ -181,6 +181,17 @@ bool TemplateFeature::Execute(RegenContext& ctx) {
   return true;
 }
 
+nlohmann::json TemplateFeature::ExpandedRows() const {
+  nlohmann::json out = nlohmann::json::array();
+  for (const nlohmann::json& f : definition.features) {
+    const uint64_t local = f.value("id", uint64_t{0});
+    out.push_back({{"id", IdOf(local)},
+                   {"type", f.value("type", std::string{})},
+                   {"name", f.value("name", std::string{})}});
+  }
+  return out;
+}
+
 std::vector<std::unique_ptr<Feature>>
 TemplateFeature::Unlinked(std::string* why) const {
   std::vector<std::unique_ptr<Feature>> out;
