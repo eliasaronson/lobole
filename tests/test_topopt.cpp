@@ -604,8 +604,11 @@ TEST_CASE("Topology result persists and reloads through the directory format",
   CHECK(got->topology);
   REQUIRE(got->bodies.size() == 1);
   REQUIRE(got->bodies[0].density.size() == density.size());
+  // Kept as float (fem::KeepWhatIsRead): the run's density to float's
+  // precision, and exactly what the stored result held.
   for (size_t i = 0; i < density.size(); ++i)
-    CHECK_THAT(got->bodies[0].density[i], WithinAbs(density[i], 1e-9));
+    CHECK_THAT(got->bodies[0].density[i], WithinAbs(density[i], 1e-7));
+  CHECK(got->bodies[0].density == doc.StudyResults(studyId)->bodies[0].density);
   // A just-loaded result is stamped current, not stale.
   CHECK_FALSE(reloaded->StudyResultsStale(studyId));
   fs::remove_all(proj);
@@ -703,7 +706,7 @@ TEST_CASE("Topology result round-trips through JSON", "[topopt][serialize]") {
   REQUIRE(r.bodies[0].mesh.boundary.size() == 1);
   CHECK(r.bodies[0].mesh.boundary[0].faceIndex == 3);
   REQUIRE(r.bodies[0].density.size() == 2);
-  CHECK_THAT(r.bodies[0].density[0], WithinAbs(0.8, 1e-12));
+  CHECK_THAT(r.bodies[0].density[0], WithinAbs(0.8, 1e-7)); // a float
 }
 
 TEST_CASE("StudyResultToJson declines a runtime with nothing solved",

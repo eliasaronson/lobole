@@ -144,12 +144,11 @@ answers before the one-run-at-a-time check: it starts nothing.
 
 **Saved with the project.** Every result is written beside its study with
 its hash: a part's or an assembly's static, modal or topology result as
-`studies/<id>-<slug>.result.json` (topology since v33 and its hash since
-v148, the others v153), a motion result as `motion/<id>-<slug>.result.json`
-(v153). What is kept is what the panel and the RPCs read -- the mesh, each
-node's displacement and stress, the modes, the maxima, a shape study's cut
-and the result it was cut from, the topology density, every motion sample's
-poses, mate values and clashes -- never a solver's scratch. A reopened
+`studies/<id>-<slug>.result.json` and `.result.bin` (topology since v33 and
+its hash since v148, the others v153, the two files v154), a motion result
+as `motion/<id>-<slug>.result.json` and `.result.bin`. What is kept is what
+the panel and the RPCs read back, and nothing else
+([what a saved result keeps](#what-a-saved-result-keeps)). A reopened
 project's run of the same inputs is answered from it (`reused: true`), and
 a result whose saved hash no longer matches the reopened inputs reads stale
 rather than current-because-loaded. The checks:
@@ -186,6 +185,77 @@ or with a bore, hashes the same after a reopen.
 `topo_build_smoke.py` drive the ids, cancels, disconnects and reuse over the
 RPC; `tests/study_reopen_smoke.py` saves a project with a study of each kind
 and a topology check, opens it again, and has each one reused.
+
+### What a saved result keeps
+
+A result is reproducible from its inputs, so it is kept small: what a panel
+or an RPC reads back from it, at the precision derived data has, and
+nothing rebuilt from something else. `fem::KeepWhatIsRead`
+(`src/core/fem/FemSolver.h`) cuts a solved runtime down to that, and every
+stored result passes through it (`Document::StoreStudyResults`,
+`AssemblyDocument::StoreStudyResults`) -- so the result a run leaves in
+memory is the one a reopen reads back, value for value.
+
+| kind | kept | left out |
+|---|---|---|
+| static, modal | the boundary surface: its tri6 triangles and their faces, the nodes they use (and the peak nodes), each of those nodes' displacement and von Mises stress per load case, or its mode shapes; the maxima; the solved mesh's node and tet counts | the tets and every interior node: the contour, the deformed shape, a face's motion (`probe_study`) and the peak markers all read the surface |
+| topology | the whole tet10 mesh, its boundary, the per-tet density, the summary | -- the iso-surface, the STL export and a static study of the shape cut tets |
+| motion | every sample's poses, mate values, clashes and unknown contacts; the pair counts | -- |
+
+**Float, in a binary file.** Fields are float -- derived bulk data is
+([the model is double](../conventions.md#the-model-is-double)) -- rounded
+when the result is stored, not only when it is written. The arrays go to
+`<base>.result.bin` as raw little-endian `f32`, indices as `u16` when every
+one fits and `u32` (or `i32`, where a cut's triangle lies on no face, -1)
+otherwise; `<base>.result.json` keeps the metadata, `input_hash`, and a
+reference {`type`, `offset`, `count`} for each array
+(`ResultArrayWriter` / `ResultArrayReader`,
+`src/core/io/SerializationInternal.h`). A motion placement is the model's,
+so it stays `f64`: each distinct matrix once, and each sample's poses as
+indices into them -- an occurrence that holds still through a run is one
+matrix. The build links no zstd, so nothing is compressed. A topology
+result's density digest, which a static study of the shape keys on, is
+taken over the density as float, so a run's digest and a reopened one's
+agree.
+
+**Written once.** The bin goes first and the json, which carries
+`bin_bytes`, second; a json whose bin is missing or another size (a torn
+save, one file copied without the other) drops that result with a warning
+and the study runs again. Each file is skipped when its bytes are the ones
+on disk, so a save whose result has not changed writes neither and leaves
+its modification time alone. An autosave writes no result: its sidecars are
+the single-file form, which carries none
+([autosave](../versioning/README.md#autosave-and-recovery)). And the
+project's history keeps none
+([saved results stay out of the history](../versioning/README.md#saved-results-stay-out-of-the-history)).
+
+**What it buys.** The pan/tilt yoke's projects, saved by v153 and again by
+v154 (`scratch/pantilt`):
+
+| result | kind | v153 | v154 |
+|---|---|---|---|
+| yoke, 3 g (151 168 nodes, 3 cases) | static | 52.0 MB | 3.88 MB (13.4x) |
+| yoke_solid, 3 g | static | 33.1 MB | 2.20 MB (15.0x) |
+| yoke envelope: shape | static of a topology result | 19.2 MB | 1.87 MB (10.3x) |
+| yoke envelope: solid | static of a topology result | 22.9 MB | 2.16 MB (10.6x) |
+| yoke envelope (67 509 nodes) | topology | 6.69 MB | 2.95 MB (2.3x) |
+| pan 360 | motion | 0.60 MB | 0.38 MB (1.6x) |
+| tilt 90 | motion | 0.43 MB | 0.09 MB (5.0x) |
+
+`yoke_envelope.dsgn`'s results went from 135 MB to 13.5 MB and
+`yoke_topo.dsgn`'s from 86 MB to 6.5 MB; the rest of each project -- baked
+geometry above all -- is untouched (147.6 MB to 26.2 MB for the envelope's
+tree). A topology result keeps its volume and shrinks least; a static one
+was nine-tenths interior. Every result reopened as it was saved, current
+or stale alike; the two shape studies, current under v153, read stale
+once, because their saved hash names the topology result by a digest of
+its double density.
+
+`tests/test_study_inputs.cpp` reopens each kind and compares what came back
+with what the run stored, keeps a static result to its surface as float
+with its peak markers on their nodes, saves an unchanged result twice and
+once more after a reopen without touching either file's time, and has an
+autosave write no result.
 
 ## Meshing
 

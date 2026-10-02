@@ -338,7 +338,8 @@ omitted = whichever is active).
   placed parts' geometry and materials): `reused: true`, nothing computed,
   `recompute: true` to run anyway. So `run_motion_study {leave_at}` after
   a run costs one solve. The result is saved with the project
-  (`motion/<id>-<slug>.result.json`, v153) and read back when the assembly
+  (`motion/<id>-<slug>.result.json` with its placements in `.result.bin`,
+  v153/v154) and read back when the assembly
   is opened or its tab comes up: current when its inputs hash as they did,
   stale otherwise, so a reopened project's exact run is not paid for again
   ([studies as jobs](../simulation/README.md#studies-as-jobs)). `async: true` runs it as a job with an id

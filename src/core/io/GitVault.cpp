@@ -188,6 +188,47 @@ std::string IdentityArgs(const std::string& dir) {
   return args;
 }
 
+// A saved study or motion result stays out of the history
+// (docs/versioning/README.md#saved-results-stay-out-of-the-history). It is
+// reproducible from its inputs and named by their hash, so a version needs
+// none; and a few runs of a big study would hold gigabytes in a history that
+// keeps every blob for good. The newest result of each study is the one in
+// the working tree, which git leaves alone: restoring a version keeps it,
+// and the reopen reads it current when the restored inputs hash the same,
+// stale when they do not. The rule goes in the repository's own exclude
+// file, and a result an earlier build committed leaves the index here.
+constexpr const char* kResultsExcluded =
+    "# Written by Designer: saved study results are derived (their input "
+    "hash names them)";
+
+void KeepResultsOutOfHistory(const std::string& dir) {
+  std::string out;
+  if (RunGit(dir, "rev-parse --git-path info/exclude", &out) != 0)
+    return;
+  std::filesystem::path exclude = FirstLine(out);
+  if (exclude.empty())
+    return;
+  if (exclude.is_relative())
+    exclude = std::filesystem::path(dir) / exclude;
+  std::string current;
+  {
+    std::ifstream in(exclude);
+    if (in)
+      current.assign(std::istreambuf_iterator<char>(in),
+                     std::istreambuf_iterator<char>());
+  }
+  if (current.find(kResultsExcluded) == std::string::npos) {
+    std::error_code ec;
+    std::filesystem::create_directories(exclude.parent_path(), ec);
+    std::ofstream app(exclude, std::ios::app);
+    if (!current.empty() && current.back() != '\n')
+      app << "\n";
+    app << kResultsExcluded << "\n*.result.json\n*.result.bin\n";
+  }
+  RunGit(dir, "rm -r -q --cached --ignore-unmatch -- " +
+                  Quote("*.result.json") + " " + Quote("*.result.bin"));
+}
+
 } // namespace
 
 void SetPreferredIdentity(const std::string& name, const std::string& email) {
@@ -211,8 +252,10 @@ bool Init(const std::string& dir) {
   if (!Available())
     return false;
   const bool ok = RunGit(dir, "init -q") == 0;
-  if (ok)
+  if (ok) {
+    KeepResultsOutOfHistory(dir);
     LOG_INFO("Initialized git repository in {}", dir);
+  }
   return ok;
 }
 
@@ -223,6 +266,7 @@ bool CommitAll(const std::string& dir, const std::string& message,
       *error = "git is not available";
     return false;
   }
+  KeepResultsOutOfHistory(dir);
   if (RunGit(dir, "add -A") != 0) {
     if (error)
       *error = "git add failed";
@@ -779,6 +823,7 @@ bool CommitMerge(const std::string& dir, const std::string& message,
                " still unresolved";
     return false;
   }
+  KeepResultsOutOfHistory(dir);
   if (RunGit(dir, "add -A") != 0) {
     if (error)
       *error = "git add failed";

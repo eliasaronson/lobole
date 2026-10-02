@@ -1236,4 +1236,148 @@ bool RunTopology(const Document& doc, Study& study, StudyRuntime& rt,
   return true;
 }
 
+// ---- What a result keeps -------------------------------------------------
+// docs/simulation/README.md#what-a-saved-result-keeps
+
+namespace {
+
+double ToFloat(double v) { return static_cast<double>(static_cast<float>(v)); }
+
+glm::dvec3 ToFloat(const glm::dvec3& p) {
+  return {ToFloat(p.x), ToFloat(p.y), ToFloat(p.z)};
+}
+
+void RoundAll(std::vector<double>& v) {
+  for (double& x : v)
+    x = ToFloat(x);
+}
+
+void RoundAll(std::vector<glm::dvec3>& v) {
+  for (glm::dvec3& p : v)
+    p = ToFloat(p);
+}
+
+void RoundFields(FemResults& r) {
+  RoundAll(r.displacement);
+  RoundAll(r.vonMises);
+  for (FemResults::ModeShape& m : r.modes)
+    RoundAll(m.displacement);
+}
+
+// Every per-node array of `r` has one entry per node (or none).
+bool PerNode(const FemResults& r, size_t n) {
+  if (!r.displacement.empty() && r.displacement.size() != n)
+    return false;
+  if (!r.vonMises.empty() && r.vonMises.size() != n)
+    return false;
+  for (const FemResults::ModeShape& m : r.modes)
+    if (m.displacement.size() != n)
+      return false;
+  return true;
+}
+
+template <typename T>
+void Gather(std::vector<T>& v, const std::vector<int>& kept) {
+  if (v.empty())
+    return;
+  std::vector<T> out;
+  out.reserve(kept.size());
+  for (int old : kept)
+    out.push_back(v[old]);
+  v = std::move(out);
+}
+
+void Renumber(FemResults& r, const std::vector<int>& kept,
+              const std::vector<int>& newIndex) {
+  Gather(r.displacement, kept);
+  Gather(r.vonMises, kept);
+  for (FemResults::ModeShape& m : r.modes)
+    Gather(m.displacement, kept);
+  if (r.maxVmNode >= 0)
+    r.maxVmNode = newIndex[r.maxVmNode];
+  if (r.maxDispNode >= 0)
+    r.maxDispNode = newIndex[r.maxDispNode];
+}
+
+// A static or modal body down to its boundary surface.
+void KeepSurface(StudyBodyResult& b) {
+  FemMesh& m = b.mesh;
+  const size_t n = m.nodes.size();
+  if (!PerNode(b.results, n))
+    return;
+  for (const FemResults& c : b.cases)
+    if (!PerNode(c, n))
+      return;
+  std::vector<char> used(n, 0);
+  for (const FemMesh::BoundaryTri& t : m.boundary)
+    for (int v : t.nodes)
+      if (v < 0 || static_cast<size_t>(v) >= n)
+        return; // not a mesh this can renumber; left as it is
+      else
+        used[v] = 1;
+  const auto peak = [&](const FemResults& r) {
+    for (int v : {r.maxVmNode, r.maxDispNode})
+      if (v >= 0 && static_cast<size_t>(v) < n)
+        used[v] = 1;
+  };
+  peak(b.results);
+  for (const FemResults& c : b.cases)
+    peak(c);
+  const auto valid = [&](const FemResults& r) {
+    for (int v : {r.maxVmNode, r.maxDispNode})
+      if (v >= 0 && static_cast<size_t>(v) >= n)
+        return false;
+    return true;
+  };
+  if (!valid(b.results))
+    return;
+  for (const FemResults& c : b.cases)
+    if (!valid(c))
+      return;
+
+  std::vector<int> kept, newIndex(n, -1);
+  for (size_t i = 0; i < n; ++i)
+    if (used[i]) {
+      newIndex[i] = static_cast<int>(kept.size());
+      kept.push_back(static_cast<int>(i));
+    }
+  if (kept.size() != n) {
+    Gather(m.nodes, kept);
+    for (FemMesh::BoundaryTri& t : m.boundary)
+      for (int& v : t.nodes)
+        v = newIndex[v];
+    Renumber(b.results, kept, newIndex);
+    for (FemResults& c : b.cases)
+      Renumber(c, kept, newIndex);
+  }
+  m.tets.clear();
+  m.tets.shrink_to_fit();
+  m.tetDomain.clear();
+  m.tetDomain.shrink_to_fit();
+}
+
+} // namespace
+
+void KeepWhatIsRead(StudyRuntime& rt) {
+  for (StudyBodyResult& b : rt.bodies) {
+    FemMesh& m = b.mesh;
+    // The solved mesh's counts survive the cut (a loaded result carries
+    // them; a fresh run fills them from the mesh).
+    if (m.stats.nodeCount == 0)
+      m.stats.nodeCount = m.nodes.size();
+    if (m.stats.tetCount == 0)
+      m.stats.tetCount = m.tets.size();
+    if (!rt.topology)
+      KeepSurface(b);
+    if (std::all_of(m.tetDomain.begin(), m.tetDomain.end(),
+                    [](int d) { return d == 0; }))
+      m.tetDomain.clear();
+    RoundAll(m.nodes);
+    RoundAll(b.density);
+    RoundFields(b.results);
+    for (FemResults& c : b.cases)
+      RoundFields(c);
+  }
+}
+
 } // namespace fem

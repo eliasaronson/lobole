@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -430,12 +431,20 @@ bool WriteBytesAtomic(const std::filesystem::path& target,
                       const std::vector<unsigned char>& bytes,
                       std::string* error) {
   {
-    std::ifstream existing(target, std::ios::binary);
-    if (existing) {
+    // Read the file only when its size could make it the same bytes.
+    std::error_code sizeEc;
+    const auto size = std::filesystem::file_size(target, sizeEc);
+    // (Compared as bytes: a char and an unsigned char above 0x7f never
+    // compare equal, which rewrote every unchanged binary file.)
+    std::ifstream existing;
+    if (!sizeEc && size == bytes.size())
+      existing.open(target, std::ios::binary);
+    if (existing.is_open()) {
       std::string current((std::istreambuf_iterator<char>(existing)),
                           std::istreambuf_iterator<char>());
       if (current.size() == bytes.size() &&
-          std::equal(bytes.begin(), bytes.end(), current.begin()))
+          (bytes.empty() ||
+           std::memcmp(current.data(), bytes.data(), bytes.size()) == 0))
         return true;
     }
   }
@@ -571,6 +580,43 @@ uint64_t IdForFile(uint64_t id, const char* what, const std::string& name) {
   return id;
 }
 
+// A study or motion result beside its study (v154): `<base>.result.bin`
+// holds the arrays the json carries as a binary value (kResultData), and
+// `<base>.result.json` the rest. The bin goes first, so a save torn between
+// the two leaves a json whose `bin_bytes` disagrees with its bin, which the
+// load drops (ReadResultFiles). Either file whose bytes are the ones on disk
+// is not written: an unchanged result keeps its mtime.
+bool WriteResultFiles(const std::filesystem::path& dir, const std::string& base,
+                      json j, std::set<std::string>& wanted,
+                      std::string* error) {
+  std::vector<unsigned char> bytes;
+  if (j.contains(kResultData)) {
+    bytes = std::move(j.at(kResultData).get_binary());
+    j.erase(kResultData);
+  }
+  const std::string bin = base + ".result.bin";
+  const std::string text = base + ".result.json";
+  if (!WriteBytesAtomic(dir / bin, bytes, error) ||
+      !WriteTextAtomic(dir / text, j.dump() + "\n", error))
+    return false;
+  wanted.insert(bin);
+  wanted.insert(text);
+  return true;
+}
+
+// Removes what a save no longer writes from a collection directory: the
+// study (.json) and result (.json, .bin) files not in `wanted`.
+void PruneCollection(const std::filesystem::path& dir,
+                     const std::set<std::string>& wanted) {
+  std::error_code ec;
+  for (const auto& entry : std::filesystem::directory_iterator(dir, ec)) {
+    const auto ext = entry.path().extension();
+    if ((ext == ".json" || ext == ".bin") &&
+        !wanted.contains(entry.path().filename().string()))
+      std::filesystem::remove(entry.path(), ec);
+  }
+}
+
 } // namespace
 
 bool SaveDir(const Document& doc, const std::string& dirPath,
@@ -639,19 +685,12 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
         // Its result (topology v33, every kind v153).
         const fem::StudyRuntime* rt = doc.StudyResults(s.id);
         json resultJson;
-        if (rt && StudyResultToJson(*rt, resultJson)) {
-          const std::string resultFile = base + ".result.json";
-          if (!WriteTextAtomic(studyDir / resultFile, resultJson.dump() + "\n",
-                               error))
-            return false;
-          wantedStudies.insert(resultFile);
-        }
+        if (rt && StudyResultToJson(*rt, resultJson) &&
+            !WriteResultFiles(studyDir, base, std::move(resultJson),
+                              wantedStudies, error))
+          return false;
       }
-      for (const auto& entry : fs::directory_iterator(studyDir, ec)) {
-        if (entry.path().extension() == ".json" &&
-            !wantedStudies.contains(entry.path().filename().string()))
-          fs::remove(entry.path(), ec);
-      }
+      PruneCollection(studyDir, wantedStudies);
     }
     // Configurations (v31): file-per-config under configurations/, id list in
     // the index (the active id is in the envelope). Absent when none, so a
@@ -742,6 +781,37 @@ json ParseProjectFile(const std::filesystem::path& path) {
   } catch (const std::exception& e) {
     throw std::runtime_error(ProjectRelative(path) + ": " + e.what());
   }
+}
+
+// A result beside its study (v154): the json, with its .result.bin read
+// back in as the binary value it was written from (WriteResultFiles). A v153
+// result holds its arrays inline and has no bin. nullopt, with a warning,
+// when the bin is missing or not the size the json says: a result is
+// derived, and one whose halves disagree (a torn save, a copy of one file)
+// is dropped and run again rather than read.
+std::optional<json> ReadResultFiles(const std::filesystem::path& path) {
+  json j = ParseProjectFile(path);
+  if (!j.contains("bin_bytes"))
+    return j;
+  const size_t want = j.at("bin_bytes").get<size_t>();
+  std::filesystem::path bin = path;
+  bin.replace_extension(".bin");
+  std::ifstream in(bin, std::ios::binary);
+  std::vector<unsigned char> bytes;
+  if (in)
+    bytes.assign(std::istreambuf_iterator<char>(in),
+                 std::istreambuf_iterator<char>());
+  if (!in.is_open() || bytes.size() != want) {
+    LOG_WARN("Dropping the saved result {}: its {} is {} (expected {} "
+             "bytes); the study runs again",
+             ProjectRelative(path), bin.filename().string(),
+             in.is_open() ? std::to_string(bytes.size()) + " bytes"
+                          : std::string("missing"),
+             want);
+    return std::nullopt;
+  }
+  j[kResultData] = json::binary(std::move(bytes));
+  return j;
 }
 
 // Records `path` under the id its filename starts with, REFUSING a second
@@ -925,11 +995,9 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         // be stamped with the settled document version (else the rollback /
         // active-config regen would leave it spuriously stale).
         const auto rit = resultById.find(id);
-        if (rit != resultById.end()) {
-          std::ifstream rin(rit->second);
-          pendingResults.emplace_back(
-              id, StudyResultFromJson(ParseProjectFile(rit->second)));
-        }
+        if (rit != resultById.end())
+          if (auto rj = ReadResultFiles(rit->second))
+            pendingResults.emplace_back(id, StudyResultFromJson(*rj));
       }
     }
     // Configurations (v31): id-prefix files under configurations/, index order.
@@ -1139,20 +1207,13 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
       index["motion"].push_back(s.id);
       wantedMotion.insert(file);
       // Its result (v153), with the input hash that produced it.
-      if (const auto result = asmDoc.MotionResult(s.id)) {
-        const std::string resultFile =
-            file.substr(0, file.size() - 5) + ".result.json";
-        if (!WriteTextAtomic(motionDir / resultFile,
-                             MotionResultToJson(*result).dump() + "\n", error))
-          return false;
-        wantedMotion.insert(resultFile);
-      }
+      if (const auto result = asmDoc.MotionResult(s.id);
+          result &&
+          !WriteResultFiles(motionDir, file.substr(0, file.size() - 5),
+                            MotionResultToJson(*result), wantedMotion, error))
+        return false;
     }
-    for (const auto& entry : fs::directory_iterator(motionDir, ec)) {
-      if (entry.path().extension() == ".json" &&
-          !wantedMotion.contains(entry.path().filename().string()))
-        fs::remove(entry.path(), ec);
-    }
+    PruneCollection(motionDir, wantedMotion);
 
     // FEM studies (v106) mirror the part's: file-per-study under studies/,
     // absent when none, each result beside its study (v153).
@@ -1173,20 +1234,12 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
       wantedStudies.insert(file);
       json resultJson;
       if (const fem::StudyRuntime* rt = asmDoc.StudyResults(s.id);
-          rt != nullptr && StudyResultToJson(*rt, resultJson)) {
-        const std::string resultFile =
-            file.substr(0, file.size() - 5) + ".result.json";
-        if (!WriteTextAtomic(asmStudyDir / resultFile, resultJson.dump() + "\n",
-                             error))
-          return false;
-        wantedStudies.insert(resultFile);
-      }
+          rt != nullptr && StudyResultToJson(*rt, resultJson) &&
+          !WriteResultFiles(asmStudyDir, file.substr(0, file.size() - 5),
+                            std::move(resultJson), wantedStudies, error))
+        return false;
     }
-    for (const auto& entry : fs::directory_iterator(asmStudyDir, ec)) {
-      if (entry.path().extension() == ".json" &&
-          !wantedStudies.contains(entry.path().filename().string()))
-        fs::remove(entry.path(), ec);
-    }
+    PruneCollection(asmStudyDir, wantedStudies);
 
     // Configurations (v31): file-per-config + active id in the index; absent
     // when none so older assemblies stay byte-identical.
@@ -1402,9 +1455,10 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       // input hash reads (ui::AdoptSavedMotionResults).
       for (const auto& [id, path] : resultById)
         if (asmDoc->FindMotionStudyById(id) != nullptr)
-          asmDoc->StoreMotionResult(
-              id, std::make_shared<const motion::Result>(
-                      MotionResultFromJson(ParseProjectFile(path))));
+          if (auto rj = ReadResultFiles(path))
+            asmDoc->StoreMotionResult(id,
+                                      std::make_shared<const motion::Result>(
+                                          MotionResultFromJson(*rj)));
     }
 
     // FEM studies (v106): id-prefix files under studies/, index order; a
@@ -1438,7 +1492,10 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
       for (const auto& [id, path] : resultById) {
         if (asmDoc->FindStudy(id) == nullptr)
           continue;
-        fem::StudyRuntime rt = StudyResultFromJson(ParseProjectFile(path));
+        auto rj = ReadResultFiles(path);
+        if (!rj)
+          continue;
+        fem::StudyRuntime rt = StudyResultFromJson(*rj);
         rt.solvedAtVersion = UINT64_MAX;
         asmDoc->StoreStudyResults(id, std::move(rt));
       }

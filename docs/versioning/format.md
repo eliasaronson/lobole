@@ -233,6 +233,7 @@ here; the golden corpus and git history cover them.
 | 151 | Drawings: a view's `detail` {`view`, `center` [x, y, z] world mm, `radius_mm`, `label`}, a detail of another view ([detail views](../drawings/README.md#detail-views)); a note's `style: "fcf"` with `fcf` {`symbol`, `tolerance_mm`, `diameter`?, `modifier`? (`mmc`, `lmc`), `datums`} and `dim`, the dimension a frame stands under ([feature control frames](../drawings/README.md#feature-control-frames)); an unknown symbol or modifier, or a frame ISO 1101 cannot write, is refused on load. Material slugs `aluminum_6061_t6` and `aluminum_6082_t6`. Golden `drawing/v151-frames-details` |
 | 152 | Studies: `load_cases` [{`name`, `weight` (+`weight_expr`)}] on a static or topology study, and a force's or pressure's `case` naming one ([load cases](../topopt/README.md#load-cases)); a topology study's `keep_outs` [{`body`} or {`box_min`, `box_max`} mm] ([keep-outs](../topopt/README.md#keep-outs)); a static study's `shape_from` {`study`, `threshold`? or `whole`?}, refused on any other type ([a static study of the optimised shape](../topopt/README.md#a-static-study-of-the-optimised-shape)). A topology result file carries `cases` [{`name`, `weight`, `compliance`}], `keep_outs` [{`what`, `tets`, `volume`}] and `islands` {`threshold`, `components`, `tets`, `volume`, `keep_faces`, `load_path_broken`} ([connectivity](../topopt/README.md#connectivity)). A keep-out that is neither a body nor a box is refused on load. Golden `v152-topology-load-cases` |
 | 153 | Every study result is saved beside its study with its `input_hash`, in the directory form only: a static or modal result in a part's or an assembly's `studies/<id>-<slug>.result.json` (`kind` `static`/`modal`/`topology`, `maxima`, each body's mesh with `results` {`displacement`, `von_mises`, maxima, `modes` [{`frequency_hz`, `shape`}]} or one per load case in `cases`, and a shape study's `shape` {`source`, `threshold`, `island_tets`, `volume`, `threshold_lowered_from`}), and a motion result in an assembly's `motion/<id>-<slug>.result.json` (every sample's `worlds`, `leaves`, `clashes`, `unknown_contacts` and `mates`, the pair counts). A reopened project's run of the same inputs is answered from it; one whose inputs moved reads stale ([studies as jobs](../simulation/README.md#studies-as-jobs)). A `kind` that is none of the three, or a malformed hash, is refused on load. Golden `v153-saved-study-results` (the single-file form carries no results; `tests/test_study_inputs.cpp` and `tests/test_motion.cpp` reopen each kind) |
+| 154 | A study or motion result is two files beside its study: `<id>-<slug>.result.json` (the metadata, `input_hash`, and `bin_bytes`) and `<id>-<slug>.result.bin` (its numeric arrays, raw little-endian). Each array in the json is a reference {`type`, `offset`, `count`}: `f32` for a field (nodes, displacements, stresses, mode shapes, density), `u16`/`u32` for indices (`i32` where one is -1, a cut triangle on no face) (`tets`, `boundary` six nodes a triangle with `boundary_face` apart, `tet_domain`), `f64` for a motion placement (`worlds` {`occurrences`, `world`}, `leaf_world`). A static or modal body keeps its boundary surface only, with `node_count` and `tet_count` of the mesh it solved ([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps)). An unknown `type`, or a reference outside the bin, is refused; a bin missing or not `bin_bytes` long drops that result. A v153 result (arrays inline) still reads. Golden `v154-study-results-binary` (the single-file form carries no results; `tests/test_study_inputs.cpp` reopens each kind) |
 
 ## The directory form
 
@@ -243,6 +244,7 @@ part.dsgn/
   index.json                 envelope + the ordered feature-id list
   features/<id>-<type>.json  one file per feature (the type suffix is cosmetic)
   studies/  configurations/  assets/   per-kind files, absent when empty
+  studies/<id>-<slug>.result.json + .result.bin   a study's saved result
   geometry/                  baked bodies (derived; see README.md)
   .gitattributes             geometry/*.brep binary -merge -diff
 ```
@@ -281,7 +283,8 @@ Directory form: `index.json` (kind + id lists) plus `occurrences/`, `mates/`,
 `exploded/`, `relations/`, `assertions/`, `motion/` and `studies/`, one file
 per item, each directory absent when it would be empty. A motion or FEM
 study's result sits beside it as `<id>-<slug>.result.json` (v153), with the
-input hash that produced it.
+input hash that produced it, and its arrays in `<id>-<slug>.result.bin`
+(v154).
 
 ## The project envelope
 

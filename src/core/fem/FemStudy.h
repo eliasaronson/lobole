@@ -3,8 +3,10 @@
 // FEM study model: a document-level analysis definition (NOT a Feature). A
 // Study consumes the finished bodies and produces no geometry, so it lives on
 // Document as a sibling to the parameter table rather than in the regeneration
-// history. Mesh and results are derived data, never serialized (see
-// FemMesher.h / the FEM2 solver); only this configuration persists.
+// history. Mesh and results are derived data (FemMesher.h, FemSolver.h): a
+// run's result is saved beside its study with the hash of its inputs, cut to
+// what is read back (fem::KeepWhatIsRead), and this configuration is what
+// produces it.
 
 #include "core/Conventions.h"
 #include "core/ElementMap.h"

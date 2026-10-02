@@ -9,7 +9,12 @@
 
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <array>
+#include <bit>
+#include <cstdint>
+#include <cstring>
+#include <limits>
 #include <vector>
 
 using nlohmann::json;
@@ -256,25 +261,177 @@ fem::Study StudyFromJson(const json& j) {
   return s;
 }
 
-// ---- Study results (topology v33, every kind v153) -------------------------
-// Saved with the project, each beside its study, so a reopened project's run
-// of the same inputs is answered from it (docs/simulation/README.md
-// #studies-as-jobs). What the panel and the RPCs read -- the mesh, each
-// node's displacement and stress, the modes, the maxima, the topology
-// density -- and never the solver's scratch. Flat numeric arrays keep it
-// compact; solvedAtVersion is stamped on load.
+} // namespace DocumentIO
 
-namespace {
+// ---- A result's numeric arrays (v154) --------------------------------------
 
-json FlatVec3(const std::vector<glm::dvec3>& v) {
-  json out = json::array();
+static_assert(std::endian::native == std::endian::little,
+              "a result's .bin is little-endian, written as the bytes are");
+
+json ResultArrayWriter::Append(const char* type, const void* data, size_t count,
+                               size_t size) {
+  // Every array starts on a multiple of its element size.
+  while (m_bytes.size() % size != 0)
+    m_bytes.push_back(0);
+  const size_t offset = m_bytes.size();
+  const auto* b = static_cast<const std::uint8_t*>(data);
+  m_bytes.insert(m_bytes.end(), b, b + count * size);
+  return {{"type", type}, {"offset", offset}, {"count", count}};
+}
+
+json ResultArrayWriter::F32(const std::vector<double>& v) {
+  std::vector<float> f(v.begin(), v.end());
+  return Append("f32", f.data(), f.size(), sizeof(float));
+}
+
+json ResultArrayWriter::F32(const std::vector<glm::dvec3>& v) {
+  std::vector<float> f;
+  f.reserve(v.size() * 3);
   for (const glm::dvec3& p : v) {
-    out.push_back(p.x);
-    out.push_back(p.y);
-    out.push_back(p.z);
+    f.push_back(static_cast<float>(p.x));
+    f.push_back(static_cast<float>(p.y));
+    f.push_back(static_cast<float>(p.z));
+  }
+  return Append("f32", f.data(), f.size(), sizeof(float));
+}
+
+json ResultArrayWriter::F64(const std::vector<double>& v) {
+  return Append("f64", v.data(), v.size(), sizeof(double));
+}
+
+json ResultArrayWriter::Index(const std::vector<int>& v) {
+  int top = 0;
+  bool negative = false;
+  for (int i : v) {
+    negative = negative || i < 0;
+    top = std::max(top, i);
+  }
+  if (negative) // a cut's own triangles lie on no face (-1)
+    return Append("i32", v.data(), v.size(), sizeof(std::int32_t));
+  if (top <= 0xFFFF) {
+    std::vector<std::uint16_t> u(v.begin(), v.end());
+    return Append("u16", u.data(), u.size(), sizeof(std::uint16_t));
+  }
+  std::vector<std::uint32_t> u(v.begin(), v.end());
+  return Append("u32", u.data(), u.size(), sizeof(std::uint32_t));
+}
+
+json ResultArrayWriter::Take() { return json::binary(std::move(m_bytes)); }
+
+ResultArrayReader::ResultArrayReader(const json& owner, std::string what)
+    : m_what(std::move(what)) {
+  if (owner.contains(kResultData) && owner.at(kResultData).is_binary())
+    m_bytes = &owner.at(kResultData).get_binary();
+}
+
+const std::uint8_t* ResultArrayReader::Locate(const json& ref, const char* name,
+                                              std::string& type,
+                                              size_t& count) const {
+  if (!ref.is_object() || !ref.contains("type") || !ref.contains("offset") ||
+      !ref.contains("count"))
+    throw std::runtime_error(m_what + ": " + name +
+                             " is not {type, offset, count}");
+  if (m_bytes == nullptr)
+    throw std::runtime_error(m_what + ": " + name +
+                             " names its .result.bin, which was not read");
+  type = ref.at("type").get<std::string>();
+  size_t size = 0;
+  if (type == "f32" || type == "u32" || type == "i32")
+    size = 4;
+  else if (type == "f64")
+    size = 8;
+  else if (type == "u16")
+    size = 2;
+  else
+    throw std::runtime_error(m_what + ": " + name + " has type '" + type +
+                             "' (expected one of: f32, f64, u16, u32, i32)");
+  const size_t offset = ref.at("offset").get<size_t>();
+  count = ref.at("count").get<size_t>();
+  if (offset % size != 0 || count > m_bytes->size() / size ||
+      offset > m_bytes->size() - count * size)
+    throw std::runtime_error(m_what + ": " + name + " (" +
+                             std::to_string(count) + " " + type + " at byte " +
+                             std::to_string(offset) + ") lies outside its " +
+                             std::to_string(m_bytes->size()) + "-byte .bin");
+  return m_bytes->data() + offset;
+}
+
+std::vector<double> ResultArrayReader::Reals(const json& ref,
+                                             const char* name) const {
+  std::string type;
+  size_t count = 0;
+  const std::uint8_t* p = Locate(ref, name, type, count);
+  std::vector<double> out(count);
+  if (type == "f32") {
+    for (size_t i = 0; i < count; ++i) {
+      float f;
+      std::memcpy(&f, p + i * sizeof(float), sizeof(float));
+      out[i] = f;
+    }
+  } else if (type == "f64") {
+    std::memcpy(out.data(), p, count * sizeof(double));
+  } else {
+    throw std::runtime_error(m_what + ": " + name + " is " + type +
+                             " (expected f32 or f64)");
   }
   return out;
 }
+
+std::vector<glm::dvec3> ResultArrayReader::Vec3s(const json& ref,
+                                                 const char* name) const {
+  const std::vector<double> flat = Reals(ref, name);
+  if (flat.size() % 3 != 0)
+    throw std::runtime_error(m_what + ": " + name +
+                             " is not a whole number of xyz triples");
+  std::vector<glm::dvec3> out;
+  out.reserve(flat.size() / 3);
+  for (size_t i = 0; i + 3 <= flat.size(); i += 3)
+    out.emplace_back(flat[i], flat[i + 1], flat[i + 2]);
+  return out;
+}
+
+std::vector<int> ResultArrayReader::Indices(const json& ref,
+                                            const char* name) const {
+  std::string type;
+  size_t count = 0;
+  const std::uint8_t* p = Locate(ref, name, type, count);
+  std::vector<int> out(count);
+  if (type == "u16") {
+    for (size_t i = 0; i < count; ++i) {
+      std::uint16_t u;
+      std::memcpy(&u, p + i * sizeof(u), sizeof(u));
+      out[i] = u;
+    }
+  } else if (type == "u32") {
+    for (size_t i = 0; i < count; ++i) {
+      std::uint32_t u;
+      std::memcpy(&u, p + i * sizeof(u), sizeof(u));
+      if (u > static_cast<std::uint32_t>(std::numeric_limits<int>::max()))
+        throw std::runtime_error(m_what + ": " + name + " holds index " +
+                                 std::to_string(u));
+      out[i] = static_cast<int>(u);
+    }
+  } else if (type == "i32") {
+    std::memcpy(out.data(), p, count * sizeof(std::int32_t));
+  } else {
+    throw std::runtime_error(m_what + ": " + name + " is " + type +
+                             " (expected u16, u32 or i32)");
+  }
+  return out;
+}
+
+namespace DocumentIO {
+
+// ---- Study results (topology v33, every kind v153, binary v154) ------------
+// Saved with the project, each beside its study, so a reopened project's run
+// of the same inputs is answered from it (docs/simulation/README.md
+// #studies-as-jobs). What is kept is what fem::KeepWhatIsRead leaves -- what
+// the panel and the RPCs read back -- and never the solver's scratch
+// (docs/simulation/README.md#what-a-saved-result-keeps). The numeric arrays
+// go to the .result.bin (ResultArrayWriter); solvedAtVersion is stamped on
+// load.
+
+namespace {
 
 std::vector<glm::dvec3> Vec3sFromFlat(const json& j, const char* what) {
   const auto flat = j.get<std::vector<double>>();
@@ -288,30 +445,48 @@ std::vector<glm::dvec3> Vec3sFromFlat(const json& j, const char* what) {
   return out;
 }
 
-json FieldsToJson(const fem::FemResults& r) {
-  json out = {{"displacement", FlatVec3(r.displacement)},
-              {"von_mises", r.vonMises},
-              {"max_von_mises", r.maxVonMises},
+// A field is a reference into the .bin (v154), or the json array a v153
+// file held inline.
+struct FieldReader {
+  const ResultArrayReader& bin;
+  std::vector<double> Reals(const json& j, const char* name) const {
+    return j.is_array() ? j.get<std::vector<double>>() : bin.Reals(j, name);
+  }
+  std::vector<glm::dvec3> Vec3s(const json& j, const char* name) const {
+    return j.is_array() ? Vec3sFromFlat(j, name) : bin.Vec3s(j, name);
+  }
+  std::vector<int> Indices(const json& j, const char* name) const {
+    return j.is_array() ? j.get<std::vector<int>>() : bin.Indices(j, name);
+  }
+};
+
+json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
+  json out = {{"max_von_mises", r.maxVonMises},
               {"max_vm_node", r.maxVmNode},
               {"max_vm_at", Vec3ToJson(r.maxVmAt)},
               {"max_displacement", r.maxDisplacement},
               {"max_disp_node", r.maxDispNode},
               {"max_disp_at", Vec3ToJson(r.maxDispAt)}};
+  if (!r.displacement.empty())
+    out["displacement"] = w.F32(r.displacement);
+  if (!r.vonMises.empty())
+    out["von_mises"] = w.F32(r.vonMises);
   if (!r.modes.empty()) {
     json modes = json::array();
     for (const fem::FemResults::ModeShape& m : r.modes)
-      modes.push_back({{"frequency_hz", m.frequencyHz},
-                       {"shape", FlatVec3(m.displacement)}});
+      modes.push_back(
+          {{"frequency_hz", m.frequencyHz}, {"shape", w.F32(m.displacement)}});
     out["modes"] = std::move(modes);
   }
   return out;
 }
 
-fem::FemResults FieldsFromJson(const json& j) {
+fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
   fem::FemResults r;
-  r.displacement =
-      Vec3sFromFlat(j.value("displacement", json::array()), "displacement");
-  r.vonMises = j.value("von_mises", std::vector<double>{});
+  if (j.contains("displacement"))
+    r.displacement = f.Vec3s(j.at("displacement"), "displacement");
+  if (j.contains("von_mises"))
+    r.vonMises = f.Reals(j.at("von_mises"), "von_mises");
   r.maxVonMises = j.value("max_von_mises", 0.0);
   r.maxVmNode = j.value("max_vm_node", -1);
   if (j.contains("max_vm_at"))
@@ -322,7 +497,7 @@ fem::FemResults FieldsFromJson(const json& j) {
     r.maxDispAt = Vec3FromJson(j.at("max_disp_at"));
   for (const json& mj : j.value("modes", json::array()))
     r.modes.push_back({mj.at("frequency_hz").get<double>(),
-                       Vec3sFromFlat(mj.at("shape"), "a mode shape")});
+                       f.Vec3s(mj.at("shape"), "a mode shape")});
   return r;
 }
 
@@ -335,11 +510,57 @@ const char* KindOf(const fem::StudyRuntime& rt) {
   return "static";
 }
 
+// A loaded body that indexes past its own nodes is refused: the panel would
+// read out of bounds.
+void CheckBody(const fem::StudyBodyResult& b, const std::string& what) {
+  const size_t n = b.mesh.nodes.size();
+  const auto fail = [&](const std::string& m) {
+    throw std::runtime_error(what + ": body '" + b.bodyName + "' " + m);
+  };
+  for (const auto& t : b.mesh.tets)
+    for (int v : t)
+      if (v < 0 || static_cast<size_t>(v) >= n)
+        fail("has a tet on node " + std::to_string(v) + " of " +
+             std::to_string(n));
+  for (const auto& tr : b.mesh.boundary)
+    for (int v : tr.nodes)
+      if (v < 0 || static_cast<size_t>(v) >= n)
+        fail("has a boundary triangle on node " + std::to_string(v) + " of " +
+             std::to_string(n));
+  if (!b.mesh.tetDomain.empty() &&
+      b.mesh.tetDomain.size() != b.mesh.tets.size())
+    fail("has " + std::to_string(b.mesh.tetDomain.size()) +
+         " tet domains for " + std::to_string(b.mesh.tets.size()) + " tets");
+  if (!b.density.empty() && b.density.size() != b.mesh.tets.size())
+    fail("has " + std::to_string(b.density.size()) + " densities for " +
+         std::to_string(b.mesh.tets.size()) + " tets");
+  const auto perNode = [&](const fem::FemResults& r) {
+    if (!r.displacement.empty() && r.displacement.size() != n)
+      fail("has " + std::to_string(r.displacement.size()) +
+           " displacements for " + std::to_string(n) + " nodes");
+    if (!r.vonMises.empty() && r.vonMises.size() != n)
+      fail("has " + std::to_string(r.vonMises.size()) + " stresses for " +
+           std::to_string(n) + " nodes");
+    for (const auto& m : r.modes)
+      if (m.displacement.size() != n)
+        fail("has a mode shape of " + std::to_string(m.displacement.size()) +
+             " for " + std::to_string(n) + " nodes");
+  };
+  perNode(b.results);
+  for (const fem::FemResults& c : b.cases)
+    perNode(c);
+}
+
 } // namespace
 
-bool StudyResultToJson(const fem::StudyRuntime& rt, json& out) {
-  if (rt.bodies.empty())
+bool StudyResultToJson(const fem::StudyRuntime& runtime, json& out) {
+  if (runtime.bodies.empty())
     return false; // nothing was solved
+  // What is saved is what is kept (a stored runtime already is).
+  fem::StudyRuntime kept = runtime;
+  fem::KeepWhatIsRead(kept);
+  const fem::StudyRuntime& rt = kept;
+  ResultArrayWriter w;
   out = json::object();
   out["kind"] = KindOf(rt);
   if (rt.topology)
@@ -401,39 +622,48 @@ bool StudyResultToJson(const fem::StudyRuntime& rt, json& out) {
                     {"threshold_lowered_from", rt.shapeThresholdLoweredFrom}};
   json bodies = json::array();
   for (const fem::StudyBodyResult& b : rt.bodies) {
-    json tets = json::array();
-    for (const std::array<int, 10>& t : b.mesh.tets)
-      for (int v : t)
-        tets.push_back(v);
-    json boundary = json::array();
-    for (const fem::FemMesh::BoundaryTri& tr : b.mesh.boundary) {
-      for (int v : tr.nodes)
-        boundary.push_back(v);
-      boundary.push_back(tr.faceIndex);
-    }
+    // The solved mesh's counts (v154): a static body keeps its surface only.
     json bj = {{"body_index", b.bodyIndex},
                {"body", b.bodyName},
-               {"nodes", FlatVec3(b.mesh.nodes)},
-               {"tets", std::move(tets)},
-               {"boundary", std::move(boundary)}};
+               {"node_count", b.mesh.stats.nodeCount},
+               {"tet_count", b.mesh.stats.tetCount},
+               {"nodes", w.F32(b.mesh.nodes)}};
+    if (!b.mesh.tets.empty()) {
+      std::vector<int> tets;
+      tets.reserve(b.mesh.tets.size() * 10);
+      for (const std::array<int, 10>& t : b.mesh.tets)
+        tets.insert(tets.end(), t.begin(), t.end());
+      bj["tets"] = w.Index(tets);
+    }
+    std::vector<int> tris, faces;
+    tris.reserve(b.mesh.boundary.size() * 6);
+    faces.reserve(b.mesh.boundary.size());
+    for (const fem::FemMesh::BoundaryTri& tr : b.mesh.boundary) {
+      tris.insert(tris.end(), tr.nodes.begin(), tr.nodes.end());
+      faces.push_back(tr.faceIndex);
+    }
+    bj["boundary"] = w.Index(tris);
+    bj["boundary_face"] = w.Index(faces);
     if (!b.mesh.tetDomain.empty())
-      bj["tet_domain"] = b.mesh.tetDomain;
+      bj["tet_domain"] = w.Index(b.mesh.tetDomain);
     if (b.mesh.stats.worstQuality != 0.0)
       bj["worst_quality"] = b.mesh.stats.worstQuality;
     if (rt.topology) {
-      bj["density"] = b.density;
+      bj["density"] = w.F32(b.density);
     } else if (!b.cases.empty()) {
       // `results` is the first case's copy: written once.
       json cases = json::array();
       for (const fem::FemResults& c : b.cases)
-        cases.push_back(FieldsToJson(c));
+        cases.push_back(FieldsToJson(c, w));
       bj["cases"] = std::move(cases);
     } else if (!b.results.displacement.empty() || !b.results.modes.empty()) {
-      bj["results"] = FieldsToJson(b.results);
+      bj["results"] = FieldsToJson(b.results, w);
     }
     bodies.push_back(std::move(bj));
   }
   out["bodies"] = std::move(bodies);
+  out[kResultData] = w.Take();
+  out["bin_bytes"] = out[kResultData].get_binary().size();
   return true;
 }
 
@@ -444,6 +674,9 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
   if (kind != "topology" && kind != "static" && kind != "modal")
     throw std::runtime_error("study result: kind '" + kind +
                              "' (expected one of: static, modal, topology)");
+  const std::string what = kind + " result";
+  const ResultArrayReader bin(j, what);
+  const FieldReader f{bin};
   rt.topology = kind == "topology";
   if (rt.topology) {
     const json& s = j.at("topology");
@@ -455,7 +688,7 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
   }
   if (j.contains("input_hash") &&
       !inputhash::FromHex(j.at("input_hash").get<std::string>(), rt.inputHash))
-    throw std::runtime_error(kind + " result: input_hash " +
+    throw std::runtime_error(what + ": input_hash " +
                              j.at("input_hash").dump() +
                              " is not 0x and 16 hex digits");
   if (j.contains("maxima")) {
@@ -483,33 +716,59 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
     fem::StudyBodyResult b;
     b.bodyIndex = bj.value("body_index", -1);
     b.bodyName = bj.value("body", std::string{});
-    b.mesh.nodes = Vec3sFromFlat(bj.at("nodes"), "nodes");
-    const auto tets = bj.value("tets", std::vector<int>{});
+    b.mesh.nodes = f.Vec3s(bj.at("nodes"), "nodes");
+    const auto tets = bj.contains("tets") ? f.Indices(bj.at("tets"), "tets")
+                                          : std::vector<int>{};
+    if (tets.size() % 10 != 0)
+      throw std::runtime_error(what + ": tets is not a whole number of tet10s");
     for (size_t i = 0; i + 10 <= tets.size(); i += 10) {
       std::array<int, 10> t;
       for (int k = 0; k < 10; ++k)
         t[k] = tets[i + k];
       b.mesh.tets.push_back(t);
     }
-    const auto boundary = bj.value("boundary", std::vector<int>{});
-    for (size_t i = 0; i + 7 <= boundary.size(); i += 7) {
-      fem::FemMesh::BoundaryTri tr;
-      for (int k = 0; k < 6; ++k)
-        tr.nodes[k] = boundary[i + k];
-      tr.faceIndex = boundary[i + 6];
-      b.mesh.boundary.push_back(tr);
+    const auto boundary = bj.contains("boundary")
+                              ? f.Indices(bj.at("boundary"), "boundary")
+                              : std::vector<int>{};
+    if (bj.contains("boundary_face")) {
+      // v154: six nodes a triangle, and its face apart.
+      const auto faces = f.Indices(bj.at("boundary_face"), "boundary_face");
+      if (boundary.size() != faces.size() * 6)
+        throw std::runtime_error(what + ": " + std::to_string(faces.size()) +
+                                 " boundary faces for " +
+                                 std::to_string(boundary.size()) +
+                                 " boundary nodes (six a triangle)");
+      for (size_t t = 0; t < faces.size(); ++t) {
+        fem::FemMesh::BoundaryTri tr;
+        for (int k = 0; k < 6; ++k)
+          tr.nodes[k] = boundary[t * 6 + k];
+        tr.faceIndex = faces[t];
+        b.mesh.boundary.push_back(tr);
+      }
+    } else {
+      // v153: six nodes and the face, inline.
+      for (size_t i = 0; i + 7 <= boundary.size(); i += 7) {
+        fem::FemMesh::BoundaryTri tr;
+        for (int k = 0; k < 6; ++k)
+          tr.nodes[k] = boundary[i + k];
+        tr.faceIndex = boundary[i + 6];
+        b.mesh.boundary.push_back(tr);
+      }
     }
-    b.mesh.tetDomain = bj.value("tet_domain", std::vector<int>{});
-    b.mesh.stats.nodeCount = b.mesh.nodes.size();
-    b.mesh.stats.tetCount = b.mesh.tets.size();
+    if (bj.contains("tet_domain"))
+      b.mesh.tetDomain = f.Indices(bj.at("tet_domain"), "tet_domain");
+    b.mesh.stats.nodeCount = bj.value("node_count", b.mesh.nodes.size());
+    b.mesh.stats.tetCount = bj.value("tet_count", b.mesh.tets.size());
     b.mesh.stats.worstQuality = bj.value("worst_quality", 0.0);
-    b.density = bj.value("density", std::vector<double>{});
+    if (bj.contains("density"))
+      b.density = f.Reals(bj.at("density"), "density");
     for (const json& cj : bj.value("cases", json::array()))
-      b.cases.push_back(FieldsFromJson(cj));
+      b.cases.push_back(FieldsFromJson(cj, f));
     if (!b.cases.empty())
       b.results = b.cases.front();
     else if (bj.contains("results"))
-      b.results = FieldsFromJson(bj.at("results"));
+      b.results = FieldsFromJson(bj.at("results"), f);
+    CheckBody(b, what);
     rt.bodies.push_back(std::move(b));
   }
   for (const json& cj : j.value("cases", json::array())) {
@@ -531,6 +790,9 @@ fem::StudyRuntime StudyResultFromJson(const json& j) {
     rt.islands.keepFaces = ij.value("keep_faces", std::vector<int>{});
     rt.islands.loadPathBroken = ij.value("load_path_broken", false);
   }
+  // A v153 file's doubles, and its whole static mesh, become what a run
+  // keeps now.
+  fem::KeepWhatIsRead(rt);
   if (rt.topology && !rt.bodies.empty())
     rt.densityDigest =
         fem::DensityDigest(rt.bodies.front().mesh, rt.bodies.front().density);

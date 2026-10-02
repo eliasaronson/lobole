@@ -351,6 +351,7 @@ void AssemblyDocument::StoreStudyResults(uint64_t studyId,
                                          fem::StudyRuntime rt) {
   if (!m_studyRuntime)
     m_studyRuntime = std::make_shared<fem::StudyRuntimeCache>();
+  fem::KeepWhatIsRead(rt); // as it is read back and saved
   m_studyRuntime->byStudy[studyId] = std::move(rt);
   ++m_studyRuntime->epoch;
 }

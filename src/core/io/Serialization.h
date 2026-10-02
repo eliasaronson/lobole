@@ -175,15 +175,19 @@ fem::Study StudyFromJson(const nlohmann::json& j);
 // A study's RESULT (de)serialization: topology (v33), static and modal
 // (v153). Saved with the project beside its study, with the input hash that
 // produced it, so a reopened project's run of the same inputs is answered
-// from it (docs/simulation/README.md#studies-as-jobs): the mesh and what the
-// panel and the RPCs read of it, never the solver's scratch.
+// from it (docs/simulation/README.md#studies-as-jobs): what fem::
+// KeepWhatIsRead keeps, never the solver's scratch. The numeric arrays ride
+// in the json as a binary value (kResultData, SerializationInternal.h),
+// which the directory save writes as <base>.result.bin beside the json
+// (v154) and the load puts back; a v153 json with its arrays inline reads.
 // `solvedAtVersion` is NOT written -- on load the caller stamps it (current
 // when the inputs still hash the same, stale otherwise). Returns false for a
 // runtime that holds nothing solved. Throws on malformed input.
 bool StudyResultToJson(const fem::StudyRuntime& rt, nlohmann::json& out);
 fem::StudyRuntime StudyResultFromJson(const nlohmann::json& j);
-// A motion study's result (v153), the same way: every sample's poses, mate
-// values, clashes and unknown contacts, the pair counts, and its input hash.
+// A motion study's result (v153), the same way: every sample's poses (in the
+// binary value since v154), mate values, clashes and unknown contacts, the
+// pair counts, and its input hash.
 nlohmann::json MotionResultToJson(const motion::Result& result);
 motion::Result MotionResultFromJson(const nlohmann::json& j);
 

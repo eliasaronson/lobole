@@ -332,7 +332,9 @@ public:
     auto it = m_studyRuntime.find(studyId);
     return it == m_studyRuntime.end() ? nullptr : &it->second;
   }
+  // Kept as it is read back and saved (fem::KeepWhatIsRead).
   void StoreStudyResults(uint64_t studyId, fem::StudyRuntime rt) {
+    fem::KeepWhatIsRead(rt);
     m_studyRuntime[studyId] = std::move(rt);
     ++m_studyResultsEpoch;
   }

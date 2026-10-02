@@ -63,11 +63,14 @@ A topology result **is saved with the project**, as every study result is
 ([studies as jobs](../simulation/README.md#studies-as-jobs)): it costs
 minutes, and it is tied to a mesh that Netgen does not reproduce across
 versions or machines, so re-running would not give it back. It is written as
-`studies/<id>-<slug>.result.json` beside the study (flat arrays: mesh nodes
-and tets, per-tet density, compliance history, iterations, achieved volume
-fraction, `input_hash`, the hash of what produced it, and, since v152, each
-case's weight and compliance, what the keep-outs took and the islands
-removed) and loaded into
+`studies/<id>-<slug>.result.json` beside the study (compliance history,
+iterations, achieved volume fraction, `input_hash`, the hash of what
+produced it, and, since v152, each case's weight and compliance, what the
+keep-outs took and the islands removed) with its arrays -- the whole mesh,
+its boundary and the per-tet density, as float -- in
+`<id>-<slug>.result.bin` since v154
+([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps)),
+and loaded into
 the same `StudyRuntime` slot FEM results use. On load it is stamped with
 the settled document version, so it reads current until the part changes --
 unless its saved hash no longer matches the reopened part, when it reads

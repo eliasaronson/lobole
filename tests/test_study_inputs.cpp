@@ -17,11 +17,14 @@
 #include "core/fem/FemMesher.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
+#include "core/io/Autosaver.h"
 #include "core/io/Serialization.h"
 
 #include <nlohmann/json.hpp>
 
+#include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <string>
 
@@ -371,4 +374,114 @@ TEST_CASE("A part with a bore hashes the same after a save and reopen",
           re->GetBodies()[i].elementMap.names);
   }
   fs::remove_all(proj);
+}
+
+// What a saved result keeps (docs/simulation/README.md
+// #what-a-saved-result-keeps): a static body's boundary surface, as float,
+// in a .result.bin beside a small .result.json -- and a save whose result
+// has not changed writes neither file.
+TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
+          "json, and an unchanged save leaves both files alone",
+          "[fem][mesh][serialize][studyjobs]") {
+  namespace fs = std::filesystem;
+  auto bar = BarOf(fem::AnalysisType::Static);
+  fem::StudyRuntime raw;
+  {
+    std::string err;
+    REQUIRE(fem::RunStudy(bar->doc, StudyOf(*bar), raw, &err));
+  }
+  RunAndStore(*bar);
+  const fem::StudyBodyResult& full = raw.bodies[0];
+  const fem::StudyBodyResult& kept =
+      bar->doc.StudyResults(bar->studyId)->bodies[0];
+
+  // The surface, renumbered; the counts of the mesh that was solved.
+  CHECK(kept.mesh.tets.empty());
+  CHECK(kept.mesh.nodes.size() < full.mesh.nodes.size());
+  CHECK(kept.mesh.stats.nodeCount == full.mesh.nodes.size());
+  CHECK(kept.mesh.stats.tetCount == full.mesh.tets.size());
+  REQUIRE(kept.mesh.boundary.size() == full.mesh.boundary.size());
+  const auto f = [](double v) { return double(float(v)); };
+  for (size_t t = 0; t < kept.mesh.boundary.size(); ++t) {
+    CHECK(kept.mesh.boundary[t].faceIndex == full.mesh.boundary[t].faceIndex);
+    for (int k = 0; k < 6; ++k) {
+      const int a = kept.mesh.boundary[t].nodes[k];
+      const int b = full.mesh.boundary[t].nodes[k];
+      CHECK(kept.mesh.nodes[a].x == f(full.mesh.nodes[b].x));
+      CHECK(kept.results.displacement[a].z ==
+            f(full.results.displacement[b].z));
+      CHECK(kept.results.vonMises[a] == f(full.results.vonMises[b]));
+    }
+  }
+  // The peak markers still land on their nodes.
+  REQUIRE(kept.results.maxDispNode >= 0);
+  CHECK(kept.mesh.nodes[kept.results.maxDispNode].x ==
+        f(full.mesh.nodes[full.results.maxDispNode].x));
+
+  const fs::path proj = fs::temp_directory_path() / "study_result_files.dsgn";
+  fs::remove_all(proj);
+  REQUIRE(testio::Save(bar->doc, proj.string()));
+  fs::path json, bin;
+  for (const auto& e : fs::directory_iterator(proj / "studies")) {
+    const std::string name = e.path().filename().string();
+    if (name.ends_with(".result.json"))
+      json = e.path();
+    if (name.ends_with(".result.bin"))
+      bin = e.path();
+  }
+  REQUIRE(!json.empty());
+  REQUIRE(!bin.empty());
+  const nlohmann::json meta =
+      nlohmann::json::parse(std::ifstream(json), nullptr, true);
+  CHECK(meta.at("bin_bytes").get<size_t>() == fs::file_size(bin));
+  CHECK_FALSE(meta.contains("data"));
+  CHECK(fs::file_size(json) < 4096); // metadata only
+  CHECK(meta.at("bodies")[0].at("nodes").at("type") == "f32");
+
+  // Saved again, unchanged -- and reopened and saved -- neither file is
+  // written: both keep the time they had.
+  const auto old = fs::file_time_type::clock::now() - std::chrono::hours(1);
+  fs::last_write_time(json, old);
+  fs::last_write_time(bin, old);
+  REQUIRE(testio::Save(bar->doc, proj.string()));
+  CHECK(fs::last_write_time(json) == old);
+  CHECK(fs::last_write_time(bin) == old);
+  auto reloaded = testio::Load(proj.string());
+  REQUIRE(reloaded != nullptr);
+  REQUIRE(testio::Save(*reloaded, proj.string()));
+  CHECK(fs::last_write_time(json) == old);
+  CHECK(fs::last_write_time(bin) == old);
+
+  // A new answer is written.
+  StudyOf(*bar).loads[1].magnitude = 900.0;
+  RunAndStore(*bar);
+  REQUIRE(testio::Save(bar->doc, proj.string()));
+  CHECK(fs::last_write_time(bin) != old);
+  fs::remove_all(proj);
+}
+
+// docs/versioning/README.md#autosave-and-recovery
+TEST_CASE("An autosave writes no study result", "[fem][studyjobs][autosave]") {
+  namespace fs = std::filesystem;
+  auto bar = BarOf(fem::AnalysisType::Static);
+  RunAndStore(*bar);
+  const fs::path dir = fs::temp_directory_path() / "study_result_autosave";
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  const std::string project = (dir / "bar.dsgn").string();
+  Autosaver saver(10.0);
+  saver.Prime(0.0);
+  std::string error;
+  REQUIRE(saver.MaybeSave(bar->doc, project, bar->doc.SaveStamp() - 1, 11.0,
+                          &error));
+  const fs::path sidecar = Autosaver::SidecarPath(project);
+  REQUIRE(fs::is_regular_file(sidecar));
+  for (const auto& e : fs::recursive_directory_iterator(dir))
+    CHECK(e.path().filename().string().find(".result.") == std::string::npos);
+  std::ifstream in(sidecar);
+  const std::string text((std::istreambuf_iterator<char>(in)),
+                         std::istreambuf_iterator<char>());
+  CHECK(text.find("displacement") == std::string::npos);
+  CHECK(text.find("input_hash") == std::string::npos);
+  fs::remove_all(dir);
 }

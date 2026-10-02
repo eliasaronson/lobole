@@ -8,6 +8,10 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
+#include <bit>
+#include <cstdint>
+#include <map>
 #include <string>
 
 using nlohmann::json;
@@ -617,22 +621,15 @@ Relation RelationFromJson(const json& j) {
   return r;
 }
 
-// ---- Motion result (v153) --------------------------------------------------
-// Saved beside its study (motion/<id>-<slug>.result.json) with the input
-// hash that produced it: a reopened project's run of the same inputs is
-// answered from it (docs/simulation/README.md#studies-as-jobs). Everything
-// the table, the scrub, the export and the RPCs read; a matrix as its 16
-// numbers, column by column.
+// ---- Motion result (v153, binary v154) -------------------------------------
+// Saved beside its study (motion/<id>-<slug>.result.json and .result.bin)
+// with the input hash that produced it: a reopened project's run of the same
+// inputs is answered from it (docs/simulation/README.md#studies-as-jobs).
+// Everything the table, the scrub, the export and the RPCs read; each
+// placement a matrix of 16 f64 in the .bin, column by column (a v153 file
+// held them inline).
 
 namespace {
-
-json Mat4ToJson(const glm::dmat4& m) {
-  json out = json::array();
-  for (int c = 0; c < 4; ++c)
-    for (int r = 0; r < 4; ++r)
-      out.push_back(m[c][r]);
-  return out;
-}
 
 glm::dmat4 Mat4FromJson(const json& j) {
   if (!j.is_array() || j.size() != 16)
@@ -692,26 +689,60 @@ motion::Clash ClashFromJson(const json& j) {
 } // namespace
 
 json MotionResultToJson(const motion::Result& r) {
+  // The placements go to the .result.bin (v154): each distinct matrix once
+  // in `placements`, 16 f64 column by column -- a pose is the model's, which
+  // is double (docs/conventions.md#the-model-is-double) -- and each sample's
+  // poses as indices into it. Most occurrences hold still through a run,
+  // and one that does is one matrix, not one a sample. Distinct by bits, so
+  // the table gives back exactly what was written.
+  ResultArrayWriter w;
+  std::map<std::array<std::uint64_t, 16>, int> seen;
+  std::vector<double> table;
+  const auto placements = [&](const std::vector<const glm::dmat4*>& ms) {
+    std::vector<int> indices;
+    indices.reserve(ms.size());
+    for (const glm::dmat4* m : ms) {
+      std::array<std::uint64_t, 16> bits;
+      for (int c = 0; c < 4; ++c)
+        for (int row = 0; row < 4; ++row)
+          bits[c * 4 + row] = std::bit_cast<std::uint64_t>((*m)[c][row]);
+      const auto [it, added] =
+          seen.emplace(bits, static_cast<int>(table.size() / 16));
+      if (added)
+        for (int c = 0; c < 4; ++c)
+          for (int row = 0; row < 4; ++row)
+            table.push_back((*m)[c][row]);
+      indices.push_back(it->second);
+    }
+    return w.Index(indices);
+  };
   json samples = json::array();
   for (const motion::Sample& s : r.samples) {
-    json worlds = json::array();
-    for (const auto& [id, m] : s.worlds)
-      worlds.push_back({{"occurrence", id}, {"world", Mat4ToJson(m)}});
+    json occurrences = json::array();
+    std::vector<const glm::dmat4*> worlds;
+    for (const auto& [id, m] : s.worlds) {
+      occurrences.push_back(id);
+      worlds.push_back(&m);
+    }
     json sj = {{"t", s.t},
                {"value", s.value},
                {"solved", s.solved},
-               {"worlds", std::move(worlds)}};
+               {"worlds",
+                {{"occurrences", std::move(occurrences)},
+                 {"world", placements(worlds)}}}};
     if (s.erroredMates != 0)
       sj["errored_mates"] = s.erroredMates;
     if (s.residualMm != 0.0)
       sj["residual_mm"] = s.residualMm;
     if (!s.leaves.empty()) {
       json leaves = json::array();
-      for (const motion::Sample::LeafWorld& l : s.leaves)
-        leaves.push_back({{"root", l.root},
-                          {"occurrence", l.occurrence},
-                          {"world", Mat4ToJson(l.world)}});
+      std::vector<const glm::dmat4*> leafWorlds;
+      for (const motion::Sample::LeafWorld& l : s.leaves) {
+        leaves.push_back({{"root", l.root}, {"occurrence", l.occurrence}});
+        leafWorlds.push_back(&l.world);
+      }
       sj["leaves"] = std::move(leaves);
+      sj["leaf_world"] = placements(leafWorlds);
     }
     if (!s.clashes.empty()) {
       json clashes = json::array();
@@ -771,11 +802,42 @@ json MotionResultToJson(const motion::Result& r) {
     out["error"] = r.error;
   if (r.inputHash != 0)
     out["input_hash"] = inputhash::Hex(r.inputHash);
+  out["placements"] = w.F64(table);
+  out[kResultData] = w.Take();
+  out["bin_bytes"] = out[kResultData].get_binary().size();
   return out;
 }
 
 motion::Result MotionResultFromJson(const json& j) {
   motion::Result r;
+  const ResultArrayReader bin(j, "motion result");
+  // The distinct placements, and `count` of them named by indices (v154).
+  std::vector<double> table;
+  if (j.contains("placements")) {
+    table = bin.Reals(j.at("placements"), "placements");
+    if (table.size() % 16 != 0)
+      throw std::runtime_error(
+          "motion result: placements is not a whole number of matrices");
+  }
+  const auto placements = [&](const json& ref, size_t count, const char* name) {
+    const std::vector<int> indices = bin.Indices(ref, name);
+    if (indices.size() != count)
+      throw std::runtime_error("motion result: " + std::string(name) +
+                               " names " + std::to_string(indices.size()) +
+                               " placements for " + std::to_string(count));
+    std::vector<glm::dmat4> out(count, glm::dmat4(1.0));
+    for (size_t i = 0; i < count; ++i) {
+      const int k = indices[i];
+      if (k < 0 || static_cast<size_t>(k) >= table.size() / 16)
+        throw std::runtime_error("motion result: " + std::string(name) +
+                                 " names placement " + std::to_string(k) +
+                                 " of " + std::to_string(table.size() / 16));
+      for (int c = 0; c < 4; ++c)
+        for (int row = 0; row < 4; ++row)
+          out[i][c][row] = table[k * 16 + c * 4 + row];
+    }
+    return out;
+  };
   for (const json& sj : j.at("samples")) {
     motion::Sample s;
     s.t = sj.at("t").get<double>();
@@ -783,13 +845,27 @@ motion::Result MotionResultFromJson(const json& j) {
     s.solved = sj.value("solved", true);
     s.erroredMates = sj.value("errored_mates", 0);
     s.residualMm = sj.value("residual_mm", 0.0);
-    for (const json& wj : sj.value("worlds", json::array()))
-      s.worlds.emplace_back(wj.at("occurrence").get<uint64_t>(),
-                            Mat4FromJson(wj.at("world")));
-    for (const json& lj : sj.value("leaves", json::array()))
-      s.leaves.push_back({lj.at("root").get<uint64_t>(),
-                          lj.at("occurrence").get<uint64_t>(),
-                          Mat4FromJson(lj.at("world"))});
+    const json worlds = sj.value("worlds", json::array());
+    if (worlds.is_object()) {
+      const auto ids = worlds.at("occurrences").get<std::vector<uint64_t>>();
+      const auto ms = placements(worlds.at("world"), ids.size(), "worlds");
+      for (size_t i = 0; i < ids.size(); ++i)
+        s.worlds.emplace_back(ids[i], ms[i]);
+    } else {
+      for (const json& wj : worlds) // v153: inline
+        s.worlds.emplace_back(wj.at("occurrence").get<uint64_t>(),
+                              Mat4FromJson(wj.at("world")));
+    }
+    const json leaves = sj.value("leaves", json::array());
+    std::vector<glm::dmat4> leafWorlds;
+    if (sj.contains("leaf_world"))
+      leafWorlds = placements(sj.at("leaf_world"), leaves.size(), "leaves");
+    for (size_t i = 0; i < leaves.size(); ++i) {
+      const json& lj = leaves[i];
+      s.leaves.push_back(
+          {lj.at("root").get<uint64_t>(), lj.at("occurrence").get<uint64_t>(),
+           leafWorlds.empty() ? Mat4FromJson(lj.at("world")) : leafWorlds[i]});
+    }
     for (const json& cj : sj.value("clashes", json::array()))
       s.clashes.push_back(ClashFromJson(cj));
     for (const json& uj : sj.value("unknown_contacts", json::array())) {

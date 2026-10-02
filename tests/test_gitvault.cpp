@@ -790,3 +790,70 @@ TEST_CASE("GitVault: the log says what each version changed", "[git]") {
   for (const auto& e : log)
     CHECK(e.subject == "save");
 }
+
+namespace {
+
+std::string TrackedFiles(const ScratchRepo& repo) {
+  const std::string cmd = "git -C '" + repo.path() + "' ls-files 2>/dev/null";
+  FILE* pipe = ::popen(cmd.c_str(), "r");
+  if (!pipe)
+    return "";
+  std::string out;
+  char buffer[512];
+  size_t n = 0;
+  while ((n = ::fread(buffer, 1, sizeof(buffer), pipe)) > 0)
+    out.append(buffer, n);
+  ::pclose(pipe);
+  return out;
+}
+
+} // namespace
+
+// docs/versioning/README.md#saved-results-stay-out-of-the-history
+TEST_CASE("GitVault: a saved study result stays out of the history, and the "
+          "newest stays on disk",
+          "[git][studyjobs]") {
+  if (!GitVault::Available())
+    SKIP("git is not on PATH");
+  ScratchRepo repo("results");
+  // A repository an earlier build committed results into.
+  {
+    const std::string cmd = "git -C '" + repo.path() + "' init -q 2>/dev/null";
+    [[maybe_unused]] const int rc = std::system(cmd.c_str());
+  }
+  repo.Write("parts/bar/index.json", "{}");
+  repo.Write("parts/bar/studies/3-bend.json", "{}");
+  repo.Write("parts/bar/studies/3-bend.result.json", R"({"kind":"static"})");
+  {
+    const std::string cmd = "git -C '" + repo.path() +
+                            "' add -A 2>/dev/null && git -C '" + repo.path() +
+                            "' -c user.name=t -c user.email=t@t commit -q -m "
+                            "old 2>/dev/null";
+    [[maybe_unused]] const int rc = std::system(cmd.c_str());
+  }
+  REQUIRE(TrackedFiles(repo).find(".result.json") != std::string::npos);
+
+  // The next save takes it out of the index and leaves it on disk.
+  repo.Write("parts/bar/studies/3-bend.result.bin", "0123");
+  REQUIRE(GitVault::CommitAll(repo.path(), "save"));
+  std::string tracked = TrackedFiles(repo);
+  CHECK(tracked.find("3-bend.json") != std::string::npos);
+  CHECK(tracked.find(".result.") == std::string::npos);
+  CHECK(repo.Has("parts/bar/studies/3-bend.result.json"));
+  CHECK(repo.Has("parts/bar/studies/3-bend.result.bin"));
+  CHECK_FALSE(GitVault::Dirty(repo.path()));
+
+  // A new result is not a change to commit, and a new repository keeps
+  // results out from its first save.
+  repo.Write("parts/bar/studies/3-bend.result.bin", "4567");
+  CHECK_FALSE(GitVault::Dirty(repo.path()));
+  ScratchRepo fresh("results-fresh");
+  REQUIRE(GitVault::Init(fresh.path()));
+  fresh.Write("motion/5-turn.json", "{}");
+  fresh.Write("motion/5-turn.result.json", "{}");
+  fresh.Write("motion/5-turn.result.bin", "89");
+  REQUIRE(GitVault::CommitAll(fresh.path(), "save"));
+  tracked = TrackedFiles(fresh);
+  CHECK(tracked.find("5-turn.json") != std::string::npos);
+  CHECK(tracked.find(".result.") == std::string::npos);
+}

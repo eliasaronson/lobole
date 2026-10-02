@@ -261,6 +261,27 @@ struct StudyRuntime {
   double shapeThresholdLoweredFrom = 0.0;
 };
 
+// Reduces a solved runtime to what is read back from it
+// (docs/simulation/README.md#what-a-saved-result-keeps), which is also what
+// the project saves: every stored result passes through here
+// (Document::StoreStudyResults, AssemblyDocument::StoreStudyResults), so a
+// result reopened from disk equals the one the run left in memory.
+//
+// - Fields are float, as derived bulk data is (docs/conventions.md
+//   #the-model-is-double): node positions, displacements, stresses, mode
+//   shapes and densities are rounded to float and held in the double fields.
+// - A static or modal body keeps the boundary surface: its triangles, the
+//   nodes they use (and the peak nodes), and those nodes' fields, renumbered
+//   in their old order. Every panel and RPC reads a static result there --
+//   the contour, the deformed shape, a face's motion, the peak markers;
+//   nothing reads the interior back. The tets go; `mesh.stats` keeps the
+//   solved mesh's counts.
+// - A topology body keeps its whole mesh: the density is per tet, and the
+//   iso-surface, the STL export and a static study of the shape cut tets.
+// - A domain record that names one domain is dropped (empty means one).
+// Idempotent: a reduced runtime passes through unchanged.
+void KeepWhatIsRead(StudyRuntime& rt);
+
 // (Document is forward-declared at global scope by FemStudy.h.)
 
 // Meshes and solves the study across every body it loads: evaluates the

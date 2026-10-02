@@ -676,8 +676,12 @@ uint64_t DensityDigest(const FemMesh& mesh,
   };
   const uint64_t counts[2] = {mesh.nodes.size(), mesh.tets.size()};
   mix(counts, sizeof(counts));
-  if (!density.empty())
-    mix(density.data(), density.size() * sizeof(double));
+  // Over the density as float, which is what a result keeps
+  // (KeepWhatIsRead): the run's digest and the reopened one's agree.
+  for (const double d : density) {
+    const float f = static_cast<float>(d);
+    mix(&f, sizeof(f));
+  }
   return h == 0 ? 1 : h;
 }
 

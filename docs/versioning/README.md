@@ -230,7 +230,34 @@ A clean save clears every sidecar (and the unsaved slot). Recovery:
   `autosave_now` writes every dirty document immediately.
 
 The sidecars sit beside the project, outside its directory, so they are
-outside its git repository and outside the disk stamp below.
+outside its git repository and outside the disk stamp below. A sidecar is
+the single-file form, which carries no study result: an autosave never
+writes one, and a recovered document's studies run again
+([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps)).
+
+## Saved results stay out of the history
+
+A study or motion result is saved beside its study
+([studies as jobs](../simulation/README.md#studies-as-jobs)), and the
+project's repository does not keep it: `GitVault::CommitAll` (and
+`CommitMerge`) writes `*.result.json` and `*.result.bin` into the
+repository's own exclude file (`.git/info/exclude`, found with `git
+rev-parse --git-path`) and takes any result an earlier build committed out
+of the index (`git rm --cached`), leaving the file on disk; `Init` writes
+the rule from the first commit.
+
+None, rather than the newest: a result is reproducible from its inputs and
+named by their hash, so a version needs none to be what it was, and git
+keeps every blob it was ever given -- "only the newest" in a history is a
+history rewrite on every run. A few re-runs of the yoke's 52 MB static
+result held more than the rest of the project together. The newest result
+of each study is the one in the working tree, which git leaves alone:
+restoring a version keeps it, and the reopen reads it current when the
+restored inputs hash the same and stale when they do not; a clone, or a
+teammate's pull, carries no results, and their studies run again there.
+Because a result is untracked, a new one is not a change to commit and does
+not make the project dirty (`GitVault::Dirty`). History written before v154
+keeps the results it holds; nothing rewrites it.
 
 ## Changes made outside the app
 
