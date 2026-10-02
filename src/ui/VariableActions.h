@@ -70,6 +70,13 @@ const Parameter* FindProjectParameter(const AppState& state,
 [[nodiscard]] std::vector<std::string>
 ProjectTableReferences(AppState& state, const std::string& name);
 
+// Pushes ONE project-variable undo entry for an edit that is about to change
+// both the project variables and some features' fields: undo restores the
+// variables as they are now AND puts `features` (their JSON as it is now)
+// back. Call it before making the edit; then edit and SyncProjectScope.
+void PushProjectVarUndoWithFeatures(
+    AppState& state, std::vector<ProjectVarSnapshot::FeatureState> features);
+
 bool UndoProjectVars(AppState& state);
 
 bool RedoProjectVars(AppState& state);

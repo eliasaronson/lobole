@@ -106,6 +106,7 @@ add_executable(designer_tests
     test_remove_features.cpp
     test_expression.cpp
     test_lookup_table.cpp
+    test_literals.cpp
     test_variables.cpp
     test_datum.cpp
     test_primitives.cpp
@@ -618,6 +619,15 @@ add_test(NAME tables_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/tables_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(tables_smoke PROPERTIES TIMEOUT 120)
+
+# check_literals and extract_variables over RPC
+# (docs/variables/README.md#literals-that-should-be-expressions): the lint's
+# two findings, a dry run that changes nothing, an apply that moves no
+# geometry and is one undo step in either scope, reuse, refusals. Headless.
+add_test(NAME literals_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/literals_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(literals_smoke PROPERTIES TIMEOUT 120)
 
 # The printing process allowance (docs/tolerances/README.md#printed-parts):
 # check_fit, check_fits, print_allowance and a Thread's answer on a printed

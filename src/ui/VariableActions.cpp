@@ -162,9 +162,40 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
 }
 
 namespace {
-// Applies a project-var undo/redo snapshot: replay the cross-part reference
-// rewrite (rename only), restore the table, regenerate all.
+// The features an entry names, as they stand now: what the opposite entry
+// (redo for an undo, undo for a redo) puts back.
+std::vector<ProjectVarSnapshot::FeatureState>
+CurrentFeatureStates(AppState& state,
+                     const std::vector<ProjectVarSnapshot::FeatureState>& of) {
+  std::vector<ProjectVarSnapshot::FeatureState> out;
+  for (const ProjectVarSnapshot::FeatureState& f : of)
+    // the live part: its authored features, not a placement of it
+    if (Document* d = PartDocById(state, f.partId))
+      if (const Feature* feature = d->FindFeatureById(f.featureId))
+        out.push_back(
+            {f.partId, f.featureId, DocumentIO::FeatureToJson(*feature)});
+  return out;
+}
+
+// Applies a project-var undo/redo snapshot: put back the features it names,
+// replay the cross-part reference rewrite (rename only), restore the table,
+// regenerate all.
 void ApplyProjectVarSnapshot(AppState& state, const ProjectVarSnapshot& s) {
+  // A part whose features come back regenerates ONCE, after the project
+  // table is evaluated: the guards defer it past SyncProjectScope, so a
+  // feature reading a variable this entry restores never sees the old table.
+  std::vector<std::unique_ptr<Document::BulkEdit>> guards;
+  std::set<Document*> guarded;
+  for (const ProjectVarSnapshot::FeatureState& f : s.features) {
+    // the live part: its authored features, not a placement of it
+    Document* d = PartDocById(state, f.partId);
+    size_t index = 0;
+    if (d == nullptr || d->FindFeatureById(f.featureId, &index) == nullptr)
+      continue;
+    if (guarded.insert(d).second)
+      guards.push_back(std::make_unique<Document::BulkEdit>(*d));
+    d->ReplaceFeature(index, DocumentIO::FeatureFromJson(f.json));
+  }
   if (!s.docRefFrom.empty()) {
     for (size_t i = 0; i < state.parts.size(); i++)
       if (Document* d = SlotDoc(state, i))
@@ -189,6 +220,12 @@ void PushProjectVarUndo(AppState& state, std::vector<Parameter> preEdit,
   state.projectVarHistory.redo.clear();
 }
 } // namespace
+
+void PushProjectVarUndoWithFeatures(
+    AppState& state, std::vector<ProjectVarSnapshot::FeatureState> features) {
+  PushProjectVarUndo(state, state.projectParameters, {}, {});
+  state.projectVarHistory.undo.back().features = std::move(features);
+}
 
 bool SetProjectVariable(AppState& state, const std::string& name,
                         const std::string& expression,
@@ -355,6 +392,7 @@ bool UndoProjectVars(AppState& state) {
   redoEntry.stamp = entry.stamp;
   redoEntry.docRefFrom = entry.docRefTo;
   redoEntry.docRefTo = entry.docRefFrom;
+  redoEntry.features = CurrentFeatureStates(state, entry.features);
   state.projectVarHistory.redo.push_back(std::move(redoEntry));
   ApplyProjectVarSnapshot(state, entry);
   return true;
@@ -371,6 +409,7 @@ bool RedoProjectVars(AppState& state) {
   undoEntry.stamp = entry.stamp;
   undoEntry.docRefFrom = entry.docRefTo;
   undoEntry.docRefTo = entry.docRefFrom;
+  undoEntry.features = CurrentFeatureStates(state, entry.features);
   state.projectVarHistory.undo.push_back(std::move(undoEntry));
   ApplyProjectVarSnapshot(state, entry);
   return true;

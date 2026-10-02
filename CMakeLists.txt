@@ -372,6 +372,7 @@ set(core_sources
     src/core/Command.cpp
     src/core/Expression.cpp
     src/core/LookupTable.cpp
+    src/core/Literals.cpp
     src/core/catalog/Catalog.cpp
     src/core/io/GeometryCache.cpp
     src/core/parts/AxisStack.cpp
@@ -751,6 +752,8 @@ set(app_sources
     src/ui/ConfigurationsPanel.cpp
     src/ui/VariablesPanel.cpp
     src/ui/TablesPanel.cpp
+    src/ui/LiteralsPanel.cpp
+    src/ui/LiteralActions.cpp
     src/ui/HistoryPanel.cpp
     src/ui/ConflictsPanel.cpp
     src/ui/BackgroundJobs.cpp

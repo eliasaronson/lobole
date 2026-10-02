@@ -42,6 +42,11 @@ GATED_ON_PURPOSE = {
     # Its source is the active part's body unless `part` names another; the
     # handler reads the part document through its helper.
     "split_for_printing": "it cuts the active part's body by default",
+    # The literals lint reads the active part unless `part` names another,
+    # and extract_variables edits the active part's features; both reach the
+    # document through their helpers (RemoteModeling.cpp).
+    "check_literals": "it lints the active part by default",
+    "extract_variables": "it edits the active part's features",
     # orient_to_face sat here ("assembly-tab behaviour unverified") until
     # --offscreen provided a render surface to verify on; it is ungated now
     # and tests/offscreen_smoke.py pins its assembly-tab behaviour.

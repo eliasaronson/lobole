@@ -801,6 +801,16 @@ struct ProjectVarSnapshot {
   // every part's feature/parameter expressions (a project-var rename's ref
   // rewrite; empty for set/delete).
   std::string docRefFrom, docRefTo;
+  // Features the edit also changed, each as the JSON to put back: an edit
+  // that adds project variables AND points feature fields at them
+  // (extract_variables, docs/variables/README.md#extracting-variables) is
+  // one undo step, not one per stack.
+  struct FeatureState {
+    uint64_t partId = 0; // the part slot's id
+    uint64_t featureId = 0;
+    nlohmann::json json;
+  };
+  std::vector<FeatureState> features;
 };
 struct ProjectVarHistory {
   std::vector<ProjectVarSnapshot> undo;

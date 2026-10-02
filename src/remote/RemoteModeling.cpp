@@ -7,8 +7,9 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/Expression.h"
-#include "core/PrintSplit.h"
+#include "core/Literals.h"
 #include "core/Primitives.h"
+#include "core/PrintSplit.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
@@ -22,6 +23,7 @@
 #include "ui/AssemblyActions.h" // PartDocById
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/LiteralActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/RendererSync.h"
 #include "ui/ToleranceActions.h" // PrintedThreadFor
@@ -428,6 +430,53 @@ static constexpr MethodDoc ModelingMethods[] = {
      "angle, angle_deg, center, circular, count, line1, line2, link, radius, "
      "sketch_id, sources, step",
      remote::NeedsPart},
+    {"check_literals",
+     "ADVISORY lint for numbers that should be expressions "
+     "(docs/variables/README.md#literals-that-should-be-expressions); it "
+     "reports and never refuses, and a finding is a suggestion, not a "
+     "failure. `literals`: feature fields holding a bare number EQUAL to a "
+     "variable in scope (`variables` names each, '-name' for the negation) "
+     "-- lengths compared with lengths, angles and counts only with "
+     "variables used as such; `value` is mm for a length, degrees for an "
+     "angle. `placements`: a sketch (a primitive is one) or an explicit "
+     "Frame placed in the WORLD (a base plane, an offset of one, a datum "
+     "plane, a fixed frame) whose plane a planar face of the part already "
+     "lies on, over that face -- `face` is what to attach it to "
+     "(face_ref), so it follows the part instead of floating when it "
+     "changes. `part` (name or id) lints another part than the active one. "
+     "Run it after building a part from literals; extract_variables "
+     "{reuse: true} binds the literal findings.",
+     "part", remote::NeedsPart,
+     "{part, literals[]{feature_id, feature, field, label, value, quantity, "
+     "variables[]}, placements[]{feature_id, feature, on, origin, normal, "
+     "face{feature_id, element}, face_made_by, face_feature}, "
+     "checked{fields, placements}}"},
+    {"extract_variables",
+     "Turn the active part's literal dimensions into named variables with "
+     "expressions (docs/variables/README.md#extracting-variables). Without "
+     "`apply` it is a DRY RUN that changes nothing and answers the plan: "
+     "each proposed variable {name, expression, value, quantity, uses[] -- "
+     "the fields it would drive}, and every literal `left_alone` with the "
+     "reason (no expression twin, a unitless count, zero, a coordinate a "
+     "sketch constraint fixes, a hole diameter its fit sets). With `apply: "
+     "true` it creates the variables and sets each field's expression as "
+     "ONE undo step; the geometry does not move. `feature_ids` limits it "
+     "to those features, `fields` to those field paths (as the dry run "
+     "and check_literals name them: \"distance\", \"constraints/3\", "
+     "\"entities/1/r\"); an unknown one is refused naming what exists. "
+     "Names are <feature>_<field>, after `prefix`. Equal literals in "
+     "DIFFERENT features share one variable only with `merge_equal: "
+     "true` (equal is not the same as related); within one feature they "
+     "always do. `reuse: true` binds a literal to the ONE existing "
+     "variable it equals (check_literals' finding) instead. `scope` is "
+     "'project' (the default) or 'part'. `value` is mm for a length, "
+     "degrees for an angle.",
+     "apply, feature_ids, fields, merge_equal, prefix, reuse, scope",
+     remote::NeedsPart,
+     "{applied, scope, variables[]{name, expression, value, quantity, "
+     "existing, uses[]{feature_id, feature, field, label, expression}}, "
+     "left_alone[]{feature_id, feature, field, label, value, reason}, "
+     "regen, digest}"},
     // NOTE: list_variables is documented and handled in RemoteProject.cpp,
     // where the handler is. A second row here made `describe` list the
     // method TWICE — the convention is one row per `m ==` branch, and this
@@ -466,6 +515,131 @@ std::unique_ptr<Feature> FeatureFromJsonNamed(const nlohmann::json& j) {
 } // namespace
 
 namespace {
+
+json LiteralFieldJson(uint64_t featureId, const std::string& feature,
+                      const literals::Field& f) {
+  return {{"feature_id", featureId},
+          {"feature", feature},
+          {"field", f.path},
+          {"label", f.label},
+          {"value", f.value},
+          {"quantity", literals::QuantityName(f.quantity)}};
+}
+
+// check_literals
+// (docs/variables/README.md#literals-that-should-be-expressions).
+json CheckLiterals(ui::AppState& state, Document& active, const RpcParams& p) {
+  size_t slot = static_cast<size_t>(state.activePart);
+  if (p.contains("part"))
+    slot = ResolveSlotIndex(state, p.at("part"));
+  if (slot >= state.parts.size() || state.parts[slot].kind != ui::DocKind::Part)
+    throw std::runtime_error("check_literals: `part` is not a part");
+  const Document* doc = slot == static_cast<size_t>(state.activePart)
+                            ? &active
+                            : ui::PartDocById(state, state.parts[slot].id);
+  if (doc == nullptr)
+    throw std::runtime_error("check_literals: part '" + state.parts[slot].name +
+                             "' is not loaded");
+  const literals::Report report = ui::LintDocument(state, *doc);
+  json lits = json::array();
+  for (const literals::LiteralFinding& f : report.literals) {
+    json j = LiteralFieldJson(f.featureId, f.feature, f.field);
+    j["variables"] = f.variables;
+    lits.push_back(std::move(j));
+  }
+  json places = json::array();
+  for (const literals::PlacementFinding& f : report.placements)
+    places.push_back(
+        {{"feature_id", f.featureId},
+         {"feature", f.feature},
+         {"on", f.on},
+         {"origin", {f.origin.x, f.origin.y, f.origin.z}},
+         {"normal", {f.normal.x, f.normal.y, f.normal.z}},
+         {"face", {{"feature_id", f.face.featureId}, {"element", f.face.name}}},
+         {"face_made_by", f.faceMadeBy},
+         {"face_feature", f.faceFeature}});
+  return {{"part", state.parts[slot].name},
+          {"literals", std::move(lits)},
+          {"placements", std::move(places)},
+          {"checked",
+           {{"fields", report.fieldsChecked},
+            {"placements", report.placementsChecked}}}};
+}
+
+// extract_variables (docs/variables/README.md#extracting-variables).
+json ExtractVariables(ui::AppState& state, Document& doc, const RpcParams& p) {
+  literals::ExtractOptions options;
+  if (p.contains("feature_ids")) {
+    const json& ids = p.at("feature_ids");
+    if (!ids.is_array())
+      throw std::runtime_error("feature_ids is an array of feature ids");
+    for (const json& id : ids)
+      options.featureIds.push_back(id.get<uint64_t>());
+  }
+  if (p.contains("fields")) {
+    const json& fields = p.at("fields");
+    if (!fields.is_array())
+      throw std::runtime_error("fields is an array of field paths "
+                               "(\"distance\", \"constraints/3\")");
+    for (const json& f : fields)
+      options.paths.push_back(f.get<std::string>());
+  }
+  options.prefix = p.value("prefix", std::string{});
+  options.mergeEqual = p.value("merge_equal", false);
+  options.reuse = p.value("reuse", false);
+  const std::string scope = p.value("scope", std::string("project"));
+  if (scope != "project" && scope != "part")
+    throw std::runtime_error("scope is 'project' (the default) or 'part', "
+                             "not '" +
+                             scope + "'");
+  const bool apply = p.value("apply", false);
+
+  const literals::ExtractPlan plan =
+      ui::PlanExtractVariables(state, std::move(options));
+  json vars = json::array();
+  for (const literals::Proposal& pr : plan.proposals) {
+    json uses = json::array();
+    for (const literals::Use& u : pr.uses) {
+      json j = LiteralFieldJson(u.featureId, u.feature, u.field);
+      j.erase("value");
+      j.erase("quantity");
+      j["expression"] = u.expression;
+      uses.push_back(std::move(j));
+    }
+    vars.push_back({{"name", pr.name},
+                    {"expression", pr.expression},
+                    {"value", pr.value},
+                    {"quantity", literals::QuantityName(pr.quantity)},
+                    {"existing", pr.existing},
+                    {"uses", std::move(uses)}});
+  }
+  json left = json::array();
+  for (const literals::LeftAlone& l : plan.leftAlone) {
+    json j = {{"feature_id", l.featureId},
+              {"feature", l.feature},
+              {"field", l.path},
+              {"label", l.label},
+              {"reason", l.reason}};
+    if (l.hasValue)
+      j["value"] = l.value;
+    left.push_back(std::move(j));
+  }
+  json out = {{"applied", false},
+              {"scope", scope},
+              {"variables", std::move(vars)},
+              {"left_alone", std::move(left)}};
+  if (!apply)
+    return out;
+  const json preDigest = BodyDigestJson(doc);
+  if (const std::string why =
+          ui::ApplyExtractVariables(state, plan, scope == "project");
+      !why.empty())
+    throw std::runtime_error("extract_variables: " + why);
+  out["applied"] = !plan.proposals.empty();
+  out["regen"] = RegenSummaryJson(doc);
+  out["digest"] = DigestJson(preDigest, doc);
+  return out;
+}
 
 // split_for_printing (docs/topopt/README.md#split-for-printing).
 json SplitForPrinting(ui::AppState& state, Document& active,
@@ -663,6 +837,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   Document* doc = &document;
   if (m == "split_for_printing") {
     return SplitForPrinting(state, document, p);
+  }
+  if (m == "check_literals") {
+    return CheckLiterals(state, document, p);
+  }
+  if (m == "extract_variables") {
+    return ExtractVariables(state, document, p);
   }
   if (m == "select_feature") {
     // Select a feature by index or feature_id (-1 / 0 clears). Drives the

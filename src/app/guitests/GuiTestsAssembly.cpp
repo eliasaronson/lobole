@@ -10,6 +10,7 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/ViewActions.h"
 
+#include "core/Literals.h"
 #include "render/StockRenderer.h" // Viewport(): what the capture restores
 #include "thirdparty/stb_image.h"
 #include "ui/ImportJob.h"
@@ -2647,6 +2648,71 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//###Variables/###table_del_bearings");
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->projectTables.size(), (size_t)1);
+
+    showPanel(ui::kPanelModel); // or the next test starts on the wrong tab
+  };
+
+  // The Literals section
+  // (docs/variables/README.md#literals-that-should-be-expressions): Check
+  // finds the extrude whose distance equals a variable, Use binds it, Extract +
+  // Apply names the rest as ONE undo step, and the geometry never moves.
+  t = IM_REGISTER_TEST(engine, "variables", "literals_by_clicking");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddRectSketch(ctx, 1, 2.0f);
+    ToolbarCreateAccept(ctx, "###tb_extrude");
+    ctx->Yield(2);
+    Feature* extrude = Doc()->GetFeature(Doc()->FeatureCount() - 1);
+    IM_CHECK_SILENT(extrude != nullptr);
+    double distance = 0.0;
+    extrude->VisitExprs([&](std::string&, double& v) {
+      if (distance == 0.0)
+        distance = v; // an extrude's first field is its distance
+    });
+    IM_CHECK(distance > 0.0);
+    const double volume = Doc()->GetBodies().at(0).shape.Volume();
+    // A variable equal to it, as a generator leaves one beside a literal.
+    IM_CHECK(ui::SetProjectVariable(
+        *s_App, "plate_t", literals::ExactNumber(distance), "mm, the plate"));
+    const size_t vars = s_App->projectParameters.size();
+
+    const auto showPanel = [&](const char* title) {
+      ImGuiWindow* w = ImGui::FindWindowByName(title);
+      IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+      ctx->ItemClick(w->TabId);
+      ctx->Yield(2);
+    };
+    showPanel(ui::kPanelVariables);
+    ctx->ItemOpen("//###Variables/###literals_header");
+    ctx->Yield(2);
+    // Extract: a dry run to read, then Apply -- one undo step, the
+    // geometry where it was.
+    ctx->ItemClick("//###Variables/###literals_extract");
+    ctx->Yield(2);
+    ctx->ItemClick("//###Variables/###literals_extract_apply");
+    ctx->Yield(2);
+    IM_CHECK_GT(s_App->projectParameters.size(), vars);
+    IM_CHECK(std::abs(Doc()->GetBodies().at(0).shape.Volume() - volume) < 1e-6);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->projectParameters.size(), vars);
+    IM_CHECK(std::abs(Doc()->GetBodies().at(0).shape.Volume() - volume) < 1e-6);
+
+    // Check finds the literal equal to plate_t, and Use binds it.
+    ctx->ItemClick("//###Variables/###literals_check");
+    ctx->Yield(2);
+    const std::string use = "//###Variables/###literal_use_" +
+                            std::to_string(extrude->GetId()) + "_distance";
+    ctx->ItemClick(use.c_str());
+    ctx->Yield(2);
+    const auto* bound = dynamic_cast<const ExtrudeFeature*>(
+        Doc()->FindFeatureById(extrude->GetId()));
+    IM_CHECK(bound != nullptr);
+    IM_CHECK_STR_EQ(bound->distanceExpr.c_str(), "plate_t");
+    IM_CHECK_EQ(s_App->projectParameters.size(), vars); // no new variable
+    IM_CHECK(std::abs(Doc()->GetBodies().at(0).shape.Volume() - volume) < 1e-6);
 
     showPanel(ui::kPanelModel); // or the next test starts on the wrong tab
   };
