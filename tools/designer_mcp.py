@@ -471,6 +471,17 @@ The loop that works — follow it every time:
    feature's "error", fix or suppress_feature it. set_rollback lets you
    inspect intermediate history states. When done: save_project, and
    render_still for a presentation shot.
+7. Built a part from literals, or handed one? Run rpc('check_literals'):
+   it names each number that equals a variable in scope (bind it with
+   rpc('extract_variables', {reuse: true, apply: true})) and each sketch or
+   frame placed on a world plane where a face of the part already lies
+   (attach it to that face). rpc('extract_variables') without `apply` is a
+   dry run proposing a named variable per literal; with apply: true it is
+   one undo step and the geometry does not move.
+
+"This", "here", "the selected": read get_state's `selection` (and
+`selection_items`) BEFORE acting — that is what the user means. When it is
+empty, say so and ask; never guess which face or feature was meant.
 
 No display session of your own? Start `designer --offscreen --remote 0` —
 a real renderer with no window or display server: screenshot, render_still,
