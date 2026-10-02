@@ -146,6 +146,9 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       // Derive: a copy of another part is placed once per part from the
       // toolbar or the RPC, like an import — not something typed mid-flow.
       "part.derive",
+      // Insert template: chosen from the project's library and placed on a
+      // face, like Derive -- not a verb typed mid-flow.
+      "part.template",
       // A bearing: two or four per assembly, placed from the toolbar beside
       // the fastener, which has F. Not a verb repeated mid-flow.
       "assembly.bearing",

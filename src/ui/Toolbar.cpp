@@ -526,6 +526,8 @@ void DrawModelToolbar(AppState& state) {
   btn("###tb_cylinder", "part.cylinder", "Cylinder");
   btn("###tb_derive", "part.derive",
       "Derive (a copy of another part, to draw on)");
+  btn("###tb_template", "part.template",
+      "Insert template (one of the project's saved feature templates)");
 
   Divider();
 

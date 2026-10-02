@@ -203,6 +203,7 @@ void ApplyProjectVarSnapshot(AppState& state, const ProjectVarSnapshot& s) {
   }
   state.projectParameters = s.params;
   state.projectTables = s.tables;
+  state.projectTemplates = s.templates;
   SyncProjectScope(state);
 }
 // Pushes a project-var undo entry capturing the PRE-edit table (restored on
@@ -213,6 +214,7 @@ void PushProjectVarUndo(AppState& state, std::vector<Parameter> preEdit,
   ProjectVarSnapshot s;
   s.params = std::move(preEdit);
   s.tables = state.projectTables;
+  s.templates = state.projectTemplates;
   s.stamp = NextActionStamp();
   s.docRefFrom = std::move(undoRefFrom);
   s.docRefTo = std::move(undoRefTo);
@@ -389,6 +391,7 @@ bool UndoProjectVars(AppState& state) {
   ProjectVarSnapshot redoEntry;
   redoEntry.params = state.projectParameters;
   redoEntry.tables = state.projectTables;
+  redoEntry.templates = state.projectTemplates;
   redoEntry.stamp = entry.stamp;
   redoEntry.docRefFrom = entry.docRefTo;
   redoEntry.docRefTo = entry.docRefFrom;
@@ -406,6 +409,7 @@ bool RedoProjectVars(AppState& state) {
   ProjectVarSnapshot undoEntry;
   undoEntry.params = state.projectParameters;
   undoEntry.tables = state.projectTables;
+  undoEntry.templates = state.projectTemplates;
   undoEntry.stamp = entry.stamp;
   undoEntry.docRefFrom = entry.docRefTo;
   undoEntry.docRefTo = entry.docRefFrom;

@@ -19,6 +19,7 @@
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h" // PrintedThreadJson
 #include "remote/RemoteProject.h"    // RequireFreshTabName
+#include "remote/RemoteTemplates.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById
 #include "ui/DerivedActions.h"
@@ -906,6 +907,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (fj.is_object() &&
         primitive::KindFromName(fj.value("type", std::string{})))
       return AddPrimitive(state, *doc, fj);
+    // A template instance names a template of the project's library and
+    // gives every value (docs/modeling/templates.md#rpcs).
+    if (fj.is_object() && fj.value("type", std::string{}) == "Template")
+      return AddTemplateFeature(state, *doc, fj);
     // A Derived's configuration may be NAMED ("pawn"); the feature stores
     // the id, which survives a rename. An unknown name is refused with the
     // ones the source has, never read as "whichever is active".

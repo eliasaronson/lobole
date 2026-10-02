@@ -99,6 +99,13 @@ struct Placement {
 [[nodiscard]] const char* AcceptedOn();
 [[nodiscard]] const char* AcceptedKeys(Kind kind);
 
+// `on` as a request gives it: "Top"/"Front"/"Right", {feature_id, element}
+// (a face) or {feature_id} (a plane feature). Throws naming AcceptedOn().
+// A Template's reference parameters take the same form
+// (docs/modeling/templates.md#parameters).
+[[nodiscard]] On OnFromJson(const nlohmann::json& on);
+[[nodiscard]] nlohmann::json OnToJson(const On& on);
+
 // The add_feature dialect. Throws std::runtime_error naming what IS
 // accepted for an unknown or missing `on`, an unknown key, a world position
 // from the old dialect, or a size given twice (diameter and radius).

@@ -38,8 +38,10 @@
 #include "remote/RemoteProject.h"
 #include "remote/RemoteSheetMetal.h"
 #include "remote/RemoteSimulation.h"
+#include "remote/RemoteTemplates.h"
 #include "remote/RemoteTube.h"
 #include "remote/RpcParams.h"
+#include "ui/TemplateActions.h"
 
 #include "render/Camera.h"
 #include "render/FrameTimer.h"
@@ -559,6 +561,7 @@ const remote::MethodDoc* FindMethod(const std::string& m) {
     add(kServerMethods);
     add(remote::ModelingMethodDocs());
     add(remote::ProjectMethodDocs());
+    add(remote::TemplateMethodDocs());
     add(remote::AssemblyMethodDocs());
     add(remote::MotionMethodDocs());
     add(remote::InspectionMethodDocs());
@@ -597,6 +600,7 @@ static bool IsKnownMethod(const std::string& m) {
     add(kServerMethods);
     add(remote::ModelingMethodDocs());
     add(remote::ProjectMethodDocs());
+    add(remote::TemplateMethodDocs());
     add(remote::AssemblyMethodDocs());
     add(remote::MotionMethodDocs());
     add(remote::InspectionMethodDocs());
@@ -930,6 +934,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         kServerMethods,
         remote::ModelingMethodDocs(),
         remote::ProjectMethodDocs(),
+        remote::TemplateMethodDocs(),
         remote::AssemblyMethodDocs(),
         remote::MotionMethodDocs(),
         remote::InspectionMethodDocs(),
@@ -1201,6 +1206,23 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
               dynamic_cast<const DerivedFeature*>(stateDoc->GetFeature(i))) {
         const std::optional<bool> stale = ui::DerivedStale(state, *d);
         f["stale"] = stale.has_value() ? json(*stale) : json(nullptr);
+      }
+      // A template instance says whether the library has moved on from the
+      // definition it expands (true/false, or null when the library has no
+      // template by its name), and which features it expanded into
+      // (docs/modeling/templates.md#rpcs). The definition itself is in the
+      // row already; it is what the instance builds.
+      if (auto* tf =
+              dynamic_cast<const TemplateFeature*>(stateDoc->GetFeature(i))) {
+        const std::optional<bool> changed = ui::TemplateChanged(state, *tf);
+        f["template_changed"] =
+            changed.has_value() ? json(*changed) : json(nullptr);
+        json expanded = json::array();
+        for (const auto& e : tf->Expanded())
+          expanded.push_back({{"id", e->GetId()},
+                              {"type", e->TypeName()},
+                              {"name", e->GetName()}});
+        f["expanded"] = std::move(expanded);
       }
       // A worm or a wheel says what it built: the sizes that follow from
       // its blank, the lead angle and whether the pair self-locks.
@@ -1634,6 +1656,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   if (auto r = remote::HandleAssemblyRpc(state, m, p))
     return *r;
   if (auto r = remote::HandleProjectRpc(state, m, p))
+    return *r;
+  if (auto r = remote::HandleTemplateRpc(state, m, p))
     return *r;
   if (m == "fit_view") {
     // The aspect of the PICTURE being framed, when that is not the viewport.

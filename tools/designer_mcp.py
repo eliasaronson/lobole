@@ -349,6 +349,22 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   booleans) | false (an ordinary body of this part)}} — the snapshot is
   taken when added; `update_derived` retakes it, `get_state` says when
   it is stale.
+- Template (one instance of a feature template from the project's
+  library — a composite saved once, e.g. a bearing seat, placed as ONE
+  feature that expands into its features at every regeneration):
+  {{"type": "Template", "template": <name from list_templates>,
+  "on": <on> (what it stands on, as a primitive's), "parameters":
+  {{<name>: value, ...}}, "name"?: str}} — EVERY parameter the template
+  declares, none filled in: a length/angle as a number (mm, deg) or an
+  expression string over the variables, a count a whole number, a
+  string, a reference in the <on> form. Make one with `save_template`
+  {{name, feature_ids, literals?: [{{feature_id, path, param}}]}} (the
+  variables the features read become parameters; `dry_run` lists the
+  literal candidates); the instance's faces are named under ids of its
+  own, so a later feature references them like any face. `get_state`
+  says `template_changed` when the library moved on —
+  `update_template_instances` follows; `unlink_template` makes plain
+  features (docs/modeling/templates.md).
 - Fastener (a standard screw, nut or washer read from its ISO table — every
   dimension but these comes from the standard): {{"type": "Fastener",
   "name": str, "standard": "iso4762"|"iso14579"|"iso4017"|"iso10642"|

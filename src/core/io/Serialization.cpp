@@ -249,6 +249,10 @@ json DocumentEnvelope(const Document& doc) {
   // in for the write like its variables).
   if (!doc.GetTables().empty())
     j["tables"] = lookuptable::ToJson(doc.GetTables());
+  // v161: the template library a single-part file carries, the same way
+  // (docs/modeling/templates.md#the-library).
+  if (!doc.GetTemplates().empty())
+    j["templates"] = tmpl::LibraryToJson(doc.GetTemplates());
   j["version"] = kVersion;
   if (doc.Rollback() >= 0) {
     j["rollback"] = doc.Rollback();
@@ -898,6 +902,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     doc->SetCommitGeometry(index.value("commit_geometry", true));
     doc->SetCatalogsRaw(index.value("catalogs", json::array()));
     doc->SetTablesRaw(lookuptable::ListFromJson(index.value("tables", json())));
+    doc->SetTemplatesRaw(
+        tmpl::LibraryFromJson(index.value("templates", json())));
     doc->SetGeneratorRaw(index.value("generator", json(nullptr)));
     for (const auto& pj : index.value("parameters", json::array())) {
       doc->SetParameter(pj.at("name").get<std::string>(),
@@ -1636,6 +1642,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     doc->SetCommitGeometry(j.value("commit_geometry", true));
     doc->SetCatalogsRaw(j.value("catalogs", json::array()));
     doc->SetTablesRaw(lookuptable::ListFromJson(j.value("tables", json())));
+    doc->SetTemplatesRaw(tmpl::LibraryFromJson(j.value("templates", json())));
     doc->SetGeneratorRaw(j.value("generator", json(nullptr)));
     // Parameters first: features' expressions evaluate against them on the
     // regeneration each AddFeature triggers.

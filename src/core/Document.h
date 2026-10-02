@@ -8,6 +8,7 @@
 #include "core/LookupTable.h"
 #include "core/PrintAllowance.h"
 #include "core/SheetMetal.h"
+#include "core/Template.h"
 #include "core/Units.h"
 #include "core/fem/FemSolver.h"
 #include "core/fem/FemStudy.h"
@@ -201,6 +202,21 @@ public:
   }
   std::vector<lookuptable::Table> TakeTables() {
     return std::exchange(m_tables, {});
+  }
+
+  // The project's template library (docs/modeling/templates.md#the-library)
+  // riding this document the way the tables do: a single-part file carries
+  // it (format v161), and the open takes it back into the project
+  // (TakeTemplates). A Template instance never READS it -- it expands the
+  // definition it carries -- so a document without it regenerates the same.
+  const std::vector<tmpl::Template>& GetTemplates() const {
+    return m_templates;
+  }
+  void SetTemplatesRaw(std::vector<tmpl::Template> templates) {
+    m_templates = std::move(templates);
+  }
+  std::vector<tmpl::Template> TakeTemplates() {
+    return std::exchange(m_templates, {});
   }
 
   // ---- Parameters (variables) -------------------------------------------
@@ -690,7 +706,13 @@ public:
   // VisitFeatureRefs), searching only after that feature's own position — a
   // reference may only point backwards, so nothing at or before it consumes
   // it. -1 when the id is unknown or nothing consumes it.
+  // A feature naming an id the feature at `featureId` OWNS (a Template
+  // instance's expanded features, Feature::VisitOwnedIds) consumes it too.
   int FirstConsumerIndex(uint64_t featureId) const;
+
+  // The index of the feature that owns `id` -- the feature itself, or the
+  // Template instance whose expanded feature it is. -1 when nothing does.
+  int OwnerIndex(uint64_t id) const;
 
 private:
   // The one copy implementation; both public forms delegate to it.
@@ -715,6 +737,7 @@ private:
   catalog::Json m_generator = nullptr;
   catalog::Json m_catalogs = catalog::Json::array();
   std::vector<lookuptable::Table> m_tables;
+  std::vector<tmpl::Template> m_templates;
   std::vector<Parameter> m_parameters;
   std::vector<Tolerance> m_tolerances;
   std::vector<fem::Study> m_studies;

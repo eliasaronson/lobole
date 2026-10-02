@@ -159,13 +159,14 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
           }
           edit.pickingPlane = false;
           edit.reattachSketchId = 0;
-        } else if (edit.purpose == SketchPurpose::Primitive) {
+        } else if (edit.purpose == SketchPurpose::Primitive ||
+                   edit.purpose == SketchPurpose::Template) {
           // The Box / Cylinder / Sphere tool borrows this pick: what was
           // clicked is what the primitive stands on. A refusal (a curved
           // face) stays armed and says why; success ends the pick.
           std::string why;
           if (hit.hit) {
-            why = BeginPrimitiveOnFace(state, hit.meshId, hit.faceIndex);
+            why = BeginPlacedOnFace(state, hit.meshId, hit.faceIndex);
           } else if (datumId != 0 || plane >= 0) {
             primitive::On on;
             if (datumId != 0) {
@@ -175,7 +176,7 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
               on.kind = primitive::OnKind::WorldPlane;
               on.world = static_cast<PlaneType>(plane);
             }
-            why = BeginPrimitiveOn(state, on);
+            why = BeginPlacedOn(state, on);
           }
           if (!why.empty())
             edit.actionMsg = why;

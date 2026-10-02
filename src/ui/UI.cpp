@@ -44,6 +44,7 @@
 #include "ui/SketchInteraction.h"
 #include "ui/SketchOverlay.h"
 #include "ui/SketchToolbar.h"
+#include "ui/TemplatePanel.h" // DrawSaveTemplateWindow
 #include "ui/TerminalPanel.h"
 #include "ui/VariablesPanel.h"
 #include "ui/ViewportHandleDraw.h"
@@ -114,6 +115,9 @@ void DrawModelToolPrompt(AppState& state) {
   if (prompt == nullptr && state.sketchEdit.pickingPlane) {
     prompt = state.sketchEdit.purpose == SketchPurpose::Hole
                  ? "Hole (Step 1/3): click the flat face to drill into"
+             : state.sketchEdit.purpose == SketchPurpose::Template
+                 ? "Insert template: click a flat face or a plane to stand "
+                   "it on"
              : state.sketchEdit.purpose == SketchPurpose::Primitive
                  ? (state.primitive.kind == primitive::Kind::Box
                         ? "Box: click a flat face or a plane to stand it on"
@@ -883,6 +887,7 @@ void DrawUI(AppState& state) {
   DrawToolWindow(state);
   DrawCamTransportWindow(state); // the cutting simulation's transport
   DrawCamGenerateWindow(state);  // the run: generate, verify, save
+  DrawSaveTemplateWindow(state); // selected features as a template
   DrawBomWindow(state);          // the assembly's bill of materials
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);

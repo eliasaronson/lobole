@@ -36,6 +36,7 @@
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/JobActions.h"
 #include "ui/RendererSync.h"
+#include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
 #include <TopExp.hxx>
@@ -750,8 +751,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "body_count, "
      "feature_errors[]{index,name,error,after_earlier_failure?}, "
      "receipt{schema,standing,summary,claims}, "
-     "stale_derived?[]{id,name,source}, body_components?, connected?, "
-     "warnings?"},
+     "stale_derived?[]{id,name,source}, "
+     "templates_changed?[]{id,name,template,revision}, body_components?, "
+     "connected?, warnings?"},
     {"check_fit",
      "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
      "class's band; adding {shaft:{class:\"g6\"}} gives the fit between "
@@ -2878,6 +2880,22 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                          {"source", d->sourceName}});
       if (!stale.empty())
         out["stale_derived"] = std::move(stale);
+    }
+    // Template instances behind their library template
+    // (docs/modeling/templates.md#revisions): built fine from the revision
+    // they record, so `ok` stands; update_template_instances follows.
+    {
+      json changed = json::array();
+      for (const auto& f : part.GetFeatures())
+        if (const auto* tf = dynamic_cast<const TemplateFeature*>(f.get());
+            tf != nullptr &&
+            ui::TemplateChanged(state, *tf) == std::optional<bool>{true})
+          changed.push_back({{"id", tf->GetId()},
+                             {"name", tf->GetName()},
+                             {"template", tf->templateName},
+                             {"revision", tf->definition.revision}});
+      if (!changed.empty())
+        out["templates_changed"] = std::move(changed);
     }
     // Round-8 retro: floating geometry INSIDE a part warns by default —
     // the ladder's mount plate passed every opt-in gate because nobody

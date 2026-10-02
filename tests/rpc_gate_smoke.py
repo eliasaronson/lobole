@@ -47,6 +47,10 @@ GATED_ON_PURPOSE = {
     # document through their helpers (RemoteModeling.cpp).
     "check_literals": "it lints the active part by default",
     "extract_variables": "it edits the active part's features",
+    # A template is saved from the active part's features
+    # (docs/modeling/templates.md#saving-one); the handler reaches the part
+    # through state.document in its helper (ui::SaveTemplate).
+    "save_template": "it saves the active part's features",
     # orient_to_face sat here ("assembly-tab behaviour unverified") until
     # --offscreen provided a render surface to verify on; it is ungated now
     # and tests/offscreen_smoke.py pins its assembly-tab behaviour.

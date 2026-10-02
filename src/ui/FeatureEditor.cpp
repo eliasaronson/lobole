@@ -5,6 +5,7 @@
 #include "ui/CamTool.h"
 #include "ui/DerivedActions.h"
 #include "ui/FastenerTool.h"
+#include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h" // PrintedThreadFor
 #include <functional>
 #include <utility>
@@ -101,12 +102,13 @@ void HandleEdit(AppState& state, Feature& feature, bool changedThisFrame,
 }
 
 bool DragDim(AppState& state, const char* label, double* value,
-             float reserveRight = 0.0f, std::string* exprOut = nullptr) {
+             float reserveRight = 0.0f, std::string* exprOut = nullptr,
+             double minValue = 0.01) {
   LeftLabel(label, reserveRight);
   const std::string id = std::string("##") + label;
   // Expression-capable (double-click or Ctrl+click, type "width/2"): the
   // shared widget. `exprOut` is for the fields that can KEEP the text.
-  return ExprDragDouble(state, id.c_str(), value, 0.05f, 0.01, 1e6, "%.3f",
+  return ExprDragDouble(state, id.c_str(), value, 0.05f, minValue, 1e6, "%.3f",
                         exprOut);
 }
 
@@ -234,14 +236,15 @@ void CommitDiscrete(AppState& state, Feature& feature,
 // "123" button back to a literal. Committing a plain number also reverts to
 // a literal — expressions stay opt-in per field.
 void ExprDim(AppState& state, Feature& feature, size_t index, bool commit,
-             const char* label, std::string& exprText, double& value) {
+             const char* label, std::string& exprText, double& value,
+             double minValue = 0.01) {
   Document& doc = *state.document;
   ImGui::PushID(label);
 
   if (exprText.empty()) {
     std::string typed;
-    const bool changed =
-        DragDim(state, label, &value, SmallButtonReserve("fx"), &typed);
+    const bool changed = DragDim(state, label, &value, SmallButtonReserve("fx"),
+                                 &typed, minValue);
     // An expression typed straight into the field KEEPS ITS TEXT, exactly as
     // the fx field would. Otherwise "wall_d" collapses to the 20 it happened
     // to evaluate to the moment it commits, the next edit edits 20, and
@@ -1493,6 +1496,143 @@ void DrawDerivedParams(AppState& state, DerivedFeature& d, size_t index,
   }
 }
 
+// A template instance's editor (docs/modeling/templates.md#in-the-gui):
+// which template (while it is a preview), whether the library has moved on,
+// what it stands on, and one row per parameter -- a number (a literal or an
+// expression over the part's variables), a string (its choices when the
+// template lists them).
+void DrawTemplateParams(AppState& state, TemplateFeature& tf, size_t index,
+                        bool commit) {
+  Document& doc = *state.document;
+  if (!commit && !state.projectTemplates.empty()) {
+    std::vector<const char*> names;
+    int sel = 0;
+    for (size_t i = 0; i < state.projectTemplates.size(); i++) {
+      names.push_back(state.projectTemplates[i].name.c_str());
+      if (state.projectTemplates[i].name == tf.templateName)
+        sel = static_cast<int>(i);
+    }
+    if (LabeledCombo("Template", &sel, names.data(),
+                     static_cast<int>(names.size()))) {
+      const tmpl::Template& t = state.projectTemplates[sel];
+      nlohmann::json params = nlohmann::json::object();
+      for (const tmpl::Param& p : t.params)
+        if (p.name != "on")
+          params[p.name] = p.example;
+      const nlohmann::json on = state.templateTool.on;
+      try {
+        tf.values = tmpl::ValuesFromRequest(t, params, &on);
+        tf.templateName = t.name;
+        tf.definition = t;
+        tf.SetName(t.name);
+        tf.ids.clear();
+        tf.AssignIds([&doc] { return doc.AllocateId(); });
+        state.templateTool.last = t.name;
+      } catch (const std::exception& e) {
+        state.sketchEdit.actionMsg = e.what();
+      }
+      doc.Regenerate();
+      return; // the rows below are the old template's
+    }
+  } else {
+    ImGui::Text("Template: %s", tf.templateName.c_str());
+  }
+  ImGui::TextDisabled("Revision %llu, %zu features",
+                      static_cast<unsigned long long>(tf.definition.revision),
+                      tf.definition.features.size());
+  const std::optional<bool> changed = TemplateChanged(state, tf);
+  if (!changed.has_value()) {
+    ImGui::TextDisabled("(not in this project's library)");
+  } else if (*changed) {
+    ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.25f, 1.0f),
+                       ICON_FA_TRIANGLE_EXCLAMATION
+                       " Template changed: the library's is not the one "
+                       "this expands");
+    if (commit && ImGui::Button("Update from template###tpl_update")) {
+      if (const std::string why = UpdateTemplateInstance(state, tf.GetId(), {});
+          !why.empty())
+        state.sketchEdit.actionMsg = why;
+      return; // the feature was replaced
+    }
+  }
+  if (!tf.definition.comment.empty()) {
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("%s", tf.definition.comment.c_str());
+    ImGui::PopTextWrapPos();
+  }
+  for (const tmpl::Param& p : tf.definition.params) {
+    auto it = tf.values.find(p.name);
+    if (it == tf.values.end())
+      continue;
+    tmpl::Value& v = it->second;
+    ImGui::PushID(p.name.c_str());
+    switch (p.kind) {
+    case tmpl::ParamKind::Length:
+    case tmpl::ParamKind::Angle:
+    case tmpl::ParamKind::Count:
+      ExprDim(state, tf, index, commit, p.name.c_str(), v.expr, v.number, -1e9);
+      break;
+    case tmpl::ParamKind::String: {
+      if (!p.choices.empty()) {
+        std::vector<const char*> items;
+        int sel = 0;
+        for (size_t i = 0; i < p.choices.size(); i++) {
+          items.push_back(p.choices[i].c_str());
+          if (p.choices[i] == v.text)
+            sel = static_cast<int>(i);
+        }
+        const nlohmann::json before = DocumentIO::FeatureToJson(tf);
+        if (LabeledCombo(p.name.c_str(), &sel, items.data(),
+                         static_cast<int>(items.size()))) {
+          v.text = p.choices[sel];
+          CommitDiscrete(state, tf, before, index, commit);
+        }
+      } else {
+        static char buf[128];
+        static std::string active;
+        const std::string key = std::to_string(tf.GetId()) + "/" + p.name;
+        if (active != key || !ImGui::IsAnyItemActive())
+          std::snprintf(buf, sizeof(buf), "%s", v.text.c_str());
+        LeftLabel(p.name.c_str());
+        ImGui::InputText("###tpl_text", buf, sizeof(buf));
+        if (ImGui::IsItemActivated()) {
+          active = key;
+          state.editBaseline = DocumentIO::FeatureToJson(tf);
+        }
+        if (ImGui::IsItemDeactivatedAfterEdit() && buf[0] != 0 &&
+            v.text != buf) {
+          const nlohmann::json before = state.editBaseline;
+          v.text = buf;
+          CommitDiscrete(state, tf, before, index, commit);
+        }
+      }
+      break;
+    }
+    case tmpl::ParamKind::Reference: {
+      std::string label = v.ref.is_string() ? v.ref.get<std::string>() : "";
+      if (v.ref.is_object()) {
+        const Feature* f =
+            doc.FindFeatureById(v.ref.value("feature_id", uint64_t{0}));
+        label = (v.ref.contains("element")
+                     ? "face " + v.ref.value("element", std::string{}) + " of "
+                     : std::string{}) +
+                (f ? f->GetName() : std::string("(missing)"));
+      }
+      LeftLabel(p.name.c_str());
+      ImGui::TextUnformatted(label.c_str());
+      break;
+    }
+    }
+    if (!p.comment.empty() && ImGui::IsItemHovered())
+      ImGui::SetTooltip("%s", p.comment.c_str());
+    ImGui::PopID();
+  }
+  if (commit && ImGui::Button("Unlink (plain features)###tpl_unlink")) {
+    if (const std::string why = UnlinkTemplate(state, tf.GetId()); !why.empty())
+      state.sketchEdit.actionMsg = why;
+  }
+}
+
 // The worm's and the wheel's rows (docs/modeling/worm-gears.md): the pair's
 // numbers, with what the blank derived and what the pair does — its lead
 // angle and whether it self-locks — read back from the last regeneration.
@@ -1664,6 +1804,8 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
   } else if (auto* d = dynamic_cast<DerivedFeature*>(&feature)) {
     DrawDerivedParams(state, *d, index, commit);
+  } else if (auto* tf = dynamic_cast<TemplateFeature*>(&feature)) {
+    DrawTemplateParams(state, *tf, index, commit);
   } else if (auto* sk = dynamic_cast<SketchFeature*>(&feature)) {
     if (sk->planeRef != 0) {
       if (Feature* datum = state.document->FindFeatureById(sk->planeRef)) {

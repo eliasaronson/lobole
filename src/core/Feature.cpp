@@ -45,6 +45,12 @@ void VisitRefs(const std::vector<ElementRef>& refs,
 const Feature* RegenContext::FindById(uint64_t id) const {
   if (id == 0)
     return nullptr;
+  // A template's own features first: they are what its references name,
+  // and none of them is ever suppressed on its own.
+  if (inner != nullptr)
+    for (size_t i = 0; i < innerIndex && i < inner->size(); i++)
+      if ((*inner)[i]->GetId() == id)
+        return (*inner)[i].get();
   for (size_t i = 0; i < currentIndex && i < features.size(); i++) {
     // A suppressed feature is invisible to references — its consumers fail
     // with their normal missing-reference errors, same rule as deletion (R1).

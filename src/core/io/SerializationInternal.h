@@ -19,7 +19,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    159; // v159: a saved motion result lists the press fits its exact checks
+    161; // v161: feature templates (docs/modeling/templates.md): a
+         //      `Template` feature {template, revision, on?, parameters,
+         //      ids [[local, id]], definition}, and the project's template
+         //      library under `templates` (a single-part file's envelope;
+         //      project.json in the directory form).
+         // v159: a saved motion result lists the press fits its exact checks
          //      relieved, `press_fits` [{a, b, a_name, b_name, a_inner?,
          //      b_inner?, fit, interference_mm, max_interference_mm,
          //      volume_mm3}]; omitted when there are none

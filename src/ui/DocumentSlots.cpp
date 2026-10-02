@@ -151,6 +151,7 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.catalogHistory = {};
   state.projectParameters = state.document->TakeParameters();
   state.projectTables = state.document->TakeTables();
+  state.projectTemplates = state.document->TakeTemplates();
   state.projectVarHistory = {};
   state.document->SetProjectSymbols(&state.projectSymbols);
   state.document->SetProjectParameters(&state.projectParameters);

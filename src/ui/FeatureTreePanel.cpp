@@ -3,6 +3,8 @@
 #include "ui/DerivedActions.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
+#include "ui/TemplateActions.h"
+#include "ui/TemplatePanel.h"
 #include "ui/TextFit.h"
 #include "ui/Widgets.h"
 #include <algorithm>
@@ -132,6 +134,7 @@ const char* FeatureIcon(const std::string& type) {
       {"Sweep", "part.sweep"},
       {"Import", "file.import"},
       {"Derived", "part.derive"},
+      {"Template", "part.template"},
   };
   const auto it = kCommandOf.find(type);
   return it == kCommandOf.end() ? kUnknownIcon : CommandIcon(it->second);
@@ -210,10 +213,11 @@ void DrawFeatureTreePanel(AppState& state) {
               ImGuiSelectableFlags_AllowDoubleClick)) {
         const int n = static_cast<int>(doc->FeatureCount()) + 1;
         if (armedForPlane &&
-            state.sketchEdit.purpose == SketchPurpose::Primitive) {
+            (state.sketchEdit.purpose == SketchPurpose::Primitive ||
+             state.sketchEdit.purpose == SketchPurpose::Template)) {
           primitive::On on;
           on.world = static_cast<PlaneType>(i);
-          if (std::string why = BeginPrimitiveOn(state, on); !why.empty())
+          if (std::string why = BeginPlacedOn(state, on); !why.empty())
             state.sketchEdit.actionMsg = why; // still armed
         } else if (armedForPlane) {
           const SketchPurpose purpose = state.sketchEdit.purpose;
@@ -332,9 +336,16 @@ void DrawFeatureTreePanel(AppState& state) {
       const bool derivedStale =
           derivedFeat != nullptr && !dimmed && !errored &&
           DerivedStale(state, *derivedFeat) == std::optional<bool>{true};
+      // A template instance whose library template has changed reads the
+      // same way: it built, from the revision it records
+      // (docs/modeling/templates.md#revisions).
+      auto* templateFeat = dynamic_cast<TemplateFeature*>(feature);
+      const bool templateChanged =
+          templateFeat != nullptr && !dimmed && !errored &&
+          TemplateChanged(state, *templateFeat) == std::optional<bool>{true};
       if (errored)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.92f, 0.35f, 0.35f, 1.0f));
-      else if (warned || derivedStale)
+      else if (warned || derivedStale || templateChanged)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.75f, 0.25f, 1.0f));
       else if (derivedFeat != nullptr && !dimmed)
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.60f, 0.75f, 0.95f, 1.0f));
@@ -367,11 +378,12 @@ void DrawFeatureTreePanel(AppState& state) {
           SlotPickClicked(state, {SelectionItem::Kind::Body, feature->GetId()},
                           /*meshId=*/0, /*index=*/0);
         } else if (datum && state.sketchEdit.pickingPlane &&
-                   state.sketchEdit.purpose == SketchPurpose::Primitive) {
+                   (state.sketchEdit.purpose == SketchPurpose::Primitive ||
+                    state.sketchEdit.purpose == SketchPurpose::Template)) {
           primitive::On on;
           on.kind = primitive::OnKind::PlaneFeature;
           on.featureId = datum->GetId();
-          if (std::string why = BeginPrimitiveOn(state, on); !why.empty())
+          if (std::string why = BeginPlacedOn(state, on); !why.empty())
             state.sketchEdit.actionMsg = why;
         } else if (datum && state.sketchEdit.pickingPlane) {
           // A datum row IS the pick while one is armed, exactly as the base
@@ -450,6 +462,15 @@ void DrawFeatureTreePanel(AppState& state) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
           ImGui::SetTooltip("%s", feature->GetWarning().c_str());
+      } else if (templateChanged) {
+        ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Template changed: '%s' in the library is not the "
+                            "revision %llu this expands. Right-click > Update "
+                            "from template.",
+                            templateFeat->templateName.c_str(),
+                            static_cast<unsigned long long>(
+                                templateFeat->definition.revision));
       } else if (derivedStale) {
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered())
@@ -522,6 +543,38 @@ void DrawFeatureTreePanel(AppState& state) {
             ImGui::EndPopup();
             break; // feature list changed; redraw next frame
           }
+        }
+        // A template instance's verbs (docs/modeling/templates.md): follow
+        // the library's revision, or hand its features to the tree. Both
+        // replace the row, so leave it like Delete does.
+        if (templateFeat != nullptr) {
+          bool replaced = false;
+          if (ImGui::MenuItem("Update from template###feat_template_update",
+                              nullptr, false, templateChanged)) {
+            if (const std::string why =
+                    UpdateTemplateInstance(state, feature->GetId(), {});
+                !why.empty())
+              state.sketchEdit.actionMsg = why;
+            replaced = true;
+          }
+          if (ImGui::MenuItem("Unlink template###feat_template_unlink")) {
+            if (const std::string why = UnlinkTemplate(state, feature->GetId());
+                !why.empty())
+              state.sketchEdit.actionMsg = why;
+            replaced = true;
+          }
+          if (replaced) {
+            ImGui::EndPopup();
+            break; // feature list changed; redraw next frame
+          }
+        }
+        // The selection as a template (docs/modeling/templates.md#saving-one).
+        if (ImGui::MenuItem("Save as template…###feat_save_template")) {
+          std::vector<uint64_t> ids =
+              SelectedIds(state, SelectionItem::Kind::Feature);
+          if (ids.empty())
+            ids.push_back(feature->GetId());
+          OpenSaveTemplate(state, ids);
         }
         // Rollback bar (not undoable — a view of the history, not an edit).
         if (ImGui::MenuItem("Rollback to here")) {

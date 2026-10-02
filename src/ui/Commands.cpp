@@ -28,6 +28,7 @@
 #include "ui/SimulationActions.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchToolbar.h"
+#include "ui/TemplateActions.h"
 #include "ui/TerminalPanel.h"
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
@@ -478,6 +479,10 @@ const std::vector<Command>& Table() {
     // Enabled on any part tab: with nothing to derive from the window says
     // so and Accept stays disabled (U10), the same rule as the fastener.
     add("part.derive", Idle, [](AppState& s) { CreateDerived(s); });
+    // A template from the project's library, standing on a picked face or
+    // plane (docs/modeling/templates.md#in-the-gui). Enabled on any part
+    // tab: with an empty library the pick's window says so.
+    add("part.template", Idle, [](AppState& s) { CreateTemplateInstance(s); });
 
     add("part.fillet", IdleBody, [](AppState& s) { CreateFillet(s); });
     add("part.chamfer", IdleBody, [](AppState& s) { CreateChamfer(s); });

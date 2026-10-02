@@ -6,6 +6,7 @@
 // `list_elements` filters all go through it.
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -75,5 +76,13 @@ ElementOrigin DecodeElementName(const std::string& name);
 // leading id (the outermost Derived feature or the seed) and every M and G
 // step. What drawing provenance matches a hole or a tolerance by.
 std::vector<uint64_t> FeatureIdsMentioned(const std::string& name);
+
+// `name` with every feature id it mentions -- each comma part's leading id
+// (as FeatureIdsMentioned reads it) and every M, G and S step's -- replaced
+// by `map(id)`, every other byte kept. What a template uses to carry the
+// names its features reference among themselves from one set of ids to
+// another (docs/modeling/templates.md#names).
+std::string RewriteIds(const std::string& name,
+                       const std::function<uint64_t(uint64_t)>& map);
 
 } // namespace topo

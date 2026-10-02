@@ -317,12 +317,16 @@ void DrawSketchToolWindow(AppState& state) {
 
   if (edit.pickingPlane) {
     const bool hole = edit.purpose == SketchPurpose::Hole;
-    const bool prim = edit.purpose == SketchPurpose::Primitive;
+    const bool tmpl = edit.purpose == SketchPurpose::Template;
+    const bool prim = edit.purpose == SketchPurpose::Primitive || tmpl;
     const std::string primPrompt =
-        std::string("Pick a flat face or a plane for the ") +
-        primitive::KindName(state.primitive.kind) +
-        " to stand on. (Esc to cancel)";
-    BeginToolWindowFrame(state, hole ? "Hole"
+        tmpl ? std::string("Pick a flat face or a plane for the template to "
+                           "stand on. (Esc to cancel)")
+             : std::string("Pick a flat face or a plane for the ") +
+                   primitive::KindName(state.primitive.kind) +
+                   " to stand on. (Esc to cancel)";
+    BeginToolWindowFrame(state, hole   ? "Hole"
+                                : tmpl ? "Insert template"
                                 : prim
                                     ? primitive::KindName(state.primitive.kind)
                                     : "New Sketch");

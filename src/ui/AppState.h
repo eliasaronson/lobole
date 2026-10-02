@@ -121,7 +121,7 @@ enum class ViewportDrag { None, Orbit, Pan, Zoom, Roll };
 // Primitive = not a sketch session at all: the Box / Cylinder / Sphere tool
 // borrows the plane pick, and a pick starts its preview
 // (AppState::primitive, ui/PrimitiveTool.h) instead of a sketch.
-enum class SketchPurpose { Freeform, Hole, Primitive };
+enum class SketchPurpose { Freeform, Hole, Primitive, Template };
 
 enum class SketchTool {
   Select,
@@ -799,6 +799,9 @@ struct ProjectVarSnapshot {
   // The project tables, restored with the variables: a table edit is a
   // project-scope edit like a variable's, on the same cross-tab undo.
   std::vector<lookuptable::Table> tables;
+  // ...and the template library (docs/modeling/templates.md#the-library):
+  // saving, importing or deleting a template is the same kind of edit.
+  std::vector<tmpl::Template> templates;
   uint64_t stamp = 0;
   // When set, applying this entry first rewrites `docRefFrom` -> `docRefTo` in
   // every part's feature/parameter expressions (a project-var rename's ref
@@ -1059,6 +1062,12 @@ struct AppState {
   // (or a lone part's envelope), read by lookup() in every part; their cells
   // are seeded into projectSymbols by SyncProjectScope.
   std::vector<lookuptable::Table> projectTables;
+  // The project's feature templates (docs/modeling/templates.md#the-library):
+  // what Save as template writes and the insert tool reads. Saved in
+  // project.json under "templates" (a lone part's file carries them, v161).
+  // A Template instance carries its own definition, so nothing regenerates
+  // from this.
+  std::vector<tmpl::Template> projectTemplates;
   SymbolTable projectSymbols;
   ProjectVarHistory projectVarHistory; // cross-tab undo for project-var edits
 
@@ -1373,6 +1382,39 @@ struct AppState {
     std::string snapU, snapV;
   };
   PrimitiveSession primitive;
+
+  // The Insert template tool (docs/modeling/templates.md#in-the-gui, ui/
+  // TemplateActions.h). Armed through the plane pick
+  // (SketchPurpose::Template); a picked face or plane opens a preview of an
+  // instance of `last` standing on it, which the tool window edits.
+  struct TemplateTool {
+    std::string last;    // the template the tool places
+    nlohmann::json on;   // what the preview stands on
+    std::string refusal; // why the tool would not start (an empty library)
+  };
+  TemplateTool templateTool;
+
+  // Save as template (docs/modeling/templates.md#saving-one): the window
+  // that turns the selected features into a template, offering the literals
+  // they carry as parameters (the variables they read are parameters
+  // already).
+  struct SaveTemplateSession {
+    bool open = false;
+    std::vector<uint64_t> featureIds;
+    std::string name;
+    struct Row {
+      tmpl::Candidate candidate;
+      bool use = false;
+      std::string param;
+    };
+    std::vector<Row> rows;
+    std::vector<std::string> variables;  // become parameters of their name
+    std::vector<std::string> references; // what it stands on
+    bool replace = false;
+    std::string error;   // the last refusal, in the window
+    std::string message; // the last save, in the window
+  };
+  SaveTemplateSession saveTemplate;
   // Committed feature open in the Tool-window editor session (U7e: editing
   // is explicit — double-click / context-menu Edit — now that the always-on
   // Properties panel is gone). 0 = none. Transient; edits commit as usual.

@@ -180,6 +180,8 @@ const Binding kDefaults[] = {
     // Unbound: a copy of another part is placed once per part, not typed.
     {"part.derive", Context::Part, "Derive (copy of another part)", "Create",
      ""},
+    // Unbound, like Derive: a template is placed by choosing one, not typed.
+    {"part.template", Context::Part, "Insert template", "Create", ""},
 
     // B for Blend — the term OCC, NX and Creo all use, and the one free
     // mnemonic: F is Fit and Shift+F is zoom-to-selection, both older and
