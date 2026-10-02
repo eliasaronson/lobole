@@ -25,6 +25,9 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     // many are live, so a scene with no section costs one compare per ray.
     vec4 clipPlanes[4];
     vec4 clipInfo;
+    // World direction -> environment-map direction (core/LightRig.h): the
+    // studio turns with the camera unless the lights are locked to the model.
+    mat4 envRotation;
 } ubo;
 
 // Per-sample RNG seed data (raygen only).

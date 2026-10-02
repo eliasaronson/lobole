@@ -77,6 +77,18 @@ const Field kFields[] = {
      0.0f,
      100.0f,
      "%"},
+    {"lock_lights_to_model",
+     "Appearance",
+     "Lock lights to model",
+     "Off, the lights follow the camera: every side you turn to is lit the "
+     "same way, and shadows move with the view. On, they stay fixed in the "
+     "world where they stand at the home view.",
+     Tier::Live,
+     &Settings::lockLightsToModel,
+     {},
+     {},
+     0.0f,
+     0.0f},
     {"gpu_device",
      "Performance",
      "Graphics device",
@@ -284,9 +296,11 @@ std::optional<json> ReadFile(const fs::path& path) {
 } // namespace
 
 bool Settings::operator==(const Settings& other) const {
-  return uiFontScale == other.uiFontScale && gpuDevice == other.gpuDevice &&
-         shadows == other.shadows && ssao == other.ssao &&
-         shadowMap == other.shadowMap && idleThrottle == other.idleThrottle &&
+  return uiFontScale == other.uiFontScale &&
+         lockLightsToModel == other.lockLightsToModel &&
+         gpuDevice == other.gpuDevice && shadows == other.shadows &&
+         ssao == other.ssao && shadowMap == other.shadowMap &&
+         idleThrottle == other.idleThrottle &&
          autosaveInterval == other.autosaveInterval && keys == other.keys;
 }
 
@@ -440,6 +454,7 @@ bool Save(const Settings& current, std::string* error) {
   none.shadowMap = -1;
   none.autosaveInterval = -1.0;
   none.shadows = !current.shadows;
+  none.lockLightsToModel = !current.lockLightsToModel;
   none.idleThrottle = !current.idleThrottle;
   none.ssao = "\x01";
   none.gpuDevice = "\x01";

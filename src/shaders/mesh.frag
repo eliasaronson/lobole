@@ -37,6 +37,27 @@ layout(push_constant) uniform PushConstants {
     vec4 procMaterial;
 } pc;
 
+// The vertex stage's UBO (mesh.vert), declared here for envRotation alone;
+// the block must match mesh.vert's member for member.
+layout(binding = 0) uniform UniformBufferObject {
+    mat4 view;
+    mat4 proj;
+    vec4 viewPos;
+    Light primaryLight;
+    Light fillLight;
+    Light rimLight;
+    vec4 ambientColor;
+    vec4 clipPlanes[4];
+    mat4 lightViewProj;
+    vec4 shadowParams;
+    vec4 aoParams;
+    vec4 aoParams2;
+    // World direction -> the direction the environment maps are sampled in:
+    // the studio turns with the camera unless the lights are locked to the
+    // model (core/LightRig.h).
+    mat4 envRotation;
+} ubo;
+
 // Image-based lighting maps (equirectangular; see IBL.cpp for the convention).
 layout(set = 0, binding = 1) uniform sampler2D uIrradiance;  // diffuse env
 layout(set = 0, binding = 2) uniform sampler2D uPrefilter;   // specular mips
@@ -51,7 +72,7 @@ const float PI = 3.14159265359;
 // Must match IBL.cpp DirToEquirectUV exactly. The HDRI format is Y-polar;
 // the world is Z-up, so world dirs swizzle into env space first.
 vec2 dirToUV(vec3 d) {
-    d = normalize(d);
+    d = normalize(mat3(ubo.envRotation) * d); // the rig's turn of the studio
     d = vec3(d.x, d.z, -d.y); // world -> env
     float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
     float v = acos(clamp(d.y, -1.0, 1.0)) / PI;

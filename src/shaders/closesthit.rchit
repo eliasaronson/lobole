@@ -56,6 +56,9 @@ layout(binding = 2, set = 0) uniform UniformBufferObject {
     // many are live, so a scene with no section costs one compare per ray.
     vec4 clipPlanes[4];
     vec4 clipInfo;
+    // World direction -> environment-map direction (core/LightRig.h): the
+    // studio turns with the camera unless the lights are locked to the model.
+    mat4 envRotation;
 } ubo;
 
 // Per-body vertex/index data reached by device address. std430 float/uint
@@ -116,7 +119,7 @@ const float kSunCos = 0.9994; // shadow-ray cone, ~2 degree half-angle
 // Must match IBL.cpp DirToEquirectUV / mesh.frag dirToUV exactly (including
 // the world -> env swizzle: the HDRI is Y-polar, the world Z-up).
 vec2 dirToUV(vec3 d) {
-    d = normalize(d);
+    d = normalize(mat3(ubo.envRotation) * d); // the rig's turn of the studio
     d = vec3(d.x, d.z, -d.y); // world -> env
     float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
     float v = acos(clamp(d.y, -1.0, 1.0)) / PI;

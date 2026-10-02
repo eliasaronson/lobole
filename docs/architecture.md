@@ -313,7 +313,8 @@ by the same name drift apart without any test noticing:
   whether an operation follows one target at a time), with the generator a
   `-Werror=switch` switch in `CamStrategies.cpp`.
 - The RPC `MethodDoc` rows and their flags (above).
-- The named views, world axes and light rig (`core/Conventions.h`).
+- The named views and world axes (`core/Conventions.h`); the light rig's
+  placement (`core/LightRig.h`).
 - Scene renderers: `RegisterSceneRenderers()`/`ShutdownSceneRenderers()` in
   `main.cpp`; icons: `ui/Icons.cpp`; tool sessions: the tool-session registry
   that `ViewportInput.cpp` asks through `ToolSessionFor`. Each is checked by

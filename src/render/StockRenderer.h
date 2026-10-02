@@ -69,6 +69,10 @@ public:
   // a rotary program plays and puts identity back when playback ends.
   void SetModel(const glm::mat4& m) { m_model = m; }
 
+  // Preferences > Lock lights to model, as MeshRenderer has it: the block
+  // derives the same rig from the same camera as the part beside it.
+  void SetLightsLockedToModel(bool locked) { m_lightsLocked = locked; }
+
   void UpdateCamera(const glm::mat4& view, const glm::mat4& proj) override {
     m_view = view;
     m_proj = proj;
@@ -159,6 +163,7 @@ private:
   glm::mat4 m_model = glm::mat4(1.0f);
   glm::mat4 m_view = glm::mat4(1.0f);
   glm::mat4 m_proj = glm::mat4(1.0f);
+  bool m_lightsLocked = false;
   ClipPlaneArray m_clipPlanes = NoClipPlanes();
   int32_t m_vx = 0, m_vy = 0;
   uint32_t m_vw = 1280, m_vh = 720;

@@ -3,6 +3,7 @@
 #include "render/FramesInFlight.h"
 
 #include "cad/CADMaterials.h" // SurfacePattern (per-instance procParams)
+#include "core/LightRig.h"
 #include "render/ClipPlanes.h"
 #include "render/SceneRenderer.h"
 #include "render/VulkanCommon.h" // vkutil::StagingBatch (asset upload batching)
@@ -61,6 +62,10 @@ struct UniformBufferObject {
   glm::vec4 aoParams;
   // x = AO enabled, yzw unused.
   glm::vec4 aoParams2;
+  // World direction -> environment-map direction (conv::LightRig): the IBL
+  // turns with the camera unless the lights are locked to the model. A mat4
+  // because a std140 mat3 pads each column to a vec4 anyway.
+  glm::mat4 envRotation;
 };
 
 // One opaque instance's draw data for the shadow pass (ShadowRenderer): the
@@ -362,6 +367,15 @@ public:
     m_aoInvSize = invFullResolution;
   }
 
+  // Preferences > Lock lights to model (Settings::lockLightsToModel).
+  void SetLightsLockedToModel(bool locked) { m_lightsLocked = locked; }
+  // The rig for the camera as last set by UpdateCamera (core/LightRig.h).
+  // The shadow pass reads its key from here, so the map is rendered from
+  // exactly the light the main pass shades with.
+  conv::LightRig Rig() const {
+    return conv::StudioRig(m_viewMatrix, m_lightsLocked);
+  }
+
   // Camera matrices as last set by UpdateCamera — the prepasses read them
   // here so they are guaranteed identical to what the main pass uses.
   const glm::mat4& ViewMatrix() const { return m_viewMatrix; }
@@ -426,6 +440,8 @@ private:
   VkSampler m_aoSampler = VK_NULL_HANDLE;
   bool m_aoEnabled = true;
   glm::vec2 m_aoInvSize = glm::vec2(0.0f);
+
+  bool m_lightsLocked = false;
 
   // Camera
   glm::mat4 m_viewMatrix = glm::mat4(1.0f);

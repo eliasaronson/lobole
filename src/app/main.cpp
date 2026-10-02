@@ -1031,6 +1031,12 @@ static void RecordScenePrepasses(VkCommandBuffer cb, uint32_t currentFrame,
   // double-write the frame's query slot.
   if (!g_MeshRenderer)
     return;
+  // The light rig follows the camera unless locked to the model
+  // (core/LightRig.h). Set here because the frame and every capture path
+  // come through, and before the shadow pass, which renders from the key.
+  g_MeshRenderer->SetLightsLockedToModel(g_App.lightsLockedToModel);
+  if (g_StockRenderer)
+    g_StockRenderer->SetLightsLockedToModel(g_App.lightsLockedToModel);
   if (g_ShadowRenderer) {
     g_MeshRenderer->SetShadowsEnabled(g_App.showShadows);
     if (g_App.showShadows) {

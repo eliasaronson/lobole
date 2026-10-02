@@ -84,23 +84,12 @@ inline const NamedView* ViewForDirection(const glm::dvec3& toCamera) {
   return nullptr;
 }
 
-// The studio light rig, shared by the raster renderer, the shadow map and the
-// ray tracer (three copies drifted before). Directions are TOWARD the light.
-// Key from the upper front-right, fill from the lower back-left, rim from
-// behind-right for edge definition.
-inline const glm::vec3 kKeyLightDir =
-    glm::normalize(glm::vec3(1.0f) + 0.5f * kWorldUpF);
-inline const glm::vec3 kFillLightDir =
-    glm::normalize(glm::vec3(-0.5f) - 0.3f * kWorldUpF);
-inline const glm::vec3 kRimLightDir = glm::normalize(
-    0.8f * kWorldRightF + 0.2f * kWorldUpF - 0.9f * kWorldFrontF);
-
-// …and what each light IS, beside the direction it shines from. The
-// directions moved here because three copies had drifted; the colours and
-// intensities were still inline in MeshRenderer, and StockRenderer had a
-// fourth set of directions hard-coded in its own GLSL — so the simulation's
-// block was lit from somewhere the part beside it was not. Intensity rides in
-// `.w`, as the shaders' `Light` struct expects.
+// The studio light rig. WHERE the lights stand is core/LightRig.h (derived
+// from the camera, or frozen at the home view when locked to the model); what
+// each light IS lives here, shared by every renderer: the colours were once
+// inline in MeshRenderer while StockRenderer had its own lights in its GLSL,
+// so the simulation's block was lit from somewhere the part beside it was
+// not. Intensity rides in `.w`, as the shaders' `Light` struct expects.
 inline const glm::vec4 kKeyLight{1.0f, 0.95f, 0.8f, 1.8f};  // slightly warm
 inline const glm::vec4 kFillLight{0.8f, 0.85f, 1.0f, 0.4f}; // cool, soft
 inline const glm::vec4 kRimLight{1.0f, 1.0f, 0.9f, 0.6f};   // neutral edge

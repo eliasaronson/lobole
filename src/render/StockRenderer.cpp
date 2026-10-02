@@ -1,6 +1,6 @@
 #include "render/StockRenderer.h"
 
-#include "core/Conventions.h"
+#include "core/LightRig.h"
 
 #include "render/VulkanCommon.h"
 
@@ -237,12 +237,14 @@ void StockRenderer::Render(VkCommandBuffer commandBuffer,
   ubo.proj = m_proj;
   for (int i = 0; i < kMaxClipPlanes; i++)
     ubo.clipPlanes[i] = m_clipPlanes[static_cast<size_t>(i)];
-  // The scene's own rig, not a copy — see core/Conventions.h.
-  ubo.key = {glm::vec4(conv::kKeyLightDir, conv::kKeyLight.a),
+  // The scene's own rig, not a copy — the part beside the block is lit by
+  // the same derivation from the same camera (core/LightRig.h).
+  const conv::LightRig rig = conv::StudioRig(m_view, m_lightsLocked);
+  ubo.key = {glm::vec4(rig.key, conv::kKeyLight.a),
              glm::vec4(glm::vec3(conv::kKeyLight), 1.0f)};
-  ubo.fill = {glm::vec4(conv::kFillLightDir, conv::kFillLight.a),
+  ubo.fill = {glm::vec4(rig.fill, conv::kFillLight.a),
               glm::vec4(glm::vec3(conv::kFillLight), 1.0f)};
-  ubo.rim = {glm::vec4(conv::kRimLightDir, conv::kRimLight.a),
+  ubo.rim = {glm::vec4(rig.rim, conv::kRimLight.a),
              glm::vec4(glm::vec3(conv::kRimLight), 1.0f)};
   ubo.ambient = conv::kAmbientLight;
   std::memcpy(m_uniformBuffers[frame].mapped, &ubo, sizeof(ubo));

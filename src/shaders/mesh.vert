@@ -20,14 +20,16 @@ layout(binding = 0) uniform UniformBufferObject {
     vec4 clipPlanes[4];
     // Key-light shadow map (S1): world -> light clip space, and params
     // x = strength, y = normal-offset world distance, z = texel size (UV),
-    // w = enable. Forwarded to the fragment stage as varyings (this UBO is
-    // bound to the vertex stage only).
+    // w = enable. Forwarded to the fragment stage as varyings.
     mat4 lightViewProj;
     vec4 shadowParams;
     // SSAO (S2): xy = 1 / framebuffer size (gl_FragCoord -> AO uv),
     // z = enable, w = unused. Forwarded as a varying like shadowParams.
     vec4 aoParams;
     vec4 aoParams2;
+    // World -> environment-map direction (core/LightRig.h). Read by
+    // mesh.frag, which declares this same block.
+    mat4 envRotation;
 } ubo;
 
 layout(push_constant) uniform PushConstants {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "core/LightRig.h"
 #include "render/ClipPlanes.h"
 
 #include <glm/glm.hpp>
@@ -87,12 +88,10 @@ struct RTStillDesc {
   // HDRI still lights it and still fills its reflections — it just stops
   // being the background.
   bool studioBackdrop = true;
-  // TOWARD each light. Zero = fall back to the shared rig (conv::kKeyLightDir
-  // and friends), which is what the viewport draws with. The still derives all
-  // three from the camera instead, so the rig stays a rig from any viewpoint.
-  glm::vec3 keyLightDir{0.0f};
-  glm::vec3 fillLightDir{0.0f};
-  glm::vec3 rimLightDir{0.0f};
+  // Where the lights stand and which way the environment faces — the
+  // viewport's own rig for the same camera (core/LightRig.h), so a still is
+  // lit the way the screen it came from is. MakeStillDesc fills it.
+  conv::LightRig rig = conv::ModelLightRig();
   uint32_t seed = 0; // RNG seed; fixed seed -> deterministic image
   // Edges over the traced image, the way the viewport draws them. Without
   // them a row of butted boards renders as one continuous slab -- the single

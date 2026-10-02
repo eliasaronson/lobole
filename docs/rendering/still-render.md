@@ -109,12 +109,14 @@ and rim, one cosine-weighted AO ray, and split-sum IBL ambient. Near-mirror
 surfaces (roughness below 0.15) blend in the full-resolution environment for
 crisp reflections.
 
-**The still is lit for the picture, not for working.** Its key light is
-derived from the camera — 40° to its left and 45° up — with a fill 60° to the
-other side and a rim from behind, so it stays off-axis from any viewpoint.
-The viewport's fixed rig (`conv::kKeyLightDir`) sits close to the default
-view direction, which is fine where outlines and SSAO define shape but
-flattens a traced still and throws its shadow behind the model.
+**The still is lit as the viewport is.** It takes the viewport's
+[light rig](README.md#the-light-rig) for the same camera — key 40° to the
+camera's left and 45° up, a fill 60° to the other side, a rim from behind —
+and the environment turned the same way, so it stays off-axis from any
+viewpoint and a still matches the screen it came from, Lock lights to model
+included. The rig began as the still's own: the viewport's old world-fixed
+key sat close to the home view direction, which flattened a traced still and
+threw its shadow behind the model.
 
 **Backdrop.** By default (`studio`) the camera sees a neutral vertical sweep
 where it sees no geometry; the HDRI still lights the model and fills its

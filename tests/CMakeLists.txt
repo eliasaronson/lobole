@@ -139,6 +139,7 @@ add_executable(designer_tests
     test_sketch_selection.cpp
     test_camera.cpp
     test_world_up.cpp
+    test_light_rig.cpp
     test_outline_edges.cpp
     test_still_outlines.cpp
     test_watchdog.cpp
@@ -318,6 +319,14 @@ add_test(NAME offscreen_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/offscreen_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(offscreen_smoke PROPERTIES LABELS slow TIMEOUT 300
+                     SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
+
+# The light rig follows the camera: the back of a block reads as its front,
+# and Lock lights to model switches that off (docs/rendering/README.md#the-light-rig).
+add_test(NAME render_light_rig_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/render_light_rig_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(render_light_rig_smoke PROPERTIES LABELS slow TIMEOUT 300
                      SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
 
 # The MCP server's autostart lifecycle: nothing running → it spawns

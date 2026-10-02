@@ -409,7 +409,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "hud, renders, reset, window"},
     {"get_settings", "Read the user preferences (docs/ui/settings.md).", "",
      remote::NoFlags,
-     "settings_format, ui_font_scale, gpu_device, shadows, ssao, "
+     "settings_format, ui_font_scale, lock_lights_to_model, gpu_device, "
+     "shadows, ssao, "
      "idle_throttle, shadow_map, git_user_name, git_user_email, "
      "terminal_panel, autosave_interval, keys{per-command chord}, "
      "window{x,y,w,h,maximized}, path, devices"},

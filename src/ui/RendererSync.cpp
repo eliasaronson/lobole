@@ -5,6 +5,7 @@
 #include "ui/SceneOverlays.h"
 #include "ui/ViewActions.h"
 
+#include "core/LightRig.h"
 #include "core/Units.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
 #include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
@@ -892,48 +893,15 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
              desc.rayFar, desc.aoRadius, diag,
              glm::length(desc.cameraPos - centre));
   }
-  // The still's rig is placed OFF the camera axis. The shared rig
-  // (conv::kKeyLightDir) sits 18.7 degrees from the default view direction —
-  // a headlamp: it flattens the form, and it throws the shadow directly
-  // behind the model where the model hides it, so "Ground shadows" looked
-  // like it did nothing. The viewport can live with that (SSAO and its
-  // outlines do the shape definition); the still now draws outlines too, but
-  // it still has no SSAO and must be LIT for the picture.
-  //
-  // 40 degrees to the camera's left and 45 up, derived from the camera so it
-  // stays off-axis from any viewpoint. Left because the shadow then falls to
-  // the right, and the eye reads a form lit from the left as convex.
-  if (state.camera) {
-    const glm::vec3 toCamera =
-        glm::normalize(state.camera->GetPosition() - state.camera->GetTarget());
-    const glm::vec3 up = conv::kWorldUpF;
-    glm::vec3 right = glm::cross(toCamera, up);
-    // Looking straight down the up axis leaves no horizontal to swing about;
-    // any perpendicular will do there.
-    if (glm::length(right) < 1e-4f)
-      right = glm::cross(toCamera, glm::vec3(1.0f, 0.0f, 0.0f));
-    right = glm::normalize(right);
-    const float swing = glm::radians(40.0f);
-    const float lift = glm::radians(45.0f);
-    const glm::vec3 flat =
-        glm::normalize(toCamera - glm::dot(toCamera, up) * up);
-    const glm::vec3 swung =
-        std::cos(swing) * flat - std::sin(swing) * right; // toward its left
-    desc.keyLightDir =
-        glm::normalize(std::cos(lift) * swung + std::sin(lift) * up);
-    // Fill opposite the key and barely lifted, to open the shadow side
-    // without casting a second one; rim from behind and high, for the bright
-    // edge that separates a body from what is behind it. Both carry the
-    // shared rig's colour and intensity (cool 0.4, neutral 0.6) — only the
-    // placement is derived here, so the three stay a rig from any viewpoint.
-    const glm::vec3 fillSwung = std::cos(glm::radians(60.0f)) * flat +
-                                std::sin(glm::radians(60.0f)) * right;
-    desc.fillLightDir =
-        glm::normalize(std::cos(glm::radians(15.0f)) * fillSwung +
-                       std::sin(glm::radians(15.0f)) * up);
-    desc.rimLightDir = glm::normalize(-flat * std::cos(glm::radians(55.0f)) +
-                                      up * std::sin(glm::radians(55.0f)));
-  }
+  // The viewport's rig for this camera (core/LightRig.h), so the still is
+  // lit the way the screen it came from is — including the lock to the model.
+  // That rig was the still's own once: the viewport's old world-fixed key sat
+  // 18.7 degrees from the home view direction, a headlamp that flattened the
+  // form and hid the ground shadow behind the model, so the still swung its
+  // own off the camera. The viewport now uses the same placement.
+  if (state.camera)
+    desc.rig = conv::StudioRig(state.camera->GetViewMatrix(),
+                               state.lightsLockedToModel);
   if (state.ibl) {
     desc.environment = state.ibl->EnvironmentView();
     desc.irradiance = state.ibl->IrradianceView();

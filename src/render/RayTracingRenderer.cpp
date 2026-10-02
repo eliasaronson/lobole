@@ -684,6 +684,9 @@ struct RTUniforms {
   // y = 1 when some material transmits: shadow rays must then run any-hit,
   // which is where they pass through glass.
   glm::vec4 clipInfo;
+  // World direction -> environment-map direction (core/LightRig.h): the
+  // studio turns with the camera, as it does in the viewport.
+  glm::mat4 envRotation;
 };
 
 glm::vec3 ACESFilm(const glm::vec3& x) {
@@ -827,29 +830,17 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   u.viewInverse = glm::inverse(desc.view);
   u.projInverse = glm::inverse(desc.proj);
   u.viewPos = glm::vec4(desc.cameraPos, 1.0f);
-  // Match the raster primary key light (conv::kKeyLightDir, toward the
-  // light); store the travel direction (negated) so the shader recovers the
-  // toward-light vector as -lightDir.
-  glm::vec3 toLight = glm::length(desc.keyLightDir) > 1e-6f
-                          ? glm::normalize(desc.keyLightDir)
-                          : conv::kKeyLightDir;
-  u.lightDir = glm::vec4(-toLight, 1.8f);
+  // The viewport's rig for this camera (MakeStillDesc), with the shared
+  // colours and intensities. The shaders take TRAVEL directions, so each
+  // toward-light vector is negated.
+  u.lightDir = glm::vec4(-desc.rig.key, conv::kKeyLight.a);
   u.lightColor = glm::vec4(glm::vec3(conv::kKeyLight), 1.0f);
   u.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 1.0f);
-  // Fill and rim carry the shared rig's COLOURS and intensities; their
-  // directions come from the caller, which swings the whole rig off the
-  // camera axis (MakeStillDesc). Travel direction is the negated toward-light
-  // vector, matching lightDir above.
-  const glm::vec3 toFill = glm::length(desc.fillLightDir) > 1e-6f
-                               ? glm::normalize(desc.fillLightDir)
-                               : conv::kFillLightDir;
-  const glm::vec3 toRim = glm::length(desc.rimLightDir) > 1e-6f
-                              ? glm::normalize(desc.rimLightDir)
-                              : conv::kRimLightDir;
-  u.fillDir = glm::vec4(-toFill, conv::kFillLight.a);
+  u.fillDir = glm::vec4(-desc.rig.fill, conv::kFillLight.a);
   u.fillColor = glm::vec4(glm::vec3(conv::kFillLight), 1.0f);
-  u.rimDir = glm::vec4(-toRim, conv::kRimLight.a);
+  u.rimDir = glm::vec4(-desc.rig.rim, conv::kRimLight.a);
   u.rimColor = glm::vec4(glm::vec3(conv::kRimLight), 1.0f);
+  u.envRotation = glm::mat4(desc.rig.envRotation);
   // Section planes, compacted so the shader's count is the loop bound.
   int live = 0;
   for (const glm::vec4& pl : desc.clipPlanes)

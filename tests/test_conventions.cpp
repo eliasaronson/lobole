@@ -985,13 +985,13 @@ TEST_CASE("the model is double: no float type in a model header",
        "how see-through the viewport draws it"},
       {"src/cad/CADMaterials.h", "int PatternAxis(",
        "texture axis from a mesh extent"},
-      // The renderers' float mirrors of model constants, and the light rig.
+      // The renderers' float mirrors of model constants, and the lights'
+      // colours (their placement is core/LightRig.h, not the model at all).
       {"src/core/Conventions.h", "kWorldUpF", "float mirror for the renderers"},
       {"src/core/Conventions.h", "kWorldFrontF",
        "float mirror for the renderers"},
       {"src/core/Conventions.h", "kWorldRightF",
        "float mirror for the renderers"},
-      {"src/core/Conventions.h", "LightDir =", "studio lights"},
       {"src/core/Conventions.h", "Light{", "studio lights"},
       // Meshes: tessellations the GPU draws and the picker hits.
       {"src/cad/CADKernel.h", "glm::vec3 position;", "a mesh vertex"},
@@ -1046,6 +1046,7 @@ TEST_CASE("the model is double: no float type in a model header",
       {"src/cad/MeshExport.h", "", "tessellated export (GLB, OBJ)"},
       {"src/core/io/GlbAnimation.h", "", "glTF is float by specification"},
       {"src/core/io/Settings.h", "", "preferences"},
+      {"src/core/LightRig.h", "", "where the viewport's lights stand"},
       {"src/core/io/WindowGeometry.h", "", "the window's size and place"},
   };
 

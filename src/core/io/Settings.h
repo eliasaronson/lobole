@@ -32,6 +32,10 @@ enum class Tier {
 struct Settings {
   // Appearance
   float uiFontScale = 1.0f; // 0.85 | 1.0 | 1.2 | 1.4, as View > Font Size had
+  // The viewport's light rig follows the camera, so whatever side of a part
+  // you look at is lit (core/LightRig.h). Locked, it stays fixed in the world
+  // where it stands at the home view, and the shadows stay put as you orbit.
+  bool lockLightsToModel = false;
 
   // Performance
   std::string gpuDevice; // "" = automatic (prefer discrete)

@@ -667,6 +667,7 @@ void ApplySettings(AppState& state) {
   GitVault::SetPreferredIdentity(s.gitUserName, s.gitUserEmail);
   state.uiFontScale = s.uiFontScale;
   state.showShadows = s.shadows;
+  state.lightsLockedToModel = s.lockLightsToModel;
   state.showAmbientOcclusion = s.ssao != "off";
   state.ssaoFullRes = s.ssao == "full";
   state.shadowMapSize = s.shadowMap;

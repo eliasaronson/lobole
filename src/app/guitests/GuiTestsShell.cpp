@@ -582,6 +582,19 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK(s_App->settings.shadows);
     IM_CHECK(s_App->showShadows);
+
+    // Lock lights to model: off by default (the rig follows the camera), and
+    // the checkbox reaches the flag RecordScenePrepasses hands the renderers
+    // (docs/rendering/README.md#the-light-rig).
+    IM_CHECK(!s_App->settings.lockLightsToModel);
+    IM_CHECK(!s_App->lightsLockedToModel);
+    ctx->ItemClick("//###SettingsWindow/###set_lock_lights_to_model");
+    ctx->Yield(2);
+    IM_CHECK(s_App->settings.lockLightsToModel);
+    IM_CHECK(s_App->lightsLockedToModel);
+    ctx->ItemClick("//###SettingsWindow/###set_lock_lights_to_model");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->lightsLockedToModel);
     // And the View menu really has no duplicate left.
     ctx->SetRef("//##MainMenuBar");
     ctx->MenuAction(ImGuiTestAction_Open, "View");

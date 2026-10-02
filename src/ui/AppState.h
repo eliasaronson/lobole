@@ -1408,6 +1408,10 @@ struct AppState {
   // Key-light shadow map (S1) — View > Shadows; session state only (no file
   // format / golden impact).
   bool showShadows = true;
+  // Preferences > Lock lights to model (Settings::lockLightsToModel): the
+  // light rig stays fixed in the world instead of following the camera
+  // (core/LightRig.h). Applied from the settings by ApplySettings.
+  bool lightsLockedToModel = false;
   // SSAO (S2) — View > Ambient Occlusion; session state only, like shadows.
   bool showAmbientOcclusion = true;
   // S3 quality settings (View > Render Quality, set_render_options RPC).

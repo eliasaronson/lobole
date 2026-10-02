@@ -20,9 +20,12 @@ app exchanges files with.
   `OrientationAxes` all read it. Top and bottom roll so the part's front edge
   sits at the bottom of the screen or sheet, which puts a drawing's top view
   directly above its front view. `FindView` and `ViewForDirection` look it up.
-- The studio light rig (`kKeyLightDir`, `kFillLightDir`, `kRimLightDir` and
-  their colours) is shared by the raster renderer, the shadow map, the ray
-  tracer and the CAM stock renderer.
+- The studio light rig — its colours here, its placement in
+  `core/LightRig.h`, derived from the camera
+  ([rendering](rendering/README.md#the-light-rig)) — is shared by the raster
+  renderer, the shadow map, the ray tracer and the CAM stock renderer. Its
+  "up" is the camera's screen up, not world up: a headlight rig must be
+  defined looking straight down the up axis too.
 - Anything that means "up" — a named view, a plane name, a gravity or load
   default, a camera up vector, a light — derives from these constants. A
   literal `(0,1,0)` elsewhere is a claim that the value is *not* world up (a

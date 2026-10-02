@@ -347,20 +347,17 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
   glm::mat4 invView = glm::inverse(m_viewMatrix);
   ubo.viewPos = glm::vec4(invView[3][0], invView[3][1], invView[3][2], 1.0f);
 
-  // FreeCAD-style multi-light setup for professional CAD lighting
-
-  // Primary directional light (main illumination from upper right). The rig
-  // directions live in core/Conventions.h — the shadow map and the ray tracer
-  // share the key light, and the three copies drifted before.
-  // The whole rig — directions, colours, intensities — is core/Conventions.h,
-  // so the stock block in the simulation is lit by the same three lights as
-  // the part beside it rather than by its own copy.
-  ubo.primaryLight.direction = glm::vec4(conv::kKeyLightDir, conv::kKeyLight.a);
+  // The rig (core/LightRig.h): placed from the camera, or frozen at the
+  // home view when locked to the model; the colours are core/Conventions.h,
+  // shared with the stock block and the ray tracer.
+  const conv::LightRig rig = Rig();
+  ubo.primaryLight.direction = glm::vec4(rig.key, conv::kKeyLight.a);
   ubo.primaryLight.color = glm::vec4(glm::vec3(conv::kKeyLight), 1.0f);
-  ubo.fillLight.direction = glm::vec4(conv::kFillLightDir, conv::kFillLight.a);
+  ubo.fillLight.direction = glm::vec4(rig.fill, conv::kFillLight.a);
   ubo.fillLight.color = glm::vec4(glm::vec3(conv::kFillLight), 1.0f);
-  ubo.rimLight.direction = glm::vec4(conv::kRimLightDir, conv::kRimLight.a);
+  ubo.rimLight.direction = glm::vec4(rig.rim, conv::kRimLight.a);
   ubo.rimLight.color = glm::vec4(glm::vec3(conv::kRimLight), 1.0f);
+  ubo.envRotation = glm::mat4(rig.envRotation);
   ubo.ambientColor = conv::kAmbientLight;
 
   // Section clip plane is global (same for every instance), so it rides in
@@ -656,14 +653,16 @@ void MeshRenderer::RebindAOMap(VkImageView aoMap) {
 
 // Private helper functions
 bool MeshRenderer::CreateDescriptorSetLayout() {
-  // 0: camera+lights UBO (vertex). 1-3: IBL maps (fragment) — irradiance,
-  // prefiltered specular, BRDF LUT. 4: key-light shadow map (fragment,
-  // compare sampler). 5: blurred SSAO map (fragment).
+  // 0: camera+lights UBO (vertex; the fragment stage reads its envRotation).
+  // 1-3: IBL maps (fragment) — irradiance, prefiltered specular, BRDF LUT.
+  // 4: key-light shadow map (fragment, compare sampler). 5: blurred SSAO map
+  // (fragment).
   VkDescriptorSetLayoutBinding bindings[6]{};
   bindings[0].binding = 0;
   bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
   bindings[0].descriptorCount = 1;
-  bindings[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  bindings[0].stageFlags =
+      VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
   for (int i = 1; i <= 5; i++) {
     bindings[i].binding = static_cast<uint32_t>(i);
     bindings[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;

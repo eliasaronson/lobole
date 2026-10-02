@@ -214,12 +214,12 @@ hidden `[.outline-perf]` case is the benchmark.
 
 - **Materials**: metallic-roughness PBR in `mesh.frag`, from per-body
   `CADMaterials` properties ([materials.md](materials.md)).
-- **Three analytic directional lights** — key, fill, rim — from
-  `conv::kKeyLightDir` / `kFillLightDir` / `kRimLightDir` and their
-  colour/intensity constants in `core/Conventions.h` (key intensity 1.8),
-  written into the UBO by `MeshRenderer::Render`. They add at 0.5x on top of
-  the IBL ambient: `ambient + 0.5 * (shadow * key + fill + rim)`. Only the key
-  light is shadowed.
+- **Three analytic directional lights** — key, fill, rim — placed by the
+  [light rig](#the-light-rig), with their colour/intensity constants in
+  `core/Conventions.h` (`conv::kKeyLight` & co., key intensity 1.8), written
+  into the UBO by `MeshRenderer::Render`. They add at 0.5x on top of the IBL
+  ambient: `ambient + 0.5 * (shadow * key + fill + rim)`. Only the key light
+  is shadowed.
 - **IBL**: split-sum image-based lighting from a bundled studio HDRI,
   `assets/hdri/brown_photostudio_02_2k.hdr` (Poly Haven, CC0; the name is
   `RuntimePaths::kEnvironmentHdriFile`). `IBLPrecompute` runs on the CPU,
@@ -228,18 +228,67 @@ hidden `[.outline-perf]` case is the benchmark.
   a 128² BRDF LUT, uploaded by `IBLTextures` as `R16G16B16A16_SFLOAT` /
   `R16G16_SFLOAT`. `IBLTextures::EnvironmentView()` is the full-resolution
   environment, used only by the path tracer. The viewport background is a
-  solid clear colour from the theme, not the environment.
+  solid clear colour from the theme, not the environment. The maps are
+  sampled through the rig's `envRotation`, so the studio turns with the
+  camera like the lights do.
 - **Tone mapping**: ACES filmic (Narkowicz fit) in `mesh.frag`.
 - **Anti-aliasing**: 4x MSAA over the whole main pass, resolved into the
   swapchain image; `GetMaxUsableSampleCount` falls back to 2x, then 1x, from
   the device's colour and depth sample-count limits. ImGui and the screenshot
   pass use the same count.
 
+### The light rig
+
+`core/LightRig.h` is the one derivation of where the lights stand.
+`conv::StudioRig(view, locked)` takes the world-to-view matrix every renderer
+is handed (`UpdateCamera`) and returns the key, fill and rim directions
+(toward each light), a roll for the shadow map, and the environment's
+rotation. The mesh renderer (`MeshRenderer::Rig()`), the stock block in the
+CAM simulation, the shadow map (which reads the key from the mesh renderer)
+and the ray-traced still (`MakeStillDesc`) all call it, and every screenshot
+and capture path re-records those renderers, so a still or a screenshot is
+lit exactly as the viewport is.
+
+- **Camera-relative by default**, as a CAD viewport's headlight rig is: the
+  key 40° to the camera's left and 45° up (screen up), the fill 60° to its
+  right and 15° up, the rim behind and 55° up. Whatever side of a part you
+  look at is lit as the front was from the front; the shadows move with the
+  view. "Up" is the camera's own, so the rig is defined from every
+  viewpoint, straight down the up axis included. Key on the left because the
+  shadow then falls down and to the right, and a form lit from the upper
+  left reads as convex.
+- **The environment turns with it.** `envRotation` maps a world direction
+  into the frame the HDRI is sampled in: the camera's frame expressed as the
+  home view's. A face toward the viewer gets the irradiance and reflections
+  it would facing the home camera, so the back of a part is not lit by
+  whatever corner of the photo studio happens to sit behind it.
+  Reflections stay put on screen as you orbit, as Blender's studio lighting
+  does (its "World Space Lighting" off).
+- **Lock lights to model** (Preferences > Appearance, `lock_lights_to_model`,
+  Live) freezes the rig where the camera-relative one stands at the **home
+  view** (`HomeViewBasis`, `Camera::DefaultIsometricPosition`), with the
+  environment unrotated. Turning it on at the home view changes nothing on
+  screen; it only stops the rig following the camera. `main.cpp` hands the
+  flag to the mesh and stock renderers in `RecordScenePrepasses`, which the
+  frame and every capture path run.
+
+The world-fixed rig this replaced had the key 18.7° from the home view's
+direction: a headlamp from there, and from the far side of a part only the
+dim fill reached what you saw. The still had already swung its own rig off
+the camera; that placement is now everyone's.
+
 ### Shadows
 
-`ShadowRenderer` renders a `D32` depth map from the key light direction,
+`ShadowRenderer` renders a `D32` depth map from the rig's key light,
 1024² or 2048² (default 2048). No cascades: the orthographic frustum is
-refitted to the scene's bounds every frame, which suits compact CAD scenes.
+refitted every frame to the scene's bounds as seen from the key, which suits
+compact CAD scenes; the fit is to the bbox's eight corners in light space,
+so it is tight whatever direction the key comes from. The light view's roll
+is the rig's `up`, which stands 45° off the key by construction (a fixed
+axis is parallel to some key a camera can produce, and `lookAt` degenerates
+there). The biases are relative to the fit — a slope-scaled depth bias in
+the pipeline and a normal offset of 1.5 map texels — so they do not change
+with the light's direction.
 The shadow vertex shader applies the section clip discard (cut-away material
 casts nothing) and draws only the opaque caster set (`GetShadowCasters`:
 visible, non-ghost instances). `mesh.frag` samples it with 3x3 PCF; the
@@ -427,13 +476,19 @@ renderer, and by looking at the pictures.
   one place, asserting none appears anywhere else (catches any mapping error
   between the AO buffer and the viewport sub-rect), plus a bound between the
   upsampled half tier and native full.
+- **`tests/render_light_rig_smoke.py`** — a square block from in front and
+  from behind reads the same mean luminance camera-relative (within 3%), is
+  lit looking straight down, and reads clearly different with Lock lights to
+  model on: the setting reaches the renderers.
 - **`tests/offscreen_smoke.py`** — lazy projection, offscreen GPU timing, a
   deterministic traced PNG.
 - `render_quick_smoke`, `render_still_reach_smoke`, `render_glass_smoke`
   ([still-render.md](still-render.md)).
 - `remote_smoke` — the windowed screenshot path, the idle throttle's RPC
   wake, and the spare swapchain image.
-- Unit: `test_outline_edges`, `test_faceselector`, `test_frame_timer`,
+- Unit: `test_light_rig` (the key left of and above the view from any
+  camera, the rig the same in camera coordinates from every viewpoint,
+  the lock, the setting), `test_outline_edges`, `test_faceselector`, `test_frame_timer`,
   `test_frame_pacer`, `test_ibl`, `test_still_outlines`, `test_materials`.
 - **`tests/test_conventions.cpp`** — the scene-renderer registration gate.
 

@@ -2,7 +2,7 @@
 
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
-#include "core/Conventions.h"
+#include "core/LightRig.h"
 #include "render/VulkanCommon.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -123,14 +123,20 @@ void ShadowRenderer::RecordShadowPass(VkCommandBuffer cb, MeshRenderer& scene) {
   const bool haveCasters = scene.GetShadowCasters(m_casters, bbMin, bbMax);
 
   if (haveCasters) {
-    // Fit the ortho frustum to the scene bbox from the primary light's
-    // direction. Pinned to MeshRenderer::UpdateCamera's primary light —
-    // shadowing any other light would need its own map.
-    const glm::vec3 lightDir = conv::kKeyLightDir;
+    // Fit the ortho frustum to the scene bbox from the key light, taken from
+    // the mesh renderer's own rig so the map is rendered from exactly the
+    // light the main pass shades with. The rig follows the camera, so the
+    // shadows move with the view; the fit below is to the bbox's corners in
+    // light space, which is tight from any direction. The roll is the rig's
+    // `up`, 45 degrees off the key by construction: a fixed axis is parallel
+    // to some key a camera can now produce, and lookAt degenerates there.
+    // Shadowing any other light would need its own map.
+    const conv::LightRig rig = scene.Rig();
+    const glm::vec3 lightDir = rig.key;
     const glm::vec3 center = 0.5f * (bbMin + bbMax);
     const float diag = std::max(glm::length(bbMax - bbMin), 1e-3f);
-    const glm::mat4 view = glm::lookAt(center + lightDir * diag, center,
-                                       glm::vec3(0.0f, 1.0f, 0.0f));
+    const glm::mat4 view =
+        glm::lookAt(center + lightDir * diag, center, rig.up);
     glm::vec3 mn(std::numeric_limits<float>::max());
     glm::vec3 mx = -mn;
     for (int c = 0; c < 8; c++) {
