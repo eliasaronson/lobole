@@ -84,15 +84,15 @@ them:
 - **Deliberate contact.** `add_assertion` declares a minimum clearance and
   `check_fits` classifies ISO 286 fits, but `interference` and
   `contact_report` cannot be told that an overlap is a press fit, so a
-  designed interference reads as a clash.
+  designed interference reads as a clash. (A retaining ring's grip in its
+  groove is the one designed overlap they relieve,
+  [a ring in its groove](parts/README.md#a-ring-in-its-groove).)
 - **A weld as a record** (length, size, symbol, a weld table). Welded joins
   are currently flush mates or unioned solids.
 - **Fasteners:** property classes, torque and preload (`check_fasteners`
   checks length and engagement, not load); Phillips drives; a countersunk
   screw in a plain bore (refused today); inserts, rivets, dowel pins and
-  spring washers; a DIN 471/472 retaining ring placed in its groove (the
-  ring and the groove exist,
-  [retaining rings](parts/README.md#retaining-rings)).
+  spring washers.
 - **Relations with two inputs:** a relation reads one mate; a delivery valve
   whose timing follows both the camshaft and the rack cannot be expressed.
 - **Springs** that stretch between two occurrences and follow the motion.

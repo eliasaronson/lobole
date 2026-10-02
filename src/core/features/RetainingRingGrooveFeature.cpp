@@ -3,6 +3,7 @@
 #include "common/Logger.h"
 #include "core/BodyMode.h"
 #include "core/ElementHistory.h"
+#include "core/PrintAllowance.h"
 #include "core/parts/RetainingRingTable.h"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -138,11 +139,28 @@ bool RetainingRingGrooveFeature::Execute(RegenContext& ctx) {
         return false;
       }
     }
+    // On a PRINTED part the face is read at the size it prints, as
+    // fit_bearing reads a seat: a PETG journal for a Ø25 ring is modelled
+    // Ø24.9 (docs/tolerances/README.md#printed-parts), and its groove is
+    // the Ø25's.
+    const printfit::Printed printedAs =
+        shaft ? printfit::Printed::Shaft : printfit::Printed::Hole;
+    double nominal = 2.0 * r;
+    std::string printedNote;
+    if (ctx.print != nullptr) {
+      std::string ignored;
+      if (const auto a =
+              printfit::ForModelled(*ctx.print, printedAs, nominal, &ignored)) {
+        nominal = a->basicMm;
+        printedNote =
+            " (modelled Ø" + Mm(2.0 * r) + ", prints Ø" + Mm(nominal) + ")";
+      }
+    }
     std::string why;
     const parts::RetainingRingRow* row =
-        parts::FindRetainingRing(own, 2.0 * r, &why);
+        parts::FindRetainingRing(own, nominal, &why);
     if (row == nullptr) {
-      SetError(why);
+      SetError(why + printedNote);
       return false;
     }
 
@@ -208,7 +226,14 @@ bool RetainingRingGrooveFeature::Execute(RegenContext& ctx) {
     // cylinder's Y direction — off its seam, which is in the X plane.
     const double vA = vEdge + sign * offset;
     const double vB = vA + sign * row->m;
-    const double floor = row->d2 / 2.0;
+    // The floor where it PRINTS at d2 on a printed part.
+    double floor = row->d2 / 2.0;
+    if (ctx.print != nullptr) {
+      std::string ignored;
+      if (const auto a =
+              printfit::ForBasic(*ctx.print, printedAs, row->d2, &ignored))
+        floor = a->modelMm / 2.0;
+    }
     const double reach = shaft ? r + row->t : r - row->t;
     const double rIn = std::min(floor, reach), rOut = std::max(floor, reach);
     const gp_Dir y = cyl.Position().YDirection();
@@ -270,6 +295,20 @@ bool RetainingRingGrooveFeature::Execute(RegenContext& ctx) {
       SetWarning(cut.warning);
     body->shape = std::move(cut.shape);
     body->elementMap = std::move(cut.map);
+    // The groove's grip (RingGrip, docs/parts/README.md#a-ring-in-its-groove):
+    // on its floor, which a ring of this standard and size may overlap.
+    const std::string floorName = prefix + "/" + kFloor;
+    for (const auto& [idx, name] : body->elementMap.names)
+      if (name == floorName || name.rfind(floorName + ";", 0) == 0) {
+        RingGrip grip;
+        grip.face = {body->createdBy, name};
+        grip.featureId = GetId();
+        grip.standard = parts::RetainingRingStandardName(own);
+        grip.size = row->d1;
+        grip.groove = true;
+        body->ringGrips.push_back(std::move(grip));
+        break;
+      }
     return true;
   } catch (const Standard_Failure& e) {
     SetError(std::string("retaining ring groove failed: ") +

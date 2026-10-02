@@ -458,9 +458,12 @@ refused asking for the rim.
   `designation?`) is checked against the same measurements on top. Both
   rings are checked, the one no mate reaches through the seat it sits on
   ([both rings](#both-rings)); a ring with no seat found is unverified,
-  never a pass. A ring with no shoulder at the end it sits at is
-  `<ring>_ring_located: unverified`; a retaining ring in a groove is not yet
-  read as locating it ([retaining rings](#retaining-rings)).
+  never a pass. A ring with no shoulder at the end it sits at is located
+  by a retaining ring seated in a groove beside it
+  ([a ring in its groove](#a-ring-in-its-groove)) — `<ring>_ring_located`
+  passes and `<ring>_retainer_reach` judges the ring's installed reach by
+  the same abutment limits — and with neither it is
+  `<ring>_ring_located: unverified`.
 
 ### Both rings
 
@@ -563,6 +566,10 @@ JSON type `RetainingRingGroove`, v156) cuts the groove in a part:
   on. `offset` (+`offset_expr`) is the distance from it into the face to
   the groove's NEAR flank, the one the ring bears on: the bearing's width,
   for a bearing held between the shoulder and the ring.
+- On a PRINTED part (`set_print_process`) the face is read at the size it
+  prints, as `fit_bearing` reads a seat — a PETG journal for a Ø25 ring is
+  modelled Ø24.9 and takes the Ø25's groove — and the floor is cut where
+  it prints at d2.
 - The groove is the row for the face's diameter: d2 deep, m wide. Refused,
   never adjusted, when the face's diameter is not a carried size, the
   groove runs off the face, or less than the edge distance n is left past
@@ -575,22 +582,69 @@ So a journal for a bearing located by a ring is B + m + n long past its
 shoulder at least, and `list_retaining_rings` gives m and n before anything
 is cut.
 
-### Placing a ring in its groove: not built
+### A ring in its groove
 
-The ring is placed where told; nothing yet puts it in its groove, mates it,
-or lets `check_seat` read it as locating a bearing ring. That waits for the
-fastener rework that makes placed hardware follow its hole's named faces,
-and is to be built on it rather than on `attachedTo`/`attachOffset`: the
-ring's `ring_side_a` on the groove's `groove_flank_a`, its axis on the
-groove's, and the overlap of the free ring with the floor treated as
-intended.
+`fit_retaining_ring {groove, dry_run?}` (`ui::FitRetainingRing`,
+`src/ui/RetainingRingActions.{h,cpp}`) puts the ring a groove takes into
+it. `groove` names any face of a `RetainingRingGroove` (its floor or a
+flank) on a placed part, with the `occurrence` (and `inner_path`) it is on;
+a name several placements answer to is refused naming them.
+
+- **Which ring** is the groove's: the standard and size it was cut for
+  (DIN 471 in a shaft, 472 in a bore). It is added as a bought part
+  (`add_retaining_ring`'s one part per spec).
+- **Where.** It is attached to the grooved placement and **seated** by
+  `assembly::SeatRider` on the groove's faces by name
+  ([attached, and mated](#attached-and-mated)): `groove_flank_a` is the
+  face, `groove_floor` the axis, and its `ring_side_a` lies on the flank,
+  the ring standing in the groove off it (the flank's outward normal is the
+  seat's Z, and the ring's +Z runs from side A). So it follows the groove
+  when the part changes — a journal made longer, a groove's offset — and a
+  groove that is deleted leaves it in error, as a fastener's lost hole
+  does. One ring to a groove: a second is refused naming the first.
+- **Its grip is not a clash.** Drawn at its free diameter, a 471 ring's
+  inside (d3) is under the groove's floor (d2), so the ring overlaps the
+  shaft by (d2 - d3)/2 over its thickness — which is what holds it. Both
+  features stamp a `RingGrip` on their body (`core/Feature.h`: the groove
+  on its floor, the ring on the face that grips — a 471's bore, a 472's
+  outside), as a Thread stamps the `ThreadRegion` a screw may engage, and
+  `Measure::ContactBetween` relieves EXACTLY that annulus: between the ring's
+  grip face and the floor, over the ring's thickness, and only for a ring
+  and a groove of the same standard and size, on one axis, the ring inside
+  the groove's width. Anything else either overlaps is still a clash: a
+  ring half a millimetre out of its groove, or a ring of the next size in
+  it. It is geometry, not a flag on the pair, so it holds wherever contact
+  is asked — `interference` (a named pair reports `ring_grip_pairs` and
+  `ring_grip_volume`), the exact sweep, `contact_report`, an exact motion
+  study (which bypasses its contact cache for a body with grips, as for
+  threads) — and needs no assembly: the seat is how a ring gets there, the
+  grip is why it may be there. The mesh mode of a sweep has no grips and
+  reports the overlap, as it does a thread. The geometry cache carries the
+  grips (`kGeometryFormat` 5), so a reopened project relieves them too.
+- **It locates a bearing.** `check_seat` reads a bearing ring that has no
+  shoulder at the end it sits at as located by a ring seated (attached,
+  its seat resolving) in a groove of the seat's own placement — 471 on the
+  shaft for an inner ring, 472 in the bore for an outer — on the bearing's
+  axis, beside the ring within the groove's float (m - s, plus 0.01 mm).
+  The seat's entry names it (`retainer` {occurrence, designation, gap_mm,
+  reach_mm}); `<ring>_ring_located` passes, and `<ring>_retainer_reach`
+  judges the ring's reach as installed — its inside on the floor, d2 + 2b
+  for a 471, d2 - 2b for a 472 — against the same
+  [abutment limits](#abutment-limits) as a shoulder: d_a min to d_a max on
+  a shaft, D_a max in a housing. A DIN 471 25 reaches Ø29.9, inside a
+  6005-2Z's 28.2 to 31.9.
 
 `tests/test_retaining_rings.cpp`: the table against the charts at several
 sizes and against itself (t is half of d1 - d2 on every row), the refusals,
 both rings' bodies and named faces, a groove cut on a Ø25 shaft from the
 shoulder and from the free end (its floor, flanks and removed volume), a
 groove in a Ø47 bore, every groove refusal, round trip, and placing and
-counting rings in an assembly. Golden `v156-retaining-ring`.
+counting rings in an assembly; a ring fitted into its groove (pose,
+seat, a second refused, a face no groove made refused, following the groove
+when its offset changes), its grip relieved in its groove and not half a
+millimetre out of it or at another size, a groove on a printed shaft, and
+`check_seat` reading a seated ring as locating a 6005's inner ring (and not
+once its seat is lost). Golden `v156-retaining-ring`.
 
 ## RPCs
 
@@ -601,7 +655,7 @@ shoulder and a housing from before anything is placed), `add_bearing
 designation?, series?, dry_run?}`, `check_seat {occurrence, catalog?,
 revision?, hash?, designation?}`; `list_retaining_rings {standard,
 min_size_mm?}`, `add_retaining_ring {standard, size, position?,
-orientation?}`;
+orientation?}`, `fit_retaining_ring {groove, dry_run?}`;
 `add_fastener {standard, size, length?, drive?, position?, orientation?}`
 (places where told), `fit_fastener {rim, standard?, drive?, size?, nut?,
 washer_under_head?, washer_under_nut?, washer?, far_end?, dry_run?}`,
@@ -638,9 +692,10 @@ ghost count tracks the options, place, joined, check). Goldens
   browser.
 - Bearings beyond deep-groove ball bearings at bores 3 to 30 mm; shield and
   seal variants as their own designations; a bearing whose rings turn.
-- A retaining ring placed in its groove, and read by `check_seat` as
-  locating a ring ([retaining rings](#placing-a-ring-in-its-groove-not-built));
-  a ring's opening and lugs; DIN 6799 (E-clips) and heavy-duty rings.
+- A retaining ring's opening and lugs; DIN 6799 (E-clips) and heavy-duty
+  rings; a ring tool in the GUI (`fit_retaining_ring` is an RPC); a grip
+  carried through a pattern of grooves (a Pattern copies a body's threads,
+  not its ring grips).
 - Folding hardware in the Occurrences tree.
 - A ghost on hover before the rim is picked.
 - Attachment chains (an attached occurrence's parent is never itself chased)

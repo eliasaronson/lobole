@@ -598,6 +598,8 @@ void AttachSweepCoverage(nlohmann::json& out, const SweepPlan& plan,
 void AddOverlapSite(json& j, const Measure::SetContact& c) {
   j["engaged_thread_pairs"] = c.engagedThreadPairs;
   j["thread_engagement_volume"] = c.threadEngagementVolume;
+  j["ring_grip_pairs"] = c.ringGripPairs;
+  j["ring_grip_volume"] = c.ringGripVolume;
   if (!c.overlaps)
     return;
   remote::AddOverlapSite(j, c.centroid, c.overlapMin, c.overlapMax);

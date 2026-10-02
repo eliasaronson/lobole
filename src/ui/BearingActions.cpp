@@ -5,7 +5,9 @@
 #include "core/PrintAllowance.h"
 #include "core/catalog/Catalog.h"
 #include "core/features/BearingFeature.h"
+#include "core/features/RetainingRingFeature.h"
 #include "core/parts/BearingSeat.h"
+#include "core/parts/RetainingRingTable.h"
 #include "ui/AppState.h"
 #include "ui/DocumentSlots.h"
 
@@ -494,6 +496,118 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
   json measurements = json::object();
   bool haveBore = false, haveOutside = false;
 
+  // A retaining ring that locates a bearing ring where no shoulder does
+  // (docs/parts/README.md#a-ring-in-its-groove): one SEATED in a groove of
+  // the seat's own placement (attached, its seat resolving), of the standard
+  // the ring's side takes (471 on a shaft for the inner ring, 472 in a bore
+  // for the outer), on the bearing's axis and beside it within the groove's
+  // float (m - s). Its reach as installed -- its inside on the groove floor,
+  // d2 + 2b (471), its outside there, d2 - 2b (472) -- is the abutment, so
+  // it is judged by the same limits as a shoulder.
+  const auto retainer = [&](bool bore, const assembly::FlatInstance& inst,
+                            json& s) {
+    const glm::dvec3 dir = glm::normalize(sideB - sideA);
+    for (const Occurrence& o : state.assembly->GetOccurrences()) {
+      if (o.attachedTo != inst.rootOccurrenceId || !o.attachSeat.IsSet() ||
+          o.attachSeat.innerPath != inst.innerIds || !o.attachError.empty())
+        continue;
+      const RetainingRingFeature* ring =
+          SoleRetainingRingOf(OccurrencePartDoc(state, o));
+      parts::RetainingRingStandard which{};
+      if (ring == nullptr ||
+          !parts::RetainingRingStandardFromString(ring->standard, which) ||
+          (which == parts::RetainingRingStandard::Din471) != bore)
+        continue;
+      const parts::RetainingRingRow* rr =
+          parts::FindRetainingRing(which, ring->size);
+      if (rr == nullptr)
+        continue;
+      const glm::dmat4 rw = OccurrenceMatrix(o);
+      const glm::dvec3 ro(rw[3]);
+      const glm::dvec3 rz = glm::normalize(glm::dvec3(rw[2]));
+      if (std::abs(std::abs(glm::dot(rz, dir)) - 1.0) > 1e-6)
+        continue;
+      const glm::dvec3 off = ro - sideA;
+      if (glm::length(off - glm::dot(off, dir) * dir) > 1e-3)
+        continue;
+      const double t0 = glm::dot(off, dir);
+      const double t1 = t0 + rr->s * glm::dot(rz, dir);
+      const double lo = std::min(t0, t1), hi = std::max(t0, t1);
+      // Outside the bearing's width, on one side or the other.
+      const double gap = hi <= 1e-6            ? -hi
+                         : lo >= row->B - 1e-6 ? lo - row->B
+                                               : -1.0;
+      const double play = std::max(0.0, rr->m - rr->s) + 0.01;
+      if (gap < 0.0 || gap > play)
+        continue;
+      const double reach = bore ? rr->d2 + 2.0 * rr->b : rr->d2 - 2.0 * rr->b;
+      const std::string ringName = bore ? "inner" : "outer";
+      const std::string designation =
+          parts::RetainingRingDesignation(which, *rr);
+      s["retainer"] = {{"occurrence", o.id},
+                       {"designation", designation},
+                       {"gap_mm", gap},
+                       {"reach_mm", reach}};
+      check(
+          {{"characteristic", ringName + "_ring_located"},
+           {"status", "pass"},
+           {"observed", gap},
+           {"maximum", play},
+           {"units", "mm"},
+           {"reason", "held by " + designation + " (occurrence " +
+                          std::to_string(o.id) + ") in its groove, " + Mm(gap) +
+                          " mm off the ring's side (the groove lets it "
+                          "float " +
+                          Mm(play - 0.01) + ")"}});
+      json r = {{"characteristic", ringName + "_retainer_reach"},
+                {"observed", reach},
+                {"units", "mm"}};
+      if (abut != nullptr) {
+        r["source"] = source;
+        if (bore) {
+          const bool haveMax = parts::BearingAbutment::Has(abut->daMax);
+          r["minimum"] = abut->daMin;
+          if (haveMax)
+            r["maximum"] = abut->daMax;
+          const bool low = reach < abut->daMin - 1e-6;
+          const bool high = haveMax && reach > abut->daMax + 1e-6;
+          r["status"] = low || high ? "fail" : haveMax ? "pass" : "unverified";
+          r["reason"] =
+              low ? "the ring reaches Ø" + Mm(reach) +
+                        " in its groove, below d_a min " + Mm(abut->daMin) +
+                        ": the inner ring's side is unsupported"
+              : high ? "the ring reaches Ø" + Mm(reach) + ", above d_a max " +
+                           Mm(abut->daMax) + ": it reaches the shield"
+              : haveMax
+                  ? "within d_a " + Mm(abut->daMin) + " to " + Mm(abut->daMax)
+                  : std::string("it meets d_a min; d_a max is not printed");
+        } else {
+          r["maximum"] = abut->DaMax;
+          const bool wide = reach > abut->DaMax + 1e-6;
+          r["status"] = wide ? "fail" : "pass";
+          r["reason"] = wide ? "the ring's inside, Ø" + Mm(reach) +
+                                   " in its groove, is above D_a max " +
+                                   Mm(abut->DaMax) +
+                                   ": the outer ring's side is unsupported"
+                             : "within D_a max " + Mm(abut->DaMax);
+        }
+      } else {
+        const double edge =
+            bore ? row->d + 2.0 * row->rMin : row->D - 2.0 * row->rMin;
+        const bool reaches = bore ? reach > edge : reach < edge;
+        r["status"] = reaches ? "unverified" : "fail";
+        r["reason"] = reaches ? "it reaches past the ring's chamfer; " +
+                                    std::string(source) + " lists no " +
+                                    row->designation
+                              : std::string("it does not reach past the "
+                                            "ring's chamfer");
+      }
+      check(std::move(r));
+      return true;
+    }
+    return false;
+  };
+
   // One ring on one seat, however the seat was found (a mate, or the
   // coaxial search below): the end it sits at, the diameter, the shoulder.
   const auto judge = [&](bool bore, const assembly::FlatInstance& inst,
@@ -536,11 +650,16 @@ nlohmann::json CheckSeat(AppState& state, uint64_t occurrence,
     check(std::move(dia));
     if (end == nullptr || !end->shoulder) {
       s["shoulder"] = false;
+      if (retainer(bore, inst, s)) {
+        seats.push_back(std::move(s));
+        return;
+      }
       check({{"characteristic",
               std::string(bore ? "inner" : "outer") + "_ring_located"},
              {"status", "unverified"},
              {"reason", "nothing on this seat stops the ring axially — no "
-                        "shoulder at the end it sits at"}});
+                        "shoulder at the end it sits at, and no retaining ring "
+                        "seated in a groove beside it"}});
       seats.push_back(std::move(s));
       return;
     }

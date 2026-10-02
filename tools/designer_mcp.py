@@ -369,7 +369,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   from the table): {{"type": "RetainingRing", "name": str, "standard":
   "din471" (external, a shaft, sizes 3-56) | "din472" (internal, a bore,
   sizes 8-72), "size": num (the nominal shaft or bore diameter, mm)}} — in
-  an ASSEMBLY, `add_retaining_ring` places one; `list_retaining_rings`
+  an ASSEMBLY, `fit_retaining_ring {{groove}}` puts the ring a groove
+  takes into it, seated on the groove's faces so it follows the groove
+  (`add_retaining_ring` places one where told); `list_retaining_rings`
   answers the table, its groove dimensions included.
 - RetainingRingGroove (the groove a ring sits in, cut in a part):
   {{"type": "RetainingRingGroove", "name": str, "face": {{"feature_id",

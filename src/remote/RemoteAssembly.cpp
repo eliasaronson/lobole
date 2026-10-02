@@ -461,9 +461,31 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "is local +Z, side A (`ring_side_a`) on z = 0. It is drawn at its FREE "
      "diameter, so in its groove it overlaps the floor by (d2 - d3)/2. Its "
      "groove is a RetainingRingGroove feature on the part (add_feature). "
-     "Placing a ring INTO its groove is not built yet: position it yourself.",
+     "fit_retaining_ring puts one INTO its groove; this places one where "
+     "told.",
      "orientation, position, size, standard", remote::NoFlags,
      "occurrence, part"},
+    {"fit_retaining_ring",
+     "Put the retaining ring a GROOVE takes into it "
+     "(docs/parts/README.md#a-ring-in-its-groove). `groove` is {feature_id, "
+     "element, occurrence?, inner_path?} naming any face of a "
+     "RetainingRingGroove feature (its groove_floor or a groove_flank) on a "
+     "placed part. The ring's standard and size are the groove's (DIN 471 in "
+     "a shaft, 472 in a bore); it is added as a bought part, ATTACHED to that "
+     "placement and SEATED on the groove's faces by name -- its ring_side_a "
+     "on groove_flank_a, coaxial with groove_floor -- so it follows the "
+     "groove when the part changes (and `attach_error` says so if the groove "
+     "is lost). The free ring overlaps the groove's floor by (d2 - d3)/2: that "
+     "grip is relieved by interference, contact_report and motion studies, "
+     "and only for a ring of the groove's own standard and size sitting "
+     "coaxially inside its width (`ring_grip_pairs`, `ring_grip_volume` on a "
+     "named pair). check_seat counts a ring seated beside a bearing ring as "
+     "locating it. Refused: a face no groove made, a groove on several "
+     "placements without `occurrence`, a groove that already holds a ring. "
+     "`dry_run` works it out without placing.",
+     "dry_run, groove", remote::NoFlags,
+     "occurrence, part, standard, size_mm, designation, parent, "
+     "groove_feature, position, orientation, summary"},
     {"list_retaining_rings",
      "The DIN 471 / DIN 472 table this build carries "
      "(docs/parts/README.md#retaining-rings): {standard, min_size_mm?} "
@@ -1163,6 +1185,34 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     return json{{"standard", name},
                 {"source", parts::RetainingRingSource(which)},
                 {"rings", std::move(out)}};
+  }
+  if (m == "fit_retaining_ring") {
+    ui::RimPick groove;
+    const auto& r = p.at("groove");
+    groove.element.featureId = r.at("feature_id").get<uint64_t>();
+    groove.element.name = r.at("element").get<std::string>();
+    groove.occurrence = r.value("occurrence", uint64_t{0});
+    if (r.contains("inner_path"))
+      groove.innerPath = r.at("inner_path").get<std::vector<uint64_t>>();
+    const ui::RetainingRingFit fit =
+        ui::FitRetainingRing(state, groove, p.value("dry_run", false));
+    if (!fit.ok)
+      throw std::runtime_error(fit.why);
+    const Occurrence* placed = fit.occurrence != 0
+                                   ? state.assembly->FindById(fit.occurrence)
+                                   : nullptr;
+    return json{{"occurrence", fit.occurrence},
+                {"part", placed != nullptr ? placed->name : fit.designation},
+                {"standard", fit.standard},
+                {"size_mm", fit.size},
+                {"designation", fit.designation},
+                {"parent", fit.parent},
+                {"groove_feature", fit.groove},
+                {"position", {fit.position.x, fit.position.y, fit.position.z}},
+                {"orientation",
+                 {fit.orientation.x, fit.orientation.y, fit.orientation.z,
+                  fit.orientation.w}},
+                {"summary", fit.summary}};
   }
   if (m == "fit_bearing") {
     ui::RimPick seat;

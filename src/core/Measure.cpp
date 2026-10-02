@@ -54,6 +54,7 @@
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
 #include <TopoDS_Vertex.hxx>
+#include <gp_Cylinder.hxx>
 #include <gp_Quaternion.hxx>
 #include <gp_Trsf.hxx>
 
@@ -346,8 +347,9 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
                                          const std::vector<Body>& bodiesB,
                                          const glm::dmat4& xfB) {
   const auto threaded = [](const auto& bodies) {
-    return std::any_of(bodies.begin(), bodies.end(),
-                       [](const Body& b) { return !b.threadRegions.empty(); });
+    return std::any_of(bodies.begin(), bodies.end(), [](const Body& b) {
+      return !b.threadRegions.empty() || !b.ringGrips.empty();
+    });
   };
   if (threaded(bodiesA) || threaded(bodiesB)) {
     const auto c = ContactBetween(bodiesA, xfA, bodiesB, xfB, false);
@@ -554,6 +556,93 @@ static TopoDS_Shape RemoveThreadEngagement(
   return overlap;
 }
 
+// A retaining ring's grip or its groove's (RingGrip), placed: the grip
+// face's axis, radius and the span it runs along that axis.
+struct GripSpan {
+  const RingGrip* grip = nullptr;
+  glm::dvec3 origin{0.0}, axis{0.0, 0.0, 1.0};
+  double radius = 0.0, lo = 0.0, hi = 0.0;
+};
+
+static std::vector<GripSpan> GripSpans(const Body& body,
+                                       const TopLoc_Location& loc) {
+  std::vector<GripSpan> out;
+  for (const RingGrip& grip : body.ringGrips) {
+    const auto index = body.elementMap.Resolve(grip.face.name);
+    if (!index)
+      continue;
+    const auto face = FaceAt(body.shape.GetShape().Moved(loc), *index);
+    if (face.IsNull())
+      continue;
+    BRepAdaptor_Surface surface(TopoDS::Face(face));
+    if (surface.GetType() != GeomAbs_Cylinder)
+      continue;
+    const gp_Cylinder cylinder = surface.Cylinder();
+    const gp_Pnt o = cylinder.Location();
+    const gp_Dir d = cylinder.Axis().Direction();
+    double lo = surface.FirstVParameter(), hi = surface.LastVParameter();
+    if (lo > hi)
+      std::swap(lo, hi);
+    out.push_back({&grip, glm::dvec3(o.X(), o.Y(), o.Z()),
+                   glm::dvec3(d.X(), d.Y(), d.Z()), cylinder.Radius(), lo, hi});
+  }
+  return out;
+}
+
+// Removes from `overlap` the grip of a ring seated in its groove
+// (docs/parts/README.md#a-ring-in-its-groove): the annulus between the
+// free ring's grip face and the groove's floor, over the ring's thickness —
+// and only for a ring and a groove of one standard and size, on one axis,
+// the ring within the groove's width. Whatever else overlaps is left.
+static TopoDS_Shape RemoveRingGrip(TopoDS_Shape overlap,
+                                   const std::vector<GripSpan>& a,
+                                   const std::vector<GripSpan>& b,
+                                   size_t& gripped) {
+  for (const GripSpan& x : a)
+    for (const GripSpan& y : b) {
+      if (x.grip->groove == y.grip->groove ||
+          x.grip->standard != y.grip->standard ||
+          std::abs(x.grip->size - y.grip->size) > 1e-6)
+        continue;
+      const GripSpan& groove = x.grip->groove ? x : y;
+      const GripSpan& ring = x.grip->groove ? y : x;
+      const double dot = glm::dot(groove.axis, ring.axis);
+      if (std::abs(std::abs(dot) - 1.0) > 1e-7)
+        continue;
+      // The ring's span along the groove's axis, in the groove's frame.
+      const glm::dvec3 delta = ring.origin - groove.origin;
+      const double along = glm::dot(delta, groove.axis);
+      if (glm::length(delta - along * groove.axis) > 1e-4)
+        continue;
+      const double r0 = along + dot * ring.lo, r1 = along + dot * ring.hi;
+      const double lo = std::min(r0, r1), hi = std::max(r0, r1);
+      constexpr double kTol = 1e-4;
+      if (lo < groove.lo - kTol || hi > groove.hi + kTol)
+        continue; // not in its groove: its overlap is a clash
+      // A hair past the two cylinders and the ring's sides, so the cut does
+      // not leave a sliver of their own coincident faces behind.
+      constexpr double kPad = 1e-3;
+      const double rIn = std::min(groove.radius, ring.radius) - kPad;
+      const double rOut = std::max(groove.radius, ring.radius) + kPad;
+      const glm::dvec3 start = groove.origin + (lo - kPad) * groove.axis;
+      const gp_Ax2 ax(gp_Pnt(start.x, start.y, start.z),
+                      gp_Dir(groove.axis.x, groove.axis.y, groove.axis.z));
+      const double h = hi - lo + 2.0 * kPad;
+      BRepAlgoAPI_Cut tube;
+      BuildQuery(tube, BRepPrimAPI_MakeCylinder(ax, rOut, h).Shape(),
+                 BRepPrimAPI_MakeCylinder(ax, std::max(rIn, 1e-3), h).Shape());
+      if (!tube.IsDone())
+        throw Standard_Failure("ring grip tool failed");
+      BRepAlgoAPI_Cut cut;
+      BuildQuery(cut, overlap, tube.Shape());
+      if (!cut.IsDone())
+        throw Standard_Failure("ring grip subtraction failed");
+      overlap = cut.Shape();
+      ++gripped;
+    }
+  return overlap;
+}
+
 // The exact minimum distance between two placed shapes, asked of the FACES
 // that can hold it rather than of every face against every other.
 //
@@ -645,6 +734,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
       const CADShape* source = nullptr; // for the mesh cache, keyed on it
       Bnd_Box box;
       std::vector<Measure::ThreadSpan> threads;
+      std::vector<GripSpan> grips;
     };
     const auto place = [](const std::vector<Body>& bodies,
                           const TopLoc_Location& loc) {
@@ -656,6 +746,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
         p.source = &b.shape;
         p.shape = b.shape.GetShape().Moved(loc);
         p.threads = ThreadSpans(b, loc);
+        p.grips = GripSpans(b, loc);
         BRepBndLib::Add(p.shape, p.box);
         out.push_back(std::move(p));
       }
@@ -693,16 +784,27 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
         BuildQuery(common, pa[i].shape, pb[j].shape, kContactFuzz);
         if (!common.IsDone() || common.Shape().IsNull())
           return std::nullopt;
-        const auto overlap =
+        const auto threaded =
             RemoveThreadEngagement(common.Shape(), pa[i].threads, pb[j].threads,
                                    out.engagedThreadPairs);
+        const bool gripping = !pa[i].grips.empty() && !pb[j].grips.empty();
+        const auto overlap =
+            gripping ? RemoveRingGrip(threaded, pa[i].grips, pb[j].grips,
+                                      out.ringGripPairs)
+                     : threaded;
         GProp_GProps props;
         BRepGProp::VolumeProperties(overlap, props);
         if (!pa[i].threads.empty() && !pb[j].threads.empty()) {
-          GProp_GProps raw;
+          GProp_GProps raw, after;
           BRepGProp::VolumeProperties(common.Shape(), raw);
+          BRepGProp::VolumeProperties(threaded, after);
           out.threadEngagementVolume +=
-              std::max(0.0, raw.Mass() - props.Mass());
+              std::max(0.0, raw.Mass() - after.Mass());
+        }
+        if (gripping) {
+          GProp_GProps before;
+          BRepGProp::VolumeProperties(threaded, before);
+          out.ringGripVolume += std::max(0.0, before.Mass() - props.Mass());
         }
         const double v = std::max(0.0, props.Mass());
         out.volume += v;

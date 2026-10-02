@@ -10,6 +10,7 @@
 #include "core/ElementOrigin.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
+#include "core/PrintAllowance.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/RetainingRingFeature.h"
 #include "core/features/RetainingRingGrooveFeature.h"
@@ -17,8 +18,12 @@
 #include "core/parts/RetainingRingTable.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
+#include "ui/BearingActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/RetainingRingActions.h"
+
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <cmath>
 #include <numbers>
@@ -455,4 +460,270 @@ TEST_CASE("A retaining ring is placed and counted as a bought part",
       CHECK(row.quantity == 1);
     }
   }
+}
+
+namespace {
+
+// A Ø`d` x 40 rod on z 0..40 in its own part tab, a DIN 471 groove cut from
+// its bottom rim at `offset`, placed in an assembly "Rig" off the origin and
+// turned a quarter about X, so nothing reads in the part's own frame by
+// accident.
+struct GroovedRod {
+  ui::AppState state;
+  size_t tab = 0;
+  uint64_t partId = 0;
+  uint64_t occ = 0;
+  uint64_t body = 0;
+  uint64_t grooveId = 0;
+  ElementRef floor;
+  glm::dmat4 world{1.0};
+};
+
+void BuildGroovedRod(GroovedRod& r, double offset, bool printed = false,
+                     double d = 25.0) {
+  ui::AppState& state = r.state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+  r.tab = ui::AddPart(state, "Rod");
+  ui::SetActivePart(state, r.tab);
+  Document& doc = *state.document;
+  if (printed)
+    doc.SetPrintProcess(printfit::Process{"fdm", "petg"});
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Rod", glm::dvec3(0, 0, 0), glm::dvec3(0, 0, 1), d / 2.0, 40.0));
+  REQUIRE(doc.Regenerate());
+  const Body& body = doc.GetBodies().front();
+  r.body = body.createdBy;
+  ElementRef face, rim;
+  for (const auto& [index, mapped] : body.elementMap.names) {
+    const auto f = Measure::DescribeFaceAt(body, index);
+    if (f && f->kind == "cylinder")
+      face = ElementRef{r.body, mapped};
+  }
+  for (const auto& [index, mapped] : body.elementMap.edgeNames) {
+    const auto e = Measure::DescribeEdgeAt(body, index);
+    if (e && e->kind == "circle" && std::abs(e->midpoint.z) < 1e-6)
+      rim = ElementRef{r.body, mapped};
+  }
+  REQUIRE(face.IsSet());
+  REQUIRE(rim.IsSet());
+  doc.AddFeature(std::make_unique<RetainingRingGrooveFeature>("Groove", face,
+                                                              rim, offset));
+  REQUIRE(doc.Regenerate());
+  INFO(doc.GetFeature(1)->GetError());
+  REQUIRE(doc.GetFeature(1)->GetError().empty());
+  const Body& cut = doc.GetBodies().front();
+  r.grooveId = doc.GetFeature(1)->GetId();
+  for (const RingGrip& g : cut.ringGrips)
+    if (g.groove)
+      r.floor = g.face;
+  REQUIRE(r.floor.IsSet());
+  r.partId = state.parts[r.tab].id;
+  ui::SetActivePart(state, ui::AddAssembly(state, "Rig"));
+  Occurrence occ;
+  occ.partId = r.partId;
+  occ.name = "Rod";
+  occ.position = glm::dvec3(5.0, -3.0, 2.0);
+  occ.orientation =
+      glm::angleAxis(std::numbers::pi / 2.0, glm::dvec3(1.0, 0.0, 0.0));
+  r.occ = state.assembly->AddOccurrence(occ);
+  r.world = ui::OccurrenceMatrix(*state.assembly->FindById(r.occ));
+}
+
+// The contact between two placements, as interference reads it.
+Measure::SetContact ContactOf(ui::AppState& state, uint64_t a, uint64_t b,
+                              const glm::dmat4& shiftB = glm::dmat4(1.0)) {
+  const Occurrence* oa = state.assembly->FindById(a);
+  const Occurrence* ob = state.assembly->FindById(b);
+  REQUIRE(oa != nullptr);
+  REQUIRE(ob != nullptr);
+  const auto c = Measure::ContactBetween(
+      ui::OccurrencePartDoc(state, *oa)->GetBodies(), ui::OccurrenceMatrix(*oa),
+      ui::OccurrencePartDoc(state, *ob)->GetBodies(),
+      shiftB * ui::OccurrenceMatrix(*ob));
+  REQUIRE(c);
+  return *c;
+}
+
+std::string CheckStatus(const nlohmann::json& r, const std::string& what) {
+  for (const auto& c : r.at("checks"))
+    if (c.at("characteristic") == what)
+      return c.at("status").get<std::string>();
+  return "absent";
+}
+
+} // namespace
+
+TEST_CASE("A retaining ring is fitted into its groove and follows it",
+          "[actions][parts][retaining_ring]") {
+  GroovedRod rod;
+  BuildGroovedRod(rod, 22.0);
+  ui::AppState& state = rod.state;
+  const ElementRef flankB{rod.body, std::to_string(rod.grooveId) + "/" +
+                                        RetainingRingGrooveFeature::kFlankB};
+
+  // Any face of the groove names it; a dry run places nothing.
+  const size_t before = state.assembly->GetOccurrences().size();
+  const ui::RetainingRingFit dry =
+      ui::FitRetainingRing(state, ui::RimPick{rod.occ, flankB}, true);
+  INFO(dry.why);
+  REQUIRE(dry.ok);
+  CHECK(dry.designation == "DIN 471 25x1.2");
+  CHECK(state.assembly->GetOccurrences().size() == before);
+
+  const ui::RetainingRingFit fit =
+      ui::FitRetainingRing(state, ui::RimPick{rod.occ, rod.floor}, false);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  const Occurrence* ring = state.assembly->FindById(fit.occurrence);
+  REQUIRE(ring != nullptr);
+  CHECK(ring->attachedTo == rod.occ);
+  CHECK(ring->attachSeat.IsSet());
+  CHECK(ring->attachSeat.axis.name == rod.floor.name);
+  CHECK_THAT(ring->attachSeat.face.name,
+             ContainsSubstring(RetainingRingGrooveFeature::kFlankA));
+  // Side A on the near flank (the rod's z = 22), the ring's +Z up the rod,
+  // on its axis: read in the rod's own frame.
+  const glm::dmat4 local =
+      glm::inverse(rod.world) * ui::OccurrenceMatrix(*ring);
+  CHECK(glm::length(glm::dvec3(local[3]) - glm::dvec3(0, 0, 22)) < 1e-6);
+  CHECK(glm::dot(glm::dvec3(local[2]), glm::dvec3(0, 0, 1)) > 1.0 - 1e-9);
+
+  // One ring to a groove.
+  const ui::RetainingRingFit twice =
+      ui::FitRetainingRing(state, ui::RimPick{rod.occ, flankB}, false);
+  CHECK_FALSE(twice.ok);
+  CHECK_THAT(twice.why, ContainsSubstring("already holds"));
+  // A face no groove made is refused.
+  const ui::RetainingRingFit wrong = ui::FitRetainingRing(
+      state, ui::RimPick{rod.occ, ElementRef{rod.body, "1/face0"}}, false);
+  CHECK_FALSE(wrong.ok);
+  CHECK_THAT(wrong.why, ContainsSubstring("not a face of a retaining ring"));
+
+  // The groove moves INSIDE the rod: the ring goes with it.
+  Document* doc = ui::PartDocById(state, rod.partId);
+  REQUIRE(doc != nullptr);
+  dynamic_cast<RetainingRingGrooveFeature*>(doc->GetFeature(1))->offset = 18.0;
+  doc->Regenerate();
+  REQUIRE(doc->GetFeature(1)->GetError().empty());
+  CHECK(ui::SolveActiveAssemblyReport(state).erroredAttachments == 0);
+  const glm::dmat4 moved =
+      glm::inverse(rod.world) *
+      ui::OccurrenceMatrix(*state.assembly->FindById(fit.occurrence));
+  CHECK(glm::length(glm::dvec3(moved[3]) - glm::dvec3(0, 0, 18)) < 1e-6);
+}
+
+TEST_CASE("A ring in its groove grips it; anywhere else it clashes",
+          "[actions][parts][retaining_ring]") {
+  GroovedRod rod;
+  BuildGroovedRod(rod, 22.0);
+  ui::AppState& state = rod.state;
+  const ui::RetainingRingFit fit =
+      ui::FitRetainingRing(state, ui::RimPick{rod.occ, rod.floor}, false);
+  REQUIRE(fit.ok);
+  // DIN 471 25: the free ring's inside Ø23.2 on a Ø23.9 floor, 1.2 thick.
+  const double grip =
+      std::numbers::pi * ((23.9 / 2.0) * (23.9 / 2.0) - 11.6 * 11.6) * 1.2;
+  const Measure::SetContact in = ContactOf(state, rod.occ, fit.occurrence);
+  CHECK(in.volume < 1e-6);
+  CHECK(in.ringGripPairs == 1);
+  CHECK_THAT(in.ringGripVolume, WithinAbs(grip, 1e-3));
+
+  // Half a millimetre out of its groove along the rod: no longer its grip.
+  const glm::dvec3 up(rod.world[2]);
+  const Measure::SetContact out =
+      ContactOf(state, rod.occ, fit.occurrence,
+                glm::translate(glm::dmat4(1.0), 0.5 * up));
+  CHECK(out.volume > 0.1);
+  CHECK(out.ringGripPairs == 0);
+
+  // A ring of another size in the same place: a clash, not a grip.
+  std::string error;
+  const uint64_t other =
+      ui::AddRetainingRing(state, "din471", 24, {}, {1, 0, 0, 0}, &error);
+  REQUIRE(other != 0);
+  Occurrence* o = state.assembly->FindById(other);
+  const Occurrence* placed = state.assembly->FindById(fit.occurrence);
+  o->position = placed->position;
+  o->orientation = placed->orientation;
+  const Measure::SetContact wrong = ContactOf(state, rod.occ, other);
+  CHECK(wrong.volume > 0.1);
+  CHECK(wrong.ringGripPairs == 0);
+}
+
+TEST_CASE("A groove on a printed shaft is read at what it prints",
+          "[actions][parts][retaining_ring]") {
+  // PETG prints a shaft over its model: a Ø25 journal is modelled under 25,
+  // and its groove is the Ø25's, its floor cut to print at d2.
+  const printfit::Process petg{"fdm", "petg"};
+  std::string why;
+  const auto shaft =
+      printfit::ForBasic(petg, printfit::Printed::Shaft, 25.0, &why);
+  const auto floor =
+      printfit::ForBasic(petg, printfit::Printed::Shaft, 23.9, &why);
+  REQUIRE(shaft);
+  REQUIRE(floor);
+  GroovedRod rod;
+  BuildGroovedRod(rod, 22.0, /*printed=*/true, shaft->modelMm);
+  const Document* doc = ui::PartDocById(rod.state, rod.partId);
+  REQUIRE(doc != nullptr);
+  const Body& body = doc->GetBodies().front();
+  const auto f = NamedFace(body, "groove_floor");
+  REQUIRE(f);
+  CHECK_THAT(2.0 * f->radius, WithinAbs(floor->modelMm, 1e-9));
+  REQUIRE(body.ringGrips.size() == 1);
+  CHECK(body.ringGrips[0].size == 25.0);
+  // ...and the ring that goes in it is the Ø25's, gripping it.
+  const ui::RetainingRingFit fit =
+      ui::FitRetainingRing(rod.state, ui::RimPick{rod.occ, rod.floor}, false);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  CHECK(fit.designation == "DIN 471 25x1.2");
+  CHECK(ContactOf(rod.state, rod.occ, fit.occurrence).volume < 1e-6);
+}
+
+TEST_CASE("check_seat counts a ring in its groove as locating a bearing",
+          "[actions][parts][retaining_ring][bearing]") {
+  // A 6005 on the rod with no shoulder under it, its side B on the groove's
+  // near flank: only the ring can hold it there.
+  GroovedRod rod;
+  BuildGroovedRod(rod, 22.0);
+  ui::AppState& state = rod.state;
+  std::string error;
+  const glm::dmat4 at =
+      rod.world * glm::translate(glm::dmat4(1.0), glm::dvec3(0, 0, 10));
+  const uint64_t bearing =
+      ui::AddBearing(state, "6005", glm::dvec3(at[3]),
+                     glm::normalize(glm::quat_cast(glm::dmat3(at))), &error);
+  REQUIRE(bearing != 0);
+  {
+    const nlohmann::json r = ui::CheckSeat(state, bearing, nullptr, "");
+    INFO(r.dump(2));
+    CHECK(CheckStatus(r, "inner_ring_located") == "unverified");
+  }
+  const ui::RetainingRingFit fit =
+      ui::FitRetainingRing(state, ui::RimPick{rod.occ, rod.floor}, false);
+  REQUIRE(fit.ok);
+  const nlohmann::json r = ui::CheckSeat(state, bearing, nullptr, "");
+  INFO(r.dump(2));
+  CHECK(CheckStatus(r, "shaft_diameter") == "pass");
+  CHECK(CheckStatus(r, "inner_ring_located") == "pass");
+  // Installed, its inside on the Ø23.9 floor, it reaches Ø29.9: inside the
+  // 6005-2Z's d_a 28.2 to 31.9.
+  CHECK(CheckStatus(r, "inner_retainer_reach") == "pass");
+  bool named = false;
+  for (const auto& s : r.at("seats"))
+    if (s.contains("retainer")) {
+      named = true;
+      CHECK(s.at("retainer").at("occurrence") == fit.occurrence);
+      CHECK_THAT(s.at("retainer").at("reach_mm").get<double>(),
+                 WithinAbs(29.9, 1e-9));
+    }
+  CHECK(named);
+
+  // A ring whose seat is lost holds nothing.
+  state.assembly->FindById(fit.occurrence)->attachError = "lost";
+  CHECK(CheckStatus(ui::CheckSeat(state, bearing, nullptr, ""),
+                    "inner_ring_located") == "unverified");
 }

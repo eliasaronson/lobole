@@ -43,7 +43,10 @@ namespace {
 // and the job's list of what it does not cut) are stamped by the Hole the
 // same way; and a Hole's derived drill point changes what an unchanged
 // recipe builds, so a blob baked before it is rebuilt rather than read.
-constexpr int kGeometryFormat = 4;
+// 5: ring grips. A retaining ring's and its groove's RingGrips (what a ring
+// in its groove may overlap) are stamped by their features the same way, so
+// a reopened head would have read every circlip as a clash with its shaft.
+constexpr int kGeometryFormat = 5;
 
 // A bend record, whole. It is not document data — the features stamp it on
 // every regeneration — but a baked open regenerates nothing, so the blob has
@@ -112,6 +115,24 @@ ThreadRegion ThreadRegionFromJson(const json& j) {
   t.minimumEngagement = j.value("minimum_engagement", 0.0);
   t.external = j.value("external", false);
   return t;
+}
+
+json RingGripToJson(const RingGrip& g) {
+  return json{{"face", RefJson(g.face)},
+              {"feature", g.featureId},
+              {"standard", g.standard},
+              {"size", g.size},
+              {"groove", g.groove}};
+}
+
+RingGrip RingGripFromJson(const json& j) {
+  RingGrip g;
+  g.face = RefFromJson(j.value("face", json()));
+  g.featureId = j.value("feature", uint64_t{0});
+  g.standard = j.value("standard", std::string{});
+  g.size = j.value("size", 0.0);
+  g.groove = j.value("groove", false);
+  return g;
 }
 
 json ThreadMarkToJson(const ThreadMark& t) {
@@ -345,6 +366,12 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
           regions.push_back(ThreadRegionToJson(t));
         entry["thread_regions"] = std::move(regions);
       }
+      if (!body.ringGrips.empty()) {
+        json grips = json::array();
+        for (const RingGrip& g : body.ringGrips)
+          grips.push_back(RingGripToJson(g));
+        entry["ring_grips"] = std::move(grips);
+      }
       if (!body.threads.empty()) {
         json marks = json::array();
         for (const ThreadMark& t : body.threads)
@@ -448,6 +475,8 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
         body.bends.push_back(BendFromJson(bendJson));
       for (const json& t : bj.value("thread_regions", json::array()))
         body.threadRegions.push_back(ThreadRegionFromJson(t));
+      for (const json& g : bj.value("ring_grips", json::array()))
+        body.ringGrips.push_back(RingGripFromJson(g));
       for (const json& t : bj.value("threads", json::array()))
         body.threads.push_back(ThreadMarkFromJson(t));
       for (const json& h : bj.value("holes", json::array()))

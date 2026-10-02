@@ -115,5 +115,13 @@ bool RetainingRingFeature::Execute(RegenContext& ctx) {
   ctx.bodies.push_back({m_name.empty() ? designation : m_name, std::move(solid),
                         material, GetId()});
   ctx.bodies.back().elementMap = std::move(map);
+  // Its grip (RingGrip, docs/parts/README.md#a-ring-in-its-groove): the face
+  // that is smaller (471) or larger (472) than its groove's floor, free.
+  RingGrip grip;
+  grip.face = {GetId(), prefix + "/" + (shaft ? kBore : kOutside)};
+  grip.featureId = GetId();
+  grip.standard = parts::RetainingRingStandardName(which);
+  grip.size = row->d1;
+  ctx.bodies.back().ringGrips.push_back(std::move(grip));
   return true;
 }

@@ -177,6 +177,14 @@ void Hasher::Bodies(const std::vector<Body>& bodies) {
       F64(t.minimumEngagement);
       U64(t.external ? 1 : 0);
     }
+    U64(b.ringGrips.size());
+    for (const RingGrip& g : b.ringGrips) {
+      U64(g.face.featureId);
+      Str(g.face.name);
+      Str(g.standard);
+      F64(g.size);
+      U64(g.groove ? 1 : 0);
+    }
     // A load or a refinement resolves its face through these.
     U64(b.createdBy);
     U64(b.elementMap.names.size());

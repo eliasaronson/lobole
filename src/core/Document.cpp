@@ -1,6 +1,7 @@
 #include "core/Document.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/HoleFeature.h"
+#include "core/features/RetainingRingGrooveFeature.h"
 
 #include "common/Logger.h"
 #include "core/io/Serialization.h" // FeatureToJson: the regen-cache hash input
@@ -44,6 +45,8 @@ void FollowModifiedFaces(std::vector<Body>& bodies) {
       follow(b.elementMap, t.face);
     for (ThreadRegion& t : b.threadRegions)
       follow(b.elementMap, t.face);
+    for (RingGrip& g : b.ringGrips)
+      follow(b.elementMap, g.face);
     for (HoleMark& h : b.holes)
       follow(b.elementMap, h.bore);
   }
@@ -875,6 +878,10 @@ Document::FindParameterReferences(const std::string& name) {
 // A Hole whose fit is a clearance (close/normal/loose) is modelled at the
 // print allowance when the part is printed (HoleFeature::Execute).
 static bool PrintDrivesGeometry(const Feature& f) {
+  // A retaining ring groove reads its face at the size it prints and cuts
+  // its floor to print at d2 (docs/parts/README.md#the-groove).
+  if (dynamic_cast<const RetainingRingGrooveFeature*>(&f) != nullptr)
+    return true;
   const auto* hole = dynamic_cast<const HoleFeature*>(&f);
   return hole != nullptr && !hole->fitThread.empty() &&
          hole->fitKind != "tapped";

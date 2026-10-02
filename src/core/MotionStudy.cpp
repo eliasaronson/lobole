@@ -322,7 +322,8 @@ Hit ExactHit(const Placed& a, const Placed& b,
   ba[0] = *a.body;
   bb[0] = *b.body;
   const auto answer =
-      contacts && ba[0].threadRegions.empty() && bb[0].threadRegions.empty()
+      contacts && ba[0].threadRegions.empty() && bb[0].threadRegions.empty() &&
+              ba[0].ringGrips.empty() && bb[0].ringGrips.empty()
           ? contacts->Check(ba[0].shape, a.world, bb[0].shape, b.world)
           : collide::ExactContactCache::Answer{
                 Measure::ContactBetween(ba, a.world, bb, b.world, false),

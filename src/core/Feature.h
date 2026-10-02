@@ -42,6 +42,25 @@ struct ThreadRegion {
   bool external = false;
 };
 
+// A retaining ring's GRIP, stamped on both sides of it by the feature that
+// knows it (docs/parts/README.md#a-ring-in-its-groove): the groove a
+// RetainingRingGroove cut (`face` its floor) and the ring a RetainingRing is
+// (`face` the face that grips: a DIN 471 ring's bore, a 472 ring's outside).
+// A ring is drawn at its FREE diameter, so seated in its groove it overlaps
+// the floor by (d2 - d3)/2 — the grip that holds it, not a clash. A contact
+// check relieves exactly that annulus, and only where a ring and a groove of
+// the same standard and size are coaxial and the ring lies within the
+// groove's width; anything else either overlaps is still a clash. The
+// ThreadRegion idea, for a ring. Transient: stamped every regeneration, and
+// carried by the geometry cache.
+struct RingGrip {
+  ElementRef face;
+  uint64_t featureId = 0; // the RetainingRing / RetainingRingGroove
+  std::string standard;   // "din471" | "din472"
+  double size = 0.0;      // the nominal shaft or bore diameter, mm
+  bool groove = false;    // the groove's floor (else the ring's grip face)
+};
+
 // A thread a feature put on a face of this body, whatever it is for: a
 // `Thread` feature, or a Hole with a tapped fit, on each bore it drilled.
 // Written down by the feature that knows it, as a bend is, so a consumer
@@ -215,6 +234,8 @@ struct Body {
   // bodies. Transient like the shape, stamped by the creating feature.
   bool reference = false;
   std::vector<ThreadRegion> threadRegions; // derived opt-in contact semantics
+  // A retaining ring or its groove (RingGrip, above): the same opt-in.
+  std::vector<RingGrip> ringGrips;
   // The bends this body carries, in the order the features made them.
   std::vector<BendRegion> bends;
   // Every thread on this body's faces (ThreadMark, above).

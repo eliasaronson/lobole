@@ -111,6 +111,10 @@ std::optional<double> InterferenceVolume(const std::vector<Body>& bodiesA,
 struct SetContact {
   size_t engagedThreadPairs = 0;
   double threadEngagementVolume = 0.0; // deliberately relieved from volume
+  // A retaining ring in its groove (RingGrip): the free ring's overlap with
+  // the floor is its grip, relieved the same way.
+  size_t ringGripPairs = 0;
+  double ringGripVolume = 0.0;
 
   double volume = 0.0;   // total pairwise intersection volume
   double distance = 0.0; // min body-to-body separation, 0 when overlapping
