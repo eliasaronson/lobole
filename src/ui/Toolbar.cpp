@@ -6,6 +6,7 @@
 #include "common/Logger.h"
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h" // BuildLoops (extrude gating)
+#include "render/OutlineRenderer.h"    // the viewport's line width
 #include "render/RayTracingRenderer.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/BearingTool.h"
@@ -70,6 +71,10 @@ void DrawRenderModal(AppState& state) {
   // (docs/rendering/still-render.md#quick-mode).
   static bool quick = true;
   static int supersample = 2;
+  // Edges over the picture, and (quick) their width in pixels of the still:
+  // the viewport's until the user picks another.
+  static bool outlines = true;
+  static float lineWeight = 0.0f; // 0 until the dialog first shows
 
   ImGui::SetNextWindowSize(ImVec2(340, 0), ImGuiCond_Appearing);
   if (!ImGui::BeginPopupModal("Render Still", nullptr,
@@ -155,6 +160,26 @@ void DrawRenderModal(AppState& state) {
         ImGui::SetTooltip("Draw the picture this many times wider and taller "
                           "and average it down: smoother edges and lines.");
     }
+    ImGui::Checkbox("Outlines###render_outlines", &outlines);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("The model's edges over the picture, as the viewport "
+                        "draws them.");
+    if (quick) {
+      if (lineWeight <= 0.0f)
+        lineWeight =
+            state.outlineRenderer
+                ? state.outlineRenderer->GetOutlineSettings().rasterLineWidth
+                : 1.0f;
+      ImGui::BeginDisabled(!outlines);
+      ImGui::TextUnformatted("Line weight");
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      ImGui::SliderFloat("###render_line_weight", &lineWeight, 0.25f, 4.0f,
+                         "%.2f px");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Edge width in pixels of the saved picture, at any "
+                          "supersampling. The viewport draws 1 px.");
+      ImGui::EndDisabled();
+    }
     if (!quick) {
       ImGui::TextUnformatted("Samples");
       ImGui::SetNextItemWidth(-FLT_MIN);
@@ -195,6 +220,8 @@ void DrawRenderModal(AppState& state) {
       job.width = kRes[resIdx].w;
       job.height = kRes[resIdx].h;
       job.supersample = static_cast<uint32_t>(supersample);
+      job.outlines = outlines;
+      job.lineWeight = lineWeight;
       job.outPath = "render.png";
     } else if (clicked) {
       job = RenderJob{};
@@ -205,6 +232,7 @@ void DrawRenderModal(AppState& state) {
       job.seed = 1;
       job.groundPlane = ground;
       job.studioBackdrop = studio;
+      job.outlines = outlines;
       job.outPath = "render.png";
     }
     ImGui::EndDisabled();

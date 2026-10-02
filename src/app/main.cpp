@@ -65,6 +65,7 @@
 #include <chrono>
 #include <csignal>
 #include <filesystem>
+#include <format>
 #include <memory>
 #include <random>
 #include <sstream>
@@ -558,6 +559,9 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
     vkGetPhysicalDeviceFeatures(g_PhysicalDevice, &supportedFeatures);
     VkPhysicalDeviceFeatures enabledFeatures{};
     enabledFeatures.fillModeNonSolid = supportedFeatures.fillModeNonSolid;
+    // A quick still draws its lines k times wider at k times the size
+    // (OutlineRenderer reads the same feature to know it may).
+    enabledFeatures.wideLines = supportedFeatures.wideLines;
 
     VkDeviceCreateInfo create_info = {};
     create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
@@ -1088,11 +1092,19 @@ static void RecordModel(VkCommandBuffer cb, uint32_t frame) {
     g_OutlineRenderer->Render(cb, frame);
 }
 
+// How a capture draws its edges: whether at all, and the wireframe's width
+// in the capture's own pixels (k x the output's line weight).
+struct CaptureLines {
+  bool outlines = true;
+  float rasterWidth = 0.0f; // <= 0: the viewport's, unscaled
+};
+
 // Point every renderer at a W x H capture of the current camera, drawn `k`
 // times larger than it will be shown (lines widened to match), after waiting
 // for the GPU: the SSAO targets are reallocated. Returns the outline settings
 // AimRenderersBack restores.
-static OutlineSettings AimRenderersAt(uint32_t W, uint32_t H, uint32_t k) {
+static OutlineSettings AimRenderersAt(uint32_t W, uint32_t H, uint32_t k,
+                                      const CaptureLines& lines = {}) {
   vkDeviceWaitIdle(g_Device);
   // Only the model: no selection or hover tint on it (the GUI re-applies
   // both next frame), and none of the overlay renderers.
@@ -1109,8 +1121,13 @@ static OutlineSettings AimRenderersAt(uint32_t W, uint32_t H, uint32_t k) {
   if (g_OutlineRenderer) {
     outline = g_OutlineRenderer->GetOutlineSettings();
     OutlineSettings wide = outline;
-    wide.lineWidth *= float(k); // the viewport's width once averaged down
+    // The wireframe at the width asked for; the EDGES mode's outline at the
+    // viewport's once averaged down.
+    if (lines.rasterWidth > 0.0f)
+      wide.rasterLineWidth = lines.rasterWidth;
     wide.outlineWidth *= float(k);
+    if (!lines.outlines)
+      wide.mode = OutlineMode::NONE;
     g_OutlineRenderer->SetOutlineSettings(wide);
   }
   const glm::mat4 view = g_Camera->GetViewMatrix();
@@ -1178,7 +1195,32 @@ static bool CaptureRasterStill(const RasterTarget& t,
                std::to_string(limit) + " px on a side";
   const uint32_t W = req.width * k, H = req.height * k;
 
-  const OutlineSettings outline = AimRenderersAt(W, H, k);
+  // Lines are geometry, drawn k times wider at k times the size, so the
+  // average down leaves them the line weight wide and as dark as the
+  // viewport's (docs/rendering/still-render.md#lines-in-a-quick-still).
+  // Drawn at the capture's 1 px instead, they averaged down to 1/k of a
+  // pixel: a quarter of their darkness at 4x.
+  CaptureLines lines;
+  lines.outlines = req.outlines;
+  float weight = req.lineWeight;
+  if (g_OutlineRenderer) {
+    if (weight <= 0.0f)
+      weight = g_OutlineRenderer->GetOutlineSettings().rasterLineWidth;
+    lines.rasterWidth = weight * float(k);
+    const float widest = g_OutlineRenderer->MaxLineWidth();
+    if (req.outlines && lines.rasterWidth > widest) {
+      lines.rasterWidth = widest;
+      if (warning) {
+        if (!warning->empty())
+          *warning += "; ";
+        *warning += std::format("lines drawn {:.2f} px wide, not {:.2f}: "
+                                "this device's widest line is {:.0f} px at "
+                                "{}x",
+                                widest / float(k), weight, widest, k);
+      }
+    }
+  }
+  const OutlineSettings outline = AimRenderersAt(W, H, k, lines);
 
   out->rgb.clear();
   std::string captureError;
@@ -1197,6 +1239,7 @@ static bool CaptureRasterStill(const RasterTarget& t,
   out->width = W;
   out->height = H;
   out->factor = k;
+  out->lineWeight = lines.rasterWidth / float(k);
   // Saved is not the same as good, as for a traced still: a picture that is
   // all one colour framed nothing.
   if (stats.dominantFraction > 0.995f && warning) {

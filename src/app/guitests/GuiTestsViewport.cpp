@@ -2196,8 +2196,17 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemClick("//Render Still/###render_mode_quick");
     IM_CHECK((ctx->ItemInfo("//Render Still/###render_go").ItemFlags &
               ImGuiItemFlags_Disabled) == 0);
+    // The edges: a line weight in pixels of the still, only while outlines
+    // are on (docs/rendering/still-render.md#lines-in-a-quick-still).
+    ctx->ItemUncheck("//Render Still/###render_outlines");
+    IM_CHECK((ctx->ItemInfo("//Render Still/###render_line_weight").ItemFlags &
+              ImGuiItemFlags_Disabled) != 0);
+    ctx->ItemCheck("//Render Still/###render_outlines");
+    ctx->ItemInputValue("//Render Still/###render_line_weight", 2.0f);
     ctx->ItemClick("//Render Still/###render_go");
     IM_CHECK(s_App->renderJob.active && s_App->renderJob.quick);
+    IM_CHECK(s_App->renderJob.outlines);
+    IM_CHECK_EQ(s_App->renderJob.lineWeight, 2.0f);
     int frames = 0;
     while (s_App->renderJob.active && frames < 2000) {
       ctx->Yield();
@@ -2208,6 +2217,8 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::filesystem::exists("render.png"));
     IM_CHECK(std::filesystem::file_size("render.png", ec) > 0);
     std::filesystem::remove("render.png", ec);
+    // The dialog keeps its choices for the session: put the viewport's back.
+    ctx->ItemInputValue("//Render Still/###render_line_weight", 1.0f);
     ctx->ItemClick("//Render Still/###render_close");
     ctx->Yield();
   };

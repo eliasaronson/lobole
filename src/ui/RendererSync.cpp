@@ -1005,6 +1005,8 @@ static void PumpQuickRenderJob(AppState& state) {
     req.width = job.width;
     req.height = job.height;
     req.supersample = job.supersample;
+    req.outlines = job.outlines;
+    req.lineWeight = job.lineWeight;
     req.path = job.outPath;
     auto encode = std::make_shared<QuickEncode>();
     job.warning.clear();

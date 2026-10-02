@@ -670,6 +670,7 @@ struct RasterFrame {
   std::vector<uint8_t> rgb;
   uint32_t width = 0, height = 0; // of `rgb`
   uint32_t factor = 1;            // supersampling; the PNG is width/factor
+  float lineWeight = 0.0f;        // the lines as drawn, px of the PNG (0: none)
 };
 
 // A quick render's downsample + encode, on its worker (RendererSync.cpp).
@@ -715,8 +716,10 @@ struct RenderJob {
   // A neutral sweep behind the model rather than the HDRI photograph. The
   // HDRI still lights the model and still fills its reflections.
   bool studioBackdrop = true;
-  // Edges over the traced image, as the viewport draws them.
+  // Edges over the image, as the viewport draws them; a quick still's line
+  // weight in output pixels (0 = the viewport's).
   bool outlines = true;
+  float lineWeight = 0.0f;
   std::string outPath;
   // Result (valid once !active after having been started)
   bool finished = false; // a render completed (success or failure)
@@ -2097,6 +2100,10 @@ struct AppState {
   struct RasterStill {
     uint32_t width = 1920, height = 1080;
     uint32_t supersample = 2; // render k x the size, average down
+    // Edges over the model, and their width in pixels of the OUTPUT image
+    // (the capture draws them k times wider); 0 = the viewport's own.
+    bool outlines = true;
+    float lineWeight = 0.0f;
     std::string path = "render.png";
   };
   std::function<bool(const RasterStill&, RasterFrame* out, std::string* error,

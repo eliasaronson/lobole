@@ -30,7 +30,16 @@ struct OutlineSettings {
   glm::vec4 wireframeColor =
       glm::vec4(0.2f, 0.2f, 0.2f, 1.0f); // Subtle dark gray
   float outlineWidth = 5.0f;             // Larger for visibility
+  // The pen a TRACED still draws its edges with, px at the still's size
+  // (RendererSync's MakeStillDesc). The raster wireframe does not read it.
   float lineWidth = 1.5f;
+  // The width the WIREFRAME pass rasterizes its lines at, in pixels of the
+  // target it draws into: 1 in the viewport, k x the line weight in a quick
+  // still drawn k times larger, so the average down is the line weight
+  // (docs/rendering/still-render.md#lines-in-a-quick-still). Below 1 the
+  // line is drawn 1 px wide at that fraction of its alpha -- the coverage a
+  // thinner line would have had.
+  float rasterLineWidth = 1.0f;
   bool enableDepthTest = true;
   bool enableBlending = true;
   // Wireframe silhouettes are recomputed once the camera has been still for
@@ -117,6 +126,9 @@ public:
                    uint32_t height) override;
 
   bool IsInitialized() const { return m_isInitialized; }
+  // The widest line this device rasterizes (1 without the wideLines
+  // feature, which main.cpp enables wherever it is supported).
+  [[nodiscard]] float MaxLineWidth() const { return m_maxLineWidth; }
 
 private:
   // One slot per swapchain image, not per "frame in flight" — the caller
@@ -266,6 +278,10 @@ private:
   // Settings
   OutlineSettings m_settings;
   ClipPlaneArray m_clipPlanes = NoClipPlanes(); // section view
+
+  // Line widths the device can draw (from its features and limits).
+  bool m_wideLines = false;
+  float m_minLineWidth = 1.0f, m_maxLineWidth = 1.0f;
 
   // State
   bool m_isInitialized = false;

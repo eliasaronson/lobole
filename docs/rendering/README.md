@@ -203,6 +203,10 @@ visibility toggle is a full resync through this cache.
   silhouettes in one buffer.
 - **Captures call `OutlineRenderer::SettleSilhouettes()` first**, so a
   screenshot taken right after a camera move still has its silhouettes.
+- **Line width** is dynamic state, `OutlineSettings::rasterLineWidth`: 1 px
+  in the viewport, k x the line weight in a quick still drawn k times larger
+  ([still-render.md#lines-in-a-quick-still](still-render.md#lines-in-a-quick-still)).
+  `lineWidth` is the traced still's pen, which the raster pass does not read.
 - Edge index buffers are per frame slot, host-visible and written in place —
   no staging copy, no device wait during interaction — and created on demand
   per slot (`EnsureEdgeBuffer`), so unused slots cost nothing.

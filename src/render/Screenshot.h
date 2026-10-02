@@ -62,8 +62,8 @@ bool CaptureScreenshot(
 // with an empty `outputPath` nothing is written to disk.
 
 // The averaging alone, into `out` ((w / k) x (h / k) RGB8), for a caller
-// that encodes the frame itself — the motion video pipes it to ffmpeg. The
-// same linear-light average as below; `progress` runs 0..`progressShare`.
+// that encodes the frame itself. The same average as below; `progress` runs
+// 0..`progressShare`.
 bool DownsampleRgb(const std::vector<uint8_t>& rgb, uint32_t width,
                    uint32_t height, uint32_t factor, std::vector<uint8_t>* out,
                    std::string* error = nullptr,
@@ -72,9 +72,10 @@ bool DownsampleRgb(const std::vector<uint8_t>& rgb, uint32_t width,
                    float progressShare = 1.0f);
 
 // Average a k x k supersampled RGB8 frame down to (w / k) x (h / k) and write
-// it as a PNG. The average is taken in LINEAR light (sRGB decoded, averaged,
-// re-encoded): averaging the encoded values darkens every edge between a
-// light and a dark surface, which is the one place supersampling shows.
+// it as a PNG. The average is of the ENCODED values -- the space the
+// viewport's own MSAA resolve averages in -- so a supersampled still's edges
+// and lines come out as dark as the viewport's. (A linear-light average
+// thinned a 1 px dark line on a light face by a third.)
 // Safe on a worker thread. `progress` (0..1) advances as it goes; a set
 // `cancel` stops it before the file is written, returning false.
 bool DownsampleToPng(const std::vector<uint8_t>& rgb, uint32_t width,

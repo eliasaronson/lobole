@@ -24,12 +24,15 @@ picture of the model at a chosen size, in one of two modes:
 | `backdrop` | `studio` \| `environment` | `studio` |
 | `outlines` | edges over the image, as the viewport draws them | true |
 | `supersample` | quick only: 1-4 | 2 |
+| `line_weight` | quick only: edge width in px of the output, 0.25-4 | the viewport's (1) |
 
 An unknown `mode` or `backdrop` is refused naming the accepted values. The
-path tracer's parameters (`samples`, `seed`, `ground`, `backdrop`,
-`outlines`) are **refused** in quick mode rather than ignored. `supersample`
-outside 1-4 is refused. A picture that is almost entirely one colour is still
-saved, with a warning in the reply.
+path tracer's parameters (`samples`, `seed`, `ground`, `backdrop`) are
+**refused** in quick mode rather than ignored, and `line_weight` in path
+mode. `supersample` outside 1-4, a `line_weight` outside 0.25-4 and an
+`outlines` that is not a bool are refused. A quick reply says `outlines`, and
+the `line_weight` it drew when it drew lines. A picture that is almost
+entirely one colour is still saved, with a warning in the reply.
 
 The RPC is synchronous. It pulls the renderer projection first
 ([README.md#offscreen-mode-and-lazy-projection](README.md#offscreen-mode-and-lazy-projection)),
@@ -67,9 +70,13 @@ a part that is whole on screen.
 ## The dialog
 
 The Render toolbar button (`view.render`) opens a modal with a resolution
-list (3840x2160 down to 640x480, default 1920x1080), a mode choice, a sample
-slider (16-1024, default 512), a progress bar and Cancel. On a device without
-ray tracing it opens anyway, with "Path traced" disabled and quick forced.
+list (3840x2160 down to 640x480, default 1920x1080), a mode choice, an
+Outlines checkbox, a progress bar and Cancel; quick adds the supersampling
+and a Line weight slider (0.25-4 px of the still, starting at the viewport's
+width, disabled with Outlines off), path a sample slider (16-1024, default
+512) and the ground and backdrop choices. The dialog keeps its choices for
+the session. On a device without ray tracing it opens anyway, with "Path
+traced" disabled and quick forced.
 
 - **Path** runs as `AppState::renderJob`, pumped one batch (up to 32
   samples) per frame by `PumpRenderJob` from `ui::PollBackgroundJobs`, so the
@@ -143,7 +150,8 @@ only `main.cpp` can provide, reachable from `ui/` and `remote/`.
 `CaptureRasterStill`:
 
 1. points the scene renderers' viewport and the SSAO targets at k·W x k·H,
-   projects the camera at W/H, and scales line and outline widths by k;
+   projects the camera at W/H, and sets the wireframe to k x the line
+   weight (or draws no edges, with `outlines: false`);
 2. clears the selection and hover tints, and settles the silhouettes;
 3. records the prepasses and **only the mesh, field and outline renderers**
    (no sketch, underlay or CAM stock) into `CaptureScreenshot`'s own
@@ -153,9 +161,38 @@ only `main.cpp` can provide, reachable from `ui/` and `remote/`.
 
 `supersample` k (1-4, default 2) renders k times wider and taller, on top of
 the pipelines' MSAA, and `DownsampleToPng` (`render/Screenshot.cpp`) averages
-it down in linear light, with an optional progress and cancel flag. k is
-lowered, with a note in the reply, if k·W passes the device's image or
-framebuffer limit.
+it down, with an optional progress and cancel flag. k is lowered, with a note
+in the reply, if k·W passes the device's image or framebuffer limit. The
+background is the viewport's.
+
+### Lines in a quick still
+
+A quick still's edges are the viewport's in **output** pixels at any k: as
+wide (the line weight, default the 1 px the viewport draws) and as dark.
+They are the outline renderer's geometry, rasterized as lines, so they stay
+straight; nothing is found in the image. Two things make that hold:
+
+- **Width.** The wireframe pipeline takes its line width per draw
+  (`VK_DYNAMIC_STATE_LINE_WIDTH`, `OutlineSettings::rasterLineWidth`): 1 in
+  the viewport, k x the line weight in a capture k times larger, so the
+  average down is the line weight. `main.cpp` enables the device's
+  `wideLines` feature wherever it has one. A width past the device's widest
+  line is clamped, with a note in the reply; one below its narrowest is drawn
+  that wide at the alpha of the coverage the thinner line would have had.
+- **The average.** `DownsampleRgb` averages the *encoded* values, the space
+  the viewport's own MSAA resolve averages in (its UNORM target holds what
+  the shaders encoded), so the still's anti-aliasing is the viewport's
+  filter on a finer grid.
+
+Both used to be wrong at once: lines were drawn 1 px wide at k times the
+size (the scaled `lineWidth` was the traced still's pen, which the raster
+pipeline never read), so they averaged down to 1/k of a pixel, and the
+linear-light average took a further third off a dark line on a light face.
+Across the edges of a light-grey block, a line's darkness against the face
+was a third of the viewport's at 2x and a ninth at 4x. Measured now as what
+the lines take off the same picture drawn without them, it is within 2%
+(peak) and 5% (summed across the line) of the viewport's at 2x and 4x, on
+an RTX 4060, Intel Arc and llvmpipe.
 
 ## Outlines on a traced still
 
@@ -184,8 +221,14 @@ The still's radiance and G-buffer readbacks use host-cached memory
 
 - `tests/render_quick_smoke.py` — on an `--offscreen` instance: a quick
   still of exactly the requested size, not one colour, in seconds; a
-  path-tracer parameter in quick mode is refused naming it; the viewport's
-  own screenshot is byte-identical before and after.
+  path-tracer parameter in quick mode is refused naming it, as are bad
+  `line_weight` and `outlines` values; the viewport's own screenshot is
+  byte-identical before and after. Then the lines, on a light-grey block at
+  the viewport's size and camera: a 1x still IS the viewport's screenshot,
+  byte for byte, so its `outlines: false` twin is the viewport without lines;
+  what the lines take off their bare twin at 2x and 4x is within 10% of the
+  viewport's, `outlines: false` leaves no line, and `line_weight` 2 and 0.5
+  draw heavier and lighter ones.
 - `tests/offscreen_smoke.py` — same seed, byte-identical traced PNG.
 - `tests/render_still_reach_smoke.py`, `tests/render_glass_smoke.py` — skip
   (77) without ray tracing.
@@ -194,4 +237,5 @@ The still's radiance and G-buffer readbacks use host-cached memory
   coverage equals one whole-image pass.
 - `tests/headless_smoke.py` — framing for a picture's aspect.
 - The GUI test `render/modal_enabled_on_an_assembly` drives a quick render
-  through the dialog to the file.
+  through the dialog to the file, with the Line weight slider disabled while
+  Outlines is off and its value reaching the job.

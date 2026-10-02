@@ -66,7 +66,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <map>
 
@@ -95,6 +97,20 @@ using nlohmann::json;
 // strong definition and PE/COFF refuses outright, so it only ever failed on
 // the Windows cross build.
 using remote::Vec3ToJson;
+
+// render_still's `outlines`: a bool, or refused -- nlohmann's own message
+// for a string here is a type error naming no parameter.
+[[nodiscard]] static bool StillOutlinesParam(const remote::RpcParams& p) {
+  if (!p.contains("outlines"))
+    return true;
+  const json& v = p["outlines"];
+  if (!v.is_boolean())
+    throw std::runtime_error("outlines is true or false; got " + v.dump());
+  return v.get<bool>();
+}
+// A quick still's line weight, px of the output image: from a hairline to a
+// heavy pen, both well inside every device's line range at 4x.
+static constexpr double kMinLineWeight = 0.25, kMaxLineWeight = 4.0;
 
 // Levenshtein distance, for the "did you mean" hint on a rejected param key.
 size_t EditDistance(const std::string& a, const std::string& b) {
@@ -383,10 +399,13 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "model as the VIEWPORT draws it (materials, lights, shadow map, SSAO, "
      "outlines; no sketches, gizmos or selection tints) at this size in "
      "about a second, `supersample` 1-4 (default 2) times wider and taller "
-     "and averaged down. The path tracer's samples/seed/ground/backdrop/"
-     "outlines are refused in quick mode.",
-     "backdrop, fit, ground, height, mode, outlines, path, samples, seed, "
-     "supersample, width",
+     "and averaged down. `line_weight` (quick only): the edges' width in "
+     "PIXELS of the output image, 0.25-4, default the viewport's (1) -- "
+     "drawn k times wider at k times the size, so lines stay as dark as on "
+     "screen at any supersample. The path tracer's samples/seed/ground/"
+     "backdrop are refused in quick mode.",
+     "backdrop, fit, ground, height, line_weight, mode, outlines, path, "
+     "samples, seed, supersample, width",
      remote::NotInBatch},
     {"rt_build", "Build ray-tracing acceleration structures.", ""},
     {"set_render_options", "Toggle shadows/SSAO/quality options.",
@@ -1370,14 +1389,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // parameters mean nothing here, and are refused rather than dropped: a
       // caller asking for 4096 samples of a raster image has the wrong idea
       // about what came back.
-      for (const char* k :
-           {"samples", "seed", "ground", "backdrop", "outlines"})
+      for (const char* k : {"samples", "seed", "ground", "backdrop"})
         if (p.contains(k))
           throw std::runtime_error(
               std::string("`") + k +
               "` is a path-tracer setting; a quick render draws what the "
-              "viewport draws (supersample sets its smoothness). Drop it, or "
-              "use mode: path");
+              "viewport draws (supersample sets its smoothness, outlines and "
+              "line_weight its edges). Drop it, or use mode: path");
       if (!state.captureRaster)
         throw std::runtime_error(
             "a quick render needs a renderer: this instance is --headless");
@@ -1388,6 +1406,21 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       if (req.supersample < 1 || req.supersample > 4)
         throw std::runtime_error("supersample is 1 to 4 (the image is drawn "
                                  "that many times wider and taller)");
+      req.outlines = StillOutlinesParam(p);
+      // The lines' width in pixels of THIS picture, whatever the
+      // supersample: the capture draws them k times wider
+      // (docs/rendering/still-render.md#lines-in-a-quick-still).
+      if (p.contains("line_weight")) {
+        const json& lw = p["line_weight"];
+        const double v = lw.is_number() ? lw.get<double>() : -1.0;
+        if (!lw.is_number() || !std::isfinite(v) || v < kMinLineWeight ||
+            v > kMaxLineWeight)
+          throw std::runtime_error(
+              "line_weight is a width in pixels of the output image, " +
+              std::format("{} to {}", kMinLineWeight, kMaxLineWeight) +
+              " (the viewport's is 1); got " + lw.dump());
+        req.lineWeight = static_cast<float>(v);
+      }
       req.path = p.value("path", std::string("render.png"));
       if (p.value("fit", false))
         ui::FitCameraToDocument(state, static_cast<float>(req.width) /
@@ -1407,14 +1440,21 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                      {"width", req.width},
                      {"height", req.height},
                      {"supersample", req.supersample},
+                     {"outlines", req.outlines},
                      {"error", error},
                      {"seconds", std::chrono::duration<double>(
                                      std::chrono::steady_clock::now() - t0)
                                      .count()}};
+      if (req.outlines && frame.lineWeight > 0.0f)
+        result["line_weight"] = frame.lineWeight;
       if (!warning.empty())
         result["warnings"] = json::array({warning});
       return result;
     }
+    if (p.contains("line_weight"))
+      throw std::runtime_error(
+          "`line_weight` is a quick-mode setting (mode: quick); a traced "
+          "still's edges are drawn at the viewport's outline width");
     // Offline path-traced still to a PNG. Runs synchronously on the main thread
     // (ProcessPending) using the same idle-queue one-shot submits as the AS
     // build, so it needs no swapchain interaction.
@@ -1448,7 +1488,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // Edges over the traced image. On by default because the viewport draws
     // them and their absence is what made butted boards render as one slab;
     // false renders the bare path-traced image.
-    const bool outlines = p.value("outlines", true);
+    const bool outlines = StillOutlinesParam(p);
     // "studio" (default) shows a neutral sweep; "environment" shows the HDRI
     // itself, which is what it was before there was a choice.
     const std::string backdrop = p.value("backdrop", std::string("studio"));

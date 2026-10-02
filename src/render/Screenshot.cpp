@@ -340,21 +340,12 @@ bool DownsampleRgb(const std::vector<uint8_t>& rgb, uint32_t width,
     *out = rgb;
     return true;
   }
-  // sRGB <-> linear, exactly (the piecewise curve, not a 2.2 power): a
-  // table for the decode, the formula for the encode.
-  float toLinear[256];
-  for (int i = 0; i < 256; i++) {
-    const float c = i / 255.0f;
-    toLinear[i] =
-        c <= 0.04045f ? c / 12.92f : std::pow((c + 0.055f) / 1.055f, 2.4f);
-  }
-  const auto toSrgb = [](float l) {
-    l = std::clamp(l, 0.0f, 1.0f);
-    const float c = l <= 0.0031308f
-                        ? l * 12.92f
-                        : 1.055f * std::pow(l, 1.0f / 2.4f) - 0.055f;
-    return static_cast<uint8_t>(std::lround(c * 255.0f));
-  };
+  // The average is of the ENCODED values, as the viewport's MSAA resolve
+  // takes it (its UNORM target holds what the shaders encoded): the still's
+  // anti-aliasing is then the viewport's own filter on a finer grid. A
+  // linear-light average lost a third of a 1 px dark line's darkness against
+  // a light face -- the faint lines of the quick still
+  // (docs/rendering/still-render.md#lines-in-a-quick-still).
   const uint32_t w = width / factor, h = height / factor;
   const float inv = 1.0f / float(factor * factor);
   out->assign(size_t(w) * h * 3, 0);
@@ -368,10 +359,11 @@ bool DownsampleRgb(const std::vector<uint8_t>& rgb, uint32_t width,
         float sum = 0.0f;
         for (uint32_t dy = 0; dy < factor; dy++)
           for (uint32_t dx = 0; dx < factor; dx++)
-            sum += toLinear
-                [rgb[(size_t(y * factor + dy) * width + x * factor + dx) * 3 +
-                     c]];
-        (*out)[(size_t(y) * w + x) * 3 + c] = toSrgb(sum * inv);
+            sum += float(
+                rgb[(size_t(y * factor + dy) * width + x * factor + dx) * 3 +
+                    c]);
+        (*out)[(size_t(y) * w + x) * 3 + c] =
+            static_cast<uint8_t>(std::lround(sum * inv));
       }
   }
   if (cancel != nullptr && cancel->load())

@@ -35,6 +35,16 @@ bool OutlineRenderer::Initialize(VkDevice device,
   m_queueFamily = queueFamily;
   m_commandPool = commandPool;
 
+  // Wide lines: a quick still draws its lines k times wider at k times the
+  // size. main.cpp enables the feature wherever the device has it.
+  VkPhysicalDeviceFeatures features{};
+  vkGetPhysicalDeviceFeatures(physicalDevice, &features);
+  VkPhysicalDeviceProperties props{};
+  vkGetPhysicalDeviceProperties(physicalDevice, &props);
+  m_wideLines = features.wideLines == VK_TRUE;
+  m_minLineWidth = m_wideLines ? props.limits.lineWidthRange[0] : 1.0f;
+  m_maxLineWidth = m_wideLines ? props.limits.lineWidthRange[1] : 1.0f;
+
   LOG_INFO("OutlineRenderer: Initializing...");
 
   // Create descriptor set layout
@@ -453,8 +463,11 @@ bool OutlineRenderer::CreateWireframePipeline() {
   colorBlending.attachmentCount = 1;
   colorBlending.pAttachments = &colorBlendAttachment;
 
+  // The line width is set per draw (RenderWireframes): a quick still widens
+  // the lines with the image.
   std::vector<VkDynamicState> dynamicStates = {VK_DYNAMIC_STATE_VIEWPORT,
-                                               VK_DYNAMIC_STATE_SCISSOR};
+                                               VK_DYNAMIC_STATE_SCISSOR,
+                                               VK_DYNAMIC_STATE_LINE_WIDTH};
 
   VkPipelineDynamicStateCreateInfo dynamicState{};
   dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
@@ -1054,6 +1067,11 @@ void OutlineRenderer::UpdateUniformBuffers(uint32_t currentFrame) {
   wireframeUBO.proj = m_projectionMatrix;
   wireframeUBO.viewPos = glm::vec4(m_cameraPosition, 1.0f);
   wireframeUBO.wireframeColor = m_settings.wireframeColor;
+  // A line thinner than the narrowest the device draws is drawn that wide at
+  // the coverage the thinner one would have had.
+  if (m_settings.rasterLineWidth < m_minLineWidth)
+    wireframeUBO.wireframeColor.a *=
+        std::max(m_settings.rasterLineWidth, 0.0f) / m_minLineWidth;
   wireframeUBO.lineWidth = m_settings.lineWidth;
 
   vkMapMemory(m_device, m_wireframeUniformBuffersMemory[currentFrame], 0,
@@ -1122,6 +1140,9 @@ void OutlineRenderer::RenderWireframes(VkCommandBuffer commandBuffer,
   scissor.offset = {m_viewportX, m_viewportY};
   scissor.extent = {m_viewportWidth, m_viewportHeight};
   vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+  vkCmdSetLineWidth(commandBuffer, std::clamp(m_settings.rasterLineWidth,
+                                              m_minLineWidth, m_maxLineWidth));
 
   vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
                           m_wireframePipelineLayout, 0, 1,
