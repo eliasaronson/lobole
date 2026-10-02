@@ -15,8 +15,10 @@
 #include "core/AssemblySolve.h"
 #include "core/CollisionCache.h"
 #include "core/Document.h"
+#include "core/InputHash.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
+#include "core/features/BearingFeature.h"
 #include "core/io/GlbAnimation.h"
 #include "core/io/Serialization.h"
 
@@ -26,6 +28,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <memory>
 
 using Catch::Matchers::ContainsSubstring;
@@ -958,4 +961,117 @@ TEST_CASE("A saved motion result reopens with its hash and its samples",
   REQUIRE(without != nullptr);
   CHECK(without->MotionResult(study.id) == nullptr);
   fs::remove_all(proj);
+}
+
+// The parts a motion hash reads come back from the project too, and a shape
+// read back is not bit for bit the one that was saved: reading a direction
+// normalises it again, and the 6005's and 609's chamfer lines came back a
+// unit in the last place away. The pan/tilt head's pan and tilt studies read
+// stale after every reopen for it. The hash reads a shape as the project
+// reads it back, so a saved project reopens with its results current.
+TEST_CASE("A saved motion study on an assembly with relations reopens "
+          "current, its parts read back from the project",
+          "[motion][studyjobs][serialize]") {
+  const fs::path dir = fs::temp_directory_path() / "motion_relations_reopen";
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  using Parts = std::map<uint64_t, std::unique_ptr<Document>>;
+  // Part 1 a block; 2 and 3 the two bearings that came back otherwise.
+  Parts parts;
+  parts[1] = BoxPart({-40, -40, -20}, {80, 80, 10});
+  for (const auto& [id, designation] :
+       {std::pair<uint64_t, const char*>{2, "6005"}, {3, "609"}}) {
+    auto doc = std::make_unique<Document>();
+    doc->AddFeature(std::make_unique<BearingFeature>("Bearing", designation));
+    doc->Regenerate();
+    REQUIRE(doc->GetFeature(0)->GetError().empty());
+    parts[id] = std::move(doc);
+  }
+  const auto over = [](Parts& docs) {
+    return assembly::PartResolver(
+        [&docs](uint64_t id, uint64_t) -> const Document* {
+          const auto it = docs.find(id);
+          return it == docs.end() ? nullptr : it->second.get();
+        });
+  };
+
+  AssemblyDocument asmDoc;
+  Occurrence base;
+  base.name = "Base";
+  base.partId = 1;
+  base.fixed = true;
+  const uint64_t baseOcc = asmDoc.AddOccurrence(std::move(base));
+  Occurrence big;
+  big.name = "Big";
+  big.partId = 2;
+  const uint64_t bigOcc = asmDoc.AddOccurrence(std::move(big));
+  Occurrence small;
+  small.name = "Small";
+  small.partId = 3;
+  const uint64_t smallOcc = asmDoc.AddOccurrence(std::move(small));
+  Mate axle;
+  axle.type = MateType::Revolute;
+  axle.name = "big axle";
+  axle.a = Origin(baseOcc);
+  axle.b = Origin(bigOcc);
+  axle.flipped = false;
+  const uint64_t bigAxle = asmDoc.AddMate(axle);
+  axle.name = "small axle";
+  axle.b = Origin(smallOcc);
+  axle.offset = 30.0;
+  const uint64_t smallAxle = asmDoc.AddMate(axle);
+  Relation pair;
+  pair.kind = RelationKind::Gear;
+  pair.name = "pair";
+  pair.mateA = bigAxle;
+  pair.mateB = smallAxle;
+  pair.ratio = -0.025;
+  const uint64_t pairId = asmDoc.AddRelation(pair);
+
+  MotionStudy study = FullTurn(bigAxle, 5);
+  study.checkClash = false;
+  study.id = asmDoc.AddMotionStudy(study);
+  const MotionStudy& stored = *asmDoc.FindMotionStudyById(study.id);
+  motion::Result result = motion::Run(asmDoc, over(parts), nullptr, stored);
+  REQUIRE(result.error.empty());
+  result.inputHash = motion::InputKey(asmDoc, over(parts), nullptr, stored);
+  asmDoc.StoreMotionResult(study.id,
+                           std::make_shared<const motion::Result>(result));
+
+  for (const auto& [id, doc] : parts)
+    REQUIRE(
+        testio::Save(*doc, (dir / (std::to_string(id) + ".dsgn")).string()));
+  REQUIRE(testio::SaveAssembly(asmDoc, (dir / "asm.dsgn").string()));
+  Parts back;
+  for (const auto& [id, doc] : parts) {
+    back[id] = testio::Load((dir / (std::to_string(id) + ".dsgn")).string());
+    REQUIRE(back[id] != nullptr);
+    INFO("part " << id);
+    inputhash::Hasher was, is;
+    was.Bodies(doc->GetBodies());
+    is.Bodies(back[id]->GetBodies());
+    CHECK(was.Digest() == is.Digest());
+  }
+  auto reloaded = testio::LoadAssembly((dir / "asm.dsgn").string());
+  REQUIRE(reloaded != nullptr);
+  const MotionStudy& reread = *reloaded->FindMotionStudyById(study.id);
+  REQUIRE(reloaded->MotionResult(study.id) != nullptr);
+  CHECK(reloaded->MotionResult(study.id)->inputHash == result.inputHash);
+  CHECK(motion::InputKey(*reloaded, over(back), nullptr, reread) ==
+        result.inputHash);
+
+  // An input moved after the reopen reads otherwise: a part's material,
+  // then the relation's ratio.
+  back[3]->GetFeature(0)->SetMaterial("aluminum");
+  back[3]->Regenerate();
+  CHECK(motion::InputKey(*reloaded, over(back), nullptr, reread) !=
+        result.inputHash);
+  back[3]->GetFeature(0)->SetMaterial("steel");
+  back[3]->Regenerate();
+  CHECK(motion::InputKey(*reloaded, over(back), nullptr, reread) ==
+        result.inputHash);
+  reloaded->FindRelationById(pairId)->ratio = -0.05;
+  CHECK(motion::InputKey(*reloaded, over(back), nullptr, reread) !=
+        result.inputHash);
+  fs::remove_all(dir);
 }

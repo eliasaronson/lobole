@@ -164,23 +164,31 @@ rather than current-because-loaded. The checks:
   assembly study's saved result reads stale.
 
 **The B-Rep is hashed as geometry**, not as OCC's bookkeeping on it
-(`inputhash::ShapeDigest`): a copy of the shape, its TShapes' `Modified`,
-`Checked` and `Free` flags set one way, written as text without UV points,
-every `-0` read as `0`. Meshing a face -- Netgen for a study, BRepMesh for
+(`inputhash::ShapeDigest`): the shape as the project reads it back (written
+and read through BinTools, the baked geometry's format), its TShapes'
+`Modified`, `Checked` and `Free` flags set one way, written as text without
+UV points, every `-0` read as `0`. Meshing a face -- Netgen for a study, BRepMesh for
 the viewport -- clears its `Checked` flag and its cached UV points, and a
 shape read back from the project's baked geometry carries a `+0` where the
 regenerated one had a `-0` (a circle's axis); the pan/tilt yoke's envelope,
 meshed in place by its topology run and saved meshed, reopened hashing
 otherwise, and its 80 s run was paid again on every reopen. A topology run
-now meshes a copy, as a static plan does.
+now meshes a copy, as a static plan does. And reading a direction
+normalises it again: a unit vector that came off a rotation reads back a
+unit in the last place away (a 6005's chamfer line, `-0.70710678118654746`
+saved and `...757` read), so the pan/tilt head's pan and tilt studies, whose
+hash reads every bearing, read stale after every reopen until the hash read
+the shape as it comes back.
 
 The `[studyjobs]` tests prove the hash moves on each input class -- geometry,
 material, mates, a placement, relations, settings, loads, an expression's
 value, configurations -- and on nothing else (`tests/test_motion.cpp`,
 `tests/test_study_inputs.cpp`); that a result of each kind -- static, modal,
 topology, motion -- reopens with its hash, current, its part hashing as it
-did, and reads stale once an input moves; and that a part meshed in place,
-or with a bore, hashes the same after a reopen.
+did, and reads stale once an input moves; that a part meshed in place,
+or with a bore, hashes the same after a reopen; and that a motion study on
+an assembly with a relation, its bearing parts saved and read back with the
+project, reopens current.
 `tests/study_jobs_smoke.py`, `fem_async_smoke.py`, `topo_smoke.py` and
 `topo_build_smoke.py` drive the ids, cancels, disconnects and reuse over the
 RPC; `tests/study_reopen_smoke.py` saves a project with a study of each kind

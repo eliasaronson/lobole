@@ -4,8 +4,8 @@
 #include "cad/CADMaterials.h"
 #include "core/Feature.h"
 
-#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepTools.hxx>
+#include <BinTools.hxx>
 #include <TopTools_MapOfShape.hxx>
 #include <TopoDS_Iterator.hxx>
 #include <TopoDS_TShape.hxx>
@@ -96,10 +96,19 @@ uint64_t ShapeDigest(const CADShape& shape) {
   // with a bore hashed otherwise too. So: a copy (the copy carries the
   // flags over) with those flags set one way, written as text in format 1
   // (no UV points), every "-0" read as "0".
-  const TopoDS_Shape copy =
-      BRepBuilderAPI_Copy(shape.GetShape(), /*copyGeom=*/true,
-                          /*copyMesh=*/false)
-          .Shape();
+  //
+  // And the copy is the shape AS THE PROJECT READS IT BACK: through BinTools,
+  // the baked geometry's own format. Reading a direction normalises it
+  // again, so a unit vector that came off a rotation returns a unit in the
+  // last place away (a 6005's chamfer line, -0.70710678118654746 saved and
+  // -0.70710678118654757 read), and the pan/tilt head's motion studies read
+  // stale after every reopen. Hashed as read back, the regenerated shape and
+  // the reopened one are one input.
+  std::stringstream bin;
+  BinTools::Write(shape.GetShape(), bin, /*theWithTriangles=*/false,
+                  /*theWithNormals=*/false, BinTools_FormatVersion_CURRENT);
+  TopoDS_Shape copy;
+  BinTools::Read(copy, bin);
   NeutralFlags(copy);
   std::ostringstream text;
   BRepTools::Write(copy, text, /*theWithTriangles=*/false,
