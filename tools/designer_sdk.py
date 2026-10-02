@@ -1158,6 +1158,7 @@ class SketchBuilder:
         self.part, self.plane, self.name = part, plane, name
         self.entities, self.projections = [], []
         self.face_ref = face_ref
+        self.plane_ref = None  # a Frame feature's id: sketch(on=frame)
         self.id = None
         # Nothing here re-implements the expression language: a coordinate
         # or radius given as a string rides on the entity as the app's own
@@ -1481,6 +1482,8 @@ class SketchBuilder:
             f["external"] = self.projections
         if self.face_ref:
             f["face_ref"] = self.face_ref
+        if self.plane_ref is not None:
+            f["plane_ref"] = self.plane_ref
         if isinstance(self.plane, DatumPlane):
             if self.plane.part.id != self.part.id or self.plane.part.app is not self.part.app:
                 raise SdkError("datum plane belongs to a different part")
@@ -1787,7 +1790,20 @@ class Part(_Tab):
     # --- sketches ----------------------------------------------------------
     def sketch(self, plane=None, name="Sketch", on=None):
         """A sketch builder. `on=<Face>` puts it ON that face (so it moves
-        with the body); `plane=` takes a Plane, a Frame or a Face."""
+        with the body), `on=<Frame>` (one this part made) on the frame's XY
+        plane and `on=<DatumPlane>` on the datum, each followed at every
+        regeneration; `plane=` takes a Plane, a Frame or a Face, as numbers
+        (a snapshot)."""
+        if isinstance(on, Frame):
+            if on.id is None:
+                raise SdkError(
+                    "that frame is a query result, not a Frame feature: "
+                    "create one with part.frame(name, ...) to sketch on")
+            b = SketchBuilder(self, on.plane(), name)
+            b.plane_ref = on.id
+            return b
+        if isinstance(on, DatumPlane):
+            return SketchBuilder(self, on, name)
         if on is not None:
             return SketchBuilder(self, on.plane(), name, face_ref=on.ref)
         if isinstance(plane, Frame):

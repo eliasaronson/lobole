@@ -531,6 +531,33 @@ def check_flipped_planes(app):
                        f"axis {k}, not {centre[k]}")
 
 
+def check_sketch_on_frame(app):
+    """`sketch(on=<Frame>)` attaches the sketch to the frame (plane_ref),
+    so a frame placed by a Param carries it when the variable moves; a
+    `Plane` would stay where it was put. And `on=<Face>` sits on the face."""
+    app.new()
+    part = app.part("on a frame")
+    z = part.param("deck_z", 12.0)
+    deck = part.frame("deck", origin=(0, 0, z))
+    sk = part.sketch(on=deck, name="Boss")
+    sk.circle((0, 0), d=8)
+    boss = part.extrude(sk.add(), 5.0, name="Boss")
+    sk = part.sketch(on=boss.feature.end_cap(), name="Pin")
+    sk.circle((0, 0), d=3)
+    part.extrude(sk.add(), 2.0, mode="add", name="Pin")
+    lo, hi = part.bbox()
+    expect(abs(lo.z - 12.0) < 1e-6 and abs(hi.z - 19.0) < 1e-6,
+           f"on the frame at deck_z, the pin on the boss's top: "
+           f"{lo.z:.3f}..{hi.z:.3f}, not 12..19")
+    app.set_variable(name="deck_z", expression="20", scope="part")
+    lo, hi = part.bbox()
+    expect(abs(lo.z - 20.0) < 1e-6 and abs(hi.z - 27.0) < 1e-6,
+           f"a sketch on a frame follows the frame's variable: "
+           f"{lo.z:.3f}..{hi.z:.3f} after deck_z went to 20, not 20..27")
+    refused(lambda: part.sketch(on=part.get_frame("deck")),
+            "a query result, not a Frame feature")
+
+
 def main():
     check_angle_units()
     binary = sys.argv[1]
@@ -866,6 +893,9 @@ def main():
 
         # ---- A flipped plane extrudes the other way ---------------------
         check_flipped_planes(app)
+
+        # ---- A sketch on a frame follows it ------------------------------
+        check_sketch_on_frame(app)
 
         # ---- Every CAM op field is reachable through the generated SDK ---
         # Last: it starts a new project, and everything above works in one.

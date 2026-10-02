@@ -128,6 +128,17 @@ Place sketch geometry with `plane.uv(world_point)` rather than by reading the
 table, and the mirroring never reaches the caller. `sdk_smoke` extrudes on
 each flipped plane and checks the solid lands on the far side.
 
+A `Plane` is numbers: a sketch drawn on `Plane.xy(28.7)` stays at 28.7 when
+the part's top moves. `part.sketch(on=...)` attaches it instead, and the
+document re-resolves it at every regeneration: `on=<Face>` (`face_ref`, the
+face's own frame: origin its centroid, U its X, asked with `face.frame()`),
+`on=<Frame>` that this part made (`plane_ref`, the frame's XY plane, X as U
+-- an explicit frame whose origin is a `Param` is a plane placed by a
+variable) and `on=<DatumPlane>`. `check_literals` reports a world-placed
+sketch over a face ([literals](../variables/README.md#literals-that-should-be-expressions));
+the pan/tilt head's `common.plane` is the Frame form of the table above
+(generators/pantilt/common.py).
+
 ### Opening a part is a choice
 
 `app.part(name)` creates the part. When a tab of that name already exists it
