@@ -255,6 +255,7 @@ def _archive_failure(app_log):
 
 
 OWNER_FILE = "smoke_app.owner"
+SWEEP_MIN_AGE_S = 600
 
 
 def _alive(pid):
@@ -289,7 +290,15 @@ def _sweep_orphaned_scratch():
                 pids = [int(p) for p in f.read().split()]
         except (OSError, ValueError):
             continue
-        if pids and not any(_alive(p) for p in pids):
+        # Dead owners alone are not enough: a launcher killed a moment ago
+        # (exit_with_parent_smoke does it on purpose) still has a watcher
+        # about to read its app.log, and a parallel launch's sweep removed it
+        # under the test. Ten minutes is past any reader of a fresh orphan.
+        try:
+            age = time.time() - os.path.getmtime(os.path.join(path, OWNER_FILE))
+        except OSError:
+            continue
+        if age > SWEEP_MIN_AGE_S and pids and not any(_alive(p) for p in pids):
             shutil.rmtree(path, ignore_errors=True)
 
 
