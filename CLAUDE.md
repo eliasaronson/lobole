@@ -159,7 +159,8 @@ list kept elsewhere drifts.
   solve). A GUI test failing only while others build: replay it with the
   runner's `--slow-frames 160` / `--slow-jobs 3000`, which make it fail on a
   quiet machine (docs/ui/testing.md#wait-on-the-condition-not-a-frame-count).
-  `tests/smoke_app.py` is the one launcher for smokes, and keeps the app's log.
+  `tests/smoke_app.py` is the one launcher for smokes, keeps the app's log,
+  and makes the app die with the test (`DESIGNER_EXIT_WITH_PARENT`).
 - **An OpenCASCADE boolean MODIFIES its arguments** (it writes the p-curves it
   computes onto their edges). Two threads running booleans on pairs that share
   a body corrupt the heap — `malloc(): unaligned tcache chunk` frames away from

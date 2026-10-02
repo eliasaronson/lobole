@@ -726,6 +726,7 @@ set(app_sources
     src/render/GpuTimer.cpp
     src/app/CrashHandler.cpp
     src/app/HeadlessMain.cpp
+    src/app/ParentWatch.cpp
     src/render/IBLTextures.cpp
     src/render/MeshRenderer.cpp
     src/render/OutlineRenderer.cpp
@@ -940,7 +941,8 @@ set(app_lib_sources ${app_sources})
 list(REMOVE_ITEM app_lib_sources
      src/app/main.cpp
      src/app/HeadlessMain.cpp
-     src/app/CrashHandler.cpp)
+     src/app/CrashHandler.cpp
+     src/app/ParentWatch.cpp)
 add_library(designer_app STATIC
     ${app_lib_sources}
     ${NFD_SOURCES}
@@ -1009,7 +1011,8 @@ endif()
 add_executable(designer ${SANITIZER_DEFAULTS_SRC}
     src/app/main.cpp
     src/app/HeadlessMain.cpp
-    src/app/CrashHandler.cpp)
+    src/app/CrashHandler.cpp
+    src/app/ParentWatch.cpp)
 if(HAVE_STDCXX_STACKTRACE)
     target_compile_definitions(designer PRIVATE HAVE_STDCXX_STACKTRACE)
 endif()

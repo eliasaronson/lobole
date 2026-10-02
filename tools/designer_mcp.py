@@ -704,6 +704,15 @@ def _autostart():
     if (real_dir / "machines").is_dir():
         shutil.copytree(real_dir / "machines", cfg / "machines")
     env["XDG_CONFIG_HOME"] = str(pathlib.Path(scratch, "config"))
+    # "It dies with this server" has to hold when the server is SIGKILLed
+    # too, where atexit never runs: the app asks the kernel for SIGTERM when
+    # this process exits (src/app/ParentWatch.h). An older binary ignores the
+    # variable; `flatpak run` does not forward it. The kernel watches the
+    # THREAD that forks, so only the main thread arms it: a pool thread
+    # retiring after idling would take the instance with it.
+    import threading
+    if threading.current_thread() is threading.main_thread():
+        env["DESIGNER_EXIT_WITH_PARENT"] = str(os.getpid())
     log_path = os.path.join(scratch, "app.log")
     with open(log_path, "w") as log:
         proc = subprocess.Popen(argv + ["--offscreen", "--remote", "0"],
