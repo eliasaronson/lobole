@@ -563,6 +563,77 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = false;
   };
 
+  // The tool window keeps the width its content asks for, and the next
+  // session does not inherit it. Clamping the window inside the app AFTER
+  // Begin moved it without moving the region its content was laid out in, so
+  // the list (a child as wide as the window) reached past the edge by the
+  // clamp's step; the window took that as its width and grew 97 px a frame
+  // across the viewport. The child then kept that width through the
+  // reappearing window's remeasure, and the next session opened 786 px wide
+  // (docs/ui/panels.md#floating-windows).
+  t = IM_REGISTER_TEST(engine, "cam", "tool_window_keeps_its_own_width");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    CamPart()->AddFeature(std::make_unique<BoxFeature>(
+        "Baffle", glm::vec3(0, 0, 0), 210, 16, 400));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    const uint64_t setupId = setup.id;
+    s_App->camActiveSetup = setupId;
+    s_App->camToolOpen = true;
+    ctx->Yield(8);
+    const auto window = [] {
+      return ImGui::FindWindowByName("CAM###ToolWindow");
+    };
+    IM_CHECK(window() != nullptr);
+    const float plain = window()->Size.x;
+    const float rightEdge =
+        s_App->viewportPos.x + s_App->viewportSize.x - 12.0f;
+
+    const Body& body = CamPart()->GetBodies()[0];
+    ui::SelectionItem big;
+    big.kind = ui::SelectionItem::Kind::Face;
+    for (const auto& [index, name] : body.elementMap.names) {
+      glm::dvec3 o(0.0), n(0.0), u(0.0);
+      if (body.shape.FacePlane(index, o, n, u) && n.y < -0.99f)
+        big.element = ElementRef{body.createdBy, name};
+    }
+    IM_CHECK(big.element.IsSet());
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamTopFace, "Click the top face");
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(3);
+    ui::ArmCamPick(*s_App, ui::PickSlot::CamPocketFloor, "Click a floor");
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(3);
+    ui::CamFacePicked(*s_App, big);
+    ctx->Yield(6);
+    IM_CHECK_EQ(Job()->FindSetup(setupId)->operations.size(), (size_t)2);
+
+    // Settled: the same width frame after frame, still at the viewport's
+    // top-right corner.
+    const float settled = window()->Size.x;
+    ctx->Yield(10);
+    ctx->LogInfo("plain %.0f px, with operations %.0f px, then %.0f px", plain,
+                 settled, window()->Size.x);
+    IM_CHECK(std::abs(window()->Size.x - settled) < 1.0f);
+    IM_CHECK(std::abs(window()->Pos.x + window()->Size.x - rightEdge) < 2.0f);
+
+    // Closed, the list emptied, opened again: as wide as it first was.
+    s_App->slotPick = {};
+    s_App->camToolOpen = false;
+    ctx->Yield(3);
+    Job()->FindSetup(setupId)->operations.clear();
+    ui::MarkJobEdited(*s_App);
+    ui::RefreshCamToolpaths(*s_App);
+    s_App->camVerdict.clear();
+    s_App->camNote.clear();
+    s_App->camToolOpen = true;
+    ctx->Yield(8);
+    ctx->LogInfo("reopened %.0f px", window()->Size.x);
+    IM_CHECK(std::abs(window()->Size.x - plain) < 2.0f);
+    s_App->camToolOpen = false;
+  };
+
   // Where the CUTTER points, asserted against what the RENDERER holds rather
   // than against the caller's arithmetic. Reported three times from the real
   // job as "the cutter is not perpendicular to the cutting surface — it almost

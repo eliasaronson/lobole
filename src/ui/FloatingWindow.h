@@ -23,11 +23,14 @@ struct AppState;
 //  - anchored to a corner of the viewport, and RE-anchored when that corner
 //    moves (docking a panel, closing the terminal) or the window reappears --
 //    two frames, one to learn an auto-resized window's size and one to place
-//    it; a drag sticks until the anchor moves again;
-//  - an auto-resized window that reappears is also SIZED afresh, measured
-//    over two hidden frames: the tool window is shared by every session, and
-//    otherwise kept the last session's width;
-//  - clamped inside the app window every frame;
+//    it; a window not dragged keeps that corner as its size changes; a drag
+//    sticks until the anchor moves again;
+//  - an auto-resized window that reappears is also SIZED afresh, child
+//    windows included, measured over two hidden frames: the tool window is
+//    shared by every session, and otherwise kept the last session's width;
+//  - clamped inside the app window every frame, BEFORE Begin, from the size
+//    Begin will give it (moved after Begin, its content is laid out where it
+//    was, and a full-width child widens the window by the move every frame);
 //  - the elevated border and the soft shadow that say "above the model";
 //  - no docking, no collapsing, no saved settings, so a stale imgui.ini
 //    cannot park it off screen.

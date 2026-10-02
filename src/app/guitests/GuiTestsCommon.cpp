@@ -151,6 +151,7 @@ void ResetAppForTest() {
   s_App->camGhostOp = 0;
   s_App->camActiveSetup = 0;
   s_App->camRefusal.clear();
+  s_App->camNote.clear();
   s_App->camToolpaths.clear();
   s_App->camVerdict.clear();
   s_App->camLeftover.clear();

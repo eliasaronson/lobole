@@ -50,11 +50,17 @@ The app's patterns, which every panel follows:
 `ui::BeginFloatingWindow` (`src/ui/FloatingWindow.{h,cpp}`) places every
 floating window the same way: anchored to a viewport corner (`TopRight`,
 `BelowToolWindow`, `BottomCenter`), re-anchored when the viewport moves or the
-window reappears, sized afresh when an auto-resized one reappears (the tool
-window is one ImGui window shared by every session, and its right-aligned
-rows kept the previous session's width, so a Thread window opened after a
-wide Simulation window covered the viewport it asks you to click in),
-clamped inside the app every frame, with the elevated
+window reappears, and kept on that corner as its size changes until it is
+dragged. It is sized afresh when an auto-resized one reappears, its child
+windows with it (the tool window is one ImGui window shared by every
+session, and its right-aligned rows and full-width lists kept the previous
+session's width, so a Thread window opened after a wide Simulation window
+covered the viewport it asks you to click in). It is clamped inside the app
+every frame **before** `Begin`, from the size `Begin` is about to give it:
+moved after `Begin`, the window's content is still laid out where the window
+was, so a list as wide as the window reaches past its edge by the move, the
+auto-resize adopts that as its width, and the CAM window grew by the clamp's
+step every frame (`cam/tool_window_keeps_its_own_width`). It has the elevated
 border and a drawn shadow (`DrawWindowShadow`; ImGui has no shadow
 primitive), and `NoSavedSettings`. A window anchored `BelowToolWindow` stacks
 under the tool window (`state.toolWindowRect`) instead of opening on top of

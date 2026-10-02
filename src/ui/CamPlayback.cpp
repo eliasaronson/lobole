@@ -250,6 +250,7 @@ bool ArmPlayback(AppState& state, const cam::Setup& setup, StartWork& w) {
   state.camVerbOp = 0;
   state.camGhostOp = 0;
   state.camRefusal.clear();
+  state.camNote.clear();
   if (state.slotPick.featureId == kCamToolSlot)
     state.slotPick = {};
   state.measure = MeasureState{};

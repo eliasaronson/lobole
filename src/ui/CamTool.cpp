@@ -1775,6 +1775,7 @@ void DrawCamToolWindow(AppState& state) {
     state.camVerb = CamVerb::None;
     state.camVerbOp = 0;
     state.camGhostOp = 0;
+    state.camNote.clear();
     if (state.slotPick.featureId == kCamToolSlot)
       state.slotPick = {};
     return;
@@ -1944,6 +1945,7 @@ void DrawCamToolWindow(AppState& state) {
     state.camVerbOp = 0;
     state.camGhostOp = 0;
     state.camRefusal.clear();
+    state.camNote.clear(); // what the session did goes with it
     if (state.slotPick.featureId == kCamToolSlot)
       state.slotPick = {};
   }
@@ -1960,6 +1962,7 @@ void EditCamOperation(AppState& state, uint64_t opId) {
   state.camVerb = CamVerb::None;
   state.camVerbOp = 0;
   state.camRefusal.clear();
+  state.camNote.clear();
   state.camEditTool = 0;
   state.camEditFixture = 0;
   state.camEditOp = opId;
@@ -1974,6 +1977,7 @@ void EditCamTool(AppState& state, int number) {
   state.camVerb = CamVerb::None;
   state.camVerbOp = 0;
   state.camRefusal.clear();
+  state.camNote.clear();
   state.camEditOp = 0;
   state.camEditFixture = 0;
   state.camEditTool = number;
@@ -1988,6 +1992,7 @@ void EditCamFixture(AppState& state, uint64_t fixtureId) {
   state.camVerb = CamVerb::None;
   state.camVerbOp = 0;
   state.camRefusal.clear();
+  state.camNote.clear();
   state.camEditOp = 0;
   state.camEditTool = 0;
   state.camEditFixture = fixtureId;
