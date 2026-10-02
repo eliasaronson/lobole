@@ -327,8 +327,9 @@ def main():
         `role`, asked by what made them rather than by a name's prefix. Not
         a chamfer's face generated from one of their edges (";G<chamfer>"),
         which the same feature is the origin of."""
-        fid = [f["id"] for f in feats
-               if f["name"] == name and f["type"] == type_]
+        # A template instance of that name (the bearing pocket is one,
+        # common.bearing_seat) answers with the feature it expanded into.
+        fid = common.template_part(feats, name, type_)
         if len(fid) != 1:
             raise SystemExit(f"base_plate: {len(fid)} {type_} '{name}'")
         out = [f for f in plate.faces(made_by=fid[0], role=role)

@@ -60,8 +60,21 @@ minutes.
 | `build_renders.py` | path-traced stills of the head: hero, tilted 35 degrees by its worm, from below, exploded along its own axes | `renders/{hero,tilted,low,exploded}.png` |
 
 `spec.py` holds the derivation; `common.py` the connection, the print
-allowance lookup, the frame and plane helpers, and `named(S)`, the
-variables as `Param`s.
+allowance lookup, the frame and plane helpers, `named(S)`, the
+variables as `Param`s, and the bearing seat.
+
+**The bearing seats are one template**
+([templates](../../docs/modeling/templates.md)). The base plate's pocket,
+the pan wheel's counterbore and the yoke's two tilt seats are each a
+counterbore the bearing's outside wide and its width deep, cut into the
+face it is pressed in from. `build_base.py` draws the first on the plate's
+top, saves it to the project's library as `bearing seat` (parameters `on`,
+`D`, `B` and `v`, the centre's offset along the face's v) and takes it out
+again; every seat is then an instance (`common.bearing_seat`): the pocket
+`D = pan_brg_D`, the counterbore and the tilt seats the printed sizes the
+print allowance asks for, the tilt seats standing on the arms' outer
+planes at `v = tilt_z`. The geometry is the four cuts' it replaced, to the
+last ulp of every volume.
 
 **Every part is lint-clean** (`check_literals`,
 [literals](../../docs/variables/README.md#literals-that-should-be-expressions)):

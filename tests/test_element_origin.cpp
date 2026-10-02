@@ -142,13 +142,14 @@ TEST_CASE("Every element name in the golden corpus decodes",
         names++;
         CHECK(o.ok);
         CHECK(o.role != ElementRole::Unknown);
-        // The maker is a feature of this document -- unless the name came
-        // in through a Derived copy, where it is the SOURCE's, and then the
-        // Derived feature is this document's.
+        // The maker is a feature of this document, or one a Template
+        // instance owns (docs/modeling/templates.md#names) -- unless the name
+        // came in through a Derived copy, where it is the SOURCE's, and then
+        // the Derived feature is this document's.
         if (!o.derived.empty())
           CHECK(doc.FindFeatureById(o.derived.front().derivedId) != nullptr);
         else if (o.madeBy != 0)
-          CHECK(doc.FindFeatureById(o.madeBy) != nullptr);
+          CHECK(doc.OwnerIndex(o.madeBy) >= 0);
       }
     }
   }

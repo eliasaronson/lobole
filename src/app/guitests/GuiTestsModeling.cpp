@@ -13,6 +13,7 @@
 #include "ui/PanelTitles.h"
 #include "ui/PrimitiveTool.h"
 #include "ui/ProjectActions.h" // ProjectDirty
+#include "ui/TemplateActions.h"
 #include "ui/VariableActions.h"
 
 // Modeling GUI tests, carved out of the single 8,036-line RegisterGuiTests.
@@ -581,6 +582,163 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   // one is pick-the-face-first. The base is made through the core tool, so
   // its faces are named and its top face has a known outline: 10 x 6, 2
   // thick, centred on the origin on the Top plane.
+  // Feature templates (docs/modeling/templates.md#in-the-gui): the plate's
+  // own sketch and extrude saved through the tree's Save as template window,
+  // placed by the Insert template tool on the plate's top face (a viewport
+  // pick), the row marked when the template changes and brought up to date
+  // from its menu, then unlinked into plain features with the same geometry
+  // -- and the unlink undone.
+  t = IM_REGISTER_TEST(engine, "templates", "save_insert_update_unlink");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    PrimitiveTestPlate(); // a sketch on Top and its extrude, 10 x 6 x 2
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    const auto row = [&](size_t i) {
+      return "//###Model/" + Doc()->GetFeature(i)->GetName() + "##" +
+             std::to_string(i);
+    };
+    // Both rows, then the context menu's Save as template.
+    ctx->ItemClick(row(0).c_str());
+    ctx->KeyDown(ImGuiMod_Shift);
+    ctx->ItemClick(row(1).c_str());
+    ctx->KeyUp(ImGuiMod_Shift);
+    ctx->Yield();
+    ctx->ItemClick(row(1).c_str(), ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/###feat_save_template");
+    ctx->Yield(2);
+    auto& save = s_App->saveTemplate;
+    IM_CHECK(save.open);
+    IM_CHECK_EQ(save.featureIds.size(), (size_t)2);
+    // The extrude's height is a literal: offered, and taken as `height`.
+    bool offered = false;
+    for (auto& r : save.rows)
+      if (r.candidate.featureId == Doc()->GetFeature(1)->GetId() &&
+          r.candidate.path == "distance") {
+        r.use = true;
+        r.param = "height";
+        offered = true;
+      }
+    IM_CHECK(offered);
+    save.name = "post";
+    ctx->ItemClick("//Save as template###SaveTemplate/###tpl_save");
+    ctx->Yield();
+    IM_CHECK_STR_EQ(save.error.c_str(), "");
+    const tmpl::Template* t = tmpl::Find(s_App->projectTemplates, "post");
+    IM_CHECK(t != nullptr);
+    IM_CHECK(t->FindParam("height") != nullptr);
+    IM_CHECK(t->FindParam("on") != nullptr);
+    ctx->ItemClick("//Save as template###SaveTemplate/###tpl_close");
+    ctx->Yield();
+    IM_CHECK(!save.open);
+
+    // Insert: the pick, then the plate's top face in the viewport.
+    const glm::vec3 top = PlateTop();
+    LookDownAt(ctx, top, 20.0f);
+    const double plate = Doc()->GetBodies()[0].shape.Volume();
+    ToolbarClick(ctx, "###tb_template");
+    IM_CHECK(s_App->sketchEdit.pickingPlane);
+    IM_CHECK(s_App->sketchEdit.purpose == ui::SketchPurpose::Template);
+    ctx->MouseMoveToPos(WorldToWindow(top));
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    size_t idx = 0;
+    auto* pending =
+        dynamic_cast<TemplateFeature*>(ui::ResolvePendingFeature(*s_App, &idx));
+    IM_CHECK(pending != nullptr);
+    IM_CHECK(pending->GetError().empty());
+    IM_CHECK(pending->values.at("on").ref.contains("element"));
+    const ImGuiTestItemInfo accept =
+        ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) == 0);
+    ctx->ItemClick("//###ToolWindow/###tw_accept");
+    ctx->Yield(2);
+    IM_CHECK(!ui::HasPendingFeature(*s_App));
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)3);
+    auto* instance = dynamic_cast<TemplateFeature*>(Doc()->GetFeature(2));
+    IM_CHECK(instance != nullptr);
+    IM_CHECK(instance->GetError().empty());
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2); // a second post
+    const uint64_t instanceId = instance->GetId();
+    IM_CHECK(!ui::TemplateChanged(*s_App, *instance).value_or(true));
+
+    // The template changes (saved again, 1 mm taller): the row says so and
+    // nothing moves until its menu's Update from template.
+    const double before = Doc()->GetBodies()[1].shape.Volume();
+    {
+      tmpl::SaveSpec spec;
+      spec.name = "post";
+      spec.featureIds = {Doc()->GetFeature(0)->GetId(),
+                         Doc()->GetFeature(1)->GetId()};
+      tmpl::Template next = tmpl::FromFeatures(*Doc(), spec);
+      // The source as it is, with its height one more: a revision.
+      next.features[1]["distance"] = 3.0;
+      next.revision = t->revision + 1;
+      for (tmpl::Template& x : s_App->projectTemplates)
+        if (x.name == "post")
+          x = next;
+    }
+    ctx->Yield();
+    instance = dynamic_cast<TemplateFeature*>(Doc()->GetFeature(2));
+    IM_CHECK(ui::TemplateChanged(*s_App, *instance).value_or(false));
+    IM_CHECK(std::abs(Doc()->GetBodies()[1].shape.Volume() - before) < 1e-9);
+    ctx->ItemClick(row(2).c_str(), ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/###feat_template_update");
+    ctx->Yield(2);
+    instance = dynamic_cast<TemplateFeature*>(Doc()->GetFeature(2));
+    IM_CHECK(instance != nullptr);
+    IM_CHECK(!ui::TemplateChanged(*s_App, *instance).value_or(true));
+    IM_CHECK(instance->GetError().empty());
+    const double taller = Doc()->GetBodies()[1].shape.Volume();
+    IM_CHECK(std::abs(taller - before * 1.5) < 1e-6);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - plate) < 1e-9);
+
+    // Unlink: plain features, the same geometry; one Ctrl+Z gives the
+    // instance back.
+    const std::vector<uint64_t> owned = {instance->IdOf(1), instance->IdOf(2)};
+    ctx->ItemClick(row(2).c_str(), ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/###feat_template_unlink");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)4);
+    IM_CHECK(Doc()->FindFeatureById(instanceId) == nullptr);
+    IM_CHECK_EQ(Doc()->GetFeature(2)->GetId(), owned[0]);
+    IM_CHECK_EQ(Doc()->GetFeature(3)->GetId(), owned[1]);
+    IM_CHECK(std::abs(Doc()->GetBodies()[1].shape.Volume() - taller) < 1e-9);
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)3);
+    IM_CHECK(Doc()->FindFeatureById(instanceId) != nullptr);
+  };
+
+  // With nothing in the library the tool still opens its pick -- the window
+  // is where the refusal is read -- and a pick places nothing.
+  t = IM_REGISTER_TEST(engine, "templates",
+                       "insert_refuses_with_an_empty_library");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    IM_CHECK(s_App->projectTemplates.empty());
+    const size_t count = Doc()->FeatureCount();
+    ToolbarClick(ctx, "###tb_template");
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.pickingPlane);
+    IM_CHECK(s_App->sketchEdit.actionMsg.find("no templates") !=
+             std::string::npos);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow"));
+    ctx->ItemClick((std::string("//##DockHost/**/") +
+                    SketchPlane::StandardPlaneName(PlaneType::XY))
+                       .c_str());
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.pickingPlane); // still armed, still saying why
+    IM_CHECK(!ui::HasPendingFeature(*s_App));
+    IM_CHECK_EQ(Doc()->FeatureCount(), count);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+  };
+
   t = IM_REGISTER_TEST(engine, "primitive", "face_pick_drag_snap_accept");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

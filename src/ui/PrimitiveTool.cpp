@@ -13,6 +13,7 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/SketchInteraction.h"
 #include "ui/SketchInteractionInternal.h" // ScreenRay, RayToPlaneUV, PixelsPerUV
+#include "ui/TemplateActions.h"           // BeginTemplatePreview
 
 #include "imgui.h"
 
@@ -296,6 +297,37 @@ std::string BeginPrimitiveOnFace(AppState& state, uint32_t meshId,
   on.kind = primitive::OnKind::Face;
   on.face = *ref;
   return BeginPrimitiveOn(state, on);
+}
+
+std::string BeginPlacedOn(AppState& state, const primitive::On& on) {
+  if (state.sketchEdit.purpose != SketchPurpose::Template)
+    return BeginPrimitiveOn(state, on);
+  if (!state.document)
+    return "open a part first";
+  // A template stands where a primitive does: checked the same way.
+  if (const auto r = primitive::Resolve(*state.document, on); !r)
+    return "Insert template: " + r.error();
+  BeginTemplatePreview(state, primitive::OnToJson(on));
+  // A refusal leaves the pick armed, saying why.
+  return state.sketchEdit.pickingPlane ? state.sketchEdit.actionMsg
+                                       : std::string{};
+}
+
+std::string BeginPlacedOnFace(AppState& state, uint32_t meshId,
+                              uint32_t faceIndex) {
+  if (state.sketchEdit.purpose != SketchPurpose::Template)
+    return BeginPrimitiveOnFace(state, meshId, faceIndex);
+  glm::dvec3 origin, normal, uAxis;
+  if (!ExactFacePlane(state, meshId, faceIndex, origin, normal, uAxis))
+    return "Insert template: that face is curved - pick a flat one.";
+  const auto ref = FaceElementRef(state, meshId, faceIndex);
+  if (!ref)
+    return "Insert template: that face has no stable name to stand on - "
+           "pick a plane, or a face of a feature that names its faces.";
+  primitive::On on;
+  on.kind = primitive::OnKind::Face;
+  on.face = *ref;
+  return BeginPlacedOn(state, on);
 }
 
 void StartPrimitiveTool(AppState& state, primitive::Kind kind) {

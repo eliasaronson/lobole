@@ -376,6 +376,7 @@ set(core_sources
     src/core/LookupTable.cpp
     src/core/Literals.cpp
     src/core/Requirements.cpp
+    src/core/Template.cpp
     src/core/catalog/Catalog.cpp
     src/core/io/GeometryCache.cpp
     src/core/parts/AxisStack.cpp
@@ -405,6 +406,7 @@ set(core_sources
     src/core/features/RetainingRingGrooveFeature.cpp
     src/core/features/FastenerFeature.cpp
     src/core/features/DerivedFeature.cpp
+    src/core/features/TemplateFeature.cpp
     src/core/features/DatumPlaneFeature.cpp
     src/core/features/FrameFeature.cpp
     src/core/Primitives.cpp
@@ -783,6 +785,8 @@ set(app_sources
     src/ui/BearingTool.cpp
     src/ui/FastenerTool.cpp
     src/ui/DerivedActions.cpp
+    src/ui/TemplateActions.cpp
+    src/ui/TemplatePanel.cpp
     src/ui/FileDialogs.cpp
     src/ui/ProjectActions.cpp
     src/ui/RendererSync.cpp
@@ -861,6 +865,7 @@ set(app_sources
     src/remote/RemoteAssembly.cpp
     src/remote/RemoteMotion.cpp
     src/remote/RemoteProject.cpp
+    src/remote/RemoteTemplates.cpp
 )
 
 # UI fonts, loaded at runtime relative to the executable

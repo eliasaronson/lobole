@@ -36,6 +36,7 @@
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/JobActions.h"
 #include "ui/RendererSync.h"
+#include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
 #include <TopExp.hxx>
@@ -167,6 +168,9 @@ Feature* FeatureParam(Document& doc, const json& j, const char* what) {
 struct ElementFilter {
   bool hasMadeBy = false, hasRole = false;
   uint64_t madeBy = 0;
+  // A Template instance's features (docs/modeling/templates.md#names): what
+  // the instance made is what any of them made.
+  std::set<uint64_t> madeByAlso;
   std::string madeByLabel; // "feature 4 (Pocket, Extrude)"
   topo::ElementRole role = topo::ElementRole::Unknown;
   std::string roleAsked;
@@ -183,7 +187,7 @@ struct ElementFilter {
     } else if (hasMadeBy && !o.derived.empty()) {
       return false; // a copy's ids are its SOURCE's: say `via`
     }
-    return !hasMadeBy || o.madeBy == madeBy;
+    return !hasMadeBy || o.madeBy == madeBy || madeByAlso.contains(o.madeBy);
   }
   bool Matches(const topo::ElementOrigin& o) const {
     if (!MatchesMaker(o))
@@ -244,7 +248,20 @@ ElementFilter ParseElementFilter(ui::AppState& state, Document* listed,
   if (p.contains("made_by")) {
     f.hasMadeBy = true;
     const json& mb = p.at("made_by");
-    if (makers != nullptr) {
+    const int owner =
+        makers != nullptr && mb.is_number_integer() &&
+                makers->FindFeatureById(mb.get<uint64_t>()) == nullptr
+            ? makers->OwnerIndex(mb.get<uint64_t>())
+            : -1;
+    if (owner >= 0) {
+      // A feature a Template instance expanded into: not in the tree, but
+      // the faces it made are named under its id.
+      f.madeBy = mb.get<uint64_t>();
+      f.madeByLabel =
+          "feature " + std::to_string(f.madeBy) +
+          " (inside the template instance '" +
+          makers->GetFeature(static_cast<size_t>(owner))->GetName() + "')";
+    } else if (makers != nullptr) {
       Feature* m = FeatureParam(*makers, mb, "made_by");
       f.madeBy = m->GetId();
       f.madeByLabel = "feature " + std::to_string(m->GetId()) + " (" +
@@ -256,6 +273,8 @@ ElementFilter ParseElementFilter(ui::AppState& state, Document* listed,
         f.madeByLabel += ", whose copies are feature " +
                          std::to_string(pat->sourceId) + "'s";
       }
+      // A template instance made what its expanded features made.
+      m->VisitOwnedIds([&](uint64_t id) { f.madeByAlso.insert(id); });
     } else if (mb.is_number()) {
       f.madeBy = mb.get<uint64_t>();
       f.madeByLabel = "feature " + std::to_string(f.madeBy);
@@ -750,8 +769,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "body_count, "
      "feature_errors[]{index,name,error,after_earlier_failure?}, "
      "receipt{schema,standing,summary,claims}, "
-     "stale_derived?[]{id,name,source}, body_components?, connected?, "
-     "warnings?"},
+     "stale_derived?[]{id,name,source}, "
+     "templates_changed?[]{id,name,template,revision}, body_components?, "
+     "connected?, warnings?"},
     {"check_fit",
      "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
      "class's band; adding {shaft:{class:\"g6\"}} gives the fit between "
@@ -986,7 +1006,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "(a feature that names by index: shell, loft, sweep, import...) | "
      "boundary (named from its edges; no role) | pole | seam; plus "
      "`instance` for a pattern copy and `derived` for one come in through "
-     "Derived features. Filter by them: `made_by` (feature id or name), "
+     "Derived features. Filter by them: `made_by` (feature id or name; a "
+     "Template instance stands for every feature it expanded into, and "
+     "one of those ids is accepted on its own), "
      "`role` (also `floor` = end_cap, `walls` = side), `entity`, and `via` "
      "(a Derived feature: then `made_by` names a feature of ITS source "
      "part) -- the faces a feature made in a role, instead of a filter by "
@@ -2878,6 +2900,22 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                          {"source", d->sourceName}});
       if (!stale.empty())
         out["stale_derived"] = std::move(stale);
+    }
+    // Template instances behind their library template
+    // (docs/modeling/templates.md#revisions): built fine from the revision
+    // they record, so `ok` stands; update_template_instances follows.
+    {
+      json changed = json::array();
+      for (const auto& f : part.GetFeatures())
+        if (const auto* tf = dynamic_cast<const TemplateFeature*>(f.get());
+            tf != nullptr &&
+            ui::TemplateChanged(state, *tf) == std::optional<bool>{true})
+          changed.push_back({{"id", tf->GetId()},
+                             {"name", tf->GetName()},
+                             {"template", tf->templateName},
+                             {"revision", tf->definition.revision}});
+      if (!changed.empty())
+        out["templates_changed"] = std::move(changed);
     }
     // Round-8 retro: floating geometry INSIDE a part warns by default —
     // the ladder's mount plate passed every opt-in gate because nobody

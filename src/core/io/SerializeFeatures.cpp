@@ -36,6 +36,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
 #include "core/features/SweepFeature.h"
+#include "core/features/TemplateFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/features/UnfoldFeature.h"
 #include "core/features/WormFeature.h"
@@ -983,6 +984,22 @@ json FeatureToJson(const Feature& feature) {
       j["units"] = units::ToString(import->lengthUnit);
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
       j["color"] = Vec3ToJson(import->color);
+  } else if (auto* tf = dynamic_cast<const TemplateFeature*>(&feature)) {
+    // v161 (docs/modeling/templates.md). The definition rides in full, so
+    // the chain hash covers what the instance expands and a part rebuilds
+    // from its own file.
+    j["template"] = tf->templateName;
+    j["revision"] = tf->definition.revision;
+    if (const auto on = tf->values.find("on");
+        on != tf->values.end() && !on->second.ref.is_null())
+      j["on"] = on->second.ref;
+    j["parameters"] = tmpl::ValuesToJson(tf->definition, tf->values);
+    json ids = json::array();
+    for (const auto& [local, id] : tf->ids)
+      ids.push_back(json::array({local, id}));
+    j["ids"] = std::move(ids);
+    if (!tf->definition.features.empty())
+      j["definition"] = tmpl::ToJson(tf->definition);
   } else if (auto* d = dynamic_cast<const DerivedFeature*>(&feature)) {
     // v84 (docs/modeling/derived.md). The snapshot rides here in full
     // but for the B-Reps, which are document assets: the chain hash is a
@@ -1641,6 +1658,19 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "added and on update_derived; regeneration reads the snapshot, never "
      "the source, and get_state reports `stale` when the source has moved "
      "(docs/modeling/derived.md)"},
+    {"Template", 161,
+     "template (a name in the project's library: list_templates), "
+     "parameters {name: value} — EVERY parameter the template declares, "
+     "none filled in: a length or angle as a number (mm, degrees) or an "
+     "expression string, a count a whole number, a string, a reference in "
+     "the `on` form — and on: what it stands on, \"Top\"|\"Front\"|"
+     "\"Right\", {feature_id, element} (a planar face) or {feature_id} (a "
+     "DatumPlane, Sketch or Frame). ONE feature that expands into the "
+     "template's features at every regeneration, in its own namespace: "
+     "their faces are named under ids of its own. Carries the definition "
+     "it expanded; get_state says template_changed when the library's "
+     "differs (update_template_instances). unlink_template turns it into "
+     "plain features (docs/modeling/templates.md)"},
     {"DatumPlane", 1,
      "kind: offset|angled|through_points; offset and angled take base_plane: "
      "xy|xz|yz or parent_id; offset: offset (+_expr), flip?; angled: axis "
@@ -2166,6 +2196,22 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       imp->color = Vec3FromJson(j.at("color"));
     }
     out = std::move(imp);
+  } else if (type == "Template") {
+    // A request names the template and gives values; the add_feature
+    // handler takes the definition from the project's library and parses
+    // the values against it. A saved instance carries both.
+    auto tf = std::make_unique<TemplateFeature>(name);
+    tf->templateName = j.value("template", std::string{});
+    if (j.contains("definition")) {
+      tf->definition = tmpl::FromJson(j.at("definition"));
+      const json on = j.value("on", json());
+      tf->values = tmpl::ValuesFromJson(
+          tf->definition, j.value("parameters", json::object()), &on);
+      for (const json& pair : j.value("ids", json::array()))
+        tf->ids.emplace_back(pair.at(0).get<uint64_t>(),
+                             pair.at(1).get<uint64_t>());
+    }
+    out = std::move(tf);
   } else if (type == "Derived") {
     auto d = std::make_unique<DerivedFeature>(
         name, j.at("source_part").get<uint64_t>());

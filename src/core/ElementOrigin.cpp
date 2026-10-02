@@ -314,4 +314,44 @@ std::vector<uint64_t> FeatureIdsMentioned(const std::string& name) {
   return ids;
 }
 
+std::string RewriteIds(const std::string& name,
+                       const std::function<uint64_t(uint64_t)>& map) {
+  std::string out;
+  out.reserve(name.size());
+  size_t i = 0;
+  bool partStart = true; // after the start, a ';' or a ','
+  const auto digits = [&](size_t from) {
+    size_t e = from;
+    while (e < name.size() && std::isdigit(static_cast<unsigned char>(name[e])))
+      ++e;
+    return e;
+  };
+  while (i < name.size()) {
+    const char c = name[i];
+    if (partStart) {
+      partStart = false;
+      if (std::isdigit(static_cast<unsigned char>(c))) {
+        const size_t e = digits(i);
+        if (e < name.size() && name[e] == '/') {
+          out += std::to_string(map(std::stoull(name.substr(i, e - i))));
+          i = e;
+          continue;
+        }
+      } else if ((c == 'M' || c == 'G' || c == 'S') && i + 1 < name.size() &&
+                 std::isdigit(static_cast<unsigned char>(name[i + 1]))) {
+        const size_t e = digits(i + 1);
+        out += c;
+        out += std::to_string(map(std::stoull(name.substr(i + 1, e - i - 1))));
+        i = e;
+        continue;
+      }
+    }
+    if (c == ';' || c == ',')
+      partStart = true;
+    out += c;
+    ++i;
+  }
+  return out;
+}
+
 } // namespace topo

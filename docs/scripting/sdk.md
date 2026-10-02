@@ -96,6 +96,13 @@ Only what `describe` cannot express:
   on a floating occurrence, a clash or a near miss.
 - **`part.check(solids=)`** — raises on any errored feature, prints
   warnings, and optionally requires a solid count.
+- **Feature templates** ([templates](../modeling/templates.md)):
+  `part.save_template(name, features, literals=[{feature, path, param}],
+  rename={variable: param}, replace=)` saves features of the part to the
+  project's library, and `part.template(name, on, {param: value})` places
+  an instance -- a `Param` value keeps its formula -- returning a `Feature`
+  whose `.features` are the features it expanded into, each asked for its
+  faces like any.
 
 Rules the hand-written layer follows: every method is a composition of
 documented RPCs and never sends a field the RPC does not have; every method

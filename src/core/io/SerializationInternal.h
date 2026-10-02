@@ -19,7 +19,12 @@
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    160; // v160: the project's requirements (docs/requirements/README.md):
+    161; // v161: feature templates (docs/modeling/templates.md): a
+         //      `Template` feature {template, revision, on?, parameters,
+         //      ids [[local, id]], definition}, and the project's template
+         //      library under `templates` (a single-part file's envelope;
+         //      project.json in the directory form).
+         // v160: the project's requirements (docs/requirements/README.md):
          //      `requirements/<id>-<slug>.json` beside project.json, each
          //      {id, name, source?, revision, measure {kind, document, ...},
          //      bound {kind, value|min|max}, evidence?}, and

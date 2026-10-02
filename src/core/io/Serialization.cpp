@@ -254,6 +254,10 @@ json DocumentEnvelope(const Document& doc) {
   // (docs/requirements/README.md#saved-form), folded in like the tables.
   if (doc.GetRequirementsRaw().is_array() && !doc.GetRequirementsRaw().empty())
     j["requirements"] = doc.GetRequirementsRaw();
+  // v161: the template library a single-part file carries, the same way
+  // (docs/modeling/templates.md#the-library).
+  if (!doc.GetTemplates().empty())
+    j["templates"] = tmpl::LibraryToJson(doc.GetTemplates());
   j["version"] = kVersion;
   if (doc.Rollback() >= 0) {
     j["rollback"] = doc.Rollback();
@@ -907,6 +911,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // know: the requirement would load as something it is not.
     doc->SetRequirementsRaw(req::ListToJson(
         req::ListFromJson(index.value("requirements", json()))));
+    doc->SetTemplatesRaw(
+        tmpl::LibraryFromJson(index.value("templates", json())));
     doc->SetGeneratorRaw(index.value("generator", json(nullptr)));
     for (const auto& pj : index.value("parameters", json::array())) {
       doc->SetParameter(pj.at("name").get<std::string>(),
@@ -1649,6 +1655,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     // know: the requirement would load as something it is not.
     doc->SetRequirementsRaw(
         req::ListToJson(req::ListFromJson(j.value("requirements", json()))));
+    doc->SetTemplatesRaw(tmpl::LibraryFromJson(j.value("templates", json())));
     doc->SetGeneratorRaw(j.value("generator", json(nullptr)));
     // Parameters first: features' expressions evaluate against them on the
     // regeneration each AddFeature triggers.

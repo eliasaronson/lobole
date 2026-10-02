@@ -300,9 +300,11 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
     state.document->SetParametersRaw(state.projectParameters);
     state.document->SetTablesRaw(state.projectTables);
     state.document->SetRequirementsRaw(req::ListToJson(state.requirements));
+    state.document->SetTemplatesRaw(state.projectTemplates);
     auto r = DocumentIO::Save(*state.document, path);
     state.document->SetTablesRaw({});
     state.document->TakeRequirementsRaw();
+    state.document->SetTemplatesRaw({});
     state.document->SetParametersRaw(std::move(localBackup));
     state.document->SetCatalogsRaw(catalogBackup);
     if (!r && error)
@@ -341,6 +343,9 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
     // Project tables: additive, like the parameters (read by lookup()).
     if (!state.projectTables.empty())
       index["tables"] = lookuptable::ToJson(state.projectTables);
+    // The template library: additive, like the tables.
+    if (!state.projectTemplates.empty())
+      index["templates"] = tmpl::LibraryToJson(state.projectTemplates);
     // Phase V: project-scope variables live in the project envelope, beside
     // active/documents. Per-part index.json `parameters` are that part's LOCAL
     // scope (usually empty now that set_variable defaults to project).
@@ -690,6 +695,10 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     // Refused too: a requirement naming a measure this build does not know
     // would load as something it is not.
     auto loadedRequirements = ReadRequirements(fs::path(path));
+    // Refused the same way: an instance never reads the library, but a
+    // project that silently lost a template could not update one.
+    auto loadedTemplates =
+        tmpl::LibraryFromJson(index.value("templates", nlohmann::json()));
 
     // This branch never goes through ReplaceDocument, so it releases the
     // per-part render cache itself — same id-reuse hazard.
@@ -755,6 +764,7 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     state.catalogHistory = {};
     state.projectParameters.clear();
     state.projectTables = std::move(loadedTables);
+    state.projectTemplates = std::move(loadedTemplates);
     state.projectVarHistory = {};
     state.requirements = std::move(loadedRequirements);
     state.nextRequirementId = index.value("requirements_next_id", uint64_t{1});

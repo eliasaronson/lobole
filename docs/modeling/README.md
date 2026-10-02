@@ -18,6 +18,9 @@ Topic pages:
   phase a pair meshes at, and self-locking.
 - [derived.md](derived.md) — the Derived feature: another part's bodies copied
   into this one as a snapshot.
+- [templates.md](templates.md) — feature templates: a composite saved once as
+  data, with named parameters, and placed as one `Template` feature that
+  expands into its features in its own namespace.
 
 ## The model
 
@@ -130,6 +133,7 @@ The authoritative list, with every field, is `kFeatureTypes` in
 | `Worm`, `WormWheel` | see [worm-gears.md](worm-gears.md) |
 | `Curve3D`, `Sweep`, `Loft`, `Pipe` | see [3D curves, sweep, loft and pipe](#3d-curves-sweep-loft-and-pipe) |
 | `Derived` | see [derived.md](derived.md) |
+| `Template` | an instance of a feature template; see [templates.md](templates.md) |
 | `Fastener` | a generated standard part; only in a part of its own, placed in an assembly (the parts area) |
 
 Sheet-metal features (`BaseFlange`, `EdgeFlange`, `Hem`, `Jog`, `Unfold`,

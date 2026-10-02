@@ -11,6 +11,7 @@
 #include "core/cam/CamNames.h"
 #include "core/cam/CamToolpath.h"
 #include "core/features/CurveFeature.h"
+#include "core/features/TemplateFeature.h"
 #include "core/io/Serialization.h"
 #include "core/tube/Rules.h"
 
@@ -865,6 +866,22 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     CHECK(doc.Generator() == expect.at("generator"));
   if (expect.contains("catalogs"))
     CHECK(doc.GetCatalogs() == expect.at("catalogs"));
+  // v161: the template library a lone part carries, by name and revision,
+  // and each instance's template and the revision it expands.
+  if (expect.contains("templates")) {
+    nlohmann::json got = nlohmann::json::array();
+    for (const tmpl::Template& t : doc.GetTemplates())
+      got.push_back({t.name, t.revision});
+    CHECK(got == expect.at("templates"));
+  }
+  if (expect.contains("template_instances")) {
+    nlohmann::json got = nlohmann::json::array();
+    for (const auto& f : doc.GetFeatures())
+      if (const auto* tf = dynamic_cast<const TemplateFeature*>(f.get()))
+        got.push_back({tf->templateName, tf->definition.revision,
+                       tf->GetError().empty()});
+    CHECK(got == expect.at("template_instances"));
+  }
   AssertTolerances(doc, expect);
   AssertSheetMetal(doc, expect);
   // v160: the project's requirements a lone part carries, read back as

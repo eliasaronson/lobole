@@ -19,6 +19,7 @@
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h" // PrintedThreadJson
 #include "remote/RemoteProject.h"    // RequireFreshTabName
+#include "remote/RemoteTemplates.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById
 #include "ui/DerivedActions.h"
@@ -104,8 +105,16 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
   // "type" is the FromJson dispatch key; the rest are the get_state envelope
   // (index/error state stamped AROUND the dialect), so a read-modify-write of
   // a get_state feature entry — a legitimate agent pattern — stays valid.
-  static const std::set<std::string> kAllow = {
-      "type", "index", "error", "warning", "after_earlier_failure", "report"};
+  // A template instance's row adds what get_state says about it
+  // (template_changed, expanded).
+  static const std::set<std::string> kAllow = {"type",
+                                               "index",
+                                               "error",
+                                               "warning",
+                                               "after_earlier_failure",
+                                               "report",
+                                               "template_changed",
+                                               "expanded"};
   // The round trip alone is not enough: a key whose value is EMPTY
   // serializes back to nothing, so `"external": []` on a sketch (a filter
   // that found no edges — the SO-101 gripper's) was refused as an unknown
@@ -906,6 +915,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (fj.is_object() &&
         primitive::KindFromName(fj.value("type", std::string{})))
       return AddPrimitive(state, *doc, fj);
+    // A template instance names a template of the project's library and
+    // gives every value (docs/modeling/templates.md#rpcs).
+    if (fj.is_object() && fj.value("type", std::string{}) == "Template")
+      return AddTemplateFeature(state, *doc, fj);
     // A Derived's configuration may be NAMED ("pawn"); the feature stores
     // the id, which survives a rename. An unknown name is refused with the
     // ones the source has, never read as "whichever is active".

@@ -34,6 +34,13 @@ std::string BeginPrimitiveOnFace(AppState& state, uint32_t meshId,
                                  uint32_t faceIndex);
 
 // The preview the session describes is the pending one.
+// The plane pick answered for whichever tool armed it: a primitive, or
+// (SketchPurpose::Template) the Insert template tool, which stands where a
+// primitive does. Returns the refusal (the pick stays armed) or empty.
+std::string BeginPlacedOn(AppState& state, const primitive::On& on);
+std::string BeginPlacedOnFace(AppState& state, uint32_t meshId,
+                              uint32_t faceIndex);
+
 bool PrimitiveSessionActive(const AppState& state);
 
 // The tool window's body while the session is live: the primitive's fields,

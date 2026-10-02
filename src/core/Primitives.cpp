@@ -114,6 +114,8 @@ void WriteDim(json& j, const char* key, const Dim& d) {
     j[std::string(key) + "_expr"] = d.expr;
 }
 
+} // namespace
+
 On OnFromJson(const json& on) {
   On out;
   if (on.is_string()) {
@@ -161,6 +163,8 @@ json OnToJson(const On& on) {
     return {{"feature_id", on.featureId}};
   }
 }
+
+namespace {
 
 // The size of the part: its largest bounding-box dimension, over the solid
 // bodies (a reference ghost is not part of it). 0 when it has none.

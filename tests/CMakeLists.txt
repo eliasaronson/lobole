@@ -56,6 +56,7 @@ add_executable(designer_tests
     test_assembly_loops.cpp
     test_assembly_relations.cpp
     test_derived.cpp
+    test_templates.cpp
     test_measure.cpp
     test_receipt.cpp
     test_materials.cpp
@@ -582,6 +583,15 @@ add_test(NAME derived_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/derived_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(derived_smoke PROPERTIES TIMEOUT 120)
+
+# Feature templates (v161): a seat saved from one part, placed twice on
+# another over the RPC -- refusals that change nothing, an upstream edit,
+# a changed template marked and updated only on request, unlink, and the
+# library through export, import, save and open.
+add_test(NAME templates_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/templates_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(templates_smoke PROPERTIES TIMEOUT 120)
 
 # list_elements by what made a face: a pocket's floor and walls, a hole's
 # bores, a pattern's copies, a Derived copy through `via`, and the why of a

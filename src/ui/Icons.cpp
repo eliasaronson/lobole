@@ -27,6 +27,7 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"part.sphere", ICON_DS_SPHERE},
     {"part.cylinder", ICON_DS_CYLINDER},
     {"part.derive", ICON_FA_LINK},
+    {"part.template", ICON_FA_STAMP},
     {"part.extrude", ICON_DS_EXTRUDE},
     {"part.revolve", ICON_DS_REVOLVE},
     {"part.curve3d", ICON_DS_HELIX},

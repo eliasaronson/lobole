@@ -319,10 +319,23 @@ struct RegenContext {
   // folds the process into exactly those holes, so nothing else rebuilds.
   const printfit::Process* print = nullptr;
 
-  // Searches features[0, currentIndex) by stable id; nullptr if absent or
-  // suppressed.
+  // A Template instance executes its expanded features against this same
+  // context (docs/modeling/templates.md#expansion): `inner` lists them and
+  // `innerIndex` is the one executing, so a reference inside the template
+  // finds the template's own earlier features first, then the document's.
+  // Null everywhere else.
+  const std::vector<std::unique_ptr<Feature>>* inner = nullptr;
+  size_t innerIndex = 0;
+
+  // Searches inner[0, innerIndex), then features[0, currentIndex), by
+  // stable id; nullptr if absent or suppressed.
   const Feature* FindById(uint64_t id) const;
 };
+
+// Moves the marks a face carries (a hole's, a thread's) onto its renamed
+// self after a feature modified it: what the regeneration loop runs after
+// every feature, and a Template instance after each feature it expands.
+void FollowModifiedFaces(std::vector<Body>& bodies);
 
 // One step in the parametric history. Features are executed in order by
 // Document::Regenerate() to rebuild the model from scratch, so they must be
@@ -419,6 +432,13 @@ public:
   // it, so a Shell naming a body names the feature that produced it.
   using RefVisitor = std::function<void(uint64_t)>;
   virtual void VisitFeatureRefs(const RefVisitor& visit) const = 0;
+
+  // Ids this feature OWNS besides its own: a Template instance's expanded
+  // features carry document ids of their own, minted once and stored on the
+  // instance, so the names they give faces are unique to it
+  // (docs/modeling/templates.md#names). The document keeps its id counter
+  // ahead of them, and a feature naming one of them depends on this one.
+  virtual void VisitOwnedIds(const RefVisitor& visit) const { (void)visit; }
 
   // Why this feature cannot be COMMITTED as it stands (empty = fine).
   // Distinct from GetError(), which reports a regeneration failure: a fillet

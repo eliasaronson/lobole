@@ -11,12 +11,11 @@
 #include <atomic>
 #include <deque>
 #include <functional>
+#include <set>
 #include <string>
 #include <unordered_map>
 
 static bool PrintDrivesGeometry(const Feature& f);
-
-namespace {
 
 // A face a later feature MODIFIES keeps its name with ";M<tag>" appended
 // (core/ElementHistory.h), and a thread recorded on it before -- a Thread, a
@@ -52,8 +51,6 @@ void FollowModifiedFaces(std::vector<Body>& bodies) {
       follow(b.elementMap, h.bore);
   }
 }
-
-} // namespace
 
 // Monotonic for the life of the process: identity must never be reused, or
 // the consumers of InstanceId() are back to guessing.
@@ -104,6 +101,7 @@ Document::Document(const Document& other, bool reuseGeometry)
   m_tube = other.m_tube;             // what check_frame and the cut list read
   m_print = other.m_print;           // what the fit checks model a print at
   m_tables = other.m_tables;         // a lone part's project tables
+  m_templates = other.m_templates;   // ...and its template library
   m_features.reserve(other.m_features.size());
   for (const std::unique_ptr<Feature>& f : other.m_features)
     m_features.push_back(f->Clone());
@@ -173,6 +171,10 @@ void Document::InsertFeature(std::unique_ptr<Feature> feature, size_t index) {
   } else {
     m_nextId = std::max(m_nextId, feature->GetId() + 1);
   }
+  // ...and ahead of the ids it owns (a Template instance's features), so
+  // nothing added later can be given one of them.
+  feature->VisitOwnedIds(
+      [this](uint64_t id) { m_nextId = std::max(m_nextId, id + 1); });
   m_features.insert(m_features.begin() + index, std::move(feature));
   Regenerate(); // deferred while a BulkEdit guard is held
 }
@@ -244,13 +246,28 @@ int Document::FirstConsumerIndex(uint64_t featureId) const {
   }
   if (own == m_features.size())
     return -1; // no such feature
+  std::set<uint64_t> ids = {featureId};
+  m_features[own]->VisitOwnedIds([&](uint64_t id) { ids.insert(id); });
   for (size_t i = own + 1; i < m_features.size(); i++) {
     bool consumes = false;
     m_features[i]->VisitFeatureRefs([&](uint64_t id) {
-      if (id == featureId)
+      if (ids.contains(id))
         consumes = true;
     });
     if (consumes)
+      return static_cast<int>(i);
+  }
+  return -1;
+}
+
+int Document::OwnerIndex(uint64_t id) const {
+  if (id == 0)
+    return -1;
+  for (size_t i = 0; i < m_features.size(); i++) {
+    bool owns = m_features[i]->GetId() == id;
+    if (!owns)
+      m_features[i]->VisitOwnedIds([&](uint64_t o) { owns = owns || o == id; });
+    if (owns)
       return static_cast<int>(i);
   }
   return -1;
@@ -295,8 +312,14 @@ bool Document::Regenerate() {
     // Derived with none takes its source body's back.
     for (Body& b : m_bodies) {
       const Feature* f = FindFeatureById(b.createdBy);
-      if (f == nullptr)
+      if (f == nullptr) {
+        // A body a Template instance's feature made: the instance's own
+        // material, when it has one, over what the template saved.
+        const int owner = OwnerIndex(b.createdBy);
+        if (owner >= 0 && !m_features[owner]->GetMaterial().empty())
+          b.material = m_features[owner]->GetMaterial();
         continue;
+      }
       if (!f->StampsOwnMaterial() || !f->GetMaterial().empty()) {
         b.material = f->GetMaterial();
         continue;

@@ -48,9 +48,13 @@ def base_plate(app, S):
     # cap, asked again after each cut that renames it), so it stands where
     # base_t puts the face.
     plate = body.feature
-    sk = part.sketch(on=plate.end_cap(), name="Bearing pocket")
-    sk.circle((0, 0), d=X.pan_brg_D)
-    part.cut(sk.add(), X.pan_brg_B, reversed=True, name="Bearing pocket")
+    # The lower pan bearing's pocket: the bearing seat every housing of the
+    # head shares, saved as a template from this pocket and placed here as
+    # its first instance (common.bearing_seat).
+    common.define_bearing_seat(part, plate.end_cap(), X.pan_brg_D,
+                               X.pan_brg_B)
+    common.bearing_seat(part, plate.end_cap(), X.pan_brg_D, X.pan_brg_B,
+                        name="Bearing pocket")
     sk = part.sketch(on=plate.end_cap(), name="Relief")
     sk.circle((0, 0), d=X.pan_relief_d)
     part.cut(sk.add(), X.pan_relief_depth, reversed=True, name="Relief")
@@ -102,10 +106,9 @@ def pan_wheel(app, S):
                           name="Blank")
     rim = blank.faces(kind="cylinder")[0]
     # Drawn ON the blank's top face, as the plate's are on its.
-    sk = part.sketch(on=blank.feature.end_cap(), name="Bearing counterbore")
-    sk.circle((0, 0), d=model("hole", S["pan_brg_D"]))
-    part.cut(sk.add(), X.pan_brg_B, reversed=True,
-             name="Bearing counterbore")
+    common.bearing_seat(part, blank.feature.end_cap(),
+                        model("hole", S["pan_brg_D"]), X.pan_brg_B,
+                        name="Bearing counterbore")
     sk = part.sketch(on=blank.feature.end_cap(), name="Relief")
     sk.circle((0, 0), d=model("hole", S["pan_relief_d"]))
     part.cut(sk.add(), 1.0, reversed=True, end_mode="through_all",
