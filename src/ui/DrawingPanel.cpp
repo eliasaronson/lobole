@@ -5,6 +5,8 @@
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
+#include "ui/DrawingAnnotate.h"
+#include "ui/DrawingSheet.h"
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/PanelLayout.h"
 #include "ui/PanelTitles.h"
@@ -51,6 +53,8 @@ ImVec2 ViewportCenter(const AppState& state) {
                 state.viewportPos.y + state.viewportSize.y * 0.5f);
 }
 
+} // namespace
+
 // Sheet-mm (origin bottom-left, +Y up) -> screen pixels (+Y down).
 ImVec2 SheetToScreen(const AppState& state, glm::dvec2 mm) {
   const ImVec2 c = ViewportCenter(state);
@@ -66,6 +70,8 @@ glm::dvec2 ScreenToSheet(const AppState& state, ImVec2 px) {
   return {state.sheetView.offset.x + (px.x - c.x) / s,
           state.sheetView.offset.y - (px.y - c.y) / s};
 }
+
+namespace {
 
 // Centre the sheet in the viewport at ~90% fill — the scale==0 first-paint
 // state, and the "fit" button.
@@ -132,6 +138,8 @@ int NeededRefs(DrawingDimKind k) {
   return 2;
 }
 
+} // namespace
+
 double PointSegDist(glm::dvec2 p, glm::dvec2 a, glm::dvec2 b) {
   const glm::dvec2 ab = b - a;
   const double len2 = glm::dot(ab, ab);
@@ -176,6 +184,8 @@ ProjRef RefOfCurve(const drawing::SheetCurve& c, uint64_t viewId) {
     r.silFace = c.silFace;
   return r;
 }
+
+namespace {
 
 // Dimension-placement interaction (D4): highlights the projected edge under the
 // cursor, picks it on click (all refs share one view), and creates the dim once
@@ -237,6 +247,8 @@ void HandleDimTool(ImDrawList* dl, AppState& state) {
   }
 }
 
+} // namespace
+
 // A filled arrowhead at `tip` pointing along unit `dir` (sheet mm), ported from
 // the sketch Arrow but in sheet space so it scales with zoom.
 void SheetArrow(ImDrawList* dl, AppState& state, glm::dvec2 tip, glm::dvec2 dir,
@@ -248,6 +260,8 @@ void SheetArrow(ImDrawList* dl, AppState& state, glm::dvec2 tip, glm::dvec2 dir,
                         SheetToScreen(state, base + n * w),
                         SheetToScreen(state, base - n * w), col);
 }
+
+namespace {
 
 // Text turned counter-clockwise on the SHEET by `angle` about `pivot` (a
 // screen point): set flat, then its vertices turned. ImGui sets no turned
@@ -266,6 +280,8 @@ void AddTurnedText(ImDrawList* dl, ImFont* font, float px, ImVec2 topLeft,
     v = ImVec2(pivot.x + dx * c - dy * s, pivot.y + dx * s + dy * c);
   }
 }
+
+} // namespace
 
 // Sheet furniture (drawing::SheetGraphics) on screen: the primitives the
 // exporters draw, so a balloon or a hatch looks here as it prints.
@@ -313,6 +329,8 @@ void DrawSheetGraphics(ImDrawList* dl, AppState& state,
     AddTurnedText(dl, font, fontPx, at, pivot, t.angleRad, col, t.text.c_str());
   }
 }
+
+namespace {
 
 // Draws the active drawing's dimensions: extension/dimension lines + arrows +
 // value text (linear), or a centre->rim leader (radial). A dangling dimension
@@ -405,8 +423,12 @@ void DrawDims(ImDrawList* dl, AppState& state) {
                         IM_COL32(250, 250, 250, 230), 2.0f);
       dl->AddText(font, fontPx, org, ink, d.text.c_str());
     }
-    // Label drag (only when the dimension tool isn't picking).
-    if (!state.dimTool.active && !overPanel) {
+    // Label drag (only when no drawing tool is picking: a frame's pick of
+    // a dimension's value is a click on this same box).
+    const bool picking =
+        state.dimTool.active || state.detailTool.active ||
+        state.drawingNoteTool.kind != AppState::DrawingNoteTool::Kind::None;
+    if (!picking && !overPanel) {
       const bool overLabel =
           io.MousePos.x >= org.x - 2 && io.MousePos.x <= org.x + tsz.x + 2 &&
           io.MousePos.y >= org.y - 1 && io.MousePos.y <= org.y + tsz.y + 1;
@@ -647,6 +669,7 @@ void DrawSheet(AppState& state) {
   DrawViews(dl, state);
   DrawDims(dl, state);
   HandleDimTool(dl, state);
+  HandleDrawingAnnotateTools(dl, state);
 
   dl->PopClipRect();
 }
@@ -752,7 +775,18 @@ void DrawViewsSection(AppState& state) {
 
   static const double kScales[] = {10.0, 5.0, 2.0,  1.0,  0.5,
                                    0.2,  0.1, 0.05, 0.02, 0.01};
-  uint64_t removeView = 0;
+  if (!state.drawingMessage.empty()) {
+    // What the last drawing action did (a balloon layout), or why not.
+    ImGui::PushTextWrapPos(0.0f);
+    if (state.drawingMessageIsError)
+      ImGui::TextColored(ImVec4(0.85f, 0.62f, 0.25f, 1.0f), "%s",
+                         state.drawingMessage.c_str());
+    else
+      ImGui::TextDisabled("%s", state.drawingMessage.c_str());
+    ImGui::PopTextWrapPos();
+  }
+
+  uint64_t removeView = 0, balloonView = 0;
   for (const DrawingView& view : state.drawing->GetViews()) {
     const auto it = state.drawingRenders.find(view.id);
     const bool rendered = it != state.drawingRenders.end();
@@ -780,7 +814,13 @@ void DrawViewsSection(AppState& state) {
     const uint64_t viewId = view.id;
     const bool canBendTable =
         rendered && it->second.hasGeometry && ViewHasBends(state, view);
-    row.menu = [&state, &removeView, viewId, canBendTable] {
+    const bool canDetail =
+        rendered && it->second.hasGeometry && !view.detail.on;
+    const auto slot = SlotIndexById(state, view.sourceDocId);
+    const bool ofAssembly =
+        !view.detail.on && slot && state.parts[*slot].kind == DocKind::Assembly;
+    row.menu = [&state, &removeView, &balloonView, viewId, canBendTable,
+                canDetail, ofAssembly] {
       if (ImGui::BeginMenu("Scale###dwg_view_scale")) {
         DrawingView* v = state.drawing->FindView(viewId);
         for (const double scale : kScales) {
@@ -821,6 +861,12 @@ void DrawViewsSection(AppState& state) {
         if (v && r != state.drawingRenders.end())
           AddBendTable(state, *v, r->second);
       }
+      // A circle of this view drawn again larger: the session starts on it.
+      if (canDetail && ImGui::MenuItem("Detail view###dwg_view_detail"))
+        ArmDetailTool(state, viewId);
+      // A balloon on every row of the parts list, round this view.
+      if (ofAssembly && ImGui::MenuItem("Lay out balloons###dwg_view_balloons"))
+        balloonView = viewId;
       ImGui::Separator();
       if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete###dwg_view_delete"))
         removeView = viewId;
@@ -832,6 +878,8 @@ void DrawViewsSection(AppState& state) {
     state.drawing->RemoveView(removeView);
     UpdateDrawingRenders(state);
   }
+  if (balloonView != 0)
+    LayOutBalloons(state, {balloonView});
 }
 
 // The dimensions, as rows: the kind and its value, red when a reference no
@@ -862,7 +910,12 @@ void DrawDimsSection(AppState& state) {
     }
     row.menuId = "###dwg_dim_ctx_" + std::to_string(dim.id);
     const uint64_t dimId = dim.id;
-    row.menu = [&removeDim, dimId] {
+    row.menu = [&state, &removeDim, dimId, resolved = rd.resolved] {
+      // A tolerance on the feature this dimension sizes: the frame session
+      // opens aimed at it (select-first).
+      if (resolved && ImGui::MenuItem("Feature control frame###dwg_dim_fcf"))
+        BeginFcfOnDimension(state, dimId);
+      ImGui::Separator();
       if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete###dwg_dim_delete"))
         removeDim = dimId;
     };

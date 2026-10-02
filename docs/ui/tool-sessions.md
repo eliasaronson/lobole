@@ -77,7 +77,8 @@ address rows as `//<Title>###ToolWindow/###slotN`; a ref that looks specific
 (`//Hole###ToolWindow`) drives whichever session is actually open.
 
 Only one session draws at a time. `DrawToolWindow` takes, in order: a sketch
-session (or plane pick), a mate session, a drawing dimension, the drawing's
+session (or plane pick), a mate session, a drawing dimension, a drawing
+annotation (a datum or a feature control frame), a detail view, the drawing's
 Add view, then a feature preview; with none of those it shows the committed-
 feature editor, or measure, section, the CAM verbs, the fastener tool, an
 assembly editor, exploded views, motion, or simulation.
@@ -156,6 +157,11 @@ exactly one of these must hold:
 - `Expect::HarmlessNoOp` — accepts cleanly and legitimately changes nothing.
 
 "Enabled button, accepts, changes nothing" is the failure it exists to catch.
+The drawing tab's sessions (datum, frame, detail) pick on the sheet rather
+than in the model, so they are not in `kToolCases`;
+`defaults/drawing_sessions_wait_for_a_pick` holds them to `RefusesUntilPicked`
+(and Enter does not take a refused Accept), and their derived defaults are
+asserted where they are driven ([../drawings/README.md](../drawings/README.md#in-the-gui)).
 `defaults/no_op_warns_without_blocking` pins the amber warning.
 
 ## The Hole tool

@@ -132,6 +132,9 @@ void ResetAppForTest() {
   s_App->editFeatureId = 0;
   s_App->mateTool = {};
   s_App->dimTool = {};
+  s_App->drawingNoteTool = {};
+  s_App->detailTool = {};
+  s_App->drawingMessage.clear();
   s_App->inContext = {};
   s_App->showCog = false;
   s_App->perfHudOpen = false;

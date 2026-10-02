@@ -16,6 +16,7 @@
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
+#include "ui/DrawingAnnotate.h"
 #include "ui/FastenerTool.h"
 #include "ui/FeatureEditor.h" // kCamToolSlot (the CAM session's pick slot)
 #include "ui/FileDialogs.h"
@@ -287,7 +288,7 @@ void ToggleSection(AppState& s) {
 void RequestPopup(AppState& s, const char* name) { s.popupRequest = name; }
 
 void ArmDimTool(AppState& s, DrawingDimKind kind) {
-  s.dimTool = AppState::DimTool{};
+  EndDrawingTools(s); // one drawing session at a time
   s.dimTool.active = true;
   s.dimTool.kind = kind;
 }
@@ -787,6 +788,21 @@ const std::vector<Command>& Table() {
     dim("drawing.dim_hole_callout", DrawingDimKind::HoleCallout);
     dim("drawing.dim_pattern_callout", DrawingDimKind::PatternCallout);
     dim("drawing.dim_part_note", DrawingDimKind::FastenerCallout);
+    // The annotations a dimension is not (docs/drawings/guide.md#in-the-gui).
+    const auto hasViews = [](AppState& s) {
+      return s.drawing != nullptr && !s.drawing->GetViews().empty();
+    };
+    add("drawing.fcf", hasViews, [](AppState& s) {
+      ArmDrawingNoteTool(s, AppState::DrawingNoteTool::Kind::Fcf);
+    });
+    add("drawing.datum", hasViews, [](AppState& s) {
+      ArmDrawingNoteTool(s, AppState::DrawingNoteTool::Kind::Datum);
+    });
+    add("drawing.detail", hasViews, [](AppState& s) { ArmDetailTool(s); });
+    add(
+        "drawing.balloons",
+        [](AppState& s) { return !BalloonViews(s).empty(); },
+        [](AppState& s) { LayOutBalloons(s, BalloonViews(s)); });
 
     // -------------------------------------------------------- Simulation
     const auto bc = [&add](const char* id, SimulationState::Tool t) {

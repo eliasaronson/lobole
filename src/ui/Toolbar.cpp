@@ -1150,6 +1150,9 @@ void DrawDrawingToolbar(AppState& state) {
   // and scale -- the sheet equivalent of inserting a part.
   CommandButton(state, "###tb_dwg_add_view", "drawing.add_view",
                 "Add view (project a part/assembly)", state.drawingAddViewOpen);
+  CommandButton(state, "###tb_dwg_detail", "drawing.detail",
+                "Detail view (press on a view, drag out the circle)",
+                state.detailTool.active);
   ImGui::SameLine();
   Divider();
 
@@ -1186,6 +1189,20 @@ void DrawDrawingToolbar(AppState& state) {
   dimBtn("###tb_dwg_part_note", "drawing.dim_part_note",
          "Part note (pick a fastener or a part to label)",
          DrawingDimKind::FastenerCallout);
+
+  Divider();
+
+  // Annotations: a frame on a feature or under a dimension, a datum feature,
+  // and the balloons of an assembly view's parts list.
+  using NoteKind = AppState::DrawingNoteTool::Kind;
+  CommandButton(state, "###tb_dwg_fcf", "drawing.fcf",
+                "Feature control frame (pick an edge or a dimension)",
+                state.drawingNoteTool.kind == NoteKind::Fcf);
+  CommandButton(state, "###tb_dwg_datum", "drawing.datum",
+                "Datum feature (pick an edge)",
+                state.drawingNoteTool.kind == NoteKind::Datum);
+  CommandButton(state, "###tb_dwg_balloons", "drawing.balloons",
+                "Lay out balloons (one per parts-list row, none crossing)");
 
   Divider();
 

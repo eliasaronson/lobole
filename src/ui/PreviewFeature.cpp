@@ -3,7 +3,8 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/StudyPanel.h" // DrawSimulationToolWindow
 
-#include "ui/DrawingPanel.h" // DrawAddViewToolWindow
+#include "ui/DrawingAnnotate.h" // the frame, datum and detail sessions
+#include "ui/DrawingPanel.h"    // DrawAddViewToolWindow
 #include "ui/ExprInput.h"    // expression-capable numeric fields
 #include "ui/OccurrencePanel.h"
 
@@ -561,6 +562,17 @@ void DrawToolWindow(AppState& state) {
   }
   if (state.drawing && state.dimTool.active) {
     DrawDimToolWindow(state);
+    return;
+  }
+  // The annotation sessions: a frame or a datum, a detail view
+  // (docs/drawings/guide.md#in-the-gui).
+  if (state.drawing &&
+      state.drawingNoteTool.kind != AppState::DrawingNoteTool::Kind::None) {
+    DrawDrawingNoteToolWindow(state);
+    return;
+  }
+  if (state.drawing && state.detailTool.active) {
+    DrawDetailToolWindow(state);
     return;
   }
   if (state.drawing && state.drawingAddViewOpen) {

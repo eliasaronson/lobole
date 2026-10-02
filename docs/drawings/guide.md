@@ -109,11 +109,40 @@ its setup (sheet, views, dimensions, notes).
    sheet. The dimension places itself clear of the views, the title block and
    other labels; drag its value label to move it. Right-click a dimension's
    row to delete it.
-5. **Export** writes the sheet as SVG or PDF. It needs a system file dialog;
+5. **Datums and frames**: **Datum** (`Shift+D`) and **Feature control
+   frame** (`G`) on the toolbar each open a session in the tool window. Click
+   the feature's edge on the sheet; the symbol then stands clear of the view,
+   outward from the edge, and dragging it moves it (clicking another edge
+   moves its leader). A datum takes the sheet's next free letter. A frame
+   starts as flatness on a straight edge and as a Ø position on a circle, its
+   zone ISO 2768-2 class K for the feature's length (perpendicularity's
+   table for an orientation tolerance), until you choose or type otherwise;
+   the window has the symbol, the zone, Ø, Ⓜ/Ⓛ, and the datums the sheet
+   has, primary first. A frame can instead stand under a dimension's value:
+   click the value, or choose **Feature control frame** from the
+   dimension's row menu. What the sheet cannot take — a datum letter used
+   twice or that is I, O or Q, a flatness naming a datum, a perpendicularity
+   naming none — is said in the window in the words `add_drawing_note`
+   refuses with, and Accept stays off until it is fixed.
+6. **Detail views**: **Detail view** (`Shift+I`, or **Detail view** in a
+   view row's menu): press on a view at the circle's centre and drag out its
+   radius (a click without a drag takes an eighth of the view). The detail
+   comes up at the largest standard scale, at least twice its parent's,
+   that keeps it within a third of the sheet, lettered with the next free
+   letter and placed in the free spot nearest the circle, drawn in preview
+   as it will look. Drag it to move it; the window edits radius, scale and
+   letter. Accept adds it as one undo step.
+7. **Balloons**: **Lay out balloons** (`B`) puts a balloon on every row of
+   the parts list round the views of the sheet's assembly; **Lay out
+   balloons** in an assembly view's row menu does it round that view. Run
+   again, it replaces the balloons rather than adding more. The panel says
+   how many it placed, and names any leaders crossing or rows with no clear
+   edge.
+8. **Export** writes the sheet as SVG or PDF. It needs a system file dialog;
    without one, use `export_drawing`.
 
-Folding a child from a base view, hiding occurrences, choosing `fast`, and
-free notes are set over RPC.
+Folding a child from a base view, hiding occurrences, choosing `fast`, a
+section view, and free text notes are set over RPC.
 
 ## Over RPC / MCP
 

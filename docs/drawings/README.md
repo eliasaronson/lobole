@@ -449,6 +449,26 @@ its outline (a line found every way from its centre) — not merely inside its
 box, which flagged every callout beside a round part; inside a section it
 stands on knocked-out hatching, which is how a section is dimensioned.
 
+### In the GUI
+
+The datum, frame and detail sessions and the balloon layout
+(`src/ui/DrawingAnnotate.cpp`, [guide.md](guide.md#in-the-gui)) are the
+tool window plus direct manipulation on the sheet: a click on a projected
+curve (or, for a frame, on a dimension's value) is the pick, a drag moves
+the symbol or the detail, and a press-and-drag on a view is a detail's
+centre and radius. They refuse what the RPC refuses by asking the same
+functions -- `ui::WhyDrawingNoteRefused` (a datum letter, `ValidateFcf`, the
+leader and the datums `ResolveDrawingNote` resolves) and
+`ui::WhyDetailRefused` -- which `add_drawing_note` and `add_drawing_view`
+call too. Their defaults come from what they act on: a frame's zone is ISO
+2768-2 class K for the picked feature's length (`ui::DefaultGeoTolerance`),
+a detail's scale the largest standard one at least twice its parent's that
+keeps the circle within a third of the sheet (`ui::DefaultDetailScale`),
+and a symbol or a detail stands on the first spot clear of the views, the
+title block, the labels and the border (`ui::AutoNotePosition`,
+`ui::AutoDetailPosition`, over the same avoid list dimension placement
+uses).
+
 ## Export
 
 `DrawingExport::SaveSVG` and `SavePDF` (`src/core/drawing/DrawingExport.cpp`)
@@ -479,6 +499,7 @@ notes with their balloons, datums and tables, and centre marks. `export_drawing 
 | SVG / PDF | `src/core/drawing/DrawingExport.{h,cpp}` |
 | update, placement, folding, export glue | `src/ui/DrawingActions.{h,cpp}` |
 | panel, sheet viewport, dimension picking | `src/ui/DrawingPanel.cpp`, toolbar in `src/ui/Toolbar.cpp` |
+| datum, frame and detail sessions, balloon layout from the GUI | `src/ui/DrawingAnnotate.cpp` |
 | RPCs | `src/remote/RemoteDrawings.cpp` |
 
 ## Tests
@@ -526,7 +547,13 @@ notes with their balloons, datums and tables, and centre marks. `export_drawing 
   `drawing_quality_smoke.py`: the RPC chain headless (create, views, update,
   dimensions, dangling after an edit, cost reporting, `fast`, `hidden`,
   `budget_s`, export).
-- GUI: `drawing/build_a_drawing_by_clicking`.
+- GUI: `drawing/build_a_drawing_by_clicking`;
+  `drawing/datum_and_frame_by_clicking` (a datum and the frames naming it
+  by clicking, the derived zone, a refusal shown with Accept off, a frame
+  under a dimension from its row and by its value, one undo step),
+  `drawing/detail_view_by_press_and_drag`,
+  `drawing/balloons_from_the_view_row`, and
+  `defaults/drawing_sessions_wait_for_a_pick`.
 
 ## Not done
 
@@ -540,9 +567,10 @@ notes with their balloons, datums and tables, and centre marks. `export_drawing 
 - Balloons placed round several views at once as one problem: each view's
   ring is laid out in turn, clear of the ones before.
 - DXF of a sheet (DXF exists for flat patterns only).
-- Dragging a view on the sheet in the GUI, and folding a child from the GUI
-  (`base_view` is RPC-only); adding free notes in the GUI (Add bend table is
-  the only note the panel adds).
+- Dragging a view on the sheet in the GUI, and folding a child or cutting a
+  section from the GUI (`base_view` and `section` are RPC-only); adding free
+  text notes in the GUI (the GUI adds bend tables, datums, frames and
+  balloons); dragging a note once it is placed.
 - Numbering bend lines to match the bend table's rows.
 - Parallel projection of a sheet's views; reuse of cached visibility across
   differently placed instances of one shape.

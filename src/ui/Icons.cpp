@@ -128,6 +128,10 @@ constexpr std::array kIcons = std::to_array<CommandIconEntry>({
     {"drawing.dim_hole_callout", ICON_FA_BULLSEYE},
     {"drawing.dim_pattern_callout", ICON_FA_GRIP},
     {"drawing.dim_part_note", ICON_FA_TAG},
+    {"drawing.fcf", ICON_FA_TABLE_CELLS},
+    {"drawing.datum", ICON_FA_FLAG},
+    {"drawing.detail", ICON_FA_MAGNIFYING_GLASS_PLUS},
+    {"drawing.balloons", ICON_FA_CIRCLE_NODES},
     {"drawing.export", ICON_FA_FILE_EXPORT},
 
     // CAM job.

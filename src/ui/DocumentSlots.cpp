@@ -194,6 +194,8 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   // click on the toolbar button meant to turn it on.
   state.editFeatureId = 0;
   state.dimTool = AppState::DimTool{};
+  state.drawingNoteTool = AppState::DrawingNoteTool{};
+  state.detailTool = AppState::DetailTool{};
   state.mateTool = AppState::MateToolState{};
   state.camToolOpen = false;
   state.camVerb = AppState::CamVerb::None;
@@ -302,6 +304,9 @@ void ResetActiveTabUiState(AppState& state) {
   // (StashActive/ActivateSlot) so a drawing keeps its projected geometry across
   // tab switches and only an explicit update re-projects.
   state.dimTool = AppState::DimTool{}; // transient dimension-pick state
+  state.drawingNoteTool = AppState::DrawingNoteTool{}; // ...and the rest
+  state.detailTool = AppState::DetailTool{};
+  state.drawingMessage.clear();
   state.dimDrag = 0;
   // Any tab change exits simulation mode (results themselves live on the
   // Document and survive; only the mode/display state resets). Through

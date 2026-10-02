@@ -137,6 +137,8 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     s_App->camToolOpen = true;
     s_App->measure.active = true;
     s_App->dimTool.active = true;
+    s_App->drawingNoteTool.kind = ui::AppState::DrawingNoteTool::Kind::Fcf;
+    s_App->detailTool.active = true;
     s_App->mateTool.active = true;
     ctx->Yield(2);
 
@@ -146,6 +148,9 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->camToolOpen);
     IM_CHECK(!s_App->measure.active);
     IM_CHECK(!s_App->dimTool.active);
+    IM_CHECK(s_App->drawingNoteTool.kind ==
+             ui::AppState::DrawingNoteTool::Kind::None);
+    IM_CHECK(!s_App->detailTool.active);
     IM_CHECK(!s_App->mateTool.active);
   };
 

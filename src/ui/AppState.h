@@ -1595,6 +1595,54 @@ struct AppState {
   // disagreed (docs/ui/panels.md#drawing-tab-the-drawing-panel).
   bool drawingAddViewOpen = false;
 
+  // The annotation session on a drawing tab
+  // (docs/drawings/guide.md#in-the-gui): a feature control frame or a datum
+  // feature. The first click names what it is on -- a projected edge or circle
+  // (a leader to it), or for a frame a dimension's value (stacked with it) --
+  // and the symbol then stands at a spot clear of the sheet, where a drag moves
+  // it. What the RPC refuses, the window says, with Accept disabled.
+  struct DrawingNoteTool {
+    enum class Kind { None, Fcf, Datum } kind = Kind::None;
+    ProjRef ref;        // the leader's feature, when one was picked
+    uint64_t dimId = 0; // the dimension a frame stands under
+    bool targeted = false;
+    glm::dvec2 pos{0.0};  // the symbol's position, sheet mm
+    double featureMM = 0; // what the feature measures, model mm
+    FeatureControlFrame fcf;
+    bool toleranceTyped = false; // stop deriving it once the user typed one
+    bool symbolChosen = false;   // ...and the symbol once the user chose one
+    std::string letter;          // a datum's
+    bool dragging = false;
+    glm::dvec2 grab{0.0}; // cursor minus pos at the press
+  } drawingNoteTool;
+
+  // The detail-view session: press on a view for the circle's centre and
+  // drag out its radius, then the detail stands clear of the other views at
+  // a scale that enlarges it; a drag moves it, the window edits radius,
+  // scale and letter.
+  struct DetailTool {
+    bool active = false;
+    uint64_t parentViewId = 0; // 0 = nothing picked yet
+    glm::dvec3 center{0.0};    // world mm, as DetailSpec holds it
+    double radius = 0.0;       // model mm
+    double scale = 0.0;
+    bool scaleTyped = false;
+    std::string label;
+    glm::dvec2 position{0.0}; // where the detail's centre lands, sheet mm
+    enum class Drag { None, Radius, Place } drag = Drag::None;
+    glm::dvec2 grab{0.0};       // Place: cursor minus position at the press
+    glm::dvec2 pressAt{0.0};    // Radius: the centre on the sheet
+    bool radiusDragged = false; // the press moved: the radius is the drag's
+    bool moved = false;         // the user placed it: stop re-deriving
+    std::string refusal;        // the last Accept that did not take, and why
+  } detailTool;
+
+  // What the last drawing action did, when it is worth a sentence ("Laid
+  // out 7 balloons, none crossing"), or why it did not: shown in the
+  // drawing panel until the next action.
+  std::string drawingMessage;
+  bool drawingMessageIsError = false;
+
   // The fastener session (docs/parts/README.md#gui). One pick and one
   // choice: the rim says which hole and which way round, the standard says
   // what kind of screw, and the size and length derive from the geometry.

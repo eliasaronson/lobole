@@ -298,12 +298,18 @@ picture needs a windowed instance.
 
 `src/ui/DrawingPanel.cpp`. Views and dimensions are `ListRow`s (a view's tail
 is its scale, a dimension's its value). A view's menu sets its **Scale**
-and **Rotate** (0/90/180/270), adds a bend table (when the view has bends) and deletes; a dimension's menu
-deletes. Rows have the menu gestures but no selection: a click highlights
-nothing on the sheet. **Add view** is one path: the toolbar opens it in the
+and **Rotate** (0/90/180/270), adds a bend table (when the view has bends),
+starts a **Detail view** of it, **Lays out balloons** round it (an assembly
+view) and deletes; a dimension's menu starts a **Feature control frame**
+under it and deletes. Those are the drawing tab's select-first: rows have the
+menu gestures but no selection, and a click highlights nothing on the sheet.
+What the last balloon layout did is a line under Views. **Add view** is one path: the toolbar opens it in the
 tool window (`DrawAddViewToolWindow`, `drawingAddViewOpen`) with the source,
 configuration, all seven orientations and the scale. Dimensions, Update
-views, the part note (`###tb_dwg_part_note`, L) are on the drawing toolbar;
+views, the part note (`###tb_dwg_part_note`, L), the detail view
+(`###tb_dwg_detail`), the frame, the datum and the balloon layout
+(`###tb_dwg_fcf`, `###tb_dwg_datum`, `###tb_dwg_balloons`) are on the
+drawing toolbar ([../drawings/guide.md](../drawings/guide.md#in-the-gui));
 the panel keeps the count of stale views as a line pointing at the toolbar.
 
 ## Other dock panels

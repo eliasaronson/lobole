@@ -154,4 +154,50 @@ bool LayoutDrawingBalloons(AppState& state,
 // (A, B, ... skipping I, O and Q, and those its sections and details use).
 std::string NextViewLetter(AppState& state);
 
+// The next datum letter the active sheet does not use yet (A, B, ...
+// skipping I, O and Q), or "" when all 23 are taken.
+std::string NextDatumLetter(AppState& state);
+
+// Why the active sheet would not take `note`, in the words add_drawing_note
+// refuses it with -- a datum letter that is not one or is already used, a
+// frame ISO 1101 cannot write or naming a datum the sheet lacks, a leader
+// that resolves to nothing -- or "" when it would. The RPC and the GUI's
+// annotation sessions both ask this, so a click is refused exactly what a
+// script is (docs/drawings/guide.md#in-the-gui).
+std::string WhyDrawingNoteRefused(AppState& state, const DrawingNote& note);
+
+// Where a new symbol (a datum, a frame) stands by default: near the point its
+// leader names, outward from its view, on the first spot whose box clears the
+// views, the title block, the labels and the border.
+glm::dvec2 AutoNotePosition(AppState& state, const DrawingNote& note);
+
+// A geometric tolerance to start from, derived from the feature it is on:
+// ISO 2768-2 class K for that length (straightness/flatness for form,
+// position and profile; perpendicularity for orientation; the runout and
+// symmetry values for those). `featureMM` is the toleranced feature's
+// length (or a circle's diameter), model mm.
+double DefaultGeoTolerance(GeoSymbol symbol, double featureMM);
+
+// Why `detail` cannot be added to the active sheet (no such parent, a detail
+// of a detail, no radius, a letter that is not one), as add_drawing_view
+// refuses it; "" when it can.
+std::string WhyDetailRefused(AppState& state, const DetailSpec& detail);
+
+// The world point (the source's frame, mm) a sheet point on `view` shows,
+// on the plane through the origin square to the view's direction -- which
+// is all a detail's centre needs, since only its projection matters.
+glm::dvec3 SheetPointToWorld(AppState& state, const DrawingView& view,
+                             const glm::dvec2& sheet);
+
+// A detail's scale to start from: a standard scale at least twice its
+// parent's, as large as lets the circle stay within a third of the sheet's
+// smaller side.
+double DefaultDetailScale(AppState& state, const DrawingView& parent,
+                          double radiusMM);
+
+// Where a detail's centre lands by default: the free spot nearest its
+// circle on the parent where the detail (circle and caption) clears the
+// views, the title block, the labels and the border.
+glm::dvec2 AutoDetailPosition(AppState& state, const DrawingView& detail);
+
 } // namespace ui

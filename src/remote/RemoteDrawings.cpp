@@ -370,21 +370,11 @@ DetailSpec ParseDetail(ui::AppState& state, const json& dj) {
               c.at(2).get<double>()};
   d.radius = dj.at("radius_mm").get<double>();
   d.label = dj.value("label", std::string{});
-  const DrawingView* parent = state.drawing->FindView(d.parentViewId);
-  if (parent == nullptr)
-    throw std::runtime_error("detail.view: no view " +
-                             std::to_string(d.parentViewId) + " on this sheet");
-  if (parent->detail.on)
-    throw std::runtime_error(
-        "detail.view names a detail; a detail is of a view (detail its "
-        "parent at a larger scale instead)");
-  if (!(d.radius > 0.0))
-    throw std::runtime_error("detail.radius_mm is the circle's radius in "
-                             "model mm, above 0");
   if (d.label.empty())
     d.label = ui::NextViewLetter(state);
-  if (const std::string why = ValidateDatumLetter(d.label); !why.empty())
-    throw std::runtime_error("detail.label: " + why);
+  // The GUI's detail session asks the same question.
+  if (const std::string why = ui::WhyDetailRefused(state, d); !why.empty())
+    throw std::runtime_error(why);
   return d;
 }
 
@@ -1155,18 +1145,6 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     if (text.empty() && table == NoteTable::None &&
         style != NoteStyle::Balloon && style != NoteStyle::Fcf)
       throw std::runtime_error("text must be non-empty");
-    if (style == NoteStyle::Datum) {
-      // A datum feature is named once per sheet, by a letter that cannot be
-      // read as a digit: two datum A's would make every frame naming A
-      // ambiguous.
-      if (const std::string why = ValidateDatumLetter(text); !why.empty())
-        throw std::runtime_error(why);
-      for (const DrawingNote& other : state.drawing->GetNotes())
-        if (other.style == NoteStyle::Datum && other.text == text)
-          throw std::runtime_error("datum " + text +
-                                   " is already on this sheet (note " +
-                                   std::to_string(other.id) + ")");
-    }
     FeatureControlFrame fcf;
     uint64_t attachDim = 0;
     if (style == NoteStyle::Fcf) {
@@ -1237,9 +1215,13 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                                    rj.value("element", std::string{})};
       }
     }
+    // What the sheet refuses -- a datum letter used twice, a frame naming a
+    // datum the sheet lacks, a leader to nothing -- asked the one way the
+    // GUI's annotation sessions ask it.
+    if (const std::string why = ui::WhyDrawingNoteRefused(state, n);
+        !why.empty())
+      throw std::runtime_error(why);
     const auto resolved = ui::ResolveDrawingNote(state, n);
-    if (!resolved.resolved)
-      throw std::runtime_error(resolved.error);
     ui::SnapshotDrawing(state);
     return json{{"id", state.drawing->AddNote(std::move(n))},
                 {"text", resolved.text}};

@@ -94,6 +94,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <initializer_list>
 #include <limits>
 #include <map>
 #include <memory>
@@ -125,7 +126,7 @@ struct SourceBody {
   uint64_t featureId = 0; // the body's createdBy (owner of its element names)
   uint64_t refId = 0;     // semantic source id -> SheetCurve.sourceId
   const ElementMap* map = nullptr;
-  const std::vector<BendRegion>* bends = nullptr; // flat creases to draw
+  const std::vector<BendRegion>* bends = nullptr;   // flat creases to draw
   const std::vector<ThreadMark>* threads = nullptr; // cosmetic threads
   TopoDS_Shape whole; // the body before any section cut (its element map's)
   // A section view's cut of this body: `input.shape` is then the cut, and
@@ -1013,12 +1014,10 @@ void AvoidViewTexts(const AppState& state,
                        {x0 + w, t.pos.y + 0.8 * t.heightMM}});
     }
 }
-} // namespace
-
-glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
-  const auto it = state.drawingRenders.find(dim.viewId);
-  if (it == state.drawingRenders.end() || !state.drawing)
-    return {0.0, -12.0};
+// Everything on the active sheet a new label must stay off: the title
+// block, every view's box and its words, every dimension's value and every
+// note. With the border, what auto-placement works inside.
+drawing::DimPlaceContext SheetPlaceContext(AppState& state) {
   drawing::DimPlaceContext ctx;
   const SheetChrome chrome = ChromeOf(state.drawing->GetSheet());
   ctx.borderMin = chrome.borderMin;
@@ -1042,6 +1041,28 @@ glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
     drawing::NoteBox(resolved, mn, mx);
     ctx.avoid.push_back({mn, mx});
   }
+  return ctx;
+}
+
+// Is the box [mn, mx] on the sheet, inside the border, and off everything
+// `ctx` avoids?
+bool BoxIsClear(const drawing::DimPlaceContext& ctx, const glm::dvec2& mn,
+                const glm::dvec2& mx) {
+  if (mn.x < ctx.borderMin.x || mn.y < ctx.borderMin.y ||
+      mx.x > ctx.borderMax.x || mx.y > ctx.borderMax.y)
+    return false;
+  for (const auto& [amn, amx] : ctx.avoid)
+    if (mn.x < amx.x && mx.x > amn.x && mn.y < amx.y && mx.y > amn.y)
+      return false;
+  return true;
+}
+} // namespace
+
+glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim) {
+  const auto it = state.drawingRenders.find(dim.viewId);
+  if (it == state.drawingRenders.end() || !state.drawing)
+    return {0.0, -12.0};
+  const drawing::DimPlaceContext ctx = SheetPlaceContext(state);
   // Resolved HERE, where the source document is reachable: a hole callout
   // that cannot be resolved cannot be placed, and it would fall back onto
   // the hole it names.
@@ -1809,6 +1830,204 @@ std::string NextViewLetter(AppState& state) {
       return std::string(1, c);
   }
   return "Z";
+}
+
+std::string NextDatumLetter(AppState& state) {
+  std::set<std::string> used;
+  if (state.drawing)
+    for (const DrawingNote& n : state.drawing->GetNotes())
+      if (n.style == NoteStyle::Datum)
+        used.insert(n.text);
+  for (char c = 'A'; c <= 'Z'; ++c) {
+    if (c == 'I' || c == 'O' || c == 'Q')
+      continue;
+    if (!used.contains(std::string(1, c)))
+      return std::string(1, c);
+  }
+  return "";
+}
+
+std::string WhyDrawingNoteRefused(AppState& state, const DrawingNote& note) {
+  if (!state.drawing)
+    return "the active document is not a drawing";
+  if (note.style == NoteStyle::Datum) {
+    // A datum feature is named once per sheet, by a letter that cannot be
+    // read as a digit: two datum A's would make every frame naming A
+    // ambiguous.
+    if (const std::string why = ValidateDatumLetter(note.text); !why.empty())
+      return why;
+    for (const DrawingNote& other : state.drawing->GetNotes())
+      if (other.id != note.id && other.style == NoteStyle::Datum &&
+          other.text == note.text)
+        return "datum " + note.text + " is already on this sheet (note " +
+               std::to_string(other.id) + ")";
+  }
+  if (note.style == NoteStyle::Fcf) {
+    if (const std::string why = ValidateFcf(note.fcf); !why.empty())
+      return why;
+    if (note.attachDim != 0 && !state.drawing->FindDim(note.attachDim))
+      return "no dimension " + std::to_string(note.attachDim) +
+             " on this sheet for the frame to stand under";
+    if (note.attachDim == 0 && !note.leader.edge.IsSet() &&
+        !note.leader.silFace.IsSet())
+      return "a feature control frame points at its feature: give it a "
+             "leader to the feature, or stand it under a dimension";
+  }
+  if ((note.style == NoteStyle::Datum || note.style == NoteStyle::Balloon) &&
+      !note.leader.edge.IsSet() && !note.leader.silFace.IsSet())
+    return std::string("a ") + NoteStyleToString(note.style) +
+           " points at geometry: give it a leader to a feature";
+  const drawing::ResolvedNote resolved = ResolveDrawingNote(state, note);
+  if (!resolved.resolved)
+    return resolved.error;
+  return "";
+}
+
+glm::dvec2 AutoNotePosition(AppState& state, const DrawingNote& note) {
+  if (!state.drawing)
+    return note.pos;
+  const drawing::DimPlaceContext ctx = SheetPlaceContext(state);
+  // Where the leader lands, and which way is OUT of its view.
+  glm::dvec2 anchor = note.pos;
+  glm::dvec2 out(0.0, 1.0);
+  const auto it = state.drawingRenders.find(note.viewId);
+  if (it != state.drawingRenders.end()) {
+    const drawing::SheetView& sv = it->second;
+    glm::dvec2 at;
+    if ((note.leader.edge.IsSet() || note.leader.silFace.IsSet()) &&
+        drawing::RefPointOf(sv, note.leader, at))
+      anchor = at;
+    const glm::dvec2 centre = 0.5 * (sv.bboxMin + sv.bboxMax);
+    if (glm::length(anchor - centre) > 1e-6)
+      out = glm::normalize(anchor - centre);
+  }
+  // Rings outward from the anchor, the directions nearest "out" first; the
+  // first spot whose box is clear wins.
+  DrawingNote probe = note;
+  constexpr double kPi = 3.14159265358979323846;
+  const double base = std::atan2(out.y, out.x);
+  for (double r = 10.0; r <= 120.0; r += 5.0)
+    for (int k = 0; k < 24; ++k) {
+      // 0, +15, -15, +30, -30 ... degrees from straight out.
+      const double step = (k + 1) / 2 * (kPi / 12.0);
+      const double a = base + (k % 2 == 0 ? step : -step);
+      probe.pos = anchor + r * glm::dvec2(std::cos(a), std::sin(a));
+      const drawing::ResolvedNote rn = ResolveDrawingNote(state, probe);
+      glm::dvec2 mn, mx;
+      drawing::NoteBox(rn, mn, mx);
+      if (BoxIsClear(ctx, mn, mx))
+        return probe.pos;
+    }
+  return anchor + 12.0 * out;
+}
+
+double DefaultGeoTolerance(GeoSymbol symbol, double featureMM) {
+  // ISO 2768-2, class K (medium), by nominal length.
+  const double len = featureMM > 0.0 ? featureMM : 10.0;
+  const auto band = [len](std::initializer_list<double> limits,
+                          std::initializer_list<double> values) {
+    auto v = values.begin();
+    for (const double limit : limits) {
+      if (len <= limit)
+        return *v;
+      ++v;
+    }
+    return *v;
+  };
+  switch (symbol) {
+  case GeoSymbol::Parallelism:
+  case GeoSymbol::Perpendicularity:
+  case GeoSymbol::Angularity: // Table 2, perpendicularity
+    return band({100, 300, 1000}, {0.4, 0.6, 0.8, 1.0});
+  case GeoSymbol::Symmetry: // Table 3
+    return 0.6;
+  case GeoSymbol::CircularRunout:
+  case GeoSymbol::TotalRunout:
+  case GeoSymbol::Coaxiality: // Table 4, circular run-out
+    return 0.2;
+  default: // Table 1, straightness and flatness
+    return band({10, 30, 100, 300, 1000}, {0.05, 0.1, 0.2, 0.4, 0.6, 0.8});
+  }
+}
+
+std::string WhyDetailRefused(AppState& state, const DetailSpec& d) {
+  if (!state.drawing)
+    return "the active document is not a drawing";
+  const DrawingView* parent = state.drawing->FindView(d.parentViewId);
+  if (parent == nullptr)
+    return "detail.view: no view " + std::to_string(d.parentViewId) +
+           " on this sheet";
+  if (parent->detail.on)
+    return "detail.view names a detail; a detail is of a view (detail its "
+           "parent at a larger scale instead)";
+  if (!(d.radius > 0.0))
+    return "detail.radius_mm is the circle's radius in model mm, above 0";
+  if (const std::string why = ValidateDatumLetter(d.label); !why.empty())
+    return "detail.label: " + why;
+  return "";
+}
+
+glm::dvec3 SheetPointToWorld(AppState& state, const DrawingView& view,
+                             const glm::dvec2& sheet) {
+  // The inverse of what DetailCircles draws: sheet = pos + s * (p.x, p.y)
+  // in the viewing system ProjectPoint uses.
+  glm::dvec3 viewDir, up;
+  ViewAxes(view, viewDir, up);
+  const glm::dvec3 d = glm::normalize(viewDir);
+  const glm::dvec3 x = glm::normalize(glm::cross(d, up));
+  const glm::dvec3 y = glm::cross(-d, x);
+  const double s = view.scale != 0.0 ? view.scale : 1.0;
+  const glm::dvec2 uv = (sheet - DrawingFoldedPosition(state, view).pos) / s;
+  return uv.x * x + uv.y * y;
+}
+
+double DefaultDetailScale(AppState& state, const DrawingView& parent,
+                          double radiusMM) {
+  const double parentScale = parent.scale > 0.0 ? parent.scale : 1.0;
+  const SheetChrome chrome = ChromeOf(state.drawing->GetSheet());
+  const glm::dvec2 room = chrome.borderMax - chrome.borderMin;
+  const double fit = std::min(room.x, room.y) / 3.0;
+  static const double kScales[] = {50.0, 20.0, 10.0, 5.0,  2.0,  1.0,
+                                   0.5,  0.2,  0.1,  0.05, 0.02, 0.01};
+  for (const double s : kScales)
+    if (s >= 2.0 * parentScale - 1e-12 && 2.0 * radiusMM * s <= fit)
+      return s;
+  // A circle too big to enlarge within that: twice the parent, the least a
+  // detail is for.
+  return 2.0 * parentScale;
+}
+
+glm::dvec2 AutoDetailPosition(AppState& state, const DrawingView& detail) {
+  const DrawingView* parent =
+      state.drawing->FindView(detail.detail.parentViewId);
+  const drawing::DimPlaceContext ctx = SheetPlaceContext(state);
+  const double R = detail.scale * detail.detail.radius;
+  // Near where the circle is drawn on its parent.
+  glm::dvec2 aim = 0.5 * (ctx.borderMin + ctx.borderMax);
+  if (parent != nullptr) {
+    glm::dvec3 vd, up;
+    ViewAxes(*parent, vd, up);
+    aim = DrawingFoldedPosition(state, *parent).pos +
+          parent->scale * drawing::ProjectPoint(detail.detail.center, vd, up);
+  }
+  // The detail's box: its circle, and the caption 9 mm under it.
+  const auto boxOf = [&](const glm::dvec2& c, glm::dvec2& mn, glm::dvec2& mx) {
+    mn = c - glm::dvec2(R + 2.0, R + 14.0);
+    mx = c + glm::dvec2(R + 2.0, R + 2.0);
+  };
+  glm::dvec2 best = aim;
+  double bestDist = std::numeric_limits<double>::max();
+  for (double x = ctx.borderMin.x; x <= ctx.borderMax.x; x += 5.0)
+    for (double y = ctx.borderMin.y; y <= ctx.borderMax.y; y += 5.0) {
+      glm::dvec2 mn, mx;
+      boxOf({x, y}, mn, mx);
+      const double dist = glm::length(glm::dvec2(x, y) - aim);
+      if (dist < bestDist && BoxIsClear(ctx, mn, mx)) {
+        best = {x, y};
+        bestDist = dist;
+      }
+    }
+  return best;
 }
 
 namespace {

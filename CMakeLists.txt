@@ -747,6 +747,7 @@ set(app_sources
     src/ui/ListSelection.cpp
     src/ui/StudyPanel.cpp
     src/ui/DrawingPanel.cpp
+    src/ui/DrawingAnnotate.cpp
     src/ui/ConfigurationsPanel.cpp
     src/ui/VariablesPanel.cpp
     src/ui/TablesPanel.cpp
