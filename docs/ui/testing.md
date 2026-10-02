@@ -157,6 +157,11 @@ is building.
   stays interactive") reads `MainThreadCpuMs()`, the main thread's CPU
   clock, not a stopwatch round `Yield()`: under load a frame that computed
   nothing still takes 250 ms of wall time waiting for a core.
+  A bound on the app's own work, without what drawing the frame cost, reads
+  `frameTimer.Snapshot(1).workCpuMs` after the `Yield()` — the same clock
+  over the `update` and `ui` phases only
+  (docs/rendering/frame-pacing.md#phases); the frame timer's phases
+  themselves are wall time.
 
 Load reproduces this badly: the burners `tools/with-cpu-load.sh` starts are
 niced (`--contend` unnices them), and the app outruns them. The runner

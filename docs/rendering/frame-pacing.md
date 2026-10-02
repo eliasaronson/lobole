@@ -94,6 +94,12 @@ the refresh period. When it is, check the swapchain line: a `present` that is
 a multiple of the refresh period on a two-image swapchain is the FIFO cliff
 above.
 
+Beside the wall-clock phases each frame keeps its **work CPU**
+(`Stats::workCpuMs`): the main thread's CPU time over `update` + `ui`, read
+from the thread CPU clock. A phase is wall time, and on a loaded machine a
+frame that computed nothing reads tens of ms of `ui` waiting for a core; a
+bound that must hold under load reads this instead (see Tests below).
+
 The worst frame in the window also keeps its own phase split
 (`worst_phases_ms`, shown as `worst … · <phase> …` in the HUD), because
 averages dilute a one-off hitch 240:1. A swapchain-rebuild frame skips its
@@ -162,7 +168,7 @@ infinitely fast.
 ### Tests
 
 `tests/test_frame_timer.cpp` (exact percentiles, phases summing to the
-total, the ring and window). The GUI test
+total, the ring and window, work CPU per frame). The GUI test
 `frametime/frame_stats_measure_hud_stays_hidden` asserts positive fps, phases
 summing to the frame, GPU parts summing exactly to the total, and that the
 HUD window does not exist until Ctrl+Shift+F opens it (the category is
@@ -170,7 +176,7 @@ HUD window does not exist until Ctrl+Shift+F opens it (the category is
 into a group this suite never queues). `tests/offscreen_smoke.py` asserts a
 capture produces per-pass numbers and no `fps`.
 
-`frametime/job_tab_idle_and_switch` holds frame TIME to a bound, on the case
+`frametime/job_tab_idle_and_switch` holds a frame's CPU work to a bound, on the case
 that once ran at one frame a second: a job tab asking OCC for the exact box of
 a turned part's toroidal faces every frame, and a job-tab switch that paid
 3-7 s (docs/modeling/README.md#bounding-boxes-are-memoized-on-the-shape). It turns a stepped shaft with
@@ -178,22 +184,30 @@ six rounded rims, holds it in the rotary at A = 30 (no quarter turn reaches
 it, so every framed copy is a new shape, and only the memos -- `CachedStockView`
 in `ui/CamTool.cpp`, and the exact box remembered by shape identity and
 location, docs/cam/gui.md#job-tab-frame-cost -- keep the frame cheap), and
-asserts the median idle `ui` phase over 30 frames. It then adds jobs at
+asserts the median idle frame's work over 30 frames. It then adds jobs at
 A = 90 and 180, which carry their source's box through the quarter turn, and
-switches among the three tabs three times, bounding the worst `update` + `ui`
-of the six frames after each switch. The bounds are CPU phases so llvmpipe's
-drawing time does not count against them. Measured on the GUI runner, the
-machine at a load of about 20 from other work:
+switches among the three tabs three times, bounding the worst of the six
+frames after each switch.
+
+"Work" is the main thread's CPU time over the `update` and `ui` phases
+(`Stats::workCpuMs`, which main.cpp feeds from the thread CPU clock through
+`FrameTimer::SetWorkCpuMs`), not the phases' wall time: a loaded machine
+stretches every wall phase with waits for a core, and drawing (llvmpipe's,
+or the driver's) is left out because it is not what these regressions cost.
+Measured on the GUI runner:
 
 | what | healthy | bound | broken |
 |---|---|---|---|
-| idle `ui`, median | 0.5 ms | 15 ms | 88 ms (memo never hits) |
-| switch to a quarter-turned job | 15-21 ms | 120 ms | 240 ms (box not carried) |
-| switch to the A = 30 job | 16-21 ms | 120 ms | 193-234 ms (box not remembered) |
+| idle frame's work, median | 0.3-0.8 ms | 15 ms | 75 ms (memos off) |
+| switch to a quarter-turned job | 12-22 ms | 120 ms | 240 ms (box not carried) |
+| switch to the A = 30 job | 13-18 ms | 120 ms | 160-173 ms (box not remembered) |
 
-With `tools/with-cpu-load.sh -n 22` on top of that, the healthy numbers were
-0.7, 51 and 45 ms. The last row's broken column is the negative control: the
-same test with the shared box memo's lookup switched off. The A = 30 job used
+Under `tools/with-cpu-load.sh -n 22 --contend` the healthy numbers were 0.5,
+30 and 30 ms, and the runner's `--slow-frames 160` moves none of them.
+The broken columns of the first and last rows are negative controls, run
+under `--slow-frames 160`: the same test with `CachedStockView`'s key check
+and the shared box memo's lookup both switched off (first row), and with the
+shared lookup alone (last row). The A = 30 job used
 to pay its exact boxes again on every visit and was held only to a second;
 revisiting it now costs what a quarter-turned one does, and it is held to the
 same bound.

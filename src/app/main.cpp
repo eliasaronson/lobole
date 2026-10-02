@@ -145,6 +145,17 @@ static void ShowWindowNonBlocking(GLFWwindow* window) {
 }
 #endif
 
+// This thread's CPU time, ms: what a frame cost rather than how long it took
+// (FrameTimer::SetWorkCpuMs). Wall time where there is no thread CPU clock.
+static double ThreadCpuMs() {
+#if defined(__linux__)
+  timespec ts{};
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) == 0)
+    return ts.tv_sec * 1e3 + ts.tv_nsec / 1e6;
+#endif
+  return glfwGetTime() * 1e3;
+}
+
 #ifdef _DEBUG
 #define APP_USE_VULKAN_DEBUG_REPORT
 static VkDebugReportCallbackEXT g_DebugReport = VK_NULL_HANDLE;
@@ -2884,6 +2895,7 @@ int main(int argc, char** argv) {
     watchdog::Beat(); // per iteration: a minimized window finishes no frame
     g_App.frameTimer.BeginFrame(glfwGetTime());
     g_App.frameTimer.SetIdlePaced(paceIdle);
+    const double frameCpuStartMs = ThreadCpuMs();
     glfwPollEvents();
 
     // Monitor content scale changed (window moved to another display) or the
@@ -3074,6 +3086,7 @@ int main(int argc, char** argv) {
     // Rendering
     ImGui::Render();
     g_App.frameTimer.Mark(render::FramePhase::BuildUI, glfwGetTime());
+    g_App.frameTimer.SetWorkCpuMs(ThreadCpuMs() - frameCpuStartMs);
     ImDrawData* draw_data = ImGui::GetDrawData();
     const bool is_minimized =
         (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);

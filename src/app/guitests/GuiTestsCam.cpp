@@ -5046,9 +5046,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
   // on a turned blank's tori that is a search per face: the chess undersides
   // job ran at one frame a second doing nothing, and switching job tabs cost
   // 3-7 s. Nothing measured frame time, so a human found it. The bounds are
-  // CPU time (the `update` and `ui` phases), which a software rasteriser does
-  // not move, and sit many times above a healthy frame and far below a broken
-  // one.
+  // the main thread's CPU time over the `update` and `ui` phases, which
+  // neither a software rasteriser nor a loaded machine moves (the wall-clock
+  // phases it read before are stretched by every wait for a core), and sit
+  // many times above a healthy frame and far below a broken one.
   t = IM_REGISTER_TEST(engine, "frametime", "job_tab_idle_and_switch");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -5102,12 +5103,15 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       s_App->camActiveSetup = added.id;
       return tab;
     };
-    // CPU time of the frame just finished: what the app did, not what the
-    // GPU (or llvmpipe) took to draw it.
-    const auto lastCpuMs = [] {
-      const render::FrameTimer::Stats fs = s_App->frameTimer.Snapshot(1);
-      return fs.phaseMs[static_cast<size_t>(render::FramePhase::Update)] +
-             fs.phaseMs[static_cast<size_t>(render::FramePhase::BuildUI)];
+    // One frame, and the main thread's CPU time over its update and ui
+    // phases (FrameTimer::SetWorkCpuMs): what the app did, not how long it
+    // waited for a core — a loaded machine stretches the WALL phases, and a
+    // frame that computed nothing read 50 ms of them — and not what drawing
+    // it took, which on llvmpipe is most of the frame's CPU (a whole idle
+    // frame here is ~20 ms of main-thread CPU against ~0.5 ms of ui).
+    const auto frameCpuMs = [ctx] {
+      ctx->Yield();
+      return s_App->frameTimer.Snapshot(1).workCpuMs;
     };
     const auto msSince = [](std::chrono::steady_clock::time_point t0) {
       return std::chrono::duration<double, std::milli>(
@@ -5134,19 +5138,15 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       ctx->LogInfo("one cold exact box of the part: %.1f ms", msSince(t0));
     }
     ctx->Yield(20); // settled: the first visit's framing and meshing are done
-    std::vector<double> ui;
-    for (int i = 0; i < 30; i++) {
-      ctx->Yield();
-      ui.push_back(
-          s_App->frameTimer.Snapshot(1)
-              .phaseMs[static_cast<size_t>(render::FramePhase::BuildUI)]);
-    }
-    std::sort(ui.begin(), ui.end());
-    const double uiMedian = ui[ui.size() / 2];
-    ctx->LogInfo("idle job tab: ui median %.2f ms, worst %.2f ms", uiMedian,
-                 ui.back());
-    // Healthy is about a millisecond; the regression was a second.
-    IM_CHECK_LE(uiMedian, 15.0);
+    std::vector<double> idle;
+    for (int i = 0; i < 30; i++)
+      idle.push_back(frameCpuMs());
+    std::sort(idle.begin(), idle.end());
+    const double idleMedian = idle[idle.size() / 2];
+    ctx->LogInfo("idle job tab: median %.2f ms of CPU a frame, worst %.2f ms",
+                 idleMedian, idle.back());
+    // Healthy is under a millisecond; the regression was a second.
+    IM_CHECK_LE(idleMedian, 15.0);
 
     // Switching. Two more jobs framed by quarter turns, which carry their
     // source's box: returning to one pays nothing. The first visit to each is
@@ -5160,10 +5160,8 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
       for (const size_t tab : {flats, flipped, indexed}) {
         ui::SetActivePart(*s_App, tab);
         double worst = 0.0;
-        for (int i = 0; i < 6; i++) {
-          ctx->Yield();
-          worst = std::max(worst, lastCpuMs());
-        }
+        for (int i = 0; i < 6; i++)
+          worst = std::max(worst, frameCpuMs());
         ctx->LogInfo("to %s: worst frame %.1f ms of CPU",
                      s_App->parts[tab].name.c_str(), worst);
         double& into = tab == indexed ? worstIndexed : worstQuarter;

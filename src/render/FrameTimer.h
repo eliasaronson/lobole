@@ -70,6 +70,8 @@ public:
     std::array<double, kPhaseCount> worstPhaseMs{};
     bool worstIdle = false; // the worst frame ran idle-paced (rare; ~10 Hz
                             // iterations do the same work, just later)
+    // The main thread's CPU time over update + ui, averaged (SetWorkCpuMs).
+    double workCpuMs = 0.0;
   };
 
   void BeginFrame(double now) {
@@ -87,6 +89,17 @@ public:
   void SetIdlePaced(bool idle) {
     if (m_inFrame)
       m_pending.idle = idle;
+  }
+
+  // The main thread's CPU time over this frame's update and ui phases, read
+  // by the caller from a thread CPU clock (the timer stays clock-free). The
+  // phases are WALL time, which a loaded machine stretches — a frame that
+  // computed nothing reads 50 ms of `ui` waiting for a core — so a bound that
+  // must hold under load reads this instead
+  // (docs/rendering/frame-pacing.md#tests).
+  void SetWorkCpuMs(double ms) {
+    if (m_inFrame)
+      m_pending.workCpu = static_cast<float>(ms);
   }
 
   // Closes `phase` at `now`. Phases are closed in order; a phase never marked
@@ -151,12 +164,14 @@ public:
         worst = &f;
       for (size_t p = 0; p < kPhaseCount; p++)
         s.phaseMs[p] += f.phase[p];
+      s.workCpuMs += f.workCpu;
     }
     for (size_t p = 0; p < kPhaseCount; p++)
       s.worstPhaseMs[p] = worst->phase[p];
     s.worstIdle = worst->idle;
     for (size_t p = 0; p < kPhaseCount; p++)
       s.phaseMs[p] /= static_cast<double>(n);
+    s.workCpuMs /= static_cast<double>(n);
 
     s.avgMs = sum / static_cast<double>(n);
     s.fps = s.avgMs > 0.0 ? 1000.0 / s.avgMs : 0.0;
@@ -171,6 +186,7 @@ private:
   struct Frame {
     float total = 0.0f;
     bool idle = false; // iteration was idle-paced (SetIdlePaced)
+    float workCpu = 0.0f; // SetWorkCpuMs
     std::array<float, kPhaseCount> phase{};
   };
 

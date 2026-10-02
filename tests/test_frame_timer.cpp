@@ -167,3 +167,24 @@ TEST_CASE("frame timer: the worst frame carries its own phase split",
   t2.EndFrame(c2);
   CHECK(t2.Snapshot().worstIdle);
 }
+
+TEST_CASE("frame timer: work CPU is the frame's own, averaged over the window",
+          "[frametimer]") {
+  FrameTimer t;
+  double clock = 0.0;
+  // Two frames whose wall time says nothing about their CPU: a stretched
+  // 100 ms frame that cost 1 ms, and a 10 ms one that cost 9.
+  t.BeginFrame(clock);
+  t.SetWorkCpuMs(1.0);
+  clock += 0.100;
+  t.EndFrame(clock);
+  t.BeginFrame(clock);
+  t.SetWorkCpuMs(9.0);
+  clock += 0.010;
+  t.EndFrame(clock);
+  CHECK_THAT(t.Snapshot(1).workCpuMs, Catch::Matchers::WithinRel(9.0, 1e-6));
+  CHECK_THAT(t.Snapshot().workCpuMs, Catch::Matchers::WithinRel(5.0, 1e-6));
+  // Outside a frame it is ignored, like every other mark.
+  t.SetWorkCpuMs(500.0);
+  CHECK_THAT(t.Snapshot(1).workCpuMs, Catch::Matchers::WithinRel(9.0, 1e-6));
+}
