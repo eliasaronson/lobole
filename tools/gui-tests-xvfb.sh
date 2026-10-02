@@ -22,6 +22,10 @@
 #   ./tools/gui-tests-xvfb.sh --shuffle 12345  # replay a recorded seed
 #   ./tools/gui-tests-xvfb.sh --in-order   # the declared order, no shuffle
 #   ./tools/gui-tests-xvfb.sh --record-times   # refresh gui-test-times.txt
+#   ./tools/gui-tests-xvfb.sh --slow-frames 150 [...]  # every frame >= 150 ms:
+#       a loaded machine without loading it (before -f, which runs at once)
+#   ./tools/gui-tests-xvfb.sh --slow-jobs 2000 [...]  # every background job
+#       takes >= 2 s: starved workers, frames at full rate
 #
 # Shuffled BY DEFAULT since 2026-09-01, with the seed printed. The suite has a
 # history of order-dependent failures — three different tests in one day, each
@@ -102,11 +106,13 @@ run_shard() {
   "$XVFB_RUN" -n "$1" -s "$SCREEN" \
     "$ROOT/tools/nix-run" \
     "cd '$ROOT/build' && XDG_STATE_HOME='$3' XDG_CONFIG_HOME='$3/config' \
-     ./designer --gui-tests --hidden --gui-test-filter '$2' ${4:-}" 8>&-
+     ./designer --gui-tests --hidden --gui-test-filter '$2' ${4:-} \
+     $APP_EXTRA" 8>&-
 }
 
 SHARDS=4
 SLOWER_THAN=""
+APP_EXTRA=""
 RECORD=0
 SHUFFLE=1  # on by default; --in-order turns it off
 SEED=0     # 0 = pick one below, so a whole run replays from ONE number
@@ -128,6 +134,18 @@ while [ "$#" -gt 0 ]; do
       # changing order is noise rather than signal.
       SHUFFLE=0; shift ;;
     --fast) SLOWER_THAN="$FAST_LIMIT"; shift ;;
+    --slow-frames)
+      # Every frame takes at least this many ms. The suite's load-only
+      # failures were time counted in frames (a double-click that is two
+      # clicks 0.3 s apart, a job that finished "within 10 frames"); this
+      # reproduces them on a quiet machine, which loading one does not
+      # reliably do (docs/ui/testing.md#wait-on-the-condition-not-a-frame-count).
+      APP_EXTRA="$APP_EXTRA --gui-test-min-frame-ms $2"; shift 2 ;;
+    --slow-jobs)
+      # No background job (a CAM pass, an import, a solve) is done sooner
+      # than this many ms after it started: workers starved while the frames
+      # run at full rate, the other half of a loaded machine.
+      APP_EXTRA="$APP_EXTRA --gui-test-job-latency-ms $2"; shift 2 ;;
     --serial) SHARDS=1; shift ;;
     -j) SHARDS="$2"; shift 2 ;;
     --record-times) RECORD=1; SHARDS=1; shift ;;
@@ -142,7 +160,7 @@ while [ "$#" -gt 0 ]; do
       "$XVFB_RUN" -a -s "$SCREEN" \
         "$ROOT/tools/nix-run" \
         "cd '$ROOT/build' && ./designer --gui-tests --hidden \
-         --gui-test-filter '$2'" > "$FLOG" 2>&1 8>&- || true
+         --gui-test-filter '$2' $APP_EXTRA" > "$FLOG" 2>&1 8>&- || true
       cat "$FLOG"
       fline="$(grep -o 'GUI tests: [0-9]*/[0-9]* passed' "$FLOG" | tail -1 ||
                true)"
@@ -309,7 +327,7 @@ for c in $(seq 1 "$i"); do
       # "the bug went away".
       echo "HERE=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\""
       echo "cd '$ROOT/build' && $XVFB_RUN -a ./designer --gui-tests --hidden \\"
-      echo "  --gui-test-sequence \"\$(paste -sd, \"\$HERE/sequence\")\""
+      echo "  --gui-test-sequence \"\$(paste -sd, \"\$HERE/sequence\")\" $APP_EXTRA"
       echo "#"
       echo "# The filter and seed that dealt it (the same order only while the"
       echo "# registered tests are the ones this run had):"

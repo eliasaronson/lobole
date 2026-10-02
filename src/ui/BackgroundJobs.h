@@ -80,6 +80,18 @@ size_t CancelBackgroundJobs(AppState& state, const std::string& kind);
 // synchronous RPC path ("settle first, then answer"), never the frame loop.
 void JoinBackgroundJobs(AppState& state, const std::string& kind);
 
+// A floor on how long any job takes to be reaped: a finished one waits until
+// `seconds` after it started. The GUI suite's `--gui-test-job-latency-ms`,
+// and nothing else: it is a machine whose workers are starved by someone
+// else's build, on a quiet one, so a test that gave a job a fixed number of
+// frames fails every time instead of once a day
+// (docs/ui/testing.md#wait-on-the-condition-not-a-frame-count). 0 = off.
+void SetTestJobLatency(double seconds);
+
+// `job.done`, as seen through that floor. What the main thread reads to ask
+// whether a worker has finished; only the worker writes `done`.
+[[nodiscard]] bool BackgroundJobDone(const BackgroundJob& job);
+
 struct BackgroundJobInfo {
   uint64_t id = 0;
   std::string kind, label;

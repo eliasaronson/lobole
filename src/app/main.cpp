@@ -1459,6 +1459,13 @@ void printUsage(const char* programName) {
   std::cout << "  --gui-test-sequence <cat/name,...>  Run exactly these GUI "
                "tests, in this order (replays a failed shard)"
             << std::endl;
+  std::cout << "  --gui-test-min-frame-ms <ms>  Make every GUI-test frame take "
+               "at least this long (a loaded machine, without loading it)"
+            << std::endl;
+  std::cout
+      << "  --gui-test-job-latency-ms <ms>  Reap no background job sooner "
+         "than this after it started (starved workers)"
+      << std::endl;
   std::cout << "  --gui-test-list      List GUI tests as category/name and "
                "exit (no GPU needed)"
             << std::endl;
@@ -1506,6 +1513,13 @@ struct CommandLineArgs {
   // -1 = run in registration order. >= 0 = shuffle with this seed; 0 means
   // "pick one and tell me". See --gui-test-shuffle.
   long guiTestShuffle = -1;
+  // --gui-test-min-frame-ms: the test-mode frame cap's floor, raised. Frames
+  // as slow as someone else's build makes them, on a quiet machine
+  // (docs/ui/testing.md#wait-on-the-condition-not-a-frame-count).
+  double guiTestMinFrameMs = 0.0;
+  // --gui-test-job-latency-ms: no background job is reaped sooner than this
+  // after it started — its workers starved, the frames not (SetTestJobLatency).
+  double guiTestJobLatencyMs = 0.0;
   bool headless = false;
   bool offscreen = false;
   bool hidden = false;
@@ -1575,6 +1589,17 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
                   << std::endl;
         exit(1);
       }
+    } else if (arg == "--gui-test-min-frame-ms" ||
+               arg == "--gui-test-job-latency-ms") {
+      char* end = nullptr;
+      const double ms = i + 1 < argc ? std::strtod(argv[i + 1], &end) : -1.0;
+      if (end == nullptr || *end != '\0' || !(ms >= 0.0 && ms <= 60000.0)) {
+        std::cerr << arg << " takes milliseconds, 0..60000" << std::endl;
+        exit(1);
+      }
+      (arg == "--gui-test-min-frame-ms" ? args.guiTestMinFrameMs
+                                        : args.guiTestJobLatencyMs) = ms;
+      ++i;
     } else if (arg == "--gui-test-list") {
       args.listGuiTests = true;
     } else if (arg == "--headless") {
@@ -2349,6 +2374,8 @@ int main(int argc, char** argv) {
     g_App.buildDefaultDockLayout = !std::filesystem::exists(ini);
   }
   g_App.runGuiTests = args.runGuiTests;
+  if (args.runGuiTests)
+    ui::SetTestJobLatency(args.guiTestJobLatencyMs / 1000.0);
   g_App.perfHudOpen = args.perfHud;
 
   // Theme, scaled for the display's content scale (HiDPI). A monitor change
@@ -3047,7 +3074,8 @@ int main(int argc, char** argv) {
       if (g_DisableVSync) {
         static double lastFrame = 0.0;
         const double now = glfwGetTime();
-        const double minFrame = 1.0 / 60.0;
+        const double minFrame =
+            std::max(1.0 / 60.0, args.guiTestMinFrameMs / 1000.0);
         const double elapsed = now - lastFrame;
         if (elapsed < minFrame && elapsed > 0.0) {
           std::this_thread::sleep_for(

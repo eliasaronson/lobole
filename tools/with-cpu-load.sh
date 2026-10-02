@@ -13,29 +13,37 @@
 #   - every burner additionally carries its own `timeout` TTL, so even SIGKILL
 #     of the whole tree cannot leave one spinning past the deadline.
 #
-# Usage: tools/with-cpu-load.sh [-n N] [-t TTL_SECONDS] -- command args...
+# Usage: tools/with-cpu-load.sh [-n N] [-t TTL_SECONDS] [--contend] -- command args...
 #   -n  burner count (default: nproc)
 #   -t  hard per-burner lifetime in seconds (default 900) — the backstop, not
 #       the mechanism; the EXIT trap ends them with the command.
+#   --contend  burners at the subject's own priority instead of niced. Niced
+#       burners load the machine without slowing the subject much; other
+#       agents' compilers are NOT niced, and the GUI suite's load-only
+#       failures (frames of 250 ms) appear only when it has to share
+#       (docs/ui/testing.md#wait-on-the-condition-not-a-frame-count).
 # Exit code is the command's.
 set -eu
 
 N="$(nproc)"
 TTL=900
+NICE=nice
 while [ $# -gt 0 ]; do
   case "$1" in
     -n) N="$2"; shift 2 ;;
     -t) TTL="$2"; shift 2 ;;
+    --contend) NICE=""; shift ;;
     --) shift; break ;;
-    *) echo "usage: $0 [-n N] [-t TTL_SECONDS] -- command args..." >&2; exit 2 ;;
+    *) echo "usage: $0 [-n N] [-t TTL_SECONDS] [--contend] -- command args..." >&2; exit 2 ;;
   esac
 done
-[ $# -gt 0 ] || { echo "usage: $0 [-n N] [-t TTL_SECONDS] -- command args..." >&2; exit 2; }
+[ $# -gt 0 ] || { echo "usage: $0 [-n N] [-t TTL_SECONDS] [--contend] -- command args..." >&2; exit 2; }
 
 PIDS=""
 for _ in $(seq 1 "$N"); do
-  # nice: the point is load, not starving the subject under test.
-  nice timeout "$TTL" sh -c 'while :; do :; done' &
+  # nice by default: load without starving the subject; --contend starves it
+  # the way unniced compilers do.
+  $NICE timeout "$TTL" sh -c 'while :; do :; done' &
   PIDS="$PIDS $!"
 done
 # shellcheck disable=SC2086  # $PIDS is a deliberate word-split list

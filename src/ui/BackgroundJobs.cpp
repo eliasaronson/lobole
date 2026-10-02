@@ -31,6 +31,21 @@ void PollBackgroundJobs(AppState& state) {
 
 // --- The registry ------------------------------------------------------------
 
+namespace {
+double g_testJobLatency = 0.0; // SetTestJobLatency
+} // namespace
+
+void SetTestJobLatency(double seconds) { g_testJobLatency = seconds; }
+
+bool BackgroundJobDone(const BackgroundJob& job) {
+  if (!job.done.load())
+    return false;
+  return g_testJobLatency <= 0.0 ||
+         std::chrono::duration<double>(std::chrono::steady_clock::now() -
+                                       job.started)
+                 .count() >= g_testJobLatency;
+}
+
 void ReapBackgroundJobs(AppState& state) {
   // By index, and only over the entries that existed when this started: a
   // `finish` is allowed to start the NEXT job (that is how a queue of
@@ -38,7 +53,7 @@ void ReapBackgroundJobs(AppState& state) {
   const size_t had = state.backgroundJobs.size();
   for (size_t i = 0; i < had && i < state.backgroundJobs.size(); i++) {
     BackgroundJob& job = *state.backgroundJobs[i];
-    if (!job.done.load())
+    if (!BackgroundJobDone(job))
       continue;
     if (job.thread.joinable())
       job.thread.join();

@@ -93,7 +93,7 @@ bool StartOpenProject(AppState& state, const std::string& path,
   // test_conventions.cpp keeps joins out of draw paths).
   const auto until = std::chrono::steady_clock::now() +
                      std::chrono::milliseconds(options.quietWaitMs);
-  while (!raw->done.load() && std::chrono::steady_clock::now() < until)
+  while (!BackgroundJobDone(*raw) && std::chrono::steady_clock::now() < until)
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
   return true;
 }
@@ -111,8 +111,8 @@ void DrawOpenProjectModal(AppState& state) {
   // A job that has finished but not yet been reaped is adopted by the poll at
   // the end of this frame; opening the modal for it would flash it.
   const BackgroundJob* pending = FindBackgroundJob(state, kKind);
-  const bool running =
-      pending != nullptr && !pending->done.load() && state.openJob != nullptr;
+  const bool running = pending != nullptr && !BackgroundJobDone(*pending) &&
+                       state.openJob != nullptr;
   if (!running && state.openError.empty()) {
     // Close it, rather than only stop submitting it: an unsubmitted modal
     // stays on ImGui's popup stack, where IsPopupOpen still finds it.
