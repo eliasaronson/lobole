@@ -12,6 +12,14 @@ unset or stale viewport draws full-window at the wrong scale and offset, which
 `--offscreen` cannot show because there the viewport is the whole
 framebuffer.
 
+## When to build it
+
+With the next render path or scene renderer (a new capture mode, a second
+viewport, a video export). The registry and its gate already catch a
+renderer missing from the loop, so on its own this buys a compile error in
+place of a wrong picture on a path nobody has written yet; built with a new
+path, it protects that path from its first frame.
+
 ## The fix
 
 Pass the frame state with the call:
