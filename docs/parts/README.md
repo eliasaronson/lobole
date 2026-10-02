@@ -203,8 +203,56 @@ tables, which are metric, and is refused for an inch screw naming
   part** in the Occurrences context menu releases it. The relative placement
   is stored explicitly rather than reinterpreting `position`, so every reader
   of `position` keeps one meaning; it is quaternion arithmetic, exact for a
-  rigid placement. A fastener has no degrees of freedom, so a mate
-  would add rows to the mechanism's list and could relocate the hardware.
+  rigid placement.
+- **It follows its HOLE, not just its part** (format v157). A hole can move
+  inside a part that does not move — a plate made thicker raises its top
+  face, a bore pitch changes — and an offset fixed in the part's frame left
+  the hardware where the hole used to be: on the pan/tilt head, `base_t`
+  2 mm more stood twelve pieces 2 mm into the yoke. So each piece is
+  **seated** on two named faces of its parent, `Occurrence::attachSeat`:
+  `face`, the planar face it bears on (the head's face, or the far face for
+  a nut and its washer), and `axis`, the cylinder or cone whose axis centres
+  it (the bore, or a countersink's cone), with an `innerPath` into a
+  sub-assembly. `assembly::SeatFrame` derives the seat's frame from them on
+  every solve — origin where the axis meets the face's plane, Z the face's
+  outward normal, X the parent's X projected into the plane — each face
+  resolved through `ConnectorLocalFrame`, so the piece behaves as a
+  concentric + coincident mate to those faces would. With a seat,
+  `attachOffset`/`attachRotation` are in its frame (a washer's thickness
+  under a head, the turn of a nut).
+- **Any standard part, not just a screw.** Nothing in a seat is a
+  fastener's: a retaining ring against its groove's flank, a part against a
+  shaft's shoulder, are the same two faces. `assembly::SeatRider` seats an
+  attached occurrence on faces the caller names, keeping it exactly where it
+  is; finding a fastener's hole is the one fastener-specific step.
+- **Not mates, on purpose.** A fastener is a zero-DOF leaf: as mates, every
+  piece would add rows to the mechanism the solver and the Mates list read
+  (four per joint, four hundred for a hundred-bolt frame), and frame
+  alignment could move hardware off the pose the fit computed. The
+  attachment stays a composition after the solve. A seat's frame is cached
+  on the rider against its part's regeneration (`InstanceId`, `Version`),
+  and a face many riders share is resolved once per solve: 144 pieces in
+  36 holes of one plate re-seat in about 6 ms after the plate regenerates
+  and 0.01 ms when it has not.
+- **Finding the hole** (`assembly::FindHoleSeat`): at the pose the fit
+  computed, the nearest planar face of the parent square to the piece's
+  axis, facing it, with a circular edge centred on that axis; and a coaxial
+  cylinder running into the material from that plane (a counterbore's floor
+  has two), else any coaxial cylinder in it, else a cone. `ui::AddFastener`
+  seats every attached piece this way (`assembly::BindRiderToHole`); one
+  placed off any hole rides its part's frame, says why in `attach_warning`,
+  and `fit_fastener` lists it in `warnings`.
+- **A seat that no longer resolves** — its face deleted, or renamed by a
+  later feature — is an error ON THAT PIECE, never a silent stay-put: it is
+  left where it last stood, its `attach_error` says which face and why (with
+  the near-miss names a mate would offer), the solve counts it
+  (`errored_attachments` and `attachment_errors` in `solve_assembly`), the
+  Occurrences row reads "hole lost", and `check_fasteners` lists it.
+- **Files from before v157** carry offsets in the part's frame and load
+  unchanged. The first solve of the assembly in a session
+  (`assembly::BindRidersToHoles`, from `ui::SolveActiveAssemblyReport`)
+  seats each such piece in the hole under it at the pose its offset gives;
+  one with no hole there keeps its offset and its `attach_warning`.
 - Placing also adds a **fastened mate named `Bolted`** across every interface
   the joint spans (consecutive parts along the axis, hardware excluded), for
   every bolt, anchored on the two touching faces. Its degrees of freedom are
@@ -233,7 +281,12 @@ trade exactness in the one number a fastener must get right, its length.
 ## Checking placed fasteners
 
 `ui::CheckFasteners`, RPC `check_fasteners`: every placed fastener re-derived
-against the stack it is in now — too short, bottoming out, spanning nothing.
+against the stack it is in now — too short, longer than its stack needs (a
+through screw a shorter stocked length would span: its plate got thinner and
+the nut followed the face in), bottoming out, spanning nothing, or no longer
+in its hole ([attached, and mated](#attached-and-mated)). A hole that moves
+takes the head or the nut with it, so a joint whose length changed is a
+finding here rather than hardware buried in a plate.
 Nothing is stored at placement: a fastener's position and orientation are its
 rim and axis, so the check re-traverses from scratch (probing past the
 **loosest** clearance for its size, since a placed fastener does not know its
@@ -562,7 +615,9 @@ shank − socket; ASME B18.3's 1/4-20 row in mm, its refusal, its inch length
 series and a 1/4-20 x 3/4 measured against Table 1), `tests/test_actions.cpp` (`[parts]`: one part per spec and
 the part-tab refusal, the four derivation cases, whole joints with washers and
 nut, a second pick, a thread ends a joint, countersunk screws, a bolt mates
-the parts, riders, a rim on two placements), `tests/fastener_stack_smoke.py`
+the parts, riders, a rim on two placements, pieces following holes that
+move — a plate thickened and thinned, bores moved, a pre-v157 rider seated on
+its first solve, a suppressed hole's error), `tests/fastener_stack_smoke.py`
 (`fit_fastener` and `check_fasteners` agree on where a joint ends),
 `tests/test_drawing.cpp` (`fastener_callout`),
 `tests/drawing_frames_smoke.py` (an ASME B18.3 screw placed, refused at an
@@ -570,7 +625,7 @@ unknown size, and BOUGHT in a parts list),
 `tests/test_faceselector.cpp` (a head-on rim pick takes the near rim), GUI
 `parts/a_fastener_is_placed_by_picking_a_rim` (arm, refuse, pick, far end,
 ghost count tracks the options, place, joined, check). Goldens
-`v69-fastener`, `v70-fastener-kinds`.
+`v69-fastener`, `v70-fastener-kinds`, `assembly/v157-attach-seat`.
 
 ## Not built
 

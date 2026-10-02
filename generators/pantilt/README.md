@@ -77,12 +77,12 @@ origin). Coordinates, distances and frames are `Param` arithmetic over
 regenerates every part without an error: the plate's pocket, relief and
 `seat` frame rise with its top, the yoke -- base, arms, bearing bores,
 ledge and its eight frames -- 2 mm up its own Z, and the assembly solves
-with the pan wheel, cradle and camera 2 mm higher. What does not follow is
-the bought hardware: a fastener `fit_fastener` placed rides on its
-occurrence at the offset it was placed at
-([attachments](../../docs/assemblies/README.md#occurrences)), not on its
-hole, so the yoke's joint screws and the pan blocks' nuts and washers stand
-2 mm into the yoke (12 clashes) until the assembly stage runs again.
+with the pan wheel, cradle and camera 2 mm higher. The bought hardware
+follows too: every one of the 40 pieces `fit_fastener` placed rides in its
+hole, by the hole's named seat face and bore
+([attached, and mated](../../docs/parts/README.md#attached-and-mated)), so
+the yoke's joint screws and the pan blocks' nuts and washers rise with the
+yoke's faces, and the exact clash sweep stays clean.
 
 ## Sizes
 

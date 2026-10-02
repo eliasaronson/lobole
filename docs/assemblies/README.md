@@ -67,7 +67,13 @@ is unused.
 fasteners follow their plate. It is a composition, not a mate: no solver sees
 it, `ApplyAttachments` recomputes the rider's `position`/`orientation` after
 the solve, it goes one level deep only, and the gizmo will not drag a rider
-(its pose is derived). Deleting an occurrence deletes what rides on it.
+(its pose is derived). Deleting an occurrence deletes what rides on it. A
+rider may also be SEATED on two named faces of its parent (`attach_seat`,
+v157: a face it bears on and the cylinder or cone centring it — a
+fastener's hole); its offset is then in the seat's frame, so it follows a
+hole that moves inside its part, and a seat that no longer resolves is an
+`attach_error` on the rider
+([attached, and mated](../parts/README.md#attached-and-mated)).
 
 Rendering is instanced: every occurrence of a part draws the part's one
 tessellation with its own transform -- one per configuration and material it
@@ -488,8 +494,8 @@ ordinary undo. Referencing assembly geometry from the part is not supported.
 `add_fastener` / `fit_fastener` place standard hardware as ordinary
 occurrences of generated parts (one part per distinct spec, named by its BOM
 designation). The screw, nut and washers ride on the parts they sit on
-(attachments above). `fit_fastener` also adds a fastened mate across every
-interface the bolt spans, once per bolt, anchored at that bolt's hole, with
+(attachments above), following the holes they sit in. `fit_fastener` also
+adds a fastened mate across every interface the bolt spans, once per bolt, anchored at that bolt's hole, with
 the DOFs read off where the parts already are so the solve moves nothing; the
 extra mates of a bolt pattern are redundant-but-consistent loop mates
 ([solver.md](solver.md#closing-loops)). `check_fasteners` re-derives every
