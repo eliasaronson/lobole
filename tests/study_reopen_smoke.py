@@ -94,9 +94,9 @@ def main():
         bar = a.part("bar")
         bar.activate()
         r = d.call("add_feature", feature={"type": "Box", "name": "Bar",
-                                           "position": [0, 0, 0],
-                                           "width": 120, "height": 30,
-                                           "depth": 30})
+                                           "on": "Top", "centered": False,
+                                           "width": 120, "depth": 30,
+                                           "height": 30})
         d.call("set_material", feature_id=r["id"], material="steel")
         faces = d.call("list_elements")["bodies"][0]["faces"]
         root = face_at(faces, 0, 0.0, -1)
