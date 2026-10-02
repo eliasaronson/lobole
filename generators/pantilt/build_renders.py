@@ -80,6 +80,15 @@ def explode_steps(occs):
             off[o["id"]] = add(G, (0, 22 if c[1] > 0 else -22, 0))
         else:                    # the tilt worm's, along X
             off[o["id"]] = add(T, (22 if c[0] > 0 else -22, 0, 0))
+    # The retaining rings off the ends they hold: the pan one just under the
+    # yoke's journal (its bearings have left downward), the tilt one out of
+    # the -Y arm past its bearing.
+    for o in occs:
+        if not o["part"].startswith("DIN 47"):
+            continue
+        c = centre(o)
+        off[o["id"]] = (0, 0, -15) if abs(c[0]) < 1.0 and abs(c[1]) < 1.0 \
+            else (0, -80, 0)
     # Fasteners ride with what they are attached to, then leave their hole:
     # a screw away from its nut, the nut and washer the other way.
     fasteners = [o for o in occs if o["part"].startswith("ISO 4")

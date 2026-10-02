@@ -43,8 +43,11 @@ def declare(part, S):
          "(centre_dist - block_h / 2 - run_gap)^2))",
          "mm, worm mid-span to a block's inboard face: past the worm, and "
          "where the wheel's tip clears the block whichever way it stands"),
-        ("worm_collar_d", "worm_brg_d + 0.25 * (worm_brg_D - worm_brg_d)",
-         "mm, bears on the inner ring only"),
+        ("worm_collar_d", "(worm_brg_da_min + worm_brg_da_max) / 2",
+         "mm, bears on the inner ring only: mid-way in SKF's d_a"),
+        ("worm_relief_d", "(worm_brg_da_max + worm_brg_Da_max) / 2",
+         "mm, the blocks' shoulders round the outer rings: inside D_a max, "
+         "clear of the inner ring (d_a max) so it turns free"),
         ("knob_h", "knob_d / 2", "mm"),
         ("knob_bore", "knob_h - print_wall", "mm, how far the shaft goes in"),
     ]:
@@ -107,9 +110,8 @@ def block(app, S):
     sk.circle((0, 0), d=model("hole", S["worm_brg_D"]))
     part.cut(sk.add(), Param(S["worm_brg_B"], "worm_brg_B"),
              name="Bearing counterbore")
-    relief = (S["worm_brg_d"] + S["worm_brg_D"]) / 2
     sk = part.sketch(Plane.yz(0), name="Relief")
-    sk.circle((0, 0), d=model("hole", relief))
+    sk.circle((0, 0), d=model("hole", S["worm_relief_d"]))
     part.cut(sk.add(), 1.0, end_mode="through_all", name="Relief")
     # Two screws down through the flanges, top to bottom.
     # Two screws up from the underside, counterbored to leave a web at the

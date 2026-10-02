@@ -124,6 +124,38 @@ def plane(part, name, kind, at, flip=False):
     return frame(part, f"{name} plane", origin, z, x)
 
 
+def groove(part, radius, rim_z, offset, name):
+    """A DIN 471 groove (RetainingRingGroove) in the shaft of `radius` that
+    runs along part Z: measured from its rim at height `rim_z` (the end it
+    is measured from) to the groove's near flank `offset` along it -- a
+    Param, so the document carries the formula. The standard and size are
+    the face's (docs/parts/README.md#the-groove); returns the feature."""
+    body = part.body()
+    faces = [f for f in body.faces(kind="cylinder")
+             if f.radius is not None and abs(f.radius - radius) < 1e-4]
+    rims = [e for e in body.edges(circular=True)
+            if e.radius and abs(e.radius - radius) < 1e-4
+            and abs(e.midpoint[2] - float(rim_z)) < 1e-4]
+    if len(faces) != 1 or len(rims) != 1:
+        raise SystemExit(f"{part.name}: groove on the Ø{2 * radius:g} shaft "
+                         f"found {len(faces)} faces, {len(rims)} rims")
+    feature = {"type": "RetainingRingGroove", "name": name,
+               "face": faces[0].ref, "from": rims[0].ref,
+               "offset": float(offset)}
+    if isinstance(offset, Param):
+        feature["offset_expr"] = offset.expr
+    return part.app.add_feature(feature=feature)
+
+
+def ring_groove_face(part):
+    """The floor of the part's retaining ring groove, as a face ref."""
+    floors = [f for f in part.body().faces(kind="cylinder")
+              if "/groove_floor" in f.ref["element"]]
+    if len(floors) != 1:
+        raise SystemExit(f"{part.name}: {len(floors)} groove floors")
+    return floors[0].ref
+
+
 def save(app, name):
     path = OUT / name
     app.save_project(path=str(path))

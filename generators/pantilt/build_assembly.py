@@ -86,11 +86,16 @@ def mate(app, asm, o, S):
 
 
 def camera_screw_length(S):
-    """The longest ASME B18.3 length (1/8 in. steps to 1 in.) that does not
-    reach past the camera's socket: the cradle's plate plus the
-    engagement."""
-    shank_in = (S["plate_t"] + S["cam_screw_eng"]) / 25.4
-    return int(shank_in * 8 + 1e-9) / 8 * 25.4
+    """The camera screw's stocked length (spec.py's `cam_screw_l`), checked
+    against what it has to do: through the cradle's plate, which spec.py
+    sized for it, and into the camera's socket by `cam_screw_eng`, short of
+    the socket's floor."""
+    length = S["cam_screw_l"]
+    eng = length - S["plate_t"]
+    if eng > S["cam_socket"] + 1e-6 or eng < S["cam_screw_eng"] - 1e-6:
+        raise SystemExit(f"camera screw: {length:.3f} mm engages {eng:.3f} "
+                         f"in a {S['cam_socket']:g} mm socket")
+    return length
 
 
 def camera_screw(app, asm, cradle, S):
@@ -151,6 +156,24 @@ def bearings(app, asm, o, S):
     return out
 
 
+def retaining_rings(app, asm, o):
+    """The DIN 471 rings that hold the two inner rings no shoulder locates:
+    the lower pan bearing's on the yoke's journal, the -Y tilt bearing's on
+    the tilt shaft. Each is put in the groove its part was cut with
+    (fit_retaining_ring), seated on the groove's faces, so it follows the
+    groove when the journal or the shaft changes."""
+    out = []
+    for key, pname in (("yoke", "yoke"), ("tilt_wheel", "tilt_wheel")):
+        part = app.part(pname, create=False)
+        face = common.ring_groove_face(part)
+        asm.activate()
+        r = app.fit_retaining_ring(groove=dict(face, occurrence=o[key].id))
+        out.append({"part": pname, "ring": r["part"],
+                    "occurrence": r["occurrence"], "summary": r["summary"]})
+        print(f"  ring: {r['summary']}")
+    return out
+
+
 def check_seats(app, asm, placed):
     """Both rings of every bearing, each on the seat it sits on: the one its
     `Bearing seat` mate names, and the other read through the coaxial
@@ -160,9 +183,10 @@ def check_seats(app, asm, placed):
 
     Every shoulder is judged against SKF's abutment limits, built in
     (docs/parts/README.md#abutment-limits). What cannot be judged stays
-    unverified and is listed with its reason, not read as a pass: a ring
-    that no shoulder locates axially says so. A ring with no seat, or a
-    check that fails, stops the stage."""
+    unverified and is listed with its reason, not read as a pass. Every
+    ring is located -- on a shoulder, or by a retaining ring in a groove
+    beside it -- so every check must PASS: a ring with no seat, a check
+    that fails or one left unverified stops the stage."""
     asm.activate()
     out = []
     for b in placed:
@@ -184,7 +208,7 @@ def check_seats(app, asm, placed):
                 "checks": {c["characteristic"]: c["status"] for c in mine},
                 "unverified": {c["characteristic"]: c.get("reason", "")
                                for c in mine if c["status"] == "unverified"}}
-        failed = [c for c in r["checks"] if c["status"] == "fail"]
+        failed = [c for c in r["checks"] if c["status"] != "pass"]
         if failed or set(rings) != {"inner", "outer"}:
             raise SystemExit(f"check_seat {b['seat']}: {r['status']}, rings "
                              f"{sorted(rings)}, failed {failed}")
@@ -272,6 +296,29 @@ def fasteners(app, asm, o, S):
     print(f"  {len(out)} screws:",
           sorted({f"{x['size']}x{x['length_mm']:g}" for x in out}))
     return out
+
+
+def fastener_check(app, asm, S):
+    """check_fasteners over the head: every placed screw re-derived against
+    the stack it is in. One finding is expected and explained (README,
+    Known): the camera screw has less thread in the camera than one
+    diameter, the app's rule, because a camera's tripod socket is shallower
+    than that by design (`cam_socket`). Anything else stops the stage."""
+    asm.activate()
+    r = app.check_fasteners()
+    expected, other = [], []
+    for f in r.get("findings", []):
+        camera = (f.get("part", "").startswith("ASME B18.3 1/4-20")
+                  and "of thread in camera" in f.get("why", ""))
+        (expected if camera else other).append(f)
+    print(f"  check_fasteners: {r.get('examined')} examined, "
+          f"{len(r.get('findings', []))} findings"
+          + "".join(f"\n    {f['part']}: {f['why']}" for f in
+                    r.get("findings", [])))
+    if other or len(expected) > 1:
+        raise SystemExit(f"check_fasteners: {other or expected}")
+    return {"examined": r.get("examined"), "skipped": r.get("skipped"),
+            "findings": r.get("findings", [])}
 
 
 def relations(app, asm, m, S):
@@ -459,9 +506,12 @@ def main():
     placed = bearings(app, asm, o, S)
     REPORT["bearings"] = placed
     clock("bearings")
+    REPORT["retaining_rings"] = retaining_rings(app, asm, o)
+    clock("retaining rings")
     REPORT["seats"] = check_seats(app, asm, placed)
     clock("seats")
     REPORT["fasteners"] = fasteners(app, asm, o, S)
+    REPORT["check_fasteners"] = fastener_check(app, asm, S)
     clock("fasteners")
     REPORT["relations"] = relations(app, asm, m, S)
     clock("relations")

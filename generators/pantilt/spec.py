@@ -72,7 +72,20 @@ CAMERA = [
     ("cam_cz", "cam_h / 2", "mm, the CoM above the socket (lens on axis)"),
     ("seat_x", "com_fwd - cam_cx", "mm, the socket in front of the axis"),
     ("seat_z", "com_up - cam_cz", "mm, the cradle's top above the axis"),
-    ("plate_t", "2 * print_wall", "mm, the cradle's plate"),
+    # The camera screw, sized from the socket it threads into. A camera's
+    # 1/4-20 tripod socket is shallow: camera makers' manuals cap a tripod
+    # screw at 5.5 mm into the body (Canon's and Nikon's, for instance).
+    # ASSUMED here, not measured: measure the camera's.
+    ("cam_socket", "5.5", "mm, the camera's 1/4-20 socket depth (assumed: "
+     "the 5.5 mm makers' manuals allow a tripod screw)"),
+    ("cam_screw_eng", "cam_socket - 0.05 in",
+     "mm, the screw's engagement: a 1/4-20 pitch short of the socket's "
+     "floor, so it cannot bottom out"),
+    ("cam_screw_l", "0.5 in", "mm, the camera screw: ASME B18.3 1/4-20 x "
+     "1/2, a stocked length"),
+    ("plate_t", "max(2 * print_wall, cam_screw_l - cam_screw_eng)",
+     "mm, the cradle's plate: eight perimeters, or what puts the stocked "
+     "screw's engagement just inside the socket"),
 ]
 
 WORM = [
@@ -148,11 +161,12 @@ PAN = [
 ]
 
 PAN_DERIVED = [
-    ("pan_collar_d", "pan_brg_d + 0.25 * (pan_brg_D - pan_brg_d)",
-     "mm, the yoke's collar: bears on the upper pan bearing's inner ring"),
-    ("pan_relief_d", "(pan_brg_d + pan_brg_D) / 2",
-     "mm, under the pan bearings' inner rings so they turn free of the "
-     "shoulders"),
+    ("pan_collar_d", "(pan_brg_da_min + pan_brg_da_max) / 2",
+     "mm, the yoke's collar: bears on the upper pan bearing's inner ring, "
+     "mid-way in SKF's d_a"),
+    ("pan_relief_d", "(pan_brg_da_max + pan_brg_Da_max) / 2",
+     "mm, the housings' shoulders round the pan bearings' outer rings: "
+     "inside D_a max, clear of the inner ring (d_a max) so it turns free"),
 ]
 
 
@@ -210,13 +224,48 @@ def _pan_sizing():
 
 def _bearing(app, part, key, dmin_name):
     """Declare `key`_brg_{d,D,B}: a table lookup, so numbers, with the
-    reason beside them."""
+    reason beside them; and the row's abutment limits (`key`_brg_da_min,
+    _da_max, _Da_max: SKF's, from list_bearings), which every shoulder
+    and relief round the bearing is an expression over."""
     dmin = part.value_of(dmin_name)
     row = bearing_for(app, dmin)
     what = f"ISO 15 {row['designation']}, first 60-series row over {dmin_name}"
     part.param(f"{key}_brg_d", row["d_mm"], comment=what, scope="project")
     part.param(f"{key}_brg_D", row["D_mm"], comment=what, scope="project")
     part.param(f"{key}_brg_B", row["B_mm"], comment=what, scope="project")
+    for name, field in (("da_min", "d_a_min_mm"), ("da_max", "d_a_max_mm"),
+                        ("Da_max", "D_a_max_mm")):
+        if row.get(field) is None:
+            raise SystemExit(f"{row['designation']}: list_bearings gives no "
+                             f"{field}, and the shoulders are sized by it")
+        part.param(f"{key}_brg_{name}", row[field],
+                   comment=f"mm, {row['designation']}'s abutment limit "
+                           f"{field[:-3]} (list_bearings: SKF)",
+                   scope="project")
+    return row
+
+
+def _ring(app, part, key):
+    """Declare `key`_ring_{s,m,n}: the DIN 471 ring and groove for the
+    `key` bearing's shaft (list_retaining_rings), and `key`_ring_land, the
+    journal it needs past the bearing: the groove and its edge distance."""
+    d = part.value_of(f"{key}_brg_d")
+    rows = app.call("list_retaining_rings", standard="din471",
+                    min_size_mm=float(d))["rings"]
+    row = rows[0]
+    if abs(row["size_mm"] - d) > 1e-6:
+        raise SystemExit(f"no DIN 471 ring for the Ø{d:g} {key} shaft")
+    what = f"{row['designation']}, the {key} shaft's (list_retaining_rings)"
+    part.param(f"{key}_ring_s", row["s_mm"], comment="mm, ring thickness: " +
+               what, scope="project")
+    part.param(f"{key}_ring_m", row["groove"]["m_mm"],
+               comment="mm, groove width: " + what, scope="project")
+    part.param(f"{key}_ring_n", row["groove"]["n_mm"],
+               comment="mm, edge distance past the groove: " + what,
+               scope="project")
+    part.param(f"{key}_ring_land", f"{key}_ring_m + {key}_ring_n",
+               comment="mm, the journal past a bearing its ring locates",
+               scope="project")
     return row
 
 
@@ -229,6 +278,7 @@ def declare(app, part):
                scope="project")
     _declare(part, WORM_DERIVED + SHAFTS)
     _bearing(app, part, "main", "shaft_d_min")
+    _ring(app, part, "main")
     _bearing(app, part, "worm", "worm_shaft_d_min")
     # The pan journal: how high the load stands over it is the head's
     # layout (build_yoke.py's z_mesh_pan .. tilt_z, checked there), written
@@ -241,6 +291,7 @@ def declare(app, part):
     sizing = _pan_sizing()
     over = "pan_shaft_d_min" if sizing == "moment" else "shaft_d_min"
     row = _bearing(app, part, "pan", over)
+    _ring(app, part, "pan")
     _declare(part, PAN_DERIVED)
     print(f"module {m_min:.3f} -> {part.value_of('worm_module')}; pan "
           f"journal sized by the {sizing} ({over} "

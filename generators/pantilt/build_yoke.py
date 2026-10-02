@@ -270,10 +270,13 @@ def yoke(app, S, name="yoke", design="solid"):
     collar = part.extrude(sk.add(), zb - top, mode="add", name="Pan collar")
     # Through the wheel's bearing AND the plate's under it: a journal only
     # the wheel's long (as phase 5 had it) hangs the whole yoke, and its
-    # moment, on one bearing's inner ring. It stands on the collar's end.
+    # moment, on one bearing's inner ring. It stands on the collar's end,
+    # and runs on past the lower bearing by the land its DIN 471 ring needs
+    # (the groove and the edge distance beyond it).
     sk = part.sketch(on=collar.end_cap(), name="Pan journal")
-    sk.circle((0, 0), d=model("shaft", S["pan_brg_d"]))
-    part.extrude(sk.add(), X.wheel_face + X.pan_brg_B - X.nozzle,
+    journal_d = model("shaft", S["pan_brg_d"])
+    sk.circle((0, 0), d=journal_d)
+    part.extrude(sk.add(), X.wheel_face + X.pan_brg_B + X.pan_ring_land,
                  mode="add", name="Pan journal")
     if design != "solid":
         # The hub: the base deepened down to the wheel's top (a running gap
@@ -328,6 +331,11 @@ def yoke(app, S, name="yoke", design="solid"):
     part.hole(sk.add(), d=1.0, depth=tb + X.print_wall,
               fit={"thread": "M4", "kind": "normal"},
               name="Tilt block screws")
+    if design == "lightened":
+        # The lower pan bearing's inner ring is held by a ring in a groove
+        # under it: the near flank the two bearings' stack from the collar.
+        common.groove(part, journal_d / 2, rim_z=top,
+                      offset=X.wheel_face + X.pan_brg_B, name="Ring groove")
     part.material("petg")
     zm, zw = X.z_mesh_pan, zt_tilt - a
     for name, o, z, x in [

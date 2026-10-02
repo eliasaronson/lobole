@@ -23,19 +23,20 @@ def declare(part, S):
     # The camera's own sizes are spec.py's (CAMERA): how far it swings
     # under the tilt axis sizes the pan journal, in the first stage.
     for name, expr, comment in [
-        ("cam_socket", "0.3 in", "mm, the camera's 1/4-20 socket depth"),
-        ("cam_screw_eng", "0.2 in", "mm, the screw's engagement in it"),
+        # cam_socket, the screw's engagement and its length are spec.py's:
+        # the cradle's plate is sized by them.
         ("cam_screw_clear", "0.266 in", "mm, ASME close clearance for 1/4"),
         # The cradle and the arms it turns between.
         ("cheek_t", "2 * print_wall", "mm"),
         ("boss_r", "main_brg_d / 2 + 2 * print_wall", "mm, round the shaft"),
         ("slot_l", "com_fwd / 2", "mm, the camera slides +-com_fwd/4 to "
                                   "balance"),
-        ("main_collar_d", "main_brg_d + 0.25 * (main_brg_D - main_brg_d)",
-         "mm, bears on the inner ring only"),
-        ("relief_d", "(main_brg_d + main_brg_D) / 2",
-         "mm, in the arms under the tilt bearings' inner rings, so they "
-         "turn free of the shoulders"),
+        ("main_collar_d", "(main_brg_da_min + main_brg_da_max) / 2",
+         "mm, bears on the inner ring only: mid-way in SKF's d_a"),
+        ("relief_d", "(main_brg_da_max + main_brg_Da_max) / 2",
+         "mm, the arms' shoulders round the tilt bearings' outer rings: "
+         "inside D_a max, clear of the inner ring (d_a max) so it turns "
+         "free"),
         ("arm_t", "main_brg_B + print_wall", "mm, a bearing and a shoulder"),
         ("arm_in", "cam_w / 2 + run_gap", "mm, the arms clear the camera"),
         ("arm_out", "arm_in + arm_t", "mm, the arms' outer faces"),
@@ -65,13 +66,21 @@ def tilt_wheel(app, S):
     collar = part.extrude(sk.add(), X.tilt_collar, mode="add",
                           name="Collar")
     # The shaft stands on the collar's end.
+    # Through both arms, and past the -Y arm by the land a DIN 471 ring
+    # needs: its groove and the edge distance beyond it.
     sk = part.sketch(on=collar.end_cap(), name="Shaft")
-    sk.circle((0, 0), d=model("shaft", S["main_brg_d"]))
-    part.extrude(sk.add(), Param(2 * S["arm_out"], "2 * arm_out"),
-                 mode="add", name="Shaft")
+    shaft_d = model("shaft", S["main_brg_d"])
+    sk.circle((0, 0), d=shaft_d)
+    part.extrude(sk.add(), 2 * X.arm_out + X.main_ring_land, mode="add",
+                 name="Shaft")
     r = part.worm_wheel(rim, teeth=int(S["wheel_teeth"]),
                         starts=int(S["worm_starts"]), hand="right",
                         name="Tilt wheel")
+    # The -Y bearing's inner ring is held by a ring in a groove at the arm's
+    # outer face: the groove's near flank two arm_outs from the collar.
+    common.groove(part, shaft_d / 2,
+                  rim_z=-X.tilt_collar, offset=2 * X.arm_out,
+                  name="Ring groove")
     part.material("petg")
     common.frame(part, "axis", (0, 0, 0), (0, 0, 1), (1, 0, 0))
     common.frame(part, "mesh", (0, 0, X.wheel_face / 2), (0, 0, 1),

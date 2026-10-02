@@ -26,8 +26,13 @@ def base_plate(app, S):
          "mm, inside the pan worm's swing"),
         ("tripod_len", "0.375 in", "mm, 3/8-16 engaged one diameter deep"),
         ("tripod_pitch", "0.0625 in", "mm, 16 TPI"),
+        ("pan_relief_depth", "pan_brg_B + pan_ring_land + run_gap",
+         "mm, the relief under the lower pan bearing: the pocket, the "
+         "journal's ring groove and land past it, a running gap"),
         ("base_t", "tripod_len + 2 * tripod_pitch + pan_brg_B / 3 + "
-                   "pan_brg_B", "mm: tap drill, a web, the bearing pocket"),
+                   "pan_brg_B + pan_ring_land",
+         "mm: tap drill, a web, the bearing pocket and the ring's land under "
+         "it (the relief leaves the web pan_brg_B / 3 - run_gap)"),
         ("screw_pcd", "base_r + pan_brg_D / 2",
          "mm, the wheel's screws, midway between pocket and rim"),
         ("edge_break", "0.5", "mm, the chamfer on every machined rim: "
@@ -48,8 +53,7 @@ def base_plate(app, S):
     part.cut(sk.add(), X.pan_brg_B, reversed=True, name="Bearing pocket")
     sk = part.sketch(on=plate.end_cap(), name="Relief")
     sk.circle((0, 0), d=X.pan_relief_d)
-    part.cut(sk.add(), X.pan_brg_B + X.run_gap, reversed=True,
-             name="Relief")
+    part.cut(sk.add(), X.pan_relief_depth, reversed=True, name="Relief")
     # The tripod thread, tapped up from the underside.
     sk = part.sketch(Plane.xy(0, flip=True), name="Tripod")
     sk.point((0, 0))

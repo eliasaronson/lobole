@@ -466,7 +466,7 @@ def main():
     plate.activate()
     V = variables(app)
     # What the drawing measures to, derived the way build_base.py made it.
-    V["relief_depth"] = V["pan_brg_B"] + V["run_gap"]
+    V["relief_depth"] = V["pan_relief_depth"]
     V["tripod_drill"] = 0.3125 * 25.4  # 5/16 tap drill, the Hole's diameter
     V["tripod_depth"] = V["tripod_len"] + 2 * V["tripod_pitch"]
     V["m4_tap_drill"] = 3.3

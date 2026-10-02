@@ -89,8 +89,10 @@ def faces_of(part, S, model):
             and abs(f.centroid[2] - zt) < 1),
         "ledge": one("the ledge's top",
                      lambda f: plane_at(f, 2, S["ledge_z"], 1)),
+        # Above the ring groove's land, where the head's yoke has one.
         "journal": one("the pan journal",
-                       lambda f: cyl(f, model("shaft", S["pan_brg_d"]) / 2)),
+                       lambda f: cyl(f, model("shaft", S["pan_brg_d"]) / 2)
+                       and f.centroid[2] > S["base_t"] - S["pan_brg_B"]),
         "collar": one("the pan collar's face",
                       lambda f: plane_at(f, 2, S["base_t"] + S["wheel_face"],
                                          -1)),
