@@ -99,7 +99,7 @@ def case(S, G, name, tilt_deg, accel):
     assert all(abs(a - b) < 1e-6 for a, b in zip(total, W)), (total, W)
     return {"name": name, "tilt_deg": tilt_deg, "accel_g": accel,
             "loads": on_yoke, "tooth_force_n": fp,
-            "lens": lens_point(S, G, t)}
+            "lens": lens_point(S, G, t), "load_kg": m}
 
 
 def journal(S, G, c):
@@ -134,6 +134,48 @@ def journal(S, G, c):
 def lens_point(S, G, t):
     lx, lz = _rot_y(G["lens"], t)
     return (lx, 0.0, S["tilt_z"] + lz)
+
+
+def lens_requirement(S, c, F):
+    """`lens()` as a requirement's formula (docs/requirements/README.md
+    #measures): the four faces' readings of the yoke's study and the
+    project's variables, so the project re-measures the lens itself after an
+    edit instead of trusting this script's arithmetic. The same equations:
+    the shaft's line through the two bores' translations (`p`, `n`, each
+    bore's centroid `_cy` its station on the axis), its turn about the axis
+    from the wheel's teeth following the worm on the ledge (`w`, the
+    ledge's motion carried to the worm's axis), the +Y shoulder's axial
+    motion (`s`), carried to the lens in front of the axis -- turned by the
+    case's tilt, whose cosine and sine are the CoM's own lever (the worst
+    tilt is where the CoM is furthest out)."""
+    lx = "(seat_x + cam_d / 2 + lens_l)"
+    lz = "(seat_z + cam_cz)"
+    if abs(c["tilt_deg"]) < 1e-12:
+        ax, az = lx, lz
+    else:
+        assert abs(c["tilt_deg"] - worst_tilt_deg(S)) < 1e-9, c["tilt_deg"]
+        h = "sqrt(com_fwd^2 + com_up^2)"
+        ct, st = f"(com_fwd / {h})", f"(com_up / {h})"
+        ax = f"({lx} * {ct} + {lz} * {st})"
+        az = f"(-{lx} * {st} + {lz} * {ct})"
+    span = "(p_cy - n_cy)"
+
+    def shaft(comp, y):
+        return f"(n_t{comp} + (p_t{comp} - n_t{comp}) * ({y} - n_cy) / {span})"
+    rx = f"((p_tz - n_tz) / {span})"
+    rz = f"(-(p_tx - n_tx) / {span})"
+    ry = f"(({shaft('x', 'tilt_mesh_y')} - w_dx) / (wheel_d2 / 2))"
+    dx = f"({shaft('x', '0')} + {ry} * {az})"
+    dy = f"(s_ty + {rz} * {ax} - {rx} * {az})"
+    dz = f"({shaft('z', '0')} - {ry} * {ax})"
+    readings = {
+        "p": {"face": F["bore_pos"].ref},
+        "n": {"face": F["bore_neg"].ref},
+        "s": {"face": F["shoulder_pos"].ref},
+        "w": {"face": F["ledge"].ref,
+              "at": [0, "tilt_mesh_y", "tilt_z - centre_dist"]},
+    }
+    return readings, f"sqrt({dx}^2 + {dy}^2 + {dz}^2)"
 
 
 def lens(G, c, pos, neg, worm_x, axial_y):

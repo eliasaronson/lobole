@@ -1,5 +1,6 @@
 #include "remote/RemoteRequirements.h"
 
+#include "core/Angles.h"
 #include "core/AssemblySolve.h"
 #include "core/Expression.h"
 #include "core/InputHash.h"
@@ -68,8 +69,10 @@ const MethodDoc RequirementMethods[] = {
      "or assembly}, fit_class {document, mate, class: clearance|transition|"
      "interference}, check_fits {document, allow_unverified?}, check_seat "
      "{document, occurrences: [bearing ids], allow_unverified?}, "
-     "check_fasteners {document, allow?: [{part?, why?}], allow_skipped?}, "
-     "check_literals {document?: one part, else every part}, motion_clean "
+     "check_fasteners {document, allow?: [{part?, why?, max?}], "
+     "allow_skipped?}, "
+     "check_literals {document?: one part, or documents?: several, else "
+     "every part}, motion_clean "
      "{document, study}, cam_verify {document: job, setup, resolution?, "
      "allow_uncut?: [what prefixes]}. A number is bounded at_most, at_least "
      "or within; a verdict is bounded pass. A bound value may be an "
@@ -333,8 +336,12 @@ uint64_t JobKey(ui::AppState& state, const cam::JobDocument& job) {
     else
       h.U64(0);
   }
+  // Each setup as it reads back: a field the loader fills in (an
+  // operation's side) is written once the job has been saved, so the
+  // session that built the job and one that reopened it hash the same job.
   for (const cam::Setup& s : job.GetSetups())
-    h.Json(DocumentIO::CamSetupToJson(s));
+    h.Json(DocumentIO::CamSetupToJson(
+        DocumentIO::CamSetupFromJson(DocumentIO::CamSetupToJson(s))));
   return h.Digest();
 }
 
@@ -353,6 +360,18 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
     h.F64(it == state.projectSymbols.end()
               ? std::numeric_limits<double>::quiet_NaN()
               : it->second);
+  }
+  if (kind == "check_literals" && m.contains("documents")) {
+    for (const json& id : m.at("documents")) {
+      const auto slot = DocSlot(state, id.get<uint64_t>(), "part", &why);
+      if (!slot)
+        return 0;
+      if (const Document* d = ui::SlotDoc(state, *slot)) {
+        h.U64(state.parts[*slot].id);
+        HashLiteralsInputs(h, state, *d);
+      }
+    }
+    return h.Digest();
   }
   if (kind == "check_literals" && !m.contains("document")) {
     h.Str("every part");
@@ -598,9 +617,14 @@ void MarkRequirementsEdited(ui::AppState& state) {
 // exist is refused rather than saved unresolved.
 void RefuseUnresolvable(ui::AppState& state, const req::Requirement& r) {
   const std::string kind = r.Kind();
-  if (kind == "check_literals" && !r.measure.contains("document"))
-    return;
   std::string why;
+  if (kind == "check_literals" && !r.measure.contains("document")) {
+    CurrentHash(state, r, why);
+    if (!why.empty())
+      throw std::runtime_error(why +
+                               ". Documents: " + DocumentCandidates(state));
+    return;
+  }
   if (!DocSlot(state, r.Document(), req::DocumentKindFor(kind), &why))
     throw std::runtime_error(why + ". Documents: " + DocumentCandidates(state));
   if (r.measure.contains("readings"))
@@ -894,18 +918,26 @@ Taken MeasureClearance(ui::AppState& state, const json& m, const Ctx& ctx) {
       worstAt = s.value;
     }
   }
+  // A sample that did not solve has no pose, so the gap there is unknown:
+  // not the smallest of the rest.
+  if (unsolved > 0)
+    throw std::runtime_error(std::to_string(unsolved) + " of " +
+                             std::to_string(res->samples.size()) +
+                             " samples of motion study " + std::to_string(sid) +
+                             " did not solve, so the gap there is unknown");
   if (measured == 0)
     throw std::runtime_error("no sample of motion study " +
                              std::to_string(sid) + " could be measured");
   t.value = worst;
-  t.detail = {{"mode", mesh ? "mesh" : "exact"},
-              {"samples", measured},
-              {"unsolved", unsolved},
-              {"smallest_at_driver", worstAt}};
-  if (unsolved > 0)
-    throw std::runtime_error(std::to_string(unsolved) +
-                             " sample(s) of the study did not solve, so the "
-                             "gap there is unknown");
+  const MotionStudy* study = state.assembly->FindMotionStudyById(sid);
+  const bool turns = study && study->driverDof == MateDof::Rotation;
+  t.detail = {{"mode", mesh ? "mesh" : "exact"}, {"samples", measured}};
+  // The driver in the unit the study speaks (motion studies take degrees
+  // for a rotation and store radians).
+  if (turns)
+    t.detail["smallest_at_driver_deg"] = angles::ToDegrees(worstAt);
+  else
+    t.detail["smallest_at_driver_mm"] = worstAt;
   return t;
 }
 
@@ -1036,17 +1068,24 @@ Taken MeasureCheckFasteners(ui::AppState& state, const json& m) {
   const json r = Call(state, "check_fasteners", json::object());
   const json allow = m.value("allow", json::array());
   json unexpected = json::array(), allowed = json::array();
+  std::vector<int64_t> used(allow.size(), 0);
   for (const json& f : r.value("findings", json::array())) {
     const std::string part = f.value("part", std::string());
     const std::string why = f.value("why", std::string());
     bool ok = false;
-    for (const json& a : allow) {
+    for (size_t k = 0; k < allow.size() && !ok; k++) {
+      const json& a = allow[k];
+      if (a.contains("max") && used[k] >= a.at("max").get<int64_t>())
+        continue; // this entry has allowed all it may
       const bool partOk = !a.contains("part") ||
                           part.starts_with(a.at("part").get<std::string>());
       const bool whyOk =
           !a.contains("why") ||
           why.find(a.at("why").get<std::string>()) != std::string::npos;
-      ok = ok || (partOk && whyOk);
+      if (partOk && whyOk) {
+        ok = true;
+        used[k]++;
+      }
     }
     (ok ? allowed : unexpected).push_back(f);
   }
@@ -1074,6 +1113,8 @@ Taken MeasureCheckLiterals(ui::AppState& state, const json& m) {
   std::vector<uint64_t> parts;
   if (m.contains("document"))
     parts.push_back(m.at("document").get<uint64_t>());
+  else if (m.contains("documents"))
+    parts = m.at("documents").get<std::vector<uint64_t>>();
   else
     for (const ui::PartSlot& s : state.parts)
       if (s.kind == ui::DocKind::Part)
@@ -1151,9 +1192,10 @@ Taken MeasureCamVerify(ui::AppState& state, const json& m, const Ctx& ctx) {
     problems.push_back("not complete (material left on the part)");
   if (r.value("cuts_nothing", false))
     problems.push_back("the program cuts nothing");
-  if (r.value("failed_ops", 0) > 0)
-    problems.push_back(std::to_string(r.value("failed_ops", 0)) +
-                       " operation(s) produced no toolpath");
+  for (const json& f : r.value("failed_ops", json::array()))
+    problems.push_back(
+        "operation " + f.value("op", json()).dump() +
+        " produced no toolpath: " + f.value("error", std::string()));
   for (const json& th : r.value("threads", json::array()))
     if (!(th.value("judged", false) && th.value("in_band", false)))
       problems.push_back("thread " + th.value("designation", std::string()) +
@@ -1189,6 +1231,8 @@ Taken MeasureOn(ui::AppState& state, const req::Requirement& r,
   if (kind == "check_literals") {
     if (m.contains("document"))
       Activate(state, r.Document());
+    else if (m.contains("documents"))
+      Activate(state, m.at("documents").at(0).get<uint64_t>());
     else
       ActivateFirstPart(state);
     return MeasureCheckLiterals(state, m);

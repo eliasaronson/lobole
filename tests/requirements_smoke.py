@@ -35,7 +35,7 @@ from designer_sdk import connect  # noqa: E402
 from fem_smoke import build_bar  # noqa: E402
 from slider_crank import build as build_crank  # noqa: E402
 from smoke_app import launch  # noqa: E402
-from smoke_shapes import cylinder  # noqa: E402
+from smoke_shapes import box, cylinder  # noqa: E402
 from tolerances_smoke import housing  # noqa: E402
 
 
@@ -152,6 +152,63 @@ def fits(d):
     expect(now["running fit"]["state"] == "fail"
            and now["running fit"]["detail"]["kind"] == "interference",
            now["running fit"])
+
+
+def cam(d):
+    """A plate with a pocket, cut by one operation: cam_verify's answer is
+    the evidence (measured -- pass or fail -- never unresolved), and a setup
+    that does not exist is refused."""
+    if not d.call("ping").get("features", {}).get("cam", True):
+        return
+    d.call("new_project")
+    box(d, (-40, -30, 0), (80, 60, 20), "Plate")
+    sk = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Pocket sketch",
+        "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1],
+                  "uAxis": [1, 0, 0]},
+        "entities": [{"type": "rect", "c1": [-20, -10], "c2": [20, 10]}]})
+    d.call("add_feature", feature={
+        "type": "Extrude", "name": "Pocket", "sketch_id": sk["id"],
+        "distance": 5.0, "mode": "cut", "reversed": True})
+    floor = None
+    for body in d.call("list_elements")["bodies"]:
+        for f in body["faces"]:
+            n = f.get("normal") or [0, 0, 0]
+            c = f.get("centroid") or [0, 0, 0]
+            if f.get("kind") == "plane" and n[2] > 0.99 and abs(c[2] - 15) < .5:
+                floor = {"feature_id": body["created_by"], "element": f["name"]}
+    expect(floor is not None, "the pocket has a floor")
+    d.call("machine_part")
+    job = [p["id"] for p in d.call("list_parts")["parts"]
+           if p["type"] == "job"][0]
+    setup = d.call("add_cam_setup", name="Top")["id"]
+    d.call("set_cam_setup", id=setup,
+           tool={"number": 2, "diameter": 6.0, "name": "6 mm"})
+    d.call("add_cam_op", setup=setup, type="pocket", tool=2, target=floor,
+           stepdown=2.5)
+    add(d, "the plate verifies", {"kind": "cam_verify", "document": job,
+                                  "setup": setup, "resolution": 0.5},
+        {"kind": "pass"})
+    refused(d, "add_requirement", "setup 999", name="x",
+            measure={"kind": "cam_verify", "document": job, "setup": 999},
+            bound={"kind": "pass"})
+    d.call("check_requirements", **{"async": True})
+    deadline = time.time() + 120
+    while time.time() < deadline and any(
+            j["kind"] == "requirements"
+            for j in d.call("background_jobs")["jobs"]):
+        time.sleep(0.2)
+    row = rows(d)["the plate verifies"]
+    expect(row["state"] in ("pass", "fail")
+           and "ok" in row["detail"] and "complete" in row["detail"],
+           f"cam_verify measured: {row}")
+    # The session that built the job and one that reopened it hash the same
+    # job: evidence taken before the save is current after it.
+    with tempfile.TemporaryDirectory() as tmp:
+        d.call("save_project", path=os.path.join(tmp, "plate.dsgn"))
+        d.call("open_project", path=os.path.join(tmp, "plate.dsgn"))
+        expect(rows(d)["the plate verifies"]["state"] == row["state"],
+               f"reopened: {rows(d)['the plate verifies']}")
 
 
 def main():
@@ -358,6 +415,7 @@ def main():
         expect(v["assertions"][0]["standing"] == "holds", v)
 
         fits(d)
+        cam(d)
     print("requirements_smoke: ok")
     return 0
 

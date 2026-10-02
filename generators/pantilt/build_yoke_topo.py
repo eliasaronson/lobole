@@ -134,8 +134,14 @@ def add_loads(app, sid, F, c, case=None, supports=True):
         if mag < 1e-9:
             continue
         extra = {"case": case} if case else {}
+        # Per kilogram of camera, times its variable: every force on the
+        # yoke is the load's weight times a lever that does not move with
+        # the mass (the CoM stands where com_fwd and com_up put it), so a
+        # heavier camera is a heavier load on the same study, and the
+        # study's input hash moves with it.
         app.add_load(study=sid, type="force", face=F[face].ref,
-                     magnitude=mag, direction=list(v), **extra)
+                     magnitude=f"load_kg * {mag / c['load_kg']:.15g}",
+                     direction=list(v), **extra)
 
 
 def keep_outs(S):
@@ -232,6 +238,39 @@ def statics(app, part, S, F, G, cases, clock):
         rows.append(out)
     clock(f"statics {part.name}")
     return rows
+
+
+# The most the lens may move at 3 g, in any of the three cases. The yoke as
+# designed moves it 1.5 / 2.9 / 3.2 mm (level, tilted, sideways) on a rigid
+# journal, a fifth under this; a camera a third heavier than the 1.5 kg the
+# head is sized for is past it sideways.
+LENS_MAX_3G_MM = 4.0
+
+
+def lens_requirements(app, yoke, S, F, cases, sid, rows):
+    """The lens at 3 g, one requirement per case, measured by the project
+    from the yoke's study (yoke_loads.lens_requirement). Each formula is
+    checked here against the lens this script carried from the same probes,
+    so the two cannot drift apart."""
+    for c, row in zip(cases, rows):
+        readings, expression = yoke_loads.lens_requirement(S, c, F)
+        app.require(f"lens at 3 g, {c['name']}", {
+            "kind": "study_probe", "document": yoke.id, "study": sid,
+            "case": c["name"], "readings": readings,
+            "expression": expression, "unit": "mm"},
+            at_most=LENS_MAX_3G_MM,
+            source="a 3 g knock in handling must not move the lens more "
+                   "than this; the yoke on a rigid journal (its own bend is "
+                   "the README's beam estimate, beside it)")
+    out = app.verify_requirements(raise_on_failure=False)["requirements"]
+    for c, row in zip(cases, rows):
+        got = next(x for x in out if x["name"] == f"lens at 3 g, {c['name']}")
+        if "value" not in got or abs(
+                got["value"] - row["lens_magnitude_mm"]) > 1e-6 * max(
+                    1.0, row["lens_magnitude_mm"]):
+            raise SystemExit(f"the lens requirement's formula reads "
+                             f"{got.get('value')} mm, this script "
+                             f"{row['lens_magnitude_mm']} mm: {got}")
 
 
 def fresh(app, name):
@@ -578,6 +617,10 @@ def main():
         REPORT["yoke"] = {"mass_g": mass_g(app, yoke),
                           "static": statics(app, yoke, S, FY, G, CASES,
                                             clock)}
+        lens_requirements(app, yoke, S, FY, CASES,
+                          REPORT["yoke"]["static"][0]["study"],
+                          REPORT["yoke"]["static"])
+        clock("lens requirements")
         REPORT["print_pieces"] = print_pieces(app, S, yoke)
         clock("print pieces")
         REPORT["stills"] = stills(app, [solid, yoke])
@@ -589,9 +632,15 @@ def main():
         topo_step(app, S, G, CASES,
                   volume(app, app.part("yoke", create=False)),
                   a.fresh_topology, clock)
+    # topo_step opens and saves yoke_envelope.dsgn when it has to run, so
+    # the head's requirements are checked on the head's project.
+    app.call("open_project", path=str(common.OUT / "yoke_topo.dsgn"))
+    REPORT["requirements"], bad = common.requirements_met(app)
+    common.save(app, "yoke_topo.dsgn")
     REPORT["time"] = clock.rows
     (common.OUT / "yoke_topo_report.json").write_text(
         json.dumps(REPORT, indent=1, default=str))
+    common.stop_unless_met(bad)
 
 
 if __name__ == "__main__":

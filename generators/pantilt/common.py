@@ -162,6 +162,39 @@ def save(app, name):
     print("saved", path)
 
 
+def requirements_met(app):
+    """Check the project's requirements (docs/requirements/README.md) as a
+    job and print each: what the head is FOR, held by the project rather
+    than asserted here, so an edit after this run is checked against the
+    same sentences. Returns every row and the ones that are not `pass` (a
+    stale, unresolved or unchecked one is not met either)."""
+    rows = app.verify_requirements(raise_on_failure=False)["requirements"]
+    for x in rows:
+        value = (f" {x['value']:.4g} {x.get('unit', '')}".rstrip()
+                 if "value" in x else "")
+        bound = x["bound"]
+        limit = {"at_most": f" <= {x.get('limit', bound.get('value'))}",
+                 "at_least": f" >= {x.get('limit', bound.get('value'))}",
+                 "within": f" in {x.get('limit_min')}..{x.get('limit_max')}",
+                 }.get(bound["kind"], "")
+        note = f" ({x['note']})" if x.get("note") else ""
+        print(f"  requirement {x['name']}: {x['state']}{value}{limit}{note}",
+              flush=True)
+    return rows, [x for x in rows if x["state"] != "pass"]
+
+
+def stop_unless_met(bad):
+    if bad:
+        raise SystemExit("requirements not met: " + "; ".join(
+            f"{x['name']}: {x['state']}" for x in bad))
+
+
+# The parts this generator models (the bought ones are generated from their
+# standard, and a stocked screw length can equal a variable by coincidence).
+MODELLED = ("base_plate", "pan_wheel", "worm", "worm_block", "knob",
+            "tilt_wheel", "cradle", "camera", "yoke")
+
+
 def check_regen(app, what):
     st = app.call("get_state")
     if not st["regen"]["ok"]:

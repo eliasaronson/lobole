@@ -68,7 +68,7 @@ const std::vector<KindSpec>& Specs() {
        "assembly",
        {"document", "allow", "allow_skipped"},
        {"document"}},
-      {"check_literals", false, "part", {"document"}, {}},
+      {"check_literals", false, "part", {"document", "documents"}, {}},
       {"motion_clean",
        false,
        "assembly",
@@ -211,13 +211,27 @@ void ValidateValues(const std::string& kind, const json& m) {
       for (const json& e : a) {
         if (!e.is_object() || e.empty())
           throw std::runtime_error(
-              "check_fasteners allow entry is {part?, why?}, not " + e.dump());
+              "check_fasteners allow entry is {part?, why?, max?}, not " +
+              e.dump());
         for (auto k = e.begin(); k != e.end(); ++k)
-          if (k.key() != "part" && k.key() != "why")
+          if (k.key() != "part" && k.key() != "why" && k.key() != "max")
             throw std::runtime_error("check_fasteners allow: unknown key '" +
-                                     k.key() + "' (accepted: part, why)");
+                                     k.key() + "' (accepted: part, why, max)");
+        if (e.contains("max") && !(e.at("max").is_number_integer() &&
+                                   e.at("max").get<int64_t>() >= 0))
+          throw std::runtime_error("check_fasteners allow: `max` is how many "
+                                   "findings the entry may match, a count");
       }
     }
+  } else if (kind == "check_literals") {
+    if (m.contains("document") && m.contains("documents"))
+      throw std::runtime_error("check_literals reads one part (`document`), "
+                               "several (`documents`), or every part "
+                               "(neither); not both");
+    if (m.contains("documents") &&
+        (!m.at("documents").is_array() || m.at("documents").empty()))
+      throw std::runtime_error(
+          "check_literals documents is a non-empty list of part ids");
   } else if (kind == "cam_verify") {
     if (m.contains("allow_uncut") && !m.at("allow_uncut").is_array())
       throw std::runtime_error(

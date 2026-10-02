@@ -15,8 +15,13 @@ pantilt.dsgn, writes assembly_report.json, the BOM and the renders.
 - The standing exact clash sweep, the declared fits (check_fits), the BOM.
 - Motion studies driven from the worm shafts -- pan through 360 degrees,
   tilt through +-90 -- every sample checked exactly.
-- Clearance assertions: the camera and the cradle clear the yoke, verified
-  at each end of the tilt.
+- The head's acceptance criteria as REQUIREMENTS the project holds
+  (docs/requirements/README.md), checked at the end of the stage, which
+  stops on any that is not met: both rings of every bearing seated
+  (check_seat), check_fasteners with only the camera screw's known finding,
+  every modelled part lint-clean (check_literals), both motion studies
+  clean, and the camera and the cradle clearing the yoke through the whole
+  tilt.
 - Renders of the head.
 """
 import json
@@ -186,7 +191,9 @@ def check_seats(app, asm, placed):
     unverified and is listed with its reason, not read as a pass. Every
     ring is located -- on a shoulder, or by a retaining ring in a groove
     beside it -- so every check must PASS: a ring with no seat, a check
-    that fails or one left unverified stops the stage."""
+    that fails or one left unverified fails the stage's `seats`
+    requirement. This is the report of each ring; the verdict is the
+    requirement's."""
     asm.activate()
     out = []
     for b in placed:
@@ -195,8 +202,9 @@ def check_seats(app, asm, placed):
         for seat in r["seats"]:
             ring = seat["ring"]
             if seat.get("error") or "part" not in seat:
-                raise SystemExit(f"check_seat {b['seat']}: no seat for the "
-                                 f"{ring} ring: {seat}")
+                print(f"  check_seat {b['seat']}: no seat for the {ring} "
+                      f"ring: {seat}")
+                continue
             size = "shaft_diameter" if ring == "inner" else "housing_diameter"
             mine = [c for c in r["checks"]
                     if c["characteristic"].startswith(ring + "_")
@@ -208,10 +216,6 @@ def check_seats(app, asm, placed):
                 "checks": {c["characteristic"]: c["status"] for c in mine},
                 "unverified": {c["characteristic"]: c.get("reason", "")
                                for c in mine if c["status"] == "unverified"}}
-        failed = [c for c in r["checks"] if c["status"] != "pass"]
-        if failed or set(rings) != {"inner", "outer"}:
-            raise SystemExit(f"check_seat {b['seat']}: {r['status']}, rings "
-                             f"{sorted(rings)}, failed {failed}")
         out.append({"seat": b["seat"], "designation": b["designation"],
                     "status": r["status"], "rings": rings})
         print(f"  check_seat {b['seat']}: {r['status']}; " + "; ".join(
@@ -300,23 +304,17 @@ def fasteners(app, asm, o, S):
 
 def fastener_check(app, asm, S):
     """check_fasteners over the head: every placed screw re-derived against
-    the stack it is in. One finding is expected and explained (README,
-    Known): the camera screw has less thread in the camera than one
+    the stack it is in, reported. One finding is expected and explained
+    (README, Known): the camera screw has less thread in the camera than one
     diameter, the app's rule, because a camera's tripod socket is shallower
-    than that by design (`cam_socket`). Anything else stops the stage."""
+    than that by design (`cam_socket`). The `fasteners` requirement allows
+    that one and fails on anything else."""
     asm.activate()
     r = app.check_fasteners()
-    expected, other = [], []
-    for f in r.get("findings", []):
-        camera = (f.get("part", "").startswith("ASME B18.3 1/4-20")
-                  and "of thread in camera" in f.get("why", ""))
-        (expected if camera else other).append(f)
     print(f"  check_fasteners: {r.get('examined')} examined, "
           f"{len(r.get('findings', []))} findings"
           + "".join(f"\n    {f['part']}: {f['why']}" for f in
                     r.get("findings", [])))
-    if other or len(expected) > 1:
-        raise SystemExit(f"check_fasteners: {other or expected}")
     return {"examined": r.get("examined"), "skipped": r.get("skipped"),
             "findings": r.get("findings", [])}
 
@@ -414,28 +412,41 @@ def run_study(app, asm, name, driver, lo, hi, samples, clock):
     return out, sid
 
 
-def assertions(app, asm, o, S):
-    asm.activate()
-    gap = S["run_gap"] / 2
-    ids = []
+def requirements(app, asm, o, S, placed, pan_id, tilt_id):
+    """What the head is for, stated as requirements the project holds
+    (docs/requirements/README.md): `App.require` states each one, or edits
+    the one of that name, so a re-run states the same set."""
+    gap = "run_gap / 2"
+    why_gap = (f"it passes between the arms {S['run_gap']:g} mm off each and "
+               f"swings {S['cam_clear']:g} mm over the base at full tilt")
     for who in ("camera", "cradle"):
-        r = app.add_assertion(
-            name=f"{who} clears the yoke", a=o[who].id, b=o["yoke"].id,
-            min_mm=gap, mode="exact",
-            why=f"it passes between the arms {S['run_gap']:g} mm off each "
-                f"and swings {S['cam_clear']:g} mm over the base at full tilt")
-        ids.append(r.get("id"))
-    return ids
-
-
-def verify(app, asm, where):
-    asm.activate()
-    r = app.verify_assertions()
-    rows = [(a["name"], a.get("last_verdict"), a.get("measured_mm"))
-            for a in r["assertions"]]
-    print(f"  assertions at {where}: {rows}")
-    return {"at": where, "rows": rows,
-            "standing": r.get("receipt", {}).get("standing")}
+        app.require(f"{who} clears the yoke through the tilt", {
+            "kind": "clearance", "document": asm.id, "a": o[who].id,
+            "b": o["yoke"].id, "mode": "exact", "motion_study": tilt_id},
+            at_least=gap, source=why_gap)
+    app.require("every bearing seated, both rings", {
+        "kind": "check_seat", "document": asm.id,
+        "occurrences": [b["occurrence"] for b in placed]},
+        source="every ring is located, on a shoulder or by a retaining ring "
+               "beside it, and every shoulder is inside SKF's abutment limits")
+    app.require("fasteners: only the camera socket's", {
+        "kind": "check_fasteners", "document": asm.id,
+        "allow": [{"part": "ASME B18.3 1/4-20", "why": "of thread in camera",
+                   "max": 1}]},
+        source="a camera's tripod socket is 5.5 mm deep by design "
+               "(cam_socket), under the one diameter the rule asks; every "
+               "other screw passes")
+    app.require("every modelled part lint-clean", {
+        "kind": "check_literals",
+        "documents": [app.part(n, create=False).id
+                      for n in common.MODELLED]},
+        source="every number is a variable or follows a face, so base_t 2 "
+               "mm more regenerates the head")
+    for sid, what in ((pan_id, "pan 360"), (tilt_id, "tilt +-90")):
+        app.require(f"{what} moves clean", {
+            "kind": "motion_clean", "document": asm.id, "study": sid},
+            source="driven from its worm, every sample solved and checked "
+                   "exactly, nothing clashing")
 
 
 def bom(app, asm):
@@ -524,34 +535,27 @@ def main():
     REPORT["mass"] = masses(app, asm, o)
     clock("bom and mass")
     common.save(app, "pantilt.dsgn")
-    REPORT["assertions"] = assertions(app, asm, o, S)
-    REPORT["verify"] = [verify(app, asm, "zero tilt")]
     # Pan: the wheel is the base's, so the worm walks round it; 360 degrees
     # of pan is wheel_teeth turns of the worm.
     ratio = S["wheel_teeth"] / S["worm_starts"]
-    REPORT["pan_study"], _ = run_study(
+    REPORT["pan_study"], pan_id = run_study(
         app, asm, "pan 360", m["pan_worm"], 0.0, 360.0 * ratio,
         int(STUDY_SAMPLES), clock)
     # Tilt: +-90 degrees of the camera is +-90 * ratio of the tilt worm.
     REPORT["tilt_study"], tilt_id = run_study(
         app, asm, "tilt +-90", m["tilt_worm"], -90.0 * ratio, 90.0 * ratio,
         int(STUDY_SAMPLES), clock)
-    # The ends of the tilt, posed by the worm itself (the relation turns
-    # the wheel): leave_at would run the whole study again to get there.
-    for deg, where in ((-90.0, "tilt -90"), (90.0, "tilt +90")):
-        app.set_mate(id=m["tilt_worm"]["id"], rotation_deg=deg * ratio)
-        asm.solve()
-        REPORT["verify"].append(verify(app, asm, where))
-    clock("assertions at full tilt")
-    app.set_mate(id=m["tilt_worm"]["id"], rotation_deg=0.0)
-    asm.solve()
     common.save(app, "pantilt.dsgn")
     REPORT["renders"] = renders(app, asm, m["tilt_worm"])
     clock("renders")
+    requirements(app, asm, o, S, placed, pan_id, tilt_id)
+    REPORT["requirements"], bad = common.requirements_met(app)
+    clock("requirements")
     common.save(app, "pantilt.dsgn")
     REPORT["time"] = clock.rows
     (common.OUT / "assembly_report.json").write_text(
         json.dumps(REPORT, indent=1, default=str))
+    common.stop_unless_met(bad)
 
 
 if __name__ == "__main__":

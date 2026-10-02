@@ -53,9 +53,9 @@ minutes.
 | `build_worms.py` | the worm (one part for both axes: ZA, one start, 0.25 mm backlash, spacer collars and journals), the bearing block (one part for all four bearings) and the knob | `worms.dsgn` |
 | `build_tilt.py` | the tilt wheel with its shaft, the cradle (camera plate, 1/4-20 slot) and the camera (the load: a box and a lens of 1.5 kg) | `tilt.dsgn` |
 | `build_yoke.py` | the yoke, modelled where it stands, its frames the layout: the design re-modelled over its topology result (A-frame arms, a web under the tilt worm, a windowed base on a keel grillage, foot flanges bolted to the base), and the phase-5 solid and the topology envelope as variants `build_yoke_topo.py` builds | `yoke.dsgn` |
-| `build_assembly.py` | the assembly: mates, the camera screw as the ASME B18.3 1/4-20 it is bought as (`add_fastener`), bearings by `fit_bearing`, the two DIN 471 rings by `fit_retaining_ring`, both rings of each bearing by `check_seat` (all eight must pass), screws by `fit_fastener` and `check_fasteners`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, clearance assertions verified at both ends of the tilt, renders | `pantilt.dsgn` |
-| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): a static study of the solid yoke and one of the head's, each with the three as load cases, the lens carried from the seats (`probe_study`), and the pan journal's own bend, which no study sees, by beam; the yoke cut for the printer (`split_for_printing`) with the pieces' STLs; stills; the envelope's topology study (the three cases at once, the worms' blocks as keep-outs), its pictures and its check (`check_topology`) -- kept in `yoke_envelope.dsgn`, reused while the envelope, its cases and keep-outs are the same and the result is not stale, `--fresh-topology` to run it again; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_envelope.dsgn`, `yoke_print_*.stl` |
-| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm and required ok AND complete with no toolpath warning and the thread judged in its band, posted, the K7 seat judged in its band and the uncut features checked to be only the hand-tapped M4s, and a setup sheet for each; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `nc/base_plate - {Top,Underside} setup sheet.pdf`, `cam_report.json` |
+| `build_assembly.py` | the assembly: mates, the camera screw as the ASME B18.3 1/4-20 it is bought as (`add_fastener`), bearings by `fit_bearing`, the two DIN 471 rings by `fit_retaining_ring`, both rings of each bearing reported by `check_seat`, screws by `fit_fastener` and `check_fasteners`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, renders; then the head's [requirements](#requirements), checked, and the stage stops on any not met | `pantilt.dsgn` |
+| `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): a static study of the solid yoke and one of the head's, each with the three as load cases, the lens carried from the seats (`probe_study`), and the pan journal's own bend, which no study sees, by beam; the yoke cut for the printer (`split_for_printing`) with the pieces' STLs; stills; the envelope's topology study (the three cases at once, the worms' blocks as keep-outs), its pictures and its check (`check_topology`) -- kept in `yoke_envelope.dsgn`, reused while the envelope, its cases and keep-outs are the same and the result is not stale, `--fresh-topology` to run it again; the lens at 3 g, a requirement per case; `yoke_topo_report.json` | `yoke_topo.dsgn`, `yoke_envelope.dsgn`, `yoke_print_*.stl` |
+| `cam.py` | the base plate's job on the 6090 (Mach3): a vise jaw part, the machine, two setups (Top, Underside), each verified at 0.1 mm as a requirement (ok and complete, the thread and the K7 seat judged in their bands, nothing uncut but the hand-tapped M4s) and with no toolpath warning, posted, and a setup sheet for each; `--shots` plays each back for screenshots (needs `headless-preview.sh --gui`) | `cam.dsgn`, `nc/base_plate - Top.nc`, `nc/base_plate - Underside.nc`, `nc/base_plate - {Top,Underside} setup sheet.pdf`, `cam_report.json` |
 | `build_drawings.py` | three A3 sheets ([below](#drawings-and-renders)): the base plate's shop drawing, the head's assembly drawing with balloons and the parts list, and the print sheet; each exported and `check_drawing`ed, and the stage stops on a sheet that is not clean. It only draws: what the sheets order by is the model's | `drawings.dsgn`, `drawings/{base_plate,assembly,print}.{pdf,svg}`, `drawings_report.json` |
 | `build_renders.py` | path-traced stills of the head: hero, tilted 35 degrees by its worm, from below, exploded along its own axes | `renders/{hero,tilted,low,exploded}.png` |
 
@@ -200,7 +200,9 @@ reason (a frame built from a cylindrical face takes the face's seam as X:
   against its bearing's side, touching and not clashing.
 - **Clearances.** The camera clears the yoke by 4.8 mm at -90 degrees (the
   designed `cam_clear`) and passes the A-frames 1.2 mm off (the running
-  gap); the cradle runs 1.2 mm off the arms. The standing exact sweep is
+  gap); the cradle runs 1.2 mm off the arms. Through the whole tilt study
+  the smallest gap is the running gap, 1.2 mm, for both
+  ([requirements](#requirements)). The standing exact sweep is
   clean (168 pairs), each ring in its groove included: drawn at its free
   diameter it overlaps the floor (26.6 and 8.8 mm3), and that grip is
   relieved as designed, nothing else
@@ -221,7 +223,8 @@ reason (a frame built from a cylindrical face takes the face's seam as X:
   are located by their retaining rings, each beside the ring's face and
   reaching, as installed, inside the same d_a (Ø29.9 in 28.2-31.9, Ø18.7
   in 17-20.4). All eight bearings PASS, both rings each; a ring with no
-  seat, or any check that fails or stays unverified, stops the stage.
+  seat, or any check that fails or stays unverified, fails the
+  requirement and stops the stage.
 - **Bought parts.** 2 x 6005, 2 x 6002, 4 x 609; 4 x ISO 4762 M4x14 into
   the plate; 8 x M4x25 with ISO 4032 nuts and ISO 7089 washers through the
   worm blocks; 2 x M4x30 and 2 x M4x40 through the yoke's foot flanges;
@@ -231,8 +234,67 @@ reason (a frame built from a cylindrical face takes the face's seam as X:
   explained: the camera screw has 4.23 mm of thread in the camera where the
   app's rule asks one diameter (6.35). No camera socket meets that rule --
   the socket is 5.5 mm by design -- and the load is 1.5 kg at 3 g, 44 N, on
-  a thread whose 4 mm strips at well over a kilonewton. The stage stops on
-  any other finding.
+  a thread whose 4 mm strips at well over a kilonewton. The requirement
+  allows that one finding, once, and fails on any other.
+
+## Requirements
+
+What the head is for is held by its projects as requirements
+([requirements](../../docs/requirements/README.md)), not asserted by these
+scripts: each stage states its own with `App.require` and ends by checking
+every requirement the project holds (`common.requirements_met`), and stops
+on any that is not `pass`. A later edit to the model is checked against the
+same sentences, by anyone: `list_requirements` says which still hold, which
+are stale, and `check_requirements` measures them again.
+
+| requirement | stage | measure | bound | as generated |
+|---|---|---|---|---|
+| camera clears the yoke through the tilt | assembly | clearance, exact, over the tilt study | >= `run_gap / 2` | 1.2 mm |
+| cradle clears the yoke through the tilt | assembly | the same | >= `run_gap / 2` | 1.2 mm |
+| every bearing seated, both rings | assembly | `check_seat`, the eight bearings | pass | pass |
+| fasteners: only the camera socket's | assembly | `check_fasteners`, the camera screw's thread allowed once | pass | pass (17 examined) |
+| every modelled part lint-clean | assembly | `check_literals`, the nine modelled parts | pass | pass |
+| pan 360 moves clean, tilt +-90 moves clean | assembly | the motion study clean | pass | pass |
+| lens at 3 g, one per case | yoke_topo | the yoke's static study, a formula over four probes | <= 4 mm | 1.51 / 2.90 / 3.20 mm |
+| plate CAM: Top verifies, Underside verifies | cam | `cam_verify` at 0.1 mm, M4s allowed uncut | pass | pass |
+
+**The lens** is measured by the project, not carried by `yoke_loads.lens`:
+`yoke_loads.lens_requirement` writes the same equations as a formula over
+four of the yoke study's probes (the two bearing bores, the +Y shoulder,
+the ledge carried to the worm's axis) and the variables (the lens, the
+CoM's lever, the worm's station), and the stage stops if the project's
+number differs from the script's. The study's forces are `load_kg` times a
+lever per kilogram, so the study, and the requirement, follow the camera's
+mass. 4 mm is the bound: the head as designed moves the lens a fifth under
+it at worst, on a rigid journal (the journal's own bend is the beam
+estimate below, beside it).
+
+**A heavier camera.** `load_kg` 1.5 to 1.8 on `yoke_topo.dsgn`, and every
+requirement reads stale before anything is measured: the lens is as long as
+makes the mass, so the swing, the arms and the tilt axis grow with it, and
+the study's forces are the mass's. Checked again (one job, about five
+minutes: the yoke's static and both motion studies run again):
+
+| requirement | 1.5 kg | 1.8 kg |
+|---|---|---|
+| lens at 3 g, level | 1.51 mm, pass | 2.76 mm, pass |
+| lens at 3 g, tilted 63.4 deg | 2.90 mm, pass | 5.28 mm, fail |
+| lens at 3 g, sideways | 3.20 mm, pass | 4.53 mm, fail |
+| every bearing seated, every modelled part lint-clean | pass | pass |
+| fasteners: only the camera socket's | pass | fail |
+| pan 360, tilt +-90 move clean | pass | fail |
+| camera, cradle clear the yoke through the tilt | 1.2 mm, pass | unresolved |
+
+The lens is not all it says. The taller yoke renames the bores of its
+joint screws (`face '39/p1/bore;M39' not found ... modified by a later
+feature`), so three screws lose their seats, and with them the mechanism
+no longer solves at any sample: the clearance through the tilt is
+unresolved, never a pass. The head is parametric in the camera only as far
+as its sizes; that rename is the next thing to fix before it is in its
+mass.
+
+The base plate's requirements are in `cam.dsgn` with the assembly's (the CAM
+stage opens `pantilt.dsgn`), the lens's in `yoke_topo.dsgn`.
 
 ## The base plate on the 6090
 

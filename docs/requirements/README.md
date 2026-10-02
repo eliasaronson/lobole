@@ -48,8 +48,8 @@ and the call a person would make agree by construction.
 | `fit_class` | assembly | `check_fits` | verdict | `mate`, `class`: clearance \| transition \| interference |
 | `check_fits` | assembly | `check_fits` | verdict | `allow_unverified?` |
 | `check_seat` | assembly | `check_seat` | verdict | `occurrences` (the bearings), `allow_unverified?` |
-| `check_fasteners` | assembly | `check_fasteners` | verdict | `allow?` [{`part?`, `why?`}], `allow_skipped?` |
-| `check_literals` | part, or none | `check_literals` | verdict | (no `document`: every part) |
+| `check_fasteners` | assembly | `check_fasteners` | verdict | `allow?` [{`part?`, `why?`, `max?`}], `allow_skipped?` |
+| `check_literals` | part, parts, or none | `check_literals` | verdict | `documents?` (several parts); neither: every part |
 | `motion_clean` | assembly | `run_motion_study` | verdict | `study` |
 | `cam_verify` | job | `cam_verify` | verdict | `setup`, `resolution?`, `allow_uncut?` [what prefixes] |
 
@@ -66,9 +66,12 @@ What a verdict needs to pass:
   check passes (an unverified one only when allowed).
 - `check_fasteners`: at least one screw examined, none skipped (unless
   allowed), and every finding matches an `allow` entry: its part starts
-  with `part` and its reason contains `why`.
-- `check_literals`: no literal and no world placement in the part, or in
-  any part.
+  with `part` and its reason contains `why`, and the entry has matched
+  fewer than its `max` findings before it (an expected finding allowed
+  once is not two of them).
+- `check_literals`: no literal and no world placement in the part, the
+  parts, or every part (a standard part's length can equal a variable by
+  coincidence, which is why `documents` exists).
 - `motion_clean`: the result is clean: every sample solved, no clash, no
   standing clash.
 - `cam_verify`: ok and complete, it cuts something, no operation failed,
@@ -89,7 +92,7 @@ radians), `_dx/_dy/_dz` (its motion carried to `at`) and `_cx/_cy/_cz` (its
 centroid), beside the project's variables. It is how a requirement reads
 what a body held by several faces did: the pan/tilt head's lens, carried by
 two bearing bores, a shoulder and a worm on a ledge
-([generators/pantilt](../../generators/pantilt/README.md)).
+([generators/pantilt](../../generators/pantilt/README.md#requirements)).
 An `at` component may be an expression too.
 
 ## Bounds

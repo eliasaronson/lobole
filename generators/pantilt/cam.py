@@ -418,6 +418,20 @@ def main():
     if a.shots:
         report["shots"] = shots(app, J, job.setups)
         clock("playback shots")
+    # What the program must do, held by the project as requirements
+    # (docs/requirements/README.md): each setup's posted file verified ok
+    # and complete at VERIFY_RES, every thread judged in its band, the K7
+    # wall in its band, and nothing left uncut but the hand-tapped M4s.
+    jid = next(p["id"] for p in app.call("list_parts")["parts"]
+               if p["type"] == "job" and p["name"] == job.label)
+    for name, sid in job.setups:
+        app.require(f"plate CAM: {name} verifies", {
+            "kind": "cam_verify", "document": jid, "setup": sid,
+            "resolution": VERIFY_RES, "allow_uncut": [SCREW_THREAD]},
+            source="the posted program, simulated, cuts the part and only "
+                   "the part; the M4s are tapped by hand")
+    report["requirements"], bad = common.requirements_met(app)
+    clock("requirements")
     common.save(app, "cam.dsgn")
     (OUT / "cam_report.json").write_text(json.dumps(report, indent=1,
                                                     default=str))
@@ -425,36 +439,15 @@ def main():
     for label, said in report["ops"].items():
         if isinstance(said, str) and said.startswith("REFUSED"):
             problems.append(f"{label}: {said}")
+    problems += [f"requirement {x['name']}: {x['state']}" for x in bad]
     total = 0.0
     for sname, s in report["setups"].items():
-        v = s.get("verify", {})
-        if not v.get("ok", False):
-            problems.append(f"{sname}: not safe")
-        if not v.get("complete", False):
-            problems.append(f"{sname}: not complete")
+        # Safe, complete, the threads and the K7 wall in their bands and
+        # nothing uncut but the M4s are the `plate CAM` requirements above.
         # A toolpath warning is a feeds finding (a cutter cutting with its
         # shank): the job is not one to run as it stands.
         for w in s.get("toolpath", {}).get("warnings") or []:
             problems.append(f"{sname}: {w}")
-        if v.get("cuts_nothing"):
-            problems.append(f"{sname}: its program cuts nothing")
-        if v.get("failed_ops"):
-            problems.append(f"{sname}: {v['failed_ops']} op(s) produced no "
-                            "toolpath")
-        for th in v.get("threads", []):
-            if not (th.get("judged") and th.get("in_band")):
-                problems.append(f"{sname}: thread {th.get('designation')} "
-                                "not judged in band")
-        for f in v.get("fits", []):
-            if not f.get("in_band"):
-                problems.append(f"{sname}: {f.get('class')} wall not cut in "
-                                "its band")
-        # The job leaves the M4 threads to a hand tap, and nothing else: any
-        # other hole or thread it does not cut is a missing operation.
-        for u in v.get("uncut", []):
-            if not (u.get("kind") == "thread" and
-                    u.get("what", "").startswith(SCREW_THREAD)):
-                problems.append(f"{sname}: not cut: {u.get('what')}")
         if "refused" in s.get("post", {}):
             problems.append(f"{sname}: post refused")
         if "refused" in s.get("sheet", {}):
