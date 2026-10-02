@@ -120,8 +120,6 @@ them:
   in-document form, for a composite that recurs across projects. An
   interpreter inside regeneration is not the answer: it brings a sandbox, a
   pinned runtime version and a new determinism gate.
-- `extract_variables`: turn a model's literals into named variables in one
-  verb ([plans/extract-variables.md](plans/extract-variables.md)).
 - **Design requirements stored with the project.** A generator's acceptance
   criteria live in its own script, so a later edit cannot be checked against
   them and a check run before an edit looks like one run after it. The

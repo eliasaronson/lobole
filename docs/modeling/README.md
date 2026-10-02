@@ -207,6 +207,10 @@ from sketches.
   diameter and radius, a size that is not positive, a feature that is not a
   plane. `modify_feature` refuses `type: Box|Cylinder|Sphere`; a primitive
   is changed through its sketch's dimensions or its extrude.
+- **On a world plane over a face, the lint says so.** A primitive placed
+  on Top/Front/Right at an offset, or on a datum plane, where a planar face
+  of the part already lies is a `check_literals` placement finding naming
+  that face ([../variables/README.md](../variables/README.md#literals-that-should-be-expressions)).
 - **A lost reference is the sketch's error**, never the world plane: a
   deleted or suppressed datum, sketch or frame ("the plane this sketch is on
   ... is gone"), a face that no longer resolves. An Extrude or Revolve whose
@@ -511,7 +515,10 @@ pieces interfere fails outright.
 whole spec, keeps the id), `delete_feature`, `suppress_feature {feature_id,
 suppressed}`, `set_rollback {feature_id | index}`, `set_material`,
 `set_appearance`, `project_geometry`, `update_derived`, `derive_occurrence`
-(`src/remote/RemoteModeling.cpp`); `list_elements`, `curve_points`,
+(`src/remote/RemoteModeling.cpp`), and there too `check_literals` and
+`extract_variables`
+([../variables/README.md](../variables/README.md#literals-that-should-be-expressions));
+`list_elements`, `curve_points`,
 `tube_schedule` (`src/remote/RemoteInspection.cpp`). `get_state` lists each
 feature with its error, warning, `suppressed` and, for a Derived, `stale`.
 

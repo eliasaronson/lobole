@@ -134,8 +134,13 @@ gated by the MCP host's tool approval.
 One MCP prompt, `modeling-workflow`, teaches the loop: variables first,
 constrain fully, read each mutating response's `regen` and `digest`, verify
 with `mass_properties` and `render_sheet`, gate assemblies on
-`contact_report`, and run [the review checklist](../inspect/review-checklist.md)
-before delivery. Changing it changes what the benchmark measures.
+`contact_report`, run `check_literals` on a part built from literals (and
+`extract_variables` to name them,
+[../variables/README.md](../variables/README.md#literals-that-should-be-expressions)),
+read `get_state`'s selection before acting on "this" or "the selected" and
+ask rather than guess when it is empty, and run
+[the review checklist](../inspect/review-checklist.md) before delivery.
+Changing it changes what the benchmark measures.
 
 ## Format documentation
 

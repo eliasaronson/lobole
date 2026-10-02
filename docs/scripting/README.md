@@ -217,8 +217,5 @@ through the MCP stdio layer).
   ([rpc.md](rpc.md#reads-name-their-part)).
 - Typed request/result contracts beyond the two inspection-snapshot methods
   ([../roadmap.md](../roadmap.md#6-the-agent-interface)).
-- A single verb that pulls hard-coded dimensions into variables, and a
-  workflow-prompt rule to read the selection first
-  ([../plans/extract-variables.md](../plans/extract-variables.md)).
 - A channel for an unattended agent to ask the human a question mid-task;
   `background_jobs` covers the asynchronous half only.

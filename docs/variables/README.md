@@ -176,6 +176,102 @@ the two around the evaluation. Driven sketch coordinates are held fixed in
 the solver, because the variable table owns their value, not the solver
 (see [../sketching/README.md](../sketching/README.md#linked-copies)).
 
+## Literals that should be expressions
+
+A shape can be consistent and still wrong, and nothing else catches it. Four
+numbers with an unstated relationship -- a bolt circle, a wall, a relief and
+a boss, each a bare literal -- let a boss hang off a flange while every check
+passes; had the boss been an expression of the others it could not have
+floated, and editing the wall would have carried it. `check_literals` points
+at the cause. It is ADVISORY: it reports and never refuses, because equal is
+not the same as related, and a lint that fires on every coincidence gets
+ignored.
+
+**The field walk** (`literals::Fields`, `src/core/Literals.{h,cpp}`) is
+generic. A feature declares its expression pairs through `VisitExprs` and
+writes each as `<field>_expr`; the walk puts a sentinel text into every pair
+of a CLONE, serializes it, and reads back where each landed. So a new
+feature type takes part the day it has a `VisitExprs` and a serializer, with
+no table to forget, and a pair its serializer does not write (an extrude's
+second distance when it is not two-sided) is no field. A field is named by
+its path in the feature's JSON: `distance`, `angle_deg` (the key the number
+is under, beside `angle_expr`), `origin/2`, `constraints/3` (a sketch
+dimension), `entities/1/r` (a sketch entity's coordinate, which takes an
+expression even when it has none yet). Each carries its value in the
+expression's units (mm, degrees), its kind -- length, angle or count, from
+the field's name and a sketch dimension's kind -- and, when it must not be
+driven, why: a coordinate a sketch constraint names (drive the dimension), a
+sketch entity a pattern, mirror, copy or projection generates, a hole
+diameter its fit sets, an extrude distance that ends through all or up to a
+face.
+
+**Literal findings.** A field holding a bare number EQUAL (to 1e-6 mm) to a
+variable in scope -- the part's own, then the project's it does not shadow --
+is reported with every variable it equals (`-name` when it is the negation).
+Zero is never a finding. A literal is only compared with a variable of the
+same kind, and a variable's kind is what it is USED as across every part of
+the project (a bare reference in a field of that kind, or any reference from
+a length field that does not multiply two names), what its name says
+(`_deg`, `angle`, `count`, `teeth`), and what its comment's leading unit
+says (`mm, ...` a length; `N, ...`, `MPa`, `kg` never a length; a ratio, a
+factor or a width "in modules" a count). A variable none of those
+classify is compared with lengths only. On the pan/tilt generator's output
+the comment rule is what kept `finger_n = 8` (newtons) off an 8 mm hole
+depth and `face_k = 6.7` (a width in modules) off a 6.7 mm frame height.
+
+**Placement findings.** A sketch -- a primitive is one
+([../modeling/README.md](../modeling/README.md#primitives)) -- or an
+explicit `Frame` placed in the WORLD (a baked base plane at any offset, a
+`DatumPlane`, another world-placed sketch's plane, an explicit frame or an
+offset of one) whose plane a planar face of the part already lies on, over
+that face, is reported with the face it should be attached to (`face_ref`
+for a sketch, a frame `from_element`): attached to the world it floats, or
+is buried, the day the part changes. The faces are the ones that existed
+when it ran: the regen prefix cache's bodies, or on a part opened from baked
+geometry (which carries only the tip) the final bodies with each face's name
+cut back to what it was then -- the M steps of later features dropped, a
+face a later feature made (a G or S step) left out
+([../modeling/toponaming.md](../modeling/toponaming.md#naming-grammar)). Not
+reported: a placement whose offset follows a variable (a datum offset or a
+frame origin with an expression), a face lying in a base plane through the
+origin (the part's own datum, which what made the face measured from too),
+and a face in the plane its own feature's sketch was drawn on (an extrude's
+start cap over a sketch on the same plane). Reference (ghost) bodies are
+skipped.
+
+## Extracting variables
+
+`extract_variables` turns the active part's literal dimensions into named
+variables with expressions -- the parameters-first workflow, for a part that
+was built from numbers or imported. `literals::PlanExtract` plans it and
+changes nothing; `ui::ApplyExtractVariables` (`src/ui/LiteralActions.cpp`)
+applies a plan.
+
+- **A dry run first.** Without `apply` it answers the plan: each proposed
+  variable `{name, expression, value, quantity, uses[]}` and every literal
+  `left_alone` with the reason -- no expression twin, a unitless count, zero,
+  a full turn, or the field's own reason above. `feature_ids` and `fields`
+  narrow it; an unknown id or path is refused naming what exists.
+- **Names** are `<feature>_<field>` (a sketch dimension by its kind, an
+  entity coordinate by its field), after `prefix`, made unique against every
+  variable of the project and of every part. The expression is the shortest
+  text that reads back as exactly the number, so the geometry does not move
+  by an ulp.
+- **Equal is not related.** Within one feature equal values share one
+  variable (and the negation is `-name`); across features only with
+  `merge_equal: true`. `reuse: true` binds a literal to the ONE existing
+  variable it equals -- the lint's finding -- instead of a new one; a literal
+  equal to several is left alone, naming them.
+- **One undo step.** In `project` scope (the default) the new variables are
+  project variables, and the step is ONE entry on the project-variable
+  history that also carries the touched features' JSON
+  (`ProjectVarSnapshot::features`), so undo and redo put the features back
+  with the table. In `part` scope they are the part's own, and the step is
+  `SetVariableCommand`s plus `ModifyFeatureCommand`s coalesced on the part's
+  stack. A plan whose name has since been taken, or whose field has gone, is
+  refused ("run the dry run again"); an apply that would leave a touched
+  feature broken is rolled back and says which.
+
 ## Rename and delete
 
 - **Rename.** `Document::RenameParameter` rewrites every parameter and
@@ -216,6 +312,8 @@ The RPCs are handled in `src/remote/RemoteProject.cpp`.
 | `set_table` | `name, columns, rows, comment?` | Adds or replaces a project table. A row is `{key, values: [...]}` or `{key, <column>: value, ...}`; a column a row names that the table does not have is refused naming the columns. Returns `{table, regen?}`. |
 | `list_tables` | `name?` | Every table, or the one named (an unknown name is refused naming the tables). |
 | `delete_table` | `name` | Refused while any expression reads it (naming them), or when there is no such table. |
+| `check_literals` | `part?` | The advisory lint ([above](#literals-that-should-be-expressions)), in `src/remote/RemoteModeling.cpp`: `{part, literals[], placements[], checked}`. Never refuses. |
+| `extract_variables` | `feature_ids?, fields?, prefix?, merge_equal?, reuse?, scope?, apply?` | A dry run without `apply` ([above](#extracting-variables)); with it one undo step, `{applied, scope, variables[], left_alone[], regen, digest}`. `scope` other than `project`/`part` is refused. |
 
 Every numeric feature parameter also accepts an expression, as a
 `<field>_expr` key in the feature JSON passed to `add_feature` or
@@ -254,6 +352,13 @@ Every numeric feature parameter also accepts an expression, as a
   - A feature dimension (`ExprDim` in `src/ui/FeatureEditor.cpp`) has an
     **fx** button that stores the expression text and shows its value or
     error. A **123** button turns it back into a literal.
+- **Literals** is a section of the same panel (`src/ui/LiteralsPanel.cpp`,
+  `DrawLiteralsSection`), on the same actions as the RPCs: **Check** runs
+  the lint on the active part, each literal equal to one variable has a
+  **Use** that binds it (`###literal_use_<feature id>_<path with dots>`),
+  and **Extract variables** plans on the selected features (every feature
+  when none is) into project or part scope, listing the proposals until
+  **Apply** or **Cancel**. GUI test `variables/literals_by_clicking`.
 - The inline sketch dimension editor accepts an expression in the same way.
   It is covered by the GUI tests `dims/inline_editor_expression` and
   `dims/inline_editor_completes_a_variable`.
@@ -282,6 +387,17 @@ Every numeric feature parameter also accepts an expression, as a
   undoing, and refusing a delete while read.
 - `tests/tables_smoke.py` covers the RPCs, both row forms, and the tables
   surviving a flat save and a project.json save.
+- `tests/test_literals.cpp` covers the walk and the lint: a literal equal to
+  a variable reported, the same field driven by it not, a count never
+  against a length, a variable's comment saying what it measures, a sketch
+  on a datum plane over a plate's top face reported with that face and not
+  once attached to it, an expression-driven offset not reported, a field in
+  degrees named by its own key, and a plan that applied drives the same
+  geometry.
+- `tests/literals_smoke.py` covers the RPCs: both findings, a dry run that
+  changes nothing, an apply that moves no geometry and puts an expression on
+  every field it proposed, each new variable moving exactly the fields it
+  drives, one undo and a redo in either scope, `reuse`, and the refusals.
 - `tests/golden/v11-expressions.json`, `v38-entity-exprs.json` and
   `v150-lookup-table.json` pin the file format.
 
@@ -295,5 +411,8 @@ Every numeric feature parameter also accepts an expression, as a
 - Per-sketch local variables, conditionals, and string values (a quoted
   name is a lookup's argument, not a value).
 - Table cells holding expressions, or text; a table per part.
-- A verb that turns the selected features' literal dimensions into named
-  variables in one step (`extract_variables`).
+- The lint suggesting `lookup(...)` for a literal equal to a table cell, or
+  re-attaching a world-placed sketch to the face it found (a sketch on a
+  face takes the face's frame, so its coordinates change too).
+- Placement findings for anything but sketches and explicit frames: a
+  revolve's custom axis, a 3D curve's points.
