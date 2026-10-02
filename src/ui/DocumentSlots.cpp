@@ -131,6 +131,9 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.jobHistory = {};
   state.drawingRenders.clear();
   state.drawingRendersVersion = 0;
+  // The assembly's motion results went with it (stashed per tab: StashActive).
+  state.motionResults.clear();
+  state.motionResultRevisions.clear();
   // The job's assembled bodies are keyed on document ids that this
   // replacement is about to reuse, so a stale cache reads as a hit for an
   // unrelated part -- the same trap ReleasePartRenderCache exists for.
@@ -258,6 +261,13 @@ void StashActive(AppState& state) {
   slot.lastSavedVersion = state.lastSavedVersion;
   slot.solvedPartVersions = std::move(state.solvedPartVersions);
   state.solvedPartVersions.clear(); // moved-from: guarantee empty
+  // Motion results are by study id, which is unique within one assembly
+  // only: left in AppState, the next assembly's study of the same id read
+  // this one's verdict until a run of its own replaced it.
+  slot.motionResults = std::move(state.motionResults);
+  state.motionResults.clear();
+  slot.motionResultRevisions = std::move(state.motionResultRevisions);
+  state.motionResultRevisions.clear();
 }
 
 // Move a slot's model into AppState as the active tab. Assumes AppState holds
@@ -278,6 +288,10 @@ void ActivateSlot(AppState& state, size_t index) {
   state.lastSavedVersion = slot.lastSavedVersion;
   state.solvedPartVersions = std::move(slot.solvedPartVersions);
   slot.solvedPartVersions.clear();
+  state.motionResults = std::move(slot.motionResults);
+  slot.motionResults.clear();
+  state.motionResultRevisions = std::move(slot.motionResultRevisions);
+  slot.motionResultRevisions.clear();
   state.activePart = static_cast<int>(index);
 }
 

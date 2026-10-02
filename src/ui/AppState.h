@@ -854,6 +854,12 @@ struct PartSlot {
   // Version and the configurations' revision) at this assembly's last solve,
   // stashed while inactive. See AppState field.
   std::unordered_map<uint64_t, uint64_t> solvedPartVersions;
+  // Assembly tabs only: the session's motion results and the revisions they
+  // ran at, stashed while inactive. A study id is unique within its assembly
+  // only, so held in AppState across a switch they answered the next
+  // assembly's study of the same id. See AppState::motionResults.
+  std::map<uint64_t, motion::Result> motionResults;
+  std::map<uint64_t, std::string> motionResultRevisions;
 };
 
 // THE selection (docs/ui/selection.md#one-selection-set): one typed, ordered
@@ -1242,6 +1248,8 @@ struct AppState {
   bool motionToolOpen = false;
   std::string motionAddRefusal; // why Add/Run refused, shown in the panel
   std::shared_ptr<collide::ExactContactCache> motionContacts;
+  // The ACTIVE assembly's results by study id, and the revisions they ran at;
+  // stashed on its PartSlot while another tab is active.
   std::map<uint64_t, motion::Result> motionResults;
   std::map<uint64_t, std::string> motionResultRevisions;
   // The session's recent motion results by INPUT HASH

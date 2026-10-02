@@ -352,12 +352,9 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::ImportRunning(*s_App));
     IM_CHECK_EQ(s_App->parts.size(), tabsBefore);
 
-    bool sawModal = false;
-    for (int i = 0; i < 600 && !sawModal; i++) {
-      ctx->Yield();
-      sawModal = ctx->ItemExists("//Importing STEP/Cancel###import_cancel");
-    }
-    IM_CHECK(sawModal);
+    IM_CHECK(WaitFor(ctx, "the import modal", [&] {
+      return ctx->ItemExists("//Importing STEP/Cancel###import_cancel");
+    }));
     IM_CHECK(ui::ImportRunning(*s_App));
     ui::HoldImportWorkerForTesting(false);
 
@@ -366,9 +363,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // modal is drawn by DockLayout rather than a toolbar precisely so it
     // survives the part->assembly tab switch that materialization performs
     // halfway through.
-    for (int i = 0; i < 2000 && ui::ImportRunning(*s_App); i++)
-      ctx->Yield();
-    IM_CHECK(!ui::ImportRunning(*s_App));
+    IM_CHECK(WaitFor(ctx, "the import to land",
+                     [] { return !ui::ImportRunning(*s_App); }));
     IM_CHECK(s_App->importError.empty());
 
     // A part tab per product plus the assembly, and one more occurrence than
@@ -660,10 +656,11 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     const std::string modeBefore =
         s_App->assembly->FindMotionStudyById(study.id)->clashMode;
     ctx->ItemClick("//Motion###ToolWindow/###motion_preview");
-    for (int i = 0; i < 600 && ui::MotionResultFor(*s_App, study.id) == nullptr;
-         i++)
-      ctx->Yield();
-    IM_CHECK(ui::MotionResultFor(*s_App, study.id) != nullptr);
+    // The run landed: no job left, not merely some result present.
+    IM_CHECK(WaitFor(ctx, "the preview's run", [&] {
+      return !ui::BackgroundJobRunning(*s_App, "motion") &&
+             ui::MotionResultFor(*s_App, study.id) != nullptr;
+    }));
     IM_CHECK(!ui::MotionResultFor(*s_App, study.id)->checkedClashes);
     IM_CHECK(s_App->assembly->FindMotionStudyById(study.id)->checkClash);
     // A preview of an unchanged study is a fresh result, not a stale one.
@@ -671,11 +668,11 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     // Run: a job; wait for it to land (a two-body turn is milliseconds).
     ctx->ItemClick("//Motion###ToolWindow/###motion_run");
-    for (int i = 0;
-         i < 600 && (!ui::MotionResultFor(*s_App, study.id)->checkedClashes ||
-                     ui::MotionResultStale(*s_App, study.id));
-         i++)
-      ctx->Yield();
+    WaitFor(ctx, "the validated run", [&] {
+      const motion::Result* got = ui::MotionResultFor(*s_App, study.id);
+      return got != nullptr && got->checkedClashes &&
+             !ui::MotionResultStale(*s_App, study.id);
+    });
     const motion::Result* r = ui::MotionResultFor(*s_App, study.id);
     IM_CHECK(r != nullptr);
     IM_CHECK(r->checkedClashes);
@@ -690,8 +687,8 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     const glm::dmat4 docBefore = ui::OccurrenceMatrix(*armNow);
     ctx->ItemClick("//Motion###ToolWindow/###motion_play");
     IM_CHECK(s_App->motionPlaybackStudy == study.id && s_App->motionPlaying);
-    for (int i = 0; i < 600 && s_App->motionPlaybackPos < 5.0; i++)
-      ctx->Yield();
+    WaitFor(ctx, "playback to advance",
+            [] { return s_App->motionPlaybackPos >= 5.0; });
     IM_CHECK(s_App->motionPlaybackPos >= 5.0); // it advances on its own
     const glm::mat4 shown = ui::DisplayMatrixOf(*s_App, *armNow);
     const glm::dmat4 docNow = ui::OccurrenceMatrix(*armNow);
@@ -753,11 +750,32 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
            ImGuiItemFlags_Disabled) != 0);
 
       job.done.store(true); // no thread to join; let the registry reap it
-      for (int i = 0; i < 60 && ui::BackgroundJobRunning(*s_App, "motion"); i++)
-        ctx->Yield();
-      IM_CHECK(!ui::BackgroundJobRunning(*s_App, "motion"));
+      IM_CHECK(WaitForJobs(ctx, "motion"));
       IM_CHECK(ctx->ItemExists(
           "//Motion###ToolWindow/###motion_run")); // buttons back
+    }
+
+    // The result is THIS assembly's. A study id is unique within its
+    // assembly only, and the session's results were keyed by it alone: the
+    // next assembly's study of the same id read this one's verdict (stale)
+    // until a run of its own landed -- which a quiet machine did within the
+    // frames of the click, and a loaded one did not.
+    {
+      const uint64_t sid = study.id;
+      const uint64_t asmSlot = s_App->parts[asmIdx].id;
+      ui::SetActivePart(*s_App, ui::AddAssembly(*s_App, "Other"));
+      ctx->Yield(2);
+      IM_CHECK(ui::MotionResultFor(*s_App, sid) == nullptr);
+      for (size_t i = 0; i < s_App->parts.size(); i++)
+        if (s_App->parts[i].id == asmSlot)
+          ui::SetActivePart(*s_App, i);
+      ctx->Yield(2);
+      IM_CHECK(ui::MotionResultFor(*s_App, sid) != nullptr);
+      IM_CHECK(!ui::MotionResultStale(*s_App, sid));
+      if (!s_App->motionToolOpen)
+        ToolbarClick(ctx, "###tb_asm_motion");
+      ctx->Yield(2);
+      IM_CHECK(s_App->motionToolOpen);
     }
 
     ctx->ItemClick("//Motion###ToolWindow/###motion_delete");
