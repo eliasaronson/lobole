@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
-"""Stage 8: the drawings. Opens cam.dsgn, saves drawings.dsgn; the sheets go
-to scratch/pantilt/drawings/ as PDF and SVG.
+"""Stage 8: the drawings. Opens stages/cam.dsgn and saves the head's one
+project, scratch/pantilt/pantilt.dsgn: parts, assembly, requirements, the
+CAM job and the drawings. The sheets go to scratch/pantilt/drawings/ as PDF
+and SVG.
 
     python3 generators/pantilt/build_drawings.py --port N
 
@@ -461,7 +463,7 @@ def main():
     a = common.args()
     app = common.connect(a.port)
     clock = common.Clock()
-    app.call("open_project", path=str(OUT / "cam.dsgn"))
+    app.call("open_project", path=str(common.stage("cam")))
     plate = app.part("base_plate", create=False)
     plate.activate()
     V = variables(app)
@@ -477,7 +479,7 @@ def main():
     clock("assembly sheet")
     report["print"] = print_sheet(app, V)
     clock("print sheet")
-    common.save(app, "drawings.dsgn")
+    common.save_final(app)
     (OUT / "drawings_report.json").write_text(json.dumps(
         {k: {"ok": v["ok"], "issues": v["issues"]} for k, v in report.items()},
         indent=1))
@@ -485,7 +487,7 @@ def main():
     if dirty:
         raise SystemExit(f"drawings: check_drawing found issues on "
                          f"{', '.join(dirty)} (drawings_report.json)")
-    print("done")
+    print("drawings: every sheet clean")
 
 
 if __name__ == "__main__":

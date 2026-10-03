@@ -16,6 +16,13 @@ HERE = Path(__file__).resolve().parent
 OUT = Path(os.environ.get("DESIGNER_SCRATCH")
            or HERE.parent.parent / "scratch") / "pantilt"
 OUT.mkdir(parents=True, exist_ok=True)
+# The head is ONE project at the top, the drawings stage's: parts, assembly,
+# requirements, the CAM job and the drawings. What each stage before it
+# saved -- the project `--from` resumes from -- is kept apart under stages/,
+# so whoever opens the output finds the head and not nine snapshots of it.
+FINAL = OUT / "pantilt.dsgn"
+STAGES = OUT / "stages"
+STAGES.mkdir(parents=True, exist_ok=True)
 sys.path.insert(0, str(HERE.parent.parent / "tools"))
 sys.path.insert(0, str(HERE))
 from designer_sdk import connect, Plane, Param  # noqa: E402,F401
@@ -211,10 +218,23 @@ def ring_groove_face(part):
     return floors[0].ref
 
 
+def stage(name):
+    """Where the stage snapshot `name` is saved: stages/<name>.dsgn."""
+    return STAGES / f"{name}.dsgn"
+
+
 def save(app, name):
-    path = OUT / name
+    """Save a stage's snapshot, stages/<name>.dsgn: what the next stage, or
+    `run_all.sh --from`, opens."""
+    path = stage(name)
     app.save_project(path=str(path))
     print("saved", path)
+
+
+def save_final(app):
+    """Save the head's one project, pantilt.dsgn at the output's top."""
+    app.save_project(path=str(FINAL))
+    print("saved", FINAL)
 
 
 def requirements_met(app):

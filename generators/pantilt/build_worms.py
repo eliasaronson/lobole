@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Stage 2: the worm, its bearing block and its knob. Opens base.dsgn,
-saves worms.dsgn.
+"""Stage 2: the worm, its bearing block and its knob. Opens stages/base.dsgn,
+saves stages/worms.dsgn.
 
     python3 generators/pantilt/build_worms.py --port N
 
@@ -166,7 +166,7 @@ def main():
     a = common.args()
     app = common.connect(a.port)
     clock = common.Clock()
-    app.call("open_project", path=str(common.OUT / "base.dsgn"))
+    app.call("open_project", path=str(common.stage("base")))
     S = {}
     worm(app, S)
     clock("worm")
@@ -175,7 +175,7 @@ def main():
     knob(app, S)
     clock("knob")
     common.check_regen(app, "worms")
-    common.save(app, "worms.dsgn")
+    common.save(app, "worms")
 
 
 if __name__ == "__main__":

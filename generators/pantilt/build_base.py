@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Stage 1: the spec, the base plate and the pan wheel. Saves base.dsgn.
+"""Stage 1: the spec, the base plate and the pan wheel. Saves
+stages/base.dsgn.
 
     python3 generators/pantilt/build_base.py --port N
 
@@ -154,7 +155,7 @@ def main():
     clock("pan wheel")
     common.drop_default_part(app)
     common.check_regen(app, "base")
-    common.save(app, "base.dsgn")
+    common.save(app, "base")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 4: the yoke. Opens tilt.dsgn, saves yoke.dsgn.
+"""Stage 4: the yoke. Opens stages/tilt.dsgn, saves stages/yoke.dsgn.
 
     python3 generators/pantilt/build_yoke.py --port N
 
@@ -363,12 +363,12 @@ def main():
     a = common.args()
     app = common.connect(a.port)
     clock = common.Clock()
-    app.call("open_project", path=str(common.OUT / "tilt.dsgn"))
+    app.call("open_project", path=str(common.stage("tilt")))
     S = {}
     yoke(app, S, design="lightened")
     clock("yoke")
     common.check_regen(app, "yoke")
-    common.save(app, "yoke.dsgn")
+    common.save(app, "yoke")
 
 
 if __name__ == "__main__":

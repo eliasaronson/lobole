@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Stage 6: the aluminium base plate's CAM job on the 6090. Saves cam.dsgn.
+"""Stage 6: the aluminium base plate's CAM job on the 6090. Saves
+stages/cam.dsgn.
 
     python3 generators/pantilt/cam.py --port N [--shots]
 
-Opens scratch/pantilt/pantilt.dsgn (the assembly stage put the bearing
+Opens scratch/pantilt/stages/assembly.dsgn (the assembly stage put the bearing
 seat's K7 on the plate), makes a job on the base plate from a saw-cut blank,
 cuts it in two vise setups, verifies and posts each, and writes the programs
 and their setup sheets to scratch/pantilt/nc/ and a report to
@@ -305,7 +306,7 @@ def main():
     a = ap.parse_args()
     app = common.connect(a.port)
     clock = common.Clock()
-    app.call("open_project", path=str(OUT / "pantilt.dsgn"))
+    app.call("open_project", path=str(common.stage("assembly")))
     plate = app.part("base_plate", create=False)
     tol = [t for t in app.call("list_tolerances")["tolerances"]
            if t.get("class")]
@@ -433,7 +434,7 @@ def main():
                    "the part; the M4s are tapped by hand")
     report["requirements"], bad = common.requirements_met(app)
     clock("requirements")
-    common.save(app, "cam.dsgn")
+    common.save(app, "cam")
     (OUT / "cam_report.json").write_text(json.dumps(report, indent=1,
                                                     default=str))
     problems = []

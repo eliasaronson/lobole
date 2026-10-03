@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
-"""Stage 5: the head assembled, checked and moved. Opens yoke.dsgn, saves
-pantilt.dsgn, writes assembly_report.json, the BOM and the renders.
+"""Stage 5: the head assembled, checked and moved. Opens stages/yoke.dsgn,
+saves stages/assembly.dsgn, writes assembly_report.json, the BOM and the
+renders.
 
     python3 generators/pantilt/build_assembly.py --port N
 
@@ -412,6 +413,26 @@ def run_study(app, asm, name, driver, lo, hi, samples, clock):
     return out, sid
 
 
+def shaft_bearings(placed):
+    """The head's bearings by the shaft each carries, with the variable
+    that shaft's own minimum diameter is (spec.py): the yoke's pan journal
+    in the plate's and the wheel's bearings, the tilt shaft in the arms',
+    each worm's journals in its blocks'. Every placed bearing is in exactly
+    one group; one left out stops the stage."""
+    groups = [("pan journal", "pan_shaft_d_min",
+               [b for b in placed if b["seat"].startswith("pan ")]),
+              ("tilt shaft", "shaft_d_min",
+               [b for b in placed if b["seat"].startswith("tilt ")]),
+              ("worm journal", "worm_shaft_d_min",
+               [b for b in placed if b["seat"].endswith("_block_a")
+                or b["seat"].endswith("_block_b")])]
+    grouped = sum(len(g[2]) for g in groups)
+    if grouped != len(placed) or any(not g[2] for g in groups):
+        raise SystemExit(f"bearings by shaft: {grouped} of {len(placed)} "
+                         f"grouped: {[b['seat'] for b in placed]}")
+    return groups
+
+
 def requirements(app, asm, o, S, placed, pan_id, tilt_id):
     """What the head is for, stated as requirements the project holds
     (docs/requirements/README.md): `App.require` states each one, or edits
@@ -429,6 +450,18 @@ def requirements(app, asm, o, S, placed, pan_id, tilt_id):
         "occurrences": [b["occurrence"] for b in placed]},
         source="every ring is located, on a shoulder or by a retaining ring "
                "beside it, and every shoulder is inside SKF's abutment limits")
+    # Every bearing against the shaft it carries: the shaft is sized from
+    # the load (spec.py: `*_shaft_d_min`), the bearing is a catalogue row
+    # chosen once, and a row does not follow a variable -- so a heavier
+    # camera regenerates the shaft's own minimum past a bore nothing else
+    # compares it with. One requirement per shaft, over its bearings.
+    for what, minimum, bearings in shaft_bearings(placed):
+        app.require(f"the {what}'s bearings take its minimum", {
+            "kind": "bearing_bore", "document": asm.id,
+            "occurrences": [b["occurrence"] for b in bearings]},
+            at_least=minimum,
+            source=f"`{minimum}` is the {what} sized for its load at 3 g; "
+                   "each bearing's bore must take it")
     app.require("fasteners: only the camera socket's", {
         "kind": "check_fasteners", "document": asm.id,
         "allow": [{"part": "ASME B18.3 1/4-20", "why": "of thread in camera",
@@ -507,7 +540,7 @@ def main():
     a = common.args()
     app = common.connect(a.port)
     clock = common.Clock()
-    app.call("open_project", path=str(common.OUT / "yoke.dsgn"))
+    app.call("open_project", path=str(common.stage("yoke")))
     S = spec.values(app.part("base_plate", create=False))
     asm = app.assembly("pantilt")
     asm.activate()
@@ -534,7 +567,7 @@ def main():
     REPORT["bom"] = bom(app, asm)
     REPORT["mass"] = masses(app, asm, o)
     clock("bom and mass")
-    common.save(app, "pantilt.dsgn")
+    common.save(app, "assembly")
     # Pan: the wheel is the base's, so the worm walks round it; 360 degrees
     # of pan is wheel_teeth turns of the worm.
     ratio = S["wheel_teeth"] / S["worm_starts"]
@@ -545,13 +578,13 @@ def main():
     REPORT["tilt_study"], tilt_id = run_study(
         app, asm, "tilt +-90", m["tilt_worm"], -90.0 * ratio, 90.0 * ratio,
         int(STUDY_SAMPLES), clock)
-    common.save(app, "pantilt.dsgn")
+    common.save(app, "assembly")
     REPORT["renders"] = renders(app, asm, m["tilt_worm"])
     clock("renders")
     requirements(app, asm, o, S, placed, pan_id, tilt_id)
     REPORT["requirements"], bad = common.requirements_met(app)
     clock("requirements")
-    common.save(app, "pantilt.dsgn")
+    common.save(app, "assembly")
     REPORT["time"] = clock.rows
     (common.OUT / "assembly_report.json").write_text(
         json.dumps(REPORT, indent=1, default=str))

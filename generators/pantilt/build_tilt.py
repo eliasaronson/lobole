@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Stage 3: what turns about the tilt axis -- the tilt wheel on its shaft,
-the cradle (the camera plate) and the camera. Opens worms.dsgn, saves
-tilt.dsgn. The camera screw is bought, an ASME B18.3 standard part, and
-the assembly places it (build_assembly.py).
+the cradle (the camera plate) and the camera. Opens stages/worms.dsgn,
+saves stages/tilt.dsgn. The camera screw is bought, an ASME B18.3 standard
+part, and the assembly places it (build_assembly.py).
 
     python3 generators/pantilt/build_tilt.py --port N
 
@@ -176,7 +176,7 @@ def main():
     a = common.args()
     app = common.connect(a.port)
     clock = common.Clock()
-    app.call("open_project", path=str(common.OUT / "worms.dsgn"))
+    app.call("open_project", path=str(common.stage("worms")))
     S = {}
     tilt_wheel(app, S)
     clock("tilt wheel")
@@ -185,7 +185,7 @@ def main():
     camera(app, S)
     clock("camera")
     common.check_regen(app, "tilt")
-    common.save(app, "tilt.dsgn")
+    common.save(app, "tilt")
 
 
 if __name__ == "__main__":

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Stage 6: the yoke under load, and what topology made of it. Opens
-pantilt.dsgn, saves yoke_topo.dsgn (the head with the studies, the solid
-yoke, the envelope and its topology result, and the print pieces), writes
-yoke_topo_report.json, the pictures and the pieces' STLs.
+stages/assembly.dsgn, saves stages/yoke_topo.dsgn (the head with the
+studies, the solid yoke, the envelope and its topology result, and the print
+pieces), writes yoke_topo_report.json, the pictures and the pieces' STLs.
 
     python3 generators/pantilt/build_yoke_topo.py --port N
 
@@ -289,16 +289,16 @@ def volume(app, part):
 
 
 def topo_step(app, S, G, cases, target_volume, fresh_run, clock):
-    """The topology study, or the one `yoke_envelope.dsgn` already holds.
+    """The topology study, or the one `stages/yoke_envelope.dsgn` holds.
 
     A run is minutes on the GPU (two hours on the CPU when its solver could
     not converge), so its project is kept: when the envelope built now has
     the volume the saved one has (it is the same envelope) and the saved
     study carries the same cases, its result is reused -- pictured,
     checked and reported again, not re-run. Called last, on the session
-    saved as yoke_topo.dsgn: a fresh run adds the envelope to it and saves
-    that as yoke_envelope.dsgn."""
-    saved = common.OUT / "yoke_envelope.dsgn"
+    saved as stages/yoke_topo.dsgn: a fresh run adds the envelope to it and
+    saves that as stages/yoke_envelope.dsgn."""
+    saved = common.stage("yoke_envelope")
     fresh(app, "yoke_envelope")
     env = build_yoke.yoke(app, dict(S), name="yoke_envelope",
                           design="envelope")
@@ -341,7 +341,7 @@ def topo_step(app, S, G, cases, target_volume, fresh_run, clock):
         print(f"  topology: {saved.name} is for another envelope or other "
               f"cases ({v_old:.0f} against {v_now:.0f} mm3): running it",
               flush=True)
-        app.call("open_project", path=str(common.OUT / "yoke_topo.dsgn"))
+        app.call("open_project", path=str(common.stage("yoke_topo")))
         env = build_yoke.yoke(app, dict(S), name="yoke_envelope",
                               design="envelope")
     env, REPORT["topology"] = topology(app, S, env, cases, target_volume,
@@ -350,7 +350,7 @@ def topo_step(app, S, G, cases, target_volume, fresh_run, clock):
     REPORT["topology_pictures"] = pictures(app, env, sid)
     REPORT["topology_check"] = check(app, S, env, G, cases, sid)
     clock("topology check")
-    common.save(app, "yoke_envelope.dsgn")
+    common.save(app, "yoke_envelope")
 
 
 def topology(app, S, env, cases, target_volume, clock):
@@ -590,12 +590,12 @@ def main():
                     help="which of solid,topo,yoke to run (default: all)")
     ap.add_argument("--fresh-topology", action="store_true",
                     help="run the topology study even when "
-                         "yoke_envelope.dsgn holds a result for this "
+                         "stages/yoke_envelope.dsgn holds a result for this "
                          "envelope and its cases (minutes on the GPU)")
     a = ap.parse_args()
     app = common.connect(a.port)
     clock = common.Clock()
-    app.call("open_project", path=str(common.OUT / "pantilt.dsgn"))
+    app.call("open_project", path=str(common.stage("assembly")))
     S = spec.values(app.part("yoke", create=False))
     fresh(app, "yoke_solid")
     solid = build_yoke.yoke(app, dict(S), name="yoke_solid", design="solid")
@@ -625,7 +625,7 @@ def main():
         clock("print pieces")
         REPORT["stills"] = stills(app, [solid, yoke])
         clock("stills")
-    common.save(app, "yoke_topo.dsgn")
+    common.save(app, "yoke_topo")
     if "topo" in steps:
         # The same material as the head's yoke, so the optimiser's layout
         # and the hand re-model compare directly, case by case.
@@ -634,9 +634,9 @@ def main():
                   a.fresh_topology, clock)
     # topo_step opens and saves yoke_envelope.dsgn when it has to run, so
     # the head's requirements are checked on the head's project.
-    app.call("open_project", path=str(common.OUT / "yoke_topo.dsgn"))
+    app.call("open_project", path=str(common.stage("yoke_topo")))
     REPORT["requirements"], bad = common.requirements_met(app)
-    common.save(app, "yoke_topo.dsgn")
+    common.save(app, "yoke_topo")
     REPORT["time"] = clock.rows
     (common.OUT / "yoke_topo_report.json").write_text(
         json.dumps(REPORT, indent=1, default=str))

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 9: the final renders of the head. Opens drawings.dsgn; writes
+"""Stage 9: the final renders of the head. Opens pantilt.dsgn; writes
 scratch/pantilt/renders/ and saves nothing (it poses the head, renders,
 and puts it back).
 
@@ -124,7 +124,7 @@ def main():
     a = common.args()
     app = common.connect(a.port)
     clock = common.Clock()
-    app.call("open_project", path=str(OUT / "drawings.dsgn"))
+    app.call("open_project", path=str(common.FINAL))
     V = {v["name"]: v["value"]
          for v in app.call("list_variables")["variables"]}
     ratio = V["wheel_teeth"] / V["worm_starts"]
@@ -161,7 +161,7 @@ def main():
     for o in camera:
         app.call("set_occurrence_visible", id=o["id"], visible=True)
     clock("exploded")
-    print("done")
+    print("renders: written")
 
 
 if __name__ == "__main__":
