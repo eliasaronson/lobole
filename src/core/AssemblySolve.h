@@ -96,10 +96,18 @@ struct SolveReport {
 // before — a rigid unit's inner face sits at a known place in the unit, and
 // a flexible one's where its own inner poses put it. An ORIGIN anchor with a
 // path is the origin of what the path names, not the unit's.
+//
+// `followModified` (a seat's faces, SeatFrame): a face name that no longer
+// resolves is followed to the ONE face it became through later
+// modifications — its name plus whole `;M<tag>` steps, unsplit (a chamfer on
+// a bolt hole's rim modifies the bore and the face round it, and neither
+// stops being the face the screw sits in). A split (`.i`), or two faces
+// claiming the name, still fails: there is no one face to sit on.
 std::optional<glm::dmat4>
 ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
                     const PartResolver& partById, std::string* whyNot = nullptr,
-                    const AssemblyResolver& asmById = nullptr);
+                    const AssemblyResolver& asmById = nullptr,
+                    bool followModified = false);
 
 // Re-places every mated, non-`fixed` occurrence and writes the result back to
 // its transform (position + orientation). `fixed` occurrences and occurrences

@@ -184,6 +184,14 @@ naming the element — never a silent snap to a neighbouring face. Repair is
 re-picking: Reattach face… for a face-attached sketch, Pick edges… for a
 blend.
 
+An assembly's references resolve against the part's FINAL body, so a
+feature added after them does reach them. A mate connector still fails,
+suggesting the names that extend its own. A fastener's seat follows the one
+face its name became through whole, unsplit `;M<tag>` steps -- the same
+face, modified (a chamfer on its rim) -- and fails on a split
+(`;M<tag>.<i>`), naming the feature that split it
+([attached and mated](../parts/README.md#attached-and-mated)).
+
 Edge picks for a blend are stored against the blend's **input** body, not its
 displayed output (whose names already carry the blend's own tag):
 `Document::CachedBodiesAfter` supplies the input, and

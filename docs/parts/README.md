@@ -220,6 +220,18 @@ tables, which are metric, and is refused for an inch screw naming
   concentric + coincident mate to those faces would. With a seat,
   `attachOffset`/`attachRotation` are in its frame (a washer's thickness
   under a head, the turn of a nut).
+- **It follows its faces through a later modification, not a split.** A
+  chamfer on the hole's rim modifies the bore and the face round it, so
+  their names gain `;M<chamfer>`
+  ([naming](../modeling/toponaming.md#naming-grammar)); a seat name that no
+  longer resolves is followed to the ONE face whose name is it plus whole,
+  unsplit `;M<tag>` steps (`ConnectorLocalFrame`'s `followModified`, which
+  a mate does not ask for). The stored names are not rewritten, so undoing
+  the chamfer finds them as they were. A face cut in pieces (`;M<tag>.<i>`)
+  names no one face to sit on, and the seat is lost saying which feature
+  split it: on the pan/tilt head a joint-screw hole breaking out through the
+  part's end split its bore in two (`feature 39 split the face into 2
+  pieces`), which is the model to fix, not the seat.
 - **Any standard part, not just a screw.** Nothing in a seat is a
   fastener's: a retaining ring against its groove's flank, a part against a
   shaft's shoulder, are the same two faces. `assembly::SeatRider` seats an
@@ -255,9 +267,15 @@ tables, which are metric, and is refused for an inch screw naming
   one with no hole there keeps its offset and its `attach_warning`.
 - Placing also adds a **fastened mate named `Bolted`** across every interface
   the joint spans (consecutive parts along the axis, hardware excluded), for
-  every bolt, anchored on the two touching faces. Its degrees of freedom are
-  measured from the parts' current poses through the solver's own
-  `ConnectorLocalFrame`, so the solve that follows moves nothing. Several bolts
+  every bolt, anchored on the two touching faces and snapped to each face's
+  rim of the hole (`snapEdge`: the connector's origin is the hole's centre),
+  so the joint holds the HOLES in line. Anchored on the faces alone it held
+  their centroids, which move against the holes when a part changes shape:
+  the pan/tilt head's worm blocks missed their joints by 5 mm at a heavier
+  load. A snap edge that no longer resolves (a chamfer took the rim) errors
+  the mate rather than falling back to the face's centroid. Its degrees of
+  freedom are measured from the parts' current poses through the solver's
+  own `ConnectorLocalFrame`, so the solve that follows moves nothing. Several bolts
   across one interface close consistent loops, which the loop solver reports as
   `redundant_mates` rather than errors. The ids come back as `mates`.
 

@@ -28,7 +28,7 @@ stored, so a part edit moves the connector with the geometry.
 | … cylindrical | Z the axis, origin the face centroid projected onto the axis, X the cylinder's **seam** (`CADShape::FaceAxis`; see below) |
 | … conical | Z the axis, origin the apex, X the cone's seam |
 | … spherical | origin the centre, Z world +Z |
-| `snap_edge` (with a face) | origin moved to that edge's characteristic point — a circular edge's centre, else its midpoint; the face still gives Z |
+| `snap_edge` (with a face) | origin moved to that edge's characteristic point — a circular edge's centre, else its midpoint; the face still gives Z. An edge that no longer resolves errors the connector rather than leaving the origin at the face's centroid, a different point |
 | `snap_edge` + `snap_edge2` | origin at the vertex the two edges share (a corner). A corner has no persistent name of its own, but two named edges do; when they share none or more than one vertex, the origin falls back to `snap_edge`'s own point rather than guess. |
 
 Faces and edges are toponaming `ElementRef`s

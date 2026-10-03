@@ -51,6 +51,8 @@
 #include "core/Occurrence.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/FilletFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/SplitFeature.h"
@@ -1768,6 +1770,181 @@ TEST_CASE("A placed fastener follows its hole when the hole moves in its part",
   half["attach_seat"].erase("axis");
   CHECK_THROWS_WITH(DocumentIO::OccurrenceFromJson(half),
                     Catch::Matchers::ContainsSubstring("attach_seat needs"));
+}
+
+TEST_CASE("A seated fastener follows its hole through a later modification, "
+          "not through a split",
+          "[actions][parts]") {
+  // A chamfer on a bolt hole's rim MODIFIES the bore and the face round it
+  // (their names gain ";M<chamfer>"), and the screw, its washer and its nut
+  // fell out of their seats: a seat named the faces exactly. A modified
+  // face is the same face (docs/parts/README.md#attached-and-mated). A face
+  // cut in TWO is not: on the pan/tilt head, a yoke whose joint-screw holes
+  // broke out through the part's end split each bore into ";M39.0" and
+  // ";M39.1", and that must still say so.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const DrilledPlate top = MakePlate(state, "Top", 12.0, 6.6, -1.0, 0.0);
+  ui::SetActivePart(state, ui::AddAssembly(state, "Bolted"));
+  Occurrence plate;
+  plate.partId = ui::PartIdByName(state, "Top");
+  plate.name = "Top";
+  const uint64_t topOcc = state.assembly->AddOccurrence(plate);
+
+  ui::FastenerRequest request;
+  request.washerUnderHead = true;
+  const ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{topOcc, top.topRim}, request);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  REQUIRE(fit.placed.size() == 2); // screw, washer
+  const auto occOf = [&](uint64_t id) { return state.assembly->FindById(id); };
+  const AttachSeat seat = occOf(fit.placed[0])->attachSeat;
+  REQUIRE(seat.IsSet());
+  std::vector<glm::dvec3> was;
+  for (const uint64_t id : fit.placed)
+    was.push_back(occOf(id)->position);
+
+  Document* doc = ui::PartDocById(state, top.partId);
+  REQUIRE(doc != nullptr);
+  const auto faceNamed = [&](const std::string& prefix) {
+    std::vector<std::string> out;
+    for (const auto& [i, n] : doc->GetBodies().front().elementMap.names)
+      if (n.compare(0, prefix.size(), prefix) == 0)
+        out.push_back(n);
+    return out;
+  };
+
+  // The rim chamfered: both seat faces are renamed, the seat is not lost.
+  doc->AddFeature(std::make_unique<FilletFeature>(
+      "Rim", std::vector{top.topRim}, 0.5, EdgeBlendOp::Chamfer));
+  doc->Regenerate();
+  for (const auto& f : doc->GetFeatures())
+    REQUIRE(f->GetError().empty());
+  const std::string chamfer =
+      ";M" + std::to_string(doc->GetFeatures().back()->GetId());
+  REQUIRE(doc->GetBodies().front().elementMap.Resolve(seat.face.name) ==
+          std::nullopt);
+  REQUIRE(faceNamed(seat.face.name) ==
+          std::vector<std::string>{seat.face.name + chamfer});
+  REQUIRE(faceNamed(seat.axis.name) ==
+          std::vector<std::string>{seat.axis.name + chamfer});
+  {
+    const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(state);
+    INFO(occOf(fit.placed[0])->attachError);
+    CHECK(rep.erroredAttachments == 0);
+    for (size_t i = 0; i < was.size(); i++) {
+      CHECK(occOf(fit.placed[i])->attachError.empty());
+      CHECK(glm::length(occOf(fit.placed[i])->position - was[i]) < 1e-9);
+    }
+    // Followed, not rewritten: take the chamfer away and the names it
+    // stored resolve again as they are.
+    CHECK(occOf(fit.placed[0])->attachSeat.face.name == seat.face.name);
+    CHECK(occOf(fit.placed[0])->attachSeat.axis.name == seat.axis.name);
+  }
+  // A mate is not a seat: its connector still names the one face it means
+  // and says it was modified.
+  {
+    Connector c;
+    c.occurrenceId = topOcc;
+    c.anchor.face = seat.axis;
+    std::string why;
+    CHECK_FALSE(assembly::ConnectorLocalFrame(c, *state.assembly,
+                                              ui::PartResolverFor(state), &why)
+                    .has_value());
+    CHECK(why.find("modified by a later feature") != std::string::npos);
+  }
+
+  // A slot across the hole cuts the bore in two (its top face stays one
+  // face, ringing the hole and the slot): no one face to sit in.
+  auto slotSketch = std::make_unique<SketchFeature>(
+      "Slot", SketchPlane(PlaneType::XY, glm::vec3(0.0f, 0.0f, -1.0f)));
+  slotSketch->AddRectangle({-0.5, -10.0}, {0.5, 10.0});
+  doc->AddFeature(std::move(slotSketch));
+  doc->AddFeature(std::make_unique<ExtrudeFeature>(
+      "Slot", doc->GetFeatures().back()->GetId(), 14.0, ExtrudeMode::Cut));
+  doc->Regenerate();
+  for (const auto& f : doc->GetFeatures())
+    REQUIRE(f->GetError().empty());
+  const std::string slot = std::to_string(doc->GetFeatures().back()->GetId());
+  // Three pieces: the two arcs either side of the slot, one of them across
+  // the cylinder's seam.
+  const std::vector<std::string> pieces = faceNamed(seat.axis.name);
+  for (const std::string& n : pieces)
+    UNSCOPED_INFO(n);
+  REQUIRE(pieces.size() == 3);
+  const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(state);
+  CHECK(rep.erroredAttachments == 2);
+  const std::string& err = occOf(fit.placed[0])->attachError;
+  INFO(err);
+  CHECK(err.find("its axis") != std::string::npos);
+  CHECK(err.find("feature " + slot + " split the face into 3 pieces") !=
+        std::string::npos);
+  CHECK(glm::length(occOf(fit.placed[0])->position - was[0]) < 1e-9);
+}
+
+TEST_CASE("A bolted joint holds its HOLES together when its parts change "
+          "shape",
+          "[actions][parts][assembly]") {
+  // The pan/tilt head at 1.8 kg: every worm block bolted to the yoke missed
+  // its joint by 5 mm, and the mechanism solved at no sample. The joint's
+  // mate anchored on the two interface faces, whose centroids it held apart
+  // by the dx/dy measured at the fit; the parts grew unevenly, the centroids
+  // moved against the holes, and the screws no longer went through both. It
+  // snaps each side to its hole's rim now.
+  ui::AppState state;
+  state.document = std::make_unique<Document>();
+  state.commands = std::make_unique<CommandStack>();
+  ui::EnsureParts(state);
+
+  const DrilledPlate top = MakePlate(state, "Top", 12.0, 6.6, -1.0, 0.0);
+  MakePlate(state, "Bottom", 26.0, 6.6, -1.0, 0.0);
+  ui::SetActivePart(state, ui::AddAssembly(state, "Bolted"));
+  const auto place = [&](const char* part, glm::vec3 at) {
+    Occurrence occ;
+    occ.partId = ui::PartIdByName(state, part);
+    occ.name = part;
+    occ.position = at;
+    return state.assembly->AddOccurrence(occ);
+  };
+  const uint64_t topOcc = place("Top", glm::vec3(0.0f));
+  const uint64_t bottomOcc = place("Bottom", glm::vec3(0.0f, 0.0f, -26.0f));
+  state.assembly->FindById(bottomOcc)->fixed = true;
+
+  ui::FastenerRequest request;
+  request.nut = "iso4032";
+  const ui::FastenerFit fit =
+      ui::FitFastenerToHole(state, ui::RimPick{topOcc, top.topRim}, request);
+  INFO(fit.why);
+  REQUIRE(fit.ok);
+  REQUIRE(fit.mates.size() == 1);
+  const Mate* mate = state.assembly->FindMateById(fit.mates.front());
+  REQUIRE(mate != nullptr);
+  CHECK(mate->a.anchor.snapEdge.IsSet());
+  CHECK(mate->b.anchor.snapEdge.IsSet());
+  // Hole to hole: nothing in the plane between them to hold.
+  CHECK_THAT(mate->dx, WithinAbs(0.0, 1e-6));
+  CHECK_THAT(mate->dy, WithinAbs(0.0, 1e-6));
+  const glm::dvec3 topWas = state.assembly->FindById(topOcc)->position;
+
+  // Top grows 30 mm on +X only: its under face's centroid moves 15 mm, its
+  // hole does not. The joint keeps the holes in line, so Top stays put.
+  Document* doc = ui::PartDocById(state, top.partId);
+  REQUIRE(doc != nullptr);
+  for (const auto& f : doc->GetFeatures())
+    if (auto* box = dynamic_cast<BoxFeature*>(f.get()))
+      box->width = 90.0;
+  doc->Regenerate();
+  for (const auto& f : doc->GetFeatures())
+    REQUIRE(f->GetError().empty());
+  const assembly::SolveReport rep = ui::SolveActiveAssemblyReport(state);
+  CHECK(rep.erroredMates == 0);
+  INFO(state.assembly->FindById(topOcc)->position.x);
+  CHECK(glm::length(state.assembly->FindById(topOcc)->position - topWas) <
+        1e-6);
 }
 
 TEST_CASE("A hole that says what it is for is believed over its diameter",

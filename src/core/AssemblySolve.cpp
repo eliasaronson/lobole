@@ -16,6 +16,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <map>
@@ -442,13 +443,53 @@ std::string LoopHint(const LoopDiagnosis& d, const AssemblyDocument& asmDoc) {
              "their connectors";
 }
 
+// How a current face name `later` descends from a stored `name` through
+// history (docs/modeling/toponaming.md#naming-grammar): not at all; by whole
+// `;M<tag>` steps, unsplit — the same face, modified by later features; by
+// such steps where one input became several faces (`;M<tag>.<i>`), with
+// `splitBy` the feature that split it; or through some other step.
+enum class Descent { None, Modified, Split, Other };
+
+Descent DescentOf(const std::string& name, const std::string& later,
+                  uint64_t* splitBy = nullptr) {
+  if (later.size() <= name.size() || later.compare(0, name.size(), name) != 0 ||
+      later[name.size()] != ';')
+    return Descent::None;
+  const auto digits = [&](size_t& j) {
+    const size_t from = j;
+    while (j < later.size() &&
+           std::isdigit(static_cast<unsigned char>(later[j])) != 0)
+      ++j;
+    return j > from;
+  };
+  bool split = false;
+  size_t i = name.size();
+  while (i < later.size()) {
+    if (later[i] != ';' || i + 1 >= later.size() || later[i + 1] != 'M')
+      return Descent::Other;
+    size_t j = i + 2;
+    const size_t tagAt = j;
+    if (!digits(j))
+      return Descent::Other;
+    if (j < later.size() && later[j] == '.') {
+      if (!split && splitBy != nullptr)
+        *splitBy = std::stoull(later.substr(tagAt, j - tagAt));
+      split = true;
+      ++j;
+      if (!digits(j))
+        return Descent::Other;
+    }
+    i = j;
+  }
+  return split ? Descent::Split : Descent::Modified;
+}
+
 } // namespace
 
-std::optional<glm::dmat4> ConnectorLocalFrame(const Connector& c,
-                                              const AssemblyDocument& asmDoc,
-                                              const PartResolver& partById,
-                                              std::string* whyNot,
-                                              const AssemblyResolver& asmById) {
+std::optional<glm::dmat4>
+ConnectorLocalFrame(const Connector& c, const AssemblyDocument& asmDoc,
+                    const PartResolver& partById, std::string* whyNot,
+                    const AssemblyResolver& asmById, bool followModified) {
   const auto fail = [&](std::string why) {
     if (whyNot)
       *whyNot = std::move(why);
@@ -544,13 +585,35 @@ std::optional<glm::dmat4> ConnectorLocalFrame(const Connector& c,
   for (const Body& body : part->GetBodies()) {
     if (body.createdBy != ref.featureId)
       continue;
-    const auto faceIdx = body.elementMap.Resolve(ref.name);
+    auto faceIdx = body.elementMap.Resolve(ref.name);
+    if (!faceIdx && followModified) {
+      // A seat follows its face through later modifications: the one face
+      // whose name is this one plus whole, unsplit `;M<tag>` steps. Any
+      // other descendant beside it (a split piece) and there is no one face.
+      int descendants = 0;
+      std::optional<int> modified;
+      for (const auto& [idx, name] : body.elementMap.names) {
+        const Descent d = DescentOf(ref.name, name);
+        if (d == Descent::None)
+          continue;
+        ++descendants;
+        if (d == Descent::Modified)
+          modified = idx;
+      }
+      if (descendants == 1 && modified)
+        faceIdx = modified;
+    }
     if (!faceIdx) {
       // Owner found, name no longer resolves. The usual cause: a feature
       // added AFTER the mate modified the face, extending its history name
       // ("6/g1;M6" -> "6/g1;M6;M7") — suggest current names that keep the
-      // failing name as a prefix.
+      // failing name as a prefix. A SPLIT is said as one: "39/p1/bore;M39"
+      // becoming "...;M39.0" and "...;M39.1" is a face cut in two (here a
+      // hole breaking out through the part's end), which no re-pick of "the
+      // new name" repairs.
       std::string similar;
+      int pieces = 0;
+      uint64_t splitBy = 0;
       for (const auto& [idx, name] : body.elementMap.names) {
         (void)idx;
         if (name.size() > ref.name.size() &&
@@ -558,10 +621,22 @@ std::optional<glm::dmat4> ConnectorLocalFrame(const Connector& c,
           if (!similar.empty())
             similar += ", ";
           similar += name;
+          uint64_t by = 0;
+          if (DescentOf(ref.name, name, &by) == Descent::Split) {
+            ++pieces;
+            if (splitBy == 0)
+              splitBy = by;
+          }
         }
       }
       std::string why = "face '" + ref.name + "' not found on its part";
-      if (!similar.empty())
+      if (!similar.empty() && pieces > 0)
+        why += "; similar: " + similar + " (feature " +
+               std::to_string(splitBy) + " split the face into " +
+               std::to_string(pieces) +
+               " pieces, so the name means no one face — find out what cut "
+               "it, or re-pick)";
+      else if (!similar.empty())
         why += "; similar: " + similar +
                " (the face was modified by a later feature — update the "
                "connector to the new name)";
@@ -595,6 +670,14 @@ std::optional<glm::dmat4> ConnectorLocalFrame(const Connector& c,
         }
         if (cornered || body.shape.EdgeSnapPoint(*edgeIdx, snap))
           origin = snap;
+      } else {
+        // Gone, the connector is NOT the face's own frame: that is a
+        // different point (the centroid), and a bolted joint snapped to its
+        // hole would quietly slide the parts by the distance between them.
+        return fail("its snap edge '" + c.anchor.snapEdge.name +
+                    "' is not on its part any more (consumed by a later "
+                    "feature, a fillet or chamfer on it?) — re-pick the "
+                    "connector");
       }
     }
     // innerXf is identity unless the anchor reached into a sub-assembly, in
@@ -634,7 +717,8 @@ SeatFaceFrame(const ElementRef& face, const std::vector<uint64_t>& innerPath,
   c.occurrenceId = parent.id;
   c.innerPath = innerPath;
   c.anchor.face = face;
-  const auto frame = ConnectorLocalFrame(c, asmDoc, partById, &why, asmById);
+  const auto frame = ConnectorLocalFrame(c, asmDoc, partById, &why, asmById,
+                                         /*followModified=*/true);
   if (memo != nullptr)
     (*memo)[key] = {frame, why};
   return frame;

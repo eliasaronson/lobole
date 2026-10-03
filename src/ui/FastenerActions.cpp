@@ -238,17 +238,33 @@ std::optional<double> CompanionDim(const std::string& standard,
 // other one moves nothing — the mate's in-plane dx/dy absorb the difference
 // and the joint holds identically. The tiebreak decides which face the mate
 // is LABELLED with, not where anything ends up.
-std::optional<ElementRef> FaceAcrossAxis(const assembly::FlatInstance& inst,
-                                         const glm::dvec3& origin,
-                                         const glm::dvec3& along, double t,
-                                         const glm::dvec3& outward) {
+//
+// With it, the RIM: the face's circular edge centred on the axis, which the
+// mate snaps its connector to (the hole's centre), so the joint holds the
+// two HOLES together. Anchored on the faces alone, it held their centroids
+// apart by the dx/dy measured at the fit: on the pan/tilt head a heavier
+// camera grew the yoke and the worm blocks unevenly, the centroids moved
+// against the holes, and every bolted block missed its joint by 5 mm
+// (generators/pantilt/README.md). A face with a rim on the axis is the
+// hole's, and wins over a coplanar one without.
+struct InterfaceFace {
+  ElementRef face;
+  ElementRef rim; // unset when the face has no circle on the axis
+};
+
+std::optional<InterfaceFace> FaceAcrossAxis(const assembly::FlatInstance& inst,
+                                            const glm::dvec3& origin,
+                                            const glm::dvec3& along, double t,
+                                            const glm::dvec3& outward) {
   if (inst.part == nullptr)
     return std::nullopt;
   constexpr double kSquare = 0.999; // perpendicular enough to the axis
   constexpr double kOnPlane = 0.05; // mm off the expected station
+  constexpr double kOnAxis = 1e-3;  // mm: a rim's centre ON the axis
   const glm::dvec3 at = origin + along * t;
-  std::optional<ElementRef> best;
+  std::optional<InterfaceFace> best;
   double nearest = 0.0;
+  std::vector<CADShape::FaceSnap> snaps;
   for (const Body& body : inst.part->GetBodies()) {
     for (const auto& [faceIndex, name] : body.elementMap.names) {
       glm::dvec3 o, n, xHint;
@@ -267,9 +283,28 @@ std::optional<ElementRef> FaceAcrossAxis(const assembly::FlatInstance& inst,
       const glm::dvec3 c =
           glm::dvec3(inst.world * glm::dvec4(info->centroid, 1.0)) - at;
       const double off = glm::length(c - glm::dot(c, along) * along);
-      if (best && off >= nearest)
-        continue;
-      best = ElementRef{body.createdBy, name};
+      ElementRef rim;
+      snaps.clear();
+      body.shape.FaceSnapPoints(faceIndex, snaps);
+      for (const CADShape::FaceSnap& sp : snaps) {
+        if (!sp.circleCenter)
+          continue;
+        const glm::dvec3 p =
+            glm::dvec3(inst.world * glm::dvec4(sp.point, 1.0)) - at;
+        const std::string* edge = body.elementMap.EdgeNameOf(sp.edgeIndex);
+        if (edge != nullptr &&
+            glm::length(p - glm::dot(p, along) * along) < kOnAxis) {
+          rim = ElementRef{body.createdBy, *edge};
+          break;
+        }
+      }
+      if (best) {
+        if (best->rim.IsSet() && !rim.IsSet())
+          continue;
+        if (best->rim.IsSet() == rim.IsSet() && off >= nearest)
+          continue;
+      }
+      best = InterfaceFace{ElementRef{body.createdBy, name}, rim};
       nearest = off;
     }
   }
@@ -306,9 +341,9 @@ uint64_t JoinAcrossInterface(AppState& state, const assembly::FlatInstance& a,
                              double tB, const glm::dvec3& centre,
                              const glm::dvec3& axis) {
   const glm::dvec3 into = -axis;
-  const std::optional<ElementRef> faceA =
+  const std::optional<InterfaceFace> faceA =
       FaceAcrossAxis(a, centre, into, tA, into);
-  const std::optional<ElementRef> faceB =
+  const std::optional<InterfaceFace> faceB =
       FaceAcrossAxis(b, centre, into, tB, axis);
   if (!faceA || !faceB)
     return 0;
@@ -318,10 +353,12 @@ uint64_t JoinAcrossInterface(AppState& state, const assembly::FlatInstance& a,
   mate.name = "Bolted";
   mate.a.occurrenceId = a.rootOccurrenceId;
   mate.a.innerPath = a.innerIds;
-  mate.a.anchor.face = *faceA;
+  mate.a.anchor.face = faceA->face;
+  mate.a.anchor.snapEdge = faceA->rim;
   mate.b.occurrenceId = b.rootOccurrenceId;
   mate.b.innerPath = b.innerIds;
-  mate.b.anchor.face = *faceB;
+  mate.b.anchor.face = faceB->face;
+  mate.b.anchor.snapEdge = faceB->rim;
 
   const assembly::PartResolver resolve = PartResolverFor(state);
   const assembly::AssemblyResolver asmResolve = AssemblyResolverFor(state);
