@@ -111,7 +111,9 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   // project's geometry. Drop it all here rather than at each of the four
   // parts.clear() sites, where a fifth would eventually be missed.
   ReleasePartRenderCache(state);
-  state.drawingProjectionCache.Clear();
+  // A drawing run in flight is cancelled and joined, and the projections,
+  // copies and caches let go (they name shapes of the project going away).
+  ForgetDrawingProjections(state);
   // Whole Documents, one per configuration a drawing view named. The
   // instance-id guard keeps them from ever being READ as the new project's,
   // but nothing would otherwise free them for the rest of the session.
@@ -131,6 +133,7 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.jobHistory = {};
   state.drawingRenders.clear();
   state.drawingRendersVersion = 0;
+  state.drawingProjections = {};
   // The assembly's motion results went with it (stashed per tab: StashActive).
   state.motionResults.clear();
   state.motionResultRevisions.clear();
@@ -266,6 +269,8 @@ void StashActive(AppState& state) {
   state.drawingRenders.clear(); // moved-from: guarantee empty
   slot.drawingRendersVersion = state.drawingRendersVersion;
   state.drawingRendersVersion = 0;
+  slot.drawingProjections = std::move(state.drawingProjections);
+  state.drawingProjections = {}; // moved-from: guarantee empty
   slot.lastSavedVersion = state.lastSavedVersion;
   slot.solvedPartVersions = std::move(state.solvedPartVersions);
   state.solvedPartVersions.clear(); // moved-from: guarantee empty
@@ -293,6 +298,8 @@ void ActivateSlot(AppState& state, size_t index) {
   state.drawingRenders = std::move(slot.drawingRenders);
   slot.drawingRenders.clear();
   state.drawingRendersVersion = slot.drawingRendersVersion;
+  state.drawingProjections = std::move(slot.drawingProjections);
+  slot.drawingProjections = {};
   state.lastSavedVersion = slot.lastSavedVersion;
   state.solvedPartVersions = std::move(slot.solvedPartVersions);
   slot.solvedPartVersions.clear();
@@ -531,10 +538,11 @@ size_t DuplicateDocument(AppState& state, size_t index) {
     const DrawingDocument* dwg = SlotDrawing(state, index);
     if (!dwg)
       return SIZE_MAX;
-    // Views carry a sourceDocId, so the copy draws the same part. Its
-    // projected geometry is NOT copied: SetActivePart below projects a drawing
-    // whose render cache is empty, which is one re-projection instead of a
-    // second cache to keep honest.
+    // Views carry a sourceDocId, so the copy draws the same part. Its renders
+    // are NOT copied: SetActivePart below asks for the projection of a
+    // drawing whose renders are empty, and the copy's saved projections
+    // (which the document carries) answer it with no HLR when their inputs
+    // still hash the same.
     slot.drawing = std::make_unique<DrawingDocument>(*dwg);
     break;
   }
@@ -784,12 +792,10 @@ void SetActivePart(AppState& state, size_t index) {
   // An assembly's saved results, read current or stale by their inputs.
   if (state.assembly)
     AdoptStoredResults(state);
-  // A drawing projects on the FIRST view of the tab (design §2): if the
-  // restored cache is empty (never projected this session) fill it; otherwise
-  // keep the stashed geometry so staleness is only cleared by explicit update.
-  if (state.drawing && state.drawingRenders.empty() &&
-      state.drawing->ViewCount() > 0)
-    UpdateDrawingRenders(state);
+  // A drawing projects on the FIRST view of the tab (design §2), off the
+  // frame (docs/drawings/README.md#projection-off-the-frame); views a job
+  // landed while the tab was stashed are assembled now.
+  DrawingTabShown(state);
 
   // First look at this tab: frame it. The camera is global, so arriving at a
   // 5 m assembly with a 20 mm part's framing puts you inside the geometry —

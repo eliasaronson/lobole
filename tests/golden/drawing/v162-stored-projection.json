@@ -1,0 +1,41 @@
+{
+  "format": "designer-document",
+  "version": 162,
+  "kind": "drawing",
+  "sheet": {
+    "landscape": true,
+    "size": "a4"
+  },
+  "views": [
+    {
+      "hidden": [],
+      "id": 1,
+      "name": "front",
+      "orientation": "front",
+      "position": [
+        100.0,
+        120.0
+      ],
+      "quality": "exact",
+      "scale": 2.0,
+      "show_hidden": true,
+      "source": 3
+    },
+    {
+      "hidden": [],
+      "id": 2,
+      "name": "top",
+      "orientation": "top",
+      "position": [
+        100.0,
+        50.0
+      ],
+      "quality": "exact",
+      "scale": 2.0,
+      "show_hidden": true,
+      "source": 3
+    }
+  ],
+  "dims": [],
+  "notes": []
+}

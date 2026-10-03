@@ -33,6 +33,7 @@
 #include "ui/CreateActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
+#include "ui/DrawingJob.h"
 #include "ui/PrimitiveTool.h" // SnapPrimitiveAxis
 #include "ui/ProjectActions.h"
 #include "ui/StudyPanel.h" // SimulationLoadLabel
@@ -82,6 +83,8 @@
 #include <atomic>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
+#include <map>
 #include <memory>
 #include <thread>
 #include <unistd.h>
@@ -2897,7 +2900,7 @@ TEST_CASE(
   DrawingView view;
   view.sourceDocId = part;
   const auto id = state.drawing->AddView(view);
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   const auto before = state.drawingRenders.at(id);
   REQUIRE(before.hasGeometry);
   REQUIRE(before.projectionStats.selfCalls == 1);
@@ -2906,7 +2909,7 @@ TEST_CASE(
   edited->position = {100, 80};
   edited->scale = 0.5;
   state.drawing->BumpVersion();
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   const auto& after = state.drawingRenders.at(id);
   REQUIRE(after.hasGeometry);
   CHECK(after.projectionStats.projectionHit);
@@ -2916,7 +2919,7 @@ TEST_CASE(
   DrawingNote note;
   note.text = "Cached sheet";
   state.drawing->AddNote(note);
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   CHECK(state.drawingRenders.at(id).projectionStats.projectionHit);
 }
 
@@ -2940,13 +2943,13 @@ TEST_CASE(
   DrawingView view;
   view.sourceDocId = topId;
   const auto id = state.drawing->AddView(view);
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   REQUIRE(state.drawingRenders.at(id).hasGeometry);
   const auto rootVersion = state.parts[top].assembly->Version();
   REQUIRE(state.parts[0].doc);
   AddBox(*state.parts[0].doc, {40, 0, 0}, 10, 10, 10);
   CHECK(state.parts[top].assembly->Version() == rootVersion);
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   const auto& result = state.drawingRenders.at(id);
   REQUIRE(result.hasGeometry);
   CHECK_FALSE(result.projectionStats.projectionHit);
@@ -3173,4 +3176,339 @@ TEST_CASE("a primitive drag snaps to the face's centre and edges",
   CHECK(snap(0.1, 0.0).value == 0.1); // Ctrl: no capture, no snap
   // A plane has no outline: only its origin.
   CHECK(ui::SnapPrimitiveAxis(3.4, 1.5, false, 0.0, 0.0, 0.2).value == 3.4);
+}
+
+// ---------------------------------------------------------------------------
+// Drawing projection off the frame
+// (docs/drawings/README.md#projection-off-the-frame): the `drawing` job's
+// headless twins, pumping the registry as HeadlessMain does.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A part of two boxes, one bored, and a drawing tab of its front and top
+// views, not projected. The drawing is the active tab; returns the part's
+// slot index and the two view ids.
+struct SheetFixture {
+  size_t part = 0, sheet = 0;
+  uint64_t front = 0, top = 0;
+};
+SheetFixture TwoViewSheet(ui::AppState& state) {
+  SheetFixture f;
+  f.part = static_cast<size_t>(state.activePart);
+  AddBox(*state.document, glm::vec3(0), 40, 30, 20);
+  AddBox(*state.document, glm::vec3(60, 0, 0), 20, 20, 30);
+  const uint64_t partId = state.parts[f.part].id;
+  f.sheet = ui::AddDrawing(state, "Sheet");
+  DrawingView v;
+  v.sourceDocId = partId;
+  v.name = "front";
+  v.orientation = ViewOrientation::Front;
+  v.position = {150, 150};
+  f.front = state.drawing->AddView(v);
+  v.name = "top";
+  v.orientation = ViewOrientation::Top;
+  v.position = {150, 60};
+  f.top = state.drawing->AddView(v);
+  return f;
+}
+
+void PumpDrawing(ui::AppState& state) {
+  PumpUntil(state, [&] { return !ui::BackgroundJobRunning(state, "drawing"); });
+  ui::PollBackgroundJobs(state);
+}
+
+void SameSheetCurves(const drawing::SheetView& a, const drawing::SheetView& b) {
+  REQUIRE(a.curves.size() == b.curves.size());
+  for (size_t i = 0; i < a.curves.size(); ++i) {
+    CHECK(a.curves[i].kind == b.curves[i].kind);
+    CHECK(a.curves[i].visible == b.curves[i].visible);
+    CHECK(a.curves[i].edge.name == b.curves[i].edge.name);
+    CHECK(a.curves[i].points == b.curves[i].points);
+  }
+}
+
+} // namespace
+
+TEST_CASE("a drawing job lands the sheet UpdateDrawingRendersNow draws",
+          "[actions][drawing][jobs]") {
+  ui::AppState state = MakeHeadlessState();
+  const SheetFixture f = TwoViewSheet(state);
+  REQUIRE(state.drawingDeferProjection); // the app's default
+  ui::RequestDrawingUpdate(state);
+  // Asked for, not done: the frame went on.
+  CHECK(ui::BackgroundJobRunning(state, "drawing"));
+  CHECK(ui::DrawingViewProjecting(state, f.front));
+  CHECK(ui::DrawingViewProjecting(state, f.top));
+  // A view with nothing to show yet has a placeholder at its bounds.
+  glm::dvec2 lo, hi;
+  CHECK(ui::DrawingPlaceholderBox(state, *state.drawing->FindView(f.front), lo,
+                                  hi));
+  PumpDrawing(state);
+  REQUIRE_FALSE(ui::BackgroundJobRunning(state, "drawing"));
+  CHECK_FALSE(ui::DrawingViewProjecting(state, f.front));
+  const auto front = state.drawingRenders.at(f.front);
+  const auto top = state.drawingRenders.at(f.top);
+  REQUIRE(front.hasGeometry);
+  REQUIRE(top.hasGeometry);
+  CHECK(front.error.empty());
+
+  // The same sheet, projected inline from nothing.
+  state.drawingProjectionCache.Clear();
+  state.drawingProjections = {};
+  state.drawingRenders.clear();
+  ui::UpdateDrawingRendersNow(state);
+  SameSheetCurves(state.drawingRenders.at(f.front), front);
+  SameSheetCurves(state.drawingRenders.at(f.top), top);
+}
+
+TEST_CASE("a drawing job that lands after a tab switch writes its own tab",
+          "[actions][drawing][jobs]") {
+  ui::AppState state = MakeHeadlessState();
+  const SheetFixture f = TwoViewSheet(state);
+  ui::RequestDrawingUpdate(state);
+  REQUIRE(ui::BackgroundJobRunning(state, "drawing"));
+  ui::SetActivePart(state, f.part); // away, while it projects
+  PumpDrawing(state);
+  // Kept by the stashed drawing tab, not by the part on screen.
+  const ui::PartSlot& sheet = state.parts[f.sheet];
+  CHECK(sheet.drawingProjections.kept.contains(f.front));
+  CHECK(sheet.drawingProjections.kept.contains(f.top));
+  CHECK(state.drawingProjections.kept.empty());
+  CHECK(state.drawingRenders.empty());
+  // Back on it: drawn from what landed, nothing projects again.
+  ui::SetActivePart(state, f.sheet);
+  CHECK_FALSE(ui::BackgroundJobRunning(state, "drawing"));
+  REQUIRE(state.drawingRenders.contains(f.front));
+  CHECK(state.drawingRenders.at(f.front).hasGeometry);
+  CHECK(state.drawingRenders.at(f.top).hasGeometry);
+}
+
+TEST_CASE("a drawing job whose source moved while it ran lands stale",
+          "[actions][drawing][jobs]") {
+  ui::AppState state = MakeHeadlessState();
+  const SheetFixture f = TwoViewSheet(state);
+  ui::RequestDrawingUpdate(state);
+  REQUIRE(ui::BackgroundJobRunning(state, "drawing"));
+  // The part grows a third box while its views project.
+  AddBox(*state.parts[f.part].doc, glm::vec3(0, 50, 0), 10, 10, 10);
+  PumpDrawing(state);
+  const auto& front = state.drawingRenders.at(f.front);
+  CHECK(front.hasGeometry);
+  // Drawn as it was projected, and marked stale: projection stays explicit.
+  CHECK(front.solvedSourceVersion !=
+        ui::DrawingSourceVersion(state, state.parts[f.part].id));
+}
+
+TEST_CASE("a drawing projection out of its budget keeps the last geometry",
+          "[actions][drawing][jobs]") {
+  ui::AppState state = MakeHeadlessState();
+  const SheetFixture f = TwoViewSheet(state);
+  ui::UpdateDrawingRendersNow(state);
+  const auto before = state.drawingRenders.at(f.front);
+  REQUIRE(before.hasGeometry);
+  AddBox(*state.parts[f.part].doc, glm::vec3(0, 50, 0), 10, 10, 10);
+  // A budget already spent stops the run before its first view: what the
+  // sheet showed stays, saying why it was not brought up to date.
+  ui::RequestDrawingUpdate(state, 1e-9);
+  PumpDrawing(state);
+  const auto& after = state.drawingRenders.at(f.front);
+  CHECK(after.hasGeometry);
+  CHECK(after.error.find("time budget") != std::string::npos);
+  SameSheetCurves(after, before);
+  // A later update without one projects it.
+  ui::RequestDrawingUpdate(state);
+  PumpDrawing(state);
+  CHECK(state.drawingRenders.at(f.front).error.empty());
+  CHECK(state.drawingRenders.at(f.front).projectionStats.selfCalls > 0);
+}
+
+TEST_CASE("a cancelled drawing projection says so and resumes",
+          "[actions][drawing][jobs]") {
+  ui::AppState state = MakeHeadlessState();
+  const SheetFixture f = TwoViewSheet(state);
+  ui::RequestDrawingUpdate(state);
+  ui::CancelDrawingJob(state);
+  const uint64_t cancels = state.drawingJobCancellations;
+  PumpDrawing(state);
+  CHECK(state.drawingJobCancellations == cancels + 1);
+  // A view that had landed before the cancel keeps what it landed; one that
+  // had not says it was cancelled and keeps its placeholder.
+  for (const uint64_t id : {f.front, f.top}) {
+    const auto& sv = state.drawingRenders.at(id);
+    if (sv.hasGeometry)
+      continue;
+    CHECK(sv.error.find("projection cancelled") != std::string::npos);
+    glm::dvec2 lo, hi;
+    CHECK(
+        ui::DrawingPlaceholderBox(state, *state.drawing->FindView(id), lo, hi));
+  }
+  ui::RequestDrawingUpdate(state);
+  PumpDrawing(state);
+  CHECK(state.drawingRenders.at(f.front).hasGeometry);
+  CHECK(state.drawingRenders.at(f.top).hasGeometry);
+}
+
+TEST_CASE("a view moved on the sheet is assembled again, not projected",
+          "[actions][drawing][jobs]") {
+  ui::AppState state = MakeHeadlessState();
+  const SheetFixture f = TwoViewSheet(state);
+  ui::RequestDrawingUpdate(state);
+  PumpDrawing(state);
+  const auto before = state.drawingRenders.at(f.front);
+  DrawingView* v = state.drawing->FindView(f.front);
+  v->scale = 0.5;
+  v->rotationDeg = 90.0;
+  state.drawing->BumpVersion();
+  ui::ReassembleDrawingViews(state);
+  // No job, no HLR: the kept projection, turned and scaled.
+  CHECK_FALSE(ui::BackgroundJobRunning(state, "drawing"));
+  const auto& after = state.drawingRenders.at(f.front);
+  REQUIRE(after.hasGeometry);
+  CHECK(after.projectionStats.projectionHit);
+  CHECK(after.projectionStats.selfCalls == 0);
+  CHECK(after.projectionStats.pairCalls == 0);
+  const glm::dvec2 sb = before.bboxMax - before.bboxMin;
+  const glm::dvec2 sa = after.bboxMax - after.bboxMin;
+  CHECK_THAT(sa.x, WithinAbs(0.5 * sb.y, 1e-6)); // a quarter turn
+  CHECK_THAT(sa.y, WithinAbs(0.5 * sb.x, 1e-6));
+}
+
+TEST_CASE("an added view is placed by its projection once it lands",
+          "[actions][drawing][jobs]") {
+  ui::AppState state = MakeHeadlessState();
+  const SheetFixture f = TwoViewSheet(state);
+  ui::UpdateDrawingRendersNow(state);
+  DrawingView v;
+  v.sourceDocId = state.parts[f.part].id;
+  v.name = "right";
+  v.orientation = ViewOrientation::Right;
+  v.scale = 0.0; // choose one
+  const size_t undo = state.drawingHistory.undo.size();
+  const uint64_t id = ui::AddDrawingViewPlaced(state, v);
+  CHECK(ui::DrawingViewProjecting(state, id));
+  PumpDrawing(state);
+  const auto& sv = state.drawingRenders.at(id);
+  REQUIRE(sv.hasGeometry);
+  // Clear of the views already there, and one undo step for all of it.
+  for (const uint64_t other : {f.front, f.top}) {
+    const auto& o = state.drawingRenders.at(other);
+    const bool apart = sv.bboxMax.x < o.bboxMin.x ||
+                       o.bboxMax.x < sv.bboxMin.x ||
+                       sv.bboxMax.y < o.bboxMin.y || o.bboxMax.y < sv.bboxMin.y;
+    CHECK(apart);
+  }
+  CHECK(state.drawingHistory.undo.size() == undo + 1);
+  CHECK(state.drawing->FindView(id)->scale > 0.0);
+}
+
+// ---- Saved projections (docs/drawings/README.md#saved-projections) --------
+
+namespace {
+size_t HlrCalls(const drawing::SheetView& sv) {
+  return static_cast<size_t>(sv.projectionStats.selfCalls +
+                             sv.projectionStats.pairCalls);
+}
+} // namespace
+
+TEST_CASE("a saved drawing reopens drawn from its saved projections",
+          "[actions][drawing][io]") {
+  namespace fs = std::filesystem;
+  const fs::path dir = fs::temp_directory_path() / "designer_saved_projection";
+  fs::remove_all(dir);
+  std::map<uint64_t, size_t> curves;
+  uint64_t front = 0, top = 0;
+  {
+    ui::AppState state = MakeHeadlessState();
+    const SheetFixture f = TwoViewSheet(state);
+    front = f.front;
+    top = f.top;
+    ui::UpdateDrawingRendersNow(state);
+    for (const uint64_t id : {front, top}) {
+      REQUIRE(state.drawingRenders.at(id).hasGeometry);
+      REQUIRE(HlrCalls(state.drawingRenders.at(id)) > 0);
+      curves[id] = state.drawingRenders.at(id).curves.size();
+    }
+    std::string error;
+    REQUIRE(ui::SaveProject(state, dir.string(), &error));
+  }
+  // Beside each view's file: its projection's json and bin.
+  size_t projectionFiles = 0;
+  for (const auto& e : fs::recursive_directory_iterator(dir))
+    projectionFiles +=
+        e.path().filename().string().find(".projection.") != std::string::npos;
+  CHECK(projectionFiles == 4);
+
+  SECTION("unchanged, every view is installed with no HLR") {
+    ui::AppState state;
+    std::string error;
+    REQUIRE(ui::OpenProject(state, dir.string(), &error));
+    REQUIRE(state.drawing != nullptr); // saved on the drawing tab
+    PumpDrawing(state);
+    for (const uint64_t id : {front, top}) {
+      const auto& sv = state.drawingRenders.at(id);
+      INFO("view " << id);
+      CHECK(sv.hasGeometry);
+      CHECK(sv.error.empty());
+      CHECK(HlrCalls(sv) == 0);
+      CHECK(sv.curves.size() == curves[id]);
+    }
+  }
+  SECTION("a foreign input hash is projected again, not refused") {
+    for (const auto& e : fs::recursive_directory_iterator(dir)) {
+      if (e.path().filename().string().find("-top.projection.json") ==
+          std::string::npos)
+        continue;
+      nlohmann::json j;
+      std::ifstream(e.path()) >> j;
+      j["input_hash"] = "0x0000000000000001";
+      std::ofstream(e.path()) << j.dump();
+    }
+    ui::AppState state;
+    std::string error;
+    REQUIRE(ui::OpenProject(state, dir.string(), &error));
+    PumpDrawing(state);
+    CHECK(HlrCalls(state.drawingRenders.at(front)) == 0);
+    CHECK(HlrCalls(state.drawingRenders.at(top)) > 0);
+    CHECK(state.drawingRenders.at(top).hasGeometry);
+    CHECK(state.drawingRenders.at(top).error.empty());
+  }
+  SECTION("an edited part misses only the views that draw it") {
+    ui::AppState state;
+    std::string error;
+    REQUIRE(ui::OpenProject(state, dir.string(), &error));
+    PumpDrawing(state);
+    // A second part on the sheet, saved, then the first part edited before
+    // the next open's projection: its views project, the other's install.
+    const size_t sheet = static_cast<size_t>(state.activePart);
+    const size_t other = ui::AddPart(state, "Other");
+    AddBox(*state.document, glm::vec3(0), 15, 15, 15);
+    const uint64_t otherId = state.parts[other].id;
+    ui::SetActivePart(state, sheet);
+    DrawingView v;
+    v.sourceDocId = otherId;
+    v.name = "other";
+    v.position = {300, 150};
+    const uint64_t otherView = state.drawing->AddView(v);
+    ui::UpdateDrawingRendersNow(state);
+    REQUIRE(ui::SaveProject(state, dir.string(), &error));
+
+    ui::AppState again;
+    REQUIRE(ui::OpenProject(again, dir.string(), &error));
+    PumpDrawing(again);
+    for (const uint64_t id : {front, top, otherView})
+      CHECK(HlrCalls(again.drawingRenders.at(id)) == 0);
+    // The first part moves on: only its two views project.
+    size_t partSlot = 0;
+    for (size_t i = 0; i < again.parts.size(); ++i)
+      if (again.parts[i].kind == ui::DocKind::Part &&
+          again.parts[i].id != otherId)
+        partSlot = i;
+    AddBox(*again.parts[partSlot].doc, glm::vec3(0, 60, 0), 5, 5, 5);
+    ui::UpdateDrawingRendersNow(again);
+    CHECK(HlrCalls(again.drawingRenders.at(front)) > 0);
+    CHECK(HlrCalls(again.drawingRenders.at(top)) > 0);
+    CHECK(HlrCalls(again.drawingRenders.at(otherView)) == 0);
+  }
+  fs::remove_all(dir);
 }

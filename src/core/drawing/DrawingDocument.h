@@ -5,8 +5,14 @@
 #include <glm/glm.hpp>
 
 #include <cstdint>
+#include <map>
+#include <memory>
 #include <string>
 #include <vector>
+
+namespace drawing {
+struct ViewProjection; // core/drawing/ViewProjection.h
+}
 
 // A drawing document (docs/drawings/README.md): one sheet holding
 // projected views of a source part or assembly, plus driven dimensions
@@ -14,9 +20,10 @@
 // feature-list Document and the AssemblyDocument — a drawing neither executes
 // features nor places occurrences; it projects other documents onto a sheet.
 //
-// Views and dims are carried as first-class lists, but projected geometry
-// and measured dimension values are DERIVED, never stored — opening a drawing
-// re-projects on demand.
+// Views and dims are carried as first-class lists. Measured dimension values
+// are DERIVED, never stored; projected geometry is derived too, and kept
+// only as each view's saved projection (SavedProjections, below), which
+// opening installs when its inputs still hash the same.
 
 // Sheet paper size. Landscape/portrait is a separate flag; these are the
 // portrait short×long extents in millimetres (ISO A-series + US Letter).
@@ -295,6 +302,30 @@ public:
   uint64_t Version() const { return m_version; }
   void BumpVersion() { m_version++; }
 
+  // Each view's projection as it is saved with the drawing
+  // (docs/drawings/README.md#saved-projections): read from the directory
+  // form's views/<id>-<slug>.projection.{json,bin} and written back to it.
+  // Derived, like a study's result: it is not part of the drawing's content
+  // or its Version, and the single-file form carries none. Whether one still
+  // answers its view is its input hash's to say, which the projecting job
+  // checks before drawing it; a view of none, or of a stale one, projects.
+  using ProjectionMap =
+      std::map<uint64_t, std::shared_ptr<const drawing::ViewProjection>>;
+  const ProjectionMap& SavedProjections() const { return m_projections; }
+  std::shared_ptr<const drawing::ViewProjection>
+  SavedProjection(uint64_t viewId) const {
+    const auto it = m_projections.find(viewId);
+    return it == m_projections.end() ? nullptr : it->second;
+  }
+  // Null forgets the view's.
+  void SetSavedProjection(uint64_t viewId,
+                          std::shared_ptr<const drawing::ViewProjection> p) {
+    if (p)
+      m_projections[viewId] = std::move(p);
+    else
+      m_projections.erase(viewId);
+  }
+
 private:
   Sheet m_sheet;
   std::vector<DrawingView> m_views;
@@ -302,6 +333,7 @@ private:
   std::vector<DrawingNote> m_notes;
   uint64_t m_nextId = 1;
   uint64_t m_version = 0;
+  ProjectionMap m_projections;
 };
 
 // Portrait short/long sheet extents in millimetres.

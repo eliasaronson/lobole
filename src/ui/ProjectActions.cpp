@@ -701,8 +701,10 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
         tmpl::LibraryFromJson(index.value("templates", nlohmann::json()));
 
     // This branch never goes through ReplaceDocument, so it releases the
-    // per-part render cache itself — same id-reuse hazard.
+    // per-part render cache itself — same id-reuse hazard — and the drawing
+    // projections, whose run in flight would land on a reused slot id.
     ReleasePartRenderCache(state);
+    ForgetDrawingProjections(state);
     state.document = nullptr;
     state.assembly = nullptr;
     state.drawing = nullptr;
@@ -789,9 +791,12 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
     state.motionResults.clear();
     state.motionResultRevisions.clear();
     AdoptStoredResults(state);
+    // The opened drawing's views: each one's saved projection is installed
+    // when its inputs still hash as they did, and the rest project, all on a
+    // `drawing` job rather than on the frame
+    // (docs/drawings/README.md#saved-projections).
     if (state.drawing && state.drawing->ViewCount() > 0)
-      UpdateDrawingRenders(
-          state); // re-project on first view of an opened drawing
+      RequestDrawingUpdate(state);
     // Frame whatever the opened project put in front of us. This tested
     // `state.document` alone, which is null when the active tab is an
     // ASSEMBLY — so opening an assembly project left the camera at its

@@ -311,6 +311,11 @@ views, the part note (`###tb_dwg_part_note`, L), the detail view
 (`###tb_dwg_fcf`, `###tb_dwg_datum`, `###tb_dwg_balloons`) are on the
 drawing toolbar ([../drawings/guide.md](../drawings/guide.md#in-the-gui));
 the panel keeps the count of stale views as a line pointing at the toolbar.
+While a `drawing` job projects this sheet's views, the view list carries
+its progress -- the shared `DrawJobProgress` bar, which view and which pair,
+and Cancel (`###dwg_cancel_projection`) -- rather than a modal, and a view
+row's tooltip says it is projecting
+([drawings](../drawings/README.md#projection-off-the-frame)).
 
 ## Other dock panels
 

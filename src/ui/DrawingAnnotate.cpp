@@ -530,7 +530,9 @@ bool LayOutBalloons(AppState& state, const std::vector<uint64_t>& viewIds) {
   EndDrawingTools(state);
   BalloonLayoutReport report;
   std::string error;
-  if (!LayoutDrawingBalloons(state, viewIds, report, &error)) {
+  // The GUI never waits for a projection: a view still projecting refuses.
+  if (!LayoutDrawingBalloons(state, viewIds, report, &error,
+                             !state.drawingDeferProjection)) {
     state.drawingMessage = "No balloons: " + error;
     state.drawingMessageIsError = true;
     return false;
@@ -741,7 +743,8 @@ void DrawDetailToolWindow(AppState& state) {
     SnapshotDrawing(state);
     state.drawing->AddView(v);
     t = AppState::DetailTool{};
-    UpdateDrawingRenders(state);
+    // A detail draws its parent's projection: assembled, not projected.
+    ReassembleDrawingViews(state);
   } else if (cancel) {
     t = AppState::DetailTool{};
   }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "remote/RemoteHelpers.h"
+#include "remote/RemoteParking.h"
 #include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
@@ -38,19 +39,8 @@ std::span<const MethodDoc> CamMethodDocs();
 // server answers the request when what it waits on has landed -- with the
 // response the synchronous handler gives, because it IS that handler (or,
 // for cam_verify, the same three steps it runs).
-class CamParking {
-public:
-  virtual ~CamParking() = default;
-  enum class Next {
-    Wait,     // still waiting; ask again next tick
-    Dispatch, // everything is cached: run the ordinary handler now
-    Answer,   // `answer` is the response
-  };
-  // One tick, on the main thread. A refusal (a cancelled pass, a failed
-  // verification) is thrown, the way a handler throws one.
-  virtual Next Poll(ui::AppState& state, const RpcParams& params,
-                    nlohmann::json& answer) = 0;
-};
+// The interface is the server's (remote/RemoteParking.h).
+using CamParking = Parking;
 
 // Parks `method` when answering it now would compute on the frame, and
 // returns what to poll; nullptr means "dispatch it now" -- not a CAM request

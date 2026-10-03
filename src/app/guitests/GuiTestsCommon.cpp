@@ -128,7 +128,13 @@ void ResetAppForTest() {
   // which turns it back on for itself
   // (docs/ui/long-operations.md#cam-toolpath-passes).
   s_App->camDeferPasses = false;
+  // Drawing views project INLINE too, for the same reason; the deferred path
+  // is drawing/a_slow_drawing_tab_does_not_stall_the_frame's subject.
+  s_App->drawingDeferProjection = false;
   s_App->backgroundJobs.clear(); // joins whatever a previous test left
+  // ...without running its finish, so a drawing run it held is gone too, and
+  // the caches it had taken with it.
+  s_App->drawingRun = nullptr;
   s_App->camAdaptiveQueue.clear();
 #ifdef HAVE_CAM
   s_App->camAdaptiveCache.Clear();

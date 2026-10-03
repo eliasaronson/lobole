@@ -5,9 +5,10 @@ How it works underneath is in [README.md](README.md).
 
 A **drawing** is its own document kind beside parts and assemblies: one sheet
 of hidden-line **views** projected from a source part or assembly, plus
-driven **dimensions** measured off the projected geometry. Projected geometry
-and measured values are recomputed, never stored, so a drawing file is only
-its setup (sheet, views, dimensions, notes).
+driven **dimensions** measured off the projected geometry. Measured values
+are recomputed, never stored, so a drawing file is its setup (sheet, views,
+dimensions, notes) plus, in the directory form, each view's last projection
+as a cache ([saved projections](README.md#saved-projections)).
 
 ## Concepts
 
@@ -34,7 +35,11 @@ its setup (sheet, views, dimensions, notes).
   [../tolerances/README.md](../tolerances/README.md).
 - **Explicit update**: projection is expensive, so it does not run on every
   change. A view whose source changed reads **stale** until the drawing is
-  updated. Entering a drawing tab projects it.
+  updated. Entering a drawing tab for the first time asks for its
+  projection, which runs off the frame: the views land one at a time, a
+  view not yet projected is a dashed placeholder at its source's bounds, and
+  the panel shows the progress with Cancel
+  ([projection off the frame](README.md#projection-off-the-frame)).
 - **Note**: a line of text on the sheet, optionally with a leader to
   projected geometry ("6× Ø4.4 on Ø175.8 PCD", "break all sharp edges").
   `{{expression}}` in the text is replaced by a variable's value.
@@ -101,8 +106,10 @@ its setup (sheet, views, dimensions, notes).
    with configurations, which **Configuration** to draw. The view is placed
    clear of the views already there. Each view is a row in the panel;
    right-click it to change the **Scale**, **Add bend table** beside a view
-   of a part with bends, or **Delete** it. **Update views** re-projects; the
-   panel says when views are stale.
+   of a part with bends, or **Delete** it. **Update views** re-projects the
+   views that need it, off the frame, with its progress and Cancel on the
+   panel; the panel says when views are stale. File > Export writes once the
+   views have landed.
 4. **Dimensions**: pick a tool on the toolbar (Distance, Dist X, Dist Y,
    Radius, Diameter, Angle, Hole callout, Pattern callout — Enter finishes
    the pick — or Part note), then click projected edges or circles on the
@@ -157,7 +164,8 @@ add_drawing_view {detail: {view, center: [x, y, z], radius_mm, label?},
                   scale, position, name?}   # a detail of another view
 set_drawing_view {id, position?, scale?, name?, show_hidden?, quality?,
                   base_view?, configuration?, hidden?, rotation_deg?, section?}
-update_drawing {budget_s?}     # re-project; per-view curve counts and errors
+update_drawing {budget_s?, async?}  # re-project; per-view curve counts and errors
+                               # (waits off the frame; async answers at once)
 list_drawing_views             # placement, stale, and what each projection cost
 list_drawing_geometry {view}   # a view's curves, with the ref to dimension each
 add_drawing_dim {view, kind, refs: [{edge | sil_face: {feature_id, element},

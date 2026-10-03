@@ -20,7 +20,7 @@ struct ImGuiTestContext;
 
 namespace remote {
 class RpcParams;
-class CamParking;
+class Parking;
 }
 
 // Opt-in JSON-RPC server (newline-delimited JSON over localhost TCP) that
@@ -135,7 +135,8 @@ private:
   };
 
   // A request answered LATER, while the frame and other clients carry on:
-  // a CAM request waiting for its passes (remote/RemoteCam.h,
+  // a CAM request waiting for its passes (remote/RemoteCam.h), or a
+  // drawing request for its views' projection (remote/RemoteDrawings.h;
   // docs/architecture.md#requests-that-wait). Unlike a screenshot it does
   // not hold the queue -- only its own client's later requests wait behind
   // it, so each connection still gets its answers in the order it asked.

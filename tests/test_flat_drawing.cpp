@@ -137,7 +137,7 @@ TEST_CASE("a drawing view draws the configuration it names",
   blank.position = {0.0, 200.0};
   const uint64_t foldedId = state.drawing->AddView(folded);
   const uint64_t blankId = state.drawing->AddView(blank);
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
 
   const drawing::SheetView fv = state.drawingRenders.at(foldedId);
   const drawing::SheetView bv = state.drawingRenders.at(blankId);
@@ -190,7 +190,7 @@ TEST_CASE("a drawing view draws the configuration it names",
   side.orientation = ViewOrientation::Front;
   side.position = {200.0, 200.0};
   const uint64_t sideId = state.drawing->AddView(side);
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   CHECK(state.drawingRenders.at(sideId).hasGeometry);
   CHECK(BendLines(state.drawingRenders.at(sideId)) == 0);
 
@@ -200,7 +200,7 @@ TEST_CASE("a drawing view draws the configuration it names",
   REQUIRE(flange);
   flange->length = kWall + 10.0;
   doc->Regenerate();
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   const drawing::SheetView& after = state.drawingRenders.at(blankId);
   CHECK_THAT(after.bboxMax.y - after.bboxMin.y, WithinAbs(before + 10.0, 1e-6));
 
@@ -211,17 +211,17 @@ TEST_CASE("a drawing view draws the configuration it names",
   Configuration edited = *doc->FindConfiguration(flatCfg);
   edited.unsuppressedFeatures.clear(); // no longer unfolds anything
   REQUIRE(doc->ReplaceConfiguration(edited));
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   CHECK(BendLines(state.drawingRenders.at(blankId)) == 0);
   edited.unsuppressedFeatures = {flatFeature};
   REQUIRE(doc->ReplaceConfiguration(edited));
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   CHECK(BendLines(state.drawingRenders.at(blankId)) == 1);
 
   // A configuration the part no longer has is an error on the view, not the
   // active configuration drawn in its place.
   REQUIRE(doc->RemoveConfiguration(flatCfg));
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   CHECK(state.drawingRenders.at(blankId).error.find("configuration") !=
         std::string::npos);
 }
@@ -243,7 +243,7 @@ TEST_CASE("a dimension across the blank reads the developed length",
   blank.scale = 0.5; // not 1:1, so a sheet-mm answer cannot pass as model mm
   blank.position = {150.0, 150.0};
   const uint64_t viewId = state.drawing->AddView(blank);
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
   const drawing::SheetView sv = state.drawingRenders.at(viewId);
   REQUIRE(sv.hasGeometry);
 
@@ -290,7 +290,7 @@ TEST_CASE("a bend table lists the bends of its view's part",
   view.orientation = ViewOrientation::Top;
   view.configuration = flatCfg;
   const uint64_t viewId = state.drawing->AddView(view);
-  ui::UpdateDrawingRenders(state);
+  ui::UpdateDrawingRendersNow(state);
 
   DrawingNote table;
   table.table = NoteTable::Bends;

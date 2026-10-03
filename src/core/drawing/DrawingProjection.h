@@ -149,6 +149,24 @@ struct ProjectionResult {
 
 class ProjectionCache;
 
+// Where a projection is, as it goes: the hidden-line classification is a
+// self step per body and a pair step per ordered pair of bodies, so a view of
+// n bodies owes n*n steps of which n*(n-1) are pairs. What a progress bar
+// and its label read ("pair 1200 of 4032").
+struct ProjectionProgress {
+  int stepsDone = 0, stepsOwed = 0;
+  int pairsDone = 0, pairsOwed = 0;
+};
+
+// What ProjectView returns for one input, as a version: bump it whenever a
+// change to ProjectView, the section cut or what they are handed makes the
+// same input project to different curves, so a projection saved with a
+// drawing by the previous build is projected again rather than drawn. A test
+// projects a fixed fixture and compares its digest with the one recorded
+// beside this revision, so the bump cannot be forgotten
+// (docs/drawings/README.md#saved-projections).
+inline constexpr int kProjectionRevision = 1;
+
 struct ProjectionOptions {
   // Optional, session-local and single-threaded. Null is the reference path.
   ProjectionCache* cache = nullptr;
@@ -158,6 +176,9 @@ struct ProjectionOptions {
   // OCC's Hide() offers no such hook, so this is driven by running its
   // PAIRWISE form ourselves — see the .cpp. Null means run to completion.
   std::function<bool()> cancelled;
+  // Told, after every step of that classification, how far it has got.
+  // Called on the projecting thread. Null: nobody is listening.
+  std::function<void(const ProjectionProgress&)> progress;
   // Max chord deviation for discretizing curved edges, in view-plane mm
   // (model scale — callers divide by view scale for sheet-mm control).
   double deflection = 0.05;

@@ -20,6 +20,7 @@
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
+#include "core/drawing/ViewProjection.h"
 #include "core/features/SketchFeature.h"
 #include "core/fem/FemSolver.h" // ContactPatch (assembly studies)
 #include "core/io/GitVault.h"
@@ -824,6 +825,63 @@ struct ProjectVarHistory {
   std::vector<ProjectVarSnapshot> redo;
 };
 
+// A drawing tab's projections, beside its renders and stashed with them
+// (docs/drawings/README.md#projection-off-the-frame). A render is what the
+// sheet draws; this is what it was assembled from, so a change of scale, turn
+// or place assembles it again without projecting anything.
+struct DrawingRun; // ui/DrawingJob.cpp
+
+struct DrawingProjectionState {
+  struct Kept {
+    std::shared_ptr<const drawing::ViewProjection> projection;
+    // What it was projected from: the worker's own copies, held, so their
+    // identity cannot be reused; compared (SameAs) with what the view would
+    // project now to tell whether anything changed.
+    drawing::ProjectionInputs inputs;
+    uint64_t sourceVersion = 0; // the source's version when it was asked for
+    // The view (a detail's parent, as a detail draws it) it was projected
+    // for: a kept projection is drawn stale only for a SOURCE that moved,
+    // never for a view whose own definition did.
+    DrawingView view;
+  };
+  std::map<uint64_t, Kept> kept; // by view id; a detail has none of its own
+  // Views a `drawing` job is projecting now, and for those with no geometry
+  // yet, the box the sheet draws in its place: the source's bounds seen
+  // along the view, in the view plane at 1:1 (model mm).
+  std::set<uint64_t> projecting;
+  std::map<uint64_t, std::pair<glm::dvec2, glm::dvec2>> placeholder;
+  // Views a job landed while this tab was stashed: assembled when it is
+  // shown again (assembling reads the live drawing).
+  std::set<uint64_t> assemble;
+  // Views added with their place (and maybe their scale) still to choose,
+  // which waits on their projection's bounds: true = choose the scale too.
+  std::map<uint64_t, bool> placePending;
+  // An update was asked for while a job was projecting another tab's views.
+  bool updateOwed = false;
+  // File > Export waiting on this tab's projection: written when the last
+  // view lands, dropped (with a message) if it is cancelled.
+  std::string exportPath;
+  // Frames the sheet drew a placeholder in a projecting view's place: what
+  // the GUI suite asserts the placeholder by.
+  uint64_t placeholderFrames = 0;
+};
+
+// The worker's own copy of every shape a drawing view projects, by the
+// shape's identity (GeometryId, PlacementId): handed to each projection, so
+// the projection cache, which keys on identity, keeps hitting from one
+// update to the next. An entry holds its original, so the identity cannot be
+// reused; one whose revision moved is copied again.
+struct DrawingShapeMemo {
+  struct Entry {
+    CADShape original;
+    CADShape copy;
+    uint64_t revision = 0;
+    uint64_t used = 0;
+  };
+  std::map<std::pair<const void*, uint64_t>, Entry> entries;
+  uint64_t clock = 0;
+};
+
 struct PartSlot {
   uint64_t id = 0; // stable per-document id (A2): what occurrences reference
   std::string name;
@@ -851,8 +909,9 @@ struct PartSlot {
   // is only cleared by an explicit update (the FEM rule).
   std::map<uint64_t, drawing::SheetView> drawingRenders;
   // The drawing document's version the renders above were built at, so
-  // UpdateDrawingRenders can skip views that cannot have changed (U11).
+  // an update can skip views that cannot have changed (U11).
   uint64_t drawingRendersVersion = 0;
+  DrawingProjectionState drawingProjections; // stashed with the renders
   uint64_t lastSavedVersion = 0; // save stamp at the last save (dirty check)
   // Assembly tabs only (A4): referenced parts' stamps (ui::PartStamp: the
   // Version and the configurations' revision) at this assembly's last solve,
@@ -1627,18 +1686,40 @@ struct AppState {
   } sheetView;
 
   // Projected view geometry for the active drawing tab, keyed by DrawingView
-  // id (workstream 13, D2). Derived and transient — recomputed by
-  // UpdateDrawingRenders on tab entry and explicit update_drawing, never
-  // serialized. Cleared on tab switch (ResetActiveTabUiState).
+  // id (workstream 13, D2). Derived and transient — assembled from each
+  // view's projection (drawingProjections) when one lands or the sheet
+  // moves it; stashed per slot on a tab switch.
   std::map<uint64_t, drawing::SheetView> drawingRenders;
   // The drawing document's version those renders were built at, so
-  // UpdateDrawingRenders can skip views that cannot have gone stale — HLR is
+  // an update can skip views that cannot have gone stale — HLR is
   // half a second per view, and export re-projected everything every time
   // (U11 scale round). Stashed with the renders, per tab.
   uint64_t drawingRendersVersion = 0;
 
-  // Session-local, bounded geometry cache, shared across drawing tabs.
+  // The active drawing tab's projections (stashed per slot with the
+  // renders).
+  DrawingProjectionState drawingProjections;
+
+  // Session-local, bounded geometry cache, shared across drawing tabs. A
+  // `drawing` job takes it, and the cut cache, for its life and gives them
+  // back in its last `finish`
+  // (docs/drawings/README.md#projection-off-the-frame), so the main thread
+  // never touches them while a worker does.
   drawing::ProjectionCache drawingProjectionCache;
+  drawing::CutCache drawingCutCache;
+  DrawingShapeMemo drawingShapes;
+  // Whether the GUI's paths project on a `drawing` job (the app) or inline
+  // (the GUI suite, whose cases read a view's curves right after the click
+  // that asked for them; the camDeferPasses precedent). The RPC handlers and
+  // UpdateDrawingRendersNow project inline, except update_drawing {async}
+  // and a parked request's work ahead of its handler.
+  bool drawingDeferProjection = true;
+  // Bumped each time a `drawing` job is cancelled, so a parked request
+  // waiting on one can tell it ended that way.
+  uint64_t drawingJobCancellations = 0;
+  // The `drawing` run in flight (ui/DrawingJob.h), null when none: what its
+  // jobs share, read by the panel's bar. The registry owns the threads.
+  std::shared_ptr<DrawingRun> drawingRun;
 
   // A part evaluated in a configuration it does not have active, for the
   // drawing views that name one (a sheet of the Flat blank while the model

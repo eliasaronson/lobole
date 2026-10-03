@@ -1,0 +1,15 @@
+{
+  "views": 2,
+  "directory": "v162-stored-projection",
+  "saved_projections": {
+    "1": {
+      "input_hash": "0x28c832d5e1d8db7e",
+      "curves": 8
+    },
+    "2": {
+      "input_hash": "0x00000000deadbeef",
+      "curves": 8
+    }
+  },
+  "single_file_saved_projections": 0
+}

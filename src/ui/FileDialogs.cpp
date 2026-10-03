@@ -494,11 +494,15 @@ void ExportDialog(AppState& state) {
     std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
     if (ext != ".svg" && ext != ".pdf")
       path += ".pdf"; // default
+    // Written now when nothing needs projecting, else when the last view
+    // lands: an export never writes a stale or half-projected sheet.
     std::string error;
-    if (ExportActiveDrawing(state, path, &error))
-      LOG_INFO("Exported drawing to {}", path);
-    else
+    if (!ExportActiveDrawingWhenProjected(state, path, &error))
       LOG_ERROR("Drawing export failed: {}", error);
+    else if (!state.drawingProjections.exportPath.empty())
+      LOG_INFO("Exporting drawing to {} once its views are projected", path);
+    else
+      LOG_INFO("Exported drawing to {}", path);
     return;
   }
 

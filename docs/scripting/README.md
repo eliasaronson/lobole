@@ -121,7 +121,11 @@ queue, and responses route back per connection. A screenshot, a sheet render
 or a UI action holds the queue until it completes. A CAM request that waits
 for toolpath passes (`cam_toolpath`, `cam_post`, `cam_verify`,
 `cam_simulate`, `export_setup_sheet`) holds only its own connection: the others are answered
-while it waits ([cam/README.md](../cam/README.md#requests-that-wait)).
+while it waits ([cam/README.md](../cam/README.md#requests-that-wait)); so
+does a drawing request waiting for its views' projection (`update_drawing`,
+`check_drawing`, `export_drawing`, `add_drawing_view`, `set_drawing_view`,
+`layout_balloons`; `update_drawing {async: true}` answers at once)
+([drawings](../drawings/README.md#requests-that-wait)).
 
 ## Recording and replay
 

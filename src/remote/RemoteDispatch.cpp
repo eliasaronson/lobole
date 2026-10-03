@@ -325,7 +325,13 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "for the panel's Simulate or a waiting cam_simulate), `sync` (git "
      "fetch/push/clone), `topo`, `study` (a FEM solve), `mesh`, `import`, "
      "`motion`, `motion-video` (export_motion_video), `open` (a "
-     "project opening). Empty when nothing is running. Not the CAM "
+     "project opening), `requirements` (check_requirements), `check` "
+     "(check_topology), `job-warm` (framing the job tabs after an open), "
+     "`drawing` (a drawing view projecting, one job per "
+     "view, the next started as one lands; what a waiting update_drawing, "
+     "check_drawing, export_drawing, layout_balloons, add_drawing_view or "
+     "set_drawing_view is waiting for). Empty when nothing is running. Not the "
+     "CAM "
      "job document -- that is list_job_parts.",
      ""},
     {"cancel_background_job",

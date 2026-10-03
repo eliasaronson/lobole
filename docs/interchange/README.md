@@ -181,7 +181,10 @@ File > Export (`file.export`; `ui::ExportDialog` in `src/ui/FileDialogs.cpp`)
 offers STEP first. A part tab offers STEP, STL, BREP, glTF, OBJ and PLY; an
 assembly tab STEP and the visual formats; a drawing tab SVG and PDF. After
 the dialog everything is `ui::ExportActiveDocument(state, path)`, which the
-tests drive directly because a native dialog cannot be driven. STL and BREP
+tests drive directly because a native dialog cannot be driven -- except a
+drawing tab's, which goes through `ui::ExportActiveDrawingWhenProjected` and
+writes once its views have landed
+([drawings](../drawings/README.md#projection-off-the-frame)). STL and BREP
 on an assembly tab, and unknown extensions, are refused by name.
 
 ## RPCs

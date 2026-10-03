@@ -1,9 +1,12 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/drawing/DrawingProjection.h" // ProjectPoint
+#include "ui/BackgroundJobs.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/DrawingAnnotate.h"
 #include "ui/DrawingSheet.h"
+
+#include <chrono>
 
 namespace {
 
@@ -87,6 +90,36 @@ size_t NotesOfStyle(NoteStyle style) {
   return n;
 }
 
+// A part carrying a four-turn helical spring and a box -- seconds of exact
+// hidden-line removal in one view -- and a drawing tab holding its front
+// view, never projected and not the tab shown. Returns the sheet's tab index
+// and the view's id.
+std::pair<size_t, uint64_t> SpringOnAnUnvisitedSheet(ImGuiTestContext* ctx) {
+  ctx->SetRef("//##MainMenuBar");
+  auto helix = std::make_unique<CurveFeature>("Helix", Curve3DKind::Helix);
+  helix->radius = 11;
+  helix->pitch = 7;
+  helix->turns = 4;
+  Doc()->AddFeature(std::move(helix));
+  const uint64_t pathId = Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetId();
+  Doc()->AddFeature(std::make_unique<PipeFeature>("Spring", pathId, 3.2));
+  Doc()->AddFeature(std::make_unique<BoxFeature>(
+      "Block", glm::dvec3(30.0, -5.0, 0.0), 10.0, 10.0, 10.0));
+  ctx->Yield(2);
+  const size_t partIndex = static_cast<size_t>(s_App->activePart);
+  const uint64_t partId = s_App->parts[partIndex].id;
+  const size_t sheetIndex = ui::AddDrawing(*s_App, "Sheet");
+  DrawingView v;
+  v.name = "front";
+  v.sourceDocId = partId;
+  v.orientation = ViewOrientation::Front;
+  v.scale = 1.0;
+  v.position = ChromeOf(s_App->drawing->GetSheet()).extent * 0.5;
+  const uint64_t viewId = s_App->drawing->AddView(v); // not projected
+  ui::SetActivePart(*s_App, partIndex);
+  ctx->Yield(3);
+  return {sheetIndex, viewId};
+}
 } // namespace
 
 // Drawing GUI tests, carved out of the single 8,036-line RegisterGuiTests.
@@ -523,6 +556,103 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
         ctx->ItemInfo("//##DockHost/**/###tb_dwg_balloons");
     IM_CHECK(balloons.ID != 0);
     IM_CHECK((balloons.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+  };
+
+  // docs/drawings/README.md#projection-off-the-frame: switching to a drawing
+  // tab whose views were never projected this session projected every one of
+  // them inside the click's frame -- the pan/tilt head's sheet froze the app
+  // for 43.7 s. A part carrying a helical spring and a box (seconds of exact
+  // HLR in one front view), its sheet never shown, the tab clicked: the
+  // projection runs on a `drawing` job, a placeholder stands in its place,
+  // and no frame is held while it runs.
+  t = IM_REGISTER_TEST(engine, "drawing",
+                       "a_slow_drawing_tab_does_not_stall_the_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const auto [sheetIndex, viewId] = SpringOnAnUnvisitedSheet(ctx);
+    s_App->drawingDeferProjection = true; // the real default, off for the suite
+    const uint64_t placeholderBefore =
+        s_App->parts[sheetIndex].drawingProjections.placeholderFrames;
+
+    // The click itself -- the press and the release, the mouse already on
+    // the tab -- and what its frames COST (MainThreadCpuMs), not how long
+    // they waited for a core. The projection inside one of them was the
+    // stall.
+    ctx->MouseMove(
+        ("//##PartTabs/**/###part" + std::to_string(sheetIndex)).c_str());
+    const double c0 = MainThreadCpuMs();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    const double clickMs = MainThreadCpuMs() - c0;
+    IM_CHECK(s_App->drawing != nullptr);
+    ctx->LogInfo("the tab switch cost %.1f ms of main-thread time", clickMs);
+    IM_CHECK(clickMs < 250.0);
+
+    // Frames keep coming while the view projects, and none of them is held.
+    int framesWhileRunning = 0;
+    double worstMs = 0.0;
+    const auto t0 = std::chrono::steady_clock::now();
+    while (ui::BackgroundJobRunning(*s_App, "drawing")) {
+      const double f0 = MainThreadCpuMs();
+      ctx->Yield();
+      worstMs = std::max(worstMs, MainThreadCpuMs() - f0);
+      framesWhileRunning++;
+      if (std::chrono::steady_clock::now() - t0 > std::chrono::seconds(120))
+        break;
+    }
+    ctx->LogInfo("%d frames while projecting, worst %.1f ms",
+                 framesWhileRunning, worstMs);
+    IM_CHECK(!ui::BackgroundJobRunning(*s_App, "drawing"));
+    IM_CHECK(framesWhileRunning >= 2);
+    IM_CHECK(worstMs < 250.0);
+    // The placeholder was drawn in the view's place while it projected.
+    IM_CHECK(s_App->drawingProjections.placeholderFrames > placeholderBefore);
+
+    // ...and the view landed, with curves, having cost what makes the
+    // question worth asking: a second or more of hidden-line removal, so the
+    // case cannot pass by being fast.
+    ctx->Yield(2);
+    IM_CHECK(s_App->drawingRenders.contains(viewId));
+    const drawing::SheetView& sv = RenderOf(viewId);
+    IM_CHECK(sv.error.empty());
+    IM_CHECK(sv.hasGeometry);
+    IM_CHECK(!sv.curves.empty());
+    const double projectedMs = sv.updateMs + sv.hideMs;
+    ctx->LogInfo("the view's own projection cost %.0f ms", projectedMs);
+    IM_CHECK(projectedMs >= 1000.0);
+    IM_CHECK(!ui::DrawingViewProjecting(*s_App, viewId));
+  };
+
+  // Cancel, from the drawing panel's bar: the view that had not landed keeps
+  // its placeholder and says it was cancelled, and a later Update views
+  // projects it.
+  t = IM_REGISTER_TEST(engine, "drawing", "a_cancelled_projection_resumes");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const auto [sheetIndex, viewId] = SpringOnAnUnvisitedSheet(ctx);
+    s_App->drawingDeferProjection = true; // the real default, off for the suite
+    ctx->ItemClick(
+        ("//##PartTabs/**/###part" + std::to_string(sheetIndex)).c_str());
+    ctx->Yield(2);
+    IM_CHECK(ui::BackgroundJobRunning(*s_App, "drawing"));
+    IM_CHECK(ui::DrawingViewProjecting(*s_App, viewId));
+    ctx->ItemClick("//###Model/**/###dwg_cancel_projection");
+    IM_CHECK(WaitForJobs(ctx, "drawing"));
+    ctx->Yield(2);
+    IM_CHECK(!ui::DrawingViewProjecting(*s_App, viewId));
+    IM_CHECK(s_App->drawingRenders.contains(viewId));
+    IM_CHECK(!RenderOf(viewId).hasGeometry);
+    IM_CHECK(RenderOf(viewId).error.find("projection cancelled") !=
+             std::string::npos);
+    const DrawingView* view = s_App->drawing->FindView(viewId);
+    IM_CHECK(view != nullptr);
+    glm::dvec2 lo, hi;
+    IM_CHECK(ui::DrawingPlaceholderBox(*s_App, *view, lo, hi));
+
+    ToolbarClick(ctx, "###tb_dwg_update");
+    ctx->Yield(2);
+    IM_CHECK(WaitForJobs(ctx, "drawing"));
+    ctx->Yield(2);
+    IM_CHECK(RenderOf(viewId).error.empty());
+    IM_CHECK(RenderOf(viewId).hasGeometry);
+    IM_CHECK(!ui::DrawingPlaceholderBox(*s_App, *view, lo, hi));
   };
 
   // F11 layer 3: what the GEOMETRY did between a version and now. The

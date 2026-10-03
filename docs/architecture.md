@@ -291,12 +291,16 @@ RPC handlers keep their own poll so they answer from a finished result.
 The pump (`ProcessPending`, `RemoteUiActions.cpp`) runs one request at a time
 on the main thread. Three kinds span frames. A `ui_action`, a `screenshot`
 and a `render_sheet` hold the WHOLE queue until they finish, because they
-drive the frame itself. A CAM request that would compute for minutes is
-PARKED instead (`RemoteServer::Parked`, `remote::CamParking`): the work goes
-to background jobs, `PollParked` asks it once a tick, after
-`ReapBackgroundJobs`, whether it is done, and the answer -- or a refusal, or
-the request put back at the head of the queue to run its handler from the
-caches -- goes out then ([cam/README.md](cam/README.md#requests-that-wait)).
+drive the frame itself. A request that would compute for minutes is
+PARKED instead (`RemoteServer::Parked`, `remote::Parking` in
+`RemoteParking.h`): the work goes to background jobs, `PollParked` asks it
+once a tick, after `ReapBackgroundJobs`, whether it is done, and the answer
+-- or a refusal, or the request put back at the head of the queue to run its
+handler from the caches -- goes out then. Two domains park: CAM, on its
+toolpath passes ([cam/README.md](cam/README.md#requests-that-wait)), and
+drawings, on their views' projection, except on `--headless`, where the
+synchronous handler holds no frame
+([drawings](drawings/README.md#requests-that-wait)).
 A parked request holds only its OWN connection's later requests, so a
 pipelining client still gets its answers in order while other connections
 (the MCP server, a second script) are served. While anything is parked the

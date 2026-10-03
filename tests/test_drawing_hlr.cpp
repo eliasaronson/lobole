@@ -9,8 +9,10 @@
 #include "core/Conventions.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/InputHash.h"
 #include "core/drawing/DrawingDocument.h"
 #include "core/drawing/DrawingProjection.h"
+#include "core/drawing/ViewProjection.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/io/Serialization.h"
@@ -19,6 +21,7 @@
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRep_Tool.hxx>
+#include <BinTools.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
@@ -35,6 +38,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <sstream>
 
 using Catch::Matchers::WithinAbs;
 using drawing::CurveKind;
@@ -944,4 +948,128 @@ TEST_CASE("HLR cache handles poles and rotated occluders",
     if (step)
       CHECK(actual->stats.selfHits == 1);
   }
+}
+
+// ---- The revision a saved projection is keyed on --------------------------
+//
+// A projection saved with a drawing is drawn instead of projected when its
+// input hash matches (docs/drawings/README.md#saved-projections), and the hash
+// covers drawing::kProjectionRevision -- not the code. So a change to what
+// ProjectView returns for the same input must bump the revision, or every
+// saved projection keeps drawing the old answer. This fixture's digest is
+// recorded beside the revision it was taken at: a different digest with the
+// same revision fails, and so does a bumped revision nobody re-recorded.
+// Primitives only, and an order-free digest, so a boolean's or OCC's edge
+// numbering is not what it guards.
+TEST_CASE("kProjectionRevision moves when what ProjectView returns does",
+          "[drawing][hlr]") {
+  constexpr int kRecordedRevision = 1;
+  constexpr uint64_t kRecordedDigest = 0x431d3b5b31137471ULL;
+  const CADShape box = CADKernel::Instance().CreateBox(60.0, 30.0, 20.0);
+  const CADShape pin = CADKernel::Instance().CreateCylinder(
+      glm::vec3(80, 15, 0), glm::vec3(0, 0, 1), 6.0, 30.0);
+  std::vector<InputBody> bodies{{box.GetShape(), glm::dmat4(1.0), 0},
+                                {pin.GetShape(), glm::dmat4(1.0), 1}};
+  inputhash::Hasher all;
+  for (const auto& [dir, up] :
+       {std::pair{kFrontDir, kFrontUp}, std::pair{kTopDir, kTopUp},
+        std::pair{kIsoDir, kIsoUp}}) {
+    std::string error;
+    const auto r = ProjectView(bodies, dir, up, {}, &error);
+    INFO(error);
+    REQUIRE(r);
+    all.U64(drawing::ProjectionDigest(*r));
+  }
+  const uint64_t digest = all.Digest();
+  INFO("ProjectView returns something else for this fixture: bump "
+       "drawing::kProjectionRevision (core/drawing/DrawingProjection.h) and "
+       "record the new pair here -- revision "
+       << drawing::kProjectionRevision << ", digest 0x" << std::hex << digest);
+  CHECK(drawing::kProjectionRevision == kRecordedRevision);
+  CHECK(digest == kRecordedDigest);
+}
+
+// What a saved projection is checked against: the same inputs hash the same
+// however their shapes came to be (a deep copy, the document's own), and
+// anything ProjectView or the cut reads moves it -- but not `up`, since a
+// projection turned on the sheet is its old one turned (TurnedTo).
+TEST_CASE("a view's input hash covers what its projection reads",
+          "[drawing][hlr]") {
+  const CADShape box = BlockWithHole();
+  drawing::ProjectionInputs a;
+  a.bodies = One(box, 0);
+  a.viewDir = kFrontDir;
+  a.up = kFrontUp;
+
+  // The worker hashes its own deep copy of the document's shape, and a
+  // reopened project's shape is the baked one, read back through BinTools:
+  // the copy of either is the same input.
+  std::stringstream baked;
+  BinTools::Write(box.GetShape(), baked);
+  TopoDS_Shape reopened;
+  BinTools::Read(reopened, baked);
+  a.bodies[0].shape = BRepBuilderAPI_Copy(box.GetShape()).Shape();
+  const uint64_t h = drawing::ProjectionInputHash(a);
+  CHECK(h != 0);
+  drawing::ProjectionInputs copy = a;
+  copy.bodies[0].shape = BRepBuilderAPI_Copy(reopened).Shape();
+  CHECK(drawing::ProjectionInputHash(copy) == h);
+
+  drawing::ProjectionInputs turned = a;
+  turned.up = glm::dvec3(1, 0, 0);
+  CHECK(drawing::ProjectionInputHash(turned) == h);
+
+  for (int which = 0; which < 6; ++which) {
+    drawing::ProjectionInputs moved = a;
+    switch (which) {
+    case 0:
+      moved.viewDir = kTopDir;
+      break;
+    case 1:
+      moved.mode = drawing::ProjectionMode::Poly;
+      break;
+    case 2:
+      moved.hiddenLines = false;
+      break;
+    case 3:
+      moved.section = true;
+      moved.sectionPoint = glm::dvec3(50, 20, 20);
+      break;
+    case 4:
+      moved.bodies[0].transform =
+          glm::translate(glm::dmat4(1.0), glm::dvec3(1, 0, 0));
+      break;
+    case 5:
+      moved.bodies[0].shape =
+          CADKernel::Instance().CreateBox(100.0, 40.0, 41.0).GetShape();
+      break;
+    }
+    INFO("change " << which);
+    CHECK(drawing::ProjectionInputHash(moved) != h);
+  }
+}
+
+// A projection turned in the view plane is the projection of the turned
+// view: TurnedTo against ProjectView with the turned up.
+TEST_CASE("a projection turned on the sheet is the turned view's projection",
+          "[drawing][hlr]") {
+  const auto bodies = One(BlockWithHole());
+  std::string error;
+  drawing::ViewProjection vp;
+  vp.viewDir = kFrontDir;
+  vp.up = kFrontUp;
+  vp.result = *ProjectView(bodies, kFrontDir, kFrontUp, {}, &error);
+  const glm::dvec3 turnedUp{1, 0, 0}; // a quarter turn about +Y
+  const auto direct = ProjectView(bodies, kFrontDir, turnedUp, {}, &error);
+  REQUIRE(direct);
+  const drawing::ProjectionResult turned = drawing::TurnedTo(vp, turnedUp);
+  const Box2 a = BoundsOf(turned.curves, false);
+  const Box2 b = BoundsOf(direct->curves, false);
+  CHECK_THAT(a.min.x, WithinAbs(b.min.x, 1e-9));
+  CHECK_THAT(a.min.y, WithinAbs(b.min.y, 1e-9));
+  CHECK_THAT(a.max.x, WithinAbs(b.max.x, 1e-9));
+  CHECK_THAT(a.max.y, WithinAbs(b.max.y, 1e-9));
+  CHECK(turned.curves.size() == direct->curves.size());
+  CHECK(drawing::ProjectionDigest(turned) ==
+        drawing::ProjectionDigest(*direct));
 }

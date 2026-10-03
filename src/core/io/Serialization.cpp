@@ -1,4 +1,5 @@
 #include "core/io/Serialization.h"
+#include "core/drawing/ViewProjection.h"
 
 #include "core/MotionStudy.h"
 #include "core/Requirements.h"
@@ -596,15 +597,15 @@ uint64_t IdForFile(uint64_t id, const char* what, const std::string& name) {
 // load drops (ReadResultFiles). Either file whose bytes are the ones on disk
 // is not written: an unchanged result keeps its mtime.
 bool WriteResultFiles(const std::filesystem::path& dir, const std::string& base,
-                      json j, std::set<std::string>& wanted,
-                      std::string* error) {
+                      json j, std::set<std::string>& wanted, std::string* error,
+                      const char* suffix = ".result") {
   std::vector<unsigned char> bytes;
   if (j.contains(kResultData)) {
     bytes = std::move(j.at(kResultData).get_binary());
     j.erase(kResultData);
   }
-  const std::string bin = base + ".result.bin";
-  const std::string text = base + ".result.json";
+  const std::string bin = base + suffix + ".bin";
+  const std::string text = base + suffix + ".json";
   if (!WriteBytesAtomic(dir / bin, bytes, error) ||
       !WriteTextAtomic(dir / text, j.dump() + "\n", error))
     return false;
@@ -852,6 +853,14 @@ void InsertIdFile(std::map<uint64_t, std::filesystem::path>& byId,
 bool IsResultFile(const std::filesystem::path& path) {
   const std::string stem = path.stem().string(); // strips ".json"
   return stem.size() > 7 && stem.compare(stem.size() - 7, 7, ".result") == 0;
+}
+
+// A drawing view's saved projection beside it (v162):
+// "<id>-<slug>.projection.json".
+bool IsProjectionFile(const std::filesystem::path& path) {
+  const std::string stem = path.stem().string(); // strips ".json"
+  return stem.size() > 11 &&
+         stem.compare(stem.size() - 11, 11, ".projection") == 0;
 }
 
 // The index lists the ids, in order. A duplicate there means the same file
@@ -2124,20 +2133,25 @@ bool SaveDrawingDir(const DrawingDocument& dwg, const std::string& dirPath,
       fs::create_directories(viewDir);
     std::set<std::string> wantedView;
     for (const DrawingView& v : dwg.GetViews()) {
-      const std::string file = std::to_string(IdForFile(v.id, "view", v.name)) +
-                               "-" + LabelSlug(v.name) + ".json";
+      const std::string base = std::to_string(IdForFile(v.id, "view", v.name)) +
+                               "-" + LabelSlug(v.name);
+      const std::string file = base + ".json";
       if (!WriteTextAtomic(viewDir / file, DrawingViewToJson(v).dump(2) + "\n",
                            error))
         return false;
       index["views"].push_back(v.id);
       wantedView.insert(file);
+      // Its last projection beside it (v162), as a study's result is: an
+      // unchanged one is not rewritten, and one whose inputs nobody hashed
+      // is not written at all.
+      const auto projection = dwg.SavedProjection(v.id);
+      if (projection && projection->inputHash != 0 &&
+          !WriteResultFiles(viewDir, base, ViewProjectionToJson(*projection),
+                            wantedView, error, ".projection"))
+        return false;
     }
     std::error_code ec;
-    for (const auto& entry : fs::directory_iterator(viewDir, ec)) {
-      if (entry.path().extension() == ".json" &&
-          !wantedView.contains(entry.path().filename().string()))
-        fs::remove(entry.path(), ec);
-    }
+    PruneCollection(viewDir, wantedView);
 
     const fs::path dimDir = dir / "dims";
     index["dims"] = json::array();
@@ -2207,11 +2221,15 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
     auto dwg = std::make_unique<DrawingDocument>();
     dwg->GetSheet() = SheetFromJson(index.value("sheet", json::object()));
 
-    std::map<uint64_t, fs::path> viewById;
+    std::map<uint64_t, fs::path> viewById, projectionById;
     std::error_code ec;
     for (const auto& entry :
          fs::directory_iterator(fs::path(dirPath) / "views", ec)) {
-      if (entry.path().extension() == ".json")
+      if (entry.path().extension() != ".json")
+        continue;
+      if (IsProjectionFile(entry.path()))
+        InsertIdFile(projectionById, entry.path(), "view projection");
+      else
         InsertIdFile(viewById, entry.path(), "view");
     }
     uint64_t maxId = 0;
@@ -2223,6 +2241,23 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
       std::ifstream vin(it->second);
       DrawingView v = DrawingViewFromJson(ParseProjectFile(it->second));
       maxId = std::max(maxId, v.id);
+      // Its saved projection (v162), a candidate until the projecting job
+      // hashes its inputs. One that does not read is dropped and the view
+      // projects: it is derived, and never a reason to refuse the drawing.
+      if (const auto pit = projectionById.find(v.id);
+          pit != projectionById.end()) {
+        try {
+          if (const auto pj = ReadResultFiles(pit->second))
+            dwg->SetSavedProjection(
+                v.id,
+                std::make_shared<const drawing::ViewProjection>(
+                    ViewProjectionFromJson(*pj, ProjectRelative(pit->second))));
+        } catch (const std::exception& e) {
+          LOG_WARN("Dropping the saved projection {}: {}; the view projects "
+                   "again",
+                   ProjectRelative(pit->second), e.what());
+        }
+      }
       dwg->GetViews().push_back(std::move(v));
     }
 

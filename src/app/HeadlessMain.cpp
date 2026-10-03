@@ -47,6 +47,10 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   state.document = std::make_unique<Document>();
   state.commands = std::make_unique<CommandStack>();
   state.camera = &camera;
+  // No frame to keep free: a drawing's views project where they are asked
+  // for, so an RPC that reads them after a tab switch or an open finds them
+  // (docs/drawings/README.md#requests-that-wait).
+  state.drawingDeferProjection = false;
   ui::EnsureParts(state); // one part to start (assemblies A1)
   // The machine store. main() loads it into the GUI's AppState, and this mode
   // builds its OWN -- so a headless session had no machines at all: an agent

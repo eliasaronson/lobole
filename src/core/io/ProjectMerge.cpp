@@ -360,8 +360,10 @@ void ScanDuplicateIds(const std::string& projectDir,
         continue;
       const std::string filename = entry.path().filename().string();
       // A study's ".result.json" sits beside its study and shares the id on
-      // purpose — derived data, not a second study.
-      if (filename.find(".result.json") != std::string::npos)
+      // purpose — derived data, not a second study; so does a drawing view's
+      // ".projection.json" (v162).
+      if (filename.find(".result.json") != std::string::npos ||
+          filename.find(".projection.json") != std::string::npos)
         continue;
       const uint64_t id = IdFromFilename(filename);
       if (id == 0)

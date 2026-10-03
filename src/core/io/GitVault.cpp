@@ -200,6 +200,10 @@ std::string IdentityArgs(const std::string& dir) {
 constexpr const char* kResultsExcluded =
     "# Written by Designer: saved study results are derived (their input "
     "hash names them)";
+// The study and motion results (v153), and the drawing views' saved
+// projections (v162): derived, each named by its input hash.
+constexpr const char* kDerivedPatterns[] = {
+    "*.result.json", "*.result.bin", "*.projection.json", "*.projection.bin"};
 
 void KeepResultsOutOfHistory(const std::string& dir) {
   std::string out;
@@ -217,16 +221,28 @@ void KeepResultsOutOfHistory(const std::string& dir) {
       current.assign(std::istreambuf_iterator<char>(in),
                      std::istreambuf_iterator<char>());
   }
-  if (current.find(kResultsExcluded) == std::string::npos) {
+  // Each pattern on its own line, added when that line is missing: a
+  // repository whose exclude file an earlier build wrote has the study
+  // results' lines and not the drawing projections' (v162).
+  std::string missing;
+  if (current.find(kResultsExcluded) == std::string::npos)
+    missing += std::string(kResultsExcluded) + "\n";
+  for (const char* pattern : kDerivedPatterns)
+    if (current.find(std::string("\n") + pattern + "\n") == std::string::npos &&
+        current.rfind(std::string(pattern) + "\n", 0) != 0)
+      missing += std::string(pattern) + "\n";
+  if (!missing.empty()) {
     std::error_code ec;
     std::filesystem::create_directories(exclude.parent_path(), ec);
     std::ofstream app(exclude, std::ios::app);
     if (!current.empty() && current.back() != '\n')
       app << "\n";
-    app << kResultsExcluded << "\n*.result.json\n*.result.bin\n";
+    app << missing;
   }
-  RunGit(dir, "rm -r -q --cached --ignore-unmatch -- " +
-                  Quote("*.result.json") + " " + Quote("*.result.bin"));
+  std::string untrack = "rm -r -q --cached --ignore-unmatch --";
+  for (const char* pattern : kDerivedPatterns)
+    untrack += " " + Quote(pattern);
+  RunGit(dir, untrack);
 }
 
 } // namespace

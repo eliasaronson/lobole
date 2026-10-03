@@ -10,6 +10,7 @@
 #include "remote/RemoteProject.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById / AssemblyDocById (view cost)
+#include "ui/BackgroundJobs.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 
@@ -74,14 +75,20 @@ static constexpr MethodDoc DrawingMethods[] = {
      "it a plain view again. An edge the plane made is named by the face it "
      "was cut from (list_drawing_geometry's sil_face ref). A detail view "
      "takes `detail: {view?, center?, radius_mm?, label?}`, keeping what it "
-     "does not name.",
+     "does not name. Every view is then assembled again from its kept "
+     "projection; only a change the projection reads (orientation, section, "
+     "hidden, configuration, quality, show_hidden) projects -- off the frame "
+     "on a windowed instance, the call waiting for it (see update_drawing).",
      "base_view, configuration, detail, hidden, id, name, position, quality, "
      "rotation_deg, scale, section, show_hidden"},
     {"check_drawing",
      "Validate sheet layout: views vs border/title block, overlaps, dim "
      "placement, dangling/stale {update?}. {drawing?} (name or id) checks "
      "THAT sheet rather than whichever one is active — a report about the "
-     "wrong sheet is worse than none.",
+     "wrong sheet is worse than none. `update` (default true) brings the "
+     "views up to date first, waiting for their projection as update_drawing "
+     "does; a dimension or note on a view still projecting is `pending`, "
+     "never `dangling_dim`.",
      "drawing, update", remote::NoFlags,
      "ok, issues[]{kind,detail,view?,other_view?,dim?,note?}, views, dims, "
      "receipt{schema,standing,summary,claims}"},
@@ -122,10 +129,15 @@ static constexpr MethodDoc DrawingMethods[] = {
      "circle's centre at `position` (required); the parent draws the circle "
      "lettered and the detail is captioned DETAIL B (5:1). `source` and the "
      "projection's own parameters are then the parent's and are refused "
-     "here; `label` defaults to the sheet's next free view letter.",
+     "here; `label` defaults to the sheet's next free view letter. An "
+     "auto-placed view's projection runs off the frame on a windowed "
+     "instance, the call waiting for it (see update_drawing).",
      "base_view, configuration, detail, drawing, hidden, name, orientation, "
      "position, quality, rotation_deg, scale, section, source"},
-    {"remove_drawing_view", "Remove a view by id.", "id"},
+    {"remove_drawing_view",
+     "Remove a view by id (and its dimensions and saved projection). Nothing "
+     "projects; it waits for a projection in flight to land first.",
+     "id"},
     {"list_drawing_views",
      "List views with placement and scale, each with what its projection "
      "COST: `cost.by_occurrence` names the occupants that carried it, "
@@ -148,8 +160,19 @@ static constexpr MethodDoc DrawingMethods[] = {
      "`quality: \"fast\"` is the other lever. Omit for no budget. A view "
      "that took over a second and was mostly ONE occupant says so in its "
      "`warnings`, naming it: on a 35-part speaker, one imported driver was "
-     "87% of an 16.8 s view.",
-     "budget_s, drawing"},
+     "87% of an 16.8 s view. "
+     "Each view keeps its projection and saves it with the drawing "
+     "(docs/drawings/README.md#saved-projections): a view whose inputs "
+     "hash as they did is installed with no HLR, and one only moved on the "
+     "sheet is assembled again; only the rest project."
+     " On a windowed or --offscreen instance the call waits for its projection "
+     "without holding the frame: it projects on a `drawing` job "
+     "(background_jobs) and the answer comes when the views land; "
+     "cancel_background_job {kind: \"drawing\"} refuses it."
+     " `async: true` answers at once with the views as they are (each "
+     "projecting one marked `projecting`) and `job_id`, for a client that "
+     "would rather poll background_jobs.",
+     "async, budget_s, drawing"},
     {"list_drawing_geometry",
      "Projected 2D curves of a view (for picking/dimensioning).", "view",
      remote::NoFlags,
@@ -174,7 +197,14 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"remove_drawing_dim", "Remove a dimension by id.", "id"},
     {"list_drawing_dims", "List dimensions with values.", "", remote::NoFlags,
      "dims[]{id,kind,view,resolved,value,text}"},
-    {"export_drawing", "Export the drawing to SVG or PDF by extension {path}.",
+    {"export_drawing",
+     "Export the drawing to SVG or PDF by extension {path}. The views are "
+     "brought up to date first: a stale or half-projected sheet is never "
+     "written."
+     " On a windowed or --offscreen instance the call waits for its projection "
+     "without holding the frame: it projects on a `drawing` job "
+     "(background_jobs) and the answer comes when the views land; "
+     "cancel_background_job {kind: \"drawing\"} refuses it.",
      "path:string", remote::NotInBatch},
     {"add_drawing_note",
      "Add a text note ({{expression}} resolves project variables, or "
@@ -218,7 +248,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "they go round the view and untangled so no two leaders cross. The "
      "balloons already on those views are replaced, so run it again after "
      "the model moves. One undo step. Needs an assembly view (a parts list "
-     "note numbers them when there is one).",
+     "note numbers them when there is one). The views are brought up to "
+     "date first, waiting for their projection as update_drawing does.",
      "views", remote::NoFlags,
      "placed[]{note,item,part,view,occurrence,position}, unplaced[], "
      "crossings"},
@@ -436,6 +467,24 @@ json DrawingIssuesJson(ui::AppState& state) {
   for (const drawing::DrawingIssue& i : drawing::ValidateDrawing(
            *state.drawing, state.drawingRenders, dims, stale, notes)) {
     json ij = {{"kind", i.kind}, {"detail", i.detail}};
+    // On a view still projecting, a dimension with nothing to stand on yet
+    // is PENDING, not dangling, and the view is not unprojected: it is on
+    // its way (docs/drawings/README.md#projection-off-the-frame).
+    uint64_t onView = i.viewId;
+    if (onView == 0 && i.dimId != 0)
+      if (const DrawingDim* d = state.drawing->FindDim(i.dimId))
+        onView = d->viewId;
+    if (onView == 0 && i.noteId != 0)
+      for (const DrawingNote& n : state.drawing->GetNotes())
+        if (n.id == i.noteId)
+          onView = n.viewId;
+    if (onView != 0 && ui::DrawingViewProjecting(state, onView) &&
+        (i.kind == "dangling_dim" || i.kind == "unprojected_view" ||
+         i.kind == "stale_view")) {
+      ij["kind"] = "pending";
+      ij["detail"] = "view " + std::to_string(onView) +
+                     " is still projecting; this is checked once it lands";
+    }
     if (i.viewId)
       ij["view"] = i.viewId;
     if (i.otherViewId)
@@ -585,6 +634,137 @@ void SelectDrawing(ui::AppState& state, const RpcParams& p) {
 } // namespace
 
 namespace {
+// The view an add_drawing_view (not a detail) asks for, every parameter
+// checked: what the handler adds, and what a parked one projects ahead of it
+// (ParkDrawingRequest). `autoPlace`: neither a position nor a scale given.
+DrawingView AddViewFromParams(ui::AppState& state, const RpcParams& p,
+                              bool& autoPlace) {
+  // `source` = the source document's NAME (a part or an assembly), resolved
+  // to its stable id.
+  const std::string sourceName = p.at("source").get<std::string>();
+  uint64_t sourceId = 0;
+  for (const auto& slot : state.parts) {
+    if (slot.name == sourceName && (slot.kind == ui::DocKind::Part ||
+                                    slot.kind == ui::DocKind::Assembly)) {
+      sourceId = slot.id;
+      break;
+    }
+  }
+  if (sourceId == 0)
+    throw std::runtime_error("no part or assembly named '" + sourceName + "'");
+  DrawingView v;
+  v.sourceDocId = sourceId;
+  if (p.contains("orientation") &&
+      !ViewOrientationFromString(p.at("orientation").get<std::string>(),
+                                 v.orientation))
+    throw std::runtime_error("unknown orientation '" +
+                             p.at("orientation").get<std::string>() + "'");
+  // Default the label to the orientation (front/top/iso…) — clearer on the
+  // sheet than repeating the source name across every view.
+  v.name = p.value("name", std::string(ViewOrientationToString(v.orientation)));
+  v.baseViewId = p.value("base_view", uint64_t{0});
+  v.rotationDeg = p.value("rotation_deg", 0.0);
+  if (p.contains("section"))
+    v.section = ParseSection(p.at("section"));
+  // Say nothing about size or place and you get what the "Add view" button
+  // gives: a standard scale that fits this sheet, and a spot clear of the
+  // views already on it. This RPC dropped every view at the sheet centre at
+  // 1:1, so three scripted views landed in one pile while three clicked
+  // ones laid themselves out — the same action, two behaviours.
+  autoPlace = !p.contains("position") && !p.contains("scale");
+  v.scale = p.value("scale", 1.0);
+  if (p.contains("quality"))
+    v.quality = RequireQuality(p.at("quality"));
+  if (p.contains("hidden"))
+    v.hidden = ParseHidden(state, v, p.at("hidden"));
+  if (p.contains("configuration")) {
+    v.configuration = ParseViewConfiguration(state, v, p.at("configuration"));
+    // Two views of one part at one orientation, both called "top", are two
+    // rows nobody can tell apart — the GUI names the configured one after
+    // its configuration, and so does this.
+    if (!p.contains("name") && v.configuration != 0) {
+      const Document* src = ui::DrawingSourceDocument(state, sourceId);
+      const Configuration* cfg =
+          src ? src->FindConfiguration(v.configuration) : nullptr;
+      if (cfg)
+        v.name += " (" + cfg->name + ")";
+    }
+  }
+  if (p.contains("position")) {
+    const json& pos = p.at("position");
+    v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
+  } else { // default to the sheet centre
+    v.position = ChromeOf(state.drawing->GetSheet()).extent * 0.5;
+  }
+  return v;
+}
+
+// A set_drawing_view's view: `view` with the parameters applied, every one
+// checked first. What the handler stores, and what a parked one projects
+// ahead of it (ParkDrawingRequest).
+DrawingView SetViewFromParams(ui::AppState& state, const DrawingView& view,
+                              const RpcParams& p) {
+  if (p.contains("scale") && p.at("scale").get<double>() <= 0.0)
+    throw std::runtime_error("scale must be positive");
+  if (p.contains("base_view")) {
+    const uint64_t baseId = p.at("base_view").get<uint64_t>();
+    if (baseId != 0) {
+      const DrawingView* base = state.drawing->FindView(baseId);
+      if (!base || baseId == view.id)
+        throw std::runtime_error("base_view must name another view");
+      if (base->baseViewId == view.id)
+        throw std::runtime_error(
+            "base_view cycle: that view already folds from this one");
+    }
+  }
+  DrawingView v = view;
+  if (p.contains("configuration"))
+    v.configuration =
+        ParseViewConfiguration(state, view, p.at("configuration"));
+  if (p.contains("section"))
+    v.section = ParseSection(p.at("section"));
+  if (p.contains("detail")) {
+    if (!view.detail.on)
+      throw std::runtime_error("this view is not a detail; add a detail "
+                               "view with add_drawing_view {detail}");
+    json dj = p.at("detail");
+    if (!dj.is_object())
+      throw std::runtime_error("detail is {view, center, radius_mm, label?}");
+    // An edit keeps what it does not name.
+    if (!dj.contains("view"))
+      dj["view"] = view.detail.parentViewId;
+    if (!dj.contains("center"))
+      dj["center"] = {view.detail.center.x, view.detail.center.y,
+                      view.detail.center.z};
+    if (!dj.contains("radius_mm"))
+      dj["radius_mm"] = view.detail.radius;
+    if (!dj.contains("label"))
+      dj["label"] = view.detail.label;
+    v.detail = ParseDetail(state, dj);
+    if (v.detail.parentViewId == view.id)
+      throw std::runtime_error("a detail cannot be of itself");
+  }
+  if (p.contains("position")) {
+    const json& pos = p.at("position");
+    v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
+  }
+  if (p.contains("scale"))
+    v.scale = p.at("scale").get<double>();
+  if (p.contains("name"))
+    v.name = p.at("name").get<std::string>();
+  if (p.contains("show_hidden"))
+    v.showHidden = p.at("show_hidden").get<bool>();
+  if (p.contains("quality"))
+    v.quality = RequireQuality(p.at("quality"));
+  if (p.contains("hidden"))
+    v.hidden = ParseHidden(state, view, p.at("hidden"));
+  if (p.contains("base_view"))
+    v.baseViewId = p.at("base_view").get<uint64_t>();
+  if (p.contains("rotation_deg"))
+    v.rotationDeg = p.at("rotation_deg").get<double>();
+  return v;
+}
+
 // What a view's projection cost, by the name a reader can act on. The ids in
 // `costBySource` are occurrence ids on an assembly view and body-owning
 // feature ids on a part view, which is exactly what `hidden` accepts.
@@ -641,8 +821,273 @@ std::optional<std::string> SlowViewWarning(ui::AppState& state,
 }
 } // namespace
 
+namespace {
+
+// Whether the drawing's views project on a `drawing` job or inline, for one
+// scope (AppState::drawingDeferProjection), put back as it was.
+struct SyncProjection {
+  ui::AppState& state;
+  bool was;
+  SyncProjection(ui::AppState& s, bool defer)
+      : state(s), was(s.drawingDeferProjection) {
+    s.drawingDeferProjection = defer;
+  }
+  ~SyncProjection() { state.drawingDeferProjection = was; }
+  SyncProjection(const SyncProjection&) = delete;
+  SyncProjection& operator=(const SyncProjection&) = delete;
+};
+
+// update_drawing's answer, from the views as they are now.
+json UpdateDrawingAnswer(ui::AppState& state) {
+  json views = json::array();
+  for (const DrawingView& view : state.drawing->GetViews()) {
+    json vj = {{"id", view.id}, {"name", view.name}};
+    if (ui::DrawingViewProjecting(state, view.id))
+      vj["projecting"] = true;
+    const auto it = state.drawingRenders.find(view.id);
+    if (it != state.drawingRenders.end()) {
+      int vis = 0, hid = 0, outline = 0;
+      const int bends = CountBends(it->second);
+      for (const drawing::SheetCurve& c : it->second.curves) {
+        if (c.kind == drawing::CurveKind::Bend)
+          continue; // counted above; not a projected edge either way
+        if (c.visible)
+          ++vis;
+        else
+          ++hid;
+        if (c.kind == drawing::CurveKind::Outline)
+          ++outline;
+      }
+      vj["curves"] = it->second.curves.size();
+      vj["visible"] = vis;
+      vj["hidden"] = hid;
+      vj["silhouettes"] = outline;
+      vj["bend_lines"] = bends;
+      vj["has_geometry"] = it->second.hasGeometry;
+      if (!it->second.error.empty())
+        vj["error"] = it->second.error;
+    }
+    views.push_back(vj);
+  }
+  json out{{"views", views}};
+  if (const ui::BackgroundJob* job = ui::FindBackgroundJob(state, "drawing")) {
+    out["job"] = "drawing";
+    out["job_id"] = job->id;
+  }
+  return out;
+}
+
+// check_drawing's answer, judging the views as they are now.
+json CheckDrawingAnswer(ui::AppState& state) {
+  const json issues = DrawingIssuesJson(state);
+  json out{{"ok", issues.empty()},
+           {"issues", issues},
+           {"views", state.drawing->ViewCount()},
+           {"dims", state.drawing->DimCount()}};
+  // A sheet with no views passes every check there is. That is the "valid
+  // over nothing" shape again (core/Receipt.h): `ok: true` is true and it is
+  // not a drawing anyone can build from.
+  receipt::Receipt receipt;
+  const receipt::Oracle oracle{"designer/drawing-rules", "1"};
+  const std::string claim = "the drawing is complete and consistent";
+  if (state.drawing->ViewCount() == 0) {
+    receipt.Unverifiable(claim, oracle,
+                         "this sheet has no views — there is nothing for "
+                         "the drawing rules to check");
+  } else {
+    receipt::Claim c(claim, oracle,
+                     issues.empty() ? receipt::Verdict::Pass
+                                    : receipt::Verdict::Fail);
+    c.basis = receipt::Basis::Verified;
+    c.value = static_cast<double>(state.drawing->DimCount());
+    c.unit = "dimensions";
+    c.note = std::to_string(state.drawing->ViewCount()) +
+             " view(s) checked against the drawing rules";
+    receipt.Add(std::move(c));
+    // A dimension-free drawing is not wrong, and it is not a drawing you can
+    // make a part from either. Said, not enforced.
+    if (state.drawing->DimCount() == 0)
+      receipt.Unverifiable("the drawing dimensions the part", oracle,
+                           "no dimensions on this sheet, so nothing here says "
+                           "how big anything is");
+  }
+  AttachReceipt(out, receipt);
+  return out;
+}
+
+// export_drawing's answer: the file written (`update` brings the views up to
+// date first, waiting), and the layout report, so a script cannot miss a
+// broken sheet.
+json ExportDrawingAnswer(ui::AppState& state, const std::string& path,
+                         bool update) {
+  std::string err;
+  if (!ui::ExportActiveDrawing(state, path, &err, update))
+    throw std::runtime_error(err);
+  return json{{"path", path},
+              {"views", state.drawing->ViewCount()},
+              {"issues", DrawingIssuesJson(state)}};
+}
+
+// A request waiting on the drawing's projection
+// (docs/drawings/README.md#requests-that-wait). Two shapes:
+//   - asked for an update (update_drawing, check_drawing, export_drawing):
+//     the update is on a `drawing` job; when it lands the answer is built
+//     from the views as they landed -- not by the handler, which would
+//     project again whatever ran out of its budget or failed;
+//   - anything else: waits while a run is in flight, then has the view it
+//     will add or change projected ahead of it (into the projection cache),
+//     and is dispatched once that lands, so the handler's own projection is
+//     a cache hit.
+class DrawingWait final : public Parking {
+public:
+  DrawingWait(std::string method, uint64_t cancellations, uint64_t slot,
+              bool answers)
+      : m_method(std::move(method)), m_cancellations(cancellations),
+        m_slot(slot), m_answers(answers) {}
+
+  Next Poll(ui::AppState& state, const RpcParams& p, json& answer) override {
+    if (state.drawingJobCancellations != m_cancellations)
+      throw std::runtime_error(
+          m_method +
+          " was waiting for the drawing's views to project and the "
+          "projection was cancelled (cancel_background_job drawing) -- call "
+          "it again");
+    if (state.drawingRun)
+      return Next::Wait;
+    if (!m_answers) {
+      if (!m_prefetched) {
+        m_prefetched = true;
+        Prefetch(state, p);
+        if (state.drawingRun)
+          return Next::Wait;
+      }
+      return Next::Dispatch;
+    }
+    // The views landed. On the tab the request was for: the GUI may have
+    // switched away meanwhile.
+    if (const auto idx = ui::SlotIndexById(state, m_slot);
+        idx && static_cast<int>(*idx) != state.activePart)
+      ui::SetActivePart(state, *idx);
+    if (!state.drawing)
+      throw std::runtime_error("the active document is not a drawing");
+    (void)p.contains("drawing");
+    if (m_method == "update_drawing") {
+      (void)p.contains("budget_s");
+      (void)p.contains("async");
+      answer = UpdateDrawingAnswer(state);
+    } else if (m_method == "check_drawing") {
+      (void)p.contains("update");
+      answer = CheckDrawingAnswer(state);
+    } else {
+      answer = ExportDrawingAnswer(state, p.at("path").get<std::string>(),
+                                   /*update=*/false);
+    }
+    return Next::Answer;
+  }
+
+private:
+  // The view the request will add or change, projected now on a job, so the
+  // handler finds it in the cache. A request the handler will refuse projects
+  // nothing (the refusal is the handler's to word).
+  void Prefetch(ui::AppState& state, const RpcParams& p) {
+    if (!state.drawing)
+      return;
+    m_cancellations = state.drawingJobCancellations;
+    try {
+      SyncProjection deferred(state, /*defer=*/true);
+      if (m_method == "add_drawing_view" && !p.contains("detail")) {
+        bool autoPlace = false;
+        const DrawingView v = AddViewFromParams(state, p, autoPlace);
+        if (autoPlace) // a placed view is measured, so projected
+          ui::PrefetchDrawingView(state, v);
+      } else if (m_method == "set_drawing_view") {
+        const DrawingView* view =
+            state.drawing->FindView(p.at("id").get<uint64_t>());
+        if (view != nullptr)
+          ui::PrefetchDrawingView(state, SetViewFromParams(state, *view, p));
+      } else if (m_method == "layout_balloons") {
+        ui::RequestDrawingUpdate(state);
+      }
+    } catch (const std::exception&) {
+      // Refused: dispatched as it is, and the handler says why.
+    }
+  }
+
+  std::string m_method;
+  uint64_t m_cancellations = 0;
+  uint64_t m_slot = 0;
+  bool m_answers = false;
+  bool m_prefetched = false;
+};
+
+} // namespace
+
+std::unique_ptr<Parking> ParkDrawingRequest(ui::AppState& state,
+                                            const std::string& m,
+                                            const RpcParams& p) {
+  const bool update =
+      m == "update_drawing" || m == "check_drawing" || m == "export_drawing";
+  const bool change = m == "add_drawing_view" || m == "set_drawing_view" ||
+                      m == "remove_drawing_view" || m == "layout_balloons";
+  if (!update && !change) {
+    // Anything else of this module that reads the sheet (its views, their
+    // curves, the dimensions and notes resolved against them) waits for a
+    // run in flight: right after an open or a tab switch the views are
+    // still projecting, and a note on one would read as not resolving.
+    if (!state.drawingRun || m == "create_drawing" || m == "list_drawings" ||
+        m == "set_drawing_sheet")
+      return nullptr;
+    for (const MethodDoc& row : DrawingMethodDocs())
+      if (m == row.name)
+        return std::make_unique<DrawingWait>(m, state.drawingJobCancellations,
+                                             0, /*answers=*/false);
+    return nullptr;
+  }
+  try {
+    if (m == "update_drawing" && p.value("async", false))
+      return nullptr; // answers at once by its nature
+    if (m == "check_drawing" && !p.value("update", true))
+      return nullptr; // judges the views as they are
+    if (m != "export_drawing" && m != "layout_balloons" &&
+        m != "remove_drawing_view" && p.contains("drawing"))
+      SelectDrawing(state, p); // as the handler would, before it waits
+    if (!state.drawing || state.drawing->ViewCount() == 0)
+      return nullptr; // the handler refuses, or has nothing to project
+    const uint64_t slot =
+        state.parts.at(static_cast<size_t>(state.activePart)).id;
+    if (update) {
+      {
+        // Asked for even while a run is in flight: an update owed then is
+        // asked for when that run ends, and this waits for both.
+        SyncProjection deferred(state, /*defer=*/true);
+        ui::RequestDrawingUpdate(
+            state, m == "update_drawing" ? p.value("budget_s", 0.0) : 0.0);
+      }
+      if (!state.drawingRun)
+        return nullptr; // nothing projects: the handler only assembles
+      return std::make_unique<DrawingWait>(m, state.drawingJobCancellations,
+                                           slot, /*answers=*/true);
+    }
+    // A change: the view it adds or edits is projected ahead of it, once any
+    // run in flight has landed (DrawingWait::Prefetch).
+    auto wait = std::make_unique<DrawingWait>(m, state.drawingJobCancellations,
+                                              slot, /*answers=*/false);
+    json unused;
+    if (wait->Poll(state, p, unused) == Parking::Next::Dispatch)
+      return nullptr;
+    return wait;
+  } catch (const std::exception&) {
+    return nullptr; // the handler says what went wrong
+  }
+}
+
 std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
+  // A handler answers with complete results, so whatever it asks of the
+  // drawing projects inline (UpdateDrawingRendersNow's semantics): the frame
+  // is kept free by parking the request BEFORE it gets here
+  // (ParkDrawingRequest), not by the handler deferring.
+  SyncProjection inline_(state, /*defer=*/false);
   if (m == "create_drawing") {
     // Adds a drawing tab. Optional `sheet` seeds paper size / orientation /
     // title-block fields so a headless caller can set them in one call.
@@ -759,70 +1204,14 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
                   {"label", v.detail.label},
                   {"needs_update", true}};
     }
-    // `source` = the source document's NAME (a part or an assembly), resolved
-    // to its stable id.
-    const std::string sourceName = p.at("source").get<std::string>();
-    uint64_t sourceId = 0;
-    for (const auto& slot : state.parts) {
-      if (slot.name == sourceName && (slot.kind == ui::DocKind::Part ||
-                                      slot.kind == ui::DocKind::Assembly)) {
-        sourceId = slot.id;
-        break;
-      }
-    }
-    if (sourceId == 0)
-      throw std::runtime_error("no part or assembly named '" + sourceName +
-                               "'");
-    DrawingView v;
-    v.sourceDocId = sourceId;
-    if (p.contains("orientation") &&
-        !ViewOrientationFromString(p.at("orientation").get<std::string>(),
-                                   v.orientation))
-      throw std::runtime_error("unknown orientation '" +
-                               p.at("orientation").get<std::string>() + "'");
-    // Default the label to the orientation (front/top/iso…) — clearer on the
-    // sheet than repeating the source name across every view.
-    v.name =
-        p.value("name", std::string(ViewOrientationToString(v.orientation)));
-    v.baseViewId = p.value("base_view", uint64_t{0});
-    v.rotationDeg = p.value("rotation_deg", 0.0);
-    if (p.contains("section"))
-      v.section = ParseSection(p.at("section"));
-    // Say nothing about size or place and you get what the "Add view" button
-    // gives: a standard scale that fits this sheet, and a spot clear of the
-    // views already on it. This RPC dropped every view at the sheet centre at
-    // 1:1, so three scripted views landed in one pile while three clicked
-    // ones laid themselves out — the same action, two behaviours.
-    const bool autoPlace = !p.contains("position") && !p.contains("scale");
-    v.scale = p.value("scale", 1.0);
-    if (p.contains("quality"))
-      v.quality = RequireQuality(p.at("quality"));
-    if (p.contains("hidden"))
-      v.hidden = ParseHidden(state, v, p.at("hidden"));
-    if (p.contains("configuration")) {
-      v.configuration = ParseViewConfiguration(state, v, p.at("configuration"));
-      // Two views of one part at one orientation, both called "top", are two
-      // rows nobody can tell apart — the GUI names the configured one after
-      // its configuration, and so does this.
-      if (!p.contains("name") && v.configuration != 0) {
-        const Document* src = ui::DrawingSourceDocument(state, sourceId);
-        const Configuration* cfg =
-            src ? src->FindConfiguration(v.configuration) : nullptr;
-        if (cfg)
-          v.name += " (" + cfg->name + ")";
-      }
-    }
-    if (p.contains("position")) {
-      const json& pos = p.at("position");
-      v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
-    } else { // default to the sheet centre
-      v.position = ChromeOf(state.drawing->GetSheet()).extent * 0.5;
-    }
+    bool autoPlace = false;
+    DrawingView v = AddViewFromParams(state, p, autoPlace);
+    const uint64_t sourceId = v.sourceDocId;
     if (autoPlace) {
       // AddDrawingViewPlaced snapshots and re-projects itself, so it goes
       // BEFORE the snapshot below rather than alongside it.
       v.scale = 0.0; // <= 0 asks it to choose a standard scale
-      const uint64_t id = ui::AddDrawingViewPlaced(state, v);
+      const uint64_t id = ui::AddDrawingViewPlaced(state, v, /*defer=*/false);
       // Placing a view means measuring it, so it is already projected — and
       // therefore this is the one moment that knows what it cost. A view that
       // took seconds names the occurrence that carried it (W3's "an assembly
@@ -860,84 +1249,25 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
           .pop_back(); // nothing changed; drop the snapshot
       throw std::runtime_error("no such view");
     }
-    ui::UpdateDrawingRenders(state); // drop the removed view's geometry
+    ui::ReassembleDrawingViews(state); // drop the removed view's geometry
     return json::object();
   }
   if (m == "set_drawing_view") {
     // Edit a view in place — the missing mutation that used to force
-    // remove+re-add (losing the view's dims). params: {id, position?: [x,y],
-    // scale?, name?, show_hidden?, base_view?}. Everything is validated
+    // remove+re-add (losing the view's dims). Everything is validated
     // BEFORE the undo snapshot so a failed call leaves no undo entry.
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
     DrawingView* view = state.drawing->FindView(p.at("id").get<uint64_t>());
     if (!view)
       throw std::runtime_error("no such view");
-    if (p.contains("scale") && p.at("scale").get<double>() <= 0.0)
-      throw std::runtime_error("scale must be positive");
-    if (p.contains("base_view")) {
-      const uint64_t baseId = p.at("base_view").get<uint64_t>();
-      if (baseId != 0) {
-        const DrawingView* base = state.drawing->FindView(baseId);
-        if (!base || baseId == view->id)
-          throw std::runtime_error("base_view must name another view");
-        if (base->baseViewId == view->id)
-          throw std::runtime_error(
-              "base_view cycle: that view already folds from this one");
-      }
-    }
-    const uint64_t configuration =
-        p.contains("configuration")
-            ? ParseViewConfiguration(state, *view, p.at("configuration"))
-            : view->configuration;
-    const SectionSpec section =
-        p.contains("section") ? ParseSection(p.at("section")) : view->section;
-    DetailSpec detail = view->detail;
-    if (p.contains("detail")) {
-      if (!view->detail.on)
-        throw std::runtime_error("this view is not a detail; add a detail "
-                                 "view with add_drawing_view {detail}");
-      json dj = p.at("detail");
-      if (!dj.is_object())
-        throw std::runtime_error("detail is {view, center, radius_mm, label?}");
-      // An edit keeps what it does not name.
-      if (!dj.contains("view"))
-        dj["view"] = view->detail.parentViewId;
-      if (!dj.contains("center"))
-        dj["center"] = {view->detail.center.x, view->detail.center.y,
-                        view->detail.center.z};
-      if (!dj.contains("radius_mm"))
-        dj["radius_mm"] = view->detail.radius;
-      if (!dj.contains("label"))
-        dj["label"] = view->detail.label;
-      detail = ParseDetail(state, dj);
-      if (detail.parentViewId == view->id)
-        throw std::runtime_error("a detail cannot be of itself");
-    }
+    const DrawingView edited = SetViewFromParams(state, *view, p);
     ui::SnapshotDrawing(state);
-    view->section = section;
-    view->detail = detail;
-    view->configuration = configuration;
-    if (p.contains("position")) {
-      const json& pos = p.at("position");
-      view->position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
-    }
-    if (p.contains("scale"))
-      view->scale = p.at("scale").get<double>();
-    if (p.contains("name"))
-      view->name = p.at("name").get<std::string>();
-    if (p.contains("show_hidden"))
-      view->showHidden = p.at("show_hidden").get<bool>();
-    if (p.contains("quality"))
-      view->quality = RequireQuality(p.at("quality"));
-    if (p.contains("hidden"))
-      view->hidden = ParseHidden(state, *view, p.at("hidden"));
-    if (p.contains("base_view"))
-      view->baseViewId = p.at("base_view").get<uint64_t>();
-    if (p.contains("rotation_deg"))
-      view->rotationDeg = p.at("rotation_deg").get<double>();
+    *view = edited;
     state.drawing->BumpVersion();
-    ui::UpdateDrawingRenders(state); // bboxes/dims are baked at projection
+    // Assembled again from what each view keeps; only a change that is a
+    // new projection (orientation, section, hidden, quality...) projects.
+    ui::ReassembleDrawingViews(state);
 
     const ui::FoldedPosition folded = ui::DrawingFoldedPosition(state, *view);
     json out = {{"id", view->id},
@@ -968,83 +1298,28 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
     if (p.value("update", true))
-      ui::UpdateDrawingRenders(state);
-    const json issues = DrawingIssuesJson(state);
-    json out{{"ok", issues.empty()},
-             {"issues", issues},
-             {"views", state.drawing->ViewCount()},
-             {"dims", state.drawing->DimCount()}};
-    {
-      // A sheet with no views passes every check there is. That is the
-      // "valid over nothing" shape again (core/Receipt.h): `ok: true` is
-      // true and it is not a drawing anyone can build from.
-      receipt::Receipt receipt;
-      const receipt::Oracle oracle{"designer/drawing-rules", "1"};
-      const std::string claim = "the drawing is complete and consistent";
-      if (state.drawing->ViewCount() == 0) {
-        receipt.Unverifiable(claim, oracle,
-                             "this sheet has no views — there is nothing for "
-                             "the drawing rules to check");
-      } else {
-        receipt::Claim c(claim, oracle,
-                         issues.empty() ? receipt::Verdict::Pass
-                                        : receipt::Verdict::Fail);
-        c.basis = receipt::Basis::Verified;
-        c.value = static_cast<double>(state.drawing->DimCount());
-        c.unit = "dimensions";
-        c.note = std::to_string(state.drawing->ViewCount()) +
-                 " view(s) checked against the drawing rules";
-        receipt.Add(std::move(c));
-        // A dimension-free drawing is not wrong, and it is not a drawing you
-        // can make a part from either. Said, not enforced.
-        if (state.drawing->DimCount() == 0)
-          receipt.Unverifiable(
-              "the drawing dimensions the part", oracle,
-              "no dimensions on this sheet, so nothing here says how big "
-              "anything is");
-      }
-      AttachReceipt(out, receipt);
-    }
-    return out;
+      ui::UpdateDrawingRendersNow(state);
+    // Built by CheckDrawingAnswer, which a parked request answers with too.
+    // rpc-returns-from: src/remote/RemoteDrawings.cpp
+    return CheckDrawingAnswer(state);
   }
   if (m == "update_drawing") {
     if (p.contains("drawing"))
       SelectDrawing(state, p); // {drawing}: re-project THAT sheet
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
+    // `async`: answered at once, the views projecting on a `drawing` job
+    // that background_jobs reports and cancel_background_job stops.
+    if (p.value("async", false)) {
+      SyncProjection deferred(state, /*defer=*/true);
+      ui::RequestDrawingUpdate(state, p.value("budget_s", 0.0));
+      return UpdateDrawingAnswer(state);
+    }
     // `budget_s` bounds the whole update. Without one it runs to completion,
     // which on a model carrying a swept surface can be a minute a view and
     // looks exactly like a hang.
-    ui::UpdateDrawingRenders(state, p.value("budget_s", 0.0));
-    json views = json::array();
-    for (const DrawingView& view : state.drawing->GetViews()) {
-      json vj = {{"id", view.id}, {"name", view.name}};
-      const auto it = state.drawingRenders.find(view.id);
-      if (it != state.drawingRenders.end()) {
-        int vis = 0, hid = 0, outline = 0;
-        const int bends = CountBends(it->second);
-        for (const drawing::SheetCurve& c : it->second.curves) {
-          if (c.kind == drawing::CurveKind::Bend)
-            continue; // counted above; not a projected edge either way
-          if (c.visible)
-            ++vis;
-          else
-            ++hid;
-          if (c.kind == drawing::CurveKind::Outline)
-            ++outline;
-        }
-        vj["curves"] = it->second.curves.size();
-        vj["visible"] = vis;
-        vj["hidden"] = hid;
-        vj["silhouettes"] = outline;
-        vj["bend_lines"] = bends;
-        vj["has_geometry"] = it->second.hasGeometry;
-        if (!it->second.error.empty())
-          vj["error"] = it->second.error;
-      }
-      views.push_back(vj);
-    }
-    return json{{"views", views}};
+    ui::UpdateDrawingRendersNow(state, p.value("budget_s", 0.0));
+    return UpdateDrawingAnswer(state);
   }
   if (m == "list_drawing_views") {
     if (!state.drawing)
@@ -1299,15 +1574,8 @@ std::optional<json> HandleDrawingRpc(ui::AppState& state, const std::string& m,
   if (m == "export_drawing") {
     if (!state.drawing)
       throw std::runtime_error("the active document is not a drawing");
-    const std::string path = p.at("path").get<std::string>();
-    std::string err;
-    if (!ui::ExportActiveDrawing(state, path, &err))
-      throw std::runtime_error(err);
-    // Echo the layout report (renders are fresh — ExportActiveDrawing just
-    // updated them) so a script can't miss a broken sheet. Never blocks.
-    return json{{"path", path},
-                {"views", state.drawing->ViewCount()},
-                {"issues", DrawingIssuesJson(state)}};
+    return ExportDrawingAnswer(state, p.at("path").get<std::string>(),
+                               /*update=*/true);
   }
   if (m == "list_drawing_geometry") {
     // Discovery for dimensioning: the distinct source edges/silhouettes of a

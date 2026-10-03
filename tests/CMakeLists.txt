@@ -844,6 +844,15 @@ set_tests_properties(render_quick_smoke PROPERTIES LABELS "gui;pygui"
 # including a PATH without ffmpeg; the pose put back; an async cancel. A
 # renderer, not ray tracing. Skips (77) the encoded formats when the machine
 # has no ffmpeg — shell.nix installs it, so a nix build never skips.
+# A drawing request waits for its projection off the frame: parked, in a
+# batch, cancelled, async (docs/drawings/README.md#requests-that-wait).
+# --offscreen, because --headless projects inline.
+add_test(NAME drawing_parked_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/drawing_parked_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(drawing_parked_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 add_test(NAME motion_video_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/motion_video_smoke.py
                  $<TARGET_FILE:designer>)

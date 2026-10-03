@@ -221,7 +221,9 @@ shows the state (coloured), the name (its tooltip: the measure kind, the
 source, the note, when it was checked and at which revision), the value with
 its unit (or "clean" / "findings" for a verdict) and the bound as evaluated.
 **Check** starts the job for every requirement that is not current, and
-shows its progress while it runs; Shift+Check measures every one again. The
+shows its progress while it runs on the bar every long operation draws
+(`DrawJobProgress`), with Cancel (`###req_cancel`); Shift+Check measures
+every one again. The
 rows come from the same engine `list_requirements` answers with, through a
 hook the RPC module installs (`ui::SetRequirementsEngine`), and are cached
 on the documents' save stamps. Requirements are stated over the RPC, the

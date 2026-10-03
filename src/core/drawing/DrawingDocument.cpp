@@ -20,6 +20,7 @@ bool DrawingDocument::RemoveView(uint64_t id) {
   if (it == m_views.end())
     return false;
   m_views.erase(it);
+  m_projections.erase(id);
   // A dimension whose view is gone has nothing to measure — drop it too.
   m_dims.erase(
       std::remove_if(m_dims.begin(), m_dims.end(),

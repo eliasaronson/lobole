@@ -771,7 +771,7 @@ const std::vector<Command>& Table() {
     add("drawing.add_view", nullptr,
         [](AppState& s) { s.drawingAddViewOpen = !s.drawingAddViewOpen; });
     add("drawing.update", nullptr,
-        [](AppState& s) { UpdateDrawingRenders(s); });
+        [](AppState& s) { RequestDrawingUpdate(s); });
     add(
         "drawing.export",
         [](AppState& s) {
@@ -806,7 +806,17 @@ const std::vector<Command>& Table() {
     add("drawing.detail", hasViews, [](AppState& s) { ArmDetailTool(s); });
     add(
         "drawing.balloons",
-        [](AppState& s) { return !BalloonViews(s).empty(); },
+        [](AppState& s) {
+          // Balloons stand on the landed geometry: not while a view they
+          // go round is still projecting.
+          const std::vector<uint64_t> views = BalloonViews(s);
+          if (views.empty())
+            return false;
+          for (uint64_t id : views)
+            if (DrawingViewProjecting(s, id))
+              return false;
+          return true;
+        },
         [](AppState& s) { LayOutBalloons(s, BalloonViews(s)); });
 
     // -------------------------------------------------------- Simulation

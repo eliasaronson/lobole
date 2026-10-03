@@ -13,7 +13,7 @@ registry, and the frame keeps drawing. The rule every job follows:
 | field | meaning |
 |---|---|
 | `id` | handed out by `StartBackgroundJob` from a session counter, never reused: the handle a study job is asked about and cancelled by |
-| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
@@ -56,7 +56,10 @@ domain's own struct and is consumed by that domain's `finish`).
 
 **Progress UI.** One widget, `DrawJobProgress` (`src/ui/Widgets.h`), used by
 the open and import modals, the render-still progress, the Generate window,
-the Study panel and the motion window. A modal is used only where nothing else is safe while
+the Study panel, the motion window, the requirements panel and the drawing
+panel's view list. `test_conventions.cpp` ("every long operation draws the
+one progress bar") fails on an `ImGui::ProgressBar` anywhere but
+`Widgets.cpp`, so a new long operation cannot grow a bar of its own. A modal is used only where nothing else is safe while
 the job runs (an import or an open is building the document); elsewhere the
 bar sits where the work was asked for and the rest of the UI stays live.
 
@@ -322,6 +325,28 @@ handed to the shape memo in its `finish`, so the first visit to a job tab
 reads them instead of stalling (docs/cam/gui.md#job-tab-frame-cost). On the
 chess set: 10 bodies, 17 ms on the frame to prepare, 4 s on the worker, and a
 first visit to a turning job down from 0.6-0.9 s to under a millisecond.
+
+## Drawings: projection off the frame
+
+A drawing view's hidden-line removal is a `drawing` job, one job per view,
+the next started from the last one's `finish` so views land one at a time
+([drawings](../drawings/README.md#projection-off-the-frame)). The main
+thread gathers each view's bodies and hands the worker deep copies
+(`CADShape::DetachedUnlocated`, memoized per shape so the projection cache
+keeps hitting); the worker hashes the inputs, installs a projection saved
+with the drawing when the hash matches, else cuts and projects; the
+`finish` assembles the view on its tab (by slot id, so a run that lands
+after a tab switch writes the stashed tab). The run takes the projection
+and cut caches for its life and gives them back when it ends. Cancel keeps
+the views that landed. On the pan/tilt head's sheet, switching to the tab
+held the frame for 43.7 s (23 s offscreen, the reopen another 23 s); on an
+offscreen instance the switch now answers in 40 ms, the main thread is
+never held more than 37 ms while the three views project for 23 s on the
+worker, and a reopen installs the saved projections with no HLR, landed
+0.5 s after the open. `UpdateDrawingRendersNow` is the waiting form,
+for an RPC in a `batch` or on `--headless`; elsewhere the drawing RPCs are
+parked until the job lands
+([requests that wait](../drawings/README.md#requests-that-wait)).
 
 ## Motion studies
 

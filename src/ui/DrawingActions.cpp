@@ -5,8 +5,10 @@
 #include "core/Units.h"
 #include "core/sheet/Unfold.h"     // sheet::SquareTo (bend lines)
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
-#include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
-#include "ui/CamTool.h"            // RunCamVerification (job undo)
+#include "ui/BackgroundJobs.h"
+#include "ui/CamPanel.h" // RefreshCamToolpaths (job undo)
+#include "ui/CamTool.h"  // RunCamVerification (job undo)
+#include "ui/DrawingJob.h"
 #include "ui/JobActions.h"
 
 #include "imgui.h" // IsAnyItemActive (the undo guard coalesces a drag)         // JobBodies / JobRenderVersion (a job tab)
@@ -123,86 +125,17 @@ namespace {
 // to — a body's createdBy for a part, or the occurrence id for an assembly.
 struct SourceBody {
   drawing::InputBody input;
+  CADShape shape;         // the document's own, whose copy the worker gets
   uint64_t featureId = 0; // the body's createdBy (owner of its element names)
   uint64_t refId = 0;     // semantic source id -> SheetCurve.sourceId
   const ElementMap* map = nullptr;
   const std::vector<BendRegion>* bends = nullptr;   // flat creases to draw
   const std::vector<ThreadMark>* threads = nullptr; // cosmetic threads
   TopoDS_Shape whole; // the body before any section cut (its element map's)
-  // A section view's cut of this body: `input.shape` is then the cut, and
-  // this says which source edge or face each of its elements is.
+  // A section view's cut of this body: says which source edge or face each
+  // element of the projected cut is.
   std::shared_ptr<const drawing::SectionCut> cut;
 };
-
-// Section cuts, kept while their body and plane are the same: the boolean
-// is the dear part, and a new cut every update would also be a new shape to
-// the projection cache, which keys on shape identity. Session-local, small,
-// main thread only (like the projection cache).
-struct CutEntry {
-  TopoDS_Shape source; // held, so its identity cannot be reused
-  glm::dvec3 point{0.0}, normal{0.0};
-  std::shared_ptr<const drawing::SectionCut> cut;
-  uint64_t used = 0;
-};
-
-std::shared_ptr<const drawing::SectionCut> CachedCut(const TopoDS_Shape& shape,
-                                                     const glm::dvec3& point,
-                                                     const glm::dvec3& normal,
-                                                     std::string* error) {
-  static std::vector<CutEntry> cache;
-  static uint64_t clock = 0;
-  ++clock;
-  for (CutEntry& e : cache)
-    if (e.source.IsEqual(shape) && e.point == point && e.normal == normal) {
-      e.used = clock;
-      return e.cut;
-    }
-  auto cut = drawing::CutBody(shape, point, normal, error);
-  if (!cut)
-    return nullptr;
-  // Every body of every section on the sheets in hand: a head's two
-  // assembly sections are 120 cuts, and a cache of 64 re-cut all of them
-  // (and re-projected the new shapes) on every update and export.
-  constexpr size_t kMaxCuts = 1024;
-  if (cache.size() >= kMaxCuts)
-    cache.erase(std::min_element(
-        cache.begin(), cache.end(),
-        [](const CutEntry& a, const CutEntry& b) { return a.used < b.used; }));
-  CutEntry e;
-  e.source = shape;
-  e.point = point;
-  e.normal = normal;
-  e.cut = std::make_shared<const drawing::SectionCut>(std::move(*cut));
-  e.used = clock;
-  cache.push_back(e);
-  return cache.back().cut;
-}
-
-// Replaces each body with what a section view's plane leaves of it, in the
-// body's own frame; a body wholly in front of the plane is dropped.
-bool CutForSection(const DrawingView& view, std::vector<SourceBody>& bodies,
-                   std::string* error) {
-  glm::dvec3 viewDir, up;
-  ViewAxes(view, viewDir, up);
-  std::vector<SourceBody> kept;
-  for (SourceBody& sb : bodies) {
-    const glm::dmat4 inv = glm::inverse(sb.input.transform);
-    const glm::dvec3 p(inv * glm::dvec4(view.section.point, 1.0));
-    const glm::dvec3 n =
-        glm::normalize(glm::dvec3(inv * glm::dvec4(viewDir, 0.0)));
-    auto cut = CachedCut(sb.input.shape, p, n, error);
-    if (!cut)
-      return false;
-    if (cut->shape.IsNull() || cut->edgeOrigin.empty())
-      continue; // all of it was in front of the plane
-    sb.input.shape = cut->shape;
-    sb.cut = std::move(cut);
-    sb.input.sourceId = kept.size(); // the slot index the join looks up
-    kept.push_back(std::move(sb));
-  }
-  bodies = std::move(kept);
-  return true;
-}
 
 // Appends one part document's bodies at the given world placement.
 void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
@@ -217,6 +150,7 @@ void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
       continue;
     SourceBody sb;
     sb.input.shape = body.shape.GetShape();
+    sb.shape = body.shape;
     sb.input.transform = xf;
     sb.input.geometryRevision = doc.Version();
     sb.input.sourceId = out.size(); // slot index: picks this entry on join
@@ -299,10 +233,6 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
   return false;
 }
 
-// Projects one drawing view: resolves its source, runs HLR, places the curves
-// on the sheet at the view's scale + position, and joins the index-space
-// source refs to stable ElementRefs. A failure leaves `error` set and no
-// geometry (callers keep the previous SheetView so a stale view isn't blanked).
 // The current version of whatever document a view projects (a part or an
 // assembly); 0 when it cannot be resolved, which forces a re-projection.
 uint64_t SourceVersionOf(AppState& state, const DrawingView& view) {
@@ -335,87 +265,387 @@ void ClipToDetail(const DrawingView& view, drawing::SheetView& sheet);
 void DetailCircles(AppState& state, const DrawingView& view,
                    drawing::SheetView& sheet);
 
-drawing::SheetView ProjectDrawingView(AppState& state, const DrawingView& asked,
-                                      std::function<bool()> cancelled) {
-  drawing::SheetView result;
-  result.viewId = asked.id;
-  // A detail draws what its parent draws, at its own scale and place: the
-  // parent's source, orientation, turn, section, hidden occurrences and
-  // configuration, read NOW, so an edit to the parent carries over.
-  DrawingView view = asked;
-  if (asked.detail.on) {
-    const DrawingView* parent =
-        state.drawing ? state.drawing->FindView(asked.detail.parentViewId)
-                      : nullptr;
-    if (parent == nullptr) {
-      result.error = "the view this detail is of is gone";
-      return result;
-    }
-    if (parent->detail.on) {
-      result.error = "a detail is of a view, not of another detail";
-      return result;
-    }
-    view = *parent;
-    view.id = asked.id;
-    view.name = asked.name;
-    view.scale = asked.scale;
-    view.scaleExpr.clear();
-    view.position = asked.position;
-    view.baseViewId = 0;
-    view.detail = asked.detail;
-  }
+// ---- Projection off the frame
+// (docs/drawings/README.md#projection-off-the-frame)
 
+// The view as it is projected: a detail draws what its parent draws, at its
+// own scale and place -- the parent's source, orientation, turn, section,
+// hidden occurrences and configuration, read NOW, so an edit to the parent
+// carries over.
+std::optional<DrawingView> EffectiveView(const DrawingDocument& dwg,
+                                         const DrawingView& asked,
+                                         std::string* error) {
+  if (!asked.detail.on)
+    return asked;
+  const DrawingView* parent = dwg.FindView(asked.detail.parentViewId);
+  if (parent == nullptr) {
+    *error = "the view this detail is of is gone";
+    return std::nullopt;
+  }
+  if (parent->detail.on) {
+    *error = "a detail is of a view, not of another detail";
+    return std::nullopt;
+  }
+  DrawingView view = *parent;
+  view.id = asked.id;
+  view.name = asked.name;
+  view.scale = asked.scale;
+  view.scaleExpr.clear();
+  view.position = asked.position;
+  view.baseViewId = 0;
+  view.detail = asked.detail;
+  return view;
+}
+
+// The view whose projection `view` draws: its own, or a detail's parent's.
+uint64_t ProjectedViewId(const DrawingView& view) {
+  return view.detail.on ? view.detail.parentViewId : view.id;
+}
+
+// The worker's own copy of a body's shape (DrawingShapeMemo), made now when
+// `create`; null when there is none and none may be made. A deep copy at no
+// location, put where the document's is: a worker may cut, mesh and hash it
+// while the frame meshes and picks the original.
+std::optional<TopoDS_Shape> WorkerCopy(AppState& state, const CADShape& shape,
+                                       uint64_t revision, bool create) {
+  DrawingShapeMemo& memo = state.drawingShapes;
+  const std::pair<const void*, uint64_t> key{shape.GeometryId(),
+                                             shape.PlacementId()};
+  auto it = memo.entries.find(key);
+  if (it != memo.entries.end() && it->second.revision == revision &&
+      it->second.original.SameGeometryAs(shape)) {
+    it->second.used = ++memo.clock;
+    return it->second.copy.GetShape();
+  }
+  if (!create)
+    return std::nullopt;
+  DrawingShapeMemo::Entry e;
+  e.original = shape;
+  e.copy = shape.DetachedUnlocated().LocatedLike(shape);
+  e.revision = revision;
+  e.used = ++memo.clock;
+  if (!e.copy.IsValid())
+    return std::nullopt;
+  memo.entries[key] = e;
+  return e.copy.GetShape();
+}
+
+// Lets go of the copies whose original only the memo still holds (the
+// document moved on), and of the least recently used past a bound.
+void PruneShapeMemo(AppState& state) {
+  DrawingShapeMemo& memo = state.drawingShapes;
+  std::erase_if(memo.entries, [](const auto& kv) {
+    const TopoDS_Shape& s = kv.second.original.GetShape();
+    return s.IsNull() || s.TShape().IsNull() || s.TShape()->GetRefCount() <= 1;
+  });
+  constexpr size_t kMaxShapes = 4096;
+  while (memo.entries.size() > kMaxShapes)
+    memo.entries.erase(std::min_element(memo.entries.begin(),
+                                        memo.entries.end(),
+                                        [](const auto& a, const auto& b) {
+                                          return a.second.used < b.second.used;
+                                        }));
+}
+
+// One view, ready to project or to assemble: its bodies as the document has
+// them (for the join, main thread only) and its projection's inputs, with
+// the worker's copies when `copies` says they are all in hand.
+struct PreparedView {
+  DrawingView view; // effective (a detail is its parent's)
   std::vector<SourceBody> bodies;
-  std::string error;
-  if (!GatherSourceBodies(state, view, bodies, &result.solvedSourceVersion,
-                          &error)) {
-    result.error = error;
-    return result;
+  drawing::ProjectionInputs inputs;
+  bool copies = false;
+  uint64_t sourceVersion = 0;
+  std::string error; // why it cannot be projected at all
+};
+
+// Fills `pv.inputs.bodies` with the worker's copies; false when one is not
+// in hand and may not be made.
+bool FillCopies(AppState& state, PreparedView& pv, bool create) {
+  pv.inputs.bodies.clear();
+  pv.copies = false;
+  for (size_t i = 0; i < pv.bodies.size(); ++i) {
+    const SourceBody& sb = pv.bodies[i];
+    const auto copy =
+        WorkerCopy(state, sb.shape, sb.input.geometryRevision, create);
+    if (!copy)
+      return false;
+    drawing::InputBody in = sb.input;
+    in.shape = *copy;
+    in.sourceId = i;
+    pv.inputs.bodies.push_back(std::move(in));
   }
-  if (bodies.empty()) {
-    result.error = "source has no geometry to project";
-    return result;
+  pv.copies = true;
+  return true;
+}
+
+PreparedView PrepareView(AppState& state, const DrawingView& asked,
+                         bool createCopies) {
+  PreparedView pv;
+  const auto eff = EffectiveView(*state.drawing, asked, &pv.error);
+  if (!eff)
+    return pv;
+  pv.view = *eff;
+  if (!GatherSourceBodies(state, pv.view, pv.bodies, &pv.sourceVersion,
+                          &pv.error))
+    return pv;
+  if (pv.bodies.empty()) {
+    pv.error = "source has no geometry to project";
+    return pv;
   }
-  if (view.section.on) {
-    if (!CutForSection(view, bodies, &error)) {
-      result.error = error;
-      return result;
+  ViewAxes(pv.view, pv.inputs.viewDir, pv.inputs.up);
+  pv.inputs.mode = pv.view.quality == "fast" ? drawing::ProjectionMode::Poly
+                                             : drawing::ProjectionMode::Exact;
+  pv.inputs.hiddenLines = pv.view.showHidden;
+  pv.inputs.section = pv.view.section.on;
+  pv.inputs.sectionPoint = pv.view.section.point;
+  FillCopies(state, pv, createCopies);
+  return pv;
+}
+
+// The sheet view of `pv` drawn from `vp`: its curves turned to the view's
+// up, placed, named through the bodies the document has now, decorated.
+// Not `named` (the source's bodies are not the ones it was projected from),
+// the curves are drawn as they were projected and name nothing.
+drawing::SheetView AssembleFromProjection(AppState& state,
+                                          const PreparedView& pv,
+                                          const drawing::ViewProjection& vp,
+                                          bool named = true) {
+  drawing::SheetView fail;
+  fail.viewId = pv.view.id;
+  std::vector<SourceBody> bodies;
+  if (!named) {
+    // nothing to join against
+  } else if (vp.sectioned) {
+    for (size_t k = 0; k < vp.cuts.size(); ++k) {
+      const drawing::ViewProjection::Cut& c = vp.cuts[k];
+      if (c.body < 0 || static_cast<size_t>(c.body) >= pv.bodies.size()) {
+        fail.error = "the projection names a body its source no longer has; "
+                     "update the view";
+        return fail;
+      }
+      SourceBody sb = pv.bodies[c.body];
+      auto cut = std::make_shared<drawing::SectionCut>();
+      cut->edgeOrigin = c.edgeOrigin;
+      cut->edgeFromFace = c.edgeFromFace;
+      cut->faceOrigin = c.faceOrigin;
+      cut->cutLoops = c.cutLoops;
+      sb.cut = std::move(cut);
+      sb.input.sourceId = k;
+      bodies.push_back(std::move(sb));
     }
-    if (bodies.empty()) {
-      result.error = "the section plane leaves nothing of the source behind "
-                     "it -- move its point, or look the other way";
-      return result;
+  } else {
+    bodies = pv.bodies;
+  }
+  for (const drawing::ProjectedCurve& c : vp.result.curves)
+    if (named && c.source.IsResolved() && c.source.sourceId >= bodies.size()) {
+      fail.error = "the projection names a body its source no longer has; "
+                   "update the view";
+      return fail;
     }
-  }
-
-  std::vector<drawing::InputBody> inputs;
-  inputs.reserve(bodies.size());
-  for (const SourceBody& sb : bodies)
-    inputs.push_back(sb.input);
-
-  glm::dvec3 viewDir, up;
-  ViewAxes(view, viewDir, up);
-  drawing::ProjectionOptions opts;
-  opts.hiddenLines = view.showHidden;
-  opts.cache = &state.drawingProjectionCache;
-  opts.mode = view.quality == "fast" ? drawing::ProjectionMode::Poly
-                                     : drawing::ProjectionMode::Exact;
-  opts.cancelled = cancelled;
-  auto projected = drawing::ProjectView(inputs, viewDir, up, opts, &error);
-  if (!projected) {
-    result.error = error;
-    return result;
-  }
-
-  drawing::SheetView sheet = AssembleSheetView(state, view, bodies, *projected);
-  sheet.sectioned = view.section.on;
-  SectionDecorations(state, view, bodies, sheet);
-  ThreadDecorations(state, view, bodies, sheet);
-  if (view.detail.on)
-    ClipToDetail(view, sheet);
+  glm::dvec3 dir, up;
+  ViewAxes(pv.view, dir, up);
+  const drawing::ProjectionResult turned = drawing::TurnedTo(vp, up);
+  drawing::SheetView sheet = AssembleSheetView(state, pv.view, bodies, turned);
+  sheet.sectioned = pv.view.section.on;
+  SectionDecorations(state, pv.view, bodies, sheet);
+  ThreadDecorations(state, pv.view, bodies, sheet);
+  if (pv.view.detail.on)
+    ClipToDetail(pv.view, sheet);
   else
-    DetailCircles(state, view, sheet);
+    DetailCircles(state, pv.view, sheet);
   return sheet;
+}
+
+// A view that could not be (re)drawn keeps its last geometry with `error`
+// (design §1): a failed view shows its previous curves rather than blanking
+// the sheet.
+void SetViewError(std::map<uint64_t, drawing::SheetView>& renders,
+                  uint64_t viewId, const std::string& error,
+                  uint64_t sourceVersion) {
+  auto it = renders.find(viewId);
+  if (it != renders.end() && it->second.hasGeometry) {
+    it->second.error = error;
+    it->second.solvedSourceVersion = sourceVersion;
+    return;
+  }
+  drawing::SheetView sv;
+  sv.viewId = viewId;
+  sv.error = error;
+  sv.solvedSourceVersion = sourceVersion;
+  renders[viewId] = std::move(sv);
+}
+
+// Whether two views project the same thing from the same source: what
+// decides whether a kept projection may still be drawn (stale) after the
+// source moved. Scale, place, turn and name are the sheet's, not the
+// projection's.
+bool SameProjectedDefinition(const DrawingView& a, const DrawingView& b) {
+  return a.sourceDocId == b.sourceDocId && a.orientation == b.orientation &&
+         a.section.on == b.section.on &&
+         (!a.section.on || a.section.point == b.section.point) &&
+         a.hidden == b.hidden && a.configuration == b.configuration &&
+         a.quality == b.quality && a.showHidden == b.showHidden;
+}
+
+// Assembles the active drawing's `viewId` from what it keeps (a detail from
+// its parent's). Fresh when the view would project the very same inputs now;
+// otherwise, with `allowStale`, drawn as it was projected and marked stale --
+// provided it still looks the same way at the same bodies, so its curves'
+// names still join. False when there is nothing to draw it from. `landed`:
+// its projection just ran, so the view carries what it cost; otherwise it
+// reports what assembling it spent on projecting, which is nothing (a hit).
+bool AssembleKeptView(AppState& state, uint64_t viewId, bool allowStale,
+                      bool landed = false) {
+  const DrawingView* asked = state.drawing->FindView(viewId);
+  if (asked == nullptr)
+    return false;
+  const auto kept = state.drawingProjections.kept.find(ProjectedViewId(*asked));
+  if (kept == state.drawingProjections.kept.end())
+    return false;
+  PreparedView pv = PrepareView(state, *asked, /*createCopies=*/false);
+  if (!pv.error.empty())
+    return false;
+  const DrawingProjectionState::Kept& k = kept->second;
+  const bool fresh = pv.copies && k.inputs.SameAs(pv.inputs);
+  if (!fresh) {
+    if (!allowStale || !SameProjectedDefinition(pv.view, k.view) ||
+        pv.inputs.viewDir != k.inputs.viewDir)
+      return false;
+  }
+  // Stale, and the source no longer has the bodies it was projected from:
+  // drawn as it was, naming nothing, until it is brought up to date.
+  const bool named = fresh || pv.bodies.size() == k.inputs.bodies.size();
+  drawing::SheetView sv =
+      AssembleFromProjection(state, pv, *k.projection, named);
+  sv.solvedSourceVersion = fresh ? pv.sourceVersion : k.sourceVersion;
+  if (!landed) {
+    drawing::ProjectionResult::Stats& st = sv.projectionStats;
+    const int edges = st.dsEdges, unresolved = st.unresolvedSources;
+    st = {};
+    st.dsEdges = edges;
+    st.unresolvedSources = unresolved;
+    st.projectionHit = true;
+    sv.updateMs = sv.hideMs = 0.0;
+    sv.costBySource.clear();
+  }
+  if (!sv.error.empty()) {
+    SetViewError(state.drawingRenders, viewId, sv.error,
+                 sv.solvedSourceVersion);
+    return true;
+  }
+  state.drawingRenders[viewId] = std::move(sv);
+  return true;
+}
+
+// The active drawing's views sorted into the ones assembled now from what
+// they keep and the work still to project. A view whose source cannot even
+// be gathered lands its error now; a detail is assembled from its parent's
+// projection, or waits for it. `only` (when set) limits the projecting to
+// those views: the others are assembled as they are, stale or not. Views a
+// run is projecting are left to it.
+std::vector<DrawingViewWork>
+PlanDrawingUpdate(AppState& state, const std::set<uint64_t>* only, bool* owed) {
+  DrawingDocument& dwg = *state.drawing;
+  DrawingProjectionState& ps = state.drawingProjections;
+  std::vector<DrawingViewWork> work;
+  std::set<uint64_t> projecting;
+  for (const DrawingView& view : dwg.GetViews()) {
+    if (view.detail.on)
+      continue;
+    if (ps.projecting.contains(view.id)) {
+      if (owed)
+        *owed = true;
+      continue;
+    }
+    const bool wanted = only == nullptr || only->contains(view.id);
+    if (AssembleKeptView(state, view.id, /*allowStale=*/!wanted))
+      continue;
+    if (!wanted) {
+      if (!state.drawingRenders.contains(view.id))
+        SetViewError(state.drawingRenders, view.id,
+                     "not projected yet: Update views", 0);
+      continue;
+    }
+    if (owed)
+      *owed = true;
+    PreparedView pv = PrepareView(state, view, /*createCopies=*/true);
+    if (!pv.error.empty()) {
+      SetViewError(state.drawingRenders, view.id, pv.error, pv.sourceVersion);
+      ps.placeholder.erase(view.id);
+      continue;
+    }
+    if (!pv.copies) {
+      SetViewError(state.drawingRenders, view.id,
+                   "a body of the source could not be copied to project",
+                   pv.sourceVersion);
+      continue;
+    }
+    DrawingViewWork w;
+    w.viewId = view.id;
+    w.name = view.name;
+    w.inputs = std::move(pv.inputs);
+    w.view = pv.view;
+    w.candidate = dwg.SavedProjection(view.id);
+    w.sourceVersion = pv.sourceVersion;
+    work.push_back(std::move(w));
+    projecting.insert(view.id);
+  }
+  for (const DrawingView& view : dwg.GetViews()) {
+    if (!view.detail.on)
+      continue;
+    const uint64_t parent = view.detail.parentViewId;
+    if (projecting.contains(parent) || ps.projecting.contains(parent))
+      continue; // lands with its parent
+    if (AssembleKeptView(state, view.id, /*allowStale=*/true))
+      continue;
+    std::string error;
+    if (!EffectiveView(dwg, view, &error))
+      SetViewError(state.drawingRenders, view.id, error, 0);
+    else
+      SetViewError(state.drawingRenders, view.id,
+                   "the view this detail is of has no projection yet", 0);
+  }
+  // What the sheet no longer has.
+  const auto gone = [&](uint64_t id) { return dwg.FindView(id) == nullptr; };
+  std::erase_if(state.drawingRenders,
+                [&](const auto& kv) { return gone(kv.first); });
+  std::erase_if(ps.kept, [&](const auto& kv) { return gone(kv.first); });
+  std::erase_if(ps.placeholder, [&](const auto& kv) { return gone(kv.first); });
+  return work;
+}
+
+// The source's bounds seen along `view`, at 1:1 in the view plane: what the
+// sheet draws while a view with no geometry projects, and what placing a new
+// view starts from. The conservative box of each body, so a little large.
+bool EstimateViewBox(AppState& state, const DrawingView& asked, glm::dvec2& lo,
+                     glm::dvec2& hi) {
+  std::string error;
+  const auto eff = EffectiveView(*state.drawing, asked, &error);
+  if (!eff)
+    return false;
+  std::vector<SourceBody> bodies;
+  uint64_t version = 0;
+  if (!GatherSourceBodies(state, *eff, bodies, &version, &error) ||
+      bodies.empty())
+    return false;
+  glm::dvec3 dir, up;
+  ViewAxes(*eff, dir, up);
+  lo = glm::dvec2(1e300);
+  hi = glm::dvec2(-1e300);
+  for (const SourceBody& sb : bodies) {
+    glm::dvec3 mn, mx;
+    sb.shape.GetBoundingBox(mn, mx);
+    for (int c = 0; c < 8; ++c) {
+      const glm::dvec3 corner((c & 1) ? mx.x : mn.x, (c & 2) ? mx.y : mn.y,
+                              (c & 4) ? mx.z : mn.z);
+      const glm::dvec3 w(sb.input.transform * glm::dvec4(corner, 1.0));
+      const glm::dvec2 p = drawing::ProjectPoint(w, dir, up);
+      lo = glm::min(lo, p);
+      hi = glm::max(hi, p);
+    }
+  }
+  return hi.x >= lo.x && hi.y >= lo.y;
 }
 
 // The cheap half of a view: place the projected curves on the sheet at the
@@ -1386,14 +1616,36 @@ Sheet DrawingSheetForOutput(AppState& state) {
   return sheet;
 }
 
-bool ExportActiveDrawing(AppState& state, const std::string& path,
-                         std::string* error) {
+bool ExportActiveDrawingWhenProjected(AppState& state, const std::string& path,
+                                      std::string* error) {
   if (!state.drawing) {
     if (error)
       *error = "no active drawing";
     return false;
   }
-  UpdateDrawingRenders(state); // export reflects current geometry
+  if (!state.drawingDeferProjection)
+    return ExportActiveDrawing(state, path, error, /*update=*/true);
+  RequestDrawingUpdate(state);
+  if (state.drawingRun || state.drawingProjections.updateOwed) {
+    // Written by FlushPendingExport when the last view lands.
+    state.drawingProjections.exportPath = path;
+    state.drawingMessage =
+        "Exporting " + path + " once the views are projected";
+    state.drawingMessageIsError = false;
+    return true;
+  }
+  return ExportActiveDrawing(state, path, error, /*update=*/false);
+}
+
+bool ExportActiveDrawing(AppState& state, const std::string& path,
+                         std::string* error, bool update) {
+  if (!state.drawing) {
+    if (error)
+      *error = "no active drawing";
+    return false;
+  }
+  if (update)
+    UpdateDrawingRendersNow(state); // export reflects current geometry
   // The sheet as it goes out, its title block's blanks filled.
   DrawingDocument out = *state.drawing;
   out.GetSheet() = DrawingSheetForOutput(state);
@@ -1583,22 +1835,19 @@ bool BoxesOverlap(glm::dvec2 aMin, glm::dvec2 aMax, glm::dvec2 bMin,
 
 } // namespace
 
-uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
-  if (!state.drawing)
-    return 0;
+namespace {
+
+// Chooses a new view's scale (when `chooseScale`) and its place, from its
+// size at 1:1 (`lo`..`hi` in the view plane, model mm; `measured` false when
+// there is none to go by), clear of the views already placed (all but
+// `self`). A placement that overlaps a view or the title block re-lays the
+// whole sheet out, so other views may move and rescale too.
+void PlaceView(AppState& state, DrawingView& v, glm::dvec2 lo, glm::dvec2 hi,
+               bool measured, bool chooseScale, uint64_t self) {
   DrawingDocument& dwg = *state.drawing;
   const glm::dvec2 ext = ChromeOf(dwg.GetSheet()).extent;
-
-  // Project a 1:1 copy anchored at the origin: its bbox IS the part's size in
-  // millimetres, which is what both decisions below need.
-  DrawingView probe = v;
-  probe.id = 0;
-  probe.scale = 1.0;
-  probe.position = glm::dvec2(0.0);
-  probe.baseViewId = 0; // a folded child would inherit its parent's place
-  const drawing::SheetView sv = ProjectDrawingView(state, probe, nullptr);
-  const bool measured = sv.hasGeometry;
-  const glm::dvec2 size = measured ? sv.bboxMax - sv.bboxMin : glm::dvec2(0.0);
+  const glm::dvec2 size = measured ? hi - lo : glm::dvec2(0.0);
+  const auto others = [&](const DrawingView& o) { return o.id != self; };
 
   // Scale (only when the caller did not choose one). Views of the SAME part
   // share a scale: a right view at 2:1 beside a front view at 1:1 is a
@@ -1606,9 +1855,11 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
   // produced for a plate (the right view is the smallest face, so it got
   // blown up until it collided with the top view). Matching first, fitting
   // only when this is the part's first view.
-  if (v.scale <= 0.0) {
+  if (chooseScale) {
+    v.scale = 0.0;
     for (const DrawingView& other : dwg.GetViews()) {
-      if (other.sourceDocId == v.sourceDocId && other.scale > 0.0) {
+      if (others(other) && other.sourceDocId == v.sourceDocId &&
+          other.scale > 0.0) {
         v.scale = other.scale;
         break;
       }
@@ -1634,7 +1885,7 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
   // Position: sheet centre for the first view, else clear to the right of
   // everything already placed by the shared rule (ui/Placement.h), wrapping
   // below when the row is full. The sheet anchor maps model -> pos + scale *
-  // model, so a left edge at `x` means pos.x = x - scale * bboxMin.x.
+  // model, so a left edge at `x` means pos.x = x - scale * lo.x.
   glm::dvec2 pos = ext * 0.5;
   if (measured) {
     const SheetChrome chrome = ChromeOf(dwg.GetSheet());
@@ -1642,6 +1893,8 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
     double lowest = 1e30, firstMidY = ext.y * 0.5;
     bool anyPlaced = false;
     for (const DrawingView& other : dwg.GetViews()) {
+      if (!others(other))
+        continue;
       const auto it = state.drawingRenders.find(other.id);
       if (it == state.drawingRenders.end() || !it->second.hasGeometry)
         continue;
@@ -1652,27 +1905,26 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
       lowest = std::min(lowest, it->second.bboxMin.y);
     }
     const glm::dvec2 placed = size * v.scale;
-    const Span incoming{v.scale * sv.bboxMin.x, v.scale * sv.bboxMax.x};
+    const Span incoming{v.scale * lo.x, v.scale * hi.x};
     const double gap = std::max(8.0, std::max(placed.x, placed.y) * 0.15);
     if (!anyPlaced) {
-      pos = ext * 0.5 - v.scale * (sv.bboxMin + sv.bboxMax) * 0.5;
+      pos = ext * 0.5 - v.scale * (lo + hi) * 0.5;
     } else if (const double dx = ClearOffset(takenX, incoming, 8.0);
-               dx + v.scale * sv.bboxMax.x <= chrome.borderMax.x) {
+               dx + v.scale * hi.x <= chrome.borderMax.x) {
       pos.x = dx; // same row, to the right of everything placed
-      pos.y = firstMidY - v.scale * (sv.bboxMin.y + sv.bboxMax.y) * 0.5;
+      pos.y = firstMidY - v.scale * (lo.y + hi.y) * 0.5;
     } else {
       // A new row BELOW the others (sheet Y grows upward), starting at the
       // left margin — and stopping above the title block, which a wrapped
       // row used to land on top of.
-      pos.x = chrome.borderMin.x + gap - v.scale * sv.bboxMin.x;
-      pos.y = lowest - gap - v.scale * sv.bboxMax.y;
-      const Span rowX{pos.x + v.scale * sv.bboxMin.x,
-                      pos.x + v.scale * sv.bboxMax.x};
+      pos.x = chrome.borderMin.x + gap - v.scale * lo.x;
+      pos.y = lowest - gap - v.scale * hi.y;
+      const Span rowX{pos.x + v.scale * lo.x, pos.x + v.scale * hi.x};
       const Span blockX{chrome.titleBlockMin.x, chrome.titleBlockMax.x};
       const double floorY =
           Overlaps(rowX, blockX) ? chrome.titleBlockMax.y : chrome.borderMin.y;
-      if (pos.y + v.scale * sv.bboxMin.y < floorY + gap)
-        pos.y = floorY + gap - v.scale * sv.bboxMin.y;
+      if (pos.y + v.scale * lo.y < floorY + gap)
+        pos.y = floorY + gap - v.scale * lo.y;
     }
   }
   v.position = pos;
@@ -1685,77 +1937,147 @@ uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v) {
   // at this scale first and then each standard scale down, until it fits.
   // Every view of the sheet is moved (and, if needed, rescaled together —
   // one scale per sheet is the drafting rule the block above already keeps).
-  // The snapshot goes first: the re-lay moves views already on the sheet,
-  // and an undo of this add has to put them back too.
-  SnapshotDrawing(state);
-  if (measured) {
-    const SheetChrome chrome = ChromeOf(dwg.GetSheet());
-    const glm::dvec2 newMin = pos + v.scale * sv.bboxMin;
-    const glm::dvec2 newMax = pos + v.scale * sv.bboxMax;
-    bool collides =
-        BoxesOverlap(newMin, newMax, chrome.titleBlockMin,
-                     chrome.titleBlockMax) ||
-        newMin.x < chrome.borderMin.x || newMin.y < chrome.borderMin.y ||
-        newMax.x > chrome.borderMax.x || newMax.y > chrome.borderMax.y;
-    for (const DrawingView& other : dwg.GetViews()) {
-      const auto it = state.drawingRenders.find(other.id);
-      if (it != state.drawingRenders.end() && it->second.hasGeometry &&
-          BoxesOverlap(newMin, newMax, it->second.bboxMin, it->second.bboxMax))
-        collides = true;
-    }
-    if (collides) {
-      std::vector<DrawingView*> laid;
-      std::vector<ViewFootprint> items;
-      for (DrawingView& other : dwg.GetViews()) {
-        const auto it = state.drawingRenders.find(other.id);
-        if (it == state.drawingRenders.end() || !it->second.hasGeometry ||
-            other.scale <= 0.0)
-          continue;
-        laid.push_back(&other);
-        items.push_back({(it->second.bboxMin - other.position) / other.scale,
-                         (it->second.bboxMax - other.position) / other.scale});
-      }
-      items.push_back({sv.bboxMin, sv.bboxMax});
-      static const double kScales[] = {100.0, 50.0, 20.0, 10.0, 5.0,  2.0, 1.0,
-                                       0.5,   0.2,  0.1,  0.05, 0.02, 0.01};
-      std::vector<glm::dvec2> positions;
-      for (double scale : kScales) {
-        if (scale > v.scale + 1e-12)
-          continue;
-        if (!FlowLayout(chrome, scale, items, positions))
-          continue;
-        for (size_t i = 0; i < laid.size(); i++) {
-          laid[i]->scale = scale;
-          laid[i]->position = positions[i];
-        }
-        v.scale = scale;
-        v.position = positions.back();
-        break;
-      }
-    }
+  if (!measured)
+    return;
+  const SheetChrome chrome = ChromeOf(dwg.GetSheet());
+  const glm::dvec2 newMin = pos + v.scale * lo;
+  const glm::dvec2 newMax = pos + v.scale * hi;
+  bool collides =
+      BoxesOverlap(newMin, newMax, chrome.titleBlockMin,
+                   chrome.titleBlockMax) ||
+      newMin.x < chrome.borderMin.x || newMin.y < chrome.borderMin.y ||
+      newMax.x > chrome.borderMax.x || newMax.y > chrome.borderMax.y;
+  for (const DrawingView& other : dwg.GetViews()) {
+    if (!others(other))
+      continue;
+    const auto it = state.drawingRenders.find(other.id);
+    if (it != state.drawingRenders.end() && it->second.hasGeometry &&
+        BoxesOverlap(newMin, newMax, it->second.bboxMin, it->second.bboxMax))
+      collides = true;
   }
-
-  const uint64_t id = dwg.AddView(v);
-  UpdateDrawingRenders(state);
-  // The probe above is the projection that DID the work; the re-projection
-  // just now was a cache hit by construction (same bodies, same direction —
-  // scale and position are sheet mapping, which HLR never saw). So the
-  // placed view carries the probe's bill: otherwise the one call that
-  // actually spent 18 seconds reports zero, which is true of that second
-  // projection and useless to the caller asking what the view cost.
-  if (const auto it = state.drawingRenders.find(id);
-      it != state.drawingRenders.end() && it->second.costBySource.empty() &&
-      !sv.costBySource.empty()) {
-    it->second.costBySource = sv.costBySource;
-    it->second.projectionStats = sv.projectionStats;
-    it->second.updateMs = sv.updateMs;
-    it->second.hideMs = sv.hideMs;
-    it->second.dsEdges = sv.dsEdges;
+  if (!collides)
+    return;
+  std::vector<DrawingView*> laid;
+  std::vector<ViewFootprint> items;
+  for (DrawingView& other : dwg.GetViews()) {
+    if (!others(other))
+      continue;
+    const auto it = state.drawingRenders.find(other.id);
+    if (it == state.drawingRenders.end() || !it->second.hasGeometry ||
+        other.scale <= 0.0)
+      continue;
+    laid.push_back(&other);
+    items.push_back({(it->second.bboxMin - other.position) / other.scale,
+                     (it->second.bboxMax - other.position) / other.scale});
   }
-  return id;
+  items.push_back({lo, hi});
+  static const double kScales[] = {100.0, 50.0, 20.0, 10.0, 5.0,  2.0, 1.0,
+                                   0.5,   0.2,  0.1,  0.05, 0.02, 0.01};
+  std::vector<glm::dvec2> positions;
+  for (double scale : kScales) {
+    if (scale > v.scale + 1e-12)
+      continue;
+    if (!FlowLayout(chrome, scale, items, positions))
+      continue;
+    for (size_t i = 0; i < laid.size(); i++) {
+      laid[i]->scale = scale;
+      laid[i]->position = positions[i];
+    }
+    v.scale = scale;
+    v.position = positions.back();
+    break;
+  }
 }
 
-void UpdateDrawingRenders(AppState& state, double budgetSeconds) {
+// The active drawing's view `viewId` at 1:1 in the view plane, by its kept
+// projection (turned to the view's up): its size, which placing it needs.
+bool ProjectedBox(AppState& state, uint64_t viewId, glm::dvec2& lo,
+                  glm::dvec2& hi) {
+  const DrawingView* v = state.drawing->FindView(viewId);
+  if (v == nullptr)
+    return false;
+  const auto kept = state.drawingProjections.kept.find(ProjectedViewId(*v));
+  if (kept == state.drawingProjections.kept.end())
+    return false;
+  glm::dvec3 dir, up;
+  ViewAxes(*v, dir, up);
+  const drawing::ProjectionResult r =
+      drawing::TurnedTo(*kept->second.projection, up);
+  lo = glm::dvec2(1e300);
+  hi = glm::dvec2(-1e300);
+  for (const drawing::ProjectedCurve& c : r.curves)
+    for (const glm::dvec2& p : c.points) {
+      lo = glm::min(lo, p);
+      hi = glm::max(hi, p);
+    }
+  return hi.x >= lo.x && hi.y >= lo.y;
+}
+
+// Assembles every view of the active drawing again from what it keeps
+// (stale ones as stale): what a change of place or scale needs. Returns the
+// views that have nothing to be drawn from.
+std::set<uint64_t> AssembleAllKept(AppState& state) {
+  std::set<uint64_t> missing;
+  for (const DrawingView& view : state.drawing->GetViews()) {
+    if (state.drawingProjections.projecting.contains(ProjectedViewId(view)))
+      continue;
+    if (!AssembleKeptView(state, view.id, /*allowStale=*/true))
+      missing.insert(ProjectedViewId(view));
+  }
+  return missing;
+}
+
+// A view added with its place still to choose has its projection: place it
+// by its real bounds, and draw the sheet again (others may have moved).
+void PlaceLandedView(AppState& state, uint64_t viewId, bool chooseScale) {
+  DrawingView* v = state.drawing->FindView(viewId);
+  glm::dvec2 lo, hi;
+  if (v == nullptr || !ProjectedBox(state, viewId, lo, hi))
+    return;
+  PlaceView(state, *v, lo, hi, true, chooseScale, viewId);
+  state.drawing->BumpVersion();
+  // Moving it is not projecting it: the view keeps the bill of the
+  // projection that just landed, which is what placing it asked for.
+  std::optional<drawing::SheetView> landed;
+  if (const auto it = state.drawingRenders.find(viewId);
+      it != state.drawingRenders.end())
+    landed = it->second;
+  AssembleAllKept(state);
+  if (const auto it = state.drawingRenders.find(viewId);
+      landed && it != state.drawingRenders.end()) {
+    it->second.projectionStats = landed->projectionStats;
+    it->second.updateMs = landed->updateMs;
+    it->second.hideMs = landed->hideMs;
+    it->second.dsEdges = landed->dsEdges;
+    it->second.costBySource = landed->costBySource;
+  }
+}
+
+// Where an export waits on the projection, it goes once nothing projects.
+void FlushPendingExport(AppState& state) {
+  DrawingProjectionState& ps = state.drawingProjections;
+  if (ps.exportPath.empty() || !state.drawing || state.drawingRun)
+    return;
+  const std::string path = std::move(ps.exportPath);
+  ps.exportPath.clear();
+  std::string error;
+  if (ExportActiveDrawing(state, path, &error, /*update=*/false)) {
+    LOG_INFO("Exported drawing to {}", path);
+    state.drawingMessage = "Exported " + path;
+    state.drawingMessageIsError = false;
+  } else {
+    LOG_ERROR("Drawing export failed: {}", error);
+    state.drawingMessage = "Export failed: " + error;
+    state.drawingMessageIsError = true;
+  }
+}
+
+void UpdateNowImpl(AppState& state, double budgetSeconds,
+                   const std::set<uint64_t>* only) {
+  if (!state.drawing)
+    return;
+  // A run in flight finishes first, and gives the caches back.
+  JoinBackgroundJobs(state, "drawing");
   if (!state.drawing)
     return;
   const auto started = std::chrono::steady_clock::now();
@@ -1766,52 +2088,343 @@ void UpdateDrawingRenders(AppState& state, double budgetSeconds) {
                                          started)
                .count() > budgetSeconds;
   };
-  // Always gather current leaf geometry and placements. The projection cache
-  // checks those actual dependencies, so nested edits cannot slip through an
-  // unchanged root assembly version. Sheet-only edits just reassemble curves.
-  const uint64_t drawingVersion = state.drawing->Version();
-  std::map<uint64_t, drawing::SheetView> fresh;
-  for (const DrawingView& view : state.drawing->GetViews()) {
+  std::vector<DrawingViewWork> work =
+      PlanDrawingUpdate(state, only, /*owed=*/nullptr);
+  const uint64_t slotId = ActiveSlotId(state);
+  for (DrawingViewWork& w : work) {
     // Before starting, as well as during. A single body's Hide() is ONE
     // uninterruptible OCC call — the pairwise drive only has somewhere to
     // stop when there are several shapes to classify against each other — so
     // without this a sheet whose budget went on view one would still pay for
     // views two and three in full.
-    drawing::SheetView sv;
+    std::string why;
     if (outOfBudget()) {
-      sv.viewId = view.id;
-      sv.solvedSourceVersion = SourceVersionOf(state, view);
-      sv.error = "cancelled";
+      why = "budget";
     } else {
-      sv = ProjectDrawingView(state, view, outOfBudget);
+      RunDrawingViewWork(w, &state.drawingProjectionCache,
+                         &state.drawingCutCache, outOfBudget, nullptr);
+      if (!w.out && w.error == "cancelled")
+        why = "budget";
     }
-    if (sv.error == "cancelled") {
-      // Out of budget rather than broken. Say which, and say the way through:
-      // a `fast` view of the same geometry is a couple of hundred
-      // milliseconds against a minute and a half.
-      sv.error = "ran out of the update's time budget (" +
-                 std::to_string(static_cast<int>(budgetSeconds)) +
-                 " s) — exact HLR on this source is slower than that. Raise "
-                 "the budget, or set this view's quality to \"fast\" "
-                 "(polygonal HLR: orders of magnitude cheaper, and a look "
-                 "rather than a dimensionable deliverable).";
-    }
-    // Keep last-good geometry on failure (design §1): a failed view shows its
-    // previous curves with an error, rather than blanking the sheet.
-    if (!sv.error.empty() && !sv.hasGeometry) {
-      const auto prev = state.drawingRenders.find(view.id);
-      if (prev != state.drawingRenders.end() && prev->second.hasGeometry) {
-        drawing::SheetView kept = prev->second;
-        kept.error = sv.error;
-        kept.solvedSourceVersion = sv.solvedSourceVersion;
-        fresh[view.id] = std::move(kept);
+    LandDrawingViewWork(state, slotId, w, why);
+  }
+  PruneShapeMemo(state);
+  state.drawingRendersVersion = state.drawing->Version();
+}
+
+std::string StoppedError(const std::string& why) {
+  if (why == "budget")
+    // Out of budget rather than broken. Say which, and say the way through:
+    // a `fast` view of the same geometry is a couple of hundred milliseconds
+    // against a minute and a half.
+    return "ran out of the update's time budget — exact HLR on this source "
+           "is slower than that. Raise the budget, or set this view's "
+           "quality to \"fast\" (polygonal HLR: orders of magnitude cheaper, "
+           "and a look rather than a dimensionable deliverable).";
+  return "projection cancelled — Update views to project";
+}
+
+} // namespace
+
+uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v,
+                              std::optional<bool> defer) {
+  if (!state.drawing)
+    return 0;
+  const bool deferred = defer.value_or(state.drawingDeferProjection);
+  const bool chooseScale = v.scale <= 0.0;
+  // One undo step: the snapshot goes first, because placing may move the
+  // views already on the sheet, and an undo of this add puts them back too.
+  SnapshotDrawing(state);
+  // Placed at once by its source's bounds, which need no projection...
+  glm::dvec2 lo, hi;
+  v.id = 0;
+  const bool estimated = EstimateViewBox(state, v, lo, hi);
+  PlaceView(state, v, lo, hi, estimated, chooseScale, 0);
+  const uint64_t id = state.drawing->AddView(v);
+  // ...and again by its real ones, once it is projected.
+  if (deferred) {
+    state.drawingProjections.placePending[id] = chooseScale;
+    RequestDrawingUpdate(state);
+    return id;
+  }
+  UpdateNowImpl(state, 0.0, nullptr);
+  PlaceLandedView(state, id, chooseScale);
+  return id;
+}
+
+void RequestDrawingUpdate(AppState& state, double budgetSeconds,
+                          const std::set<uint64_t>* only) {
+  if (!state.drawing)
+    return;
+  if (!state.drawingDeferProjection) {
+    UpdateNowImpl(state, budgetSeconds, only);
+    return;
+  }
+  DrawingProjectionState& ps = state.drawingProjections;
+  if (state.drawingRun) {
+    // One run at a time. What can be assembled is; what would project waits
+    // for the run in flight, and is asked for when it ends.
+    // (A view the run is projecting may have moved on since it started, so
+    // asking about one is an update owed too: it costs only assembling,
+    // when it has not.)
+    bool owed = false;
+    for (const DrawingView& view : state.drawing->GetViews()) {
+      const uint64_t projected = ProjectedViewId(view);
+      if (ps.projecting.contains(projected)) {
+        owed = owed || only == nullptr || only->contains(projected);
         continue;
       }
+      if (AssembleKeptView(state, view.id, /*allowStale=*/false))
+        continue;
+      if (!view.detail.on && (only == nullptr || only->contains(view.id)))
+        owed = true;
+      AssembleKeptView(state, view.id, /*allowStale=*/true);
     }
-    fresh[view.id] = std::move(sv);
+    if (owed)
+      ps.updateOwed = true;
+    return;
   }
-  state.drawingRenders = std::move(fresh);
-  state.drawingRendersVersion = drawingVersion;
+  const auto prepStart = std::chrono::steady_clock::now();
+  std::vector<DrawingViewWork> work = PlanDrawingUpdate(state, only, nullptr);
+  PruneShapeMemo(state);
+  state.drawingRendersVersion = state.drawing->Version();
+  if (work.empty()) {
+    FlushPendingExport(state);
+    return;
+  }
+  for (const DrawingViewWork& w : work) {
+    ps.projecting.insert(w.viewId);
+    for (const DrawingView& d : state.drawing->GetViews())
+      if (d.detail.on && d.detail.parentViewId == w.viewId)
+        ps.projecting.insert(d.id);
+  }
+  for (uint64_t id : ps.projecting) {
+    const auto r = state.drawingRenders.find(id);
+    if (r != state.drawingRenders.end() && r->second.hasGeometry)
+      continue;
+    const DrawingView* v = state.drawing->FindView(id);
+    glm::dvec2 lo, hi;
+    if (v && EstimateViewBox(state, *v, lo, hi))
+      ps.placeholder[id] = {lo, hi};
+  }
+  LOG_INFO("Drawing: {} view(s) to project off the frame, {:.0f} ms to "
+           "prepare on it",
+           work.size(),
+           std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now() - prepStart)
+               .count());
+  StartDrawingJob(state, ActiveSlotId(state), std::move(work), budgetSeconds);
+}
+
+void UpdateDrawingRendersNow(AppState& state, double budgetSeconds) {
+  UpdateNowImpl(state, budgetSeconds, nullptr);
+}
+
+bool PrefetchDrawingView(AppState& state, const DrawingView& v) {
+  if (!state.drawing || state.drawingRun || !state.drawingDeferProjection)
+    return false;
+  PreparedView pv = PrepareView(state, v, /*createCopies=*/true);
+  if (!pv.error.empty() || !pv.copies)
+    return false;
+  for (const auto& [id, kept] : state.drawingProjections.kept)
+    if (kept.inputs.SameAs(pv.inputs))
+      return false; // projected already: assembling is all it costs
+  DrawingViewWork w;
+  w.viewId = 0; // lands on no view: what it leaves is the cache's
+  w.name = v.name;
+  w.inputs = std::move(pv.inputs);
+  w.view = pv.view;
+  w.sourceVersion = pv.sourceVersion;
+  std::vector<DrawingViewWork> work;
+  work.push_back(std::move(w));
+  StartDrawingJob(state, ActiveSlotId(state), std::move(work), 0.0);
+  return true;
+}
+
+void ReassembleDrawingViews(AppState& state) {
+  if (!state.drawing)
+    return;
+  const std::set<uint64_t> missing = AssembleAllKept(state);
+  std::erase_if(state.drawingRenders, [&](const auto& kv) {
+    return state.drawing->FindView(kv.first) == nullptr;
+  });
+  if (!missing.empty())
+    RequestDrawingUpdate(state, 0.0, &missing);
+}
+
+bool DrawingViewProjecting(const AppState& state, uint64_t viewId) {
+  if (!state.drawing)
+    return false;
+  const DrawingProjectionState& ps = state.drawingProjections;
+  if (ps.projecting.contains(viewId))
+    return true;
+  const DrawingView* v = state.drawing->FindView(viewId);
+  return v != nullptr && v->detail.on &&
+         ps.projecting.contains(v->detail.parentViewId);
+}
+
+bool DrawingPlaceholderBox(const AppState& state, const DrawingView& view,
+                           glm::dvec2& min, glm::dvec2& max) {
+  const auto it = state.drawingProjections.placeholder.find(view.id);
+  if (it == state.drawingProjections.placeholder.end())
+    return false;
+  const double s = view.scale != 0.0 ? view.scale : 1.0;
+  const glm::dvec2 pos =
+      view.detail.on
+          ? view.position
+          : DrawingFoldedPosition(const_cast<AppState&>(state), view).pos;
+  min = pos + s * it->second.first;
+  max = pos + s * it->second.second;
+  return true;
+}
+
+void LandDrawingViewWork(AppState& state, uint64_t slotId, DrawingViewWork& w,
+                         const std::string& why) {
+  // The tab the work was for: active, stashed, or closed meanwhile.
+  const bool active = state.drawing != nullptr && ActiveSlotId(state) == slotId;
+  DrawingDocument* dwg = nullptr;
+  DrawingProjectionState* ps = nullptr;
+  std::map<uint64_t, drawing::SheetView>* renders = nullptr;
+  if (active) {
+    dwg = state.drawing.get();
+    ps = &state.drawingProjections;
+    renders = &state.drawingRenders;
+  } else {
+    for (PartSlot& slot : state.parts)
+      if (slot.id == slotId && slot.kind == DocKind::Drawing && slot.drawing) {
+        dwg = slot.drawing.get();
+        ps = &slot.drawingProjections;
+        renders = &slot.drawingRenders;
+      }
+  }
+  if (dwg == nullptr)
+    return; // the tab was closed: nothing to land on
+  std::vector<uint64_t> views{w.viewId};
+  for (const DrawingView& d : dwg->GetViews())
+    if (d.detail.on && d.detail.parentViewId == w.viewId)
+      views.push_back(d.id);
+  for (uint64_t id : views)
+    ps->projecting.erase(id);
+  if (dwg->FindView(w.viewId) == nullptr)
+    return; // the view was deleted meanwhile
+  if (w.out) {
+    ps->kept[w.viewId] = {w.out, w.inputs, w.sourceVersion, w.view};
+    dwg->SetSavedProjection(w.viewId, w.out);
+    for (uint64_t id : views)
+      ps->placeholder.erase(id);
+    if (!active) {
+      ps->assemble.insert(views.begin(), views.end());
+      return;
+    }
+    for (uint64_t id : views)
+      if (!AssembleKeptView(state, id, /*allowStale=*/true, /*landed=*/true))
+        SetViewError(*renders, id,
+                     "its source changed while it projected: Update views",
+                     w.sourceVersion);
+    if (const auto place = ps->placePending.find(w.viewId);
+        place != ps->placePending.end()) {
+      const bool chooseScale = place->second;
+      ps->placePending.erase(place);
+      PlaceLandedView(state, w.viewId, chooseScale);
+    }
+    return;
+  }
+  const std::string error = !why.empty()       ? StoppedError(why)
+                            : !w.error.empty() ? w.error
+                                               : w.gatherError;
+  for (uint64_t id : views) {
+    SetViewError(*renders, id,
+                 id == w.viewId
+                     ? error
+                     : "the view this detail is of did not project: " + error,
+                 w.sourceVersion);
+    // Cancelled, it is still coming (at the next update) and keeps its
+    // placeholder; failed, it is not.
+    if (why.empty())
+      ps->placeholder.erase(id);
+  }
+  ps->placePending.erase(w.viewId);
+}
+
+void DrawingRunEnded(AppState& state, uint64_t slotId, bool cancelled) {
+  for (PartSlot& slot : state.parts)
+    if (slot.id == slotId)
+      slot.drawingProjections.projecting.clear();
+  const bool active = state.drawing != nullptr && ActiveSlotId(state) == slotId;
+  if (active)
+    state.drawingProjections.projecting.clear();
+  if (cancelled) {
+    // Stopping is the user's word for everything that waited on the run.
+    for (PartSlot& slot : state.parts)
+      if (slot.id == slotId)
+        slot.drawingProjections.exportPath.clear();
+    if (active && !state.drawingProjections.exportPath.empty()) {
+      state.drawingProjections.exportPath.clear();
+      state.drawingMessage =
+          "Export cancelled: the views were not all projected";
+      state.drawingMessageIsError = true;
+    }
+    if (active)
+      state.drawingProjections.updateOwed = false;
+    return;
+  }
+  if (!state.drawing)
+    return;
+  if (state.drawingProjections.updateOwed) {
+    state.drawingProjections.updateOwed = false;
+    RequestDrawingUpdate(state);
+  }
+  FlushPendingExport(state);
+}
+
+void DrawingTabShown(AppState& state) {
+  if (!state.drawing)
+    return;
+  DrawingProjectionState& ps = state.drawingProjections;
+  if (!ps.assemble.empty()) {
+    const std::set<uint64_t> landed = std::move(ps.assemble);
+    ps.assemble.clear();
+    for (uint64_t id : landed)
+      if (state.drawing->FindView(id) &&
+          !AssembleKeptView(state, id, /*allowStale=*/true))
+        SetViewError(state.drawingRenders, id,
+                     "its source changed while it projected: Update views", 0);
+    // A view added while it projected is placed now that it can be.
+    for (auto it = ps.placePending.begin(); it != ps.placePending.end();) {
+      if (landed.contains(it->first) && !ps.projecting.contains(it->first)) {
+        const uint64_t id = it->first;
+        const bool chooseScale = it->second;
+        it = ps.placePending.erase(it);
+        PlaceLandedView(state, id, chooseScale);
+      } else {
+        ++it;
+      }
+    }
+  }
+  // A drawing projects on the FIRST view of the tab (design §2): if the
+  // restored renders are empty (never projected this session) it asks;
+  // otherwise it keeps the stashed geometry, so staleness is only cleared by
+  // an explicit update. An update asked for while another tab's run went is
+  // asked for now.
+  if (ps.updateOwed && !state.drawingRun) {
+    ps.updateOwed = false;
+    RequestDrawingUpdate(state);
+  } else if (state.drawingRenders.empty() && state.drawing->ViewCount() > 0 &&
+             ps.projecting.empty()) {
+    RequestDrawingUpdate(state);
+  }
+  FlushPendingExport(state);
+}
+
+void ForgetDrawingProjections(AppState& state) {
+  if (state.drawingRun) {
+    CancelDrawingJob(state);
+    JoinBackgroundJobs(state, "drawing");
+  }
+  state.drawingProjectionCache.Clear();
+  state.drawingCutCache.Clear();
+  state.drawingShapes = {};
+  state.drawingProjections = {};
 }
 
 std::string NextViewLetter(AppState& state) {
@@ -2152,7 +2765,8 @@ double ShownLength(const drawing::SheetView& sv, uint64_t occurrence) {
 
 bool LayoutDrawingBalloons(AppState& state,
                            const std::vector<uint64_t>& viewIds,
-                           BalloonLayoutReport& report, std::string* error) {
+                           BalloonLayoutReport& report, std::string* error,
+                           bool update) {
   const auto fail = [&](std::string why) {
     if (error)
       *error = std::move(why);
@@ -2175,7 +2789,13 @@ bool LayoutDrawingBalloons(AppState& state,
                   "one parts list");
     source = v->sourceDocId;
   }
-  UpdateDrawingRenders(state);
+  if (update)
+    UpdateDrawingRendersNow(state);
+  for (uint64_t id : viewIds)
+    if (DrawingViewProjecting(state, id))
+      return fail("view '" + state.drawing->FindView(id)->name +
+                  "' is still projecting; lay the balloons out once it has "
+                  "landed");
   for (uint64_t id : viewIds)
     if (!state.drawingRenders.contains(id) ||
         !state.drawingRenders.at(id).hasGeometry)

@@ -433,6 +433,58 @@ TEST_CASE("the surface key covers every field the pass reads", "[convention]") {
   CHECK(missing.empty());
 }
 
+TEST_CASE("the frame never waits for a drawing's projection", "[convention]") {
+  // Switching to the pan/tilt head's drawing tab projected its three views
+  // inside the click's frame and froze the app for 43.7 s; reopening the
+  // project on that tab froze it again after the open modal closed
+  // (docs/drawings/README.md#projection-off-the-frame). The GUI asks for an
+  // update (RequestDrawingUpdate) and a `drawing` job projects; the waiting
+  // form, UpdateDrawingRendersNow, is for the callers that may wait -- an
+  // RPC in a batch or on --headless, a test -- and only DrawingActions.cpp,
+  // where both live, may call it under src/ui. A call from a panel or a
+  // command would look equally at home and hold the frame for minutes.
+  std::vector<std::string> offenders;
+  for (const SourceFile& f : SourcesUnder("src/ui", ".cpp")) {
+    if (f.path.filename() == "DrawingActions.cpp")
+      continue;
+    if (f.text.find("UpdateDrawingRendersNow(") != std::string::npos)
+      offenders.push_back(Relative(f.path));
+  }
+  INFO("Call RequestDrawingUpdate (or ReassembleDrawingViews) instead:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& o : offenders)
+              s += "  " + o + " calls UpdateDrawingRendersNow\n";
+            return s;
+          }());
+  CHECK(offenders.empty());
+}
+
+TEST_CASE("every long operation draws the one progress bar", "[convention]") {
+  // A long operation's bar is ui::DrawJobProgress (src/ui/Widgets.h): the
+  // same bar, the same overlay text and the same Cancel wherever the work
+  // runs -- opening a project, a toolpath, a still, a drawing's projection
+  // (docs/ui/long-operations.md#the-registry). The requirements panel grew a
+  // bar of its own with no way to stop the check; a raw ImGui::ProgressBar
+  // anywhere but the widget is how the next one would.
+  std::vector<std::string> offenders;
+  for (const char* dir : {"src/ui", "src/app", "src/remote"})
+    for (const SourceFile& f : SourcesUnder(dir, ".cpp")) {
+      if (f.path.filename() == "Widgets.cpp")
+        continue; // the one place it belongs
+      if (f.text.find("ImGui::ProgressBar(") != std::string::npos)
+        offenders.push_back(Relative(f.path));
+    }
+  INFO("Draw it with ui::DrawJobProgress:\n"
+       << [&] {
+            std::string s;
+            for (const std::string& o : offenders)
+              s += "  " + o + " calls ImGui::ProgressBar\n";
+            return s;
+          }());
+  CHECK(offenders.empty());
+}
+
 TEST_CASE("a background job is polled by the loop, never by a panel",
           "[convention]") {
   // Whether a long-running operation can FINISH must not depend on which

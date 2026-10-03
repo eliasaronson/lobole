@@ -178,6 +178,15 @@ def main():
         views = {v["name"]: v for v in d.call("list_drawing_views")["views"]}
         expect(views["front"].get("section", {}).get("label") == "A",
                f"the section reopens: {views['front']}")
+        # Each view's projection was saved with the drawing, and reopens
+        # installed rather than projected: no hidden-line removal at all
+        # (docs/drawings/README.md#saved-projections).
+        d.call("update_drawing")
+        for v in d.call("list_drawing_views")["views"]:
+            cost = v.get("cost", {})
+            expect(v["has_geometry"] and cost.get("self_calls", 1) == 0
+                   and cost.get("pair_calls", 1) == 0,
+                   f"{v['name']} reopens projected, without HLR: {cost}")
         print("drawing_sheet_smoke: OK")
     finally:
         app.terminate()

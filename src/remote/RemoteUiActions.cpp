@@ -721,7 +721,7 @@ struct RemoteServer::Parked {
   // steps read are what the unknown-parameter check compares against when
   // the answer comes from them rather than from a handler.
   std::unique_ptr<remote::RpcParams> params;
-  std::unique_ptr<remote::CamParking> wait;
+  std::unique_ptr<remote::Parking> wait;
 };
 
 bool RemoteServer::ConnectionOpen(uint64_t connection) {
@@ -964,10 +964,12 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       }
     }
 
-    // A CAM request that would compute on the frame waits instead
-    // (remote/RemoteCam.h). A `batch` never parks -- its calls run inside
+    // A request that would compute on the frame waits instead
+    // (remote/RemoteParking.h): a CAM one on its passes, a drawing one on its
+    // projection. A `batch` never parks -- its calls run inside
     // HandleSemantic, one transaction -- and neither does a request coming
-    // back from parking.
+    // back from parking. Nor does a drawing request on --headless, where no
+    // frame is held and the synchronous handler is the simpler answer.
     if (!request.resumed) {
       auto parked = std::make_shared<Parked>();
       parked->request = std::move(request);
@@ -978,6 +980,9 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
                                     " (parking)");
         parked->wait = remote::ParkCamRequest(state, parked->request.method,
                                               *parked->params);
+        if (!parked->wait && m_mode != RemoteMode::Headless)
+          parked->wait = remote::ParkDrawingRequest(
+              state, parked->request.method, *parked->params);
       } catch (...) {
         parked->wait = nullptr; // the handler says what went wrong
       }

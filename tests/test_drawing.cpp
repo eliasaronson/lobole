@@ -5,6 +5,7 @@
 
 #include "TestIO.h"
 #include "core/Document.h"
+#include "core/InputHash.h"
 #include "core/drawing/DrawingCallout.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingDocument.h"
@@ -12,6 +13,7 @@
 #include "core/drawing/DrawingProjection.h"
 #include "core/drawing/DrawingRender.h"
 #include "core/drawing/DrawingValidate.h"
+#include "core/drawing/ViewProjection.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FastenerFeature.h"
 #include "core/features/HoleFeature.h"
@@ -1360,4 +1362,67 @@ TEST_CASE("drawing validator checks note bounds and overlaps", "[drawing]") {
       return i.kind == kind && i.noteId != 0;
     }));
   }
+}
+
+// v162 (docs/drawings/README.md#saved-projections): a drawing's directory
+// form carries each view's last projection beside it. Loaded, every one is a
+// CANDIDATE -- the loader cannot hash the source, so a foreign input hash is
+// read like any other and left to the projecting job to discard; one that
+// does not read at all is dropped with a warning, never a refusal. The
+// single-file form (an autosave's) carries none.
+TEST_CASE("Drawing golden carries its views' saved projections (v162)",
+          "[drawing][serialization][golden]") {
+  const fs::path golden =
+      fs::path(TestSourceDir()) / "tests" / "golden" / "drawing";
+  nlohmann::json expect;
+  std::ifstream(golden / "v162-stored-projection.expect.json") >> expect;
+  const fs::path dir = golden / expect.at("directory").get<std::string>();
+  auto dwg = testio::LoadDrawing(dir.string());
+  REQUIRE(dwg != nullptr);
+  CHECK(dwg->ViewCount() == expect.at("views").get<size_t>());
+  const auto check = [&](const DrawingDocument& d) {
+    for (const auto& [id, e] : expect.at("saved_projections").items()) {
+      INFO("view " << id);
+      const auto p = d.SavedProjection(std::stoull(id));
+      REQUIRE(p != nullptr);
+      CHECK(inputhash::Hex(p->inputHash) ==
+            e.at("input_hash").get<std::string>());
+      CHECK(p->result.curves.size() == e.at("curves").get<size_t>());
+      for (const auto& c : p->result.curves)
+        CHECK(c.points.size() >= 2);
+    }
+  };
+  check(*dwg);
+
+  // Written back in the directory form: the same projections reopen.
+  const fs::path tmp = fs::temp_directory_path() / "dwg_v162_rt.dsgn";
+  fs::remove_all(tmp);
+  REQUIRE(testio::SaveDrawing(*dwg, tmp.string()));
+  auto again = testio::LoadDrawing(tmp.string());
+  REQUIRE(again != nullptr);
+  check(*again);
+  // A projection whose bin is torn is dropped, and the drawing still loads.
+  for (const auto& e : fs::recursive_directory_iterator(tmp))
+    if (e.path().filename() == "1-front.projection.bin")
+      fs::resize_file(e.path(), 3);
+  auto torn = testio::LoadDrawing(tmp.string());
+  REQUIRE(torn != nullptr);
+  CHECK(torn->ViewCount() == expect.at("views").get<size_t>());
+  CHECK(torn->SavedProjection(1) == nullptr);
+  CHECK(torn->SavedProjection(2) != nullptr);
+  fs::remove_all(tmp);
+
+  // The single-file form carries none, and saving to it writes none.
+  auto single =
+      testio::LoadDrawing((golden / "v162-stored-projection.json").string());
+  REQUIRE(single != nullptr);
+  CHECK(single->ViewCount() == expect.at("views").get<size_t>());
+  CHECK(single->SavedProjections().size() ==
+        expect.at("single_file_saved_projections").get<size_t>());
+  const fs::path file = fs::temp_directory_path() / "dwg_v162_single.json";
+  REQUIRE(testio::SaveDrawing(*dwg, file.string()));
+  auto fromFile = testio::LoadDrawing(file.string());
+  REQUIRE(fromFile != nullptr);
+  CHECK(fromFile->SavedProjections().empty());
+  fs::remove(file);
 }

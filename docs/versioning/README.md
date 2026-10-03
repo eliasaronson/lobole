@@ -36,10 +36,11 @@ the container they live in `project.json` and each part's `index.json`
 | file | holds |
 |---|---|
 | `src/core/io/SerializationInternal.h` | `kFormat`, `kVersion` and its per-version comments, shared JSON helpers |
-| `src/core/io/Serialization.cpp` | envelopes, `Save`/`Load`, `SaveDir`/`LoadDir`, assemblies, drawings, jobs, a lone part's project tables, requirements and templates, the study results' files, load refusals |
+| `src/core/io/Serialization.cpp` | envelopes, `Save`/`Load`, `SaveDir`/`LoadDir`, assemblies, drawings, jobs, a lone part's project tables, requirements and templates, the study results' and drawing projections' files, load refusals |
 | `src/core/io/SerializeFeatures.cpp` | `FeatureToJson` / `FeatureFromJson`, sketch entities and constraints |
 | `src/core/io/SerializeAssembly.cpp` | occurrences, mates, relations, exploded views, motion studies and their saved results, the clearance assertions an old file carries |
 | `src/core/io/SerializeStudies.cpp` | FEM and topology studies and their saved results (the `.result.bin` arrays) |
+| `src/core/io/SerializeDrawingProjections.cpp` | a drawing view's saved projection (the `.projection.bin` arrays) |
 | `src/core/io/SerializeConfigurations.cpp` | part and assembly configurations |
 | `src/core/io/SerializeCam.cpp` | CAM setups, tools, operations |
 | `src/core/io/AtomicWrite.cpp` | `WriteTextAtomic`: temp + rename, skips identical content |
@@ -232,20 +233,26 @@ A clean save clears every sidecar (and the unsaved slot). Recovery:
 
 The sidecars sit beside the project, outside its directory, so they are
 outside its git repository and outside the disk stamp below. A sidecar is
-the single-file form, which carries no study result: an autosave never
-writes one, and a recovered document's studies run again
-([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps)).
+the single-file form, which carries no study result and no drawing
+projection: an autosave never writes one, and a recovered document's
+studies run again
+([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps))
+and its drawing views project again.
 
 ## Saved results stay out of the history
 
 A study or motion result is saved beside its study
-([studies as jobs](../simulation/README.md#studies-as-jobs)), and the
-project's repository does not keep it: `GitVault::CommitAll` (and
-`CommitMerge`) writes `*.result.json` and `*.result.bin` into the
-repository's own exclude file (`.git/info/exclude`, found with `git
-rev-parse --git-path`) and takes any result an earlier build committed out
-of the index (`git rm --cached`), leaving the file on disk; `Init` writes
-the rule from the first commit.
+([studies as jobs](../simulation/README.md#studies-as-jobs)), and a drawing
+view's projection beside the view
+([saved projections](../drawings/README.md#saved-projections)), and the
+project's repository keeps neither: `GitVault::CommitAll` (and
+`CommitMerge`) writes `*.result.json`, `*.result.bin`, `*.projection.json`
+and `*.projection.bin` into the repository's own exclude file
+(`.git/info/exclude`, found with `git rev-parse --git-path`), each pattern
+added when its line is missing (so a repository an earlier build set up
+gains the projections' lines), and takes any such file an earlier build
+committed out of the index (`git rm --cached`), leaving it on disk; `Init`
+writes the rule from the first commit.
 
 None, rather than the newest: a result is reproducible from its inputs and
 named by their hash, so a version needs none to be what it was, and git
@@ -346,4 +353,3 @@ History, merge and remote RPCs are listed in [history.md](history.md#rpcs).
 - Baking a regeneration history (per-feature snapshots), so the first edit
   after opening is fast too.
 - Git LFS for the baked blobs; `commit_geometry: false` is the size opt-out.
-- Baking drawing projections.

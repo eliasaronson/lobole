@@ -553,6 +553,13 @@ ProjectViewImpl(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
             std::distance(result.stats.costBySource.begin(), it));
       }
     }
+    ProjectionProgress progress;
+    progress.stepsOwed = nbShapes * nbShapes;
+    progress.pairsOwed = nbShapes * (nbShapes - 1);
+    const auto report = [&] {
+      if (options.progress)
+        options.progress(progress);
+    };
     for (int i = 1; i <= nbShapes; ++i) {
       if (stopped()) {
         if (error)
@@ -582,6 +589,8 @@ ProjectViewImpl(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
               .count();
       result.stats.selfMs += selfMs;
       result.stats.costBySource[slotGroup[i - 1]].ms += selfMs;
+      ++progress.stepsDone;
+      report();
       auto combined = self;
       for (int j = 1; j <= nbShapes; ++j) {
         if (stopped()) {
@@ -629,6 +638,9 @@ ProjectViewImpl(const std::vector<InputBody>& bodies, const glm::dvec3& viewDir,
         result.stats.costBySource[slotGroup[i - 1]].ms += pairMs;
         if (slotGroup[j - 1] != slotGroup[i - 1])
           result.stats.costBySource[slotGroup[j - 1]].ms += pairMs;
+        ++progress.stepsDone;
+        ++progress.pairsDone;
+        report();
       }
     }
     if (stopped()) {

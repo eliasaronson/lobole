@@ -345,6 +345,7 @@ set(core_sources
     src/core/AssemblySolve.cpp
     src/core/AssemblyLoopSolve.cpp
     src/core/drawing/DrawingProjection.cpp
+    src/core/drawing/ViewProjection.cpp
     src/core/drawing/DrawingDocument.cpp
     src/core/cam/JobDocument.cpp
     src/core/cam/CamMachine.cpp
@@ -394,6 +395,7 @@ set(core_sources
     src/core/io/Serialization.cpp
     src/core/io/SerializeFeatures.cpp
     src/core/io/SerializeStudies.cpp
+    src/core/io/SerializeDrawingProjections.cpp
     src/core/io/SerializeCam.cpp
     src/core/io/SerializeConfigurations.cpp
     src/core/io/SerializeAssembly.cpp
@@ -798,6 +800,7 @@ set(app_sources
     src/ui/DocumentSlots.cpp
     src/ui/ViewActions.cpp
     src/ui/DrawingActions.cpp
+    src/ui/DrawingJob.cpp
     src/ui/SceneOverlays.cpp
     src/ui/VariableActions.cpp
     src/ui/CatalogActions.cpp

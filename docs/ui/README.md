@@ -228,8 +228,8 @@ every creation tool to it. The rule, its examples and the gate are in
   `SettingsWindow.cpp`,
   `TerminalPanel.cpp`.
 - **Numbers:** `ExprInput.cpp`, `ExprComplete.cpp`.
-- **Jobs:** `BackgroundJob(s).h`, `CamJobs.cpp`, `ImportJob.cpp`,
-  `OpenJob.cpp`, `SyncJob.cpp`, `TopoJob.h`.
+- **Jobs:** `BackgroundJob(s).h`, `CamJobs.cpp`, `DrawingJob.cpp`,
+  `ImportJob.cpp`, `OpenJob.cpp`, `SyncJob.cpp`, `TopoJob.h`.
 - **Projection into the renderers:** `RendererSync.cpp`, `SceneOverlays.cpp`,
   `SketchOverlay.cpp`, `TessellationCache.cpp`.
 - **Actions by subject:** `ProjectActions`, `DocumentSlots`, `ViewActions`,

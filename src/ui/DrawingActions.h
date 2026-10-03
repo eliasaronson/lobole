@@ -11,6 +11,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -31,20 +32,38 @@ struct Ray;          // defined in FaceSelector.h
 
 namespace ui {
 
+struct DrawingViewWork; // ui/DrawingJob.h
+
 drawing::ResolvedNote ResolveDrawingNote(AppState& state,
                                          const DrawingNote& note);
 
-// Re-projects every view of the active drawing into state.drawingRenders (the
-// HLR-per-view work). Explicit (D2): called on drawing-tab entry and by the
-// update_drawing RPC / panel button — never per frame, since HLR is expensive.
-// Failed views keep their last-good geometry with an error string.
-// Re-project every view of the active drawing whose source has moved.
+// Bringing the active drawing's views up to date
+// (docs/drawings/README.md#projection-off-the-frame). A view is projected
+// (the hidden-line removal, the dear half) and then assembled onto the sheet
+// (placed, scaled, turned, its curves named; cheap). Each view keeps its
+// projection (state.drawingProjections), so anything that only moves a view
+// on the sheet assembles it again and projects nothing.
+//
+// RequestDrawingUpdate is the GUI's: it assembles every view whose inputs
+// have not moved since its projection, and hands the rest to a `drawing`
+// job, so the frame never waits for HLR; a view projecting shows its last
+// geometry, or a placeholder at its source's bounds, until it lands. With
+// `state.drawingDeferProjection` off (the GUI suite) it is
+// UpdateDrawingRendersNow. `only` limits the projecting to those views (the
+// rest are assembled as they are, stale or not).
+void RequestDrawingUpdate(AppState& state, double budgetSeconds = 0.0,
+                          const std::set<uint64_t>* only = nullptr);
+
+// The same, waiting: joins a `drawing` job in flight (taking its caches
+// back), then projects whatever is owed inline. For the callers that may
+// wait -- an RPC in a `batch` or on --headless, a test -- and never the
+// frame: test_conventions.cpp fails on a call to it from any file under
+// src/ui but this one.
 //
 // `budgetSeconds` > 0 bounds the WHOLE update: a view still running when the
 // budget is gone stops where it is, keeps its last-good geometry and reports
 // that it ran out (OCC's Hide() has no cancel hook of its own — the pairwise
 // drive in DrawingProjection.cpp is what makes stopping possible at all).
-// 0 = run to completion, which is what every existing caller wants and gets.
 //
 // The budget exists because exact HLR is priced by SURFACE complexity and can
 // therefore surprise you: 16 bored boxes project in 3.1 ms, but one four-turn
@@ -52,14 +71,63 @@ drawing::ResolvedNote ResolveDrawingNote(AppState& state,
 // fell to 0.0 when its two valve springs were hidden. A three-view sheet of it
 // had not finished after 21 minutes, with no way to interrupt it and the RPC
 // server blocked behind it (docs/drawings/README.md#projection-hlr).
-void UpdateDrawingRenders(AppState& state, double budgetSeconds = 0.0);
+void UpdateDrawingRendersNow(AppState& state, double budgetSeconds = 0.0);
+
+// Projects `view` -- one about to be added or changed, not yet on the sheet --
+// on a `drawing` job into the projection cache, so the synchronous update
+// that adds it finds it there: what a parked RPC does before it lets the
+// handler run (remote/RemoteDrawings.h). False when nothing needed
+// projecting, a run is in flight, or projection is not deferred.
+bool PrefetchDrawingView(AppState& state, const DrawingView& view);
+
+// A view moved on the sheet (its scale, turn or place) or one was deleted:
+// every view assembled again from its kept projection, stale ones as stale,
+// and only a view that has none requested.
+void ReassembleDrawingViews(AppState& state);
+
+// Whether a `drawing` job is projecting `viewId` of the active drawing (or
+// the view a detail is of).
+[[nodiscard]] bool DrawingViewProjecting(const AppState& state,
+                                         uint64_t viewId);
+
+// Where the sheet draws a projecting view that has no geometry yet: its
+// source's bounds seen along the view, at the view's scale and place
+// (sheet mm). False when it has none.
+bool DrawingPlaceholderBox(const AppState& state, const DrawingView& view,
+                           glm::dvec2& min, glm::dvec2& max);
+
+// Lands one view a `drawing` job finished (ui/DrawingJob.cpp): on the active
+// drawing, assembled now; on a stashed one, kept and assembled when its tab
+// is shown; dropped when the tab is gone. `why` is "" (it ran), "cancelled"
+// or "budget".
+void LandDrawingViewWork(AppState& state, uint64_t slotId,
+                         DrawingViewWork& work, const std::string& why);
+
+// The run for `slotId` has ended: whatever waited on it (an export, an
+// update asked for meanwhile) goes now.
+void DrawingRunEnded(AppState& state, uint64_t slotId, bool cancelled);
+
+// A drawing tab was just shown: views a job landed while it was stashed are
+// assembled, an update owed is requested, and a tab never projected this
+// session asks for its first (design §2).
+void DrawingTabShown(AppState& state);
+
+// The project is going away: a run in flight is cancelled and joined, and
+// the session's projection state let go.
+void ForgetDrawingProjections(AppState& state);
 
 // Adds a view to the active drawing, choosing the two things a human should
 // not have to compute: a standard scale that makes the part legible on this
 // sheet (only when `v.scale` is <= 0), and a spot clear of the views already
 // placed. Snapshots for undo and re-projects. Shared by the drawing
 // toolbar's Add-view menu and the panel's Add view button.
-uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v);
+//
+// Placing needs the view's size, which its projection gives. Deferred (the
+// GUI's default, or `defer` true), the view is added at once at a place and
+// scale estimated from its source's bounds, and placed again by its real
+// bounds when its projection lands -- one undo step either way.
+uint64_t AddDrawingViewPlaced(AppState& state, DrawingView v,
+                              std::optional<bool> defer = std::nullopt);
 
 // The current Document::Version() / AssemblyDocument::Version() of a source
 // document (part or assembly) by stable id, or 0 if absent. A drawing view is
@@ -121,11 +189,20 @@ drawing::ResolvedDim ResolveDrawingDim(AppState& state, const DrawingDim& dim);
 // The {0,-12} fallback covers an unprojected view.
 glm::dvec2 AutoDimOffset(AppState& state, const DrawingDim& dim);
 
-// Re-projects and writes the active drawing to `path` (.svg or .pdf by
-// extension). The shared export path for the export_drawing RPC and the GUI
-// Export dialog. Returns false and fills *error on failure.
+// Writes the active drawing to `path` (.svg or .pdf by extension), bringing
+// its views up to date first when `update`. The export_drawing RPC's path,
+// and the GUI Export dialog's through ExportActiveDrawingWhenProjected. Returns
+// false and fills *error on failure. `update` false writes the views as they
+// are (the caller has just brought them up to date, or a parked RPC's job has).
 bool ExportActiveDrawing(AppState& state, const std::string& path,
-                         std::string* error);
+                         std::string* error, bool update = true);
+
+// File > Export: writes now when nothing needs projecting, else when the
+// last view lands (the progress shown on the drawing panel); an export never
+// writes a stale or half-projected sheet. False with `error` when it cannot
+// even start.
+bool ExportActiveDrawingWhenProjected(AppState& state, const std::string& path,
+                                      std::string* error);
 
 // A balloon on every row of the parts list, laid out round the views that
 // draw them (docs/drawings/README.md#balloon-layout): each row on the view
@@ -146,9 +223,13 @@ struct BalloonLayoutReport {
   std::vector<std::string> unplaced; // rows nothing on these views draws
   int crossings = 0;
 };
+//
+// `update` brings the views up to date first, waiting (the RPC); without it
+// (the GUI) a view still projecting refuses the layout, saying so.
 bool LayoutDrawingBalloons(AppState& state,
                            const std::vector<uint64_t>& viewIds,
-                           BalloonLayoutReport& report, std::string* error);
+                           BalloonLayoutReport& report, std::string* error,
+                           bool update = true);
 
 // The next free letter for a section or detail view on the active sheet
 // (A, B, ... skipping I, O and Q, and those its sections and details use).

@@ -4,6 +4,7 @@
 #include "ui/BackgroundJobs.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
+#include "ui/Widgets.h" // DrawJobProgress
 
 #include "imgui.h"
 #include "imgui_internal.h" // FindWindowByName, the Model panel's dock
@@ -89,13 +90,17 @@ void DrawRequirementsPanel(AppState& state) {
 
   BackgroundJob* job = FindBackgroundJob(state, "requirements");
   if (job != nullptr) {
-    ImGui::BeginDisabled();
-    ImGui::Button("Checking...###req_checking");
-    ImGui::EndDisabled();
-    ImGui::SameLine();
-    const double f = job->fraction.load();
-    ImGui::ProgressBar(f >= 0.0 ? static_cast<float>(f) : 0.0f,
-                       ImVec2(-1.0f, 0.0f), job->label.c_str());
+    // The bar every long operation draws (docs/ui/long-operations.md), and
+    // with it the way to stop the check.
+    JobProgress bar;
+    bar.status = job->label;
+    bar.fraction = job->fraction.load();
+    bar.cancellable = job->cancellable;
+    bar.cancelAsked = job->cancel.load();
+    bar.cancelId = "###req_cancel";
+    bar.cancelTip = "Stop checking: what was measured stays";
+    if (DrawJobProgress(bar))
+      CancelBackgroundJobs(state, "requirements");
   } else {
     if (ImGui::Button("Check###req_check"))
       Engine().check(state, ImGui::GetIO().KeyShift);

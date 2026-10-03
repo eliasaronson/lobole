@@ -6,6 +6,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/DrawingAnnotate.h"
+#include "ui/DrawingJob.h"
 #include "ui/DrawingSheet.h"
 #include "ui/ExprInput.h" // expression-capable numeric fields
 #include "ui/PanelLayout.h"
@@ -346,6 +347,20 @@ void DrawDims(ImDrawList* dl, AppState& state) {
 
   for (DrawingDim& dim : state.drawing->GetDims()) {
     const drawing::ResolvedDim d = ResolveDrawingDim(state, dim);
+    if (!d.resolved && DrawingViewProjecting(state, dim.viewId)) {
+      // Its view is still projecting: pending, drawn as such, never
+      // reported as broken (docs/drawings/README.md#projection-off-the-frame).
+      if (fontPx >= 4.0f) {
+        const DrawingView* dv = state.drawing->FindView(dim.viewId);
+        glm::dvec2 anchor = dv ? dv->position : dim.labelOffset;
+        glm::dvec2 mn, mx;
+        if (dv && DrawingPlaceholderBox(state, *dv, mn, mx))
+          anchor = {mn.x, mx.y + 4.0};
+        dl->AddText(font, fontPx, SheetToScreen(state, anchor),
+                    IM_COL32(120, 120, 130, 255), "pending dim");
+      }
+      continue;
+    }
     if (!d.resolved) {
       // Dangling: anchor the marker at the view's bbox corner (labelOffset is
       // an OFFSET — drawing it as an absolute point parked the marker at the
@@ -494,8 +509,35 @@ void DrawViews(ImDrawList* dl, AppState& state) {
   const float fontPx = static_cast<float>(2.6 * state.sheetView.scale);
   ImFont* font = ImGui::GetFont();
 
+  const ImU32 pending = IM_COL32(120, 120, 130, 255);
+  static const double kPlaceholderDash[] = {3.0, 2.0};
+  bool placeholderDrawn = false;
   for (const DrawingView& view : state.drawing->GetViews()) {
+    const bool projecting = DrawingViewProjecting(state, view.id);
     const auto it = state.drawingRenders.find(view.id);
+    const bool hasGeometry =
+        it != state.drawingRenders.end() && it->second.hasGeometry;
+    // A view with no geometry yet, projecting or cancelled on its way: its
+    // frame at its source's bounds, captioned with its name, so the sheet
+    // shows where it will be
+    // (docs/drawings/README.md#projection-off-the-frame).
+    glm::dvec2 phMin, phMax;
+    if (!hasGeometry && DrawingPlaceholderBox(state, view, phMin, phMax)) {
+      StrokeDashed(
+          dl, state,
+          {phMin, {phMax.x, phMin.y}, phMax, {phMin.x, phMax.y}, phMin},
+          pending, 1.0f, kPlaceholderDash);
+      if (fontPx >= 4.0f) {
+        char label[160];
+        std::snprintf(label, sizeof(label), "%s  %s",
+                      view.name.empty() ? "view" : view.name.c_str(),
+                      projecting ? "projecting..." : "not projected");
+        dl->AddText(font, fontPx,
+                    SheetToScreen(state, {phMin.x, phMax.y + 6.0}), pending,
+                    label);
+      }
+      placeholderDrawn = true;
+    }
     if (it == state.drawingRenders.end())
       continue;
     const drawing::SheetView& sv = it->second;
@@ -546,6 +588,16 @@ void DrawViews(ImDrawList* dl, AppState& state) {
       }
     }
 
+    // Projecting over its last geometry: said where the stale badge goes.
+    if (projecting && sv.hasGeometry) {
+      if (fontPx >= 4.0f)
+        dl->AddText(font, fontPx,
+                    SheetToScreen(state, {sv.bboxMin.x, sv.bboxMax.y + 12.0}),
+                    pending, "projecting...");
+      continue;
+    }
+    if (projecting)
+      continue;
     // Stale badge: the source advanced past this view's last projection, or
     // projection failed. Shown near the view's top-left.
     const bool isStale =
@@ -558,6 +610,8 @@ void DrawViews(ImDrawList* dl, AppState& state) {
                   sv.error.empty() ? "stale - update" : sv.error.c_str());
     }
   }
+  if (placeholderDrawn)
+    ++state.drawingProjections.placeholderFrames;
 }
 
 } // namespace
@@ -755,9 +809,35 @@ void DrawViewsSection(AppState& state) {
 
   // Count views whose source changed since their last projection, or that
   // failed to project -- the "needs update" signal.
+  // The projection running for this sheet: the bar every long operation
+  // draws (DrawJobProgress), on the view list rather than in a modal -- the
+  // sheet stays usable while it runs.
+  if (const auto run = RunningDrawingJob(state);
+      run && state.activePart >= 0 &&
+      run->slotId == state.parts[state.activePart].id) {
+    JobProgress bar;
+    bar.status =
+        "Projecting '" + run->view + "'" +
+        (run->viewCount > 1 ? " (view " + std::to_string(run->viewIndex + 1) +
+                                  " of " + std::to_string(run->viewCount) + ")"
+                            : std::string());
+    bar.fraction = run->fraction;
+    if (run->pairsOwed > 0)
+      bar.overlay = "pair " + std::to_string(run->pairsDone) + " of " +
+                    std::to_string(run->pairsOwed);
+    bar.cancelAsked = run->cancelAsked;
+    bar.cancelId = "###dwg_cancel_projection";
+    bar.cancelTip = "Stop projecting: the views that landed stay, the rest "
+                    "keep what they showed";
+    if (DrawJobProgress(bar))
+      CancelDrawingJob(state);
+  }
+
   int stale = 0, errored = 0;
   for (const DrawingView& view : state.drawing->GetViews()) {
     const auto it = state.drawingRenders.find(view.id);
+    if (DrawingViewProjecting(state, view.id))
+      continue; // on its way, which the bar above says
     if (it == state.drawingRenders.end() ||
         DrawingSourceVersion(state, view.sourceDocId) !=
             it->second.solvedSourceVersion)
@@ -805,20 +885,22 @@ void DrawViewsSection(AppState& state) {
       std::snprintf(tail + std::strlen(tail), sizeof(tail) - std::strlen(tail),
                     "  %g°", view.rotationDeg);
     row.tail = tail;
-    row.tooltip = !rendered ? std::string("Needs an update.")
+    const bool projecting = DrawingViewProjecting(state, view.id);
+    row.tooltip = projecting  ? std::string("Projecting...")
+                  : !rendered ? std::string("Needs an update.")
                   : failed
                       ? it->second.error
                       : std::to_string(it->second.curves.size()) + " curves" +
                             (it->second.hasGeometry ? "" : ", empty");
     row.menuId = "###dwg_view_ctx_" + std::to_string(view.id);
     const uint64_t viewId = view.id;
-    const bool canBendTable =
-        rendered && it->second.hasGeometry && ViewHasBends(state, view);
+    const bool canBendTable = rendered && it->second.hasGeometry &&
+                              !projecting && ViewHasBends(state, view);
     const bool canDetail =
         rendered && it->second.hasGeometry && !view.detail.on;
     const auto slot = SlotIndexById(state, view.sourceDocId);
-    const bool ofAssembly =
-        !view.detail.on && slot && state.parts[*slot].kind == DocKind::Assembly;
+    const bool ofAssembly = !view.detail.on && !projecting && slot &&
+                            state.parts[*slot].kind == DocKind::Assembly;
     row.menu = [&state, &removeView, &balloonView, viewId, canBendTable,
                 canDetail, ofAssembly] {
       if (ImGui::BeginMenu("Scale###dwg_view_scale")) {
@@ -832,7 +914,7 @@ void DrawViewsSection(AppState& state) {
             SnapshotDrawing(state);
             v->scale = scale;
             state.drawing->BumpVersion();
-            UpdateDrawingRenders(state);
+            ReassembleDrawingViews(state); // a scale is no new projection
           }
         }
         ImGui::EndMenu();
@@ -850,7 +932,7 @@ void DrawViewsSection(AppState& state) {
             SnapshotDrawing(state);
             v->rotationDeg = deg;
             state.drawing->BumpVersion();
-            UpdateDrawingRenders(state);
+            ReassembleDrawingViews(state); // nor is a turn on the sheet
           }
         }
         ImGui::EndMenu();
@@ -876,7 +958,7 @@ void DrawViewsSection(AppState& state) {
   if (removeView != 0) {
     SnapshotDrawing(state);
     state.drawing->RemoveView(removeView);
-    UpdateDrawingRenders(state);
+    ReassembleDrawingViews(state); // drops its render; nothing projects
   }
   if (balloonView != 0)
     LayOutBalloons(state, {balloonView});

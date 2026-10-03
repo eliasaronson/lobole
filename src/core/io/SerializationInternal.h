@@ -17,9 +17,22 @@
 #include <string>
 #include <vector>
 
+namespace drawing {
+struct ViewProjection; // core/drawing/ViewProjection.h
+}
+
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    161; // v161: feature templates (docs/modeling/templates.md): a
+    162; // v162: saved drawing projections
+         //      (docs/drawings/README.md#saved-projections): in the directory
+         //      form, beside each view's file, its last projection as
+         //      views/<id>-<slug>.projection.json {kind, revision,
+         //      input_hash, mode, view_dir, up, sectioned, curve arrays,
+         //      cuts, bin_bytes} + .projection.bin (f32 points, index
+         //      arrays). Derived, keyed by its input hash; never written by
+         //      an autosave or kept in the project's history. The
+         //      single-file form carries none.
+         // v161: feature templates (docs/modeling/templates.md): a
          //      `Template` feature {template, revision, on?, parameters,
          //      ids [[local, id]], definition}, and the project's template
          //      library under `templates` (a single-part file's envelope;
@@ -574,3 +587,12 @@ private:
   const std::vector<std::uint8_t>* m_bytes = nullptr;
   std::string m_what;
 };
+
+// A drawing view's saved projection (v162,
+// docs/drawings/README.md#saved-projections) as one json whose arrays ride
+// under kResultData, like a study's result: the save splits them into
+// <id>-<slug>.projection.bin. FromJson throws on a malformed one; the
+// loader drops it with a warning rather than refusing the drawing.
+nlohmann::json ViewProjectionToJson(const drawing::ViewProjection& p);
+drawing::ViewProjection ViewProjectionFromJson(const nlohmann::json& j,
+                                               const std::string& what);
