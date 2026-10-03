@@ -15,7 +15,8 @@ reports done, a person before a review. Every box is one RPC call. The MCP
 - [ ] `mass_properties`: total mass and centre of mass are physically
       plausible for the object. A render cannot fake these.
 - [ ] Every driving dimension is a named variable; no literal where an
-      expression belongs.
+      expression belongs. `check_literals` names each one it finds
+      ([literals](../variables/README.md#literals-that-should-be-expressions)).
 - [ ] `render_sheet`: one call, four views and the numeric footer. Check the
       pixels against the footer numbers in the same image.
 - [ ] The orientation of any swept or revolved feature is read from the

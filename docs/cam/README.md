@@ -354,7 +354,7 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
 
 ## Tests
 
-- Headless, `tests/test_cam*.cpp` (`ctest -L cam`), fixtures in
+- Headless, `tests/test_cam*.cpp` (`tools/ctest -L cam`), fixtures in
   `tests/cam_fixtures.h`: toolpath geometry against known shapes
   (`test_cam.cpp`), setups/frames/stock/origin (`test_cam_setup.cpp`),
   machine profiles, dialects and the frozen G-code goldens
@@ -427,6 +427,7 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   round a cylinder).
 - **Simulation extras**: colour by operation, a deviation map, a dirty-rect
   stock remesh.
-- **Distance tolerances.** A band is read off a round face's size only
-  ([tolerance bands](operations.md#tolerance-bands)); a slot width or a
-  shoulder-to-seat length is cut as modelled.
+- **Distance tolerances between walls.** A round face's size band and a
+  distance band between two level faces (a floor or a shoulder) are cut to
+  ([tolerance bands](operations.md#tolerance-bands)); a slot's width
+  between two walls is cut as modelled.

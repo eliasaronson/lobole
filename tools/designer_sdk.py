@@ -38,8 +38,8 @@ Usage:
     app = connect()                      # the announced instance, or --port
     part = app.part("piston")
     part.var("bore", 86)
-    top = part.cylinder(d="bore", h=40)          # a Body
-    part.fillet(top.edges(kind="circle"), r=2)
+    top = part.cylinder("Top", d="bore", height=40)  # a Body
+    part.fillet(top.edges(circular=True), r=2)
     seat = part.frame("wrist_pin", top.faces(kind="cylinder")[0])
     part.check()                                 # raises on any broken feature
 """

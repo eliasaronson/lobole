@@ -48,8 +48,10 @@ themselves.
 - **Build one target while iterating**: `ninja designer` for the app,
   `ninja designer_tests` for the unit tests. The full `ninja` is only needed
   the first time (and after touching CMakeLists).
-- A **precompiled header** already covers the heavy common set
-  (`CADKernel.h`, glm, nlohmann/json) for `designer_core`; nothing to enable.
+- **Precompiled headers are off** (`-DENABLE_PCH=ON` turns them on): a
+  `.gch` is not byte-reproducible, so with one no two build trees share a
+  ccache object
+  ([docs/architecture.md](docs/architecture.md#precompiled-headers)).
 - A cold full build is ~2 minutes on 24 threads, ~15 on 4. If it is slower
   than that, check that ccache is actually being used — see the `FAILED`
   caveat in [CLAUDE.md](CLAUDE.md#build--run--always-through-nix).
@@ -72,41 +74,33 @@ Two suites, and both matter:
 tools/ctest -LE gui -j$(nproc)    # ctest under build/'s lock, in nix
 
 # GUI: the real app on a virtual display, driving its own widgets.
-./tools/gui-tests-xvfb.sh            # 150 tests, 4 shards, ~80 s
-./tools/gui-tests-xvfb.sh --fast     # ...minus the 5 slowest, ~70 s
-./tools/gui-tests-xvfb.sh -f section # ...one case, ~11 s
+./tools/gui-tests-xvfb.sh            # 4 shards, ~130 s
+./tools/gui-tests-xvfb.sh --fast     # ...minus the slowest few
+./tools/gui-tests-xvfb.sh -f section # ...one case
 ```
 
-CI runs the headless suite on every push (a PR must pass it) plus a build with
-the test engine off. The GUI suite needs a GPU, so it is local-only — please
-run it before opening a PR if you touched anything in `src/ui`, `src/app` or
-`src/render`.
+CI runs the headless suite on every push (a PR must pass it), builds with
+the test engine off and with CAM off, and runs the GUI suite serially on
+software Vulkan (llvmpipe) with a byte-exact pixel gate. Run the GUI suite
+locally before opening a PR if you touched anything in `src/ui`, `src/app` or
+`src/render`: it is faster on a real GPU, and the runner prints the seed of a
+failing order.
 
 ### The inner loop
 
 ```
-tools/test-fast.sh        # the headless suite minus the long numeric gates
+tools/test-fast.sh        # the headless suite minus the `slow` label, ~65 s
 ```
 
-Measured on a 24-thread machine, 2026-08-20:
+The tests tagged `[slow]` (a python smoke: `LABELS slow`) are real gates on
+real numerics and toolpaths; they stay in `ci-local` and CI, and not in the
+check you run after every edit. Run the full suite before you commit.
 
-| | |
-|---|---|
-| full headless suite (622 tests) | 81 s |
-| the SIMP topology gate, alone | 89 s of CPU — the long pole |
-| the next four topology/FEM gates | 12-14 s each |
-| **everything else (603 tests)** | **8 s** |
-
-The suite is not slow; one test is. Those gates check real numerics and stay
-in `ci-local` and CI — they just do not belong in the check you run after
-every edit. Run the full suite before you commit.
-
-The GUI suite (`tools/gui-tests-xvfb.sh`) needs a real GPU and runs **150
-tests in ~80 s**, as four parallel shards; one process takes 335 s. It is
-CPU-bound (real OCC geometry, real frames) with no per-test overhead to trim
-— the fastest case is 0.09 s — so running several at once is the only lever.
-`--fast` skips the 5 tests recorded at 4 s or more (69 s), `-j 8` shards
-further (`--fast -j 8` = 48 s), and `-f <pattern>` runs one case in ~11 s.
+The GUI suite (`tools/gui-tests-xvfb.sh`) runs as four parallel shards, about
+three times faster than one process. It is CPU-bound (real OCC geometry,
+real frames) with no per-test overhead to trim, so running several at once
+is the only lever. `--fast` skips the slowest few, `-j 8` shards further,
+and `-f <pattern>` runs one case.
 
 The whole suite is still flock-serialized machine-wide: the shards are one
 suite, not several, and a second run waits its turn rather than fighting for
@@ -143,11 +137,9 @@ found here costs a coffee, and found on the runner costs a round trip.
 multi-GB runner images. Reach for it when the workflow *file* is what you are
 debugging.)
 
-Known flakes, worth a rerun rather than an investigation: the femgpu
-`TopologyOptimize` gate. (`headless_smoke` used to be on this list; it turned
-out to be a real autosave bug that load only made intermittent, so a rerun is
-the first move but a mechanism is worth looking for before anything earns the
-"flaky" label.)
+No test is a known flake. A test that fails only under load is worth one
+look for a mechanism before it earns that label: every one that looked like
+it here was a real bug.
 
 ## Formatting and commits
 
@@ -176,16 +168,19 @@ These are the ones a newcomer trips over. Most have a test behind them.
   [`docs/ui/tool-sessions.md#defaults-and-refusals`](docs/ui/tool-sessions.md#defaults-and-refusals).
 - **A feature an assistant cannot drive is half-shipped.** A new feature type
   needs its row in the `describe` table (`remote_smoke` fails otherwise) and
-  in `FEATURE_FORMATS` in `tools/designer_mcp.py` (`mcp_smoke` cross-checks
-  it against `describe`).
+  in `FEATURE_FORMATS` in `tools/designer_mcp.py` (`mcp_formats_gate`
+  cross-checks it against `describe`).
 - **A new tool must be reachable by clicking.** Give the button a stable
   `###tb_*` id and add a GUI test that finishes the tool and checks the
   resulting geometry — not just that a feature appeared. Hidden labels
   (`##Name`) and `ImGui::PushID` scopes make a widget unaddressable to tests
   and scripts; use `###Name`. See
   [`docs/ui/testing.md`](docs/ui/testing.md).
-- **A serialization change bumps `kVersion`** (`src/core/io/SerializationInternal.h`)
-  **and adds a golden pair** under `tests/golden/`. One bump, one golden.
+- **A serialization change bumps `kVersion`** (`src/core/io/SerializationInternal.h`),
+  **adds a golden at that version** under `tests/golden/` (or its
+  `assembly/`, `job/` or `drawing/` directory) **and a row in
+  [the version history](docs/versioning/format.md#version-history)**;
+  `test_golden.cpp` gates both.
 - **Edit the domain module, not the monolith.** RPCs live in
   `src/remote/Remote{Modeling,Assembly,Inspection,…}.cpp`; serialization in
   `src/core/io/Serialize*.cpp`.

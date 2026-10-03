@@ -183,7 +183,7 @@ both paths to agree on every edge name and centre before it accepts a timing.
 | socket, reader threads, recording | `src/remote/RemoteSession.cpp` |
 | dispatch, `batch`, `describe`, `ping`, `get_state` | `src/remote/RemoteDispatch.cpp` |
 | main-thread pump, strict-param check, error mapping, UI-action queue | `src/remote/RemoteUiActions.cpp` |
-| domain handlers + their `MethodDoc` tables | `src/remote/Remote{Modeling,Project,Assembly,Motion,Inspection,Drawings,Configurations,SheetMetal,Tube,Simulation,Cam,Catalog}.cpp` |
+| domain handlers + their `MethodDoc` tables | `src/remote/Remote{Modeling,Project,Assembly,Motion,Inspection,Drawings,Configurations,SheetMetal,Tube,Simulation,Cam,Catalog,Requirements,Templates}.cpp` |
 | shared helpers (`MethodDoc`, flags, regen/digest, `KnownList`, `IndexError`, `ResolvePartParam`) | `src/remote/RemoteHelpers.h` |
 | instance registry | `src/remote/InstanceRegistry.{h,cpp}` |
 | typed inspection contracts | `api/inspection-contracts.json`, `src/remote/InspectionContracts.h`, `tools/generate_inspection_contracts.py` |

@@ -4,7 +4,7 @@
     python3 generators/gear.py --module 2 --teeth 24 --thickness 8 --bore 6
     python3 generators/gear.py --port 8799 ...   # into a specific instance
 
-What this is (docs/roadmap.md#6-the-agent-interface, "feature templates"):
+What this is (docs/roadmap.md#not-planned, "an interpreter inside regeneration"):
 the kind of thing other CADs grow a workbench or a feature language for, done
 as an ordinary script against the API. The result is an ordinary part:
 thickness and bore stay LIVE as project variables driving expressions; the

@@ -409,8 +409,8 @@ Every numeric feature parameter also accepts an expression, as a
 
 ## Not built
 
-- Dimensional analysis, and choosing the display unit per document (the
-  display units in `test_units.cpp` are a separate, fixed-base system).
+- Dimensional analysis: once a suffix has converted, an expression's
+  algebra is plain numbers ([units](../conventions.md#units-and-angles)).
 - Variables bound to a measurement. `MeasureActions.cpp` can *create* a
   project variable from a measured value, but the variable does not follow
   the measurement afterwards.

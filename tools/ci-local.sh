@@ -20,11 +20,11 @@
 # Build trees live in .ci-local/ (gitignored) and are reused, so the second
 # run of a container is a rebuild of what changed rather than a fresh compile.
 #
-# The GUI suite IS covered here (--no-gui opts out), in a shuffled order.
-# GitHub never runs it — every ctest there is `-LE gui` — so this script is
-# the only automated gate it has, which is an argument for including it
-# rather than the reverse. Shuffled because three order-dependent failures in
-# one week were each invisible until the shard partition happened to move.
+# The GUI suite IS covered here (--no-gui opts out), in a shuffled order, on
+# this machine's GPU. GitHub's gui-suite job runs it serially on software
+# Vulkan (llvmpipe), and its pixel gate is --pixel's. Shuffled because three
+# order-dependent failures in one week were each invisible until the shard
+# partition happened to move.
 #
 # Not covered here: anything needing GitHub itself.
 #

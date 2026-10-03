@@ -186,7 +186,7 @@ keeping the camera where it was; a tab switch clears the selection.
 
 ## Clearance assertions
 
-The declared clearances (`add_assertion`, v97) are clearance requirements:
+The declared clearances (`add_assertion`, v100) are clearance requirements:
 `add_assertion {name, a, b, min_mm, mode?, why?}` adds one on the active
 assembly (`at_least min_mm`, `why` as its source); `list_assertions` lists
 the active assembly's in the old shape (`standing` holds \| violated \|

@@ -1483,8 +1483,11 @@ int DocumentFormatVersion() { return kVersion; }
 static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Sketch", 1,
      "plane {origin, normal, uAxis} (in-plane V = normal x uAxis!), entities "
-     "[{type: line|circle|arc|ellipse|spline|point|rect, ...}], name?, "
-     "face_ref? {feature_id, element} (sketch ON a body face), external? "
+     "[{type: line|circle|arc|ellipse|ellipse_arc|spline|point|text|rect, "
+     "...}], name?, "
+     "face_ref? {feature_id, element} (sketch ON a body face), plane_ref? "
+     "(the id of a DatumPlane, another Sketch or a Frame whose plane this "
+     "one follows), external? "
      "[{feature_id, element, kind: face|edge}] — live projected construction "
      "geometry of another body, the same thing project_geometry adds to an "
      "existing sketch (a projected hole edge is a circle, and Hole takes "
@@ -1516,8 +1519,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "+_expr); offset [u, v] mm (+offset_expr) of its axis; mode; reversed?. "
      "Stored as a Sketch (a circle) + an Extrude along the normal"},
     {"Fastener", 69,
-     "standard: iso4762|iso14579|iso4017|iso10642|iso7380 (screws), iso4032 "
-     "(nut), iso7089 (washer); size (a key in that table, e.g. M6); length "
+     "standard: iso4762|iso14579|iso4017|iso10642|iso7380 (screws), "
+     "asme_b18_3 (inch socket head cap screw, size a UNC designation such as "
+     "1/4-20), iso4032 (nut), iso7089 (washer); size (a key in that table, "
+     "e.g. M6); length "
      "(+_expr) mm — under the head, or OVERALL for a countersunk one, and "
      "omitted for a nut or a washer; drive?: leave empty for the one the "
      "standard is made with. Every other dimension is READ from the table — "

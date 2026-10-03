@@ -27,7 +27,7 @@ connection's later requests wait behind it
 `RemoteServer::HandleSemantic` (`RemoteDispatch.cpp`) handles the methods the
 server owns (`batch`, `describe`, `ping`, `get_state`, camera, tabs, …) and
 then offers the request to each domain module in turn —
-`Remote{Modeling,Project,Assembly,Motion,Inspection,Drawings,Configurations,SheetMetal,Tube,Simulation,Cam,Catalog}.cpp`,
+`Remote{Modeling,Project,Assembly,Motion,Inspection,Drawings,Configurations,SheetMetal,Tube,Simulation,Cam,Catalog,Requirements,Templates}.cpp`,
 each a `HandleXxxRpc(state, [doc], method, params, out) -> bool`. What no
 module handles is a UI action (queued on the ImGui Test Engine, one at a
 time), a capture, or `unknown method`.

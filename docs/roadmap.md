@@ -80,12 +80,11 @@ them:
   to several, and needs its own design.
 - **Cross-part linked sketch copies.** A linked copy follows a sketch in the
   same part; across parts it falls back to a plain paste.
-- **Deliberate contact.** `add_assertion` declares a minimum clearance and
-  `check_fits` classifies ISO 286 fits, but `interference` and
-  `contact_report` cannot be told that an overlap is a press fit, so a
-  designed interference reads as a clash. (A retaining ring's grip in its
-  groove is the one designed overlap they relieve,
-  [a ring in its groove](parts/README.md#a-ring-in-its-groove).)
+- **Other designed overlaps.** The contact checks relieve an engaged
+  thread, a retaining ring's grip and a press fit whose size bands allow it
+  ([designed overlaps](inspect/README.md#designed-overlaps)); any other
+  overlap meant by design (a snap-fit hook, a crush rib, a press fit on
+  faces with no size tolerance) reads as a clash.
 - **A weld as a record** (length, size, symbol, a weld table). Welded joins
   are currently flush mates or unioned solids.
 - **Fasteners:** property classes, torque and preload (`check_fasteners`
@@ -113,14 +112,6 @@ them:
 
 ## 6. The agent interface
 
-- **Feature templates:** a saved feature list with parameters, instantiated as
-  one composite feature. Feature types are a compiled table (`kFeatureTypes`),
-  so an agent can drive every feature and define none. Logic that computes
-  geometry already works from outside the app as a generator
-  (`generators/gear.py`), with no determinism cost; a template is the
-  in-document form, for a composite that recurs across projects. An
-  interpreter inside regeneration is not the answer: it brings a sandbox, a
-  pinned runtime version and a new determinism gate.
 - **Typed contracts for more RPCs.** Only `geometry_snapshot` and
   `validate_snapshot` have machine-readable request and result schemas
   ([scripting/rpc.md](scripting/rpc.md#typed-inspection-contracts)); every
@@ -129,7 +120,9 @@ them:
   contracts to the most-used methods, with structured errors and generated
   typed SDK stubs, and let a write carry the snapshot revision it was built
   from so a stale reference is refused.
-- Putting the current selection into an agent's prompt as context.
+- Putting the current selection into an agent's context unasked: the
+  workflow prompt has the agent read `get_state`'s `selection` before it
+  acts on "this" ([mcp.md](scripting/mcp.md#the-workflow-prompt)).
 - `design_audit`: perturb each parameter and report which perturbations break
   regeneration.
 - Benchmark tasks graded on relations (gears, racks, cams); mechanisms are
@@ -167,3 +160,9 @@ Split what the next feature extends, not as a standalone sweep:
 ## Not planned
 
 - NURBS surface modelling (boundary, fill, sew, thicken).
+- **An interpreter inside regeneration.** It would bring a sandbox, a
+  pinned runtime version and a determinism gate of its own. Feature types
+  are a compiled table (`kFeatureTypes`); a composite that recurs is a
+  [feature template](modeling/templates.md), which is data, and logic that
+  computes geometry runs outside the app as a generator
+  (`generators/gear.py`).

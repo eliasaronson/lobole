@@ -36,10 +36,10 @@ the container they live in `project.json` and each part's `index.json`
 | file | holds |
 |---|---|
 | `src/core/io/SerializationInternal.h` | `kFormat`, `kVersion` and its per-version comments, shared JSON helpers |
-| `src/core/io/Serialization.cpp` | envelopes, `Save`/`Load`, `SaveDir`/`LoadDir`, assemblies, drawings, jobs, load refusals |
+| `src/core/io/Serialization.cpp` | envelopes, `Save`/`Load`, `SaveDir`/`LoadDir`, assemblies, drawings, jobs, a lone part's project tables, requirements and templates, the study results' files, load refusals |
 | `src/core/io/SerializeFeatures.cpp` | `FeatureToJson` / `FeatureFromJson`, sketch entities and constraints |
-| `src/core/io/SerializeAssembly.cpp` | occurrences, mates, relations, exploded views, the clearance assertions an old file carries |
-| `src/core/io/SerializeStudies.cpp` | FEM and topology studies |
+| `src/core/io/SerializeAssembly.cpp` | occurrences, mates, relations, exploded views, motion studies and their saved results, the clearance assertions an old file carries |
+| `src/core/io/SerializeStudies.cpp` | FEM and topology studies and their saved results (the `.result.bin` arrays) |
 | `src/core/io/SerializeConfigurations.cpp` | part and assembly configurations |
 | `src/core/io/SerializeCam.cpp` | CAM setups, tools, operations |
 | `src/core/io/AtomicWrite.cpp` | `WriteTextAtomic`: temp + rename, skips identical content |

@@ -27,7 +27,7 @@ from designer_remote import Designer  # noqa: E402
 # Format reference, embedded into tool descriptions. Source of truth:
 # src/core/io/SerializeFeatures.cpp (FeatureFromJson / EntityFromJson) and
 # RemoteModeling.cpp (ConstraintKindTable). The describe RPC serves the
-# authoritative type lists; mcp_smoke cross-checks this text against it, so
+# authoritative type lists; mcp_formats_gate cross-checks this text against it, so
 # a new feature type that isn't documented here fails the suite.
 # ---------------------------------------------------------------------------
 
@@ -58,7 +58,10 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
     "radius"), "offset"?: [u,v] (its centre, ON the plane), "mode"?}}
 - Sketch: {{"type": "Sketch", "name": str,
   "plane": {{"origin": [x,y,z], "normal": [x,y,z], "uAxis": [x,y,z]}},
-  "plane_ref"?: <DatumPlane feature id — tracks the datum instead of baking>,
+  "plane_ref"?: <the id of a DatumPlane, another Sketch or a Frame (its XY
+  plane, X as u) — follows it instead of baking>,
+  "face_ref"?: {{"feature_id": id, "element": name}} (a planar body face —
+  the sketch takes its frame and follows it),
   "entities": [<entity>, ...]}} . Entity formats (2D UV coords on the plane):
     {{"type": "point", "p": [u,v]}}
     {{"type": "line", "a": [u,v], "b": [u,v]}}
@@ -368,7 +371,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
 - Fastener (a standard screw, nut or washer read from its ISO table — every
   dimension but these comes from the standard): {{"type": "Fastener",
   "name": str, "standard": "iso4762"|"iso14579"|"iso4017"|"iso10642"|
-  "iso7380" (screws) | "iso4032" (nut) | "iso7089" (washer), "size": str
+  "iso7380" (screws) | "asme_b18_3" (inch socket head cap screw, "size" a
+  UNC designation such as "1/4-20") | "iso4032" (nut) | "iso7089"
+  (washer), "size": str
   (a stocked key, e.g. "M6" — an unstocked one is refused naming the
   nearest stocked), "length"?: num (mm under the head, OVERALL for a
   countersunk screw; omit for a nut or a washer), "length_expr"?: str,
@@ -894,6 +899,7 @@ _EXPOSED = {
           "sketch_entity_types (each with a `params` string naming every "
           "field AND its unit), constraint_kinds, constraint_value_units "
           "(what the number beside each dimensional kind means), "
+          "mate_types, relation_kinds, "
           "extrude_modes, extrude_end_modes, axis_kinds, material_slugs, "
           "drawing_dim_kinds, inspection_contract, "
           "document_format_version. Pass `method` to get just that one "

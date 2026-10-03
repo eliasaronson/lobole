@@ -566,8 +566,10 @@ The stock remeshes whole, at most 12 times a second while playing.
 index buffers per frame in flight (the `FieldRenderer` pattern): no device
 wait except when a buffer grows. It honours the section clip plane, depth-tests
 against the scene and is registered in `RegisterSceneRenderers` like every
-scene renderer. It takes the scene's light directions, colours and ambient from
-`core/Conventions.h`, the same constants the mesh renderer reads.
+scene renderer. It lights the block with the scene's own rig: the directions
+`conv::StudioRig` derives from the camera (`core/LightRig.h`, honouring Lock
+lights to model) and the colours and ambient from `core/Conventions.h`, as
+the mesh renderer does ([the light rig](../rendering/README.md#the-light-rig)).
 
 ### Tool glyph
 

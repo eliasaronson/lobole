@@ -4,7 +4,7 @@ A composite that recurs -- a bearing seat, a boss with its bore and relief,
 a bolted flange -- is saved ONCE as a template and placed as one feature, a
 `Template` instance, wherever it is wanted. Feature types are a compiled
 table (`kFeatureTypes`), and an interpreter inside regeneration is ruled out
-([../roadmap.md](../roadmap.md#6-the-agent-interface): a sandbox, a pinned
+([../roadmap.md](../roadmap.md#not-planned): a sandbox, a pinned
 runtime and a determinism gate of its own), so a template is DATA: a saved
 list of features with named, typed parameters, whose fields are expressions
 over them. No code runs. Expanding one is substituting values into JSON, and

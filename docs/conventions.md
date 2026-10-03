@@ -177,8 +177,10 @@ joint with the wrong degrees of freedom, a modal study running as static).
   either throw with the accepted list (`unknown mate type 'revolut'
   (expected one of: fastened, revolute, …)`) or return `bool`/`optional`
   for the caller to refuse on. A `bool` parser is `[[nodiscard]]`.
-- `RpcParams` refuses unknown request keys, and `FeatureFromJson` refuses a
-  feature type with no `kFeatureTypes` row.
+- The RPC dispatcher refuses an unknown request key against the method's
+  `describe` row before the handler runs, and a refused call changes nothing
+  ([rpc.md](scripting/rpc.md#a-refused-call-changes-nothing));
+  `FeatureFromJson` refuses a feature type with no `kFeatureTypes` row.
 - The directory format is one hand-editable file per item, so a typo in a
   file is a normal-workflow risk, and the loader applies the same rule as
   the RPC surface.

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The headless suite minus the long numeric gates — the inner loop.
 #
-#   tools/test-fast.sh            # ~10 s instead of ~79
+#   tools/test-fast.sh            # ~65 s, against ~110 s for the full suite
 #   tools/test-fast.sh -R sketch  # ...further filtered, ctest args pass through
 #
 # What it skips is the `slow` LABEL, not a list of names kept here. A Catch2
@@ -17,15 +17,7 @@
 # every doc still quoted the old number
 # (docs/architecture.md#tests).
 #
-# Measured 2026-08-31 on this machine, `ctest -j$(nproc)`:
-#
-#   full headless suite (925 tests)            79 s
-#   the 17 `slow` tests                       311 s of CPU between them
-#     of which the SIMP topology gate           77 s
-#     and four CAM clearing cases              138 s
-#   everything else (908 tests)                10 s
-#
-# They are real gates on real numerics and real toolpaths — they belong in
+# The `slow` tests are real gates on real numerics and real toolpaths — they belong in
 # tools/ci-local.sh and in CI, and not in the loop you run after every edit.
 #
 # ALWAYS run the full suite before committing (tools/ci-local.sh --nix, or
