@@ -206,7 +206,8 @@ Headless, on the default `ctest -LE gui` path:
 - `rpc_gate_smoke` — every method flagged `NeedsPart` touches the part
   document in its handler, or says why it is gated anyway.
 - `batch_smoke`, `regen_honesty_smoke`, `strict_inputs_smoke`,
-  `papercuts_smoke`, `tabless_read_smoke` — the contracts in [rpc.md](rpc.md).
+  `papercuts_smoke`, `tabless_read_smoke`, `refused_calls_smoke` — the
+  contracts in [rpc.md](rpc.md).
 - `sdk_smoke`, `pyclient_smoke`, `replay_smoke`, `fanout_smoke`,
   `component_update_smoke`, `inspection_contracts_smoke`,
   `inspection_contracts_generated`, `inspection_typing_gate`.

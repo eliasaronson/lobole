@@ -209,7 +209,7 @@ they cannot break a feature, so a `regen` there would always read `ok`.
 
 Every RPC that answers "is this all right?" (geometry checks, clash and
 interference, contact, fastener/drawing/layout checks, CAM verification,
-study results, motion studies) attaches a receipt (`core/Receipt.h`): each
+study results, motion studies, requirements) attaches a receipt (`core/Receipt.h`): each
 claim carries its oracle and version, a verdict of `Pass`, `Fail` or
 **`Unverifiable`** (the oracle could not run — never read as clean), and a
 basis of `Predicted` (a solver's estimate, such as an FEM factor of safety),

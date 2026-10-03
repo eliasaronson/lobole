@@ -455,7 +455,7 @@ called from our workers).
 - **Logging goes through the `LOG_*` macros** (`common/Logger.h`, spdlog).
   The only direct stdout/stderr writes are `main.cpp`'s command-line usage
   and argument errors, which are program output and must not carry a log
-  prefix or be silenced by `--log-level`.
+  prefix or follow the log level (`-v`/`--verbose`, `-vv`).
 - New fallible functions return `std::expected<T, std::string>`; the
   `bool f(..., std::string* error)` out-parameter form is legacy.
 - `std::to_underlying` for enum-to-integer casts.
