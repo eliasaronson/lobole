@@ -189,6 +189,70 @@ def check_params_drive(app):
            f"a Param DIAMETER must drive the bore — volume {after:.1f} did "
            f"not fall from {before:.1f} when plate_bore doubled")
 
+    # rect() and centered_rect() too. The app's rectangle has no expression
+    # fields, so a Param corner went in as its number: the pan/tilt yoke's
+    # base stayed one camera's size while its holes, drawn as points,
+    # followed the next camera's out through its end.
+    part = app.part("param rect")
+    a = part.param("rect_a", 30.0)
+    b = part.param("rect_b", 20.0)
+    sk = part.sketch(sdk.Plane.xy(), name="rect")
+    sk.rect((0, -b / 2), (a, b / 2))
+    part.extrude(sk.add(), distance=5.0, name="rect")
+    sk = part.sketch(sdk.Plane.xy(), name="centred")
+    sk.centered_rect((-a, 0), a / 3, b)
+    part.extrude(sk.add(), distance=5.0, mode="add", name="centred")
+    lo, hi = part.bbox()
+    expect(abs(lo.x + 35.0) < 0.01 and abs(hi.x - 30.0) < 0.01,
+           f"the rects start at x -35..30: {lo.x:.3f}..{hi.x:.3f}")
+    app.set_variable(name="rect_a", expression="45.0", scope="part")
+    app.set_variable(name="rect_b", expression="26.0", scope="part")
+    lo, hi = part.bbox()
+    expect(abs(lo.x + 52.5) < 0.01 and abs(hi.x - 45.0) < 0.01 and
+           abs((hi.y - lo.y) - 26.0) < 0.01,
+           f"a Param CORNER must drive a rect — x {lo.x:.3f}..{hi.x:.3f}, "
+           f"{hi.y - lo.y:.3f} wide, after rect_a 45 and rect_b 26")
+
+    # A slot along u, its centres and width Params (the cradle's camera
+    # slot, which stayed under the camera's old seat).
+    part = app.part("param slot")
+    sx = part.param("slot_at", 10.0)
+    sw = part.param("slot_w", 6.0)
+    sk = part.sketch(sdk.Plane.xy(), name="slot")
+    sk.slot((sx, 0), (sx + 20.0, 0), sw)
+    part.extrude(sk.add(), distance=2.0, name="slot")
+    app.set_variable(name="slot_at", expression="30.0", scope="part")
+    app.set_variable(name="slot_w", expression="8.0", scope="part")
+    lo, hi = part.bbox()
+    expect(abs(lo.x - 26.0) < 0.01 and abs(hi.x - 54.0) < 0.01 and
+           abs((hi.y - lo.y) - 8.0) < 0.01,
+           f"a Param slot must follow its centres and width — x "
+           f"{lo.x:.3f}..{hi.x:.3f}, {hi.y - lo.y:.3f} wide, not 26..54, 8")
+    oblique = part.sketch(sdk.Plane.xy(), name="oblique")
+    refused(lambda: oblique.slot((sx, 0), (sx + 10.0, 10.0), 4.0),
+            "must run along u or v")
+
+    # A pattern's count (the knob's flutes, one per 4 mm of a rim that
+    # grows with the load).
+    part = app.part("param pattern")
+    n = part.param("holes_n", 4.0)
+    sk = part.sketch(sdk.Plane.xy(), name="disc")
+    sk.circle((0, 0), d=60.0)
+    part.extrude(sk.add(), distance=2.0, name="disc")
+    sk = part.sketch(sdk.Plane.xy(), name="hole")
+    sk.circle((20.0, 0), d=6.0)
+    hole = part.cut(sk.add(), distance=2.0, name="hole")
+    part.pattern(hole, n, circular="z", name="holes")
+    four = part.volume()
+    app.set_variable(name="holes_n", expression="8", scope="part")
+    eight = part.volume()
+    one = math.pi * 3.0 ** 2 * 2.0
+    expect(abs((four - eight) - 4 * one) < 0.5,
+           f"a Param COUNT must drive a pattern — 4 holes to 8 took "
+           f"{four - eight:.2f} mm3 away, not {4 * one:.2f}")
+    refused(lambda: part.pattern(hole, n / 3, circular="z"),
+            "not a whole number")
+
 
 def check_bad_blend_refuses(app):
     """A blend set the kernel cannot build must FAIL, not kill the process.

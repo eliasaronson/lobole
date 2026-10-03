@@ -1425,12 +1425,31 @@ class SketchBuilder:
         return self
 
     def rect(self, c1, c2):
+        """An axis-aligned rectangle between two opposite corners.
+
+        A corner coordinate that is a `Param` or an expression string makes
+        it four lines whose endpoints carry the expressions (the app's own
+        rectangle has no expression fields). It used to go in as that
+        rectangle at the numbers the Params held: on the pan/tilt head the
+        yoke's base and foot flanges stayed the size a 1.5 kg camera made
+        them while the joint-screw holes drawn as points followed a 1.8 kg
+        one, out through the base's end (generators/pantilt/README.md)."""
+        if _driven(c1) or _driven(c2):
+            (u1, v1), (u2, v2) = (c if _driven(c) else _uv(self, c)
+                                  for c in (c1, c2))
+            return self.polyline([(u1, v1), (u2, v1), (u2, v2), (u1, v2)])
         self.entities.append({"type": "rect", "c1": list(_uv(self, c1)),
                               "c2": list(_uv(self, c2))})
         return self
 
     def centered_rect(self, center, w, h):
-        cu, cv = _uv(self, center)
+        """A rectangle `w` by `h` about `center`; Params stay variables (the
+        corners are Param arithmetic, which rect() keeps)."""
+        given = list(center) if _driven(center) else []
+        if any(isinstance(c, str) for c in given + [w, h]):
+            raise SdkError("centered_rect takes numbers or Params, not "
+                           "expression strings: give rect() the corners")
+        cu, cv = center if given else _uv(self, center)
         return self.rect((cu - w / 2.0, cv - h / 2.0),
                          (cu + w / 2.0, cv + h / 2.0))
 
@@ -1510,7 +1529,15 @@ class SketchBuilder:
         web drawn round a pin 43 up came to reach z=85 and hit a barrel whose
         underside is at 82. `extent()` below is the cheap way to check before
         extruding (generators/README.md#single-cylinder-and-air-cooled-engines).
+
+        Centres or a width given as `Param`s keep their expressions when the
+        slot runs along u or v (its sides are then the centres' coordinates
+        plus or minus half the width); an oblique one is refused, since its
+        sides need trigonometry of the Params, rather than drawn at the
+        numbers they hold and left there.
         """
+        if _driven(a) or _driven(b) or isinstance(width, (Param, str)):
+            return self._slot_driven(a, b, width)
         (au, av), (bu, bv) = _uv(self, a), _uv(self, b)
         dx, dy = bu - au, bv - av
         n = math.hypot(dx, dy)
@@ -1527,6 +1554,43 @@ class SketchBuilder:
         self.entities.append({"type": "arc", "center": [au, av],
                               "radius": rad, "start_angle": ang + math.pi / 2,
                               "end_angle": ang + 3 * math.pi / 2})
+        return self
+
+    def _slot_driven(self, a, b, width):
+        """slot() with Param centres or width: two lines and two arcs whose
+        coordinates and radius carry the expressions."""
+        given = [c for p in (a, b) if _driven(p) for c in p] + [width]
+        if any(isinstance(c, str) for c in given):
+            raise SdkError("slot takes numbers or Params, not expression "
+                           "strings: a string has no value to draw it at")
+        (au, av), (bu, bv) = (p if _driven(p) else _uv(self, p)
+                              for p in (a, b))
+        du, dv = float(bu) - float(au), float(bv) - float(av)
+        if abs(du) < 1e-9 and abs(dv) < 1e-9:
+            raise SdkError("a slot's two centres coincide")
+        if abs(du) > 1e-9 and abs(dv) > 1e-9:
+            raise SdkError(
+                "a slot driven by Params must run along u or v: an oblique "
+                "one's sides need the Params' trigonometry, which a sketch "
+                "coordinate cannot carry — draw it with numbers, or as "
+                "lines and arcs")
+        rad = width / 2.0
+        # The side offset, perpendicular to the slot (as slot() turns it).
+        if abs(dv) < 1e-9:
+            off = (0, rad) if du > 0 else (0, -rad)
+        else:
+            off = (-rad, 0) if dv > 0 else (rad, 0)
+
+        def shift(p, sign):
+            return tuple(c if (isinstance(o, int) and o == 0) else
+                         (c + o if sign > 0 else c - o)
+                         for c, o in zip(p, off))
+
+        self.line(shift((au, av), 1), shift((bu, bv), 1))
+        self.line(shift((au, av), -1), shift((bu, bv), -1))
+        ang = math.degrees(math.atan2(dv, du))
+        self.arc((bu, bv), rad, ang - 90.0, ang + 90.0)
+        self.arc((au, av), rad, ang + 90.0, ang + 270.0)
         return self
 
     def arc_through(self, start, mid, end):
@@ -1663,6 +1727,13 @@ _COORD_FIELDS = {
 }
 
 
+def _driven(at):
+    """Whether a sketch position given as a (u, v) pair has a coordinate the
+    document should evaluate: a `Param` or an expression string."""
+    return (isinstance(at, (tuple, list)) and len(at) == 2 and
+            any(isinstance(c, (Param, str)) for c in at))
+
+
 def _uv(builder, at, entity=None, point=0, kind=None):
     """A sketch position: a (u, v) pair, or anything with a world position —
     a Face, an Edge, a Frame, a V — projected onto the builder's plane. This
@@ -1697,8 +1768,9 @@ def _uv(builder, at, entity=None, point=0, kind=None):
             c.expr if isinstance(c, Param) else None)
         if expr is not None and (entity is None or field is None):
             # A Param still has a NUMBER, so it can go in a coordinate the
-            # app does not make expression-driven (a rect's corners) — it
-            # just will not follow. A bare string has no value and cannot.
+            # app does not make expression-driven — it just will not follow
+            # (rect() draws lines instead, which do). A bare string has no
+            # value and cannot.
             if isinstance(c, Param):
                 expr = None
             else:
@@ -2225,22 +2297,39 @@ class Part(_Tab):
         span they cover. Left out, it is derived from `count`: 360/count, the
         copies evenly round a full turn. (A fixed 360 default rotated every
         copy a full turn back onto the original.)
+
+        `count` may be a `Param` (its value a whole number): it goes as the
+        app's `count_expr`, and the derived step as 360 over it, so the
+        copies follow the variable. `int(count)` used to drop it: the
+        pan/tilt knob's flutes stayed a 1.5 kg camera's count on a knob
+        grown for a heavier one.
         """
+        if isinstance(count, str):
+            raise SdkError("pattern: count takes a number or a Param, not an "
+                           "expression string (it has no value to check)")
         f = {"type": "Pattern", "name": name, "source_id": _id(source)}
+        n = int(count)
+        if isinstance(count, Param):
+            if abs(float(count) - n) > 1e-9:
+                raise SdkError(f"pattern: count {count!r} is not a whole "
+                               f"number — floor() or ceil() its expression")
+            f["count_expr"] = count.expr
+        else:
+            count = n
         if linear is not None:
             f.update({"kind": "linear",
                       "axis": linear if isinstance(linear, dict)
-                      else {"kind": linear}, "count": int(count)})
+                      else {"kind": linear}, "count": n})
             _dim(f, "spacing", spacing)
         elif circular is not None:
             f.update({"kind": "circular",
                       "axis": circular if isinstance(circular, dict)
-                      else {"kind": circular}, "count": int(count)})
+                      else {"kind": circular}, "count": n})
             if step_deg is None:
-                if int(count) < 1:
+                if n < 1:
                     raise SdkError(f"pattern: count must be at least 1, "
                                    f"got {count}")
-                step_deg = 360.0 / int(count)
+                step_deg = 360.0 / count
             _dim(f, "angle_deg", step_deg)
         else:
             raise SdkError("pattern takes linear= or circular= (an axis)")

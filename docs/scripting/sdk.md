@@ -201,7 +201,15 @@ the answer and the dimension stays adjustable after the run.
 `part.params(table)` / `app.params(table)` declare a whole dimension table at
 once and return `{name: Param}`; an entry may name any declared before it.
 Where the document cannot hold an expression a Param behaves as its number.
-`param_smoke` builds a part from Param arithmetic, nudges a variable, and
+A sketch's `rect()` and `centered_rect()` given a Param corner are drawn as
+four lines whose endpoints carry it, since the app's rectangle has no
+expression fields: as a rectangle, the pan/tilt yoke's base kept a 1.5 kg
+camera's size while its screw holes, drawn as points, followed a heavier
+one out through its end. A `slot()` along u or v keeps Param centres and
+width the same way (an oblique one is refused: its sides would need the
+Params' trigonometry), and a pattern's `count` given as a Param goes as
+its `count_expr`, the circular step as 360 over it (`sdk_smoke` checks
+the shapes). `param_smoke` builds a part from Param arithmetic, nudges a variable, and
 asserts exactly the expected fields of the saved document move.
 
 ### Reads do not switch tabs
