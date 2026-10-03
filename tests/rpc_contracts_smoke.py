@@ -19,11 +19,13 @@ from pathlib import Path
 import sys
 import tempfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'tools'))
 from designer_contracts import accepts  # noqa: E402
 from designer_remote import RemoteError  # noqa: E402
 from designer_rpc import COLUMNS  # noqa: E402
 from designer_sdk import App  # noqa: E402
+from method_doc_scan import method_docs  # noqa: E402
 from rpc_contract import parse_column, request_schema  # noqa: E402
 from smoke_app import launch  # noqa: E402
 
@@ -66,13 +68,26 @@ def world(raw):
             raw.call('list_parts'))
 
 
+def built_columns(raw):
+    """The contracted rows THIS build serves. COLUMNS is read from every
+    Remote*.cpp; RemoteCam.cpp's table is compiled out of a CAM-free build
+    (-DENABLE_CAM=OFF), which ping's `features` says -- and only those rows
+    may be missing from one."""
+    if raw.call('ping').get('features', {}).get('cam', True):
+        return dict(COLUMNS)
+    cam = method_docs([str(ROOT / 'src/remote/RemoteCam.cpp')])
+    assert set(cam) & set(COLUMNS), 'RemoteCam.cpp has no contracted row'
+    return {k: v for k, v in COLUMNS.items() if k not in cam}
+
+
 def check_schemas(raw, docs):
     vocab = {k: v for k, v in docs.items()
              if isinstance(v, list) and all(isinstance(x, str) for x in v)}
     rows = {m['name']: m for m in docs['methods']}
     inspection = {'geometry_snapshot', 'validate_snapshot'}
     server = {n for n, m in rows.items() if 'request_schema' in m} - inspection
-    assert server == set(COLUMNS), (server ^ set(COLUMNS))
+    columns = built_columns(raw)
+    assert server == set(columns), (server ^ set(columns))
     def plain(s):
         # A vocabulary's remedy (`description`) is prose the server adds.
         if isinstance(s, dict):
@@ -80,13 +95,13 @@ def check_schemas(raw, docs):
         if isinstance(s, list):
             return [plain(v) for v in s]
         return s
-    for name, column in COLUMNS.items():
+    for name, column in columns.items():
         mine = request_schema(parse_column(column), vocab)
         theirs = plain(rows[name]['request_schema'])
         assert theirs == mine, (name, mine, theirs)
         assert rows[name]['params'] == [p['name'] for p in parse_column(column)]
-    typed = [n for n, c in COLUMNS.items() if parse_column(c)]
-    print(f'schemas: {len(COLUMNS)} contracted rows ({len(typed)} typed) '
+    typed = [n for n, c in columns.items() if parse_column(c)]
+    print(f'schemas: {len(columns)} contracted rows ({len(typed)} typed) '
           f'match the Python reading')
     return rows, typed
 
