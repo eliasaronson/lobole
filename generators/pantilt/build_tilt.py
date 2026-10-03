@@ -8,11 +8,14 @@ part, and the assembly places it (build_assembly.py).
 
 Each part is modelled about the tilt axis: the cradle and the camera in
 tilt-axis coordinates (X forward, Z up, the axis along Y), the wheel along
-its own Z. The camera is the LOAD, not a camera: a box and a lens of the
-stated mass, its density the black plastic it is drawn in and its lens long
-enough to make 1.5 kg, so its CoM lands 80 mm up and 40 mm forward of the
-tilt axis when the cradle seats it -- the cradle's seat is placed from the
-camera's own CoM, not the other way round.
+its own Z. The camera is the LOAD, drawn as one: a mirrorless body with a
+grip, a viewfinder hump and a hot shoe on a zoom with its rings and front
+element, in the black plastic it is drawn in, its lens long enough to make
+1.5 kg (spec.py) and its hood hollow by what the details add, so it
+still weighs the load. The load's CoM is spec.py's, the body and plain
+lens it is sized as: 80 mm up and 40 mm forward of the tilt axis when the
+cradle seats it -- the cradle's seat is placed from that CoM, not the other
+way round, and the studies load it there.
 """
 import common
 from common import Plane, Param
@@ -142,21 +145,176 @@ def cradle(app, S):
     return part
 
 
+# The camera's look, every size over the body's and the lens's own (spec.py's
+# CAMERA): a full-frame mirrorless body with a grip, a viewfinder hump and a
+# hot shoe, two dials and a shutter button, and a zoom on a metal mount with
+# its zoom and focus rings and a front element in a hood. None of it moves
+# the load: the hollow behind the front element is as deep as gives back
+# what the rest adds (`cam_hood_depth`), so the camera still weighs load_kg.
+CAMERA_LOOK = [
+    ("cam_r", "cam_h / 16", "mm, the body's edges, rounded"),
+    ("cam_mount_d", "lens_d * 1.06", "mm, the lens mount's ring"),
+    ("cam_mount_l", "lens_d / 12", "mm, the mount ring's length"),
+    ("cam_grip_t", "cam_d / 3", "mm, how far the grip stands off the front"),
+    ("cam_grip_w", "cam_w / 2 - cam_r - cam_mount_d / 2 - cam_r / 2",
+     "mm, the grip's width: from the body's side to beside the mount"),
+    ("cam_grip_h", "cam_h - 2 * cam_r", "mm, the grip's height"),
+    ("cam_grip_r", "cam_grip_w / 4", "mm, the grip's edges"),
+    ("cam_hump_l", "cam_d * 0.6", "mm, the viewfinder hump, front to back"),
+    ("cam_hump_w", "lens_d / 2", "mm, the hump's width"),
+    ("cam_hump_h", "cam_h / 5", "mm, the hump over the top plate"),
+    ("cam_hump_r", "cam_hump_h / 4", "mm, the hump's edges"),
+    ("cam_hump_x", "-cam_d / 10", "mm, the hump's centre behind the socket"),
+    ("cam_shoe_l", "cam_hump_l / 2", "mm, the hot shoe"),
+    ("cam_shoe_w", "cam_hump_w / 2", "mm"),
+    ("cam_shoe_h", "cam_r / 2", "mm"),
+    ("cam_dial_d", "cam_h / 4.5", "mm, the top plate's two dials"),
+    ("cam_dial_h", "cam_r", "mm"),
+    ("cam_dial_x", "-cam_d / 6", "mm, the dials' centres behind the socket"),
+    ("cam_dial_y", "cam_w / 2 - 2 * cam_r - cam_dial_d / 2",
+     "mm, each dial's centre off the lens axis"),
+    ("cam_btn_d", "cam_dial_d / 2", "mm, the shutter button, over the grip"),
+    ("cam_btn_h", "cam_r / 2", "mm"),
+    ("cam_btn_x", "cam_d / 2 - cam_r - cam_btn_d", "mm"),
+    ("cam_zoom_at", "lens_l * 0.15", "mm, the zoom ring's back from the body"),
+    ("cam_groove_at", "lens_l * 0.45", "mm, the groove between the rings"),
+    ("cam_groove_l", "lens_d / 25", "mm"),
+    ("cam_groove_t", "lens_d / 50", "mm, the groove's depth"),
+    ("cam_front_at", "lens_l * 0.7", "mm, the focus ring's front"),
+    ("cam_bore_d", "lens_d * 0.84", "mm, the hood's bore"),
+    ("cam_glass_t", "lens_d / 20", "mm, the front element"),
+    ("cam_glass_rho", "2.5", "g/cm3: glass, what the front element is"),
+]
+
+
+def _rounded_box(a, b, c, r):
+    """The volume of an a x b x c box with every edge rounded r, as an
+    expression: the inner box swept by a ball of r."""
+    i = [f"(({x}) - 2 * ({r}))" for x in (a, b, c)]
+    return (f"({i[0]} * {i[1]} * {i[2]} + 2 * ({r}) * ({i[0]} * {i[1]} + "
+            f"{i[1]} * {i[2]} + {i[0]} * {i[2]}) + pi * ({r})^2 * ({i[0]} + "
+            f"{i[1]} + {i[2]}) + 4 / 3 * pi * ({r})^3)")
+
+
+def _disc(d, h):
+    return f"(pi * ({d})^2 / 4 * ({h}))"
+
+
+def _hood_depth():
+    """How deep the hollow behind the front element is: deep enough that
+    the camera, every addition to the body and lens counted, weighs what
+    the box and the plain lens weighed -- load_kg (spec.py's lens_l)."""
+    added = " + ".join([
+        _rounded_box("cam_d", "cam_w", "cam_h", "cam_r")
+        + " - cam_d * cam_w * cam_h",
+        _rounded_box("cam_grip_t", "cam_grip_w", "cam_grip_h", "cam_grip_r"),
+        _rounded_box("cam_hump_l", "cam_hump_w", "cam_hump_h", "cam_hump_r"),
+        "cam_shoe_l * cam_shoe_w * cam_shoe_h",
+        "2 * " + _disc("cam_dial_d", "cam_dial_h"),
+        _disc("cam_btn_d", "cam_btn_h"),
+        _disc("cam_mount_d", "cam_mount_l") + " - "
+        + _disc("lens_d", "cam_mount_l"),
+        _disc("lens_d - 2 * cam_groove_t", "cam_groove_l") + " - "
+        + _disc("lens_d", "cam_groove_l"),
+    ])
+    return (f"({added}) / (pi * cam_bore_d^2 / 4) + "
+            f"cam_glass_rho / cam_rho * cam_glass_t")
+
+
+def _look(part, body, color, roughness, metallic=0.0):
+    part.app.call("set_appearance", feature_id=body.created_by,
+                  color=list(color), roughness=roughness, metallic=metallic)
+
+
+# Linear colours (set_appearance): plastic_black alone renders a mid grey.
+BLACK = ((0.018, 0.018, 0.02), 0.5)
+RUBBER = ((0.008, 0.008, 0.008), 0.92)
+METAL = ((0.55, 0.55, 0.57), 0.3, 1.0)
+DARK_METAL = ((0.05, 0.05, 0.055), 0.35, 0.8)
+
+
 def camera(app, S):
-    """The load: a body and a lens, socket at the origin on its underside."""
+    """The load: a mirrorless body and a zoom, socket at the origin on its
+    underside. It looks like a camera and weighs what spec.py says the load
+    is; the studies read the load from spec.py (load_kg, its CoM), not from
+    this part."""
     part = app.part("camera")
     part.activate()
-    w, h, d = S["cam_w"], S["cam_h"], S["cam_d"]
+    for name, expr, comment in CAMERA_LOOK:
+        part.param(name, expr, comment=comment, scope="project")
+    part.param("cam_hood_depth", _hood_depth(),
+               comment="mm, the hollow behind the front element: what the "
+                       "grip, hump, dials, mount and rounded edges add, "
+                       "taken out again, so the camera weighs load_kg",
+               scope="project")
+    S.update(spec.values(part))
+    X = common.named(S)
+    if not 0 < S["cam_hood_depth"] < S["lens_l"] - S["cam_front_at"]:
+        raise SystemExit(f"camera: the hood's hollow is "
+                         f"{S['cam_hood_depth']:.2f} mm, outside the lens's "
+                         f"front {S['lens_l'] - S['cam_front_at']:.2f} mm")
     body = part.box("Top", width="cam_d", depth="cam_w", height="cam_h",
                     name="Body")
-    # The lens stands on the body's front face, at the lens centre height.
-    front = body.face(normal=(1, 0, 0))
-    lens = part.cylinder(front, d="lens_d", height="lens_l",
-                         at=common.uv_on(front, (d / 2, 0, S["cam_cz"])),
-                         name="Lens")
-    part.app.add_feature(feature={"type": "Boolean", "name": "Camera",
-                                  "target_id": body.created_by,
-                                  "tool_id": lens.created_by, "op": "union"})
+    part.fillet(body.edges(), "cam_r", name="Body edges")
+    # The front, top and lens stations are planes the variables place
+    # (tilt-axis-free camera coordinates: X forward, Z up, the socket at the
+    # origin). On the front plane u is +Y and v +Z; on the top, u +X, v +Y.
+    front = common.plane(part, "Camera front", "yz", X.cam_d / 2)
+    top = common.plane(part, "Camera top", "xy", X.cam_h)
+    grip = part.box(front, width="cam_grip_w", depth="cam_grip_h",
+                    height="cam_grip_t",
+                    at=("cam_grip_w / 2 + cam_r - cam_w / 2", "cam_h / 2"),
+                    name="Grip")
+    part.fillet(grip.edges(), "cam_grip_r", name="Grip edges")
+    hump = part.box(top, width="cam_hump_l", depth="cam_hump_w",
+                    height="cam_hump_h", at=("cam_hump_x", "0"),
+                    name="Viewfinder")
+    part.fillet(hump.edges(), "cam_hump_r", name="Viewfinder edges")
+    shoe_on = common.plane(part, "Hot shoe", "xy", X.cam_h + X.cam_hump_h)
+    shoe = part.box(shoe_on, width="cam_shoe_l", depth="cam_shoe_w",
+                    height="cam_shoe_h", at=("cam_hump_x", "0"),
+                    name="Hot shoe")
+    dials = [part.cylinder(top, d="cam_dial_d", height="cam_dial_h",
+                           at=("cam_dial_x", y), name=f"Dial {k}")
+             for k, y in (("left", "cam_dial_y"), ("right", "-cam_dial_y"))]
+    button = part.cylinder(top, d="cam_btn_d", height="cam_btn_h",
+                           at=("cam_btn_x", "-cam_dial_y"),
+                           name="Shutter button")
+    # The lens, station by station along +X from the body's front.
+    axis = ("0", "cam_cz")
+
+    def station(name, at):
+        return common.plane(part, f"Lens {name}", "yz", X.cam_d / 2 + at)
+
+    mount = part.cylinder(front, d="cam_mount_d", height="cam_mount_l",
+                          at=axis, name="Lens mount")
+    rear = part.cylinder(station("rear", X.cam_mount_l), d="lens_d",
+                         height="cam_zoom_at - cam_mount_l", at=axis,
+                         name="Lens barrel")
+    zoom = part.cylinder(station("zoom ring", X.cam_zoom_at), d="lens_d",
+                         height="cam_groove_at - cam_zoom_at", at=axis,
+                         name="Zoom ring")
+    groove = part.cylinder(station("groove", X.cam_groove_at),
+                           d="lens_d - 2 * cam_groove_t",
+                           height="cam_groove_l", at=axis,
+                           name="Lens groove")
+    focus = part.cylinder(station("focus ring",
+                                  X.cam_groove_at + X.cam_groove_l),
+                          d="lens_d",
+                          height="cam_front_at - cam_groove_at - cam_groove_l",
+                          at=axis, name="Focus ring")
+    nose = part.cylinder(station("front", X.cam_front_at), d="lens_d",
+                         height="lens_l - cam_front_at", at=axis,
+                         name="Lens front")
+    # The hood's hollow, cut back from the lens's front, and the front
+    # element at its floor.
+    tip = station("tip", X.lens_l)
+    sk = part.sketch(on=tip, name="Hood")
+    sk.circle((0, X.cam_cz), d=X.cam_bore_d)
+    part.cut(sk.add(), X.cam_hood_depth, reversed=True, name="Hood")
+    glass = part.cylinder(station("glass", X.lens_l - X.cam_hood_depth),
+                          d="cam_bore_d", height="cam_glass_t", at=axis,
+                          name="Front element")
     sk = part.sketch(Plane.xy(0, flip=True), name="Socket")
     sk.point((0, 0))
     sock = part.hole(sk.add(), d=1.0, depth=Param(S["cam_socket"],
@@ -165,10 +323,24 @@ def camera(app, S):
                      name="Socket")
     part.thread(sock.bores()[0], "1/4-20 UNC-2B", allow_engagement=True)
     part.material("plastic_black")
+    part.app.set_material(feature_id=glass.created_by, material="glass")
+    for b in (body, hump, rear, groove, nose):
+        _look(part, b, *BLACK)
+    for b in (grip, zoom, focus):
+        _look(part, b, *RUBBER)
+    for b in (mount, shoe):
+        _look(part, b, *METAL)
+    for b in dials + [button]:
+        _look(part, b, *DARK_METAL)
     common.frame(part, "socket", (0, 0, 0), (0, 0, 1), (1, 0, 0))
     part.check()
     mp = part.app.mass_properties(part=part.id)["total"]
-    print(f"camera: {mp['mass_g']:.1f} g, CoM {mp['center_of_mass']}")
+    print(f"camera: {mp['mass_g']:.1f} g (load_kg {S['load_kg']:g}), CoM "
+          f"{mp['center_of_mass']} (spec.py: x {S['cam_cx']:.2f}, z "
+          f"{S['cam_cz']:.2f})")
+    # The socket's tapped hole is the one thing not given back, as before.
+    if abs(mp["mass_g"] - 1000 * S["load_kg"]) > 1.0:
+        raise SystemExit(f"camera: {mp['mass_g']:.3f} g, not load_kg")
     return part, mp
 
 

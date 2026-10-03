@@ -57,7 +57,7 @@ minutes.
 |---|---|---|
 | `build_base.py` | the project variables (`spec.py`), the base plate (6082-T6 aluminium, `aluminum_6082_t6`: the lower pan bearing's pocket, the tapped 3/8-16 tripod hole with its Thread, four M4 tapped holes, 0.5 mm chamfers on the rims the 6090 breaks) and the pan wheel (PETG, 40 teeth, hobbed; the upper pan bearing's counterbore, four counterbored screw holes) | `stages/base.dsgn` |
 | `build_worms.py` | the worm (one part for both axes: ZA, one start, 0.25 mm backlash, spacer collars and journals), the bearing block (one part for all four bearings) and the knob | `stages/worms.dsgn` |
-| `build_tilt.py` | the tilt wheel with its shaft, the cradle (camera plate, 1/4-20 slot) and the camera (the load: a box and a lens of 1.5 kg) | `stages/tilt.dsgn` |
+| `build_tilt.py` | the tilt wheel with its shaft, the cradle (camera plate, 1/4-20 slot) and the camera (the load, 1.5 kg, drawn as a mirrorless body and a zoom: [below](#the-camera)) | `stages/tilt.dsgn` |
 | `build_yoke.py` | the yoke, modelled where it stands, its frames the layout: the design re-modelled over its topology result (A-frame arms, a web under the tilt worm, a windowed base on a keel grillage, foot flanges bolted to the base), and the phase-5 solid and the topology envelope as variants `build_yoke_topo.py` builds | `stages/yoke.dsgn` |
 | `build_assembly.py` | the assembly: mates, the camera screw as the ASME B18.3 1/4-20 it is bought as (`add_fastener`), bearings by `fit_bearing`, the two DIN 471 rings by `fit_retaining_ring`, both rings of each bearing reported by `check_seat`, screws by `fit_fastener` and `check_fasteners`, two worm relations, the standing exact sweep, tolerances and `check_fits`, BOM and masses, pan 360 and tilt +-90 motion studies checked exactly at every sample, renders; then the head's [requirements](#requirements), checked, and the stage stops on any not met | `stages/assembly.dsgn` |
 | `build_yoke_topo.py` | the yoke under the camera's load at 3 g (`yoke_loads.py`: three cases, followed from the camera to the seats and the ledge): a static study of the solid yoke and one of the head's, each with the three as load cases, the lens carried from the seats (`probe_study`), and the pan journal's own bend, which no study sees, by beam; the yoke cut for the printer (`split_for_printing`) with the pieces' STLs; stills; the envelope's topology study (the three cases at once, the worms' blocks as keep-outs), its pictures and its check (`check_topology`) -- kept in `stages/yoke_envelope.dsgn`, reused while the envelope, its cases and keep-outs are the same and the result is not stale, `--fresh-topology` to run it again; the lens at 3 g, a requirement per case; `yoke_topo_report.json` | `stages/yoke_topo.dsgn`, `stages/yoke_envelope.dsgn`, `yoke_print_*.stl` |
@@ -176,6 +176,8 @@ Every size is a project variable, most of them expressions over the load:
   the layout it builds stands the load where `pan_lever` says. The head was
   first built with the pan pair the tilt shaft's 6002: below,
   [the pan bearing](#the-pan-bearing).
+- **The camera** is the load, drawn as one
+  ([the camera](#the-camera)).
 - **The arms** are as tall as the camera reaches below the tilt axis in
   +-90 degrees of tilt (`cam_swing`, 160 mm: an expression over the
   camera's and cradle's variables, `spec.swing_expr`, checked against the
@@ -188,6 +190,41 @@ Every size is a project variable, most of them expressions over the load:
   a Ø25 journal Ø24.9. `fit_bearing` and `check_seat` read a printed seat
   at what it prints.
 - The knob is sized so an 8 N fingertip pull holds the load at 1 g.
+
+## The camera
+
+The load is drawn as a camera: a full-frame mirrorless body (`cam_w`,
+`cam_h`, `cam_d`) with its edges rounded, a grip beside the mount, a
+viewfinder hump with a hot shoe, two dials and a shutter button on the top
+plate, and a zoom (`lens_d`, `lens_l`) on a metal mount ring, with a zoom
+ring and a focus ring parted by a groove and a front element of glass at
+the floor of a hood. Every size is a project variable over the body's and
+the lens's (`build_tilt.CAMERA_LOOK`), so a heavier camera's longer lens
+regenerates with its rings where they belong. The rubber, the metal and
+the black body are appearances on one plastic, so the density is still
+`cam_rho`; the front element is the app's glass. The tripod socket is
+where it was, at the origin of the body's underside.
+
+**It still weighs the load.** `spec.py` sizes the lens so a box and a plain
+lens weigh `load_kg`; everything the look adds or takes away -- the rounded
+edges (an exact expression: the inner box swept by a ball), the grip, the
+hump, the shoe, the dials, the mount ring, the groove, the glass at its
+density -- is given back by the hollow behind the front element,
+`cam_hood_depth` (28.8 mm at every load: what the look adds does not grow
+with the lens), so the part weighs 1499.9 g at 1.5 kg, as the box and lens
+did (the socket's tapped hole is the 0.1 g). The studies and
+the lens requirements load the camera from `spec.py` (`load_kg` and its
+CoM at `cam_cx`, `cam_cz`), not from this part, so they read what they did:
+1.51 / 2.90 / 3.20 mm. The part's own CoM is not spec.py's any more: what
+the look adds sits on the body and the hollow that pays for it is at the
+lens's front, so it is 6.4 mm further back, 1.4 mm higher and 1.2 mm towards the grip (27.9, -1.2, 48.9
+against 34.3, 0, 47.5), which the studies do not see. The rounded edges
+move the camera's closest approach to the A-frames from the running gap,
+1.2 mm, to 1.80 mm at 1.5 kg (at 1.8 kg the closest is the running gap
+again, at full tilt). What stands outside the box and the plain lens -- the
+grip, the hump, the mount ring -- stays inside the camera's width and above
+its underside, and the hump only rises over the top, which never swings
+below the tilt axis in +-90 degrees, so `cam_swing` is still the camera's.
 
 ## Layout
 
@@ -219,9 +256,9 @@ reason (a frame built from a cylindrical face takes the face's seam as X:
   checks), both clean, no sample unsolved. Each ring turns with its shaft
   against its bearing's side, touching and not clashing.
 - **Clearances.** The camera clears the yoke by 4.8 mm at -90 degrees (the
-  designed `cam_clear`) and passes the A-frames 1.2 mm off (the running
-  gap); the cradle runs 1.2 mm off the arms. Through the whole tilt study
-  the smallest gap is the running gap, 1.2 mm, for both
+  designed `cam_clear`) and passes the A-frames off its rounded edges; the
+  cradle runs 1.2 mm off the arms (the running gap). Through the whole tilt
+  study the smallest gap is 1.80 mm for the camera, 1.2 mm for the cradle
   ([requirements](#requirements)). The standing exact sweep is
   clean (168 pairs), each ring in its groove included: drawn at its free
   diameter it overlaps the floor (26.6 and 8.8 mm3), and that grip is
@@ -282,7 +319,7 @@ are stale, and `check_requirements` measures them again.
 
 | requirement | stage | measure | bound | as generated |
 |---|---|---|---|---|
-| camera clears the yoke through the tilt | assembly | clearance, exact, over the tilt study | >= `run_gap / 2` | 1.2 mm |
+| camera clears the yoke through the tilt | assembly | clearance, exact, over the tilt study | >= `run_gap / 2` | 1.80 mm |
 | cradle clears the yoke through the tilt | assembly | the same | >= `run_gap / 2` | 1.2 mm |
 | every bearing seated, both rings | assembly | `check_seat`, the eight bearings | pass | pass |
 | the pan journal's, the tilt shaft's, the worm journal's bearings take its minimum | assembly | `bearing_bore`, each shaft's bearings: the smallest bore | >= `pan_shaft_d_min`, `shaft_d_min`, `worm_shaft_d_min` | 25 / 15 / 9 mm over 21.02 / 14.45 / 8.46 |
@@ -322,12 +359,12 @@ the swing (`cam_swing`, 160 to 200 mm), the arms and the tilt axis grow
 with it; the worm pair is sized from the tilt torque, so the wheel, the
 knobs, the base plate under it and its program change too; and the study's
 forces are the mass's. Checked again on `stages/yoke_topo.dsgn` (one job,
-about eight minutes: the yoke's static and both motion studies run again),
-and the plate's two on `stages/cam.dsgn` (seven minutes):
+about nine minutes on a loaded machine: the yoke's static and both motion
+studies run again), and the plate's two on `stages/cam.dsgn` (the same):
 
 | requirement | 1.5 kg | 1.8 kg |
 |---|---|---|
-| camera clears the yoke through the tilt | 1.2 mm, pass | 1.2 mm, pass |
+| camera clears the yoke through the tilt | 1.80 mm, pass | 1.2 mm, pass (at full tilt, +90 degrees) |
 | cradle clears the yoke through the tilt | 1.2 mm, pass | 1.2 mm, pass |
 | every bearing seated, both rings | pass | pass |
 | the pan journal's bearings take its minimum | 25 mm over 21.02, pass | 25 mm over 23.33, pass |
