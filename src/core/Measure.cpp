@@ -744,10 +744,17 @@ constexpr double kFitCoaxialMm = 1e-4;
 // listed in `pressFits`; otherwise the overlap stays a clash and
 // `fitsRefused` says why. A pair of faces neither of which carries a band is
 // none of this step's business.
+//
+// A refusal is said only when an overlap is left once every fit is
+// relieved: it explains a clash. Two faces can be coaxial and engaged
+// without being a fit's -- a bearing's bore and the outside of the plate its
+// outer ring is pressed into -- and with the real fit relieved there is no
+// clash for them to explain.
 static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
                                      const std::vector<BandSpan>& a,
                                      const std::vector<BandSpan>& b,
                                      Measure::SetContact& out) {
+  std::vector<Measure::SetContact::FitRefused> refusals;
   for (const BandSpan& x : a)
     for (const BandSpan& y : b) {
       if (x.band == nullptr && y.band == nullptr)
@@ -785,7 +792,7 @@ static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
       Measure::SetContact::FitRefused refused;
       const auto refuse = [&](std::string reason) {
         refused.reason = std::move(reason);
-        out.fitsRefused.push_back(refused);
+        refusals.push_back(refused);
       };
       if (bore.band == nullptr || shaft.band == nullptr) {
         // One side banded, the other not: the overlap has no fit behind it.
@@ -893,6 +900,9 @@ static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
       out.pressFits.push_back(std::move(fit));
       out.pressFitVolume += relieved;
     }
+  if (!refusals.empty() && VolumeOf(overlap) > 1e-9)
+    out.fitsRefused.insert(out.fitsRefused.end(), refusals.begin(),
+                           refusals.end());
   return overlap;
 }
 

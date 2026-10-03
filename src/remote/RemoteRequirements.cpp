@@ -69,6 +69,9 @@ const MethodDoc RequirementMethods[] = {
      "or assembly}, fit_class {document, mate, class: clearance|transition|"
      "interference}, check_fits {document, allow_unverified?}, check_seat "
      "{document, occurrences: [bearing ids], allow_unverified?}, "
+     "bearing_bore {document: assembly, occurrences: [bearing ids]} (mm, "
+     "the smallest bore of those bearings: bound it at_least the shaft's "
+     "own minimum, an expression), "
      "check_fasteners {document, allow?: [{part?, why?, max?}], "
      "allow_skipped?}, "
      "check_literals {document?: one part, or documents?: several, else "
@@ -451,7 +454,7 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
       if (!needOcc("a") || !needOcc("b"))
         return 0;
     }
-    if (kind == "check_seat")
+    if (kind == "check_seat" || kind == "bearing_bore")
       for (const json& o : m.at("occurrences"))
         if (a->FindById(o.get<uint64_t>()) == nullptr) {
           why = "bearing occurrence " + o.dump() + " is gone from '" +
@@ -1063,6 +1066,31 @@ Taken MeasureCheckSeat(ui::AppState& state, const json& m) {
   return t;
 }
 
+// The smallest bore of the listed bearings: each read off its own catalogue
+// row through check_seat, which names the bearing an occurrence places, so a
+// bearing swapped for another row is measured as the row it is now. Bounded
+// at_least the shaft's own minimum, it says the bearings still take the
+// shaft the design asks for: a bearing is a catalogue row and does not
+// follow a variable, so a heavier load regenerates the shaft's minimum past
+// it without anything else saying so.
+Taken MeasureBearingBore(ui::AppState& state, const json& m) {
+  Taken t;
+  json rows = json::array();
+  std::optional<double> smallest;
+  for (const json& occ : m.at("occurrences")) {
+    const json r = Call(state, "check_seat", {{"occurrence", occ}});
+    const double d = r.at("d").get<double>();
+    smallest = smallest ? std::min(*smallest, d) : d;
+    rows.push_back({{"occurrence", occ},
+                    {"designation", r.value("designation", std::string())},
+                    {"d", d}});
+  }
+  t.value = *smallest;
+  t.unit = "mm";
+  t.detail = {{"bearings", rows}};
+  return t;
+}
+
 Taken MeasureCheckFasteners(ui::AppState& state, const json& m) {
   Taken t;
   const json r = Call(state, "check_fasteners", json::object());
@@ -1254,6 +1282,8 @@ Taken MeasureOn(ui::AppState& state, const req::Requirement& r,
     return MeasureCheckFits(state, m);
   if (kind == "check_seat")
     return MeasureCheckSeat(state, m);
+  if (kind == "bearing_bore")
+    return MeasureBearingBore(state, m);
   if (kind == "check_fasteners")
     return MeasureCheckFasteners(state, m);
   if (kind == "motion_clean")

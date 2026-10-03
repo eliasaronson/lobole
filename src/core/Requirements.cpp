@@ -63,6 +63,11 @@ const std::vector<KindSpec>& Specs() {
        "assembly",
        {"document", "occurrences", "allow_unverified"},
        {"document", "occurrences"}},
+      {"bearing_bore",
+       true,
+       "assembly",
+       {"document", "occurrences"},
+       {"document", "occurrences"}},
       {"check_fasteners",
        false,
        "assembly",
@@ -194,12 +199,17 @@ void ValidateValues(const std::string& kind, const json& m) {
                                       "-- `a` and `b` are the same");
   } else if (kind == "fit_class") {
     oneOf("class", {"clearance", "transition", "interference"});
-  } else if (kind == "check_seat") {
+  } else if (kind == "check_seat" || kind == "bearing_bore") {
     const json& o = m.at("occurrences");
     if (!o.is_array() || o.empty())
       throw std::runtime_error(
-          "check_seat occurrences is a non-empty list of bearing occurrence "
-          "ids");
+          kind + " occurrences is a non-empty list of bearing occurrence ids");
+    for (const json& id : o)
+      if (!id.is_number_integer() || id.get<int64_t>() < 0)
+        throw std::runtime_error(kind +
+                                 " occurrences are occurrence ids "
+                                 "(list_occurrences), not " +
+                                 id.dump());
   } else if (kind == "check_fasteners") {
     if (m.contains("allow")) {
       const json& a = m.at("allow");

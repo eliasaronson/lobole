@@ -154,7 +154,12 @@ and no mate is needed, and nothing new is saved.
   band on the wrong side (a hole class on the shaft), one side with no band
   ("the shaft (Ø8.024 modelled) carries no size band"), or two faces whose
   axes are more than 0.1 µm apart over the engaged length. Two faces neither
-  of which is banded are plain geometry, and nothing is said.
+  of which is banded are plain geometry, and nothing is said. A refusal
+  explains a clash, so it is said only when an overlap is left once every
+  fit of the pair is relieved: a bearing's bore and the round outside of
+  the plate its outer ring is pressed into share an axis and an engaged
+  length without being a fit, and beside the relieved outer-ring fit they
+  have no clash to explain.
 - **What is reported**: the fit as `"Ø<basic> <hole band> / <shaft band>"`
   ("Ø47 K7 / 6005 outside (ISO 492 normal)", "Ø8 H7 / p6"), the basic being
   the roundest size both made diameters lie within their bands about; the
@@ -352,7 +357,8 @@ pin at the top of H7/p6 relieved by exactly its annulus, 0.01 mm past it a
 clash naming the excess, no band, one band, a clearance fit, a band on the
 wrong side and a micrometre off-axis each a clash saying so, a collar's
 overlap beside a fit still a clash, a printed bore read at what it prints, a
-6005 at its K7 seat's interference, a motion result keeping its press fits,
+6005 at its K7 seat's interference, the same in a round plate with no
+refusal from the plate's outside, a motion result keeping its press fits,
 and golden `assembly/v159-press-fit` run as an exact motion study),
 `tests/press_fit_smoke.py` (the K7 bearing a press fit in the named pair,
 the exact sweep, `contact_report` and an exact motion study, the mesh modes

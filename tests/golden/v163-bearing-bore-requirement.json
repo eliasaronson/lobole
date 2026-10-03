@@ -1,0 +1,35 @@
+{
+  "format": "designer-document",
+  "version": 163,
+  "parameters": [
+    {"name": "depth", "expression": "9"},
+    {"name": "shaft_d_min", "expression": "14.45"}
+  ],
+  "requirements": [
+    {"id": 1, "name": "tilt bearings take the tilt shaft",
+     "source": "the shaft's own minimum must fit the bearings it runs in",
+     "revision": 1,
+     "measure": {"kind": "bearing_bore", "document": 4,
+                 "occurrences": [34, 36]},
+     "bound": {"kind": "at_least", "value": "shaft_d_min"},
+     "evidence": {"pass": true, "value": 15.0, "unit": "mm",
+                  "input_hash": "0x0123456789abcdef", "revision": 1,
+                  "limit": 14.45, "checked_at": "2026-10-03T12:00:00Z",
+                  "detail": {"bearings": [
+                    {"occurrence": 34, "designation": "6002", "d": 15.0},
+                    {"occurrence": 36, "designation": "6002", "d": 15.0}]}}}
+  ],
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [4, 0]},
+       {"type": "line", "id": 2, "a": [4, 0], "b": [4, 2]},
+       {"type": "line", "id": 3, "a": [4, 2], "b": [0, 2]},
+       {"type": "line", "id": 4, "a": [0, 2], "b": [0, 0]}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 1.0, "distance_expr": "depth", "mode": "new_body"}
+  ]
+}

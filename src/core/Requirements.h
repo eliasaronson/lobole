@@ -45,6 +45,7 @@ inline constexpr const char* kMeasureKinds[] = {
     "fit_class",    // check_fits: one mate's fit is of a class
     "check_fits",   // check_fits passing
     "check_seat",   // check_seat passing, both rings, every listed bearing
+    "bearing_bore", // the smallest bore of the listed bearings, mm
     "check_fasteners", // check_fasteners: no finding but the allowed ones
     "check_literals",  // check_literals clean
     "motion_clean",    // run_motion_study: clean

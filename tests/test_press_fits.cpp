@@ -318,6 +318,45 @@ TEST_CASE("A bearing at its K7 seat's interference is a press fit",
   CHECK_THAT(h7.fitsRefused.front().reason, ContainsSubstring("clearance"));
 }
 
+TEST_CASE("A relieved fit leaves no refusal from faces that only share its "
+          "axis",
+          "[measure][tolerances][press_fit][bearing]") {
+  // The pan/tilt head's base plate: a round plate, its outside coaxial with
+  // the 6005 pressed into its K7 pocket. The bearing's banded bore and the
+  // plate's unbanded outside are coaxial and engaged, and the overlap lies
+  // between their radii, but they are not a fit: once the outer ring's fit
+  // is relieved nothing is left to explain, so nothing is refused.
+  Document bearing;
+  bearing.AddFeature(std::make_unique<BearingFeature>("B", "6005"));
+  auto plate = std::make_unique<Document>();
+  plate->AddFeature(std::make_unique<CylinderFeature>(
+      "Disc", glm::dvec3(0, 0, 0), glm::dvec3(0, 0, 1), 36.8, 12.0));
+  plate->AddFeature(std::make_unique<CylinderFeature>(
+      "Hole", glm::dvec3(0, 0, -1), glm::dvec3(0, 0, 1), 46.992 / 2.0, 14.0));
+  plate->AddFeature(std::make_unique<BooleanFeature>(
+      "Pocket", plate->GetFeature(0)->GetId(), plate->GetFeature(1)->GetId(),
+      BooleanOp::Subtract));
+  REQUIRE(plate->Regenerate());
+  Tolerate(*plate, 46.992, "K7");
+
+  const Measure::SetContact c = Contact(*plate, bearing);
+  CHECK(c.volume < 1e-9);
+  REQUIRE(c.pressFits.size() == 1);
+  CHECK(c.pressFits.front().fit == "Ø47 K7 / 6005 outside (ISO 492 normal)");
+  CHECK_THAT(c.pressFits.front().interference, WithinAbs(0.008, 1e-9));
+  CHECK(c.fitsRefused.empty());
+
+  // An H7 pocket is a clearance fit for the ring: the clash stays, and the
+  // fit says why.
+  Tolerate(*plate, 46.992, "H7");
+  const Measure::SetContact h7 = Contact(*plate, bearing);
+  CHECK(h7.volume > 1.0);
+  bool clearance = false;
+  for (const auto& f : h7.fitsRefused)
+    clearance |= f.reason.find("clearance") != std::string::npos;
+  CHECK(clearance);
+}
+
 TEST_CASE("A motion result keeps the press fits it relieved",
           "[motion][press_fit][io]") {
   motion::Result r;

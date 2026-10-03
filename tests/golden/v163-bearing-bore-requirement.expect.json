@@ -1,0 +1,5 @@
+{"features": 2, "bodies": 1, "volumes": [72.0],
+ "requirements": [
+   {"name": "tilt bearings take the tilt shaft", "kind": "bearing_bore",
+    "bound": "at_least", "revision": 1, "evidence": true}
+ ]}

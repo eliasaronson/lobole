@@ -48,6 +48,7 @@ and the call a person would make agree by construction.
 | `fit_class` | assembly | `check_fits` | verdict | `mate`, `class`: clearance \| transition \| interference |
 | `check_fits` | assembly | `check_fits` | verdict | `allow_unverified?` |
 | `check_seat` | assembly | `check_seat` | verdict | `occurrences` (the bearings), `allow_unverified?` |
+| `bearing_bore` | assembly | `check_seat` (its `d`) | mm, the smallest bore of the bearings | `occurrences` (the bearings) |
 | `check_fasteners` | assembly | `check_fasteners` | verdict | `allow?` [{`part?`, `why?`, `max?`}], `allow_skipped?` |
 | `check_literals` | part, parts, or none | `check_literals` | verdict | `documents?` (several parts); neither: every part |
 | `motion_clean` | assembly | `run_motion_study` | verdict | `study` |
@@ -84,6 +85,17 @@ where they stand now to where the study put them. The study is run, or its
 result reused, first; a sample that did not solve makes the measure
 unresolved, since the gap there is unknown. Only top-level placements move:
 a flexible placement's inner poses are not followed.
+
+**A bearing against its shaft** (`bearing_bore`): a bearing is a catalogue
+row, chosen once, and does not follow a variable; the shaft it carries is
+sized from the load. Bounded `at_least` the shaft's own minimum (an
+expression: `"shaft_d_min"`), the requirement says the bearings still take
+the shaft the design asks for, and a heavier load that regenerates the
+minimum past the bore fails it, the bore and the minimum side by side. Each
+bearing is read through `check_seat` as the row it places now, so a bearing
+swapped for another row is measured as that one; an occurrence that is not
+a placed bearing leaves the measure unresolved. The pan/tilt head states one
+per shaft ([generators/pantilt](../../generators/pantilt/README.md#requirements)).
 
 **A formula over several faces** (`study_probe` with `readings`): each
 reading is a `probe_study` of one face, `{face, at?}`, and the expression
@@ -263,12 +275,16 @@ before delivering.
   project forms carry the evidence current; and on a shaft in a housing,
   check_fits and fit_class pass and then fail on an interference shaft
   (stale before the check: a tolerance is an input), check_seat fails a
-  bearing on no seat, check_fasteners over no screw is not a pass.
+  bearing on no seat, check_fasteners over no screw is not a pass, and a
+  bearing's bore passes over a variable minimum, reads stale when the
+  variable grows past it and then fails, and reads unresolved on a part that
+  is not a bearing.
 - `tests/assertion_smoke.py`: the clearance verbs, as requirements.
 - GUI `requirements/panel_checks_and_goes_stale`: the panel appears with
   the requirements, Check measures them as a job, and an edit to the model
   makes them stale.
-- Golden `v160-requirements` (a lone part's envelope).
+- Golden `v160-requirements` (a lone part's envelope) and
+  `v163-bearing-bore-requirement` (the `bearing_bore` measure).
 - The pan/tilt head (`generators/pantilt`) states its acceptance criteria as
   requirements and stops on any that does not pass.
 

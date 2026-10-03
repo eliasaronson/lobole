@@ -93,6 +93,30 @@ TEST_CASE("an unknown measure or bound is refused, naming the accepted ones",
                  {"expression", "p_tx * 2"}},
                 {{"kind", "at_most"}, {"value", "lens_max"}})
             .empty());
+  // A bearing's bore is a number, over named occurrences.
+  CHECK(Refusal({{"kind", "bearing_bore"},
+                 {"document", 1},
+                 {"occurrences", nlohmann::json::array({4, 5})}},
+                {{"kind", "at_least"}, {"value", "shaft_d_min"}})
+            .empty());
+  CHECK_THAT(Refusal({{"kind", "bearing_bore"},
+                      {"document", 1},
+                      {"occurrences", nlohmann::json::array({4})}},
+                     {{"kind", "pass"}}),
+             ContainsSubstring("is a number"));
+  CHECK_THAT(Refusal({{"kind", "bearing_bore"},
+                      {"document", 1},
+                      {"occurrences", nlohmann::json::array()}},
+                     {{"kind", "at_least"}, {"value", 15}}),
+             ContainsSubstring("non-empty list of bearing occurrence ids"));
+  CHECK_THAT(Refusal({{"kind", "bearing_bore"},
+                      {"document", 1},
+                      {"occurrences", nlohmann::json::array({"6002"})}},
+                     {{"kind", "at_least"}, {"value", 15}}),
+             ContainsSubstring("occurrence ids"));
+  CHECK_THAT(Refusal({{"kind", "bearing_bore"}, {"document", 1}},
+                     {{"kind", "at_least"}, {"value", 15}}),
+             ContainsSubstring("needs `occurrences`"));
 }
 
 TEST_CASE("a requirement's state: only current evidence is a pass",

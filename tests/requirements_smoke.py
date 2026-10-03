@@ -123,6 +123,14 @@ def fits(d):
                       "occurrences": [bearing]}, {"kind": "pass"})
     add(d, "screws", {"kind": "check_fasteners", "document": asm},
         {"kind": "pass"})
+    # The bearing's bore against the journal's own minimum, a variable.
+    d.call("set_variable", name="journal_min", expression="24")
+    add(d, "bore", {"kind": "bearing_bore", "document": asm,
+                    "occurrences": [bearing]},
+        {"kind": "at_least", "value": "journal_min"})
+    add(d, "bore of no bearing", {"kind": "bearing_bore", "document": asm,
+                                  "occurrences": [oh]},
+        {"kind": "at_least", "value": 1})
     refused(d, "add_requirement", "accepted: clearance", name="x",
             measure={"kind": "fit_class", "document": asm, "mate": mate,
                      "class": "loose"}, bound={"kind": "pass"})
@@ -139,6 +147,22 @@ def fits(d):
     expect(now["screws"]["state"] == "fail"
            and now["screws"]["detail"]["examined"] == 0,
            f"no screw examined is no pass: {now['screws']}")
+    expect(now["bore"]["state"] == "pass" and now["bore"]["value"] == 25.0
+           and now["bore"]["unit"] == "mm"
+           and now["bore"]["detail"]["bearings"][0]["designation"] == "6005",
+           f"a 6005's bore over a 24 mm minimum: {now['bore']}")
+    expect(now["bore of no bearing"]["state"] == "unresolved"
+           and "not a placed bearing" in now["bore of no bearing"]["note"],
+           f"a housing has no bore to read: {now['bore of no bearing']}")
+    # The journal's minimum grows past the bearing: stale, then a fail at
+    # the same 25 mm against the new limit.
+    d.call("set_variable", name="journal_min", expression="25.3")
+    expect(state(d, "bore") == "stale", rows(d)["bore"])
+    d.call("check_requirements")
+    now = rows(d)
+    expect(now["bore"]["state"] == "fail" and now["bore"]["value"] == 25.0
+           and abs(now["bore"]["limit"] - 25.3) < 1e-9,
+           f"a 6005 under a 25.3 mm journal: {now['bore']}")
 
     d.call("set_tolerance", part="Shaft", feature_id=sf, element=sname,
            **{"class": "p6"})

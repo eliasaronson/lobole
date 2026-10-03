@@ -23,7 +23,11 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    162; // v162: saved drawing projections
+    163; // v163: a requirement's measure kind `bearing_bore` {document:
+         //      assembly, occurrences: [bearing ids]}, the smallest bore of
+         //      those bearings in mm (docs/requirements/README.md#measures).
+         //      A build that does not know it refuses the file.
+         // v162: saved drawing projections
          //      (docs/drawings/README.md#saved-projections): in the directory
          //      form, beside each view's file, its last projection as
          //      views/<id>-<slug>.projection.json {kind, revision,
