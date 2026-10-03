@@ -6,17 +6,19 @@
 
 class Logger {
 public:
+  // Sets the level. Safe from any thread, at any time: it adjusts the one
+  // logger rather than replacing it.
   static void Initialize(spdlog::level::level_enum level = spdlog::level::info);
-  // Lazily initializes so library code (core, tests, scripts) can log
-  // without depending on application startup.
-  static std::shared_ptr<spdlog::logger>& GetLogger() {
-    if (!s_logger)
-      Initialize();
-    return s_logger;
-  }
+  // The logger is built on first use, so library code (core, tests, scripts)
+  // can log without depending on application startup -- and built exactly
+  // once. It used to be a shared_ptr assigned on first use, and a worker that
+  // logged first raced the main thread building it: each read a pointer the
+  // other was writing, and the logger one of them built could be freed under
+  // the other.
+  static spdlog::logger* GetLogger() { return Instance(); }
 
 private:
-  static std::shared_ptr<spdlog::logger> s_logger;
+  static spdlog::logger* Instance();
 };
 
 // Convenient macros for logging
