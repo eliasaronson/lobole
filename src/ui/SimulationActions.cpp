@@ -688,7 +688,10 @@ StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
     return st;
   st.running = true;
   st.elapsedSeconds = Elapsed(job->started);
-  st.solver = fem::CpuSolverName(job->input.type);
+  // From the PLAN, not job->input: the worker rebuilds `input` wholesale
+  // (MeshPlannedStudy's first line) while this polls; the plan is written
+  // here before the thread starts and the worker only reads it.
+  st.solver = fem::CpuSolverName(job->plan.type);
   return st;
 }
 

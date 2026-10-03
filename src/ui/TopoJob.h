@@ -56,7 +56,9 @@ struct StudyJob {
   // An assembly study's stale record, stamped at plan time (the versions of
   // the parts the plan read) and stored with the result.
   std::vector<std::pair<uint64_t, uint64_t>> partVersions;
+  // Written by main before the worker starts; only read after that, by both.
   fem::StudyPlan plan;
+  // The worker's: it rebuilds it wholesale. Main reads it after the join.
   fem::StudyJobInput input;
   fem::StudyRuntime runtime; // read by main only after the join
   std::string error;
