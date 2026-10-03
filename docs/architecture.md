@@ -257,9 +257,11 @@ RPC handlers keep their own poll so they answer from a finished result.
   the ImGui frame; `RemoteDispatch.cpp` decides what a call means and routes
   it to the domain modules.
 - Each domain module keeps a `MethodDoc` table next to its handler: `name`,
-  `doc` (what `describe` and `help` serve), `params` (the accepted keys),
-  `flags`, and `returns` (the response keys, required for `list_*`, `get_*`
-  and `check_*`).
+  `doc` (what `describe` and `help` serve), `params` (the accepted keys —
+  typed, on the most-used methods, which makes the row the method's
+  contract: [rpc.md](scripting/rpc.md#typed-contracts)), `flags`, and
+  `returns` (the response keys, required for `list_*`, `get_*` and
+  `check_*`).
 - **The `flags` column is the gate**, stated on the row rather than kept in a
   list apart from the handler: `NeedsPart` (refuses unless a part tab is
   active), `NotInBatch` (reaches outside the document, so a `batch` cannot
@@ -276,9 +278,10 @@ RPC handlers keep their own poll so they answer from a finished result.
   `tools/rpc_params_scan.py`), `tests/rpc_units_gate.py` (units, see
   [conventions.md](conventions.md#units-and-angles)),
   `tests/rpc_returns_gate.py`, `tests/rpc_names_gate.py`,
-  `tests/rpc_gate_smoke.py` and `tests/refused_calls_smoke.py`; the shared
-  row parser is
-  `tools/method_doc_scan.py`.
+  `tests/rpc_gate_smoke.py`, `tests/refused_calls_smoke.py` and
+  `tests/rpc_contracts_smoke.py`; the shared row parser is
+  `tools/method_doc_scan.py`, and `tools/rpc_contract.py` reads a typed
+  row's grammar as `src/remote/RpcContract.cpp` does.
 - Changing a method's name, a refusal message, a `describe` row or `help()`
   text changes what `benchmarks/` measures; the benchmark is unfinished and
   gates nothing yet ([scripting/benchmark.md](scripting/benchmark.md#status)).

@@ -112,14 +112,14 @@ them:
 
 ## 6. The agent interface
 
-- **Typed contracts for more RPCs.** Only `geometry_snapshot` and
-  `validate_snapshot` have machine-readable request and result schemas
-  ([scripting/rpc.md](scripting/rpc.md#typed-inspection-contracts)); every
-  other method is a `MethodDoc` row, so a wrong type or enum is caught only
-  inside the handler and the SDK is untyped. The direction: extend the
-  contracts to the most-used methods, with structured errors and generated
-  typed SDK stubs, and let a write carry the snapshot revision it was built
-  from so a stale reference is refused.
+- **Typed contracts for the rest of the surface.** The most-used methods
+  have typed rows — validated before the handler, published as
+  `request_schema`, typed in the SDK stubs — and part writes take a revision
+  guard ([scripting/rpc.md](scripting/rpc.md#typed-contracts)). The other
+  rows, CAM's among them, still name keys only, so their wrong types are
+  caught inside the handler; only the two inspection methods publish a
+  result schema; and the guard covers the active part's writes, not an
+  assembly's or a job's.
 - Putting the current selection into an agent's context unasked: the
   workflow prompt has the agent read `get_state`'s `selection` before it
   acts on "this" ([mcp.md](scripting/mcp.md#the-workflow-prompt)).

@@ -102,7 +102,8 @@ process started, so the instance is serving old code.
   returns that method's row alone; an unknown name is refused with close
   matches. `help(method)` (also `call("help", method=...)`, answered in the
   client) is `method_help`, the lookup the SDK and the MCP server's `help`
-  share: the method's doc, params and returns from its `describe` row. Also
+  share: the method's doc, params (and `param_types` for a typed one) and
+  returns from its `describe` row. Also
   a CLI:
   `designer_remote.py <port> <method> ['<params-json>']`.
 - **`tools/designer_sdk.py`** — the SDK ([sdk.md](sdk.md)). Its RPC surface

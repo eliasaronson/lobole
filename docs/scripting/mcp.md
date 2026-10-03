@@ -103,7 +103,9 @@ reached with **`rpc(method, params)`** and documented by **`help(method)`**.
   straight to the app, so an RPC newer than this file still works. An unknown
   name comes back with close matches.
 - `help(method)` returns the wrapper's prose and signature, or, for an RPC
-  the server does not wrap, the app's own `describe` row. The lookup is
+  the server does not wrap, the app's own `describe` row — with
+  `param_types`, each key's type in words, for a method with a typed
+  contract ([rpc.md](rpc.md#typed-contracts)). The lookup is
   `designer_remote.method_help`, which the python client's `help` also is;
   this server only adds its wrapper prose.
 - `screenshot` and `render_still` return the image inline.

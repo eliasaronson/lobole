@@ -43,7 +43,7 @@ One row per method (`src/remote/RemoteHelpers.h`):
 |---|---|
 | `name` | the method literal |
 | `doc` | prose: what it does, the units, the traps |
-| `params` | accepted top-level keys, comma-separated; `""` for none; `"*"` for a free-form spec the handler reads opaquely. The dispatcher refuses any other key before the handler runs; under `"*"` the handler checks its own |
+| `params` | accepted top-level keys, comma-separated; `""` for none; `"*"` for a free-form spec the handler reads opaquely. The dispatcher refuses any other key before the handler runs; under `"*"` the handler checks its own. A row may type its keys, and is then a [contract](#typed-contracts) |
 | `flags` | what the dispatcher needs to know (below) |
 | `returns` | the response's top-level keys with nesting shown (`bodies[]{name,volume}`, `total{mass_g}`), required for every `list_*`, `get_*` and `check_*` method |
 
@@ -67,18 +67,21 @@ the keys the handler reads, both directions), `rpc_returns_gate` (the
 carries a unit suffix such as `_mm` or `_deg`, or its row names the unit),
 `rpc_names_gate` (below), and `rpc_gate_smoke` (a `NeedsPart` method touches
 the part document, or the test records why it is gated anyway).
+`rpc_params_gate` also holds a typed row to its handler
+([below](#typed-contracts)).
 
 ## `describe`
 
 `describe` returns every method with its `doc`, `params` (or
-`params_free_form: true`), `requires_part_doc` and `returns`. `{method}`
+`params_free_form: true`), `requires_part_doc` and `returns`, and a
+`request_schema` for a method with a [contract](#typed-contracts). `{method}`
 narrows the answer to that one row, with only `app` and
 `document_format_version` beside it, and refuses an unknown name naming the
 close matches. Without it, `describe` also publishes the vocabularies an agent otherwise has
 to guess: `feature_types` and `sketch_entity_types` (each with its field
 list), `constraint_kinds`, `constraint_value_units`, `mate_types`,
 `relation_kinds`, `extrude_modes`, `extrude_end_modes`, `axis_kinds`,
-`drawing_dim_kinds`, `material_slugs`, the `document_format_version`, and the
+`drawing_dim_kinds`, `material_slugs`, `views`, the `document_format_version`, and the
 `inspection_contract` version and hash (below). The vocabularies come from
 the same tables the parsers refuse against, so `describe` cannot list a value
 the parser rejects. A feature type the parser accepts but `describe` does not
@@ -100,7 +103,12 @@ worse than a missing row, because an agent trusts it instead of guessing.
   `rpc_params_gate` holds it equal to the keys the handler reads; a `"*"`
   row (a free-form spec) is the handler's to check, and `set_settings`
   checks all of its keys before applying any. A method with an inspection
-  contract refuses through that first, for its structured diagnostic.
+  contract refuses through that first. The refusal is
+  [structured](#structured-errors) either way.
+- **Typed values, before anything runs.** A method with a
+  [contract](#typed-contracts) has its values checked in the same place:
+  a missing key, a wrong type, an enum or a range is refused before the
+  handler.
   What remains for the handler is a key the row lists that THIS call's path
   did not read (`target` on an op whose depths were typed): `RpcParams`
   still records the keys read, and such a call is refused after the handler
@@ -110,10 +118,11 @@ worse than a missing row, because an agent trusts it instead of guessing.
   trip or the type's documented fields ("unknown field 'mode' for Fillet"). A
   documented key whose value is the default, and so does not serialize back
   (`units: "mm"`), is accepted.
-- **Wrong types.** A `json::exception` from a handler is reported as a
-  refusal naming the method, what each key it was handed actually is, which
-  keys the handler read, and where the vocabulary is — never nlohmann's own
-  "type must be string, but is boolean".
+- **Wrong types.** On a method without a contract, a `json::exception` from
+  a handler is reported as a refusal naming the method, what each key it
+  was handed actually is, which keys the handler read, and where the
+  vocabulary is — never nlohmann's own "type must be string, but is
+  boolean".
 - **Units.** A parameter carrying a physical quantity names its unit
   (`angle_deg`, `tolerance_mm`, `deflection_mm`) or has it stated in its row.
 - **Names.** `id` is the id of the thing the method is named after
@@ -215,7 +224,7 @@ the job, the second does it twice — `cam_post {setup, path, _timeout}` wrote
 its G-code and then answered "unknown parameter '_timeout'". So:
 
 - **Keys are refused by the dispatcher**, against the row, before the
-  handler runs (above).
+  handler runs (above), and so are a contracted method's values.
 - **A handler reads and checks every parameter before its first side
   effect.** Values are read into locals, ranges and enums checked, the
   files a call will write planned whole — and only then is anything
@@ -284,8 +293,13 @@ as one transaction:
   rebuilt. Geometry is answered once, by the batch's `regen`.
 - **Refused inside a batch:** another `batch`, any `NotInBatch` method
   (screenshots, exports, project and git verbs, `undo`/`redo`), UI actions,
-  unknown methods, and a key outside a call's row — each checked before
-  anything runs, so the document is unchanged.
+  unknown methods, a key outside a call's row, and — under
+  `stop_on_error` — a value a call's [contract](#typed-contracts) refuses,
+  unless a `$ref` stands in it (that call is checked when it runs). Each is
+  checked before anything runs, so the document is unchanged, and the
+  refusal's diagnostic names the `call`.
+- **Guarded.** `expect_revision` on the batch is checked once, before the
+  first call ([the revision guard](#the-revision-guard)).
 
 The gain is largest for edits early in a long history, where each separate
 call would rebuild everything after it; appends are already incremental.
@@ -293,10 +307,118 @@ call would rebuild everything after it; appends are already incremental.
 a failed call, a rejected key refused before any call runs, `stop_on_error: false`, `$ref` and its
 refusals, a mid-batch query seeing current geometry, and an assembly batch.
 
-## Typed inspection contracts
+## Typed contracts
+
+A row whose `params` column types its keys is a contract. It is declared in
+the row and nowhere else — the column every gate and the dispatcher already
+read — so there is no second table to drift from it:
+
+```
+"feature_id?:int>=0, feature:object, expect_revision?:revision"
+"name:string, expression:string|number, scope?:'project'|'part', comment?:string"
+"type?:@mate_types, a:object, b:object, ball_rotation?:number[4], derive?:'twist'|'pose'"
+```
+
+- `name` is required, `name?` optional. A typed row types every key.
+- Types: `int`, `number`, `bool`, `string`, `object` (opaque: its own
+  parser checks inside it, e.g. a feature spec), `null`, `any`, `revision`;
+  an array is `T[]` or `T[N]`.
+- `|` is a union and `'x'` a literal, so an enum is a union of literals.
+- `@name` is one of `describe`'s published vocabularies (`mate_types`,
+  `relation_kinds`, `material_slugs`, `views`), resolved from the table the
+  parser refuses against; a vocabulary can carry the remedy for its usual
+  mistake (a coupling is a relation, not a mate), which ends the refusal.
+- A range follows a numeric type: `int>=0`, `number>0`, `number>=0<=1`.
+
+A row with no parameters (`""`) is a complete contract already. Typed today:
+`add_assembly`, `add_configuration`, `add_feature`, `add_mate`,
+`add_occurrence`, `add_part`, `batch`, `check_geometry`, `create_drawing`,
+`delete_feature`, `delete_part`, `describe`, `export_drawing`,
+`export_step`, `frame`, `get_state`, `interference`, `list_configurations`,
+`list_elements`, `list_occurrences`, `mass_properties`, `measure`,
+`modify_feature`, `open_project`, `remove_mate`, `rename_part`,
+`run_motion_study`, `run_study`, `save_project`,
+`set_active_configuration`, `set_active_part`, `set_mate`, `set_material`,
+`set_occurrence_transform`, `set_variable`, `view` — the most-called
+methods across the tests, generators, benchmarks and the SDK. CAM's rows,
+whose keys go through field tables, and the free-form rows are not typed.
+
+`src/remote/RpcContract.{h,cpp}` parses a column and renders it as the JSON
+Schema subset [below](#inspection-contracts) (plus `anyOf`, `null`,
+`exclusiveMinimum`/`exclusiveMaximum` and `description`). The dispatcher
+validates a contracted request in `ProcessPending`, right after the
+unknown-key check and before anything else; `HandleSemantic` validates again
+for a batch's calls once their `$ref`s are resolved. `describe` publishes the
+schema as the method's `request_schema`, and its `params` stays a list of
+names. One validator (`ValidateInspectionValue`) serves both families, in a
+fixed order — unknown keys, then missing ones, then each value in key order —
+which `tools/designer_contracts.py` repeats client-side.
+
+Kept true by:
+
+- `rpc_params_gate` — a typed row parses, its `?` is exactly where the
+  handler reads the key with `value()`/`contains()` (a key only ever read
+  with `at()` is required), and every literal of an enum is one the branch
+  compares against (a vocabulary the parser owns is `@name` instead).
+- `rpc_contracts_smoke` — every contracted row's server schema equals the
+  Python reading of it (`tools/rpc_contract.py`) and every `@name` is a
+  published vocabulary; each typed method refuses a missing key, a wrong
+  type, an enum miss and a range miss with its diagnostic and changes
+  nothing; the SDK's preflight refusal equals the server's; and the
+  revision guard below.
+- `test_rpc_contract.cpp` — the grammar, its schema and its messages.
+
+### Structured errors
+
+A refusal carries the sentence in `error` and, where the dispatcher can say
+it in fields, a `diagnostic`:
+
+```
+{operation, code, path, param?, expected, observed, accepted?, call?}
+```
+
+`code` is `missing_argument`, `unknown_argument`, `invalid_argument` (a
+type, an enum, a range or a shape) or `stale_revision`, plus the inspection
+methods' own (`stale_snapshot`, `budget_exceeded`, …). `path` is a JSON
+pointer under `/params`; `param` is its top-level key; `expected` is the
+schema (or, for an unknown key, the keys the method takes); `observed` is
+the value sent; `accepted` lists the values an enum or vocabulary takes, or
+the keys a method takes; `call` is the 1-based call a batch refused before
+running. Every method's unknown key carries one, and so does a missing key a
+handler reads with `RpcParams::at`; a contracted method's every refusal of
+its params does. The sentence names the method, the key, what it must be and
+what it got:
+
+```
+add_mate: 'type' must be one of: fastened, revolute, slider, cylindrical,
+planar, ball; got "revolut". To COUPLE two mates' degrees of freedom --
+gears, a rack and pinion, a screw -- the thing to add is a RELATION, not a
+mate: see add_relation
+```
+
+### The revision guard
+
+A write built from a reading of a part can say which reading:
+`expect_revision` is the part's revision `{session, part_id, instance,
+version}` — the one `geometry_snapshot` binds its references to and
+`get_state` reports as `revision`. The dispatcher compares it with the
+active part's before the handler runs, and refuses `stale_revision` (naming
+the current revision, and why: another part, another server session, the
+part reopened or replaced, or regenerated since) when they differ. `version`
+moves on every regeneration, so an edit that rebuilds nothing — a tolerance,
+a comment — does not invalidate a reading. A guarded call answers with the
+`revision` it left, so a chain of writes guards each against the last.
+
+Guarded: `add_feature`, `modify_feature`, `delete_feature`, `set_material`,
+and `batch`, which checks once before its first call and answers with the
+revision after its last. The key is the dispatcher's, not the handler's: a
+row lists it as `expect_revision?:revision` and `rpc_params_gate` knows no
+branch reads it.
+
+### Inspection contracts
 
 Two methods — `geometry_snapshot` and `validate_snapshot` — carry
-machine-readable request and result schemas. `api/inspection-contracts.json`
+machine-readable request AND result schemas. `api/inspection-contracts.json`
 is the source; `python3 tools/generate_inspection_contracts.py` regenerates
 the embedded server schemas (`src/remote/InspectionContracts.generated.h`)
 and the Python records and facade (`tools/designer_inspection.py`). The
@@ -314,11 +436,10 @@ and refuses to talk to a server whose contract hash differs
 `uniqueItems`, `default` — and the generator refuses any other keyword rather
 than publishing a constraint nothing enforces.
 
-A contract refusal is a `ContractError` whose `diagnostic` has `operation`,
-`code`, `path`, `expected`, `observed`; batch failures keep the nested
-diagnostics, including when the batch rolls back. Other RPCs' errors may
-carry no diagnostic.
+A contract refusal is a `ContractError` with the
+[structured diagnostic](#structured-errors); batch failures keep the nested
+diagnostics, including when the batch rolls back.
 
-Snapshot semantics are in [sdk.md](sdk.md#measurement-snapshots). Extending
-contracts to the rest of the surface is on the
+Snapshot semantics are in [sdk.md](sdk.md#measurement-snapshots). Typing the
+rest of the surface, and result schemas beyond these two, is on the
 [roadmap](../roadmap.md#6-the-agent-interface).

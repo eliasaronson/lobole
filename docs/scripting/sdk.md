@@ -28,9 +28,12 @@ The RPC surface is not written by hand. At connect time `App` reads
 arguments are checked against the row's parameter list before the round
 trip, and a wrong one is refused naming the keys the method does take
 (free-form methods such as `add_constraint` accept anything). Methods with a
-typed contract are validated against their schema. Enums are on `app.enums`,
-read from the app. A new RPC is callable the day it lands, a renamed one
-fails by name, and the client cannot drift from the server.
+[typed contract](rpc.md#typed-contracts) are validated against the
+`request_schema` `describe` publishes, so a wrong type or enum is refused
+client-side with the same diagnostic the server would give, without the
+round trip. Enums are on `app.enums`, read from the app. A new RPC is
+callable the day it lands, a renamed one fails by name, and the client
+cannot drift from the server.
 
 - `_timeout=` (seconds) on any generated call, for the ones that run for
   minutes (a large STEP import, a study).
@@ -46,6 +49,21 @@ fails by name, and the client cannot drift from the server.
 `sdk_smoke` gates the split: every documented method is reachable, nothing
 hand-written on `App` shadows a generated one, the enums are read rather than
 copied, and no constraint-kind string is hard-coded in the module.
+
+### Typed stubs
+
+For a type checker, the contracted RPCs are typed: `tools/designer_rpc.py`
+is generated from the typed rows by `tools/generate_rpc_contracts.py`
+(checked in; `rpc_contracts_generated` fails when it is stale) and holds a
+`TypedDict` of each method's parameters and an `RpcSurface` class with one
+method per contracted RPC. `App` inherits it under `TYPE_CHECKING` only, so
+mypy sees `app.add_mate(a=..., b=..., derive="sideways")`, a string
+`rotation_deg` or a missing `a` as an error while the runtime surface stays
+the generated one. A key that is a Python keyword is typed with its
+trailing underscore (`async_`), as it is passed. A vocabulary
+(`@mate_types`) is typed `str`: its values are the running app's, which the
+runtime check enforces. `inspection_typing_gate` type-checks a valid script
+and one seeded with errors against the stubs.
 
 ## The hand-written layer
 
@@ -271,7 +289,15 @@ record of a body's edges in one RPC. Reading `edge.center`, `edge.radius`,
   with `budget_exceeded`, never answered partially.
 - The existing `Edge.center` stays a live query.
 
-Faces, world space, pagination and guarded writes are not covered
+- A write can be guarded by the snapshot it was built from:
+  `expect_revision=snapshot.revision.as_dict()` on `add_feature`,
+  `modify_feature`, `delete_feature`, `set_material` or a `batch` refuses it
+  with `stale_revision` if the part has moved since, and the answer carries
+  the new `revision` to guard the next write with
+  ([rpc.md](rpc.md#the-revision-guard)). `get_state()["revision"]` is the
+  same revision without a snapshot.
+
+Faces, world space and pagination are not covered
 ([../roadmap.md](../roadmap.md#6-the-agent-interface)).
 
 ## Validation stages
