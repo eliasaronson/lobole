@@ -10,14 +10,24 @@
 # designer_tests under a running suite, and two suites still run side by side
 # (tools/build-lock.sh). It runs in shell.nix's environment (tools/nix-run)
 # when it is not already in one.
+#
+# --test-dir is resolved here (against the cwd, then the repo root) and
+# handed to ctest as that ABSOLUTE path in place of the one given: ctest
+# runs from inside the build directory, where a relative --test-dir would
+# name build/build.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 dir="$root/build"
+rest=()
 args=("$@")
 for ((i = 0; i < ${#args[@]}; i++)); do
   case "${args[i]}" in
-    --test-dir) dir="${args[i + 1]:-}" ;;
+    --test-dir)
+      dir="${args[i + 1]:-}"
+      i=$((i + 1))
+      ;;
     --test-dir=*) dir="${args[i]#--test-dir=}" ;;
+    *) rest+=("${args[i]}") ;;
   esac
 done
 [ -d "$dir" ] || [ ! -d "$root/$dir" ] || dir="$root/$dir"
@@ -26,13 +36,13 @@ dir="$(cd "$dir" && pwd)"
 # shellcheck source=build-lock.sh
 . "$root/tools/build-lock.sh"
 build_lock_shared "$dir" 9
-quoted=""
-for a in "$@"; do quoted+=" $(printf '%q' "$a")"; done
+quoted=" --test-dir $(printf '%q' "$dir")"
+for a in ${rest[@]+"${rest[@]}"}; do quoted+=" $(printf '%q' "$a")"; done
 # The fd is closed for the run: a process a test leaves behind must not keep
 # holding the lock. This shell holds it until ctest returns. Inside shell.nix
 # already, or on a machine without nix (CI), ctest is the one on PATH.
 if [ -n "${IN_NIX_SHELL:-}" ] || ! command -v nix-instantiate >/dev/null; then
   cd "$dir" && eval "ctest$quoted" 9>&-
 else
-  "$root/tools/nix-run" "cd '$dir' && ctest$quoted" 9>&-
+  "$root/tools/nix-run" "cd $(printf '%q' "$dir") && ctest$quoted" 9>&-
 fi
