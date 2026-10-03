@@ -204,6 +204,12 @@ TEST_CASE("A topology result's input hash round-trips, and a malformed one is "
                     "hex digits");
 }
 
+// The cases below run the mesher. Every CI build is configured without
+// Netgen (no distribution package ships it), where fem::Mesh refuses by
+// design -- tests/test_fem.cpp checks that refusal -- so they are compiled
+// only where the mesher exists, as test_fem.cpp's own are.
+#ifdef HAVE_NETGEN
+
 namespace {
 
 // A real run of the bar's study, stored as the app stores one: stamped, and
@@ -335,9 +341,8 @@ TEST_CASE("Meshing a body in place does not move its input hash",
   fs::remove_all(proj);
 }
 
-#include "core/InputHash.h"
-#include "core/features/ExtrudeFeature.h"
-#include "core/features/SketchFeature.h"
+#endif // HAVE_NETGEN
+
 // A shape read back from the project's baked geometry is the regenerated
 // one but for the sign of a zero in a circle's axis; the hash reads the
 // geometry, so a part with a bore hashes the same after a reopen.
@@ -375,6 +380,8 @@ TEST_CASE("A part with a bore hashes the same after a save and reopen",
   }
   fs::remove_all(proj);
 }
+
+#ifdef HAVE_NETGEN
 
 // What a saved result keeps (docs/simulation/README.md
 // #what-a-saved-result-keeps): a static body's boundary surface, as float,
@@ -460,14 +467,32 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
   fs::remove_all(proj);
 }
 
+#endif // HAVE_NETGEN
+
 // docs/versioning/README.md#autosave-and-recovery
+// The result is made by hand, as a run would store it, so this holds in a
+// build without the mesher too: what is under test is the autosave.
 TEST_CASE("An autosave writes no study result", "[fem][studyjobs][autosave]") {
   namespace fs = std::filesystem;
-  auto bar = BarOf(fem::AnalysisType::Static);
-  RunAndStore(*bar);
+  auto bar = MakeBar(fem::AnalysisType::Topology);
+  const uint64_t hash = Key(*bar);
+  REQUIRE(hash != 0);
+  bar->doc.StoreStudyResults(bar->studyId, HandMadeTopology(hash));
   const fs::path dir = fs::temp_directory_path() / "study_result_autosave";
   fs::remove_all(dir);
   fs::create_directories(dir);
+
+  // The control: a real save of this document writes the result, so the
+  // autosave's missing one is the autosave's doing.
+  const fs::path saved = dir / "saved.dsgn";
+  REQUIRE(testio::Save(bar->doc, saved.string()));
+  bool wroteResult = false;
+  for (const auto& e : fs::recursive_directory_iterator(saved))
+    wroteResult |=
+        e.path().filename().string().find(".result.") != std::string::npos;
+  REQUIRE(wroteResult);
+  fs::remove_all(saved);
+
   const std::string project = (dir / "bar.dsgn").string();
   Autosaver saver(10.0);
   saver.Prime(0.0);
@@ -481,7 +506,7 @@ TEST_CASE("An autosave writes no study result", "[fem][studyjobs][autosave]") {
   std::ifstream in(sidecar);
   const std::string text((std::istreambuf_iterator<char>(in)),
                          std::istreambuf_iterator<char>());
-  CHECK(text.find("displacement") == std::string::npos);
+  CHECK(text.find("density") == std::string::npos);
   CHECK(text.find("input_hash") == std::string::npos);
   fs::remove_all(dir);
 }
