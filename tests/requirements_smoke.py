@@ -211,6 +211,129 @@ def cam(d):
                f"reopened: {rows(d)['the plate verifies']}")
 
 
+def studied_part(d, study):
+    """The bar's study requirements against a real solve: pass, stale on
+    a load edit, fail past the bound, edited, saved and reopened, and
+    unresolved once the study is gone."""
+    r = d.call("check_requirements")
+    got = {x["name"]: x for x in r["requirements"]}
+    for name in ("end moves", "stress", "end moves, by formula", "mass"):
+        expect(got[name]["state"] == "pass", f"{name}: {got[name]}")
+    expect(abs(got["end moves"]["value"] - 0.05) < 0.01,
+           f"FL/EA is 0.05 mm: {got['end moves']}")
+    expect(abs(got["end moves, by formula"]["value"]
+               - got["end moves"]["value"] * 1000) < 1e-6,
+           f"the formula reads the same face: {got}")
+    expect(abs(got["stress"]["limit"] - 250 / 1.5) < 1e-9,
+           f"a bound expression is evaluated: {got['stress']}")
+    expect(got["mass"]["unit"] == "g" and 75 < got["mass"]["value"] < 82,
+           f"10 cm3 of steel: {got['mass']}")
+    expect(got["literals"]["state"] in ("pass", "fail"),
+           f"a verdict: {got['literals']}")
+    expect(r["receipt"]["claims"] and r["checked"] == 5, r["receipt"])
+
+    # ---- Re-checking an unchanged design measures nothing ----------------
+    t0 = time.time()
+    again = d.call("check_requirements")
+    expect(again["checked"] == 0 and again["reused"] == 5,
+           f"all current, nothing measured: {again['checked']}")
+    expect(time.time() - t0 < 2.0, "a reuse is well under the solve")
+    rerun = d.call("check_requirements", recompute=True,
+                   ids=[rows(d)["mass"]["id"]])
+    expect(rerun["checked"] == 1, f"recompute measures: {rerun}")
+
+    # ---- A model edit: stale where it reaches, current elsewhere ---------
+    d.call("set_variable", name="load_n", expression="30000")
+    now = rows(d)
+    for name in ("end moves", "stress", "end moves, by formula"):
+        expect(now[name]["state"] == "stale",
+               f"the load moved: {name} {now[name]}")
+    expect(now["mass"]["state"] == "pass",
+           f"the load moves no mass: {now['mass']}")
+    r = d.call("check_requirements", **{"async": True})
+    expect(r.get("started") and isinstance(r.get("job"), int), r)
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        st = d.call("study_status", job=r["job"])
+        if not st["running"]:
+            break
+        time.sleep(0.1)
+    expect(st["outcome"] == "done" and st["kind"] == "requirements", st)
+    now = rows(d)
+    expect(now["stress"]["state"] == "fail"
+           and now["stress"]["value"] > now["stress"]["limit"],
+           f"three times the load, past 250/1.5: {now['stress']}")
+    expect(now["end moves"]["state"] == "fail", now["end moves"])
+
+    # ---- Editing a requirement drops its evidence -----------------------
+    rid = now["end moves"]["id"]
+    e = d.call("set_requirement", id=rid,
+               bound={"kind": "at_most", "value": 0.5})["requirement"]
+    expect(e["state"] == "unchecked" and e["revision"] == 2,
+           f"edited: the old evidence was about the old bound: {e}")
+    d.call("check_requirements", ids=[rid])
+    expect(state(d, "end moves") == "pass", rows(d)["end moves"])
+
+    # ---- Both project forms carry them -----------------------------------
+    with tempfile.TemporaryDirectory() as tmp:
+        for path in (os.path.join(tmp, "bar.json"),
+                     os.path.join(tmp, "bar.dsgn")):
+            before = rows(d)
+            d.call("save_project", path=path)
+            d.call("open_project", path=path)
+            after = rows(d)
+            expect(set(after) == set(before), f"{path}: {after.keys()}")
+            for name, row in before.items():
+                want = row["state"]
+                if path.endswith(".json") and name in (
+                        "end moves", "stress", "end moves, by formula"):
+                    # The single-file form carries no study result, so
+                    # a reopened study is unsolved: its hash is the same
+                    # inputs, the evidence still current.
+                    pass
+                expect(after[name]["state"] == want,
+                       f"{path}: {name} {want} -> {after[name]}")
+                expect(after[name]["revision"] == row["revision"], name)
+
+    # ---- A deleted reference is unresolved, never pass -------------------
+    d.call("remove_study", id=study)
+    now = rows(d)
+    for name in ("end moves", "stress"):
+        expect(now[name]["state"] == "unresolved"
+               and "study" in now[name]["note"], now[name])
+    r = d.call("check_requirements", ids=[now["stress"]["id"]])
+    expect(r["requirements"][0]["state"] == "unresolved"
+           and r["receipt"]["standing"] != "verified", r)
+
+    d.call("remove_requirement", id=now["stress"]["id"])
+    expect("stress" not in rows(d), "removed")
+
+
+def unmeshed_part(d):
+    """A build without the mesher (every CI build: no distribution package
+    ships Netgen) cannot solve the bar. Its study requirements read
+    unresolved, naming why -- never pass, and never a number made up --
+    while the ones that need no solve are measured as anywhere else."""
+    r = d.call("check_requirements")
+    got = {x["name"]: x for x in r["requirements"]}
+    for name in ("end moves", "stress", "end moves, by formula"):
+        expect(got[name]["state"] == "unresolved"
+               and "FEM support" in got[name].get("note", ""),
+               f"no mesher, no evidence: {name} {got[name]}")
+    expect(got["mass"]["state"] == "pass"
+           and got["mass"]["unit"] == "g" and 75 < got["mass"]["value"] < 82,
+           f"10 cm3 of steel: {got['mass']}")
+    expect(got["literals"]["state"] in ("pass", "fail"),
+           f"a verdict: {got['literals']}")
+    expect(r["receipt"]["standing"] != "verified", r["receipt"])
+
+
+def mesher_available(d):
+    feats = d.call("ping").get("features", {})
+    return bool(feats.get("fem") and feats.get("mesher"))
+
+
+
 def main():
     binary = sys.argv[1]
     with launch(binary) as app:
@@ -254,98 +377,10 @@ def main():
         listed = d.call("list_requirements")
         expect(listed["summary"]["unchecked"] == 5 and not listed["all_pass"],
                f"stated, never checked -- not a pass: {listed['summary']}")
-        r = d.call("check_requirements")
-        got = {x["name"]: x for x in r["requirements"]}
-        for name in ("end moves", "stress", "end moves, by formula", "mass"):
-            expect(got[name]["state"] == "pass", f"{name}: {got[name]}")
-        expect(abs(got["end moves"]["value"] - 0.05) < 0.01,
-               f"FL/EA is 0.05 mm: {got['end moves']}")
-        expect(abs(got["end moves, by formula"]["value"]
-                   - got["end moves"]["value"] * 1000) < 1e-6,
-               f"the formula reads the same face: {got}")
-        expect(abs(got["stress"]["limit"] - 250 / 1.5) < 1e-9,
-               f"a bound expression is evaluated: {got['stress']}")
-        expect(got["mass"]["unit"] == "g" and 75 < got["mass"]["value"] < 82,
-               f"10 cm3 of steel: {got['mass']}")
-        expect(got["literals"]["state"] in ("pass", "fail"),
-               f"a verdict: {got['literals']}")
-        expect(r["receipt"]["claims"] and r["checked"] == 5, r["receipt"])
-
-        # ---- Re-checking an unchanged design measures nothing ----------------
-        t0 = time.time()
-        again = d.call("check_requirements")
-        expect(again["checked"] == 0 and again["reused"] == 5,
-               f"all current, nothing measured: {again['checked']}")
-        expect(time.time() - t0 < 2.0, "a reuse is well under the solve")
-        rerun = d.call("check_requirements", recompute=True,
-                       ids=[rows(d)["mass"]["id"]])
-        expect(rerun["checked"] == 1, f"recompute measures: {rerun}")
-
-        # ---- A model edit: stale where it reaches, current elsewhere ---------
-        d.call("set_variable", name="load_n", expression="30000")
-        now = rows(d)
-        for name in ("end moves", "stress", "end moves, by formula"):
-            expect(now[name]["state"] == "stale",
-                   f"the load moved: {name} {now[name]}")
-        expect(now["mass"]["state"] == "pass",
-               f"the load moves no mass: {now['mass']}")
-        r = d.call("check_requirements", **{"async": True})
-        expect(r.get("started") and isinstance(r.get("job"), int), r)
-        deadline = time.time() + 120
-        while time.time() < deadline:
-            st = d.call("study_status", job=r["job"])
-            if not st["running"]:
-                break
-            time.sleep(0.1)
-        expect(st["outcome"] == "done" and st["kind"] == "requirements", st)
-        now = rows(d)
-        expect(now["stress"]["state"] == "fail"
-               and now["stress"]["value"] > now["stress"]["limit"],
-               f"three times the load, past 250/1.5: {now['stress']}")
-        expect(now["end moves"]["state"] == "fail", now["end moves"])
-
-        # ---- Editing a requirement drops its evidence -----------------------
-        rid = now["end moves"]["id"]
-        e = d.call("set_requirement", id=rid,
-                   bound={"kind": "at_most", "value": 0.5})["requirement"]
-        expect(e["state"] == "unchecked" and e["revision"] == 2,
-               f"edited: the old evidence was about the old bound: {e}")
-        d.call("check_requirements", ids=[rid])
-        expect(state(d, "end moves") == "pass", rows(d)["end moves"])
-
-        # ---- Both project forms carry them -----------------------------------
-        with tempfile.TemporaryDirectory() as tmp:
-            for path in (os.path.join(tmp, "bar.json"),
-                         os.path.join(tmp, "bar.dsgn")):
-                before = rows(d)
-                d.call("save_project", path=path)
-                d.call("open_project", path=path)
-                after = rows(d)
-                expect(set(after) == set(before), f"{path}: {after.keys()}")
-                for name, row in before.items():
-                    want = row["state"]
-                    if path.endswith(".json") and name in (
-                            "end moves", "stress", "end moves, by formula"):
-                        # The single-file form carries no study result, so
-                        # a reopened study is unsolved: its hash is the same
-                        # inputs, the evidence still current.
-                        pass
-                    expect(after[name]["state"] == want,
-                           f"{path}: {name} {want} -> {after[name]}")
-                    expect(after[name]["revision"] == row["revision"], name)
-
-        # ---- A deleted reference is unresolved, never pass -------------------
-        d.call("remove_study", id=study)
-        now = rows(d)
-        for name in ("end moves", "stress"):
-            expect(now[name]["state"] == "unresolved"
-                   and "study" in now[name]["note"], now[name])
-        r = d.call("check_requirements", ids=[now["stress"]["id"]])
-        expect(r["requirements"][0]["state"] == "unresolved"
-               and r["receipt"]["standing"] != "verified", r)
-
-        d.call("remove_requirement", id=now["stress"]["id"])
-        expect("stress" not in rows(d), "removed")
+        if mesher_available(d):
+            studied_part(d, study)
+        else:
+            unmeshed_part(d)
 
         # ---- An assembly: motion, clearance, contact, mass -------------------
         a = connect(app.port)
