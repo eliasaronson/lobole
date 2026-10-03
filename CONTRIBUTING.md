@@ -123,7 +123,9 @@ the README's package list is complete — and it **derives** the package list,
 the container images and the excluded tests from
 `.github/workflows/ci.yml`, so the two cannot drift. Build trees live in
 `.ci-local/` and are reused, so a second run is a rebuild of what changed
-(~1 minute) rather than a fresh compile.
+(~1 minute) rather than a fresh compile. The containers run as you
+(`--user`), so `.ci-local/` is yours to delete; a tree that an older run left
+owned by root is handed back once, through the same image, at the next run.
 
 `--asan` is separate because the sanitized build is its own ~4-minute compile.
 On GitHub that job runs weekly and on demand rather than per push, so if you

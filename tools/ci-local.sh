@@ -168,6 +168,22 @@ run_build() {
   exit 1
 }
 
+# The containers run as the invoking user (`--user`), so what they write into
+# .ci-local/ is a file this user can rebuild over and delete. They used to run
+# as root, and a worktree that had run them could not be removed without
+# docker ("Permission denied" under .ci-local/ubuntu-24-04/). A tree left by
+# such a run would now fail the --user build half way, so it is handed back
+# first: once, through the same image, which is the only thing here that is
+# root.
+#   reclaim_tree <image tag> <dir under $root>
+reclaim_tree() {
+  local tag="$1" dir="$2"
+  [ -n "$(find "$root/$dir" ! -user "$(id -u)" -print -quit 2>/dev/null)" ] || return 0
+  step "reclaiming root-owned files in $dir (left by a run before --user)"
+  docker run --rm -v "$root/$dir:/t" "$tag" chown -R "$(id -u):$(id -g)" /t \
+    || { fail "could not chown $dir; remove it with: docker run --rm -v \"$root/$dir:/t\" $tag rm -rf /t/*"; exit 1; }
+}
+
 started=$SECONDS
 failures=0
 # Compilers from free memory, not cores (tools/build-jobs, ~1.5 GB each): at
@@ -256,6 +272,7 @@ if [ "$run_containers" = 1 ]; then
     printf 'FROM %s\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates %s && rm -rf /var/lib/apt/lists/*\n' \
       "$image" "$PACKAGES" > "$build_dir/Dockerfile"
     docker build -q -t "$tag" "$build_dir" > /dev/null
+    reclaim_tree "$tag" "$build_dir"
 
     # No '> /dev/null' on the build: run_tests keeps the whole log and prints
     # it only on failure, and a compile error with its output discarded leaves
@@ -265,7 +282,8 @@ if [ "$run_containers" = 1 ]; then
     # `set -o pipefail`: without it the pipe to tail swallows ctest's exit
     # status and every run looks green.
     run_tests "${image//[:.]/-}" "$image" \
-      docker run --rm -v "$root:/src:ro" -v "$root/$build_dir:/b" "$tag" bash -c "
+      docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
+        -v "$root:/src:ro" -v "$root/$build_dir:/b" "$tag" bash -c "
          set -o pipefail
          cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release &&
          cmake --build /b -j$jobs && $ctest_cmd"
@@ -299,6 +317,8 @@ if [ "$run_pixel" = 1 ]; then
   # The ccache mount must exist first, or docker creates it owned by root and
   # the --user build cannot write it ("ccache: Permission denied").
   mkdir -p "$root/.ci-local/ccache"
+  reclaim_tree "$tag" "$build_dir"
+  reclaim_tree "$tag" .ci-local/ccache
   run_tests pixel "pixel gate" \
     docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
       -v "$root:/src" -v "$root/$build_dir:/b" -v "$root/.ci-local/ccache:/tmp/ccache" \
