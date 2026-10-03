@@ -48,11 +48,11 @@ namespace remote {
 static constexpr MethodDoc AssemblyMethods[] = {
     {"set_active_part",
      "Switch the active tab {part: name|id|index} (legacy: name, index).",
-     "index, name, part", remote::NotInBatch},
+     "part?:string|int, name?:string|int, index?:int>=0", remote::NotInBatch},
     {"delete_part",
      "Delete a part/assembly/drawing tab {part: name|id|index} (legacy: "
      "index); refused while any assembly places it.",
-     "index, part", remote::NotInBatch},
+     "part?:string|int, index?:int>=0", remote::NotInBatch},
     {"add_occurrence",
      "Place a part OR another assembly in the active assembly {part: name or "
      "slot id of either, transform?}. Returns {id, part_id, ref_kind}; a "
@@ -63,8 +63,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "places (a part's or a sub-assembly's; see "
      "set_occurrence_configuration); {material: slug} makes this placement "
      "of that material (see set_occurrence_material).",
-     "configuration, fixed, flexible, material, name, part, transform, "
-     "visible"},
+     "part:string|int, name?:string, transform?:object, visible?:bool, "
+     "fixed?:bool, configuration?:string|int|null, material?:string|null, "
+     "flexible?:bool"},
     {"remove_occurrence",
      "Remove an occurrence. Takes `occurrence` as well as `id`.",
      "id, occurrence"},
@@ -78,7 +79,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "where it actually sits, which get_state cannot give you because its "
      "boxes are in the part's own space. For a single named point or axis "
      "use `frame` with an occurrence instead.",
-     "bounds", remote::NoFlags,
+     "bounds?:bool", remote::NoFlags,
      "occurrences[]{type,id,name,part_id,ref_kind,part_version,transform,"
      "visible,fixed,configuration_id,attached_to?,attach_offset?,attach_"
      "rotation?,attach_seat?{face,axis,inner_path?},attach_error?,"
@@ -90,7 +91,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}. Either half may "
      "be omitted and keeps its current value, so sliding a part along one "
      "axis needs no quaternion.",
-     "id, occurrence, transform"},
+     "id?:int>=0, occurrence?:int>=0, transform:object"},
     {"set_occurrence_visible",
      "Show/hide an occurrence. Takes `occurrence` as well as `id` — its "
      "neighbours here spell that argument `occurrence`, and one method "
@@ -171,8 +172,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "two anchors are not square to one axis, because then no turn seats "
      "them and a nearest quarter turn would be a guess wearing a joint's "
      "clothes.",
-     "a, b, ball_rotation, derive, dx, dy, flipped, name, offset, rotation, "
-     "rotation_deg, type"},
+     "type?:@mate_types, a:object, b:object, name?:string, flipped?:bool, "
+     "rotation?:number, rotation_deg?:number, offset?:number, dx?:number, "
+     "dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose'"},
     {"set_mate",
      "Edit a mate's parameters, and the way to POSE a mechanism: turn a "
      "revolute or cylindrical mate with `rotation` (RADIANS) or "
@@ -187,9 +189,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "sub-assembly placement (its own id there): only rotation, "
      "rotation_deg or offset — THIS placement's pose of it, kept on the "
      "occurrence; refused where the placement's configuration holds it.",
-     "ball_rotation, dx, dy, flipped, id, name, offset, path, rotation, "
-     "rotation_deg"},
-    {"remove_mate", "Remove a mate by id.", "id"},
+     "id:int>=0, path?:int[]|null, name?:string, flipped?:bool, "
+     "rotation?:number, rotation_deg?:number, offset?:number, dx?:number, "
+     "dy?:number, ball_rotation?:number[4]"},
+    {"remove_mate", "Remove a mate by id.", "id:int>=0"},
     {"list_mates",
      "List mates with `status` (satisfied | redundant | error) and the "
      "error text when there is one. `type` is the mate's KIND — fastened, "

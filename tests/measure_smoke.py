@@ -148,8 +148,9 @@ def main():
             accepted = []
         except RuntimeError as e:
             expect("nonesuch" in str(e), f"the refusal names the bad kind: {e}")
-            tail = str(e).split("Accepted:")[-1].strip().rstrip(".")
-            accepted = [k.strip() for k in tail.split(",")]
+            # The contract's structured refusal lists them
+            # (docs/scripting/rpc.md#structured-errors).
+            accepted = e.diagnostic["accepted"]
         expect(len(accepted) >= 2, f"the refusal listed the alternatives: {accepted}")
 
         # Every kind the refusal advertises must WORK, and must be named in

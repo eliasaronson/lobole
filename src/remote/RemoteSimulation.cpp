@@ -472,7 +472,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "of any kind included; `input_hash` names the inputs, `recompute: true` "
      "runs anyway. Takes "
      "`id` (or `study`, the same thing here) — see remove_study.",
-     "async, id, outlive_client, recompute, study"},
+     "id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, "
+     "recompute?:bool"},
     {"cancel_study",
      "Cancel a running study: {job} (the id run_study, run_motion_study or "
      "mesh_study answered -- any study job, motion included) or `id` (or "

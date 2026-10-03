@@ -1,5 +1,7 @@
 #pragma once
 
+#include "remote/InspectionContracts.h"
+
 #include <nlohmann/json.hpp>
 
 #include <set>
@@ -42,8 +44,7 @@ public:
   template <class K> const nlohmann::json& at(const K& key) const {
     seen_.emplace(key);
     if (!params_.contains(key))
-      throw std::runtime_error("missing required parameter '" +
-                               std::string(key) + "'");
+      Missing(key);
     return params_.at(key);
   }
 
@@ -52,8 +53,7 @@ public:
     // operator[] on a const json with a missing key is UB, not an exception —
     // guard it the same way.
     if (!params_.contains(key))
-      throw std::runtime_error("missing required parameter '" +
-                               std::string(key) + "'");
+      Missing(key);
     return params_[key];
   }
 
@@ -88,6 +88,15 @@ public:
   const std::set<std::string>& SeenKeys() const { return seen_; }
 
 private:
+  // Structured like a contract refusal
+  // (docs/scripting/rpc.md#structured-errors) with the operation left blank:
+  // RpcParams does not know its method, and the dispatcher fills it in where it
+  // answers.
+  [[noreturn]] static void Missing(const std::string& key) {
+    throw ContractError("", "missing_argument", "/params/" + key, nullptr,
+                        nullptr, "missing required parameter '" + key + "'");
+  }
+
   const nlohmann::json& params_;
   mutable std::set<std::string> seen_;
   mutable bool passthrough_ = false;

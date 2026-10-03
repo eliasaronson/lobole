@@ -127,7 +127,7 @@ def main():
             d.call("create_drawing", name="bad-sheet", sheet="A4")
             raise AssertionError("string sheet must be refused")
         except RuntimeError as e:
-            expect("sheet is an object" in str(e), f"names the shape: {e}")
+            expect("'sheet' must be an object" in str(e), f"names the shape: {e}")
         try:
             d.call("add_drawing_dim", view=front_id, kind="distance_x",
                    refs=[{"edge": vlines[0]["ref"]},

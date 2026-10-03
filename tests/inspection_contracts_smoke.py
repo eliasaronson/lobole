@@ -135,7 +135,16 @@ def main():
                 server = refusal(lambda: raw.call('geometry_snapshot', **request), code)
                 assert client == server, (client, server)
             bad_call = dict(method='geometry_snapshot', params=dict(good, body=True))
-            failed_batch = refusal(lambda: raw.call('batch', calls=[bad_call]), 'batch_failed')
+            # Refused before the first call runs (docs/scripting/rpc.md#batch).
+            early = refusal(lambda: raw.call('batch', calls=[bad_call]), 'invalid_argument')
+            assert early['path'] == '/params/body' and early['call'] == 1, early
+            # A $ref defers the check to when the call runs; the batch then
+            # rolls back and keeps the call's diagnostic.
+            ref_call = dict(method='geometry_snapshot',
+                            params=dict(good, body=True,
+                                        max_elements={'$ref': 1, 'key': 'active_id'}))
+            failed_batch = refusal(lambda: raw.call(
+                'batch', calls=[dict(method='list_parts'), ref_call]), 'batch_failed')
             assert failed_batch['failures'][0]['diagnostic']['path'] == '/params/body'
             partial = raw.call('batch', calls=[bad_call], stop_on_error=False)
             assert partial['failed'][0]['diagnostic']['code'] == 'invalid_argument'

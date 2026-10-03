@@ -51,6 +51,15 @@ namespace remote {
 [[nodiscard]] const Document& SubjectPart(ui::AppState& state, Document* active,
                                           const RpcParams& params);
 
+// A part's revision: {session, part_id, instance, version} -- this server
+// process, the part's stable slot id, the document instance (a reopen or a
+// replacement is a new one) and its regeneration count. What
+// geometry_snapshot binds its references to, get_state reports, and a
+// guarded write's `expect_revision` is compared against
+// (docs/scripting/rpc.md#the-revision-guard).
+[[nodiscard]] nlohmann::json PartRevision(const Document& part,
+                                          uint64_t partId);
+
 // One entry per RPC method for the describe endpoint. Each domain module
 // keeps a static table ADJACENT to its dispatch if-chain (the drift defense:
 // add the branch, add the row) exposed via XxxMethodDocs().
@@ -71,6 +80,15 @@ struct MethodDoc {
   // tools/rpc_params_scan.py and fails when a row and its branch disagree in
   // either direction — so a new key without a row, or a row naming a key
   // nobody reads, is a failing test rather than a stale line.
+  //
+  // A row may TYPE its keys, and is then a contract
+  // (docs/scripting/rpc.md#typed-contracts): `name?:type` per key, `?` for
+  // optional, types int/number/bool/string/object/null/any/revision, `T[]`
+  // or `T[N]`, unions with `|`, literals 'x', a describe vocabulary @name,
+  // ranges int>=0 / number>0. The dispatcher validates such a request before
+  // the handler runs, describe publishes it as `request_schema`, and
+  // tools/generate_rpc_contracts.py types the SDK from it
+  // (remote/RpcContract.h). A typed row types every key.
   const char* params;
 
   // What the DISPATCHER needs to know about this method, in the same row as

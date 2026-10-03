@@ -32,7 +32,7 @@ namespace remote {
 static constexpr MethodDoc DrawingMethods[] = {
     {"create_drawing",
      "Add a drawing document (sheet size, title block) to the project.",
-     "name, sheet"},
+     "name?:string, sheet?:object"},
     {"set_drawing_sheet",
      "Edit the active drawing's sheet {size?, landscape?, title_block?}.",
      "landscape, size, title_block"},
@@ -175,7 +175,7 @@ static constexpr MethodDoc DrawingMethods[] = {
     {"list_drawing_dims", "List dimensions with values.", "", remote::NoFlags,
      "dims[]{id,kind,view,resolved,value,text}"},
     {"export_drawing", "Export the drawing to SVG or PDF by extension {path}.",
-     "path", remote::NotInBatch},
+     "path:string", remote::NotInBatch},
     {"add_drawing_note",
      "Add a text note ({{expression}} resolves project variables, or "
      "source-part variables with view) {text, position: [x,y] sheet mm, view?, "

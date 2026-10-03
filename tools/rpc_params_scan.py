@@ -38,6 +38,12 @@ KEY_RE = re.compile(
     r'\b(?:p|params|request\.params)\s*'
     r'(?:\.\s*(?:at|value|contains)\s*\(|\[)\s*"([A-Za-z0-9_]+)"'
     r'|\bneed\s*\(\s*(?:p|params)\s*,\s*"([A-Za-z0-9_]+)"')
+# A key read so that its absence is a path, not an error: `value` (with a
+# default) or `contains`. A typed row's `?` must agree with this
+# (tests/rpc_params_gate.py): a key only ever read with `at()` is required.
+OPT_RE = re.compile(
+    r'\b(?:p|params|request\.params)\s*\.\s*(?:value|contains)\s*\(\s*'
+    r'"([A-Za-z0-9_]+)"')
 LITERAL_RE = re.compile(r'"((?:[^"\\]|\\.)*)"')
 RAW_RE = re.compile(r'\b(?:p|params)\s*\.\s*raw\s*\(\s*\)')
 # Method names in a condition: `m == "x"`, and the `||` chains that group
@@ -117,13 +123,18 @@ def scan_source(src):
     out = {}
 
     def note(names, key=None, opaque=False, handoff=None, annotated=False,
-             literal=None):
+             literal=None, optional=None, annotated_key=None):
         for nm in names:
             e = out.setdefault(nm, {"keys": set(), "opaque": False,
                                     "handoff": set(), "annotated": False,
-                                    "literals": set()})
+                                    "literals": set(), "optional": set(),
+                                    "annotated_keys": set()})
             if key:
                 e["keys"].add(key)
+            if optional:
+                e["optional"].add(optional)
+            if annotated_key:
+                e["annotated_keys"].add(annotated_key)
             if literal:
                 e["literals"].add(literal)
             if opaque:
@@ -179,6 +190,10 @@ def scan_source(src):
         owner = _innermost(scopes, mm.start())
         if owner:
             note(owner, key=mm.group(1) or mm.group(2))
+    for mm in OPT_RE.finditer(bare):
+        owner = _innermost(scopes, mm.start())
+        if owner:
+            note(owner, optional=mm.group(1))
     for mm in RAW_RE.finditer(bare):
         owner = _innermost(scopes, mm.start())
         if owner:
@@ -209,7 +224,7 @@ def scan_source(src):
         if mm.group(1).strip() == "none":
             continue
         for k in (x.strip() for x in mm.group(1).split(",")):
-            note(owner, key=k)
+            note(owner, key=k, annotated_key=k)
     # Who hands the params to a helper, and to which one.
     for mm in HANDOFF_RE.finditer(bare):
         callee = mm.group(1)
@@ -224,7 +239,9 @@ def scan_source(src):
         note(names)
     return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"],
                 "handoff": sorted(v["handoff"]), "annotated": v["annotated"],
-                "literals": sorted(v["literals"])}
+                "literals": sorted(v["literals"]),
+                "optional": sorted(v["optional"]),
+                "annotated_keys": sorted(v["annotated_keys"])}
             for k, v in out.items()}
 
 
@@ -238,13 +255,19 @@ def _scopes(bare):
         if c == '{':
             depth += 1
             if pending:
-                stack.append((pending, i, depth))
+                # The scope starts at its `if`, so a key the CONDITION reads
+                # (`m == "x" && p.contains("part")`) is the method's too.
+                stack.append((pending[0], pending[1], depth))
                 pending = None
         elif c == '}':
             while stack and stack[-1][2] == depth:
                 names, start, _ = stack.pop()
                 out.append((names, start, i))
             depth -= 1
+        elif c == ';':
+            # A braceless `if (m == "x") return ...;` opens no scope; it
+            # must not claim the next block it happens to precede.
+            pending = None
         elif c == 'i' and bare.startswith('if', i) and \
                 not (i and (bare[i - 1].isalnum() or bare[i - 1] == '_')):
             j = bare.find('(', i)
@@ -260,7 +283,7 @@ def _scopes(bare):
                     k += 1
                 names = COND_RE.findall(bare[j:k + 1])
                 if names:
-                    pending = names
+                    pending = (names, i)
                 i = k
         i += 1
     while stack:
@@ -328,9 +351,11 @@ def _helpers(sources):
             if COND_RE.search(body):
                 continue  # a dispatcher: its branches are scanned as methods
             e = found.setdefault(name, {"keys": set(), "opaque": False,
-                                        "calls": set()})
+                                        "calls": set(), "optional": set()})
             for km in KEY_RE.finditer(body):
                 e["keys"].add(km.group(1) or km.group(2))
+            for km in OPT_RE.finditer(body):
+                e["optional"].add(km.group(1))
             e["opaque"] = e["opaque"] or bool(RAW_RE.search(body))
             for hm in HANDOFF_RE.finditer(body):
                 callee = hm.group(1).split("::")[-1]
@@ -345,22 +370,25 @@ def _helpers(sources):
             raise SystemExit(f"rpc_params_scan: no table rows in "
                              f"{table_path} -- did the op-field table move?")
         found[name]["keys"].update(table)
+        found[name]["optional"].update(table)  # a field is set if present
     return found
 
 
 def _resolve(helpers, name, seen=None):
-    """A helper's keys and opacity, following the helpers it calls."""
+    """A helper's keys, opacity and optionally-read keys, following the
+    helpers it calls."""
     seen = set() if seen is None else seen
     if name in seen or name not in helpers:
-        return set(), False
+        return set(), False, set()
     seen.add(name)
     h = helpers[name]
-    keys, opaque = set(h["keys"]), h["opaque"]
+    keys, opaque, optional = set(h["keys"]), h["opaque"], set(h["optional"])
     for c in h["calls"]:
-        k, o = _resolve(helpers, c, seen)
+        k, o, opt = _resolve(helpers, c, seen)
         keys |= k
         opaque = opaque or o
-    return keys, opaque
+        optional |= opt
+    return keys, opaque, optional
 
 
 def scan_files(paths):
@@ -375,22 +403,32 @@ def scan_files(paths):
             e = merged.setdefault(name, {"keys": set(), "opaque": False,
                                          "handoff": set(),
                                          "annotated": False,
-                                         "literals": set()})
+                                         "literals": set(),
+                                         "optional": set(),
+                                         "annotated_keys": set()})
             e["keys"].update(info["keys"])
             e["literals"].update(info.get("literals", ()))
+            e["optional"].update(info.get("optional", ()))
+            e["annotated_keys"].update(info.get("annotated_keys", ()))
             e["opaque"] = e["opaque"] or info["opaque"]
             e["handoff"].update(info["handoff"])
             e["annotated"] = e["annotated"] or info["annotated"]
             for h in info["handoff"]:
                 h = h.split("::")[-1]
                 if h in helpers:
-                    keys, opaque = _resolve(helpers, h)
+                    keys, opaque, optional = _resolve(helpers, h)
                     e["keys"].update(keys)
+                    e["optional"].update(optional)
                     e["opaque"] = e["opaque"] or opaque
                     e["annotated"] = True
+    # "optional": keys some path reads with value()/contains(), so their
+    # absence is a path; "annotated_keys": keys only an annotation names,
+    # whose way of being read the scanner cannot see.
     return {k: {"keys": sorted(v["keys"]), "opaque": v["opaque"],
                 "handoff": sorted(v["handoff"]), "annotated": v["annotated"],
-                "literals": sorted(v["literals"])}
+                "literals": sorted(v["literals"]),
+                "optional": sorted(v["optional"]),
+                "annotated_keys": sorted(v["annotated_keys"])}
             for k, v in sorted(merged.items())}
 
 

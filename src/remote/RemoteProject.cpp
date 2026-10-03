@@ -57,11 +57,11 @@ static constexpr MethodDoc ProjectMethods[] = {
      "rebuilt_parts (parts whose saved geometry could not be used, so they "
      "were rebuilt from their features) and rebuild_reason when they share "
      "one; saving re-bakes them, and the next open is a load.",
-     "path", remote::NotInBatch},
+     "path:string", remote::NotInBatch},
     {"save_project",
      "Save the project to {path, message?, force?}. Refuses when the project "
      "changed on disk since it was opened; {force:true} saves over it.",
-     "force, message, path", remote::NotInBatch},
+     "path:string, message?:string, force?:bool", remote::NotInBatch},
     {"validation_revision",
      "Session revision of all model tabs, plus unresolved occurrence "
      "references. "
@@ -105,7 +105,7 @@ static constexpr MethodDoc ProjectMethods[] = {
      "exports one body of a part. Replies {bodies} (part) or {shapes} "
      "(assembly) — placed body shapes — plus {products} and {instances}. "
      "No `deflection`: STEP is exact, so it is refused.",
-     "body, part, path", remote::NotInBatch},
+     "path:string, part?:string|int, body?:int", remote::NotInBatch},
     {"export_stl",
      "Export to STL {path, deflection?}. `deflection` is the tessellation "
      "chord tolerance in MILLIMETRES (smaller = finer, more triangles); STEP "
@@ -159,7 +159,9 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"set_variable",
      "Add or redefine a variable {name, expression, comment?, "
      "scope: project|part}; returns value + regen.",
-     "comment, expression, name, scope", remote::Deferrable},
+     "name:string, expression:string|number, scope?:'project'|'part', "
+     "comment?:string",
+     remote::Deferrable},
     {"list_variables", "Project variables and the active part's local ones.",
      "", remote::NoFlags,
      "variables[]{name,expression,value,scope,comment?,error?}"},

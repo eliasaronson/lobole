@@ -234,7 +234,7 @@ def main():
                f"and reports no volume: {mesh['pairs'][:2]}")
         expect(mesh.get("deflection_mm", 0) > 0,
                f"but says how close 'clear' was decided: {mesh}")
-        refused(d, "interference", "not one of: exact, mesh", mode="wibble")
+        refused(d, "interference", "must be one of: exact, mesh", mode="wibble")
 
         print("contact_smoke: all checks passed")
         return 0

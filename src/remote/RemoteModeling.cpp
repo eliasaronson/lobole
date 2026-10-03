@@ -292,7 +292,8 @@ static constexpr MethodDoc ModelingMethods[] = {
      "(set_print_process) "
      "also returns `print`: what the print wants it modelled at, since the "
      "basic profile it cuts prints tight (docs/tolerances/README.md).",
-     "feature", remote::NeedsPart | remote::Deferrable},
+     "feature:object, expect_revision?:revision",
+     remote::NeedsPart | remote::Deferrable},
     {"split_for_printing",
      "Cut a body into pieces that fit a printer's bed, each piece its own "
      "part {bed_mm: [x, y, z], body?, part?, cuts?: [{axis: x|y|z, at_mm}], "
@@ -344,13 +345,17 @@ static constexpr MethodDoc ModelingMethods[] = {
      "one it has, so references to it (sketch_id, mates, drawing dimensions) "
      "keep resolving. Pass a different \"id\" there only to mean 'this is a "
      "different feature now', which deliberately dangles those references.",
-     "feature, feature_id, index", remote::NeedsPart | remote::Deferrable},
+     "feature:object, feature_id?:int>=0, index?:int>=0, "
+     "expect_revision?:revision",
+     remote::NeedsPart | remote::Deferrable},
     {"set_material",
      "Assign a material slug (describe's material_slugs) to a body's creating "
      "feature, by feature_id (its created_by) or by body index; '' restores "
      "default. An unrecognised slug is refused, naming the accepted set. "
      "Drives mass, BOM and FEM as well as appearance.",
-     "body, feature_id, material", remote::NeedsPart | remote::Deferrable},
+     "material?:string, feature_id?:int>=0, body?:int>=0, "
+     "expect_revision?:revision",
+     remote::NeedsPart | remote::Deferrable},
     {"set_appearance",
      "Visual override SEPARATE from the physical material (v54): "
      "{feature_id|body, color?: [r,g,b] LINEAR 0..1 (not sRGB: the renderer "
@@ -374,7 +379,8 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"delete_feature",
      "Delete a feature by `feature_id` (`id` is the older spelling) or "
      "`index`; one undo step; returns {regen}.",
-     "feature_id, id, index", remote::NeedsPart | remote::Deferrable},
+     "feature_id?:int>=0, id?:int>=0, index?:int>=0, expect_revision?:revision",
+     remote::NeedsPart | remote::Deferrable},
     {"project_geometry",
      "Project a body face/edge (feature_id + element) into "
      "a sketch as live locked construction geometry.",

@@ -22,12 +22,12 @@ static constexpr MethodDoc ConfigurationMethods[] = {
     {"add_configuration",
      "Add a configuration to the active part (parameter overrides + feature "
      "suppression) or assembly (occurrence suppression).",
-     "name"},
+     "name?:string"},
     {"remove_configuration", "Remove a configuration by `id`.", "id"},
     {"list_configurations",
      "List configurations and the active one - of the active tab, or of "
      "`part` (id or name) from any tab.",
-     "part", remote::NoFlags,
+     "part?:string|int", remote::NoFlags,
      "configurations[]{id, name, and then the tab's own: on a PART "
      "parameter_overrides, suppressed_features, unsuppressed_features; on "
      "an ASSEMBLY suppressed_occurrences, suppressed_mates, "
@@ -50,7 +50,7 @@ static constexpr MethodDoc ConfigurationMethods[] = {
     {"set_active_configuration",
      "Activate a configuration (0 = base) and regenerate (part) or re-solve "
      "(assembly).",
-     "id"},
+     "id?:int>=0"},
 };
 std::span<const MethodDoc> ConfigurationMethodDocs() {
   return ConfigurationMethods;

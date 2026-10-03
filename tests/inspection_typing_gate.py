@@ -29,8 +29,9 @@ with tempfile.TemporaryDirectory(prefix='inspection-mypy-') as cache:
     base = [sys.executable, '-m', 'mypy', '--follow-imports=silent',
             '--show-error-codes', '--no-error-summary', '--no-pretty',
             '--cache-dir', cache]
-    for name in ('valid', 'invalid'):
-        path = ROOT / 'tests/typing' / f'inspection_{name}.py'
+    for name in ('inspection_valid', 'inspection_invalid', 'rpc_valid',
+                 'rpc_invalid'):
+        path = ROOT / 'tests/typing' / f'{name}.py'
         result = subprocess.run(base + [str(path)], env=env, text=True,
                                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         errors = {int(n) for n in re.findall(r':(\d+): error:', result.stdout)}
@@ -38,7 +39,8 @@ with tempfile.TemporaryDirectory(prefix='inspection-mypy-') as cache:
                     if '# type-error' in line}
         assert errors == expected, result.stdout
         assert result.returncode == (1 if expected else 0), result.stdout
-    generated = subprocess.run(base + [str(ROOT / 'tools/designer_inspection.py')],
+    generated = subprocess.run(base + [str(ROOT / 'tools/designer_inspection.py'),
+                                      str(ROOT / 'tools/designer_rpc.py')],
                                env=env, text=True, capture_output=True)
     assert generated.returncode == 0, generated.stdout + generated.stderr
-print('inspection typing: valid fixture and every seeded error verified')
+print('inspection + rpc typing: valid fixtures and every seeded error verified')

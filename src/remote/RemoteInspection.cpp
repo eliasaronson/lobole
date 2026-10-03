@@ -120,6 +120,20 @@ const Document& SubjectPart(ui::AppState& state, Document* active,
   return *active;
 }
 
+json PartRevision(const Document& part, uint64_t partId) {
+  // A process nonce prevents a document ID from another server matching.
+  static const std::string session = [] {
+    std::random_device random;
+    return std::to_string(random()) + "-" + std::to_string(random()) + "-" +
+           std::to_string(
+               std::chrono::steady_clock::now().time_since_epoch().count());
+  }();
+  return json{{"session", session},
+              {"part_id", partId},
+              {"instance", part.InstanceId()},
+              {"version", part.Version()}};
+}
+
 namespace {
 
 // A feature of `doc` by id or by name, for a filter; refused by name.
@@ -763,7 +777,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "is a yes/no riding on a cheap check — contact_report on the same tab "
      "gives the exact gaps. Naming a `body` checks that one and skips the "
      "connectivity pass entirely.",
-     "body", remote::NeedsPart,
+     "body?:int", remote::NeedsPart,
      "ok, valid, "
      "bodies[]{body,name,valid,bad_faces,bad_edges,bad_wires,reasons}, "
      "body_count, "
@@ -930,7 +944,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "a cheap conservative bound that can read ~60% over on a swept surface. "
      "`part` reads another part without switching to it; from an assembly tab "
      "with no `part`, aggregates every visible occurrence in world space.",
-     "body, part", remote::NoFlags,
+     "part?:string|int, body?:int", remote::NoFlags,
      "bodies[]{body, name, volume, surface_area, center_of_mass, inertia, "
      "material, bbox_min?, bbox_max?, density?, mass_g}, total{volume, "
      "center_of_mass, mass_g}"},
@@ -959,7 +973,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "exact "
      "one is pathological (two lofted propellers 151 mm apart take 55 s, "
      "because every face pair is equally far and nothing prunes).",
-     "a, b, distance_kind, kind, mode, part"},
+     "a:object, b?:object, kind?:'distance'|'angle'|'both', "
+     "distance_kind?:string, mode?:'exact'|'mesh', part?:string|int"},
     {"frame",
      "The frame of a thing — origin, unit x/y/z, and a column-major 4x4 "
      "`matrix` — in PART space on a part tab, or in WORLD space with "
@@ -971,7 +986,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "in the world. Nothing = the part origin. This is exactly the frame a "
      "mate connector with the same spec uses, so a script positions "
      "against it and never transcribes a coordinate.",
-     "element, feature_id, frame, occurrence, part"},
+     "part?:string|int, frame?:string|int, feature_id?:int>=0, "
+     "element?:string, occurrence?:string|int"},
     {"geometry_snapshot",
      "Immutable, bounded edge measurements in part coordinates. Requires a "
      "stable part_id and body index; never switches tabs. fields defaults to "
@@ -1017,7 +1033,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "configuration -- what a placement or a job part in it is made of. Each "
      "edge lists the `faces` it joins, by name: the edges where a top "
      "meets its walls are the ones whose faces include one of each.",
-     "body, configuration, entity, made_by, max_faces, part, role, via",
+     "part?:string|int, configuration?:string|int, body?:int, entity?:int>=0, "
+     "made_by?:string|int, role?:string, via?:string|int, max_faces?:int>=0",
      remote::NoFlags,
      "bodies[]{body,name,created_by,job_part,faces[]{index,name,made_by,"
      "role,entity?,instance?,derived?,kind,area,centroid,normal,radius?,"
@@ -1098,7 +1115,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "(past the band, a clearance fit, no band on one side, off-axis) stays "
      "a clash with `press_fit_refused` [{fit, reason, excess_mm?}]. Mesh "
      "mode relieves none of these, and says so in `relieves`.",
-     "a, b, deadline_s, max_pairs, mode, touch_tol"},
+     "a?:string|int, b?:string|int, mode?:'exact'|'mesh', max_pairs?:int>=0, "
+     "deadline_s?:number, touch_tol?:number"},
     {"contact_report",
      "Contact graph: connected components (len 1 = one connected "
      "structure), per-pair state/distance, near_misses (gap <= near_tol, "
@@ -4090,19 +4108,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const glm::dmat4 local = localFrame(part, source);
     return frameJson(local, "part", source);
   }
-  const auto snapshotRevision = [](const Document& part, uint64_t partId) {
-    // A process nonce prevents a document ID from another server matching.
-    static const std::string session = [] {
-      std::random_device random;
-      return std::to_string(random()) + "-" + std::to_string(random()) + "-" +
-             std::to_string(
-                 std::chrono::steady_clock::now().time_since_epoch().count());
-    }();
-    return json{{"session", session},
-                {"part_id", partId},
-                {"instance", part.InstanceId()},
-                {"version", part.Version()}};
-  };
+  const auto snapshotRevision = PartRevision;
   if (m == "validate_snapshot") {
     const auto& previous = p.at("revision");
     const auto partId = previous.at("part_id").get<uint64_t>();

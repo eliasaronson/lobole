@@ -41,6 +41,7 @@ add_executable(designer_tests
     test_open_project.cpp
     test_cam_rough_rest.cpp
     test_instance_registry.cpp
+    test_rpc_contract.cpp
     test_screen_space_mapping.cpp
     test_recent_projects.cpp
     test_gitvault.cpp
@@ -1041,6 +1042,15 @@ add_test(NAME catalog_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/catalog_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(catalog_smoke PROPERTIES TIMEOUT 120)
+
+# Typed RPC contracts (docs/scripting/rpc.md#typed-contracts): the stubs
+# match the rows, and the running server enforces and publishes them.
+add_test(NAME rpc_contracts_generated
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/generate_rpc_contracts.py --check)
+add_test(NAME rpc_contracts_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_contracts_smoke.py
+                         $<TARGET_FILE:designer>)
+set_tests_properties(rpc_contracts_smoke PROPERTIES TIMEOUT 120)
 
 add_test(NAME inspection_contracts_generated
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/generate_inspection_contracts.py --check)

@@ -8,7 +8,9 @@
 // (docs/architecture.md#the-remote-json-rpc) left exactly two helpers used by
 // two of them, plus two the session owns and the dispatch reports in `ping`.
 
+#include "remote/InspectionContracts.h"
 #include "remote/RemoteServer.h"
+#include "remote/RpcContract.h"
 #include "ui/AppState.h"
 
 #include <glm/glm.hpp>
@@ -16,6 +18,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <string_view>
 #include <vector>
 
 // The mode this server was started in.
@@ -40,8 +43,27 @@ std::string UnknownParamError(const std::string& method,
 // the handler runs, for every way a request arrives: a refusal that comes
 // after the handler has written a file is a refusal of something already
 // done (docs/scripting/rpc.md#parameters).
-std::optional<std::string> UndeclaredParamsError(const std::string& method,
-                                                 const nlohmann::json& params);
+//
+// A ContractError: `what()` is the sentence, `diagnostic` the structured
+// refusal (code unknown_argument, the key, the keys the row takes).
+std::optional<remote::ContractError>
+UndeclaredParamsError(const std::string& method, const nlohmann::json& params);
+
+// The request schema of `method` -- an inspection contract or a typed
+// MethodDoc row (docs/scripting/rpc.md#typed-contracts) -- or nullptr.
+const nlohmann::json* RequestSchemaOf(const std::string& method);
+
+// Refuses (ContractError) a request its schema does not accept; a method
+// without one passes.
+void ValidateRequestContract(const std::string& method,
+                             const nlohmann::json& params);
+
+// The vocabulary a typed row names as `@name`, or nullptr.
+const remote::contract::Vocabulary* ContractVocabulary(std::string_view name);
+
+// The active part's revision ({session, part_id, instance, version}), or
+// null when the active tab is not a part.
+nlohmann::json ActivePartRevision(ui::AppState& state);
 
 // Where each of the active tab's undo histories stood before a call, so a
 // refused call can be taken back whole: the part's command stack, and the

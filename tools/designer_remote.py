@@ -181,6 +181,15 @@ def method_help(call, method="", reference=None):
         out["params_free_form"] = True
     else:
         out["params"] = row.get("params", [])
+    # A typed method (docs/scripting/rpc.md#typed-contracts): each key's
+    # type in words, from the same schema the server validates against.
+    schema = row.get("request_schema") or {}
+    if schema.get("properties"):
+        from designer_contracts import describe
+        required = set(schema.get("required", []))
+        out["param_types"] = {
+            k: describe(s) + ("" if k in required else " (optional)")
+            for k, s in schema["properties"].items()}
     for key in ("returns", "requires_part_doc"):
         if key in row:
             out[key] = row[key]

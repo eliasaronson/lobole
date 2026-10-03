@@ -72,10 +72,14 @@ def main():
                    b={"occurrence": o2, "origin": True})
             raise AssertionError("add_mate accepted the mis-spelled type")
         except RuntimeError as e:
-            expect("unknown mate type 'revolut'" in str(e),
+            # Refused by the contract, before the handler
+            # (docs/scripting/rpc.md#typed-contracts), with the same remedy.
+            expect("got \"revolut\"" in str(e),
                    f"refusal should name the typo: {e}")
-            expect("revolute" in str(e),
+            expect("revolute" in e.diagnostic["accepted"],
                    f"refusal should name what IS accepted: {e}")
+            expect("add_relation" in str(e),
+                   f"refusal should point a coupling at relations: {e}")
 
         # --- A slider mate: origin-to-origin, free to slide along Z --------
         mate = d.call("add_mate", type="slider", name="rail",
@@ -169,7 +173,7 @@ def main():
                "a refused derive leaves NO mate behind")
 
         # Refusals: an unknown word, and a mate type with a free DOF.
-        for kw, want in (({"derive": "sideways"}, "'twist'"),
+        for kw, want in (({"derive": "sideways"}, "one of: twist, pose"),
                          ({"derive": "twist", "type": "revolute"},
                           "FASTENED")):
             try:

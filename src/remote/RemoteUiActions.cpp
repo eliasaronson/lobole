@@ -944,9 +944,22 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
                               {"diagnostic", e.diagnostic}});
         continue;
       }
-      if (auto refusal =
-              UndeclaredParamsError(request.method, request.params)) {
-        RespondError(request.client, request.id, *refusal);
+      std::optional<remote::ContractError> refusal =
+          UndeclaredParamsError(request.method, request.params);
+      // Then the values, for a method whose row is typed
+      // (docs/scripting/rpc.md#typed-contracts): a missing key, a wrong
+      // type, an enum or a range is refused here, before anything runs.
+      if (!refusal) {
+        try {
+          ValidateRequestContract(request.method, request.params);
+        } catch (const remote::ContractError& e) {
+          refusal = e;
+        }
+      }
+      if (refusal) {
+        Send(request.client, {{"id", request.id},
+                              {"error", refusal->what()},
+                              {"diagnostic", refusal->diagnostic}});
         continue;
       }
     }
@@ -1060,6 +1073,12 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
                       << "\n";
           m_recording.flush();
         }
+        // A guarded write answers with the revision it left, so the next
+        // write in a chain can guard against this one
+        // (docs/scripting/rpc.md#the-revision-guard).
+        if (request.params.is_object() &&
+            request.params.contains("expect_revision") && result.is_object())
+          result["revision"] = ActivePartRevision(state);
         Respond(request.client, request.id, result);
         continue;
       }
@@ -1216,9 +1235,13 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       RespondError(request.client, request.id,
                    "unknown method: " + request.method);
     } catch (const remote::ContractError& e) {
+      json diagnostic = e.diagnostic;
+      // RpcParams' missing-key refusal does not know its method.
+      if (diagnostic.value("operation", "").empty())
+        diagnostic["operation"] = request.method;
       Send(request.client, {{"id", request.id},
                             {"error", e.what() + rolledBack()},
-                            {"diagnostic", e.diagnostic}});
+                            {"diagnostic", diagnostic}});
     } catch (const json::exception& e) {
       // A parameter of the wrong TYPE used to come back as nlohmann's own
       // words — "[json.exception.type_error.302] type must be string, but is

@@ -97,12 +97,26 @@ def method_docs(paths):
                 ps = literal(fields[2])
                 out[nm.group(1)] = {
                     "doc": doc,
-                    "params": "*" if ps == "*" else
-                    sorted(k.strip() for k in ps.split(",") if k.strip()),
+                    "params": "*" if ps == "*" else sorted(param_names(ps)),
+                    # The column as written: a typed one is the method's
+                    # contract (rpc_contract.parse_column).
+                    "column": ps,
                     "returns": rets,
                     "file": path,
                 }
     return out
+
+
+def param_names(column):
+    """The plain key names of a params column, typed or not — `a?:int` is
+    `a` (src/remote/RpcContract.h, ParamNames)."""
+    from rpc_contract import split_top
+    names = []
+    for entry in split_top(column, ","):
+        name = entry.split(":", 1)[0].strip().rstrip("?").strip()
+        if name:
+            names.append(name)
+    return names
 
 
 def table_rows(paths):

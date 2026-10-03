@@ -147,8 +147,9 @@ constexpr MethodDoc MotionMethods[] = {
      "slider-crank stays on the branch the run found. The reply says "
      "`left_at` (the sample), `left_at_value` and `left_solves`. leave_at "
      "with async is refused: its samples do not exist yet.",
-     "async, include_poses, leave_at, leave_at_deg, leave_at_mm, "
-     "outlive_client, recompute, study"},
+     "study:int>=0, async?:bool, include_poses?:bool, leave_at?:string|int, "
+     "leave_at_deg?:number, leave_at_mm?:number, outlive_client?:bool, "
+     "recompute?:bool"},
     {"motion_status",
      "{study}: whether a run of THIS study is in progress (with its `job` "
      "id and `fraction` while it is), and the stored result if one has "

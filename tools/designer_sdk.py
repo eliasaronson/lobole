@@ -58,6 +58,11 @@ from designer_inspection import (  # noqa: E402
 
 if TYPE_CHECKING:
     from designer_snapshots import MeasurementSnapshot
+    # The contracted RPCs, typed for a checker only: at runtime every RPC is
+    # the generated describe surface (docs/scripting/sdk.md#typed-stubs).
+    from designer_rpc import RpcSurface as _RpcSurface
+else:
+    _RpcSurface = object
 
 
 class SdkError(RuntimeError):
@@ -278,7 +283,7 @@ class _Rpc:
         return self._app.call(self.name, _timeout=_timeout, **kw)
 
 
-class App:
+class App(_RpcSurface):
     """A connection to one running Designer, with its whole RPC surface.
 
     Every method `describe` lists is an attribute. The enums it publishes

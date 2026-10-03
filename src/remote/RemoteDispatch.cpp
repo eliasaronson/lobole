@@ -41,6 +41,7 @@
 #include "remote/RemoteSimulation.h"
 #include "remote/RemoteTemplates.h"
 #include "remote/RemoteTube.h"
+#include "remote/RpcContract.h"
 #include "remote/RpcParams.h"
 #include "ui/TemplateActions.h"
 
@@ -287,14 +288,17 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "refuses anything whose effect a rollback could not take back "
      "(screenshots, exports, project and git verbs, UI actions), naming it. "
      "A feature that fails to BUILD is not a failed call: it is reported in "
-     "the final regen, exactly as it would be on its own.",
-     "calls, stop_on_error"},
+     "the final regen, exactly as it would be on its own. `expect_revision` "
+     "(a part revision, as get_state reports it) is checked once before the "
+     "first call and refused as stale_revision if the part has moved.",
+     "calls:object[], stop_on_error?:bool, expect_revision?:revision"},
     {"describe",
-     "This endpoint: methods (each with the parameter keys it accepts), "
+     "This endpoint: methods (each with the parameter keys it accepts, and "
+     "a request_schema where the row is typed), "
      "feature/entity/constraint types, enums, and the document format "
      "version. {method} narrows the answer to that method's row alone "
      "(no type tables); an unknown method is refused naming close matches.",
-     "method"},
+     "method?:string"},
     {"ping",
      "Liveness check; returns {ok, app, port, pid, mode, ui_actions, "
      "project, dirty, gpu, features, binary_replaced}. `pid` is this "
@@ -338,8 +342,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "active tab still, since that is where they live. Prefer it to "
      "set_active_part for a read: switching tabs clears the selection, the "
      "hidden bodies, the measure session and the explode state, which on "
-     "somebody's running instance is their work.",
-     "part", remote::NoFlags,
+     "somebody's running instance is their work. `revision` is what a "
+     "guarded write (add_feature, modify_feature, delete_feature, "
+     "set_material, batch) names as expect_revision.",
+     "part?:string|int", remote::NoFlags,
      "features[]{type,name,index,id?,material?,appearance?,suppressed?,error?,"
      "stale?,warning?,after_earlier_failure?, "
      "plus per-type keys}, "
@@ -349,14 +355,14 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "selection_items[]{kind,id?,element?}, selected_feature, "
      "camera{position,target,distance,fov_deg,aspect}, can_undo, can_redo, "
      "rollback, view_rollback, regen{ok,failed,warnings,executed,cached}, "
-     "pending_feature_id"},
+     "revision{session,part_id,instance,version}, pending_feature_id"},
     {"undo", "Undo one step (assembly snapshot history on an assembly tab).",
      "", remote::NotInBatch},
     {"redo", "Redo one step.", "", remote::NotInBatch},
     {"view",
      "Orient the camera to a named view {name: front|back|left|right|top|"
      "bottom|iso}.",
-     "fit, name"},
+     "fit?:bool, name:@views"},
     {"fit_view",
      "Frame the geometry in the viewport. `width` and `height` (PIXELS, both "
      "together) frame it for a picture of that size instead — which is what "
@@ -454,8 +460,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Persists. Escape/Enter/Delete/arrows are fixed and have no command.",
      "chord, command, reset", remote::NotInBatch},
     {"reset_layout", "Reset the dock layout.", "", remote::NotInBatch},
-    {"add_part", "Add a new empty part tab.", "name"},
-    {"add_assembly", "Add an assembly tab.", "name"},
+    {"add_part", "Add a new empty part tab.", "name?:string"},
+    {"add_assembly", "Add an assembly tab.", "name?:string"},
     {"list_parts",
      "List project TABS — every one, with `type`: part | assembly | "
      "drawing | job. Not parts alone, whatever the name says: a sweep that "
@@ -464,7 +470,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "`type` unless you mean all four.",
      "", remote::NoFlags,
      "parts[]{name,index,id,type,folder?}, active, active_id, folders?"},
-    {"rename_part", "Rename a part.", "new_name, part"},
+    {"rename_part", "Rename a part.", "new_name:string, part:string|int"},
     {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\".", "path",
      remote::UiAction},
     {"menu_items",
@@ -552,28 +558,33 @@ static constexpr remote::MethodDoc kServerMethods[] = {
 // methods that DO NOT EXIST (export_mesh, move_feature, rename_feature): dead
 // entries a list apart from its handlers accumulates in silence.
 // docs/architecture.md#the-remote-json-rpc.
+// Every module's table, in describe's order: the one list of them.
+std::span<const std::span<const remote::MethodDoc>> AllMethodTables() {
+  static const std::span<const remote::MethodDoc> tables[] = {
+      kServerMethods,
+      remote::ModelingMethodDocs(),
+      remote::ProjectMethodDocs(),
+      remote::TemplateMethodDocs(),
+      remote::AssemblyMethodDocs(),
+      remote::MotionMethodDocs(),
+      remote::InspectionMethodDocs(),
+      remote::CatalogMethodDocs(),
+      remote::CamMethodDocs(),
+      remote::DrawingMethodDocs(),
+      remote::ConfigurationMethodDocs(),
+      remote::SheetMetalMethodDocs(),
+      remote::TubeMethodDocs(),
+      remote::SimulationMethodDocs(),
+      remote::RequirementMethodDocs()};
+  return tables;
+}
+
 const remote::MethodDoc* FindMethod(const std::string& m) {
   static const std::map<std::string, const remote::MethodDoc*> byName = [] {
     std::map<std::string, const remote::MethodDoc*> out;
-    const auto add = [&out](std::span<const remote::MethodDoc> docs) {
-      for (const remote::MethodDoc& d : docs)
+    for (const auto& table : AllMethodTables())
+      for (const remote::MethodDoc& d : table)
         out.emplace(d.name, &d);
-    };
-    add(kServerMethods);
-    add(remote::ModelingMethodDocs());
-    add(remote::ProjectMethodDocs());
-    add(remote::TemplateMethodDocs());
-    add(remote::AssemblyMethodDocs());
-    add(remote::MotionMethodDocs());
-    add(remote::InspectionMethodDocs());
-    add(remote::CatalogMethodDocs());
-    add(remote::CamMethodDocs());
-    add(remote::DrawingMethodDocs());
-    add(remote::ConfigurationMethodDocs());
-    add(remote::SheetMetalMethodDocs());
-    add(remote::TubeMethodDocs());
-    add(remote::SimulationMethodDocs());
-    add(remote::RequirementMethodDocs());
     return out;
   }();
   const auto it = byName.find(m);
@@ -593,30 +604,77 @@ uint8_t MethodFlags(const std::string& m) {
 // (a branch without a row is caught by its own test), so this needs no
 // second list to drift out of step.
 static bool IsKnownMethod(const std::string& m) {
-  static const std::set<std::string> known = [] {
-    std::set<std::string> s;
-    const auto add = [&s](std::span<const remote::MethodDoc> docs) {
-      for (const auto& d : docs)
-        s.insert(d.name);
-    };
-    add(kServerMethods);
-    add(remote::ModelingMethodDocs());
-    add(remote::ProjectMethodDocs());
-    add(remote::TemplateMethodDocs());
-    add(remote::AssemblyMethodDocs());
-    add(remote::MotionMethodDocs());
-    add(remote::InspectionMethodDocs());
-    add(remote::CatalogMethodDocs());
-    add(remote::CamMethodDocs());
-    add(remote::DrawingMethodDocs());
-    add(remote::ConfigurationMethodDocs());
-    add(remote::SheetMetalMethodDocs());
-    add(remote::TubeMethodDocs());
-    add(remote::SimulationMethodDocs());
-    add(remote::RequirementMethodDocs());
-    return s;
-  }();
-  return known.count(m) != 0;
+  return FindMethod(m) != nullptr;
+}
+
+// Whether a batch call's params hold a {"$ref": n} anywhere.
+static bool ContainsRef(const json& v) {
+  if (v.is_object()) {
+    if (v.contains("$ref"))
+      return true;
+    for (const auto& [k, e] : v.items())
+      if (ContainsRef(e))
+        return true;
+  } else if (v.is_array()) {
+    for (const json& e : v)
+      if (ContainsRef(e))
+        return true;
+  }
+  return false;
+}
+
+json ActivePartRevision(ui::AppState& state) {
+  if (!state.document || state.activePart < 0 ||
+      state.activePart >= static_cast<int>(state.parts.size()))
+    return nullptr;
+  return remote::PartRevision(*state.document,
+                              state.parts[state.activePart].id);
+}
+
+// The revision guard (docs/scripting/rpc.md#the-revision-guard): the call
+// carries the revision of the part it was built from, and runs only if the
+// active part is still exactly that -- the same part, the same document
+// instance (not reopened or replaced) and the same regeneration.
+static void CheckExpectedRevision(ui::AppState& state, const std::string& m,
+                                  const json& expected) {
+  const json current = ActivePartRevision(state);
+  const std::string at = "/params/expect_revision";
+  const std::string unchanged = " Nothing was changed.";
+  if (current.is_null()) {
+    const char* kind = state.assembly  ? "an assembly"
+                       : state.drawing ? "a drawing"
+                       : state.job     ? "a CAM job"
+                                       : "empty";
+    throw remote::ContractError(
+        m, "stale_revision", at, "a part tab", expected,
+        m +
+            ": expect_revision guards a write to a part, and the active tab "
+            "is " +
+            kind + " — switch to the part (set_active_part)." + unchanged);
+  }
+  if (expected == current)
+    return;
+  std::string why;
+  if (expected.value("part_id", uint64_t{0}) !=
+      current.value("part_id", uint64_t{0}))
+    why = "it names part " + expected.value("part_id", json()).dump() +
+          " and the active part is " + current["part_id"].dump() +
+          " — switch tabs, or take the revision of this one";
+  else if (expected.value("session", "") != current.value("session", ""))
+    why = "it was taken from another server session";
+  else if (expected.value("instance", uint64_t{0}) !=
+           current.value("instance", uint64_t{0}))
+    why = "the part was reopened or replaced since";
+  else
+    why = "the part has regenerated since (version " +
+          expected.value("version", json()).dump() + ", now " +
+          current["version"].dump() + ")";
+  throw remote::ContractError(
+      m, "stale_revision", at, current, expected,
+      m + ": the revision this call was built from is stale: " + why +
+          ". Re-read it (geometry_snapshot, get_state) and rebuild the call "
+          "from what is there now." +
+          unchanged);
 }
 
 json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
@@ -624,7 +682,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   const std::string& m = request.method;
   Document* doc = state.document.get();
   handled = true;
-  remote::ValidateInspectionRequest(m, request.params);
+  // The method's typed contract, if it has one (an inspection contract or a
+  // typed row, docs/scripting/rpc.md#typed-contracts). ProcessPending has
+  // checked a single call already; this is the check a batch's calls get
+  // once their $refs are resolved.
+  ValidateRequestContract(m, request.params);
+  // A write built from a snapshot names the geometry it was built from, and
+  // is refused when the part has moved since. Only a row that lists the key
+  // gets this far with it (the dispatcher refuses an undeclared key first).
+  if (p.contains("expect_revision"))
+    CheckExpectedRevision(state, m, p.at("expect_revision"));
 
   // UI actions (item_click, viewport_click, …) fall through to QueueUiAction,
   // not HandleSemantic, so don't guard them here — they drive the assembly tab.
@@ -691,11 +758,30 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                  "unchanged.");
       // Every call's keys against its row before ANY call runs: a $ref
       // replaces a value, never a key, so this is already the final shape.
-      if (calls[i].contains("params"))
-        if (auto refusal = UndeclaredParamsError(sub, calls[i].at("params")))
-          throw std::runtime_error("batch call " + std::to_string(i + 1) +
-                                   ": " + *refusal +
-                                   " The document is unchanged.");
+      // A typed call's values too, unless a $ref stands in for one: that
+      // value is only known when the call it names has run, and the call is
+      // checked again then. Not under stop_on_error: false, which reports a
+      // failed call in place and runs the rest.
+      if (calls[i].contains("params")) {
+        const json& sp = calls[i].at("params");
+        std::optional<remote::ContractError> refusal =
+            UndeclaredParamsError(sub, sp);
+        if (!refusal && stopOnError && !ContainsRef(sp)) {
+          try {
+            ValidateRequestContract(sub, sp);
+          } catch (const remote::ContractError& e) {
+            refusal = e;
+          }
+        }
+        if (refusal) {
+          json diagnostic = refusal->diagnostic;
+          diagnostic["call"] = i + 1;
+          throw remote::ContractError("batch call " + std::to_string(i + 1) +
+                                          ": " + refusal->what() +
+                                          " The document is unchanged.",
+                                      diagnostic);
+        }
+      }
     }
 
     // The marks a rollback rewinds to. Both are taken before anything runs:
@@ -822,8 +908,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       } catch (const std::exception& e) {
         json failure{{"call", i + 1}, {"method", sub}, {"error", e.what()}};
         if (const auto* contract =
-                dynamic_cast<const remote::ContractError*>(&e))
+                dynamic_cast<const remote::ContractError*>(&e)) {
           failure["diagnostic"] = contract->diagnostic;
+          if (failure["diagnostic"].value("operation", "").empty())
+            failure["diagnostic"]["operation"] = sub; // RpcParams' refusal
+        }
         failures.push_back(failure);
         if (stopOnError) {
           fatal = "batch call " + std::to_string(i + 1) + " (" + sub +
@@ -903,18 +992,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         if (ps == "*") {
           entry["params_free_form"] = true;
         } else {
-          json keys = json::array();
-          for (size_t i = 0, j = 0; i <= ps.size(); i++) {
-            if (i == ps.size() || ps[i] == ',') {
-              std::string k = ps.substr(j, i - j);
-              const size_t b = k.find_first_not_of(" ");
-              const size_t e = k.find_last_not_of(" ");
-              if (b != std::string::npos)
-                keys.push_back(k.substr(b, e - b + 1));
-              j = i + 1;
-            }
-          }
-          entry["params"] = std::move(keys);
+          // The names alone, typed row or not: the types are in
+          // `request_schema` below.
+          entry["params"] = remote::contract::ParamNames(ps);
         }
         // What comes BACK. Kept as the row wrote it — `bodies[]{name,
         // volume}`, `total{mass_g}`, `optional?` — because the nesting is
@@ -925,30 +1005,18 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         // already describes.
         if (d.returns != nullptr && *d.returns != '\0')
           entry["returns"] = d.returns;
+        // A typed method's request contract
+        // (docs/scripting/rpc.md#typed-contracts), and an inspection
+        // method's result schema too.
+        if (const json* schema = RequestSchemaOf(d.name))
+          entry["request_schema"] = *schema;
         const auto& contracts = remote::InspectionContracts().at("methods");
-        if (contracts.contains(d.name)) {
-          entry["request_schema"] = contracts[d.name]["request"];
+        if (contracts.contains(d.name))
           entry["result_schema"] = contracts[d.name]["result"];
-        }
         methods.push_back(std::move(entry));
       }
     };
-    const std::span<const remote::MethodDoc> tables[] = {
-        kServerMethods,
-        remote::ModelingMethodDocs(),
-        remote::ProjectMethodDocs(),
-        remote::TemplateMethodDocs(),
-        remote::AssemblyMethodDocs(),
-        remote::MotionMethodDocs(),
-        remote::InspectionMethodDocs(),
-        remote::CatalogMethodDocs(),
-        remote::CamMethodDocs(),
-        remote::DrawingMethodDocs(),
-        remote::ConfigurationMethodDocs(),
-        remote::SheetMetalMethodDocs(),
-        remote::TubeMethodDocs(),
-        remote::SimulationMethodDocs(),
-        remote::RequirementMethodDocs()};
+    const auto tables = AllMethodTables();
     for (const auto& t : tables)
       addDocs(t);
     if (!only.empty() && methods.empty()) {
@@ -1003,8 +1071,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         // `relation_kinds` here, a caller reading this endpoint to find out
         // what the app can do sees six mate types and concludes that coupled
         // DOFs -- gears, rack and pinion, a screw -- are not supported.
-        {"mate_types", DocumentIO::MateTypeNames()},
-        {"relation_kinds", DocumentIO::RelationKindNames()},
+        {"mate_types", ContractVocabulary("mate_types")->values},
+        {"relation_kinds", ContractVocabulary("relation_kinds")->values},
         {"constraint_value_units",
          [] {
            json u = json::object();
@@ -1017,7 +1085,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
          {"blind", "symmetric", "two_sided", "up_to_face", "through_all"}},
         {"drawing_dim_kinds", DrawingDimKindNames()},
         {"axis_kinds", {"x", "y", "z", "sketch_line", "datum_axis", "custom"}},
-        {"material_slugs", CADMaterials::MaterialLibrary::AllSlugs()}};
+        {"material_slugs", ContractVocabulary("material_slugs")->values},
+        // The named camera views (`view`, `screenshot`, drawings).
+        {"views", ContractVocabulary("views")->values}};
   }
 
   // Doc-level-object RPCs carved into their own module (decision 7). The
@@ -1372,6 +1442,16 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                r["executed"] = stateDoc->LastRegenStats().executed;
                r["cached"] = stateDoc->LastRegenStats().cached;
                return r;
+             }()},
+            // What a guarded write names as `expect_revision`
+            // (docs/scripting/rpc.md#the-revision-guard): the revision of
+            // the part this state describes.
+            {"revision",
+             [&]() -> json {
+               for (const ui::PartSlot& slot : state.parts)
+                 if (ui::PartDocById(state, slot.id) == stateDoc)
+                   return remote::PartRevision(*stateDoc, slot.id);
+               return nullptr;
              }()},
             {"pending_feature_id", state.pendingFeatureId}};
   }
@@ -2142,37 +2222,98 @@ uint8_t MethodFlagsOf(const std::string& method) { return MethodFlags(method); }
 // in both directions, so a key outside it is one no path of the handler
 // reads. Learning that by running the handler -- which is how this used to
 // work -- refused `cam_post {_timeout}` after it had written the G-code.
-std::optional<std::string> UndeclaredParamsError(const std::string& method,
-                                                 const json& params) {
+//
+// Structured like a contract refusal (code unknown_argument, the key, the
+// keys the row takes), for every method, typed or not.
+std::optional<remote::ContractError>
+UndeclaredParamsError(const std::string& method, const json& params) {
   const remote::MethodDoc* d = FindMethod(method);
   if (d == nullptr)
     return std::nullopt; // "unknown method" is the dispatcher's to say
   if (params.is_null())
     return std::nullopt;
   if (!params.is_object())
-    return "'" + method + "' takes its params as an object {key: value}; got " +
-           std::string(JsonTypeName(params));
+    return remote::ContractError(
+        method, "invalid_argument", "/params", json{{"type", "object"}}, params,
+        "'" + method + "' takes its params as an object {key: value}; got " +
+            std::string(JsonTypeName(params)));
   const std::string ps = d->params ? d->params : "";
   if (ps == "*")
     return std::nullopt; // a free-form spec, read opaquely
   std::set<std::string> accepted;
-  for (size_t i = 0, j = 0; i <= ps.size(); i++) {
-    if (i == ps.size() || ps[i] == ',') {
-      const std::string k = ps.substr(j, i - j);
-      const size_t b = k.find_first_not_of(' ');
-      const size_t e = k.find_last_not_of(' ');
-      if (b != std::string::npos)
-        accepted.insert(k.substr(b, e - b + 1));
-      j = i + 1;
-    }
-  }
+  for (const std::string& k : remote::contract::ParamNames(ps))
+    accepted.insert(k);
   std::vector<std::string> unknown;
   for (auto it = params.begin(); it != params.end(); ++it)
     if (accepted.count(it.key()) == 0)
       unknown.push_back(it.key());
   if (unknown.empty())
     return std::nullopt;
-  return UnknownParamError(method, unknown, accepted);
+  remote::ContractError e(method, "unknown_argument", "/params/" + unknown[0],
+                          json(accepted), params.at(unknown[0]),
+                          UnknownParamError(method, unknown, accepted));
+  e.diagnostic["accepted"] = json(accepted);
+  if (unknown.size() > 1)
+    e.diagnostic["unknown"] = unknown;
+  return e;
+}
+
+// The vocabularies a typed row may name as `@name`: the same lists describe
+// publishes under those keys, from the tables the parsers refuse against, so
+// a contract cannot accept a value the handler then rejects.
+const remote::contract::Vocabulary* ContractVocabulary(std::string_view name) {
+  static const std::map<std::string, remote::contract::Vocabulary, std::less<>>
+      vocabularies = [] {
+        std::map<std::string, remote::contract::Vocabulary, std::less<>> v;
+        // The remedy MateTypeFromString gives, which the contract now
+        // refuses before it: a coupling is not a mate.
+        v["mate_types"] = {DocumentIO::MateTypeNames(),
+                           "To COUPLE two mates' degrees of freedom -- gears, "
+                           "a rack and pinion, a screw -- the thing to add is "
+                           "a RELATION, not a mate: see add_relation"};
+        v["relation_kinds"] = {DocumentIO::RelationKindNames(), ""};
+        v["material_slugs"] = {CADMaterials::MaterialLibrary::AllSlugs(), ""};
+        std::vector<std::string> views;
+        for (const conv::NamedView& view : conv::kNamedViews)
+          views.emplace_back(view.name);
+        v["views"] = {std::move(views), ""};
+        return v;
+      }();
+  const auto it = vocabularies.find(name);
+  return it == vocabularies.end() ? nullptr : &it->second;
+}
+
+// Every method's request schema: an inspection contract's, or the one its
+// typed row declares (docs/scripting/rpc.md#typed-contracts). Built once; a
+// malformed row throws here naming itself, and rpc_contracts_smoke asks
+// describe for every schema, so a test fails first.
+const json* RequestSchemaOf(const std::string& method) {
+  static const std::map<std::string, json> schemas = [] {
+    std::map<std::string, json> out;
+    const auto& inspection = remote::InspectionContracts().at("methods");
+    for (auto it = inspection.begin(); it != inspection.end(); ++it)
+      out[it.key()] = it.value().at("request");
+    for (const auto& table : AllMethodTables())
+      for (const remote::MethodDoc& d : table) {
+        try {
+          if (auto c = remote::contract::ParseColumn(d.params ? d.params : ""))
+            out[d.name] =
+                remote::contract::RequestSchema(*c, ContractVocabulary);
+        } catch (const std::invalid_argument& e) {
+          throw std::logic_error(std::string("MethodDoc row '") + d.name +
+                                 "': " + e.what());
+        }
+      }
+    return out;
+  }();
+  const auto it = schemas.find(method);
+  return it == schemas.end() ? nullptr : &it->second;
+}
+
+void ValidateRequestContract(const std::string& method, const json& params) {
+  if (const json* schema = RequestSchemaOf(method))
+    remote::ValidateInspectionValue(
+        *schema, params.is_null() ? json::object() : params, method);
 }
 
 // The active tab's save stamp, whichever kind of document it holds (the

@@ -33,18 +33,82 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 from rpc_params_scan import scan_files  # noqa: E402
-from method_doc_scan import table_rows  # noqa: E402
+from method_doc_scan import method_docs  # noqa: E402
+from rpc_contract import ContractSyntaxError, parse_column  # noqa: E402
 
 REMOTE = os.path.join(ROOT, "src", "remote")
+
+# Keys the DISPATCHER consumes before the handler runs, so no branch reads
+# them: `expect_revision` is the revision guard
+# (docs/scripting/rpc.md#the-revision-guard). A row lists one to accept it,
+# and only a typed row may, with its type.
+DISPATCHER_KEYS = {"expect_revision": "revision"}
+
+
+def contract_problems(name, column, info):
+    """A typed row (docs/scripting/rpc.md#typed-contracts) against its
+    handler: every key typed (the parser refuses a half-typed row), a `?`
+    exactly where the handler can do without the key, every literal of an
+    enum one the branch actually compares against."""
+    try:
+        params = parse_column(column)
+    except ContractSyntaxError as e:
+        return [f"{name}: the typed row does not parse: {e}"]
+    if params is None:
+        return [f"{name}: lists {k} without a type — only a typed row "
+                f"carries a dispatcher key" for k in DISPATCHER_KEYS
+                if k in column.replace(" ", "").split(",")]
+    out = []
+    for p in params:
+        k = p["name"]
+        if k in DISPATCHER_KEYS:
+            if p["type"] != DISPATCHER_KEYS[k] or p["required"]:
+                out.append(f"{name}: {k} is `{k}?:{DISPATCHER_KEYS[k]}`")
+            continue
+        if k in info["annotated_keys"] and k not in info["optional"]:
+            continue  # read where the scanner cannot see how
+        optional = k in info["optional"]
+        if p["required"] and optional:
+            out.append(f"{name}: '{k}' is required in the row, but the "
+                       f"handler reads it with value()/contains(), so a call "
+                       f"may leave it out — mark it `{k}?`")
+        if not p["required"] and not optional and k in info["keys"]:
+            out.append(f"{name}: '{k}' is optional in the row, but the "
+                       f"handler only reads it with at(), so a call without "
+                       f"it is refused inside the handler — drop the `?`")
+        for a in p["alts"]:
+            if a["kind"] == "literal" and a["text"] not in info["literals"]:
+                out.append(f"{name}: '{k}' accepts '{a['text']}', which the "
+                           f"branch never compares against — a stale "
+                           f"literal (a vocabulary the parser owns is "
+                           f"`@name`)")
+    return out
 
 
 def main():
     paths = sorted(os.path.join(REMOTE, f) for f in os.listdir(REMOTE)
                    if f.startswith("Remote") and f.endswith(".cpp"))
     scanned = scan_files(paths)
-    declared = table_rows(paths)
+    docs = method_docs(paths)
+    declared = {}
+    for k, v in docs.items():
+        ps = v["params"]
+        if isinstance(ps, list):
+            ps = [x for x in ps if x not in DISPATCHER_KEYS]
+        declared[k] = ps
 
     problems = []
+    typed = 0
+    for name, info in sorted(scanned.items()):
+        column = docs.get(name, {}).get("column")
+        if column is None or info["opaque"]:
+            continue
+        found = contract_problems(name, column, info)
+        problems += found
+        try:
+            typed += bool(parse_column(column))
+        except ContractSyntaxError:
+            pass
     for name, info in sorted(scanned.items()):
         if name not in declared:
             problems.append(
@@ -83,7 +147,7 @@ def main():
             f"(describe advertises a method the dispatcher does not answer)")
 
     print(f"rpc params gate: {len(scanned)} handler branches, "
-          f"{len(declared)} describe rows")
+          f"{len(declared)} describe rows, {typed} typed")
     if problems:
         print(f"\n{len(problems)} mismatch(es):")
         for pr in problems:

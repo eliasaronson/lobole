@@ -221,7 +221,9 @@ async def run(port):
             # Errors surface as tool errors, not hangs or crashes
             bad = await session.call_tool("view", {"name": "sideways"})
             expect(bad.isError, "bad view name reports a tool error")
-            expect("unknown view" in bad.content[0].text, "error is passed on")
+            # Refused by view's contract, naming the views it takes.
+            expect("'name' must be one of: front" in bad.content[0].text,
+                   f"error is passed on: {bad.content[0].text}")
 
             # modify_feature closes the loop on the pad
             state = await call("get_state")
