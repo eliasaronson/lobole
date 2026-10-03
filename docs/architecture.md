@@ -419,7 +419,11 @@ by the same name drift apart without any test noticing:
   `DESIGNER_EXIT_WITH_PARENT=<its pid>`, so the app gets SIGTERM when the
   test dies however it dies — a SIGKILLed smoke used to leave its instance
   serving nothing under init for hours (`src/app/ParentWatch.h`,
-  `tests/exit_with_parent_smoke.py`). It prints the app's pid; kill by that.
+  `tests/exit_with_parent_smoke.py`). A launcher that is PID 1 (a
+  container's entry point, as in `ci-local.sh --pixel`) sets nothing: the
+  app refuses 1, which is also what an orphan's parent reads, and the
+  kernel kills everything in a pid namespace when its init exits. It prints
+  the app's pid; kill by that.
   The MCP server's autostart arms the same; `headless-preview.sh` and
   `dev-watch.sh` do not, because their instances are meant to outlive them.
 - The GUI runner shards, shuffles by default and prints the seed that

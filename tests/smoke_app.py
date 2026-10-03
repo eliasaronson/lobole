@@ -54,7 +54,9 @@ agent stopping a test), and two `--headless --remote 0` instances orphaned
 that way were found still serving nothing 16 hours later
 (src/app/ParentWatch.h). The death signal follows the THREAD that forked, so
 a launch from anything but the main thread is refused rather than left to
-kill its app when that thread ends. The app's pid is printed to stderr — kill
+kill its app when that thread ends. A launcher that is PID 1 (a container's
+entry point) sets nothing: the app refuses 1, and a pid namespace's other
+processes die with its init anyway. The app's pid is printed to stderr — kill
 it by that, never by a pattern.
 """
 import contextlib
@@ -320,7 +322,14 @@ def _spawn(binary, extra_args, env, timeout, headless):
     tmp = tempfile.mkdtemp(prefix="designer_smoke_")
     e = dict(os.environ if env is None else env)
     # Dies with THIS process, even one killed by SIGKILL (see the docstring).
-    e["DESIGNER_EXIT_WITH_PARENT"] = str(os.getpid())
+    # Except as PID 1 -- a container's entry point, as in ci-local's pixel
+    # gate: the app refuses 1, since an orphan's parent reads 1 too, and it
+    # needs no asking, since when a pid namespace's init exits the kernel
+    # kills every process left in it.
+    if os.getpid() != 1:
+        e["DESIGNER_EXIT_WITH_PARENT"] = str(os.getpid())
+    else:
+        e.pop("DESIGNER_EXIT_WITH_PARENT", None)
     if headless:
         # No display: these paths run under ctest with no X, and a stray
         # DISPLAY makes it look like the windowed path is wanted. ONLY for

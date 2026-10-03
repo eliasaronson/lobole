@@ -714,9 +714,13 @@ def _autostart():
     # this process exits (src/app/ParentWatch.h). An older binary ignores the
     # variable; `flatpak run` does not forward it. The kernel watches the
     # THREAD that forks, so only the main thread arms it: a pool thread
-    # retiring after idling would take the instance with it.
+    # retiring after idling would take the instance with it. Not as PID 1 (a
+    # container's entry point): the app refuses 1, which is also what an
+    # orphan's parent reads, and the namespace's other processes die with
+    # its init anyway.
     import threading
-    if threading.current_thread() is threading.main_thread():
+    if (threading.current_thread() is threading.main_thread()
+            and os.getpid() != 1):
         env["DESIGNER_EXIT_WITH_PARENT"] = str(os.getpid())
     log_path = os.path.join(scratch, "app.log")
     with open(log_path, "w") as log:

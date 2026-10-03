@@ -54,7 +54,9 @@ An instance a program starts for its own use should die with that program:
 kernel send it SIGTERM when its parent exits — SIGKILL included, where no
 cleanup code runs — and the headless and offscreen loops stop cleanly on it.
 The variable names the launcher, so an instance whose launcher died before
-it started exits at once too; a value that is not a pid is refused. Linux
+it started exits at once too; a value that is not a pid is refused, and so
+is 1 (an orphan's parent reads 1, so it would arm nothing a launcher could
+own -- a launcher that IS PID 1 leaves the variable unset). Linux
 only (`prctl(PR_SET_PDEATHSIG)`); `tests/smoke_app.py` and the MCP server's
 autostart set it.
 
