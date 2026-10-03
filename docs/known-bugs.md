@@ -60,9 +60,6 @@ the heading if it is not here yet.
 - **Likely fix:** a `key_chars` action (the test engine's
   `KeyCharsAppend`), or an `item_click` variant that keeps the field active.
 
-`describe` is what an agent reads instead of the code, so a stale row is a
-wrong contract.
-
 ## GUI suite
 
 ### Viewport picks resolve nothing after some neighbours in a shuffled run

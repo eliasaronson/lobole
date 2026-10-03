@@ -33,8 +33,10 @@ baked geometry and autosave are in [README.md](README.md).
   documents re-save byte-identically: `rollback`, `commit_geometry: false`,
   `generator`, `catalogs`, `sheet_metal`, `tube`, `print`, `units`,
   `tolerances`,
-  `active_configuration`, and
-  `assets` (base64 blobs, single-file form only).
+  `active_configuration`,
+  `assets` (base64 blobs, single-file form only), and the project's
+  `tables`, `requirements` and `templates`, which a lone part's file
+  carries for its project.
 
 ## Stability guarantees
 
@@ -269,7 +271,8 @@ with `"kind": "assembly"`. Its body is an ordered `occurrences` list; each
 occurrence is `{id, name, part_id, part_version, transform: {position,
 orientation}, visible, fixed}` plus optional `ref_kind` (a sub-assembly),
 `configuration_id` (a part's or a sub-assembly's configuration; v135 for a
-part), `attached_to` (with `attach_offset` / `attach_rotation`), `material`
+part), `attached_to` (with `attach_offset` / `attach_rotation`, and v157's
+`attach_seat`, the faces it is seated on), `material`
 (v135: what this placement of a part is made of) and `flexible` (v129, with
 the `inner_poses` and `inner_mate_dofs` it keeps). `orientation` is a
 quaternion

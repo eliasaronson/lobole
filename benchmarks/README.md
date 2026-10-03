@@ -32,14 +32,17 @@ nix-shell shell.nix --run "python3 benchmarks/run.py --reps 3"  # costs money
 anything. `--tasks t2-flange --arms full --reps 1` is the cell-sized loop for
 iterating on a task or an arm.
 
-## The rule
+## Status
 
-**No benchmark, no claim.** A change to the tool surface — a new tool, a
-removed one, a reworded description, a different refusal message, a change to
-`help()` or `describe` — is a change to the thing this measures. Claiming it
-helps means running a sweep before and after. Results are committed under
-`results/<timestamp>-<model>/` and are **never overwritten**: the point of
-keeping the bad ones is being able to see the line move.
+**Unfinished.** It does not yet measure what it is for, so it neither gates a
+change to the tool surface — a new tool, a removed one, a reworded
+description, a different refusal message, a change to `help()` or
+`describe` — nor backs a claim about one
+([docs/scripting/benchmark.md](../docs/scripting/benchmark.md#status)). Such a
+change is still a change to the thing this measures. When a sweep is run, its
+results are committed under `results/<timestamp>-<model>/` and are **never
+overwritten**: the point of keeping the bad ones is being able to see the
+line move.
 
 ## How it works
 

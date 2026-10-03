@@ -62,8 +62,9 @@ anchor); `visible` hides it. `part_version` is reserved for a version pin and
 is unused.
 
 **Attachments.** An occurrence may ride on another (`attached_to`, with
-`attach_offset` / `attach_rotation` in the parent's frame). This is how placed
-fasteners follow their plate. It is a composition, not a mate: no solver sees
+`attach_offset` / `attach_rotation` in the parent's frame, or in its seat's,
+below). This is how placed fasteners follow their plate and the hole they
+sit in. It is a composition, not a mate: no solver sees
 it, `ApplyAttachments` recomputes the rider's `position`/`orientation` after
 the solve, it goes one level deep only, and the gizmo will not drag a rider
 (its pose is derived). Deleting an occurrence deletes what rides on it. A
@@ -288,8 +289,9 @@ in the loop solve. Dragging or `set_mate` on either mate moves the other. See
 
 A `MotionStudy` drives ONE mate DOF from `from` to `to` in `samples` steps
 (default 48), solves at each sample, and checks every occurrence pair for a
-clash (`clash_mode` `mesh`, the default, or `exact`). The definition is saved;
-samples and the collision table are results, not document state. A study may
+clash (`clash_mode` `mesh`, the default, or `exact`). The definition is
+document state; the samples and the collision table are its result, saved
+beside it and keyed by the run's inputs (below). A study may
 name the configuration it runs under (`configuration`: an id, 0 = base,
 omitted = whichever is active).
 

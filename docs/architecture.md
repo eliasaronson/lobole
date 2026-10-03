@@ -280,7 +280,8 @@ RPC handlers keep their own poll so they answer from a finished result.
   row parser is
   `tools/method_doc_scan.py`.
 - Changing a method's name, a refusal message, a `describe` row or `help()`
-  text changes what `benchmarks/` measures (see CLAUDE.md).
+  text changes what `benchmarks/` measures; the benchmark is unfinished and
+  gates nothing yet ([scripting/benchmark.md](scripting/benchmark.md#status)).
 
 ### Requests that wait
 
@@ -405,7 +406,7 @@ by the same name drift apart without any test noticing:
 | agent blind spots | `tests/blindspots/` (one file per known agent mistake, run by `blindspot_smoke.py`; never delete one) | headless |
 | GUI | `src/app/guitests/GuiTests<Domain>.cpp` (ImGui Test Engine) | `tools/gui-tests-xvfb.sh` |
 | render pixels | `tests/render_pixel_smoke.py`, byte-exact against a per-device baseline | needs a GPU |
-| golden corpus | `tests/golden/`, `tests/golden/assembly/`, gated by `test_golden.cpp` | headless |
+| golden corpus | `tests/golden/` and its `assembly/`, `job/` and `drawing/` directories, gated by `test_golden.cpp` | headless |
 
 - `tests/smoke_app.py` is the only way a test launches the app
   (`launch_app()`); `tests/config_isolation_lint.py` fails any script that

@@ -26,8 +26,9 @@
 #   (cd ../designer-wtB && tools/worktree-build.sh)
 #   ... run an agent in each (Agent tool: isolation:"worktree" does the
 #       worktree part automatically; this script gives it a working build/) ...
-#   # then merge wtA to main, run suites, merge wtB, run suites.
-#   git worktree remove ../designer-wtA   (when done)
+#   # then land each in turn from main: tools/merge-branch.sh wtA-feature
+#   # cherry-picks, builds, runs the suites and removes the worktree (a
+#   # tree with submodules is one `git worktree remove` refuses; CLAUDE.md).
 #
 # Usage:  tools/worktree-build.sh [--tests]   (run from inside the worktree)
 set -eu
@@ -90,4 +91,4 @@ if PORT="$("$ROOT/tools/scratch_port.py")"; then
 else
   echo "  no scratch port free in 8800-8899 — pick one yourself, but not 8799"
 fi
-echo "  git worktree remove '$ROOT'          # when this branch is merged"
+echo "  tools/merge-branch.sh <branch>   # from main: lands it, removes this worktree"
