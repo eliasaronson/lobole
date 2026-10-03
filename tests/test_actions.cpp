@@ -2420,8 +2420,18 @@ TEST_CASE(
 // ---------------------------------------------------------------------------
 
 namespace {
+// The budget is a hang guard, not a speed check. ThreadSanitizer runs these
+// workers several times slower, and with four suites in parallel an adaptive
+// pocket's passes ran past 20 s and failed an assertion that had nothing to
+// do with them.
+#ifdef __SANITIZE_THREAD__
+constexpr int kPumpSlowdown = 5;
+#else
+constexpr int kPumpSlowdown = 1;
+#endif
 void PumpUntil(ui::AppState& state, const std::function<bool()>& done,
                int budgetMs = 20000) {
+  budgetMs *= kPumpSlowdown;
   const auto t0 = std::chrono::steady_clock::now();
   while (!done()) {
     ui::PollBackgroundJobs(state);
