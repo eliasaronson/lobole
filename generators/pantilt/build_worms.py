@@ -15,6 +15,8 @@ SPACE stands at mid-span, docs/modeling/worm-gears.md#phase) along +X; the
 knob end is +Z. The blocks sit as far out along the worm as the wheel's tip
 needs to clear them, so the worm carries a spacer collar each side.
 """
+import math
+
 import common
 from common import Plane, Param
 import spec
@@ -141,9 +143,12 @@ def knob(app, S):
     sk.circle((0, 0), d=model("hole", S["worm_brg_d"]))
     part.cut(sk.add(), Param(S["knob_bore"], "knob_bore"), reversed=True,
              name="Bore")
-    # A grip: flutes round the rim, one per 4 mm of circumference.
-    n = max(6, int(3.14159 * S["knob_d"] / 4))
+    # A grip: flutes round the rim, one per 4 mm of circumference. A Param,
+    # so a knob grown for a heavier load (knob_d is the worm's torque's)
+    # gets more of them.
     X = common.named(S)
+    n = Param(max(6, math.floor(math.pi * S["knob_d"] / 4)),
+              "max(6, floor(pi * knob_d / 4))")
     top = body.feature.end_cap()
     sk = part.sketch(on=top, name="Flute")
     sk.circle(common.on_face_uv(top, (X.knob_d / 2, 0.0, 0.0)),

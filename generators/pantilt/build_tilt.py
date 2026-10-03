@@ -96,7 +96,9 @@ def cradle(app, S):
     part = app.part("cradle")
     model = common.printed(part)
     X = common.named(S)
-    w, sx, sz, pt = S["cam_w"], S["seat_x"], S["seat_z"], S["plate_t"]
+    # Params, so the plate and its slot follow the seat when the camera
+    # moves it (seat_x is the camera's CoM, and so its load's).
+    w, sx = X.cam_w, X.seat_x
     # Its planes are the variables', in tilt-axis coordinates: the plate's
     # underside, the cheeks' outer faces at the camera's width, the plate's
     # top (the plate's own faces are off the axis the sketches are drawn
@@ -104,7 +106,7 @@ def cradle(app, S):
     under = X.seat_z - X.plate_t
     sk = part.sketch(on=common.plane(part, "Plate", "xy", under),
                      name="Plate")
-    sk.rect((sx - S["cam_d"] / 2, -w / 2), (sx + S["cam_d"] / 2, w / 2))
+    sk.rect((sx - X.cam_d / 2, -w / 2), (sx + X.cam_d / 2, w / 2))
     part.extrude(sk.add(), X.plate_t, name="Plate")
     br = X.boss_r
     for sign in (1, -1):
@@ -127,7 +129,7 @@ def cradle(app, S):
              name="Shaft bore")
     sk = part.sketch(on=common.plane(part, "Camera slot", "xy", X.seat_z),
                      name="Camera slot")
-    half = S["slot_l"] / 2
+    half = X.slot_l / 2
     sk.slot((sx - half, 0), (sx + half, 0),
             model("hole", S["cam_screw_clear"]))
     part.cut(sk.add(), X.plate_t, reversed=True, name="Camera slot")

@@ -205,6 +205,24 @@ def swing(S):
     return deepest
 
 
+def swing_expr():
+    """`swing` as an EXPRESSION over the same variables, so the tilt axis
+    follows the camera when `load_kg` (and with it the lens) changes. Over
+    +-90 degrees, x sin(t) - z cos(t) peaks at the point's distance from
+    the axis when it starts below it (z <= 0) and at |x| otherwise (the
+    ends of the range): sqrt(x^2 + min(z, 0)^2) either way. Declared as the
+    number `swing` sampled, it was a 1.5 kg camera's 160 mm under a 1.8 kg
+    one's 200, and the regenerated arms 40 mm short of the lens."""
+    xs = ("seat_x - cam_d / 2", "seat_x + cam_d / 2",
+          "seat_x + cam_d / 2 + lens_l")
+    body_z = ("seat_z - plate_t", "seat_z + cam_h")
+    lens_z = ("seat_z + cam_cz - lens_d / 2", "seat_z + cam_cz + lens_d / 2")
+    pts = [(x, z) for x in xs[:2] for z in body_z] + \
+          [(x, z) for x in xs[1:] for z in lens_z]
+    return "max(" + ", ".join(f"sqrt(({x})^2 + min({z}, 0)^2)"
+                              for x, z in pts) + ")"
+
+
 # Which load sizes the pan journal (`PANTILT_PAN_BEARING`):
 #   moment -- the load at 3 g sideways about the pan collar (the default:
 #             the journal is a cantilever under the head's overturning
@@ -283,10 +301,15 @@ def declare(app, part):
     # The pan journal: how high the load stands over it is the head's
     # layout (build_yoke.py's z_mesh_pan .. tilt_z, checked there), written
     # here over what decides it, none of which is the pan bearing.
-    part.param("cam_swing", round(swing(values(part)), 3),
+    part.param("cam_swing", swing_expr(),
                comment="mm, the deepest the camera or cradle reaches below "
-                       "the tilt axis over +-90 deg (spec.swing)",
+                       "the tilt axis over +-90 deg (spec.swing_expr)",
                scope="project")
+    sampled = swing(values(part))
+    if abs(part.value_of("cam_swing") - sampled) > 1e-3:
+        raise SystemExit(f"cam_swing: the expression says "
+                         f"{part.value_of('cam_swing'):.4f} mm, the swing "
+                         f"sampled every 0.1 deg {sampled:.4f}")
     _declare(part, PAN)
     sizing = _pan_sizing()
     over = "pan_shaft_d_min" if sizing == "moment" else "shaft_d_min"

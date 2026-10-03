@@ -171,9 +171,10 @@ Every size is a project variable, most of them expressions over the load:
   first built with the pan pair the tilt shaft's 6002: below,
   [the pan bearing](#the-pan-bearing).
 - **The arms** are as tall as the camera reaches below the tilt axis in
-  +-90 degrees of tilt (`cam_swing`, 160 mm, computed from the camera's and
-  cradle's variables) plus a clearance; their spacing is the camera's width
-  plus a running gap.
+  +-90 degrees of tilt (`cam_swing`, 160 mm: an expression over the
+  camera's and cradle's variables, `spec.swing_expr`, checked against the
+  swing sampled every 0.1 degree) plus a clearance; their spacing is the
+  camera's width plus a running gap.
 - **The blocks** stand as far out along the worm as the wheel's tip needs
   to clear them, which is why the worm carries spacer collars.
 - **Printed fits** come from the print allowance table, asked of the app
@@ -285,27 +286,57 @@ estimate below, beside it).
 **A heavier camera.** `load_kg` 1.5 to 1.8, and every requirement reads
 stale before anything is measured, in `yoke_topo.dsgn` and `cam.dsgn` alike:
 the head is sized from its load. The lens is as long as makes the mass, so
-the swing, the arms and the tilt axis grow with it; the worm pair is sized
-from the tilt torque, so the wheel, the base plate under it (108 to 187 cm3)
-and its program change too; and the study's forces are the mass's. Checked
-again on `yoke_topo.dsgn` (one job, about seven minutes on a loaded machine:
-the yoke's static and both motion studies run again):
+the swing (`cam_swing`, 160 to 200 mm), the arms and the tilt axis grow
+with it; the worm pair is sized from the tilt torque, so the wheel, the
+knobs, the base plate under it and its program change too; and the study's
+forces are the mass's. Checked again on `yoke_topo.dsgn` (one job, about
+nine minutes: the yoke's static and both motion studies run again), and the
+plate's two on `cam.dsgn`:
 
 | requirement | 1.5 kg | 1.8 kg |
 |---|---|---|
-| lens at 3 g, level | 1.51 mm, pass | 2.76 mm, pass |
-| lens at 3 g, tilted 63.4 deg | 2.90 mm, pass | 5.28 mm, fail |
-| lens at 3 g, sideways | 3.20 mm, pass | 4.53 mm, fail |
-| every bearing seated, every modelled part lint-clean | pass | pass |
+| camera clears the yoke through the tilt | 1.2 mm, pass | 1.2 mm, pass |
+| cradle clears the yoke through the tilt | 1.2 mm, pass | 1.2 mm, pass |
+| every bearing seated, both rings | pass | pass |
 | fasteners: only the camera socket's | pass | fail |
-| pan 360, tilt +-90 move clean | pass | fail |
-| camera, cradle clear the yoke through the tilt | 1.2 mm, pass | unresolved |
+| every modelled part lint-clean | pass | pass |
+| pan 360 moves clean | pass | fail (51 clashes, every sample solved) |
+| tilt +-90 moves clean | pass | fail (51 clashes, every sample solved) |
+| lens at 3 g, level | 1.51 mm, pass | 2.48 mm, pass |
+| lens at 3 g, tilted 63.4 deg | 2.90 mm, pass | 4.69 mm, fail |
+| lens at 3 g, sideways | 3.20 mm, pass | 5.67 mm, fail |
+| plate CAM: Top verifies | pass | pass |
+| plate CAM: Underside verifies | pass | pass |
 
-The lens is not all they say. The regenerated yoke renames the bores of its
-joint screws (`face '39/p1/bore;M39' not found ... modified by a later
-feature`), so three screws lose their seats, and with them the mechanism no
-longer solves at any sample, so the clearance through the tilt is
-unresolved, never a pass ([Known](#known)).
+What fails is the design, not the regeneration. The lens moves past its
+4 mm in two of the cases. The four M4x14s under the pan wheel engage 1.75
+mm of the plate where an M4 needs 4: they were fitted to the 1.5 kg wheel,
+and a fitted screw keeps its length. And three standing clashes, in every
+sample of both studies: the pan knob, grown with the worm's torque, 2.5 mm
+up into the yoke's base (516 mm3); the tilt knob into the yoke (59 mm3);
+and each pan block, out with the wider worm span, 0.9 mm into a keel band
+(70 mm3). The tilt shaft's own minimum, `shaft_d_min`, is 15.35 mm at 1.8
+kg against the 6002's 15 mm bore, which no requirement states: a bearing
+is a catalogue row, chosen by the generator, not an expression, so a
+regenerated head keeps it. Built from scratch at 1.8 kg the head takes a
+6003; regenerated, every other part matches that build to the last mm3
+(knob, worm, wheel, blocks, plate, camera), and the tilt wheel, cradle
+and yoke differ only by what follows the bearing.
+
+It took three defects to get there, each of which had frozen part of the
+head at 1.5 kg while the rest followed the load: the SDK drew a `rect()`,
+a `slot()` and a pattern's count at the numbers their Params held
+([sdk](../../docs/scripting/sdk.md#parameters-carry-their-expression)),
+so the yoke's base and foot flanges kept their size while its joint-screw
+holes, drawn as points, moved out through the base's ends (each bore
+split in two, `39/p1/bore;M39.0` and `.1`, and three screws lost their
+seats), the cradle's slot stayed under the camera's old seat and the
+knob kept its flutes; `cam_swing` was declared as the number `spec.swing`
+sampled, so the tilt axis stayed 40 mm low; and `fit_fastener`'s bolted
+joints held the two parts' interface faces' centroids apart by what they
+measured at the fit, so every bolted block missed its joint by 5 mm and
+the mechanism solved at no sample. Each joint now snaps to its holes' rims
+([attached and mated](../../docs/parts/README.md#attached-and-mated)).
 
 **Edits that reach less.** A requirement's own bound tightened (the
 sideways lens to 3.0 mm) reads unchecked and nothing else moves; checking
@@ -396,11 +427,12 @@ real bore size error, which is the K7 question above.
 
 ## Known
 
-- A heavier camera (`load_kg`) regenerates a yoke whose joint screws'
-  bores are renamed by a later feature, so three of them lose their seats
-  and the assembly no longer solves ([requirements](#requirements)): the
-  head is parametric in its load as far as its sizes, not yet in its
-  hardware.
+- A heavier camera (`load_kg`) regenerates the head to its sizes but not
+  its hardware ([requirements](#requirements)): a fitted screw keeps its
+  length and a bearing its catalogue row, so at 1.8 kg the pan wheel's
+  M4x14s are short and the tilt shaft is 0.35 mm under its own minimum,
+  the second of which no requirement checks. Run the generator again for
+  a different load.
 - The camera screw engages 4.23 mm of thread in the camera, under the
   one diameter `check_fasteners` asks; the camera's socket is 5.5 mm deep
   by design and the depth is ASSUMED from makers' manuals (above, sizes).
