@@ -22,15 +22,16 @@ See [docs/README.md](docs/README.md) for how each part of the program works, and
 ## Gallery
 
 Every model here is built by a generator — an ordinary Python program driving
-the same API the GUI and an LLM assistant use — and rendered by Designer's own
-path tracer. See [generators/README.md](generators/README.md) for all of them.
+the same API the GUI and an LLM assistant use. The stills are Designer's own
+path tracer; the animation is its motion-video export. See
+[generators/README.md](generators/README.md) for all of them.
 
-| | | |
-|:---:|:---:|:---:|
-| [![Formula Student space frame](docs/gallery/fs-chassis.jpg)](generators/chassis) | [![Automatic watch](docs/gallery/automatic-watch.jpg)](generators/watch) | [![Four-cylinder diesel engine](docs/gallery/om615-engine.jpg)](generators/om615) |
-| **Formula Student chassis** — 91 coped chromoly members read from a team's CAD, with its cut list, bend schedule and weld jig | **Automatic watch** — a working movement: gear train, escapement and keyless works, geared together and set to a time | **OM615 diesel** — every part down to the bearing shells, driven by one crank, clash-checked over two revolutions |
-| [![Bicycle](docs/gallery/bicycle.jpg)](generators/bike) | [![FPV quadcopter](docs/gallery/fpv-drone.jpg)](generators/fpv_drone) | [![Gas grill](docs/gallery/gas-grill.jpg)](generators/grill) |
-| **Bicycle** — modelled from photographs: frame, wheels with laced spokes, chain drive | **5-inch FPV quadcopter** — 91 occurrences, fitted fasteners, FEM on the arms | **Gas grill** — sheet-metal parts, bent from flat blanks and assembled by mates |
+| | |
+|:---:|:---:|
+| [![OM615 diesel with its injection pump](docs/gallery/om615-engine.jpg)](generators/om615) | [![OM615 diesel turning over, in section](docs/gallery/om615-motion.gif)](generators/om615) |
+| **OM615 diesel** — every part down to the bearing shells, with its Bosch injection pump chained to the crank and timed | **Two revolutions, in section** — one crank drives the pistons and the valve train, clash-checked all the way round |
+| [![Bicycle](docs/gallery/bicycle.jpg)](generators/bike) | [![FPV quadcopter](docs/gallery/fpv-drone.jpg)](generators/fpv_drone) |
+| **Bicycle** — modelled from photographs: frame, wheels with laced spokes, chain drive | **5-inch FPV quadcopter** — 91 occurrences, fitted fasteners, FEM on the arms |
 
 ## Requirements
 
