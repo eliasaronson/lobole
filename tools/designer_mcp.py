@@ -530,10 +530,10 @@ The loop that works — follow it every time:
    into the project with rpc('add_requirement', {name, measure, bound,
    source}), not into your head or a comment: a measure names what to read
    by stable reference (a study's probe or peak, a clearance between two
-   occurrences, mass, check_fits / check_seat / check_fasteners /
-   check_literals, a motion study clean, cam_verify) and a bound (at_most,
-   at_least, within, or pass; a value may be an expression over the
-   variables). Before you say a design is done, run
+   occurrences, mass, a section's area, check_fits / check_seat /
+   check_fasteners / check_literals, a motion study clean, cam_verify) and
+   a bound (at_most, at_least, within, or pass; a value may be an
+   expression over the variables). Before you say a design is done, run
    rpc('check_requirements', {async: true}) and poll study_status {job},
    then list_requirements: only `pass` is a pass. `stale` means the model
    changed after the check, `unresolved` that a reference is gone or the
@@ -970,7 +970,10 @@ def set_section(enabled: bool = True, base_plane: str = "xy",
           "ISLAND ({area, centroid}, biggest first) — two islands where you "
           "expected one is a feature that is not joined. loops=True adds "
           "each island's OUTLINE as line/arc segments, which is how you "
-          "recover the shape of a part you did not draw.")
+          "recover the shape of a part you did not draw. The area a cut "
+          "ENCLOSES (the floor inside separate wall bodies) and a cut of "
+          "only some bodies are rpc('section', {enclosed: true, bodies: "
+          "[names or feature ids]}).")
 def section(base_plane: str = "xy", offset: float = 0.0,
             origin: list | None = None, normal: list | None = None,
             regions: bool = False, loops: bool = False) -> dict:

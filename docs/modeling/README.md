@@ -65,8 +65,8 @@ Topic pages:
    them. The serialized feature is exactly the state that determines its
    output, and chaining makes any upstream change invalidate everything after
    it. Stripped from the hash because they do not change geometry: sketch
-   reference images, `appearance`, `material` (both are re-stamped onto bodies
-   by a post-pass keyed on `createdBy`). An Import hashes its file's content
+   reference images, `appearance`, `face_appearance`, `material` (all are
+   re-stamped onto bodies by a post-pass keyed on `createdBy`). An Import hashes its file's content
    instead of its path, so a save that moves the file into the project is not
    a changed part.
 3. **Prefix cache.** Each cache entry holds the hash and the body list after

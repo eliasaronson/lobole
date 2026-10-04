@@ -22,7 +22,9 @@ as a cache ([saved projections](README.md#saved-projections)).
   that made it, which is what dimensions attach to. `fast` is a polygonal
   look at a sheet that would otherwise take long to project; nothing on a
   fast view can be dimensioned.
-- **Hidden occurrences**: an assembly view can leave occurrences off. Exact
+- **Hidden occurrences and bodies**: an assembly view can leave occurrences
+  off, and a part view bodies, by body name or creating-feature id
+  ([leaving bodies off a view](README.md#leaving-bodies-off-a-view)). Exact
   projection is priced by surface complexity, so one spring or imported part
   can be most of a view's time; the view's cost report names it.
 - **Dimension**: a *driven*, read-only value measured from projected
@@ -148,7 +150,7 @@ as a cache ([saved projections](README.md#saved-projections)).
 8. **Export** writes the sheet as SVG or PDF. It needs a system file dialog;
    without one, use `export_drawing`.
 
-Folding a child from a base view, hiding occurrences, choosing `fast`, a
+Folding a child from a base view, hiding occurrences or bodies, choosing `fast`, a
 section view, and free text notes are set over RPC.
 
 ## Over RPC / MCP
@@ -158,7 +160,8 @@ create_drawing {name?, sheet?: {size, landscape, title_block: {project, document
                 author, date, notes, material, scale}}}
 set_drawing_sheet {size?, landscape?, title_block?}
 add_drawing_view {source, orientation?, scale?, position?, base_view?,
-                  configuration?, quality?: "exact"|"fast", hidden?: [occurrence ids or names],
+                  configuration?, quality?: "exact"|"fast",
+                  hidden?: [occurrence ids or names | body names or feature ids],
                   rotation_deg?, section?: {point: [x, y, z], label?}}
 add_drawing_view {detail: {view, center: [x, y, z], radius_mm, label?},
                   scale, position, name?}   # a detail of another view

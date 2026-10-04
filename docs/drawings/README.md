@@ -112,7 +112,7 @@ viewport and both exporters draw the same way.
 
 A view with a `detail` {`view`, `center` [x, y, z] world mm, `radius_mm`,
 `label`} draws part of another view larger: what the PARENT projects — its
-source, orientation, turn, section, hidden occurrences and configuration,
+source, orientation, turn, section, hidden occurrences or bodies and configuration,
 read at every update, so an edit to the parent carries over — at the
 detail's own scale, kept inside the circle about `center`
 (`EffectiveView`, `ClipToDetail` in `ui/DrawingActions.cpp`). The

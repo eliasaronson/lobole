@@ -137,8 +137,9 @@ material area can report; a plate encloses its bore.
 
 - A ring with a gap encloses 0, and `enclosed_note` says so: a door or a
   window at the plane's height opens the walls, so a plan check cuts above
-  the openings (the house's outer walls enclose 115.48 m² at 2200 mm and
-  nothing at 1200, where the windows are).
+  the openings (the house generator's outer walls enclose nothing at
+  1.2 m, where the windows are, so its requirement cuts at 2.34 m;
+  [generators/house](../../generators/house/README.md#what-the-round-taught)).
 - Material of the chosen bodies standing inside the ring is not enclosed
   area. Leave a body out of `bodies` to count the floor under it, which is
   also how a slab under the walls stays out of the room.

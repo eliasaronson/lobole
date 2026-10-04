@@ -592,9 +592,9 @@ edit session (pattern parameters, sources/axis re-pick, Break link for a
 linked copy).
 
 **Reference images**: File > Reference Image… or Shift+I opens a file dialog
-and inserts one. Its session (Tool window) has opacity, hide, Calibrate… and
-Delete; the image drags to move. Opacity and hide are persisted fields and
-are undoable — the opacity baseline is taken when the slider is grabbed and
+and inserts one. Its session (Tool window) has opacity, hide, Show always,
+Calibrate… and Delete; the image drags to move. Opacity, hide and show-always
+are persisted fields and are undoable — the opacity baseline is taken when the slider is grabbed and
 one command pushed on release, never one per frame. Calibration picks two
 points (markers show them and the span), then takes the real distance and an
 optional axis alignment.

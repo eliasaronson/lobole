@@ -353,10 +353,11 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "set_material, batch) names as expect_revision.",
      "part?:string|int", remote::NoFlags,
      "features[]{type,name,index,id?,material?,appearance?,suppressed?,error?,"
-     "stale?,warning?,after_earlier_failure?, "
+     "stale?,warning?,after_earlier_failure?,face_appearance_unresolved?, "
      "plus per-type keys}, "
      "bodies[]{name,volume,material,created_by,bbox_min,bbox_max,reference?,"
-     "appearance?,mesh?}, "
+     "appearance?,face_appearance?[]{element,face,color?,roughness?,"
+     "metallic?},mesh?}, "
      "selection{mesh,face,normal,center}, "
      "selection_items[]{kind,id?,element?}, selected_feature, "
      "camera{position,target,distance,fov_deg,aspect}, can_undo, can_redo, "
