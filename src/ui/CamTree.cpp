@@ -742,6 +742,8 @@ void DrawCamPanel(AppState& state) {
   // A JOB tab's panel, and no other's (v73).
   if (!state.job)
     return;
+  // The run status below is the setup on screen's.
+  SyncCamResultOwner(state);
   // Every edit this panel makes lands on the undo stack through this one
   // guard (R7): a drag is one step, a click is one step.
   JobUndoGuard undoGuard(state, /*coalesce=*/true);
@@ -1494,10 +1496,14 @@ void DrawCamPanel(AppState& state) {
     if (dirty || active->origin != origin)
       MarkJobEdited(state);
     state.camSafeZEdit = active->safeZ;
+    // A switch alone keeps the last setup's verdict WITH that setup and
+    // brings this one's back (RefreshCamToolpaths -> SyncCamResultOwner).
     RefreshCamToolpaths(state);
-    // A verdict about the PREVIOUS toolpath is worse than no verdict.
-    state.camVerdict.clear();
-    state.camLeftover.clear();
+    // An edit: a verdict about the PREVIOUS toolpath is worse than none.
+    if (dirty) {
+      state.camVerdict.clear();
+      state.camLeftover.clear();
+    }
   }
   ImGui::End();
 }
@@ -1963,9 +1969,7 @@ void EditCamSetup(AppState& state, uint64_t setupId) {
   TakeToolWindow(state);
   if (state.camActiveSetup != setupId) {
     state.camActiveSetup = setupId;
-    RefreshCamToolpaths(state);
-    state.camVerdict.clear();
-    state.camLeftover.clear();
+    RefreshCamToolpaths(state); // and this setup's own verdict, if it has one
   }
   state.camEditSetup = setupId;
 }

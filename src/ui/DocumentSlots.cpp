@@ -196,6 +196,12 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.camToolpaths.clear();
   state.camVerdict.clear();
   state.camLeftover.clear();
+  state.camFixtureHit.reset();
+  state.camLastPost.clear();
+  state.camVerdictSettled = false;
+  state.camSetupResults.clear();
+  state.camResultOwner = {};
+  state.camToolpathsFor = {};
   state.camActiveSetup = 0;
   state.camGhostOp = 0;
   if (state.slotPick.featureId == kCamToolSlot)
@@ -281,6 +287,12 @@ void StashActive(AppState& state) {
   state.motionResults.clear();
   slot.motionResultRevisions = std::move(state.motionResultRevisions);
   state.motionResultRevisions.clear();
+  // A job's setups' last runs go with it, as the drawing renders do. The one
+  // on screen joins them when SyncCamResultOwner sees another come on.
+  slot.camResults = std::move(state.camSetupResults);
+  state.camSetupResults.clear();
+  slot.camActiveSetup = state.camActiveSetup;
+  state.camActiveSetup = 0;
 }
 
 // Move a slot's model into AppState as the active tab. Assumes AppState holds
@@ -307,6 +319,9 @@ void ActivateSlot(AppState& state, size_t index) {
   slot.motionResults.clear();
   state.motionResultRevisions = std::move(slot.motionResultRevisions);
   slot.motionResultRevisions.clear();
+  state.camSetupResults = std::move(slot.camResults);
+  slot.camResults.clear();
+  state.camActiveSetup = slot.camActiveSetup;
   state.activePart = static_cast<int>(index);
 }
 
@@ -796,6 +811,11 @@ void SetActivePart(AppState& state, size_t index) {
   // frame (docs/drawings/README.md#projection-off-the-frame); views a job
   // landed while the tab was stashed are assembled now.
   DrawingTabShown(state);
+  // The CAM results on screen were the last tab's: kept with it, and a job's
+  // own put back (docs/cam/gui.md#whose-results-are-on-screen). Its
+  // toolpaths are regenerated too -- the ones in AppState were the last
+  // job's, and its backplot drew them over this one.
+  SyncCamResultOwner(state);
 
   // First look at this tab: frame it. The camera is global, so arriving at a
   // 5 m assembly with a 20 mm part's framing puts you inside the geometry —

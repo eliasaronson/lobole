@@ -242,6 +242,9 @@ bool ArmPlayback(AppState& state, const cam::Setup& setup, StartWork& w) {
     state.camStockSim.Begin(state.camTimeline, setup, std::move(w.height));
   state.camCursor = {0, 0.0};
   state.camPlaybackOpen = true;
+  // What it plays: a switch to another job or setup ends it
+  // (SyncCamResultOwner).
+  state.camPlaybackOwner = CurrentCamResultOwner(state);
   // The simulation is the one thing on screen now: a verb window still
   // asking for a face, or a measurement, over a block being cut is two
   // sessions claiming the same clicks. Close them -- the job stays.
@@ -360,6 +363,8 @@ bool CamPlaybackStartReading(AppState& state, uint64_t setupId, double simRes) {
 }
 
 bool BeginCamPlayback(AppState& state, bool settle) {
+  // The toolpaths it posts must be the setup on screen's.
+  SyncCamResultOwner(state);
   state.camPlaybackRefusal.clear();
   state.camPlaybackSeededFrom.clear();
   state.camPlaybackNotSeeded.clear();

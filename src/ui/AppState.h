@@ -882,6 +882,34 @@ struct DrawingShapeMemo {
   uint64_t clock = 0;
 };
 
+// What the CAM results on screen are ABOUT
+// (docs/cam/gui.md#whose-results-are-on-screen): the project, the job tab and
+// the setup, each by identity -- a slot id and a setup id, never a version.
+// The verdict, the leftover, the fixture hit and the saved path used to be
+// global and "cleared on any edit"; a switch to another job or setup is not
+// an edit, so the Generate window went on showing the previous job's verdict
+// and file.
+struct CamResultOwner {
+  uint64_t project = 0; // AppState::projectGeneration
+  uint64_t job = 0;     // the job tab's PartSlot::id; 0 = no job on screen
+  uint64_t setup = 0;   // the setup's id in that job; 0 = none yet
+  bool operator==(const CamResultOwner&) const = default;
+};
+
+// One setup's last run, kept while another setup or tab is on screen and put
+// back when it returns. The verdict comes back only while `verdictKey` still
+// matches the job (ui::CamVerdictKey): an edit to the job or to a part it
+// cuts makes it a verdict about something else. The saved path always comes
+// back -- the file was written, and says so as long as it did before.
+struct CamSetupResult {
+  bool hasVerdict = false;
+  uint64_t verdictKey = 0;
+  std::vector<cam::VerdictLine> verdict;
+  std::vector<glm::dvec3> leftover;
+  std::optional<glm::dvec3> fixtureHit;
+  std::string lastPost;
+};
+
 struct PartSlot {
   uint64_t id = 0; // stable per-document id (A2): what occurrences reference
   std::string name;
@@ -923,6 +951,13 @@ struct PartSlot {
   // assembly's study of the same id. See AppState::motionResults.
   std::map<uint64_t, motion::Result> motionResults;
   std::map<uint64_t, std::string> motionResultRevisions;
+  // Job tabs only: each setup's last run, by setup id, stashed while the tab
+  // is inactive (AppState::camSetupResults, ui::SyncCamResultOwner).
+  std::map<uint64_t, CamSetupResult> camResults;
+  // ...and which setup was the active one. Setup ids count from the same
+  // start in every job, so a global one made the NEXT job's setup of that id
+  // active, or its first.
+  uint64_t camActiveSetup = 0;
 };
 
 // THE selection (docs/ui/selection.md#one-selection-set): one typed, ordered
@@ -2152,8 +2187,28 @@ struct AppState {
   // The last verification (G4), in the words the panel prints, plus the
   // points where the tool could not reach. Both cleared on any edit, because
   // a verdict about a previous toolpath is worse than no verdict.
+  //
+  // They, `camFixtureHit`, `camLastPost`, `camNote`, `camRefusal` and
+  // `camPlaybackRefusal` are about `camResultOwner` -- one job tab's one
+  // setup -- and ui::SyncCamResultOwner moves them aside when another job
+  // or setup comes on screen, and puts that one's own back
+  // (docs/cam/gui.md#whose-results-are-on-screen).
   std::vector<cam::VerdictLine> camVerdict;
   std::vector<glm::dvec3> camLeftover;
+  CamResultOwner camResultOwner;
+  // Whom `camToolpaths` were generated for, and the playback is playing: the
+  // toolpaths are regenerated, and a playback ended, when that is not the
+  // owner on screen.
+  CamResultOwner camToolpathsFor;
+  CamResultOwner camPlaybackOwner;
+  // The verdict is a finished one (not "Verifying..." or "Not verified yet"),
+  // and the ui::CamVerdictKey it was asked under. Only a finished verdict is
+  // kept for a setup's return.
+  bool camVerdictSettled = false;
+  uint64_t camVerdictKey = 0;
+  // The active job's OTHER setups' last runs, by setup id; stashed into its
+  // PartSlot with the tab (StashActive/ActivateSlot).
+  std::map<uint64_t, CamSetupResult> camSetupResults;
 
   // Cutting simulation (docs/cam/simulation.md). Playback is SESSION state:
   // nothing here serializes, and a document edit invalidates it rather than

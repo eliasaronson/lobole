@@ -48,6 +48,27 @@ void AppendCamToolpathExtras(AppState& state, std::vector<PrimVertex>& out);
 // edit used to pay it again (docs/cam/README.md#background-work).
 void RefreshCamToolpaths(AppState& state);
 
+// Keeps the CAM results on screen about the job tab and setup ON screen
+// (docs/cam/gui.md#whose-results-are-on-screen). When another one has come
+// on -- a tab switch, a setup made active, by a click or over the RPC -- the
+// last one's verdict, leftover, fixture hit and saved path are kept with it,
+// its notes and any verification still running are dropped, a playback of
+// it is ended, and the new one's own last run is put back (its verdict only
+// while CamVerdictKey still matches). The toolpaths are regenerated when
+// they were made for another. Cheap when nothing changed, so every reader
+// can call it first.
+void SyncCamResultOwner(AppState& state);
+
+// Who the results on screen should be about: the active job tab and its
+// active setup. Empty on a tab that is not a job.
+[[nodiscard]] CamResultOwner CurrentCamResultOwner(AppState& state);
+
+// What a verdict depends on beyond its setup: the job's content (its save
+// stamp moves on every recorded edit) and the bodies it cuts, where they are
+// placed and how they are held (JobPassesKey). A kept verdict is shown again
+// only while this is unchanged.
+[[nodiscard]] uint64_t CamVerdictKey(AppState& state);
+
 // Regenerates ONE operation's toolpath in place (appending if it is new), and
 // drops one by id. The vector is per-operation and in operations order, so
 // the result is the same as a full pass — `test_cam.cpp` pins that.

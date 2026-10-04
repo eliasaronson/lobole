@@ -1894,6 +1894,237 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
              !ImGui::FindWindowByName("###CamGenerate")->Active);
   };
 
+  // docs/cam/gui.md#whose-results-are-on-screen. The Generate window's
+  // verdict, its cutting length and the file it saved were GLOBAL, "cleared
+  // on any edit" -- and opening another job is not an edit, so job B's window
+  // went on showing job A's verdict lines, A's millimetres of cutting and A's
+  // saved path. Each job's run is its own: B shows none of A's, and A's comes
+  // back with A.
+  t = IM_REGISTER_TEST(engine, "cam", "another_job_shows_its_own_run");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    const size_t partTab = static_cast<size_t>(s_App->activePart);
+    const uint64_t partId = s_App->parts[partTab].id;
+
+    // Job A: a profile round the plate, into a clamp, so the run has a
+    // verdict, a fixture hit and a file.
+    cam::Setup& made = MakeJob()->AddSetup("Top");
+    const size_t jobA = static_cast<size_t>(s_App->activePart);
+    const uint64_t sid = made.id;
+    s_App->camActiveSetup = sid;
+    cam::Operation op;
+    op.id = Job()->AllocateId();
+    op.name = "Outline";
+    op.type = cam::OpType::Profile;
+    op.topZ = 13.0;
+    op.bottomZ = -1.0;
+    made.operations.push_back(op);
+    ctx->Yield(2);
+    if (ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam))
+      ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    CamSetupMenu(ctx, sid, "###cam_fixture_add_menu");
+    ctx->ItemClick("//###Menu_00/###cam_fixture_box");
+    ctx->Yield(2);
+    IM_CHECK_EQ(Job()->FindSetup(sid)->fixtures.size(), (size_t)1);
+
+    // Job B, on the same part: a setup with nothing in it yet. Its ids
+    // count from the same start as A's, which is how A's results could pass
+    // for B's.
+    const size_t jobB = ui::CreateJobForPart(*s_App, partId, "Other job");
+    cam::Setup& other = Job()->AddSetup("Back");
+    (void)cam::RecomputeOrigin(other, ui::JobBodies(*s_App));
+    s_App->camActiveSetup = other.id;
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, jobA);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->camActiveSetup, sid);
+
+    ToolbarClick(ctx, "###tb_job_generate");
+    ctx->Yield(3);
+    IM_CHECK(s_App->camGenerateOpen);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    IM_CHECK(!s_App->camVerdict.empty());
+    IM_CHECK(s_App->camFixtureHit.has_value());
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_cam_own_run_test";
+    std::filesystem::create_directories(dir);
+    s_App->projectPath = (dir / "plate.dsgn").string();
+    ctx->ItemClick("//###CamGenerate/###cam_save_gcode");
+    ctx->Yield(2);
+    IM_CHECK(std::filesystem::exists(s_App->camLastPost));
+    const std::vector<cam::VerdictLine> verdictA = s_App->camVerdict;
+    const std::vector<glm::dvec3> leftoverA = s_App->camLeftover;
+    const glm::dvec3 hitA = s_App->camFixtureHit.value_or(glm::dvec3(0.0));
+    const std::string postA = s_App->camLastPost;
+    const size_t pathsA = s_App->camToolpaths.size();
+
+    // To B, by its tab.
+    ui::SetActivePart(*s_App, jobB);
+    ctx->Yield(3);
+    // The window stayed open (it is a tool, like Simulate), and shows B.
+    IM_CHECK(s_App->camGenerateOpen);
+    IM_CHECK(ImGui::FindWindowByName("###CamGenerate") != nullptr &&
+             ImGui::FindWindowByName("###CamGenerate")->Active);
+    IM_CHECK(s_App->camVerdict.empty());
+    IM_CHECK(s_App->camLastPost.empty());
+    IM_CHECK(s_App->camToolpaths.empty()); // "N mm of cutting" was A's
+    IM_CHECK(ctx->ItemExists("//###CamGenerate/###cam_generate"));
+    IM_CHECK(!ctx->ItemExists("//###CamGenerate/###cam_save_gcode"));
+    // ...and the viewport's markers, drawn from the same state.
+    IM_CHECK(s_App->camLeftover.empty());
+    IM_CHECK(!s_App->camFixtureHit.has_value());
+    {
+      std::vector<PrimVertex> prims;
+      ui::AppendCamToolpathOverlay(*s_App, prims);
+      IM_CHECK(prims.empty()); // A's backplot is not drawn over B
+    }
+
+    // Back to A: its own run, still true -- nothing was edited.
+    ui::SetActivePart(*s_App, jobA);
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->camActiveSetup, sid);
+    IM_CHECK_EQ(s_App->camToolpaths.size(), pathsA);
+    IM_CHECK_EQ(s_App->camVerdict.size(), verdictA.size());
+    for (size_t i = 0; i < std::min(verdictA.size(), s_App->camVerdict.size());
+         i++)
+      IM_CHECK(s_App->camVerdict[i].text == verdictA[i].text);
+    IM_CHECK_EQ(s_App->camLeftover.size(), leftoverA.size());
+    IM_CHECK(s_App->camFixtureHit.has_value() && *s_App->camFixtureHit == hitA);
+    IM_CHECK(s_App->camLastPost == postA);
+    IM_CHECK(ctx->ItemExists("//###CamGenerate/###cam_save_gcode"));
+
+    // A tab that is not a job shows nothing of either.
+    ui::SetActivePart(*s_App, partTab);
+    ctx->Yield(2);
+    IM_CHECK(s_App->camVerdict.empty());
+    IM_CHECK(s_App->camToolpaths.empty());
+
+    // An edit to A's part while A is away makes its verdict about a part
+    // that no longer exists: it does not come back, and the file it wrote
+    // still does.
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Boss", glm::vec3(0, 0, 12), 10, 10, 5));
+    ctx->Yield(2);
+    ui::SetActivePart(*s_App, jobA);
+    ctx->Yield(3);
+    IM_CHECK(s_App->camVerdict.empty());
+    IM_CHECK(!s_App->camFixtureHit.has_value());
+    IM_CHECK(s_App->camLastPost == postA);
+
+    std::filesystem::remove_all(dir);
+    s_App->projectPath.clear();
+    s_App->camGenerateOpen = false;
+    ui::SetActivePart(*s_App, partTab);
+    ctx->Yield(2);
+  };
+
+  // The same within one job: the verdict is about ONE setup. Making another
+  // the active one used to clear it -- so coming back meant generating again
+  // -- and left the saved path standing, naming the other setup's file.
+  t = IM_REGISTER_TEST(engine, "cam", "another_setup_shows_its_own_run");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    const uint64_t top = MakeJob()->AddSetup("Top").id;
+    const uint64_t back = Job()->AddSetup("Back").id;
+    std::map<uint64_t, uint64_t> opOf;
+    for (const uint64_t s : {top, back}) {
+      // Derived as a setup made in the panel is, so making one active moves
+      // nothing (which would be an edit, and end every kept verdict).
+      (void)cam::RecomputeOrigin(*Job()->FindSetup(s), ui::JobBodies(*s_App));
+      cam::Operation op;
+      op.id = Job()->AllocateId();
+      op.name = s == top ? "Outline" : "Face";
+      op.type = cam::OpType::Profile;
+      op.topZ = 13.0;
+      op.bottomZ = s == top ? -1.0 : 6.0;
+      Job()->FindSetup(s)->operations.push_back(op);
+      opOf[s] = op.id;
+    }
+    s_App->camActiveSetup = top;
+    ctx->Yield(2);
+    if (ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam))
+      ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() / "designer_cam_own_setup_test";
+    std::filesystem::create_directories(dir);
+    s_App->projectPath = (dir / "plate.dsgn").string();
+
+    // Generate and save the top.
+    ToolbarClick(ctx, "###tb_job_generate");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camVerdict.empty());
+    ctx->ItemClick("//###CamGenerate/###cam_save_gcode");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camLastPost.find("Top") != std::string::npos);
+    const std::vector<cam::VerdictLine> verdictTop = s_App->camVerdict;
+    const std::string postTop = s_App->camLastPost;
+
+    // A click on the back's row: the window is the back's now.
+    ctx->ItemClick(CamSetupRow(back).c_str());
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->camActiveSetup, back);
+    IM_CHECK(s_App->camVerdict.empty());
+    IM_CHECK(s_App->camLastPost.empty());
+    IM_CHECK_EQ(s_App->camToolpaths.size(), (size_t)1);
+    if (!s_App->camToolpaths.empty())
+      IM_CHECK_EQ(s_App->camToolpaths[0].operationId, opOf[back]);
+
+    // Its own run, and saved under its own name.
+    ctx->ItemClick("//###CamGenerate/###cam_generate");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camVerdict.empty());
+    ctx->ItemClick("//###CamGenerate/###cam_save_gcode");
+    ctx->Yield(2);
+    IM_CHECK(s_App->camLastPost.find("Back") != std::string::npos);
+    const std::string postBack = s_App->camLastPost;
+    const size_t verdictBack = s_App->camVerdict.size();
+
+    // Each comes back with its setup.
+    ctx->ItemClick(CamSetupRow(top).c_str());
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->camActiveSetup, top);
+    IM_CHECK(s_App->camLastPost == postTop);
+    IM_CHECK_EQ(s_App->camVerdict.size(), verdictTop.size());
+    for (size_t i = 0;
+         i < std::min(verdictTop.size(), s_App->camVerdict.size()); i++)
+      IM_CHECK(s_App->camVerdict[i].text == verdictTop[i].text);
+    if (!s_App->camToolpaths.empty())
+      IM_CHECK_EQ(s_App->camToolpaths[0].operationId, opOf[top]);
+    ctx->ItemClick(CamSetupRow(back).c_str());
+    ctx->Yield(3);
+    IM_CHECK(s_App->camLastPost == postBack);
+    IM_CHECK_EQ(s_App->camVerdict.size(), verdictBack);
+
+    // An edit to the job -- the top's operation, made from the back --
+    // leaves the top's verdict about a job that is gone: it does not come
+    // back.
+    Job()->FindSetup(top)->operations[0].bottomZ = 2.0;
+    ui::MarkJobEdited(*s_App);
+    ctx->ItemClick(CamSetupRow(top).c_str());
+    ctx->Yield(3);
+    IM_CHECK_EQ(s_App->camActiveSetup, top);
+    IM_CHECK(s_App->camVerdict.empty());
+    IM_CHECK(s_App->camLastPost == postTop);
+
+    std::filesystem::remove_all(dir);
+    s_App->projectPath.clear();
+    s_App->camGenerateOpen = false;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+  };
+
   // Workholding by clicking (docs/cam/setup.md#workholding-fixtures): a
   // keep-out box from the panel, placed from the stock; its row checks, moves
   // and edits it; and Verify names the clamp the profile runs into.

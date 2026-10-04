@@ -388,6 +388,39 @@ the background ([README.md](README.md#background-work)); the toolpaths fill in
 as they land and a progress row shows the batch. The "N mm of cutting" total is
 cached on the toolpaths' key.
 
+### Whose results are on screen
+
+Everything the window shows — the verdict, the "N mm of cutting", the saved
+file's path — and the viewport's leftover dots and fixture-hit marker are
+about ONE setup of ONE job tab: `AppState::camResultOwner`, the project, the
+job's slot id and the setup id (identities, not a version). They were global
+and "cleared on any edit", and a switch to another job or setup is not an
+edit, so job B's window went on showing job A's verdict, cutting length and
+`.nc` path, and A's backplot was drawn over B.
+
+`ui::SyncCamResultOwner` (CamPanel.cpp) keeps them honest. A tab switch calls
+it, as does `RefreshCamToolpaths` and every reader (this window, the CAM
+panel, the tool window, the viewport overlay, a playback starting). When the
+setup on screen is not the owner, it:
+
+- keeps the last setup's run with that setup — in `camSetupResults` while its
+  job is the active tab, in its `PartSlot::camResults` once it is not, the
+  way a drawing's renders are kept per slot. Only a finished verdict is kept
+  ("Verifying..." would say so forever);
+- drops the notes and refusals, and a verification still on a worker (its
+  generation no longer matches), and ends a playback of the other setup's file;
+- puts the new setup's own run back: the saved path always (the file was
+  written), the verdict, leftover and fixture hit only while `CamVerdictKey`
+  — the job's save stamp, which every recorded edit moves, and `JobPassesKey`,
+  the bodies it cuts and where — is what it was when the verdict was asked.
+  An edit to the job, or to a part it cuts, while that setup was away leaves
+  "Not verified since the last change";
+- regenerates the toolpaths when they were made for another owner.
+
+Which setup is active is kept per job tab too (`PartSlot::camActiveSetup`):
+setup ids count from the same start in every job, so a global one opened the
+next job on its setup of the same id.
+
 ## Simulate
 
 `job.simulate` opens the transport window along the bottom of the viewport
@@ -453,7 +486,9 @@ part and a setup, each by the Delete key, each one undo step that brings it
 back), `cam/a_delete_from_the_panel_is_one_undo`,
 `cam/the_engrave_window_keeps_its_height`,
 `cam/a_job_tab_frames_its_parts_and_stock` (the first visit, and a project
-opened on the job). A test that
+opened on the job), `cam/another_job_shows_its_own_run` and
+`cam/another_setup_shows_its_own_run`
+([Whose results are on screen](#whose-results-are-on-screen)). A test that
 leaves a CAM window open, or a docked tab switched, breaks later tests' clicks,
 so cleanup that matters to other tests comes right after the last interaction
 that needs it.

@@ -1780,6 +1780,8 @@ void DrawCamToolWindow(AppState& state) {
       state.slotPick = {};
     return;
   }
+  // Its verdict lines and notes are the setup on screen's.
+  SyncCamResultOwner(state);
   // A setup's settings and a part's placement (CamTree.cpp) hold the window
   // only while no verb and no other editor asked for it.
   if (state.camVerb != CamVerb::None || state.camEditOp != 0 ||
@@ -2032,6 +2034,8 @@ void AppendCamVisualisation(AppState& state, std::vector<PrimVertex>& prims,
                             std::vector<LineVertex3D>& quads) {
   if (!state.job)
     return;
+  // The leftover and the fixture hit are the setup on screen's.
+  SyncCamResultOwner(state);
   const cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr)
     return;
@@ -2295,6 +2299,7 @@ void LandVerification(AppState& state, const VerifyWork& w) {
     return;
   state.camVerdict.clear();
   state.camLeftover.clear();
+  state.camVerdictSettled = true;
   const cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr)
     return;
@@ -2351,9 +2356,14 @@ void LandVerification(AppState& state, const VerifyWork& w) {
 } // namespace
 
 void RunCamVerification(AppState& state) {
+  // First, so the verdict is asked about -- and kept with -- the setup on
+  // screen, of toolpaths generated for it.
+  SyncCamResultOwner(state);
   state.camVerdict.clear();
   state.camLeftover.clear();
   state.camFixtureHit.reset();
+  state.camVerdictSettled = false;
+  state.camVerdictKey = CamVerdictKey(state);
   // Every request overtakes the one before it, whether that one is still on
   // a worker or not: a verdict landing about a toolpath that has since moved
   // is the thing this whole check exists to avoid.
@@ -2380,6 +2390,7 @@ void RunCamVerification(AppState& state) {
                         PostOpts(*setup), work->gcode, &error)) {
     state.camVerdict.push_back(
         {cam::VerdictLine::Level::Bad, "Could not post this job: " + error});
+    state.camVerdictSettled = true;
     return;
   }
   for (const cam::Toolpath& tp : state.camToolpaths) {

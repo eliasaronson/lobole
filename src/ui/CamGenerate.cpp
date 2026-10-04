@@ -49,6 +49,9 @@ void DrawCamGenerateWindow(AppState& state) {
     state.camGenerateOpen = false;
     return;
   }
+  // Everything below is about one job's one setup: the one on screen
+  // (docs/cam/gui.md#whose-results-are-on-screen).
+  SyncCamResultOwner(state);
   cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr) {
     state.camGenerateOpen = false;

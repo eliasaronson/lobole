@@ -179,6 +179,12 @@ void ResetAppForTest() {
   s_App->camToolpaths.clear();
   s_App->camVerdict.clear();
   s_App->camLeftover.clear();
+  s_App->camFixtureHit.reset();
+  s_App->camLastPost.clear();
+  s_App->camVerdictSettled = false;
+  s_App->camSetupResults.clear();
+  s_App->camResultOwner = {};
+  s_App->camToolpathsFor = {};
   s_App->camShowToolpath = true;
   // THE DOCK LAYOUT, and it is the one that actually bit us. Two of the
   // three order-dependent failures on 2026-08-22 were a left-node tab left

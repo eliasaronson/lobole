@@ -114,9 +114,123 @@ cam::GenerateContext ContextOf(AppState& state, const cam::Setup& setup) {
 }
 } // namespace
 
+CamResultOwner CurrentCamResultOwner(AppState& state) {
+  CamResultOwner owner;
+  if (!state.job || state.activePart < 0 ||
+      static_cast<size_t>(state.activePart) >= state.parts.size())
+    return owner;
+  owner.project = state.projectGeneration;
+  owner.job = state.parts[static_cast<size_t>(state.activePart)].id;
+  if (const cam::Setup* setup = ActiveCamSetup(state))
+    owner.setup = setup->id;
+  return owner;
+}
+
+uint64_t CamVerdictKey(AppState& state) {
+  if (!state.job)
+    return 0;
+  return (JobPassesKey(state) ^ state.job->SaveStamp()) * 1099511628211ull;
+}
+
+namespace {
+
+// The body of SyncCamResultOwner without its last step, for
+// RefreshCamToolpaths to call before it regenerates (which IS that step).
+void SwapCamResultOwner(AppState& state) {
+  const CamResultOwner now = CurrentCamResultOwner(state);
+  if (now == state.camResultOwner)
+    return;
+  const CamResultOwner was = state.camResultOwner;
+  state.camResultOwner = now;
+
+  // Leaving: what was on screen goes with what it was about. Its tab's map
+  // is in AppState while that tab is active, and in its slot once it is not
+  // (StashActive has already moved it by the time a tab switch lands here).
+  if (was.job != 0 && was.project == state.projectGeneration) {
+    std::map<uint64_t, CamSetupResult>* kept = nullptr;
+    if (was.job == now.job)
+      kept = &state.camSetupResults;
+    else if (const std::optional<size_t> i = SlotIndexById(state, was.job);
+             i && *i != static_cast<size_t>(state.activePart))
+      kept = &state.parts[*i].camResults;
+    if (kept != nullptr) {
+      CamSetupResult& r = (*kept)[was.setup];
+      r = CamSetupResult{};
+      r.lastPost = std::move(state.camLastPost);
+      // Only a FINISHED verdict: "Verifying..." kept would say so forever,
+      // since the verification it waits for is dropped below.
+      if (state.camVerdictSettled && !state.camVerdict.empty()) {
+        r.hasVerdict = true;
+        r.verdictKey = state.camVerdictKey;
+        r.verdict = std::move(state.camVerdict);
+        r.leftover = std::move(state.camLeftover);
+        r.fixtureHit = state.camFixtureHit;
+      }
+    }
+  }
+
+  state.camVerdict.clear();
+  state.camLeftover.clear();
+  state.camFixtureHit.reset();
+  state.camLastPost.clear();
+  state.camVerdictSettled = false;
+  state.camVerdictKey = 0;
+  // What the last action did or refused is about the last setup's action --
+  // except the action that MADE this job's first setup, whose note (the part
+  // laid flat for a Z zero) is about the setup it made.
+  if (was.job != now.job || was.setup != 0) {
+    state.camNote.clear();
+    state.camRefusal.clear();
+  }
+  state.camPlaybackRefusal.clear();
+  // A verification still on a worker is about `was`: dropped, not landed
+  // here (LandVerification compares the generation).
+  state.camVerifyGeneration++;
+  state.camVerifyWhenSettled = false;
+  // A playback is a picture of `was`'s file.
+  if (state.camPlaybackOpen && state.camPlaybackOwner != now)
+    EndCamPlayback(state);
+
+  // Arriving: this setup's own last run -- the verdict only while it is
+  // still about the job as it is now.
+  if (now.job == 0)
+    return;
+  std::erase_if(state.camSetupResults, [&state](const auto& entry) {
+    return state.job->FindSetup(entry.first) == nullptr;
+  });
+  const auto it = state.camSetupResults.find(now.setup);
+  if (it == state.camSetupResults.end())
+    return;
+  CamSetupResult r = std::move(it->second);
+  state.camSetupResults.erase(it);
+  state.camLastPost = std::move(r.lastPost);
+  if (r.hasVerdict && r.verdictKey == CamVerdictKey(state)) {
+    state.camVerdict = std::move(r.verdict);
+    state.camLeftover = std::move(r.leftover);
+    state.camFixtureHit = r.fixtureHit;
+    state.camVerdictKey = r.verdictKey;
+    state.camVerdictSettled = true;
+  }
+}
+
+} // namespace
+
+void SyncCamResultOwner(AppState& state) {
+  SwapCamResultOwner(state);
+  if (state.camToolpathsFor != state.camResultOwner)
+    RefreshCamToolpaths(state);
+}
+
 void RefreshCamToolpaths(AppState& state) {
-  std::vector<cam::Toolpath> previous = std::move(state.camToolpaths);
+  SwapCamResultOwner(state);
+  // Moves are kept for a pass still cutting only from the SAME setup's last
+  // generate: operation ids count from the same start in every job, so
+  // another job's toolpath of that id is not this operation's.
+  std::vector<cam::Toolpath> previous;
+  if (state.camToolpathsFor == state.camResultOwner)
+    previous = std::move(state.camToolpaths);
   state.camToolpaths.clear();
+  state.camToolpathsFor = state.camResultOwner;
   cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr || !state.job)
     return;
@@ -132,6 +246,7 @@ void RefreshCamToolpaths(AppState& state) {
 }
 
 void RefreshCamToolpath(AppState& state, uint64_t opId) {
+  SyncCamResultOwner(state); // the other ops' toolpaths must be this setup's
   cam::Setup* setup = ActiveCamSetup(state);
   if (setup == nullptr || !state.job || opId == 0)
     return;
@@ -204,6 +319,7 @@ void RefreshCamToolpath(AppState& state, uint64_t opId) {
 }
 
 void DropCamToolpath(AppState& state, uint64_t opId) {
+  SyncCamResultOwner(state);
   for (auto it = state.camToolpaths.begin(); it != state.camToolpaths.end();
        ++it)
     if (it->operationId == opId) {
@@ -1597,6 +1713,9 @@ CamBackplotRef CamBackplot(AppState&) { return {}; }
 void AppendCamToolpathExtras(AppState&, std::vector<PrimVertex>&) {}
 uint64_t CamToolpathsKey(const std::vector<cam::Toolpath>&) { return 0; }
 void RefreshCamToolpaths(AppState&) {}
+void SyncCamResultOwner(AppState&) {}
+CamResultOwner CurrentCamResultOwner(AppState&) { return {}; }
+uint64_t CamVerdictKey(AppState&) { return 0; }
 void RefreshCamToolpath(AppState&, uint64_t) {}
 void DropCamToolpath(AppState&, uint64_t) {}
 int RemoveCamOperations(AppState&, const std::vector<uint64_t>&) { return 0; }
