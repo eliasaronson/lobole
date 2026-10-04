@@ -165,10 +165,11 @@ struct SheetView {
   ProjectionResult::Stats projectionStats;
   // The same hiding time, folded onto the SEMANTIC source — the occurrence on
   // an assembly view, the body's owning feature on a part view — because that
-  // is the name a reader can act on: `hidden` takes occurrences, not body
-  // slots. One imported driver was 16 s of an 18 s view and nothing said so
-  // (docs/drawings/README.md#what-a-view-costs). Shares OVERLAP: a pair's cost
-  // counts for both of its members, since leaving out either avoids it.
+  // is the name a reader can act on: `hidden` takes occurrences, or a part's
+  // body-owning features, not body slots. One imported driver was 16 s of an
+  // 18 s view and nothing said so (docs/drawings/README.md#what-a-view-costs).
+  // Shares OVERLAP: a pair's cost counts for both of its members, since
+  // leaving out either avoids it.
   std::vector<ProjectionResult::Stats::BodyCost> costBySource;
   double updateMs = 0.0; // HLR outline building
   double hideMs = 0.0;   // HLR visibility classification

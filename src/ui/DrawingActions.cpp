@@ -137,11 +137,19 @@ struct SourceBody {
   std::shared_ptr<const drawing::SectionCut> cut;
 };
 
-// Appends one part document's bodies at the given world placement.
+// Appends one part document's bodies at the given world placement, less any
+// whose creating feature is in `hidden` (a part view's `hidden`; null for an
+// assembly's occurrences, which leave whole parts off before this).
 void AppendBodies(const Document& doc, const glm::dmat4& xf, uint64_t occId,
-                  std::vector<SourceBody>& out) {
+                  std::vector<SourceBody>& out,
+                  const std::vector<uint64_t>* hidden = nullptr) {
   for (const Body& body : doc.GetBodies()) {
     if (body.shape.GetShape().IsNull())
+      continue;
+    // Left off this sheet: the ground under a house, a fixture beside the
+    // casting (docs/drawings/README.md#leaving-bodies-off-a-view).
+    if (hidden != nullptr && std::find(hidden->begin(), hidden->end(),
+                                       body.createdBy) != hidden->end())
       continue;
     // A Derived ghost is not the part: a drawing of the gripper body is a
     // drawing of the body, not of the servo it was drawn on (and the HLR of
@@ -187,7 +195,7 @@ bool GatherSourceBodies(AppState& state, const DrawingView& view,
       if (!doc)
         return false;
       *sourceVersion = SlotDoc(state, i)->Version();
-      AppendBodies(*doc, glm::dmat4(1.0), 0, out);
+      AppendBodies(*doc, glm::dmat4(1.0), 0, out, &view.hidden);
       return true;
     }
     if (view.configuration != 0) {
@@ -1600,6 +1608,10 @@ Sheet DrawingSheetForOutput(AppState& state) {
       std::string slug;
       for (const Body& body : doc->GetBodies()) {
         if (body.reference || body.material.empty())
+          continue;
+        // A body left off the sheet is not what the sheet is made of.
+        if (std::find(first.hidden.begin(), first.hidden.end(),
+                      body.createdBy) != first.hidden.end())
           continue;
         if (!slug.empty() && slug != body.material) {
           slug = "mixed";

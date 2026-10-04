@@ -6,7 +6,9 @@ cutting plane on the view it folds from, a Ø across the bore's walls that
 reads the toleranced class AND its limits), a datum symbol, the title
 block's material and its derived scale, and on an assembly sheet a parts
 list with balloons numbered from it -- an occurrence the view hides is
-neither listed nor ballooned. Everything survives a save and a reopen.
+neither listed nor ballooned. Everything survives a save and a reopen. A
+part view leaves a BODY off by name or feature id and projects only the
+rest.
 Headless -- no display (docs/drawings/README.md#section-views).
 
 Usage: drawing_sheet_smoke.py <path-to-designer-binary>
@@ -187,6 +189,34 @@ def main():
             expect(v["has_geometry"] and cost.get("self_calls", 1) == 0
                    and cost.get("pair_calls", 1) == 0,
                    f"{v['name']} reopens projected, without HLR: {cost}")
+
+        # --- a part view leaves a BODY off ----------------------------------
+        # The ground under a house is a body the model needs and its sheet
+        # does not (docs/drawings/README.md#leaving-bodies-off-a-view).
+        d.call("add_part", name="two")
+        keep = box(d, (0, 0, 0), (10, 10, 10), "Keep")["id"]
+        ground = box(d, (50, 0, 0), (10, 10, 10), "Ground")["id"]
+        d.call("create_drawing", name="two-dwg",
+               sheet={"size": "a3", "landscape": True})
+        refused(d, "add_drawing_view", "'Ground'", source="two",
+                orientation="top", scale=1.0, position=[150, 150],
+                hidden=["Grund"])
+        v = d.call("add_drawing_view", source="two", orientation="top",
+                   scale=1.0, position=[150, 150], hidden=["Ground"])["id"]
+        d.call("update_drawing")
+
+        def sources():
+            return {e["source_id"] for e in d.call(
+                "list_drawing_geometry", view=v)["geometry"]}
+        expect(sources() == {keep},
+               f"only the kept body is projected: {sources()}")
+        d.call("set_drawing_view", id=v, hidden=[])
+        d.call("update_drawing")
+        expect(sources() == {keep, ground},
+               f"both, with nothing hidden: {sources()}")
+        d.call("set_drawing_view", id=v, hidden=[keep])
+        d.call("update_drawing")
+        expect(sources() == {ground}, f"hidden by feature id: {sources()}")
         print("drawing_sheet_smoke: OK")
     finally:
         app.terminate()

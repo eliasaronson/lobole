@@ -144,7 +144,9 @@ struct DrawingView {
   // A string rather than the enum so it serializes and refuses by name like
   // every other enum on the wire (docs/drawings/README.md#projection-hlr).
   std::string quality = "exact";
-  // Occurrences to leave OFF this view, by id. Empty = draw everything.
+  // What to leave OFF this view, by id: occurrences of an assembly source,
+  // or the creating features of a part source's bodies (a body name is
+  // resolved to its feature when the view is set). Empty = draw everything.
   //
   // Exact HLR is priced by surface complexity: the single-cylinder engine is
   // 47 s a view, and 0.0 s with its two valve springs hidden — seventeen of
@@ -152,7 +154,9 @@ struct DrawingView {
   // the difference between a real dimensionable drawing and no drawing at all
   // (generators/README.md#single-cylinder-and-air-cooled-engines).
   //
-  // Only meaningful for an assembly source; a part has no occurrences.
+  // On a part it is the ground under a house or a fixture beside a casting:
+  // a body the model needs that this sheet does not
+  // (docs/drawings/README.md#leaving-bodies-off-a-view).
   std::vector<uint64_t> hidden;
   // Which configuration of a PART source this view draws; 0 = whatever the
   // part has active. A sheet names its configuration so a flat-pattern view

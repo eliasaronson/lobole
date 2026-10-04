@@ -29,7 +29,8 @@ onto one sheet. A project holds any number of drawings.
 - **Views** (`DrawingView`): a source document by stable project-document id
   (part or assembly — a rename cannot break a view), a named orientation, a
   scale (with an optional expression), a sheet position in mm, `showHidden`,
-  `quality` (`exact` or `fast`), `hidden` occurrences, a part
+  `quality` (`exact` or `fast`), `hidden` occurrences or bodies
+  ([leaving bodies off a view](#leaving-bodies-off-a-view)), a part
   `configuration`, a `rotation_deg`, `baseViewId` for a projected child, a
   `section` and a `detail` (below).
 - **Dimensions** (`DrawingDim`): a kind, a view, one or more `ProjRef`s and a
@@ -145,6 +146,25 @@ open (the hatching stops at the drill, the thick line), dashed where the hole
 is hidden, and left off when the view hides hidden lines. A modelled thread
 draws its own geometry instead.
 
+### Leaving bodies off a view
+
+A view's `hidden` leaves things off THIS sheet, which is not hiding them in
+the model: one sheet can drop the springs and another keep them. On an
+assembly view it names occurrences (by id or name). On a part view it names
+bodies, by body name or by the id of the feature that created one, and
+stores the feature ids (`DrawingView::hidden`, the same id list, so no
+format change): the ground a house stands on, or a fixture modelled beside a
+casting, is a body the model needs and the sheet does not, and leaving it
+off used to take a configuration that suppressed it.
+
+- A name is resolved when the view is set, against the bodies of the part
+  as the view draws it (its `configuration`), and an unknown one is refused
+  naming the bodies that exist (`ResolvePartBodies`). A feature that created
+  several bodies leaves them all off.
+- `AppendBodies` skips the hidden bodies, so the projection's input hash
+  and the kept-projection equality (`SameProjectedDefinition`) both see the
+  change, and the title block's derived MATERIAL reads only what is drawn.
+
 ### Projected children
 
 A view with a `baseViewId` folds from its base: when the two views map the
@@ -189,8 +209,8 @@ intersects every projected edge against every face, and a swept B-spline
 surface (a spring, a pipe, an imported driver) is orders of magnitude dearer
 than planes and cylinders. Sixteen bored boxes are milliseconds a view; one
 four-turn helical spring is seconds; one or two such parts can be nearly all
-of an assembly view. The levers are `hidden` (leave occurrences off this
-view), `quality: "fast"`, and `update_drawing {budget_s}`, which bounds the
+of an assembly view. The levers are `hidden` (leave occurrences, or a
+part's bodies, off this view), `quality: "fast"`, and `update_drawing {budget_s}`, which bounds the
 whole update: a view still running when the budget is spent stops, keeps its
 previous curves and says so. OCC's `Hide()` has no cancel hook, so the
 projection drives HLR pairwise itself to be stoppable. Failures are caught
@@ -701,8 +721,9 @@ which writes once the views have landed); the format is chosen by extension and 
   block, and a reopen.
 - `tests/drawing_sheet_smoke.py`: a section view, its Ø across the walls
   with class and limits, a datum, the title block, a parts list numbered
-  for its balloons with a hidden occurrence left out, export, and a reopen
-  whose views come back projected without HLR.
+  for its balloons with a hidden occurrence left out, export, a reopen
+  whose views come back projected without HLR, a part view that leaves a
+  body off by name and by feature id (and refuses a misspelt one).
 - `tests/test_flat_drawing.cpp`: a view draws its configuration, a dimension
   across a blank reads the developed length, bend tables.
 - `tests/test_actions.cpp`: layout reuse and nested-part invalidation through

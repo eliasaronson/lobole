@@ -58,7 +58,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "exact costs what the SURFACES cost, not the part count: 16 bored "
      "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. "
      "`hidden` leaves occurrences OFF this view, by id or name, refused if the "
-     "name is not in the source. It is a per-SHEET choice, not a model change. "
+     "name is not in the source; on a PART view it leaves bodies off, by body "
+     "name or the id of the feature that created one (the ground under a "
+     "house), stored as feature ids. It is a per-SHEET choice, not a model "
+     "change. "
      "When this call projects (the auto-placed form), it returns `cost_ms` "
      "and `by_occurrence` — which occupants carried it — plus a `warnings` "
      "line when one of them carried most of a slow view, so the name to put "
@@ -112,7 +115,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "exact costs what the SURFACES cost, not the part count: 16 bored "
      "boxes are 3.1 ms a view, one 4-turn helical spring is 6.4 s. "
      "`hidden` leaves occurrences OFF this view, by id or name, refused if the "
-     "name is not in the source. It is a per-SHEET choice, not a model change. "
+     "name is not in the source; on a PART view it leaves bodies off, by body "
+     "name or the id of the feature that created one (the ground under a "
+     "house), stored as feature ids. It is a per-SHEET choice, not a model "
+     "change. "
      "When this call projects (the auto-placed form), it returns `cost_ms` "
      "and `by_occurrence` — which occupants carried it — plus a `warnings` "
      "line when one of them carried most of a slow view, so the name to put "
@@ -507,14 +513,31 @@ namespace {
 // a sheet asked for fast and given exact takes a minute and a half a view and
 // looks like a hang, and one asked for exact and given fast is a look
 // presented as a deliverable.
-// The occurrences a view leaves off, by id or by name, refused when the name
-// is not in the source assembly — a silent miss would draw the spring you
-// meant to drop and cost a minute a view to find out.
+// What a view leaves off, by id or by name, refused when the name is not in
+// the source -- a silent miss would draw the spring you meant to drop and
+// cost a minute a view to find out. An assembly source names occurrences; a
+// part source names its bodies, by name or by the feature that created one,
+// and stores the feature ids
+// (docs/drawings/README.md#leaving-bodies-off-a-view).
 std::vector<uint64_t> ParseHidden(ui::AppState& state, const DrawingView& view,
                                   const nlohmann::json& j) {
   std::vector<uint64_t> out;
   if (!j.is_array())
-    throw std::runtime_error("`hidden` is an array of occurrence ids or names");
+    throw std::runtime_error("`hidden` is an array of occurrence ids or names "
+                             "(an assembly view), or of body names or "
+                             "feature ids (a part view)");
+  if (const Document* part =
+          ui::DrawingSourceDocument(state, view.sourceDocId)) {
+    if (j.empty())
+      return out;
+    // The configured copy when the view draws one: a body that exists only
+    // in that configuration is still a body of this sheet.
+    std::string err;
+    const Document* drawn = ui::DrawingViewDocument(state, view, &err);
+    const std::set<uint64_t> ids =
+        ResolvePartBodies(drawn ? *drawn : *part, j, "hidden");
+    return {ids.begin(), ids.end()};
+  }
   const AssemblyDocument* asmDoc = nullptr;
   for (const ui::PartSlot& slot : state.parts)
     if (slot.id == view.sourceDocId && slot.kind == ui::DocKind::Assembly)
@@ -675,8 +698,6 @@ DrawingView AddViewFromParams(ui::AppState& state, const RpcParams& p,
   v.scale = p.value("scale", 1.0);
   if (p.contains("quality"))
     v.quality = RequireQuality(p.at("quality"));
-  if (p.contains("hidden"))
-    v.hidden = ParseHidden(state, v, p.at("hidden"));
   if (p.contains("configuration")) {
     v.configuration = ParseViewConfiguration(state, v, p.at("configuration"));
     // Two views of one part at one orientation, both called "top", are two
@@ -690,6 +711,9 @@ DrawingView AddViewFromParams(ui::AppState& state, const RpcParams& p,
         v.name += " (" + cfg->name + ")";
     }
   }
+  // After the configuration: a part view's bodies are the configured part's.
+  if (p.contains("hidden"))
+    v.hidden = ParseHidden(state, v, p.at("hidden"));
   if (p.contains("position")) {
     const json& pos = p.at("position");
     v.position = {pos.at(0).get<double>(), pos.at(1).get<double>()};
@@ -757,7 +781,7 @@ DrawingView SetViewFromParams(ui::AppState& state, const DrawingView& view,
   if (p.contains("quality"))
     v.quality = RequireQuality(p.at("quality"));
   if (p.contains("hidden"))
-    v.hidden = ParseHidden(state, view, p.at("hidden"));
+    v.hidden = ParseHidden(state, v, p.at("hidden"));
   if (p.contains("base_view"))
     v.baseViewId = p.at("base_view").get<uint64_t>();
   if (p.contains("rotation_deg"))
