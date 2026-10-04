@@ -1,0 +1,39 @@
+{
+  "format": "designer-document",
+  "version": 165,
+  "parameters": [
+    {"name": "floor_min", "expression": "6390"}
+  ],
+  "requirements": [
+    {"id": 1, "name": "floor inside the walls",
+     "source": "the listing's area is the floor the outer walls ring",
+     "revision": 1,
+     "measure": {"kind": "section_area", "document": 7, "of": "enclosed",
+                 "base_plane": "xy", "offset": 25,
+                 "bodies": ["South wall", "North wall", "West wall", 4]},
+     "bound": {"kind": "at_least", "value": "floor_min"},
+     "evidence": {"pass": true, "value": 6400.0, "unit": "mm2",
+                  "input_hash": "0x0123456789abcdef", "revision": 1,
+                  "limit": 6390.0, "checked_at": "2026-10-04T12:00:00Z",
+                  "detail": {"material_area": 3600.0}}},
+    {"id": 2, "name": "wall footprint",
+     "revision": 1,
+     "measure": {"kind": "section_area", "document": 7, "of": "material",
+                 "origin": [0, 0, 25], "normal": [0, 0, 1]},
+     "bound": {"kind": "at_most", "value": 4000}}
+  ],
+  "features": [
+    {"type": "Box", "name": "South wall", "id": 1, "position": [0, 0, 0],
+     "width": 100, "depth": 10, "height": 50, "material": "brick"},
+    {"type": "Box", "name": "North wall", "id": 2, "position": [0, 90, 0],
+     "width": 100, "depth": 10, "height": 50, "material": "render"},
+    {"type": "Box", "name": "West wall", "id": 3, "position": [0, 10, 0],
+     "width": 10, "depth": 80, "height": 50, "material": "plaster"},
+    {"type": "Box", "name": "East wall", "id": 4, "position": [90, 10, 0],
+     "width": 10, "depth": 80, "height": 50, "material": "roof_tile"},
+    {"type": "Box", "name": "Membrane", "id": 5, "position": [0, 0, 50],
+     "width": 100, "depth": 100, "height": 1, "material": "roofing_felt"},
+    {"type": "Box", "name": "Ground", "id": 6, "position": [-50, -50, -20],
+     "width": 200, "depth": 200, "height": 20, "material": "soil"}
+  ]
+}

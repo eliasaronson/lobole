@@ -251,7 +251,7 @@ TEST_CASE("A grade is its own row and prints as the grade",
   CHECK(MaterialLibrary::FamilySlug("petg") == "petg");
 }
 
-// The building materials (v164): a house's mass and parts list mean
+// The building materials (v165): a house's mass and parts list mean
 // something only when each has a density, and CAM says by name that no
 // router cuts them rather than reading them as no material.
 TEST_CASE("Building materials have a density, a look and a cut class",

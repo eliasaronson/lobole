@@ -58,7 +58,7 @@ enum class MaterialType {
   // glass appearance.
   EPOXY,
 
-  // Building materials (v164): what a house is made of, so its mass and its
+  // Building materials (v165): what a house is made of, so its mass and its
   // parts list mean something and a finish is not an override on concrete.
   BRICK,        // fired clay brick
   ROOF_TILE,    // concrete roof tile

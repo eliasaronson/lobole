@@ -235,6 +235,98 @@ def cam(d):
                f"reopened: {rows(d)['the plate verifies']}")
 
 
+def section_area(d):
+    """The area a section ENCLOSES: four separate wall bodies ringing a
+    floor report exactly the floor, the material they cut is the walls'
+    footprint, a plate with a 10 mm bore encloses the bore, and a bound past
+    the measure fails -- all through check_requirements. A wall that goes
+    reads unresolved, not a smaller room."""
+    d.call("new_project")
+    walls = {"South wall": ((0, 0, 0), (100, 10, 50)),
+             "North wall": ((0, 90, 0), (100, 10, 50)),
+             "West wall": ((0, 10, 0), (10, 80, 50)),
+             "East wall": ((90, 10, 0), (10, 80, 50))}
+    for name, (lo, size) in walls.items():
+        box(d, lo, size, name)
+    # A slab under them all, which must not fill the room it carries.
+    box(d, (-20, -20, -10), (140, 140, 10), "Slab")
+    room = d.call("list_parts")["parts"][0]["id"]
+    names = sorted(walls)
+    r = d.call("section", base_plane="xy", offset=25, bodies=names,
+               enclosed=True)
+    expect(abs(r["enclosed_area"] - 6400.0) < 1e-6,
+           f"the four walls enclose the 80 x 80 floor: {r}")
+    expect(abs(r["area"] - 3600.0) < 1e-6, f"the walls' own footprint: {r}")
+    refused(d, "section", "no body 'Roof'", base_plane="xy", offset=25,
+            bodies=["Roof"], enclosed=True)
+    refused(d, "section", "accepted: xy, xz, yz", base_plane="top",
+            offset=25)
+    add(d, "floor", {"kind": "section_area", "document": room,
+                     "of": "enclosed", "base_plane": "xy", "offset": 25,
+                     "bodies": names},
+        {"kind": "within", "min": 6399, "max": 6401},
+        "the room the listing quotes")
+    add(d, "walls", {"kind": "section_area", "document": room,
+                     "of": "material", "origin": [0, 0, 25],
+                     "normal": [0, 0, 1], "bodies": names},
+        {"kind": "at_most", "value": 3600.5})
+    add(d, "bigger floor", {"kind": "section_area", "document": room,
+                            "of": "enclosed", "base_plane": "xy",
+                            "offset": 25, "bodies": names},
+        {"kind": "at_least", "value": 6500})
+    refused(d, "add_requirement", "accepted: material, enclosed", name="x",
+            measure={"kind": "section_area", "document": room,
+                     "of": "inside", "base_plane": "xy", "offset": 25},
+            bound={"kind": "at_least", "value": 1})
+    refused(d, "add_requirement", "needs `offset`", name="x",
+            measure={"kind": "section_area", "document": room,
+                     "of": "enclosed", "base_plane": "xy"},
+            bound={"kind": "at_least", "value": 1})
+    refused(d, "add_requirement", "no body 'Roof'", name="x",
+            measure={"kind": "section_area", "document": room,
+                     "of": "enclosed", "base_plane": "xy", "offset": 25,
+                     "bodies": ["Roof"]},
+            bound={"kind": "at_least", "value": 1})
+
+    d.call("add_part", name="Plate")
+    box(d, (-20, -20, 0), (40, 40, 5), "Plate")
+    sk = d.call("add_feature", feature={
+        "type": "Sketch", "name": "Bore sketch",
+        "plane": {"origin": [0, 0, 5], "normal": [0, 0, 1],
+                  "uAxis": [1, 0, 0]},
+        "entities": [{"type": "circle", "center": [0, 0], "radius": 5.0}]})
+    d.call("add_feature", feature={
+        "type": "Extrude", "name": "Bore", "sketch_id": sk["id"],
+        "distance": 5.0, "mode": "cut", "reversed": True})
+    plate = [p["id"] for p in d.call("list_parts")["parts"]
+             if p["name"] == "Plate"][0]
+    add(d, "bore", {"kind": "section_area", "document": plate,
+                    "of": "enclosed", "base_plane": "xy", "offset": 2.5},
+        {"kind": "within", "min": 78.5, "max": 78.6})
+
+    got = {x["name"]: x for x in d.call("check_requirements")["requirements"]}
+    expect(got["floor"]["state"] == "pass"
+           and abs(got["floor"]["value"] - 6400.0) < 1e-6
+           and got["floor"]["unit"] == "mm2", got["floor"])
+    expect(got["walls"]["state"] == "pass"
+           and abs(got["walls"]["value"] - 3600.0) < 1e-6, got["walls"])
+    expect(got["bigger floor"]["state"] == "fail", got["bigger floor"])
+    expect(got["bore"]["state"] == "pass"
+           and abs(got["bore"]["value"] - 25.0 * 3.141592653589793) < 1e-3,
+           got["bore"])
+
+    # A wall deleted is a reference gone: never a pass, never a smaller room.
+    d.call("set_active_part", part=room)
+    east = [f["id"] for f in d.call("get_state")["features"]
+            if f["name"] == "East wall"][0]
+    d.call("delete_feature", feature_id=east)
+    expect(state(d, "floor") == "unresolved", rows(d)["floor"])
+    # Three walls ring nothing, and the answer says why rather than a bare 0.
+    r = d.call("section", base_plane="xy", offset=25, enclosed=True,
+               bodies=["South wall", "North wall", "West wall"])
+    expect(r["enclosed_area"] == 0 and "opening" in r["enclosed_note"], r)
+
+
 def studied_part(d, study):
     """The bar's study requirements against a real solve: pass, stale on
     a load edit, fail past the bound, edited, saved and reopened, and
@@ -475,6 +567,7 @@ def main():
 
         fits(d)
         cam(d)
+        section_area(d)
     print("requirements_smoke: ok")
     return 0
 

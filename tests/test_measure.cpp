@@ -6,6 +6,10 @@
 #include "core/Feature.h"
 #include "core/Measure.h"
 #include "core/features/BooleanFeature.h"
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <gp_Ax2.hxx>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -780,6 +784,76 @@ TEST_CASE("Cross-section area of a box", "[measure][section]") {
                                         glm::dvec3(0, 0, 1));
   REQUIRE(miss.has_value());
   CHECK_THAT(*miss, Catch::Matchers::WithinAbs(0.0, 1e-6));
+}
+
+// The area a section ENCLOSES (docs/inspect/README.md#enclosed-area): four
+// separate wall bodies -- the way a building is modelled -- ring a floor the
+// material area cannot report.
+TEST_CASE("SectionEnclosedArea: four wall bodies enclose the floor",
+          "[measure][section]") {
+  const auto walls = [](Document& doc, double eastY1) {
+    doc.AddFeature(
+        std::make_unique<BoxFeature>("S", glm::dvec3(0, 0, 0), 100, 10, 50));
+    doc.AddFeature(
+        std::make_unique<BoxFeature>("N", glm::dvec3(0, 90, 0), 100, 10, 50));
+    // West runs the full depth, overlapping both: corners that overlap are
+    // one ring, as corners that only meet are.
+    doc.AddFeature(
+        std::make_unique<BoxFeature>("W", glm::dvec3(0, 0, 0), 10, 100, 50));
+    doc.AddFeature(std::make_unique<BoxFeature>("E", glm::dvec3(90, 10, 0), 10,
+                                                eastY1 - 10, 50));
+  };
+  Document closed;
+  walls(closed, 90);
+  REQUIRE(closed.GetBodies().size() == 4);
+  const auto floor = Measure::SectionEnclosedArea(
+      closed.GetBodies(), glm::dvec3(0, 0, 25), glm::dvec3(0, 0, 1));
+  REQUIRE(floor.has_value());
+  CHECK_THAT(*floor, WithinRel(80.0 * 80.0, 1e-9));
+  // The material is the walls, overlap counted per body, and not the floor.
+  const auto material = Measure::CrossSectionArea(
+      closed.GetBodies(), glm::dvec3(0, 0, 25), glm::dvec3(0, 0, 1));
+  REQUIRE(material.has_value());
+  CHECK_THAT(*material, WithinRel(1000.0 + 1000.0 + 1000.0 + 800.0, 1e-9));
+  // A gap in the ring encloses nothing: the honest answer when the walls do
+  // not close.
+  Document open;
+  walls(open, 85);
+  const auto none = Measure::SectionEnclosedArea(
+      open.GetBodies(), glm::dvec3(0, 0, 25), glm::dvec3(0, 0, 1));
+  REQUIRE(none.has_value());
+  CHECK_THAT(*none, Catch::Matchers::WithinAbs(0.0, 1e-9));
+  // Above the walls the plane cuts nothing, and encloses nothing.
+  const auto above = Measure::SectionEnclosedArea(
+      closed.GetBodies(), glm::dvec3(0, 0, 80), glm::dvec3(0, 0, 1));
+  REQUIRE(above.has_value());
+  CHECK_THAT(*above, Catch::Matchers::WithinAbs(0.0, 1e-9));
+}
+
+TEST_CASE("SectionEnclosedArea: a plate encloses its bore",
+          "[measure][section]") {
+  const TopoDS_Shape plate =
+      BRepPrimAPI_MakeBox(gp_Pnt(-20, -20, 0), 40, 40, 5).Shape();
+  const TopoDS_Shape pin =
+      BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -1), gp_Dir(0, 0, 1)), 5.0,
+                               7.0)
+          .Shape();
+  BRepAlgoAPI_Cut cut(plate, pin);
+  REQUIRE(cut.IsDone());
+  std::vector<Body> bodies(1);
+  bodies[0].name = "Plate";
+  bodies[0].shape = CADShape(cut.Shape());
+  const auto bore = Measure::SectionEnclosedArea(bodies, glm::dvec3(0, 0, 2.5),
+                                                 glm::dvec3(0, 0, 1));
+  REQUIRE(bore.has_value());
+  CHECK_THAT(*bore, WithinRel(25.0 * std::acos(-1.0), 1e-6)); // 78.54 mm2
+  // Tilted, the same plate still encloses an ellipse of the bore's area over
+  // the cosine.
+  const double t = 0.2;
+  const auto tilted = Measure::SectionEnclosedArea(
+      bodies, glm::dvec3(0, 0, 2.5), glm::dvec3(std::sin(t), 0, std::cos(t)));
+  REQUIRE(tilted.has_value());
+  CHECK_THAT(*tilted, WithinRel(25.0 * std::acos(-1.0) / std::cos(t), 1e-3));
 }
 
 TEST_CASE("DescribeFaceAt/DescribeEdgeAt classify a box", "[measure]") {

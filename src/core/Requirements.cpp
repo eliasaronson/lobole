@@ -68,6 +68,11 @@ const std::vector<KindSpec>& Specs() {
        "assembly",
        {"document", "occurrences"},
        {"document", "occurrences"}},
+      {"section_area",
+       true,
+       "part",
+       {"document", "of", "base_plane", "offset", "origin", "normal", "bodies"},
+       {"document", "of"}},
       {"check_fasteners",
        false,
        "assembly",
@@ -210,6 +215,54 @@ void ValidateValues(const std::string& kind, const json& m) {
                                  " occurrences are occurrence ids "
                                  "(list_occurrences), not " +
                                  id.dump());
+  } else if (kind == "section_area") {
+    oneOf("of", {"material", "enclosed"});
+    oneOf("base_plane", {"xy", "xz", "yz"});
+    const bool byBase = m.contains("base_plane");
+    const bool byPoint = m.contains("origin") || m.contains("normal");
+    if (byBase == byPoint)
+      throw std::runtime_error(
+          "section_area cuts on ONE plane: {base_plane: xy|xz|yz, offset} or "
+          "{origin: [x, y, z], normal: [x, y, z]}; pass exactly one of the "
+          "two");
+    // A requirement's plane is stated, never "the middle of what is shown":
+    // that moves with the model, and the area with it.
+    if (byBase && !(m.contains("offset") && m.at("offset").is_number()))
+      throw std::runtime_error("section_area base_plane needs `offset`, mm "
+                               "along the plane's normal");
+    const auto vec3 = [&](const char* key) {
+      if (!m.contains(key))
+        throw std::runtime_error(std::string("section_area needs both "
+                                             "`origin` and `normal`; `") +
+                                 key + "` is missing");
+      const json& v = m.at(key);
+      if (!v.is_array() || v.size() != 3 ||
+          !std::all_of(v.begin(), v.end(),
+                       [](const json& c) { return c.is_number(); }))
+        throw std::runtime_error(std::string("section_area ") + key +
+                                 " is [x, y, z], not " + v.dump());
+    };
+    if (byPoint) {
+      vec3("origin");
+      vec3("normal");
+      const json& n = m.at("normal");
+      if (std::hypot(n[0].get<double>(), n[1].get<double>(),
+                     n[2].get<double>()) < 1e-12)
+        throw std::runtime_error("section_area normal is a direction, not "
+                                 "zero");
+    }
+    if (m.contains("bodies")) {
+      const json& b = m.at("bodies");
+      if (!b.is_array() || b.empty())
+        throw std::runtime_error("section_area bodies is a non-empty list of "
+                                 "body names or the feature ids that created "
+                                 "them");
+      for (const json& e : b)
+        if (!e.is_string() && !(e.is_number_integer() && e.get<int64_t>() > 0))
+          throw std::runtime_error("section_area bodies are body names or "
+                                   "feature ids, not " +
+                                   e.dump());
+    }
   } else if (kind == "check_fasteners") {
     if (m.contains("allow")) {
       const json& a = m.at("allow");

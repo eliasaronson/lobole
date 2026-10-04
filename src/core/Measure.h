@@ -566,6 +566,21 @@ std::optional<std::vector<SectionRegion>>
 CrossSectionRegions(const std::vector<Body>& bodies, const glm::dvec3& origin,
                     const glm::dvec3& normal, bool withLoops = false);
 
+// The area the cut ENCLOSES rather than the area it crosses: the plane's
+// regions that are not material but are ringed by it, after the bodies' cut
+// faces are joined (docs/inspect/README.md#enclosed-area). Four separate wall
+// bodies that meet at the corners enclose the floor between them; a plate
+// with a bore encloses the bore. A ring with a gap in it encloses nothing,
+// and so answers 0 -- the honest answer when the walls do not close.
+//
+// Material of `bodies` standing inside the ring is not enclosed area (a
+// column in a room takes its own footprint off the floor); leave a body out
+// of `bodies` to count the area under it. 0 when the plane misses
+// everything; nullopt on an OCC failure.
+std::optional<double> SectionEnclosedArea(const std::vector<Body>& bodies,
+                                          const glm::dvec3& origin,
+                                          const glm::dvec3& normal);
+
 // The section-cut cap faces (I3 v2, C4): one CADShape per body — the body's
 // intersection with the section plane, lying on the plane — for rendering a
 // filled cut face so a sectioned part reads solid. Same plane as

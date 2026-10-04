@@ -1206,8 +1206,18 @@ static constexpr MethodDoc InspectionMethods[] = {
      "and a centroid say a brace is 34,466 mm2 somewhere near the middle; "
      "recovering the SHAPE of a part you did not draw — the whole job when "
      "porting one in — needs the boundary, and without it a brace was "
-     "measured in screenshots and then redrawn to a rule.",
-     "base_plane, loops, normal, offset, origin, part, regions"},
+     "measured in screenshots and then redrawn to a rule. "
+     "{enclosed: true} adds `enclosed_area` (mm2): the area the cut RINGS "
+     "rather than crosses, with the bodies' cut faces joined first -- four "
+     "separate wall bodies meeting at the corners enclose the floor "
+     "between them, a plate encloses its bore; a ring with a gap (a door "
+     "or window at that height) encloses 0 and says so in "
+     "`enclosed_note`. {bodies: [names or feature ids]} cuts only those bodies "
+     "of a "
+     "part (the outer walls, not the slab under them); an unknown one is "
+     "refused naming the bodies there are.",
+     "base_plane, bodies, enclosed, loops, normal, offset, origin, part, "
+     "regions"},
     {"set_section",
      "Enable/disable the live section clip {base_plane: xy|xz|yz, offset?, "
      "reverse?}. Works on part AND assembly tabs, with filled cut caps on "
@@ -1503,6 +1513,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     bool derived = false;
     if (p.contains("base_plane")) {
       const std::string bp = p.at("base_plane").get<std::string>();
+      if (bp != "xy" && bp != "xz" && bp != "yz")
+        throw std::runtime_error("unknown base_plane '" + bp +
+                                 "' (accepted: xy, xz, yz)");
       const int basePlane = bp == "xz" ? 1 : bp == "yz" ? 2 : 0;
       normal = basePlane == 1   ? glm::dvec3(0, 1, 0)
                : basePlane == 2 ? glm::dvec3(1, 0, 0)
@@ -1535,7 +1548,22 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     Document* sectionDoc = doc;
     if (p.contains("part"))
       sectionDoc = ResolvePartParam(state, p.at("part"));
-    if (sectionDoc != nullptr) {
+    if (p.contains("enclosed") && !p.at("enclosed").is_boolean())
+      throw std::runtime_error("`enclosed` is true or false");
+    if (p.contains("bodies") && sectionDoc == nullptr)
+      throw std::runtime_error(
+          "`bodies` picks bodies of a PART; on an assembly tab the section "
+          "is of every visible occurrence (name the part with `part`)");
+    if (sectionDoc != nullptr && p.contains("bodies")) {
+      // Only the chosen bodies: the walls of a room and not the floor slab
+      // under them, so what they enclose is the room.
+      const std::set<uint64_t> chosen =
+          ResolvePartBodies(*sectionDoc, p.at("bodies"), "bodies");
+      for (const Body& b : sectionDoc->GetBodies())
+        if (chosen.count(b.createdBy) != 0)
+          placed.push_back(b);
+      bodies = &placed;
+    } else if (sectionDoc != nullptr) {
       bodies = &sectionDoc->GetBodies();
     } else if (state.assembly) {
       // A5: the leaf parts of the whole tree, placed.
@@ -1564,6 +1592,23 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     json out{{"area", *area}};
     if (derived)
       out["offset"] = usedOffset; // say where it chose to cut
+    // The area the cut RINGS, not the area it crosses: the floor inside the
+    // walls, the bore in the plate (docs/inspect/README.md#enclosed-area).
+    if (p.value("enclosed", false)) {
+      const auto enclosed =
+          Measure::SectionEnclosedArea(*bodies, origin, normal);
+      if (!enclosed)
+        throw std::runtime_error("enclosed area failed -- see the log");
+      out["enclosed_area"] = *enclosed;
+      // Zero with material cut is the ring not closing HERE, which is worth
+      // saying: a wall with a door or a window in it at this height is
+      // open, and a plane above the openings encloses the room.
+      if (*enclosed <= 0.0 && *area > 0.0)
+        out["enclosed_note"] =
+            "the cut material rings nothing at this plane: an opening (a "
+            "door, a window, a gap between bodies) breaks the ring. Cut "
+            "where it is whole, e.g. above the openings";
+    }
     // The ISLANDS the cut crosses, biggest first. Off by default because the
     // total is what most callers want and this costs a second boolean.
     if (p.value("regions", false)) {

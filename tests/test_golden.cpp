@@ -902,6 +902,14 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
   }
   CHECK(doc.FeatureCount() == expect.at("features").get<size_t>());
   REQUIRE(doc.GetBodies().size() == expect.at("bodies").get<size_t>());
+  // v165: the building materials, each slug read back as itself.
+  if (expect.contains("body_materials")) {
+    std::vector<std::string> got;
+    for (const auto& body : doc.GetBodies())
+      got.push_back(body.material);
+    std::sort(got.begin(), got.end());
+    CHECK(got == expect.at("body_materials").get<std::vector<std::string>>());
+  }
   std::vector<double> volumes;
   for (const auto& body : doc.GetBodies())
     volumes.push_back(body.shape.Volume());

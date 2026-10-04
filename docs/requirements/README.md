@@ -49,6 +49,7 @@ and the call a person would make agree by construction.
 | `check_fits` | assembly | `check_fits` | verdict | `allow_unverified?` |
 | `check_seat` | assembly | `check_seat` | verdict | `occurrences` (the bearings), `allow_unverified?` |
 | `bearing_bore` | assembly | `check_seat` (its `d`) | mm, the smallest bore of the bearings | `occurrences` (the bearings) |
+| `section_area` | part | `section` (`area`, or `enclosed_area`) | mm², the material a plane cuts or the area it encloses | `of`: material \| enclosed, `base_plane` (xy \| xz \| yz) with `offset` (mm) or `origin` and `normal`, `bodies?` (body names or feature ids) |
 | `check_fasteners` | assembly | `check_fasteners` | verdict | `allow?` [{`part?`, `why?`, `max?`}], `allow_skipped?` |
 | `check_literals` | part, parts, or none | `check_literals` | verdict | `documents?` (several parts); neither: every part |
 | `motion_clean` | assembly | `run_motion_study` | verdict | `study` |
@@ -96,6 +97,18 @@ bearing is read through `check_seat` as the row it places now, so a bearing
 swapped for another row is measured as that one; an occurrence that is not
 a placed bearing leaves the measure unresolved. The pan/tilt head states one
 per shaft ([generators/pantilt](../../generators/pantilt/README.md#requirements)).
+
+**The area inside the walls** (`section_area`, `of: enclosed`): a listing
+quotes a building's floor as the area inside its outer walls, and a plan
+traced 7 % short reads that floor 14 % small with nothing else saying so. The walls are
+separate bodies, so the measure joins their cut faces and reports what they
+ring ([enclosed area](../inspect/README.md#enclosed-area)); `bodies` names
+the walls, which keeps the slab under them out of the room. The plane is
+stated, never "the middle of what is shown", which moves with the model: a
+`base_plane` needs its `offset`. A wall renamed or deleted makes the
+requirement unresolved rather than a smaller room, and a plane through a
+door or window encloses 0 with a note in `detail` saying the ring is open
+there.
 
 **A formula over several faces** (`study_probe` with `readings`): each
 reading is a `probe_study` of one face, `{face, at?}`, and the expression
@@ -278,13 +291,18 @@ before delivering.
   bearing on no seat, check_fasteners over no screw is not a pass, and a
   bearing's bore passes over a variable minimum, reads stale when the
   variable grows past it and then fails, and reads unresolved on a part that
-  is not a bearing.
+  is not a bearing; and four wall bodies enclose exactly their floor (the
+  slab under them left out by `bodies`), their material is their footprint,
+  a plate encloses its Ø10 bore, a bound past the floor fails, and a wall
+  deleted reads unresolved.
 - `tests/assertion_smoke.py`: the clearance verbs, as requirements.
 - GUI `requirements/panel_checks_and_goes_stale`: the panel appears with
   the requirements, Check measures them as a job, and an edit to the model
   makes them stale.
 - Golden `v160-requirements` (a lone part's envelope) and
-  `v163-bearing-bore-requirement` (the `bearing_bore` measure).
+  `v163-bearing-bore-requirement` (the `bearing_bore` measure) and
+  `v165-section-area-requirement` (`section_area`, on walls of the building
+  materials).
 - The pan/tilt head (`generators/pantilt`) states its acceptance criteria as
   requirements and stops on any that does not pass.
 

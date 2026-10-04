@@ -117,6 +117,58 @@ TEST_CASE("an unknown measure or bound is refused, naming the accepted ones",
   CHECK_THAT(Refusal({{"kind", "bearing_bore"}, {"document", 1}},
                      {{"kind", "at_least"}, {"value", 15}}),
              ContainsSubstring("needs `occurrences`"));
+  // A section's area, on ONE stated plane.
+  CHECK(Refusal({{"kind", "section_area"},
+                 {"document", 1},
+                 {"of", "enclosed"},
+                 {"base_plane", "xy"},
+                 {"offset", 1200},
+                 {"bodies", {"South wall", 4}}},
+                {{"kind", "within"}, {"min", 1.1e8}, {"max", 1.2e8}})
+            .empty());
+  CHECK(Refusal({{"kind", "section_area"},
+                 {"document", 1},
+                 {"of", "material"},
+                 {"origin", {0, 0, 5}},
+                 {"normal", {0, 0, 1}}},
+                {{"kind", "at_most"}, {"value", 10}})
+            .empty());
+  const json plane{{"kind", "section_area"},
+                   {"document", 1},
+                   {"of", "enclosed"},
+                   {"base_plane", "xy"},
+                   {"offset", 5}};
+  const json atLeast{{"kind", "at_least"}, {"value", 1}};
+  CHECK_THAT(Refusal(plane, {{"kind", "pass"}}),
+             ContainsSubstring("is a number"));
+  json m = plane;
+  m["of"] = "inside";
+  CHECK_THAT(Refusal(m, atLeast),
+             ContainsSubstring("accepted: material, enclosed"));
+  m = plane;
+  m["base_plane"] = "top";
+  CHECK_THAT(Refusal(m, atLeast), ContainsSubstring("accepted: xy, xz, yz"));
+  m = plane;
+  m.erase("offset");
+  CHECK_THAT(Refusal(m, atLeast), ContainsSubstring("needs `offset`"));
+  m = plane;
+  m["origin"] = {0, 0, 0};
+  CHECK_THAT(Refusal(m, atLeast), ContainsSubstring("exactly one"));
+  m = plane;
+  m.erase("of");
+  CHECK_THAT(Refusal(m, atLeast), ContainsSubstring("needs `of`"));
+  m = {{"kind", "section_area"},
+       {"document", 1},
+       {"of", "material"},
+       {"origin", {0, 0, 0}}};
+  CHECK_THAT(Refusal(m, atLeast), ContainsSubstring("`normal` is missing"));
+  m["normal"] = {0, 0, 0};
+  CHECK_THAT(Refusal(m, atLeast), ContainsSubstring("not zero"));
+  m = plane;
+  m["bodies"] = json::array();
+  CHECK_THAT(Refusal(m, atLeast), ContainsSubstring("non-empty list"));
+  m["bodies"] = {1.5};
+  CHECK_THAT(Refusal(m, atLeast), ContainsSubstring("not 1.5"));
 }
 
 TEST_CASE("a requirement's state: only current evidence is a pass",

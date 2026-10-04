@@ -46,6 +46,7 @@ inline constexpr const char* kMeasureKinds[] = {
     "check_fits",   // check_fits passing
     "check_seat",   // check_seat passing, both rings, every listed bearing
     "bearing_bore", // the smallest bore of the listed bearings, mm
+    "section_area", // section: a cut's material or enclosed area, mm2
     "check_fasteners", // check_fasteners: no finding but the allowed ones
     "check_literals",  // check_literals clean
     "motion_clean",    // run_motion_study: clean

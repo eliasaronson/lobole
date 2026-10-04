@@ -48,6 +48,7 @@
 #include <TopLoc_Location.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
@@ -1570,6 +1571,74 @@ CrossSectionRegions(const std::vector<Body>& bodies, const glm::dvec3& origin,
     return std::nullopt;
   } catch (const Standard_Failure& e) {
     LOG_ERROR("Cross-section regions failed: {}", e.GetMessageString());
+    return std::nullopt;
+  }
+}
+
+std::optional<double> SectionEnclosedArea(const std::vector<Body>& bodies,
+                                          const glm::dvec3& origin,
+                                          const glm::dvec3& normal) {
+  if (bodies.empty())
+    return 0.0;
+  try {
+    const TopoDS_Face cutter =
+        BuildSectionCutter(bodies, origin, glm::normalize(normal));
+    // Each body's cut face, the material the plane crosses.
+    TopTools_ListOfShape material;
+    for (const auto& b : bodies) {
+      if (b.shape.GetShape().IsNull())
+        continue;
+      BRepAlgoAPI_Common common;
+      BuildQuery(common, b.shape.GetShape(), cutter);
+      if (!common.IsDone() || common.Shape().IsNull())
+        continue;
+      GProp_GProps props;
+      BRepGProp::SurfaceProperties(common.Shape(), props);
+      if (props.Mass() > 1e-9)
+        material.Append(common.Shape());
+    }
+    if (material.IsEmpty())
+      return 0.0;
+    // The plane with ALL the material taken out at once, so faces of
+    // separate bodies that meet or overlap act as one: what is left is the
+    // open plane around the part plus one face per region the material
+    // rings. The cutter is the bodies' diagonal larger than them on every
+    // side, so the open plane reaches past their bounds and an enclosed
+    // region cannot.
+    TopTools_ListOfShape plane;
+    plane.Append(cutter);
+    BRepAlgoAPI_Cut cut;
+    BuildQuery(cut, plane, material);
+    if (!cut.IsDone() || cut.Shape().IsNull())
+      return std::nullopt;
+    Bnd_Box within;
+    for (TopTools_ListIteratorOfListOfShape it(material); it.More(); it.Next())
+      BRepBndLib::Add(it.Value(), within);
+    within.Enlarge(1e-3 + 1e-6 * std::sqrt(within.SquareExtent()));
+    Standard_Real x0, y0, z0, x1, y1, z1;
+    within.Get(x0, y0, z0, x1, y1, z1);
+    double area = 0.0;
+    for (TopExp_Explorer ex(cut.Shape(), TopAbs_FACE); ex.More(); ex.Next()) {
+      Bnd_Box box;
+      BRepBndLib::Add(ex.Current(), box);
+      if (box.IsVoid())
+        continue;
+      Standard_Real a0, b0, c0, a1, b1, c1;
+      box.Get(a0, b0, c0, a1, b1, c1);
+      if (a0 < x0 || b0 < y0 || c0 < z0 || a1 > x1 || b1 > y1 || c1 > z1)
+        continue; // the open plane around the part
+      GProp_GProps props;
+      BRepGProp::SurfaceProperties(ex.Current(), props);
+      area += props.Mass();
+    }
+    return area;
+  } catch (const std::exception& e) {
+    LOG_ERROR("Enclosed section area failed: {}", e.what());
+    return std::nullopt;
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Enclosed section area failed: {}", e.GetMessageString()
+                                                      ? e.GetMessageString()
+                                                      : "OpenCASCADE failure");
     return std::nullopt;
   }
 }

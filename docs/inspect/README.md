@@ -113,14 +113,37 @@ viewport.
 ## Sections
 
 **The number.** `section {base_plane | origin+normal, offset?, part?,
-regions?, loops?}` returns the cross-section area where a plane cuts the
+bodies?, regions?, loops?, enclosed?}` returns the cross-section area where a plane cuts the
 bodies — on an assembly tab, every visible occurrence in place. `offset` is
 mm along the normal; omitted, the cut goes through the middle of what is
 shown and the chosen offset comes back. `regions: true` adds each connected
 island `{area, centroid}` and `region_count`: the total cannot say whether
 material is where you think it is, an island can. `loops: true` adds each
 island's outline as line/arc/other segments, for recovering the shape of a
-part you did not draw.
+part you did not draw. `bodies` (body names or the feature ids that created
+them; part tabs only) cuts just those bodies, and an unknown one is refused
+naming the bodies there are. An unknown `base_plane` is refused.
+
+### Enclosed area
+
+`enclosed: true` adds `enclosed_area`, mm²: the area the cut RINGS rather
+than the area it crosses (`Measure::SectionEnclosedArea`). Each body's cut
+face is taken out of one oversized plane in a single boolean, so faces of
+separate bodies that meet or overlap act as one; what is left is the open
+plane around the part plus one face per region the material closes, and
+those regions' areas are the answer. A building's outer walls are four
+bodies, and what they enclose is the floor a listing quotes, which no
+material area can report; a plate encloses its bore.
+
+- A ring with a gap encloses 0, and `enclosed_note` says so: a door or a
+  window at the plane's height opens the walls, so a plan check cuts above
+  the openings (the house's outer walls enclose 115.48 m² at 2200 mm and
+  nothing at 1200, where the windows are).
+- Material of the chosen bodies standing inside the ring is not enclosed
+  area. Leave a body out of `bodies` to count the floor under it, which is
+  also how a slab under the walls stays out of the room.
+- A requirement states the same thing as `section_area {of: enclosed}`
+  ([measures](../requirements/README.md#measures)).
 
 **The view.** The Section tool (toolbar, both part and assembly tabs) keeps a
 list of up to four cuts. A fragment survives only on the kept side of every
@@ -407,7 +430,9 @@ exact to rounding, not to the decimal a person would write.
 
 ## How it is tested
 
-`test_measure.cpp`, `test_meshcollide.cpp` (agreement with the exact boolean
+`test_measure.cpp` (enclosed area: four wall bodies ring exactly the
+floor, a gap encloses nothing, a plate encloses its bore level and tilted),
+`test_meshcollide.cpp` (agreement with the exact boolean
 on overlapping, clear and enclosed pairs; deflection scaling; the
 placement-keyed cache; a pin in a clearance hole reads clear), and the
 headless smokes `measure_smoke`, `contact_smoke`, `compare_smoke`,

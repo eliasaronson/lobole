@@ -1,0 +1,10 @@
+{"features": 6, "bodies": 6,
+ "volumes": [50000.0, 50000.0, 40000.0, 40000.0, 10000.0, 800000.0],
+ "body_materials": ["brick", "plaster", "render", "roof_tile",
+                    "roofing_felt", "soil"],
+ "requirements": [
+   {"name": "floor inside the walls", "kind": "section_area",
+    "bound": "at_least", "revision": 1, "evidence": true},
+   {"name": "wall footprint", "kind": "section_area",
+    "bound": "at_most", "revision": 1, "evidence": false}
+ ]}

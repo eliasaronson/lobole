@@ -72,6 +72,10 @@ const MethodDoc RequirementMethods[] = {
      "bearing_bore {document: assembly, occurrences: [bearing ids]} (mm, "
      "the smallest bore of those bearings: bound it at_least the shaft's "
      "own minimum, an expression), "
+     "section_area {document: part, of: material|enclosed, base_plane: "
+     "xy|xz|yz + offset (mm), or origin + normal, bodies?: [body names or "
+     "feature ids]} (mm2: the material a plane cuts, or the area it "
+     "ENCLOSES -- the floor inside the walls), "
      "check_fasteners {document, allow?: [{part?, why?, max?}], "
      "allow_skipped?}, "
      "check_literals {document?: one part, or documents?: several, else "
@@ -81,7 +85,7 @@ const MethodDoc RequirementMethods[] = {
      "or within; a verdict is bounded pass. A bound value may be an "
      "expression over the project's variables. An unknown kind or key is "
      "refused naming the accepted ones; a document, study or occurrence "
-     "that does not exist is refused. Units: mm, deg, MPa, g, mm3 as the "
+     "that does not exist is refused. Units: mm, deg, MPa, g, mm2, mm3 as the "
      "measure reports them.",
      "bound, measure, name, source", NotInBatch,
      "id, requirement{id,name,state,...}"},
@@ -422,6 +426,15 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
       h.U64(fem::StudyInputKey(*doc, *s));
     } else if (kind == "check_literals") {
       HashLiteralsInputs(h, state, *doc);
+    } else if (kind == "section_area" && m.contains("bodies")) {
+      // A wall renamed or deleted is a reference gone, not a smaller area.
+      try {
+        (void)ResolvePartBodies(*doc, m.at("bodies"), "bodies");
+      } catch (const std::exception& e) {
+        why = e.what();
+        return 0;
+      }
+      h.U64(PartKey(*doc));
     } else {
       h.U64(PartKey(*doc));
     }
@@ -1091,6 +1104,29 @@ Taken MeasureBearingBore(ui::AppState& state, const json& m) {
   return t;
 }
 
+// A section's area through the `section` RPC: the material the plane
+// crosses, or the area that material rings (the floor inside a building's
+// outer walls, which a listing quotes and a plan scale gets wrong without
+// anything saying so).
+Taken MeasureSectionArea(ui::AppState& state, const json& m) {
+  Taken t;
+  json params{{"part", m.at("document")}};
+  for (const char* k : {"base_plane", "offset", "origin", "normal", "bodies"})
+    if (m.contains(k))
+      params[k] = m.at(k);
+  const bool enclosed = m.at("of").get<std::string>() == "enclosed";
+  if (enclosed)
+    params["enclosed"] = true;
+  const json r = Call(state, "section", params);
+  t.value = r.at(enclosed ? "enclosed_area" : "area").get<double>();
+  t.unit = "mm2";
+  if (enclosed)
+    t.detail["material_area"] = r.at("area");
+  if (r.contains("enclosed_note"))
+    t.detail["note"] = r.at("enclosed_note");
+  return t;
+}
+
 Taken MeasureCheckFasteners(ui::AppState& state, const json& m) {
   Taken t;
   const json r = Call(state, "check_fasteners", json::object());
@@ -1284,6 +1320,8 @@ Taken MeasureOn(ui::AppState& state, const req::Requirement& r,
     return MeasureCheckSeat(state, m);
   if (kind == "bearing_bore")
     return MeasureBearingBore(state, m);
+  if (kind == "section_area")
+    return MeasureSectionArea(state, m);
   if (kind == "check_fasteners")
     return MeasureCheckFasteners(state, m);
   if (kind == "motion_clean")

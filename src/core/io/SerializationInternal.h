@@ -23,7 +23,14 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    164; // v164: a face appearance override
+    165; // v165: a requirement's measure kind `section_area` {document:
+         //      part, base_plane+offset or origin+normal, of: material|
+         //      enclosed, bodies?: [names or feature ids]}, mm2
+         //      (docs/requirements/README.md#measures); and six building
+         //      materials, brick, roof_tile, plaster, roofing_felt, render
+         //      and soil (docs/rendering/materials.md). A build that knows
+         //      neither refuses the file.
+         // v164: a face appearance override
          //      (docs/rendering/materials.md#a-face-of-its-own): on a
          //      body's creating feature, `face_appearance` [{element,
          //      color?, roughness?, metallic?}] beside `appearance`, keyed by
