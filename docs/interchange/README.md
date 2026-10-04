@@ -130,7 +130,10 @@ file carries the same structure whichever way it was asked for.
   before its bodies' own) > imported display colour > palette. The palette
   is seeded the way the showing tab seeds it, so every
   occurrence of an unpainted part is one colour. Colours are written linear,
-  as the shaders light them.
+  as the shaders light them. A face with an appearance of its own (v164) is
+  written as a colour on that face's sub-shape label, over the product's
+  ([a face of its own](../rendering/materials.md#a-face-of-its-own)); the
+  importer reads product colours only.
 - **Units** are written as millimetres, explicitly.
 - **A body's location is baked into its geometry.** XCAF turns a located
   shape into an assembly of one auto-named component, which would push the
@@ -171,7 +174,9 @@ OpenCASCADE's `RWGltf_CafWriter` / `RWObj_CafWriter` / `RWPly_CafWriter`).
   Occurrences of one part share the underlying shape, so the writers emit
   instanced geometry. Reference bodies are left out.
 - Materials are written as PBR (base colour, metallic, roughness) from the
-  same colour resolver as STEP.
+  same colour resolver as STEP. A face with an appearance of its own carries
+  its own material on its sub-shape, so the writer emits it as its own
+  primitive.
 - glTF is written in metres and Y-up, as the format defines; OBJ and PLY
   stay in millimetres, Z-up.
 
@@ -203,7 +208,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 
 | where | covers |
 |---|---|
-| `tests/test_step_export.cpp` | an assembly exports as its tree (each part once per configuration and material, placed by reference, sub-assemblies nested, hidden occurrences left out); a part is one named product of its bodies; a one-solid compound keeps its name and colour; visual export colours every occurrence as the screen does; an assembly tab writes STEP and refuses STL by name |
+| `tests/test_step_export.cpp` | an assembly exports as its tree (each part once per configuration and material, placed by reference, sub-assemblies nested, hidden occurrences left out); a part is one named product of its bodies; a one-solid compound keeps its name and colour; a face painted apart is a colour on that face in the STEP and its own primitive and material in glTF; visual export colours every occurrence as the screen does; an assembly tab writes STEP and refuses STL by name |
 | `tests/test_cadkernel.cpp` `[kernel]` | structured STEP import (names, colours, instances); STL units; the assembly import plan (centred parts, placed occurrences); no XCAF document left open |
 | `tests/test_assembly_flatten.cpp` | `Flatten`'s levels compose to exactly its world placement |
 | `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly` |

@@ -25,6 +25,7 @@
 #include <TDF_LabelSequence.hxx>
 #include <TDataStd_Name.hxx>
 #include <TDocStd_Document.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS_Compound.hxx>
 
@@ -38,6 +39,7 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <map>
 #include <string>
 
 namespace MeshExport {
@@ -104,6 +106,20 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
     // the placed shapes (shared TShapes stay shared → instancing).
     const TDF_Label root = shapes->AddShape(compound, Standard_True);
 
+    const auto pbrMaterial = [&](const glm::vec3& c, float metallic,
+                                 float roughness, const std::string& name) {
+      Handle(XCAFDoc_VisMaterial) visMat = new XCAFDoc_VisMaterial();
+      XCAFDoc_VisMaterialPBR pbr;
+      pbr.IsDefined = Standard_True;
+      pbr.BaseColor = Quantity_ColorRGBA(
+          Quantity_Color(c.r, c.g, c.b, Quantity_TOC_RGB), 1.0f);
+      pbr.Metallic = metallic;
+      pbr.Roughness = roughness;
+      visMat->SetPbrMaterial(pbr);
+      return materials->AddMaterial(visMat,
+                                    TCollection_AsciiString(name.c_str()));
+    };
+
     TDF_LabelSequence components;
     shapes->GetComponents(root, components);
     for (Standard_Integer i = 1;
@@ -118,16 +134,41 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
                                  item.baseColor.b, Quantity_TOC_RGB);
       colors->SetColor(component, color, XCAFDoc_ColorSurf);
 
-      Handle(XCAFDoc_VisMaterial) visMat = new XCAFDoc_VisMaterial();
-      XCAFDoc_VisMaterialPBR pbr;
-      pbr.IsDefined = Standard_True;
-      pbr.BaseColor = Quantity_ColorRGBA(color, 1.0f);
-      pbr.Metallic = item.metallic;
-      pbr.Roughness = item.roughness;
-      visMat->SetPbrMaterial(pbr);
-      const TDF_Label matLabel = materials->AddMaterial(
-          visMat, TCollection_AsciiString(item.name.c_str()));
-      materials->SetShapeMaterial(component, matLabel);
+      materials->SetShapeMaterial(component,
+                                  pbrMaterial(item.baseColor, item.metallic,
+                                              item.roughness, item.name));
+
+      // Faces styled apart (v164): a colour and a material on the face's
+      // sub-shape of the PROTOTYPE (the shape the component refers to), which
+      // the writers lay over the instance's own style, so those faces become
+      // their own primitive. Occurrences of one part share the prototype, and
+      // with it these faces, as they share the faces' geometry.
+      if (item.faces.empty())
+        continue;
+      TDF_Label proto;
+      if (!shapes->GetReferredShape(component, proto))
+        continue;
+      std::map<int, const Item::FaceStyle*> byIndex;
+      for (const Item::FaceStyle& f : item.faces)
+        byIndex[f.face] = &f;
+      int fi = 0;
+      for (TopExp_Explorer ex(shapes->GetShape(proto), TopAbs_FACE); ex.More();
+           ex.Next(), ++fi) {
+        const auto it = byIndex.find(fi);
+        if (it == byIndex.end())
+          continue;
+        const TDF_Label sub = shapes->AddSubShape(proto, ex.Current());
+        if (sub.IsNull())
+          continue;
+        const Item::FaceStyle& f = *it->second;
+        colors->SetColor(sub,
+                         Quantity_Color(f.baseColor.r, f.baseColor.g,
+                                        f.baseColor.b, Quantity_TOC_RGB),
+                         XCAFDoc_ColorSurf);
+        materials->SetShapeMaterial(
+            sub, pbrMaterial(f.baseColor, f.metallic, f.roughness,
+                             item.name + "-face" + std::to_string(fi)));
+      }
     }
 
     TColStd_IndexedDataMapOfStringString fileInfo;

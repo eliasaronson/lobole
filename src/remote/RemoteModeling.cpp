@@ -114,7 +114,8 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
                                                "after_earlier_failure",
                                                "report",
                                                "template_changed",
-                                               "expanded"};
+                                               "expanded",
+                                               "face_appearance_unresolved"};
   // The round trip alone is not enough: a key whose value is EMPTY
   // serializes back to nothing, so `"external": []` on a sketch (a filter
   // that found no edges — the SO-101 gripper's) was refused as an unknown
@@ -365,8 +366,15 @@ static constexpr MethodDoc ModelingMethods[] = {
      "grey), roughness?: 0..1, metallic?: 0..1}. Unset fields inherit from the "
      "material; passing NO "
      "optional fields clears the override. Never affects mass/FEM/BOM, and "
-     "recoloring rebuilds no geometry.",
-     "body, color, feature_id, metallic, roughness", remote::NeedsPart},
+     "recoloring rebuilds no geometry. Add `element` (a face name from "
+     "list_elements on that body — a face a later cut made included) to "
+     "paint ONE FACE instead (v164): its unset fields inherit from the "
+     "body's look, it survives regeneration by name, and a name that stops "
+     "resolving is reported in every regen summary's warnings and in "
+     "get_state, never dropped. {feature_id|body, element} with no optional "
+     "field clears that face, even a stale one.",
+     "body, color, element, feature_id, metallic, roughness",
+     remote::NeedsPart},
     {"set_rollback",
      "Move the rollback bar: only features before it regenerate. Takes "
      "`feature_id` — the bar stops just BEFORE that feature — or `index` "
@@ -1308,8 +1316,48 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       ap.roughness = unit("roughness");
     if (p.contains("metallic"))
       ap.metallic = unit("metallic");
+    // A FACE of the body (v164): `element` names it, as list_elements does,
+    // on the body `f` created — a face a later cut made included. Checked
+    // before anything changes.
+    std::optional<int> faceIndex;
+    std::string element;
+    if (p.contains("element")) {
+      element = p.at("element").get<std::string>();
+      const bool hadOne = std::any_of(
+          f->GetFaceAppearances().begin(), f->GetFaceAppearances().end(),
+          [&](const FaceAppearance& fa) { return fa.element == element; });
+      bool owns = false, isEdge = false;
+      for (const Body& b : doc->GetBodies()) {
+        if (b.createdBy != f->GetId())
+          continue;
+        owns = true;
+        if (!faceIndex)
+          faceIndex = b.elementMap.Resolve(element);
+        isEdge |= b.elementMap.ResolveEdge(element).has_value();
+      }
+      if (!owns && !(hadOne && !ap.Any()))
+        throw std::runtime_error(
+            "set_appearance: feature " + std::to_string(f->GetId()) + " (" +
+            f->GetName() +
+            ") created no body, so it has no faces to paint — `feature_id` is "
+            "the body's created_by (get_state lists bodies)");
+      // Clearing a name that no longer resolves is how a stale override is
+      // removed, so it needs only to BE an override; setting one needs a face.
+      if (!faceIndex && !(hadOne && !ap.Any()))
+        throw std::runtime_error(
+            "set_appearance: element '" + element + "' " +
+            (isEdge ? std::string("is an edge — only a face takes an "
+                                  "appearance")
+                    : "names no face of " + f->GetName() +
+                          "'s body (list_elements {feature_id: " +
+                          std::to_string(f->GetId()) + "} lists them)") +
+            (ap.Any() ? "" : "; and it carries no face override to clear"));
+    }
     json before = DocumentIO::FeatureToJson(*f);
-    f->SetAppearance(ap);
+    if (p.contains("element"))
+      f->SetFaceAppearance(element, ap);
+    else
+      f->SetAppearance(ap);
     doc->Regenerate(); // full cache hit (hash-stripped): restamps only
     json after = DocumentIO::FeatureToJson(*f);
     state.commands->Execute(
@@ -1319,6 +1367,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     state.syncedDocumentVersion = UINT64_MAX;
     json resp = {{"regen", RegenSummaryJson(*doc)}};
     resp["cleared"] = !ap.Any();
+    if (p.contains("element")) {
+      resp["element"] = element;
+      if (faceIndex)
+        resp["face"] = *faceIndex;
+    }
     return resp;
   }
   if (m == "set_rollback") {

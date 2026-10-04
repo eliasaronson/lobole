@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <deque>
 #include <functional>
 #include <set>
@@ -50,6 +51,40 @@ void FollowModifiedFaces(std::vector<Body>& bodies) {
     for (HoleMark& h : b.holes)
       follow(b.elementMap, h.bore);
   }
+}
+
+// Does `later` name what became of the face `name` through later features
+// alone — `name` plus whole `;M<tag>` steps, each possibly split
+// (`;M<tag>.<i>`)? The grammar is docs/modeling/toponaming.md#naming-grammar;
+// AssemblySolve's DescentOf reads the same steps for a seat, which must
+// tell a split apart. A face appearance need not: paint follows a face and
+// every piece a cut made of it.
+static bool DescendsByModification(const std::string& name,
+                                   const std::string& later) {
+  if (later.size() <= name.size() || later.compare(0, name.size(), name) != 0)
+    return false;
+  size_t i = name.size();
+  const auto digits = [&](size_t& j) {
+    const size_t from = j;
+    while (j < later.size() &&
+           std::isdigit(static_cast<unsigned char>(later[j])) != 0)
+      ++j;
+    return j > from;
+  };
+  while (i < later.size()) {
+    if (later[i] != ';' || i + 1 >= later.size() || later[i + 1] != 'M')
+      return false;
+    size_t j = i + 2;
+    if (!digits(j))
+      return false;
+    if (j < later.size() && later[j] == '.') {
+      ++j;
+      if (!digits(j))
+        return false;
+    }
+    i = j;
+  }
+  return true;
 }
 
 // Monotonic for the life of the process: identity must never be reused, or
@@ -291,10 +326,48 @@ bool Document::Regenerate() {
   // every Execute signature) — run at every successful exit below, so cached
   // and baked bodies re-stamp too. This is what lets the chain hash STRIP
   // appearance: a recolor re-stamps here without rebuilding any B-Rep.
+  //
+  // Face overrides (v164) resolve here too, by element name against each
+  // body the feature created — including faces a later cut made, which the
+  // body's ElementMap names — and follow a face a later feature modified or
+  // split (DescendsByModification) to what it became. A name that resolves on
+  // none of them is recorded on the feature and reported, never dropped. A
+  // feature with no body this time (suppressed, rolled back, failed) reports
+  // nothing: its faces are not stale, just absent, and a failure says so
+  // itself.
   const auto stampAppearance = [this] {
-    for (Body& b : m_bodies)
-      if (const Feature* f = FindFeatureById(b.createdBy))
-        b.appearance = f->GetAppearance();
+    std::map<uint64_t, std::set<std::string>> resolved;
+    std::set<uint64_t> hasBody;
+    for (Body& b : m_bodies) {
+      b.faceAppearances.clear();
+      const Feature* f = FindFeatureById(b.createdBy);
+      if (!f)
+        continue;
+      b.appearance = f->GetAppearance();
+      hasBody.insert(b.createdBy);
+      for (const FaceAppearance& fa : f->GetFaceAppearances()) {
+        if (const std::optional<int> face = b.elementMap.Resolve(fa.element)) {
+          b.faceAppearances[*face] = fa;
+          resolved[b.createdBy].insert(fa.element);
+          continue;
+        }
+        // A later feature modified the face (a pocket in a painted top
+        // renames it "…;M7") or cut it in pieces: the paint follows it.
+        for (const auto& [index, name] : b.elementMap.names)
+          if (DescendsByModification(fa.element, name)) {
+            b.faceAppearances.try_emplace(index, fa);
+            resolved[b.createdBy].insert(fa.element);
+          }
+      }
+    }
+    for (const auto& f : m_features) {
+      std::vector<std::string> stale;
+      if (hasBody.count(f->GetId()) != 0)
+        for (const FaceAppearance& fa : f->GetFaceAppearances())
+          if (resolved[f->GetId()].count(fa.element) == 0)
+            stale.push_back(fa.element);
+      f->SetUnresolvedFaceLooks(std::move(stale));
+    }
   };
   // Material, for the same reason and by the same key. It used to be stamped
   // only where a body is CREATED, which meant a recolour changed the feature
@@ -411,6 +484,7 @@ bool Document::Regenerate() {
     // a recolour never rebuilds. Material still reaches physics — the BOM and
     // FEM read Body::material, which the stamp sets.
     fj.erase("appearance");
+    fj.erase("face_appearance");
     fj.erase("material");
     // An import is WHAT it imports, not where the file sits: a save adopts
     // staged files into the project directory and rewrites the path, which

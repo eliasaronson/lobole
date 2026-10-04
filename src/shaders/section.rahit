@@ -76,13 +76,15 @@ layout(binding = 4, set = 0, std430) readonly buffer Materials {
 layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer FloatBuf { float f[]; };
 layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer UintBuf { uint u[]; };
 const uint kFlagShadowCatcher = 1u;
+const uint kFlagPerTriangleMaterial = 2u;
 struct GeometryInfo {
     FloatBuf verts;
     UintBuf inds;
     uint materialIndex;
     uint flags;
-    uint pad0;
-    uint pad1;
+    // One material index per triangle, read only under
+    // kFlagPerTriangleMaterial (faces with looks of their own, v164).
+    UintBuf triMats;
 };
 layout(binding = 3, set = 0, std430) readonly buffer GeometryInfos {
     GeometryInfo geoms[];
@@ -110,7 +112,9 @@ void main() {
     // A camera or path ray still STOPS on glass: closest-hit's dielectric
     // branch is what refracts it.
     if ((gl_IncomingRayFlagsEXT & gl_RayFlagsSkipClosestHitShaderEXT) != 0u) {
-        Material m = materials[g.materialIndex];
+        Material m = materials[(g.flags & kFlagPerTriangleMaterial) != 0u
+                                   ? g.triMats.u[gl_PrimitiveID]
+                                   : g.materialIndex];
         if (m.transmission > 0.0) {
             float ior = max(m.optics.x, 1.0);
             float f0 = (ior - 1.0) / (ior + 1.0);

@@ -462,7 +462,7 @@ why the wait sits where every capture passes through.
 | `frame_stats {window, hud, reset, renders}` | frame and GPU pass timing ([frame-pacing.md](frame-pacing.md)) |
 | `view`, `fit_view {width?, height?}`, `set_camera` | camera; `get_state.camera` reports `fov_deg` and `aspect`. `set_camera` refuses an `up` within 1° of the view direction (it would set no roll), naming the angle, and leaves the camera where it was; `up` alone re-rolls the current view |
 | `set_section` / `add_section` / `update_section` | section clip planes |
-| `set_material`, `set_appearance` | the look of a body ([materials.md](materials.md)) |
+| `set_material`, `set_appearance` | the look of a body, or with `element` of one face ([materials.md](materials.md#a-face-of-its-own)) |
 
 ## How it is tested
 
@@ -512,8 +512,9 @@ renderer, and by looking at the pictures.
   4x; on an integrated GPU geometry plus 4x MSAA is the floor of the frame.
 - **Device-memory reporting** — no allocation count or heap budget is shown
   anywhere.
-- **Per-occurrence appearance** and **per-face appearance** — see
-  [materials.md](materials.md). A per-occurrence *material* exists
+- **Per-occurrence appearance** — see [materials.md](materials.md); a face's
+  own appearance exists
+  ([a face of its own](materials.md#a-face-of-its-own)). A per-occurrence *material* exists
   ([assemblies](../assemblies/README.md#configurations-per-placement)).
 - A **BVH for picking** (see [Picking](#picking)).
 - The path tracer builds one BLAS per body occurrence from pre-transformed

@@ -1782,6 +1782,22 @@ bool CADKernel::SaveSTEPModel(const std::string& filename,
     TDF_Label label = shapes->AddShape(shape, /*makeAssembly=*/Standard_False);
     name(label, b.name);
     paint(label, b.color);
+    // Faces painted apart (v164): a colour on the face's sub-shape label,
+    // which a reader lays over the body's. The bake above copies the shape
+    // but keeps its face order, so the explorer index still names the face.
+    if (!b.faceColors.empty()) {
+      std::map<int, glm::vec3> byIndex(b.faceColors.begin(),
+                                       b.faceColors.end());
+      int i = 0;
+      for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next(), ++i) {
+        const auto it = byIndex.find(i);
+        if (it == byIndex.end())
+          continue;
+        const TDF_Label sub = shapes->AddSubShape(label, ex.Current());
+        if (!sub.IsNull())
+          paint(sub, it->second);
+      }
+    }
     return label;
   };
 

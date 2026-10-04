@@ -15,6 +15,7 @@
 #include "imgui.h" // IsAnyItemActive (the undo guard coalesces a drag)         // JobBodies / JobRenderVersion (a job tab)
 #include <atomic>
 #include <chrono>
+#include <map>
 #include <thread>
 #include <utility>
 
@@ -108,6 +109,36 @@
 // docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
+
+namespace {
+// A body's faces with looks of their own (v164), as the mesh renderer's
+// runs over the tessellation's index buffer: one per run of triangles that
+// share a look (FaceLookRuns), the overridden ones carrying the face's
+// resolved look, the rest the instance's. Empty for a body with none.
+std::vector<MeshLookRun>
+MeshLookRunsFor(const Body& body, const BodyLook& look,
+                const std::vector<uint32_t>& triangleFaces) {
+  std::vector<MeshLookRun> out;
+  for (const FaceLookRun& r : FaceLookRuns(body, triangleFaces)) {
+    MeshLookRun m;
+    m.firstIndex = r.firstTriangle * 3;
+    m.indexCount = r.triangleCount * 3;
+    if (r.face != nullptr) {
+      const CADMaterials::MaterialProperties& mat =
+          ResolveFaceLook(look, r.face->look).mat;
+      m.own = true;
+      m.baseColor = mat.baseColor;
+      m.materialParams =
+          glm::vec4(mat.metallic, mat.roughness, mat.specular, mat.reflectance);
+      m.procParams =
+          glm::vec4(static_cast<float>(static_cast<int>(mat.pattern)),
+                    mat.patternScale, mat.patternContrast, 0.0f);
+    }
+    out.push_back(m);
+  }
+  return out;
+}
+} // namespace
 
 void SetGeometryDelta(AppState& state, const CADShape& missing,
                       const CADShape& extra, const std::string& summary) {
@@ -342,6 +373,11 @@ void SyncDocumentRenderers(AppState& state) {
       albedo = mat.baseColor;
     }
     bodyColors[bi] = albedo; // section caps reuse the body's color
+    // Faces with looks of their own draw as runs. Not on a reference ghost:
+    // it is one translucent tint, whatever its faces wear.
+    if (!body.reference && !body.faceAppearances.empty())
+      state.meshRenderer->SetInstanceLookRuns(
+          meshId, MeshLookRunsFor(body, look, tess->triangleFaces));
     // A Derived reference body is drawn the way an in-context neighbour is:
     // the ghost tint, translucent, no outline — so what is another part's
     // geometry never reads as this part's. It stays pickable (that is what
@@ -589,6 +625,9 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
 
   glm::vec3 bbMin(FLT_MAX), bbMax(-FLT_MAX);
   size_t reused = 0, meshed = 0;
+  // Only an override with no colour on an unassigned body reads the palette
+  // here; the count is the trace's own.
+  size_t rtPalette = 0;
   for (const RTItem& it : rtItems) {
     const Body& body = *it.body;
     const BodyTessellation* cached = cachedBodyFor(it);
@@ -604,26 +643,17 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     const std::vector<uint32_t>& indices =
         cached != nullptr ? cached->indices : cadMesh.indices;
 
-    // The placement's material, when it overrides the part's.
-    const std::string& wears =
-        it.material.empty() ? body.material : it.material;
-    CADMaterials::MaterialProperties mat =
-        CADMaterials::MaterialLibrary::GetMaterialOrDefault(wears);
-    // Appearance override, same merge as the raster paths.
-    if (body.appearance.Any()) {
-      if (wears.empty()) {
-        mat.metallic = 0.0f;
-        mat.roughness = 0.6f;
-        mat.specular = 0.5f;
-        mat.pattern = CADMaterials::SurfacePattern::Flat;
-      }
-      if (body.appearance.color)
-        mat.baseColor = *body.appearance.color;
-      if (body.appearance.roughness)
-        mat.roughness = *body.appearance.roughness;
-      if (body.appearance.metallic)
-        mat.metallic = *body.appearance.metallic;
-    }
+    // The look every raster path and export resolves (ui/BodyAppearance.h),
+    // the placement's material wearing over the part's. A body with neither
+    // a material nor an override traces as the DEFAULT material, as it
+    // always has, not as its viewport palette colour.
+    const BodyLook look = ResolveBodyLook(body, rtPalette, it.material);
+    const CADMaterials::MaterialProperties mat =
+        look.hasMaterial ? look.mat
+                         : CADMaterials::MaterialLibrary::GetMaterialOrDefault(
+                               std::string{});
+    const std::vector<uint32_t>& triangleFaces =
+        cached != nullptr ? cached->triangleFaces : cadMesh.triangleFaces;
 
     std::vector<Vertex3D> vertices =
         cached != nullptr ? cached->vertices
@@ -662,28 +692,54 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
     bbMin = glm::min(bbMin, lo);
     bbMax = glm::max(bbMax, hi);
 
-    RTMaterial rtm{};
-    rtm.baseColor = mat.baseColor;
-    rtm.metallic = mat.metallic;
-    rtm.roughness = mat.roughness;
-    rtm.emissive = glm::vec3(0.0f);
-    rtm.specular = glm::vec3(mat.specular);
-    // Glass: closesthit.rchit refracts through it, and section.rahit lets a
-    // shadow ray through it tinted (docs/rendering/materials.md#glass).
-    rtm.transmission = mat.transmission;
-    rtm.optics = glm::vec4(mat.ior, 0.0f, 0.0f, 0.0f);
-    if (mat.pattern != CADMaterials::SurfacePattern::Flat) {
-      // One rule, shared with the raster path (MeshRenderer's draw loop).
-      // Each body gets its own material here, so the axis rides in it.
-      rtm.procParams =
-          glm::vec4(static_cast<float>(static_cast<int>(mat.pattern)),
-                    mat.patternScale, mat.patternContrast,
-                    static_cast<float>(CADMaterials::PatternAxis(
-                        mat.pattern, localHi - localLo)));
-    }
-    uint32_t matId = state.rayTracer->AddMaterial(rtm);
+    const auto rtMaterialOf = [&](const CADMaterials::MaterialProperties& m) {
+      RTMaterial rtm{};
+      rtm.baseColor = m.baseColor;
+      rtm.metallic = m.metallic;
+      rtm.roughness = m.roughness;
+      rtm.emissive = glm::vec3(0.0f);
+      rtm.specular = glm::vec3(m.specular);
+      // Glass: closesthit.rchit refracts through it, and section.rahit lets
+      // a shadow ray through it tinted (docs/rendering/materials.md#glass).
+      rtm.transmission = m.transmission;
+      rtm.optics = glm::vec4(m.ior, 0.0f, 0.0f, 0.0f);
+      if (m.pattern != CADMaterials::SurfacePattern::Flat) {
+        // One rule, shared with the raster path (MeshRenderer's draw loop).
+        // Each body gets its own material here, so the axis rides in it.
+        rtm.procParams =
+            glm::vec4(static_cast<float>(static_cast<int>(m.pattern)),
+                      m.patternScale, m.patternContrast,
+                      static_cast<float>(CADMaterials::PatternAxis(
+                          m.pattern, localHi - localLo)));
+      }
+      return rtm;
+    };
+    uint32_t matId = state.rayTracer->AddMaterial(rtMaterialOf(mat));
 
-    state.rayTracer->AddGeometry(vertices, indices, matId);
+    // Faces with looks of their own (v164): a material per look and an index
+    // per triangle, so the body stays ONE geometry. Split into one geometry
+    // per look, the still's outline pass would draw a body boundary along
+    // every colour change, smooth or not.
+    const std::vector<FaceLookRun> runs = FaceLookRuns(body, triangleFaces);
+    if (runs.empty() || triangleFaces.size() * 3 != indices.size()) {
+      state.rayTracer->AddGeometry(vertices, indices, matId);
+    } else {
+      std::map<const FaceAppearance*, uint32_t> faceMats;
+      std::vector<uint32_t> triMats(triangleFaces.size(), matId);
+      for (const FaceLookRun& r : runs) {
+        if (r.face == nullptr)
+          continue;
+        auto [slot, fresh] = faceMats.try_emplace(r.face, 0u);
+        if (fresh) {
+          const BodyLook faceLook = ResolveFaceLook(look, r.face->look);
+          slot->second = state.rayTracer->AddMaterial(
+              rtMaterialOf(faceLook.hasMaterial ? faceLook.mat : mat));
+        }
+        std::fill_n(triMats.begin() + r.firstTriangle, r.triangleCount,
+                    slot->second);
+      }
+      state.rayTracer->AddGeometry(vertices, indices, matId, 0, &triMats);
+    }
   }
 
   if (state.rayTracer->GeometryCount() == 0)
@@ -1285,16 +1341,9 @@ void SyncAssemblyRenderers(AppState& state) {
         // Resolve order: appearance > material > displayColor > palette
         // (ui/BodyAppearance.h — the part-tab loop and the exports share it).
         // A placement made of another material than its part wears it.
-        Body worn;
-        if (!inst.material.empty()) {
-          worn.material = inst.material;
-          worn.appearance = body.appearance;
-          worn.displayColor = body.displayColor;
-          worn.hasDisplayColor = body.hasDisplayColor;
-        }
-        const BodyLook look =
-            ResolveBodyLook(inst.material.empty() ? body : worn, palette);
+        const BodyLook look = ResolveBodyLook(body, palette, inst.material);
         sb.palette = look.palette;
+        sb.runs = MeshLookRunsFor(body, look, sb.tess->triangleFaces);
         if (state.outlineRenderer)
           OutlineAssetFor(state, *sb.tess);
         if (look.hasMaterial) {
@@ -1365,6 +1414,8 @@ void SyncAssemblyRenderers(AppState& state) {
       } else {
         state.meshRenderer->SetInstanceColor(meshId, sb.palette);
       }
+      if (!sb.runs.empty())
+        state.meshRenderer->SetInstanceLookRuns(meshId, sb.runs);
       uint32_t outlineId = 0;
       if (state.outlineRenderer && sb.tess->outlineAsset != 0) {
         // Untransformed vertices + a per-instance model matrix (A2.5): the

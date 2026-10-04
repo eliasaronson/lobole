@@ -24,6 +24,10 @@ enum RTGeometryFlags : uint32_t {
   // Shadow catcher: shows the environment darkened by shadow/AO instead of a
   // shaded surface — the ground plane under offline renders.
   RT_GEOM_SHADOW_CATCHER = 1u << 0,
+  // The material comes per TRIANGLE from the geometry's triangle-material
+  // buffer, not from materialIndex: a body whose faces carry their own
+  // appearance (v164). Set by AddGeometry when it is handed one.
+  RT_GEOM_PER_TRIANGLE_MATERIAL = 1u << 1,
 };
 
 struct RTGeometry {
@@ -37,6 +41,10 @@ struct RTGeometry {
   uint32_t indexCount = 0;
   uint32_t materialIndex = 0;
   uint32_t flags = 0; // RTGeometryFlags, forwarded to the closest-hit shader
+  // One material index per triangle (RT_GEOM_PER_TRIANGLE_MATERIAL only).
+  VkBuffer triMaterialBuffer = VK_NULL_HANDLE;
+  VkDeviceMemory triMaterialMemory = VK_NULL_HANDLE;
+  VkDeviceAddress triMaterialAddress = 0;
   // Per-geometry bottom-level AS (built in R4.2).
   RTAccelerationStructure blas;
 };
@@ -122,9 +130,11 @@ public:
   bool IsInitialized() const { return m_isInitialized; }
 
   // Geometry management
-  uint32_t AddGeometry(const std::vector<Vertex3D>& vertices,
-                       const std::vector<uint32_t>& indices,
-                       uint32_t materialIndex = 0, uint32_t flags = 0);
+  uint32_t
+  AddGeometry(const std::vector<Vertex3D>& vertices,
+              const std::vector<uint32_t>& indices, uint32_t materialIndex = 0,
+              uint32_t flags = 0,
+              const std::vector<uint32_t>* triangleMaterials = nullptr);
   void UpdateGeometry(uint32_t geometryId,
                       const std::vector<Vertex3D>& vertices,
                       const std::vector<uint32_t>& indices);

@@ -23,6 +23,16 @@ std::string SlotName(const AppState& state, uint64_t slotId) {
   return i ? state.parts[*i].name : std::string{};
 }
 
+// The faces of `b` painted apart from it (v164), each in its resolved colour
+// over the body's `look`.
+std::vector<std::pair<int, glm::vec3>> FaceColors(const Body& b,
+                                                  const BodyLook& look) {
+  std::vector<std::pair<int, glm::vec3>> out;
+  for (const auto& [index, fa] : b.faceAppearances)
+    out.emplace_back(index, ResolveFaceLook(look, fa.look).Color());
+  return out;
+}
+
 // Every body of `part` in its on-screen colour, `palette` seeded the way the
 // tab showing it seeds it; reference bodies advance the count (the part tab
 // draws them) but are never written — they are another part's geometry.
@@ -32,17 +42,10 @@ std::vector<CADKernel::StepBody> PartBodies(const Document& part,
   std::vector<CADKernel::StepBody> out;
   for (const Body& b : part.GetBodies()) {
     // a placement of another material than its part exports as that
-    Body worn;
-    if (!wears.empty()) {
-      worn.material = wears;
-      worn.appearance = b.appearance;
-      worn.displayColor = b.displayColor;
-      worn.hasDisplayColor = b.hasDisplayColor;
-    }
-    const BodyLook look = ResolveBodyLook(wears.empty() ? b : worn, palette);
+    const BodyLook look = ResolveBodyLook(b, palette, wears);
     if (b.reference || !b.shape.IsValid())
       continue;
-    out.push_back({b.shape, b.name, look.Color()});
+    out.push_back({b.shape, b.name, look.Color(), FaceColors(b, look)});
   }
   return out;
 }
@@ -75,7 +78,7 @@ BuildPartStepModel(const Document& part, const std::string& name,
         bodyIndex < 0 || listed == static_cast<size_t>(bodyIndex);
     listed++;
     if (wanted && b.shape.IsValid())
-      bodies.push_back({b.shape, b.name, look.Color()});
+      bodies.push_back({b.shape, b.name, look.Color(), FaceColors(b, look)});
   }
   if (bodies.empty())
     return std::unexpected("the body to export has no valid geometry");

@@ -23,6 +23,7 @@ add_executable(designer_tests
     ${SANITIZER_DEFAULTS_SRC}
     test_assembly_flatten.cpp
     test_step_export.cpp
+    test_face_appearance.cpp
     test_cam_workholding.cpp
     test_cadkernel.cpp
     test_sketch.cpp
@@ -786,6 +787,14 @@ add_test(NAME appearance_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/appearance_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(appearance_smoke PROPERTIES TIMEOUT 120)
+
+# v164 face appearance: set_appearance {element} by name, an upstream edit,
+# a face a cut made, a stale name reported (not dropped), clear, undo,
+# persistence. Headless.
+add_test(NAME face_appearance_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/face_appearance_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(face_appearance_smoke PROPERTIES TIMEOUT 120)
 
 # Variables C2 units: unit-suffixed expressions resolve, unit names reserved,
 # v28 round-trip. Headless (no display).

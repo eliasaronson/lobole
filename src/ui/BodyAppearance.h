@@ -15,6 +15,9 @@
 #include <glm/glm.hpp>
 
 #include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
 
 namespace ui {
 
@@ -34,6 +37,32 @@ struct BodyLook {
 // displayColor — the renderers' rule. A part tab starts it at 0 for the
 // document; an assembly tab seeds it with the PART's id so every occurrence of
 // a part is the same colour, whatever else is in the assembly.
-BodyLook ResolveBodyLook(const Body& body, size_t& palette);
+//
+// `wears` is a placement's material when it overrides the part's (an
+// assembly occurrence of another material, v135); empty = the body's own.
+BodyLook ResolveBodyLook(const Body& body, size_t& palette,
+                         const std::string& wears = {});
+
+// The look of a face carrying its own override (Body::faceAppearances, v164):
+// the body's resolved look with the override's set fields on top, so an
+// unset field inherits from the BODY — its appearance, then its material.
+// A colour-only override on an unassigned body is a neutral dielectric, as
+// ResolveBodyLook makes it.
+BodyLook ResolveFaceLook(const BodyLook& body, const Appearance& face);
+
+// A run of consecutive triangles that share one look. `face` is the override
+// they wear, nullptr for the body's own look.
+struct FaceLookRun {
+  uint32_t firstTriangle = 0;
+  uint32_t triangleCount = 0;
+  const FaceAppearance* face = nullptr;
+};
+// The runs tiling a tessellation whose triangles lie on `triangleFaces`
+// (CADShape::Mesh::triangleFaces). EMPTY when the body has no face override
+// that resolved — the one-draw path every other body keeps. A tessellation
+// emits each face contiguously, so this is one run per overridden face plus
+// the gaps between them; it does not rely on that, only gets longer without it.
+std::vector<FaceLookRun>
+FaceLookRuns(const Body& body, const std::vector<uint32_t>& triangleFaces);
 
 } // namespace ui

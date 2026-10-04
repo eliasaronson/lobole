@@ -961,6 +961,30 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     CHECK_THAT(r.EffectiveMaxThinning(),
                WithinRel(want.at("max_thinning").get<double>(), 1e-9));
   }
+  // v164: a face's own appearance. Cosmetic, so the volumes say nothing
+  // about it; dropped on the way through the envelope, the faces reload
+  // unpainted and look like any other part. Each [element, colour] must be
+  // on the feature AND resolve to a face of its body, painted that colour.
+  if (expect.contains("face_appearance")) {
+    for (const auto& want : expect.at("face_appearance")) {
+      const std::string element = want.at(0).get<std::string>();
+      const glm::vec3 color(want.at(1).at(0).get<float>(),
+                            want.at(1).at(1).get<float>(),
+                            want.at(1).at(2).get<float>());
+      INFO("face appearance " << element);
+      bool painted = false;
+      for (const Body& body : doc.GetBodies())
+        for (const auto& [index, fa] : body.faceAppearances)
+          if (fa.element == element) {
+            REQUIRE(fa.look.color.has_value());
+            CHECK(glm::length(*fa.look.color - color) < 1e-5f);
+            painted = true;
+          }
+      CHECK(painted);
+    }
+    for (const auto& f : doc.GetFeatures())
+      CHECK(f->UnresolvedFaceLooks().empty());
+  }
   // v143: how the part is printed. Drives no geometry, so the volumes above
   // say nothing about it; a pair dropped on the way through the envelope
   // would read back as an unprinted part and every fit report would stop

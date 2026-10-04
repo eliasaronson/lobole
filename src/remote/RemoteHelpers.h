@@ -328,6 +328,18 @@ inline nlohmann::json RegenSummaryJson(const Document& doc) {
       warnings.push_back(
           {{"index", i}, {"name", f->GetName()}, {"warning", f->GetWarning()}});
     }
+    // A face appearance whose face is gone (v164): the feature built fine,
+    // but a face the caller painted is no longer painted — said here, in the
+    // response to the edit that lost it, not left for a get_state poll.
+    for (const std::string& name : f->UnresolvedFaceLooks())
+      warnings.push_back(
+          {{"index", i},
+           {"name", f->GetName()},
+           {"warning", "face appearance on '" + name +
+                           "' names no face of its body any more; it is "
+                           "kept, unpainted — clear it with set_appearance "
+                           "{feature_id, element} or repaint another face"},
+           {"face_appearance", name}});
     if (f->GetError().empty())
       continue;
     nlohmann::json entry = {

@@ -20,21 +20,29 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <Quantity_Color.hxx>
 #include <STEPCAFControl_Reader.hxx>
 #include <TDF_Label.hxx>
 #include <TDF_LabelSequence.hxx>
 #include <TDF_Tool.hxx>
 #include <TDataStd_Name.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
 #include <XCAFDoc_ColorTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
 
 #include <glm/gtc/quaternion.hpp>
+#include <nlohmann/json.hpp>
 
+#include <cmath>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -406,4 +414,112 @@ TEST_CASE("a body that is a compound of one solid keeps its name and colour",
   CHECK_FALSE(root->isAssembly);
   CheckColor(*root, glm::vec3(0.2f, 0.4f, 0.6f));
   std::filesystem::remove(path);
+}
+
+namespace {
+// The element name and index of the face of `body` centred at `at`.
+std::pair<std::string, int> FaceCentredAt(const Body& body, glm::dvec3 at) {
+  int i = 0;
+  for (TopExp_Explorer ex(body.shape.GetShape(), TopAbs_FACE); ex.More();
+       ex.Next(), ++i) {
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(TopoDS::Face(ex.Current()), props);
+    const gp_Pnt c = props.CentreOfMass();
+    if (glm::length(glm::dvec3(c.X(), c.Y(), c.Z()) - at) < 1e-6) {
+      const std::string* name = body.elementMap.NameOf(i);
+      REQUIRE(name != nullptr);
+      return {*name, i};
+    }
+  }
+  FAIL("no face centred there");
+  return {};
+}
+} // namespace
+
+TEST_CASE("a face painted apart exports as a colour on that face",
+          "[step][export][gltf][appearance]") {
+  ui::AppState state = MakeHeadlessState();
+  AddBoxPart(state, "Wall", {{"Wall", {0, 0, 0}, {4, 4, 2}}});
+  Document& doc = *state.document;
+  const auto [top, topIndex] = FaceCentredAt(doc.GetBodies()[0], {2, 2, 2});
+  const glm::vec3 red(0.8f, 0.02f, 0.02f);
+  Appearance paint;
+  paint.color = red;
+  doc.GetFeature(0)->SetFaceAppearance(top, paint);
+  doc.Regenerate();
+
+  SECTION("STEP: an XCAF colour on the face's sub-shape") {
+    const auto model = ui::BuildPartStepModel(doc, "Wall", -1);
+    REQUIRE(model.has_value());
+    REQUIRE(model->parts.at(0).bodies.at(0).faceColors.size() == 1);
+    const std::string path = TempPath("designer_step_face_colour.step");
+    REQUIRE(CADKernel::Instance().SaveSTEPModel(path, *model));
+
+    // Read back the way another OCC-based system would: the face that
+    // carries a colour of its own is the top, and it is red. The body keeps
+    // its own colour, which is not.
+    std::scoped_lock exchange(DataExchangeMutex());
+    XcafDocument xdoc;
+    STEPCAFControl_Reader reader;
+    reader.SetColorMode(Standard_True);
+    REQUIRE(reader.ReadFile(path.c_str()) == IFSelect_RetDone);
+    REQUIRE(reader.Transfer(xdoc));
+    Handle(XCAFDoc_ShapeTool) shapes =
+        XCAFDoc_DocumentTool::ShapeTool(xdoc->Main());
+    Handle(XCAFDoc_ColorTool) colors =
+        XCAFDoc_DocumentTool::ColorTool(xdoc->Main());
+    TDF_LabelSequence roots;
+    shapes->GetFreeShapes(roots);
+    REQUIRE(roots.Length() == 1);
+    Quantity_Color bodyColour;
+    REQUIRE(colors->GetColor(roots.Value(1), XCAFDoc_ColorSurf, bodyColour));
+    CHECK(std::abs(bodyColour.Green() - red.g) > 0.1); // the palette's
+    int coloured = 0;
+    for (TopExp_Explorer ex(shapes->GetShape(roots.Value(1)), TopAbs_FACE);
+         ex.More(); ex.Next()) {
+      Quantity_Color qc;
+      if (!colors->GetColor(ex.Current(), XCAFDoc_ColorSurf, qc))
+        continue;
+      coloured++;
+      GProp_GProps props;
+      BRepGProp::SurfaceProperties(TopoDS::Face(ex.Current()), props);
+      CHECK_THAT(props.CentreOfMass().Z(), WithinAbs(2.0, 1e-6));
+      CHECK_THAT(qc.Red(), WithinAbs(red.r, 1.0 / 255));
+      CHECK_THAT(qc.Green(), WithinAbs(red.g, 1.0 / 255));
+      CHECK_THAT(qc.Blue(), WithinAbs(red.b, 1.0 / 255));
+    }
+    CHECK(coloured == 1);
+    std::filesystem::remove(path);
+  }
+
+  SECTION("glTF: the face is its own primitive, in its own material") {
+    const std::vector<MeshExport::Item> items =
+        ui::BuildVisualExportItems(state);
+    REQUIRE(items.size() == 1);
+    REQUIRE(items[0].faces.size() == 1);
+    CHECK(items[0].faces[0].face == topIndex);
+    const std::string path = TempPath("designer_face_colour.gltf");
+    std::string error;
+    REQUIRE(MeshExport::SaveVisual(path, items, 0.1, &error));
+    const nlohmann::json gltf = nlohmann::json::parse(Slurp(path));
+    // Which material is red, and how many primitives draw with it.
+    std::set<size_t> redMaterials;
+    const auto& mats = gltf.at("materials");
+    for (size_t i = 0; i < mats.size(); i++) {
+      const auto& f = mats[i].at("pbrMetallicRoughness").at("baseColorFactor");
+      if (std::abs(f[0].get<double>() - red.r) < 1e-3 &&
+          std::abs(f[1].get<double>() - red.g) < 1e-3)
+        redMaterials.insert(i);
+    }
+    REQUIRE(redMaterials.size() == 1);
+    size_t redPrims = 0, otherPrims = 0;
+    for (const auto& mesh : gltf.at("meshes"))
+      for (const auto& prim : mesh.at("primitives"))
+        (redMaterials.count(prim.value("material", size_t(-1))) ? redPrims
+                                                                : otherPrims)++;
+    CHECK(redPrims == 1);
+    CHECK(otherPrims >= 1);
+    std::filesystem::remove(path);
+    std::filesystem::remove(TempPath("designer_face_colour.bin"));
+  }
 }

@@ -443,6 +443,11 @@ public:
     CADShape shape;
     std::string name;
     std::optional<glm::vec3> color; // linear RGB, what the viewport lights
+    // Faces painted apart from the body (a face appearance override, v164):
+    // face index in TopExp_Explorer order -> linear RGB. Written as an XCAF
+    // colour on the face's sub-shape label, which a reader applies over the
+    // body's own colour.
+    std::vector<std::pair<int, glm::vec3>> faceColors;
   };
   // A leaf product. One body is written as the product itself; several make
   // the product an assembly of body products, because STEP colours attach to

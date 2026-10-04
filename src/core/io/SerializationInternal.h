@@ -23,7 +23,12 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    163; // v163: a requirement's measure kind `bearing_bore` {document:
+    164; // v164: a face appearance override
+         //      (docs/rendering/materials.md#a-face-of-its-own): on a
+         //      body's creating feature, `face_appearance` [{element,
+         //      color?, roughness?, metallic?}] beside `appearance`, keyed by
+         //      the face's element name. Stripped from the regen hash.
+         // v163: a requirement's measure kind `bearing_bore` {document:
          //      assembly, occurrences: [bearing ids]}, the smallest bore of
          //      those bearings in mm (docs/requirements/README.md#measures).
          //      A build that does not know it refuses the file.

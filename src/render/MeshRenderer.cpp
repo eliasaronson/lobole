@@ -284,6 +284,20 @@ void MeshRenderer::SetInstanceVisible(uint32_t instanceId, bool visible) {
   }
 }
 
+void MeshRenderer::SetInstanceLookRuns(uint32_t instanceId,
+                                       std::vector<MeshLookRun> runs) {
+  if (MeshInstance* instance = GetInstance(instanceId))
+    instance->runs = std::move(runs);
+}
+
+std::vector<MeshLookRun>
+MeshRenderer::InstanceLookRuns(uint32_t instanceId) const {
+  if (instanceId == 0 || instanceId > m_instances.size() ||
+      !m_instances[instanceId - 1])
+    return {};
+  return m_instances[instanceId - 1]->runs;
+}
+
 void MeshRenderer::SetInstanceGlass(uint32_t instanceId, float alpha) {
   if (MeshInstance* instance = GetInstance(instanceId)) {
     instance->ghost = true;
@@ -448,22 +462,20 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
                                   : instance->selRanges.front();
       push.highlight = glm::uvec4(sel0.x, sel0.y, instance->hoverRange.x,
                                   instance->hoverRange.y);
-      push.material = instance->materialParams;
-      push.baseColor = instance->baseColor;
-      push.procMaterial = instance->procParams;
-      if (instance->procParams.x > 0.5f) {
-        // The asset's bbox is genuinely object-local (the model matrix rides
-        // in the push constant), so this is the frame PatternAxis wants.
-        // Cheap enough per-draw.
-        push.procMaterial.w = static_cast<float>(CADMaterials::PatternAxis(
-            static_cast<CADMaterials::SurfacePattern>(
-                static_cast<int>(instance->procParams.x + 0.5f)),
-            asset->bboxMax - asset->bboxMin));
-      }
-      vkCmdPushConstants(commandBuffer, m_pipelineLayout,
-                         VK_SHADER_STAGE_VERTEX_BIT |
-                             VK_SHADER_STAGE_FRAGMENT_BIT,
-                         0, sizeof(push), &push);
+      // The pattern axis belongs to the asset, whichever look draws it.
+      const auto procFor = [&](const glm::vec4& proc) {
+        glm::vec4 out = proc;
+        if (proc.x > 0.5f) {
+          // The asset's bbox is genuinely object-local (the model matrix
+          // rides in the push constant), so this is the frame PatternAxis
+          // wants. Cheap enough per-draw.
+          out.w = static_cast<float>(CADMaterials::PatternAxis(
+              static_cast<CADMaterials::SurfacePattern>(
+                  static_cast<int>(proc.x + 0.5f)),
+              asset->bboxMax - asset->bboxMin));
+        }
+        return out;
+      };
 
       if (instance->assetId != boundAssetId) {
         VkBuffer vertexBuffers[] = {asset->vertexBuffer};
@@ -474,27 +486,64 @@ void MeshRenderer::Render(VkCommandBuffer commandBuffer,
         boundAssetId = instance->assetId;
       }
 
-      vkCmdDrawIndexed(commandBuffer,
-                       static_cast<uint32_t>(asset->indices.size()), 1, 0, 0,
-                       0);
-
-      // Additional selected ranges (multi-select on one instance): re-draw
-      // the asset with only that range highlighted — depth LESS_OR_EQUAL
-      // lets the identical geometry pass, and the 0xFFFFFFFF hover-slot
-      // sentinel makes the fragment stage DISCARD everything outside the
-      // range (a plain redraw would overwrite the other ranges' tint).
-      // Selection counts are small, so the extra full-asset draws are cheap.
-      for (size_t r = 1; r < instance->selRanges.size(); r++) {
-        push.highlight =
-            glm::uvec4(instance->selRanges[r].x, instance->selRanges[r].y,
-                       0xFFFFFFFFu, 0xFFFFFFFFu);
+      // One look over [firstIndex, firstIndex + count): the main draw, then
+      // the additional selected ranges (multi-select on one instance) —
+      // re-drawn with only that range highlighted: depth LESS_OR_EQUAL lets
+      // the identical geometry pass, and the 0xFFFFFFFF hover-slot sentinel
+      // makes the fragment stage DISCARD everything outside the range (a
+      // plain redraw would overwrite the other ranges' tint). Selection
+      // counts are small, so the extra draws are cheap. The highlight ranges
+      // are VERTEX ranges, which a sub-draw of the index buffer keeps (its
+      // vertexOffset is 0), so a body drawn in looks highlights the same.
+      const auto drawLook = [&](uint32_t firstIndex, uint32_t count,
+                                const glm::vec4& baseColor,
+                                const glm::vec4& material,
+                                const glm::vec4& proc) {
+        push.highlight = glm::uvec4(sel0.x, sel0.y, instance->hoverRange.x,
+                                    instance->hoverRange.y);
+        push.material = material;
+        push.baseColor = baseColor;
+        push.procMaterial = procFor(proc);
         vkCmdPushConstants(commandBuffer, m_pipelineLayout,
                            VK_SHADER_STAGE_VERTEX_BIT |
                                VK_SHADER_STAGE_FRAGMENT_BIT,
                            0, sizeof(push), &push);
-        vkCmdDrawIndexed(commandBuffer,
-                         static_cast<uint32_t>(asset->indices.size()), 1, 0, 0,
-                         0);
+        vkCmdDrawIndexed(commandBuffer, count, 1, firstIndex, 0, 0);
+        for (size_t r = 1; r < instance->selRanges.size(); r++) {
+          push.highlight =
+              glm::uvec4(instance->selRanges[r].x, instance->selRanges[r].y,
+                         0xFFFFFFFFu, 0xFFFFFFFFu);
+          vkCmdPushConstants(commandBuffer, m_pipelineLayout,
+                             VK_SHADER_STAGE_VERTEX_BIT |
+                                 VK_SHADER_STAGE_FRAGMENT_BIT,
+                             0, sizeof(push), &push);
+          vkCmdDrawIndexed(commandBuffer, count, 1, firstIndex, 0, 0);
+        }
+      };
+
+      const uint32_t indexCount = static_cast<uint32_t>(asset->indices.size());
+      if (instance->runs.empty()) {
+        drawLook(0, indexCount, instance->baseColor, instance->materialParams,
+                 instance->procParams);
+        continue;
+      }
+      // Faces with looks of their own (v164): one draw per run. A run past
+      // the end of the asset (a stale run on a re-uploaded asset) is clipped
+      // rather than read out of bounds.
+      for (const MeshLookRun& run : instance->runs) {
+        if (run.firstIndex >= indexCount)
+          continue;
+        const uint32_t count =
+            std::min(run.indexCount, indexCount - run.firstIndex);
+        if (!run.own) {
+          drawLook(run.firstIndex, count, instance->baseColor,
+                   instance->materialParams, instance->procParams);
+          continue;
+        }
+        // The instance's alpha (ghost opacity, the glass sign) stays its own.
+        drawLook(run.firstIndex, count,
+                 glm::vec4(run.baseColor, instance->baseColor.a),
+                 run.materialParams, run.procParams);
       }
     }
   }

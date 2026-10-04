@@ -137,9 +137,63 @@ no optional field clears it; a colour given as 0..255 is refused with a hint.
 `get_state` echoes it per body; the body context menu in the feature tree has
 an **Appearance** submenu.
 
+### A face of its own
+
+One face of a body can wear its own appearance (v164) — a wall brick outside
+and plaster inside, a painted end on a bare bar:
+
+- **Held** on the body's creating feature beside the body override, as
+  `Feature::m_faceAppearances` (`FaceAppearance {element, look}`), keyed by
+  the face's **element name** ([toponaming](../modeling/toponaming.md)). A
+  face a later feature made — a cut's floor or wall — is still a face of the
+  body, named in its `ElementMap`, so it is painted on the body's creating
+  feature too. Serialized as `face_appearance` [{`element`, `color`?,
+  `roughness`?, `metallic`?}]; stripped from the chain hash like
+  `appearance`.
+- **Resolved** at every regeneration by the same stamp
+  (`Document::Regenerate`): each name is looked up in the `ElementMap` of
+  every body its feature created and lands in `Body::faceAppearances` (face
+  index → override). A face a later feature modified or cut in pieces is
+  renamed `…;M<tag>` / `…;M<tag>.<i>`; the paint follows it to every face
+  so descended (a pocket in a painted top leaves the top painted). A name that resolves on none of them is **kept and
+  reported** — `Feature::UnresolvedFaceLooks`, a warning carrying
+  `face_appearance` in every regeneration summary (so the response to the
+  edit that lost the face says so), and `face_appearance_unresolved` on the
+  feature in `get_state`. A feature with no body this time (suppressed,
+  rolled back, failed) reports nothing; its faces are absent, not stale.
+- **Look:** `ui::ResolveFaceLook` lays the face's set fields over the BODY's
+  resolved look, so an unset field inherits the body's appearance, then its
+  material. On a body with no material a face override is the same neutral
+  dielectric a body override is.
+- **Viewport:** the body stays one tessellation and one instance.
+  `ui::FaceLookRuns` cuts its triangles (`triangleFaces`; a face's triangles
+  are contiguous) into runs that share a look, and `MeshRenderer` draws one
+  `vkCmdDrawIndexed` per run with its own push constant (`MeshLookRun`).
+  Highlight ranges are vertex ranges, which a sub-draw keeps, so selection
+  and hover look as before. A body with no face override draws exactly as it
+  did — the pixel baseline does not move. A Derived reference ghost ignores
+  face looks (it is one translucent tint).
+- **Path tracer:** the body stays ONE geometry with a material per look and
+  a per-triangle material index (`RT_GEOM_PER_TRIANGLE_MATERIAL`, read by
+  `closesthit.rchit` and `section.rahit`). One geometry per colour would
+  have made the still's outline pass draw a body boundary along every colour
+  change.
+- **STEP:** an XCAF colour on the face's sub-shape label, over the body
+  product's own colour (`StepBody::faceColors`). Import reads the product
+  colour only, so a round trip through our own importer loses the face.
+- **glTF/OBJ/PLY:** a colour and a PBR material on the face's sub-shape of
+  the prototype shape, so the writer emits that face as its own primitive.
+
+`set_appearance {feature_id | body, element, color?, roughness?, metallic?}`
+paints one face; `element` is a face name from `list_elements` on that body
+(an edge is refused, as is a name that names no face). With no optional field
+it clears that face — even a stale one, which is how a stale override goes.
+`get_state` lists a body's painted faces as `face_appearance` [{`element`,
+`face`, …}], the face index being the one `list_elements` and `select_face`
+use. There is no GUI for it yet.
+
 Not supported: a per-occurrence appearance override (the same part coloured
-differently in two places of an assembly), per-face appearance, and image
-textures. A per-occurrence MATERIAL does exist (`set_occurrence_material`,
+differently in two places of an assembly), and image textures. A per-occurrence MATERIAL does exist (`set_occurrence_material`,
 v135): it replaces every body's material for mass, the BOM, rendering and
 STEP ([assemblies](../assemblies/README.md#configurations-per-placement)).
 
@@ -196,6 +250,15 @@ A section cap of a transmissive body is drawn as glass too.
   cube is deterministic), slug refusal, and that glass and only glass
   transmits with an IOR over 1.
 - `tests/appearance_smoke.py` — override, clear, zero features executed.
+- `tools/ctest -L appearance` (`tests/test_face_appearance.cpp`) — a face
+  override resolves by name, survives an upstream edit, rebuilds nothing; a
+  cut's floor painted on the box and reported when the cut is suppressed;
+  the round trip; the face look's inheritance and the runs that tile a
+  tessellation. `tests/test_step_export.cpp` checks the files: the colour on
+  the STEP face, the face's own glTF primitive.
+- `tests/face_appearance_smoke.py` — the RPC: paint, edit, a cut face, the
+  stale-name warning in the response that lost it, clearing a stale name,
+  undo, refusals, persistence.
 - `tests/render_glass_smoke.py` — a red block behind a pane: it shows through
   `glass` and not through `steel` (skips without ray tracing).
 - `tests/render_pixel_smoke.py` — its scene assigns no materials, so a

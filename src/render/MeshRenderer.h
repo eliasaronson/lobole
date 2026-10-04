@@ -96,6 +96,21 @@ public:
   uint32_t refCount = 0; // live instances referencing this asset
 };
 
+// A run of an instance's INDEX buffer drawn with a look of its own: how a
+// body whose faces carry their own appearance (v164) is drawn — one sub-draw
+// per run, each with its own push constant, over the contiguous ranges the
+// tessellation emits per B-Rep face. `own` false means the instance's look
+// (so later SetInstanceColor/Material calls still reach the faces that have
+// no override of their own).
+struct MeshLookRun {
+  uint32_t firstIndex = 0;
+  uint32_t indexCount = 0;
+  bool own = false;
+  glm::vec3 baseColor{0.8f};
+  glm::vec4 materialParams{0.0f, 0.5f, 0.5f, 0.04f};
+  glm::vec4 procParams{0.0f}; // as MeshInstance::procParams
+};
+
 // One drawn occurrence of an asset: everything that may vary between
 // occurrences without re-uploading geometry. Rides in push constants per draw.
 struct MeshInstance {
@@ -127,6 +142,10 @@ struct MeshInstance {
   glm::uvec2 hoverRange = glm::uvec2(0);
 
   bool visible = true;
+
+  // Empty: one draw of the whole asset in the instance's look. Otherwise the
+  // runs cover the index buffer and each is its own draw (MeshLookRun).
+  std::vector<MeshLookRun> runs;
 
   // Ghosted context geometry (A4 in-context editing): drawn by the alpha-
   // blended, depth-write-off ghost pipeline in a second pass after all
@@ -213,6 +232,13 @@ public:
                              CADMaterials::SurfacePattern pattern,
                              float patternScale, float patternContrast);
   void SetInstanceVisible(uint32_t instanceId, bool visible);
+  // Per-face looks (MeshLookRun): runs that tile the asset's index buffer.
+  // Empty restores the single whole-asset draw.
+  void SetInstanceLookRuns(uint32_t instanceId, std::vector<MeshLookRun> runs);
+  // What an instance draws its runs with — for a test to read the renderer's
+  // state rather than the caller's intent (see GetInstanceTransform).
+  [[nodiscard]] std::vector<MeshLookRun>
+  InstanceLookRuns(uint32_t instanceId) const;
   // Marks an instance as ghosted context geometry (A4): translucent
   // (`alpha`), no depth write, drawn after all opaque instances. Unsorted
   // blending — acceptable at reference-visual alphas (~0.25).

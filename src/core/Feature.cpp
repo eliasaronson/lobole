@@ -1,5 +1,7 @@
 #include "core/Feature.h"
 
+#include <algorithm>
+
 #include "cad/CADMaterials.h"
 #include "core/AxisRef.h"
 #include "core/Configuration.h"
@@ -342,6 +344,23 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     }
   }
   return true;
+}
+
+bool Feature::SetFaceAppearance(const std::string& element,
+                                const Appearance& look) {
+  const auto it = std::find_if(
+      m_faceAppearances.begin(), m_faceAppearances.end(),
+      [&](const FaceAppearance& f) { return f.element == element; });
+  const bool had = it != m_faceAppearances.end();
+  if (!look.Any()) {
+    if (had)
+      m_faceAppearances.erase(it);
+  } else if (had) {
+    it->look = look;
+  } else {
+    m_faceAppearances.push_back({element, look});
+  }
+  return had;
 }
 
 void Feature::SetMaterial(const std::string& material) {

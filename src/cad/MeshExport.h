@@ -26,6 +26,17 @@ struct Item {
   glm::vec3 baseColor{0.8f}; // linear RGB
   float metallic = 0.0f;
   float roughness = 0.5f;
+  // Faces styled apart from the item (a face appearance override, v164).
+  // `face` counts TopExp_Explorer order. Written as a style on the face's
+  // XCAF sub-shape, so the glTF writer gives those faces their own material
+  // (and so their own primitive).
+  struct FaceStyle {
+    int face = 0;
+    glm::vec3 baseColor{0.8f};
+    float metallic = 0.0f;
+    float roughness = 0.5f;
+  };
+  std::vector<FaceStyle> faces;
 };
 
 // Writes `items` to `path`; the format is chosen by the file extension

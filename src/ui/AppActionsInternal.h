@@ -142,6 +142,8 @@ struct SharedBody {
   // CADMaterials::ViewportAlpha: under 1 draws it see-through, in the ghost
   // pass (glass).
   float alpha = 1.0f;
+  // Faces with looks of their own (v164; MeshLookRun). Empty for most.
+  std::vector<MeshLookRun> runs;
 };
 
 // A part as drawn: its slot id and the configuration a placement asked for

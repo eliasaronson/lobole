@@ -192,6 +192,15 @@ face, modified (a chamfer on its rim) -- and fails on a split
 (`;M<tag>.<i>`), naming the feature that split it
 ([attached and mated](../parts/README.md#attached-and-mated)).
 
+A face appearance (v164) also resolves against the FINAL body — its name is
+looked up in the creating feature's body after every feature, so a face a
+later cut made can carry one — and follows a face a later feature modified
+or split to every face whose name extends it by `;M<tag>` steps. A name that stops resolving is not a feature
+error, since the geometry is fine: it is a warning in the regeneration
+summary and `face_appearance_unresolved` in `get_state`, and the override is
+kept until it is cleared or resolves again
+([a face of its own](../rendering/materials.md#a-face-of-its-own)).
+
 Edge picks for a blend are stored against the blend's **input** body, not its
 displayed output (whose names already carry the blend's own tag):
 `Document::CachedBodiesAfter` supplies the input, and

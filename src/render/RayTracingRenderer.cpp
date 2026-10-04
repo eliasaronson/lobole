@@ -525,10 +525,10 @@ VkDeviceAddress RayTracingRenderer::GetBufferDeviceAddress(VkBuffer buffer) {
   return vkGetBufferDeviceAddress(m_device, &info);
 }
 
-uint32_t RayTracingRenderer::AddGeometry(const std::vector<Vertex3D>& vertices,
-                                         const std::vector<uint32_t>& indices,
-                                         uint32_t materialIndex,
-                                         uint32_t flags) {
+uint32_t RayTracingRenderer::AddGeometry(
+    const std::vector<Vertex3D>& vertices, const std::vector<uint32_t>& indices,
+    uint32_t materialIndex, uint32_t flags,
+    const std::vector<uint32_t>* triangleMaterials) {
   auto geometry = std::make_unique<RTGeometry>();
   geometry->vertexCount = static_cast<uint32_t>(vertices.size());
   geometry->indexCount = static_cast<uint32_t>(indices.size());
@@ -563,6 +563,26 @@ uint32_t RayTracingRenderer::AddGeometry(const std::vector<Vertex3D>& vertices,
   vkUnmapMemory(m_device, geometry->indexMemory);
   geometry->indexAddress = GetBufferDeviceAddress(geometry->indexBuffer);
 
+  // A material per triangle (faces with looks of their own, v164): one uint
+  // each, read by closest-hit and section any-hit in place of materialIndex.
+  // Only when it covers every triangle; anything else would read past it.
+  if (triangleMaterials != nullptr && !triangleMaterials->empty() &&
+      triangleMaterials->size() * 3 == indices.size()) {
+    const VkDeviceSize tSize = triangleMaterials->size() * sizeof(uint32_t);
+    geometry->triMaterialBuffer =
+        CreateBuffer(tSize,
+                     VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT |
+                         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                     props, geometry->triMaterialMemory);
+    void* tmap = nullptr;
+    vkMapMemory(m_device, geometry->triMaterialMemory, 0, tSize, 0, &tmap);
+    memcpy(tmap, triangleMaterials->data(), static_cast<size_t>(tSize));
+    vkUnmapMemory(m_device, geometry->triMaterialMemory);
+    geometry->triMaterialAddress =
+        GetBufferDeviceAddress(geometry->triMaterialBuffer);
+    geometry->flags |= RT_GEOM_PER_TRIANGLE_MATERIAL;
+  }
+
   uint32_t geometryId = m_nextGeometryId++;
   m_geometries.push_back(std::move(geometry));
   return geometryId;
@@ -595,6 +615,10 @@ void RayTracingRenderer::ClearGeometry() {
       vkDestroyBuffer(m_device, g->indexBuffer, nullptr);
     if (g->indexMemory)
       vkFreeMemory(m_device, g->indexMemory, nullptr);
+    if (g->triMaterialBuffer)
+      vkDestroyBuffer(m_device, g->triMaterialBuffer, nullptr);
+    if (g->triMaterialMemory)
+      vkFreeMemory(m_device, g->triMaterialMemory, nullptr);
   }
   m_geometries.clear();
   m_nextGeometryId = 1;
@@ -657,9 +681,13 @@ struct GeometryInfoGPU {
   VkDeviceAddress indexAddress;
   uint32_t materialIndex;
   uint32_t flags; // RTGeometryFlags
-  uint32_t pad0;
-  uint32_t pad1;
+  // One material index per triangle; read only under
+  // RT_GEOM_PER_TRIANGLE_MATERIAL (0 otherwise). Offset 24, 8-aligned, so
+  // the struct stays 32 bytes.
+  VkDeviceAddress triMaterialAddress;
 };
+static_assert(sizeof(GeometryInfoGPU) == 32,
+              "GeometryInfoGPU must match the shaders' GeometryInfo");
 
 // Camera + light UBO, matching the layout declared in the RT shaders.
 struct RTUniforms {
@@ -877,6 +905,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
     gi.indexAddress = g->indexAddress;
     gi.materialIndex = g->materialIndex;
     gi.flags = g->flags;
+    gi.triMaterialAddress = g->triMaterialAddress;
     geomInfos.push_back(gi);
   }
   VkDeviceSize geomSize = geomInfos.size() * sizeof(GeometryInfoGPU);

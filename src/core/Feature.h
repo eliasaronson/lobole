@@ -32,6 +32,21 @@ struct Appearance {
   }
 };
 
+// An appearance override on ONE face of a body (v164,
+// docs/rendering/materials.md#a-face-of-its-own): a wall brick outside and
+// plaster inside. Held on the body's CREATING feature beside the body-level
+// override and keyed by the face's element name (topological naming), so it
+// survives upstream edits that renumber faces — and a face a later cut made
+// is still a face of the body, named in its ElementMap. Resolved to a face
+// index at every regeneration (Document::Regenerate's appearance stamp); a
+// name that no longer resolves is REPORTED (Feature::UnresolvedFaceLooks),
+// never dropped. Unset fields inherit from the body's own look. Like the
+// body override it is stripped from the regen chain hash.
+struct FaceAppearance {
+  std::string element; // a MappedName in the body's ElementMap
+  Appearance look;
+};
+
 // A named solid produced by regenerating the feature list. `material` is a slug
 // into the render-layer material library (empty = default); it is transient
 // like the shape — the feature that creates the body stamps its own material
@@ -253,6 +268,10 @@ struct Body {
   // regeneration (Document::Regenerate post-pass keyed on createdBy).
   // Renderers prefer: appearance > material > displayColor > palette.
   Appearance appearance;
+  // Per-face overrides (FaceAppearance, above), stamped beside `appearance`:
+  // face index (TopExp_Explorer order, as triangleFaces and picking count
+  // them) -> the override that resolved to it. Transient.
+  std::map<int, FaceAppearance> faceAppearances;
 
   // A ghost, not this part (a Derived feature with `reference: true`,
   // docs/modeling/derived.md#reference-bodies-ghosts): here to be drawn on —
@@ -375,6 +394,27 @@ public:
   const Appearance& GetAppearance() const { return m_appearance; }
   void SetAppearance(const Appearance& appearance) {
     m_appearance = appearance;
+  }
+  // Per-face overrides on this feature's bodies (FaceAppearance; persistent,
+  // v164), in the order they were set.
+  const std::vector<FaceAppearance>& GetFaceAppearances() const {
+    return m_faceAppearances;
+  }
+  void SetFaceAppearances(std::vector<FaceAppearance> faces) {
+    m_faceAppearances = std::move(faces);
+  }
+  // Sets the override on `element`, replacing one already there; an EMPTY
+  // look removes it. Returns whether `element` carried one before.
+  bool SetFaceAppearance(const std::string& element, const Appearance& look);
+  // The face overrides whose element name resolved to no face of any body
+  // this feature created, at the last regeneration. Transient: stamped by
+  // Document::Regenerate with the appearance, and reported in every
+  // regeneration summary (remote::RegenSummaryJson) and in get_state.
+  const std::vector<std::string>& UnresolvedFaceLooks() const {
+    return m_unresolvedFaceLooks;
+  }
+  void SetUnresolvedFaceLooks(std::vector<std::string> names) {
+    m_unresolvedFaceLooks = std::move(names);
   }
 
   // Stable identity for feature->feature references (an extrude names its
@@ -524,6 +564,8 @@ protected:
   std::string m_name;
   std::string m_material;
   Appearance m_appearance;
+  std::vector<FaceAppearance> m_faceAppearances;
+  std::vector<std::string> m_unresolvedFaceLooks;
   uint64_t m_id = 0;
   std::string m_error;
   std::string m_warning;

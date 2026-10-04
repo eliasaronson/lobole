@@ -327,6 +327,12 @@ void FillItemAppearance(const Body& body, size_t& palette,
   item.baseColor = look.Color();
   item.metallic = look.hasMaterial ? look.mat.metallic : 0.0f;
   item.roughness = look.hasMaterial ? look.mat.roughness : 0.5f;
+  // Faces with looks of their own (v164), over the body's.
+  for (const auto& [index, fa] : body.faceAppearances) {
+    const BodyLook face = ResolveFaceLook(look, fa.look);
+    item.faces.push_back(
+        {index, face.Color(), face.mat.metallic, face.mat.roughness});
+  }
 }
 } // namespace
 

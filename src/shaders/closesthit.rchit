@@ -68,14 +68,16 @@ layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer Uin
 
 // Geometry behavior flags (must match RTGeometryFlags in RayTracingRenderer.h).
 const uint kFlagShadowCatcher = 1u;
+const uint kFlagPerTriangleMaterial = 2u;
 
 struct GeometryInfo {
     FloatBuf verts;
     UintBuf inds;
     uint materialIndex;
     uint flags;
-    uint pad0;
-    uint pad1;
+    // One material index per triangle, read only under
+    // kFlagPerTriangleMaterial (faces with looks of their own, v164).
+    UintBuf triMats;
 };
 layout(binding = 3, set = 0, std430) readonly buffer GeometryInfos {
     GeometryInfo geoms[];
@@ -350,7 +352,9 @@ void main() {
         return;
     }
 
-    Material mat = materials[g.materialIndex];
+    Material mat = materials[(g.flags & kFlagPerTriangleMaterial) != 0u
+                                 ? g.triMats.u[prim]
+                                 : g.materialIndex];
     if (mat.transmission > 0.0) {
         payload.radiance = glassSurface(worldPos, Nsurf, mat);
         return;

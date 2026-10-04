@@ -798,6 +798,33 @@ ElementMap ElementMapFromJson(const json& j) {
   return map;
 }
 
+namespace {
+// An Appearance's set fields (v54); the face form (v164) adds `element`.
+json AppearanceToJson(const Appearance& ap) {
+  json a = json::object();
+  if (ap.color)
+    a["color"] = {ap.color->x, ap.color->y, ap.color->z};
+  if (ap.roughness)
+    a["roughness"] = *ap.roughness;
+  if (ap.metallic)
+    a["metallic"] = *ap.metallic;
+  return a;
+}
+Appearance AppearanceFromJson(const json& a) {
+  Appearance ap;
+  if (a.contains("color")) {
+    const json& c = a.at("color");
+    ap.color = glm::vec3(c.at(0).get<float>(), c.at(1).get<float>(),
+                         c.at(2).get<float>());
+  }
+  if (a.contains("roughness"))
+    ap.roughness = a.at("roughness").get<float>();
+  if (a.contains("metallic"))
+    ap.metallic = a.at("metallic").get<float>();
+  return ap;
+}
+} // namespace
+
 json FeatureToJson(const Feature& feature) {
   json j;
   j["type"] = feature.TypeName();
@@ -808,16 +835,16 @@ json FeatureToJson(const Feature& feature) {
   if (!feature.GetMaterial().empty()) { // omit default to keep JSON compact
     j["material"] = feature.GetMaterial();
   }
-  if (feature.GetAppearance().Any()) { // v54; omit when pure material
-    json a = json::object();
-    const Appearance& ap = feature.GetAppearance();
-    if (ap.color)
-      a["color"] = {ap.color->x, ap.color->y, ap.color->z};
-    if (ap.roughness)
-      a["roughness"] = *ap.roughness;
-    if (ap.metallic)
-      a["metallic"] = *ap.metallic;
-    j["appearance"] = std::move(a);
+  if (feature.GetAppearance().Any()) // v54; omit when pure material
+    j["appearance"] = AppearanceToJson(feature.GetAppearance());
+  if (!feature.GetFaceAppearances().empty()) { // v164; omit when none
+    json faces = json::array();
+    for (const FaceAppearance& fa : feature.GetFaceAppearances()) {
+      json a = AppearanceToJson(fa.look);
+      a["element"] = fa.element;
+      faces.push_back(std::move(a));
+    }
+    j["face_appearance"] = std::move(faces);
   }
   if (feature.IsSuppressed()) { // v19; omit when active
     j["suppressed"] = true;
@@ -1479,7 +1506,8 @@ int DocumentFormatVersion() { return kVersion; }
 // Fields EVERY type accepts, so no row repeats them: `name?`, `id?`,
 // `material?` (a slug from describe.material_slugs — an unrecognised one is
 // REFUSED naming the accepted set, so it cannot arrive here through
-// add_feature or modify_feature the way it used to), `appearance?`.
+// add_feature or modify_feature the way it used to), `appearance?`,
+// `face_appearance?` [{element, color?, roughness?, metallic?}] (v164).
 static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Sketch", 1,
      "plane {origin, normal, uAxis} (in-plane V = normal x uAxis!), entities "
@@ -2758,19 +2786,22 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       j.value("id", uint64_t{0})); // v1 files have no id; Document assigns
   out->SetMaterial(
       j.value("material", std::string{})); // absent (pre-v10) = default
-  if (j.contains("appearance")) {          // absent (pre-v54) = pure material
-    const json& a = j.at("appearance");
-    Appearance ap;
-    if (a.contains("color")) {
-      const json& c = a.at("color");
-      ap.color = glm::vec3(c.at(0).get<float>(), c.at(1).get<float>(),
-                           c.at(2).get<float>());
+  if (j.contains("appearance"))            // absent (pre-v54) = pure material
+    out->SetAppearance(AppearanceFromJson(j.at("appearance")));
+  if (j.contains("face_appearance")) { // absent (pre-v164) = none
+    std::vector<FaceAppearance> faces;
+    for (const json& a : j.at("face_appearance")) {
+      FaceAppearance fa{a.at("element").get<std::string>(),
+                        AppearanceFromJson(a)};
+      // An entry that sets nothing would be an override that is not one;
+      // refused rather than carried, as set_appearance never writes one.
+      if (fa.element.empty() || !fa.look.Any())
+        throw std::runtime_error(
+            "face_appearance entry needs an `element` and at least one of "
+            "color, roughness, metallic");
+      faces.push_back(std::move(fa));
     }
-    if (a.contains("roughness"))
-      ap.roughness = a.at("roughness").get<float>();
-    if (a.contains("metallic"))
-      ap.metallic = a.at("metallic").get<float>();
-    out->SetAppearance(ap);
+    out->SetFaceAppearances(std::move(faces));
   }
   out->SetSuppressed(j.value("suppressed", false)); // absent (pre-v19) = active
   return out;

@@ -1280,6 +1280,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       if (!stateDoc->GetFeature(i)->GetWarning().empty()) {
         f["warning"] = stateDoc->GetFeature(i)->GetWarning();
       }
+      // Face appearances whose face is gone (v164): kept, and said.
+      if (!stateDoc->GetFeature(i)->UnresolvedFaceLooks().empty())
+        f["face_appearance_unresolved"] =
+            stateDoc->GetFeature(i)->UnresolvedFaceLooks();
       // A Derived copy says whether its source has moved (v84): true/false,
       // or null when the source is not loaded — unknown is not fresh.
       if (auto* d =
@@ -1355,6 +1359,22 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         if (body.appearance.metallic)
           a["metallic"] = *body.appearance.metallic;
         entry["appearance"] = std::move(a);
+      }
+      // Its painted faces (v164), each with the face index it resolved to
+      // this regeneration — the index select_face and list_elements use.
+      if (!body.faceAppearances.empty()) {
+        json faces = json::array();
+        for (const auto& [index, fa] : body.faceAppearances) {
+          json a = {{"element", fa.element}, {"face", index}};
+          if (fa.look.color)
+            a["color"] = Vec3ToJson(*fa.look.color);
+          if (fa.look.roughness)
+            a["roughness"] = *fa.look.roughness;
+          if (fa.look.metallic)
+            a["metallic"] = *fa.look.metallic;
+          faces.push_back(std::move(a));
+        }
+        entry["face_appearance"] = std::move(faces);
       }
       // Render/picking mesh id (used by select_face); ids change on
       // regeneration, so always read them fresh from here. OMITTED rather
