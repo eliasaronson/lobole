@@ -32,7 +32,7 @@ After it lands:
 `src/shaders/mesh.frag`, `src/shaders/tonecurve.glsl`,
 `src/render/ToneCurve.h`, `src/render/RayTracingRenderer.cpp`,
 `src/shaders/{miss.rmiss,closesthit.rchit}` (studio backdrop),
-`tests/test_tone_curve.cpp`, docs/rendering/README.md#tone-mapping.
+`tests/test_tone_curve.cpp`, and a "Tone mapping" section in the rendering README (on the branch).
 
 ## Verification
 
