@@ -8,7 +8,7 @@ block's material and its derived scale, and on an assembly sheet a parts
 list with balloons numbered from it -- an occurrence the view hides is
 neither listed nor ballooned. Everything survives a save and a reopen. A
 part view leaves a BODY off by name or feature id and projects only the
-rest.
+rest, and render_still on the drawing tab names the tab.
 Headless -- no display (docs/drawings/README.md#section-views).
 
 Usage: drawing_sheet_smoke.py <path-to-designer-binary>
@@ -217,6 +217,11 @@ def main():
         d.call("set_drawing_view", id=v, hidden=[keep])
         d.call("update_drawing")
         expect(sources() == {ground}, f"hidden by feature id: {sources()}")
+        # A still of a drawing tab names the tab, not "no geometry".
+        refused(d, "render_still", "the active tab 'two-dwg' is a drawing",
+                path=os.path.join(tmp, "still.png"))
+        refused(d, "render_still", "set_active_part", mode="quick",
+                path=os.path.join(tmp, "still.png"))
         print("drawing_sheet_smoke: OK")
     finally:
         app.terminate()

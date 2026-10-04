@@ -723,7 +723,8 @@ which writes once the views have landed); the format is chosen by extension and 
   with class and limits, a datum, the title block, a parts list numbered
   for its balloons with a hidden occurrence left out, export, a reopen
   whose views come back projected without HLR, a part view that leaves a
-  body off by name and by feature id (and refuses a misspelt one).
+  body off by name and by feature id (and refuses a misspelt one), and
+  `render_still` on a drawing tab naming the tab.
 - `tests/test_flat_drawing.cpp`: a view draws its configuration, a dimension
   across a blank reads the developed length, bend tables.
 - `tests/test_actions.cpp`: layout reuse and nested-part invalidation through

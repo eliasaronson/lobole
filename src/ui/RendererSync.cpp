@@ -970,6 +970,29 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
   return desc;
 }
 
+std::string StillTabRefusal(const AppState& state) {
+  if (state.document || state.assembly)
+    return {};
+  if (state.activePart >= state.parts.size())
+    return "no tab is open: a still renders a part or an assembly tab";
+  const PartSlot& slot = state.parts[state.activePart];
+  const char* kind = slot.kind == DocKind::Drawing ? "a drawing"
+                     : slot.kind == DocKind::Job   ? "a CAM job"
+                                                   : "not a model";
+  return "the active tab '" + slot.name + "' is " + kind +
+         ": render_still renders a part or an assembly tab -- switch to "
+         "one (set_active_part) first";
+}
+
+namespace {
+// What a still that could not build its scene says: the tab when it is not
+// a model, else that the model is empty.
+std::string NoSceneReason(const AppState& state) {
+  const std::string tab = StillTabRefusal(state);
+  return tab.empty() ? std::string("no geometry to render") : tab;
+}
+} // namespace
+
 bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
                          uint32_t seed, bool groundPlane, std::string* error,
@@ -983,7 +1006,7 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
   if (!state.rayTracer || !state.rayTracer->IsInitialized())
     return fail("ray tracing not available");
   if (!SyncRayTracingScene(state, groundPlane))
-    return fail("no geometry to render");
+    return fail(NoSceneReason(state));
   if (samples == 0)
     samples = 1;
 
@@ -1129,7 +1152,7 @@ void PumpRenderJob(AppState& state) {
     // First frame of the job: build the scene + acceleration structures and set
     // up the still. Spread over its own frame so the modal shows immediately.
     if (!SyncRayTracingScene(state, job.groundPlane)) {
-      finish(false, "no geometry to render");
+      finish(false, NoSceneReason(state));
       return;
     }
     RTStillDesc desc = MakeStillDesc(state, job.width, job.height, job.seed,

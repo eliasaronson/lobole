@@ -1502,6 +1502,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (state.assembly && state.assembly->OccurrenceCount() == 0)
       throw std::runtime_error(
           "this assembly has no occurrences — there is nothing to render");
+    // A drawing or a job tab has no scene to render; say which tab it is
+    // rather than "no geometry" about a model that has plenty.
+    if (const std::string why = ui::StillTabRefusal(state); !why.empty())
+      throw std::runtime_error(why);
     const std::string mode = p.value("mode", std::string("path"));
     if (mode != "path" && mode != "quick")
       throw std::runtime_error("unknown mode: " + mode +

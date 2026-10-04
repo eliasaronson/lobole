@@ -34,6 +34,11 @@ mode. `supersample` outside 1-4, a `line_weight` outside 0.25-4 and an
 the `line_weight` it drew when it drew lines. A picture that is almost
 entirely one colour is still saved, with a warning in the reply.
 
+A still renders a part or an assembly tab. On a drawing or a CAM job tab it
+is refused naming the tab and its kind (`ui::StillTabRefusal`), in either
+mode and in the dialog; "no geometry to render" is kept for a part that is
+genuinely empty, and an assembly with no occurrences says that.
+
 The RPC is synchronous. It pulls the renderer projection first
 ([README.md#offscreen-mode-and-lazy-projection](README.md#offscreen-mode-and-lazy-projection)),
 so it works on a `--offscreen` instance.

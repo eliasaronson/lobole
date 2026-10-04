@@ -94,6 +94,12 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane = false);
                             uint32_t seed, bool studioBackdrop = true,
                             bool outlines = true);
 
+// Why a still cannot be taken of the active tab, or "" when it is a part or
+// an assembly: a drawing or a CAM job tab has no scene, and saying "no
+// geometry" about a model with 128 bodies sends the reader looking in the
+// wrong place. Names the tab and its kind.
+std::string StillTabRefusal(const AppState& state);
+
 // Full synchronous offline still: sync the scene, build ASes, trace `samples`
 // samples, tonemap and write a PNG to `path`. Blocks until done. Returns false
 // (with *error set) on any failure. Used by the render_still RPC; the UI modal
