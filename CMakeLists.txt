@@ -1201,6 +1201,8 @@ endfunction()
 # Shared shader include (procedural grain), a dependency of every shader that
 # #includes it.
 set(GRAIN_INCLUDE "${CMAKE_SOURCE_DIR}/src/shaders/grain.glsl")
+# The display transform (render/ToneCurve.h's GPU copy), mesh.frag's.
+set(TONECURVE_INCLUDE "${CMAKE_SOURCE_DIR}/src/shaders/tonecurve.glsl")
 
 # Compile vertex shader
 set(VERTEX_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/mesh.vert")
@@ -1210,7 +1212,7 @@ compile_shader(mesh_vert_shader ${VERTEX_SHADER_SOURCE} ${VERTEX_SHADER_OUTPUT})
 # Compile fragment shader
 set(FRAGMENT_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/mesh.frag")
 set(FRAGMENT_SHADER_OUTPUT "${SHADER_OUTPUT_DIR}/mesh_frag.spv")
-compile_shader(mesh_frag_shader ${FRAGMENT_SHADER_SOURCE} ${FRAGMENT_SHADER_OUTPUT} ${GRAIN_INCLUDE})
+compile_shader(mesh_frag_shader ${FRAGMENT_SHADER_SOURCE} ${FRAGMENT_SHADER_OUTPUT} ${GRAIN_INCLUDE} ${TONECURVE_INCLUDE})
 
 # Compile ray tracing shaders
 set(RAYGEN_SHADER_SOURCE "${CMAKE_SOURCE_DIR}/src/shaders/raygen.rgen")

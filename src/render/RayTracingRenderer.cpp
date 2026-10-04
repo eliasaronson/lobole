@@ -1,5 +1,6 @@
 #include "render/RayTracingRenderer.h"
 #include "render/StillOutlines.h"
+#include "render/ToneCurve.h"
 
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
@@ -717,12 +718,6 @@ struct RTUniforms {
   glm::mat4 envRotation;
 };
 
-glm::vec3 ACESFilm(const glm::vec3& x) {
-  const float a = 2.51f, b = 0.03f, c = 2.43f, d = 0.59f, e = 0.14f;
-  glm::vec3 num = x * (a * x + b);
-  glm::vec3 den = x * (c * x + d) + e;
-  return glm::clamp(num / den, glm::vec3(0.0f), glm::vec3(1.0f));
-}
 } // namespace
 
 void RayTracingRenderer::TransitionImage(VkCommandBuffer cb, VkImage image,
@@ -1233,19 +1228,14 @@ bool RayTracingRenderer::ReadbackStill(uint32_t totalSamples,
        ++i) {
     glm::vec3 c(src[i * 4 + 0], src[i * 4 + 1], src[i * 4 + 2]);
     c *= invN;                               // average the accumulated samples
-    c = ACESFilm(c);                         // filmic tonemap
-    c = glm::pow(c, glm::vec3(1.0f / 2.2f)); // gamma to sRGB
-    c *= 1.1f; // the same post-gamma lift mesh.frag applies
+    c = tone::ToDisplay(c); // the viewport's curve (render/ToneCurve.h)
     // Edges go on after tonemapping, so the line keeps the colour it was
     // asked for instead of being filmically rolled toward it.
     if (!outline.empty() && outline[i] > 0.0f)
       c = glm::mix(c, m_stillOutlineColor, outline[i]);
-    rgb[i * 3 + 0] =
-        static_cast<uint8_t>(glm::clamp(c.r, 0.0f, 1.0f) * 255.0f + 0.5f);
-    rgb[i * 3 + 1] =
-        static_cast<uint8_t>(glm::clamp(c.g, 0.0f, 1.0f) * 255.0f + 0.5f);
-    rgb[i * 3 + 2] =
-        static_cast<uint8_t>(glm::clamp(c.b, 0.0f, 1.0f) * 255.0f + 0.5f);
+    rgb[i * 3 + 0] = tone::ToByte(c.r);
+    rgb[i * 3 + 1] = tone::ToByte(c.g);
+    rgb[i * 3 + 2] = tone::ToByte(c.b);
   }
   vkUnmapMemory(m_device, readMem);
   vkDestroyBuffer(m_device, readBuf, nullptr);

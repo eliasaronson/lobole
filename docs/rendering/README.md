@@ -239,7 +239,8 @@ hidden `[.outline-perf]` case is the benchmark.
   built the same way from a procedural sky image and lit by its sun
   ([still-render.md#the-sky](still-render.md#the-sky)); the viewport and
   quick stills always use the studio HDRI.
-- **Tone mapping**: ACES filmic (Narkowicz fit) in `mesh.frag`.
+- **Tone mapping**: one curve for every picture; see
+  [tone mapping](#tone-mapping).
 - **Anti-aliasing**: 4x MSAA over the whole main pass, resolved into the
   swapchain image; `GetMaxUsableSampleCount` falls back to 2x, then 1x, from
   the device's colour and depth sample-count limits. ImGui and the screenshot
@@ -355,6 +356,25 @@ live-applied):
 
 `set_render_options {shadows, ssao, shadow_map}` changes the same three for
 the session only (not persisted); an out-of-range value is refused.
+
+### Tone mapping
+
+One curve for the viewport, the quick still and the
+path-traced still — exposure 0.6, then Narkowicz's ACES fit, then the
+piecewise sRGB encode. `render/ToneCurve.h` is the CPU copy
+(`ReadbackStill`), `shaders/tonecurve.glsl` the GPU copy (`mesh.frag`), and
+`test_tone_curve.cpp` holds their constants to each other. The 0.6 is the
+exposure the fit was made for, not a taste knob; brightness belongs to the
+lights (`conv::kKeyLight` & co.), never to a lift after the encode. Under
+the default rig a face-on grey card of linear 0.05 / 0.2 / 0.5 / 0.8 lands
+on byte 61 / 133 / 192 / 215, against its plain sRGB encode of
+63 / 124 / 188 / 231: the darks and mids within ten counts, the top rolled
+off by the filmic shoulder (the old curve gave 99 / 186 / 238 / 255). So a
+colour picked off a photograph and converted to linear renders about as
+picked. The studio backdrop's radiances (`studioBackdrop`, in
+`miss.rmiss` and `closesthit.rchit`) are set to land on the bytes the sweep
+was designed at. Theme colours — the viewport clear colour, overlays,
+outlines, the CAM stock block — are display values and bypass the curve.
 
 ## Sections
 

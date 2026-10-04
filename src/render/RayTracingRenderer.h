@@ -183,7 +183,8 @@ public:
   //   RenderBatch -> dispatch `samplesInBatch` traces (one command buffer,
   //                  submit + wait); call repeatedly until firstSample reaches
   //                  the total. Cheap to batch for progress/cancel.
-  //   ReadbackStill -> divide by totalSamples, ACES tonemap + gamma, write PNG.
+  //   ReadbackStill -> divide by totalSamples, tone::ToDisplay
+  //                  (render/ToneCurve.h, the viewport's curve), write PNG.
   //   EndStill    -> free the per-render resources.
   bool BeginStill(const RTStillDesc& desc);
   bool RenderBatch(uint32_t firstSample, uint32_t samplesInBatch);

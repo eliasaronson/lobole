@@ -2,6 +2,7 @@
 #extension GL_GOOGLE_include_directive : require
 
 #include "grain.glsl"  // procedural wood/plywood grain, shared with the ray tracer
+#include "tonecurve.glsl"  // the display transform, shared with the still
 
 struct Light {
     vec4 direction;  // xyz = direction, w = intensity
@@ -77,17 +78,6 @@ vec2 dirToUV(vec3 d) {
     float u = atan(d.z, d.x) / (2.0 * PI) + 0.5;
     float v = acos(clamp(d.y, -1.0, 1.0)) / PI;
     return vec2(u, v);
-}
-
-// ACES filmic tone mapping (Narkowicz fit): maps HDR [0,inf) into [0,1] with a
-// filmic shoulder so highlights roll off instead of clipping to flat white.
-vec3 ACESFilm(vec3 x) {
-    const float a = 2.51;
-    const float b = 0.03;
-    const float c = 2.43;
-    const float d = 0.59;
-    const float e = 0.14;
-    return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
 // Shadow factor for the primary light: 1 = fully lit, 1 - strength = fully
@@ -265,12 +255,9 @@ void main() {
         finalColor = premultiplied / outAlpha;
     }
 
-    // ACES filmic tone mapping, then gamma to sRGB.
-    finalColor = ACESFilm(finalColor);
-    finalColor = pow(finalColor, vec3(1.0/2.2));
-    
-    // Slight brightness boost for better visibility
-    finalColor *= 1.1;
+    // Radiance -> sRGB display value (tonecurve.glsl): exposure, ACES, the
+    // sRGB encode — the curve the path-traced still applies on the CPU.
+    finalColor = toneToDisplay(finalColor);
 
     // Face highlight tint: selected (>= 1) strong, hovered (0.5) subtle.
     // The selected value carries a palette index (1 + tint, see mesh.vert):

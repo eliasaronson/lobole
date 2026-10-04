@@ -152,6 +152,9 @@ struct Appearance {                    // src/core/Feature.h
   appearance never reaches physics.
 - The colour is **linear**, not sRGB: the renderer lights it as linear and
   STEP/GLB export is handed it as linear, so an sRGB 0.5 grey is about 0.2.
+  The [tone curve](README.md#tone-mapping) shows a lit linear colour about as
+  its sRGB encode, so a value converted from a photograph (c^2.2) renders
+  near the photograph — no extra darkening.
 
 `set_appearance {feature_id | body, color?, roughness?, metallic?}` sets it;
 no optional field clears it; a colour given as 0..255 is refused with a hint.

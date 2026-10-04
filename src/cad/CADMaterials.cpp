@@ -226,9 +226,11 @@ void MaterialLibrary::InitializeMaterials() {
   // procedurally in the shader (see the "procedural grain" block below).
   // Colors are the light early-wood tone — the shader darkens toward the
   // grain lines using patternContrast, so these read as the overall hue.
-  // NOTE: these are pre-darkened to survive the scene's bright lighting rig
-  // (primary intensity 1.8 + IBL + 1.1 boost + ACES tonemap wash light
-  // albedos out ~1.4x); tuned against a render, not raw perceptual targets.
+  // NOTE: these were pre-darkened (~1.4x) against a tone curve that washed
+  // albedos out (no exposure before ACES, pow 1/2.2, a x1.1 lift). The curve
+  // now shows a lit linear colour about as its sRGB encode
+  // (docs/rendering/README.md#tone-mapping), so they read somewhat darker
+  // than their names; tuned against a render, not raw perceptual targets.
   materials[MaterialType::WOOD_OAK] = {
       glm::vec3(0.42f, 0.28f, 0.14f), // Warm honey brown
       0.0f,

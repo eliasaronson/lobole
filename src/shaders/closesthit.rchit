@@ -135,9 +135,9 @@ const vec3 kWorldUp = vec3(0.0, 0.0, 1.0);
 // show the SAME surface the camera sees past it, or the shadow lands on one
 // backdrop and the frame shows another.
 vec3 studioBackdrop(vec3 dir) {
-    const vec3 kFloor = vec3(0.055, 0.057, 0.062);
-    const vec3 kHorizon = vec3(0.20, 0.21, 0.23);
-    const vec3 kSky = vec3(0.52, 0.54, 0.58);
+    const vec3 kFloor = vec3(0.108, 0.112, 0.121);
+    const vec3 kHorizon = vec3(0.402, 0.425, 0.472);
+    const vec3 kSky = vec3(1.432, 1.528, 1.739);
     float h = clamp(dot(normalize(dir), kWorldUp), -1.0, 1.0);
     return h < 0.0 ? mix(kHorizon, kFloor, pow(-h, 0.35))
                    : mix(kHorizon, kSky, pow(h, 0.55));

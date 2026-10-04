@@ -104,7 +104,8 @@ own; `render_still` builds them from the raster tessellation cache.
 
 **Still API**: `BeginStill` (output image, UBO, SSBOs, descriptor set) →
 `RenderBatch` (N traces per one-shot submit, accumulating into an `rgba32f`
-image) → `ReadbackStill` (divide by N, ACES, gamma, PNG) → `EndStill`.
+image) → `ReadbackStill` (divide by N, the viewport's tone curve — `tone::ToDisplay`,
+[tone mapping](README.md#tone-mapping) — PNG) → `EndStill`.
 `RenderStillBlocking` (`RendererSync.cpp`) is the synchronous form the RPC
 uses.
 

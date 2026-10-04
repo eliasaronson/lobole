@@ -23,7 +23,9 @@
 struct Appearance {
   // LINEAR base colour: the shaders light it as linear and the STEP/GLB
   // writers are handed it as linear. A mid-grey written as sRGB 0.5 renders as
-  // about 0.73 — so a casting that should read grey wants ~0.2.
+  // about 0.73 — so a casting that should read grey wants ~0.2. The tone
+  // curve (render/ToneCurve.h) displays a lit linear colour about as its sRGB
+  // encode, so a photograph's colour converted with c^2.2 renders as picked.
   std::optional<glm::vec3> color;
   std::optional<float> roughness; // 0..1
   std::optional<float> metallic;  // 0..1
