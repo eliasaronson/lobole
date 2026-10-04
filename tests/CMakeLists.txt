@@ -833,6 +833,15 @@ add_test(NAME render_sky_smoke
 set_tests_properties(render_sky_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300 SKIP_RETURN_CODE 77)
 
+# A show-always underlay is in a quick still with no sketch in edit, and not
+# without the flag (docs/sketching/README.md#reference-images-underlays). A
+# renderer, not ray tracing.
+add_test(NAME underlay_show_always_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/underlay_show_always_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(underlay_show_always_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300)
+
 # The frame watchdog: a stalled main thread is logged with its label and a
 # symbolized stack, and the app carries on (docs/architecture.md#crashes-and-stalls).
 add_test(NAME watchdog_smoke

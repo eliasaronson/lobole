@@ -394,17 +394,24 @@ static constexpr MethodDoc ModelingMethods[] = {
      "a sketch as live locked construction geometry.",
      "element, feature_id, kind, sketch_id", remote::NeedsPart},
     {"add_reference_image",
-     "Attach an image underlay to a sketch from an image file (`path`); "
-     "returns image_id.",
-     "at, opacity, path, sketch_id, units_per_pixel", remote::NeedsPart},
+     "Attach an image underlay to a sketch from an image file (`path`), "
+     "centred on `at` [u, v] (sketch mm, default the plane origin) and "
+     "turned about that centre by `rotation` (RADIANS, CCW) or "
+     "`rotation_deg`, never both. `show_always` (default false) draws it "
+     "whenever its sketch is shown and in quick stills, not only while the "
+     "sketch is edited. Returns image_id.",
+     "at, opacity, path, rotation, rotation_deg, show_always, sketch_id, "
+     "units_per_pixel",
+     remote::NeedsPart},
     {"set_reference_image",
-     "Update an underlay's placement, opacity or visibility (`hidden`) by "
+     "Update an underlay's placement, opacity or visibility (`hidden`; "
+     "`show_always` draws it outside sketch edit and in quick stills) by "
      "{sketch_id, image_id}. "
      "origin is [u, v] sketch mm, units_per_pixel is sketch mm per image "
      "pixel, and the tilt is `rotation` (RADIANS, CCW about origin) or "
      "`rotation_deg`, never both.",
-     "hidden, image_id, opacity, origin, rotation, rotation_deg, sketch_id, "
-     "units_per_pixel",
+     "hidden, image_id, opacity, origin, rotation, rotation_deg, "
+     "show_always, sketch_id, units_per_pixel",
      remote::NeedsPart},
     {"calibrate_reference_image",
      "Scale an underlay so two picked image points span a given distance, in "
@@ -1687,11 +1694,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       m == "set_reference_image" || m == "delete_reference_image") {
     // Sketch reference underlays
     // (v49, docs/sketching/README.md#reference-images-underlays).
-    // add:       {sketch_id, path, [at:[u,v]], [units_per_pixel], [opacity]}
+    // add:       {sketch_id, path, [at:[u,v]], [units_per_pixel], [opacity],
+    //             [rotation]|[rotation_deg], [show_always]}
     // calibrate: {sketch_id, image_id, p1:[u,v], p2:[u,v], distance,
     //             [align:"none"|"horizontal"|"vertical"]}
     // set:       {sketch_id, image_id, [opacity]|[hidden]|[rotation]|
-    //             [units_per_pixel]|[origin:[u,v]]}
+    //             [units_per_pixel]|[origin:[u,v]]|[show_always]}
     // delete:    {sketch_id, image_id}
     size_t index = 0;
     Feature* f =
@@ -1732,6 +1740,13 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const glm::dvec2 center =
           p.contains("at") ? uv("at") : glm::dvec2(0.0, 0.0);
       // rpc-params: at
+      // Turned about that centre — the point the caller placed it by.
+      const double rotation =
+          AngleParam(p.contains("rotation"), p.value("rotation", 0.0),
+                     p.contains("rotation_deg"), p.value("rotation_deg", 0.0),
+                     "rotation", "rotation_deg", 0.0);
+      const bool showAlways =
+          p.contains("show_always") && p.at("show_always").get<bool>();
       std::ifstream in(path, std::ios::binary);
       if (!in)
         throw std::runtime_error("cannot open image: " + path);
@@ -1752,6 +1767,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       // unless the caller pins one. (Recalibrated to a real dimension next.)
       img.unitsPerPixel = unitsPerPixel.value_or(w > 0 ? 4.0 / w : 0.01);
       img.opacity = opacity;
+      img.rotation = rotation;
+      img.showAlways = showAlways;
       const uint32_t id = sk->AddImage(img);
       sketch::ReferenceImage& ri = sk->images[sk->IndexOfImage(id)];
       // Stable asset name carrying the source extension, keyed in the doc
@@ -1760,8 +1777,13 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       if (ext.empty())
         ext = ".png";
       ri.asset = std::to_string(sk->GetId()) + "-" + std::to_string(id) + ext;
-      ri.origin =
-          center - 0.5 * glm::dvec2(ri.widthPx, ri.heightPx) * ri.unitsPerPixel;
+      // origin is the (0,0) pixel corner, so the half-extent from it to the
+      // centre turns with the image.
+      const glm::dvec2 half =
+          0.5 * glm::dvec2(ri.widthPx, ri.heightPx) * ri.unitsPerPixel;
+      const double c = std::cos(rotation), sn = std::sin(rotation);
+      ri.origin = center - glm::dvec2(c * half.x - sn * half.y,
+                                      sn * half.x + c * half.y);
       doc->SetAsset(ri.asset, std::move(bytes));
       result = {{"image_id", id},
                 {"width_px", ri.widthPx},
@@ -1796,6 +1818,8 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         ri.opacity = p.at("opacity").get<double>();
       if (p.contains("hidden"))
         ri.hidden = p.at("hidden").get<bool>();
+      if (p.contains("show_always"))
+        ri.showAlways = p.at("show_always").get<bool>();
       if (p.contains("rotation") || p.contains("rotation_deg"))
         ri.rotation =
             AngleParam(p.contains("rotation"), p.value("rotation", 0.0),

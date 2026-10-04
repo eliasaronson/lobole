@@ -235,6 +235,7 @@ TEST_CASE("Reference image edits do not invalidate the regen cache",
   REQUIRE(sk != nullptr);
   sk->images[0].opacity = 0.1;
   sk->images[0].origin = glm::vec2(9, 9);
+  sk->images[0].showAlways = true;
   doc->Regenerate();
   CHECK(doc->LastRegenStats().cached == 2); // nothing downstream rebuilt
 
@@ -243,4 +244,28 @@ TEST_CASE("Reference image edits do not invalidate the regen cache",
   sk->AddRectangle(glm::vec2(10, 10), glm::vec2(11, 11));
   doc->Regenerate();
   CHECK(doc->LastRegenStats().cached < 2);
+}
+
+// v166: show_always rides the file, and only when set — a flag dropped on the
+// way through would put a plan back to drawing only in sketch edit, with
+// nothing to say so.
+TEST_CASE("Reference image show_always round-trips, omitted when off",
+          "[reference-image][serialization]") {
+  uint32_t imgId = 0;
+  auto doc = MakeDocWithImage(&imgId);
+  const fs::path path = fs::temp_directory_path() / "refimg_showalways.json";
+  {
+    REQUIRE(testio::Save(*doc, path.string()));
+    auto loaded = testio::Load(path.string());
+    REQUIRE(loaded != nullptr);
+    CHECK_FALSE(FirstSketch(*loaded)->images.at(0).showAlways);
+    const nlohmann::json j = DocumentIO::FeatureToJson(*FirstSketch(*doc));
+    CHECK_FALSE(j.at("images").at(0).contains("show_always"));
+  }
+  FirstSketch(*doc)->images[0].showAlways = true;
+  REQUIRE(testio::Save(*doc, path.string()));
+  auto loaded = testio::Load(path.string());
+  REQUIRE(loaded != nullptr);
+  CHECK(FirstSketch(*loaded)->images.at(0).showAlways);
+  fs::remove(path);
 }

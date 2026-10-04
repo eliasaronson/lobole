@@ -909,6 +909,8 @@ json FeatureToJson(const Feature& feature) {
                    {"height_px", img.heightPx}};
         if (img.hidden)
           ij["hidden"] = true; // omit when visible to keep JSON compact
+        if (img.showAlways)
+          ij["show_always"] = true; // v166, omitted when off
         j["images"].push_back(std::move(ij));
       }
       j["next_image_id"] = sk->nextImageId;
@@ -2094,6 +2096,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       img.widthPx = ij.value("width_px", 0);
       img.heightPx = ij.value("height_px", 0);
       img.hidden = ij.value("hidden", false);
+      img.showAlways = ij.value("show_always", false); // v166
       // `bytes` are filled in out-of-band by the loader (assets/ file or the
       // single-file base64 blob), keyed by `asset`.
       sk->images.push_back(std::move(img));

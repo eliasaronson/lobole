@@ -1,4 +1,5 @@
 #include "app/guitests/GuiTestsCommon.h"
+#include "render/UnderlayRenderer.h"
 #include "ui/ImportActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/SceneOverlays.h"
@@ -2187,6 +2188,58 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(sk != nullptr && sk->images.size() == 1);
     IM_CHECK(std::abs(sk->images[0].unitsPerPixel - upp) > 1e-9);
     IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Select);
+  };
+
+  // Show always (v166): an underlay that stays in the viewport once its
+  // sketch is closed. Before it, closing the sketch took every underlay off
+  // screen, so a model could never be looked at over the plan it was traced
+  // from. The checkbox is one click and one undo step; the renderer is what
+  // is read, because the flag alone says nothing about what is drawn.
+  t = IM_REGISTER_TEST(engine, "sketch", "reference_image_show_always");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield(2);
+    const std::string fixture = std::string(DESIGNER_SOURCE_DIR) +
+                                "/tests/fixtures/images/checker16x12.png";
+    const uint32_t id = ui::AddReferenceImageToSketch(*s_App, fixture);
+    IM_CHECK(id != 0);
+    s_App->sketchEdit.selectedImageId = id;
+    ui::SetSketchTool(*s_App, ui::SketchTool::Image);
+    ctx->Yield(4);
+    IM_CHECK(s_App->underlayRenderer != nullptr);
+    IM_CHECK_EQ(s_App->underlayRenderer->DrawCount(), (size_t)1);
+
+    ctx->ItemClick("//###ToolWindow/Show always");
+    ctx->Yield(2);
+    SketchFeature* sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr && sk->images.size() == 1);
+    IM_CHECK(sk->images[0].showAlways);
+    // A persisted field, so one undo step.
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(2);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr && sk->images.size() == 1);
+    IM_CHECK(!sk->images[0].showAlways);
+    ctx->ItemClick("//###ToolWindow/Show always");
+    ctx->Yield(2);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr && sk->images[0].showAlways);
+    const uint64_t sketchId = sk->GetId();
+
+    ctx->ItemClick("//###ToolWindow/Close###image_close");
+    ToolbarClick(ctx, "###tb_sk_finish");
+    ctx->Yield(4);
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+    IM_CHECK_EQ(s_App->underlayRenderer->DrawCount(), (size_t)1);
+
+    // Without the flag, a closed sketch's underlay is off screen again.
+    auto* closed =
+        dynamic_cast<SketchFeature*>(Doc()->FindFeatureById(sketchId));
+    IM_CHECK(closed != nullptr && closed->images.size() == 1);
+    closed->images[0].showAlways = false;
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->underlayRenderer->DrawCount(), (size_t)0);
   };
 
   // Moving a reference image: with its session open, grab anywhere ON the

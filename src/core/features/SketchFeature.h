@@ -156,6 +156,11 @@ struct ReferenceImage {
   int widthPx = 0;              // cached pixel dimensions
   int heightPx = 0;
   bool hidden = false;
+  // v166: drawn whenever its sketch is — not only while that sketch is being
+  // edited — and in quick stills, so a model can be checked against the plan
+  // it was traced from (docs/sketching/README.md#reference-images-underlays).
+  // `hidden` still wins.
+  bool showAlways = false;
 };
 
 // Effective degree of a spline: cubic by default, reduced so a spline with few

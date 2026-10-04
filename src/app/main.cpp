@@ -57,6 +57,7 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/SettingsWindow.h"
 #include "ui/SimulationActions.h"
+#include "ui/SketchOverlay.h" // SyncUnderlays
 #include "ui/TerminalPanel.h"
 #include "ui/Theme.h"
 #include "ui/UI.h"
@@ -1144,13 +1145,17 @@ static void ShutdownSkyEnvironment() {
   g_SkyIBLKey = {-1, -1};
 }
 
-// The model's renderers only: the sketch, underlay and CAM stock renderers
-// carry the overlays (sketches, datums, gizmos, handles). What a quick render
-// and a motion video draw.
+// The model's renderers only: the sketch and CAM stock renderers carry the
+// overlays (sketches, datums, gizmos, handles). What a quick render and a
+// motion video draw. The underlay renderer is here for the show-always
+// reference images (v166) — AimRenderersAt hands it only those — drawn after
+// the model so the depth test hides what is behind it, and under the edges.
 static void RecordModel(VkCommandBuffer cb, uint32_t frame) {
   g_MeshRenderer->Render(cb, frame);
   if (g_FieldRenderer)
     g_FieldRenderer->Render(cb, frame);
+  if (g_UnderlayRenderer)
+    g_UnderlayRenderer->Render(cb, frame);
   if (g_OutlineRenderer)
     g_OutlineRenderer->Render(cb, frame);
 }
@@ -1173,6 +1178,11 @@ static OutlineSettings AimRenderersAt(uint32_t W, uint32_t H, uint32_t k,
   // both next frame), and none of the overlay renderers.
   g_MeshRenderer->ClearFaceHighlight();
   g_MeshRenderer->ClearFaceHover();
+  // The underlays a capture shows: the show-always ones, and not the edited
+  // sketch's (a capture draws no sketch). The frame loop's list is the only
+  // other thing that fills the renderer, and offscreen there is no frame
+  // loop, so this is where a quick still gets them at all.
+  ui::SyncUnderlays(g_App, /*withEditedSketch=*/false);
   // Everything that is sized in pixels, pointed at the capture.
   for (SceneRenderer* r : g_Scene)
     r->SetViewport(0, 0, W, H);

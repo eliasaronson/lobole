@@ -11,6 +11,7 @@
 #include "core/cam/CamNames.h"
 #include "core/cam/CamToolpath.h"
 #include "core/features/CurveFeature.h"
+#include "core/features/SketchFeature.h"
 #include "core/features/TemplateFeature.h"
 #include "core/io/Serialization.h"
 #include "core/tube/Rules.h"
@@ -992,6 +993,27 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     }
     for (const auto& f : doc.GetFeatures())
       CHECK(f->UnresolvedFaceLooks().empty());
+  }
+  // v166: an underlay that shows outside sketch edit. Cosmetic, so the
+  // volumes say nothing about it; dropped on the way through the envelope,
+  // the plan reloads drawing only in sketch edit and nothing says so. Each
+  // [sketch name, image id, show_always] must hold, the false ones included,
+  // so a flag that defaults ON cannot pass either.
+  if (expect.contains("underlay_show_always")) {
+    for (const auto& want : expect.at("underlay_show_always")) {
+      const std::string sketchName = want.at(0).get<std::string>();
+      const uint32_t imageId = want.at(1).get<uint32_t>();
+      INFO("underlay " << sketchName << "/" << imageId);
+      const SketchFeature* sk = nullptr;
+      for (const auto& f : doc.GetFeatures())
+        if (const auto* s = dynamic_cast<const SketchFeature*>(f.get());
+            s && s->GetName() == sketchName)
+          sk = s;
+      REQUIRE(sk != nullptr);
+      const size_t i = sk->IndexOfImage(imageId);
+      REQUIRE(i < sk->images.size());
+      CHECK(sk->images[i].showAlways == want.at(2).get<bool>());
+    }
   }
   // v143: how the part is printed. Drives no geometry, so the volumes above
   // say nothing about it; a pair dropped on the way through the envelope

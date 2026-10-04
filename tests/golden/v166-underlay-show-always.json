@@ -1,0 +1,219 @@
+{
+  "assets": {
+    "1-1.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGM4oaEBRAwQCgAhLgRhHuBtwgAAAABJRU5ErkJggg==",
+    "1-2.png": "iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEElEQVR4nGM4oaEBRAwQCgAhLgRhHuBtwgAAAABJRU5ErkJggg=="
+  },
+  "features": [
+    {
+      "constraints": [
+        {
+          "a": [
+            2,
+            1
+          ],
+          "b": [
+            3,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3,
+            1
+          ],
+          "b": [
+            4,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4,
+            1
+          ],
+          "b": [
+            5,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            5,
+            1
+          ],
+          "b": [
+            2,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            2,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        },
+        {
+          "a": [
+            5,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        }
+      ],
+      "entities": [
+        {
+          "a": [
+            0.0,
+            0.0
+          ],
+          "b": [
+            4.0,
+            0.0
+          ],
+          "id": 2,
+          "type": "line"
+        },
+        {
+          "a": [
+            4.0,
+            0.0
+          ],
+          "b": [
+            4.0,
+            2.0
+          ],
+          "id": 3,
+          "type": "line"
+        },
+        {
+          "a": [
+            4.0,
+            2.0
+          ],
+          "b": [
+            0.0,
+            2.0
+          ],
+          "id": 4,
+          "type": "line"
+        },
+        {
+          "a": [
+            0.0,
+            2.0
+          ],
+          "b": [
+            0.0,
+            0.0
+          ],
+          "id": 5,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "images": [
+        {
+          "asset": "1-1.png",
+          "height_px": 2,
+          "id": 1,
+          "opacity": 0.5,
+          "origin": [
+            1.8169872981077806,
+            0.3169872981077807
+          ],
+          "rotation": 0.5235987755982988,
+          "show_always": true,
+          "units_per_pixel": 0.5,
+          "width_px": 2
+        },
+        {
+          "asset": "1-2.png",
+          "height_px": 2,
+          "id": 2,
+          "opacity": 0.5,
+          "origin": [
+            5.5,
+            0.5
+          ],
+          "rotation": 0.0,
+          "units_per_pixel": 0.5,
+          "width_px": 2
+        }
+      ],
+      "name": "Plan",
+      "next_image_id": 3,
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 3.0,
+      "id": 2,
+      "mode": "new_body",
+      "name": "Pad",
+      "reversed": false,
+      "sketch_id": 1,
+      "type": "Extrude"
+    }
+  ],
+  "format": "designer-document",
+  "version": 166
+}

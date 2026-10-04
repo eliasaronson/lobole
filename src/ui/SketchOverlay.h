@@ -77,4 +77,14 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
 std::vector<LineVertex3D> BuildStaticSketchLines(AppState& state,
                                                  uint64_t activeSketchId);
 
+// Hands the underlay renderer this frame's reference images
+// (docs/sketching/README.md#reference-images-underlays): every `show_always`
+// image of every sketch that is shown — not suppressed, not past the
+// rollback — and, with `withEditedSketch`, every visible image of the sketch
+// being edited. The frame loop asks for both; a quick still or a motion
+// video only for the show-always ones, and offscreen that capture is the
+// only thing that fills the renderer. A frame with none frees the cached
+// textures when `withEditedSketch` (the frame loop); a capture leaves them.
+void SyncUnderlays(AppState& state, bool withEditedSketch);
+
 } // namespace ui

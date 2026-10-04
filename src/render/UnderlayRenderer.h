@@ -54,6 +54,9 @@ public:
   // Replace this frame's draw list. Decodes + uploads any asset not yet cached
   // (a one-time synchronous upload); cached assets are reused.
   void SetImages(const std::vector<UnderlayDraw>& images);
+  // How many images the last SetImages left to draw (a decoded texture
+  // each). What the GUI tests read to see what the viewport shows.
+  size_t DrawCount() const { return m_draws.size(); }
 
   // Destroy every cached texture (wait-idle first) and reset the texture
   // descriptor pool. Call on sketch exit / document close / version change so a

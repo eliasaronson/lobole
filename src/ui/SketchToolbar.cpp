@@ -232,9 +232,9 @@ void DrawOpEditSession(AppState& state, SketchFeature& sketch) {
   ImGui::End();
 }
 
-// Reference-image session (U8 polish): opacity/hide live edits, calibrate
-// hand-off, delete — for edit.selectedImageId. Opened by the toolbar's
-// Insert image button (on the fresh image) or an Operations row.
+// Reference-image session (U8 polish): opacity/hide/show-always edits,
+// calibrate hand-off, delete — for edit.selectedImageId. Opened by the
+// toolbar's Insert image button (on the fresh image) or an Operations row.
 void DrawImageSession(AppState& state, SketchFeature& sketch) {
   SketchEditState& edit = state.sketchEdit;
   sketch::ReferenceImage* img = nullptr;
@@ -284,6 +284,17 @@ void DrawImageSession(AppState& state, SketchFeature& sketch) {
     img->hidden = hidden;
     commitImageEdit();
   }
+  // v166: keep it on screen once the sketch is closed, and in quick stills
+  // (docs/sketching/README.md#reference-images-underlays).
+  bool always = img->showAlways;
+  if (ImGui::Checkbox("Show always", &always)) {
+    if (resolved)
+      state.sketchEdit.imageEditBaseline = DocumentIO::FeatureToJson(sketch);
+    img->showAlways = always;
+    commitImageEdit();
+  }
+  ImGui::SetItemTooltip("Draw this image whenever its sketch is shown, not "
+                        "only while editing it - and in quick renders");
   ImGui::Separator();
   if (ImGui::Button("Calibrate...")) {
     edit.calibImageId = img->id;

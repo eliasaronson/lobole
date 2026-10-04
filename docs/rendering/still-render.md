@@ -186,6 +186,8 @@ for this camera (Lock lights to model included) — over the viewer's left
 shoulder, so the side being looked at is lit. The reply's `sun` reports both.
 
 The GUI dialog offers studio and environment; the sky is the RPC's for now.
+Underlays are not traced: a path still shows none of them, `show_always` or
+not (a quick still does, [quick mode](#quick-mode)).
 
 **Ground.** The shadow catcher is a large quad just under the scene's
 bounds, flagged `RT_GEOM_SHADOW_CATCHER` in `GeometryInfo.flags`; it shows
@@ -209,9 +211,15 @@ only `main.cpp` can provide, reachable from `ui/` and `remote/`.
    projects the camera at W/H, and sets the wireframe to k x the line
    weight (or draws no edges, with `outlines: false`);
 2. clears the selection and hover tints, and settles the silhouettes;
-3. records the prepasses and **only the mesh, field and outline renderers**
-   (no sketch, underlay or CAM stock) into `CaptureScreenshot`'s own
-   attachments;
+3. records the prepasses and **only the mesh, field, underlay and outline
+   renderers** (no sketch or CAM stock) into `CaptureScreenshot`'s own
+   attachments (`RecordModel`). The underlay renderer is handed only the
+   reference images marked `show_always`
+   ([sketching](../sketching/README.md#reference-images-underlays)), by
+   `ui::SyncUnderlays` in `AimRenderersAt` — never the edited sketch's own,
+   since a capture draws no sketch. That call is also what fills the
+   renderer offscreen, where no frame loop runs. A motion video's frames
+   take the same path;
 4. restores every size it changed, so the next frame is the frame it would
    have been.
 
@@ -294,6 +302,9 @@ The still's radiance and G-buffer readbacks use host-cached memory
   given; an unknown backdrop is refused naming all three, a sun parameter
   without `sky` or in quick mode is refused, as is an elevation outside
   (0, 90]. Skips (77) without ray tracing.
+- `tests/underlay_show_always_smoke.py` — a pure-red underlay with
+  `show_always` is red in a quick still taken with no sketch in edit, and the
+  same still without the flag has no red in it.
 - `tests/test_still_outlines.cpp` — a diagonal boundary at 4x gives
   fractional coverage, a 1 px line covers about one pixel, and strip-by-strip
   coverage equals one whole-image pass.

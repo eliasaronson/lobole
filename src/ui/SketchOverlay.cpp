@@ -60,6 +60,7 @@
 #include "core/features/SweepFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/sketch/SketchProfile.h"
+#include "render/UnderlayRenderer.h"
 #include "ui/AssemblyActions.h"
 #include "ui/CamPlayback.h"   // SyncCamPlayback (SyncRenderersToDocument)
 #include "ui/FastenerTool.h"  // SyncFastenerGhost (SyncRenderersToDocument)
@@ -211,6 +212,71 @@ std::vector<LineVertex3D> BuildStaticSketchLines(AppState& state,
     }
   }
   return lines;
+}
+
+void SyncUnderlays(AppState& state, bool withEditedSketch) {
+  if (!state.underlayRenderer)
+    return;
+  // The texture cache is keyed by asset name, and asset names are per
+  // document ("<sketch>-<image>.png"): two tabs can both own a "2-1.png".
+  // A show-always image outlives sketch edit, so the cache can now cross a
+  // tab switch with something in it — drop it when the document changes.
+  static const Document* lastDocument = nullptr;
+  if (state.document.get() != lastDocument) {
+    state.underlayRenderer->ReleaseTextures();
+    lastDocument = state.document.get();
+  }
+  std::vector<UnderlayDraw> draws;
+  if (state.document) {
+    const Document& doc = *state.document;
+    const SketchFeature* edited =
+        withEditedSketch && state.sketchEdit.IsEditing()
+            ? ResolveActiveSketch(state)
+            : nullptr;
+    const int rollback = doc.EffectiveRollback();
+    for (size_t i = 0; i < doc.FeatureCount(); ++i) {
+      const auto* sk = dynamic_cast<const SketchFeature*>(doc.GetFeature(i));
+      if (!sk)
+        continue;
+      const bool isEdited = sk == edited;
+      // The sketch being edited shows its images whatever the bar says
+      // (edit mode parks the view rollback just past it); any other sketch
+      // only when it is part of the model on screen.
+      if (!isEdited && (doc.EffectiveSuppressed(i) ||
+                        (rollback >= 0 && static_cast<int>(i) >= rollback)))
+        continue;
+      for (const sketch::ReferenceImage& img : sk->images) {
+        if (img.hidden || img.widthPx <= 0 || img.heightPx <= 0)
+          continue;
+        if (!isEdited && !img.showAlways)
+          continue;
+        // Each pixel corner through the image's placement into plane UV,
+        // then onto the sketch plane in world space.
+        const double c = std::cos(img.rotation), s = std::sin(img.rotation);
+        auto pxToWorld = [&](double px, double py) {
+          const double x = px * img.unitsPerPixel, y = py * img.unitsPerPixel;
+          const glm::vec2 uv(float(img.origin.x + c * x - s * y),
+                             float(img.origin.y + s * x + c * y));
+          return sk->plane.PlaneToWorld(uv);
+        };
+        UnderlayDraw d;
+        d.asset = img.asset;
+        d.bytes = doc.GetAsset(img.asset);
+        d.opacity = static_cast<float>(img.opacity);
+        d.corners[0] = pxToWorld(0, 0);
+        d.corners[1] = pxToWorld(img.widthPx, 0);
+        d.corners[2] = pxToWorld(img.widthPx, img.heightPx);
+        d.corners[3] = pxToWorld(0, img.heightPx);
+        draws.push_back(std::move(d));
+      }
+    }
+  }
+  // None this frame (not editing, none shown): free the cached textures
+  // behind a wait-idle. Cheap once the cache is empty. A capture does not:
+  // the next frame would only decode them again.
+  if (draws.empty() && withEditedSketch)
+    state.underlayRenderer->ReleaseTextures();
+  state.underlayRenderer->SetImages(draws);
 }
 
 std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,

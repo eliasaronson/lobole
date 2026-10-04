@@ -1247,15 +1247,24 @@ def offset(sketch_id: int, chain: list, distance: float,
           "read by the running app (must be reachable by it). The image is "
           "centered on 'at' (default plane origin [0,0]) at a default scale; "
           "recalibrate to a real dimension with calibrate_reference_image. "
+          "rotation_deg turns it about 'at' (degrees, CCW). show_always=True "
+          "keeps it drawn when the sketch is not being edited and in quick "
+          "stills, to check a model against the plan it was traced from. "
           "Returns {image_id, width_px, height_px, asset}.")
 def add_reference_image(sketch_id: int, path: str, at: list | None = None,
                         units_per_pixel: float | None = None,
-                        opacity: float = 0.5) -> dict:
+                        opacity: float = 0.5,
+                        rotation_deg: float | None = None,
+                        show_always: bool = False) -> dict:
     params = {"sketch_id": sketch_id, "path": path, "opacity": opacity}
     if at is not None:
         params["at"] = at
     if units_per_pixel is not None:
         params["units_per_pixel"] = units_per_pixel
+    if rotation_deg is not None:
+        params["rotation_deg"] = rotation_deg
+    if show_always:
+        params["show_always"] = True
     return _call("add_reference_image", **params)
 
 
@@ -1274,13 +1283,15 @@ def calibrate_reference_image(sketch_id: int, image_id: int, p1: list,
 
 
 @_reference(description="Edit a sketch reference image (by image_id): pass any "
-          "of opacity (0..1), hidden (bool), rotation (RADIANS) or "
+          "of opacity (0..1), hidden (bool), show_always (bool: drawn outside "
+          "sketch edit and in quick stills), rotation (RADIANS) or "
           "rotation_deg (degrees) but never both, units_per_pixel (sketch mm "
           "per image pixel), or origin [u,v] (plane-UV of the image's (0,0) "
           "pixel corner). Only the fields you pass change.")
 def set_reference_image(sketch_id: int, image_id: int,
                         opacity: float | None = None,
                         hidden: bool | None = None,
+                        show_always: bool | None = None,
                         rotation: float | None = None,
                         rotation_deg: float | None = None,
                         units_per_pixel: float | None = None,
@@ -1290,6 +1301,8 @@ def set_reference_image(sketch_id: int, image_id: int,
         params["opacity"] = opacity
     if hidden is not None:
         params["hidden"] = hidden
+    if show_always is not None:
+        params["show_always"] = show_always
     if rotation is not None:
         params["rotation"] = rotation
     if rotation_deg is not None:

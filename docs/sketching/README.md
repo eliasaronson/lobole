@@ -398,11 +398,27 @@ affine: pixel `(px, py)` maps to `origin + R(rotation)·(px, py)·unitsPerPixel`
 - **Calibration** (`CalibrateImage(id, p1, p2, distance, alignAxis)`) rescales
   so two picked plane points are `distance` apart, holding `p1` fixed; an
   `alignAxis` of 0/1 also rotates the p1→p2 line onto the U/V axis.
-- `UnderlayRenderer` draws only the active sketch's visible images as
-  textured quads **before** the sketch lines (depth test on, write off). It
-  owns persistent device-local textures, which is why it is separate from
-  `SketchRenderer`; `ReleaseTextures` waits for the device to idle before
-  freeing, since a frame in flight may still sample them.
+- **What draws.** `UnderlayRenderer` draws textured quads **before** the
+  sketch lines (depth test on, write off). `ui::SyncUnderlays`
+  (`SketchOverlay.cpp`) hands it the list: while a sketch is edited, all of
+  that sketch's visible images; and at any time, every image marked
+  **`show_always`** (v166) on every sketch that is part of the model on
+  screen — not suppressed (configurations included), not past the rollback
+  bar. `hidden` still wins. A show-always underlay is how a model is checked
+  against the plan it was traced from: it stays on screen once the sketch is
+  closed, and it is in **quick stills** and motion videos, which hand the
+  renderer the show-always images only (never the edited sketch's own, since
+  a capture draws no sketch;
+  [still-render.md#quick-mode](../rendering/still-render.md#quick-mode)).
+  Path-traced stills show no underlays.
+- The renderer owns persistent device-local textures, which is why it is
+  separate from `SketchRenderer`; `ReleaseTextures` waits for the device to
+  idle before freeing, since a frame in flight may still sample them. The
+  cache is keyed by asset name, which is per document, so it is dropped when
+  the active document changes.
+- `add_reference_image` centres the image on `at` and turns it about that
+  centre by `rotation` (radians) or `rotation_deg`, never both;
+  `set_reference_image` turns it about `origin`, its (0, 0) pixel corner.
 
 ## Operations on the entity list
 
@@ -600,8 +616,8 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `mirror` | `sketch_id, sources, axis, link?` | `axis` may be a datum axis id |
 | `pattern` | `sketch_id, sources, count, link?` and `step` or `circular, center, angle \| angle_deg` | circular angle is **per step** |
 | `project_geometry` | `sketch_id, feature_id, element, kind` | live external geometry; returns `gen_ids` |
-| `add_reference_image` | `sketch_id, path, at?, opacity?, units_per_pixel?` | returns `image_id` |
-| `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, origin?, units_per_pixel?, rotation \| rotation_deg` | |
+| `add_reference_image` | `sketch_id, path, at?, opacity?, units_per_pixel?, rotation \| rotation_deg, show_always?` | returns `image_id`; turned about `at` |
+| `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, show_always?, origin?, units_per_pixel?, rotation \| rotation_deg` | |
 | `calibrate_reference_image` | `sketch_id, image_id, p1, p2, distance, align?` | `distance` in sketch mm |
 | `delete_reference_image` | `sketch_id, image_id` | |
 
@@ -629,7 +645,10 @@ link; `modify_feature` with an edited sketch JSON covers them.
   `tests/test_sketch_selection.cpp` `[selection]` — the pure passes.
 - `tests/test_spline.cpp` `[spline]` `[profile]` — evaluator vs OCC, profiles.
 - `tests/test_reference_image.cpp` — placement, calibration, asset storage in
-  both formats, regen-hash exclusion.
+  both formats, regen-hash exclusion, `show_always` round trip.
+- `tests/underlay_show_always_smoke.py` — a show-always underlay in a quick
+  still with no sketch in edit, by pixel colour; none without the flag;
+  `rotation_deg` on add turns it about `at`.
 - `tests/test_sketch_text.cpp` `[text]` — cap height, advance and kerning
   against the fonts' own numbers, alignment, save/reload, refusals, every
   ASCII glyph of the outline font as a profile, a cut label's face names,
@@ -642,7 +661,8 @@ link; `modify_feature` with an edited sketch JSON covers them.
 - Goldens: `tests/golden/v03-legacy-sketch` (index refs and rigid rects
   migrate), `v35-linked-copy`, `v38-entity-exprs`, `v40-spline`,
   `v46-ellipse-arc`, `v49-reference-image`, `v50-linear-pattern-2d`,
-  `v51-mirror-and-center-ref`, `v137-text`, `v155-ellipse-axis-ends`.
+  `v51-mirror-and-center-ref`, `v137-text`, `v155-ellipse-axis-ends`,
+  `v166-underlay-show-always`.
 - `tests/test_sketch_curves.cpp` `[ellipse]` `[spline]` `[refusal]` —
   ellipses, elliptical arcs and splines solved: DOF, radii by axis-end
   distance through an extrude and a revolve, tangency checked as directions

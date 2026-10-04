@@ -1,0 +1,19 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [
+    24.0
+  ],
+  "underlay_show_always": [
+    [
+      "Plan",
+      1,
+      true
+    ],
+    [
+      "Plan",
+      2,
+      false
+    ]
+  ]
+}
