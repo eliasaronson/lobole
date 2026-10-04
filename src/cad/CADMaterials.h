@@ -58,6 +58,15 @@ enum class MaterialType {
   // glass appearance.
   EPOXY,
 
+  // Building materials (v164): what a house is made of, so its mass and its
+  // parts list mean something and a finish is not an override on concrete.
+  BRICK,        // fired clay brick
+  ROOF_TILE,    // concrete roof tile
+  PLASTER,      // gypsum plaster
+  ROOFING_FELT, // bitumen roofing felt
+  RENDER,       // cement render
+  SOIL,         // the ground a building stands on
+
   // Wood & engineered wood. Appearance is a procedural surface pattern shaded
   // from local object-space position (no textures / UVs); see SurfacePattern.
   WOOD_OAK,

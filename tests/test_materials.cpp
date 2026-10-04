@@ -1,6 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "cad/CADMaterials.h"
+#include "core/cam/CamFeeds.h"
 
 #include <algorithm>
 #include <set>
@@ -248,4 +249,46 @@ TEST_CASE("A grade is its own row and prints as the grade",
   // aluminium; every other slug is its own family.
   CHECK(MaterialLibrary::FamilySlug("aluminum_6061_t6") == "aluminum");
   CHECK(MaterialLibrary::FamilySlug("petg") == "petg");
+}
+
+// The building materials (v164): a house's mass and parts list mean
+// something only when each has a density, and CAM says by name that no
+// router cuts them rather than reading them as no material.
+TEST_CASE("Building materials have a density, a look and a cut class",
+          "[materials]") {
+  using MT = MaterialType;
+  const struct {
+    MT type;
+    const char* slug;
+    double lo, hi; // the handbook range the density sits in, kg/m3
+    bool stiff;    // carries a modulus for FEM
+  } rows[] = {
+      {MT::BRICK, "brick", 1800, 1900, true},
+      {MT::ROOF_TILE, "roof_tile", 2100, 2400, true},
+      {MT::PLASTER, "plaster", 1000, 1300, true},
+      {MT::ROOFING_FELT, "roofing_felt", 1050, 1150, false},
+      {MT::RENDER, "render", 1800, 2000, true},
+      {MT::SOIL, "soil", 1500, 1800, false},
+  };
+  for (const auto& r : rows) {
+    INFO(r.slug);
+    CHECK(MaterialLibrary::Slug(r.type) == r.slug);
+    CHECK(MaterialLibrary::MaterialTypeFromString(r.slug) == r.type);
+    const MaterialProperties& m = MaterialLibrary::GetMaterial(r.type);
+    CHECK(m.density >= r.lo);
+    CHECK(m.density <= r.hi);
+    CHECK(m.metallic == 0.0f);
+    CHECK(m.roughness >= 0.7f); // matte, every one
+    CHECK(m.pattern == SurfacePattern::Flat);
+    CHECK((m.youngGPa > 0.0) == r.stiff);
+    CHECK(m.yieldMPa == 0.0); // brittle or not a solid: no factor of safety
+    CHECK(cam::CutClassOf(r.slug) == cam::CutClass::NotCut);
+    CHECK_FALSE(cam::BandFor(cam::CutClassOf(r.slug), 6.0).known);
+  }
+  // Brick reads red-brown, plaster pale, felt near black.
+  const glm::vec3 brick = MaterialLibrary::GetMaterial(MT::BRICK).baseColor;
+  CHECK(brick.r > brick.g);
+  CHECK(brick.g > brick.b);
+  CHECK(MaterialLibrary::GetMaterial(MT::PLASTER).baseColor.g > 0.6f);
+  CHECK(MaterialLibrary::GetMaterial(MT::ROOFING_FELT).baseColor.r < 0.05f);
 }

@@ -36,6 +36,7 @@ Fraction FractionFor(CutClass c) {
   case CutClass::Steel:
     return {0.004, 0.012};
   case CutClass::Unknown:
+  case CutClass::NotCut:
     break;
   }
   return {0.0, 0.0};
@@ -69,7 +70,21 @@ CutClass CutClassOf(const std::string& slug) {
       {"copper", CutClass::Brass},
       {"steel", CutClass::Steel},
       {"stainless", CutClass::Steel},
+      {"stainless_steel", CutClass::Steel},
       {"iron", CutClass::Steel},
+      // In the catalogue for mass, studies and pictures, and not cut on a
+      // router: a stone, a ceramic, a building's fabric. No chip-load band
+      // exists for them, and the report says so by name rather than
+      // reading them as no material at all.
+      {"concrete", CutClass::NotCut},
+      {"glass", CutClass::NotCut},
+      {"ruby", CutClass::NotCut},
+      {"brick", CutClass::NotCut},
+      {"roof_tile", CutClass::NotCut},
+      {"plaster", CutClass::NotCut},
+      {"roofing_felt", CutClass::NotCut},
+      {"render", CutClass::NotCut},
+      {"soil", CutClass::NotCut},
   };
   // A grade cuts as its family: 6082-T6 is aluminium to a chipload table.
   const auto it = kMap.find(CADMaterials::MaterialLibrary::FamilySlug(slug));
@@ -92,6 +107,8 @@ const char* CutClassName(CutClass c) {
     return "brass";
   case CutClass::Steel:
     return "steel";
+  case CutClass::NotCut:
+    return "not a router material";
   case CutClass::Unknown:
     break;
   }
@@ -100,7 +117,7 @@ const char* CutClassName(CutClass c) {
 
 ChiploadBand BandFor(CutClass c, double diameter) {
   ChiploadBand out;
-  if (c == CutClass::Unknown || diameter <= 0.0)
+  if (c == CutClass::Unknown || c == CutClass::NotCut || diameter <= 0.0)
     return out;
   const Fraction f = FractionFor(c);
   out.min = f.min * diameter;
@@ -256,8 +273,14 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
   // The material of what is being cut. Several bodies may differ; the
   // hardest-to-cut class governs, because that is the one that bites.
   CutClass klass = CutClass::Unknown;
+  std::string notCut; // a material on the bodies no router cuts
   for (const Body& b : bodies) {
     const CutClass c = CutClassOf(b.material);
+    if (c == CutClass::NotCut) {
+      if (notCut.empty())
+        notCut = b.material;
+      continue;
+    }
     if (c != CutClass::Unknown && static_cast<int>(c) > static_cast<int>(klass))
       klass = c;
   }
@@ -307,6 +330,12 @@ FeedReport FeedsFor(const Setup& setup, const std::vector<Body>& bodies) {
     out.findings.push_back(f);
   }
 
+  if (klass == CutClass::Unknown && !notCut.empty()) {
+    out.unchecked.push_back("the bodies this setup cuts are " + notCut +
+                            ", which is not a material a router cuts: no "
+                            "chip load was checked against anything");
+    return out;
+  }
   if (klass == CutClass::Unknown) {
     // NOT silence. An empty answer reads as "checked, all fine", and this is
     // "nobody looked" -- which is how a 4-flute cutter posted a job at a

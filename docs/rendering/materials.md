@@ -38,6 +38,27 @@ a consumer that knows materials only that way: CAM's chipload classes
 alloy each, and refuse a grade they do not carry rather than bend 6061-T6
 with a 5052 sheet's radii.
 
+### Building materials
+
+What a house is made of, so its mass and its parts list mean something and
+a finish is not an appearance override on concrete: `brick` (fired clay,
+1850 kg/m³), `roof_tile` (concrete tile, 2200), `plaster` (gypsum, 1150),
+`roofing_felt` (bitumen, 1100), `render` (cement render, 1900) and `soil`
+(1650). Each density is the middle of a handbook range for the material of
+the body, not a wall's bulk with its mortar and voids; the ranges and their
+sources are beside the values in `CADMaterials.cpp`. All are matte and
+non-metallic: brick a muted red-brown, tile a darker one, plaster
+off-white, felt near-black, render light grey, soil dark brown.
+
+FEM moduli are given where a source gives one (brick masonry 10 GPa, a
+concrete tile 25, gypsum plaster 2, render 12), with no yield, since all are
+brittle: a study reports stress and no factor of safety. Felt (viscoelastic)
+and soil (not a linear solid) carry none, as rubber carries none, so a study
+on them refuses rather than answering with a made-up modulus. CAM's cutting
+data reads them, with concrete, glass and ruby, as `NotCut`: a feed check on
+such a body says the material is not one a router cuts, rather than that no
+material was set (`cam::CutClassOf`).
+
 The viewport shades metallic-roughness PBR in `mesh.frag`; the path tracer
 reads the same values through `RTMaterial` (`RayTracingRenderer.h`), so the
 two agree.
@@ -247,8 +268,10 @@ A section cap of a transmissive body is drawn as glass too.
 
 - `tools/ctest -L materials` (`tests/test_materials.cpp`) — the pattern partition,
   `PatternAxis` (a long board picks its length, a sheet its thickness, a
-  cube is deterministic), slug refusal, and that glass and only glass
-  transmits with an IOR over 1.
+  cube is deterministic), slug refusal, that glass and only glass
+  transmits with an IOR over 1, and that each building material has its
+  density in its handbook range, a matte look, a modulus where one is
+  sourced and the `NotCut` class.
 - `tests/appearance_smoke.py` — override, clear, zero features executed.
 - `tools/ctest -L appearance` (`tests/test_face_appearance.cpp`) — a face
   override resolves by name, survives an upstream edit, rebuilds nothing; a

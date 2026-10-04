@@ -525,6 +525,9 @@ prescriptions.
   vendor chart for that cutter beats any rule). Under the band is said, not
   shouted: light machines often run under it and still cut. When the band
   needs a feed the machine's `rapid_feed` cannot reach, that is stated too.
+  A body with no material is `unchecked` as that; one whose material no
+  router cuts (concrete, glass, brick and the other building materials:
+  `CutClass::NotCut`) is `unchecked` naming the material.
 - **Reach**: `cam::ReachCheck` on each tool's deepest operation, as its own
   tool or its finishing tool ([setup.md](setup.md#reach)). The same words
   the edit that made the operation returned, less the operation's name.

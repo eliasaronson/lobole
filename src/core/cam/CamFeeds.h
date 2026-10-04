@@ -35,6 +35,10 @@ enum class CutClass {
   Aluminium,
   Brass,
   Steel,
+  // A material in the catalogue that a router does not cut -- concrete,
+  // glass, brick: no chip-load band, and the feed report says WHY rather
+  // than "no material".
+  NotCut,
 };
 
 [[nodiscard]] CutClass CutClassOf(const std::string& materialSlug);

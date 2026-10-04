@@ -176,6 +176,52 @@ void MaterialLibrary::InitializeMaterials() {
       0.045f, // ((n-1)/(n+1))^2 at n = 1.55
       "Epoxy"};
 
+  // Building materials. Linear base colours, pre-darkened for the bright rig
+  // as the woods below are, and matte: none of these has a gloss to speak
+  // of, and a felt roof at plastic's 0.6 read wet.
+  materials[MaterialType::BRICK] = {
+      glm::vec3(0.30f, 0.11f, 0.06f), // muted red-brown fired clay
+      0.0f,
+      0.85f,
+      0.2f,
+      0.04f,
+      "Brick"};
+  materials[MaterialType::ROOF_TILE] = {
+      glm::vec3(0.17f, 0.06f, 0.04f), // dark red-brown concrete tile
+      0.0f,
+      0.7f, // a sealed face weathers to a low sheen
+      0.25f,
+      0.04f,
+      "Roof Tile"};
+  materials[MaterialType::PLASTER] = {
+      glm::vec3(0.74f, 0.72f, 0.67f), // off-white
+      0.0f,
+      0.9f,
+      0.15f,
+      0.04f,
+      "Plaster"};
+  materials[MaterialType::ROOFING_FELT] = {
+      glm::vec3(0.025f, 0.025f, 0.024f), // near-black bitumen
+      0.0f,
+      0.8f, // mineral-surfaced
+      0.2f,
+      0.04f,
+      "Roofing Felt"};
+  materials[MaterialType::RENDER] = {
+      glm::vec3(0.55f, 0.55f, 0.53f), // light grey cement render
+      0.0f,
+      0.9f,
+      0.15f,
+      0.04f,
+      "Render"};
+  materials[MaterialType::SOIL] = {
+      glm::vec3(0.10f, 0.07f, 0.045f), // dark brown topsoil
+      0.0f,
+      0.95f,
+      0.05f,
+      0.04f,
+      "Soil"};
+
   // Wood & engineered wood. Base tone only here; the grain figure is applied
   // procedurally in the shader (see the "procedural grain" block below).
   // Colors are the light early-wood tone — the shader darkens toward the
@@ -270,6 +316,25 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::GLASS].ior = 1.52f;
   materials[MaterialType::CONCRETE].density = 2400.0f;
   materials[MaterialType::EPOXY].density = 1150.0f;
+  // Building materials, as the material of the body (not a wall's bulk with
+  // its mortar and voids, which a model draws as separate bodies or not at
+  // all). Handbook ranges, the value used in the middle of each:
+  //   fired clay brick, solid      1800-1900  (Engineering ToolBox; EN 771-1
+  //                                            gross densities of solid
+  //                                            units)
+  //   concrete roof tile           2100-2400  (bulk of the tile, EN 490)
+  //   gypsum plaster, set          1000-1300  (EN 13279 / EN 12524 tables)
+  //   bitumen roofing felt         ~1100      (EN 12524: bitumen 1050)
+  //   cement render / mortar       1800-2000  (EN 12524: cement mortar 1800,
+  //                                            render 1800-2000)
+  //   soil, moist topsoil to clay  1500-1800  (EN ISO 10456 / geotechnical
+  //                                            handbooks)
+  materials[MaterialType::BRICK].density = 1850.0f;
+  materials[MaterialType::ROOF_TILE].density = 2200.0f;
+  materials[MaterialType::PLASTER].density = 1150.0f;
+  materials[MaterialType::ROOFING_FELT].density = 1100.0f;
+  materials[MaterialType::RENDER].density = 1900.0f;
+  materials[MaterialType::SOIL].density = 1650.0f;
   // Wood densities are moisture-dependent; these are typical air-dry (~12% MC)
   // values, well-defined enough for mass properties.
   materials[MaterialType::WOOD_OAK].density = 700.0f;
@@ -321,6 +386,16 @@ void MaterialLibrary::InitializeMaterials() {
   elastic(MaterialType::RUBY, 345.0f, 0.29f, 0.0f);
   elastic(MaterialType::CONCRETE, 30.0f, 0.20f, 0.0f);
   elastic(MaterialType::EPOXY, 3.0f, 0.35f, 60.0f);
+  // Building materials: brittle, so no yield (a study reports stress and no
+  // factor of safety). Brick masonry 5-15 GPa (EN 1996-1-1 takes E = 1000
+  // f_k); a concrete tile is a dense concrete's ~25 GPa; set gypsum plaster
+  // ~2 GPa; cement render, a mortar, 10-15 GPa. Bitumen felt (viscoelastic)
+  // and soil (not a linear solid at all) are left 0, as rubber is: a study
+  // on them refuses rather than answering with a made-up modulus.
+  elastic(MaterialType::BRICK, 10.0f, 0.20f, 0.0f);
+  elastic(MaterialType::ROOF_TILE, 25.0f, 0.20f, 0.0f);
+  elastic(MaterialType::PLASTER, 2.0f, 0.25f, 0.0f);
+  elastic(MaterialType::RENDER, 12.0f, 0.20f, 0.0f);
   // Wood is strongly anisotropic (along-grain stiffness is ~15-20x the
   // transverse), but our FEM is linear-isotropic. These are representative
   // ALONG-GRAIN values (modulus, and modulus-of-rupture as a yield proxy);
@@ -361,8 +436,9 @@ void MaterialLibrary::InitializeMaterials() {
   pattern(MaterialType::CARBON_FIBRE, SP::Weave, 0.5f, 0.45f);
   // MDF: Flat — a wood product, but genuinely near-uniform.
 
-  // RUBBER and DEFAULT intentionally left at 0 (near-incompressible /
-  // unassigned): a linear-static study on them errors rather than guessing.
+  // RUBBER, ROOFING_FELT, SOIL and DEFAULT intentionally left at 0
+  // (near-incompressible / unassigned): a linear-static study on them errors
+  // rather than guessing.
 
   // What a drawing writes: a grade row its grade, a generic row its name
   // in capitals (which says that no grade was chosen).
@@ -421,6 +497,12 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
       {MaterialType::RUBY, "ruby"},
       {MaterialType::CONCRETE, "concrete"},
       {MaterialType::EPOXY, "epoxy"},
+      {MaterialType::BRICK, "brick"},
+      {MaterialType::ROOF_TILE, "roof_tile"},
+      {MaterialType::PLASTER, "plaster"},
+      {MaterialType::ROOFING_FELT, "roofing_felt"},
+      {MaterialType::RENDER, "render"},
+      {MaterialType::SOIL, "soil"},
       {MaterialType::WOOD_OAK, "wood_oak"},
       {MaterialType::WOOD_PINE, "wood_pine"},
       {MaterialType::WOOD_WALNUT, "wood_walnut"},

@@ -879,6 +879,16 @@ TEST_CASE("cam feeds: a cutter that rubs instead of cutting is named",
   INFO(blind.unchecked[0]);
   CHECK(blind.unchecked[0].find("no material") != std::string::npos);
   CHECK_FALSE(blind.Empty()); // NOT silence
+
+  // A material no router cuts is named as that, not read as no material.
+  for (Body& b : const_cast<std::vector<Body>&>(doc->GetBodies()))
+    b.material = "brick";
+  const cam::FeedReport stone = cam::FeedsFor(setup, doc->GetBodies());
+  CHECK(stone.findings.empty());
+  REQUIRE(stone.unchecked.size() == 1);
+  INFO(stone.unchecked[0]);
+  CHECK(stone.unchecked[0].find("brick, which is not a material a router "
+                                "cuts") != std::string::npos);
 }
 
 TEST_CASE("cam reach: a cut deeper than the cutter is long is named",

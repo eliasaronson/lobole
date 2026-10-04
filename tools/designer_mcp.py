@@ -452,7 +452,8 @@ MATERIAL_SLUGS = ("aluminum, steel, stainless_steel, brass, bronze, copper, "
                   "chrome, gold, silver, titanium, aluminum_6061_t6, "
                   "aluminum_6082_t6, plastic_white, "
                   "plastic_black, petg, carbon_fibre, rubber, glass, ruby, concrete, "
-                  "epoxy, wood_oak, wood_pine, wood_walnut, wood_maple, "
+                  "epoxy, brick, roof_tile, plaster, roofing_felt, render, "
+                  "soil, wood_oak, wood_pine, wood_walnut, wood_maple, "
                   "wood_beech, plywood_birch, plywood_pine, mdf")
 
 WORKFLOW = """You are modeling in Designer, a parametric B-Rep CAD app
