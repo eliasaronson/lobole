@@ -2032,22 +2032,26 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
                  supersample: int = 2, samples: int = 512, seed: int = 1,
                  ground: bool = True, outlines: bool = True,
                  line_weight: float = 0.0, path: str = "",
-                 backdrop: str = "studio",
+                 backdrop: str | None = None,
                  sun_azimuth_deg: float | None = None,
                  sun_elevation_deg: float | None = None) -> Image:
     out = path or os.path.join(tempfile.gettempdir(), "designer_mcp_still.png")
+    # A backdrop or sun the caller GAVE goes to the app in either mode, so a
+    # quick still asked for a sky is refused there rather than quietly drawn
+    # without one (CLAUDE.md, "Refuse, don't substitute").
+    given = {k: v for k, v in (("backdrop", backdrop),
+                               ("sun_azimuth_deg", sun_azimuth_deg),
+                               ("sun_elevation_deg", sun_elevation_deg))
+             if v is not None}
     if mode == "quick":
         extra = {"line_weight": line_weight} if line_weight else {}
         r = _call("render_still", width=width, height=height, mode="quick",
                   supersample=supersample, outlines=outlines, path=out,
-                  **extra)
+                  **extra, **given)
     else:
-        sun = {k: v for k, v in (("sun_azimuth_deg", sun_azimuth_deg),
-                                 ("sun_elevation_deg", sun_elevation_deg))
-               if v is not None}
         r = _call("render_still", width=width, height=height, mode=mode,
                   samples=samples, seed=seed, ground=ground,
-                  outlines=outlines, path=out, backdrop=backdrop, **sun)
+                  outlines=outlines, path=out, **given)
     if not r.get("ok"):
         raise RuntimeError("render failed: " + str(r.get("error", "unknown")))
     return Image(path=out)
