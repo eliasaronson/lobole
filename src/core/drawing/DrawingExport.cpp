@@ -5,6 +5,7 @@
 #include "core/io/Format.h"
 
 #include <cmath>
+#include <cstdint>
 #include <fstream>
 #include <sstream>
 
@@ -63,34 +64,55 @@ std::string Num(double v) {
   return s;
 }
 
-// Escapes a UTF-8 display string into PDF WinAnsi bytes: the three
-// non-ASCII glyphs dimension text uses (Ø, °, ×) map to their WinAnsi code
-// points; other non-ASCII is replaced with '?'. Parens/backslash escaped.
+// Escapes a UTF-8 display string into PDF WinAnsi bytes. The base-14 font
+// is declared /WinAnsiEncoding, which is Latin-1 from 0xA0 to 0xFF, so every
+// code point there is its own byte: the dimension signs (Ø, °, ×) and the
+// letters of a title block or note in Swedish, German or French (å ä ö é ü).
+// It used to map only the three signs, and "FASAD MOT SÖDER" exported as
+// "FASAD MOT S??DER" while the SVG of the same sheet was right. The dashes
+// and the ellipsis have WinAnsi slots of their own; anything else is '?'.
+// Parens/backslash escaped.
 std::string PdfText(const std::string& s) {
   std::string out;
   for (size_t i = 0; i < s.size();) {
     const unsigned char c = static_cast<unsigned char>(s[i]);
-    if (c == 0xC3 && i + 1 < s.size() &&
-        static_cast<unsigned char>(s[i + 1]) == 0x98) { // Ø
-      out += static_cast<char>(0xD8);
-      i += 2;
-    } else if (c == 0xC3 && i + 1 < s.size() &&
-               static_cast<unsigned char>(s[i + 1]) == 0x97) { // × (callouts)
-      out += static_cast<char>(0xD7);
-      i += 2;
-    } else if (c == 0xC2 && i + 1 < s.size() &&
-               static_cast<unsigned char>(s[i + 1]) == 0xB0) { // °
-      out += static_cast<char>(0xB0);
-      i += 2;
-    } else if (c < 0x80) {
+    if (c < 0x80) {
       if (c == '\\' || c == '(' || c == ')')
         out += '\\';
       out += static_cast<char>(c);
       ++i;
-    } else {
+      continue;
+    }
+    uint32_t cp = 0;
+    size_t n = 0;
+    if ((c & 0xE0) == 0xC0) {
+      cp = c & 0x1F;
+      n = 1;
+    } else if ((c & 0xF0) == 0xE0) {
+      cp = c & 0x0F;
+      n = 2;
+    } else if ((c & 0xF8) == 0xF0) {
+      cp = c & 0x07;
+      n = 3;
+    }
+    if (n == 0 || i + n >= s.size()) { // not a lead byte, or truncated
       out += '?';
       ++i;
+      continue;
     }
+    for (size_t k = 1; k <= n; ++k)
+      cp = (cp << 6) | (static_cast<unsigned char>(s[i + k]) & 0x3F);
+    i += n + 1;
+    if (cp >= 0xA0 && cp <= 0xFF)
+      out += static_cast<char>(cp);
+    else if (cp == 0x2013)
+      out += static_cast<char>(0x96);
+    else if (cp == 0x2014)
+      out += static_cast<char>(0x97);
+    else if (cp == 0x2026)
+      out += static_cast<char>(0x85);
+    else
+      out += '?';
   }
   return out;
 }

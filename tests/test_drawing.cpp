@@ -597,9 +597,17 @@ TEST_CASE("PDF export writes a valid single-page document",
              "12"; // Ø12 — exercises the WinAnsi mapping
   dim.labelPos = {48, 42};
 
+  // Latin-1 letters and a dash: a Swedish caption must reach the PDF as the
+  // WinAnsi bytes, not as '?' (it did, while the SVG was right).
+  drawing::ResolvedDim text = dim;
+  text.id = 2;
+  text.text = "K\xC3\xA4llare \xE2\x80\x93 S\xC3\x96"
+              "DER";
+  text.labelPos = {48, 60};
+
   const fs::path out = fs::temp_directory_path() / "drawing_export.pdf";
   std::string err;
-  REQUIRE(DrawingExport::SavePDF(doc, {view}, {dim}, out.string(), &err));
+  REQUIRE(DrawingExport::SavePDF(doc, {view}, {dim, text}, out.string(), &err));
   INFO(err);
 
   std::ifstream in(out, std::ios::binary);
@@ -619,6 +627,9 @@ TEST_CASE("PDF export writes a valid single-page document",
   CHECK(pdf.find("\xD8"
                  "12") != std::string::npos);
   CHECK(pdf.find("\xC3\x98") == std::string::npos);
+  CHECK(pdf.find("K\xE4llare \x96 S\xD6"
+                 "DER") != std::string::npos);
+  CHECK(pdf.find("K?llare") == std::string::npos);
   CHECK(pdf.rfind("%%EOF") != std::string::npos);
   fs::remove(out);
 }

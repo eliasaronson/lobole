@@ -628,7 +628,8 @@ uses).
 are hand-written, GUI-free, and consume the same projected structures as the
 viewport, so export is testable headless without rendering. SVG uses mm user
 units, polylines and `<text>`; PDF is one vector page with base-14
-Helvetica, mapping Ø, ° and × to WinAnsi, centring text by Helvetica's
+Helvetica in WinAnsi (all of Latin-1, so Ø, °, × and a Swedish or German
+caption's letters, plus the dashes; anything else is `?`), centring text by Helvetica's
 widths (`drawing::TextWidthMM`, which also sizes a table's columns), and
 turning a line of text with a text matrix (the SVG with `rotate`). A
 `SheetGraphics` knockout is filled white before the rest of it. Both
