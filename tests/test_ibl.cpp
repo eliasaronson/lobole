@@ -5,6 +5,7 @@
 
 #include "render/IBL.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdlib>
 #include <filesystem>
@@ -75,4 +76,58 @@ TEST_CASE("IBL precompute produces sane maps from the studio HDR", "[ibl]") {
   if (const char* dir = std::getenv("DESIGNER_IBL_DUMP")) {
     ibl.DumpDebugPNGs(dir);
   }
+}
+
+namespace {
+// IBL.cpp's DirToEquirectUV (world Z-up -> the HDRI's Y-polar map), restated
+// so the test can find a direction's pixel.
+glm::vec4 SkyAt(const IBLPrecompute::Image& img, const glm::vec3& world) {
+  const glm::vec3 d = glm::normalize(world);
+  const glm::vec3 e(d.x, d.z, -d.y);
+  const float u = std::atan2(e.z, e.x) / (2.0f * 3.14159265f) + 0.5f;
+  const float v = std::acos(std::clamp(e.y, -1.0f, 1.0f)) / 3.14159265f;
+  const int x = std::clamp(int(u * img.width), 0, img.width - 1);
+  const int y = std::clamp(int(v * img.height), 0, img.height - 1);
+  return img.pixels[size_t(y) * img.width + x];
+}
+float Luma(const glm::vec4& c) {
+  return 0.2126f * c.x + 0.7152f * c.y + 0.0722f * c.z;
+}
+} // namespace
+
+// The procedural sky behind and over a `backdrop: sky` still
+// (docs/rendering/still-render.md#the-sky): blue overhead, ground below the
+// horizon, the sun where it was asked to stand — and it lights from that side
+// once convolved.
+TEST_CASE("Procedural sky: gradient, ground, sun, and it lights", "[ibl]") {
+  const float el = glm::radians(40.0f);
+  const glm::vec3 sun(std::cos(el), 0.0f, std::sin(el)); // toward +X
+  const IBLPrecompute::Image sky = IBLPrecompute::GenerateSky(sun, 512, 256);
+  REQUIRE(sky.pixels.size() == size_t(512) * 256);
+  for (const auto& p : sky.pixels) {
+    REQUIRE(Finite(p));
+    REQUIRE(p.x >= 0.0f);
+  }
+  // Deterministic: a sky is a function of its sun.
+  CHECK(IBLPrecompute::GenerateSky(sun, 512, 256).pixels == sky.pixels);
+
+  const glm::vec4 zenith = SkyAt(sky, {0, 0, 1});
+  CHECK(zenith.z > 2.0f * zenith.x); // blue overhead
+  const glm::vec4 horizon = SkyAt(sky, {0, 1, 0.02f});
+  CHECK(horizon.x > zenith.x); // paler at the horizon
+  const glm::vec4 ground = SkyAt(sky, {0, 0.3f, -1});
+  CHECK(ground.x >= ground.z);                         // not sky: a warm grey
+  CHECK(Luma(SkyAt(sky, sun)) > 10.0f * Luma(zenith)); // the disc
+  CHECK(Luma(SkyAt(sky, {-sun.x, 0, sun.z})) < Luma(SkyAt(sky, sun)) / 10.0f);
+
+  IBLPrecompute ibl;
+  ibl.BuildFromImage(sky);
+  REQUIRE(ibl.PrefilterMipCount() > 0);
+  // A face toward the sun gathers more light than one turned away from it,
+  // and an upward face more than a downward one. Only somewhat more: the
+  // sun's direct light is the still's KEY light, not the map's.
+  CHECK(Luma(SkyAt(ibl.Irradiance(), {1, 0, 0})) >
+        1.1f * Luma(SkyAt(ibl.Irradiance(), {-1, 0, 0})));
+  CHECK(Luma(SkyAt(ibl.Irradiance(), {0, 0, 1})) >
+        Luma(SkyAt(ibl.Irradiance(), {0, 0, -1})));
 }

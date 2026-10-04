@@ -825,6 +825,14 @@ add_test(NAME render_glass_smoke
 set_tests_properties(render_glass_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300 SKIP_RETURN_CODE 77)
 
+# The outdoor sky behind and over a still: blue above the horizon, ground
+# below, the sun reported, the refusals (docs/rendering/still-render.md#the-sky).
+add_test(NAME render_sky_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/render_sky_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(render_sky_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300 SKIP_RETURN_CODE 77)
+
 # The frame watchdog: a stalled main thread is logged with its label and a
 # symbolized stack, and the app carries on (docs/architecture.md#crashes-and-stalls).
 add_test(NAME watchdog_smoke

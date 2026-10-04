@@ -2006,11 +2006,19 @@ def orient_to_face() -> dict:
           "only). mode='path' is the offline path tracer "
           "(needs a ray-tracing GPU; the app freezes for the duration): "
           "samples=64 is a fast preview, 512+ presentation quality, ground "
-          "adds a shadow-catcher plane. Optional path also keeps the PNG.")
+          "adds a shadow-catcher plane. backdrop (path only): 'studio' (a "
+          "neutral sweep), 'environment' (the studio HDRI) or 'sky' (an "
+          "outdoor sky that also lights the model, its sun the key light; "
+          "sun_azimuth_deg CCW from +X and sun_elevation_deg place the sun, "
+          "defaults derived from the camera and 40). Optional path also "
+          "keeps the PNG.")
 def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
                  supersample: int = 2, samples: int = 512, seed: int = 1,
                  ground: bool = True, outlines: bool = True,
-                 line_weight: float = 0.0, path: str = "") -> Image:
+                 line_weight: float = 0.0, path: str = "",
+                 backdrop: str = "studio",
+                 sun_azimuth_deg: float | None = None,
+                 sun_elevation_deg: float | None = None) -> Image:
     out = path or os.path.join(tempfile.gettempdir(), "designer_mcp_still.png")
     if mode == "quick":
         extra = {"line_weight": line_weight} if line_weight else {}
@@ -2018,9 +2026,12 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
                   supersample=supersample, outlines=outlines, path=out,
                   **extra)
     else:
+        sun = {k: v for k, v in (("sun_azimuth_deg", sun_azimuth_deg),
+                                 ("sun_elevation_deg", sun_elevation_deg))
+               if v is not None}
         r = _call("render_still", width=width, height=height, mode=mode,
                   samples=samples, seed=seed, ground=ground,
-                  outlines=outlines, path=out)
+                  outlines=outlines, path=out, backdrop=backdrop, **sun)
     if not r.get("ok"):
         raise RuntimeError("render failed: " + str(r.get("error", "unknown")))
     return Image(path=out)

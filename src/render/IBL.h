@@ -30,6 +30,19 @@ public:
   // cache.
   bool Build(const std::string& hdrPath, const std::string& cacheDir);
 
+  // The same maps from an equirectangular image already in memory (the
+  // procedural sky, GenerateSky). Not cached: a sky's convolution takes about
+  // 0.2 s, and a cache file per sun direction would only pile up.
+  void BuildFromImage(Image env);
+
+  // A procedural outdoor sky as an equirectangular image in the same
+  // convention as the HDRI (docs/rendering/still-render.md#the-sky): a
+  // zenith-to-horizon gradient, a ground below the horizon, and a sun disc
+  // with its glow standing at `sunToward` (a world direction, Z up, toward
+  // the sun). Deterministic: the same direction gives the same pixels.
+  static Image GenerateSky(const glm::vec3& sunToward, int width = 1024,
+                           int height = 512);
+
   const Image& Environment() const { return m_env; } // full-res source HDR
   const Image& Irradiance() const { return m_irradiance; }
   const std::vector<Image>& Prefilter() const {
@@ -53,6 +66,7 @@ private:
   void ComputePrefilter();
   void ComputeBRDF();
 
+  void Precompute(const std::string& cachePath);
   bool LoadCache(const std::string& path);
   void SaveCache(const std::string& path) const;
 };

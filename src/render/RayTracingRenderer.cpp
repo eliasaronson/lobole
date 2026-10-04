@@ -861,7 +861,7 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
   // The viewport's rig for this camera (MakeStillDesc), with the shared
   // colours and intensities. The shaders take TRAVEL directions, so each
   // toward-light vector is negated.
-  u.lightDir = glm::vec4(-desc.rig.key, conv::kKeyLight.a);
+  u.lightDir = glm::vec4(-desc.rig.key, conv::kKeyLight.a * desc.keyScale);
   u.lightColor = glm::vec4(glm::vec3(conv::kKeyLight), 1.0f);
   u.ambientColor = glm::vec4(0.15f, 0.17f, 0.2f, 1.0f);
   u.fillDir = glm::vec4(-desc.rig.fill, conv::kFillLight.a);
@@ -883,7 +883,8 @@ bool RayTracingRenderer::BeginStill(const RTStillDesc& desc) {
       glm::vec4(static_cast<float>(live), glass ? 1.0f : 0.0f, 0.0f, 0.0f);
   m_stillHasClip = live > 0;
   u.params = glm::vec4(static_cast<float>(desc.prefilterMips), desc.rayFar,
-                       desc.aoRadius, desc.studioBackdrop ? 1.0f : 0.0f);
+                       desc.aoRadius,
+                       desc.backdrop == StillBackdrop::Studio ? 1.0f : 0.0f);
 
   const VkMemoryPropertyFlags hostVisible =
       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |

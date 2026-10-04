@@ -21,15 +21,20 @@ picture of the model at a chosen size, in one of two modes:
 | `samples` | path samples per pixel | 512 |
 | `seed` | RNG seed; (scene, samples, seed) reproduces the image | 1 |
 | `ground` | shadow-catcher ground plane | true |
-| `backdrop` | `studio` \| `environment` | `studio` |
+| `backdrop` | `studio` \| `environment` \| `sky` ([backdrops](#backdrops)) | `studio` |
+| `sun_azimuth_deg` | sky only: the sun's bearing, counter-clockwise from world +X seen from above | where the studio key stands for this camera |
+| `sun_elevation_deg` | sky only: the sun's height above the horizon, (0, 90] | 40 |
 | `outlines` | edges over the image, as the viewport draws them | true |
 | `supersample` | quick only: 1-4 | 2 |
 | `line_weight` | quick only: edge width in px of the output, 0.25-4 | the viewport's (1) |
 
 An unknown `mode` or `backdrop` is refused naming the accepted values. The
-path tracer's parameters (`samples`, `seed`, `ground`, `backdrop`) are
-**refused** in quick mode rather than ignored, and `line_weight` in path
-mode. `supersample` outside 1-4, a `line_weight` outside 0.25-4 and an
+path tracer's parameters (`samples`, `seed`, `ground`, `backdrop`, the sun's
+two) are **refused** in quick mode rather than ignored, and `line_weight` in
+path mode. A sun parameter with any backdrop but `sky` is refused, as is an
+elevation outside (0, 90]. A path reply names its `backdrop`; a sky reply
+also carries the `sun` it was lit by, `{azimuth_deg, elevation_deg}`,
+derived or not. `supersample` outside 1-4, a `line_weight` outside 0.25-4 and an
 `outlines` that is not a bool are refused. A quick reply says `outlines`, and
 the `line_weight` it drew when it drew lines. A picture that is almost
 entirely one colour is still saved, with a warning in the reply.
@@ -130,11 +135,57 @@ included. The rig began as the still's own: the viewport's old world-fixed
 key sat close to the home view direction, which flattened a traced still and
 threw its shadow behind the model.
 
-**Backdrop.** By default (`studio`) the camera sees a neutral vertical sweep
-where it sees no geometry; the HDRI still lights the model and fills its
-reflections, but is not the picture (a low-resolution photograph stretched
-behind a model has no scale relationship with it). `environment` shows the
-HDRI itself.
+### Backdrops
+
+What the camera sees where it sees no geometry, and what lights the model:
+
+- **`studio`** (the default) — a neutral vertical sweep (`studioBackdrop()`
+  in `miss.rmiss` and `closesthit.rchit`); the studio HDRI still lights the
+  model and fills its reflections, but is not the picture (a low-resolution
+  photograph stretched behind a model has no scale relationship with it).
+- **`environment`** — the studio HDRI itself.
+- **`sky`** — a procedural outdoor sky that backs the still AND lights it
+  ([the sky](#the-sky)).
+
+`RTStillDesc::backdrop` (`StillBackdrop`) carries the choice; the shaders
+only need to know whether to draw the sweep (`params.w`), because
+`environment` and `sky` both show the environment the bound maps were built
+from.
+
+### The sky
+
+`IBLPrecompute::GenerateSky` (`src/render/IBL.cpp`) draws a 1024x512
+equirectangular image in the HDRI's own convention: a zenith-to-horizon
+gradient (deep blue overhead, pale haze at the horizon), a dry grey-brown
+ground below a thin haze band, and a sun disc (drawn 1.5° across, larger than
+the real sun's half degree so it survives the map's third of a degree a
+pixel) with a glow around it. A low sun dims the sky and the ground. It is
+deterministic: the same sun gives the same pixels.
+
+`IBLPrecompute::BuildFromImage` convolves it exactly as the HDRI is
+convolved (irradiance, prefilter chain, BRDF LUT), so the sky lights the
+model through the same split-sum IBL. `main.cpp`'s `SkyEnvironment`, reached
+as `AppState::skyEnvironment`, builds those maps the first time a sky still
+asks and keeps them for the next still with the same sun (rounded to a
+tenth of a degree, which the pixels then use too); a different sun replaces
+them. Unlike the HDRI's, the sky's convolution is not cached on disk: it
+takes about 0.2 s, and a file per sun direction would only pile up.
+
+In a sky still the rig changes in two ways (`MakeStillDesc`): the **key
+light is the sun** — its direction, with the soft shadow it already casts —
+so the shadow falls away from the disc in the backdrop; and the environment
+does **not** turn with the camera (`envRotation` is the identity), since a
+sky belongs to the world. Fill and rim stay as the rig places them. The
+disc and its glow are moderate on purpose: the key is the sun's direct light,
+so the sky only has to give the IBL its bright side.
+
+The sun's **elevation** defaults to 40°, a fixed value: an angle is not a
+model-scale quantity, and a mid-morning sun gives short shadows that still
+model the form. Its **azimuth** defaults to the bearing of the studio key
+for this camera (Lock lights to model included) — over the viewer's left
+shoulder, so the side being looked at is lit. The reply's `sun` reports both.
+
+The GUI dialog offers studio and environment; the sky is the RPC's for now.
 
 **Ground.** The shadow catcher is a large quad just under the scene's
 bounds, flagged `RT_GEOM_SHADOW_CATCHER` in `GeometryInfo.flags`; it shows
@@ -237,6 +288,12 @@ The still's radiance and G-buffer readbacks use host-cached memory
 - `tests/offscreen_smoke.py` — same seed, byte-identical traced PNG.
 - `tests/render_still_reach_smoke.py`, `tests/render_glass_smoke.py` — skip
   (77) without ray tracing.
+- `tests/render_sky_smoke.py` — a sky still of a block: the top of the frame
+  is sky blue and the bottom ground, where the studio still of the same view
+  is neither; the reply names the derived sun and an explicit one is used as
+  given; an unknown backdrop is refused naming all three, a sun parameter
+  without `sky` or in quick mode is refused, as is an elevation outside
+  (0, 90]. Skips (77) without ray tracing.
 - `tests/test_still_outlines.cpp` — a diagonal boundary at 4x gives
   fractional coverage, a 1 px line covers about one pixel, and strip-by-strip
   coverage equals one whole-image pass.

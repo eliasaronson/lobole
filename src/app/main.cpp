@@ -269,6 +269,10 @@ static std::unique_ptr<SSAORenderer> g_SSAORenderer;
 static render::GpuTimer g_GpuTimer; // per-pass GPU timing (frame-timing.md)
 static std::unique_ptr<FaceSelector> g_FaceSelector;
 static std::unique_ptr<IBLTextures> g_IBLTextures;
+// The procedural sky's maps (render_still backdrop: sky), for the one sun
+// they were built for. Built on first use: most sessions never ask for one.
+static std::unique_ptr<IBLTextures> g_SkyIBL;
+static std::pair<long, long> g_SkyIBLKey{-1, -1};
 
 // All state the UI layer works with (owns the document + undo stack; holds
 // non-owning pointers to the objects above once they exist)
@@ -1093,6 +1097,53 @@ struct RasterTarget {
   uint32_t vpW = 0, vpH = 0;
 };
 
+// The sky's maps for a sun at (azimuth, elevation) degrees
+// (docs/rendering/still-render.md#the-sky): the image generated, then
+// convolved exactly as the HDRI is (about 0.2 s, so not cached on disk). The
+// sun is rounded to a tenth of a degree first, so the key and the pixels
+// agree. One sky is held at a time; a different sun replaces it behind a
+// wait-idle, since a still that used the old one has ended by the time
+// another can ask.
+static IBLTextures* SkyEnvironment(double azimuthDeg, double elevationDeg) {
+  const std::pair<long, long> key{std::lround(azimuthDeg * 10.0),
+                                  std::lround(elevationDeg * 10.0)};
+  if (g_SkyIBL && key == g_SkyIBLKey)
+    return g_SkyIBL.get();
+  if (g_SkyIBL) {
+    vkDeviceWaitIdle(g_Device);
+    g_SkyIBL->Shutdown(g_Device);
+    g_SkyIBL.reset();
+  }
+  const double az = glm::radians(key.first / 10.0);
+  const double el = glm::radians(key.second / 10.0);
+  const glm::vec3 sun(static_cast<float>(std::cos(el) * std::cos(az)),
+                      static_cast<float>(std::cos(el) * std::sin(az)),
+                      static_cast<float>(std::sin(el)));
+  const auto t0 = std::chrono::steady_clock::now();
+  IBLPrecompute ibl;
+  ibl.BuildFromImage(IBLPrecompute::GenerateSky(sun));
+  auto tex = std::make_unique<IBLTextures>();
+  if (!tex->Upload(g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, ibl)) {
+    tex->Shutdown(g_Device);
+    LOG_ERROR("IBL: the sky's maps could not be uploaded");
+    return nullptr;
+  }
+  LOG_INFO("IBL: sky for sun azimuth {:.1f}, elevation {:.1f} deg in {:.2f} s",
+           key.first / 10.0, key.second / 10.0,
+           std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+               .count());
+  g_SkyIBL = std::move(tex);
+  g_SkyIBLKey = key;
+  return g_SkyIBL.get();
+}
+
+static void ShutdownSkyEnvironment() {
+  if (g_SkyIBL)
+    g_SkyIBL->Shutdown(g_Device);
+  g_SkyIBL.reset();
+  g_SkyIBLKey = {-1, -1};
+}
+
 // The model's renderers only: the sketch, underlay and CAM stock renderers
 // carry the overlays (sketches, datums, gizmos, handles). What a quick render
 // and a motion video draw.
@@ -1885,6 +1936,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
+  g_App.skyEnvironment = SkyEnvironment;
   // Shadow/SSAO/shadow-map-size preferences flow into the same fields
   // set_render_options writes, so the toggles below read coherent state.
   ui::ApplySettings(g_App);
@@ -2139,6 +2191,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   g_FaceSelector.reset();
   g_IBLTextures->Shutdown(g_Device);
   g_IBLTextures.reset();
+  ShutdownSkyEnvironment();
   vkDestroyRenderPass(g_Device, offscreenPass, g_Allocator);
   CleanupVulkan();
   return 0;
@@ -2640,6 +2693,7 @@ int main(int argc, char** argv) {
   g_App.rayTracer = g_RayTracingRenderer.get();
   g_App.faceSelector = g_FaceSelector.get();
   g_App.ibl = g_IBLTextures.get();
+  g_App.skyEnvironment = SkyEnvironment;
 
   // Quick render (docs/rendering/still-render.md#quick-mode), from the dialog
   // or render_still. Both run on this thread between frames, so after a wait
@@ -3242,6 +3296,7 @@ int main(int argc, char** argv) {
     g_IBLTextures->Shutdown(g_Device);
     g_IBLTextures.reset();
   }
+  ShutdownSkyEnvironment();
 
   ImGui_ImplVulkan_Shutdown();
   ImGui_ImplGlfw_Shutdown();

@@ -69,6 +69,13 @@ struct RTMaterial {
 static_assert(sizeof(RTMaterial) == 80,
               "RTMaterial must match the shaders' std430 Material");
 
+// What stands behind a still where it sees no geometry, and what lights it
+// (render_still `backdrop`, docs/rendering/still-render.md#backdrops).
+// Studio and Environment are both lit by the studio HDRI; Sky is lit by the
+// procedural sky it shows, and its key light is the sun. Declared opaque in
+// ui/RendererSync.h, so the values are fixed and Studio is the zero.
+enum class StillBackdrop : int { Studio = 0, Environment = 1, Sky = 2 };
+
 // Everything an offline still render needs from the app: output size, camera,
 // and the shared IBL maps (same environment as the raster viewport, so both
 // agree on lighting).
@@ -92,14 +99,19 @@ struct RTStillDesc {
   // 3 m dock reached 2 mm. MakeStillDesc derives them from the scene.
   float rayFar = 10000.0f;
   float aoRadius = 2.0f;
-  // A neutral sweep behind the model instead of the HDRI photograph. The
-  // HDRI still lights it and still fills its reflections — it just stops
-  // being the background.
-  bool studioBackdrop = true;
+  // Studio: a neutral sweep behind the model instead of the HDRI photograph.
+  // The HDRI still lights it and still fills its reflections — it just stops
+  // being the background. Environment and Sky show the environment the maps
+  // above were built from (the HDRI, or the procedural sky).
+  StillBackdrop backdrop = StillBackdrop::Studio;
   // Where the lights stand and which way the environment faces — the
   // viewport's own rig for the same camera (core/LightRig.h), so a still is
   // lit the way the screen it came from is. MakeStillDesc fills it.
   conv::LightRig rig = conv::ModelLightRig();
+  // The key light's intensity, as a multiple of conv::kKeyLight's. 1 in the
+  // studio; a sky still's key is the sun, several times the sky's own light
+  // (MakeStillDesc).
+  float keyScale = 1.0f;
   uint32_t seed = 0; // RNG seed; fixed seed -> deterministic image
   // Edges over the traced image, the way the viewport draws them. Without
   // them a row of butted boards renders as one continuous slab -- the single

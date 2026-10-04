@@ -404,9 +404,14 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"render_still",
      "Path-traced still to {path} (ray tracing; needs GPU support). Defaults "
      "to 1920x1080 at 512 samples, the same as the GUI's Render dialog. "
-     "`backdrop`: studio (a neutral sweep, the default) or environment (the "
-     "HDRI itself). `outlines`: edges over the image, as the viewport draws "
-     "them (default true). `fit` frames the model for THIS picture's aspect "
+     "`backdrop`: studio (a neutral sweep, the default), environment (the "
+     "HDRI itself) or sky (a procedural outdoor sky that lights the model as "
+     "well as backing it, its sun the key light; `sun_azimuth_deg` "
+     "counter-clockwise from +X seen from above, default where the studio "
+     "key stands for this camera, and `sun_elevation_deg` (0-90], default "
+     "40; the answer's `sun` says which it used). `outlines`: edges over "
+     "the image, as the viewport draws them (default true). `fit` frames the "
+     "model for THIS picture's aspect "
      "first: the still projects at width/height, while a plain `fit_view` "
      "solves for the viewport, so fit-then-render crops whenever the two "
      "differ — and offscreen the viewport is whatever the framebuffer "
@@ -420,7 +425,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "screen at any supersample. The path tracer's samples/seed/ground/"
      "backdrop are refused in quick mode.",
      "backdrop, fit, ground, height, line_weight, mode, outlines, path, "
-     "samples, seed, supersample, width",
+     "samples, seed, sun_azimuth_deg, sun_elevation_deg, supersample, width",
      remote::NotInBatch},
     {"rt_build", "Build ray-tracing acceleration structures.", ""},
     {"set_render_options", "Toggle shadows/SSAO/quality options.",
@@ -1517,7 +1522,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // parameters mean nothing here, and are refused rather than dropped: a
       // caller asking for 4096 samples of a raster image has the wrong idea
       // about what came back.
-      for (const char* k : {"samples", "seed", "ground", "backdrop"})
+      for (const char* k : {"samples", "seed", "ground", "backdrop",
+                            "sun_azimuth_deg", "sun_elevation_deg"})
         if (p.contains(k))
           throw std::runtime_error(
               std::string("`") + k +
@@ -1616,11 +1622,46 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // false renders the bare path-traced image.
     const bool outlines = StillOutlinesParam(p);
     // "studio" (default) shows a neutral sweep; "environment" shows the HDRI
-    // itself, which is what it was before there was a choice.
+    // itself, which is what it was before there was a choice; "sky" is the
+    // procedural outdoor sky, which lights the model as well as backing it
+    // (docs/rendering/still-render.md#the-sky).
     const std::string backdrop = p.value("backdrop", std::string("studio"));
-    if (backdrop != "studio" && backdrop != "environment") {
+    if (backdrop != "studio" && backdrop != "environment" &&
+        backdrop != "sky") {
       throw std::runtime_error("unknown backdrop: " + backdrop +
-                               "; backdrops: studio, environment");
+                               "; backdrops: studio, environment, sky");
+    }
+    ui::StillBackground background;
+    background.backdrop = backdrop == "sky" ? StillBackdrop::Sky
+                          : backdrop == "environment"
+                              ? StillBackdrop::Environment
+                              : StillBackdrop::Studio;
+    // Where the sun stands, sky only: refused elsewhere rather than ignored,
+    // since a studio still has no sun to move.
+    for (const char* k : {"sun_azimuth_deg", "sun_elevation_deg"}) {
+      if (!p.contains(k))
+        continue;
+      if (backdrop != "sky")
+        throw std::runtime_error(std::string("`") + k +
+                                 "` places the sun of backdrop: sky; this "
+                                 "still's backdrop is " +
+                                 backdrop);
+      const json& v = p[k];
+      if (!v.is_number() || !std::isfinite(v.get<double>()))
+        throw std::runtime_error(std::string(k) +
+                                 " is an angle in degrees; got " + v.dump());
+    }
+    if (p.contains("sun_azimuth_deg"))
+      background.sunAzimuthDeg = std::fmod(
+          std::fmod(p["sun_azimuth_deg"].get<double>(), 360.0) + 360.0, 360.0);
+    if (p.contains("sun_elevation_deg")) {
+      const double el = p["sun_elevation_deg"].get<double>();
+      if (el <= 0.0 || el > 90.0)
+        throw std::runtime_error(
+            std::format("sun_elevation_deg is the sun's height above the "
+                        "horizon, more than 0 and at most 90; got {}",
+                        el));
+      background.sunElevationDeg = el;
     }
     if (fit)
       ui::FitCameraToDocument(state, height > 0 ? static_cast<float>(width) /
@@ -1631,10 +1672,21 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     ui::SyncRenderersToDocument(state);
     std::string error, warning;
     bool ok = ui::RenderStillBlocking(state, width, height, samples, path, seed,
-                                      ground, &error, &warning,
-                                      backdrop == "studio", outlines);
-    json result = {{"ok", ok},         {"path", path},       {"width", width},
-                   {"height", height}, {"samples", samples}, {"error", error}};
+                                      ground, &error, &warning, &background,
+                                      outlines);
+    json result = {{"ok", ok},
+                   {"path", path},
+                   {"width", width},
+                   {"height", height},
+                   {"samples", samples},
+                   {"error", error},
+                   {"backdrop", backdrop}};
+    // The sun the sky was lit by, derived or not: a default the caller did
+    // not choose is still one they should be able to read back.
+    if (background.backdrop == StillBackdrop::Sky && background.sunAzimuthDeg &&
+        background.sunElevationDeg)
+      result["sun"] = {{"azimuth_deg", *background.sunAzimuthDeg},
+                       {"elevation_deg", *background.sunElevationDeg}};
     // The postcondition a screenshot already carries: saying "ok" about a
     // picture of nothing is the confident wrong answer this codebase keeps
     // paying for.

@@ -895,9 +895,10 @@ bool StillFramesGeometry(const RTStillDesc& desc, const glm::vec3& min,
 }
 
 RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
-                          uint32_t seed, bool studioBackdrop, bool outlines) {
+                          uint32_t seed, StillBackground& background,
+                          bool outlines) {
   RTStillDesc desc;
-  desc.studioBackdrop = studioBackdrop;
+  desc.backdrop = background.backdrop;
   // Edges, colour and width all come from the renderer the viewport uses, so
   // the still cannot disagree with the screen about what an edge looks like.
   // main.cpp runs it in WIREFRAME mode, which is why this reads wireframeColor
@@ -958,14 +959,52 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
   if (state.camera)
     desc.rig = conv::StudioRig(state.camera->GetViewMatrix(),
                                state.lightsLockedToModel);
-  if (state.ibl) {
-    desc.environment = state.ibl->EnvironmentView();
-    desc.irradiance = state.ibl->IrradianceView();
-    desc.prefilter = state.ibl->PrefilterView();
-    desc.brdfLut = state.ibl->BrdfLutView();
-    desc.envSampler = state.ibl->EnvSampler();
-    desc.lutSampler = state.ibl->LutSampler();
-    desc.prefilterMips = state.ibl->PrefilterMips();
+  IBLTextures* ibl = state.ibl;
+  if (background.backdrop == StillBackdrop::Sky) {
+    // The sky (docs/rendering/still-render.md#the-sky). The sun stands where
+    // the studio key stands for this camera unless the caller placed it —
+    // over the viewer's left shoulder, so the side being looked at is lit,
+    // which is the reason the studio key stands there.
+    if (!background.sunAzimuthDeg) {
+      glm::vec3 k = desc.rig.key;
+      k.z = 0.0f; // the key's direction on the ground
+      const float len = glm::length(k);
+      background.sunAzimuthDeg =
+          len > 1e-4f
+              ? std::fmod(glm::degrees(std::atan2(k.y, k.x)) + 360.0, 360.0)
+              : 0.0;
+    }
+    if (!background.sunElevationDeg)
+      background.sunElevationDeg = kDefaultSunElevationDeg;
+    const double az = glm::radians(*background.sunAzimuthDeg);
+    const double el = glm::radians(*background.sunElevationDeg);
+    const glm::vec3 sun(static_cast<float>(std::cos(el) * std::cos(az)),
+                        static_cast<float>(std::cos(el) * std::sin(az)),
+                        static_cast<float>(std::sin(el)));
+    // The sky is the world's, not the studio's: it does not turn with the
+    // camera, and the key light IS the sun, so the shadow falls away from
+    // the disc the backdrop shows.
+    desc.rig.key = sun;
+    desc.rig.envRotation = glm::mat3(1.0f);
+    // Outdoors the sun is most of the light. The sky gives about a third of
+    // the studio HDRI's light, so at the studio key's strength the whole
+    // still sat a stop under the studio one; at 2.5 times it a light grey
+    // face square to the sun blew out to white. 1.5 keeps a sunlit face
+    // bright with its form, and the shade side a sky-lit blue.
+    desc.keyScale = 1.5f;
+    ibl = state.skyEnvironment
+              ? state.skyEnvironment(*background.sunAzimuthDeg,
+                                     *background.sunElevationDeg)
+              : nullptr;
+  }
+  if (ibl) {
+    desc.environment = ibl->EnvironmentView();
+    desc.irradiance = ibl->IrradianceView();
+    desc.prefilter = ibl->PrefilterView();
+    desc.brdfLut = ibl->BrdfLutView();
+    desc.envSampler = ibl->EnvSampler();
+    desc.lutSampler = ibl->LutSampler();
+    desc.prefilterMips = ibl->PrefilterMips();
   }
   return desc;
 }
@@ -996,7 +1035,7 @@ std::string NoSceneReason(const AppState& state) {
 bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
                          uint32_t seed, bool groundPlane, std::string* error,
-                         std::string* warning, bool studioBackdrop,
+                         std::string* warning, StillBackground* background,
                          bool outlines) {
   auto fail = [&](const std::string& m) {
     if (error)
@@ -1010,15 +1049,18 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
   if (samples == 0)
     samples = 1;
 
-  RTStillDesc desc =
-      MakeStillDesc(state, width, height, seed, studioBackdrop, outlines);
+  StillBackground studio;
+  RTStillDesc desc = MakeStillDesc(state, width, height, seed,
+                                   background ? *background : studio, outlines);
   if (warning && state.rtSceneValid &&
       !StillFramesGeometry(desc, state.rtSceneMin, state.rtSceneMax)) {
     *warning = "the camera framed no geometry — the still is the backdrop "
                "only (fit the view, then render again)";
   }
   if (!desc.irradiance)
-    return fail("IBL maps unavailable");
+    return fail(desc.backdrop == StillBackdrop::Sky
+                    ? "the sky's lighting maps could not be built"
+                    : "IBL maps unavailable");
   if (!state.rayTracer->BeginStill(desc))
     return fail("BeginStill failed");
 
@@ -1155,8 +1197,11 @@ void PumpRenderJob(AppState& state) {
       finish(false, NoSceneReason(state));
       return;
     }
+    StillBackground background;
+    background.backdrop =
+        job.studioBackdrop ? StillBackdrop::Studio : StillBackdrop::Environment;
     RTStillDesc desc = MakeStillDesc(state, job.width, job.height, job.seed,
-                                     job.studioBackdrop, job.outlines);
+                                     background, job.outlines);
     // Saved is not the same as good: a still whose scene is entirely outside
     // the frustum is a valid PNG of the backdrop, and the modal used to
     // report that as a plain success.

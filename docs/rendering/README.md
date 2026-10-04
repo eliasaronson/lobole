@@ -235,6 +235,10 @@ hidden `[.outline-perf]` case is the benchmark.
   solid clear colour from the theme, not the environment. The maps are
   sampled through the rig's `envRotation`, so the studio turns with the
   camera like the lights do.
+  A path-traced still with `backdrop: sky` swaps in a second set of maps,
+  built the same way from a procedural sky image and lit by its sun
+  ([still-render.md#the-sky](still-render.md#the-sky)); the viewport and
+  quick stills always use the studio HDRI.
 - **Tone mapping**: ACES filmic (Narkowicz fit) in `mesh.frag`.
 - **Anti-aliasing**: 4x MSAA over the whole main pass, resolved into the
   swapchain image; `GetMaxUsableSampleCount` falls back to 2x, then 1x, from

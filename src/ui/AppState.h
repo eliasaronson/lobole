@@ -1198,6 +1198,13 @@ struct AppState {
   std::vector<SceneRenderer*> sceneRenderers;
   FaceSelector* faceSelector = nullptr;
   IBLTextures* ibl = nullptr;
+  // The procedural outdoor sky's maps for a sun at (azimuth, elevation)
+  // degrees, built the first time a sky still asks and kept for the next one
+  // with the same sun (docs/rendering/still-render.md#the-sky). Installed by
+  // main.cpp next to `ibl`; null without a renderer, and the result is null
+  // when the maps cannot be built.
+  std::function<IBLTextures*(double sunAzimuthDeg, double sunElevationDeg)>
+      skyEnvironment;
   GLFWwindow* window = nullptr;
 
   // Mate creation tool (A3 phase 3): a toolbar button starts it with a mate

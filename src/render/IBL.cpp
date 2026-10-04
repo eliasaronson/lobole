@@ -322,8 +322,18 @@ bool IBLPrecompute::Build(const std::string& hdrPath,
   // the convolution.
   if (!LoadHDR(hdrPath))
     return false;
+  Precompute(cachePath);
+  return true;
+}
+
+void IBLPrecompute::BuildFromImage(Image env) {
+  m_env = std::move(env);
+  Precompute(std::string());
+}
+
+void IBLPrecompute::Precompute(const std::string& cachePath) {
   if (!cachePath.empty() && LoadCache(cachePath))
-    return true;
+    return;
 
   LOG_INFO("IBL: precomputing irradiance / prefilter / BRDF (one-time)...");
   ComputeIrradiance();
@@ -331,7 +341,61 @@ bool IBLPrecompute::Build(const std::string& hdrPath,
   ComputeBRDF();
   if (!cachePath.empty())
     SaveCache(cachePath);
-  return true;
+}
+
+// ---- procedural sky --------------------------------------------------------
+
+// Radiances are linear and chosen against the still's ACES tone map: the
+// zenith reads as a clear mid blue, the horizon as a pale haze, the ground as
+// a dry grey-brown in sun. The sun disc is drawn larger than the real sun's
+// quarter degree so it survives the 1024-wide map (a third of a degree a
+// pixel), and kept moderate: the KEY light is the sun's direct light, with its
+// shadow, so the disc and its glow only have to give the IBL a bright side.
+IBLPrecompute::Image IBLPrecompute::GenerateSky(const glm::vec3& sunToward,
+                                                int width, int height) {
+  Image img;
+  img.width = width;
+  img.height = height;
+  img.pixels.resize(static_cast<size_t>(width) * height);
+  const glm::vec3 sun = glm::normalize(sunToward);
+  const float sunUp = std::clamp(sun.z, 0.0f, 1.0f);
+  // A low sun leaves a dimmer sky and a dimmer ground.
+  const float skyScale = 0.55f + 0.45f * std::sqrt(sunUp);
+  const glm::vec3 kZenith(0.060f, 0.135f, 0.450f);
+  const glm::vec3 kHorizon(0.380f, 0.560f, 0.980f);
+  const glm::vec3 kGround(0.190f, 0.180f, 0.150f);
+  const glm::vec3 kSunColor(1.0f, 0.95f, 0.85f);
+  const float kDiscInner = std::cos(glm::radians(0.65f));
+  const float kDiscOuter = std::cos(glm::radians(0.85f));
+  ParallelRows(height, [&](int y) {
+    for (int x = 0; x < width; x++) {
+      const glm::vec3 d =
+          EquirectUVToDir((x + 0.5f) / width, (y + 0.5f) / height);
+      const float up = d.z;
+      glm::vec3 c;
+      if (up >= 0.0f) {
+        c = glm::mix(kZenith, kHorizon, std::pow(1.0f - up, 3.0f)) * skyScale;
+        const float cs = std::max(glm::dot(d, sun), 0.0f);
+        // The glow: a broad brightening of the sun's half of the sky (which
+        // gives the IBL its sunward side) and a tight aureole round the disc.
+        c += kSunColor *
+             (0.12f * std::pow(cs, 6.0f) + 0.25f * std::pow(cs, 32.0f) +
+              0.60f * std::pow(cs, 512.0f));
+        // The disc, with a pixel's worth of soft edge.
+        const float disc = std::clamp((glm::dot(d, sun) - kDiscOuter) /
+                                          (kDiscInner - kDiscOuter),
+                                      0.0f, 1.0f);
+        c += kSunColor * 30.0f * disc;
+      } else {
+        // Ground below the horizon, through a thin band of haze.
+        const glm::vec3 ground = kGround * (0.35f + 0.65f * sunUp);
+        const float t = std::clamp(-up / 0.04f, 0.0f, 1.0f);
+        c = glm::mix(kHorizon * skyScale * 0.8f, ground, t * t * (3 - 2 * t));
+      }
+      img.pixels[static_cast<size_t>(y) * width + x] = {c, 1.0f};
+    }
+  });
+  return img;
 }
 
 // ---- debug dump ----------------------------------------------------------

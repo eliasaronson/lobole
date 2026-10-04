@@ -20,6 +20,7 @@ class SketchFeature;
 class SplitFeature;
 class FilletFeature; // defined in core/features/FilletFeature.h
 struct RTStillDesc;  // defined in RayTracingRenderer.h
+enum class StillBackdrop : int; // defined in RayTracingRenderer.h (Studio = 0)
 struct Ray;          // defined in FaceSelector.h
 
 // Pushing the document at the renderers, and rendering a still.
@@ -86,12 +87,32 @@ void SyncGeometryDelta(AppState& state);
 // only).
 bool SyncRayTracingScene(AppState& state, bool groundPlane = false);
 
+// What stands behind a traced still and lights it — render_still's
+// `backdrop` and, for the sky, where the sun stands
+// (docs/rendering/still-render.md#the-sky). Value-initialized, it is the
+// studio sweep.
+struct StillBackground {
+  ::StillBackdrop backdrop{};
+  // Sky only, in degrees: azimuth counter-clockwise from world +X seen from
+  // above, elevation above the ground plane. Unset = derived: the azimuth
+  // from where the studio key light stands for this camera, the elevation
+  // kDefaultSunElevationDeg. MakeStillDesc writes back what it used.
+  std::optional<double> sunAzimuthDeg;
+  std::optional<double> sunElevationDeg;
+};
+// The default sun's height. Not a model-scale quantity — an angle means the
+// same thing on a watch and on a house — so a fixed value is right here: a
+// mid-morning sun, high enough for short shadows that still model the form.
+inline constexpr double kDefaultSunElevationDeg = 40.0;
+
 // Builds the offline-render descriptor from the current app state (camera +
 // shared IBL maps) for a `width`x`height` still with the given RNG seed.
 // `outlines` is ANDed with the viewport's own outline mode, so a still draws
-// edges exactly when the screen it came from does.
+// edges exactly when the screen it came from does. A sky background fills in
+// the sun it used; without its maps (no renderer) the descriptor has no
+// irradiance, which every caller refuses.
 ::RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
-                            uint32_t seed, bool studioBackdrop = true,
+                            uint32_t seed, StillBackground& background,
                             bool outlines = true);
 
 // Why a still cannot be taken of the active tab, or "" when it is a part or
@@ -112,7 +133,8 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
                          uint32_t samples, const std::string& path,
                          uint32_t seed, bool groundPlane, std::string* error,
                          std::string* warning = nullptr,
-                         bool studioBackdrop = true, bool outlines = true);
+                         StillBackground* background = nullptr,
+                         bool outlines = true);
 
 // Advances an active AppState::renderJob by one step per call: a path trace
 // by one sample batch (the non-blocking counterpart of RenderStillBlocking),
