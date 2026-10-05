@@ -115,8 +115,8 @@ void MaterialLibrary::InitializeMaterials() {
       "Black Plastic"};
 
   materials[MaterialType::PETG] = {
-      // A printed orange, pre-darkened for the bright rig as the woods are:
-      // at 0.8/0.32 it rendered yellow.
+      // A printed orange. At 0.8/0.32 it rendered yellow under the old tone
+      // curve; this darker value reads orange under the corrected one too.
       glm::vec3(0.42f, 0.07f, 0.01f),
       0.0f,
       0.35f, // a printed surface: glossy filament, layer lines
@@ -124,8 +124,8 @@ void MaterialLibrary::InitializeMaterials() {
       0.05f, // ((n-1)/(n+1))^2 at n = 1.57
       "PETG"};
 
-  // Pre-darkened for the scene's bright rig, exactly as the woods below are:
-  // at the nominal 0.07 this rendered LIGHTER than black plastic, and blue,
+  // Darker than its nominal albedo, chosen for the scene's bright rig: at
+  // the nominal 0.07 this rendered LIGHTER than black plastic, and blue,
   // which is the one comparison the material exists to win. The weave's relief
   // scatters normals, so it catches more environment than a flat surface of
   // the same albedo — the tow highlights carry the read now, not the base.
@@ -176,9 +176,9 @@ void MaterialLibrary::InitializeMaterials() {
       0.045f, // ((n-1)/(n+1))^2 at n = 1.55
       "Epoxy"};
 
-  // Building materials. Linear base colours, pre-darkened for the bright rig
-  // as the woods below are, and matte: none of these has a gloss to speak
-  // of, and a felt roof at plastic's 0.6 read wet.
+  // Building materials. Linear base colours, tuned by eye under the corrected
+  // tone curve, and matte: none of these has a gloss to speak of, and a felt
+  // roof at plastic's 0.6 read wet.
   materials[MaterialType::BRICK] = {
       glm::vec3(0.30f, 0.11f, 0.06f), // muted red-brown fired clay
       0.0f,
@@ -226,62 +226,62 @@ void MaterialLibrary::InitializeMaterials() {
   // procedurally in the shader (see the "procedural grain" block below).
   // Colors are the light early-wood tone — the shader darkens toward the
   // grain lines using patternContrast, so these read as the overall hue.
-  // NOTE: these were pre-darkened (~1.4x) against a tone curve that washed
-  // albedos out (no exposure before ACES, pow 1/2.2, a x1.1 lift). The curve
-  // now shows a lit linear colour about as its sRGB encode
-  // (docs/rendering/README.md#tone-mapping), so they read somewhat darker
-  // than their names; tuned against a render, not raw perceptual targets.
+  // Each is a finished sample's typical sRGB tone, converted to linear
+  // (c^2.2; the sRGB triple is in the comment). The tone curve shows a lit
+  // linear colour about as its sRGB encode
+  // (docs/rendering/README.md#tone-mapping), so these read as the wood does.
+  // They were once pre-darkened ~1.4x for a curve that washed albedos out.
   materials[MaterialType::WOOD_OAK] = {
-      glm::vec3(0.42f, 0.28f, 0.14f), // Warm honey brown
+      glm::vec3(0.55f, 0.35f, 0.16f), // Warm honey brown (196,160,110)
       0.0f,
       0.55f,
       0.4f,
       0.04f,
       "Oak"};
   materials[MaterialType::WOOD_PINE] = {
-      glm::vec3(0.60f, 0.45f, 0.25f), // Pale yellow
+      glm::vec3(0.73f, 0.51f, 0.26f), // Pale yellow (222,190,140)
       0.0f,
       0.6f,
       0.35f,
       0.04f,
       "Pine"};
   materials[MaterialType::WOOD_WALNUT] = {
-      glm::vec3(0.085f, 0.052f, 0.033f), // Dark chocolate brown
+      glm::vec3(0.11f, 0.048f, 0.025f), // Dark chocolate brown (92,62,44)
       0.0f,
       0.5f,
       0.45f,
       0.04f,
       "Walnut"};
   materials[MaterialType::WOOD_MAPLE] = {
-      glm::vec3(0.50f, 0.39f, 0.25f), // Pale cream, less yellow than pine
+      glm::vec3(0.79f, 0.61f, 0.38f), // Pale cream, less yellow (230,205,165)
       0.0f,
       0.5f,
       0.4f,
       0.04f,
       "Maple"};
   materials[MaterialType::WOOD_BEECH] = {
-      glm::vec3(0.47f, 0.32f, 0.21f), // Pinkish tan
+      glm::vec3(0.68f, 0.40f, 0.22f), // Pinkish tan (215,170,130)
       0.0f,
       0.55f,
       0.4f,
       0.04f,
       "Beech"};
   materials[MaterialType::PLYWOOD_BIRCH] = {
-      glm::vec3(0.60f, 0.48f, 0.30f), // Pale cream birch face
+      glm::vec3(0.77f, 0.61f, 0.38f), // Pale cream birch face (228,205,165)
       0.0f,
       0.55f,
       0.4f,
       0.04f,
       "Birch Plywood"};
   materials[MaterialType::PLYWOOD_PINE] = {
-      glm::vec3(0.55f, 0.41f, 0.23f), // Softwood ply face
+      glm::vec3(0.68f, 0.46f, 0.22f), // Softwood ply face (215,180,130)
       0.0f,
       0.6f,
       0.35f,
       0.04f,
       "Pine Plywood"};
   materials[MaterialType::MDF] = {
-      glm::vec3(0.40f, 0.29f, 0.19f), // Uniform tan-brown, matte
+      glm::vec3(0.46f, 0.26f, 0.13f), // Uniform tan-brown, matte (180,140,100)
       0.0f,
       0.75f,
       0.25f,
