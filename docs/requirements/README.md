@@ -132,8 +132,13 @@ key for the kind, a missing required key, an unknown value of a key that
 has a vocabulary (`quantity`, `mode`, `expect`, `class`), an unknown bound
 kind, a number bounded `pass` or a verdict bounded by a number, `within`
 with its min above its max, and a requirement naming a document, study,
-occurrence, mate or setup that does not exist. A file holding any of these
-does not load: the requirement would load as something it is not.
+occurrence, mate or setup that does not exist. A key of the wrong type is
+refused by its own name and what it takes (`measure.document` is the id of
+the part it measures, `measure.allow_unverified` true or false,
+`measure.offset` a number), and a `document` written as an open tab's name
+also says which id that is: a requirement keeps ids, because a name
+repoints silently on a rename. A file holding any of these does not load:
+the requirement would load as something it is not.
 
 ## Evidence
 

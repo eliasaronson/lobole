@@ -134,6 +134,55 @@ void WriteSide(json& j, const char* key, double value,
     j[key] = expr;
 }
 
+// The type of every key that is read as an id, a flag, a number or text,
+// refused by the key's own name before anything reads it. Reading one
+// directly let nlohmann answer: `document: "Garden shed"` came back as "a
+// parameter has the wrong type -- type must be number, but is string", which
+// names neither the field nor what goes in it (generators/house/README.md).
+void ValidateTypes(const std::string& kind, const char* document,
+                   const json& m) {
+  const auto refuse = [&](const std::string& key, const std::string& takes) {
+    throw std::runtime_error("measure " + kind + ": `measure." + key + "` is " +
+                             takes + ", not " + m.at(key).dump());
+  };
+  const auto id = [](const json& v) {
+    return v.is_number_integer() && v.get<int64_t>() >= 0;
+  };
+  struct IdKey {
+    const char* key;
+    const char* what;
+  };
+  const std::string doc = std::string("the id of the ") + document +
+                          " it measures (list_parts), not its name: a name "
+                          "repoints silently on a rename";
+  const IdKey ids[] = {
+      {"study", "a study id (list_studies)"},
+      {"mate", "a mate id (list_mates)"},
+      {"motion_study", "a motion study id (list_motion_studies)"},
+      {"setup", "a CAM setup id (list_cam_setups)"}};
+  if (m.contains("document") && !id(m.at("document")))
+    refuse("document", doc);
+  for (const IdKey& k : ids)
+    if (m.contains(k.key) && !id(m.at(k.key)))
+      refuse(k.key, k.what);
+  if (m.contains("documents") && m.at("documents").is_array())
+    for (const json& e : m.at("documents"))
+      if (!id(e))
+        throw std::runtime_error("measure " + kind +
+                                 ": `measure.documents` lists part ids "
+                                 "(list_parts), not " +
+                                 e.dump());
+  for (const char* k : {"allow_unverified", "allow_skipped"})
+    if (m.contains(k) && !m.at(k).is_boolean())
+      refuse(k, "true or false");
+  for (const char* k : {"offset", "resolution"})
+    if (m.contains(k) && !m.at(k).is_number())
+      refuse(k, "a number");
+  for (const char* k : {"expression", "unit"})
+    if (m.contains(k) && !m.at(k).is_string())
+      refuse(k, "text");
+}
+
 // Each kind's own refusals for values the vocabulary fixes.
 void ValidateValues(const std::string& kind, const json& m) {
   const auto oneOf = [&](const char* key,
@@ -362,6 +411,7 @@ void Validate(const json& measure, const Bound& bound) {
     if (!measure.contains(k))
       throw std::runtime_error("measure " + kind + " needs `" + k +
                                "` (it takes: " + Join(spec->keys) + ")");
+  ValidateTypes(kind, spec->document, measure);
   ValidateValues(kind, measure);
 
   bool knownBound = false;

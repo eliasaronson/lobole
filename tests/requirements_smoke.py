@@ -282,6 +282,19 @@ def section_area(d):
             measure={"kind": "section_area", "document": room,
                      "of": "enclosed", "base_plane": "xy"},
             bound={"kind": "at_least", "value": 1})
+    # `document` given as the tab's NAME: refused (a requirement keeps the
+    # id), and the refusal says which field and which id that name is.
+    room_name = [s for s in d.call("list_parts")["parts"]
+                 if s["id"] == room][0]["name"]
+    refused(d, "add_requirement",
+            f"'{room_name}' is document {room}", name="x",
+            measure={"kind": "section_area", "document": room_name,
+                     "of": "enclosed", "base_plane": "xy", "offset": 25},
+            bound={"kind": "at_least", "value": 1})
+    refused(d, "add_requirement", "`measure.document` is the id", name="x",
+            measure={"kind": "section_area", "document": "no such tab",
+                     "of": "enclosed", "base_plane": "xy", "offset": 25},
+            bound={"kind": "at_least", "value": 1})
     refused(d, "add_requirement", "no body 'Roof'", name="x",
             measure={"kind": "section_area", "document": room,
                      "of": "enclosed", "base_plane": "xy", "offset": 25,

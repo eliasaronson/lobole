@@ -1615,7 +1615,26 @@ json AssertionRow(ui::AppState& state, const req::Requirement& r) {
   return j;
 }
 
+// A `document` written as a tab's NAME is refused like any wrong type (an id
+// is what a requirement keeps: a name repoints silently on a rename), but
+// when the name is an open tab the refusal says which id that is, so the fix
+// is one copy rather than a trip to list_parts.
+void RefuseDocumentByName(const ui::AppState& state, const json& measure) {
+  if (!measure.is_object() || !measure.contains("document") ||
+      !measure.at("document").is_string())
+    return;
+  const std::string name = measure.at("document").get<std::string>();
+  for (const auto& slot : state.parts)
+    if (slot.name == name)
+      throw std::runtime_error(
+          "`measure.document` is the id of the document it measures, not "
+          "its name: '" +
+          name + "' is document " + std::to_string(slot.id) +
+          " (a name repoints silently on a rename)");
+}
+
 json AddRequirement(ui::AppState& state, req::Requirement r) {
+  RefuseDocumentByName(state, r.measure);
   req::Validate(r.measure, r.bound);
   RefuseUnresolvable(state, r);
   r.id = state.nextRequirementId++;
@@ -1708,6 +1727,7 @@ std::optional<json> HandleRequirementsRpc(ui::AppState& state,
       r.measure = p.at("measure");
     if (p.contains("bound"))
       r.bound = req::BoundFromJson(p.at("bound"));
+    RefuseDocumentByName(state, r.measure);
     req::Validate(r.measure, r.bound);
     RefuseUnresolvable(state, r);
     r.revision = live.revision + 1;

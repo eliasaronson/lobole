@@ -171,6 +171,39 @@ TEST_CASE("an unknown measure or bound is refused, naming the accepted ones",
   CHECK_THAT(Refusal(m, atLeast), ContainsSubstring("not 1.5"));
 }
 
+TEST_CASE("a measure key of the wrong type is refused by its own name",
+          "[requirements]") {
+  // nlohmann's own answer named neither the field nor what goes in it:
+  // "type must be number, but is string" for document: "Garden shed".
+  CHECK_THAT(Refusal({{"kind", "mass"}, {"document", "Garden shed"}},
+                     {{"kind", "at_most"}, {"value", 1}}),
+             ContainsSubstring("`measure.document` is the id of the "
+                               "part|assembly it measures (list_parts), not "
+                               "its name"));
+  CHECK_THAT(Refusal({{"kind", "study_result"},
+                      {"document", 1},
+                      {"study", "Load case"},
+                      {"quantity", "max_von_mises"}},
+                     {{"kind", "at_most"}, {"value", 1}}),
+             ContainsSubstring("`measure.study` is a study id"));
+  CHECK_THAT(Refusal({{"kind", "check_seat"},
+                      {"document", 1},
+                      {"occurrences", {2}},
+                      {"allow_unverified", "yes"}},
+                     {{"kind", "pass"}}),
+             ContainsSubstring("`measure.allow_unverified` is true or false"));
+  CHECK_THAT(Refusal({{"kind", "section_area"},
+                      {"document", 1},
+                      {"of", "enclosed"},
+                      {"base_plane", "xy"},
+                      {"offset", "2340"}},
+                     {{"kind", "at_least"}, {"value", 1}}),
+             ContainsSubstring("`measure.offset` is a number"));
+  CHECK_THAT(Refusal({{"kind", "check_literals"}, {"documents", {1, "x"}}},
+                     {{"kind", "pass"}}),
+             ContainsSubstring("`measure.documents` lists part ids"));
+}
+
 TEST_CASE("a requirement's state: only current evidence is a pass",
           "[requirements]") {
   req::Requirement r = Mass(100, 200);
