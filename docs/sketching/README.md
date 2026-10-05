@@ -416,9 +416,14 @@ affine: pixel `(px, py)` maps to `origin + R(rotation)·(px, py)·unitsPerPixel`
   idle before freeing, since a frame in flight may still sample them. The
   cache is keyed by asset name, which is per document, so it is dropped when
   the active document changes.
-- `add_reference_image` centres the image on `at` and turns it about that
-  centre by `rotation` (radians) or `rotation_deg`, never both;
-  `set_reference_image` turns it about `origin`, its (0, 0) pixel corner.
+- **One placement convention for both RPCs.** `add_reference_image` and
+  `set_reference_image` take the position as `at`, the image's centre, or
+  `origin`, its (0, 0) pixel corner (what is stored), never both. A turn
+  (`rotation` in radians or `rotation_deg`, never both) is about the centre
+  in both: a `set` that turns or rescales the image with neither keeps the
+  centre where it was. Both answer with the placement as `at` and `origin`.
+  Add once took only the centre and set only the corner, and the house
+  generator's plan landed half an image away from where it was put.
 
 ## Operations on the entity list
 
@@ -616,8 +621,8 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `mirror` | `sketch_id, sources, axis, link?` | `axis` may be a datum axis id |
 | `pattern` | `sketch_id, sources, count, link?` and `step` or `circular, center, angle \| angle_deg` | circular angle is **per step** |
 | `project_geometry` | `sketch_id, feature_id, element, kind` | live external geometry; returns `gen_ids` |
-| `add_reference_image` | `sketch_id, path, at?, opacity?, units_per_pixel?, rotation \| rotation_deg, show_always?` | returns `image_id`; turned about `at` |
-| `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, show_always?, origin?, units_per_pixel?, rotation \| rotation_deg` | |
+| `add_reference_image` | `sketch_id, path, at? \| origin?, opacity?, units_per_pixel?, rotation \| rotation_deg, show_always?` | returns `image_id`, `at`, `origin`; turned about its centre |
+| `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, show_always?, at? \| origin?, units_per_pixel?, rotation \| rotation_deg` | returns `at`, `origin`; a turn keeps the centre |
 | `calibrate_reference_image` | `sketch_id, image_id, p1, p2, distance, align?` | `distance` in sketch mm |
 | `delete_reference_image` | `sketch_id, image_id` | |
 
@@ -648,7 +653,8 @@ link; `modify_feature` with an edited sketch JSON covers them.
   both formats, regen-hash exclusion, `show_always` round trip.
 - `tests/underlay_show_always_smoke.py` — a show-always underlay in a quick
   still with no sketch in edit, by pixel colour; none without the flag;
-  `rotation_deg` on add turns it about `at`.
+  `rotation_deg` on add turns it about its centre; `at` and `origin` name
+  one placement in add and set, and a turn on set keeps the centre.
 - `tests/test_sketch_text.cpp` `[text]` — cap height, advance and kerning
   against the fonts' own numbers, alignment, save/reload, refusals, every
   ASCII glyph of the outline font as a profile, a cut label's face names,

@@ -1247,14 +1247,18 @@ def offset(sketch_id: int, chain: list, distance: float,
 
 @_reference(description="Import a raster image (PNG/JPEG/BMP) into a sketch (by "
           "feature id) as a reference underlay to trace geometry over. path is "
-          "read by the running app (must be reachable by it). The image is "
-          "centered on 'at' (default plane origin [0,0]) at a default scale; "
+          "read by the running app (must be reachable by it). Placement, the "
+          "same here as in set_reference_image: 'at' [u,v] is the image's "
+          "CENTRE, 'origin' [u,v] its (0,0) pixel corner, never both "
+          "(default: centred on the plane origin), at a default scale; "
           "recalibrate to a real dimension with calibrate_reference_image. "
-          "rotation_deg turns it about 'at' (degrees, CCW). show_always=True "
+          "rotation_deg turns it about its centre (degrees, CCW). "
+          "show_always=True "
           "keeps it drawn when the sketch is not being edited and in quick "
           "stills, to check a model against the plan it was traced from. "
-          "Returns {image_id, width_px, height_px, asset}.")
+          "Returns {image_id, width_px, height_px, asset, at, origin}.")
 def add_reference_image(sketch_id: int, path: str, at: list | None = None,
+                        origin: list | None = None,
                         units_per_pixel: float | None = None,
                         opacity: float = 0.5,
                         rotation_deg: float | None = None,
@@ -1262,6 +1266,8 @@ def add_reference_image(sketch_id: int, path: str, at: list | None = None,
     params = {"sketch_id": sketch_id, "path": path, "opacity": opacity}
     if at is not None:
         params["at"] = at
+    if origin is not None:
+        params["origin"] = origin
     if units_per_pixel is not None:
         params["units_per_pixel"] = units_per_pixel
     if rotation_deg is not None:
@@ -1289,8 +1295,10 @@ def calibrate_reference_image(sketch_id: int, image_id: int, p1: list,
           "of opacity (0..1), hidden (bool), show_always (bool: drawn outside "
           "sketch edit and in quick stills), rotation (RADIANS) or "
           "rotation_deg (degrees) but never both, units_per_pixel (sketch mm "
-          "per image pixel), or origin [u,v] (plane-UV of the image's (0,0) "
-          "pixel corner). Only the fields you pass change.")
+          "per image pixel), and the placement as in add_reference_image: "
+          "at [u,v] (the image's centre) or origin [u,v] (its (0,0) pixel "
+          "corner), never both. A turn or a rescale with neither keeps the "
+          "centre where it was. Only the fields you pass change.")
 def set_reference_image(sketch_id: int, image_id: int,
                         opacity: float | None = None,
                         hidden: bool | None = None,
@@ -1298,6 +1306,7 @@ def set_reference_image(sketch_id: int, image_id: int,
                         rotation: float | None = None,
                         rotation_deg: float | None = None,
                         units_per_pixel: float | None = None,
+                        at: list | None = None,
                         origin: list | None = None) -> dict:
     params = {"sketch_id": sketch_id, "image_id": image_id}
     if opacity is not None:
@@ -1312,6 +1321,8 @@ def set_reference_image(sketch_id: int, image_id: int,
         params["rotation_deg"] = rotation_deg
     if units_per_pixel is not None:
         params["units_per_pixel"] = units_per_pixel
+    if at is not None:
+        params["at"] = at
     if origin is not None:
         params["origin"] = origin
     return _call("set_reference_image", **params)

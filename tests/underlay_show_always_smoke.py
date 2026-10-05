@@ -134,6 +134,35 @@ def main():
         w1, h1 = extent(still())
         expect(w0 > 2 * h0 and h1 > 2 * w1,
                f"rotation_deg turns it: {w0}x{h0} unturned, {w1}x{h1} turned")
+
+        # One placement convention in add and set: `at` the centre, `origin`
+        # the (0, 0) corner, a turn about the centre in both.
+        def close(a, b):
+            return all(abs(x - y) < 1e-6 for x, y in zip(a, b))
+        r = d.call("add_reference_image", sketch_id=plan, path=strip,
+                   at=[10, 20], units_per_pixel=2.0)
+        ref, origin = r["image_id"], r["origin"]
+        expect(close(r["at"], [10, 20]), f"add answers the centre: {r['at']}")
+        s = d.call("set_reference_image", sketch_id=plan, image_id=ref,
+                   rotation_deg=90)
+        expect(close(s["at"], [10, 20]) and not close(s["origin"], origin),
+               f"a turn on set keeps the centre: at {s['at']}")
+        s = d.call("set_reference_image", sketch_id=plan, image_id=ref,
+                   at=[0, 0])
+        expect(close(s["at"], [0, 0]), "set places by the centre too")
+        s = d.call("set_reference_image", sketch_id=plan, image_id=ref,
+                   origin=[5, 5])
+        expect(close(s["origin"], [5, 5]), "and by the corner")
+        r2 = d.call("add_reference_image", sketch_id=plan, path=strip,
+                    origin=[5, 5], units_per_pixel=2.0, rotation_deg=90)
+        expect(close(r2["origin"], [5, 5]) and close(r2["at"], s["at"]),
+               "add by the corner lands where set by the corner did")
+        try:
+            d.call("add_reference_image", sketch_id=plan, path=strip,
+                   at=[0, 0], origin=[0, 0])
+            expect(False, "at and origin together are refused")
+        except Exception as e:  # noqa: BLE001 -- the refusal is the point
+            expect("not both" in str(e), f"refusal says why: {e}")
         return 0
     finally:
         app.terminate()

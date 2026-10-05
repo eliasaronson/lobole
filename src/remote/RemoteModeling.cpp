@@ -396,23 +396,27 @@ static constexpr MethodDoc ModelingMethods[] = {
      "a sketch as live locked construction geometry.",
      "element, feature_id, kind, sketch_id", remote::NeedsPart},
     {"add_reference_image",
-     "Attach an image underlay to a sketch from an image file (`path`), "
-     "centred on `at` [u, v] (sketch mm, default the plane origin) and "
-     "turned about that centre by `rotation` (RADIANS, CCW) or "
-     "`rotation_deg`, never both. `show_always` (default false) draws it "
-     "whenever its sketch is shown and in quick stills, not only while the "
-     "sketch is edited. Returns image_id.",
-     "at, opacity, path, rotation, rotation_deg, show_always, sketch_id, "
-     "units_per_pixel",
+     "Attach an image underlay to a sketch from an image file (`path`). "
+     "Placement, the same in add and set_reference_image: `at` [u, v] puts "
+     "the image's CENTRE there, `origin` [u, v] its (0, 0) pixel corner -- "
+     "sketch mm, one of the two, never both (default: centred on the plane "
+     "origin); `units_per_pixel` is sketch mm per image pixel; `rotation` "
+     "(RADIANS, CCW) or `rotation_deg`, never both, turns it about its "
+     "centre. `show_always` (default false) draws it whenever its sketch is "
+     "shown and in quick stills, not only while the sketch is edited. "
+     "Returns image_id, and the placement as both `at` and `origin`.",
+     "at, opacity, origin, path, rotation, rotation_deg, show_always, "
+     "sketch_id, units_per_pixel",
      remote::NeedsPart},
     {"set_reference_image",
      "Update an underlay's placement, opacity or visibility (`hidden`; "
      "`show_always` draws it outside sketch edit and in quick stills) by "
-     "{sketch_id, image_id}. "
-     "origin is [u, v] sketch mm, units_per_pixel is sketch mm per image "
-     "pixel, and the tilt is `rotation` (RADIANS, CCW about origin) or "
-     "`rotation_deg`, never both.",
-     "hidden, image_id, opacity, origin, rotation, rotation_deg, "
+     "{sketch_id, image_id}. Placement means what it does in "
+     "add_reference_image: `at` the centre or `origin` the (0, 0) pixel "
+     "corner, never both; a new `rotation`/`rotation_deg` or "
+     "`units_per_pixel` with neither keeps the CENTRE where it was. Returns "
+     "the placement as both `at` and `origin`.",
+     "at, hidden, image_id, opacity, origin, rotation, rotation_deg, "
      "show_always, sketch_id, units_per_pixel",
      remote::NeedsPart},
     {"calibrate_reference_image",
@@ -885,6 +889,16 @@ json SplitForPrinting(ui::AppState& state, Document& active,
   }
   backToWhereItWas();
   return out;
+}
+
+// A reference image's `at` (its centre) and `origin` (its (0, 0) pixel
+// corner) are two names for one placement; add and set take either, never
+// both.
+void RefuseTwoPlacements(const RpcParams& p) {
+  if (p.contains("at") && p.contains("origin"))
+    throw std::runtime_error(
+        "pass `at` (the image's centre) or `origin` (its (0, 0) pixel "
+        "corner), not both: they are two names for one placement");
 }
 
 } // namespace
@@ -1696,12 +1710,18 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       m == "set_reference_image" || m == "delete_reference_image") {
     // Sketch reference underlays
     // (v49, docs/sketching/README.md#reference-images-underlays).
-    // add:       {sketch_id, path, [at:[u,v]], [units_per_pixel], [opacity],
-    //             [rotation]|[rotation_deg], [show_always]}
+    // add:       {sketch_id, path, [at:[u,v]]|[origin:[u,v]],
+    //             [units_per_pixel], [opacity], [rotation]|[rotation_deg],
+    //             [show_always]}
     // calibrate: {sketch_id, image_id, p1:[u,v], p2:[u,v], distance,
     //             [align:"none"|"horizontal"|"vertical"]}
     // set:       {sketch_id, image_id, [opacity]|[hidden]|[rotation]|
-    //             [units_per_pixel]|[origin:[u,v]]|[show_always]}
+    //             [units_per_pixel]|[at:[u,v]]|[origin:[u,v]]|[show_always]}
+    // One placement convention in both: `at` is the image's centre and
+    // `origin` its (0, 0) pixel corner (what is stored), and a turn is about
+    // the centre. add used to take only the centre and set only the corner,
+    // so a script placing by one and adjusting by the other moved the image
+    // by half its turned extent (generators/house/README.md).
     // delete:    {sketch_id, image_id}
     size_t index = 0;
     Feature* f =
@@ -1730,18 +1750,34 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                  a.dump());
       return glm::dvec2(a[0].get<double>(), a[1].get<double>());
     };
+    // From the image's centre to its (0, 0) corner, turned with the image.
+    const auto centreToCorner = [](const sketch::ReferenceImage& ri) {
+      const glm::dvec2 half =
+          0.5 * glm::dvec2(ri.widthPx, ri.heightPx) * ri.unitsPerPixel;
+      const double c = std::cos(ri.rotation), sn = std::sin(ri.rotation);
+      return -glm::dvec2(c * half.x - sn * half.y, sn * half.x + c * half.y);
+    };
+    const auto placement = [&](const sketch::ReferenceImage& ri) {
+      const glm::dvec2 centre = ri.origin - centreToCorner(ri);
+      return json{{"at", {centre.x, centre.y}},
+                  {"origin", {ri.origin.x, ri.origin.y}}};
+    };
 
     if (m == "add_reference_image") {
+      RefuseTwoPlacements(p);
       const std::string path = p.at("path").get<std::string>();
       const std::optional<double> unitsPerPixel =
           p.contains("units_per_pixel")
               ? std::optional<double>(p.at("units_per_pixel").get<double>())
               : std::nullopt;
       const double opacity = p.value("opacity", 0.5);
-      // Centre the image on the requested point (default plane origin).
+      // Centred on `at` (default the plane origin), or cornered on `origin`.
       const glm::dvec2 center =
           p.contains("at") ? uv("at") : glm::dvec2(0.0, 0.0);
-      // rpc-params: at
+      const std::optional<glm::dvec2> corner =
+          p.contains("origin") ? std::optional<glm::dvec2>(uv("origin"))
+                               : std::nullopt;
+      // rpc-params: at, origin
       // Turned about that centre — the point the caller placed it by.
       const double rotation =
           AngleParam(p.contains("rotation"), p.value("rotation", 0.0),
@@ -1779,18 +1815,13 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       if (ext.empty())
         ext = ".png";
       ri.asset = std::to_string(sk->GetId()) + "-" + std::to_string(id) + ext;
-      // origin is the (0,0) pixel corner, so the half-extent from it to the
-      // centre turns with the image.
-      const glm::dvec2 half =
-          0.5 * glm::dvec2(ri.widthPx, ri.heightPx) * ri.unitsPerPixel;
-      const double c = std::cos(rotation), sn = std::sin(rotation);
-      ri.origin = center - glm::dvec2(c * half.x - sn * half.y,
-                                      sn * half.x + c * half.y);
+      ri.origin = corner ? *corner : center + centreToCorner(ri);
       doc->SetAsset(ri.asset, std::move(bytes));
       result = {{"image_id", id},
                 {"width_px", ri.widthPx},
                 {"height_px", ri.heightPx},
                 {"asset", ri.asset}};
+      result.update(placement(ri));
     } else if (m == "calibrate_reference_image") {
       // The points reach RpcParams through uv()'s argument.
       // rpc-params: p1, p2
@@ -1814,8 +1845,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const size_t ii = sk->IndexOfImage(p.at("image_id").get<uint32_t>());
       if (ii == std::numeric_limits<size_t>::max())
         throw std::runtime_error("no such image");
+      RefuseTwoPlacements(p);
       // Onto a copy, put in place only once every key has been read.
       sketch::ReferenceImage ri = sk->images[ii];
+      const glm::dvec2 centreBefore = ri.origin - centreToCorner(ri);
       if (p.contains("opacity"))
         ri.opacity = p.at("opacity").get<double>();
       if (p.contains("hidden"))
@@ -1829,10 +1862,17 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                        "rotation", "rotation_deg", ri.rotation);
       if (p.contains("units_per_pixel"))
         ri.unitsPerPixel = p.at("units_per_pixel").get<double>();
+      // The corner as given, the centre as given, or -- a turn or a rescale
+      // with neither -- the centre where it was.
       if (p.contains("origin"))
         ri.origin = uv("origin"); // rpc-params: origin
+      else if (p.contains("at") || p.contains("rotation") ||
+               p.contains("rotation_deg") || p.contains("units_per_pixel"))
+        ri.origin = (p.contains("at") ? uv("at") : centreBefore) +
+                    centreToCorner(ri); // rpc-params: at
       sk->images[ii] = ri;
       result["ok"] = true;
+      result.update(placement(ri));
     } else if (m == "delete_reference_image") {
       // Orphaned pixel bytes stay in the doc store; save-time pruning drops
       // any asset no image references (and keeps redo working meanwhile).
