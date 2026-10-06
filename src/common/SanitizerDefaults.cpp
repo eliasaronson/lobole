@@ -45,6 +45,18 @@ const char* __lsan_default_suppressions() {
       // same path and are now closed (XcafDocument) — this covers only the
       // strings OCC drops during the walk.
       "leak:XCAFPrs_DocumentExplorer\n"
+      // STEPControl_Controller / STEPCAFControl_Controller — the STEP
+      // controller singletons and the static parameter registry they build
+      // on first use (Interface_Static::Init, XSAlgo::Init, the IFSelect
+      // editors and the AsciiStrings they hold all nest under these two
+      // frames). OCC registers them into process-global tables and exposes
+      // no teardown for either; our side is a stack-local STEPControl_Writer
+      // or STEPCAFControl_Writer, so there is no handle to free. One-time,
+      // and the totals prove it: the same 2916 B / 136 allocations (writer)
+      // or 2964 B / 138 (CAF writer) in every process, whatever the test
+      // did. Reached from any STEP read or write.
+      "leak:STEPControl_Controller\n"
+      "leak:STEPCAFControl_Controller\n"
       // libdbus's per-connection registration state, from the GTK file
       // dialog (nativefiledialog → portal). One-time, per process, and the
       // connection is a library global we never see.
