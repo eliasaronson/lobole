@@ -920,6 +920,20 @@ add_test(NAME rpc_units_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_units_gate.py)
 set_tests_properties(rpc_units_gate PROPERTIES TIMEOUT 60)
 
+# The LGPL-family dependencies are linked as SEPARATE SHARED OBJECTS, which is
+# the whole reason this project's own licence stays a choice: LGPL-2.1 s6 lets
+# us combine and license on our terms only while a recipient can relink the
+# library. One word turns SHARED into STATIC and nothing else changes -- the
+# build succeeds, this suite passes, every render is identical -- and the
+# promise THIRD_PARTY.md makes is void in binaries already shipped. Reads
+# DT_NEEDED out of the linked binary rather than grepping the build files, and
+# fails on a dependency no THIRD_PARTY.md row covers. Skips (77) on a non-ELF
+# build; Windows import tables are not read yet.
+add_test(NAME linkage_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/linkage_gate.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(linkage_gate PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+
 # Assemblies A4 exploded views: RPCs, pure-view-state contract, persistence.
 add_test(NAME exploded_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/exploded_smoke.py
