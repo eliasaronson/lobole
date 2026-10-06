@@ -232,5 +232,30 @@ verified it — this codebase's habit is to state the actual numbers ("volume
 31.5, matching the exact frustum", "580 headless, 134 GUI") rather than "tests
 pass".
 
+## Licensing a contribution
+
 By contributing you agree that your work is licensed under
 **AGPL-3.0-or-later**, the license of the project.
+
+Sign off each commit (`git commit -s`). That appends a `Signed-off-by:` line
+certifying you wrote the patch, or otherwise have the right to submit it under
+that licence — the [Developer Certificate of
+Origin](https://developercertificate.org/), as the Linux kernel and the CNCF
+projects use it. If your employer holds rights in work you do, have their
+permission before you send it.
+
+**A new dependency is a licensing change, not a build change, and is reviewed
+as one.** The LGPL libraries here are linked as *separate shared objects*, and
+that is the only reason this application can be licensed on its own terms:
+LGPL-2.1 section 6 permits the combination while — and only while — a recipient
+can relink the library. Turning one into a static link removes that, silently,
+in builds already shipped. So:
+
+- a new dependency ships its [`THIRD_PARTY.md`](THIRD_PARTY.md) row (component,
+  purpose, licence, linkage) in the same pull request; and
+- `tests/linkage_gate.py` fails if an LGPL-family library stops being linked
+  dynamically, or if anything is linked that no row covers.
+
+Nothing GPL-licensed is copied into `src/`. That one links nothing, so no
+build-level check can see it — it is the only rule here that rests entirely on
+review.

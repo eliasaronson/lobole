@@ -6,6 +6,22 @@ that product. Designer is **not affiliated with, endorsed by, or sponsored
 by** any of them, and naming a product claims no compatibility,
 certification or approval.
 
+## This project's own name
+
+The name and logo of this project are not licensed under the AGPL, and are not
+granted by any contributor agreement. The licence covers the source code; it
+says nothing about the name, and copyleft does not transfer a mark.
+
+This is the ordinary arrangement for free software — Mozilla and the Linux
+Foundation both hold their marks separately from the licences on their code —
+and it exists for the reader's benefit rather than the author's: anyone
+redistributing a modified build should give it a different name, so that a
+user can tell whose build they are running and who to report a bug to.
+
+Referring to the project by name is free and always will be: saying that your
+software reads its files, drives it, forks it or replaces it is nominative use,
+exactly as described below for everyone else's marks.
+
 ## Which names appear
 
 - **Other CAD, CAM and design software:** FreeCAD, SolidWorks, Parasolid,

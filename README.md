@@ -351,6 +351,12 @@ Other products named in this repository are trademarks of their owners, and
 Designer is **not affiliated with, endorsed by, or sponsored by** any of them.
 Where those names are used, and why — see [`TRADEMARKS.md`](TRADEMARKS.md).
 
+The project's own name and logo are **not licensed under the AGPL**. The
+copyleft covers the code and grants no right to the name or the mark. You may
+say truthfully that your work derives from, or interoperates with, Designer —
+but a fork, a redistribution or a modified build takes its own name, so that
+anyone can tell whose build they are running.
+
 ### Third-party components
 
 Designer links LGPL libraries (OpenCASCADE, Netgen, and the vendored, modified
