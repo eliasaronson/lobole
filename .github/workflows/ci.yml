@@ -10,10 +10,8 @@ on:
   push:
     branches: [main]
   pull_request:
-  # For the sanitizers job below, which is too slow to put on every push.
+  # For the sanitizers job below, which is run by hand and never on a schedule.
   workflow_dispatch:
-  schedule:
-    - cron: "0 5 * * 1" # Mondays, 05:00 UTC
 
 jobs:
   # The GUI suite (./tools/gui-tests-xvfb.sh), on a runner with no GPU.
@@ -326,18 +324,27 @@ jobs:
             ctest --test-dir build -LE gui -j "$(nproc)" --output-on-failure
           fi
 
-  # ASan + UBSan. Deliberately NOT on every push: the sanitizer flags miss the
-  # normal build's ccache entries, so this is a cold compile of the whole
-  # project — minutes are free for public repositories but not for private
-  # ones, and this repo is still private. Weekly plus a manual "Run workflow"
-  # button is the compromise; drop the `schedule:` trigger above to make it
-  # manual-only, or move it to `push` once the repo is public.
+  # ASan + UBSan, by hand only — no push trigger and no schedule.
   #
-  # It found a real use-after-free in August 2026 (46ca04b), which is the
-  # argument for it running at all. Locally: tools/ci-local.sh --asan (~6 min
-  # on a warm tree — the same build and the same exclusions).
+  # The sanitizer flags miss the normal build's ccache entries, so this is a
+  # cold compile of the whole project, and on runner hardware the suite then
+  # takes ~98 minutes against ~6 locally on a warm tree. A weekly cron bought
+  # none of that back: it ran unwatched and was red for three weeks before
+  # anyone read it, which is worse than not running, because a red nightly
+  # teaches you to ignore the badge.
+  #
+  # So the real gate is local — tools/ci-local.sh --asan, the same build and
+  # the same exclusions — run when it is worth running: before a release,
+  # after touching ownership or threading, or when chasing a crash. It found
+  # a real use-after-free in August 2026 (46ca04b), which is the argument for
+  # running it at all.
+  #
+  # The button here stays because this job is NOT redundant with the local
+  # run: it builds against Ubuntu's apt OpenCASCADE, and nix's OCCT 7.9.3
+  # does not leak the same way — the STEP controller suppression in
+  # SanitizerDefaults.cpp exists for a leak that only this environment shows.
   sanitizers:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4

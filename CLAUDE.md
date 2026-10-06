@@ -193,6 +193,14 @@ list kept elsewhere drifts.
   container carrying the runner's llvmpipe — the only place its baseline can
   be checked or (`--pixel-record`) written, since a developer GPU records a
   different key.
+- **`--asan` is the fourth, and it runs NOWHERE else.** The sanitizers CI job
+  is `workflow_dispatch` only: a cold compile plus ~98 min on runner hardware
+  against ~6 here, and the weekly cron it replaced sat red for three weeks
+  unread. So run `tools/ci-local.sh --asan` when it earns its minutes —
+  before a release, after touching ownership or threading, when chasing a
+  crash — not on a cadence. The one thing it cannot see is what only Ubuntu's
+  apt OpenCASCADE shows (nix's OCCT does not leak the STEP controller the way
+  it does); dispatch the CI job by hand for that.
 - Format changes bump `kVersion` (src/core/io/SerializationInternal.h), add
   a golden AT that version, AND a row in docs/versioning/format.md's version
   history. **Both are gated** (`test_golden.cpp`): the newest golden must
