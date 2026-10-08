@@ -82,7 +82,7 @@ wait_ready() {
 }
 
 # A scratch instance must not write the HUMAN's preferences. Settings live in
-# $XDG_CONFIG_HOME/designer (docs/ui/settings.md), and an agent calling
+# $XDG_CONFIG_HOME/lobole (docs/ui/settings.md), and an agent calling
 # set_settings — or just toggling shadows to compare a render — would
 # otherwise change the config of the windowed instance on 8799. Point it at a
 # per-port scratch dir, seeded from the real one so the preview still LOOKS
@@ -90,10 +90,10 @@ wait_ready() {
 # gui-tests-xvfb.sh. Override by exporting XDG_CONFIG_HOME yourself.
 if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
   DESIGNER_PREVIEW_CONFIG="${TMPDIR:-/tmp}/designer-preview-config-$$"
-  mkdir -p "$DESIGNER_PREVIEW_CONFIG/designer"
-  REAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/designer"
+  mkdir -p "$DESIGNER_PREVIEW_CONFIG/lobole"
+  REAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/lobole"
   [ -f "$REAL_DIR/settings.json" ] &&
-    cp "$REAL_DIR/settings.json" "$DESIGNER_PREVIEW_CONFIG/designer/settings.json"
+    cp "$REAL_DIR/settings.json" "$DESIGNER_PREVIEW_CONFIG/lobole/settings.json"
   # ...and the MACHINE store. A setup names its machine by name, so a preview
   # without one refuses every CAM job with "no machine called '6090'" against
   # a machine plainly on disk -- the same trap the headless RPC path fell into
@@ -104,7 +104,7 @@ if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
   # directory would take anything else kept there with it, and a scratch dir
   # under /tmp is not where credentials belong.
   [ -d "$REAL_DIR/machines" ] &&
-    cp -r "$REAL_DIR/machines" "$DESIGNER_PREVIEW_CONFIG/designer/"
+    cp -r "$REAL_DIR/machines" "$DESIGNER_PREVIEW_CONFIG/lobole/"
 fi
 export XDG_CONFIG_HOME="$DESIGNER_PREVIEW_CONFIG"
 
@@ -116,12 +116,12 @@ export XDG_CONFIG_HOME="$DESIGNER_PREVIEW_CONFIG"
 # The pid is found WHATEVER XDG_STATE_HOME the instance was started with: an
 # instance started under a scratch state dir announces itself in THAT
 # registry, and a --stop from a shell without the variable found nothing.
-# So, in order, the first candidate that is a live designer serving this
+# So, in order, the first candidate that is a live lobole serving this
 # port wins:
 #   1. the pid file --start writes in a state-independent run dir;
 #   2. the instance itself: `ping` reports its pid, no registry needed;
 #   3. the registry under this shell's XDG_STATE_HOME, then the default one.
-# A candidate counts only when /proc says it IS a designer with `--remote
+# A candidate counts only when /proc says it IS a lobole with `--remote
 # PORT` on its command line, so a stale file naming a recycled pid never
 # kills a stranger. The registry it announced in is read from the process's
 # own environment, and cleared with the pid file.
@@ -131,7 +131,7 @@ is_instance() { # pid port
   [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ] || return 1
   cmd="$(tr '\0' ' ' <"/proc/$pid/cmdline")"
   case "$cmd" in
-    *designer*" --remote $port "*) return 0 ;;
+    *lobole*" --remote $port "*) return 0 ;;
   esac
   return 1
 }
@@ -147,19 +147,23 @@ if [ "${1:-}" = "--stop" ]; then
   PORT="${2:-8798}"
   PID=""
   for cand in "$(cat "$RUN_DIR/$PORT.pid" 2>/dev/null)" "$(ping_pid "$PORT")" \
-      "$(reg_pid "${XDG_STATE_HOME:-$HOME/.local/state}/designer/instances/$PORT.json")" \
+      "$(reg_pid "${XDG_STATE_HOME:-$HOME/.local/state}/lobole/instances/$PORT.json")" \
       "$(reg_pid "$HOME/.local/state/lobole/instances/$PORT.json")"; do
     if is_instance "$cand" "$PORT"; then PID="$cand"; break; fi
   done
-  rm -f "$RUN_DIR/$PORT.pid"
   if [ -z "$PID" ]; then
-    echo "headless-preview: no designer instance serving port $PORT" >&2
+    # The pid file is the most reliable of the four candidates, so it is kept
+    # when the stop FAILS: deleting it here used to remove the one record that
+    # would have found the instance on a later attempt, which turned a stop
+    # that matched nothing into a stop that could never match again.
+    echo "headless-preview: no lobole instance serving port $PORT" >&2
     exit 1
   fi
+  rm -f "$RUN_DIR/$PORT.pid"
   # Where it announced itself: its own XDG_STATE_HOME, read before it dies.
   ITS_STATE="$(tr '\0' '\n' <"/proc/$PID/environ" 2>/dev/null |
     sed -n 's/^XDG_STATE_HOME=//p')"
-  ITS_REG="${ITS_STATE:-$HOME/.local/state}/designer/instances/$PORT.json"
+  ITS_REG="${ITS_STATE:-$HOME/.local/state}/lobole/instances/$PORT.json"
   kill "$PID"
   echo "headless-preview: stopped $PID on port $PORT"
   [ "$(reg_pid "$ITS_REG")" = "$PID" ] && rm -f "$ITS_REG"
