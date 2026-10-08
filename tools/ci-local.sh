@@ -208,8 +208,8 @@ if [ "$run_nix" = 1 ]; then
   step "build without the test engine"
   run_build no-te -S . -B .ci-local/build-no-te -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TEST_ENGINE=OFF \
     -- .ci-local/build-no-te -j"$jobs"
-  if nix-shell shell.nix --run "python3 tests/headless_smoke.py .ci-local/build-no-te/designer" > /dev/null \
-     && ! .ci-local/build-no-te/designer --gui-tests --hidden 2>/dev/null; then
+  if nix-shell shell.nix --run "python3 tests/headless_smoke.py .ci-local/build-no-te/lobole" > /dev/null \
+     && ! .ci-local/build-no-te/lobole --gui-tests --hidden 2>/dev/null; then
     ok "engine-free build works and refuses --gui-tests"
   else
     fail "engine-free build FAILED"; failures=$((failures+1))
@@ -311,8 +311,8 @@ if [ "$run_pixel" = 1 ]; then
   docker build -q -t "$tag" "$build_dir" > /dev/null
   # The ICD discovery step of the job, verbatim in spirit: lavapipe's filename
   # moved once already (lvp_icd.x86_64.json -> lvp_icd.json).
-  pixel_cmd="python3 tests/render_pixel_smoke.py /b/designer --require-baseline"
-  [ "$pixel_record" = 1 ] && pixel_cmd="python3 tests/render_pixel_smoke.py /b/designer --record"
+  pixel_cmd="python3 tests/render_pixel_smoke.py /b/lobole --require-baseline"
+  [ "$pixel_record" = 1 ] && pixel_cmd="python3 tests/render_pixel_smoke.py /b/lobole --record"
   # --user: a root-owned PNG in tests/golden/ is a file nobody can commit.
   # The ccache mount must exist first, or docker creates it owned by root and
   # the --user build cannot write it ("ccache: Permission denied").

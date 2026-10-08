@@ -117,7 +117,7 @@
         meta = with pkgs.lib; {
           description = "Parametric B-Rep CAD (Vulkan, OpenCASCADE, PlaneGCS)";
           platforms = [ "x86_64-linux" ];
-          mainProgram = "designer";
+          mainProgram = "lobole";
           # AGPL-3.0-or-later, with a section-7 additional permission to link
           # Dear ImGui Test Engine (see LICENSE + README). Bundled LGPL/MPL/etc.
           # dependencies are inventoried in THIRD_PARTY.md.

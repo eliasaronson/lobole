@@ -262,7 +262,7 @@ build's ccache).
 
 The workarounds our prebuilt (non-instrumented) dependencies require are
 compiled INTO a sanitized binary (`src/common/SanitizerDefaults.cpp`), so
-`build-asan/designer` behaves the same however you launch it — no wrapper, no
+`build-asan/lobole` behaves the same however you launch it — no wrapper, no
 environment to remember. It sets `detect_container_overflow=0` for the
 std-container/OpenCASCADE boundary, points UBSan at
 `tools/ubsan-suppressions.txt`, and suppresses a short list of

@@ -10,7 +10,7 @@
 # Run:         nix-shell --run "tools/run-sanitized-app.sh"
 set -euo pipefail
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-bin="$here/build-asan/designer"
+bin="$here/build-asan/lobole"
 if [[ ! -x "$bin" ]]; then
   echo "sanitized app not found: $bin" >&2
   echo "build it: cmake -B build-asan -G Ninja -DENABLE_SANITIZERS=ON && ninja -C build-asan designer" >&2

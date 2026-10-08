@@ -2,7 +2,7 @@
 #
 # The runtime OPTIONS now live in the binary (src/common/SanitizerDefaults.cpp,
 # compiled in when ENABLE_SANITIZERS=ON), so a sanitized build behaves the same
-# however it is launched — including when you run build-asan/designer straight
+# however it is launched — including when you run build-asan/lobole straight
 # from a shell, which is how the real findings have actually turned up. This
 # file keeps only what a binary cannot carry: which tests to skip.
 #

@@ -238,8 +238,8 @@ jobs:
 
       - name: Smoke the engine-free build
         run: |
-          python3 tests/headless_smoke.py build-no-te/designer
-          ! build-no-te/designer --gui-tests --hidden 2>/dev/null
+          python3 tests/headless_smoke.py build-no-te/lobole
+          ! build-no-te/lobole --gui-tests --hidden 2>/dev/null
 
       # The build without CAM, for exactly the reason stated above and with
       # the receipts to prove it: -DENABLE_CAM=OFF was accepted by CMake,

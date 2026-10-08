@@ -2,7 +2,7 @@
 // ENABLE_SANITIZERS=ON (ASan + UBSan) or ENABLE_TSAN=ON.
 //
 // The options used to live in wrapper scripts, which meant they applied only
-// if you launched through one. Anyone who ran build-asan/designer directly —
+// if you launched through one. Anyone who ran build-asan/lobole directly —
 // the natural thing to do, and how the leaks in the ray tracer and the XCAF
 // documents were actually found — got a report full of dependency noise with
 // the real findings buried in it, and no hint that a suppression list existed.

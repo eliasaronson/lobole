@@ -106,7 +106,7 @@ if(ENABLE_TSAN)
   add_compile_options(-fsanitize=thread -fno-omit-frame-pointer -g)
   add_link_options(-fsanitize=thread)
   # Same arrangement as the ASan block: the runtime options live IN the binary
-  # (src/common/SanitizerDefaults.cpp), so build-tsan/designer run straight
+  # (src/common/SanitizerDefaults.cpp), so build-tsan/lobole run straight
   # from a shell behaves the same as one launched through a wrapper. Without
   # it the first run drowns in Netgen's uninstrumented thread pool.
   set(SANITIZER_DEFAULTS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/common/SanitizerDefaults.cpp)

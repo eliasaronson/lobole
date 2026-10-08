@@ -2587,7 +2587,7 @@ def _connect_if_needed():
           "choose) or nothing reachable.")
 def instances() -> dict:
     live = _running_instances()
-    cmd = _start_hint() or "designer"
+    cmd = _start_hint() or "lobole"
     return {"attached": attached_to(),
             "instances": live,
             "hint": (f"Start one with `{cmd} --remote {DEFAULT_PORT}`."
