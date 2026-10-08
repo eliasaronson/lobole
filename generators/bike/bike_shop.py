@@ -69,12 +69,17 @@ def _frame_of(a, b, bulge=None):
     the sweep analytic surfaces, and their exact intersections are where the
     booleans go degenerate.
 
-    It does not bite HERE, because `Weldment` unions solid rods and bores
-    them afterwards, and a solid union does not care. Moving everything onto
-    curves anyway was measured and reverted: the frame went from 3.1 s to
-    12.3 s, and the wheel's 36 straight spokes started failing their unions
-    with "self-intersecting wire". Curves for bows, sketches for straights —
-    and for a frame, neither, because it is welded solid.
+    It bites a SOLID union too, which is why `Weldment` sweeps its bowed
+    rods along a curve (`spline_rod`). A 4 mm bow over a 530 mm seat stay is
+    an arc of 8.9 m radius, and its pipe a torus that thin — 8.9 m round,
+    8 mm through — is nearly a cylinder without being one; unioned into the
+    seat tube, the kernel kept a patch of the seat tube's wall inside the
+    stay at every offset tried (10.5 to 12 mm off the axis, 33 to 35 mm down
+    the seat tube), while the same stay as a fit-spline unions clean at all
+    of them. Moving everything onto curves was measured and reverted: the
+    frame went from 3.1 s to 12.3 s, and the wheel's 36 straight spokes
+    started failing their unions with "self-intersecting wire". Curves for
+    bows, sketches for straights.
     """
     u = (V(b) - V(a)).unit()
     if bulge is not None:
@@ -93,6 +98,20 @@ def path_tube(part, sketch_id, od, wall=0.0, name="Tube", mode="new_body"):
          "outer_diameter": float(od), "wall_thickness": float(wall),
          "mode": mode}
     return part._add(f)["id"]
+
+
+def spline_rod(part, a, b, bulge, sagitta, od, name="Rod", samples=9):
+    """A SOLID rod bowed like `bowed_tube`'s, swept along a `Curve3D`
+    fit-spline through points of the same bow instead of a sketch arc —
+    see `_frame_of` for why a weldment's bowed rod must not be a torus."""
+    pts = [arc_point(a, b, bulge, sagitta, k / (samples - 1.0))
+           for k in range(samples)]
+    path = part._add({"type": "Curve3D", "name": f"{name} path",
+                      "kind": "fit_spline",
+                      "points": [list(V(p)) for p in pts]})["id"]
+    return part._add({"type": "Pipe", "name": name, "path_id": path,
+                      "outer_diameter": float(od), "wall_thickness": 0.0,
+                      "mode": "new_body"})["id"]
 
 
 def _weld_plugs(part, ids, a, b, u, od, weld, name):
@@ -340,8 +359,11 @@ class Weldment:
         a, b = V(a), V(b)
         u = (b - a).unit()
         length = (b - a).length()
-        self.solids.append(bowed_tube(self.part, a, b, bulge, sagitta, od,
-                                      0.0, name))
+        if abs(float(sagitta)) < 1e-6:
+            self.solids.append(tube(self.part, a, b, od, 0.0, name))
+        else:
+            self.solids.append(spline_rod(self.part, a, b, bulge, sagitta,
+                                          od, name))
         if wall <= 0:
             return self.solids[-1]
         la, lb = (weld, weld) if isinstance(weld, (int, float)) else weld

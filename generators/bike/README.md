@@ -71,6 +71,11 @@ Hollow tubes unioned at an angle put an end cap inside another tube's void,
 and whether that builds depends on tangencies; solid rods union at any angle,
 and the bores are then cylinders subtracted from one solid. The tubes come out
 hollow between joints and solid through them, which is what a brazed lug is.
+A BOWED rod (a stay, a fork blade) is swept along a `Curve3D` fit-spline, not
+a sketch arc: a few millimetres of bow over half a metre is a torus metres
+round and millimetres thick, and the seat stay's union into the seat tube
+came out wrong (a patch of seat-tube wall kept inside the stay) at every
+offset tried. Straight rods stay on sketches.
 
 **A part is finished when `check_geometry` says `verified`** (`bike_shop.verified`
 gates every part on the receipt). An invalid body — one axle bore drilled
