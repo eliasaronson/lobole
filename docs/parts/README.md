@@ -144,8 +144,12 @@ tables, which are metric, and is refused for an inch screw naming
   a ray down the hole's axis hits nothing — the hole is a void — so the probe
   is a bundle of four rays parallel to the axis just outside the bore wall,
   which measures each plate's thickness. A body the axis crosses twice (a
-  folded part) is two segments. A second, on-axis ray finds what actually
-  stops a screw, and comparing the two classifies the joint:
+  folded part) is two segments. Between two crossings a ray is classified at
+  the ends of the interval as well as its middle, and an end that is not
+  material is walked in to where it starts: the intersector can miss a
+  crossing (a drill point's apex, grazed 1e-13 off the axis), and a blind
+  tapped hole then read as solid from its mouth. A second, on-axis ray finds
+  what actually stops a screw, and comparing the two classifies the joint:
 
   | on-axis ray | means |
   |---|---|

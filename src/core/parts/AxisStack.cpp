@@ -154,15 +154,40 @@ std::vector<StackSegment> TraverseAxis(const std::vector<PlacedBody>& placed,
       // discarding one hid blind floors and selected screws through them.
       if (!classifier)
         classifier.emplace(p.body->shape.GetShape());
+      const auto inside = [&](double t) {
+        const glm::dvec3 q = localOrigin + localDir * t;
+        classifier->Perform(gp_Pnt(q.x, q.y, q.z), 1e-6);
+        return classifier->State() == TopAbs_IN;
+      };
+      // Where the state changes between `in` (inside) and `out` (not): the
+      // crossing the intersector did not report.
+      const auto boundary = [&](double in, double out) {
+        while (std::abs(out - in) > 1e-7) {
+          const double t = (in + out) / 2;
+          (inside(t) ? in : out) = t;
+        }
+        return (in + out) / 2;
+      };
       double previous = 0.0;
       for (size_t i = 0; i <= hits.size(); ++i) {
         const double next = i < hits.size() ? hits[i] : maxDist;
-        if (next - previous > 1e-6) {
-          const glm::dvec3 mid =
-              localOrigin + localDir * ((previous + next) / 2);
-          classifier->Perform(gp_Pnt(mid.x, mid.y, mid.z), 1e-6);
-          if (classifier->State() == TopAbs_IN)
-            spans.emplace_back(previous, next);
+        const double mid = (previous + next) / 2;
+        if (next - previous > 1e-6 && inside(mid)) {
+          // The midpoint alone is not the interval. The intersector can miss
+          // a crossing: a ray down a tapped hole grazes its drill point's
+          // apex 1e-13 off the axis and reports nothing there, and the
+          // interval from the mouth of the hole to the far end of the part
+          // read as solid from the mouth -- a burner bolted on through its
+          // tapped tail was "the end of a SOLID, not a hole". So the ends are
+          // classified too, and an end that is not material is walked in to
+          // where the material really starts or stops.
+          const double inset = std::min(1e-3, (next - previous) / 4);
+          double enter = previous, exit = next;
+          if (!inside(previous + inset))
+            enter = boundary(mid, previous + inset);
+          if (!inside(next - inset))
+            exit = boundary(mid, next - inset);
+          spans.emplace_back(enter, exit);
         }
         previous = next;
       }

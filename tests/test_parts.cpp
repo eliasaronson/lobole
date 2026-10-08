@@ -11,6 +11,10 @@
 #include "core/parts/FastenerTable.h"
 
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -76,6 +80,40 @@ TEST_CASE("Axis traversal keeps material when the ray has one crossing",
     CHECK_THAT(spans[0].enter, WithinAbs(0, 1e-6));
     CHECK_THAT(spans[0].exit, WithinAbs(15, 1e-6));
   }
+}
+
+TEST_CASE("Axis traversal finds a drill point's apex on the axis",
+          "[parts][axis]") {
+  // The gas grill's burner (tests/fixtures/grill_burner.brep, exported from
+  // the generator's part): a tube with a blind tapped hole in its tail that
+  // ends in a 118 degree drill point, its apex on the axis -- every tapped
+  // Hole since v148. The fit of the M5 that holds it to the firebox was
+  // refused as "the end of a SOLID, not a hole": the material from the apex
+  // to the far end read as starting at the mouth of the hole.
+  Body body;
+  {
+    TopoDS_Shape shape;
+    BRep_Builder builder;
+    const fs::path brep =
+        fs::path(TestSourceDir()) / "tests/fixtures/grill_burner.brep";
+    REQUIRE(BRepTools::Read(shape, brep.string().c_str(), builder));
+    body.shape = CADShape(shape);
+  }
+  const double len = 508.5, apex = 495.238192700042;
+  // Burner 1's placement in the grill: its +Z turned to +Y, the tail flush
+  // with the inside of the firebox's back wall. The turn is what matters:
+  // through it the ray reaches the part's frame 1e-13 off the axis.
+  const glm::dvec3 at(-206.66666666666666, -238.0, 706.5);
+  const glm::dquat turn(0.7071067811865476, -0.7071067811865475, 0, 0);
+  const glm::dmat4 world =
+      glm::translate(glm::dmat4(1), at) * glm::mat4_cast(turn);
+  const std::vector<parts::PlacedBody> placed{{&body, world, "burner"}};
+  // From the centre of the clearance hole's outer rim, 1.5 mm out.
+  const glm::dvec3 rim(at.x, at.y + len + 1.5, at.z);
+  const auto spans = parts::TraverseAxis(placed, rim, {0, -1, 0}, 0, 10000);
+  REQUIRE(spans.size() == 1);
+  CHECK_THAT(spans[0].enter, WithinAbs(1.5 + len - apex, 1e-3));
+  CHECK_THAT(spans[0].exit, WithinAbs(1.5 + len, 1e-6));
 }
 
 // The vendored standard-parts tables (docs/parts/README.md#the-data).
