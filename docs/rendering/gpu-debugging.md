@@ -57,7 +57,7 @@ Launch the app from RenderDoc's **Launch Application** tab:
 
 | field | value |
 |---|---|
-| Executable | `build/designer` |
+| Executable | `build/lobole` |
 | Working directory | the repo root |
 | Command line | `--remote <port>` (a scratch port — `tools/scratch_port.py` picks one) |
 

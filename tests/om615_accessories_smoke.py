@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real accessory B-Reps and staged appearance updates, without an engine sweep.
 
-Run through nix: python3 tests/om615_accessories_smoke.py build/designer
+Run through nix: python3 tests/om615_accessories_smoke.py build/lobole
 The generator's --stage full remains the whole-engine 49-pose release gate.
 """
 

@@ -22,7 +22,7 @@
 # Usage:
 #   tools/profile.sh --test '[cam]'            # a Catch2 selection
 #   tools/profile.sh --app scratch/build_x.py  # the app, driven by a script
-#   tools/profile.sh -- build/designer --headless --remote 8901
+#   tools/profile.sh -- build/lobole --headless --remote 8901
 #
 # Options:
 #   --freq N     sampling frequency, Hz (default 999 — coprime with common
@@ -108,7 +108,7 @@ case "$MODE" in
     ;;
   app)
     [ -f "$ARG" ] || { echo "profile: no such script: $ARG" >&2; exit 1; }
-    BIN="$ROOT/build/designer"
+    BIN="$ROOT/build/lobole"
     [ -x "$BIN" ] || { echo "profile: build designer first" >&2; exit 1; }
     PORT="$("$ROOT/tools/scratch_port.py")" || {
       echo "profile: no scratch port free" >&2; exit 1; }

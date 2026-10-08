@@ -29,7 +29,7 @@
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/build/designer"
+BIN="$ROOT/build/lobole"
 [ -x "$BIN" ] || { echo "headless-preview: no binary at $BIN — build it first." >&2; exit 1; }
 
 # Only the --gui path needs a display server; resolve Xvfb lazily so the

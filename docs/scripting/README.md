@@ -147,7 +147,7 @@ reading either.
 git worktree add ../designer-wt1 -b wt1 && (cd ../designer-wt1 && tools/worktree-build.sh)
 # worktree-build.sh clones the submodules from the main checkout (no
 # network unless main lacks a pinned commit) and prints a scratch port
-../designer-wt1/build/designer --headless --remote <port1> &
+../designer-wt1/build/lobole --headless --remote <port1> &
 DESIGNER_PORT=<port1> claude -p "build the bracket in parts/bracket" ...
 ```
 

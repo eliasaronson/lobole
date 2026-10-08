@@ -190,8 +190,8 @@ These are the ones a newcomer trips over. Most have a test behind them.
 ## Driving the app (how most debugging happens here)
 
 ```
-build/designer --remote 8437              # windowed
-build/designer --headless --remote 8437   # no GPU, no display: full modeling
+build/lobole --remote 8437              # windowed
+build/lobole --headless --remote 8437   # no GPU, no display: full modeling
 ```
 
 Then drive it from Python:

@@ -628,11 +628,11 @@ def _designer_argv():
     import pathlib
     import shutil
     import subprocess
-    dev = pathlib.Path(__file__).resolve().parent.parent / "build" / "designer"
+    dev = pathlib.Path(__file__).resolve().parent.parent / "build" / "lobole"
     if dev.is_file():
         return [str(dev)]
-    if shutil.which("designer"):
-        return ["designer"]
+    if shutil.which("lobole"):
+        return ["lobole"]
     if shutil.which("flatpak"):
         try:
             probe = subprocess.run(
@@ -778,7 +778,7 @@ def _resolve_port():
         if cmd is None:
             raise RuntimeError(
                 "No running Designer found, and no installed one to start: "
-                "probed for build/designer beside this server, `designer` on "
+                "probed for build/lobole beside this server, `designer` on "
                 "PATH, and the org.lobole.Lobole flatpak. "
                 "Install the app, then start it with `designer --remote "
                 f"{DEFAULT_PORT}`.")

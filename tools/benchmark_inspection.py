@@ -23,7 +23,7 @@ from smoke_app import launch
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--binary', default=str(ROOT / 'build/designer'))
+    parser.add_argument('--binary', default=str(ROOT / 'build/lobole'))
     parser.add_argument('--project', required=True)
     parser.add_argument('--parts', nargs='+', required=True)
     parser.add_argument('--repeats', type=int, default=3)

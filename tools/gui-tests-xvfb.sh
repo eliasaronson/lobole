@@ -60,7 +60,7 @@ if [ "${DESIGNER_GUI_LOCKED:-}" != "1" ]; then
   exec flock "$LOCK" "$ROOT/tools/gui-tests-xvfb.sh" "$@"
 fi
 
-# build/'s lock, shared: the shards run build/designer, and a merge or a build
+# build/'s lock, shared: the shards run build/lobole, and a merge or a build
 # (which take it exclusively) must not relink it under them
 # (tools/build-lock.sh). Taken after the GPU lock, so a run queued behind
 # another suite does not hold up a merge while it waits. This shell holds it;

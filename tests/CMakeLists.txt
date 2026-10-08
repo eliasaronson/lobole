@@ -339,7 +339,7 @@ set_tests_properties(render_light_rig_smoke PROPERTIES LABELS slow TIMEOUT 300
 
 # The MCP server's autostart lifecycle: nothing running → it spawns
 # --offscreen and the child dies with it. Skips (77) without the mcp SDK or
-# a Vulkan device. Finds the binary itself (build/designer beside tools/),
+# a Vulkan device. Finds the binary itself (build/lobole beside tools/),
 # so no $<TARGET_FILE> — which is the point: it tests the server's own probe.
 # Pixel regression on the offscreen renderer. Its baseline is keyed to the
 # DEVICE that produced it (ping reports it), so this skips rather than fails

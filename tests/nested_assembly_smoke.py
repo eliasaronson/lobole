@@ -8,7 +8,7 @@ parts), the per-unit BOM is just that assembly's own tab, geometry survives a
 save/reopen, a cycle is refused before it can render forever, and deleting a
 referenced tab is refused rather than leaving a dangling occurrence.
 
-Run: python3 tests/nested_assembly_smoke.py build/designer
+Run: python3 tests/nested_assembly_smoke.py build/lobole
 """
 import os
 import socket
@@ -270,4 +270,4 @@ def main(binary):
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "build/designer"))
+    sys.exit(main(sys.argv[1] if len(sys.argv) > 1 else "build/lobole"))

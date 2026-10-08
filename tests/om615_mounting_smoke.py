@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Physical accessory connections: contact, pocket section and missing-hardware gates.
 
-Run through nix: python3 tests/om615_mounting_smoke.py build/designer
+Run through nix: python3 tests/om615_mounting_smoke.py build/lobole
 Uses a private lower-engine fixture; the generator's full stage checks 720° motion.
 """
 

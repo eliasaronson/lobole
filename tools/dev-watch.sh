@@ -3,7 +3,7 @@
 #
 # Run this ONCE in your own GPU/display session (a normal terminal, or your
 # window-manager autostart). It launches the windowed app on a fixed port and
-# relaunches it whenever `build/designer` changes (i.e. after every rebuild),
+# relaunches it whenever `build/lobole` changes (i.e. after every rebuild),
 # so an assistant — or you, via tools/designer_remote.py — can always drive and
 # screenshot the CURRENT build without you restarting anything.
 #
@@ -26,7 +26,7 @@ set -u
 
 PORT="${1:-8799}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$ROOT/build/designer"
+BIN="$ROOT/build/lobole"
 
 if [ ! -x "$BIN" ]; then
   echo "dev-watch: no binary at $BIN — build it first (cmake --build build)." >&2

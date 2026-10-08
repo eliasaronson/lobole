@@ -1026,7 +1026,8 @@ if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
 else()
     set(DESIGNER_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
 endif()
-set_target_properties(designer PROPERTIES INSTALL_RPATH "${DESIGNER_INSTALL_RPATH}")
+set_target_properties(designer PROPERTIES OUTPUT_NAME lobole
+                      INSTALL_RPATH "${DESIGNER_INSTALL_RPATH}")
 
 # imgui.cpp must see IMGUI_ENABLE_TEST_ENGINE so it emits the test hooks.
 # HAVE_TEST_ENGINE is ours: the app's own code switches on it (matching the

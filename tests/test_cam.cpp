@@ -3295,8 +3295,8 @@ TEST_CASE("cam: one operation at a time cuts what all of them cut",
 // from a description and read the REAL one. This is that read.
 //
 // Hidden, and machine-bound by nature — the part is not in the repo:
-//     build/designer_tests "[frontwall]"
-//     DESIGNER_FRONT_WALL=<part dir> build/designer_tests "[frontwall]"
+//     build/lobole_tests "[frontwall]"
+//     DESIGNER_FRONT_WALL=<part dir> build/lobole_tests "[frontwall]"
 //
 // It answers one question. If the outer loop of the section carries a notch
 // at the cross-dowel height and not above or below it, the fixtures were
@@ -3562,7 +3562,7 @@ TEST_CASE("cam probe: a bore that opens onto an edge", "[.][frontwall]") {
 
 // The end of the ladder: the real job, posted and verified, gouge and all.
 // Hidden for the same reason as the section probe — the part is not in the
-// repo.  build/designer_tests "[frontwall]"
+// repo.  build/lobole_tests "[frontwall]"
 TEST_CASE("cam probe: the front_wall job's verdict", "[.][frontwall]") {
   // The part is the smart speaker's saved front_wall, which is not in the
   // repo: point DESIGNER_FRONT_WALL at its part directory.

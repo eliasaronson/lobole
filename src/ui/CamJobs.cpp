@@ -30,9 +30,9 @@ std::filesystem::path ExecutablePath() {
 #if defined(__linux__)
   return "/proc/self/exe";
 #elif defined(_WIN32)
-  return RuntimePaths::ExecutableDir() / "designer.exe";
+  return RuntimePaths::ExecutableDir() / "lobole.exe";
 #else
-  return RuntimePaths::ExecutableDir() / "designer";
+  return RuntimePaths::ExecutableDir() / "lobole";
 #endif
 }
 

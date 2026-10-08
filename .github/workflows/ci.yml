@@ -150,7 +150,7 @@ jobs:
       # does not depend on the host CPU — only on the driver, which the key
       # names.
       - name: Pixel regression (software Vulkan, NO Xvfb)
-        run: python3 tests/render_pixel_smoke.py build/designer --require-baseline
+        run: python3 tests/render_pixel_smoke.py build/lobole --require-baseline
 
       # A pixel diff nobody can look at is a failure nobody can act on: the
       # smoke writes the render it got beside the baseline, so hand it over.

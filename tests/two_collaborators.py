@@ -64,7 +64,7 @@ def set_height(client, height):
 
 
 def main():
-    binary = sys.argv[1] if len(sys.argv) > 1 else "build/designer"
+    binary = sys.argv[1] if len(sys.argv) > 1 else "build/lobole"
     tmp = tempfile.mkdtemp(prefix="designer-collab-")
     env = dict(os.environ)
     # Two instances, and neither should touch the developer's real config.

@@ -270,7 +270,7 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   unclaimed, and never the human's). One-shot:
   `headless-preview.sh --render PROJECT OUT.png <port>`. Only `ui_action`
   needs a GUI: `headless-preview.sh --gui <port>` (windowed under Xvfb).
-- **Non-visual checks need no GPU**: `build/designer --headless --remote <port>`.
+- **Non-visual checks need no GPU**: `build/lobole --headless --remote <port>`.
 - **Don't guess ports**: every instance announces itself in
   `~/.local/state/designer/instances/<port>.json` (`Designer.instances()` in
   the python client). `ping` reports the port, the open project, whether it is
@@ -337,7 +337,7 @@ sync/GPU-assisted validation (slow; for device-lost/OOB bugs).
 
 **GPU:** two different questions — "did we use Vulkan correctly" (validation
 layers, above) and "what did this frame actually draw" (a RenderDoc capture:
-`nix-shell -p renderdoc --run qrenderdoc`, launch `build/designer` from inside
+`nix-shell -p renderdoc --run qrenderdoc`, launch `build/lobole` from inside
 nix-shell). docs/rendering/gpu-debugging.md says which answers which and what
 to look at; neither reports device memory, which nothing does yet.
 

@@ -59,7 +59,7 @@ dropped connection, so registering it before the app is running is fine.
 With nothing running, the server spawns `designer --offscreen --remote 0`,
 waits for the child to announce its kernel-chosen port under its pid, attaches
 to it, and kills it when the server exits. The binary is probed, not assumed:
-`build/designer` beside the server, then `designer` on `PATH`, then the
+`build/lobole` beside the server, then `designer` on `PATH`, then the
 flatpak `org.lobole.Lobole`. The conditions are what make it
 safe:
 
