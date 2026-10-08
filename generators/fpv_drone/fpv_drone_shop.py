@@ -109,7 +109,7 @@ def plot(app, result, out):
     app.call("view", name="iso")
     path = os.path.join(out, "fem-" + result["name"].lower()
                         .replace(" ", "-") + ".png")
-    app.call("screenshot", path=path, width=1200, height=900)
+    app.call("screenshot", path=path)
     app.call("exit_simulation")
     return path
 
