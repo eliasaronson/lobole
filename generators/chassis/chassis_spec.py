@@ -59,6 +59,78 @@ for _m in FRAME["members"] + FRAME["bent"]:
     _s = size_name(_m["od"], _m["wall"])
     OD[_s], WALL[_s] = stocked(_m["od"], _m["wall"])
 
+
+# --- a joint is not made on a bend -------------------------------------------
+# The CAD lands the side-impact rail and two engine-bay diagonals a side ON the
+# main hoop's knee: 1.4 mm from the corner of a 24 degree bend whose arc runs
+# 21 mm either side of it; and the upper side members 40 mm into the front
+# hoop's top bends, whose arcs run 74 mm. A bend is a torus, thinned by the
+# bending, with no straight for a cope to sit against, and the app refuses a
+# cope there (docs/tube/README.md). A fabricator slides the node down the
+# hoop's straight until every fishmouth and its fillet sit clear of the arc,
+# and so does this: along the leg the members already run toward, by the arc's
+# tangent length, plus the longest fishmouth's footprint along the leg (r / sin
+# of the angle it meets at), plus a fillet as wide as the hoop's wall. MOVED
+# says which nodes moved and how far, and the run prints it.
+def _clear_of_bends(nodes):
+    import math
+
+    def sub(a, b):
+        return [a[k] - b[k] for k in range(3)]
+
+    def unit(a):
+        n = math.sqrt(sum(c * c for c in a))
+        return [c / n for c in a]
+
+    def dot(a, b):
+        return sum(a[k] * b[k] for k in range(3))
+
+    moved = []
+    for hoop in FRAME["bent"]:
+        pts = [nodes[hoop["feet"][0]]] + [tuple(c) for c in hoop["corners"]] \
+            + [nodes[hoop["feet"][1]]]
+        for i in range(1, len(pts) - 1):
+            corner = pts[i]
+            legs = [unit(sub(pts[i - 1], corner)),
+                    unit(sub(pts[i + 1], corner))]
+            turn = math.pi - math.acos(max(-1.0, min(1.0, dot(*legs))))
+            tangent = hoop["radius"] * math.tan(turn / 2.0)
+            for n in hoop["through"]:
+                p = nodes[n]
+                ending = [m for m in FRAME["members"] if n in m["nodes"]]
+                if not ending:
+                    continue
+                radius = max(stocked(m["od"], m["wall"])[0] / 2.0
+                             for m in ending)
+                if math.dist(p, corner) >= tangent + radius:
+                    continue
+                dirs = [unit(sub(nodes[m["nodes"][1] if m["nodes"][0] == n
+                                       else m["nodes"][0]], p))
+                        for m in ending]
+                pull = [sum(d[k] for d in dirs) for k in range(3)]
+                leg = max(legs, key=lambda u: dot(u, pull))
+                footprint = max(
+                    stocked(m["od"], m["wall"])[0] / 2.0
+                    / max(1e-3, math.sqrt(1.0 - dot(d, leg) ** 2))
+                    for m, d in zip(ending, dirs))
+                slide = tangent + footprint + hoop["wall"]
+                # Nothing else on that leg may be passed: a node slid into
+                # its neighbour is a different frame, not a fabricator's fix.
+                for q in hoop["through"] + hoop["feet"]:
+                    v = sub(nodes[q], corner)
+                    if q != n and 0.0 < dot(v, leg) <= slide + radius and \
+                            math.dist(nodes[q], corner) <= slide + radius:
+                        raise SystemExit(
+                            f"node {n} on a bend of the hoop cannot slide "
+                            f"{slide:.0f} mm clear: node {q} is in the way")
+                new = tuple(corner[k] + leg[k] * slide for k in range(3))
+                nodes[n] = new
+                moved.append((n, math.dist(p, new), slide - tangent, tangent))
+    return moved
+
+
+MOVED = _clear_of_bends(NODES)
+
 # The bender's dies. A shop owns a handful of formers, not a continuum; the
 # CAD bends both hoops round 100 mm, so the shop that built it had one.
 FORMERS = [76.2, 100.0, 101.6, 152.4]

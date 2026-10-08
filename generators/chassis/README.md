@@ -104,6 +104,18 @@ typed. Only mitred ends are swept a diameter long. Every cut is opened by
 `WELD_GAP` (0.25 mm), which also keeps equal-diameter joints drawn to their
 node off an exact tangency.
 
+**Nodes on a bend.** The CAD puts four nodes ON a hoop's bend: the
+side-impact rail and two engine-bay diagonals a side meet on the main hoop's
+knee, and the upper side members on the front hoop's top bends. A bend is a
+torus, thinned by bending, with no straight to cope against, and the app
+refuses a cope there ([docs/tube/README.md](../../docs/tube/README.md)). So
+`chassis_spec._clear_of_bends` does what a fabricator would: it slides the
+node along the hoop's straight that its members already pull toward, by the
+arc's tangent length plus the widest fishmouth's footprint along the leg
+(r / sin of the angle it meets at) plus a fillet as wide as the hoop's wall —
+37 mm at the knee, 51 mm at the front hoop — and refuses if another node is in
+the way. The frame built is that far from the frame drawn, at those nodes.
+
 **Panels and tabs.** The floor and firewall are 1.5 mm steel. A suspension
 pickup is a 4 mm plate standing in a plane THROUGH its tube's axis, so the
 rod end pulls along the tube; its seat is a cylinder cut across the plate's
@@ -128,9 +140,9 @@ it is written as line segments.
 
 ## What a run reports
 
-`check_frame` on the real car reports engine-bay diagonals landing on the main
-hoop's knee bend and bays that are not triangulated (panels close several);
-both are as the CAD has them. The frame is 91 members in five tube sizes.
+`check_frame` on the real car reports bays that are not triangulated (panels
+close several), as the CAD has them. The run also prints each node it slid
+off a hoop's bend (below). The frame is 91 members in five tube sizes.
 Mass is printed; the CAD's own mass is not among the streams read, so there
 is no second number to hold it against.
 

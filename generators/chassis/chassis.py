@@ -190,6 +190,13 @@ def main():
     f = Frame(d)
     members(f)
     print(f"{len(f.members)} members")
+    # Where the CAD put a joint on a hoop's bend, the node was slid clear of
+    # it (chassis_spec._clear_of_bends): say so, since the frame built is
+    # then not the frame drawn.
+    for n, by, past, arc in S.MOVED:
+        print(f"  node {n} moved {by:.0f} mm off a hoop bend: the CAD has it "
+              f"on the arc, which runs {arc:.0f} mm from the corner; now "
+              f"{past:.0f} mm past where the arc ends")
     copes = f.build()
     print(f"{copes} coped members, {time.time() - t0:.1f}s")
 
