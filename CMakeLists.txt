@@ -909,7 +909,7 @@ set(DESIGNER_HDRI "brown_photostudio_02_2k.hdr")
 file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}
      DESTINATION ${CMAKE_BINARY_DIR}/assets/hdri)
 # The vendored standard-parts tables (docs/parts/README.md). Staged beside the
-# executable for a development build; installed under share/designer below.
+# executable for a development build; installed under share/lobole below.
 file(COPY ${CMAKE_SOURCE_DIR}/assets/parts
      DESTINATION ${CMAKE_BINARY_DIR}/assets)
 
@@ -1361,18 +1361,18 @@ if(TARGET designer_adaptive)
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 install(DIRECTORY "${SHADER_OUTPUT_DIR}/"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/shaders")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole/shaders")
 install(FILES
         "${CMAKE_SOURCE_DIR}/deps/imgui/misc/fonts/Roboto-Medium.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/fa-solid-900.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/designer-icons.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/LiberationSans-Regular.ttf"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/fonts")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole/fonts")
 install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/designer/hdri")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole/hdri")
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/parts"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/designer")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole")
 install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.desktop"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 # AppStream metainfo. Installing it triggers `appstreamcli compose` during a
@@ -1396,9 +1396,9 @@ install(FILES
         "${CMAKE_SOURCE_DIR}/LICENSE"
         "${CMAKE_SOURCE_DIR}/ADDITIONAL_PERMISSION.md"
         "${CMAKE_SOURCE_DIR}/THIRD_PARTY.md"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/designer")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/lobole")
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/LICENSES/"
-        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/designer/LICENSES")
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/lobole/LICENSES")
 
 
 # ---------------------------------------------------------------------------

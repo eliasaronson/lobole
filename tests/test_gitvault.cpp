@@ -541,7 +541,7 @@ TEST_CASE("GitVault: a repo with no identity still commits", "[git]") {
   repo.Write("index.json", "{}");
   REQUIRE(GitVault::CommitAll(repo.path(), "save"));
   CHECK(GitVault::Log(repo.path()).size() == 1);
-  CHECK(AuthorOf(repo) == "Designer|designer@local");
+  CHECK(AuthorOf(repo) == "Lobole|lobole@local");
 }
 
 // ---------------------------------------------------------------------------

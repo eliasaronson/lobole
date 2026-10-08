@@ -6,7 +6,7 @@ has been prose: "pass a distinct one per worktree" (tools/worktree-build.sh).
 That is a value a human has to hold, in a repo that everywhere else refuses to
 let one — free_port() races were fixed by having the app bind its own port,
 and every running instance already announces itself in
-~/.local/state/designer/instances/<port>.json.
+~/.local/state/lobole/instances/<port>.json.
 
 Two sources, because neither alone is enough:
 
@@ -37,7 +37,7 @@ DEV_WATCH_PORT = 8799
 def announced_ports():
     """Ports claimed by instances that have announced themselves."""
     claimed = set()
-    pattern = os.path.expanduser("~/.local/state/designer/instances/*.json")
+    pattern = os.path.expanduser("~/.local/state/lobole/instances/*.json")
     for path in glob.glob(pattern):
         # The filename is the port, and the file also carries it. Read the
         # file first (it is the source `ping` uses) and fall back to the name,

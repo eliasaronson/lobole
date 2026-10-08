@@ -106,7 +106,7 @@ class Designer:
         "started"}. The open project is not here — it changes while the
         instance runs; `ping` reports it. The app
         writes one file per open remote port under
-        $XDG_STATE_HOME/designer/instances (see src/remote/InstanceRegistry.h);
+        $XDG_STATE_HOME/lobole/instances (see src/remote/InstanceRegistry.h);
         a crash leaves the file behind, so the pid is the truth. Entries whose
         process is gone are skipped, and removed when we own them.
         """
@@ -114,7 +114,7 @@ class Designer:
         import pathlib
         state = os.environ.get("XDG_STATE_HOME") or os.path.expanduser(
             "~/.local/state")
-        directory = pathlib.Path(state) / "designer" / "instances"
+        directory = pathlib.Path(state) / "lobole" / "instances"
         found = []
         for path in sorted(directory.glob("*.json")) if (
                 directory.is_dir()) else []:

@@ -13,7 +13,7 @@ namespace fs = std::filesystem;
 namespace {
 
 // Point the registry at a scratch state dir: a test must never write into the
-// developer's real ~/.local/state/designer, and two tests must not see each
+// developer's real ~/.local/state/lobole, and two tests must not see each
 // other's instances.
 struct ScratchState {
   fs::path dir;
@@ -84,7 +84,7 @@ TEST_CASE("A dead instance's file is pruned, not believed",
   const fs::path stale = fs::path(remote::InstancesDir()) / "8904.json";
   {
     // pid 0x7FFFFFFF: valid to write, certain not to be running.
-    nlohmann::json j{{"app", "designer"},
+    nlohmann::json j{{"app", "lobole"},
                      {"pid", 2147483647},
                      {"port", 8904},
                      {"mode", "gui"},

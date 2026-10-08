@@ -64,7 +64,7 @@ def main(binary):
         # the state directory, and seven temp projects from one afternoon's
         # runs turned up in the developer's File menu before smoke_app gave
         # each run its own (the autosave recovery copy shares that directory).
-        recents = (Path(running.tmp) / "state" / "designer"
+        recents = (Path(running.tmp) / "state" / "lobole"
                    / "recent-projects.json")
         assert recents.exists(), f"the recents went somewhere else: {recents}"
         assert "single.dsgn" in recents.read_text()

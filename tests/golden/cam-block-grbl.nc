@@ -1,4 +1,4 @@
-(Designer CAM - Golden)
+(Lobole CAM - Golden)
 (post: grbl)
 G90 G91.1 G21 G17 G40 G49 G80
 G54

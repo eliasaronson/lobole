@@ -692,11 +692,11 @@ def _autostart():
     # Same reasoning as tools/headless-preview.sh: set_settings persists
     # immediately, so a scratch instance must not write the human's real
     # preferences. Seed from them so it still looks like their app.
-    cfg = pathlib.Path(scratch, "config", "designer")
+    cfg = pathlib.Path(scratch, "config", "lobole")
     cfg.mkdir(parents=True)
     real_dir = pathlib.Path(env.get("XDG_CONFIG_HOME",
                                     os.path.expanduser("~/.config")),
-                            "designer")
+                            "lobole")
     if (real_dir / "settings.json").is_file():
         shutil.copy(real_dir / "settings.json", cfg / "settings.json")
     # ...and the MACHINE store. A CAM setup names its machine BY NAME, so a

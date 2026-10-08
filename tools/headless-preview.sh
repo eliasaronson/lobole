@@ -148,7 +148,7 @@ if [ "${1:-}" = "--stop" ]; then
   PID=""
   for cand in "$(cat "$RUN_DIR/$PORT.pid" 2>/dev/null)" "$(ping_pid "$PORT")" \
       "$(reg_pid "${XDG_STATE_HOME:-$HOME/.local/state}/designer/instances/$PORT.json")" \
-      "$(reg_pid "$HOME/.local/state/designer/instances/$PORT.json")"; do
+      "$(reg_pid "$HOME/.local/state/lobole/instances/$PORT.json")"; do
     if is_instance "$cand" "$PORT"; then PID="$cand"; break; fi
   done
   rm -f "$RUN_DIR/$PORT.pid"

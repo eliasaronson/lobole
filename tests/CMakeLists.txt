@@ -227,7 +227,7 @@ include(Catch)
 # test can write to the developer's own state.
 #
 # They could, and did. `Autosaver::StateDir()` falls back to
-# $HOME/.local/state/designer when XDG_STATE_HOME is unset, and the unit tests
+# $HOME/.local/state/lobole when XDG_STATE_HOME is unset, and the unit tests
 # run in-process with whatever environment ctest was given — so a test that
 # saved a project called RecentProjects::Remember and put its temp directory
 # in the RECENT PROJECTS MENU of the app on that machine. Nine entries like
@@ -252,7 +252,7 @@ catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
 # so the packaged binary can be identified on a display-less machine.
 add_test(NAME version_cli COMMAND $<TARGET_FILE:designer> --version)
 set_tests_properties(version_cli PROPERTIES
-    PASS_REGULAR_EXPRESSION "^Designer ${PROJECT_VERSION}")
+    PASS_REGULAR_EXPRESSION "^Lobole ${PROJECT_VERSION}")
 
 # GPU solver tests live in their own binary so designer_tests stays free of
 # Vulkan. Each case SKIPs itself when no usable compute device is present, so

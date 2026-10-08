@@ -360,7 +360,7 @@ def cam(app, out):
     """One job per sheet: nest it, cut it, post it, and check the G-code back
     against the model."""
     print("cam:")
-    # Into the machine STORE (~/.config/designer/machines), because a setup
+    # Into the machine STORE (~/.config/lobole/machines), because a setup
     # names one from there and then embeds a copy — so the job file opens on
     # a machine that has never heard of this router, and reports
     # `machine_match: missing` rather than pretending. This is the one thing

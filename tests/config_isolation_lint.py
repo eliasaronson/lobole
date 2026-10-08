@@ -13,7 +13,7 @@ It shipped that way. `headless_smoke.py` calls
 
 to prove the RPC is not part-gated, and its launcher isolated XDG_STATE_HOME
 only. So every run of the headless suite rewrote the developer's real
-~/.config/designer/settings.json and their app came back at 120% text after the
+~/.config/lobole/settings.json and their app came back at 120% text after the
 next rebuild. docs/ui/settings.md#tests calls for exactly this isolation ("Nothing a
 test runs may write the developer's real preferences") — the GUI shard runner does it, the Python smoke
 tests never did.

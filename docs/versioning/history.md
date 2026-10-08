@@ -24,7 +24,7 @@ a no-op, or answers "nothing", when git is not on `PATH`.
 - **Who commits.** Per field, git's own `user.name` / `user.email`, then the
   Preferences fields *Your name* / *Your email* under Sharing (settings
   `git_user_name`, `git_user_email`), then the inline fallback
-  `designer@local`, so CI and a fresh machine without git config can still
+  `lobole@local`, so CI and a fresh machine without git config can still
   commit.
 - **Quote every format string.** Commands go through a shell:
   `%(refname:short)` is a syntax error and `%an|%ae` a pipe, and the failure

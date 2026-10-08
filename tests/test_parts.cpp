@@ -115,7 +115,7 @@ struct TempTables {
 //
 // `RuntimePaths::DataDir()` looks beside the running executable, and this
 // binary lives in build/tests/ rather than beside `designer` — so it would
-// resolve to build/share/designer/parts and find nothing. test_ibl.cpp reaches
+// resolve to build/share/lobole/parts and find nothing. test_ibl.cpp reaches
 // the HDRI the same way, for the same reason. Staging is checked separately
 // below, because "the content is right" and "the build put it where the app
 // looks" are different claims and only one of them is about the data.

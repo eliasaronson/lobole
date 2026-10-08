@@ -125,7 +125,7 @@ def build_job(d):
     if isinstance(job, dict) and "id" in job:
         d.call("rename_part", part=job["id"], new_name="Waveguide job")
     sid = d.call("add_cam_setup", name="Waveguide - one side", post="mach3")["id"]
-    # By NAME, from ~/.config/designer/machines/. Headless sessions used to
+    # By NAME, from ~/.config/lobole/machines/. Headless sessions used to
     # have no machine store at all -- RunHeadless builds its own AppState and
     # main() had loaded the machines into the GUI's -- so this refused, and
     # every job reported `machine_match: missing` against a machine plainly on

@@ -265,7 +265,7 @@ def main():
     binary = sys.argv[1]
     # A scratch state dir: the app announces itself there (instance
     # discovery), and a test must never write into the developer's real
-    # ~/.local/state/designer or see the instances they have open.
+    # ~/.local/state/lobole or see the instances they have open.
     state = tempfile.mkdtemp(prefix="designer-mcp-smoke-")
     # CONFIG too: set_settings persists immediately, so a run that touched
     # preferences would edit the developer's real settings.json.
