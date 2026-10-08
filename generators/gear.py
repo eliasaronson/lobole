@@ -29,7 +29,7 @@ from _lib import arc_through, check, circle, connect, line, plane_at_z  # noqa
 
 
 def involute_profile(module, teeth, pressure_deg, samples=5, backlash=0.0,
-                     phase_deg=0.0):
+                     phase_deg=0.0, addendum=1.0, dedendum=1.25):
     """Closed CCW outline of the whole gear, as sketch entities.
 
     `backlash` (mm, measured on the pitch circle) THINS every tooth by half
@@ -40,13 +40,18 @@ def involute_profile(module, teeth, pressure_deg, samples=5, backlash=0.0,
     `phase_deg` turns the whole pattern. It is what makes a pair MESH: two
     gears whose teeth both point at the line of centres jam tip to tip, and
     the fix is a quarter pitch on each (or half a pitch on one).
+
+    `addendum` and `dedendum` are in modules. An INTERNAL gear is cut by
+    this outline with them swapped (its tooth spaces are this gear's teeth):
+    a cutter's addendum is the internal gear's root depth, and a NEGATIVE
+    backlash widens the spaces it cuts.
     """
     m, z = float(module), int(teeth)
     alpha = math.radians(pressure_deg)
     rp = m * z / 2.0          # pitch radius
     rb = rp * math.cos(alpha)  # base radius
-    ra = rp + m                # tip (addendum m)
-    rf = rp - 1.25 * m         # root (dedendum 1.25 m)
+    ra = rp + addendum * m     # tip (addendum m by default)
+    rf = rp - dedendum * m     # root (dedendum 1.25 m by default)
     if rf <= 0:
         raise SystemExit("root radius is not positive: more teeth or a "
                          "smaller module")
@@ -60,6 +65,11 @@ def involute_profile(module, teeth, pressure_deg, samples=5, backlash=0.0,
     def psi(r):
         """Half-angle of the tooth at radius r (r >= rb)."""
         return half_pitch + inv(alpha) - inv(math.acos(rb / r))
+
+    if psi(ra) <= 0:
+        raise SystemExit(f"the tooth comes to a point below its tip "
+                         f"(z={z}, addendum {addendum} m): a smaller addendum "
+                         f"or less backlash")
 
     phase = math.radians(float(phase_deg))
 

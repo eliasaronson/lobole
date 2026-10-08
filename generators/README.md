@@ -34,6 +34,7 @@ the one announced instance or take `--port`; they never guess:
 | `grill/` | a three-burner gas grill in brake-formed sheet | [README](grill/README.md) |
 | `om615/` | the OM615 four-cylinder diesel | [README](om615/README.md) |
 | `pantilt/` | a geared pan/tilt head for a 1.5 kg camera: two worm pairs, bearings, a machined base plate, printed PETG yoke | [README](pantilt/README.md) |
+| `planetary/` | a print-in-place herringbone planetary gear set: one plate off the bed already turning, its gaps from the print allowance table, proved by an assembly's motion study | [README](planetary/README.md) |
 | `pes_pump/` | the Bosch PES4M injection pump for the OM615 | [README](pes_pump/README.md) |
 | `smart_speaker/` | a two-way floorstanding loudspeaker cabinet | [README](smart_speaker/README.md) |
 | `so101_gripper/` | a parallel-jaw wrist gripper for the SO-101 arm | [README](so101_gripper/README.md) |
@@ -90,6 +91,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 | `generator_om615` | `om615.py --stage preview` (headless) | 221 s | 420 s |
 | `generator_pes_pump` | `pes_pump.py --no-still`: the build, the standing sweep, the four studies and their measured strokes, order and turns (offscreen) | 44 s | 180 s |
 | `generator_chess` | `run_all.sh --only board`: every design stage, then the board's CAM job verified and posted (offscreen) | 140 s | 360 s |
+| `generator_planetary` | `planetary/build.py --no-render`: the print plate, its exact mesh clearances and the STL's five shells, the assembly and both motion studies (headless) | ~300 s | 600 s |
 | `generator_pantilt` | `run_all.sh --skip yoke_topo renders` with `PANTILT_SAMPLES=6`: every part, the assembly with its exact sweeps and studies, the CAM job, the drawings (offscreen) | 181-349 s | 720 s |
 
 A test passes when the generator exits 0 AND its own success marker is in
@@ -122,11 +124,16 @@ none), `--phase` turns the tooth pattern (what makes two mirrored sectors
 mesh instead of jamming tip to tip), and `--sector` keeps teeth over a wedge
 and a hub elsewhere. Thickness and bore stay live variables; module, teeth,
 pressure angle, backlash, phase and sector are frozen. `involute_profile()`
-is importable, and other generators compose it into multi-level parts.
+is importable, and other generators compose it into multi-level parts. It
+takes `addendum` and `dedendum` in modules (1.0 and 1.25 by default): an
+INTERNAL gear is cut by the outline with them swapped and a negative
+backlash, which is how `planetary/` makes its ring, and a stub tooth is a
+shorter addendum. A helical or herringbone gear is a loft through the
+outline turned along the helix (`planetary/build.py`'s `herringbone`).
 
 Not drawn: root fillets; undercut correction (below ~17 teeth at 20° the
 flank runs radially from the base circle to the root, as an uncorrected
-cutter would); helical, bevel, internal and rack forms.
+cutter would); bevel and rack forms.
 
 `gear_train.py` mates pinion z12 → idler z24 → wheel z36 (module 2) by their
 bores to a carrier, seats each on the plate by the mate's axial offset,

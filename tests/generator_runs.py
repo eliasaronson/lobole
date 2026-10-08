@@ -82,6 +82,16 @@ def pantilt(port, out):
             os.path.join(out, "pantilt", "run_all.log"))
 
 
+def planetary(port, out):
+    # The print plate with its exact mesh clearances and the STL's shell
+    # count, the assembly and both motion studies. Left out: the sun's static
+    # study (--study, minutes of factorisation) and the hero still.
+    return ([PY, "-u", os.path.join(GEN, "planetary", "build.py"),
+             "--port", str(port), "--no-render",
+             "--out", os.path.join(out, "planetary")],
+            [r"motion, one orbit .*: passed", r"planetary: 5 shells"], None)
+
+
 # name -> (builder, instance kind, extra environment). The offscreen ones
 # take screenshots or renders, which a --headless instance refuses.
 RUNS = {
@@ -90,6 +100,7 @@ RUNS = {
     "chess": (chess, "offscreen", {}),
     # Six samples a motion study, each still checked exactly.
     "pantilt": (pantilt, "offscreen", {"PANTILT_SAMPLES": "6"}),
+    "planetary": (planetary, True, {}),
 }
 
 
