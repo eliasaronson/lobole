@@ -1091,7 +1091,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         if (!CaptureAvailable()) {
           RespondError(request.client, request.id,
                        "screenshot requires a rendered frame — start "
-                       "designer without --headless (--offscreen renders "
+                       "lobole without --headless (--offscreen renders "
                        "without a window)");
           continue;
         }
@@ -1132,7 +1132,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         if (!CaptureAvailable()) {
           RespondError(request.client, request.id,
                        "render_sheet requires a rendered frame — start "
-                       "designer without --headless (--offscreen renders "
+                       "lobole without --headless (--offscreen renders "
                        "without a window)");
           continue;
         }
@@ -1229,7 +1229,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
                 ? "UI actions need the ImGui Test Engine, and this build was "
                   "configured with -DENABLE_TEST_ENGINE=OFF. The semantic "
                   "RPCs (add_feature, measure, screenshot, …) all work."
-                : "UI actions are unavailable in --headless — start designer "
+                : "UI actions are unavailable in --headless — start lobole "
                   "without it");
         continue;
       }

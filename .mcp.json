@@ -1,6 +1,6 @@
 {
   "mcpServers": {
-    "designer": {
+    "lobole": {
       "command": "nix-shell",
       "args": [
         "--run",

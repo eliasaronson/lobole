@@ -238,7 +238,7 @@ std::string WriteMcpConfig(int port) {
   const std::filesystem::path cfg =
       std::filesystem::temp_directory_path() /
       ("designer-mcp-" + std::to_string(port) + ".json");
-  const std::string json = "{\"mcpServers\":{\"designer\":{\"command\":"
+  const std::string json = "{\"mcpServers\":{\"lobole\":{\"command\":"
                            "\"python3\",\"args\":[\"" +
                            server + "\",\"--port\",\"" + std::to_string(port) +
                            "\"]}}}";

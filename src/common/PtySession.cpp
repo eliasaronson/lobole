@@ -89,7 +89,7 @@ bool PtySession::Start(const Options& opts, std::string* error) {
     execvp(program.c_str(), argv.data());
     // Only reached if exec failed. Say so ON THE TERMINAL — the parent has
     // no other channel, and a panel that just goes blank reads as a crash.
-    const std::string msg = "designer: could not run '" + program +
+    const std::string msg = "lobole: could not run '" + program +
                             "': " + std::strerror(errno) + "\r\n";
     ssize_t ignored = write(STDERR_FILENO, msg.data(), msg.size());
     (void)ignored;

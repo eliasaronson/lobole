@@ -69,7 +69,7 @@ whatever `XDG_STATE_HOME` it was started under: it takes the pid from a
 file `--start` writes in a state-independent run directory
 (`$XDG_RUNTIME_DIR/designer-preview/<port>.pid`), else from the instance's
 own `ping`, else from the registry under this shell's state dir and the
-default one, and kills a candidate only when `/proc` shows a designer
+default one, and kills a candidate only when `/proc` shows a lobole
 serving that port. It clears the registry entry in the state dir the
 instance itself was started with.
 

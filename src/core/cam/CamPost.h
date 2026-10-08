@@ -14,7 +14,7 @@
 namespace cam {
 
 struct PostOptions {
-  std::string program = "designer";
+  std::string program = "lobole";
   bool comments = true; // human-readable op headers
   int decimals = 4;     // coordinate precision
   bool useG54 = true;   // emit the work offset in the preamble

@@ -20,7 +20,7 @@ int ArmExitWithParent(bool requestedByFlag) {
   const char* raw = std::getenv(kEnv);
   const std::string value = raw ? raw : "";
   if (raw) {
-    // Read once, then gone: a designer started from this one's terminal tab
+    // Read once, then gone: a lobole started from this one's terminal tab
     // would otherwise inherit a launcher pid that is not its parent.
 #if defined(_WIN32)
     _putenv_s(kEnv, "");

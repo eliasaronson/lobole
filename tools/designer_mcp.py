@@ -3,7 +3,7 @@
 
 Design: docs/scripting/mcp.md. Register this server with an MCP client:
 
-    claude mcp add designer -- python3 tools/designer_mcp.py   # from a checkout
+    claude mcp add lobole -- python3 tools/designer_mcp.py   # from a checkout
     claude mcp add designer -- designer-mcp    # installed (uv tool install .)
 
 No port needed: running instances announce themselves and the server attaches
@@ -585,8 +585,8 @@ see every knob, and an explicit offer to adjust any of them.
 # ---------------------------------------------------------------------------
 
 mcp = FastMCP(
-    "designer",
-    instructions="Tools for driving a running Designer CAD instance. Read the "
+    "lobole",
+    instructions="Tools for driving a running Loböle CAD instance. Read the "
     "modeling-workflow prompt before modeling. The listed tools are the "
     "conversational surface; EVERY other RPC (assemblies, drawings, studies, "
     "configurations, sketch constraints, exports, raw GUI actions) is reached "

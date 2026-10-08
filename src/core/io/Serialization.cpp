@@ -889,13 +889,13 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     std::ifstream in(fs::path(dirPath) / "index.json");
     if (!in) {
       if (error)
-        *error = "Not a designer project directory: " + dirPath;
+        *error = "Not a Lobole project directory: " + dirPath;
       return nullptr;
     }
     json index = ParseProjectFile(fs::path(dirPath) / "index.json");
     if (index.value("format", "") != kFormat) {
       if (error)
-        *error = "Not a designer document: " + dirPath;
+        *error = "Not a Lobole document: " + dirPath;
       return nullptr;
     }
     if (index.value("version", 0) > kVersion) {
@@ -1310,13 +1310,13 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
     std::ifstream in(fs::path(dirPath) / "index.json");
     if (!in) {
       if (error)
-        *error = "Not a designer project directory: " + dirPath;
+        *error = "Not a Lobole project directory: " + dirPath;
       return nullptr;
     }
     json index = ParseProjectFile(fs::path(dirPath) / "index.json");
     if (index.value("format", "") != kFormat) {
       if (error)
-        *error = "Not a designer document: " + dirPath;
+        *error = "Not a Lobole document: " + dirPath;
       return nullptr;
     }
     if (index.value("version", 0) > kVersion) {
@@ -1639,7 +1639,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
 
     if (j.value("format", "") != kFormat) {
       if (error)
-        *error = "Not a designer document: " + path;
+        *error = "Not a Lobole document: " + path;
       return nullptr;
     }
     if (j.value("version", 0) > kVersion) {
@@ -1806,7 +1806,7 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
     json j = ParseProjectFile(path);
     if (j.value("format", "") != kFormat) {
       if (error)
-        *error = "Not a designer document: " + path;
+        *error = "Not a Lobole document: " + path;
       return nullptr;
     }
     if (j.value("version", 0) > kVersion) {
@@ -2198,13 +2198,13 @@ std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
     std::ifstream in(fs::path(dirPath) / "index.json");
     if (!in) {
       if (error)
-        *error = "Not a designer project directory: " + dirPath;
+        *error = "Not a Lobole project directory: " + dirPath;
       return nullptr;
     }
     json index = ParseProjectFile(fs::path(dirPath) / "index.json");
     if (index.value("format", "") != kFormat) {
       if (error)
-        *error = "Not a designer document: " + dirPath;
+        *error = "Not a Lobole document: " + dirPath;
       return nullptr;
     }
     if (index.value("version", 0) > kVersion) {
@@ -2345,7 +2345,7 @@ static std::unique_ptr<DrawingDocument> LoadDrawingImpl(const std::string& path,
     json j = ParseProjectFile(path);
     if (j.value("format", "") != kFormat) {
       if (error)
-        *error = "Not a designer document: " + path;
+        *error = "Not a Lobole document: " + path;
       return nullptr;
     }
     if (j.value("version", 0) > kVersion) {
@@ -2538,7 +2538,7 @@ bool CheckJobEnvelope(const json& j, const std::string& where,
                       std::string* error) {
   if (j.value("format", "") != kFormat) {
     if (error)
-      *error = "Not a designer document: " + where;
+      *error = "Not a Lobole document: " + where;
     return false;
   }
   if (j.value("version", 0) > kVersion) {

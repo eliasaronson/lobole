@@ -94,7 +94,7 @@ ComputeContext::Create(std::string* error, const std::string& preferredDevice) {
   std::unique_ptr<ComputeContext> ctx(new ComputeContext());
 
   VkApplicationInfo app{VK_STRUCTURE_TYPE_APPLICATION_INFO};
-  app.pApplicationName = "designer-femgpu";
+  app.pApplicationName = "lobole-femgpu";
   app.apiVersion = VK_API_VERSION_1_2;
   VkInstanceCreateInfo ici{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
   ici.pApplicationInfo = &app;
