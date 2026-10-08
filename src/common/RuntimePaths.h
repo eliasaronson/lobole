@@ -8,7 +8,7 @@ namespace RuntimePaths {
 std::filesystem::path ExecutableDir();
 
 // Runtime data roots. Development builds use the staged directories beside
-// the executable; installed builds use ../share/designer.
+// the executable; installed builds use ../share/lobole.
 std::filesystem::path DataDir();
 std::filesystem::path ShaderDir();
 

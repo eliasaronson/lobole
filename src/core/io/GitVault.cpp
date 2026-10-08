@@ -151,8 +151,8 @@ int RunGitNetwork(const std::string& dir, const std::string& args,
 
 // The last-resort identity: commits must work on CI and on a fresh machine
 // with no git config at all. Only used for a field nothing else supplies.
-constexpr const char* kFallbackName = "Designer";
-constexpr const char* kFallbackEmail = "designer@local";
+constexpr const char* kFallbackName = "Lobole";
+constexpr const char* kFallbackEmail = "lobole@local";
 
 // Set from Preferences (F9 C1). Empty = the person expressed no preference.
 std::string g_preferredName;
@@ -198,7 +198,7 @@ std::string IdentityArgs(const std::string& dir) {
 // stale when they do not. The rule goes in the repository's own exclude
 // file, and a result an earlier build committed leaves the index here.
 constexpr const char* kResultsExcluded =
-    "# Written by Designer: saved study results are derived (their input "
+    "# Written by Lobole: saved study results are derived (their input "
     "hash names them)";
 // The study and motion results (v153), and the drawing views' saved
 // projections (v162): derived, each named by its input hash.

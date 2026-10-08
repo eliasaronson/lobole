@@ -751,7 +751,7 @@ void DrawHistoryPanel(AppState& state) {
           ImGui::TextColored(ImVec4(0.95f, 0.45f, 0.45f, 1.0f), "%s",
                              state.syncMessage.c_str());
           ImGui::TextDisabled(
-              "Designer does not ask for passwords. If this is about "
+              "Lobole does not ask for passwords. If this is about "
               "credentials, set them up the way you normally would — the "
               "terminal panel opens in this project.");
         } else {

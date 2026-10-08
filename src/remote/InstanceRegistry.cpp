@@ -77,7 +77,7 @@ bool AnnounceInstance(uint16_t port, const std::string& mode) {
     // crashed, and a stale file for a dead pid helps nobody.
     LiveInstances();
 
-    const json j{{"app", "designer"},
+    const json j{{"app", "lobole"},
                  {"pid", CurrentPid()},
                  {"port", port},
                  {"mode", mode},

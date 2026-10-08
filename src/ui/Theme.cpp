@@ -209,14 +209,14 @@ void ApplyTheme(float uiScale, float framebufferScale) {
                                  kUiRanges);
 
     // Merge the icon fonts into the same atlas so ICON_FA_* and ICON_DS_*
-    // work inline: Font Awesome, then Designer's own CAD glyphs
+    // work inline: Font Awesome, then Lobole's own CAD glyphs
     // (tools/icons/build_icon_font.py) in a range FA leaves empty.
     //
     // Every icon gets the SAME advance, min and max alike, so no glyph can
     // make its button wider than its neighbours (a 15 px floor alone let the
     // 16.8 px ones do it, and the planes toggle grew 2 px on every click).
     //
-    // The slot is 14 px: exactly the grid Designer's glyphs are drawn on,
+    // The slot is 14 px: exactly the grid Lobole's glyphs are drawn on,
     // centred in, and snapped to, so they fill it with no shift and their
     // edges stay on pixels. Font Awesome's are then CENTRED in it by ImGui —
     // which needs PixelSnapH off: with it on, the centring offset is

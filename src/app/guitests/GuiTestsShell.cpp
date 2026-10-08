@@ -246,11 +246,11 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     IM_CHECK(!s_App->showAbout);
-    ctx->MenuClick("Help/About Designer");
+    ctx->MenuClick("Help/About Loböle");
     ctx->Yield();
     IM_CHECK(s_App->showAbout);
     // It is a real window with the build in it, not just a flag flip.
-    ctx->SetRef("//###AboutDesigner");
+    ctx->SetRef("//###AboutLobole");
     IM_CHECK(ctx->ItemExists("###about_copy"));
     // The attributions are a tree node, collapsed by default; open it so the
     // test covers the table actually building.

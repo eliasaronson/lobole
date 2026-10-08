@@ -1557,7 +1557,7 @@ struct AppState {
   // the draw function so the between-test reset can close it — a stray
   // floating window swallows the viewport clicks of every later GUI test.
   bool showShortcuts = false;
-  // Help > About Designer. A flag rather than a bare ImGui popup id for the
+  // Help > About Loböle. A flag rather than a bare ImGui popup id for the
   // same reason as showShortcuts, plus one specific to popups: OpenPopup()
   // called INSIDE a BeginMenu scope registers the id against the menu's
   // window, and the matching BeginPopupModal() outside it never finds it —
@@ -1995,7 +1995,7 @@ struct AppState {
   bool runGuiTests = false;
 
   // The machine store (docs/cam/setup.md#machine-profiles):
-  // ~/.config/designer/machines/*.json, mirrored here by
+  // ~/.config/lobole/machines/*.json, mirrored here by
   // ui::ReloadMachines. A setup embeds a COPY of one of these, named; the
   // panel compares the two by name every frame and says when they differ.
   std::vector<cam::Machine> machines;

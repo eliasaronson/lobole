@@ -27,7 +27,7 @@ enum class Curve3DKind {
 // helix made before start_deg existed started here, so none of them moves.
 [[nodiscard]] glm::dvec3 HelixReference(const glm::dvec3& axis);
 
-// A free 3D curve as its own history feature — the first Designer geometry that
+// A free 3D curve as its own history feature — the first Lobole geometry that
 // is NOT a sketch entity and NOT a solid body (curves-3d-plan Phase 0). Like a
 // datum, it contributes no body: Execute caches a resulting OCC edge plus a
 // tessellated polyline that downstream features (Sweep path, Loft guide) and

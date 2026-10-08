@@ -112,8 +112,8 @@ struct Field {
 
 std::span<const Field> Fields();
 
-// `$XDG_CONFIG_HOME/designer` (falling back to `~/.config/designer`) and the
-// settings file inside it; `%LOCALAPPDATA%\Designer\config` on Windows, which
+// `$XDG_CONFIG_HOME/lobole` (falling back to `~/.config/lobole`) and the
+// settings file inside it; `%LOCALAPPDATA%\Lobole\config` on Windows, which
 // has neither variable. One resolver for all three per-user directories:
 // RuntimePaths::UserConfigDir. CONFIG, not state: the state dir holds what the
 // app can regenerate, this holds what the user chose.

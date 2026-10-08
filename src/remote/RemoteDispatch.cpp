@@ -1053,7 +1053,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // one row came back buried under every feature type and enum.
     if (!only.empty())
       return json{
-          {"app", "designer"},
+          {"app", "lobole"},
           {"document_format_version", DocumentIO::DocumentFormatVersion()},
           {"methods", std::move(methods)}};
     json featureTypes = json::array();
@@ -1069,7 +1069,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                              {"since_version", et.sinceVersion},
                              {"params", et.params}});
     return json{
-        {"app", "designer"},
+        {"app", "lobole"},
         {"inspection_contract",
          {{"version", remote::InspectionContracts()["version"]},
           {"hash", std::string(remote::kInspectionContractHash)},
@@ -1148,7 +1148,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     const std::string project =
         state.projectPath.empty() ? std::string{} : state.projectPath;
     return {{"ok", true},
-            {"app", "designer"},
+            {"app", "lobole"},
             {"port", m_port},
             // Which PROCESS: two launches handed the same port cannot tell
             // their own instance from one already listening there by the

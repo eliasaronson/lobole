@@ -24,7 +24,7 @@ public:
   void Prime(double now) { m_lastSaveTime = now; }
 
   // The sidecar for a project path; "" = the unsaved-document slot under the
-  // XDG state dir (~/.local/state/designer/unsaved.autosave.json). Used for a
+  // XDG state dir (~/.local/state/lobole/unsaved.autosave.json). Used for a
   // project that IS one document; see SidecarDir for the rest.
   static std::string SidecarPath(const std::string& projectPath);
 
@@ -47,7 +47,7 @@ public:
   static std::vector<std::string>
   RecoverableDocuments(const std::string& projectPath);
 
-  // The app's XDG state dir (~/.local/state/designer) — home of the unsaved
+  // The app's XDG state dir (~/.local/state/lobole) — home of the unsaved
   // autosave slot and the import staging area (sidecars extracted before the
   // project has a folder to own them).
   static std::string StateDir();

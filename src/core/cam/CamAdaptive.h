@@ -24,7 +24,7 @@
 // is therefore built as its own shared library — `designer_adaptive`, see
 // CMakeLists — and reached only through this header, whose declarations
 // carry no LGPL code into the caller. THIS FILE is the whole surface: nothing
-// else in Designer includes `Adaptive.hpp`, and nothing should.
+// else in Lobole includes `Adaptive.hpp`, and nothing should.
 //
 // Its public interface makes that cheap, which is the reason this is
 // vendoring rather than porting: `Execute()` speaks millimetre doubles in and

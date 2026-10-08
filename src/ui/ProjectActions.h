@@ -183,7 +183,7 @@ void MarkProjectRecovered(AppState& state, const std::string& path);
 // has edits since its last clean save/open.
 bool ProjectDirty(AppState& state);
 
-// Window title: "<project name>[*] - Designer", * = ProjectDirty. The name is
+// Window title: "<project name>[*] - Loböle", * = ProjectDirty. The name is
 // the project path's stem; "Untitled" before the first save.
 std::string WindowTitle(AppState& state);
 

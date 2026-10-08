@@ -178,7 +178,7 @@ bool DrawField(AppState& state, const settings::Field& f) {
 
 // Preferences > Machines (docs/cam/setup.md#machine-profiles). Not a
 // `Field` either: a LIST of structs, each its own file in
-// ~/.config/designer/machines, written on every edit the way settings.json
+// ~/.config/lobole/machines, written on every edit the way settings.json
 // is -- there is no Save button to forget. A job names one of these and
 // embeds a copy; the CAM panel says when the two differ.
 std::string g_machineError; // the last refusal from the store, in words
@@ -775,7 +775,7 @@ void DrawSettingsWindow(AppState& state) {
         } else if (pending) {
           ImGui::PushTextWrapPos(0.0f);
           ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
-                             "Restart Designer to render on %s.", want.c_str());
+                             "Restart Lobole to render on %s.", want.c_str());
           ImGui::PopTextWrapPos();
         }
       } else {

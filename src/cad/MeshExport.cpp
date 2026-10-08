@@ -172,7 +172,7 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
     }
 
     TColStd_IndexedDataMapOfStringString fileInfo;
-    fileInfo.Add("generator", "Designer");
+    fileInfo.Add("generator", "Lobole");
     Message_ProgressRange progress;
     bool ok = false;
     if (isGltf) {

@@ -80,7 +80,7 @@ uint64_t SourceConfiguration(ui::AppState& state, uint64_t sourceId,
 
 constexpr MethodDoc kCamMethods[] = {
     {"list_machines",
-     "Your machines, from ~/.config/designer/machines/*.json: each {name, "
+     "Your machines, from ~/.config/lobole/machines/*.json: each {name, "
      "post, travel?: {min, max}, fit_arcs, has_rotary_axis, rapid_feed, "
      "a_max_deg_min (the A axis's top speed; 0/absent = not stated), "
      "rotary?, holding?, tools}. A setup names one and EMBEDS a copy of it; "

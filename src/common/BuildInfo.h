@@ -5,7 +5,7 @@
 // What this binary IS: the answer to the first question anyone asks about a
 // bug report, and the content of Help > About.
 //
-// Deliberately not just a version number. "Designer 0.1.0 misbehaves" is not
+// Deliberately not just a version number. "Lobole 0.1.0 misbehaves" is not
 // reproducible; "0.1.0 at d9c30aa, Release, OpenCASCADE 7.9.3, RTX 4060" is —
 // and this project has already spent a day on a bug that was really a kernel
 // version difference, and another on one that only appeared in a sanitized

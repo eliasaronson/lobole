@@ -590,7 +590,7 @@ bool PostProcess(const std::string& postId, const Setup& setup,
   e.origin = setup.origin;
   e.mount = MountOf(setup);
   if (opts.comments) {
-    e.Comment("Designer CAM - " + setup.name);
+    e.Comment("Lobole CAM - " + setup.name);
     e.Comment("post: " + std::string(dialect->id));
     // Every toleranced wall the program aims at, and where in its band
     // (docs/cam/post.md#what-the-file-says): the machinist gauges against

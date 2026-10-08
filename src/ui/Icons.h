@@ -11,7 +11,7 @@ namespace ui {
 // the button that made it — four hand-kept copies had
 // (docs/ui/README.md#icons).
 //
-// Glyphs are Font Awesome's (ICON_FA_*) where it has the word, and Designer's
+// Glyphs are Font Awesome's (ICON_FA_*) where it has the word, and Lobole's
 // own (ICON_DS_*, tools/icons/build_icon_font.py) for the CAD vocabulary it
 // does not.
 struct CommandIconEntry {

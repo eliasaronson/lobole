@@ -219,7 +219,7 @@ void DrawDiskChangeModal(AppState& state) {
       std::filesystem::path(state.projectPath).filename().string();
   ImGui::TextWrapped(
       "Something else wrote to %s — a command in the terminal, another "
-      "editor, or a second Designer window.",
+      "editor, or a second Lobole window.",
       name.c_str());
   ImGui::Spacing();
   ImGui::TextWrapped("Saving now would replace it with what is open here.");
@@ -456,7 +456,7 @@ void SaveProjectDialog(AppState& state) {
   // never return: it is a FOLDER picker, so a flat `foo.json` was reachable
   // only through Open Recent. ProjectSaveTarget enforces it for a name typed
   // by hand, which the filter alone does not.
-  const nfdu8filteritem_t filters[] = {{"Designer project", "dsgn"}};
+  const nfdu8filteritem_t filters[] = {{"Lobole project", "dsgn"}};
   if (InDialog([&] {
         return NFD_SaveDialogU8(&outPath, filters, 1, nullptr, "project.dsgn");
       }) == NFD_OKAY) {

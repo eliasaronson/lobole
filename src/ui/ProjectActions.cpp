@@ -984,7 +984,7 @@ std::string WindowTitle(AppState& state) {
   std::string name = "Untitled";
   if (!state.projectPath.empty())
     name = std::filesystem::path(state.projectPath).stem().string();
-  return name + (ProjectDirty(state) ? "*" : "") + " - Designer";
+  return name + (ProjectDirty(state) ? "*" : "") + " - Loböle";
 }
 
 void MarkProjectSaved(AppState& state, const std::string& path,

@@ -8,15 +8,15 @@
 // of being told which port to assume.
 //
 // The MCP server used to default to port 8437 while this repo's .mcp.json
-// hardcoded 8799 (dev-watch's port), and any other port produced "Designer is
+// hardcoded 8799 (dev-watch's port), and any other port produced "Lobole is
 // not reachable" while the app was running perfectly. Nobody's app was
 // missing; the client just could not find it.
 //
 // Each instance that opens a remote port writes
 //
-//   $XDG_STATE_HOME/designer/instances/<port>.json
-//   (%LOCALAPPDATA%\Designer\state\instances\<port>.json on Windows)
-//     { "app": "designer", "pid": …, "port": …,
+//   $XDG_STATE_HOME/lobole/instances/<port>.json
+//   (%LOCALAPPDATA%\Lobole\state\instances\<port>.json on Windows)
+//     { "app": "lobole", "pid": …, "port": …,
 //       "mode": "gui"|"headless"|"offscreen", "started": <unix seconds> }
 //
 // and removes it when the port closes. A crash leaves the file behind, so a

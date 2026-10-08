@@ -391,14 +391,14 @@ void DrawAboutWindow(AppState& state) {
   if (!state.showAbout)
     return;
   ImGui::SetNextWindowSize(ImVec2(560, 0), ImGuiCond_Appearing);
-  if (!ImGui::Begin("About Designer###AboutDesigner", &state.showAbout,
+  if (!ImGui::Begin("About Loböle###AboutLobole", &state.showAbout,
                     ImGuiWindowFlags_AlwaysAutoResize |
                         ImGuiWindowFlags_NoDocking)) {
     ImGui::End();
     return;
   }
 
-  ImGui::Text("Designer %s", BuildInfo::Version().c_str());
+  ImGui::Text("Loböle %s", BuildInfo::Version().c_str());
   ImGui::TextUnformatted("Open-source parametric 3D CAD");
   ImGui::TextUnformatted("Licensed under AGPL-3.0-or-later");
   ImGui::Separator();
@@ -458,7 +458,7 @@ void DrawHelpMenu(AppState& state) {
       state.showShortcuts = true;
     // Sets a flag; see AppState::showAbout for why this cannot open the
     // popup from in here.
-    if (ImGui::MenuItem("About Designer"))
+    if (ImGui::MenuItem("About Loböle"))
       state.showAbout = true;
     ImGui::EndMenu();
   }

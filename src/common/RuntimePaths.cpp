@@ -52,13 +52,13 @@ std::filesystem::path DataDir() {
   // golden document carrying a Fastener regenerated to zero bodies in the test
   // binary and to a screw in the app — the data was staged correctly and only
   // the finder was short. An installed /usr/bin/designer looks for /usr/assets
-  // here, does not find it, and falls through to share/designer as before.
+  // here, does not find it, and falls through to share/lobole as before.
   const std::filesystem::path parent =
       (executable / ".." / "assets").lexically_normal();
   if (std::filesystem::is_directory(parent))
     return parent;
 
-  return (executable / ".." / "share" / "designer").lexically_normal();
+  return (executable / ".." / "share" / "lobole").lexically_normal();
 }
 
 std::filesystem::path EnvironmentHdri() {
@@ -70,16 +70,16 @@ std::filesystem::path PartsDir() { return DataDir() / "parts"; }
 namespace {
 
 // The per-user root the three directories below hang off. Windows gets ONE
-// folder — %LOCALAPPDATA%\Designer — so there is a single thing to find when
+// folder — %LOCALAPPDATA%\Lobole — so there is a single thing to find when
 // a setting misbehaves and a single thing to delete for a clean slate. On
 // Linux each kind has its own XDG variable and they are resolved separately.
 #if defined(_WIN32)
 std::filesystem::path WindowsAppDir() {
   if (const char* local = std::getenv("LOCALAPPDATA"); local && *local)
-    return std::filesystem::path(local) / "Designer";
+    return std::filesystem::path(local) / "Lobole";
   if (const char* profile = std::getenv("USERPROFILE"); profile && *profile)
-    return std::filesystem::path(profile) / "AppData" / "Local" / "Designer";
-  return std::filesystem::temp_directory_path() / "Designer";
+    return std::filesystem::path(profile) / "AppData" / "Local" / "Lobole";
+  return std::filesystem::temp_directory_path() / "Lobole";
 }
 #endif
 
@@ -90,10 +90,10 @@ std::filesystem::path UserConfigDir() {
   return WindowsAppDir() / "config";
 #else
   if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg && *xdg)
-    return std::filesystem::path(xdg) / "designer";
+    return std::filesystem::path(xdg) / "lobole";
   if (const char* home = std::getenv("HOME"); home && *home)
-    return std::filesystem::path(home) / ".config" / "designer";
-  return std::filesystem::temp_directory_path() / "designer-config";
+    return std::filesystem::path(home) / ".config" / "lobole";
+  return std::filesystem::temp_directory_path() / "lobole-config";
 #endif
 }
 
@@ -102,10 +102,10 @@ std::filesystem::path UserStateDir() {
   return WindowsAppDir() / "state";
 #else
   if (const char* xdg = std::getenv("XDG_STATE_HOME"); xdg && *xdg)
-    return std::filesystem::path(xdg) / "designer";
+    return std::filesystem::path(xdg) / "lobole";
   if (const char* home = std::getenv("HOME"); home && *home)
-    return std::filesystem::path(home) / ".local" / "state" / "designer";
-  return std::filesystem::temp_directory_path() / "designer-state";
+    return std::filesystem::path(home) / ".local" / "state" / "lobole";
+  return std::filesystem::temp_directory_path() / "lobole-state";
 #endif
 }
 
@@ -114,10 +114,10 @@ std::filesystem::path UserCacheDir() {
   return WindowsAppDir() / "cache";
 #else
   if (const char* xdg = std::getenv("XDG_CACHE_HOME"); xdg && *xdg)
-    return std::filesystem::path(xdg) / "designer";
+    return std::filesystem::path(xdg) / "lobole";
   if (const char* home = std::getenv("HOME"); home && *home)
-    return std::filesystem::path(home) / ".cache" / "designer";
-  return std::filesystem::temp_directory_path() / "designer";
+    return std::filesystem::path(home) / ".cache" / "lobole";
+  return std::filesystem::temp_directory_path() / "lobole";
 #endif
 }
 

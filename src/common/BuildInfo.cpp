@@ -45,7 +45,7 @@ std::string KernelVersion() {
 }
 
 std::string Summary(const std::string& gpu, const std::string& vulkanApi) {
-  std::string s = "Designer " + Version() + " (" + Commit() + ")\n";
+  std::string s = "Lobole " + Version() + " (" + Commit() + ")\n";
   s += "Build: " + Configuration() + "\n";
   s += "OpenCASCADE: " + KernelVersion() + "\n";
   if (!gpu.empty()) {

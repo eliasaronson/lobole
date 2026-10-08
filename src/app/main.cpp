@@ -334,7 +334,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
     // implicit 1.0 default). Both discrete and iGPU here report 1.3.
     VkApplicationInfo app_info = {};
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
-    app_info.pApplicationName = "Designer";
+    app_info.pApplicationName = "Lobole";
     app_info.apiVersion = VK_API_VERSION_1_2;
 
     VkInstanceCreateInfo create_info = {};
@@ -1521,7 +1521,7 @@ void printUsage(const char* programName) {
       << "  -vv                  Enable very verbose logging (trace level)"
       << std::endl;
   std::cout << "  -h, --help           Show this help message" << std::endl;
-  std::cout << "  --version            Show the Designer version" << std::endl;
+  std::cout << "  --version            Show the Lobole version" << std::endl;
   std::cout << "  --gui-tests          Run GUI test suite and exit"
             << std::endl;
   std::cout << "  --gui-test-shuffle [seed]    Run GUI tests in a random "
@@ -1621,7 +1621,7 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       printUsage(argv[0]);
       exit(0);
     } else if (arg == "--version") {
-      std::cout << "Designer " << DESIGNER_VERSION << std::endl;
+      std::cout << "Lobole " << DESIGNER_VERSION << std::endl;
       exit(0);
     } else if (arg == "-f" || arg == "--file") {
       if (i + 1 < argc) {
@@ -2388,7 +2388,7 @@ int main(int argc, char** argv) {
   }
 
   GLFWwindow* window = glfwCreateWindow(
-      geom.w, geom.h, "Designer - 3D CAD Software", nullptr, nullptr);
+      geom.w, geom.h, "Loböle - 3D CAD Software", nullptr, nullptr);
   if (window && rememberGeometry) {
     // Position after creation: the hint-based route needs a monitor handle
     // and would make this fullscreen. Wayland refuses positioning outright --

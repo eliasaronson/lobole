@@ -446,7 +446,7 @@ inline constexpr int kVersion =
          //      re-answered "which machine" with a combo; they are now a
          //      `machine` block -- name, travel, post, arcs, rotary, rapid,
          //      tool library -- that is a copy of a globally stored profile
-         //      named by `name` (~/.config/designer/machines/<slug>.json), so
+         //      named by `name` (~/.config/lobole/machines/<slug>.json), so
          //      the file opens on a machine that has never seen the profile
          //      and the panel says which copy it is using when the two differ
          //      (docs/cam/setup.md#machine-profiles). The three old keys are

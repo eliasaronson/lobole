@@ -2,7 +2,7 @@
 
 #ifdef HAVE_CAM_ADAPTIVE
 
-// The ONLY place in Designer that includes an LGPL header. See CamAdaptive.h:
+// The ONLY place in Lobole that includes an LGPL header. See CamAdaptive.h:
 // the code behind it lives in its own shared library so the licence boundary
 // is a link a user can replace.
 #include "Adaptive.hpp"

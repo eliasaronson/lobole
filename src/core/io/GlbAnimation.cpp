@@ -201,7 +201,7 @@ bool Write(const std::string& path, const std::vector<Node>& nodes,
   gltfNodes.insert(gltfNodes.begin(), root);
 
   json doc{
-      {"asset", {{"version", "2.0"}, {"generator", "Designer"}}},
+      {"asset", {{"version", "2.0"}, {"generator", "Lobole"}}},
       {"scene", 0},
       {"scenes", {{{"nodes", {0}}}}},
       {"nodes", gltfNodes},

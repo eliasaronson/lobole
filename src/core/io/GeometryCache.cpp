@@ -528,7 +528,7 @@ bool WriteRepositoryHints(const std::string& dir, bool commit,
     // non-mergeable so a conflict cannot interleave two shapes into garbage:
     // the resolution for derived data is "take either, the hash decides".
     const std::string attributes =
-        "# Written by Designer. Baked geometry is derived data: binary, and\n"
+        "# Written by Lobole. Baked geometry is derived data: binary, and\n"
         "# never merged — a conflicted .brep is resolved by rebuilding.\n"
         "geometry/*.brep binary -merge -diff\n";
     {
@@ -548,7 +548,7 @@ bool WriteRepositoryHints(const std::string& dir, bool commit,
       fs::remove(ignore, ec);
     } else {
       std::ofstream out(ignore, std::ios::trunc);
-      out << "# Written by Designer: this project does not commit its baked\n"
+      out << "# Written by Lobole: this project does not commit its baked\n"
              "# geometry, so opening a fresh clone rebuilds the model.\n"
              "geometry/\n";
       if (!out) {
