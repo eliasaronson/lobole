@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <component type="desktop-application">
-  <id>io.github.eliasaronson.Designer</id>
-  <name>Designer</name>
+  <id>org.lobole.Lobole</id>
+  <name>Loböle</name>
   <summary>Parametric B-Rep CAD for parts, assemblies, drawings, and simulation</summary>
   <metadata_license>CC0-1.0</metadata_license>
   <project_license>AGPL-3.0-or-later</project_license>
-  <developer id="io.github.eliasaronson">
+  <developer id="org.lobole">
     <name>Elias Högbom Aronsson</name>
   </developer>
   <description>
@@ -20,7 +20,7 @@
       automation clients.
     </p>
   </description>
-  <launchable type="desktop-id">io.github.eliasaronson.Designer.desktop</launchable>
+  <launchable type="desktop-id">org.lobole.Lobole.desktop</launchable>
   <url type="homepage">https://github.com/eliasaronson/Designer</url>
   <url type="bugtracker">https://github.com/eliasaronson/Designer/issues</url>
   <releases>

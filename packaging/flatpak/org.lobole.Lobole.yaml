@@ -11,7 +11,7 @@
 # note this before submitting.
 #
 # Build locally with tools/flatpak-build.sh (user-mode, no NixOS system change).
-app-id: io.github.eliasaronson.Designer
+app-id: org.lobole.Lobole
 runtime: org.freedesktop.Platform
 runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
@@ -207,7 +207,7 @@ modules:
     # SVG without those loaders, so drop the scalable icon locally and ship the
     # 256x256 PNG. Remove this post-install for a Flathub build.
     post-install:
-      - rm -f /app/share/icons/hicolor/scalable/apps/io.github.eliasaronson.Designer.svg
+      - rm -f /app/share/icons/hicolor/scalable/apps/org.lobole.Lobole.svg
     sources:
       - type: dir
         path: ../..

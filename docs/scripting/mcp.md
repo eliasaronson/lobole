@@ -60,7 +60,7 @@ With nothing running, the server spawns `designer --offscreen --remote 0`,
 waits for the child to announce its kernel-chosen port under its pid, attaches
 to it, and kills it when the server exits. The binary is probed, not assumed:
 `build/designer` beside the server, then `designer` on `PATH`, then the
-flatpak `io.github.eliasaronson.Designer`. The conditions are what make it
+flatpak `org.lobole.Lobole`. The conditions are what make it
 safe:
 
 - It triggers only when discovery finds nothing — a pinned port or any live

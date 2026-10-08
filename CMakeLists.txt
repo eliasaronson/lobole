@@ -1373,7 +1373,7 @@ install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole/hdri")
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/parts"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole")
-install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.desktop"
+install(FILES "${CMAKE_SOURCE_DIR}/packaging/org.lobole.Lobole.desktop"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 # AppStream metainfo. Installing it triggers `appstreamcli compose` during a
 # Flatpak build; that step needs working gdk-pixbuf image loaders to read the
@@ -1383,14 +1383,14 @@ install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.des
 # desktop entry and icons below still install.
 option(DESIGNER_INSTALL_METAINFO "Install AppStream metainfo" ON)
 if(DESIGNER_INSTALL_METAINFO)
-    install(FILES "${CMAKE_SOURCE_DIR}/packaging/io.github.eliasaronson.Designer.metainfo.xml"
+    install(FILES "${CMAKE_SOURCE_DIR}/packaging/org.lobole.Lobole.metainfo.xml"
             DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
 endif()
-install(FILES "${CMAKE_SOURCE_DIR}/assets/icons/io.github.eliasaronson.Designer.svg"
+install(FILES "${CMAKE_SOURCE_DIR}/assets/icons/org.lobole.Lobole.svg"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps")
 # A 256x256 raster alongside the scalable icon, as a fallback for desktops (and
 # icon-cache tools) that don't render SVG.
-install(FILES "${CMAKE_SOURCE_DIR}/assets/icons/io.github.eliasaronson.Designer.png"
+install(FILES "${CMAKE_SOURCE_DIR}/assets/icons/org.lobole.Lobole.png"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/icons/hicolor/256x256/apps")
 install(FILES
         "${CMAKE_SOURCE_DIR}/LICENSE"

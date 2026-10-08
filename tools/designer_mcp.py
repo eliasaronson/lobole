@@ -636,10 +636,10 @@ def _designer_argv():
     if shutil.which("flatpak"):
         try:
             probe = subprocess.run(
-                ["flatpak", "info", "io.github.eliasaronson.Designer"],
+                ["flatpak", "info", "org.lobole.Lobole"],
                 capture_output=True, timeout=10)
             if probe.returncode == 0:
-                return ["flatpak", "run", "io.github.eliasaronson.Designer"]
+                return ["flatpak", "run", "org.lobole.Lobole"]
         except OSError:
             pass
     return None
@@ -779,7 +779,7 @@ def _resolve_port():
             raise RuntimeError(
                 "No running Designer found, and no installed one to start: "
                 "probed for build/designer beside this server, `designer` on "
-                "PATH, and the io.github.eliasaronson.Designer flatpak. "
+                "PATH, and the org.lobole.Lobole flatpak. "
                 "Install the app, then start it with `designer --remote "
                 f"{DEFAULT_PORT}`.")
         raise RuntimeError(

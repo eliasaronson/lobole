@@ -13,11 +13,11 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-MANIFEST="$REPO/packaging/flatpak/io.github.eliasaronson.Designer.yaml"
+MANIFEST="$REPO/packaging/flatpak/org.lobole.Lobole.yaml"
 WORK="$(dirname "$REPO")/designer-flatpak-work"
 BUILDDIR="$WORK/build"
 STATEDIR="$WORK/state"   # persistent: downloaded sources + ccache
-APP_ID="io.github.eliasaronson.Designer"
+APP_ID="org.lobole.Lobole"
 
 mkdir -p "$WORK"
 

@@ -91,7 +91,7 @@ that glibc-to-driver contract. Nothing in CI builds the AppImage.
 
 ## The Flatpak
 
-`packaging/flatpak/io.github.eliasaronson.Designer.yaml`, built and
+`packaging/flatpak/org.lobole.Lobole.yaml`, built and
 user-installed by `tools/flatpak-build.sh` (user mode through `nix-shell`, no
 root and no system Flatpak service needed; `--run` launches the result). It
 builds against the Freedesktop 24.08 runtime and SDK, not the Nix
