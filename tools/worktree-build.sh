@@ -20,10 +20,10 @@
 #     (different subsystems) — overlapping edits just move the cost to merge.
 #
 # Typical parallel setup from the main checkout:
-#   git worktree add ../designer-wtA -b wtA-feature
-#   git worktree add ../designer-wtB -b wtB-feature
-#   (cd ../designer-wtA && tools/worktree-build.sh)   # or let an agent run it
-#   (cd ../designer-wtB && tools/worktree-build.sh)
+#   git worktree add ../lobole-wtA -b wtA-feature
+#   git worktree add ../lobole-wtB -b wtB-feature
+#   (cd ../lobole-wtA && tools/worktree-build.sh)   # or let an agent run it
+#   (cd ../lobole-wtB && tools/worktree-build.sh)
 #   ... run an agent in each (Agent tool: isolation:"worktree" does the
 #       worktree part automatically; this script gives it a working build/) ...
 #   # then land each in turn from main: tools/merge-branch.sh wtA-feature

@@ -1,6 +1,6 @@
 # Roadmap
 
-What Designer does not do yet, grouped by what it unblocks and ordered within
+What Loböle does not do yet, grouped by what it unblocks and ordered within
 each group by what a real part needs first. Each item is absent from the code
 as it stands; how the built parts work is in the area READMEs
 ([README.md](README.md)). A plan for an item goes in `docs/plans/` before

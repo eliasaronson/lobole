@@ -20,7 +20,7 @@ along, the chuck's end, its letter and which way it turns;
 and tailstock's sizes; [rotary.md](rotary.md#chuck-and-tailstock)) and
 `library` (tools). The settings window's machine editor has all of them.
 
-**Stored globally, one file per machine**: `~/.config/designer/machines/<slug>.json`,
+**Stored globally, one file per machine**: `~/.config/lobole/machines/<slug>.json`,
 beside `settings.json` — a list of structs does not belong in the scalar
 settings table. `DocumentIO::LoadMachines/SaveMachine/DeleteMachine` own the
 store; `ui::ReloadMachines` mirrors it into `state.machines` at startup (the

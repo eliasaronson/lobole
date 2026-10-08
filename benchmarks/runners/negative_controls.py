@@ -153,7 +153,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--task", default="")
     ap.add_argument("--keep", default="")
-    ap.add_argument("--binary", default=os.path.join(ROOT, "build", "designer"))
+    ap.add_argument("--binary", default=os.path.join(ROOT, "build", "lobole"))
     a = ap.parse_args()
 
     items = [(k, w) for k, v in WRONG.items() if not a.task or k == a.task

@@ -2839,7 +2839,7 @@ bool Adaptive2d::ResolveLinkPath(
     size_t sindex;
     double par;
 
-    // Designer patch 0001, 2026-09-25: no CPU-time limit here. Upstream
+    // Lobole patch 0001, 2026-09-25: no CPU-time limit here. Upstream
     // gave up after a clock() budget, so the same input produced a
     // different toolpath when the machine was busy; the step limit below
     // bounds the search alone.
@@ -2979,7 +2979,7 @@ bool Adaptive2d::MakeLeadPath(
     output.push_back(startPoint);
     double stepSize = min(MIN_STEP_CLIPPER * 8, 0.2 * stepOverScaled + 1);
 
-    // Designer patch 0002, 2026-10-01: the lead path works on the cleared
+    // Lobole patch 0002, 2026-10-01: the lead path works on the cleared
     // area WITHIN REACH of it, not the whole of it. Upstream copied the
     // whole cleared area, offset all of it inward by the tool's radius, and
     // for a lead-out did both again at every step: on a part cleared at a

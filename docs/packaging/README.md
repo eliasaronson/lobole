@@ -1,6 +1,6 @@
 # Packaging: building and shipping
 
-How Designer is built outside a developer's `nix-shell`, and what each
+How Loböle is built outside a developer's `nix-shell`, and what each
 channel delivers. Day-to-day builds (`nix-shell shell.nix --run "cd build &&
 ninja …"`) are in the repository's `CLAUDE.md` and `CONTRIBUTING.md`.
 
@@ -43,7 +43,7 @@ At run time `RuntimePaths` (`src/common/RuntimePaths.{h,cpp}`) resolves:
   `$XDG_CONFIG_HOME` / `$XDG_STATE_HOME` / `$XDG_CACHE_HOME` + `/designer`,
   falling back to `~/.config`, `~/.local/state`, `~/.cache`. On Windows,
   which has neither `$HOME` nor `XDG_*`, they are
-  `%LOCALAPPDATA%\Designer\{config,state,cache}`, never `%TEMP%`, which
+  `%LOCALAPPDATA%\Loböle\{config,state,cache}`, never `%TEMP%`, which
   Windows sweeps.
 
 ## The Nix flake
@@ -57,11 +57,11 @@ and the fonts are vendored in-tree.
 
 - `packages.x86_64-linux.default` (= `designer`): a Release build of the app
   only, installed through the CMake install phase. Netgen is
-  `nix/netgen-lean.nix`: built without MPI, Python and its GUI, which Designer
+  `nix/netgen-lean.nix`: built without MPI, Python and its GUI, which Loböle
   never uses and which would otherwise pull numpy and a Fortran compiler into
   the runtime closure through metadata references.
 - `packages.x86_64-linux.dockerHeadless`: a layered OCI image running
-  `designer --headless --remote 8437 --remote-bind-all`. The RPC server is
+  `lobole --headless --remote 8437 --remote-bind-all`. The RPC server is
   unauthenticated and loopback-only by default; `--remote-bind-all` is right
   inside a container's namespaced network, and the port should not be
   published to a network you do not trust. CI builds it, smokes it and
@@ -222,7 +222,7 @@ installs them with every binary.
 The MCP server and the Python client ship separately from the app: the
 repository's `pyproject.toml` packages `tools/designer_mcp.py` and
 `tools/designer_remote.py` with `designer-mcp` / `designer-remote` entry
-points (`uv tool install <repo>`, then `claude mcp add designer --
+points (`uv tool install <repo>`, then `claude mcp add lobole --
 designer-mcp`). `tests/packaging_smoke.py` gates the metadata. See
 [../scripting/README.md](../scripting/README.md).
 

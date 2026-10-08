@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The frame watchdog reports a stalled main thread, with its stack.
 
-`designer --headless --stall-test` stalls the main loop for 4 s once, a few
+`lobole --headless --stall-test` stalls the main loop for 4 s once, a few
 iterations in, inside a function named StallSelfTest and under a label. The
 watchdog (common/Watchdog.h) must log, from its own thread:
 

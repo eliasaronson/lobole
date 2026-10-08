@@ -1,6 +1,6 @@
 # The agent benchmark
 
-`benchmarks/` answers one question repeatably: given only Designer's MCP
+`benchmarks/` answers one question repeatably: given only Loböle's MCP
 surface and a description of a part, can an agent build the part — and does a
 change to the API make that better or worse? The full description, how to
 run it and how to read a result are in
@@ -24,7 +24,7 @@ prints the plan, the run count and the cost ceiling for free.
   parts, mates, and at T5 a motion answer), and a Fit task graded against a
   host part the agent never sees. `reference.py` prints the current task and
   check counts; do not copy them into docs.
-- **Arms** (`benchmarks/arms/*.json`) — Designer configurations under test:
+- **Arms** (`benchmarks/arms/*.json`) — Loböle configurations under test:
   `full` (every tool), `rpc-only` (six tools; `rpc` still reaches every RPC,
   so it loses only schema bulk), `script-first` (every tool, told to write a
   script), `no-inspect` (the floor: no tool that can ask an independent

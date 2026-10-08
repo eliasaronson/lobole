@@ -107,8 +107,8 @@ class World:
             "cwd": tree(self.work, skip=("fp",)),
             "app": tree(self.app.tmp, skip=(
                 "app.log",
-                os.path.join("state", "designer", "instances"),
-                os.path.join("state", "designer", "recent-projects.json"))),
+                os.path.join("state", "lobole", "instances"),
+                os.path.join("state", "lobole", "recent-projects.json"))),
         }
 
 

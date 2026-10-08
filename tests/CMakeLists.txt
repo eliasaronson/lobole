@@ -311,14 +311,14 @@ add_test(NAME render_ao_smoke
 set_tests_properties(render_ao_smoke PROPERTIES LABELS "gui;pygui" TIMEOUT 300
                      SKIP_RETURN_CODE 77)
 
-# Drives designer --headless --remote: no window, GPU, or display server
+# Drives lobole --headless --remote: no window, GPU, or display server
 # needed, so no gui label — this one runs on CI.
 add_test(NAME headless_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/headless_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(headless_smoke PROPERTIES LABELS slow TIMEOUT 300)
 
-# Drives designer --offscreen --remote: a real Vulkan renderer with NO window
+# Drives lobole --offscreen --remote: a real Vulkan renderer with NO window
 # and NO display server (the test strips DISPLAY to prove it). Needs an ICD,
 # not a display — the femgpu precedent — so it skips (77) in a container and
 # runs wherever a device exists. RESOURCE_LOCK serializes it against the

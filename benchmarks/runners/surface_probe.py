@@ -185,7 +185,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--probe", default="")
     ap.add_argument("--keep", default="")
-    ap.add_argument("--binary", default=os.path.join(ROOT, "build", "designer"))
+    ap.add_argument("--binary", default=os.path.join(ROOT, "build", "lobole"))
     a = ap.parse_args()
 
     probes = [p for p in PROBES if not a.probe or p[0] == a.probe]

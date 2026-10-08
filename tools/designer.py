@@ -2,7 +2,7 @@
 """A pythonic client for Designer — the same interface the LLM drives, for
 humans in a REPL or notebook (scripting S3).
 
-Start the app with `designer --remote 8437` (or `--headless --remote 8437`),
+Start the app with `lobole --remote 8437` (or `--headless --remote 8437`),
 then:
 
     from designer import Designer

@@ -2,7 +2,7 @@
 """Integration test: model a dimensioned bracket through the MCP server.
 
 Exercises the MCP layer itself (stdio transport, tool schemas, image
-content), not just the RPC underneath: designer --remote <- designer_mcp.py
+content), not just the RPC underneath: lobole --remote <- designer_mcp.py
 <- the SDK's stdio client.
 
 Usage: mcp_smoke.py <path-to-designer-binary>

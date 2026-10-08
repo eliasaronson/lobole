@@ -1,6 +1,6 @@
 # Third-party license bundle
 
-This directory accompanies Designer binary distributions. The project itself is
+This directory accompanies Loböle binary distributions. The project itself is
 licensed under AGPL-3.0-or-later; see the top-level `LICENSE`. Component names,
 versions, linkage, and source locations are listed in `THIRD_PARTY.md`.
 

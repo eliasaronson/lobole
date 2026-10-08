@@ -366,7 +366,7 @@ by the same name drift apart without any test noticing:
   work.
 - `--remote <port>` serves JSON-RPC (`--remote 0` binds a kernel-chosen
   port); every instance announces itself in
-  `~/.local/state/designer/instances/<port>.json`. `ping` reports the port,
+  `~/.local/state/lobole/instances/<port>.json`. `ping` reports the port,
   the open project, the build's optional `features`, and `binary_replaced`
   (Linux: the executable was rebuilt under a running instance).
 
@@ -374,7 +374,7 @@ by the same name drift apart without any test noticing:
 
 - **A crash** (SIGSEGV, SIGABRT, SIGBUS, SIGFPE) prints a symbolized stack
   to stderr from `CrashHandler.cpp`, then dies as it would have.
-  `designer --crash-test` exercises it.
+  `lobole --crash-test` exercises it.
 - **A stall** — the main thread not coming round its loop — is reported by
   the frame watchdog (`src/common/Watchdog.{h,cpp}`). Each loop (windowed,
   `--offscreen`, `--headless`) beats it once per iteration; a monitor thread
@@ -399,7 +399,7 @@ by the same name drift apart without any test noticing:
   the stall's helper and never the function that stalled.
 - `DESIGNER_WATCHDOG_S` sets the threshold (default 3; 0 turns it off, as a
   debugger stopping the process is not a hang); a value that is not seconds
-  is refused at start-up. `designer --stall-test` stalls the loop for 4 s once,
+  is refused at start-up. `lobole --stall-test` stalls the loop for 4 s once,
   and `tests/watchdog_smoke.py` checks the stall line, the label, the stack and
   the resume.
 
@@ -419,7 +419,7 @@ by the same name drift apart without any test noticing:
   (`launch_app()`); `tests/config_isolation_lint.py` fails any script that
   spawns the binary directly. It keeps the app's log, prints it on failure,
   and archives the log, traceback and a `reproduce.sh` under
-  `$XDG_STATE_HOME/designer/smoke-failures/`. Every launch sets
+  `$XDG_STATE_HOME/lobole/smoke-failures/`. Every launch sets
   `DESIGNER_EXIT_WITH_PARENT=<its pid>`, so the app gets SIGTERM when the
   test dies however it dies — a SIGKILLed smoke used to leave its instance
   serving nothing under init for hours (`src/app/ParentWatch.h`,
@@ -432,7 +432,7 @@ by the same name drift apart without any test noticing:
   `dev-watch.sh` do not, because their instances are meant to outlive them.
 - The GUI runner shards, shuffles by default and prints the seed that
   replays the run; a failing shard is archived under
-  `$XDG_STATE_HOME/designer/gui-failures/` with its exact filter and a
+  `$XDG_STATE_HOME/lobole/gui-failures/` with its exact filter and a
   `reproduce.sh`.
 - `tests/test_actions.cpp` pins UI logic headlessly (read its header before
   adding to it); `tests/test_conventions.cpp` holds the source-scanning rules

@@ -2,7 +2,7 @@
 # headless-preview — a Designer instance that renders WITHOUT a visible window
 # or your display session, for agents and CI to drive + screenshot themselves.
 #
-# Default is `designer --offscreen`: a real Vulkan renderer with no window and
+# Default is `lobole --offscreen`: a real Vulkan renderer with no window and
 # no display server at all — screenshot, render_still, render_sheet, render
 # options and face selection all work, no Xvfb involved. The one thing it
 # cannot do is DRIVE the GUI (ui_action needs an interface to click), so

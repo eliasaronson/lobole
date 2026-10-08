@@ -64,7 +64,7 @@ The loop always measures itself (a few `glfwGetTime()` calls a frame) and
 shows nothing unless asked. Three ways in, none of them in the menus or
 Preferences, because this is session debugging state, not a preference:
 
-- `designer --perf-hud` — from launch;
+- `lobole --perf-hud` — from launch;
 - **Ctrl+Shift+F** — the hidden `view.perf_hud` command;
 - **`frame_stats`** over the remote/MCP — the numbers, and `{hud: true|false}`
   toggles the overlay. This is the door for agents and tests.

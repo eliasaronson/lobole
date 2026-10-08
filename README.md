@@ -1,4 +1,4 @@
-# Designer
+# Loböle
 
 [![CI](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml/badge.svg)](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml)
 
@@ -22,7 +22,7 @@ See [docs/README.md](docs/README.md) for how each part of the program works, and
 ## Gallery
 
 Every model here is built by a generator — an ordinary Python program driving
-the same API the GUI and an LLM assistant use. The stills are Designer's own
+the same API the GUI and an LLM assistant use. The stills are Loböle's own
 path tracer; the animation is its motion-video export. See
 [generators/README.md](generators/README.md) for all of them.
 
@@ -35,7 +35,7 @@ path tracer; the animation is its motion-video export. See
 
 ## Requirements
 
-Designer builds on any Linux with the libraries below; two paths are verified
+Loböle builds on any Linux with the libraries below; two paths are verified
 continuously, and the rest is a matter of your distribution's package names.
 
 **Ubuntu 24.04** — this exact list is what CI installs on every push, so it
@@ -58,7 +58,7 @@ panel, and the preference for it disappears.)
 `cmake` prints what it compiled in, so nothing is inferred:
 
 ```
-Designer 0.1.0 — optional features
+Loböle 0.1.0 — optional features
   [x] CAM (milling, G-code)        deps/clipper2 (vendored, Boost)  -DENABLE_CAM=OFF
   [x] Terminal panel               libvterm (system)  -DENABLE_TERMINAL=OFF
   [x] FEM solver                   Eigen (system)
@@ -130,7 +130,7 @@ container on every push so this stays honest:
 
 These are deterministic, not flaky: the same two fail on every run against
 7.6.3 and neither fails against 7.9.x. **You do not need to build OpenCASCADE
-yourself** to work on Designer — every distro package listed above is a
+yourself** to work on Loböle — every distro package listed above is a
 supported configuration and CI keeps 26.04 and 24.04 that way. On an older
 release, the cheap routes to full parity are Ubuntu 26.04, Nix or the Flatpak; compiling OCC from source takes far longer
 than either and leaves you maintaining it — the OCCT project publishes source
@@ -165,7 +165,7 @@ cmake -S . -B build -DENABLE_TEST_ENGINE=OFF
 Every other dependency here is open source; the test engine is not. It is free
 for individuals, non-profit entities, educational use, open-source derivative
 works, and companies under 2M USD turnover — but a larger company that wants
-to build or ship Designer needs a paid license from DISCO HELLO. This flag
+to build or ship Loböle needs a paid license from DISCO HELLO. This flag
 removes the dependency outright: no sources, no headers, no
 `IMGUI_ENABLE_TEST_ENGINE` hooks compiled into imgui.
 
@@ -188,7 +188,7 @@ cmake --install build --prefix "$HOME/.local"
 
 ```
 cd build
-./designer [-f path/to/file.step]
+./lobole [-f path/to/file.step]
 ```
 
 ### Container (headless)
@@ -216,7 +216,7 @@ a network you do not trust.
 
 The image is ~1.1 GB (169 MB compressed), nearly all of it the CAD kernel.
 Netgen is built without MPI, Python bindings and its Tk GUI — none of which
-Designer uses, and which together dragged numpy and a Fortran compiler into
+Loböle uses, and which together dragged numpy and a Fortran compiler into
 every runtime closure; see `nix/netgen-lean.nix`.
 
 ## Testing
@@ -229,7 +229,7 @@ tools/ctest -LE gui -j$(nproc)              # headless: no GPU, no display
 ```
 
 The headless suite is Catch2 against the GUI-free `designer_core` library plus
-Python integration smokes driving `designer --headless`; it is what CI runs on
+Python integration smokes driving `lobole --headless`; it is what CI runs on
 every push. The GUI suite drives the real application through
 [ImGui Test Engine](https://github.com/ocornut/imgui_test_engine) (simulated
 mouse and keyboard on the actual UI) and needs a GPU — `gui-tests-xvfb.sh`
@@ -289,7 +289,7 @@ Scripts and AI assistants can drive a live session over JSON-RPC
 (localhost-only, opt-in):
 
 ```
-./designer --remote 8437
+./lobole --remote 8437
 python3 tools/designer_remote.py 8437 get_state
 python3 tools/designer_remote.py 8437 add_feature \
     '{"feature": {"type": "Box", "name": "Box 1", "on": "Top",
@@ -310,7 +310,7 @@ See `tools/designer_remote.py` and `tests/remote_smoke.py` for reference usage.
 modeling, measurement and export — which is what CI and scripted work use:
 
 ```
-./designer --headless --remote 8437
+./lobole --headless --remote 8437
 ```
 
 Running instances **announce themselves**, so a client finds the app rather
@@ -323,14 +323,14 @@ MCP clients (Claude and others) get the same surface through
 
 Copyright © Elias Högbom Aronsson
 
-Designer is free software licensed under the **GNU Affero General Public License,
+Loböle is free software licensed under the **GNU Affero General Public License,
 version 3 or (at your option) any later version** (AGPL-3.0-or-later). See the
 [`LICENSE`](LICENSE) file for the full text.
 
 In short: you may use, study, modify, and redistribute it, but any distributed
 or network-hosted derivative must also be released under the AGPL with its
 source available. This copyleft governs the *software only* — files you author
-with Designer (CAD models, drawings, exports) are yours, with no obligation to
+with Loböle (CAD models, drawings, exports) are yours, with no obligation to
 publish them.
 
 ### Additional permission (GPL/AGPL section 7): imgui_test_engine linking
@@ -348,18 +348,18 @@ those in its own license. The distributable notice is also available as
 ### Trademarks
 
 Other products named in this repository are trademarks of their owners, and
-Designer is **not affiliated with, endorsed by, or sponsored by** any of them.
+Loböle is **not affiliated with, endorsed by, or sponsored by** any of them.
 Where those names are used, and why — see [`TRADEMARKS.md`](TRADEMARKS.md).
 
 The project's own name and logo are **not licensed under the AGPL**. The
 copyleft covers the code and grants no right to the name or the mark. You may
-say truthfully that your work derives from, or interoperates with, Designer —
+say truthfully that your work derives from, or interoperates with, Loböle —
 but a fork, a redistribution or a modified build takes its own name, so that
 anyone can tell whose build they are running.
 
 ### Third-party components
 
-Designer links LGPL libraries (OpenCASCADE, Netgen, and the vendored, modified
+Loböle links LGPL libraries (OpenCASCADE, Netgen, and the vendored, modified
 PlaneGCS built as a shared library) and bundles other open-source components;
 see [`THIRD_PARTY.md`](THIRD_PARTY.md) for the full inventory and their
 licenses.

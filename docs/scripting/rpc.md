@@ -1,6 +1,6 @@
 # The remote RPC server
 
-`designer --remote <port>` serves newline-delimited JSON-RPC over TCP:
+`lobole --remote <port>` serves newline-delimited JSON-RPC over TCP:
 
 ```
 request:   {"id": 1, "method": "add_feature", "params": {...}}\n

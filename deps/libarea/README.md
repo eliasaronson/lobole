@@ -19,7 +19,7 @@ be enough to reproduce this — hence the pinned commit.
 | `Adaptive.{cpp,hpp}` | **LGPL-2.1-or-later** (Kresimir Tusek, 2018) |
 | `clipper.{cpp,hpp}` | BSL-1.0 (Angus Johnson) |
 
-Designer is AGPL-3.0-or-later; Adaptive is LGPL, like PlaneGCS beside it. It
+Loböle is AGPL-3.0-or-later; Adaptive is LGPL, like PlaneGCS beside it. It
 is built as its own shared library — `designer_adaptive`, with an SONAME —
 and linked dynamically; it is never absorbed into `designer_core`, and every
 package installs it. The LGPL's condition for a combined work is that the
@@ -35,7 +35,7 @@ Two rules follow, and both matter more than build tidiness:
 
 These files are kept identical to upstream **plus the patches in `patches/`**,
 and nothing else. Each patch marks the code it changes with a dated
-`Designer patch NNNN` comment, which is the notice of modification LGPL-2.1
+`Lobole patch NNNN` comment, which is the notice of modification LGPL-2.1
 §2a asks for. That is what makes "what did we change" checkable: apply
 the patches to the pinned commit and the result must equal these files.
 

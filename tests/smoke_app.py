@@ -228,7 +228,7 @@ def _archive_failure(app_log):
         root = os.path.join(
             os.environ.get("XDG_STATE_HOME",
                            os.path.expanduser("~/.local/state")),
-            "designer", "smoke-failures")
+            "lobole", "smoke-failures")
         os.makedirs(root, exist_ok=True)
         # Keep the last 20; past that the oldest are noise, same rule the GUI
         # archive follows.

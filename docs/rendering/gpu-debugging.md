@@ -46,7 +46,7 @@ see GPU memory.
 Validation is silent when every call is legal and the result is still wrong:
 a matrix built in the wrong space, a texture sampled at the wrong
 coordinates, a pass reading last frame's attachment. For those, capture the
-frame and look at each draw's inputs and outputs. Designer is an ordinary
+frame and look at each draw's inputs and outputs. Loböle is an ordinary
 Vulkan target, so RenderDoc works with no changes to the app.
 
 ```

@@ -109,13 +109,13 @@ def mcp_config(port, arm):
         # and not a capability we ship.
         args = [os.path.join(ROOT, "benchmarks", "arms", "document_mcp.py"),
                 "--port", str(port)]
-        return {"mcpServers": {"designer":
+        return {"mcpServers": {"lobole":
                                {"command": sys.executable, "args": args}}}
     args = [os.path.join(ROOT, "tools", "designer_mcp.py"), "--port", str(port),
             "--no-autostart"]
     if arm.get("only_tools"):
         args += ["--only-tools", ",".join(arm["only_tools"])]
-    return {"mcpServers": {"designer": {"command": sys.executable, "args": args}}}
+    return {"mcpServers": {"lobole": {"command": sys.executable, "args": args}}}
 
 
 def run_agent(prompt, cfg_path, arm, model, cwd, budget, timeout):
@@ -376,7 +376,7 @@ def main():
     ap.add_argument("--budget", type=float, default=2.0,
                     help="per-run USD ceiling handed to claude --max-budget-usd")
     ap.add_argument("--timeout", type=int, default=900, help="per-run seconds")
-    ap.add_argument("--binary", default=os.path.join(ROOT, "build", "designer"))
+    ap.add_argument("--binary", default=os.path.join(ROOT, "build", "lobole"))
     ap.add_argument("--out", default=os.path.join(BENCH, "results"))
     ap.add_argument("--no-classify", dest="classify", action="store_false",
                     help="skip the over-claim classifier (saves a haiku call)")

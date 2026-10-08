@@ -160,7 +160,7 @@ here; the golden corpus and git history cover them.
 | 74 | A job holds several parts: a machining selection names its `part`; a setup's `placements: [{id, part, pos?, rot_z?, enabled?}]`. A part placed twice is refused (`cam::PlacementRefusal`) |
 | 75 | Setup `order`: `authored` (default) \| `tool` \| `part`; unknown values refused |
 | 76 | A placement may carry its own fixturing `frame` (quaternion) |
-| 77 | A setup embeds its machine: `cam[].machine` `{name, travel?, post, fit_arcs?, has_rotary_axis?, rapid_feed?, tools?}`, a copy of a profile under `~/.config/designer/machines/<slug>.json`. The old per-setup `post` / `fit_arcs` / `has_rotary_axis` are still read. Unknown posts refused |
+| 77 | A setup embeds its machine: `cam[].machine` `{name, travel?, post, fit_arcs?, has_rotary_axis?, rapid_feed?, tools?}`, a copy of a profile under `~/.config/lobole/machines/<slug>.json`. The old per-setup `post` / `fit_arcs` / `has_rotary_axis` are still read. Unknown posts refused |
 | 78 | Setup `split_output`: one program per tool, `<project> - <setup>-T<n>.nc`; forces tool order |
 | 79 | Drill `peck` depth |
 | 80 | Profile / pocket `corner_relief`: `dogbone` \| `tbone` |

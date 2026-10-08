@@ -1,6 +1,6 @@
 # The MCP server
 
-`tools/designer_mcp.py` exposes a running Designer instance to any MCP client
+`tools/designer_mcp.py` exposes a running Loböle instance to any MCP client
 (Claude Code, Claude Desktop, a custom agent). It is a stdio server built on
 the official MCP Python SDK's `FastMCP`, a thin layer over
 `tools/designer_remote.py`: every tool ends in an RPC ([rpc.md](rpc.md)).
@@ -12,7 +12,7 @@ checked-in `.mcp.json`, which runs it inside `nix-shell` (the `mcp` package
 comes from `shell.nix`). For other clients:
 
 ```
-claude mcp add designer -- python3 /path/to/Designer/tools/designer_mcp.py
+claude mcp add lobole -- python3 /path/to/Designer/tools/designer_mcp.py
 ```
 
 No port is needed; see "Finding the app" below. `--port` or `$DESIGNER_PORT`
@@ -26,7 +26,7 @@ from `tools/` with two console scripts, `designer-mcp` (the server) and
 
 ```
 uv tool install /path/to/Designer       # or: uvx --from git+ssh://<remote> designer-mcp
-claude mcp add designer -- designer-mcp
+claude mcp add lobole -- designer-mcp
 ```
 
 The package name `designer-mcp` is a placeholder and is not on PyPI; install
@@ -46,17 +46,17 @@ The server resolves which instance to talk to, in this order:
 3. **Several** — refuse, listing them with their modes. Guessing would answer
    questions about a document the user is not looking at.
 4. **None** — autostart (below), or, with autostart off, refuse naming the
-   exact start command for a Designer that is actually installed here.
+   exact start command for a Loböle that is actually installed here.
 
 It connects lazily on the first tool call and reconnects once across a
 dropped connection, so registering it before the app is running is fine.
 `describe` and `execute_script` report what they attached to (`attached`:
-"Designer on port 9090: bracket.dsgn (unsaved changes), gui"), and the
+"Loböle on port 9090: bracket.dsgn (unsaved changes), gui"), and the
 `instances` tool lists what is running. That line comes from `ping`, live.
 
 ### Autostart
 
-With nothing running, the server spawns `designer --offscreen --remote 0`,
+With nothing running, the server spawns `lobole --offscreen --remote 0`,
 waits for the child to announce its kernel-chosen port under its pid, attaches
 to it, and kills it when the server exits. The binary is probed, not assumed:
 `build/lobole` beside the server, then `designer` on `PATH`, then the

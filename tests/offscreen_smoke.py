@@ -77,7 +77,7 @@ def main():
         expect(pong["port"] == app.port, f"ping names its port ({pong})")
 
         phase("instance registry announces offscreen")
-        entry = os.path.join(tmp, "designer", "instances", f"{app.port}.json")
+        entry = os.path.join(tmp, "lobole", "instances", f"{app.port}.json")
         expect(os.path.exists(entry), f"registry file exists ({entry})")
         with open(entry) as f:
             info = json.load(f)

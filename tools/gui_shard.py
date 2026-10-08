@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Partition the GUI suite into balanced shards for gui-tests-xvfb.sh.
 
-Reads the suite's OWN inventory (`designer --gui-test-list`, one
+Reads the suite's OWN inventory (`lobole --gui-test-list`, one
 "category/name" per line) and the recorded per-test times, and prints one
 `--gui-test-filter` string per shard.
 

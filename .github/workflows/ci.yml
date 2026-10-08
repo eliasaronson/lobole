@@ -1,5 +1,5 @@
 # Build + the headless test suite: unit tests and headless_smoke run with no
-# display server and no GPU (designer --headless never initializes Vulkan).
+# display server and no GPU (lobole --headless never initializes Vulkan).
 # GUI-labeled ctest entries (gui_smoke, remote_smoke, mcp_smoke) stay
 # local-only; the `gui-suite` job below runs the ImGui test-engine suite on
 # SOFTWARE Vulkan instead, which needs no GPU.
@@ -104,7 +104,7 @@ jobs:
         run: |
           cd build
           xvfb-run -a -s "-screen 0 1280x720x24" \
-            ./designer --gui-tests --hidden --gui-test-shuffle \
+            ./lobole --gui-tests --hidden --gui-test-shuffle \
             | tee gui.log
           # The app exits 0 whether or not a case failed, so the verdict comes
           # from its own summary line — the same trap tools/gui-tests-xvfb.sh

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """An app a test launched dies with the test, even one killed by SIGKILL.
 
-Two `designer --headless --remote 0` instances were found 16 hours after
+Two `lobole --headless --remote 0` instances were found 16 hours after
 their smokes were killed (a ctest timeout, an agent stopping a run): parented
 to init, holding a scratch state dir and their memory. No `finally:` runs on
 SIGKILL, so the app has to notice by itself — src/app/ParentWatch.h, armed

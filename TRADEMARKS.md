@@ -2,7 +2,7 @@
 
 This repository names other companies' products. Every such name is a
 trademark or registered trademark of its owner, used here only to refer to
-that product. Designer is **not affiliated with, endorsed by, or sponsored
+that product. Loböle is **not affiliated with, endorsed by, or sponsored
 by** any of them, and naming a product claims no compatibility,
 certification or approval.
 
@@ -41,7 +41,7 @@ they are; each belongs to its respective owner.
 
 All of it is **referential (nominative) use**: naming someone else's product
 to talk about that product, and no more of the name than that takes. No
-third-party logos or branding are used. Designer is described on its own
+third-party logos or branding are used. Loböle is described on its own
 terms, and is not offered as a replica of, or a drop-in replacement for, any
 of these products.
 

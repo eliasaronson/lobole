@@ -6,7 +6,7 @@ Usage:
     designer_replay.py <port> <session.jsonl>
 
 Sends each recorded semantic request in order over the JSON-RPC remote
-(start the target with `designer --headless --remote <port>` for a
+(start the target with `lobole --headless --remote <port>` for a
 deterministic environment). Exits non-zero on the first failing call.
 """
 import json

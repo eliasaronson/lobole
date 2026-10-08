@@ -10,7 +10,7 @@ every tab kind it claims to support.
 
 HOW, AND WHAT TO DISTRUST
 -------------------------
-The test list comes from the binary itself (`designer --gui-test-list`), so a
+The test list comes from the binary itself (`lobole --gui-test-list`), so a
 renamed or deleted test cannot silently linger here. Everything else is a
 SOURCE SCAN against the marker tables below, which is a heuristic: a test is
 credited to a tool when its body mentions one of that tool's markers, and to
@@ -163,7 +163,7 @@ def main():
         i = args.index("--out")
         out_path = args[i + 1]
         del args[i:i + 2]
-    binary = args[0] if args else os.path.join(ROOT, "build", "designer")
+    binary = args[0] if args else os.path.join(ROOT, "build", "lobole")
     bodies = test_bodies()
     listed = listed_tests(binary)
     note = ""

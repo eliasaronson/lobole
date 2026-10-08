@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Integration test: drive `designer --headless --remote` — no window, no
+"""Integration test: drive `lobole --headless --remote` — no window, no
 GPU, no display server (DISPLAY is stripped to prove it).
 
 Covers the document/geometry RPC surface headless: the S1 bracket with

@@ -2,13 +2,13 @@
 
 ## The remote interface is unauthenticated
 
-Designer can serve a JSON-RPC interface (`designer --remote <port>`, also
+Loböle can serve a JSON-RPC interface (`lobole --remote <port>`, also
 opened on demand by the terminal panel) that scripts, the Python SDK, the MCP
 server and the test suites drive. Know what it is before you run it:
 
 - **It has no authentication.** Anything that can open a TCP connection to the
   port can drive the application.
-- **It can read and write files** as the user running Designer: open, save,
+- **It can read and write files** as the user running Loböle: open, save,
   import and export take paths, and `execute_script` in the MCP server runs
   Python.
 - **It listens on 127.0.0.1 only**, unless you pass `--remote-bind-all`, which
@@ -16,7 +16,7 @@ server and the test suites drive. Know what it is before you run it:
   network namespace (the headless image uses it). On a shared machine, other
   local users can still reach a loopback port.
 - A running instance announces its port in
-  `~/.local/state/designer/instances/`.
+  `~/.local/state/lobole/instances/`.
 
 So: **do not expose the remote port** to a network, a port forward, or a
 container port published beyond a network you trust. Without `--remote` (and
@@ -33,8 +33,8 @@ choose **Report a vulnerability**
 (<https://github.com/eliasaronson/Designer/security/advisories/new>). There is
 no security email address.
 
-Include what you found, how to reproduce it, the Designer version or commit
-(`designer --version`), and what an attacker gains. You will get an answer on
+Include what you found, how to reproduce it, the Loböle version or commit
+(`lobole --version`), and what an attacker gains. You will get an answer on
 the advisory; once a fix is available the advisory is published with credit,
 unless you ask otherwise.
 

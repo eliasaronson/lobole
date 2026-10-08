@@ -1,8 +1,8 @@
-# Agent benchmark — does Designer's API survive contact with an agent?
+# Agent benchmark — does Loböle's API survive contact with an agent?
 
 This directory answers one question, repeatably and in numbers:
 
-> **Given only Designer's MCP surface and a description of a part, can an agent
+> **Given only Loböle's MCP surface and a description of a part, can an agent
 > build that part — and does a change we just made to the API make that better
 > or worse?**
 
@@ -17,7 +17,7 @@ Prior art: [SmartAI/Chamfer](https://github.com/SmartAI/Chamfer) benchmarks a
 CAD agent the same way — identical prompts across arms, a geometry oracle that
 never asks the agent whether it succeeded, over-claims counted separately. The
 shape here is deliberately theirs. What differs is the subject: Chamfer tunes an
-agent against a fixed kernel; **here the arms are Designer configurations and
+agent against a fixed kernel; **here the arms are Loböle configurations and
 the agent is the fixed instrument.**
 
 ## Run it
@@ -48,7 +48,7 @@ line move.
 
 ```
 tasks/*.json     a part described in prose, plus the checks its geometry must pass
-arms/*.json      a Designer configuration under test (tool surface, extra prompting)
+arms/*.json      a Loböle configuration under test (tool surface, extra prompting)
 arms/document_mcp.py  the direct-emission arm's server: no RPCs, one document
 oracle/          bench_oracle (C++/OCCT) reads a STEP back; grade.py applies the checks
 runners/         reference.py — the by-hand build of every task; the harness's self-test
@@ -72,9 +72,9 @@ The oracle shares the kernel — there is only one on this machine — but none 
 the feature, regeneration or toponaming code, which is where the defects this
 is meant to catch actually live.
 
-### The agent gets Designer and nothing else
+### The agent gets Loböle and nothing else
 
-Each run launches its own `designer --headless` on a kernel-chosen port and
+Each run launches its own `lobole --headless` on a kernel-chosen port and
 pins that port into the agent's MCP config, so a sweep can never wander onto
 the developer's instance on 8799. The agent runs with `--tools ""` — **no
 built-in tools at all**: no shell, no file reads, no repo. Whatever it builds,

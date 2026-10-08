@@ -33,7 +33,7 @@ body:
     attributes:
       label: Build configuration
       description: |
-        `designer --version`, how you built it (Nix, Flatpak, Ubuntu packages,
+        `lobole --version`, how you built it (Nix, Flatpak, Ubuntu packages,
         other), and any CMake options you changed (for example
         `-DENABLE_CAM=OFF`, `-DENABLE_TEST_ENGINE=OFF`).
     validations:

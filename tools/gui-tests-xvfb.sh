@@ -106,7 +106,7 @@ run_shard() {
   "$XVFB_RUN" -n "$1" -s "$SCREEN" \
     "$ROOT/tools/nix-run" \
     "cd '$ROOT/build' && XDG_STATE_HOME='$3' XDG_CONFIG_HOME='$3/config' \
-     ./designer --gui-tests --hidden --gui-test-filter '$2' ${4:-} \
+     ./lobole --gui-tests --hidden --gui-test-filter '$2' ${4:-} \
      $APP_EXTRA" 8>&-
 }
 
@@ -159,7 +159,7 @@ while [ "$#" -gt 0 ]; do
       FLOG="$(mktemp -t designer-gui-f-XXXXXX.log)"
       "$XVFB_RUN" -a -s "$SCREEN" \
         "$ROOT/tools/nix-run" \
-        "cd '$ROOT/build' && ./designer --gui-tests --hidden \
+        "cd '$ROOT/build' && ./lobole --gui-tests --hidden \
          --gui-test-filter '$2' $APP_EXTRA" > "$FLOG" 2>&1 8>&- || true
       cat "$FLOG"
       fline="$(grep -o 'GUI tests: [0-9]*/[0-9]* passed' "$FLOG" | tail -1 ||
@@ -200,7 +200,7 @@ trap 'rm -rf "$WORK"' EXIT
 if [ "$RECORD" = "1" ]; then
   echo "Recording per-test times (serial, ~6 min)..."
   "$XVFB_RUN" -a -s "$SCREEN" "$ROOT/tools/nix-run" \
-    "cd '$ROOT/build' && ./designer --gui-tests --hidden" 2>&1 8>&- |
+    "cd '$ROOT/build' && ./lobole --gui-tests --hidden" 2>&1 8>&- |
     python3 -u "$ROOT/tools/gui_shard_record.py" "$TIMES"
   exit $?
 fi
@@ -209,7 +209,7 @@ fi
 # of the source would drift, and a test missing from the partition would be
 # silently skipped. Listing needs no display and no GPU.
 "$ROOT/tools/nix-run" \
-  "cd '$ROOT/build' && ./designer --gui-test-list" > "$WORK/list" 2>/dev/null
+  "cd '$ROOT/build' && ./lobole --gui-test-list" > "$WORK/list" 2>/dev/null
 python3 "$ROOT/tools/gui_shard.py" --list "$WORK/list" --times "$TIMES" \
   --shards "$SHARDS" ${SLOWER_THAN:+--slower-than "$SLOWER_THAN"} \
   > "$WORK/filters" 2> "$WORK/info"
@@ -326,7 +326,7 @@ for c in $(seq 1 "$i"); do
       # without a display the app prints its help and exits, which reads as
       # "the bug went away".
       echo "HERE=\"\$(cd \"\$(dirname \"\$0\")\" && pwd)\""
-      echo "cd '$ROOT/build' && $XVFB_RUN -a ./designer --gui-tests --hidden \\"
+      echo "cd '$ROOT/build' && $XVFB_RUN -a ./lobole --gui-tests --hidden \\"
       echo "  --gui-test-sequence \"\$(paste -sd, \"\$HERE/sequence\")\" $APP_EXTRA"
       echo "#"
       echo "# The filter and seed that dealt it (the same order only while the"

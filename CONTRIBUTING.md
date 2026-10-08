@@ -1,4 +1,4 @@
-# Contributing to Designer
+# Contributing to Loböle
 
 Thanks for looking. This is a parametric B-Rep CAD application (C++23, Vulkan,
 OpenCASCADE, PlaneGCS, Dear ImGui) with an unusual design goal: **an AI
@@ -219,7 +219,7 @@ Open an issue with the bug template
 use the feature template. A security problem is reported privately instead,
 as [`SECURITY.md`](SECURITY.md) describes, and never in a public issue.
 
-Include `designer --version`, your OS and GPU, and what you did. If it
+Include `lobole --version`, your OS and GPU, and what you did. If it
 crashed, the symbolized stack trace is on stderr (a `std::stacktrace` handler
 is installed for SIGSEGV/SIGABRT) — paste it. A `.dsgn` project that
 reproduces the problem is worth more than a description; the format is text,

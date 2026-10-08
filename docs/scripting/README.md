@@ -8,7 +8,7 @@ command layer (an RPC with a `describe` row) first and in the GUI second.
 A feature an agent cannot drive is half-built.
 
 ```
-  designer --remote <port>          the app: one JSON-RPC server (src/remote/)
+  lobole --remote <port>          the app: one JSON-RPC server (src/remote/)
      ^            ^           ^
      |            |           |
   designer_remote.py   designer_sdk.py      designer_mcp.py
@@ -76,7 +76,7 @@ instance itself was started with.
 ### The instance registry
 
 Every instance that opens a remote port writes
-`$XDG_STATE_HOME/designer/instances/<port>.json` —
+`$XDG_STATE_HOME/lobole/instances/<port>.json` —
 `{app, pid, port, mode: gui|headless|offscreen, started}` — and removes it
 when the port closes (`src/remote/InstanceRegistry.h`). A crash leaves the
 file behind, so the pid is the truth: readers skip entries whose process is
@@ -144,10 +144,10 @@ part, per mate, per occurrence, so git merges two agents' parts without
 reading either.
 
 ```sh
-git worktree add ../designer-wt1 -b wt1 && (cd ../designer-wt1 && tools/worktree-build.sh)
+git worktree add ../lobole-wt1 -b wt1 && (cd ../lobole-wt1 && tools/worktree-build.sh)
 # worktree-build.sh clones the submodules from the main checkout (no
 # network unless main lacks a pinned commit) and prints a scratch port
-../designer-wt1/build/lobole --headless --remote <port1> &
+../lobole-wt1/build/lobole --headless --remote <port1> &
 DESIGNER_PORT=<port1> claude -p "build the bracket in parts/bracket" ...
 ```
 

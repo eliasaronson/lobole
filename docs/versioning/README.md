@@ -210,8 +210,8 @@ Where it goes:
 | several documents | `<project>.autosave.d/<dir>.json`, one file per DIRTY document, mirroring `project.json`'s `dir` (`parts/Stand.json`) |
 | never saved | `unsaved.autosave.json` / `unsaved.autosave.d/` in the user state dir |
 
-The user state dir is `RuntimePaths::UserStateDir()`: `$XDG_STATE_HOME/designer`
-or `~/.local/state/designer`, and `%LOCALAPPDATA%\Designer\state` on Windows.
+The user state dir is `RuntimePaths::UserStateDir()`: `$XDG_STATE_HOME/lobole`
+or `~/.local/state/lobole`, and `%LOCALAPPDATA%\Loböle\state` on Windows.
 
 Every sidecar file is written temp + rename, so each is complete or absent:
 a tool whose job is surviving a crash must never offer a half-written

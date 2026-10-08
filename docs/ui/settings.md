@@ -19,11 +19,11 @@ writes them and can regenerate them; the user did not choose them.
 
 ## Storage
 
-`$XDG_CONFIG_HOME/designer/settings.json`, falling back to
-`~/.config/designer/settings.json`; on Windows `%LOCALAPPDATA%\Designer\config`.
+`$XDG_CONFIG_HOME/lobole/settings.json`, falling back to
+`~/.config/lobole/settings.json`; on Windows `%LOCALAPPDATA%\Loböle\config`.
 All three per-user directories (config, state, cache) resolve through
 `RuntimePaths::User{Config,State,Cache}Dir`, which on Windows gives
-`%LOCALAPPDATA%\Designer\{config,state,cache}` rather than `%TEMP%`, which the
+`%LOCALAPPDATA%\Loböle\{config,state,cache}` rather than `%TEMP%`, which the
 OS sweeps.
 
 ```json
@@ -116,7 +116,7 @@ Edit > Preferences (`Ctrl+,`) opens one floating window,
 workspace. One collapsing header per section, generated from the table, then
 two that are not table rows: **Keyboard** ([keybindings.md](keybindings.md))
 and **Machines** — the user's CAM machine profiles, a list of structs each
-stored as its own file in `~/.config/designer/machines`, written on every
+stored as its own file in `~/.config/lobole/machines`, written on every
 edit; a CAM setup picks one and keeps a copy. At the foot: "Reset all to defaults"
 (`###set_reset_all`, which keeps unknown keys) beside the config file's path.
 

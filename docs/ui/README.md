@@ -144,7 +144,7 @@ button that made it. Panel titles, status glyphs and playback controls are not
 commands and stay where they are.
 
 Glyphs come from two fonts merged into the text font (Roboto Medium, 16 px ×
-scale): Font Awesome 6 Free Solid, and **Designer's own CAD icon font** for
+scale): Font Awesome 6 Free Solid, and **Loböle's own CAD icon font** for
 what Font Awesome cannot draw (fillet, chamfer, shell, loft, draft, section,
 mate types, dimensions, arcs, CAM operations, sheet-metal tools).
 `tools/icons/build_icon_font.py` defines each glyph as geometry on a 14-unit
@@ -153,7 +153,7 @@ grid and writes `deps/fonts/designer-icons.ttf` and `deps/fonts/IconsDesigner.h`
 committed and byte-reproducible, and the script's `--check` compares them.
 Both icon fonts load at one fixed 14 px × scale advance, so no button changes
 width with its glyph; `PixelSnapH` is off for Font Awesome (on, ImGui
-truncates its centring offset) and on for Designer's grid-drawn glyphs.
+truncates its centring offset) and on for Loböle's grid-drawn glyphs.
 
 Gates: `toolbar/no_duplicate_glyph` opens every toolbar and flyout and fails
 if two commands show one glyph or a button fell through to the unknown-command

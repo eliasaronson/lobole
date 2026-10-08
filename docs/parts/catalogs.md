@@ -1,6 +1,6 @@
 # Engineering catalogs
 
-Designer accepts local CSV and JSON bearing datasets. Import validates and
+Loböle accepts local CSV and JSON bearing datasets. Import validates and
 normalizes reference data; it does not create geometry, choose a fit, or certify
 manufacturability. Vendor APIs, PDF extraction and cutting-tool datasets are
 future adapters, not supported input formats today.
@@ -26,7 +26,7 @@ app = App(Designer(8852))  # your own running instance
 preview = app.catalogs.preview_file(
     "examples/catalogs/synthetic-bearings.csv",
     id="demo-bearings", revision="1",
-    source="Designer synthetic example", license="CC0-1.0",
+    source="Loböle synthetic example", license="CC0-1.0",
     units="mm", storage="reference",
 )
 print(preview.summary)

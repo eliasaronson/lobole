@@ -1,4 +1,4 @@
-# Designer docs
+# Loböle docs
 
 The current description of the program: how each part of it works, the rules
 it follows, and what it does not do yet. The history of how it got here is in

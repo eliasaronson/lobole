@@ -4,11 +4,11 @@
 Design: docs/scripting/mcp.md. Register this server with an MCP client:
 
     claude mcp add lobole -- python3 tools/designer_mcp.py   # from a checkout
-    claude mcp add designer -- designer-mcp    # installed (uv tool install .)
+    claude mcp add lobole -- designer-mcp    # installed (uv tool install .)
 
 No port needed: running instances announce themselves and the server attaches
 (several running → it asks; pin with --port or $DESIGNER_PORT, flag wins).
-With NOTHING running it autostarts `designer --offscreen --remote 0` — a real
+With NOTHING running it autostarts `lobole --offscreen --remote 0` — a real
 renderer, no window — and kills it on exit; disable with --no-autostart or
 DESIGNER_AUTOSTART=0. Requires the official MCP Python SDK (`mcp` on PyPI,
 `python3Packages.mcp` on nixpkgs).
@@ -546,7 +546,7 @@ The loop that works — follow it every time:
 `selection_items`) BEFORE acting — that is what the user means. When it is
 empty, say so and ask; never guess which face or feature was meant.
 
-No display session of your own? Start `designer --offscreen --remote 0` —
+No display session of your own? Start `lobole --offscreen --remote 0` —
 a real renderer with no window or display server: screenshot, render_still,
 render_sheet, set_render_options and select_face all work (ui_action does
 not — driving the GUI needs a window, e.g. `tools/headless-preview.sh --gui
@@ -621,7 +621,7 @@ def _designer_argv():
     """THIS machine's Designer as an argv, probed — not guessed.
 
     The server can be installed far from any checkout (`uv tool install`), so
-    a refusal that always says `designer --remote …` names a command half the
+    a refusal that always says `lobole --remote …` names a command half the
     machines don't have. Suggest only what is actually here: a dev-tree
     binary beside this file, `designer` on PATH, or the flatpak.
     """
@@ -780,7 +780,7 @@ def _resolve_port():
                 "No running Designer found, and no installed one to start: "
                 "probed for build/lobole beside this server, `designer` on "
                 "PATH, and the org.lobole.Lobole flatpak. "
-                "Install the app, then start it with `designer --remote "
+                "Install the app, then start it with `lobole --remote "
                 f"{DEFAULT_PORT}`.")
         raise RuntimeError(
             f"No running Designer found (autostart is off). Start one with:  "

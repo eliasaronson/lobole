@@ -100,7 +100,7 @@ sharded run is not evidence of independence.
 
 ### Replaying a failed shard
 
-A failed shard is archived under `~/.local/state/designer/gui-failures/`:
+A failed shard is archived under `~/.local/state/lobole/gui-failures/`:
 its log, its filter, `sequence` (the tests in the order they ran, read from
 the log) and `reproduce.sh`, which runs that sequence with
 `--gui-test-sequence cat/name,...` — exactly those tests, in that order, an
@@ -267,7 +267,7 @@ clicking and over the script surface and compares them.
 
 `python3 tools/coverage_matrix.py` prints it (`--out FILE` writes it); it is
 not committed, because a copy in the tree goes stale with the next GUI test.
-It takes the test list from the binary (`designer --gui-test-list`) and
+It takes the test list from the binary (`lobole --gui-test-list`) and
 credits tests by scanning their bodies. For each interactive tool (measure, section,
 mate, gizmo, preview handles, sketch dimensions and drawing, the CAM tool,
 simulation loads, the feature tree, the tab bar) it counts the tests that

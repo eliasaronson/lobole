@@ -1,4 +1,4 @@
-# Designer — working notes for Claude
+# Loböle — working notes for Claude
 
 Parametric B-Rep CAD (C++23, Vulkan, OpenCASCADE 7.9, PlaneGCS, ImGui). Built
 and run inside `nix-shell`. Keep this file short — it loads into every session.
@@ -237,12 +237,12 @@ overwritten.
 
 The app must own a real renderer to screenshot; true `--headless` has none.
 - **The human's instance is `dev-watch.sh`, and the REGISTRY says which port** —
-  `~/.local/state/designer/instances/*.json`, or `Designer.instances()`; a port
+  `~/.local/state/lobole/instances/*.json`, or `Designer.instances()`; a port
   number written in a doc goes stale while the registry cannot. It is a
   windowed build in their display session that relaunches on rebuild, and it is
   the build under review. Read from it (get_state) freely; do NOT mutate their
   open document — or their preferences (`set_settings` writes
-  `~/.config/designer/settings.json`). `headless-preview.sh` gives its instance
+  `~/.config/lobole/settings.json`). `headless-preview.sh` gives its instance
   a scratch config dir for exactly that reason, seeded from the real one so it
   still looks like their app.
 - **Agents/CI get their OWN instance**: `./tools/headless-preview.sh --start
@@ -264,7 +264,7 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   nowhere else; `test_conventions.cpp` fails if it is missing from either
   (docs/rendering/README.md#scene-renderers).
   It also does NOT isolate `XDG_STATE_HOME`: its autosave lands in the user's
-  real `~/.local/state/designer/` and will overwrite an unsaved document's
+  real `~/.local/state/lobole/` and will overwrite an unsaved document's
   recovery copy. Export a scratch one when driving a job.
   Use a scratch port (`tools/scratch_port.py` picks one that is free and
   unclaimed, and never the human's). One-shot:
@@ -272,11 +272,11 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   needs a GUI: `headless-preview.sh --gui <port>` (windowed under Xvfb).
 - **Non-visual checks need no GPU**: `build/lobole --headless --remote <port>`.
 - **Don't guess ports**: every instance announces itself in
-  `~/.local/state/designer/instances/<port>.json` (`Designer.instances()` in
+  `~/.local/state/lobole/instances/<port>.json` (`Designer.instances()` in
   the python client). `ping` reports the port, the open project, whether it is
   dirty, and whether ui_action is available in that build.
 - Drive any of them with `python3` importing `Designer` from
-  `tools/designer_remote.py`, or the `designer` MCP tools. Screenshots come back
+  `tools/designer_remote.py`, or the `lobole` MCP tools. Screenshots come back
   as images — actually look at them; verify volumes with real numbers.
 
 ## Parallel work in git worktrees
@@ -286,7 +286,7 @@ overlapping edits just move the cost to merge. **Start worktree agents two at
 a time**: memory runs out before cores do. A docs-only change needs no
 worktree; it goes in main after the code has merged. Setup:
 ```
-git worktree add ../designer-wtX -b wtX   &&   (cd ../designer-wtX && tools/worktree-build.sh)
+git worktree add ../lobole-wtX -b wtX   &&   (cd ../lobole-wtX && tools/worktree-build.sh)
 ```
 `worktree-build.sh` handles the gotcha: a fresh worktree has EMPTY submodules
 (cmake fails without `git submodule update --init`; it fills them from main's
@@ -303,8 +303,8 @@ and it holds nothing uncommitted. By hand, REMOVE the worktree as soon as its
 branch is in. `git worktree remove` REFUSES here ("working trees containing
 submodules cannot be moved or removed"), so it is:
 ```
-git merge-base --is-ancestor wtX main && [ -z "$(git -C ../designer-wtX status --porcelain)" ] \
-  && rm -rf ../designer-wtX && git worktree prune && git branch -d wtX
+git merge-base --is-ancestor wtX main && [ -z "$(git -C ../lobole-wtX status --porcelain)" ] \
+  && rm -rf ../lobole-wtX && git worktree prune && git branch -d wtX
 ```
 Check both first — merged, and nothing uncommitted — because the `rm` takes
 the build directory with it (several GB each). A merged worktree left lying
@@ -328,7 +328,7 @@ pointers, so `--call-graph dwarf` is the only mode with a usable stack.
 ## Crash debugging
 
 `main()` installs a `std::stacktrace` handler (CrashHandler.cpp) — SIGSEGV/ABRT
-print a symbolized stack to stderr → the dev-watch log. `designer --crash-test`
+print a symbolized stack to stderr → the dev-watch log. `lobole --crash-test`
 exercises it. A HANG is reported by the frame watchdog: `main thread stalled
 N s (in <RPC or dialog>)` plus the main thread's stack, then `resumed after`
 (docs/architecture.md#crashes-and-stalls); `DESIGNER_WATCHDOG_S=0` turns it off
