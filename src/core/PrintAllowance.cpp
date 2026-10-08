@@ -27,6 +27,25 @@ constexpr const char* kInternalThreadSource =
 constexpr const char* kExternalThreadSource =
     "FreeCAD Fasteners workbench, 3D-printer mode: a screw at 0.99·d - 0.05 "
     "(M8 -> -0.13)";
+constexpr const char* kPlaHoleSource =
+    "FDM holes print 0.1-0.4 mm undersize on the diameter and the fix is to "
+    "model them about 0.2 mm oversize (3dprintbounty.com, 3D printing "
+    "tolerances guide); PLA shrinks 0.3-0.5 % against PETG's 0.5-0.8 %, so "
+    "the PETG table's extra 0.1 from Ø10 is not carried over";
+constexpr const char* kPlaShaftSource =
+    "an outside diameter grows by about a tenth in FDM, the material's "
+    "shrinkage well inside that (3dprintbounty.com, 3D printing tolerances "
+    "guide)";
+constexpr const char* kPlaGapSource =
+    "print-in-place PLA wants about 0.25 mm per side as a starting point "
+    "(sovol3d.com, print-in-place hinges and joints: 0.15-0.35 mm by printer "
+    "and filament); on Bambu Lab printers 0.2 mm still turns, 0.25 is the "
+    "best fit and 0.3 is loose (makerworld.com clearance tests)";
+constexpr const char* kPetgGapSource =
+    "print-in-place clearance is 0.15-0.35 mm per side by printer and "
+    "filament (sovol3d.com, print-in-place hinges and joints); PETG strings "
+    "and bonds to itself more than PLA, so it takes 0.3, 0.05 more than "
+    "PLA";
 
 std::vector<Table> BuildTables() {
   std::vector<Table> out;
@@ -42,8 +61,21 @@ std::vector<Table> BuildTables() {
       {Printed::Shaft, 0.0, kAbove, -0.1, kShaftSource},
       {Printed::InternalThread, 0.0, kAbove, 0.4, kInternalThreadSource},
       {Printed::ExternalThread, 0.0, kAbove, -0.1, kExternalThreadSource},
+      {Printed::Gap, 0.0, kAbove, 0.6, kPetgGapSource},
+  };
+  Table pla;
+  pla.process = "fdm";
+  pla.material = "pla";
+  pla.conditions = petg.conditions;
+  pla.rows = {
+      {Printed::Hole, 0.0, kAbove, 0.2, kPlaHoleSource},
+      {Printed::Shaft, 0.0, kAbove, -0.1, kPlaShaftSource},
+      {Printed::InternalThread, 0.0, kAbove, 0.4, kInternalThreadSource},
+      {Printed::ExternalThread, 0.0, kAbove, -0.1, kExternalThreadSource},
+      {Printed::Gap, 0.0, kAbove, 0.5, kPlaGapSource},
   };
   out.push_back(std::move(petg));
+  out.push_back(std::move(pla));
   return out;
 }
 
@@ -72,20 +104,23 @@ std::string PrintedName(Printed kind) {
     return "internal_thread";
   case Printed::ExternalThread:
     return "external_thread";
+  case Printed::Gap:
+    return "gap";
   }
   return "hole";
 }
 
 std::optional<Printed> PrintedFromName(const std::string& name) {
   for (Printed k : {Printed::Hole, Printed::Shaft, Printed::InternalThread,
-                    Printed::ExternalThread})
+                    Printed::ExternalThread, Printed::Gap})
     if (PrintedName(k) == name)
       return k;
   return std::nullopt;
 }
 
 const std::string& PrintedNames() {
-  static const std::string s = "hole, shaft, internal_thread, external_thread";
+  static const std::string s =
+      "hole, shaft, internal_thread, external_thread, gap";
   return s;
 }
 

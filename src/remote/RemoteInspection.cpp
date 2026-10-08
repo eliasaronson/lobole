@@ -853,8 +853,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "kind,from_mm,to_mm,allowance_mm,source}}, confirm, threads?[]"},
     {"print_allowance",
      "What to MODEL for one printed diameter: {kind: hole|shaft|"
-     "internal_thread|external_thread, size_mm} (the size it should PRINT "
-     "at) or, for a thread, {designation: \"M8\"} for the table's major. "
+     "internal_thread|external_thread|gap, size_mm} (the size it should "
+     "PRINT at) or, for a thread, {designation: \"M8\"} for the table's "
+     "major. A `gap` is two surfaces printed together that must come apart "
+     "(print-in-place): size_mm is the inner one's diameter, model_mm the "
+     "outer's, and allowance_mm the whole diametral clearance. "
      "The process is the part's (set_print_process) or {process, material} "
      "given here. Answers the signed `allowance_mm` on the diameter, "
      "`model_mm`, the row's source, and what the STL export takes off a "

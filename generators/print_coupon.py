@@ -3,7 +3,7 @@
 
     python3 generators/print_coupon.py --port 8800
     python3 generators/print_coupon.py --port 8800 --size 10 --steps 3 \\
-        --thread M10 --process fdm --material petg
+        --thread M10 --process fdm --material pla
 
 The allowance table (docs/tolerances/README.md#printed-parts) is community
 practice and CAD-tool defaults, "to confirm with a test coupon". This is the
@@ -13,13 +13,18 @@ MODELLED at:
 - bores at the table's model size for a Ø`size` hole, and `steps` either side
   of it `step` mm apart;
 - pins the same way for a Ø`size` shaft;
+- discs printed loose in holes at the table's print-in-place `gap` round a
+  Ø`size` disc, and `steps` either side (the clearance a print-in-place
+  joint or gear needs so its parts do not fuse);
 - a printed internal and external `thread` (default the metric coarse thread
   of `size`, when there is one) at the table's thread allowance, modelled as
   the custom threads print_allowance and a Thread's report advise.
 
 Print it with the settings the parts will get, then push a real Ø`size` pin
 (a drill shank, a dowel) into the bores and the pins into a reamed Ø`size`
-hole, and screw a real bolt and nut onto the threads. The bore and the pin
+hole, and screw a real bolt and nut onto the threads. Push each loose disc out of its hole:
+the tightest that comes free by hand is the gap print-in-place parts want.
+The bore and the pin
 that fit the way you want are the model sizes the table should give; correct
 PrintAllowance.cpp from them, citing the print.
 
@@ -77,7 +82,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--port", type=int)
     ap.add_argument("--process", default="fdm")
-    ap.add_argument("--material", default="petg")
+    ap.add_argument("--material", default="pla")
     ap.add_argument("--size", type=float, default=8.0,
                     help="the diameter the fit is at, mm (the printed size)")
     ap.add_argument("--steps", type=int, default=2,
@@ -106,6 +111,13 @@ def main():
 
     hole = allowance("hole", size_mm=size)
     shaft = allowance("shaft", size_mm=size)
+    gap = allowance("gap", size_mm=size)
+    gap_step = 2.0 * args.step
+    if gap["allowance_mm"] - args.steps * gap_step <= 0.0:
+        raise SystemExit(
+            f"print_coupon: {args.steps} steps of {fmt(gap_step)} below the "
+            f"table's gap of {fmt(gap['allowance_mm'])} close it — fewer "
+            f"--steps or a smaller --step")
     thread = args.thread
     if thread is None:
         guess = f"M{fmt(size)}"
@@ -126,7 +138,7 @@ def main():
     label_h = min(0.3 * size, 4.0)
     engrave = 0.05 * size
     thick = size
-    rows = 3 if nut else 2
+    rows = 4 if nut else 3
     width = count * pitch
     depth = rows * pitch
     name = args.name or f"coupon_{args.process}_{args.material}_{fmt(size)}"
@@ -147,7 +159,7 @@ def main():
 
     report = {"process": proc, "size": size, "step": args.step,
               "confirm": hole["confirm"], "features": []}
-    bores, pins, labels = [], [], []
+    bores, pins, discs, labels = [], [], [], []
     for i in range(count):
         k = i - args.steps
         for row, what, base in ((0, "bore", hole), (1, "pin", shaft)):
@@ -159,6 +171,19 @@ def main():
             report["features"].append(
                 {"kind": what, "modelled_mm": dia, "offset_mm": k * args.step,
                  "table": k == 0, "at": [x_at(i), y_at(row)]})
+        # A gap is the whole diametral clearance, so its steps are twice the
+        # bore's: the same step on each side of the disc. The label is the
+        # gap a side, which is how print-in-place clearance is quoted.
+        g = round(gap["allowance_mm"] + k * gap_step, 4)
+        at = (x_at(i), y_at(rows - 1))
+        bores.append(circle(at, (size + g) / 2.0))
+        discs.append(circle(at, size / 2.0))
+        labels.append(text(fmt(g / 2.0), (at[0], at[1] - 0.62 * size),
+                           label_h))
+        report["features"].append(
+            {"kind": "gap", "disc_mm": size, "hole_mm": round(size + g, 4),
+             "gap_per_side_mm": g / 2.0, "offset_mm": k * gap_step,
+             "table": k == 0, "at": list(at)})
 
     thread_faces = []
     if nut:
@@ -206,6 +231,13 @@ def main():
         "type": "Extrude", "name": "Engrave", "mode": "cut",
         "sketch_id": feature_id(d, "Labels"), "distance": engrave,
         "reversed": True}), "engrave")
+    # The loose discs: their own bodies, standing on the bed in their holes.
+    check(d.call("add_feature", feature={
+        "type": "Sketch", "name": "Discs", "plane": plane_at_z(0),
+        "entities": discs}), "disc sketch")
+    check(d.call("add_feature", feature={
+        "type": "Extrude", "name": "Discs up", "mode": "new_body",
+        "sketch_id": feature_id(d, "Discs"), "distance": thick}), "discs")
 
     for what, dia, x, info in thread_faces:
         r = check(d.call("add_feature", feature={
@@ -221,7 +253,10 @@ def main():
     exp = {"path": str(stl)}
     if args.deflection is not None:
         exp["deflection"] = args.deflection
-    d.call("export_stl", **exp)
+    r = d.call("export_stl", **exp)
+    if r.get("shells") is not None and r["shells"] != 1 + count:
+        raise SystemExit(f"print_coupon: the STL has {r['shells']} shells, "
+                         f"not the plate and {count} loose discs: {r}")
     d.call("save_project", path=str(OUT / f"{name}.dsgn"))
     (OUT / f"{name}.json").write_text(json.dumps(report, indent=1))
     print(f"print_coupon: {len(report['features'])} features -> {stl}")

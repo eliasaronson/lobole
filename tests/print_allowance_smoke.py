@@ -97,6 +97,10 @@ def main():
                    designation="M8", **PETG)
         expect(near(r["model_mm"], 8.4) and near(r["pitch"], 1.25),
                f"a printed M8 nut thread: {r}")
+        r = d.call("print_allowance", kind="gap", size_mm=10,
+                   process="fdm", material="pla")
+        expect(near(r["model_mm"], 10.5) and near(r["allowance_mm"], 0.5),
+               f"a print-in-place gap round a Ø10 PLA pin: {r}")
         r = d.call("print_allowance", kind="hole", size_mm=12, **PETG)
         expect(near(r["model_mm"], 12.3), f"a Ø12 hole: {r}")
         expect(near(r["stl_chord_loss_mm"], 0.2),
@@ -107,9 +111,9 @@ def main():
                 size_mm=8, **PETG)
         refused(d, "print_allowance", "Accepted: fdm", kind="hole",
                 size_mm=8, process="sla", material="petg")
-        refused(d, "print_allowance", "Accepted for fdm: petg", kind="hole",
-                size_mm=8, process="fdm", material="pla")
-        refused(d, "check_fit", "Accepted for fdm: petg", size=8.0,
+        refused(d, "print_allowance", "Accepted for fdm: petg, pla",
+                kind="hole", size_mm=8, process="fdm", material="abs")
+        refused(d, "check_fit", "Accepted for fdm: petg, pla", size=8.0,
                 hole={"class": "H7",
                       "print": {"process": "fdm", "material": "abs"}})
 
@@ -122,8 +126,8 @@ def main():
         refused(d, "set_print_process", "needs both", process="fdm")
         refused(d, "set_print_process", "Accepted: fdm", process="sls",
                 material="petg")
-        refused(d, "set_print_process", "Accepted for fdm: petg",
-                process="fdm", material="pla")
+        refused(d, "set_print_process", "Accepted for fdm: petg, pla",
+                process="fdm", material="abs")
         state0 = d.call("get_state")
         r = d.call("set_print_process", **PETG)
         expect(r["print"] == PETG, f"declared: {r}")

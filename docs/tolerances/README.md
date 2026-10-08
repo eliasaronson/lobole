@@ -202,14 +202,30 @@ static data like `FitStandards`: per process and material, a signed allowance
 | shaft | any | −0.1 | sovol3d.com clearance guide (PETG sliding fit 0.2-0.3 per side, most of it the hole's) |
 | internal thread | any | +0.4 | FreeCAD Fasteners 3D-print nut 1.03·D + 0.10 (M8 → +0.34); BOSL2 4·`$slop` at 0.1 |
 | external thread | any | −0.1 | FreeCAD Fasteners 3D-print screw 0.99·d − 0.05 (M8 → −0.13) |
+| gap | any | +0.6 | sovol3d.com print-in-place guide (0.15-0.35 a side by printer and filament); PETG bonds to itself more than PLA, so 0.3 a side |
+
+| fdm, pla | size | allowance | source |
+|---|---|---|---|
+| hole | any | +0.2 | 3dprintbounty.com tolerances guide; PLA shrinks 0.3-0.5 %, less than PETG, so PETG's step at Ø10 is not carried |
+| shaft | any | −0.1 | as above: an outside diameter grows by about a tenth |
+| internal thread | any | +0.4 | as for PETG (the Fasteners and BOSL2 numbers are not per material) |
+| external thread | any | −0.1 | as for PETG |
+| gap | any | +0.5 | sovol3d.com print-in-place guide (0.25 a side to start); makerworld.com clearance tests on Bambu Lab printers (0.2 still turns, 0.25 best, 0.3 loose) |
+
+A **gap** is two surfaces printed together that must come apart — a
+print-in-place joint or gear. Its size is the inner surface's diameter, its
+model the outer's, and the allowance the whole diametral clearance; a
+generator that needs it per side (a gear's backlash, a tip clearance) halves
+it.
 
 It assumes a 0.4 mm nozzle and the slicers' XY and hole compensation at their
 default of 0 (Bambu Studio and PrusaSlicer ship no per-material values, so the
 allowance belongs in the model). Every number is community practice and CAD
 tool defaults, **to confirm with a test coupon** — `generators/print_coupon.py`
 prints the table's sizes and ± steps around them, and every report says so.
-PLA is not carried: the sources give PETG numbers, and PLA's differ by less
-than they disagree with each other, which is a coupon's job to settle.
+The PLA rows are the generic FDM numbers less PETG's extra shrinkage; that
+PLA's and PETG's differ by less than the sources disagree with each other is
+the coupon's to settle.
 
 Where the numbers come from, beyond the table's column:
 
@@ -289,12 +305,16 @@ Where the numbers come from, beyond the table's column:
 `generators/print_coupon.py --port PORT [--size 8 --steps 2 --step 0.05]`
 builds a printed part with bores and pins at the table's model sizes and
 `steps` either side, an internal and an external custom thread of the size's
-metric coarse pitch at the printed allowance, each engraved with its modelled
-diameter, and exports STL, the project and a JSON list into
-`scratch/print_coupon/`. Every size derives from `--size`, and every number
-comes from `print_allowance`, so the coupon tests the table the build
-carries. Print it, find the bore a Ø8 pin slides in and the pin that slides
-in a Ø8 reamed hole, and correct the table.
+metric coarse pitch at the printed allowance, and a row of loose Ø`size`
+discs standing in holes at the table's print-in-place `gap` and `steps` of
+twice `step` either side (the same step on each side of the disc, labelled
+as the gap a side). Each is engraved with its modelled size. It exports STL
+(refused unless the discs come out as shells of their own), the project and
+a JSON list into `scratch/print_coupon/`. Every size derives from `--size`,
+and every number comes from `print_allowance`, so the coupon tests the
+table the build carries. Print it, find the bore a Ø8 pin slides in, the pin
+that slides in a Ø8 reamed hole and the tightest disc that pushes out by
+hand, and correct the table. The material defaults to `pla`.
 
 ## Drawings
 

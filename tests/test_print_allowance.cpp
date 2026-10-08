@@ -70,25 +70,48 @@ TEST_CASE("The PETG table says what to model for each kind of diameter",
   REQUIRE(a);
   CHECK(a->modelMm == Approx(7.9));
 
-  // Every row names where its number comes from, and the kinds are covered
+  // Every table names where each number comes from, and covers every kind
   // from zero with no hole in the size range.
-  const printfit::Table* t = printfit::Find(kPetg);
-  REQUIRE(t != nullptr);
-  CHECK(!t->conditions.empty());
-  for (printfit::Printed k :
-       {printfit::Printed::Hole, printfit::Printed::Shaft,
-        printfit::Printed::InternalThread, printfit::Printed::ExternalThread}) {
-    double reach = 0.0;
-    for (const printfit::Row& r : t->rows) {
-      if (r.kind != k)
-        continue;
-      CHECK(!r.source.empty());
-      CHECK(r.fromMm == Approx(reach));
-      reach = r.toMm;
+  for (const printfit::Table& t : printfit::Tables()) {
+    INFO(t.process << " " << t.material);
+    CHECK(!t.conditions.empty());
+    for (printfit::Printed k :
+         {printfit::Printed::Hole, printfit::Printed::Shaft,
+          printfit::Printed::InternalThread, printfit::Printed::ExternalThread,
+          printfit::Printed::Gap}) {
+      INFO(printfit::PrintedName(k));
+      double reach = 0.0;
+      for (const printfit::Row& r : t.rows) {
+        if (r.kind != k)
+          continue;
+        CHECK(!r.source.empty());
+        CHECK(r.fromMm == Approx(reach));
+        reach = r.toMm;
+      }
+      CHECK(reach > 500.0);
     }
-    CHECK(reach > 500.0);
   }
   CHECK(Contains(printfit::ConfirmNote(), "coupon"));
+}
+
+TEST_CASE("A print-in-place gap opens the outer surface by the whole "
+          "clearance",
+          "[tolerances][print]") {
+  // A Ø10 pin printed inside a ring: the ring is modelled 0.5 larger in PLA
+  // (0.25 a side) and 0.6 in PETG, which bonds to itself more.
+  std::string why;
+  auto a =
+      printfit::ForBasic({"fdm", "pla"}, printfit::Printed::Gap, 10.0, &why);
+  REQUIRE(a);
+  CHECK(a->allowanceMm == Approx(0.5));
+  CHECK(a->modelMm == Approx(10.5));
+  a = printfit::ForBasic(kPetg, printfit::Printed::Gap, 10.0, &why);
+  REQUIRE(a);
+  CHECK(a->modelMm == Approx(10.6));
+  // PLA holes carry no step at Ø10: that was PETG's shrinkage.
+  a = printfit::ForBasic({"fdm", "pla"}, printfit::Printed::Hole, 12.0, &why);
+  REQUIRE(a);
+  CHECK(a->modelMm == Approx(12.2));
 }
 
 TEST_CASE("A modelled diameter reads back to what it prints",
@@ -126,17 +149,18 @@ TEST_CASE("An unknown process or a material without data is refused by name",
   CHECK(Contains(why, "Accepted: fdm"));
   why = printfit::Validate({"fdm", "abs"});
   CHECK(Contains(why, "no data for 'abs'"));
-  CHECK(Contains(why, "Accepted for fdm: petg"));
+  CHECK(Contains(why, "Accepted for fdm: petg, pla"));
   CHECK(printfit::Validate(kPetg).empty());
 
   std::string err;
   CHECK_FALSE(
-      printfit::ForBasic({"fdm", "pla"}, printfit::Printed::Hole, 8.0, &err));
-  CHECK(Contains(err, "pla"));
+      printfit::ForBasic({"fdm", "abs"}, printfit::Printed::Hole, 8.0, &err));
+  CHECK(Contains(err, "abs"));
   CHECK_FALSE(printfit::ForBasic(kPetg, printfit::Printed::Hole, 0.0, &err));
   CHECK_FALSE(printfit::PrintedFromName("bore"));
   CHECK(printfit::PrintedFromName("internal_thread") ==
         printfit::Printed::InternalThread);
+  CHECK(printfit::PrintedFromName("gap") == printfit::Printed::Gap);
 }
 
 TEST_CASE("The print process lives on the part and rebuilds nothing",

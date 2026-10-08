@@ -28,15 +28,19 @@ namespace printfit {
 // are accepted (Validate); anything else is refused naming what is.
 struct Process {
   std::string process;  // "fdm"
-  std::string material; // "petg"
+  std::string material; // "petg" | "pla"
   bool operator==(const Process&) const = default;
 };
 
 // What a diameter is, as far as a printer is concerned: which way the
-// process moves it.
-enum class Printed { Hole, Shaft, InternalThread, ExternalThread };
+// process moves it. A Gap is the round clearance between two surfaces
+// PRINTED TOGETHER that must come apart (a print-in-place joint): its basic
+// is the inner surface's diameter, its model the outer's, and the allowance
+// is the whole diametral gap — what a print needs so the two do not fuse.
+enum class Printed { Hole, Shaft, InternalThread, ExternalThread, Gap };
 [[nodiscard]] std::string PrintedName(Printed kind);
-// "hole" | "shaft" | "internal_thread" | "external_thread"; nullopt otherwise
+// "hole" | "shaft" | "internal_thread" | "external_thread" | "gap"; nullopt
+// otherwise
 // (the caller refuses naming PrintedNames()).
 [[nodiscard]] std::optional<Printed> PrintedFromName(const std::string& name);
 [[nodiscard]] const std::string& PrintedNames();
