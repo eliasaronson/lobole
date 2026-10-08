@@ -6,23 +6,30 @@
 answers are all numbers: does it fit the travel, can the spindle reach a
 sane chip load at the feed ceiling, and how long will it run.
 
-The whole program, in the order a router wants it:
+The whole program, in the order a router wants it, in two setups:
 
+  front, the dish up
   1. rough the dish        6 mm flat, levels, 0.3 mm left on
   2. finish the flare      6 mm ball, raster -- the shallow majority
   3. drill the bolt circle 5 x 3.4 mm, while the blank is still solid
-  4. free the throat slug  6 mm flat inside the back face's inner wire, tabs
-  5. cut the disc free     6 mm flat outside the rim, tabs
+  4. cut the disc free     6 mm flat outside the rim, tabs
+  back, the sheet turned over with the disc still on its tabs
+  5. free the throat       6 mm flat inside the back face's opening
 
-3 before 4 and 5 because a blank that is still one piece cannot move, and
-4 before 5 because the outside cut is what releases the part. Both 4 and 5
-leave tabs: the Phi-100 slug is heavy enough to be thrown if it drops into
-the dish, and the disc is the part.
+3 before 4 because a blank that is still one piece cannot move. 4 leaves
+tabs because the disc is the part, and they are what keeps it in the sheet
+when the sheet is turned over.
 
 The throat has NO cylindrical wall to follow -- the flare runs all the way
 down to r=50 -- so there is nothing to profile in the usual sense. Its
-opening is the INNER WIRE of the back face, which is what "cut the opening"
-picks, and that is the whole trick of this job.
+opening is the INNER WIRE of the back face, and the back face points down
+on the front setup, where the spindle cannot reach it and the app refuses
+it as a pick. Turned over, it faces the spindle, and an inside profile on it
+cuts exactly its opening. That is the whole trick of this job.
+
+Each setup posts its own program: `--post` is the front, and the back goes
+beside it as `<stem>-back<ext>`. The script fails when the verifier finds
+either one unsafe.
 """
 import argparse
 import os
@@ -124,19 +131,7 @@ def build_job(d):
     job = d.call("machine_part")
     if isinstance(job, dict) and "id" in job:
         d.call("rename_part", part=job["id"], new_name="Waveguide job")
-    sid = d.call("add_cam_setup", name="Waveguide - one side", post="mach3")["id"]
-    # By NAME, from ~/.config/lobole/machines/. Headless sessions used to
-    # have no machine store at all -- RunHeadless builds its own AppState and
-    # main() had loaded the machines into the GUI's -- so this refused, and
-    # every job reported `machine_match: missing` against a machine plainly on
-    # disk (docs/cam/setup.md#machine-profiles).
-    d.call("set_cam_setup", id=sid, machine="6090")
-    tools(d, sid)
-    # The blank: the part plus a hand's-width of margin, and NO bottom margin
-    # -- it is screwed to the spoilboard and the profile cuts 0.5 mm into it.
-    d.call("set_cam_setup", id=sid,
-           stock={"mode": "relative", "margin": [MARGIN, MARGIN, 0.0],
-                  "bottom_margin": 0.0})
+    sid = setup(d, "Waveguide - front")
     top = d.call("list_cam_setups")["setups"][0]["stock"]["box"]["max"][2]
 
     d.call("add_cam_op", setup=sid, type="adaptive", tool=1, name="Rough",
@@ -157,18 +152,56 @@ def build_job(d):
     d.call("add_cam_op", setup=sid, type="drill", tool=3,
            name="Drill the bolt circle",
            targets=[target(f) for f in bolts])
-    # Tabs on BOTH: the Phi-100 slug is heavy enough to be thrown if it drops
-    # into the dish, and the disc is the part.
-    d.call("add_cam_op", setup=sid, type="profile", tool=1,
-           name="Free the throat slug", targets=[target(back)],
-           tabs={"count": 4, "width": 8.0, "height": 2.0})
+    # Tabs: the disc is the part, and the sheet is turned over with it still
+    # hanging in it.
     d.call("add_cam_op", setup=sid, type="profile", tool=1,
            name="Cut the disc free", targets=[target(rim)],
            tabs={"count": 4, "width": 8.0, "height": 2.0})
+
+    # The throat, from the BACK. The throat has no wall to follow -- the flare
+    # runs all the way down to r=50 -- so the opening is named by the back
+    # face's inner wire, and the back face points DOWN on the front setup:
+    # the spindle cannot reach it, and the app refuses it as a pick. This op
+    # used to pick it anyway, with no side, and was derived as a cut OUTSIDE
+    # the face -- a second pass round the rim, named for the throat. The
+    # throat was never cut: the ball cannot follow the flare into the r=50
+    # edge, and the verifier finds the lip it leaves (2.8 mm at r=49.9).
+    #
+    # So the sheet is turned over, half a turn about X with the disc still
+    # on its tabs, and the back face is UP. Side `inside` on it cuts its
+    # openings -- the throat -- and nothing else; the bolt holes are the
+    # drill's and are left alone. No tabs: what drops out of an opening is
+    # scrap, and a roughed throat leaves only a skin there.
+    back_sid = setup(d, "Waveguide - back", flip=True)
+    d.call("add_cam_op", setup=back_sid, type="profile", tool=1,
+           name="Free the throat", targets=[target(back)], side="inside",
+           drilled_bores=waveguide.BOLT_D)
+    return [sid, back_sid]
+
+
+def setup(d, name, flip=False):
+    """One clamping: the 6090, its cutters, and the 210 mm blank."""
+    sid = d.call("add_cam_setup", name=name, post="mach3")["id"]
+    # By NAME, from ~/.config/lobole/machines/. Headless sessions used to
+    # have no machine store at all -- RunHeadless builds its own AppState and
+    # main() had loaded the machines into the GUI's -- so this refused, and
+    # every job reported `machine_match: missing` against a machine plainly on
+    # disk (docs/cam/setup.md#machine-profiles).
+    kw = {"machine": "6090"}
+    if flip:
+        kw["flip"] = True
+    d.call("set_cam_setup", id=sid, **kw)
+    tools(d, sid)
+    # The blank: the part plus a hand's-width of margin, and NO bottom margin
+    # -- it is screwed to the spoilboard and the profile cuts 0.5 mm into it.
+    d.call("set_cam_setup", id=sid,
+           stock={"mode": "relative", "margin": [MARGIN, MARGIN, 0.0],
+                  "bottom_margin": 0.0})
     return sid
 
 
 def report(d, sid, path):
+    """Post and verify one setup; False when the verifier finds it wrong."""
     # A long timeout, explicitly. Generating and posting a 3D finishing pass
     # is minutes of work, and the client's 60 s default kills the connection
     # while the server carries on -- which reads as a hang followed by a
@@ -176,10 +209,12 @@ def report(d, sid, path):
     # the same class of call).
     r = d.request("cam_post", {"setup": sid, "path": path}, timeout=900)
     v = d.request("cam_verify", {"setup": sid}, timeout=900)
-    su = d.call("list_cam_setups")["setups"][0]
+    su = next(s for s in d.call("list_cam_setups")["setups"]
+              if s["id"] == sid)
     box = su["stock"]["box"]
     travel = su["machine"]["travel"]
 
+    print(f"== {su['name']}")
     size = [round(box["max"][i] - box["min"][i], 1) for i in range(3)]
     room = [round(travel["max"][i] - travel["min"][i], 1) for i in range(3)]
     print(f"  blank        {size[0]} x {size[1]} x {size[2]} mm")
@@ -195,10 +230,15 @@ def report(d, sid, path):
         secs += o["cut_length_mm"] / max(1.0, tool_feed.get(o["tool"], 1000.0)) * 60.0
     print(f"  cutting      {r['cut_length_mm'] / 1000.0:.1f} m, "
           f"{secs / 60.0:.0f} min at feed (rapids and tool changes on top)")
-    print(f"  program      {r['lines']} lines, {os.path.getsize(path) / 1024:.0f} kB")
+    print(f"  program      {path}: {r['lines']} lines, "
+          f"{os.path.getsize(path) / 1024:.0f} kB")
     print(f"  max gouge    {v['max_gouge_mm'] * 1000:.0f} um")
     for w in r.get("warnings", []):
         print(f"  ! {w}")
+    for w in v.get("says", []):
+        print(f"  verify: {w}")
+    print(f"  verdict      {'ok' if v['ok'] else 'FAILED'}")
+    return bool(v["ok"])
 
 
 def main():
@@ -207,12 +247,15 @@ def main():
     ap.add_argument("--post", default="/tmp/waveguide.nc")
     ap.add_argument("--save", default=None,
                     help="also save the PROJECT here, so the part, the job "
-                         "and its five operations can be opened and looked at "
+                         "and its two setups can be opened and looked at "
                          "rather than only the program read")
     a = ap.parse_args()
     d = connect(a.port)
-    sid = build_job(d)
-    report(d, sid, a.post)
+    sids = build_job(d)
+    # One program per setup: the front as asked, the back beside it.
+    stem, ext = os.path.splitext(a.post)
+    paths = [a.post] + [f"{stem}-back{ext}"]
+    ok = all([report(d, sid, path) for sid, path in zip(sids, paths)])
     if a.save:
         # The program alone is a dead end for a person: it says what the
         # machine will do and nothing about why. Save the project too.
@@ -221,6 +264,8 @@ def main():
         if isinstance(r, dict) and r.get("warnings"):
             for w in r["warnings"]:
                 print(f"  ! {w}")
+    if not ok:
+        raise SystemExit("the verifier found the program wrong -- see above")
 
 
 if __name__ == "__main__":
