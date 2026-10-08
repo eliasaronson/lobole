@@ -14,9 +14,9 @@ density, Young's modulus, Poisson's ratio, yield — that mass properties, the
 BOM and FEM read. `DEFAULT` is the empty slug and carries no physics
 (density 0, so mass reports none rather than a guess). The accepted slugs
 are `MaterialLibrary::AllSlugs()` (`describe` reports them as
-`material_slugs`). `petg` is the printed parts' material: 1270 kg/m³ and a
-filament datasheet's modulus, where generic plastic would read a printed part
-a fifth light; how a printed part is modelled to fit is its print process,
+`material_slugs`). `petg` and `pla` are the printed parts' materials:
+1270 and 1240 kg/m³ and their filament datasheets' moduli, where generic
+plastic would read a printed part a fifth light; how a printed part is modelled to fit is its print process,
 not its material ([../tolerances/README.md](../tolerances/README.md#printed-parts)).
 
 ### Grades

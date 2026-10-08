@@ -124,6 +124,15 @@ void MaterialLibrary::InitializeMaterials() {
       0.05f, // ((n-1)/(n+1))^2 at n = 1.57
       "PETG"};
 
+  materials[MaterialType::PLA] = {
+      // A printed blue, so a PLA part and a PETG one tell apart on sight.
+      glm::vec3(0.02f, 0.10f, 0.32f),
+      0.0f,
+      0.4f, // a printed surface: matte-ish filament, layer lines
+      0.5f,
+      0.045f, // ((n-1)/(n+1))^2 at n = 1.53
+      "PLA"};
+
   // Darker than its nominal albedo, chosen for the scene's bright rig: at
   // the nominal 0.07 this rendered LIGHTER than black plastic, and blue,
   // which is the one comparison the material exists to win. The weave's relief
@@ -309,6 +318,7 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::PLASTIC_WHITE].density = 1040.0f;
   materials[MaterialType::PLASTIC_BLACK].density = 1040.0f;
   materials[MaterialType::PETG].density = 1270.0f;
+  materials[MaterialType::PLA].density = 1240.0f;
   materials[MaterialType::CARBON_FIBRE].density = 1550.0f;
   materials[MaterialType::RUBBER].density = 1200.0f;
   materials[MaterialType::GLASS].density = 2500.0f;
@@ -381,6 +391,9 @@ void MaterialLibrary::InitializeMaterials() {
   // 45-53 MPa. A printed part is weaker ACROSS its layers (the pan/tilt
   // sources read 30-50 MPa there), which an isotropic study cannot see.
   elastic(MaterialType::PETG, 2.1f, 0.38f, 50.0f);
+  // Prusament PLA's datasheet, printed specimens: E 2.3 GPa and yield
+  // 51 +/- 3 MPa printed flat (2.4 and 59 upright); density 1.24 g/cm3.
+  elastic(MaterialType::PLA, 2.3f, 0.36f, 48.0f);
   // Quasi-isotropic 3K/epoxy laminate, in-plane: this is a plate material
   // and the numbers are the plate's, not a unidirectional ply's.
   elastic(MaterialType::CARBON_FIBRE, 55.0f, 0.30f, 550.0f);
@@ -493,6 +506,7 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
       {MaterialType::PLASTIC_WHITE, "plastic_white"},
       {MaterialType::PLASTIC_BLACK, "plastic_black"},
       {MaterialType::PETG, "petg"},
+      {MaterialType::PLA, "pla"},
       {MaterialType::CARBON_FIBRE, "carbon_fibre"},
       {MaterialType::RUBBER, "rubber"},
       {MaterialType::GLASS, "glass"},

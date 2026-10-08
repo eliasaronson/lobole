@@ -165,6 +165,20 @@ TEST_CASE("PETG is a material of its own, heavier than generic plastic",
   CHECK(petg.metallic == 0.0f);
 }
 
+TEST_CASE("PLA is a material of its own, with its datasheet's numbers",
+          "[materials]") {
+  CHECK(MaterialLibrary::MaterialTypeFromString("pla") == MaterialType::PLA);
+  CHECK(MaterialLibrary::Slug(MaterialType::PLA) == "pla");
+  const MaterialProperties& pla =
+      MaterialLibrary::GetMaterial(MaterialType::PLA);
+  CHECK(pla.density == 1240.0f);
+  CHECK(pla.youngGPa > 2.0f);
+  CHECK(pla.yieldMPa > 0.0f);
+  CHECK(glm::length(
+            pla.baseColor -
+            MaterialLibrary::GetMaterial(MaterialType::PETG).baseColor) > 0.1f);
+}
+
 TEST_CASE("A pattern's axis comes from the part's local extent",
           "[materials]") {
   // The rule the raster and ray-traced paths BOTH call now. They used to keep
