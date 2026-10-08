@@ -164,7 +164,20 @@ if [ "${1:-}" = "--stop" ]; then
   ITS_STATE="$(tr '\0' '\n' <"/proc/$PID/environ" 2>/dev/null |
     sed -n 's/^XDG_STATE_HOME=//p')"
   ITS_REG="${ITS_STATE:-$HOME/.local/state}/lobole/instances/$PORT.json"
+  # SIGTERM, then make sure. An instance in the middle of a FEM
+  # factorization shuts down only once the factorization ends (it has no
+  # interruption points), and "stopped" printed after a bare kill left one
+  # holding 9 GB for an hour. So wait for it to go, and SIGKILL it if it has
+  # not within the grace period.
   kill "$PID"
+  for _ in $(seq 50); do
+    kill -0 "$PID" 2>/dev/null || break
+    sleep 0.2
+  done
+  if kill -0 "$PID" 2>/dev/null; then
+    kill -KILL "$PID"
+    echo "headless-preview: $PID ignored SIGTERM for 10 s; killed it" >&2
+  fi
   echo "headless-preview: stopped $PID on port $PORT"
   [ "$(reg_pid "$ITS_REG")" = "$PID" ] && rm -f "$ITS_REG"
   exit 0
