@@ -77,13 +77,15 @@ derives:
 `--study` adds a static study of the sun, the weakest gear. The knob's flats
 are held. Each planet's mesh carries a third of the tangential force from a
 firm 60 N pinch on the knob, applied to that tooth's driving flank in both
-halves of the V. Material is PLA (Prusament's datasheet). The study takes
-minutes on the CPU direct solver, which is why it is opt-in: at 70 mm,
-47k tets took about 15 minutes. The answer there was a factor of safety of
-about 17 against PLA's yield, 0.39 N m on the knob. The peak (2.7 MPa) sits
-where the knob meets the gear, at the held flats, not at a tooth root: a
-hand cannot strip these teeth. docs/plans/fem-static-iterative.md is the
-work that makes this fast.
+halves of the V. Material is PLA (Prusament's datasheet), at 0.4 module
+elements: 111k tets.
+
+The solve goes to the GPU (docs/simulation/README.md#the-solver): about
+30 s, or two minutes on the CPU's iterative solver. At 70 mm and 0.39 N m on
+the knob, the factor of safety against yield is about 13. The peak (3.6 MPa)
+is in the sharp inside corner where the hex knob meets the gear's face, a
+re-entrant corner whose stress grows as the mesh is refined (2.7 MPa at 0.6
+module). It is not at a tooth root: a hand cannot strip these teeth.
 
 The generator test `generator_planetary`
 (generators/README.md#the-big-generators-as-tests) runs the default build

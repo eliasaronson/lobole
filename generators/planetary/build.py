@@ -420,7 +420,7 @@ def run_motion(d, mates, s, name, to_deg, samples, mode):
         time.sleep(2.0)
 
 
-def sun_study(d, s, ph, material):
+def sun_study(d, s, ph, material, mesh_modules=0.4):
     """The sun's teeth under a firm pinch on its knob: the knob's flats held
     (the fingers), and at each planet the reaction on the flanks that drive
     it. The sun is the weakest gear: the smallest, and it carries every
@@ -465,10 +465,9 @@ def sun_study(d, s, ph, material):
                          f"of the V, were expected")
     st = d.call("add_study", type="static", name="sun under a pinch")
     sid = st.get("id", st.get("study"))
-    # Three quadratic elements across a tooth's root (about 1.6 modules
-    # thick): the stress there is the answer. Finer is many minutes of the
-    # direct solver for a few percent.
-    d.call("set_study", study=sid, mesh_size=0.6 * m)
+    # Four quadratic elements across a tooth's root (about 1.6 modules
+    # thick): the stress there is the answer.
+    d.call("set_study", study=sid, mesh_size=mesh_modules * m)
     for name in held:
         d.call("add_load", study=sid, type="fixed", face=name)
     for i, (th, _) in enumerate(ph["planets"]):
@@ -477,12 +476,16 @@ def sun_study(d, s, ph, material):
             d.call("add_load", study=sid, type="force", face=name,
                    magnitude=f_mesh / len(loaded[i]),
                    direction=[-t[0], -t[1], 0.0])
+    t0 = time.perf_counter()
     d.call("run_study", study=sid, **{"async": True})
     while d.call("study_status", study=sid).get("running"):
-        time.sleep(2.0)
+        time.sleep(1.0)
     r = d.call("study_results", study=sid)
+    status = d.call("study_status", study=sid)
     return {"torque_nmm": torque, "force_per_mesh_n": f_mesh,
-            "material": material, "results": r}
+            "material": material, "mesh_size_mm": mesh_modules * m,
+            "seconds": time.perf_counter() - t0,
+            "solver": status.get("solver"), "results": r}
 
 
 def hero(d, path):
@@ -524,7 +527,7 @@ def main():
                     help="start a new project first (refused on unsaved work)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--study", action="store_true",
-                    help="also solve the sun's static study (minutes)")
+                    help="also solve the sun's static study (half a minute on a GPU, two on the CPU)")
     ap.add_argument("--no-render", action="store_true",
                     help="skip the hero still (a --headless instance has "
                          "no renderer)")

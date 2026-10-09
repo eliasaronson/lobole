@@ -85,7 +85,7 @@ def pantilt(port, out):
 def planetary(port, out):
     # The print plate with its exact mesh clearances and the STL's shell
     # count, the assembly and both motion studies. Left out: the sun's static
-    # study (--study, minutes of factorisation) and the hero still.
+    # study (--study: a GPU, or two minutes of CPU) and the hero still.
     return ([PY, "-u", os.path.join(GEN, "planetary", "build.py"),
              "--port", str(port), "--no-render",
              "--out", os.path.join(out, "planetary")],
