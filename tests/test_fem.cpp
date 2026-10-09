@@ -412,6 +412,127 @@ TEST_CASE("Solver: cantilever tip deflection near Euler-Bernoulli",
   CHECK_THAT(res->maxDisplacement, WithinRel(delta, 0.12));
 }
 
+namespace {
+// The cantilever above, as two glued materials (the far half aluminium, so
+// the domains differ in Poisson's ratio as well as stiffness) under two load
+// cases, solved with `options`.
+struct TwoMaterialBeam {
+  fem::FemMesh mesh;
+  std::vector<fem::Material> mats{{200000.0, 0.30, 7.85e-9},
+                                  {69000.0, 0.33, 2.70e-9}};
+  std::vector<int> fixed;
+  std::vector<std::vector<fem::FaceLoad>> cases;
+  TwoMaterialBeam() {
+    const double L = 100;
+    CADShape beam = CADKernel::Instance().CreateBox(L, 10, 10);
+    fem::MeshSettings ms;
+    ms.maxSize = 4.0;
+    std::string err;
+    auto m = fem::Mesh(beam.GetShape(), ms, &err);
+    REQUIRE(m.has_value());
+    mesh = std::move(*m);
+    mesh.tetDomain.resize(mesh.tets.size());
+    for (size_t t = 0; t < mesh.tets.size(); ++t) {
+      double x = 0;
+      for (int i = 0; i < 4; ++i)
+        x += mesh.nodes[mesh.tets[t][i]].x / 4.0;
+      mesh.tetDomain[t] = x > L / 2 ? 1 : 0;
+    }
+    fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+    fem::FaceLoad tip;
+    tip.type = fem::LoadType::Force;
+    tip.tris = TrisAtPlane(mesh, 0, L, 1e-6);
+    tip.magnitude = 1000.0;
+    tip.direction = glm::dvec3(0, 0, -1);
+    fem::FaceLoad side = tip;
+    side.direction = glm::dvec3(0, 1, 0.5);
+    cases = {{tip}, {side}};
+  }
+  std::optional<std::vector<fem::FemResults>> Solve(const fem::SolveOptions& o,
+                                                    fem::SolveReport* report,
+                                                    std::string* err) const {
+    return fem::SolveCases(mesh, mats, fixed, cases, err,
+                           glm::dvec3(0, 0, -9810.0), o, report);
+  }
+};
+} // namespace
+
+TEST_CASE("Solver: the iterative solve agrees with the direct one",
+          "[fem][solver]") {
+  // The beam-theory tests hold the element to 3-12 %, which cannot see a
+  // solver's error. This holds PCG to LDLT on the same K: two materials of
+  // different Poisson's ratio, two load cases, gravity in both.
+  TwoMaterialBeam beam;
+  fem::SolveOptions direct;
+  direct.iterativeAboveDofs = 1 << 30;
+  fem::SolveOptions iterative;
+  iterative.iterativeAboveDofs = 0;
+  const char* told = nullptr;
+  iterative.solving = [&](const char* name) { told = name; };
+  fem::SolveReport rd, ri;
+  std::string err;
+  const auto a = beam.Solve(direct, &rd, &err);
+  INFO(err);
+  REQUIRE(a.has_value());
+  const auto b = beam.Solve(iterative, &ri, &err);
+  INFO(err);
+  REQUIRE(b.has_value());
+  CHECK(std::string(rd.solver) == fem::kDirectSolverName);
+  CHECK(std::string(ri.solver) == fem::kIterativeSolverName);
+  CHECK(told == fem::kIterativeSolverName);
+  CHECK(ri.iterations > 0);
+  CHECK(ri.worstResidual <= 1e-6);
+  REQUIRE(a->size() == 2);
+  REQUIRE(b->size() == 2);
+  for (size_t c = 0; c < 2; ++c) {
+    const fem::FemResults& x = (*a)[c];
+    const fem::FemResults& y = (*b)[c];
+    double worst = 0;
+    for (size_t n = 0; n < x.displacement.size(); ++n)
+      worst =
+          std::max(worst, glm::length(x.displacement[n] - y.displacement[n]));
+    INFO("case " << c << ": worst displacement difference " << worst << " of "
+                 << x.maxDisplacement);
+    CHECK(worst <= 1e-5 * x.maxDisplacement);
+    CHECK_THAT(y.maxVonMises, WithinRel(x.maxVonMises, 1e-5));
+  }
+}
+
+TEST_CASE("Solver: the iterative solve refuses an under-constrained model",
+          "[fem][solver]") {
+  // One line of nodes held: the beam can still turn about it, so K is
+  // singular, and CG must say so instead of iterating to its cap or
+  // returning what it reached.
+  TwoMaterialBeam beam;
+  std::vector<int> line;
+  for (int n : beam.fixed) {
+    const glm::dvec3& p = beam.mesh.nodes[n];
+    if (std::abs(p.y) < 1e-6 && std::abs(p.z) < 1e-6)
+      line.push_back(n);
+  }
+  REQUIRE(!line.empty());
+  beam.fixed = line;
+  fem::SolveOptions iterative;
+  iterative.iterativeAboveDofs = 0;
+  std::string err;
+  CHECK_FALSE(beam.Solve(iterative, nullptr, &err).has_value());
+  CHECK(err.find("constrained") != std::string::npos);
+}
+
+TEST_CASE("Solver: an iterative solve stops when cancelled", "[fem][solver]") {
+  TwoMaterialBeam beam;
+  fem::SolveOptions iterative;
+  iterative.iterativeAboveDofs = 0;
+  int asked = 0;
+  // Not before the solve starts: inside it.
+  iterative.cancelled = [&] { return ++asked > 1; };
+  fem::SolveReport report;
+  std::string err;
+  CHECK_FALSE(beam.Solve(iterative, &report, &err).has_value());
+  CHECK(err == "cancelled");
+  CHECK(report.iterations > 0);
+}
+
 // probe_study's arithmetic: a face carried by a known rigid motion is fitted
 // back to exactly that motion, and the fit carries it to a point off the
 // face as a rigid body would.

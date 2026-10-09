@@ -91,6 +91,16 @@ struct TopoResult {
 // Vulkan matrix-free CG in fem_gpu (docs/topopt/README.md#the-gpu-solver) —
 // without pulling any GPU dependency into designer_core. Null = the built-in
 // CPU path, which remains the fallback and the correctness oracle.
+// What a strict solve (TopoLinearSolver::SolveStrict) must reach, and what
+// it did. A static study holds the answer to a residual; SIMP does not.
+struct LinearSolveControl {
+  double tolerance = 1e-7; // |K u - F| / |F|, measured in fp64
+  // Polled between steps; true stops the solve, which fails "cancelled".
+  std::function<bool()> cancelled;
+  double achieved = 0.0; // out: the relative residual reached
+  int iterations = 0;    // out: the implementation's iterations, all levels
+};
+
 class TopoLinearSolver {
 public:
   virtual ~TopoLinearSolver() = default;
@@ -117,6 +127,34 @@ public:
     (void)u;
     (void)se;
     (void)error;
+    return false;
+  }
+
+  // Optional capability: a STATIC study's solve
+  // (docs/simulation/README.md#the-solver). SetupDomains is Setup with one
+  // material per mesh domain (FemMesh::tetDomain; a domain past the list
+  // takes the last), and SolveStrict solves K u = F at full modulus from
+  // nothing, to `control.tolerance` or not at all: an answer short of it
+  // FAILS. Declining (the default) leaves the static solve on the CPU.
+  virtual bool SetupDomains(const FemMesh& mesh,
+                            const std::vector<Material>& byDomain,
+                            const std::vector<int>& dofMap, int nFree,
+                            std::string* error) {
+    (void)mesh;
+    (void)byDomain;
+    (void)dofMap;
+    (void)nFree;
+    if (error)
+      *error = "this solver does not solve static studies";
+    return false;
+  }
+  virtual bool SolveStrict(const std::vector<double>& F, std::vector<double>& u,
+                           LinearSolveControl& control, std::string* error) {
+    (void)F;
+    (void)u;
+    (void)control;
+    if (error)
+      *error = "this solver does not solve static studies";
     return false;
   }
 };

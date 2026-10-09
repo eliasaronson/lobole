@@ -63,6 +63,9 @@ struct StudyJob {
   fem::StudyRuntime runtime; // read by main only after the join
   std::string error;
   std::chrono::steady_clock::time_point started;
+  // The linear solver the worker chose, once the mesh said how big K is (a
+  // static string; null until then), for the status of a running solve.
+  std::atomic<const char*> solverNow{nullptr};
 };
 
 // mesh_study off the frame: the same plan/mesh split, no solve. What it

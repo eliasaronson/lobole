@@ -805,8 +805,8 @@ bool PrepareStudy(const Document& doc, Study& study, StudyJobInput& out,
   return true;
 }
 
-bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
-                        std::string* error) {
+bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
+                        const SolveOptions& options) {
   rt = StudyRuntime{};
   rt.caseNames = in.caseNames;
   rt.sourceDigest = in.sourceDigest;
@@ -815,7 +815,10 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
   rt.shapeVolume = in.shapeVolume;
   rt.shapeThresholdLoweredFrom = in.shapeThresholdLoweredFrom;
   std::string err;
+  // A failed (or cancelled) solve leaves no half result: a caller reads a
+  // runtime with bodies as solved whole.
   auto fail = [&](const std::string& m) {
+    rt = StudyRuntime{};
     if (error)
       *error = m;
     return false;
@@ -843,9 +846,20 @@ bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
               : jb.caseLoads;
       const std::vector<Material> mats =
           jb.materials.empty() ? std::vector<Material>{jb.mat} : jb.materials;
-      auto all = SolveCases(jb.mesh, mats, jb.fixedNodes, rhs, &err, g);
+      SolveReport report;
+      auto all = SolveCases(jb.mesh, mats, jb.fixedNodes, rhs, &err, g, options,
+                            &report);
       if (!all)
         return fail("body '" + jb.bodyName + "': " + err);
+      // Several bodies may solve differently; the study names the
+      // heaviest solver any body needed, which is the one a reader wants to
+      // know about, and why an offered GPU was not it.
+      std::string name = report.solver;
+      if (!report.externalDeclined.empty())
+        name += "; GPU declined: " + report.externalDeclined;
+      if (rt.solver.empty() || rt.solver == kDirectSolverName ||
+          report.solver == kGpuSolverName)
+        rt.solver = name;
       // The maxima a summary reads are the worst over the cases.
       for (const FemResults& c : *all) {
         if (c.maxVonMises > rt.maxVonMises) {

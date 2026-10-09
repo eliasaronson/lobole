@@ -1159,6 +1159,73 @@ TEST_CASE("femgpu: load cases land on the CPU design via the GPU solver",
 // on the same study was exact. The gate above missed it because its mesh is
 // a CHUNKY box (100x40x40, 10x4x4 cells); the failure needs a SLENDER one,
 // which is what a beam-shaped part meshes to.
+TEST_CASE("femgpu: a static study solves on the GPU as the CPU's LDLT does",
+          "[femgpu][cg][static]") {
+  std::string gerr;
+  if (!gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr))
+    SKIP("no usable compute device: " << gerr);
+
+  // The slender coupon the SIMP gate uses (the fp32-hard one), as two glued
+  // materials of different Poisson's ratio, under two load cases with
+  // gravity: everything SolveCases hands the external solver.
+  fem::FemMesh mesh = GenerateBoxMesh(20, 1, 2, 200.0, 10.0, 20.0);
+  mesh.tetDomain.resize(mesh.tets.size());
+  for (size_t t = 0; t < mesh.tets.size(); ++t) {
+    double x = 0;
+    for (int i = 0; i < 4; ++i)
+      x += mesh.nodes[mesh.tets[t][i]].x / 4.0;
+    mesh.tetDomain[t] = x > 100.0 ? 1 : 0;
+  }
+  const std::vector<fem::Material> mats{{200000.0, 0.30, 7.85e-9},
+                                        {69000.0, 0.33, 2.70e-9}};
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad tip;
+  tip.type = fem::LoadType::Force;
+  tip.tris = TrisAtPlane(mesh, 0, 200.0, 1e-6);
+  tip.magnitude = 100.0;
+  tip.direction = glm::dvec3(0, -1, 0);
+  fem::FaceLoad side = tip;
+  side.direction = glm::dvec3(0, 0.3, 1);
+  const std::vector<std::vector<fem::FaceLoad>> cases{{tip}, {side}};
+  const glm::dvec3 g(0, 0, -9810.0);
+
+  fem::SolveOptions direct;
+  direct.iterativeAboveDofs = 1 << 30;
+  fem::SolveOptions onGpu;
+  onGpu.iterativeAboveDofs = 0;
+  onGpu.makeExternal = [](std::string* why) {
+    std::unique_ptr<fem::TopoLinearSolver> s =
+        gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, why);
+    return s;
+  };
+  std::string err;
+  fem::SolveReport rd, rg;
+  const auto a =
+      fem::SolveCases(mesh, mats, fixed, cases, &err, g, direct, &rd);
+  INFO(err);
+  REQUIRE(a.has_value());
+  const auto b = fem::SolveCases(mesh, mats, fixed, cases, &err, g, onGpu, &rg);
+  INFO(err);
+  REQUIRE(b.has_value());
+  INFO("declined: '" << rg.externalDeclined << "', " << rg.iterations
+                     << " inner iterations, residual " << rg.worstResidual);
+  CHECK(rg.solver == fem::kGpuSolverName);
+  CHECK(rg.externalDeclined.empty());
+  CHECK(rg.worstResidual <= 1e-6);
+  for (size_t c = 0; c < cases.size(); ++c) {
+    const fem::FemResults& x = (*a)[c];
+    const fem::FemResults& y = (*b)[c];
+    double worst = 0;
+    for (size_t n = 0; n < x.displacement.size(); ++n)
+      worst =
+          std::max(worst, glm::length(x.displacement[n] - y.displacement[n]));
+    INFO("case " << c << ": worst displacement difference " << worst << " of "
+                 << x.maxDisplacement);
+    CHECK(worst <= 1e-5 * x.maxDisplacement);
+    CHECK_THAT(y.maxVonMises, WithinRel(x.maxVonMises, 1e-5));
+  }
+}
+
 TEST_CASE("femgpu: a slender cantilever solves on the GPU (GATE)",
           "[femgpu][cg]") {
   std::string gerr;

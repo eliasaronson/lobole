@@ -479,8 +479,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "mesh_study answered -- any study job, motion included) or `id` (or "
      "`study`, the same thing here; a part or assembly study's running "
      "job). A topology run keeps the best shape so far; a static or modal "
-     "run stops at its next boundary (after meshing; the factorization has "
-     "no interruption points and ends first) and drops its answer. A job "
+     "run stops at its next boundary (after meshing, or within a few "
+     "iterations of an iterative solve; a direct factorization has no "
+     "interruption points and ends first) and drops its answer. A job "
      "id that names no study job, or one that has ended, is refused.",
      "id, job, study"},
     {"study_status",

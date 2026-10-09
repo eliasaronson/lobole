@@ -6,6 +6,7 @@
 // HAVE_FEM_SOLVER on Eigen availability, like the mesher is gated on Netgen.
 
 #include "core/fem/FemMesher.h"
+#include "core/fem/FemSolveOptions.h"
 #include "core/fem/FemStudy.h"
 
 #include <glm/glm.hpp>
@@ -110,12 +111,16 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
 // Several load cases on one stiffness (docs/topopt/README.md#load-cases): K
 // is assembled and factorised once, and each case is one right-hand side —
 // its face loads plus the gravity every case shares. One result per case, in
-// order; a failure in any case fails the whole.
+// order; a failure in any case fails the whole. Above
+// `options.iterativeAboveDofs` free DOF K is not factorised: each case is
+// solved by preconditioned conjugate gradients, to the same residual the
+// direct solve is held to (docs/simulation/README.md#the-solver).
 std::optional<std::vector<FemResults>>
 SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
            const std::vector<int>& fixedNodes,
            const std::vector<std::vector<FaceLoad>>& cases, std::string* error,
-           const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0));
+           const glm::dvec3& gravityAccel = glm::dvec3(0, 0, 0),
+           const SolveOptions& options = {}, SolveReport* report = nullptr);
 
 // Solves the generalized eigenproblem K phi = omega^2 M phi for the lowest
 // `numModes` natural frequencies + mode shapes (consistent mass matrix). Needs
@@ -439,8 +444,10 @@ struct StudyRuntimeCache {
   std::map<uint64_t, StudyRuntime> byStudy;
   uint64_t epoch = 0;
 };
-bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt,
-                        std::string* error);
+// Solves every body of a meshed study; a static one through SolveCases with
+// `options`, and rt.solver says which solver ran.
+bool SolvePreparedStudy(StudyJobInput& in, StudyRuntime& rt, std::string* error,
+                        const SolveOptions& options = {});
 
 // Meshes the study's single loaded body (v1) and runs SIMP topology
 // optimization on it (the study's Force/Pressure loads + fixed supports; keep

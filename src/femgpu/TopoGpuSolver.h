@@ -42,9 +42,22 @@ public:
   // caller's per-element Ke0 recompute.
   bool ElementEnergies(const std::vector<double>& u, std::vector<double>& se,
                        std::string* error) override;
+  // Static studies: one material per mesh domain, and a solve held to the
+  // control's tolerance from a cold start (the same refinement, given more
+  // steps, and failing instead of accepting what it reached).
+  bool SetupDomains(const fem::FemMesh& mesh,
+                    const std::vector<fem::Material>& byDomain,
+                    const std::vector<int>& dofMap, int nFree,
+                    std::string* error) override;
+  bool SolveStrict(const std::vector<double>& F, std::vector<double>& u,
+                   fem::LinearSolveControl& control,
+                   std::string* error) override;
 
 private:
   TopoGpuSolver();
+  bool Refine(const std::vector<double>& scale, const std::vector<double>& F,
+              std::vector<double>& u, std::string* error,
+              fem::LinearSolveControl* strict);
   struct Impl;
   std::unique_ptr<Impl> m_impl;
 };

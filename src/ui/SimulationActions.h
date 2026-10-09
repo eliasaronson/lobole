@@ -133,8 +133,9 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId);
 
 // The async static/modal counterparts (StudyJob): prepare-on-main +
 // solve-on-worker, polled at the same sites as the topology run. A cancel
-// lands at a boundary (after the meshing; during the factorization, which
-// has no interruption points, when it ends) and drops the answer.
+// lands at a boundary (after the meshing, inside an iterative solve; during
+// a direct factorization, which has no interruption points, when it ends)
+// and drops the answer.
 bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
                    std::string* error, JobStart* job = nullptr);
 

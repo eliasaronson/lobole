@@ -112,8 +112,10 @@ an async study and exits without `outlive_client` has stopped its study.
 on and keeps the best shape so far, marked cancelled. A motion run stops
 between samples, or between pair checks, and keeps the leading samples
 whose every check landed. A static, modal or mesh job stops at its next
-boundary -- after the meshing; the factorization has no interruption
-points, so a cancel during it lands when it ends -- and drops its answer.
+boundary and drops its answer: after the meshing, or within a few
+iterations of an iterative solve ([the solver](#the-solver)); a
+factorization has no interruption points, so a cancel during one lands
+when it ends.
 
 **Results keyed by inputs.** A run computes a 64-bit input hash
 (`src/core/InputHash.h`; FNV-1a) over the exact B-Rep of the bodies it reads
@@ -134,8 +136,8 @@ names, and:
   sub-assembly, and every placed (part, configuration).
 
 A version string leads each hash (`motion/1`, `fem/1`); a change to what a
-run computes bumps it. The solver a topology run picks (GPU or CPU) is not
-an input. A finished whole run is kept by its hash in the session
+run computes bumps it. The solver a run picks (GPU or CPU, direct or
+iterative) is not an input: every one is held to the same residual. A finished whole run is kept by its hash in the session
 (`AppState::motionResultsByInput`, 32; `studyResultsByInput`, 8; a cancelled
 or failed run is not kept), and `Start…Run`/`RunMotionNow` ask first: a match
 -- the study's own result, or one of the session's -- is installed as the
@@ -301,12 +303,37 @@ shared with topology optimization), namespace `fem`, GUI-free. Gated
 `HAVE_FEM_SOLVER` on Eigen and `HAVE_SPECTRA` on Spectra (modal only).
 
 - **Static** (`fem::Solve`, or `fem::SolveCases` for several load cases on
-  one factorisation): tet10 isotropic elasticity, 4-point Gauss rule,
-  triplet assembly into a sparse K, fixed nodes eliminated (all three DOF),
-  consistent nodal loads from face tractions (equal splitting is visibly
-  wrong on tet10), `SimplicialLDLT`. The factorization can report success on
-  a singular K, so the residual `‖Ku − F‖` is checked and an
-  under-constrained model is refused as such. Stresses are evaluated at each
+  one K): tet10 isotropic elasticity, 4-point Gauss rule, triplet assembly
+  into a sparse K, fixed nodes eliminated (all three DOF), consistent nodal
+  loads from face tractions (equal splitting is visibly wrong on tet10).
+  Every answer is held to `‖Ku − F‖ ≤ 1e-6 ‖F‖`, recomputed on the
+  assembled K whichever solver produced it. That is how an
+  under-constrained model is refused: an LDLT factorization can report
+  success on a singular K.
+  - **The linear solver** is chosen by K's size
+    (`SolveOptions`, `src/core/fem/FemSolveOptions.h`). Up to
+    `kIterativeAboveDofs` (20k) free DOF it is `SimplicialLDLT`. Above it, a
+    direct factor of a tet10 mesh fills in steeply, so each case is solved
+    iteratively:
+    - On the GPU when the build has it and a hardware device exists, under
+      topology's rules (`DESIGNER_TOPO_GPU`, the preferred device): the same
+      mixed-precision refinement
+      ([../topopt/README.md](../topopt/README.md#the-gpu-solver)), from a
+      cold start, through `TopoLinearSolver::SetupDomains` (each tet its
+      domain's material) and `SolveStrict` (to 1e-7, or not an answer).
+    - Otherwise, or when the GPU declines or falls short, on the CPU:
+      preconditioned conjugate gradients with an incomplete-Cholesky
+      preconditioner, to 1e-8, written out so it can be cancelled and so a
+      stall (no tenfold gain in 2000 iterations, the signature of a
+      singular K) is refused as under-constrained rather than run to the
+      cap.
+  - **Measured** on a 100 x 20 x 20 beam, CPU only: 33.5k DOF, LDLT 4.9 s
+    and PCG 1.7 s; 202k DOF, 423 s against 26 s. A printed gear's sun at
+    111k tets (512k DOF), meshing included: PCG 120 s, the GPU 31 s. At 47k
+    tets, which LDLT took 15 minutes and 9 GB to factor, the GPU took 11 s.
+  - `study_status.solver` names the solver a running job chose once its
+    mesh said how big K is, and the stored result names the one that ran,
+    with `GPU declined: <why>` when a GPU was offered and not used. Stresses are evaluated at each
   element's nodes and averaged to the mesh nodes weighted by element volume;
   von Mises per node, and the maxima with their locations.
 - **Modal** (`fem::SolveModal`): `K φ = ω² M φ` with a consistent mass
@@ -342,8 +369,8 @@ validation, shape copies) + `MeshPlannedStudy` + `SolvePreparedStudy`
 mesh and solve off the frame as a background job; `mesh_study {async: true}`
 meshes only. Each is a job with an id
 ([studies as jobs](#studies-as-jobs)); a cancel stops a static or modal job
-at its next boundary (after the meshing; the factorization has no
-interruption points) and drops its answer. One study run at a time. A
+at its next boundary (after the meshing, inside an iterative solve; a
+factorization has no interruption points) and drops its answer. One study run at a time. A
 finished job stores its result into the document it ran on even if another
 tab is active.
 

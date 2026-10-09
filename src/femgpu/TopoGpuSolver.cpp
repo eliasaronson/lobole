@@ -168,12 +168,28 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
                           const fem::Material& material,
                           const std::vector<int>& dofMap, int nFree,
                           std::string* error) {
+  return SetupDomains(mesh, {material}, dofMap, nFree, error);
+}
+
+bool TopoGpuSolver::SetupDomains(const fem::FemMesh& mesh,
+                                 const std::vector<fem::Material>& byDomain,
+                                 const std::vector<int>& dofMap, int nFree,
+                                 std::string* error) {
   using namespace fem::internal;
   Impl& im = *m_impl;
+  if (byDomain.empty()) {
+    if (error)
+      *error = "no material";
+    return false;
+  }
 
   // Pack the reduced system exactly the way the CPU assembly builds it:
   // per-tet Ke at full modulus (fp32-cast), DOF slots node-major, -1 = fixed.
-  const auto D0 = Elasticity(material.youngMPa, material.poisson);
+  // Each tet's elasticity is its domain's, as SolveCases picks it; topology
+  // passes one material, so every tet shares it.
+  std::vector<Eigen::Matrix<double, 6, 6>> Ds;
+  for (const fem::Material& m : byDomain)
+    Ds.push_back(Elasticity(m.youngMPa, m.poisson));
   SpmvSystem sys;
   sys.nFree = nFree;
   sys.nElems = static_cast<int>(mesh.tets.size());
@@ -181,7 +197,11 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
   sys.ke.reserve(static_cast<size_t>(sys.nElems) * 900);
   std::vector<double> ke64; // the host's fp64 copy, upper triangle
   ke64.reserve(static_cast<size_t>(sys.nElems) * HostOperator::kPacked);
-  for (const auto& tet : mesh.tets) {
+  for (size_t ti = 0; ti < mesh.tets.size(); ++ti) {
+    const auto& tet = mesh.tets[ti];
+    const size_t dom =
+        mesh.tetDomain.empty() ? 0 : static_cast<size_t>(mesh.tetDomain[ti]);
+    const Eigen::Matrix<double, 6, 6>& D0 = Ds[std::min(dom, Ds.size() - 1)];
     for (int i = 0; i < 10; ++i)
       for (int k = 0; k < 3; ++k)
         sys.dof.push_back(dofMap[3 * tet[i] + k]);
@@ -266,6 +286,22 @@ bool TopoGpuSolver::Setup(const fem::FemMesh& mesh,
 bool TopoGpuSolver::Solve(const std::vector<double>& scale,
                           const std::vector<double>& F, std::vector<double>& u,
                           std::string* error) {
+  return Refine(scale, F, u, error, nullptr);
+}
+
+bool TopoGpuSolver::SolveStrict(const std::vector<double>& F,
+                                std::vector<double>& u,
+                                fem::LinearSolveControl& control,
+                                std::string* error) {
+  // Full modulus everywhere: a static study's K.
+  const std::vector<double> ones(m_impl->scaleF.size(), 1.0);
+  return Refine(ones, F, u, error, &control);
+}
+
+bool TopoGpuSolver::Refine(const std::vector<double>& scale,
+                           const std::vector<double>& F, std::vector<double>& u,
+                           std::string* error,
+                           fem::LinearSolveControl* strict) {
   using clk = std::chrono::steady_clock;
   Impl& im = *m_impl;
   if (!im.cg) {
@@ -289,8 +325,9 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
   }
 
   // The target, as an fp64 relative residual: the old fp32 one, now
-  // reachable. Compliance error goes as its square.
-  constexpr double kTol = 1e-5;
+  // reachable. Compliance error goes as its square. A strict (static) solve
+  // names its own.
+  const double kTol = strict ? strict->tolerance : 1e-5;
   // The inner fp32 solve only has to contract, and a loose one is cheaper
   // per digit: 1e-1 a step measured fastest overall (1e-2 spent its
   // iterations solving the fp32 operator more exactly than it is worth, and
@@ -298,8 +335,10 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
   constexpr float kInnerTol = 1e-1f;
   // Iterations per inner solve. The first solve of a run starts from
   // nothing and gets more; past that the warm start leaves less to do.
-  const int innerMax = im.haveWarmStart ? 128 : 256;
-  constexpr int kMaxSteps = 40;
+  const int innerMax = im.haveWarmStart && !strict ? 128 : 256;
+  // A static solve starts from nothing and wants two more decades than
+  // SIMP: more steps, still ended early by the stall test below.
+  const int kMaxSteps = strict ? 400 : 40;
 
   // Warm start: the previous SIMP iteration's displacement (the caller hands
   // back what this returned last time), scaled by the energy-optimal factor
@@ -307,7 +346,9 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
   // a poor fit — the pan/tilt yoke's had a residual 13x |F| — and scaling is
   // never worse than either it or zero.
   std::vector<double> Ku, r(n);
-  if (!im.haveWarmStart || static_cast<int>(u.size()) != n)
+  // A strict solve is a different right-hand side from whatever came before:
+  // no warm start.
+  if (!im.haveWarmStart || strict || static_cast<int>(u.size()) != n)
     u.assign(n, 0.0);
   double hostMs = 0.0; // the fp64 products, for the trace
   auto th = clk::now();
@@ -333,6 +374,11 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
   double pKp = 0.0;
   int steps = 0, innerIters = 0, stalls = 0;
   while (rel > kTol && steps < kMaxSteps) {
+    if (strict && strict->cancelled && strict->cancelled()) {
+      if (error)
+        *error = "cancelled";
+      return false;
+    }
     ++steps;
     // Rescale into fp32's comfortable range: r shrinks by orders of
     // magnitude over the run, and a tiny right-hand side wastes the
@@ -405,6 +451,19 @@ bool TopoGpuSolver::Solve(const std::vector<double>& scale,
         std::chrono::duration<double, std::milli>(clk::now() - t0).count(),
         hostMs, steps, innerIters, relStart, rel);
 
+  if (strict) {
+    strict->achieved = rel;
+    strict->iterations = innerIters;
+    if (!(rel <= kTol)) {
+      if (error)
+        *error = "GPU solve reached a relative residual of " +
+                 std::to_string(rel) + ", not the " + std::to_string(kTol) +
+                 " asked for, in " + std::to_string(steps) +
+                 " refinement steps";
+      return false;
+    }
+    return true;
+  }
   // An unconverged answer is accepted: SIMP reacts to element energies, not
   // to the last digit of u. One no better than u = 0 is not an answer — it
   // reads downstream as a structure carrying no load — so say so and let

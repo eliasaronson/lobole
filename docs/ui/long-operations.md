@@ -242,14 +242,16 @@ own shape would be a write under the renderer's reads. `tests/test_fem.cpp`
 holds both pairs to their inline originals (same nodes, tets, supports and
 tractions, and a shape that is not the document's).
 
-- `study` (static/modal) is cancellable at its boundaries: the linear
-  solver has no interruption points, so a cancel lands after the meshing
-  or when the factorization ends, and the answer is dropped.
+- `study` (static/modal) is cancellable at its boundaries: after the
+  meshing, and within a few iterations of an iterative solve; a direct
+  factorization has no interruption points, so a cancel during one lands
+  when it ends. The answer is dropped either way.
 - `topo` is cancellable and keeps its best iterate; `cancel_study` cancels
   it.
 - `check` (`check_topology`) solves the shape's and the solid's static
   studies one after the other, each planned on the main thread; a cancel
-  lands between them or when a factorization ends, and keeps what was
+  lands between them, inside an iterative solve or when a factorization
+  ends, and keeps what was
   solved whole ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)).
 - `mesh_study {async: true}` is a `mesh` job (a cancel drops its report); `study_status` answers
   `{running, meshing: true}` until it lands and then carries

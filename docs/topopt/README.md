@@ -320,6 +320,14 @@ option is `DESIGNER_ENABLE_FEM_GPU` (default ON); compute shaders are
 compiled to embedded SPIR-V (`src/shaders/fem_*.comp`, `cg_*.comp`,
 `cheb_*.comp`, `mg_*.comp`).
 
+Static studies use the same solver above a size
+([../simulation/README.md](../simulation/README.md#the-solver)), through the
+seam's two optional methods. `SetupDomains` packs each tet with its own
+domain's elasticity (topology's `Setup` is it with one material).
+`SolveStrict` runs the refinement below at full modulus from a cold start,
+with up to 400 steps and a caller's tolerance, and FAILS short of it where
+SIMP's solve accepts any progress; it polls a cancel between steps.
+
 - **Matrix-free SpMV** (`gpu::TopoSpmv`, `fem_spmv.comp`): one workgroup per
   tet applies `scale_e · Kₑ⁰` to its 30 DOF and scatters with float
   `atomicAdd` (requires `VK_EXT_shader_atomic_float`). K is never assembled.

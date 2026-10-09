@@ -156,6 +156,41 @@ void RememberStudyResult(AppState& state, const fem::StudyRuntime& rt) {
 
 namespace {
 
+// What a study job's worker solves with: an iterative solve stops when the
+// job is cancelled (a factorisation still cannot), the job learns which
+// solver it is waiting on, and a solve large enough to go iterative tries
+// the GPU first, under the rules topology's does (StartTopologyRun):
+// DESIGNER_TOPO_GPU=0 keeps it on the CPU, =1 admits a software device, and
+// the user's preferred device is asked for. The device is made on the
+// worker, and only for a solve that wants one.
+fem::SolveOptions JobSolveOptions(const AppState& state, BackgroundJob* raw,
+                                  StudyJob* job) {
+  fem::SolveOptions o;
+  o.cancelled = [raw] { return raw->cancel.load(); };
+  if (job != nullptr)
+    o.solving = [job](const char* name) { job->solverNow.store(name); };
+#ifdef HAVE_FEM_GPU
+  const char* pref = std::getenv("DESIGNER_TOPO_GPU");
+  if (!pref || std::string(pref) != "0") {
+    const bool allowSoftware = pref && std::string(pref) == "1";
+    o.makeExternal =
+        [allowSoftware, device = state.settings.gpuDevice](
+            std::string* why) -> std::unique_ptr<fem::TopoLinearSolver> {
+      return gpu::TopoGpuSolver::Create(allowSoftware, why, device);
+    };
+  }
+#else
+  (void)state;
+#endif
+  return o;
+}
+
+// The solver a result records: the one that ran, which a static solve
+// reports, else the analysis type's.
+std::string SolverOf(const fem::StudyRuntime& rt, fem::AnalysisType type) {
+  return rt.solver.empty() ? std::string(fem::CpuSolverName(type)) : rt.solver;
+}
+
 // The part slot `doc` belongs to: the active one (its slot holds no
 // document while it is active) or a stashed one. 0 when `doc` is not a part
 // tab's document at all.
@@ -430,20 +465,24 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
   auto bg = std::make_unique<BackgroundJob>();
   bg->kind = "study";
   bg->label = StudyLabel(doc, studyId, "Solving");
-  // At its boundaries: the linear solver has no interruption points, so a
-  // cancel lands after the meshing or, during the factorization, when it
-  // ends -- and the answer is dropped either way.
+  // After the meshing, and within a few iterations of an iterative solve;
+  // a direct factorization has no interruption points, so there it lands
+  // when the factorization ends. The answer is dropped either way.
   bg->cancellable = true;
   bg->studyId = studyId;
   bg->owner = jobStart ? jobStart->owner : 0;
   BackgroundJob* raw = bg.get();
-  bg->thread = std::thread([job, raw]() {
+  // Made here: the worker must not read AppState.
+  fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
+  bg->thread = std::thread([job, raw, solveOptions]() {
     OSD::SetSignal(Standard_False); // OCC's handlers are per thread
     std::string err;
     if (!fem::MeshPlannedStudy(job->plan, job->input, &err))
       job->error = err.empty() ? "meshing failed" : err;
     else if (!raw->cancel.load() &&
-             !fem::SolvePreparedStudy(job->input, job->runtime, &err))
+             !fem::SolvePreparedStudy(job->input, job->runtime, &err,
+                                      solveOptions) &&
+             !raw->cancel.load()) // a cancel inside the solve is a cancel
       job->error = err.empty() ? "solve failed" : err;
     raw->error = job->error;
     raw->done.store(true); // last
@@ -455,7 +494,7 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
         // Cancelled: whatever it reached is not the answer it was asked for.
       } else if (j.error.empty()) {
         j.runtime.solvedAtVersion = target->Version();
-        j.runtime.solver = fem::CpuSolverName(j.input.type);
+        j.runtime.solver = SolverOf(j.runtime, j.input.type);
         j.runtime.solveSeconds = Elapsed(j.started);
         j.runtime.inputHash = inputHash;
         RememberStudyResult(s, j.runtime);
@@ -538,13 +577,16 @@ bool StartTopologyCheck(AppState& state, Document& doc, uint64_t topoId,
   auto bg = std::make_unique<BackgroundJob>();
   bg->kind = "check";
   bg->label = StudyLabel(doc, topoId, "Checking");
-  // Between the two solves, and after a factorization (it has no
-  // interruption points): what was not finished is dropped.
+  // Between the two solves, inside an iterative one, and after a
+  // factorization (it has no interruption points): what was not finished
+  // is dropped.
   bg->cancellable = true;
   bg->studyId = topoId;
   bg->owner = jobStart ? jobStart->owner : 0;
   BackgroundJob* raw = bg.get();
-  bg->thread = std::thread([job, raw]() {
+  // Made here: the worker must not read AppState.
+  fem::SolveOptions solveOptions = JobSolveOptions(state, raw, nullptr);
+  bg->thread = std::thread([job, raw, solveOptions]() {
     OSD::SetSignal(Standard_False); // OCC's handlers are per thread
     const double n = static_cast<double>(job->parts.size());
     for (size_t i = 0; i < job->parts.size() && !raw->cancel.load(); ++i) {
@@ -553,7 +595,9 @@ bool StartTopologyCheck(AppState& state, Document& doc, uint64_t topoId,
       if (!fem::MeshPlannedStudy(p.plan, p.input, &err))
         job->error = err.empty() ? "meshing failed" : err;
       else if (!raw->cancel.load() &&
-               !fem::SolvePreparedStudy(p.input, p.runtime, &err))
+               !fem::SolvePreparedStudy(p.input, p.runtime, &err,
+                                        solveOptions) &&
+               !raw->cancel.load()) // a cancel inside the solve is a cancel
         job->error = err.empty() ? "solve failed" : err;
       if (!job->error.empty()) {
         job->errorStudy = p.studyId;
@@ -575,7 +619,7 @@ bool StartTopologyCheck(AppState& state, Document& doc, uint64_t topoId,
       if (p.runtime.bodies.empty())
         continue;
       p.runtime.solvedAtVersion = target->Version();
-      p.runtime.solver = fem::CpuSolverName(p.input.type);
+      p.runtime.solver = SolverOf(p.runtime, p.input.type);
       p.runtime.solveSeconds = Elapsed(j.started);
       p.runtime.inputHash = p.inputHash;
       RememberStudyResult(s, p.runtime);
@@ -691,7 +735,8 @@ StudyRunStatus GetStudyRunStatus(const AppState& state, uint64_t studyId) {
   // From the PLAN, not job->input: the worker rebuilds `input` wholesale
   // (MeshPlannedStudy's first line) while this polls; the plan is written
   // here before the thread starts and the worker only reads it.
-  st.solver = fem::CpuSolverName(job->plan.type);
+  const char* now = job->solverNow.load();
+  st.solver = now != nullptr ? now : fem::CpuSolverName(job->plan.type);
   return st;
 }
 
@@ -973,7 +1018,7 @@ bool RunAssemblyStudyAndCache(AppState& state, AssemblyDocument& asmDoc,
   }
   rt.solvedAtVersion = asmDoc.Version();
   rt.solvedPartVersions = partVersions;
-  rt.solver = fem::CpuSolverName(input.type);
+  rt.solver = SolverOf(rt, input.type);
   rt.inputHash = inputHash;
   RememberStudyResult(state, rt);
   asmDoc.StoreStudyResults(studyId, std::move(rt));
@@ -1013,13 +1058,17 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
   bg->studyId = studyId;
   bg->owner = jobStart ? jobStart->owner : 0;
   BackgroundJob* raw = bg.get();
-  bg->thread = std::thread([job, raw]() {
+  // Made here: the worker must not read AppState.
+  fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
+  bg->thread = std::thread([job, raw, solveOptions]() {
     OSD::SetSignal(Standard_False);
     std::string err;
     if (!fem::MeshPlannedStudy(job->plan, job->input, &err))
       job->error = err.empty() ? "meshing failed" : err;
     else if (!raw->cancel.load() &&
-             !fem::SolvePreparedStudy(job->input, job->runtime, &err))
+             !fem::SolvePreparedStudy(job->input, job->runtime, &err,
+                                      solveOptions) &&
+             !raw->cancel.load()) // a cancel inside the solve is a cancel
       job->error = err.empty() ? "solve failed" : err;
     raw->error = job->error;
     raw->done.store(true);
@@ -1035,7 +1084,7 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
     } else if (j.error.empty()) {
       j.runtime.solvedAtVersion = target->Version();
       j.runtime.solvedPartVersions = j.partVersions;
-      j.runtime.solver = fem::CpuSolverName(j.input.type);
+      j.runtime.solver = SolverOf(j.runtime, j.input.type);
       j.runtime.solveSeconds = Elapsed(j.started);
       j.runtime.inputHash = inputHash;
       RememberStudyResult(st, j.runtime);

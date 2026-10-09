@@ -5,8 +5,10 @@
 
 #ifdef HAVE_FEM_SOLVER
 #include "core/fem/FemSolverInternal.h"
+#include "core/fem/FemTopo.h" // TopoLinearSolver, the external solver's seam
 
 #include <Eigen/Dense>
+#include <Eigen/IterativeLinearSolvers>
 #include <Eigen/SparseCholesky>
 #include <Eigen/SparseCore>
 #endif
@@ -90,11 +92,76 @@ Solve(const FemMesh& mesh, const std::vector<Material>& byDomain,
   return std::move(all->front());
 }
 
+namespace {
+
+// Preconditioned conjugate gradients on the assembled K, written out rather
+// than Eigen's ConjugateGradient so it can be cancelled mid-solve (Eigen's
+// would have to be restarted in chunks, losing its search directions each
+// time) and so a stall is seen as one.
+//
+// Converged at |K u - f| <= tol |f|. Fails "cancelled" when asked, and
+// "stalled" when the best residual has not improved by a tenth in
+// kStallIterations: the signature of a singular K (an under-constrained
+// model has a rigid-body mode CG cannot resolve), which would otherwise
+// iterate to the cap.
+enum class PcgOutcome { Converged, Cancelled, Stalled, Capped };
+
+template <class Precond>
+PcgOutcome Pcg(const Eigen::SparseMatrix<double>& K, const Precond& M,
+               const Eigen::VectorXd& f, Eigen::VectorXd& u, double tol,
+               int maxIterations, const std::function<bool()>& cancelled,
+               int* iterations, double* relResidual) {
+  constexpr int kCancelEvery = 32;
+  constexpr int kStallIterations = 2000;
+  const double fNorm = f.norm();
+  u = Eigen::VectorXd::Zero(f.size());
+  *iterations = 0;
+  *relResidual = 0.0;
+  if (fNorm == 0.0)
+    return PcgOutcome::Converged;
+  Eigen::VectorXd r = f; // u = 0
+  Eigen::VectorXd z = M.solve(r);
+  Eigen::VectorXd p = z;
+  Eigen::VectorXd Kp(f.size());
+  double rz = r.dot(z);
+  double best = 1.0;
+  int bestAt = 0;
+  for (int it = 1; it <= maxIterations; ++it) {
+    Kp.noalias() = K * p;
+    const double alpha = rz / p.dot(Kp);
+    u.noalias() += alpha * p;
+    r.noalias() -= alpha * Kp;
+    const double rel = r.norm() / fNorm;
+    *iterations = it;
+    *relResidual = rel;
+    if (!std::isfinite(rel))
+      return PcgOutcome::Stalled;
+    if (rel <= tol)
+      return PcgOutcome::Converged;
+    if (rel < 0.9 * best) {
+      best = rel;
+      bestAt = it;
+    } else if (it - bestAt > kStallIterations) {
+      return PcgOutcome::Stalled;
+    }
+    if (cancelled && it % kCancelEvery == 0 && cancelled())
+      return PcgOutcome::Cancelled;
+    z = M.solve(r);
+    const double rzNext = r.dot(z);
+    p = z + (rzNext / rz) * p;
+    rz = rzNext;
+  }
+  return PcgOutcome::Capped;
+}
+
+} // namespace
+
 std::optional<std::vector<FemResults>>
 SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
            const std::vector<int>& fixedNodes,
            const std::vector<std::vector<FaceLoad>>& cases, std::string* error,
-           const glm::dvec3& gravityAccel) {
+           const glm::dvec3& gravityAccel, const SolveOptions& options,
+           SolveReport* report) {
   auto fail =
       [&](const std::string& m) -> std::optional<std::vector<FemResults>> {
     if (error)
@@ -212,12 +279,59 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     }
   }
 
-  // Factorise once; every case is one right-hand side.
-  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
-  solver.compute(K);
-  if (solver.info() != Eigen::Success)
-    return fail(
-        "model is insufficiently constrained (singular stiffness matrix)");
+  // Direct below the threshold: factorise once, every case one right-hand
+  // side. Above it, PCG per case on K with one incomplete-Cholesky
+  // preconditioner. Both are held to the same residual below.
+  const bool iterative = nFree > options.iterativeAboveDofs;
+  // An iterative solve goes to the external (GPU) solver when one is
+  // offered and takes this system; the CPU's PCG is its fallback.
+  std::unique_ptr<TopoLinearSolver> external;
+  std::string declined;
+  if (iterative && options.makeExternal) {
+    external = options.makeExternal(&declined);
+    if (external &&
+        !external->SetupDomains(mesh, byDomain, dofMap, nFree, &declined))
+      external.reset();
+  }
+  const char* solverName = !iterative ? kDirectSolverName
+                           : external ? kGpuSolverName
+                                      : kIterativeSolverName;
+  if (options.solving)
+    options.solving(solverName);
+  if (report) {
+    *report = SolveReport{};
+    report->solver = solverName;
+    if (iterative && !external && options.makeExternal)
+      report->externalDeclined = declined;
+  }
+  if (options.cancelled && options.cancelled())
+    return fail("cancelled");
+  constexpr const char* kSingular =
+      "model is insufficiently constrained (singular stiffness matrix)";
+  Eigen::SimplicialLDLT<Eigen::SparseMatrix<double>> direct;
+  Eigen::IncompleteCholesky<double> ic;
+  bool icReady = false;
+  // The CPU preconditioner, built when the CPU first needs it: a GPU solve
+  // that succeeds never pays for it.
+  const auto prepareIc = [&]() {
+    if (!icReady) {
+      ic.compute(K);
+      icReady = ic.info() == Eigen::Success;
+    }
+    return icReady;
+  };
+  if (iterative) {
+    if (!external && !prepareIc())
+      return fail(kSingular);
+  } else {
+    direct.compute(K);
+    if (direct.info() != Eigen::Success)
+      return fail(kSingular);
+  }
+  // A cap no converging solve comes near (a well-posed tet10 model takes a
+  // few hundred to a few thousand iterations); the stall test ends a
+  // singular one long before it.
+  const int maxIterations = std::max(10000, nFree / 4);
   std::vector<FemResults> all;
   all.reserve(cases.size());
   const Eigen::VectorXd Fgravity = F;
@@ -228,17 +342,71 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
       if (!AssembleFaceLoads(mesh, loads, dofMap, F, &loadErr))
         return fail(loadErr);
     }
-    const Eigen::VectorXd u = solver.solve(F);
-    if (solver.info() != Eigen::Success)
-      return fail("linear solve failed");
+    Eigen::VectorXd u;
+    if (external) {
+      std::vector<double> fv(F.data(), F.data() + F.size()), uv;
+      LinearSolveControl control;
+      // A decade inside the acceptance below.
+      control.tolerance = 1e-7;
+      control.cancelled = options.cancelled;
+      std::string why;
+      const bool ok = external->SolveStrict(fv, uv, control, &why);
+      if (report)
+        report->iterations += control.iterations;
+      if (options.cancelled && options.cancelled())
+        return fail("cancelled");
+      if (ok && static_cast<int>(uv.size()) == nFree) {
+        u = Eigen::Map<const Eigen::VectorXd>(uv.data(), nFree);
+      } else {
+        // Not an answer: finish this case and the rest on the CPU, and say
+        // why the result names the CPU.
+        external.reset();
+        if (options.solving)
+          options.solving(kIterativeSolverName);
+        if (report) {
+          report->solver = kIterativeSolverName;
+          report->externalDeclined = why;
+        }
+        if (!prepareIc())
+          return fail(kSingular);
+      }
+    }
+    if (u.size() == 0 && iterative) {
+      int its = 0;
+      double rel = 0.0;
+      // Two decades under the acceptance below, so the check never decides
+      // a converged solve.
+      const PcgOutcome o =
+          Pcg(K, ic, F, u, 1e-8, maxIterations, options.cancelled, &its, &rel);
+      if (report)
+        report->iterations += its;
+      if (o == PcgOutcome::Cancelled)
+        return fail("cancelled");
+      if (o == PcgOutcome::Stalled)
+        return fail(std::string(kSingular) +
+                    ": the iterative solve stalled at a relative residual of " +
+                    std::to_string(rel) + " after " + std::to_string(its) +
+                    " iterations");
+      if (o == PcgOutcome::Capped)
+        return fail("the iterative solve did not converge in " +
+                    std::to_string(its) + " iterations (relative residual " +
+                    std::to_string(rel) + ")");
+    } else if (!iterative) {
+      u = direct.solve(F);
+      if (direct.info() != Eigen::Success)
+        return fail("linear solve failed");
+    }
     // SimplicialLDLT can factor a singular K (a rigid-body mode the fixed faces
     // didn't kill) with a near-zero pivot and still report Success, then return
     // a garbage solution. The robust signal is the residual: a genuine solution
-    // satisfies K u = F, an under-constrained one does not.
-    if (!u.allFinite() ||
-        (F.norm() > 0 && (K * u - F).norm() > 1e-6 * F.norm()))
-      return fail(
-          "model is insufficiently constrained (singular stiffness matrix)");
+    // satisfies K u = F, an under-constrained one does not. The iterative
+    // answer is held to the same test, recomputed rather than trusted from
+    // its recurrence.
+    const double residual = F.norm() > 0 ? (K * u - F).norm() / F.norm() : 0.0;
+    if (!u.allFinite() || residual > 1e-6)
+      return fail(kSingular);
+    if (report)
+      report->worstResidual = std::max(report->worstResidual, residual);
 
     // Expand to full displacement (fixed DOFs are zero).
     FemResults out;
@@ -592,7 +760,8 @@ std::optional<FemResults> Solve(const FemMesh& mesh, const Material& material,
 std::optional<std::vector<FemResults>>
 SolveCases(const FemMesh&, const std::vector<Material>&,
            const std::vector<int>&, const std::vector<std::vector<FaceLoad>>&,
-           std::string* error, const glm::dvec3&) {
+           std::string* error, const glm::dvec3&, const SolveOptions&,
+           SolveReport*) {
   if (error)
     *error = "built without FEM solver support (Eigen not found)";
   return std::nullopt;
