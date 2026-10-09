@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 
 // The Save as template window (docs/modeling/templates.md#in-the-gui): the

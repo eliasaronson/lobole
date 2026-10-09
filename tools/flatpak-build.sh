@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Build (and user-install) the Designer Flatpak.
 #
 # Runs entirely in user mode via nix-shell, so it needs NO NixOS

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # dev-watch — keep a fresh-build Designer running on a fixed --remote port.
 #
 # Run this ONCE in your own GPU/display session (a normal terminal, or your

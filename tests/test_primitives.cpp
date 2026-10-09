@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The primitive tools (docs/modeling/README.md#primitives): a Box, Cylinder
 // or Sphere asked for in one call is stored as a fully constrained Sketch on
 // what it names, plus an Extrude or a Revolve, and follows that reference.

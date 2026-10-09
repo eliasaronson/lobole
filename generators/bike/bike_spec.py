@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The bicycle's dimensions, and the layout derived from them.
 
 The model is of a real bicycle that was photographed, not measured

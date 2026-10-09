@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // A worm and its wheel (docs/modeling/worm-gears.md): the worm's sizes and
 // its exact volume, the wheel's hobbed envelope converging as the hob's steps
 // shrink, the refusals, and the pair meshing through a motion study checked

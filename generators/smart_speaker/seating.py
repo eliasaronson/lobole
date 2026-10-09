@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """How a part is seated: say the face and the direction, not the quaternion.
 
 Every orientation bug in this generator came from writing a quaternion by

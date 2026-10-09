@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # coverage — which of our own code the headless suite actually executes.
 #
 # An occasional audit build, like tools/ci-local.sh --asan and -DENABLE_ANALYZER:

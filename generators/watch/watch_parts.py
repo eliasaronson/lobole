@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The watch's parts — one function per part, each its own part document.
 
 Every ARBOR part is built on its own axis at its WORLD depth: local Z is world

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """One part placed in two configurations and two materials, headless
 (docs/assemblies/README.md#configurations-per-placement): the BOM has a line
 for each, mass follows the configuration and the material, editing a

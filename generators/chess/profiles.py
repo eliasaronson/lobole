@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Staunton profiles for the turned pieces, as expressions.
 
 A profile is a closed loop in the (x, r) half-plane: x along the piece's

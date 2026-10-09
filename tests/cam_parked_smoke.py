@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """CAM requests wait OFF the frame (docs/cam/README.md#requests-that-wait).
 
 cam_toolpath, cam_post, cam_verify and cam_simulate used to cut every pass

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A barley-twist rolling pin, to cut on the 4th axis.
 
 Six helical flutes down a Phi 50 pin: the rope twist you see on Jacobean

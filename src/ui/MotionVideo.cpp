@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // A motion study to a video (docs/assemblies/README.md#motion-video).
 //
 // The shape: a job of kind "motion-video" with NO worker of its own on the

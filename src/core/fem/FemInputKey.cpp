@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The input hash of an FEM run (docs/simulation/README.md#studies-as-jobs).
 
 #include "core/Document.h"

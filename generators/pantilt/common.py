@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """What every stage of the pan/tilt head shares: where its output goes, the
 connection, and the few helpers that are several RPCs."""
 import argparse

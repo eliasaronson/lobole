@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The weld jig: what holds the tubes while they are tacked.
 
 A space frame is only as repeatable as the fixture it is built in. A jig is a

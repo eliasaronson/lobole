@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Pixel regression: does a renderer change move any pixel it did not mean to?
 
 The gap this closes. The 2026-08-24 architecture review rewrote shared Vulkan

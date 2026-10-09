@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The top end of the diesel: the head, its valve gear, and the pre-chambers
 that make it a pre-chamber diesel rather than a petrol four.
 

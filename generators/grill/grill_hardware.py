@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Everything on the grill that is not folded sheet: burners, gas, grates,
 wheels, the tank, and the bits a hand touches.
 

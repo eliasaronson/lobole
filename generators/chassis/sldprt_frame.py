@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Read a welded tube frame out of a SolidWorks part file, without SolidWorks.
 
     python3 generators/chassis/sldprt_frame.py FRAME.SLDPRT [--out fs_chassis_frame.json]

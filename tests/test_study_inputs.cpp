@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Results keyed by inputs (docs/simulation/README.md#studies-as-jobs): an
 // FEM run is answered from a stored result only when its input hash matches,
 // so the hash must move on every input that can change an answer -- each

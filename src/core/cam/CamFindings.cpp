@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // What the verdict says about the part beyond the cut surface: the
 // toleranced walls judged against their bands, and the holes and threads the
 // job does not cut (docs/cam/simulation.md#tolerance-bands,

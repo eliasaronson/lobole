@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """What every generator needs and every scratch script used to carry.
 
 Seventeen build scripts in scratch/ each copied the same forty lines: a

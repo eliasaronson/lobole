@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: C1 visual-mesh export (glTF/OBJ/PLY), headless.
 
 Exports a part and an assembly to .glb and parses the binary-glTF container

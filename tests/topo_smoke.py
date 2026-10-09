@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: async topology optimization, headless over JSON-RPC (TO2).
 
 Builds a steel design envelope, fixes one face and pushes on the opposite face,

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Gate: the MCP server's hand-written format prose matches the app.
 
 `describe` is the app-side truth for feature types, sketch entity types and

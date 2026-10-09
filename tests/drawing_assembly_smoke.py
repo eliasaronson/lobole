@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: drawing views of an assembly, and projected-child folding.
 
 Covers the D2b additions on top of drawing_smoke's part views: a view whose

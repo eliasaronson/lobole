@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "core/cam/CamJob.h"
 #include "core/cam/CamMachine.h" // MachineFileName
 #include "core/cam/CamNames.h"

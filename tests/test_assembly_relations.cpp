@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Relations: gear, rack, screw, linear (docs/assemblies/relations.md).
 //
 // A relation couples two mates' degrees of freedom, dofB = ratio * dofA +

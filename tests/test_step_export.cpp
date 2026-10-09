@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // STEP export (docs/interchange/README.md#exporting-step): what another CAD
 // system finds when it opens our file. Every case here writes a real file
 // and reads it back through XCAF — the same reader another OCC-based system

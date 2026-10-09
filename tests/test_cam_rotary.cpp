@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #ifdef HAVE_CAM
 
 // The rotary stock: r(x, theta) instead of z(x, y)

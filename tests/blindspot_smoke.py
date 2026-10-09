@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Blind-spot suite runner: tests/blindspots/NN_*.py, one file per KNOWN
 AGENT MISTAKE (the numbered-blind-spot idea from the AI-CAD survey,
 docs/architecture.md#tests). Each file's `run(d, expect)` must show

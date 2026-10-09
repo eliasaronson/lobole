@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The model is double (docs/conventions.md#the-model-is-double): a primitive
 // stores the position it was given, so a face made from it lies where a
 // plane typed at the same number does; an occurrence's placement and a

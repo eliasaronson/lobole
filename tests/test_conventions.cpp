@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Conventions the codebase relies on, checked against the source itself.
 //
 // These exist because the alternative is a comment, and comments do not fail

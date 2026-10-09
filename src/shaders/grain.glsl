@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Procedural surface figure — wood, plywood, woven composite — shared by the
 // raster (mesh.frag) and ray-traced (closesthit.rchit) shaders so both render
 // an identical result. Everything is evaluated in OBJECT (part-local) space so

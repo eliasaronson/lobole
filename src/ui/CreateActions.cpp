@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "ui/CreateActions.h"
 #include "ui/RendererSync.h"
 #include "ui/SketchToolbar.h" // ClosedProfileSketch (a base flange takes one)

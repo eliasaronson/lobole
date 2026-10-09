@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The baffle's job on the 6090: what it takes to cut the front panel.
 
 One setup, baffle up, and fourteen operations — two flange recesses, two

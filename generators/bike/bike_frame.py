@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The frame set: the green lugged frame, and the fork.
 
 Both are built in WORLD coordinates — the bicycle's own, with the bottom

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // A drawing view's saved projection (v162,
 // docs/drawings/README.md#saved-projections): the curves ProjectView
 // returned, their sources in index space, and a section's cuts, in the

@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Land a worktree branch on main: cherry-pick, build, test, remove the worktree.
 #
 #   tools/merge-branch.sh BRANCH            # test-fast after the build

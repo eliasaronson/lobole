@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The waveguide as a CUTTABLE job on the 6090 router.
 
 `waveguide.py` makes the part; this makes the program. It exists because

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Grade a STEP file against a task's checks. Facts come from bench_oracle.
 
 Every check is BINARY and name-independent: it asks the geometry a question a

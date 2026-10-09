@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A pythonic client for Designer — the same interface the LLM drives, for
 humans in a REPL or notebook (scripting S3).
 

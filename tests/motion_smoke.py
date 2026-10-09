@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Motion studies over the RPC, headless (docs/assemblies/README.md#motion-studies).
 
 A carrier, an arm on a revolute axle, and a stop fixed on the arm's circle:

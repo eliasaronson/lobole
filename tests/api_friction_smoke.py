@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """What the PES pump relies on, over the RPC and through both clients
 (generators/pes_pump/README.md#how-it-moves): a revolve about a custom axis, a helix that
 starts where it is told, a study that names its configuration and reports

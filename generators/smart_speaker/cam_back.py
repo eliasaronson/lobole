@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The BACK of an upright: its divider dado and its face dowels.
 
 A second job per panel, and the same job for both uprights — the baffle and

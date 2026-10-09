@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 find_package(Catch2 3 QUIET)
 
 if(NOT Catch2_FOUND)
@@ -933,6 +936,18 @@ add_test(NAME linkage_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/linkage_gate.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(linkage_gate PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
+
+# Every authored source file says what it is licensed as. The top-level
+# LICENSE is what makes the licence valid, so this is not correctness -- it is
+# the two places a missing notice costs something: packagers (Debian, Fedora,
+# Flathub) check for SPDX identifiers and file bugs when they are absent, and a
+# file with no notice is one whose licence someone copying a function out of it
+# has to guess. Not `reuse lint`, which requires LICENSES/ to be named by SPDX
+# identifier; ours is a distribution bundle named by component and referenced
+# by filename from THIRD_PARTY.md (docs/plans/spdx-headers.md).
+add_test(NAME spdx_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/spdx_gate.py)
+set_tests_properties(spdx_gate PROPERTIES TIMEOUT 60)
 
 # Assemblies A4 exploded views: RPCs, pure-view-state contract, persistence.
 add_test(NAME exploded_smoke

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Glass is see-through in a path-traced still.
 
 `glass` rendered as an opaque, near-white mirror: the ray tracer declared a

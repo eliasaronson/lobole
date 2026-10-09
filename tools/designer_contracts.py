@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Runtime validation of the documented contract JSON Schema subset.
 
 The client-side twin of ValidateInspectionValue (src/remote/InspectionContracts.h):

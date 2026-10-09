@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A quick still is the viewport's own picture, at the size asked for.
 
 `render_still {mode: "quick"}` draws the model with the raster renderers into

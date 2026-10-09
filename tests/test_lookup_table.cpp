@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Project tables and lookup() (docs/variables/README.md#tables): the
 // expression form, the refusals that name what exists, the table's own
 // validation and JSON, a document that carries tables evaluating its

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Stage 9: the final renders of the head. Opens pantilt.dsgn; writes
 scratch/pantilt/renders/ and saves nothing (it poses the head, renders,
 and puts it back).

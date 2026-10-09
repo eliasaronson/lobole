@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A study is a job: it has an id, it dies with its client, and a run of
 inputs it has already answered is not computed again
 (docs/simulation/README.md#studies-as-jobs).

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // CAD Application with working Vulkan + ImGui setup
 // Based on Dear ImGui GLFW+Vulkan example
 

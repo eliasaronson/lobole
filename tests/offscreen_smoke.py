@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """--offscreen: a real Vulkan renderer with no window and no display server.
 
 The claim this suite exists to pin: an agent on a machine with only the

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Pick a scratch --remote port that is free AND unclaimed.
 
 Parallel work in worktrees needs one instance per worktree, and the convention

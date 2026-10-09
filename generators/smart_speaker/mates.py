@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """What holds the assembly together, anchored to geometry.
 
 Everything here was placed by a computed transform first, and the results are

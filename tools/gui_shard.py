@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Partition the GUI suite into balanced shards for gui-tests-xvfb.sh.
 
 Reads the suite's OWN inventory (`lobole --gui-test-list`, one

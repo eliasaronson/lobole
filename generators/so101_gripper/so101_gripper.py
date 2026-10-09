@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Build the SO-101 PG-52 wrist gripper: every part, then the assembly.
 
     python3 generators/so101_gripper/so101_gripper.py --port 8800

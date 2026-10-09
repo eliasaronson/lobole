@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Feature templates over the RPC, headless (docs/modeling/templates.md): a
 bearing seat saved from one part and placed twice on another with different
 values; the refusals, each naming what is accepted, and a refusal changes

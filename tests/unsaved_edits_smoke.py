@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: an edit that is saved but regenerates nothing is UNSAVED.
 
 `ping.dirty` is what the close prompt, the title bar and autosave all ask. It

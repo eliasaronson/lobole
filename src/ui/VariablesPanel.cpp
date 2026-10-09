@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "ui/VariablesPanel.h"
 #include "ui/CatalogActions.h"
 #include "ui/LiteralsPanel.h"

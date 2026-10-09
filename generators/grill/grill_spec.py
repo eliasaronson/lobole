@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Every dimension of the grill, in one table — and where every part SITS.
 
 Derived from the cooking area outwards, the way the real thing is: the grate

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Derived (docs/modeling/derived.md): a copy of another part's
 // bodies inside this part, regenerated from its snapshot and updated on
 // request. The properties pinned here are the ones the page's Tests list:

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: an appearance override on ONE FACE (v164,
 docs/rendering/materials.md#a-face-of-its-own) — set_appearance {element},
 through the real RPC path: the face resolves by name, survives an upstream

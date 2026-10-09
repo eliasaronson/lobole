@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Design requirements: the model, its saved form and its states
 // (docs/requirements/README.md). Measuring goes through the RPC handlers
 // and is tested over the RPC (tests/requirements_smoke.py); this pins what

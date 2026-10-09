@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Build the whole grill against a running Designer instance.
 
     python3 generators/grill/grill.py --port 8800 [--only firebox]

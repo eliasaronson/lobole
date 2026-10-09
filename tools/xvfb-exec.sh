@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # xvfb-exec — run a command on a virtual X display, serialized on the GPU.
 #
 # The gui-labeled ctest entries (gui_smoke, remote_smoke) drive a real

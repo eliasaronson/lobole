@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """What is bolted on: mudguards and their stays, the rear rack, the rear
 reflector and the front brake.
 

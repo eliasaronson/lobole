@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The barley-twist pin as a CUTTABLE 4-axis job on the 6090.
 
 `rolling_pin.py` makes the part; this makes the program.

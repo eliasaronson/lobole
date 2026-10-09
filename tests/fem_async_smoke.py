@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: solving a study on the WORKER THREAD, over JSON-RPC.
 
 Split out of fem_smoke.py on 2026-08-25. This is the slow half — it runs a

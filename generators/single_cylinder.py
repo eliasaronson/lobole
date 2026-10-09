@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A single-cylinder engine, on the SDK — the SDK's acceptance
 test (generators/README.md#single-cylinder-and-air-cooled-engines).
 

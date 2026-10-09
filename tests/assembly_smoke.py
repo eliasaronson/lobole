@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: the assemblies A2 project container, driven headless.
 
 Covers: creating a mixed part+assembly project, placing occurrences that

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A slider-crank on the SDK — the engine's atom, and the motion study's
 acceptance rig (docs/assemblies/README.md#motion-studies).
 

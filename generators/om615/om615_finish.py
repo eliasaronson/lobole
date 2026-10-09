@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """How each part of the engine LOOKS, apart from what it is made of.
 
 A clean factory finish, as the reference photographs show a new OM615: the

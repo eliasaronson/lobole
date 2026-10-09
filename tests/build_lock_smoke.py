@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A merge waits for a running suite; two suites do not wait for each other.
 
 tools/ctest holds a build directory's lock SHARED for as long as its suite

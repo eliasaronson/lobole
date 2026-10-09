@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A spur gear: an involute computed here, a part in the app.
 
     python3 generators/gear.py --module 2 --teeth 24 --thickness 8 --bore 6

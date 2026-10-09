@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Wait for something to finish: a PID to exit, or a LINE to appear in a file.
 # Never a `pgrep -f PATTERN` loop -- the pattern is in the loop's own command
 # line, so it matches itself and waits forever (33 minutes, once), and the

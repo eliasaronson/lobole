@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """What the yoke carries: the camera's load at 3 g, followed down its path.
 
 camera -> cradle -> tilt shaft -> the two arm bearings, and the worm pair:

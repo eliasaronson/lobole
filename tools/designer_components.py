@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Explicit ownership and staged updates for single-part Python generators.
 
 The application owns the manifest and undoable apply. This module plans builder

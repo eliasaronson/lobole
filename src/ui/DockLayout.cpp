@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "ui/DockLayout.h"
 #include "ui/OpenJob.h"
 #include "ui/PanelTitles.h"

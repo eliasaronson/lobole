@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The head's numbers: the load, the worm pair, the shafts and the bearings.
 
 Every size the parts are built from is a PROJECT variable declared here, in

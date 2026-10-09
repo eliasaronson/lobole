@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The setup sheet's page (docs/cam/setup.md#the-setup-sheet): a PDF a
 // viewer opens -- every object where the xref says it is, as many pages as
 // the tables take, text a base-14 font can draw. Built in every

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A path-traced still against an outdoor sky (`render_still backdrop: sky`).
 
 Every still used to be lit and backed by one indoor studio HDRI. `sky` is a

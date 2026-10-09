@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Declared clearances live in the document and re-check (peer-survey-plan W3).
 
 The drone's `verify()` says "prop tip to arm is at least 2 mm" in python, and

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Compare two arms from a sweep, with an interval instead of a vibe.
 
     python3 benchmarks/analysis/compare.py results/<dir> --a full --b rpc-only

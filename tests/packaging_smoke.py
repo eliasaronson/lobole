@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Every claim in pyproject.toml resolves to something real.
 
 The install (`uv tool install .`, `uvx --from git+…`) happens on machines

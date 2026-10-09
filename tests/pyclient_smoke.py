@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Model a bracket through the pythonic client (scripting S3).
 
 Usage: pyclient_smoke.py <path-to-designer-binary>

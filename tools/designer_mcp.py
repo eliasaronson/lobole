@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """MCP server for Designer — drive a running instance over its JSON-RPC remote.
 
 Design: docs/scripting/mcp.md. Register this server with an MCP client:

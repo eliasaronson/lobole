@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Sheet metal over the RPC, headless (docs/sheetmetal/README.md#rules-the-stock-a-part-is-cut-from).
 
 The rules first (a gauge is a thickness PER MATERIAL, and an unstocked one is

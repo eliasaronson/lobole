@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # headless-preview — a Designer instance that renders WITHOUT a visible window
 # or your display session, for agents and CI to drive + screenshot themselves.
 #

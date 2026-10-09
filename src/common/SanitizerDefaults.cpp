@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // What the sanitizers should do here, compiled INTO the binary — built when
 // ENABLE_SANITIZERS=ON (ASan + UBSan) or ENABLE_TSAN=ON.
 //

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The half-dozen moves a bicycle is made of.
 
 A bicycle is tubes that meet at angles no axis is square to, and rims and

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: the sheet furniture a shop drawing needs (v147).
 
 A section view through a bored plate (hatching, its caption, the lettered

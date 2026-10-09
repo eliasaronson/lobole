@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # build-lock.sh -- the build directory's lock, sourced by the scripts that
 # change a build tree or run what it built.
 #

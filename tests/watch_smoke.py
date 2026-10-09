@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The watch generator builds a watch that keeps time, headless.
 
 generators/watch/ is a 21,600 vph automatic with small seconds

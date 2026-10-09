@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Build, holding the build directory's lock: the one way to build here.
 #
 #   tools/build.sh                       # build/: designer designer_tests

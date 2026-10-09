@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Embeds a compiled SPIR-V binary as a C++ byte array header, so fem_gpu and
 # its tests need no runtime shader path (the renderer .spv files are loaded
 # relative to the app executable, which test binaries don't share).

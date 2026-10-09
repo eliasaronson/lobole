@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Dimensions for the 5-inch FPV freestyle quadcopter.
 
 Everything the model is built from, in one place, in millimetres and

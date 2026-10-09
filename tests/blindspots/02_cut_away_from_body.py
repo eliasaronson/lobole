@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Blind spot: extrude follows +plane-normal, so a cut sketched on a top
 face whose plane normal points OUT of the body extrudes into empty air.
 The profile is exactly where the agent thinks it is — only the direction

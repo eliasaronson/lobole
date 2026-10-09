@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The roll-up rules are the whole point of a receipt, so they are gated
 // (core/Receipt.h, docs/conventions.md#a-verdict-says-how-it-knows).
 //

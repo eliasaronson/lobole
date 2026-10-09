@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A parameter must survive the script boundary (docs/scripting/sdk.md#parameters-carry-their-expression).
 
 Thirteen of sixteen generators declared no document variables at all, so their

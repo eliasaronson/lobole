@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 
 // On-device preconditioned Conjugate Gradient over the matrix-free stiffness

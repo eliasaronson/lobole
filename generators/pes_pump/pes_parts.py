@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """One builder per part of the PES4M pump. Every builder takes the SDK app
 and returns the finished Part; every number comes from pes_spec."""
 import math

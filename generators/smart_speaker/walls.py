@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The six MDF panels, each drawn about its own centre.
 
 Every wall is drawn in the frame the assembly places it in, so an occurrence

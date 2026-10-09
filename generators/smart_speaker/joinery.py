@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Every dowelled joint in the carcass, from one rule.
 
 The panels used to drill their own dowels independently and the holes did not

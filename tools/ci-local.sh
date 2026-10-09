@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Run the CI jobs on this machine, so a red build costs a coffee instead of a
 # push. Everything here is DERIVED from .github/workflows/ci.yml — the package
 # list, the container images, the excluded tests — so the two cannot drift.

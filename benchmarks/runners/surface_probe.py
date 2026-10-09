@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """B2 — what surface types does each Designer operation actually leave?
 
 The `surfaces` check kind (grade.py) asks HOW a part was built by counting the

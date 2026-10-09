@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Record per-GUI-test wall times from a serial suite run.
 
 Reads the suite's stdout, writes "seconds<TAB>category/name" to the file named

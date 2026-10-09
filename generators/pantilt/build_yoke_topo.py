@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Stage 6: the yoke under load, and what topology made of it. Opens
 stages/assembly.dsgn, saves stages/yoke_topo.dsgn (the head with the
 studies, the solid yoke, the envelope and its topology result, and the print

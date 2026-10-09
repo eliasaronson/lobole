@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Blind spot: hand-derived quaternions. The classic slip is forgetting
 the half-angle — writing [0, sin(90), 0, cos(90)] for "90 degrees about
 Y" and getting a 180-degree rotation. On a symmetric part it is invisible;

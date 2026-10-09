@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Deep-groove ball bearings as generated standard parts
 // (docs/parts/README.md#bearings): the ISO 15 table, the generated body, and
 // placing, mating, fitting and checking one in an assembly.

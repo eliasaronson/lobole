@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Cycloidal watch gearing: epicycloidal addenda on radial flanks.
 
 Why not involute (generators/gear.py): the gates in watch_spec proved it

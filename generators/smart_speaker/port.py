@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The reflex port: a straight tube with a flare on each end.
 
 The tube is exactly what the parameters say — pi/4 (105^2 - 100^2) x 250 is

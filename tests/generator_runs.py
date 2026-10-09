@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The big generators, run as tests: each one's cheapest checking stage.
 
     generator_runs.py <path-to-designer-binary> <generator> <budget-seconds>

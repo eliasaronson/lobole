@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Every study kind's result is saved with the project and reused after a
 reopen (docs/simulation/README.md#studies-as-jobs).
 

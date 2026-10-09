@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """T-nuts and dowels, seated in the holes they belong to.
 
 Both are drawn from the holes they go in, so a change to `plug_dia` or

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #ifdef HAVE_CAM
 
 // The setup and the job document: fixture frames, the indexed 4th axis,

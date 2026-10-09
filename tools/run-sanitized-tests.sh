@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Run the headless unit tests under ASan + UBSan with this project's
 # dependency-noise workarounds baked in (see tools/sanitizer-env.sh for what
 # is suppressed and why).

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The drivetrain: crankset, pedals, chain and chainguard.
 
 The crankset turns, so it is built on ITS OWN AXIS — local Z along the bottom

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Restoring a window to a screen that may no longer exist.
 //
 // The saving half is easy; this is the half that strands people. Unplug the

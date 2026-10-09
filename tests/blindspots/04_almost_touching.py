@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Blind spot: a sub-millimetre gap is invisible in any render and passes
 every clash-only check — the checks pass EXACTLY BECAUSE nothing touches.
 Members meant to be bolted end up floating next to each other.

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Topology you can build from
 // (docs/topopt/README.md#topology-you-can-build-from): load cases, keep-outs,
 // the connectivity filter, a static study of the optimised shape, and the split

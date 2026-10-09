@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The frame: members along paths, coped where they meet.
 
 A member is a bent path and a pipe swept along it, which is what a bender and

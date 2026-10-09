@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 // Flexible sub-assemblies in the GUI (v129,
 // docs/assemblies/README.md#flexible-sub-assemblies): the panel and the RPC

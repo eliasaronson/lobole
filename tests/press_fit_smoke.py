@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: a press fit is not a clash, in every contact check.
 
 A 6005 bearing in a housing bore modelled at its K7 seat's interference

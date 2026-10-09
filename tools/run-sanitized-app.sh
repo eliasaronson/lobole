@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Run the WINDOWED app under ASan + UBSan with this project's dependency-noise
 # workarounds. Run on your own display (DISPLAY set) — watch the terminal for
 # "ERROR: AddressSanitizer" while you exercise modeling / sketch / assembly /

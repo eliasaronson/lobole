@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The cockpit: bars, stem, grips, lever, bell, seatpost and saddle.
 
 Everything here is drawn in WORLD coordinates and carries a "seat" frame at

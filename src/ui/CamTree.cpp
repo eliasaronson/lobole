@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The CAM panel: the job as a Model tree
 // (docs/ui/panels.md#cam-job-tab-the-cam-panel).
 //

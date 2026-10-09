@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // DIN 471 / DIN 472 retaining rings as generated standard parts, and the
 // groove one sits in (docs/parts/README.md#retaining-rings): the table
 // against Seeger-Orbis's data charts, the ring's body, the groove feature and

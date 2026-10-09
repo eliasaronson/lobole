@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # worktree-build — bootstrap a build in a git worktree, for running agents /
 # workstreams in parallel on isolated copies of the repo.
 #

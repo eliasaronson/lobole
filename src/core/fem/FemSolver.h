@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 
 // Linear-static FEM solver: tet10 isotropic elasticity on Eigen. GUI-free core,

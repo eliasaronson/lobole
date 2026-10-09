@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A reference image marked `show_always` is in a quick still.
 
 Underlays drew only while their sketch was being edited, so a model could

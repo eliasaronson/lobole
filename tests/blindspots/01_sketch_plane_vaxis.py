@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Blind spot: the sketch-plane V axis is normal x uAxis, NOT uAxis x
 normal. An XZ plane with normal +Y and uAxis +X maps sketch +v to world
 -Z, so a profile authored "above" the part lands behind it and a cut

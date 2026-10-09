@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #version 450
 // One Chebyshev step (Saad Alg. 12.1), given Ap = K * d_prev:
 //   rc -= D^-1 Ap            (inner residual in the D^-1 K operator)

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The cold half: the cart that carries the firebox, and the control panel.
 
 Handed, and drawn in place. The two side panels are mirror parts rather than

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """What the run refuses to save without.
 
 Everything here is MEASURED on the assembled bicycle, not recomputed from the

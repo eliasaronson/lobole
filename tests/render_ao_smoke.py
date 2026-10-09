@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Screen-space rendering invariants, on a real GPU.
 
 The renderers are otherwise untested: CI has no GPU, and `gui_smoke` checks

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #version 450
 // Multigrid prolongation-and-correct z += P e (GPU3): one thread per mesh
 // node, u = t + omega x d from its aggregate's 6 coarse DOFs. Each free DOF

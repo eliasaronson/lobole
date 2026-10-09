@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # profile — where the CPU time actually goes.
 #
 # An occasional audit tool, like tools/coverage.sh and ci-local.sh --asan: NOT

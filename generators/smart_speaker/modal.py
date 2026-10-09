@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Panel modes of the cabinet — what the box itself adds to what you hear.
 
 A loudspeaker panel that resonates radiates, and the frequencies it does that

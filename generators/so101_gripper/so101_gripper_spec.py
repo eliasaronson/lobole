@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """SO-101 wrist gripper (PG-52) — the numbers, in one place.
 
 Tool frame, and everything in this design is expressed in it:

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #pragma once
 
 // FEM tetrahedral meshing (Netgen, gated HAVE_NETGEN). GUI-free core code.

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A motion study films to every format, and the refusals refuse.
 
 `export_motion_video` (docs/assemblies/README.md#motion-video) plays the

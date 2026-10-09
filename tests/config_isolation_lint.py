@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A test that launches Designer must give it its own XDG_CONFIG_HOME.
 
 `set_settings` persists immediately — deliberately, because a --headless

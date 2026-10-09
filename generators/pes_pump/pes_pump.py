@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A Bosch PES4M inline injection pump (Mercedes OM615, L306D) that MOVES:
 four roller tappets and plungers lifted by the camshaft in firing order
 1-3-4-2, the control rack turning every plunger's helix through its control

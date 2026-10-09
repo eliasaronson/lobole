@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Run the Designer agent benchmark: every arm x task x repetition, graded.
 
     nix-shell shell.nix --run "python3 benchmarks/run.py --reps 3"

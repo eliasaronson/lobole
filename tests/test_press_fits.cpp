@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Press fits (docs/tolerances/README.md#press-fits): an overlap two size
 // bands allow is relieved by the contact check, exactly up to the fit's
 // maximum interference; past it, with no band, with a band on the wrong

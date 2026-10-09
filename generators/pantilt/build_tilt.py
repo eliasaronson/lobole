@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Stage 3: what turns about the tilt axis -- the tilt wheel on its shaft,
 the cradle (the camera plate) and the camera. Opens stages/worms.dsgn,
 saves stages/tilt.dsgn. The camera screw is bought, an ASME B18.3 standard

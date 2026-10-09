@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Physical accessory connections: contact, pocket section and missing-hardware gates.
 
 Run through nix: python3 tests/om615_mounting_smoke.py build/lobole

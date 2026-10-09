@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The LGPL-family dependencies are linked DYNAMICALLY, and nothing arrives undocumented.
 
 Why this is a test and not a comment in CMakeLists.txt:

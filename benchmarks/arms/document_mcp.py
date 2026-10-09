@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The direct-emission arm's whole world: one tool that takes a document.
 
 This exists to ask the question vcad's own benchmark answers against them, and

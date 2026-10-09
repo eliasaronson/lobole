@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Motion studies (docs/assemblies/README.md#motion-studies): one mate DOF
 // driven over a range, the assembly solved at every sample, every pair checked.
 // The gate: "rotate through the range, confirm zero collision at

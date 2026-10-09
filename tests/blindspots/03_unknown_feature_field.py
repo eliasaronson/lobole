@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Blind spot: a plausible-but-wrong feature field used to be silently
 ignored — Box accepted mode:"add", dropped it, and created a separate
 body; the failure surfaced three calls later as a null-mass BOM. (A Box

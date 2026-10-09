@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A four-cylinder OM615-shaped diesel: 1988 cc, five main bearings, a single
 overhead camshaft on a duplex chain, rocker arms, and a pre-chamber per
 cylinder — built complete, down to the bearing shells and the seals.

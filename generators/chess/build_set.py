@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The set assembled, its bill of materials, and the pieces' drawing.
 
     python3 generators/chess/build_set.py --port N

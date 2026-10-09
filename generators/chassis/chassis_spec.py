@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The numbers the FS chassis is built from.
 
 The FRAME is a team's own CAD: `fs_chassis_frame.json`, read out of its

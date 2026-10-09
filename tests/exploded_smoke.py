@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: A4 exploded views, headless over JSON-RPC.
 
 Checks the RPC surface (add/remove/list/set_explode_step/auto_explode/

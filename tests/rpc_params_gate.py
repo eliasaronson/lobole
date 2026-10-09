@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Gate: every RPC method's `describe` parameter list matches its handler.
 
 The vocabulary a method accepts is decided by which keys its handler READS —

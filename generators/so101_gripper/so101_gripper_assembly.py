@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Place the gripper's parts in an assembly, at a given link angle.
 
     python3 generators/so101_gripper/so101_gripper_assembly.py --port 8800 [--theta 0] [--create]

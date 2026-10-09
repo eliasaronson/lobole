@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The Derived feature over the RPC, headless (docs/modeling/derived.md):
 a jaw derives a servo as a ghost; the refusals in words; stale reported and
 never auto-resolved; update_derived as one undo step; derive_occurrence in

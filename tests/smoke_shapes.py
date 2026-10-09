@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """World-aligned test blocks, built the way the app takes primitives now.
 
 A Box, Cylinder or Sphere is placed `on` something and stored as a Sketch

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Every edit that is SAVED makes the project read unsaved — including the
 // ones that regenerate nothing and so leave Version() where it was: a
 // tolerance, the units, the tube or print process, a study, a configuration

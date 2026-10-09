@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: a drawing request waits for its projection off the frame.
 
 On an --offscreen instance (a frame loop, unlike --headless, where the

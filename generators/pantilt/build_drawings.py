@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Stage 8: the drawings. Opens stages/cam.dsgn and saves the head's one
 project, scratch/pantilt/pantilt.dsgn: parts, assembly, requirements, the
 CAM job and the drawings. The sheets go to scratch/pantilt/drawings/ as PDF

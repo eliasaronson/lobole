@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #version 450
 // s[slot] += dot(a, b): tree reduction in shared memory, one float atomicAdd
 // per workgroup. The host zeroes the target slot first.

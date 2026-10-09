@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Gate: a dimensional RPC parameter says what unit it is in.
 
 Every unit bug this project has shipped is a BOUNDARY bug — a number crossing

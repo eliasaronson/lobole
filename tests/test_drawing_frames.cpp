@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The pan/tilt round's drawings (E): feature control frames on datum
 // features, values written along their lines, a placed Ø across two walls,
 // balloons laid out so no two leaders cross, and the v151 golden

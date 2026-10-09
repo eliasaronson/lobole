@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A file handle to cut on the 6090's 4th axis.
 
 The dogfood for continuous 4-axis (docs/cam/rotary.md#continuous-surface_rotary). It is a real

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: the printing process allowance over RPC, headless.
 
 docs/tolerances/README.md#printed-parts. What only the RPC layer shows: a part

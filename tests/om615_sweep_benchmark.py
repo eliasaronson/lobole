@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Compare full contact and volume-only sweeps on an already open engine.
 
 Usage: python3 tests/om615_sweep_benchmark.py SCRATCH_PORT [OUT.json]

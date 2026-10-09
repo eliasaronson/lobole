@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Flexible sub-assemblies (v129,
 // docs/assemblies/README.md#flexible-sub-assemblies): the expansion that lets
 // a placed sub-assembly's own mechanism move in its parent, around a solver

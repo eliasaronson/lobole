@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The committed icon font is what tools/icons/build_icon_font.py makes.
 
 The script draws Designer's CAD glyphs and writes deps/fonts/designer-icons.ttf

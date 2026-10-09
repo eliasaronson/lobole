@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The typed MethodDoc `params` column, read in Python.
 
 The twin of src/remote/RpcContract.{h,cpp}

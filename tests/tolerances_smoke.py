@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: tolerances and fits over RPC, driven headless.
 
 Covers what only the RPC layer can show: a tolerance surviving as design

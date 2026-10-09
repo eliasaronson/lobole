@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Ellipses, elliptical arcs and splines as solved curves
 // (docs/sketching/README.md#ellipses-and-splines). Every case checks the
 // GEOMETRY the solve leaves -- a point on the curve, directions that agree at

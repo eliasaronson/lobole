@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A Formula Student chassis: a steel space frame, and the order to make it.
 
     python3 generators/chassis/chassis.py --port <port>

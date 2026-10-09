@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #version 450
 // Element-assembled stiffness diagonal for the Jacobi preconditioner:
 // diag[g] += scale_e * Ke0_e[t][t] for each of the element's 30 DOF. Same

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The literals lint and the extract_variables planner
 // (docs/variables/README.md#literals-that-should-be-expressions).
 #include <catch2/catch_test_macros.hpp>

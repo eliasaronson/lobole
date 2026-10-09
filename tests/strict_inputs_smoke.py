@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: V2 strict feature inputs + regen digests + BOM warnings.
 
 Covers: unknown feature-JSON fields error on the RPC path (the class the

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Replay a recorded Designer session (--record JSONL) against a live
 instance — every reported bug becomes a replayable regression (S4).
 

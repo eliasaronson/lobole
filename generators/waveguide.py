@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A constant-directivity waveguide for the Alpair 7MS, to cut in 3D.
 
 The dogfood for 3-axis surfacing (docs/cam/operations.md#3-axis-surfacing). It is a real part

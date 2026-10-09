@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // A sketch plane and the geometry on it are double precision, end to end
 // (docs/sketching/README.md#plane): a plane typed at a face's height lies ON
 // that face, a solve writes back what it solved, and a save loads back the

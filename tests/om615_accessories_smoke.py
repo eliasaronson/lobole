@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Real accessory B-Reps and staged appearance updates, without an engine sweep.
 
 Run through nix: python3 tests/om615_accessories_smoke.py build/lobole

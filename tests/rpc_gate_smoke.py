@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The part gate has to agree with the handlers it gates.
 
 `kNoPartDoc` (RemoteServer.cpp) decides which RPCs refuse on an assembly or

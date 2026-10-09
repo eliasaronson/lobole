@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The light rig follows the camera: the back of a part is lit like its front.
 
 The viewport's rig was fixed in the world, with the key in front of the home

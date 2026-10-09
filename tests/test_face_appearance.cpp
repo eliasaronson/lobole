@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // A face's own appearance (v164,
 // docs/rendering/materials.md#a-face-of-its-own): keyed by element name on the
 // body's creating feature, resolved to a face index at every regeneration,

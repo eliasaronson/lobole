@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "core/cam/CamMount.h"
 #include "core/cam/CamNames.h"
 #include "core/cam/CamRotaryFeed.h"

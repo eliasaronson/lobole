@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Sheet furniture (v147): section views, parts lists, balloons, datum
 // symbols, the title block's derived rows, cosmetic threads in callouts, and
 // what the pan/tilt base plate's drawing found wrong on the way

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Gate: every read-only RPC says what it RETURNS, and says it truthfully.
 
 `rpc_params_gate` keeps the PARAMETER contract honest, and it is why a wrong

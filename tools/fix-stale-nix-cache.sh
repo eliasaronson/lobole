@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # A nix GC collects the store paths a CMake cache was configured against, and
 # every build tree here goes stale at once. The symptoms do not name the cause:
 #

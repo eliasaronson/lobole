@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The printing process allowance (docs/tolerances/README.md#printed-parts):
 // the table, its refusals, where the process lives on a part, and the
 // sentences the fit and thread reports are built from.

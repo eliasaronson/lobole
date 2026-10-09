@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """What every grill module needs: sheet parts, edge picks, blanks, checks.
 
 The point of picking edges BY GEOMETRY rather than by stored name is that a

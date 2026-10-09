@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Headless unit tests for the ui/ actions layer.
 //
 // THE PATTERN THIS FILE ESTABLISHES

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Feature templates (docs/modeling/templates.md): a composite saved once as
 // data and placed as one `Template` feature that expands, in its own
 // namespace, into the features it was saved from. Pinned here: a seat saved

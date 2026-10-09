@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The display transform: scene radiance -> sRGB-encoded display value.
 // The GPU copy of src/render/ToneCurve.h, which says why each step is there
 // (docs/rendering/README.md#tone-mapping); the path-traced still applies the

@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The hot half: the firebox pan, the lid, and everything welded inside it.
 
 Drawn WHERE IT LIVES. The firebox's own coordinates are the world's, so a

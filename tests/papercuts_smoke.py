@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: V5 ergonomics papercuts — set_camera eye, occurrence
 rotate {axis, angle_deg}, per-feature param docs in describe, and the honest
 render_still assembly error.

@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """An automatic mechanical watch — time only, with small seconds.
 
     python3 generators/watch/watch.py [--port N] [--out DIR]

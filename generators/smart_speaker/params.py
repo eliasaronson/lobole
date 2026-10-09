@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The one parameter table, and the frame everything is measured in.
 
 The ported document carried 44 parameters SIX times — a part-scoped copy in

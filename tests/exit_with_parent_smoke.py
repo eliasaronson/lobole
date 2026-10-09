@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """An app a test launched dies with the test, even one killed by SIGKILL.
 
 Two `lobole --headless --remote 0` instances were found 16 hours after

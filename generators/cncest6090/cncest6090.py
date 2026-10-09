@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """CNCest layout and provisional Z axis. Only spindle_d=80 is user confirmed.
 
 All dimensions are project variables. Sketch coordinates, offsets, extrusions

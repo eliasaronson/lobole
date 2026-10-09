@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // A study on an assembly (docs/simulation/README.md#assembly-studies): one
 // occurrence meshed, its rigid neighbours clamped where they touch it. The
 // technique is P0's (tests/test_fem.cpp, "a mesh spans two solids only when

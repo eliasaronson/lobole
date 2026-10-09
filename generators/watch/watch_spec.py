@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Dimensions for an automatic mechanical watch — time only, small seconds.
 
 Everything the model is built from, in millimetres, in one place, and in the

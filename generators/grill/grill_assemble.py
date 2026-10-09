@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Put the grill together — and JOIN it.
 
 Every occurrence is placed by a mate to a socket on the part that carries it,

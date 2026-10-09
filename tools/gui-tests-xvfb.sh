@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # gui-tests-xvfb — run the GUI test suite on a virtual X display, in parallel.
 #
 # Why Xvfb: on the real display, the hidden test window is throttled to ~1 fps

@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // bench_oracle — read an exported STEP file, print name-independent geometric
 // facts as JSON. Nothing else.
 //

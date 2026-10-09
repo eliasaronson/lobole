@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #version 450
 // Chebyshev preconditioner init (GPU2, Saad Alg. 12.1 on A = D^-1 K):
 // inner residual rc = b = D^-1 r, first correction d = b/theta, z = d.

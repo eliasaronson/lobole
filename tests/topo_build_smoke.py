@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: topology you can build from (docs/topopt/README.md
 #topology-you-can-build-from), headless over JSON-RPC.
 

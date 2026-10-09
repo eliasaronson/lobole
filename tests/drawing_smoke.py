@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: the drawings D1 sheet spine, driven headless.
 
 Covers: creating a drawing tab (a third document kind) with an initial sheet

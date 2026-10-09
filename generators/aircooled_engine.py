@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """An air-cooled single, built from SKETCHES ONLY — no Box, Sphere or Cylinder.
 
 The same mechanism as generators/single_cylinder.py (86 x 86 bore and stroke,

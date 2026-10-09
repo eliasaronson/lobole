@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Named datum frames over the RPC, headless (docs/assemblies/solver.md#connector-frames).
 
 The property under test is the one the SO-101 gripper dogfood lacked: a

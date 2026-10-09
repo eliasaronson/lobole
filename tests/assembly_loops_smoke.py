@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: A6 mate LOOPS, driven headless over JSON-RPC.
 
 The A3 pass reported every loop as "over-constrained (mate loop conflict)" and

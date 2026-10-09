@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """fit_fastener and check_fasteners agree about where a joint ENDS
 (docs/parts/README.md#deriving-a-fastener-from-a-hole).
 

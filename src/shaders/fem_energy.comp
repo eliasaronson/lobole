@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #version 450
 // Per-element strain energies at full modulus
 // (docs/topopt/README.md#the-gpu-solver): se[e] = ue^T Ke0 ue, the SIMP sensitivity

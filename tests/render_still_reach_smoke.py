@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A path-traced still must reach the whole part, however big it is.
 
 The ray tracer's rays carried a hard-coded far limit of 10000 in raygen.rgen,

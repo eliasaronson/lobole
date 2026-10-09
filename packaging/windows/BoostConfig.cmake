@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # Minimal BoostConfig for the Windows cross build. PlaneGCS uses Boost headers
 # only, but CMake 3.30+ dropped the bundled FindBoost, so find_package(Boost)
 # needs a package config that defines the Boost::boost interface target. We ship

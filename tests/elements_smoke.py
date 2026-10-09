@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """list_elements by what made a face, headless (docs/modeling/toponaming.md):
 a pocket's floor and walls, a hole's bores, a pattern's copies and a Derived
 copy's faces through `via`, each asked for by feature and role; the refusal

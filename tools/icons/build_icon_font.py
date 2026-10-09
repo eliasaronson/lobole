@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Designer's own icon font: CAD glyphs Font Awesome has no vocabulary for.
 
 The icons are GEOMETRY, defined below with shapely: strokes are buffered into

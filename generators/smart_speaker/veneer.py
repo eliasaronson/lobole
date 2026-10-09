@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The plywood coverings, as their own parts, referencing the walls.
 
 They used to be an extra body inside each wall — a second solid in a part

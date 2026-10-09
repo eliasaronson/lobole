@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: check_literals and extract_variables over RPC, headless.
 
 docs/variables/README.md#literals-that-should-be-expressions. A part built

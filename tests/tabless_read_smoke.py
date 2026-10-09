@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A READ does not switch tabs (docs/scripting/rpc.md#reads-name-their-part).
 
 The app holds exactly one live document: a PartSlot's `doc` is moved into

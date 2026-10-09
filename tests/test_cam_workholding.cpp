@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Workholding (docs/cam/setup.md#workholding-fixtures): fixtures the verifier
 // can see. Every case posts a real program -- written by hand where the point
 // is a move no strategy would emit -- and reads the verdict, so what is

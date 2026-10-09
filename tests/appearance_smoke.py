@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: the v54 appearance override — set_appearance RPC,
 inheritance from the material, persistence, clearing, validation, and the
 no-geometry-rebuild guarantee (appearance is stripped from the regen hash).

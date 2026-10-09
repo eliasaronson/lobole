@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The Designer SDK — geometry references instead of transcribed numbers.
 
 Two layers, and the split is the whole design:

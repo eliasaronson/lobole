@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #include "femgpu/TopoMultigrid.h"
 
 #include "femgpu/TopoCgSolver.h" // MgGpuData

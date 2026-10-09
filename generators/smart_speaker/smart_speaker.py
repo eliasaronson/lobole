@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The smart_speaker cabinet, built from its parameters.
 
     python3 generators/smart_speaker/smart_speaker.py [--port N]

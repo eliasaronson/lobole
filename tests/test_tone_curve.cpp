@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The display transform (render/ToneCurve.h) and its GPU copy
 // (src/shaders/tonecurve.glsl): the viewport and the path-traced still must
 // turn one radiance into one byte, and that byte must be the sRGB encode of

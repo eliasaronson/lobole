@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # The pan/tilt head, from nothing: every part, then the assembly with its
 # checks, studies and renders, the base plate's CAM job on the 6090, the
 # drawings and the final renders. What it makes goes to scratch/pantilt/:

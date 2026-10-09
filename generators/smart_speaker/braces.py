@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The two internal braces, recovered from the export's own sections.
 
 They used to be re-drawn to a rule and stated as such — "the exact mouldings

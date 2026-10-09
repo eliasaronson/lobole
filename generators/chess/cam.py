@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """CAM for the chess set: one job per blank, and the jig and board jobs.
 
     python3 generators/chess/cam.py --port N [--only blank_pawns ...]

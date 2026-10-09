@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Give the assembly its joints, then drive them.
 
     python3 generators/so101_gripper/so101_gripper_motion.py --port 8800            # mate, solve, study, run, export

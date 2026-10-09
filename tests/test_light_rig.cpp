@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The studio light rig (core/LightRig.h,
 // docs/rendering/README.md#the-light-rig).
 //

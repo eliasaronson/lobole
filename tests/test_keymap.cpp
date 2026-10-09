@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // Keymap: the chord parser, the defaults table and the conflict gate
 // (docs/ui/keybindings.md). These run headless because the metadata lives
 // in core — designer_tests links designer_core alone, so a broken default

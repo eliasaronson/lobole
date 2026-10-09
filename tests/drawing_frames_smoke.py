@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: the pan/tilt round's drawings (v151).
 
 On a bored plate's sheet: datum features A and B, a perpendicularity frame

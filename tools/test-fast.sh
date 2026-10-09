@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 # The headless suite minus the long numeric gates — the inner loop.
 #
 #   tools/test-fast.sh            # ~65 s, against ~110 s for the full suite

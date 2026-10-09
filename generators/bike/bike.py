@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A roadster bicycle, modelled from three photographs of the owner's.
 
     python3 generators/bike/bike.py [--port N] [--out DIR]

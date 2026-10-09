@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Integration test: C2 units algebra, driven headless over JSON-RPC.
 
 Checks unit-suffixed expressions resolve end-to-end through the document:

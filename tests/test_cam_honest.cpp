@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 #ifdef HAVE_CAM
 
 // CAM honest about what the model says and the cut cannot see: a toleranced

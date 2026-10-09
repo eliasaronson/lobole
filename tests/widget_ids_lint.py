@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Two widgets in one window must not answer to one ImGui id.
 
 ImGui derives a widget's id from the part of its label after "###", so

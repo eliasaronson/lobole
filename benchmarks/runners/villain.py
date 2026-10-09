@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The villain arm: build a box of the task's own bbox for EVERY task.
 
 `reference.py` is the upper control — a task whose by-hand build cannot pass

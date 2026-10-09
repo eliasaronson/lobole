@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The parts nobody here makes: two drivers, the amplifier, the power brick.
 
 They arrive as STEP from `scratch/smart_speaker/bought/`, which

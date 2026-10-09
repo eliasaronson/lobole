@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """Typed RPC contracts against a running app (docs/scripting/rpc.md#typed-contracts).
 
 - The server's `request_schema` for every typed or parameterless row equals

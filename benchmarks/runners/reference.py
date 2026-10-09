@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """The reference arm: build every task by hand, grade it, report.
 
 This is not a competitor — it is the harness's own self-test and the ceiling

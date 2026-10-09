@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
 // The text sketch entity (docs/sketching/README.md#text): layout against the
 // bundled fonts' own numbers, persistence, refusals, profiles, naming and the
 // solver's view of the label's box.
