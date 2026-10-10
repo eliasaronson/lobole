@@ -85,7 +85,7 @@ from a default are written, so a later change to a default still reaches
 anyone who never touched it. An unknown id in the file survives a round trip;
 a bad chord in a hand-edited file loses that one binding, not the keymap.
 
-**Edit > Preferences > Keyboard** is its own renderer over `Keymap` (a keymap
+**Edit > Preferences > Keyboard** is its own page over `Keymap` (a keymap
 is not a scalar settings row): one collapsing node per context, a filter over
 name and key, click-to-capture (Backspace clears, Escape cancels), an inline
 warning naming what a chord collides with, and Reset per row, per context and

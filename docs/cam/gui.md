@@ -454,12 +454,16 @@ transport opens when that lands, saying "Starts from what 'Turn' left"
 
 ## Preferences › Machines
 
-The machine store's editor: New / Duplicate / Delete, a list, and an editor
+The machine store's editor, a library page
+([settings.md](../ui/settings.md#library-pages)): the list of machines on the
+left under New / Duplicate / Delete, and the selected one's form beside it,
 whose every edit writes the file (a rename moves it): name, work area X, Y, Z
 (a partly typed area is kept), post, arcs, 4th axis, how the rotary is
 installed and its chuck and tailstock
 ([rotary.md](rotary.md#how-the-rotary-is-installed)), rapid feed, the A
 axis's top speed, and the tool library. Numeric fields go through `ui::ExprInput`.
+The CAM panel's `Preferences › Machines` buttons open the window on this page
+(`ui::OpenPreferences`).
 
 ## Tests
 

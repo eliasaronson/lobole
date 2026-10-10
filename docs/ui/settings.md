@@ -58,9 +58,11 @@ must be unit-testable. Defaults live in the struct. Exactly one live copy
 exists, `AppState::settings`; nothing else caches one.
 
 One table, `kFields`, drives the field list, the JSON round trip and the
-window rows, so adding a setting is one row. Rows are grouped by section and
-the grouping is load-bearing (the window draws one header per section); a
-test holds it.
+window rows, so adding a setting is one row. A row's `section` is the
+Preferences page it is drawn on; a section string nobody has used yet is a new
+page, with no change to the window. The window no longer needs a section's
+rows together, but the table should read the way it draws, and a test holds
+that.
 
 Two members are deliberately not `kFields` rows: `keys` (the keymap
 overrides, [keybindings.md](keybindings.md)) and `window` (the main window's
@@ -113,21 +115,77 @@ a throwaway surface.
 
 Edit > Preferences (`Ctrl+,`) opens one floating window,
 `Preferences###SettingsWindow` — not a dock tab; it is not part of the
-workspace. One collapsing header per section, generated from the table, then
-two that are not table rows: **Keyboard** ([keybindings.md](keybindings.md))
-and **Machines** — the user's CAM machine profiles, a list of structs each
-stored as its own file in `~/.config/lobole/machines`, written on every
-edit; a CAM setup picks one and keeps a copy. At the foot: "Reset all to defaults"
-(`###set_reset_all`, which keeps unknown keys) beside the config file's path.
+workspace. It shows one page at a time: a category list on the left, the
+selected page on the right under its title, and a footer under both.
+
+**The pages** come from `ui::PreferenceCategories()`, the window's only
+statement of their order:
+
+- one per table section, in the order `kFields` first names it — Appearance,
+  Performance, Sharing, General — each listing its rows;
+- then the hand-written pages in `kHandPages` (SettingsWindow.cpp): **Keyboard**
+  ([keybindings.md](keybindings.md)) and **Machines**, the user's CAM machine
+  profiles.
+
+Each row in the list is a glyph and the name (`###cat_<name>`). A section's
+glyph comes from a small table by name; an unknown section gets the generic
+gear rather than none. The page shown is `AppState::settingsCategory`,
+session state: the window reopens on the page it was left on until the app
+closes. `ui::OpenPreferences(state, "Machines")` opens it on a page, to the
+front — the CAM panel's `Preferences › Machines` buttons use it.
+
+**Search.** A field above the category list (`###set_search`) filters by row
+label and blurb. While it holds text the page side shows the matching rows of
+every table page, each group under its page's name, and the rows are the real
+controls. A library page matches by item name, and a match opens that item on
+its page (`###find_<page>_<name>`); a hand-written page whose name matches is
+offered as a row that opens it (`###find_page_<name>`), so "keyboard" is not a
+dead end.
+
+**The footer.** `Reset <page> to defaults` (`###set_reset_category`,
+`settings::ResetSection`) on a table page — it leaves every other page, the
+keymap and the unknown keys alone. A library page has none: its items are the
+user's data, not preferences with a default. Then "Reset all to defaults"
+(`###set_reset_all`, which keeps unknown keys) and the config file's path.
+
+### Library pages
+
+A library is a list of the user's own things, each stored as its own file and
+written on every edit — there is no Save button to forget. Its page puts the
+list on the left (New, Duplicate and Delete as icon buttons over it, the rows
+as `ListRow`s) and the selected item's form on the right, so a long form (a
+machine's tool table) scrolls in its own pane instead of pushing the list off
+screen. `DrawLibraryPage` in SettingsWindow.cpp lays it out from a
+`LibraryPage`: an id prefix (`mach` gives `###mach_new`, `###mach_dup`,
+`###mach_delete`, `###mach_item_<name>`), the blurb, the names, the selection,
+and callbacks for create, duplicate, delete and the form.
+
+Adding one is two things: a draw function that fills a `LibraryPage`, and a
+`kHandPages` row naming it, its glyph, and `items`/`open` so search finds its
+items. Machines is the one there is: stored in `~/.config/lobole/machines`, one
+file per machine; a CAM setup picks one and keeps a copy
+([cam/gui.md](../cam/gui.md#preferences--machines)).
+
+### Layout rules
 
 - Every control has a stable `###id` and there are no `PushID` scopes, so
-  scripts and tests can address every row ([testing.md](testing.md)).
+  scripts and tests can address every row ([testing.md](testing.md)). The
+  panes are child windows, and a child window starts its own id scope, so
+  each pane hashes its items from the window's seed (`BeginPane`): a control
+  is `//###SettingsWindow/###set_ssao` whichever pane, page or search result
+  draws it. The one exception is a machine's tool rows, `$$<T number>/###libdia`.
 - Each row explains itself in one muted line: what it costs, what it affects.
-- Every width is measured (`CalcTextSize` plus the style's padding), never a
-  pixel literal, because the window can change its own font size.
+- Every width is measured (`CalcTextSize` plus the style's padding, or the
+  font size), never a pixel literal, because the window can change its own
+  font size. The category list and a library's list are as wide as their
+  longest name, within a cap.
+- A form puts each label above its control, so a long label wraps with the
+  window rather than running off it.
 - Sized in font units, capped to the viewport, centred when it appears, and
   not `AlwaysAutoResize` (the blurbs wrap to the content region, so
-  content-driven width ran off the screen).
+  content-driven width ran off the screen). It fits a 1280 × 720 viewport at
+  the default font size and at 140 %, and no pane scrolls sideways at 100 %
+  or 150 % (`settings/each_page_shows_its_own_rows` checks every page).
 
 ## The script surface
 
@@ -148,13 +206,21 @@ the JSON names above.
   Python smokes launch through `tests/smoke_app.py`'s `launch_app()`, which
   sets it; and `tests/config_isolation_lint.py` fails a script that spawns
   the binary itself.
+- Headless: every table row is on exactly one page and no page is empty
+  (`every preference is on exactly one page`); a fixture table with a new
+  section gets a new page (`a new section is a new preferences page`);
+  `a section resets alone`.
 - GUI: `settings/a_restart_row_says_restart`,
-  `settings/a_change_reaches_the_renderer`.
+  `settings/a_change_reaches_the_renderer`,
+  `settings/each_page_shows_its_own_rows` (each page's rows and no others, and
+  no sideways scroll at 100 % and 150 %), `settings/search_finds_rows_on_any_page`,
+  `settings/a_page_resets_alone`, `cam/the_machine_button_opens_on_machines`
+  (and search opening a machine), `cam/machines_are_kept_in_preferences`.
 
 ## Not built
 
 Per-project overrides of user preferences (a project must not force a GPU on
-whoever opens it), synced settings, live reload of the file, a search field,
-per-section resets. The remote port is a launch flag (`--remote`), not a
-preference: one that silently disagreed with the command line would be worse
-than neither.
+whoever opens it), synced settings, live reload of the file. Search does not
+reach into the Keyboard page's bindings; its own filter does that. The remote
+port is a launch flag (`--remote`), not a preference: one that silently
+disagreed with the command line would be worse than neither.

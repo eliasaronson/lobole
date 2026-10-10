@@ -43,7 +43,7 @@ pattern to copy (docs/cam/setup.md, `DocumentIO::LoadMachines`,
     an allowance of the wrong sign for its kind.
 - **App and RPC:** a `state.printProfiles` mirror;
   `list_print_profiles` / `save_print_profile` / `delete_print_profile`;
-  and a Preferences header with the editor.
+  and a Preferences page with the editor.
   - The built-in tables stay, read-only, as the defaults a profile starts
     from.
 - **The document carries its numbers.** The part's `print` becomes
@@ -92,16 +92,16 @@ pattern to copy (docs/cam/setup.md, `DocumentIO::LoadMachines`,
 
 ## UI
 
-**Preferences › Print profiles** is a third hand-written section after
-Keyboard and Machines, cloned from `DrawMachinesSection`
+**Preferences › Print profiles** is a library page
+(docs/ui/settings.md#library-pages): a `DrawPrintProfilesPage` that fills a
+`LibraryPage` (id prefix `prof`), and one `kHandPages` row after Machines
+naming it, its glyph, and `items`/`open` so search finds a profile by name
 (src/ui/SettingsWindow.cpp).
 
-- **Layout,** top to bottom:
-  - a muted blurb (what a profile is; that a part keeps a copy);
-  - `New` / `Duplicate` / `Delete`;
-  - the list;
-  - one red line for the store's last refusal;
-  - the detail form, written on every edit, with no Save button.
+- **Layout:** the muted blurb (what a profile is; that a part keeps a copy)
+  across the top; the list on the left under New / Duplicate / Delete; the
+  store's last refusal in red over the form; the selected profile's form on
+  the right, written on every edit, with no Save button.
 - **The form:**
   - Name: a rename refused when taken, as a machine's is.
   - Process and Material combos over the built-in tables.
@@ -129,7 +129,8 @@ src/ui/TolerancePanel.cpp) keeps its place and its single combo.
   - Both buttons are undoable commands on the document.
 - **The rows** are listed as today, from the document's own copy.
 - **No profiles yet:** a muted line with a `Preferences › Print profiles`
-  SmallButton, as the CAM setup does for machines.
+  SmallButton calling `ui::OpenPreferences(state, "Print profiles")`, as the
+  CAM setup does for machines.
 
 **Export:**
 
