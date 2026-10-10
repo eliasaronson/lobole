@@ -29,6 +29,7 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+  uint64_t MaterialSource() const override { return targetId; }
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(targetId); // both operands are named by their producing feature

@@ -394,6 +394,16 @@ public:
   // recolour a cache hit instead of a full rebuild of the part.
   virtual bool StampsOwnMaterial() const { return false; }
 
+  // The feature whose body this one's body CONTINUES, when it re-owns one: a
+  // Boolean's target, a body pattern's or mirror's seed, the body a Split
+  // cut. Such a feature erases the body it was given and makes a new one
+  // owned by itself, so the material stamp (keyed on the creating feature)
+  // would otherwise hand the result this feature's own material, empty unless
+  // someone set one. With one, an empty material here means the source's,
+  // followed back through a chain of them
+  // (docs/rendering/materials.md#the-feature-that-holds-a-material). 0 = none.
+  virtual uint64_t MaterialSource() const { return 0; }
+
   // Visual override applied to this feature's bodies on top of the material
   // (persistent + serialized, v54). Empty (no field set) = pure material.
   const Appearance& GetAppearance() const { return m_appearance; }

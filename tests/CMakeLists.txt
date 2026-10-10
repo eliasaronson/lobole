@@ -65,6 +65,7 @@ add_executable(designer_tests
     test_measure.cpp
     test_receipt.cpp
     test_materials.cpp
+    test_body_material.cpp
     test_tone_curve.cpp
     test_shell.cpp
     test_loft.cpp

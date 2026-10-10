@@ -237,10 +237,19 @@ bool PatternFeature::Execute(RegenContext& ctx) {
   for (size_t i = seedCount; i < instances.size(); i++)
     CollectTags(instances[i].second, tags);
 
+  // The copies are the seed's matter: its material unless this pattern sets
+  // its own (Document's stamp says the same after a cached regeneration).
+  std::string material = m_material;
+  if (material.empty())
+    for (const Body& b : ctx.bodies)
+      if (b.createdBy == sourceId) {
+        material = b.material;
+        break;
+      }
   std::string fuseErr;
   const bool ok =
       FuseInstancesReplacingSource(ctx.bodies, sourceId, std::move(instances),
-                                   m_name, m_material, GetId(), &fuseErr);
+                                   m_name, material, GetId(), &fuseErr);
   if (!ok)
     SetError(fuseErr.empty() ? "pattern failed" : fuseErr);
   else

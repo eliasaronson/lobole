@@ -19,6 +19,33 @@ are `MaterialLibrary::AllSlugs()` (`describe` reports them as
 plastic would read a printed part a fifth light; how a printed part is modelled to fit is its print process,
 not its material ([../tolerances/README.md](../tolerances/README.md#printed-parts)).
 
+
+### The feature that holds a material
+
+The material is written on the feature that CREATED the body (its
+`created_by`), and the stamp keys on it, so the regeneration that a
+material edit skips (material is out of the chain hash: a recolour is a
+cache hit) still reaches every body.
+
+- Add and Cut keep a body's creator, so a body's material survives every
+  pocket, boss and fillet.
+- A Boolean, a body pattern or mirror, and a Split RE-OWN a body: they erase
+  the one they were given and make a new one, named and owned by
+  themselves. With no material of their own they continue their source's
+  (`Feature::MaterialSource`: the Boolean's target, the pattern's seed, the
+  split body), followed back through a chain of them. So a steel block
+  unioned with a boss and then subtracted from is still steel, and stays
+  so when the steel is set after the booleans exist. A material set on the
+  re-owning feature wins; the tool of a Boolean gives none.
+- `set_material` and `set_appearance` address a body by `feature_id` (its
+  `created_by`), by index into `get_state`'s bodies, or by `body_name`. A
+  name two bodies share is refused naming them; an unknown one is refused
+  listing the bodies there are. Every form writes the creating feature,
+  so after a Boolean the body has the Boolean's name and a write lands on
+  the Boolean. The feature tree's right-click menu writes there too.
+- The appearance override is not continued the same way: a Boolean's body
+  shows the Boolean's appearance, which is empty unless one was set on it.
+
 ### Grades
 
 A shop orders an alloy and a temper, not "aluminium", so a grade is a row

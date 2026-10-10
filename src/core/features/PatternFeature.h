@@ -36,6 +36,7 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+  uint64_t MaterialSource() const override { return sourceId; }
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(sourceId); // the seed, by its producing feature

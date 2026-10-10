@@ -386,6 +386,29 @@ bool Document::Regenerate() {
     // kept the source's empty material and weighed nothing. Its own
     // material, when it has one, is stamped here like everyone else's; a
     // Derived with none takes its source body's back.
+    //
+    // A feature that RE-OWNS a body (Feature::MaterialSource: a Boolean, a
+    // body pattern or mirror, a Split) and sets no material of its own
+    // continues its source's, followed back through a chain of them: a steel
+    // block unioned with a boss and then subtracted from stays steel, and so
+    // does it when the steel is set after the booleans exist, which is a
+    // cache hit no Boolean executes for. nullopt where the chain ends at a
+    // feature that works its material out itself (a Derived, a Fastener) or
+    // at a feature this document does not hold: what Execute stamped, which
+    // took the source body's, stands.
+    const auto materialOf =
+        [this](const Feature* f) -> std::optional<std::string> {
+      for (size_t hops = 0; f != nullptr && hops <= m_features.size(); hops++) {
+        if (!f->GetMaterial().empty())
+          return f->GetMaterial();
+        const uint64_t source = f->MaterialSource();
+        if (source == 0)
+          return f->StampsOwnMaterial() ? std::nullopt
+                                        : std::optional<std::string>("");
+        f = FindFeatureById(source);
+      }
+      return std::nullopt;
+    };
     for (Body& b : m_bodies) {
       const Feature* f = FindFeatureById(b.createdBy);
       if (f == nullptr) {
@@ -397,7 +420,8 @@ bool Document::Regenerate() {
         continue;
       }
       if (!f->StampsOwnMaterial() || !f->GetMaterial().empty()) {
-        b.material = f->GetMaterial();
+        if (const std::optional<std::string> m = materialOf(f))
+          b.material = *m;
         continue;
       }
       // The copy carries the source body's name (DerivedFeature::Execute).
