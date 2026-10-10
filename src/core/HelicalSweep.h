@@ -6,7 +6,9 @@
 #include "cad/CADKernel.h"
 
 #include <TopoDS_Edge.hxx>
+#include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Ax3.hxx>
 #include <gp_Pnt2d.hxx>
 
@@ -72,3 +74,25 @@ struct HelicalSweepSpec {
 // `why` on failure; never throws.
 [[nodiscard]] CADShape HelicalSweep(const HelicalSweepSpec& spec,
                                     std::string* why = nullptr);
+
+// A planar face carried `length` along a straight `axis` while it turns
+// `twistRad` about it (right-handed about the axis direction when positive):
+// one screw motion, so every point of the face follows a helix of the same
+// lead and each edge of the face sweeps into one helicoidal side face. The
+// twisted Extrude's builder (docs/modeling/README.md#twisted-extrudes).
+//
+// A pipe shell along a helix about the axis with the axis as its constant
+// binormal: the trihedron then turns about the axis exactly as the helix
+// point does, whatever the helix radius, so each wire of the face is carried
+// rigidly; the holes are swept the same way and cut from the outer.
+// `sides[i]` is what the face's i-th edge (TopExp_Explorer order) became in
+// `solid`; `first` and `last` are the two end faces (`last` turned and
+// moved) as they are in `solid`. False and `why` on failure; never throws.
+struct ScrewSweep {
+  TopoDS_Shape solid;
+  std::vector<TopoDS_Shape> first, last;
+  std::vector<std::vector<TopoDS_Shape>> sides;
+};
+[[nodiscard]] bool ScrewSweepFace(const TopoDS_Face& face, const gp_Ax1& axis,
+                                  double length, double twistRad,
+                                  ScrewSweep& out, std::string* why = nullptr);

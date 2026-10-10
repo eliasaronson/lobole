@@ -113,12 +113,17 @@ std::optional<uint32_t> TextSideEntity(const std::string& word) {
   return Numbered(parts[0], "g");
 }
 
-// The seed's words after its tag: "g7", "g7.2.0.5", "cap1@g3", "b1/face4",
-// "p5/bore".
+// The seed's words after its tag: "g7", "g7.2.0.5", "g7@h2", "cap1@g3",
+// "b1/face4", "p5/bore".
 bool DecodeSeed(const std::vector<std::string>& words, ElementOrigin& o) {
   if (words.empty())
     return false;
-  const std::string& last = words.back();
+  std::string last = words.back();
+  // A herringbone's upper half names its sides as the lower's, plus "@h2"
+  // (docs/modeling/README.md#twisted-extrudes): a side all the same.
+  if (last.size() > 3 && last.compare(last.size() - 3, 3, "@h2") == 0 &&
+      last.rfind("cap", 0) != 0)
+    last.resize(last.size() - 3);
   if (words.size() == 1) {
     if (const auto e = Numbered(last, "g")) {
       o.role = ElementRole::Side;

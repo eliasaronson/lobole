@@ -58,7 +58,14 @@ public:
     visit(distanceExpr, distance);
     visit(distance2Expr, distance2);
     visit(thinThicknessExpr, thinThickness);
+    visit(twistExpr, twistDeg);
   }
+
+  // A twist is a Blind or Symmetric solid extrude's: the other end modes
+  // and a thin wall are refused here, naming what is accepted, so the tool
+  // window cannot accept one and the RPC cannot add one; Execute fails the
+  // same way for a file that carries one.
+  [[nodiscard]] std::string WhyIncomplete() const override;
 
   uint64_t sketchId = 0;
   double distance = 1.0;
@@ -80,6 +87,14 @@ public:
   std::string thinThicknessExpr;
   sketch::ThinSide thinSide = sketch::ThinSide::Out;
   bool reversed = false;
+  // Twisted extrude (v168, docs/modeling/README.md#twisted-extrudes): the
+  // profile turns `twistDeg` about the sketch normal through the sketch
+  // origin over the length, right-handed about the direction of travel when
+  // positive. 0 = a plain prism. `herringbone` climbs the first half at that
+  // rate and comes back over the second (a V; ignored at zero twist).
+  double twistDeg = 0.0;
+  std::string twistExpr;
+  bool herringbone = false;
   ExtrudeMode mode = ExtrudeMode::NewBody;
   // Region selection (U2): each entry is one selected region — the sorted
   // entity ids of its outer loop (sketch::LoopEntityIds). Empty = the whole

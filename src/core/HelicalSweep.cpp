@@ -6,24 +6,32 @@
 #include "core/features/SweepFeature.h"
 
 #include <BRepAlgoAPI_Common.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLib.hxx>
+#include <BRepOffsetAPI_MakePipeShell.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
+#include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
 #include <Geom2d_Line.hxx>
 #include <Geom_CylindricalSurface.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_DataMapOfShapeListOfShape.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Dir2d.hxx>
+#include <gp_Lin.hxx>
 #include <gp_Trsf.hxx>
 
 #include <algorithm>
@@ -217,5 +225,173 @@ CADShape HelicalSweep(const HelicalSweepSpec& spec, std::string* why) {
   } catch (const Standard_Failure& e) {
     Fail(why, std::string("the helical sweep failed: ") + e.GetMessageString());
     return CADShape();
+  }
+}
+
+namespace {
+
+// What a boolean made of one of its input faces: the face itself when the
+// operation left it alone, its images when it rebuilt it, nothing when it
+// removed it.
+std::vector<TopoDS_Shape> ImagesOf(BRepAlgoAPI_BooleanOperation& op,
+                                   const TopoDS_Shape& face) {
+  std::vector<TopoDS_Shape> out;
+  const TopTools_ListOfShape& mod = op.Modified(face);
+  if (!mod.IsEmpty()) {
+    for (const TopoDS_Shape& s : mod)
+      out.push_back(s);
+  } else if (!op.IsDeleted(face)) {
+    out.push_back(face);
+  }
+  return out;
+}
+
+} // namespace
+
+bool ScrewSweepFace(const TopoDS_Face& face, const gp_Ax1& axis, double length,
+                    double twistRad, ScrewSweep& out, std::string* why) {
+  out = ScrewSweep{};
+  if (face.IsNull() || !(length > 1e-9) || !(std::abs(twistRad) > 1e-12) ||
+      !std::isfinite(twistRad)) {
+    Fail(why, "a twisted sweep needs a face, a positive length and a "
+              "non-zero twist");
+    return false;
+  }
+  try {
+    const gp_Ax3 frame(axis.Location(), axis.Direction());
+    // Any helix radius carries the section the same way (the trihedron
+    // depends on the helix only through its angle about the axis); one near
+    // the face keeps the pipe's own approximation local to it, and the axis
+    // itself is the one radius that is not a helix.
+    Bnd_Box box;
+    BRepBndLib::Add(face, box);
+    double reach = 0.0;
+    {
+      double x0, y0, z0, x1, y1, z1;
+      box.Get(x0, y0, z0, x1, y1, z1);
+      const gp_Lin line(axis);
+      for (int c = 0; c < 8; c++)
+        reach = std::max(reach,
+                         line.Distance(gp_Pnt(c & 1 ? x1 : x0, c & 2 ? y1 : y0,
+                                              c & 4 ? z1 : z0)));
+    }
+    const double radius = std::max(0.5 * reach, 1e-3);
+    const double turns = std::abs(twistRad) / (2.0 * M_PI);
+    const TopoDS_Edge helix =
+        HelixEdge(frame, radius, length / turns, turns, twistRad > 0.0, 0.0);
+    if (helix.IsNull()) {
+      Fail(why, "the twist's helix could not be built");
+      return false;
+    }
+    const TopoDS_Wire spine = BRepBuilderAPI_MakeWire(helix).Wire();
+
+    // Each wire of the face swept on its own (a pipe shell takes a wire, not
+    // a face), binormal = the axis: the section turns about the axis exactly
+    // as the helix point does, which is the screw motion. The holes are cut
+    // from the outer afterwards.
+    TopTools_DataMapOfShapeListOfShape generated; // profile edge -> faces
+    const auto sweepWire = [&](const TopoDS_Wire& wire, TopoDS_Shape& solid,
+                               TopoDS_Shape* first,
+                               TopoDS_Shape* last) -> bool {
+      BRepOffsetAPI_MakePipeShell shell(spine);
+      shell.SetMode(axis.Direction());
+      shell.Add(wire);
+      shell.Build();
+      if (!shell.IsDone() || !shell.MakeSolid())
+        return false;
+      solid = shell.Shape();
+      GProp_GProps props;
+      BRepGProp::VolumeProperties(solid, props);
+      if (props.Mass() < 0.0)
+        solid.Reverse(); // inside out: a cut with it would add material
+      if (first)
+        *first = shell.FirstShape();
+      if (last)
+        *last = shell.LastShape();
+      for (TopExp_Explorer ex(wire, TopAbs_EDGE); ex.More(); ex.Next())
+        if (!generated.IsBound(ex.Current()))
+          generated.Bind(ex.Current(), shell.Generated(ex.Current()));
+      return true;
+    };
+
+    const TopoDS_Wire outerWire = BRepTools::OuterWire(face);
+    TopoDS_Shape solid, first, last;
+    if (outerWire.IsNull() || !sweepWire(outerWire, solid, &first, &last)) {
+      Fail(why, "the twisted sweep failed");
+      return false;
+    }
+    TopoDS_Compound holes;
+    BRep_Builder builder;
+    builder.MakeCompound(holes);
+    bool anyHole = false;
+    for (TopExp_Explorer ex(face, TopAbs_WIRE); ex.More(); ex.Next()) {
+      if (ex.Current().IsSame(outerWire))
+        continue;
+      TopoDS_Shape hole;
+      if (!sweepWire(TopoDS::Wire(ex.Current()), hole, nullptr, nullptr)) {
+        Fail(why, "the twisted sweep of a hole in the profile failed");
+        return false;
+      }
+      builder.Add(holes, hole);
+      anyHole = true;
+    }
+
+    // Every tracked face: the ends, then each profile edge's sides.
+    std::vector<TopoDS_Shape> faceEdges;
+    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next())
+      faceEdges.push_back(ex.Current());
+    const auto sidesOf = [&](const TopoDS_Shape& edge) {
+      std::vector<TopoDS_Shape> faces;
+      if (generated.IsBound(edge))
+        for (const TopoDS_Shape& f : generated.Find(edge))
+          if (f.ShapeType() == TopAbs_FACE)
+            faces.push_back(f);
+      return faces;
+    };
+
+    if (!anyHole) {
+      out.solid = solid;
+      out.first = {first};
+      out.last = {last};
+      for (const TopoDS_Shape& e : faceEdges)
+        out.sides.push_back(sidesOf(e));
+      return true;
+    }
+    BRepAlgoAPI_Cut cut;
+    TopTools_ListOfShape args, tools;
+    args.Append(solid);
+    tools.Append(holes);
+    cut.SetArguments(args);
+    cut.SetTools(tools);
+    cut.SetRunParallel(false);
+    cut.Build();
+    if (!cut.IsDone() || cut.HasErrors()) {
+      Fail(why, "cutting the profile's holes out of the twisted sweep failed");
+      return false;
+    }
+    out.solid = cut.Shape();
+    {
+      // One solid out of the compound a boolean hands back.
+      TopExp_Explorer ex(out.solid, TopAbs_SOLID);
+      if (ex.More()) {
+        const TopoDS_Shape one = ex.Current();
+        ex.Next();
+        if (!ex.More())
+          out.solid = one;
+      }
+    }
+    out.first = ImagesOf(cut, first);
+    out.last = ImagesOf(cut, last);
+    for (const TopoDS_Shape& e : faceEdges) {
+      std::vector<TopoDS_Shape> images;
+      for (const TopoDS_Shape& f : sidesOf(e))
+        for (const TopoDS_Shape& img : ImagesOf(cut, f))
+          images.push_back(img);
+      out.sides.push_back(std::move(images));
+    }
+    return true;
+  } catch (const Standard_Failure& e) {
+    Fail(why, std::string("the twisted sweep failed: ") + e.GetMessageString());
+    return false;
   }
 }

@@ -252,6 +252,8 @@ or the GUI. The saved form did not change, so this is not a format version.
   rather than passing a negative distance.
 - **Thin** (`thin: {thickness, side: out|in|both}`): every loop becomes a wall
   ring (OCC `MakeOffset`), composing with any end condition.
+- **Twist** (`twist_deg`, `herringbone`): the profile turns about the sketch
+  normal as it goes ([twisted extrudes](#twisted-extrudes)).
 - A cut or add extrude keeps the prism it swept (`ToolShape()`), which is what
   lets a pattern repeat it; a Hole keeps its drilled tool the same way, so a
   bolt circle is one Hole and a pattern.
@@ -272,6 +274,51 @@ or the GUI. The saved form did not change, so this is not a format version.
   `test_hole.cpp` drills at six). An STL is float by its format: a plane typed
   at the decimal height of one of its faces is off it by that rounding, so
   sketch on the face, which takes its exact frame.
+
+### Twisted extrudes
+
+`twist_deg` (+ `twist_expr`, live like `distance_expr`) turns the profile
+about the extrude direction over the extrude's length: a helical gear, a
+twisted vase, a spiral flute. The axis is the sketch normal through the
+**sketch origin**, so a gear is drawn about its sketch's origin. A positive
+twist is right-handed about the direction of travel, which makes it a
+right-handed helix whichever way the extrude runs.
+
+- **The sweep is one screw motion.** Each wire of the profile is swept along
+  a helix about the axis with the axis as the pipe's constant binormal
+  (`ScrewSweepFace`, `src/core/HelicalSweep.{h,cpp}`; the builder is
+  `BuildTwistedPrismNamed` in `SketchProfile.cpp`). With a constant binormal
+  the trihedron turns about the axis exactly as the helix point does,
+  whatever the helix radius, so every point of the profile follows a helix
+  of the same lead and the side faces are helicoids: one per sketch edge,
+  named as a prism's (`<id>/g<entity>`, `cap0`, `cap1`). The holes of a
+  profile are swept the same way and cut from the outer. The surfaces are
+  the pipe's B-spline approximation, within its 1e-4 mm tolerance: a twisted
+  rectangle's volume is the prism's to a few parts in a million.
+- **Herringbone** (`herringbone: true`) climbs the first half at the plain
+  twist's rate and turns back over the second, so the helix angle does not
+  change when it is switched on: the apex is turned by half of `twist_deg`
+  and both ends are the profile. The upper half is the lower mirrored in the
+  mid-plane — a mirror reverses the twist and meets the lower half on an
+  exactly coincident face — and the two are fused with OCC's full glue. Its
+  upper side faces are named `<id>/g<entity>@h2`.
+- **Symmetric** centres the solid on the sketch plane and turns it back by
+  half the twist, so the section on the sketch plane is the sketch (for a
+  herringbone, the apex is there).
+- **Refused:** a twist with `two_sided`, `up_to_face` or `through_all`, and a
+  thin twist. `WhyIncomplete` names what is accepted, so the tool window
+  shows it in red and disables Accept and `add_feature` refuses it; a file
+  that carries one fails the feature with the same words. A twist of 0 is a
+  plain prism, and `herringbone` is ignored there.
+- **In the GUI:** the Extrude window's *Twist (deg)* field (Blind and
+  Symmetric) and, once there is a twist, a *Herringbone* checkbox; the
+  preview carries a twist arc ([viewport
+  handles](../ui/viewport-handles.md#preview-handles)).
+- **Measuring two meshing helical gears is slow.** Exact distance between two
+  conjugate helicoidal flanks took about 28 s for a sun and planet against
+  about 12 s for the same pair as lofts through turned sections: the flanks
+  nearly touch along a line, which is the hard case for OCC's
+  surface-to-surface extrema.
 
 ### Patterns
 
@@ -541,7 +588,8 @@ tooltip. View > Show Element Names labels the hovered face with its name.
 
 ## Tests
 
-Headless, one file per feature (`tests/test_extrude.cpp`, `test_revolve`,
+Headless, one file per feature (`tests/test_extrude.cpp`,
+`test_twist_extrude`, `test_revolve`,
 `test_datum`, `test_primitives`, `test_boolean`, `test_pattern`, `test_fillet`, `test_shell`,
 `test_draft`, `test_split`, `test_refine`, `test_rib`, `test_thread`,
 `test_hole`, `test_worm`, `test_curve3d`, `test_sweep`, `test_loft`, `test_pipe`,

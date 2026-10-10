@@ -14,6 +14,7 @@
 #include "core/cam/CamNames.h"
 #include "core/cam/CamToolpath.h"
 #include "core/features/CurveFeature.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/TemplateFeature.h"
 #include "core/io/Serialization.h"
@@ -1016,6 +1017,24 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       const size_t i = sk->IndexOfImage(imageId);
       REQUIRE(i < sk->images.size());
       CHECK(sk->images[i].showAlways == want.at(2).get<bool>());
+    }
+  }
+  // v168: an extrude's twist. A twisted rectangle has the prism's volume, so
+  // the volumes above cannot see a twist dropped on load; each [extrude
+  // name, twist_deg, twist_expr, herringbone] must hold.
+  if (expect.contains("extrude_twists")) {
+    for (const auto& want : expect.at("extrude_twists")) {
+      const std::string name = want.at(0).get<std::string>();
+      INFO("extrude " << name);
+      const ExtrudeFeature* ext = nullptr;
+      for (const auto& f : doc.GetFeatures())
+        if (const auto* e = dynamic_cast<const ExtrudeFeature*>(f.get());
+            e && e->GetName() == name)
+          ext = e;
+      REQUIRE(ext != nullptr);
+      CHECK_THAT(ext->twistDeg, WithinRel(want.at(1).get<double>(), 1e-9));
+      CHECK(ext->twistExpr == want.at(2).get<std::string>());
+      CHECK(ext->herringbone == want.at(3).get<bool>());
     }
   }
   // v143: how the part is printed. Drives no geometry, so the volumes above

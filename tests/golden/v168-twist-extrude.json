@@ -1,0 +1,181 @@
+{
+  "features": [
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            -5.0,
+            -2.0
+          ],
+          "b": [
+            5.0,
+            -2.0
+          ],
+          "id": 1,
+          "type": "line"
+        },
+        {
+          "a": [
+            5.0,
+            -2.0
+          ],
+          "b": [
+            5.0,
+            2.0
+          ],
+          "id": 2,
+          "type": "line"
+        },
+        {
+          "a": [
+            5.0,
+            2.0
+          ],
+          "b": [
+            -5.0,
+            2.0
+          ],
+          "id": 3,
+          "type": "line"
+        },
+        {
+          "a": [
+            -5.0,
+            2.0
+          ],
+          "b": [
+            -5.0,
+            -2.0
+          ],
+          "id": 4,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "name": "Bar",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 20.0,
+      "id": 2,
+      "mode": "new_body",
+      "name": "Helical",
+      "reversed": false,
+      "sketch_id": 1,
+      "twist_deg": 90.0,
+      "type": "Extrude"
+    },
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            -5.0,
+            -2.0
+          ],
+          "b": [
+            5.0,
+            -2.0
+          ],
+          "id": 1,
+          "type": "line"
+        },
+        {
+          "a": [
+            5.0,
+            -2.0
+          ],
+          "b": [
+            5.0,
+            2.0
+          ],
+          "id": 2,
+          "type": "line"
+        },
+        {
+          "a": [
+            5.0,
+            2.0
+          ],
+          "b": [
+            -5.0,
+            2.0
+          ],
+          "id": 3,
+          "type": "line"
+        },
+        {
+          "a": [
+            -5.0,
+            2.0
+          ],
+          "b": [
+            -5.0,
+            -2.0
+          ],
+          "id": 4,
+          "type": "line"
+        }
+      ],
+      "id": 3,
+      "name": "Bar 2",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          30.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 12.0,
+      "end_mode": "symmetric",
+      "herringbone": true,
+      "id": 4,
+      "mode": "new_body",
+      "name": "Herringbone",
+      "reversed": false,
+      "sketch_id": 3,
+      "twist_deg": 60.0,
+      "twist_expr": "turn",
+      "type": "Extrude"
+    }
+  ],
+  "format": "designer-document",
+  "parameters": [
+    {
+      "expression": "60",
+      "name": "turn"
+    }
+  ],
+  "version": 168
+}

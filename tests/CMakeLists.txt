@@ -144,6 +144,7 @@ add_executable(designer_tests
     test_faceselector.cpp
     test_sketch_feature.cpp
     test_extrude.cpp
+    test_twist_extrude.cpp
     test_sketch_precision.cpp
     test_model_precision.cpp
     test_sketch_solver.cpp

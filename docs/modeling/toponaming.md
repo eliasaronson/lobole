@@ -46,6 +46,8 @@ seed  := tag '/g' entityId       side face swept from sketch entity <entityId>
                                  side face swept from one segment of a text
                                  label's glyph (glyphs counted over rendered
                                  characters only)
+       | tag '/g' entityId '@h2' the same, on a herringbone extrude's upper
+                                 half (README.md#twisted-extrudes)
        | tag '/cap0' | '/cap1'   extrude/revolve start and end caps
        | tag '/cap0@g' key       caps of one profile group of a multi-profile
                                  sketch (key = its outer loop's lowest entity

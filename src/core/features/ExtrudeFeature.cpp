@@ -4,6 +4,7 @@
 #include "core/features/ExtrudeFeature.h"
 
 #include "common/Logger.h"
+#include "core/Angles.h"
 #include "core/BodyMode.h"
 #include "core/features/SketchFeature.h"
 #include "core/sketch/SketchProfile.h"
@@ -16,7 +17,29 @@ ExtrudeFeature::ExtrudeFeature(const std::string& name, uint64_t sketchId,
   m_name = name;
 }
 
+std::string ExtrudeFeature::WhyIncomplete() const {
+  if (twistDeg == 0.0 && twistExpr.empty())
+    return {};
+  if (endMode != ExtrudeEnd::Blind && endMode != ExtrudeEnd::Symmetric) {
+    const char* end = endMode == ExtrudeEnd::TwoSided   ? "two_sided"
+                      : endMode == ExtrudeEnd::UpToFace ? "up_to_face"
+                                                        : "through_all";
+    return std::string("a twist needs end_mode blind or symmetric, not ") +
+           end + " (set twist_deg to 0 for that end condition)";
+  }
+  if (thin)
+    return "a twisted extrude cannot be thin: a twist sweeps a filled "
+           "profile (set twist_deg to 0, or turn thin off)";
+  if (!std::isfinite(twistDeg))
+    return "twist_deg must be a finite number of degrees";
+  return {};
+}
+
 bool ExtrudeFeature::Execute(RegenContext& ctx) {
+  if (const std::string why = WhyIncomplete(); !why.empty()) {
+    SetError(why);
+    return false;
+  }
   const Feature* ref = ctx.FindById(sketchId);
   const auto* sketch = dynamic_cast<const SketchFeature*>(ref);
   if (!sketch) {
@@ -123,17 +146,25 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
   // leaves alone keeps its name, a pierced one gains ";M<id>".
   ElementMap map;
   std::string buildErr;
+  const bool twisted = twistDeg != 0.0;
   CADShape prism =
-      thin ? sketch::BuildThinPrismNamed(sketch->plane, loops, total,
-                                         sweepReversed, thinThickness, thinSide,
-                                         GetId(), map, &buildErr)
-           : sketch::BuildPrismNamed(sketch->plane, loops, total, sweepReversed,
-                                     GetId(), map, &buildErr);
+      twisted ? sketch::BuildTwistedPrismNamed(
+                    // A symmetric one is the same either way round, so
+                    // `reversed` must not flip its hand either.
+                    sketch->plane, loops, total,
+                    endMode != ExtrudeEnd::Symmetric && sweepReversed,
+                    angles::ToRadians(twistDeg), herringbone,
+                    endMode == ExtrudeEnd::Symmetric, GetId(), map, &buildErr)
+      : thin ? sketch::BuildThinPrismNamed(sketch->plane, loops, total,
+                                           sweepReversed, thinThickness,
+                                           thinSide, GetId(), map, &buildErr)
+             : sketch::BuildPrismNamed(sketch->plane, loops, total,
+                                       sweepReversed, GetId(), map, &buildErr);
   if (!prism.IsValid()) {
     SetError(buildErr.empty() ? "profile could not be extruded" : buildErr);
     return false;
   }
-  if (backOffset != 0.0) {
+  if (backOffset != 0.0 && !twisted) { // a twisted one centres itself
     const double sign = reversed ? 1.0 : -1.0;
     prism.Translate(sketch->plane.GetNormal() * (sign * backOffset));
   }

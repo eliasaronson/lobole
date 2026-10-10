@@ -116,7 +116,12 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   list_elements; follows upstream edits) | "through_all" (cut only:
   sweeps past every body, distance ignored),
   "thin"?: {{"thickness": num, "thickness_expr"?: str,
-  "side": "out"|"in"|"both"}} — walls every loop instead of filling}}.
+  "side": "out"|"in"|"both"}} — walls every loop instead of filling,
+  "twist_deg"?: num, "twist_expr"?: str — degrees the profile turns about
+  the normal through the SKETCH ORIGIN over the length, right-handed about
+  the direction of travel (a helical gear: tan(helix)/r_pitch radians per
+  mm times the length); blind or symmetric only, never thin,
+  "herringbone"?: bool — climb the first half at that rate and back}}.
   Extrudes sweep along the sketch plane's +normal; "reversed": true flips
   them. So a cut whose sketch sits ON a face wants "reversed" (into the
   material) — no need to park the plane behind the part and overshoot;

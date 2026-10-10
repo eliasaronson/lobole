@@ -128,8 +128,14 @@ is importable, and other generators compose it into multi-level parts. It
 takes `addendum` and `dedendum` in modules (1.0 and 1.25 by default): an
 INTERNAL gear is cut by the outline with them swapped and a negative
 backlash, which is how `planetary/` makes its ring, and a stub tooth is a
-shorter addendum. A helical or herringbone gear is a loft through the
-outline turned along the helix (`planetary/build.py`'s `herringbone`).
+shorter addendum. A helical or herringbone gear is the outline extruded
+with a twist: `twist_deg` is the helix's turn over the face width, `tan(helix)
+/ r_pitch` radians a millimetre, and `herringbone: true` turns it back over
+the second half ([twisted extrudes](../docs/modeling/README.md#twisted-extrudes)).
+A pair's exact clearance comes out about 5 µm under the gap the backlash
+asks for at module 1.4, the twist and a loft through turned sections alike,
+so the shortfall is the profile's (its flanks are arcs, not involutes), not
+the sweep's.
 
 Not drawn: root fillets; undercut correction (below ~17 teeth at 20° the
 flank runs radially from the base circle to the root, as an uncorrected

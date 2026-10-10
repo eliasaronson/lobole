@@ -5,9 +5,11 @@
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
+#include "core/HelicalSweep.h"
 #include "core/sketch/SketchText.h"
 
 #include <BRepAdaptor_Curve.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepBuilderAPI_MakeEdge.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -31,6 +33,7 @@
 #include <TColgp_Array1OfPnt.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
@@ -1501,6 +1504,173 @@ CADShape BuildPrismNamed(const SketchPlane& plane,
     CADShape result(multi ? TopoDS_Shape(compound) : single);
     topo::ApplyFallbackPasses(result, out);
     return result;
+  } catch (const Standard_Failure& e) {
+    ProfileFail(error, std::string("OCCT error: ") + e.GetMessageString());
+    return CADShape();
+  }
+}
+
+CADShape BuildTwistedPrismNamed(const SketchPlane& plane,
+                                const std::vector<Loop>& loops, double distance,
+                                bool reversed, double twistRad,
+                                bool herringbone, bool symmetric,
+                                uint64_t featureTag, ElementMap& out,
+                                std::string* error) {
+  out.names.clear();
+  out.edgeNames.clear();
+  if (loops.empty() || std::abs(distance) < 1e-9) {
+    ProfileFail(error, "empty profile or zero extrude distance");
+    return CADShape();
+  }
+  if (!std::isfinite(twistRad) || std::abs(twistRad) < 1e-12) {
+    ProfileFail(error, "a twisted extrude needs a non-zero twist");
+    return CADShape();
+  }
+  try {
+    const std::vector<ProfileGroup> groups = ClassifyLoops(loops);
+    if (groups.empty()) {
+      ProfileFail(error,
+                  "profile loops overlap or nest inconsistently (see log)");
+      return CADShape();
+    }
+    const glm::dvec3 o = plane.GetOrigin();
+    glm::dvec3 n = plane.GetNormal();
+    if (reversed != (distance < 0.0))
+      n = -n;
+    const double length = std::abs(distance);
+    const gp_Pnt origin(o.x, o.y, o.z);
+    const gp_Dir dir(n.x, n.y, n.z);
+    const gp_Ax1 axis(origin, dir);
+    // A herringbone climbs half the length at the same rate and comes back:
+    // the helix angle is the one the plain twist would have.
+    const double half = herringbone ? 0.5 * length : length;
+    const double halfTwist = herringbone ? 0.5 * twistRad : twistRad;
+
+    const std::string tag = std::to_string(featureTag) + "/";
+    const bool multi = groups.size() > 1;
+    BRep_Builder builder;
+    TopoDS_Compound compound;
+    builder.MakeCompound(compound);
+    TopoDS_Shape single;
+    int faceOffset = 0;
+    for (const ProfileGroup& group : groups) {
+      const TopoDS_Face face = BuildGroupFace(plane, loops, group);
+      if (face.IsNull()) {
+        ProfileFail(error, "failed to build a face for the profile "
+                           "(bad wire geometry, see log)");
+        return CADShape();
+      }
+      ScrewSweep sweep;
+      std::string why;
+      if (!ScrewSweepFace(face, axis, half, halfTwist, sweep, &why)) {
+        ProfileFail(error, why);
+        return CADShape();
+      }
+      const std::string capSuffix = multi ? "@" + group.key : "";
+      std::vector<std::pair<TopoDS_Shape, std::string>> lower;
+      {
+        int i = 0;
+        for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next(), i++) {
+          const std::string word =
+              MatchEdgeName(TopoDS::Edge(ex.Current()), plane, loops);
+          if (word.empty() || i >= static_cast<int>(sweep.sides.size()))
+            continue;
+          for (const TopoDS_Shape& side : sweep.sides[i])
+            lower.emplace_back(side, tag + word);
+        }
+      }
+      for (const TopoDS_Shape& f : sweep.first)
+        lower.emplace_back(f, tag + "cap0" + capSuffix);
+
+      TopoDS_Shape shape;
+      std::vector<std::pair<TopoDS_Shape, std::string>> named;
+      if (!herringbone) {
+        for (const TopoDS_Shape& f : sweep.last)
+          lower.emplace_back(f, tag + "cap1" + capSuffix);
+        shape = sweep.solid;
+        named = std::move(lower);
+      } else {
+        // The upper half is the lower mirrored in the mid-plane: a mirror
+        // turns the twist back, ends on the profile itself, and meets the
+        // lower half on a face exactly coincident with its top — which the
+        // glued fuse then removes. Its sides are named as the lower's, one
+        // half up ("@h2"), and its far end is the second cap.
+        gp_Trsf mirror;
+        mirror.SetMirror(gp_Ax2(origin.Translated(gp_Vec(dir) * half), dir));
+        BRepBuilderAPI_Transform mirrored(sweep.solid, mirror, true);
+        if (!mirrored.IsDone()) {
+          ProfileFail(error, "mirroring the herringbone's lower half failed");
+          return CADShape();
+        }
+        const TopoDS_Shape upper = mirrored.Shape();
+        std::vector<std::pair<TopoDS_Shape, std::string>> upperNames;
+        for (const auto& [f, nm] : lower) {
+          const TopoDS_Shape img = mirrored.ModifiedShape(f);
+          if (nm == tag + "cap0" + capSuffix)
+            upperNames.emplace_back(img, tag + "cap1" + capSuffix);
+          else
+            upperNames.emplace_back(img, nm + "@h2");
+        }
+        BRepAlgoAPI_Fuse fuse;
+        TopTools_ListOfShape args, tools;
+        args.Append(sweep.solid);
+        tools.Append(upper);
+        fuse.SetArguments(args);
+        fuse.SetTools(tools);
+        fuse.SetGlue(BOPAlgo_GlueFull);
+        fuse.SetRunParallel(false);
+        fuse.Build();
+        if (!fuse.IsDone() || fuse.HasErrors()) {
+          ProfileFail(error, "joining the herringbone's halves failed");
+          return CADShape();
+        }
+        shape = fuse.Shape();
+        // One solid out of the compound the fuse hands back.
+        TopExp_Explorer solids(shape, TopAbs_SOLID);
+        if (solids.More()) {
+          const TopoDS_Shape s = solids.Current();
+          solids.Next();
+          if (!solids.More())
+            shape = s;
+        }
+        // A face the fuse left alone is in the result as it was; one it
+        // rebuilt (its mid-plane edge is now shared) is its image.
+        for (auto* list : {&lower, &upperNames})
+          for (const auto& [f, nm] : *list) {
+            const TopTools_ListOfShape& mod = fuse.Modified(f);
+            if (mod.IsEmpty()) {
+              if (!fuse.IsDeleted(f))
+                named.emplace_back(f, nm);
+              continue;
+            }
+            int k = 0;
+            for (const TopoDS_Shape& img : mod)
+              named.emplace_back(
+                  img, mod.Extent() == 1 ? nm : nm + "." + std::to_string(k++));
+          }
+      }
+      for (const auto& [f, nm] : named) {
+        const int idx = FaceIndexOf(shape, f);
+        if (idx >= 0)
+          out.names[faceOffset + idx] = nm;
+      }
+      faceOffset += CountFaces(shape);
+      single = shape;
+      builder.Add(compound, single);
+    }
+
+    TopoDS_Shape result = multi ? TopoDS_Shape(compound) : single;
+    if (symmetric) {
+      // Centred on the sketch plane, and turned back so the section there is
+      // the sketch: the twist runs from -half to +half of it.
+      gp_Trsf back, turn;
+      back.SetTranslation(gp_Vec(dir) * (-0.5 * length));
+      turn.SetRotation(axis, -0.5 * twistRad);
+      result = result.Moved(TopLoc_Location(turn * back));
+    }
+    CADShape named(result);
+    topo::ApplyFallbackPasses(named, out);
+    return named;
   } catch (const Standard_Failure& e) {
     ProfileFail(error, std::string("OCCT error: ") + e.GetMessageString());
     return CADShape();

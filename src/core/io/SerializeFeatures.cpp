@@ -943,6 +943,14 @@ json FeatureToJson(const Feature& feature) {
     }
     if (!ext->regions.empty()) // v34; omit = whole sketch
       j["regions"] = ext->regions;
+    // v168: a twist, omitted when there is none, so an untwisted extrude
+    // writes what it always did.
+    if (ext->twistDeg != 0.0 || !ext->twistExpr.empty())
+      j["twist_deg"] = ext->twistDeg;
+    if (!ext->twistExpr.empty())
+      j["twist_expr"] = ext->twistExpr;
+    if (ext->herringbone)
+      j["herringbone"] = true;
     if (ext->thin) { // v18; omit when off
       json thin = {{"thickness", ext->thinThickness},
                    {"side", ext->thinSide == sketch::ThinSide::Out  ? "out"
@@ -1530,7 +1538,12 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "blind|symmetric|two_sided|up_to_face|through_all, distance2? (+_expr), "
      "reversed?, regions?, end_target?, thin? {thickness (+_expr), side: "
      "out|in|both} (a wall of that thickness along the profile instead of a "
-     "filled face); extrudes along +plane normal"},
+     "filled face); extrudes along +plane normal. twist_deg? (+twist_expr): "
+     "degrees the profile turns about the normal through the sketch origin "
+     "over the length, right-handed about the direction of travel (a "
+     "helical gear, a twisted vase); blind or symmetric, not thin. "
+     "herringbone?: true climbs the first half at that rate and back over "
+     "the second (a V)"},
     // A primitive asked for through add_feature is EXPANDED into a Sketch
     // and an Extrude/Revolve (core/Primitives.h); these rows are
     // that dialect. A stored Box/Sphere/Cylinder (position/center, from an
@@ -2139,6 +2152,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                           : ExtrudeEnd::Blind;
     ext->distance2 = j.value("distance2", 1.0);
     ext->distance2Expr = j.value("distance2_expr", std::string{});
+    ext->twistDeg = j.value("twist_deg", 0.0); // v168
+    ext->twistExpr = j.value("twist_expr", std::string{});
+    ext->herringbone = j.value("herringbone", false);
     if (j.contains("regions")) // v34
       ext->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
     if (j.contains("end_target")) {

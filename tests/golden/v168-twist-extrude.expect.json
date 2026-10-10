@@ -1,0 +1,22 @@
+{
+  "features": 4,
+  "bodies": 2,
+  "volumes": [
+    800.0,
+    480.0
+  ],
+  "extrude_twists": [
+    [
+      "Helical",
+      90.0,
+      "",
+      false
+    ],
+    [
+      "Herringbone",
+      60.0,
+      "turn",
+      true
+    ]
+  ]
+}

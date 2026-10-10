@@ -106,6 +106,23 @@ CADShape BuildPrismNamed(const SketchPlane& plane,
                          bool reversed, uint64_t featureTag, ElementMap& out,
                          std::string* error = nullptr);
 
+// A twisted extrude (docs/modeling/README.md#twisted-extrudes): each profile
+// group swept `distance` along the plane normal (negated when `reversed`)
+// while it turns `twistRad` about the normal through the plane's origin,
+// right-handed about the direction of travel when positive — one screw
+// motion, so the side faces are helicoids, one per sketch edge, named as
+// BuildPrismNamed names a prism's. `herringbone` climbs the first half at
+// that rate and the second half back (the lower half mirrored in the
+// mid-plane, glue-fused): its upper side faces are "<tag>/g<id>@h2", its
+// ends cap0 and cap1. `symmetric` centres it on the sketch plane, turned so
+// the section there is the sketch. `error` (optional) receives the reason.
+CADShape BuildTwistedPrismNamed(const SketchPlane& plane,
+                                const std::vector<Loop>& loops, double distance,
+                                bool reversed, double twistRad,
+                                bool herringbone, bool symmetric,
+                                uint64_t featureTag, ElementMap& out,
+                                std::string* error = nullptr);
+
 // Which side of the profile curve a thin extrude's wall grows toward.
 enum class ThinSide { Out, In, Both };
 
