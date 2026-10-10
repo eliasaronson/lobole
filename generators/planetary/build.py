@@ -62,11 +62,6 @@ ADDENDUM = 0.8
 # the gears axially, shallow enough that a printed flank (which overhangs by
 # the helix angle) needs no support.
 HELIX_DEG = 30.0
-# Sections per loft half. The loft's skin strays from the helix between
-# sections by more than the geometry suggests: at four a sun and planet that
-# clear 0.28 mm at every section touched between them; at eight the closest
-# point is 0.2485 mm, and sixteen measures the same.
-SPANS = 8
 # The fewest teeth whose involute is not undercut at PRESSURE_DEG (gear.py
 # draws no profile shift, and draws an undercut flank radially).
 MIN_TEETH = 12
@@ -212,36 +207,26 @@ def phases(s):
 
 def herringbone(d, name, s, z, centre, phase, twist_sign, backlash,
                 addendum=ADDENDUM, dedendum=1.25):
-    """A herringbone gear (or ring cutter) as one body: two lofts, each
-    through SPANS + 1 sections of the same profile turned along a helix, and
-    their union. Two lofts, not one through all the sections, because a
-    loft fits one smooth skin and would round the V off at the apex."""
+    """A herringbone gear (or ring cutter) as one body: the tooth outline
+    extruded with a twist up to the middle and back (Extrude `twist_deg` and
+    `herringbone`, docs/modeling/README.md#twisted-extrudes). The flanks are
+    exact helicoids about the sketch plane's origin, which is the gear's
+    centre; the twist over the full height makes a helix of HELIX_DEG at the
+    pitch circle, and the herringbone climbs half of it to the apex."""
     m, h = s["module"], s["height"]
     rp = m * z / 2.0
     k = twist_sign * math.degrees(math.tan(math.radians(HELIX_DEG)) / rp)
-    halves = []
-    for half in (0, 1):
-        ids = []
-        for i in range(SPANS + 1):
-            zz = h / 2.0 * (i / SPANS + half)
-            zh = zz if zz <= h / 2.0 else h - zz
-            ents, _ = involute_profile(
-                m, z, PRESSURE_DEG, backlash=backlash,
-                phase_deg=math.degrees(phase) + k * zh,
-                addendum=addendum, dedendum=dedendum)
-            r = check(d.call("add_feature", feature={
-                "type": "Sketch", "name": f"{name} section {half}.{i}",
-                "plane": plane(centre[0], centre[1], zz), "entities": ents}),
-                f"{name} section")
-            ids.append(r["id"])
-        r = check(d.call("add_feature", feature={
-            "type": "Loft", "name": f"{name} {'lower' if half == 0 else 'upper'}",
-            "sketch_ids": ids, "mode": "new_body"}), f"{name} loft")
-        halves.append(r["id"])
-    r = check(d.call("add_feature", feature={
-        "type": "Boolean", "name": name, "target_id": halves[0],
-        "tool_id": halves[1], "op": "union"}), f"{name} union")
-    return r["id"]
+    ents, _ = involute_profile(m, z, PRESSURE_DEG, backlash=backlash,
+                               phase_deg=math.degrees(phase),
+                               addendum=addendum, dedendum=dedendum)
+    sk = check(d.call("add_feature", feature={
+        "type": "Sketch", "name": f"{name} outline",
+        "plane": plane(centre[0], centre[1], 0.0), "entities": ents}),
+        f"{name} outline")
+    return check(d.call("add_feature", feature={
+        "type": "Extrude", "name": name, "sketch_id": sk["id"],
+        "distance": h, "mode": "new_body", "twist_deg": k * h,
+        "herringbone": True}), f"{name} extrude")["id"]
 
 
 def text(label, at, height, angle=0.0):
@@ -342,7 +327,7 @@ def build_print(d, s, ph, diameter, proc):
         ids[f"planet {i + 1}"] = planet(d, s, phi, centre, str(i + 1))
     ids = bodies_by_name(d)
     for fid in ids.values():
-        d.call("set_material", feature_id=fid, material=proc["material"])
+        d.call("set_material", feature_id=fid, material=material_of(d, proc))
     print(f"  print part: {len(ids)} bodies in "
           f"{time.perf_counter() - t0:.0f} s")
     return ids
@@ -361,7 +346,8 @@ def build_assembly(d, s, ph, diameter, proc):
         d.call("set_print_process", **proc)
         make()
         for fid in bodies_by_name(d).values():
-            d.call("set_material", feature_id=fid, material=proc["material"])
+            d.call("set_material", feature_id=fid,
+                   material=material_of(d, proc))
     d.call("add_part", name="carrier")
     for i, (th, _) in enumerate(ph["planets"]):
         check(d.call("add_feature", feature={
@@ -408,10 +394,21 @@ def build_assembly(d, s, ph, diameter, proc):
     return occ, mates, {"carrier": carrier_ratio, "planet": planet_ratio}
 
 
-def run_motion(d, mates, s, name, to_deg, samples, mode):
+def material_of(d, proc):
+    """The material slug of a print process: given, or its profile's."""
+    if "material" in proc:
+        return proc["material"]
+    for p in d.call("list_print_profiles")["profiles"]:
+        if p["name"] == proc["profile"]:
+            return p["material"]
+    raise SystemExit(f"planetary: no print profile '{proc['profile']}'")
+
+
+def run_motion(d, mates, s, name, to_deg, samples, mode, deflection=None):
+    extra = {} if deflection is None else {"clash_deflection_mm": deflection}
     st = d.call("add_motion_study", driver=mates["sun"], dof="rotation",
                 **{"from": 0.0}, to=to_deg, samples=samples,
-                clash_mode=mode, name=name)
+                clash_mode=mode, name=name, **extra)
     if st.get("why_not"):
         raise SystemExit(f"planetary: motion study {name}: {st['why_not']}")
     sid = st.get("id", st.get("study"))
@@ -526,6 +523,11 @@ def main():
                     help="the ring's outside diameter, mm")
     ap.add_argument("--process", default="fdm")
     ap.add_argument("--material", default="pla")
+    ap.add_argument("--profile", default=None,
+                    help="one of your print profiles (list_print_profiles), "
+                         "measured on your printer; without it the built-in "
+                         "--process/--material table, the community's "
+                         "numbers")
     ap.add_argument("--fresh", action="store_true",
                     help="start a new project first (refused on unsaved work)")
     ap.add_argument("--out", default=None)
@@ -540,7 +542,8 @@ def main():
     d = connect(args.port)
     if args.fresh:
         fresh_project(d)
-    proc = {"process": args.process, "material": args.material}
+    proc = ({"profile": args.profile} if args.profile else
+            {"process": args.process, "material": args.material})
     gap = d.call("print_allowance", kind="gap", size_mm=args.diameter,
                  **proc)
     s = solve(args.diameter, gap["allowance_mm"])
@@ -548,7 +551,7 @@ def main():
     print(f"planetary: Ø{args.diameter:g}, module {s['module']:g}, "
           f"sun {s['zs']} / planets {s['zp']} / ring {s['zr']}, "
           f"ratio {s['ratio']:.3f}:1, gap {gap['allowance_mm'] / 2:g} a side "
-          f"({args.material})")
+          f"({args.profile or args.material})")
 
     ids = build_print(d, s, ph, args.diameter, proc)
     geo = d.call("check_geometry")
@@ -559,10 +562,10 @@ def main():
     worst = min(cl.values())
     for k, v in cl.items():
         print(f"  {k}: {v:.3f} mm")
-    # The loft follows the helix between sections, not exactly on it: the
-    # closest point comes out about 5 um short of the gap, at 0.25 a side
-    # and at 0.1 alike. So the allowance is absolute, a hundredth of a
-    # millimetre, far under what a 0.4 mm nozzle resolves.
+    # The closest point comes out about 5 um short of the gap, lofted or
+    # extruded alike: gear.py draws each flank as two arcs through involute
+    # points, not the involute itself. So the allowance is absolute, a
+    # hundredth of a millimetre, far under what a 0.4 mm nozzle resolves.
     if worst < gap["allowance_mm"] / 2.0 - 0.01:
         raise SystemExit(f"planetary: the closest mesh is {worst:.3f} mm, "
                          f"under the {gap['allowance_mm'] / 2:g} mm the "
@@ -570,11 +573,13 @@ def main():
 
     out.mkdir(parents=True, exist_ok=True)
     stl = out / "planetary.stl"
-    # Chords a tenth of the gap: at export_stl's own 0.1 mm they took 0.03
-    # mm a side off a printed gap (measured on the coupon's STL), more than
-    # a tenth of what is left between the teeth at 0.1 a side.
-    exp = d.call("export_stl", path=str(stl),
-                 deflection=gap["allowance_mm"] / 2.0 / 10.0)
+    # A printed part exports at its profile's chord deviation (else a tenth
+    # of its smallest gap): at the old 0.1 mm the chords took 0.03 mm a side
+    # off every gap. The reply says what it used.
+    exp = d.call("export_stl", path=str(stl))
+    if exp.get("deflection_mm", 1.0) > gap["allowance_mm"] / 2.0 / 5.0:
+        raise SystemExit(f"planetary: the STL's chords ({exp}) can take a "
+                         f"fifth of the gap")
     if exp.get("shells") != len(ids) or not exp.get("watertight", True):
         raise SystemExit(f"planetary: the STL is not {len(ids)} separate "
                          f"watertight shells: {exp}")
@@ -585,10 +590,31 @@ def main():
     # One mesh cycle finely (every tooth pair passes through every phase of
     # its mesh in it), then a whole orbit of the planets coarsely.
     cycle = 360.0 * (s["zs"] + s["zr"]) / (s["zs"] * s["zr"])
-    motion = {}
+    # The mesh check's triangles a fifth of the gap: at its derived 0.2 mm
+    # they were coarser than the 0.1 mm the teeth clear by.
+    clash = gap["allowance_mm"] / 2.0 / 5.0
+    motion = {"clash_deflection_mm": clash, "negative_controls": {}}
+    # First, that this check can fail: planet 1 put half a tooth out, and
+    # then only 0.4 mm along its pitch circle, must each clash.
+    rels = {r["name"]: r for r in d.call("list_relations")["relations"]}
+    r1 = rels["sun : planet 1"]
+    rp_planet = s["module"] * s["zp"] / 2.0
+    for label, off in (("half a tooth", math.pi / s["zp"]),
+                       ("0.4 mm", 0.4 / rp_planet)):
+        d.call("set_relation", id=r1["id"], phase=r1["phase"] + off)
+        r = run_motion(d, mates, s, f"control: {label}", cycle, 24, "mesh",
+                       clash)["result"]
+        motion["negative_controls"][label] = r["collision_status"]
+        print(f"  negative control, planet 1 {label} out: "
+              f"{r['collision_status']}")
+        if r["clean"]:
+            raise SystemExit(f"planetary: planet 1 {label} out of phase "
+                             f"reads clean; the clash check cannot see "
+                             f"this gap")
+    d.call("set_relation", id=r1["id"], phase=r1["phase"])
     for name, to, n in (("one mesh cycle", cycle, 24),
                         ("one orbit", 360.0 * s["ratio"], 240)):
-        r = run_motion(d, mates, s, name, to, n, "mesh")["result"]
+        r = run_motion(d, mates, s, name, to, n, "mesh", clash)["result"]
         motion[name] = {"to_deg": to, "samples": n,
                         "status": r["collision_status"],
                         "summary": r["receipt"]["summary"]}
@@ -600,7 +626,7 @@ def main():
 
     study = None
     if args.study:
-        study = sun_study(d, s, ph, args.material)
+        study = sun_study(d, s, ph, material_of(d, proc))
         res = study["results"]
         vm = res["max_von_mises_mpa"]
         print(f"  sun under a {PINCH_N:g} N pinch "
