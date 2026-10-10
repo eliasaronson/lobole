@@ -284,8 +284,13 @@ void DrawLibraryPage(const LibraryPage& page) {
   names = page.names();
 
   ImGui::Separator();
-  if (names.empty())
-    ImGui::TextDisabled("No %ss yet.", noun.c_str());
+  if (names.empty()) {
+    // Wrapped: "No print profiles yet." is wider than the narrowest list.
+    ImGui::PushStyleColor(ImGuiCol_Text,
+                          ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("No %ss yet.", noun.c_str());
+    ImGui::PopStyleColor();
+  }
   for (size_t i = 0; i < names.size(); i++) {
     ListRowSpec row;
     row.glyph = page.icon;
