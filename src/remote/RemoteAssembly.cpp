@@ -1937,8 +1937,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error(
             "a relation over several mates takes `constant` (sum of "
             "coefficient * dof), not a phase in one member's unit");
-      // rpc-params: sun, ring, carrier, planet, teeth_sun, teeth_ring,
-      // teeth_planet
+      // rpc-params: sun, ring, carrier, planet
+      // rpc-params: teeth_sun, teeth_ring, teeth_planet
       const auto member = [&](const char* key) {
         return TermFromRequest(state, p.at(key), key, false);
       };
