@@ -13,7 +13,7 @@ registry, and the frame keeps drawing. The rule every job follows:
 | field | meaning |
 |---|---|
 | `id` | handed out by `StartBackgroundJob` from a session counter, never reused: the handle a study job is asked about and cancelled by |
-| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"`, `"contact"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
@@ -362,6 +362,20 @@ A job makes the work asynchronous; the setup that hands the worker pure data
 is main-thread by construction. `StartMotionRun` snapshots every document
 under the assembly before the worker exists, so the cost of copying a
 Document is paid on the frame.
+
+## Contact reports
+
+`contact_report {async: true}` is a cancellable `contact` job, one at a
+time ([inspect](../inspect/README.md#clashes-contact-and-floating-parts)).
+The handler gathers on the main thread (the bodies placed in world space,
+their boxes, the mates) and hands the worker DEEP COPIES
+(`CADShape::DetachedUnlocated`), since the frame may mesh the document's
+shapes while the worker reads them. The worker runs the same sweep the
+synchronous call does, writes the share of pairs checked to `fraction`, and
+stops dispatching pairs on a cancel; its `finish` keeps the report in
+`AppState::contactReports` (the last eight) for `contact_status {job}`, and
+a cancelled run keeps none. It is owned by the RPC connection that started it
+unless `outlive_client: true`.
 
 ## What is not on the registry
 

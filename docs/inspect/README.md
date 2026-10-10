@@ -55,6 +55,31 @@ measurement can span two parts or two occurrences.
   where the exact extrema search is pathological (every face pair equally
   far, nothing prunes).
 
+**Exact distance between whole shapes** (`ExactDistance`,
+`src/core/Measure.cpp`) asks the meshes where the answer is and the B-Rep
+what it is. The cached meshes name every face pair whose triangles lie within
+two deflections of the nearest; a pair whose triangles are further from the
+best exact answer found than the two deflections together cannot beat it and
+is skipped; the rest are single face-pair extrema (`Extrema_ExtFlag_MIN`),
+run on every core. A list longer than 128 pairs is asked again of meshes ten
+times finer, built on copies so the document's triangulation is untouched.
+Only a list past 4096 pairs goes to BRepExtrema as two whole shapes. The cap
+is fixed, not derived from the thread count, so a one-thread run gives the
+same answer bit for bit. Extrema write nothing onto the shapes (unlike a
+boolean, [below](#query-booleans-are-non-destructive)); the meshes are built
+before the workers start, and a sweep warms every one first
+(`collide::Warm`).
+
+Between two whole shapes `measure` also reports `overlap_volume` / `clash`.
+When the distance it has just measured is positive, the surfaces meet
+nowhere, so the solids overlap only if one lies wholly inside the other; one
+vertex of each solid classified against the other settles that, and the
+boolean is not run. Measured on a 70 mm planetary gear set (herringbone teeth
+0.1 mm apart): a sun and planet 15-24 s before, 0.6-1.3 s after; a planet in
+the ring 29-32 s before, 4-6 s after; the same sun and planet with
+twisted-extrude (helicoid) teeth 21.5 s before, 0.5-1 s after. A face or edge pair asks
+BRepExtrema for the minimum only, not MINMAX.
+
 **GUI.** The Measure tool (toolbar, `Ctrl+Shift+M`) works on part, assembly
 and CAM job tabs. It picks faces, edges, whole bodies, whole occurrences, and
 corners.
@@ -215,7 +240,33 @@ an overlap joins two bodies into one component, like a weld. A pair whose
 shapes carry more than `exact_face_budget` faces between them (default 20000
 — an imported mesh is one face per triangle) is not started and is listed in
 `not_checked`: the deadline cannot preempt a boolean already running, so one
-such pair would hang the sweep.
+such pair would hang the sweep. Both scopes are bounded the same way
+(`max_pairs`, `deadline_s`, the coverage fields and a receipt), run their
+pairs in parallel, and say `clash` when `clashes` is not empty, which the
+receipt's "no pair interferes" reads.
+
+- **`mode: mesh`** screens each pair on the tessellation first. A pair whose
+  triangles cross goes to the exact boolean. One whose triangles do not has
+  its exact distance measured (`Measure::ClearanceBetween`), and that settles
+  it without a boolean when the distance is positive and no solid of either
+  side lies wholly inside the other (one vertex of each solid, classified
+  exactly). Anything else goes to the boolean. The answer is the exact one,
+  with the same states, distances, clashes and press fits; each pair says
+  how it was settled (`checked: distance | boolean`), and `mesh_cleared`
+  counts the ones the distance settled. On a 70 mm planetary gear set (five
+  lofted herringbone gears, teeth 0.1 mm apart) the print part's body scope
+  took 445 s and the assembly 244 s; both now take about 30 s exact and
+  24 s in mesh mode, which spares the booleans between meshing teeth.
+- **`async: true`** runs the sweep as a `contact` job and answers `{job}`;
+  `contact_status {job}` reports `fraction` (pairs checked) while it runs
+  and the report once it is done, and `cancel_background_job {kind:
+  "contact"}` stops it (a cancelled run keeps no report). One runs at a
+  time. Like a study job it is cancelled when the connection that started it
+  closes, unless `outlive_client: true`. The gather (the bodies, placed, and
+  the mates) runs on the main thread and hands the worker deep copies
+  (`CADShape::DetachedUnlocated`), because the frame may mesh the document's
+  own shapes while the worker reads them; the copies' cached meshes are
+  dropped when the run ends (`collide::Forget`).
 
 ### Designed overlaps
 
@@ -436,11 +487,18 @@ exact to rounding, not to the decimal a person would write.
 ## How it is tested
 
 `test_measure.cpp` (enclosed area: four wall bodies ring exactly the
-floor, a gap encloses nothing, a plate encloses its bore level and tilted),
-`test_meshcollide.cpp` (agreement with the exact boolean
+floor, a gap encloses nothing, a plate encloses its bore level and tilted;
+the exact distance over a 96-gon shaft in its bore, concentric and off
+centre, against BRepExtrema on the whole shapes, and `ClearanceBetween`
+declining a buried box), `test_meshcollide.cpp` (agreement with the exact boolean
 on overlapping, clear and enclosed pairs; deflection scaling; the
 placement-keyed cache; a pin in a clearance hole reads clear), and the
-headless smokes `measure_smoke`, `contact_smoke`, `compare_smoke`,
+headless smokes `measure_smoke`, `contact_smoke` (also: `contact_report`
+in mesh mode naming the clashes and distances the exact one does, and an
+async run reporting progress while the instance answers `ping`, landing the
+synchronous report, and ending `cancelled` when cancelled; a test-only
+`DESIGNER_TEST_CONTACT_PAIR_MS` holds each async pair so the run is seen
+running on any machine), `compare_smoke`,
 `query_smoke`, `strict_inputs_smoke`, `papercuts_smoke`,
 `sweep_parallel_smoke` (a one-thread sweep and an all-thread sweep give
 byte-identical reports). Designed overlaps: `test_thread.cpp`,

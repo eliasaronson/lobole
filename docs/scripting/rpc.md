@@ -186,6 +186,22 @@ the active tab never changed.
   truncated sweep, a pair over budget) is `unverifiable`, never a pass, so
   "could not check" cannot read as "clean".
 
+## Long calls run as jobs
+
+A call that can take minutes takes `{async: true}` and answers at once with
+the id of a background job
+([the registry](../ui/long-operations.md#the-registry)):
+`run_study`, `mesh_study`, `run_motion_study`, `export_motion_video`,
+`cam_toolpath`, `update_drawing`, `check_requirements` and `contact_report`.
+`background_jobs` lists every running job with its kind and `fraction`. Each
+domain has a status call that reports a running job and, once it has ended,
+how (`done | cancelled | failed`) and its result: `study_status {job}` for
+the study jobs, `motion_status`, `contact_status {job}` for a contact
+report. A job started over RPC that belongs to a study or a contact report is
+cancelled when its connection closes, unless the call said `outlive_client:
+true`; `cancel_study {job}` or `cancel_background_job {kind}` cancels one by
+hand. The instance answers other calls while a job runs.
+
 ## Refusals
 
 An error is read once and must be actionable without another round trip.
