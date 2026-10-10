@@ -40,7 +40,7 @@ and the call a person would make agree by construction.
 
 | kind | document | through | reads | keys besides `document` |
 |---|---|---|---|---|
-| `study_probe` | part | `run_study`, `probe_study` | mm (or as `unit` says) | `study`, `case?`, and one face (`face`, `at?`, `quantity?`: translation \| rotation \| displacement_at) or a formula (`readings`, `expression`, `unit?`) |
+| `study_probe` | part | `run_study`, `probe_study` | mm, deg, MPa (or as `unit` says) | `study`, `case?`, and one face (`face`, `at?`, `quantity?`: translation \| rotation \| displacement_at \| von_mises_max \| von_mises_mean) or a formula (`readings`, `expression`, `unit?`) |
 | `study_result` | part | `run_study`, `study_results` | mm, MPa, or a factor | `study`, `quantity`: max_displacement \| max_von_mises \| factor_of_safety, `case?` |
 | `clearance` | assembly | the gap `interference` measures | mm | `a`, `b` (top-level occurrences), `mode?`: mesh \| exact, `motion_study?` |
 | `contact` | assembly | `interference` | verdict | `a`, `b`, `expect`: clear \| touching \| not_clashing |
@@ -110,11 +110,21 @@ requirement unresolved rather than a smaller room, and a plane through a
 door or window encloses 0 with a note in `detail` saying the ring is open
 there.
 
+**The stress on a face** (`study_probe`, `quantity: von_mises_max` or
+`von_mises_mean`, MPa): the von Mises stress `probe_study` reads ON the face,
+its largest nodal value or its area-weighted mean
+([probing a face](../simulation/README.md#probing-a-face)). A study's global
+peak often sits in a sharp corner whose value grows with the mesh; a tooth
+root or a fillet is the stress a design is held to. The Simulation window's
+pinned probes make one ("Add requirement"), bounded at most the material's
+yield.
+
 **A formula over several faces** (`study_probe` with `readings`): each
 reading is a `probe_study` of one face, `{face, at?}`, and the expression
 sees `<name>_tx/_ty/_tz` (its translation, mm), `_rx/_ry/_rz` (its rotation,
-radians), `_dx/_dy/_dz` (its motion carried to `at`) and `_cx/_cy/_cz` (its
-centroid), beside the project's variables. It is how a requirement reads
+radians), `_dx/_dy/_dz` (its motion carried to `at`), `_cx/_cy/_cz` (its
+centroid) and `_vmmax/_vmmean` (the stress on it, MPa), beside the
+project's variables. It is how a requirement reads
 what a body held by several faces did: the pan/tilt head's lens, carried by
 two bearing bores, a shoulder and a worm on a ledge
 ([generators/pantilt](../../generators/pantilt/README.md#requirements)).

@@ -82,9 +82,10 @@ solver and mate frames speak radians. Rules:
   so `dof_b = ratio · dof_a + phase` stays coherent.
 
 **RPC parameters name their unit.** A parameter naming a physical quantity
-carries a unit suffix (`angle_deg`, `tolerance_mm`) or has its unit named
-in its `MethodDoc` row (`add_load`'s `magnitude` is newtons for a force, MPa
-for a pressure). A wrong unit is invisible in the answer (a mate pinned at 60
+carries a unit suffix (`angle_deg`, `tolerance_mm`, a torque's
+`torque_nmm` in N·mm, a force's `force_n`) or has its unit named in its
+`MethodDoc` row (`add_load`'s `magnitude` is newtons for a force, MPa for a
+pressure). `torque` and `moment` count as dimensional stems. A wrong unit is invisible in the answer (a mate pinned at 60
 radians, an FEM load that scales every result), so the name is where it has
 to be caught.
 
