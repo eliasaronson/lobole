@@ -308,6 +308,11 @@ struct ExplodedView {
 // worm:  rotation -> rotation on crossed axes, ratio +-starts/teeth with the
 //        sign from the worm's hand and where it sits (v146,
 //        docs/assemblies/relations.md#worm)
+// linear_n: sum of coefficient * dof over SEVERAL mates = constant (v171,
+//        docs/assemblies/relations.md#relations-over-several-mates)
+// epicyclic: Willis over {sun, ring, carrier}, stored as that linear_n
+//        relation with the tooth counts it came from
+// planet: a planet's own turn on its carrier, over {sun, carrier, planet}
 enum class RelationKind {
   Gear,
   Rack,
@@ -317,9 +322,26 @@ enum class RelationKind {
   Cam,
   Freewheel,
   Click,
-  Worm
+  Worm,
+  LinearN,
+  Epicyclic,
+  Planet
 };
 enum class MateDof { Rotation, Offset };
+
+// One member of a relation over several mates (v171): the relation is
+// sum(coefficient * dof) = constant, the constant held in Relation::phase.
+// An epicyclic's terms are {sun, ring, carrier} in that order and a
+// planet's {sun, carrier, planet} — the member a walk solves for last is
+// the last; `teeth` is the member's tooth count
+// where the kind has one (0 for a carrier, and for every linear_n term).
+struct RelationTerm {
+  uint64_t mate = 0;
+  std::vector<uint64_t> path; // as Relation::mateAPath reads
+  MateDof dof = MateDof::Rotation;
+  double coefficient = 1.0;
+  int teeth = 0;
+};
 
 struct Relation {
   uint64_t id = 0;  // stable, shares the assembly's id counter
@@ -374,7 +396,27 @@ struct Relation {
   MateDof rideDof = MateDof::Offset;
   double rideApplied = 0.0; // what the last pass added, to take back
   uint64_t threadPart = 0, threadFeature = 0; // authoritative screw thread
+  // A gear's or a chain's tooth counts (v171), when its ratio was derived
+  // from them: 0 = a bare ratio. `internal` is a gear meshing INSIDE a ring
+  // (a planet in its ring), which turns the same way: ratio +teethA/teethB.
+  int teethA = 0, teethB = 0;
+  bool internal = false;
+  // linear_n, epicyclic and planet (v171): the members, and mateA/mateB are
+  // unused (0). `phase` is the relation's constant.
+  std::vector<RelationTerm> terms;
+  bool HasTerms() const {
+    return kind == RelationKind::LinearN || kind == RelationKind::Epicyclic ||
+           kind == RelationKind::Planet;
+  }
   std::string error; // set by the solve: a mate gone, a DOF missing
+  // Transient too: a relation over several mates that the solve had to
+  // complete by holding a member nothing drove ("ring (mate 7) held where it
+  // stands"). Empty when every member it needed was driven.
+  std::string held;
+  // ...and which terms those were: a loop pass PINS them where propagation
+  // held them, or its least squares would spread the turn over every member
+  // and disagree with the tree.
+  std::vector<size_t> heldTerms;
 };
 
 // The lift a cam profile gives at `angleRad`, and its slope (mm per radian).

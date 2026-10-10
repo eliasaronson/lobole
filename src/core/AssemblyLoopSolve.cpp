@@ -403,9 +403,36 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
     double ratio, phase;
     bool rotationB;
     std::vector<std::pair<double, double>> lift; // cam only (v88)
+    // A relation over several mates (v171): (column, coefficient) per term,
+    // the coefficients already divided by the largest.
+    std::vector<std::pair<int, double>> terms;
   };
   std::vector<RelationRow> relRows;
   for (const LoopRelation& r : problem.relations) {
+    if (!r.terms.empty()) {
+      RelationRow row{-1, -1, 0.0, 0.0, true, {}, {}};
+      double scale = 0.0;
+      for (const LoopRelation::Term& t : r.terms)
+        scale = std::max(scale, std::abs(t.coefficient));
+      bool all = scale > 0.0;
+      for (const LoopRelation::Term& t : r.terms) {
+        const int c =
+            DofColumn(problem.mates[t.mate].type, t.dof, pack.columnOf[t.mate]);
+        if (c < 0) {
+          all = false;
+          break;
+        }
+        row.terms.emplace_back(c, t.coefficient / scale);
+        // Weighed as a rotation (by the characteristic length) only when
+        // every member turns; a mixed row stays in its own units.
+        row.rotationB = row.rotationB && t.dof == MateDof::Rotation;
+      }
+      if (!all)
+        continue;
+      row.phase = r.phase / scale;
+      relRows.push_back(std::move(row));
+      continue;
+    }
     const int ca =
         DofColumn(problem.mates[r.mateA].type, r.dofA, pack.columnOf[r.mateA]);
     const int cb =
@@ -467,6 +494,13 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
     // part is, so radians and millimetres weigh alike in the least squares.
     for (size_t k = 0; k < relRows.size(); k++) {
       const RelationRow& rr = relRows[k];
+      if (!rr.terms.empty()) {
+        double v = -rr.phase;
+        for (const auto& [col, c] : rr.terms)
+          v += c * qq[col];
+        r[cutRows + static_cast<int>(k)] = rr.rotationB ? v * charLen : v;
+        continue;
+      }
       // A cam reads its lift table where the others multiply by a ratio.
       // The residual is still "what B is, less what A says it should be",
       // and the numeric Jacobian differentiates the spline — which is why
@@ -735,6 +769,21 @@ std::vector<Component> SplitIntoComponents(const LoopProblem& p) {
     c.sub.pinned.push_back({subIndexOf[pin.mate], pin.dof, pin.value});
   }
   for (const LoopRelation& r : p.relations) {
+    if (!r.terms.empty()) {
+      // Over several mates: a row only when EVERY member is in this one
+      // component, the same rule as two.
+      const size_t s0 = slotFor(p.mates[r.terms.front().mate].aOcc);
+      bool one = true;
+      for (const LoopRelation::Term& t : r.terms)
+        one = one && slotFor(p.mates[t.mate].aOcc) == s0;
+      if (!one)
+        continue;
+      LoopRelation sub = r;
+      for (LoopRelation::Term& t : sub.terms)
+        t.mate = subIndexOf[t.mate];
+      out[s0].sub.relations.push_back(std::move(sub));
+      continue;
+    }
     const size_t sa = slotFor(p.mates[r.mateA].aOcc);
     const size_t sb = slotFor(p.mates[r.mateB].aOcc);
     if (sa != sb)

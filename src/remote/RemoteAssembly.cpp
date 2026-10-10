@@ -214,7 +214,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "dof_b = ratio * dof_a + phase. The ratio is DERIVED from the kind's "
      "own numbers when given (screw may instead reference thread_part and "
      "thread_feature) — gear: {teeth_a, teeth_b} (ratio = "
-     "-teeth_a/teeth_b, so meshing gears counter-rotate); CHAIN: the same "
+     "-teeth_a/teeth_b, so meshing gears counter-rotate; with {internal: "
+     "true} +teeth_a/teeth_b, a gear meshing inside a ring; teeth and a "
+     "ratio together are refused); CHAIN: the same "
      "but the ratio KEEPS its sign, because a chain or belt turns both "
      "sprockets the same way; rack: {pitch_radius} mm (a's rotation drives "
      "b's slide); screw: {pitch} mm per turn on ONE cylindrical mate (pass "
@@ -267,23 +269,52 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "a_path / b_path ([occurrence id] of a FLEXIBLE sub-assembly placement) "
      "make that side a mate INSIDE it, by the sub-assembly's own mate id — "
      "an engine's chain driving its pump's camshaft; refused for a "
-     "freewheel or a click, whose history would be per placement.",
-     "thread_part, thread_feature, a, a_path, b, b_path, dof_b, drives, "
-     "duration_deg, hand, lead, "
-     "lift, name, ride_deg, ride_dof, ride_mate, ride_mm, teeth, "
+     "freewheel or a click, whose history would be per placement. "
+     "OVER SEVERAL MATES "
+     "(docs/assemblies/relations.md#relations-over-several-mates) the "
+     "relation is sum(coefficient * dof) = constant, "
+     "its members named by role instead of a and b (each a mate id, or "
+     "{mate, path} inside a flexible placement): LINEAR_N {terms: [{mate, "
+     "dof?, coefficient}, ...]} (two or more; dof required of a cylindrical "
+     "mate); EPICYCLIC {sun, ring, carrier, teeth_sun, teeth_ring, planets?: "
+     "[{mate, teeth, constant?}]} — Willis, teeth_sun*sun + teeth_ring*ring "
+     "- (teeth_sun+teeth_ring)*carrier = constant, all three revolute "
+     "rotations measured in one frame; each planet adds a PLANET relation "
+     "for its own turn on the carrier (planet + (teeth_sun/teeth)*(sun - "
+     "carrier) = constant), returned in `planets`; PLANET {planet, sun, "
+     "carrier, teeth_planet, teeth_sun} is that one alone. `constant` "
+     "(radians) defaults to where the members stand, so adding one moves "
+     "nothing; ratio and phase are refused. In a mate tree the last "
+     "unsettled member is solved for; when two are left a member is HELD "
+     "where it stands, the first in term order (the ring before the carrier "
+     "when the sun is driven), and the relation's `held` says which.",
+     "thread_part, thread_feature, a, a_path, b, b_path, carrier, constant, "
+     "dof_b, drives, duration_deg, hand, internal, lead, "
+     "lift, name, planet, planets, ride_deg, ride_dof, ride_mate, ride_mm, "
+     "ring, sun, teeth, teeth_planet, teeth_ring, teeth_sun, terms, "
      "phase, pitch, pitch_radius, ratio, "
      "rise, rise_deg, start_deg, starts, teeth_a, teeth_b, type"},
     {"set_relation",
      "Edit a relation's {ratio?, phase?, name?} by {id}; a freewheel's "
      "{lead?} too (b's unit, radians), which moves b onto a's drive line "
-     "at that lead — re-engaging it by hand.",
-     "id, lead, name, phase, ratio"},
+     "at that lead — re-engaging it by hand. A gear or chain made from "
+     "teeth takes {teeth_a?, teeth_b?} (and a gear {internal?}) instead of "
+     "a ratio; an epicyclic {teeth_sun?, teeth_ring?}, a planet "
+     "{teeth_planet?, teeth_sun?}, and every relation over several mates "
+     "{constant?} (radians) instead of a phase.",
+     "constant, id, internal, lead, name, phase, ratio, teeth_a, teeth_b, "
+     "teeth_planet, teeth_ring, teeth_sun"},
     {"remove_relation", "Remove a relation by id.", "id"},
-    {"list_relations", "List relations with status/errors.", "",
-     remote::NoFlags,
-     "relations[]{type,id,name,kind,mate_a,mate_b,dof_a,dof_b,ratio,phase,"
+    {"list_relations",
+     "List relations with status/errors. A relation over several mates "
+     "(linear_n, epicyclic, planet) lists `terms` and `constant` in place "
+     "of mate_a/mate_b/ratio/phase, and `held` names a member the last "
+     "solve held where it stood because nothing drove it.",
+     "", remote::NoFlags,
+     "relations[]{type,id,name,kind,mate_a?,mate_b?,dof_a?,dof_b?,ratio?,"
+     "phase?,teeth_a?,teeth_b?,internal?,terms?,constant?,"
      "thread_part?,thread_feature?,lift?,drives?,lead?,teeth?,ride?,"
-     "mate_a_path?,mate_b_path?,error?}"},
+     "mate_a_path?,mate_b_path?,error?,held?}"},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
      "Run the mate solver. Returns every mate with a `status` (satisfied | "
@@ -743,6 +774,81 @@ const Mate* MateFromRequest(ui::AppState& state, const RpcParams& p,
     throw std::runtime_error(path.empty() ? why
                                           : std::string(pathKey) + ": " + why);
   return mate;
+}
+
+// A member of a relation over several mates, as add_relation takes it: a
+// mate id, or {mate, path?} for one inside a flexible placement, plus, for a
+// linear_n term, {dof?, coefficient}. A cylindrical mate has both DOFs, so
+// its term must say which; any other mate has one and `dof` may be left out.
+RelationTerm TermFromRequest(ui::AppState& state, const json& j,
+                             const std::string& role, bool linear) {
+  RelationTerm t;
+  if (j.is_number_unsigned() || j.is_number_integer()) {
+    t.mate = j.get<uint64_t>();
+  } else if (j.is_object() && j.contains("mate")) {
+    t.mate = j.at("mate").get<uint64_t>();
+    if (j.contains("path") && !j.at("path").is_null())
+      t.path = j.at("path").get<std::vector<uint64_t>>();
+  } else {
+    throw std::runtime_error(role + " is a mate id, or {mate, path} for a "
+                                    "mate inside a flexible placement");
+  }
+  if (j.is_object())
+    for (auto it = j.begin(); it != j.end(); ++it) {
+      const std::string& key = it.key();
+      if (key != "mate" && key != "path" &&
+          !(linear && (key == "dof" || key == "coefficient")) &&
+          !(!linear && key == "teeth"))
+        throw std::runtime_error(role + " has no '" + key + "' — " +
+                                 (linear ? "a term is {mate, path?, dof?, "
+                                           "coefficient}"
+                                         : "a member is a mate id or {mate, "
+                                           "path?}"));
+    }
+  std::string why;
+  const Mate* m = assembly::MateAtPath(*state.assembly, t.path, t.mate,
+                                       ui::AssemblyResolverFor(state), &why);
+  if (m == nullptr)
+    throw std::runtime_error(role + ": " + why);
+  const bool turns = assembly::MateHasDof(m->type, MateDof::Rotation);
+  const bool slides = assembly::MateHasDof(m->type, MateDof::Offset);
+  if (linear && j.is_object() && j.contains("dof"))
+    t.dof = DocumentIO::MateDofFromString(j.at("dof").get<std::string>());
+  else if (linear && turns && slides)
+    throw std::runtime_error(
+        role + ": mate " + std::to_string(t.mate) +
+        " is cylindrical and both turns and slides — give dof: rotation or "
+        "offset");
+  else
+    t.dof = linear && slides && !turns ? MateDof::Offset : MateDof::Rotation;
+  if (linear) {
+    if (!j.is_object() || !j.contains("coefficient"))
+      throw std::runtime_error(role + " needs its coefficient: the relation "
+                                      "is sum(coefficient * dof) = constant");
+    t.coefficient = j.at("coefficient").get<double>();
+  }
+  return t;
+}
+
+// A tooth count: a whole positive number.
+int TeethFromRequest(const json& j, const std::string& key) {
+  const double z = j.get<double>();
+  if (!(z > 0.0) || z != std::floor(z) || z > 1e6)
+    throw std::runtime_error(key + " is a tooth count, a whole number above "
+                                   "zero");
+  return static_cast<int>(z);
+}
+
+// Where a relation over several mates stands: its constant, as the members
+// are posed now, so adding one moves nothing.
+double ConstantAsItStands(ui::AppState& state, const Relation& r) {
+  double k = 0.0;
+  for (const RelationTerm& t : r.terms)
+    k += t.coefficient * assembly::MateDofAt(*state.assembly, t.path, t.mate,
+                                             t.dof,
+                                             ui::AssemblyResolverFor(state))
+                             .value_or(0.0);
+  return k;
 }
 
 // The mates inside every flexible placement, by path, as solve_assembly
@@ -1805,6 +1911,165 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     Relation r;
     r.kind =
         DocumentIO::RelationKindFromString(p.at("type").get<std::string>());
+    if (r.HasTerms()) {
+      // Over several mates (v171,
+      // docs/assemblies/relations.md#relations-over-several-mates): the
+      // members are named by role, not a and b, and the constant is not a
+      // phase in one member's unit.
+      for (const char* k : {"a", "b", "a_path", "b_path"})
+        if (p.contains(k))
+          throw std::runtime_error(
+              std::string("a ") + DocumentIO::RelationKindToString(r.kind) +
+              " relation names its members, not a and b: " +
+              (r.kind == RelationKind::LinearN
+                   ? "terms [{mate, dof?, coefficient}, ...]"
+               : r.kind == RelationKind::Epicyclic
+                   ? "sun, ring and carrier"
+                   : "planet, sun and carrier"));
+      if (p.contains("ratio"))
+        throw std::runtime_error(
+            std::string("a ") + DocumentIO::RelationKindToString(r.kind) +
+            " relation has no ratio: " +
+            (r.kind == RelationKind::LinearN
+                 ? "each term carries its coefficient"
+                 : "its coefficients follow from the tooth counts"));
+      if (p.contains("phase"))
+        throw std::runtime_error(
+            "a relation over several mates takes `constant` (sum of "
+            "coefficient * dof), not a phase in one member's unit");
+      // rpc-params: sun, ring, carrier, planet, teeth_sun, teeth_ring,
+      // teeth_planet
+      const auto member = [&](const char* key) {
+        return TermFromRequest(state, p.at(key), key, false);
+      };
+      const auto teeth = [&](const char* key) {
+        return TeethFromRequest(p.at(key), key);
+      };
+      std::vector<Relation> made;
+      if (r.kind == RelationKind::LinearN) {
+        const json& terms = p.at("terms");
+        if (!terms.is_array())
+          throw std::runtime_error(
+              "terms is [{mate, path?, dof?, coefficient}, ...]");
+        for (size_t i = 0; i < terms.size(); i++)
+          r.terms.push_back(TermFromRequest(
+              state, terms.at(i), "term " + std::to_string(i + 1), true));
+        r.ratio = 1.0;
+        made.push_back(std::move(r));
+      } else if (r.kind == RelationKind::Epicyclic) {
+        made.push_back(assembly::MakeEpicyclic(
+            member("sun"), member("ring"), member("carrier"),
+            teeth("teeth_sun"), teeth("teeth_ring")));
+        // Each planet's own turn on the carrier, which the Willis
+        // equation does not give: a planet relation per planet.
+        if (p.contains("planets")) {
+          const json& planets = p.at("planets");
+          if (!planets.is_array())
+            throw std::runtime_error(
+                "planets is [{mate, teeth, path?, constant?}, ...]");
+          for (size_t i = 0; i < planets.size(); i++) {
+            const json& pj = planets.at(i);
+            const std::string role = "planet " + std::to_string(i + 1);
+            if (!pj.is_object() || !pj.contains("teeth"))
+              throw std::runtime_error(role +
+                                       " is {mate, teeth, path?, constant?}");
+            json bare = pj;
+            bare.erase("teeth");
+            bare.erase("constant");
+            Relation planet = assembly::MakePlanet(
+                TermFromRequest(state, bare, role, false), made[0].terms[0],
+                made[0].terms[2],
+                TeethFromRequest(pj.at("teeth"), role + " teeth"),
+                made[0].terms[0].teeth);
+            planet.name = p.value("name", std::string{}).empty()
+                              ? std::string{}
+                              : p.value("name", std::string{}) + " / " + role;
+            if (pj.contains("constant"))
+              planet.phase = pj.at("constant").get<double>();
+            else
+              planet.phase = ConstantAsItStands(state, planet);
+            made.push_back(std::move(planet));
+          }
+        }
+      } else {
+        made.push_back(assembly::MakePlanet(
+            member("planet"), member("sun"), member("carrier"),
+            teeth("teeth_planet"), teeth("teeth_sun")));
+      }
+      made[0].name = p.value("name", std::string{});
+      made[0].phase = p.contains("constant")
+                          ? p.at("constant").get<double>()
+                          : ConstantAsItStands(state, made[0]);
+      for (const Relation& each : made)
+        if (std::string why = assembly::RelationProblem(
+                *state.assembly, each, ui::AssemblyResolverFor(state));
+            !why.empty())
+          throw std::runtime_error(why);
+      // One planet mate named twice across the planets is a member used
+      // twice too, though no single relation shows it.
+      for (size_t i = 1; i < made.size(); i++)
+        for (size_t k = 1; k < i; k++)
+          if (made[i].terms[2].mate == made[k].terms[2].mate &&
+              made[i].terms[2].path == made[k].terms[2].path)
+            throw std::runtime_error("mate " +
+                                     std::to_string(made[i].terms[2].mate) +
+                                     " is planet " + std::to_string(k) +
+                                     " and planet " + std::to_string(i) +
+                                     " — each planet turns on a mate of its "
+                                     "own");
+      // Gears share an axis direction: a member more than 5 degrees off the
+      // first one's is named, as a gear pair's skew axles are.
+      json warnings = json::array();
+      if (r.kind != RelationKind::LinearN) {
+        std::optional<glm::dvec3> axis;
+        for (const Relation& each : made)
+          for (size_t i = 0; i < each.terms.size(); i++) {
+            const RelationTerm& t = each.terms[i];
+            const Mate* m =
+                assembly::MateAtPath(*state.assembly, t.path, t.mate,
+                                     ui::AssemblyResolverFor(state));
+            const auto f = m ? ui::MateConnectorWorldAt(state, t.path, m->a)
+                             : std::nullopt;
+            if (!f)
+              continue;
+            const glm::dvec3 z = glm::normalize(glm::dvec3((*f)[2]));
+            if (!axis)
+              axis = z;
+            else if (std::abs(glm::dot(*axis, z)) < 0.9962)
+              warnings.push_back(
+                  "the " + assembly::RelationTermRole(each, i) +
+                  "'s axis (mate " + std::to_string(t.mate) + ") is " +
+                  std::to_string(glm::degrees(
+                      std::acos(std::min(1.0, std::abs(glm::dot(*axis, z)))))) +
+                  " degrees off the sun's: an epicyclic train turns about "
+                  "one axis");
+          }
+      }
+      ui::SnapshotAssembly(state);
+      std::vector<uint64_t> ids;
+      for (Relation& each : made)
+        ids.push_back(state.assembly->AddRelation(std::move(each)));
+      ui::SolveActiveAssembly(state);
+      const auto withStatus = [&](uint64_t id) {
+        const Relation* rel = state.assembly->FindRelationById(id);
+        json rj = DocumentIO::RelationToJson(*rel);
+        if (!rel->error.empty())
+          rj["error"] = rel->error;
+        if (!rel->held.empty())
+          rj["held"] = rel->held;
+        return rj;
+      };
+      json out = withStatus(ids[0]);
+      if (ids.size() > 1) {
+        json planets = json::array();
+        for (size_t i = 1; i < ids.size(); i++)
+          planets.push_back(withStatus(ids[i]));
+        out["planets"] = std::move(planets);
+      }
+      if (!warnings.empty())
+        out["warnings"] = warnings;
+      return out;
+    }
     r.mateA = p.at("a").get<uint64_t>();
     r.mateB = p.at("b").get<uint64_t>();
     // rpc-params: a_path, b_path
@@ -1840,13 +2105,36 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // derived from the kind's own numbers.
     switch (r.kind) {
     case RelationKind::Gear:
+    case RelationKind::Chain:
+      // A chain is a gear whose ratio KEEPS its sign: a chain or a belt
+      // turns both sprockets the same way. Expressing one as a gear with a
+      // negated tooth count works and makes the sign a thing to remember
+      // instead of a thing to say, which is how a reversed conveyor gets
+      // modelled. So is an INTERNAL gear (v171): a planet in its ring
+      // turns the same way as the ring.
       r.dofA = r.dofB = MateDof::Rotation;
+      r.internal = p.value("internal", false);
+      if (r.internal && r.kind != RelationKind::Gear)
+        throw std::runtime_error(
+            "internal is a gear's (one meshing inside a ring); a chain keeps "
+            "its sign already");
       if (p.contains("teeth_a") || p.contains("teeth_b")) {
-        const double za = p.value("teeth_a", 0.0), zb = p.value("teeth_b", 0.0);
-        if (za <= 0.0 || zb <= 0.0)
+        if (!p.contains("teeth_a") || !p.contains("teeth_b"))
           throw std::runtime_error(
-              "a gear ratio needs both teeth_a and teeth_b (positive)");
-        r.ratio = -za / zb;
+              std::string("a ") + DocumentIO::RelationKindToString(r.kind) +
+              " ratio needs both teeth_a and teeth_b (positive)");
+        if (p.contains("ratio"))
+          throw std::runtime_error(
+              std::string("a ") + DocumentIO::RelationKindToString(r.kind) +
+              "'s ratio is derived from teeth_a and teeth_b: give the teeth "
+              "or a ratio, not both");
+        r.teethA = TeethFromRequest(p.at("teeth_a"), "teeth_a");
+        r.teethB = TeethFromRequest(p.at("teeth_b"), "teeth_b");
+        (void)assembly::DeriveFromTeeth(r);
+      } else if (r.internal) {
+        throw std::runtime_error(
+            "internal derives the ratio from teeth_a and teeth_b (+za/zb); "
+            "a bare ratio already carries its sign, so give the teeth");
       }
       break;
     case RelationKind::Rack:
@@ -1880,20 +2168,6 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       break;
     case RelationKind::Linear:
       r.dofA = r.dofB = MateDof::Offset;
-      break;
-    case RelationKind::Chain:
-      // A gear whose ratio KEEPS its sign: a chain or a belt turns both
-      // sprockets the same way. Expressing one as a gear with a negated
-      // tooth count works and makes the sign a thing to remember instead of
-      // a thing to say, which is how a reversed conveyor gets modelled.
-      r.dofA = r.dofB = MateDof::Rotation;
-      if (p.contains("teeth_a") || p.contains("teeth_b")) {
-        const double za = p.value("teeth_a", 0.0), zb = p.value("teeth_b", 0.0);
-        if (za <= 0.0 || zb <= 0.0)
-          throw std::runtime_error(
-              "a chain ratio needs both teeth_a and teeth_b (positive)");
-        r.ratio = za / zb;
-      }
       break;
     case RelationKind::Freewheel:
       // A one-way clutch (docs/assemblies/relations.md#freewheel). Its
@@ -2101,6 +2375,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       r.ratio = 1.0; // unused by a cam, but never zero (the zero check below)
       break;
     }
+    case RelationKind::LinearN:
+    case RelationKind::Epicyclic:
+    case RelationKind::Planet:
+      break; // handled above, before a and b are read
     }
     if (p.contains("ratio") && r.kind != RelationKind::Cam)
       r.ratio = p.at("ratio").get<double>();
@@ -2241,7 +2519,73 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(
           "lead is a freewheel's or a click's history; a " +
           std::string(DocumentIO::RelationKindToString(r->kind)) + " has none");
+    // v171: what a relation's numbers came from is what is edited. Every
+    // key is checked against the kind before anything changes.
+    const std::string kindName = DocumentIO::RelationKindToString(r->kind);
+    const auto refuse = [&](const std::string& key, const std::string& why) {
+      throw std::runtime_error(key + " is not a " + kindName +
+                               " relation's: " + why);
+    };
+    if (r->HasTerms()) {
+      if (p.contains("ratio"))
+        refuse("ratio", r->kind == RelationKind::LinearN
+                            ? "its terms carry their coefficients"
+                            : "its coefficients follow from its teeth");
+      if (p.contains("phase"))
+        refuse("phase", "a relation over several mates has a constant");
+    } else if (p.contains("constant")) {
+      refuse("constant", "it is dof_b = ratio * dof_a + phase");
+    }
+    if (p.contains("ratio") && r->teethA > 0)
+      refuse("ratio", "it is derived from teeth_a and teeth_b — edit those");
+    const bool toothed =
+        r->kind == RelationKind::Gear || r->kind == RelationKind::Chain;
+    for (const char* k : {"teeth_a", "teeth_b"})
+      if (p.contains(k) && (!toothed || r->teethA <= 0))
+        refuse(k, toothed ? "it was made from a bare ratio"
+                          : "only a gear's or a chain's");
+    if (p.contains("internal") && r->kind != RelationKind::Gear)
+      refuse("internal", "only a gear's");
+    if (p.contains("internal") && r->teethA <= 0)
+      refuse("internal", "a gear made from a bare ratio carries its sign "
+                         "in the ratio");
+    if (p.contains("teeth_sun") && r->kind != RelationKind::Epicyclic &&
+        r->kind != RelationKind::Planet)
+      refuse("teeth_sun", "only an epicyclic's or a planet's");
+    if (p.contains("teeth_ring") && r->kind != RelationKind::Epicyclic)
+      refuse("teeth_ring", "only an epicyclic's");
+    if (p.contains("teeth_planet") && r->kind != RelationKind::Planet)
+      refuse("teeth_planet", "only a planet's");
+    Relation edited = *r;
+    if (p.contains("teeth_a"))
+      edited.teethA = TeethFromRequest(p.at("teeth_a"), "teeth_a");
+    if (p.contains("teeth_b"))
+      edited.teethB = TeethFromRequest(p.at("teeth_b"), "teeth_b");
+    if (p.contains("internal"))
+      edited.internal = p.at("internal").get<bool>();
+    if (p.contains("teeth_sun"))
+      edited.terms[0].teeth = TeethFromRequest(p.at("teeth_sun"), "teeth_sun");
+    if (p.contains("teeth_ring"))
+      edited.terms[1].teeth =
+          TeethFromRequest(p.at("teeth_ring"), "teeth_ring");
+    if (p.contains("teeth_planet"))
+      edited.terms[2].teeth =
+          TeethFromRequest(p.at("teeth_planet"), "teeth_planet");
+    if (edited.teethA > 0 || !edited.terms.empty())
+      (void)assembly::DeriveFromTeeth(edited);
+    if (p.contains("constant"))
+      edited.phase = p.at("constant").get<double>();
+    if (p.contains("ratio") && p.at("ratio").get<double>() == 0.0)
+      throw std::runtime_error("a relation's ratio cannot be zero");
     ui::SnapshotAssembly(state);
+    r->teethA = edited.teethA;
+    r->teethB = edited.teethB;
+    r->internal = edited.internal;
+    r->terms = edited.terms;
+    if (r->teethA > 0 || r->HasTerms()) {
+      r->ratio = edited.ratio;
+      r->phase = edited.phase;
+    }
     if (p.contains("lead")) {
       // Putting the history back moves the OUTPUT onto the input's drive
       // line at that lead — otherwise the next solve reads the output as
@@ -2253,11 +2597,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
             *b, r->dofB,
             assembly::RelationValue(*r, assembly::MateDofValue(*a, r->dofA)));
     }
-    if (p.contains("ratio")) {
+    if (p.contains("ratio"))
       r->ratio = p.at("ratio").get<double>();
-      if (r->ratio == 0.0)
-        throw std::runtime_error("a relation's ratio cannot be zero");
-    }
     if (p.contains("phase"))
       r->phase = p.at("phase").get<double>();
     if (p.contains("name"))
@@ -2267,6 +2608,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     json out = DocumentIO::RelationToJson(*r);
     if (!r->error.empty())
       out["error"] = r->error;
+    if (!r->held.empty())
+      out["held"] = r->held;
     return out;
   }
   if (m == "remove_relation") {
@@ -2292,6 +2635,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       json rj = DocumentIO::RelationToJson(r);
       if (!r.error.empty())
         rj["error"] = r.error;
+      if (!r.held.empty()) // a member nothing drove, held where it stood
+        rj["held"] = r.held;
       arr.push_back(rj);
     }
     return json{{"relations", arr}};

@@ -2696,6 +2696,17 @@ def _mate_ref(key, mate):
     return out
 
 
+def _member(mate, **extra):
+    """A member of a relation over several mates (v171): `{mate, path?}`
+    plus whatever the member carries (a planet's teeth, a term's dof and
+    coefficient)."""
+    out = {"mate": _id(mate)}
+    if isinstance(mate, InnerMate):
+        out["path"] = mate.path
+    out.update({k: v for k, v in extra.items() if v is not None})
+    return out
+
+
 class Asm(_Tab):
     def place(self, part, at=None, fixed=False, name=None, flexible=False,
               configuration=None, material=None):
@@ -2916,11 +2927,45 @@ class Asm(_Tab):
     def ball(self, a, b, **kw):
         return self._mate("ball", a, b, **kw)
 
-    def gear(self, mate_a, mate_b, teeth_a, teeth_b, **kw):
+    def gear(self, mate_a, mate_b, teeth_a, teeth_b, internal=False, **kw):
+        """A gear pair from its tooth counts: meshing outside they
+        counter-rotate (ratio -teeth_a/teeth_b); `internal=True` is a gear
+        meshing INSIDE a ring, which turns the same way (+teeth_a/teeth_b)."""
         self.activate()
+        if internal:
+            kw["internal"] = True
         return self.app.add_relation(type="gear", **_mate_ref("a", mate_a),
                                      **_mate_ref("b", mate_b), teeth_a=teeth_a,
                                      teeth_b=teeth_b, **kw)
+
+    def epicyclic(self, sun, ring, carrier, teeth_sun, teeth_ring,
+                  planets=(), **kw):
+        """An epicyclic train by Willis (v171): sun, ring and carrier are
+        their revolute mates, all turning about one axis in one frame.
+        `planets` is [(planet_mate, teeth), ...], each planet's mate on the
+        carrier; every one gets its own relation for its turn there.
+        Driving one member holds the next in term order (the ring before the
+        carrier) where it stands, and the relation's `held` says so
+        (docs/assemblies/relations.md#relations-over-several-mates)."""
+        self.activate()
+        args = dict(type="epicyclic", sun=_member(sun), ring=_member(ring),
+                    carrier=_member(carrier), teeth_sun=teeth_sun,
+                    teeth_ring=teeth_ring)
+        if planets:
+            args["planets"] = [_member(m, teeth=z) for m, z in planets]
+        return self.app.add_relation(**args, **kw)
+
+    def linear_n(self, terms, **kw):
+        """sum(coefficient * dof) = constant over several mates (v171):
+        `terms` is [(mate, coefficient), ...] or [(mate, coefficient, dof),
+        ...] — dof "rotation" or "offset", required of a cylindrical mate.
+        `constant` defaults to where the members stand."""
+        self.activate()
+        out = []
+        for t in terms:
+            mate, coefficient, dof = (tuple(t) + (None,))[:3]
+            out.append(_member(mate, coefficient=coefficient, dof=dof))
+        return self.app.add_relation(type="linear_n", terms=out, **kw)
 
     def worm(self, worm_mate, wheel_mate, starts, teeth, hand, **kw):
         """Couple a worm's revolute to its wheel's on crossed axes. The ratio

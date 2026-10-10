@@ -247,6 +247,27 @@ FlexibleExpansion ExpandFlexible(const AssemblyDocument& parent,
     for (const Relation& r : sub.GetRelations()) {
       if (sub.RelationSuppressedIn(cfgId, r.id))
         continue;
+      if (r.HasTerms()) {
+        // Over several mates (v171): every member must move here, or the
+        // relation stays behind with the unit it would have coupled.
+        Relation cp = r;
+        bool all = true;
+        for (RelationTerm& t : cp.terms) {
+          const auto it = t.path.empty() ? ex.mateIdOf.find({F.id, t.mate})
+                                         : ex.mateIdOf.end();
+          if (it == ex.mateIdOf.end()) {
+            all = false;
+            break;
+          }
+          t.mate = it->second;
+        }
+        if (!all)
+          continue;
+        cp.id = next++;
+        cp.error.clear();
+        doc.GetRelations().push_back(std::move(cp));
+        continue;
+      }
       const auto a = ex.mateIdOf.find({F.id, r.mateA});
       const auto b = ex.mateIdOf.find({F.id, r.mateB});
       if (a == ex.mateIdOf.end() || b == ex.mateIdOf.end())
@@ -288,8 +309,11 @@ FlexibleExpansion ExpandFlexible(const AssemblyDocument& parent,
     }
   // ...and its relations naming an inner mate by path name the twin.
   for (Relation& r : doc.GetRelations()) {
-    for (auto [mate, path] : {std::pair{&r.mateA, &r.mateAPath},
-                              std::pair{&r.mateB, &r.mateBPath}}) {
+    std::vector<std::pair<uint64_t*, std::vector<uint64_t>*>> sides{
+        {&r.mateA, &r.mateAPath}, {&r.mateB, &r.mateBPath}};
+    for (RelationTerm& t : r.terms) // v171: every member of a hyperedge
+      sides.emplace_back(&t.mate, &t.path);
+    for (auto [mate, path] : sides) {
       if (path->empty())
         continue;
       const uint64_t id = ex.MateId(*path, *mate);
@@ -369,6 +393,8 @@ void CollapseFlexible(const FlexibleExpansion& ex, AssemblyDocument& parent,
       r.error = it->second->error;
       r.lead = it->second->lead;
       r.rideApplied = it->second->rideApplied;
+      r.held = it->second->held;
+      r.heldTerms = it->second->heldTerms;
       if (const auto why = ex.relationErrors.find(r.id);
           why != ex.relationErrors.end())
         r.error = why->second;

@@ -197,15 +197,12 @@ constexpr std::pair<const char*, MateType> kMateTypes[] = {
     {"planar", MateType::Planar},     {"ball", MateType::Ball}};
 
 constexpr std::pair<const char*, RelationKind> kRelationKinds[] = {
-    {"gear", RelationKind::Gear},
-    {"rack", RelationKind::Rack},
-    {"screw", RelationKind::Screw},
-    {"linear", RelationKind::Linear},
-    {"chain", RelationKind::Chain},
-    {"cam", RelationKind::Cam},
-    {"freewheel", RelationKind::Freewheel},
-    {"click", RelationKind::Click},
-    {"worm", RelationKind::Worm}};
+    {"gear", RelationKind::Gear},           {"rack", RelationKind::Rack},
+    {"screw", RelationKind::Screw},         {"linear", RelationKind::Linear},
+    {"chain", RelationKind::Chain},         {"cam", RelationKind::Cam},
+    {"freewheel", RelationKind::Freewheel}, {"click", RelationKind::Click},
+    {"worm", RelationKind::Worm},           {"linear_n", RelationKind::LinearN},
+    {"epicyclic", RelationKind::Epicyclic}, {"planet", RelationKind::Planet}};
 
 template <typename T, size_t N>
 std::string NameList(const std::pair<const char*, T> (&table)[N]) {
@@ -433,6 +430,12 @@ const char* RelationKindToString(RelationKind kind) {
     return "click";
   case RelationKind::Worm:
     return "worm";
+  case RelationKind::LinearN:
+    return "linear_n";
+  case RelationKind::Epicyclic:
+    return "epicyclic";
+  case RelationKind::Planet:
+    return "planet";
   }
   return "gear";
 }
@@ -456,6 +459,12 @@ RelationKind RelationKindFromString(const std::string& s) {
     return RelationKind::Click;
   if (s == "worm")
     return RelationKind::Worm;
+  if (s == "linear_n")
+    return RelationKind::LinearN;
+  if (s == "epicyclic")
+    return RelationKind::Epicyclic;
+  if (s == "planet")
+    return RelationKind::Planet;
   throw std::runtime_error("unknown relation type '" + s +
                            "' (expected one of: " + NameList(kRelationKinds) +
                            ")");
@@ -494,6 +503,25 @@ json RelationToJson(const Relation& r) {
   j["id"] = r.id;
   j["name"] = r.name;
   j["kind"] = RelationKindToString(r.kind);
+  if (r.HasTerms()) {
+    // v171: a relation over several mates is its terms and a constant,
+    // sum(coefficient * dof) = constant; an epicyclic's and a planet's
+    // members carry the tooth counts their coefficients came from.
+    json terms = json::array();
+    for (const RelationTerm& t : r.terms) {
+      json tj{{"mate", t.mate},
+              {"dof", MateDofToString(t.dof)},
+              {"coefficient", t.coefficient}};
+      if (!t.path.empty())
+        tj["path"] = t.path;
+      if (t.teeth > 0)
+        tj["teeth"] = t.teeth;
+      terms.push_back(std::move(tj));
+    }
+    j["terms"] = std::move(terms);
+    j["constant"] = r.phase;
+    return j;
+  }
   j["mate_a"] = r.mateA;
   j["mate_b"] = r.mateB;
   // v129: a side inside a flexible placement names its path; absent = a
@@ -505,6 +533,12 @@ json RelationToJson(const Relation& r) {
   j["dof_a"] = MateDofToString(r.dofA);
   j["dof_b"] = MateDofToString(r.dofB);
   j["ratio"] = r.ratio;
+  if (r.teethA > 0 && r.teethB > 0) { // v171: what the ratio came from
+    j["teeth_a"] = r.teethA;
+    j["teeth_b"] = r.teethB;
+  }
+  if (r.internal)
+    j["internal"] = true; // v171
   if (r.threadPart || r.threadFeature) {
     j["thread_part"] = r.threadPart;
     j["thread_feature"] = r.threadFeature;
@@ -633,6 +667,25 @@ Relation RelationFromJson(const json& j) {
   r.id = j.at("id").get<uint64_t>();
   r.name = j.value("name", std::string{});
   r.kind = RelationKindFromString(j.at("kind").get<std::string>());
+  if (r.HasTerms()) { // v171
+    if (!j.contains("terms") || !j.at("terms").is_array())
+      throw std::runtime_error(std::string("a ") +
+                               RelationKindToString(r.kind) +
+                               " relation needs its `terms`");
+    for (const json& tj : j.at("terms")) {
+      RelationTerm t;
+      t.mate = tj.at("mate").get<uint64_t>();
+      if (tj.contains("path"))
+        t.path = tj.at("path").get<std::vector<uint64_t>>();
+      t.dof = MateDofFromString(tj.at("dof").get<std::string>());
+      t.coefficient = tj.at("coefficient").get<double>();
+      t.teeth = tj.value("teeth", 0);
+      r.terms.push_back(std::move(t));
+    }
+    r.phase = j.value("constant", 0.0);
+    r.ratio = 1.0;
+    return r;
+  }
   r.mateA = j.at("mate_a").get<uint64_t>();
   r.mateB = j.at("mate_b").get<uint64_t>();
   if (j.contains("mate_a_path")) // v129
@@ -642,6 +695,12 @@ Relation RelationFromJson(const json& j) {
   r.dofA = MateDofFromString(j.at("dof_a").get<std::string>());
   r.dofB = MateDofFromString(j.at("dof_b").get<std::string>());
   r.ratio = j.at("ratio").get<double>();
+  r.teethA = j.value("teeth_a", 0); // v171
+  r.teethB = j.value("teeth_b", 0);
+  r.internal = j.value("internal", false);
+  if (r.internal && r.kind != RelationKind::Gear)
+    throw std::runtime_error("`internal` is a gear relation's; this one is a " +
+                             std::string(RelationKindToString(r.kind)));
   r.threadPart = j.value("thread_part", uint64_t{0});
   r.threadFeature = j.value("thread_feature", uint64_t{0});
   r.phase = j.value("phase", 0.0);

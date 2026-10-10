@@ -1146,9 +1146,40 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
   for (size_t i = 0; i < rels.size(); i++) {
     Relation& r = rels[i];
     r.error.clear();
+    r.held.clear();
+    r.heldTerms.clear();
     // Out of the active configuration: not applied, and not an error.
     if (asmDoc.RelationSuppressed(r.id))
       continue;
+    if (r.HasTerms()) {
+      // A relation over several mates (v171). A member inside a flexible
+      // placement is applied only once the solve has expanded it, like a
+      // binary relation's side named by path below.
+      bool byPath = false;
+      for (const RelationTerm& t : r.terms) {
+        if (t.path.empty())
+          continue;
+        byPath = true;
+        const Occurrence* o = asmDoc.FindById(t.path.front());
+        if (o == nullptr)
+          r.error = "the placement its path names is gone";
+        else if (t.path.size() != 1)
+          r.error = "its path goes more than one level down, and only one "
+                    "level of sub-assembly is flexible";
+        else if (!o->flexible)
+          r.error = "it names a mate inside '" + o->name +
+                    "', which is not flexible — set_occurrence_flexible to "
+                    "let its mechanism move here";
+      }
+      if (byPath)
+        continue;
+      if (std::string why = RelationProblem(asmDoc, r); !why.empty()) {
+        r.error = std::move(why);
+        continue;
+      }
+      usable[i] = true;
+      continue;
+    }
     // A side named by a path (v129) is a mate inside a flexible placement.
     // Only the solve can apply it — it expands the placement first — so
     // here it is checked for its path and otherwise left alone.
@@ -1268,6 +1299,19 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
   // drag, and the pose runs away (a watch's ratchet reached 5e10 degrees).
   // The real mechanism locks there, and a lock is a constraint, not a drive:
   // the relation says its output stands behind its line instead.
+  // Every (mate, DOF) a relation touches: its two sides, or each of its
+  // terms for a relation over several mates.
+  const auto membersOf = [&](size_t k) {
+    std::vector<Node> out;
+    if (rels[k].HasTerms()) {
+      for (const RelationTerm& t : rels[k].terms)
+        out.push_back({t.mate, t.dof});
+    } else {
+      out.push_back({rels[k].mateA, rels[k].dofA});
+      out.push_back({rels[k].mateB, rels[k].dofB});
+    }
+    return out;
+  };
   std::vector<bool> mayDrag(rels.size(), false);
   for (size_t i = 0; i < rels.size(); i++) {
     if (!usable[i] || rels[i].kind != RelationKind::Freewheel)
@@ -1283,13 +1327,15 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
     while (!stack.empty() && !cycle) {
       const Node at = stack.back();
       stack.pop_back();
-      for (size_t k = 0; k < rels.size(); k++) {
+      for (size_t k = 0; k < rels.size() && !cycle; k++) {
         if (k == i || !usable[k])
           continue;
-        const Node ka{rels[k].mateA, rels[k].dofA};
-        const Node kb{rels[k].mateB, rels[k].dofB};
-        for (const auto& [here, there] : {std::pair{ka, kb}, {kb, ka}}) {
-          if (!(here == at) ||
+        // A relation over several mates ties every member to every other.
+        const std::vector<Node> members = membersOf(k);
+        if (std::find(members.begin(), members.end(), at) == members.end())
+          continue;
+        for (const Node& there : members) {
+          if (there == at ||
               std::find(seen.begin(), seen.end(), there) != seen.end())
             continue;
           if (there == goal) {
@@ -1354,13 +1400,50 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
     }
     return MateDofValue(m, d);
   };
+  // A member of a relation over several mates, as its error and note name it.
+  const auto memberWord = [&](const Relation& r, size_t k) {
+    const RelationTerm& t = r.terms[k];
+    const Mate* m = asmDoc.FindMateById(t.mate);
+    return RelationTermRole(r, k) + " (" +
+           (m != nullptr && !m->name.empty()
+                ? m->name
+                : "mate " + std::to_string(t.mate)) +
+           ")";
+  };
   const auto nextRoot = [&]() {
-    // A component nothing has reached: its first relation's A is the root.
+    // A relation over several mates that the walk REACHED but could not
+    // finish — a differential with one input driven — is completed first,
+    // before any new component starts: its first unsettled member, in term
+    // order, is held where it stands, and the relation says so. A new
+    // component started first could claim that member from the far side
+    // (a gear on the carrier taking the carrier) and turn the held one.
     for (size_t i = 0; i < rels.size(); i++) {
-      const Node a{rels[i].mateA, rels[i].dofA};
-      const Node b{rels[i].mateB, rels[i].dofB};
-      if (usable[i] && !isSettled(a) && !isSettled(b)) {
-        settle(a);
+      if (!usable[i] || !rels[i].HasTerms())
+        continue;
+      const std::vector<Node> members = membersOf(i);
+      size_t open = 0, first = members.size();
+      for (size_t k = 0; k < members.size(); k++)
+        if (!isSettled(members[k])) {
+          open++;
+          first = std::min(first, k);
+        }
+      if (open >= 2 && open < members.size()) {
+        settle(members[first]);
+        Relation& r = rels[i];
+        r.held += (r.held.empty() ? "" : "; ") + memberWord(r, first) +
+                  " held where it stands: nothing drives it";
+        r.heldTerms.push_back(first);
+        return true;
+      }
+    }
+    // A component nothing has reached: its first relation's A is the root
+    // (a relation over several mates: its first member).
+    for (size_t i = 0; i < rels.size(); i++) {
+      if (!usable[i])
+        continue;
+      const std::vector<Node> members = membersOf(i);
+      if (std::none_of(members.begin(), members.end(), isSettled)) {
+        settle(members.front());
         return true;
       }
     }
@@ -1368,7 +1451,7 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
     // driven backwards): it stands where it is.
     for (size_t i = 0; i < rels.size(); i++) {
       const Node a{rels[i].mateA, rels[i].dofA};
-      if (usable[i] && !isSettled(a)) {
+      if (usable[i] && !rels[i].HasTerms() && !isSettled(a)) {
         settle(a);
         return true;
       }
@@ -1382,6 +1465,33 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
       if (!usable[i])
         continue;
       Relation& r = rels[i];
+      if (r.HasTerms()) {
+        // A HYPEREDGE: one equation over all its members. It settles the
+        // last member once every other is settled, and otherwise waits —
+        // for the walk to reach the rest, or for nextRoot to hold one.
+        const std::vector<Node> members = membersOf(i);
+        if (std::find(members.begin(), members.end(), from) == members.end())
+          continue;
+        size_t open = members.size(), count = 0;
+        for (size_t k = 0; k < members.size(); k++)
+          if (!isSettled(members[k])) {
+            open = k;
+            count++;
+          }
+        if (count != 1)
+          continue;
+        double sum = r.phase;
+        for (size_t k = 0; k < members.size(); k++)
+          if (k != open)
+            sum -=
+                r.terms[k].coefficient *
+                valueOf(*asmDoc.FindMateById(members[k].mate), members[k].dof);
+        SetMateDof(*asmDoc.FindMateById(members[open].mate), members[open].dof,
+                   sum / r.terms[open].coefficient);
+        settle(members[open]);
+        wrote++;
+        continue;
+      }
       const Node an{r.mateA, r.dofA};
       const Node bn{r.mateB, r.dofB};
       Mate* a = asmDoc.FindMateById(r.mateA);
@@ -1635,6 +1745,23 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
       // moves one of its mates (docs/assemblies/relations.md#freewheel).
       if (r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click)
         continue;
+      if (r.HasTerms()) {
+        // One row over all its members (v171).
+        LoopRelation lr;
+        lr.phase = r.phase;
+        bool all = true;
+        for (const RelationTerm& t : r.terms) {
+          const auto it = indexOfMate.find(t.mate);
+          if (it == indexOfMate.end()) {
+            all = false;
+            break;
+          }
+          lr.terms.push_back({it->second, t.dof, t.coefficient});
+        }
+        if (all)
+          loop.relations.push_back(std::move(lr));
+        continue;
+      }
       const auto ia = indexOfMate.find(r.mateA);
       const auto ib = indexOfMate.find(r.mateB);
       if (ia == indexOfMate.end() || ib == indexOfMate.end())
@@ -1656,6 +1783,23 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
       loop.pinned.push_back(
           {it->second, driven.dof,
            MateDofValue(asmDoc.GetMates()[it->second], driven.dof)});
+  }
+  // So is every member a relation over several mates HELD in propagation:
+  // the loop's least squares would otherwise share the turn among them all.
+  {
+    std::unordered_map<uint64_t, size_t> indexOfMate;
+    for (size_t i = 0; i < asmDoc.GetMates().size(); i++)
+      indexOfMate[asmDoc.GetMates()[i].id] = i;
+    for (const Relation& r : asmDoc.GetRelations())
+      for (size_t k : r.heldTerms) {
+        if (k >= r.terms.size())
+          continue;
+        const auto it = indexOfMate.find(r.terms[k].mate);
+        if (it != indexOfMate.end())
+          loop.pinned.push_back(
+              {it->second, r.terms[k].dof,
+               MateDofValue(asmDoc.GetMates()[it->second], r.terms[k].dof)});
+      }
   }
   // So is every DOF the configuration holds.
   for (const Held& h : held)
@@ -1888,23 +2032,52 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
     // here would read a clutch riding over a tooth as a fault.
     if (r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click)
       continue;
-    const Mate* a = asmDoc.FindMateById(r.mateA);
-    const Mate* b = asmDoc.FindMateById(r.mateB);
-    if (a == nullptr || b == nullptr)
-      continue;
-    const double want =
-        RelationValue(r, MateDofValue(*a, r.dofA)) + rideOn(r.mateB, r.dofB);
-    const double got = MateDofValue(*b, r.dofB);
+    uint64_t mateB = r.mateB;
+    MateDof dofB = r.dofB;
+    double want = 0.0, got = 0.0;
+    if (r.HasTerms()) {
+      // Over several mates: what the LAST member must be for the others
+      // as they stand (an epicyclic's carrier, a planet's carrier). Any
+      // member off the equation shows here, whichever one it is.
+      if (r.terms.empty())
+        continue;
+      bool all = true;
+      double sum = r.phase;
+      for (size_t k = 0; k + 1 < r.terms.size(); k++) {
+        const Mate* m = asmDoc.FindMateById(r.terms[k].mate);
+        if (m == nullptr) {
+          all = false;
+          break;
+        }
+        sum -= r.terms[k].coefficient * MateDofValue(*m, r.terms[k].dof);
+      }
+      const RelationTerm& last = r.terms.back();
+      const Mate* m = asmDoc.FindMateById(last.mate);
+      if (!all || m == nullptr)
+        continue;
+      mateB = last.mate;
+      dofB = last.dof;
+      want = sum / last.coefficient + rideOn(mateB, dofB);
+      got = MateDofValue(*m, dofB);
+    } else {
+      const Mate* a = asmDoc.FindMateById(r.mateA);
+      const Mate* b = asmDoc.FindMateById(r.mateB);
+      if (a == nullptr || b == nullptr)
+        continue;
+      want =
+          RelationValue(r, MateDofValue(*a, r.dofA)) + rideOn(r.mateB, r.dofB);
+      got = MateDofValue(*b, r.dofB);
+    }
     // A loop closes to a tolerance, not exactly: allow it at the magnitude.
     if (std::abs(want - got) > 1e-4 * std::max(1.0, std::abs(want))) {
-      const bool rot = r.dofB == MateDof::Rotation;
+      const bool rot = dofB == MateDof::Rotation;
       const double k = rot ? angles::kDegPerRad : 1.0;
       char buf[256];
       std::snprintf(buf, sizeof(buf),
                     "not satisfied: mate %llu's %s is %.4f %s where this "
                     "relation wants %.4f — another relation drives it too, "
                     "and they disagree",
-                    static_cast<unsigned long long>(r.mateB),
+                    static_cast<unsigned long long>(mateB),
                     rot ? "rotation" : "offset", got * k, rot ? "deg" : "mm",
                     want * k);
       r.error = buf;

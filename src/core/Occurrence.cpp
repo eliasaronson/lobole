@@ -531,8 +531,15 @@ bool AssemblyDocument::RelationSuppressedIn(uint64_t configurationId,
                         : c->Suppresses(path.front());
   };
   for (const Relation& r : m_relations)
-    if (r.id == relationId)
+    if (r.id == relationId) {
+      // v171: a relation over several mates is out with ANY of them — an
+      // equation missing a member would drive the rest wrong.
+      if (r.HasTerms())
+        return std::any_of(
+            r.terms.begin(), r.terms.end(),
+            [&](const RelationTerm& t) { return sideOut(t.mate, t.path); });
       return sideOut(r.mateA, r.mateAPath) || sideOut(r.mateB, r.mateBPath);
+    }
   return false;
 }
 

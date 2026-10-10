@@ -1354,3 +1354,412 @@ TEST_CASE("A cam profile never overshoots its own table",
   CamLift(lobe, a + 1e-4, &after);
   CHECK_THAT(after, WithinAbs(before, 0.05));
 }
+
+// --- relations over several mates (v171,
+// docs/assemblies/relations.md#relations-over-several-mates) ----------------
+
+namespace {
+// A housing (fixed) with a sun, a ring and a carrier each on a revolute
+// about one axis, and two planets on revolutes on the carrier. Tooth counts
+// are the planetary generator's kind: 14-tooth sun, 40-tooth ring, 13-tooth
+// planets.
+constexpr int kZs = 14, kZr = 40, kZp = 13;
+struct Epi {
+  Rig r = MakeRig();
+  uint64_t sun = 0, ring = 0, carrier = 0, planet1 = 0, planet2 = 0;
+  uint64_t willis = 0, p1 = 0, p2 = 0;
+  uint64_t carrierOcc = 0;
+  double Rot(uint64_t mate) { return r.d.FindMateById(mate)->rotation; }
+  void Drive(uint64_t mate, double value) {
+    r.d.FindMateById(mate)->rotation = value;
+    assembly::PropagateRelations(r.d, mate);
+    assembly::Solve(r.d, NoParts(), nullptr, {mate, MateDof::Rotation, {}});
+  }
+};
+RelationTerm Term(uint64_t mate) {
+  RelationTerm t;
+  t.mate = mate;
+  return t;
+}
+Epi MakeEpi(bool planets = true) {
+  Epi e;
+  e.sun = e.r.Add("Sun", 2, MateType::Revolute);
+  e.ring = e.r.Add("Ring", 3, MateType::Revolute);
+  e.carrier = e.r.Add("Carrier arm", 4, MateType::Revolute);
+  e.carrierOcc = e.r.d.FindMateById(e.carrier)->b.occurrenceId;
+  e.willis = e.r.d.AddRelation(assembly::MakeEpicyclic(
+      Term(e.sun), Term(e.ring), Term(e.carrier), kZs, kZr));
+  if (planets)
+    for (uint64_t* mate : {&e.planet1, &e.planet2}) {
+      Occurrence o;
+      o.name = "Planet";
+      o.partId = 5;
+      const uint64_t occ = e.r.d.AddOccurrence(std::move(o));
+      *mate = e.r.d.AddMate(Revolute(e.carrierOcc, occ));
+      (mate == &e.planet1 ? e.p1 : e.p2) =
+          e.r.d.AddRelation(assembly::MakePlanet(Term(*mate), Term(e.sun),
+                                                 Term(e.carrier), kZp, kZs));
+    }
+  return e;
+}
+} // namespace
+
+TEST_CASE("An internal gear turns the same way, at teeth_a / teeth_b",
+          "[assembly][relations]") {
+  Train t = MakeTrain();
+  Relation g;
+  g.kind = RelationKind::Gear;
+  g.mateA = t.axleA;
+  g.mateB = t.axleB;
+  g.teethA = 13;
+  g.teethB = 40;
+  g.internal = true;
+  REQUIRE(assembly::DeriveFromTeeth(g));
+  CHECK_THAT(g.ratio, WithinAbs(13.0 / 40.0, 1e-12));
+  const uint64_t rel = t.asmDoc.AddRelation(g);
+  t.asmDoc.FindMateById(t.axleA)->rotation = 0.8;
+  assembly::Solve(t.asmDoc, NoParts());
+  CHECK(t.asmDoc.FindRelationById(rel)->error.empty());
+  // Same sense: a planet in its ring.
+  CHECK_THAT(t.asmDoc.FindMateById(t.axleB)->rotation,
+             WithinAbs(0.8 * 13.0 / 40.0, 1e-9));
+  // ...and the external pair, from the same teeth, the other way.
+  g.internal = false;
+  REQUIRE(assembly::DeriveFromTeeth(g));
+  CHECK_THAT(g.ratio, WithinAbs(-13.0 / 40.0, 1e-12));
+  Relation chain = g;
+  chain.kind = RelationKind::Chain;
+  REQUIRE(assembly::DeriveFromTeeth(chain));
+  CHECK(chain.ratio > 0.0);
+}
+
+TEST_CASE("Willis holds with each member of an epicyclic held in turn",
+          "[assembly][relations][epicyclic]") {
+  const double zs = kZs, zr = kZr;
+  SECTION("ring held: the carrier turns zs/(zs+zr) of the sun") {
+    Epi e = MakeEpi(false);
+    e.Drive(e.sun, 0.7);
+    CHECK_THAT(e.Rot(e.ring), WithinAbs(0.0, 1e-12)); // nothing drove it
+    CHECK_THAT(e.Rot(e.carrier), WithinAbs(0.7 * zs / (zs + zr), 1e-9));
+    const Relation* w = e.r.d.FindRelationById(e.willis);
+    CHECK(w->error.empty());
+    // ...and it says which member it held, and why.
+    CHECK_THAT(w->held, Catch::Matchers::ContainsSubstring("ring"));
+    // The carrier's placement follows its mate, not just the number.
+    CHECK_THAT(ZRotationOf(e.r.d, e.carrierOcc),
+               WithinAbs(0.7 * zs / (zs + zr), 1e-5));
+  }
+  SECTION("carrier held: the ring turns -zs/zr of the sun") {
+    Epi e = MakeEpi(false);
+    Configuration& cfg = e.r.d.AddConfiguration("Carrier held");
+    cfg.mateOverrides = {{e.carrier, 0.0, std::nullopt}};
+    REQUIRE(e.r.d.SetActiveConfiguration(cfg.id));
+    e.Drive(e.sun, 0.7);
+    CHECK_THAT(e.Rot(e.ring), WithinAbs(-0.7 * zs / zr, 1e-9));
+    CHECK(e.r.d.FindRelationById(e.willis)->error.empty());
+    CHECK(e.r.d.FindRelationById(e.willis)->held.empty()); // all driven
+  }
+  SECTION("sun held: the carrier turns zr/(zs+zr) of the ring") {
+    Epi e = MakeEpi(false);
+    Configuration& cfg = e.r.d.AddConfiguration("Sun held");
+    cfg.mateOverrides = {{e.sun, 0.0, std::nullopt}};
+    REQUIRE(e.r.d.SetActiveConfiguration(cfg.id));
+    e.Drive(e.ring, 0.5);
+    CHECK_THAT(e.Rot(e.carrier), WithinAbs(0.5 * zr / (zs + zr), 1e-9));
+    CHECK(e.r.d.FindRelationById(e.willis)->error.empty());
+  }
+}
+
+TEST_CASE("A planet turns on its carrier by -(zs/zp) of the sun's turn "
+          "relative to the carrier",
+          "[assembly][relations][epicyclic]") {
+  Epi e = MakeEpi();
+  e.Drive(e.sun, 0.9);
+  const double carrier = 0.9 * kZs / double(kZs + kZr);
+  CHECK_THAT(e.Rot(e.carrier), WithinAbs(carrier, 1e-9));
+  for (uint64_t planet : {e.planet1, e.planet2})
+    CHECK_THAT(e.Rot(planet),
+               WithinAbs(-double(kZs) / kZp * (0.9 - carrier), 1e-9));
+  // Absolute, that is -(zs/zp)(zr/(zs+zr)) of the sun — the hand-derived
+  // bare ratio the planetary generator used to carry.
+  CHECK_THAT(e.Rot(e.planet1),
+             WithinAbs(-double(kZs) / kZp * kZr / (kZs + kZr) * 0.9, 1e-9));
+  for (const Relation& rel : e.r.d.GetRelations())
+    CHECK(rel.error.empty());
+  // A plain solve afterwards changes nothing: propagation is idempotent.
+  assembly::Solve(e.r.d, NoParts());
+  CHECK_THAT(e.Rot(e.sun), WithinAbs(0.9, 1e-12));
+  CHECK_THAT(e.Rot(e.carrier), WithinAbs(carrier, 1e-9));
+}
+
+TEST_CASE("A differential: two members driven set the third, one driven "
+          "holds the next and says so",
+          "[assembly][relations][epicyclic]") {
+  Epi e = MakeEpi(false);
+  const double zs = kZs, zr = kZr;
+  // The ring held at 0.3 by a configuration, the sun driven to 0.7: Willis
+  // sets the carrier between them.
+  Configuration& cfg = e.r.d.AddConfiguration("Ring at 0.3");
+  cfg.mateOverrides = {{e.ring, 0.3, std::nullopt}};
+  REQUIRE(e.r.d.SetActiveConfiguration(cfg.id));
+  e.Drive(e.sun, 0.7);
+  CHECK_THAT(e.Rot(e.carrier),
+             WithinAbs((zs * 0.7 + zr * 0.3) / (zs + zr), 1e-9));
+  CHECK(e.r.d.FindRelationById(e.willis)->held.empty());
+  // Driving the CARRIER alone: the sun, first in term order, stays where it
+  // stands and the ring takes the turn — and the relation names the sun.
+  e.r.d.SetActiveConfiguration(0);
+  const double sun = e.Rot(e.sun);
+  e.Drive(e.carrier, 1.0);
+  CHECK_THAT(e.Rot(e.sun), WithinAbs(sun, 1e-12));
+  CHECK_THAT(e.Rot(e.ring), WithinAbs(((zs + zr) * 1.0 - zs * sun) / zr, 1e-9));
+  CHECK_THAT(e.r.d.FindRelationById(e.willis)->held,
+             Catch::Matchers::ContainsSubstring("sun"));
+}
+
+TEST_CASE("Two epicyclic relations that disagree report 'not satisfied'",
+          "[assembly][relations][epicyclic]") {
+  Epi e = MakeEpi(false);
+  e.r.d.AddRelation(assembly::MakeEpicyclic(Term(e.sun), Term(e.ring),
+                                            Term(e.carrier), 20, kZr));
+  e.Drive(e.sun, 0.4);
+  int unsatisfied = 0;
+  for (const Relation& rel : e.r.d.GetRelations())
+    if (rel.error.find("not satisfied") != std::string::npos)
+      unsatisfied++;
+  CHECK(unsatisfied == 1);
+}
+
+TEST_CASE("A relation over several mates is ONE row in a loop: rank sees it",
+          "[assembly][relations][loops][epicyclic]") {
+  // The parallelogram four-bar (theta4 = theta1, one DOF) and a wheel on
+  // the ground, pinned at 0.4. The row 3*wheel + 5*theta1 - 8*theta4 = 0
+  // with the linkage's own theta4 = theta1 leaves theta1 = wheel: the loop
+  // solve must MOVE the linkage there, from a seed of 0.3.
+  const auto AtX = [](double x) {
+    return glm::translate(glm::dmat4(1.0), glm::dvec3(x, 0.0, 0.0));
+  };
+  const auto Rev = [](uint64_t id, uint64_t a, const glm::dmat4& fa, uint64_t b,
+                      const glm::dmat4& fb, double seed) {
+    assembly::LoopMate m;
+    m.id = id;
+    m.type = MateType::Revolute;
+    m.aOcc = a;
+    m.bOcc = b;
+    m.fa = fa;
+    m.fb = fb;
+    m.flipped = false;
+    m.rotation = seed;
+    return m;
+  };
+  assembly::LoopProblem p;
+  // Seeded ON the parallelogram branch (crank and rocker at 0.3, the
+  // coupler level): the linkage has a crossed branch through zero too.
+  p.mates.push_back(Rev(1, 10, glm::dmat4(1.0), 20, glm::dmat4(1.0), 0.3));
+  p.mates.push_back(Rev(2, 20, AtX(40.0), 30, glm::dmat4(1.0), -0.3));
+  p.mates.push_back(Rev(3, 30, AtX(100.0), 40, AtX(40.0), 0.3));
+  p.mates.push_back(Rev(4, 10, AtX(100.0), 40, glm::dmat4(1.0), 0.3));
+  p.mates.push_back(Rev(5, 10, AtX(-50.0), 50, glm::dmat4(1.0), 0.4));
+  p.tree.push_back({0, 10, 20, false});
+  p.tree.push_back({1, 20, 30, false});
+  p.tree.push_back({2, 30, 40, false});
+  p.tree.push_back({4, 10, 50, false});
+  p.cut.push_back(3);
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
+  p.pinned.push_back({4, MateDof::Rotation, 0.4});
+  assembly::LoopRelation lr;
+  lr.terms = {{4, MateDof::Rotation, 3.0},
+              {0, MateDof::Rotation, 5.0},
+              {3, MateDof::Rotation, -8.0}};
+  p.relations.push_back(lr);
+  const assembly::LoopSolution s = assembly::SolveLoops(p);
+  REQUIRE(s.unavailable.empty());
+  CHECK(s.converged);
+  CHECK(s.dof == 0);
+  CHECK_THAT(s.solved[0].rotation, WithinAbs(0.4, 1e-4));
+  CHECK_THAT(s.solved[3].rotation, WithinAbs(0.4, 1e-4));
+}
+
+TEST_CASE("An epicyclic inside a closed loop solves to propagation's answer",
+          "[assembly][relations][loops][epicyclic]") {
+  // A second bearing on the carrier's axis closes a loop through the
+  // housing, so the solve takes the loop path with the Willis and planet
+  // rows in it. Its answer must be the tree's.
+  Epi tree = MakeEpi();
+  tree.Drive(tree.sun, 0.6);
+  Epi looped = MakeEpi();
+  looped.r.d.AddMate(Revolute(looped.r.carrier, looped.carrierOcc));
+  looped.r.d.FindMateById(looped.sun)->rotation = 0.6;
+  assembly::PropagateRelations(looped.r.d, looped.sun);
+  const assembly::SolveReport rep = assembly::Solve(
+      looped.r.d, NoParts(), nullptr, {looped.sun, MateDof::Rotation, {}});
+  CHECK(rep.loopMates >= 1);
+  CHECK(rep.loopsClosed);
+  for (uint64_t Epi::* m :
+       {&Epi::ring, &Epi::carrier, &Epi::planet1, &Epi::planet2})
+    CHECK_THAT(looped.Rot(looped.*m), WithinAbs(tree.Rot(tree.*m), 1e-6));
+  for (const Relation& rel : looped.r.d.GetRelations())
+    CHECK(rel.error.empty());
+}
+
+TEST_CASE("A relation over several mates is refused before it is made, "
+          "naming what would do",
+          "[assembly][relations][epicyclic]") {
+  Epi e = MakeEpi(false);
+  using Catch::Matchers::ContainsSubstring;
+  // A mate used twice.
+  Relation twice = assembly::MakeEpicyclic(Term(e.sun), Term(e.sun),
+                                           Term(e.carrier), kZs, kZr);
+  CHECK_THAT(assembly::RelationProblem(e.r.d, twice),
+             ContainsSubstring("both the sun and the ring"));
+  // A member missing.
+  Relation missing =
+      assembly::MakeEpicyclic(Term(e.sun), Term(0), Term(e.carrier), kZs, kZr);
+  CHECK_THAT(assembly::RelationProblem(e.r.d, missing),
+             ContainsSubstring("no ring picked"));
+  // A member that does not turn.
+  const uint64_t slide = e.r.Add("Slide", 6, MateType::Slider);
+  Relation flat = assembly::MakeEpicyclic(Term(e.sun), Term(slide),
+                                          Term(e.carrier), kZs, kZr);
+  CHECK_THAT(assembly::RelationProblem(e.r.d, flat),
+             ContainsSubstring("has no rotation"));
+  // A linear_n of one term.
+  Relation one;
+  one.kind = RelationKind::LinearN;
+  one.terms = {Term(e.sun)};
+  CHECK_THAT(assembly::RelationProblem(e.r.d, one),
+             ContainsSubstring("at least two terms"));
+  // No teeth.
+  Relation toothless = assembly::MakeEpicyclic(Term(e.sun), Term(e.ring),
+                                               Term(e.carrier), 0, kZr);
+  CHECK_THAT(assembly::RelationProblem(e.r.d, toothless),
+             ContainsSubstring("tooth count"));
+  // And the good one passes.
+  CHECK(assembly::RelationProblem(e.r.d, *e.r.d.FindRelationById(e.willis))
+            .empty());
+  // A gear pair named on one mate is a mate used twice too.
+  Relation self = Gear(e.sun, e.sun, -1.0);
+  CHECK_THAT(assembly::RelationProblem(e.r.d, self),
+             ContainsSubstring("both the a and the b"));
+}
+
+TEST_CASE("A configuration suppressing any member takes the whole relation "
+          "out, and a removed member is an error",
+          "[assembly][relations][epicyclic][configurations]") {
+  Epi e = MakeEpi();
+  Configuration& cfg = e.r.d.AddConfiguration("No ring");
+  cfg.suppressedMates = {e.ring};
+  const uint64_t cfgId = cfg.id;
+  REQUIRE(e.r.d.SetActiveConfiguration(cfgId));
+  CHECK(e.r.d.RelationSuppressed(e.willis));
+  CHECK_FALSE(e.r.d.RelationSuppressed(e.p1));
+  e.Drive(e.sun, 0.5);
+  CHECK(e.r.d.FindRelationById(e.willis)->error.empty());
+  CHECK_THAT(e.Rot(e.carrier), WithinAbs(0.0, 1e-12)); // nothing drove it
+  e.r.d.SetActiveConfiguration(0);
+  REQUIRE(e.r.d.RemoveMate(e.ring));
+  assembly::Solve(e.r.d, NoParts());
+  CHECK_THAT(e.r.d.FindRelationById(e.willis)->error,
+             Catch::Matchers::ContainsSubstring("ring"));
+}
+
+TEST_CASE("A freewheel tied to its input through a relation over several "
+          "mates holds rather than drags",
+          "[assembly][relations][freewheel]") {
+  // The cycle search walks every member of a hyperedge: X drives Y through
+  // a clutch, and a linear_n over {Y, X, Z} ties them another way. Pushing
+  // Y back must not drag X (the clutch HOLDS, as in a reverser).
+  Rig r = MakeRig();
+  const uint64_t x = r.Add("X", 2, MateType::Revolute);
+  const uint64_t y = r.Add("Y", 3, MateType::Revolute);
+  const uint64_t z = r.Add("Z", 4, MateType::Revolute);
+  Relation fw;
+  fw.kind = RelationKind::Freewheel;
+  fw.mateA = x;
+  fw.mateB = y;
+  fw.ratio = 1.0;
+  fw.drives = 1;
+  r.d.AddRelation(fw);
+  assembly::Solve(r.d, NoParts());
+  r.d.FindMateById(y)->rotation = -0.5;
+  assembly::PropagateRelations(r.d, y);
+  // Alone, the clutch drags its input back with it (a bicycle's pedals).
+  CHECK_THAT(r.d.FindMateById(x)->rotation, WithinAbs(-0.5, 1e-9));
+
+  Rig t = MakeRig();
+  const uint64_t tx = t.Add("X", 2, MateType::Revolute);
+  const uint64_t ty = t.Add("Y", 3, MateType::Revolute);
+  const uint64_t tz = t.Add("Z", 4, MateType::Revolute);
+  fw.mateA = tx;
+  fw.mateB = ty;
+  t.d.AddRelation(fw);
+  Relation tie;
+  tie.kind = RelationKind::LinearN;
+  tie.terms = {Term(ty), Term(tx), Term(tz)};
+  tie.terms[1].coefficient = -1.0;
+  t.d.AddRelation(tie);
+  assembly::Solve(t.d, NoParts());
+  t.d.FindMateById(ty)->rotation = -0.5;
+  assembly::PropagateRelations(t.d, ty);
+  CHECK_THAT(t.d.FindMateById(tx)->rotation, WithinAbs(0.0, 1e-12));
+  CHECK_THAT(t.d.FindMateById(tz)->rotation, WithinAbs(0.5, 1e-9));
+  (void)z;
+}
+
+TEST_CASE("Relations over several mates round-trip, and the v171 golden "
+          "drives",
+          "[assembly][relations][epicyclic][golden]") {
+  Epi e = MakeEpi();
+  e.r.d.FindRelationById(e.p1)->phase = 0.25;
+  Relation g = Gear(e.sun, e.ring, 0.0);
+  g.teethA = kZp;
+  g.teethB = kZr;
+  g.internal = true;
+  REQUIRE(assembly::DeriveFromTeeth(g));
+  e.r.d.AddRelation(g);
+  const fs::path tmp = fs::temp_directory_path() / "epicyclic_rt.json";
+  REQUIRE(DocumentIO::SaveAssembly(e.r.d, tmp.string()).has_value());
+  auto back = DocumentIO::LoadAssembly(tmp.string());
+  REQUIRE(back.has_value());
+  const Relation* w = (*back)->FindRelationById(e.willis);
+  REQUIRE(w != nullptr);
+  CHECK(w->kind == RelationKind::Epicyclic);
+  REQUIRE(w->terms.size() == 3);
+  CHECK(w->terms[0].mate == e.sun);
+  CHECK(w->terms[0].teeth == kZs);
+  CHECK(w->terms[1].teeth == kZr);
+  CHECK_THAT(w->terms[2].coefficient, WithinAbs(-(kZs + kZr), 1e-12));
+  const Relation* p = (*back)->FindRelationById(e.p1);
+  REQUIRE(p != nullptr);
+  CHECK(p->kind == RelationKind::Planet);
+  CHECK(p->terms[2].teeth == kZp);
+  CHECK_THAT(p->phase, WithinAbs(0.25, 1e-12));
+  const Relation& gb = (*back)->GetRelations().back();
+  CHECK(gb.internal);
+  CHECK(gb.teethA == kZp);
+  CHECK_THAT(gb.ratio, WithinAbs(double(kZp) / kZr, 1e-12));
+  fs::remove(tmp);
+
+  // An unknown kind is refused, naming the new ones among those accepted.
+  CHECK_THROWS_WITH(DocumentIO::RelationKindFromString("epicylic"),
+                    Catch::Matchers::ContainsSubstring("epicyclic"));
+  // `internal` on anything but a gear is refused, not ignored.
+  nlohmann::json bad = DocumentIO::RelationToJson(gb);
+  bad["kind"] = "chain";
+  CHECK_THROWS(DocumentIO::RelationFromJson(bad));
+
+  // The golden: the sun at 0.7 rad, the ring held, the carrier and the
+  // planet following.
+  const fs::path golden = fs::path(TestSourceDir()) /
+                          "tests/golden/assembly/v171-epicyclic-relation.json";
+  auto gd = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(gd.has_value());
+  assembly::Solve(**gd, NoParts());
+  for (const Relation& rel : (*gd)->GetRelations())
+    CHECK(rel.error.empty());
+  const auto rot = [&](uint64_t mate) {
+    return (*gd)->FindMateById(mate)->rotation;
+  };
+  CHECK_THAT(rot(3), WithinAbs(0.7, 1e-12));
+  CHECK_THAT(rot(5), WithinAbs(0.7 * kZs / (kZs + kZr), 1e-9));
+}

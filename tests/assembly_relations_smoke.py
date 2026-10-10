@@ -333,6 +333,56 @@ def main():
         expect(abs(mate(d, cyl)["offset"]) < 1e-3,
                f"a whole tooth drops it back: {mate(d, cyl)['offset']}")
         d.call("remove_relation", id=fw2["id"])
+
+        # An epicyclic train (v171): sun, ring and carrier on the base, a
+        # planet on the carrier. Refusals first, each changing nothing.
+        occ = {k: d.call("add_occurrence", part="gear", name=k)["id"]
+               for k in ("sun", "ring", "arm", "planet")}
+        em = {k: origin_mate(d, "revolute", carrier, occ[k], name=k)
+              for k in ("sun", "ring", "arm")}
+        em["planet"] = origin_mate(d, "revolute", occ["arm"], occ["planet"],
+                                   name="planet")
+        before = len(d.call("list_relations")["relations"])
+        refused(d, "add_relation", "not both", type="gear",
+                a=em["sun"], b=em["ring"], teeth_a=13, teeth_b=40, ratio=0.3)
+        refused(d, "add_relation", "give the teeth", type="gear",
+                a=em["sun"], b=em["ring"], ratio=0.3, internal=True)
+        refused(d, "add_relation", "both the sun and the ring",
+                type="epicyclic", sun=em["sun"], ring=em["sun"],
+                carrier=em["arm"], teeth_sun=14, teeth_ring=40)
+        refused(d, "add_relation", "carrier", type="epicyclic",
+                sun=em["sun"], ring=em["ring"], teeth_sun=14, teeth_ring=40)
+        refused(d, "add_relation", "whole number", type="epicyclic",
+                sun=em["sun"], ring=em["ring"], carrier=em["arm"],
+                teeth_sun=14.5, teeth_ring=40)
+        refused(d, "add_relation", "not a and b", type="epicyclic",
+                a=em["sun"], sun=em["sun"], ring=em["ring"],
+                carrier=em["arm"], teeth_sun=14, teeth_ring=40)
+        expect(len(d.call("list_relations")["relations"]) == before,
+               "a refused relation was added anyway")
+        epi = d.call("add_relation", type="epicyclic", sun=em["sun"],
+                     ring=em["ring"], carrier=em["arm"], teeth_sun=14,
+                     teeth_ring=40, planets=[{"mate": em["planet"],
+                                              "teeth": 13}], name="train")
+        expect(epi["kind"] == "epicyclic" and len(epi["planets"]) == 1,
+               f"an epicyclic with its planet: {epi}")
+        expect([t["teeth"] for t in epi["terms"][:2]] == [14, 40],
+               f"the teeth are kept: {epi['terms']}")
+        d.call("set_mate", id=em["sun"], rotation=0.9)
+        carrier_at = 0.9 * 14 / 54
+        expect(abs(rot(em["ring"])) < 1e-6, f"the ring held: {rot(em['ring'])}")
+        expect(abs(rot(em["arm"]) - carrier_at) < 1e-4,
+               f"the carrier at zs/(zs+zr) of the sun: {rot(em['arm'])}")
+        expect(abs(rot(em["planet"]) + 14 / 13 * (0.9 - carrier_at)) < 1e-4,
+               f"the planet on its carrier: {rot(em['planet'])}")
+        rels = {r["id"]: r for r in d.call("list_relations")["relations"]}
+        expect("ring" in rels[epi["id"]].get("held", ""),
+               f"it says it held the ring: {rels[epi['id']]}")
+        refused(d, "set_relation", "constant", id=epi["id"], phase=0.1)
+        d.call("set_relation", id=epi["id"], teeth_sun=20)
+        rels = {r["id"]: r for r in d.call("list_relations")["relations"]}
+        expect(rels[epi["id"]]["terms"][2]["coefficient"] == -60,
+               f"new teeth, new coefficients: {rels[epi['id']]}")
         d.close()
     finally:
         app.terminate()

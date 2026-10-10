@@ -1,0 +1,327 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "flipped": false,
+      "id": 3,
+      "mate_type": "revolute",
+      "name": "sun axis",
+      "offset": 0.0,
+      "rotation": 0.7,
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 7
+      },
+      "flipped": false,
+      "id": 4,
+      "mate_type": "revolute",
+      "name": "ring axis",
+      "offset": 0.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 8
+      },
+      "flipped": false,
+      "id": 5,
+      "mate_type": "revolute",
+      "name": "carrier axis",
+      "offset": 0.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 8
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 9
+      },
+      "flipped": false,
+      "id": 6,
+      "mate_type": "revolute",
+      "name": "planet axis",
+      "offset": 0.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 13
+      },
+      "flipped": false,
+      "id": 14,
+      "mate_type": "revolute",
+      "name": "idler axis",
+      "offset": 30.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    }
+  ],
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Housing",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 2,
+      "name": "Sun",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 7,
+      "name": "Ring",
+      "part_id": 3,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 8,
+      "name": "Carrier",
+      "part_id": 4,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 9,
+      "name": "Planet",
+      "part_id": 5,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 13,
+      "name": "Idler",
+      "part_id": 6,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "relations": [
+    {
+      "constant": 0.0,
+      "id": 10,
+      "kind": "epicyclic",
+      "name": "train",
+      "terms": [
+        {
+          "coefficient": 14.0,
+          "dof": "rotation",
+          "mate": 3,
+          "teeth": 14
+        },
+        {
+          "coefficient": 40.0,
+          "dof": "rotation",
+          "mate": 4,
+          "teeth": 40
+        },
+        {
+          "coefficient": -54.0,
+          "dof": "rotation",
+          "mate": 5
+        }
+      ],
+      "type": "Relation"
+    },
+    {
+      "constant": 0.0,
+      "id": 11,
+      "kind": "planet",
+      "name": "planet 1",
+      "terms": [
+        {
+          "coefficient": 1.0769230769230769,
+          "dof": "rotation",
+          "mate": 3,
+          "teeth": 14
+        },
+        {
+          "coefficient": -1.0769230769230769,
+          "dof": "rotation",
+          "mate": 5
+        },
+        {
+          "coefficient": 1.0,
+          "dof": "rotation",
+          "mate": 6,
+          "teeth": 13
+        }
+      ],
+      "type": "Relation"
+    },
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "id": 12,
+      "internal": true,
+      "kind": "gear",
+      "mate_a": 4,
+      "mate_b": 14,
+      "name": "ring drives an inner gear",
+      "phase": 0.0,
+      "ratio": 3.076923076923077,
+      "teeth_a": 40,
+      "teeth_b": 13,
+      "type": "Relation"
+    }
+  ],
+  "version": 171
+}

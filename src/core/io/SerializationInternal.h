@@ -26,7 +26,13 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    170; // v170: two load types, `torque` (magnitude N*mm, an optional
+    171; // v171: relations over several mates — kinds `linear_n`,
+         //      `epicyclic` and `planet`, each `terms` [{mate, path?, dof,
+         //      coefficient, teeth?}] and a `constant` in place of
+         //      mate_a/mate_b/dof/ratio/phase; a gear's or chain's
+         //      `teeth_a`/`teeth_b` and a gear's `internal`
+         //      (docs/assemblies/relations.md#relations-over-several-mates).
+         // v170: two load types, `torque` (magnitude N*mm, an optional
          //      `axis_origin` + `axis_dir`, omitted for a cylindrical face's
          //      own axis) and `remote` (magnitude N, `direction`, `point`)
          //      (docs/simulation/README.md#torque-and-remote-loads).

@@ -505,3 +505,55 @@ TEST_CASE("The v130 golden: an explode step inside a flexible placement",
   CHECK_THROWS_WITH(DocumentIO::ExplodedViewFromJson(j),
                     ContainsSubstring("one flexible placement"));
 }
+
+TEST_CASE("Relations over several mates cross into a flexible unit and move "
+          "inside one",
+          "[assembly][solver][relations]") {
+  // v171: a parent's linear_n names the unit's crank by path, and the
+  // sub-assembly's own linear_n couples its crank to a second crank — both
+  // expanded with the placement, every member remapped.
+  Rig r = MakeRig(false, /*withChain=*/false);
+  Occurrence c2;
+  c2.name = "Second crank";
+  c2.partId = 11;
+  const uint64_t crank2Occ = r.sub.AddOccurrence(std::move(c2));
+  Mate m2;
+  m2.type = MateType::Revolute;
+  m2.name = "crank 2";
+  m2.a = Origin(r.housingOcc);
+  m2.b = Origin(crank2Occ);
+  m2.flipped = false;
+  const uint64_t crank2 = r.sub.AddMate(m2);
+  const auto term = [](uint64_t mate, double c, std::vector<uint64_t> path) {
+    RelationTerm t;
+    t.mate = mate;
+    t.coefficient = c;
+    t.path = std::move(path);
+    return t;
+  };
+  Relation inner;
+  inner.kind = RelationKind::LinearN;
+  inner.terms = {term(r.crankMate, 1.0, {}), term(crank2, 1.0, {})};
+  r.sub.AddRelation(inner); // crank2 = -crank
+  Relation outer;
+  outer.kind = RelationKind::LinearN;
+  outer.terms = {term(r.drive, 2.0, {}), term(r.crankMate, -1.0, {r.unitOcc})};
+  const uint64_t rel = r.top.AddRelation(outer); // crank = 2 * drive
+  CHECK_FALSE(r.top.RelationSuppressed(rel));
+
+  Drive(r, 0.25);
+  CHECK(r.top.FindRelationById(rel)->error.empty());
+  const std::vector<uint64_t> path{r.unitOcc};
+  CHECK_THAT(*assembly::MateDofAt(r.top, path, r.crankMate, MateDof::Rotation,
+                                  r.Subs()),
+             WithinAbs(0.5, 1e-6));
+  CHECK_THAT(
+      *assembly::MateDofAt(r.top, path, crank2, MateDof::Rotation, r.Subs()),
+      WithinAbs(-0.5, 1e-6));
+
+  // A configuration hiding the unit takes the parent's relation out with it.
+  Configuration& cfg = r.top.AddConfiguration("No unit");
+  cfg.suppressedFeatures = {r.unitOcc};
+  REQUIRE(r.top.SetActiveConfiguration(cfg.id));
+  CHECK(r.top.RelationSuppressed(rel));
+}

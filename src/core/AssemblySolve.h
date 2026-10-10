@@ -309,6 +309,36 @@ bool SetMateDofAt(AssemblyDocument& doc, const std::vector<uint64_t>& path,
                   uint64_t mate, MateDof dof, double value,
                   const AssemblyResolver& asmById);
 
+// ---- Relations over several mates (v171) -----------------------------------
+// (docs/assemblies/relations.md#relations-over-several-mates)
+//
+// What a kind's tooth counts make of it: an epicyclic's Willis equation
+// zs*sun + zr*ring - (zs+zr)*carrier = constant, a planet's
+// planet + (zs/zp)*(sun - carrier) = constant, and a gear's or a chain's
+// ratio (-za/zb, an internal gear's and a chain's +za/zb). False, changing
+// nothing, when the counts it needs are not all positive.
+bool DeriveFromTeeth(Relation& r);
+// An epicyclic {sun, ring, carrier} and a planet {planet, sun, carrier},
+// their coefficients derived from the teeth. The members' dof is rotation;
+// a planet relation stores its terms as {sun, carrier, planet}.
+Relation MakeEpicyclic(RelationTerm sun, RelationTerm ring,
+                       RelationTerm carrier, int teethSun, int teethRing);
+Relation MakePlanet(RelationTerm planet, RelationTerm sun, RelationTerm carrier,
+                    int teethPlanet, int teethSun);
+// Whether `r` can be made as it stands, before it is added: every member a
+// mate of `doc` (or, by path, of a flexible placement) that has the DOF it
+// reads, no DOF named twice, and for a relation over several mates at least
+// two terms with non-zero coefficients. "" when it can; otherwise the
+// refusal, naming what would do. add_relation and the Add relation window
+// both ask it.
+std::string RelationProblem(const AssemblyDocument& doc, const Relation& r,
+                            const AssemblyResolver& asmById = nullptr);
+// A member's display role: "sun", "ring", "carrier", "planet" for the
+// epicyclic kinds, "term N" for linear_n; and whether the member has a tooth
+// count (an epicyclic's sun and ring, a planet relation's sun and planet).
+std::string RelationTermRole(const Relation& r, size_t index);
+bool RelationTermHasTeeth(const Relation& r, size_t index);
+
 // ---- Flatten: the one tree walk (A5) --------------------------------------
 //
 // An assembly may place other assemblies. Every consumer that wants GEOMETRY

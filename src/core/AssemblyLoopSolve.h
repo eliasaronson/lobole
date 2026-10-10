@@ -103,6 +103,15 @@ struct LoopRelation {
   // the solver differentiates the spline rather than a constant. A turning
   // follower's (dofB rotation, v102) table is in DEGREES; the row converts.
   std::vector<std::pair<double, double>> lift;
+  // A relation over several mates (v171): when set, mateA/mateB/ratio are
+  // unused and the row is sum(coefficient * dof) - phase, divided by the
+  // largest coefficient so it weighs like a binary row.
+  struct Term {
+    size_t mate = 0; // index into LoopProblem::mates
+    MateDof dof = MateDof::Rotation;
+    double coefficient = 1.0;
+  };
+  std::vector<Term> terms;
 };
 
 // A DOF held at a value while the loop closes around it (v88 fix): the mate
