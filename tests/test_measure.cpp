@@ -10,8 +10,12 @@
 #include "core/Measure.h"
 #include "core/features/BooleanFeature.h"
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
 #include <gp_Ax2.hxx>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -690,6 +694,124 @@ TEST_CASE("Two overlapping bodies report the overlap, not distance 0",
   const auto over = Measure::OverlapBetween(a, b);
   REQUIRE(over.has_value());
   CHECK_THAT(over->volume, WithinAbs(2.0 * 4.0 * 4.0, 1e-3)); // the 2mm slab
+}
+
+namespace {
+// An n-gon prism about (cx, cy), circumradius r, height h: n flat side
+// faces, so a pair of them has hundreds of face pairs at nearly one distance.
+TopoDS_Shape Prism(int n, double r, double h, double cx = 0.0,
+                   double cy = 0.0) {
+  BRepBuilderAPI_MakePolygon poly;
+  for (int i = 0; i < n; ++i) {
+    const double t = 2.0 * M_PI * i / n;
+    poly.Add(gp_Pnt(cx + r * std::cos(t), cy + r * std::sin(t), 0.0));
+  }
+  poly.Close();
+  const TopoDS_Face face = BRepBuilderAPI_MakeFace(poly.Wire());
+  return BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, h)).Shape();
+}
+Body BodyOf(const TopoDS_Shape& s, uint64_t id) {
+  Body b;
+  b.name = "body " + std::to_string(id);
+  b.shape = CADShape(s);
+  b.createdBy = id;
+  return b;
+}
+double WholeShapeDistance(const TopoDS_Shape& a, const TopoDS_Shape& b) {
+  BRepExtrema_DistShapeShape d(a, b);
+  REQUIRE(d.IsDone());
+  return d.Value();
+}
+} // namespace
+
+TEST_CASE("Exact distance over many equally close faces matches the whole "
+          "shapes'",
+          "[measure]") {
+  // The mesh-guided refinement (ExactDistance) used to hand anything with
+  // more than 64 candidate face pairs to BRepExtrema whole; it now asks
+  // them all, in parallel, re-meshing finer when the list is long. Whatever
+  // it does, the answer must be BRepExtrema's own.
+  //
+  // A 96-gon shaft in a 96-gon bore: every flat faces its twin across the
+  // same gap, the concentric case no tessellation narrows. Off centre, the
+  // minimum is one pair among hundreds of near-equals.
+  const TopoDS_Shape bore =
+      BRepAlgoAPI_Cut(
+          BRepPrimAPI_MakeBox(gp_Pnt(-30, -30, 0), 60, 60, 20).Shape(),
+          Prism(96, 20.0, 20.0))
+          .Shape();
+  for (const double off : {0.0, 0.37}) {
+    const TopoDS_Shape shaft = Prism(96, 19.5, 20.0, off, 0.0);
+    std::vector<Body> a{BodyOf(bore, 1)}, b{BodyOf(shaft, 2)};
+    const glm::dmat4 I(1.0);
+    Measure::Target ta{&a, I, ElementRef{1, ""}};
+    Measure::Target tb{&b, I, ElementRef{2, ""}};
+    const auto d =
+        Measure::DistanceBetween(ta, tb, Measure::DistanceKind::Minimum);
+    REQUIRE(d.has_value());
+    CHECK_THAT(d->distance, WithinAbs(WholeShapeDistance(bore, shaft), 1e-9));
+    // The points it reports are that far apart: the dimension is drawn
+    // where the answer is.
+    CHECK_THAT(glm::distance(d->pointA, d->pointB),
+               WithinAbs(d->distance, 1e-9));
+    // And twice is the same answer to the bit: which worker found it
+    // first does not choose it.
+    const auto again =
+        Measure::DistanceBetween(ta, tb, Measure::DistanceKind::Minimum);
+    REQUIRE(again.has_value());
+    CHECK(again->distance == d->distance);
+    CHECK(again->pointA == d->pointA);
+
+    // Apart, and neither inside the other: no boolean needed to say so.
+    const auto clear = Measure::ClearanceBetween(a, I, b, I);
+    REQUIRE(clear.has_value());
+    CHECK(clear->distance == d->distance);
+    CHECK(clear->volume == 0.0);
+  }
+}
+
+TEST_CASE("ClearanceBetween answers only when it proves there is no overlap",
+          "[measure]") {
+  const glm::dmat4 I(1.0);
+  const TopoDS_Shape big = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 10, 10, 10);
+  const TopoDS_Shape inside = BRepPrimAPI_MakeBox(gp_Pnt(4, 4, 4), 2, 2, 2);
+  const TopoDS_Shape apart = BRepPrimAPI_MakeBox(gp_Pnt(13, 0, 0), 2, 2, 2);
+  const TopoDS_Shape crossing = BRepPrimAPI_MakeBox(gp_Pnt(9, 4, 4), 2, 2, 2);
+  std::vector<Body> a{BodyOf(big, 1)};
+
+  // 3 mm apart: answered, and as ContactBetween answers it.
+  std::vector<Body> b{BodyOf(apart, 2)};
+  const auto clear = Measure::ClearanceBetween(a, I, b, I);
+  REQUIRE(clear.has_value());
+  CHECK_THAT(clear->distance, WithinAbs(3.0, 1e-9));
+  const auto contact = Measure::ContactBetween(a, I, b, I);
+  REQUIRE(contact.has_value());
+  CHECK(contact->distance == clear->distance);
+
+  // Buried: the SURFACES are 4 mm apart, and that is not clearance. A
+  // distance alone would call it clear; the classification says it is not.
+  std::vector<Body> c{BodyOf(inside, 3)};
+  CHECK_FALSE(Measure::ClearanceBetween(a, I, c, I).has_value());
+  CHECK_FALSE(Measure::ClearanceBetween(c, I, a, I).has_value());
+  const auto buried = Measure::ContactBetween(a, I, c, I);
+  REQUIRE(buried.has_value());
+  CHECK_THAT(buried->volume, WithinAbs(8.0, 1e-6));
+
+  // Crossing: distance 0 proves nothing, so it declines.
+  std::vector<Body> e{BodyOf(crossing, 4)};
+  CHECK_FALSE(Measure::ClearanceBetween(a, I, e, I).has_value());
+
+  // measure's shortcut, OverlapBetween given the distance it measured,
+  // still finds the buried one.
+  Measure::Target ta{&a, I, ElementRef{1, ""}};
+  Measure::Target tc{&c, I, ElementRef{3, ""}};
+  const auto over = Measure::OverlapBetween(ta, tc, 4.0);
+  REQUIRE(over.has_value());
+  CHECK_THAT(over->volume, WithinAbs(8.0, 1e-6));
+  Measure::Target tb{&b, I, ElementRef{2, ""}};
+  const auto none = Measure::OverlapBetween(ta, tb, 3.0);
+  REQUIRE(none.has_value());
+  CHECK(none->volume == 0.0);
 }
 
 TEST_CASE("TotalOf sums a set, and refuses a mixed one", "[measure]") {

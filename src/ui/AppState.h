@@ -2108,6 +2108,9 @@ struct AppState {
   // end, so a status asked by id just after the end still answers.
   uint64_t nextJobId = 1;
   std::deque<FinishedJob> finishedJobs;
+  // The reports of async contact_report runs (`contact` jobs), by job id:
+  // the last few, for contact_status to hand back once the job has ended.
+  std::map<uint64_t, nlohmann::json> contactReports;
   // The RPC connection whose request is being handled (0: none — the GUI),
   // set by the remote pump around each dispatch; what a study job started
   // over RPC is owned by. `rpcCallerGone` answers whether that connection

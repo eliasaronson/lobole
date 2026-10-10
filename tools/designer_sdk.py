@@ -3200,6 +3200,10 @@ VERDICT_CONTRACTS = {
             "press_fits": "overlaps the size bands allow, relieved and so "
                           "touching rather than clashing "
                           "(docs/tolerances/README.md#press-fits)",
+            "clash": "the boolean behind `clashes`",
+            "mode": "exact (the default) or mesh, which answer alike",
+            "mesh_cleared": "mesh mode: pairs settled by distance alone",
+            "deflection_mm": "mesh mode: the screen's coarsest mesh",
         },
         # Present only when they APPLY: the sweep says how far it got only
         # when it stopped early. They are still `consumed` — the whole point

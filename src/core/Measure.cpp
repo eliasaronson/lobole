@@ -6,6 +6,7 @@
 #include "core/FitBands.h"
 
 #include "core/MeshCollide.h"
+#include "core/Parallel.h"
 
 #include "core/Conventions.h"
 #include "core/ThreadStandards.h"
@@ -29,6 +30,7 @@
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepCheck_Result.hxx>
+#include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeHalfSpace.hxx>
@@ -46,6 +48,7 @@
 #include <GeomAbs_SurfaceType.hxx>
 #include <GeomLProp_SLProps.hxx>
 #include <Geom_Surface.hxx>
+#include <Precision.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
@@ -64,6 +67,7 @@
 #include <gp_Trsf.hxx>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -928,45 +932,105 @@ static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
 // triangles): propeller to camera plate 3.3 s -> 0.6 s, propeller to
 // battery 0.8 s, camera to battery 7 ms.
 //
-// THE CAP is the other half, and it is a cost estimate rather than a limit.
-// Refining N candidate pairs costs about N single face-pair extrema, and on
-// spline faces one of those is 0.1-0.4 s; asking OpenCASCADE about the whole
-// shapes costs whatever its own pruning makes it. Measured on a quadcopter's
-// propellers (53 spline faces, 2208 triangles each):
+// THE NARROWED SET. Nearest collects every face pair within `mesh + 2
+// deflections`. A pair's true distance is at least its triangles' less the
+// two meshes' deflections summed, so once an exact answer is in hand, a pair
+// whose floor is past it cannot beat it and is skipped. The rest are
+// independent single face-pair extrema, so they run on every core
+// (parallel::For).
 //
-//   151 mm apart:  32 candidates,  4.5 s refined,  51 s whole-shape
-//    30 mm apart: 177 candidates,   69 s refined,  17 s whole-shape
+// Meshing teeth are the case this is for: many nearly parallel flanks, all
+// within a deflection of each other, which no tessellation separates. Two
+// herringbone gears of a 70 mm planetary put 140-300 pairs in the set, and
+// this was capped at 64 and handed to BRepExtrema whole above that: 15-30 s
+// a pair, lofted or twisted. Refined in parallel it is 0.4 s for a sun and
+// planet and about 4 s for a planet in the coarser-meshed ring.
 //
-// The blades run nearly PARALLEL at 30 mm, so half the faces are equally
-// close and the candidate list stops narrowing anything. A long list is that
-// case, and this hands it back. 64 sits between the two: high enough to keep
-// the win where the list is short, low enough to refuse where it is not.
-constexpr size_t kMaxRefinedPairs = 64;
+// Extrema WRITE nothing onto the shapes (unlike a boolean,
+// docs/inspect/README.md#query-booleans-are-non-destructive): each worker
+// reads its two faces' geometry and owns its BRepExtrema object, as
+// OpenCASCADE's own BRepExtrema_DistShapeShape::SetMultiThread does over the
+// same sub-shapes. What a worker must not meet is a MESHER writing a
+// triangulation onto a face it reads; the mesh is built (under its cache's
+// lock, by Nearest) before the workers start, a finer one below is built on a
+// copy, and a sweep that calls this from its own workers warms every mesh
+// first (collide::Warm).
+//
+// THE CAP is a cost estimate, not a correctness limit: refining N pairs costs
+// N extrema spread over the cores, asking OpenCASCADE about the whole shapes
+// costs whatever its own pruning makes it, and on the cases measured here it
+// pruned no better (a sun inside its ring, 16 mm apart: minutes whole). It
+// is a FIXED number, never derived from the thread count, so a one-thread run
+// (DESIGNER_SWEEP_THREADS=1) refines exactly the pairs an all-thread run does
+// and answers bit for bit the same (sweep_parallel_smoke).
+constexpr size_t kMaxRefinedPairs = 4096;
+
+// A list longer than this is asked again of meshes cut kRemeshFactor times
+// finer, built on copies (collide::Mesh::Build with a stated deflection, so
+// the document's triangulation is untouched and nothing is cached). A coarse
+// mesh is one reason a list is long (a 70 mm ring is meshed at 0.2 mm, a
+// gap between teeth is 0.1), and a finer one narrows it: a sun and planet's
+// 144 pairs come down to about 70. Concentric faces are the
+// other, and no mesh separates those: a sun 16 mm inside its ring keeps
+// 2166 of its 3212, and costs 12 s on 22 cores.
+constexpr size_t kRemeshAbove = 128;
+constexpr double kRemeshFactor = 10.0;
 
 double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
                      const glm::dmat4& xfA, const CADShape& shapeB,
                      const TopoDS_Shape& b, const glm::dmat4& xfB,
                      gp_Pnt* pointA = nullptr, gp_Pnt* pointB = nullptr) {
-  double best_ = std::numeric_limits<double>::infinity();
-  const auto full = [&](const TopoDS_Shape& x, const TopoDS_Shape& y) {
-    // MIN, not the default MINMAX: every BRepExtrema here wants the
-    // minimum, and the maxima are work nobody reads.
+  constexpr double kInf = std::numeric_limits<double>::infinity();
+  // MIN, not the default MINMAX: every BRepExtrema here wants the minimum,
+  // and the maxima are work nobody reads.
+  const auto extrema = [](const TopoDS_Shape& x, const TopoDS_Shape& y,
+                          gp_Pnt* px, gp_Pnt* py) {
     BRepExtrema_DistShapeShape d(x, y, Extrema_ExtFlag_MIN,
                                  Extrema_ExtAlgo_Grad);
     if (!d.IsDone() || d.NbSolution() < 1)
-      return std::numeric_limits<double>::infinity();
-    if (pointA != nullptr && d.Value() < best_) {
-      *pointA = d.PointOnShape1(1);
-      *pointB = d.PointOnShape2(1);
+      return kInf;
+    if (px != nullptr) {
+      *px = d.PointOnShape1(1);
+      *py = d.PointOnShape2(1);
     }
-    best_ = std::min(best_, d.Value());
     return d.Value();
   };
+  const auto whole = [&] {
+    gp_Pnt pa, pb;
+    const double d = extrema(a, b, &pa, &pb);
+    if (pointA != nullptr && std::isfinite(d)) {
+      *pointA = pa;
+      *pointB = pb;
+    }
+    return d;
+  };
   const collide::Gap gap = collide::Nearest(shapeA, xfA, shapeB, xfB, 2.0);
-  if (!gap.known || gap.pairs.empty() || gap.pairs.size() > kMaxRefinedPairs)
-    return full(a, b);
+  if (!gap.known || gap.pairs.empty())
+    return whole();
   if (gap.distance <= 0.0)
     return 0.0; // touching or crossing: the overlap pass's question, not this
+
+  // A long list asks again, finer: see kRemeshAbove.
+  std::vector<collide::Mesh::FacePair> pairs = gap.pairs;
+  double tolerance = gap.tolerance;
+  if (pairs.size() > kRemeshAbove) {
+    const double fine = gap.tolerance / (2.0 * kRemeshFactor);
+    const auto ma = collide::Mesh::Build(shapeA, fine);
+    const auto mb = collide::Mesh::Build(shapeB, fine);
+    if (ma && mb && !ma->Empty() && !mb->Empty()) {
+      const double fineTol = ma->Deflection() + mb->Deflection();
+      const collide::Mesh::Near finer =
+          ma->Nearest(xfA, *mb, xfB, 2.0 * fineTol);
+      if (finer.distance <= 0.0)
+        return 0.0;
+      if (!finer.pairs.empty()) {
+        pairs = finer.pairs;
+        tolerance = fineTol;
+      }
+    }
+  }
+  if (pairs.size() > kMaxRefinedPairs)
+    return whole();
 
   // The faces, once, in the walk order `triangleFaces` indexes.
   std::vector<TopoDS_Shape> fa, fb;
@@ -974,26 +1038,93 @@ double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
     fa.push_back(ex.Current());
   for (TopExp_Explorer ex(b, TopAbs_FACE); ex.More(); ex.Next())
     fb.push_back(ex.Current());
-
-  double best = std::numeric_limits<double>::infinity();
-  for (const collide::Mesh::FacePair& pair : gap.pairs) {
+  for (const collide::Mesh::FacePair& pair : pairs)
     if (pair.a >= fa.size() || pair.b >= fb.size())
-      return full(a, b); // the mesh and the face walk disagree: ask everything
+      return whole(); // the mesh and the face walk disagree: ask everything
+
+  struct Hit {
+    double d = kInf;
+    gp_Pnt pa, pb;
+    bool failed = false;
+  };
+  std::vector<Hit> hits(pairs.size());
+  std::atomic<double> best{kInf};
+  // How far a pair's triangles can sit from its surfaces: the two meshes'
+  // deflections SUMMED (collide::Gap::tolerance), each surface off its own
+  // tessellation by up to its own deflection, in opposite directions at
+  // worst.
+  const double margin = tolerance;
+  parallel::For(pairs.size(), [&](size_t k) {
+    const collide::Mesh::FacePair& pair = pairs[k];
     // This pair's TRUE distance is at least its triangles' less the two
-    // deflections, so once that floor is past the best exact answer found,
-    // nothing later in the list (they are sorted) can beat it either.
-    if (pair.distance - 2.0 * gap.deflection >= best)
-      break;
-    best = std::min(best, full(fa[pair.a], fb[pair.b]));
+    // deflections. STRICTLY past the best: a pair that could tie is still
+    // asked, so which pairs hold the minimum does not depend on which worker
+    // got there first, and neither do the points reported.
+    if (pair.distance - margin > best.load(std::memory_order_relaxed))
+      return;
+    Hit& h = hits[k];
+    try {
+      h.d = extrema(fa[pair.a], fb[pair.b], &h.pa, &h.pb);
+    } catch (const Standard_Failure&) {
+      h.failed = true; // a worker must not throw; the whole shapes are asked
+      return;
+    } catch (const std::exception&) {
+      h.failed = true;
+      return;
+    }
+    double seen = best.load(std::memory_order_relaxed);
+    while (h.d < seen &&
+           !best.compare_exchange_weak(seen, h.d, std::memory_order_relaxed))
+      ;
+  });
+  // The minimum, and among equal minima the first in the (sorted) list.
+  const Hit* winner = nullptr;
+  for (const Hit& h : hits) {
+    if (h.failed)
+      return whole();
+    if (winner == nullptr || h.d < winner->d)
+      winner = &h;
   }
-  return std::isfinite(best) ? best : full(a, b);
+  if (winner == nullptr || !std::isfinite(winner->d))
+    return whole();
+  if (pointA != nullptr) {
+    *pointA = winner->pa;
+    *pointB = winner->pb;
+  }
+  return winner->d;
 }
 
-std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
-                                         const glm::dmat4& xfA,
-                                         const std::vector<Body>& bodiesB,
-                                         const glm::dmat4& xfB,
-                                         bool wantDistance) {
+namespace {
+
+// Whether any solid of `inner` lies inside `outer`, for two shapes whose
+// SURFACES are known to be apart: each solid of `inner` is then wholly in or
+// wholly out, so one of its vertices answers for all of it. Gated on the
+// boxes nesting, which is the cheap half.
+bool AnySolidInside(const TopoDS_Shape& inner, const TopoDS_Shape& outer) {
+  Bnd_Box outerBox;
+  BRepBndLib::Add(outer, outerBox);
+  for (TopExp_Explorer s(inner, TopAbs_SOLID); s.More(); s.Next()) {
+    TopExp_Explorer v(s.Current(), TopAbs_VERTEX);
+    if (!v.More())
+      continue;
+    const gp_Pnt p = BRep_Tool::Pnt(TopoDS::Vertex(v.Current()));
+    if (outerBox.IsOut(p))
+      continue;
+    BRepClass3d_SolidClassifier classifier(outer, p, Precision::Confusion());
+    if (classifier.State() == TopAbs_IN)
+      return true;
+  }
+  return false;
+}
+
+// ContactBetween and ClearanceBetween: the overlap pass (a boolean per
+// box-overlapping body pair) when `wantOverlap`, then the distance pass when
+// nothing overlapped and `wantDistance`.
+std::optional<SetContact> ContactImpl(const std::vector<Body>& bodiesA,
+                                      const glm::dmat4& xfA,
+                                      const std::vector<Body>& bodiesB,
+                                      const glm::dmat4& xfB, bool wantOverlap,
+                                      bool wantDistance) {
   try {
     const TopLoc_Location la(ToTrsf(xfA)), lb(ToTrsf(xfB));
     struct Placed {
@@ -1049,7 +1180,7 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
       for (size_t j = 0; j < pb.size(); ++j) {
         const double d = pa[i].box.Distance(pb[j].box);
         cands.push_back({d, i, j});
-        if (d > 0.0)
+        if (d > 0.0 || !wantOverlap)
           continue;
         // Fuzzy, for the reason kContactFuzz documents: parts DESIGNED to
         // touch share a face, and an exact boolean over coincident faces
@@ -1134,6 +1265,18 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
     }
     if (!std::isfinite(best))
       return std::nullopt;
+    if (!wantOverlap) {
+      // Asked without the boolean: only an answer that PROVES no overlap
+      // is one. Surfaces apart meet nowhere, so the sets overlap only if a
+      // solid of one is wholly inside the other.
+      if (best <= 0.0)
+        return std::nullopt;
+      for (const Placed& x : pa)
+        for (const Placed& y : pb)
+          if (AnySolidInside(x.shape, y.shape) ||
+              AnySolidInside(y.shape, x.shape))
+            return std::nullopt;
+    }
     out.distance = best;
     return out;
   } catch (const std::exception& e) {
@@ -1147,6 +1290,23 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
                                               : "OpenCASCADE failure");
     return std::nullopt;
   }
+}
+
+} // namespace
+
+std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
+                                         const glm::dmat4& xfA,
+                                         const std::vector<Body>& bodiesB,
+                                         const glm::dmat4& xfB,
+                                         bool wantDistance) {
+  return ContactImpl(bodiesA, xfA, bodiesB, xfB, true, wantDistance);
+}
+
+std::optional<SetContact> ClearanceBetween(const std::vector<Body>& bodiesA,
+                                           const glm::dmat4& xfA,
+                                           const std::vector<Body>& bodiesB,
+                                           const glm::dmat4& xfB) {
+  return ContactImpl(bodiesA, xfA, bodiesB, xfB, false, true);
 }
 
 std::optional<SetCompare>
@@ -2550,12 +2710,30 @@ std::optional<glm::dvec3> NearestPointOn(const Target& t, const glm::dvec3& p,
   }
 }
 
-std::optional<SetContact> OverlapBetween(const Target& a, const Target& b) {
+std::optional<SetContact> OverlapBetween(const Target& a, const Target& b,
+                                         double apart) {
   if (!a.Whole() || !b.Whole())
     return std::nullopt; // a face has no volume to overlap with
   const std::vector<Body> pa = TargetBodies(a), pb = TargetBodies(b);
   if (pa.empty() || pb.empty())
     return std::nullopt;
+  if (apart > 0.0) {
+    try {
+      bool nested = false;
+      for (const Body& x : pa)
+        for (const Body& y : pb)
+          nested = nested ||
+                   AnySolidInside(x.shape.GetShape(), y.shape.GetShape()) ||
+                   AnySolidInside(y.shape.GetShape(), x.shape.GetShape());
+      if (!nested) {
+        SetContact clear;
+        clear.distance = apart;
+        return clear; // apart, and neither inside the other: no overlap
+      }
+    } catch (const Standard_Failure&) {
+      // fall through to the boolean, which reports its own failure
+    }
+  }
   // No distance: this verb exists for the overlap VOLUME, and its callers
   // read `volume` alone. Asking for the distance as well doubled the cost of
   // every `measure` between two whole shapes — the handler had already
@@ -2612,7 +2790,11 @@ DistanceDetailed(const std::vector<Body>& bodiesA, const ElementRef& a,
   try {
     sa = sa.Moved(TopLoc_Location(ToTrsf(xfA)));
     sb = sb.Moved(TopLoc_Location(ToTrsf(xfB)));
-    BRepExtrema_DistShapeShape dist(sa, sb);
+    // MIN, as ExactDistance asks: the default MINMAX also searches for the
+    // maxima, which nobody reads and which on two spline faces cost as much
+    // again as the minimum.
+    BRepExtrema_DistShapeShape dist(sa, sb, Extrema_ExtFlag_MIN,
+                                    Extrema_ExtAlgo_Grad);
     if (!dist.IsDone() || dist.NbSolution() < 1)
       return std::nullopt;
     DistanceResult out;

@@ -160,6 +160,18 @@ Gap Nearest(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
 Result Overlap(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
                const glm::dmat4& xfB);
 
+// Builds (or finds) `shape`'s cached mesh now. A sweep calls it for every
+// body, single-threaded, before its workers start: building a mesh writes a
+// triangulation onto the shape's TShape, and a worker running extrema or a
+// boolean on that shape must not meet a mesher (core/Parallel.h).
+void Warm(const CADShape& shape);
+
+// Drops `shape`'s cached mesh. For a caller that meshed its own short-lived
+// copies (an async contact_report's): the cache keys on the TShape's
+// address, and a copy freed with its entry still cached would hand that
+// mesh to whatever shape is allocated there next.
+void Forget(const CADShape& shape);
+
 // The shared cache's current size, and a way to drop it (a document closing,
 // or a test that wants a cold measurement).
 size_t CacheSize();

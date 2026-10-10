@@ -38,8 +38,9 @@ struct BackgroundJob {
   std::string kind;  // "cam" | … — what `cancel_background_job` names
   std::string label; // "Clearing 'Pocket 1', pass 2 of 4" — shown as-is
   // The RPC connection that started it and that it dies with (0: nobody —
-  // the GUI started it, or the caller asked it to outlive its client). Only
-  // study jobs set it: a CAM pass is cached and paid for, and keeps going.
+  // the GUI started it, or the caller asked it to outlive its client). Study
+  // jobs and async contact reports set it: a CAM pass is cached and paid
+  // for, and keeps going.
   uint64_t owner = 0;
   // The study a study job runs (0 for every other kind), so a status by job
   // id can say which.

@@ -34,6 +34,7 @@
 #include "ui/AppState.h"
 
 #include "ui/AssemblyActions.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
@@ -43,6 +44,8 @@
 #include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
+#include <OSD.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_DataMapOfShapeInteger.hxx>
@@ -61,6 +64,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <random>
 #include <set>
@@ -467,9 +471,17 @@ struct SweepPlan {
 // pairs, so shapes must be warm before the workers start. They are:
 // `Measure::WorldBounds` runs over every entity, single-threaded, while the
 // plan is being built.
+//
+// `cancel` (an async contact_report's job) stops new dispatches the way the
+// deadline does, and `fraction` is written with the share of pairs done.
+//
+// The workers run under parallel::For, so a pair whose own check is
+// parallel inside (ExactDistance's face pairs) gets this worker's share of
+// the machine rather than a machine's worth of threads per worker.
 template <typename C, typename R>
 size_t RunSweep(SweepPlan& plan, double deadlineSeconds, C&& compute,
-                R&& record) {
+                R&& record, const std::atomic<bool>* cancel = nullptr,
+                std::atomic<double>* fraction = nullptr) {
   using Result = decltype(compute(size_t{0}, size_t{0}));
   const auto start = std::chrono::steady_clock::now();
   const bool timed = deadlineSeconds > 0.0;
@@ -483,6 +495,7 @@ size_t RunSweep(SweepPlan& plan, double deadlineSeconds, C&& compute,
   std::vector<Result> results(n);
   std::atomic<size_t> next{0};
   std::atomic<size_t> stopAt{n}; // first pair the deadline turned away
+  std::atomic<size_t> done{0};
   const auto worker = [&] {
     for (;;) {
       const size_t k = next.fetch_add(1, std::memory_order_relaxed);
@@ -491,7 +504,8 @@ size_t RunSweep(SweepPlan& plan, double deadlineSeconds, C&& compute,
       // Every pair, not every eighth: one contact check between two imported
       // servos is seconds, so sampling the clock in batches overran a 20 s
       // deadline by 100 s. Reading a steady_clock is nanoseconds.
-      if (timed && elapsedNow() > deadlineSeconds) {
+      if ((timed && elapsedNow() > deadlineSeconds) ||
+          (cancel != nullptr && cancel->load(std::memory_order_relaxed))) {
         size_t seen = stopAt.load(std::memory_order_relaxed);
         while (k < seen && !stopAt.compare_exchange_weak(
                                seen, k, std::memory_order_relaxed))
@@ -499,21 +513,29 @@ size_t RunSweep(SweepPlan& plan, double deadlineSeconds, C&& compute,
         return;
       }
       results[k] = compute(plan.exact[k].first, plan.exact[k].second);
+      const size_t finished = done.fetch_add(1) + 1;
+      if (fraction != nullptr)
+        fraction->store(static_cast<double>(finished) / static_cast<double>(n));
     }
   };
 
+  // One slot per worker thread, each pulling from the shared counter.
+  //
+  // Each worker hands a check that is parallel inside (ExactDistance's face
+  // pairs) the WHOLE machine, not parallel::For's even share of it. A
+  // sweep's pairs are uneven: in a planetary gear set the sun against the
+  // ring it sits inside asks 2000 face pairs while every meshing pair asks
+  // about 100, so a share of 22 / 7 left the long one on three threads for a
+  // minute while the rest sat idle. Oversubscribing while several long ones
+  // overlap is the cheaper error; the scheduler time-slices them.
   const size_t threads = std::min<size_t>(n, parallel::Workers());
-  if (threads <= 1) {
+  const size_t whole = parallel::Workers();
+  parallel::For(threads, [&](size_t) {
+    const size_t was = parallel::detail::tlShare;
+    parallel::detail::tlShare = whole;
     worker();
-  } else {
-    std::vector<std::thread> pool;
-    pool.reserve(threads - 1);
-    for (size_t t = 1; t < threads; ++t)
-      pool.emplace_back(worker);
-    worker(); // this thread pulls its share rather than idling
-    for (std::thread& t : pool)
-      t.join();
-  }
+    parallel::detail::tlShare = was;
+  });
 
   const size_t checked = std::min(stopAt.load(), n);
   for (size_t k = 0; k < checked; ++k)
@@ -1198,15 +1220,42 @@ static constexpr MethodDoc InspectionMethods[] = {
      "A PRESS FIT the bands allow is relieved, not a clash: its pair is "
      "`touching` and carries `press_fits`, and `press_fits` lists every one "
      "(docs/tolerances/README.md#press-fits); a clash beside a banded round "
-     "face carries `press_fit_refused` saying why it is not a fit.",
-     "deadline_s, exact_face_budget, max_pairs, near_tol, touch_tol",
+     "face carries `press_fit_refused` saying why it is not a fit. "
+     "mode 'mesh' screens every pair on the tessellation first: a pair "
+     "whose triangles cross goes to the exact boolean, and one whose "
+     "triangles do not has its exact distance measured, which settles it "
+     "without a boolean when it is positive and neither side is inside "
+     "the other (`checked`: distance | boolean per pair, `mesh_cleared` "
+     "the count settled by distance). The answer is the exact one either "
+     "way: same states, distances, clashes and press fits. {async: true} runs "
+     "it as a background job (`contact` in "
+     "background_jobs, one at a time) and answers `job`: contact_status "
+     "{job} reports progress and then the report, cancel_background_job "
+     "{kind: 'contact'} stops it. The job is cancelled when the connection "
+     "that started it closes, unless `outlive_client: true`.",
+     "async, deadline_s, exact_face_budget, max_pairs, mode, near_tol, "
+     "outlive_client, touch_tol",
      remote::NoFlags,
-     "connected, components, pairs[]{a, b, state, distance, volume, "
-     "press_fits?}, "
+     "connected, clash, components, pairs[]{a, b, state, distance, volume, "
+     "checked?, press_fits?}, "
      "near_misses[]{a, b, distance}, clashes[]{a, b, volume, centroid_mm, "
      "bbox_min_mm, bbox_max_mm, press_fit_refused?}, press_fits[]{a, b, "
      "fits, volume_mm3}, touch_tol, "
-     "near_tol, scope?, bodies?"},
+     "near_tol, mode, mesh_cleared?, deflection_mm?, pairs_checked, "
+     "elapsed_s, receipt, scope?, bodies?, occurrences?, not_checked?, "
+     "started?, running?, job?, kind?, outlives_client?"},
+    {"contact_status",
+     "An async contact_report by its `job` id, from any tab: {job, kind, "
+     "label, running: true, fraction, elapsed_seconds, cancellable, "
+     "cancel_requested, outlives_client} while it runs; {running: false, "
+     "outcome (done|cancelled|failed), seconds, error?, cancel_reason?, "
+     "report?} once it has ended, `report` being exactly what the "
+     "synchronous call would have answered (a cancelled run keeps none). "
+     "An id that names no contact job is refused, naming those there are.",
+     "job", remote::NoFlags,
+     "job, kind, running, fraction?, label?, elapsed_seconds?, "
+     "cancellable?, cancel_requested?, outlives_client?, outcome?, "
+     "seconds?, error?, cancel_reason?, report?"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
@@ -1474,6 +1523,422 @@ json PrintedThreadsJson(const Document& part) {
       if (const auto r = ui::PrintedThreadFor(part, *th))
         out.push_back(PrintedThreadJson(*r));
   return out;
+}
+
+// --- contact_report
+// (docs/inspect/README.md#clashes-contact-and-floating-parts)
+//
+// Two halves, so the second can run as a job: GATHER (main thread: the
+// tab's bodies, placed in world space, their boxes, the mates) and SWEEP
+// (pure: the pairs, the union-find, the response). An async report gathers
+// DEEP COPIES (CADShape::DetachedUnlocated), because the frame may mesh the
+// document's own shapes while the worker reads them
+// (docs/ui/long-operations.md).
+
+// One node of the contact graph: a body on a part tab, a top-level
+// occurrence's whole flattened subtree on an assembly tab.
+struct ContactEnt {
+  std::string name;
+  uint64_t id = 0;          // the occurrence's; 0 on the bodies scope
+  std::vector<Body> bodies; // placed in world space
+  glm::dvec3 min{0.0}, max{0.0};
+  size_t faces = 0; // how heavy an exact boolean against it would be
+};
+
+struct ContactSweep {
+  bool bodiesScope = false;
+  bool mesh = false; // mode: "mesh" — screen on triangles first
+  std::vector<ContactEnt> ents;
+  json skipped = json::array();
+  double touchTol = 1e-3, nearTol = 1.0, deadline = 20.0;
+  size_t maxPairs = 4000, faceBudget = 20000;
+  // For the intended-vs-realized diff (assembly scope, mates present).
+  struct MateRef {
+    std::string name;
+    uint64_t id = 0, a = 0, b = 0;
+  };
+  std::vector<MateRef> mates;
+  std::map<uint64_t, std::string> occNames;
+  bool copies = false; // the bodies are this sweep's own (an async run)
+  // Tests only: how long each pair of an ASYNC run waits before it is
+  // checked (DESIGNER_TEST_CONTACT_PAIR_MS), so a smoke can watch a run in
+  // progress and cancel it before it ends, on any machine. A cancel ends
+  // the wait.
+  int pairDelayMs = 0;
+};
+
+// The parameters, read and checked before anything is gathered or started:
+// a refused call changes nothing
+// (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+ContactSweep ContactParams(const RpcParams& p) {
+  ContactSweep sw;
+  sw.touchTol = p.value("touch_tol", 1e-3);
+  sw.nearTol = p.value("near_tol", 1.0);
+  sw.maxPairs = p.value("max_pairs", size_t{4000});
+  sw.deadline = p.value("deadline_s", 20.0);
+  sw.faceBudget = p.value("exact_face_budget", size_t{20000});
+  const std::string mode = p.value("mode", std::string("exact"));
+  if (mode != "exact" && mode != "mesh")
+    throw std::runtime_error("contact_report mode '" + mode +
+                             "' is not one of: exact, mesh");
+  sw.mesh = mode == "mesh";
+  return sw;
+}
+
+// What the gather keeps of a body: the body itself on the synchronous path,
+// a deep copy at the same placement on an async one.
+Body ContactBody(const Body& b, const CADShape& placed, bool copy) {
+  Body nb = b;
+  nb.shape = copy ? placed.DetachedUnlocated().LocatedLike(placed) : placed;
+  return nb;
+}
+
+void GatherContactBodies(ContactSweep& sw, const Document& doc) {
+  sw.bodiesScope = true;
+  for (const Body& b : doc.GetBodies()) {
+    if (b.reference)
+      continue; // a derived ghost is not this part's matter
+    ContactEnt e;
+    e.name = b.name;
+    e.bodies.push_back(ContactBody(b, b.shape, sw.copies));
+    if (!Measure::WorldBounds(e.bodies, glm::dmat4(1.0), e.min, e.max)) {
+      sw.skipped.push_back(b.name);
+      continue;
+    }
+    e.faces = static_cast<size_t>(e.bodies.front().shape.FaceCount());
+    sw.ents.push_back(std::move(e));
+  }
+}
+
+// A5: one node per TOP-LEVEL occurrence, whose geometry is its whole
+// flattened subtree in world space. That is what makes "is the gangway
+// attached to the dock" a question about two nodes and the hinges between
+// them, instead of thirty parts — and the reason a clash BETWEEN two parts
+// inside one sub-assembly does not appear here: it belongs to that
+// assembly's own report, on its own tab.
+void GatherContactOccurrences(ContactSweep& sw, ui::AppState& state) {
+  std::map<uint64_t, std::vector<Body>> byRoot;
+  for (const assembly::FlatInstance& inst : ui::FlattenActiveAssembly(state)) {
+    if (!inst.visible)
+      continue;
+    for (const Body& b : inst.part->GetBodies()) {
+      // A derived ghost is not the occurrence's matter: the gripper body
+      // carrying a copy of the servo it was drawn on reported a 15 cm3
+      // clash with that servo — its own ghost.
+      if (b.reference)
+        continue;
+      byRoot[inst.rootOccurrenceId].push_back(
+          ContactBody(b, b.shape.Transformed(inst.world), sw.copies));
+    }
+  }
+  for (const Occurrence& o : state.assembly->GetOccurrences()) {
+    sw.occNames[o.id] = o.name;
+    if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
+      continue;
+    const auto it = byRoot.find(o.id);
+    ContactEnt e;
+    e.name = o.name;
+    e.id = o.id;
+    if (it != byRoot.end())
+      e.bodies = it->second;
+    if (e.bodies.empty() ||
+        !Measure::WorldBounds(e.bodies, glm::dmat4(1.0), e.min, e.max)) {
+      sw.skipped.push_back(o.name); // nothing resolvable under it
+      continue;
+    }
+    for (const Body& b : e.bodies)
+      e.faces += static_cast<size_t>(b.shape.FaceCount());
+    sw.ents.push_back(std::move(e));
+  }
+  for (const Mate& mt : state.assembly->GetMates())
+    sw.mates.push_back({mt.name, mt.id, mt.a.occurrenceId, mt.b.occurrenceId});
+}
+
+// The mesh screen: whether the tessellations of the two sides cross, or one
+// lies inside the other (collide::Overlap). A pair whose triangles cross is
+// overlapping to within the deflection and goes straight to the boolean,
+// which weighs it; one whose triangles do not is asked for its exact
+// distance first (Measure::ClearanceBetween), and needs no boolean when
+// that proves it apart.
+bool MeshCrosses(const ContactEnt& a, const ContactEnt& b, double& deflection) {
+  for (const Body& x : a.bodies) {
+    if (!x.shape.IsValid())
+      continue;
+    for (const Body& y : b.bodies) {
+      if (!y.shape.IsValid())
+        continue;
+      const collide::Result r =
+          collide::Overlap(x.shape, glm::dmat4(1.0), y.shape, glm::dmat4(1.0));
+      deflection = std::max(deflection, r.deflection);
+      if (r.intersects)
+        return true;
+    }
+  }
+  return false;
+}
+
+json RunContactSweep(ContactSweep& sw, const std::atomic<bool>* cancel,
+                     std::atomic<double>* fraction) {
+  std::vector<ContactEnt>& ents = sw.ents;
+  // Every mesh built HERE, one thread, before the workers start: building
+  // one writes a triangulation onto the shape, and the workers' extrema read
+  // those shapes (core/Parallel.h). ExactDistance asks for them in both
+  // modes.
+  for (const ContactEnt& e : ents)
+    for (const Body& b : e.bodies)
+      if (b.shape.IsValid())
+        collide::Warm(b.shape);
+
+  std::vector<size_t> parent(ents.size());
+  for (size_t i = 0; i < parent.size(); ++i)
+    parent[i] = i;
+  const std::function<size_t(size_t)> find = [&](size_t i) -> size_t {
+    return parent[i] == i ? i : parent[i] = find(parent[i]);
+  };
+  json pairs = json::array(), nearMisses = json::array(),
+       clashes = json::array(), pressFits = json::array();
+  std::set<std::pair<uint64_t, uint64_t>> touchingIds;
+  // Closest first, and bounded: on a 253-occurrence arm this is 31,878
+  // pairs, and the ones sharing a PCB all pass the box test.
+  std::vector<glm::dvec3> mins, maxs;
+  for (const ContactEnt& e : ents) {
+    mins.push_back(e.min);
+    maxs.push_back(e.max);
+  }
+  // The deadline stops new DISPATCHES; a boolean already running cannot be
+  // preempted. That is fine between parts and useless against a mesh
+  // import, where one pair is not slow but effectively unbounded: an STL
+  // arrives as one planar face per triangle, and two 54k-face bodies took a
+  // documented sweep past ten minutes with a deadline_s of 20 set. So the
+  // heavy pairs are not started, and the report says which -- a sweep that
+  // quietly never returns is worse than one that says what it did not check.
+  json tooHeavy = json::array();
+  const auto heavy = [&](size_t i, size_t j) {
+    return sw.faceBudget > 0 && ents[i].faces + ents[j].faces > sw.faceBudget;
+  };
+  struct PairResult {
+    std::optional<Measure::SetContact> contact;
+    bool screened = false; // the mesh proved it clear: no boolean ran
+    bool apart = false;    // the oriented boxes proved it out of range
+  };
+  std::atomic<double> deflection{0.0};
+  std::atomic<size_t> screened{0};
+  SweepPlan plan = PlanSweep(mins, maxs, sw.nearTol, sw.maxPairs);
+  RunSweep(
+      plan, sw.deadline,
+      [&](size_t i, size_t j) -> PairResult {
+        PairResult r;
+        for (int waited = 0; waited < sw.pairDelayMs; waited += 10) {
+          if (cancel != nullptr && cancel->load())
+            break;
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (heavy(i, j))
+          return r;
+        // The bodies scope's second prefilter, for what the first cannot
+        // reject: a long slanted member's axis-aligned box is mostly air,
+        // so on a space frame nearly every pair survives it and pays for an
+        // exact boolean. An oriented box follows the member.
+        if (sw.bodiesScope &&
+            Measure::SeparatedByOBB(ents[i].bodies, glm::dmat4(1.0),
+                                    ents[j].bodies, glm::dmat4(1.0),
+                                    sw.nearTol)) {
+          r.apart = true;
+          return r;
+        }
+        if (sw.mesh) {
+          double d = 0.0;
+          const bool crosses = MeshCrosses(ents[i], ents[j], d);
+          double seen = deflection.load(std::memory_order_relaxed);
+          while (d > seen && !deflection.compare_exchange_weak(
+                                 seen, d, std::memory_order_relaxed))
+            ;
+          if (!crosses) {
+            r.contact =
+                Measure::ClearanceBetween(ents[i].bodies, glm::dmat4(1.0),
+                                          ents[j].bodies, glm::dmat4(1.0));
+            if (r.contact) {
+              r.screened = true;
+              screened.fetch_add(1, std::memory_order_relaxed);
+              return r;
+            }
+          }
+        }
+        r.contact = Measure::ContactBetween(ents[i].bodies, glm::dmat4(1.0),
+                                            ents[j].bodies, glm::dmat4(1.0));
+        return r;
+      },
+      [&](size_t i, size_t j, const PairResult& r) {
+        const auto sides = [&](json& o) {
+          // The ids as well as the names: sixteen occurrences answer to
+          // "ISO 4762 M3x10", and a reported pair that cannot say WHICH
+          // one sends a caller hunting through list_occurrences.
+          if (!sw.bodiesScope) {
+            o["a_id"] = ents[i].id;
+            o["b_id"] = ents[j].id;
+          }
+        };
+        if (r.apart)
+          return;
+        if (!r.contact) {
+          if (heavy(i, j)) {
+            json h{{"a", ents[i].name},
+                   {"b", ents[j].name},
+                   {"faces", ents[i].faces + ents[j].faces},
+                   {"why", "an exact boolean between these two would not "
+                           "finish inside any deadline; measure them with "
+                           "mode 'mesh', or raise exact_face_budget"}};
+            sides(h);
+            tooHeavy.push_back(std::move(h));
+          }
+          return;
+        }
+        const Measure::SetContact& c = *r.contact;
+        const char* st = ContactState(c, sw.touchTol);
+        json pair{{"a", ents[i].name}, {"b", ents[j].name}};
+        sides(pair);
+        pair["state"] = st;
+        pair["distance"] = c.distance;
+        pair["volume"] = c.volume;
+        if (sw.mesh)
+          pair["checked"] = r.screened ? "distance" : "boolean";
+        AddPressFits(pair, c);
+        pairs.push_back(std::move(pair));
+        if (!c.pressFits.empty()) {
+          json fit{{"a", ents[i].name}, {"b", ents[j].name}};
+          sides(fit);
+          fit["fits"] = PressFitsJson(c);
+          fit["volume_mm3"] = c.pressFitVolume;
+          pressFits.push_back(std::move(fit));
+        }
+        if (std::string_view(st) != "clear") {
+          parent[find(i)] = find(j);
+          touchingIds.insert({std::min(ents[i].id, ents[j].id),
+                              std::max(ents[i].id, ents[j].id)});
+        }
+        if (std::string_view(st) == "clash") {
+          json clash{{"a", ents[i].name}, {"b", ents[j].name}};
+          sides(clash);
+          clash["volume"] = c.volume;
+          AddOverlapSite(clash, c);
+          clashes.push_back(std::move(clash));
+        } else if (c.distance > sw.touchTol && c.distance <= sw.nearTol) {
+          json miss{{"a", ents[i].name}, {"b", ents[j].name}};
+          sides(miss);
+          miss["distance"] = c.distance;
+          nearMisses.push_back(std::move(miss));
+        }
+      },
+      cancel, fraction);
+
+  std::map<size_t, std::vector<std::string>> comps;
+  for (size_t i = 0; i < ents.size(); ++i)
+    comps[find(i)].push_back(ents[i].name);
+  std::vector<std::vector<std::string>> componentList;
+  for (auto& [root, names] : comps)
+    componentList.push_back(std::move(names));
+  std::sort(componentList.begin(), componentList.end(),
+            [](const auto& a, const auto& b) { return a.size() > b.size(); });
+  json out = {{"connected", componentList.size() <= 1},
+              {"components", componentList},
+              {"pairs", pairs},
+              {"near_misses", nearMisses},
+              {"clashes", clashes},
+              {"clash", !clashes.empty()},
+              {"press_fits", pressFits},
+              {"touch_tol", sw.touchTol},
+              {"near_tol", sw.nearTol},
+              {"mode", sw.mesh ? "mesh" : "exact"}};
+  if (sw.mesh) {
+    out["mesh_cleared"] = screened.load();
+    out["deflection_mm"] = deflection.load();
+  }
+  AttachSweepCoverage(out, plan, ents.size(), sw.maxPairs, sw.deadline,
+                      tooHeavy.size());
+  if (sw.bodiesScope) {
+    out.erase("occurrences");
+    out["scope"] = "bodies";
+    out["bodies"] = ents.size();
+  }
+  if (!sw.skipped.empty())
+    out["skipped"] = sw.skipped;
+  if (!tooHeavy.empty())
+    out["not_checked"] = tooHeavy;
+  // Intended vs realized: only meaningful when the assembly HAS mates — in
+  // a fixed-occurrence assembly every touching pair is "unmated".
+  if (!sw.bodiesScope && !sw.mates.empty()) {
+    json unrealized = json::array(), unmated = json::array();
+    std::set<std::pair<uint64_t, uint64_t>> mated;
+    for (const ContactSweep::MateRef& mt : sw.mates) {
+      const auto key =
+          std::make_pair(std::min(mt.a, mt.b), std::max(mt.a, mt.b));
+      mated.insert(key);
+      if (touchingIds.find(key) == touchingIds.end())
+        unrealized.push_back({{"mate", mt.name}, {"id", mt.id}});
+    }
+    for (const auto& [ia, ib] : touchingIds)
+      if (mated.find({ia, ib}) == mated.end()) {
+        const auto a = sw.occNames.find(ia), b = sw.occNames.find(ib);
+        if (a != sw.occNames.end() && b != sw.occNames.end())
+          unmated.push_back({{"a", a->second}, {"b", b->second}});
+      }
+    out["unrealized_mates"] = unrealized;
+    out["unmated_contacts"] = unmated;
+  }
+  // An async run meshed its own copies; their cache entries go with them
+  // (collide::Forget says why).
+  if (sw.copies)
+    for (const ContactEnt& e : ents)
+      for (const Body& b : e.bodies)
+        collide::Forget(b.shape);
+  return out;
+}
+
+// An async contact_report: the sweep on a `contact` job. The report lands in
+// AppState::contactReports by job id for contact_status to hand back.
+uint64_t StartContactJob(ui::AppState& state, std::shared_ptr<ContactSweep> sw,
+                         uint64_t owner) {
+  struct Run {
+    std::shared_ptr<ContactSweep> sweep;
+    json report;
+  };
+  auto run = std::make_shared<Run>();
+  run->sweep = std::move(sw);
+  auto bg = std::make_unique<ui::BackgroundJob>();
+  bg->kind = "contact";
+  bg->label = std::string("Contact report (") +
+              (run->sweep->bodiesScope ? "bodies" : "occurrences") + ", " +
+              std::to_string(run->sweep->ents.size()) + ")";
+  bg->cancellable = true;
+  bg->owner = owner;
+  bg->fraction.store(0.0); // the share of pairs checked: determinate
+  ui::BackgroundJob* raw = bg.get();
+  bg->thread = std::thread([run, raw]() {
+    OSD::SetSignal(Standard_False);
+    try {
+      run->report = RunContactSweep(*run->sweep, &raw->cancel, &raw->fraction);
+    } catch (const Standard_Failure& e) {
+      raw->error =
+          e.GetMessageString() ? e.GetMessageString() : "OpenCASCADE failure";
+    } catch (const std::exception& e) {
+      raw->error = e.what();
+    }
+    run->sweep.reset();    // the copies go on the worker, not on the frame
+    raw->done.store(true); // last
+  });
+  bg->finish = [run, raw](ui::AppState& s) {
+    // A cancelled run's report is a prefix nobody asked for: it ends as
+    // `cancelled` (the registry records it) and keeps nothing.
+    if (!raw->cancel.load() && !run->report.is_null()) {
+      s.contactReports[raw->id] = std::move(run->report);
+      // The last few, as finishedJobs keeps: a status asked just after the
+      // end answers, and a session of async reports does not grow forever.
+      while (s.contactReports.size() > 8)
+        s.contactReports.erase(s.contactReports.begin());
+    }
+    return true;
+  };
+  return ui::StartBackgroundJob(state, std::move(bg)).id;
 }
 
 } // namespace
@@ -2626,291 +3091,107 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // BODIES — the occurrence-level gate structurally cannot see a bracket
     // floating INSIDE one part (the ladder mount plate that touched
     // nothing), so multi-body parts get their own connectivity check.
-    if (doc != nullptr) {
-      const double touchTol = p.value("touch_tol", 1e-3);
-      const double nearTol = p.value("near_tol", 1.0);
-      struct BEnt {
-        const Body* body;
-        std::vector<Body> single; // ContactBetween takes body sets
-        glm::dvec3 min, max;
-      };
-      std::vector<BEnt> ents;
-      json skipped = json::array();
-      for (const Body& b : doc->GetBodies()) {
-        if (b.reference)
-          continue; // a derived ghost is not this part's matter
-        BEnt e{&b, {}, {}, {}};
-        e.single.push_back(b);
-        if (!Measure::WorldBounds(e.single, glm::dmat4(1.0), e.min, e.max)) {
-          skipped.push_back(b.name);
-          continue;
-        }
-        ents.push_back(std::move(e));
-      }
-      const auto boxGap = [](const BEnt& a, const BEnt& b) {
-        const glm::dvec3 gap =
-            glm::max(glm::max(a.min - b.max, b.min - a.max), glm::dvec3(0.0));
-        return static_cast<double>(glm::length(gap));
-      };
-      std::vector<size_t> parent(ents.size());
-      for (size_t i = 0; i < parent.size(); ++i)
-        parent[i] = i;
-      const std::function<size_t(size_t)> find = [&](size_t i) -> size_t {
-        return parent[i] == i ? i : parent[i] = find(parent[i]);
-      };
-      json pairs = json::array(), nearMisses = json::array(),
-           clashes = json::array(), pressFits = json::array();
-      for (size_t i = 0; i < ents.size(); ++i)
-        for (size_t j = i + 1; j < ents.size(); ++j) {
-          if (boxGap(ents[i], ents[j]) > nearTol)
-            continue;
-          // The second prefilter, for what the first cannot reject: a long
-          // slanted member's axis-aligned box is mostly air, so on a space
-          // frame nearly every pair survives it and pays for an exact
-          // boolean. An oriented box follows the member.
-          if (Measure::SeparatedByOBB(ents[i].single, glm::dmat4(1.0),
-                                      ents[j].single, glm::dmat4(1.0), nearTol))
-            continue;
-          const auto c = Measure::ContactBetween(
-              ents[i].single, glm::dmat4(1.0), ents[j].single, glm::dmat4(1.0));
-          if (!c)
-            continue;
-          const char* st = ContactState(*c, touchTol);
-          pairs.push_back({{"a", ents[i].body->name},
-                           {"b", ents[j].body->name},
-                           {"state", st},
-                           {"distance", c->distance},
-                           {"volume", c->volume}});
-          AddPressFits(pairs.back(), *c);
-          if (!c->pressFits.empty())
-            pressFits.push_back({{"a", ents[i].body->name},
-                                 {"b", ents[j].body->name},
-                                 {"fits", PressFitsJson(*c)},
-                                 {"volume_mm3", c->pressFitVolume}});
-          if (std::string_view(st) != "clear")
-            parent[find(i)] = find(j);
-          if (std::string_view(st) == "clash") {
-            json clash{{"a", ents[i].body->name},
-                       {"b", ents[j].body->name},
-                       {"volume", c->volume}};
-            AddOverlapSite(clash, *c);
-            clashes.push_back(std::move(clash));
-          } else if (c->distance > touchTol && c->distance <= nearTol)
-            nearMisses.push_back({{"a", ents[i].body->name},
-                                  {"b", ents[j].body->name},
-                                  {"distance", c->distance}});
-        }
-      std::map<size_t, std::vector<std::string>> comps;
-      for (size_t i = 0; i < ents.size(); ++i)
-        comps[find(i)].push_back(ents[i].body->name);
-      std::vector<std::vector<std::string>> componentList;
-      for (auto& [root, names] : comps)
-        componentList.push_back(std::move(names));
-      std::sort(
-          componentList.begin(), componentList.end(),
-          [](const auto& a, const auto& b) { return a.size() > b.size(); });
-      json out = {{"scope", "bodies"},
-                  {"bodies", ents.size()},
-                  {"connected", componentList.size() <= 1},
-                  {"components", componentList},
-                  {"pairs", pairs},
-                  {"near_misses", nearMisses},
-                  {"clashes", clashes},
-                  {"press_fits", pressFits},
-                  {"touch_tol", touchTol},
-                  {"near_tol", nearTol}};
-      if (!skipped.empty())
-        out["skipped"] = skipped;
-      return out;
-    }
-    if (state.assembly == nullptr)
+    // The response is built by RunContactSweep, above:
+    // rpc-returns-from: src/remote/RemoteInspection.cpp
+    if (doc == nullptr && state.assembly == nullptr)
       throw std::runtime_error(
           "contact_report needs a part or assembly tab — switch tabs with "
           "set_active_part (see list_parts)");
-    const double touchTol = p.value("touch_tol", 1e-3);
-    const double nearTol = p.value("near_tol", 1.0);
-    // A5: one node per TOP-LEVEL occurrence, whose geometry is its whole
-    // flattened subtree in world space. That is what makes "is the gangway
-    // attached to the dock" a question about two nodes and the hinges
-    // between them, instead of thirty parts — and the reason a clash BETWEEN
-    // two parts inside one sub-assembly does not appear here: it belongs to
-    // that assembly's own report, on its own tab.
-    struct Ent {
-      const Occurrence* occ;
-      std::vector<Body> bodies; // already placed in world space
-      glm::dmat4 xf{1.0};       // identity: `bodies` carry the placement
-      glm::dvec3 min, max;
-      size_t faces = 0; // how heavy an exact boolean against it would be
-    };
-    std::vector<Ent> ents;
-    json skipped = json::array();
-    std::map<uint64_t, std::vector<Body>> byRoot;
-    for (const assembly::FlatInstance& inst :
-         ui::FlattenActiveAssembly(state)) {
-      if (!inst.visible)
-        continue;
-      for (const Body& b : inst.part->GetBodies()) {
-        // A derived ghost is not the occurrence's matter: the gripper body
-        // carrying a copy of the servo it was drawn on reported a 15 cm3
-        // clash with that servo — its own ghost.
-        if (b.reference)
-          continue;
-        Body nb = b;
-        nb.shape = b.shape.Transformed(inst.world);
-        byRoot[inst.rootOccurrenceId].push_back(std::move(nb));
-      }
+    // Read by ContactParams:
+    // rpc-params: deadline_s, exact_face_budget, max_pairs
+    // rpc-params: mode, near_tol, touch_tol
+    auto sw = std::make_shared<ContactSweep>(ContactParams(p));
+    const bool async = p.value("async", false);
+    const bool outlive = p.value("outlive_client", false);
+    if (outlive && !async)
+      throw std::runtime_error(
+          "outlive_client is for an async report (async: true); a "
+          "synchronous one ends with its call");
+    if (async) {
+      // One at a time: `cancel_background_job {kind: "contact"}` then says
+      // which run it stops.
+      if (const ui::BackgroundJob* running =
+              ui::FindBackgroundJob(state, "contact"))
+        throw std::runtime_error(
+            "a contact report is already running (job " +
+            std::to_string(running->id) +
+            "): contact_status {job} reports it, cancel_background_job "
+            "{kind: \"contact\"} stops it");
+      sw->copies = true;
+      if (const char* ms = std::getenv("DESIGNER_TEST_CONTACT_PAIR_MS"))
+        sw->pairDelayMs = std::max(0, std::atoi(ms));
     }
-    for (const Occurrence& o : state.assembly->GetOccurrences()) {
-      if (!o.visible || state.assembly->OccurrenceSuppressed(o.id))
-        continue;
-      const auto it = byRoot.find(o.id);
-      Ent e;
-      e.occ = &o;
-      if (it != byRoot.end())
-        e.bodies = it->second;
-      if (e.bodies.empty() ||
-          !Measure::WorldBounds(e.bodies, e.xf, e.min, e.max)) {
-        skipped.push_back(o.name); // nothing resolvable under this occurrence
-        continue;
-      }
-      for (const Body& b : e.bodies)
-        e.faces += static_cast<size_t>(b.shape.FaceCount());
-      ents.push_back(std::move(e));
+    if (doc != nullptr)
+      GatherContactBodies(*sw, *doc);
+    else
+      GatherContactOccurrences(*sw, state);
+    if (!async)
+      return RunContactSweep(*sw, nullptr, nullptr);
+    const uint64_t owner = outlive ? 0 : state.rpcConnection;
+    const uint64_t job = StartContactJob(state, sw, owner);
+    return json{{"started", true},
+                {"running", true},
+                {"job", job},
+                {"kind", "contact"},
+                {"outlives_client", owner == 0}};
+  }
+  if (m == "contact_status") {
+    // An async contact_report by its job id, from any tab: how far it is
+    // while it runs, how it ended and (when it finished) the report.
+    ui::ReapBackgroundJobs(state);
+    const uint64_t id = p.at("job").get<uint64_t>();
+    if (ui::BackgroundJob* j = ui::FindBackgroundJobById(state, id)) {
+      if (j->kind != "contact")
+        throw std::runtime_error("job " + std::to_string(id) + " is a '" +
+                                 j->kind +
+                                 "' job, not a contact report -- "
+                                 "background_jobs lists it");
+      const double fraction = j->fraction.load();
+      return json{
+          {"job", id},
+          {"kind", "contact"},
+          {"label", j->label},
+          {"running", true},
+          {"fraction", fraction >= 0.0 ? json(fraction) : json(nullptr)},
+          {"elapsed_seconds", std::chrono::duration<double>(
+                                  std::chrono::steady_clock::now() - j->started)
+                                  .count()},
+          {"cancellable", j->cancellable},
+          {"cancel_requested", j->cancel.load()},
+          {"outlives_client", j->owner == 0}};
     }
-    std::vector<size_t> parent(ents.size());
-    for (size_t i = 0; i < parent.size(); ++i)
-      parent[i] = i;
-    const std::function<size_t(size_t)> find = [&](size_t i) -> size_t {
-      return parent[i] == i ? i : parent[i] = find(parent[i]);
-    };
-    json pairs = json::array(), nearMisses = json::array(),
-         clashes = json::array(), pressFits = json::array();
-    std::set<std::pair<uint64_t, uint64_t>> touchingIds;
-    // Closest first, and bounded: on a 253-occurrence arm this loop is
-    // 31,878 pairs, and the ones sharing a PCB all pass the box test.
-    std::vector<glm::dvec3> mins, maxs;
-    for (const Ent& e : ents) {
-      mins.push_back(e.min);
-      maxs.push_back(e.max);
+    if (const ui::FinishedJob* f = ui::FinishedJobById(state, id)) {
+      if (f->kind != "contact")
+        throw std::runtime_error("job " + std::to_string(id) + " is a '" +
+                                 f->kind + "' job, not a contact report");
+      json out{{"job", id},
+               {"kind", "contact"},
+               {"running", false},
+               {"outcome", f->outcome},
+               {"seconds", f->seconds}};
+      if (!f->error.empty())
+        out["error"] = f->error;
+      if (!f->cancelReason.empty())
+        out["cancel_reason"] = f->cancelReason;
+      if (const auto it = state.contactReports.find(id);
+          it != state.contactReports.end())
+        out["report"] = it->second;
+      return out;
     }
-    const size_t maxPairs = p.value("max_pairs", size_t{4000});
-    const double deadline = p.value("deadline_s", 20.0);
-    // The deadline stops new DISPATCHES; a boolean already running cannot be
-    // preempted. That is fine between parts and useless against a mesh
-    // import, where one pair is not slow but effectively unbounded: an STL
-    // arrives as one planar face per triangle, and two 54k-face bodies took
-    // a documented sweep past ten minutes with a deadline_s of 20 set. So
-    // the heavy pairs are not started, and the report says which -- a sweep
-    // that quietly never returns is worse than one that says what it did not
-    // check.
-    const size_t faceBudget = p.value("exact_face_budget", size_t{20000});
-    json tooHeavy = json::array();
-    SweepPlan plan = PlanSweep(mins, maxs, nearTol, maxPairs);
-    RunSweep(
-        plan, deadline,
-        [&](size_t i, size_t j) -> std::optional<Measure::SetContact> {
-          if (faceBudget > 0 && ents[i].faces + ents[j].faces > faceBudget)
-            return std::nullopt;
-          return Measure::ContactBetween(ents[i].bodies, ents[i].xf,
-                                         ents[j].bodies, ents[j].xf);
-        },
-        [&](size_t i, size_t j, const std::optional<Measure::SetContact>& c) {
-          if (!c) {
-            if (faceBudget > 0 && ents[i].faces + ents[j].faces > faceBudget)
-              tooHeavy.push_back(
-                  {{"a", ents[i].occ->name},
-                   {"b", ents[j].occ->name},
-                   {"faces", ents[i].faces + ents[j].faces},
-                   {"why", "an exact boolean between these two would not "
-                           "finish inside any deadline; measure them with "
-                           "mode 'mesh', or raise exact_face_budget"}});
-            return;
-          }
-          const char* st = ContactState(*c, touchTol);
-          // The ids as well as the names: sixteen occurrences answer to
-          // "ISO 4762 M3x10", and a reported pair that cannot say WHICH
-          // one sends a caller hunting through list_occurrences.
-          pairs.push_back({{"a", ents[i].occ->name},
-                           {"b", ents[j].occ->name},
-                           {"a_id", ents[i].occ->id},
-                           {"b_id", ents[j].occ->id},
-                           {"state", st},
-                           {"distance", c->distance},
-                           {"volume", c->volume}});
-          AddPressFits(pairs.back(), *c);
-          if (!c->pressFits.empty())
-            pressFits.push_back({{"a", ents[i].occ->name},
-                                 {"b", ents[j].occ->name},
-                                 {"a_id", ents[i].occ->id},
-                                 {"b_id", ents[j].occ->id},
-                                 {"fits", PressFitsJson(*c)},
-                                 {"volume_mm3", c->pressFitVolume}});
-          if (std::string_view(st) != "clear") {
-            parent[find(i)] = find(j);
-            touchingIds.insert({std::min(ents[i].occ->id, ents[j].occ->id),
-                                std::max(ents[i].occ->id, ents[j].occ->id)});
-          }
-          if (std::string_view(st) == "clash") {
-            json clash{{"a", ents[i].occ->name},
-                       {"b", ents[j].occ->name},
-                       {"a_id", ents[i].occ->id},
-                       {"b_id", ents[j].occ->id},
-                       {"volume", c->volume}};
-            AddOverlapSite(clash, *c);
-            clashes.push_back(std::move(clash));
-          } else if (c->distance > touchTol && c->distance <= nearTol)
-            nearMisses.push_back({{"a", ents[i].occ->name},
-                                  {"b", ents[j].occ->name},
-                                  {"a_id", ents[i].occ->id},
-                                  {"b_id", ents[j].occ->id},
-                                  {"distance", c->distance}});
-        });
-    std::map<size_t, std::vector<std::string>> comps;
-    for (size_t i = 0; i < ents.size(); ++i)
-      comps[find(i)].push_back(ents[i].occ->name);
-    std::vector<std::vector<std::string>> componentList;
-    for (auto& [root, names] : comps)
-      componentList.push_back(std::move(names));
-    std::sort(componentList.begin(), componentList.end(),
-              [](const auto& a, const auto& b) { return a.size() > b.size(); });
-    json out = {{"connected", componentList.size() <= 1},
-                {"components", componentList},
-                {"pairs", pairs},
-                {"near_misses", nearMisses},
-                {"clashes", clashes},
-                {"press_fits", pressFits},
-                {"touch_tol", touchTol},
-                {"near_tol", nearTol}};
-    AttachSweepCoverage(out, plan, ents.size(), maxPairs, deadline,
-                        tooHeavy.size());
-    if (!skipped.empty())
-      out["skipped"] = skipped;
-    if (!tooHeavy.empty())
-      out["not_checked"] = tooHeavy;
-    // Intended vs realized: only meaningful when the assembly HAS mates —
-    // in a fixed-occurrence assembly every touching pair is "unmated".
-    if (!state.assembly->GetMates().empty()) {
-      json unrealized = json::array(), unmated = json::array();
-      std::set<std::pair<uint64_t, uint64_t>> mated;
-      for (const Mate& mt : state.assembly->GetMates()) {
-        const auto key =
-            std::make_pair(std::min(mt.a.occurrenceId, mt.b.occurrenceId),
-                           std::max(mt.a.occurrenceId, mt.b.occurrenceId));
-        mated.insert(key);
-        if (touchingIds.find(key) == touchingIds.end())
-          unrealized.push_back({{"mate", mt.name}, {"id", mt.id}});
-      }
-      for (const auto& [ia, ib] : touchingIds)
-        if (mated.find({ia, ib}) == mated.end()) {
-          const Occurrence* a = state.assembly->FindById(ia);
-          const Occurrence* b = state.assembly->FindById(ib);
-          if (a != nullptr && b != nullptr)
-            unmated.push_back({{"a", a->name}, {"b", b->name}});
-        }
-      out["unrealized_mates"] = unrealized;
-      out["unmated_contacts"] = unmated;
-    }
-    return out;
+    std::string known;
+    for (const ui::BackgroundJobInfo& j : ui::ListBackgroundJobs(state))
+      if (j.kind == "contact")
+        known +=
+            (known.empty() ? "" : ", ") + std::to_string(j.id) + " (running)";
+    for (const ui::FinishedJob& f : state.finishedJobs)
+      if (f.kind == "contact")
+        known += (known.empty() ? "" : ", ") + std::to_string(f.id) + " (" +
+                 f.outcome + ")";
+    throw std::runtime_error(
+        "no contact report job " + std::to_string(id) + " — " +
+        (known.empty() ? std::string("none has run (contact_report "
+                                     "{async: true} starts one)")
+                       : "known: " + known));
   }
   if (m == "mass_properties") {
     // Volume, surface area, center of mass, and inertia (about the CoM) per
@@ -4154,7 +4435,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         out["delta"] = {delta.x, delta.y, delta.z};
         // Two WHOLE shapes that interpenetrate are 0 apart, which is true
         // and the least useful available fact. Say whether they clash.
-        if (const auto ov = Measure::OverlapBetween(ta, tb)) {
+        // The minimum just measured is passed on: two shapes measurably
+        // apart need no boolean to say they do not overlap.
+        const double apart =
+            dk == Measure::DistanceKind::Minimum ? d->distance : -1.0;
+        if (const auto ov = Measure::OverlapBetween(ta, tb, apart)) {
           out["overlap_volume"] = ov->volume;
           out["clash"] = ov->volume > 0.0;
         }

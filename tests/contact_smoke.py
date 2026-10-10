@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 from designer_remote import Designer  # noqa: E402
@@ -51,6 +52,9 @@ def main():
     # preferences: set_settings persists immediately (headless runs no GUI
     # loop to debounce it), so a suite reset their font size to 120%.
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
+    # Holds each pair of an ASYNC contact_report, so the smoke sees one
+    # running and cancels it before it ends (tests only).
+    env["DESIGNER_TEST_CONTACT_PAIR_MS"] = "1500"
     app = launch_app(binary, env=env)
     try:
         d = Designer.wait_for(app.port)
@@ -238,6 +242,83 @@ def main():
         expect(mesh.get("deflection_mm", 0) > 0,
                f"but says how close 'clear' was decided: {mesh}")
         refused(d, "interference", "must be one of: exact, mesh", mode="wibble")
+
+        # --- contact_report mode: mesh -----------------------------------
+        # The triangles choose which pairs need the boolean; the answer is
+        # the exact one. Same clashes, same states, same distances.
+        exact = d.call("contact_report")
+        mesh = d.call("contact_report", mode="mesh")
+        expect(mesh["mode"] == "mesh" and exact["mode"] == "exact",
+               f"each report names its mode: {mesh['mode']} {exact['mode']}")
+
+        def clash_set(r):
+            return {(c["a_id"], c["b_id"]) for c in r["clashes"]}
+
+        def pair_rows(r):
+            return sorted((p["a_id"], p["b_id"], p["state"],
+                           round(p["distance"], 9)) for p in r["pairs"])
+
+        expect(clash_set(mesh) == clash_set(exact) and exact["clashes"],
+               f"mesh names the same clashes: {mesh['clashes']} vs "
+               f"{exact['clashes']}")
+        expect(pair_rows(mesh) == pair_rows(exact),
+               f"and every pair alike: {pair_rows(mesh)} vs "
+               f"{pair_rows(exact)}")
+        expect(all(p["checked"] in ("distance", "boolean")
+                   for p in mesh["pairs"]),
+               f"each pair says how it was settled: {mesh['pairs'][:2]}")
+        # Its receipt says so: "no pair interferes" FAILS with clashes in
+        # the list (it used to read `clash`, which this report never set,
+        # and passed).
+        expect(exact["clash"] and exact["receipt"]["standing"] != "verified",
+               f"a report with clashes is not a clean receipt: "
+               f"{exact.get('clash')} {exact['receipt']}")
+        refused(d, "contact_report", "is not one of: exact, mesh",
+                mode="wibble")
+        refused(d, "contact_report", "outlive_client is for an async",
+                outlive_client=True)
+
+        # --- contact_report async: a `contact` job -----------------------
+        # DESIGNER_TEST_CONTACT_PAIR_MS (set at launch) holds every pair of
+        # an ASYNC run, so it is still running when it is looked at.
+        started = d.call("contact_report", mode="mesh", **{"async": True})
+        expect(started["started"] and started["kind"] == "contact"
+               and not started["outlives_client"],
+               f"an async report is a job: {started}")
+        job = started["job"]
+        st = d.call("contact_status", job=job)
+        expect(st["running"] and st["fraction"] is not None
+               and 0.0 <= st["fraction"] <= 1.0 and st["cancellable"],
+               f"a running report says how far it is: {st}")
+        expect(d.call("ping")["port"] == app.port,
+               "the instance answers while the report runs")
+        jobs = d.call("background_jobs")["jobs"]
+        expect(any(j["id"] == job and j["kind"] == "contact" for j in jobs),
+               f"background_jobs lists it: {jobs}")
+        refused(d, "contact_report", "already running", **{"async": True})
+        deadline = time.time() + 90
+        while st["running"] and time.time() < deadline:
+            time.sleep(0.2)
+            st = d.call("contact_status", job=job)
+        expect(not st["running"] and st["outcome"] == "done",
+               f"the job ends done: {st}")
+        report = st["report"]
+        expect(pair_rows(report) == pair_rows(mesh)
+               and clash_set(report) == clash_set(mesh),
+               f"its report is the synchronous one: {pair_rows(report)}")
+
+        # Cancelled: it ends `cancelled` and keeps no report.
+        job = d.call("contact_report", **{"async": True})["job"]
+        asked = d.call("cancel_background_job", kind="contact")
+        expect(asked["asked"] == 1, f"the cancel reached it: {asked}")
+        st = d.call("contact_status", job=job)
+        deadline = time.time() + 30
+        while st["running"] and time.time() < deadline:
+            time.sleep(0.1)
+            st = d.call("contact_status", job=job)
+        expect(st["outcome"] == "cancelled" and "report" not in st,
+               f"a cancelled report ends cancelled, with none: {st}")
+        refused(d, "contact_status", "no contact report job", job=999999)
 
         print("contact_smoke: all checks passed")
         return 0

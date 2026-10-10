@@ -557,6 +557,16 @@ Gap Nearest(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
   return out;
 }
 
+void Warm(const CADShape& shape) { (void)CachedMesh(shape); }
+
+void Forget(const CADShape& shape) {
+  const uint64_t key = shape.PlacementId();
+  if (key == 0)
+    return;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  g_cache.erase(key);
+}
+
 size_t CacheSize() {
   std::lock_guard<std::mutex> lock(g_mutex);
   return g_cache.size();

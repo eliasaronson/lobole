@@ -173,6 +173,19 @@ std::optional<SetContact> ContactBetween(const std::vector<Body>& bodiesA,
                                          const glm::dmat4& xfB,
                                          bool wantDistance = true);
 
+// The distance pass alone, without the boolean: for two sets a mesh screen
+// (contact_report {mode: "mesh"}) found not crossing. It answers only when
+// the answer PROVES there is no overlap — the exact distance is positive
+// and no solid of either set lies wholly inside the other (one vertex of
+// each solid, classified exactly) — and is nullopt otherwise, for the
+// caller to ask ContactBetween. When it answers, `volume` is 0 and
+// `distance` the separation, by the same extrema ContactBetween's second
+// pass takes, so the two agree to the bit.
+std::optional<SetContact> ClearanceBetween(const std::vector<Body>& bodiesA,
+                                           const glm::dmat4& xfA,
+                                           const std::vector<Body>& bodiesB,
+                                           const glm::dmat4& xfB);
+
 // Axis-aligned world bounds of a placed body set — the cheap prefilter the
 // assembly contact_report sweep runs before paying for ContactBetween.
 // False when the set has no valid shapes.
@@ -400,7 +413,15 @@ std::optional<glm::dvec3> NearestPointOn(const Target& t, const glm::dvec3& p,
 // which is what the extrema solver says about any two overlapping solids and
 // is the least useful true thing available. nullopt when either side is an
 // element (a face has no volume to overlap with).
-std::optional<SetContact> OverlapBetween(const Target& a, const Target& b);
+//
+// `apart`, when the caller already measured the exact minimum distance
+// between the two (as `measure` does first), spares the boolean: surfaces
+// that are apart meet nowhere, so the solids overlap only if one is wholly
+// inside the other, and one point of each solid classified against the
+// other settles that exactly. Between two meshing gears the boolean was
+// most of a `measure`.
+std::optional<SetContact> OverlapBetween(const Target& a, const Target& b,
+                                         double apart = -1.0);
 
 // The minimum distance between two whole targets, off their TRIANGLES: the
 // same answer `interference mode=mesh` decides a clash with, and the same
