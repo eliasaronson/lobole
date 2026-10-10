@@ -357,7 +357,13 @@ def build_assembly(d, s, ph, diameter, proc):
             "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]}), "planet frame")
 
     d.call("add_assembly", name="planetary")
-    occ = {"ring": d.call("add_occurrence", part="ring", fixed=True)["id"],
+    # A ground to hang every axis on: the frames-only carrier part, placed
+    # fixed. The ring is no longer the anchor, because the epicyclic
+    # relation needs the ring on an axis of its own (it is the member the
+    # solve holds while the sun is driven).
+    occ = {"ground": d.call("add_occurrence", part="carrier", name="ground",
+                            fixed=True)["id"],
+           "ring": d.call("add_occurrence", part="ring")["id"],
            "sun": d.call("add_occurrence", part="sun")["id"],
            "carrier": d.call("add_occurrence", part="carrier")["id"]}
     for i in range(PLANETS):
@@ -367,31 +373,27 @@ def build_assembly(d, s, ph, diameter, proc):
     def origin(o):
         return {"occurrence": occ[o], "origin": True}
 
-    mates = {
-        "sun": d.call("add_mate", type="revolute", name="sun axis",
-                      a=origin("ring"), b=origin("sun"), flipped=False)["id"],
-        "carrier": d.call("add_mate", type="revolute", name="carrier axis",
-                          a=origin("ring"), b=origin("carrier"),
-                          flipped=False)["id"]}
-    # Rotation to rotation at a SIGNED bare ratio is a `gear` relation given
-    # `ratio` (with teeth it would derive -za/zb, an external pair's sign).
-    # With the ring held: the carrier turns zs/(zs+zr) of the sun, and a
-    # planet turns on the carrier by -(zs/zp) of the sun's turn RELATIVE to
-    # the carrier, i.e. -(zs/zp)(zr/(zs+zr)) of the sun's.
-    carrier_ratio = zs / (zs + zr)
-    planet_ratio = -(zs / zp) * (zr / (zs + zr))
-    check(d.call("add_relation", type="gear", a=mates["sun"],
-                 b=mates["carrier"], ratio=carrier_ratio,
-                 name="sun : carrier"), "carrier relation")
+    mates = {k: d.call("add_mate", type="revolute", name=f"{k} axis",
+                       a=origin("ground"), b=origin(k),
+                       flipped=False)["id"]
+             for k in ("sun", "ring", "carrier")}
     for i, (_, phi) in enumerate(ph["planets"]):
         o = f"planet {i + 1}"
         mates[o] = d.call("add_mate", type="revolute", name=f"{o} axis",
                           a={"occurrence": occ["carrier"], "frame": o},
                           b=origin(o), flipped=False, rotation=phi)["id"]
-        check(d.call("add_relation", type="gear", a=mates["sun"],
-                     b=mates[o], ratio=planet_ratio, phase=phi,
-                     name=f"sun : {o}"), f"{o} relation")
-    return occ, mates, {"carrier": carrier_ratio, "planet": planet_ratio}
+    # The train as written on paper: sun, ring and carrier by Willis, and
+    # each planet's turn on the carrier, from the tooth counts
+    # (docs/assemblies/relations.md#relations-over-several-mates). The
+    # constants are where the parts stand, so each planet keeps its phase.
+    check(d.call("add_relation", type="epicyclic", name="planetary",
+                 sun=mates["sun"], ring=mates["ring"],
+                 carrier=mates["carrier"], teeth_sun=zs, teeth_ring=zr,
+                 planets=[{"mate": mates[f"planet {i + 1}"], "teeth": zp}
+                          for i in range(PLANETS)]), "epicyclic relation")
+    # What the train should do with the ring held, for the receipt.
+    return occ, mates, {"carrier": zs / (zs + zr),
+                        "planet": -(zs / zp) * (zr / (zs + zr))}
 
 
 def material_of(d, proc):
@@ -619,12 +621,21 @@ def main():
     motion = {"clash_deflection_mm": clash, "negative_controls": {}}
     # First, that this check can fail: planet 1 put half a tooth out, and
     # then only 0.4 mm along its pitch circle, must each clash.
-    rels = {r["name"]: r for r in d.call("list_relations")["relations"]}
-    r1 = rels["sun : planet 1"]
+    # Planet 1's own relation (kind `planet`): moving its constant by the
+    # planet's coefficient times an angle turns that planet by the angle.
+    r1, coef = None, None
+    for r in d.call("list_relations")["relations"]:
+        for t in r.get("terms", []):
+            if r.get("kind") == "planet" and \
+                    t["mate"] == mates["planet 1"]:
+                r1, coef = r, t["coefficient"]
+    if r1 is None:
+        raise SystemExit("planetary: no planet relation for planet 1")
     rp_planet = s["module"] * s["zp"] / 2.0
     for label, off in (("half a tooth", math.pi / s["zp"]),
                        ("0.4 mm", 0.4 / rp_planet)):
-        d.call("set_relation", id=r1["id"], phase=r1["phase"] + off)
+        d.call("set_relation", id=r1["id"],
+               constant=r1["constant"] + coef * off)
         r = run_motion(d, mates, s, f"control: {label}", cycle, 24, "mesh",
                        clash)["result"]
         motion["negative_controls"][label] = r["collision_status"]
@@ -634,7 +645,7 @@ def main():
             raise SystemExit(f"planetary: planet 1 {label} out of phase "
                              f"reads clean; the clash check cannot see "
                              f"this gap")
-    d.call("set_relation", id=r1["id"], phase=r1["phase"])
+    d.call("set_relation", id=r1["id"], constant=r1["constant"])
     for name, to, n in (("one mesh cycle", cycle, 24),
                         ("one orbit", 360.0 * s["ratio"], 240)):
         r = run_motion(d, mates, s, name, to, n, "mesh", clash)["result"]

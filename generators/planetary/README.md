@@ -72,10 +72,15 @@ community's numbers. The rest derives:
 - **The STL's chords are at most a fifth of the gap:** `export_stl` picks
   the profile's chord deviation (0.01 mm) for a printed part.
 - **The STL has five shells**: two bodies that touch would fuse into one.
-- **The assembly turns.** The `sun`, `planet` and `ring` parts are placed on
-  a kinematic carrier (a part of frames only), with the sun driving the
-  carrier and each planet through `gear` relations at signed ratios
-  (carrier `Zs/(Zs+Zr)`, planet `-(Zs/Zp) Zr/(Zs+Zr)`). Two motion studies
+- **The assembly turns.** The `sun`, `ring` and a kinematic carrier (a part
+  of frames only, also placed fixed as the ground every axis hangs on) turn
+  on their own axes, the planets on the carrier's frames. One `epicyclic`
+  relation couples them from the tooth counts, Willis's equation plus each
+  planet's turn on the carrier
+  (docs/assemblies/relations.md#relations-over-several-mates). With the sun
+  driven, the solve holds the ring and says so, the carrier turns
+  Zs/(Zs+Zr) of the sun and each planet -(Zs/Zp) of the sun's turn relative
+  to the carrier. Two motion studies
   check for clashes: one mesh cycle (every pair through every phase of its
   mesh) in 24 samples, and one whole orbit of the planets in 240. Both must
   be clean.
