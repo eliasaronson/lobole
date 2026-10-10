@@ -517,8 +517,11 @@ pieces interfere fails outright.
 
 `add_feature` (JSON dialect = `feature_types`), `modify_feature` (replaces the
 whole spec, keeps the id), `delete_feature`, `suppress_feature {feature_id,
-suppressed}`, `set_rollback {feature_id | index}`, `set_material`,
-`set_appearance`, `project_geometry`, `update_derived`, `derive_occurrence`
+suppressed}`, `set_rollback {feature_id | index}`, `set_material` and
+`set_appearance` (`{feature_id | body | body_name}`, on the body's creating
+feature; a Boolean, pattern or Split's body continues its source's material:
+[the feature that holds a material](../rendering/materials.md#the-feature-that-holds-a-material)),
+`project_geometry`, `update_derived`, `derive_occurrence`
 (`src/remote/RemoteModeling.cpp`), and there too `check_literals` and
 `extract_variables`
 ([../variables/README.md](../variables/README.md#literals-that-should-be-expressions));

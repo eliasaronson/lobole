@@ -354,15 +354,21 @@ static constexpr MethodDoc ModelingMethods[] = {
      remote::NeedsPart | remote::Deferrable},
     {"set_material",
      "Assign a material slug (describe's material_slugs) to a body's creating "
-     "feature, by feature_id (its created_by) or by body index; '' restores "
+     "feature, by feature_id (its created_by), by body index, or by "
+     "body_name (a name two bodies share is refused naming them; an "
+     "unknown one is refused listing the bodies); '' restores "
      "default. An unrecognised slug is refused, naming the accepted set. "
-     "Drives mass, BOM and FEM as well as appearance.",
+     "Drives mass, BOM and FEM as well as appearance. The write lands on the "
+     "CREATING feature: a Boolean, a body pattern or mirror and a Split make "
+     "a new body named after themselves, which keeps its source's material "
+     "until a material is set on the new body.",
      "material?:string, feature_id?:int>=0, body?:int>=0, "
-     "expect_revision?:revision",
+     "body_name?:string, expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},
     {"set_appearance",
      "Visual override SEPARATE from the physical material (v54): "
-     "{feature_id|body, color?: [r,g,b] LINEAR 0..1 (not sRGB: the renderer "
+     "{feature_id|body|body_name (as set_material), color?: [r,g,b] LINEAR "
+     "0..1 (not sRGB: the renderer "
      "lights it as linear and STEP/GLB are handed it as linear, so an sRGB "
      "grey "
      "of 0.5 comes out near 0.73 — convert with c^2.2, e.g. 0.2 for a mid "
@@ -378,7 +384,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "resolving is reported in every regen summary's warnings and in "
      "get_state, never dropped. {feature_id|body, element} with no optional "
      "field clears that face, even a stale one.",
-     "body, color, element, feature_id, metallic, roughness",
+     "body, body_name, color, element, feature_id, metallic, roughness",
      remote::NeedsPart},
     {"set_rollback",
      "Move the rollback bar: only features before it regenerate. Takes "
@@ -904,6 +910,73 @@ void RefuseTwoPlacements(const RpcParams& p) {
         "corner), not both: they are two names for one placement");
 }
 
+// The creating feature of the body set_material / set_appearance address:
+// exactly one of `feature_id` (the body's created_by), `body` (an index into
+// get_state's bodies) or `body_name`. A name is resolved as every other
+// RPC that takes body names resolves one (ResolvePartBodies), and must name
+// ONE body: a name two bodies share is refused naming them, since writing
+// either would be a guess, and an unknown name is refused listing the bodies
+// there are. The write lands on the creating feature in every case, so a
+// feature that made several bodies gets them all.
+Feature* BodyOwnerFor(Document& doc, const RpcParams& p, const char* method,
+                      size_t& index) {
+  const int given = int(p.contains("feature_id")) + int(p.contains("body")) +
+                    int(p.contains("body_name"));
+  if (given != 1)
+    throw std::runtime_error(
+        std::string(method) +
+        " needs exactly one of feature_id (the body's created_by from "
+        "get_state/list_elements), body (an index into get_state's bodies) "
+        "or body_name (a body's name, as get_state lists it)");
+  if (p.contains("feature_id")) {
+    const uint64_t id = p.at("feature_id").get<uint64_t>();
+    Feature* f = doc.FindFeatureById(id, &index);
+    if (!f)
+      throw std::runtime_error(
+          "no feature with id " + std::to_string(id) +
+          " (must be a body's created_by — get_state lists bodies). "
+          "Features here: " +
+          FeatureCandidates(doc, false));
+    return f;
+  }
+  const auto& bodies = doc.GetBodies();
+  uint64_t owner = 0;
+  if (p.contains("body")) {
+    const int body = p.at("body").get<int>();
+    if (body < 0 || body >= static_cast<int>(bodies.size()))
+      throw std::runtime_error(
+          IndexError("body", body, bodies.size(), "get_state lists bodies"));
+    owner = bodies[body].createdBy;
+  } else {
+    const json& name = p.at("body_name");
+    if (!name.is_string())
+      throw std::runtime_error("body_name is a body's name (a string, as "
+                               "get_state lists it), not " +
+                               name.dump());
+    // Refuses a name no body has, listing those there are.
+    const std::set<uint64_t> owners =
+        ResolvePartBodies(doc, json::array({name}), "body_name");
+    std::vector<std::string> matches;
+    for (const Body& b : bodies)
+      if (b.name == name.get<std::string>())
+        matches.push_back("#" + std::to_string(&b - bodies.data()) +
+                          " (created_by " + std::to_string(b.createdBy) + ")");
+    if (matches.size() > 1)
+      throw std::runtime_error(std::string(method) + ": " +
+                               std::to_string(matches.size()) +
+                               " bodies are named '" + name.get<std::string>() +
+                               "': " + KnownList(matches) +
+                               " — name one by feature_id or body instead");
+    owner = *owners.begin();
+  }
+  // Add/Cut keep the original creator, so this reaches everything fused
+  // into that body.
+  Feature* f = doc.FindFeatureById(owner, &index);
+  if (!f)
+    throw std::runtime_error("body has no creating feature");
+  return f;
+}
+
 } // namespace
 
 std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
@@ -1232,40 +1305,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   }
   if (m == "set_material") {
     // Assign a material to a body-creating feature — by feature_id (the
-    // body's created_by) or by body index (get_state order). params:
-    // {feature_id? | body?, material} where material is a library slug
-    // (e.g. "steel") or "" for default. Commits one undoable edit and
-    // regenerates.
-    const bool byId = p.contains("feature_id");
-    const bool byBody = p.contains("body");
-    if (byId == byBody) // neither, or both
-      throw std::runtime_error(
-          "set_material needs exactly one of feature_id (the body's "
-          "created_by from get_state/list_elements) or body (an index into "
-          "get_state's bodies)");
+    // body's created_by), by body index (get_state order) or by body_name
+    // (BodyOwnerFor). params: {feature_id? | body? | body_name?, material}
+    // where material is a library slug (e.g. "steel") or "" for default.
+    // Commits one undoable edit and regenerates.
     size_t index = 0;
-    Feature* f = nullptr;
-    if (byId) {
-      f = doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
-      if (!f)
-        throw std::runtime_error(
-            "no feature with id " +
-            std::to_string(p.at("feature_id").get<uint64_t>()) +
-            " (must be a body's created_by — get_state lists bodies). "
-            "Features here: " +
-            FeatureCandidates(*doc, false));
-    } else {
-      const auto& bodies = doc->GetBodies();
-      const int body = p.at("body").get<int>();
-      if (body < 0 || body >= static_cast<int>(bodies.size()))
-        throw std::runtime_error(
-            IndexError("body", body, bodies.size(), "get_state lists bodies"));
-      // Add/Cut keep the original creator, so this recolors everything
-      // fused into that body.
-      f = doc->FindFeatureById(bodies[body].createdBy, &index);
-      if (!f)
-        throw std::runtime_error("body has no creating feature");
-    }
+    Feature* f = BodyOwnerFor(*doc, p, "set_material", index);
     // An unrecognised slug is refused by SetMaterial below, naming what IS
     // accepted — the same funnel add_feature and document load go through.
     // This used to sniff for `== DEFAULT` here, which caught it on this one
@@ -1287,35 +1332,12 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // V-appearance: a visual override on a body's creating feature, separate
     // from the physical material
     // (docs/rendering/materials.md#appearance-override). Same addressing as
-    // set_material: {feature_id | body}. Optional fields color [r,g,b] (LINEAR
-    // 0..1), roughness, metallic; passing none clears the override. Appearance
-    // is stripped from the regen chain hash, so this never rebuilds geometry —
-    // just restamps and resyncs.
-    const bool byId = p.contains("feature_id");
-    const bool byBody = p.contains("body");
-    if (byId == byBody)
-      throw std::runtime_error(
-          "set_appearance needs exactly one of feature_id (the body's "
-          "created_by) or body (an index into get_state's bodies)");
+    // set_material: {feature_id | body | body_name}. Optional fields color
+    // [r,g,b] (LINEAR 0..1), roughness, metallic; passing none clears the
+    // override. Appearance is stripped from the regen chain hash, so this never
+    // rebuilds geometry — just restamps and resyncs.
     size_t index = 0;
-    Feature* f = nullptr;
-    if (byId) {
-      f = doc->FindFeatureById(p.at("feature_id").get<uint64_t>(), &index);
-      if (!f)
-        throw std::runtime_error(
-            "no feature with id " +
-            std::to_string(p.at("feature_id").get<uint64_t>()) +
-            ". Features here: " + FeatureCandidates(*doc, false));
-    } else {
-      const auto& bodies = doc->GetBodies();
-      const int body = p.at("body").get<int>();
-      if (body < 0 || body >= static_cast<int>(bodies.size()))
-        throw std::runtime_error(
-            IndexError("body", body, bodies.size(), "get_state lists bodies"));
-      f = doc->FindFeatureById(bodies[body].createdBy, &index);
-      if (!f)
-        throw std::runtime_error("body has no creating feature");
-    }
+    Feature* f = BodyOwnerFor(*doc, p, "set_appearance", index);
     Appearance ap;
     const auto unit = [&](const char* field) {
       const double v = p.at(field).get<double>();

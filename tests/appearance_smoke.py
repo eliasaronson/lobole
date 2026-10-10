@@ -90,6 +90,42 @@ def main():
             expect("0..255" in str(e) and "0..1" in str(e),
                    f"names the convention: {e}")
 
+        # A body by NAME (body_name): the one most stable handle a script
+        # has, since ids and indices move as features are added.
+        d.call("new_project")
+        box(d, (0, 0, 0), (10, 10, 10), "Plate")
+        d.call("set_material", body_name="Plate", material="steel")
+        body = d.call("get_state")["bodies"][0]
+        expect(body["material"] == "steel", f"set by name: {body}")
+        d.call("set_appearance", body_name="Plate", color=[0.2, 0.2, 0.2])
+        body = d.call("get_state")["bodies"][0]
+        expect("appearance" in body, f"painted by name: {body}")
+        try:
+            d.call("set_material", body_name="Plaet", material="steel")
+            raise AssertionError("an unknown body name should be refused")
+        except RuntimeError as e:
+            expect("Plaet" in str(e) and "'Plate'" in str(e),
+                   f"names the bodies there are: {e}")
+        box(d, (20, 0, 0), (10, 10, 10), "Plate")
+        for method, extra in (("set_material", {"material": "brass"}),
+                              ("set_appearance", {"roughness": 0.5})):
+            try:
+                d.call(method, body_name="Plate", **extra)
+                raise AssertionError(f"{method}: an ambiguous name should be "
+                                     "refused")
+            except RuntimeError as e:
+                expect("2 bodies are named 'Plate'" in str(e) and
+                       "created_by" in str(e), f"names both: {e}")
+        try:
+            d.call("set_material", body_name="Plate", body=0,
+                   material="brass")
+            raise AssertionError("two addresses should be refused")
+        except RuntimeError as e:
+            expect("exactly one of" in str(e), f"says which: {e}")
+        expect(all(b.get("material", "") in ("steel", "")
+                   for b in d.call("get_state")["bodies"]),
+               "the refusals changed nothing")
+
         print("appearance_smoke: all checks passed")
         return 0
     finally:

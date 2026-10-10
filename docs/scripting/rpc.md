@@ -129,6 +129,8 @@ worse than a missing row, because an agent trusts it instead of guessing.
 - **Names.** `id` is the id of the thing the method is named after
   (`remove_mate(id)`, `set_occurrence_visible(id)`). `<noun>_id` refers to
   something the method is not about (`set_material(feature_id)`).
+  `body_name` names one body as `get_state` lists it (`set_material`,
+  `set_appearance`); a name two bodies share is refused naming both.
   `sketch_id` is deliberately narrower than `feature_id`: it says the feature
   must be a Sketch, so passing an extrude fails at the call. A method that
   resolves a feature takes `feature_id` (`delete_feature` and `set_rollback`

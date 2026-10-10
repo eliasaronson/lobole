@@ -92,7 +92,7 @@ COLUMNS: dict[str, str] = {
     'set_active_configuration': 'id?:int>=0',
     'set_active_part': 'part?:string|int, name?:string|int, index?:int>=0',
     'set_mate': 'id:int>=0, path?:int[]|null, name?:string, flipped?:bool, rotation?:number, rotation_deg?:number, offset?:number, dx?:number, dy?:number, ball_rotation?:number[4]',
-    'set_material': 'material?:string, feature_id?:int>=0, body?:int>=0, expect_revision?:revision',
+    'set_material': 'material?:string, feature_id?:int>=0, body?:int>=0, body_name?:string, expect_revision?:revision',
     'set_occurrence_transform': 'id?:int>=0, occurrence?:int>=0, transform:object',
     'set_variable': "name:string, expression:string|number, scope?:'project'|'part', comment?:string",
     'solve_assembly': '',
@@ -280,6 +280,7 @@ class SetMaterialParams(TypedDict):
     material: NotRequired[str]
     feature_id: NotRequired[int]
     body: NotRequired[int]
+    body_name: NotRequired[str]
     expect_revision: NotRequired[Revision]
 
 class SetOccurrenceTransformParams(TypedDict):
