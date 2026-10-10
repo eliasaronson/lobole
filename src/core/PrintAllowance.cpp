@@ -3,12 +3,15 @@
 
 #include "core/PrintAllowance.h"
 
+#include <algorithm>
+#include <cctype>
+#include <cmath>
 #include <cstdio>
 
 namespace printfit {
 namespace {
 
-constexpr double kAbove = 1e9; // "and above": the last row's open end
+constexpr double kAbove = kAboveMm;
 
 // The sources, once (docs/tolerances/README.md#printed-parts says where each
 // number comes from).
@@ -40,13 +43,13 @@ constexpr const char* kPlaShaftSource =
     "shrinkage well inside that (3dprintbounty.com, 3D printing tolerances "
     "guide)";
 constexpr const char* kPlaGapSource =
-    "MEASURED, print_coupon --gap-only on a Bambu Lab P1S in K5 PLA "
-    "(2026-10-09; Bambu Studio 0.20 mm, X-Y hole and contour compensation 0, "
-    "the STL at 0.01 mm chord deviation): 0.075 mm a side freed only under "
-    "force and rubbed, 0.1 slid freely, and a gearbox modelled at 0.25 was "
-    "loose. The community's 0.15-0.35 a side (sovol3d.com; makerworld.com "
-    "tests on Bambu printers, 0.25 best) is for printers that close a gap "
-    "more than this one";
+    "A DEFAULT to calibrate: print-in-place PLA wants about 0.25 mm per side "
+    "as a starting point (sovol3d.com, print-in-place hinges and joints: "
+    "0.15-0.35 mm by printer and filament); on Bambu Lab printers 0.2 mm "
+    "still turns, 0.25 is the best fit and 0.3 is loose (makerworld.com "
+    "clearance tests). A printer can want much less -- one P1S slid at 0.1 "
+    "a side in K5 PLA and 0.15 in a plain PLA -- so print the coupon and "
+    "keep the answer in a print profile";
 constexpr const char* kPetgGapSource =
     "print-in-place clearance is 0.15-0.35 mm per side by printer and "
     "filament (sovol3d.com, print-in-place hinges and joints); PETG strings "
@@ -78,7 +81,7 @@ std::vector<Table> BuildTables() {
       {Printed::Shaft, 0.0, kAbove, -0.1, kPlaShaftSource},
       {Printed::InternalThread, 0.0, kAbove, 0.4, kInternalThreadSource},
       {Printed::ExternalThread, 0.0, kAbove, -0.1, kExternalThreadSource},
-      {Printed::Gap, 0.0, kAbove, 0.2, kPlaGapSource},
+      {Printed::Gap, 0.0, kAbove, 0.5, kPlaGapSource},
   };
   out.push_back(std::move(petg));
   out.push_back(std::move(pla));
@@ -155,24 +158,237 @@ std::vector<std::string> MaterialsFor(const std::string& process) {
   return out;
 }
 
-std::string Validate(const Process& p) {
-  const std::vector<std::string> materials = MaterialsFor(p.process);
+namespace {
+
+std::string ValidatePair(const std::string& process,
+                         const std::string& material) {
+  const std::vector<std::string> materials = MaterialsFor(process);
   if (materials.empty())
-    return "unknown process '" + p.process +
+    return "unknown process '" + process +
            "'. Accepted: " + Join(ProcessNames());
-  if (Find(p) == nullptr)
-    return "the " + p.process + " allowance has no data for '" + p.material +
-           "'. Accepted for " + p.process + ": " + Join(materials) +
+  if (FindBuiltin(process, material) == nullptr)
+    return "the " + process + " allowance has no data for '" + material +
+           "'. Accepted for " + process + ": " + Join(materials) +
            ". A material is added with sourced numbers, or measured off a "
            "print_coupon — never borrowed from a neighbour";
   return {};
 }
 
-const Table* Find(const Process& p) {
+// Which way a kind's allowance may point: +1 opened (not negative), -1
+// closed (not positive), 2 strictly opened (a gap of zero fuses).
+int SignOf(Printed kind) {
+  switch (kind) {
+  case Printed::Hole:
+  case Printed::InternalThread:
+    return 1;
+  case Printed::Shaft:
+  case Printed::ExternalThread:
+    return -1;
+  case Printed::Gap:
+    return 2;
+  }
+  return 1;
+}
+
+std::string RangeText(const Row& r) {
+  return "Ø" + Mm(r.fromMm) +
+         (r.toMm >= kAbove ? " and up" : "-Ø" + Mm(r.toMm));
+}
+
+} // namespace
+
+std::string Validate(const Process& p) {
+  if (std::string why = ValidatePair(p.process, p.material); !why.empty())
+    return why;
+  if (p.profile) {
+    if (p.profile->table.process != p.process ||
+        p.profile->table.material != p.material)
+      return "profile '" + p.profile->name + "' is " +
+             p.profile->table.process + " " + p.profile->table.material +
+             ", not " + p.process + " " + p.material;
+    if (std::string why = ValidateProfile(*p.profile); !why.empty())
+      return why;
+  }
+  return {};
+}
+
+const Table* FindBuiltin(const std::string& process,
+                         const std::string& material) {
   for (const Table& t : Tables())
-    if (t.process == p.process && t.material == p.material)
+    if (t.process == process && t.material == material)
       return &t;
   return nullptr;
+}
+
+const Table* Find(const Process& p) {
+  if (p.profile)
+    return &p.profile->table;
+  return FindBuiltin(p.process, p.material);
+}
+
+Process FromProfile(const Profile& p) {
+  return Process{p.table.process, p.table.material, p};
+}
+
+std::string Label(const Process& p) {
+  const std::string pair = p.process + " " + p.material;
+  return p.profile ? "'" + p.profile->name + "' (" + pair + ")" : pair;
+}
+
+std::string ValidateProfile(const Profile& p) {
+  std::string name = p.name;
+  name.erase(std::remove_if(name.begin(), name.end(),
+                            [](unsigned char c) { return std::isspace(c); }),
+             name.end());
+  if (name.empty())
+    return "a print profile needs a name";
+  const std::string who = "print profile '" + p.name + "': ";
+  if (std::string why = ValidatePair(p.table.process, p.table.material);
+      !why.empty())
+    return who + why;
+  if (!std::isfinite(p.stlDeflectionMm) || p.stlDeflectionMm < 0.0)
+    return who +
+           "stl_deflection_mm must be 0 (not stated) or a positive "
+           "chord deviation, not " +
+           Mm(p.stlDeflectionMm);
+  if (p.table.rows.empty())
+    return who + "a profile needs at least one row (" + PrintedNames() + ")";
+  for (size_t i = 0; i < p.table.rows.size(); i++) {
+    const Row& r = p.table.rows[i];
+    const std::string at =
+        who + PrintedName(r.kind) + " row " + std::to_string(i + 1) + ": ";
+    if (!std::isfinite(r.fromMm) || !std::isfinite(r.toMm) || r.fromMm < 0.0 ||
+        !(r.toMm > r.fromMm))
+      return at +
+             "the size range must run from 0 or more to something "
+             "larger, not Ø" +
+             Mm(r.fromMm) + " to Ø" + Mm(r.toMm);
+    if (!std::isfinite(r.allowanceMm))
+      return at + "the allowance is not a number";
+    const int sign = SignOf(r.kind);
+    if (sign == 2 && !(r.allowanceMm > 0.0))
+      return at +
+             "a gap's allowance must be positive (the whole diametral "
+             "clearance; a gap of " +
+             Mm(r.allowanceMm) + " fuses)";
+    if (sign == 1 && r.allowanceMm < 0.0)
+      return at + "a " + PrintedName(r.kind) +
+             " is modelled larger, so its allowance is not negative (got " +
+             Mm(r.allowanceMm) + ")";
+    if (sign == -1 && r.allowanceMm > 0.0)
+      return at + "a " + PrintedName(r.kind) +
+             " is modelled smaller, so its allowance is not positive (got " +
+             Mm(r.allowanceMm) + ")";
+    // Rows of a kind run in ascending size and do not overlap.
+    for (size_t j = 0; j < i; j++) {
+      const Row& q = p.table.rows[j];
+      if (q.kind != r.kind)
+        continue;
+      if (r.fromMm < q.toMm)
+        return at + RangeText(r) +
+               (r.fromMm < q.fromMm ? " is out of order after "
+                                    : " overlaps ") +
+               RangeText(q) +
+               " — rows of a kind run in ascending size "
+               "and do not overlap";
+    }
+  }
+  return {};
+}
+
+const Profile* FindProfile(const std::vector<Profile>& store,
+                           const std::string& name) {
+  if (name.empty())
+    return nullptr;
+  for (const Profile& p : store)
+    if (p.name == name)
+      return &p;
+  return nullptr;
+}
+
+ProfileMatch MatchProfile(const std::vector<Profile>& store, const Process& p) {
+  if (!p.profile)
+    return ProfileMatch::Builtin;
+  const Profile* mine = FindProfile(store, p.profile->name);
+  if (mine == nullptr)
+    return ProfileMatch::Missing;
+  return *mine == *p.profile ? ProfileMatch::Same : ProfileMatch::Differs;
+}
+
+const char* ProfileMatchName(ProfileMatch m) {
+  switch (m) {
+  case ProfileMatch::Builtin:
+    return "builtin";
+  case ProfileMatch::Same:
+    return "same";
+  case ProfileMatch::Differs:
+    return "differs";
+  case ProfileMatch::Missing:
+    return "missing";
+  }
+  return "builtin";
+}
+
+std::string ProfileFileName(const std::string& name) {
+  std::string slug;
+  bool dash = false;
+  for (const char c : name) {
+    if (std::isalnum(static_cast<unsigned char>(c))) {
+      slug += static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+      dash = false;
+    } else if (!slug.empty() && !dash) {
+      slug += '-';
+      dash = true;
+    }
+  }
+  while (!slug.empty() && slug.back() == '-')
+    slug.pop_back();
+  return (slug.empty() ? std::string("profile") : slug) + ".json";
+}
+
+std::optional<Profile> ProfileFromBuiltin(const std::string& name,
+                                          const std::string& process,
+                                          const std::string& material) {
+  const Table* t = FindBuiltin(process, material);
+  if (t == nullptr)
+    return std::nullopt;
+  return Profile{name, *t, 0.0};
+}
+
+std::string Fingerprint(const Process& p) {
+  std::string s = p.process + "/" + p.material;
+  const Table* t = Find(p);
+  if (p.profile)
+    s += "/" + p.profile->name;
+  if (t == nullptr)
+    return s;
+  char buf[96];
+  for (const Row& r : t->rows) {
+    std::snprintf(buf, sizeof(buf), "|%d:%.17g:%.17g:%.17g",
+                  static_cast<int>(r.kind), r.fromMm, r.toMm, r.allowanceMm);
+    s += buf;
+  }
+  return s;
+}
+
+double SmallestGapSideMm(const Table& t) {
+  double gap = 0.0, any = 0.0;
+  for (const Row& r : t.rows) {
+    const double a = std::abs(r.allowanceMm);
+    if (!(a > 0.0))
+      continue;
+    if (r.kind == Printed::Gap)
+      gap = gap > 0.0 ? std::min(gap, a) : a;
+    any = any > 0.0 ? std::min(any, a) : a;
+  }
+  return (gap > 0.0 ? gap : any) / 2.0;
+}
+
+double StlDeflectionMm(const Process& p) {
+  if (p.profile && p.profile->stlDeflectionMm > 0.0)
+    return p.profile->stlDeflectionMm;
+  const Table* t = Find(p);
+  return t == nullptr ? 0.0 : SmallestGapSideMm(*t) / 10.0;
 }
 
 std::optional<Allowance> ForBasic(const Process& p, Printed kind,
@@ -183,18 +399,24 @@ std::optional<Allowance> ForBasic(const Process& p, Printed kind,
       *why = Validate(p);
     return std::nullopt;
   }
+  return ForBasic(*t, Label(p), kind, basicMm, why);
+}
+
+std::optional<Allowance> ForBasic(const Table& t, const std::string& label,
+                                  Printed kind, double basicMm,
+                                  std::string* why) {
   if (!(basicMm > 0.0)) {
     if (why)
       *why = "a printed diameter must be positive (got " + Mm(basicMm) + ")";
     return std::nullopt;
   }
-  for (const Row& r : t->rows)
+  for (const Row& r : t.rows)
     if (r.kind == kind && basicMm >= r.fromMm && basicMm < r.toMm)
       return Allowance{kind, basicMm, r.allowanceMm, basicMm + r.allowanceMm,
                        &r};
   if (why)
-    *why = "the " + p.process + " " + p.material + " table has no " +
-           PrintedName(kind) + " row for Ø" + Mm(basicMm);
+    *why = "the " + label + " table has no " + PrintedName(kind) +
+           " row for Ø" + Mm(basicMm);
   return std::nullopt;
 }
 
@@ -206,11 +428,17 @@ std::optional<Allowance> ForModelled(const Process& p, Printed kind,
       *why = Validate(p);
     return std::nullopt;
   }
+  return ForModelled(*t, Label(p), kind, modelledMm, why);
+}
+
+std::optional<Allowance> ForModelled(const Table& t, const std::string& label,
+                                     Printed kind, double modelledMm,
+                                     std::string* why) {
   // Rows are in ascending size, so the first whose basic range holds the
   // inverse is the answer; failing that, the gap between two rows' model
   // ranges prints at the step between them.
   const Row* prev = nullptr;
-  for (const Row& r : t->rows) {
+  for (const Row& r : t.rows) {
     if (r.kind != kind)
       continue;
     const double basic = modelledMm - r.allowanceMm;
@@ -223,7 +451,7 @@ std::optional<Allowance> ForModelled(const Process& p, Printed kind,
   }
   if (why)
     *why = "a " + PrintedName(kind) + " modelled at Ø" + Mm(modelledMm) +
-           " is outside the " + p.process + " " + p.material + " table";
+           " is outside the " + label + " table";
   return std::nullopt;
 }
 
@@ -244,10 +472,11 @@ double MinReliableThreadMm(const Process& p) {
 
 const std::string& ConfirmNote() {
   static const std::string s =
-      "to confirm with a test coupon: the table is community practice and CAD "
-      "tool defaults, not a measurement of your printer — print "
-      "generators/print_coupon.py, exported at the deflection you export "
-      "parts at, and correct the table from what fits";
+      "to confirm with a test coupon: the built-in tables are community "
+      "practice and CAD tool defaults, not a measurement of your printer — "
+      "print generators/print_coupon.py, exported at the deflection you "
+      "export parts at, and keep what fits in a print profile "
+      "(Preferences › Print profiles, or print_coupon.py --record)";
   return s;
 }
 

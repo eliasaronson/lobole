@@ -12,6 +12,8 @@
 #include "core/features/ThreadFeature.h"
 #include "ui/AppState.h"
 #include "ui/ExprInput.h"
+#include "ui/PrintProfileActions.h"
+#include "ui/SettingsWindow.h" // OpenPreferences
 
 #include <imgui.h>
 
@@ -403,31 +405,103 @@ void DrawPrintProcessSection(AppState& state) {
   const auto& have = doc.PrintProcess();
   if (!SectionHeader("Print process", -1, have.has_value()))
     return;
-  // Every carried pair, and "not printed". Nothing else is offered, so the
-  // picker cannot choose what set_print_process would refuse.
+  const auto set = [&](std::optional<printfit::Process> next) {
+    if (state.commands != nullptr && !(have == next))
+      state.commands->Execute(
+          std::make_unique<SetPrintProcessCommand>(std::move(next)), doc);
+  };
+  // "Not printed", then the user's profiles, then the built-in tables as
+  // the defaults. Nothing else is offered, so the picker cannot choose what
+  // set_print_process would refuse
+  // (docs/tolerances/README.md#print-profiles).
   const std::string current =
-      have ? have->process + " " + have->material : std::string("Not printed");
+      !have           ? std::string("Not printed")
+      : have->profile ? have->profile->name
+                      : have->process + " " + have->material + " (default)";
   ImGui::SetNextItemWidth(-1.0f);
   if (ImGui::BeginCombo("###print_process", current.c_str())) {
-    if (ImGui::Selectable("Not printed###print_none", !have) && have &&
-        state.commands != nullptr)
-      state.commands->Execute(
-          std::make_unique<SetPrintProcessCommand>(std::nullopt), doc);
+    if (ImGui::Selectable("Not printed###print_none", !have))
+      set(std::nullopt);
+    for (const printfit::Profile& pr : state.printProfiles) {
+      const bool on = have && have->profile && have->profile->name == pr.name;
+      const std::string label = pr.name + "###print_prof_" + pr.name;
+      if (ImGui::Selectable(label.c_str(), on) && !on)
+        set(printfit::FromProfile(pr));
+      ImGui::SetItemTooltip("%s %s", pr.table.process.c_str(),
+                            pr.table.material.c_str());
+    }
+    if (!state.printProfiles.empty())
+      ImGui::Separator();
     for (const printfit::Table& t : printfit::Tables()) {
-      const printfit::Process pr{t.process, t.material};
-      const std::string label = t.process + " " + t.material + "###print_" +
-                                t.process + "_" + t.material;
+      const printfit::Process pr{t.process, t.material, std::nullopt};
+      const std::string label = t.process + " " + t.material +
+                                " (default)###print_" + t.process + "_" +
+                                t.material;
       if (ImGui::Selectable(label.c_str(), have && *have == pr) &&
-          !(have && *have == pr) && state.commands != nullptr)
-        state.commands->Execute(std::make_unique<SetPrintProcessCommand>(pr),
-                                doc);
+          !(have && *have == pr))
+        set(pr);
     }
     ImGui::EndCombo();
+  }
+  if (state.printProfiles.empty()) {
+    ImGui::TextDisabled("No print profiles: keep your printer's in");
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Preferences › Print profiles###print_prefs"))
+      OpenPreferences(state, "Print profiles");
   }
   if (!have) {
     ImGui::TextDisabled("Declare it and the fit checks say what to model "
                         "for a print.");
     return;
+  }
+  // How the part's copy stands against the store, SAID -- the CAM setup's
+  // machine block, for a profile (CamTree.cpp).
+  const ImVec4 amber(0.95f, 0.80f, 0.40f, 1.0f);
+  const printfit::ProfileMatch match =
+      printfit::MatchProfile(state.printProfiles, *have);
+  const std::string name = have->profile ? have->profile->name : "";
+  switch (match) {
+  case printfit::ProfileMatch::Builtin:
+  case printfit::ProfileMatch::Same:
+    break;
+  case printfit::ProfileMatch::Differs:
+    ImGui::PushStyleColor(ImGuiCol_Text, amber);
+    ImGui::TextWrapped("Modelled with a different '%s' than yours.",
+                       name.c_str());
+    ImGui::PopStyleColor();
+    if (ImGui::SmallButton("Use mine###print_use_mine"))
+      set(printfit::FromProfile(
+          *printfit::FindProfile(state.printProfiles, name)));
+    ImGui::SetItemTooltip("Replace the part's copy with your '%s' (undoable)",
+                          name.c_str());
+    ImGui::SameLine();
+    break;
+  case printfit::ProfileMatch::Missing:
+    ImGui::PushStyleColor(ImGuiCol_Text, amber);
+    ImGui::TextWrapped("'%s' is not one of your profiles.", name.c_str());
+    ImGui::PopStyleColor();
+    break;
+  }
+  if (match == printfit::ProfileMatch::Differs ||
+      match == printfit::ProfileMatch::Missing) {
+    // ONE call site for both cases (widget_ids_lint): the label says which.
+    if (ImGui::SmallButton(match == printfit::ProfileMatch::Differs
+                               ? "Save as mine###print_save_mine"
+                               : "Save it###print_save_mine")) {
+      std::string error;
+      if (!SavePrintProfile(state, *have->profile, &error))
+        state.printProfileError = error;
+      else
+        state.printProfileError.clear();
+    }
+    ImGui::SetItemTooltip("Write the part's copy to your print profiles as "
+                          "'%s'",
+                          name.c_str());
+  }
+  if (!state.printProfileError.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+    ImGui::TextWrapped("%s", state.printProfileError.c_str());
+    ImGui::PopStyleColor();
   }
   if (const printfit::Table* t = printfit::Find(*have)) {
     for (const printfit::Row& r : t->rows) {
@@ -445,11 +519,18 @@ void DrawPrintProcessSection(AppState& state) {
                          range.c_str());
       ImGui::SetItemTooltip("%s", r.source.c_str());
     }
-    ImGui::TextDisabled("%s", t->conditions.c_str());
+    ImGui::PushStyleColor(ImGuiCol_Text,
+                          ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("%s", t->conditions.c_str());
+    ImGui::PopStyleColor();
   }
-  ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.35f, 1.0f));
-  ImGui::TextWrapped("%s", printfit::ConfirmNote().c_str());
-  ImGui::PopStyleColor();
+  // The built-in tables are defaults; a profile is already the user's
+  // measurement, and telling them to confirm it again is noise.
+  if (!have->profile) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.35f, 1.0f));
+    ImGui::TextWrapped("%s", printfit::ConfirmNote().c_str());
+    ImGui::PopStyleColor();
+  }
   // The part's threads, each with what the print wants it modelled at.
   for (size_t i = 0; i < doc.FeatureCount(); i++)
     if (const auto* th = dynamic_cast<const ThreadFeature*>(doc.GetFeature(i)))

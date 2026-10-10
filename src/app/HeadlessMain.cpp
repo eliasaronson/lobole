@@ -17,6 +17,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/ImportActions.h"
 #include "ui/MachineActions.h"
+#include "ui/PrintProfileActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/RendererSync.h"
 
@@ -63,6 +64,9 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
   // ceiling on exactly the surface an agent drives
   // (docs/cam/setup.md#machine-profiles).
   ui::ReloadMachines(state);
+  // ...and the print profiles, for the same reason: a printed part names
+  // one, and a session without the store reports every one `missing`.
+  ui::ReloadPrintProfiles(state);
 #ifdef HAVE_CAM
   // ...and the surfacing passes kept between runs, as main() opens them
   // (docs/ui/long-operations.md#passes-kept-on-disk).

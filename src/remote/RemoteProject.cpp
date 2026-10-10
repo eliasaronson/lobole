@@ -7,6 +7,7 @@
 #include "remote/InspectionContracts.h"
 #include "ui/AssemblyActions.h"
 #include "ui/StepExport.h"
+#include "ui/StlExport.h"
 #include <set>
 
 #include "cad/CADKernel.h"
@@ -37,6 +38,7 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -110,10 +112,19 @@ static constexpr MethodDoc ProjectMethods[] = {
      "No `deflection`: STEP is exact, so it is refused.",
      "path:string, part?:string|int, body?:int", remote::NotInBatch},
     {"export_stl",
-     "Export to STL {path, deflection?}. `deflection` is the tessellation "
-     "chord tolerance in MILLIMETRES (smaller = finer, more triangles); STEP "
-     "and BREP are exact solids and refuse it.",
-     "body, deflection, path", remote::NeedsPart | remote::NotInBatch},
+     "Export to STL {path, deflection?, body?}. `deflection` is the "
+     "tessellation chord tolerance in MILLIMETRES (smaller = finer, more "
+     "triangles); STEP and BREP are exact solids and refuse it. Left out, an "
+     "unprinted part meshes at 0.1 mm and a PRINTED part (set_print_process) "
+     "at its print profile's stl_deflection_mm, else a tenth of its smallest "
+     "gap a side, so the chords cannot close what the print needs open. A "
+     "coarser one asked for is exported as asked and the reply's `warning` "
+     "says how much of the smallest gap the chords can take. Replies the "
+     "chord deviation used and where it came from (asked, profile, gap, "
+     "default), and the SOURCE B-Rep's watertightness.",
+     "body, deflection, path", remote::NeedsPart | remote::NotInBatch,
+     "path, bodies, watertight, shells, free_edges, deflection_mm, "
+     "deflection_from, smallest_gap_side_mm?, chord_share?, warning?"},
     {"export_brep",
      "Export to BREP {path}: the exact solid, so no `deflection` (that is "
      "export_stl's tessellation tolerance).",
@@ -1366,6 +1377,35 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       out[onAssembly ? "shapes" : "bodies"] = counts->bodies;
       return out;
     }
+    // STL: the one helper File > Export calls too
+    // (docs/tolerances/README.md#exporting-a-printed-part). With no
+    // `deflection`, a printed part meshes at its print profile's chord
+    // deviation; an explicit coarser one is exported as asked and warned.
+    // Read in a scope of its own so that only export_stl's row lists it, and
+    // the dispatcher refuses it on BREP before anything is written.
+    if (m == "export_stl") {
+      std::optional<double> deflection;
+      if (p.contains("deflection"))
+        deflection = p.at("deflection").get<double>();
+      const auto r =
+          ui::ExportPartStl(*doc, path, p.value("body", -1), deflection);
+      if (!r)
+        throw std::runtime_error(r.error());
+      json out{{"path", path},
+               {"bodies", r->bodies},
+               {"watertight", r->shells.watertight},
+               {"shells", r->shells.shells},
+               {"free_edges", r->shells.freeEdges},
+               {"deflection_mm", r->deflectionMm},
+               {"deflection_from", r->deflectionFrom}};
+      if (r->smallestGapSideMm > 0.0) {
+        out["smallest_gap_side_mm"] = r->smallestGapSideMm;
+        out["chord_share"] = r->chordShare;
+      }
+      if (!r->warning.empty())
+        out["warning"] = r->warning;
+      return out;
+    }
     // Derived reference bodies are other parts' geometry: never exported.
     // `body` indexes the document's body list as get_state reports it.
     std::vector<Body> bodies;
@@ -1380,44 +1420,17 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     const int only = p.value("body", -1);
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
-    // STL's alone: a tessellation tolerance means nothing to a format that
-    // carries the exact geometry. Read in a scope of its own so that only
-    // export_stl's row lists it, and the dispatcher refuses it on STEP and
-    // BREP before anything is written -- it used to be refused as unread
-    // AFTER the file had landed.
-    double deflection = 0.1;
-    if (m == "export_stl") {
-      deflection = p.value("deflection", 0.1);
+    // BREP is single-shape; a whole-document export of several bodies fuses
+    // them (the usual CAD behavior) so one file holds the whole part.
+    CADShape shape;
+    if (only >= 0) {
+      shape = bodies[only].shape;
+    } else {
+      shape = bodies[0].shape;
+      for (size_t i = 1; i < bodies.size(); i++)
+        shape = shape.Union(bodies[i].shape);
     }
-
-    auto& kernel = CADKernel::Instance();
-    bool ok = false;
-    {
-      // STL/BREP are single-shape; a whole-document export of several bodies
-      // fuses them (the usual CAD behavior) so one file holds the whole part.
-      CADShape shape;
-      if (only >= 0) {
-        shape = bodies[only].shape;
-      } else {
-        shape = bodies[0].shape;
-        for (size_t i = 1; i < bodies.size(); i++)
-          shape = shape.Union(bodies[i].shape);
-      }
-      ok = m == "export_stl" ? kernel.SaveSTL(path, shape, deflection)
-                             : kernel.SaveBREP(path, shape);
-      if (ok && m == "export_stl") {
-        // Watertightness report on the SOURCE B-Rep (not the mesh): a
-        // non-watertight input still exports — the report tells the caller
-        // whether the STL can be trusted for printing/slicing.
-        const Measure::ShellReport r = Measure::AnalyzeWatertight(shape);
-        return json{{"path", path},
-                    {"bodies", only < 0 ? bodies.size() : size_t{1}},
-                    {"watertight", r.watertight},
-                    {"shells", r.shells},
-                    {"free_edges", r.freeEdges}};
-      }
-    }
-    if (!ok)
+    if (!CADKernel::Instance().SaveBREP(path, shape))
       throw std::runtime_error("export failed (see log)");
     return json{{"path", path},
                 {"bodies", only < 0 ? bodies.size() : size_t{1}}};

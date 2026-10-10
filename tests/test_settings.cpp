@@ -308,16 +308,18 @@ TEST_CASE("every preference is on exactly one page", "[settings]") {
   }
   // A table page has rows; a page without rows is one of the hand-written
   // ones, which draw themselves.
-  for (const char* hand : {"Keyboard", "Machines"})
+  for (const char* hand : {"Keyboard", "Machines", "Print profiles"})
     CHECK(names.count(hand) == 1);
   for (const ui::PreferenceCategory& c : categories)
     if (c.rows.empty()) {
       INFO("page '" << c.name << "' has no rows and is not hand-written");
-      CHECK((c.name == "Keyboard" || c.name == "Machines"));
+      CHECK((c.name == "Keyboard" || c.name == "Machines" ||
+             c.name == "Print profiles"));
     }
-  // Machines is a library: search finds its items by name.
+  // Machines and Print profiles are libraries: search finds their items by
+  // name.
   for (const ui::PreferenceCategory& c : categories)
-    if (c.name == "Machines")
+    if (c.name == "Machines" || c.name == "Print profiles")
       CHECK(c.library);
 }
 

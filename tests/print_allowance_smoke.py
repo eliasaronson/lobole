@@ -11,7 +11,10 @@ give, followed, is what they then accept.
 
 Usage: print_allowance_smoke.py <path-to-designer-binary>
 """
+import math
 import os
+import struct
+import subprocess
 import sys
 import tempfile
 
@@ -72,6 +75,171 @@ def pin(d, name, diameter):
     return round_faces(d)[0]
 
 
+def stl_triangles(path):
+    """The binary STL's triangles, as three (x, y, z) each."""
+    with open(path, "rb") as f:
+        data = f.read()
+    (n,) = struct.unpack_from("<I", data, 80)
+    tris = []
+    for i in range(n):
+        v = struct.unpack_from("<12f", data, 84 + 50 * i)
+        tris.append((v[3:6], v[6:9], v[9:12]))
+    return tris
+
+
+def gap_in_stl(path, r_disc, r_hole):
+    """The gap a side between a disc and the hole round it, both on the z
+    axis, as the STL carries it: (the narrowest, the mean). A chord sits
+    inside its round surface, so the narrowest is between a chord's middle
+    on the hole and a vertex on the disc."""
+    disc, hole = [], []
+    for tri in stl_triangles(path):
+        rs = [math.hypot(p[0], p[1]) for p in tri]
+        # A wall triangle runs top to bottom; a cap's is flat in z.
+        zs = [p[2] for p in tri]
+        if max(zs) - min(zs) < 0.5 or max(rs) - min(rs) > 0.02:
+            continue
+        mids = [((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+                for a, b in ((tri[0], tri[1]), (tri[1], tri[2]),
+                             (tri[2], tri[0]))]
+        pts = rs + [math.hypot(*m) for m in mids]
+        if abs(max(rs) - r_disc) < 0.05:
+            disc += pts
+        elif abs(max(rs) - r_hole) < 0.05:
+            hole += pts
+    expect(disc and hole, f"found the disc and the hole walls in {path}")
+    return min(hole) - max(disc), (sum(hole) / len(hole) -
+                                   sum(disc) / len(disc))
+
+
+def profiles(d, port):
+    """Print profiles (docs/tolerances/README.md#print-profiles): the store,
+    a part that embeds one, the match, the export that keeps the gaps, and
+    the coupon's --record."""
+    have = d.call("list_print_profiles")
+    expect(have["profiles"] == [], f"the scratch store starts empty: {have}")
+    expect(have["dir"].endswith("print_profiles") and
+           "config" in have["dir"], f"in the isolated config: {have}")
+    expect(any(t["material"] == "pla" for t in have["defaults"]),
+           f"the built-in tables are the defaults: {have}")
+
+    # No rows: the built-in table, to correct.
+    p = d.call("save_print_profile", profile={
+        "name": "Test P1S", "process": "fdm", "material": "pla"})
+    expect(any(r["kind"] == "gap" and near(r["allowance_mm"], 0.5)
+               for r in p["rows"]), f"starts as the default: {p}")
+    rows = [r for r in p["rows"] if r["kind"] != "gap"] + [
+        {"kind": "gap", "from_mm": 0, "allowance_mm": 0.2,
+         "source": "coupon"}]
+    p = d.call("save_print_profile", profile={
+        "name": "Test P1S", "process": "fdm", "material": "pla",
+        "stl_deflection_mm": 0.01, "rows": rows})
+    expect(near(p["stl_deflection_mm"], 0.01) and p["stl_deflection_stated"],
+           f"saved: {p}")
+
+    # Refused, naming what is wrong, and nothing written.
+    refused(d, "save_print_profile", "needs a name",
+            profile={"name": "", "process": "fdm", "material": "pla"})
+    refused(d, "save_print_profile", "Accepted for fdm: petg, pla",
+            profile={"name": "X", "process": "fdm", "material": "abs"})
+    refused(d, "save_print_profile", "gap's allowance must be positive",
+            profile={"name": "X", "process": "fdm", "material": "pla",
+                     "rows": [{"kind": "gap", "allowance_mm": -0.1}]})
+    refused(d, "save_print_profile", "overlaps",
+            profile={"name": "X", "process": "fdm", "material": "pla",
+                     "rows": [{"kind": "hole", "to_mm": 10,
+                               "allowance_mm": 0.2},
+                              {"kind": "hole", "from_mm": 5,
+                               "allowance_mm": 0.3}]})
+    refused(d, "save_print_profile", "would share a file",
+            profile={"name": "test p1s", "process": "fdm",
+                     "material": "pla"})
+    refused(d, "set_print_process", "no print profile called 'Nope'",
+            profile="Nope")
+    expect([x["name"] for x in d.call("list_print_profiles")["profiles"]]
+           == ["Test P1S"], "the refusals wrote nothing")
+
+    r = d.call("print_allowance", kind="gap", size_mm=10, profile="Test P1S")
+    expect(near(r["model_mm"], 10.2) and r["profile"] == "Test P1S",
+           f"answered from the profile: {r}")
+
+    # A part printed with it: a disc in a hole, at the profile's gap.
+    d.call("add_part", name="Gap")
+    box(d, (-15, -15, 0), (30, 30, 6), "Plate")
+    cylinder(d, (0, 0, 0), "z", 5.1, 6, "Hole", mode="cut")
+    cylinder(d, (0, 0, 0), "z", 5.0, 6, "Disc", mode="new_body")
+    r = d.call("set_print_process", profile="Test P1S")
+    expect(r["print"]["profile"] == "Test P1S" and
+           r["print"]["match"] == "same", f"embedded: {r}")
+
+    # Exported with no deflection: the profile's 0.01, and the gap survives.
+    tmp = tempfile.mkdtemp(prefix="designer_print_stl_")
+    stl = os.path.join(tmp, "gap.stl")
+    e = d.call("export_stl", path=stl)
+    expect(near(e["deflection_mm"], 0.01) and
+           e["deflection_from"] == "profile" and "warning" not in e,
+           f"meshed at the profile's chords: {e}")
+    narrow, mean = gap_in_stl(stl, 5.0, 5.1)
+    expect(abs(mean - 0.1) < 0.005,
+           f"the STL's gap is the model's within 0.005: {mean:.4f}")
+    expect(narrow > 0.1 - 0.01 - 1e-4,
+           f"no chord closes more than 0.01 of it: {narrow:.4f}")
+    # A coarse one asked for is exported as asked, and warned.
+    e = d.call("export_stl", path=stl, deflection=0.1)
+    expect(near(e["deflection_mm"], 0.1) and e["deflection_from"] == "asked",
+           f"exported as asked: {e}")
+    expect("100% of the smallest gap" in e.get("warning", ""),
+           f"and warned: {e}")
+
+    # The store changes under the part: it keeps its copy, and says so.
+    rows2 = [dict(x) for x in rows]
+    rows2[-1]["allowance_mm"] = 0.3
+    d.call("save_print_profile", profile={
+        "name": "Test P1S", "process": "fdm", "material": "pla",
+        "stl_deflection_mm": 0.01, "rows": rows2})
+    g = d.call("get_print_process")["print"]
+    expect(g["match"] == "differs" and
+           any(x["kind"] == "gap" and near(x["allowance_mm"], 0.2)
+               for x in g["rows"]), f"differs, reads its copy: {g}")
+    # "Use mine": the same name again takes the store's copy.
+    r = d.call("set_print_process", profile="Test P1S")
+    expect(r["print"]["match"] == "same", f"use mine: {r}")
+    d.call("delete_print_profile", name="Test P1S")
+    g = d.call("get_print_process")["print"]
+    expect(g["match"] == "missing", f"missing, still printed: {g}")
+    d.call("save_print_profile", from_part=True)
+    expect(d.call("get_print_process")["print"]["match"] == "same",
+           "save it: the part's copy is now the store's")
+
+    # The coupon records its answer into a profile.
+    coupon = os.path.join(os.path.dirname(__file__), "..", "generators",
+                          "print_coupon.py")
+    out = subprocess.run(
+        [sys.executable, coupon, "--port", str(port), "--record",
+         "--profile", "Coupon P1S", "--process", "fdm", "--material", "pla",
+         "--size", "8", "--gap-side", "0.15", "--bore", "8.25",
+         "--thread-went", "yes"],
+        capture_output=True, text=True, timeout=60)
+    expect(out.returncode == 0, f"print_coupon --record: {out.stderr}")
+    r = d.call("print_allowance", kind="gap", size_mm=8, profile="Coupon P1S")
+    expect(near(r["allowance_mm"], 0.3) and "print_coupon" in r["source"],
+           f"the recorded gap answers: {r}")
+    r = d.call("print_allowance", kind="hole", size_mm=8,
+               profile="Coupon P1S")
+    expect(near(r["model_mm"], 8.25), f"the recorded bore: {r}")
+    # --seed installs the two P1S profiles.
+    out = subprocess.run([sys.executable, coupon, "--port", str(port),
+                          "--seed"], capture_output=True, text=True,
+                         timeout=60)
+    expect(out.returncode == 0, f"print_coupon --seed: {out.stderr}")
+    names = {x["name"]: x for x in
+             d.call("list_print_profiles")["profiles"]}
+    for name, side in (("K5 PLA on P1S", 0.1), ("PLA on P1S", 0.15)):
+        expect(name in names, f"seeded {name}: {names.keys()}")
+        r = d.call("print_allowance", kind="gap", size_mm=10, profile=name)
+        expect(near(r["allowance_mm"], 2 * side), f"{name}: {r}")
+
+
 def main():
     binary = sys.argv[1]
     env = dict(os.environ)
@@ -102,12 +270,18 @@ def main():
                f"a printed M8 nut thread: {r}")
         r = d.call("print_allowance", kind="gap", size_mm=10,
                    process="fdm", material="pla")
-        expect(near(r["model_mm"], 10.2) and near(r["allowance_mm"], 0.2),
-               f"a print-in-place gap round a Ø10 PLA pin: {r}")
+        expect(near(r["model_mm"], 10.5) and near(r["allowance_mm"], 0.5),
+               f"a print-in-place gap round a Ø10 PLA pin, the default: {r}")
         r = d.call("print_allowance", kind="hole", size_mm=12, **PETG)
         expect(near(r["model_mm"], 12.3), f"a Ø12 hole: {r}")
+        # Asked of a print, the chords are the ones export_stl meshes it at:
+        # a tenth of PETG's 0.3 gap a side.
+        expect(near(r["stl_deflection_mm"], 0.03),
+               f"export_stl meshes a PETG print at 0.03: {r}")
+        r = d.call("print_allowance", kind="hole", size_mm=12,
+                   stl_deflection_mm=0.1, **PETG)
         expect(near(r["stl_chord_loss_mm"], 0.2),
-               f"export_stl's default chords take up to 0.2: {r}")
+               f"chords at 0.1 take up to 0.2: {r}")
 
         # --- Refused, naming what is accepted ------------------------------
         refused(d, "print_allowance", "Accepted: hole, shaft", kind="bore",
@@ -133,8 +307,12 @@ def main():
                 process="fdm", material="abs")
         state0 = d.call("get_state")
         r = d.call("set_print_process", **PETG)
-        expect(r["print"] == PETG, f"declared: {r}")
-        expect(d.call("get_print_process")["print"] == PETG, "reads back")
+        pair = {k: r["print"][k] for k in ("process", "material")}
+        expect(pair == PETG and "profile" not in r["print"],
+               f"declared, the built-in table: {r}")
+        g = d.call("get_print_process")["print"]
+        expect({k: g[k] for k in ("process", "material")} == PETG,
+               "reads back")
         expect(len(d.call("get_state")["features"]) ==
                len(state0["features"]), "rebuilds nothing, adds nothing")
         d.call("set_tolerance", feature_id=bf, element=bname,
@@ -228,6 +406,8 @@ def main():
         d.call("undo")
         expect(d.call("get_print_process")["print"] is None,
                "undo clears the process")
+
+        profiles(d, app.port)
 
         print("print_allowance_smoke: all checks passed")
         return 0

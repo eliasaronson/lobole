@@ -527,9 +527,11 @@ bool Document::Regenerate() {
     // A clearance-fitted Hole on a printed part is modelled at the fit plus
     // the process's allowance (HoleFeature::Execute), so the process is one
     // of ITS inputs — and only its: a part with no such hole keeps its
-    // hashes whatever the process.
+    // hashes whatever the process. The rows' CONTENT, not the names: a
+    // profile's gap edited from a coupon (v169) is the same name with a
+    // different number, and must rebuild what was modelled from the old one.
     if (m_print && PrintDrivesGeometry(*m_features[i]))
-      fj["print"] = m_print->process + "/" + m_print->material;
+      fj["print"] = printfit::Fingerprint(*m_print);
     chain = std::hash<std::string>{}(
         std::to_string(chain) + fj.dump() +
         (EffectiveSuppressed(i) ? "|cfg-suppressed" : ""));

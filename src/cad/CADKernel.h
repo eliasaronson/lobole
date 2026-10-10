@@ -493,10 +493,13 @@ public:
                 const std::vector<CADShape>& shapes);
 
   bool LoadSTL(const std::string& filename, CADShape& shape);
-  // Binary STL, re-meshed at `deflection` (smaller = finer). Export quality
-  // is the caller's choice, not whatever the viewport tessellated.
+  // Binary STL, re-meshed at `deflection` (smaller = finer, mm) and
+  // `angularDeflectionRad`. Export quality is the caller's choice, not
+  // whatever the viewport tessellated, and both bounds are passed: OCC's
+  // angular default (0.5 rad) also refines a small radius, which is why the
+  // linear one is only an upper bound on what a chord takes.
   bool SaveSTL(const std::string& filename, const CADShape& shape,
-               double deflection = 0.1);
+               double deflection, double angularDeflectionRad);
   // Native OCC BREP text (BRepTools::Write) — exact, no tessellation.
   bool SaveBREP(const std::string& filename, const CADShape& shape);
 

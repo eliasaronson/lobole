@@ -111,6 +111,12 @@ void DrawModelToolPrompt(AppState& state) {
   // worth spending a pill on.
   if (state.HasGeometryDelta())
     DrawPromptPill(state, y, state.deltaSummary, PromptPill::Status);
+  // What File > Export just did, for a few seconds: the log alone was where
+  // an export used to report, and nobody reads it.
+  if (!state.exportNote.empty() && ImGui::GetTime() < state.exportNoteUntil)
+    DrawPromptPill(state, y, state.exportNote,
+                   state.exportNoteFailed ? PromptPill::Warning
+                                          : PromptPill::StatusGood);
 
   const char* prompt = ArmedPrompt(state);
   // Plane/face picking has no armed CONTEXT (it is not a pick slot), so it

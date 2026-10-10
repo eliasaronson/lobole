@@ -2,11 +2,16 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""A printable test coupon that calibrates the print allowance table.
+"""A printable test coupon that calibrates a print profile.
 
     python3 generators/print_coupon.py --port 8800
     python3 generators/print_coupon.py --port 8800 --size 10 --steps 3 \\
         --thread M10 --process fdm --material pla
+    python3 generators/print_coupon.py --port 8800 --profile "K5 PLA on P1S"
+    python3 generators/print_coupon.py --port 8800 --record \\
+        --profile "K5 PLA on P1S" --process fdm --material pla --size 8 \\
+        --gap-side 0.1 --bore 8.2 --pin 7.9 --thread-went yes
+    python3 generators/print_coupon.py --port 8800 --seed
 
 The allowance table (docs/tolerances/README.md#printed-parts) is community
 practice and CAD-tool defaults, "to confirm with a test coupon". This is the
@@ -25,11 +30,20 @@ MODELLED at:
 
 Print it with the settings the parts will get, then push a real Ø`size` pin
 (a drill shank, a dowel) into the bores and the pins into a reamed Ø`size`
-hole, and screw a real bolt and nut onto the threads. Push each loose disc out of its hole:
-the tightest that comes free by hand is the gap print-in-place parts want.
-The bore and the pin
-that fit the way you want are the model sizes the table should give; correct
-PrintAllowance.cpp from them, citing the print.
+hole, and screw a real bolt and nut onto the threads. Push each loose disc out
+of its hole: the tightest that comes free by hand is the gap print-in-place
+parts want. The bore and the pin that fit the way you want are the model
+sizes the table should give.
+
+`--profile NAME` builds the coupon against one of your print profiles
+(docs/tolerances/README.md#print-profiles) and exports it at the profile's
+chord deviation. `--record` keeps the answer: it reads the winners off the
+command line (`--gap-side`, `--bore`, `--pin`, `--thread-went`), turns them
+into rows on top of the profile (or, for a new one, the built-in table of
+`--process`/`--material`) and saves it with `save_print_profile`, each row's
+`source` naming the coupon. `--seed` installs the two profiles measured on a
+Bambu Lab P1S (K5 PLA at 0.1 mm a side, a plain PLA at 0.15), skipping any
+name the store already has.
 
 Every size derives from `--size`: the pitch between features, the plate's
 thickness (a bore as deep as it is wide), the label height and the engraving
@@ -40,6 +54,7 @@ Output (generated, untracked): scratch/print_coupon/<name>.stl, the project,
 and <name>.json listing every feature, its modelled diameter and its label.
 """
 import argparse
+import datetime
 import json
 import os
 import sys
@@ -81,11 +96,145 @@ def round_face(d, diameter, x, y):
     raise SystemExit(f"no Ø{diameter} face at ({x}, {y})")
 
 
+# Measured on one Bambu Lab P1S (Bambu Studio 0.20 mm, X-Y hole and contour
+# compensation 0, STL at 0.01 mm chord deviation), print_coupon --gap-only:
+# the first two profiles (docs/tolerances/README.md#from-a-measurement).
+P1S_CONDITIONS = ("Bambu Lab P1S, 0.4 mm nozzle, Bambu Studio 0.20 mm, X-Y "
+                  "hole and contour compensation 0, the STL at 0.01 mm chord "
+                  "deviation")
+SEED = [
+    {"name": "K5 PLA on P1S", "gap_side": 0.1,
+     "source": "MEASURED, print_coupon --gap-only on a Bambu Lab P1S in K5 "
+               "PLA (2026-10-09): 0.075 mm a side freed only under force and "
+               "rubbed, 0.1 slid freely, and a gearbox modelled at 0.25 was "
+               "loose"},
+    {"name": "PLA on P1S", "gap_side": 0.15,
+     "source": "MEASURED, print_coupon --gap-only on a Bambu Lab P1S in an "
+               "ordinary PLA: 0.15 mm a side slid freely"},
+]
+
+
+def seed(d):
+    """Install the two P1S profiles, leaving any name already stored."""
+    have = {p["name"] for p in d.call("list_print_profiles")["profiles"]}
+    for s in SEED:
+        if s["name"] in have:
+            print(f"print_coupon: '{s['name']}' is already one of your "
+                  f"profiles; left as it is")
+            continue
+        rows = [r for r in builtin_rows(d, "fdm", "pla")
+                if r["kind"] != "gap"]
+        rows.append({"kind": "gap", "from_mm": 0,
+                     "allowance_mm": round(2.0 * s["gap_side"], 4),
+                     "source": s["source"]})
+        p = d.call("save_print_profile", profile={
+            "name": s["name"], "process": "fdm", "material": "pla",
+            "conditions": P1S_CONDITIONS, "stl_deflection_mm": 0.01,
+            "rows": rows})
+        print(f"print_coupon: saved '{p['name']}' (gap {s['gap_side']:g} mm "
+              f"a side)")
+    return 0
+
+
+def builtin_rows(d, process, material):
+    """The built-in table's rows of a pair -- the defaults a profile starts
+    from -- as save_print_profile takes them."""
+    for t in d.call("list_print_profiles")["defaults"]:
+        if t["process"] == process and t["material"] == material:
+            rows = []
+            for r in t["rows"]:
+                r = {k: v for k, v in r.items() if v is not None}
+                rows.append(r)
+            return rows
+    raise SystemExit(f"print_coupon: no built-in table for {process} "
+                     f"{material}")
+
+
+def record(d, args):
+    """The coupon's winners, as rows of a profile, saved."""
+    if not args.profile:
+        raise SystemExit("print_coupon --record needs --profile NAME: the "
+                         "profile the answer is kept in")
+    mine = {p["name"]: p for p in d.call("list_print_profiles")["profiles"]}
+    if args.profile in mine:
+        prof = mine[args.profile]
+    else:
+        prof = {"name": args.profile, "process": args.process,
+                "material": args.material,
+                "rows": builtin_rows(d, args.process, args.material)}
+    when = datetime.date.today().isoformat()
+    tag = f"print_coupon {when}, Ø{fmt(args.size)}"
+    rows = [dict(r) for r in prof["rows"]]
+
+    def replace(kind, allowance, what):
+        nonlocal rows
+        rows = [r for r in rows if r["kind"] != kind]
+        rows.append({"kind": kind, "from_mm": 0, "allowance_mm": allowance,
+                     "source": f"{tag}: {what}"})
+
+    if args.bore is not None:
+        replace("hole", round(args.bore - args.size, 4),
+                f"the bore modelled Ø{fmt(args.bore)} fit a Ø{fmt(args.size)} "
+                f"pin")
+    if args.pin is not None:
+        replace("shaft", round(args.pin - args.size, 4),
+                f"the pin modelled Ø{fmt(args.pin)} fit a Ø{fmt(args.size)} "
+                f"hole")
+    if args.gap_side is not None:
+        replace("gap", round(2.0 * args.gap_side, 4),
+                f"the tightest disc that slid was {fmt(args.gap_side)} a side")
+    if args.thread_went is not None:
+        for r in rows:
+            if r["kind"] in ("internal_thread", "external_thread"):
+                r["source"] = (f"{tag}: the thread went at this allowance"
+                               if args.thread_went == "yes" else
+                               f"{tag}: the thread did NOT go at this "
+                               f"allowance; open it")
+    if len(rows) == len(prof["rows"]) and all(
+            a == b for a, b in zip(rows, prof["rows"])):
+        raise SystemExit("print_coupon --record: nothing to record — pass "
+                         "--gap-side, --bore, --pin or --thread-went")
+    # The deflection the coupon was exported at: the one asked for, else
+    # the profile's own, else the coupon's default.
+    deflection = (args.deflection if args.deflection is not None else
+                  prof["stl_deflection_mm"] if prof.get("stl_deflection_stated")
+                  else 0.01)
+    out = {"name": prof["name"], "process": prof["process"],
+           "material": prof["material"], "rows": rows,
+           "conditions": args.conditions or prof.get("conditions", ""),
+           "stl_deflection_mm": deflection}
+    saved = d.call("save_print_profile", profile=out)
+    print(f"print_coupon: recorded {len(rows)} rows in '{saved['name']}' "
+          f"(STL at {saved['stl_deflection_mm']:g} mm)")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--port", type=int)
     ap.add_argument("--process", default="fdm")
     ap.add_argument("--material", default="pla")
+    ap.add_argument("--profile", default=None,
+                    help="one of your print profiles: build against it, or "
+                         "with --record the one the answer is kept in")
+    ap.add_argument("--record", action="store_true",
+                    help="build nothing: save the winners below as rows of "
+                         "--profile")
+    ap.add_argument("--gap-side", type=float, default=None,
+                    help="--record: the tightest gap disc that slid, mm a "
+                         "side")
+    ap.add_argument("--bore", type=float, default=None,
+                    help="--record: the bore (as modelled) that fit a "
+                         "Ø--size pin, mm")
+    ap.add_argument("--pin", type=float, default=None,
+                    help="--record: the pin (as modelled) that fit a "
+                         "Ø--size hole, mm")
+    ap.add_argument("--thread-went", choices=("yes", "no"), default=None,
+                    help="--record: whether the bolt and nut went on")
+    ap.add_argument("--conditions", default=None,
+                    help="--record: printer, nozzle, slicer preset")
+    ap.add_argument("--seed", action="store_true",
+                    help="install the two profiles measured on a P1S")
     ap.add_argument("--size", type=float, default=8.0,
                     help="the diameter the fit is at, mm (the printed size)")
     ap.add_argument("--steps", type=int, default=2,
@@ -98,9 +247,10 @@ def main():
     # Fine: at export_stl's own 0.1 mm the chords took 0.03 mm a side off
     # every gap and the slicer closed the two narrowest; a coupon that
     # measures the chords measures nothing about the printer.
-    ap.add_argument("--deflection", type=float, default=0.01,
-                    help="STL chord deviation, mm (default 0.01; export the "
-                         "parts it calibrates at the same)")
+    ap.add_argument("--deflection", type=float, default=None,
+                    help="STL chord deviation, mm (default: the profile's, "
+                         "else 0.01; export the parts it calibrates at the "
+                         "same)")
     ap.add_argument("--gap-only", action="store_true",
                     help="only the row of loose discs (a second coupon, "
                          "once the first has said which way to look)")
@@ -114,9 +264,16 @@ def main():
     args = ap.parse_args()
 
     d = connect(args.port)
+    if args.seed:
+        return seed(d)
+    if args.record:
+        return record(d, args)
     if args.fresh:
         fresh_project(d)
-    proc = {"process": args.process, "material": args.material}
+    proc = ({"profile": args.profile} if args.profile else
+            {"process": args.process, "material": args.material})
+    if args.deflection is None and not args.profile:
+        args.deflection = 0.01
     size = args.size
 
     def allowance(kind, **kw):
@@ -157,7 +314,9 @@ def main():
     rows = 1 if args.gap_only else 4 if nut else 3
     width = count * pitch
     depth = rows * pitch
-    name = args.name or (f"coupon_{args.process}_{args.material}_{fmt(size)}"
+    what = (args.profile.lower().replace(" ", "_") if args.profile else
+            f"{args.process}_{args.material}")
+    name = args.name or (f"coupon_{what}_{fmt(size)}"
                          + ("_gap" if args.gap_only else ""))
 
     d.call("add_part", name=name)
@@ -275,6 +434,7 @@ def main():
     if args.deflection is not None:
         exp["deflection"] = args.deflection
     r = d.call("export_stl", **exp)
+    report["stl_deflection_mm"] = r.get("deflection_mm")
     if r.get("shells") is not None and r["shells"] != 1 + count:
         raise SystemExit(f"print_coupon: the STL has {r['shells']} shells, "
                          f"not the plate and {count} loose discs: {r}")

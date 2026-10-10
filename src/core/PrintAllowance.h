@@ -18,22 +18,14 @@
 // print_allowance and the Thread editor REPORT — "H7 on a printed Ø8 bore:
 // model Ø8.2" — and a generator applies it where it models the part.
 //
-// Pure static data, no I/O, every number MILLIMETRES ON THE DIAMETER and
-// signed so that model = basic + allowance: a hole's is positive (model it
-// larger), a shaft's negative (model it smaller). Each row carries its
-// source, and every one of them is to be confirmed with a test coupon
-// (generators/print_coupon.py): the sources are community practice and CAD
-// tool defaults, not a measurement of this printer.
+// No I/O, every number MILLIMETRES ON THE DIAMETER and signed so that
+// model = basic + allowance: a hole's is positive (model it larger), a
+// shaft's negative (model it smaller). Each row carries its source. The
+// BUILT-IN tables are community practice and CAD tool defaults, the
+// defaults a PRINT PROFILE starts from; a profile is the user's own copy,
+// corrected from a test coupon (generators/print_coupon.py) for one printer,
+// filament and slicer preset (docs/tolerances/README.md#print-profiles).
 namespace printfit {
-
-// How a part is made, as a document declares it: the process and the
-// material it is made of in that process. Only the pairs the table carries
-// are accepted (Validate); anything else is refused naming what is.
-struct Process {
-  std::string process;  // "fdm"
-  std::string material; // "petg" | "pla"
-  bool operator==(const Process&) const = default;
-};
 
 // What a diameter is, as far as a printer is concerned: which way the
 // process moves it. A Gap is the round clearance between two surfaces
@@ -56,28 +48,114 @@ struct Row {
   double toMm = 0.0;        // exclusive; a large number for "and above"
   double allowanceMm = 0.0; // signed, on the diameter: model = basic + this
   std::string source;
+  bool operator==(const Row&) const = default;
 };
+
+// "And above": the open end of a row's size range.
+inline constexpr double kAboveMm = 1e9;
 
 struct Table {
   std::string process;
   std::string material;
   std::string conditions; // what the numbers assume (nozzle, export)
   std::vector<Row> rows;
+  bool operator==(const Table&) const = default;
 };
 
-// Every process/material pair carried, in display order.
+// A PRINT PROFILE (docs/tolerances/README.md#print-profiles): a named,
+// user-owned copy of a table -- one printer, one filament, one slicer
+// preset. Stored one file per profile in ~/.config/lobole/print_profiles
+// (DocumentIO::LoadPrintProfiles), and EMBEDDED in a part that is printed
+// with it, the way a CAM setup embeds its machine.
+struct Profile {
+  std::string name;
+  Table table; // its base process and material, conditions and rows
+  // The STL chord deviation the profile was calibrated at, mm; 0 = not
+  // stated, and an export takes a tenth of the smallest gap a side.
+  double stlDeflectionMm = 0.0;
+  bool operator==(const Profile&) const = default;
+};
+
+// How a part is made, as a document declares it: the process and the
+// material it is made of in that process, and, when it is printed with one
+// of the user's profiles, an embedded COPY of that profile (v169). The copy
+// is what every lookup reads: a part keeps what it was modelled with,
+// whichever machine opens it. Without one, the built-in table of the pair.
+// Only the pairs the built-in tables carry are accepted (Validate).
+struct Process {
+  std::string process;  // "fdm"
+  std::string material; // "petg" | "pla"
+  std::optional<Profile> profile;
+  bool operator==(const Process&) const = default;
+};
+// A part printed with `p`: its pair and the embedded copy.
+[[nodiscard]] Process FromProfile(const Profile& p);
+// "fdm pla", or "'K5 PLA' (fdm pla)" with a profile: how a report names it.
+[[nodiscard]] std::string Label(const Process& p);
+
+// Every BUILT-IN process/material pair carried, in display order: the
+// defaults, read-only, that a profile starts from.
 [[nodiscard]] const std::vector<Table>& Tables();
 // "fdm" ...
 [[nodiscard]] std::vector<std::string> ProcessNames();
 // The materials carried for `process` (empty for an unknown process).
 [[nodiscard]] std::vector<std::string> MaterialsFor(const std::string& process);
 
-// Empty when `p` is a carried pair; otherwise the refusal, naming the
-// processes (for an unknown process) or that process's materials (for a
-// material it has no data for).
+// Empty when `p` is a carried pair (and its profile, when it has one, is
+// one ValidateProfile accepts); otherwise the refusal, naming the processes
+// (for an unknown process) or that process's materials (for a material it
+// has no data for).
 [[nodiscard]] std::string Validate(const Process& p);
-// The table for `p`, or nullptr (Validate says why).
+// The table `p` reads: its embedded profile's, else the built-in one of its
+// pair; nullptr when neither (Validate says why).
 [[nodiscard]] const Table* Find(const Process& p);
+// The built-in table of a pair, or nullptr.
+[[nodiscard]] const Table* FindBuiltin(const std::string& process,
+                                       const std::string& material);
+
+// Empty when `p` may be stored; otherwise what is wrong with it: no name, a
+// base process/material the built-in tables do not carry, a negative or
+// non-finite chord deviation, no rows, a size range that is empty,
+// overlapping or out of order within its kind, or an allowance of the wrong
+// sign for its kind (a hole, internal thread or gap is opened, so not
+// negative -- and a gap of zero fuses; a shaft or external thread is not
+// positive).
+[[nodiscard]] std::string ValidateProfile(const Profile& p);
+
+// How a part's embedded profile stands against the user's store, by name.
+enum class ProfileMatch {
+  Builtin, // no profile: the built-in table, nothing to compare
+  Same,    // named, and equal to the store's profile of that name
+  Differs, // named, and the store's says something else
+  Missing, // named, and the store has no profile of that name
+};
+[[nodiscard]] const Profile* FindProfile(const std::vector<Profile>& store,
+                                         const std::string& name);
+[[nodiscard]] ProfileMatch MatchProfile(const std::vector<Profile>& store,
+                                        const Process& p);
+// "builtin" | "same" | "differs" | "missing"
+[[nodiscard]] const char* ProfileMatchName(ProfileMatch m);
+// The file a profile of this name is stored in: the name lower-cased with
+// every run of non-alphanumerics folded to one '-', plus ".json".
+[[nodiscard]] std::string ProfileFileName(const std::string& name);
+// A profile that starts as the built-in table of a pair ("the defaults,
+// corrected"); nullopt for a pair the tables do not carry.
+[[nodiscard]] std::optional<Profile>
+ProfileFromBuiltin(const std::string& name, const std::string& process,
+                   const std::string& material);
+
+// Everything about `p` that moves geometry: the pair, the profile's name and
+// every row's kind, range and allowance. The regeneration and requirements
+// hashes fold this in, so editing a gap rebuilds what was modelled from it.
+[[nodiscard]] std::string Fingerprint(const Process& p);
+
+// The smallest clearance a side the table opens -- half its smallest gap
+// row, or, without one, half its smallest non-zero allowance; 0 for none.
+[[nodiscard]] double SmallestGapSideMm(const Table& t);
+// The chord deviation a printed part's STL is exported at: the profile's
+// stated one, else a tenth of the smallest gap a side (0 when the table has
+// nothing to keep).
+[[nodiscard]] double StlDeflectionMm(const Process& p);
 
 // The answer for one diameter.
 struct Allowance {
@@ -92,6 +170,11 @@ struct Allowance {
 // set) for a process/material not carried or a size outside the rows.
 [[nodiscard]] std::optional<Allowance>
 ForBasic(const Process& p, Printed kind, double basicMm, std::string* why);
+// The same on a resolved table (`label` names it in a refusal).
+[[nodiscard]] std::optional<Allowance> ForBasic(const Table& t,
+                                                const std::string& label,
+                                                Printed kind, double basicMm,
+                                                std::string* why);
 
 // The inverse: a diameter MODELLED at `modelledMm` prints at what? The row is
 // the one whose model range holds `modelledMm`. The table steps at a size, so
@@ -102,6 +185,9 @@ ForBasic(const Process& p, Printed kind, double basicMm, std::string* why);
                                                    Printed kind,
                                                    double modelledMm,
                                                    std::string* why);
+[[nodiscard]] std::optional<Allowance>
+ForModelled(const Table& t, const std::string& label, Printed kind,
+            double modelledMm, std::string* why);
 
 // A desktop FDM printer holds about ±0.2 mm in practice; an ISO band
 // narrower than that is a statement the print will not meet on its own.

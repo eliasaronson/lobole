@@ -2008,6 +2008,20 @@ struct AppState {
   std::vector<cam::Machine> machines;
   // Preferences > Machines: which one is being edited (-1 = none).
   int machineEditIndex = -1;
+  // The print profile store (docs/tolerances/README.md#print-profiles):
+  // ~/.config/lobole/print_profiles/*.json, mirrored here by
+  // ui::ReloadPrintProfiles. A printed part embeds a COPY of one, named; the
+  // Print process section compares the two every frame.
+  std::vector<printfit::Profile> printProfiles;
+  // Preferences > Print profiles: which one is being edited (-1 = none).
+  int printProfileEditIndex = -1;
+  // The Print process section's last store refusal ("Save as mine").
+  std::string printProfileError;
+  // What the last File > Export said, as a viewport pill until
+  // `exportNoteUntil` (ImGui time): "Exported part.stl — chords 0.01 mm".
+  std::string exportNote;
+  bool exportNoteFailed = false;
+  double exportNoteUntil = 0.0;
   // The CAM panel's setup step on a job with no setup yet (M3): which
   // machine, and whether the stock is a sheet you own or a wrap of the parts.
   struct CamNewSetup {

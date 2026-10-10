@@ -54,7 +54,7 @@ std::string Fmt(double v) {
 std::string Signed(double v) { return (v >= 0.0 ? "+" : "") + Fmt(v); }
 
 std::string ProcessName(const printfit::Process& p) {
-  return p.process + " " + p.material;
+  return printfit::Label(p);
 }
 
 } // namespace

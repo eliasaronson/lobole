@@ -1650,14 +1650,15 @@ bool CADKernel::LoadSTL(const std::string& filename, CADShape& shape) {
 }
 
 bool CADKernel::SaveSTL(const std::string& filename, const CADShape& shape,
-                        double deflection) {
+                        double deflection, double angularDeflectionRad) {
   if (!shape.IsValid())
     return false;
 
   // Re-mesh explicitly at the requested deflection instead of reusing
   // whatever triangulation the viewport happened to leave on the shape —
   // export quality is then a user choice, not an accident.
-  BRepMesh_IncrementalMesh mesh(shape.GetShape(), deflection);
+  BRepMesh_IncrementalMesh mesh(shape.GetShape(), deflection,
+                                /*isRelative=*/false, angularDeflectionRad);
   mesh.Perform();
 
   StlAPI_Writer writer;

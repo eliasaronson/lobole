@@ -55,6 +55,7 @@
 #include "ui/ImportJob.h"
 #include "ui/MachineActions.h"
 #include "ui/MotionActions.h"
+#include "ui/PrintProfileActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/RendererSync.h"
 #include "ui/SelectionPipeline.h"
@@ -2268,6 +2269,7 @@ int main(int argc, char** argv) {
   // the GUI tests too: the runner points XDG_CONFIG_HOME at a scratch
   // directory, so the tests see an empty store rather than the desk's.
   ui::ReloadMachines(g_App);
+  ui::ReloadPrintProfiles(g_App); // the print profile store, the same way
 #ifdef HAVE_CAM
   // Surfacing passes kept between runs
   // (docs/ui/long-operations.md#passes-kept-on-disk). Not under the GUI

@@ -12,12 +12,17 @@
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/FeatureTreePanel.h"
+#include "ui/FileDialogs.h" // ExportActiveDocument
 #include "ui/MeasureActions.h"
 #include "ui/PanelTitles.h"
 #include "ui/PrimitiveTool.h"
+#include "ui/PrintProfileActions.h"
 #include "ui/ProjectActions.h" // ProjectDirty
+#include "ui/SettingsWindow.h" // OpenPreferences
 #include "ui/TemplateActions.h"
 #include "ui/VariableActions.h"
+
+#include <unistd.h> // getpid: a scratch file per shard
 
 // Modeling GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -2804,5 +2809,188 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!Doc()->PrintProcess().has_value());
     ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
     ctx->Yield(2);
+  };
+
+  // Preferences > Print profiles is the store
+  // (docs/tolerances/README.md#print-profiles): New writes the built-in
+  // table as a file, Duplicate copies it, a rename moves it (refused onto a
+  // name that is taken), a row edit rewrites it, Delete removes it. The GUI
+  // runner points XDG_CONFIG_HOME at a scratch dir; the test still cleans up
+  // by name.
+  t = IM_REGISTER_TEST(engine, "tolerance",
+                       "print_profiles_are_kept_in_preferences");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    for (const char* stale : {"New profile", "New profile 2", "Test P1S"})
+      (void)ui::DeletePrintProfile(*s_App, stale);
+    const auto find = [](const char* name) {
+      return printfit::FindProfile(s_App->printProfiles, name);
+    };
+    const size_t before = s_App->printProfiles.size();
+    ui::OpenPreferences(*s_App, "Print profiles");
+    ctx->Yield(2);
+    ctx->SetRef("//###SettingsWindow");
+    ctx->ItemClick("###prof_new");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->printProfiles.size(), before + 1);
+    const printfit::Profile* made = find("New profile");
+    IM_CHECK_SILENT(made != nullptr);
+    if (made == nullptr)
+      return;
+    // "The defaults, corrected": it starts as a built-in table.
+    IM_CHECK(made->table ==
+             *printfit::FindBuiltin(made->table.process, made->table.material));
+    const std::filesystem::path dir(ui::PrintProfileDir());
+    IM_CHECK(std::filesystem::exists(dir / "new-profile.json"));
+
+    ctx->ItemClick("###prof_dup");
+    ctx->Yield(2);
+    IM_CHECK(find("New profile 2") != nullptr);
+    // The duplicate is selected; renamed onto a taken name, it is refused.
+    ctx->ItemInputValue("###prof_name", "New profile");
+    ctx->Yield(3);
+    IM_CHECK(find("New profile 2") != nullptr);
+    IM_CHECK_EQ(s_App->printProfiles.size(), before + 2);
+    ctx->ItemInputValue("###prof_name", "Test P1S");
+    ctx->Yield(3);
+    IM_CHECK(find("Test P1S") != nullptr);
+    IM_CHECK(find("New profile 2") == nullptr);
+    IM_CHECK(std::filesystem::exists(dir / "test-p1s.json"));
+    IM_CHECK(!std::filesystem::exists(dir / "new-profile-2.json"));
+
+    // The gap row, typed as a coupon's answer, read back from DISK.
+    int gap = -1;
+    const printfit::Profile* mine = find("Test P1S");
+    for (size_t i = 0; mine != nullptr && i < mine->table.rows.size(); i++)
+      if (mine->table.rows[i].kind == printfit::Printed::Gap)
+        gap = static_cast<int>(i);
+    IM_CHECK_SILENT(gap >= 0);
+    if (gap < 0)
+      return;
+    ctx->ItemInputValue(
+        ("###prof_rows/###prof_row_allow_" + std::to_string(gap)).c_str(),
+        "0.2");
+    ctx->Yield(3);
+    const auto fromDisk = DocumentIO::LoadPrintProfiles(ui::PrintProfileDir());
+    const printfit::Profile* saved =
+        printfit::FindProfile(fromDisk, "Test P1S");
+    IM_CHECK_SILENT(saved != nullptr);
+    if (saved == nullptr)
+      return;
+    const printfit::Row& row = saved->table.rows[static_cast<size_t>(gap)];
+    IM_CHECK(std::abs(row.allowanceMm - 0.2) < 1e-9);
+    IM_CHECK(row.source.rfind("coupon ", 0) == 0);
+
+    ctx->ItemClick("###prof_delete");
+    ctx->Yield(2);
+    IM_CHECK(find("Test P1S") == nullptr);
+    IM_CHECK(!std::filesystem::exists(dir / "test-p1s.json"));
+    (void)ui::DeletePrintProfile(*s_App, "New profile");
+    IM_CHECK_EQ(s_App->printProfiles.size(), before);
+    s_App->settingsWindowOpen = false;
+  };
+
+  // A part picks one of the user's profiles in the Print process combo and
+  // EMBEDS a copy; when the store's copy changes, the section says so and
+  // offers both directions -- the CAM setup's machine block, for a print
+  // (docs/tolerances/README.md#print-profiles).
+  t = IM_REGISTER_TEST(engine, "tolerance", "print_profile_picked_and_matched");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    AddFixtureCylinder(ctx);
+    ctx->Yield(2);
+    const char* kName = "Test pick P1S";
+    (void)ui::DeletePrintProfile(*s_App, kName);
+    auto mine = printfit::ProfileFromBuiltin(kName, "fdm", "pla");
+    IM_CHECK_SILENT(mine.has_value());
+    if (!mine)
+      return;
+    IM_CHECK(ui::SavePrintProfile(*s_App, *mine));
+    const auto match = [] {
+      return printfit::MatchProfile(s_App->printProfiles,
+                                    *Doc()->PrintProcess());
+    };
+
+    ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+    ctx->ItemClick(w->TabId);
+    ctx->Yield(2);
+    if (ctx->ItemInfo("//###Variables/###print_process",
+                      ImGuiTestOpFlags_NoError)
+            .ID == 0) {
+      ctx->ItemClick("//###Variables/Print process");
+      ctx->Yield(2);
+    }
+    ctx->SetRef("//###Variables");
+    ctx->ComboClick(
+        (std::string("###print_process/###print_prof_") + kName).c_str());
+    ctx->Yield(2);
+    IM_CHECK(Doc()->PrintProcess().has_value());
+    IM_CHECK(Doc()->PrintProcess()->profile.has_value());
+    IM_CHECK(match() == printfit::ProfileMatch::Same);
+
+    // The user re-measures: the store's gap is 0.1 a side now.
+    printfit::Profile remeasured = *mine;
+    for (printfit::Row& r : remeasured.table.rows)
+      if (r.kind == printfit::Printed::Gap)
+        r.allowanceMm = 0.2;
+    IM_CHECK(ui::SavePrintProfile(*s_App, remeasured));
+    ctx->Yield(2);
+    IM_CHECK(match() == printfit::ProfileMatch::Differs);
+    ctx->ItemClick("###print_use_mine");
+    ctx->Yield(2);
+    IM_CHECK(*Doc()->PrintProcess()->profile == remeasured);
+    IM_CHECK(match() == printfit::ProfileMatch::Same);
+    // Undoable: the part's old copy comes back, and differs again.
+    s_App->commands->Undo(*Doc());
+    ctx->Yield(2);
+    IM_CHECK(*Doc()->PrintProcess()->profile == *mine);
+    IM_CHECK(match() == printfit::ProfileMatch::Differs);
+    // "Save as mine" goes the other way: the store takes the part's copy.
+    ctx->ItemClick("###print_save_mine");
+    ctx->Yield(2);
+    IM_CHECK(match() == printfit::ProfileMatch::Same);
+    IM_CHECK(*printfit::FindProfile(s_App->printProfiles, kName) == *mine);
+    // Gone from the store: "missing", and the part still reads its copy.
+    IM_CHECK(ui::DeletePrintProfile(*s_App, kName));
+    ctx->Yield(2);
+    IM_CHECK(match() == printfit::ProfileMatch::Missing);
+    IM_CHECK(ctx->ItemExists("###print_save_mine"));
+    ctx->ComboClick("###print_process/###print_none");
+    ctx->Yield(2);
+    IM_CHECK(!Doc()->PrintProcess().has_value());
+    ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
+    ctx->Yield(2);
+  };
+
+  // File > Export of a printed part's STL meshes at the profile's chords and
+  // says so in the viewport
+  // (docs/tolerances/README.md#exporting-a-printed-part).
+  t = IM_REGISTER_TEST(engine, "tolerance",
+                       "printed_stl_export_says_its_chords");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    AddFixtureCylinder(ctx);
+    ctx->Yield(2);
+    auto k5 = printfit::ProfileFromBuiltin("Test export P1S", "fdm", "pla");
+    IM_CHECK_SILENT(k5.has_value());
+    if (!k5)
+      return;
+    k5->stlDeflectionMm = 0.01;
+    Doc()->SetPrintProcess(printfit::FromProfile(*k5));
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("designer_gui_export_" +
+                       std::to_string(static_cast<long>(::getpid())) + ".stl");
+    std::string error;
+    IM_CHECK(ui::ExportActiveDocument(*s_App, path.string(), &error));
+    ctx->Yield(2);
+    ctx->LogInfo("note: %s", s_App->exportNote.c_str());
+    IM_CHECK(s_App->exportNote.find("chords 0.01 mm") != std::string::npos);
+    IM_CHECK(!s_App->exportNoteFailed);
+    IM_CHECK(ImGui::GetTime() < s_App->exportNoteUntil);
+    std::filesystem::remove(path);
+    // A failure says so in the same place, as a warning.
+    IM_CHECK(
+        !ui::ExportActiveDocument(*s_App, "/nonexistent-dir/x.stl", &error));
+    IM_CHECK(s_App->exportNoteFailed);
+    Doc()->SetPrintProcess(std::nullopt);
+    s_App->exportNoteUntil = 0.0;
   };
 }

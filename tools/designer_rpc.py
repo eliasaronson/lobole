@@ -64,6 +64,7 @@ COLUMNS: dict[str, str] = {
     'list_motion_studies': '',
     'list_occurrences': 'bounds?:bool',
     'list_parts': '',
+    'list_print_profiles': '',
     'list_relations': '',
     'list_requirements': '',
     'list_sections': '',
@@ -440,6 +441,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def list_parts(self, _timeout: float | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def list_print_profiles(self, _timeout: float | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
     def list_relations(self, _timeout: float | None = None) -> dict[str, Any]:

@@ -173,6 +173,27 @@ bool SaveMachine(const std::string& dir, const cam::Machine& m,
                  std::string* error = nullptr);
 bool DeleteMachine(const std::string& dir, const std::string& name,
                    std::string* error = nullptr);
+// Print profiles (docs/tolerances/README.md#print-profiles): one
+// `<slug>.json` per profile under `dir` (the app uses
+// settings::ConfigDir()/print_profiles), the same contract as the machine
+// store. Load returns every readable file sorted by name and reports the
+// unreadable ones in `error` without failing the rest; Save refuses what
+// printfit::ValidateProfile refuses and a name that would share a file with a
+// different name; Delete refuses a name it cannot find.
+nlohmann::json PrintProfileToJson(const printfit::Profile& p);
+// Throws on a malformed profile, naming what is wrong (an unknown kind, a
+// missing field, anything ValidateProfile refuses).
+printfit::Profile PrintProfileFromJson(const nlohmann::json& j);
+// A row on the wire: {kind, from_mm, to_mm (null or absent = and up),
+// allowance_mm, source?}.
+nlohmann::json PrintRowToJson(const printfit::Row& r);
+printfit::Row PrintRowFromJson(const nlohmann::json& j);
+std::vector<printfit::Profile> LoadPrintProfiles(const std::string& dir,
+                                                 std::string* error = nullptr);
+bool SavePrintProfile(const std::string& dir, const printfit::Profile& p,
+                      std::string* error = nullptr);
+bool DeletePrintProfile(const std::string& dir, const std::string& name,
+                        std::string* error = nullptr);
 fem::Study StudyFromJson(const nlohmann::json& j);
 
 // A study's RESULT (de)serialization: topology (v33), static and modal

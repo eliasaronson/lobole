@@ -595,7 +595,7 @@ TEST_CASE("STL save/load roundtrip yields a SOLID with the box volume",
   CADShape box = k.CreateBox(2.0, 3.0, 4.0);
   fs::path path =
       std::filesystem::temp_directory_path() / "designer_test_roundtrip.stl";
-  REQUIRE(k.SaveSTL(path.string(), box, 0.1));
+  REQUIRE(k.SaveSTL(path.string(), box, 0.1, 0.5));
 
   // A watertight mesh must come back as a closed solid (LoadSTL promotes the
   // sewn shell), so volume/mass work on it — a planar box tessellates
@@ -892,7 +892,7 @@ TEST_CASE("An STL import is read in the unit it was drawn in",
   // extension check was case-sensitive.
   const fs::path stl =
       fs::temp_directory_path() / ("designer_units_" + pid + ".STL");
-  REQUIRE(k.SaveSTL(stl.string(), k.CreateBox(2.0, 3.0, 4.0), 0.1));
+  REQUIRE(k.SaveSTL(stl.string(), k.CreateBox(2.0, 3.0, 4.0), 0.1, 0.5));
   const auto import = [](const fs::path& path, units::Length unit) {
     auto doc = std::make_unique<Document>();
     auto imp = std::make_unique<ImportFeature>("part", path.string());
@@ -922,7 +922,7 @@ TEST_CASE("An STL import is read in the unit it was drawn in",
     // A 20 x 30 x 40 mm part, exported by a tool that thinks in metres.
     const fs::path m =
         fs::temp_directory_path() / ("designer_units_m_" + pid + ".stl");
-    REQUIRE(k.SaveSTL(m.string(), k.CreateBox(0.02, 0.03, 0.04), 0.001));
+    REQUIRE(k.SaveSTL(m.string(), k.CreateBox(0.02, 0.03, 0.04), 0.001, 0.5));
     const auto wrong = import(m, units::Length::Millimetre);
     const std::string w = wrong->GetFeatures()[0]->GetWarning();
     INFO(w);

@@ -701,6 +701,8 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
           IM_CHECK(ctx->ItemExists("//###SettingsWindow/###key_filter"));
         if (c.name == "Machines")
           IM_CHECK(ctx->ItemExists("//###SettingsWindow/###mach_new"));
+        if (c.name == "Print profiles")
+          IM_CHECK(ctx->ItemExists("//###SettingsWindow/###prof_new"));
         // A table page resets alone; a library has no reset.
         IM_CHECK_EQ(
             ctx->ItemExists("//###SettingsWindow/###set_reset_category"),

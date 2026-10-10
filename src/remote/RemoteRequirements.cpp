@@ -284,8 +284,9 @@ void HashPartExtras(inputhash::Hasher& h, const Document& doc) {
     h.F64(t.upper);
   }
   if (const auto& pp = doc.PrintProcess()) {
-    h.Str(pp->process);
-    h.Str(pp->material);
+    // The rows' content (v169): a profile edited under the same name
+    // changes what a printed fit is judged at.
+    h.Str(printfit::Fingerprint(*pp));
   } else {
     h.Str("-");
   }

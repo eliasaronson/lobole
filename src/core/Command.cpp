@@ -275,7 +275,7 @@ SetPrintProcessCommand::SetPrintProcessCommand(
 std::string SetPrintProcessCommand::Description() const {
   if (!m_after)
     return "Clear print process";
-  return "Print in " + m_after->process + " " + m_after->material;
+  return "Print in " + printfit::Label(*m_after);
 }
 
 bool SetPrintProcessCommand::Execute(Document& doc) {

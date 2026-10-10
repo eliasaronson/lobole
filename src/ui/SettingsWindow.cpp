@@ -9,6 +9,7 @@
 #include "core/io/GitVault.h"
 
 #include "common/Logger.h"
+#include "core/Units.h"
 #include "core/cam/CamMachine.h"
 #include "core/cam/CamPost.h"
 #include "core/io/Keymap.h"
@@ -16,6 +17,7 @@
 #include "core/io/Settings.h"
 #include "ui/Commands.h"
 #include "ui/MachineActions.h"
+#include "ui/PrintProfileActions.h"
 
 #include "IconsFontAwesome6.h"
 
@@ -27,6 +29,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <ctime>
 #include <functional>
 #include <string>
 #include <vector>
@@ -624,6 +627,280 @@ bool DrawMachinesPage(AppState& state) {
   return false; // the machine store is not settings.json
 }
 
+// Preferences > Print profiles (docs/tolerances/README.md#print-profiles).
+// The machine page's shape: the user's profiles, each its own file in
+// ~/.config/lobole/print_profiles, written on every edit. A printed part
+// names one and embeds a copy; the Print process section says when the two
+// differ.
+std::string g_profileError; // the last refusal from the store, in words
+
+std::vector<std::string> PrintProfileNames(const AppState& state) {
+  std::vector<std::string> names;
+  for (const printfit::Profile& p : state.printProfiles)
+    names.push_back(p.name);
+  return names;
+}
+
+void SelectPrintProfile(AppState& state, const std::string& name) {
+  for (size_t i = 0; i < state.printProfiles.size(); i++)
+    if (state.printProfiles[i].name == name)
+      state.printProfileEditIndex = static_cast<int>(i);
+}
+
+void CommitPrintProfile(AppState& state, const printfit::Profile& p) {
+  std::string error;
+  const std::string name = p.name;
+  if (!SavePrintProfile(state, p, &error)) {
+    g_profileError = error;
+    // The store still holds the last good one: show it, not the refused
+    // edit, so the form never reads as saved when it was not.
+    ReloadPrintProfiles(state);
+  } else {
+    g_profileError.clear();
+  }
+  SelectPrintProfile(state, name);
+}
+
+// "2026-10-10": the date a coupon row was typed in.
+std::string Today() {
+  const std::time_t now = std::time(nullptr);
+  char buf[16];
+  std::strftime(buf, sizeof(buf), "%Y-%m-%d", std::localtime(&now));
+  return buf;
+}
+
+// The selected profile's editor. Every edit is written at once; a rename is
+// refused when the name is taken, as a machine's is.
+void DrawPrintProfileForm(AppState& state, int index) {
+  printfit::Profile p = state.printProfiles[static_cast<size_t>(index)];
+  static char nameBuf[96];
+  static int nameFor = -1;
+  if (nameFor != index || !ImGui::IsAnyItemActive()) {
+    std::snprintf(nameBuf, sizeof(nameBuf), "%s", p.name.c_str());
+    nameFor = index;
+  }
+  FormLabel("Name");
+  ImGui::InputText("###prof_name", nameBuf, sizeof(nameBuf));
+  if (ImGui::IsItemDeactivatedAfterEdit() && p.name != nameBuf &&
+      nameBuf[0] != '\0') {
+    std::string error;
+    const std::string to = nameBuf;
+    if (!RenamePrintProfile(state, p.name, to, &error)) {
+      g_profileError = error;
+    } else {
+      g_profileError.clear();
+      SelectPrintProfile(state, to);
+      return; // `p` is stale
+    }
+  }
+
+  bool edited = false;
+  // The base pair: what the rows are allowances FOR. Only the pairs the
+  // built-in tables carry, so the form cannot make what a save refuses.
+  FormLabel("Process and material");
+  const std::string pair = p.table.process + " " + p.table.material;
+  if (ImGui::BeginCombo("###prof_pair", pair.c_str())) {
+    for (const printfit::Table& t : printfit::Tables()) {
+      const std::string label = t.process + " " + t.material + "###prof_pair_" +
+                                t.process + "_" + t.material;
+      if (ImGui::Selectable(label.c_str(),
+                            t.process == p.table.process &&
+                                t.material == p.table.material)) {
+        p.table.process = t.process;
+        p.table.material = t.material;
+        edited = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  ImGui::SetItemTooltip("The process and the material the rows are for. "
+                        "Changing it keeps the rows.");
+
+  static char condBuf[512];
+  static int condFor = -1;
+  if (condFor != index || !ImGui::IsAnyItemActive()) {
+    std::snprintf(condBuf, sizeof(condBuf), "%s", p.table.conditions.c_str());
+    condFor = index;
+  }
+  FormLabel("Conditions");
+  ImGui::SetNextItemWidth(-FLT_MIN);
+  ImGui::InputText("###prof_conditions", condBuf, sizeof(condBuf));
+  if (ImGui::IsItemDeactivatedAfterEdit() && p.table.conditions != condBuf) {
+    p.table.conditions = condBuf;
+    edited = true;
+  }
+  ImGui::SetItemTooltip("What the numbers assume: the printer, the nozzle, "
+                        "the slicer preset and its compensation.%s%s",
+                        p.table.conditions.empty() ? "" : "\n\n",
+                        p.table.conditions.c_str());
+
+  double defl = p.stlDeflectionMm;
+  FormLabel("STL chord deviation (mm, 0 = a tenth of the smallest gap)");
+  if (ExprInputDouble(state, "###prof_deflection", &defl, "%.4g") &&
+      defl != p.stlDeflectionMm) {
+    p.stlDeflectionMm = defl;
+    edited = true;
+  }
+  ImGui::SetItemTooltip("What a printed part's STL is exported at. Export "
+                        "the coupon at the same, and it calibrates the "
+                        "chords and the printer at once.");
+
+  // The rows: kind, size range, allowance, source.
+  ImGui::Spacing();
+  ImGui::TextUnformatted("Allowances (mm on the diameter)");
+  ImGui::SameLine();
+  ImGui::TextDisabled("model = size + allowance");
+  int removeRow = -1;
+  // Stretched by weight, never wider than the pane: a page does not scroll
+  // sideways (docs/ui/settings.md#the-window). A source is elided in its
+  // cell and whole in the tooltip.
+  const ImGuiTableFlags flags = ImGuiTableFlags_SizingStretchProp |
+                                ImGuiTableFlags_RowBg |
+                                ImGuiTableFlags_BordersInnerH;
+  if (ImGui::BeginTable("###prof_rows", 6, flags)) {
+    ImGui::TableSetupColumn("Kind", 0, 2.0f);
+    ImGui::TableSetupColumn("From", 0, 1.0f);
+    ImGui::TableSetupColumn("To (0 = up)", 0, 1.0f);
+    ImGui::TableSetupColumn("Allowance", 0, 1.1f);
+    ImGui::TableSetupColumn("Source", 0, 2.2f);
+    ImGui::TableSetupColumn("", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableHeadersRow();
+    for (size_t i = 0; i < p.table.rows.size(); i++) {
+      printfit::Row& r = p.table.rows[i];
+      // Flat, numbered ids (###prof_row_allow_2): a script or a test
+      // addresses one row's field without knowing the table's id scope.
+      const auto id = [i](const char* what) {
+        return std::string("###prof_row_") + what + "_" + std::to_string(i);
+      };
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      if (ImGui::BeginCombo(id("kind").c_str(),
+                            printfit::PrintedName(r.kind).c_str())) {
+        for (printfit::Printed k :
+             {printfit::Printed::Hole, printfit::Printed::Shaft,
+              printfit::Printed::InternalThread,
+              printfit::Printed::ExternalThread, printfit::Printed::Gap})
+          if (ImGui::Selectable(printfit::PrintedName(k).c_str(),
+                                k == r.kind)) {
+            r.kind = k;
+            edited = true;
+          }
+        ImGui::EndCombo();
+      }
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      double from = r.fromMm;
+      if (ExprInputDouble(state, id("from").c_str(), &from, "%.4g") &&
+          from != r.fromMm) {
+        r.fromMm = from;
+        edited = true;
+      }
+      ImGui::TableNextColumn();
+      // "And up" is an open end: shown and typed as 0.
+      double to = r.toMm >= printfit::kAboveMm ? 0.0 : r.toMm;
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      if (ExprInputDouble(state, id("to").c_str(), &to, "%.4g")) {
+        const double next = to <= 0.0 ? printfit::kAboveMm : to;
+        if (next != r.toMm) {
+          r.toMm = next;
+          edited = true;
+        }
+      }
+      ImGui::SetItemTooltip("The size the range stops at; 0 = and up");
+      ImGui::TableNextColumn();
+      ImGui::SetNextItemWidth(-FLT_MIN);
+      double allow = r.allowanceMm;
+      if (ExprInputDouble(state, id("allow").c_str(), &allow, "%+.4g") &&
+          allow != r.allowanceMm) {
+        r.allowanceMm = allow;
+        // A number typed in is a measurement replacing a default: say whose.
+        r.source = "coupon " + Today();
+        edited = true;
+      }
+      if (r.kind == printfit::Printed::Gap)
+        ImGui::SetItemTooltip("The whole diametral gap: %s mm a side",
+                              units::FormatNumber(r.allowanceMm / 2.0).c_str());
+      ImGui::TableNextColumn();
+      ImGui::TextDisabled("%s", r.source.empty() ? "-" : r.source.c_str());
+      if (!r.source.empty())
+        ImGui::SetItemTooltip("%s", r.source.c_str());
+      ImGui::TableNextColumn();
+      if (ImGui::SmallButton((ICON_FA_XMARK + id("rm")).c_str()))
+        removeRow = static_cast<int>(i);
+      ImGui::SetItemTooltip("Remove this row");
+    }
+    ImGui::EndTable();
+  }
+  if (removeRow >= 0) {
+    p.table.rows.erase(p.table.rows.begin() + removeRow);
+    edited = true;
+  }
+  if (ImGui::SmallButton("Add row###prof_add_row")) {
+    printfit::Row r;
+    r.kind = printfit::Printed::Gap;
+    r.toMm = printfit::kAboveMm;
+    r.allowanceMm = 0.3;
+    for (const printfit::Row& have : p.table.rows)
+      if (have.kind == r.kind)
+        r.allowanceMm = have.allowanceMm;
+    r.source = "coupon " + Today();
+    p.table.rows.push_back(r);
+    edited = true;
+  }
+  if (edited)
+    CommitPrintProfile(state, p);
+}
+
+bool DrawPrintProfilesPage(AppState& state) {
+  LibraryPage page;
+  page.id = "prof";
+  page.noun = "print profile";
+  page.icon = ICON_FA_PRINT;
+  page.blurb =
+      "Your printers' allowances: one printer, filament and slicer preset "
+      "each, corrected from a test coupon (generators/print_coupon.py). New "
+      "starts from the built-in table. A printed part picks one in its Print "
+      "process section and keeps a copy, so it opens anywhere with the "
+      "numbers it was modelled with.";
+  page.names = [&state] { return PrintProfileNames(state); };
+  page.selected = &state.printProfileEditIndex;
+  page.error = &g_profileError;
+  page.create = [&state] {
+    // The defaults, corrected: a new profile starts as the built-in table
+    // of the selected one's pair, else the first pair.
+    std::string process = printfit::Tables().front().process;
+    std::string material = printfit::Tables().front().material;
+    const int sel = state.printProfileEditIndex;
+    if (sel >= 0 && sel < static_cast<int>(state.printProfiles.size())) {
+      process = state.printProfiles[static_cast<size_t>(sel)].table.process;
+      material = state.printProfiles[static_cast<size_t>(sel)].table.material;
+    }
+    const auto fresh = printfit::ProfileFromBuiltin(
+        FreePrintProfileName(state, "New profile"), process, material);
+    if (fresh)
+      CommitPrintProfile(state, *fresh);
+  };
+  page.duplicate = [&state](int index) {
+    printfit::Profile copy = state.printProfiles[static_cast<size_t>(index)];
+    copy.name = FreePrintProfileName(state, copy.name);
+    CommitPrintProfile(state, copy);
+  };
+  page.remove = [&state](int index) {
+    std::string error;
+    if (!DeletePrintProfile(
+            state, state.printProfiles[static_cast<size_t>(index)].name,
+            &error))
+      g_profileError = error;
+    else
+      g_profileError.clear();
+    state.printProfileEditIndex = -1;
+  };
+  page.form = [&state](int index) { DrawPrintProfileForm(state, index); };
+  DrawLibraryPage(page);
+  return false; // the profile store is not settings.json
+}
+
 // Preferences > Keyboard. Not a `Field`: the table above is one scalar per
 // row rendered as a slider or a combo, and a chord is neither
 // (docs/ui/keybindings.md). One collapsing node per context, because a
@@ -797,8 +1074,8 @@ const char* SectionIcon(const std::string& section) {
 // The pages the settings table does not make, after its sections, in this
 // order. A page here is a name, a glyph and a draw function; a LIBRARY page
 // also names its items, so search can find one, and opens one when a match
-// is clicked. A new library page (Print profiles) is one more row whose draw
-// function fills a LibraryPage.
+// is clicked. A new library page is one more row whose draw function fills
+// a LibraryPage (Machines and Print profiles are two).
 struct HandPage {
   const char* name;
   const char* icon;
@@ -811,6 +1088,8 @@ const HandPage kHandPages[] = {
     {"Keyboard", ICON_FA_KEYBOARD, DrawKeyboardSection},
     {"Machines", ICON_FA_INDUSTRY, DrawMachinesPage, MachineNames,
      [](AppState& s, int i) { s.machineEditIndex = i; }},
+    {"Print profiles", ICON_FA_PRINT, DrawPrintProfilesPage, PrintProfileNames,
+     [](AppState& s, int i) { s.printProfileEditIndex = i; }},
 };
 
 const HandPage* FindHandPage(const std::string& name) {

@@ -8,6 +8,7 @@
 #include "TestIO.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/PrintAllowance.h"
 #include "core/Requirements.h"
 #include "core/Units.h"
 #include "core/cam/CamJob.h"
@@ -1047,6 +1048,27 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
           expect.at("print").at("process").get<std::string>());
     CHECK(doc.PrintProcess()->material ==
           expect.at("print").at("material").get<std::string>());
+    // v169: a print profile's embedded copy. Lost, the part would read the
+    // built-in table under the profile's name, and every allowance would be
+    // the default again (docs/tolerances/README.md#print-profiles).
+    const nlohmann::json& pe = expect.at("print");
+    if (pe.contains("profile")) {
+      REQUIRE(doc.PrintProcess()->profile.has_value());
+      const printfit::Profile& pr = *doc.PrintProcess()->profile;
+      CHECK(pr.name == pe.at("profile").get<std::string>());
+      CHECK(pr.table.rows.size() == pe.at("rows").get<size_t>());
+      CHECK_THAT(pr.stlDeflectionMm,
+                 WithinRel(pe.at("stl_deflection_mm").get<double>(), 1e-12));
+      const auto gap = printfit::ForBasic(
+          *doc.PrintProcess(), printfit::Printed::Gap, 10.0, nullptr);
+      REQUIRE(gap);
+      CHECK_THAT(gap->allowanceMm,
+                 WithinRel(pe.at("gap_allowance_mm").get<double>(), 1e-12));
+      CHECK_THAT(gap->row->toMm,
+                 WithinRel(pe.at("gap_to_mm").get<double>(), 1e-12));
+    } else {
+      CHECK_FALSE(doc.PrintProcess()->profile.has_value());
+    }
   }
   // v97: whether an Import keeps the file's own coordinates. A flag that
   // round-trips as `false` is an import that silently moves — the whole

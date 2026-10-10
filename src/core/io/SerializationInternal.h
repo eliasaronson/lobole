@@ -26,7 +26,12 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    168; // v168: an Extrude's `twist_deg` (+ `twist_expr`) and `herringbone`
+    169; // v169: a part's `print` may name one of the user's print profiles
+         //      (`profile`) and embed its copy: `conditions`,
+         //      `stl_deflection_mm` and `rows` [{kind, from_mm, to_mm?,
+         //      allowance_mm, source?}]
+         //      (docs/tolerances/README.md#print-profiles).
+         // v168: an Extrude's `twist_deg` (+ `twist_expr`) and `herringbone`
          //      (omitted at zero twist / when off): the profile turns about
          //      the sketch normal over the length
          //      (docs/modeling/README.md#twisted-extrudes).

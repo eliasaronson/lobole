@@ -215,12 +215,37 @@ void TubeToEnvelope(const std::optional<tube::TubeRules>& rules, json& j) {
 // carry the pair, naming what it does: a document that says "sla" or "abs"
 // was written by a build that had data this one lacks, and reading it as
 // unprinted — or as PETG — would report the wrong thing to model.
+//
+// v169: a part printed with one of the user's print profiles carries the
+// profile's name and an EMBEDDED copy of it -- `conditions`,
+// `stl_deflection_mm` and `rows` -- the way a CAM setup embeds its machine
+// (docs/tolerances/README.md#print-profiles). The copy is what the part
+// reads, whichever store opens it; a copy the profile rules refuse is
+// refused here too.
 std::optional<printfit::Process> PrintFromEnvelope(const json& j) {
   if (!j.contains("print"))
     return std::nullopt;
   const json& m = j.at("print");
   printfit::Process p{m.value("process", std::string{}),
-                      m.value("material", std::string{})};
+                      m.value("material", std::string{}), std::nullopt};
+  if (m.contains("profile")) {
+    if (!m.contains("rows"))
+      throw std::runtime_error("print process: profile '" +
+                               m.value("profile", std::string{}) +
+                               "' carries no rows");
+    json pj = m;
+    pj["name"] = m.at("profile");
+    pj.erase("profile");
+    try {
+      p.profile = DocumentIO::PrintProfileFromJson(pj);
+    } catch (const std::exception& e) {
+      throw std::runtime_error(std::string("print process: ") + e.what());
+    }
+  } else if (m.contains("rows")) {
+    throw std::runtime_error(
+        "print process: `rows` without a `profile` name — the built-in table "
+        "is not embedded, and rows nobody named cannot be told apart from it");
+  }
   if (const std::string why = printfit::Validate(p); !why.empty())
     throw std::runtime_error("print process: " + why);
   return p;
@@ -231,7 +256,15 @@ std::optional<printfit::Process> PrintFromEnvelope(const json& j) {
 void PrintToEnvelope(const std::optional<printfit::Process>& p, json& j) {
   if (!p)
     return;
-  j["print"] = {{"process", p->process}, {"material", p->material}};
+  json m{{"process", p->process}, {"material", p->material}};
+  if (p->profile) {
+    json pj = DocumentIO::PrintProfileToJson(*p->profile);
+    m["profile"] = p->profile->name;
+    for (const char* key : {"conditions", "stl_deflection_mm", "rows"})
+      if (pj.contains(key))
+        m[key] = pj.at(key);
+  }
+  j["print"] = std::move(m);
 }
 
 // The same three keys, written only when they differ from the default.

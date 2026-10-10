@@ -21,6 +21,8 @@
 #include <filesystem>
 #include <fstream>
 
+#include <unistd.h> // getpid
+
 using Catch::Approx;
 
 namespace {
@@ -101,13 +103,14 @@ TEST_CASE("A print-in-place gap opens the outer surface by the whole "
           "clearance",
           "[tolerances][print]") {
   // A Ø10 pin printed inside a ring: the ring is modelled 0.5 larger in PLA
-  // (0.1 a side, measured on a P1S) and 0.6 in PETG.
+  // (the community's 0.25 a side, a default to calibrate) and 0.6 in PETG.
   std::string why;
   auto a =
       printfit::ForBasic({"fdm", "pla"}, printfit::Printed::Gap, 10.0, &why);
   REQUIRE(a);
-  CHECK(a->allowanceMm == Approx(0.2));
-  CHECK(a->modelMm == Approx(10.2));
+  CHECK(a->allowanceMm == Approx(0.5));
+  CHECK(a->modelMm == Approx(10.5));
+  CHECK(Contains(a->row->source, "DEFAULT to calibrate"));
   a = printfit::ForBasic(kPetg, printfit::Printed::Gap, 10.0, &why);
   REQUIRE(a);
   CHECK(a->modelMm == Approx(10.6));
@@ -339,4 +342,205 @@ TEST_CASE("A printed clearance hole is modelled at its fit plus the allowance",
   tapped->SetPrintProcess(kPetg);
   CHECK(holeOf(*tapped)->diameter == Approx(drill));
   CHECK(tapped->Version() == version); // nothing on it moved: no regen
+}
+
+// ---- Print profiles (docs/tolerances/README.md#print-profiles) ----------
+
+namespace {
+
+// K5 PLA on a P1S: the gap measured at 0.1 a side.
+printfit::Profile K5() {
+  auto p = printfit::ProfileFromBuiltin("K5 PLA on P1S", "fdm", "pla");
+  REQUIRE(p);
+  for (printfit::Row& r : p->table.rows)
+    if (r.kind == printfit::Printed::Gap) {
+      r.allowanceMm = 0.2;
+      r.source = "coupon 2026-10-09";
+    }
+  p->stlDeflectionMm = 0.01;
+  return *p;
+}
+
+struct TempDir {
+  std::filesystem::path path;
+  explicit TempDir(const char* tag)
+      : path(std::filesystem::temp_directory_path() /
+             (std::string("designer-") + tag + "-" +
+              std::to_string(::getpid()))) {
+    std::filesystem::remove_all(path);
+  }
+  ~TempDir() { std::filesystem::remove_all(path); }
+};
+
+} // namespace
+
+TEST_CASE("A print profile round-trips through its file",
+          "[tolerances][print][profile]") {
+  TempDir dir("print-profiles");
+  std::string problems = "x";
+  CHECK(DocumentIO::LoadPrintProfiles(dir.path.string(), &problems).empty());
+  CHECK(problems.empty()); // no store yet is not an error
+  const printfit::Profile k5 = K5();
+  std::string error;
+  REQUIRE(DocumentIO::SavePrintProfile(dir.path.string(), k5, &error));
+  CHECK(std::filesystem::exists(dir.path / "k5-pla-on-p1s.json"));
+  // A broken neighbour is reported, and does not hide the good one.
+  std::ofstream(dir.path / "broken.json") << "{ not json";
+  const auto loaded =
+      DocumentIO::LoadPrintProfiles(dir.path.string(), &problems);
+  REQUIRE(loaded.size() == 1);
+  CHECK(loaded[0] == k5);
+  CHECK(Contains(problems, "broken.json"));
+  // The open end survives as "and up", not as a number.
+  const auto j = DocumentIO::PrintProfileToJson(k5);
+  CHECK_FALSE(j.at("rows").at(0).contains("to_mm"));
+  // Two names that fold to one file: the second is refused.
+  printfit::Profile clash = k5;
+  clash.name = "k5 pla on p1s";
+  CHECK_FALSE(DocumentIO::SavePrintProfile(dir.path.string(), clash, &error));
+  CHECK(Contains(error, "would share a file"));
+  REQUIRE(DocumentIO::DeletePrintProfile(dir.path.string(), k5.name, &error));
+  CHECK_FALSE(
+      DocumentIO::DeletePrintProfile(dir.path.string(), k5.name, &error));
+  CHECK(Contains(error, "no print profile called"));
+}
+
+TEST_CASE("A print profile refuses what it cannot be, saying what",
+          "[tolerances][print][profile]") {
+  const auto refusal = [](const printfit::Profile& p) {
+    return printfit::ValidateProfile(p);
+  };
+  CHECK(refusal(K5()).empty());
+  auto p = K5();
+  p.name = "  ";
+  CHECK(Contains(refusal(p), "needs a name"));
+  p = K5();
+  p.table.process = "sla";
+  CHECK(Contains(refusal(p), "Accepted: fdm"));
+  p = K5();
+  p.table.material = "abs";
+  CHECK(Contains(refusal(p), "Accepted for fdm: petg, pla"));
+  p = K5();
+  p.table.rows.clear();
+  CHECK(Contains(refusal(p), "at least one row"));
+  p = K5();
+  p.stlDeflectionMm = -0.01;
+  CHECK(Contains(refusal(p), "stl_deflection_mm"));
+  // The wrong sign for the kind.
+  p = K5();
+  p.table.rows.push_back({printfit::Printed::Gap, 0.0, 1.0, 0.0, ""});
+  CHECK(Contains(refusal(p), "gap's allowance must be positive"));
+  p = K5();
+  p.table.rows = {{printfit::Printed::Shaft, 0.0, printfit::kAboveMm, 0.1, ""}};
+  CHECK(Contains(refusal(p), "not positive"));
+  p = K5();
+  p.table.rows = {{printfit::Printed::Hole, 0.0, printfit::kAboveMm, -0.1, ""}};
+  CHECK(Contains(refusal(p), "not negative"));
+  // Overlapping and out-of-order ranges within a kind.
+  p = K5();
+  p.table.rows = {{printfit::Printed::Hole, 0.0, 10.0, 0.2, ""},
+                  {printfit::Printed::Hole, 8.0, 20.0, 0.3, ""}};
+  CHECK(Contains(refusal(p), "overlaps"));
+  p.table.rows = {{printfit::Printed::Hole, 10.0, 20.0, 0.2, ""},
+                  {printfit::Printed::Hole, 0.0, 10.0, 0.3, ""}};
+  CHECK(Contains(refusal(p), "out of order"));
+  p.table.rows = {{printfit::Printed::Hole, 5.0, 5.0, 0.2, ""}};
+  CHECK(Contains(refusal(p), "size range"));
+  // A refusal writes nothing.
+  TempDir dir("print-profiles-refused");
+  std::string error;
+  CHECK_FALSE(DocumentIO::SavePrintProfile(dir.path.string(), p, &error));
+  CHECK_FALSE(std::filesystem::exists(dir.path));
+}
+
+TEST_CASE("A part reads its embedded profile, and says how it stands",
+          "[tolerances][print][profile]") {
+  const printfit::Profile k5 = K5();
+  auto doc = BossDoc();
+  doc->SetPrintProcess(printfit::FromProfile(k5));
+  // The copy is what the lookups read: 0.1 a side, not the default 0.25.
+  auto a = printfit::ForBasic(*doc->PrintProcess(), printfit::Printed::Gap,
+                              10.0, nullptr);
+  REQUIRE(a);
+  CHECK(a->modelMm == Approx(10.2));
+  CHECK(printfit::StlDeflectionMm(*doc->PrintProcess()) == Approx(0.01));
+  CHECK(printfit::Label(*doc->PrintProcess()) == "'K5 PLA on P1S' (fdm pla)");
+
+  // Saved and loaded, it carries the rows.
+  const auto path =
+      std::filesystem::temp_directory_path() /
+      ("designer_print_profile_" + std::to_string(::getpid()) + ".json");
+  REQUIRE(DocumentIO::Save(*doc, path.string()).has_value());
+  auto loaded = DocumentIO::Load(path.string());
+  REQUIRE(loaded.has_value());
+  REQUIRE((*loaded)->PrintProcess());
+  CHECK(*(*loaded)->PrintProcess() == *doc->PrintProcess());
+  std::filesystem::remove(path);
+
+  // Against the store: same, differs (the user re-measured), missing.
+  std::vector<printfit::Profile> store{k5};
+  CHECK(printfit::MatchProfile(store, *doc->PrintProcess()) ==
+        printfit::ProfileMatch::Same);
+  store[0].table.rows.back().allowanceMm = 0.3;
+  CHECK(printfit::MatchProfile(store, *doc->PrintProcess()) ==
+        printfit::ProfileMatch::Differs);
+  // ...and the part still reads ITS copy, not the store's.
+  a = printfit::ForBasic(*doc->PrintProcess(), printfit::Printed::Gap, 10.0,
+                         nullptr);
+  CHECK(a->modelMm == Approx(10.2));
+  store.clear();
+  CHECK(printfit::MatchProfile(store, *doc->PrintProcess()) ==
+        printfit::ProfileMatch::Missing);
+  CHECK(printfit::MatchProfile(store, kPetg) ==
+        printfit::ProfileMatch::Builtin);
+}
+
+TEST_CASE("Editing a profile's allowance rebuilds what was modelled from it",
+          "[tolerances][print][profile][hole]") {
+  auto doc = std::make_unique<Document>();
+  auto pad =
+      std::make_unique<SketchFeature>("Block", SketchPlane(PlaneType::XY));
+  pad->AddRectangle({-20, -20}, {20, 20});
+  doc->AddFeature(std::move(pad));
+  doc->AddFeature(std::make_unique<ExtrudeFeature>(
+      "Pad", doc->GetFeature(0)->GetId(), 20.0, ExtrudeMode::NewBody));
+  auto centre = std::make_unique<SketchFeature>(
+      "Centre",
+      SketchPlane(glm::vec3(0, 0, 20), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  centre->AddEntity(sketch::Point{{0, 0}, 1});
+  doc->AddFeature(std::move(centre));
+  const uint64_t at = doc->GetFeature(doc->FeatureCount() - 1)->GetId();
+  auto hole =
+      std::make_unique<HoleFeature>("Hole", at, HoleKind::Simple, 1.0, 12.0);
+  hole->fitThread = "M6";
+  hole->fitKind = "normal";
+  doc->AddFeature(std::move(hole));
+  REQUIRE(doc->Regenerate());
+  const auto holeOf = [&] {
+    return dynamic_cast<const HoleFeature*>(
+        doc->GetFeature(doc->FeatureCount() - 1));
+  };
+
+  printfit::Profile mine = K5();
+  CommandStack stack;
+  stack.Execute(
+      std::make_unique<SetPrintProcessCommand>(printfit::FromProfile(mine)),
+      *doc);
+  CHECK(holeOf()->diameter == Approx(6.6 + 0.2)); // the pla hole row
+  const std::string before = printfit::Fingerprint(*doc->PrintProcess());
+
+  // The same name, a different hole row: "use mine" after a coupon.
+  for (printfit::Row& r : mine.table.rows)
+    if (r.kind == printfit::Printed::Hole)
+      r.allowanceMm = 0.35;
+  stack.Execute(
+      std::make_unique<SetPrintProcessCommand>(printfit::FromProfile(mine)),
+      *doc);
+  INFO(holeOf()->GetError());
+  CHECK(holeOf()->diameter == Approx(6.95));
+  CHECK(doc->LastRegenStats().executed >= 1);
+  // The requirements hash folds the same fingerprint.
+  CHECK(printfit::Fingerprint(*doc->PrintProcess()) != before);
+  stack.Undo(*doc);
+  CHECK(holeOf()->diameter == Approx(6.8));
 }

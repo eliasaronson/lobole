@@ -7,6 +7,7 @@
 #include "ui/MotionActions.h"
 #include "ui/OpenJob.h"
 #include "ui/StepExport.h"
+#include "ui/StlExport.h"
 
 #include "cad/CADKernel.h"
 #include "common/Logger.h"
@@ -534,10 +535,21 @@ void ExportDialog(AppState& state) {
   if (std::filesystem::path(path).extension().empty())
     path += ".step";
   std::string error;
-  if (ExportActiveDocument(state, path, &error))
+  state.exportNoteUntil = 0.0; // an STL export words its own below
+  const bool ok = ExportActiveDocument(state, path, &error);
+  if (ok)
     LOG_INFO("Exported to {}", path);
   else
     LOG_ERROR("Export failed: {}", error);
+  // Said in the viewport, not only the log. An STL export has set its own
+  // note (with the chords it took); every other format says that it landed.
+  if (state.exportNoteUntil <= 0.0) {
+    state.exportNote =
+        ok ? "Exported " + std::filesystem::path(path).filename().string()
+           : "Export failed: " + error;
+    state.exportNoteFailed = !ok;
+    state.exportNoteUntil = ImGui::GetTime() + 6.0;
+  }
 }
 
 void ExportBomDialog(AppState& state) {
@@ -717,6 +729,23 @@ bool ExportActiveDocument(AppState& state, const std::string& path,
   if (!state.document)
     return fail("STL/BREP export needs a part tab; use STEP or glTF/OBJ/PLY "
                 "for an assembly");
+  // STL through the one helper export_stl uses: a printed part meshes at its
+  // print profile's chord deviation, so there is nothing to ask
+  // (docs/tolerances/README.md#exporting-a-printed-part). The GUI never
+  // passes a coarser one, so it never warns; it says what it did.
+  if (ext == ".stl") {
+    const std::string file = std::filesystem::path(path).filename().string();
+    const auto r = ExportPartStl(*state.document, path, -1, std::nullopt);
+    state.exportNoteUntil = ImGui::GetTime() + 6.0;
+    if (!r) {
+      state.exportNote = "Export failed: " + r.error();
+      state.exportNoteFailed = true;
+      return fail(r.error());
+    }
+    state.exportNote = "Exported " + file + " — " + StlExportSummary(*r);
+    state.exportNoteFailed = false;
+    return true;
+  }
   // Derived reference bodies are other parts' geometry: never exported.
   std::vector<Body> bodies;
   for (const Body& b : state.document->GetBodies())
@@ -727,10 +756,8 @@ bool ExportActiveDocument(AppState& state, const std::string& path,
   CADShape shape = bodies[0].shape;
   for (size_t i = 1; i < bodies.size(); i++)
     shape = shape.Union(bodies[i].shape);
-  auto& kernel = CADKernel::Instance();
-  const bool ok = ext == ".stl" ? kernel.SaveSTL(path, shape)
-                                : kernel.SaveBREP(path, shape);
-  return ok || fail("could not write " + path);
+  return CADKernel::Instance().SaveBREP(path, shape) ||
+         fail("could not write " + path);
 }
 
 void SaveProjectAction(AppState& state) {

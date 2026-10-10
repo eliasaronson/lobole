@@ -400,6 +400,7 @@ set(core_sources
     src/core/io/SerializeStudies.cpp
     src/core/io/SerializeDrawingProjections.cpp
     src/core/io/SerializeCam.cpp
+    src/core/io/SerializePrintProfiles.cpp
     src/core/io/SerializeConfigurations.cpp
     src/core/io/SerializeAssembly.cpp
     src/core/features/SketchFeature.cpp
@@ -816,6 +817,7 @@ set(app_sources
     src/ui/AssemblyActions.cpp
     src/ui/BodyAppearance.cpp
     src/ui/StepExport.cpp
+    src/ui/StlExport.cpp
     src/ui/Bom.cpp
     src/ui/MateActions.cpp
     src/ui/GizmoInput.cpp
@@ -828,6 +830,7 @@ set(app_sources
     src/ui/MotionVideo.cpp
     src/ui/JobActions.cpp
     src/ui/MachineActions.cpp
+    src/ui/PrintProfileActions.cpp
     src/ui/SimulationActions.cpp
     src/ui/FeatureEditor.cpp
     src/ui/ExprInput.cpp

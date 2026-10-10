@@ -38,6 +38,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/JobActions.h"
+#include "ui/PrintProfileActions.h"
 #include "ui/RendererSync.h"
 #include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h"
@@ -822,10 +823,51 @@ static constexpr MethodDoc InspectionMethods[] = {
      "shaft?{class,lower,upper,min,max,it_grade,it}, kind?, min_clearance?, "
      "max_clearance?, note?, intent?, intent_ok?, print?{hole?,shaft?}, "
      "print_notes?"},
+    {"list_print_profiles",
+     "Your print profiles, from ~/.config/lobole/print_profiles/*.json "
+     "(docs/tolerances/README.md#print-profiles): each a named copy of an "
+     "allowance table for one printer, filament and slicer preset — {name, "
+     "process, material, conditions, stl_deflection_mm (the chord deviation "
+     "a printed part's STL is exported at: the stated one, else a tenth of "
+     "the smallest gap a side), stl_deflection_stated, rows[]{kind, "
+     "from_mm, to_mm (absent = and up), allowance_mm, source}}. A printed "
+     "part names one (set_print_process {profile}) and EMBEDS a copy. "
+     "`defaults` are the built-in tables, read-only, that a new profile "
+     "starts from (get_print_process's `tables`).",
+     "", remote::NoFlags,
+     "profiles[]{name,process,material,conditions?,stl_deflection_mm,"
+     "stl_deflection_stated,rows[]{kind,from_mm,to_mm?,allowance_mm,"
+     "source?}}, defaults[]{process,material,conditions,rows[]}, dir"},
+    {"save_print_profile",
+     "Write a print profile to your store {profile: {name, process, "
+     "material, conditions?, stl_deflection_mm?, rows?: [{kind: hole|shaft|"
+     "internal_thread|external_thread|gap, from_mm?, to_mm? (absent = and "
+     "up), allowance_mm (signed, on the DIAMETER; a gap's is the whole "
+     "diametral clearance), source?}]}}, replacing one of that name; without "
+     "`rows` it starts as the built-in table of its process and material, "
+     "the defaults to correct. Or {from_part: true, part?} saves the part's "
+     "embedded copy (\"Save as mine\"). Refused: no name, an unknown "
+     "process/material or kind (naming the accepted ones), a size range "
+     "empty, overlapping or out of order within its kind, an allowance of "
+     "the wrong sign for its kind (a hole/internal thread not negative, a "
+     "gap positive, a shaft/external thread not positive), or a name that "
+     "would share a file with another. Open parts keep their copy; "
+     "get_print_process then reports `match: differs`.",
+     "from_part, part, profile", remote::NotInBatch,
+     "name, process, material, conditions?, stl_deflection_mm, "
+     "stl_deflection_stated, rows[]"},
+    {"delete_print_profile",
+     "Remove a print profile from your store {name}. A part printed with it "
+     "keeps its copy and reports `match: missing`.",
+     "name", remote::NotInBatch},
     {"set_print_process",
      "Declare how this PART is printed: {process, material} — `fdm` with "
-     "`petg` is what the table carries — or {clear: true} for a part that is "
-     "not printed. It lives on the part because a part is made one way, "
+     "`petg` or `pla`, the built-in tables, the defaults — or {profile}, one "
+     "of YOUR print profiles (list_print_profiles), whose copy the part "
+     "embeds and reads from then on — or {clear: true} for a part that is "
+     "not printed. Picking the same profile again after it changed in the "
+     "store replaces the copy (\"use mine\"). It lives on the part because "
+     "a part is made one way, "
      "whichever machine or tab opens it. The one geometry it drives is a "
      "Hole's clearance fit, modelled at the fit's size plus the hole "
      "allowance (M6 normal in PETG: Ø6.8 to print Ø6.6), so those holes "
@@ -837,8 +879,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "answer lists every Thread on the part with what it should be modelled "
      "at. `part` (name, stable id or slot index) sets it on any part, not "
      "only the active one, in that part's undo history.",
-     "clear, material, part, process", remote::NoFlags,
-     "print{process,material}, threads[]{feature_id,name,designation,"
+     "clear, material, part, process, profile", remote::NoFlags,
+     "print{process,material,profile?,match?,conditions?,rows?,"
+     "stl_deflection_mm}, threads[]{feature_id,name,designation,"
      "side,modeled,known,pitch,allowance_mm,modelled_major,prints_major,"
      "want_major?,model_major?,model_face?,notes,sentence,confirm}"},
     {"get_print_process",
@@ -848,10 +891,16 @@ static constexpr MethodDoc InspectionMethods[] = {
      "(model = basic + allowance), the size range each row covers, the "
      "conditions it assumes and where each number comes from. Every number "
      "is community practice and CAD-tool defaults, to be confirmed with a "
-     "test coupon (generators/print_coupon.py). A printed part also lists "
-     "its Threads with what to model for each.",
+     "test coupon (generators/print_coupon.py) and kept in a print profile. "
+     "A part printed with a profile reports its name, the rows of its "
+     "embedded copy and `match` against your store: same, differs (your "
+     "profile of that name says something else: set_print_process {profile} "
+     "uses yours, save_print_profile {from_part} keeps the part's) or "
+     "missing. `stl_deflection_mm` is what export_stl meshes it at. A "
+     "printed part also lists its Threads with what to model for each.",
      "part", remote::Deferrable,
-     "print{process,material}, tables[]{process,material,conditions,"
+     "print{process,material,profile?,match?,conditions?,rows?,"
+     "stl_deflection_mm}, tables[]{process,material,conditions,"
      "repeatability_mm,repeatability_source,min_reliable_thread_mm,rows[]{"
      "kind,from_mm,to_mm,allowance_mm,source}}, confirm, threads?[]"},
     {"print_allowance",
@@ -861,16 +910,19 @@ static constexpr MethodDoc InspectionMethods[] = {
      "major. A `gap` is two surfaces printed together that must come apart "
      "(print-in-place): size_mm is the inner one's diameter, model_mm the "
      "outer's, and allowance_mm the whole diametral clearance. "
-     "The process is the part's (set_print_process) or {process, material} "
-     "given here. Answers the signed `allowance_mm` on the diameter, "
-     "`model_mm`, the row's source, and what the STL export takes off a "
-     "round surface at `stl_deflection_mm` (export_stl's own default when "
-     "omitted). Drives no geometry: a generator applies it where it models "
-     "the part. Refused: an unknown kind, process or material, naming what "
-     "is accepted.",
-     "designation, kind, material, part, process, size_mm, stl_deflection_mm",
+     "The process is the part's (set_print_process), {process, material} "
+     "given here, or {profile}, one of yours. Answers the signed "
+     "`allowance_mm` on the diameter, `model_mm`, the row's source, and what "
+     "the STL export takes off a round surface at `stl_deflection_mm` (when "
+     "omitted, the one export_stl meshes this print at). Drives no "
+     "geometry: a generator applies it where it models the part. Refused: "
+     "an unknown kind, process, material or profile, naming what is "
+     "accepted.",
+     "designation, kind, material, part, process, profile, size_mm, "
+     "stl_deflection_mm",
      remote::Deferrable,
-     "process, material, kind, basic_mm, allowance_mm, model_mm, source, "
+     "profile?, process, material, kind, basic_mm, allowance_mm, model_mm, "
+     "source, "
      "confirm, stl_deflection_mm, stl_chord_loss_mm, stl_note, designation?, "
      "pitch?, note?"},
     {"set_tolerance",
@@ -1329,10 +1381,89 @@ json PrintTablesJson() {
   return tables;
 }
 
-json ProcessJson(const std::optional<printfit::Process>& p) {
+// A print process on the wire: the pair, and with a profile its name, the
+// embedded copy's rows and how it stands against the store.
+json ProcessJson(const ui::AppState& state,
+                 const std::optional<printfit::Process>& p) {
   if (!p)
     return nullptr;
-  return {{"process", p->process}, {"material", p->material}};
+  json j{{"process", p->process}, {"material", p->material}};
+  if (p->profile) {
+    j["profile"] = p->profile->name;
+    j["match"] = printfit::ProfileMatchName(
+        printfit::MatchProfile(state.printProfiles, *p));
+    if (!p->profile->table.conditions.empty())
+      j["conditions"] = p->profile->table.conditions;
+    json rows = json::array();
+    for (const printfit::Row& r : p->profile->table.rows)
+      rows.push_back(DocumentIO::PrintRowToJson(r));
+    j["rows"] = std::move(rows);
+  }
+  j["stl_deflection_mm"] = printfit::StlDeflectionMm(*p);
+  return j;
+}
+
+// The note a report adds when a part's profile is not the store's: the
+// answer came from the part's own copy, and the user's says otherwise (or
+// is not there).
+std::string ProfileMatchNote(const ui::AppState& state,
+                             const printfit::Process& p) {
+  switch (printfit::MatchProfile(state.printProfiles, p)) {
+  case printfit::ProfileMatch::Differs:
+    return "modelled with a different '" + p.profile->name +
+           "' than yours: answered from the part's copy (set_print_process "
+           "{profile} uses yours)";
+  case printfit::ProfileMatch::Missing:
+    return "'" + p.profile->name +
+           "' is not one of your print profiles: answered from the part's "
+           "copy (save_print_profile {from_part: true} keeps it)";
+  case printfit::ProfileMatch::Builtin:
+  case printfit::ProfileMatch::Same:
+    break;
+  }
+  return {};
+}
+
+// {process, material} -- a built-in table -- or {profile}, one of the
+// user's: the one parser set_print_process, print_allowance and check_fit
+// share. Refused, naming what is accepted; never substituted.
+template <class Params>
+printfit::Process ProcessFromParams(const ui::AppState& state, const Params& p,
+                                    const std::string& method) {
+  if (p.contains("profile")) {
+    if (p.contains("process") || p.contains("material"))
+      throw std::runtime_error(
+          method + ": `profile` or {process, material}, not both — a "
+                   "profile already says its process and material");
+    const std::string name = p.at("profile").template get<std::string>();
+    const printfit::Profile* mine =
+        printfit::FindProfile(state.printProfiles, name);
+    if (mine == nullptr) {
+      std::string known;
+      for (const printfit::Profile& pr : state.printProfiles)
+        known += (known.empty() ? "" : ", ") + pr.name;
+      throw std::runtime_error(
+          method + ": no print profile called '" + name + "'. " +
+          (known.empty() ? std::string("You have none yet: "
+                                       "save_print_profile makes one")
+                         : "Yours: " + known));
+    }
+    return printfit::FromProfile(*mine);
+  }
+  printfit::Process proc{p.at("process").template get<std::string>(),
+                         p.at("material").template get<std::string>(),
+                         std::nullopt};
+  if (const std::string why = printfit::Validate(proc); !why.empty())
+    throw std::runtime_error(method + ": " + why);
+  return proc;
+}
+
+json PrintProfileWire(const ui::AppState& state, const printfit::Profile& pr) {
+  json j = DocumentIO::PrintProfileToJson(pr);
+  j["stl_deflection_mm"] = printfit::StlDeflectionMm(printfit::FromProfile(pr));
+  j["stl_deflection_stated"] = pr.stlDeflectionMm > 0.0;
+  (void)state;
+  return j;
 }
 
 // Every thread a printed part carries, reported.
@@ -3011,6 +3142,79 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
     return out;
   }
+  if (m == "list_print_profiles") {
+    json out = json::array();
+    for (const printfit::Profile& pr : state.printProfiles)
+      out.push_back(PrintProfileWire(state, pr));
+    // The built-in tables beside them: the defaults a profile starts from.
+    return json{{"profiles", std::move(out)},
+                {"defaults", PrintTablesJson()},
+                {"dir", ui::PrintProfileDir()}};
+  }
+  if (m == "save_print_profile") {
+    // The user's own table (docs/tolerances/README.md#print-profiles):
+    // written to the store, never to a document. Every check is made before
+    // the file is written, so a refusal changes nothing.
+    const bool fromPart = p.value("from_part", false);
+    if (fromPart == p.contains("profile"))
+      throw std::runtime_error(
+          "save_print_profile: `profile` {name, process, material, "
+          "conditions?, stl_deflection_mm?, rows?} or `from_part: true` (the "
+          "part's embedded copy), one of the two");
+    if (!fromPart && p.contains("part"))
+      throw std::runtime_error(
+          "save_print_profile: `part` says whose copy `from_part` saves");
+    printfit::Profile pr;
+    if (fromPart) {
+      const Document& part = p.contains("part")
+                                 ? *ResolvePartParam(state, p.at("part"))
+                                 : RequirePartDoc(doc, "save_print_profile");
+      if (!part.PrintProcess() || !part.PrintProcess()->profile)
+        throw std::runtime_error(
+            "save_print_profile: this part is printed with no profile (" +
+            std::string(part.PrintProcess() ? "the built-in table"
+                                            : "not printed at all") +
+            ") — there is no copy to save; pass `profile`");
+      pr = *part.PrintProcess()->profile;
+    } else {
+      json pj = p.at("profile");
+      if (!pj.is_object())
+        throw std::runtime_error("save_print_profile: `profile` is an object");
+      // No rows: the built-in table of its pair, the defaults to correct.
+      if (!pj.contains("rows")) {
+        const printfit::Table* base =
+            printfit::FindBuiltin(pj.value("process", std::string()),
+                                  pj.value("material", std::string()));
+        if (base != nullptr) {
+          json rows = json::array();
+          for (const printfit::Row& r : base->rows)
+            rows.push_back(DocumentIO::PrintRowToJson(r));
+          pj["rows"] = std::move(rows);
+          if (!pj.contains("conditions"))
+            pj["conditions"] = base->conditions;
+        }
+      }
+      try {
+        pr = DocumentIO::PrintProfileFromJson(pj);
+      } catch (const std::exception& e) {
+        throw std::runtime_error(std::string("save_print_profile: ") +
+                                 e.what());
+      }
+    }
+    std::string error;
+    if (!ui::SavePrintProfile(state, pr, &error))
+      throw std::runtime_error("save_print_profile: " + error);
+    // Open parts are not changed: a part keeps the copy it was modelled
+    // with, and get_print_process says when it now differs.
+    return PrintProfileWire(state, pr);
+  }
+  if (m == "delete_print_profile") {
+    std::string error;
+    const std::string name = p.at("name").get<std::string>();
+    if (!ui::DeletePrintProfile(state, name, &error))
+      throw std::runtime_error("delete_print_profile: " + error);
+    return json{{"deleted", name}};
+  }
   if (m == "set_print_process") {
     // How the part is printed (docs/tolerances/README.md#printed-parts).
     // Drives no geometry, so it rebuilds nothing; it is what the fit checks
@@ -3018,39 +3222,39 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     Document& part = PartToEdit(state, doc, p, "set_print_process");
     std::optional<printfit::Process> next;
     if (p.value("clear", false)) {
-      if (p.contains("process") || p.contains("material"))
-        throw std::runtime_error(
-            "set_print_process: `clear` or a {process, material}, not both");
+      if (p.contains("process") || p.contains("material") ||
+          p.contains("profile"))
+        throw std::runtime_error("set_print_process: `clear` or a {process, "
+                                 "material} or a {profile}, not both");
     } else {
-      if (!p.contains("process") || !p.contains("material"))
+      if (!p.contains("profile") &&
+          (!p.contains("process") || !p.contains("material")))
         throw std::runtime_error(
             "set_print_process needs both `process` and `material` (e.g. "
             "fdm, petg) — an allowance is a property of the pair, and half "
-            "of one would be guessed. Or `clear: true` for a part that is not "
+            "of one would be guessed — or `profile`, one of yours "
+            "(list_print_profiles). Or `clear: true` for a part that is not "
             "printed. get_print_process lists what is carried.");
-      next = printfit::Process{p.at("process").get<std::string>(),
-                               p.at("material").get<std::string>()};
-      if (const std::string why = printfit::Validate(*next); !why.empty())
-        throw std::runtime_error("set_print_process: " + why);
+      next = ProcessFromParams(state, p, "set_print_process");
+      // rpc-params: material, process, profile
     }
     // The same process again is no edit: no undo step, and no version
     // moved under a study solved on this part (a generator that re-declares
-    // its print before reading a result read it stale).
+    // its print before reading a result read it stale). The same profile
+    // with different rows IS an edit: it is how "use mine" is done.
     const auto& have = part.PrintProcess();
-    const bool same = have.has_value() == next.has_value() &&
-                      (!have || (have->process == next->process &&
-                                 have->material == next->material));
+    const bool same = have == next;
     if (!same)
       CommandsFor(state, part)
           .Execute(std::make_unique<SetPrintProcessCommand>(next), part);
-    return json{{"print", ProcessJson(part.PrintProcess())},
+    return json{{"print", ProcessJson(state, part.PrintProcess())},
                 {"threads", PrintedThreadsJson(part)}};
   }
   if (m == "get_print_process") {
     const Document& part = p.contains("part")
                                ? *ResolvePartParam(state, p.at("part"))
                                : RequirePartDoc(doc, "get_print_process");
-    json out{{"print", ProcessJson(part.PrintProcess())},
+    json out{{"print", ProcessJson(state, part.PrintProcess())},
              {"tables", PrintTablesJson()},
              {"confirm", printfit::ConfirmNote()}};
     if (part.PrintProcess())
@@ -3061,14 +3265,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // One printed diameter: what to MODEL for it. The process is the part's,
     // or stated here ({process, material}) to ask before there is a part.
     std::optional<printfit::Process> proc;
-    if (p.contains("process") || p.contains("material")) {
-      if (!p.contains("process") || !p.contains("material"))
+    if (p.contains("process") || p.contains("material") ||
+        p.contains("profile")) {
+      if (!p.contains("profile") &&
+          (!p.contains("process") || !p.contains("material")))
         throw std::runtime_error(
             "print_allowance: `process` and `material` come as a pair");
-      proc = printfit::Process{p.at("process").get<std::string>(),
-                               p.at("material").get<std::string>()};
-      if (const std::string why = printfit::Validate(*proc); !why.empty())
-        throw std::runtime_error("print_allowance: " + why);
+      proc = ProcessFromParams(state, p, "print_allowance");
+      // rpc-params: material, process, profile
     } else {
       const Document& part = p.contains("part")
                                  ? *ResolvePartParam(state, p.at("part"))
@@ -3077,7 +3281,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (!proc)
         throw std::runtime_error(
             "print_allowance: this part declares no print process — "
-            "set_print_process {process, material} on it, or pass them here");
+            "set_print_process {process, material} or {profile} on it, or "
+            "pass them here");
     }
     if (!p.contains("kind"))
       throw std::runtime_error("print_allowance: `kind` is one of " +
@@ -3124,7 +3329,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const auto a = printfit::ForBasic(*proc, *kind, basic, &why);
     if (!a)
       throw std::runtime_error("print_allowance: " + why);
-    const double deflection = p.value("stl_deflection_mm", 0.1);
+    // What export_stl would mesh this print at, unless asked about another.
+    const double printed = printfit::StlDeflectionMm(*proc);
+    const double deflection =
+        p.value("stl_deflection_mm", printed > 0.0 ? printed : 0.1);
+    if (proc->profile)
+      out["profile"] = proc->profile->name;
     out.update(json{{"process", proc->process},
                     {"material", proc->material},
                     {"kind", kindName},
@@ -3206,28 +3416,32 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       std::optional<printfit::Process> declared;
       if (s.contains("print")) {
         const json& pj = s.at("print");
-        if (!pj.is_object() || !pj.contains("process") ||
-            !pj.contains("material"))
+        if (!pj.is_object() ||
+            !(pj.contains("profile") ||
+              (pj.contains("process") && pj.contains("material"))))
           throw std::runtime_error(
               std::string("check_fit: ") + which +
               ".print is {process, material}, e.g. {process: \"fdm\", "
-              "material: \"petg\"}");
-        declared = printfit::Process{pj.at("process").get<std::string>(),
-                                     pj.at("material").get<std::string>()};
-        if (const std::string why = printfit::Validate(*declared); !why.empty())
-          throw std::runtime_error("check_fit: " + why);
+              "material: \"petg\"}, or {profile: \"<one of yours>\"}");
+        declared = ProcessFromParams(state, pj, "check_fit");
       }
       std::optional<printfit::Process> part;
       if (measuredIn != nullptr)
         part = measuredIn->PrintProcess();
-      if (declared && part && !(*declared == *part))
+      if (declared && part &&
+          printfit::Label(*declared) != printfit::Label(*part) &&
+          !(declared->profile == std::nullopt &&
+            declared->process == part->process &&
+            declared->material == part->material))
         throw std::runtime_error(
             std::string("check_fit: ") + which + ".print says " +
-            declared->process + " " + declared->material +
-            " but the part it is measured on is printed in " + part->process +
-            " " + part->material +
+            printfit::Label(*declared) +
+            " but the part it is measured on is printed in " +
+            printfit::Label(*part) +
             " (set_print_process) — a face is printed one way");
-      return declared ? declared : part;
+      // The face's own part, when there is one: it carries the copy the
+      // face was modelled with.
+      return part ? part : declared;
     };
 
     if (!p.contains("hole"))
@@ -3366,6 +3580,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                    why);
         print[key] = PrintedDiameterJson(*d, cls);
         sentences.push_back(d->Sentence(cls));
+        // A part printed with a profile that is not the store's says so:
+        // the answer is from the part's own copy
+        // (docs/tolerances/README.md#print-profiles).
+        if (const std::string note = ProfileMatchNote(state, *pr);
+            !note.empty())
+          sentences.push_back(note);
       };
       printedSide(holeProc, true, holeCls, holeMeasured, "hole");
       if (hasShaft)

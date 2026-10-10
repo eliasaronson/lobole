@@ -103,11 +103,17 @@ if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
   # (docs/cam/setup.md#machine-profiles), arriving from the other side. Copied, so
   # an agent editing a machine here cannot touch the shop's.
   #
-  # settings.json and machines/ only, explicitly. `cp -r` of the whole
-  # directory would take anything else kept there with it, and a scratch dir
-  # under /tmp is not where credentials belong.
+  # The print profile store likewise
+  # (docs/tolerances/README.md#print-profiles): a printed part names its
+  # profile, and a preview without the store reports every one `missing`.
+  #
+  # settings.json, machines/ and print_profiles/ only, explicitly. `cp -r` of
+  # the whole directory would take anything else kept there with it, and a
+  # scratch dir under /tmp is not where credentials belong.
   [ -d "$REAL_DIR/machines" ] &&
     cp -r "$REAL_DIR/machines" "$DESIGNER_PREVIEW_CONFIG/lobole/"
+  [ -d "$REAL_DIR/print_profiles" ] &&
+    cp -r "$REAL_DIR/print_profiles" "$DESIGNER_PREVIEW_CONFIG/lobole/"
 fi
 export XDG_CONFIG_HOME="$DESIGNER_PREVIEW_CONFIG"
 
