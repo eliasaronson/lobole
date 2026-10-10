@@ -10,6 +10,7 @@
 
 #include <span>
 #include <string>
+#include <string_view>
 #include <variant>
 #include <vector>
 
@@ -93,7 +94,9 @@ using Member =
 
 struct Field {
   const char* key;     // JSON key, and the window's "###id"
-  const char* section; // window grouping
+  // The Preferences category the row is drawn on: each distinct string is
+  // one page, in the order it first appears here (docs/ui/settings.md).
+  const char* section;
   const char* label;
   const char* blurb; // the muted line under the control
   Tier tier;
@@ -114,6 +117,12 @@ struct Field {
 };
 
 std::span<const Field> Fields();
+
+// Puts the rows of one section back to their defaults and leaves the rest --
+// the other sections, the keymap, the window and the unknown keys -- as they
+// are (Preferences' "Reset <category> to defaults").
+void ResetSection(Settings& s, std::string_view section,
+                  std::span<const Field> fields = Fields());
 
 // `$XDG_CONFIG_HOME/lobole` (falling back to `~/.config/lobole`) and the
 // settings file inside it; `%LOCALAPPDATA%\Lobole\config` on Windows, which

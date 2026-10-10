@@ -570,9 +570,12 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     IM_CHECK(s_App->settingsWindowOpen);
 
-    // Shadows are on by default and the renderer agrees.
+    // Shadows are on by default and the renderer agrees. They are on the
+    // Performance page: one page shows at a time.
     IM_CHECK(s_App->settings.shadows);
     IM_CHECK(s_App->showShadows);
+    ctx->ItemClick("//###SettingsWindow/###cat_Performance");
+    ctx->Yield();
 
     ctx->ItemClick("//###SettingsWindow/###set_shadows");
     ctx->Yield(2);
@@ -592,6 +595,8 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     // (docs/rendering/README.md#the-light-rig).
     IM_CHECK(!s_App->settings.lockLightsToModel);
     IM_CHECK(!s_App->lightsLockedToModel);
+    ctx->ItemClick("//###SettingsWindow/###cat_Appearance");
+    ctx->Yield();
     ctx->ItemClick("//###SettingsWindow/###set_lock_lights_to_model");
     ctx->Yield(2);
     IM_CHECK(s_App->settings.lockLightsToModel);
@@ -610,6 +615,8 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
 
     // An enum row is a combo, and its id is stable.
+    ctx->ItemClick("//###SettingsWindow/###cat_Performance");
+    ctx->Yield();
     ctx->ItemClick("//###SettingsWindow/###set_ssao");
     ctx->ItemClick("//$FOCUSED/full");
     ctx->Yield(2);
@@ -646,7 +653,119 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     }
     IM_CHECK(sawGpuRow);
     IM_CHECK(saidRestart);
+    ui::OpenPreferences(*s_App, "Performance");
+    ctx->Yield(2);
     IM_CHECK(ctx->ItemExists("//###SettingsWindow/###set_gpu_device"));
+  };
+
+  // Preferences shows one page at a time (docs/ui/settings.md#the-window):
+  // each category's rows and nothing else, and no page wider than the
+  // window, at 100 % and at the largest font -- nothing scrolls sideways.
+  t = IM_REGISTER_TEST(engine, "settings", "each_page_shows_its_own_rows");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    s_App->settingsWindowOpen = true;
+    ctx->Yield(2);
+    const auto categories = ui::PreferenceCategories();
+    const auto noSideways = [&](const std::string& page) {
+      ImGuiWindow* root =
+          ctx->GetWindowByRef(ctx->GetID("//###SettingsWindow"));
+      IM_CHECK_RETV(root != nullptr, false);
+      for (ImGuiWindow* w : ctx->UiContext->Windows)
+        if (w->RootWindow == root && w->Active) {
+          ctx->LogInfo("%s: '%s' scroll max x %.1f", page.c_str(), w->Name,
+                       w->ScrollMax.x);
+          IM_CHECK_RETV(w->ScrollMax.x <= 0.5f, false);
+        }
+      return true;
+    };
+    for (float scale : {1.0f, 1.5f}) {
+      s_App->settings.uiFontScale = scale;
+      ui::MarkSettingsChanged(*s_App);
+      ctx->Yield(4);
+      // The window resizes to the font on its next appearing.
+      s_App->settingsWindowOpen = false;
+      ctx->Yield(2);
+      s_App->settingsWindowOpen = true;
+      ctx->Yield(3);
+      for (const ui::PreferenceCategory& c : categories) {
+        ctx->ItemClick(("//###SettingsWindow/###cat_" + c.name).c_str());
+        ctx->Yield(2);
+        IM_CHECK_EQ(s_App->settingsCategory, c.name);
+        for (const settings::Field& f : settings::Fields()) {
+          const bool mine = c.name == f.section;
+          const std::string row =
+              std::string("//###SettingsWindow/###set_") + f.key;
+          IM_CHECK_EQ(ctx->ItemExists(row.c_str()), mine);
+        }
+        if (c.name == "Keyboard")
+          IM_CHECK(ctx->ItemExists("//###SettingsWindow/###key_filter"));
+        if (c.name == "Machines")
+          IM_CHECK(ctx->ItemExists("//###SettingsWindow/###mach_new"));
+        // A table page resets alone; a library has no reset.
+        IM_CHECK_EQ(
+            ctx->ItemExists("//###SettingsWindow/###set_reset_category"),
+            !c.rows.empty());
+        IM_CHECK(noSideways(c.name));
+      }
+    }
+    s_App->settings.uiFontScale = 1.0f;
+    ui::MarkSettingsChanged(*s_App);
+    ctx->Yield(3);
+  };
+
+  // The search field finds rows by label and blurb across every page, each
+  // under its page's name, and the row found is the real control.
+  t = IM_REGISTER_TEST(engine, "settings", "search_finds_rows_on_any_page");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ui::OpenPreferences(*s_App, "Appearance");
+    ctx->Yield(2);
+    ctx->SetRef("//###SettingsWindow");
+    ctx->ItemInputValue("###set_search", "shadow");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->settingsSearch, std::string("shadow"));
+    IM_CHECK(ctx->ItemExists("###set_shadows"));
+    IM_CHECK(ctx->ItemExists("###set_shadow_map"));
+    IM_CHECK(!ctx->ItemExists("###set_ui_font_scale"));
+    IM_CHECK(!ctx->ItemExists("###set_autosave_interval"));
+    // The row is live: a click here is the preference.
+    IM_CHECK(s_App->settings.shadows);
+    ctx->ItemClick("###set_shadows");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->settings.shadows);
+    IM_CHECK(!s_App->showShadows);
+    // A page's name finds the page, and choosing it ends the search.
+    ctx->ItemInputValue("###set_search", "keyb");
+    ctx->Yield(2);
+    ctx->ItemClick("###find_page_Keyboard");
+    ctx->Yield(2);
+    IM_CHECK(s_App->settingsSearch.empty());
+    IM_CHECK_EQ(s_App->settingsCategory, std::string("Keyboard"));
+    ctx->ItemInputValue("###set_search", "no such preference");
+    ctx->Yield(2);
+    IM_CHECK(!ctx->ItemExists("###set_shadows"));
+    s_App->settingsSearch.clear();
+    s_App->settingsWindowOpen = false;
+  };
+
+  // Reset <category> puts that page back and leaves the others.
+  t = IM_REGISTER_TEST(engine, "settings", "a_page_resets_alone");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    s_App->settings.ssao = "full";
+    s_App->settings.shadows = false;
+    s_App->settings.lockLightsToModel = true; // Appearance
+    s_App->settings.autosaveInterval = 120.0; // General
+    ui::MarkSettingsChanged(*s_App);
+    ui::OpenPreferences(*s_App, "Performance");
+    ctx->Yield(2);
+    ctx->ItemClick("//###SettingsWindow/###set_reset_category");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->settings.ssao, std::string("half"));
+    IM_CHECK(s_App->settings.shadows);
+    IM_CHECK(s_App->showShadows); // applied, not only stored
+    IM_CHECK(s_App->settings.lockLightsToModel);
+    IM_CHECK(s_App->lightsLockedToModel);
+    IM_CHECK_EQ(s_App->settings.autosaveInterval, 120.0);
+    s_App->settingsWindowOpen = false;
   };
 
   // Idle throttle (docs/rendering/frame-pacing.md#idle-throttle). Three

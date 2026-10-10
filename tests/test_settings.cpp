@@ -5,6 +5,7 @@
 
 #include "common/DevicePreference.h"
 #include "core/io/Settings.h"
+#include "ui/SettingsWindow.h" // the Preferences page registry
 
 #include <nlohmann/json.hpp>
 
@@ -256,11 +257,11 @@ TEST_CASE("Device preference: a name wins, but never over eligibility",
   CHECK(devicepref::Choose({}, {}, "nvidia") == -1);
 }
 
-// The Preferences window draws one collapsing header per section. This table's
-// ORDER is what groups the rows under it, so a section split across two runs
-// drew that header TWICE — two widgets sharing one "###sec_<name>" id, which
-// is an ImGui id collision (the pair then fight over the open/closed state)
-// and splits the section on screen for no reason.
+// The Preferences window once drew one collapsing header per section, and
+// this table's ORDER grouped the rows under it, so a section split across two
+// runs drew that header TWICE — two widgets sharing one "###sec_<name>" id,
+// an ImGui id collision — and split the section on screen for no reason.
+// Sections are pages now (ui::PreferenceCategories).
 //
 // That shipped: the two Sharing rows landed between the Performance rows in
 // c7e50ff, and Preferences showed Performance twice until 2026-08-24. The
@@ -280,4 +281,82 @@ TEST_CASE("the settings table groups its sections", "[settings]") {
                         "— move its rows together");
     CHECK(seen.insert(section).second);
   }
+}
+
+// Preferences shows one page per category (docs/ui/settings.md#the-window):
+// every table row on exactly one page, no page empty, and no hand-written
+// page sharing a name with a section, which would put two rows in the list
+// under one "###cat_<name>" id.
+TEST_CASE("every preference is on exactly one page", "[settings]") {
+  const auto categories = ui::PreferenceCategories();
+  std::set<std::string> names;
+  for (const ui::PreferenceCategory& c : categories) {
+    INFO("page '" << c.name << "'");
+    CHECK(names.insert(c.name).second);
+    CHECK(c.icon != nullptr);
+  }
+  for (const settings::Field& f : settings::Fields()) {
+    int pages = 0;
+    for (const ui::PreferenceCategory& c : categories)
+      for (const settings::Field* row : c.rows)
+        if (row == &f) {
+          pages++;
+          CHECK(c.name == f.section);
+        }
+    INFO("row '" << f.key << "'");
+    CHECK(pages == 1);
+  }
+  // A table page has rows; a page without rows is one of the hand-written
+  // ones, which draw themselves.
+  for (const char* hand : {"Keyboard", "Machines"})
+    CHECK(names.count(hand) == 1);
+  for (const ui::PreferenceCategory& c : categories)
+    if (c.rows.empty()) {
+      INFO("page '" << c.name << "' has no rows and is not hand-written");
+      CHECK((c.name == "Keyboard" || c.name == "Machines"));
+    }
+  // Machines is a library: search finds its items by name.
+  for (const ui::PreferenceCategory& c : categories)
+    if (c.name == "Machines")
+      CHECK(c.library);
+}
+
+// A row with a section nobody has used yet is a new page, in table order and
+// before the hand-written ones, without a change to the window.
+TEST_CASE("a new section is a new preferences page", "[settings]") {
+  const settings::Field fixture[] = {
+      {"a", "Appearance", "A", "", settings::Tier::Live,
+       &settings::Settings::shadows},
+      {"b", "Plotting", "B", "", settings::Tier::Live,
+       &settings::Settings::idleThrottle},
+      {"c", "Appearance", "C", "", settings::Tier::Live,
+       &settings::Settings::terminalPanel},
+  };
+  const auto categories = ui::PreferenceCategories(fixture);
+  REQUIRE(categories.size() >= 2);
+  CHECK(categories[0].name == "Appearance");
+  CHECK(categories[0].rows.size() == 2); // split rows, still one page
+  CHECK(categories[1].name == "Plotting");
+  REQUIRE(categories[1].rows.size() == 1);
+  CHECK(std::string(categories[1].rows[0]->key) == "b");
+  CHECK(categories[1].icon != nullptr); // a generic glyph, not none
+  CHECK(categories[2].name == "Keyboard");
+}
+
+// Reset <category> puts that page's rows back and nothing else.
+TEST_CASE("a section resets alone", "[settings]") {
+  settings::Settings s;
+  s.shadows = false;         // Performance
+  s.ssao = "full";           // Performance
+  s.uiFontScale = 1.4f;      // Appearance
+  s.gitUserName = "someone"; // Sharing
+  REQUIRE(s.keys.Set("view.fit", "F9"));
+  s.unknown.emplace_back("future_key", "1");
+  settings::ResetSection(s, "Performance");
+  CHECK(s.shadows);
+  CHECK(s.ssao == "half");
+  CHECK(s.uiFontScale == 1.4f);
+  CHECK(s.gitUserName == "someone");
+  CHECK(!s.keys.IsDefault("view.fit")); // the keymap is not a section
+  CHECK(s.unknown.size() == 1);
 }

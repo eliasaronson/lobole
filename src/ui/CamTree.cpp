@@ -19,6 +19,7 @@
 
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
+#include "ui/SettingsWindow.h" // OpenPreferences
 #include "ui/Widgets.h"
 
 #ifdef HAVE_CAM
@@ -501,7 +502,7 @@ void DrawSetupStep(AppState& state) {
                        "follows.");
     ImGui::PopStyleColor();
     if (ImGui::SmallButton("Preferences › Machines###cam_new_machine_prefs"))
-      state.settingsWindowOpen = true;
+      OpenPreferences(state, "Machines");
   } else {
     ImGui::SetNextItemWidth(160.0f);
     if (ImGui::BeginCombo("###cam_new_machine", ns.machine.c_str())) {
@@ -1566,7 +1567,7 @@ bool DrawCamSetupEditor(AppState& state) {
       ImGui::TextDisabled("No machine: define one in");
       ImGui::SameLine();
       if (ImGui::SmallButton("Preferences › Machines###cam_machine_prefs"))
-        state.settingsWindowOpen = true;
+        OpenPreferences(state, "Machines");
     } else {
       ImGui::TextDisabled("No machine chosen — the job's own settings");
     }

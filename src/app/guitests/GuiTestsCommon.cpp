@@ -85,11 +85,19 @@ void ResetAppForTest() {
   // config decides whether a test passes and CI disagrees with the desk. The
   // app already skips loading them under --gui-tests; this covers a test that
   // changed one.
+  // A test that changed the font size and failed before putting it back
+  // would leave the atlas at that size for the rest of the shard.
+  const bool fontChanged =
+      s_App->uiFontScale != settings::Settings{}.uiFontScale;
   s_App->settings = settings::Settings{};
   s_App->settingsSaved = s_App->settings;
   s_App->settingsDirtyAt = -1.0;
   s_App->settingsWindowOpen = false;
+  s_App->settingsCategory.clear();
+  s_App->settingsSearch.clear();
   ui::ApplySettings(*s_App);
+  if (fontChanged)
+    s_App->fontRebuildRequested = true;
   s_App->selection.Clear();
   s_App->sketchEdit = {};
   s_App->sketchDrag = {};

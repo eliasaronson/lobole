@@ -62,11 +62,10 @@ constexpr std::array<float, 4> kFontScales{0.85f, 1.0f, 1.2f, 1.4f};
 constexpr std::array<float, 2> kShadowMaps{1024.0f, 2048.0f};
 constexpr std::array<const char* const, 3> kSsao{"off", "half", "full"};
 
-// Rows are grouped by section, and the grouping is load-bearing: the
-// Preferences window draws one collapsing header per section, and a section
-// split across two runs of this table used to draw TWO headers sharing one
-// "###sec_<name>" id — an ImGui id collision, with the pair fighting over the
-// open/closed state. `the settings table groups its sections` holds it.
+// Rows are grouped by section. Each section is one Preferences category, in
+// the order it first appears here; the window no longer depends on the rows
+// being together, but the table should read the way it draws, and `the
+// settings table groups its sections` holds it.
 const Field kFields[] = {
     {"ui_font_scale",
      "Appearance",
@@ -308,6 +307,14 @@ bool Settings::operator==(const Settings& other) const {
 }
 
 std::span<const Field> Fields() { return kFields; }
+
+void ResetSection(Settings& s, std::string_view section,
+                  std::span<const Field> fields) {
+  const Settings defaults;
+  for (const Field& f : fields)
+    if (section == f.section)
+      std::visit([&](auto member) { s.*member = defaults.*member; }, f.member);
+}
 
 std::string ConfigDir() {
   // CONFIG, not state: the state directory holds what the app can regenerate

@@ -4319,7 +4319,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->MenuClick("Edit/###edit_preferences");
     ctx->Yield();
     ctx->SetRef("//###SettingsWindow");
-    ctx->ItemOpen("###sec_Machines");
+    ctx->ItemClick("###cat_Machines");
     ctx->Yield();
     ctx->ItemClick("###mach_new");
     ctx->Yield(2);
@@ -4359,6 +4359,58 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(cam::FindMachine(s_App->machines, "Test router") == nullptr);
     IM_CHECK(!std::filesystem::exists(dir / "test-router.json"));
     IM_CHECK_EQ(s_App->machines.size(), before);
+    s_App->settingsWindowOpen = false;
+  };
+
+  // The CAM panel's "Preferences › Machines" opens the window ON Machines,
+  // wherever it was left, and search finds a machine by name and opens it
+  // in the form (docs/ui/settings.md#the-window).
+  t = IM_REGISTER_TEST(engine, "cam", "the_machine_button_opens_on_machines");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    (void)ui::DeleteMachine(*s_App, "Test search mill");
+    Doc()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    ctx->ItemClick("//##PartTabs/+##addmenu");
+    ctx->ItemClick("//$FOCUSED/New CAM Job##addjob");
+    ctx->Yield(4);
+    IM_CHECK(s_App->job != nullptr);
+    // The button shows while the store is empty; the in-memory mirror is
+    // emptied for the test and reloaded from the store after it.
+    s_App->machines.clear();
+    // Left on another page, as a person would have.
+    ui::OpenPreferences(*s_App, "Keyboard");
+    ctx->Yield(2);
+    s_App->settingsWindowOpen = false;
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    ctx->ItemClick("###cam_new_machine_prefs");
+    ctx->Yield(2);
+    IM_CHECK(s_App->settingsWindowOpen);
+    IM_CHECK_EQ(s_App->settingsCategory, std::string("Machines"));
+    IM_CHECK(ctx->ItemExists("//###SettingsWindow/###mach_new"));
+    ui::ReloadMachines(*s_App);
+
+    cam::Machine mine;
+    mine.name = "Test search mill";
+    IM_CHECK(ui::SaveMachine(*s_App, mine));
+    s_App->machineEditIndex = -1;
+    ui::OpenPreferences(*s_App, "Appearance");
+    ctx->Yield(2);
+    ctx->SetRef("//###SettingsWindow");
+    ctx->ItemInputValue("###set_search", "search mill");
+    ctx->Yield(2);
+    ctx->ItemClick("###find_Machines_Test search mill");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->settingsCategory, std::string("Machines"));
+    IM_CHECK(s_App->settingsSearch.empty());
+    IM_CHECK(s_App->machineEditIndex >= 0);
+    IM_CHECK_EQ(
+        s_App->machines[static_cast<size_t>(s_App->machineEditIndex)].name,
+        std::string("Test search mill"));
+    IM_CHECK(ctx->ItemExists("###mach_name"));
+    (void)ui::DeleteMachine(*s_App, "Test search mill");
     s_App->settingsWindowOpen = false;
   };
 
@@ -4582,7 +4634,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ctx->MenuClick("Edit/###edit_preferences");
     ctx->Yield();
     ctx->SetRef("//###SettingsWindow");
-    ctx->ItemOpen("###sec_Machines");
+    ctx->ItemClick("###cat_Machines");
     ctx->Yield();
     for (size_t i = 0; i < s_App->machines.size(); i++)
       if (s_App->machines[i].name == "Test tooled router")

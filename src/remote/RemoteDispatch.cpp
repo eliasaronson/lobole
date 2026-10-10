@@ -2019,6 +2019,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       throw std::runtime_error("could not save settings: " + error);
     }
     ui::ApplySettings(state);
+    // The font atlas is rebuilt between frames, on request: ApplySettings
+    // only moves the number, so a scripted font size changed nothing on
+    // screen until something else asked.
+    if (before.uiFontScale != state.settings.uiFontScale)
+      state.fontRebuildRequested = true;
     state.settingsSaved = state.settings;
     state.settingsDirtyAt = -1.0;
     return settings::ToJson(state.settings);

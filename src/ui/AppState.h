@@ -2526,6 +2526,15 @@ struct AppState {
   settings::Settings settingsSaved;
   double settingsDirtyAt = -1.0; // ImGui time of the last edit; <0 = clean
   bool settingsWindowOpen = false;
+  // The Preferences page shown (docs/ui/settings.md#the-window): a category
+  // name, "" = the first. Session state like the window itself, so a person
+  // comes back to the page they left, but only until the app closes.
+  std::string settingsCategory;
+  // The search field over the category list; while it holds text the page
+  // side shows the matching rows of every category instead.
+  std::string settingsSearch;
+  // ui::OpenPreferences asks for the window to come to the front.
+  bool settingsFocusRequested = false;
   // Preferences > Keyboard is waiting for the next chord, for this command id.
   // Session state, not a preference, and it gates the key dispatcher: while a
   // capture is armed every chord means "bind me", not "run something".
