@@ -61,8 +61,9 @@ derives:
 ## What is checked, every run
 
 - `check_geometry` on the print part is `verified`.
-- **Every meshing pair's exact B-rep distance is at least 95 % of the gap a
-  side.** It measures 0.244 mm (sun) and 0.247 mm (ring) against 0.25.
+- **Every meshing pair's exact B-rep distance is at least the gap a side
+  less 0.01 mm.** The lofts come out about 5 µm short: 0.095 mm (sun) and
+  0.097 mm (ring) against PLA's measured 0.1.
 - **The STL has five shells**: two bodies that touch would fuse into one.
 - **The assembly turns.** The `sun`, `planet` and `ring` parts are placed on
   a kinematic carrier (a part of frames only), with the sun driving the
@@ -93,11 +94,17 @@ without the still.
 
 ## Printing it on a P1S
 
-1. **Print the coupon first**: `generators/print_coupon.py --material pla`.
-   Its bottom row is loose discs in holes at 0.15-0.35 mm a side. The
-   tightest disc that pushes out by hand is your printer's gap. If it is not
-   the table's 0.25, correct `src/core/PrintAllowance.cpp` from it (citing
-   the print) and regenerate.
+1. **The gap is the printer's.** PLA's 0.1 mm a side was measured on a P1S
+   in K5 PLA: a set modelled at the community's 0.25 printed loose, and
+   `print_coupon.py --gap-only --gap-center 0.1 --step 0.025` showed 0.075
+   freeing only under force and 0.1 sliding. On another printer or
+   filament, print `print_coupon.py --gap-only` first: the tightest disc
+   that slides out by hand is its gap. If it differs, correct
+   `src/core/PrintAllowance.cpp` from it (citing the print) and regenerate.
+   Slice the coupon with the same preset as the gears, and keep the STL
+   chords fine (both generators export at a tenth of the gap or less): at
+   0.1 mm chords the facets took 0.03 mm a side off every gap, and the
+   slicer's gap closing shut the narrowest.
 2. Slice `planetary.stl` flat on the bed as it comes, **no supports**, 0.2 mm
    layers.
    - **No brim**, or an outer brim only. A brim between the gears welds them.

@@ -559,16 +559,22 @@ def main():
     worst = min(cl.values())
     for k, v in cl.items():
         print(f"  {k}: {v:.3f} mm")
-    # The loft follows the helix between sections, not exactly on it, so
-    # allow a twentieth of the gap; less than that and the parts fuse.
-    if worst < 0.95 * gap["allowance_mm"] / 2.0:
+    # The loft follows the helix between sections, not exactly on it: the
+    # closest point comes out about 5 um short of the gap, at 0.25 a side
+    # and at 0.1 alike. So the allowance is absolute, a hundredth of a
+    # millimetre, far under what a 0.4 mm nozzle resolves.
+    if worst < gap["allowance_mm"] / 2.0 - 0.01:
         raise SystemExit(f"planetary: the closest mesh is {worst:.3f} mm, "
                          f"under the {gap['allowance_mm'] / 2:g} mm the "
                          f"table wants a side")
 
     out.mkdir(parents=True, exist_ok=True)
     stl = out / "planetary.stl"
-    exp = d.call("export_stl", path=str(stl))
+    # Chords a tenth of the gap: at export_stl's own 0.1 mm they took 0.03
+    # mm a side off a printed gap (measured on the coupon's STL), more than
+    # a tenth of what is left between the teeth at 0.1 a side.
+    exp = d.call("export_stl", path=str(stl),
+                 deflection=gap["allowance_mm"] / 2.0 / 10.0)
     if exp.get("shells") != len(ids) or not exp.get("watertight", True):
         raise SystemExit(f"planetary: the STL is not {len(ids)} separate "
                          f"watertight shells: {exp}")

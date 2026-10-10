@@ -102,7 +102,7 @@ def main():
                f"a printed M8 nut thread: {r}")
         r = d.call("print_allowance", kind="gap", size_mm=10,
                    process="fdm", material="pla")
-        expect(near(r["model_mm"], 10.5) and near(r["allowance_mm"], 0.5),
+        expect(near(r["model_mm"], 10.2) and near(r["allowance_mm"], 0.2),
                f"a print-in-place gap round a Ø10 PLA pin: {r}")
         r = d.call("print_allowance", kind="hole", size_mm=12, **PETG)
         expect(near(r["model_mm"], 12.3), f"a Ø12 hole: {r}")

@@ -101,13 +101,13 @@ TEST_CASE("A print-in-place gap opens the outer surface by the whole "
           "clearance",
           "[tolerances][print]") {
   // A Ø10 pin printed inside a ring: the ring is modelled 0.5 larger in PLA
-  // (0.25 a side) and 0.6 in PETG, which bonds to itself more.
+  // (0.1 a side, measured on a P1S) and 0.6 in PETG.
   std::string why;
   auto a =
       printfit::ForBasic({"fdm", "pla"}, printfit::Printed::Gap, 10.0, &why);
   REQUIRE(a);
-  CHECK(a->allowanceMm == Approx(0.5));
-  CHECK(a->modelMm == Approx(10.5));
+  CHECK(a->allowanceMm == Approx(0.2));
+  CHECK(a->modelMm == Approx(10.2));
   a = printfit::ForBasic(kPetg, printfit::Printed::Gap, 10.0, &why);
   REQUIRE(a);
   CHECK(a->modelMm == Approx(10.6));

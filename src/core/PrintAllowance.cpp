@@ -40,15 +40,18 @@ constexpr const char* kPlaShaftSource =
     "shrinkage well inside that (3dprintbounty.com, 3D printing tolerances "
     "guide)";
 constexpr const char* kPlaGapSource =
-    "print-in-place PLA wants about 0.25 mm per side as a starting point "
-    "(sovol3d.com, print-in-place hinges and joints: 0.15-0.35 mm by printer "
-    "and filament); on Bambu Lab printers 0.2 mm still turns, 0.25 is the "
-    "best fit and 0.3 is loose (makerworld.com clearance tests)";
+    "MEASURED, print_coupon --gap-only on a Bambu Lab P1S in K5 PLA "
+    "(2026-10-09; Bambu Studio 0.20 mm, X-Y hole and contour compensation 0, "
+    "the STL at 0.01 mm chord deviation): 0.075 mm a side freed only under "
+    "force and rubbed, 0.1 slid freely, and a gearbox modelled at 0.25 was "
+    "loose. The community's 0.15-0.35 a side (sovol3d.com; makerworld.com "
+    "tests on Bambu printers, 0.25 best) is for printers that close a gap "
+    "more than this one";
 constexpr const char* kPetgGapSource =
     "print-in-place clearance is 0.15-0.35 mm per side by printer and "
     "filament (sovol3d.com, print-in-place hinges and joints); PETG strings "
-    "and bonds to itself more than PLA, so it takes 0.3, 0.05 more than "
-    "PLA";
+    "and bonds to itself more than PLA, so it takes 0.3; not yet measured "
+    "here, as the PLA row has been";
 
 std::vector<Table> BuildTables() {
   std::vector<Table> out;
@@ -75,7 +78,7 @@ std::vector<Table> BuildTables() {
       {Printed::Shaft, 0.0, kAbove, -0.1, kPlaShaftSource},
       {Printed::InternalThread, 0.0, kAbove, 0.4, kInternalThreadSource},
       {Printed::ExternalThread, 0.0, kAbove, -0.1, kExternalThreadSource},
-      {Printed::Gap, 0.0, kAbove, 0.5, kPlaGapSource},
+      {Printed::Gap, 0.0, kAbove, 0.2, kPlaGapSource},
   };
   out.push_back(std::move(petg));
   out.push_back(std::move(pla));

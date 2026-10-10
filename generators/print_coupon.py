@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
 """A printable test coupon that calibrates the print allowance table.
 
     python3 generators/print_coupon.py --port 8800
@@ -92,9 +95,19 @@ def main():
     ap.add_argument("--thread", default=None,
                     help="thread designation (default: the metric coarse "
                          "M<size>, if the tables carry it; 'none' for none)")
-    ap.add_argument("--deflection", type=float, default=None,
-                    help="STL chord deviation, mm (default: export_stl's "
-                         "own, which is what parts get unless told)")
+    # Fine: at export_stl's own 0.1 mm the chords took 0.03 mm a side off
+    # every gap and the slicer closed the two narrowest; a coupon that
+    # measures the chords measures nothing about the printer.
+    ap.add_argument("--deflection", type=float, default=0.01,
+                    help="STL chord deviation, mm (default 0.01; export the "
+                         "parts it calibrates at the same)")
+    ap.add_argument("--gap-only", action="store_true",
+                    help="only the row of loose discs (a second coupon, "
+                         "once the first has said which way to look)")
+    ap.add_argument("--gap-center", type=float, default=None,
+                    help="mm A SIDE the gap row centres on (default: the "
+                         "table's), for a printer the first coupon showed "
+                         "to sit outside its steps")
     ap.add_argument("--name", default=None)
     ap.add_argument("--fresh", action="store_true",
                     help="start a new project first (refused on unsaved work)")
@@ -113,12 +126,15 @@ def main():
     shaft = allowance("shaft", size_mm=size)
     gap = allowance("gap", size_mm=size)
     gap_step = 2.0 * args.step
-    if gap["allowance_mm"] - args.steps * gap_step <= 0.0:
+    # On the diameter, as the table states it.
+    gap_mid = (gap["allowance_mm"] if args.gap_center is None
+               else 2.0 * args.gap_center)
+    if gap_mid - args.steps * gap_step <= 0.0:
         raise SystemExit(
-            f"print_coupon: {args.steps} steps of {fmt(gap_step)} below the "
-            f"table's gap of {fmt(gap['allowance_mm'])} close it — fewer "
+            f"print_coupon: {args.steps} steps of {fmt(gap_step)} below a "
+            f"gap of {fmt(gap_mid)} on the diameter close it — fewer "
             f"--steps or a smaller --step")
-    thread = args.thread
+    thread = "none" if args.gap_only else args.thread
     if thread is None:
         guess = f"M{fmt(size)}"
         try:
@@ -138,10 +154,11 @@ def main():
     label_h = min(0.3 * size, 4.0)
     engrave = 0.05 * size
     thick = size
-    rows = 4 if nut else 3
+    rows = 1 if args.gap_only else 4 if nut else 3
     width = count * pitch
     depth = rows * pitch
-    name = args.name or f"coupon_{args.process}_{args.material}_{fmt(size)}"
+    name = args.name or (f"coupon_{args.process}_{args.material}_{fmt(size)}"
+                         + ("_gap" if args.gap_only else ""))
 
     d.call("add_part", name=name)
     d.call("set_print_process", **proc)
@@ -158,11 +175,14 @@ def main():
         return depth - pitch * (row + 0.45)
 
     report = {"process": proc, "size": size, "step": args.step,
+              "gap_center_from": ("table" if args.gap_center is None
+                                  else "--gap-center"),
               "confirm": hole["confirm"], "features": []}
     bores, pins, discs, labels = [], [], [], []
     for i in range(count):
         k = i - args.steps
-        for row, what, base in ((0, "bore", hole), (1, "pin", shaft)):
+        for row, what, base in (() if args.gap_only else
+                                ((0, "bore", hole), (1, "pin", shaft))):
             dia = round(base["model_mm"] + k * args.step, 4)
             (bores if what == "bore" else pins).append(
                 circle((x_at(i), y_at(row)), dia / 2.0))
@@ -174,7 +194,7 @@ def main():
         # A gap is the whole diametral clearance, so its steps are twice the
         # bore's: the same step on each side of the disc. The label is the
         # gap a side, which is how print-in-place clearance is quoted.
-        g = round(gap["allowance_mm"] + k * gap_step, 4)
+        g = round(gap_mid + k * gap_step, 4)
         at = (x_at(i), y_at(rows - 1))
         bores.append(circle(at, (size + g) / 2.0))
         discs.append(circle(at, size / 2.0))
@@ -211,12 +231,13 @@ def main():
              "pitch": p}]
 
     top = plane_at_z(thick)
-    check(d.call("add_feature", feature={
-        "type": "Sketch", "name": "Pins", "plane": top, "entities": pins}),
-        "pin sketch")
-    check(d.call("add_feature", feature={
-        "type": "Extrude", "name": "Pins up", "mode": "add",
-        "sketch_id": feature_id(d, "Pins"), "distance": size}), "pins")
+    if pins:
+        check(d.call("add_feature", feature={
+            "type": "Sketch", "name": "Pins", "plane": top,
+            "entities": pins}), "pin sketch")
+        check(d.call("add_feature", feature={
+            "type": "Extrude", "name": "Pins up", "mode": "add",
+            "sketch_id": feature_id(d, "Pins"), "distance": size}), "pins")
     check(d.call("add_feature", feature={
         "type": "Sketch", "name": "Bores", "plane": top, "entities": bores}),
         "bore sketch")

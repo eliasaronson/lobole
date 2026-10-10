@@ -210,7 +210,7 @@ static data like `FitStandards`: per process and material, a signed allowance
 | shaft | any | −0.1 | as above: an outside diameter grows by about a tenth |
 | internal thread | any | +0.4 | as for PETG (the Fasteners and BOSL2 numbers are not per material) |
 | external thread | any | −0.1 | as for PETG |
-| gap | any | +0.5 | sovol3d.com print-in-place guide (0.25 a side to start); makerworld.com clearance tests on Bambu Lab printers (0.2 still turns, 0.25 best, 0.3 loose) |
+| gap | any | +0.2 | **measured**: `print_coupon --gap-only` on a Bambu Lab P1S in K5 PLA, STL at 0.01 mm chords: 0.075 a side frees only under force, 0.1 slides; a gearbox at 0.25 was loose. The community's 0.15-0.35 (sovol3d.com; makerworld.com, 0.25 best on Bambu printers) is for printers that close a gap more |
 
 A **gap** is two surfaces printed together that must come apart — a
 print-in-place joint or gear. Its size is the inner surface's diameter, its
@@ -314,7 +314,10 @@ a JSON list into `scratch/print_coupon/`. Every size derives from `--size`,
 and every number comes from `print_allowance`, so the coupon tests the
 table the build carries. Print it, find the bore a Ø8 pin slides in, the pin
 that slides in a Ø8 reamed hole and the tightest disc that pushes out by
-hand, and correct the table. The material defaults to `pla`.
+hand, and correct the table. The material defaults to `pla`. When every
+disc comes free, or none does, `--gap-only --gap-center <mm a side>
+--step <mm>` prints a second coupon of the gap row alone, centred where the
+first one pointed.
 
 ## Drawings
 
