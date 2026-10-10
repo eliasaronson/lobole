@@ -421,11 +421,15 @@ def run_motion(d, mates, s, name, to_deg, samples, mode, deflection=None):
 
 
 def sun_study(d, s, ph, material, mesh_modules=0.4):
-    """The sun's teeth under a firm pinch on its knob: the knob's flats held
-    (the fingers), and at each planet the reaction on the flanks that drive
-    it. The sun is the weakest gear: the smallest, and it carries every
-    planet's mesh. Reports the factor of safety against the material's
-    yield."""
+    """The sun's teeth under a firm pinch on its knob: the pinch's torque on
+    the knob's flats (a `torque` load about the sun's axis), held at each
+    planet by the one flank that drives it. The sun is the weakest gear: the
+    smallest, and it carries every planet's mesh.
+
+    Reports two stresses, and says which is which: the global peak, which
+    sits in the sharp inside corner where the knob meets the gear and grows
+    as the mesh is refined, and the tooth ROOTS' (probe_study on every root
+    face), which is what would break a tooth."""
     m, h = s["module"], s["height"]
     alpha = math.radians(PRESSURE_DEG)
     rs = m * s["zs"] / 2.0
@@ -433,17 +437,26 @@ def sun_study(d, s, ph, material, mesh_modules=0.4):
     r_hex = 0.9 * (rs - (ADDENDUM * m + s["tip_clearance"]))
     torque = PINCH_N * r_hex * math.cos(math.pi / 6)  # N mm, on the flats
     f_mesh = torque / rs / PLANETS                    # N tangential a mesh
+    rf = rs - (ADDENDUM * m + s["tip_clearance"])
     d.call("set_active_part", part="sun")
     faces = d.call("list_elements")["bodies"][0]["faces"]
-    held, loaded = [], {i: [] for i in range(PLANETS)}
+    flats, loaded, roots = [], {i: [] for i in range(PLANETS)}, []
     pitch = 2.0 * math.pi / s["zs"]
     for f in faces:
         x, y, z = f["centroid"]
         n = f["normal"]
         if f["kind"] == "plane" and z > h + 1e-6 and abs(n[2]) < 1e-6:
-            held.append(f["name"])
+            flats.append(f["name"])
             continue
         r = math.hypot(x, y)
+        # A root arc's face: near the root circle and facing out from the
+        # axis. A twisted face's centroid lies inside the surface (by about
+        # 2 % over half the sun's twist), so radius alone also takes the
+        # short radial flanks below the base circle; those face sideways.
+        if (f["kind"] != "plane" and z < h and r < rf + 0.2 * m
+                and (n[0] * x + n[1] * y) / max(r, 1e-9) > 0.7):
+            roots.append(f["name"])
+            continue
         if f["kind"] == "plane" or not rb <= r <= ra:
             continue
         ang = math.atan2(y, x)
@@ -458,8 +471,11 @@ def sun_study(d, s, ph, material, mesh_modules=0.4):
             if (abs(math.remainder(k * pitch - th, 2.0 * math.pi))
                     <= pitch / 2.0 and n[0] * t[0] + n[1] * t[1] > 0.3):
                 loaded[i].append(f["name"])
-    if len(held) != 6 or any(len(v) != 4 for v in loaded.values()):
-        raise SystemExit(f"planetary: the sun's study found {len(held)} knob "
+    if (len(flats) != 6 or any(len(v) != 4 for v in loaded.values())
+            or len(roots) != 2 * s["zs"]):
+        raise SystemExit(f"planetary: the sun's study found {len(flats)} knob "
+                         f"flats, {len(roots)} root faces (two a tooth "
+                         f"expected) and "
                          f"flats and flanks {loaded} — six flats, and a "
                          f"planet's tooth's flank as two arcs in each half "
                          f"of the V, were expected")
@@ -468,21 +484,28 @@ def sun_study(d, s, ph, material, mesh_modules=0.4):
     # Four quadratic elements across a tooth's root (about 1.6 modules
     # thick): the stress there is the answer.
     d.call("set_study", study=sid, mesh_size=mesh_modules * m)
-    for name in held:
-        d.call("add_load", study=sid, type="fixed", face=name)
-    for i, (th, _) in enumerate(ph["planets"]):
-        t = [-math.sin(th), math.cos(th), 0.0]
+    # The hand's torque, a sixth on each flat: a flat is not round, so the
+    # axis is stated. The six together carry no net force.
+    for name in flats:
+        d.call("add_load", study=sid, type="torque", face=name,
+               torque_nmm=torque / len(flats),
+               axis_origin_mm=[0.0, 0.0, h], axis_dir=[0.0, 0.0, 1.0])
+    for i in range(PLANETS):
         for name in loaded[i]:
-            d.call("add_load", study=sid, type="force", face=name,
-                   magnitude=f_mesh / len(loaded[i]),
-                   direction=[-t[0], -t[1], 0.0])
+            d.call("add_load", study=sid, type="fixed", face=name)
     t0 = time.perf_counter()
     d.call("run_study", study=sid, **{"async": True})
     while d.call("study_status", study=sid).get("running"):
         time.sleep(1.0)
     r = d.call("study_results", study=sid)
     status = d.call("study_status", study=sid)
+    probes = [d.call("probe_study", study=sid, face=name) for name in roots]
+    worst = max(probes, key=lambda p: p["von_mises_max_mpa"])
     return {"torque_nmm": torque, "force_per_mesh_n": f_mesh,
+            "root_von_mises_max_mpa": worst["von_mises_max_mpa"],
+            "root_von_mises_max_at_mm": worst["von_mises_max_at_mm"],
+            "root_von_mises_mean_mpa": max(p["von_mises_mean_mpa"]
+                                           for p in probes),
             "material": material, "mesh_size_mm": mesh_modules * m,
             "seconds": time.perf_counter() - t0,
             "solver": status.get("solver"), "results": r}
@@ -630,9 +653,12 @@ def main():
         res = study["results"]
         vm = res["max_von_mises_mpa"]
         print(f"  sun under a {PINCH_N:g} N pinch "
-              f"({study['torque_nmm'] / 1000:.2f} N m): max von Mises "
-              f"{vm['value']:.2f} MPa at {[round(v, 1) for v in vm['at']]}, "
-              f"factor of safety {res.get('factor_of_safety', 0):.1f}")
+              f"({study['torque_nmm'] / 1000:.2f} N m): tooth roots "
+              f"{study['root_von_mises_max_mpa']:.2f} MPa at worst; the "
+              f"global peak {vm['value']:.2f} MPa at "
+              f"{[round(v, 1) for v in vm['at']]} (the knob's inside "
+              f"corner), factor of safety {res.get('factor_of_safety', 0):.1f}"
+              f" on it")
 
     if not args.no_render:
         hero(d, out / "planetary.png")
