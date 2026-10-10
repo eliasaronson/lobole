@@ -8,6 +8,9 @@
 #include "core/Command.h"
 #include "core/Conventions.h"
 #include "core/MassProps.h"
+#include "core/Measure.h"
+#include "core/Requirements.h"
+#include "core/features/DatumAxisFeature.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
@@ -37,6 +40,7 @@
 #include <cfloat>
 #include <cstdio>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -72,8 +76,200 @@ const char* LoadLabel(fem::LoadType t) {
     return "Force";
   case fem::LoadType::Pressure:
     return "Pressure";
+  case fem::LoadType::Torque:
+    return "Torque";
+  case fem::LoadType::Remote:
+    return "Remote";
   }
   return "?";
+}
+
+const char* LoadGlyph(fem::LoadType t) {
+  switch (t) {
+  case fem::LoadType::Fixed:
+    return ICON_FA_LOCK;
+  case fem::LoadType::Force:
+    return ICON_FA_BOLT;
+  case fem::LoadType::Pressure:
+    return ICON_FA_DOWN_LONG;
+  case fem::LoadType::Torque:
+    return ICON_FA_ROTATE;
+  case fem::LoadType::Remote:
+    return ICON_FA_LOCATION_CROSSHAIRS;
+  }
+  return ICON_FA_BOLT;
+}
+
+// A torque's axis, chosen before the click (DrawAxisRefCombo's choices on a
+// part: X/Y/Z, datum axes, construction lines, custom; an assembly's world
+// X/Y/Z or custom). Resolved to a point and direction when the load is
+// placed, so the load stores numbers, as add_load does.
+struct AxisChoice {
+  std::string label;
+  AxisRef ref;
+};
+std::vector<AxisChoice> TorqueAxisChoices(AppState& state) {
+  std::vector<AxisChoice> out = {{"X", {AxisRef::Kind::X}},
+                                 {"Y", {AxisRef::Kind::Y}},
+                                 {"Z", {AxisRef::Kind::Z}}};
+  if (const Document* doc = state.document.get()) {
+    for (const auto& f : doc->GetFeatures()) {
+      if (const auto* da = dynamic_cast<const DatumAxisFeature*>(f.get())) {
+        AxisRef r;
+        r.kind = AxisRef::Kind::DatumAxis;
+        r.datumAxisId = da->GetId();
+        out.push_back({da->GetName(), r});
+      } else if (const auto* sk = dynamic_cast<const SketchFeature*>(f.get())) {
+        for (const auto& e : sk->entities) {
+          const auto* line = std::get_if<sketch::Line>(&e);
+          if (line == nullptr || !line->construction)
+            continue;
+          AxisRef r;
+          r.kind = AxisRef::Kind::SketchLine;
+          r.sketchId = sk->GetId();
+          r.entityId = line->id;
+          out.push_back(
+              {sk->GetName() + ": line " + std::to_string(line->id), r});
+        }
+      }
+    }
+  }
+  AxisRef custom;
+  custom.kind = AxisRef::Kind::Custom;
+  custom.direction = glm::dvec3(0, 0, 1);
+  out.push_back({"Custom", custom});
+  return out;
+}
+
+bool SameAxisChoice(const AxisRef& a, const AxisRef& b) {
+  return a.kind == b.kind &&
+         (a.kind != AxisRef::Kind::DatumAxis ||
+          a.datumAxisId == b.datumAxisId) &&
+         (a.kind != AxisRef::Kind::SketchLine ||
+          (a.sketchId == b.sketchId && a.entityId == b.entityId));
+}
+
+// The chosen axis as numbers; false when it no longer resolves.
+bool ResolveTorqueAxis(AppState& state, const AxisRef& ref, glm::dvec3& origin,
+                       glm::dvec3& dir) {
+  if (Document* doc = state.document.get()) {
+    RegenContext ctx{const_cast<std::vector<Body>&>(doc->GetBodies()),
+                     doc->GetFeatures(), doc->GetFeatures().size()};
+    return ResolveAxis(ctx, ref, origin, dir);
+  }
+  switch (ref.kind) {
+  case AxisRef::Kind::X:
+    origin = glm::dvec3(0.0);
+    dir = glm::dvec3(1, 0, 0);
+    return true;
+  case AxisRef::Kind::Y:
+    origin = glm::dvec3(0.0);
+    dir = glm::dvec3(0, 1, 0);
+    return true;
+  case AxisRef::Kind::Z:
+    origin = glm::dvec3(0.0);
+    dir = glm::dvec3(0, 0, 1);
+    return true;
+  case AxisRef::Kind::Custom:
+    if (glm::dot(ref.direction, ref.direction) < 1e-18)
+      return false;
+    origin = ref.origin;
+    dir = glm::normalize(ref.direction);
+    return true;
+  default:
+    return false;
+  }
+}
+
+// "390 N·mm", "1.2 N·m": a torque the way a person reads one.
+std::string TorqueText(double nmm) {
+  char buf[64];
+  if (std::abs(nmm) >= 10000.0)
+    std::snprintf(buf, sizeof(buf), "%.3g N\xC2\xB7m", nmm / 1000.0);
+  else
+    std::snprintf(buf, sizeof(buf), "%.3g N\xC2\xB7mm", nmm);
+  return buf;
+}
+
+// A face's stress in a solved static part study, in the case the viewport
+// shows (docs/simulation/README.md#probing-a-face): what probe_study
+// answers. nullopt when the study has no current result, or the face is not
+// on a body it solved.
+struct Probed {
+  fem::FaceStress stress;
+  std::string body;
+};
+std::optional<Probed> ProbeFace(AppState& state, const fem::Study& s,
+                                const ElementRef& face) {
+  const StudyHost host = StudyHostOf(state);
+  if (!host.part || s.type != fem::AnalysisType::Static)
+    return std::nullopt;
+  const fem::StudyRuntime* rt = host.Results(s.id);
+  if (!rt || StudyStale(state, s.id))
+    return std::nullopt;
+  fem::ResolvedFace rf;
+  if (!fem::ResolveFace(*host.part, face, "probe", rf, nullptr))
+    return std::nullopt;
+  for (const fem::StudyBodyResult& b : rt->bodies) {
+    if (b.bodyIndex != rf.bodyIndex)
+      continue;
+    const auto st = fem::FaceStressOf(
+        b.mesh, b.Case(state.simulation.activeCase).vonMises, rf.faceIndex);
+    if (!st)
+      return std::nullopt;
+    return Probed{*st, b.bodyName};
+  }
+  return std::nullopt;
+}
+
+std::string ProbeText(const fem::FaceStress& st) {
+  char buf[96];
+  std::snprintf(buf, sizeof(buf), "max %.3g  mean %.3g MPa", st.maxMPa,
+                st.meanMPa);
+  return buf;
+}
+
+// The pinned probe as a requirement: the face's peak von Mises held at most
+// the yield strength of its body's material -- the limit the part's own
+// material sets -- or, without one, at most what it reads now.
+void AddProbeRequirement(AppState& state, const fem::Study& s,
+                         const ElementRef& face, double now) {
+  const StudyHost host = StudyHostOf(state);
+  if (!host.part || state.activePart < 0 ||
+      state.activePart >= static_cast<int>(state.parts.size()))
+    return;
+  double limit = now;
+  fem::ResolvedFace rf;
+  if (fem::ResolveFace(*host.part, face, "probe", rf, nullptr)) {
+    const Body& body = host.part->GetBodies()[rf.bodyIndex];
+    const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
+        CADMaterials::MaterialLibrary::MaterialTypeFromString(body.material));
+    if (mp.yieldMPa > 0.0)
+      limit = mp.yieldMPa;
+  }
+  req::Requirement r;
+  r.id = state.nextRequirementId++;
+  r.revision = 1;
+  r.name = s.name + ": " + face.name + " stress";
+  r.source = "Pinned with the Probe tool: the stress on this face, not the "
+             "global peak.";
+  r.measure = {
+      {"kind", "study_probe"},
+      {"document", state.parts[state.activePart].id},
+      {"study", s.id},
+      {"face", {{"feature_id", face.featureId}, {"element", face.name}}},
+      {"quantity", "von_mises_max"}};
+  r.bound.kind = "at_most";
+  r.bound.value = limit;
+  try {
+    req::Validate(r.measure, r.bound);
+  } catch (const std::exception& e) {
+    LOG_WARN("probe requirement refused: {}", e.what());
+    return;
+  }
+  state.requirements.push_back(std::move(r));
+  state.requirementsEdits++;
+  state.projectMetaDirty = true;
 }
 
 // Deletes a study from its host, as one undo step, and moves the selection
@@ -282,7 +478,9 @@ void DrawLoadCases(AppState& state, const fem::Study& s) {
     sim.pendingCase = name;
   }
   if (!s.loadCases.empty() && (sim.tool == SimulationState::Tool::Force ||
-                               sim.tool == SimulationState::Tool::Pressure)) {
+                               sim.tool == SimulationState::Tool::Pressure ||
+                               sim.tool == SimulationState::Tool::Torque ||
+                               sim.tool == SimulationState::Tool::Remote)) {
     int k = std::max(0, s.FindLoadCase(sim.pendingCase));
     LeftLabel("In case");
     if (ImGui::BeginCombo("###sim_pending_case", s.loadCases[k].name.c_str())) {
@@ -316,7 +514,86 @@ void DrawLoads(AppState& state, const fem::Study& s) {
   arm(ICON_FA_BOLT " Force###sim_bc_force", SimulationState::Tool::Force);
   arm(ICON_FA_DOWN_LONG " Pressure###sim_bc_pressure",
       SimulationState::Tool::Pressure);
+  arm(ICON_FA_ROTATE " Torque###sim_bc_torque", SimulationState::Tool::Torque);
+  arm(ICON_FA_LOCATION_CROSSHAIRS " Remote###sim_bc_remote",
+      SimulationState::Tool::Remote);
   ImGui::Checkbox("Labels in viewport###sim_show_labels", &sim.showLabels);
+
+  if (sim.tool == SimulationState::Tool::Torque) {
+    LeftLabel("Torque (N\xC2\xB7mm)");
+    std::string expr;
+    if (ExprInputDouble(state, "###sim_torque", &sim.pendingTorque, "%.1f",
+                        &expr))
+      sim.pendingTorqueExpr = expr;
+    if (sim.pendingTorque == 0.0)
+      ImGui::TextDisabled("Default: the part's weight times the face's "
+                          "radius");
+    const std::vector<AxisChoice> choices = TorqueAxisChoices(state);
+    std::string current = "From the face (cylinder)";
+    for (const AxisChoice& c : choices)
+      if (sim.torqueAxisChosen && SameAxisChoice(c.ref, sim.torqueAxis))
+        current = c.label;
+    LeftLabel("Axis");
+    if (ImGui::BeginCombo("###sim_torque_axis", current.c_str())) {
+      if (ImGui::Selectable("From the face (cylinder)###axis_face",
+                            !sim.torqueAxisChosen))
+        sim.torqueAxisChosen = false;
+      for (size_t i = 0; i < choices.size(); ++i) {
+        const std::string id =
+            choices[i].label + "###axis_choice_" + std::to_string(i);
+        const bool sel = sim.torqueAxisChosen &&
+                         SameAxisChoice(choices[i].ref, sim.torqueAxis);
+        if (ImGui::Selectable(id.c_str(), sel)) {
+          const AxisRef keep = sim.torqueAxis;
+          sim.torqueAxis = choices[i].ref;
+          if (choices[i].ref.kind == AxisRef::Kind::Custom &&
+              keep.kind == AxisRef::Kind::Custom) {
+            sim.torqueAxis = keep; // what was typed survives re-picking
+          }
+          sim.torqueAxisChosen = true;
+        }
+      }
+      ImGui::EndCombo();
+    }
+    if (sim.torqueAxisChosen && sim.torqueAxis.kind == AxisRef::Kind::Custom) {
+      LeftLabel("Through (mm)");
+      ExprInputDouble3(state, "###sim_torque_origin", &sim.torqueAxis.origin.x,
+                       "%.2f");
+      LeftLabel("Along");
+      ExprInputDouble3(state, "###sim_torque_dir", &sim.torqueAxis.direction.x,
+                       "%.3f");
+    }
+    if (!sim.torqueAxisChosen)
+      ImGui::TextColored(kMuted, "A cylindrical face lends its own axis; any "
+                                 "other face needs one chosen here.");
+  }
+  if (sim.tool == SimulationState::Tool::Remote) {
+    LeftLabel("Force (N)");
+    std::string expr;
+    if (ExprInputDouble(state, "###sim_remote_force", &sim.pendingMagnitude,
+                        "%.1f", &expr))
+      sim.pendingMagnitudeExpr = expr;
+    ImGui::Checkbox("Custom direction###sim_remote_custom_dir",
+                    &sim.directionOverridden);
+    if (sim.directionOverridden) {
+      LeftLabel("Direction");
+      ExprInputDouble3(state, "###sim_remote_direction",
+                       &sim.pendingDirection.x, "%.3f");
+    } else {
+      ImGui::TextDisabled("Direction: into the face you click");
+    }
+    LeftLabel("At (mm)");
+    if (ExprInputDouble3(state, "###sim_remote_point", &sim.pendingPoint.x,
+                         "%.2f"))
+      sim.pointOverridden = true;
+    if (sim.pointOverridden) {
+      ImGui::SameLine();
+      if (ImGui::SmallButton("From face###sim_remote_point_reset"))
+        sim.pointOverridden = false;
+    } else {
+      ImGui::TextDisabled("At: off the face you click, along its normal");
+    }
+  }
 
   // Pending magnitude/direction applied to the next placed force/pressure.
   if (sim.tool == SimulationState::Tool::Force ||
@@ -345,12 +622,12 @@ void DrawLoads(AppState& state, const fem::Study& s) {
 
   DrawLoadCases(state, s);
 
+  if (!sim.placeRefusal.empty())
+    MessageText(kError, sim.placeRefusal);
   if (s.loads.empty()) {
     ImGui::TextColored(kMuted, "No loads yet.");
     return;
   }
-  if (!sim.placeRefusal.empty())
-    MessageText(kError, sim.placeRefusal);
   const StudyHost host = StudyHostOf(state);
   // Rows, as every list (ui::ListRow): the face as the label, the magnitude
   // as the tail, and Remove in the row's menu instead of a trash button.
@@ -365,18 +642,36 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     else
       where = l.face.name;
     ListRowSpec row;
-    row.glyph = l.type == fem::LoadType::Fixed   ? ICON_FA_LOCK
-                : l.type == fem::LoadType::Force ? ICON_FA_BOLT
-                                                 : ICON_FA_DOWN_LONG;
+    row.glyph = LoadGlyph(l.type);
     row.label = std::string(LoadLabel(l.type)) + "  " + where + "###load_row_" +
                 std::to_string(l.id);
     if (l.type != fem::LoadType::Fixed) {
       char buf[64];
       std::snprintf(buf, sizeof(buf), "%.1f%s", l.magnitude,
-                    l.type == fem::LoadType::Force ? " N" : " MPa");
-      row.tail = buf;
+                    l.type == fem::LoadType::Pressure ? " MPa" : " N");
+      row.tail = l.type == fem::LoadType::Torque ? TorqueText(l.magnitude)
+                                                 : std::string(buf);
       if (!l.loadCase.empty())
         row.tail += "  " + l.loadCase;
+    }
+    if (l.type == fem::LoadType::Torque) {
+      char ax[160];
+      if (l.HasAxis())
+        std::snprintf(ax, sizeof(ax),
+                      "About (%.3g, %.3g, %.3g) through (%.3g, %.3g, %.3g)",
+                      l.axisDirection.x, l.axisDirection.y, l.axisDirection.z,
+                      l.axisOrigin.x, l.axisOrigin.y, l.axisOrigin.z);
+      else
+        std::snprintf(ax, sizeof(ax), "About the cylindrical face's own axis");
+      row.tooltip = ax;
+    }
+    if (l.type == fem::LoadType::Remote) {
+      char at[160];
+      std::snprintf(at, sizeof(at),
+                    "At (%.3g, %.3g, %.3g) mm, along [%.2g, %.2g, %.2g]",
+                    l.point.x, l.point.y, l.point.z, l.direction.x,
+                    l.direction.y, l.direction.z);
+      row.tooltip = at;
     }
     if (l.type == fem::LoadType::Force) {
       // A force's direction decides the answer; showing only its magnitude
@@ -388,7 +683,22 @@ void DrawLoads(AppState& state, const fem::Study& s) {
     }
     row.menuId = "###load_ctx_" + std::to_string(l.id);
     const uint64_t loadId = l.id;
-    row.menu = [&removeLoad, loadId] {
+    const bool remote = l.type == fem::LoadType::Remote;
+    const glm::dvec3 point = l.point;
+    const uint64_t studyId = s.id;
+    row.menu = [&state, &removeLoad, loadId, remote, point, studyId] {
+      if (remote) {
+        // The point after placing: where the force acts is the load.
+        glm::dvec3 p = point;
+        LeftLabel("At (mm)");
+        if (ExprInputDouble3(state, "###load_point", &p.x, "%.2f") &&
+            p != point)
+          ModifyStudy(state, studyId, "Move remote load", [&](fem::Study& cs) {
+            for (fem::Load& x : cs.loads)
+              if (x.id == loadId)
+                x.point = p;
+          });
+      }
       if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###load_del"))
         removeLoad = loadId;
     };
@@ -746,6 +1056,64 @@ void DrawResults(AppState& state, const fem::Study& s) {
     sim.field = static_cast<SimulationState::Field>(field);
   LeftLabel("Deform");
   ImGui::SliderFloat("###deform", &sim.deformScale, 0.0f, 100.0f, "%.0fx");
+
+  // Probing (docs/simulation/README.md#probing-a-face): the stress ON a face
+  // -- a tooth root, a fillet -- where the global peak above may sit in a
+  // sharp corner whose value is the mesh's, not the part's. A part study:
+  // an assembly's mesh is the imprinted fuse, whose faces are not the
+  // parts'.
+  if (!host.part)
+    return;
+  ImGui::SeparatorText("Probes");
+  {
+    const bool armed = sim.tool == SimulationState::Tool::Probe;
+    if (armed)
+      ImGui::PushStyleColor(ImGuiCol_Button,
+                            ImGui::GetStyleColorVec4(ImGuiCol_ButtonActive));
+    if (ImGui::Button(ICON_FA_CROSSHAIRS " Probe###sim_probe"))
+      SimulationArmTool(state, armed ? SimulationState::Tool::None
+                                     : SimulationState::Tool::Probe);
+    if (armed)
+      ImGui::PopStyleColor();
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Hover a face for its von Mises stress; click to pin "
+                        "it here.");
+    if (armed && !sim.placeRefusal.empty())
+      MessageText(kError, sim.placeRefusal);
+  }
+  size_t removeAt = SIZE_MAX;
+  for (size_t i = 0; i < sim.probes.size(); ++i) {
+    const SimulationState::ProbePin& pin = sim.probes[i];
+    if (pin.studyId != s.id)
+      continue;
+    const auto probed = ProbeFace(state, s, pin.face);
+    ListRowSpec row;
+    row.glyph = ICON_FA_CROSSHAIRS;
+    row.label = pin.face.name + "###probe_row_" + std::to_string(i);
+    row.tail = probed ? ProbeText(probed->stress) : std::string("-");
+    if (probed) {
+      char at[160];
+      std::snprintf(at, sizeof(at), "Peak at (%.3g, %.3g, %.3g) mm on %s",
+                    probed->stress.maxAt.x, probed->stress.maxAt.y,
+                    probed->stress.maxAt.z, probed->body.c_str());
+      row.tooltip = at;
+    }
+    row.menuId = "###probe_ctx_" + std::to_string(i);
+    const double now = probed ? probed->stress.maxMPa : 0.0;
+    const bool has = probed.has_value();
+    const ElementRef face = pin.face;
+    row.menu = [&state, &s, &removeAt, i, face, now, has] {
+      ImGui::BeginDisabled(!has);
+      if (ImGui::MenuItem(ICON_FA_LIST_CHECK " Add requirement###probe_req"))
+        AddProbeRequirement(state, s, face, now);
+      ImGui::EndDisabled();
+      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Remove###probe_del"))
+        removeAt = i;
+    };
+    ListRow(row);
+  }
+  if (removeAt != SIZE_MAX)
+    sim.probes.erase(sim.probes.begin() + static_cast<long>(removeAt));
 }
 
 } // namespace
@@ -1407,6 +1775,65 @@ const glm::vec4 kForce{1.00f, 0.65f, 0.20f, 1.0f};    // the handle's orange
 const glm::vec4 kPressure{0.85f, 0.30f, 0.75f, 1.0f}; // magenta, like its tint
 const glm::vec4 kKeep{0.35f, 0.85f, 0.95f, 1.0f};
 const glm::vec4 kGravity{0.55f, 0.55f, 1.00f, 1.0f};
+const glm::vec4 kTorque{1.00f, 0.42f, 0.30f,
+                        1.0f}; // red-orange, a turning load
+const glm::vec4 kRemote{0.95f, 0.85f, 0.25f, 1.0f}; // yellow, a load at a point
+const glm::vec4 kProbe{0.95f, 0.95f, 0.95f, 1.0f};  // white: a reading, no load
+
+// A torque's axis in the frame the viewport draws in: the load's own, or its
+// cylindrical face's, placed by the occurrence on an assembly.
+std::optional<fem::LoadAxis> TorqueAxisInView(AppState& state,
+                                              const fem::Load& load) {
+  if (load.HasAxis())
+    return fem::LoadAxis{load.axisOrigin, glm::normalize(load.axisDirection)};
+  const StudyHost host = StudyHostOf(state);
+  if (host.part)
+    return fem::CylindricalFaceAxis(*host.part, load.face);
+  const Occurrence* occ =
+      host.asmDoc ? host.asmDoc->FindById(load.occurrenceId) : nullptr;
+  const Document* part = occ ? OccurrencePartDoc(state, *occ) : nullptr;
+  if (!part)
+    return std::nullopt;
+  auto axis = fem::CylindricalFaceAxis(*part, load.face);
+  if (axis) {
+    const glm::dmat3 r = glm::mat3_cast(occ->orientation);
+    axis->origin = r * axis->origin + occ->position;
+    axis->direction = r * axis->direction;
+  }
+  return axis;
+}
+
+// A circular arrow about `axis`, centred where the axis passes the face
+// (nearest `c`): three quarters of a turn in the sense a positive torque
+// turns, right-handed about the direction, with a head at its end.
+void TorqueGlyph(const glm::vec3& centre, const glm::vec3& axis, float radius,
+                 float sign, std::vector<PrimVertex>& out) {
+  glm::vec3 u =
+      glm::abs(axis.z) < 0.9f ? glm::vec3(0, 0, 1) : glm::vec3(1, 0, 0);
+  u = glm::normalize(glm::cross(axis, u));
+  const glm::vec3 v = glm::cross(axis, u) * sign;
+  constexpr int kSegments = 36;
+  constexpr float kSweep = 1.5f * 3.14159265f;
+  glm::vec3 prev = centre + u * radius;
+  for (int i = 1; i <= kSegments; ++i) {
+    const float t = kSweep * static_cast<float>(i) / kSegments;
+    const glm::vec3 p = centre + (u * std::cos(t) + v * std::sin(t)) * radius;
+    ui::AppendPrimLine(prev, p, 2.4f, kTorque, out);
+    prev = p;
+  }
+  // The head: along the tangent at the end, two strokes back from it.
+  const glm::vec3 tangent =
+      glm::normalize(-u * std::sin(kSweep) + v * std::cos(kSweep));
+  const glm::vec3 inward = glm::normalize(centre - prev);
+  const float head = radius * 0.35f;
+  ui::AppendPrimLine(prev, prev - tangent * head + inward * head * 0.5f, 2.4f,
+                     kTorque, out);
+  ui::AppendPrimLine(prev, prev - tangent * head - inward * head * 0.5f, 2.4f,
+                     kTorque, out);
+  // The axis itself, short, through the centre.
+  ui::AppendPrimLine(centre - axis * radius * 0.6f,
+                     centre + axis * radius * 1.2f, 1.6f, kTorque, out);
+}
 
 // An anchor hatch: a ground line with strokes fanning off it, in BOTH
 // in-plane axes. It used to draw along one axis only, so from most angles
@@ -1568,6 +1995,37 @@ void AppendSimulationBCGlyphs(AppState& state, std::vector<PrimVertex>& out) {
         ArrowGlyph(fs.point + fs.normal * arrow, fs.point, kPressure, out);
       break;
     }
+    case fem::LoadType::Torque: {
+      // A circular arrow about the axis, where the axis passes the face,
+      // just outside it along the axis so the solid does not hide it.
+      const auto axis = TorqueAxisInView(state, load);
+      if (!axis)
+        break;
+      const glm::vec3 a = glm::normalize(glm::vec3(axis->direction));
+      const glm::vec3 o(axis->origin);
+      glm::vec3 centre = o + a * glm::dot(c - o, a);
+      const float out_ = glm::dot(n, a) >= 0.0f ? 1.0f : -1.0f;
+      centre += a * out_ * len * 0.25f;
+      const float r = std::max(glm::length(c - centre), len * 0.6f);
+      TorqueGlyph(centre, a, std::min(r, len * 1.4f),
+                  load.magnitude >= 0.0 ? 1.0f : -1.0f, out);
+      break;
+    }
+    case fem::LoadType::Remote: {
+      // The force where it acts, and thin lines tying that point to the
+      // face that carries it.
+      const glm::vec3 p(load.point);
+      glm::vec3 dir(load.direction);
+      dir =
+          glm::length(dir) > 1e-9f ? glm::normalize(dir) : glm::vec3(0, 0, -1);
+      ArrowGlyph(p - dir * len, p, kRemote, out);
+      const auto samples =
+          SampleFace(state, load.occurrenceId, load.face, spacing * 2.0f, 6);
+      ui::AppendPrimLine(p, c, 1.2f, kRemote, out);
+      for (const FaceSample& fs : samples)
+        ui::AppendPrimLine(p, fs.point, 1.0f, kRemote, out);
+      break;
+    }
     }
   }
   for (const ElementRef& keep : s->keepFaces) {
@@ -1595,6 +2053,19 @@ void AppendSimulationOverlayGlyphs(AppState& state,
   const fem::Study* s = host.Find(sim.activeStudyId);
   if (s == nullptr)
     return;
+  // The pinned probes' peaks: a small cross where each face's stress is
+  // largest. See-through, because a peak on a hidden face still counts.
+  {
+    const float m = GlyphLength(state) * 0.15f;
+    const glm::vec3 ax[3] = {{1, 0, 0}, {0, 1, 0}, {0, 0, 1}};
+    for (const SimulationState::ProbePin& pin : sim.probes)
+      if (pin.studyId == s->id)
+        if (const auto probed = ProbeFace(state, *s, pin.face)) {
+          const glm::vec3 at(probed->stress.maxAt);
+          for (const glm::vec3& a : ax)
+            ui::AppendPrimLine(at - a * m, at + a * m, 2.0f, kProbe, out);
+        }
+  }
   // Gravity: one arrow leaving the centre of mass, the way the weight acts.
   // A self-weight study whose picture showed no weight was a setup nobody
   // could check against the panel. The centre of mass is inside the solid,
@@ -1728,6 +2199,15 @@ std::string SimulationLoadLabel(const fem::Load& load) {
     else
       std::snprintf(buf, sizeof(buf), "%.3g MPa", load.magnitude);
     return buf;
+  case fem::LoadType::Torque:
+    return TorqueText(load.magnitude);
+  case fem::LoadType::Remote:
+    if (std::abs(load.magnitude) >= 1000.0)
+      std::snprintf(buf, sizeof(buf), "%.3g kN at a point",
+                    load.magnitude / 1000.0);
+    else
+      std::snprintf(buf, sizeof(buf), "%.3g N at a point", load.magnitude);
+    return buf;
   }
   return "";
 }
@@ -1741,6 +2221,23 @@ std::string SimulationGravityLabel(const glm::dvec3& gravity) {
 void DrawSimulationLabels(AppState& state) {
   SimulationState& sim = state.simulation;
   const StudyHost host = StudyHostOf(state);
+  // The Probe tool's reading of the face under the cursor, in the Measure
+  // tool's cursor-label look: what a click would pin.
+  if (sim.IsActive() && sim.tool == SimulationState::Tool::Probe && host &&
+      state.pick.hoverFace.IsSet())
+    if (const fem::Study* ps = host.Find(sim.activeStudyId))
+      if (const auto probed = ProbeFace(state, *ps, state.pick.hoverFace)) {
+        const std::string text = state.pick.hoverFace.name + "\nvon Mises " +
+                                 ProbeText(probed->stress);
+        const ImVec2 m = ImGui::GetIO().MousePos;
+        ImDrawList* dl = ViewportDrawList();
+        const ImVec2 size = ImGui::CalcTextSize(text.c_str());
+        const ImVec2 pos(m.x + 18.0f, m.y + 16.0f);
+        dl->AddRectFilled(ImVec2(pos.x - 6.0f, pos.y - 4.0f),
+                          ImVec2(pos.x + size.x + 6.0f, pos.y + size.y + 4.0f),
+                          IM_COL32(30, 24, 16, 205), 4.0f);
+        dl->AddText(pos, IM_COL32(255, 210, 130, 235), text.c_str());
+      }
   if (!sim.IsActive() || !sim.showLabels || !host || !state.faceSelector ||
       !state.camera)
     return;
@@ -1816,6 +2313,17 @@ void DrawSimulationLabels(AppState& state) {
     case fem::LoadType::Pressure:
       label(c + n * len * 0.8f, SimulationLoadLabel(load), col(kPressure));
       break;
+    case fem::LoadType::Torque:
+      label(c + n * len * 0.6f, SimulationLoadLabel(load), col(kTorque));
+      break;
+    case fem::LoadType::Remote: {
+      glm::vec3 dir(load.direction);
+      dir =
+          glm::length(dir) > 1e-9f ? glm::normalize(dir) : glm::vec3(0, 0, -1);
+      label(glm::vec3(load.point) - dir * len, SimulationLoadLabel(load),
+            col(kRemote));
+      break;
+    }
     }
   }
   for (const ElementRef& keep : s->keepFaces) {
@@ -1862,6 +2370,26 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
     faceDoc = occ ? OccurrencePartDoc(state, *occ) : nullptr;
   }
 
+  // Probe: pin the face (the Probes list under the results); the tool stays
+  // armed, so several faces can be pinned in a row.
+  if (sim.tool == SimulationState::Tool::Probe) {
+    if (!ProbeFace(state, *s, face)) {
+      sim.placeRefusal = "'" + face.name +
+                         "' has no stress to read: run the study (a static "
+                         "part study) and pick a face of a body it solved";
+      return;
+    }
+    const bool dup = std::any_of(sim.probes.begin(), sim.probes.end(),
+                                 [&](const SimulationState::ProbePin& p) {
+                                   return p.studyId == s->id &&
+                                          p.face.featureId == face.featureId &&
+                                          p.face.name == face.name;
+                                 });
+    if (!dup)
+      sim.probes.push_back({s->id, face});
+    return;
+  }
+
   // Keep tool (topology): freeze the picked face solid.
   if (sim.tool == SimulationState::Tool::Keep) {
     ModifyStudy(state, s->id, "Add keep face", [&](fem::Study& cs) {
@@ -1877,16 +2405,96 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
   }
 
   fem::Load load;
-  load.id = host.AllocateId();
-  load.type = sim.tool == SimulationState::Tool::Fixed ? fem::LoadType::Fixed
-              : sim.tool == SimulationState::Tool::Force
-                  ? fem::LoadType::Force
-                  : fem::LoadType::Pressure;
+  switch (sim.tool) {
+  case SimulationState::Tool::Fixed:
+    load.type = fem::LoadType::Fixed;
+    break;
+  case SimulationState::Tool::Force:
+    load.type = fem::LoadType::Force;
+    break;
+  case SimulationState::Tool::Torque:
+    load.type = fem::LoadType::Torque;
+    break;
+  case SimulationState::Tool::Remote:
+    load.type = fem::LoadType::Remote;
+    break;
+  default:
+    load.type = fem::LoadType::Pressure;
+    break;
+  }
   load.face = face;
   load.occurrenceId = occurrenceId;
+  // Where the face is, in the frame the study solves in (the world, on an
+  // assembly): a torque's axis and a remote load's point are stated there.
+  const Occurrence* placedOcc = occurrenceId != 0 && host.asmDoc
+                                    ? host.asmDoc->FindById(occurrenceId)
+                                    : nullptr;
+  std::optional<Measure::FaceInfo> info;
+  double bodyDiagonal = 0.0;
+  if (faceDoc) {
+    fem::ResolvedFace rf;
+    if (fem::ResolveFace(*faceDoc, face, "load", rf, nullptr)) {
+      const Body& body = faceDoc->GetBodies()[rf.bodyIndex];
+      info = Measure::DescribeFaceAt(body, rf.faceIndex);
+      glm::dvec3 lo(0.0), hi(0.0);
+      body.shape.GetBoundingBox(lo, hi);
+      bodyDiagonal = glm::length(hi - lo);
+    }
+  }
+  if (load.type == fem::LoadType::Torque) {
+    if (sim.torqueAxisChosen) {
+      glm::dvec3 o, d;
+      if (!ResolveTorqueAxis(state, sim.torqueAxis, o, d)) {
+        sim.placeRefusal = "The chosen axis no longer resolves; choose "
+                           "another";
+        return;
+      }
+      load.axisOrigin = o;
+      load.axisDirection = d;
+    } else if (!faceDoc || !fem::CylindricalFaceAxis(*faceDoc, face)) {
+      // Refused where it can be read, and nothing placed: a flat face has
+      // no axis of its own, and guessing one is a different load.
+      sim.placeRefusal = "'" + face.name +
+                         "' is not cylindrical, so it has no axis of its "
+                         "own: choose the torque's axis above, then click "
+                         "it again";
+      return;
+    }
+    // Seeded when nothing was typed: the part's weight acting at the face's
+    // radius, a torque the part itself scales.
+    if (sim.pendingTorque == 0.0 && sim.pendingTorqueExpr.empty() && info) {
+      const double r = info->hasRadius
+                           ? info->radius
+                           : std::sqrt(info->area / 3.14159265358979);
+      sim.pendingTorque = SimulationWeightN(state) * r;
+    }
+    load.magnitude = sim.pendingTorque;
+    load.magnitudeExpr = sim.pendingTorqueExpr;
+  }
+  if (load.type == fem::LoadType::Remote) {
+    if (!sim.pointOverridden) {
+      if (!info) {
+        sim.placeRefusal = "'" + face.name +
+                           "' could not be measured for a remote load's "
+                           "point; type one in At";
+        return;
+      }
+      // Off the face along its normal, a tenth of the body's diagonal: a
+      // lever arm the picture can show, derived from the part.
+      glm::dvec3 p = info->centroid + info->normal * (0.1 * bodyDiagonal);
+      if (placedOcc)
+        p = glm::mat3_cast(placedOcc->orientation) * p + placedOcc->position;
+      sim.pendingPoint = p;
+    }
+    load.point = sim.pendingPoint;
+    load.hasPoint = true;
+  }
+  load.id = host.AllocateId();
   if (load.type != fem::LoadType::Fixed) {
-    load.magnitude = sim.pendingMagnitude;
-    load.magnitudeExpr = sim.pendingMagnitudeExpr;
+    if (load.type != fem::LoadType::Torque) {
+      load.magnitude = sim.pendingMagnitude;
+      load.magnitudeExpr = sim.pendingMagnitudeExpr;
+    }
     // On a study with load cases it goes in the one chosen (the first when
     // none is, or the chosen one is gone).
     if (!s->loadCases.empty())
@@ -1894,7 +2502,9 @@ void SimulationApplyToFace(AppState& state, uint64_t occurrenceId,
                           ? sim.pendingCase
                           : s->loadCases.front().name;
   }
-  if (load.type == fem::LoadType::Force && faceDoc) {
+  if ((load.type == fem::LoadType::Force ||
+       load.type == fem::LoadType::Remote) &&
+      faceDoc) {
     // The face decides the direction unless the user asked for a specific
     // one: a force placed on a face pushes into it.
     auto into = fem::DefaultForceDirection(*faceDoc, face);

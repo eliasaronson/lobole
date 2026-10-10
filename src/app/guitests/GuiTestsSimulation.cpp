@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "app/guitests/GuiTestsCommon.h"
+#include "core/Measure.h"
 #include "render/MeshRenderer.h" // InstanceHighlightRanges (tint test)
 #include "ui/AssemblyActions.h"  // UndoAssembly, PartDocById (S1)
 #include "ui/DocumentSlots.h"    // AddAssembly, SetActivePart
@@ -858,5 +859,183 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     IM_CHECK(!s_App->simulation.active);
     ctx->SetRef("//##MainMenuBar");
+  };
+
+  // Torque (docs/simulation/README.md#torque-and-remote-loads): armed in the
+  // panel, its magnitude typed, and a click on a cylinder's side takes the
+  // cylinder's own axis -- nothing stored, so the load follows the face --
+  // and the viewport draws its circular arrow.
+  t = IM_REGISTER_TEST(engine, "sim", "a_torque_on_a_cylinder_takes_its_axis");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureCylinder(ctx);
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    const Body& body = Doc()->GetBodies()[0];
+    ElementRef side;
+    for (const auto& [index, name] : body.elementMap.names)
+      if (const auto info = Measure::DescribeFaceAt(body, index);
+          info && info->kind == "cylinder")
+        side = ElementRef{body.createdBy, name};
+    IM_CHECK_SILENT(!side.name.empty());
+    ctx->ItemClick("//###ToolWindow/###sim_bc_torque");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Torque);
+    ctx->ItemInputValue("//###ToolWindow/###sim_torque", "500");
+    ctx->Yield();
+    ui::SimulationApplyToFace(*s_App, side);
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK_SILENT(st != nullptr);
+    IM_CHECK_EQ(st->loads.size(), (size_t)1);
+    IM_CHECK(st->loads[0].type == fem::LoadType::Torque);
+    IM_CHECK(std::abs(st->loads[0].magnitude - 500.0) < 1e-9);
+    IM_CHECK(!st->loads[0].HasAxis()); // the face's, not a copy of it
+    IM_CHECK(s_App->simulation.placeRefusal.empty());
+    // The glyph: an arc of many short strokes, drawn about the axis.
+    std::vector<PrimVertex> prims;
+    ui::AppendSimulationBCGlyphs(*s_App, prims);
+    IM_CHECK(prims.size() > 30);
+    IM_CHECK(ctx->ItemExists(
+        ("//###ToolWindow/**/###load_row_" + std::to_string(st->loads[0].id))
+            .c_str()));
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // A flat face has no axis of its own: the click is refused in the panel
+  // and nothing is placed. With an axis chosen, the same click places it.
+  t = IM_REGISTER_TEST(engine, "sim", "a_torque_on_a_flat_face_needs_an_axis");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    const uint64_t cb = Doc()->GetBodies()[0].createdBy;
+    const ElementRef flat{cb, std::to_string(cb) + "/face1"};
+    ctx->ItemClick("//###ToolWindow/###sim_bc_torque");
+    ctx->Yield();
+    ctx->ItemInputValue("//###ToolWindow/###sim_torque", "250");
+    ctx->Yield();
+    ui::SimulationApplyToFace(*s_App, flat);
+    ctx->Yield(2);
+    const uint64_t sid = s_App->simulation.activeStudyId;
+    IM_CHECK(Doc()->FindStudy(sid)->loads.empty());
+    IM_CHECK(s_App->simulation.placeRefusal.find("not cylindrical") !=
+             std::string::npos);
+    // Still armed: choose Z in the axis combo and click again.
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Torque);
+    ctx->ItemClick("//###ToolWindow/###sim_torque_axis");
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick(
+        (std::string("//") + popup->Name + "/**/###axis_choice_2").c_str());
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.torqueAxisChosen);
+    ui::SimulationApplyToFace(*s_App, flat);
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(sid);
+    IM_CHECK_EQ(st->loads.size(), (size_t)1);
+    IM_CHECK(st->loads[0].type == fem::LoadType::Torque);
+    IM_CHECK(st->loads[0].HasAxis());
+    IM_CHECK(std::abs(st->loads[0].axisDirection.z - 1.0) < 1e-12);
+    IM_CHECK(s_App->simulation.placeRefusal.empty());
+    s_App->simulation.torqueAxisChosen = false;
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // A remote load: its force typed, and its point -- untyped -- off the
+  // clicked face along its normal by a tenth of the body's diagonal, so the
+  // default is a lever arm the picture shows.
+  t = IM_REGISTER_TEST(engine, "sim", "a_remote_load_acts_off_the_face");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    ui::EnterSimulation(*s_App);
+    ctx->Yield(2);
+    const Body& body = Doc()->GetBodies()[0];
+    const ElementRef face{body.createdBy,
+                          std::to_string(body.createdBy) + "/face1"};
+    fem::ResolvedFace rf;
+    IM_CHECK_SILENT(fem::ResolveFace(*Doc(), face, "t", rf, nullptr));
+    const auto info = Measure::DescribeFaceAt(body, rf.faceIndex);
+    IM_CHECK_SILENT(info.has_value());
+    glm::dvec3 lo(0.0), hi(0.0);
+    body.shape.GetBoundingBox(lo, hi);
+    ctx->ItemClick("//###ToolWindow/###sim_bc_remote");
+    ctx->Yield();
+    s_App->simulation.pointOverridden = false;
+    ctx->ItemInputValue("//###ToolWindow/###sim_remote_force", "60");
+    ctx->Yield();
+    ui::SimulationApplyToFace(*s_App, face);
+    ctx->Yield(2);
+    const fem::Study* st = Doc()->FindStudy(s_App->simulation.activeStudyId);
+    IM_CHECK_EQ(st->loads.size(), (size_t)1);
+    const fem::Load& l = st->loads[0];
+    IM_CHECK(l.type == fem::LoadType::Remote);
+    IM_CHECK(std::abs(l.magnitude - 60.0) < 1e-9);
+    IM_CHECK(l.hasPoint);
+    const glm::dvec3 want =
+        info->centroid + info->normal * (0.1 * glm::length(hi - lo));
+    IM_CHECK(glm::length(l.point - want) < 1e-6);
+    // Pushing into the face, like a force placed there.
+    IM_CHECK(glm::dot(l.direction, info->normal) < -0.999);
+    std::vector<PrimVertex> prims;
+    ui::AppendSimulationBCGlyphs(*s_App, prims);
+    IM_CHECK(!prims.empty());
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
+  };
+
+  // Probe (docs/simulation/README.md#probing-a-face): a solved study's
+  // stress on the clamped face, pinned to the Probes list, and the pin made
+  // a requirement on that face -- held at the material's yield.
+  t = IM_REGISTER_TEST(engine, "sim", "a_probe_pins_a_face_and_holds_it");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, studyId));
+    ctx->Yield(2);
+    const ElementRef root = Doc()->FindStudy(studyId)->loads[0].face;
+    ctx->ItemClick("//###ToolWindow/###sim_probe");
+    ctx->Yield();
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Probe);
+    ui::SimulationApplyToFace(*s_App, root);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->simulation.probes.size(), (size_t)1);
+    // Still armed: a probe pins several faces in a row. Off again.
+    IM_CHECK(s_App->simulation.tool == ui::SimulationState::Tool::Probe);
+    ctx->ItemClick("//###ToolWindow/###sim_probe");
+    ctx->Yield();
+    // The clamped root carries the bending stress; its peak is real.
+    const fem::StudyRuntime* rt = Doc()->StudyResults(studyId);
+    fem::ResolvedFace rf;
+    IM_CHECK_SILENT(fem::ResolveFace(*Doc(), root, "t", rf, nullptr));
+    const auto stress = fem::FaceStressOf(
+        rt->bodies[0].mesh, rt->bodies[0].results.vonMises, rf.faceIndex);
+    IM_CHECK_SILENT(stress.has_value());
+    IM_CHECK(stress->maxMPa > 0.0);
+    IM_CHECK(stress->maxMPa <= rt->maxVonMises + 1e-9);
+
+    const size_t before = s_App->requirements.size();
+    ctx->ItemClick("//###ToolWindow/**/###probe_row_0", ImGuiMouseButton_Right);
+    ctx->Yield();
+    ctx->ItemClick("//$FOCUSED/###probe_req");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->requirements.size(), before + 1);
+    const req::Requirement& r = s_App->requirements.back();
+    IM_CHECK(r.measure.at("kind") == "study_probe");
+    IM_CHECK(r.measure.at("quantity") == "von_mises_max");
+    IM_CHECK(r.measure.at("face").at("element") == root.name);
+    IM_CHECK(r.bound.kind == "at_most");
+    IM_CHECK(r.bound.value > stress->maxMPa); // steel's yield, not the reading
+    s_App->requirements.pop_back();
+    s_App->simulation.probes.clear();
+    ui::ExitSimulation(*s_App);
+    ctx->Yield();
   };
 }

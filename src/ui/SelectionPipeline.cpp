@@ -414,9 +414,17 @@ std::optional<ArmedContext> ActiveArmedContext(AppState& state) {
   }
   if (state.simulation.IsActive() &&
       state.simulation.tool != SimulationState::Tool::None) {
+    const SimulationState::Tool tool = state.simulation.tool;
     const char* prompt =
-        state.simulation.tool == SimulationState::Tool::Keep
+        tool == SimulationState::Tool::Keep
             ? "Pick a face to keep solid - Esc cancels"
+        : tool == SimulationState::Tool::Probe
+            ? "Hover a face for its stress, click to pin it - Esc exits"
+        : tool == SimulationState::Tool::Torque
+            ? "Pick the face the torque turns (a cylinder lends its axis) - "
+              "Esc cancels"
+        : tool == SimulationState::Tool::Remote
+            ? "Pick the face that carries the remote load - Esc cancels"
             : "Pick a face for the boundary condition - Esc cancels";
     return ArmedContext{KindBit(SelectionItem::Kind::Face), prompt,
                         ConsumeSimFace};

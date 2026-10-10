@@ -47,6 +47,9 @@ struct StudyRunStatus {
 // own weight, so the tool never places a load of 0 that silently does
 // nothing.
 void SimulationArmTool(AppState& state, SimulationState::Tool tool);
+// The weight (N) of what the active study solves -- the part, or the meshed
+// occurrence -- that the load tools seed from; 0 when no material says.
+double SimulationWeightN(AppState& state);
 
 // ---- Studies on an ASSEMBLY (docs/simulation/README.md#assembly-studies)
 // The assembly document does not own its parts, so everything that places

@@ -786,20 +786,11 @@ TopoRunStatus GetTopologyStatus(const AppState& state, uint64_t studyId) {
   return st;
 }
 
-void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
+namespace {
+// The mass properties of what the active study solves: the part's own
+// bodies -- or, on an assembly, the MESHED occurrence's.
+std::optional<Measure::DocumentMass> SimulationMass(AppState& state) {
   SimulationState& sim = state.simulation;
-  sim.tool = tool;
-  if (tool != SimulationState::Tool::Force &&
-      tool != SimulationState::Tool::Pressure)
-    return;
-  if (sim.pendingMagnitude != 0.0)
-    return; // the user's own number survives re-arming
-  // Seed from the part itself. A 0 N force is placeable, solvable and
-  // meaningless — the study runs and reports zero stress everywhere, which
-  // looks like an answer. Self-weight is a real number derived from what the
-  // load acts on: "this part's own weight" is a scale a user can reason about
-  // and edit (docs/ui/tool-sessions.md#defaults-and-refusals).
-  // The part's own weight — or, on an assembly, the MESHED occurrence's.
   std::vector<Body> placed;
   const std::vector<Body>* bodies = nullptr;
   if (Document* doc = state.document.get()) {
@@ -813,12 +804,37 @@ void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
     bodies = &placed;
   }
   if (!bodies || bodies->empty())
-    return;
-  const auto mass = Measure::MassOfBodies(*bodies);
+    return std::nullopt;
+  return Measure::MassOfBodies(*bodies);
+}
+} // namespace
+
+double SimulationWeightN(AppState& state) {
+  const auto mass = SimulationMass(state);
+  if (!mass || !mass->massKnown || mass->massG <= 0.0)
+    return 0.0;
+  return mass->massG * 0.001 * 9.81;
+}
+
+void SimulationArmTool(AppState& state, SimulationState::Tool tool) {
+  SimulationState& sim = state.simulation;
+  sim.tool = tool;
+  if (tool != SimulationState::Tool::Force &&
+      tool != SimulationState::Tool::Pressure &&
+      tool != SimulationState::Tool::Remote)
+    return; // a torque seeds when it is placed, from the face's radius
+  if (sim.pendingMagnitude != 0.0)
+    return; // the user's own number survives re-arming
+  // Seed from the part itself. A 0 N force is placeable, solvable and
+  // meaningless — the study runs and reports zero stress everywhere, which
+  // looks like an answer. Self-weight is a real number derived from what the
+  // load acts on: "this part's own weight" is a scale a user can reason about
+  // and edit (docs/ui/tool-sessions.md#defaults-and-refusals).
+  const auto mass = SimulationMass(state);
   if (!mass || !mass->massKnown || mass->massG <= 0.0)
     return; // no material yet: the panel says so, and says why
   const double weightN = mass->massG * 0.001 * 9.81;
-  if (tool == SimulationState::Tool::Force) {
+  if (tool != SimulationState::Tool::Pressure) {
     sim.pendingMagnitude = weightN;
     sim.pendingMagnitudeExpr.clear(); // a derived default is a number
     return;

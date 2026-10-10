@@ -1165,11 +1165,30 @@ void DrawSimulationToolbar(AppState& state) {
   // Hint while a BC tool is armed.
   if (sim.tool != SimulationState::Tool::None) {
     ImGui::SameLine();
-    const char* what = sim.tool == SimulationState::Tool::Fixed
-                           ? "fixed support"
-                       : sim.tool == SimulationState::Tool::Force ? "force"
-                                                                  : "pressure";
-    ImGui::TextDisabled("click a face to place the %s", what);
+    const char* what = "pressure";
+    switch (sim.tool) {
+    case SimulationState::Tool::Fixed:
+      what = "fixed support";
+      break;
+    case SimulationState::Tool::Force:
+      what = "force";
+      break;
+    case SimulationState::Tool::Torque:
+      what = "torque";
+      break;
+    case SimulationState::Tool::Remote:
+      what = "remote load";
+      break;
+    case SimulationState::Tool::Keep:
+      what = "keep face";
+      break;
+    default:
+      break;
+    }
+    if (sim.tool == SimulationState::Tool::Probe)
+      ImGui::TextDisabled("hover a face for its stress, click to pin it");
+    else
+      ImGui::TextDisabled("click a face to place the %s", what);
   }
   ImGui::NewLine();
 }

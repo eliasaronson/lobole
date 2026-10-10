@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/AxisRef.h"
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/InputHash.h"
@@ -589,7 +590,10 @@ struct SimulationState {
 
   // Armed boundary-condition tool: a viewport face click assigns this load.
   // Keep (topology) freezes the picked face solid during optimization.
-  enum class Tool { None, Fixed, Force, Pressure, Keep };
+  // Torque and Remote place those loads; Probe reads a solved static
+  // study's stress on the face under the cursor and pins what is clicked
+  // (docs/simulation/README.md#probing-a-face).
+  enum class Tool { None, Fixed, Force, Pressure, Keep, Torque, Remote, Probe };
   Tool tool = Tool::None;
 
   // Dragging a force arrow in the viewport to change its MAGNITUDE
@@ -619,6 +623,28 @@ struct SimulationState {
   std::string pendingMagnitudeExpr;
   glm::dvec3 pendingDirection{0.0, -1.0, 0.0};
   bool directionOverridden = false;
+  // The next torque (N*mm; seeded from the part's weight times the clicked
+  // face's radius when it is placed, unless typed) and the axis it turns
+  // about. With no axis chosen a cylindrical face lends its own and any
+  // other face is refused (placeRefusal).
+  double pendingTorque = 0.0;
+  std::string pendingTorqueExpr;
+  bool torqueAxisChosen = false;
+  AxisRef torqueAxis;
+  // The next remote load's point (mm). Until one is typed it is the clicked
+  // face's centroid pushed out along its normal by a tenth of the body's
+  // bounding diagonal: a lever arm the picture can show. Its force and
+  // direction are the Force tool's (pendingMagnitude, pendingDirection).
+  glm::dvec3 pendingPoint{0.0};
+  bool pointOverridden = false;
+  // Faces pinned with the Probe tool: their stress in the study's result is
+  // listed under the results, and their peaks marked in the viewport.
+  // Panel state: a pin that should outlive the session is a requirement.
+  struct ProbePin {
+    uint64_t studyId = 0;
+    ElementRef face;
+  };
+  std::vector<ProbePin> probes;
   // The load case the next force or pressure goes in, on a study with cases
   // (docs/topopt/README.md#load-cases); empty or gone = the first.
   std::string pendingCase;
