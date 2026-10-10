@@ -40,7 +40,9 @@
 //
 // Deflection is DERIVED from each body's own size (its bounding diagonal),
 // so a 2 mm screw and a 2 m dock are meshed to the same relative fidelity
-// and neither carries a millimetre constant that is wrong for the other.
+// and neither carries a millimetre constant that is wrong for the other. A
+// caller that knows the gap it is deciding (a motion study's
+// clash_deflection_mm) can ask for a finer one with Mesh::Build.
 namespace collide {
 
 // A triangle soup with an AABB tree over it, built once per shape and reused
@@ -48,11 +50,14 @@ namespace collide {
 // and a query transforms boxes and triangles rather than the geometry.
 class Mesh {
 public:
-  // Builds from `shape`. `deflectionFraction` multiplies the bounding
-  // diagonal (0.002 = the same 0.2% the renderer meshes at). Empty when the
-  // shape has no triangles.
+  // Builds from `shape`, tessellated at `deflectionMm`. 0 derives it from
+  // the shape's own size -- 0.2% of its bounding diagonal, the triangulation
+  // the renderer already holds, so it costs nothing new. A stated deflection
+  // is meshed on a COPY of the shape: a finer triangulation written into the
+  // document's shape would become the one every renderer and export reads
+  // (CADShape::GenerateMeshDetached). Empty when the shape has no triangles.
   static std::shared_ptr<const Mesh> Build(const CADShape& shape,
-                                           double deflectionFraction = 0.002);
+                                           double deflectionMm = 0.0);
 
   [[nodiscard]] bool Empty() const { return m_tris.empty(); }
   [[nodiscard]] size_t TriangleCount() const { return m_tris.size(); }

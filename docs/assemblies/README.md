@@ -297,6 +297,17 @@ omitted = whichever is active).
 
 - The range is stored in the DOF's own unit (radians / mm); the RPC takes
   degrees for a rotation and converts once.
+- The mesh check meshes each body at 0.2% of its bounding diagonal unless
+  the study states `clash_deflection_mm` (v167). A running gap finer than
+  that — print-in-place gears at 0.1 mm a side, where a 100 mm ring meshes
+  at about 0.2 mm — has triangles coarser than the gap they decide, and can
+  read either way; state a deflection under the gap. The stated one is what
+  the triangles are cut to, on a copy of each shape so the document's own
+  triangulation is untouched ([mesh mode](../inspect/README.md#mesh-mode)),
+  and the run's `deflection_mm` reports the coarsest mesh it decided on.
+  It belongs to the mesh check only: on an `exact` study it is refused, and
+  `set_motion_study {clash_deflection_mm: null}` derives it again. The
+  Motion window's Validate always checks exactly, so it has no field there.
 - Samples are walked in order, each solve starting from the last, so a closed
   loop stays on the branch it is on — and the first sample is WALKED to from
   wherever the document has the driver, at the study's own spacing, as the

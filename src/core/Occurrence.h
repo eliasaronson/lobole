@@ -412,6 +412,12 @@ struct MotionStudy {
   // "mesh" (the default: triangles, the speed a sweep needs) or "exact"
   // (the boolean, at a boolean's price, for a final gate).
   std::string clashMode = "mesh";
+  // The mesh check's deflection, mm (v167): 0 derives it per body, 0.2% of
+  // its bounding diagonal. A mechanism whose running gaps are finer than
+  // that (print-in-place gears at 0.1 mm a side, where a 100 mm ring meshes
+  // at 0.2 mm) says so here, or its triangles are coarser than the gap they
+  // decide. Mesh mode only.
+  double clashDeflectionMm = 0.0;
   // The configuration the study runs under (v128): an id, or 0 for the BASE
   // (no configuration); unset = whichever is active when it runs. A study
   // that measures "full load" has to SAY full load, or it measures whatever
@@ -419,6 +425,12 @@ struct MotionStudy {
   // held has to be able to say "base", which is why unset and 0 differ.
   std::optional<uint64_t> configuration;
 };
+
+// Why `study`'s clash_deflection_mm cannot stand, or empty when it can: it
+// must be a finite positive number of millimetres, and it means something
+// only to the mesh check, so an exact study that carries one is refused
+// rather than quietly ignoring it. One rule for the RPC and the loader.
+std::string MotionStudyDeflectionProblem(const MotionStudy& study);
 
 // A CLEARANCE the designer declared, as an assembly saved before v160 holds
 // it. It loads, and is moved into the project's requirements on open

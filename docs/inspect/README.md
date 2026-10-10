@@ -262,6 +262,10 @@ and is for questions asked over and over.
   must be certain re-runs exact.
 - The deflection is 0.2% of each body's bounding diagonal, the renderer's
   own, so a 2 mm screw and a 2 m frame get the same relative fidelity.
+  `collide::Mesh::Build` also takes a stated deflection in mm (a motion
+  study's `clash_deflection_mm`) and cuts the triangles to it, on a copy of
+  the shape: BRepMesh writes its triangulation into the shape, and a finer
+  one left there would be what the renderer draws from then on.
 - A body wholly inside another is a clash, found by a ray-parity containment
   test that runs only when the two boxes nest. The test starts from a point
   on the inner body's surface, never its box centre: a bearing cap straddling

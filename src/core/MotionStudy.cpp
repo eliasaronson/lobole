@@ -311,13 +311,15 @@ struct Placed {
 // A mesh per LOCAL shape, built once for the whole run and placed by matrix
 // at every sample — the only reason 48 samples of a 250-occurrence sweep is
 // tractable at all.
-std::shared_ptr<const collide::Mesh> MeshFor(MeshCache& cache,
-                                             const CADShape& shape) {
+// One run asks for one deflection (MotionStudy::clashDeflectionMm, 0 =
+// derived per body), so the cache need not key on it.
+std::shared_ptr<const collide::Mesh>
+MeshFor(MeshCache& cache, const CADShape& shape, double deflectionMm) {
   const void* key = shape.GeometryId();
   const auto it = cache.find(key);
   if (it != cache.end())
     return it->second;
-  auto mesh = collide::Mesh::Build(shape);
+  auto mesh = collide::Mesh::Build(shape, deflectionMm);
   cache[key] = mesh;
   return mesh;
 }
@@ -376,10 +378,11 @@ Hit ExactHit(const Placed& a, const Placed& b,
   return h;
 }
 
-Hit MeshHit(const Placed& a, const Placed& b, MeshCache& meshes) {
+Hit MeshHit(const Placed& a, const Placed& b, MeshCache& meshes,
+            double deflectionMm) {
   Hit h;
-  const auto ma = MeshFor(meshes, a.body->shape);
-  const auto mb = MeshFor(meshes, b.body->shape);
+  const auto ma = MeshFor(meshes, a.body->shape, deflectionMm);
+  const auto mb = MeshFor(meshes, b.body->shape, deflectionMm);
   h.deflection = std::max(ma->Deflection(), mb->Deflection());
   h.hit = ma->Overlaps(a.world, *mb, b.world);
   return h;
@@ -508,8 +511,8 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
   if (!exact)
     for (const Cand& c : cands)
       if (!c.rigid) {
-        MeshFor(meshes, placed[c.s][c.a].body->shape);
-        MeshFor(meshes, placed[c.s][c.b].body->shape);
+        MeshFor(meshes, placed[c.s][c.a].body->shape, study.clashDeflectionMm);
+        MeshFor(meshes, placed[c.s][c.b].body->shape, study.clashDeflectionMm);
       }
 
   // The callbacks are the caller's and need not be thread-safe: the workers
@@ -537,8 +540,9 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
     const Placed& pb = placed[cd.s][cd.b];
     // A rigid pair is always asked exactly: touching is what fastened parts
     // do, and a mesh check would call every bolted joint a clash.
-    hits[k] = exact || cd.rigid ? ExactHit(pa, pb, contacts)
-                                : MeshHit(pa, pb, meshes);
+    hits[k] = exact || cd.rigid
+                  ? ExactHit(pa, pb, contacts)
+                  : MeshHit(pa, pb, meshes, study.clashDeflectionMm);
     done[k] = 1;
     const size_t n = finished.fetch_add(1) + 1;
     if (progress && toRun > 0) {

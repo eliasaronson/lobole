@@ -593,6 +593,8 @@ json MotionStudyToJson(const MotionStudy& s) {
   j["samples"] = s.samples;
   j["check_clash"] = s.checkClash;
   j["clash_mode"] = s.clashMode;
+  if (s.clashDeflectionMm > 0.0)
+    j["clash_deflection_mm"] = s.clashDeflectionMm; // v167; absent = derived
   if (s.configuration)
     j["configuration"] = *s.configuration; // v128; 0 = the base
   return j;
@@ -618,6 +620,11 @@ MotionStudy MotionStudyFromJson(const json& j) {
                              "' (expected mesh or exact)");
   if (j.contains("configuration") && !j.at("configuration").is_null())
     s.configuration = j.at("configuration").get<uint64_t>();
+  if (j.contains("clash_deflection_mm")) { // v167
+    s.clashDeflectionMm = j.at("clash_deflection_mm").get<double>();
+    if (const std::string why = MotionStudyDeflectionProblem(s); !why.empty())
+      throw std::runtime_error("motion study '" + s.name + "': " + why);
+  }
   return s;
 }
 

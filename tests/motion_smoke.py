@@ -220,6 +220,34 @@ def main():
         refused(d, "add_motion_study", ["clash_mode", "mesh, exact"],
                 driver=axle, **{"from": 0}, to=90, clash_mode="fast")
         refused(d, "motion_status", ["no motion study", "turn"], study=4242)
+        # The mesh check's deflection: what it is asked for is what it
+        # meshes at and reports, and it means nothing to an exact check.
+        fine = d.call("add_motion_study", driver=axle, **{"from": 0}, to=360,
+                      samples=13, name="fine", clash_deflection_mm=0.05)
+        expect(abs(fine["clash_deflection_mm"] - 0.05) < 1e-12,
+               f"the study keeps its deflection: {fine}")
+        ran = d.call("run_motion_study", study=fine["id"])
+        expect(abs(ran["deflection_mm"] - 0.05) < 1e-12 and
+               not ran["clean"],
+               f"meshed at 0.05 mm, and the stop still found: "
+               f"{ran.get('deflection_mm')}")
+        refused(d, "add_motion_study", ["clash_deflection_mm", "mesh"],
+                driver=axle, **{"from": 0}, to=90, clash_mode="exact",
+                clash_deflection_mm=0.05)
+        refused(d, "add_motion_study", ["positive"], driver=axle,
+                **{"from": 0}, to=90, clash_deflection_mm=-1)
+        # A refused edit changes nothing; null derives it per body again.
+        refused(d, "set_motion_study", ["clash_deflection_mm", "null"],
+                study=fine["id"], clash_mode="exact", samples=7)
+        kept = next(s for s in d.call("list_motion_studies")["studies"]
+                    if s["id"] == fine["id"])
+        expect(kept["samples"] == 13 and kept["clash_mode"] == "mesh",
+               f"the refused edit changed nothing: {kept}")
+        cleared = d.call("set_motion_study", study=fine["id"],
+                         clash_mode="exact", clash_deflection_mm=None)
+        expect("clash_deflection_mm" not in cleared and
+               cleared["clash_mode"] == "exact", f"cleared: {cleared}")
+        d.call("remove_motion_study", study=fine["id"])
         refused(d, "set_motion_pose", ["0..1"], study=sid, t=1.5)
         # A fastened mate has nothing to drive.
         fixed = d.call("add_mate", type="fastened", name="weld",

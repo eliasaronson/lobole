@@ -50,6 +50,10 @@ constexpr MethodDoc MotionMethods[] = {
      "mate must say which), from, to — DEGREES for a rotation, mm for an "
      "offset — samples? (default 48), check_clash? (default true), "
      "clash_mode?: mesh (default, ~10x faster) | exact (the boolean), "
+     "clash_deflection_mm? (mesh only: the tessellation the mesh check "
+     "decides on, default 0.2% of each body's bounding diagonal — set it "
+     "under the smallest running gap, or a gap finer than the triangles "
+     "reads either way), "
      "configuration? (an assembly configuration id the study runs, is "
      "judged and is scrubbed UNDER, whatever is active; 0 = the base, with "
      "nothing held or suppressed; omitted = whichever is active when it "
@@ -64,21 +68,23 @@ constexpr MethodDoc MotionMethods[] = {
      "from the previous sample and can come out of it on the other branch. "
      "The driver to choose is the DOF that cannot change on the branch you "
      "do not want; the clash check is what makes the jump visible.",
-     "check_clash, clash_mode, configuration, dof, driver, driver_path, "
-     "from, name, samples, to"},
+     "check_clash, clash_deflection_mm, clash_mode, configuration, dof, "
+     "driver, driver_path, from, name, samples, to"},
     {"set_motion_study",
      "Edit a study {study, name?, from?, to?, samples?, check_clash?, "
-     "clash_mode?, configuration? (an id, 0 = the base, null = whichever "
+     "clash_mode?, clash_deflection_mm? (mm, null = derived per body "
+     "again), configuration? (an id, 0 = the base, null = whichever "
      "is active)}; a stored "
      "result is dropped, since it described the old definition.",
-     "check_clash, clash_mode, configuration, from, name, samples, study, "
-     "to"},
+     "check_clash, clash_deflection_mm, clash_mode, configuration, from, "
+     "name, samples, study, to"},
     {"remove_motion_study", "Remove a study by id.", "study"},
     {"list_motion_studies",
      "Every study, with whether it has a result and whether one is running.",
      "", remote::NoFlags,
      "studies[]{type,id,name,driver_mate,driver_dof,from,to,samples,check_"
-     "clash,clash_mode,configuration?,unit,has_result,running,why_not?,"
+     "clash,clash_mode,clash_deflection_mm?,configuration?,unit,has_result,"
+     "running,why_not?,"
      "stale?,clean?,collision_checked?}"},
     {"run_motion_study",
      "Run it: {study, async?, include_poses?, leave_at?, leave_at_deg?, "
@@ -110,7 +116,9 @@ constexpr MethodDoc MotionMethods[] = {
      "its motor and its screws, so the pairs already in contact at the "
      "first sample are counted and the rest are listed), `worst_sample`, "
      "`table` (the same as text, for a report), "
-     "`deflection_mm` for a mesh check, and `pairs_checked`. An exact "
+     "`deflection_mm` for a mesh check (the coarsest tessellation it "
+     "decided on: the study's clash_deflection_mm when it sets one), and "
+     "`pairs_checked`. An exact "
      "check relieves an engaged thread, a ring in its groove and a PRESS "
      "FIT (two coaxial round faces whose size bands allow the overlap, "
      "docs/tolerances/README.md#press-fits); `press_fits` lists each "
@@ -205,6 +213,32 @@ constexpr MethodDoc MotionMethods[] = {
      "plus ok and error).",
      ""},
 };
+
+// `clash_deflection_mm`: a positive number of mm, or null to derive it per
+// body again. Checked against the study's clash_mode as it will be, so
+// clash_mode and the deflection can change in one call.
+void ReadClashDeflection(const RpcParams& p, MotionStudy& s) {
+  if (p.contains("clash_deflection_mm")) {
+    const json& v = p.at("clash_deflection_mm");
+    if (v.is_null()) {
+      s.clashDeflectionMm = 0.0;
+    } else if (!v.is_number()) {
+      throw std::runtime_error(
+          "clash_deflection_mm is a number of millimetres, or null to derive "
+          "it from each body's size; got " +
+          v.dump());
+    } else {
+      s.clashDeflectionMm = v.get<double>();
+      if (!(s.clashDeflectionMm > 0.0))
+        throw std::runtime_error(
+            "clash_deflection_mm must be a positive number of millimetres "
+            "(null derives it from each body's size); got " +
+            v.dump());
+    }
+  }
+  if (const std::string why = MotionStudyDeflectionProblem(s); !why.empty())
+    throw std::runtime_error(why);
+}
 
 json StudyJson(ui::AppState& state, const AssemblyDocument& asmDoc,
                const MotionStudy& s) {
@@ -620,6 +654,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     if (s.clashMode != "mesh" && s.clashMode != "exact")
       throw std::runtime_error("clash_mode '" + s.clashMode +
                                "' is not one of: mesh, exact");
+    ReadClashDeflection(p, s);
     if (p.contains("configuration")) {
       // null clears it (whichever is active); 0 is the base; else an id.
       if (p.at("configuration").is_null()) {
@@ -647,8 +682,11 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "set_motion_study") {
     AssemblyDocument& asmDoc = NeedAssembly(state);
-    MotionStudy& s = NeedStudy(asmDoc, p);
-    ui::SnapshotAssembly(state);
+    MotionStudy& live = NeedStudy(asmDoc, p);
+    // Edited on a copy and written back only once every field has passed: a
+    // refused call changes nothing
+    // (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+    MotionStudy s = live;
     const bool rot = s.driverDof == MateDof::Rotation;
     if (p.contains("name"))
       s.name = p.at("name").get<std::string>();
@@ -669,6 +707,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error("clash_mode '" + s.clashMode +
                                  "' is not one of: mesh, exact");
     }
+    ReadClashDeflection(p, s);
     if (p.contains("configuration")) {
       // null clears it (whichever is active); 0 is the base; else an id.
       if (p.at("configuration").is_null()) {
@@ -687,9 +726,11 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
         s.configuration = c;
       }
     }
+    ui::SnapshotAssembly(state);
+    live = s;
     asmDoc.BumpVersion();
-    ui::DropMotionResult(state, s.id); // it described the old definition
-    return StudyJson(state, asmDoc, s);
+    ui::DropMotionResult(state, live.id); // it described the old definition
+    return StudyJson(state, asmDoc, live);
   }
   if (m == "remove_motion_study") {
     AssemblyDocument& asmDoc = NeedAssembly(state);

@@ -1,0 +1,117 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "flipped": false,
+      "id": 4,
+      "mate_type": "revolute",
+      "name": "axle",
+      "offset": 0.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    }
+  ],
+  "motion": [
+    {
+      "check_clash": true,
+      "clash_deflection_mm": 0.05,
+      "clash_mode": "mesh",
+      "driver_dof": "rotation",
+      "driver_mate": 4,
+      "from": 0.0,
+      "id": 5,
+      "name": "turn, finely",
+      "samples": 13,
+      "to": 6.283185307179586,
+      "type": "MotionStudy"
+    }
+  ],
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Carrier",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 2,
+      "name": "Arm",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 3,
+      "name": "Stop",
+      "part_id": 3,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          1.2246467996456087e-15,
+          20.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "version": 167
+}

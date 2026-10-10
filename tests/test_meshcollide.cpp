@@ -295,3 +295,46 @@ TEST_CASE("Mesh distance answers what the exact query answers", "[collide]") {
     CHECK_FALSE(gap.known);
   }
 }
+
+// A running gap finer than the derived deflection: a 100 mm ring meshes at
+// about 0.2 mm, and print-in-place parts run at 0.1 mm a side. The check has
+// to be ASKED for finer triangles, and must then actually cut them -- Build
+// once took a fraction that changed only the number it reported.
+TEST_CASE("A stated deflection is the one the mesh is cut to", "[collide]") {
+  collide::ClearCache();
+  CADKernel& k = CADKernel::Instance();
+  // A ring with a 60 mm bore, and pins 0.1 mm clear of it and 0.05 mm over.
+  CADShape ring =
+      k.CreateCylinder(glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 50.0, 10.0);
+  ring = ring.Difference(
+      k.CreateCylinder(glm::vec3(0, 0, -1), glm::vec3(0, 0, 1), 30.0, 12.0));
+  REQUIRE(ring.IsValid());
+  const CADShape clear =
+      k.CreateCylinder(glm::vec3(0, 0, -5), glm::vec3(0, 0, 1), 29.9, 20.0);
+  const CADShape over =
+      k.CreateCylinder(glm::vec3(0, 0, -5), glm::vec3(0, 0, 1), 30.05, 20.0);
+  REQUIRE_FALSE(ExactOverlap(ring, glm::mat4(1.0f), clear, glm::mat4(1.0f)));
+  REQUIRE(ExactOverlap(ring, glm::mat4(1.0f), over, glm::mat4(1.0f)));
+
+  const auto derived = collide::Mesh::Build(ring);
+  const double fine = 0.02; // a fifth of the gap
+  const auto ringFine = collide::Mesh::Build(ring, fine);
+  REQUIRE_FALSE(ringFine->Empty());
+  INFO("derived " << derived->Deflection() << " mm, "
+                  << derived->TriangleCount() << " triangles; stated "
+                  << ringFine->Deflection() << " mm, "
+                  << ringFine->TriangleCount() << " triangles");
+  CHECK(derived->Deflection() > 0.1); // coarser than the gap: the problem
+  CHECK_THAT(ringFine->Deflection(), WithinAbs(fine, 1e-12));
+  CHECK(ringFine->TriangleCount() > derived->TriangleCount());
+
+  const auto clearFine = collide::Mesh::Build(clear, fine);
+  const auto overFine = collide::Mesh::Build(over, fine);
+  CHECK_FALSE(ringFine->Overlaps(glm::dmat4(1.0), *clearFine, glm::dmat4(1.0)));
+  CHECK(ringFine->Overlaps(glm::dmat4(1.0), *overFine, glm::dmat4(1.0)));
+
+  // ...and the fine mesh was cut on a copy: the document's own shape still
+  // carries the triangulation the renderer drew, not the fine one.
+  const auto again = collide::Mesh::Build(ring);
+  CHECK(again->TriangleCount() == derived->TriangleCount());
+}

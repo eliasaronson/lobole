@@ -26,10 +26,10 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    166; // v166: a reference image's `show_always` (true, omitted when off):
-         //      drawn whenever its sketch is shown and in quick stills, not
-         //      only while the sketch is edited
-         //      (docs/sketching/README.md#reference-images-underlays).
+    167; // v167: a motion study's `clash_deflection_mm` (omitted when the
+         //      mesh check derives its deflection per body), the mesh clash
+         //      check's tessellation in mm
+         //      (docs/assemblies/README.md#motion-studies).
          //      Underlays are stripped from the regen hash already.
          // v165: a requirement's measure kind `section_area` {document:
          //      part, base_plane+offset or origin+normal, of: material|

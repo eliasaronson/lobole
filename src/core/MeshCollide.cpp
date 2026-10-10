@@ -225,15 +225,24 @@ std::shared_ptr<const Mesh> CachedMesh(const CADShape& s) {
 } // namespace
 
 std::shared_ptr<const Mesh> Mesh::Build(const CADShape& shape,
-                                        double deflectionFraction) {
+                                        double deflectionMm) {
   auto mesh = std::shared_ptr<Mesh>(new Mesh());
   if (!shape.IsValid())
     return mesh;
-  // The deflection is the shape's OWN size times the fraction, so a screw
+  // Unstated, the deflection is the shape's OWN size times 0.2%, so a screw
   // and a dock are meshed to the same relative fidelity. GenerateMesh
   // already derives its linear deflection this way; asking for the default
   // keeps the two in step rather than introducing a second rule.
-  const CADShape::Mesh tess = shape.GenerateMesh();
+  //
+  // Stated, it is what the triangles are cut to. This used to take a
+  // fraction that changed only the number reported, not the tessellation,
+  // so a caller asking for a finer check got the same triangles labelled
+  // finer. A stated one meshes a COPY: BRepMesh writes its triangulation
+  // into the shape, and a finer one left there is what the renderer would
+  // draw from then on.
+  const bool stated = deflectionMm > 0.0;
+  const CADShape::Mesh tess =
+      stated ? shape.GenerateMeshDetached(deflectionMm) : shape.GenerateMesh();
   if (tess.indices.size() < 3)
     return mesh;
 
@@ -253,8 +262,7 @@ std::shared_ptr<const Mesh> Mesh::Build(const CADShape& shape,
   }
   mesh->m_min = lo;
   mesh->m_max = hi;
-  const double diag = glm::length(hi - lo);
-  mesh->m_deflection = diag * deflectionFraction;
+  mesh->m_deflection = stated ? deflectionMm : glm::length(hi - lo) * 0.002;
 
   mesh->m_order.resize(mesh->m_tris.size());
   for (uint32_t i = 0; i < mesh->m_order.size(); i++)

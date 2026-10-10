@@ -117,7 +117,8 @@ void PrebuildMeshes(MotionRun& run) {
         continue;
       const void* key = b.shape.GeometryId();
       if (!run.meshes.count(key))
-        run.meshes[key] = collide::Mesh::Build(b.shape);
+        run.meshes[key] =
+            collide::Mesh::Build(b.shape, run.study.clashDeflectionMm);
     }
 }
 

@@ -551,3 +551,19 @@ bool AssemblyDocument::OccurrenceSuppressedIn(uint64_t configurationId,
         occurrenceId); // deleted: fall back, don't break
   return c->Suppresses(occurrenceId);
 }
+
+std::string MotionStudyDeflectionProblem(const MotionStudy& study) {
+  const double d = study.clashDeflectionMm;
+  if (d == 0.0)
+    return {};
+  if (!std::isfinite(d) || d < 0.0)
+    return "clash_deflection_mm must be a positive number of millimetres "
+           "(omit it, or pass null, to derive it from each body's size)";
+  if (study.clashMode != "mesh")
+    return "clash_deflection_mm sets the MESH check's tessellation, and "
+           "clash_mode is '" +
+           study.clashMode +
+           "', which checks the B-Rep; use clash_mode mesh, or clear "
+           "clash_deflection_mm with null";
+  return {};
+}

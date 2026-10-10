@@ -575,6 +575,55 @@ TEST_CASE("The v128 golden: a study that names its configuration",
   CHECK(res.clean); // the stop is out, under the study's own configuration
 }
 
+TEST_CASE("The v167 golden: a study that states its clash deflection",
+          "[motion][golden]") {
+  Rig r = MakeRig(90.0);
+  MotionStudy s = FullTurn(r.axle, 13);
+  s.name = "turn, finely";
+  s.clashDeflectionMm = 0.05;
+  r.asmDoc.AddMotionStudy(s);
+  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V167_ASM"))
+    REQUIRE(DocumentIO::SaveAssembly(r.asmDoc, out).has_value());
+
+  // What the run meshes at is what it was asked for, and it still finds the
+  // stop the derived deflection finds.
+  const motion::Result here = motion::Run(r.asmDoc, r.Parts(), nullptr, s);
+  REQUIRE(here.error.empty());
+  CHECK_THAT(here.deflectionMm, WithinAbs(0.05, 1e-12));
+  CHECK_FALSE(here.clean);
+  MotionStudy derived = s;
+  derived.clashDeflectionMm = 0.0;
+  const motion::Result coarse =
+      motion::Run(r.asmDoc, r.Parts(), nullptr, derived);
+  CHECK(coarse.deflectionMm > 0.05);
+  // ...and they are different inputs: a stored answer is not handed across.
+  CHECK(motion::InputKey(r.asmDoc, r.Parts(), nullptr, s) !=
+        motion::InputKey(r.asmDoc, r.Parts(), nullptr, derived));
+
+  const fs::path golden = fs::path(TestSourceDir()) /
+                          "tests/golden/assembly/v167-clash-deflection.json";
+  auto g = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(g.has_value());
+  REQUIRE((*g)->GetMotionStudies().size() == 1);
+  const MotionStudy& gs = (*g)->GetMotionStudies()[0];
+  CHECK_THAT(gs.clashDeflectionMm, WithinAbs(0.05, 1e-12));
+  const motion::Result res = motion::Run(**g, r.Parts(), nullptr, gs);
+  REQUIRE(res.error.empty());
+  CHECK_THAT(res.deflectionMm, WithinAbs(0.05, 1e-12));
+  CHECK_FALSE(res.clean);
+
+  // Absent is derived; a bad one, or one on an exact study, is refused.
+  nlohmann::json j = DocumentIO::MotionStudyToJson(derived);
+  CHECK_FALSE(j.contains("clash_deflection_mm"));
+  j["clash_deflection_mm"] = -0.1;
+  CHECK_THROWS_WITH(DocumentIO::MotionStudyFromJson(j),
+                    ContainsSubstring("positive"));
+  j["clash_deflection_mm"] = 0.05;
+  j["clash_mode"] = "exact";
+  CHECK_THROWS_WITH(DocumentIO::MotionStudyFromJson(j),
+                    ContainsSubstring("MESH"));
+}
+
 TEST_CASE("The verdict asks whether it moved before it asks about clashes",
           "[motion]") {
   MotionStudy s;
