@@ -161,8 +161,8 @@ Jacobian and a factorization.
   frame should be and where the tree put it: translation in mm, then the
   rotation (log of the rotation part) scaled by a characteristic length — the
   spread of the component's occurrence origins at the seed, at least 1 mm — so
-  every row is in mm and the tolerance means one thing. Relation rows and
-  pinned-DOF rows (the driven DOF, configuration holds) are added beside them.
+  every row is in mm and the tolerance means one thing. Relation rows (one
+  per relation, however many mates it couples) and pinned-DOF rows (the driven DOF, configuration holds) are added beside them.
 - **Precision.** Evaluation runs in double, as the placements and mate values
   it starts from and writes back are. A float chain of matrices carried
   ~1e-3 mm of noise at 100 mm scale, which a finite difference at small h

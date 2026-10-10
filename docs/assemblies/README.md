@@ -8,8 +8,10 @@ Two topic pages carry the detail:
 
 - [solver.md](solver.md) — connector frames, the mate types and their
   maths, the placement pass, and the numeric pass that closes mate loops.
-- [relations.md](relations.md) — couplings between two mates' degrees of
-  freedom: gear, chain, rack, screw, linear, cam, freewheel, click.
+- [relations.md](relations.md) — couplings between mates' degrees of
+  freedom: gear (external or internal), chain, rack, screw, linear, cam,
+  freewheel, click, worm, and over several mates linear_n, epicyclic and
+  planet.
 
 ## Projects and documents
 
@@ -29,7 +31,7 @@ an error):
 |---|---|
 | occurrences | placed parts or sub-assemblies |
 | mates | joints between two occurrences ([solver.md](solver.md)) |
-| relations | couplings between two mates' DOFs ([relations.md](relations.md)) |
+| relations | couplings between mates' DOFs ([relations.md](relations.md)) |
 | exploded views | named display offsets |
 | motion studies | one mate DOF driven over a range, clash-checked |
 | configurations | occurrence/mate/relation suppression and held mate DOFs ([../configurations/README.md](../configurations/README.md)) |
@@ -278,11 +280,14 @@ overwritten by the next solve.
 
 ## Relations
 
-A relation couples two mates' degrees of freedom — `dof_b = ratio · dof_a +
+A relation couples mates' degrees of freedom — `dof_b = ratio · dof_a +
 phase` for gear, chain, rack, screw and linear; a lift table for a cam; a
-one-way drive for a freewheel; a pawl for a click. In a mate tree it is
-enforced by propagation before placement; inside a loop it is a residual row
-in the loop solve. Dragging or `set_mate` on either mate moves the other. See
+one-way drive for a freewheel; a pawl for a click; and Σ cᵢ · dofᵢ = constant
+over several mates for linear_n and an epicyclic train (Willis, and each
+planet's turn on its carrier). In a mate tree it is enforced by propagation
+before placement; inside a loop it is a residual row in the loop solve.
+Dragging or `set_mate` on a member moves the others. The occurrence panel
+lists, edits and makes them (Add relation). See
 [relations.md](relations.md).
 
 ## Motion studies
@@ -768,8 +773,8 @@ one.
 - Mate limits (min/max on a DOF).
 - Editing into a sub-assembly from its parent.
 - A per-occurrence appearance override (a placement's `material` exists).
-- Creating a relation from the GUI; a gear relation's phase derived from the
-  gears' geometry.
+- A gear relation's phase derived from the gears' geometry; creating the
+  kinds other than gear, internal gear, linear and epicyclic from the GUI.
 - Contact dynamics: gears and cams are kinematic relations, checked for
   clash statically and over motion studies.
 - A version pin on an occurrence's part (`part_version`).

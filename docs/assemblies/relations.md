@@ -1,17 +1,21 @@
 # Relations
 
-A relation couples two mates' degrees of freedom. Mates alone give each gear
-of a pair its own free rotation on a carrier; a relation makes turning one
-turn the other. Tooth contact is not simulated — once module and centre
+A relation couples mates' degrees of freedom — two, or, for an epicyclic
+train, several. Mates alone give each gear of a pair its own free rotation
+on a carrier; a relation makes turning one turn the other. Tooth contact is not simulated — once module and centre
 distance match, the ratio is the kinematic model — and a wrong ratio or phase
 shows up as teeth overlapping in the clash checks, which is the static test
 that stands in for contact.
 
 Code: `Relation` in `src/core/Occurrence.h`; `PropagateRelations`,
 `RelationValue` and the residual check in `src/core/AssemblySolve.cpp`; the
-loop row in `src/core/AssemblyLoopSolve.cpp`; `add_relation` /
-`set_relation` in `src/remote/RemoteAssembly.cpp`. Tests:
-`tests/test_assembly_relations.cpp`, `tests/assembly_relations_smoke.py`.
+derivation from teeth and the checks before a relation is made
+(`DeriveFromTeeth`, `RelationProblem`) in `src/core/AssemblyRelations.cpp`;
+the loop row in `src/core/AssemblyLoopSolve.cpp`; `add_relation` /
+`set_relation` in `src/remote/RemoteAssembly.cpp`; the panel rows and the
+Add relation window in `src/ui/OccurrencePanel.cpp`. Tests:
+`tests/test_assembly_relations.cpp`, `tests/assembly_relations_smoke.py`,
+the `assembly` GUI tests named `*relation*`.
 
 Either side may be a mate inside a
 [flexible sub-assembly](README.md#flexible-sub-assemblies) placement, named
@@ -28,7 +32,7 @@ or `offset`). Most kinds are one equation:
 
 | kind | dof_a → dof_b | ratio |
 |---|---|---|
-| `gear` | rotation → rotation | `−teeth_a / teeth_b` (meshing gears counter-rotate) |
+| `gear` | rotation → rotation | `−teeth_a / teeth_b` (meshing gears counter-rotate); with `internal`, `+teeth_a / teeth_b` (a gear meshing inside a ring turns the same way) |
 | `chain` | rotation → rotation | `+teeth_a / teeth_b` (a chain or belt keeps the sense) |
 | `rack` | rotation → offset | the pinion's `pitch_radius`, mm per radian |
 | `screw` | one cylindrical mate's rotation → its own offset (a = b) | `pitch / 2π`; or from a Thread feature (`thread_part`, `thread_feature`), re-read on every solve |
@@ -37,10 +41,17 @@ or `offset`). Most kinds are one equation:
 | `freewheel` | rotation → rotation | a bare `ratio`, plus `drives` and `lead` |
 | `click` | one mate's rotation (a = b) | none: a one-way hold |
 | `worm` | the worm's rotation → the wheel's, on crossed axes | `±starts / teeth`, the sign from the hand and the geometry ([Worm](#worm)) |
+| `linear_n` | Σ coefficient · dof = constant, over two or more mates | none: a coefficient per term ([below](#relations-over-several-mates)) |
+| `epicyclic` | sun, ring and carrier rotations, by Willis | from `teeth_sun`, `teeth_ring` |
+| `planet` | a planet's turn on its carrier, from the sun's and the carrier's | from `teeth_sun` and the planet's teeth |
 
 The ratio is derived from the kind's own numbers when they are given (tooth
 counts, pitch radius, pitch) and otherwise taken as a bare `ratio`; a relation
-given neither is refused. `phase` is in b's unit (radians or mm) and is what makes teeth mesh.
+given neither is refused, and so is a gear or a chain given both teeth and a
+ratio (or `internal` with a bare ratio, which carries its own sign). A gear's
+or a chain's tooth counts are kept (`teeth_a`, `teeth_b`), so `set_relation`
+and the editor change the teeth and the ratio follows. `phase` is in b's
+unit (radians or mm) and is what makes teeth mesh.
 
 Refused at creation, naming what would do: a mate that lacks the DOF (a
 fastened mate's `rotation` is an authored twist, not a DOF); a rack whose
@@ -60,11 +71,14 @@ slide can each take their own relation. The walk:
 2. walks outward, setting each unsettled node from its neighbour and settling
    it; a relation is applied forward (b from a) or inverted (a from b), except
    a cam, which is never inverted;
-3. when the frontier empties, seeds **one** new root — the `a` of the first
-   relation neither of whose ends is settled — and continues. One root at a
-   time, not all at once: seeding every `a` would settle every mate that is
-   both a follower and a driver before anything reached it, and a chain would
-   be applied at its two ends only.
+3. when the frontier empties, first finishes any relation over several mates
+   the walk reached but could not complete, holding one member
+   ([below](#relations-over-several-mates)); otherwise seeds **one** new
+   root — the `a` of the first relation neither of whose ends is settled
+   (the first member, for one over several mates) — and continues. One root
+   at a time, not all at once: seeding every `a` would settle every mate
+   that is both a follower and a driver before anything reached it, and a
+   chain would be applied at its two ends only.
 
 Driven-first is what lets dragging either gear turn the other, and keeps a
 free mate from claiming a node the driver is about to set from a stale value.
@@ -72,12 +86,14 @@ An unprompted solve (load, `solve_assembly`) has no driven mate, so `a`
 drives `b` — deterministic, and a no-op after a driven pass because
 propagation is idempotent.
 
-**Inside a loop, as a row.** Each equality relation whose two mates are in the
+**Inside a loop, as a row.** Each equality relation whose mates are all in the
 same looped component is one residual row in the loop solve
 ([solver.md](solver.md#closing-loops)), `dof_b − ratio · dof_a − phase`, with
 rotation rows scaled by the component's characteristic length like the cut
-rows. Rank sees it: a four-bar with a 1:1 relation on its ground joints drops
-from one DOF to zero.
+rows. A relation over several mates is one row, Σ cᵢ · dofᵢ − constant,
+divided by its largest coefficient so it weighs like a binary one (weighted by
+the characteristic length when every member turns). Rank sees it: a four-bar
+with a 1:1 relation on its ground joints drops from one DOF to zero.
 
 **Validation.** A relation with a problem is reported in its `error` and
 skipped, never half-applied: a mate gone, a DOF the mate no longer has, a DOF
@@ -89,11 +105,105 @@ skipped without an error.
 ### When relations disagree
 
 After placement and the loop pass, every equality relation is checked: one
-whose `b` does not equal what it asks for (to 1e-4 of its magnitude, the room
+whose `b` (for one over several mates, its last member) does not equal what
+it asks for (to 1e-4 of its magnitude, the room
 a closed loop needs) is a DOF driven twice by relations that disagree, and
 carries `not satisfied: mate N's rotation is X deg where this relation wants
 Y`. In a tree the second relation was never applied; in a loop the solver
 settled on a compromise. Either way it is said on the relation.
+
+## Relations over several mates
+
+A mate's DOF is measured relative to its parent. A planet's revolute sits on
+the carrier, so its angle is relative to the carrier, and the coupling that
+moves it involves three members — which no relation between two mates can
+say. An epicyclic train is one equation over three:
+
+    linear_n:   Σ cᵢ · dofᵢ = constant
+    epicyclic:  zs · sun + zr · ring − (zs + zr) · carrier = constant    (Willis)
+    planet:     (zs/zp) · sun − (zs/zp) · carrier + planet = constant
+
+`add_relation {type: "linear_n", terms: [{mate, dof?, coefficient}, …]}`
+takes two or more terms (`dof` is required only of a cylindrical mate, which
+has both). `{type: "epicyclic", sun, ring, carrier, teeth_sun, teeth_ring}`
+is the form a person writes: it is stored as the Willis terms with the tooth
+counts kept, so `list_relations` and the panel show what was written
+("epicyclic 14/40"). With `planets: [{mate, teeth}, …]` it also adds one
+`planet` relation per planet — each planet's own turn on the carrier,
+−(zs/zp)(sun − carrier) — returned in `planets`; `type: "planet"` makes one
+alone. Members are mate ids, or `{mate, path}` for a mate inside a flexible
+placement. A relation over several mates stores `terms` and a `constant` in
+place of a and b, ratio and phase; `ratio` and `phase` are refused, and the
+`constant` (in the members' units) defaults to where they stand, so adding
+one moves nothing.
+
+The three members' rotations must be measured about one axis in one frame:
+the sun, ring and carrier each on a revolute to the housing, the planets on
+revolutes to the carrier. A member more than 5° off the sun's axis is named
+in `warnings`.
+
+Refused before anything changes (`RelationProblem`, which the Add relation
+window asks too): a member missing, a mate used twice (across the planets
+too), a member whose mate lacks the DOF, a tooth count that is not a whole
+number above zero, fewer than two terms, a zero coefficient.
+
+**Propagation.** A relation over several mates is a hyperedge. When every
+member but one is settled, the walk solves for the last. With two or more
+open it waits — for the walk to reach them, and, once the frontier is empty,
+it holds its first open member **in term order** where it stands and goes
+on. That hold comes before any new component is started, so a gear on the
+carrier cannot claim the carrier from the far side. The relation says what
+it held in `held` ("ring (ring axis) held where it stands: nothing drives
+it"), in `list_relations`, `add_relation`'s and `set_relation`'s answers,
+the row's tooltip and the editor. So:
+
+- the sun driven: the ring (second) is held and the carrier turns
+  zs/(zs+zr) of the sun; each planet relation, its sun and carrier now
+  settled, turns the planet;
+- the carrier driven: the sun is held and the ring turns;
+- two members driven (one by a configuration's hold, which settles a DOF
+  like the driver's): Willis sets the third — a differential.
+
+A planet's terms are stored as {sun, carrier, planet} so that, without the
+Willis relation, driving the sun holds the carrier and turns the planet.
+Order matters only where several relations over several mates wait at once:
+they are completed in the order they were made, which is why `epicyclic`
+adds the Willis relation before its planets.
+
+**In a loop** it is one row; with every member in the looped component, the
+same relation solves there to the answer propagation gives
+(`test_assembly_relations.cpp`, "An epicyclic inside a closed loop…").
+
+**Everywhere else a relation is touched**, every member counts: a
+configuration that suppresses any member (or hides its occurrence) takes the
+whole relation out; a flexible sub-assembly's relation over several mates
+moves with the placement only when all of its members do, and a parent's
+term may name an inner mate by path; the freewheel cycle search walks from
+each member to every other.
+
+## In the app
+
+The occurrence panel's Relations section lists each relation with what it
+was made from as its tail — "gear 14:13", "internal 13:40",
+"epicyclic 14/40", "planet 13 on 14" — and its members, ratio or
+coefficients, `held` and any error in the tooltip; a relation that is not
+satisfied keeps its red glyph. A double-click opens it in the tool window:
+a pair's Drives and Driven combos, its teeth when it was made from teeth
+(the ratio shown, derived) or else its ratio, and its phase; a relation over
+several mates shows each member's combo by role, its teeth and its constant,
+never its raw coefficients.
+
+**Add relation** (shown once the assembly has a mate that turns or slides)
+opens the same window in create mode. Its Kind combo lists what the window
+can make: Gear, Internal gear, Linear and Epicyclic; the other kinds are
+made by `add_relation` or the SDK. A gear takes its two sides (started on
+the first two mates that turn), both tooth counts (no default: a count is
+read off the part) and a phase; Linear takes two slides, a ratio and a
+phase; Epicyclic takes Sun, Ring and Carrier combos over the mates that
+turn, their teeth, and a Planets list — a row per planet, Add planet, and
+the picked one's mate and teeth below it. What is wrong with the draft — a
+member not picked, one mate used twice, a tooth count missing — is said on
+the window's red line and Accept stays disabled. Accept is one undo step.
 
 ## Cam
 
@@ -208,12 +318,15 @@ simulated.
   `warnings`.
 - `set_relation {id, ratio?, phase?, name?, lead?}` — `lead` only for a
   freewheel or click; `ratio` refused on a thread-backed screw (edit the
-  thread).
+  thread) and on a gear or chain made from teeth, which takes `teeth_a`,
+  `teeth_b` (and a gear `internal`); an epicyclic takes `teeth_sun`,
+  `teeth_ring`, a planet `teeth_planet`, `teeth_sun`, and every relation over
+  several mates `constant` instead of a phase.
 - `remove_relation {id}`, `list_relations`.
 - `set_mate` and a drag within a mate propagate from the mate they changed.
-- The occurrence panel lists relations with ratio and phase editable (a
-  freewheel's `lead` read-only) and a remove button; creation is RPC or SDK
-  only (`Asm.gear/chain/rack/screw/cam/freewheel/click/worm`).
+- The occurrence panel lists, edits and makes them ([In the app](#in-the-app));
+  a freewheel's `lead` is read-only there. The SDK has
+  `Asm.gear(…, internal=)/epicyclic/linear_n/chain/rack/screw/cam/freewheel/click/worm`.
 - Stored in the assembly's `relations/` directory, one file per relation
   ([../versioning/format.md](../versioning/format.md)).
 
