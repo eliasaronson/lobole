@@ -124,15 +124,16 @@ statement of their order:
 - one per table section, in the order `kFields` first names it — Appearance,
   Performance, Sharing, General — each listing its rows;
 - then the hand-written pages in `kHandPages` (SettingsWindow.cpp): **Keyboard**
-  ([keybindings.md](keybindings.md)) and **Machines**, the user's CAM machine
-  profiles.
+  ([keybindings.md](keybindings.md)), **Machines**, the user's CAM machine
+  profiles, and **Print profiles**, the user's printing allowances.
 
 Each row in the list is a glyph and the name (`###cat_<name>`). A section's
 glyph comes from a small table by name; an unknown section gets the generic
 gear rather than none. The page shown is `AppState::settingsCategory`,
 session state: the window reopens on the page it was left on until the app
 closes. `ui::OpenPreferences(state, "Machines")` opens it on a page, to the
-front — the CAM panel's `Preferences › Machines` buttons use it.
+front — the CAM panel's `Preferences › Machines` buttons and the Print
+process section's `Preferences › Print profiles` use it.
 
 **Search.** A field above the category list (`###set_search`) filters by row
 label and blurb. While it holds text the page side shows the matching rows of
@@ -162,9 +163,21 @@ and callbacks for create, duplicate, delete and the form.
 
 Adding one is two things: a draw function that fills a `LibraryPage`, and a
 `kHandPages` row naming it, its glyph, and `items`/`open` so search finds its
-items. Machines is the one there is: stored in `~/.config/lobole/machines`, one
-file per machine; a CAM setup picks one and keeps a copy
-([cam/gui.md](../cam/gui.md#preferences--machines)).
+items. There are two:
+
+- **Machines** (`mach`): stored in `~/.config/lobole/machines`, one file per
+  machine; a CAM setup picks one and keeps a copy
+  ([cam/gui.md](../cam/gui.md#preferences--machines)).
+- **Print profiles** (`prof`, `DrawPrintProfilesPage`): stored in
+  `~/.config/lobole/print_profiles`, one file per profile; a printed part
+  picks one and keeps a copy
+  ([print profiles](../tolerances/README.md#print-profiles)). New starts from
+  the built-in table of the selected profile's pair. The form is name,
+  process and material, conditions, the STL chord deviation (`ExprInputDouble`)
+  and the rows as a stretched table, never wider than the pane — kind, from,
+  to (0 = and up), allowance and source, each field a flat numbered id
+  (`###prof_row_allow_<i>`) so a script reaches one without the table's id
+  scope.
 
 ### Layout rules
 
@@ -215,7 +228,9 @@ the JSON names above.
   `settings/each_page_shows_its_own_rows` (each page's rows and no others, and
   no sideways scroll at 100 % and 150 %), `settings/search_finds_rows_on_any_page`,
   `settings/a_page_resets_alone`, `cam/the_machine_button_opens_on_machines`
-  (and search opening a machine), `cam/machines_are_kept_in_preferences`.
+  (and search opening a machine), `cam/machines_are_kept_in_preferences`,
+  `tolerance/print_profiles_are_kept_in_preferences` (new, duplicate, a
+  rename and a refused one, a row edit read back from disk, delete).
 
 ## Not built
 

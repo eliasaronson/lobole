@@ -247,10 +247,12 @@ its G-code and then answered "unknown parameter '_timeout'". So:
   outside them (a field set directly on a feature) is the handler's to make
   only after its checks.
 - **`NotInBatch` methods are not rolled back** — they reach outside the
-  document (a file, a tab, the settings, the machine store, git), which no
-  undo stack holds. They are the ones that must check first, and the flag
-  is how a method says it is one of them: `export_brep`, `delete_part`,
-  `set_keybinding`, `save_machine` and `delete_machine` carry it too. A key
+  document (a file, a tab, the settings, the machine store, the print
+  profile store, git), which no undo stack holds. They are the ones that must
+  check first, and the flag is how a method says it is one of them:
+  `export_brep`, `delete_part`, `set_keybinding`, `save_machine`,
+  `delete_machine`, `save_print_profile` and `delete_print_profile` carry it
+  too. A key
   such a method left unread is still refused, with "The call had already
   run" in place of a rollback, because that is the truth. A failure after
   the effect undoes it where it can: `split_for_printing` and
@@ -264,7 +266,10 @@ part, assembly, drawing and job tab; and the calls that write files or move
 tabs from a valid baseline with each key made wrong in turn. After every
 refusal the world must be as it was: the saved project, the tabs, undo and
 redo, the files under the app's dirs and its cwd, the settings, the machine
-store, the background jobs.
+store, the background jobs. `save_print_profile` validates the whole profile
+(`printfit::ValidateProfile`) before its file is written, so a refused one
+leaves the print profile store as it was
+([print profiles](../tolerances/README.md#print-profiles)).
 
 ## `batch`
 

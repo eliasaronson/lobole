@@ -158,9 +158,15 @@ structured multi-body file still yields one shape per body.
 `export_stl {path, body?, deflection?}` and `export_brep {path, body?}`
 write the active part. Without `body` the non-reference bodies are fused
 into one shape; STL and BREP hold one shape each. STL is binary and
-re-meshed at `deflection` (chord tolerance in mm, default 0.1), never the
-viewport's tessellation; the reply reports whether the source B-Rep was
-watertight. BREP is OpenCASCADE's exact native form. STL has no unit and is
+re-meshed at `deflection` (chord tolerance in mm), never the viewport's
+tessellation; the reply reports the deflection used, where it came from, and
+whether the source B-Rep was watertight. Left out, it is 0.1 mm on an
+unprinted part and, on a printed one, the print profile's chord deviation or
+a tenth of its smallest gap; a coarser one asked for on a printed part is
+written and warned about
+([exporting a printed part](../tolerances/README.md#exporting-a-printed-part)).
+File › Export goes through the same helper (`ui::ExportPartStl`) and says
+what it wrote in a viewport pill. BREP is OpenCASCADE's exact native form. STL has no unit and is
 millimetres by convention.
 
 ## Exporting visual meshes
