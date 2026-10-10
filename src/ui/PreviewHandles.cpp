@@ -18,6 +18,7 @@
 #include "ui/DragMath.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"  // WorldToScreen
+#include "ui/ViewportHandle.h"     // HitTestHandles
 #include "ui/ViewportHandleDraw.h" // kHandleHalfPx
 
 #include "imgui.h"
@@ -38,15 +39,17 @@ namespace {
 const glm::vec3 kHandleColor{1.0f, 0.72f, 0.20f};
 constexpr double kMinLength = 0.01; // DragDim's field minimum
 
-// UV bounding-box center of the sketch's profile entities. `ids` restricts to
-// the extrude's picked regions (empty = whole sketch); construction geometry
-// never counts. Falls back to the plane origin for an empty sketch.
-glm::vec2 ProfileCenterUV(const SketchFeature& sk,
-                          const std::vector<std::vector<uint32_t>>& regions) {
+// UV bounding box of the sketch's profile entities. `ids` restricts to the
+// extrude's picked regions (empty = whole sketch); construction geometry
+// never counts. False for an empty sketch.
+bool ProfileBoundsUV(const SketchFeature& sk,
+                     const std::vector<std::vector<uint32_t>>& regions,
+                     glm::vec2& lo, glm::vec2& hi) {
   std::vector<uint32_t> ids;
   for (const auto& region : regions)
     ids.insert(ids.end(), region.begin(), region.end());
-  glm::vec2 lo(FLT_MAX), hi(-FLT_MAX);
+  lo = glm::vec2(FLT_MAX);
+  hi = glm::vec2(-FLT_MAX);
   bool any = false;
   const auto add = [&](glm::vec2 p) {
     lo = glm::min(lo, p);
@@ -84,13 +87,36 @@ glm::vec2 ProfileCenterUV(const SketchFeature& sk,
         },
         e);
   }
-  return any ? (lo + hi) * 0.5f : glm::vec2(0.0f);
+  return any;
 }
 
-// What the pending feature's handle looks like this frame. Recomputed per
-// frame (cheap); a live drag keeps using its grab-time axis instead.
+// UV bounding-box center of the profile; the plane origin for an empty one.
+glm::vec2 ProfileCenterUV(const SketchFeature& sk,
+                          const std::vector<std::vector<uint32_t>>& regions) {
+  glm::vec2 lo, hi;
+  return ProfileBoundsUV(sk, regions, lo, hi) ? (lo + hi) * 0.5f
+                                              : glm::vec2(0.0f);
+}
+
+// Which scalar of the pending feature a handle drags. It is also the
+// handle's sub-id (HandleId(HandleOwner::Feature, param)), so the two
+// handles of one preview — an extrude's arrow and its twist arc, or a
+// two-sided extrude's two arrows — hover, highlight and drag apart.
+enum class HandleParam : int {
+  None = 0,
+  Distance,  // extrude distance
+  Distance2, // a two-sided extrude's backward distance
+  Twist,     // extrude twist, degrees
+  Radius,    // fillet / chamfer
+  Angle,     // revolve, degrees
+};
+
+// What one of the pending feature's handles looks like this frame.
+// Recomputed per frame (cheap); a live drag keeps using its grab-time axis
+// instead.
 struct HandleSpec {
-  bool rotate = false;    // revolve arc vs linear arrow
+  HandleParam param = HandleParam::None;
+  bool rotate = false;    // arc vs linear arrow
   glm::vec3 anchor{0};    // arrow base / arc center
   glm::vec3 dir{0, 0, 1}; // arrow direction / arc plane normal (unit)
   float arcRadius = 0.0f; // rotate only
@@ -106,7 +132,81 @@ const SketchFeature* SketchOf(const Document& doc, uint64_t sketchId) {
   return nullptr;
 }
 
-bool ComputeHandleSpec(AppState& state, HandleSpec& spec) {
+// How far the parameter moves per unit the handle moves: a symmetric
+// extrude's cap travels half its distance (and turns half its twist), so a
+// drag maps 2:1 to keep the cap under the cursor.
+double DragFactor(const Feature& f, HandleParam param) {
+  const auto* ext = dynamic_cast<const ExtrudeFeature*>(&f);
+  if (ext == nullptr || ext->endMode != ExtrudeEnd::Symmetric)
+    return 1.0;
+  if (param == HandleParam::Distance)
+    return 2.0;
+  if (param == HandleParam::Twist && !ext->herringbone)
+    return 2.0;
+  return 1.0;
+}
+
+void ExtrudeHandleSpecs(AppState& state, const Document& doc,
+                        const ExtrudeFeature& ext,
+                        std::vector<HandleSpec>& out) {
+  // Only plain scalars: an expression-driven field must not be clobbered by
+  // a drag. Up-to-face and through-all have no distance to drag at all.
+  const ExtrudeEnd end = ext.endMode;
+  if (end == ExtrudeEnd::UpToFace || end == ExtrudeEnd::ThroughAll)
+    return;
+  const SketchFeature* sk = SketchOf(doc, ext.sketchId);
+  if (!sk)
+    return;
+  const glm::vec3 base =
+      sk->plane.PlaneToWorld(ProfileCenterUV(*sk, ext.regions));
+  const glm::vec3 N = glm::normalize(sk->plane.GetNormal());
+  // `reversed` flips a blind or two-sided extrude; a symmetric one is the
+  // same either way.
+  const glm::vec3 fwd = ext.reversed && end != ExtrudeEnd::Symmetric ? -N : N;
+  const double capAt =
+      end == ExtrudeEnd::Symmetric ? ext.distance * 0.5 : ext.distance;
+  if (ext.distanceExpr.empty()) {
+    HandleSpec s;
+    s.param = HandleParam::Distance;
+    s.anchor = base + fwd * static_cast<float>(capAt); // tracks the end cap
+    s.dir = fwd;
+    s.value = ext.distance;
+    out.push_back(s);
+  }
+  if (end == ExtrudeEnd::TwoSided && ext.distance2Expr.empty()) {
+    HandleSpec s; // the backward side, from its own cap
+    s.param = HandleParam::Distance2;
+    s.anchor = base - fwd * static_cast<float>(ext.distance2);
+    s.dir = -fwd;
+    s.value = ext.distance2;
+    out.push_back(s);
+  }
+  // The twist: an arc about the twist axis (the sketch normal through the
+  // sketch origin) at the end cap, once there is a twist to turn.
+  if ((end == ExtrudeEnd::Blind || end == ExtrudeEnd::Symmetric) &&
+      ext.twistExpr.empty() && ext.twistDeg != 0.0 && !ext.thin) {
+    glm::vec2 lo, hi;
+    float reach = 0.0f;
+    if (ProfileBoundsUV(*sk, ext.regions, lo, hi))
+      for (const glm::vec2 c :
+           {lo, hi, glm::vec2(lo.x, hi.y), glm::vec2(hi.x, lo.y)})
+        reach = std::max(reach, glm::length(c));
+    const glm::vec3 origin = sk->plane.GetOrigin();
+    HandleSpec s;
+    s.param = HandleParam::Twist;
+    s.rotate = true;
+    s.degrees = true;
+    s.anchor = origin + fwd * static_cast<float>(capAt);
+    s.dir = fwd;
+    s.arcRadius = std::max(1.15f * reach, 0.35f * GizmoScale(state));
+    s.value = ext.twistDeg;
+    out.push_back(s);
+  }
+}
+
+// Every handle the pending feature has, or none (false).
+bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
+  out.clear();
   if (!state.document || state.assembly)
     return false;
   size_t index = 0;
@@ -116,27 +216,8 @@ bool ComputeHandleSpec(AppState& state, HandleSpec& spec) {
   Document& doc = *state.document;
 
   if (auto* ext = dynamic_cast<ExtrudeFeature*>(f)) {
-    // Only the plain-scalar Blind/Symmetric distance; an expression-driven
-    // field must not be clobbered by a drag, and the other end modes have no
-    // single draggable scalar.
-    if (!ext->distanceExpr.empty())
-      return false;
-    if (ext->endMode != ExtrudeEnd::Blind &&
-        ext->endMode != ExtrudeEnd::Symmetric)
-      return false;
-    const SketchFeature* sk = SketchOf(doc, ext->sketchId);
-    if (!sk)
-      return false;
-    const glm::vec3 base =
-        sk->plane.PlaneToWorld(ProfileCenterUV(*sk, ext->regions));
-    const glm::vec3 N = glm::normalize(sk->plane.GetNormal());
-    const double end = ext->endMode == ExtrudeEnd::Symmetric
-                           ? ext->distance * 0.5
-                           : ext->distance;
-    spec.anchor = base + N * static_cast<float>(end); // tracks the end cap
-    spec.dir = N;
-    spec.value = ext->distance;
-    return true;
+    ExtrudeHandleSpecs(state, doc, *ext, out);
+    return !out.empty();
   }
 
   if (auto* fil = dynamic_cast<FilletFeature*>(f)) {
@@ -163,23 +244,26 @@ bool ComputeHandleSpec(AppState& state, HandleSpec& spec) {
         glm::length(ext) > 1e-6 ? glm::normalize(ext) : glm::dvec3(0, 0, 1);
     // "Pull away = bigger": from the body center through the edge, projected
     // ⟂ to the edge tangent; camera-right fallback when that degenerates.
-    glm::dvec3 out(0.0);
+    glm::dvec3 away(0.0);
     for (const Body& body : *input) {
       if (body.createdBy != ref.featureId)
         continue;
       glm::dvec3 bmin, bmax;
       body.shape.GetBoundingBox(bmin, bmax);
-      out = P - (bmin + bmax) * 0.5;
-      out -= glm::dot(out, T) * T;
+      away = P - (bmin + bmax) * 0.5;
+      away -= glm::dot(away, T) * T;
       break;
     }
-    if (glm::length(out) < 1e-4 && state.camera)
-      out = glm::cross(glm::dvec3(state.camera->GetForward()), T);
-    if (glm::length(out) < 1e-4)
+    if (glm::length(away) < 1e-4 && state.camera)
+      away = glm::cross(glm::dvec3(state.camera->GetForward()), T);
+    if (glm::length(away) < 1e-4)
       return false;
+    HandleSpec spec;
+    spec.param = HandleParam::Radius;
     spec.anchor = P;
-    spec.dir = glm::normalize(out);
+    spec.dir = glm::normalize(away);
     spec.value = fil->radius;
+    out.push_back(spec);
     return true;
   }
 
@@ -200,6 +284,8 @@ bool ComputeHandleSpec(AppState& state, HandleSpec& spec) {
     const glm::dvec3 c = sk->plane.PlaneToWorld(ProfileCenterUV(*sk, {}));
     // Arc centered on the axis at the profile's height, through the profile.
     const double along = glm::dot(c - origin, dir);
+    HandleSpec spec;
+    spec.param = HandleParam::Angle;
     spec.anchor = origin + dir * along;
     spec.dir = dir;
     spec.arcRadius = std::max(glm::length(glm::vec3(c) - spec.anchor),
@@ -207,19 +293,18 @@ bool ComputeHandleSpec(AppState& state, HandleSpec& spec) {
     spec.rotate = true;
     spec.value = rev->angleDeg;
     spec.degrees = true;
+    out.push_back(spec);
     return true;
   }
 
   return false;
 }
 
-// Writes the dragged value into whichever supported feature is pending and
-// regenerates — byte-identical to what the preview dialog's widget does.
 // The active section's drag arrow. Sections are VIEW state, so this path
 // shares the arrow, the ray-axis math and the readout with the feature
 // handles but touches no document: no feature to resolve, no regeneration,
 // no undo entry. It is also the only handle allowed on an assembly tab —
-// ComputeHandleSpec refuses those outright, because every feature handle
+// ComputeHandleSpecs refuses those outright, because every feature handle
 // edits a part document.
 bool ComputeSectionHandleSpec(AppState& state, HandleSpec& spec,
                               uint64_t* outId) {
@@ -250,21 +335,33 @@ bool ComputeSectionHandleSpec(AppState& state, HandleSpec& spec,
   return true;
 }
 
-void ApplyHandleValue(AppState& state, Feature& f, double v) {
-  if (auto* ext = dynamic_cast<ExtrudeFeature*>(&f))
+// Writes the dragged value into the pending feature's `param` and
+// regenerates — byte-identical to what the preview dialog's widget does.
+void ApplyHandleValue(AppState& state, Feature& f, HandleParam param,
+                      double v) {
+  auto* ext = dynamic_cast<ExtrudeFeature*>(&f);
+  auto* fil = dynamic_cast<FilletFeature*>(&f);
+  auto* rev = dynamic_cast<RevolveFeature*>(&f);
+  if (ext && param == HandleParam::Distance)
     ext->distance = std::max(v, kMinLength);
-  else if (auto* fil = dynamic_cast<FilletFeature*>(&f))
+  else if (ext && param == HandleParam::Distance2)
+    ext->distance2 = std::max(v, kMinLength);
+  else if (ext && param == HandleParam::Twist)
+    ext->twistDeg = std::clamp(v, -36000.0, 36000.0); // either hand
+  else if (fil && param == HandleParam::Radius)
     fil->radius = std::max(v, kMinLength);
-  else if (auto* rev = dynamic_cast<RevolveFeature*>(&f))
+  else if (rev && param == HandleParam::Angle)
     rev->angleDeg = std::clamp(v, 1.0, 360.0);
   else
     return;
   state.document->Regenerate();
 }
 
-double CurrentHandleValue(const Feature& f) {
+double CurrentHandleValue(const Feature& f, HandleParam param) {
   if (auto* ext = dynamic_cast<const ExtrudeFeature*>(&f))
-    return ext->distance;
+    return param == HandleParam::Distance2 ? ext->distance2
+           : param == HandleParam::Twist   ? ext->twistDeg
+                                           : ext->distance;
   if (auto* fil = dynamic_cast<const FilletFeature*>(&f))
     return fil->radius;
   if (auto* rev = dynamic_cast<const RevolveFeature*>(&f))
@@ -275,83 +372,90 @@ double CurrentHandleValue(const Feature& f) {
 } // namespace
 
 void BuildPreviewHandleOverlay(AppState& state, std::vector<PrimVertex>& out) {
-  HandleSpec spec;
+  std::vector<HandleSpec> specs;
   bool isSection = false;
   uint64_t sectionId = 0;
-  if (!ComputeHandleSpec(state, spec)) {
+  if (!ComputeHandleSpecs(state, specs)) {
+    HandleSpec spec;
     isSection = ComputeSectionHandleSpec(state, spec, &sectionId);
     if (!isSection)
       return;
+    specs.push_back(spec);
   }
   const float L = 0.9f * GizmoScale(state);
+  const uint64_t active = ActiveHandleId(state);
 
-  // Publish this handle for the shared hover + click hit test
-  // (docs/ui/viewport-handles.md): one list, so what highlights under the
-  // cursor is exactly what a click would grab.
-  ViewportHandle vh;
-  vh.id = isSection ? HandleId(HandleOwner::Section, sectionId)
-                    : HandleId(HandleOwner::Feature);
-  vh.kind = spec.rotate ? HandleKind::Rotate : HandleKind::Linear;
-  vh.origin = spec.anchor;
-  vh.dir = spec.dir;
-  vh.length = spec.rotate ? spec.arcRadius : L;
-  vh.color = kHandleColor;
-  state.viewportHandles.push_back(vh);
-  // The handle itself is drawn by DrawViewportHandles from the record above.
-  // The decorations below are drawn here, in the same tint, so they follow
-  // the hover / drag highlight with the arrow they belong to.
-  const glm::vec4 tint(
-      HandleTint(vh, state.hoveredHandle, ActiveHandleId(state)), 1.0f);
+  for (const HandleSpec& spec : specs) {
+    // Publish this handle for the shared hover + click hit test
+    // (docs/ui/viewport-handles.md): one list, so what highlights under the
+    // cursor is exactly what a click would grab.
+    ViewportHandle vh;
+    vh.id = isSection ? HandleId(HandleOwner::Section, sectionId)
+                      : HandleId(HandleOwner::Feature,
+                                 static_cast<uint64_t>(spec.param));
+    vh.kind = spec.rotate ? HandleKind::Rotate : HandleKind::Linear;
+    vh.origin = spec.anchor;
+    vh.dir = spec.dir;
+    vh.length = spec.rotate ? spec.arcRadius : L;
+    vh.color = kHandleColor;
+    state.viewportHandles.push_back(vh);
+    // The handle itself is drawn by DrawViewportHandles from the record
+    // above. The decorations below are drawn here, in the same tint, so they
+    // follow the hover / drag highlight with the handle they belong to.
+    const glm::vec4 tint(HandleTint(vh, state.hoveredHandle, active), 1.0f);
 
-  // Where the cut plane is, as a square outline around the arrow's base —
-  // an offset typed into the tool window is otherwise invisible until it
-  // crosses geometry.
-  if (isSection) {
-    const glm::vec3 u = PerpTo(spec.dir), v = glm::cross(spec.dir, u);
-    glm::vec3 bmin, bmax;
-    const float r = VisibleSceneBounds(state, bmin, bmax)
-                        ? 0.5f * glm::length(bmax - bmin)
-                        : L;
-    const glm::vec3 corners[4] = {
-        spec.anchor + (u + v) * r, spec.anchor + (u - v) * r,
-        spec.anchor - (u + v) * r, spec.anchor - (u - v) * r};
-    for (int i = 0; i < 4; i++)
-      AppendPrimLine(corners[i], corners[(i + 1) % 4], kHandleHalfPx, tint,
+    // Where the cut plane is, as a square outline around the arrow's base —
+    // an offset typed into the tool window is otherwise invisible until it
+    // crosses geometry.
+    if (isSection) {
+      const glm::vec3 u = PerpTo(spec.dir), v = glm::cross(spec.dir, u);
+      glm::vec3 bmin, bmax;
+      const float r = VisibleSceneBounds(state, bmin, bmax)
+                          ? 0.5f * glm::length(bmax - bmin)
+                          : L;
+      const glm::vec3 corners[4] = {
+          spec.anchor + (u + v) * r, spec.anchor + (u - v) * r,
+          spec.anchor - (u + v) * r, spec.anchor - (u - v) * r};
+      for (int i = 0; i < 4; i++)
+        AppendPrimLine(corners[i], corners[(i + 1) % 4], kHandleHalfPx, tint,
+                       out);
+    }
+
+    if (!spec.rotate) {
+      // A blend/short-arrow base tick so the grab point reads on the
+      // geometry.
+      const glm::vec3 s1 = PerpTo(spec.dir) * (0.09f * L);
+      const glm::vec3 s2 = glm::cross(spec.dir, PerpTo(spec.dir)) * (0.09f * L);
+      AppendPrimLine(spec.anchor - s1, spec.anchor + s1, kHandleHalfPx, tint,
                      out);
-  }
+      AppendPrimLine(spec.anchor - s2, spec.anchor + s2, kHandleHalfPx, tint,
+                     out);
+    }
 
-  if (!spec.rotate) {
-    // A blend/short-arrow base tick so the grab point reads on the geometry.
-    const glm::vec3 s1 = PerpTo(spec.dir) * (0.09f * L);
-    const glm::vec3 s2 = glm::cross(spec.dir, PerpTo(spec.dir)) * (0.09f * L);
-    AppendPrimLine(spec.anchor - s1, spec.anchor + s1, kHandleHalfPx, tint,
-                   out);
-    AppendPrimLine(spec.anchor - s2, spec.anchor + s2, kHandleHalfPx, tint,
-                   out);
-  }
-
-  // Floating readout at the handle while dragging (foreground list: on top of
-  // everything, viewport-space like the measure readout).
-  if (state.handleDrag.active) {
-    const glm::vec3 tipWorld =
-        spec.rotate ? spec.anchor + PerpTo(spec.dir) * spec.arcRadius
-                    : spec.anchor + spec.dir * L;
-    const glm::vec2 s = WorldToScreen(state, tipWorld);
-    char buf[32];
-    if (spec.degrees)
-      snprintf(buf, sizeof(buf), "%.1f\xc2\xb0", spec.value);
-    else
-      snprintf(buf, sizeof(buf), "%.3f", spec.value);
-    ImDrawList* fg = ViewportDrawList();
-    const ImVec2 pos(s.x + 12.0f, s.y - ImGui::GetFontSize() - 4.0f);
-    fg->AddText(ImVec2(pos.x + 1, pos.y + 1), IM_COL32(0, 0, 0, 200), buf);
-    fg->AddText(pos, IM_COL32(255, 214, 90, 255), buf);
+    // Floating readout at the handle being dragged (foreground list: on top
+    // of everything, viewport-space like the measure readout).
+    if (state.handleDrag.active && vh.id == active) {
+      const glm::vec3 tipWorld =
+          spec.rotate ? spec.anchor + PerpTo(spec.dir) * spec.arcRadius
+                      : spec.anchor + spec.dir * L;
+      const glm::vec2 s = WorldToScreen(state, tipWorld);
+      char buf[32];
+      if (spec.degrees)
+        snprintf(buf, sizeof(buf), "%.1f\xc2\xb0", spec.value);
+      else
+        snprintf(buf, sizeof(buf), "%.3f", spec.value);
+      ImDrawList* fg = ViewportDrawList();
+      const ImVec2 pos(s.x + 12.0f, s.y - ImGui::GetFontSize() - 4.0f);
+      fg->AddText(ImVec2(pos.x + 1, pos.y + 1), IM_COL32(0, 0, 0, 200), buf);
+      fg->AddText(pos, IM_COL32(255, 214, 90, 255), buf);
+    }
   }
 }
 
 bool HasViewportHandle(AppState& state) {
+  std::vector<HandleSpec> specs;
   HandleSpec spec;
-  return ComputeHandleSpec(state, spec) ||
+  return ComputeHandleSpecs(state, specs) ||
          ComputeSectionHandleSpec(state, spec, nullptr);
 }
 
@@ -382,21 +486,18 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
       h.active = false; // value stays where the drag left it
       return true;
     }
+    const auto param = static_cast<HandleParam>(h.param);
+    const double factor = DragFactor(*f, param);
     double v = h.startValue;
     if (!h.rotate) {
       const float t =
           RayAxisParam(ray.origin, ray.direction, h.axisOrigin, h.axisDir);
-      // Symmetric extrude: the end cap moves distance/2 per unit of distance,
-      // so a drag maps 2:1 to keep the cap under the cursor.
-      auto* ext = dynamic_cast<ExtrudeFeature*>(f);
-      const double factor =
-          ext && ext->endMode == ExtrudeEnd::Symmetric ? 2.0 : 1.0;
       v = h.startValue + (t - h.startParam) * factor;
     } else {
       float ang;
       if (!RotateAngle(ray.origin, ray.direction, h.axisOrigin, h.axisDir, ang))
         return true;
-      v = h.startValue + glm::degrees(ang - h.startParam);
+      v = h.startValue + glm::degrees(ang - h.startParam) * factor;
     }
     // Snap to the round value unless Ctrl says free — the app's one drag
     // polarity (ui/DragMath.h). This used to be the OTHER way round here,
@@ -404,50 +505,52 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
     // modifier meant opposite things on a part tab and an assembly tab.
     // The capture window is what makes snap-by-default safe: a value that is
     // not near a round one is left exactly where the drag put it.
-    const bool deg = dynamic_cast<RevolveFeature*>(f) != nullptr;
+    const bool deg = param == HandleParam::Angle || param == HandleParam::Twist;
     const bool snap = !ImGui::GetIO().KeyCtrl;
     v = deg ? SnapAngleDeg(v, snap) : SnapLength(v, snap);
     // ...and whatever survives that still reads at display precision.
     const double quantum = deg ? 0.1 : 0.001;
     v = std::round(v / quantum) * quantum;
-    ApplyHandleValue(state, *f, v);
+    ApplyHandleValue(state, *f, param, v);
     return true;
   }
 
   if (!clicked)
     return false;
-  HandleSpec spec;
+  std::vector<HandleSpec> specs;
   uint64_t sectionId = 0;
-  if (!ComputeHandleSpec(state, spec)) {
+  if (!ComputeHandleSpecs(state, specs)) {
     // No feature handle: the section arrow gets the click instead.
+    HandleSpec spec;
     if (!ComputeSectionHandleSpec(state, spec, &sectionId))
       return false;
+    specs.push_back(spec);
   }
   const float scale = GizmoScale(state);
   const float grab = 0.14f * scale, L = 0.9f * scale;
 
-  bool hit = false;
+  // The shared hit test over the same records hover uses, so the handle a
+  // click takes is the one that was highlighted.
+  std::vector<ViewportHandle> records;
+  for (const HandleSpec& spec : specs) {
+    ViewportHandle vh;
+    vh.kind = spec.rotate ? HandleKind::Rotate : HandleKind::Linear;
+    vh.origin = spec.anchor;
+    vh.dir = spec.dir;
+    vh.length = spec.rotate ? spec.arcRadius : L;
+    records.push_back(vh);
+  }
+  const int hit = HitTestHandles(records, ray, grab);
+  if (hit < 0)
+    return false; // let selection and armed tools consume a missed click
+  const HandleSpec& spec = specs[static_cast<size_t>(hit)];
   float startParam = 0.0f;
   if (!spec.rotate) {
-    const float t = std::clamp(
-        RayAxisParam(ray.origin, ray.direction, spec.anchor, spec.dir), 0.0f,
-        L);
-    hit = PointRayDist(spec.anchor + spec.dir * t, ray.origin, ray.direction) <
-          grab;
-    if (hit)
-      startParam =
-          RayAxisParam(ray.origin, ray.direction, spec.anchor, spec.dir);
-  } else {
-    glm::vec3 p;
-    if (RayPlane(ray.origin, ray.direction, spec.anchor, spec.dir, p) &&
-        std::abs(glm::length(p - spec.anchor) - spec.arcRadius) < grab) {
-      float ang;
-      hit = RotateAngle(ray.origin, ray.direction, spec.anchor, spec.dir, ang);
-      startParam = ang;
-    }
+    startParam = RayAxisParam(ray.origin, ray.direction, spec.anchor, spec.dir);
+  } else if (!RotateAngle(ray.origin, ray.direction, spec.anchor, spec.dir,
+                          startParam)) {
+    return false;
   }
-  if (!hit)
-    return false; // let selection and armed tools consume a missed click
 
   h.active = true;
   h.rotate = spec.rotate;
@@ -455,13 +558,14 @@ bool HandlePreviewHandleInput(AppState& state, const Ray& ray, bool clicked,
   h.axisDir = spec.dir;
   h.startParam = startParam;
   h.sectionId = sectionId;
+  h.param = static_cast<int>(spec.param);
   if (sectionId != 0) {
     h.featureId = 0;
     h.startValue = spec.value; // the section's offset; no document involved
   } else {
     Feature* f = ResolvePendingFeature(state);
     h.featureId = f->GetId();
-    h.startValue = CurrentHandleValue(*f);
+    h.startValue = CurrentHandleValue(*f, spec.param);
   }
   return true; // consumed: don't also run picking on this click
 }
@@ -472,7 +576,8 @@ void AbortPreviewHandleDrag(AppState& state) {
     return;
   if (Feature* f = ResolvePendingFeature(state))
     if (f->GetId() == h.featureId)
-      ApplyHandleValue(state, *f, h.startValue);
+      ApplyHandleValue(state, *f, static_cast<HandleParam>(h.param),
+                       h.startValue);
   h.active = false;
 }
 

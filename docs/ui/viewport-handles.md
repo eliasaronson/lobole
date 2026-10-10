@@ -5,7 +5,7 @@ test says which one is under the cursor, and one drawer draws them all.
 
 | owner | what it drags | grab payload | on release |
 |---|---|---|---|
-| preview handles (`src/ui/PreviewHandles.{h,cpp}`) | the pending feature's headline scalar: extrude distance, fillet/chamfer radius, revolve angle | `AppState::handleDrag` | nothing: preview edits are not on the undo stack; Accept commits the feature as one step |
+| preview handles (`src/ui/PreviewHandles.{h,cpp}`) | the pending feature's scalars: extrude distance (both of a two-sided one) and twist, fillet/chamfer radius, revolve angle | `AppState::handleDrag` | nothing: preview edits are not on the undo stack; Accept commits the feature as one step |
 | section (same module) | the active section's offset — view state, no document | `handleDrag` | nothing |
 | gizmo (`src/ui/GizmoInput.cpp`) | an occurrence's transform, a mate DOF, an exploded-view offset, a CAM job part's placement | `AppState::gizmoDrag` | one snapshot per drag, then solve |
 | simulation force load (`StudyPanel.cpp`, `HandleLoadDragInput`) | the load's magnitude | `SimulationState::loadDrag` | one `ModifyStudyCommand` from a snapshot taken at grab |
@@ -51,21 +51,34 @@ off the viewport.
 
 ## Preview handles
 
-One handle per pending preview, only when the parameter is a plain number:
-an expression-driven field (`distanceExpr`, `radiusExpr`, `angleExpr`) gets
-no handle, since a drag would silently overwrite the formula.
+One handle per draggable scalar of the pending preview, and only while the
+parameter is a plain number: an expression-driven field (`distanceExpr`,
+`distance2Expr`, `twistExpr`, `radiusExpr`, `angleExpr`) gets no handle,
+since a drag would silently overwrite the formula. `ComputeHandleSpecs`
+returns the list, and each handle's id is
+`HandleId(HandleOwner::Feature, param)`, where `param` (`HandleParam`) says
+which scalar it drags. `AppState::handleDrag.param` records it at the grab,
+so two handles on one preview hover, highlight and drag apart. A click goes
+through the same `HitTestHandles` as hover.
 
-- **Extrude** (Blind and Symmetric only): an arrow along the sketch normal
-  from the profile's centre, based on the current end cap so it tracks the
-  geometry.
+- **Extrude** (Blind, Symmetric, Two-sided): an arrow along the extrude
+  direction from the profile's centre, based on the current end cap so it
+  tracks the geometry (it follows `reversed`). A symmetric extrude's drag
+  maps 2:1, its cap moving half the distance. A two-sided one has a second
+  arrow, from the far cap pointing back, which drags `distance2`.
+- **Extrude twist** (Blind and Symmetric, once the twist is not zero): a
+  `HandleKind::Rotate` arc about the twist axis (the sketch normal through
+  the sketch origin) at the end cap, wide enough to clear the profile. It
+  snaps like any angle; a plain symmetric twist maps 2:1, as its cap turns
+  half of it.
 - **Fillet / chamfer**: at the midpoint of the first referenced edge, pulled
   away from the body.
 - **Revolve**: an arc about the resolved axis.
 
 The handle and the tool window edit the same field, so the field updates live
-with no sync protocol. The value is clamped at the field minimum (0.01).
+with no sync protocol. A length is clamped at the field minimum (0.01).
 Escape during a drag restores the grab value and is consumed, so it does not
-also cancel the preview. A readout floats at the handle while dragging.
+also cancel the preview. A readout floats at the handle being dragged.
 
 ## Snapping: one polarity
 
@@ -119,6 +132,10 @@ with no shaft to grab and are not draggable.
 
 ## Tests
 
+- `handles/extrude_twist_field_and_arc` (the Twist field, then the arc
+  beside the arrow: the hover names the arc, the drag snaps to 90° and
+  leaves the distance alone), `handles/two_sided_extrude_has_two_arrows`
+  (the back arrow drags `distance2`).
 - `handles/hover_highlights_the_arrow` (hover sets and clears
   `hoveredHandle`), `handles/gizmo_hover_names_the_axis` (each axis reports
   its own id, and only the hovered axis's drawn colour changes),
@@ -140,5 +157,5 @@ with no shaft to grab and are not draggable.
 
 Handles on a committed feature (they exist only while previewing; an edit
 session would need a JSON baseline at grab and one modify command on release),
-a second arrow for a two-sided extrude, a shell-thickness handle, cursor
+a shell-thickness handle, cursor
 changes and hover tooltips on handles, a length snap derived from the part.

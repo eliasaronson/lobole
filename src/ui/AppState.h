@@ -1303,7 +1303,7 @@ struct AppState {
   struct HandleDrag {
     bool active = false;
     uint64_t featureId = 0;  // the pending feature at grab (undo-safe check)
-    bool rotate = false;     // revolve arc vs linear arrow
+    bool rotate = false;     // an arc vs a linear arrow
     glm::vec3 axisOrigin{0}; // drag line / arc-plane center at grab
     glm::vec3 axisDir{0, 0, 1};
     double startValue = 0.0; // the parameter at grab (Esc restores this)
@@ -1312,6 +1312,10 @@ struct AppState {
     // feature — sections are view state, so there is no feature to resolve
     // and no regeneration to run.
     uint64_t sectionId = 0;
+    // Which scalar of the pending feature is being dragged — an extrude has
+    // a distance arrow, a second one when two-sided, and a twist arc
+    // (PreviewHandles.cpp's HandleParam). Also the handle's sub-id.
+    int param = 0;
   };
 
   // In-context editing (A4): non-zero while a part tab is being edited with

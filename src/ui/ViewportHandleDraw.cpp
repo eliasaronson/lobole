@@ -20,7 +20,8 @@ uint64_t ActiveHandleId(const AppState& state) {
   if (state.handleDrag.active)
     return state.handleDrag.sectionId
                ? HandleId(HandleOwner::Section, state.handleDrag.sectionId)
-               : HandleId(HandleOwner::Feature);
+               : HandleId(HandleOwner::Feature,
+                          static_cast<uint64_t>(state.handleDrag.param));
   if (state.simulation.loadDrag.active)
     return HandleId(HandleOwner::Load, state.simulation.loadDrag.loadId);
   return 0;

@@ -1414,6 +1414,154 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->commands->CanUndo());
   };
 
+  // A twisted extrude (docs/modeling/README.md#twisted-extrudes): the tool
+  // window's Twist field, then the twist ARC beside the distance arrow — the
+  // first preview with two live handles, so the drag must take the arc and
+  // leave the distance alone. The arc snaps like every angle drag.
+  t = IM_REGISTER_TEST(engine, "handles", "extrude_twist_field_and_arc");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+    sketch->AddRectangle({-2, -1}, {2, 1}); // about the twist axis
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_sk_extrude");
+    ctx->Yield(2);
+    auto* ext =
+        dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->twistDeg, 0.0); // the default: a plain prism
+    std::vector<PrimVertex> decor;
+    s_App->viewportHandles.clear();
+    ui::BuildPreviewHandleOverlay(*s_App, decor);
+    IM_CHECK_EQ(s_App->viewportHandles.size(), (size_t)1); // the arrow only
+
+    // The field: a twist, live in the preview.
+    ctx->ItemInputValue("//Extrude###ToolWindow/Twist (deg)/##Twist (deg)",
+                        30.0f);
+    ctx->Yield(2);
+    ext = dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(std::abs(ext->twistDeg - 30.0) < 1e-9);
+    IM_CHECK(ext->GetError().empty());
+    const double d0 = ext->distance;
+
+    s_App->viewportHandles.clear();
+    ui::BuildPreviewHandleOverlay(*s_App, decor);
+    IM_CHECK_EQ(s_App->viewportHandles.size(), (size_t)2);
+    const ui::ViewportHandle arrow = s_App->viewportHandles[0];
+    const ui::ViewportHandle arc = s_App->viewportHandles[1];
+    IM_CHECK(arrow.kind == ui::HandleKind::Linear);
+    IM_CHECK(arc.kind == ui::HandleKind::Rotate);
+    IM_CHECK(arrow.id != arc.id); // two handles, told apart
+    IM_CHECK_EQ(ui::OwnerOf(arc.id), ui::HandleOwner::Feature);
+
+    const glm::vec3 centre = arc.origin, axis = arc.dir;
+    const float radius = arc.length;
+    const glm::vec3 b1 = ui::PerpTo(axis), b2 = glm::cross(axis, b1);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(centre);
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(centre + axis * (radius * 6.0f) +
+                               b1 * (radius * 0.5f));
+    ctx->Yield(2);
+    const auto at = [&](float deg) {
+      const float a = glm::radians(deg);
+      return centre + (std::cos(a) * b1 + std::sin(a) * b2) * radius;
+    };
+    // From 30, +58 degrees lands at 88: inside 90's 5-degree capture, so
+    // the snap is what makes it exactly 90.
+    ctx->MouseMoveToPos(WorldToWindow(at(0.0f)));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->hoveredHandle, arc.id); // the arc, not the arrow
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->MouseMoveToPos(WorldToWindow(at(58.0f)));
+    ctx->Yield(2);
+    IM_CHECK(s_App->handleDrag.active);
+    IM_CHECK(s_App->handleDrag.rotate);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    ext = dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(std::abs(ext->twistDeg - 90.0) < 1e-6); // snapped
+    IM_CHECK(std::abs(ext->distance - d0) < 1e-9);   // the arrow untouched
+    IM_CHECK(ext->GetError().empty());
+
+    // Accept commits the field and the drag as one undoable feature.
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(Doc()->FeatureCount(), (size_t)2);
+    const auto* committed =
+        dynamic_cast<const ExtrudeFeature*>(Doc()->GetFeature(1));
+    IM_CHECK(committed != nullptr);
+    IM_CHECK(std::abs(committed->twistDeg - 90.0) < 1e-6);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+  };
+
+  // A two-sided extrude has a handle for each side: the second arrow points
+  // back from the far cap and drags `distance2`, not `distance`.
+  t = IM_REGISTER_TEST(engine, "handles", "two_sided_extrude_has_two_arrows");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+    sketch->AddRectangle({0, 0}, {4, 2});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    ToolbarClick(ctx, "###tb_sk_extrude");
+    ctx->Yield(2);
+    auto* ext =
+        dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    ext->endMode = ExtrudeEnd::TwoSided;
+    ext->distance2 = 1.0;
+    Doc()->Regenerate();
+    ctx->Yield(2);
+
+    std::vector<PrimVertex> decor;
+    s_App->viewportHandles.clear();
+    ui::BuildPreviewHandleOverlay(*s_App, decor);
+    IM_CHECK_EQ(s_App->viewportHandles.size(), (size_t)2);
+    const ui::ViewportHandle fwd = s_App->viewportHandles[0];
+    const ui::ViewportHandle back = s_App->viewportHandles[1];
+    IM_CHECK(glm::dot(fwd.dir, back.dir) < -0.99f); // opposite ways
+    const double d0 = ext->distance, d2 = ext->distance2;
+
+    // Look across the axis so both arrows are long on screen.
+    const glm::vec3 mid = (fwd.origin + back.origin) * 0.5f;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(mid);
+    s_App->camera->SetUp(glm::vec3(0.0f, 0.0f, 1.0f));
+    s_App->camera->SetPosition(mid + ui::PerpTo(fwd.dir) * 14.0f);
+    ctx->Yield(2);
+    const glm::vec3 grab = back.origin + back.dir * (0.5f * back.length);
+    ctx->MouseMoveToPos(WorldToWindow(grab));
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->KeyDown(ImGuiMod_Ctrl); // free: the number is the drag's own
+    ctx->MouseMoveToPos(WorldToWindow(grab + back.dir * 0.7f));
+    ctx->Yield(2);
+    IM_CHECK(s_App->handleDrag.active);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->KeyUp(ImGuiMod_Ctrl);
+    ctx->Yield();
+    ext = dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(std::abs(ext->distance2 - (d2 + 0.7)) < 0.05);
+    IM_CHECK(std::abs(ext->distance - d0) < 1e-9);
+  };
+
   // ONE drag polarity across the app: snap is the DEFAULT and Ctrl frees it.
   // This handle used to mean the opposite by Ctrl — fine by default, coarse
   // while held — so "Ctrl frees the snap" was true on an assembly tab and
@@ -2312,7 +2460,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
     // A pending FILLET has the direct-manipulation handle (its radius); a
-    // pending box does not — ComputeHandleSpec only serves features with a
+    // pending box does not — ComputeHandleSpecs only serves features with a
     // headline scalar (extrude distance, blend radius, revolve angle).
     AddFixtureBox(ctx);
     ctx->Yield();

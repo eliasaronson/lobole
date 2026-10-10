@@ -1855,6 +1855,17 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       ExprDim(state, feature, index, commit, "Distance 2", ext->distance2Expr,
               ext->distance2);
     }
+    // A twist is a blind or symmetric extrude's (ExtrudeFeature::
+    // WhyIncomplete refuses the rest, and says so in the window).
+    if (ext->endMode == ExtrudeEnd::Blind ||
+        ext->endMode == ExtrudeEnd::Symmetric) {
+      ExprDim(state, feature, index, commit, "Twist (deg)", ext->twistExpr,
+              ext->twistDeg, /*minValue=*/-1e6); // either hand
+      if (ext->twistDeg != 0.0 || !ext->twistExpr.empty())
+        HandleEdit(state, feature,
+                   ImGui::Checkbox("Herringbone", &ext->herringbone), index,
+                   commit);
+    }
     if (ext->endMode == ExtrudeEnd::Blind ||
         ext->endMode == ExtrudeEnd::TwoSided ||
         ext->endMode == ExtrudeEnd::ThroughAll) // no effect otherwise
