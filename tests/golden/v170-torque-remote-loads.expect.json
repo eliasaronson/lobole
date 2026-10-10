@@ -1,0 +1,11 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [7853.98],
+  "study_loads": [
+    ["fixed", 0.0, null, null],
+    ["torque", 2000.0, null, null],
+    ["torque", 500.0, [0, 0, 1], null],
+    ["remote", 60.0, null, [40, 0, 100]]
+  ]
+}

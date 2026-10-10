@@ -61,9 +61,12 @@ const MethodDoc RequirementMethods[] = {
      "(docs/requirements/README.md): {name, measure: {kind, document, ...}, "
      "bound: {kind: at_most|at_least {value} | within {min, max} | pass}, "
      "source?: why it exists, in a sentence}. Measure kinds: study_probe "
-     "{document: part, study, face?, at?, quantity?, case?, readings?, "
-     "expression?, unit?} (a face's motion in a static study, or a formula "
-     "over several faces' readings and the project's variables), "
+     "{document: part, study, face?, at?, quantity?: translation|rotation|"
+     "displacement_at|von_mises_max|von_mises_mean, case?, readings?, "
+     "expression?, unit?} (a face's motion, or the von Mises stress ON it "
+     "in MPa -- a tooth root rather than the global peak -- in a static "
+     "study, or a formula over several faces' readings and the project's "
+     "variables), "
      "study_result {document, study, quantity: max_displacement|"
      "max_von_mises|factor_of_safety, case?}, clearance {document: "
      "assembly, a, b: occurrence ids, mode?: mesh|exact, motion_study?: the "
@@ -762,6 +765,16 @@ Taken MeasureStudyProbe(ui::AppState& state, const json& m, const Ctx& ctx) {
     if (q == "translation") {
       t.value = r.at("translation_magnitude_mm").get<double>();
       t.unit = "mm";
+    } else if (q == "von_mises_max" || q == "von_mises_mean") {
+      // The stress ON the face (a tooth root, a fillet), not the global
+      // peak: docs/simulation/README.md#probing-a-face.
+      const char* key =
+          q == "von_mises_max" ? "von_mises_max_mpa" : "von_mises_mean_mpa";
+      if (!r.contains(key))
+        throw std::runtime_error("the face carries no stress in the study's "
+                                 "result");
+      t.value = r.at(key).get<double>();
+      t.unit = "MPa";
     } else if (q == "rotation") {
       if (!r.contains("rotation_magnitude_deg"))
         throw std::runtime_error("the face's nodes lie on a line: its "
@@ -773,6 +786,11 @@ Taken MeasureStudyProbe(ui::AppState& state, const json& m, const Ctx& ctx) {
       t.unit = "mm";
     }
     t.detail = {{"translation_mm", r.at("translation_mm")}};
+    if (r.contains("von_mises_max_mpa")) {
+      t.detail["von_mises_max_mpa"] = r.at("von_mises_max_mpa");
+      t.detail["von_mises_max_at_mm"] = r.at("von_mises_max_at_mm");
+      t.detail["von_mises_mean_mpa"] = r.at("von_mises_mean_mpa");
+    }
     if (r.contains("displacement_at_mm"))
       t.detail["displacement_at_mm"] = r.at("displacement_at_mm");
   } else {
@@ -794,6 +812,10 @@ Taken MeasureStudyProbe(ui::AppState& state, const json& m, const Ctx& ctx) {
                                           : json::array({0.0, 0.0, 0.0}));
       if (r.contains("displacement_at_mm"))
         put("d", r.at("displacement_at_mm"));
+      if (r.contains("von_mises_max_mpa")) {
+        sym[name + "_vmmax"] = r.at("von_mises_max_mpa").get<double>();
+        sym[name + "_vmmean"] = r.at("von_mises_mean_mpa").get<double>();
+      }
       readings[name] = {{"translation_mm", r.at("translation_mm")}};
       if (r.contains("displacement_at_mm"))
         readings[name]["displacement_at_mm"] = r.at("displacement_at_mm");

@@ -379,19 +379,33 @@ static constexpr MethodDoc SimulationMethods[] = {
      "name, num_modes, participants, shape_from, study, type, "
      "volume_fraction"},
     {"add_load",
-     "Add a load/fixture to a study {study, type: fixed|force|pressure, face, "
-     "magnitude, direction?}. `magnitude` is NEWTONS for a force -- the total "
-     "on that face, spread over its area -- and MPa for a pressure, which "
-     "pushes along the inward normal. `fixed` ignores it. Every result scales "
-     "linearly with this number and a wrong unit is invisible in the answer, "
-     "so it is stated here rather than left to be inferred from the solver. "
-     "An omitted force `direction` pushes into the picked face (the same "
-     "default a GUI placement takes). A `face` is {feature_id, element}, or "
-     "just the element name — the body that has it is then found for you. "
-     "On a study with load cases a force or pressure names its `case`; a "
-     "support names none (it holds in every case).",
-     "case, contact_with, direction, face, magnitude, occurrence, study, "
-     "type"},
+     "Add a load/fixture to a study {study, type: fixed|force|pressure|"
+     "torque|remote, face, ...}. force/pressure take `magnitude`: NEWTONS "
+     "for a force -- the total on that face, spread over its area -- and MPa "
+     "for a pressure, which pushes along the inward normal; `direction?`. "
+     "`fixed` takes neither. A torque takes `torque_nmm` (N*mm, right-handed "
+     "about the axis) and turns the face about `axis_origin_mm` + "
+     "`axis_dir` -- both omitted on a cylindrical face, which lends its own "
+     "axis (signed so its largest component is positive); a torque on any "
+     "other face without them is refused. It is the traction (T/J) a x "
+     "(x - o): exactly T about the axis, and no net force on a face "
+     "symmetric about it. A remote load takes `force_n` (N), `direction?` "
+     "and `point_mm` (required, [x, y, z] mm): that force acting at that "
+     "point, carried by the face as its share F/A plus the linear traction "
+     "that carries the moment (p - c) x F about the face's centroid, the "
+     "way an RBE3 spreads it. A key another type takes is refused, naming "
+     "the right one. On an assembly study the axis and point are WORLD "
+     "coordinates (docs/simulation/README.md#torque-and-remote-loads). "
+     "Every result scales linearly with these numbers and a wrong unit is "
+     "invisible in the answer, so it is stated here rather than left to be "
+     "inferred from the solver. An omitted force `direction` pushes into "
+     "the picked face (the same default a GUI placement takes). A `face` is "
+     "{feature_id, element}, or just the element name — the body that has "
+     "it is then found for you. On a study with load cases a force, "
+     "pressure, torque or remote load names its `case`; a support names "
+     "none (it holds in every case).",
+     "axis_dir, axis_origin_mm, case, contact_with, direction, face, "
+     "force_n, magnitude, occurrence, point_mm, study, torque_nmm, type"},
     {"remove_load",
      "Remove a load from a study {study, id}. `load` is accepted for the "
      "same thing. It is the load's ID, as `add_load` and `list_studies` "
@@ -530,11 +544,17 @@ static constexpr MethodDoc SimulationMethods[] = {
      "0-based index).",
      "case, deform_scale, field, mode, study, threshold"},
     {"probe_study",
-     "How one FACE moved under a solved static PART study, as a rigid body "
-     "{id (or study), face, at?}: the least-squares small-displacement fit "
+     "How one FACE moved and how hard it is stressed under a solved static "
+     "PART study {id (or study), face, at?}. Stress: von_mises_max_mpa (the "
+     "largest nodal von Mises on the face, MPa) at von_mises_max_at_mm, and "
+     "von_mises_mean_mpa (area-weighted over the face) -- a tooth root or a "
+     "fillet, where the global peak may sit in a sharp corner whose value "
+     "grows with the mesh. Motion, as a rigid body: the least-squares "
+     "small-displacement fit "
      "of the face's mesh nodes, u(p) = translation + rotation x (p - "
      "centroid), each node weighted by the area it stands for. Returns "
-     "{nodes, area_mm2, centroid_mm, translation_mm (the centroid's "
+     "{nodes, area_mm2, von_mises_max_mpa, von_mises_max_at_mm, "
+     "von_mises_mean_mpa, centroid_mm, translation_mm (the centroid's "
      "displacement, MILLIMETRES), rotation_rad (a small-angle rotation "
      "vector, RADIANS), rotation_magnitude_deg, rms_residual_mm (what the "
      "rigid fit leaves: the face's own distortion)}. `at` is a point "
@@ -766,8 +786,24 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         }
         if (l.type != fem::LoadType::Fixed)
           lj["magnitude"] = l.magnitude;
-        if (l.type == fem::LoadType::Force)
+        if (l.type == fem::LoadType::Force || l.type == fem::LoadType::Remote)
           lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
+        if (l.type == fem::LoadType::Torque) {
+          lj["torque_nmm"] = l.magnitude;
+          // The axis it turns about: its own, or its cylindrical face's.
+          if (l.HasAxis()) {
+            lj["axis_origin_mm"] = {l.axisOrigin.x, l.axisOrigin.y,
+                                    l.axisOrigin.z};
+            lj["axis_dir"] = {l.axisDirection.x, l.axisDirection.y,
+                              l.axisDirection.z};
+          } else {
+            lj["axis_from_face"] = true;
+          }
+        }
+        if (l.type == fem::LoadType::Remote) {
+          lj["force_n"] = l.magnitude;
+          lj["point_mm"] = {l.point.x, l.point.y, l.point.z};
+        }
         if (!l.loadCase.empty())
           lj["case"] = l.loadCase;
         loads.push_back(std::move(lj));
@@ -1148,7 +1184,63 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     fem::Load l;
     l.id = host.AllocateId();
     if (!fem::LoadTypeFromString(p.at("type").get<std::string>(), l.type))
-      throw std::runtime_error("load type must be fixed, force, or pressure");
+      throw std::runtime_error("unknown load type '" +
+                               p.at("type").get<std::string>() +
+                               "' (accepted: " + fem::kLoadTypeNames + ")");
+    // Each type's own keys; a key another type takes is refused rather than
+    // ignored, because its unit is another unit (a torque's `magnitude`
+    // read as newtons would be a thousand times off on a 1 m lever).
+    const bool torque = l.type == fem::LoadType::Torque;
+    const bool remote = l.type == fem::LoadType::Remote;
+    const auto refuseKey = [&](const char* key, const char* instead) {
+      if (p.contains(key))
+        throw std::runtime_error(
+            std::string("a ") + fem::LoadTypeToString(l.type) +
+            " load does not take `" + key + "`" +
+            (instead[0] ? std::string("; it takes `") + instead + "`"
+                        : std::string()));
+    };
+    if (torque || remote)
+      refuseKey("magnitude", torque ? "torque_nmm" : "force_n");
+    if (!torque) {
+      refuseKey("torque_nmm", "");
+      refuseKey("axis_origin_mm", "");
+      refuseKey("axis_dir", "");
+    }
+    if (!remote) {
+      refuseKey("force_n", "");
+      refuseKey("point_mm", "");
+    }
+    if (torque && !p.contains("torque_nmm"))
+      throw std::runtime_error("a torque load needs torque_nmm (N*mm, "
+                               "right-handed about its axis)");
+    if (remote && !p.contains("force_n"))
+      throw std::runtime_error("a remote load needs force_n (N)");
+    if (remote && !p.contains("point_mm"))
+      throw std::runtime_error("a remote load needs point_mm, the point "
+                               "[x, y, z] (mm) the force acts at");
+    if (torque && p.contains("axis_origin_mm") != p.contains("axis_dir"))
+      throw std::runtime_error("a torque's axis is axis_origin_mm AND "
+                               "axis_dir; pass both, or neither on a "
+                               "cylindrical face");
+    const auto vec3 = [&](const char* key) {
+      const json& v = p.at(key);
+      if (!v.is_array() || v.size() != 3)
+        throw std::runtime_error(std::string("`") + key + "` is [x, y, z]");
+      return glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
+                        v.at(2).get<double>());
+    };
+    if (torque && p.contains("axis_dir")) {
+      l.axisOrigin = vec3("axis_origin_mm");
+      l.axisDirection = vec3("axis_dir");
+      if (!l.HasAxis())
+        throw std::runtime_error("axis_dir is zero: a torque turns about a "
+                                 "direction");
+    }
+    if (remote) {
+      l.point = vec3("point_mm");
+      l.hasPoint = true;
+    }
     // An assembly study's anchor (S1): a face on a named occurrence, or —
     // for a fixed support — the CONTACT with a rigid occurrence, which has
     // no face to name because the patch exists in neither part.
@@ -1187,18 +1279,33 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
             "(id or name), or contact_with for a fixed support at a contact");
       }
     }
-    if (p.contains("magnitude")) {
-      const json& v = p.at("magnitude");
+    // rpc-params: magnitude
+    const char* magKey = torque   ? "torque_nmm"
+                         : remote ? "force_n"
+                                  : "magnitude";
+    if (p.contains(magKey)) {
+      const json& v = p.at(magKey);
       if (v.is_string())
         l.magnitudeExpr = v.get<std::string>();
       else
         l.magnitude = v.get<double>();
     }
+    // A torque on a face that lends no axis is refused here, before the
+    // study changes, as well as at the run (a file can carry one too).
+    if (torque && !l.HasAxis() && l.contactWith == 0 &&
+        !(faceDoc && fem::CylindricalFaceAxis(*faceDoc, l.face)))
+      throw std::runtime_error(
+          "face '" + l.face.name +
+          "' is not cylindrical, so it has no axis of its own: a torque on "
+          "it needs axis_origin_mm and axis_dir");
+    if (torque && p.contains("direction"))
+      throw std::runtime_error("a torque load does not take `direction`; "
+                               "it turns about axis_dir");
     if (p.contains("direction")) {
       const auto& d = p.at("direction");
       l.direction = glm::dvec3(d.at(0).get<double>(), d.at(1).get<double>(),
                                d.at(2).get<double>());
-    } else if (l.type == fem::LoadType::Force) {
+    } else if (l.type == fem::LoadType::Force || remote) {
       // No direction given: push into the face, exactly as a GUI placement
       // does. The alternative was the struct's literal, which is a world
       // direction that knows nothing about the face it was applied to.
@@ -1727,6 +1834,8 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     if (!fm)
       throw std::runtime_error("face '" + face.name +
                                "' has no triangles in the study's mesh");
+    const auto stress = fem::FaceStressOf(
+        body->mesh, body->Case(caseIdx).vonMises, rf.faceIndex);
     const auto vec = [](const glm::dvec3& v) {
       return json::array({v.x, v.y, v.z});
     };
@@ -1741,6 +1850,11 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         {"translation_magnitude_mm", glm::length(fm->translation)},
         {"rotation_determined", fm->rotationDetermined},
         {"rms_residual_mm", fm->rmsResidual}};
+    if (stress) {
+      out["von_mises_max_mpa"] = stress->maxMPa;
+      out["von_mises_max_at_mm"] = vec(stress->maxAt);
+      out["von_mises_mean_mpa"] = stress->meanMPa;
+    }
     if (fm->rotationDetermined) {
       out["rotation_rad"] = vec(fm->rotation);
       out["rotation_magnitude_deg"] = glm::degrees(glm::length(fm->rotation));

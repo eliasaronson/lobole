@@ -226,6 +226,83 @@ def assembly_study(d):
     print("fem_smoke: assembly study OK")
 
 
+def torque_and_probe(d, study, created_by, fixed_face):
+    """Torque and remote loads and a face's stress, over the RPCs
+    (docs/simulation/README.md#torque-and-remote-loads, #probing-a-face).
+    The physics is test_fem_loads.cpp's; this is the contract: refusals
+    that change nothing, the keys each type takes, what list_studies and
+    probe_study report, and a requirement on a face's stress."""
+    els = d.call("list_elements")["bodies"][0]
+    end = [f["name"] for f in els["faces"]
+           if abs(f["normal"][0] - 1.0) < 1e-6][0]
+    face = {"feature_id": created_by, "element": end}
+    count = len(d.call("list_studies")["studies"][0]["loads"])
+
+    def refused(params, words):
+        try:
+            d.call("add_load", study=study, face=face, **params)
+        except RuntimeError as e:
+            for w in words:
+                expect(w in str(e), f"the refusal names {w!r}: {e}")
+        else:
+            raise AssertionError(f"accepted {params}")
+        now = len(d.call("list_studies")["studies"][0]["loads"])
+        expect(now == count, f"a refused add_load changed the study: {now}")
+
+    # A flat end has no axis of its own; a remote load needs its point; a
+    # torque's magnitude is not newtons, so `magnitude` is refused for it.
+    refused({"type": "torque", "torque_nmm": 1000}, ["not cylindrical",
+                                                     "axis_dir"])
+    refused({"type": "remote", "force_n": 10}, ["point_mm"])
+    refused({"type": "torque", "magnitude": 1000, "axis_dir": [1, 0, 0],
+             "axis_origin_mm": [0, 5, 5]}, ["torque_nmm"])
+    refused({"type": "force", "magnitude": 1, "point_mm": [0, 0, 0]},
+            ["point_mm"])
+    refused({"type": "twist", "magnitude": 1}, ["torque", "remote"])
+
+    twist = d.call("add_study", name="Twist")["id"]
+    d.call("set_study", id=twist, mesh_size=4.0)
+    d.call("add_load", study=twist, type="fixed",
+           face={"feature_id": created_by, "element": fixed_face})
+    d.call("add_load", study=twist, type="torque", face=face,
+           torque_nmm=5000, axis_origin_mm=[100, 5, 5], axis_dir=[1, 0, 0])
+    d.call("add_load", study=twist, type="remote", face=face, force_n=50,
+           direction=[0, 0, -1], point_mm=[140, 5, 5])
+    loads = [x for x in d.call("list_studies")["studies"]
+             if x["id"] == twist][0]["loads"]
+    expect(loads[1]["type"] == "torque" and loads[1]["torque_nmm"] == 5000
+           and loads[1]["axis_dir"] == [1, 0, 0], f"the torque: {loads[1]}")
+    expect(loads[2]["type"] == "remote" and loads[2]["force_n"] == 50
+           and loads[2]["point_mm"] == [140, 5, 5], f"the remote: {loads[2]}")
+    res = d.call("run_study", id=twist)
+    peak = res["max_von_mises_mpa"]["value"]
+    expect(peak > 0, f"solved: {res['max_von_mises_mpa']}")
+
+    # The stress ON a face, beside its motion.
+    probe = d.call("probe_study", id=twist,
+                   face={"feature_id": created_by, "element": fixed_face})
+    expect(0 < probe["von_mises_mean_mpa"] <= probe["von_mises_max_mpa"]
+           <= peak + 1e-9, f"a face's stress under the peak: {probe}")
+    expect(len(probe["von_mises_max_at_mm"]) == 3, "where its peak is")
+
+    # ... held by a requirement on that face.
+    doc = d.call("list_parts")["active_id"]
+    req = d.call("add_requirement", name="root stress",
+                 measure={"kind": "study_probe", "document": doc,
+                          "study": twist,
+                          "face": {"feature_id": created_by,
+                                   "element": fixed_face},
+                          "quantity": "von_mises_max"},
+                 bound={"kind": "at_most", "value": 1e6})["id"]
+    checked = d.call("check_requirements", ids=[req])
+    row = [r for r in checked["requirements"] if r["id"] == req][0]
+    expect(row["state"] == "pass"
+           and abs(row["value"] - probe["von_mises_max_mpa"]) < 1e-9
+           and row["unit"] == "MPa", f"the requirement reads the probe: {row}")
+    d.call("remove_requirement", id=req)
+    d.call("remove_study", id=twist)
+
+
 def main():
     binary = sys.argv[1]
     try:
@@ -292,6 +369,8 @@ def main():
             ratio = res2["max_von_mises_mpa"]["value"] / sigma
             expect(abs(ratio - 2.0) < 0.05,
                    f"stress scales 2x with the load, got {ratio}")
+
+            torque_and_probe(d, study, created_by, fixed_face)
 
             # --- one word per thing, and `id` means what it does elsewhere
             # This family used to ask for `kind` and report `type`, and name

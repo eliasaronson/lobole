@@ -59,6 +59,8 @@ DIMENSIONAL = {
     # force / stress / mass / density
     "magnitude", "force", "pressure", "load", "mass", "density", "gravity",
     "stress", "modulus", "yield",
+    # torque, a force times a length
+    "torque", "moment",
     # rate / time
     "feed", "plunge", "speed", "rpm", "duration", "timeout", "budget",
     "deadline", "frequency",
@@ -70,14 +72,15 @@ DIMENSIONAL = {
 # and the convention the codebase already spells: angle_deg, mass_g,
 # max_von_mises_mpa, feed_mm_min, deflection_mm, budget_s.
 UNIT_SUFFIX = re.compile(
-    r"_(mm|cm|m|in|deg|rad|g|kg|lb|s|ms|n|mpa|gpa|hz|rpm|mm_min|m_s|px|pct)$")
+    r"_(mm|cm|m|in|deg|rad|g|kg|lb|s|ms|n|n_mm|nmm|n_m|mpa|gpa|hz|rpm|mm_min|"
+    r"m_s|px|pct)$")
 
 # Unit words a row's prose can use, in any case — rows shout MILLIMETRES and
 # RADIANS where the confusion has actually bitten, and that has to count.
 UNIT_WORD = re.compile(
     r"\b(mm|cm|millimetres?|millimeters?|centimetres?|centimeters?|"
     r"metres?|meters?|inch|inches|deg|degrees?|radians?|rad|"
-    r"newtons?|kg|grams?|tonnes?|pounds?|"
+    r"newtons?|newton-millimetres?|n\*mm|n·mm|kg|grams?|tonnes?|pounds?|"
     r"rpm|hz|hertz|seconds?|minutes?|pixels?|percent|"
     r"unitless|dimensionless|fraction|ratio|normalized)\b"
     r"|mm/min|m/s\^?2?|kg/m\^?3?|g/cm\^?3?|%",

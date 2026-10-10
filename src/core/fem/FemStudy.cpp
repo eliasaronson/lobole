@@ -3,9 +3,15 @@
 
 #include "core/fem/FemStudy.h"
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
+#include <BRepGProp.hxx>
+#include <GProp_GProps.hxx>
 #include <TopAbs_State.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <gp_Cylinder.hxx>
 #include <gp_Pnt.hxx>
 
 #include "cad/CADMaterials.h"
@@ -32,6 +38,10 @@ const char* LoadTypeToString(LoadType type) {
     return "force";
   case LoadType::Pressure:
     return "pressure";
+  case LoadType::Torque:
+    return "torque";
+  case LoadType::Remote:
+    return "remote";
   }
   return "fixed";
 }
@@ -47,6 +57,14 @@ bool LoadTypeFromString(const std::string& s, LoadType& out) {
   }
   if (s == "pressure") {
     out = LoadType::Pressure;
+    return true;
+  }
+  if (s == "torque") {
+    out = LoadType::Torque;
+    return true;
+  }
+  if (s == "remote") {
+    out = LoadType::Remote;
     return true;
   }
   return false;
@@ -288,6 +306,98 @@ std::optional<glm::dvec3> DefaultForceDirection(const Document& doc,
     return std::nullopt;
   // Into the face: pushing on a face is what placing a force on it means.
   return -glm::normalize(n);
+}
+
+namespace {
+// Face `index` of `shape` in TopExp_Explorer order, which is what a
+// ResolvedFace counts (Measure's FaceAt).
+TopoDS_Shape FaceByIndex(const TopoDS_Shape& shape, int index) {
+  int i = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next(), ++i)
+    if (i == index)
+      return ex.Current();
+  return {};
+}
+} // namespace
+
+std::optional<LoadAxis> CylindricalFaceAxis(const TopoDS_Shape& face) {
+  if (face.IsNull() || face.ShapeType() != TopAbs_FACE)
+    return std::nullopt;
+  BRepAdaptor_Surface surf(TopoDS::Face(face));
+  if (surf.GetType() != GeomAbs_Cylinder)
+    return std::nullopt;
+  const gp_Ax1 ax = surf.Cylinder().Axis();
+  glm::dvec3 d(ax.Direction().X(), ax.Direction().Y(), ax.Direction().Z());
+  // The surface's own sign is arbitrary; the largest component positive
+  // makes a shaft along Z turn about +Z whichever way it was modelled.
+  int big = 0;
+  for (int k = 1; k < 3; ++k)
+    if (std::abs(d[k]) > std::abs(d[big]) + 1e-9)
+      big = k;
+  if (d[big] < 0)
+    d = -d;
+  const glm::dvec3 o(ax.Location().X(), ax.Location().Y(), ax.Location().Z());
+  GProp_GProps props;
+  BRepGProp::SurfaceProperties(face, props);
+  const gp_Pnt c = props.CentreOfMass();
+  const glm::dvec3 cc(c.X(), c.Y(), c.Z());
+  LoadAxis out;
+  out.direction = glm::normalize(d);
+  out.origin = o + glm::dot(cc - o, out.direction) * out.direction;
+  return out;
+}
+
+std::optional<LoadAxis> CylindricalFaceAxis(const Document& doc,
+                                            const ElementRef& face) {
+  ResolvedFace rf;
+  if (!ResolveFace(doc, face, "torque", rf, nullptr))
+    return std::nullopt;
+  return CylindricalFaceAxis(FaceByIndex(
+      doc.GetBodies()[rf.bodyIndex].shape.GetShape(), rf.faceIndex));
+}
+
+std::optional<LoadAxis> TorqueAxis(const Document& doc, const Load& load) {
+  if (load.HasAxis())
+    return LoadAxis{load.axisOrigin, glm::normalize(load.axisDirection)};
+  return CylindricalFaceAxis(doc, load.face);
+}
+
+bool CompleteLoadGeometry(const TopoDS_Shape& face, Load& load,
+                          std::string* error) {
+  if (load.type == LoadType::Torque && !load.HasAxis()) {
+    const auto axis = CylindricalFaceAxis(face);
+    if (!axis) {
+      if (error)
+        *error = "load " + std::to_string(load.id) +
+                 ": a torque on a face that is not cylindrical needs an axis "
+                 "(axis_origin_mm and axis_dir); a cylindrical face lends its "
+                 "own";
+      return false;
+    }
+    load.axisOrigin = axis->origin;
+    load.axisDirection = axis->direction;
+  }
+  if (load.type == LoadType::Remote && !load.hasPoint) {
+    if (error)
+      *error = "load " + std::to_string(load.id) +
+               ": a remote load needs the point it acts at (point_mm)";
+    return false;
+  }
+  return true;
+}
+
+FaceLoad MakeFaceLoad(const Load& load) {
+  FaceLoad fl;
+  fl.type = load.type;
+  fl.magnitude = load.magnitude;
+  fl.direction = load.direction;
+  if (load.type == LoadType::Torque) {
+    fl.origin = load.axisOrigin;
+    fl.axis = load.axisDirection;
+  } else if (load.type == LoadType::Remote) {
+    fl.origin = load.point;
+  }
+  return fl;
 }
 
 bool PlanStudyMesh(const Document& doc, Study& study, MeshPlan& out,
@@ -664,8 +774,13 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     // meshes, and this shape may be meshed on a worker while the document's
     // own is being drawn.
     bp.settings = plan.settings;
-    for (const auto& [faceIndex, loadIdx] : plan.loads)
-      bp.loads.push_back({faceIndex, study.loads[loadIdx]});
+    for (const auto& [faceIndex, loadIdx] : plan.loads) {
+      Load l = study.loads[loadIdx];
+      if (!CompleteLoadGeometry(FaceByIndex(body.shape.GetShape(), faceIndex),
+                                l, &err))
+        return fail(err);
+      bp.loads.push_back({faceIndex, std::move(l)});
+    }
     if (study.shapeFrom.study != 0) {
       // A static study of a topology result: its mesh is cut from the
       // result, nothing is meshed
@@ -744,6 +859,9 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     std::set<int> fixedSet;
     std::vector<FaceLoad> faceLoads;
     std::vector<std::vector<FaceLoad>> caseLoads(plan.caseNames.size());
+    // A torque or remote load on a face the imprint split arrives once per
+    // piece: its pieces are one FaceLoad, so its field is the whole face's.
+    std::map<uint64_t, std::pair<size_t, size_t>> fieldLoad; // id -> (case, i)
     for (const auto& [faceIndex, load] : bp.loads) {
       if (load.type == LoadType::Fixed) {
         for (const auto& tri : mesh->boundary)
@@ -751,28 +869,39 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
             for (int n : tri.nodes)
               fixedSet.insert(n);
       } else {
-        FaceLoad fl;
-        fl.type = load.type;
-        fl.magnitude = load.magnitude;
-        fl.direction = load.direction;
+        std::vector<int> tris;
         for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
           if (mesh->boundary[t].faceIndex == faceIndex)
-            fl.tris.push_back(t);
-        if (fl.tris.empty() && bp.premeshed)
+            tris.push_back(t);
+        if (tris.empty() && bp.premeshed)
           return fail("body '" + bp.bodyName + "': load " +
                       std::to_string(load.id) +
                       "'s face has no material left in the optimised shape");
-        if (plan.caseNames.empty()) {
-          faceLoads.push_back(std::move(fl));
-          continue;
-        }
         size_t k = 0;
-        while (k < plan.caseNames.size() && plan.caseNames[k] != load.loadCase)
-          ++k;
-        if (k == plan.caseNames.size())
-          return fail("load " + std::to_string(load.id) + " names load case '" +
-                      load.loadCase + "', which the study does not have");
-        caseLoads[k].push_back(std::move(fl));
+        if (!plan.caseNames.empty()) {
+          while (k < plan.caseNames.size() &&
+                 plan.caseNames[k] != load.loadCase)
+            ++k;
+          if (k == plan.caseNames.size())
+            return fail("load " + std::to_string(load.id) +
+                        " names load case '" + load.loadCase +
+                        "', which the study does not have");
+        }
+        std::vector<FaceLoad>& into =
+            plan.caseNames.empty() ? faceLoads : caseLoads[k];
+        const bool field =
+            load.type == LoadType::Torque || load.type == LoadType::Remote;
+        if (field && load.id != 0)
+          if (auto it = fieldLoad.find(load.id); it != fieldLoad.end()) {
+            std::vector<int>& more = into[it->second.second].tris;
+            more.insert(more.end(), tris.begin(), tris.end());
+            continue;
+          }
+        FaceLoad fl = MakeFaceLoad(load);
+        fl.tris = std::move(tris);
+        if (field && load.id != 0)
+          fieldLoad[load.id] = {k, into.size()};
+        into.push_back(std::move(fl));
       }
     }
     if (fixedSet.empty())
@@ -1130,10 +1259,11 @@ bool PrepareTopology(const Document& doc, Study& study, TopoInput& out,
             fixedSet.insert(n);
     } else {
       hasApplied = true;
-      FaceLoad fl;
-      fl.type = load.type;
-      fl.magnitude = load.magnitude;
-      fl.direction = load.direction;
+      Load complete = load;
+      if (!CompleteLoadGeometry(FaceByIndex(body.shape.GetShape(), faceIndex),
+                                complete, &err))
+        return fail(err);
+      FaceLoad fl = MakeFaceLoad(complete);
       for (int t = 0; t < static_cast<int>(mesh.boundary.size()); ++t)
         if (mesh.boundary[t].faceIndex == faceIndex)
           fl.tris.push_back(t);

@@ -18,6 +18,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/TemplateFeature.h"
+#include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "core/tube/Rules.h"
 
@@ -1018,6 +1019,31 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       const size_t i = sk->IndexOfImage(imageId);
       REQUIRE(i < sk->images.size());
       CHECK(sk->images[i].showAlways == want.at(2).get<bool>());
+    }
+  }
+  // v170: torque and remote loads. Neither changes a volume, and a torque's
+  // axis or a remote load's point dropped on load would solve as a different
+  // load; each [type, magnitude, axis_dir or null, point or null] of the
+  // first study must hold.
+  if (expect.contains("study_loads")) {
+    REQUIRE_FALSE(doc.GetStudies().empty());
+    const auto& loads = doc.GetStudies().front().loads;
+    const auto& want = expect.at("study_loads");
+    REQUIRE(loads.size() == want.size());
+    for (size_t i = 0; i < loads.size(); ++i) {
+      INFO("load " << i);
+      const fem::Load& l = loads[i];
+      CHECK(std::string(fem::LoadTypeToString(l.type)) ==
+            want[i].at(0).get<std::string>());
+      CHECK_THAT(l.magnitude, WithinRel(want[i].at(1).get<double>(), 1e-9));
+      CHECK(l.HasAxis() == !want[i].at(2).is_null());
+      if (l.HasAxis())
+        for (int k = 0; k < 3; ++k)
+          CHECK(l.axisDirection[k] == want[i].at(2).at(k).get<double>());
+      CHECK(l.hasPoint == !want[i].at(3).is_null());
+      if (l.hasPoint)
+        for (int k = 0; k < 3; ++k)
+          CHECK(l.point[k] == want[i].at(3).at(k).get<double>());
     }
   }
   // v168: an extrude's twist. A twisted rectangle has the prism's volume, so

@@ -40,12 +40,23 @@ struct Material {
 
 // A traction boundary condition on one B-Rep face, given as the boundary
 // triangles (indices into FemMesh::boundary) that lie on it.
+// Torque and Remote are fields over the whole face set `tris` covers: a face
+// an assembly's imprint split is one FaceLoad over all its pieces, so the
+// field is the unsplit face's.
 struct FaceLoad {
-  LoadType type = LoadType::Force; // Force or Pressure (Fixed is a constraint)
+  LoadType type = LoadType::Force; // Fixed is a constraint, not a FaceLoad
   std::vector<int> tris;           // indices into FemMesh::boundary
-  double magnitude = 0.0;          // total N (Force) or MPa (Pressure)
-  glm::dvec3 direction{0, 0, 0};   // Force only (need not be normalized)
+  // Total N (Force, Remote), MPa (Pressure), N*mm (Torque).
+  double magnitude = 0.0;
+  glm::dvec3 direction{0, 0, 0}; // Force, Remote (need not be normalized)
+  // Torque: a point on the axis; Remote: the point the force acts at (mm).
+  glm::dvec3 origin{0, 0, 0};
+  glm::dvec3 axis{0, 0, 0}; // Torque: the axis direction (need not be unit)
 };
+
+// A load's traction as the solver takes it, its triangles left to the caller.
+// The load's geometry must be complete (CompleteLoadGeometry).
+FaceLoad MakeFaceLoad(const Load& load);
 
 // Solved fields, one entry per mesh node.
 struct FemResults {
@@ -94,6 +105,24 @@ struct FaceMotion {
 std::optional<FaceMotion>
 FitFaceMotion(const FemMesh& mesh, const std::vector<glm::dvec3>& displacement,
               int faceIndex);
+
+// The von Mises stress on one face of a solved mesh
+// (docs/simulation/README.md#probing-a-face): the largest nodal value over
+// the face's boundary triangles and where it is, and the area-weighted mean
+// of the field the triangles interpolate. A face is where a designer reads a
+// stress -- a tooth root, a fillet -- rather than the global peak, which in a
+// sharp re-entrant corner grows with refinement. nullopt when no boundary
+// triangle lies on face `faceIndex` or `vonMises` is not one entry per node.
+struct FaceStress {
+  int nodes = 0;
+  double area = 0.0;     // mm^2
+  double maxMPa = 0.0;   // the largest nodal value on the face
+  glm::dvec3 maxAt{0.0}; // mm, where it is
+  double meanMPa = 0.0;  // area-weighted over the face
+};
+std::optional<FaceStress> FaceStressOf(const FemMesh& mesh,
+                                       const std::vector<double>& vonMises,
+                                       int faceIndex);
 
 // Solves K u = f with the given fixed nodes (all three DOF zeroed, eliminated
 // from the system), face tractions, and an optional body force (gravity

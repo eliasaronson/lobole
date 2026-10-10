@@ -856,4 +856,46 @@ FitFaceMotion(const FemMesh& mesh, const std::vector<glm::dvec3>& displacement,
   return out;
 }
 
+std::optional<FaceStress> FaceStressOf(const FemMesh& mesh,
+                                       const std::vector<double>& vonMises,
+                                       int faceIndex) {
+  if (vonMises.size() != mesh.nodes.size())
+    return std::nullopt;
+  FaceStress out;
+  double weighted = 0.0;
+  std::vector<char> seen(mesh.nodes.size(), 0);
+  bool any = false;
+  for (const FemMesh::BoundaryTri& t : mesh.boundary) {
+    if (t.faceIndex != faceIndex)
+      continue;
+    any = true;
+    const glm::dvec3& a = mesh.nodes[t.nodes[0]];
+    const double triArea =
+        0.5 * glm::length(glm::cross(mesh.nodes[t.nodes[1]] - a,
+                                     mesh.nodes[t.nodes[2]] - a));
+    // The integral of the quadratic (tri6) interpolant over a flat
+    // triangle: the corner shape functions integrate to zero and each
+    // mid-side one to a third of the area.
+    weighted +=
+        triArea *
+        (vonMises[t.nodes[3]] + vonMises[t.nodes[4]] + vonMises[t.nodes[5]]) /
+        3.0;
+    out.area += triArea;
+    for (int n : t.nodes) {
+      if (!seen[n]) {
+        seen[n] = 1;
+        ++out.nodes;
+      }
+      if (out.nodes == 1 || vonMises[n] > out.maxMPa) { // first, or larger
+        out.maxMPa = vonMises[n];
+        out.maxAt = mesh.nodes[n];
+      }
+    }
+  }
+  if (!any || out.area <= 0.0)
+    return std::nullopt;
+  out.meanMPa = weighted / out.area;
+  return out;
+}
+
 } // namespace fem

@@ -34,6 +34,11 @@ enum class LoadType {
   Force,    // a total force vector (N) spread as uniform traction
   Pressure, // a scalar pressure (MPa) along the INWARD face normal: a
             // positive value pushes into the face
+  Torque,   // a torque (N*mm) about an axis, as the traction
+            // t = (T/J) a x (x - o), J = integral of r^2 dA over the face
+  Remote,   // a force (N) acting at a point off the face, carried by the
+            // face as F/A plus the linear traction that carries its moment
+            // (docs/simulation/README.md#torque-and-remote-loads)
 };
 
 // A per-face mesh size override (mm). size follows the value+expr convention:
@@ -71,10 +76,11 @@ const char* ParticipantRoleToString(ParticipantRole role);
 [[nodiscard]] bool ParticipantRoleFromString(const std::string& s,
                                              ParticipantRole& out);
 
-// One boundary condition. `magnitude` is N (Force) or MPa (Pressure), ignored
-// for Fixed. `direction` is the force direction (Force only; need not be
-// normalized — it is normalized at solve time). Magnitude follows the value+
-// expr convention so it can read "bolt_preload * 1.5".
+// One boundary condition. `magnitude` is N (Force, Remote), MPa (Pressure) or
+// N*mm (Torque), ignored for Fixed. `direction` is the force direction (Force
+// and Remote; need not be normalized — it is normalized at solve time).
+// Magnitude follows the value+ expr convention so it can read "bolt_preload
+// * 1.5".
 //
 // On an assembly study every anchor is occurrence-qualified (`occurrenceId`,
 // the job document's `{jobPartId, ElementRef}` shape), and a Fixed load may
@@ -96,6 +102,18 @@ struct Load {
   // the face you picked. "Down" comes from the world frame — a hand-written
   // axis here was once "down" in no coordinate system this app uses.
   glm::dvec3 direction = -conv::kWorldUp;
+  // Torque only: the axis it turns about, a point on it and its direction
+  // (mm; the part's coordinates, or the world's on an assembly study). A
+  // zero direction means the face's own axis, which only a cylindrical face
+  // has: anywhere else the axis is given or the load is refused. A positive
+  // torque turns right-handed about the direction.
+  glm::dvec3 axisOrigin{0.0};
+  glm::dvec3 axisDirection{0.0};
+  bool HasAxis() const { return glm::dot(axisDirection, axisDirection) > 0.0; }
+  // Remote only: the point the force acts at (mm, same frame as the axis).
+  // Required: a remote load without one is refused.
+  glm::dvec3 point{0.0};
+  bool hasPoint = false;
   // The load case this force or pressure belongs to, by name
   // (docs/topopt/README.md#load-cases). Empty on a study with no cases, and
   // always on a support: supports are shared by every case.
@@ -205,6 +223,9 @@ struct Study {
 };
 
 const char* LoadTypeToString(LoadType type);
+// Every load type's name, for a refusal that names what is accepted.
+inline constexpr const char* kLoadTypeNames =
+    "fixed, force, pressure, torque, remote";
 [[nodiscard]] bool LoadTypeFromString(const std::string& s, LoadType& out);
 const char* AnalysisTypeToString(AnalysisType type);
 
@@ -257,6 +278,31 @@ bool ResolveFace(const Document& doc, const ElementRef& ref,
 // resolve or the surface has no usable normal.
 std::optional<glm::dvec3> DefaultForceDirection(const Document& doc,
                                                 const ElementRef& face);
+
+// An axis: a point on it and a unit direction (mm).
+struct LoadAxis {
+  glm::dvec3 origin{0.0};
+  glm::dvec3 direction{0.0, 0.0, 1.0};
+};
+// The axis of a cylindrical face, its origin the face's centroid projected
+// onto it and its direction signed so its largest component is positive (the
+// surface's own sign is arbitrary). nullopt for any other face.
+std::optional<LoadAxis> CylindricalFaceAxis(const TopoDS_Shape& face);
+// The same for a face of a document, by ref; nullopt when the ref does not
+// resolve or the face is not cylindrical.
+std::optional<LoadAxis> CylindricalFaceAxis(const Document& doc,
+                                            const ElementRef& face);
+// The axis a torque load turns about: its own, else its face's. nullopt when
+// it has none and its face is not cylindrical.
+std::optional<LoadAxis> TorqueAxis(const Document& doc, const Load& load);
+// Completes `load` against the face it acts on, before it is meshed: a
+// torque without an axis takes the cylindrical face's, and is refused on any
+// other face; a remote load without a point is refused. Every path that
+// turns a Load into a traction calls this (part, assembly and topology
+// studies), so a file and an RPC are refused the same way. Other load types
+// pass unchanged.
+bool CompleteLoadGeometry(const TopoDS_Shape& face, Load& load,
+                          std::string* error);
 
 // One meshed body of a study.
 struct StudyBodyMesh {

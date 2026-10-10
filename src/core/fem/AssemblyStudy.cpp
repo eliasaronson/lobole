@@ -511,8 +511,15 @@ bool PlanAssemblyStudy(const AssemblyDocument& asmDoc, Study& study,
           bp.loads.push_back({piece, part});
         }
       } else {
+        // A torque or a remote load is a field over the whole face: every
+        // piece carries it whole, and MeshPlannedStudy makes the pieces of
+        // one load one FaceLoad again.
+        Load whole = l;
+        std::string why;
+        if (!CompleteLoadGeometry(imprintedFaces[pieces.front()], whole, &why))
+          return fail(why);
         for (int piece : pieces)
-          bp.loads.push_back({piece, l});
+          bp.loads.push_back({piece, whole});
       }
     }
 
@@ -797,8 +804,14 @@ static bool PlanBondedGroup(const AssemblyDocument& asmDoc, Study& study,
         bp.loads.push_back({piece, part});
       }
     } else {
+      // A torque or remote load: whole on every piece (see the meshed
+      // occurrence's planning above).
+      Load whole = l;
+      std::string why;
+      if (!CompleteLoadGeometry(faceMap(pieces.front() + 1), whole, &why))
+        return fail(why);
       for (int piece : pieces)
-        bp.loads.push_back({piece, l});
+        bp.loads.push_back({piece, whole});
     }
   }
   for (size_t ri = 0; ri < study.refinements.size(); ++ri) {

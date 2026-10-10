@@ -1,0 +1,29 @@
+{
+  "format": "designer-document",
+  "version": 170,
+  "features": [
+    {"type": "Sketch", "name": "Section", "id": 1, "next_entity_id": 2,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "circle", "id": 1, "center": [0, 0], "radius": 5}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Shaft", "id": 2, "sketch_id": 1,
+     "distance": 100.0, "mode": "new_body"}
+  ],
+  "studies": [
+    {"type": "Study", "id": 3, "name": "Twist",
+     "loads": [
+       {"id": 4, "type": "fixed",
+        "face": {"feature_id": 2, "element": "2/cap0"}, "magnitude": 0.0},
+       {"id": 5, "type": "torque",
+        "face": {"feature_id": 2, "element": "2/g1"}, "magnitude": 2000.0},
+       {"id": 6, "type": "torque",
+        "face": {"feature_id": 2, "element": "2/cap1"}, "magnitude": 500.0,
+        "axis_origin": [0, 0, 100], "axis_dir": [0, 0, 1]},
+       {"id": 7, "type": "remote",
+        "face": {"feature_id": 2, "element": "2/cap1"}, "magnitude": 60.0,
+        "direction": [0, -1, 0], "point": [40, 0, 100]}
+     ]}
+  ]
+}

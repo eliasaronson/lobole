@@ -26,7 +26,11 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    169; // v169: a part's `print` may name one of the user's print profiles
+    170; // v170: two load types, `torque` (magnitude N*mm, an optional
+         //      `axis_origin` + `axis_dir`, omitted for a cylindrical face's
+         //      own axis) and `remote` (magnitude N, `direction`, `point`)
+         //      (docs/simulation/README.md#torque-and-remote-loads).
+         // v169: a part's `print` may name one of the user's print profiles
          //      (`profile`) and embed its copy: `conditions`,
          //      `stl_deflection_mm` and `rows` [{kind, from_mm, to_mm?,
          //      allowance_mm, source?}]

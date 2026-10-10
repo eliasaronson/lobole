@@ -204,7 +204,8 @@ void ValidateValues(const std::string& kind, const json& m) {
                              "' (accepted: " + list + ")");
   };
   if (kind == "study_probe") {
-    oneOf("quantity", {"translation", "rotation", "displacement_at"});
+    oneOf("quantity", {"translation", "rotation", "displacement_at",
+                       "von_mises_max", "von_mises_mean"});
     const bool face = m.contains("face");
     const bool formula = m.contains("readings") || m.contains("expression");
     if (face == formula)
@@ -216,7 +217,8 @@ void ValidateValues(const std::string& kind, const json& m) {
       throw std::runtime_error(
           "study_probe's formula needs both `readings` (name -> {face, at?}) "
           "and `expression` (over <name>_tx/_ty/_tz, _rx/_ry/_rz, "
-          "_dx/_dy/_dz, _cx/_cy/_cz and the project's variables)");
+          "_dx/_dy/_dz, _cx/_cy/_cz, _vmmax/_vmmean and the project's "
+          "variables)");
     if (formula) {
       if (!m.at("readings").is_object() || m.at("readings").empty())
         throw std::runtime_error(

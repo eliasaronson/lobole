@@ -22,8 +22,10 @@ A study holds:
 - `meshSize` (mm; 0 = auto, the body's bounding-box diagonal / 15) and
   per-face `refinements` (a target element size on one face).
 - `loads`: each a `Fixed` support, a `Force` (a total vector in newtons,
-  spread as uniform traction over the face) or a `Pressure` (MPa along the
-  inward normal, positive pushes into the part).
+  spread as uniform traction over the face), a `Pressure` (MPa along the
+  inward normal, positive pushes into the part), a `Torque` (N·mm about an
+  axis) or a `Remote` force (newtons acting at a point off the face)
+  ([torque and remote loads](#torque-and-remote-loads)).
 - `gravity` (static only; m/s² in world axes, 0 = off; needs a material
   density) and `numModes` (modal only; default 6).
 - `loadCases` (static and topology): forces and pressures grouped into
@@ -49,6 +51,48 @@ feature that created the element, which after a boolean is not the body's
 A force with no direction pushes into the face it was put on
 (`fem::DefaultForceDirection`, the negated outward normal). The GUI placement
 and `add_load` both call it, so clicking and scripting agree.
+
+### Torque and remote loads
+
+A shaft, a key, a knob or a gear under torque, and a load at a point away
+from the face that carries it (a lever's end, a bracket's hole), are loads of
+their own rather than forces picked tooth by tooth.
+
+- **Torque** (`magnitude` N·mm, right-handed about the axis): the traction
+  `t = (T/J) â × (x − o)`, with `J = ∫ r² dA` the face's polar moment about
+  the axis. That is exactly `T` about the axis, and no net force on a face
+  symmetric about it. The axis is `axisOrigin` + `axisDirection`; with none,
+  the face lends its own, which only a **cylindrical** face has
+  (`fem::CylindricalFaceAxis`: the surface's axis through the face's
+  middle, signed so its largest component is positive). A torque on any
+  other face without an axis is refused, naming what it needs: by
+  `add_load` before the study changes, by the panel's click, and by the run
+  for a file that carries one (`fem::CompleteLoadGeometry`). An off-axis
+  face (one of a knob's flats) carries `T` about the axis plus the force
+  that puts its share there; a set of faces symmetric about the axis
+  carries no net force.
+- **Remote** (`magnitude` N along `direction`, at `point`): the face
+  carries the force F at the point p the way an RBE3 spreads it,
+  `t(x) = F/A + (I⁻¹ M) × (x − c)` with `M = (p − c) × F` and `I` the face's
+  area "inertia" `∫ (|r|² E − r rᵀ) dA` about its centroid `c`: the face's
+  share of the force plus the linear traction that carries the moment. A
+  remote load without a point is refused, on load and by `add_load`.
+
+Both are assembled in `AssembleFaceLoads` (`FemSolverInternal.h`), which the
+static solve and topology optimisation share, at the same Gauss points that
+integrate `J`, `A`, `c` and `I`, so the totals come back exact. On an
+assembly study the axis and point are world coordinates; a face the imprint
+splits is solved as ONE face again (`MeshPlannedStudy` gathers a load's
+pieces into one `FaceLoad`), so the field is the unsplit face's. A force is
+still split by area, which is the same thing for a uniform traction.
+
+The study's input hash covers both through the serialized study
+([studies as jobs](#studies-as-jobs)). Tests: `tests/test_fem_loads.cpp`
+(`[loads]`): the nodal loads sum to `T` about the axis to 1e-9; a shaft's
+end twists by `TL/GJ` and its surface carries `√3·Tr/J`; a torque on a
+cylinder's side through `RunStudy` twists the end by `TL/2GJ`; a remote
+force's nodal loads are `F` and `(p − c) × F`, and the reactions at the
+clamp answer them; the refusals.
 
 ### Units
 
@@ -376,7 +420,20 @@ tab is active.
 
 ### Probing a face
 
-The maxima say how far the worst node moved, somewhere on the part. A
+**Stress.** `probe_study` also reports the von Mises stress ON the face
+(`fem::FaceStressOf`): `von_mises_max_mpa`, the largest nodal value over the
+face's boundary triangles, at `von_mises_max_at_mm`, and
+`von_mises_mean_mpa`, the area-weighted mean of the field the triangles
+interpolate. A study's global maximum often sits in a sharp re-entrant
+corner, where it grows as the mesh is refined -- a property of the mesh, not
+the part. The stress a designer wants is at a tooth root, a fillet, a bore's
+edge, and a face is where to read it. A requirement holds it with
+`study_probe {quantity: von_mises_max | von_mises_mean}`
+([measures](../requirements/README.md#measures)). Tests: `[probe]` in
+`tests/test_fem_loads.cpp` (a cantilever's clamped face reads `Mc/I`; the
+free end reads less than the global peak).
+
+**Motion.** The maxima say how far the worst node moved, somewhere on the part. A
 mechanism asks a different question: what did the face that carries
 something do? A bearing seat moves its bearing, and the bearing its shaft,
 as one body, so `probe_study {id, face, at?}` fits the face's nodes with a
@@ -503,13 +560,30 @@ tinted as a fixture, and bonded seams in the bond colour.
   participants table with a role per row and **Clamp here** on rigid rows.
 - In the window: analysis type, mesh size, material check, gravity (a
   checkbox that sets world-down 9.81 m/s²), and **Boundary conditions**: arm
-  Fixed, Force or Pressure and click a face; magnitude and an optional custom
-  direction apply to the next placement. A placed force can be dragged in the
+  Fixed, Force, Pressure, Torque or Remote and click a face; magnitude and an
+  optional custom direction apply to the next placement. **Torque** takes
+  "Torque (N·mm)" and an **Axis**: "From the face (cylinder)", or the choices
+  a Revolve's axis offers (X/Y/Z, datum axes, construction lines, custom).
+  With no axis chosen a click on a cylinder takes its axis, and a click on
+  any other face is refused in the panel's red line and places nothing. An
+  untyped torque seeds from the part's weight times the clicked face's
+  radius. **Remote** takes "Force (N)", a direction and "At (mm)"; an
+  untyped point is the clicked face's centroid pushed out along its normal
+  by a tenth of the body's bounding diagonal, and the point stays editable
+  in the load row's menu. A torque is drawn as a circular arrow about its
+  axis, a remote load as an arrow at its point with thin lines to the face. A placed force can be dragged in the
   viewport to change its magnitude (one undo step on release). Run shows the
   shared progress bar. Results: mesh size, max von Mises, max displacement,
   field selector and deformation slider; for modal, the natural frequencies
   (selecting one shows its mode shape) and a mode-shape toggle. The factor of
   safety is reported over RPC only.
+- **Probes** (a solved static part study): arm **Probe**, hover a face to
+  read its max and mean von Mises at the cursor, click to pin it. Each pin
+  is a row, "<face>  max 2.1  mean 1.4 MPa" in the case shown, with a small
+  marker at the face's peak in the viewport; its menu has Remove and **Add
+  requirement**, a `study_probe` requirement on that face's peak, bounded
+  at most the body's material yield (at most today's value without one).
+  Pins are panel state; the requirement is what is saved.
 - Clicking an occurrence other than the meshed one on an assembly study is
   refused in the panel.
 
@@ -526,14 +600,14 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `add_study {type?, name?}` | `type`: static \| modal \| topology (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
 | `set_study` | `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes`, `participants`, `load_cases`, `shape_from`, topology parameters |
-| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?}` | returns the load id |
+| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
 | `run_study {id, async?, recompute?, outlive_client?}` | mesh + solve; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended; cancel stops it |
 | `study_results` | static: maxima, per-body, factor of safety; modal: `bodies[i].frequencies_hz` |
-| `probe_study {id, face, at?, case?}` | how one face moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
+| `probe_study {id, face, at?, case?}` | the face's von Mises max (and where) and mean; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `case`: which load case a static study shows |
 | `check_topology {study, threshold?, recompute?, outlive_client?}` | a topology result's shape and solid design domain, statically, per case, as a job ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |
@@ -563,7 +637,9 @@ verb that names a study for context (`add_load`, `add_refinement`,
 - GUI (`src/app/guitests/GuiTestsSimulation.cpp`, category `sim`): force
   direction and arrow placement, pressure as a field, face tints, gravity at
   the centre of mass, a static run against beam theory, the assembly study
-  window and its clamp, the list-row editor.
+  window and its clamp, the list-row editor; a torque on a cylinder, a
+  torque refused on a flat face and placed with an axis, a remote load's
+  default point, a probe pinned and made a requirement.
 - `tests/rpc_gate_smoke.py` checks the study verbs are accepted on an
   assembly tab.
 

@@ -137,8 +137,17 @@ json StudyToJson(const fem::Study& s) {
         lj["occurrence"] = l.occurrenceId;
       if (!l.magnitudeExpr.empty())
         lj["magnitude_expr"] = l.magnitudeExpr;
-      if (l.type == fem::LoadType::Force)
+      if (l.type == fem::LoadType::Force || l.type == fem::LoadType::Remote)
         lj["direction"] = {l.direction.x, l.direction.y, l.direction.z};
+      // v170: a torque's axis (omitted: the cylindrical face's own), and a
+      // remote load's point.
+      if (l.type == fem::LoadType::Torque && l.HasAxis()) {
+        lj["axis_origin"] = {l.axisOrigin.x, l.axisOrigin.y, l.axisOrigin.z};
+        lj["axis_dir"] = {l.axisDirection.x, l.axisDirection.y,
+                          l.axisDirection.z};
+      }
+      if (l.type == fem::LoadType::Remote && l.hasPoint)
+        lj["point"] = {l.point.x, l.point.y, l.point.z};
       if (!l.loadCase.empty())
         lj["case"] = l.loadCase;
       j["loads"].push_back(std::move(lj));
@@ -243,7 +252,8 @@ fem::Study StudyFromJson(const json& j) {
     const std::string loadStr = lj.value("type", std::string{"fixed"});
     if (!fem::LoadTypeFromString(loadStr, l.type))
       throw std::runtime_error("unknown load type '" + loadStr +
-                               "' (expected one of: fixed, force, pressure)");
+                               "' (expected one of: " + fem::kLoadTypeNames +
+                               ")");
     l.contactWith = lj.value("contact_with", uint64_t{0});
     l.occurrenceId = lj.value("occurrence", uint64_t{0});
     if (l.contactWith == 0)
@@ -254,10 +264,35 @@ fem::Study StudyFromJson(const json& j) {
     l.magnitude = lj.value("magnitude", 0.0);
     l.magnitudeExpr = lj.value("magnitude_expr", std::string{});
     l.loadCase = lj.value("case", std::string{});
-    if (lj.contains("direction")) {
-      const auto& d = lj.at("direction");
-      l.direction = glm::dvec3(d.at(0).get<double>(), d.at(1).get<double>(),
-                               d.at(2).get<double>());
+    const auto point = [&](const char* key) {
+      const json& v = lj.at(key);
+      if (!v.is_array() || v.size() != 3)
+        throw std::runtime_error("load " + std::to_string(l.id) + ": " + key +
+                                 " is not [x, y, z]");
+      return glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
+                        v.at(2).get<double>());
+    };
+    if (lj.contains("direction"))
+      l.direction = point("direction");
+    if (l.type == fem::LoadType::Torque &&
+        (lj.contains("axis_origin") || lj.contains("axis_dir"))) {
+      if (!lj.contains("axis_origin") || !lj.contains("axis_dir"))
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": a torque's axis is axis_origin AND "
+                                 "axis_dir");
+      l.axisOrigin = point("axis_origin");
+      l.axisDirection = point("axis_dir");
+      if (!l.HasAxis())
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": a torque's axis_dir is zero");
+    }
+    if (l.type == fem::LoadType::Remote) {
+      if (!lj.contains("point"))
+        throw std::runtime_error("load " + std::to_string(l.id) +
+                                 ": a remote load needs the point it acts "
+                                 "at");
+      l.point = point("point");
+      l.hasPoint = true;
     }
     s.loads.push_back(std::move(l));
   }
