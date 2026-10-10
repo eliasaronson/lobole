@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Every authored source file carries an SPDX header.
 
 The top-level LICENSE is what makes the licence valid, so this is not about
