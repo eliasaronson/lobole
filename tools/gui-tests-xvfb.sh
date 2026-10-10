@@ -160,10 +160,16 @@ while [ "$#" -gt 0 ]; do
       # failing test therefore reported success, which is worse than no check
       # at all because it looks like one.
       FLOG="$(mktemp -t designer-gui-f-XXXXXX.log)"
+      # Its own state and config, as every shard below has: without them a
+      # single case ran against the developer's real ~/.config/lobole, and a
+      # test that writes a store (machines, print profiles) wrote theirs.
+      FSTATE="$(mktemp -d -t designer-gui-f-state-XXXXXX)"
       "$XVFB_RUN" -a -s "$SCREEN" \
         "$ROOT/tools/nix-run" \
-        "cd '$ROOT/build' && ./lobole --gui-tests --hidden \
+        "cd '$ROOT/build' && XDG_STATE_HOME='$FSTATE' \
+         XDG_CONFIG_HOME='$FSTATE/config' ./lobole --gui-tests --hidden \
          --gui-test-filter '$2' $APP_EXTRA" > "$FLOG" 2>&1 8>&- || true
+      rm -rf "$FSTATE"
       cat "$FLOG"
       fline="$(grep -o 'GUI tests: [0-9]*/[0-9]* passed' "$FLOG" | tail -1 ||
                true)"
