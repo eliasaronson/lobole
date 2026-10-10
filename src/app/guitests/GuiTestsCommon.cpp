@@ -124,6 +124,7 @@ void ResetAppForTest() {
   s_App->paletteOpen = false;
   s_App->asmEditOccurrence = 0;
   s_App->asmEditRelation = 0;
+  s_App->asmNewRelation = false;
   // A pending bring-this-tab-forward request (EnterSimulation, focus_panel)
   // outlives a short test and then fights the NEXT test's item clicks: the
   // engine locates "**/" items by focusing windows, and a competing

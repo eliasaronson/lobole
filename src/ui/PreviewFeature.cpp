@@ -622,7 +622,8 @@ void DrawToolWindow(AppState& state) {
     else if (state.bearingTool.open)
       DrawBearingToolWindow(state); // docs/parts/README.md#bearings
     else if (state.assembly &&
-             (state.asmEditOccurrence != 0 || state.asmEditRelation != 0))
+             (state.asmEditOccurrence != 0 || state.asmEditRelation != 0 ||
+              state.asmNewRelation))
       DrawAssemblyEditWindow(state); // docs/ui/panels.md
     else if (state.assembly && state.explodeToolOpen)
       DrawExplodeToolWindow(state); // docs/ui/panels.md

@@ -131,7 +131,17 @@ DOF fields — `DrawMateDofFields`) in the mate tool's edit mode
   (`###rel_side_a`, `###rel_side_b`) listing every mate that turns or slides:
   this assembly's own, then each flexible placement's as "Pump / camshaft"
   (`ui::DofMateChoices`). A mate lacking the DOF the side reads is refused in
-  place; a screw's one mate is both sides.
+  place; a screw's one mate is both sides. A gear made from teeth edits its
+  teeth (`###rel_teeth_a`, `###rel_teeth_b`) and shows the ratio; a relation
+  over several mates shows a combo per member by role (`###rel_term_<i>`),
+  its teeth and its constant (`###rel_constant`).
+- **Add relation** (`###rel_add`, under the Relations list) opens the same
+  window in create mode (`AppState::asmNewRelation`, the draft in
+  `relationDraft`): a Kind combo (`###rel_kind`: gear, internal, linear,
+  epicyclic), the members, the teeth, and for an epicyclic a Planets list
+  with `###rel_planet_add`. What the draft lacks is the red line
+  (`asmEditRefusal`) and Accept (`###rel_new_accept`) stays disabled
+  ([relations.md](../assemblies/relations.md#in-the-app)).
 
 Floating from the assembly toolbar, one at a time through the tool-window
 slot (an exploded view and a motion study both place occurrences, so holding

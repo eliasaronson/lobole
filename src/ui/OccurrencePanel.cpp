@@ -36,11 +36,13 @@
 #include <glm/trigonometric.hpp>  // degrees, radians
 
 #include <algorithm>
+#include <cctype>
 #include <cfloat>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <expected>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -99,13 +101,44 @@ const char* MateTypeLabel(MateType t) {
 // The mate list and its selected-mate editor. The create/edit session's
 // controls (connector slot rows, flip, accept/cancel) live in the floating
 // Tool window (DrawMateToolWindow below, U7c).
-// Relations (docs/assemblies/relations.md): listed with their ratio
-// and phase editable and a remove button. Made by RPC in this round — a
-// relation names two mates and the panel selects one — so there is no
-// creation tool here for the defaults gate to hold.
+// What a relation row's tail says: the kind and, where it was made from
+// teeth, the counts — "gear 14:13", "internal 13:40", "epicyclic 14/40".
+std::string RelationTail(const Relation& r) {
+  char buf[64];
+  if ((r.kind == RelationKind::Gear || r.kind == RelationKind::Chain) &&
+      r.teethA > 0 && r.teethB > 0) {
+    std::snprintf(buf, sizeof(buf), "%s %d:%d",
+                  r.internal ? "internal"
+                             : DocumentIO::RelationKindToString(r.kind),
+                  r.teethA, r.teethB);
+    return buf;
+  }
+  if (r.kind == RelationKind::Epicyclic && r.terms.size() == 3) {
+    std::snprintf(buf, sizeof(buf), "epicyclic %d/%d", r.terms[0].teeth,
+                  r.terms[1].teeth);
+    return buf;
+  }
+  if (r.kind == RelationKind::Planet && r.terms.size() == 3) {
+    std::snprintf(buf, sizeof(buf), "planet %d on %d", r.terms[2].teeth,
+                  r.terms[0].teeth);
+    return buf;
+  }
+  return DocumentIO::RelationKindToString(r.kind);
+}
+
+// Relations (docs/assemblies/relations.md#in-the-app): listed with what
+// they were made from, edited in the tool window from a double-click, and
+// made there too — Add relation opens it in create mode.
 void DrawRelationsSection(AppState& state) {
   AssemblyDocument& asmDoc = *state.assembly;
-  if (asmDoc.RelationCount() == 0)
+  // Shown as soon as there is a mate a relation could couple: Add relation
+  // lives here, so an assembly with none yet still needs the section.
+  const bool anyDof = std::any_of(
+      asmDoc.GetMates().begin(), asmDoc.GetMates().end(), [](const Mate& m) {
+        return assembly::MateHasDof(m.type, MateDof::Rotation) ||
+               assembly::MateHasDof(m.type, MateDof::Offset);
+      });
+  if (asmDoc.RelationCount() == 0 && !anyDof)
     return;
   if (!SectionHeader("Relations###rel_section",
                      static_cast<int>(asmDoc.RelationCount()), true))
@@ -130,14 +163,50 @@ void DrawRelationsSection(AppState& state) {
     row.glyph = r.error.empty() ? ICON_FA_GEARS : ICON_FA_TRIANGLE_EXCLAMATION;
     if (!r.error.empty())
       row.glyphColor = ImVec4(0.95f, 0.5f, 0.4f, 1.0f);
-    row.label = (r.name.empty() ? mateName(a) + " – " + mateName(b) : r.name) +
+    std::string members; // a relation over several mates: every member
+    std::string memberTip;
+    for (size_t k = 0; k < r.terms.size(); k++) {
+      const RelationTerm& t = r.terms[k];
+      const std::string m = mateName(assembly::MateAtPath(
+          asmDoc, t.path, t.mate, AssemblyResolverFor(state)));
+      members += (k ? " – " : "") + m;
+      char term[160];
+      std::snprintf(term, sizeof(term), "%s%s %s (%.5g)", k ? ", " : "",
+                    assembly::RelationTermRole(r, k).c_str(), m.c_str(),
+                    t.coefficient);
+      memberTip += term;
+    }
+    // Unnamed, a row reads as what it moves: a planet relation as its
+    // planet, an epicyclic as its sun; the tail says the kind.
+    if (r.kind == RelationKind::Planet && r.terms.size() == 3)
+      members = mateName(assembly::MateAtPath(asmDoc, r.terms[2].path,
+                                              r.terms[2].mate,
+                                              AssemblyResolverFor(state)));
+    else if (r.kind == RelationKind::Epicyclic && !r.terms.empty())
+      members = mateName(assembly::MateAtPath(asmDoc, r.terms[0].path,
+                                              r.terms[0].mate,
+                                              AssemblyResolverFor(state)));
+    row.label = (!r.name.empty() ? r.name
+                 : r.HasTerms()  ? members
+                                 : mateName(a) + " – " + mateName(b)) +
                 "###rel_row_" + rid;
     row.selected = IsSelected(state, SelectionItem::Kind::Relation, r.id);
-    row.tail = DocumentIO::RelationKindToString(r.kind);
-    char tip[256];
-    std::snprintf(tip, sizeof(tip), "%s drives %s, ratio %.5g, phase %.5g%s%s",
-                  mateName(a).c_str(), mateName(b).c_str(), r.ratio, r.phase,
-                  r.error.empty() ? "" : "\n", r.error.c_str());
+    row.tail = RelationTail(r);
+    std::string tip;
+    if (r.HasTerms()) {
+      char k[64];
+      std::snprintf(k, sizeof(k), ", constant %.5g", r.phase);
+      tip = memberTip + k;
+    } else {
+      char buf[256];
+      std::snprintf(buf, sizeof(buf), "%s drives %s, ratio %.5g, phase %.5g",
+                    mateName(a).c_str(), mateName(b).c_str(), r.ratio, r.phase);
+      tip = buf;
+    }
+    if (!r.held.empty())
+      tip += "\n" + r.held;
+    if (!r.error.empty())
+      tip += "\n" + r.error;
     row.tooltip = tip;
     row.menuId = "###rel_ctx_" + rid;
     row.menu = [&state, &remove, id = r.id]() {
@@ -154,6 +223,11 @@ void DrawRelationsSection(AppState& state) {
     if (res.doubleClicked)
       EditAssemblyRelation(state, r.id);
   }
+  if (anyDof && ImGui::Button(ICON_FA_PLUS " Add relation###rel_add"))
+    NewAssemblyRelation(state);
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Couple mates: a gear pair, an internal gear, a linear "
+                      "slide, or an epicyclic train with its planets.");
   if (remove != 0) {
     SnapshotAssembly(state);
     asmDoc.RemoveRelation(remove);
@@ -1721,6 +1795,393 @@ void DrawSubAssemblyPlacement(AppState& state, Occurrence& sel) {
 }
 } // namespace
 
+namespace {
+// ---- Add relation (docs/assemblies/relations.md#in-the-app) ---------------
+
+using Draft = AppState::RelationDraft;
+
+// A combo over the mates that have `dof`, this assembly's and each flexible
+// placement's; true when one was picked. `mate` 0 reads "(pick a mate)".
+bool MemberCombo(AppState& state, const char* label, const std::string& id,
+                 MateDof dof, std::vector<uint64_t>& path, uint64_t& mate,
+                 const char* tip) {
+  LeftLabel(label);
+  const std::string preview =
+      mate == 0 ? std::string("(pick a mate)") : MateLabelAt(state, path, mate);
+  bool picked = false;
+  if (ImGui::BeginCombo(("###" + id).c_str(), preview.c_str())) {
+    for (const DofMateChoice& c : DofMateChoices(state)) {
+      if (!(dof == MateDof::Rotation ? c.rotation : c.offset))
+        continue;
+      std::string cid = std::to_string(c.mate);
+      if (!c.path.empty())
+        cid = std::to_string(c.path.front()) + "_" + cid;
+      const std::string item = c.label + "###" + id + "_" + cid;
+      if (ImGui::Selectable(item.c_str(), c.path == path && c.mate == mate)) {
+        path = c.path;
+        mate = c.mate;
+        picked = true;
+      }
+    }
+    ImGui::EndCombo();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("%s", tip);
+  return picked;
+}
+
+bool NumberField(AppState& state, const char* label, const std::string& id,
+                 double* v, const char* fmt) {
+  LeftLabel(label);
+  return ExprInputDouble(state, ("###" + id).c_str(), v, fmt);
+}
+
+// A tooth count as the window holds it (a double, from an expression field):
+// "" when it is a whole number above zero, else what is wrong with it.
+std::string TeethProblem(double z, const std::string& what) {
+  if (z <= 0.0)
+    return "give the " + what + " tooth count";
+  if (z != std::floor(z))
+    return "the " + what + " tooth count is a whole number";
+  return {};
+}
+
+RelationTerm TermOf(const Draft::Member& m) {
+  RelationTerm t;
+  t.mate = m.mate;
+  t.path = m.path;
+  return t;
+}
+
+// Where a relation over several mates stands: its constant as the members
+// are posed, so making it moves nothing — add_relation's default too.
+double ConstantAsItStands(AppState& state, const Relation& r) {
+  double k = 0.0;
+  for (const RelationTerm& t : r.terms)
+    k += t.coefficient * assembly::MateDofAt(*state.assembly, t.path, t.mate,
+                                             t.dof, AssemblyResolverFor(state))
+                             .value_or(0.0);
+  return k;
+}
+
+// The relations the draft makes, or why it cannot make them yet. The same
+// checks add_relation makes (assembly::RelationProblem), plus the ones only
+// a window can get wrong: a member not picked, a tooth count not given.
+std::expected<std::vector<Relation>, std::string>
+DraftRelations(AppState& state) {
+  const Draft& d = state.relationDraft;
+  std::vector<Relation> out;
+  if (d.kind != Draft::Kind::Epicyclic) {
+    Relation r;
+    r.kind = d.kind == Draft::Kind::Linear ? RelationKind::Linear
+                                           : RelationKind::Gear;
+    r.dofA = r.dofB =
+        d.kind == Draft::Kind::Linear ? MateDof::Offset : MateDof::Rotation;
+    r.mateA = d.a.mate;
+    r.mateAPath = d.a.path;
+    r.mateB = d.b.mate;
+    r.mateBPath = d.b.path;
+    if (d.a.mate == 0)
+      return std::unexpected("pick the mate that drives");
+    if (d.b.mate == 0)
+      return std::unexpected("pick the driven mate");
+    if (d.kind == Draft::Kind::Linear) {
+      if (d.ratio == 0.0)
+        return std::unexpected("a ratio of zero couples nothing");
+      r.ratio = d.ratio;
+    } else {
+      for (const auto& [z, what] : {std::pair{d.a.teeth, "driving gear's"},
+                                    std::pair{d.b.teeth, "driven gear's"}})
+        if (std::string why = TeethProblem(z, what); !why.empty())
+          return std::unexpected(why);
+      r.internal = d.kind == Draft::Kind::InternalGear;
+      r.teethA = static_cast<int>(d.a.teeth);
+      r.teethB = static_cast<int>(d.b.teeth);
+      (void)assembly::DeriveFromTeeth(r);
+    }
+    r.phase = d.phase;
+    out.push_back(std::move(r));
+  } else {
+    // Every member first, so the line names the one still to pick before
+    // it asks for a number.
+    struct Named {
+      const Draft::Member* m;
+      std::string role;
+    };
+    std::vector<Named> all{
+        {&d.sun, "sun"}, {&d.ring, "ring"}, {&d.carrier, "carrier"}};
+    for (size_t i = 0; i < d.planets.size(); i++)
+      all.push_back({&d.planets[i], "planet " + std::to_string(i + 1)});
+    for (const Named& n : all)
+      if (n.m->mate == 0)
+        return std::unexpected("pick the " + n.role + "'s mate");
+    for (size_t i = 0; i < all.size(); i++)
+      for (size_t k = 0; k < i; k++)
+        if (all[i].m->mate == all[k].m->mate &&
+            all[i].m->path == all[k].m->path)
+          return std::unexpected(
+              "'" + MateLabelAt(state, all[i].m->path, all[i].m->mate) +
+              "' is both the " + all[k].role + " and the " + all[i].role +
+              " — each member turns on a mate of its own");
+    for (const Named& n : all)
+      if (n.m != &d.carrier)
+        if (std::string why = TeethProblem(n.m->teeth, n.role + "'s");
+            !why.empty())
+          return std::unexpected(why);
+    Relation willis = assembly::MakeEpicyclic(
+        TermOf(d.sun), TermOf(d.ring), TermOf(d.carrier),
+        static_cast<int>(d.sun.teeth), static_cast<int>(d.ring.teeth));
+    willis.phase = ConstantAsItStands(state, willis);
+    out.push_back(std::move(willis));
+    for (const Draft::Member& p : d.planets) {
+      Relation planet = assembly::MakePlanet(
+          TermOf(p), TermOf(d.sun), TermOf(d.carrier),
+          static_cast<int>(p.teeth), static_cast<int>(d.sun.teeth));
+      planet.phase = ConstantAsItStands(state, planet);
+      out.push_back(std::move(planet));
+    }
+  }
+  for (const Relation& r : out)
+    if (std::string why = assembly::RelationProblem(*state.assembly, r,
+                                                    AssemblyResolverFor(state));
+        !why.empty())
+      return std::unexpected(why);
+  return out;
+}
+
+// The create mode: the draft, its refusal line, and Accept / Cancel.
+void DrawAddRelationWindow(AppState& state) {
+  Draft& d = state.relationDraft;
+  BeginToolWindowFrame(state, "Add relation");
+  static const char* kKinds[] = {"Gear", "Internal gear", "Linear",
+                                 "Epicyclic"};
+  static const char* kKindIds[] = {"gear", "internal", "linear", "epicyclic"};
+  LeftLabel("Kind");
+  const int kind = static_cast<int>(d.kind);
+  if (ImGui::BeginCombo("###rel_kind", kKinds[kind])) {
+    for (int i = 0; i < 4; i++) {
+      const std::string item =
+          std::string(kKinds[i]) + "###rel_kind_" + kKindIds[i];
+      if (ImGui::Selectable(item.c_str(), i == kind)) {
+        // The sides read a different DOF for a linear relation: a mate
+        // picked for a gear's turn is not a slide.
+        const bool slides = i == static_cast<int>(Draft::Kind::Linear);
+        if (slides != (d.kind == Draft::Kind::Linear))
+          d.a = d.b = {};
+        d.kind = static_cast<Draft::Kind>(i);
+      }
+    }
+    ImGui::EndCombo();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Gear: meshing outside, the pair counter-rotates. "
+                      "Internal gear: one meshing inside a ring, the same "
+                      "way round. Linear: one slide drives another. "
+                      "Epicyclic: sun, ring and carrier by Willis, and each "
+                      "planet's own turn.");
+  switch (d.kind) {
+  case Draft::Kind::Gear:
+  case Draft::Kind::InternalGear:
+  case Draft::Kind::Linear: {
+    const MateDof dof =
+        d.kind == Draft::Kind::Linear ? MateDof::Offset : MateDof::Rotation;
+    MemberCombo(state, "Drives", "rel_new_a", dof, d.a.path, d.a.mate,
+                "The mate that drives.");
+    MemberCombo(state, "Driven", "rel_new_b", dof, d.b.path, d.b.mate,
+                "The mate this relation moves.");
+    if (d.kind == Draft::Kind::Linear) {
+      NumberField(state, "Ratio", "rel_new_ratio", &d.ratio, "%.5g");
+    } else {
+      NumberField(state, "Teeth (drives)", "rel_teeth_a", &d.a.teeth, "%.0f");
+      NumberField(state, "Teeth (driven)", "rel_teeth_b", &d.b.teeth, "%.0f");
+      LeftLabel("Ratio");
+      if (d.a.teeth > 0.0 && d.b.teeth > 0.0)
+        ImGui::TextDisabled("%.5g",
+                            d.a.teeth / d.b.teeth *
+                                (d.kind == Draft::Kind::Gear ? -1.0 : 1.0));
+      else
+        ImGui::TextDisabled("from the teeth");
+    }
+    NumberField(state, "Phase", "rel_new_phase", &d.phase, "%.5g");
+    break;
+  }
+  case Draft::Kind::Epicyclic: {
+    MemberCombo(state, "Sun", "rel_sun", MateDof::Rotation, d.sun.path,
+                d.sun.mate, "The sun gear's mate.");
+    MemberCombo(state, "Ring", "rel_ring", MateDof::Rotation, d.ring.path,
+                d.ring.mate,
+                "The ring gear's mate: the one held when only the sun is "
+                "driven.");
+    MemberCombo(state, "Carrier", "rel_carrier", MateDof::Rotation,
+                d.carrier.path, d.carrier.mate,
+                "The carrier's mate, turning on the same axis.");
+    NumberField(state, "Teeth (sun)", "rel_teeth_sun", &d.sun.teeth, "%.0f");
+    NumberField(state, "Teeth (ring)", "rel_teeth_ring", &d.ring.teeth, "%.0f");
+    ImGui::SeparatorText("Planets");
+    int remove = -1;
+    for (size_t i = 0; i < d.planets.size(); i++) {
+      const Draft::Member& pm = d.planets[i];
+      ListRowSpec row;
+      row.glyph = ICON_FA_GEARS;
+      row.label = (pm.mate == 0 ? std::string("(pick a mate)")
+                                : MateLabelAt(state, pm.path, pm.mate)) +
+                  "###rel_planet_row_" + std::to_string(i);
+      row.selected = d.planetPick == static_cast<int>(i);
+      if (pm.teeth > 0.0)
+        row.tail = std::to_string(static_cast<int>(pm.teeth)) + " teeth";
+      row.menuId = "###rel_planet_ctx_" + std::to_string(i);
+      row.menu = [&remove, i]() {
+        if (ImGui::MenuItem("Remove###rel_planet_remove"))
+          remove = static_cast<int>(i);
+      };
+      if (ListRow(row).clicked)
+        d.planetPick = static_cast<int>(i);
+    }
+    if (remove >= 0) {
+      d.planets.erase(d.planets.begin() + remove);
+      d.planetPick =
+          std::min(d.planetPick, static_cast<int>(d.planets.size()) - 1);
+    }
+    if (ImGui::Button(ICON_FA_PLUS " Add planet###rel_planet_add")) {
+      // A planet usually has the teeth the last one had.
+      Draft::Member pm;
+      if (!d.planets.empty())
+        pm.teeth = d.planets.back().teeth;
+      d.planets.push_back(pm);
+      d.planetPick = static_cast<int>(d.planets.size()) - 1;
+    }
+    if (d.planetPick >= 0 &&
+        d.planetPick < static_cast<int>(d.planets.size())) {
+      Draft::Member& pm = d.planets[static_cast<size_t>(d.planetPick)];
+      MemberCombo(state, "Planet", "rel_planet_mate", MateDof::Rotation,
+                  pm.path, pm.mate,
+                  "The planet's mate on the carrier: its turn is relative "
+                  "to the carrier.");
+      NumberField(state, "Teeth (planet)", "rel_planet_teeth", &pm.teeth,
+                  "%.0f");
+    }
+    break;
+  }
+  }
+  const auto made = DraftRelations(state);
+  state.asmEditRefusalFor = 0;
+  state.asmEditRefusal = made ? std::string() : made.error();
+  if (!made) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.5f, 0.4f, 1.0f));
+    ImGui::TextWrapped("%s", state.asmEditRefusal.c_str());
+    ImGui::PopStyleColor();
+  }
+  ImGui::Separator();
+  ImGui::BeginDisabled(!made);
+  const bool accept = ImGui::Button("Accept###rel_new_accept");
+  ImGui::EndDisabled();
+  ImGui::SameLine();
+  const bool cancel = ImGui::Button("Cancel###rel_new_cancel");
+  ImGui::End();
+  if (accept && made) {
+    SnapshotAssembly(state);
+    for (Relation r : *made)
+      state.assembly->AddRelation(std::move(r));
+    SolveActiveAssembly(state);
+    state.asmNewRelation = false;
+    state.asmEditRefusal.clear();
+  } else if (cancel) {
+    state.asmNewRelation = false;
+    state.asmEditRefusal.clear();
+  }
+}
+
+// The editor's members for a relation over several mates: each a combo
+// (its role's), its teeth, and the constant. A member that would make the
+// relation unmakeable is refused in place, like a side.
+void DrawRelationTerms(AppState& state, Relation& r) {
+  AssemblyDocument& asmDoc = *state.assembly;
+  for (size_t i = 0; i < r.terms.size(); i++) {
+    std::string role = assembly::RelationTermRole(r, i);
+    std::string label = role;
+    label[0] = static_cast<char>(std::toupper(label[0]));
+    RelationTerm t = r.terms[i];
+    if (!MemberCombo(state, label.c_str(), "rel_term_" + std::to_string(i),
+                     t.dof, t.path, t.mate,
+                     "The mate this member turns or slides on."))
+      continue;
+    Relation edited = r;
+    edited.terms[i] = t;
+    state.asmEditRefusalFor = r.id;
+    state.asmEditRefusal =
+        assembly::RelationProblem(asmDoc, edited, AssemblyResolverFor(state));
+    if (!state.asmEditRefusal.empty())
+      continue;
+    SnapshotAssembly(state);
+    r.terms[i] = t;
+    asmDoc.BumpVersion();
+    SolveActiveAssembly(state);
+  }
+  if (r.kind != RelationKind::LinearN)
+    for (size_t i = 0; i < r.terms.size(); i++) {
+      if (!assembly::RelationTermHasTeeth(r, i))
+        continue;
+      const std::string role = assembly::RelationTermRole(r, i);
+      double z = r.terms[i].teeth;
+      if (!NumberField(state, ("Teeth (" + role + ")").c_str(),
+                       "rel_teeth_" + role, &z, "%.0f") ||
+          z == r.terms[i].teeth)
+        continue;
+      state.asmEditRefusalFor = r.id;
+      state.asmEditRefusal = TeethProblem(z, role + "'s");
+      if (!state.asmEditRefusal.empty())
+        continue;
+      SnapshotAssembly(state);
+      r.terms[i].teeth = static_cast<int>(z);
+      (void)assembly::DeriveFromTeeth(r);
+      asmDoc.BumpVersion();
+      SolveActiveAssembly(state);
+    }
+  else
+    for (size_t i = 0; i < r.terms.size(); i++)
+      ImGui::TextDisabled("%s: coefficient %.5g on its %s",
+                          assembly::RelationTermRole(r, i).c_str(),
+                          r.terms[i].coefficient,
+                          DocumentIO::MateDofToString(r.terms[i].dof));
+  double k = r.phase;
+  if (NumberField(state, "Constant", "rel_constant", &k, "%.5g") &&
+      k != r.phase) {
+    SnapshotAssembly(state);
+    r.phase = k;
+    asmDoc.BumpVersion();
+    SolveActiveAssembly(state);
+  }
+  if (state.asmEditRefusalFor == r.id && !state.asmEditRefusal.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.5f, 0.4f, 1.0f));
+    ImGui::TextWrapped("%s", state.asmEditRefusal.c_str());
+    ImGui::PopStyleColor();
+  }
+}
+} // namespace
+
+void NewAssemblyRelation(AppState& state) {
+  if (!state.assembly)
+    return;
+  if (state.mateTool.active)
+    CancelMateTool(state);
+  state.asmEditOccurrence = 0;
+  state.asmEditRelation = 0;
+  state.asmNewRelation = true;
+  state.relationDraft = {};
+  state.asmEditRefusal.clear();
+  // A gear pair is the common case, so its two sides start on the first two
+  // mates that turn — visible in the combos, and changed there. Teeth have
+  // no default: a count is read off the part, never invented.
+  std::vector<DofMateChoice> turning;
+  for (const DofMateChoice& c : DofMateChoices(state))
+    if (c.rotation)
+      turning.push_back(c);
+  if (turning.size() >= 2) {
+    state.relationDraft.a = {turning[0].path, turning[0].mate, 0.0};
+    state.relationDraft.b = {turning[1].path, turning[1].mate, 0.0};
+  }
+}
+
 void EditAssemblyOccurrence(AppState& state, uint64_t occId) {
   if (!state.assembly)
     return;
@@ -1728,6 +2189,7 @@ void EditAssemblyOccurrence(AppState& state, uint64_t occId) {
   if (state.mateTool.active)
     CancelMateTool(state);
   state.asmEditRelation = 0;
+  state.asmNewRelation = false;
   state.asmEditOccurrence = occId;
   state.asmEditRefusal.clear();
 }
@@ -1738,6 +2200,7 @@ void EditAssemblyRelation(AppState& state, uint64_t relId) {
   if (state.mateTool.active)
     CancelMateTool(state);
   state.asmEditOccurrence = 0;
+  state.asmNewRelation = false;
   state.asmEditRelation = relId;
   state.asmEditRefusal.clear();
 }
@@ -1745,9 +2208,14 @@ void EditAssemblyRelation(AppState& state, uint64_t relId) {
 void DrawAssemblyEditWindow(AppState& state) {
   if (!state.assembly) {
     state.asmEditOccurrence = state.asmEditRelation = 0;
+    state.asmNewRelation = false;
     return;
   }
   AssemblyDocument& asmDoc = *state.assembly;
+  if (state.asmNewRelation) {
+    DrawAddRelationWindow(state);
+    return;
+  }
 
   if (state.asmEditOccurrence != 0) {
     Occurrence* sel = asmDoc.FindById(state.asmEditOccurrence);
@@ -1848,27 +2316,61 @@ void DrawAssemblyEditWindow(AppState& state) {
       return;
     }
     BeginToolWindowFrame(state, "Edit relation");
-    ImGui::TextDisabled("%s", DocumentIO::RelationKindToString(r->kind));
-    DrawRelationSides(state, *r);
-    if (r->kind == RelationKind::Freewheel)
-      ImGui::TextDisabled("drives %s, lead %.4g deg",
-                          DocumentIO::FreewheelDrivesToString(r->drives),
-                          angles::ToDegrees(r->lead));
-    double ratio = r->ratio, phase = r->phase;
-    if (ExprInputDouble(state, "Ratio###rel_ratio", &ratio, "%.5g") &&
-        ratio != 0.0 && ratio != r->ratio) {
-      SnapshotAssembly(state);
-      r->ratio = ratio;
-      asmDoc.BumpVersion();
-      SolveActiveAssembly(state);
+    ImGui::TextDisabled("%s", RelationTail(*r).c_str());
+    if (r->HasTerms()) {
+      DrawRelationTerms(state, *r);
+    } else {
+      DrawRelationSides(state, *r);
+      if (r->kind == RelationKind::Freewheel)
+        ImGui::TextDisabled("drives %s, lead %.4g deg",
+                            DocumentIO::FreewheelDrivesToString(r->drives),
+                            angles::ToDegrees(r->lead));
+      double ratio = r->ratio, phase = r->phase;
+      if (r->teethA > 0 && r->teethB > 0) {
+        // Made from teeth: the teeth are what is edited, and the ratio
+        // follows from them (with the sign an internal gear keeps).
+        for (int side = 0; side < 2; side++) {
+          double z = side == 0 ? r->teethA : r->teethB;
+          if (!NumberField(
+                  state, side == 0 ? "Teeth (drives)" : "Teeth (driven)",
+                  side == 0 ? "rel_teeth_a" : "rel_teeth_b", &z, "%.0f") ||
+              z == (side == 0 ? r->teethA : r->teethB))
+            continue;
+          state.asmEditRefusalFor = r->id;
+          state.asmEditRefusal =
+              TeethProblem(z, side == 0 ? "driving gear's" : "driven gear's");
+          if (!state.asmEditRefusal.empty())
+            continue;
+          SnapshotAssembly(state);
+          (side == 0 ? r->teethA : r->teethB) = static_cast<int>(z);
+          (void)assembly::DeriveFromTeeth(*r);
+          asmDoc.BumpVersion();
+          SolveActiveAssembly(state);
+        }
+        LeftLabel("Ratio");
+        ImGui::TextDisabled("%.5g", r->ratio);
+        if (state.asmEditRefusalFor == r->id && !state.asmEditRefusal.empty()) {
+          ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.5f, 0.4f, 1.0f));
+          ImGui::TextWrapped("%s", state.asmEditRefusal.c_str());
+          ImGui::PopStyleColor();
+        }
+      } else if (ExprInputDouble(state, "Ratio###rel_ratio", &ratio, "%.5g") &&
+                 ratio != 0.0 && ratio != r->ratio) {
+        SnapshotAssembly(state);
+        r->ratio = ratio;
+        asmDoc.BumpVersion();
+        SolveActiveAssembly(state);
+      }
+      if (ExprInputDouble(state, "Phase###rel_phase", &phase, "%.5g") &&
+          phase != r->phase) {
+        SnapshotAssembly(state);
+        r->phase = phase;
+        asmDoc.BumpVersion();
+        SolveActiveAssembly(state);
+      }
     }
-    if (ExprInputDouble(state, "Phase###rel_phase", &phase, "%.5g") &&
-        phase != r->phase) {
-      SnapshotAssembly(state);
-      r->phase = phase;
-      asmDoc.BumpVersion();
-      SolveActiveAssembly(state);
-    }
+    if (!r->held.empty())
+      ImGui::TextDisabled("%s", r->held.c_str());
     if (!r->error.empty())
       ImGui::TextColored(ImVec4(0.95f, 0.5f, 0.4f, 1.0f), "%s",
                          r->error.c_str());

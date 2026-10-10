@@ -1373,6 +1373,25 @@ struct AppState {
   // edits in the mate tool's own Edit Mate mode.)
   uint64_t asmEditOccurrence = 0;
   uint64_t asmEditRelation = 0;
+  // The same window in CREATE mode (docs/assemblies/relations.md#in-the-app):
+  // the relation being drafted, made only on Accept.
+  struct RelationDraft {
+    enum class Kind { Gear, InternalGear, Linear, Epicyclic };
+    struct Member {
+      std::vector<uint64_t> path; // a mate inside a flexible placement
+      uint64_t mate = 0;          // 0 = not picked yet
+      double teeth = 0.0;         // 0 = not given yet
+    };
+    Kind kind = Kind::Gear;
+    Member a, b;        // gear, internal gear, linear
+    double ratio = 1.0; // linear
+    double phase = 0.0; // b's unit; an epicyclic's constant
+    Member sun, ring, carrier;
+    std::vector<Member> planets;
+    int planetPick = -1; // the planet row whose mate and teeth are shown
+  };
+  bool asmNewRelation = false;
+  RelationDraft relationDraft;
   // A refused edit in that window -- Flexible, the configuration picker, a
   // relation's side -- shown under the control that was clicked, with the
   // app's reason, until the next edit there or another occurrence is edited

@@ -41,6 +41,9 @@ void DrawMotionToolWindow(AppState& state);
 // (StartMateEdit).
 void EditAssemblyOccurrence(AppState& state, uint64_t occId);
 void EditAssemblyRelation(AppState& state, uint64_t relId);
+// The same window in create mode: Add relation, a fresh draft
+// (docs/assemblies/relations.md#in-the-app).
+void NewAssemblyRelation(AppState& state);
 void DrawAssemblyEditWindow(AppState& state);
 
 // The bill of materials as a floating window with real columns, opened from

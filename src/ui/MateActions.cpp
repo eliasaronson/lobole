@@ -273,6 +273,7 @@ void StartMateEdit(AppState& state, uint64_t mateId) {
   // One tool window at a time: the occurrence and relation editors close.
   state.asmEditOccurrence = 0;
   state.asmEditRelation = 0;
+  state.asmNewRelation = false;
   state.mateTool = AppState::MateToolState{};
   state.mateTool.active = true;
   state.mateTool.editMateId = mateId;

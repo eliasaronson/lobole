@@ -28,6 +28,52 @@
 // shard partition from the binary's own --gui-test-list and asserts every
 // listed test ran, so a case renamed or lost in the split fails the runner
 // loudly instead of silently disappearing.
+namespace {
+// An assembly with a fixed housing and `n` occurrences each on a revolute
+// to it, plus (when `planet`) one more on a revolute to the third — the
+// carrier. Returns the mate ids, in order (the planet's last).
+std::vector<uint64_t> RelationRig(ImGuiTestContext* ctx, int n, bool planet) {
+  ctx->SetRef("//##MainMenuBar");
+  AddFixtureBox(ctx);
+  ctx->Yield();
+  const size_t asmIdx = ui::AddAssembly(*s_App, "Geared");
+  ui::SetActivePart(*s_App, asmIdx);
+  const auto place = [](const char* name, bool fixed) {
+    Occurrence o;
+    o.name = name;
+    o.partId = s_App->parts[0].id;
+    o.fixed = fixed;
+    return s_App->assembly->AddOccurrence(o);
+  };
+  const auto revolute = [](uint64_t a, uint64_t b) {
+    Mate m;
+    m.type = MateType::Revolute;
+    m.a.occurrenceId = a;
+    m.a.anchor.origin = true;
+    m.b.occurrenceId = b;
+    m.b.anchor.origin = true;
+    m.flipped = false;
+    return s_App->assembly->AddMate(m);
+  };
+  const uint64_t housing = place("Housing", true);
+  std::vector<uint64_t> occs, mates;
+  for (int i = 0; i < n; i++) {
+    occs.push_back(place(("Wheel " + std::to_string(i + 1)).c_str(), false));
+    mates.push_back(revolute(housing, occs.back()));
+  }
+  if (planet && occs.size() >= 3)
+    mates.push_back(revolute(occs[2], place("Planet", false)));
+  ui::SolveActiveAssembly(*s_App);
+  ctx->Yield(3);
+  return mates;
+}
+
+// The combo item a mate is in a relation combo of id `id`.
+std::string RelCombo(const char* id, uint64_t mate) {
+  return std::string("###") + id + "/###" + id + "_" + std::to_string(mate);
+}
+} // namespace
+
 void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
   (void)t;
@@ -1313,6 +1359,166 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     panel->Scroll.y = 0.0f;
     ctx->Yield(3);
     IM_CHECK(panel->Scroll.y < 1.0f);
+  };
+
+  // Add relation (docs/assemblies/relations.md#in-the-app): a gear pair
+  // made in the window from its teeth, the ratio derived and shown, and
+  // one undo step.
+  t = IM_REGISTER_TEST(engine, "assembly", "add_relation_gear_from_teeth");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::vector<uint64_t> m = RelationRig(ctx, 2, false);
+    const size_t undo0 = s_App->assemblyHistory.undo.size();
+    ctx->ItemClick("//###Model/###rel_add");
+    ctx->Yield(2);
+    IM_CHECK(s_App->asmNewRelation);
+    // Teeth have no default: the window refuses until they are given.
+    IM_CHECK(!s_App->asmEditRefusal.empty());
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick(RelCombo("rel_new_a", m[0]).c_str());
+    ctx->ComboClick(RelCombo("rel_new_b", m[1]).c_str());
+    ctx->ItemInputValue("###rel_teeth_a", "14");
+    ctx->ItemInputValue("###rel_teeth_b", "28");
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(s_App->asmEditRefusal.c_str(), "");
+    ctx->ItemClick("###rel_new_accept");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->asmNewRelation);
+    IM_CHECK_EQ(s_App->assembly->RelationCount(), (size_t)1);
+    const Relation& r = s_App->assembly->GetRelations()[0];
+    IM_CHECK(r.kind == RelationKind::Gear);
+    IM_CHECK_EQ(r.teethA, 14);
+    IM_CHECK_EQ(r.teethB, 28);
+    IM_CHECK(std::abs(r.ratio + 0.5) < 1e-12);
+    IM_CHECK_EQ(s_App->assemblyHistory.undo.size(), undo0 + 1);
+    // Turning the driver turns the driven gear the other way, at half.
+    s_App->assembly->FindMateById(m[0])->rotation = 0.4;
+    ui::SolveActiveAssemblyDriven(*s_App, m[0], MateDof::Rotation);
+    IM_CHECK(std::abs(s_App->assembly->FindMateById(m[1])->rotation + 0.2) <
+             1e-9);
+    // The row says what it was made from, and the editor edits the teeth.
+    const std::string row = "//###Model/###rel_row_" + std::to_string(r.id);
+    ctx->ItemDoubleClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###rel_teeth_a"));
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###rel_ratio"));
+    ctx->ItemInputValue("//###ToolWindow/###rel_teeth_b", "42");
+    ctx->Yield(2);
+    IM_CHECK(std::abs(s_App->assembly->GetRelations()[0].ratio + 14.0 / 42.0) <
+             1e-12);
+    ctx->ItemClick("//###ToolWindow/###rel_edit_done");
+    ctx->Yield();
+  };
+
+  // An internal gear turns the same way round.
+  t = IM_REGISTER_TEST(engine, "assembly", "add_relation_internal_gear");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::vector<uint64_t> m = RelationRig(ctx, 2, false);
+    ctx->ItemClick("//###Model/###rel_add");
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###rel_kind/###rel_kind_internal");
+    ctx->ComboClick(RelCombo("rel_new_a", m[0]).c_str());
+    ctx->ComboClick(RelCombo("rel_new_b", m[1]).c_str());
+    ctx->ItemInputValue("###rel_teeth_a", "13");
+    ctx->ItemInputValue("###rel_teeth_b", "40");
+    ctx->Yield(2);
+    ctx->ItemClick("###rel_new_accept");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->RelationCount(), (size_t)1);
+    const Relation& r = s_App->assembly->GetRelations()[0];
+    IM_CHECK(r.internal);
+    IM_CHECK(std::abs(r.ratio - 13.0 / 40.0) < 1e-12);
+  };
+
+  // An epicyclic train with two planets, made in the window: turning the
+  // sun turns the carrier at zs/(zs+zr) with the ring held, and the planet
+  // on it.
+  t = IM_REGISTER_TEST(engine, "assembly", "add_relation_epicyclic_planets");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    // sun, ring, carrier on the housing; a planet on the carrier.
+    const std::vector<uint64_t> m = RelationRig(ctx, 3, true);
+    ctx->ItemClick("//###Model/###rel_add");
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###rel_kind/###rel_kind_epicyclic");
+    ctx->ComboClick(RelCombo("rel_sun", m[0]).c_str());
+    ctx->ComboClick(RelCombo("rel_ring", m[1]).c_str());
+    ctx->ComboClick(RelCombo("rel_carrier", m[2]).c_str());
+    ctx->ItemInputValue("###rel_teeth_sun", "14");
+    ctx->ItemInputValue("###rel_teeth_ring", "40");
+    ctx->ItemClick("###rel_planet_add");
+    ctx->Yield(2);
+    ctx->ComboClick(RelCombo("rel_planet_mate", m[3]).c_str());
+    ctx->ItemInputValue("###rel_planet_teeth", "13");
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(s_App->asmEditRefusal.c_str(), "");
+    ctx->ItemClick("###rel_new_accept");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->RelationCount(), (size_t)2);
+    IM_CHECK(s_App->assembly->GetRelations()[0].kind ==
+             RelationKind::Epicyclic);
+    IM_CHECK(s_App->assembly->GetRelations()[1].kind == RelationKind::Planet);
+    s_App->assembly->FindMateById(m[0])->rotation = 0.9;
+    ui::SolveActiveAssemblyDriven(*s_App, m[0], MateDof::Rotation);
+    ctx->Yield(2);
+    const double carrier = 0.9 * 14.0 / 54.0;
+    const auto rot = [](uint64_t id) {
+      return s_App->assembly->FindMateById(id)->rotation;
+    };
+    IM_CHECK(std::abs(rot(m[1])) < 1e-12); // the ring, held
+    IM_CHECK(std::abs(rot(m[2]) - carrier) < 1e-9);
+    IM_CHECK(std::abs(rot(m[3]) + 14.0 / 13.0 * (0.9 - carrier)) < 1e-9);
+    for (const Relation& r : s_App->assembly->GetRelations())
+      IM_CHECK_STR_EQ(r.error.c_str(), "");
+    // The row's tail says what was written, and the editor shows members.
+    ctx->ItemDoubleClick(("//###Model/###rel_row_" +
+                          std::to_string(s_App->assembly->GetRelations()[0].id))
+                             .c_str());
+    ctx->Yield(2);
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###rel_term_0"));
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###rel_teeth_ring"));
+    IM_CHECK(ctx->ItemExists("//###ToolWindow/###rel_constant"));
+    ctx->ItemClick("//###ToolWindow/###rel_edit_done");
+    ctx->Yield();
+  };
+
+  // What the window refuses, it says on its red line, and Accept makes
+  // nothing: a member not picked, one mate used twice.
+  t = IM_REGISTER_TEST(engine, "assembly", "add_relation_refusals");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::vector<uint64_t> m = RelationRig(ctx, 3, false);
+    ctx->ItemClick("//###Model/###rel_add");
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###rel_kind/###rel_kind_epicyclic");
+    ctx->Yield(2);
+    IM_CHECK(s_App->asmEditRefusal.find("sun") != std::string::npos);
+    ctx->ComboClick(RelCombo("rel_sun", m[0]).c_str());
+    ctx->ComboClick(RelCombo("rel_ring", m[0]).c_str());
+    ctx->ComboClick(RelCombo("rel_carrier", m[2]).c_str());
+    ctx->ItemInputValue("###rel_teeth_sun", "14");
+    ctx->ItemInputValue("###rel_teeth_ring", "40");
+    ctx->Yield(2);
+    IM_CHECK(s_App->asmEditRefusal.find("both the sun and the ring") !=
+             std::string::npos);
+    ctx->ItemClick("###rel_new_accept"); // disabled: nothing happens
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->RelationCount(), (size_t)0);
+    IM_CHECK(s_App->asmNewRelation);
+    // A gear's teeth that are not whole.
+    ctx->ComboClick("###rel_kind/###rel_kind_gear");
+    ctx->ItemInputValue("###rel_teeth_a", "13.5");
+    ctx->ItemInputValue("###rel_teeth_b", "40");
+    ctx->Yield(2);
+    IM_CHECK(s_App->asmEditRefusal.find("whole number") != std::string::npos);
+    ctx->ItemClick("###rel_new_cancel");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    IM_CHECK(!s_App->asmNewRelation);
+    IM_CHECK_EQ(s_App->assembly->RelationCount(), (size_t)0);
   };
 
   // A relation row can be PICKED, like an occurrence or a mate. It was the
