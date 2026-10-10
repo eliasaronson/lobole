@@ -251,7 +251,7 @@ Where the numbers come from, beyond the table's column:
 
 - **Where it lives: on the part.** `Document::PrintProcess()`, serialized as
   the envelope's `print {process, material}` (v143) — with a profile, its
-  name and an embedded copy (v168, [below](#print-profiles)) — outside the
+  name and an embedded copy (v169, [below](#print-profiles)) — outside the
   regen chain like a tolerance or the tube shop. A part is made one way, whichever machine
   or tab opens it; a body's material is its appearance and density, and the
   same PETG is printed or moulded with different allowances, so it is not the
@@ -502,7 +502,7 @@ set/list/clear/undo, `check_fits` off mates including the sub-assembly walk),
 table, its inverse, refusals, storage, the fit and thread sentences; a
 profile through its file, each refusal, a part reading its embedded copy and
 reporting same/differs/missing, and a profile's hole row rebuilding a fitted
-clearance hole), golden `v168-print-profile`,
+clearance hole), golden `v169-print-profile`,
 `tests/print_allowance_smoke.py` (check_fit, check_fits and a Thread on a
 printed part, and the advised custom thread printing the right major; the
 profile store's RPCs and refusals, a disc in a hole exported at the
