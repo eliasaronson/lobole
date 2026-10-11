@@ -186,24 +186,28 @@ each member to every other.
 
 The occurrence panel's Relations section lists each relation with what it
 was made from as its tail — "gear 14:13", "internal 13:40",
-"epicyclic 14/40", "planet 13 on 14" — and its members, ratio or
+"epicyclic 14/40", "planet 13 on 14", "geneva 3" — and its members, ratio or
 coefficients, `held` and any error in the tooltip; a relation that is not
 satisfied keeps its red glyph. A double-click opens it in the tool window:
 a pair's Drives and Driven combos, its teeth when it was made from teeth
 (the ratio shown, derived) or else its ratio, and its phase; a relation over
 several mates shows each member's combo by role, its teeth and its constant,
-never its raw coefficients.
+never its raw coefficients; an intermittent relation shows its step and
+window and edits where the window opens, with no ratio.
 
 **Add relation** (shown once the assembly has a mate that turns or slides)
 opens the same window in create mode. Its Kind combo lists what the window
-can make: Gear, Internal gear, Linear and Epicyclic; the other kinds are
+can make: Gear, Internal gear, Linear, Epicyclic and Geneva carry; the other kinds are
 made by `add_relation` or the SDK. A gear takes its two sides (started on
 the first two mates that turn), both tooth counts (no default: a count is
 read off the part) and a phase; Linear takes two slides, a ratio and a
 phase; Epicyclic takes Sun, Ring and Carrier combos over the mates that
 turn, their teeth, and a Planets list — a row per planet, Add planet, and
-the picked one's mate and teeth below it. What is wrong with the draft — a
-member not picked, one mate used twice, a tooth count missing — is said on
+the picked one's mate and teeth below it. A Geneva carry takes the driving
+mate, the Geneva's, its slots (no default) and where the window opens; its
+step and window are shown, derived, and it is made where the parts stand.
+What is wrong with the draft — a
+member not picked, one mate used twice, a tooth or slot count missing — is said on
 the window's red line and Accept stays disabled. Accept is one undo step.
 
 ## Cam

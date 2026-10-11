@@ -3,6 +3,7 @@
 
 #include "IconsFontAwesome6.h"
 #include "app/guitests/GuiTestsCommon.h"
+#include "core/Angles.h"
 #include "core/Measure.h"
 #include "ui/AppActionsInternal.h" // PartRenderCacheStore (the resync cache)
 #include "ui/AssemblyActions.h"
@@ -1430,6 +1431,56 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     const Relation& r = s_App->assembly->GetRelations()[0];
     IM_CHECK(r.internal);
     IM_CHECK(std::abs(r.ratio - 13.0 / 40.0) < 1e-12);
+  };
+
+  // A Geneva carry (docs/assemblies/relations.md#intermittent): refused
+  // until its slots are given, made where the parts stand, and stepping
+  // the wheel once a turn of the driver.
+  t = IM_REGISTER_TEST(engine, "assembly", "add_relation_geneva_carry");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::vector<uint64_t> m = RelationRig(ctx, 2, false);
+    ctx->ItemClick("//###Model/###rel_add");
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###rel_kind/###rel_kind_geneva");
+    ctx->ComboClick(RelCombo("rel_new_a", m[0]).c_str());
+    ctx->ComboClick(RelCombo("rel_new_b", m[1]).c_str());
+    ctx->Yield(2);
+    IM_CHECK(s_App->asmEditRefusal.find("slot") != std::string::npos);
+    ctx->ItemInputValue("###rel_slots", "3");
+    ctx->ItemInputValue("###rel_start", "-12");
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(s_App->asmEditRefusal.c_str(), "");
+    ctx->ItemClick("###rel_new_accept");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->assembly->RelationCount(), (size_t)1);
+    const Relation& r = s_App->assembly->GetRelations()[0];
+    IM_CHECK(r.kind == RelationKind::Intermittent);
+    IM_CHECK_EQ(r.intermittent.slots, 3);
+    IM_CHECK(std::abs(r.intermittent.step + 120.0) < 1e-12);
+    IM_CHECK(std::abs(r.intermittent.startDeg + 12.0) < 1e-12);
+    IM_CHECK(r.error.empty());
+    // Made where it stands: nothing moved. Then a turn back of the driver,
+    // clear of the window, is one step on.
+    s_App->assembly->FindMateById(m[0])->rotation = angles::ToRadians(-180.0);
+    ui::SolveActiveAssemblyDriven(*s_App, m[0], MateDof::Rotation);
+    const double b1 = s_App->assembly->FindMateById(m[1])->rotation;
+    s_App->assembly->FindMateById(m[0])->rotation = angles::ToRadians(-540.0);
+    ui::SolveActiveAssemblyDriven(*s_App, m[0], MateDof::Rotation);
+    const double b2 = s_App->assembly->FindMateById(m[1])->rotation;
+    IM_CHECK(std::abs(angles::ToDegrees(b2 - b1) - 120.0) < 1e-6);
+    // The editor edits its timing, and has no ratio.
+    const std::string row = "//###Model/###rel_row_" + std::to_string(r.id);
+    ctx->ItemDoubleClick(row.c_str());
+    ctx->Yield(2);
+    IM_CHECK(!ctx->ItemExists("//###ToolWindow/###rel_ratio"));
+    ctx->ItemInputValue("//###ToolWindow/###rel_start", "-10");
+    ctx->Yield(2);
+    IM_CHECK(std::abs(s_App->assembly->GetRelations()[0].intermittent.startDeg +
+                      10.0) < 1e-12);
+    ctx->ItemClick("//###ToolWindow/###rel_edit_done");
+    ctx->Yield();
   };
 
   // An epicyclic train with two planets, made in the window: turning the

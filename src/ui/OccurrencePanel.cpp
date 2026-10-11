@@ -123,6 +123,13 @@ std::string RelationTail(const Relation& r) {
                   r.terms[0].teeth);
     return buf;
   }
+  if (r.kind == RelationKind::Intermittent) {
+    if (r.intermittent.slots > 0)
+      std::snprintf(buf, sizeof(buf), "geneva %d", r.intermittent.slots);
+    else
+      std::snprintf(buf, sizeof(buf), "step %.4g", r.intermittent.step);
+    return buf;
+  }
   return DocumentIO::RelationKindToString(r.kind);
 }
 
@@ -197,6 +204,16 @@ void DrawRelationsSection(AppState& state) {
       char k[64];
       std::snprintf(k, sizeof(k), ", constant %.5g", r.phase);
       tip = memberTip + k;
+    } else if (r.kind == RelationKind::Intermittent) {
+      const Relation::Intermittent& im = r.intermittent;
+      char buf[256];
+      std::snprintf(buf, sizeof(buf),
+                    "%s steps %s by %.4g%s once every %.4g deg, over %.4g "
+                    "deg from %.4g deg",
+                    mateName(a).c_str(), mateName(b).c_str(), im.step,
+                    r.dofB == MateDof::Rotation ? " deg" : " mm", im.periodDeg,
+                    im.durationDeg, im.startDeg);
+      tip = buf;
     } else {
       char buf[256];
       std::snprintf(buf, sizeof(buf), "%s drives %s, ratio %.5g, phase %.5g",
@@ -227,7 +244,8 @@ void DrawRelationsSection(AppState& state) {
     NewAssemblyRelation(state);
   if (ImGui::IsItemHovered())
     ImGui::SetTooltip("Couple mates: a gear pair, an internal gear, a linear "
-                      "slide, or an epicyclic train with its planets.");
+                      "slide, an epicyclic train with its planets, or a "
+                      "Geneva carry.");
   if (remove != 0) {
     SnapshotAssembly(state);
     asmDoc.RemoveRelation(remove);
@@ -1871,7 +1889,41 @@ std::expected<std::vector<Relation>, std::string>
 DraftRelations(AppState& state) {
   const Draft& d = state.relationDraft;
   std::vector<Relation> out;
-  if (d.kind != Draft::Kind::Epicyclic) {
+  if (d.kind == Draft::Kind::Geneva) {
+    // A carry (docs/assemblies/relations.md#intermittent): its step and
+    // window follow from the slots, and it is made where the parts stand.
+    Relation r;
+    r.kind = RelationKind::Intermittent;
+    r.dofA = r.dofB = MateDof::Rotation;
+    r.mateA = d.a.mate;
+    r.mateAPath = d.a.path;
+    r.mateB = d.b.mate;
+    r.mateBPath = d.b.path;
+    r.ratio = 1.0;
+    if (d.a.mate == 0)
+      return std::unexpected("pick the mate that drives");
+    if (d.b.mate == 0)
+      return std::unexpected("pick the Geneva wheel's mate");
+    if (d.slots <= 0.0)
+      return std::unexpected("give the Geneva's slot count");
+    if (d.slots != std::floor(d.slots) || d.slots < 3.0)
+      return std::unexpected("a Geneva has a whole number of slots, at "
+                             "least 3");
+    Relation::Intermittent& im = r.intermittent;
+    im.slots = static_cast<int>(d.slots);
+    im.step = -360.0 / im.slots;
+    im.durationDeg = 180.0 - 360.0 / im.slots;
+    im.periodDeg = 360.0;
+    im.startDeg = d.startDeg;
+    const auto at = [&](const std::vector<uint64_t>& path, uint64_t mate) {
+      return assembly::MateDofAt(*state.assembly, path, mate, MateDof::Rotation,
+                                 AssemblyResolverFor(state))
+          .value_or(0.0);
+    };
+    r.phase = at(r.mateBPath, r.mateB) -
+              IntermittentValue(r, at(r.mateAPath, r.mateA));
+    out.push_back(std::move(r));
+  } else if (d.kind != Draft::Kind::Epicyclic) {
     Relation r;
     r.kind = d.kind == Draft::Kind::Linear ? RelationKind::Linear
                                            : RelationKind::Gear;
@@ -1953,13 +2005,14 @@ DraftRelations(AppState& state) {
 void DrawAddRelationWindow(AppState& state) {
   Draft& d = state.relationDraft;
   BeginToolWindowFrame(state, "Add relation");
-  static const char* kKinds[] = {"Gear", "Internal gear", "Linear",
-                                 "Epicyclic"};
-  static const char* kKindIds[] = {"gear", "internal", "linear", "epicyclic"};
+  static const char* kKinds[] = {"Gear", "Internal gear", "Linear", "Epicyclic",
+                                 "Geneva carry"};
+  static const char* kKindIds[] = {"gear", "internal", "linear", "epicyclic",
+                                   "geneva"};
   LeftLabel("Kind");
   const int kind = static_cast<int>(d.kind);
   if (ImGui::BeginCombo("###rel_kind", kKinds[kind])) {
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
       const std::string item =
           std::string(kKinds[i]) + "###rel_kind_" + kKindIds[i];
       if (ImGui::Selectable(item.c_str(), i == kind)) {
@@ -1978,7 +2031,8 @@ void DrawAddRelationWindow(AppState& state) {
                       "Internal gear: one meshing inside a ring, the same "
                       "way round. Linear: one slide drives another. "
                       "Epicyclic: sun, ring and carrier by Willis, and each "
-                      "planet's own turn.");
+                      "planet's own turn. Geneva carry: the driver steps the "
+                      "wheel once a turn, and it stands still between.");
   switch (d.kind) {
   case Draft::Kind::Gear:
   case Draft::Kind::InternalGear:
@@ -2003,6 +2057,23 @@ void DrawAddRelationWindow(AppState& state) {
         ImGui::TextDisabled("from the teeth");
     }
     NumberField(state, "Phase", "rel_new_phase", &d.phase, "%.5g");
+    break;
+  }
+  case Draft::Kind::Geneva: {
+    MemberCombo(state, "Drives", "rel_new_a", MateDof::Rotation, d.a.path,
+                d.a.mate, "The mate of the wheel that carries the pin.");
+    MemberCombo(state, "Geneva", "rel_new_b", MateDof::Rotation, d.b.path,
+                d.b.mate, "The mate of the slotted wheel it steps.");
+    NumberField(state, "Slots", "rel_slots", &d.slots, "%.0f");
+    NumberField(state, "Window opens (deg)", "rel_start", &d.startDeg, "%.5g");
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Where in the driver's turn the pin enters a slot.");
+    LeftLabel("Step");
+    if (d.slots >= 3.0)
+      ImGui::TextDisabled("%.5g deg over %.5g deg of the driver",
+                          -360.0 / d.slots, 180.0 - 360.0 / d.slots);
+    else
+      ImGui::TextDisabled("from the slots");
     break;
   }
   case Draft::Kind::Epicyclic: {
@@ -2321,6 +2392,24 @@ void DrawAssemblyEditWindow(AppState& state) {
       DrawRelationTerms(state, *r);
     } else {
       DrawRelationSides(state, *r);
+      if (r->kind == RelationKind::Intermittent) {
+        // Its timing is what is edited; the step and window are its kind's
+        // (a Geneva's follow from its slots).
+        const Relation::Intermittent& im = r->intermittent;
+        LeftLabel("Step");
+        ImGui::TextDisabled("%.5g over %.5g deg, once every %.5g deg%s",
+                            im.step, im.durationDeg, im.periodDeg,
+                            im.slots > 0 ? " (Geneva)" : "");
+        double start = im.startDeg;
+        if (NumberField(state, "Window opens (deg)", "rel_start", &start,
+                        "%.5g") &&
+            start != im.startDeg) {
+          SnapshotAssembly(state);
+          r->intermittent.startDeg = start;
+          asmDoc.BumpVersion();
+          SolveActiveAssembly(state);
+        }
+      }
       if (r->kind == RelationKind::Freewheel)
         ImGui::TextDisabled("drives %s, lead %.4g deg",
                             DocumentIO::FreewheelDrivesToString(r->drives),
@@ -2354,7 +2443,8 @@ void DrawAssemblyEditWindow(AppState& state) {
           ImGui::TextWrapped("%s", state.asmEditRefusal.c_str());
           ImGui::PopStyleColor();
         }
-      } else if (ExprInputDouble(state, "Ratio###rel_ratio", &ratio, "%.5g") &&
+      } else if (r->kind != RelationKind::Intermittent &&
+                 ExprInputDouble(state, "Ratio###rel_ratio", &ratio, "%.5g") &&
                  ratio != 0.0 && ratio != r->ratio) {
         SnapshotAssembly(state);
         r->ratio = ratio;

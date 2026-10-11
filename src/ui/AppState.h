@@ -1376,7 +1376,7 @@ struct AppState {
   // The same window in CREATE mode (docs/assemblies/relations.md#in-the-app):
   // the relation being drafted, made only on Accept.
   struct RelationDraft {
-    enum class Kind { Gear, InternalGear, Linear, Epicyclic };
+    enum class Kind { Gear, InternalGear, Linear, Epicyclic, Geneva };
     struct Member {
       std::vector<uint64_t> path; // a mate inside a flexible placement
       uint64_t mate = 0;          // 0 = not picked yet
@@ -1389,6 +1389,10 @@ struct AppState {
     Member sun, ring, carrier;
     std::vector<Member> planets;
     int planetPick = -1; // the planet row whose mate and teeth are shown
+    // A Geneva carry (v173): its slot count (0 = not given yet) and where
+    // in the driver's turn its window opens, degrees.
+    double slots = 0.0;
+    double startDeg = 0.0;
   };
   bool asmNewRelation = false;
   RelationDraft relationDraft;
