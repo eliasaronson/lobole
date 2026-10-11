@@ -79,11 +79,15 @@ it while the solids are apart. `ExactDistance` refines the face pairs within
 the slack exactly in that case too, and a pair whose surfaces really cross
 answers 0 itself. It used to return 0 the moment the meshes crossed, with no
 closest points: a planet pushed toward its ring read as touching 0.04 mm
-before it did. Only a pair list still past the 4096 cap with the finer
-meshes crossing answers 0 without refining: two shapes that overlap that
-widely are the overlap pass's question, and BRepExtrema over two
-interpenetrating solids takes minutes. `test_measure.cpp` "A shaft whose
-mesh crosses its bore's is measured, not called touching".
+before it did. When the meshes cross it does not re-mesh finer (seconds on
+a gear), and the first pair found whose surfaces cross ends the search, so
+two solids that really interpenetrate still answer in about a second;
+which crossing pair supplies the (degenerate) points then depends on the
+workers. A pair list past the 4096 cap answers 0 without refining: two
+shapes that overlap that widely are the overlap pass's question, and
+BRepExtrema over two interpenetrating solids takes minutes.
+`test_measure.cpp` "A shaft whose mesh crosses its bore's is measured, not
+called touching".
 
 Between two whole shapes `measure` also reports `overlap_volume` / `clash`.
 When the distance it has just measured is positive, the surfaces meet

@@ -1015,12 +1015,15 @@ double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
   // (docs/inspect/README.md#crossing-tessellations-are-not-contact). The
   // face pairs within the slack are refined exactly as any others; a pair
   // whose surfaces really cross answers 0 itself.
-  bool crossing = gap.distance <= 0.0;
+  const bool crossing = gap.distance <= 0.0;
 
-  // A long list asks again, finer: see kRemeshAbove.
+  // A long list asks again, finer: see kRemeshAbove. Not when the meshes
+  // cross: the finer meshes cost seconds on a gear, and the pairs in hand
+  // are refined until one whose surfaces cross ends the search, which for
+  // two solids that really interpenetrate is among the first.
   std::vector<collide::Mesh::FacePair> pairs = gap.pairs;
   double tolerance = gap.tolerance;
-  if (pairs.size() > kRemeshAbove) {
+  if (!crossing && pairs.size() > kRemeshAbove) {
     const double fine = gap.tolerance / (2.0 * kRemeshFactor);
     const auto ma = collide::Mesh::Build(shapeA, fine);
     const auto mb = collide::Mesh::Build(shapeB, fine);
@@ -1031,13 +1034,12 @@ double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
       if (!finer.pairs.empty()) {
         pairs = finer.pairs;
         tolerance = fineTol;
-        crossing = finer.distance <= 0.0;
       }
     }
   }
-  // Past the cap, two shapes whose meshes still cross even finer overlap
-  // widely: 0, the overlap pass's question, rather than minutes of
-  // BRepExtrema over two interpenetrating solids.
+  // Past the cap, two shapes whose meshes cross overlap widely: 0, the
+  // overlap pass's question, rather than minutes of BRepExtrema over two
+  // interpenetrating solids.
   if (pairs.size() > kMaxRefinedPairs)
     return crossing ? 0.0 : whole();
 
@@ -1070,6 +1072,14 @@ double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
     // asked, so which pairs hold the minimum does not depend on which worker
     // got there first, and neither do the points reported.
     if (pair.distance - margin > best.load(std::memory_order_relaxed))
+      return;
+    // Meshes that cross, and a pair already found whose SURFACES cross:
+    // the answer is 0 and no pair can change it. Without this, two solids
+    // that interpenetrate refined every pair in the slack (seconds a
+    // measurement for a gear pushed into its mate). Which crossing pair
+    // supplies the (degenerate) points then depends on the workers.
+    if (crossing &&
+        best.load(std::memory_order_relaxed) <= Precision::Confusion())
       return;
     Hit& h = hits[k];
     try {
