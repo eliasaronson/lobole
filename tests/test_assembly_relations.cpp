@@ -17,7 +17,9 @@
 #include "core/AssemblyLoopSolve.h"
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
+#include "core/Measure.h"
 #include "core/Occurrence.h"
+#include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -397,6 +399,69 @@ TEST_CASE("A rack follows its pinion, and a screw follows its own turn",
   d.FindMateById(thread)->rotation = static_cast<float>(4.0 * M_PI); // 2 turns
   assembly::Solve(d, NoParts());
   CHECK_THAT(d.FindMateById(thread)->offset, WithinAbs(2.5, 1e-5));
+}
+
+// A screw backed by a Thread feature reads the pitch off it. A printed
+// thread is always a CUSTOM one (PrintedThreadFor says to model it so), so a
+// custom thread's own pitch is taken -- the relation used to refuse every
+// thread the tables do not carry -- and a left-hand thread runs the other
+// way for the same turn.
+TEST_CASE("A thread-backed screw takes a custom thread's pitch and hand",
+          "[assembly][relations][thread]") {
+  Document part;
+  part.AddFeature(std::make_unique<CylinderFeature>(
+      "Neck", glm::dvec3(0.0), glm::dvec3(0.0, 0.0, 1.0), 30.0, 10.0));
+  const Body& body = part.GetBodies().at(0);
+  std::string face;
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto f = Measure::DescribeFaceAt(body, index);
+    if (f && f->kind == "cylinder")
+      face = name;
+  }
+  REQUIRE(!face.empty());
+  auto th = std::make_unique<ThreadFeature>(
+      "Jar", ElementRef{body.createdBy, face}, "jar thread", 4.0);
+  th->flankDeg = 45.0;
+  part.AddFeature(std::move(th));
+  auto* thread = dynamic_cast<ThreadFeature*>(part.GetFeature(1));
+  REQUIRE(thread->GetError().empty());
+  const assembly::PartResolver parts =
+      [&](uint64_t, uint64_t) -> const Document* { return &part; };
+
+  AssemblyDocument d;
+  Occurrence jar;
+  jar.name = "Jar";
+  jar.partId = 1;
+  jar.fixed = true;
+  const uint64_t jarId = d.AddOccurrence(std::move(jar));
+  Occurrence lid;
+  lid.name = "Lid";
+  lid.partId = 1;
+  const uint64_t lidId = d.AddOccurrence(std::move(lid));
+  Mate cyl;
+  cyl.type = MateType::Cylindrical;
+  cyl.a = Origin(jarId);
+  cyl.b = Origin(lidId);
+  cyl.flipped = false;
+  const uint64_t screw = d.AddMate(std::move(cyl));
+  Relation s;
+  s.kind = RelationKind::Screw;
+  s.mateA = s.mateB = screw;
+  s.dofA = MateDof::Rotation;
+  s.dofB = MateDof::Offset;
+  s.threadPart = 1;
+  s.threadFeature = thread->GetId();
+  const uint64_t rel = d.AddRelation(s);
+  d.FindMateById(screw)->rotation = static_cast<float>(3.0 * M_PI); // 1.5
+  assembly::Solve(d, parts);
+  CHECK(d.FindRelationById(rel)->error.empty());
+  CHECK_THAT(d.FindMateById(screw)->offset, WithinAbs(6.0, 1e-4));
+
+  thread->rightHanded = false;
+  part.Regenerate();
+  assembly::Solve(d, parts);
+  CHECK(d.FindRelationById(rel)->error.empty());
+  CHECK_THAT(d.FindMateById(screw)->offset, WithinAbs(-6.0, 1e-4));
 }
 
 TEST_CASE("A relation inside a loop is a row: a four-bar drops to zero DOF",

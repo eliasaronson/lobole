@@ -85,8 +85,18 @@ with (
     app.modify_feature(feature_id=spec["id"], feature=spec)
     fixture.solve()
     assert abs(app.list_relations()["relations"][0]["ratio"] - 1 / (2 * math.pi)) < 1e-9
+    # A custom thread drives the screw by its own pitch: every printed
+    # thread is a custom one (docs/assemblies/relations.md).
     shaft.activate()
-    spec["designation"] = "custom-unsupported"
+    spec["designation"] = "custom"
+    spec["pitch"] = 2.5
+    app.modify_feature(feature_id=spec["id"], feature=spec)
+    fixture.solve()
+    assert abs(app.list_relations()["relations"][0]["ratio"] - 2.5 / (2 * math.pi)) < 1e-9
+    # A thread the tables refuse is the feature's error, and the screw it
+    # backs errors with it rather than keeping the last pitch.
+    shaft.activate()
+    spec["designation"] = "M7.3"
     app.modify_feature(feature_id=spec["id"], feature=spec)
     assert fixture.solve()["errored_mates"] > 0
     print(

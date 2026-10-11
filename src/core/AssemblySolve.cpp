@@ -1216,14 +1216,22 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
           if (f->GetId() == r.threadFeature && !doc->EffectiveSuppressed(i))
             thread = dynamic_cast<const ThreadFeature*>(f.get());
         }
-      const auto spec =
-          thread ? threads::Lookup(thread->designation) : std::nullopt;
-      if (!thread || !spec || thread->IsSuppressed() ||
-          r.kind != RelationKind::Screw || !thread->GetError().empty()) {
+      if (!thread || thread->IsSuppressed() || r.kind != RelationKind::Screw ||
+          !thread->GetError().empty()) {
         r.error = "screw thread reference is missing, invalid or unsupported";
         continue;
       }
-      r.ratio = spec->pitch / (2.0 * 3.14159265358979323846);
+      // The table's pitch for a known designation, else the custom thread's
+      // own -- what every printed thread is (PrintedThreadFor models one so).
+      // A left-hand thread advances the other way for the same turn.
+      const auto spec = threads::Lookup(thread->designation);
+      const double pitch = spec ? spec->pitch : thread->pitch;
+      if (!(pitch > 0.0)) {
+        r.error = "the screw's thread has no pitch";
+        continue;
+      }
+      r.ratio = (thread->rightHanded ? 1.0 : -1.0) * pitch /
+                (2.0 * 3.14159265358979323846);
     }
     const Mate* a = asmDoc.FindMateById(r.mateA);
     const Mate* b = asmDoc.FindMateById(r.mateB);

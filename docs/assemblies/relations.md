@@ -35,7 +35,7 @@ or `offset`). Most kinds are one equation:
 | `gear` | rotation → rotation | `−teeth_a / teeth_b` (meshing gears counter-rotate); with `internal`, `+teeth_a / teeth_b` (a gear meshing inside a ring turns the same way) |
 | `chain` | rotation → rotation | `+teeth_a / teeth_b` (a chain or belt keeps the sense) |
 | `rack` | rotation → offset | the pinion's `pitch_radius`, mm per radian |
-| `screw` | one cylindrical mate's rotation → its own offset (a = b) | `pitch / 2π`; or from a Thread feature (`thread_part`, `thread_feature`), re-read on every solve |
+| `screw` | one cylindrical mate's rotation → its own offset (a = b) | `pitch / 2π`; or from a Thread feature (`thread_part`, `thread_feature`), re-read on every solve: a table designation's pitch or a custom thread's own (a printed thread is a custom one), negative for a left-hand thread |
 | `linear` | offset → offset | a bare `ratio` |
 | `cam` | rotation → offset or rotation | none: a lift table |
 | `freewheel` | rotation → rotation | a bare `ratio`, plus `drives` and `lead` |
