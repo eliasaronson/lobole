@@ -92,7 +92,8 @@ def planetary(port, out):
     return ([PY, "-u", os.path.join(GEN, "planetary", "build.py"),
              "--port", str(port), "--no-render",
              "--out", os.path.join(out, "planetary")],
-            [r"motion, one orbit .*: passed", r"planetary: 5 shells"], None)
+            [r"motion, one orbit .*: passed", r"push check: passed",
+             r"planetary: 5 shells"], None)
 
 
 def hook(port, out):

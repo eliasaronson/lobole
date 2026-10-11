@@ -3,8 +3,9 @@
 A sun, three planets and an internal ring with herringbone teeth, printed as
 ONE plate that comes off the bed assembled and turns. The V of the teeth
 holds every gear at its height, so there is no carrier, no pin and no
-support. Hold the ring, turn the hex knob on the sun, and the numbered
-planets orbit at the ratio engraved on the ring.
+support; rolling bearers above the teeth hold the centre distances
+([Bearers](#bearers)). Hold the ring, turn the hex knob on the sun, and the
+numbered planets orbit at the ratio engraved on the ring.
 
     tools/headless-preview.sh --start <port>
     python3 generators/planetary/build.py --port <port> --profile "K5 PLA on P1S"
@@ -13,7 +14,8 @@ planets orbit at the ratio engraved on the ring.
 Output goes to `scratch/planetary/` (or `--out`): `planetary.stl` (the plate,
 five shells), `planetary.dsgn`, `planetary.png` (the hero still) and
 `planetary.json`, the receipt (tooth counts, module, ratio, gap, measured
-clearances, motion verdicts and, with `--study`, the sun's stresses).
+clearances, motion verdicts, the push check and, with `--study`, the sun's
+stresses).
 
 ## Where every size comes from
 
@@ -34,8 +36,9 @@ community's numbers. The rest derives:
   `(Zs + Zr) % 3 == 0` (three equal planets assemble), neighbouring planets
   clearing tip to tip, at least 12 teeth on each, and the sun and planets as
   close in size as that allows. At 70 mm: 14 / 13 / 40, ratio 3.857 : 1.
-- **Face width** 0.3 of the diameter, the knob 0.3 of the face width,
-  engraving 1 % of the diameter deep.
+- **The plate's height** 0.3 of the diameter, the knob 0.3 of that,
+  engraving 1 % of the diameter deep. The teeth are what the bearers leave
+  of the height: 16.7 of 21 mm at 70 mm.
 
 ## The teeth
 
@@ -60,6 +63,47 @@ community's numbers. The rest derives:
   takes the half pitch less the sun's offset at its angle, and the ring
   cutter takes the planet's tooth at the ring. The script asserts all three
   planets ask the ring for the same phase.
+
+## Bearers
+
+Without a carrier the sun is centred only by the planets' teeth, and a mesh
+can close by g / (sin α · cos β_b) of centre distance before both flanks
+touch (0.25-0.26 mm measured at 0.1 mm a side). A push on the sun toward the
+space between two planets closes two meshes in series along lines 60° off
+the push, so the sun travels about 1 mm and the third planet's mesh opens by
+that plus the planet's own play: the first K5 print, pushed by hand, kept
+about 1 mm of its 2.24 mm working depth.
+
+So every gear carries a smooth **bearer band** above its teeth: the sun and
+the planets a cylinder of their pitch radius less half the gap, the ring a
+bore of its pitch radius plus half the gap. Neighbouring bands clear by the
+gap and touch at the pitch point, where the pitch circles roll without
+slipping, so the motion studies see the same pure rolling as the teeth, and
+a mesh closes by the gap instead of 0.25 mm.
+
+- **Each band stands on a 45° cone** (no support), because the neighbour's
+  teeth reach an addendum under it. The cone's foot is the gap plus one
+  layer plus the gap inside the neighbour's tip circle (the sun's at its
+  pitch radius less 0.8 m + 0.4 mm, a planet's likewise, the ring's bore
+  that much outside its pitch circle), which lands on or a few hundredths
+  past each gear's root. It clears the neighbour's tips by the gap in plan
+  through the first layer above the teeth and crosses over them a layer
+  up: the profile's gap is between walls, and over a horizontal face the
+  slicer needs an empty layer (`LAYER_MM`, the 0.2 mm the plate is sliced
+  at). The cone is 0.8 m + 1.5 g + a layer tall (1.47 mm at 70 mm), the
+  band 2 modules (2.8 mm, fourteen layers).
+- **Every gear only narrows going up**: the sun's and planets' bands step in
+  from their teeth, the ring's bore steps out from its tips. The knob stands
+  on the sun's band; the planet numbers and the ratio are engraved in the
+  band tops.
+- **No band under the teeth.** It would carry the teeth on its top with
+  their tips overhanging it by an addendum, so the teeth would have to be
+  chamfered off at the bottom. It is not needed: a push on the knob, above
+  the bearers, pivots the sun about them and its bottom swings the OTHER
+  way, toward the opposite planet, held there by that planet's two tooth
+  meshes in series. The two meshes it opens open by that times cos 60° plus
+  their own play, about 0.5 mm. The push check reports this tilt case and
+  holds it to the same limit.
 
 ## What is checked, every run
 
@@ -89,6 +133,26 @@ community's numbers. The rest derives:
   than the 0.1 mm the teeth clear by). Before the real studies, planet 1 is
   put half a tooth out, and then only 0.4 mm along its pitch circle, and
   each must clash; a run whose controls read clean stops there.
+- **The worst push leaves half the working depth engaged** (`push_check`,
+  on an assembly `push check` of free occurrences). Measured: how far the
+  sun travels toward planet 1 along their line of centres before the exact
+  solids touch (`t_sp`), and planet 1 toward the ring (`t_pr`, against a
+  45° sector of the ring around it, since an exact distance to all forty
+  teeth takes seconds). The phases centre every tooth in its space, so a
+  translation closes both flanks together, as the free gears' play does.
+  The search steps by the measured gap, which no contact can outrun, then by
+  the rate the gap closed at. Composed from those by the train's geometry:
+  the sun travels (t_sp + t_pr) / cos 60°, and the opposite mesh opens by
+  that plus planet 1's drift out to the ring, t_pr. What is left of the
+  working depth (2 · 0.8 m) must be at least half of it, one addendum: each
+  tooth then still reaches the other's pitch circle and they bear flank on
+  flank; below it the contact runs out to the tip corners and the next push
+  rides a tooth over. At 70 mm in K5: the sun travels 0.40 mm and 1.75 mm
+  (78 %) stays engaged; at the knob's tilt, 1.74 mm (78 %).
+- **The push check can fail.** The same measurement on the gears as teeth
+  alone (`sun, no bearer` and the rest, what the first print was) must fail
+  it, or the run stops: 0.257 / 0.250 mm closures, the sun travels 1.01 mm
+  and 0.98 mm (44 %) is left — what the hand found on the print.
 
 `--study` adds a static study of the sun, the weakest gear: a firm 60 N
 pinch's torque (0.39 N m at 70 mm) as a `torque` load on the knob's six
@@ -99,16 +163,20 @@ Prusament's datasheet), at 0.4 module elements. The solve goes to the GPU
 
 It reports two stresses and says which is which:
 
-- **The tooth roots:** `probe_study` on every root face, the worst max.
-  At 70 mm, 2.1 MPa against PLA's 48: a hand cannot strip these teeth.
-- **The global peak** (3.2 MPa) and its factor of safety. It sits in the
-  sharp inside corner where the hex knob meets the gear's face, a
-  re-entrant corner whose value grows as the mesh is refined, so it is a
-  property of the mesh more than of the part.
+- **The tooth roots:** `probe_study` on every root face, the worst max and
+  the mean. At 70 mm, 6.2 MPa at worst (0.76 on average) against PLA's 48:
+  a hand cannot strip these teeth.
+- **The global peak** and its factor of safety, and where it is. With the
+  bearer it is the root's worst too (6.2 MPa, factor of safety 7.8): the
+  top of a tooth space, where the bearer's cone stands on the roots and the
+  pinch's torque enters the teeth. Without the bearer it was the inside
+  corner of the hex knob (3.2 MPa). Both are re-entrant corners, whose
+  value grows as the mesh is refined, so a property of the mesh more than
+  of the part.
 
 The generator test `generator_planetary`
 (generators/README.md#the-big-generators-as-tests) runs the default build
-without the still.
+without the still, and waits for the push check's verdict too.
 
 ## Printing it on a P1S
 

@@ -93,7 +93,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 | `generator_om615` | `om615.py --stage preview` (headless) | 221 s | 420 s |
 | `generator_pes_pump` | `pes_pump.py --no-still`: the build, the standing sweep, the four studies and their measured strokes, order and turns (offscreen) | 44 s | 180 s |
 | `generator_chess` | `run_all.sh --only board`: every design stage, then the board's CAM job verified and posted (offscreen) | 140 s | 360 s |
-| `generator_planetary` | `planetary/build.py --no-render`: the print plate, its exact mesh clearances and the STL's five shells, the assembly and both motion studies (headless) | ~90 s | 240 s |
+| `generator_planetary` | `planetary/build.py --no-render`: the print plate, its exact mesh clearances and the STL's five shells, the assembly, both motion studies and the push check (headless) | ~100 s | 240 s |
 | `generator_hook` | `hook/build.py`: both prints checked on the bed, the study at two meshes read for both orientations, the test card (headless) | 13 s | 60 s |
 | `generator_jar` | `jar/build.py --no-render`: the three parts with modelled threads, the thread's phase found by interference, the squeeze measured twice, the unscrewing study, the three negative controls and the STLs (headless) | 83-198 s | 400 s |
 | `generator_pantilt` | `run_all.sh --skip yoke_topo renders` with `PANTILT_SAMPLES=6`: every part, the assembly with its exact sweeps and studies, the CAM job, the drawings (offscreen) | 181-349 s | 720 s |

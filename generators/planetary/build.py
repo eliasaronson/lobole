@@ -10,7 +10,9 @@ off the bed already assembled and turning.
 
 A sun, three planets and an internal ring, all with herringbone teeth: the V
 holds every gear at its height, so nothing needs a carrier, a pin or a
-support. Turn the hex knob on the sun with the ring held and the planets
+support. Rolling bearers at the pitch circles, above the teeth, keep the
+centre distances to within the gap, so a push on the sun cannot open a
+mesh. Turn the hex knob on the sun with the ring held and the planets
 orbit; the ratio is engraved on the ring.
 
 Every size derives from `--diameter` (the ring's outside) and the print
@@ -23,7 +25,9 @@ What it builds (generators/planetary/README.md):
   ONE STL whose shells must number five (two bodies that touch would fuse);
 - the parts `sun`, `planet` and `ring` and an assembly `planetary` with a
   kinematic carrier, the gear ratios as relations, and a motion study;
-- a static study on the sun's teeth under a firm pinch on the knob.
+- a static study on the sun's teeth under a firm pinch on the knob;
+- the push check: the worst push on the sun, against the engagement left on
+  the mesh it opens, with the bearers and (the control) without.
 
 Output (generated, untracked): scratch/planetary/ — the STL, the project and
 planetary.json, the receipt (counts, module, ratio, gap, clearances, factor
@@ -40,7 +44,7 @@ from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from _lib import check, circle, connect, fresh_project, line  # noqa: E402
-from gear import involute_profile  # noqa: E402
+from gear import involute_profile, wedge  # noqa: E402
 
 ROOT = Path(HERE).resolve().parent.parent
 OUT = ROOT / "scratch" / "planetary"
@@ -73,6 +77,15 @@ NOZZLE_MM = 0.4  # the P1S's stock nozzle, which the allowance table assumes
 # The narrowest tip worth printing: a line and a half, which a variable-width
 # slicer (Bambu Studio's Arachne) fills with one widened line.
 MIN_TIP_MM = 1.5 * NOZZLE_MM
+# The layer the README slices at (Bambu Studio's 0.20 mm preset on the P1S).
+# A gap measured on the profile is between WALLS; where one gear's material
+# crosses over another's horizontal face, the slicer needs an empty layer.
+LAYER_MM = 0.2
+# The worst push may leave no less than this share of the working depth
+# engaged at the mesh it opens: half, one addendum, so each tooth still
+# reaches the other gear's pitch circle and they bear flank on flank. The
+# print without bearers had 40 % and was felt to be near a skip.
+MIN_ENGAGED = 0.5
 
 
 def plane(cx, cy, z):
@@ -138,6 +151,22 @@ def solve(diameter, gap):
                          f"{ring_addendum:.2f} modules tall to clear the "
                          f"planets — more planet teeth (a larger --diameter)")
     height = 0.3 * diameter
+    # Rolling bearers above the teeth: a band at each pitch circle, half the
+    # gap inside it on the sun and planets and outside it on the ring, so two
+    # bands clear by the gap and roll at the pitch point
+    # (generators/planetary/README.md#bearers). The neighbour's teeth reach
+    # an addendum under every band, so the band stands on a 45 degree cone
+    # that starts the gap plus an empty layer and the gap inside that reach:
+    # it clears the tip by the gap in plan through the first layer, and
+    # crosses over it a layer up. Two modules of band: fourteen layers.
+    reach = ADDENDUM * m + g + (LAYER_MM + g)
+    band = 2.0 * m
+    cone = reach - g / 2.0
+    teeth = height - cone - band
+    if teeth < 0.5 * height:
+        raise SystemExit(f"planetary: the bearers ({cone + band:.2f} mm) "
+                         f"leave {teeth:.2f} mm of teeth in {height:.2f} — "
+                         f"a larger --diameter")
     for z, b in ((zs, j / 2.0), (zp, j / 2.0)):
         land = tip_land(m, z, b)
         if land < MIN_TIP_MM:
@@ -149,6 +178,10 @@ def solve(diameter, gap):
         "module": m, "zs": zs, "zp": zp, "zr": zr, "tip_clearance": c,
         "ring_addendum": ring_addendum,
         "backlash": j, "wall": wall, "height": height,
+        "teeth_height": teeth, "band_height": band, "cone_height": cone,
+        # From each gear's pitch radius: the band (+ inward on the ring) and
+        # the cone's foot, both signed so `pitch - x` is an external gear's.
+        "band_inset": g / 2.0, "cone_inset": reach,
         "centre": m * (zs + zp) / 2.0,
         "ratio": 1.0 + zr / zs,
         "knob_height": 0.3 * height,
@@ -213,7 +246,7 @@ def herringbone(d, name, s, z, centre, phase, twist_sign, backlash,
     exact helicoids about the sketch plane's origin, which is the gear's
     centre; the twist over the full height makes a helix of HELIX_DEG at the
     pitch circle, and the herringbone climbs half of it to the apex."""
-    m, h = s["module"], s["height"]
+    m, h = s["module"], s["teeth_height"]
     rp = m * z / 2.0
     k = twist_sign * math.degrees(math.tan(math.radians(HELIX_DEG)) / rp)
     ents, _ = involute_profile(m, z, PRESSURE_DEG, backlash=backlash,
@@ -229,6 +262,42 @@ def herringbone(d, name, s, z, centre, phase, twist_sign, backlash,
         "herringbone": True}), f"{name} extrude")["id"]
 
 
+def bearer(d, name, s, z, centre, internal=False):
+    """The rolling bearer above a gear's teeth, as a revolved body: a band
+    at the pitch circle (half the gap inside it, or outside it on the ring)
+    on a 45 degree cone that rises from the top of the teeth inside the
+    neighbour's tips. On the ring it is the TOOL that cuts the bore: the
+    same profile, run up past the top so the cut leaves no skin."""
+    m, ht, H = s["module"], s["teeth_height"], s["height"]
+    rp = m * z / 2.0
+    sign = -1.0 if internal else 1.0
+    r_band = rp - sign * s["band_inset"]
+    r_foot = rp - sign * s["cone_inset"]
+    top = H + (m if internal else 0.0)
+    ents = [line((0.0, ht), (r_foot, ht)),
+            line((r_foot, ht), (r_band, ht + s["cone_height"])),
+            line((r_band, ht + s["cone_height"]), (r_band, top)),
+            line((r_band, top), (0.0, top)),
+            line((0.0, top), (0.0, ht))]
+    sk = check(d.call("add_feature", feature={
+        "type": "Sketch", "name": f"{name} bearer profile",
+        "plane": {"origin": [centre[0], centre[1], 0.0],
+                  "normal": [0, -1, 0], "uAxis": [1, 0, 0]},
+        "entities": ents}), f"{name} bearer profile")
+    return check(d.call("add_feature", feature={
+        "type": "Revolve", "name": f"{name} bearer", "sketch_id": sk["id"],
+        "axis": {"kind": "custom", "origin": [centre[0], centre[1], 0.0],
+                 "direction": [0.0, 0.0, 1.0]},
+        "angle_deg": 360.0, "mode": "new_body"}), f"{name} bearer")["id"]
+
+
+def with_bearer(d, name, s, z, centre, body):
+    return check(d.call("add_feature", feature={
+        "type": "Boolean", "name": name, "target_id": body,
+        "tool_id": bearer(d, name, s, z, centre), "op": "union"}),
+        f"{name} + bearer")["id"]
+
+
 def text(label, at, height, angle=0.0):
     return {"type": "text", "text": label, "font": "sans", "height": height,
             "anchor": [float(at[0]), float(at[1])], "angle": angle,
@@ -236,12 +305,14 @@ def text(label, at, height, angle=0.0):
 
 
 def sun(d, s, ph, centre=(0.0, 0.0)):
-    """The sun with its hex knob on top. The knob stays inside the root
-    circle, so it stands straight up off the teeth and overhangs nothing."""
+    """The sun with its bearer and its hex knob on top. The knob stays
+    inside the root circle, so it stands straight up off the bearer and
+    overhangs nothing."""
     m = s["module"]
     c = s["tip_clearance"]
-    body = herringbone(d, "sun", s, s["zs"], centre, ph["sun"], +1,
+    body = herringbone(d, "sun teeth", s, s["zs"], centre, ph["sun"], +1,
                        s["backlash"] / 2.0, dedendum=ADDENDUM + c / m)
+    body = with_bearer(d, "sun bearing", s, s["zs"], centre, body)
     rf = m * s["zs"] / 2.0 - (ADDENDUM * m + c)
     r_hex = 0.9 * rf
     pts = [(centre[0] + r_hex * math.cos(math.pi / 3 * i),
@@ -260,9 +331,10 @@ def sun(d, s, ph, centre=(0.0, 0.0)):
 
 def planet(d, s, phase, centre=(0.0, 0.0), label=None):
     m, c = s["module"], s["tip_clearance"]
-    body = herringbone(d, f"planet {label or ''}".strip(), s, s["zp"], centre,
-                       phase, -1, s["backlash"] / 2.0,
-                       dedendum=ADDENDUM + c / m)
+    name = f"planet {label or ''}".strip()
+    body = herringbone(d, f"{name} teeth", s, s["zp"], centre, phase, -1,
+                       s["backlash"] / 2.0, dedendum=ADDENDUM + c / m)
+    body = with_bearer(d, name, s, s["zp"], centre, body)
     if label:
         # A number on each, so the orbit can be counted against the ratio.
         rf = m * s["zp"] / 2.0 - (ADDENDUM * m + c)
@@ -277,24 +349,35 @@ def planet(d, s, phase, centre=(0.0, 0.0), label=None):
     return body
 
 
-def ring(d, s, ph, diameter, engrave=True):
+def ring(d, s, ph, diameter, engrave=True, bearers=True, sector_deg=0.0):
     """A blank cut by an external gear of the ring's tooth count: the
     cutter's teeth are the ring's spaces, so the roles of addendum and
     dedendum swap and its backlash goes negative (fatter cutter teeth,
-    wider spaces)."""
+    wider spaces). `sector_deg`: only a pie of that half-angle about +X,
+    the teeth planet 1 meets, for the push check (an exact distance to the
+    whole ring takes seconds)."""
     m, c = s["module"], s["tip_clearance"]
-    sk = check(d.call("add_feature", feature={
-        "type": "Sketch", "name": "ring blank", "plane": plane(0, 0, 0),
-        "entities": [circle((0, 0), diameter / 2.0)]}), "blank sketch")
-    blank = check(d.call("add_feature", feature={
-        "type": "Extrude", "name": "ring blank", "sketch_id": sk["id"],
-        "distance": s["height"], "mode": "new_body"}), "blank")["id"]
+    h = s["height"] if bearers else s["teeth_height"]
+    if sector_deg > 0.0:
+        blank = wedge(d, diameter / 2.0, sector_deg, h, "ring")
+    else:
+        sk = check(d.call("add_feature", feature={
+            "type": "Sketch", "name": "ring blank", "plane": plane(0, 0, 0),
+            "entities": [circle((0, 0), diameter / 2.0)]}), "blank sketch")
+        blank = check(d.call("add_feature", feature={
+            "type": "Extrude", "name": "ring blank", "sketch_id": sk["id"],
+            "distance": h, "mode": "new_body"}), "blank")["id"]
     cutter = herringbone(d, "ring cutter", s, s["zr"], (0, 0), ph["ring"], -1,
                          -s["backlash"] / 2.0, addendum=ADDENDUM + c / m,
                          dedendum=s["ring_addendum"])
     body = check(d.call("add_feature", feature={
-        "type": "Boolean", "name": "ring", "target_id": blank,
+        "type": "Boolean", "name": "ring teeth", "target_id": blank,
         "tool_id": cutter, "op": "subtract"}), "ring cut")["id"]
+    if bearers:
+        body = check(d.call("add_feature", feature={
+            "type": "Boolean", "name": "ring", "target_id": body,
+            "tool_id": bearer(d, "ring", s, s["zr"], (0, 0), internal=True),
+            "op": "subtract"}), "ring bore")["id"]
     if engrave:
         r_root = m * s["zr"] / 2.0 + ADDENDUM * m + c
         mid = (r_root + diameter / 2.0) / 2.0
@@ -396,6 +479,141 @@ def build_assembly(d, s, ph, diameter, proc):
                         "planet": -(zs / zp) * (zr / (zs + zr))}
 
 
+# The ring the push check measures planet 1 against: the teeth within this
+# half-angle of it. Planet 1's tips subtend asin(ra / centre) = 33 degrees
+# of the ring at 70 mm; 45 leaves a tooth and more either side.
+RING_SECTOR_DEG = 45.0
+
+
+def bare_parts(d, s, ph, diameter):
+    """The control: the sun, a planet and the ring as teeth alone, no
+    bearers (what the generator printed before them); and both rings as
+    the sector planet 1 meets."""
+    m, c = s["module"], s["tip_clearance"]
+    d.call("add_part", name="sun, no bearer")
+    herringbone(d, "sun teeth", s, s["zs"], (0, 0), ph["sun"], +1,
+                s["backlash"] / 2.0, dedendum=ADDENDUM + c / m)
+    d.call("add_part", name="planet, no bearer")
+    herringbone(d, "planet teeth", s, s["zp"], (0, 0), 0.0, -1,
+                s["backlash"] / 2.0, dedendum=ADDENDUM + c / m)
+    for suffix, bearers in (("", True), (", no bearer", False)):
+        d.call("add_part", name="ring sector" + suffix)
+        ring(d, s, ph, diameter, engrave=False, bearers=bearers,
+             sector_deg=RING_SECTOR_DEG)
+
+
+def closure(d, moving, still, at, rot_deg, tol=1e-3):
+    """How far `moving` travels along +X from `at` before it touches
+    `still`, on the exact solids: the centre distance a mesh can close.
+
+    A body moved by d closes no gap by more than d, so a step of the
+    measured gap never passes the contact, and one that lands in contact
+    found it (a cylinder's gap closes at exactly that rate). Teeth close
+    slower, at the rate the last step measured, which the next step takes;
+    a step that lands in contact brackets the answer and the rest narrow
+    it."""
+    def gap(t):
+        d.call("set_occurrence_transform", occurrence=moving, transform={
+            "position": [at[0] + t, at[1], 0.0],
+            "rotate": {"axis": [0, 0, 1], "angle_deg": rot_deg}})
+        return d.call("measure", a={"occurrence": moving},
+                      b={"occurrence": still})["distance"]
+    lo, glo, hi, rate, n = 0.0, gap(0.0), None, None, 1
+    if glo <= tol:
+        raise SystemExit(f"planetary: push check: the pair touches as "
+                         f"placed ({glo:.4f} mm)")
+    answer = None
+    while answer is None:
+        if n > 30:
+            raise SystemExit("planetary: push check: no contact found")
+        if hi is None:
+            t = lo + (glo if rate is None else glo / rate)
+        else:
+            t = 0.5 * (lo + hi) if rate is None else min(
+                max(lo + glo / rate, lo + 0.1 * (hi - lo)),
+                hi - 0.1 * (hi - lo))
+        g, n = gap(t), n + 1
+        if g > tol:
+            rate = (glo - g) / (t - lo) if glo > g else None
+            lo, glo = t, g
+            if glo < 2.0 * tol:
+                answer = lo + glo
+        elif hi is None and rate is None:
+            answer = t  # the safe step, which no contact can outrun
+        else:
+            hi = t
+            if hi - lo < 2.0 * tol:
+                answer = 0.5 * (lo + hi)
+    d.call("set_occurrence_transform", occurrence=moving, transform={
+        "position": [at[0], at[1], 0.0],
+        "rotate": {"axis": [0, 0, 1], "angle_deg": rot_deg}})
+    return answer, n
+
+
+def push_check(d, s, ph, diameter):
+    """The worst push on the sun, toward the space between two planets,
+    against the remaining engagement of the opposite planet's mesh.
+
+    MEASURED: how far each mesh's centre distance closes before the solids
+    touch (`closure`, sun toward planet 1 and planet 1 toward the ring).
+    The phases centre every tooth in its space, so a translation closes both
+    flanks together, as the free gears' play does. COMPOSED from those, by
+    the train's geometry (no contact solver says it): the sun closes the two
+    planets' meshes in series along lines pi/N off the push, so it travels
+    (t_sp + t_pr) / cos(pi/N), and the opposite planet's sun mesh opens by
+    that plus the planet's own drift out to the ring, t_pr.
+
+    The tilt case, a push on the knob above the bearers: the sun pivots on
+    them and its BOTTOM swings toward the opposite planet, held there by the
+    teeth alone, so the two pushed-toward meshes open at the bottom by
+    (t_sp + t_pr) cos(pi/N) of the TEETH's closures plus their own drift.
+
+    Run on the bare gears too, as the negative control: that must fail."""
+    t0 = time.perf_counter()
+    bare_parts(d, s, ph, diameter)
+    t_bare = time.perf_counter() - t0
+    d.call("add_assembly", name="push check")
+    a = s["centre"]
+    th, phi = ph["planets"][0]
+    at_planet = (a * math.cos(th), a * math.sin(th))
+    rot = math.degrees(phi)
+    depth = 2.0 * ADDENDUM * s["module"]
+    cos_n = math.cos(math.pi / PLANETS)
+    out = {}
+    for label, suffix in (("bearers", ""), ("bare", ", no bearer")):
+        occ = {k: d.call("add_occurrence", part=p + suffix,
+                         name=f"{p}{suffix}")["id"]
+               for k, p in (("sun", "sun"), ("planet", "planet"),
+                            ("ring", "ring sector"))}
+        d.call("set_occurrence_transform", occurrence=occ["planet"],
+               transform={"position": [at_planet[0], at_planet[1], 0.0],
+                          "rotate": {"axis": [0, 0, 1], "angle_deg": rot}})
+        # Sun toward planet 1, then planet 1 toward the ring: +X both.
+        t_sp, n_sp = closure(d, occ["sun"], occ["planet"], (0.0, 0.0), 0.0)
+        t_pr, n_pr = closure(d, occ["planet"], occ["ring"], at_planet, rot)
+        for k in occ.values():
+            d.call("set_occurrence_visible", occurrence=k, visible=False)
+        push = (t_sp + t_pr) / cos_n
+        opened = push + t_pr
+        out[label] = {"closure_sun_planet_mm": t_sp,
+                      "closure_planet_ring_mm": t_pr,
+                      "measurements": n_sp + n_pr,
+                      "sun_travel_mm": push, "mesh_opened_mm": opened,
+                      "engaged_mm": depth - opened,
+                      "engaged_share": (depth - opened) / depth}
+    # The bottom of a sun pushed at the knob: the bare closures.
+    tilt = out["bare"]
+    opened = ((tilt["closure_sun_planet_mm"] + tilt["closure_planet_ring_mm"])
+              * cos_n + tilt["closure_planet_ring_mm"])
+    out["tilt"] = {"mesh_opened_mm": opened, "engaged_mm": depth - opened,
+                   "engaged_share": (depth - opened) / depth}
+    out["working_depth_mm"] = depth
+    out["min_engaged_share"] = MIN_ENGAGED
+    out["seconds"] = time.perf_counter() - t0
+    out["seconds_bare_parts"] = t_bare
+    return out
+
+
 def material_of(d, proc):
     """The material slug of a print process: given, or its profile's."""
     if "material" in proc:
@@ -432,7 +650,7 @@ def sun_study(d, s, ph, material, mesh_modules=0.4):
     sits in the sharp inside corner where the knob meets the gear and grows
     as the mesh is refined, and the tooth ROOTS' (probe_study on every root
     face), which is what would break a tooth."""
-    m, h = s["module"], s["height"]
+    m, h, ht = s["module"], s["height"], s["teeth_height"]
     alpha = math.radians(PRESSURE_DEG)
     rs = m * s["zs"] / 2.0
     rb, ra = rs * math.cos(alpha), rs + ADDENDUM * m
@@ -455,15 +673,16 @@ def sun_study(d, s, ph, material, mesh_modules=0.4):
         # axis. A twisted face's centroid lies inside the surface (by about
         # 2 % over half the sun's twist), so radius alone also takes the
         # short radial flanks below the base circle; those face sideways.
-        if (f["kind"] != "plane" and z < h and r < rf + 0.2 * m
+        if (f["kind"] != "plane" and z < ht and r < rf + 0.2 * m
                 and (n[0] * x + n[1] * y) / max(r, 1e-9) > 0.7):
             roots.append(f["name"])
             continue
-        if f["kind"] == "plane" or not rb <= r <= ra:
+        # The bearer's band and cone stand above the teeth.
+        if f["kind"] == "plane" or not rb <= r <= ra or z > ht:
             continue
         ang = math.atan2(y, x)
         # Which tooth: its angle less the helix's twist at this height.
-        zh = z if z <= h / 2.0 else h - z
+        zh = z if z <= ht / 2.0 else ht - z
         k = round((ang - math.tan(math.radians(HELIX_DEG)) * zh / rs) / pitch)
         t = (-math.sin(ang), math.cos(ang))
         for i, (th, _) in enumerate(ph["planets"]):
@@ -658,24 +877,55 @@ def main():
             raise SystemExit(f"planetary: {name} clashes: "
                              f"{r.get('table', r)}")
 
+    push = push_check(d, s, ph, args.diameter)
+    for label in ("bearers", "bare"):
+        p = push[label]
+        print(f"  push, {label}: meshes close {p['closure_sun_planet_mm']:.3f}"
+              f" / {p['closure_planet_ring_mm']:.3f} mm, the sun travels "
+              f"{p['sun_travel_mm']:.2f} mm, the opposite mesh opens "
+              f"{p['mesh_opened_mm']:.2f}: {p['engaged_mm']:.2f} of "
+              f"{push['working_depth_mm']:.2f} mm engaged "
+              f"({100 * p['engaged_share']:.0f} %)")
+    print(f"  push at the knob, the bottom: {push['tilt']['engaged_mm']:.2f} "
+          f"mm engaged ({100 * push['tilt']['engaged_share']:.0f} %); "
+          f"{push['bearers']['measurements'] + push['bare']['measurements']}"
+          f" measurements, {push['seconds']:.0f} s")
+    for label in ("bearers", "tilt"):
+        if push[label]["engaged_share"] < MIN_ENGAGED:
+            raise SystemExit(f"planetary: the worst push ({label}) leaves "
+                             f"{push[label]['engaged_mm']:.2f} mm engaged, "
+                             f"under {MIN_ENGAGED:.0%} of the working depth")
+    if push["bare"]["engaged_share"] >= MIN_ENGAGED:
+        raise SystemExit("planetary: the push check passes the gears WITHOUT "
+                         "bearers too; it cannot see the fault it is for")
+    print(f"  push check: passed; without bearers it fails, as it must")
+
     study = None
     if args.study:
         study = sun_study(d, s, ph, material_of(d, proc))
         res = study["results"]
         vm = res["max_von_mises_mpa"]
+        # Both peaks sit in a re-entrant corner, whose value grows as the
+        # mesh is refined: say which one.
+        z = vm["at"][2]
+        where = ("the knob's inside corner" if z > s["height"] - 1e-3 else
+                 "the teeth's top, at the foot of the bearer's cone"
+                 if abs(z - s["teeth_height"]) < s["module"] else
+                 "in the teeth")
         print(f"  sun under a {PINCH_N:g} N pinch "
               f"({study['torque_nmm'] / 1000:.2f} N m): tooth roots "
-              f"{study['root_von_mises_max_mpa']:.2f} MPa at worst; the "
+              f"{study['root_von_mises_max_mpa']:.2f} MPa at worst, "
+              f"{study['root_von_mises_mean_mpa']:.2f} on average; the "
               f"global peak {vm['value']:.2f} MPa at "
-              f"{[round(v, 1) for v in vm['at']]} (the knob's inside "
-              f"corner), factor of safety {res.get('factor_of_safety', 0):.1f}"
-              f" on it")
+              f"{[round(v, 1) for v in vm['at']]} ({where}), factor of "
+              f"safety {res.get('factor_of_safety', 0):.1f} on it")
 
     if not args.no_render:
         hero(d, out / "planetary.png")
 
     receipt = {"diameter": args.diameter, "process": proc, **s,
-               "ratios": ratios, "motion": motion, "study": study,
+               "ratios": ratios, "motion": motion, "push": push,
+               "study": study,
                "phases": {"ring": ph["ring"],
                           "planets": [list(p) for p in ph["planets"]]},
                "clearances_mm": cl, "stl": str(stl),
