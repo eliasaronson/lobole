@@ -1007,8 +1007,15 @@ double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
   const collide::Gap gap = collide::Nearest(shapeA, xfA, shapeB, xfB, 2.0);
   if (!gap.known || gap.pairs.empty())
     return whole();
-  if (gap.distance <= 0.0)
-    return 0.0; // touching or crossing: the overlap pass's question, not this
+  // Tessellations that touch or cross do NOT make the solids touch. A chord
+  // of a concave face (a bore, a ring's tooth space) stands proud of it by
+  // up to the deflection, so a shaft 0.016 mm inside a bore meshed at 0.1
+  // crosses it. This returned 0 there, with no points, and a planet pushed
+  // into its ring read as touching 0.04 mm early
+  // (docs/inspect/README.md#crossing-tessellations-are-not-contact). The
+  // face pairs within the slack are refined exactly as any others; a pair
+  // whose surfaces really cross answers 0 itself.
+  bool crossing = gap.distance <= 0.0;
 
   // A long list asks again, finer: see kRemeshAbove.
   std::vector<collide::Mesh::FacePair> pairs = gap.pairs;
@@ -1021,16 +1028,18 @@ double ExactDistance(const CADShape& shapeA, const TopoDS_Shape& a,
       const double fineTol = ma->Deflection() + mb->Deflection();
       const collide::Mesh::Near finer =
           ma->Nearest(xfA, *mb, xfB, 2.0 * fineTol);
-      if (finer.distance <= 0.0)
-        return 0.0;
       if (!finer.pairs.empty()) {
         pairs = finer.pairs;
         tolerance = fineTol;
+        crossing = finer.distance <= 0.0;
       }
     }
   }
+  // Past the cap, two shapes whose meshes still cross even finer overlap
+  // widely: 0, the overlap pass's question, rather than minutes of
+  // BRepExtrema over two interpenetrating solids.
   if (pairs.size() > kMaxRefinedPairs)
-    return whole();
+    return crossing ? 0.0 : whole();
 
   // The faces, once, in the walk order `triangleFaces` indexes.
   std::vector<TopoDS_Shape> fa, fb;

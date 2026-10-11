@@ -70,6 +70,21 @@ boolean, [below](#query-booleans-are-non-destructive)); the meshes are built
 before the workers start, and a sweep warms every one first
 (`collide::Warm`).
 
+### Crossing tessellations are not contact
+
+Meshes that touch or cross say nothing about the solids. A chord of a
+concave face (a bore, a ring's tooth space) stands proud of the surface by up
+to the deflection, so a shaft 0.01 mm inside a bore meshed at 0.1 mm crosses
+it while the solids are apart. `ExactDistance` refines the face pairs within
+the slack exactly in that case too, and a pair whose surfaces really cross
+answers 0 itself. It used to return 0 the moment the meshes crossed, with no
+closest points: a planet pushed toward its ring read as touching 0.04 mm
+before it did. Only a pair list still past the 4096 cap with the finer
+meshes crossing answers 0 without refining: two shapes that overlap that
+widely are the overlap pass's question, and BRepExtrema over two
+interpenetrating solids takes minutes. `test_measure.cpp` "A shaft whose
+mesh crosses its bore's is measured, not called touching".
+
 Between two whole shapes `measure` also reports `overlap_volume` / `clash`.
 When the distance it has just measured is positive, the surfaces meet
 nowhere, so the solids overlap only if one lies wholly inside the other; one

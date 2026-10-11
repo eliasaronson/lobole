@@ -8,6 +8,7 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
+#include "core/MeshCollide.h"
 #include "core/features/BooleanFeature.h"
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
@@ -768,6 +769,49 @@ TEST_CASE("Exact distance over many equally close faces matches the whole "
     CHECK(clear->distance == d->distance);
     CHECK(clear->volume == 0.0);
   }
+}
+
+TEST_CASE("A shaft whose mesh crosses its bore's is measured, not called "
+          "touching",
+          "[measure]") {
+  // A bore's chords stand proud of it by up to the deflection, so a shaft
+  // a hundredth of a millimetre inside crosses the bore's MESH while the
+  // solids are apart. The exact distance used to stop there and answer 0,
+  // with no points: a planet pushed into its ring read as touching early.
+  const TopoDS_Shape bore =
+      BRepAlgoAPI_Cut(
+          BRepPrimAPI_MakeBox(gp_Pnt(-30, -30, 0), 60, 60, 20).Shape(),
+          BRepPrimAPI_MakeCylinder(20.0, 20.0).Shape())
+          .Shape();
+  // 0.01 of radial clearance, 0.004 off centre: 0.006 at the near side.
+  // The shaft's seam is turned off the bore's, so its mesh vertices fall
+  // between the bore's and meet its chords rather than lining up with them.
+  const TopoDS_Shape shaft =
+      BRepPrimAPI_MakeCylinder(
+          gp_Ax2(gp_Pnt(0.004, 0, 0), gp_Dir(0, 0, 1),
+                 gp_Dir(std::cos(1.234), std::sin(1.234), 0)),
+          19.99, 20.0)
+          .Shape();
+  std::vector<Body> a{BodyOf(bore, 1)}, b{BodyOf(shaft, 2)};
+  const glm::dmat4 I(1.0);
+  // The premise: the tessellations do cross.
+  const collide::Gap mesh = collide::Nearest(a[0].shape, I, b[0].shape, I, 2.0);
+  REQUIRE(mesh.known);
+  REQUIRE(mesh.distance <= 0.0);
+
+  Measure::Target ta{&a, I, ElementRef{1, ""}};
+  Measure::Target tb{&b, I, ElementRef{2, ""}};
+  const auto d =
+      Measure::DistanceBetween(ta, tb, Measure::DistanceKind::Minimum);
+  REQUIRE(d.has_value());
+  CHECK_THAT(d->distance, WithinAbs(0.006, 1e-6));
+  CHECK_THAT(d->distance, WithinAbs(WholeShapeDistance(bore, shaft), 1e-9));
+  CHECK_THAT(glm::distance(d->pointA, d->pointB), WithinAbs(d->distance, 1e-9));
+  // The interference report's distance pass goes the same way.
+  const auto contact = Measure::ContactBetween(a, I, b, I);
+  REQUIRE(contact.has_value());
+  CHECK(contact->volume == 0.0);
+  CHECK_THAT(contact->distance, WithinAbs(0.006, 1e-6));
 }
 
 TEST_CASE("ClearanceBetween answers only when it proves there is no overlap",
