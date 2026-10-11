@@ -148,7 +148,8 @@ json ThreadMarkToJson(const ThreadMark& t) {
               {"right_hand", t.rightHand},
               {"external", t.external},
               {"length", t.length},
-              {"modeled", t.modeled}};
+              {"modeled", t.modeled},
+              {"flank_deg", t.flankDeg}};
 }
 
 ThreadMark ThreadMarkFromJson(const json& j) {
@@ -163,6 +164,8 @@ ThreadMark ThreadMarkFromJson(const json& j) {
   t.external = j.value("external", false);
   t.length = j.value("length", 0.0);
   t.modeled = j.value("modeled", false);
+  // Absent in a blob from before flank angles, when every thread was 30.
+  t.flankDeg = j.value("flank_deg", 30.0);
   return t;
 }
 

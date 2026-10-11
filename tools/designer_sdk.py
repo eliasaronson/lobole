@@ -2152,7 +2152,7 @@ class Part(_Tab):
         return feat
 
     def thread(self, face, designation, allow_engagement=False, minimum_engagement=0,
-               modeled=False, hand="right"):
+               modeled=False, hand="right", flank_angle_deg=None, pitch=None):
         """Annotate actual manufacturing geometry; engagement is explicit opt-in.
 
         Matching coaxial threads relieve only their common axial span during
@@ -2160,6 +2160,15 @@ class Part(_Tab):
         machining diameter is changed. ``modeled=True`` cuts the real helical
         groove (``hand`` "right" or "left"); a cut that fails is the
         feature's error and keeps the body.
+
+        ``pitch`` (mm) is a CUSTOM thread's -- a designation that names no
+        series; a table thread takes the table's whatever is given. Without
+        it a custom thread is left at the feature's 1.25 mm default.
+
+        ``flank_angle_deg`` is half the thread angle (30, the ISO profile, when
+        omitted); a CUSTOM thread may take 15-60, and 45 prints with no flank
+        past 45 degrees of overhang
+        (docs/modeling/holes-and-threads.md#flank-angle).
         """
         if hand not in ("right", "left"):
             raise SdkError(f"thread hand must be 'right' or 'left', not {hand!r}")
@@ -2167,6 +2176,11 @@ class Part(_Tab):
             raise SdkError("thread needs a cylindrical Face")
         if face._part.id != self.id or face._part.app is not self.app:
             raise SdkError("thread face belongs to a different part or connection")
+        extra = {}
+        if pitch is not None:
+            extra["pitch"] = float(pitch)
+        if flank_angle_deg is not None:
+            extra["flank_angle_deg"] = float(flank_angle_deg)
         feature = self._add(
             dict(
                 type="Thread",
@@ -2177,6 +2191,7 @@ class Part(_Tab):
                 minimum_engagement=minimum_engagement,
                 modeled=bool(modeled),
                 hand=hand,
+                **extra,
             )
         )
         return Thread(self, feature["id"], face)

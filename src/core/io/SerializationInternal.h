@@ -26,7 +26,10 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    172; // v172: a static result keeps its nodal stress tensor, `stress`
+    173; // v173: a Thread's `flank_angle_deg` (half the thread angle; absent
+         //      = the ISO 30, a custom thread 15-60) and the material `tpu`
+         //      (docs/modeling/holes-and-threads.md#flank-angle).
+         // v172: a static result keeps its nodal stress tensor, `stress`
          //      (six components a node, Voigt order, float), for the
          //      principal stress and the stress across printed layers.
          // v171: relations over several mates — kinds `linear_n`,

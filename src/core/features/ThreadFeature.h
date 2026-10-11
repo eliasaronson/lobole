@@ -12,7 +12,8 @@
 // external boss or hole wall. Cosmetic by default: the geometry is untouched
 // and the UI draws the drafting convention (dashed thread-depth circles +
 // crest lines) from the session `overlay` this feature computes each
-// regeneration. `modeled` cuts the real 60-degree helical groove instead
+// regeneration. `modeled` cuts the real helical groove instead (60 degrees,
+// or a custom thread's own flank angle)
 // (docs/modeling/holes-and-threads.md#modelled-threads); a cut that fails is
 // a feature error that keeps the body and the overlay. The designation drives
 // the pitch via the ISO metric and unified tables (core/ThreadStandards); a
@@ -50,6 +51,12 @@ public:
   double minimumEngagement = 0.0;
   bool modeled = false;    // cut the real helical groove
   bool rightHanded = true; // JSON "hand": "right" | "left"
+  // The flank angle, degrees: half the thread angle, from the plane normal
+  // to the axis. 30 is the ISO/UTS basic profile, the only one a table
+  // designation has; a custom thread may take 15-60
+  // (docs/modeling/holes-and-threads.md#flank-angle) -- 45 is a thread whose
+  // every flank prints without support.
+  double flankDeg = 30.0;
 
   // Session-only, rebuilt by Execute (never serialized): what the UI draws.
   struct Overlay {

@@ -100,6 +100,7 @@ struct ThreadMark {
   bool external = false;
   double length = 0.0; // threaded length from the face's start; 0 = all
   bool modeled = false;
+  double flankDeg = 30.0; // half the thread angle; 30 = the ISO/UTS profile
 };
 
 // A hole a Hole feature drilled into this body, written by the feature that

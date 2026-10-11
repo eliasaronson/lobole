@@ -1399,6 +1399,8 @@ json FeatureToJson(const Feature& feature) {
       j["modeled"] = true;
     if (!th->rightHanded)
       j["hand"] = "left"; // v140; absent = right, as every thread before it
+    if (th->flankDeg != 30.0)
+      j["flank_angle_deg"] = th->flankDeg; // v173; absent = the ISO 30
   } else if (auto* wo = dynamic_cast<const WormFeature*>(&feature)) {
     j["face"] = {{"feature_id", wo->face.featureId},
                  {"element", wo->face.name}};
@@ -1791,9 +1793,12 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "naming a series the tables lack is refused, other text is a custom "
      "thread with its own pitch (mm); thread_class? (6g/6H..., 1A-3A "
      "external, 1B-3B internal); length (mm, +_expr; 0 = the whole face); "
-     "modeled? (cut the real 60-degree helical groove; a failure keeps the "
-     "body); hand?: right|left (default right); allow_engagement?, "
-     "minimum_engagement? (mm)"},
+     "modeled? (cut the real helical groove; a failure keeps the "
+     "body); hand?: right|left (default right); flank_angle_deg? (half the "
+     "thread angle, degrees from the plane normal to the axis: 30 = the "
+     "ISO/UTS 60-degree profile, the only one a table designation takes; a "
+     "custom thread 15-60, and 45 prints with no flank past 45 degrees of "
+     "overhang); allow_engagement?, minimum_engagement? (mm)"},
     {"Hole", 21,
      "hole_kind: simple|counterbore|countersink, sketch_id (centres: its "
      "points and its circles' centres, so a projected hole edge places a hole; "
@@ -2673,6 +2678,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       throw std::runtime_error("Thread '" + name + "': unknown hand '" + hand +
                                "' (accepted: right, left)");
     th->rightHanded = hand == "right";
+    // v173. Out of range is the feature's error at regeneration, which
+    // names the range; a value that is not a number is refused here.
+    if (j.contains("flank_angle_deg") && !j.at("flank_angle_deg").is_number())
+      throw std::runtime_error("Thread '" + name +
+                               "': flank_angle_deg must be a number of "
+                               "degrees");
+    th->flankDeg = j.value("flank_angle_deg", 30.0);
     th->allowEngagement = j.value("allow_engagement", false);
     th->minimumEngagement = j.value("minimum_engagement", 0.0);
     out = std::move(th);

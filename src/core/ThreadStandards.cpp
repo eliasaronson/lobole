@@ -3,6 +3,8 @@
 
 #include "core/ThreadStandards.h"
 
+#include "core/Angles.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -131,6 +133,11 @@ std::string SeriesName(Series s) {
     return "UNF";
   }
   return "?";
+}
+
+double BasicDepth(double pitch, double flankDeg) {
+  const double h = pitch / (2.0 * std::tan(angles::ToRadians(flankDeg)));
+  return 5.0 * h / 8.0;
 }
 
 double MinorDiameter(const Standard& s) {

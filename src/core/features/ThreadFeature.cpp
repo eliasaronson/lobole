@@ -4,6 +4,7 @@
 #include "core/features/ThreadFeature.h"
 
 #include "common/Logger.h"
+#include "core/Angles.h"
 #include "core/BodyMode.h"
 #include "core/ElementHistory.h"
 #include "core/HelicalSweep.h"
@@ -91,7 +92,10 @@ TopoDS_Shape MergeFootprint(const TopoDS_Shape& body,
 // The groove a modelled thread cuts, as an axial profile for HelicalSweep:
 // the space between two teeth of the ISO 68-1 / ASME B1.1 basic profile
 // (60 degree flanks, fundamental triangle H = P*sqrt(3)/2), in the half-plane
-// through the axis, x = radius and y = height about the helix point.
+// through the axis, x = radius and y = height about the helix point. Another
+// flank angle `a` (a custom thread's) keeps the profile's proportions: the
+// fundamental triangle is H = P / (2 tan a) and the flats stay P/8 and P/4,
+// since a flat k*H from the apex is 2 k H tan a = k P wide.
 //
 // External (a boss): the root flat P/4 wide at the basic minor radius
 // D/2 - 5H/8, the flanks opening outward past the crest to `reach` so the
@@ -100,13 +104,14 @@ TopoDS_Shape MergeFootprint(const TopoDS_Shape& body,
 // Either way the groove is capped just under a pitch wide, so neighbouring
 // turns never touch.
 std::vector<gp_Pnt2d> GrooveProfile(double pitch, double rootRadius,
-                                    double reach, bool external) {
-  const double tan30 = std::tan(M_PI / 6.0);
+                                    double reach, bool external,
+                                    double flankDeg) {
+  const double tanFlank = std::tan(angles::ToRadians(flankDeg));
   const double halfRoot = external ? pitch / 8.0 : pitch / 16.0;
   const double halfCap = 0.475 * pitch;      // 0.95 P: clear of the next turn
   const double sign = external ? 1.0 : -1.0; // which way the groove opens
   const double span = std::abs(reach - rootRadius);
-  const double toCap = (halfCap - halfRoot) / tan30; // flank meets the cap
+  const double toCap = (halfCap - halfRoot) / tanFlank; // flank meets the cap
   std::vector<gp_Pnt2d> out;
   out.emplace_back(rootRadius, -halfRoot);
   if (toCap < span) {
@@ -115,7 +120,7 @@ std::vector<gp_Pnt2d> GrooveProfile(double pitch, double rootRadius,
     out.emplace_back(reach, halfCap);
     out.emplace_back(rootRadius + sign * toCap, halfCap);
   } else {
-    const double h = halfRoot + span * tan30;
+    const double h = halfRoot + span * tanFlank;
     out.emplace_back(reach, -h);
     out.emplace_back(reach, h);
   }
@@ -137,6 +142,16 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     return true; // previewing: no face picked yet
   if (pitch <= 1e-6) {
     SetError("thread pitch must be positive");
+    return false;
+  }
+  if (!(flankDeg >= threads::kMinFlankDeg &&
+        flankDeg <= threads::kMaxFlankDeg)) {
+    char buf[160];
+    snprintf(buf, sizeof(buf),
+             "flank angle %g degrees is outside %g-%g (30 is the ISO "
+             "profile, 45 prints without support)",
+             flankDeg, threads::kMinFlankDeg, threads::kMaxFlankDeg);
+    SetError(buf);
     return false;
   }
 
@@ -194,6 +209,16 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     }
 
     // A known designation must roughly fit the face it annotates.
+    if (resolved && std::abs(flankDeg - threads::kIsoFlankDeg) > 1e-9) {
+      char buf[200];
+      snprintf(buf, sizeof(buf),
+               "%s is the standard's 60-degree profile; a %g-degree flank "
+               "is a custom thread (a designation that names no series, with "
+               "its own pitch)",
+               designation.c_str(), flankDeg);
+      SetError(buf);
+      return false;
+    }
     if (resolved) {
       const threads::Standard& std_ = resolved->standard;
       pitch = std_.pitch; // the table is authoritative for known series
@@ -236,9 +261,9 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
 
     // Drafting convention: the dashed circle sits at the thread depth —
     // minor diameter on a boss, major diameter inside a hole. Both are
-    // pitch-derived (ISO 68 fundamental triangle), so custom designations
-    // work without a table row.
-    const double depth = 1.0825 * pitch * 0.5;
+    // pitch-derived (the basic profile's fundamental triangle at this flank
+    // angle), so custom designations work without a table row.
+    const double depth = threads::BasicDepth(pitch, flankDeg);
     overlay.valid = true;
     overlay.origin = glm::vec3(axisLoc.X(), axisLoc.Y(), axisLoc.Z());
     overlay.dir =
@@ -271,7 +296,7 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     body->threads.push_back(
         {face, GetId(), resolved ? resolved->standard.designation : designation,
          resolved ? resolved->standard.majorDia : 0.0, pitch, cls, rightHanded,
-         external, length, modeled});
+         external, length, modeled, flankDeg});
     if (allowEngagement) {
       if (!resolved || minimumEngagement < 0 ||
           !std::isfinite(minimumEngagement)) {
@@ -295,17 +320,18 @@ bool ThreadFeature::CutModeled(Body& body, const gp_Cylinder& cyl,
                                double faceV1, double tableMajor) {
   const auto t0 = std::chrono::steady_clock::now();
   const double r = cyl.Radius();
-  const double H = pitch * std::sqrt(3.0) / 2.0;
+  // 5H/8, the basic profile's depth at this flank angle.
+  const double depth = threads::BasicDepth(pitch, flankDeg);
   // The major diameter: the table's, else the face's own on a boss, and the
   // face taken as the basic minor in a hole.
   const double major = tableMajor > 0.0 ? tableMajor
                        : external       ? 2.0 * r
-                                        : 2.0 * r + 1.0825 * pitch;
+                                        : 2.0 * r + 2.0 * depth;
   const double margin = 0.1 * pitch; // past the blank, so no sliver is left
   double root = 0.0, reach = 0.0, probe = 0.0;
   char buf[160];
   if (external) {
-    root = major / 2.0 - 5.0 * H / 8.0;
+    root = major / 2.0 - depth;
     reach = std::max(r, major / 2.0) + margin;
     probe = 0.5 * (root + r);
     if (root <= 1e-6 || root >= r) {
@@ -318,7 +344,7 @@ bool ThreadFeature::CutModeled(Body& body, const gp_Cylinder& cyl,
     }
   } else {
     root = major / 2.0;
-    reach = std::min(r, major / 2.0 - 5.0 * H / 8.0) - margin;
+    reach = std::min(r, major / 2.0 - depth) - margin;
     probe = 0.5 * (r + root);
     if (root <= r || reach <= 1e-6) {
       snprintf(buf, sizeof(buf),
@@ -368,7 +394,7 @@ bool ThreadFeature::CutModeled(Body& body, const gp_Cylinder& cyl,
   // Not on the face's seam (u = 0): a cutter face in the seam plane makes the
   // boolean intersect along the seam edge.
   spec.startRad = 0.5 * M_PI;
-  spec.profile = GrooveProfile(pitch, root, reach, external);
+  spec.profile = GrooveProfile(pitch, root, reach, external, flankDeg);
   std::string why;
   CADShape tool = HelicalSweep(spec, &why);
   if (!tool.IsValid()) {

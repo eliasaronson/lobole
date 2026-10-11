@@ -18,6 +18,7 @@
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/TemplateFeature.h"
+#include "core/features/ThreadFeature.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
 #include "core/tube/Rules.h"
@@ -1062,6 +1063,23 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       CHECK_THAT(ext->twistDeg, WithinRel(want.at(1).get<double>(), 1e-9));
       CHECK(ext->twistExpr == want.at(2).get<std::string>());
       CHECK(ext->herringbone == want.at(3).get<bool>());
+    }
+  }
+  // v173: a custom thread's flank angle. The volume above sees the groove,
+  // but a flank dropped on load would read back as ISO's 30 and cut a deeper
+  // groove than the golden's; each [thread name, flank_angle_deg] holds.
+  if (expect.contains("thread_flanks")) {
+    for (const auto& want : expect.at("thread_flanks")) {
+      const std::string name = want.at(0).get<std::string>();
+      INFO("thread " << name);
+      const ThreadFeature* th = nullptr;
+      for (const auto& f : doc.GetFeatures())
+        if (const auto* t = dynamic_cast<const ThreadFeature*>(f.get());
+            t && t->GetName() == name)
+          th = t;
+      REQUIRE(th != nullptr);
+      CHECK(th->flankDeg == want.at(1).get<double>());
+      CHECK(th->GetError().empty());
     }
   }
   // v143: how the part is printed. Drives no geometry, so the volumes above

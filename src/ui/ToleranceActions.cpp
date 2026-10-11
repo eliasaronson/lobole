@@ -172,7 +172,9 @@ std::optional<PrintedThread> PrintedThreadFor(const Document& doc,
     r.modelledMajor = row->majorDia;
   } else if (r.resolved) {
     const double face = 2.0 * th.overlay.faceRadius;
-    r.modelledMajor = r.external ? face : face + 1.0825 * r.pitch;
+    r.modelledMajor =
+        r.external ? face
+                   : face + 2.0 * threads::BasicDepth(r.pitch, th.flankDeg);
   }
   if (!row && !r.resolved) {
     r.notes.push_back("the thread's face does not resolve, so its size is "

@@ -468,7 +468,9 @@ the THREAD, not by typed numbers. Its target is the cylindrical face a
 `Thread` feature is on, or the bore of a Hole with a tapped fit (both write
 a `ThreadMark` on the body, [holes and
 threads](../modeling/holes-and-threads.md#thread)), and from that it reads
-the size, pitch, hand, inside or outside, the class and the threaded span.
+the size, pitch, hand, inside or outside, the class and the threaded span. A thread with another [flank
+angle](../modeling/holes-and-threads.md#flank-angle) than the 60-degree
+profile's 30 is refused: the cutter's form is the 60-degree one.
 The code is `src/core/cam/CamThreadMill.{h,cpp}`; its numbers are FreeCAD's
 CAM ThreadMilling (`Path/Op/ThreadMilling.py`,
 `Path/Base/Generator/threadmilling.py`), which the tests pin to its own

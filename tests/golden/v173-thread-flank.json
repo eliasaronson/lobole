@@ -1,0 +1,15 @@
+{
+  "format": "designer-document",
+  "version": 173,
+  "features": [
+    {"type": "Cylinder", "name": "Neck", "id": 1, "center": [0, 0, 0],
+     "direction": [0, 0, 1], "radius": 10.0, "height": 20.0},
+    {"type": "Thread", "name": "Jar thread", "id": 2,
+     "face": {"feature_id": 1, "element": "1/face0"},
+     "designation": "jar thread", "pitch": 4.0, "modeled": true,
+     "flank_angle_deg": 45.0},
+    {"type": "Cylinder", "name": "Gasket", "id": 3, "center": [40, 0, 0],
+     "direction": [0, 0, 1], "radius": 5.0, "height": 2.0,
+     "material": "tpu"}
+  ]
+}

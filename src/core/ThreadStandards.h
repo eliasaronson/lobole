@@ -30,6 +30,21 @@ struct Standard {
 // "ISO metric", "UNC", "UNF".
 [[nodiscard]] std::string SeriesName(Series s);
 
+// The flank angle of the ISO 68-1 / ASME B1.1 basic profile: half its 60
+// degree thread angle, measured from the plane normal to the axis.
+inline constexpr double kIsoFlankDeg = 30.0;
+// The range a custom thread's flank angle may take
+// (docs/modeling/holes-and-threads.md#flank-angle): steeper than 15 degrees
+// the profile is nearly square, past 60 its depth is under a third of a
+// pitch.
+inline constexpr double kMinFlankDeg = 15.0, kMaxFlankDeg = 60.0;
+
+// The basic profile's thread depth, 5H/8 of its fundamental triangle
+// H = P / (2 tan a), for a flank angle `a` in degrees: 0.5413 P at the ISO
+// 30, half a pitch less a fifth at 45. Twice it is what a basic minor lies
+// under the major.
+[[nodiscard]] double BasicDepth(double pitch, double flankDeg = kIsoFlankDeg);
+
 // Basic minor diameter: D - 1.0825·P (ISO 68-1 / ASME B1.1 internal D1).
 // M8 -> 6.647.
 double MinorDiameter(const Standard& s);

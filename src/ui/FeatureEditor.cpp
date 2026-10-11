@@ -2235,6 +2235,16 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     } else {
       HandleEdit(state, feature, DragDim(state, "Pitch", &th->pitch), index,
                  commit);
+      // A custom thread's flank angle: half the thread angle, 30 the ISO
+      // profile, 45 one whose every flank prints without support
+      // (docs/modeling/holes-and-threads.md#flank-angle). A table thread is
+      // the standard's 30 and shows none.
+      LeftLabel("Flank angle");
+      HandleEdit(state, feature,
+                 ExprDragDouble(state, "##Flank angle", &th->flankDeg, 0.25f,
+                                threads::kMinFlankDeg, threads::kMaxFlankDeg,
+                                "%.1f deg"),
+                 index, commit);
     }
     {
       LeftLabel("Length");

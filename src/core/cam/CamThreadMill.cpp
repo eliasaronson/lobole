@@ -334,6 +334,17 @@ ThreadPlan PlanThread(const Setup& setup, const Operation& op, const Tool& tool,
     out.why = "the thread on that face has no pitch";
     return out;
   }
+  // A thread mill's form is the 60-degree profile; milled into a thread of
+  // another flank angle it cuts the wrong groove, so it is refused.
+  if (std::abs(m.flankDeg - 30.0) > 1e-9) {
+    char buf[200];
+    std::snprintf(buf, sizeof(buf),
+                  "the thread on that face has %g-degree flanks; a thread "
+                  "mill cuts the 60-degree profile (30-degree flanks) only",
+                  m.flankDeg);
+    out.why = buf;
+    return out;
+  }
   if (std::string why = ThreadToolRefusal(tool, P); !why.empty()) {
     out.why = std::move(why);
     return out;
@@ -405,7 +416,8 @@ ThreadPlan PlanThread(const Setup& setup, const Operation& op, const Tool& tool,
   const double major = m.majorDia > 0.0 ? m.majorDia
                        : m.external
                            ? 2.0 * r
-                           : 2.0 * r + 1.0825 * P; // a custom thread's own rule
+                           : 2.0 * r + 1.0825 * P; // a custom thread's own
+                                                   // rule (30 degrees: above)
   // The class: the one stated, else the series' general-purpose one, SAID.
   const std::optional<threads::Standard> table = threads::Lookup(m.designation);
   const threads::Series series =

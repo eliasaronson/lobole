@@ -276,6 +276,53 @@ TEST_CASE("A Thread on a printed part reports its printed allowance",
   CHECK(cosmetic);
 }
 
+// A custom thread takes a bore's wall as its basic minor, so its major is
+// the wall plus twice the basic depth AT ITS FLANK ANGLE: a 45-degree jar
+// thread read with ISO's 1.0825 P would report the wrong printed major.
+TEST_CASE("A custom thread's printed major follows its flank angle",
+          "[tolerances][print][thread]") {
+  auto doc = std::make_unique<Document>();
+  auto pad =
+      std::make_unique<SketchFeature>("Block", SketchPlane(PlaneType::XY));
+  pad->AddRectangle({-20, -20}, {20, 20});
+  doc->AddFeature(std::move(pad));
+  doc->AddFeature(std::make_unique<ExtrudeFeature>(
+      "Pad", doc->GetFeature(0)->GetId(), 10.0, ExtrudeMode::NewBody));
+  auto centre = std::make_unique<SketchFeature>(
+      "Centre",
+      SketchPlane(glm::vec3(0, 0, 10), glm::vec3(0, 0, 1), glm::vec3(1, 0, 0)));
+  centre->AddEntity(sketch::Point{{0, 0}, 1});
+  doc->AddFeature(std::move(centre));
+  auto hole = std::make_unique<HoleFeature>("Bore", doc->GetFeature(2)->GetId(),
+                                            HoleKind::Simple, 20.0, 10.0);
+  hole->through = true;
+  doc->AddFeature(std::move(hole));
+  REQUIRE(doc->Regenerate());
+  REQUIRE(doc->GetBodies().size() == 1);
+  const Body& body = doc->GetBodies().at(0);
+  std::string face;
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto f = Measure::DescribeFaceAt(body, index);
+    if (f && f->kind == "cylinder" && std::abs(f->radius - 10.0) < 1e-6)
+      face = name;
+  }
+  REQUIRE(!face.empty());
+  auto th = std::make_unique<ThreadFeature>(
+      "Jar", ElementRef{body.createdBy, face}, "jar thread", 4.0);
+  th->flankDeg = 45.0;
+  doc->AddFeature(std::move(th));
+  const auto* t = dynamic_cast<const ThreadFeature*>(doc->GetFeature(4));
+  INFO(t->GetError());
+  REQUIRE(t->GetError().empty());
+  REQUIRE_FALSE(t->overlay.external);
+  doc->SetPrintProcess(kPetg);
+  const auto r = ui::PrintedThreadFor(*doc, *t);
+  REQUIRE(r);
+  CHECK_FALSE(r->known);
+  CHECK(r->modelledMajor == Approx(20.0 + 2.0 * 1.25));
+  CHECK(r->printsMajor == Approx(22.5 - 0.4));
+}
+
 // A Hole's clearance fit names the size the hole must COME OUT at, so on a
 // printed part it is modelled at that size plus the hole allowance
 // (docs/tolerances/README.md#printed-parts): M6 normal is Ø6.6 in steel and

@@ -121,7 +121,8 @@ parts area).
 `Thread`: `face` (a cylindrical face by `ElementRef`), `designation` (`M8`,
 `M8x1`, `3/8-16 UNC`, optionally with a class suffix, or free text), `pitch`,
 `thread_class`, `length` (0 = the whole face), `modeled`, `hand` (`right` or
-`left`, absent = right), `allow_engagement`, `minimum_engagement`.
+`left`, absent = right), `flank_angle_deg` (absent = 30,
+[below](#flank-angle)), `allow_engagement`, `minimum_engagement`.
 
 - **Cosmetic** (the default). The body is untouched; volume, STEP, mass and
   CAM see no thread. Each regeneration resolves the face, checks it is
@@ -218,7 +219,8 @@ helical sweep-cut is the slowest boolean the kernel does, and most parts
 only need the callout.
 
 - **The groove** is the space between two teeth of the basic profile
-  (H = √3/2·P), drawn in the half-plane through the axis. External: the root
+  (H = √3/2·P, or another [flank angle](#flank-angle)'s), drawn in the
+  half-plane through the axis. External: the root
   flat P/4 wide at the basic minor D/2 − 5H/8, the flanks opening outward to
   P/10 past the face. Internal: the root flat P/8 at the major D/2, the
   flanks opening inward to P/10 inside the wall (a tapped hole's wall is the
@@ -276,6 +278,30 @@ only need the callout.
   both ends of a length L removes exactly 2π·r̄·A·L/P (Pappus holds for the
   screw motion), with A and r̄ the groove section's area and centroid radius
   inside the blank. The tests assert that to 0.5%.
+
+### Flank angle
+
+`flank_angle_deg` (half the thread angle, from the plane normal to the
+axis; absent = 30, the ISO/UTS 60-degree profile) gives a **custom**
+thread another basic profile. The fundamental triangle is
+H = P / (2 tan a), the depth stays 5H/8 (`threads::BasicDepth`), and the
+flats stay P/8 and P/4 (a flat k·H from the apex is k·P wide whatever the
+angle). The groove, the overlay's depth circle, a custom thread's major
+from a bore, the printed report (`PrintedThreadFor`) and the body's
+`ThreadMark` all follow it.
+
+- **Why: printing.** A 60-degree flank lies 30 degrees off horizontal, so a
+  thread printed with its axis vertical overhangs 60 degrees from vertical
+  on whichever flank faces down. At 45 every flank is at the usual
+  printable limit and needs no support; `generators/jar/` cuts one.
+- **Refused**, naming what would do: another angle on a table designation
+  (an `M8` is the standard's profile: a different angle is a custom
+  thread), and an angle outside 15-60 degrees. A value that is not a number
+  is refused on load.
+- **A thread mill refuses it.** The mill's form is the 60-degree profile;
+  milled into another angle it cuts the wrong groove
+  ([thread mill](../cam/operations.md#thread-mill)).
+- GUI: a **Flank angle** row under the pitch, for a custom thread only.
 
 ### What a helical sweep gets wrong in OCC
 

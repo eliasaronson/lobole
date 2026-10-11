@@ -787,3 +787,86 @@ TEST_CASE("a modelled thread that cannot be cut keeps the body", "[thread]") {
   REQUIRE(doc.GetBodies().size() == 1);
   CHECK(doc.GetBodies()[0].shape.Volume() == before);
 }
+
+// --- flank angle (docs/modeling/holes-and-threads.md#flank-angle)
+
+TEST_CASE("the basic depth follows the flank angle", "[thread]") {
+  // 5H/8 of the fundamental triangle H = P / (2 tan a): ISO's 1.0825 P on
+  // the diameter at 30 degrees, 5P/16 a side at 45.
+  CHECK_THAT(2.0 * threads::BasicDepth(1.25), WithinAbs(1.0825 * 1.25, 1e-4));
+  CHECK_THAT(threads::BasicDepth(4.0, 45.0), WithinAbs(1.25, 1e-12));
+}
+
+TEST_CASE("a modelled 45-degree custom thread cuts its own groove",
+          "[thread][slow]") {
+  // A printable thread: 45-degree flanks overhang no more than 45 degrees
+  // from vertical, which a printer bridges without support. The groove keeps
+  // ISO's flats (P/4 at the root, 7P/8 at the major), only shallower: 5P/16.
+  const double P = 4.0, R = 10.0, L = 20.0;
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>("Neck", glm::vec3(0),
+                                                   glm::vec3(0, 0, 1), R, L));
+  const Body& body = doc.GetBodies()[0];
+  const double blank = body.shape.Volume();
+  auto th = std::make_unique<ThreadFeature>(
+      "Jar", ElementRef{body.createdBy, CylFaceName(body)}, "jar thread", P);
+  th->modeled = true;
+  th->flankDeg = 45.0;
+  doc.AddFeature(std::move(th));
+  const auto* feature = dynamic_cast<const ThreadFeature*>(doc.GetFeature(1));
+  INFO(feature->GetError());
+  REQUIRE(feature->GetError().empty());
+  CHECK(feature->overlay.cut);
+  // The drafting circle sits at the 45-degree depth, not ISO's.
+  CHECK_THAT(feature->overlay.radius, WithinAbs(R - 5.0 * P / 16.0, 1e-4));
+  const double depth = 5.0 * P / 16.0;
+  const double groove =
+      ScrewCutVolume(R - depth, P / 4.0, R, 7.0 * P / 8.0, L, P);
+  CHECK_THAT(blank - doc.GetBodies()[0].shape.Volume(),
+             WithinRel(groove, 5e-3));
+  // The mark on the body carries the angle, for a thread mill to refuse.
+  REQUIRE(doc.GetBodies()[0].threads.size() == 1);
+  CHECK(doc.GetBodies()[0].threads[0].flankDeg == 45.0);
+}
+
+TEST_CASE("a flank angle is refused on a table thread and out of range",
+          "[thread]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Boss", glm::vec3(0), glm::vec3(0, 0, 1), 4.0, 20.0));
+  const Body& body = doc.GetBodies()[0];
+  const ElementRef face{body.createdBy, CylFaceName(body)};
+  // An M8 is the standard's 60-degree profile: another angle is a custom
+  // thread, and the error says so rather than cutting either.
+  auto m8 = std::make_unique<ThreadFeature>("M8", face, "M8", 1.25);
+  m8->flankDeg = 45.0;
+  doc.AddFeature(std::move(m8));
+  const std::string e1 = doc.GetFeature(1)->GetError();
+  CHECK(e1.find("custom thread") != std::string::npos);
+  // Out of range names the range.
+  auto steep = std::make_unique<ThreadFeature>("Steep", face, "custom", 2.0);
+  steep->flankDeg = 70.0;
+  doc.AddFeature(std::move(steep));
+  const std::string e2 = doc.GetFeature(2)->GetError();
+  CHECK(e2.find("15-60") != std::string::npos);
+}
+
+TEST_CASE("a flank angle round-trips, and is written only when not 30",
+          "[thread][serialization]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Boss", glm::vec3(0), glm::vec3(0, 0, 1), 10.0, 20.0));
+  const Body& body = doc.GetBodies()[0];
+  ThreadFeature iso("Iso", ElementRef{body.createdBy, CylFaceName(body)},
+                    "custom", 4.0);
+  CHECK_FALSE(DocumentIO::FeatureToJson(iso).contains("flank_angle_deg"));
+  ThreadFeature print = iso;
+  print.flankDeg = 45.0;
+  nlohmann::json j = DocumentIO::FeatureToJson(print);
+  CHECK(j.at("flank_angle_deg").get<double>() == 45.0);
+  auto back = DocumentIO::FeatureFromJson(j);
+  CHECK(dynamic_cast<ThreadFeature*>(back.get())->flankDeg == 45.0);
+  // Not a number: refused on load, never read as the default.
+  j["flank_angle_deg"] = "steep";
+  CHECK_THROWS(DocumentIO::FeatureFromJson(j));
+}

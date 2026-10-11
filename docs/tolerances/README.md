@@ -296,7 +296,9 @@ Where the numbers come from, beyond the table's column:
   prints, and for a table thread what to model — as a custom thread on the
   face it names (a boss's face is a custom thread's major, a bore's wall its
   basic minor: M8 internal in PETG → a Ø7.047 bore, which prints the Ø8
-  major). It notes a cosmetic thread prints nothing, and that printed threads
+  major). A custom thread's major from a bore is the wall plus twice its
+  basic depth at its own [flank
+  angle](../modeling/holes-and-threads.md#flank-angle). It notes a cosmetic thread prints nothing, and that printed threads
   are unreliable below M8 (tap a plain bore at the tap drill, or use an
   insert). `add_feature` and `modify_feature` on a Thread return it as
   `print`; `set_print_process` and `get_print_process` list every thread.
