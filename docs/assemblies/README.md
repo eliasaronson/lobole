@@ -10,8 +10,8 @@ Two topic pages carry the detail:
   maths, the placement pass, and the numeric pass that closes mate loops.
 - [relations.md](relations.md) — couplings between mates' degrees of
   freedom: gear (external or internal), chain, rack, screw, linear, cam,
-  freewheel, click, worm, and over several mates linear_n, epicyclic and
-  planet.
+  freewheel, click, worm, intermittent (a carry, a Geneva), and over
+  several mates linear_n, epicyclic and planet.
 
 ## Projects and documents
 
@@ -282,7 +282,8 @@ overwritten by the next solve.
 
 A relation couples mates' degrees of freedom — `dof_b = ratio · dof_a +
 phase` for gear, chain, rack, screw and linear; a lift table for a cam; a
-one-way drive for a freewheel; a pawl for a click; and Σ cᵢ · dofᵢ = constant
+one-way drive for a freewheel; a pawl for a click; one step a turn, standing
+still between, for an intermittent relation (a carry); and Σ cᵢ · dofᵢ = constant
 over several mates for linear_n and an epicyclic train (Willis, and each
 planet's turn on its carrier). In a mate tree it is enforced by propagation
 before placement; inside a loop it is a residual row in the loop solve.
@@ -774,7 +775,8 @@ one.
 - Editing into a sub-assembly from its parent.
 - A per-occurrence appearance override (a placement's `material` exists).
 - A gear relation's phase derived from the gears' geometry; creating the
-  kinds other than gear, internal gear, linear and epicyclic from the GUI.
+  kinds other than gear, internal gear, linear, epicyclic and a Geneva carry
+  from the GUI.
 - Contact dynamics: gears and cams are kinematic relations, checked for
   clash statically and over motion studies.
 - A version pin on an occurrence's part (`part_version`).

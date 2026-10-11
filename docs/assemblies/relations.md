@@ -327,8 +327,9 @@ b names `dof_b`; a Geneva's b turns.
 stands, so, like a cam, an intermittent relation is never inverted: b
 driven on its own leaves a where it is, and the relation reports `not
 satisfied` — which is what a lock holding is. Turned that way in a motion
-study, the parts that lock it clash, which is how a counter's lock is
-checked.
+study, the parts that lock it clash, which is how
+[generators/counter](../../generators/counter/README.md#what-is-checked-every-run)
+checks its locks.
 In a mate loop it is a residual row, dofB − value(dofA).
 
 ## Worm

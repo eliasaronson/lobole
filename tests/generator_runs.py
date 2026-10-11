@@ -99,6 +99,19 @@ def planetary(port, out):
              r"planetary: 5 shells"], None)
 
 
+def counter(port, out):
+    # The whole run but the still: the plate's clearances and its STL's
+    # shells, the negative controls, both counting studies with their
+    # readings, and every lock turned both ways. The test's instance has
+    # no print profiles, and at the built-in table's 0.25 mm a side an 8 mm
+    # digit's 9-tooth pinion has no printable tip, so 10 mm.
+    return ([PY, "-u", os.path.join(GEN, "counter", "build.py"),
+             "--port", str(port), "--no-render", "--digit-height", "10",
+             "--out", os.path.join(out, "counter")],
+            [r"motion, the triple carry .*: passed", r"counter: 8 shells"],
+            None)
+
+
 def hook(port, out):
     # The whole run: both prints checked on the bed, the study solved at two
     # meshes and read for both orientations, the test card written.
@@ -126,6 +139,7 @@ RUNS = {
     "planetary": (planetary, True, {}),
     "hook": (hook, True, {}),
     "jar": (jar, True, {}),
+    "counter": (counter, True, {}),
 }
 
 

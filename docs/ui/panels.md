@@ -138,7 +138,8 @@ DOF fields — `DrawMateDofFields`) in the mate tool's edit mode
 - **Add relation** (`###rel_add`, under the Relations list) opens the same
   window in create mode (`AppState::asmNewRelation`, the draft in
   `relationDraft`): a Kind combo (`###rel_kind`: gear, internal, linear,
-  epicyclic), the members, the teeth, and for an epicyclic a Planets list
+  epicyclic, geneva), the members, the teeth (a Geneva's `###rel_slots` and
+  `###rel_start`), and for an epicyclic a Planets list
   with `###rel_planet_add`. What the draft lacks is the red line
   (`asmEditRefusal`) and Accept (`###rel_new_accept`) stays disabled
   ([relations.md](../assemblies/relations.md#in-the-app)).

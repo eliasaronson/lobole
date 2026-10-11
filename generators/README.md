@@ -34,6 +34,7 @@ the one announced instance or take `--port`; they never guess:
 | `grill/` | a three-burner gas grill in brake-formed sheet | [README](grill/README.md) |
 | `om615/` | the OM615 four-cylinder diesel | [README](om615/README.md) |
 | `pantilt/` | a geared pan/tilt head for a 1.5 kg camera: two worm pairs, bearings, a machined base plate, printed PETG yoke | [README](pantilt/README.md) |
+| `counter/` | a print-in-place four-digit counter: number wheels, a Geneva carry between each pair that locks the next wheel between carries, a housing with a window per digit; counted and locked in motion studies | [README](counter/README.md) |
 | `planetary/` | a print-in-place herringbone planetary gear set: one plate off the bed already turning, its gaps from the print allowance table, proved by an assembly's motion study | [README](planetary/README.md) |
 | `hook/` | a PLA wall hook sized for a load, printed flat and upright, with a predicted breaking load for each to test on a luggage scale | [README](hook/README.md) |
 | `jar/` | a screw-top jar: PLA jar and lid with modelled 45° threads at the print allowance, a TPU gasket squeezed 25 % at the lid's stop, checked in an assembly with negative controls | [README](jar/README.md) |
@@ -96,6 +97,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 | `generator_planetary` | `planetary/build.py --no-render --diameter 90` (the built-in table's gap needs more than 70 mm): the print plate, its exact mesh clearances and the STL's five shells, the assembly, both motion studies and the push check (headless) | ~130 s | 240 s |
 | `generator_hook` | `hook/build.py`: both prints checked on the bed, the study at two meshes read for both orientations, the test card (headless) | 13 s | 60 s |
 | `generator_jar` | `jar/build.py --no-render`: the three parts with modelled threads, the thread's phase found by interference, the squeeze measured twice, the unscrewing study, the three negative controls and the STLs (headless) | 83-198 s | 400 s |
+| `generator_counter` | `counter/build.py --no-render --digit-height 10`: the plate's clearances and STL shells, the negative controls, both counting studies with their readings, every lock both ways (headless) | 45 s | 120 s |
 | `generator_pantilt` | `run_all.sh --skip yoke_topo renders` with `PANTILT_SAMPLES=6`: every part, the assembly with its exact sweeps and studies, the CAM job, the drawings (offscreen) | 181-349 s | 720 s |
 
 A test passes when the generator exits 0 AND its own success marker is in
