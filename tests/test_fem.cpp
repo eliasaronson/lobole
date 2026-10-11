@@ -415,6 +415,100 @@ TEST_CASE("Solver: cantilever tip deflection near Euler-Bernoulli",
   CHECK_THAT(res->maxDisplacement, WithinRel(delta, 0.12));
 }
 
+// docs/simulation/README.md#printed-layers
+TEST_CASE("Stress: the largest principal stress and the normal stress on a "
+          "plane, of known tensors",
+          "[fem][stress]") {
+  // Uniaxial tension: along the bar it is all; across it, nothing; at 45
+  // degrees, half.
+  const fem::Stress bar{10, 0, 0, 0, 0, 0};
+  CHECK_THAT(fem::MaxPrincipal(bar), WithinAbs(10.0, 1e-9));
+  CHECK_THAT(fem::NormalStress(bar, {1, 0, 0}), WithinAbs(10.0, 1e-9));
+  CHECK_THAT(fem::NormalStress(bar, {0, 3, 0}), WithinAbs(0.0, 1e-9));
+  CHECK_THAT(fem::NormalStress(bar, {1, 1, 0}), WithinAbs(5.0, 1e-9));
+  // Compression has no tension in it: the largest principal stress is the
+  // zero of the unloaded directions, not the -10 von Mises would call 10.
+  const fem::Stress squeeze{-10, 0, 0, 0, 0, 0};
+  CHECK_THAT(fem::MaxPrincipal(squeeze), WithinAbs(0.0, 1e-9));
+  CHECK_THAT(fem::NormalStress(squeeze, {-2, 0, 0}), WithinAbs(-10.0, 1e-9));
+  // Pure shear: tension of tau on the diagonal plane.
+  const fem::Stress shear{0, 0, 0, 5, 0, 0};
+  CHECK_THAT(fem::MaxPrincipal(shear), WithinAbs(5.0, 1e-9));
+  CHECK_THAT(fem::NormalStress(shear, {1, 1, 0}), WithinAbs(5.0, 1e-9));
+  CHECK_THAT(fem::NormalStress(shear, {1, -1, 0}), WithinAbs(-5.0, 1e-9));
+  // Hydrostatic: every direction is principal.
+  CHECK_THAT(fem::MaxPrincipal({4, 4, 4, 0, 0, 0}), WithinAbs(4.0, 1e-9));
+  // diag(3, -1, 7) turned about an oblique axis keeps its eigenvalues.
+  const glm::dmat3 R = glm::dmat3(
+      glm::rotate(glm::dmat4(1.0), 0.7, glm::normalize(glm::dvec3(1, 2, 3))));
+  const glm::dmat3 S =
+      R * glm::dmat3(3, 0, 0, 0, -1, 0, 0, 0, 7) * glm::transpose(R);
+  const fem::Stress turned{S[0][0], S[1][1], S[2][2],
+                           S[0][1], S[1][2], S[2][0]};
+  CHECK_THAT(fem::MaxPrincipal(turned), WithinAbs(7.0, 1e-9));
+  const glm::dvec3 n = R * glm::dvec3(0, 1, 0); // the -1 direction
+  CHECK_THAT(fem::NormalStress(turned, n), WithinAbs(-1.0, 1e-9));
+  CHECK_THAT(fem::NormalStress(bar, {0, 0, 0}), WithinAbs(0.0, 1e-12));
+}
+
+TEST_CASE("Solver: a cantilever's bending stress is its largest principal "
+          "stress on the tension side and the stress across layers stacked "
+          "along it",
+          "[fem][solver][stress]") {
+  // The cantilever above. At mid-span the top fibre carries
+  // sigma = M c / I in tension and the bottom the same in compression.
+  const double L = 100, b = 10, h = 10;
+  CADShape beam = CADKernel::Instance().CreateBox(L, b, h);
+  fem::MeshSettings ms;
+  ms.maxSize = 4.0;
+  std::string err;
+  auto mesh = fem::Mesh(beam.GetShape(), ms, &err);
+  INFO(err);
+  REQUIRE(mesh.has_value());
+  fem::Material steel{200000.0, 0.3};
+  const double P = 1000.0;
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(*mesh, 0, L, 1e-6);
+  load.magnitude = P;
+  load.direction = glm::dvec3(0, 0, -1);
+  auto res =
+      fem::Solve(*mesh, steel, NodesAtPlane(*mesh, 0, 0.0, 1e-6), {load}, &err);
+  INFO(err);
+  REQUIRE(res.has_value());
+  REQUIRE(res->stress.size() == mesh->nodes.size());
+
+  const double sigma = P * (L / 2) * (h / 2) / (b * h * h * h / 12.0); // 300
+  const auto nearest = [&](const glm::dvec3& p) {
+    int best = 0;
+    for (size_t i = 0; i < mesh->nodes.size(); ++i)
+      if (glm::length(mesh->nodes[i] - p) < glm::length(mesh->nodes[best] - p))
+        best = static_cast<int>(i);
+    return best;
+  };
+  const auto principal = fem::MaxPrincipalField(*res);
+  // Layers stacked along the beam (an upright print of it): the bending
+  // stress pulls them apart. Stacked across it (printed flat): nothing does.
+  const auto alongBeam = fem::AcrossLayersField(*res, {1, 0, 0});
+  const auto acrossBeam = fem::AcrossLayersField(*res, {0, 1, 0});
+  const int top = nearest({L / 2, b / 2, h});
+  const int bottom = nearest({L / 2, b / 2, 0});
+  INFO("top node at " << mesh->nodes[top].x << ", principal " << principal[top]
+                      << " beam " << sigma);
+  CHECK_THAT(principal[top], WithinRel(sigma, 0.10));
+  CHECK_THAT(alongBeam[top], WithinRel(sigma, 0.10));
+  CHECK(std::abs(acrossBeam[top]) < 0.05 * sigma);
+  CHECK_THAT(alongBeam[bottom], WithinRel(-sigma, 0.10));
+  CHECK(principal[bottom] < 0.05 * sigma); // compression: no tension
+  // The peak of the tension is at the clamp's top edge, not the bottom.
+  const fem::FieldPeak pk = fem::PeakOf(*mesh, principal);
+  REQUIRE(pk.node >= 0);
+  CHECK(pk.at.z > h / 2);
+  CHECK(pk.at.x < L / 4);
+  // A field that is not one a node has no peak.
+  CHECK(fem::PeakOf(*mesh, {1.0, 2.0}).node == -1);
+}
+
 namespace {
 // The cantilever above, as two glued materials (the far half aluminium, so
 // the domains differ in Poisson's ratio as well as stiffness) under two load

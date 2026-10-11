@@ -27,8 +27,10 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -184,6 +186,27 @@ int CaseIndex(const std::vector<std::string>& names, const json& v) {
         return static_cast<int>(k);
   throw std::runtime_error("no load case " + v.dump() + "; the cases are " +
                            known);
+}
+
+// A printed part's build direction, `layer_normal` [x, y, z] in the part's
+// frame (docs/simulation/README.md#printed-layers), as a unit vector.
+// Refused unless it is three finite numbers that are not all zero.
+glm::dvec3 LayerNormalOf(const json& v) {
+  const char* what = "`layer_normal` is the build direction [x, y, z] in the "
+                     "part's frame: the normal of the printed layers, which "
+                     "need not be unit but cannot be zero";
+  if (!v.is_array() || v.size() != 3)
+    throw std::runtime_error(what);
+  glm::dvec3 n(0.0);
+  for (int k = 0; k < 3; ++k) {
+    if (!v.at(k).is_number())
+      throw std::runtime_error(what);
+    n[k] = v.at(k).get<double>();
+  }
+  const double len = glm::length(n);
+  if (!std::isfinite(len) || len <= 1e-12)
+    throw std::runtime_error(what);
+  return n / len;
 }
 
 // Where the studies live: the active PART, or the active ASSEMBLY
@@ -530,8 +553,20 @@ static constexpr MethodDoc SimulationMethods[] = {
      "project beside its study and reads current after a reopen while its "
      "inputs hash as they did, stale otherwise (`has_results`, `stale` in "
      "list_studies). Takes `id` (or "
-     "`study`, the same thing here) — see remove_study.",
-     "id, study"},
+     "`study`, the same thing here) — see remove_study. A static study also "
+     "reports max_principal_mpa {value, at, body}: the largest TENSILE "
+     "principal stress, MPa, which a brittle material (a printed plastic) "
+     "breaks on where von Mises is the yield check. `layer_normal` [x, y, z] "
+     "(a direction in the part's frame, unitless; a part study only) is a "
+     "printed part's BUILD direction: the answer adds max_across_layers_mpa "
+     "{value, at, body} (the largest normal stress on the layer planes, n·σ·n, "
+     "tension positive) and interlayer_factor_of_safety against the "
+     "material's interlayer strength (pla 17, petg 18 MPa). The study is "
+     "isotropic, so one solve answers every orientation "
+     "(docs/simulation/README.md#printed-layers). Refused on a material with "
+     "no interlayer strength, and on a result saved before v172, which kept "
+     "no stress tensor.",
+     "id, layer_normal, study"},
     {"set_result_display",
      "Choose the result field the VIEWPORT draws, and how far it exaggerates "
      "the deformation {study, field: von_mises|displacement|shape|density|"
@@ -566,8 +601,14 @@ static constexpr MethodDoc SimulationMethods[] = {
      "named now may not be the face that was meshed), an assembly study, "
      "or a modal or topology one (docs/simulation/README.md#probing-a-face). "
      "A study with load cases takes `case` (its name or 0-based index; "
-     "default the first).",
-     "at, case, face, id, study"},
+     "default the first). Also principal_max_mpa, principal_max_at_mm and "
+     "principal_mean_mpa: the face's largest TENSILE principal stress; and "
+     "with `layer_normal` [x, y, z] (the build direction, unitless, as "
+     "study_results takes it) across_layers_max_mpa, "
+     "across_layers_max_at_mm and across_layers_mean_mpa: the tension "
+     "pulling the face's printed layers apart "
+     "(docs/simulation/README.md#printed-layers).",
+     "at, case, face, id, layer_normal, study"},
     {"set_topo_ghost", "Toggle the topology-optimization ghost overlay.",
      "on, study"},
     {"export_topo_stl", "Export the optimized topology as STL.",
@@ -1544,6 +1585,23 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     const fem::StudyRuntime* rt = host.Results(id);
     if (!rt)
       throw std::runtime_error("study has not been run");
+    // A printed part's layers (docs/simulation/README.md#printed-layers):
+    // the build direction, in the part's frame. Read here, before any
+    // answer is built, so a bad one refuses the whole call.
+    std::optional<glm::dvec3> layerNormal;
+    if (m == "study_results" && p.contains("layer_normal")) {
+      if (s->type != fem::AnalysisType::Static)
+        throw std::runtime_error(
+            std::string("layer_normal reads a static study's stresses; this "
+                        "study is ") +
+            fem::AnalysisTypeToString(s->type));
+      if (host.IsAssembly())
+        throw std::runtime_error(
+            "layer_normal is one PART's build direction, and an assembly "
+            "study bonds several parts each printed its own way -- study the "
+            "part, loaded as the assembly loads it");
+      layerNormal = LayerNormalOf(p.at("layer_normal"));
+    }
     // What every answer below carries: the inputs it is for, and on a run
     // whether it was computed or reused.
     const auto stamp = [&](json j) {
@@ -1643,6 +1701,10 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     std::size_t nodes = 0, elements = 0;
     double minFoS = 0.0;
     bool haveFoS = false;
+    fem::FieldPeak principal, across;
+    std::string principalBody, acrossBody;
+    bool missingStress = false, anyInterlayer = false, haveIlFoS = false;
+    double minIlFoS = 0.0;
     json perBody = json::array();
     for (const fem::StudyBodyResult& b : rt->bodies) {
       nodes += b.mesh.stats.nodeCount;
@@ -1650,12 +1712,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       json bj = {{"body", b.bodyName},
                  {"max_von_mises_mpa", b.results.maxVonMises},
                  {"max_displacement_mm", b.results.maxDisplacement}};
+      const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
+          CADMaterials::MaterialLibrary::MaterialTypeFromString(
+              host.BodyMaterial(*s, b.bodyIndex)));
       // Factor of safety against yield, when the body's material defines one.
       if (b.results.maxVonMises > 0) {
-        const auto mt = CADMaterials::MaterialLibrary::MaterialTypeFromString(
-            host.BodyMaterial(*s, b.bodyIndex));
-        const double yield =
-            CADMaterials::MaterialLibrary::GetMaterial(mt).yieldMPa;
+        const double yield = mp.yieldMPa;
         if (yield > 0) {
           const double fos = yield / b.results.maxVonMises;
           bj["factor_of_safety"] = fos;
@@ -1664,8 +1726,61 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           haveFoS = true;
         }
       }
+      // The largest tensile principal stress and the largest tension across
+      // the layers, over every case, on the nodes the result keeps.
+      for (size_t k = 0; k < std::max<size_t>(1, b.cases.size()); ++k) {
+        const fem::FemResults& r = b.Case(static_cast<int>(k));
+        if (r.stress.empty()) {
+          missingStress = true;
+          continue;
+        }
+        const fem::FieldPeak pk =
+            fem::PeakOf(b.mesh, fem::MaxPrincipalField(r));
+        if (pk.node >= 0 &&
+            (principal.node < 0 || pk.value > principal.value)) {
+          principal = pk;
+          principalBody = b.bodyName;
+        }
+        if (pk.node >= 0 && (!bj.contains("max_principal_mpa") ||
+                             pk.value > bj["max_principal_mpa"].get<double>()))
+          bj["max_principal_mpa"] = pk.value;
+        if (!layerNormal)
+          continue;
+        const fem::FieldPeak lk =
+            fem::PeakOf(b.mesh, fem::AcrossLayersField(r, *layerNormal));
+        if (lk.node < 0)
+          continue;
+        if (across.node < 0 || lk.value > across.value) {
+          across = lk;
+          acrossBody = b.bodyName;
+        }
+        if (!bj.contains("max_across_layers_mpa") ||
+            lk.value > bj["max_across_layers_mpa"].get<double>())
+          bj["max_across_layers_mpa"] = lk.value;
+      }
+      if (layerNormal && mp.interlayerMPa > 0) {
+        anyInterlayer = true;
+        const double v = bj.value("max_across_layers_mpa", 0.0);
+        if (v > 0) {
+          const double fos = mp.interlayerMPa / v;
+          bj["interlayer_factor_of_safety"] = fos;
+          if (!haveIlFoS || fos < minIlFoS)
+            minIlFoS = fos;
+          haveIlFoS = true;
+        }
+      }
       perBody.push_back(std::move(bj));
     }
+    if (layerNormal && missingStress)
+      throw std::runtime_error(
+          "this result was saved without its stress tensor (before format "
+          "v172), so the stress across layers cannot be read from it -- "
+          "run_study with recompute: true");
+    if (layerNormal && !anyInterlayer)
+      throw std::runtime_error(
+          "layer_normal asks how hard a PRINTED part's layers are pulled "
+          "apart, and no body in this study is of a material with an "
+          "interlayer strength (pla, petg)");
 
     json result = {
         {"nodes", nodes},
@@ -1682,6 +1797,20 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         {"stale", host.Stale(id)}};
     if (haveFoS)
       result["factor_of_safety"] = minFoS;
+    const auto peakJson = [](const fem::FieldPeak& pk, const std::string& b) {
+      return json{{"value", pk.value},
+                  {"at", {pk.at.x, pk.at.y, pk.at.z}},
+                  {"body", b}};
+    };
+    if (principal.node >= 0)
+      result["max_principal_mpa"] = peakJson(principal, principalBody);
+    if (layerNormal) {
+      result["layer_normal"] = {layerNormal->x, layerNormal->y, layerNormal->z};
+      if (across.node >= 0)
+        result["max_across_layers_mpa"] = peakJson(across, acrossBody);
+      if (haveIlFoS)
+        result["interlayer_factor_of_safety"] = minIlFoS;
+    }
     if (!roles.empty())
       result["participants"] = roles;
     // Load cases: each one's maxima (the top level is the worst of them).
@@ -1834,8 +1963,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     if (!fm)
       throw std::runtime_error("face '" + face.name +
                                "' has no triangles in the study's mesh");
-    const auto stress = fem::FaceStressOf(
-        body->mesh, body->Case(caseIdx).vonMises, rf.faceIndex);
+    std::optional<glm::dvec3> layerNormal;
+    if (p.contains("layer_normal"))
+      layerNormal = LayerNormalOf(p.at("layer_normal"));
+    const fem::FemResults& caseResult = body->Case(caseIdx);
+    if (layerNormal && caseResult.stress.empty())
+      throw std::runtime_error(
+          "this result was saved without its stress tensor (before format "
+          "v172), so the stress across layers cannot be read from it -- "
+          "run_study with recompute: true");
+    const auto stress =
+        fem::FaceStressOf(body->mesh, caseResult.vonMises, rf.faceIndex);
     const auto vec = [](const glm::dvec3& v) {
       return json::array({v.x, v.y, v.z});
     };
@@ -1854,6 +1992,24 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       out["von_mises_max_mpa"] = stress->maxMPa;
       out["von_mises_max_at_mm"] = vec(stress->maxAt);
       out["von_mises_mean_mpa"] = stress->meanMPa;
+    }
+    if (!caseResult.stress.empty()) {
+      if (const auto pr = fem::FaceStressOf(
+              body->mesh, fem::MaxPrincipalField(caseResult), rf.faceIndex)) {
+        out["principal_max_mpa"] = pr->maxMPa;
+        out["principal_max_at_mm"] = vec(pr->maxAt);
+        out["principal_mean_mpa"] = pr->meanMPa;
+      }
+    }
+    if (layerNormal) {
+      out["layer_normal"] = vec(*layerNormal);
+      if (const auto al = fem::FaceStressOf(
+              body->mesh, fem::AcrossLayersField(caseResult, *layerNormal),
+              rf.faceIndex)) {
+        out["across_layers_max_mpa"] = al->maxMPa;
+        out["across_layers_max_at_mm"] = vec(al->maxAt);
+        out["across_layers_mean_mpa"] = al->meanMPa;
+      }
     }
     if (fm->rotationDetermined) {
       out["rotation_rad"] = vec(fm->rotation);

@@ -82,7 +82,9 @@ close matches. Without it, `describe` also publishes the vocabularies an agent o
 to guess: `feature_types` and `sketch_entity_types` (each with its field
 list), `constraint_kinds`, `constraint_value_units`, `mate_types`,
 `relation_kinds`, `extrude_modes`, `extrude_end_modes`, `axis_kinds`,
-`drawing_dim_kinds`, `material_slugs`, `views`, the `document_format_version`, and the
+`drawing_dim_kinds`, `material_slugs` and `materials` (each slug's density,
+modulus, Poisson's ratio, yield and interlayer strength, a field the library
+does not know left out), `views`, the `document_format_version`, and the
 `inspection_contract` version and hash (below). The vocabularies come from
 the same tables the parsers refuse against, so `describe` cannot list a value
 the parser rejects. A feature type the parser accepts but `describe` does not

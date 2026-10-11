@@ -58,10 +58,19 @@ struct FaceLoad {
 // The load's geometry must be complete (CompleteLoadGeometry).
 FaceLoad MakeFaceLoad(const Load& load);
 
+// A nodal stress in Voigt order [xx, yy, zz, xy, yz, zx], MPa.
+using Stress = std::array<double, 6>;
+
 // Solved fields, one entry per mesh node.
 struct FemResults {
   std::vector<glm::dvec3> displacement; // mm
   std::vector<double> vonMises;         // MPa
+  // The whole nodal stress, averaged to the node like vonMises: what a
+  // stress other than von Mises is read from -- the largest principal
+  // stress, or the stress across a printed part's layers
+  // (docs/simulation/README.md#printed-layers). Empty on a modal result and
+  // on one saved before v172.
+  std::vector<Stress> stress;
 
   double maxVonMises = 0.0;
   int maxVmNode = -1;
@@ -120,9 +129,32 @@ struct FaceStress {
   glm::dvec3 maxAt{0.0}; // mm, where it is
   double meanMPa = 0.0;  // area-weighted over the face
 };
+// Any per-node scalar field reads the same way (a principal stress, the
+// stress across layers), so `vonMises` is that field.
 std::optional<FaceStress> FaceStressOf(const FemMesh& mesh,
                                        const std::vector<double>& vonMises,
                                        int faceIndex);
+
+// The largest principal stress of `s` (MPa, tension positive): the
+// eigenvalue of the stress tensor that a brittle material breaks on.
+double MaxPrincipal(const Stress& s);
+// The normal stress on the plane whose normal is `n` (need not be unit):
+// n . sigma . n, tension positive. For a printed part with `n` its build
+// direction, the stress pulling its layers apart.
+double NormalStress(const Stress& s, const glm::dvec3& n);
+// A field of one value per node of `r.stress`: its largest principal
+// stress, or (AcrossLayers) its normal stress along `n`. Empty when the
+// result kept no stress tensor.
+std::vector<double> MaxPrincipalField(const FemResults& r);
+std::vector<double> AcrossLayersField(const FemResults& r, const glm::dvec3& n);
+// The largest value of a per-node field and where it is; node -1 when the
+// field is empty or not one per node of `mesh`.
+struct FieldPeak {
+  double value = 0.0;
+  int node = -1;
+  glm::dvec3 at{0.0};
+};
+FieldPeak PeakOf(const FemMesh& mesh, const std::vector<double>& field);
 
 // Solves K u = f with the given fixed nodes (all three DOF zeroed, eliminated
 // from the system), face tractions, and an optional body force (gravity

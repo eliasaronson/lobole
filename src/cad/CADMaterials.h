@@ -139,6 +139,10 @@ struct MaterialProperties {
   double youngGPa = 0.0; // Young's modulus, GPa
   double poisson = 0.0;  // Poisson's ratio (dimensionless)
   double yieldMPa = 0.0; // yield strength, MPa (0 = no factor-of-safety)
+  // A printed material's tensile strength ACROSS its layers, MPa: what
+  // pulls a layer off the one below (docs/simulation/README.md
+  // #printed-layers). 0 = not a printed material, or unknown.
+  double interlayerMPa = 0.0;
 
   // Procedural surface figure. Both fields are pattern-relative, and are 0
   // exactly when pattern is Flat:

@@ -1,0 +1,85 @@
+{
+ "format": "designer-document",
+ "version": 172,
+ "features": [
+  {
+   "type": "Sketch",
+   "name": "Section",
+   "id": 1,
+   "next_entity_id": 2,
+   "plane": {
+    "origin": [
+     0,
+     0,
+     0
+    ],
+    "normal": [
+     1,
+     0,
+     0
+    ],
+    "uAxis": [
+     0,
+     1,
+     0
+    ]
+   },
+   "entities": [
+    {
+     "type": "rect",
+     "id": 1,
+     "c1": [
+      -8,
+      -4
+     ],
+     "c2": [
+      8,
+      4
+     ]
+    }
+   ],
+   "constraints": []
+  },
+  {
+   "type": "Extrude",
+   "name": "Arm",
+   "id": 2,
+   "sketch_id": 1,
+   "distance": 30.0,
+   "mode": "new_body",
+   "material": "pla"
+  }
+ ],
+ "studies": [
+  {
+   "type": "Study",
+   "id": 3,
+   "name": "Hook at the rated load",
+   "loads": [
+    {
+     "id": 4,
+     "type": "fixed",
+     "face": {
+      "feature_id": 2,
+      "element": "2/cap0"
+     },
+     "magnitude": 0.0
+    },
+    {
+     "id": 5,
+     "type": "force",
+     "face": {
+      "feature_id": 2,
+      "element": "2/cap1"
+     },
+     "magnitude": 49.05,
+     "direction": [
+      0,
+      0,
+      -1
+     ]
+    }
+   ]
+  }
+ ]
+}

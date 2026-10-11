@@ -300,7 +300,57 @@ def torque_and_probe(d, study, created_by, fixed_face):
            and abs(row["value"] - probe["von_mises_max_mpa"]) < 1e-9
            and row["unit"] == "MPa", f"the requirement reads the probe: {row}")
     d.call("remove_requirement", id=req)
+    printed_layers(d, twist, created_by, fixed_face, res)
     d.call("remove_study", id=twist)
+
+
+def printed_layers(d, study, created_by, fixed_face, res):
+    """The largest principal stress and the stress across a printed part's
+    layers (docs/simulation/README.md#printed-layers), over the RPCs: the
+    fields, and the refusals. The physics is test_fem.cpp's."""
+    face = {"feature_id": created_by, "element": fixed_face}
+    expect(0 < res["max_principal_mpa"]["value"]
+           and len(res["max_principal_mpa"]["at"]) == 3,
+           f"a static result's largest principal stress: {res}")
+    probe = d.call("probe_study", id=study, face=face, layer_normal=[2, 0, 0])
+    expect(probe["layer_normal"] == [1.0, 0.0, 0.0], f"made unit: {probe}")
+    for k in ("principal_max_mpa", "principal_mean_mpa",
+              "across_layers_max_mpa", "across_layers_mean_mpa"):
+        expect(k in probe, f"probe_study reports {k}: {probe}")
+    expect(probe["principal_max_mpa"] <= res["max_principal_mpa"]["value"]
+           + 1e-9, f"a face's principal stress under the peak: {probe}")
+
+    def refused(method, params, words):
+        try:
+            d.call(method, id=study, **params)
+        except RuntimeError as e:
+            for w in words:
+                expect(w in str(e), f"the refusal names {w!r}: {e}")
+        else:
+            raise AssertionError(f"{method} accepted {params}")
+
+    refused("study_results", {"layer_normal": [0, 0, 0]}, ["build direction"])
+    refused("probe_study", {"face": face, "layer_normal": "z"},
+            ["build direction"])
+    # Steel has no layers: a question about them is refused, not answered
+    # with a factor of safety against nothing.
+    refused("study_results", {"layer_normal": [1, 0, 0]},
+            ["interlayer", "pla"])
+    d.call("set_material", feature_id=created_by, material="pla")
+    d.call("run_study", id=study)
+    r = d.call("study_results", id=study, layer_normal=[1, 0, 0])
+    across = r["max_across_layers_mpa"]["value"]
+    expect(r["layer_normal"] == [1.0, 0.0, 0.0] and across > 0,
+           f"the stress across layers: {r}")
+    expect(abs(r["interlayer_factor_of_safety"] - 17.0 / across) < 1e-6,
+           f"against PLA's interlayer strength: {r}")
+    mats = d.call("describe")["materials"]
+    expect(mats["pla"]["interlayer_mpa"] == 17.0
+           and mats["pla"]["yield_mpa"] == 48.0
+           and "interlayer_mpa" not in mats["steel"],
+           f"describe's materials: {mats['pla']}, {mats['steel']}")
+    d.call("set_material", feature_id=created_by, material="steel")
+    print("fem_smoke: principal stress and printed layers OK")
 
 
 def main():

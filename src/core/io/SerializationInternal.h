@@ -26,7 +26,10 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    171; // v171: relations over several mates — kinds `linear_n`,
+    172; // v172: a static result keeps its nodal stress tensor, `stress`
+         //      (six components a node, Voigt order, float), for the
+         //      principal stress and the stress across printed layers.
+         // v171: relations over several mates — kinds `linear_n`,
          //      `epicyclic` and `planet`, each `terms` [{mate, path?, dof,
          //      coefficient, teeth?}] and a `constant` in place of
          //      mate_a/mate_b/dof/ratio/phase; a gear's or chain's

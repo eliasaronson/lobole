@@ -509,6 +509,13 @@ json FieldsToJson(const fem::FemResults& r, ResultArrayWriter& w) {
     out["displacement"] = w.F32(r.displacement);
   if (!r.vonMises.empty())
     out["von_mises"] = w.F32(r.vonMises);
+  if (!r.stress.empty()) { // v172: six a node, Voigt order
+    std::vector<double> flat;
+    flat.reserve(6 * r.stress.size());
+    for (const fem::Stress& st : r.stress)
+      flat.insert(flat.end(), st.begin(), st.end());
+    out["stress"] = w.F32(flat);
+  }
   if (!r.modes.empty()) {
     json modes = json::array();
     for (const fem::FemResults::ModeShape& m : r.modes)
@@ -525,6 +532,17 @@ fem::FemResults FieldsFromJson(const json& j, const FieldReader& f) {
     r.displacement = f.Vec3s(j.at("displacement"), "displacement");
   if (j.contains("von_mises"))
     r.vonMises = f.Reals(j.at("von_mises"), "von_mises");
+  if (j.contains("stress")) { // v172
+    const std::vector<double> flat = f.Reals(j.at("stress"), "stress");
+    if (flat.size() % 6 != 0)
+      throw std::runtime_error("a result's stress has " +
+                               std::to_string(flat.size()) +
+                               " values, not six a node");
+    r.stress.resize(flat.size() / 6);
+    for (size_t i = 0; i < r.stress.size(); ++i)
+      for (int k = 0; k < 6; ++k)
+        r.stress[i][k] = flat[6 * i + k];
+  }
   r.maxVonMises = j.value("max_von_mises", 0.0);
   r.maxVmNode = j.value("max_vm_node", -1);
   if (j.contains("max_vm_at"))
@@ -578,6 +596,9 @@ void CheckBody(const fem::StudyBodyResult& b, const std::string& what) {
            " displacements for " + std::to_string(n) + " nodes");
     if (!r.vonMises.empty() && r.vonMises.size() != n)
       fail("has " + std::to_string(r.vonMises.size()) + " stresses for " +
+           std::to_string(n) + " nodes");
+    if (!r.stress.empty() && r.stress.size() != n)
+      fail("has " + std::to_string(r.stress.size()) + " stress tensors for " +
            std::to_string(n) + " nodes");
     for (const auto& m : r.modes)
       if (m.displacement.size() != n)

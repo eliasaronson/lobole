@@ -421,8 +421,13 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
       CHECK(kept.results.displacement[a].z ==
             f(full.results.displacement[b].z));
       CHECK(kept.results.vonMises[a] == f(full.results.vonMises[b]));
+      // The whole tensor too (v172): what a principal stress or the stress
+      // across printed layers is read from.
+      for (int c = 0; c < 6; ++c)
+        CHECK(kept.results.stress[a][c] == f(full.results.stress[b][c]));
     }
   }
+  REQUIRE(kept.results.stress.size() == kept.mesh.nodes.size());
   // The peak markers still land on their nodes.
   REQUIRE(kept.results.maxDispNode >= 0);
   CHECK(kept.mesh.nodes[kept.results.maxDispNode].x ==
@@ -458,6 +463,11 @@ TEST_CASE("A static result keeps its surface as float, in a .bin beside its "
   CHECK(fs::last_write_time(bin) == old);
   auto reloaded = testio::Load(proj.string());
   REQUIRE(reloaded != nullptr);
+  {
+    const fem::StudyRuntime* back = reloaded->StudyResults(bar->studyId);
+    REQUIRE(back != nullptr);
+    CHECK(back->bodies[0].results.stress == kept.results.stress);
+  }
   REQUIRE(testio::Save(*reloaded, proj.string()));
   CHECK(fs::last_write_time(json) == old);
   CHECK(fs::last_write_time(bin) == old);

@@ -99,7 +99,9 @@ clamp answer them; the refusals.
 The solver works in mm–N–MPa (lengths and displacements mm, forces N,
 stresses and moduli MPa) with mass in tonnes, so frequencies come out in Hz.
 The material library (`src/cad/CADMaterials.h`) stores `youngGPa`, `poisson`,
-`yieldMPa` and `density` (kg/m³), each 0 when unknown. A body whose material
+`yieldMPa`, `interlayerMPa` (a printed material's strength across its
+layers, [printed layers](#printed-layers)) and `density` (kg/m³), each 0
+when unknown; `describe` lists them as `materials`. A body whose material
 has no stiffness is refused ("has no stiffness data"); a modal study or a
 gravity load on a material with no density is refused too. The library's
 default material has none of these, so an unassigned body cannot be analysed
@@ -254,7 +256,7 @@ memory is the one a reopen reads back, value for value.
 
 | kind | kept | left out |
 |---|---|---|
-| static, modal | the boundary surface: its tri6 triangles and their faces, the nodes they use (and the peak nodes), each of those nodes' displacement and von Mises stress per load case, or its mode shapes; the maxima; the solved mesh's node and tet counts | the tets and every interior node: the contour, the deformed shape, a face's motion (`probe_study`) and the peak markers all read the surface |
+| static, modal | the boundary surface: its tri6 triangles and their faces, the nodes they use (and the peak nodes), each of those nodes' displacement, von Mises stress and stress tensor per load case, or its mode shapes; the maxima; the solved mesh's node and tet counts | the tets and every interior node: the contour, the deformed shape, a face's motion (`probe_study`) and the peak markers all read the surface |
 | topology | the whole tet10 mesh, its boundary, the per-tet density, the summary | -- the iso-surface, the STL export and a static study of the shape cut tets |
 | motion | every sample's poses, mate values, clashes and unknown contacts; the pair counts | -- |
 
@@ -458,6 +460,44 @@ the imprinted fuse, whose faces are not the parts'), and modal or topology
 ones. Tests: `[probe]` in `tests/test_fem.cpp` (a rigid motion recovered
 exactly; a cantilever's end face turning by the tip slope, P L² / 2EI).
 
+### Printed layers
+
+A printed part is not isotropic where it breaks. Its stiffness across the
+layers is within 10-20 % of along them (Bambu PLA Basic's datasheet: 2.16
+against 2.68 GPa), but its strength is not: Prusament PLA's datasheet gives
+an interlayer adhesion of 17 ± 3 MPa against a tensile yield of 51 printed
+flat. So the study stays isotropic and the allowables carry the direction.
+
+- **The tensor is kept.** A static result keeps each node's whole stress
+  (`FemResults::stress`, Voigt order, float like every field; v172), not
+  just its von Mises. Everything below is read from it, after the solve.
+- **The largest principal stress.** `study_results` reports
+  `max_principal_mpa` {value, at, body} and `probe_study` `principal_max_mpa`
+  (at, mean): the largest TENSILE principal stress, which a brittle material
+  breaks on. Von Mises is symmetric in tension and compression, so it reads
+  a beam's compressed side as hard as its stretched one; it stays the yield
+  check (`factor_of_safety`).
+- **The stress across the layers.** `layer_normal` [x, y, z] on
+  `study_results` or `probe_study` is the build direction in the part's
+  frame. They add the largest normal stress on the layer planes, `n·σ·n`
+  (`max_across_layers_mpa`, `across_layers_max_mpa`), and `study_results`
+  `interlayer_factor_of_safety` against the material's `interlayerMPa`
+  (pla 17, petg 18 MPa, both Prusament's datasheets; describe's `materials`
+  lists every material's numbers). The direction is a question, not a
+  stored field: the stress does not depend on how the part was printed, only
+  which allowable applies does, so one solve answers every orientation.
+  Refused on a non-static study, an assembly study (its parts are each
+  printed their own way), a study whose bodies have no interlayer strength,
+  and a result saved before v172.
+
+`generators/hook/` is the use it was built for: one solve of a wall hook,
+read for a flat print and an upright one, each with a predicted breaking
+load to test on a luggage scale. Tests: `[stress]` in `tests/test_fem.cpp`
+(known tensors; a cantilever's top fibre reads `Mc/I` in tension along the
+beam and nothing across it, its bottom no tension), the round trip in
+`tests/test_study_inputs.cpp`, the RPCs and their refusals in
+`tests/fem_smoke.py`.
+
 ## Assembly studies
 
 A study on an `AssemblyDocument` names **occurrences**, each in one role
@@ -606,8 +646,8 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |
 | `run_study {id, async?, recompute?, outlive_client?}` | mesh + solve; returns the `study_results` summary when synchronous, `job` (its id) when async; unchanged inputs answer `reused: true` from the stored result ([studies as jobs](#studies-as-jobs)) |
 | `study_status {id \| job}`, `cancel_study {id \| job}` | progress of an async job, or by `job` any study job's (motion included) and how it ended; cancel stops it |
-| `study_results` | static: maxima, per-body, factor of safety; modal: `bodies[i].frequencies_hz` |
-| `probe_study {id, face, at?, case?}` | the face's von Mises max (and where) and mean; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
+| `study_results {id, layer_normal?}` | static: maxima, the largest principal stress, per-body, factor of safety; with `layer_normal`, the stress across those layers and its factor of safety ([printed layers](#printed-layers)); modal: `bodies[i].frequencies_hz` |
+| `probe_study {id, face, at?, case?, layer_normal?}` | the face's von Mises and largest principal stress, max (and where) and mean, and with `layer_normal` the stress across the layers; how it moved, as a rigid body; carried to `at` ([#probing-a-face](#probing-a-face)) |
 | `enter_simulation {study?}`, `exit_simulation` | the GUI mode |
 | `set_result_display {study?, field, deform_scale?, mode?, case?, threshold?}` | `field`: von_mises \| displacement \| shape \| density \| none; `case`: which load case a static study shows |
 | `check_topology {study, threshold?, recompute?, outlive_client?}` | a topology result's shape and solid design domain, statically, per case, as a job ([the topopt page](../topopt/README.md#a-static-study-of-the-optimised-shape)) |

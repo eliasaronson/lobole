@@ -394,9 +394,15 @@ void MaterialLibrary::InitializeMaterials() {
   // 45-53 MPa. A printed part is weaker ACROSS its layers (the pan/tilt
   // sources read 30-50 MPa there), which an isotropic study cannot see.
   elastic(MaterialType::PETG, 2.1f, 0.38f, 50.0f);
+  // Prusament PETG's datasheet (v1.1): interlayer adhesion 18 +/- 4 MPa.
+  materials[MaterialType::PETG].interlayerMPa = 18.0;
   // Prusament PLA's datasheet, printed specimens: E 2.3 GPa and yield
   // 51 +/- 3 MPa printed flat (2.4 and 59 upright); density 1.24 g/cm3.
   elastic(MaterialType::PLA, 2.3f, 0.36f, 48.0f);
+  // The same datasheet (v1.1): interlayer adhesion 17 +/- 3 MPa, a third of
+  // the in-layer yield -- what an upright print's bending breaks on
+  // (docs/simulation/README.md#printed-layers).
+  materials[MaterialType::PLA].interlayerMPa = 17.0;
   // Quasi-isotropic 3K/epoxy laminate, in-plane: this is a plate material
   // and the numbers are the plate's, not a unidirectional ply's.
   elastic(MaterialType::CARBON_FIBRE, 55.0f, 0.30f, 550.0f);

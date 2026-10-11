@@ -1404,9 +1404,16 @@ void RoundAll(std::vector<glm::dvec3>& v) {
     p = ToFloat(p);
 }
 
+void RoundAll(std::vector<Stress>& v) {
+  for (Stress& s : v)
+    for (double& x : s)
+      x = ToFloat(x);
+}
+
 void RoundFields(FemResults& r) {
   RoundAll(r.displacement);
   RoundAll(r.vonMises);
+  RoundAll(r.stress);
   for (FemResults::ModeShape& m : r.modes)
     RoundAll(m.displacement);
 }
@@ -1416,6 +1423,8 @@ bool PerNode(const FemResults& r, size_t n) {
   if (!r.displacement.empty() && r.displacement.size() != n)
     return false;
   if (!r.vonMises.empty() && r.vonMises.size() != n)
+    return false;
+  if (!r.stress.empty() && r.stress.size() != n)
     return false;
   for (const FemResults::ModeShape& m : r.modes)
     if (m.displacement.size() != n)
@@ -1438,6 +1447,7 @@ void Renumber(FemResults& r, const std::vector<int>& kept,
               const std::vector<int>& newIndex) {
   Gather(r.displacement, kept);
   Gather(r.vonMises, kept);
+  Gather(r.stress, kept);
   for (FemResults::ModeShape& m : r.modes)
     Gather(m.displacement, kept);
   if (r.maxVmNode >= 0)

@@ -1,0 +1,9 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [3840.0],
+  "study_loads": [
+    ["fixed", 0.0, null, null],
+    ["force", 49.05, null, null]
+  ]
+}

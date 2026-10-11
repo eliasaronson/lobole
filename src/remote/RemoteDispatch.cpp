@@ -1101,6 +1101,30 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         {"drawing_dim_kinds", DrawingDimKindNames()},
         {"axis_kinds", {"x", "y", "z", "sketch_line", "datum_axis", "custom"}},
         {"material_slugs", ContractVocabulary("material_slugs")->values},
+        // What each material IS to a study, so a caller sizing a part can
+        // read the allowable it will be checked against: a field the
+        // library does not know (0 there) is left out, never written as 0.
+        {"materials",
+         [] {
+           json out = json::object();
+           for (const std::string& slug :
+                CADMaterials::MaterialLibrary::AllSlugs()) {
+             const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
+                 CADMaterials::MaterialLibrary::MaterialTypeFromString(slug));
+             json j{{"name", mp.name}};
+             const auto put = [&](const char* key, double v) {
+               if (v > 0.0)
+                 j[key] = v;
+             };
+             put("density_kg_m3", mp.density);
+             put("young_gpa", mp.youngGPa);
+             put("poisson", mp.poisson);
+             put("yield_mpa", mp.yieldMPa);
+             put("interlayer_mpa", mp.interlayerMPa);
+             out[slug] = std::move(j);
+           }
+           return out;
+         }()},
         // The named camera views (`view`, `screenshot`, drawings).
         {"views", ContractVocabulary("views")->values}};
   }

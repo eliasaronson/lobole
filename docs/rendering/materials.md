@@ -10,7 +10,8 @@ A material is a slug on the body's creating feature (`Feature::m_material`),
 stamped onto its bodies each regeneration (`Body::material`), and resolved
 into `CADMaterials::MaterialProperties` (`src/cad/CADMaterials.{h,cpp}`):
 base colour, metallic, roughness, specular, reflectance, plus the physics —
-density, Young's modulus, Poisson's ratio, yield — that mass properties, the
+density, Young's modulus, Poisson's ratio, yield, and for a printed plastic
+its interlayer strength — that mass properties, the
 BOM and FEM read. `DEFAULT` is the empty slug and carries no physics
 (density 0, so mass reports none rather than a guess). The accepted slugs
 are `MaterialLibrary::AllSlugs()` (`describe` reports them as

@@ -3,6 +3,7 @@
 
 #include "core/fem/FemSolver.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 
@@ -458,10 +459,13 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
     }
 
     out.vonMises.resize(nNodes, 0.0);
+    out.stress.assign(nNodes, Stress{});
     for (int n = 0; n < nNodes; ++n) {
       if (weight[n] > 0) {
         const Eigen::Matrix<double, 6, 1> s = stressAccum[n] / weight[n];
         out.vonMises[n] = VonMises(s);
+        for (int k = 0; k < 6; ++k)
+          out.stress[n][k] = s(k);
       }
       if (out.vonMises[n] > out.maxVonMises) {
         out.maxVonMises = out.vonMises[n];
@@ -853,6 +857,65 @@ FitFaceMotion(const FemMesh& mesh, const std::vector<glm::dvec3>& displacement,
     sq += weight[i] * glm::dot(e, e);
   }
   out.rmsResidual = std::sqrt(sq / total);
+  return out;
+}
+
+double MaxPrincipal(const Stress& s) {
+  // The largest root of the characteristic cubic of a symmetric 3x3, in
+  // closed form (Smith 1961): no iteration, and no Eigen, so a build
+  // without the solver still reads a saved result.
+  const double xx = s[0], yy = s[1], zz = s[2], xy = s[3], yz = s[4], zx = s[5];
+  const double off = xy * xy + yz * yz + zx * zx;
+  const double q = (xx + yy + zz) / 3.0;
+  const double a = xx - q, b = yy - q, c = zz - q;
+  const double p2 = a * a + b * b + c * c + 2.0 * off;
+  if (p2 <= 1e-30 * (q * q + 1e-300))
+    return q; // hydrostatic: every direction is principal
+  const double p = std::sqrt(p2 / 6.0);
+  // det((sigma - q I) / p) / 2, clamped against rounding.
+  const double det =
+      a * (b * c - yz * yz) - xy * (xy * c - yz * zx) + zx * (xy * yz - b * zx);
+  const double r = std::clamp(det / (2.0 * p * p * p), -1.0, 1.0);
+  return q + 2.0 * p * std::cos(std::acos(r) / 3.0);
+}
+
+double NormalStress(const Stress& s, const glm::dvec3& n) {
+  const double len2 = glm::dot(n, n);
+  if (len2 <= 0.0)
+    return 0.0;
+  const double x = n.x, y = n.y, z = n.z;
+  return (s[0] * x * x + s[1] * y * y + s[2] * z * z +
+          2.0 * (s[3] * x * y + s[4] * y * z + s[5] * z * x)) /
+         len2;
+}
+
+std::vector<double> MaxPrincipalField(const FemResults& r) {
+  std::vector<double> out;
+  out.reserve(r.stress.size());
+  for (const Stress& s : r.stress)
+    out.push_back(MaxPrincipal(s));
+  return out;
+}
+
+std::vector<double> AcrossLayersField(const FemResults& r,
+                                      const glm::dvec3& n) {
+  std::vector<double> out;
+  out.reserve(r.stress.size());
+  for (const Stress& s : r.stress)
+    out.push_back(NormalStress(s, n));
+  return out;
+}
+
+FieldPeak PeakOf(const FemMesh& mesh, const std::vector<double>& field) {
+  FieldPeak out;
+  if (field.empty() || field.size() != mesh.nodes.size())
+    return out;
+  for (size_t i = 0; i < field.size(); ++i)
+    if (out.node < 0 || field[i] > out.value) {
+      out.value = field[i];
+      out.node = static_cast<int>(i);
+      out.at = mesh.nodes[i];
+    }
   return out;
 }
 
