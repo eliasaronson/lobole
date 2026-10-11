@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
+#include <unistd.h>
 
 // Opening a project is a read that touches no AppState and an adopt that swaps
 // it in (docs/ui/long-operations.md#opening-a-project). The read loads the
@@ -25,8 +26,11 @@ namespace fs = std::filesystem;
 
 namespace {
 
+// Per process: worktrees run this suite side by side, and a fixed path let one
+// run's remove_all empty the folder another was writing its STEP into.
 fs::path TempProject(const char* name) {
-  const fs::path p = fs::temp_directory_path() / name;
+  const fs::path p =
+      fs::temp_directory_path() / (std::to_string(::getpid()) + "-" + name);
   fs::remove_all(p);
   fs::create_directories(p);
   return p;
