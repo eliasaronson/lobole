@@ -35,6 +35,7 @@ the one announced instance or take `--port`; they never guess:
 | `om615/` | the OM615 four-cylinder diesel | [README](om615/README.md) |
 | `pantilt/` | a geared pan/tilt head for a 1.5 kg camera: two worm pairs, bearings, a machined base plate, printed PETG yoke | [README](pantilt/README.md) |
 | `planetary/` | a print-in-place herringbone planetary gear set: one plate off the bed already turning, its gaps from the print allowance table, proved by an assembly's motion study | [README](planetary/README.md) |
+| `hook/` | a PLA wall hook sized for a load, printed flat and upright, with a predicted breaking load for each to test on a luggage scale | [README](hook/README.md) |
 | `pes_pump/` | the Bosch PES4M injection pump for the OM615 | [README](pes_pump/README.md) |
 | `smart_speaker/` | a two-way floorstanding loudspeaker cabinet | [README](smart_speaker/README.md) |
 | `so101_gripper/` | a parallel-jaw wrist gripper for the SO-101 arm | [README](so101_gripper/README.md) |
@@ -92,6 +93,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 | `generator_pes_pump` | `pes_pump.py --no-still`: the build, the standing sweep, the four studies and their measured strokes, order and turns (offscreen) | 44 s | 180 s |
 | `generator_chess` | `run_all.sh --only board`: every design stage, then the board's CAM job verified and posted (offscreen) | 140 s | 360 s |
 | `generator_planetary` | `planetary/build.py --no-render`: the print plate, its exact mesh clearances and the STL's five shells, the assembly and both motion studies (headless) | ~90 s | 240 s |
+| `generator_hook` | `hook/build.py`: both prints checked on the bed, the study at two meshes read for both orientations, the test card (headless) | 13 s | 60 s |
 | `generator_pantilt` | `run_all.sh --skip yoke_topo renders` with `PANTILT_SAMPLES=6`: every part, the assembly with its exact sweeps and studies, the CAM job, the drawings (offscreen) | 181-349 s | 720 s |
 
 A test passes when the generator exits 0 AND its own success marker is in

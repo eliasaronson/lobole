@@ -95,6 +95,14 @@ def planetary(port, out):
             [r"motion, one orbit .*: passed", r"planetary: 5 shells"], None)
 
 
+def hook(port, out):
+    # The whole run: both prints checked on the bed, the study solved at two
+    # meshes and read for both orientations, the test card written.
+    return ([PY, "-u", os.path.join(GEN, "hook", "build.py"),
+             "--port", str(port), "--out", os.path.join(out, "hook")],
+            [r"mesh: the prediction moved", r"hook: done"], None)
+
+
 # name -> (builder, instance kind, extra environment). The offscreen ones
 # take screenshots or renders, which a --headless instance refuses.
 RUNS = {
@@ -104,6 +112,7 @@ RUNS = {
     # Six samples a motion study, each still checked exactly.
     "pantilt": (pantilt, "offscreen", {"PANTILT_SAMPLES": "6"}),
     "planetary": (planetary, True, {}),
+    "hook": (hook, True, {}),
 }
 
 
