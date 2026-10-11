@@ -168,6 +168,24 @@ TEST_CASE("PETG is a material of its own, heavier than generic plastic",
   CHECK(petg.metallic == 0.0f);
 }
 
+TEST_CASE("TPU is a material of its own: an elastomer, with no yield",
+          "[materials]") {
+  // A printed gasket weighed and studied as rubber or plastic reads the
+  // wrong stiffness by orders of magnitude: TPU 95A's modulus is 7.8 MPa,
+  // three hundred times under PLA's.
+  CHECK(MaterialLibrary::MaterialTypeFromString("tpu") == MaterialType::TPU);
+  CHECK(MaterialLibrary::Slug(MaterialType::TPU) == "tpu");
+  const MaterialProperties& tpu =
+      MaterialLibrary::GetMaterial(MaterialType::TPU);
+  CHECK(tpu.density == 1220.0f);
+  CHECK(tpu.youngGPa > 0.0f);
+  CHECK(tpu.youngGPa <
+        MaterialLibrary::GetMaterial(MaterialType::PLA).youngGPa / 100.0f);
+  // No yield: a study reports its stress without a factor of safety.
+  CHECK(tpu.yieldMPa == 0.0f);
+  CHECK(tpu.metallic == 0.0f);
+}
+
 TEST_CASE("PLA is a material of its own, with its datasheet's numbers",
           "[materials]") {
   CHECK(MaterialLibrary::MaterialTypeFromString("pla") == MaterialType::PLA);

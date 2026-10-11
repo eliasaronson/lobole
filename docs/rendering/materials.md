@@ -19,6 +19,11 @@ are `MaterialLibrary::AllSlugs()` (`describe` reports them as
 1270 and 1240 kg/m³ and their filament datasheets' moduli, where generic
 plastic would read a printed part a fifth light; how a printed part is modelled to fit is its print process,
 not its material ([../tolerances/README.md](../tolerances/README.md#printed-parts)).
+`tpu` is TPU 95A as printed (a gasket, a bumper): 1220 kg/m³ and a
+modulus of 7.8 MPa from Bambu Lab's datasheet, and no yield, since an
+elastomer has none; a study on it reports stress without a factor of
+safety, and its linear solve is honest only for small strains. A CAM job
+does not cut it (no chip-load band exists for an elastomer).
 
 
 ### The feature that holds a material

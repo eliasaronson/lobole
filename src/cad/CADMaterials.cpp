@@ -136,6 +136,16 @@ void MaterialLibrary::InitializeMaterials() {
       0.045f, // ((n-1)/(n+1))^2 at n = 1.53
       "PLA"};
 
+  materials[MaterialType::TPU] = {
+      // A printed translucent-ish white-grey, so a TPU gasket in a blue PLA
+      // lid reads as the other material on sight.
+      glm::vec3(0.55f, 0.55f, 0.52f),
+      0.0f,
+      0.7f, // a soft, satin printed surface
+      0.3f,
+      0.045f, // ((n-1)/(n+1))^2 at n = 1.5
+      "TPU"};
+
   // Darker than its nominal albedo, chosen for the scene's bright rig: at
   // the nominal 0.07 this rendered LIGHTER than black plastic, and blue,
   // which is the one comparison the material exists to win. The weave's relief
@@ -322,6 +332,8 @@ void MaterialLibrary::InitializeMaterials() {
   materials[MaterialType::PLASTIC_BLACK].density = 1040.0f;
   materials[MaterialType::PETG].density = 1270.0f;
   materials[MaterialType::PLA].density = 1240.0f;
+  // Bambu Lab TPU 95A HF's datasheet: 1.22 g/cm3 (its TPU 95A, 1.20).
+  materials[MaterialType::TPU].density = 1220.0f;
   materials[MaterialType::CARBON_FIBRE].density = 1550.0f;
   materials[MaterialType::RUBBER].density = 1200.0f;
   materials[MaterialType::GLASS].density = 2500.0f;
@@ -403,6 +415,12 @@ void MaterialLibrary::InitializeMaterials() {
   // the in-layer yield -- what an upright print's bending breaks on
   // (docs/simulation/README.md#printed-layers).
   materials[MaterialType::PLA].interlayerMPa = 17.0;
+  // Bambu Lab's TPU 95A datasheet, printed specimens: Young's modulus 7.8
+  // MPa, tensile strength 27-30 MPa at over 650 % elongation. An elastomer
+  // has no yield, so none: a study reports its stress without a factor of
+  // safety. Nearly incompressible, as rubbers are. A linear study is only
+  // honest for its small strains; a gasket's 25 % squeeze is not one.
+  elastic(MaterialType::TPU, 0.0078f, 0.48f, 0.0f);
   // Quasi-isotropic 3K/epoxy laminate, in-plane: this is a plate material
   // and the numbers are the plate's, not a unidirectional ply's.
   elastic(MaterialType::CARBON_FIBRE, 55.0f, 0.30f, 550.0f);
@@ -516,6 +534,7 @@ const std::vector<std::pair<MaterialType, const char*>>& SlugTable() {
       {MaterialType::PLASTIC_BLACK, "plastic_black"},
       {MaterialType::PETG, "petg"},
       {MaterialType::PLA, "pla"},
+      {MaterialType::TPU, "tpu"},
       {MaterialType::CARBON_FIBRE, "carbon_fibre"},
       {MaterialType::RUBBER, "rubber"},
       {MaterialType::GLASS, "glass"},

@@ -42,6 +42,10 @@ enum class MaterialType {
   // PLA as an FDM printer lays it down: what most printed parts are. Its own
   // row for the filament's density and modulus, as PETG has.
   PLA,
+  // TPU 95A as an FDM printer lays it down: a printed gasket, a bumper, a
+  // tyre. Its own row because it is an elastomer -- a modulus three hundred
+  // times under PLA's, which is what a squeeze or a study reads.
+  TPU,
   // 3K twill carbon plate: the material a frame, an arm or a drone's whole
   // structure is cut from, and 1550 kg/m3 against black plastic's 1040 —
   // modelling one as the other reads a third light, which is a third of an

@@ -89,6 +89,9 @@ CutClass CutClassOf(const std::string& slug) {
       {"roofing_felt", CutClass::NotCut},
       {"render", CutClass::NotCut},
       {"soil", CutClass::NotCut},
+      // An elastomer: it pushes away from a cutter rather than chipping, and
+      // no chip-load band is published for it. Printed, not routed.
+      {"tpu", CutClass::NotCut},
   };
   // A grade cuts as its family: 6082-T6 is aluminium to a chipload table.
   const auto it = kMap.find(CADMaterials::MaterialLibrary::FamilySlug(slug));
