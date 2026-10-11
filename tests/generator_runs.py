@@ -87,10 +87,13 @@ def pantilt(port, out):
 
 def planetary(port, out):
     # The print plate with its exact mesh clearances and the STL's shell
-    # count, the assembly and both motion studies. Left out: the sun's static
-    # study (--study: a GPU, or two minutes of CPU) and the hero still.
+    # count, the assembly, both motion studies and the push check. Left
+    # out: the sun's static study (--study: a GPU, or two minutes of CPU)
+    # and the hero still. At 90 mm: the scratch instance has no measured
+    # profile, and the built-in table's 0.25 mm gap needs teeth bigger than
+    # a 70 mm ring holds (generators/planetary/README.md#bearers).
     return ([PY, "-u", os.path.join(GEN, "planetary", "build.py"),
-             "--port", str(port), "--no-render",
+             "--port", str(port), "--no-render", "--diameter", "90",
              "--out", os.path.join(out, "planetary")],
             [r"motion, one orbit .*: passed", r"push check: passed",
              r"planetary: 5 shells"], None)

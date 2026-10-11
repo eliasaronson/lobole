@@ -103,6 +103,18 @@ def solve(diameter, gap):
     # A module that scales with the part: 50 modules across the ring, to the
     # nearest 0.05 — 1.4 at 70 mm, where a tooth tip is several lines wide.
     m = max(0.05, round(diameter / 50.0 / 0.05) * 0.05)
+    # And teeth deep enough for the gap. The bearers let each mesh close by
+    # the gap, so the worst push on the sun opens the far mesh by
+    # g (2 / cos(pi/N) + 1) (push_check, which measures it); at least
+    # MIN_ENGAGED of the working depth must stay. A coarse process wants
+    # bigger teeth: at the built-in table's 0.25 a side, 1.6 against 1.4.
+    m_push = (g * (2.0 / math.cos(math.pi / PLANETS) + 1.0)
+              / (2.0 * ADDENDUM * (1.0 - MIN_ENGAGED)))
+    why = ""
+    if m_push > m:
+        m = math.ceil(m_push / 0.05 - 1e-9) * 0.05
+        why = (f" (the module the {g:g} mm gap needs, so the worst push "
+               f"leaves {MIN_ENGAGED:.0%} of the teeth engaged)")
     # Tip clearance at least the gap: a printed tip on a printed root fuses
     # as readily as a flank on a flank.
     c = max(0.25 * m, g)
@@ -128,7 +140,9 @@ def solve(diameter, gap):
     if best is None:
         raise SystemExit(f"planetary: no sun/planet/ring with at least "
                          f"{MIN_TEETH} teeth fits a Ø{diameter} ring at "
-                         f"module {m} — a larger --diameter")
+                         f"module {m:g}{why} — a larger --diameter"
+                         + (", or a --profile measured on your printer "
+                            "(a smaller gap)" if why else ""))
     _, zs, zp, zr = best
     alpha = math.radians(PRESSURE_DEG)
     beta = math.radians(HELIX_DEG)
@@ -506,12 +520,12 @@ def closure(d, moving, still, at, rot_deg, tol=1e-3):
     """How far `moving` travels along +X from `at` before it touches
     `still`, on the exact solids: the centre distance a mesh can close.
 
-    A body moved by d closes no gap by more than d, so a step of the
-    measured gap never passes the contact, and one that lands in contact
-    found it (a cylinder's gap closes at exactly that rate). Teeth close
-    slower, at the rate the last step measured, which the next step takes;
-    a step that lands in contact brackets the answer and the rest narrow
-    it."""
+    Two bounds close in on the answer. A body moved by d closes no gap by
+    more than d, so `lo + gap` is never past the contact (a safe step). The
+    gap closes at the rate the last two clear steps measured until another
+    pair of faces takes over, which only ever closes faster, so a step of
+    `gap / rate` lands at the contact or past it. The steps alternate: a
+    jump that lands in contact is followed by a safe step."""
     def gap(t):
         d.call("set_occurrence_transform", occurrence=moving, transform={
             "position": [at[0] + t, at[1], 0.0],
@@ -522,28 +536,30 @@ def closure(d, moving, still, at, rot_deg, tol=1e-3):
     if glo <= tol:
         raise SystemExit(f"planetary: push check: the pair touches as "
                          f"placed ({glo:.4f} mm)")
-    answer = None
-    while answer is None:
-        if n > 30:
+    safe = True
+    while True:
+        low = lo + glo  # no contact is nearer than this
+        if hi is not None and hi - low < 2.0 * tol:
+            answer = 0.5 * (low + hi)
+            break
+        if n > 40:
             raise SystemExit("planetary: push check: no contact found")
-        if hi is None:
-            t = lo + (glo if rate is None else glo / rate)
-        else:
-            t = 0.5 * (lo + hi) if rate is None else min(
-                max(lo + glo / rate, lo + 0.1 * (hi - lo)),
-                hi - 0.1 * (hi - lo))
+        t = low
+        if not safe and rate:
+            jump = lo + glo / rate
+            if hi is not None:
+                jump = min(jump, hi - tol)
+            if jump > low + tol:
+                t = jump
         g, n = gap(t), n + 1
         if g > tol:
-            rate = (glo - g) / (t - lo) if glo > g else None
-            lo, glo = t, g
-            if glo < 2.0 * tol:
-                answer = lo + glo
-        elif hi is None and rate is None:
-            answer = t  # the safe step, which no contact can outrun
+            rate = (glo - g) / (t - lo) if glo > g else rate
+            lo, glo, safe = t, g, False
+        elif t == low:
+            answer = low  # the contact is within `tol` of a safe step
+            break
         else:
-            hi = t
-            if hi - lo < 2.0 * tol:
-                answer = 0.5 * (lo + hi)
+            hi, safe = t, True
     d.call("set_occurrence_transform", occurrence=moving, transform={
         "position": [at[0], at[1], 0.0],
         "rotate": {"axis": [0, 0, 1], "angle_deg": rot_deg}})

@@ -9,7 +9,7 @@ numbered planets orbit at the ratio engraved on the ring.
 
     tools/headless-preview.sh --start <port>
     python3 generators/planetary/build.py --port <port> --profile "K5 PLA on P1S"
-    python3 generators/planetary/build.py --port <port> --diameter 90 --study
+    python3 generators/planetary/build.py --port <port> --diameter 90 --study   # the built-in table
 
 Output goes to `scratch/planetary/` (or `--out`): `planetary.stl` (the plate,
 five shells), `planetary.dsgn`, `planetary.png` (the hero still) and
@@ -30,7 +30,13 @@ community's numbers. The rest derives:
   backlash (the gap along the flank's normal: divided by cos of the pressure
   angle and of the base helix angle), the tip clearance (at least the gap),
   and the spacing every check below holds the model to.
-- **The module**: fifty across the ring (1.4 at 70 mm).
+- **The module**: fifty across the ring (1.4 at 70 mm), and at least
+  what the gap needs for the worst push to leave half the working depth
+  engaged ([Bearers](#bearers)): a push opens a mesh by about five gaps,
+  so the module is at least 6.25 times the gap a side. A measured 0.1 mm
+  needs 0.63; the built-in PLA table's 0.25 needs 1.6, and no set with
+  12-tooth planets fits a 70 mm ring at 1.6, so without a profile the
+  generator refuses below 80 mm and says why.
 - **The tooth counts**: the largest ring that fits inside a wall of 7 % of
   the diameter, with `Zr = Zs + 2 Zp` (the planets fit between),
   `(Zs + Zr) % 3 == 0` (three equal planets assemble), neighbouring planets
@@ -147,11 +153,11 @@ a mesh closes by the gap instead of 0.25 mm.
   working depth (2 · 0.8 m) must be at least half of it, one addendum: each
   tooth then still reaches the other's pitch circle and they bear flank on
   flank; below it the contact runs out to the tip corners and the next push
-  rides a tooth over. At 70 mm in K5: the sun travels 0.40 mm and 1.75 mm
+  rides a tooth over. At 70 mm in K5: the sun travels 0.40 mm and 1.74 mm
   (78 %) stays engaged; at the knob's tilt, 1.74 mm (78 %).
 - **The push check can fail.** The same measurement on the gears as teeth
   alone (`sun, no bearer` and the rest, what the first print was) must fail
-  it, or the run stops: 0.257 / 0.250 mm closures, the sun travels 1.01 mm
+  it, or the run stops: 0.26 / 0.25 mm closures, the sun travels 1.01 mm
   and 0.98 mm (44 %) is left — what the hand found on the print.
 
 `--study` adds a static study of the sun, the weakest gear: a firm 60 N
@@ -175,8 +181,9 @@ It reports two stresses and says which is which:
   of the part.
 
 The generator test `generator_planetary`
-(generators/README.md#the-big-generators-as-tests) runs the default build
-without the still, and waits for the push check's verdict too.
+(generators/README.md#the-big-generators-as-tests) builds at 90 mm on the
+built-in table (its scratch instance has no measured profile) without the
+still, and waits for the push check's verdict too.
 
 ## Printing it on a P1S
 
