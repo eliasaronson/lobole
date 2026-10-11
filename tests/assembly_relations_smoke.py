@@ -383,6 +383,65 @@ def main():
         rels = {r["id"]: r for r in d.call("list_relations")["relations"]}
         expect(rels[epi["id"]]["terms"][2]["coefficient"] == -60,
                f"new teeth, new coefficients: {rels[epi['id']]}")
+
+        # A carry (docs/assemblies/relations.md#intermittent): a Geneva of
+        # three slots steps the transfer 120 degrees once a turn of the
+        # units, and stands still between.
+        u_occ = d.call("add_occurrence", part="gear")["id"]
+        t_occ = d.call("add_occurrence", part="gear")["id"]
+        u = origin_mate(d, "revolute", carrier, u_occ, name="units")
+        t = origin_mate(d, "revolute", carrier, t_occ, name="transfer")
+        before = len(d.call("list_relations")["relations"])
+        refused(d, "add_relation", "start_deg", type="intermittent", a=u,
+                b=t, motion="geneva", slots=3)
+        refused(d, "add_relation", "uniform or geneva", type="intermittent",
+                a=u, b=t, motion="genva", slots=3, start_deg=0)
+        refused(d, "add_relation", "slots alone", type="intermittent", a=u,
+                b=t, motion="geneva", slots=3, start_deg=0, step_deg=-120)
+        refused(d, "add_relation", "at least 3", type="intermittent", a=u,
+                b=t, motion="geneva", slots=2, start_deg=0)
+        refused(d, "add_relation", "step_deg, not step_mm",
+                type="intermittent", a=u, b=t, start_deg=0, step_mm=3,
+                duration_deg=30)
+        refused(d, "add_relation", "no ratio", type="intermittent", a=u,
+                b=t, start_deg=0, step_deg=36, duration_deg=30, ratio=2)
+        refused(d, "add_relation", "duration_deg", type="intermittent", a=u,
+                b=t, start_deg=0, step_deg=36, duration_deg=400)
+        expect(len(d.call("list_relations")["relations"]) == before,
+               "a refused carry was added anyway")
+        carry = d.call("add_relation", type="intermittent", a=u, b=t,
+                       motion="geneva", slots=3, start_deg=-12, phase=0.0,
+                       name="carry")
+        expect(carry["motion"] == "geneva" and carry["slots"] == 3
+               and abs(carry["step"] + 120.0) < 1e-9
+               and abs(carry["duration_deg"] - 60.0) < 1e-9,
+               f"a Geneva's step and window from its slots: {carry}")
+        d.call("set_mate", id=u, rotation_deg=-180.0)
+        expect(abs(rot(t)) < 1e-9, f"between carries: {rot(t)}")
+        d.call("set_mate", id=u, rotation_deg=-540.0)
+        expect(abs(math.degrees(rot(t)) - 120.0) < 1e-6,
+               f"one turn back, one step on: {math.degrees(rot(t))}")
+        # The transfer turned on its own: the units stay, and the carry
+        # says it is not satisfied — a lock, holding.
+        d.call("set_mate", id=t, rotation_deg=125.0)
+        expect(abs(math.degrees(rot(u)) + 540.0) < 1e-6,
+               f"the driver is never turned back: {math.degrees(rot(u))}")
+        rels = {r["id"]: r for r in d.call("list_relations")["relations"]}
+        expect("not satisfied" in rels[carry["id"]].get("error", ""),
+               f"the carry reports the lock: {rels[carry['id']]}")
+        d.call("set_relation", id=carry["id"], start_deg=-10.0)
+        rels = {r["id"]: r for r in d.call("list_relations")["relations"]}
+        expect(abs(rels[carry["id"]]["start_deg"] + 10.0) < 1e-12,
+               "start_deg edited")
+        refused(d, "set_relation", "only an intermittent", id=epi["id"],
+                start_deg=3.0)
+        # Made where the parts stand, a carry moves nothing.
+        d.call("remove_relation", id=carry["id"])
+        d.call("set_mate", id=t, rotation_deg=17.0)
+        d.call("add_relation", type="intermittent", a=u, b=t,
+               start_deg=0, step_deg=36, duration_deg=36)
+        expect(abs(math.degrees(rot(t)) - 17.0) < 1e-6,
+               f"adding one moved the follower: {math.degrees(rot(t))}")
         d.close()
     finally:
         app.terminate()

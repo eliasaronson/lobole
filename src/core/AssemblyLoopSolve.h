@@ -9,6 +9,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -112,6 +113,9 @@ struct LoopRelation {
     double coefficient = 1.0;
   };
   std::vector<Term> terms;
+  // An intermittent relation (v174): when set, the row is
+  // dofB - value(dofA), its phase included, rather than a ratio's.
+  std::function<double(double)> value;
 };
 
 // A DOF held at a value while the loop closes around it (v88 fix): the mate

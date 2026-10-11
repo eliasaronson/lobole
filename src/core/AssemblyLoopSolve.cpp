@@ -406,6 +406,7 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
     // A relation over several mates (v171): (column, coefficient) per term,
     // the coefficients already divided by the largest.
     std::vector<std::pair<int, double>> terms;
+    std::function<double(double)> value; // intermittent (v174)
   };
   std::vector<RelationRow> relRows;
   for (const LoopRelation& r : problem.relations) {
@@ -441,6 +442,7 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
       continue;
     relRows.push_back(
         {ca, cb, r.ratio, r.phase, r.dofB == MateDof::Rotation, r.lift});
+    relRows.back().value = r.value;
   }
   // A pinned DOF is one more row: q[col] - value = 0. It is a row rather
   // than a removed column so an over-driven mechanism reports a residual
@@ -508,7 +510,8 @@ LoopSolution SolveComponent(const LoopProblem& problem, Tilt* tilt = nullptr) {
       // A turning follower's table is in degrees, as RelationValue reads it.
       const double lift = rr.lift.empty() ? 0.0 : CamLift(rr.lift, qq[rr.colA]);
       const double want =
-          rr.lift.empty()
+          rr.value ? rr.value(qq[rr.colA])
+          : rr.lift.empty()
               ? rr.ratio * qq[rr.colA] + rr.phase
               : (rr.rotationB ? angles::ToRadians(lift) : lift) + rr.phase;
       const double v = qq[rr.colB] - want;

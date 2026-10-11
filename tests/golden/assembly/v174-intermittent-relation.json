@@ -1,0 +1,202 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "flipped": false,
+      "id": 5,
+      "mate_type": "revolute",
+      "name": "units axis",
+      "offset": 0.0,
+      "rotation": -65.97344572538566,
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 3
+      },
+      "flipped": false,
+      "id": 6,
+      "mate_type": "revolute",
+      "name": "transfer axis",
+      "offset": 0.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    },
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 4
+      },
+      "flipped": false,
+      "id": 7,
+      "mate_type": "revolute",
+      "name": "tens axis",
+      "offset": 0.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    }
+  ],
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Housing",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 2,
+      "name": "Units",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 3,
+      "name": "Transfer",
+      "part_id": 3,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 4,
+      "name": "Tens",
+      "part_id": 4,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "relations": [
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "duration_deg": 60.0,
+      "id": 8,
+      "kind": "intermittent",
+      "mate_a": 5,
+      "mate_b": 6,
+      "motion": "geneva",
+      "name": "carry",
+      "period_deg": 360.0,
+      "phase": 0.0,
+      "ratio": 1.0,
+      "slots": 3,
+      "start_deg": -12.0,
+      "step": -120.0,
+      "type": "Relation"
+    },
+    {
+      "dof_a": "rotation",
+      "dof_b": "rotation",
+      "id": 9,
+      "kind": "gear",
+      "mate_a": 6,
+      "mate_b": 7,
+      "name": "transfer drives tens",
+      "phase": 0.0,
+      "ratio": -0.3,
+      "teeth_a": 9,
+      "teeth_b": 30,
+      "type": "Relation"
+    }
+  ],
+  "version": 174
+}

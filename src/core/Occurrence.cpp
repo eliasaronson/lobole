@@ -237,6 +237,39 @@ double CamLift(const std::vector<std::pair<double, double>>& table,
   return CamAt(table, angles::ToDegrees(angleRad), slopeOut);
 }
 
+double IntermittentLaw(const Relation::Intermittent& i, double t) {
+  t = std::clamp(t, 0.0, 1.0);
+  if (i.slots <= 0)
+    return t; // uniform: a gear-driven step
+  // An external Geneva of N slots: the pin, at R = C sin(pi/N) from the
+  // driver's axis, enters a slot radially and leaves it radially, the driver
+  // turning 180 - 360/N degrees meanwhile. With alpha the driver's angle
+  // from the line of centres, the slot (and the wheel) stands at
+  // beta = atan2(R sin alpha, C - R cos alpha) off that line, from -pi/N at
+  // entry to +pi/N at exit — closed form, so the relation is the geometry.
+  const double half = M_PI / i.slots;
+  const double k = std::sin(half); // R / C
+  const double alpha = (t - 0.5) * (M_PI - 2.0 * half);
+  const double beta =
+      std::atan2(k * std::sin(alpha), 1.0 - k * std::cos(alpha));
+  return (beta + half) / (2.0 * half);
+}
+
+double IntermittentValue(const Relation& r, double aRad) {
+  const Relation::Intermittent& i = r.intermittent;
+  const double period = angles::ToRadians(i.periodDeg);
+  const double duration = angles::ToRadians(i.durationDeg);
+  if (period <= 0.0 || duration <= 0.0)
+    return 0.0; // refused at creation and reported by the solve
+  const double x = (aRad - angles::ToRadians(i.startDeg)) / period;
+  const double n = std::floor(x);
+  const double u = (x - n) * period;
+  const double s = u < duration ? IntermittentLaw(i, u / duration) : 1.0;
+  const double step =
+      r.dofB == MateDof::Rotation ? angles::ToRadians(i.step) : i.step;
+  return step * (n + s);
+}
+
 uint64_t AssemblyDocument::AddAssertion(ClearanceAssertion a) {
   a.id = m_nextId++;
   m_assertions.push_back(std::move(a));

@@ -44,6 +44,7 @@ or `offset`). Most kinds are one equation:
 | `linear_n` | Σ coefficient · dof = constant, over two or more mates | none: a coefficient per term ([below](#relations-over-several-mates)) |
 | `epicyclic` | sun, ring and carrier rotations, by Willis | from `teeth_sun`, `teeth_ring` |
 | `planet` | a planet's turn on its carrier, from the sun's and the carrier's | from `teeth_sun` and the planet's teeth |
+| `intermittent` | rotation → rotation or offset, one step a turn | none: a step, a window and a law ([Intermittent](#intermittent)) |
 
 The ratio is derived from the kind's own numbers when they are given (tooth
 counts, pitch radius, pitch) and otherwise taken as a bare `ratio`; a relation
@@ -279,6 +280,53 @@ drove it is left disagreeing, which that relation's own residual check
 reports. What rides over the teeth the click holds is a cam, which follows
 their shape. Like a freewheel, it is left out of loop rows.
 
+## Intermittent
+
+A carry: per turn of `a` (or per `period_deg`), `b` advances ONE step
+during a window of a's rotation and stands still the rest of the turn —
+an odometer's carry, a Geneva's index, a film advance. Every other kind is
+continuous, and a cam's table returns to where it started each turn, so
+none of them can count.
+
+    x = (a − start) / period,  n = ⌊x⌋,  u = (x − n) · period
+    b = phase + step · (n + s(u / duration))   while u < duration
+    b = phase + step · (n + 1)                 for the rest of the period
+
+It is a pure function of a, with no history: the count is a's whole
+turns, so a wheel turned back runs it back through zero, and a pose a
+thousand turns on costs what one at zero does (`IntermittentValue` in
+`src/core/Occurrence.cpp`). `s`, the window's progress from 0 to 1, is the
+motion law:
+
+- `uniform` — linear, a gear-driven step (a two-tooth carry):
+  `{start_deg, step_deg | step_mm, duration_deg, period_deg?}`. The step
+  is signed and in the follower's unit, and the wrong one is refused, as a
+  cam's rise is; `period_deg` defaults to one turn.
+- `geneva` — an external Geneva of `slots` N ≥ 3, exactly. The pin, at
+  R = C·sin(π/N) from the driver's axis (C the distance between the axes),
+  enters a slot radially and leaves it radially; with α the driver's angle
+  from the line of centres the wheel's slot stands at
+  β = atan2(R sin α, C − R cos α), so s = (β + π/N) / (2π/N). The window
+  is 180 − 360/N degrees and the step −360/N (an external Geneva
+  counter-rotates, as a gear pair does), once a turn; all three follow from
+  `slots`, and giving one of them as well is refused. Being the geometry,
+  a motion study's clash check on a real Geneva checks the shapes, not a
+  guess at their motion (`tests/test_assembly_relations.cpp`, "A Geneva's
+  law is the pin in its slot").
+
+`start_deg`, where a's window opens, is required for both: the timing is
+the whole of a carry, and no default would be the right one. `phase`
+defaults to where b stands, so adding a carry moves nothing. A cylindrical
+b names `dof_b`; a Geneva's b turns.
+
+**Forward only.** A locked wheel says nothing about where its driver
+stands, so, like a cam, an intermittent relation is never inverted: b
+driven on its own leaves a where it is, and the relation reports `not
+satisfied` — which is what a lock holding is. Turned that way in a motion
+study, the parts that lock it clash, which is how a counter's lock is
+checked.
+In a mate loop it is a residual row, dofB − value(dofA).
+
 ## Worm
 
 A worm drives its wheel on crossed axes, `a` the worm's revolute and `b` the
@@ -316,7 +364,9 @@ simulated.
 - `add_relation {type, a, b, …}` — kind-specific parameters as above;
   returns the relation, its `error` if the first solve found one, and any
   `warnings`.
-- `set_relation {id, ratio?, phase?, name?, lead?}` — `lead` only for a
+- `set_relation {id, ratio?, phase?, name?, lead?, start_deg?}` —
+  `start_deg` only for an intermittent relation, which refuses a ratio;
+  `lead` only for a
   freewheel or click; `ratio` refused on a thread-backed screw (edit the
   thread) and on a gear or chain made from teeth, which takes `teeth_a`,
   `teeth_b` (and a gear `internal`); an epicyclic takes `teeth_sun`,
@@ -326,7 +376,7 @@ simulated.
 - `set_mate` and a drag within a mate propagate from the mate they changed.
 - The occurrence panel lists, edits and makes them ([In the app](#in-the-app));
   a freewheel's `lead` is read-only there. The SDK has
-  `Asm.gear(…, internal=)/epicyclic/linear_n/chain/rack/screw/cam/freewheel/click/worm`.
+  `Asm.gear(…, internal=)/epicyclic/linear_n/chain/rack/screw/cam/freewheel/click/worm/intermittent`.
 - Stored in the assembly's `relations/` directory, one file per relation
   ([../versioning/format.md](../versioning/format.md)).
 

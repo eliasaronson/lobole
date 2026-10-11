@@ -3050,6 +3050,22 @@ class Asm(_Tab):
         return self.app.add_relation(type="cam", **_mate_ref("a", mate_a),
                                      **_mate_ref("b", mate_b), **kw)
 
+    def intermittent(self, mate_a, mate_b, start_deg, slots=None, **kw):
+        """A carry (v174): a's rotation steps b once per turn (or
+        period_deg) during a window opening at start_deg, b standing still
+        the rest of it. With `slots`, an external Geneva's exact law, step
+        and window; otherwise a uniform step: step_deg (or step_mm for a
+        slide) and duration_deg. Forward only: b driven alone leaves a
+        where it is and the relation reports it — a lock holding
+        (docs/assemblies/relations.md#intermittent)."""
+        self.activate()
+        if slots is not None:
+            kw.update(motion="geneva", slots=slots)
+        return self.app.add_relation(type="intermittent",
+                                     **_mate_ref("a", mate_a),
+                                     **_mate_ref("b", mate_b),
+                                     start_deg=start_deg, **kw)
+
     def freewheel(self, mate_a, mate_b, drives, ratio=1.0, **kw):
         """A one-way clutch, rotation to rotation (v104): b follows a while
         a drives it in `drives` ("positive" or "negative") and slips when a

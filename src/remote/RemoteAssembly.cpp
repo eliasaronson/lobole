@@ -209,7 +209,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "status,dx?,dy?,ball_rotation?,error?,residual_mm?,suppressed?,held?}"},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
-     "gear|chain|rack|screw|linear|cam|freewheel|click|worm, a: mate id, b: "
+     "gear|chain|rack|screw|linear|cam|freewheel|click|worm|intermittent, "
+     "a: mate id, b: "
      "mate id}: "
      "dof_b = ratio * dof_a + phase. The ratio is DERIVED from the kind's "
      "own numbers when given (screw may instead reference thread_part and "
@@ -256,9 +257,26 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "rotation (pass the same id as a and b) free the way it {drives} and "
      "held at its mark the other way, where the relation that pushed it "
      "reports; what rides over the teeth it holds is a cam, which follows "
-     "their shape. A cam is the "
-     "one relation that is not invertible (many angles give one lift), so it "
-     "drives forward only. `ratio` may be given directly for any other kind; "
+     "their shape. INTERMITTENT is a carry: a's rotation steps b ONCE per "
+     "period of a, during a window, and holds it still the rest of the "
+     "period — b = phase + step * (n + s), n the whole periods since "
+     "start_deg and s the window's progress, 0 to 1 "
+     "(docs/assemblies/relations.md#intermittent). {start_deg (required: "
+     "the angle of a where each window opens), motion?: uniform (default; s "
+     "linear, a gear-driven step) | geneva}. Uniform takes {step_deg (a "
+     "turning b) | step_mm (a sliding b), signed, duration_deg (the window), "
+     "period_deg? (default 360)}; GENEVA takes {slots} (3 or more) and "
+     "derives the rest from it — step -360/slots (an external Geneva "
+     "counter-rotates), window 180 - 360/slots, once a turn — with s the "
+     "exact Geneva law, the pin entering and leaving the slot radially; "
+     "giving a step, window or period beside slots is refused. A "
+     "cylindrical b names dof_b. phase (b's unit) defaults to where b "
+     "stands, so adding a carry moves nothing. A cam and an intermittent "
+     "relation are not invertible (many angles give one lift; a locked "
+     "wheel says nothing of where its driver is), so they "
+     "drive forward only: b driven on its own leaves a where it is and the "
+     "relation reports not satisfied — a lock, holding. `ratio` may be given "
+     "directly for any other kind; "
      "refused when neither is. {phase?} in b's unit (rad or mm) is what makes "
      "teeth mesh. Dragging or set_mate on EITHER mate turns the other; inside "
      "a mate loop the relation is a solver row and lowers the DOF count. "
@@ -291,8 +309,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "when the sun is driven), and the relation's `held` says which.",
      "thread_part, thread_feature, a, a_path, b, b_path, carrier, constant, "
      "dof_b, drives, duration_deg, hand, internal, lead, "
-     "lift, name, planet, planets, ride_deg, ride_dof, ride_mate, ride_mm, "
-     "ring, sun, teeth, teeth_planet, teeth_ring, teeth_sun, terms, "
+     "lift, motion, name, period_deg, planet, planets, ride_deg, ride_dof, "
+     "ride_mate, ride_mm, "
+     "ring, slots, step_deg, step_mm, sun, teeth, teeth_planet, teeth_ring, "
+     "teeth_sun, terms, "
      "phase, pitch, pitch_radius, ratio, "
      "rise, rise_deg, start_deg, starts, teeth_a, teeth_b, type"},
     {"set_relation",
@@ -302,19 +322,24 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "teeth takes {teeth_a?, teeth_b?} (and a gear {internal?}) instead of "
      "a ratio; an epicyclic {teeth_sun?, teeth_ring?}, a planet "
      "{teeth_planet?, teeth_sun?}, and every relation over several mates "
-     "{constant?} (radians) instead of a phase.",
-     "constant, id, internal, lead, name, phase, ratio, teeth_a, teeth_b, "
-     "teeth_planet, teeth_ring, teeth_sun"},
+     "{constant?} (radians) instead of a phase. An intermittent relation "
+     "takes {start_deg?} (its window's timing) and {phase?}, and refuses a "
+     "ratio.",
+     "constant, id, internal, lead, name, phase, ratio, start_deg, teeth_a, "
+     "teeth_b, teeth_planet, teeth_ring, teeth_sun"},
     {"remove_relation", "Remove a relation by id.", "id"},
     {"list_relations",
      "List relations with status/errors. A relation over several mates "
      "(linear_n, epicyclic, planet) lists `terms` and `constant` in place "
      "of mate_a/mate_b/ratio/phase, and `held` names a member the last "
-     "solve held where it stood because nothing drove it.",
+     "solve held where it stood because nothing drove it. An intermittent "
+     "relation lists its step (b's unit, degrees for a turn), period_deg, "
+     "start_deg, duration_deg, motion and, for a Geneva, slots.",
      "", remote::NoFlags,
      "relations[]{type,id,name,kind,mate_a?,mate_b?,dof_a?,dof_b?,ratio?,"
      "phase?,teeth_a?,teeth_b?,internal?,terms?,constant?,"
      "thread_part?,thread_feature?,lift?,drives?,lead?,teeth?,ride?,"
+     "step?,period_deg?,start_deg?,duration_deg?,motion?,slots?,"
      "mate_a_path?,mate_b_path?,error?,held?}"},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
@@ -2376,6 +2401,89 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       r.ratio = 1.0; // unused by a cam, but never zero (the zero check below)
       break;
     }
+    case RelationKind::Intermittent: {
+      // A carry (docs/assemblies/relations.md#intermittent): b steps once
+      // per period of a's turn, during a window, and stands still between.
+      // `motion` is the law over the window; a Geneva's step and window
+      // follow from its slots, so giving them too is refused.
+      // rpc-params: motion, slots, step_deg, step_mm, period_deg
+      r.dofA = MateDof::Rotation;
+      if (p.contains("ratio"))
+        throw std::runtime_error(
+            "an intermittent relation has no ratio: it steps step_deg (or "
+            "step_mm) once a period_deg of a, during duration_deg from "
+            "start_deg");
+      const bool bSlides = assembly::MateHasDof(b->type, MateDof::Offset);
+      const bool bTurns = assembly::MateHasDof(b->type, MateDof::Rotation);
+      if (p.contains("dof_b"))
+        r.dofB =
+            DocumentIO::MateDofFromString(p.at("dof_b").get<std::string>());
+      else if (bSlides && bTurns)
+        throw std::runtime_error(
+            "b is a cylindrical mate, which both turns and slides: say which "
+            "the step moves with dof_b (rotation or offset)");
+      else
+        r.dofB = bTurns ? MateDof::Rotation : MateDof::Offset;
+      if (r.mateA == r.mateB && samePath && r.dofB == MateDof::Rotation)
+        throw std::runtime_error(
+            "an intermittent relation on one mate would step its rotation "
+            "from itself");
+      const bool turns = r.dofB == MateDof::Rotation;
+      Relation::Intermittent& im = r.intermittent;
+      im.slots = DocumentIO::IntermittentSlotsFor(
+          p.value("motion", std::string("uniform")), p.value("slots", 0));
+      if (!p.contains("start_deg"))
+        throw std::runtime_error(
+            "an intermittent relation needs start_deg, the angle of a where "
+            "each step's window opens: the timing is the whole of a carry, "
+            "and no default would be the right one");
+      im.startDeg = p.at("start_deg").get<double>();
+      if (im.slots > 0) {
+        if (!turns)
+          throw std::runtime_error(
+              "a Geneva's wheel turns: b must be a revolute (or a "
+              "cylindrical with dof_b rotation)");
+        for (const char* k :
+             {"step_deg", "step_mm", "duration_deg", "period_deg"})
+          if (p.contains(k))
+            throw std::runtime_error(
+                std::string(k) +
+                " follows from a Geneva's slots (step -360/slots, window "
+                "180 - 360/slots, once a turn): give slots alone");
+        im.step = -360.0 / im.slots;
+        im.durationDeg = 180.0 - 360.0 / im.slots;
+        im.periodDeg = 360.0;
+      } else {
+        // The step is in the FOLLOWER's unit, and the wrong one is refused,
+        // never converted — as a cam's rise is.
+        if (turns && p.contains("step_mm"))
+          throw std::runtime_error(
+              "this step TURNS b: give step_deg, not step_mm");
+        if (!turns && p.contains("step_deg"))
+          throw std::runtime_error(
+              "this step SLIDES b: give step_mm, not step_deg");
+        const char* stepKey = turns ? "step_deg" : "step_mm";
+        if (!p.contains(stepKey) || !p.contains("duration_deg"))
+          throw std::runtime_error(
+              std::string("a uniform step needs ") + stepKey +
+              " (how far b moves each step, signed) and duration_deg (the "
+              "window of a's turn it moves in)");
+        im.step = p.at(stepKey).get<double>();
+        im.durationDeg = p.at("duration_deg").get<double>();
+        im.periodDeg = p.value("period_deg", 360.0);
+        if (im.step == 0.0)
+          throw std::runtime_error("a step of zero moves nothing");
+        if (im.periodDeg <= 0.0)
+          throw std::runtime_error(
+              "period_deg is how far a turns per step, more than zero");
+        if (im.durationDeg <= 0.0 || im.durationDeg > im.periodDeg)
+          throw std::runtime_error(
+              "duration_deg is the window inside each period: 0 < "
+              "duration_deg <= period_deg");
+      }
+      r.ratio = 1.0; // unused, but never zero (the zero check below)
+      break;
+    }
     case RelationKind::LinearN:
     case RelationKind::Epicyclic:
     case RelationKind::Planet:
@@ -2385,6 +2493,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       r.ratio = p.at("ratio").get<double>();
     else if (r.kind != RelationKind::Cam && r.kind != RelationKind::Click &&
              r.kind != RelationKind::Worm &&
+             r.kind != RelationKind::Intermittent &&
              !(p.contains("teeth_a") || p.contains("pitch_radius") ||
                p.contains("pitch") || r.threadPart))
       throw std::runtime_error(
@@ -2486,6 +2595,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
               ? p.at("lead").get<double>()
               : assembly::MateDofValue(*b, r.dofB) -
                     (r.ratio * assembly::MateDofValue(*a, r.dofA) + r.phase);
+    } else if (r.kind == RelationKind::Intermittent && !p.contains("phase")) {
+      // Made where the parts stand, so adding a carry moves nothing: b's
+      // count starts from where it is.
+      r.phase = assembly::MateDofValue(*b, r.dofB) -
+                IntermittentValue(r, assembly::MateDofValue(*a, r.dofA));
     } else if (r.kind == RelationKind::Click) {
       // And a pawl is made where its wheel STANDS: its mark is that angle,
       // not zero, which would hold a wheel that starts behind it.
@@ -2557,6 +2671,10 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       refuse("teeth_ring", "only an epicyclic's");
     if (p.contains("teeth_planet") && r->kind != RelationKind::Planet)
       refuse("teeth_planet", "only a planet's");
+    if (p.contains("start_deg") && r->kind != RelationKind::Intermittent)
+      refuse("start_deg", "only an intermittent relation's");
+    if (p.contains("ratio") && r->kind == RelationKind::Intermittent)
+      refuse("ratio", "it steps; remove it and add one with the new step");
     Relation edited = *r;
     if (p.contains("teeth_a"))
       edited.teethA = TeethFromRequest(p.at("teeth_a"), "teeth_a");
@@ -2602,6 +2720,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       r->ratio = p.at("ratio").get<double>();
     if (p.contains("phase"))
       r->phase = p.at("phase").get<double>();
+    if (p.contains("start_deg")) // the carry's timing (v174)
+      r->intermittent.startDeg = p.at("start_deg").get<double>();
     if (p.contains("name"))
       r->name = p.at("name").get<std::string>();
     state.assembly->BumpVersion();

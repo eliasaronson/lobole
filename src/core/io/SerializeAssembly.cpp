@@ -197,12 +197,19 @@ constexpr std::pair<const char*, MateType> kMateTypes[] = {
     {"planar", MateType::Planar},     {"ball", MateType::Ball}};
 
 constexpr std::pair<const char*, RelationKind> kRelationKinds[] = {
-    {"gear", RelationKind::Gear},           {"rack", RelationKind::Rack},
-    {"screw", RelationKind::Screw},         {"linear", RelationKind::Linear},
-    {"chain", RelationKind::Chain},         {"cam", RelationKind::Cam},
-    {"freewheel", RelationKind::Freewheel}, {"click", RelationKind::Click},
-    {"worm", RelationKind::Worm},           {"linear_n", RelationKind::LinearN},
-    {"epicyclic", RelationKind::Epicyclic}, {"planet", RelationKind::Planet}};
+    {"gear", RelationKind::Gear},
+    {"rack", RelationKind::Rack},
+    {"screw", RelationKind::Screw},
+    {"linear", RelationKind::Linear},
+    {"chain", RelationKind::Chain},
+    {"cam", RelationKind::Cam},
+    {"freewheel", RelationKind::Freewheel},
+    {"click", RelationKind::Click},
+    {"worm", RelationKind::Worm},
+    {"linear_n", RelationKind::LinearN},
+    {"epicyclic", RelationKind::Epicyclic},
+    {"planet", RelationKind::Planet},
+    {"intermittent", RelationKind::Intermittent}};
 
 template <typename T, size_t N>
 std::string NameList(const std::pair<const char*, T> (&table)[N]) {
@@ -436,6 +443,8 @@ const char* RelationKindToString(RelationKind kind) {
     return "epicyclic";
   case RelationKind::Planet:
     return "planet";
+  case RelationKind::Intermittent:
+    return "intermittent";
   }
   return "gear";
 }
@@ -465,6 +474,8 @@ RelationKind RelationKindFromString(const std::string& s) {
     return RelationKind::Epicyclic;
   if (s == "planet")
     return RelationKind::Planet;
+  if (s == "intermittent")
+    return RelationKind::Intermittent;
   throw std::runtime_error("unknown relation type '" + s +
                            "' (expected one of: " + NameList(kRelationKinds) +
                            ")");
@@ -487,6 +498,28 @@ int FreewheelDrivesFromString(const std::string& s) {
                            "' (expected positive or negative — the "
                            "direction b is driven in)");
 }
+
+int IntermittentSlotsFor(const std::string& motion, int slots) {
+  if (motion == "uniform") {
+    if (slots != 0)
+      throw std::runtime_error("slots is a Geneva's; a uniform step has none");
+    return 0;
+  }
+  if (motion == "geneva") {
+    if (slots < 3)
+      throw std::runtime_error("a Geneva has at least 3 slots");
+    return slots;
+  }
+  throw std::runtime_error("unknown intermittent motion '" + motion +
+                           "' (expected uniform or geneva)");
+}
+
+namespace {
+int IntermittentMotionFromJson(const json& j) {
+  return IntermittentSlotsFor(j.at("motion").get<std::string>(),
+                              j.value("slots", 0));
+}
+} // namespace
 
 MateDof MateDofFromString(const std::string& s) {
   if (s == "rotation")
@@ -549,6 +582,18 @@ json RelationToJson(const Relation& r) {
     for (const auto& [angle, mm] : r.lift)
       lift.push_back({angle, mm});
     j["lift"] = std::move(lift);
+  }
+  if (r.kind == RelationKind::Intermittent) {
+    // v174: the step in the follower's unit (degrees for a turn, as a cam's
+    // lift), a's angles in degrees, and the law over the window.
+    const Relation::Intermittent& im = r.intermittent;
+    j["step"] = im.step;
+    j["period_deg"] = im.periodDeg;
+    j["start_deg"] = im.startDeg;
+    j["duration_deg"] = im.durationDeg;
+    j["motion"] = im.slots > 0 ? "geneva" : "uniform";
+    if (im.slots > 0)
+      j["slots"] = im.slots;
   }
   if (r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click) {
     j["drives"] = FreewheelDrivesToString(r.drives); // v104, click v105
@@ -718,6 +763,18 @@ Relation RelationFromJson(const json& j) {
       r.rideMate = ride.at("mate").get<uint64_t>();
       r.rideDof = MateDofFromString(ride.at("dof").get<std::string>());
     }
+  }
+  if (r.kind == RelationKind::Intermittent) { // v174
+    for (const char* k : {"step", "start_deg", "duration_deg", "motion"})
+      if (!j.contains(k))
+        throw std::runtime_error(
+            std::string("an intermittent relation needs `") + k + "`");
+    Relation::Intermittent& im = r.intermittent;
+    im.step = j.at("step").get<double>();
+    im.periodDeg = j.value("period_deg", 360.0);
+    im.startDeg = j.at("start_deg").get<double>();
+    im.durationDeg = j.at("duration_deg").get<double>();
+    im.slots = IntermittentMotionFromJson(j);
   }
   if (r.kind == RelationKind::Freewheel ||
       r.kind == RelationKind::Click) { // v104: the direction is required

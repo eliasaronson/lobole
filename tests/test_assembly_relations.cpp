@@ -1828,3 +1828,214 @@ TEST_CASE("Relations over several mates round-trip, and the v171 golden "
   CHECK_THAT(rot(3), WithinAbs(0.7, 1e-12));
   CHECK_THAT(rot(5), WithinAbs(0.7 * kZs / (kZs + kZr), 1e-9));
 }
+
+namespace {
+// A carry (docs/assemblies/relations.md#intermittent): `units` turning
+// steps `transfer` once a turn, and the transfer turns `tens` through a
+// 9:30 gear. Geneva: 3 slots, the window opening at -12 degrees.
+Relation Geneva(uint64_t a, uint64_t b, int slots, double startDeg) {
+  Relation r;
+  r.kind = RelationKind::Intermittent;
+  r.mateA = a;
+  r.mateB = b;
+  r.dofA = r.dofB = MateDof::Rotation;
+  r.ratio = 1.0;
+  r.intermittent.slots = slots;
+  r.intermittent.step = -360.0 / slots;
+  r.intermittent.durationDeg = 180.0 - 360.0 / slots;
+  r.intermittent.periodDeg = 360.0;
+  r.intermittent.startDeg = startDeg;
+  return r;
+}
+
+double Deg(double rad) { return rad * 180.0 / M_PI; }
+double Rad(double deg) { return deg * M_PI / 180.0; }
+} // namespace
+
+TEST_CASE("An intermittent relation steps once a period and stands still "
+          "between",
+          "[assembly][relations][intermittent]") {
+  Relation r;
+  r.kind = RelationKind::Intermittent;
+  r.dofA = r.dofB = MateDof::Rotation;
+  r.intermittent.step = 36.0;
+  r.intermittent.durationDeg = 36.0;
+  r.intermittent.startDeg = 300.0;
+  const auto at = [&](double deg) {
+    return Deg(IntermittentValue(r, Rad(deg)));
+  };
+  // Before the first window nothing has moved; through it, a uniform step
+  // is linear; after it, b stands at one step until the next turn's window.
+  CHECK_THAT(at(0.0), WithinAbs(0.0, 1e-9));
+  CHECK_THAT(at(299.0), WithinAbs(0.0, 1e-9));
+  CHECK_THAT(at(318.0), WithinAbs(18.0, 1e-9));
+  CHECK_THAT(at(336.0), WithinAbs(36.0, 1e-9));
+  CHECK_THAT(at(359.0), WithinAbs(36.0, 1e-9));
+  CHECK_THAT(at(660.0), WithinAbs(36.0, 1e-9));
+  CHECK_THAT(at(696.0), WithinAbs(72.0, 1e-9));
+  // The count is a's turns, not history: a thousand turns on is a thousand
+  // steps, and turning back runs the count back through zero.
+  CHECK_THAT(at(360.0 * 1000.0), WithinAbs(36.0 * 1000.0, 1e-6));
+  CHECK_THAT(at(-30.0), WithinAbs(-6.0, 1e-9)); // last turn's window
+  CHECK_THAT(at(-60.0), WithinAbs(-36.0, 1e-9));
+  CHECK_THAT(at(-70.0), WithinAbs(-36.0, 1e-9));
+  CHECK_THAT(at(-42.0), WithinAbs(-18.0, 1e-9));
+  // Continuous everywhere, including the window's two ends.
+  for (double deg = -800.0; deg < 800.0; deg += 0.25)
+    CHECK(std::abs(at(deg + 0.25) - at(deg)) <= 0.25 + 1e-9);
+  // A slide steps in mm, untouched by any degree conversion.
+  r.dofB = MateDof::Offset;
+  r.intermittent.step = 2.5;
+  CHECK_THAT(IntermittentValue(r, Rad(700.0)), WithinAbs(5.0, 1e-12));
+}
+
+TEST_CASE("A Geneva's law is the pin in its slot",
+          "[assembly][relations][intermittent]") {
+  for (int n : {3, 4, 6}) {
+    CAPTURE(n);
+    Relation r = Geneva(1, 2, n, 0.0);
+    const double half = M_PI / n;
+    const double c = 1.0, rp = std::sin(half) * c; // centres 1 apart
+    const double window = M_PI - 2.0 * half;
+    double last = -1.0;
+    for (int i = 0; i <= 200; i++) {
+      const double t = i / 200.0;
+      const double s = IntermittentLaw(r.intermittent, t);
+      CHECK(s >= last - 1e-12); // never back
+      last = s;
+      // The wheel, turned by the relation, puts a slot through the pin:
+      // the driver at alpha from the line of centres has its pin at
+      // rp (cos, sin); the wheel at O2 = (c, 0) has turned -step * s from
+      // the slot that faced the driver's axis at entry, which stood at
+      // pi - half... seen from O2 the slot's direction is pi - (s * 2 half
+      // - half), and the pin must lie on it.
+      const double alpha = (t - 0.5) * window;
+      const double px = rp * std::cos(alpha) - c, py = rp * std::sin(alpha);
+      const double slot = M_PI - (s * 2.0 * half - half);
+      CHECK_THAT(px * std::sin(slot) - py * std::cos(slot),
+                 WithinAbs(0.0, 1e-12));
+      CHECK(px * std::cos(slot) + py * std::sin(slot) > 0.0); // not behind
+    }
+    CHECK_THAT(IntermittentLaw(r.intermittent, 0.0), WithinAbs(0.0, 1e-12));
+    CHECK_THAT(IntermittentLaw(r.intermittent, 1.0), WithinAbs(1.0, 1e-12));
+    CHECK_THAT(IntermittentLaw(r.intermittent, 0.5), WithinAbs(0.5, 1e-12));
+    // The pin enters and leaves radially: the wheel starts and stops at
+    // rest, so it moves under a fifth of its step in the window's first
+    // tenth.
+    CHECK(IntermittentLaw(r.intermittent, 1e-4) < 1e-6);
+    CHECK(IntermittentLaw(r.intermittent, 0.1) < 0.2);
+  }
+}
+
+TEST_CASE("A carry turns the next wheel one digit per turn, and a locked "
+          "wheel says so",
+          "[assembly][relations][intermittent]") {
+  Rig r = MakeRig();
+  const uint64_t units = r.Add("units", 2, MateType::Revolute);
+  const uint64_t transfer = r.Add("transfer", 3, MateType::Revolute);
+  const uint64_t tens = r.Add("tens", 4, MateType::Revolute);
+  const uint64_t carry = r.d.AddRelation(Geneva(units, transfer, 3, -12.0));
+  r.d.AddRelation(Gear(transfer, tens, -9.0 / 30.0));
+  const auto turn = [&](uint64_t mate) {
+    return Deg(r.d.FindMateById(mate)->rotation);
+  };
+  const auto drive = [&](double deg) {
+    assembly::SetMateDof(*r.d.FindMateById(units), MateDof::Rotation, Rad(deg));
+    assembly::Solve(r.d, NoParts(), nullptr, {units, MateDof::Rotation});
+  };
+  // Counting is the units turning back 36 degrees a digit; the window, 60
+  // degrees centred between 9 (36) and 0 (0), steps the transfer +120 and
+  // the tens -36.
+  drive(-180.0);
+  CHECK_THAT(turn(tens), WithinAbs(0.0, 1e-9));
+  drive(-360.0 + 72.0); // 08: before the window, still
+  CHECK_THAT(turn(tens), WithinAbs(0.0, 1e-9));
+  drive(-360.0 - 72.0); // 12: after it, one digit on
+  CHECK_THAT(turn(tens), WithinAbs(-36.0, 1e-9));
+  // At 9 and 0 the next wheel is a degree off its digit: the Geneva's law
+  // has done 97 % of the step by then. 29 reads 2, a degree on toward 3;
+  // 30 reads 3, a degree short of it.
+  drive(-360.0 * 3.0 + 36.0);
+  CHECK(std::abs(turn(tens) - (-36.0 * 2.0)) < 1.1);
+  CHECK(std::abs(turn(tens) - (-36.0 * 2.0)) > 0.5);
+  drive(-360.0 * 3.0);
+  CHECK(std::abs(turn(tens) - (-36.0 * 3.0)) < 1.1);
+  // Ninety-nine turns on: 995.
+  drive(-360.0 * 99.0 - 180.0);
+  CHECK_THAT(turn(tens), WithinAbs(-36.0 * 99.0, 1e-6));
+  for (const Relation& rel : r.d.GetRelations())
+    CHECK(rel.error.empty());
+
+  // The tens wheel turned on its own: the gear drives the transfer back,
+  // the carry is never inverted (a locked wheel says nothing of where its
+  // driver stands), so the units stay and the carry reports it.
+  const double unitsBefore = turn(units);
+  assembly::SetMateDof(*r.d.FindMateById(tens), MateDof::Rotation,
+                       r.d.FindMateById(tens)->rotation + Rad(3.0));
+  assembly::Solve(r.d, NoParts(), nullptr, {tens, MateDof::Rotation});
+  CHECK_THAT(turn(units), WithinAbs(unitsBefore, 1e-9));
+  CHECK_THAT(r.d.FindRelationById(carry)->error,
+             Catch::Matchers::ContainsSubstring("not satisfied"));
+}
+
+TEST_CASE("An intermittent relation round-trips, refuses what it does not "
+          "know, and the v174 golden counts",
+          "[assembly][relations][intermittent][golden]") {
+  Rig r = MakeRig();
+  const uint64_t a = r.Add("units", 2, MateType::Revolute);
+  const uint64_t b = r.Add("slide", 3, MateType::Slider);
+  Relation u;
+  u.kind = RelationKind::Intermittent;
+  u.mateA = a;
+  u.mateB = b;
+  u.dofA = MateDof::Rotation;
+  u.dofB = MateDof::Offset;
+  u.ratio = 1.0;
+  u.phase = 0.5;
+  u.intermittent = {2.5, 180.0, 10.0, 30.0, 0};
+  r.d.AddRelation(u);
+  r.d.AddRelation(Geneva(a, a, 4, -12.0)); // shape only: never solved
+  const fs::path tmp = fs::temp_directory_path() / "intermittent_rt.json";
+  REQUIRE(DocumentIO::SaveAssembly(r.d, tmp.string()).has_value());
+  auto back = DocumentIO::LoadAssembly(tmp.string());
+  REQUIRE(back.has_value());
+  const Relation& ub = (*back)->GetRelations()[0];
+  CHECK(ub.kind == RelationKind::Intermittent);
+  CHECK(ub.dofB == MateDof::Offset);
+  CHECK_THAT(ub.intermittent.step, WithinAbs(2.5, 1e-12));
+  CHECK_THAT(ub.intermittent.periodDeg, WithinAbs(180.0, 1e-12));
+  CHECK_THAT(ub.intermittent.startDeg, WithinAbs(10.0, 1e-12));
+  CHECK_THAT(ub.intermittent.durationDeg, WithinAbs(30.0, 1e-12));
+  CHECK(ub.intermittent.slots == 0);
+  CHECK_THAT(ub.phase, WithinAbs(0.5, 1e-12));
+  const Relation& gb = (*back)->GetRelations()[1];
+  CHECK(gb.intermittent.slots == 4);
+  CHECK_THAT(gb.intermittent.step, WithinAbs(-90.0, 1e-12));
+  fs::remove(tmp);
+
+  // An unknown motion is refused naming both; a Geneva needs three slots.
+  nlohmann::json bad = DocumentIO::RelationToJson(gb);
+  bad["motion"] = "genva";
+  CHECK_THROWS_WITH(DocumentIO::RelationFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("uniform or geneva"));
+  bad["motion"] = "geneva";
+  bad["slots"] = 2;
+  CHECK_THROWS(DocumentIO::RelationFromJson(bad));
+  bad = DocumentIO::RelationToJson(ub);
+  bad.erase("start_deg");
+  CHECK_THROWS_WITH(DocumentIO::RelationFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("start_deg"));
+
+  // The golden: a units wheel ten and a half turns back, a Geneva of three
+  // slots and a 9:30 gear — the tens wheel ten digits back, exactly.
+  const fs::path golden =
+      fs::path(TestSourceDir()) /
+      "tests/golden/assembly/v174-intermittent-relation.json";
+  auto gd = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(gd.has_value());
+  assembly::Solve(**gd, NoParts());
+  for (const Relation& rel : (*gd)->GetRelations())
+    CHECK(rel.error.empty());
+  CHECK_THAT(Deg((*gd)->FindMateById(6)->rotation), WithinAbs(1200.0, 1e-6));
+  CHECK_THAT(Deg((*gd)->FindMateById(7)->rotation), WithinAbs(-360.0, 1e-6));
+}

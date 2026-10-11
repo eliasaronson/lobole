@@ -313,6 +313,9 @@ struct ExplodedView {
 // epicyclic: Willis over {sun, ring, carrier}, stored as that linear_n
 //        relation with the tooth counts it came from
 // planet: a planet's own turn on its carrier, over {sun, carrier, planet}
+// intermittent: rotation -> rotation OR offset that steps ONCE per period of
+//        a, during a window, and stands still otherwise: a carry, a Geneva
+//        (v174, docs/assemblies/relations.md#intermittent)
 enum class RelationKind {
   Gear,
   Rack,
@@ -325,7 +328,8 @@ enum class RelationKind {
   Worm,
   LinearN,
   Epicyclic,
-  Planet
+  Planet,
+  Intermittent
 };
 enum class MateDof { Rotation, Offset };
 
@@ -404,6 +408,21 @@ struct Relation {
   // linear_n, epicyclic and planet (v171): the members, and mateA/mateB are
   // unused (0). `phase` is the relation's constant.
   std::vector<RelationTerm> terms;
+  // Intermittent only (v174): b advances `step` (the FOLLOWER's unit,
+  // DEGREES for a turn, mm for a slide, as a cam's lift) once per
+  // `periodDeg` of a, during the window [startDeg, startDeg + durationDeg)
+  // of each period, and stands still for the rest. `slots` > 0 is an
+  // external Geneva's exact law over the window (step -360/slots, window
+  // 180 - 360/slots, both derived); 0 is a uniform step, a gear-driven
+  // carry. A pure function of a — the count is in a's turns, so nothing
+  // here is history.
+  struct Intermittent {
+    double step = 0.0;
+    double periodDeg = 360.0;
+    double startDeg = 0.0;
+    double durationDeg = 0.0;
+    int slots = 0;
+  } intermittent;
   bool HasTerms() const {
     return kind == RelationKind::LinearN || kind == RelationKind::Epicyclic ||
            kind == RelationKind::Planet;
@@ -418,6 +437,13 @@ struct Relation {
   // and disagree with the tree.
   std::vector<size_t> heldTerms;
 };
+
+// Where an intermittent relation puts b (in b's unit as the solve holds it:
+// radians for a turn, mm for a slide) for a at `aRad`, phase excluded
+// (docs/assemblies/relations.md#intermittent). `IntermittentLaw` is the
+// window's 0..1 progress at fraction t of it.
+double IntermittentLaw(const Relation::Intermittent& i, double t);
+double IntermittentValue(const Relation& r, double aRad);
 
 // The lift a cam profile gives at `angleRad`, and its slope (mm per radian).
 // Periodic over one turn: the table wraps, so a crank turning past 360 sees

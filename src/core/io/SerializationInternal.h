@@ -26,7 +26,11 @@ struct ViewProjection; // core/drawing/ViewProjection.h
 
 inline constexpr const char* kFormat = "designer-document";
 inline constexpr int kVersion =
-    173; // v173: a Thread's `flank_angle_deg` (half the thread angle; absent
+    174; // v174: an `intermittent` relation (a carry, a Geneva): b steps
+         //      once per period of a, during a window, and stands still
+         //      otherwise — `step`, `period_deg`, `start_deg`,
+         //      `duration_deg`, `motion` (uniform | geneva), `slots`.
+         // v173: a Thread's `flank_angle_deg` (half the thread angle; absent
          //      = the ISO 30, a custom thread 15-60) and the material `tpu`
          //      (docs/modeling/holes-and-threads.md#flank-angle).
          // v172: a static result keeps its nodal stress tensor, `stress`

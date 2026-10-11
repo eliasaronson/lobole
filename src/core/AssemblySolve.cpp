@@ -1117,6 +1117,10 @@ double RelationValue(const Relation& r, double a) {
     return (r.dofB == MateDof::Rotation ? angles::ToRadians(lift) : lift) +
            r.phase;
   }
+  // A carry steps once a period of a and stands still between
+  // (docs/assemblies/relations.md#intermittent).
+  if (r.kind == RelationKind::Intermittent)
+    return IntermittentValue(r, a) + r.phase;
   // A click stands at the mark it was last carried to or held at.
   if (r.kind == RelationKind::Click)
     return r.lead;
@@ -1264,6 +1268,19 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
       r.error = "a cam relation needs a lift table of at least two "
                 "(angle, lift) points";
       continue;
+    }
+    if (r.kind == RelationKind::Intermittent) {
+      const Relation::Intermittent& im = r.intermittent;
+      if (im.periodDeg <= 0.0 || im.durationDeg <= 0.0 ||
+          im.durationDeg > im.periodDeg || im.step == 0.0) {
+        r.error = "an intermittent relation needs a step, a period and a "
+                  "window inside it (0 < duration <= period)";
+        continue;
+      }
+      if (im.slots != 0 && (im.slots < 3 || r.dofB != MateDof::Rotation)) {
+        r.error = "a Geneva has at least 3 slots and its wheel turns";
+        continue;
+      }
     }
     usable[i] = true;
   }
@@ -1536,10 +1553,13 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
         settle(an);
         wrote++;
       } else if (bn == from && !isSettled(an) && r.kind != RelationKind::Cam &&
-                 r.ratio != 0.0) {
+                 r.kind != RelationKind::Intermittent && r.ratio != 0.0) {
         // A cam is deliberately absent here: many angles give one lift, so
         // driving it backwards would have to pick a branch, and a plausible
-        // branch is the substitution this project refuses.
+        // branch is the substitution this project refuses. So is an
+        // intermittent relation: a locked output says nothing about where
+        // its input stands, and turning it is what a lock refuses — the
+        // residual check reports the disagreement instead.
         SetMateDof(*a, r.dofA, (valueOf(*b, r.dofB) - r.phase) / r.ratio);
         settle(an);
         wrote++;
@@ -1776,6 +1796,10 @@ static SolveReport SolveCore(AssemblyDocument& asmDoc,
         continue;
       loop.relations.push_back(
           {ia->second, ib->second, r.dofA, r.dofB, r.ratio, r.phase, r.lift});
+      if (r.kind == RelationKind::Intermittent)
+        loop.relations.back().value = [r](double a) {
+          return RelationValue(r, a);
+        };
     }
   }
   // The driven DOF is PINNED while the loop closes: without it the solver
