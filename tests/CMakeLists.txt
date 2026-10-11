@@ -1064,11 +1064,11 @@ set_tests_properties(generators_smoke PROPERTIES TIMEOUT 300)
 # They are `slow` too, for anything that does pass -C generators.
 # The budget (s) is about twice the run measured alone on the development
 # machine -- om615 217, pes_pump 44, chess 140, pantilt 349, planetary
-# ~90, hook 13 -- for a loaded one. The TIMEOUT is the budget plus a
-# minute: the script kills its generator at the budget and says so, which a
-# ctest kill would not.
+# ~90, hook 13, jar 83 (198 beside the GUI suite) -- for a loaded one. The
+# TIMEOUT is the budget plus a minute: the script kills its generator at the
+# budget and says so, which a ctest kill would not.
 foreach(gen_budget om615:420 pes_pump:180 chess:360 pantilt:720 planetary:240
-                   hook:60)
+                   hook:60 jar:400)
   string(REPLACE ":" ";" gen_budget "${gen_budget}")
   list(GET gen_budget 0 gen)
   list(GET gen_budget 1 budget)

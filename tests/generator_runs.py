@@ -102,6 +102,14 @@ def hook(port, out):
              "--port", str(port), "--out", os.path.join(out, "hook")],
             [r"mesh: the prediction moved", r"hook: done"], None)
 
+def jar(port, out):
+    # The jar, lid and gasket with modelled threads, every check and both
+    # negative controls, the unscrewing study and the three STLs; no still.
+    return ([PY, "-u", os.path.join(GEN, "jar", "build.py"),
+             "--port", str(port), "--no-render",
+             "--out", os.path.join(out, "jar")],
+            [r"unscrew 2 turns .*: passed", r"jar: done"], None)
+
 
 # name -> (builder, instance kind, extra environment). The offscreen ones
 # take screenshots or renders, which a --headless instance refuses.
@@ -113,6 +121,7 @@ RUNS = {
     "pantilt": (pantilt, "offscreen", {"PANTILT_SAMPLES": "6"}),
     "planetary": (planetary, True, {}),
     "hook": (hook, True, {}),
+    "jar": (jar, True, {}),
 }
 
 
