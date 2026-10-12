@@ -2813,13 +2813,16 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
   // Check print (docs/tolerances/README.md#checking-a-print): the button in
   // the Print process section runs ui::RunPrintCheck on the part and lists
-  // the six items; a ceiling's Show selects the face it is about. The
-  // fixture cylinder stands wherever the fixture spot is, so its bed item
-  // and its underside (a bridge when it is off the bed) are read from what
-  // the part says, not assumed.
+  // the six items; a ceiling's Show selects the face it is about. A
+  // cylinder standing at z = 0 and a second one held 3 above the bed: the
+  // part is on the bed, two pieces, and the upper one's underside is a
+  // ceiling as wide as it is.
   t = IM_REGISTER_TEST(engine, "tolerance", "print_check_from_the_panel");
   t->TestFunc = [](ImGuiTestContext* ctx) {
-    AddFixtureCylinder(ctx);
+    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+        "Standing", glm::vec3(0), glm::vec3(0, 0, 1), 2.0, 4.0));
+    Doc()->AddFeature(std::make_unique<CylinderFeature>(
+        "Held", glm::vec3(10, 0, 3), glm::vec3(0, 0, 1), 1.0, 2.0));
     ctx->Yield(2);
     Doc()->SetPrintProcess(printfit::Process{"fdm", "pla", std::nullopt});
     s_App->printCheck.reset();
@@ -2840,29 +2843,18 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     if (!s_App->printCheck)
       return;
     const printcheck::Report& r = s_App->printCheck->report;
-    double lowest = 1e300;
-    for (const Body& b : Doc()->GetBodies()) {
-      glm::dvec3 lo, hi;
-      b.shape.GetBoundingBox(lo, hi);
-      lowest = std::min(lowest, lo.z);
-    }
-    IM_CHECK(std::abs(r.bed.lowestMm - lowest) < 1e-3);
-    IM_CHECK((r.bed.status == printcheck::Status::Pass) ==
-             (std::abs(lowest) <= printcheck::kBedTolMm));
+    IM_CHECK(r.bed.status == printcheck::Status::Pass);
     IM_CHECK(r.shells.status == printcheck::Status::Pass);
+    IM_CHECK_EQ(r.shells.pieces, 2);
     IM_CHECK(r.chords.status == printcheck::Status::Pass);
     IM_CHECK(r.overhang.limitDeg == 45.0);
-    if (r.bed.status == printcheck::Status::Fail) {
-      // Off the bed, its underside is a ceiling as wide as the cylinder.
-      IM_CHECK_SILENT(!r.bridges.faces.empty());
-      IM_CHECK(std::abs(r.bridges.worstSpanMm - 1.6) < 0.01);
-      s_App->selection.Clear();
-      ctx->ItemClick("###print_check_bridge");
-      ctx->Yield(2);
-      const ui::SelectionItem* f =
-          s_App->selection.First(ui::SelectionItem::Kind::Face);
-      IM_CHECK(f != nullptr);
-    }
+    IM_CHECK_SILENT(r.bridges.faces.size() == 1);
+    IM_CHECK(std::abs(r.bridges.worstSpanMm - 2.0) < 0.01);
+    IM_CHECK(std::abs(r.bridges.faces[0].heightMm - 3.0) < 1e-6);
+    s_App->selection.Clear();
+    ctx->ItemClick("###print_check_bridge");
+    ctx->Yield(2);
+    IM_CHECK(s_App->selection.First(ui::SelectionItem::Kind::Face) != nullptr);
     Doc()->SetPrintProcess(std::nullopt);
     s_App->printCheck.reset();
     ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
