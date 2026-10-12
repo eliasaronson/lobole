@@ -37,6 +37,7 @@
 #include "render/FrameTimer.h"
 #include "ui/BackgroundJob.h"
 #include "ui/ImportJob.h"
+#include "ui/PrintCheckActions.h"
 #include "ui/TopoJob.h"
 #include "ui/ViewportHandle.h"
 
@@ -2066,6 +2067,13 @@ struct AppState {
   int printProfileEditIndex = -1;
   // The Print process section's last store refusal ("Save as mine").
   std::string printProfileError;
+  // The Print process section's last Check print (ui::RunPrintCheck): the
+  // part and the version it was taken at, so the panel can say when the
+  // part has changed since, and why it could not run.
+  std::optional<PrintCheckRun> printCheck;
+  const Document* printCheckDoc = nullptr;
+  uint64_t printCheckVersion = 0;
+  std::string printCheckError;
   // What the last File > Export said, as a viewport pill until
   // `exportNoteUntil` (ImGui time): "Exported part.stl — chords 0.01 mm".
   std::string exportNote;

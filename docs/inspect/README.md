@@ -438,6 +438,12 @@ requirements, and every check here can be one: a requirement holds the
 measure and its bound in the project and records evidence of what it
 measured ([requirements](../requirements/README.md)).
 
+## Will it print
+
+`check_print` answers for a printed part: on the bed, one piece per solid,
+overhangs and bridges against the process, the gap between bodies and the
+STL's chords — [../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).
+
 ## Before delivering a model
 
 [review-checklist.md](review-checklist.md) is the pre-delivery list, one RPC
@@ -540,4 +546,6 @@ GUI suite, and the measure parity phase in `remote_smoke`.
   convention does); the set is derivable — a part whose only feature is one
   Fastener.
 - Hatched cut faces (drawings section independently).
-- Draft, wall-thickness or curvature analysis.
+- Draft, wall-thickness or curvature analysis. (A printed part's
+  overhangs are measured on the B-Rep by `check_print`,
+  [../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).)

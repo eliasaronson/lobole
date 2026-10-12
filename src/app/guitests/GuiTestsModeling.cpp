@@ -2811,6 +2811,64 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
+  // Check print (docs/tolerances/README.md#checking-a-print): the button in
+  // the Print process section runs ui::RunPrintCheck on the part and lists
+  // the six items; a ceiling's Show selects the face it is about. The
+  // fixture cylinder stands wherever the fixture spot is, so its bed item
+  // and its underside (a bridge when it is off the bed) are read from what
+  // the part says, not assumed.
+  t = IM_REGISTER_TEST(engine, "tolerance", "print_check_from_the_panel");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    AddFixtureCylinder(ctx);
+    ctx->Yield(2);
+    Doc()->SetPrintProcess(printfit::Process{"fdm", "pla", std::nullopt});
+    s_App->printCheck.reset();
+    ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+    ctx->ItemClick(w->TabId);
+    ctx->Yield(2);
+    if (ctx->ItemInfo("//###Variables/###print_process",
+                      ImGuiTestOpFlags_NoError)
+            .ID == 0) {
+      ctx->ItemClick("//###Variables/Print process");
+      ctx->Yield(2);
+    }
+    ctx->SetRef("//###Variables");
+    ctx->ItemClick("###print_check");
+    ctx->Yield(2);
+    IM_CHECK_SILENT(s_App->printCheck.has_value());
+    if (!s_App->printCheck)
+      return;
+    const printcheck::Report& r = s_App->printCheck->report;
+    double lowest = 1e300;
+    for (const Body& b : Doc()->GetBodies()) {
+      glm::dvec3 lo, hi;
+      b.shape.GetBoundingBox(lo, hi);
+      lowest = std::min(lowest, lo.z);
+    }
+    IM_CHECK(std::abs(r.bed.lowestMm - lowest) < 1e-3);
+    IM_CHECK((r.bed.status == printcheck::Status::Pass) ==
+             (std::abs(lowest) <= printcheck::kBedTolMm));
+    IM_CHECK(r.shells.status == printcheck::Status::Pass);
+    IM_CHECK(r.chords.status == printcheck::Status::Pass);
+    IM_CHECK(r.overhang.limitDeg == 45.0);
+    if (r.bed.status == printcheck::Status::Fail) {
+      // Off the bed, its underside is a ceiling as wide as the cylinder.
+      IM_CHECK_SILENT(!r.bridges.faces.empty());
+      IM_CHECK(std::abs(r.bridges.worstSpanMm - 1.6) < 0.01);
+      s_App->selection.Clear();
+      ctx->ItemClick("###print_check_bridge");
+      ctx->Yield(2);
+      const ui::SelectionItem* f =
+          s_App->selection.First(ui::SelectionItem::Kind::Face);
+      IM_CHECK(f != nullptr);
+    }
+    Doc()->SetPrintProcess(std::nullopt);
+    s_App->printCheck.reset();
+    ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
+    ctx->Yield(2);
+  };
+
   // Preferences > Print profiles is the store
   // (docs/tolerances/README.md#print-profiles): New writes the built-in
   // table as a file, Duplicate copies it, a rename moves it (refused onto a

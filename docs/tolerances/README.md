@@ -400,6 +400,50 @@ both call, picks the chord deviation:
 - File › Export says what it did in a viewport pill: "Exported part.stl —
   chords 0.01 mm, 10% of the 0.1 mm gap a side", or the failure, amber.
 
+### Checking a print
+
+`check_print` (`src/core/PrintCheck.{h,cpp}`, namespace `printcheck`) is
+the one printability check: the RPC, the Print process section's *Check
+print*, and every print-in-place generator through `generators/_lib.py`'s
+`check_print`. `ui::RunPrintCheck` (`src/ui/PrintCheckActions.cpp`) derives
+the limits from the part's print, so the button and the RPC cannot disagree;
+the core takes bodies and limits and no document. It answers over the
+part's non-reference bodies (or `bodies`) as one print along `direction`
+(default +Z; the bed is the plane below it through the origin). Six items,
+each `{status: pass | fail | skipped, measured, limit, note}`:
+
+| item | measured | limit | how |
+|---|---|---|---|
+| `bed` | the lowest point along the direction | within 1 µm of 0 | exact: each body rotated so the direction is +Z, boxed by `BRepBndLib::AddOptimal` without triangulation; plus the area lying on the bed |
+| `shells` | the pieces the print comes off the bed as | one per solid | solids within 1 µm of each other are one piece, from the clearance item's distances; no boolean. A fused print-in-place pair fails; an extrude of loose discs is one body of several solids and several pieces |
+| `overhang` | area of downward faces past the limit, the worst angle, and where (body, face, element, point) | the process's (`printfit::MaxOverhangDeg`, 45° for FDM), FROM VERTICAL, and an area allowance (default 0) | the B-Rep's surface normals: a plane is one exact normal; a curved face is sampled at every node and triangle centroid of a tessellation (on a copy, 0.2% of the body's size) by its UV, then the worst sample is climbed on the face's own UV domain. A designed 45° flank reads 45.000, not a facet's 47-50, so no slack is needed. The AREA is the tessellation's triangles each classified by the exact normal at its centroid: its error is the triangles that straddle the limit |
+| `bridges` | the widest span of the ceilings, and each one's area and height | the process's (`printfit::MaxBridgeMm`, 10 mm for FDM) | a ceiling is a downward face within 1° of horizontal everywhere, off the bed: a plane by its one normal, any other surface (a derived or lofted face is often a B-spline) by every sample. Its span is its inscribed diameter, as if anchored along its whole edge: twice the largest distance from a point of the face to its edges (polylines at a quarter of the tessellation's chord), on a grid over its UV and then climbed |
+| `clearance` | the minimum distance between any two solids, with the closest pairs | the gap a side (`printfit::SmallestGapSideMm` of the print), passing down to a tenth under it | `Measure::ClearanceBetween` per pair (BRepExtrema, the distance `measure` gives), `ContactBetween` when it cannot prove them apart; a pair whose oriented boxes are four gaps apart is clear without measuring |
+| `chords` | the chord deviation `export_stl` meshes this print at | a fifth of the gap a side | `printfit::StlDeflectionMm`, as [the export](#exporting-a-printed-part) takes it, or `stl_deflection_mm` |
+
+- **A tenth under the gap passes**: an arc-approximated involute (gear.py)
+  comes out microns short of its gap, and FDM holds about ±0.2 mm; a
+  clearance modelled within 10% of the profile's prints the same.
+- **Faces are judged from the part's own lowest point**, so a part off the
+  bed fails the bed item alone, not every face on its underside.
+- **Every limit can be stated** (`max_overhang_deg`,
+  `overhang_allowance_mm2`, `max_bridge_mm`, `min_gap_mm`,
+  `stl_deflection_mm`); each item says where its limit came from
+  (`limit_from` / `required_from` / `deflection_from`: `asked`, `process`,
+  `profile`, `gap`). An **unprinted** part has no limit to take, so
+  overhang, bridges, clearance and chords are `skipped`, the note naming
+  `set_print_process` or the parameter, and the receipt is `unverified` —
+  never judged against a number nobody chose. `ok` is every item that ran
+  passing.
+- **Refused**: a direction that is not three numbers or has no length, a
+  limit out of its range, a body or part that does not exist.
+- **The Print process section** has *Check print* (`###print_check`) under
+  the part's rows and threads: one line per item, measured against limit, a
+  failure amber, a skipped item greyed with its reason, and "the part has
+  changed since" once it has. The overhang and bridge lines have *Show*
+  (`###print_check_overhang`, `###print_check_bridge`), which selects the
+  worst face so the viewport points at it.
+
 ### The coupon
 
 `generators/print_coupon.py --port PORT [--size 8 --steps 2 --step 0.05]`
@@ -510,7 +554,9 @@ part?}`, `list_tolerances {part?}`, `clear_tolerance {id, part?}`,
 `check_fit`, `check_fits`, `stack_up`, `set_print_process {process, material
 | profile | clear, part?}`, `get_print_process {part?}`, `print_allowance`,
 `list_print_profiles`, `save_print_profile {profile | from_part, part?}`,
-`delete_print_profile {name}` — all in `src/remote/RemoteInspection.cpp`;
+`delete_print_profile {name}`, `check_print {part?, bodies?, direction?,
+max_overhang_deg?, overhang_allowance_mm2?, max_bridge_mm?, min_gap_mm?,
+stl_deflection_mm?}` ([checking a print](#checking-a-print)) — all in `src/remote/RemoteInspection.cpp`;
 `export_stl` in `RemoteProject.cpp`. Tolerance edits are
 undoable commands (`src/core/Command.h`). The edits take `part` (a name,
 stable id or slot index) to act on **any** part, not only the active one —
@@ -550,16 +596,30 @@ coarse deflection warned, the match after the store changes, a Z gap off
 whole layers refused, and `print_coupon --record` (the Z gap too) and
 `--seed`),
 `tests/test_print_allowance.cpp` "A printed clearance hole is modelled at its
-fit plus the allowance", `tests/tolerances_smoke.py` (set_tolerance on a part
+fit plus the allowance", `tests/test_print_check.cpp` (a box on and off the
+bed, a 45° funnel reading 45 and passing and a 60° one failing with its
+area, a slot's ceiling spanning its inscribed 10 mm, two boxes keeping the
+gap, too close, touching and overlapping, one body of loose solids, chords
+past a fifth of the gap, another print direction),
+`tests/print_check_smoke.py` (the same negative controls over RPC — a 60°
+overhang, a fused pair, a near pair, a part off the bed — the limits from
+the print, an unprinted part's skipped items, and the refusals), `tests/tolerances_smoke.py` (set_tolerance on a part
 that is not the active one), GUI
 `tolerance/print_process_from_the_panel`,
 `tolerance/print_profiles_are_kept_in_preferences`,
 `tolerance/print_profile_picked_and_matched`,
-`tolerance/printed_stl_export_says_its_chords`, `tolerance/a_measured_bore_gets_a_class`,
+`tolerance/printed_stl_export_says_its_chords`,
+`tolerance/print_check_from_the_panel`, `tolerance/a_measured_bore_gets_a_class`,
 `tolerance/a_plane_is_told_what_to_do`, `tolerance/the_panel_lists_and_clears`,
 `tolerance/check_fits_from_the_panel`.
 
 ## Not built
+
+- In `check_print`: a ceiling resting on the part below across a
+  print-in-place layer gap reads as a bridge; a bridge anchored on two
+  edges only reads its inscribed diameter, not its length; no support or
+  island detection (a downward face that starts in air); no wall thickness;
+  no overhang shading in the viewport.
 
 - An inferred stack-up chain, and correlation between terms (needs tracking
   from measured geometry back to the variables that drove it).

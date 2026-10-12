@@ -496,6 +496,28 @@ std::string ProcessRepeatabilitySource(const Process& p) {
                             : std::string{};
 }
 
+double MaxOverhangDeg(const Process& p) {
+  return p.process == "fdm" ? 45.0 : 0.0;
+}
+
+std::string MaxOverhangSource(const Process& p) {
+  return p.process == "fdm"
+             ? "the 45-degree rule of FDM design guides: a layer stands on "
+               "the one below while it overhangs it by no more than about "
+               "half its width"
+             : std::string{};
+}
+
+double MaxBridgeMm(const Process& p) { return p.process == "fdm" ? 10.0 : 0.0; }
+
+std::string MaxBridgeSource(const Process& p) {
+  return p.process == "fdm"
+             ? "community practice: a desktop FDM printer bridges about "
+               "10 mm cleanly without tuning, and longer ones sag; to "
+               "confirm on your printer"
+             : std::string{};
+}
+
 double MinReliableThreadMm(const Process& p) {
   return p.process == "fdm" ? 8.0 : 0.0;
 }

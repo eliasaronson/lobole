@@ -320,6 +320,7 @@ set(core_sources
     src/core/FitStandards.cpp
     src/core/FitBands.cpp
     src/core/PrintAllowance.cpp
+    src/core/PrintCheck.cpp
     src/core/SheetMetal.cpp
     src/core/features/BaseFlangeFeature.cpp
     src/core/features/EdgeFlangeFeature.cpp
@@ -819,6 +820,7 @@ set(app_sources
     src/ui/BodyAppearance.cpp
     src/ui/StepExport.cpp
     src/ui/StlExport.cpp
+    src/ui/PrintCheckActions.cpp
     src/ui/Bom.cpp
     src/ui/MateActions.cpp
     src/ui/GizmoInput.cpp

@@ -398,6 +398,109 @@ void DrawTolerancesSection(AppState& state) {
 
 namespace ui {
 
+namespace {
+
+// Check print (docs/tolerances/README.md#checking-a-print): the six items of
+// ui::RunPrintCheck, measured against limit, a failure amber. The same call
+// check_print makes, so the button and the RPC cannot disagree.
+void DrawPrintCheck(AppState& state, Document& doc) {
+  ImGui::Separator();
+  if (ImGui::SmallButton("Check print###print_check")) {
+    state.printCheck.reset();
+    state.printCheckError.clear();
+    try {
+      state.printCheck = RunPrintCheck(doc, nullptr, {});
+      state.printCheckDoc = &doc;
+      state.printCheckVersion = doc.Version();
+    } catch (const std::exception& e) {
+      state.printCheckError = e.what();
+    }
+  }
+  ImGui::SetItemTooltip("On the bed, one piece per body, overhangs, "
+                        "bridges, the gap between bodies and the STL's "
+                        "chords, against this print");
+  const ImVec4 amber(0.95f, 0.80f, 0.40f, 1.0f);
+  if (!state.printCheckError.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, amber);
+    ImGui::TextWrapped("%s", state.printCheckError.c_str());
+    ImGui::PopStyleColor();
+  }
+  if (!state.printCheck || state.printCheckDoc != &doc)
+    return;
+  const PrintCheckRun& run = *state.printCheck;
+  const printcheck::Report& r = run.report;
+  ImGui::SameLine();
+  if (state.printCheckVersion != doc.Version())
+    ImGui::TextDisabled("the part has changed since");
+  else
+    ImGui::TextUnformatted(r.Ok() ? "prints" : "will not print as it is");
+  const auto line = [&](const char* item, printcheck::Status st,
+                        const std::string& text) {
+    const bool fail = st == printcheck::Status::Fail;
+    if (fail)
+      ImGui::PushStyleColor(ImGuiCol_Text, amber);
+    else if (st == printcheck::Status::Skipped)
+      ImGui::PushStyleColor(ImGuiCol_Text,
+                            ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+    ImGui::TextWrapped("%s %s: %s", printcheck::StatusName(st), item,
+                       text.c_str());
+    if (fail || st == printcheck::Status::Skipped)
+      ImGui::PopStyleColor();
+  };
+  const auto mm = [](double v) { return units::FormatNumber(v) + " mm"; };
+  // Select the face a row is about, so the viewport points at it.
+  const auto show = [&](const char* id, const printcheck::Where& w) {
+    const auto& bodies = doc.GetBodies();
+    const size_t bi =
+        static_cast<size_t>(run.bodyIndex.at(static_cast<size_t>(w.body)));
+    const Body& b = bodies.at(bi);
+    const std::string* name = b.elementMap.NameOf(w.face);
+    if (name == nullptr)
+      return;
+    ImGui::SameLine();
+    if (ImGui::SmallButton(id)) {
+      SelectionItem it;
+      it.kind = SelectionItem::Kind::Face;
+      it.element = ElementRef{b.createdBy, *name};
+      state.selection.Replace(it);
+    }
+  };
+  line("on the bed", r.bed.status,
+       "lowest point " + mm(r.bed.lowestMm) + ", " +
+           units::FormatNumber(r.bed.contactAreaMm2) + " mm² on it");
+  line("one piece per body", r.shells.status,
+       std::to_string(r.shells.pieces) + " for " +
+           std::to_string(r.shells.expected) +
+           (r.shells.watertight ? "" : ", not watertight"));
+  line("overhang", r.overhang.status,
+       r.overhang.status == printcheck::Status::Skipped
+           ? r.overhang.note
+           : units::FormatNumber(r.overhang.areaMm2) + " mm² past " +
+                 units::FormatNumber(r.overhang.limitDeg) + "°, worst " +
+                 units::FormatNumber(r.overhang.worstDeg) + "°");
+  if (r.overhang.worst && r.overhang.worstDeg > 0.0)
+    show("Show###print_check_overhang", *r.overhang.worst);
+  line("bridges", r.bridges.status,
+       r.bridges.faces.empty()
+           ? std::string("none")
+           : std::to_string(r.bridges.faces.size()) + ", widest " +
+                 mm(r.bridges.worstSpanMm) + " of " + mm(r.bridges.limitMm));
+  if (!r.bridges.faces.empty())
+    show("Show###print_check_bridge", r.bridges.faces.front().where);
+  line("gap between bodies", r.clearance.status,
+       r.clearance.status == printcheck::Status::Skipped ? r.clearance.note
+       : r.clearance.minMm
+           ? mm(*r.clearance.minMm) + " of " + mm(r.clearance.requiredMm) +
+                 " a side"
+           : "no two bodies near, needs " + mm(r.clearance.requiredMm));
+  line("STL chords", r.chords.status,
+       r.chords.status == printcheck::Status::Skipped
+           ? r.chords.note
+           : mm(r.chords.deflectionMm) + " of " + mm(r.chords.limitMm));
+}
+
+} // namespace
+
 void DrawPrintProcessSection(AppState& state) {
   if (state.document == nullptr)
     return;
@@ -536,6 +639,7 @@ void DrawPrintProcessSection(AppState& state) {
     if (const auto* th = dynamic_cast<const ThreadFeature*>(doc.GetFeature(i)))
       if (const auto r = PrintedThreadFor(doc, *th))
         ImGui::TextWrapped("%s", r->Sentence().c_str());
+  DrawPrintCheck(state, doc);
 }
 
 } // namespace ui

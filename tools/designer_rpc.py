@@ -35,6 +35,7 @@ COLUMNS: dict[str, str] = {
     'check_fasteners': '',
     'check_fits': '',
     'check_geometry': 'body?:int',
+    'check_print': 'part?:string|int, bodies?:any[], direction?:number[3], max_overhang_deg?:number>0<90, overhang_allowance_mm2?:number>=0, max_bridge_mm?:number>0, min_gap_mm?:number>0, stl_deflection_mm?:number>0',
     'checkpoint_list': '',
     'clear_geometry_delta': '',
     'conflict_list': '',
@@ -147,6 +148,16 @@ class BatchParams(TypedDict):
 
 class CheckGeometryParams(TypedDict):
     body: NotRequired[int]
+
+class CheckPrintParams(TypedDict):
+    part: NotRequired[str | int]
+    bodies: NotRequired[Sequence[Any]]
+    direction: NotRequired[Sequence[float]]
+    max_overhang_deg: NotRequired[float]
+    overhang_allowance_mm2: NotRequired[float]
+    max_bridge_mm: NotRequired[float]
+    min_gap_mm: NotRequired[float]
+    stl_deflection_mm: NotRequired[float]
 
 class CreateDrawingParams(TypedDict):
     name: NotRequired[str]
@@ -354,6 +365,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def check_geometry(self, _timeout: float | None = None, **params: Unpack[CheckGeometryParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def check_print(self, _timeout: float | None = None, **params: Unpack[CheckPrintParams]) -> dict[str, Any]:
         raise NotImplementedError
 
     def checkpoint_list(self, _timeout: float | None = None) -> dict[str, Any]:

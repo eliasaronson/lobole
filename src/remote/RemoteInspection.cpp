@@ -39,6 +39,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h" // ConfiguredPartDocument
 #include "ui/JobActions.h"
+#include "ui/PrintCheckActions.h"
 #include "ui/PrintProfileActions.h"
 #include "ui/RendererSync.h"
 #include "ui/TemplateActions.h"
@@ -812,6 +813,42 @@ static constexpr MethodDoc InspectionMethods[] = {
      "stale_derived?[]{id,name,source}, "
      "templates_changed?[]{id,name,template,revision}, body_components?, "
      "connected?, warnings?"},
+    {"check_print",
+     "Will this PART print? (docs/tolerances/README.md#checking-a-print) "
+     "Six items over its bodies (or `bodies`: names or creating-feature "
+     "ids) as ONE print along `direction` (default [0,0,1], the bed the "
+     "plane below it through the origin), each {status: pass|fail|skipped, "
+     "the measured value, the limit, note}: `bed` (the lowest point within "
+     "1 µm of the bed), `shells` (one piece per body: bodies within 1 µm "
+     "of each other are one piece, and a print-in-place pair that touches "
+     "fails), `overhang` (downward faces steeper than `max_overhang_deg` "
+     "FROM VERTICAL, 0 a wall and 90 a ceiling: angles from the B-Rep's "
+     "surface normals, so a 45° flank reads 45; area past it in mm², the "
+     "worst angle and where), `bridges` (downward faces within 1° of "
+     "horizontal off the bed: each span, its inscribed diameter in mm, "
+     "against `max_bridge_mm`), `clearance` (the minimum distance between "
+     "any two bodies in mm against the gap a side, passing down to a tenth "
+     "under it) and `chords` (the STL chord deviation export_stl meshes at "
+     "against a fifth of the gap a side). Every limit defaults to the "
+     "part's print process (set_print_process): the process's overhang and "
+     "bridge, the profile's smallest gap a side and its STL deflection; an "
+     "unprinted part skips what has no limit unless it is stated. `ok` is "
+     "every item that ran passing. Read-only; `part` reads any part from "
+     "any tab.",
+     "part?:string|int, bodies?:any[], direction?:number[3], "
+     "max_overhang_deg?:number>0<90, overhang_allowance_mm2?:number>=0, "
+     "max_bridge_mm?:number>0, min_gap_mm?:number>0, "
+     "stl_deflection_mm?:number>0",
+     remote::NoFlags,
+     "ok, process, direction, bodies[]{body,name,solids,watertight,"
+     "lowest_mm}, bed{status,lowest_mm,tol_mm,contact_area_mm2,on_bed}, "
+     "shells{status,pieces,expected,watertight,joined,split}, "
+     "overhang{status,limit_deg,limit_from,allowance_mm2,area_mm2,"
+     "worst_deg,worst?,faces[],note}, bridges{status,limit_mm,limit_from,"
+     "worst_span_mm,area_mm2,faces[],note}, clearance{status,required_mm,"
+     "required_from,tolerance_mm,min_mm?,pairs[],pruned,note}, "
+     "chords{status,deflection_mm,deflection_from,limit_mm,note}, "
+     "receipt{schema,standing,summary,claims}"},
     {"check_fit",
      "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
      "class's band; adding {shaft:{class:\"g6\"}} gives the fit between "
@@ -3544,6 +3581,217 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           .Execute(std::make_unique<SetPrintProcessCommand>(next), part);
     return json{{"print", ProcessJson(state, part.PrintProcess())},
                 {"threads", PrintedThreadsJson(part)}};
+  }
+  if (m == "check_print") {
+    // The one printability check (docs/tolerances/README.md#checking-a-print):
+    // ui::RunPrintCheck derives the limits from the part's print, and the
+    // Print process section's Check print calls the same. Every parameter
+    // is read and checked before anything is measured.
+    const Document& part = SubjectPart(state, doc, p);
+    std::optional<std::set<uint64_t>> only;
+    if (p.contains("bodies"))
+      only = ResolvePartBodies(part, p.at("bodies"), "bodies");
+    ui::PrintCheckAsk ask;
+    if (p.contains("direction")) {
+      const json& d = p.at("direction");
+      if (!d.is_array() || d.size() != 3 || !d[0].is_number() ||
+          !d[1].is_number() || !d[2].is_number())
+        throw std::runtime_error("check_print: `direction` is the print "
+                                 "direction [x, y, z], not " +
+                                 d.dump());
+      const glm::dvec3 v(d[0].get<double>(), d[1].get<double>(),
+                         d[2].get<double>());
+      const double len = glm::length(v);
+      if (!std::isfinite(len) || len < 1e-9)
+        throw std::runtime_error("check_print: `direction` " + d.dump() +
+                                 " has no direction; the bed's normal is a "
+                                 "non-zero [x, y, z], [0, 0, 1] for a part "
+                                 "printed as modelled");
+      ask.up = v / len;
+    }
+    const auto number = [&](const char* key, bool given, double lo, double hi,
+                            const char* what) -> std::optional<double> {
+      if (!given)
+        return std::nullopt;
+      const json& v = p.at(key);
+      if (!v.is_number() || !std::isfinite(v.get<double>()) ||
+          !(v.get<double>() >= lo && v.get<double>() <= hi))
+        throw std::runtime_error(std::string("check_print: `") + key + "` is " +
+                                 what + ", not " + v.dump());
+      return v.get<double>();
+    };
+    ask.maxOverhangDeg = number(
+        "max_overhang_deg", p.contains("max_overhang_deg"), 1e-9, 90.0 - 1e-9,
+        "the steepest overhang, in degrees from vertical, between 0 "
+        "and 90 (45 is FDM's rule)");
+    ask.overhangAllowanceMm2 = number(
+        "overhang_allowance_mm2", p.contains("overhang_allowance_mm2"), 0.0,
+        1e12, "an area in mm² past the limit that passes, 0 or more");
+    ask.maxBridgeMm = number("max_bridge_mm", p.contains("max_bridge_mm"), 1e-9,
+                             1e12, "the widest bridge in mm, more than 0");
+    ask.minGapMm = number("min_gap_mm", p.contains("min_gap_mm"), 1e-9, 1e12,
+                          "the gap a side in mm, more than 0");
+    ask.stlDeflectionMm =
+        number("stl_deflection_mm", p.contains("stl_deflection_mm"), 1e-9, 1e12,
+               "the STL chord deviation in mm, more than 0");
+
+    const ui::PrintCheckRun run =
+        ui::RunPrintCheck(part, only ? &*only : nullptr, ask);
+    const printcheck::Report& r = run.report;
+    const auto& all = part.GetBodies();
+    const auto bodyName = [&](int i) {
+      return all[static_cast<size_t>(run.bodyIndex[static_cast<size_t>(i)])]
+          .name;
+    };
+    const auto vec = [](const glm::dvec3& v) {
+      return json::array({v.x, v.y, v.z});
+    };
+    const auto where = [&](const printcheck::Where& w) {
+      const Body& b =
+          all[static_cast<size_t>(run.bodyIndex[static_cast<size_t>(w.body)])];
+      json out{{"body", run.bodyIndex[static_cast<size_t>(w.body)]},
+               {"name", b.name},
+               {"face", w.face},
+               {"point_mm", vec(w.point)}};
+      if (const std::string* n = b.elementMap.NameOf(w.face))
+        out["element"] = {{"feature_id", b.createdBy}, {"name", *n}};
+      return out;
+    };
+    const auto names = [&](const std::vector<int>& v) {
+      json out = json::array();
+      for (int i : v)
+        out.push_back(bodyName(i));
+      return out;
+    };
+    constexpr size_t kListed = 20;
+    const auto status = [](printcheck::Status s) {
+      return printcheck::StatusName(s);
+    };
+
+    json bodies = json::array();
+    for (size_t i = 0; i < r.bodies.size(); ++i)
+      bodies.push_back({{"body", run.bodyIndex[i]},
+                        {"name", bodyName(static_cast<int>(i))},
+                        {"solids", r.bodies[i].solids},
+                        {"watertight", r.bodies[i].watertight},
+                        {"lowest_mm", r.bodies[i].lowestMm}});
+    json joined = json::array();
+    for (const auto& g : r.shells.joined)
+      joined.push_back(names(g));
+    json overFaces = json::array();
+    for (size_t i = 0; i < r.overhang.faces.size() && i < kListed; ++i) {
+      json f = where(r.overhang.faces[i].where);
+      f["worst_deg"] = r.overhang.faces[i].worstDeg;
+      f["area_mm2"] = r.overhang.faces[i].areaMm2;
+      overFaces.push_back(std::move(f));
+    }
+    json overhang{{"status", status(r.overhang.status)},
+                  {"limit_deg", r.overhang.limitDeg},
+                  {"limit_from", run.overhangFrom},
+                  {"allowance_mm2", r.overhang.allowanceMm2},
+                  {"area_mm2", r.overhang.areaMm2},
+                  {"worst_deg", r.overhang.worstDeg},
+                  {"faces", std::move(overFaces)},
+                  {"note", r.overhang.note}};
+    if (r.overhang.worst)
+      overhang["worst"] = where(*r.overhang.worst);
+    if (!run.overhangSource.empty())
+      overhang["source"] = run.overhangSource;
+    json bridgeFaces = json::array();
+    for (size_t i = 0; i < r.bridges.faces.size() && i < kListed; ++i) {
+      json f = where(r.bridges.faces[i].where);
+      f["span_mm"] = r.bridges.faces[i].spanMm;
+      f["area_mm2"] = r.bridges.faces[i].areaMm2;
+      f["height_mm"] = r.bridges.faces[i].heightMm;
+      bridgeFaces.push_back(std::move(f));
+    }
+    json bridges{{"status", status(r.bridges.status)},
+                 {"limit_mm", r.bridges.limitMm},
+                 {"limit_from", run.bridgeFrom},
+                 {"worst_span_mm", r.bridges.worstSpanMm},
+                 {"area_mm2", r.bridges.areaMm2},
+                 {"faces", std::move(bridgeFaces)},
+                 {"note", r.bridges.note}};
+    if (!run.bridgeSource.empty())
+      bridges["source"] = run.bridgeSource;
+    json pairs = json::array();
+    for (size_t i = 0; i < r.clearance.pairs.size() && i < kListed; ++i) {
+      const printcheck::Pair& pr = r.clearance.pairs[i];
+      pairs.push_back({{"a", bodyName(pr.a)},
+                       {"b", bodyName(pr.b)},
+                       {"solid_a", pr.solidA},
+                       {"solid_b", pr.solidB},
+                       {"distance_mm", pr.distanceMm},
+                       {"overlap", pr.overlap}});
+    }
+    json clearance{{"status", status(r.clearance.status)},
+                   {"required_mm", r.clearance.requiredMm},
+                   {"required_from", run.gapFrom},
+                   {"tolerance_mm", r.clearance.toleranceMm},
+                   {"pairs", std::move(pairs)},
+                   {"pruned", r.clearance.pruned},
+                   {"note", r.clearance.note}};
+    if (r.clearance.minMm)
+      clearance["min_mm"] = *r.clearance.minMm;
+    json out{
+        {"ok", r.Ok()},
+        {"process", run.process.empty() ? json(nullptr) : json(run.process)},
+        {"direction", vec(run.options.up)},
+        {"bodies", std::move(bodies)},
+        {"bed",
+         {{"status", status(r.bed.status)},
+          {"lowest_mm", r.bed.lowestMm},
+          {"tol_mm", r.bed.tolMm},
+          {"contact_area_mm2", r.bed.contactAreaMm2},
+          {"on_bed", names(r.bed.onBed)}}},
+        {"shells",
+         {{"status", status(r.shells.status)},
+          {"pieces", r.shells.pieces},
+          {"expected", r.shells.expected},
+          {"watertight", r.shells.watertight},
+          {"joined", std::move(joined)},
+          {"split", names(r.shells.split)}}},
+        {"overhang", std::move(overhang)},
+        {"bridges", std::move(bridges)},
+        {"clearance", std::move(clearance)},
+        {"chords",
+         {{"status", status(r.chords.status)},
+          {"deflection_mm", r.chords.deflectionMm},
+          {"deflection_from", run.deflectionFrom},
+          {"limit_mm", r.chords.limitMm},
+          {"note", r.chords.note}}}};
+
+    receipt::Receipt rc;
+    const receipt::Oracle oracle{"designer/print_check", "1"};
+    const auto claim = [&](const std::string& what, printcheck::Status s,
+                           double value, const char* unit,
+                           const std::string& note) {
+      if (s == printcheck::Status::Skipped) {
+        rc.Unverifiable(what, oracle, note);
+        return;
+      }
+      receipt::Claim c(what, oracle,
+                       s == printcheck::Status::Pass ? receipt::Verdict::Pass
+                                                     : receipt::Verdict::Fail);
+      c.value = value;
+      c.unit = unit;
+      c.note = note;
+      rc.Add(std::move(c));
+    };
+    claim("the part stands on the bed", r.bed.status, r.bed.lowestMm, "mm",
+          "its lowest point along the print direction");
+    claim("one piece per body", r.shells.status, r.shells.pieces, "pieces",
+          "bodies within 1 µm of each other print as one");
+    claim("no overhang past the limit", r.overhang.status, r.overhang.areaMm2,
+          "mm2", r.overhang.note);
+    claim("every bridge within the limit", r.bridges.status,
+          r.bridges.worstSpanMm, "mm", r.bridges.note);
+    claim("the bodies keep the gap", r.clearance.status,
+          r.clearance.minMm.value_or(0.0), "mm", r.clearance.note);
+    claim("the STL chords keep the gap", r.chords.status, r.chords.deflectionMm,
+          "mm", r.chords.note);
+    AttachReceipt(out, rc);
+    return out;
   }
   if (m == "get_print_process") {
     const Document& part = p.contains("part")

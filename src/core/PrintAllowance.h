@@ -204,6 +204,16 @@ ForModelled(const Table& t, const std::string& label, Printed kind,
 [[nodiscard]] double ProcessRepeatabilityMm(const Process& p);
 [[nodiscard]] std::string ProcessRepeatabilitySource(const Process& p);
 
+// What the process prints without support
+// (docs/tolerances/README.md#checking-a-print), each with its source: the
+// steepest downward face, in degrees FROM VERTICAL (0 a wall, 90 a ceiling),
+// and the widest ceiling it bridges between two anchored edges, in mm. 0 = not
+// known for the process. check_print's defaults; a caller may state its own.
+[[nodiscard]] double MaxOverhangDeg(const Process& p);
+[[nodiscard]] std::string MaxOverhangSource(const Process& p);
+[[nodiscard]] double MaxBridgeMm(const Process& p);
+[[nodiscard]] std::string MaxBridgeSource(const Process& p);
+
 // Below this major diameter a printed thread is not reliable in this
 // process (the community's reading: printed threads work from M8 up); the
 // thread report says so and names the alternatives. 0 = no floor known.

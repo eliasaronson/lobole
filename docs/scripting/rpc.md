@@ -180,7 +180,7 @@ the active tab never changed.
   `interference` and `contact_report`, `check_geometry`, `check_fits`,
   `compare_geometry`, `run_motion_study`, `check_fasteners`,
   `verify_assertions`, `check_requirements`, `check_drawing`, `cam_verify`,
-  `check_layout`, a FEM
+  `check_layout`, `check_print`, a FEM
   `run_study`: `{schema: "designer.receipt/1", standing, summary, claims[]}`
   (`src/core/Receipt.h`). A claim's verdict is `pass | fail | unverifiable`
   and its basis `predicted | verified`; the roll-up is `verified |

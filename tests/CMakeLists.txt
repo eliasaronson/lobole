@@ -40,6 +40,7 @@ add_executable(designer_tests
     test_tolerances.cpp
     test_press_fits.cpp
     test_print_allowance.cpp
+    test_print_check.cpp
     test_serialization.cpp
     test_baked_geometry.cpp
     test_open_project.cpp
@@ -699,6 +700,14 @@ add_test(NAME print_allowance_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/print_allowance_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(print_allowance_smoke PROPERTIES TIMEOUT 120)
+
+# check_print, the one printability check: its negative controls (a 60
+# degree overhang, a fused print-in-place pair, a near pair, a part off the
+# bed), the limits it takes from the print, and its refusals. Headless.
+add_test(NAME print_check_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/print_check_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(print_check_smoke PROPERTIES TIMEOUT 120)
 
 # V1 contact & connectivity: interference distance/state + contact_report
 # components/near-misses/clashes. Headless (no display).

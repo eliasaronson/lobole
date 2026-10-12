@@ -30,6 +30,15 @@ reports done, a person before a review. Every box is one RPC call. The MCP
       one `pass`; a `stale`, `unresolved` or `unchecked` one is not met
       ([requirements](../requirements/README.md)).
 
+## Printed parts
+
+- [ ] `check_print`: `ok`, with every item that matters `pass` — on the bed,
+      one piece per solid (a print-in-place pair that touches is one), no
+      overhang or bridge past the process, the gap between bodies, the STL's
+      chords. A `skipped` item had no limit: declare the print
+      (`set_print_process`) or state it
+      ([checking a print](../tolerances/README.md#checking-a-print)).
+
 ## Assemblies
 
 - [ ] `contact_report`: `connected` is true. Anything in its own component
