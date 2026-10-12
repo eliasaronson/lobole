@@ -40,7 +40,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, HERE)
 from smoke_app import launch  # noqa: E402
-from smoke_shapes import box  # noqa: E402
+from smoke_shapes import box, cylinder  # noqa: E402
 
 BOGUS = "__not_a_parameter__"
 BAD = {"__bad__": True}  # an object: no scalar key accepts it
@@ -396,6 +396,33 @@ def main():
             check("delete_variable scope", "delete_variable",
                   {"name": "nope", "scope": "projct"}, needle="scope",
                   tab=part["name"])
+
+            # A table thread with another pitch is refused, never re-pitched
+            # to the table's (docs/modeling/holes-and-threads.md#thread) --
+            # added or modified, before anything is committed.
+            d.call("set_active_part", part=part["name"])
+            cylinder(d, (80, 0, 0), "z", 3.0, 12.0, name="M6 boss")
+            face = next(
+                {"feature_id": b["created_by"], "element": f["name"]}
+                for b in d.call("list_elements")["bodies"]
+                for f in b["faces"]
+                if f["kind"] == "cylinder" and abs(f["radius"] - 3.0) < 1e-6)
+            m6 = {"type": "Thread", "name": "M6", "face": face,
+                  "designation": "M6"}
+            check("thread pitch on add", "add_feature",
+                  {"feature": dict(m6, pitch=1.25)},
+                  needle="accepted: pitch 1 ", tab=part["name"])
+            check("custom thread without a pitch", "add_feature",
+                  {"feature": dict(m6, designation="boss thread")},
+                  needle="needs its pitch", tab=part["name"])
+            tid = d.call("add_feature", feature=m6)["id"]
+            check("thread pitch on modify", "modify_feature",
+                  {"feature_id": tid, "feature": dict(m6, pitch=1.25)},
+                  needle="accepted: pitch 1 ", tab=part["name"])
+            check("thread fine pitch named", "modify_feature",
+                  {"feature_id": tid,
+                   "feature": dict(m6, designation="M8", pitch=1.0)},
+                  needle="M8x1", tab=part["name"])
 
             # The single-call rollback: a handler that edited and THEN
             # refused leaves nothing behind -- part, job.

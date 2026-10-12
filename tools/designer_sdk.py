@@ -2162,8 +2162,9 @@ class Part(_Tab):
         feature's error and keeps the body.
 
         ``pitch`` (mm) is a CUSTOM thread's -- a designation that names no
-        series; a table thread takes the table's whatever is given. Without
-        it a custom thread is left at the feature's 1.25 mm default.
+        series -- and it needs one. A table thread takes its row's: leave it
+        out, or give exactly that; another is REFUSED naming the row's pitch
+        (and the fine row that has yours: "M8" with 1.0 is "M8x1").
 
         ``flank_angle_deg`` is half the thread angle (30, the ISO profile, when
         omitted); a CUSTOM thread may take 15-60, and 45 prints with no flank

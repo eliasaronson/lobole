@@ -6,6 +6,7 @@
 
 #include "core/Angles.h"
 #include "core/Feature.h"
+#include "core/ThreadStandards.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/BearingFeature.h"
 #include "core/features/BooleanFeature.h"
@@ -1791,7 +1792,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(\"M8\", \"M8x1\") or unified (\"3/8-16 UNC\", \"#10-32 UNF\"), "
      "optionally with a class suffix (\"M8-6g\", \"3/8-16 UNC-2B\"); one "
      "naming a series the tables lack is refused, other text is a custom "
-     "thread with its own pitch (mm); thread_class? (6g/6H..., 1A-3A "
+     "thread; pitch (mm): a custom thread's own, required; a table "
+     "designation's is the row's, omitted or given as exactly that -- "
+     "another is refused naming the row's (and the fine row that has it: "
+     "M8 with pitch 1 is refused for M8x1); thread_class? (6g/6H..., 1A-3A "
      "external, 1B-3B internal); length (mm, +_expr; 0 = the whole face); "
      "modeled? (cut the real helical groove; a failure keeps the "
      "body); hand?: right|left (default right); flank_angle_deg? (half the "
@@ -2662,11 +2666,24 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(rb);
   } else if (type == "Thread") { // v36
     const json& fj = j.at("face");
+    // An absent pitch is the table's for a table designation and NONE for a
+    // custom one -- refused at regeneration, never a made-up 1.25. A given
+    // one that is not the table's is refused there too, naming the row's
+    // (docs/modeling/holes-and-threads.md#thread).
+    const std::string designation = j.value("designation", std::string{});
+    if (j.contains("pitch") && !j.at("pitch").is_number())
+      throw std::runtime_error("Thread '" + name +
+                               "': pitch must be a number of mm");
+    double pitch = 0.0;
+    if (j.contains("pitch"))
+      pitch = j.at("pitch").get<double>();
+    else if (const auto row = threads::Lookup(designation))
+      pitch = row->pitch;
     auto th = std::make_unique<ThreadFeature>(
         name,
         ElementRef{fj.at("feature_id").get<uint64_t>(),
                    fj.at("element").get<std::string>()},
-        j.value("designation", std::string{}), j.value("pitch", 1.25));
+        designation, pitch);
     th->threadClass = j.value("thread_class", std::string{});
     th->length = j.value("length", 0.0);
     th->lengthExpr = j.value("length_expr", std::string{});

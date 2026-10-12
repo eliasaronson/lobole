@@ -80,6 +80,17 @@ struct Resolved {
 // Lookup by designation, any accepted spelling. nullopt for unknown/custom.
 std::optional<Standard> Lookup(const std::string& designation);
 
+// How close a given pitch must be to a row's to be that row's, mm.
+inline constexpr double kPitchTolMm = 1e-6;
+
+// Why `pitch` cannot go with the row `s` that `designation` resolved to, or
+// empty when it is the row's (docs/modeling/holes-and-threads.md#thread).
+// A table thread's pitch is its row's: another is refused, naming the row's
+// and -- a fine pitch being a row of its own -- the row of the same
+// diameter that has the pitch given ("M8" at 1 mm: "M8x1"), never replaced.
+[[nodiscard]] std::string
+PitchError(const Standard& s, const std::string& designation, double pitch);
+
 // Why `threadClass` cannot go on this thread, or empty when it can (empty
 // class included). A class of the other side (2B on a boss, 6g in a hole) is
 // refused as well as one the series does not have.

@@ -137,6 +137,20 @@ parts area).
   are (`1/4-20` alone is refused with "did you mean '1/4-20 UNC'?": the
   series is not guessed). Any other text is a custom thread that keeps its
   typed pitch.
+- **The pitch of a table thread is its row's.** Leave `pitch` out (it is
+  read as the row's) or give exactly that; another is **refused**, naming the
+  row's pitch and, when a row of the same diameter has the one given, that
+  row (`M8` with `pitch: 1` is refused for `M8x1`, the fine pitches being
+  rows of their own), never quietly replaced by the table's
+  (`threads::PitchError`). A custom thread needs its pitch: one without is
+  refused, never given a default. Regeneration refuses either as the
+  feature's error (`ThreadFeature::WhyRefused`, every check that needs no
+  face) — so a saved file that contradicts itself opens and says which
+  feature and what it accepts — and `add_feature`/`modify_feature` refuse
+  them before anything is committed (`ThreadFeature::PitchRefusal`); a
+  thread's other errors, such as a row the tables lack, stay the feature's,
+  reported in the call's `regen`. The editor shows a stored pitch that is
+  not the row's as it is, with *Use the table's*.
 - **The class** (`thread_class`, or the designation's suffix: `M8-6g`,
   `3/8-16 UNC-2B`) must be one the series has on the face's side: ISO 965
   `6g`, `4h`, `6h`, `4g`, `8g`, `6e`, `6f` external and `6H`, `4H`, `5H`,
@@ -361,7 +375,10 @@ relief, a tapped hole is threaded and takes a unified thread, modelled
 threads: an M8 in either hand by the Pappus volume and by following the
 groove, a shoulder left whole and left one face with no stray edges and
 its other faces' names kept, a 3/8-16 UNC-2B in a tapped wall, a failure
-that keeps the body), the GUI case `thread/modeled_checkbox_cuts_the_groove`,
+that keeps the body, a table thread at another pitch refused naming the
+row that has it, a pitch read from the row when absent),
+`tests/refused_calls_smoke.py` (the same refusals over `add_feature` and
+`modify_feature` change nothing), the GUI case `thread/modeled_checkbox_cuts_the_groove`,
 `tests/test_parts.cpp` (the hole tables, fits and their refusals),
 `tests/test_cam_thread.cpp` (the pitch-diameter bands against the tables,
 and a tapped hole's thread on its body),

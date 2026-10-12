@@ -81,7 +81,10 @@ with (
     )
     shaft.activate()
     spec = next(f for f in shaft.state()["features"] if f["type"] == "Thread")
+    # The fine row, its pitch left out: the row's. Keeping M8's 1.25 beside
+    # it would be refused, not quietly made 1 (holes-and-threads.md#thread).
     spec["designation"] = "M8x1"
+    spec.pop("pitch", None)
     app.modify_feature(feature_id=spec["id"], feature=spec)
     fixture.solve()
     assert abs(app.list_relations()["relations"][0]["ratio"] - 1 / (2 * math.pi)) < 1e-9

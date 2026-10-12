@@ -136,14 +136,46 @@ ThreadFeature::ThreadFeature(const std::string& name, ElementRef face,
   m_name = name;
 }
 
-bool ThreadFeature::Execute(RegenContext& ctx) {
-  overlay = {};
-  if (face.name.empty())
-    return true; // previewing: no face picked yet
-  if (pitch <= 1e-6) {
-    SetError("thread pitch must be positive");
-    return false;
+std::string ThreadFeature::PitchRefusal() const {
+  std::string why;
+  const auto resolved = threads::Resolve(designation, &why);
+  if (resolved)
+    return threads::PitchError(resolved->standard, designation, pitch);
+  if (!why.empty())
+    return {}; // not a row at all: WhyRefused says so, pitch aside
+  if (!(pitch > 1e-6) || !std::isfinite(pitch))
+    return "custom thread '" + designation +
+           "' needs its pitch, a positive number of mm (a table "
+           "designation such as M8 or 3/8-16 UNC takes its row's)";
+  return {};
+}
+
+std::string ThreadFeature::WhyRefused() const {
+  // A designation that names a series we carry must be in its table; one
+  // that names none is a custom thread with its own pitch.
+  std::string why;
+  const auto resolved = threads::Resolve(designation, &why);
+  if (!resolved && !why.empty())
+    return why;
+  if (resolved) {
+    if (std::abs(flankDeg - threads::kIsoFlankDeg) > 1e-9) {
+      char buf[200];
+      snprintf(buf, sizeof(buf),
+               "%s is the standard's 60-degree profile; a %g-degree flank "
+               "is a custom thread (a designation that names no series, with "
+               "its own pitch)",
+               designation.c_str(), flankDeg);
+      return buf;
+    }
+    if (!resolved->threadClass.empty() && !threadClass.empty() &&
+        threadClass != resolved->threadClass)
+      return "the designation says class " + resolved->threadClass +
+             " and thread_class says " + threadClass + "; give one";
   }
+  // The table's pitch or none: another is refused, never replaced by the
+  // table's (docs/modeling/holes-and-threads.md#thread).
+  if (std::string e = PitchRefusal(); !e.empty())
+    return e;
   if (!(flankDeg >= threads::kMinFlankDeg &&
         flankDeg <= threads::kMaxFlankDeg)) {
     char buf[160];
@@ -151,7 +183,17 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
              "flank angle %g degrees is outside %g-%g (30 is the ISO "
              "profile, 45 prints without support)",
              flankDeg, threads::kMinFlankDeg, threads::kMaxFlankDeg);
-    SetError(buf);
+    return buf;
+  }
+  return {};
+}
+
+bool ThreadFeature::Execute(RegenContext& ctx) {
+  overlay = {};
+  if (face.name.empty())
+    return true; // previewing: no face picked yet
+  if (const std::string why = WhyRefused(); !why.empty()) {
+    SetError(why);
     return false;
   }
 
@@ -190,38 +232,15 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     const gp_Cylinder cyl = surf.Cylinder();
     const double r = cyl.Radius();
 
-    // A designation that names a series we carry must be in its table; one
-    // that names none is a custom thread with its own pitch.
-    std::string why;
-    const auto resolved = threads::Resolve(designation, &why);
-    if (!resolved && !why.empty()) {
-      SetError(why);
-      return false;
-    }
+    // WhyRefused has accepted the designation, its pitch and its class.
+    const auto resolved = threads::Resolve(designation, nullptr);
     std::string cls = threadClass;
-    if (resolved && !resolved->threadClass.empty()) {
-      if (!cls.empty() && cls != resolved->threadClass) {
-        SetError("the designation says class " + resolved->threadClass +
-                 " and thread_class says " + cls + "; give one");
-        return false;
-      }
+    if (resolved && !resolved->threadClass.empty())
       cls = resolved->threadClass;
-    }
 
     // A known designation must roughly fit the face it annotates.
-    if (resolved && std::abs(flankDeg - threads::kIsoFlankDeg) > 1e-9) {
-      char buf[200];
-      snprintf(buf, sizeof(buf),
-               "%s is the standard's 60-degree profile; a %g-degree flank "
-               "is a custom thread (a designation that names no series, with "
-               "its own pitch)",
-               designation.c_str(), flankDeg);
-      SetError(buf);
-      return false;
-    }
     if (resolved) {
       const threads::Standard& std_ = resolved->standard;
-      pitch = std_.pitch; // the table is authoritative for known series
       const double lo = threads::MinorDiameter(std_) * 0.5 * 0.8;
       const double hi = std_.majorDia * 0.5 * 1.2;
       if (r < lo || r > hi) {

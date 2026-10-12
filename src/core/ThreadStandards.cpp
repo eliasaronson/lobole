@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <iterator>
 
@@ -291,6 +292,39 @@ std::optional<Standard> Lookup(const std::string& designation) {
   if (!r)
     return std::nullopt;
   return r->standard;
+}
+
+std::string PitchError(const Standard& s, const std::string& designation,
+                       double pitch) {
+  if (std::abs(pitch - s.pitch) <= kPitchTolMm)
+    return {};
+  const auto mm = [](double v) {
+    char buf[32];
+    snprintf(buf, sizeof(buf), "%.4g", v);
+    return std::string(buf);
+  };
+  // The same diameter's other rows of the same family: a fine pitch is a
+  // row of its own (M8x1), so a pitch one of them has names it.
+  std::string match, others;
+  for (const Standard& o : All()) {
+    if (o.designation == s.designation ||
+        IsUnified(o.series) != IsUnified(s.series) ||
+        std::abs(o.majorDia - s.majorDia) > 1e-9)
+      continue;
+    if (std::abs(o.pitch - pitch) <= kPitchTolMm)
+      match = o.designation;
+    others += (others.empty() ? "" : ", ") + o.designation + " (" +
+              mm(o.pitch) + " mm)";
+  }
+  std::string why = "'" + designation + "' is " + s.designation + " at " +
+                    mm(s.pitch) + " mm pitch, not " + mm(pitch) +
+                    "; accepted: pitch " + mm(s.pitch) + " or none";
+  if (!match.empty())
+    why += ". For " + mm(pitch) + " mm the table's row is " + match;
+  else if (!others.empty())
+    why += ". The same diameter's other rows: " + others;
+  return why + ". Any other pitch is a custom thread (a designation that "
+               "names no series)";
 }
 
 std::string ClassError(const Standard& s, const std::string& threadClass,

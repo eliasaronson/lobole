@@ -16,9 +16,10 @@
 // or a custom thread's own flank angle)
 // (docs/modeling/holes-and-threads.md#modelled-threads); a cut that fails is
 // a feature error that keeps the body and the overlay. The designation drives
-// the pitch via the ISO metric and unified tables (core/ThreadStandards); a
-// custom designation keeps the manual pitch, and one that claims a series
-// the tables do not carry is refused.
+// the pitch via the ISO metric and unified tables (core/ThreadStandards): a
+// table thread's pitch is its row's and another is refused, a custom
+// designation carries its own, and one that claims a series the tables do
+// not carry is refused.
 class ThreadFeature : public Feature {
 public:
   ThreadFeature(const std::string& name, ElementRef face,
@@ -31,6 +32,17 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+  // Why these inputs are refused, without the face (empty = fine): a
+  // designation claiming a row the tables lack, a table thread at another
+  // pitch or flank angle than its row's, a class suffix and thread_class
+  // that disagree, a custom thread with no pitch, a flank angle out of
+  // range. Execute refuses with it, as the feature's error.
+  [[nodiscard]] std::string WhyRefused() const;
+  // The part of it about the pitch: a table thread at another pitch than
+  // its row's, a custom thread with none. add_feature and modify_feature
+  // refuse with it before committing, so the caller's number is never
+  // swapped for the table's (docs/modeling/holes-and-threads.md#thread).
+  [[nodiscard]] std::string PitchRefusal() const;
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     VisitRefs(face, visit); // the cylindrical face being threaded
   }

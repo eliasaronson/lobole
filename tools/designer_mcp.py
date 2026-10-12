@@ -267,8 +267,9 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   {{"type": "Thread", "name": str, "face": {{"feature_id", "element"}},
   "designation"?: str (ISO "M8"/"M8x1" or unified "3/8-16 UNC", "#10-32
   UNF", optionally with a class suffix "-6g"/"-2B"; a series the tables
-  lack is REFUSED, other text is a custom thread), "pitch": num (mm, custom
-  only), "thread_class"?: str, "length"?: num (mm), "length_expr"?: str,
+  lack is REFUSED, other text is a custom thread), "pitch": num (mm; a
+  custom thread's, required; a table thread's is its row's, omit it or give
+  exactly that -- another is REFUSED), "thread_class"?: str, "length"?: num (mm), "length_expr"?: str,
   "modeled"?: bool (true cuts the real 60-degree helical groove, slow;
   a failure keeps the body), "hand"?: "right"|"left"}}. It is also what a
   CAM job mills: rpc('add_cam_op', {{type: "thread_mill", target: the

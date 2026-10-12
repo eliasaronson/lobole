@@ -2229,9 +2229,24 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       }
       ImGui::EndCombo();
     }
-    if (known) {
+    if (const auto row = threads::Lookup(th->designation)) {
+      // The table's pitch is the only one a table thread takes. A stored
+      // one that is not (a file written by hand) is the feature's error,
+      // and shown as what it is -- never the table's number over another.
       LeftLabel("Pitch");
-      ImGui::Text("%.3g (from table)", th->pitch);
+      if (threads::PitchError(*row, th->designation, th->pitch).empty()) {
+        ImGui::Text("%.4g (from table)", th->pitch);
+      } else {
+        ImGui::TextColored(ImVec4(0.95f, 0.65f, 0.2f, 1.0f),
+                           "%.4g -- %s is %.4g", th->pitch,
+                           row->designation.c_str(), row->pitch);
+        ImGui::SameLine();
+        if (ImGui::SmallButton("Use the table's")) {
+          nlohmann::json before = DocumentIO::FeatureToJson(*th);
+          th->pitch = row->pitch;
+          CommitDiscrete(state, feature, before, index, commit);
+        }
+      }
     } else {
       HandleEdit(state, feature, DragDim(state, "Pitch", &th->pitch), index,
                  commit);

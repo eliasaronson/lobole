@@ -89,6 +89,19 @@ double AngleParam(bool hasRad, double rad, bool hasDeg, double deg,
   return rad;
 }
 
+// A Thread whose pitch regeneration would refuse — a table designation
+// with another pitch than its row's, a custom one with none — is refused
+// BEFORE it is committed, so the call changes nothing and the caller's
+// number is never swapped for the table's
+// (docs/scripting/rpc.md#a-refused-call-changes-nothing). Regeneration
+// still refuses the same, for a loaded file; the thread's other errors (a
+// row the tables lack) stay the feature's, reported in `regen`.
+void RefuseThread(const Feature& f) {
+  if (const auto* th = dynamic_cast<const ThreadFeature*>(&f))
+    if (const std::string why = th->PitchRefusal(); !why.empty())
+      throw std::runtime_error("Thread: " + why);
+}
+
 // V2 strict inputs: the feature dialect used to IGNORE unknown fields — a
 // Box with mode:"add" was accepted and the mode silently dropped (the dock
 // dogfooding round's silent-failure class). Rather than maintain a per-type
@@ -1077,6 +1090,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
       throw std::runtime_error(feature->TypeName() + " is incomplete: " + why);
     }
+    RefuseThread(*feature);
     const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(feature)), *doc);
@@ -1251,8 +1265,11 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     RefusePrimitiveSpec(p.at("feature"));
     // Build a throwaway from the request first: validates the JSON AND lets
     // the round-trip unknown-field check run before anything is committed.
-    RejectUnknownFeatureFields(p.at("feature"),
-                               *DocumentIO::FeatureFromJson(p.at("feature")));
+    {
+      const auto probe = DocumentIO::FeatureFromJson(p.at("feature"));
+      RejectUnknownFeatureFields(p.at("feature"), *probe);
+      RefuseThread(*probe);
+    }
     json before = DocumentIO::FeatureToJson(*feature);
     json after = p.at("feature");
     // A sketch whose dimension VALUE changed is re-solved here, so the

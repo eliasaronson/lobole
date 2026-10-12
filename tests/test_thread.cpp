@@ -419,18 +419,19 @@ TEST_CASE("a Thread refuses a designation or class the tables do not carry",
                                                  "3/8-17 UNC", 1.5));
   CHECK(doc.GetFeature(1)->GetError().find("3/8-16 UNC") != std::string::npos);
   // An internal class on a boss.
+  const double kP16 = 25.4 / 16.0;
   doc.AddFeature(std::make_unique<ThreadFeature>("Side", ElementRef{by, side},
-                                                 "3/8-16 UNC-2B", 1.5));
+                                                 "3/8-16 UNC-2B", kP16));
   CHECK(doc.GetFeature(2)->GetError().find("internal") != std::string::npos);
   // The designation and the class field disagreeing.
   auto both = std::make_unique<ThreadFeature>("Both", ElementRef{by, side},
-                                              "3/8-16 UNC-2A", 1.5);
+                                              "3/8-16 UNC-2A", kP16);
   both->threadClass = "3A";
   doc.AddFeature(std::move(both));
   CHECK(doc.GetFeature(3)->GetError().find("give one") != std::string::npos);
-  // The right one resolves and takes the table's pitch.
+  // The right one resolves, at the table's pitch.
   doc.AddFeature(std::make_unique<ThreadFeature>("Good", ElementRef{by, side},
-                                                 "3/8-16 UNC-2A", 1.0));
+                                                 "3/8-16 UNC-2A", kP16));
   auto* good = dynamic_cast<ThreadFeature*>(doc.GetFeature(4));
   CHECK(good->GetError().empty());
   CHECK_THAT(good->pitch, WithinAbs(1.5875, 1e-9));
@@ -574,7 +575,7 @@ TEST_CASE("a modelled thread stops square at a shoulder", "[thread]") {
   const Body& body = doc.GetBodies()[0];
   const double before = body.shape.Volume();
   auto th = std::make_unique<ThreadFeature>(
-      "Thread", ElementRef{body.createdBy, CylFaceName(body)}, "M8-6g", 1.0);
+      "Thread", ElementRef{body.createdBy, CylFaceName(body)}, "M8-6g", 1.25);
   th->modeled = true;
   doc.AddFeature(std::move(th));
   INFO(doc.GetFeature(4)->GetError());
@@ -654,7 +655,7 @@ TEST_CASE("a thread squared on a shoulder leaves no stray edges on it",
   const std::string shankName = CylFaceName(before);
 
   auto th = std::make_unique<ThreadFeature>(
-      "Thread", ElementRef{before.createdBy, shankName}, "M8-6g", 1.0);
+      "Thread", ElementRef{before.createdBy, shankName}, "M8-6g", 1.25);
   th->modeled = true;
   doc.AddFeature(std::move(th));
   const uint64_t threadId = doc.GetFeature(4)->GetId();
@@ -751,7 +752,7 @@ TEST_CASE("a modelled 3/8-16 UNC-2B cuts the groove in a tapped hole wall",
 
   auto th = std::make_unique<ThreadFeature>(
       "Tripod", ElementRef{drilled.createdBy, CylFaceName(drilled)},
-      "3/8-16 UNC-2B", 1.0);
+      "3/8-16 UNC-2B", 25.4 / 16.0);
   th->modeled = true;
   doc.AddFeature(std::move(th));
   const auto* feature = doc.GetFeature(4);
@@ -868,5 +869,61 @@ TEST_CASE("a flank angle round-trips, and is written only when not 30",
   CHECK(dynamic_cast<ThreadFeature*>(back.get())->flankDeg == 45.0);
   // Not a number: refused on load, never read as the default.
   j["flank_angle_deg"] = "steep";
+  CHECK_THROWS(DocumentIO::FeatureFromJson(j));
+}
+
+TEST_CASE("a table thread takes its row's pitch or none, never another",
+          "[thread]") {
+  Document doc;
+  doc.AddFeature(std::make_unique<CylinderFeature>(
+      "Boss", glm::vec3(0), glm::vec3(0, 0, 1), 4.0, 20.0));
+  const Body& body = doc.GetBodies()[0];
+  const ElementRef face{body.createdBy, CylFaceName(body)};
+  const auto error = [&](size_t i) { return doc.GetFeature(i)->GetError(); };
+  // An M8 at 1 mm is not quietly made an M8x1.25: refused, naming the
+  // row's pitch and the fine row that HAS 1 mm.
+  doc.AddFeature(std::make_unique<ThreadFeature>("M8", face, "M8", 1.0));
+  CHECK(error(1).find("accepted: pitch 1.25") != std::string::npos);
+  CHECK(error(1).find("M8x1") != std::string::npos);
+  CHECK(dynamic_cast<const ThreadFeature*>(doc.GetFeature(1))->pitch == 1.0);
+  CHECK(doc.GetBodies()[0].threads.empty()); // nothing is marked
+  // The fine row at its own pitch, and its spelling of the coarse one.
+  doc.AddFeature(std::make_unique<ThreadFeature>("Fine", face, "M8x1", 1.0));
+  CHECK(error(2).empty());
+  doc.AddFeature(
+      std::make_unique<ThreadFeature>("Coarse", face, "M8x1.25-6g", 1.25));
+  CHECK(error(3).empty());
+  // A pitch no row of the diameter has names the rows there are.
+  doc.AddFeature(std::make_unique<ThreadFeature>("Odd", face, "M8", 0.8));
+  CHECK(error(4).find("M8x1 (1 mm)") != std::string::npos);
+  // A custom thread with no pitch is refused, not given one.
+  doc.AddFeature(std::make_unique<ThreadFeature>("Bare", face, "custom", 0.0));
+  CHECK(error(5).find("needs its pitch") != std::string::npos);
+  REQUIRE(doc.GetBodies().size() == 1);
+}
+
+TEST_CASE("a Thread read without a pitch: the row's, or refused",
+          "[thread][serialization]") {
+  nlohmann::json j = {{"type", "Thread"},
+                      {"name", "T"},
+                      {"face", {{"feature_id", 1}, {"element", "1/face0"}}},
+                      {"designation", "M6"}};
+  auto m6 = DocumentIO::FeatureFromJson(j);
+  CHECK(dynamic_cast<ThreadFeature*>(m6.get())->pitch == 1.0);
+  CHECK(dynamic_cast<ThreadFeature*>(m6.get())->WhyRefused().empty());
+  // Given and not the row's: loaded as written, refused at regeneration.
+  j["pitch"] = 1.25;
+  auto wrong = DocumentIO::FeatureFromJson(j);
+  CHECK(dynamic_cast<ThreadFeature*>(wrong.get())->pitch == 1.25);
+  CHECK(dynamic_cast<ThreadFeature*>(wrong.get())
+            ->WhyRefused()
+            .find("M6 at 1 mm pitch") != std::string::npos);
+  // A custom thread without one has none.
+  j.erase("pitch");
+  j["designation"] = "neck thread";
+  auto bare = DocumentIO::FeatureFromJson(j);
+  CHECK(dynamic_cast<ThreadFeature*>(bare.get())->pitch == 0.0);
+  CHECK_FALSE(dynamic_cast<ThreadFeature*>(bare.get())->WhyRefused().empty());
+  j["pitch"] = "coarse";
   CHECK_THROWS(DocumentIO::FeatureFromJson(j));
 }
