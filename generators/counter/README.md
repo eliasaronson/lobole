@@ -99,11 +99,15 @@ gear face while the tens is locked; that friction is the lock's to carry.
 ## What is checked, every run
 
 - `check_geometry` on the plate is `verified`.
-- Every pair's exact B-rep distance is at least the gap a side less 0.01 mm:
-  wheel and its transfer, transfer and the next wheel's gear, wheel on
-  wheel, every part against the housing. On K5 PLA every one is 0.100–0.102.
-- The STL is exported at the profile's chord deviation (0.01 mm, a fifth of
-  the gap at most) and is one shell per body: 2 · digits.
+- `check_print` (docs/tolerances/README.md#checking-a-print) on the plate:
+  it stands on the bed, comes off it as one piece per body (2 · digits),
+  every pair of bodies is at least the gap a side apart on the exact B-rep
+  (less the check's tenth: wheel and its transfer, transfer and the next
+  wheel's gear, wheel on wheel, every part against the housing; on K5 PLA
+  every one is 0.100–0.102), and the STL's chord deviation (the profile's
+  0.01 mm) is at most a fifth of the gap. Its overhang and bridge items are
+  recorded in the receipt's `print`, not required: the layer gaps print as
+  ceilings over the part below.
 - **The counting**, in the assembly: each wheel on a revolute to the
   housing's frames; per carry an `intermittent` relation (Geneva, 3 slots)
   wheel → transfer and a `gear` relation (9:30) transfer → next wheel. Two
@@ -123,8 +127,8 @@ gear face while the tens is locked; that friction is the lock's to carry.
 - **Negative controls that must fail**: the first carry's Geneva timed 10°
   late must clash its wheel with its transfer over the carry; the first
   gear put half a tooth out must clash the transfer with the tens; and a
-  transfer modelled at half the gap, beside the units wheel, must fail the
-  clearance gate (it measures 0.05 mm). A run whose controls read clean
+  transfer modelled at half the gap, beside the units wheel, must fail
+  `check_print`'s clearance item (it measures 0.05 mm). A run whose controls read clean
   stops.
 
 `generator_counter` (generators/README.md#the-big-generators-as-tests) runs

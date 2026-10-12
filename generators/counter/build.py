@@ -41,7 +41,8 @@ from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from _lib import arc_through, check, circle, connect, fresh_project, line  # noqa: E402
+from _lib import (arc_through, check, check_print, circle, connect,  # noqa: E402
+                  fresh_project, line, print_receipt)
 from gear import involute_profile  # noqa: E402
 
 ROOT = Path(HERE).resolve().parent.parent
@@ -670,31 +671,6 @@ def build_print(d, s, proc, count=0):
     return names, theta, beta
 
 
-def clearance_pairs(s):
-    n = s["digits"]
-    pairs = []
-    for j in range(n - 1):
-        t = f"transfer {j + 1}"
-        pairs += [(wheel_name(j), t), (t, wheel_name(j + 1)),
-                  (wheel_name(j), wheel_name(j + 1)), (t, "housing")]
-    pairs += [(wheel_name(j), "housing") for j in range(n)]
-    return pairs
-
-
-def clearances(d, feats, pairs):
-    out = {}
-    for a, b in pairs:
-        r = d.call("measure", a={"feature_id": feats[a]},
-                   b={"feature_id": feats[b]})
-        out[f"{a} / {b}"] = r.get("distance", r.get("min_distance"))
-    return out
-
-
-def gate(cl, need):
-    """The pairs closer than `need`: what the run refuses to save."""
-    return {k: v for k, v in cl.items() if v is None or v < need}
-
-
 def build_assembly(d, s):
     """The proof that the plate counts: every wheel and transfer on a
     revolute to the housing's frames, a Geneva carry from each wheel to its
@@ -875,22 +851,18 @@ def main():
     geo = d.call("check_geometry")
     if geo["receipt"]["standing"] != "verified":
         raise SystemExit(f"counter: the print part is not verified: {geo}")
-    cl = clearances(d, feats, clearance_pairs(s))
-    for k, v in cl.items():
-        print(f"  {k}: {v:.3f} mm")
-    bad = gate(cl, g - 0.01)
-    if bad:
-        raise SystemExit(f"counter: under the {g:g} mm a side the profile "
-                         f"wants: {bad}")
+    # The app's printability check (check_print): on the bed, one piece per
+    # body (housing, wheels and transfers), every pair of bodies at least
+    # the gap a side apart on the exact B-rep, and the STL's chords a fifth
+    # of the gap at most. Overhangs and bridges are reported: the bands'
+    # undersides are 45 degree chamfers by design, and the layer gaps print
+    # as ceilings over the part below.
+    pr = check_print(d, "counter",
+                     need=("bed", "shells", "clearance", "chords"))
+    cl = {f"{p['a']} / {p['b']}": p["distance_mm"]
+          for p in pr["clearance"]["pairs"]}
     stl = out / "counter.stl"
     exp = d.call("export_stl", path=str(stl))
-    shells = 2 * s["digits"]
-    if exp.get("deflection_mm", 1.0) > g / 5.0:
-        raise SystemExit(f"counter: the STL's chords ({exp}) can take a "
-                         f"fifth of the gap")
-    if exp.get("shells") != shells or not exp.get("watertight", True):
-        raise SystemExit(f"counter: the STL is not {shells} separate "
-                         f"watertight shells: {exp}")
     d.call("save_project", path=str(out / "counter.dsgn"))
 
     occ, mates, rels = build_assembly(d, s)
@@ -1007,14 +979,15 @@ def main():
               if b_["created_by"] != wheel]
     if len(others) != 1:
         raise SystemExit(f"counter: the half-gap control has {others}")
-    ctl = clearances(d, {"wheel": wheel, "transfer": others[0]},
-                     [("wheel", "transfer")])
-    motion["negative_controls"]["a transfer at half the gap"] = ctl
+    ctl = check_print(d, "control: half gap", need=(), quiet=True)
+    near = ctl["clearance"]
+    motion["negative_controls"]["a transfer at half the gap"] = {
+        "wheel / transfer": near.get("min_mm"), "status": near["status"]}
     print(f"  negative control, a transfer at half the gap: "
-          f"{list(ctl.values())[0]:.3f} mm")
-    if not gate(ctl, g - 0.01):
+          f"{near.get('min_mm', 0.0):.3f} mm, clearance {near['status']}")
+    if near["status"] != "fail":
         raise SystemExit("counter: a transfer at half the gap passes the "
-                         "clearance gate")
+                         "clearance check")
 
     if not args.no_render:
         hero(d, out / "counter.png")
@@ -1024,7 +997,8 @@ def main():
                                           if k not in ("wheels",
                                                        "transfers")},
                "print_pose_deg": {"wheels": theta, "transfers": beta},
-               "clearances_mm": cl, "motion": motion, "stl": str(stl),
+               "clearances_mm": cl, "print": print_receipt(pr),
+               "motion": motion, "stl": str(stl),
                "stl_shells": exp.get("shells"),
                "stl_deflection_mm": exp.get("deflection_mm"),
                "confirm": gap.get("confirm")}

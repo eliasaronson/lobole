@@ -114,14 +114,21 @@ a mesh closes by the gap instead of 0.25 mm.
 ## What is checked, every run
 
 - `check_geometry` on the print part is `verified`.
-- **Every meshing pair's exact B-rep distance is at least the gap a side
-  less 0.01 mm.** The closest points come out about 5 µm short: 0.095 mm
-  (sun) and 0.097 mm (ring) against the K5 profile's 0.1. That is the
-  profile, not the solid: gear.py draws each flank as two arcs through
-  involute points.
-- **The STL's chords are at most a fifth of the gap:** `export_stl` picks
-  the profile's chord deviation (0.01 mm) for a printed part.
-- **The STL has five shells**: two bodies that touch would fuse into one.
+- **`check_print`** (docs/tolerances/README.md#checking-a-print) on the
+  print part, which must pass every item:
+  - **every pair of bodies' exact B-rep distance is at least the gap a
+    side**, less the check's tenth. The closest points come out about 5 µm
+    short: 0.095 mm (sun) and 0.097 mm (ring) against the K5 profile's 0.1.
+    That is the profile, not the solid: gear.py draws each flank as two
+    arcs through involute points;
+  - **the STL's chords are at most a fifth of the gap**: `export_stl` picks
+    the profile's chord deviation (0.01 mm) for a printed part;
+  - **five pieces**: two bodies that touch would print as one;
+  - **on the bed;**
+  - **nothing overhangs past 45° and nothing bridges**: the helix, the
+    bearers' 45° cone and the knob read 45.000 at worst off the B-rep.
+
+  The whole report is in the receipt's `print`.
 - **The assembly turns.** The `sun`, `ring` and a kinematic carrier (a part
   of frames only, also placed fixed as the ground every axis hangs on) turn
   on their own axes, the planets on the carrier's frames. One `epicyclic`

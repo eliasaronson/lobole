@@ -43,7 +43,8 @@ from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from _lib import check, circle, connect, fresh_project, line  # noqa: E402
+from _lib import (check, check_print, circle, connect, fresh_project,  # noqa: E402
+                  line, print_receipt)
 from gear import involute_profile, wedge  # noqa: E402
 
 ROOT = Path(HERE).resolve().parent.parent
@@ -762,20 +763,6 @@ def hero(d, path):
     d.call("render_still", path=str(path), width=1600, height=1200)
 
 
-def clearances(d, ids):
-    """The smallest gap between every pair that meshes, measured on the
-    exact B-rep. The pairs that never meet (planet to planet, sun to ring)
-    are left to the STL's shell count."""
-    out = {}
-    pairs = [("sun", f"planet {i + 1}") for i in range(PLANETS)]
-    pairs += [(f"planet {i + 1}", "ring") for i in range(PLANETS)]
-    for a, b in pairs:
-        r = d.call("measure", a={"feature_id": ids[a]},
-                   b={"feature_id": ids[b]})
-        out[f"{a} / {b}"] = r.get("distance", r.get("min_distance"))
-    return out
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--port", type=int)
@@ -818,31 +805,24 @@ def main():
     if geo["receipt"]["standing"] != "verified":
         raise SystemExit(f"planetary: the print part is not verified: {geo}")
     ids = bodies_by_name(d)
-    cl = clearances(d, ids)
-    worst = min(cl.values())
-    for k, v in cl.items():
-        print(f"  {k}: {v:.3f} mm")
-    # The closest point comes out about 5 um short of the gap, lofted or
-    # extruded alike: gear.py draws each flank as two arcs through involute
-    # points, not the involute itself. So the allowance is absolute, a
-    # hundredth of a millimetre, far under what a 0.4 mm nozzle resolves.
-    if worst < gap["allowance_mm"] / 2.0 - 0.01:
-        raise SystemExit(f"planetary: the closest mesh is {worst:.3f} mm, "
-                         f"under the {gap['allowance_mm'] / 2:g} mm the "
-                         f"table wants a side")
+    # The app's printability check (check_print): on the bed, five separate
+    # pieces, the gap between every pair of bodies on the exact B-rep, and
+    # the STL's chords a fifth of the gap at most. The closest point of a
+    # mesh comes out about 5 um short of the gap -- gear.py draws each flank
+    # as two arcs through involute points -- which the check's tolerance (a
+    # tenth of the gap) holds. And nothing overhangs past 45 degrees or
+    # bridges: the helix, the bearers' cone and the knob are 45 or less by
+    # design, and every item must pass.
+    pr = check_print(d, "planetary")
+    cl = {f"{p['a']} / {p['b']}": p["distance_mm"]
+          for p in pr["clearance"]["pairs"]}
 
     out.mkdir(parents=True, exist_ok=True)
     stl = out / "planetary.stl"
     # A printed part exports at its profile's chord deviation (else a tenth
-    # of its smallest gap): at the old 0.1 mm the chords took 0.03 mm a side
-    # off every gap. The reply says what it used.
+    # of its smallest gap), the deviation check_print judged. The reply
+    # says what it used.
     exp = d.call("export_stl", path=str(stl))
-    if exp.get("deflection_mm", 1.0) > gap["allowance_mm"] / 2.0 / 5.0:
-        raise SystemExit(f"planetary: the STL's chords ({exp}) can take a "
-                         f"fifth of the gap")
-    if exp.get("shells") != len(ids) or not exp.get("watertight", True):
-        raise SystemExit(f"planetary: the STL is not {len(ids)} separate "
-                         f"watertight shells: {exp}")
     # The print part is saved as built; the hero still is a separate look.
     d.call("save_project", path=str(out / "planetary.dsgn"))
 
@@ -944,7 +924,8 @@ def main():
                "study": study,
                "phases": {"ring": ph["ring"],
                           "planets": [list(p) for p in ph["planets"]]},
-               "clearances_mm": cl, "stl": str(stl),
+               "clearances_mm": cl, "print": print_receipt(pr),
+               "stl": str(stl), "stl_deflection_mm": exp.get("deflection_mm"),
                "stl_shells": exp.get("shells"), "confirm": gap["confirm"]}
     (out / "planetary.json").write_text(json.dumps(receipt, indent=1))
     d.call("save_project", path=str(out / "planetary.dsgn"))

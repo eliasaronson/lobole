@@ -10,6 +10,9 @@ that block, once. Import it from a generator:
 
     from _lib import connect, plane_at_z, line, arc_through, check
 
+A printed part asks the app whether it will print with `check_print(d, what,
+need=...)` rather than scanning its own STL.
+
 `connect()` finds the running app: `--port` if given, else the ONE
 announced instance, else it refuses naming the ones it found — a generator
 must never guess a port and must never silently attach to the wrong window
@@ -159,3 +162,71 @@ def connect(port=None):
                              + ", ".join(f"{i['port']} ({i.get('project') or 'no project'})"
                                          for i in found))
     return Designer.wait_for(int(port))
+
+
+# --- printing -----------------------------------------------------------------
+
+PRINT_ITEMS = ("bed", "shells", "overhang", "bridges", "clearance", "chords")
+
+
+def print_item_line(name, item):
+    """One check_print item in words: its status, measured value and limit."""
+    st = item["status"]
+    if name == "bed":
+        text = f"lowest point {item['lowest_mm']:.4f} mm"
+    elif name == "shells":
+        text = (f"{item['pieces']} pieces for {item['expected']} solids"
+                + ("" if item["watertight"] else ", not watertight")
+                + (f", joined {item['joined']}" if item["joined"] else ""))
+    elif name == "overhang":
+        text = (f"{item['area_mm2']:.3f} mm2 past {item['limit_deg']:g} deg "
+                f"(allowed {item['allowance_mm2']:g}), worst "
+                f"{item['worst_deg']:.3f} deg"
+                + (f" on {item['worst']['name']} face {item['worst']['face']}"
+                   if item.get("worst") else ""))
+    elif name == "bridges":
+        text = (f"{len(item['faces'])} ceilings, widest "
+                f"{item['worst_span_mm']:.2f} mm of {item['limit_mm']:g}")
+    elif name == "clearance":
+        m = item.get("min_mm")
+        near = item["pairs"][0] if item["pairs"] else None
+        text = ((f"{m:.4f} mm" if m is not None else "no two bodies near")
+                + (f" ({near['a']} / {near['b']})" if near else "")
+                + f" against {item['required_mm']:g} mm a side, "
+                  f"down to {item['required_mm'] - item['tolerance_mm']:.4f}")
+    else:
+        text = (f"{item['deflection_mm']:g} mm against "
+                f"{item['limit_mm']:g} mm")
+    if st == "skipped":
+        text = item.get("note", "skipped")
+    return f"{name} {st}: {text}"
+
+
+def check_print(d, what, need=PRINT_ITEMS, quiet=False, **params):
+    """Will this part print? The app's one check (check_print,
+    docs/tolerances/README.md#checking-a-print) over the active part, or
+    `part=...`. Raises naming each item in `need` that did not pass -- a
+    skipped one too: what a generator needs checked must be checked. Prints
+    every item unless `quiet`, and returns the reply, whose items go in the
+    receipt (`print_receipt`)."""
+    r = d.call("check_print", **params)
+    if not quiet:
+        for k in PRINT_ITEMS:
+            print(f"  {what}: {print_item_line(k, r[k])}")
+    bad = [k for k in need if r[k]["status"] != "pass"]
+    if bad:
+        raise SystemExit(f"{what}: will not print: "
+                         + "; ".join(print_item_line(k, r[k]) for k in bad))
+    return r
+
+
+def print_receipt(r):
+    """A check_print reply, as a receipt keeps it: each item's status,
+    measured value and limit, without the per-face lists."""
+    out = {"ok": r["ok"], "process": r["process"],
+           "direction": r["direction"]}
+    for k in PRINT_ITEMS:
+        out[k] = {key: v for key, v in r[k].items()
+                  if key not in ("faces", "pairs", "note", "source")}
+    out["clearance"]["closest"] = r["clearance"]["pairs"][:3]
+    return out

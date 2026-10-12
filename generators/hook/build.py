@@ -33,14 +33,14 @@ import argparse
 import json
 import math
 import os
-import struct
 import sys
 import time
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from _lib import arc_through, check, connect, fresh_project, line  # noqa: E402
+from _lib import (arc_through, check, check_print, connect,  # noqa: E402
+                  fresh_project, line, print_receipt)
 
 ROOT = Path(HERE).resolve().parent.parent
 OUT = Path(os.environ["DESIGNER_SCRATCH"]) / "hook" if \
@@ -195,20 +195,6 @@ def to_world(frame, p, s):
     lift = s["width"] / 2.0 if frame == "flat" else 0.0
     return [p[0] * f["x"][k] + p[1] * f["y"][k] + p[2] * f["z"][k]
             + (lift if k == 2 else 0.0) for k in range(3)]
-
-
-def stl_bounds(path):
-    """The (min, max) corners of a binary STL: what the slicer will see."""
-    b = Path(path).read_bytes()
-    n = struct.unpack("<I", b[80:84])[0]
-    lo, hi = [math.inf] * 3, [-math.inf] * 3
-    for i in range(n):
-        v = struct.unpack("<12f", b[84 + 50 * i:84 + 50 * i + 48])
-        for c in range(3):
-            for k in range(3):
-                lo[k] = min(lo[k], v[3 + 3 * c + k])
-                hi[k] = max(hi[k], v[3 + 3 * c + k])
-    return lo, hi
 
 
 def build(d, s, frame, proc, material):
@@ -503,7 +489,7 @@ def main():
           f"{material} ({args.profile or 'built-in table'})")
 
     out.mkdir(parents=True, exist_ok=True)
-    stl = {}
+    stl, prints = {}, {}
     for frame in ("flat", "upright"):
         d.call("add_part", name=f"hook {frame}")
         d.call("set_print_process", **proc)
@@ -511,18 +497,17 @@ def main():
         geo = d.call("check_geometry")
         if geo["receipt"]["standing"] != "verified":
             raise SystemExit(f"hook: the {frame} print is not verified: {geo}")
+        # On the bed as modelled (the slicer places what it is given), one
+        # watertight piece, and nothing overhanging past the process's limit
+        # -- the lip is 45 degrees by design (check_print).
+        pr = check_print(d, f"hook {frame}", need=("bed", "shells"))
         path = out / f"hook_{frame}.stl"
-        exp = d.call("export_stl", path=str(path))
-        if exp.get("shells") != 1 or not exp.get("watertight", True):
-            raise SystemExit(f"hook: {path} is not one watertight shell: "
-                             f"{exp}")
-        # On the bed as exported: the slicer places what it is given.
-        lo, hi = stl_bounds(path)
-        if abs(lo[2]) > 1e-3:
-            raise SystemExit(f"hook: {path} does not sit on the bed: its "
-                             f"lowest point is at z = {lo[2]:.3f}")
+        d.call("export_stl", path=str(path))
+        box = d.call("mass_properties")["bodies"][0]
+        lo, hi = box["bbox_min"], box["bbox_max"]
         print(f"  {frame}: {hi[0] - lo[0]:.0f} x {hi[1] - lo[1]:.0f} x "
               f"{hi[2] - lo[2]:.0f} mm on the bed")
+        prints[frame] = print_receipt(pr)
         stl[frame] = path.name
 
     d.call("add_part", name="hook")
@@ -577,7 +562,7 @@ def main():
                                               "seconds", "solver")}
                           | {"nodes": sv["results"]["nodes"]}
                           for sv in solves],
-               "stl": stl}
+               "stl": stl, "print": prints}
     (out / "hook.json").write_text(json.dumps(receipt, indent=1))
     (out / "hook_card.md").write_text(
         card(s, pred, conv, args.profile or f"{args.process} {material}",

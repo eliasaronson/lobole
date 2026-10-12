@@ -78,8 +78,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _lib import (check, circle, connect, fresh_project, line,  # noqa: E402
-                  plane_at_z)
+from _lib import (check, check_print, circle, connect,  # noqa: E402
+                  fresh_project, line, plane_at_z, print_receipt)
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "scratch" / "print_coupon"
@@ -625,6 +625,17 @@ def main():
         if "print" in r:
             print(f"  {r['print']['sentence']}")
 
+    # On the bed, and the plate, each disc and each ring a piece of its own
+    # (check_print). The discs stand in gaps either side of the table's on
+    # purpose, so the clearance item is reported, not required.
+    pr = check_print(d, "print_coupon", need=("bed", "shells"), quiet=True,
+                     **({"stl_deflection_mm": args.deflection}
+                        if args.deflection is not None else {}))
+    if pr["shells"]["expected"] != 1 + len(discs) + len(rings):
+        raise SystemExit(f"print_coupon: {pr['shells']['expected']} solids, "
+                         f"not the plate, {len(discs)} loose discs and "
+                         f"{len(rings)} rings")
+    report["print"] = print_receipt(pr)
     OUT.mkdir(parents=True, exist_ok=True)
     stl = OUT / f"{name}.stl"
     exp = {"path": str(stl)}
@@ -632,11 +643,6 @@ def main():
         exp["deflection"] = args.deflection
     r = d.call("export_stl", **exp)
     report["stl_deflection_mm"] = r.get("deflection_mm")
-    shells = 1 + len(discs) + len(rings)
-    if r.get("shells") is not None and r["shells"] != shells:
-        raise SystemExit(f"print_coupon: the STL has {r['shells']} shells, "
-                         f"not the plate, {len(discs)} loose discs and "
-                         f"{len(rings)} rings: {r}")
     d.call("save_project", path=str(OUT / f"{name}.dsgn"))
     (OUT / f"{name}.json").write_text(json.dumps(report, indent=1))
     print(f"print_coupon: {len(report['features'])} features -> {stl}")

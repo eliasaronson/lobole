@@ -23,7 +23,6 @@ import argparse
 import json
 import math
 import os
-import struct
 import sys
 import time
 from pathlib import Path
@@ -31,7 +30,9 @@ from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = Path(HERE).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "tools"))
+sys.path.insert(0, str(ROOT / "generators"))
 from designer_sdk import Plane, SdkError, connect  # noqa: E402
+from _lib import check_print, print_receipt  # noqa: E402
 
 OUT = Path(os.environ.get("DESIGNER_SCRATCH", ROOT / "scratch")) / "jar"
 
@@ -52,17 +53,14 @@ SQUEEZE_BAND = (0.20, 0.30)
 # continuous-thread closure engages about a turn and a half); two at this
 # pitch also lifts the lid clear of the neck in two turns.
 TURNS = 2
-# Steepest overhang a facet may have, from vertical, before it needs
-# support; 45 is the rule of thumb. A surface AT 45 (the thread flanks, the
-# edge chamfers) is meshed into facets that lean past it: 46 degrees on a
-# chamfer's long thin triangles, and up to 50 on the slivers where a
-# thread's groove ends, under a square millimetre in all. So a facet counts
-# from three degrees past the limit, and a part fails on more than
-# OVERHANG_MAX_MM2 of them: an ISO 60-degree thread on the same neck has
-# hundreds (the negative control in main()).
+# Steepest overhang, from vertical, before a face needs support: 45, the
+# rule of thumb, which check_print takes from the PLA parts' print process.
+# The TPU gasket has no print process, so it is stated for it. check_print
+# reads every angle off the B-rep's surface normals, so a surface AT 45 (the
+# thread flanks, the edge chamfers) reads 45 rather than the 46-50 its
+# facets lean to, and no slack is needed; an ISO 60-degree thread on the
+# same neck fails (the negative control in main()).
 OVERHANG_DEG = 45.0
-OVERHANG_SLACK_DEG = 3.0
-OVERHANG_MAX_MM2 = 1.0
 
 
 def lines(mm, at_least):
@@ -260,67 +258,22 @@ def verified(app, part):
                          f"{geo['receipt']}")
 
 
-def stl_overhangs(path, bed_tol=0.01):
-    """The facets of an STL that face down past OVERHANG_DEG from vertical,
-    off the bed: what a slicer would want support for. Returns (worst
-    angle from vertical in degrees, area in mm2 past the limit, triangles)."""
-    data = Path(path).read_bytes()
-    tris = []
-    if data[:5] == b"solid" and b"facet" in data[:400]:
-        verts = []
-        for ln in data.decode("ascii", "replace").splitlines():
-            ln = ln.strip()
-            if ln.startswith("vertex"):
-                verts.append(tuple(float(v) for v in ln.split()[1:4]))
-        tris = [verts[i:i + 3] for i in range(0, len(verts) - 2, 3)]
-    else:
-        n = struct.unpack_from("<I", data, 80)[0]
-        for i in range(n):
-            off = 84 + 50 * i
-            v = struct.unpack_from("<12f", data, off)
-            tris.append([v[3:6], v[6:9], v[9:12]])
-    zmin = min(p[2] for t in tris for p in t)
-    limit = math.cos(math.radians(90.0 - OVERHANG_DEG - OVERHANG_SLACK_DEG))
-    worst, area_over = 0.0, 0.0
-    for a, b, c in tris:
-        u = [b[i] - a[i] for i in range(3)]
-        w = [c[i] - a[i] for i in range(3)]
-        n = (u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2],
-             u[0] * w[1] - u[1] * w[0])
-        ln = math.sqrt(sum(x * x for x in n))
-        if ln < 1e-12:
-            continue
-        nz = n[2] / ln
-        if nz >= 0.0:
-            continue
-        if max(a[2], b[2], c[2]) <= zmin + bed_tol:
-            continue  # on the bed
-        # The angle of the surface from vertical: 0 a wall, 90 a ceiling.
-        ang = math.degrees(math.asin(min(1.0, -nz)))
-        worst = max(worst, ang)
-        if -nz > limit:
-            area_over += ln / 2.0
-    return worst, area_over, len(tris)
-
-
-def export(app, part, path, deflection=None):
+def export(app, part, path, deflection=None, **limits):
+    """Check that `part` prints -- on the bed, one watertight piece, nothing
+    overhanging past the limit (check_print) -- then export it."""
     part.activate()
+    pr = check_print(app, f"jar: {part.name}",
+                     need=("bed", "shells", "overhang"),
+                     quiet=True, **limits)
     kw = {"path": str(path)}
     if deflection is not None:
         kw["deflection"] = deflection
     exp = app.export_stl(**kw)
-    if exp.get("shells") != 1 or not exp.get("watertight", True):
-        raise SystemExit(f"jar: {path.name} is not one watertight shell: "
-                         f"{exp}")
-    worst, over, n = stl_overhangs(path)
-    if over > OVERHANG_MAX_MM2:
-        raise SystemExit(f"jar: {path.name} has {over:.1f} mm2 of facets "
-                         f"overhanging past {OVERHANG_DEG:g} deg from "
-                         f"vertical (worst {worst:.1f}) as it prints")
+    oh = pr["overhang"]
     return {"path": str(path), "deflection_mm": exp.get("deflection_mm"),
-            "triangles": n, "worst_overhang_deg": round(worst, 2),
-            "overhang_mm2": round(over, 3),
-            "shells": exp.get("shells")}
+            "worst_overhang_deg": round(oh["worst_deg"], 3),
+            "overhang_mm2": round(oh["area_mm2"], 3),
+            "shells": exp.get("shells"), "print": print_receipt(pr)}
 
 
 class Jar:
@@ -631,29 +584,28 @@ def main():
     stls = {
         "jar": dict(export(app, jar_p, out / "jar.stl"), material=material),
         "lid": dict(export(app, lid_p, out / "lid.stl"), material=material),
-        # No print process for TPU, so the chords are asked for: the
-        # PLA parts' own.
+        # No print process for TPU, so the chords are asked for -- the
+        # PLA parts' own -- and so is the overhang limit.
         "gasket": dict(export(app, gasket_p, out / "gasket.stl",
-                              deflection=0.01), material="tpu"),
+                              deflection=0.01,
+                              max_overhang_deg=OVERHANG_DEG), material="tpu"),
     }
     # Negative control: the same jar with the ISO 60-degree flank must fail
     # the overhang check, or the check cannot see a thread.
     iso_p, _ = build_jar(app, s, proc, material, name="jar (ISO flank)",
                          flank=30.0)
     iso_p.activate()
-    iso_stl = out / "control-iso-flank.stl"
-    app.export_stl(path=str(iso_stl))
-    worst, over, _ = stl_overhangs(iso_stl)
-    iso_stl.unlink()
-    checks["control_iso_flank"] = {"worst_overhang_deg": round(worst, 2),
-                                   "overhang_mm2": round(over, 1)}
-    print(f"  control, the ISO 60-degree thread: {over:.0f} mm2 past "
-          f"{OVERHANG_DEG:g} deg (worst {worst:.1f}) -> "
-          f"{'fails, as it must' if over > OVERHANG_MAX_MM2 else 'PASSES (bad)'}")
-    if over <= OVERHANG_MAX_MM2:
+    iso = check_print(app, "jar (ISO flank)", need=(), quiet=True)["overhang"]
+    checks["control_iso_flank"] = {
+        "worst_overhang_deg": round(iso["worst_deg"], 3),
+        "overhang_mm2": round(iso["area_mm2"], 1), "status": iso["status"]}
+    print(f"  control, the ISO 60-degree thread: {iso['area_mm2']:.0f} mm2 "
+          f"past {iso['limit_deg']:g} deg (worst {iso['worst_deg']:.2f}) -> "
+          f"{'fails, as it must' if iso['status'] == 'fail' else 'PASSES (bad)'}")
+    if iso["status"] != "fail":
         raise SystemExit("jar: an ISO-flank thread passes the overhang check")
     for k, v in stls.items():
-        print(f"  {k}.stl ({v['material']}): {v['triangles']} triangles, "
+        print(f"  {k}.stl ({v['material']}): {v['shells']} shell, "
               f"chords {v['deflection_mm']} mm, steepest overhang "
               f"{v['worst_overhang_deg']} deg")
 

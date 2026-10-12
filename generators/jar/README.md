@@ -135,13 +135,14 @@ elastomer strain, and a linear one would not be honest at that strain.
   motion study turns it two turns out from where the gasket lets go, with
   the mesh clash check at a fifth of the flank clearance. It must be
   clean.
-- **Printability**: every facet of each exported STL, in its print
-  orientation, is checked for facing down more than 45° from vertical off
-  the bed. A facet counts from three degrees past that, because a meshed
-  45° surface leans further: a chamfer's thin triangles reach 46°, and the
-  slivers where a groove ends reach 50°, under a square millimetre in all.
-  A part fails on more than 1 mm² of them. Each STL must also be one
-  watertight shell.
+- **Printability**: `check_print`
+  (docs/tolerances/README.md#checking-a-print) on each part in its print
+  orientation: on the bed, one watertight piece, and nothing facing down
+  more than 45° from vertical off the bed (the process's limit; stated for
+  the TPU gasket, which has no print process). The angles are the B-rep's
+  surface normals, so the 45° thread flanks and edge chamfers read 45.0
+  with no area past it and need no slack. Each part's whole report is in
+  the receipt's `stl.<part>.print`.
 
 Three **negative controls**, each of which must fail its check or the run
 stops:
@@ -150,8 +151,8 @@ stops:
   jar (500 mm³);
 - a lid whose skirt is longer by the squeeze and a layer stops short:
   −0.2 mm, −10 %;
-- the same jar with an ISO 30° flank has about 1050 mm² of facets past the
-  overhang limit (worst 65°).
+- the same jar with an ISO 30° flank has about 1050 mm² past the overhang
+  limit (worst 60°).
 
 The generator test `generator_jar`
 (generators/README.md#the-big-generators-as-tests) runs the default build

@@ -109,8 +109,9 @@ seconds each on the GPU, about 13 s for the whole run headless on the CPU.
 ## What is checked, every run
 
 - `check_geometry` on each print part is `verified`.
-- Each STL is one watertight shell, and its lowest point is on the bed
-  (read back from the file).
+- `check_print` (docs/tolerances/README.md#checking-a-print) on each print
+  part: its lowest point is on the bed and it is one watertight piece. Its
+  overhang and bridge items go in the receipt's `print`.
 - The study finds one back face, two root fillets and one saddle by shape
   and place, or stops.
 - The root stress is within 1-2 times the beam formula, and moves under
