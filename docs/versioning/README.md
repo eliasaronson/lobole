@@ -35,7 +35,7 @@ the container they live in `project.json` and each part's `index.json`
 
 | file | holds |
 |---|---|
-| `src/core/io/SerializationInternal.h` | `kFormat`, `kVersion` and its per-version comments, shared JSON helpers |
+| `src/core/io/SerializationInternal.h` | `kFormat`, `kVersion` (`kVersionLanded` + `kVersionPending`), shared JSON helpers |
 | `src/core/io/Serialization.cpp` | envelopes, `Save`/`Load`, `SaveDir`/`LoadDir`, assemblies, drawings, jobs, a lone part's project tables, requirements and templates, the study results' and drawing projections' files, load refusals |
 | `src/core/io/SerializeFeatures.cpp` | `FeatureToJson` / `FeatureFromJson`, sketch entities and constraints |
 | `src/core/io/SerializeAssembly.cpp` | occurrences, mates, relations, exploded views, motion studies and their saved results, the clearance assertions an old file carries |
@@ -47,8 +47,10 @@ the container they live in `project.json` and each part's `index.json`
 | `src/ui/ProjectActions.cpp` | the project container, open/save/recover, staged-import adoption |
 
 A format change bumps `kVersion`, adds a golden at the new version and a row
-in [format.md](format.md#version-history). All three are gated by
-`tests/test_golden.cpp`.
+in [format.md](format.md#version-history). On a branch the number is the
+placeholder `vNEXT`, and `tools/merge-branch.sh` numbers it as the branch
+lands ([how](format.md#a-bump-takes-its-number-when-it-lands)). All of it is
+gated by `tests/test_golden.cpp` and `format_version_gate`.
 
 ### What a load refuses
 
@@ -334,6 +336,7 @@ History, merge and remote RPCs are listed in [history.md](history.md#rpcs).
 | where | covers |
 |---|---|
 | `tests/test_golden.cpp` `[golden]` | the corpus loads, regenerates and round-trips; newest golden and this history reach `kVersion` |
+| `format_version_gate` (`tools/format-version.py check`) | `kVersion` is `kVersionLanded` + `kVersionPending`; the pending rows, golden names and `vNEXT` placeholders agree with it |
 | `tests/test_serialization.cpp` `[io]` | round trips, directory form; duplicate id files, duplicate index ids and conflict markers refused; unknown feature, entity and mate types refused by name |
 | `tests/test_baked_geometry.cpp` `[baked]` | a baked open executes nothing; a recipe edited behind the app's back and a broken blob rebuild; a failed model is not baked; datums, warnings and bends survive a baked open; `commit_geometry` off |
 | `tests/test_autosaver.cpp` `[autosave]` | sidecar paths, fires only when dirty + changed + due, a replaced document at the same version still autosaves |

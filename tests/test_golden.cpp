@@ -1320,14 +1320,22 @@ TEST_CASE("The version history covers every kVersion", "[golden]") {
   REQUIRE(in);
   std::string line;
   int highest = 0;
+  // A branch's bumps are rows of the Pending changes table, whose first cell
+  // is a placeholder the merge replaces with the number
+  // (docs/versioning/format.md#a-bump-takes-its-number-when-it-lands).
+  int pending = 0;
   while (std::getline(in, line)) {
-    // Table rows read "| <n> | <commit> | <what changed> |".
+    // Table rows read "| <n> | <what changed> |".
     if (line.size() < 3 || line[0] != '|')
       continue;
     const size_t bar = line.find('|', 1);
     if (bar == std::string::npos)
       continue;
     const std::string cell = line.substr(1, bar - 1);
+    if (cell.find("NEXT") != std::string::npos) {
+      pending++;
+      continue;
+    }
     try {
       const int v = std::stoi(cell);
       highest = std::max(highest, v);
@@ -1336,8 +1344,9 @@ TEST_CASE("The version history covers every kVersion", "[golden]") {
     }
   }
   INFO("format.md's version history reaches v"
-       << highest << ", kVersion is v" << DocumentIO::DocumentFormatVersion());
-  CHECK(highest == DocumentIO::DocumentFormatVersion());
+       << highest << " with " << pending << " pending, kVersion is v"
+       << DocumentIO::DocumentFormatVersion());
+  CHECK(highest + pending == DocumentIO::DocumentFormatVersion());
 }
 
 TEST_CASE("Golden corpus loads, regenerates, and round-trips", "[golden]") {

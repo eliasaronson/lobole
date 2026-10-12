@@ -926,6 +926,16 @@ add_test(NAME rpc_units_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_units_gate.py)
 set_tests_properties(rpc_units_gate PROPERTIES TIMEOUT 60)
 
+# A format bump on a branch is written as a placeholder and numbered when it
+# lands (docs/versioning/format.md#a-bump-takes-its-number-when-it-lands): the
+# header's arithmetic, the pending rows, the goldens' names against their
+# "version", and no placeholder beyond what is pending. CI adds --landed on
+# main, where nothing may be pending.
+add_test(NAME format_version_gate
+         COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/format-version.py check)
+set_tests_properties(format_version_gate PROPERTIES TIMEOUT 30
+                     SKIP_RETURN_CODE 77)
+
 # The LGPL-family dependencies are linked as SEPARATE SHARED OBJECTS, which is
 # the whole reason this project's own licence stays a choice: LGPL-2.1 s6 lets
 # us combine and license on our terms only while a recipient can relink the

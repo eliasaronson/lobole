@@ -224,6 +224,13 @@ jobs:
       - name: Typing gate (mypy is installed here, so it must not skip)
         run: python3 tests/inspection_typing_gate.py
 
+      # Nothing pending on main: a branch's format bump is numbered by
+      # tools/merge-branch.sh as it lands, and one cherry-picked without it
+      # would ship its placeholder (docs/versioning/format.md#a-bump-takes-its-number-when-it-lands).
+      - name: Format version landed
+        if: github.ref == 'refs/heads/main'
+        run: python3 tools/format-version.py check --landed
+
       # The build without Dear ImGui Test Engine — the configuration for
       # anyone who cannot take that dependency's license (it is free for
       # individuals, non-profits, open-source derivatives and companies under

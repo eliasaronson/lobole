@@ -201,16 +201,16 @@ list kept elsewhere drifts.
   crash — not on a cadence. The one thing it cannot see is what only Ubuntu's
   apt OpenCASCADE shows (nix's OCCT does not leak the STEP controller the way
   it does); dispatch the CI job by hand for that.
-- Format changes bump `kVersion` (src/core/io/SerializationInternal.h), add
-  a golden AT that version, AND a row in docs/versioning/format.md's version
-  history. **Both are gated** (`test_golden.cpp`): the newest golden must
-  equal `kVersion`, and the history table must reach it. The golden goes in
-  `tests/golden/v<N>-<name>.json` + `.expect.json` for a document, or under
-  `tests/golden/assembly/`, `job/` or `drawing/` for those schemas; **the gate
-  counts all four directories**. The corpus is NOT one golden per bump (the early
-  versions mostly have none), so do not read it as exhaustive. No
-  back-compat/migration is required (no users yet); fix any test that assumed
-  old behavior. (Check the header for the current version — it moves.)
+- **A format change never picks its number: write `vNEXT`.** Raise
+  `kVersionPending` (src/core/io/SerializationInternal.h), name the golden
+  `vNEXT-<name>.json` + `.expect.json` (`tests/golden/`, or `assembly/`,
+  `job/`, `drawing/`), add its row to format.md's *Pending changes* table, and
+  say `vNEXT` (`kVersionNEXT` in a migration) wherever the number would go.
+  `tools/merge-branch.sh` numbers it as it lands, so parallel bumps never
+  collide (docs/versioning/format.md#a-bump-takes-its-number-when-it-lands).
+  `test_golden.cpp` and `format_version_gate` check it; CI fails a `vNEXT`
+  left on main. No back-compat/migration is required (no users yet); fix any
+  test that assumed old behavior.
 
 ## Benchmark — unfinished
 

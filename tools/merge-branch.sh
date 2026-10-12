@@ -16,6 +16,10 @@
 # The worktree is removed only when every commit is on main and it holds
 # nothing uncommitted -- `git worktree remove` refuses trees with submodules,
 # so it is rm -rf, which is why both are checked (CLAUDE.md).
+#
+# A branch's format bump is written vNEXT and numbered here, after the pick
+# and under the same lock, in a commit of its own: tools/format-version.py
+# land gives it main's next number (docs/versioning/format.md#a-bump-takes-its-number-when-it-lands).
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
@@ -24,7 +28,7 @@ for a in "$@"; do
   case "$a" in
     --full) full=1 ;;
     --no-pick) pick=0 ;;
-    -h|--help) sed -n '2,14p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
     *) branch="$a" ;;
   esac
 done
@@ -36,11 +40,29 @@ if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   exit 2
 fi
 wt="$(git worktree list --porcelain | awk -v b="refs/heads/$branch" '/^worktree /{w=$2} $0=="branch "b{print w}')"
+state="$(git rev-parse --git-dir)/merge-branch"
+base_file="$state/$branch.base"
+
+# The branch's vNEXT format bumps get main's next numbers, in one commit; then
+# nothing may be pending. Run under build/'s lock, before the build.
+number_format() {
+  python3 "$root/tools/format-version.py" land --base "$(cat "$base_file")" --label "$branch"
+  python3 "$root/tools/format-version.py" check --landed
+  rm -f "$base_file"
+}
 
 if [ "$pick" = 1 ]; then
   commits="$(git rev-list --reverse --cherry-pick --right-only --no-merges main..."$branch")"
   if [ -z "$commits" ]; then
     echo "merge-branch: nothing on $branch that main lacks"
+  elif git diff main..."$branch" -- src/core/io/SerializationInternal.h |
+       grep -q '^-inline constexpr int kVersionLanded = '; then
+    # It chose a number, which is what collided: a branch raises
+    # kVersionPending and writes vNEXT, and the landing numbers it.
+    echo "merge-branch: $branch edits kVersionLanded itself;" \
+         "a branch raises kVersionPending and writes vNEXT" \
+         "(docs/versioning/format.md#a-bump-takes-its-number-when-it-lands)" >&2
+    exit 2
   else
     # Exclusive: it waits for a build, and for every suite running from
     # build/ (tools/ctest, the GUI runner hold it shared).
@@ -50,15 +72,25 @@ if [ "$pick" = 1 ]; then
     echo "merge-branch: cherry-picking $(echo "$commits" | wc -l) commit(s)"
     # What was picked, so a commit whose conflict was resolved by hand (its
     # patch no longer matches the branch's) still counts as landed below.
-    mkdir -p "$(git rev-parse --git-dir)/merge-branch"
-    echo "$commits" > "$(git rev-parse --git-dir)/merge-branch/$branch"
+    mkdir -p "$state"
+    echo "$commits" > "$state/$branch"
+    # Where main stood, so the numbering sees only the lines the branch added.
+    git rev-parse HEAD > "$base_file"
     # shellcheck disable=SC2086
     if ! git cherry-pick $commits; then
       echo "merge-branch: CONFLICT. Resolve, 'git cherry-pick --continue', then: $0 $branch --no-pick" >&2
       exit 1
     fi
+    number_format
     exec 9>&-
   fi
+elif [ -f "$base_file" ]; then
+  # --no-pick after a conflict resolved by hand: the numbering is still owed.
+  # shellcheck source=build-lock.sh
+  . "$root/tools/build-lock.sh"
+  build_lock_exclusive "$root/build" 9
+  number_format
+  exec 9>&-
 fi
 
 "$root/tools/build.sh"
@@ -86,7 +118,7 @@ fi
 
 # Every commit of the branch now on main (by patch), and nothing uncommitted.
 if [ -n "$wt" ] && [ -d "$wt" ]; then
-  picked="$(git rev-parse --git-dir)/merge-branch/$branch"
+  picked="$state/$branch"
   left="$(git rev-list --cherry-pick --right-only --no-merges main..."$branch" \
           | { if [ -f "$picked" ]; then grep -vxF -f "$picked" || true; else cat; fi; } | wc -l)"
   dirty="$(git -C "$wt" status --porcelain --untracked-files=no)"
