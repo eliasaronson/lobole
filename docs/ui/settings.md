@@ -173,8 +173,8 @@ items. There are two:
   picks one and keeps a copy
   ([print profiles](../tolerances/README.md#print-profiles)). New starts from
   the built-in table of the selected profile's pair. The form is name,
-  process and material, conditions, the STL chord deviation (`ExprInputDouble`)
-  and the rows as a stretched table, never wider than the pane — kind, from,
+  process and material, conditions, the STL chord deviation, the layer height
+  and the Z gap (each an `ExprInputDouble`) and the rows as a stretched table, never wider than the pane — kind, from,
   to (0 = and up), allowance and source, each field a flat numbered id
   (`###prof_row_allow_<i>`) so a script reaches one without the table's id
   scope.

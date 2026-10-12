@@ -119,8 +119,9 @@ def horn_mm(c, r_g, w, r_lock_gap):
     return r_g * (math.pi / SLOTS - delta - phi)
 
 
-def solve(h, digits, gap, layer):
-    """Every size from the digit height, the gap a side and the layer."""
+def solve(h, digits, gap, layer, z_gap=None):
+    """Every size from the digit height, the gap a side and the layer, and
+    the profile's measured Z gap when it has one."""
     if digits < 2:
         raise SystemExit("counter: a counter of one digit carries nothing")
     g = gap / 2.0
@@ -198,10 +199,15 @@ def solve(h, digits, gap, layer):
         "engrave": 1.5 * NOZZLE_MM,
     }
     s["h_band"] = s["chamfer"] + s["h_face"]
-    # Where one part sits over another the space is whole layers, at least
-    # the gap: one layer at the P1S's 0.1 a side (the slicer prints the
-    # upper part on the lower as on a support's interface), two at 0.25.
-    s["zgap"] = layer * math.ceil(g / layer - 1e-9)
+    # Where one part sits over another the space is whole layers: the
+    # profile's measured Z gap (print_coupon's Z-gap row), else at least the
+    # gap -- one layer at the P1S's 0.1 a side (the slicer prints the upper
+    # part on the lower as on a support's interface), two at 0.25.
+    if z_gap:
+        s["zgap"], s["zgap_from"] = z_gap, "the profile's z_gap_mm"
+    else:
+        s["zgap"] = layer * math.ceil(g / layer - 1e-9)
+        s["zgap_from"] = "whole layers at least the gap a side"
     # The carry's window: centred where the driving wheel goes from 9 (36
     # degrees) to 0 (0 degrees), counting being a turn BACK 36 a digit.
     s["carry_centre_deg"] = 18.0
@@ -817,10 +823,10 @@ def main():
     ap.add_argument("--digit-height", type=float, default=8.0,
                     help="a digit's height around the band, mm")
     ap.add_argument("--digits", type=int, default=4)
-    ap.add_argument("--layer", type=float, default=0.2,
-                    help="the layer height the profile was measured at, mm "
-                         "(its 'Bambu Studio 0.20 mm'): the space between "
-                         "parts printed one over another")
+    ap.add_argument("--layer", type=float, default=None,
+                    help="the layer height the parts are sliced at, mm "
+                         "(default: the profile's layer_height_mm, else "
+                         "0.2, Bambu Studio's 0.20 mm preset)")
     ap.add_argument("--process", default="fdm")
     ap.add_argument("--material", default="pla")
     ap.add_argument("--profile", default=None,
@@ -842,13 +848,27 @@ def main():
             {"process": args.process, "material": args.material})
     gap = d.call("print_allowance", kind="gap",
                  size_mm=args.digit_height, **proc)
-    s = solve(args.digit_height, args.digits, gap["allowance_mm"], args.layer)
+    # The layer and the Z gap the profile states
+    # (docs/tolerances/README.md#print-profiles): the vertical counterpart of
+    # the gap, measured by print_coupon's Z-gap row.
+    prof = next((p for p in d.call("list_print_profiles")["profiles"]
+                 if p["name"] == args.profile), {}) if args.profile else {}
+    layer = args.layer or prof.get("layer_height_mm") or 0.2
+    z_gap = prof.get("z_gap_mm")
+    if z_gap and args.layer and prof.get("layer_height_mm") and abs(
+            args.layer - prof["layer_height_mm"]) > 1e-9:
+        raise SystemExit(f"counter: --layer {args.layer:g} is not the "
+                         f"{prof['layer_height_mm']:g} mm the profile's Z gap "
+                         f"was measured at")
+    s = solve(args.digit_height, args.digits, gap["allowance_mm"], layer,
+              z_gap)
     g = s["g"]
     print(f"counter: {args.digits} digits {args.digit_height:g} mm high, "
           f"band Ø{2 * s['r_band']:.1f}, Geneva {SLOTS} slots, gear "
           f"{s['zp']}:{s['zw']} m{s['module']:.3f}, gap {g:g} a side "
           f"({args.profile or args.material}), lock disc "
-          f"r{s['r_lock']:.2f} (horns {s['horn_mm']:.2f} mm)")
+          f"r{s['r_lock']:.2f} (horns {s['horn_mm']:.2f} mm), Z gap "
+          f"{s['zgap']:g} ({s['zgap_from']})")
 
     build_parts(d, s, proc)
     feats, theta, beta = build_print(d, s, proc)

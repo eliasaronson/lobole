@@ -36,7 +36,7 @@ inline constexpr const char* kFormat = "designer-document";
 // (docs/versioning/format.md#a-bump-takes-its-number-when-it-lands). Keep a
 // line between the two: a landing that moves one and a branch that raises
 // the other then never conflict.
-inline constexpr int kVersionLanded = 174;
+inline constexpr int kVersionLanded = 175;
 
 inline constexpr int kVersionPending = 0;
 inline constexpr int kVersion = kVersionLanded + kVersionPending;

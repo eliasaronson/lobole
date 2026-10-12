@@ -750,6 +750,30 @@ void DrawPrintProfileForm(AppState& state, int index) {
                         "the coupon at the same, and it calibrates the "
                         "chords and the printer at once.");
 
+  // The vertical counterpart of the gap rows
+  // (docs/tolerances/README.md#print-profiles): whole layers, so it needs
+  // the layer height it is counted in.
+  double layer = p.layerHeightMm;
+  FormLabel("Layer height (mm, 0 = not stated)");
+  if (ExprInputDouble(state, "###prof_layer", &layer, "%.4g") &&
+      layer != p.layerHeightMm) {
+    p.layerHeightMm = layer;
+    edited = true;
+  }
+  ImGui::SetItemTooltip("The slicer preset's layer height: what a Z gap is "
+                        "counted in.");
+  double zgap = p.zGapMm;
+  FormLabel("Z gap (mm, whole layers; 0 = not measured)");
+  if (ExprInputDouble(state, "###prof_zgap", &zgap, "%.4g") &&
+      zgap != p.zGapMm) {
+    p.zGapMm = zgap;
+    edited = true;
+  }
+  ImGui::SetItemTooltip("The vertical gap between two parts printed one "
+                        "over the other that still comes apart: the print "
+                        "coupon's Z-gap row says which. A print-in-place "
+                        "generator stacks its parts this far apart.");
+
   // The rows: kind, size range, allowance, source.
   ImGui::Spacing();
   ImGui::TextUnformatted("Allowances (mm on the diameter)");

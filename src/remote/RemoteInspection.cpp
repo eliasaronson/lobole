@@ -851,18 +851,23 @@ static constexpr MethodDoc InspectionMethods[] = {
      "allowance table for one printer, filament and slicer preset — {name, "
      "process, material, conditions, stl_deflection_mm (the chord deviation "
      "a printed part's STL is exported at: the stated one, else a tenth of "
-     "the smallest gap a side), stl_deflection_stated, rows[]{kind, "
+     "the smallest gap a side), stl_deflection_stated, layer_height_mm? "
+     "(the slicer preset's layer), z_gap_mm? (the vertical gap between "
+     "parts printed one over another that comes apart, whole layers; both "
+     "absent when not stated), rows[]{kind, "
      "from_mm, to_mm (absent = and up), allowance_mm, source}}. A printed "
      "part names one (set_print_process {profile}) and EMBEDS a copy. "
      "`defaults` are the built-in tables, read-only, that a new profile "
      "starts from (get_print_process's `tables`).",
      "", remote::NoFlags,
      "profiles[]{name,process,material,conditions?,stl_deflection_mm,"
-     "stl_deflection_stated,rows[]{kind,from_mm,to_mm?,allowance_mm,"
+     "stl_deflection_stated,layer_height_mm?,z_gap_mm?,rows[]{kind,from_mm,"
+     "to_mm?,allowance_mm,"
      "source?}}, defaults[]{process,material,conditions,rows[]}, dir"},
     {"save_print_profile",
      "Write a print profile to your store {profile: {name, process, "
-     "material, conditions?, stl_deflection_mm?, rows?: [{kind: hole|shaft|"
+     "material, conditions?, stl_deflection_mm?, layer_height_mm?, "
+     "z_gap_mm? (whole layers of layer_height_mm), rows?: [{kind: hole|shaft|"
      "internal_thread|external_thread|gap, from_mm?, to_mm? (absent = and "
      "up), allowance_mm (signed, on the DIAMETER; a gap's is the whole "
      "diametral clearance), source?}]}}, replacing one of that name; without "
@@ -872,12 +877,14 @@ static constexpr MethodDoc InspectionMethods[] = {
      "process/material or kind (naming the accepted ones), a size range "
      "empty, overlapping or out of order within its kind, an allowance of "
      "the wrong sign for its kind (a hole/internal thread not negative, a "
-     "gap positive, a shaft/external thread not positive), or a name that "
+     "gap positive, a shaft/external thread not positive), a z_gap_mm "
+     "without a layer_height_mm or not whole layers of it (naming the two "
+     "nearest that are), or a name that "
      "would share a file with another. Open parts keep their copy; "
      "get_print_process then reports `match: differs`.",
      "from_part, part, profile", remote::NotInBatch,
      "name, process, material, conditions?, stl_deflection_mm, "
-     "stl_deflection_stated, rows[]"},
+     "stl_deflection_stated, layer_height_mm?, z_gap_mm?, rows[]"},
     {"delete_print_profile",
      "Remove a print profile from your store {name}. A part printed with it "
      "keeps its copy and reports `match: missing`.",
@@ -903,7 +910,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "only the active one, in that part's undo history.",
      "clear, material, part, process, profile", remote::NoFlags,
      "print{process,material,profile?,match?,conditions?,rows?,"
-     "stl_deflection_mm}, threads[]{feature_id,name,designation,"
+     "layer_height_mm?,z_gap_mm?,stl_deflection_mm}, "
+     "threads[]{feature_id,name,designation,"
      "side,modeled,known,pitch,allowance_mm,modelled_major,prints_major,"
      "want_major?,model_major?,model_face?,notes,sentence,confirm}"},
     {"get_print_process",
@@ -922,7 +930,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "printed part also lists its Threads with what to model for each.",
      "part", remote::Deferrable,
      "print{process,material,profile?,match?,conditions?,rows?,"
-     "stl_deflection_mm}, tables[]{process,material,conditions,"
+     "layer_height_mm?,z_gap_mm?,stl_deflection_mm}, "
+     "tables[]{process,material,conditions,"
      "repeatability_mm,repeatability_source,min_reliable_thread_mm,rows[]{"
      "kind,from_mm,to_mm,allowance_mm,source}}, confirm, threads?[]"},
     {"print_allowance",
@@ -1447,6 +1456,10 @@ json ProcessJson(const ui::AppState& state,
     for (const printfit::Row& r : p->profile->table.rows)
       rows.push_back(DocumentIO::PrintRowToJson(r));
     j["rows"] = std::move(rows);
+    if (p->profile->layerHeightMm > 0.0)
+      j["layer_height_mm"] = p->profile->layerHeightMm;
+    if (p->profile->zGapMm > 0.0)
+      j["z_gap_mm"] = p->profile->zGapMm;
   }
   j["stl_deflection_mm"] = printfit::StlDeflectionMm(*p);
   return j;
@@ -3440,7 +3453,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (fromPart == p.contains("profile"))
       throw std::runtime_error(
           "save_print_profile: `profile` {name, process, material, "
-          "conditions?, stl_deflection_mm?, rows?} or `from_part: true` (the "
+          "conditions?, stl_deflection_mm?, layer_height_mm?, z_gap_mm?, "
+          "rows?} or `from_part: true` (the "
           "part's embedded copy), one of the two");
     if (!fromPart && p.contains("part"))
       throw std::runtime_error(

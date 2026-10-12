@@ -154,6 +154,13 @@ def profiles(d, port):
     refused(d, "save_print_profile", "would share a file",
             profile={"name": "test p1s", "process": "fdm",
                      "material": "pla"})
+    # A Z gap is whole layers of a stated layer height (v175).
+    refused(d, "save_print_profile", "needs the layer_height_mm",
+            profile={"name": "X", "process": "fdm", "material": "pla",
+                     "z_gap_mm": 0.2})
+    refused(d, "save_print_profile", "accepted: 0.2 (1 layer) or 0.4",
+            profile={"name": "X", "process": "fdm", "material": "pla",
+                     "layer_height_mm": 0.2, "z_gap_mm": 0.3})
     refused(d, "set_print_process", "no print profile called 'Nope'",
             profile="Nope")
     expect([x["name"] for x in d.call("list_print_profiles")["profiles"]]
@@ -227,6 +234,20 @@ def profiles(d, port):
     r = d.call("print_allowance", kind="hole", size_mm=8,
                profile="Coupon P1S")
     expect(near(r["model_mm"], 8.25), f"the recorded bore: {r}")
+    # The Z-gap row's answer: whole layers, kept as the profile's z_gap_mm.
+    out = subprocess.run(
+        [sys.executable, coupon, "--port", str(port), "--record",
+         "--profile", "Coupon P1S", "--layer", "0.2", "--z-gap-layers", "2"],
+        capture_output=True, text=True, timeout=60)
+    expect(out.returncode == 0, f"print_coupon --record Z: {out.stderr}")
+    mine = {x["name"]: x for x in
+            d.call("list_print_profiles")["profiles"]}["Coupon P1S"]
+    expect(near(mine.get("z_gap_mm", 0), 0.4) and
+           near(mine.get("layer_height_mm", 0), 0.2),
+           f"the recorded Z gap: {mine}")
+    expect(near(d.call("print_allowance", kind="hole", size_mm=8,
+                       profile="Coupon P1S")["model_mm"], 8.25),
+           "recording the Z gap kept the rows")
     # --seed installs the two P1S profiles.
     out = subprocess.run([sys.executable, coupon, "--port", str(port),
                           "--seed"], capture_output=True, text=True,
@@ -238,6 +259,9 @@ def profiles(d, port):
         expect(name in names, f"seeded {name}: {names.keys()}")
         r = d.call("print_allowance", kind="gap", size_mm=10, profile=name)
         expect(near(r["allowance_mm"], 2 * side), f"{name}: {r}")
+        expect(near(names[name].get("layer_height_mm", 0), 0.2) and
+               "z_gap_mm" not in names[name],
+               f"{name}: the preset's layer, no Z gap measured yet")
 
 
 def main():

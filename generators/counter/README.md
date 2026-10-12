@@ -56,7 +56,8 @@ only into the pinion.
 
 The inputs are `--digit-height` (8 mm), `--digits` (4), the profile's gap
 (`print_allowance` kind `gap`, half of it a side) and the layer height the
-profile was measured at (`--layer`, 0.2: its "Bambu Studio 0.20 mm").
+parts are sliced at (the profile's `layer_height_mm`, else `--layer`, else
+0.2: Bambu Studio's "0.20 mm").
 `solve()` derives the rest and refuses what will not print:
 
 - A digit fills 70 % of its cell around the band: band radius = 10 cells / 2π
@@ -71,8 +72,12 @@ profile was measured at (`--layer`, 0.2: its "Bambu Studio 0.20 mm").
   radius 3 nozzle widths or 6 % of C. The lock disc is as large as leaves each horn of the
   Geneva 4 nozzle widths wide at its tip, relieved where the Geneva swings
   through it at mid-carry.
-- Vertical spaces (one part printed over another) are whole layers, at
-  least the gap: one layer at 0.1 a side, two at 0.25.
+- Vertical spaces (one part printed over another) are the profile's
+  measured Z gap, `z_gap_mm`, from the coupon's Z-gap row
+  ([the coupon](../../docs/tolerances/README.md#the-coupon)); a profile
+  without one gets whole layers at least the gap: one layer at 0.1 a side,
+  two at 0.25. A `--layer` other than the one the profile's Z gap was
+  measured at is refused. The receipt's `zgap_from` says which.
 
 ## The print
 

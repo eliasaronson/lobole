@@ -318,9 +318,9 @@ Where the numbers come from, beyond the table's column:
 
 ### Print profiles
 
-A **print profile** (`printfit::Profile {name, table, stlDeflectionMm}`) is a
-named, user-owned copy of a table: one printer, one filament, one slicer
-preset. The CAM machine store is the pattern
+A **print profile** (`printfit::Profile {name, table, stlDeflectionMm,
+layerHeightMm, zGapMm}`) is a named, user-owned copy of a table: one
+printer, one filament, one slicer preset. The CAM machine store is the pattern
 ([machine profiles](../cam/setup.md#machine-profiles)).
 
 - **The store** is one file per profile, `~/.config/lobole/print_profiles/
@@ -335,10 +335,22 @@ preset. The CAM machine store is the pattern
   within its kind, and an allowance of the wrong sign: a hole or internal
   thread is not negative, a shaft or external thread not positive, and a gap
   is positive (a gap of zero fuses). A refusal writes nothing.
+- **The vertical gap** (v175). The `gap` rows are sideways: two walls
+  printed beside each other. Two parts printed one OVER the other — a
+  print-in-place wheel on the one below — are separated by whole layers,
+  and how many still come apart is the printer's and the preset's, not a
+  diameter's, so it is not a row: `layer_height_mm` (the preset's layer)
+  and `z_gap_mm` (whole layers of it), each 0 / absent until stated. A Z
+  gap without a layer height, or not whole layers of it, is refused naming
+  the two nearest that are (0.3 at 0.2 mm layers: 0.2 or 0.4) — never
+  rounded. Neither drives geometry in the app, so neither is in
+  `printfit::Fingerprint`: the coupon's [Z-gap row](#the-coupon) measures
+  it and a print-in-place generator (`generators/counter/`) reads it.
 - **The built-in tables stay**, read-only, as what a profile starts from: a
   new profile is the built-in table of its pair, "the defaults, corrected".
 - **The document carries its numbers.** A part printed with a profile has
-  `print {process, material, profile, conditions, stl_deflection_mm?, rows}`:
+  `print {process, material, profile, conditions, stl_deflection_mm?,
+  layer_height_mm?, z_gap_mm?, rows}`:
   the name and an embedded copy, the way a CAM setup embeds its machine. The
   copy is what every lookup reads (`printfit::Find` resolves it before the
   built-in table), so a part opens anywhere with what it was modelled with —
@@ -406,14 +418,38 @@ hand. The material defaults to `pla`. When every disc comes free, or none
 does, `--gap-only --gap-center <mm a side> --step <mm>` prints a second
 coupon of the gap row alone, centred where the first one pointed.
 
+The **Z-gap row** measures the vertical gap: rings captured on posts, each
+ring's underside N whole layers over the plate (`--z-layers`, default 1, 2
+and 3, or either side of the profile's `z_gap_mm` when it has one). The
+layers are the profile's `layer_height_mm`, else `--layer`; with neither the
+coupon refuses rather than assume one. Sized from `--size`: a post Ø0.5
+size, a ring Ø1.6 size and 0.25 size thick, clear of its post by the
+profile's gap a side (already measured, so the Z gap is the only thing that
+varies), kept by a 45-degree head overlapping the ring's hole by 0.15 size
+and two layers clear above the largest gap's ring — only the ring's
+underside is under test, and nothing overhangs past 45 degrees. Each is
+labelled with its gap in mm. Print it, give every ring a firm twist: the
+fewest layers that turn cleanly are the Z gap. The full coupon carries the
+row (a new printer needs every number); `--z-gap-only` prints it alone on a
+plate a quarter of `size` thick — three rings, 60 x 20 mm at Ø8 — for a
+profile whose sideways numbers are already measured:
+
+    python3 generators/print_coupon.py --port PORT --z-gap-only \
+        --profile "K5 PLA on P1S" --layer 0.2
+    python3 generators/print_coupon.py --port PORT --record \
+        --profile "K5 PLA on P1S" --layer 0.2 --z-gap-layers 1
+
 - `--profile NAME` builds against one of your profiles and exports at its
   chord deviation.
 - `--record --profile NAME --gap-side MM --bore MM --pin MM --thread-went
-  yes|no` keeps the answer: the winners become rows over the profile (or,
-  for a new name, the built-in table of `--process`/`--material`), each
-  `source` naming the coupon and its date, saved with `save_print_profile`
-  at the deflection the coupon was exported at.
-- `--seed` installs [the two measured profiles](#from-a-measurement).
+  yes|no --z-gap-layers N` keeps the answer: the winners become rows over
+  the profile (or, for a new name, the built-in table of
+  `--process`/`--material`), each `source` naming the coupon and its date,
+  and the Z gap its `z_gap_mm` (N layers of the profile's layer height, or
+  `--layer`, which it then states too), saved with `save_print_profile` at
+  the deflection the coupon was exported at.
+- `--seed` installs [the two measured profiles](#from-a-measurement), at
+  the preset's 0.2 mm layers and with no Z gap measured.
 
 ## Drawings
 
@@ -461,7 +497,7 @@ coupon of the gap row alone, centred where the first one pointed.
 - **Preferences › Print profiles**, a library page
   ([library pages](../ui/settings.md#library-pages), id prefix `prof`):
   name (a rename refused when taken), process and material, conditions, the
-  STL chord deviation and the rows — kind, from, to (0 = and up), allowance
+  STL chord deviation, the layer height and the Z gap, and the rows — kind, from, to (0 = and up), allowance
   and source — each written on every edit. A typed allowance is a
   measurement: its source becomes "coupon <date>". The tolerance editor
   says what a printed face prints at and what to model once a class is
@@ -503,14 +539,16 @@ set/list/clear/undo, `check_fits` off mates including the sub-assembly walk),
 `tests/drawing_smoke.py` (callouts), `tests/test_print_allowance.cpp` (the
 table, its inverse, refusals, storage, the fit and thread sentences; a
 profile through its file, each refusal, a part reading its embedded copy and
-reporting same/differs/missing, and a profile's hole row rebuilding a fitted
-clearance hole), golden `v169-print-profile`,
+reporting same/differs/missing, a profile's hole row rebuilding a fitted
+clearance hole, and the layer height and Z gap round-tripped and refused
+off whole layers), goldens `v169-print-profile` and `v175-print-z-gap`,
 `tests/print_allowance_smoke.py` (check_fit, check_fits and a Thread on a
 printed part, and the advised custom thread printing the right major; the
 profile store's RPCs and refusals, a disc in a hole exported at the
 profile's chords with the gap in the STL within 0.005 mm of the model, a
-coarse deflection warned, the match after the store changes, and
-`print_coupon --record` and `--seed`),
+coarse deflection warned, the match after the store changes, a Z gap off
+whole layers refused, and `print_coupon --record` (the Z gap too) and
+`--seed`),
 `tests/test_print_allowance.cpp` "A printed clearance hole is modelled at its
 fit plus the allowance", `tests/tolerances_smoke.py` (set_tolerance on a part
 that is not the active one), GUI

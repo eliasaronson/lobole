@@ -431,6 +431,19 @@ TEST_CASE("A print profile round-trips through its file",
   std::string error;
   REQUIRE(DocumentIO::SavePrintProfile(dir.path.string(), k5, &error));
   CHECK(std::filesystem::exists(dir.path / "k5-pla-on-p1s.json"));
+  // The layer height and the Z gap, when stated, come back; unstated they
+  // are not written.
+  CHECK_FALSE(DocumentIO::PrintProfileToJson(k5).contains("z_gap_mm"));
+  printfit::Profile layered = k5;
+  layered.name = "K5 layered";
+  layered.layerHeightMm = 0.2;
+  layered.zGapMm = 0.4;
+  const auto lj = DocumentIO::PrintProfileToJson(layered);
+  CHECK(lj.at("layer_height_mm").get<double>() == 0.2);
+  CHECK(DocumentIO::PrintProfileFromJson(lj) == layered);
+  auto bad = lj;
+  bad["z_gap_mm"] = "two layers";
+  CHECK_THROWS(DocumentIO::PrintProfileFromJson(bad));
   // A broken neighbour is reported, and does not hide the good one.
   std::ofstream(dir.path / "broken.json") << "{ not json";
   const auto loaded =
@@ -473,6 +486,20 @@ TEST_CASE("A print profile refuses what it cannot be, saying what",
   p = K5();
   p.stlDeflectionMm = -0.01;
   CHECK(Contains(refusal(p), "stl_deflection_mm"));
+  // A Z gap is whole layers of a stated layer height.
+  p = K5();
+  p.zGapMm = 0.2;
+  CHECK(Contains(refusal(p), "needs the layer_height_mm"));
+  p.layerHeightMm = 0.2;
+  CHECK(refusal(p).empty());
+  p.zGapMm = 0.3;
+  CHECK(Contains(refusal(p), "accepted: 0.2 (1 layer) or 0.4 (2 layers)"));
+  p.zGapMm = 0.1;
+  CHECK(Contains(refusal(p), "accepted: 0.2 (1 layer) or 0.4 (2 layers)"));
+  p.zGapMm = 0.6;
+  CHECK(refusal(p).empty());
+  p.layerHeightMm = -0.2;
+  CHECK(Contains(refusal(p), "layer_height_mm"));
   // The wrong sign for the kind.
   p = K5();
   p.table.rows.push_back({printfit::Printed::Gap, 0.0, 1.0, 0.0, ""});

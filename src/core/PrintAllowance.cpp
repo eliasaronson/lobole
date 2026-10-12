@@ -251,6 +251,36 @@ std::string ValidateProfile(const Profile& p) {
            "stl_deflection_mm must be 0 (not stated) or a positive "
            "chord deviation, not " +
            Mm(p.stlDeflectionMm);
+  if (!std::isfinite(p.layerHeightMm) || p.layerHeightMm < 0.0)
+    return who +
+           "layer_height_mm must be 0 (not stated) or the slicer preset's "
+           "positive layer height, not " +
+           Mm(p.layerHeightMm);
+  if (!std::isfinite(p.zGapMm) || p.zGapMm < 0.0)
+    return who +
+           "z_gap_mm must be 0 (not measured) or a positive number of "
+           "whole layers in mm, not " +
+           Mm(p.zGapMm);
+  if (p.zGapMm > 0.0) {
+    // A slicer prints whole layers: a Z gap between them is not a gap it
+    // can print, so it is refused rather than rounded either way.
+    if (!(p.layerHeightMm > 0.0))
+      return who + "a z_gap_mm of " + Mm(p.zGapMm) +
+             " needs the layer_height_mm it is whole layers of";
+    const double layers = p.zGapMm / p.layerHeightMm;
+    const double whole = std::round(layers);
+    if (whole < 1.0 || std::abs(layers - whole) > 1e-6) {
+      const double below = std::max(1.0, std::floor(layers));
+      const auto count = [](double n) {
+        return n == 1.0 ? std::string("1 layer") : Mm(n) + " layers";
+      };
+      return who + "z_gap_mm " + Mm(p.zGapMm) + " is not whole layers of " +
+             Mm(p.layerHeightMm) +
+             "; accepted: " + Mm(below * p.layerHeightMm) + " (" +
+             count(below) + ") or " + Mm((below + 1.0) * p.layerHeightMm) +
+             " (" + count(below + 1.0) + ")";
+    }
+  }
   if (p.table.rows.empty())
     return who + "a profile needs at least one row (" + PrintedNames() + ")";
   for (size_t i = 0; i < p.table.rows.size(); i++) {

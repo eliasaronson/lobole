@@ -12,10 +12,14 @@
         --profile "K5 PLA on P1S" --process fdm --material pla --size 8 \\
         --gap-side 0.1 --bore 8.2 --pin 7.9 --thread-went yes
     python3 generators/print_coupon.py --port 8800 --seed
+    python3 generators/print_coupon.py --port 8800 --z-gap-only \\
+        --profile "K5 PLA on P1S" --layer 0.2
+    python3 generators/print_coupon.py --port 8800 --record \\
+        --profile "K5 PLA on P1S" --layer 0.2 --z-gap-layers 1
 
 The allowance table (docs/tolerances/README.md#printed-parts) is community
 practice and CAD-tool defaults, "to confirm with a test coupon". This is the
-coupon. One plate, three rows, every feature engraved with the diameter it is
+coupon. One plate, a row of each, every feature engraved with the size it is
 MODELLED at:
 
 - bores at the table's model size for a Ø`size` hole, and `steps` either side
@@ -26,24 +30,37 @@ MODELLED at:
   joint or gear needs so its parts do not fuse);
 - a printed internal and external `thread` (default the metric coarse thread
   of `size`, when there is one) at the table's thread allowance, modelled as
-  the custom threads print_allowance and a Thread's report advise.
+  the custom threads print_allowance and a Thread's report advise;
+- rings captured on posts, each printed N whole layers over the plate (1, 2
+  and 3 by default): the vertical gap a print-in-place part stacked on
+  another needs, where the disc row measures the sideways one. The ring
+  clears its post by the table's gap a side, so the Z gap is the only thing
+  that varies, and a 45-degree head on the post keeps it, well clear above.
 
 Print it with the settings the parts will get, then push a real Ø`size` pin
 (a drill shank, a dowel) into the bores and the pins into a reamed Ø`size`
 hole, and screw a real bolt and nut onto the threads. Push each loose disc out
 of its hole: the tightest that comes free by hand is the gap print-in-place
-parts want. The bore and the pin that fit the way you want are the model
+parts want. Twist each ring on its post: the fewest layers that turn cleanly
+are the Z gap. The bore and the pin that fit the way you want are the model
 sizes the table should give.
 
 `--profile NAME` builds the coupon against one of your print profiles
 (docs/tolerances/README.md#print-profiles) and exports it at the profile's
 chord deviation. `--record` keeps the answer: it reads the winners off the
-command line (`--gap-side`, `--bore`, `--pin`, `--thread-went`), turns them
-into rows on top of the profile (or, for a new one, the built-in table of
-`--process`/`--material`) and saves it with `save_print_profile`, each row's
-`source` naming the coupon. `--seed` installs the two profiles measured on a
-Bambu Lab P1S (K5 PLA at 0.1 mm a side, a plain PLA at 0.15), skipping any
+command line (`--gap-side`, `--bore`, `--pin`, `--thread-went`,
+`--z-gap-layers`), turns them into rows on top of the profile (or, for a new
+one, the built-in table of `--process`/`--material`) -- the Z gap into the
+profile's `z_gap_mm` and `layer_height_mm` -- and saves it with
+`save_print_profile`, each row's `source` naming the coupon. `--seed`
+installs the two profiles measured on a Bambu Lab P1S (K5 PLA at 0.1 mm a
+side, a plain PLA at 0.15, both at the preset's 0.2 mm layers), skipping any
 name the store already has.
+
+`--gap-only` and `--z-gap-only` print one row alone, for a profile whose
+other rows are already measured. The Z gaps are whole layers of the layer
+the parts are sliced at: the profile's `layer_height_mm`, else `--layer`;
+with neither the coupon refuses rather than guess one.
 
 Every size derives from `--size`: the pitch between features, the plate's
 thickness (a bore as deep as it is wide), the label height and the engraving
@@ -61,7 +78,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _lib import check, circle, connect, fresh_project, plane_at_z  # noqa: E402
+from _lib import (check, circle, connect, fresh_project, line,  # noqa: E402
+                  plane_at_z)
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "scratch" / "print_coupon"
@@ -103,12 +121,12 @@ P1S_CONDITIONS = ("Bambu Lab P1S, 0.4 mm nozzle, Bambu Studio 0.20 mm, X-Y "
                   "hole and contour compensation 0, the STL at 0.01 mm chord "
                   "deviation")
 SEED = [
-    {"name": "K5 PLA on P1S", "gap_side": 0.1,
+    {"name": "K5 PLA on P1S", "gap_side": 0.1, "layer": 0.2,
      "source": "MEASURED, print_coupon --gap-only on a Bambu Lab P1S in K5 "
                "PLA (2026-10-09): 0.075 mm a side freed only under force and "
                "rubbed, 0.1 slid freely, and a gearbox modelled at 0.25 was "
                "loose"},
-    {"name": "PLA on P1S", "gap_side": 0.15,
+    {"name": "PLA on P1S", "gap_side": 0.15, "layer": 0.2,
      "source": "MEASURED, print_coupon --gap-only on a Bambu Lab P1S in an "
                "ordinary PLA: 0.15 mm a side slid freely"},
 ]
@@ -130,7 +148,7 @@ def seed(d):
         p = d.call("save_print_profile", profile={
             "name": s["name"], "process": "fdm", "material": "pla",
             "conditions": P1S_CONDITIONS, "stl_deflection_mm": 0.01,
-            "rows": rows})
+            "layer_height_mm": s["layer"], "rows": rows})
         print(f"print_coupon: saved '{p['name']}' (gap {s['gap_side']:g} mm "
               f"a side)")
     return 0
@@ -190,10 +208,26 @@ def record(d, args):
                                if args.thread_went == "yes" else
                                f"{tag}: the thread did NOT go at this "
                                f"allowance; open it")
-    if len(rows) == len(prof["rows"]) and all(
-            a == b for a, b in zip(rows, prof["rows"])):
+    layer = prof.get("layer_height_mm")
+    z_gap = prof.get("z_gap_mm")
+    if args.layer is not None:
+        layer = args.layer
+    if args.z_gap_layers is not None:
+        if args.z_gap_layers < 1:
+            raise SystemExit("print_coupon --record: --z-gap-layers counts "
+                             "whole layers, 1 or more")
+        if not layer:
+            raise SystemExit("print_coupon --record: a Z gap is whole layers "
+                             "-- pass --layer, the layer height the coupon "
+                             "was sliced at (the profile states none)")
+        z_gap = round(args.z_gap_layers * layer, 6)
+    unchanged = (len(rows) == len(prof["rows"]) and all(
+        a == b for a, b in zip(rows, prof["rows"])))
+    if (unchanged and z_gap == prof.get("z_gap_mm")
+            and layer == prof.get("layer_height_mm")):
         raise SystemExit("print_coupon --record: nothing to record — pass "
-                         "--gap-side, --bore, --pin or --thread-went")
+                         "--gap-side, --bore, --pin, --thread-went or "
+                         "--z-gap-layers")
     # The deflection the coupon was exported at: the one asked for, else
     # the profile's own, else the coupon's default.
     deflection = (args.deflection if args.deflection is not None else
@@ -203,10 +237,122 @@ def record(d, args):
            "material": prof["material"], "rows": rows,
            "conditions": args.conditions or prof.get("conditions", ""),
            "stl_deflection_mm": deflection}
+    if layer:
+        out["layer_height_mm"] = layer
+    if z_gap:
+        out["z_gap_mm"] = z_gap
     saved = d.call("save_print_profile", profile=out)
+    z = (f", Z gap {saved['z_gap_mm']:g} mm" if saved.get("z_gap_mm")
+         else "")
     print(f"print_coupon: recorded {len(rows)} rows in '{saved['name']}' "
-          f"(STL at {saved['stl_deflection_mm']:g} mm)")
+          f"(STL at {saved['stl_deflection_mm']:g} mm{z})")
     return 0
+
+
+def z_row(d, args, gap):
+    """The Z-gap row's layer height and its gaps in whole layers.
+
+    The layer is the profile's `layer_height_mm`, else `--layer`; with
+    neither, refused -- a Z gap in the wrong layers measures nothing. The
+    gaps are `--z-layers`, else 1-3 layers, or either side of the profile's
+    measured Z gap."""
+    prof = None
+    if args.profile:
+        prof = next((p for p in d.call("list_print_profiles")["profiles"]
+                     if p["name"] == args.profile), None)
+    layer, source = args.layer, "--layer"
+    if layer is None and prof and prof.get("layer_height_mm"):
+        layer, source = prof["layer_height_mm"], "the profile"
+    if layer is None or layer <= 0:
+        raise SystemExit("print_coupon: the Z-gap row is whole layers of the "
+                         "layer you slice at -- pass --layer (Bambu "
+                         "Studio's 0.20 mm preset is 0.2) or state "
+                         "layer_height_mm in the profile")
+    if args.z_layers:
+        try:
+            layers = sorted({int(n) for n in args.z_layers.split(",")})
+        except ValueError:
+            raise SystemExit(f"print_coupon: --z-layers is whole layers, "
+                             f"e.g. 1,2,3, not {args.z_layers!r}")
+        if layers[0] < 1:
+            raise SystemExit("print_coupon: --z-layers starts at 1 layer")
+    elif prof and prof.get("z_gap_mm"):
+        k = round(prof["z_gap_mm"] / layer)
+        layers = [k - 1, k, k + 1] if k > 1 else [1, 2, 3]
+    else:
+        layers = [1, 2, 3]
+    return {"layer_mm": layer, "layer_from": source, "layers": layers,
+            "gap_side_mm": gap["allowance_mm"] / 2.0}
+
+
+def z_features(zrow, size, plate_top, pitch, xs, y):
+    """Each ring on its post, in millimetres from the size: a post a
+    quarter of the size in radius, a ring 1.6 sizes across and a quarter of
+    one thick, clear of the post by the gap a side, and a 45-degree head that
+    overlaps the ring's hole by 0.15 sizes, two layers clear above the
+    largest Z gap's ring so only the ring's underside is under test."""
+    L, g = zrow["layer_mm"], zrow["gap_side_mm"]
+    r_post = 0.25 * size
+    r_hole = r_post + g
+    r_ring = 0.8 * size
+    t = 0.25 * size
+    r_head = r_hole + 0.15 * size
+    clear = L * (max(zrow["layers"]) + 2)
+    out = []
+    for x, n in zip(xs, zrow["layers"]):
+        z_gap = n * L
+        bottom = plate_top + z_gap
+        cone = bottom + t + clear  # where the head starts to flare
+        label = fmt(round(z_gap, 6))
+        out.append({
+            "x": x, "y": y, "layers": n, "z_gap": z_gap, "label": label,
+            "plate_top": plate_top, "bottom": bottom, "thick": t,
+            "r_post": r_post, "r_hole": r_hole, "r_ring": r_ring,
+            "r_head": r_head, "cone": cone,
+            "label_at": (x, y - r_ring - 0.1 * size),
+            "report": {"kind": "z_gap", "layers": n, "z_gap_mm": z_gap,
+                       "ring_mm": 2.0 * r_ring, "post_mm": 2.0 * r_post,
+                       "hole_mm": 2.0 * r_hole, "thick_mm": t,
+                       "head_clear_mm": clear, "at": [x, y]}})
+    return out
+
+
+def build_post(d, r):
+    """The post and its 45-degree head, revolved about the ring's axis and
+    joined to the plate."""
+    top, cone = r["plate_top"], r["cone"]
+    rp, rh = r["r_post"], r["r_head"]
+    head_top = cone + (rh - rp)  # 45 degrees: as high as it is wide
+    ents = [line((0.0, top), (rp, top)), line((rp, top), (rp, cone)),
+            line((rp, cone), (rh, head_top)),
+            line((rh, head_top), (0.0, head_top)),
+            line((0.0, head_top), (0.0, top))]
+    name = f"Post {r['label']}"
+    sk = check(d.call("add_feature", feature={
+        "type": "Sketch", "name": f"{name} profile",
+        "plane": {"origin": [r["x"], r["y"], 0.0], "normal": [0, -1, 0],
+                  "uAxis": [1, 0, 0]},
+        "entities": ents}), f"{name} profile")
+    check(d.call("add_feature", feature={
+        "type": "Revolve", "name": name, "sketch_id": sk["id"],
+        "axis": {"kind": "custom", "origin": [r["x"], r["y"], 0.0],
+                 "direction": [0.0, 0.0, 1.0]},
+        "angle_deg": 360.0, "mode": "add"}), name)
+
+
+def build_ring(d, r):
+    """The ring: its own body, its underside `layers` layers over the
+    plate."""
+    name = f"Ring {r['label']}"
+    sk = check(d.call("add_feature", feature={
+        "type": "Sketch", "name": f"{name} sketch",
+        "plane": plane_at_z(r["bottom"]),
+        "entities": [circle((r["x"], r["y"]), r["r_ring"]),
+                     circle((r["x"], r["y"]), r["r_hole"])]}),
+        f"{name} sketch")
+    check(d.call("add_feature", feature={
+        "type": "Extrude", "name": name, "mode": "new_body",
+        "sketch_id": sk["id"], "distance": r["thick"]}), name)
 
 
 def main():
@@ -231,6 +377,19 @@ def main():
                          "Ø--size hole, mm")
     ap.add_argument("--thread-went", choices=("yes", "no"), default=None,
                     help="--record: whether the bolt and nut went on")
+    ap.add_argument("--z-gap-layers", type=int, default=None,
+                    help="--record: the fewest layers whose ring turned "
+                         "cleanly")
+    ap.add_argument("--layer", type=float, default=None,
+                    help="the layer height the coupon is sliced at, mm "
+                         "(default: the profile's layer_height_mm)")
+    ap.add_argument("--z-layers", default=None,
+                    help="the Z-gap row's gaps, in whole layers, e.g. 1,2,3 "
+                         "(default: 1,2,3, or either side of the profile's "
+                         "measured Z gap)")
+    ap.add_argument("--z-gap-only", action="store_true",
+                    help="only the row of rings on posts (the vertical gap), "
+                         "on a thin plate")
     ap.add_argument("--conditions", default=None,
                     help="--record: printer, nozzle, slicer preset")
     ap.add_argument("--seed", action="store_true",
@@ -286,12 +445,16 @@ def main():
     # On the diameter, as the table states it.
     gap_mid = (gap["allowance_mm"] if args.gap_center is None
                else 2.0 * args.gap_center)
-    if gap_mid - args.steps * gap_step <= 0.0:
+    if not args.z_gap_only and gap_mid - args.steps * gap_step <= 0.0:
         raise SystemExit(
             f"print_coupon: {args.steps} steps of {fmt(gap_step)} below a "
             f"gap of {fmt(gap_mid)} on the diameter close it — fewer "
             f"--steps or a smaller --step")
-    thread = "none" if args.gap_only else args.thread
+    if args.gap_only and args.z_gap_only:
+        raise SystemExit("print_coupon: --gap-only or --z-gap-only, not "
+                         "both (without either, the coupon has every row)")
+    one_row = args.gap_only or args.z_gap_only
+    thread = "none" if one_row else args.thread
     if thread is None:
         guess = f"M{fmt(size)}"
         try:
@@ -304,20 +467,29 @@ def main():
         nut = allowance("internal_thread", designation=thread)
         screw = allowance("external_thread", designation=thread)
 
+    # The Z-gap row: whole layers of the layer the parts are sliced at.
+    zrow = None if args.gap_only else z_row(d, args, gap)
+
     # Everything from the size: a feature every 2.5 diameters, a plate a
-    # diameter thick, labels under each feature.
+    # diameter thick (a quarter of one under the Z-gap row alone), labels
+    # under each feature.
     pitch = 2.5 * size
     count = 2 * args.steps + 1
     label_h = min(0.3 * size, 4.0)
     engrave = 0.05 * size
-    thick = size
-    rows = 1 if args.gap_only else 4 if nut else 3
-    width = count * pitch
+    thick = 0.25 * size if args.z_gap_only else size
+    # Top to bottom: bores, pins, threads, gaps, Z gaps -- the ones built.
+    kinds = (["gap"] if args.gap_only else ["z"] if args.z_gap_only else
+             ["bore", "pin"] + (["thread"] if nut else []) + ["gap", "z"])
+    row_of = {k: i for i, k in enumerate(kinds)}
+    rows = len(kinds)
+    width = (len(zrow["layers"]) if args.z_gap_only else count) * pitch
     depth = rows * pitch
     what = (args.profile.lower().replace(" ", "_") if args.profile else
             f"{args.process}_{args.material}")
     name = args.name or (f"coupon_{what}_{fmt(size)}"
-                         + ("_gap" if args.gap_only else ""))
+                         + ("_gap" if args.gap_only else
+                            "_zgap" if args.z_gap_only else ""))
 
     d.call("add_part", name=name)
     d.call("set_print_process", **proc)
@@ -338,10 +510,11 @@ def main():
                                   else "--gap-center"),
               "confirm": hole["confirm"], "features": []}
     bores, pins, discs, labels = [], [], [], []
-    for i in range(count):
+    for i in range(0 if args.z_gap_only else count):
         k = i - args.steps
         for row, what, base in (() if args.gap_only else
-                                ((0, "bore", hole), (1, "pin", shaft))):
+                                ((row_of["bore"], "bore", hole),
+                                 (row_of["pin"], "pin", shaft))):
             dia = round(base["model_mm"] + k * args.step, 4)
             (bores if what == "bore" else pins).append(
                 circle((x_at(i), y_at(row)), dia / 2.0))
@@ -354,7 +527,7 @@ def main():
         # bore's: the same step on each side of the disc. The label is the
         # gap a side, which is how print-in-place clearance is quoted.
         g = round(gap_mid + k * gap_step, 4)
-        at = (x_at(i), y_at(rows - 1))
+        at = (x_at(i), y_at(row_of["gap"]))
         bores.append(circle(at, (size + g) / 2.0))
         discs.append(circle(at, size / 2.0))
         labels.append(text(fmt(g / 2.0), (at[0], at[1] - 0.62 * size),
@@ -372,13 +545,13 @@ def main():
         p = nut["pitch"]
         nut_face = round(nut["model_mm"] - 1.0825 * p, 4)
         screw_face = round(screw["model_mm"], 4)
-        xi, xe = x_at(0), x_at(count - 1)
-        bores.append(circle((xi, y_at(2)), nut_face / 2.0))
-        pins.append(circle((xe, y_at(2)), screw_face / 2.0))
+        xi, xe, yt = x_at(0), x_at(count - 1), y_at(row_of["thread"])
+        bores.append(circle((xi, yt), nut_face / 2.0))
+        pins.append(circle((xe, yt), screw_face / 2.0))
         labels.append(text(f"{thread} {nut['allowance_mm']:+g}",
-                           (xi, y_at(2) - 0.62 * size), label_h))
+                           (xi, yt - 0.62 * size), label_h))
         labels.append(text(f"{thread} {screw['allowance_mm']:+g}",
-                           (xe, y_at(2) - 0.62 * size), label_h))
+                           (xe, yt - 0.62 * size), label_h))
         thread_faces = [("nut", nut_face, xi, nut), ("screw", screw_face, xe,
                                                      screw)]
         report["features"] += [
@@ -389,6 +562,20 @@ def main():
              "modelled_face_mm": screw_face, "major_mm": screw["model_mm"],
              "pitch": p}]
 
+    rings = []
+    if zrow:
+        # Centred under the rows above, which are `count` features wide.
+        first = 0 if args.z_gap_only else (count - len(zrow["layers"])) // 2
+        rings = z_features(zrow, size, thick, pitch,
+                           [x_at(first + i) for i in
+                            range(len(zrow["layers"]))],
+                           y_at(row_of["z"]))
+        for r in rings:
+            labels.append(text(r["label"], r["label_at"], label_h))
+            report["features"].append(r["report"])
+        report["z_gap"] = {k: zrow[k] for k in ("layer_mm", "layer_from",
+                                                "layers", "gap_side_mm")}
+
     top = plane_at_z(thick)
     if pins:
         check(d.call("add_feature", feature={
@@ -397,13 +584,14 @@ def main():
         check(d.call("add_feature", feature={
             "type": "Extrude", "name": "Pins up", "mode": "add",
             "sketch_id": feature_id(d, "Pins"), "distance": size}), "pins")
-    check(d.call("add_feature", feature={
-        "type": "Sketch", "name": "Bores", "plane": top, "entities": bores}),
-        "bore sketch")
-    check(d.call("add_feature", feature={
-        "type": "Extrude", "name": "Bores down", "mode": "cut",
-        "sketch_id": feature_id(d, "Bores"), "distance": thick,
-        "end_mode": "through_all", "reversed": True}), "bores")
+    if bores:
+        check(d.call("add_feature", feature={
+            "type": "Sketch", "name": "Bores", "plane": top,
+            "entities": bores}), "bore sketch")
+        check(d.call("add_feature", feature={
+            "type": "Extrude", "name": "Bores down", "mode": "cut",
+            "sketch_id": feature_id(d, "Bores"), "distance": thick,
+            "end_mode": "through_all", "reversed": True}), "bores")
     check(d.call("add_feature", feature={
         "type": "Sketch", "name": "Labels", "plane": top,
         "entities": labels}), "label sketch")
@@ -411,20 +599,29 @@ def main():
         "type": "Extrude", "name": "Engrave", "mode": "cut",
         "sketch_id": feature_id(d, "Labels"), "distance": engrave,
         "reversed": True}), "engrave")
+    # The posts and their heads, part of the plate.
+    for r in rings:
+        build_post(d, r)
     # The loose discs: their own bodies, standing on the bed in their holes.
-    check(d.call("add_feature", feature={
-        "type": "Sketch", "name": "Discs", "plane": plane_at_z(0),
-        "entities": discs}), "disc sketch")
-    check(d.call("add_feature", feature={
-        "type": "Extrude", "name": "Discs up", "mode": "new_body",
-        "sketch_id": feature_id(d, "Discs"), "distance": thick}), "discs")
+    if discs:
+        check(d.call("add_feature", feature={
+            "type": "Sketch", "name": "Discs", "plane": plane_at_z(0),
+            "entities": discs}), "disc sketch")
+        check(d.call("add_feature", feature={
+            "type": "Extrude", "name": "Discs up", "mode": "new_body",
+            "sketch_id": feature_id(d, "Discs"), "distance": thick}),
+            "discs")
+    # The rings: their own bodies, each its whole layers over the plate.
+    for r in rings:
+        build_ring(d, r)
 
     for what, dia, x, info in thread_faces:
         r = check(d.call("add_feature", feature={
             "type": "Thread", "name": f"Coupon {what}",
             "designation": f"coupon {what} thread", "pitch": info["pitch"],
             "modeled": True,
-            "face": round_face(d, dia, x, y_at(2))}), f"{what} thread")
+            "face": round_face(d, dia, x, y_at(row_of["thread"]))}),
+            f"{what} thread")
         if "print" in r:
             print(f"  {r['print']['sentence']}")
 
@@ -435,12 +632,20 @@ def main():
         exp["deflection"] = args.deflection
     r = d.call("export_stl", **exp)
     report["stl_deflection_mm"] = r.get("deflection_mm")
-    if r.get("shells") is not None and r["shells"] != 1 + count:
+    shells = 1 + len(discs) + len(rings)
+    if r.get("shells") is not None and r["shells"] != shells:
         raise SystemExit(f"print_coupon: the STL has {r['shells']} shells, "
-                         f"not the plate and {count} loose discs: {r}")
+                         f"not the plate, {len(discs)} loose discs and "
+                         f"{len(rings)} rings: {r}")
     d.call("save_project", path=str(OUT / f"{name}.dsgn"))
     (OUT / f"{name}.json").write_text(json.dumps(report, indent=1))
     print(f"print_coupon: {len(report['features'])} features -> {stl}")
+    if zrow:
+        print(f"  Z gaps: {', '.join(r['label'] for r in rings)} mm "
+              f"({', '.join(str(n) for n in zrow['layers'])} layers of "
+              f"{fmt(zrow['layer_mm'])}, from {zrow['layer_from']}); twist "
+              f"each ring, and --record --z-gap-layers N the fewest that "
+              f"turned cleanly")
     print(f"  {hole['confirm']}")
     return 0
 

@@ -61,6 +61,10 @@ json PrintProfileToJson(const printfit::Profile& p) {
     j["conditions"] = p.table.conditions;
   if (p.stlDeflectionMm > 0.0)
     j["stl_deflection_mm"] = p.stlDeflectionMm;
+  if (p.layerHeightMm > 0.0)
+    j["layer_height_mm"] = p.layerHeightMm;
+  if (p.zGapMm > 0.0)
+    j["z_gap_mm"] = p.zGapMm;
   json rows = json::array();
   for (const printfit::Row& r : p.table.rows)
     rows.push_back(PrintRowToJson(r));
@@ -72,13 +76,20 @@ printfit::Profile PrintProfileFromJson(const json& j) {
   if (!j.is_object())
     throw std::runtime_error("a print profile is an object {name, process, "
                              "material, conditions?, stl_deflection_mm?, "
-                             "rows}");
+                             "layer_height_mm?, z_gap_mm?, rows}");
   printfit::Profile p;
   p.name = j.value("name", std::string());
   p.table.process = j.value("process", std::string());
   p.table.material = j.value("material", std::string());
   p.table.conditions = j.value("conditions", std::string());
   p.stlDeflectionMm = j.value("stl_deflection_mm", 0.0);
+  // v175. Not a number is refused, never read as "not stated".
+  for (const char* key : {"layer_height_mm", "z_gap_mm"})
+    if (j.contains(key) && !j.at(key).is_number())
+      throw std::runtime_error(std::string("print profile ") + key +
+                               " must be a number of mm");
+  p.layerHeightMm = j.value("layer_height_mm", 0.0);
+  p.zGapMm = j.value("z_gap_mm", 0.0);
   if (j.contains("rows")) {
     if (!j.at("rows").is_array())
       throw std::runtime_error("print profile rows must be an array");

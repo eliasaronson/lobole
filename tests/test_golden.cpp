@@ -1110,6 +1110,11 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
                  WithinRel(pe.at("gap_allowance_mm").get<double>(), 1e-12));
       CHECK_THAT(gap->row->toMm,
                  WithinRel(pe.at("gap_to_mm").get<double>(), 1e-12));
+      // v175: the layer height and the Z gap. Dropped, a print-in-place
+      // generator would stack its parts by a rule instead of the
+      // measurement.
+      CHECK(pr.layerHeightMm == pe.value("layer_height_mm", 0.0));
+      CHECK(pr.zGapMm == pe.value("z_gap_mm", 0.0));
     } else {
       CHECK_FALSE(doc.PrintProcess()->profile.has_value());
     }

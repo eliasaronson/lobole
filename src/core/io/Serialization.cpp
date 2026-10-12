@@ -221,7 +221,8 @@ void TubeToEnvelope(const std::optional<tube::TubeRules>& rules, json& j) {
 // `stl_deflection_mm` and `rows` -- the way a CAM setup embeds its machine
 // (docs/tolerances/README.md#print-profiles). The copy is what the part
 // reads, whichever store opens it; a copy the profile rules refuse is
-// refused here too.
+// refused here too. v175: and the profile's `layer_height_mm` and
+// `z_gap_mm` when it states them.
 std::optional<printfit::Process> PrintFromEnvelope(const json& j) {
   if (!j.contains("print"))
     return std::nullopt;
@@ -260,7 +261,8 @@ void PrintToEnvelope(const std::optional<printfit::Process>& p, json& j) {
   if (p->profile) {
     json pj = DocumentIO::PrintProfileToJson(*p->profile);
     m["profile"] = p->profile->name;
-    for (const char* key : {"conditions", "stl_deflection_mm", "rows"})
+    for (const char* key : {"conditions", "stl_deflection_mm",
+                            "layer_height_mm", "z_gap_mm", "rows"})
       if (pj.contains(key))
         m[key] = pj.at(key);
   }

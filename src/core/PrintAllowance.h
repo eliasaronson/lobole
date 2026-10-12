@@ -73,6 +73,14 @@ struct Profile {
   // The STL chord deviation the profile was calibrated at, mm; 0 = not
   // stated, and an export takes a tenth of the smallest gap a side.
   double stlDeflectionMm = 0.0;
+  // The slicer preset's layer height, mm; 0 = not stated.
+  double layerHeightMm = 0.0;
+  // The vertical gap between two parts printed one over the other that
+  // still comes apart, mm, whole layers of layerHeightMm; 0 = not measured
+  // (print_coupon's Z-gap row, docs/tolerances/README.md#the-coupon). The
+  // sideways counterpart is the `gap` rows. Drives no geometry in the app:
+  // a print-in-place generator reads it (generators/counter/).
+  double zGapMm = 0.0;
   bool operator==(const Profile&) const = default;
 };
 
@@ -115,7 +123,8 @@ struct Process {
 
 // Empty when `p` may be stored; otherwise what is wrong with it: no name, a
 // base process/material the built-in tables do not carry, a negative or
-// non-finite chord deviation, no rows, a size range that is empty,
+// non-finite chord deviation or layer height, a Z gap without a layer
+// height or not whole layers of it, no rows, a size range that is empty,
 // overlapping or out of order within its kind, or an allowance of the wrong
 // sign for its kind (a hole, internal thread or gap is opened, so not
 // negative -- and a gap of zero fuses; a shaft or external thread is not
