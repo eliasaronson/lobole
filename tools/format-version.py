@@ -35,6 +35,7 @@ GOLDEN_DIRS = ["tests/golden", "tests/golden/assembly", "tests/golden/job",
 # The files that DESCRIBE the rule, and so spell the placeholder as text:
 # `land` leaves them alone and `check` does not scan them.
 DESCRIBES = {"tools/format-version.py", "tools/merge-branch.sh", "CLAUDE.md",
+             "CONTRIBUTING.md",
              "docs/versioning/README.md"}
 # `check` also skips the header (the placeholders' definitions), format.md
 # (its pending rows are checked as rows; its policy describes the rule) and

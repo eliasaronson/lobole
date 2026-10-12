@@ -178,11 +178,14 @@ These are the ones a newcomer trips over. Most have a test behind them.
   (`##Name`) and `ImGui::PushID` scopes make a widget unaddressable to tests
   and scripts; use `###Name`. See
   [`docs/ui/testing.md`](docs/ui/testing.md).
-- **A serialization change bumps `kVersion`** (`src/core/io/SerializationInternal.h`),
-  **adds a golden at that version** under `tests/golden/` (or its
+- **A serialization change bumps the format version, written `vNEXT`**:
+  it raises `kVersionPending` (`src/core/io/SerializationInternal.h`),
+  **adds a golden** `vNEXT-<name>.json` under `tests/golden/` (or its
   `assembly/`, `job/` or `drawing/` directory) **and a row in
-  [the version history](docs/versioning/format.md#version-history)**;
-  `test_golden.cpp` gates both.
+  [Pending changes](docs/versioning/format.md#pending-changes)**. The merge
+  gives it its number
+  ([how](docs/versioning/format.md#a-bump-takes-its-number-when-it-lands));
+  `test_golden.cpp` and `format_version_gate` check it.
 - **Edit the domain module, not the monolith.** RPCs live in
   `src/remote/Remote{Modeling,Assembly,Inspection,…}.cpp`; serialization in
   `src/core/io/Serialize*.cpp`.
