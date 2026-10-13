@@ -981,11 +981,17 @@ set_tests_properties(format_version_gate PROPERTIES TIMEOUT 30
 # build succeeds, this suite passes, every render is identical -- and the
 # promise THIRD_PARTY.md makes is void in binaries already shipped. Reads
 # DT_NEEDED out of the linked binary rather than grepping the build files, and
-# fails on a dependency no THIRD_PARTY.md row covers. Skips (77) on a non-ELF
-# build; Windows import tables are not read yet.
+# fails on a dependency no THIRD_PARTY.md row covers. It demands only what this
+# build was configured with -- each optional component's HAVE_* result is
+# passed below, so a stock-Ubuntu build without Netgen is not asked to link it.
+# Skips (77) on a non-ELF build; Windows import tables are not read yet.
 add_test(NAME linkage_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/linkage_gate.py
-                 $<TARGET_FILE:designer>)
+                 $<TARGET_FILE:designer>
+                 HAVE_PLANEGCS=$<BOOL:${HAVE_PLANEGCS}>
+                 HAVE_CAM_ADAPTIVE=$<BOOL:${HAVE_CAM_ADAPTIVE}>
+                 HAVE_NETGEN=$<BOOL:${HAVE_NETGEN}>
+                 OPENCASCADE_FOUND=$<BOOL:${OPENCASCADE_FOUND}>)
 set_tests_properties(linkage_gate PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
 # Every authored source file says what it is licensed as. The top-level

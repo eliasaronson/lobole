@@ -26,7 +26,15 @@ Following the rule in CLAUDE.md -- a test checks the OUTCOME, not the formula --
 this does not grep CMakeLists.txt for the word SHARED. It reads DT_NEEDED out
 of the linked binary and asserts what was actually produced.
 
-Usage: linkage_gate.py <path-to-designer-binary>
+Usage: linkage_gate.py <path-to-designer-binary> NAME=ON|OFF ...
+
+Each NAME=ON|OFF is a CMake result for one optional component (HAVE_NETGEN,
+HAVE_CAM_ADAPTIVE, ...), passed by tests/CMakeLists.txt from the build's own
+configuration. A component the build was configured WITHOUT is not demanded
+(Ubuntu's apt has no Netgen, and that build has no FEM meshing at all); one it
+was configured WITH must be linked dynamically. The gate never guesses: a
+component whose flag is not passed is a usage error, so a new optional
+dependency cannot be skipped by forgetting to say how it was built.
 Exits 77 (skip) on a non-ELF binary; the Windows import table is not read yet.
 """
 
@@ -46,21 +54,27 @@ import sys
 #   "required" sonames must each appear in DT_NEEDED.
 #   "family" is the prefix the whole component's libraries share, so the
 #   undocumented-dependency check below recognises every one of them.
+#   "built_if" names the CMake result that says the build has the component;
+#   tests/CMakeLists.txt passes it. Absent means the build cannot be
+#   configured without it.
 LGPL_SHARED = [
     {"heading": "PlaneGCS",
      "required": ["libplanegcs.so"],
-     "family": "libplanegcs"},
+     "family": "libplanegcs",
+     "built_if": "HAVE_PLANEGCS"},
     {"heading": "libarea Adaptive",
      "required": ["libdesigner_adaptive.so"],
      "family": "libdesigner_adaptive",
-     "cam_only": True},
+     "built_if": "HAVE_CAM_ADAPTIVE"},
     {"heading": "Netgen",
      "required": ["libnglib.so", "libngcore.so"],
-     "family": "libng"},
+     "family": "libng",
+     "built_if": "HAVE_NETGEN"},
     # OCCT ships ~30 libTK*; these three are load-bearing and always present.
     {"heading": "OpenCASCADE Technology",
      "required": ["libTKernel.so", "libTKBRep.so", "libTKMath.so"],
-     "family": "libTK"},
+     "family": "libTK",
+     "built_if": "OPENCASCADE_FOUND"},
 ]
 
 # The C runtime, the toolchain, and the display/IPC stack the OS provides.
@@ -149,19 +163,30 @@ def claim_for(claims: dict[str, str], heading: str) -> str | None:
     return None
 
 
-def cam_enabled(build: pathlib.Path) -> bool:
-    cache = build / "CMakeCache.txt"
-    if not cache.exists():
-        return True  # cannot tell; check everything and fail loudly if wrong
-    m = re.search(r"^ENABLE_CAM:BOOL=(\w+)$", cache.read_text(), re.M)
-    return m is None or m.group(1).upper() not in {"OFF", "0", "FALSE", "NO"}
+def configured(args: list[str]) -> dict[str, bool]:
+    """NAME=VALUE pairs as CMake wrote them, read with CMake's truthiness."""
+    flags: dict[str, bool] = {}
+    for a in args:
+        name, sep, value = a.partition("=")
+        if not sep:
+            raise SystemExit(f"linkage_gate: expected NAME=ON|OFF, got {a!r}")
+        flags[name] = value.upper() not in {
+            "", "0", "OFF", "FALSE", "NO", "N", "IGNORE", "NOTFOUND"
+        } and not value.upper().endswith("-NOTFOUND")
+    return flags
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
+    if len(sys.argv) < 2:
         print(__doc__)
         return 2
     binary = pathlib.Path(sys.argv[1]).resolve()
+    flags = configured(sys.argv[2:])
+    unsaid = sorted({c["built_if"] for c in LGPL_SHARED} - flags.keys())
+    if unsaid:
+        print(f"linkage_gate: not told how the build configured {unsaid}; "
+              "tests/CMakeLists.txt passes each component's CMake result")
+        return 2
     repo = pathlib.Path(__file__).resolve().parent.parent
 
     needed = dt_needed(binary)
@@ -171,9 +196,8 @@ def main() -> int:
         return 77
 
     claims = linkage_claims(repo)
-    with_cam = cam_enabled(binary.parent)
-    components = [c for c in LGPL_SHARED
-                  if with_cam or not c.get("cam_only")]
+    components = [c for c in LGPL_SHARED if flags[c["built_if"]]]
+    left_out = [c["heading"] for c in LGPL_SHARED if not flags[c["built_if"]]]
     failures: list[str] = []
 
     # 1. Every LGPL-family dependency is a shared object, in the document and
@@ -229,7 +253,7 @@ def main() -> int:
     print(f"linkage ok: {sum(len(c['required']) for c in components)} "
           f"LGPL-family sonames linked dynamically, "
           f"{len(set(needed))} dependencies all documented"
-          f"{'' if with_cam else ' (ENABLE_CAM=OFF)'}")
+          f"{'' if not left_out else ' (built without ' + ', '.join(left_out) + ')'}")
     return 0
 
 
