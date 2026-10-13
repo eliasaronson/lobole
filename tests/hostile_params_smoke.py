@@ -59,12 +59,7 @@ sys.setrecursionlimit(100000)
 
 # Findings recorded in docs/known-bugs.md and not fixed yet: reported, not
 # failed. Each entry names the doc that says why; delete it with the fix.
-KNOWN = {
-    "query_geometry": {
-        "keys": {"axis", "near_point", "normal"},
-        "doc":
-        "docs/known-bugs.md#query_geometry-falls-over-on-a-short-vector"},
-}
+KNOWN = {}
 
 
 class Raw:

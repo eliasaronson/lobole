@@ -133,6 +133,18 @@ def main():
                 expect("on_point" in str(e), f"refusal names it: {e}")
             else:
                 raise AssertionError(f"accepted {bad}")
+        # A vector that is short, or a direction of zero length, is refused
+        # naming its key — not "array index 2 is out of range", and not a
+        # NaN direction that silently matches nothing.
+        for key, bad in (("normal", []), ("axis", [0, 0]),
+                         ("near_point", [1]), ("normal", [0, 0, 0])):
+            try:
+                d.call("query_geometry", **{key: bad})
+            except RuntimeError as e:
+                expect(key in str(e) and "out of range" not in str(e),
+                       f"{key}={bad} refusal names it: {e}")
+            else:
+                raise AssertionError(f"accepted {key}={bad}")
 
         # Torus faces are assertable (round-8 retro: bent tubes were
         # "other"). A half-donut: circle 20 off the z axis, swept 180.

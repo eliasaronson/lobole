@@ -48,19 +48,6 @@ the heading if it is not here yet.
   re-run with the pose nudged by ±ε and treat a volume that vanishes as
   touching.
 
-### `query_geometry` falls over on a short vector
-
-- **Symptom:** `query_geometry {normal: []}` (or `axis`, `near_point`, or
-  any array shorter than three) is refused with nlohmann's "array index 2 is
-  out of range", labelled `code: internal`, instead of naming the shape it
-  wants; `normal: [0, 0, 0]` normalises to NaN.
-- **Cause:** the handler's local `vec3` reads `a.at(0..2)` with no size or
-  zero-length check.
-- **Where:** `query_geometry` in `src/remote/RemoteInspection.cpp`.
-- **Likely fix:** read them with `remote::Vec3Param` (`RemoteHelpers.h`) and
-  refuse a zero direction. `tests/hostile_params_smoke.py` lists it under
-  `KNOWN`; delete that entry with the fix.
-
 ## Modeling
 
 ### A small sphere cut beside a fillet keeps a face inside the sphere

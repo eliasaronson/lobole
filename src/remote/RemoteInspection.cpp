@@ -2705,17 +2705,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const double angleTol = glm::radians(p.value("angle_tol_deg", 5.0));
     const double radiusTol = p.value("radius_tol", 0.01);
     const size_t maxResults = p.value("max_results", 50u);
-    const auto vec3 = [](const json& a) {
-      return glm::dvec3(a.at(0).get<double>(), a.at(1).get<double>(),
-                        a.at(2).get<double>());
-    };
     const auto point3 = [&](const char* key) {
-      const json& a = p.at(key);
-      if (!a.is_array() || a.size() != 3 ||
-          !std::all_of(a.begin(), a.end(),
-                       [](const json& v) { return v.is_number(); }))
-        throw std::runtime_error(std::string(key) + " must be [x, y, z] in mm");
-      return vec3(a);
+      return remote::Vec3Param(p.at(key), std::string(key) + " (mm)");
+    };
+    // A direction is any non-zero length: [0, 0, 0] normalised to NaN and
+    // matched nothing, which read as "no such face".
+    const auto direction = [&](const char* key) {
+      const glm::dvec3 v = remote::Vec3Param(p.at(key), key);
+      const double len = glm::length(v);
+      if (!(len > 0.0) || !std::isfinite(len))
+        throw std::runtime_error(std::string(key) +
+                                 " is a direction and cannot be zero");
+      return v / len;
     };
     if (p.contains("near_point") && p.contains("on_point"))
       throw std::runtime_error(
@@ -2724,9 +2725,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           "on_point to the element itself");
     std::optional<glm::dvec3> wantNormal, wantAxis, nearPoint, onPoint;
     if (p.contains("normal"))
-      wantNormal = glm::normalize(vec3(p.at("normal")));
+      wantNormal = direction("normal");
     if (p.contains("axis"))
-      wantAxis = glm::normalize(vec3(p.at("axis")));
+      wantAxis = direction("axis");
     if (p.contains("near_point"))
       nearPoint = point3("near_point");
     if (p.contains("on_point"))
