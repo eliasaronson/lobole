@@ -381,8 +381,9 @@ resets and time, and its coverage: how many handlers a hostile value reached
 through a valid baseline, and how many feature types the fixture covers.
 `hostile_params_selftest` shows the sweep sees what it claims: `debug_fault`
 (refused unless `LOBOLE_ALLOW_DEBUG_CRASH=1`) plants an internal error, a NaN
-answer, a write before a refusal, an edit then a fall, and a kernel throw
-inside a `batch`, and `debug_crash` a SIGSEGV whose crash report must name
+answer, a write before a refusal, an edit then a fall, a null write inside
+an OpenCASCADE signal scope on the handler's thread and on a worker (which
+must answer, not crash), and a kernel throw inside a `batch`, and `debug_crash` a SIGSEGV whose crash report must name
 it; each must come out as its class, and the deliberate refusals as nothing.
 It then opens the fixture twice on an instance whose jobs are held 3 s
 (`--gui-test-job-latency-ms`) and requires the two worlds to agree.

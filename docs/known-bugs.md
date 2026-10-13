@@ -139,3 +139,20 @@ the heading if it is not here yet.
 - **Likely fix:** replay an archived failing order
   (`$XDG_STATE_HOME/lobole/gui-failures/<run>/reproduce.sh`) and bisect
   it; the test that precedes the failure is the suspect.
+
+## Windows
+
+### A fault in system code on a worker thread leaves no crash report
+
+- **Symptom:** a fault inside a system DLL (msvcrt's `memcpy` handed a bad
+  pointer, a driver) on a `std::thread` ends the process with no `.crash`,
+  and the next start reports a session that "ended from outside".
+- **Cause:** mcfgthread's thread entry (`__MCF_seh_top`) ends any exception
+  it does not know in `RaiseFailFastException`, below which no filter runs.
+  The crash handler reports faults in code we ship at first chance, but
+  leaves faults in the system's own code to the unhandled-exception filter,
+  because that code may be probing memory under its own `__try`.
+- **Where:** `OnFaultInShippedCode` in `src/app/CrashHandler.cpp`.
+- **Likely fix:** report a first-chance fault in system code when the
+  thread's next handler is mcfgthread's (walk the faulting thread's frames
+  for an exception handler before reporting).

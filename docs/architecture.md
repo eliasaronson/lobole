@@ -403,6 +403,29 @@ by the same name drift apart without any test noticing:
   handler does not replace this one: `ArmOccSignalHandlers` puts it back
   after `OSD::SetSignal` and defers to OCC's only for a fault inside an OCC
   catch scope ([modeling](modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid)).
+- **On Windows none of what `OSD::SetSignal` installs stays**
+  (`src/cad/OccSignals.cpp`). Its `signal()` handlers go back to the
+  default: mingw's start-up code runs `main` under an `__except` whose filter
+  (`_gnu_exception_handler`) calls a `signal()` handler before the
+  unhandled-exception filter can run, and OCC's `exit(1)`ed with no report.
+  Its unhandled-exception filter goes back to the crash handler's, and the
+  conversion of a fault inside an OCC catch scope is a vectored handler of
+  ours, first in line on every thread, that acts only when
+  `Standard_ErrorHandler::IsInTryBlock()` and long-jumps there with
+  `Standard_Failure::Jump` (never for a stack overflow). OCC's own way held
+  its signal mutex across the long jump: after one converted fault the next
+  thread to arm OCC's handlers waited for good (`fuzz/cases/crash-153`
+  hung in `open_project`). A **fault in code we ship** (everything in the
+  executable's directory) is reported at first chance by a vectored handler
+  registered last, and the process ends with the exception's code: nothing in
+  GCC-built code can handle one, and on a `std::thread` the next frame up is
+  mcfgthread's, which ends the process with `RaiseFailFastException` before
+  any filter runs, so a worker's crash left no report. A fault in the
+  system's own code still goes to the filter. The crash file gives the
+  address touched (`address: … (read)`), all ones for a general-protection
+  fault. OCC's console handler, which swallowed Ctrl+C, is kept behind ours
+  (below). `debug_fault {kind: "occ_fault"}` faults inside an OCC scope on
+  the handler's thread and on a new one and answers what each became.
 - **Every session leaves evidence only if it ends badly**
   (`src/core/io/CrashReports.{h,cpp}`). At start-up, in every mode, the app
   writes `<state>/sessions/<started>-<pid>.json` (version, build, mode, OS,
@@ -410,7 +433,14 @@ by the same name drift apart without any test noticing:
   project changes) and holds an **exclusive lock** on it for its whole life
   (`platform::FileLock`: `flock`, `LockFileEx`). A clean exit deletes it,
   and so do SIGTERM, SIGINT and SIGHUP, since a process asked to stop has
-  not crashed. A marker whose lock can be taken belongs to a process that is
+  not crashed. On Windows a console control handler does the same for
+  Ctrl+C, Ctrl+Break, the console closing, logoff and shutdown: headless and
+  offscreen are asked to stop (their `SIGINT` handler) and end the session
+  the ordinary way, and the windowed app deletes the marker and ends.
+  `TerminateProcess` cannot be caught, so there a session that ended without
+  a report reads "ended from outside (Task Manager, taskkill /F) or power
+  lost": running out of memory is a failed allocation, which the crash
+  handler sees. A marker whose lock can be taken belongs to a process that is
   gone, however it died (a crash, the OOM killer, `kill -9`, a power cut); a
   pid check would not do, since pids are reused. The marker is locked under
   a temporary name and renamed into place, so another instance starting at
@@ -476,6 +506,13 @@ by the same name drift apart without any test noticing:
   adds the function it lies in (`, inlined in StallSelfTest()`); without
   that an optimised build with `-g` (RelWithDebInfo, the TSan tree) showed
   the stall's helper and never the function that stalled.
+- **On Windows** there is no signal to ask a thread for its stack: the
+  watchdog suspends the main thread, reads its registers and walks the stack
+  with `RtlVirtualUnwind`, as the crash handler walks a fault's, then resumes
+  it. The walk takes no lock the stopped thread might hold: functions are
+  found in each module's own `.pdata`, from a list of modules read and
+  pinned before the suspend, and named after the resume, as module + RVA
+  frames that `tools/symbolize-crash.py` names from the log.
 - `DESIGNER_WATCHDOG_S` sets the threshold (default 3; 0 turns it off, as a
   debugger stopping the process is not a hang); a value that is not seconds
   is refused at start-up. `lobole --stall-test` stalls the loop for 4 s once,

@@ -471,7 +471,9 @@ outside one. That macro is empty in code not compiled with
 `OCC_CONVERT_SIGNALS`, which is all of ours, so the blend, shell and draft
 builders run inside `occsig::RunCatchingOccSignals` (`src/cad/OccSignals.h`),
 set up where the macro is real: a SIGSEGV in `BRepOffsetAPI_DraftAngle`
-becomes "draft failed inside OpenCASCADE (OSD_SIGSEGV …)". The fault
+becomes "draft failed inside OpenCASCADE (OSD_SIGSEGV …)" (on Windows
+`OSD_Exception_ACCESS_VIOLATION …`, converted by our own vectored handler:
+[architecture](../architecture.md#crashes-and-stalls)). The fault
 long-jumps out of the algorithm's frames, so what they held may leak; it is
 the last line of defence, not a substitute for refusing the input.
 

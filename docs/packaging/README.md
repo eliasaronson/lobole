@@ -170,6 +170,15 @@ on a 30 GB machine.
 - **`occ-cross.nix`** builds OpenCASCADE with Draw and Visualization off:
   stock nixpkgs pulls Tcl/Tk (and through them bash) for Draw, which do not
   build for Windows.
+- **No IPA-CP clones** (`-fno-ipa-cp-clone`, OpenCASCADE and the app):
+  mingw GCC 16.2 at `-O3` miscompiles `BRepClass3d_SClassifier.cxx`. It
+  clones `NCollection_UBTree::Select` for the line selector, devirtualized,
+  and sends the point selector's recursion into that clone, so
+  `BRepClass3d_BndBoxTreeSelectorLine::Accept` runs on the point selector
+  and reads a curve from past its end: a point-in-solid test on a plain box
+  crashed (`tests/fuzz/cases/crash-181.jsonl`, Hole 'H6'). `-O2`, or `-O3`
+  without the cloning, is right, and the Linux build of the same compiler
+  and source is right.
 - **Boost is headers only**: Boost's own cross-build fails on its MPI
   component, so a hand-written `BoostConfig.cmake` exposes the
   `Boost::boost` interface target.
@@ -201,10 +210,18 @@ sketch constraint actually SOLVES (a circle whose radius is constrained from
 winevulkan, from the extracted portable zip, which is what a tester gets. A
 crash report: started with `LOBOLE_ALLOW_DEBUG_CRASH=1` and
 `WINEDLLOVERRIDES=winedbg.exe=d` (so Wine's debugger does not take the
-crash), `debug_crash {kind: "segv"}` after a couple of edits leaves a
-`.crash` with module + RVA frames and a `.dmp`, the next start collects
-them, and `tools/symbolize-crash.py` against that `lobole.exe` names
-`remote::DebugCrash`.
+crash), `debug_crash {kind: "segv"}` after a fillet (which arms
+OpenCASCADE's handlers) leaves a `.crash` with module + RVA frames and a
+`.dmp`, the next start collects them, and `tools/symbolize-crash.py`
+against that `lobole.exe` names `remote::DebugCrash`. Then, on the same
+instance kind: `debug_fault {kind: "occ_fault"}` answers an
+`OSD_Exception_ACCESS_VIOLATION` for both threads instead of dying; the
+fuzzer's `tests/fuzz/cases/crash-153.jsonl` and `crash-181.jsonl` replay to
+the end (`tools/designer_replay.py`); `--stall-test` logs a main-thread
+stack that `symbolize-crash.py` names (`StallSelfTest`); and a Ctrl+C
+(`SIGINT` to the Wine process, which Wine turns into `CTRL_C_EVENT`) after a
+fillet stops headless and leaves no report. All of it runs under Wine; no
+real Windows machine has run it.
 
 Rules for code, since nothing in CI builds this target:
 
@@ -218,6 +235,9 @@ Rules for code, since nothing in CI builds this target:
   `MiniDumpWriteDump` from `dbghelp`), `common/Platform` (`LockFileEx`,
   `ShellExecuteW`), the remote server (Winsock), `GitVault` (`nul`,
   `_pclose`), `_getpid`.
+- `shutdown()` does not wake a `recv` blocked on another thread on Windows;
+  `RemoteServer::Stop` cancels the socket's I/O (`CancelIoEx`) too, or a
+  headless instance asked to stop with a client connected waited for good.
 - `std::filesystem::path::native()` is a `wstring` on Windows; compare path
   components, not string prefixes.
 - A second non-inline definition of a function that also exists inline links
