@@ -10,6 +10,7 @@
 #include "core/Command.h"
 #include "core/Document.h"
 #include "core/io/Autosaver.h"
+#include "core/io/CrashReports.h"
 #include "remote/RemoteServer.h"
 #include "render/Camera.h"
 #include "ui/AppState.h"
@@ -109,6 +110,7 @@ int RunHeadless(int remotePort, const std::string& fileToLoad,
 
   while (!g_stopRequested) {
     watchdog::Beat();
+    crash::NoteProject(state.projectPath); // the marker names the project
     server.ProcessPending(state);
     // Every long-running operation, from one place (ui/BackgroundJobs.h). The
     // RPC handlers poll too — a handler must apply a finished result before it

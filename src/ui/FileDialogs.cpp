@@ -11,8 +11,10 @@
 
 #include "cad/CADKernel.h"
 #include "common/Logger.h"
+#include "common/Platform.h"
 #include "common/Watchdog.h"
 #include "core/io/Autosaver.h"
+#include "core/io/CrashReports.h"
 #include "core/io/Serialization.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
@@ -27,6 +29,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 
 #ifdef HAVE_NATIVEFILEDIALOG
 #include <nfd.h>
@@ -207,6 +210,101 @@ void DrawRecoveryModal(AppState& state) {
   }
 }
 
+// What a session that ended badly left, back in front of the user: its
+// project with the autosaves laid over it, or — for a project never saved —
+// the copy of the unsaved slot its report kept (the live slot is this
+// session's to overwrite). Dirty either way: the recovered work is unsaved.
+bool RecoverFromReport(AppState& state, const crash::Report& report,
+                       std::string* error) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  const fs::path copies = report.dir / "autosave";
+  if (!report.project.empty()) {
+    if (!Autosaver::RecoverableDocuments(report.project).empty())
+      return RecoverProject(state, report.project, error);
+    const fs::path live = Autosaver::SidecarPath(report.project);
+    const fs::path copy = copies / live.filename();
+    const fs::path from =
+        Autosaver::HasNewerAutosave(report.project) ? live : copy;
+    if (!fs::exists(from, ec)) {
+      *error = "the autosave of " + report.project + " is gone";
+      return false;
+    }
+    OpenProjectFile(state, from.string());
+    MarkProjectRecovered(state, report.project);
+    return true;
+  }
+  const fs::path copy =
+      copies / fs::path(Autosaver::SidecarPath("")).filename();
+  if (!fs::exists(copy, ec)) {
+    *error = "that session's project was never saved and had several "
+             "documents, which cannot be reopened from their autosaves; "
+             "they are in " +
+             copies.string();
+    return false;
+  }
+  OpenProjectFile(state, copy.string());
+  MarkProjectRecovered(state, "");
+  return true;
+}
+
+// The last session ended badly and start-up collected its report
+// (core/io/CrashReports.h). Said once, at start-up, with the ways out.
+void DrawCrashNoticeModal(AppState& state) {
+  const std::optional<crash::Report>& notice = crash::Notice();
+  if (!notice)
+    return;
+  const char* title = "Loböle closed unexpectedly###CrashNotice";
+  if (!ImGui::IsPopupOpen(title))
+    ImGui::OpenPopup(title);
+  if (!ImGui::BeginPopupModal(title, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+  const crash::Report& r = *notice;
+  ImGui::TextUnformatted("Loböle closed unexpectedly last time.");
+  ImGui::TextDisabled("%s", r.reason.c_str());
+  ImGui::Spacing();
+  ImGui::TextWrapped("A report was saved in\n%s\nIt stays on this computer: "
+                     "nothing is sent anywhere. It may hold your design and "
+                     "the names of your files, so share it only with someone "
+                     "you would show them to.",
+                     r.dir.string().c_str());
+  if (!r.autosaves.empty())
+    ImGui::TextWrapped("Unsaved work from that session can be recovered%s.",
+                       r.project.empty() ? "" : (" into " + r.project).c_str());
+  ImGui::Spacing();
+  bool close = false;
+  if (!r.autosaves.empty() &&
+      ImGui::Button("Recover unsaved work###crash_recover")) {
+    std::string error;
+    if (!RecoverFromReport(state, r, &error))
+      LOG_ERROR("Could not recover the unsaved work: {}", error);
+    close = true;
+  }
+  if (!r.autosaves.empty())
+    ImGui::SameLine();
+  if (ImGui::Button("Open report folder###crash_open")) {
+    std::string error;
+    if (!platform::RevealInFileManager(r.dir, &error))
+      LOG_WARN("Could not show {}: {}", r.dir.string(), error);
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Copy report###crash_copy")) {
+    std::ifstream in(r.dir / "report.txt", std::ios::binary);
+    const std::string text((std::istreambuf_iterator<char>(in)),
+                           std::istreambuf_iterator<char>());
+    ImGui::SetClipboardText(text.c_str());
+  }
+  ImGui::SameLine();
+  if (ImGui::Button("Dismiss###crash_dismiss"))
+    close = true;
+  if (close) {
+    crash::SetNotice(std::nullopt);
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
 // F8: a save was refused because the project moved on disk. The user pressed
 // Ctrl+S and something has to happen, so this is modal — and it names what
 // each way out costs, because both of them lose something.
@@ -363,6 +461,7 @@ bool NativeDialogsSafe() {
 
 void DrawFileBrowser(AppState& state) {
   DrawRecoveryModal(state);
+  DrawCrashNoticeModal(state);
   DrawDiskChangeModal(state);
   DrawBrowserWindow(state);
 }

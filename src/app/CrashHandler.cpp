@@ -3,15 +3,21 @@
 
 #include "app/CrashHandler.h"
 
+#include "common/Watchdog.h"
+
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <csignal>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cwchar>
+#include <exception>
 #include <mutex>
 #include <new>
 #include <string>
@@ -20,15 +26,20 @@
 #if defined(_WIN32)
 #include <io.h>
 #include <windows.h>
+// After windows.h, which it needs.
+#include <dbghelp.h>
 #else
-#include <csignal>
 #include <cxxabi.h>
-#include <elf.h>
 #include <fcntl.h>
-#include <link.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <vector>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <elf.h>
+#include <link.h>
+#endif
 // std::stacktrace (C++23) needs libstdc++'s experimental archive (-lstdc++exp),
 // which some toolchains ship without (e.g. the Freedesktop Flatpak SDK's gcc).
 // CMake probes for it and defines HAVE_STDCXX_STACKTRACE when it links; without
@@ -52,61 +63,530 @@ void WriteStderr(const char* s, size_t n) {
 }
 void WriteStderr(const char* s) { WriteStderr(s, strlen(s)); }
 
+// --- what the handler may touch ----------------------------------------------
+//
+// Everything below is filled at start-up, while allocating is safe, into
+// fixed buffers: the handler only reads them. Writing the crash file is
+// open/write/close (CreateFileW/WriteFile on Windows), which are safe in a
+// signal handler; the raw frames go out before anything that allocates.
+
+constexpr size_t kPathMax = 4096;
+char g_crashPath[kPathMax] = {};
+char g_markerPath[kPathMax] = {};
+// What std::terminate was handed, for the SIGABRT that follows it.
+char g_exceptionWhat[512] = {};
+constexpr int kMaxCrashFrames = 64;
+
+// A crash file being written: the bytes go to the file only, so stderr keeps
+// what it always printed. No allocation, no stdio.
+struct Out {
+#if defined(_WIN32)
+  HANDLE file = INVALID_HANDLE_VALUE;
+  void Put(const char* s, size_t n) const {
+    if (file == INVALID_HANDLE_VALUE)
+      return;
+    DWORD written = 0;
+    WriteFile(file, s, static_cast<DWORD>(n), &written, nullptr);
+  }
+#else
+  int fd = -1;
+  void Put(const char* s, size_t n) const {
+    while (fd >= 0 && n > 0) {
+      const ssize_t w = write(fd, s, n);
+      if (w < 0 && errno == EINTR)
+        continue;
+      if (w <= 0)
+        return;
+      s += w;
+      n -= static_cast<size_t>(w);
+    }
+  }
+#endif
+  void Put(const char* s) const { Put(s, strlen(s)); }
+  void Hex(uintptr_t v) const {
+    char buf[2 + 2 * sizeof(uintptr_t)];
+    size_t n = sizeof buf;
+    do {
+      buf[--n] = "0123456789abcdef"[v & 0xf];
+      v >>= 4;
+    } while (v != 0);
+    buf[--n] = 'x';
+    buf[--n] = '0';
+    Put(buf + n, sizeof buf - n);
+  }
+  void Dec(uint64_t v) const {
+    char buf[24];
+    size_t n = sizeof buf;
+    do {
+      buf[--n] = static_cast<char>('0' + v % 10);
+      v /= 10;
+    } while (v != 0);
+    Put(buf + n, sizeof buf - n);
+  }
+};
+
+// The header every crash file starts with; the collector reads the first
+// line (core/io/CrashReports.cpp).
+void PutHeader(const Out& out, const char* reason, const char* detail) {
+  out.Put("reason: ");
+  out.Put(reason);
+  if (detail && *detail) {
+    out.Put(" (");
+    out.Put(detail);
+    out.Put(")");
+  }
+  out.Put("\n");
+  char label[96];
+  if (watchdog::CopyLabel(label, sizeof label) > 0) {
+    out.Put("in: ");
+    out.Put(label);
+    out.Put("\n");
+  }
+  if (g_exceptionWhat[0]) {
+    out.Put("uncaught exception: ");
+    out.Put(g_exceptionWhat);
+    out.Put("\n");
+  }
+}
+
+void CopyInto(char* dst, size_t size, const std::string& src) {
+  const size_t n = std::min(src.size(), size - 1);
+  std::memcpy(dst, src.data(), n);
+  dst[n] = '\0';
+}
+
+// std::terminate's handler: note what was thrown, then the usual one (which
+// prints it and aborts — into the SIGABRT handler below).
+std::terminate_handler g_previousTerminate = nullptr;
+void OnTerminate() {
+  if (std::exception_ptr e = std::current_exception()) {
+    try {
+      std::rethrow_exception(e);
+    } catch (const std::exception& ex) {
+      CopyInto(g_exceptionWhat, sizeof g_exceptionWhat, ex.what());
+    } catch (...) {
+      CopyInto(g_exceptionWhat, sizeof g_exceptionWhat,
+               "(not a std::exception)");
+    }
+  }
+  if (g_previousTerminate)
+    g_previousTerminate();
+  std::abort();
+}
+
 #if !defined(_WIN32)
-void OnFatalSignal(int sig) {
+
+// --- the loaded modules, for module+offset -------------------------------
+//
+// A raw address is useless in a report: every library loads somewhere
+// different each run. Module + offset is what addr2line takes. The handler
+// cannot ask the loader (dladdr takes its lock), so the table is recorded
+// ahead of time, twice-buffered so a refresh never tears what a crash reads.
+
+struct Module {
+  uintptr_t lo = 0, hi = 0; // where its segments are mapped
+  uintptr_t bias = 0;       // what to subtract for a file-relative address
+  char name[256] = {};
+};
+constexpr size_t kMaxModules = 512;
+struct ModuleTable {
+  size_t count = 0;
+  Module modules[kMaxModules];
+};
+ModuleTable g_tables[2];
+std::atomic<int> g_activeTable{-1};
+
+void RecordModules() {
+  const int next = g_activeTable.load(std::memory_order_acquire) == 0 ? 1 : 0;
+  ModuleTable& t = g_tables[next];
+  t.count = 0;
+#if defined(__APPLE__)
+  const uint32_t images = _dyld_image_count();
+  for (uint32_t i = 0; i < images && t.count < kMaxModules; ++i) {
+    Module& m = t.modules[t.count++];
+    const auto* header =
+        reinterpret_cast<const mach_header_64*>(_dyld_get_image_header(i));
+    m.bias = static_cast<uintptr_t>(_dyld_get_image_vmaddr_slide(i));
+    m.lo = reinterpret_cast<uintptr_t>(header);
+    // The image's extent from its load commands' segments.
+    m.hi = m.lo;
+    const auto* cmd = reinterpret_cast<const load_command*>(header + 1);
+    for (uint32_t c = 0; c < header->ncmds; ++c) {
+      if (cmd->cmd == LC_SEGMENT_64) {
+        const auto* seg = reinterpret_cast<const segment_command_64*>(cmd);
+        m.hi = std::max<uintptr_t>(m.hi, m.bias + seg->vmaddr + seg->vmsize);
+      }
+      cmd = reinterpret_cast<const load_command*>(
+          reinterpret_cast<const char*>(cmd) + cmd->cmdsize);
+    }
+    CopyInto(m.name, sizeof m.name, _dyld_get_image_name(i));
+  }
+#else
+  dl_iterate_phdr(
+      [](dl_phdr_info* info, size_t, void* data) {
+        auto& table = *static_cast<ModuleTable*>(data);
+        if (table.count >= kMaxModules)
+          return 1;
+        Module m;
+        m.bias = info->dlpi_addr;
+        bool any = false;
+        for (int i = 0; i < info->dlpi_phnum; ++i) {
+          const auto& ph = info->dlpi_phdr[i];
+          if (ph.p_type != PT_LOAD)
+            continue;
+          const uintptr_t lo = info->dlpi_addr + ph.p_vaddr;
+          const uintptr_t hi = lo + ph.p_memsz;
+          m.lo = any ? std::min(m.lo, lo) : lo;
+          m.hi = any ? std::max(m.hi, hi) : hi;
+          any = true;
+        }
+        if (!any)
+          return 0;
+        if (info->dlpi_name && info->dlpi_name[0]) {
+          CopyInto(m.name, sizeof m.name, info->dlpi_name);
+        } else if (table.count == 0) {
+          // The executable reports no name.
+          const ssize_t n =
+              readlink("/proc/self/exe", m.name, sizeof m.name - 1);
+          m.name[n > 0 ? n : 0] = '\0';
+        }
+        if (!m.name[0])
+          return 0; // the vDSO
+        table.modules[table.count++] = m;
+        return 0;
+      },
+      &t);
+#endif
+  g_activeTable.store(next, std::memory_order_release);
+}
+
+void PutFrame(const Out& out, int index, uintptr_t address) {
+  out.Put("  #");
+  out.Dec(static_cast<uint64_t>(index));
+  out.Put(" ");
+  const int active = g_activeTable.load(std::memory_order_acquire);
+  if (active >= 0) {
+    const ModuleTable& t = g_tables[active];
+    for (size_t i = 0; i < t.count; ++i) {
+      const Module& m = t.modules[i];
+      if (address >= m.lo && address < m.hi) {
+        out.Put(m.name);
+        out.Put("+");
+        out.Hex(address - m.bias);
+        out.Put("\n");
+        return;
+      }
+    }
+  }
+  out.Hex(address); // a module loaded after the last refresh
+  out.Put("\n");
+}
+
+const char* SignalName(int sig) {
+  return sig == SIGSEGV   ? "SIGSEGV"
+         : sig == SIGABRT ? "SIGABRT"
+         : sig == SIGBUS  ? "SIGBUS"
+         : sig == SIGFPE  ? "SIGFPE"
+         : sig == SIGILL  ? "SIGILL"
+                          : "?";
+}
+
+// An alternate stack, so a stack overflow — the one SIGSEGV with no stack
+// left to run a handler on — is reported too. The main thread's only, as
+// sigaltstack is per thread; static, so it costs nothing until it is used.
+alignas(16) unsigned char g_altStack[1 << 20];
+
+void OnFatalSignal(int sig, siginfo_t* info, void*) {
+  // Default disposition first, so a second fault anywhere below dies the
+  // way it always did, core dump included.
+  signal(sig, SIG_DFL);
+  const char* name = SignalName(sig);
+
+  // 1-2: the crash file and its raw frames — nothing here allocates.
+  Out file;
+  if (g_crashPath[0])
+    file.fd = open(g_crashPath, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+  PutHeader(file, name, nullptr);
+  if (info && (sig == SIGSEGV || sig == SIGBUS)) {
+    file.Put("address: ");
+    file.Hex(reinterpret_cast<uintptr_t>(info->si_addr));
+    file.Put("\n");
+  }
+  void* frames[kMaxCrashFrames];
+  const int n = backtrace(frames, kMaxCrashFrames);
+  file.Put("raw frames (module+offset):\n");
+  for (int i = 1; i < n; ++i) // frame 0 is this handler
+    PutFrame(file, i - 1, reinterpret_cast<uintptr_t>(frames[i]));
+
+  // 3: best effort from here — symbolizing allocates (not strictly
+  // async-signal-safe), and in a corrupt heap it may hang; what is needed is
+  // already in the file. The same stack goes to stderr, as it always has.
   WriteStderr("\n=== fatal signal ");
-  const char* name = sig == SIGSEGV   ? "SIGSEGV"
-                     : sig == SIGABRT ? "SIGABRT"
-                     : sig == SIGBUS  ? "SIGBUS"
-                     : sig == SIGFPE  ? "SIGFPE"
-                                      : "?";
   WriteStderr(name);
   WriteStderr(" — backtrace:\n");
-  // Symbolizing allocates (not strictly async-signal-safe) — accepted: the
-  // process is already dying, and a symbolized stack in the dev-watch log is
-  // worth the small chance of a hang inside a corrupted allocator. The default
-  // handler is restored FIRST, so even that failure mode still core-dumps.
-  signal(sig, SIG_DFL);
+  file.Put("symbolized:\n");
 #if defined(HAVE_STDCXX_STACKTRACE)
   const std::string trace = std::to_string(std::stacktrace::current(
       /*skip=*/1)); // skip this handler frame
   WriteStderr(trace.c_str(), trace.size());
+  file.Put(trace.c_str(), trace.size());
+  file.Put("\n");
 #else
   // Fallback: glibc backtrace(). backtrace_symbols_fd writes straight to the fd
   // without heap allocation, and frame 0 (this handler) is skipped.
-  void* frames[64];
-  const int n = backtrace(frames, 64);
-  if (n > 1)
+  if (n > 1) {
     backtrace_symbols_fd(frames + 1, n - 1, STDERR_FILENO);
+    if (file.fd >= 0)
+      backtrace_symbols_fd(frames + 1, n - 1, file.fd);
+  }
 #endif
   WriteStderr("\n=== end backtrace\n");
+  if (file.fd >= 0) {
+    close(file.fd);
+    WriteStderr("=== crash report: ");
+    WriteStderr(g_crashPath);
+    WriteStderr("\n");
+  }
   raise(sig); // default disposition: core dump / exit code as before
 }
+
+// SIGTERM, SIGINT, SIGHUP where nothing else handles them (the windowed
+// app): somebody asked the process to stop, which is not a crash. Delete the
+// session marker so the next start does not report one, then die exactly as
+// before. The headless and offscreen loops install their own handlers for
+// SIGINT/SIGTERM and exit cleanly, which ends the session the ordinary way.
+void OnTerminationSignal(int sig) {
+  if (g_markerPath[0])
+    unlink(g_markerPath);
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
+
 #else // _WIN32
-// Windows has no POSIX signals/execinfo. Catch unhandled SEH exceptions, print
-// the code, and continue the search so the process still crashes/dumps as
-// before. (A symbolized DbgHelp stack walk can be added later.)
+
+wchar_t g_crashPathW[kPathMax] = {};
+wchar_t g_dumpPathW[kPathMax] = {};
+
+void PutFrame(const Out& out, const char* tag, uintptr_t address) {
+  out.Put(tag);
+  out.Put(" ");
+  HMODULE module = nullptr;
+  wchar_t wide[MAX_PATH];
+  char name[MAX_PATH * 3];
+  if (GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                             GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                         reinterpret_cast<LPCWSTR>(address), &module) &&
+      module) {
+    const DWORD len = GetModuleFileNameW(module, wide, MAX_PATH);
+    const int bytes =
+        WideCharToMultiByte(CP_UTF8, 0, wide, static_cast<int>(len), name,
+                            sizeof name - 1, nullptr, nullptr);
+    name[bytes > 0 ? bytes : 0] = '\0';
+    out.Put(name[0] ? name : "?");
+    out.Put("+");
+    // The module handle IS its load address, so this is the RVA.
+    out.Hex(address - reinterpret_cast<uintptr_t>(module));
+  } else {
+    out.Hex(address);
+  }
+  out.Put("\n");
+}
+
+void PutIndexedFrame(const Out& out, int index, uintptr_t address) {
+  char tag[16] = "  #";
+  size_t n = 3;
+  char digits[8];
+  size_t d = 0;
+  do {
+    digits[d++] = static_cast<char>('0' + index % 10);
+    index /= 10;
+  } while (index > 0 && d < sizeof digits);
+  while (d > 0)
+    tag[n++] = digits[--d];
+  tag[n] = '\0';
+  PutFrame(out, tag, address);
+}
+
+const char* ExceptionName(DWORD code) {
+  switch (code) {
+  case EXCEPTION_ACCESS_VIOLATION:
+    return "access violation";
+  case EXCEPTION_STACK_OVERFLOW:
+    return "stack overflow";
+  case EXCEPTION_ILLEGAL_INSTRUCTION:
+    return "illegal instruction";
+  case EXCEPTION_INT_DIVIDE_BY_ZERO:
+    return "integer divide by zero";
+  case EXCEPTION_IN_PAGE_ERROR:
+    return "in-page error";
+  case 0xE06D7363:
+    return "C++ exception";
+  default:
+    return "";
+  }
+}
+
+HANDLE OpenForWrite(const wchar_t* path) {
+  if (!path[0])
+    return INVALID_HANDLE_VALUE;
+  return CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                     CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+}
+
+void WriteMinidump(EXCEPTION_POINTERS* info) {
+  HANDLE dump = OpenForWrite(g_dumpPathW);
+  if (dump == INVALID_HANDLE_VALUE)
+    return;
+  MINIDUMP_EXCEPTION_INFORMATION mei{};
+  mei.ThreadId = GetCurrentThreadId();
+  mei.ExceptionPointers = info;
+  mei.ClientPointers = FALSE;
+  // MiniDumpNormal: threads, registers and stacks, a few hundred KB — no
+  // heap, so it carries no more of the user's design than the stacks do.
+  MiniDumpWriteDump(GetCurrentProcess(), GetCurrentProcessId(), dump,
+                    MiniDumpNormal, info ? &mei : nullptr, nullptr, nullptr);
+  CloseHandle(dump);
+}
+
+// Windows has no POSIX signals/execinfo. An unhandled SEH exception writes
+// the crash file — the code, the faulting address and the faulting thread's
+// stack walked from the exception's own context, each frame as module + RVA
+// — and a minidump, then continues the search so the process still dies as
+// before.
 LONG WINAPI OnWindowsException(EXCEPTION_POINTERS* info) {
+  const DWORD code = info->ExceptionRecord->ExceptionCode;
+  Out file;
+  file.file = OpenForWrite(g_crashPathW);
+  char reason[48] = "Windows exception ";
+  {
+    // The code, formatted without stdio.
+    size_t n = std::strlen(reason);
+    reason[n++] = '0';
+    reason[n++] = 'x';
+    for (int shift = 28; shift >= 0; shift -= 4)
+      reason[n++] = "0123456789ABCDEF"[(code >> shift) & 0xf];
+    reason[n] = '\0';
+  }
+  PutHeader(file, reason, ExceptionName(code));
+  file.Put("raw frames (module+offset):\n");
+  const auto fault =
+      reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress);
+  PutIndexedFrame(file, 0, fault);
+#if defined(__x86_64__) || defined(_M_X64)
+  CONTEXT ctx = *info->ContextRecord;
+  for (int i = 1; i < kMaxCrashFrames; ++i) {
+    DWORD64 imageBase = 0;
+    PRUNTIME_FUNCTION fn = RtlLookupFunctionEntry(ctx.Rip, &imageBase, nullptr);
+    if (fn) {
+      void* handlerData = nullptr;
+      DWORD64 establisher = 0;
+      RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx,
+                       &handlerData, &establisher, nullptr);
+    } else {
+      // A leaf function: the return address is on top of the stack.
+      if (ctx.Rsp == 0)
+        break;
+      ctx.Rip = *reinterpret_cast<DWORD64*>(ctx.Rsp);
+      ctx.Rsp += 8;
+    }
+    if (ctx.Rip == 0)
+      break;
+    PutIndexedFrame(file, i, static_cast<uintptr_t>(ctx.Rip));
+  }
+#else
+  void* frames[kMaxCrashFrames];
+  const USHORT n =
+      RtlCaptureStackBackTrace(0, kMaxCrashFrames, frames, nullptr);
+  for (USHORT i = 0; i < n; ++i)
+    PutIndexedFrame(file, i + 1, reinterpret_cast<uintptr_t>(frames[i]));
+#endif
+  if (file.file != INVALID_HANDLE_VALUE)
+    CloseHandle(file.file);
+  WriteMinidump(info);
+
   WriteStderr("\n=== fatal Windows exception (code ");
   char buf[16];
-  std::snprintf(buf, sizeof(buf), "0x%08lx",
-                info->ExceptionRecord->ExceptionCode);
+  std::snprintf(buf, sizeof(buf), "0x%08lx", code);
   WriteStderr(buf);
   WriteStderr(") ===\n");
   return EXCEPTION_CONTINUE_SEARCH;
+}
+
+// abort() — and std::terminate through it — is a CRT signal on Windows, not
+// an SEH exception, so the filter above never sees it.
+void OnWindowsAbort(int) {
+  signal(SIGABRT, SIG_DFL);
+  Out file;
+  file.file = OpenForWrite(g_crashPathW);
+  PutHeader(file, "SIGABRT", nullptr);
+  file.Put("raw frames (module+offset):\n");
+  void* frames[kMaxCrashFrames];
+  const USHORT n =
+      RtlCaptureStackBackTrace(1, kMaxCrashFrames, frames, nullptr);
+  for (USHORT i = 0; i < n; ++i)
+    PutIndexedFrame(file, i, reinterpret_cast<uintptr_t>(frames[i]));
+  if (file.file != INVALID_HANDLE_VALUE)
+    CloseHandle(file.file);
+  WriteMinidump(nullptr);
+  WriteStderr("\n=== fatal signal SIGABRT ===\n");
 }
 #endif
 
 } // namespace
 
 void InstallCrashHandler() {
+  g_previousTerminate = std::set_terminate(OnTerminate);
 #if defined(_WIN32)
   SetUnhandledExceptionFilter(OnWindowsException);
+  signal(SIGABRT, OnWindowsAbort);
 #else
-  signal(SIGSEGV, OnFatalSignal);
-  signal(SIGABRT, OnFatalSignal);
-  signal(SIGBUS, OnFatalSignal);
-  signal(SIGFPE, OnFatalSignal);
+  RecordModules();
+  stack_t alt{};
+  alt.ss_sp = g_altStack;
+  alt.ss_size = sizeof g_altStack;
+  const bool haveAlt = sigaltstack(&alt, nullptr) == 0;
+  struct sigaction sa{};
+  sa.sa_sigaction = OnFatalSignal;
+  sigemptyset(&sa.sa_mask);
+  sa.sa_flags = SA_SIGINFO | (haveAlt ? SA_ONSTACK : 0);
+  for (int sig : {SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL})
+    sigaction(sig, &sa, nullptr);
+  for (int sig : {SIGTERM, SIGINT, SIGHUP})
+    signal(sig, OnTerminationSignal);
+  // Warm the unwinder: its first use can load libgcc_s, which must not
+  // happen for the first time inside the handler.
+  void* warm[4];
+  (void)backtrace(warm, 4);
+#endif
+}
+
+void SetCrashReportFiles(const std::filesystem::path& crashFile,
+                         const std::filesystem::path& dumpFile,
+                         const std::filesystem::path& markerFile) {
+#if defined(_WIN32)
+  // Wide, from the path itself: path::string() is the ANSI code page there,
+  // which cannot spell every user name.
+  const auto widen = [](wchar_t* dst, const std::filesystem::path& p) {
+    const std::wstring w = p.wstring();
+    const size_t n = std::min(w.size(), kPathMax - 1);
+    std::wmemcpy(dst, w.data(), n);
+    dst[n] = L'\0';
+  };
+  widen(g_crashPathW, crashFile);
+  widen(g_dumpPathW, dumpFile);
+  // dbghelp loads here, not inside the filter.
+  (void)LoadLibraryW(L"dbghelp.dll");
+#else
+  (void)dumpFile; // a core dump is the system's business on POSIX
+  RecordModules();
+#endif
+  CopyInto(g_crashPath, sizeof g_crashPath, crashFile.string());
+  CopyInto(g_markerPath, sizeof g_markerPath, markerFile.string());
+}
+
+void RefreshCrashModules() {
+#if !defined(_WIN32)
+  RecordModules();
 #endif
 }
 
@@ -181,7 +661,8 @@ void OnStackRequest(int) {
 }
 #endif
 
-#if defined(HAVE_STDCXX_STACKTRACE)
+#if defined(HAVE_STDCXX_STACKTRACE) && !defined(__APPLE__)
+#define HAVE_EXE_SYMBOLS 1
 // The function a return address lies in, by the executable's own symbol
 // table. std::stacktrace names a frame from the debug info, and there a frame
 // inside an inlined call is named by the INNERMOST function: an -O2 -g build
@@ -355,7 +836,9 @@ std::string CaptureMainThreadStack(double timeoutSeconds) {
   // names only, so "at :0" is left off rather than printed on every frame.
   // A frame whose name is an inlined callee also names the function it was
   // inlined into (ExeSymbols says why).
+#if defined(HAVE_EXE_SYMBOLS)
   static ExeSymbols symbols;
+#endif
   size_t shown = 0;
   for (size_t i = 0; i < g_frameCount; ++i) {
     const std::stacktrace_entry& e = g_frames[i];
@@ -364,12 +847,14 @@ std::string CaptureMainThreadStack(double timeoutSeconds) {
       continue; // the signal trampoline, the end of the stack
     if (!e.source_file().empty())
       name += " at " + e.source_file() + ":" + std::to_string(e.source_line());
+#if defined(HAVE_EXE_SYMBOLS)
     // A return address, so one back to stay inside the call instruction's
     // function when the call was its last.
     const std::string owner = WithoutClone(
         symbols.Owner(static_cast<uintptr_t>(e.native_handle()) - 1));
     if (!owner.empty() && BareName(e.description()) != BareName(owner))
       name += ", inlined in " + owner;
+#endif
     out += "  #" + std::to_string(shown++) + " " + name + "\n";
   }
 #else

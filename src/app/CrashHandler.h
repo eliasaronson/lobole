@@ -3,14 +3,41 @@
 
 #pragma once
 
+#include <filesystem>
 #include <string>
 
-// Fatal-signal backtrace (SIGSEGV/SIGABRT/SIGBUS/SIGFPE): prints a
-// SYMBOLIZED std::stacktrace (C++23) to stderr so dev-watch logs show where
-// a crash happened, not just "core dumped". The default handler is restored
-// before symbolizing, so a failure inside the (not strictly signal-safe)
-// stacktrace machinery still core-dumps normally.
+// Fatal-signal handling (SIGSEGV/SIGABRT/SIGBUS/SIGFPE/SIGILL; unhandled SEH
+// exceptions and abort() on Windows). In order:
+//
+//   1. this session's crash file (SetCrashReportFiles) is opened with
+//      open()/CreateFileW, and the signal or exception code is written;
+//   2. then the RAW frames, each as module + offset, from a module table
+//      recorded at start-up — nothing up to here allocates, so a corrupt heap
+//      cannot stop it;
+//   3. then, best effort, the SYMBOLIZED std::stacktrace (C++23), to the file
+//      and to stderr as it always went, so dev-watch logs show where a crash
+//      happened. On Windows, a minidump beside the crash file instead.
+//
+// The default handler is restored first, and the signal re-raised at the
+// end, so the process still core-dumps as before. The next start turns the
+// files into a report (core/io/CrashReports.h,
+// docs/architecture.md#crashes-and-stalls).
+//
+// SIGTERM, SIGINT and SIGHUP delete the session marker and die as before: a
+// process asked to stop has not crashed. (Headless and offscreen replace the
+// first two with their own clean shutdown.)
 void InstallCrashHandler();
+
+// Where this session's crash file and Windows minidump go, and the marker the
+// termination signals delete. Copied into fixed buffers here, while
+// allocating is safe; also records the loaded modules.
+void SetCrashReportFiles(const std::filesystem::path& crashFile,
+                         const std::filesystem::path& dumpFile,
+                         const std::filesystem::path& markerFile);
+
+// Records the loaded modules again — after start-up has loaded the libraries
+// it loads late (the Vulkan driver), so their frames get a module too.
+void RefreshCrashModules();
 
 // The --crash-test flag's payload: deliberately SIGSEGVs to exercise the
 // backtrace path end-to-end in a real log.

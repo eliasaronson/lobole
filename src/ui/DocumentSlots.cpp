@@ -579,6 +579,9 @@ size_t DuplicateDocument(AppState& state, size_t index) {
 void SnapshotDrawing(AppState& state) {
   if (!state.drawing)
     return;
+  // One log line per undo step: the session's activity journal
+  // (docs/architecture.md#crashes-and-stalls).
+  LOG_INFO("edit: drawing");
   state.drawingHistory.undo.push_back(*state.drawing); // full-state copy
   state.drawingHistory.undoStamps.push_back(NextActionStamp());
   state.drawingHistory.redo.clear();
@@ -601,6 +604,7 @@ void RestoreDrawing(AppState& state, DrawingDocument restored) {
 bool UndoDrawing(AppState& state) {
   if (!state.drawing || state.drawingHistory.undo.empty())
     return false;
+  LOG_INFO("undo: drawing");
   state.drawingHistory.redo.push_back(*state.drawing);
   state.drawingHistory.redoStamps.push_back(
       state.drawingHistory.undoStamps.back());
@@ -614,6 +618,7 @@ bool UndoDrawing(AppState& state) {
 bool RedoDrawing(AppState& state) {
   if (!state.drawing || state.drawingHistory.redo.empty())
     return false;
+  LOG_INFO("redo: drawing");
   state.drawingHistory.undo.push_back(*state.drawing);
   state.drawingHistory.undoStamps.push_back(
       state.drawingHistory.redoStamps.back());
@@ -627,6 +632,7 @@ bool RedoDrawing(AppState& state) {
 void PushJobUndo(AppState& state, const cam::JobDocument& before) {
   if (!state.job)
     return;
+  LOG_INFO("edit: CAM job"); // the activity journal, as SnapshotDrawing
   state.jobHistory.undo.push_back(before);
   state.jobHistory.undoStamps.push_back(NextActionStamp());
   state.jobHistory.redo.clear();
@@ -662,6 +668,7 @@ void RestoreJob(AppState& state, cam::JobDocument restored) {
 bool UndoJob(AppState& state) {
   if (!state.job || state.jobHistory.undo.empty())
     return false;
+  LOG_INFO("undo: CAM job");
   state.jobHistory.redo.push_back(*state.job);
   state.jobHistory.redoStamps.push_back(state.jobHistory.undoStamps.back());
   state.jobHistory.undoStamps.pop_back();
@@ -674,6 +681,7 @@ bool UndoJob(AppState& state) {
 bool RedoJob(AppState& state) {
   if (!state.job || state.jobHistory.redo.empty())
     return false;
+  LOG_INFO("redo: CAM job");
   state.jobHistory.undo.push_back(*state.job);
   state.jobHistory.undoStamps.push_back(state.jobHistory.redoStamps.back());
   state.jobHistory.redoStamps.pop_back();
@@ -801,6 +809,7 @@ void SetActivePart(AppState& state, size_t index) {
   CancelPendingFeature(state);
   StashActive(state);
   ActivateSlot(state, index);
+  LOG_INFO("tab: {}", state.parts[index].name);
   ResetActiveTabUiState(state);
   // Part→assembly propagation (A4): entering an assembly whose referenced
   // parts regenerated since its last solve re-solves it, so mates track part

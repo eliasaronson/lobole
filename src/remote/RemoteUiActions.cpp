@@ -797,6 +797,61 @@ void RemoteServer::PollParked(ui::AppState& state) {
     m_requests.push_front(std::move(*r));
 }
 
+namespace {
+
+// The RPC lines of the activity journal: one per call, by method name only —
+// the params can be large, and they name the user's files
+// (docs/architecture.md#crashes-and-stalls). A run of the same call that
+// changed nothing is one line, not one per call: a client polling get_state
+// would otherwise bury the edits it is there to show.
+std::string g_lastRpcLogged;
+bool g_lastRpcEdited = false;
+
+bool SameEdits(const EditMarks& a, const EditMarks& b) {
+  return a.document == b.document && a.commandDepth == b.commandDepth &&
+         a.assembly == b.assembly && a.assemblyUndo == b.assemblyUndo &&
+         a.drawing == b.drawing && a.drawingUndo == b.drawingUndo &&
+         a.job == b.job && a.jobUndo == b.jobUndo &&
+         a.activePart == b.activePart && a.activeStamp == b.activeStamp;
+}
+
+void LogRpc(const std::string& method, const nlohmann::json& params) {
+  if (method == g_lastRpcLogged && !g_lastRpcEdited)
+    return;
+  g_lastRpcLogged = method;
+  if (method != "batch" || !params.is_object() || !params.contains("calls") ||
+      !params["calls"].is_array()) {
+    LOG_INFO("rpc: {}", method);
+    return;
+  }
+  // A batch names its calls: it is the one method whose name says nothing.
+  std::string calls;
+  size_t shown = 0;
+  for (const auto& call : params["calls"]) {
+    if (shown == 12) {
+      calls += ", …";
+      break;
+    }
+    calls += (shown++ == 0 ? "" : ", ") +
+             (call.is_object() && call.contains("method") &&
+                      call["method"].is_string()
+                  ? call["method"].get<std::string>()
+                  : std::string("?"));
+  }
+  LOG_INFO("rpc: batch [{}]", calls);
+}
+
+// Whether the call it spans edited anything, for the next LogRpc.
+struct RpcEditWatch {
+  const ui::AppState& state;
+  EditMarks before;
+  explicit RpcEditWatch(const ui::AppState& s)
+      : state(s), before(MarkEdits(s)) {}
+  ~RpcEditWatch() { g_lastRpcEdited = !SameEdits(before, MarkEdits(state)); }
+};
+
+} // namespace
+
 size_t RemoteServer::ProcessPending(ui::AppState& state) {
   if (!m_running)
     return 0;
@@ -1029,6 +1084,8 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       bool handled = false;
       // Named on the watchdog's stall line if it takes that long.
       const watchdog::Label rpcLabel("RPC " + request.method);
+      LogRpc(request.method, request.params);
+      const RpcEditWatch editWatch(state);
       // Who is asking, for a study job to belong to and a synchronous run to
       // stop on; cleared however the handler leaves.
       struct Caller {

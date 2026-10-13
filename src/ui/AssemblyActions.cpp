@@ -94,6 +94,9 @@ namespace ui {
 void SnapshotAssembly(AppState& state) {
   if (!state.assembly)
     return;
+  // One log line per undo step: the session's activity journal
+  // (docs/architecture.md#crashes-and-stalls).
+  LOG_INFO("edit: assembly");
   state.assemblyHistory.undo.push_back(*state.assembly); // full-state copy
   state.assemblyHistory.undoStamps.push_back(NextActionStamp());
   state.assemblyHistory.redo.clear();
@@ -117,6 +120,7 @@ void RestoreAssembly(AppState& state, AssemblyDocument restored) {
 bool UndoAssembly(AppState& state) {
   if (!state.assembly || state.assemblyHistory.undo.empty())
     return false;
+  LOG_INFO("undo: assembly");
   state.assemblyHistory.redo.push_back(*state.assembly);
   state.assemblyHistory.redoStamps.push_back(
       state.assemblyHistory.undoStamps.back());
@@ -131,6 +135,7 @@ bool UndoAssembly(AppState& state) {
 bool RedoAssembly(AppState& state) {
   if (!state.assembly || state.assemblyHistory.redo.empty())
     return false;
+  LOG_INFO("redo: assembly");
   state.assemblyHistory.undo.push_back(*state.assembly);
   state.assemblyHistory.undoStamps.push_back(
       state.assemblyHistory.redoStamps.back());

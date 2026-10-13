@@ -39,7 +39,9 @@ COLUMNS: dict[str, str] = {
     'checkpoint_list': '',
     'clear_geometry_delta': '',
     'conflict_list': '',
+    'crash_reports': '',
     'create_drawing': 'name?:string, sheet?:object',
+    'debug_crash': "kind:'segv'|'abort'|'exception'",
     'delete_feature': 'feature_id?:int>=0, id?:int>=0, index?:int>=0, expect_revision?:revision',
     'delete_part': 'part?:string|int, index?:int>=0',
     'describe': 'method?:string',
@@ -162,6 +164,9 @@ class CheckPrintParams(TypedDict):
 class CreateDrawingParams(TypedDict):
     name: NotRequired[str]
     sheet: NotRequired[Mapping[str, Any]]
+
+class DebugCrashParams(TypedDict):
+    kind: Literal['segv', 'abort', 'exception']
 
 class DeleteFeatureParams(TypedDict):
     feature_id: NotRequired[int]
@@ -379,7 +384,13 @@ class RpcSurface:
     def conflict_list(self, _timeout: float | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
+    def crash_reports(self, _timeout: float | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
     def create_drawing(self, _timeout: float | None = None, **params: Unpack[CreateDrawingParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def debug_crash(self, _timeout: float | None = None, **params: Unpack[DebugCrashParams]) -> dict[str, Any]:
         raise NotImplementedError
 
     def delete_feature(self, _timeout: float | None = None, **params: Unpack[DeleteFeatureParams]) -> dict[str, Any]:

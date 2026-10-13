@@ -292,6 +292,9 @@ set(core_sources
     # core/parts, core/io/Autosaver and core/io/Settings all resolve paths
     # through it, and a test binary that links only core still needs them.
     src/common/RuntimePaths.cpp
+    # FileLock, RevealInFileManager, the OS's name: what crash reports need
+    # from each platform (core/io/CrashReports.h).
+    src/common/Platform.cpp
     src/common/Watchdog.cpp
     src/render/OutlineEdges.cpp
     src/render/StillOutlines.cpp
@@ -303,6 +306,7 @@ set(core_sources
     src/cad/SketchPlane.cpp
     src/cad/FaceSelector.cpp
     src/core/io/Autosaver.cpp
+    src/core/io/CrashReports.cpp
     src/core/io/RecentProjects.cpp
     # Pure logic despite living under remote/: a JSON file per open port,
     # no sockets and no ImGui, so the tests can link and exercise it.
@@ -642,6 +646,10 @@ set_source_files_properties(${cam_sources} PROPERTIES COMPILE_OPTIONS
                             "-Werror=switch")
 
 add_library(designer_core STATIC ${core_sources})
+if(WIN32)
+    # ShellExecuteW: platform::RevealInFileManager.
+    target_link_libraries(designer_core PUBLIC shell32)
+endif()
 target_compile_definitions(designer_core PUBLIC
     DESIGNER_VERSION="${PROJECT_VERSION}")
 # The commit on the ONE file that reads it. As a PUBLIC define it was on 409
@@ -1063,6 +1071,8 @@ endif()
 # Winsock for the RemoteServer JSON-RPC socket (Windows).
 if(WIN32)
     target_link_libraries(designer ws2_32)
+    # The crash handler's minidump (MiniDumpWriteDump).
+    target_link_libraries(designer dbghelp)
 endif()
 
 # fem_gpu: headless Vulkan compute for the topology solver

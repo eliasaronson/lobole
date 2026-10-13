@@ -16,6 +16,7 @@
 #include "common/RuntimePaths.h"
 #include "common/Watchdog.h"
 #include "core/io/Autosaver.h"
+#include "core/io/CrashReports.h"
 #include "core/io/Settings.h"
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -1825,6 +1826,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   LOG_INFO("Offscreen mode: real renderer, no window or display server");
 
   SetupVulkan({}, nullptr, /*wsi=*/false);
+  RefreshCrashModules(); // the Vulkan driver is loaded now
   // The GUI sets these in SetupVulkanWindow, which never runs here. The
   // timer is why this mode is worth measuring in: with no swapchain there is
   // no image to wait for, so the main pass reports shading and nothing else
@@ -2083,6 +2085,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
   double animatingSince = -1.0;
   while (!g_OffscreenStopRequested) {
     watchdog::Beat();
+    crash::NoteProject(g_App.projectPath);
     server.ProcessPending(g_App);
     if (g_App.gpuStatsReset) {
       g_App.gpuStatsReset = false;
@@ -2257,6 +2260,33 @@ int main(int argc, char** argv) {
 #endif
   }
 
+  // This run's session (core/io/CrashReports.h): the log file, and a locked
+  // marker that only a run which ended badly leaves behind. Then every such
+  // marker an earlier run left becomes a report folder, before the first
+  // frame and in every mode, so a headless crash is collected by the next
+  // headless start too. Not under the GUI tests, which run on defaults: what
+  // an earlier run left must not decide what a test sees (their marker is
+  // still made, so a crashing suite leaves its report).
+  const char* sessionMode = args.runGuiTests ? "gui-tests"
+                            : args.offscreen ? "offscreen"
+                            : args.headless  ? "headless"
+                                             : "windowed";
+  struct SessionEnd {
+    ~SessionEnd() { crash::EndSession(); } // a clean exit leaves no marker
+  } sessionEnd;
+  if (auto session =
+          crash::BeginSession(RuntimePaths::UserStateDir(), sessionMode)) {
+    SetCrashReportFiles(session->crashFile, session->dumpFile, session->marker);
+    if (!args.runGuiTests) {
+      std::vector<crash::Report> reports =
+          crash::CollectDeadSessions(session->stateDir);
+      // The windowed app says so; the others have the log line and the
+      // crash_reports RPC.
+      if (!reports.empty() && !args.headless && !args.offscreen)
+        crash::SetNotice(std::move(reports.front()));
+    }
+  }
+
   // User preferences, before anything reads them: the GPU choice is consumed
   // by device selection below, and the font scale by the first theme apply.
   // GUI tests deliberately run on DEFAULTS — otherwise the developer's own
@@ -2418,6 +2448,7 @@ int main(int argc, char** argv) {
   for (uint32_t i = 0; i < extensions_count; i++)
     extensions.push_back(glfw_extensions[i]);
   SetupVulkan(extensions, window, /*wsi=*/true);
+  RefreshCrashModules(); // the Vulkan driver is loaded now
 
   VkSurfaceKHR surface;
   VkResult err =
@@ -2962,6 +2993,7 @@ int main(int argc, char** argv) {
     if (paceIdle)
       glfwWaitEventsTimeout(app::FramePacer::kIdleTimeoutSeconds);
     watchdog::Beat(); // per iteration: a minimized window finishes no frame
+    crash::NoteProject(g_App.projectPath); // the marker names the project
     g_App.frameTimer.BeginFrame(glfwGetTime());
     g_App.frameTimer.SetIdlePaced(paceIdle);
     const double frameCpuStartMs = ThreadCpuMs();

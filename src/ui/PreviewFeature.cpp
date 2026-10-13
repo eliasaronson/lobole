@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "ui/PreviewFeature.h"
+#include "common/Logger.h"
 #include "ui/FloatingWindow.h"
 #include "ui/SelectionPipeline.h"
 #include "ui/StudyPanel.h" // DrawSimulationToolWindow
@@ -44,7 +45,9 @@ namespace ui {
 uint64_t BeginPreviewFeature(AppState& state,
                              std::unique_ptr<Feature> feature) {
   // Added directly (not via a command) so it regenerates + renders while the
-  // user decides; committed to the undo stack only on accept.
+  // user decides; committed to the undo stack only on accept. Logged, like
+  // every edit: the session's activity journal.
+  LOG_INFO("tool: {} started", feature->TypeName());
   state.document->AddFeature(std::move(feature));
   const size_t idx = state.document->FeatureCount() - 1;
   Feature* added = state.document->GetFeature(idx);
@@ -153,6 +156,7 @@ void AcceptPendingFeature(AppState& state) {
     owned->SetSuppressed(true);
   const size_t mark = state.commands->UndoDepth();
   const std::string name = owned->GetName();
+  LOG_INFO("tool: {} committed", owned->TypeName());
   if (companion)
     state.commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(companion)),
@@ -168,7 +172,8 @@ void AcceptPendingFeature(AppState& state) {
 
 void CancelPendingFeature(AppState& state) {
   size_t idx = 0;
-  if (ResolvePendingFeature(state, &idx)) {
+  if (Feature* f = ResolvePendingFeature(state, &idx)) {
+    LOG_INFO("tool: {} cancelled", f->TypeName());
     state.document->RemoveFeature(idx);
   }
   // The companion after the feature that depends on it.

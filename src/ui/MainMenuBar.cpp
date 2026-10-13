@@ -11,8 +11,11 @@
 #include "common/BuildInfo.h"
 #include "common/DesignerVersion.h"
 #include "common/Logger.h"
+#include "common/Platform.h"
+#include "common/RuntimePaths.h"
 #include "core/Feature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/CrashReports.h"
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
 #include "render/Camera.h"
@@ -463,6 +466,18 @@ void DrawHelpMenu(AppState& state) {
     // popup from in here.
     if (ImGui::MenuItem("About Loböle"))
       state.showAbout = true;
+    // The folder crash reports land in (core/io/CrashReports.h), at any
+    // time and not only after a crash: the user who is asked for one has to
+    // be able to find it.
+    if (ImGui::MenuItem("Crash reports…###help_crash_reports")) {
+      const std::filesystem::path dir =
+          crash::ReportsDir(RuntimePaths::UserStateDir());
+      std::error_code ec;
+      std::filesystem::create_directories(dir, ec);
+      std::string error;
+      if (!platform::RevealInFileManager(dir, &error))
+        LOG_WARN("Could not show {}: {}", dir.string(), error);
+    }
     ImGui::EndMenu();
   }
   // The chord itself belongs to `help.shortcuts` in the one command table.

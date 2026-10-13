@@ -3,6 +3,7 @@
 
 #include "core/Command.h"
 
+#include "common/Logger.h"
 #include "core/io/Serialization.h"
 
 #include <algorithm>
@@ -450,7 +451,11 @@ void SetActiveConfigurationCommand::Undo(Document& doc) {
   doc.SetActiveConfiguration(m_before);
 }
 
+// Every edit, undo and redo is one line in the log, BEFORE it runs: the log
+// is the session's activity journal, and a crash report's session.log is how
+// its last steps are known (docs/architecture.md#crashes-and-stalls).
 bool CommandStack::Execute(std::unique_ptr<Command> command, Document& doc) {
+  LOG_INFO("edit: {}", command->Description());
   if (!command->Execute(doc)) {
     return false;
   }
@@ -462,6 +467,7 @@ bool CommandStack::Execute(std::unique_ptr<Command> command, Document& doc) {
 }
 
 void CommandStack::PushApplied(std::unique_ptr<Command> command) {
+  LOG_INFO("edit: {}", command->Description());
   command->SetStamp(NextActionStamp());
   m_undo.push_back(std::move(command));
   m_redo.clear();
@@ -471,6 +477,7 @@ void CommandStack::Undo(Document& doc) {
   if (m_undo.empty()) {
     return;
   }
+  LOG_INFO("undo: {}", m_undo.back()->Description());
   m_undo.back()->Undo(doc);
   doc.MarkEdited();
   m_redo.push_back(std::move(m_undo.back()));
@@ -481,6 +488,7 @@ void CommandStack::Redo(Document& doc) {
   if (m_redo.empty()) {
     return;
   }
+  LOG_INFO("redo: {}", m_redo.back()->Description());
   m_redo.back()->Execute(doc);
   doc.MarkEdited();
   m_undo.push_back(std::move(m_redo.back()));
@@ -535,6 +543,7 @@ size_t CommandStack::RollbackSince(size_t depth, Document& doc) {
   size_t undone = 0;
   if (depth >= m_undo.size())
     return undone;
+  LOG_INFO("undo: {} edit(s) rolled back", m_undo.size() - depth);
   {
     // One regeneration for the whole unwind, not one per command.
     Document::BulkEdit bulk(doc);

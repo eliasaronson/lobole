@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -45,6 +46,13 @@ public:
   Label(const Label&) = delete;
   Label& operator=(const Label&) = delete;
 };
+
+// The current label into `out` (NUL-terminated, at most `size` bytes), for
+// the crash handler: atomic loads into the caller's buffer, no allocation, no
+// lock, so it is safe in a signal handler. A label being rewritten at that
+// instant may come out torn; a crash report can live with that. Returns the
+// length.
+size_t CopyLabel(char* out, size_t size);
 
 // The stall decision, separated from the clock and the thread so it can be
 // tested with made-up times (like app::FramePacer).

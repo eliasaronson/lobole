@@ -992,6 +992,7 @@ std::string WindowTitle(AppState& state) {
 
 void MarkProjectSaved(AppState& state, const std::string& path,
                       const std::string& message) {
+  LOG_INFO("save: {}", path);
   state.projectPath = path;
   RecentProjects::Remember(path);
   StampAllSaved(state);
@@ -1019,6 +1020,7 @@ void MarkProjectSaved(AppState& state, const std::string& path,
 }
 
 void MarkProjectOpened(AppState& state, const std::string& path) {
+  LOG_INFO("open: {}", path.empty() ? std::string("(new)") : path);
   state.projectPath = path;
   state.projectGeneration++;      // the autosaver's tracking no longer applies
   RecentProjects::Remember(path); // ignores "" (the unsaved slot)

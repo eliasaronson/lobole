@@ -14,6 +14,7 @@
 #include "cad/FaceSelector.h"
 #include "cad/MeshExport.h"
 #include "common/Logger.h"
+#include "common/RuntimePaths.h"
 #include "core/Angles.h"
 #include "core/Conventions.h"
 #include "core/Expression.h"
@@ -25,6 +26,7 @@
 #include "core/features/WormFeature.h"
 #include "core/io/Autosaver.h"
 #include "core/io/Checkpoints.h"
+#include "core/io/CrashReports.h"
 #include "core/io/GitVault.h"
 #include "core/io/Keymap.h"
 #include "core/io/Serialization.h"
@@ -85,7 +87,9 @@
 #include "imgui_te_engine.h"
 #endif
 
+#include <cstdlib>
 #include <cstring>
+#include <exception>
 
 using nlohmann::json;
 
@@ -317,6 +321,24 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "code, which is indistinguishable from a missing feature or a "
      "regression unless you ask.",
      ""},
+    {"crash_reports",
+     "The crash reports on this machine, newest first: one folder each under "
+     "the state dir's crashes/, made at start-up from a session that ended "
+     "badly (docs/architecture.md#crashes-and-stalls). `reason` says how it "
+     "ended (\"crashed: SIGSEGV\", or \"ended without a crash report\" for "
+     "a kill, the OOM killer or a power cut); `autosaves` lists the copies "
+     "of that session's autosaves in the folder's autosave/. Read-only, and "
+     "nothing is ever sent anywhere.",
+     "", remote::Deferrable,
+     "folder, reports[]{path,stem,started,reason,crashed,mode,version,build,"
+     "os,project,autosaves[]}"},
+    {"debug_crash",
+     "Crash this process on purpose, to test crash reports end to end after "
+     "edits have been made (--crash-test crashes before there are any): "
+     "kind segv (a null write), abort, or exception (one nothing catches). "
+     "There is no answer. Refused unless the app was started with "
+     "LOBOLE_ALLOW_DEBUG_CRASH=1 in its environment.",
+     "kind:'segv'|'abort'|'exception'", remote::NotInBatch},
     {"background_jobs",
      "Every long operation running off the frame, as {jobs: [{id, kind, label, "
      "fraction, cancellable, elapsed_seconds}]}. `fraction` is -1 when the "
@@ -691,6 +713,31 @@ static void CheckExpectedRevision(ui::AppState& state, const std::string& m,
           "from what is there now." +
           unchanged);
 }
+
+namespace remote {
+namespace {
+// An exception nothing can catch: thrown from a noexcept function, so the
+// runtime goes straight to std::terminate.
+[[gnu::noinline]] void ThrowPastEveryCatch() noexcept {
+  std::rethrow_exception(std::make_exception_ptr(
+      std::runtime_error("debug_crash: an exception nothing catches")));
+}
+} // namespace
+
+// debug_crash's payload. Its own function, never inlined, so a report's
+// stack names it (tests/crash_report_smoke.py looks for it).
+enum class DebugCrashKind { Segv, Abort, Exception };
+[[gnu::noinline]] [[noreturn]] void DebugCrash(DebugCrashKind kind) {
+  LOG_WARN("debug_crash: crashing on purpose");
+  if (kind == DebugCrashKind::Segv) {
+    volatile int* p = nullptr;
+    *p = 1; // NOLINT: the point
+  } else if (kind == DebugCrashKind::Exception) {
+    ThrowPastEveryCatch();
+  }
+  std::abort();
+}
+} // namespace remote
 
 json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                   bool& handled, remote::RpcParams& p) {
@@ -1241,6 +1288,41 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // the kernel appends " (deleted)" when the file it named is gone.
             // No build stamp to keep in step with anything.
             {"binary_replaced", BinaryReplaced()}};
+  }
+  if (m == "crash_reports") {
+    const std::filesystem::path stateDir = RuntimePaths::UserStateDir();
+    json reports = json::array();
+    for (const crash::Report& r : crash::ListReports(stateDir))
+      reports.push_back({{"path", r.dir.string()},
+                         {"stem", r.stem},
+                         {"started", r.started},
+                         {"reason", r.reason},
+                         {"crashed", r.crashed},
+                         {"mode", r.mode},
+                         {"version", r.version},
+                         {"build", r.build},
+                         {"os", r.os},
+                         {"project", r.project},
+                         {"autosaves", r.autosaves}});
+    return json{{"folder", crash::ReportsDir(stateDir).string()},
+                {"reports", reports}};
+  }
+  if (m == "debug_crash") {
+    const std::string kind = p.at("kind").get<std::string>();
+    const remote::DebugCrashKind how =
+        kind == "segv"    ? remote::DebugCrashKind::Segv
+        : kind == "abort" ? remote::DebugCrashKind::Abort
+        : kind == "exception"
+            ? remote::DebugCrashKind::Exception
+            : throw std::runtime_error("debug_crash: kind is segv, abort or "
+                                       "exception");
+    const char* allow = std::getenv("LOBOLE_ALLOW_DEBUG_CRASH");
+    if (allow == nullptr || std::string(allow) != "1")
+      throw std::runtime_error(
+          "debug_crash is refused: it crashes the app, so it runs only when "
+          "the app was started with LOBOLE_ALLOW_DEBUG_CRASH=1 in its "
+          "environment. Nothing was done.");
+    remote::DebugCrash(how);
   }
   if (m == "background_jobs") {
     json jobs = json::array();

@@ -133,6 +133,20 @@ Label::Label(std::string_view what, bool wantStack) {
 }
 Label::~Label() { WriteLabel({}, true); }
 
+size_t CopyLabel(char* out, size_t size) {
+  if (size == 0)
+    return 0;
+  size_t n = 0;
+  for (; n + 1 < size && n < kLabelSize; ++n) {
+    const char c = g_label[n].load(std::memory_order_relaxed);
+    if (c == '\0')
+      break;
+    out[n] = c;
+  }
+  out[n] = '\0';
+  return n;
+}
+
 StallDetector::Event StallDetector::Observe(uint64_t beat, double now) {
   // Nothing counts until the loop has beaten once: start-up is not a stall.
   if (!m_armed) {
