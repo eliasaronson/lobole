@@ -69,6 +69,8 @@ SYSTEM_SONAMES = {
     "libc", "libm", "libdl", "libutil", "libpthread", "librt", "libresolv",
     "libstdc++", "libgcc_s", "libatomic",
     "libX11", "libxcb", "libdbus-1",
+    # The sanitizer runtimes of a --asan/--tsan build, which is never shipped.
+    "libasan", "libubsan", "libtsan", "liblsan",
 }
 
 # Linked, not vendored, and each has a row in THIRD_PARTY.md's
