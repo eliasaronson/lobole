@@ -8,6 +8,7 @@
 #include "core/Angles.h"
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/FrameFeature.h"
+#include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchProfile.h" // SegmentIntersect
 #include "core/sketch/SketchSolver.h"
 #include "core/sketch/SketchText.h"
@@ -1262,16 +1263,32 @@ bool SketchFeature::Execute(RegenContext& ctx) {
   // refreshed from the parameter table by Document::Regenerate (via
   // VisitExprs); re-solve so the rest of the sketch follows (the driven
   // coordinates themselves are solver-fixed and cannot move).
+  //
+  // The stored geometry was solved for the dimensions' previous values, so
+  // what it measures is each one's old value, and the refreshed `value` its
+  // new one: a value edit, solved without turning the sketch over
+  // (docs/sketching/README.md#solving). Expression-driven coordinates are
+  // already written into the entities, so they keep the one jump -- whose
+  // result is still checked for a flip.
   if (constraints.empty())
     solver.Load(*this); // otherwise loaded above, from the same entities
-  const sketch::SolveResult result = solver.Solve();
-  if (!result.ok) {
+  std::vector<sketch::ValueChange> changes;
+  for (size_t k = 0; k < constraints.size(); k++) {
+    const sketch::Constraint& c = constraints[k];
+    if (!sketch::IsDimension(c.kind) || c.valueExpr.empty())
+      continue;
+    if (const auto from = sketch::MeasureDimension(entities, c))
+      if (*from != c.value)
+        changes.push_back({k, *from, c.value});
+  }
+  const sketch::EditOutcome edit = solver.SolveValueEdit(changes);
+  if (!edit.Accepted()) {
     // Keep the last good entity positions instead of failing the history —
     // the conflict is the user's to resolve, downstream features can still
-    // consume the previous geometry.
-    LOG_WARN("Sketch '{}': expression-driven solve failed, keeping previous "
-             "geometry",
-             GetName());
+    // consume the previous geometry — and say so, so the edit that caused
+    // it (set_variable's regen) names the sketch and the dimension.
+    const std::string why = edit.refusal + ", keeping the previous geometry";
+    SetWarning(GetWarning().empty() ? why : GetWarning() + "; " + why);
     return true;
   }
   solver.WriteBack(entities);

@@ -22,6 +22,28 @@ struct SolveResult {
   std::vector<size_t> redundantConstraints;
 };
 
+// One dimension's value edit: constraint `constraint` goes from `from` (what
+// the geometry the solver was loaded with measures, MeasureDimension) to `to`
+// (the value the loaded sketch carries), both in the constraint's own units
+// (radians for an angle, the diameter for a diameter).
+struct ValueChange {
+  size_t constraint = 0;
+  double from = 0.0, to = 0.0;
+};
+
+// What SolveValueEdit did. Accepted (`refusal` empty) = the new values were
+// solved and no clear orientation turned over; the solver then holds the new
+// geometry. Refused = the solver holds the pre-edit geometry again, and
+// `refusal` says why in the words every edit path shows
+// (docs/sketching/README.md#solving).
+struct EditOutcome {
+  SolveResult solve;
+  std::vector<size_t> flipped; // constraints whose orientation turned over
+  bool reached = false;        // the new values were solved
+  std::string refusal;
+  bool Accepted() const { return refusal.empty(); }
+};
+
 // Adapter around PlaneGCS: maps a SketchFeature's entities (points, lines,
 // circles, arcs, ellipses, ellipse arcs, B-splines, and a text label's anchor
 // with its box corners riding it) and constraints to the solver, solves, and
@@ -37,6 +59,19 @@ public:
   void Load(const SketchFeature& sketch);
 
   SolveResult Solve();
+
+  // Solves a value edit without turning the sketch over. Call after Load on
+  // the sketch carrying the new values, seeded with the pre-edit geometry.
+  // One jump first; when that fails or turns a triangle of distances or an
+  // arc's sweep over (SketchOrientation.h), the changed dimensions step from
+  // their old values to the new ones (continuation), each step keeping every
+  // orientation that was clear where it started. An empty `changes` (values
+  // already in the entities, as expression-driven coordinates are) is the
+  // one jump and the check.
+  EditOutcome SolveValueEdit(const std::vector<ValueChange>& changes);
+
+  // Test hook: how many solves this solver has run.
+  int SolveCount() const;
 
   // --- Interactive drag session (FreeCAD moveGeometry recipe) --------------
   // Built once per drag: after Load(), Begin* pins the dragged element with a
@@ -55,8 +90,12 @@ public:
   bool BeginRadiusDrag(uint32_t circleId);
   void SetRadiusTarget(double radius);
 
-  // Re-solve with the current drag target(s); no reload/redeclare.
-  SolveResult SolveDrag();
+  // Re-solve with the current drag target(s); no reload/redeclare. Guarded,
+  // a frame that would turn a clear orientation over (against the last
+  // frame) retries with the target stepped from the last frame's, halving,
+  // and keeps the furthest step that holds: the geometry stops at the fold.
+  enum class DragGuard { Orientations, None };
+  SolveResult SolveDrag(DragGuard guard = DragGuard::Orientations);
 
   // Copies solved coordinates into a copy of the sketch's entities.
   void WriteBack(std::vector<Entity>& entities) const;

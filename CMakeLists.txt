@@ -408,6 +408,7 @@ set(core_sources
     src/core/features/SketchFeature.cpp
     src/core/sketch/SketchProfile.cpp
     src/core/sketch/SketchInference.cpp
+    src/core/sketch/SketchOrientation.cpp
     src/core/sketch/SketchText.cpp
     src/core/sketch/SketchSelection.cpp
     src/core/features/ExtrudeFeature.cpp

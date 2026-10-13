@@ -18,6 +18,7 @@
 #include "core/features/ThreadFeature.h"
 #include "core/features/WormFeature.h"
 #include "core/io/Serialization.h"
+#include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchSolver.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteInspection.h" // PrintedThreadJson
@@ -361,7 +362,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "It keeps its IDENTITY: omit \"id\" INSIDE the feature and it keeps the "
      "one it has, so references to it (sketch_id, mates, drawing dimensions) "
      "keep resolving. Pass a different \"id\" there only to mean 'this is a "
-     "different feature now', which deliberately dangles those references.",
+     "different feature now', which deliberately dangles those references. "
+     "A Sketch whose dimension values changed is re-solved from its current "
+     "geometry; a value that cannot be met, or that would mirror a triangle "
+     "of distances or turn an arc inside out, is refused naming the "
+     "dimension, and the document is unchanged.",
      "feature:object, feature_id?:int>=0, index?:int>=0, "
      "expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},
@@ -1281,24 +1286,27 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (const auto* oldSk = dynamic_cast<const SketchFeature*>(feature)) {
       auto built = DocumentIO::FeatureFromJson(after);
       auto* newSk = dynamic_cast<SketchFeature*>(built.get());
-      bool changed = false;
+      // Each changed dimension steps from what the geometry it is sent
+      // with measures (so a flip of the refs reads as one) to its new
+      // value, and an edit that would turn the sketch over is refused
+      // (docs/sketching/README.md#solving).
+      std::vector<sketch::ValueChange> changes;
       if (newSk != nullptr &&
           newSk->constraints.size() == oldSk->constraints.size())
         for (size_t c = 0; c < newSk->constraints.size(); c++)
-          changed =
-              changed ||
-              (sketch::IsDimension(newSk->constraints[c].kind) &&
-               newSk->constraints[c].value != oldSk->constraints[c].value);
-      if (changed) {
+          if (sketch::IsDimension(newSk->constraints[c].kind) &&
+              newSk->constraints[c].value != oldSk->constraints[c].value) {
+            const auto from = sketch::MeasureDimension(*newSk, c);
+            changes.push_back({c, from.value_or(oldSk->constraints[c].value),
+                               newSk->constraints[c].value});
+          }
+      if (!changes.empty()) {
         newSk->plane = oldSk->plane; // the resolved plane, for the solve
         sketch::Solver solver;
         solver.Load(*newSk);
-        const sketch::SolveResult r = solver.Solve();
-        if (!r.ok)
-          throw std::runtime_error(
-              "the sketch does not solve with those dimension values (the "
-              "dimensions conflict or cannot be met); the document is "
-              "unchanged");
+        const sketch::EditOutcome r = solver.SolveValueEdit(changes);
+        if (!r.Accepted())
+          throw std::runtime_error(r.refusal + "; the document is unchanged");
         solver.WriteBack(newSk->entities);
         const json solved = DocumentIO::FeatureToJson(*newSk);
         after["entities"] = solved.at("entities");

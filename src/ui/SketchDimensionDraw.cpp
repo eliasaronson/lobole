@@ -12,6 +12,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchInference.h"
+#include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSelection.h"
 #include "core/sketch/SketchSolver.h"
@@ -123,7 +124,9 @@ bool ReflectPLPoint(SketchFeature& sk, const sketch::Constraint& con) {
 }
 
 // Commits an edited dimension value: sets it (plus the optional driving
-// expression, empty = literal), re-solves, one undo record.
+// expression, empty = literal), re-solves, one undo record. A value that
+// cannot be met, or would turn the sketch over (Solver::SolveValueEdit), is
+// refused: nothing changes and the prompt bar says why ("Not changed: …").
 //
 // A NEGATIVE value flips the dimension's direction (the usual CAD
 // convention) instead of being stored: signed kinds (DistanceX/Y, Angle)
@@ -141,9 +144,9 @@ void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
     return;
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
   sketch::Constraint& con = sketch.constraints[dimIdx];
+  const sketch::Constraint oldCon = con; // a refused edit restores it
+  const std::vector<sketch::Entity> oldEntities = sketch.entities;
   using K = sketch::ConstraintKind;
-  std::vector<sketch::Entity> preSolve; // reflection seed rollback (below)
-  bool reflected = false;
   if (value < 0.0) {
     switch (con.kind) {
     case K::DistanceX:
@@ -155,8 +158,7 @@ void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
       }
       break; // expression: raw signed value (see above)
     case K::DistancePL:
-      preSolve = sketch.entities;
-      reflected = ReflectPLPoint(sketch, con);
+      ReflectPLPoint(sketch, con);
       if (expr.empty())
         value = -value; // GCS abs()es the magnitude; store it positive
       break;
@@ -166,17 +168,24 @@ void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
       break; // expression: raw value; the solver clamps unsigned kinds
     }
   }
+  // The orientations are read from this seed -- after the ref swap and the
+  // reflection -- so a flip the user asked for is the side that is kept.
+  const auto from = sketch::MeasureDimension(sketch.entities, con);
   con.value = value;
   con.valueExpr = expr;
   sketch::Solver solver;
   solver.Load(sketch);
-  if (solver.Solve().ok) {
-    solver.WriteBack(sketch.entities);
-  } else if (reflected) {
-    // The flip couldn't solve (over-constrained): drop the reflection seed
-    // so the geometry isn't left at the hand-placed mirror position.
-    sketch.entities = std::move(preSolve);
+  const sketch::EditOutcome edit = solver.SolveValueEdit(
+      {{static_cast<size_t>(dimIdx), from.value_or(oldCon.value), value}});
+  if (!edit.Accepted()) {
+    // Refused: the old value, expression, refs and geometry, and no undo
+    // record (docs/sketching/README.md#solving).
+    con = oldCon;
+    sketch.entities = oldEntities;
+    state.sketchEdit.actionMsg = "Not changed: " + edit.refusal;
+    return;
   }
+  solver.WriteBack(sketch.entities);
   sketch.RegenerateDerived();
   state.document->Regenerate();
   nlohmann::json after = DocumentIO::FeatureToJson(sketch);

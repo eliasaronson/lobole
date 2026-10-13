@@ -4,10 +4,13 @@
 #include "core/sketch/SketchSolver.h"
 
 #include "common/Logger.h"
+#include "core/Angles.h"
+#include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchText.h"
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <deque>
 #include <map>
 #include <optional>
@@ -259,6 +262,80 @@ struct Solver::Impl {
   int nextHoldTag = -2; // -1 is PlaneGCS's own temporary tag
   int NewHoldTag() { return hardHolds ? 0 : nextHoldTag--; }
 
+  // The solver parameter that holds each dimension's value (null for a
+  // constraint that is not one, or was refused): what a value edit steps.
+  struct ValueSlot {
+    double* p = nullptr;
+    bool absolute = false; // the solver reads |value|
+    double scale = 1.0;    // a diameter's slot holds the radius
+  };
+  std::vector<ValueSlot> valueSlots;
+  std::vector<Constraint> constraints; // as loaded, for orientations
+  std::optional<std::vector<Orientation>> orientations;
+  int solveCount = 0;
+
+  // The drag guard: the last accepted frame's orientations, targets and
+  // unknowns (SolveDrag).
+  std::vector<int> dragSigns;
+  std::vector<double> dragPrevTarget;
+  std::vector<double> dragPrevRadius;
+
+  using Snapshot = std::vector<std::pair<double*, double>>;
+  Snapshot dragState;
+  Snapshot Take() {
+    Snapshot s;
+    for (double* p : AllUnknowns())
+      s.emplace_back(p, *p);
+    return s;
+  }
+  static void Put(const Snapshot& s) {
+    for (const auto& [p, v] : s)
+      *p = v;
+  }
+
+  void SetSlot(const ValueChange& c, double value) {
+    const ValueSlot& slot = valueSlots[c.constraint];
+    *slot.p = (slot.absolute ? std::abs(value) : value) * slot.scale;
+  }
+
+  bool PointHeld(const PointRef& r) const {
+    const auto it = pointIndex.find(Key(r.entity, r.which));
+    if (it == pointIndex.end())
+      return true; // nothing the solver moves
+    const GCS::Point& gp = gcsPoints[static_cast<size_t>(it->second)];
+    return fixedParams.count(gp.x) && fixedParams.count(gp.y);
+  }
+  const std::vector<Orientation>& Orientations() {
+    if (!orientations)
+      orientations =
+          FindOrientations(entityShapes, constraints,
+                           [this](const PointRef& r) { return PointHeld(r); });
+    return *orientations;
+  }
+  // The orientations' signs in the solver's current values.
+  std::vector<int> Signs() {
+    if (Orientations().empty())
+      return {};
+    std::vector<Entity> now;
+    WriteBackTo(now);
+    return OrientationSigns(Orientations(), now);
+  }
+  // The orientations clear in `before` that are not the same in `after`.
+  static std::vector<size_t> Turned(const std::vector<int>& before,
+                                    const std::vector<int>& after) {
+    std::vector<size_t> out;
+    for (size_t i = 0; i < before.size() && i < after.size(); i++)
+      if (before[i] != 0 && after[i] != 0 && after[i] != before[i])
+        out.push_back(i);
+    return out;
+  }
+  void ResetDragGuard() {
+    dragSigns = Signs();
+    dragPrevTarget.assign(dragTarget.begin(), dragTarget.end());
+    dragPrevRadius.assign(dragRadiusTarget.begin(), dragRadiusTarget.end());
+    dragState = Take();
+  }
+
   void LoadFrom(const SketchFeature& sketch,
                 const std::vector<Entity>& entities);
   void WriteBackTo(std::vector<Entity>& entities) const;
@@ -388,6 +465,7 @@ struct Solver::Impl {
     SolveResult result;
     // Trivial when nothing is free to solve: the datum origin/axes are always
     // registered but fixed.
+    solveCount++;
     if (AllUnknowns().empty()) {
       result.ok = true;
       result.dof = 0;
@@ -687,6 +765,8 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
   // adds nothing is REFUSED with its reason (UnsupportedConstraints).
   int tag = 1;
   im.constraintFirstTag.assign(sketch.constraints.size() + 1, 0);
+  im.constraints = sketch.constraints;
+  im.valueSlots.assign(sketch.constraints.size(), {});
   const auto isLine = [&](uint32_t id) { return im.lineOf.count(id) != 0; };
   const auto isCircle = [&](uint32_t id) { return im.circleOf.count(id) != 0; };
   const auto isArc = [&](uint32_t id) { return im.arcOf.count(id) != 0; };
@@ -705,6 +785,7 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
     GCS::Point* a = im.Resolve(con.a);
     GCS::Point* b = im.Resolve(con.b);
     std::string why; // set = refused, naming what was given
+    const size_t paramsBefore = im.params.size();
     const auto describe = [&](const PointRef& r) -> std::string {
       if (IsDatum(r.entity))
         return r.entity == kOrigin ? "the origin" : "a datum axis";
@@ -1033,6 +1114,15 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
     if (!why.empty())
       im.unsupported.push_back({k, std::string(KindWord(con.kind)) + " takes " +
                                        Accepts(con.kind) + "; " + why});
+    else if (IsDimension(con.kind) && im.params.size() > paramsBefore) {
+      // Each dimension case pushes its value last.
+      using K = ConstraintKind;
+      im.valueSlots[k].p = &im.params.back();
+      im.valueSlots[k].absolute = con.kind == K::Distance ||
+                                  con.kind == K::Radius ||
+                                  con.kind == K::Diameter;
+      im.valueSlots[k].scale = con.kind == K::Diameter ? 0.5 : 1.0;
+    }
   }
   im.constraintFirstTag.back() = tag; // upper bound for the last constraint
   im.dragTag = tag;
@@ -1124,6 +1214,159 @@ SolveResult Solver::Solve() {
   Impl& im = *m_impl;
   im.DeclareUnknowns();
   return im.RunSolve();
+}
+
+int Solver::SolveCount() const { return m_impl->solveCount; }
+
+namespace {
+// Continuation steps in sixty-fourths of the edit, this many solves at most.
+// A step re-solves from the last one without reloading, so it is cheap next
+// to the load's own diagnosis: forced into continuation, the largest
+// sketches under scratch/ (51 constraints; 981 entities) cost what a plain
+// load and solve does, and the cases in tests/test_sketch_solver.cpp [flip]
+// take under 25 solves, an unreachable value included.
+constexpr int kEditSteps = 64;
+constexpr int kEditSolveBudget = 160;
+
+std::string FormatValue(ConstraintKind k, double v) {
+  char buf[64];
+  if (k == ConstraintKind::Angle)
+    std::snprintf(buf, sizeof buf, "%g deg", angles::ToDegrees(v));
+  else
+    std::snprintf(buf, sizeof buf, "%g", v);
+  return buf;
+}
+
+// The refusal text every value-edit path shows: the dimension, and what
+// its new value would do.
+std::string RefusalText(const std::vector<Constraint>& constraints,
+                        const std::vector<ValueChange>& changes,
+                        const Orientation* turned) {
+  const ValueChange* named = changes.empty() ? nullptr : &changes.front();
+  if (turned != nullptr)
+    for (const ValueChange& c : changes)
+      if (std::binary_search(turned->constraints.begin(),
+                             turned->constraints.end(), c.constraint)) {
+        named = &c;
+        break;
+      }
+  std::string out = "the new values";
+  if (named != nullptr) {
+    const Constraint& con = constraints[named->constraint];
+    out = std::string(KindWord(con.kind)) + " (constraint " +
+          std::to_string(named->constraint) +
+          ") = " + FormatValue(con.kind, con.value);
+  }
+  if (turned == nullptr)
+    return out + " cannot be met";
+  if (turned->kind == Orientation::Kind::ArcSweep)
+    return out + " would turn arc " + std::to_string(turned->arc) +
+           " inside out";
+  out += " would mirror the triangle of constraints ";
+  for (size_t i = 0; i < turned->constraints.size(); i++)
+    out += (i ? ", " : "") + std::to_string(turned->constraints[i]);
+  return out;
+}
+} // namespace
+
+EditOutcome Solver::SolveValueEdit(const std::vector<ValueChange>& asked) {
+  Impl& im = *m_impl;
+  EditOutcome out;
+  // Only the dimensions the solver holds a value for can step; an angle
+  // steps from the turn nearest its new value.
+  std::vector<ValueChange> changes;
+  for (ValueChange c : asked) {
+    if (c.constraint >= im.valueSlots.size() ||
+        im.valueSlots[c.constraint].p == nullptr)
+      continue;
+    if (im.constraints[c.constraint].kind == ConstraintKind::Angle)
+      c.from = c.to + std::remainder(c.from - c.to, 2.0 * M_PI);
+    changes.push_back(c);
+  }
+
+  im.DeclareUnknowns();
+  const Impl::Snapshot pre = im.Take();
+  const std::vector<int> s0 = im.Signs();
+
+  // One jump: an ordinary edit costs one solve and the check.
+  out.solve = im.RunSolve();
+  std::vector<size_t> turned;
+  if (out.solve.ok) {
+    turned = Impl::Turned(s0, im.Signs());
+    if (turned.empty()) {
+      out.reached = true;
+      return out;
+    }
+  }
+
+  // Continuation from the pre-edit geometry and the old values, in
+  // sixty-fourths of the edit: side lengths stepped linearly never pass a
+  // flat triangle, and each step keeps what was clear where it started.
+  const auto continueAlong = [&]() {
+    Impl::Put(pre);
+    for (const ValueChange& c : changes)
+      im.SetSlot(c, c.from);
+    im.sys.initSolution(); // the reference every solve starts from
+    const auto valueAt = [&](const ValueChange& c, int tn) {
+      if (tn == kEditSteps)
+        return c.to;
+      const double f = static_cast<double>(tn) / kEditSteps;
+      return c.from + (c.to - c.from) * f;
+    };
+    Impl::Snapshot at = pre;
+    std::vector<int> signsAt = s0;
+    int t = 0, step = kEditSteps / 2, budget = kEditSolveBudget;
+    turned.clear();
+    while (t < kEditSteps && step >= 1 && budget-- > 0) {
+      const int tn = std::min(kEditSteps, t + step);
+      for (const ValueChange& c : changes)
+        im.SetSlot(c, valueAt(c, tn));
+      const SolveResult r = im.RunSolve();
+      std::vector<int> signs;
+      std::vector<size_t> tr;
+      if (r.ok) {
+        signs = im.Signs();
+        tr = Impl::Turned(signsAt, signs);
+      }
+      if (r.ok && tr.empty()) {
+        t = tn;
+        signsAt = std::move(signs);
+        at = im.Take();
+        im.sys.initSolution();
+        step *= 2;
+        out.solve = r;
+      } else {
+        turned = std::move(tr);
+        if (!r.ok)
+          out.solve = r;
+        Impl::Put(at);
+        im.sys.undoSolution();
+        step /= 2;
+      }
+    }
+    for (const ValueChange& c : changes)
+      im.SetSlot(c, c.to);
+    return t == kEditSteps;
+  };
+  if (!changes.empty() && continueAlong()) {
+    out.reached = true;
+    return out;
+  }
+
+  // Refused: the pre-edit geometry again.
+  Impl::Put(pre);
+  if (out.solve.ok && turned.empty())
+    out.solve.ok = false; // ran out of steps short of the new values
+  const std::vector<Orientation>& orients = im.Orientations();
+  std::set<size_t> flipped;
+  for (size_t i : turned)
+    flipped.insert(orients[i].constraints.begin(),
+                   orients[i].constraints.end());
+  out.flipped.assign(flipped.begin(), flipped.end());
+  out.refusal =
+      RefusalText(im.constraints, changes,
+                  turned.empty() ? nullptr : &orients[turned.front()]);
+  return out;
 }
 
 std::vector<uint32_t> Solver::UnderDefinedEntities() const {
@@ -1220,7 +1463,9 @@ bool Solver::BeginDrag(const std::vector<PointRef>& points) {
     im.dragTargetBase[i] = base;
   }
   im.DeclareUnknowns();
-  return im.RunSolve().conflicting.empty();
+  const bool ok = im.RunSolve().conflicting.empty();
+  im.ResetDragGuard();
+  return ok;
 }
 
 void Solver::SetDragTargets(const std::vector<glm::dvec2>& targets) {
@@ -1245,7 +1490,9 @@ bool Solver::BeginRadiusDrag(uint32_t circleId) {
       im.circles[it->second], &im.dragRadiusTarget[0], im.dragTag++);
   im.sys.rescaleConstraint(cid, 0.01);
   im.DeclareUnknowns();
-  return im.RunSolve().conflicting.empty();
+  const bool ok = im.RunSolve().conflicting.empty();
+  im.ResetDragGuard();
+  return ok;
 }
 
 void Solver::SetRadiusTarget(double radius) {
@@ -1254,7 +1501,63 @@ void Solver::SetRadiusTarget(double radius) {
     im.dragRadiusTarget[0] = radius;
 }
 
-SolveResult Solver::SolveDrag() { return m_impl->RunSolve(); }
+SolveResult Solver::SolveDrag(DragGuard guard) {
+  Impl& im = *m_impl;
+  SolveResult r = im.RunSolve();
+  if (guard == DragGuard::None || !r.ok)
+    return r;
+  std::vector<int> signs = im.Signs();
+  const auto accept = [&](std::vector<int> s) {
+    im.dragSigns = std::move(s);
+    im.dragPrevTarget.assign(im.dragTarget.begin(), im.dragTarget.end());
+    im.dragPrevRadius.assign(im.dragRadiusTarget.begin(),
+                             im.dragRadiusTarget.end());
+    im.dragState = im.Take();
+  };
+  if (Impl::Turned(im.dragSigns, signs).empty()) {
+    accept(std::move(signs));
+    return r;
+  }
+  // A fold: step the target from the last frame's, halving, from the last
+  // frame's geometry, and keep the furthest step that holds.
+  const std::vector<double> wanted(im.dragTarget.begin(), im.dragTarget.end());
+  const std::vector<double> wantedR(im.dragRadiusTarget.begin(),
+                                    im.dragRadiusTarget.end());
+  const std::vector<double> fromT = im.dragPrevTarget;
+  const std::vector<double> fromR = im.dragPrevRadius;
+  const auto setTargets = [&](double f) {
+    for (size_t i = 0; i < wanted.size() && i < fromT.size(); i++)
+      im.dragTarget[i] = fromT[i] + (wanted[i] - fromT[i]) * f;
+    for (size_t i = 0; i < wantedR.size() && i < fromR.size(); i++)
+      im.dragRadiusTarget[i] = fromR[i] + (wantedR[i] - fromR[i]) * f;
+  };
+  Impl::Put(im.dragState);
+  im.sys.initSolution();
+  int t = 0, step = kEditSteps / 2, budget = kEditSolveBudget;
+  while (t < kEditSteps && step >= 1 && budget-- > 0) {
+    const int tn = std::min(kEditSteps, t + step);
+    setTargets(static_cast<double>(tn) / kEditSteps);
+    const SolveResult rr = im.RunSolve();
+    std::vector<int> s;
+    if (rr.ok)
+      s = im.Signs();
+    if (rr.ok && Impl::Turned(im.dragSigns, s).empty()) {
+      t = tn;
+      accept(std::move(s));
+      im.sys.initSolution();
+      step *= 2;
+      r = rr;
+    } else {
+      Impl::Put(im.dragState);
+      im.sys.undoSolution();
+      step /= 2;
+    }
+  }
+  setTargets(static_cast<double>(t) / kEditSteps);
+  Impl::Put(im.dragState);
+  r.ok = true; // the geometry holds where the fold stopped it
+  return r;
+}
 
 namespace {
 // The solved value, unless it moved by no more than rounding (1e-12 of the
@@ -1335,9 +1638,10 @@ void Solver::Impl::WriteBackTo(std::vector<Entity>& entities) const {
       ar.radius = *ga.rad;
       ar.startAngle = *ga.startAngle;
       ar.endAngle = *ga.endAngle;
-      // Keep the CCW-always invariant: sweep in (0, 2π].
-      while (ar.endAngle <= ar.startAngle)
-        ar.endAngle += 2.0 * M_PI;
+      // Keep the CCW-always invariant: sweep in (0, 2π]. (The arc rules
+      // read the angles through cos/sin, so a long solve can leave them a
+      // whole turn further apart than the arc is.)
+      NormalizeSweep(ar.startAngle, ar.endAngle);
     } else if (std::holds_alternative<EllipseArc>(e)) {
       auto& ea = std::get<EllipseArc>(e);
       ellipseBack(ea);
@@ -1384,7 +1688,14 @@ bool Solver::BeginDrag(const std::vector<PointRef>&) { return false; }
 void Solver::SetDragTargets(const std::vector<glm::dvec2>&) {}
 bool Solver::BeginRadiusDrag(uint32_t) { return false; }
 void Solver::SetRadiusTarget(double) {}
-SolveResult Solver::SolveDrag() { return {true, -1, {}, {}}; }
+SolveResult Solver::SolveDrag(DragGuard) { return {true, -1, {}, {}}; }
+EditOutcome Solver::SolveValueEdit(const std::vector<ValueChange>&) {
+  EditOutcome out;
+  out.solve = Solve();
+  out.reached = true;
+  return out;
+}
+int Solver::SolveCount() const { return 0; }
 std::vector<uint32_t> Solver::UnderDefinedEntities() const { return {}; }
 const std::vector<Solver::Unsupported>& Solver::UnsupportedConstraints() const {
   return m_impl->unsupported;
