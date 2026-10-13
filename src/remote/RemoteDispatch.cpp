@@ -129,8 +129,18 @@ using remote::Vec3ToJson;
 // heavy pen, both well inside every device's line range at 4x.
 static constexpr double kMinLineWeight = 0.25, kMaxLineWeight = 4.0;
 
-// Levenshtein distance, for the "did you mean" hint on a rejected param key.
-size_t EditDistance(const std::string& a, const std::string& b) {
+// Levenshtein distance, for the "did you mean" hint on a rejected param key,
+// or `cap + 1` once it is known to be past `cap`. The distance is at least the
+// difference in length, so a name far longer than every candidate costs
+// nothing: a 64 KiB method name against every method name was half a billion
+// steps, and describe stalled the main thread (the hostile sweep, under
+// ASan).
+size_t EditDistance(const std::string& a, const std::string& b,
+                    size_t cap = std::numeric_limits<size_t>::max()) {
+  const size_t gap =
+      a.size() > b.size() ? a.size() - b.size() : b.size() - a.size();
+  if (gap > cap)
+    return cap + 1;
   std::vector<size_t> prev(b.size() + 1), cur(b.size() + 1);
   for (size_t j = 0; j <= b.size(); j++)
     prev[j] = j;
@@ -153,7 +163,7 @@ CloseNames(const std::string& name, const std::vector<std::string>& pool) {
   std::vector<std::pair<size_t, std::string>> scored;
   const size_t within = std::max<size_t>(2, name.size() / 3);
   for (const std::string& k : pool) {
-    const size_t d = EditDistance(name, k);
+    const size_t d = EditDistance(name, k, within);
     const bool contains =
         name.size() >= 3 && (k.find(name) != std::string::npos ||
                              name.find(k) != std::string::npos);
@@ -207,7 +217,7 @@ std::string UnknownParamError(const std::string& method,
     std::string best;
     size_t bestDist = 3; // only suggest a genuinely near miss
     for (const std::string& k : accepted) {
-      const size_t d = EditDistance(unknown[i], k);
+      const size_t d = EditDistance(unknown[i], k, bestDist);
       if (d < bestDist) {
         bestDist = d;
         best = k;
