@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -58,8 +59,23 @@ struct DerivedStep {
   uint64_t sourceCreatedBy = 0; // the source body's created_by
 };
 
+// A split piece's last qualifier (docs/modeling/toponaming.md#split-pieces):
+// "<stem>[a|b]" and "<stem>[a|b].<i>", or a positional "<stem>.<i>" (a step
+// ";M<tag>.<i>"/";G<tag>.<i>"). `of` is the name with that qualifier taken
+// out, `boundedBy` the bracket's names, `index` the ordinal or -1.
+struct PieceName {
+  bool piece = false;     // the name carries a piece qualifier or an ordinal
+  bool qualified = false; // ...a bracketed qualifier, "[a|b]"
+  std::string of;         // the name it is a piece of
+  std::vector<std::string> boundedBy; // the neighbours that tell it apart
+  bool ordinal = false;               // told apart (also) by position: ".<i>"
+  int index = -1;                     // that position
+  uint64_t splitBy = 0;               // the M or G step's feature that split it
+};
+
 struct ElementOrigin {
   bool ok = false; // the name parsed
+  PieceName piece; // set when the name is a piece of a split
   // Derived copies the element came in through, outermost first; `madeBy`
   // and every id below are then ids in the innermost SOURCE document.
   std::vector<DerivedStep> derived;
@@ -74,6 +90,30 @@ struct ElementOrigin {
 };
 
 ElementOrigin DecodeElementName(const std::string& name);
+
+// The one tokenizer of the grammar: `name` split into its ';' steps, a
+// bracketed piece qualifier kept whole inside its step (its neighbours'
+// names carry ';', ',', '/' and '#' of their own, and are opaque).
+std::vector<std::string> NameSteps(const std::string& name);
+
+// `name` with every bracketed qualifier removed, the brackets included.
+std::string WithoutQualifiers(const std::string& name);
+
+// `name` with every piece qualifier AND piece ordinal removed: what a
+// neighbour enters a qualifier as, so names nest one level at most.
+std::string PieceStem(const std::string& name);
+
+// The last piece qualifier of `name` (PieceName); `piece` false when none.
+PieceName ParsePiece(const std::string& name);
+
+// How a current name `later` descends from a stored `name` through history:
+// not at all; by whole ";M<tag>" steps, unsplit -- the same face, modified by
+// later features; by such steps where one input became several
+// (";M<tag>[...]" or ";M<tag>.<i>"), `splitBy` the first feature that split
+// it; or through some other step.
+enum class Descent { None, Modified, Split, Other };
+Descent DescentOf(const std::string& name, const std::string& later,
+                  uint64_t* splitBy = nullptr);
 
 // Every feature id the name mentions, in this document: each comma part's
 // leading id (the outermost Derived feature or the seed) and every M and G

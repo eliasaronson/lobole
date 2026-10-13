@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/features/SketchFeature.h"
+#include "core/ElementHistory.h"
 
 #include "common/Logger.h"
 #include "core/Angles.h"
@@ -1094,7 +1095,11 @@ bool SketchFeature::RegenerateExternal(const RegenContext& ctx) {
       return false;
     }
     if (body == nullptr) {
-      SetError("external geometry '" + ext.ref.name + "' no longer exists");
+      SetError(topo::UnresolvedReason(ctx, ext.ref,
+                                      ext.kind == sketch::ExternalKind::Face
+                                          ? topo::ElementKind::Face
+                                          : topo::ElementKind::Edge,
+                                      "external geometry"));
       return false;
     }
     std::vector<sketch::Entity> proj =
@@ -1152,7 +1157,8 @@ bool SketchFeature::Execute(RegenContext& ctx) {
   if (faceRef.IsSet()) {
     const auto p = ResolveFacePlane(ctx, faceRef);
     if (!p) {
-      SetError("attached face '" + faceRef.name + "' no longer exists");
+      SetError(topo::UnresolvedReason(ctx, faceRef, topo::ElementKind::Face,
+                                      "attached face"));
       return false;
     }
     plane = *p;

@@ -302,6 +302,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A piece of a face or edge one operation split is named by the faces only it touches, `<name>;M<tag>[a\|b]` (an ordinal `.<i>` only where nothing tells pieces apart), not by its position `<name>;M<tag>.<i>`; every reference saved after this holds such names. No migration: a saved `.<i>` name resolves to the piece it named, in result order, and the regeneration warns that it is by position ([split pieces](../modeling/toponaming.md#split-pieces)). Golden `vNEXT-split-piece-names` |
 
 ## The directory form
 

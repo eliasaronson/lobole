@@ -60,7 +60,8 @@ bool SplitFeature::Execute(RegenContext& ctx) {
     }
     const auto idx = body->elementMap.Resolve(face.name);
     if (!idx) {
-      SetError("the knife face '" + face.name + "' no longer exists");
+      SetError(topo::UnresolvedReason(ctx, face, topo::ElementKind::Face,
+                                      "the knife face"));
       return false;
     }
     glm::dvec3 uAxis;

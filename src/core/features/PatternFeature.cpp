@@ -58,19 +58,29 @@ struct SeedMarks {
 std::string CopyKey(const std::string& name, std::string* tag) {
   std::string out;
   tag->clear();
+  int depth = 0; // inside a piece qualifier, whose names are opaque
+  size_t step = std::string::npos;
   for (size_t i = 0; i < name.size();) {
-    if (name[i] != '#') {
+    const char c = name[i];
+    if (c == '[' || (c == ']' && depth > 0)) {
+      depth += c == '[' ? 1 : -1;
+      out += name[i++];
+      continue;
+    }
+    if (depth > 0 || c != '#') {
+      if (depth == 0 && step == std::string::npos && c == ';' &&
+          i + 1 < name.size() && name[i + 1] == 'M')
+        step = out.size();
       out += name[i++];
       continue;
     }
     size_t j = i + 1;
     while (j < name.size() && name[j] != ';' && name[j] != ',' &&
-           name[j] != '#')
+           name[j] != '#' && name[j] != '[')
       j++;
     *tag = name.substr(i + 1, j - i - 1);
     i = j;
   }
-  const size_t step = out.find(";M");
   if (step != std::string::npos)
     out.resize(step);
   return out;

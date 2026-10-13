@@ -58,6 +58,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -372,6 +373,36 @@ void OriginJson(const topo::ElementOrigin& o, json& row) {
       d.push_back(s.derivedId);
     row["derived"] = d;
   }
+}
+
+// A split piece's `piece` {of, bounded_by, ordinal}: the face or edge it is
+// a piece of, the neighbours that tell it apart, and whether its name is (also)
+// by position -- one a reorder of the pieces would move
+// (docs/modeling/toponaming.md#split-pieces). For the piece and what later
+// features modified it into (";M7" behind the qualifier), not for an edge
+// of a piece face (";U2" behind it), which is that face's.
+void PieceJson(const std::string& name, const topo::ElementOrigin& o,
+               json& row) {
+  if (!o.piece.piece)
+    return;
+  const std::vector<std::string> steps = topo::NameSteps(name);
+  const auto modification = [](const std::string& st) {
+    if (st.size() < 2 || (st[0] != 'M' && st[0] != 'G'))
+      return false;
+    for (size_t k = 1; k < st.size() && st[k] != '#'; k++)
+      if (!std::isdigit(static_cast<unsigned char>(st[k])))
+        return false;
+    return true;
+  };
+  size_t last = steps.size();
+  while (last > 1 && modification(steps[last - 1]))
+    last--;
+  if (last == 0 || steps[last - 1].find_first_of("[.") == std::string::npos ||
+      !(steps[last - 1][0] == 'M' || steps[last - 1][0] == 'G'))
+    return;
+  row["piece"] = {{"of", o.piece.of},
+                  {"bounded_by", o.piece.boundedBy},
+                  {"ordinal", o.piece.ordinal}};
 }
 
 // The part a design-intent edit (a tolerance, the print process) acts on:
@@ -1148,7 +1179,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "(a feature that names by index: shell, loft, sweep, import...) | "
      "boundary (named from its edges; no role) | pole | seam; plus "
      "`instance` for a pattern copy and `derived` for one come in through "
-     "Derived features. Filter by them: `made_by` (feature id or name; a "
+     "Derived features. A piece of a face or edge an operation split carries "
+     "`piece` {of (the name it is a piece of), bounded_by (the neighbours "
+     "that tell it apart, which its name holds as `[a|b]`), ordinal}: "
+     "ordinal true means the name is by POSITION (nothing else told the "
+     "pieces apart) and will not survive a reorder of them. Filter by them: "
+     "`made_by` (feature id or name; a "
      "Template instance stands for every feature it expanded into, and "
      "one of those ids is accepted on its own), "
      "`role` (also `floor` = end_cap, `walls` = side), `entity`, and `via` "
@@ -5201,6 +5237,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         matchedFaces++;
         json f = {{"index", idx}, {"name", name}};
         OriginJson(origin, f);
+        PieceJson(name, origin, f);
         if (const auto fi = Measure::DescribeFaceAt(bodies[i], idx)) {
           f["kind"] = fi->kind;
           f["area"] = fi->area;
@@ -5231,6 +5268,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         matchedEdges++;
         json e = {{"index", idx}, {"name", name}};
         OriginJson(origin, e);
+        PieceJson(name, origin, e);
         // The faces it joins, by name: "the edges where the top meets the
         // walls" is what a fillet or a chamfer is, and an edge's own name
         // comes from whichever face named it first, so it cannot say.

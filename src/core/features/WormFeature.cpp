@@ -48,7 +48,8 @@ bool ResolveBlank(RegenContext& ctx, const ElementRef& face, Blank& out,
   }
   const auto idx = body->elementMap.Resolve(face.name);
   if (!idx) {
-    why = "the blank's face '" + face.name + "' no longer exists";
+    why = topo::UnresolvedReason(ctx, face, topo::ElementKind::Face,
+                                 "the blank's face");
     return false;
   }
   TopoDS_Face occFace;

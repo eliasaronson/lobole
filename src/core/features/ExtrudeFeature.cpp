@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/features/ExtrudeFeature.h"
+#include "core/ElementHistory.h"
 
 #include "common/Logger.h"
 #include "core/Angles.h"
@@ -98,8 +99,9 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     }
     const auto target = ResolveFacePlane(ctx, endTarget);
     if (!target) {
-      SetError("target face '" + endTarget.name +
-               "' no longer exists (or is not planar)");
+      SetError(topo::UnresolvedReason(ctx, endTarget, topo::ElementKind::Face,
+                                      "target face") +
+               " (or is not planar)");
       return false;
     }
     // Signed sweep along the sketch normal to the target's plane — the sign

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/AssemblySolve.h"
+
 #include "core/Angles.h"
+#include "core/ElementOrigin.h"
 #include "core/ThreadStandards.h"
 #include "core/features/ThreadFeature.h"
 
@@ -446,46 +448,8 @@ std::string LoopHint(const LoopDiagnosis& d, const AssemblyDocument& asmDoc) {
              "their connectors";
 }
 
-// How a current face name `later` descends from a stored `name` through
-// history (docs/modeling/toponaming.md#naming-grammar): not at all; by whole
-// `;M<tag>` steps, unsplit — the same face, modified by later features; by
-// such steps where one input became several faces (`;M<tag>.<i>`), with
-// `splitBy` the feature that split it; or through some other step.
-enum class Descent { None, Modified, Split, Other };
-
-Descent DescentOf(const std::string& name, const std::string& later,
-                  uint64_t* splitBy = nullptr) {
-  if (later.size() <= name.size() || later.compare(0, name.size(), name) != 0 ||
-      later[name.size()] != ';')
-    return Descent::None;
-  const auto digits = [&](size_t& j) {
-    const size_t from = j;
-    while (j < later.size() &&
-           std::isdigit(static_cast<unsigned char>(later[j])) != 0)
-      ++j;
-    return j > from;
-  };
-  bool split = false;
-  size_t i = name.size();
-  while (i < later.size()) {
-    if (later[i] != ';' || i + 1 >= later.size() || later[i + 1] != 'M')
-      return Descent::Other;
-    size_t j = i + 2;
-    const size_t tagAt = j;
-    if (!digits(j))
-      return Descent::Other;
-    if (j < later.size() && later[j] == '.') {
-      if (!split && splitBy != nullptr)
-        *splitBy = std::stoull(later.substr(tagAt, j - tagAt));
-      split = true;
-      ++j;
-      if (!digits(j))
-        return Descent::Other;
-    }
-    i = j;
-  }
-  return split ? Descent::Split : Descent::Modified;
-}
+using topo::Descent;
+using topo::DescentOf;
 
 } // namespace
 

@@ -7,6 +7,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 // A persistent reference to a named face/edge of a feature's output body
 // (topological naming, T3). Stored in features that attach to geometry (e.g. a
@@ -51,23 +52,38 @@ struct ElementMap {
   // The current faceIndex a name resolves to, or nullopt if the name is gone
   // (its generating element was deleted). This is the toponaming lookup:
   // resolution failure is a first-class signal, not a silent renumber.
-  [[nodiscard]] std::optional<int> Resolve(const std::string& name) const {
-    for (const auto& [index, n] : names) {
-      if (n == name) {
-        return index;
-      }
-    }
-    return std::nullopt;
-  }
+  // Three steps (docs/modeling/toponaming.md#resolving-a-name): the exact
+  // name; else, for a split piece "<stem>[a|b]", the one current piece of
+  // <stem> bounded by a and b (or <stem> itself, when it is whole again);
+  // else, for a positional piece "<stem>.<i>" saved before pieces were
+  // named by their neighbours, the i-th piece of <stem> in result order --
+  // noted on any PositionalLookups alive on this thread, so the
+  // regeneration warns. Anything else does not resolve:
+  // topo::UnresolvedReason says why.
+  [[nodiscard]] std::optional<int> Resolve(const std::string& name) const;
 
   // The current edgeIndex a name resolves to, or nullopt if the name is gone
-  // (e.g. the edge was consumed by a fillet or boolean).
-  [[nodiscard]] std::optional<int> ResolveEdge(const std::string& name) const {
-    for (const auto& [index, n] : edgeNames) {
-      if (n == name) {
-        return index;
-      }
-    }
-    return std::nullopt;
+  // (e.g. the edge was consumed by a fillet or boolean). The same three
+  // steps as Resolve.
+  [[nodiscard]] std::optional<int> ResolveEdge(const std::string& name) const;
+};
+
+// Collects the names resolved BY POSITION (ElementMap::Resolve's third step)
+// on this thread while it is alive: what a regeneration turns into a warning
+// on the feature that holds the reference. Scopes nest; the innermost hears.
+class PositionalLookups {
+public:
+  PositionalLookups();
+  ~PositionalLookups();
+  PositionalLookups(const PositionalLookups&) = delete;
+  PositionalLookups& operator=(const PositionalLookups&) = delete;
+  [[nodiscard]] const std::vector<std::string>& Names() const {
+    return m_names;
   }
+  // Records `name` on the innermost live scope of this thread, if any.
+  static void Note(const std::string& name);
+
+private:
+  std::vector<std::string> m_names;
+  PositionalLookups* m_outer = nullptr;
 };

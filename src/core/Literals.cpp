@@ -617,8 +617,10 @@ constexpr double kOnPlane = 1e-5; // mm
 std::optional<std::string>
 NameBefore(const std::string& name,
            const std::function<bool(uint64_t)>& earlier) {
-  if (name.find('#') != std::string::npos ||
-      name.find(',') != std::string::npos)
+  // A piece qualifier's neighbours carry '#' and ',' of their own.
+  const std::string bare = topo::WithoutQualifiers(name);
+  if (bare.find('#') != std::string::npos ||
+      bare.find(',') != std::string::npos)
     return std::nullopt;
   const auto tagOf = [](const std::string& s, size_t from) -> uint64_t {
     uint64_t v = 0;
@@ -627,18 +629,14 @@ NameBefore(const std::string& name,
       v = v * 10 + static_cast<uint64_t>(s[i] - '0');
     return i == from ? 0 : v;
   };
-  size_t end = name.find(';');
-  const std::string seed = name.substr(0, end);
+  const std::vector<std::string> steps = topo::NameSteps(name);
+  const std::string& seed = steps.front();
   const uint64_t seedTag = tagOf(seed, 0);
   if (seedTag == 0 || !earlier(seedTag))
     return std::nullopt;
   std::string out = seed;
-  while (end != std::string::npos) {
-    const size_t next = name.find(';', end + 1);
-    const std::string step =
-        name.substr(end + 1, next == std::string::npos ? std::string::npos
-                                                       : next - end - 1);
-    end = next;
+  for (size_t s = 1; s < steps.size(); s++) {
+    const std::string& step = steps[s];
     if (step.empty())
       continue;
     const char kind = step[0];

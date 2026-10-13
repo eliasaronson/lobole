@@ -3,6 +3,9 @@
 
 #include "core/ElementOrigin.h"
 
+#include "core/ElementMap.h"
+
+#include <algorithm>
 #include <cctype>
 #include <optional>
 #include <utility>
@@ -209,6 +212,153 @@ bool DecodeSeed(const std::vector<std::string>& words, ElementOrigin& o) {
   return false;
 }
 
+// One step of a name, read as a piece of a split: "M<tag>", then a bracketed
+// qualifier and/or an ordinal ".<i>", then nothing, or a pattern suffix
+// ("#2") or the next comma part of an L name. `stripped` is the step with
+// the qualifier and ordinal taken out.
+struct PieceStep {
+  bool piece = false;
+  bool qualified = false;
+  std::string content; // the bracket's
+  int index = -1;
+  uint64_t tag = 0;
+  std::string stripped;
+};
+
+PieceStep ReadPieceStep(const std::string& st) {
+  PieceStep out;
+  out.stripped = st;
+  if (st.size() < 2 || (st[0] != 'M' && st[0] != 'G') ||
+      !std::isdigit(static_cast<unsigned char>(st[1])))
+    return out;
+  size_t j = 1;
+  uint64_t tag = 0;
+  while (j < st.size() && std::isdigit(static_cast<unsigned char>(st[j])))
+    tag = tag * 10 + static_cast<uint64_t>(st[j++] - '0');
+  const size_t head = j;
+  PieceStep p;
+  p.tag = tag;
+  if (j < st.size() && st[j] == '[') {
+    int depth = 0;
+    size_t k = j;
+    for (; k < st.size(); k++) {
+      if (st[k] == '[')
+        depth++;
+      else if (st[k] == ']' && --depth == 0)
+        break;
+    }
+    if (k >= st.size())
+      return out; // unbalanced: not a qualifier
+    p.qualified = true;
+    p.content = st.substr(j + 1, k - j - 1);
+    j = k + 1;
+  }
+  if (j + 1 < st.size() && st[j] == '.' &&
+      std::isdigit(static_cast<unsigned char>(st[j + 1]))) {
+    size_t k = j + 1;
+    int v = 0;
+    while (k < st.size() && std::isdigit(static_cast<unsigned char>(st[k])))
+      v = v * 10 + (st[k++] - '0');
+    p.index = v;
+    j = k;
+  }
+  if (!p.qualified && p.index < 0)
+    return out;
+  if (j < st.size() && st[j] != '#' && st[j] != ',')
+    return out;
+  p.piece = true;
+  p.stripped = st.substr(0, head) + st.substr(j);
+  return p;
+}
+
+std::string JoinSteps(const std::vector<std::string>& steps) {
+  std::string out;
+  for (size_t i = 0; i < steps.size(); i++)
+    out += (i == 0 ? "" : ";") + steps[i];
+  return out;
+}
+
+// Splits a qualifier's content on '|' outside any bracket.
+std::vector<std::string> SplitBounds(const std::string& content) {
+  std::vector<std::string> out;
+  std::string cur;
+  int depth = 0;
+  for (const char c : content) {
+    if (c == '[')
+      depth++;
+    else if (c == ']')
+      depth--;
+    if (c == '|' && depth == 0) {
+      out.push_back(cur);
+      cur.clear();
+    } else {
+      cur += c;
+    }
+  }
+  if (!cur.empty() || !out.empty())
+    out.push_back(cur);
+  return out;
+}
+
+// The lookup behind ElementMap::Resolve and ResolveEdge (see ElementMap.h).
+std::optional<int> LookUp(const std::map<int, std::string>& names,
+                          const std::string& name) {
+  for (const auto& [index, n] : names)
+    if (n == name)
+      return index;
+  // Cheap test before any parsing: a piece name has a '[' or a '.'.
+  if (name.find_first_of("[.") == std::string::npos)
+    return std::nullopt;
+  const PieceName want = ParsePiece(name);
+  if (!want.piece)
+    return std::nullopt;
+  const std::string prefix = want.of.substr(0, want.of.find(';'));
+  std::vector<int> pieces, bounded;
+  std::optional<int> whole;
+  for (const auto& [index, n] : names) {
+    if (n.compare(0, prefix.size(), prefix) != 0)
+      continue;
+    if (n == want.of) {
+      whole = index;
+      continue;
+    }
+    const PieceName have = ParsePiece(n);
+    if (!have.piece || have.of != want.of)
+      continue;
+    pieces.push_back(index);
+    if (want.qualified &&
+        std::all_of(want.boundedBy.begin(), want.boundedBy.end(),
+                    [&](const std::string& b) {
+                      return std::find(have.boundedBy.begin(),
+                                       have.boundedBy.end(),
+                                       b) != have.boundedBy.end();
+                    }))
+      bounded.push_back(index);
+  }
+  if (want.qualified) {
+    // 2. the same piece: the one bounded by everything it was bounded by;
+    // or the whole face, when the split is gone.
+    if (bounded.size() == 1)
+      return bounded.front();
+    if (bounded.size() > 1 && want.ordinal && want.index >= 0 &&
+        static_cast<size_t>(want.index) < bounded.size()) {
+      PositionalLookups::Note(name);
+      return bounded[static_cast<size_t>(want.index)];
+    }
+    if (bounded.empty() && pieces.empty() && whole)
+      return whole;
+    return std::nullopt;
+  }
+  // 3. a positional name from before pieces were qualified: the i-th piece
+  // in result order, the rule the build that saved it used.
+  if (want.index >= 0 && static_cast<size_t>(want.index) < pieces.size()) {
+    PositionalLookups::Note(name);
+    return pieces[static_cast<size_t>(want.index)];
+  }
+  return std::nullopt;
+}
+
+thread_local PositionalLookups* t_positional = nullptr;
 } // namespace
 
 const char* ElementRoleName(ElementRole role) {
@@ -234,8 +384,11 @@ std::string ElementRoleList() {
   return out;
 }
 
-ElementOrigin DecodeElementName(const std::string& name) {
+ElementOrigin DecodeElementName(const std::string& qualified) {
   ElementOrigin o;
+  o.piece = ParsePiece(qualified);
+  // A qualifier's neighbours are not what the element is: read without.
+  const std::string name = WithoutQualifiers(qualified);
   const std::vector<std::string> tokens = Split(name, ';');
   // The seed is the first token's first comma part (an L name joins the
   // names of its edges with commas).
@@ -301,7 +454,9 @@ ElementOrigin DecodeElementName(const std::string& name) {
   return o;
 }
 
-std::vector<uint64_t> FeatureIdsMentioned(const std::string& name) {
+std::vector<uint64_t> FeatureIdsMentioned(const std::string& qualified) {
+  // A piece's neighbours are not features that made or changed it.
+  const std::string name = WithoutQualifiers(qualified);
   std::vector<uint64_t> ids;
   for (const std::string& token : Split(name, ';')) {
     for (const std::string& part : Split(token, ',')) {
@@ -327,7 +482,7 @@ std::string RewriteIds(const std::string& name,
   std::string out;
   out.reserve(name.size());
   size_t i = 0;
-  bool partStart = true; // after the start, a ';' or a ','
+  bool partStart = true; // after the start, a ';', a ',', a '[' or a '|'
   const auto digits = [&](size_t from) {
     size_t e = from;
     while (e < name.size() && std::isdigit(static_cast<unsigned char>(name[e])))
@@ -354,7 +509,8 @@ std::string RewriteIds(const std::string& name,
         continue;
       }
     }
-    if (c == ';' || c == ',')
+    // A qualifier's neighbours are names too: their ids move with the rest.
+    if (c == ';' || c == ',' || c == '[' || c == '|')
       partStart = true;
     out += c;
     ++i;
@@ -362,4 +518,124 @@ std::string RewriteIds(const std::string& name,
   return out;
 }
 
+std::vector<std::string> NameSteps(const std::string& name) {
+  std::vector<std::string> out;
+  std::string cur;
+  int depth = 0;
+  for (const char c : name) {
+    if (c == '[')
+      depth++;
+    else if (c == ']' && depth > 0)
+      depth--;
+    if (c == ';' && depth == 0) {
+      out.push_back(cur);
+      cur.clear();
+    } else {
+      cur += c;
+    }
+  }
+  out.push_back(cur);
+  return out;
+}
+
+std::string WithoutQualifiers(const std::string& name) {
+  if (name.find('[') == std::string::npos)
+    return name;
+  std::string out;
+  int depth = 0;
+  for (const char c : name) {
+    if (c == '[') {
+      depth++;
+      continue;
+    }
+    if (c == ']' && depth > 0) {
+      depth--;
+      continue;
+    }
+    if (depth == 0)
+      out += c;
+  }
+  return out;
+}
+
+std::string PieceStem(const std::string& name) {
+  if (name.find_first_of("[.") == std::string::npos)
+    return name;
+  std::vector<std::string> steps = NameSteps(name);
+  for (size_t i = 1; i < steps.size(); i++) {
+    const PieceStep p = ReadPieceStep(steps[i]);
+    if (p.piece)
+      steps[i] = p.stripped;
+  }
+  return WithoutQualifiers(JoinSteps(steps));
+}
+
+PieceName ParsePiece(const std::string& name) {
+  PieceName out;
+  if (name.find_first_of("[.") == std::string::npos)
+    return out;
+  std::vector<std::string> steps = NameSteps(name);
+  for (size_t i = steps.size(); i-- > 1;) {
+    const PieceStep p = ReadPieceStep(steps[i]);
+    if (!p.piece)
+      continue;
+    out.piece = true;
+    out.qualified = p.qualified;
+    if (p.qualified)
+      out.boundedBy = SplitBounds(p.content);
+    out.ordinal = p.index >= 0;
+    out.index = p.index;
+    out.splitBy = p.tag;
+    steps[i] = p.stripped;
+    out.of = JoinSteps(steps);
+    return out;
+  }
+  return out;
+}
+
+Descent DescentOf(const std::string& name, const std::string& later,
+                  uint64_t* splitBy) {
+  if (later.size() <= name.size() || later.compare(0, name.size(), name) != 0 ||
+      later[name.size()] != ';')
+    return Descent::None;
+  bool split = false;
+  const std::vector<std::string> steps =
+      NameSteps(later.substr(name.size() + 1));
+  for (const std::string& st : steps) {
+    if (st.size() < 2 || st[0] != 'M' ||
+        !std::isdigit(static_cast<unsigned char>(st[1])))
+      return Descent::Other;
+    const PieceStep p = ReadPieceStep(st);
+    const std::string& bare = p.piece ? p.stripped : st;
+    for (size_t k = 1; k < bare.size(); k++)
+      if (!std::isdigit(static_cast<unsigned char>(bare[k])))
+        return Descent::Other; // a pattern copy's, an L name's, ...
+    if (p.piece) {
+      if (!split && splitBy != nullptr)
+        *splitBy = p.tag;
+      split = true;
+    }
+  }
+  return split ? Descent::Split : Descent::Modified;
+}
+
 } // namespace topo
+
+std::optional<int> ElementMap::Resolve(const std::string& name) const {
+  return topo::LookUp(names, name);
+}
+
+std::optional<int> ElementMap::ResolveEdge(const std::string& name) const {
+  return topo::LookUp(edgeNames, name);
+}
+
+PositionalLookups::PositionalLookups() : m_outer(topo::t_positional) {
+  topo::t_positional = this;
+}
+
+PositionalLookups::~PositionalLookups() { topo::t_positional = m_outer; }
+
+void PositionalLookups::Note(const std::string& name) {
+  if (topo::t_positional != nullptr)
+    topo::t_positional->m_names.push_back(name);
+}

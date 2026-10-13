@@ -3,6 +3,8 @@
 
 #include "core/ElementHistory.h"
 
+#include "core/ElementOrigin.h"
+
 #include "cad/NonDestructiveBoolean.h"
 #include "common/Logger.h"
 
@@ -15,6 +17,7 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepTools_History.hxx>
 #include <TopExp.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
@@ -22,8 +25,10 @@
 #include <algorithm>
 #include <cfloat>
 #include <cstdio>
+#include <iterator>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -69,34 +74,161 @@ struct Placer {
   }
 };
 
-// Places every shape of `list`, disambiguating a 1->N fan-out with a
-// positional ".<i>" suffix ordered by result index (the one place stability
-// leaks — accepted for our history depths).
+// The results one input became, when it became several of one kind: each
+// placed under `base` for now, and told apart by QualifyPieces once every
+// history name is down.
+struct PieceGroup {
+  std::string base;
+  TopAbs_ShapeEnum type;
+  std::vector<int> members; // result indices, ascending
+};
+
+// Places every shape of `list` under `base`. A 1->N fan-out is recorded as a
+// group per kind (faces, edges) for QualifyPieces.
 void PlaceAll(const TopTools_ListOfShape& list, const std::string& base,
               const Placer& place, const TopTools_IndexedMapOfShape& resFaces,
-              const TopTools_IndexedMapOfShape& resEdges) {
+              const TopTools_IndexedMapOfShape& resEdges,
+              std::vector<PieceGroup>& groups) {
   if (list.Extent() == 1) {
     place(list.First(), base);
     return;
   }
-  std::vector<std::pair<int, const TopoDS_Shape*>> ordered;
+  PieceGroup faces{base, TopAbs_FACE, {}}, edges{base, TopAbs_EDGE, {}};
   for (const TopoDS_Shape& s : list) {
-    const auto& m = s.ShapeType() == TopAbs_FACE ? resFaces : resEdges;
-    const int idx = m.FindIndex(s) - 1;
-    if (idx >= 0) {
-      ordered.emplace_back(idx, &s);
+    const bool face = s.ShapeType() == TopAbs_FACE;
+    const int idx = (face ? resFaces : resEdges).FindIndex(s) - 1;
+    if (idx < 0)
+      continue;
+    place(s, base);
+    (face ? faces : edges).members.push_back(idx);
+  }
+  for (PieceGroup* g : {&faces, &edges}) {
+    std::sort(g->members.begin(), g->members.end());
+    g->members.erase(std::unique(g->members.begin(), g->members.end()),
+                     g->members.end());
+    if (g->members.size() > 1)
+      groups.push_back(std::move(*g));
+  }
+}
+
+// Names each group's pieces by the faces only they touch
+// (docs/modeling/toponaming.md#split-pieces): a face piece's bounds are the
+// named faces sharing an edge with it, an edge piece's the named faces at
+// its end vertices that do not contain it, each entered by its PieceStem.
+// A piece's qualifier is its bounds less those every piece of the group
+// has; pieces nothing tells apart are numbered in result order.
+void QualifyPieces(const std::vector<PieceGroup>& groups,
+                   const TopoDS_Shape& result,
+                   const TopTools_IndexedMapOfShape& resFaces,
+                   const TopTools_IndexedMapOfShape& resEdges,
+                   ElementMap& out) {
+  if (groups.empty())
+    return;
+  TopTools_IndexedDataMapOfShapeListOfShape edgeFaces, vertexFaces;
+  TopExp::MapShapesAndAncestors(result, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+  TopExp::MapShapesAndAncestors(result, TopAbs_VERTEX, TopAbs_FACE,
+                                vertexFaces);
+  const auto faceStem = [&](const TopoDS_Shape& f) -> const std::string* {
+    const int i = resFaces.FindIndex(f) - 1;
+    return i >= 0 ? out.NameOf(i) : nullptr;
+  };
+  for (const PieceGroup& g : groups) {
+    const bool faces = g.type == TopAbs_FACE;
+    auto& names = faces ? out.names : out.edgeNames;
+    std::vector<int> live;
+    for (const int m : g.members)
+      if (const auto it = names.find(m);
+          it != names.end() && it->second == g.base)
+        live.push_back(m);
+    if (live.size() < 2)
+      continue;
+    const std::string own = PieceStem(g.base);
+    std::vector<std::set<std::string>> bounds(live.size());
+    for (size_t k = 0; k < live.size(); k++) {
+      const auto add = [&](const TopoDS_Shape& f) {
+        if (const std::string* n = faceStem(f)) {
+          std::string stem = PieceStem(*n);
+          if (stem != own)
+            bounds[k].insert(std::move(stem));
+        }
+      };
+      if (faces) {
+        const TopoDS_Shape& face = resFaces(live[k] + 1);
+        TopTools_IndexedMapOfShape boundary;
+        TopExp::MapShapes(face, TopAbs_EDGE, boundary);
+        for (int e = 1; e <= boundary.Extent(); e++)
+          if (const int at = edgeFaces.FindIndex(boundary(e)); at > 0)
+            for (const TopoDS_Shape& f : edgeFaces(at))
+              if (!f.IsSame(face))
+                add(f);
+      } else {
+        const TopoDS_Shape& edge = resEdges(live[k] + 1);
+        const int at = edgeFaces.FindIndex(edge);
+        const auto holds = [&](const TopoDS_Shape& f) {
+          if (at <= 0)
+            return false;
+          for (const TopoDS_Shape& h : edgeFaces(at))
+            if (h.IsSame(f))
+              return true;
+          return false;
+        };
+        TopTools_IndexedMapOfShape ends;
+        TopExp::MapShapes(edge, TopAbs_VERTEX, ends);
+        for (int v = 1; v <= ends.Extent(); v++)
+          if (const int vi = vertexFaces.FindIndex(ends(v)); vi > 0)
+            for (const TopoDS_Shape& f : vertexFaces(vi))
+              if (!holds(f))
+                add(f);
+      }
+    }
+    std::set<std::string> shared = bounds.front();
+    for (size_t k = 1; k < bounds.size(); k++) {
+      std::set<std::string> both;
+      std::set_intersection(shared.begin(), shared.end(), bounds[k].begin(),
+                            bounds[k].end(), std::inserter(both, both.begin()));
+      shared = std::move(both);
+    }
+    // Each piece's qualifier; "" for one nothing of its own tells apart.
+    std::vector<std::string> quals(live.size());
+    std::map<std::string, int> uses;
+    for (size_t k = 0; k < live.size(); k++) {
+      for (const std::string& b : bounds[k])
+        if (!shared.count(b))
+          quals[k] += (quals[k].empty() ? "" : "|") + b;
+      uses[quals[k]]++;
+    }
+    std::map<std::string, int> next;
+    for (size_t k = 0; k < live.size(); k++) {
+      std::string name =
+          g.base + (quals[k].empty() ? "" : "[" + quals[k] + "]");
+      if (quals[k].empty() || uses[quals[k]] > 1)
+        name += "." + std::to_string(next[quals[k]]++);
+      names[live[k]] = std::move(name);
     }
   }
-  // Faces and edges occupy separate index spaces; keep the suffix sequence
-  // deterministic across the mix by sorting on (type, index).
-  std::sort(ordered.begin(), ordered.end(), [](const auto& a, const auto& b) {
-    if (a.second->ShapeType() != b.second->ShapeType()) {
-      return a.second->ShapeType() < b.second->ShapeType();
-    }
-    return a.first < b.first;
-  });
-  for (size_t i = 0; i < ordered.size(); i++) {
-    place(*ordered[i].second, base + "." + std::to_string(i));
+}
+
+// No two faces, and no two edges, share a name: the first (lowest index)
+// keeps it, every later one takes the next free ".<i>".
+void MakeNamesUnique(std::map<int, std::string>& names) {
+  std::set<std::string> seen;
+  std::map<std::string, int> dup;
+  for (const auto& [i, n] : names)
+    if (!seen.insert(n).second)
+      dup[n] = 1;
+  if (dup.empty())
+    return;
+  std::set<std::string> first;
+  for (auto& [i, n] : names) {
+    const auto d = dup.find(n);
+    if (d == dup.end() || first.insert(n).second)
+      continue;
+    std::string renamed;
+    do
+      renamed = n + "." + std::to_string(d->second++);
+    while (seen.count(renamed));
+    seen.insert(renamed);
+    n = std::move(renamed);
   }
 }
 
@@ -115,6 +247,7 @@ ElementMap PropagateNames(const std::vector<NamedInput>& inputs,
   const std::string tag = std::to_string(featureTag);
   const std::string mTag = ";M" + tag;
   const std::string gTag = ";G" + tag;
+  std::vector<PieceGroup> groups;
 
   // History pass: survivor keeps its name; Modified appends M; Generated
   // appends G (booleans: a pierced face *generates* its section edges, a
@@ -128,11 +261,11 @@ ElementMap PropagateNames(const std::vector<NamedInput>& inputs,
       if (mods.IsEmpty() && !hist.IsRemoved(sub)) {
         place(sub, name); // survivor: identity preserved for free
       } else if (!mods.IsEmpty()) {
-        PlaceAll(mods, name + mTag, place, resFaces, resEdges);
+        PlaceAll(mods, name + mTag, place, resFaces, resEdges, groups);
       }
       const TopTools_ListOfShape& gens = hist.Generated(sub);
       if (!gens.IsEmpty()) {
-        PlaceAll(gens, name + gTag, place, resFaces, resEdges);
+        PlaceAll(gens, name + gTag, place, resFaces, resEdges, groups);
       }
     };
     for (const auto& [faceIdx, name] : input.map.names) {
@@ -161,6 +294,7 @@ ElementMap PropagateNames(const std::vector<NamedInput>& inputs,
     }
   }
 
+  QualifyPieces(groups, result, resFaces, resEdges, out);
   return out;
 }
 
@@ -212,6 +346,13 @@ void FallbackPasses(const TopoDS_Shape& shape, ElementMap& map) {
     }
     map.names[f - 1] = joined + ";L";
   }
+}
+
+// The passes after history: U/L fallback, then uniqueness.
+void FinishNames(const TopoDS_Shape& shape, ElementMap& map) {
+  FallbackPasses(shape, map);
+  MakeNamesUnique(map.names);
+  MakeNamesUnique(map.edgeNames);
 }
 
 // All faces and edges of `shape`, as the explicit argument list
@@ -299,7 +440,7 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
     out = PropagateNames(
         {{target.GetShape(), targetMap}, {tool.GetShape(), toolMap}}, hist,
         mk->SectionEdges(), result, featureTag);
-    FallbackPasses(result, out);
+    FinishNames(result, out);
     return CADShape(result);
   } catch (const Standard_Failure& e) {
     LOG_ERROR("BooleanNamed: OCCT error: {}", e.GetMessageString());
@@ -318,7 +459,7 @@ ElementMap NamesThroughHistory(const CADShape& target,
   ElementMap out = PropagateNames(
       {{target.GetShape(), targetMap}, {tool.GetShape(), toolMap}}, history,
       TopTools_ListOfShape(), result.GetShape(), featureTag);
-  FallbackPasses(result.GetShape(), out);
+  FinishNames(result.GetShape(), out);
   return out;
 }
 
@@ -363,7 +504,7 @@ ElementMap NamesThroughHistory(const CADShape& input, const ElementMap& map,
   for (const auto& [r, names] : onto)
     if (names.size() == 1)
       out.names[r] = *names.front();
-  FallbackPasses(result.GetShape(), out);
+  FinishNames(result.GetShape(), out);
   return out;
 }
 
@@ -392,7 +533,7 @@ CADShape RunEdgeBlend(Maker& mk, const TopoDS_Shape& shape,
   const BRepTools_History hist(args, mk);
   static const TopTools_ListOfShape kNoSeams;
   out = PropagateNames({{shape, bodyMap}}, hist, kNoSeams, result, featureTag);
-  FallbackPasses(result, out);
+  FinishNames(result, out);
   return CADShape(result);
 }
 
@@ -587,6 +728,105 @@ std::optional<ElementRef> ResolveEdgeOnBody(const Body& input,
     return std::nullopt;
   }
   return ElementRef{input.createdBy, *name};
+}
+
+std::string
+UnresolvedReason(const ElementMap& map, const std::string& name,
+                 ElementKind kind, const std::string& what,
+                 const std::function<std::string(uint64_t)>& featureLabel) {
+  const std::string gone = what + " '" + name + "' no longer exists";
+  const auto& names = kind == ElementKind::Face ? map.names : map.edgeNames;
+  const PieceName want = ParsePiece(name);
+  // What it became: the other pieces of the face it was a piece of, or the
+  // pieces of a face it was whole.
+  std::vector<std::string> pieces;
+  uint64_t by = 0;
+  for (const auto& [index, n] : names) {
+    (void)index;
+    if (n == name)
+      continue;
+    if (want.piece) {
+      const PieceName have = ParsePiece(n);
+      if (have.piece && have.of == want.of) {
+        pieces.push_back(n);
+        if (by == 0)
+          by = have.splitBy;
+        continue;
+      }
+    }
+    uint64_t at = 0;
+    if (DescentOf(name, n, &at) == Descent::Split) {
+      pieces.push_back(n);
+      if (by == 0)
+        by = at;
+    }
+  }
+  if (pieces.empty())
+    return gone;
+  // The pieces that hold any of what bounded it, when some do: the ones it
+  // could have meant.
+  if (want.qualified) {
+    std::vector<std::string> meant;
+    for (const std::string& n : pieces) {
+      const PieceName have = ParsePiece(n);
+      for (const std::string& b : want.boundedBy)
+        if (std::find(have.boundedBy.begin(), have.boundedBy.end(), b) !=
+            have.boundedBy.end()) {
+          meant.push_back(n);
+          break;
+        }
+    }
+    if (!meant.empty())
+      pieces = std::move(meant);
+  }
+  const std::string label =
+      featureLabel ? featureLabel(by) : "feature " + std::to_string(by);
+  constexpr size_t kListed = 6;
+  std::string list;
+  const size_t shown = std::min(pieces.size(), kListed);
+  for (size_t i = 0; i < shown; i++) {
+    if (i > 0)
+      list += i + 1 == shown && shown == pieces.size() ? " and " : ", ";
+    list += "'" + pieces[i] + "'";
+  }
+  if (pieces.size() > shown)
+    list += " and " + std::to_string(pieces.size() - shown) + " more";
+  return what + " '" + name + "' was split by " + label + " into " + list +
+         "; pick the one you meant";
+}
+
+static std::string
+UnresolvedReason(const std::vector<Body>& bodies, const ElementRef& ref,
+                 ElementKind kind, const std::string& what,
+                 const std::function<std::string(uint64_t)>& label) {
+  std::string reason;
+  for (const Body& b : bodies) {
+    if (ref.featureId != 0 && b.createdBy != ref.featureId)
+      continue; // 0: whichever body has it
+    std::string r = UnresolvedReason(b.elementMap, ref.name, kind, what, label);
+    if (r.find("' was split by ") != std::string::npos)
+      return r;
+    reason = std::move(r);
+  }
+  return reason.empty() ? UnresolvedReason(ElementMap{}, ref.name, kind, what)
+                        : reason;
+}
+
+std::string UnresolvedReason(const std::vector<Body>& bodies,
+                             const ElementRef& ref, ElementKind kind,
+                             const std::string& what) {
+  return UnresolvedReason(bodies, ref, kind, what, {});
+}
+
+std::string UnresolvedReason(const RegenContext& ctx, const ElementRef& ref,
+                             ElementKind kind, const std::string& what) {
+  return UnresolvedReason(
+      ctx.bodies, ref, kind, what, [&](uint64_t id) -> std::string {
+        for (const auto& f : ctx.features)
+          if (f && f->GetId() == id)
+            return f->GetName() + " (" + std::to_string(id) + ")";
+        return "feature " + std::to_string(id);
+      });
 }
 
 } // namespace topo

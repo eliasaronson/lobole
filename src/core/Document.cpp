@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/Document.h"
+
+#include "core/ElementOrigin.h"
 #include "core/FitBands.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/HoleFeature.h"
@@ -58,36 +60,36 @@ void FollowModifiedFaces(std::vector<Body>& bodies) {
 
 // Does `later` name what became of the face `name` through later features
 // alone — `name` plus whole `;M<tag>` steps, each possibly split
-// (`;M<tag>.<i>`)? The grammar is docs/modeling/toponaming.md#naming-grammar;
-// AssemblySolve's DescentOf reads the same steps for a seat, which must
-// tell a split apart. A face appearance need not: paint follows a face and
-// every piece a cut made of it.
+// (topo::DescentOf)? A face appearance follows every piece a cut made of it,
+// where a seat (AssemblySolve) must tell a split apart.
 static bool DescendsByModification(const std::string& name,
                                    const std::string& later) {
-  if (later.size() <= name.size() || later.compare(0, name.size(), name) != 0)
-    return false;
-  size_t i = name.size();
-  const auto digits = [&](size_t& j) {
-    const size_t from = j;
-    while (j < later.size() &&
-           std::isdigit(static_cast<unsigned char>(later[j])) != 0)
-      ++j;
-    return j > from;
-  };
-  while (i < later.size()) {
-    if (later[i] != ';' || i + 1 >= later.size() || later[i + 1] != 'M')
-      return false;
-    size_t j = i + 2;
-    if (!digits(j))
-      return false;
-    if (j < later.size() && later[j] == '.') {
-      ++j;
-      if (!digits(j))
-        return false;
-    }
-    i = j;
+  const topo::Descent d = topo::DescentOf(name, later);
+  return d == topo::Descent::Modified || d == topo::Descent::Split;
+}
+
+// Runs a feature, and warns on it when a reference it holds resolved BY
+// POSITION: a split piece's ".<i>" name saved before pieces were named by
+// what bounds them (docs/modeling/toponaming.md#resolving-a-name). It still
+// means what it meant, but a reorder of the pieces would move it.
+static bool ExecuteNoting(Feature& feature, RegenContext& ctx) {
+  PositionalLookups positional;
+  const bool ok = feature.Execute(ctx);
+  if (ok && !positional.Names().empty()) {
+    std::set<std::string> seen;
+    std::string names;
+    for (const std::string& n : positional.Names())
+      if (seen.insert(n).second)
+        names += (names.empty() ? "'" : ", '") + n + "'";
+    const std::string text =
+        "references " + names +
+        " by position (a split piece named before pieces were named by what "
+        "bounds them): re-pick it, or a change to the cut that split it can "
+        "move it to another piece";
+    const std::string& had = feature.GetWarning();
+    feature.SetWarning(had.empty() ? text : had + "; " + text);
   }
-  return true;
+  return ok;
 }
 
 // Monotonic for the life of the process: identity must never be reused, or
@@ -597,7 +599,7 @@ bool Document::Regenerate() {
         ctx.configuration = ActiveConfig();
         ctx.print = m_print ? &*m_print : nullptr;
         datums++;
-        if (!m_features[i]->Execute(ctx)) {
+        if (!ExecuteNoting(*m_features[i], ctx)) {
           if (m_features[i]->GetError().empty())
             m_features[i]->SetError("regeneration failed");
           datumsOk = false;
@@ -654,7 +656,7 @@ bool Document::Regenerate() {
         ctx.configuration = ActiveConfig();
         ctx.print = m_print ? &*m_print : nullptr;
         m_lastStats.executed++;
-        if (!m_features[i]->Execute(ctx)) {
+        if (!ExecuteNoting(*m_features[i], ctx)) {
           if (m_features[i]->GetError().empty()) {
             m_features[i]->SetError("regeneration failed");
           }

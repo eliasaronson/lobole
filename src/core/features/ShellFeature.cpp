@@ -49,7 +49,8 @@ bool ShellFeature::Execute(RegenContext& ctx) {
   for (const ElementRef& ref : openFaces) {
     const auto idx = body->elementMap.Resolve(ref.name);
     if (!idx) {
-      SetError("open face '" + ref.name + "' no longer exists");
+      SetError(topo::UnresolvedReason(ctx, ref, topo::ElementKind::Face,
+                                      "open face"));
       return false;
     }
     removeIdx.push_back(*idx);

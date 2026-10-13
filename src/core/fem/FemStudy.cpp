@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/fem/FemStudy.h"
+#include "core/ElementHistory.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
@@ -275,7 +276,8 @@ bool ResolveFace(const Document& doc, const ElementRef& ref,
         *error += " " + std::to_string(bodies[i].createdBy) + " (" +
                   bodies[i].name + ")";
     } else {
-      *error = what + ": face '" + ref.name + "' no longer exists";
+      *error = topo::UnresolvedReason(bodies, ref, topo::ElementKind::Face,
+                                      what + ": face");
       if (ref.featureId != 0) {
         bool onAnother = false;
         for (const auto& b : bodies)

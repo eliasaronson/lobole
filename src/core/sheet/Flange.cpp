@@ -73,7 +73,8 @@ bool ResolveFrameImpl(const Body& body, const ElementRef& ref, double thickness,
                       EdgeFrame& out, std::string& error) {
   const auto edgeIndex = body.elementMap.ResolveEdge(ref.name);
   if (!edgeIndex) {
-    error = "edge '" + ref.name + "' no longer exists";
+    error = topo::UnresolvedReason(body.elementMap, ref.name,
+                                   topo::ElementKind::Edge, "edge");
     return false;
   }
   TopTools_IndexedMapOfShape edgeMap;

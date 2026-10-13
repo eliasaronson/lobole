@@ -71,12 +71,14 @@ bool RetainingRingGrooveFeature::Execute(RegenContext& ctx) {
   }
   const auto faceIdx = body->elementMap.Resolve(face.name);
   if (!faceIdx) {
-    SetError("grooved face '" + face.name + "' no longer exists");
+    SetError(topo::UnresolvedReason(ctx, face, topo::ElementKind::Face,
+                                    "grooved face"));
     return false;
   }
   const auto edgeIdx = body->elementMap.ResolveEdge(from.name);
   if (!edgeIdx) {
-    SetError("edge '" + from.name + "' no longer exists");
+    SetError(
+        topo::UnresolvedReason(ctx, from, topo::ElementKind::Edge, "edge"));
     return false;
   }
   TopoDS_Face occFace;

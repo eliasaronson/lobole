@@ -23,10 +23,13 @@ class BRepTools_History;
 // (topological naming, T5). Each function keeps the OCC maker alive, folds its
 // Modified/Generated/IsDeleted reports into a BRepTools_History, and rewrites
 // the inputs' MappedNames onto the result shape: a face/edge the op leaves
-// untouched keeps its name verbatim; a Modified element appends ";M<tag>"
-// (".<i>" when one input splits into N); a Generated element appends ";G<tag>";
-// whatever history misses is named by the U/L fallback passes. Names key on
-// the result's face/edge indices (the same walk GenerateMesh, picking and
+// untouched keeps its name verbatim; a Modified element appends ";M<tag>"; a
+// Generated element appends ";G<tag>"; when one input becomes several, each
+// piece is told apart by the faces only it touches, "<name>;M<tag>[a|b]"
+// (docs/modeling/toponaming.md#split-pieces), with an ordinal ".<i>" only
+// where nothing else does; whatever history misses is named by the U/L
+// fallback passes; and a last pass leaves no two elements one name. Names key
+// on the result's face/edge indices (the same walk GenerateMesh, picking and
 // ElementMap use), so references keep resolving across regenerations.
 namespace topo {
 
@@ -114,6 +117,27 @@ void NamesOfSubShape(const CADShape& whole, const ElementMap& wholeMap,
 // ";L". OCC history is genuinely incomplete for lower-dimensional elements,
 // so these are what give edges (fillet spines!) their stable names.
 void ApplyFallbackPasses(const CADShape& shape, ElementMap& map);
+
+// Why `name` does not resolve on `map`, as the error a feature reports:
+// "<what> '<name>' was split by <feature> into '<a>' and '<b>'; pick the one
+// you meant" when the face or edge it named is now several pieces (none, or
+// more than one, bounded by all it was bounded by), else "<what> '<name>' no
+// longer exists". `featureLabel` names the splitting feature ("Slot (4)");
+// without one it is "feature 4". The ONE builder of that sentence:
+// tests/test_conventions.cpp fails on the literal anywhere else.
+enum class ElementKind { Face, Edge };
+std::string
+UnresolvedReason(const ElementMap& map, const std::string& name,
+                 ElementKind kind, const std::string& what,
+                 const std::function<std::string(uint64_t)>& featureLabel = {});
+// The same for a reference during a regeneration: the bodies `ref.featureId`
+// created are searched, and features are named from the context.
+std::string UnresolvedReason(const RegenContext& ctx, const ElementRef& ref,
+                             ElementKind kind, const std::string& what);
+// The same over a list of bodies, features named by id.
+std::string UnresolvedReason(const std::vector<Body>& bodies,
+                             const ElementRef& ref, ElementKind kind,
+                             const std::string& what);
 
 // 0-based index of `edge` within `shape`'s deduplicated edge order
 // (TopExp::MapShapes(TopAbs_EDGE) first-appearance order) — the edgeIndex

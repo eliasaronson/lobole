@@ -207,7 +207,8 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
   }
   const auto idx = body->elementMap.Resolve(face.name);
   if (!idx) {
-    SetError("threaded face '" + face.name + "' no longer exists");
+    SetError(topo::UnresolvedReason(ctx, face, topo::ElementKind::Face,
+                                    "threaded face"));
     return false;
   }
   TopoDS_Face occFace;

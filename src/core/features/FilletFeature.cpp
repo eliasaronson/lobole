@@ -43,7 +43,8 @@ bool FilletFeature::Execute(RegenContext& ctx) {
   for (const ElementRef& ref : edges) {
     const auto idx = body->elementMap.ResolveEdge(ref.name);
     if (!idx) {
-      SetError("edge '" + ref.name + "' no longer exists");
+      SetError(
+          topo::UnresolvedReason(ctx, ref, topo::ElementKind::Edge, "edge"));
       return false;
     }
     if (std::find(indices.begin(), indices.end(), *idx) == indices.end()) {

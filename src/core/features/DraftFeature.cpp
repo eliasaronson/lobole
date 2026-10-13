@@ -68,7 +68,8 @@ bool DraftFeature::Execute(RegenContext& ctx) {
   for (const ElementRef& ref : faces) {
     const auto i = body->elementMap.Resolve(ref.name);
     if (!i) {
-      SetError("drafted face '" + ref.name + "' no longer exists");
+      SetError(topo::UnresolvedReason(ctx, ref, topo::ElementKind::Face,
+                                      "drafted face"));
       return false;
     }
     idx.push_back(*i);
