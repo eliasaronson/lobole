@@ -99,7 +99,7 @@ TEST_CASE("A seeded ImportFeature uses the caller's geometry once, then the "
   // The seed is consumed, not sticky: a re-execution goes back to the file, so
   // editing the source still updates the part. Deleting the file is how this
   // proves the feature READ it rather than reusing the seed — and the regen
-  // prefix cache has to be dropped first, or Regenerate serves the bodies it
+  // cache has to be dropped first, or Regenerate serves the bodies it
   // already has and never calls Execute at all.
   fs::remove(stepPath);
   doc.ClearRegenCache();

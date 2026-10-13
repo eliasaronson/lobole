@@ -843,6 +843,54 @@ std::string BodyFrom(const std::string& text, size_t from) {
 }
 } // namespace
 
+TEST_CASE("every feature restores its whole evaluation on a cache hit",
+          "[convention][regen]") {
+  // A regeneration cache hit may come from another history (an undo, a
+  // value set back), so it restores everything Execute leaves on the
+  // object through CopyDerivedState
+  // (docs/architecture.md#the-document-model-and-regeneration). PURE virtual
+  // makes a new feature SAY something; this holds what it says to
+  // RestoreExecuted<itself>, which copies the whole object, so a member added
+  // to the feature later cannot be left out of the restore. The exceptions copy
+  // by hand, and each needs a reason.
+  const std::map<std::string, std::string> kByHand = {
+      {"ImportFeature", "its parse seed is an owning one-shot hand-off"},
+      {"TemplateFeature", "its expansion is owning pointers, cloned"},
+  };
+  const std::regex cls(
+      R"(class\s+(\w+)\s*(?:final\s*)?:\s*public\s+Feature\b)");
+  std::vector<std::string> problems;
+  size_t seen = 0;
+  for (const auto& f : SourcesUnder("src", ".h")) {
+    std::vector<std::pair<size_t, std::string>> classes;
+    for (auto it = std::sregex_iterator(f.text.begin(), f.text.end(), cls);
+         it != std::sregex_iterator(); ++it)
+      classes.emplace_back(static_cast<size_t>(it->position()), (*it)[1]);
+    for (size_t c = 0; c < classes.size(); c++) {
+      const auto& [at, name] = classes[c];
+      const size_t end =
+          c + 1 < classes.size() ? classes[c + 1].first : f.text.size();
+      const std::string body = f.text.substr(at, end - at);
+      seen++;
+      if (body.find("CopyDerivedState") == std::string::npos) {
+        problems.push_back(Relative(f.path) + ": " + name +
+                           " declares no CopyDerivedState");
+        continue;
+      }
+      if (kByHand.count(name) != 0)
+        continue;
+      if (body.find("RestoreExecuted<" + name + ">") == std::string::npos)
+        problems.push_back(Relative(f.path) + ": " + name +
+                           "::CopyDerivedState is not RestoreExecuted<" + name +
+                           ">");
+    }
+  }
+  INFO("feature classes scanned: " << seen);
+  CHECK(seen > 40);
+  for (const std::string& p : problems)
+    FAIL_CHECK(p);
+}
+
 TEST_CASE("every Document mutator of saved state moves the save stamp",
           "[convention]") {
   // Dirty tracking and autosave compare Document::SaveStamp() against the

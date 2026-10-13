@@ -33,6 +33,7 @@ add_executable(designer_tests
     test_document.cpp
     test_document_copy.cpp
     test_determinism.cpp
+    test_regen_cache.cpp
     test_parts.cpp
     test_bearings.cpp
     test_retaining_rings.cpp
@@ -1155,6 +1156,13 @@ add_test(NAME inspection_typing_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/inspection_typing_gate.py)
 set_tests_properties(inspection_typing_gate PROPERTIES TIMEOUT 120
                      SKIP_RETURN_CODE 77)
+
+# The regeneration cache on generator output: every return to a state seen
+# before (a value set back, undo, redo) executes nothing and reads the same.
+add_test(NAME regen_cache_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/regen_cache_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(regen_cache_smoke PROPERTIES TIMEOUT 120)
 
 add_test(NAME component_update_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/component_update_smoke.py

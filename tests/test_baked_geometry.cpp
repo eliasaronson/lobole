@@ -80,7 +80,7 @@ TEST_CASE("Baked geometry loads instead of rebuilding", "[baked]") {
         doc->GetBodies()[0].elementMap.names);
   CHECK(loaded->GetBodies()[0].name == doc->GetBodies()[0].name);
 
-  // Regenerating again is still free — the blob seeds the prefix cache, so an
+  // Regenerating again is still free — the blob seeds the regen cache, so an
   // unrelated document-version bump cannot silently rebuild the model.
   loaded->Regenerate();
   CHECK(loaded->LastRegenStats().executed == 0);

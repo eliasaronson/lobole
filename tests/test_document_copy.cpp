@@ -202,7 +202,7 @@ TEST_CASE("A geometry-reusing copy is the same document, built by executing "
   CHECK(plain.LastRegenStats().executed > 0);
 
   // The reuse is a hand-off, not a lock-in: an edit rebuilds from the recipe
-  // like any other document. (The bake seeds the prefix cache with only the
+  // like any other document. (The bake seeds the regen cache with only the
   // tip entry valid, which is what makes this true.)
   const double before = reused->GetBodies()[0].shape.Volume();
   reused->SetActiveConfiguration(0); // off "Tall", onto the parameter table

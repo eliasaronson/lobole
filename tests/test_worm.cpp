@@ -721,6 +721,19 @@ TEST_CASE("An undone wheel edit comes back from its inputs", "[worm][slow]") {
   CHECK_FALSE(Wheel(*doc).ReportJson().at("reused").get<bool>());
   CHECK(doc->GetBodies().at(0).shape.Volume() != v0);
   edit(40); // as an undo does
+  // The regeneration cache remembers the wheel at 40 teeth, so the undo
+  // executes nothing (docs/modeling/README.md#regeneration)...
+  CHECK(doc->LastRegenStats().executed == 0);
+  CHECK(doc->GetBodies().at(0).shape.Volume() == v0);
+  // ...and when the wheel does execute on the same blank with the same
+  // numbers -- a change it does not read, like its name -- its own memo
+  // serves it.
+  {
+    auto w = Wheel(*doc).Clone();
+    w->SetName("renamed wheel");
+    doc->ReplaceFeature(1, std::move(w));
+  }
+  CHECK(doc->LastRegenStats().executed == 1);
   CHECK(Wheel(*doc).ReportJson().at("reused").get<bool>());
   CHECK(doc->GetBodies().at(0).shape.Volume() == v0);
   CHECK(doc->GetBodies().at(0).elementMap.names == names0.names);
