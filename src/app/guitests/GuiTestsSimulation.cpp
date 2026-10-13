@@ -445,9 +445,10 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
   };
 
 #else  // !HAVE_NETGEN
-  LOG_WARN("GUI suite: 2 sim cases NOT registered "
+  LOG_WARN("GUI suite: 3 sim cases NOT registered "
            "(a_static_run_matches_beam_theory, topology_holds_its_volume_"
-           "target) — this build has no Netgen, so a study cannot be meshed");
+           "target, a_probe_pins_a_face_and_holds_it) — this build has no "
+           "Netgen, so a study cannot be meshed");
 #endif // HAVE_NETGEN
 
   // A pressure is a FIELD: one arrow per cell of the face, each standing ON
@@ -990,6 +991,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+#ifdef HAVE_NETGEN // a probe reads a SOLVED study; no Netgen, no mesh
   // Probe (docs/simulation/README.md#probing-a-face): a solved study's
   // stress on the clamped face, pinned to the Probes list, and the pin made
   // a requirement on that face -- held at the material's yield.
@@ -1038,4 +1040,5 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     ui::ExitSimulation(*s_App);
     ctx->Yield();
   };
+#endif // HAVE_NETGEN
 }
