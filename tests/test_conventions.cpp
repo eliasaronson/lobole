@@ -1391,6 +1391,39 @@ TEST_CASE("nothing in src/ is named `near` or `far`", "[convention]") {
   CHECK(offenders.empty());
 }
 
+TEST_CASE("a reference that does not resolve says why in one place",
+          "[convention][toponaming]") {
+  // "<what> '<name>' no longer exists" was built at every site that resolves
+  // a face or an edge, so a face a cut had split in two said only that it
+  // was gone, and the error could not name the pieces to choose between.
+  // topo::UnresolvedReason (core/ElementHistory.h) is the one builder: it
+  // says a split is a split, naming the cut and the pieces
+  // (docs/modeling/toponaming.md#resolving-a-name).
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"})
+    for (const SourceFile& src : SourcesUnder("src", ext)) {
+      if (src.path.filename() == "ElementHistory.cpp")
+        continue;
+      std::istringstream lines(src.text);
+      std::string line;
+      int n = 0;
+      while (std::getline(lines, line)) {
+        n++;
+        if (const size_t c = line.find("//"); c != std::string::npos)
+          line.erase(c);
+        if (line.find("' no longer exists") != std::string::npos)
+          offenders.push_back(Relative(src.path) + ":" + std::to_string(n));
+      }
+    }
+  INFO("build the message with topo::UnresolvedReason:\n" + [&] {
+    std::string s;
+    for (const std::string& o : offenders)
+      s += "  " + o + "\n";
+    return s;
+  }());
+  CHECK(offenders.empty());
+}
+
 TEST_CASE("a toolbar glyph means one thing and a feature has one glyph",
           "[convention]") {
   // docs/ui/README.md#icons. The toolbars had grown five glyphs

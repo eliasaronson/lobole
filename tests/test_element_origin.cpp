@@ -67,6 +67,66 @@ TEST_CASE("A name says which feature made it and how", "[toponaming]") {
   CHECK(group.role == ElementRole::StartCap);
 }
 
+// A split piece's qualifier names its neighbours, whose own names carry ',',
+// '#' and ';' (docs/modeling/toponaming.md#split-pieces): none of that is
+// the piece's, and every reader skips the brackets.
+TEST_CASE("A qualified piece decodes as its face, its neighbours opaque",
+          "[toponaming]") {
+  const std::string name = "2/cap1;M4[2/g3|4/g3;U1,4/g5;L|6/g2#3;M4]";
+  const auto top = DecodeElementName(name);
+  REQUIRE(top.ok);
+  CHECK(top.madeBy == 2);
+  CHECK(top.role == ElementRole::EndCap);
+  CHECK(top.modifiedBy == std::vector<uint64_t>{4});
+  CHECK(top.instances.empty());
+  REQUIRE(top.piece.piece);
+  CHECK(top.piece.qualified);
+  CHECK_FALSE(top.piece.ordinal);
+  CHECK(top.piece.of == "2/cap1;M4");
+  CHECK(top.piece.splitBy == 4);
+  CHECK(top.piece.boundedBy ==
+        std::vector<std::string>{"2/g3", "4/g3;U1,4/g5;L", "6/g2#3;M4"});
+  CHECK(topo::FeatureIdsMentioned(name) == std::vector<uint64_t>{2, 4});
+  CHECK(topo::NameSteps(name + ";U2").size() == 3);
+  CHECK(topo::PieceStem(name + ";M7[9/g1].1") == "2/cap1;M4;M7");
+
+  // An edge of the piece, and a pattern copy of it, are still the piece's.
+  const auto edge = DecodeElementName(name + ";U2");
+  REQUIRE(edge.ok);
+  CHECK(edge.role == ElementRole::EndCap);
+  CHECK(edge.piece.of == "2/cap1;M4;U2");
+  const auto copy = DecodeElementName(name + "#2");
+  REQUIRE(copy.ok);
+  CHECK(copy.instances == std::vector<std::string>{"2"});
+  CHECK(copy.piece.of == "2/cap1;M4#2");
+
+  // A piece nothing told apart, and a positional name of the old form.
+  const auto ordinal = DecodeElementName("1/face0;M9.1");
+  CHECK(ordinal.piece.ordinal);
+  CHECK(ordinal.piece.index == 1);
+  CHECK_FALSE(ordinal.piece.qualified);
+  const auto both = DecodeElementName("1/face0;M9[3/g1].0");
+  CHECK(both.piece.qualified);
+  CHECK(both.piece.ordinal);
+  CHECK(both.piece.boundedBy == std::vector<std::string>{"3/g1"});
+
+  // A whole face's descendants: modified, split (by a qualifier or an
+  // ordinal), or something else.
+  uint64_t by = 0;
+  CHECK(topo::DescentOf("2/cap1", "2/cap1;M4;M7") == topo::Descent::Modified);
+  CHECK(topo::DescentOf("2/cap1", "2/cap1;M4[2/g3|4/g3;M4];M7", &by) ==
+        topo::Descent::Split);
+  CHECK(by == 4);
+  CHECK(topo::DescentOf("2/cap1", "2/cap1;M4;M7.1", &by) ==
+        topo::Descent::Split);
+  CHECK(topo::DescentOf("2/cap1", "2/cap1;G4") == topo::Descent::Other);
+  CHECK(topo::DescentOf("2/cap1", "2/cap10") == topo::Descent::None);
+
+  // Ids inside a qualifier are ids too: a template moves them with the rest.
+  CHECK(topo::RewriteIds(name, [](uint64_t id) { return id + 100; }) ==
+        "102/cap1;M104[102/g3|104/g3;U1,104/g5;L|106/g2#3;M104]");
+}
+
 TEST_CASE("A name decodes through Derived copies and pattern instances",
           "[toponaming][derived]") {
   // the third copy of the piece part's cut 31's floor, come in through

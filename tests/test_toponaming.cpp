@@ -7,17 +7,25 @@
 #include "TestIO.h"
 #include "core/AxisRef.h"
 #include "core/Document.h"
+#include "core/ElementHistory.h"
+#include "core/ElementOrigin.h"
 #include "core/Feature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/FilletFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <gp_Pnt.hxx>
+
 #include <algorithm>
 #include <array>
 #include <filesystem>
+#include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -423,7 +431,7 @@ TEST_CASE("A cut hole renames the pierced cap and keeps the sides",
   CHECK(map.names.size() == FaceCount(doc));
 }
 
-TEST_CASE("A slot cut splits a cap into disambiguated .0/.1 pieces",
+TEST_CASE("A slot cut splits a cap into pieces named by their neighbours",
           "[toponaming]") {
   Document doc;
   uint64_t ext = 0;
@@ -433,16 +441,23 @@ TEST_CASE("A slot cut splits a cap into disambiguated .0/.1 pieces",
       AddRectExtrude(doc, {1.5f, -1.0f}, {2.5f, 5.0f}, 3.0, ExtrudeMode::Cut);
   REQUIRE(doc.Regenerate());
   REQUIRE(doc.GetBodies().size() == 1);
-  (void)slotExt;
 
   const ElementMap& map = Map(doc);
   const std::string base =
       std::to_string(ext) + "/cap1;M" + std::to_string(slotExt);
-  const auto piece0 = map.Resolve(base + ".0");
-  const auto piece1 = map.Resolve(base + ".1");
-  REQUIRE(piece0.has_value());
-  REQUIRE(piece1.has_value());
-  CHECK(*piece0 != *piece1);
+  std::vector<std::string> pieces;
+  for (const auto& [idx, name] : map.names)
+    if (topo::ParsePiece(name).of == base)
+      pieces.push_back(name);
+  REQUIRE(pieces.size() == 2);
+  for (const std::string& name : pieces) {
+    INFO(name);
+    const topo::PieceName piece = topo::ParsePiece(name);
+    CHECK(piece.qualified);
+    CHECK_FALSE(piece.ordinal);
+    CHECK(map.Resolve(name).has_value()); // by its own name, exactly
+  }
+  CHECK(*map.Resolve(pieces[0]) != *map.Resolve(pieces[1]));
 }
 
 TEST_CASE("A face the cut consumes stops resolving", "[toponaming]") {
@@ -663,4 +678,284 @@ TEST_CASE("A mirrored body is named too", "[toponaming]") {
     }
   }
   CHECK(mirrored);
+}
+
+// ---- Split pieces named by what bounds them
+// (docs/modeling/toponaming.md#split-pieces) --------------------------------
+//
+// A 40x20x10 block with a 4 mm deep slot across its top at x = 12..16: the
+// top splits in two. A sketch is attached to the RIGHT piece and a fillet
+// rounds that piece's front edge; then the cut is edited, and each case
+// asserts by centroid where both land -- or that they refuse.
+
+namespace {
+
+struct SlotBlock {
+  Document doc;
+  uint64_t base = 0, cut = 0, sketch = 0, fillet = 0;
+  std::string topName, edgeName;
+};
+
+SketchFeature& SketchById(Document& doc, uint64_t id) {
+  return *dynamic_cast<SketchFeature*>(doc.FindFeatureById(id));
+}
+
+glm::dvec3 FaceMeshCentroid(const Body& body, int face) {
+  const auto mesh = body.shape.GenerateMesh();
+  glm::dvec3 sum(0.0);
+  int n = 0;
+  for (size_t t = 0; t < mesh.triangleFaces.size(); t++) {
+    if (static_cast<int>(mesh.triangleFaces[t]) != face)
+      continue;
+    for (int k = 0; k < 3; k++) {
+      sum += glm::dvec3(mesh.vertices[mesh.indices[t * 3 + k]].position);
+      n++;
+    }
+  }
+  return n == 0 ? glm::dvec3(-1e9) : sum / static_cast<double>(n);
+}
+
+// Every face name and every edge name in the map is held by one element.
+bool NamesUnique(const ElementMap& map) {
+  std::set<std::string> faces, edges;
+  for (const auto& [i, n] : map.names)
+    if (!faces.insert(n).second)
+      return false;
+  for (const auto& [i, n] : map.edgeNames)
+    if (!edges.insert(n).second)
+      return false;
+  return true;
+}
+
+SlotBlock BuildSlotBlock() {
+  SlotBlock s;
+  Document& doc = s.doc;
+  auto baseSk = std::make_unique<SketchFeature>("Base", kXY);
+  baseSk->AddRectangle({0, 0}, {40, 20});
+  doc.AddFeature(std::move(baseSk));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Block", doc.GetFeature(0)->GetId(), 10.0, ExtrudeMode::NewBody));
+  s.base = doc.GetFeature(1)->GetId();
+  auto slotSk = std::make_unique<SketchFeature>(
+      "SlotSketch", SketchPlane(PlaneType::XY, glm::dvec3(0, 0, 6)));
+  slotSk->AddRectangle({12, -1}, {16, 21});
+  doc.AddFeature(std::move(slotSk));
+  doc.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Slot", doc.GetFeature(2)->GetId(), 4.0, ExtrudeMode::Cut));
+  s.cut = doc.GetFeature(3)->GetId();
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 1);
+
+  // The right top piece, and its front edge, by geometry.
+  const Body& body = doc.GetBodies().at(0);
+  for (const auto& [idx, name] : body.elementMap.names) {
+    glm::dvec3 c, n, u;
+    if (body.shape.FacePlane(idx, c, n, u) && n.z > 0.99 &&
+        std::abs(c.z - 10) < 1e-6 && c.x > 16)
+      s.topName = name;
+  }
+  const auto polys = body.shape.GenerateEdgePolylines();
+  for (const auto& [idx, name] : body.elementMap.edgeNames) {
+    if (idx < 0 || static_cast<size_t>(idx) >= polys.size())
+      continue;
+    const auto& poly = polys[static_cast<size_t>(idx)];
+    bool front = !poly.empty();
+    double x = 0;
+    for (const glm::vec3& p : poly) {
+      front = front && std::abs(p.y) < 1e-4 && std::abs(p.z - 10) < 1e-4;
+      x += p.x;
+    }
+    if (front && x / static_cast<double>(poly.size()) > 16)
+      s.edgeName = name;
+  }
+  REQUIRE_FALSE(s.topName.empty());
+  REQUIRE_FALSE(s.edgeName.empty());
+
+  auto onTop = std::make_unique<SketchFeature>("OnTop", kXY);
+  onTop->faceRef = ElementRef{s.base, s.topName};
+  onTop->AddRectangle({-1, -1}, {1, 1});
+  doc.AddFeature(std::move(onTop));
+  s.sketch = doc.GetFeature(4)->GetId();
+  doc.AddFeature(std::make_unique<FilletFeature>(
+      "Round", std::vector<ElementRef>{{s.base, s.edgeName}}, 1.0));
+  s.fillet = doc.GetFeature(5)->GetId();
+  REQUIRE(doc.Regenerate());
+  return s;
+}
+
+// Where the sketch sits (its plane origin, the face's centroid) and where
+// the fillet's face is, in x.
+double SketchX(SlotBlock& s) {
+  return SketchById(s.doc, s.sketch).plane.GetOrigin().x;
+}
+double FilletX(const SlotBlock& s) {
+  const Body& body = s.doc.GetBodies().at(0);
+  const std::string g = ";G" + std::to_string(s.fillet);
+  for (const auto& [idx, name] : body.elementMap.names)
+    if (name.size() > g.size() &&
+        name.compare(name.size() - g.size(), g.size(), g) == 0)
+      return FaceMeshCentroid(body, idx).x;
+  return -1e9;
+}
+
+// Applies `edit` to the slot sketch's lines (by line index 0..3).
+void EditSlot(SlotBlock& s, const std::function<void(sketch::Line&)>& edit) {
+  SketchFeature& sk = SketchById(s.doc, s.cut - 1);
+  for (auto& e : sk.entities)
+    if (auto* line = std::get_if<sketch::Line>(&e))
+      edit(*line);
+}
+
+void ExpectOnRightPiece(SlotBlock& s, double from) {
+  const Feature* sk = s.doc.FindFeatureById(s.sketch);
+  const Feature* fi = s.doc.FindFeatureById(s.fillet);
+  INFO("sketch error: " << sk->GetError() << " warning: " << sk->GetWarning());
+  INFO("fillet error: " << fi->GetError() << " warning: " << fi->GetWarning());
+  CHECK(sk->GetError().empty());
+  CHECK(fi->GetError().empty());
+  CHECK(sk->GetWarning().empty());
+  CHECK(fi->GetWarning().empty());
+  CHECK(SketchX(s) > from);
+  CHECK(SketchX(s) < 40);
+  CHECK(FilletX(s) > from);
+  CHECK(FilletX(s) < 40);
+}
+
+} // namespace
+
+TEST_CASE("A split piece is named by what bounds it, and keeps it",
+          "[toponaming]") {
+  SlotBlock s = BuildSlotBlock();
+  // Named by the block's right wall and the slot's wall, nothing else: the
+  // front and back walls bound both pieces, so they tell nothing apart.
+  const std::string b = std::to_string(s.base), c = std::to_string(s.cut);
+  for (const std::string& name : {s.topName, s.edgeName}) {
+    INFO(name);
+    const topo::PieceName piece = topo::ParsePiece(name);
+    CHECK(piece.qualified);
+    CHECK_FALSE(piece.ordinal);
+    REQUIRE(piece.boundedBy.size() == 2);
+    CHECK(piece.boundedBy[0].rfind(b + "/g", 0) == 0);
+    CHECK(piece.boundedBy[0].find(';') == std::string::npos);
+    CHECK(piece.boundedBy[1].rfind(c + "/g", 0) == 0);
+    CHECK(piece.boundedBy[1].ends_with(";M" + c));
+  }
+  CHECK(s.topName.rfind(b + "/cap1;M" + c + "[", 0) == 0);
+  CHECK(NamesUnique(s.doc.GetBodies().at(0).elementMap));
+  ExpectOnRightPiece(s, 16);
+
+  SECTION("the slot moved") {
+    EditSlot(s, [](sketch::Line& l) {
+      l.a.x += 16;
+      l.b.x += 16;
+    });
+    s.doc.Regenerate();
+    ExpectOnRightPiece(s, 32);
+  }
+  SECTION("the slot resized") {
+    EditSlot(s, [](sketch::Line& l) {
+      if (std::abs(l.a.x - 16) < 1e-9)
+        l.a.x = 18;
+      if (std::abs(l.b.x - 16) < 1e-9)
+        l.b.x = 18;
+    });
+    s.doc.Regenerate();
+    ExpectOnRightPiece(s, 18);
+  }
+  SECTION("a second slot on the far side") {
+    SketchById(s.doc, s.cut - 1).AddRectangle({4, -1}, {6, 21});
+    s.doc.Regenerate();
+    ExpectOnRightPiece(s, 16);
+  }
+  CHECK(NamesUnique(s.doc.GetBodies().at(0).elementMap));
+}
+
+TEST_CASE("A second slot through the piece refuses, naming both pieces",
+          "[toponaming]") {
+  SlotBlock s = BuildSlotBlock();
+  SketchById(s.doc, s.cut - 1).AddRectangle({36, -1}, {38, 21});
+  CHECK_FALSE(s.doc.Regenerate());
+  CHECK(NamesUnique(s.doc.GetBodies().at(0).elementMap));
+  for (uint64_t id : {s.sketch, s.fillet}) {
+    const std::string& error = s.doc.FindFeatureById(id)->GetError();
+    INFO(error);
+    // Today this landed on the 2 mm sliver at x = 38..40 and said nothing.
+    REQUIRE_FALSE(error.empty());
+    CHECK(error.find("split by Slot (" + std::to_string(s.cut) + ")") !=
+          std::string::npos);
+    CHECK(error.find("pick the one you meant") != std::string::npos);
+    // Both candidates: the sliver and the middle piece, each quoted.
+    size_t quotes = 0;
+    for (char c : error)
+      quotes += c == '\'' ? 1 : 0;
+    CHECK(quotes >= 6);
+  }
+}
+
+TEST_CASE("A base drawn from the other corner never lands on the left piece",
+          "[toponaming]") {
+  SlotBlock s = BuildSlotBlock();
+  // The same four line ids, the rectangle turned half a turn: each line now
+  // lies where the opposite one did.
+  SketchFeature& baseSk = *dynamic_cast<SketchFeature*>(s.doc.GetFeature(0));
+  for (auto& e : baseSk.entities)
+    if (auto* l = std::get_if<sketch::Line>(&e)) {
+      l->a = glm::dvec2(40, 20) - glm::dvec2(l->a);
+      l->b = glm::dvec2(40, 20) - glm::dvec2(l->b);
+    }
+  s.doc.Regenerate();
+  CHECK(NamesUnique(s.doc.GetBodies().at(0).elementMap));
+  const Feature* sk = s.doc.FindFeatureById(s.sketch);
+  const Feature* fi = s.doc.FindFeatureById(s.fillet);
+  if (sk->GetError().empty())
+    CHECK(SketchX(s) > 16);
+  if (fi->GetError().empty())
+    CHECK(FilletX(s) > 16);
+}
+
+TEST_CASE("A stored positional piece name resolves as it did, and warns",
+          "[toponaming]") {
+  SlotBlock s = BuildSlotBlock();
+  // What the build before qualified names saved for the right piece: the
+  // first piece in result order.
+  auto* sk = dynamic_cast<SketchFeature*>(s.doc.FindFeatureById(s.sketch));
+  sk->faceRef.name =
+      std::to_string(s.base) + "/cap1;M" + std::to_string(s.cut) + ".0";
+  s.doc.Regenerate();
+  INFO(sk->GetError());
+  CHECK(sk->GetError().empty());
+  CHECK(SketchX(s) > 16);
+  CHECK(sk->GetWarning().find("position") != std::string::npos);
+}
+
+TEST_CASE("Pieces nothing tells apart are numbered, and say so",
+          "[toponaming]") {
+  Document cyl;
+  cyl.AddFeature(std::make_unique<CylinderFeature>(
+      "C", glm::vec3(0, 0, 0), glm::vec3(0, 0, 1), 10.0, 10.0));
+  REQUIRE(cyl.Regenerate());
+  const Body& body = cyl.GetBodies().at(0);
+  // A slab through the axis whose faces carry no names (an unnamed tool):
+  // the two halves of the wall touch the same two caps and nothing else that
+  // is named, so only their order tells them apart.
+  const CADShape slab(
+      BRepPrimAPI_MakeBox(gp_Pnt(-1, -15, -1), 2.0, 30.0, 12.0).Shape());
+  ElementMap out;
+  const CADShape cut = topo::BooleanNamed(BooleanOp::Subtract, body.shape,
+                                          body.elementMap, slab, {}, 9, out);
+  REQUIRE(cut.IsValid());
+  CHECK(NamesUnique(out));
+  int walls = 0;
+  for (const auto& [idx, name] : out.names) {
+    glm::dvec3 c, n, u;
+    if (cut.FacePlane(idx, c, n, u))
+      continue; // a cap half, or the slab's (unnamed) walls
+    INFO(name);
+    const topo::ElementOrigin o = topo::DecodeElementName(name);
+    CHECK(o.piece.piece);
+    CHECK(o.piece.ordinal); // what list_elements reports as `ordinal: true`
+    CHECK_FALSE(o.piece.qualified);
+    walls++;
+  }
+  CHECK(walls >= 2); // OCC may split the half holding the seam once more
 }
