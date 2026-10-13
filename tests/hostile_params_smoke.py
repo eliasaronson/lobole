@@ -37,6 +37,7 @@ its class: the sweep detects what it claims.
 """
 import argparse
 import json
+import json.scanner
 import os
 import shutil
 import socket
@@ -56,6 +57,26 @@ TIMEOUT_S = 30.0
 # An answer may echo a value nested 10 000 deep, which json.loads walks
 # recursively.
 sys.setrecursionlimit(100000)
+
+
+def loads(text):
+    """json.loads that survives an answer nested 10 000 deep on every Python.
+
+    The C scanner counts its depth against the interpreter's C recursion
+    limit, which sys.setrecursionlimit does not raise on 3.12 (Ubuntu 24.04's
+    python3, and the GitHub runner's): there it gives up near 1 000 levels
+    while 3.14 measures the real stack and decodes it. The pure-Python
+    scanner's frames are Python frames, which the limit above does cover, so
+    only an answer the C scanner refuses pays for it."""
+    try:
+        return json.loads(text)
+    except RecursionError:
+        return _PY_DECODER.decode(text if isinstance(text, str)
+                                  else text.decode("utf-8"))
+
+
+_PY_DECODER = json.JSONDecoder()
+_PY_DECODER.scan_once = json.scanner.py_make_scanner(_PY_DECODER)
 
 # Findings recorded in docs/known-bugs.md and not fixed yet: reported, not
 # failed. Each entry names the doc that says why; delete it with the fix.
@@ -220,7 +241,7 @@ class Conn:
         while True:
             line = self.read_line()
             try:
-                msg = json.loads(line)
+                msg = loads(line)
             except ValueError:
                 return None, [f"an answer that is not JSON: {line[:200]!r}"]
             if isinstance(msg, dict) and msg.get("id") == rid:
@@ -766,7 +787,7 @@ def sweep_raw(sw):
             while True:
                 line = c.read_line()
                 try:
-                    msg = json.loads(line)
+                    msg = loads(line)
                 except ValueError:
                     sw.fail("answer", label, f"not JSON: {line[:200]!r}")
                     continue
