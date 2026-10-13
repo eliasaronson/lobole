@@ -162,8 +162,20 @@ run_build() {
   shift
   bld=("$@")
   mkdir -p "$root/.ci-local"
-  if nix-shell shell.nix --run "cmake ${cfg[*]}" > "$log" 2>&1 \
-     && nix-shell shell.nix --run "cmake --build ${bld[*]}" >> "$log" 2>&1; then
+  # A CMake cache keeps the store paths it found, so a tree configured before
+  # shell.nix or nixpkgs moved goes on linking the old libraries, and passes
+  # (docs/packaging/README.md#gcc-16-and-ipa-cp-clones). The environment's
+  # link flags name every library's store path: when they change, the tree is
+  # configured afresh.
+  local tree="${bld[0]}" stamp
+  stamp="$("$root/tools/nix-run" 'echo "$NIX_LDFLAGS $NIX_CFLAGS_COMPILE"' | sha256sum | cut -c1-16)"
+  if [ -f "$tree/CMakeCache.txt" ] && [ "$(cat "$tree/.nix-env-stamp" 2>/dev/null)" != "$stamp" ]; then
+    step "$name: the nix environment moved; configuring $tree afresh"
+    rm -f "$tree/CMakeCache.txt"
+  fi
+  if "$root/tools/nix-run" "cmake ${cfg[*]}" > "$log" 2>&1 \
+     && "$root/tools/nix-run" "cmake --build ${bld[*]}" >> "$log" 2>&1; then
+    echo "$stamp" > "$tree/.nix-env-stamp"
     return 0
   fi
   tail -40 "$log"
@@ -211,7 +223,7 @@ if [ "$run_nix" = 1 ]; then
   step "build without the test engine"
   run_build no-te -S . -B .ci-local/build-no-te -G Ninja -DCMAKE_BUILD_TYPE=Release -DENABLE_TEST_ENGINE=OFF \
     -- .ci-local/build-no-te -j"$jobs"
-  if nix-shell shell.nix --run "python3 tests/headless_smoke.py .ci-local/build-no-te/lobole" > /dev/null \
+  if "$root/tools/nix-run" "python3 tests/headless_smoke.py .ci-local/build-no-te/lobole" > /dev/null \
      && ! .ci-local/build-no-te/lobole --gui-tests --hidden 2>/dev/null; then
     ok "engine-free build works and refuses --gui-tests"
   else
