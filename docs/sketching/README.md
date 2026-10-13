@@ -13,7 +13,8 @@ in the file; the UI and expressions show degrees.
 | what | where |
 |---|---|
 | data model, entity ops (add/delete/split/trim/mirror/fillet/pattern/offset, derived ops, images) | `src/core/features/SketchFeature.{h,cpp}` |
-| PlaneGCS adapter, drag sessions, DOF diagnosis | `src/core/sketch/SketchSolver.{h,cpp}` |
+| PlaneGCS adapter, drag sessions, DOF diagnosis, value edits (continuation) | `src/core/sketch/SketchSolver.{h,cpp}` |
+| orientations a value edit must keep, `MeasureDimension` (pure geometry) | `src/core/sketch/SketchOrientation.{h,cpp}` |
 | loops, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
 | text labels: fonts, glyph layout, box corners | `src/core/sketch/SketchText.{h,cpp}`, the Hershey data `src/core/sketch/HersheyRomanSimplex.inc` |
 | snap/auto-constraint inference (pure, camera-free) | `src/core/sketch/SketchInference.{h,cpp}` |
@@ -244,6 +245,18 @@ sketch LOADED with one (hand-written JSON, an older build) carries a
 regeneration warning naming the constraint, because it solves as if absent
 while the sketch looks constrained.
 
+A dimension VALUE the sketch cannot take is refused too, in the same words
+on every path ([Solving](#solving) says how it is found):
+`radius (constraint 4) = 49 cannot be met`, `distance (constraint 7) = 51
+would mirror the triangle of constraints 5, 6, 7`, `radius (constraint 4) =
+5000 would turn arc 3 inside out` (arc 3 is the entity id). The GUI's
+inline editor shows it as "Not changed: …" and keeps the old value,
+expression and geometry with no undo record; `modify_feature` throws it and
+leaves the document unchanged; a regeneration (`set_variable` on a variable
+a dimension reads) keeps the previous geometry and carries it as the
+sketch's warning, "…, keeping the previous geometry", in the `regen` of the
+call that caused it.
+
 ### Ellipses and splines
 
 An ellipse is PlaneGCS's own `GCS::Ellipse`: centre, `focus1` (at
@@ -473,21 +486,77 @@ entity ids.
 Held out of the unknowns (fixed): datum geometry, `Fixed` points, linked-copy
 outputs, external geometry, and expression-driven coordinates.
 
+**A value edit never turns the sketch over.** A sketch has more than one
+solution for most values -- a triangle and its mirror image, an arc and its
+complement -- and one solve lands in whichever basin is nearest. The side
+guards in `Load` hold what a constraint can see (line–circle tangency and
+`DistancePL` pin their side at load, a tangent at a shared end keeps 0 or π,
+circle–circle tangency keeps inside/outside, `DistanceX/Y` and `Angle` are
+signed). What no constraint sees is listed by `FindOrientations`
+(`SketchOrientation.h`): every triangle of `Distance` edges between corners
+(the points `Coincident` joins; two held corners count as an edge) with a
+free corner, its sign the cross product of its corners; and every arc the
+solver moves, its sign which side of its chord the centre is on (sweep
+against π). Capped at 256 triangles and a work limit, so a large sketch
+pays nothing noticeable. An orientation counts only where it is clear: a
+triangle's height over 1/1000 of its longest side, an arc's sweep more than
+1e-3 rad from π.
+
+`Solver::SolveValueEdit(changes)` runs after `Load` on the sketch carrying
+the new values, seeded with the pre-edit geometry; each `ValueChange` is a
+constraint's old value (`MeasureDimension` on the seed: what the geometry
+measures, so a ref swap or a reflected seed reads as the flip it is) and
+its new one. It solves in one jump; if that solves and no clear orientation
+turned, that is the answer (one solve plus the check). Otherwise it
+**continues**: the changed dimensions go back to their old values and step
+toward the new ones in sixty-fourths, starting half-way; a step that solves
+and keeps every orientation clear where it started is taken and the next
+doubles, one that does not is undone and halves, down to a sixty-fourth,
+within 160 solves. Steps compare with the state they start from, so a sweep
+that passes 180° continuously is accepted (near π it is not clear); a
+triangle cannot be carried across, because side lengths stepped linearly
+stay inside the triangle inequalities and never pass a flat one. An angle
+steps in its stored signed value from the turn nearest its new one. A
+refused edit leaves the solver at the pre-edit geometry with `refusal` and
+`flipped` (the constraints of the orientation that turned) set. Each step
+re-solves without reloading: PlaneGCS starts every solve from the reference
+`initSolution` stored, so a taken step re-stores it and an undone one goes
+back to it. The cost is small beside the load's own diagnosis.
+
+Every value edit goes through it: the GUI inline editor
+(`ApplyDimensionEdit`, `SketchDimensionDraw.cpp`), `modify_feature`'s
+re-solve of a sketch whose dimension values changed (`RemoteModeling.cpp`),
+and `SketchFeature::Execute`'s re-solve of expression-driven dimensions,
+whose old values are what the stored geometry measures. Expression-driven
+coordinates are written into the entities before `Execute`, so their edit
+is the one jump -- still checked. `add_constraint(s)` is not a value edit
+(the geometry was never solved for the new constraint) and keeps its single
+solve. PlaneGCS's own numerical reach is the limit: an arc on a 100 mm chord
+converges up to a radius of about 1e6 and not at 1e7, in one jump or in
+steps, so 1e7 is refused as not met.
+
 **Dragging** builds the solver once per drag: `BeginDrag(points)` (or
 `BeginRadiusDrag(circleId)`) pins the dragged points to targets with a
 temporary coincident **down-weighted by `rescaleConstraint(…, 0.01)`**, so real
 constraints dominate and a heavily constrained sketch does not oscillate; each
 frame `SetDragTargets`/`SetRadiusTarget` then `SolveDrag` — no rebuild.
 `Begin*` returns false when the sketch is already conflicting and the UI
-refuses the drag. UI modes (`SketchDragSession::Mode`): `Point`, `LineBody`
+refuses the drag. Every frame solves from the drag's starting geometry (the
+reference PlaneGCS stored at `Begin*`), not from the last frame. `SolveDrag`
+checks each frame's result against the last frame's orientations; on a flip
+it steps the target from the last frame's toward the cursor, halving as a
+value edit does, and keeps the furthest step that holds, so the sketch stops
+short of mirroring and follows again when the cursor comes back
+(`DragGuard::None` is the unguarded solve, for tests). UI modes (`SketchDragSession::Mode`): `Point`, `LineBody`
 (both endpoints, rigid delta), `CircleRim` (radius), and `SketchTranslate`
 (dragging a line that carries a driving dimension moves the whole sketch
 instead of fighting the dimension).
 
 `SketchFeature::Execute` re-solves only when a dimension or coordinate is
 expression-driven or external geometry exists (after `VisitExprs` has
-refreshed the values). A failed solve there keeps the last good positions and
-logs a warning rather than failing the history.
+refreshed the values), as a value edit (above). A refused one keeps the last
+good positions and sets the sketch's warning rather than failing the
+history.
 
 ## Profiles
 
@@ -612,7 +681,7 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | method | params | notes |
 |---|---|---|
 | `add_feature` | `feature` | a Sketch with `plane`, `entities`, `constraints`; returns `entity_ids` |
-| `modify_feature` | `feature, feature_id \| index` | replaces the whole sketch JSON |
+| `modify_feature` | `feature, feature_id \| index` | replaces the whole sketch JSON; changed dimension values are re-solved from the sent geometry, and a value that cannot be met or would flip the sketch is refused ([Refusals](#refusals)) |
 | `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm, or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. One solve, one undo step |
 | `add_constraints` | `sketch_id, constraints[]` | many at once: one solve, regen, undo step |
 | `delete_entity` | `sketch_id, entity_id` | with the constraint cleanup above |
@@ -639,9 +708,17 @@ link; `modify_feature` with an edited sketch JSON covers them.
 
 ## Tests
 
-- `tests/test_sketch_solver.cpp` `[solver]` `[arc]` `[drag]` `[delete]` —
-  constraint kinds, arcs, datum references, drag sessions, conflict mapping,
-  delete-time coincidence repair.
+- `tests/test_sketch_solver.cpp` `[solver]` `[arc]` `[drag]` `[delete]`
+  `[flip]` — constraint kinds, arcs, datum references, drag sessions,
+  conflict mapping, delete-time coincidence repair; value edits that one
+  jump flips or fails (an arc's radius to 5000 and 1e6, a triangle's sides
+  10000 → 51, an unreachable 49), each first shown flipping or failing
+  without the guard, a sweep passing 180° accepted, one solve when nothing
+  can turn, and a drag that would mirror a hinged triangle.
+- `tests/regen_honesty_smoke.py` — a variable driving a radius out of
+  reach warns in `set_variable`'s `regen`, naming the sketch and the
+  dimension; `modify_feature` to 5000 keeps the minor arc, to 49 is
+  refused with the document unchanged.
 - `tests/test_sketch_feature.cpp` `[sketch]` `[ids]` `[io]` `[pattern]`
   `[undo]` — id stability, split/trim, mirror, fillet, pattern replay and id
   stability, linked copies (sync, break link, vanished source), legacy-rect
@@ -660,7 +737,8 @@ link; `modify_feature` with an edited sketch JSON covers them.
   ASCII glyph of the outline font as a profile, a cut label's face names,
   stroke text in profiles, a dimensioned box corner.
 - GUI: `src/app/guitests/GuiTestsSketch.cpp` (`sketch/*`, `constraints/*`,
-  `trim/*`, `mirror/*`, `infer/*`, `drag/*`, `region/*`, `dims/*`, reference
+  `trim/*`, `mirror/*`, `infer/*`, `drag/*`, `region/*`, `dims/*` (among
+  them `dims/edit_refuses_flip`), reference
   image panel and drag), `GuiTestsViewport.cpp` (`pick/*`, `select/*`),
   `GuiTestsShell.cpp` (`keys/*`), `GuiTestsModeling.cpp` (`fillet/*`,
   `pattern/*`).

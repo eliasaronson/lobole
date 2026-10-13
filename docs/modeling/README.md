@@ -203,7 +203,9 @@ from sketches.
 - **Edited through what it stored.** `modify_feature` on the sketch with a
   dimension's `value` changed re-solves the sketch before committing it, so
   the geometry follows the number (a literal dimension is not re-solved at
-  regeneration, only an expression-driven one); a size given as an
+  regeneration, only an expression-driven one), and refuses a value the
+  sketch cannot take or that would flip it
+  ([sketching](../sketching/README.md#refusals)); a size given as an
   expression follows `set_variable`; the height is the extrude's
   `distance`.
 - **Refused, naming what is accepted**: a missing or unknown `on`, the old

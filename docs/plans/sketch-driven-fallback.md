@@ -42,9 +42,9 @@ A driven dimension:
   slot spans no tags, so the tag→index mapping holds) and it never appears
   in the conflict lists or the DOF;
 - **has no input.** Its value is what the geometry measures,
-  `sketch::MeasureDimension` (`SketchOrientation.h`, from
-  [sketch-flip-refusal](sketch-flip-refusal.md); whichever plan lands first
-  adds it), computed where it is read: the label, the serializer and
+  `sketch::MeasureDimension` (`SketchOrientation.h`, which value edits
+  already use: [solving](../sketching/README.md#solving)), computed where it
+  is read: the label, the serializer and
   `get_state`. It is never stored as a separate truth, so it cannot go stale.
   A `valueExpr` on a driven dimension is refused;
 - **is drawn in parentheses in a muted colour**, from a theme token next to
@@ -113,8 +113,6 @@ now, painted red; nothing is converted for them.
   `kVersionPending`.
 - `src/core/sketch/SketchSolver.{h,cpp}`: skip driven constraints;
   `JudgeAddition`.
-- `src/core/sketch/SketchOrientation.{h,cpp}`: `MeasureDimension`, if
-  [sketch-flip-refusal](sketch-flip-refusal.md) has not added it.
 - `src/ui/SketchOps.cpp` (`ApplySketchConstraint`, the toggle),
   `src/ui/SketchTools.cpp` (`ApplyInferred`), `src/ui/SketchDimensions.cpp`
   (driven fallback), `src/ui/SketchDimensionDraw.cpp` (label, no editor,
