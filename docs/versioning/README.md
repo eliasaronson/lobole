@@ -86,7 +86,7 @@ a load that executed nothing.
 **The blob is only an accelerator.** On load the recipe is read first and
 the blob is offered to the document (`Document::AdoptBakedGeometry`). The one
 regeneration that follows compares the chain hash it computes
-(`Document::TipChainHash`, the same hash the regeneration prefix cache keys
+(`Document::TipChainHash`, the same hash the regeneration cache keys
 on, over every feature's JSON plus the active configuration's suppression)
 with the blob's:
 
@@ -121,10 +121,12 @@ Consequences:
 - **A different OCC version loads the blob anyway**, with a log line.
   Rebuilding could reorder faces and move the element names that dimensions
   and mates reference; the geometry the author saw is the geometry loaded.
-- **Only the tip is stored.** The prefix cache is seeded with hash-only
-  placeholder entries (`RegenCacheEntry::bodiesValid == false`) plus the tip,
-  so a later regeneration with no edit is free, but the first edit rebuilds
-  from the start.
+- **Only the tip is stored.** The regeneration cache is seeded with
+  hash-only placeholder entries (`RegenCacheEntry::bodiesValid == false`)
+  plus the tip, none holding a clone of its feature, so a later regeneration
+  with no edit is free, but the first edit rebuilds from the start, and so
+  does the first return to the opened state (nothing evaluated it in this
+  session to return to).
 
 `Document::CopyWithGeometry` uses the same mechanism for an in-memory copy
 (a motion study's snapshot of an assembly): the copy is offered the source's

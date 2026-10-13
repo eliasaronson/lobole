@@ -56,7 +56,8 @@ against an overlay:
 - **Regen cache.** A variable override reaches the cache key through the
   evaluated field values. Effective suppression is folded into the chain
   hash explicitly (`"|cfg-suppressed"`). Together these mean that switching
-  configurations re-executes only the affected suffix of the feature list.
+  configurations re-executes only the affected suffix of the feature list,
+  and switching back to one evaluated before executes nothing.
 
 `set_variable` always edits the **base** expression. A configuration's
 overrides are edited only through the configuration surface, so it is

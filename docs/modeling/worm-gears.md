@@ -223,12 +223,13 @@ way the teeth were cut (`replicated` or `whole`).
 
 **Reuse.** The last four wheels built are kept by their exact inputs: the
 blank's body (the same shape, not an equal one), its names, and every
-number the wheel reads. Undoing or redoing an edit to a wheel, or switching
-a configuration back, gives the inputs back unchanged. The regeneration
-cache has dropped the wheel by then, since it keeps only the one history it
-last ran, so the wheel would otherwise be built again. The report's
-`reused` says so. An edit after the wheel never rebuilds it (the cache keeps
-everything before the edit), and an edit before it changes its inputs.
+number the wheel reads. Within one document the regeneration cache already
+returns an undone or redone wheel edit, or a configuration switched back,
+without executing anything ([README.md](README.md#regeneration)); the memo
+serves a wheel that executes again on the same blank with the same numbers,
+which that cache cannot see: a change the wheel does not read (its name), or
+an evaluation the cache has evicted. The report's `reused` says so. An edit after the
+wheel never rebuilds it, and an edit before it changes its inputs.
 
 The wheel still regenerates on the main thread. Regeneration is synchronous
 by design ([../ui/long-operations.md](../ui/long-operations.md#what-is-not-on-the-registry)), and at 2 s
@@ -332,7 +333,8 @@ only 2.25·m deep.
   through its web split, replicated and its holes' volume exact;
 - `[slow]`: a drilled wheel replicated with every face named once and the
   holes keeping their names; a hole through the rim falling back to the
-  whole cut; an undone wheel edit coming back from its inputs.
+  whole cut; an undone wheel edit coming back from the regeneration cache,
+  and a renamed wheel from its memo.
 
 GUI: `worm/editor_picks_the_blank_and_sets_hand` and
 `worm/wheel_editor_reports_the_pair`, plus the `defaults/worm` and

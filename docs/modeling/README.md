@@ -68,19 +68,39 @@ Topic pages:
    reference images, `appearance`, `face_appearance`, `material` (all are
    re-stamped onto bodies by a post-pass keyed on `createdBy`). An Import hashes its file's content
    instead of its path, so a save that moves the file into the project is not
-   a changed part.
-3. **Prefix cache.** Each cache entry holds the hash and the body list after
-   that feature. Regeneration restores the bodies at the first divergence and
-   executes from there; editing the last feature re-runs one feature. Retained
-   feature-internal state (solved sketches, cached datum planes) is safe
-   because a matching prefix implies identical inputs — this is why the cache
-   is chain-invalidated rather than dependency-tracked. `LastRegenStats()`
-   reports `{executed, cached}`; `ClearRegenCache()` resets it.
-   `TipChainHash()` is the last entry's hash; baked geometry and the Derived
-   stale check key on it (baked geometry is described in the versioning area).
-   The cache holds one history, so an undone edit rebuilds what follows it;
-   the worm wheel also keeps its
-   last few results by their exact inputs
+   a changed part. A sketch standing on a face, a datum plane, another sketch
+   or a frame leaves its `plane` out too: Execute works it out and writes it
+   back, so it is an output, and keyed on it the hash carried the plane of
+   whichever history last ran the sketch.
+3. **Regeneration cache.** One entry per feature evaluation, keyed on its
+   chain hash: the body list after it, and a `Clone()` of the feature taken
+   right after it executed. Each feature is a lookup, so a hit is a hit
+   wherever the entry came from — the current history, or one an undo, a
+   redo, a value set back or a removal undone returns to. The chain cannot
+   re-converge once it diverges, so a run is hits up to the edit and then
+   all hits (a state seen before: nothing executes) or all misses (the tail
+   executes); editing the last feature re-runs one feature.
+   **A hit restores what Execute left on the feature**, because the object
+   may last have executed in another history: `Feature::CopyDerivedState`
+   (pure virtual, like `Clone`) copies the cut tool a Pattern reads, a
+   datum's frame, a sketch's resolved plane and solved entities, a thread's
+   overlay, the error and warning. Nearly every feature implements it as
+   `RestoreExecuted<Self>`, a whole-object copy keeping only what the hash
+   leaves out, so a member added later cannot be forgotten
+   (`test_conventions.cpp`); Import and Template copy by hand. A feature's
+   `DerivedFor()` names the evaluation its object holds, so a hit on the
+   object's own evaluation skips the copy. The cache is bounded at
+   `max(256, 3 × features)` entries, least recently used first, never an
+   entry of the current chain: on the OM615 cylinder head (389 features) a
+   full alternative history is about 130 MB resident.
+   `LastRegenStats()` reports `{executed, cached}`; `ClearRegenCache()`
+   empties it. `TipChainHash()` is the last feature's hash; baked geometry
+   and the Derived stale check key on it (baked geometry is described in the
+   versioning area). A baked open has no evaluations to return to, so the
+   first edit and the first set back after it each rebuild. A sketch whose
+   solve moves its entities keys on what they were before the solve, so the
+   first regeneration after such a move is a miss once. The worm wheel also
+   keeps its last few results by their exact inputs
    ([worm-gears.md](worm-gears.md#how-the-teeth-are-cut)).
 4. **Continue past failure.** A feature that fails records its error, adds
    nothing, and regeneration continues; downstream features see the bodies as
@@ -599,7 +619,12 @@ Headless, one file per feature (`tests/test_extrude.cpp`,
 `tests/test_boolean_volume.cpp`, with the intake flange reduced to a block,
 two swept bores and the slot, and the same case over the RPC in
 `tests/regen_honesty_smoke.py`; regeneration semantics (cache stats,
-suppression, rollback) in `tests/test_document.cpp`. `tests/test_golden.cpp`
+suppression, rollback) in `tests/test_document.cpp`. The cache is checked
+against a from-scratch rebuild in `tests/test_regen_cache.cpp`
+(`cached_evaluation_matches_from_scratch`: edits, set backs, undo and redo,
+removal and moves over the golden corpus, comparing bodies, element names
+and every feature's derived state and error after each step) and over
+generator output in `tests/regen_cache_smoke.py`. `tests/test_golden.cpp`
 loads the golden corpus (`tests/golden/`), and `tests/test_determinism.cpp`
 checks that every golden regenerates to the same volumes and the same element
 names. GUI coverage is in `src/app/guitests/GuiTestsModeling.cpp` and the

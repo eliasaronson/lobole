@@ -185,10 +185,16 @@ expression-driven field, then executes the feature list in order. If a
 feature fails, it returns false and the bodies are those of the successful
 prefix. It runs on the calling thread.
 
-- **Incremental.** A prefix cache (`RegenCacheEntry`) keys each feature on
-  the chain hash of everything up to and including it and keeps the bodies
-  after it, so an edit re-executes only from the first changed feature.
-  `LastRegenStats()` reports `executed`/`cached`, and tests assert on it.
+- **Incremental.** The regeneration cache (`RegenCacheEntry`) keys each
+  feature evaluation on the chain hash of everything up to and including it,
+  and keeps the bodies after it plus a clone of the feature as its Execute
+  left it. It remembers more than the current history, so an edit
+  re-executes only from the first changed feature, and setting a value back,
+  undo and redo execute nothing. A hit restores the feature's derived state
+  through `Feature::CopyDerivedState` (pure virtual), since the object may
+  last have run in another history
+  ([modeling](modeling/README.md#regeneration)). `LastRegenStats()` reports
+  `executed`/`cached`, and tests assert on it.
 - **Everything a feature reads must be hash-visible.** A feature exposes its
   expressions through `VisitExprs` and its references to other features
   through `VisitFeatureRefs` (pure virtual, like `Clone`); a field missing

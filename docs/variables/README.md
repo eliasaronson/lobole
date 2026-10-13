@@ -228,7 +228,7 @@ offset of one) whose plane a planar face of the part already lies on, over
 that face, is reported with the face it should be attached to (`face_ref`
 for a sketch, a frame `from_element`): attached to the world it floats, or
 is buried, the day the part changes. The faces are the ones that existed
-when it ran: the regen prefix cache's bodies, or on a part opened from baked
+when it ran: the regeneration cache's bodies, or on a part opened from baked
 geometry (which carries only the tip) the final bodies with each face's name
 cut back to what it was then -- the M steps of later features dropped, a
 face a later feature made (a G or S step) left out
