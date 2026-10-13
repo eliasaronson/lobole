@@ -13,7 +13,7 @@ in the file; the UI and expressions show degrees.
 | what | where |
 |---|---|
 | data model, entity ops (add/delete/split/trim/mirror/fillet/pattern/offset, derived ops, images) | `src/core/features/SketchFeature.{h,cpp}` |
-| PlaneGCS adapter, drag sessions, DOF diagnosis, value edits (continuation) | `src/core/sketch/SketchSolver.{h,cpp}` |
+| PlaneGCS adapter, drag sessions, DOF diagnosis, value edits (continuation), `JudgeAddition` | `src/core/sketch/SketchSolver.{h,cpp}` |
 | orientations a value edit must keep, `MeasureDimension` (pure geometry) | `src/core/sketch/SketchOrientation.{h,cpp}` |
 | loops, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
 | text labels: fonts, glyph layout, box corners | `src/core/sketch/SketchText.{h,cpp}`, the Hershey data `src/core/sketch/HersheyRomanSimplex.inc` |
@@ -23,7 +23,7 @@ in the file; the UI and expressions show degrees.
 | viewport interaction, Escape ladder | `src/ui/SketchInteraction.cpp` (`HandleSketchViewport`) |
 | drawing tools, commits, drag sessions, copy/paste | `src/ui/SketchTools.cpp` |
 | picking | `src/ui/SketchPick.cpp` |
-| constraint/construction/delete ops, DOF status | `src/ui/SketchOps.cpp` |
+| constraint/construction/delete ops, the Driven toggle, DOF status | `src/ui/SketchOps.cpp` |
 | dimension tool, dimension drawing and inline editor, glyphs | `src/ui/SketchDimensions.cpp`, `src/ui/SketchDimensionDraw.cpp` |
 | entity colours and line primitives | `src/ui/SketchOverlay.cpp` (`BuildActiveSketchPrimitives`) |
 | prompt pills | `src/ui/SketchToolOverlay.cpp` (`DrawToolPrompt`, `SketchToolPrompt`) |
@@ -183,8 +183,8 @@ returns `SIZE_MAX` for them, so **any code resolving a ref by index must test
 
 ### Constraints
 
-`sketch::Constraint {kind, a, b, c, value, labelOffset, valueExpr}`. Kinds
-(JSON strings in brackets):
+`sketch::Constraint {kind, a, b, c, value, labelOffset, valueExpr, driven}`.
+Kinds (JSON strings in brackets):
 
 - Relations: Coincident [`coincident`], Horizontal [`horizontal`], Vertical
   [`vertical`], Parallel [`parallel`], Perpendicular [`perpendicular`], Equal
@@ -232,6 +232,21 @@ Notes on how they map to PlaneGCS (`Solver::Load`):
 An unknown kind string is refused on load (`ConstraintKindFromString`), never
 read as some default kind.
 
+**Driven (reference) dimensions.** A dimension with `driven` set measures the
+sketch instead of driving it. It adds no equation: `Solver::Load` dispatches
+it like a driving one (so it is refused for exactly the same refs) and then
+takes its equations out again, leaving its tag range empty, so it never
+appears in the conflict lists or the DOF, and `FindOrientations` does not
+count it as an edge. It has no input: its value is
+`sketch::MeasureDimension` of the current geometry (`SketchOrientation.h`),
+computed where it is read — the label, the serializer, `get_state`,
+`add_constraint`'s `measured` — so it cannot go stale; the stored `value` is
+not its truth. In JSON it is `"driven": true` (omitted when false) with
+`value` written as the measure. The loader refuses `driven` on a kind that
+is not a dimension (naming the dimension kinds), on a dimension with an
+`expr`, and when it is not a boolean. Making a driven dimension driving
+takes its measured value and is judged like an addition (below).
+
 #### Refusals
 
 A constraint the solver cannot represent — a radius on an ellipse, a
@@ -244,6 +259,31 @@ the GUI's constraint commands show it ("Not added: …") and add nothing; a
 sketch LOADED with one (hand-written JSON, an older build) carries a
 regeneration warning naming the constraint, because it solves as if absent
 while the sketch looks constrained.
+
+**A constraint that constrains nothing is refused.** Every add goes through
+`sketch::JudgeAddition(before, after)` (`SketchSolver.h`): one solve of
+each, and the addition is accepted when the solve after it succeeds (unless
+the one before already failed), no constraint is conflicting or redundant
+after that was not before, and — when anything new drives — the DOF is
+strictly lower. So a sketch that is already over-constrained still takes a
+constraint that touches none of its broken ones, and adding only driven
+dimensions need not lower the DOF. A refusal names what the addition runs
+into: for a contradiction, the conflicting group PlaneGCS names; for a
+repeat, which PlaneGCS names on one side only (usually the new constraint),
+every driving constraint without which it would constrain, found by solving
+once with each left out (only on a refusal, and not past 200 constraints):
+`the sketch already fixes that (constraint 5)`, `that contradicts what the
+sketch already fixes (constraints 0, 1, 6)`. Indices are into
+`constraints`. `add_constraint(s)` refuses with it ("not added: …", adding
+"pass driven: true (and no value) to add it as a reference dimension" for a
+dimension kind) and leaves the sketch as it was; `add_constraints` judges
+the whole list in one solve and, on a refusal, steps through it to name the
+first refused spec's index (`constraints[1]: …`). The GUI's relation
+commands and a dimension typed right after drawing say "Not added: …" and
+add nothing; the Dimension tool adds the dimension driven instead
+([GUI](#gui)); inference (`ApplyInferred`) drops it silently, as it always
+did. A sketch already saved with redundant constraints loads and solves as
+before, painted red; nothing converts it.
 
 A dimension VALUE the sketch cannot take is refused too, in the same words
 on every path ([Solving](#solving) says how it is found):
@@ -639,8 +679,8 @@ origin), point-on-line (8 px), X/Y alignment with another vertex or the origin
 (8 px, a two-point Vertical/Horizontal, drawn as a dashed guide), and for a
 line segment horizontal/vertical or parallel/perpendicular to a nearby line
 (2°). Geometry is placed at the snapped position first so the solve starts
-satisfied; an inferred constraint that makes the sketch conflict or removes
-no DOF is dropped.
+satisfied; an inferred constraint that `JudgeAddition` refuses (it makes the
+sketch conflict, repeats what it says, or removes no DOF) is dropped.
 
 **Status and colour** (`UpdateSketchStatus`, `BuildActiveSketchPrimitives`):
 blue = under-defined, green = fully defined entity (all neutral when
@@ -649,7 +689,8 @@ touched by a conflicting/redundant constraint, dashed grey = construction.
 A prompt pill shows "Fully defined" or the DOF count plus the active tool's
 step (`SketchToolPrompt`: "Name (Step k/n): …"). Constraint glyphs (Y) mark
 committed constraints; the Model panel's Constraints section lists them,
-flags conflicts, and deletes one.
+flags conflicts, deletes one, and switches a dimension between driving and
+driven (its **Driven** checkbox; a driven row reads "(distance)", muted).
 
 **Dimensions**: the Dimension tool accumulates targets and infers the kind;
 while placing, the cursor zone picks horizontal/vertical/aligned. Typing a
@@ -658,6 +699,26 @@ digit right after drawing opens a dimension on the new entity
 (`ApplyDimensionEdit`); anything that is not a plain number is an expression,
 with variable completion; angles are typed in degrees; a negative value flips
 direction. Labels drag to reposition (`labelOffset`).
+
+**Driven dimensions in the GUI.** Dimensioning geometry the sketch already
+fixes reads it, as in every CAD tool: the Dimension tool
+(`CommitInferredDimension`, `OverConstrained::AddDriven`) adds a dimension
+that would over-constrain the sketch as a driven one, with the status "That
+dimension would over-constrain the sketch, so it was added as a driven
+(reference) dimension", and opens no inline editor. Its label reads the
+measure in parentheses, "(40)", in `DrivenDimensionColor` (`Theme.h`, the
+dimension colour muted), and is never painted as conflicting.
+Double-clicking it opens nothing and says "A driven dimension measures the
+sketch; make it driving to edit it". A dimension typed right after drawing
+carries a value, which a driven one cannot, so that one is refused instead
+("Not added: the sketch already fixes that (constraint 3)"). Right-clicking
+a label (a click that does not orbit the view) opens its menu, whose
+**Driven** item — like the Model panel's checkbox — toggles it
+(`SetConstraintDriven`, one undo step): made driving, it takes its measured
+value and goes through `JudgeAddition`, so one that would over-constrain the
+sketch stays driven with "Still driven: …"; made driven, it cannot
+over-constrain anything (a dimension driven by an expression is refused:
+clear the expression first).
 
 **Generative tools** open a session in the floating Tool window
 (`DrawSketchToolWindow`): Mirror collects geometry then an axis (a line,
@@ -684,9 +745,9 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | method | params | notes |
 |---|---|---|
 | `add_feature` | `feature` | a Sketch with `plane`, `entities`, `constraints`; returns `entity_ids` |
-| `modify_feature` | `feature, feature_id \| index` | replaces the whole sketch JSON; changed dimension values are re-solved from the sent geometry, and a value that cannot be met or would flip the sketch is refused ([Refusals](#refusals)) |
-| `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm, or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. One solve, one undo step |
-| `add_constraints` | `sketch_id, constraints[]` | many at once: one solve, regen, undo step |
+| `modify_feature` | `feature, feature_id \| index` | replaces the whole sketch JSON; changed dimension values are re-solved from the sent geometry, and a value that cannot be met or would flip the sketch is refused ([Refusals](#refusals)); a driven dimension's value is ignored, and one switched to driving is judged like an addition and refused when it would over-constrain the sketch |
+| `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr \| driven` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm, or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. A constraint that constrains nothing is refused ([Refusals](#refusals)). `driven: true` on a dimension kind, with none of `value`/`value_deg`/`expr`, adds a [driven dimension](#constraints) and answers `measured` (mm; radians for an angle). Every answer carries the sketch's `dof` after the add. One solve, one undo step |
+| `add_constraints` | `sketch_id, constraints[]` | many at once, each spec as `add_constraint`'s: one judgement, solve, regen, undo step; a refused spec adds nothing and is named by index; `measured` lists each spec's measure (null for a driving one) when any is driven |
 | `delete_entity` | `sketch_id, entity_id` | with the constraint cleanup above |
 | `fillet` | `sketch_id, line1, line2, radius` | returns `arc_id`; failures say why |
 | `offset` | `sketch_id, chain, distance, join_arc?` | sign of `distance` picks the side |
@@ -717,7 +778,19 @@ link; `modify_feature` with an edited sketch JSON covers them.
   jump flips or fails (an arc's radius to 5000 and 1e6, a triangle's sides
   10000 → 51, an unreachable 49), each first shown flipping or failing
   without the guard, a sweep passing 180° accepted, one solve when nothing
-  can turn, and a drag that would mirror a hinged triangle.
+  can turn, and a drag that would mirror a hinged triangle. `[driven]`: a
+  driven distance on a fully defined triangle leaves DOF 0 and reads the new
+  measure after another dimension changes it; `JudgeAddition` refuses a
+  repeated horizontal and a contradicting distance, naming what they run
+  into, judges a driven-to-driving switch, and accepts an addition to an
+  over-constrained sketch that touches none of its broken constraints.
+- `tests/sketch_constraint_refusal_smoke.py` — over RPC, on a fully defined
+  triangle: a repeated `distance_x` and a contradicting `distance` are
+  refused with the sketch unchanged; the same `distance_x` with `driven:
+  true` is added and answers `measured`; `driven` with an input or on a
+  relation is refused; `add_constraints` with one bad spec in three adds
+  nothing and names index 1; `modify_feature` switching a driven dimension
+  to driving where it would over-constrain is refused.
 - `tests/regen_honesty_smoke.py` — a variable driving a radius out of
   reach warns in `set_variable`'s `regen`, naming the sketch and the
   dimension; `modify_feature` to 5000 keeps the minor arc, to 49 is
@@ -725,7 +798,10 @@ link; `modify_feature` with an edited sketch JSON covers them.
 - `tests/test_sketch_feature.cpp` `[sketch]` `[ids]` `[io]` `[pattern]`
   `[undo]` — id stability, split/trim, mirror, fillet, pattern replay and id
   stability, linked copies (sync, break link, vanished source), legacy-rect
-  migration, serialization. Offset profiles are in `tests/test_extrude.cpp`.
+  migration, serialization (`[driven]`: a driven dimension round-trips
+  written as its measure; `driven` on a horizontal, with an `expr`, or not
+  a boolean is refused at load). Offset profiles are in
+  `tests/test_extrude.cpp`.
 - `tests/test_sketch_inference.cpp` `[inference]` `[datum]`,
   `tests/test_sketch_selection.cpp` `[selection]` — the pure passes.
 - `tests/test_spline.cpp` `[spline]` `[profile]` — evaluator vs OCC, profiles.
@@ -741,7 +817,8 @@ link; `modify_feature` with an edited sketch JSON covers them.
   stroke text in profiles, a dimensioned box corner.
 - GUI: `src/app/guitests/GuiTestsSketch.cpp` (`sketch/*`, `constraints/*`,
   `trim/*`, `mirror/*`, `infer/*`, `drag/*`, `region/*`, `dims/*` (among
-  them `dims/edit_refuses_flip`), reference
+  them `dims/edit_refuses_flip`, `dims/over_constraining_becomes_driven`,
+  `dims/toggle_driven`; and `constraints/repeat_is_refused`), reference
   image panel and drag), `GuiTestsViewport.cpp` (`pick/*`, `select/*`),
   `GuiTestsShell.cpp` (`keys/*`), `GuiTestsModeling.cpp` (`fillet/*`,
   `pattern/*`).
@@ -749,7 +826,7 @@ link; `modify_feature` with an edited sketch JSON covers them.
   migrate), `v35-linked-copy`, `v38-entity-exprs`, `v40-spline`,
   `v46-ellipse-arc`, `v49-reference-image`, `v50-linear-pattern-2d`,
   `v51-mirror-and-center-ref`, `v137-text`, `v155-ellipse-axis-ends`,
-  `v166-underlay-show-always`.
+  `v166-underlay-show-always`, `vNEXT-driven-dimension`.
 - `tests/test_sketch_curves.cpp` `[ellipse]` `[spline]` `[refusal]` —
   ellipses, elliptical arcs and splines solved: DOF, radii by axis-end
   distance through an extrude and a revolve, tangency checked as directions
