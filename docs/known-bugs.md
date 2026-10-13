@@ -48,6 +48,73 @@ the heading if it is not here yet.
   re-run with the pose nudged by ±ε and treat a volume that vanishes as
   touching.
 
+### `query_geometry` falls over on a short vector
+
+- **Symptom:** `query_geometry {normal: []}` (or `axis`, `near_point`, or
+  any array shorter than three) is refused with nlohmann's "array index 2 is
+  out of range", labelled `code: internal`, instead of naming the shape it
+  wants; `normal: [0, 0, 0]` normalises to NaN.
+- **Cause:** the handler's local `vec3` reads `a.at(0..2)` with no size or
+  zero-length check.
+- **Where:** `query_geometry` in `src/remote/RemoteInspection.cpp`.
+- **Likely fix:** read them with `remote::Vec3Param` (`RemoteHelpers.h`) and
+  refuse a zero direction. `tests/hostile_params_smoke.py` lists it under
+  `KNOWN`; delete that entry with the fix.
+
+## Modeling
+
+### A small sphere cut beside a fillet keeps a face inside the sphere
+
+- **Symptom:** a half revolve (a 10 x 20 section through 180 degrees),
+  two of its edges filleted r2.79, then a d2.5 Sphere cut on its flat face
+  next to the blend: the exact cut and the fuzzy retry both leave a face of
+  the body INSIDE the sphere, and the boolean check refuses the cut ("made
+  body 'Base' WRONG though it passes BRepCheck").
+- **Case:** `tests/fuzz/open/boolean_failed-779.jsonl` (`tools/fuzz.py
+  replay` it; it moves to `tests/fuzz/cases/` with the fix).
+- **Cause:** OpenCASCADE's cut, where the sphere's seam meets the fillet's
+  surface; the check is right to refuse it.
+- **Where:** `CheckedBooleanNamed` in `src/core/BodyMode.cpp` is where a
+  remedy would go (a retry with the tool turned about its axis, so the seam
+  falls elsewhere).
+
+### The measured box can stand off a cut sphere
+
+- **Symptom:** a box cut by a Sphere and that cut patterned round the Z axis:
+  `mass_properties` reports the body's `bbox_min.y` as -25.7 where every
+  point of it (its mesh) is within -21.25. The box called MEASURED is not.
+  `tools/fuzz.py` reports it as `wrong_way` ("a pattern circular grew the
+  bbox").
+- **Case:** `tests/fuzz/open/wrong_way-373.jsonl`.
+- **Cause:** `BRepBndLib::AddOptimal` without a triangulation bounds a
+  trimmed spherical face by more of the sphere than the face keeps.
+- **Where:** `CADShape::GetBoundingBox(tight)` in `src/cad/CADKernel.cpp`.
+- **Likely fix:** for a face on an elementary surface, bound the face's own
+  boundary and its interior extrema, or tighten against a fine mesh.
+
+### A blend face's edge names depend on what the process did before
+
+- **Symptom:** the same design, run in an instance that has just built
+  another one, names a fillet face's boundary edges differently from a
+  fresh instance: a Fillet whose edge was picked as `100/g1;G110;U0` finds
+  no such edge when the steps are replayed from nothing in the same
+  process. `tools/fuzz.py` reports it as `leak` (seed 41 after seed 37, on
+  generator 1).
+- **Cause:** a U name (`<face>;U<k>`, `topo::ApplyFallbackPasses`) numbers a
+  face's boundary edges in the order OpenCASCADE's blend builder hands the
+  face back, and that order follows its maps keyed by shape address, so it
+  moves with the process's allocation history.
+  It is not only names: a design built a second time in one process
+  (`tests/fuzz/cases/rebuild-139.jsonl`, a shell of a drilled box, replayed
+  right after its own recorded session) came out with another volume and
+  its next step's body selector missed, so the corpus and seed smokes give
+  each run an instance of its own.
+- **Where:** `FallbackPasses` in `src/core/ElementHistory.cpp`.
+- **Likely fix:** number a face's unnamed edges in an order the geometry
+  fixes (by each edge's midpoint, then its length), not the wire's order.
+  That renames U edges in saved documents, so the goldens that cite one
+  move with it.
+
 ## Scripting
 
 ### A remote `item_click` does not leave a text field focused

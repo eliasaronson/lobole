@@ -346,11 +346,17 @@ right-handed helix whichever way the extrude runs.
 
 `PatternFeature` (`src/core/features/PatternFeature.{h,cpp}`) references its
 source by feature id. `count`, `spacing` and `angle_deg` are expressions.
+`angle_deg` is the angle BETWEEN neighbouring copies, not the sweep: a full
+ring of n is 360/n, and 360 puts every copy on the seed (the cut "removed no
+material"). A pattern makes at most 10 000 copies, its angle is within ±360,
+and a linear one reaches no further than the model space (below).
 
 - A **body source**: every instance (seed plus copies) is fused and split back
   into connected solids, so touching instances merge and disjoint ones become
   separate bodies. The seed is consumed.
-- A **cut, add or Hole source** leaves no body of its own, so the pattern
+- A **cut, add or Hole source** — an Extrude, a Revolve (which a Sphere placed
+  on a body is), a Box or Cylinder in add or cut mode, a Hole — leaves no
+  body of its own, so the pattern
   repeats the source's tool (`Feature::ToolShape`) and subtracts or fuses each
   transformed copy. In the GUI the pick for this is the cut's tree row with the
   Source slot armed; a body pick resolves to the body's `createdBy`, which is
@@ -421,6 +427,39 @@ itself broken (a bent path edited into one that cannot be bent) the consumer
 names it and defers to its error, instead of claiming the path is the wrong
 kind of thing.
 
+## Sizes past the model space are refused
+
+`kModelSpaceMm` (`src/core/ModelSpace.h`) is a kilometre: OpenCASCADE's
+confusion tolerance is 1e-7 mm and a double carries about 16 digits, so past
+about 1e9 mm a coordinate cannot tell two points apart and an algorithm loops
+or crashes instead of failing. A Hole's diameter and depth, a linear
+pattern's reach (spacing × (count − 1)) and a Shell's thickness are refused
+past it, by name. A Shell is also refused at a wall of half the body's
+thinnest extent or more, which leaves no cavity.
+
+## A reshaping feature keeps only a valid solid
+
+A Fillet, Chamfer, Shell or Draft whose builder reports success on a solid
+that crosses itself is refused with `Measure::InvalidReasons` ("draft
+produced an invalid solid (self-intersecting wire, unorientable shape)"),
+and the body is left as it was; check_geometry would have called it invalid.
+A Shell that reaches past the body's own measured outside — the offset
+builder moving a face outward — is refused too: a shell hollows inward.
+
+Their builders can also fault outright on input they should refuse.
+`ArmOccSignalHandlers` (`src/cad/CADKernel.h`, the one caller of
+`OSD::SetSignal`) installs OpenCASCADE's handler without losing the crash
+handler: OCC's turns a signal into an exception only inside an
+`OCC_CATCH_SIGNALS` scope, and anywhere else prints "no catch was found" and
+calls `exit(1)`, so the handler that was there before stays for every fault
+outside one. That macro is empty in code not compiled with
+`OCC_CONVERT_SIGNALS`, which is all of ours, so the blend, shell and draft
+builders run inside `occsig::RunCatchingOccSignals` (`src/cad/OccSignals.h`),
+set up where the macro is real: a SIGSEGV in `BRepOffsetAPI_DraftAngle`
+becomes "draft failed inside OpenCASCADE (OSD_SIGSEGV …)". The fault
+long-jumps out of the algorithm's frames, so what they held may leak; it is
+the last line of defence, not a substitute for refusing the input.
+
 ## A boolean is checked before it is kept
 
 OpenCASCADE can return a boolean result that is not null, passes
@@ -451,7 +490,10 @@ kept:
   every face of the target it kept whole that has a vertex in the tool's box,
   against the TOOL — a sound solid, and for a feature a small one.
   Classifying against the target instead (hundreds of faces) cost 8% of the
-  OM615's build; this costs about 2%.
+  OM615's build; this costs about 2%. Each of those made faces, and each of
+  the tool's it kept whole, must also pass `BRepCheck_Analyzer` on its own: a
+  cut through a thin wall that left a self-intersecting wire passed every
+  other test ("left body 'Base' with an INVALID face at …").
 
 The refusal is the feature's error, so it reaches the `regen` block of the
 call that made it. It names the feature, the operation, the body, both
@@ -612,6 +654,86 @@ Reattach face… (a face-attached sketch) and Pick edges… (a fillet or chamfer
 with a dangling edge). An errored feature is red with its message as the
 tooltip. View > Show Element Names labels the hovered face with its name.
 
+## Random designs
+
+`tools/fuzz.py` (the command line) and `tools/fuzz_design.py` (the generator,
+the checks and the minimiser) build random designs against headless
+instances and check every one from outside.
+
+A **design** is a seeded sequence of steps chosen by `random.Random(seed)`
+against the state the steps before it left (list_elements, sorted by name):
+a base — a Box on Top, a sketched profile (a rectangle, a polygon, a
+rectangle closed by an arc, a notched one) extruded, or a section revolved
+part or all the way round, sometimes touching the axis — then up to eight of
+an extrude add, cut or new body on one of the body's own planar faces, a
+Box, Cylinder or Sphere on a face, a Fillet or Chamfer of one to three
+edges, a Shell with one open face, a Hole (through, blind or drilled), a
+Pattern of the last step (linear, circular or mirror), a Draft and a
+Boolean. Placements snap to a 2.5 mm grid and sizes are fractions of the
+body's own extents, so coincident faces, tangencies and seams come up as
+they do in real parts. Every feature's id is pinned from its step's index,
+a step names an earlier one as `{"$step": k}` and a face, an edge or a body
+by where it is (`$face`, `$edge`, `$body`), resolved at run time — so a
+replay, a reopen and a minimised design all name the same features.
+
+**After every step**, from the call's own answer and one `check_geometry`:
+the answer is well formed with no `nonfinite`; every failed feature states
+its measured condition; every body has a finite positive volume and a solid;
+the geometry is valid; the volume moves the right way (a cut, a Hole or a
+Shell never adds, an add never removes, a new body adds exactly one body and
+leaves the rest alone, to 1e-6 of the part's volume); and a cut stays inside
+the MEASURED box (`mass_properties`) of what it cut. **At the end**: the
+accepted steps replayed as one `batch` into a new part tab equal the
+incremental part (every body's volume, bbox and solid count to 1e-9
+relative, and the replay's own regeneration clean); undo to the start leaves
+no bodies and redo to the end gives the same bodies; and a save and reopen
+gives them again. **Three Boolean identities** per seed, from two primitives
+made as new bodies on the grid: `V(A∪B) + V(A∩B) = V(A) + V(B)` and
+`V(A−B) = V(A) − V(A∩B)` to 0.2 % (an empty intersect or subtract counts as
+0).
+
+A seed comes out `clean`; `limit` (a Fillet, Chamfer, Shell, Draft or Hole,
+or an intersect or subtract whose result is empty, refused with a message:
+undone, counted by its gist, and the design goes on — not a failure);
+`generator` (the RPC refused a call the generator made: the generator's
+bug); or a finding: `boolean_failed`, `invalid`, `wrong_way`, `identity`,
+`rebuild`, `reopen`, `undo`, `message`, `internal`, `nonfinite`, `crash`,
+`hang`, or `leak` (failed in a reused instance, clean in a fresh one: state
+the previous seed left behind). A message's **gist** is its class and first
+60 characters less digits, and the report groups seeds by it.
+
+    tools/fuzz.py run --from 0 --count 1000 [--jobs N] [--timeout 90] [--out DIR]
+    tools/fuzz.py one SEED [--design] [--minimise] [--asan] [--keep]
+    tools/fuzz.py replay CASE.jsonl
+    tools/fuzz.py self-test
+
+`run` gives each worker one headless instance (`smoke_app`'s isolation),
+`new_project` between seeds, a fresh one every 50 seeds and after any
+failure; a failing seed is run again fresh before it is reported. `--jobs`
+comes from free memory, never the core count. It writes one JSON per seed,
+the crash handler's report beside a seed that crashed, and `report.md` (the
+outcome table, the gists by count, the slowest seeds) under untracked
+`scratch/fuzz/`. A run longer than the 600 s tool cap goes in the
+background. `one --minimise` drops steps (with the steps that name them)
+while the failure keeps its class and gist, then rounds the numbers, and
+writes the case: a header `{"fuzz": {seed, class, gist, generator,
+design}}`, then the minimised design's `--record` session, which
+`tools/designer_replay.py` plays by hand (it skips the header). A failure
+that depends on timing is replayed under `tools/with-cpu-load.sh`.
+
+A fixed case lands in `tests/fuzz/cases/<class>-<seed>.jsonl`, which
+`fuzz_corpus_smoke` replays (both as recorded and with every check); one not
+fixed goes to [known-bugs.md](../known-bugs.md) with its case in
+`tests/fuzz/open/`, which nothing runs until it moves. `tools/fuzz.py case
+RUN/<seed>.json` writes a case cut at its failing step, for a failure fixed
+before it was minimised.
+`fuzz_seeds_smoke` (headless suite) runs a fixed list of clean seeds, each in
+an instance of its own, and fails on any finding and on `generator`; the list
+belongs to one `GENERATOR_VERSION`, and changes only with the generator.
+`fuzz_design.py`'s self-test, run first, feeds the checks a cut that adds, a
+union that breaks the identity and a reopen with another volume, and a
+failure planted at step 5 of 8 that needs step 2 must minimise to those two.
+
 ## Tests
 
 Headless, one file per feature (`tests/test_extrude.cpp`,
@@ -633,7 +755,8 @@ loads the golden corpus (`tests/golden/`), and `tests/test_determinism.cpp`
 checks that every golden regenerates to the same volumes and the same element
 names. GUI coverage is in `src/app/guitests/GuiTestsModeling.cpp` and the
 `defaults/*` suite, which asserts every creation tool either changes the
-document or refuses visibly.
+document or refuses visibly. Random designs (above) check the same
+invariants from outside, over designs nobody chose.
 
 Whole parts are checked by the [reference parts](reference-parts.md)
 (`tests/reference_parts.py`, `tools/ctest -L reference`): each built over

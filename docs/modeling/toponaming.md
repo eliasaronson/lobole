@@ -179,8 +179,14 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   `<prefix>/face<i>` in index order, then the fallback passes. Used by
   Import, the stored Box/Sphere/Cylinder an older document carries
   ([primitives](README.md#primitives)) (a multi-body import adds a body ordinal,
-  `<tag>/b1`) and by features that rebuild topology wholesale — shell, draft,
-  split, sweep, loft, pipe and rib tools, fasteners.
+  `<tag>/b1`) and by features that rebuild topology wholesale — split, sweep,
+  loft, pipe and rib tools, fasteners.
+- **Shell and draft** are named through their builder's own history
+  (`topo::HistoryArguments` + `topo::NamesThroughHistory`): a face left alone
+  keeps its name, a moved one takes `;M<tag>`, a shell's inner wall is
+  `<outer face>;G<tag>`. Index-order names numbered the faces in the order the
+  builder handed them back, which changes from run to run, so a draft on a
+  shelled body's inner wall picked another face after a rebuild.
 - **Holes** (`HoleFeature::NameByRole`) name each drilled face by what it is,
   keyed by the sketch point it was drilled at: `<hole>/p<entity>/bore`, and
   so on. Deleting one point renames none of the other holes. These names

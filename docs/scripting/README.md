@@ -134,7 +134,12 @@ does a drawing request waiting for its views' projection (`update_drawing`,
 `tools/designer_replay.py <port> <session.jsonl>` sends them to another
 instance in order and stops at the first failure — a reported bug becomes a
 replayable case. `replay_smoke` records a session and replays it into a
-fresh headless instance.
+fresh headless instance. A random-design case (`tools/fuzz.py`) is such a
+session with a first line `{"fuzz": {...}}` naming its seed and failure,
+which the replayer skips ([random designs](../modeling/README.md#random-designs)).
+Replays are deterministic because nothing a call creates is named at
+random: feature ids are sequential or pinned, and a sketch entity's id is a
+hash of its geometry ([sketching](../sketching/README.md#entity-ids)).
 
 ## Fan-out: several agents, several parts, one project
 

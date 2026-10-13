@@ -105,13 +105,18 @@ Every entity also has `id` and `construction`. Rules that hold everywhere:
 
 Every entity carries a stable **id**; constraints, derived ops and selections
 refer to ids, never list indices (which shift on insert/delete).
-`AddEntity` mints the id with `MintEntityId`: random, non-zero, and retried
-against the sketch's own entities. Random rather than a per-sketch counter
-because a face's stable name is `<feature>/g<entityId>` (see
+`AddEntity` mints the id with `MintEntityId`: a hash of the entity's own
+geometry (its kind, coordinates, radii, angles, text), non-zero, below the
+datum block, and retried against the sketch's own entities. Not a per-sketch
+counter, because a face's stable name is `<feature>/g<entityId>` (see
 `BuildPrismNamed`): two people editing one sketch separately would both mint
 the next counter value, and a duplicated id makes a face name — and every
 fillet, mate or drawing dimension keyed on it — ambiguous while the document
-rebuilds without complaint. A sketch that arrives with two entities sharing
+rebuilds without complaint. Not random either, because then the same calls
+built different models: the faces' names, and with them the order the
+kernel met the edges in, changed run to run, and a `--record` session that
+named a primitive's edge could not be replayed. The same geometry drawn
+again mints the same id, which is the same edge. A sketch that arrives with two entities sharing
 an id is **refused on load**. `IndexOfEntity(id)` is a linear scan (sketches
 are small, and a cached map is a desync risk).
 

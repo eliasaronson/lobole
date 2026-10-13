@@ -107,6 +107,7 @@ are upper bounds on a loaded machine; the suites print their own counts.
 | GUI | `./tools/gui-tests-xvfb.sh` | ~130 s |
 | the python `gui` ones | `tools/ctest -L pygui -j1` | ~110 s |
 | the big generators | `tools/ctest -C generators -L generators -j2` (generators/README.md#the-big-generators-as-tests) | ~6 min |
+| random designs | `tools/fuzz.py run --count 200` (docs/modeling/README.md#random-designs; background past 600 s) | ~1 min |
 
 `gui_smoke` is the SAME tests `gui-tests-xvfb.sh` runs, only serial and
 unsharded — ~365 s against ~130 s. It keeps the `gui` label so the headless

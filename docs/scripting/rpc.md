@@ -36,6 +36,15 @@ time), a capture, or `unknown method`.
 A new RPC goes in its domain module, with a row in that module's `MethodDoc`
 table beside the branch.
 
+A line that is not JSON — or that holds a number past a double, `1e400`,
+which the parser refuses rather than reading as infinity — is answered
+`{id: null, error: "parse: …"}`: the server cannot know the id. With one
+request in flight it is that request's answer, and `designer_remote.py`
+raises it as such rather than waiting for its own id. Every message goes out
+as one line of valid UTF-8: a string holding bytes that are not (a parse
+error quoting what it choked on) is written with U+FFFD in their place, never
+left to throw on a reader thread.
+
 ## The `MethodDoc` table
 
 One row per method (`src/remote/RemoteHelpers.h`):
@@ -176,6 +185,14 @@ the active tab never changed.
   state before the call: `{volume, added[], removed[]}`. Bodies key on
   `created_by`, so a zero-volume add, a body removed, or a body that split
   into two lumps is visible in the call that caused it.
+- **`nonfinite`** on any message holding NaN or infinity: JSON has no
+  spelling for them, so each is written `null`, and the message gains a
+  top-level `nonfinite: ["/result/bodies/0/volume", …]` of JSON pointers to
+  where they were; the app logs a warning naming the RPC. The call is not
+  turned into an error after the fact — a mutating one has happened.
+  `designer_remote.py` raises `NonFiniteError` on it in strict mode
+  (`Designer(strict=True)`, or `DESIGNER_REMOTE_STRICT=1`, which
+  `tests/smoke_app.py` sets, so every smoke is strict) and warns otherwise.
 - **`receipt`** on every RPC that returns a verdict — the clash sweeps of
   `interference` and `contact_report`, `check_geometry`, `check_fits`,
   `compare_geometry`, `run_motion_study`, `check_fasteners`,
@@ -232,9 +249,15 @@ mate type — is refused naming what is accepted, never replaced by a default
 (CLAUDE.md, "Refuse, don't substitute").
 
 Helpers: `remote::KnownList` (capped candidate list), `remote::IndexError`
-(ranged index), `UnknownParamError`, `TypeErrorMessage`. A kernel
-`Standard_Failure` that escapes a handler becomes "OpenCASCADE error: …"
-instead of terminating the process. `papercuts_smoke` pins the shape of
+(ranged index), `UnknownParamError`, `TypeErrorMessage`, and for reading
+one: `remote::Vec3Param` / `Vec2Param` / `QuatParam` / `NumbersParam` (a
+point, a direction, a quaternion: "'position' must be [x, y, z] (3 numbers);
+got []") and `remote::ElementParam` (a `{feature_id, element}`). A deliberate
+refusal throws `std::runtime_error`; anything else that reaches the
+dispatcher is the handler falling over and is labelled `internal`
+([structured errors](#structured-errors)). A kernel `Standard_Failure` that
+escapes a handler becomes "OpenCASCADE error: …", also `internal`, instead of
+terminating the process. `papercuts_smoke` pins the shape of
 representative refusals; when you improve one, pin it there.
 
 ### A refused call changes nothing
@@ -276,6 +299,18 @@ its G-code and then answered "unknown parameter '_timeout'". So:
   the effect undoes it where it can: `split_for_printing` and
   `topo_to_body` delete the tabs they made.
 
+- **A string holding a NUL byte is refused by the dispatcher**, anywhere in
+  the params, before any handler runs (`code: invalid_argument`, the pointer
+  in `path`): every file name, label and lookup below a handler reads a C
+  string up to its first NUL, so `"nul\0byte"` named something else.
+- **A file a call writes is checked before it is written.** Both atomic
+  writers (`DocumentIO::WriteTextAtomic` and the binary one) refuse first,
+  through `DocumentIO::AtomicTargetOk`, a path that names no file, a
+  directory, a file name past 255 bytes or a directory that does not exist,
+  and remove their temporary file when the rename fails; the exports and
+  `compare_geometry` ask the same question of every path before they mesh
+  or write anything.
+
 `refused_calls_smoke` holds the rule from outside: every method with an
 unknown key (the refusal must name it, on an assembly tab — so not
 "missing required parameter" or "switch to a part tab", which would mean
@@ -289,6 +324,55 @@ store, the background jobs. `save_print_profile` validates the whole profile
 leaves the print profile store as it was
 ([print profiles](../tolerances/README.md#print-profiles)).
 
+### The hostile sweep
+
+`refused_calls_smoke` sends the wrong TYPE. `tests/hostile_params_smoke.py`
+sends values of the right type that are still wrong — the ones that reach a
+handler and the kernel — to every method of `describe`, every key of its row,
+one value at a time: `1e400`, `1e308`, `-1`, `0`, `-0.0`, `2^64`, `""`, a
+64 KB string, `[]`, `{}`, `null` and nesting 64 deep (`--full` adds ±1e308,
+1e-308, 2^53+1, -2^63, 1.5, "NaN", an emoji, a lone surrogate, a 1 MB string,
+`[0, 0, 0]`, nesting 10 000 deep, index 999999 and more). A typed row's keys
+also get the extremes their own contract accepts (an `int>=0` gets 0, 2^31
+and 2^63-1; an enum each literal with one character changed), and a path key
+gets "", ".", "/", a directory, a file under a directory that does not exist,
+a 5000-character name and a NUL byte, all inside the scratch dir. Each value
+goes alone and inside a valid baseline where the method has one — the
+outside-the-document calls `refused_calls_smoke` holds, then one built from a
+typed row's `request_schema` with its ids from the fixture, kept only if it is
+accepted as written. It also sets every field of every fixture feature through
+`modify_feature`, sends degenerate sketch entities, the value as the whole
+params, hostile `batch` calls and `$ref`s, and raw lines on a bare socket.
+
+The fixture is `refused_calls_smoke`'s (`tests/smoke_world.py`, which holds
+`World`, `tree`, `changed`, `build_fixture` and the outside baselines for
+both) with a representative feature set on the part. A failure is: the
+instance died (the case, the app's log and its crash report are printed, and
+the sweep goes on on a fresh instance) or did not answer in 30 s (killed by
+its pid); an answer that is not one object with the request's id and exactly
+one of result or error; `code: internal`; a `nonfinite` field; a refusal that
+changed the world (dirty against the fixture saved clean, the tabs, the parts'
+identities, a job started, the files under the cwd and the scratch dir, and
+for a `NotInBatch` method the whole `World`); a refusal with no measured
+condition. An accepted hostile call is not a failure — `1e308` is a legal
+depth — and the fixture is put back. A finding not fixed yet is listed in the
+sweep's `KNOWN` table with its [known-bugs](../known-bugs.md) entry and
+reported, not failed.
+
+The methods are sharded by a stable hash of their name (the feature types'
+fields, the sketch entities, `batch` and the raw lines are units of their
+own), one ctest each: `hostile_params_<k>` (headless suite, so CI) and
+`hostile_params_full_<k>` (`slow`; `tools/ci-local.sh --asan` runs it, which
+is where UBSan reports a value narrowed past its type). Each prints its calls,
+how many were accepted and refused by the dispatcher or the handler, its
+resets and time, and its coverage: how many handlers a hostile value reached
+through a valid baseline, and how many feature types the fixture covers.
+`hostile_params_selftest` shows the sweep sees what it claims: `debug_fault`
+(refused unless `LOBOLE_ALLOW_DEBUG_CRASH=1`) plants an internal error, a NaN
+answer, a write before a refusal, an edit then a fall, and a kernel throw
+inside a `batch`, and `debug_crash` a SIGSEGV whose crash report must name
+it; each must come out as its class, and the deliberate refusals as nothing.
+
 ## `batch`
 
 `batch {calls: [{method, params}, ...], stop_on_error: true}` runs the calls
@@ -297,15 +381,21 @@ as one transaction:
 - **One regeneration.** Consecutive `Deferrable` calls run under one
   `Document::BulkEdit`; any other call flushes the pending regeneration
   first, so a `measure` or `list_elements` inside a batch never answers from
-  the geometry as it was before the batch. `regenerations` in the response
-  counts the flushes.
+  the geometry as it was before the batch. So does an `add_feature` of a
+  primitive placed `on` a face or a datum, which reads that geometry when
+  it is added: a Box and a Cylinder on its face build in one batch as they
+  do one call at a time. `regenerations` in the response counts the flushes.
 - **One undo step.** The calls' commands are coalesced into one ("Batch of N
   calls"); on an assembly tab, one snapshot.
 - **Rollback.** With `stop_on_error` (default), a call that throws rolls the
   whole batch back — the part's commands and the assembly's, drawing's and
   job's snapshots, through the same `EditMarks` a single call uses
   ([above](#a-refused-call-changes-nothing)) — and the refusal names the
-  call, the reason, what was undone and how many later calls did not run. With `false`, errors are
+  call, the reason, what was undone and how many later calls did not run.
+  Every exception counts, a kernel `Standard_Failure` included; a call that
+  fell over carries `code: internal` in its `failures[].diagnostic`. A batch
+  refused with nothing undone leaves the project saved if it was: its
+  deferred regeneration moves no history. With `false`, errors are
   reported in place and the rest run. A feature that fails to *build* is not
   a failed call; it is reported in the final `regen`, as on its own.
 - **`$ref`.** `{"$ref": n}` anywhere in a call's params is the result of the
@@ -405,7 +495,18 @@ it in fields, a `diagnostic`:
 
 `code` is `missing_argument`, `unknown_argument`, `invalid_argument` (a
 type, an enum, a range or a shape) or `stale_revision`, plus the inspection
-methods' own (`stale_snapshot`, `budget_exceeded`, …). `path` is a JSON
+methods' own (`stale_snapshot`, `budget_exceeded`, …), and **`internal`**:
+the handler fell over rather than refused. That is any exception that is not
+a `std::runtime_error` (which every deliberate refusal throws) or nlohmann's
+`type_error` and `parse_error`: `std::logic_error` and its `out_of_range` and
+`invalid_argument`, nlohmann's `out_of_range` (an `at` on a key nobody
+checked), `bad_optional_access`, `bad_alloc`, a kernel `Standard_Failure`
+that reached the last line of defence, an exception of no known type.
+`observed` is the exception's type name (`std::out_of_range`,
+`Standard_ConstructionError`). The sentence is what the exception said, and
+the call is rolled back like any other refusal (`remote/RpcErrors.h`;
+`test_conventions.cpp` holds the source to throwing `runtime_error` for a
+refusal). `path` is a JSON
 pointer under `/params`; `param` is its top-level key; `expected` is the
 schema (or, for an unknown key, the keys the method takes); `observed` is
 the value sent; `accepted` lists the values an enum or vocabulary takes, or

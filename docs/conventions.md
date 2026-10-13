@@ -252,6 +252,12 @@ not fail the build. Beyond the cases above:
 - a toolbar glyph means one thing, and a command's icon comes from
   `ui/Icons.cpp` alone;
 - nothing in `src/` is named `near` or `far` (`windows.h` macros);
+- `OSD::SetSignal` is called only by `ArmOccSignalHandlers`
+  (`src/cad/OccSignals.cpp`), which keeps the crash handler
+  ([modeling](modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid));
+- a deliberate refusal throws `std::runtime_error`: a `logic_error` family
+  throw is allowed only where reaching it is a bug, since the dispatcher
+  labels it `internal` ([rpc.md](scripting/rpc.md#structured-errors));
 - every doc path a file cites exists, down to its heading;
 - the test binary is not older than the source it is testing.
 

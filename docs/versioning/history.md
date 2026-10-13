@@ -104,9 +104,13 @@ against. The key scan excludes only known-foreign id spaces (`entity_id`,
 under-reports. Cross-document references (a mate into a part) are out of its
 scope; `Verify` is the backstop.
 
-Sketch entity ids cannot collide this way: they are minted at random, and a
-face's name is `<feature>/g<entityId>`, so with both ids unique a merged
-reference cannot silently point at a different face. What a merge can still
+Sketch entity ids cannot collide this way: each is minted from a hash of
+the entity's own geometry (`SketchFeature::MintEntityId`), so two people
+drawing different entities mint different ids, and a face's name is
+`<feature>/g<entityId>`, so with both ids unique a merged reference cannot
+silently point at a different face. The same entity drawn on both sides
+mints the same id, which the loader refuses as a duplicate rather than
+binding one name to two faces. What a merge can still
 do is combine two people's intents into a part neither designed; that is
 review's job.
 

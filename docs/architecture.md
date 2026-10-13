@@ -397,7 +397,12 @@ by the same name drift apart without any test noticing:
   alternate stack. `lobole --crash-test` crashes before there are any
   edits; the `debug_crash {kind: segv|abort|exception}` RPC crashes after
   them, and is refused unless the app was started with
-  `LOBOLE_ALLOW_DEBUG_CRASH=1`.
+  `LOBOLE_ALLOW_DEBUG_CRASH=1`; so is `debug_fault {kind}`, which fails the
+  ways a handler can without crashing, for the hostile sweep's self-test
+  ([rpc.md](scripting/rpc.md#the-hostile-sweep)). OpenCASCADE's own signal
+  handler does not replace this one: `ArmOccSignalHandlers` puts it back
+  after `OSD::SetSignal` and defers to OCC's only for a fault inside an OCC
+  catch scope ([modeling](modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid)).
 - **Every session leaves evidence only if it ends badly**
   (`src/core/io/CrashReports.{h,cpp}`). At start-up, in every mode, the app
   writes `<state>/sessions/<started>-<pid>.json` (version, build, mode, OS,
@@ -518,6 +523,12 @@ by the same name drift apart without any test noticing:
   headless run excludes. `gui_smoke` runs the same cases as
   `tools/gui-tests-xvfb.sh`, serially; the python ones also carry `pygui`, so
   they run as `tools/ctest -L pygui` rather than by excluding `gui_smoke` by name.
+- Two sweeps test from outside what no hand-picked case does:
+  `tests/hostile_params_smoke.py` sends right-typed wrong values to every
+  RPC key ([rpc.md](scripting/rpc.md#the-hostile-sweep)), and
+  `tools/fuzz.py` builds random designs and checks each against a rebuild
+  from nothing, a reopen, undo and redo and the Boolean identities
+  ([modeling](modeling/README.md#random-designs)).
 - `src/render/` and `app/main.cpp` have no unit tests; they are verified by
   the GUI suite, the pixel gate and screenshots. Low line coverage there is
   expected.
