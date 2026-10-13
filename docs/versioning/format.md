@@ -293,6 +293,7 @@ here; the golden corpus and git history cover them.
 | 173 | A Thread's `flank_angle_deg` (degrees, half the thread angle from the plane normal to the axis; omitted at the ISO/UTS 30): a custom thread's groove, overlay depth and printed major follow it; refused on a table designation and outside 15-60 at regeneration, and on load when it is not a number ([flank angle](../modeling/holes-and-threads.md#flank-angle)). And the material `tpu`, TPU 95A as printed. A build that knows neither reads a 45-degree thread as 30 or refuses the slug. Golden `v173-thread-flank` |
 | 174 | Relation kind `intermittent` (a carry, a Geneva): b steps once per `period_deg` of a, during the window [`start_deg`, `start_deg` + `duration_deg`), and stands still the rest of the period — `step` (the follower's unit, degrees for a turn), `period_deg`, `start_deg`, `duration_deg`, `motion` (`uniform` or `geneva`) and, for a Geneva, `slots` (3 or more; its step and window are −360/slots and 180 − 360/slots). An unknown motion, a Geneva under three slots and a relation missing any of them are refused on load; an older build refuses the kind by name ([intermittent](../assemblies/relations.md#intermittent)). Golden `assembly/v174-intermittent-relation` |
 | 175 | A print profile's `layer_height_mm` (the slicer preset's layer) and `z_gap_mm` (the vertical gap between two parts printed one over the other that comes apart: whole layers of `layer_height_mm`), each omitted when not stated — in the profile store and in a printed part's embedded copy. A Z gap without a layer height, or not whole layers of it, is refused, naming the two nearest that are; a value that is not a number is refused on load. An older build reads the copy without them, so a print-in-place generator falls back on its rule ([print profiles](../tolerances/README.md#print-profiles)). Golden `v175-print-z-gap` |
+| 176 | A piece of a face or edge one operation split is named by the faces only it touches, `<name>;M<tag>[a\|b]` (an ordinal `.<i>` only where nothing tells pieces apart), not by its position `<name>;M<tag>.<i>`; every reference saved after this holds such names. No migration: a saved `.<i>` name resolves to the piece it named, in result order, and the regeneration warns that it is by position ([split pieces](../modeling/toponaming.md#split-pieces)). Golden `v176-split-piece-names` |
 
 ## Pending changes
 
@@ -302,7 +303,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A piece of a face or edge one operation split is named by the faces only it touches, `<name>;M<tag>[a\|b]` (an ordinal `.<i>` only where nothing tells pieces apart), not by its position `<name>;M<tag>.<i>`; every reference saved after this holds such names. No migration: a saved `.<i>` name resolves to the piece it named, in result order, and the regeneration warns that it is by position ([split pieces](../modeling/toponaming.md#split-pieces)). Golden `vNEXT-split-piece-names` |
 
 ## The directory form
 
