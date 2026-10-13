@@ -109,6 +109,14 @@ inline long SockRead(int fd, void* b, size_t n) {
 inline long SockWrite(int fd, const void* b, size_t n) {
   return ::send(fd, static_cast<const char*>(b), static_cast<int>(n), 0);
 }
+// Wakes a client thread blocked reading `fd`. shutdown() does that on POSIX
+// but not here: a headless instance asked to stop with a client still
+// connected waited in Stop() for good (seen under Wine). Cancelling the
+// socket's I/O ends the blocked recv, which then closes the socket itself.
+inline void SockWake(int fd) {
+  ::shutdown(fd, SD_BOTH);
+  CancelIoEx(reinterpret_cast<HANDLE>(static_cast<intptr_t>(fd)), nullptr);
+}
 } // namespace
 #ifndef SHUT_RDWR
 #define SHUT_RDWR SD_BOTH
@@ -121,6 +129,7 @@ inline long SockWrite(int fd, const void* b, size_t n) {
 namespace {
 inline int SockClose(int fd) { return ::close(fd); }
 inline long SockRead(int fd, void* b, size_t n) { return ::read(fd, b, n); }
+inline void SockWake(int fd) { ::shutdown(fd, SHUT_RDWR); }
 inline long SockWrite(int fd, const void* b, size_t n) {
   return ::write(fd, b, n);
 }
@@ -262,7 +271,7 @@ void RemoteServer::Stop() {
   {
     std::lock_guard<std::mutex> lock(m_clientsMutex);
     for (int fd : m_clients)
-      ::shutdown(fd, SHUT_RDWR);
+      SockWake(fd);
   }
   if (m_listenFd >= 0) {
     ::shutdown(m_listenFd, SHUT_RDWR);
