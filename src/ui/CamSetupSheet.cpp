@@ -58,7 +58,11 @@ std::string Minutes(double m) {
 std::string Today() {
   const std::time_t t = std::time(nullptr);
   std::tm tm{};
+#if defined(_WIN32)
+  localtime_s(&tm, &t); // the CRT's, arguments the other way round
+#else
   localtime_r(&t, &tm);
+#endif
   char buf[16];
   std::strftime(buf, sizeof(buf), "%Y-%m-%d", &tm);
   return buf;
