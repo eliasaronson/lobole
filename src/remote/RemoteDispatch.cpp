@@ -279,15 +279,18 @@ bool ApplyStandardView(ui::AppState& state, const std::string& name, bool fit,
   const conv::NamedView* v = conv::FindView(name);
   if (v == nullptr)
     return false;
-  // Fit runs first: it re-aims at the target (SetTarget), so the snap must
-  // set the orientation last.
+  // Orient first, then fit: the fit solves for the view it is given and
+  // never turns the camera, but its aim is off the model's centre whenever
+  // the free part of the viewport is (docs/ui/README.md#viewport), so a snap
+  // AFTER it swung the model about that aim and out of the frame it was
+  // fitted to.
+  state.camera->SnapToView(glm::vec3(v->toCamera), glm::vec3(v->up));
   if (fit) {
     if (boxMin != nullptr && boxMax != nullptr)
       ui::FitCameraToWorldBox(state, *boxMin, *boxMax);
     else
       ui::FitCameraToDocument(state);
   }
-  state.camera->SnapToView(glm::vec3(v->toCamera), glm::vec3(v->up));
   return true;
 }
 
@@ -428,7 +431,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "bottom|iso}.",
      "fit?:bool, name:@views"},
     {"fit_view",
-     "Frame the geometry in the viewport. `width` and `height` (PIXELS, both "
+     "Frame the geometry in the viewport -- in the largest part of it that "
+     "nothing draws over (an open tool window, the view cube, the floating "
+     "windows; docs/ui/README.md#viewport). `width` and `height` (PIXELS, both "
      "together) frame it for a picture of that size instead — which is what "
      "`render_still` renders at, and a fit solved for the viewport crops a "
      "still whose aspect is narrower. Offscreen there is no window, so the "

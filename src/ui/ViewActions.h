@@ -123,6 +123,17 @@ float CenteredSectionOffset(AppState& state, int basePlane);
 // for the viewport crops the still); 0 means the viewport's own.
 void FitCameraToDocument(AppState& state, float forAspect = 0.0f);
 
+// The largest rectangle inside `view` that overlaps none of `obstacles`
+// (all min.x, min.y, max.x, max.y, in one screen space). Obstacles are
+// clipped to the view first and empty ones dropped, so one hanging off the
+// edge costs only the part of it that is inside. The candidates are every
+// pair of x edges and every pair of y edges taken from the view and the
+// obstacles; the free one with the largest area wins. With no obstacle it is
+// the view itself. What Fit frames the model into
+// (docs/ui/README.md#viewport).
+glm::vec4 LargestFreeRect(const glm::vec4& view,
+                          const std::vector<glm::vec4>& obstacles);
+
 // Frames the camera on an explicit world-space box (render_sheet focus).
 void FitCameraToWorldBox(AppState& state, const glm::vec3& min,
                          const glm::vec3& max);

@@ -33,13 +33,15 @@
 // See docs/architecture.md#the-ui-actions-layer.
 
 #include "core/cam/CamToolpath.h"
+#include "render/Camera.h"
 #include "ui/CreateActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/DrawingJob.h"
 #include "ui/PrimitiveTool.h" // SnapPrimitiveAxis
 #include "ui/ProjectActions.h"
-#include "ui/StudyPanel.h" // SimulationLoadLabel
+#include "ui/SketchInteraction.h" // WorldToScreen
+#include "ui/StudyPanel.h"        // SimulationLoadLabel
 #include "ui/ViewActions.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -84,9 +86,11 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <atomic>
+#include <cfloat>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <map>
 #include <memory>
 #include <thread>
@@ -468,6 +472,124 @@ TEST_CASE("prompt pill keeps clear of the tool window", "[actions][overlay]") {
     const glm::vec4 r = ui::PromptPillRect(state, y, glm::vec2(700.0f, 16.0f));
     CHECK(r.x >= state.viewportPos.x);
   }
+}
+
+// ---------------------------------------------------------------------------
+// LargestFreeRect and the fit into it (docs/ui/README.md#viewport)
+//
+// Fit framed the model in the whole viewport, and the tool window, the view
+// cube and CAM's windows draw over it. The fit now frames it in the largest
+// rectangle none of them cover; the rect is pure arithmetic and the solve
+// needs a camera, not a GPU, so both are pinned here.
+// ---------------------------------------------------------------------------
+
+TEST_CASE("the largest free rect avoids what covers the viewport",
+          "[actions][camera]") {
+  const glm::vec4 view(100.0f, 50.0f, 1100.0f, 750.0f); // 1000 x 700
+  // The view cube's place: bottom right, 116 px in.
+  const glm::vec4 cube(984.0f, 634.0f, 1092.0f, 742.0f);
+
+  SECTION("no obstacle: the view itself") {
+    const glm::vec4 r = ui::LargestFreeRect(view, {});
+    CHECK(r == view);
+  }
+
+  SECTION("a tall tool window and the cube leave the left band") {
+    const glm::vec4 tool(740.0f, 62.0f, 1088.0f, 600.0f);
+    const glm::vec4 r = ui::LargestFreeRect(view, {tool, cube});
+    CHECK(r == glm::vec4(100.0f, 50.0f, 740.0f, 750.0f));
+  }
+
+  SECTION("a short wide window leaves the band below it") {
+    // A Fillet with two rows: the strip beside it is narrow, the space
+    // under it is most of the viewport.
+    const glm::vec4 tool(500.0f, 62.0f, 1088.0f, 160.0f);
+    const glm::vec4 r = ui::LargestFreeRect(view, {tool, cube});
+    // Below the window, left of the cube, to the bottom.
+    CHECK(r == glm::vec4(100.0f, 160.0f, 984.0f, 750.0f));
+  }
+
+  SECTION("obstacles outside the view are ignored, and clipped at its edge") {
+    const glm::vec4 outside(1200.0f, 0.0f, 1400.0f, 900.0f);
+    CHECK(ui::LargestFreeRect(view, {outside}) == view);
+    // Hanging off the left edge: only the part inside it costs anything.
+    const glm::vec4 hanging(0.0f, 50.0f, 150.0f, 750.0f);
+    CHECK(ui::LargestFreeRect(view, {hanging}) ==
+          glm::vec4(150.0f, 50.0f, 1100.0f, 750.0f));
+  }
+
+  SECTION("an empty or non-finite obstacle is dropped") {
+    const glm::vec4 empty(400.0f, 400.0f, 400.0f, 500.0f);
+    const float nan = std::numeric_limits<float>::quiet_NaN();
+    const glm::vec4 bad(nan, 0.0f, 600.0f, 800.0f);
+    CHECK(ui::LargestFreeRect(view, {empty, bad}) == view);
+  }
+}
+
+TEST_CASE("fit lands every corner in the free rect, and fills it",
+          "[actions][camera]") {
+  ui::AppState state = MakeHeadlessState();
+  Camera camera;
+  state.camera = &camera;
+  state.viewportPos = glm::vec2(100.0f, 50.0f);
+  state.viewportSize = glm::vec2(1000.0f, 700.0f);
+  camera.SetAspectRatio(state.viewportSize.x / state.viewportSize.y);
+  // A long part, off the origin, seen from an oblique angle: the near end
+  // of a long part is what the old after-the-fact pan let reach under the
+  // window.
+  AddBox(*state.document, glm::vec3(40.0f, -10.0f, 5.0f), 200, 40, 20);
+  state.document->Regenerate();
+  camera.SnapToView(glm::normalize(glm::vec3(1.0f, -1.2f, 0.8f)),
+                    glm::vec3(0.0f, 0.0f, 1.0f));
+
+  glm::vec4 expect(state.viewportPos, state.viewportPos + state.viewportSize);
+  float forAspect = 0.0f;
+  SECTION("a window and the cube over the right") {
+    state.viewportObstacles = {{740.0f, 62.0f, 1088.0f, 600.0f},
+                               {984.0f, 634.0f, 1092.0f, 742.0f}};
+    expect = glm::vec4(100.0f, 50.0f, 740.0f, 750.0f);
+  }
+  SECTION("a short window: the band under it") {
+    state.viewportObstacles = {{500.0f, 62.0f, 1088.0f, 160.0f},
+                               {984.0f, 634.0f, 1092.0f, 742.0f}};
+    expect = glm::vec4(100.0f, 160.0f, 984.0f, 750.0f);
+  }
+  SECTION("a sliver of free space: the whole viewport instead") {
+    // Less than half the width is free; a model squeezed into that is worse
+    // than one a movable window partly covers.
+    state.viewportObstacles = {{450.0f, 50.0f, 1100.0f, 750.0f}};
+  }
+  SECTION("a still frames the whole picture, overlays or not") {
+    state.viewportObstacles = {{740.0f, 62.0f, 1088.0f, 600.0f}};
+    forAspect = camera.GetAspectRatio();
+  }
+  ui::FitCameraToDocument(state, forAspect);
+
+  glm::vec2 lo(FLT_MAX), hi(-FLT_MAX);
+  for (int i = 0; i < 8; i++) {
+    const glm::vec3 p((i & 1) ? 240.0f : 40.0f, (i & 2) ? 30.0f : -10.0f,
+                      (i & 4) ? 25.0f : 5.0f);
+    const glm::vec2 sp = ui::WorldToScreen(state, p);
+    lo = glm::min(lo, sp);
+    hi = glm::max(hi, sp);
+  }
+  INFO("box on screen " << lo.x << "," << lo.y << " .. " << hi.x << "," << hi.y
+                        << "; free rect " << expect.x << "," << expect.y
+                        << " .. " << expect.z << "," << expect.w);
+  CHECK(lo.x >= expect.x - 0.5f);
+  CHECK(lo.y >= expect.y - 0.5f);
+  CHECK(hi.x <= expect.z + 0.5f);
+  CHECK(hi.y <= expect.w + 0.5f);
+  // ...and FILLS it: shrinking the model would pass the checks above. The
+  // limiting dimension spans the rect less the 5% margin.
+  const float fillX = (hi.x - lo.x) / (expect.z - expect.x);
+  const float fillY = (hi.y - lo.y) / (expect.w - expect.y);
+  CHECK(std::max(fillX, fillY) > 0.9f);
+  // Centred in it, not merely inside it.
+  CHECK_THAT((lo.x + hi.x) * 0.5f, WithinAbs((expect.x + expect.z) * 0.5f,
+                                             0.02f * (expect.z - expect.x)));
+  CHECK_THAT((lo.y + hi.y) * 0.5f, WithinAbs((expect.y + expect.w) * 0.5f,
+                                             0.02f * (expect.w - expect.y)));
 }
 
 // Feature-tree rows must differ by more than colour.

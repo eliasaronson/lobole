@@ -821,12 +821,96 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(glm::length(fwd + glm::vec3(conv::kWorldFront)) < 0.02f);
   };
 
-  // Fitting the view with a tool window open puts the model in the band the
-  // window LEAVES. The pan was the wrong way round — it pushed the model
-  // under the very window the branch exists to clear — and nothing noticed,
-  // because "the model moved sideways" looks the same either way until you
-  // ask which side (docs/ui/README.md#viewport).
 #endif
+
+  // Fit frames the model in the largest rectangle of the viewport nothing
+  // draws over (docs/ui/README.md#viewport). It used to fit the WHOLE
+  // viewport and then pan away from the tool window by half its width: the
+  // view cube was never counted, a short window gave up the whole band
+  // beside it, and in perspective the near end of a long part still reached
+  // under the window. Read from ImGui, not from AppState, so a rect the app
+  // records wrongly cannot agree with itself.
+  static const auto fitIntoFreeRect = [](ImGuiTestContext* ctx,
+                                         bool shortWindow) {
+    ctx->SetRef("//##MainMenuBar");
+    Doc()->AddFeature(std::make_unique<BoxFeature>(
+        "Long", glm::vec3(40.0f, -10.0f, 5.0f), 200, 40, 20));
+    ctx->Yield(2);
+    const uint64_t id = Doc()->GetFeature(0)->GetId();
+    // A tall window (the box's editor) beside the model, or a short one
+    // (the Measure session's) above it.
+    if (shortWindow)
+      s_App->measure.active = true;
+    else
+      ui::OpenFeatureEditor(*s_App, id);
+    s_App->camera->StopAnimation();
+    s_App->camera->SnapToView(glm::normalize(glm::vec3(1.0f, -1.2f, 0.8f)),
+                              glm::vec3(0.0f, 0.0f, 1.0f));
+    ctx->Yield(6); // measured, anchored, and recorded for the fit
+
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->FinishAnimation();
+    ctx->Yield(2);
+
+    ImGuiWindow* tool = ImGui::FindWindowByName("###ToolWindow");
+    ImGuiWindow* cube = ImGui::FindWindowByName("##ViewCube");
+    IM_CHECK_SILENT(tool != nullptr && tool->Active);
+    IM_CHECK_SILENT(cube != nullptr && cube->Active);
+    const ImVec2 o = ImGui::GetMainViewport()->Pos;
+    const auto rectOf = [&](ImGuiWindow* w) {
+      return glm::vec4(w->Pos.x - o.x, w->Pos.y - o.y,
+                       w->Pos.x - o.x + w->Size.x, w->Pos.y - o.y + w->Size.y);
+    };
+    const glm::vec4 toolRect = rectOf(tool), cubeRect = rectOf(cube);
+    const glm::vec2 vp = s_App->viewportPos, vs = s_App->viewportSize;
+    const glm::vec4 view(vp.x, vp.y, vp.x + vs.x, vp.y + vs.y);
+    const glm::vec4 free = ui::LargestFreeRect(view, {toolRect, cubeRect});
+
+    glm::vec2 lo(FLT_MAX), hi(-FLT_MAX);
+    for (int i = 0; i < 8; i++) {
+      const glm::vec3 p((i & 1) ? 240.0f : 40.0f, (i & 2) ? 30.0f : -10.0f,
+                        (i & 4) ? 25.0f : 5.0f);
+      const glm::vec2 sp = ui::WorldToScreen(*s_App, p);
+      lo = glm::min(lo, sp);
+      hi = glm::max(hi, sp);
+    }
+    ctx->LogInfo("model %.0f,%.0f..%.0f,%.0f  tool %.0f,%.0f..%.0f,%.0f  "
+                 "cube %.0f,%.0f  free %.0f,%.0f..%.0f,%.0f",
+                 lo.x, lo.y, hi.x, hi.y, toolRect.x, toolRect.y, toolRect.z,
+                 toolRect.w, cubeRect.x, cubeRect.y, free.x, free.y, free.z,
+                 free.w);
+    const auto clear = [&](const glm::vec4& r) {
+      return hi.x <= r.x + 0.5f || lo.x >= r.z - 0.5f || hi.y <= r.y + 0.5f ||
+             lo.y >= r.w - 0.5f;
+    };
+    // Inside the viewport, and the whole silhouette's box clear of both
+    // windows -- every corner, not the centre.
+    IM_CHECK(lo.x >= view.x - 0.5f && lo.y >= view.y - 0.5f);
+    IM_CHECK(hi.x <= view.z + 0.5f && hi.y <= view.w + 0.5f);
+    IM_CHECK(clear(toolRect));
+    IM_CHECK(clear(cubeRect));
+    // ...and it still FILLS the free rect: shrinking the model would pass
+    // every check above.
+    const float fill = std::max((hi.x - lo.x) / (free.z - free.x),
+                                (hi.y - lo.y) / (free.w - free.y));
+    ctx->LogInfo("fills %.0f%% of the free rect", fill * 100.0f);
+    IM_CHECK(fill >= 0.85f);
+    if (shortWindow) {
+      // The strip beside the window is what the old fit gave the model.
+      // The band under it is wider, and the model used it.
+      const float strip = toolRect.x - view.x;
+      IM_CHECK(free.y >= toolRect.w - 0.5f); // the band under it won
+      IM_CHECK(hi.x - lo.x > strip);
+    }
+    s_App->measure.active = false;
+    s_App->editFeatureId = 0;
+  };
+  t = IM_REGISTER_TEST(engine, "viewport", "fit_lands_in_the_free_rect");
+  t->TestFunc = [](ImGuiTestContext* ctx) { fitIntoFreeRect(ctx, false); };
+  t = IM_REGISTER_TEST(engine, "viewport",
+                       "fit_uses_the_band_under_a_short_window");
+  t->TestFunc = [](ImGuiTestContext* ctx) { fitIntoFreeRect(ctx, true); };
+
   t = IM_REGISTER_TEST(engine, "viewport", "click_selects_facing_face");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
@@ -2228,16 +2312,25 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
       hi.x = std::max(hi.x, p.x);
       hi.y = std::max(hi.y, p.y);
     }
-    const ImVec2 vp(s_App->viewportPos.x, s_App->viewportPos.y);
-    const ImVec2 size(s_App->viewportSize.x, s_App->viewportSize.y);
+    // The frame the fit fills is the viewport less what draws over it --
+    // here the view cube, read from ImGui (docs/ui/README.md#viewport).
+    ImGuiWindow* cube = ImGui::FindWindowByName("##ViewCube");
+    IM_CHECK_SILENT(cube != nullptr && cube->Active);
+    const glm::vec2 vp0 = s_App->viewportPos, vs0 = s_App->viewportSize;
+    const glm::vec4 frame = ui::LargestFreeRect(
+        glm::vec4(vp0.x, vp0.y, vp0.x + vs0.x, vp0.y + vs0.y),
+        {glm::vec4(cube->Pos.x, cube->Pos.y, cube->Pos.x + cube->Size.x,
+                   cube->Pos.y + cube->Size.y)});
+    const ImVec2 vp(frame.x, frame.y);
+    const ImVec2 size(frame.z - frame.x, frame.w - frame.y);
     const float fillX = (hi.x - lo.x) / size.x;
     const float fillY = (hi.y - lo.y) / size.y;
-    ctx->LogInfo("fit fills %.0f%% x %.0f%% of the viewport", fillX * 100.0f,
-                 fillY * 100.0f);
+    ctx->LogInfo("fit fills %.0f%% x %.0f%% of the free viewport",
+                 fillX * 100.0f, fillY * 100.0f);
 
-    // Nothing is cut off...
-    IM_CHECK(lo.x >= vp.x && hi.x <= vp.x + size.x);
-    IM_CHECK(lo.y >= vp.y && hi.y <= vp.y + size.y);
+    // Nothing is cut off, or under the cube...
+    IM_CHECK(lo.x >= vp.x - 0.5f && hi.x <= vp.x + size.x + 0.5f);
+    IM_CHECK(lo.y >= vp.y - 0.5f && hi.y <= vp.y + size.y + 0.5f);
     // ...and the limiting axis reaches the edge, bar the 5% margin. The
     // sphere fit scored 0.57 on this part; the solved one scores 0.95, which
     // is the margin exactly. The threshold sits below that: what must never

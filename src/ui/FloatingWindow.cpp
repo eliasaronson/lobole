@@ -157,7 +157,24 @@ bool BeginFloatingWindow(AppState& state, const std::string& title, bool* open,
   const ImVec2 pos = ImGui::GetWindowPos();
   const ImVec2 wsize = ImGui::GetWindowSize();
   DrawWindowShadow(pos, ImVec2(pos.x + wsize.x, pos.y + wsize.y));
+  // A window over the viewport is something Fit must keep the model out
+  // from under. The tool window (TopRight) is the exception: a remote call
+  // opens and closes it before the UI draws, so the fit asks the session
+  // state whether it is open and uses toolWindowRect, not this list.
+  if (anchor != FloatAnchor::TopRight)
+    RecordViewportObstacle(state);
   return true;
+}
+
+void RecordViewportObstacle(AppState& state) {
+  const ImVec2 origin = ImGui::GetMainViewport()->Pos;
+  const ImVec2 pos = ImGui::GetWindowPos();
+  const ImVec2 size = ImGui::GetWindowSize();
+  if (size.x <= 0.0f || size.y <= 0.0f)
+    return; // still measuring (a reappearing auto-resized window)
+  state.viewportObstaclesNext.emplace_back(pos.x - origin.x, pos.y - origin.y,
+                                           pos.x - origin.x + size.x,
+                                           pos.y - origin.y + size.y);
 }
 
 } // namespace ui

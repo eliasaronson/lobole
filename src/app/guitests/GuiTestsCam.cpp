@@ -406,13 +406,22 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
           ->StopAnimation(); // a fit ANIMATES; the click needs it landed
     ctx->Yield(20);
 
-    // Where the part's centre lands on screen. It must sit left of the
-    // window's left edge, not under it.
-    const glm::vec2 screen =
-        ui::WorldToScreen(*s_App, glm::vec3(30.0f, 20.0f, 6.0f));
-    ctx->LogInfo("part centre at x=%.0f, window starts at x=%.0f", screen.x,
-                 win->Pos.x);
-    IM_CHECK(screen.x < win->Pos.x);
+    // Where the part lands on screen: every corner clear of the window. Its
+    // centre alone being left of the window's edge is what the old strip
+    // rule passed with a corner still underneath it.
+    glm::vec2 lo(FLT_MAX), hi(-FLT_MAX);
+    for (int i = 0; i < 8; i++) {
+      const glm::vec2 sp = ui::WorldToScreen(
+          *s_App, glm::vec3((i & 1) ? 60.0f : 0.0f, (i & 2) ? 40.0f : 0.0f,
+                            (i & 4) ? 12.0f : 0.0f));
+      lo = glm::min(lo, sp);
+      hi = glm::max(hi, sp);
+    }
+    ctx->LogInfo("part %.0f,%.0f..%.0f,%.0f, window %.0f,%.0f..%.0f,%.0f", lo.x,
+                 lo.y, hi.x, hi.y, win->Pos.x, win->Pos.y,
+                 win->Pos.x + win->Size.x, win->Pos.y + win->Size.y);
+    IM_CHECK(hi.x <= win->Pos.x + 0.5f || lo.x >= win->Pos.x + win->Size.x ||
+             hi.y <= win->Pos.y + 0.5f || lo.y >= win->Pos.y + win->Size.y);
     s_App->camToolOpen = false;
   };
 

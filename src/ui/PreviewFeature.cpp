@@ -206,8 +206,11 @@ void BeginToolWindowFrame(AppState& state, const std::string& title) {
   state.toolWindowAnchorFrames = placement.anchorFrames;
   state.toolWindowLastFrame = placement.lastFrame;
   // Publish the rect so the camera fit can keep the model out from under it,
-  // and so a window anchored BelowToolWindow stacks under it.
-  const ImVec2 pos = ImGui::GetWindowPos();
+  // and so a window anchored BelowToolWindow stacks under it. In the main
+  // viewport's space, as viewportPos is: the fit compares the two directly.
+  const ImVec2 origin = ImGui::GetMainViewport()->Pos;
+  const ImVec2 pos(ImGui::GetWindowPos().x - origin.x,
+                   ImGui::GetWindowPos().y - origin.y);
   const ImVec2 size = ImGui::GetWindowSize();
   state.toolWindowRect =
       glm::vec4(pos.x, pos.y, pos.x + size.x, pos.y + size.y);

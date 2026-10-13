@@ -39,7 +39,7 @@ struct AppState;
 //    cannot park it off screen.
 
 enum class FloatAnchor {
-  TopRight,        // the tool window's corner
+  TopRight,        // the tool window's corner (and the tool window only)
   BelowToolWindow, // top right, but under the tool window while it is open
   BottomCenter,    // a media transport
 };
@@ -57,5 +57,14 @@ struct FloatingPlacement {
 bool BeginFloatingWindow(AppState& state, const std::string& title, bool* open,
                          FloatingPlacement& placement, FloatAnchor anchor,
                          ImGuiWindowFlags flags = 0, float bgAlpha = 0.96f);
+
+// Records the CURRENT ImGui window (call it between Begin and End) as an
+// obstacle the camera fit keeps the model out from under: its rect, in the
+// main viewport's space, goes into `state.viewportObstaclesNext`
+// (docs/ui/README.md#viewport). BeginFloatingWindow calls it for every
+// floating window but the one anchored TopRight -- the tool window, which
+// the fit counts only while the session state says a session is open
+// (AppState::toolWindowRect).
+void RecordViewportObstacle(AppState& state);
 
 } // namespace ui

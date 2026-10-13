@@ -99,6 +99,42 @@
 namespace ui {
 
 namespace {
+// The part of the viewport a fit frames the model in, in the main viewport's
+// space: the largest rectangle nothing draws over, or the whole viewport
+// when that rectangle is a sliver (docs/ui/README.md#viewport).
+glm::vec4 FitFrameRect(const AppState& state) {
+  const glm::vec4 view(state.viewportPos.x, state.viewportPos.y,
+                       state.viewportPos.x + state.viewportSize.x,
+                       state.viewportPos.y + state.viewportSize.y);
+  // A sheet capture (render_sheet's tiles) hides the viewport chrome, so the
+  // tiles get the whole frame, as a still does.
+  if (state.sheetCapture || !(state.viewportSize.x > 1.0f) ||
+      !(state.viewportSize.y > 1.0f))
+    return view;
+  std::vector<glm::vec4> obstacles = state.viewportObstacles;
+  // The tool window counts only while a session is OPEN, asked of the
+  // session state rather than of the rect: the remote `fit_view` runs before
+  // the UI draws, so the rect is always a frame behind, and a just-closed
+  // window kept shoving the model aside. CAM's verb window counts too; it
+  // was missing from this list once, and fitting with the verbs open parked
+  // the model under the window asking you to click it.
+  const bool toolWindowOpen = HasPendingFeature(state) ||
+                              state.editFeatureId != 0 ||
+                              state.measure.active || state.dimTool.active ||
+                              state.mateTool.active || state.camToolOpen;
+  const glm::vec4& tw = state.toolWindowRect;
+  if (toolWindowOpen && tw.z > tw.x && tw.w > tw.y)
+    obstacles.push_back(tw);
+  const glm::vec4 free = LargestFreeRect(view, obstacles);
+  // A model fitted into a sliver is worse than one a movable window partly
+  // covers. Half the viewport each way: a fraction, so it holds at any size.
+  constexpr float kFloor = 0.5f;
+  if (free.z - free.x < kFloor * state.viewportSize.x ||
+      free.w - free.y < kFloor * state.viewportSize.y)
+    return view;
+  return free;
+}
+
 // Aim the camera at a world-space box: the shared tail of the document and
 // selection fits.
 void FitCameraToBox(AppState& state, const glm::vec3& min, const glm::vec3& max,
@@ -121,87 +157,77 @@ void FitCameraToBox(AppState& state, const glm::vec3& min, const glm::vec3& max,
   float aspect = forAspect > 0.0f ? forAspect : cam.GetAspectRatio();
   if (!(aspect > 0.0f))
     aspect = 1.0f;
+  const float tanHalfHFull = tanHalfV * aspect;
 
-  // An open tool window covers the right of the viewport, and fitting used to
-  // park the model underneath the very window that asked you to click it
-  // (U10). Treat the covered strip as unusable: the model fits the band that
-  // is left, and the camera pans left by half the strip so it is centred in
-  // THAT band rather than in the whole viewport.
-  // Ask the session state whether a window is open, not the rect: the remote
-  // `fit_view` runs before the UI draws, so the rect is always a frame behind
-  // and a just-closed window kept shoving the model aside.
-  // CAM's verb window counts too. It was missing from this list, so fitting
-  // the view with the verbs open parked the model under the very window that
-  // was asking you to click it — the thing this whole branch exists to stop
-  // (docs/ui/README.md#viewport).
-  const bool toolWindowOpen = HasPendingFeature(state) ||
-                              state.editFeatureId != 0 ||
-                              state.measure.active || state.dimTool.active ||
-                              state.mateTool.active || state.camToolOpen;
-  float coveredFrac = 0.0f;
-  if (toolWindowOpen && state.viewportSize.x > 1.0f &&
-      state.toolWindowRect.z > state.toolWindowRect.x) {
-    const float vpRight = state.viewportPos.x + state.viewportSize.x;
-    const float overlap = std::max(
-        0.0f, std::min(vpRight, state.toolWindowRect.z) -
-                  std::max(state.viewportPos.x, state.toolWindowRect.x));
-    coveredFrac = std::clamp(overlap / state.viewportSize.x, 0.0f, 0.45f);
+  // The sub-rectangle of the frame the model goes in: its centre `c` and
+  // half-extents `h` in NDC (y up, each half-extent at most 1). Things draw
+  // over the viewport — the tool window, the view cube, CAM's windows — and
+  // fitting into the whole of it parked the model underneath them, the very
+  // window asking you to click it among them (U10). A still (`forAspect`)
+  // has no overlays and gets the whole frame.
+  glm::vec2 c(0.0f), h(1.0f);
+  if (forAspect <= 0.0f) {
+    const glm::vec4 r = FitFrameRect(state);
+    const glm::vec2 vp = state.viewportPos, vs = state.viewportSize;
+    if (vs.x > 1.0f && vs.y > 1.0f) {
+      c = glm::vec2(((r.x + r.z) * 0.5f - vp.x) / vs.x * 2.0f - 1.0f,
+                    1.0f - ((r.y + r.w) * 0.5f - vp.y) / vs.y * 2.0f);
+      h = glm::vec2((r.z - r.x) / vs.x, (r.w - r.y) / vs.y);
+    }
   }
-  const float usableX = 1.0f - coveredFrac;
-
-  const float tanHalfH = std::max(tanHalfV * aspect * usableX, 0.05f);
+  // The sub-frame is an OFF-AXIS frustum: its centre ray leaves the eye at
+  // (kx, ky) in tangent units, and its half-angles are the frame's scaled
+  // by h. Solved about a point Q on that ray, a corner w = P - Q lands at
+  //   x' = w . (right - kx fwd) / ((d + w . fwd) tH)
+  // in the sub-frame, which is the centred fit's formula with the right and
+  // up axes sheared — independent of d, so the exact standoff below holds
+  // for the sub-frame too and no corner can leave it. The camera then aims
+  // at A = Q - d (kx right + ky up), which puts Q's ray where c is.
+  const float kx = c.x * tanHalfHFull, ky = c.y * tanHalfV;
+  const float tanHalfH = std::max(tanHalfHFull * h.x, 0.05f);
+  const float tanHalfSubV = std::max(tanHalfV * h.y, 0.05f);
 
   // Fit the box AS IT PROJECTS, not its bounding sphere. The sphere is drawn
   // on the box's DIAGONAL, so anything that is not a cube got framed by a
   // circle it never fills: the smart-speaker panel (1122 x 210 x 16) opened
   // at half the viewport height with the rest empty, and every real part
   // needed a scroll-wheel nudge before you could work on it.
-  //
-  // Aim and standoff are solved TOGETHER, because in perspective the
-  // projected centroid of a box is not its 3D centre — the near corner
-  // swings wide. Aiming at the centre and standing off far enough for the
-  // worst corner leaves the part hugging one side with the fit "correct" and
-  // half the screen empty. Each round re-centres the projection, then scales
-  // the distance by how much of the frame it spans; four converge to well
-  // under a pixel, and the projection is re-measured against the camera's
-  // FINAL basis every time (SetTarget re-aims, so the basis moves under you).
   const float kMargin = 1.05f; // a hair of air around the silhouette
   const glm::vec3 corners[8] = {{min.x, min.y, min.z}, {max.x, min.y, min.z},
                                 {min.x, max.y, min.z}, {max.x, max.y, min.z},
                                 {min.x, min.y, max.z}, {max.x, min.y, max.z},
                                 {min.x, max.y, max.z}, {max.x, max.y, max.z}};
+  // Fitting never changes which way you look: the basis is fixed.
+  const glm::vec3 fwd = cam.GetForward();
+  const glm::vec3 right = cam.GetRight();
+  const glm::vec3 up = cam.GetUp();
+  const glm::vec3 rightS = right - kx * fwd; // the sheared axes
+  const glm::vec3 upS = up - ky * fwd;
 
-  // The standoff at which no corner leaves the frame, for the aim the camera
-  // currently holds. Exact, so it can never cut the model: a corner that
-  // leans f toward the camera sees the frame at (D - f), which is what makes
-  // the near end of a long part govern.
-  const auto standoff = [&]() {
-    const glm::vec3 fwd = cam.GetForward();
-    const glm::vec3 right = cam.GetRight();
-    const glm::vec3 up = cam.GetUp();
-    const glm::vec3 aim = cam.GetTarget();
+  // The standoff at which no corner leaves the sub-frame, for the sub-aim Q.
+  // Exact, so it can never cut the model: a corner that leans f toward the
+  // camera sees the frame at (D - f), which is what makes the near end of a
+  // long part govern.
+  const auto standoff = [&](const glm::vec3& q) {
     float d = 1.0f;
     for (const glm::vec3& corner : corners) {
-      const glm::vec3 v = corner - aim;
+      const glm::vec3 v = corner - q;
       const float toward = -glm::dot(v, fwd);
-      d = std::max({d,
-                    kMargin * std::abs(glm::dot(v, right)) / tanHalfH + toward,
-                    kMargin * std::abs(glm::dot(v, up)) / tanHalfV + toward});
+      d = std::max(
+          {d, kMargin * std::abs(glm::dot(v, rightS)) / tanHalfH + toward,
+           kMargin * std::abs(glm::dot(v, upS)) / tanHalfSubV + toward});
     }
     return d;
   };
-  // Where the box lands on screen, in NDC, from that standoff.
-  const auto projectedCentre = [&](float d) {
-    const glm::vec3 fwd = cam.GetForward();
-    const glm::vec3 right = cam.GetRight();
-    const glm::vec3 up = cam.GetUp();
-    const glm::vec3 eye = cam.GetTarget() - fwd * d;
+  // Where the box lands in the sub-frame, in its own NDC, from that standoff.
+  const auto projectedCentre = [&](const glm::vec3& q, float d) {
+    const glm::vec3 eye = q - d * (fwd + kx * right + ky * up);
     float xMin = FLT_MAX, xMax = -FLT_MAX, yMin = FLT_MAX, yMax = -FLT_MAX;
     for (const glm::vec3& corner : corners) {
       const glm::vec3 v = corner - eye;
       const float depth = std::max(glm::dot(v, fwd), 1e-3f);
-      const float x = glm::dot(v, right) / (depth * tanHalfH);
-      const float y = glm::dot(v, up) / (depth * tanHalfV);
+      const float x = (glm::dot(v, right) / depth - kx) / tanHalfH;
+      const float y = (glm::dot(v, up) / depth - ky) / tanHalfSubV;
       xMin = std::min(xMin, x);
       xMax = std::max(xMax, x);
       yMin = std::min(yMin, y);
@@ -220,33 +246,65 @@ void FitCameraToBox(AppState& state, const glm::vec3& min, const glm::vec3& max,
   // this can crop the model. It is a PAN, not a re-aim: solving it with
   // SetTarget walked the speaker panel through 60 degrees of orbit while
   // "fitting" it.
-  glm::vec3 target = center;
+  glm::vec3 q = center;
   float distance = 1.0f;
   for (int iter = 0; iter < 3; iter++) {
-    cam.SetPivot(target); // slides the view; SetTarget would rotate it
-    distance = standoff();
-    const glm::vec2 off = projectedCentre(distance);
-    target += cam.GetRight() * (off.x * tanHalfH * distance) +
-              cam.GetUp() * (off.y * tanHalfV * distance);
+    distance = standoff(q);
+    const glm::vec2 off = projectedCentre(q, distance);
+    q += right * (off.x * tanHalfH * distance) +
+         up * (off.y * tanHalfSubV * distance);
   }
-  cam.SetPivot(target);
-  distance = standoff();
-  cam.SetTarget(target);
+  distance = standoff(q);
+  const glm::vec3 aim = q - distance * (kx * right + ky * up);
+  cam.SetPivot(aim); // slides the view; SetTarget would rotate it
   cam.SetDistance(distance);
-  if (coveredFrac > 0.01f) {
-    // Half the covered strip, in world units at the target's depth. The
-    // target moves RIGHT so the model appears LEFT of it — away from the
-    // window on the right. It moved the other way, which pushed the model
-    // under the very window this branch exists to clear (found with the CAM
-    // verbs open, docs/ui/README.md#viewport).
-    const glm::vec3 right = cam.GetRight();
-    const float halfWidthWorld = distance * tanHalfV * aspect;
-    // Off the SOLVED aim, not the box centre — the fit above re-centred the
-    // projection, and re-deriving from the centre would throw that away.
-    cam.SetPivot(target + right * (halfWidthWorld * coveredFrac));
-  }
 }
 } // namespace
+
+glm::vec4 LargestFreeRect(const glm::vec4& view,
+                          const std::vector<glm::vec4>& obstacles) {
+  // Clipped to the view; what is left of each must have an area.
+  std::vector<glm::vec4> clipped;
+  std::vector<float> xs{view.x, view.z}, ys{view.y, view.w};
+  for (const glm::vec4& o : obstacles) {
+    const glm::vec4 r(std::max(o.x, view.x), std::max(o.y, view.y),
+                      std::min(o.z, view.z), std::min(o.w, view.w));
+    if (!std::isfinite(r.x) || !std::isfinite(r.y) || !std::isfinite(r.z) ||
+        !std::isfinite(r.w) || !(r.z > r.x) || !(r.w > r.y))
+      continue;
+    clipped.push_back(r);
+    xs.insert(xs.end(), {r.x, r.z});
+    ys.insert(ys.end(), {r.y, r.w});
+  }
+  if (clipped.empty())
+    return view;
+  std::sort(xs.begin(), xs.end());
+  xs.erase(std::unique(xs.begin(), xs.end()), xs.end());
+  std::sort(ys.begin(), ys.end());
+  ys.erase(std::unique(ys.begin(), ys.end()), ys.end());
+  const auto overlaps = [](const glm::vec4& a, const glm::vec4& b) {
+    return std::min(a.z, b.z) > std::max(a.x, b.x) &&
+           std::min(a.w, b.w) > std::max(a.y, b.y);
+  };
+  glm::vec4 best(view.x, view.y, view.x, view.y);
+  float bestArea = 0.0f;
+  for (size_t i = 0; i < xs.size(); i++)
+    for (size_t j = i + 1; j < xs.size(); j++)
+      for (size_t k = 0; k < ys.size(); k++)
+        for (size_t l = k + 1; l < ys.size(); l++) {
+          const glm::vec4 r(xs[i], ys[k], xs[j], ys[l]);
+          const float area = (r.z - r.x) * (r.w - r.y);
+          if (area <= bestArea)
+            continue;
+          if (std::none_of(
+                  clipped.begin(), clipped.end(),
+                  [&](const glm::vec4& o) { return overlaps(r, o); })) {
+            best = r;
+            bestArea = area;
+          }
+        }
+  return best;
+}
 
 bool VisibleSceneBounds(AppState& state, glm::vec3& outMin, glm::vec3& outMax) {
   glm::dvec3 min(DBL_MAX), max(-DBL_MAX);

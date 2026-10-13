@@ -32,6 +32,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h"
+#include "ui/FloatingWindow.h" // RecordViewportObstacle
 #include "ui/HistoryPanel.h"
 #include "ui/MainMenuBar.h"
 #include "ui/MeasureActions.h"
@@ -87,6 +88,7 @@ void DrawInContextBanner(AppState& state) {
                            ImGuiWindowFlags_NoSavedSettings |
                            ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoDocking;
   if (ImGui::Begin("##InContextBanner", nullptr, flags)) {
+    RecordViewportObstacle(state); // Fit keeps the model out from under it
     ImGui::Text("Editing %s in context of %s",
                 state.parts[state.activePart].name.c_str(),
                 state.parts[*asmIndex].name.c_str());
@@ -171,6 +173,9 @@ void DrawViewCube(AppState& state) {
     ImGui::PopStyleVar();
     return;
   }
+  // Fit keeps the model out from under it: a fit that filled the frame put
+  // the model's bottom-right corner behind the cube.
+  RecordViewportObstacle(state);
   const ImVec2 wp = ImGui::GetWindowPos();
   const ImVec2 c(wp.x + size * 0.5f, wp.y + size * 0.5f);
   const float h = size * 0.30f; // cube half-extent on screen
@@ -444,6 +449,7 @@ void DrawControlsHelpOverlay(AppState& state) {
       ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
       ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoFocusOnAppearing;
   if (ImGui::Begin("##ControlsHelp", nullptr, flags)) {
+    RecordViewportObstacle(state); // Fit keeps the model out from under it
     ImGui::TextUnformatted("Viewport controls");
     ImGui::SameLine();
     if (ImGui::SmallButton("x"))
@@ -840,6 +846,13 @@ void DrawUI(AppState& state) {
   // One place to keep the selection valid across delete/undo/File > New:
   // items are stable ids, so pruning is "does the referent still exist".
   PruneSelection(state);
+
+  // What drew over the viewport LAST frame is what a fit keeps clear of this
+  // frame: publish that complete list, and start collecting this frame's
+  // (docs/ui/README.md#viewport). A fit taken mid-frame -- a shortcut, a
+  // remote call -- would otherwise see only the overlays drawn so far.
+  state.viewportObstacles.swap(state.viewportObstaclesNext);
+  state.viewportObstaclesNext.clear();
 
   DrawMainMenuBar(state);
   BeginDockspace(state);

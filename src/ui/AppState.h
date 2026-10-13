@@ -1602,13 +1602,26 @@ struct AppState {
   // path reports — recorded by the code that draws them, never guessed.
   std::vector<std::string> menuBarTop;
 
-  // Screen rect where the floating tool window last drew (zero if it never
-  // has). FitCameraToDocument keeps the model clear of it while a session is
-  // open — fitting used to park geometry underneath the very window that
-  // asked you to click it (U10). Whether a session IS open is asked of the
-  // session state, not of this rect: the remote fit runs before the UI draws,
-  // so the rect is always a frame behind.
+  // Rect where the floating tool window last drew (zero if it never has), in
+  // the main viewport's space, as `viewportPos` is. The fit keeps the model
+  // clear of it while a session is open — fitting used to park geometry
+  // underneath the very window that asked you to click it (U10). Whether a
+  // session IS open is asked of the session state, not of this rect: the
+  // remote fit runs before the UI draws, so the rect is always a frame
+  // behind, and a just-closed window would otherwise keep pushing the model
+  // aside (docs/ui/README.md#viewport).
   glm::vec4 toolWindowRect{0.0f}; // min.x, min.y, max.x, max.y
+
+  // Everything ELSE that draws over the 3D viewport and that a fit keeps the
+  // model out from under: the view cube, the floating windows (CAM generate,
+  // the transport, Save as template, the BOM), the in-context
+  // banner, the controls cheat sheet. Each overlay records its rect into
+  // `viewportObstaclesNext` once Begin has placed it; DrawUI publishes that
+  // list as `viewportObstacles` at the start of the next frame, so a fit
+  // always reads one COMPLETE frame's set, a frame old like toolWindowRect.
+  // Main-viewport space; min.x, min.y, max.x, max.y.
+  std::vector<glm::vec4> viewportObstacles;
+  std::vector<glm::vec4> viewportObstaclesNext;
 
   // Help > Keyboard Shortcuts (Ctrl+/). In AppState rather than a static in
   // the draw function so the between-test reset can close it — a stray
