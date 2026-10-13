@@ -117,7 +117,7 @@ FindOrientations(const std::vector<Entity>& entities,
   std::map<std::pair<int, int>, std::vector<size_t>> edges; // (lo, hi)
   for (size_t k = 0; k < constraints.size(); k++) {
     const Constraint& c = constraints[k];
-    if (c.kind != K::Distance)
+    if (c.kind != K::Distance || c.driven) // a driven one sets nothing
       continue;
     const int a = corner(c.a), b = corner(c.b);
     if (a != b)
@@ -199,7 +199,7 @@ FindOrientations(const std::vector<Entity>& entities,
     o.arc = id;
     for (size_t k = 0; k < constraints.size(); k++) {
       const Constraint& c = constraints[k];
-      if (IsDimension(c.kind) && (touches(c.a) || touches(c.b)))
+      if (IsDimension(c.kind) && !c.driven && (touches(c.a) || touches(c.b)))
         o.constraints.push_back(k);
     }
     out.push_back(std::move(o));

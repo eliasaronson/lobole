@@ -705,8 +705,8 @@ enum class ConstraintKind {
                  // an endpoint of the first line)
 };
 
-// Which kinds are driving dimensions (carry an editable numeric value + a
-// canvas annotation with a `labelOffset`).
+// Which kinds are dimensions (carry a numeric value + a canvas annotation
+// with a `labelOffset`). Driving unless the constraint is `driven`.
 inline bool IsDimension(ConstraintKind k) {
   return k == ConstraintKind::Distance || k == ConstraintKind::DistanceX ||
          k == ConstraintKind::DistanceY || k == ConstraintKind::Radius ||
@@ -724,6 +724,12 @@ struct Constraint {
   // against the document's parameter table on every regeneration; kept last
   // in the struct so existing aggregate initializers stay valid.
   std::string valueExpr;
+  // A DRIVEN (reference) dimension (docs/sketching/README.md#constraints):
+  // legal on IsDimension kinds only. It adds no equation to the solve and
+  // has no input -- its value is whatever the geometry measures
+  // (sketch::MeasureDimension), read where it is shown or written; `value`
+  // is not its truth. Never carries a valueExpr.
+  bool driven = false;
 };
 
 enum class DerivedKind {

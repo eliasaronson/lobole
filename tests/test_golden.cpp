@@ -21,6 +21,7 @@
 #include "core/features/ThreadFeature.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
+#include "core/sketch/SketchOrientation.h"
 #include "core/tube/Rules.h"
 
 #include <nlohmann/json.hpp>
@@ -1117,6 +1118,30 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       CHECK(pr.zGapMm == pe.value("z_gap_mm", 0.0));
     } else {
       CHECK_FALSE(doc.PrintProcess()->profile.has_value());
+    }
+  }
+  // vNEXT: driven (reference) dimensions, [constraint index, measure] in the
+  // first sketch. Reloaded driving, a reference dimension becomes an input
+  // the sketch now has to meet -- one more equation, and a conflict the
+  // file never had; so the flag is checked, and the value against what the
+  // geometry measures, since that is what a driven one is.
+  if (expect.contains("driven_dimensions")) {
+    const SketchFeature* sk = nullptr;
+    for (const auto& f : doc.GetFeatures())
+      if ((sk = dynamic_cast<const SketchFeature*>(f.get())) != nullptr)
+        break;
+    REQUIRE(sk != nullptr);
+    size_t drivenCount = 0;
+    for (const sketch::Constraint& c : sk->constraints)
+      drivenCount += c.driven ? 1 : 0;
+    CHECK(drivenCount == expect.at("driven_dimensions").size());
+    for (const auto& want : expect.at("driven_dimensions")) {
+      const auto k = want.at(0).get<size_t>();
+      REQUIRE(k < sk->constraints.size());
+      CHECK(sk->constraints[k].driven);
+      const auto measured = sketch::MeasureDimension(*sk, k);
+      REQUIRE(measured.has_value());
+      CHECK_THAT(*measured, WithinRel(want.at(1).get<double>(), 1e-9));
     }
   }
   // v97: whether an Import keeps the file's own coordinates. A flag that

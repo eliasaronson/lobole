@@ -44,6 +44,7 @@
 #include "core/features/ThreadFeature.h"
 #include "core/features/UnfoldFeature.h"
 #include "core/features/WormFeature.h"
+#include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchText.h"
 
 #include <nlohmann/json.hpp>
@@ -401,6 +402,8 @@ json ConstraintToJson(const sketch::Constraint& c) {
             {"value", c.value}};
   if (!c.valueExpr.empty()) // literals stay plain numbers (v11)
     j["expr"] = c.valueExpr;
+  if (c.driven) // vNEXT; `value` is then the measure (the sketch writes it)
+    j["driven"] = true;
   if (c.kind == sketch::ConstraintKind::Symmetric) // only Symmetric uses c
     j["c"] = {c.c.entity, c.c.which};
   if (sketch::IsDimension(c.kind) &&
@@ -427,6 +430,24 @@ sketch::Constraint ConstraintFromJson(const json& j) {
     c.c = {j.at("c").at(0).get<uint32_t>(), j.at("c").at(1).get<uint8_t>()};
   if (j.contains("label"))
     c.labelOffset = Vec2FromJson(j.at("label"));
+  // vNEXT: a driven (reference) dimension. Only a dimension measures
+  // something, and a driven one has no input, so neither half is guessed
+  // at (docs/sketching/README.md#constraints).
+  if (j.contains("driven")) {
+    if (!j.at("driven").is_boolean())
+      throw std::runtime_error("constraint \"driven\" must be true or false");
+    c.driven = j.at("driven").get<bool>();
+  }
+  if (c.driven && !sketch::IsDimension(c.kind))
+    throw std::runtime_error(
+        std::string("a ") + ConstraintKindToString(c.kind) +
+        " constraint cannot be driven: only the dimension kinds can (distance, "
+        "distance_x, distance_y, distance_pl, radius, diameter, angle)");
+  if (c.driven && !c.valueExpr.empty())
+    throw std::runtime_error(
+        "a driven dimension measures the sketch, so it cannot carry an "
+        "expression (\"" +
+        c.valueExpr + "\"); make it driving to drive it");
   return c;
 }
 
@@ -881,7 +902,16 @@ json FeatureToJson(const Feature& feature) {
     }
     j["constraints"] = json::array();
     for (const auto& c : sk->constraints) {
-      j["constraints"].push_back(ConstraintToJson(c));
+      if (!c.driven) {
+        j["constraints"].push_back(ConstraintToJson(c));
+        continue;
+      }
+      // A driven dimension's value is what the geometry measures, read here
+      // rather than kept beside it, so it cannot go stale.
+      sketch::Constraint measured = c;
+      measured.value =
+          sketch::MeasureDimension(sk->entities, c).value_or(c.value);
+      j["constraints"].push_back(ConstraintToJson(measured));
     }
     if (!sk->derived.empty()) { // omit when empty to keep JSON compact
       j["derived_ops"] = json::array();

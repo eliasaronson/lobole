@@ -121,4 +121,34 @@ private:
   Impl* m_impl;
 };
 
+// Whether adding constraints constrains anything
+// (docs/sketching/README.md#refusals). `after` is `before` with constraints
+// appended, or with some dimensions switched from driven to driving (indices
+// below before.constraints.size() keep their meaning). Accepted when the
+// addition is representable, the solve after it succeeds (unless the one
+// before already failed), no constraint is conflicting or redundant after
+// that was not before, and -- when anything new drives -- the DOF is
+// strictly lower. Adding only driven dimensions need not lower it.
+struct AddVerdict {
+  bool accepted = false;
+  SolveResult before, after;
+  // Refused: the constraints the addition repeats or contradicts, as
+  // PlaneGCS names them (indices into after.constraints, ascending, the
+  // added ones left out), and why in words.
+  std::vector<size_t> involved;
+  std::string reason;
+  // Refused for a constraint the solver cannot represent (Unsupported):
+  // that one's index. SIZE_MAX otherwise.
+  size_t unsupported = static_cast<size_t>(-1);
+};
+// `solved`, when given, is left loaded with `after` and solved, for the
+// caller to WriteBack an accepted addition without solving it again.
+AddVerdict JudgeAddition(const SketchFeature& before,
+                         const SketchFeature& after, Solver* solved = nullptr);
+// The same, reusing a solve of `before` (an incremental caller's previous
+// `after`); `beforeDriving[k]` = constraint k of `before` drives.
+AddVerdict JudgeAddition(const SolveResult& before,
+                         const std::vector<bool>& beforeDriving,
+                         const SketchFeature& after, Solver* solved = nullptr);
+
 } // namespace sketch

@@ -1111,10 +1111,19 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
       }
       break;
     }
-    if (!why.empty())
+    if (why.empty() && con.driven && !IsDimension(con.kind))
+      why = "only a dimension can be driven";
+    if (!why.empty()) {
       im.unsupported.push_back({k, std::string(KindWord(con.kind)) + " takes " +
                                        Accepts(con.kind) + "; " + why});
-    else if (IsDimension(con.kind) && im.params.size() > paramsBefore) {
+    } else if (con.driven) {
+      // A driven dimension adds no equation: dispatched like a driving one,
+      // so what is refused cannot differ, then its equations come out again
+      // and its tag range is left empty (docs/sketching/README.md#constraints).
+      for (int t = im.constraintFirstTag[k]; t < tag; t++)
+        im.sys.clearByTag(t);
+      tag = im.constraintFirstTag[k];
+    } else if (IsDimension(con.kind) && im.params.size() > paramsBefore) {
       // Each dimension case pushes its value last.
       using K = ConstraintKind;
       im.valueSlots[k].p = &im.params.back();
@@ -1704,3 +1713,127 @@ void Solver::WriteBack(std::vector<Entity>& e) const { e = m_impl->shapes; }
 } // namespace sketch
 
 #endif
+
+namespace sketch {
+
+namespace {
+// Past this many constraints a refused redundancy is not traced to the
+// constraints it repeats (one solve per constraint).
+constexpr size_t kMaxNamedRedundancy = 200;
+
+std::vector<bool> DrivingFlags(const SketchFeature& sketch) {
+  std::vector<bool> out;
+  out.reserve(sketch.constraints.size());
+  for (const Constraint& c : sketch.constraints)
+    out.push_back(!c.driven);
+  return out;
+}
+
+std::set<size_t> Broken(const SolveResult& r) {
+  std::set<size_t> out(r.conflictingConstraints.begin(),
+                       r.conflictingConstraints.end());
+  out.insert(r.redundantConstraints.begin(), r.redundantConstraints.end());
+  return out;
+}
+
+std::string IndexList(const std::vector<size_t>& indices) {
+  std::string out;
+  for (size_t i : indices)
+    out += (out.empty() ? "" : ", ") + std::to_string(i);
+  return out;
+}
+} // namespace
+
+AddVerdict JudgeAddition(const SketchFeature& before,
+                         const SketchFeature& after, Solver* solved) {
+  Solver s;
+  s.Load(before);
+  return JudgeAddition(s.Solve(), DrivingFlags(before), after, solved);
+}
+
+AddVerdict JudgeAddition(const SolveResult& before,
+                         const std::vector<bool>& beforeDriving,
+                         const SketchFeature& after, Solver* solved) {
+  AddVerdict v;
+  v.before = before;
+  const size_t had = beforeDriving.size();
+  Solver local;
+  Solver& s = solved != nullptr ? *solved : local;
+  s.Load(after);
+  for (const auto& bad : s.UnsupportedConstraints()) {
+    const bool added = bad.index >= had;
+    const bool nowDriving = !added && beforeDriving[bad.index] == false &&
+                            !after.constraints[bad.index].driven;
+    if (added || nowDriving) {
+      v.unsupported = bad.index;
+      v.reason = bad.reason;
+      return v;
+    }
+  }
+  v.after = s.Solve();
+
+  // Did anything start to drive? An appended driving constraint, or a
+  // dimension switched from driven to driving.
+  bool drives = false;
+  for (size_t k = 0; k < after.constraints.size(); k++)
+    if (!after.constraints[k].driven && (k >= had || !beforeDriving[k]))
+      drives = true;
+
+  const std::set<size_t> was = Broken(before), now = Broken(v.after);
+  bool newlyBroken = false;
+  for (size_t k : now)
+    if (!was.count(k))
+      newlyBroken = true;
+  const bool solves = v.after.ok || !before.ok;
+  const bool lowers = !drives || before.dof < 0 ||
+                      (v.after.dof >= 0 && v.after.dof < before.dof);
+  v.accepted = solves && !newlyBroken && lowers;
+  if (v.accepted)
+    return v;
+
+  // Name what the addition runs into: the constraints already in the sketch
+  // that it leaves broken.
+  const bool conflicts = !v.after.conflictingConstraints.empty() &&
+                         !std::all_of(v.after.conflictingConstraints.begin(),
+                                      v.after.conflictingConstraints.end(),
+                                      [&](size_t k) { return was.count(k); });
+  if (conflicts || !solves) {
+    // PlaneGCS names every member of a conflicting group.
+    for (size_t k : now)
+      if (k < had && beforeDriving[k] && !was.count(k))
+        v.involved.push_back(k);
+  } else if (newlyBroken && after.constraints.size() <= kMaxNamedRedundancy) {
+    // A redundancy it names on one side only, usually the new constraint.
+    // What that one repeats is every driving constraint without which it
+    // would constrain: each is tried out of the solve. Only on a refusal,
+    // and bounded.
+    for (size_t k = 0; k < had; k++) {
+      if (after.constraints[k].driven || !beforeDriving[k] || was.count(k))
+        continue; // not driving, the addition itself, or broken already
+      SketchFeature without = after;
+      without.constraints.erase(without.constraints.begin() +
+                                static_cast<std::ptrdiff_t>(k));
+      Solver t;
+      t.Load(without);
+      const SolveResult r = t.Solve();
+      bool clean = true;
+      for (size_t b : Broken(r))
+        if (!was.count(b < k ? b : b + 1))
+          clean = false;
+      if (clean)
+        v.involved.push_back(k);
+    }
+  }
+  const std::string with =
+      v.involved.empty()
+          ? std::string()
+          : " (constraint" + std::string(v.involved.size() > 1 ? "s " : " ") +
+                IndexList(v.involved) + ")";
+  if (conflicts || !solves)
+    v.reason = "that contradicts what the sketch already fixes" + with;
+  else
+    v.reason = "the sketch already fixes that" + with;
+  return v;
+}
+
+} // namespace sketch

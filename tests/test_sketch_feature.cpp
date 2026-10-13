@@ -331,6 +331,65 @@ TEST_CASE("A linked pattern round-trips through JSON", "[sketch][pattern]") {
   CHECK(DocumentIO::FeatureToJson(*rsk) == j); // stable round-trip
 }
 
+TEST_CASE("A driven dimension round-trips, written as its measure",
+          "[sketch][io][driven]") {
+  using K = sketch::ConstraintKind;
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk->AddEntity(sketch::Line{{0, 0}, {30, 40}});
+  sketch::Constraint d{K::Distance, {l, 0}, {l, 1}, 7.0}; // 7: not its truth
+  d.driven = true;
+  sk->constraints.push_back(d);
+  sk->constraints.push_back({K::Horizontal, {l, 0}, {}}); // never "driven"
+  sk->SetId(4);
+
+  const nlohmann::json j = DocumentIO::FeatureToJson(*sk);
+  const nlohmann::json& cj = j.at("constraints");
+  CHECK(cj.at(0).at("driven") == true);
+  CHECK_THAT(cj.at(0).at("value").get<double>(), WithinAbs(50.0, 1e-12));
+  CHECK_FALSE(cj.at(1).contains("driven")); // omitted when false
+
+  auto restored = DocumentIO::FeatureFromJson(j);
+  auto* rsk = dynamic_cast<SketchFeature*>(restored.get());
+  REQUIRE(rsk != nullptr);
+  CHECK(rsk->constraints.at(0).driven);
+  CHECK_FALSE(rsk->constraints.at(1).driven);
+  CHECK(DocumentIO::FeatureToJson(*rsk) == j);
+}
+
+TEST_CASE("The loader refuses a driven flag where it means nothing",
+          "[sketch][io][driven]") {
+  using K = sketch::ConstraintKind;
+  auto sk = std::make_unique<SketchFeature>("S", SketchPlane(PlaneType::XY));
+  const uint32_t l = sk->AddEntity(sketch::Line{{0, 0}, {30, 40}});
+  sk->constraints.push_back({K::Horizontal, {l, 0}, {}});
+  sk->constraints.push_back({K::Distance, {l, 0}, {l, 1}, 50.0});
+  sk->SetId(5);
+  const nlohmann::json good = DocumentIO::FeatureToJson(*sk);
+
+  SECTION("on a horizontal, naming the dimension kinds") {
+    nlohmann::json j = good;
+    j["constraints"][0]["driven"] = true;
+    CHECK_THROWS_WITH(DocumentIO::FeatureFromJson(j),
+                      Catch::Matchers::ContainsSubstring(
+                          "a horizontal constraint cannot be driven") &&
+                          Catch::Matchers::ContainsSubstring("distance_pl"));
+  }
+  SECTION("with an expression") {
+    nlohmann::json j = good;
+    j["constraints"][1]["driven"] = true;
+    j["constraints"][1]["expr"] = "w";
+    CHECK_THROWS_WITH(DocumentIO::FeatureFromJson(j),
+                      Catch::Matchers::ContainsSubstring("cannot carry an "
+                                                         "expression"));
+  }
+  SECTION("that is not a boolean") {
+    nlohmann::json j = good;
+    j["constraints"][1]["driven"] = "yes";
+    CHECK_THROWS_WITH(DocumentIO::FeatureFromJson(j),
+                      Catch::Matchers::ContainsSubstring("true or false"));
+  }
+}
+
 TEST_CASE("FilletCorner rejects bad inputs", "[sketch]") {
   SketchFeature sk("S", SketchPlane(PlaneType::XY));
   uint32_t l1 = sk.AddEntity(sketch::Line{{4, 0}, {0, 0}});

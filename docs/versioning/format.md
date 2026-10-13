@@ -303,6 +303,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A sketch constraint's `driven` (true: a driven, or reference, dimension; omitted when false). It adds no equation to the solve and has no input: its `value` is written as what the geometry measures and is not read back as an input. `driven` on a kind that is not a dimension (`distance`, `distance_x`, `distance_y`, `distance_pl`, `radius`, `diameter`, `angle`), on one with an `expr`, or that is not a boolean is refused on load. An older build reads a driven dimension as driving, an equation the sketch may not meet ([constraints](../sketching/README.md#constraints)). Golden `vNEXT-driven-dimension` |
 
 ## The directory form
 

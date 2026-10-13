@@ -1,0 +1,13 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [
+    8000.0
+  ],
+  "driven_dimensions": [
+    [
+      10,
+      44.721359549995796
+    ]
+  ]
+}

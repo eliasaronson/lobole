@@ -1446,4 +1446,141 @@ TEST_CASE("A drag never mirrors a triangle", "[solver][drag]") {
   CHECK(drag(sketch::Solver::DragGuard::Orientations) > 0.0);
 }
 
+// A fully defined triangle: base fixed at its start and horizontal, three
+// side lengths (100, 80, 60 -- a right angle at the apex). DOF 0.
+struct DefinedTriangle {
+  SketchFeature s = MakeSketch();
+  uint32_t base = 0, l1 = 0, l2 = 0;
+  DefinedTriangle() {
+    using K = sketch::ConstraintKind;
+    base = s.AddEntity(sketch::Line{{0, 0}, {100, 0}});
+    l1 = s.AddEntity(sketch::Line{{100, 0}, {64, 48}});
+    l2 = s.AddEntity(sketch::Line{{64, 48}, {0, 0}});
+    s.constraints.push_back({K::Coincident, {base, 1}, {l1, 0}});
+    s.constraints.push_back({K::Coincident, {l1, 1}, {l2, 0}});
+    s.constraints.push_back({K::Coincident, {l2, 1}, {base, 0}});
+    s.constraints.push_back({K::Fixed, {base, 0}, {}});
+    s.constraints.push_back({K::Horizontal, {base, 0}, {}});             // [4]
+    s.constraints.push_back({K::Distance, {base, 0}, {base, 1}, 100.0}); // [5]
+    s.constraints.push_back({K::Distance, {l1, 0}, {l1, 1}, 60.0});      // [6]
+    s.constraints.push_back({K::Distance, {l2, 0}, {l2, 1}, 80.0});      // [7]
+  }
+};
+
+TEST_CASE("A driven dimension adds no equation and measures the sketch",
+          "[solver][driven]") {
+  using K = sketch::ConstraintKind;
+  DefinedTriangle t;
+  {
+    sketch::Solver solver;
+    solver.Load(t.s);
+    const sketch::SolveResult r = solver.Solve();
+    REQUIRE(r.ok);
+    REQUIRE(r.dof == 0);
+  }
+  // The apex's height, as a driven distance_y from the base's start.
+  sketch::Constraint height{K::DistanceY, {t.base, 0}, {t.l1, 1}, 999.0};
+  height.driven = true;
+  t.s.constraints.push_back(height);
+  sketch::Solver solver;
+  solver.Load(t.s);
+  CHECK(solver.UnsupportedConstraints().empty());
+  const sketch::SolveResult r = solver.Solve();
+  REQUIRE(r.ok);
+  CHECK(r.dof == 0);
+  CHECK(r.conflictingConstraints.empty());
+  CHECK(r.redundantConstraints.empty());
+  solver.WriteBack(t.s.entities);
+  // The stored 999 is not its truth: the geometry is.
+  CHECK_THAT(*sketch::MeasureDimension(t.s, 8), WithinAbs(48.0, 1e-6));
+
+  // Another dimension changes the triangle; the driven one reads the new
+  // height (60-80-100 -> 60-60-100: apex at x 50, y sqrt(3600-2500)).
+  t.s.constraints[7].value = 60.0;
+  sketch::Solver again;
+  again.Load(t.s);
+  const sketch::EditOutcome edit = again.SolveValueEdit({{7, 80.0, 60.0}});
+  REQUIRE(edit.Accepted());
+  again.WriteBack(t.s.entities);
+  CHECK_THAT(*sketch::MeasureDimension(t.s, 8),
+             WithinAbs(std::sqrt(1100.0), 1e-6));
+}
+
+TEST_CASE("JudgeAddition refuses what constrains nothing", "[solver][driven]") {
+  using K = sketch::ConstraintKind;
+  DefinedTriangle t;
+  SECTION("a repeated horizontal") {
+    SketchFeature after = t.s;
+    after.constraints.push_back({K::Horizontal, {t.base, 0}, {}});
+    const sketch::AddVerdict v = sketch::JudgeAddition(t.s, after);
+    CHECK_FALSE(v.accepted);
+    CHECK(v.reason == "the sketch already fixes that (constraint 4)");
+    CHECK(v.involved == std::vector<size_t>{4});
+  }
+  SECTION("a distance_x repeating the base length") {
+    SketchFeature after = t.s;
+    after.constraints.push_back(
+        {K::DistanceX, {t.base, 0}, {t.base, 1}, 100.0});
+    const sketch::AddVerdict v = sketch::JudgeAddition(t.s, after);
+    CHECK_FALSE(v.accepted);
+    // The base's length: with its direction fixed, the X span is it.
+    CHECK(v.reason == "the sketch already fixes that (constraint 5)");
+    // Added driven instead, it constrains nothing and is accepted.
+    after.constraints.back().driven = true;
+    CHECK(sketch::JudgeAddition(t.s, after).accepted);
+  }
+  SECTION("a contradicting distance, naming what it contradicts") {
+    SketchFeature after = t.s;
+    after.constraints.push_back({K::Distance, {t.base, 1}, {t.l2, 0}, 10.0});
+    const sketch::AddVerdict v = sketch::JudgeAddition(t.s, after);
+    CHECK_FALSE(v.accepted);
+    CHECK(v.reason.rfind("that contradicts what the sketch already fixes", 0) ==
+          0);
+    CHECK_FALSE(v.involved.empty());
+    for (size_t k : v.involved)
+      CHECK(k < t.s.constraints.size());
+  }
+  SECTION("an addition that constrains is accepted") {
+    SketchFeature open = t.s;
+    open.constraints.erase(open.constraints.begin() + 7); // l2 free: DOF 1
+    SketchFeature after = open;
+    after.constraints.push_back({K::Distance, {t.l2, 0}, {t.l2, 1}, 80.0});
+    const sketch::AddVerdict v = sketch::JudgeAddition(open, after);
+    CHECK(v.accepted);
+    CHECK(v.before.dof == 1);
+    CHECK(v.after.dof == 0);
+  }
+  SECTION("switching a dimension from driven to driving is judged too") {
+    SketchFeature before = t.s;
+    before.constraints.push_back(
+        {K::DistanceX, {t.base, 0}, {t.base, 1}, 100.0});
+    before.constraints.back().driven = true;
+    SketchFeature after = before;
+    after.constraints.back().driven = false;
+    const sketch::AddVerdict v = sketch::JudgeAddition(before, after);
+    CHECK_FALSE(v.accepted);
+    // Named: what it repeats, never itself.
+    CHECK(v.involved == std::vector<size_t>{5});
+  }
+}
+
+TEST_CASE("An over-constrained sketch still takes an unrelated constraint",
+          "[solver][driven]") {
+  using K = sketch::ConstraintKind;
+  DefinedTriangle t;
+  // Already broken: a second horizontal on the base.
+  t.s.constraints.push_back({K::Horizontal, {t.base, 0}, {}});
+  // A free line elsewhere, that a horizontal does constrain.
+  const uint32_t free = t.s.AddEntity(sketch::Line{{0, 200}, {50, 210}});
+  SketchFeature after = t.s;
+  after.constraints.push_back({K::Horizontal, {free, 0}, {}});
+  const sketch::AddVerdict v = sketch::JudgeAddition(t.s, after);
+  CHECK(v.accepted);
+  CHECK(v.after.dof == v.before.dof - 1);
+  // While one that touches the broken part is still refused.
+  SketchFeature worse = t.s;
+  worse.constraints.push_back({K::Vertical, {t.l1, 0}, {}});
+  CHECK_FALSE(sketch::JudgeAddition(t.s, worse).accepted);
+}
+
 #endif // HAVE_PLANEGCS
