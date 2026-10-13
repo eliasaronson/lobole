@@ -377,8 +377,17 @@ every later measurement — `CADShape::IsValid` is only a null check.
   position ([split pieces](../modeling/toponaming.md#split-pieces)).
 - `query_geometry` — declarative filters (`geometry_type`, `normal`/`axis`
   with `angle_tol_deg`, `radius` ± `radius_tol`, area and length bounds,
-  `near_point`) and `expected_count`, which turns the query into a one-call
-  assertion. Covers unnamed elements too.
+  `near_point`, `on_point`) and `expected_count`, which turns the query into
+  a one-call assertion. Covers unnamed elements too. `near_point` measures
+  to a face's centroid or an edge's midpoint; `on_point` `[x, y, z]` (mm)
+  to the element ITSELF (`Measure::DistanceToElementAt`, a box test then
+  `BRepExtrema_DistShapeShape` against a vertex), within `max_distance`,
+  1e-3 mm by default. A full circle's midpoint depends on where the kernel
+  put its seam; any point on the circle finds it, so `on_point` with
+  `expected_count: 1` picks an element from a fact of the drawing, which is
+  how the [reference parts](../modeling/reference-parts.md) pick every edge
+  and face. The two point filters read one `max_distance` two ways, so both
+  at once are refused.
 - `frame` — the origin and axes of a named datum frame, a face, a circular
   edge or an occurrence, in part space or (with `occurrence`) world space:
   exactly the frame a mate connector with the same spec uses.

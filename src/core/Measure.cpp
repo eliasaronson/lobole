@@ -305,6 +305,36 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex) {
   return out;
 }
 
+std::optional<double> DistanceToElementAt(const Body& body, bool face,
+                                          int index, const glm::dvec3& point,
+                                          double cutoff) {
+  if (body.shape.GetShape().IsNull())
+    return std::nullopt;
+  const TopoDS_Shape s = face ? FaceAt(body.shape.GetShape(), index)
+                              : EdgeAt(body.shape.GetShape(), index);
+  if (s.IsNull())
+    return std::nullopt;
+  try {
+    const gp_Pnt p(point.x, point.y, point.z);
+    Bnd_Box box;
+    BRepBndLib::Add(s, box);
+    if (box.IsVoid() || box.Distance(Bnd_Box(p, p)) > cutoff)
+      return std::nullopt;
+    const TopoDS_Vertex v = BRepBuilderAPI_MakeVertex(p);
+    BRepExtrema_DistShapeShape dist(v, s, Extrema_ExtFlag_MIN);
+    if (!dist.IsDone() || dist.NbSolution() < 1)
+      return std::nullopt;
+    if (dist.Value() > cutoff)
+      return std::nullopt;
+    return dist.Value();
+  } catch (const Standard_Failure& e) {
+    LOG_ERROR("Measure element distance failed: {}",
+              e.GetMessageString() ? e.GetMessageString()
+                                   : "OpenCASCADE failure");
+    return std::nullopt;
+  }
+}
+
 // Boolean fuzz for contact checks, in millimetres. Big enough to swallow the
 // sliver two coincident faces produce, far below any interference a designer
 // could intend.

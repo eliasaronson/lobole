@@ -1341,7 +1341,10 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
-     "(+radius_tol), area/length bounds, near_point (+max_distance); "
+     "(+radius_tol), area/length bounds, near_point (+max_distance: the "
+     "centroid / midpoint within it), on_point [x,y,z] mm (+max_distance, "
+     "default 1e-3 mm: the element ITSELF passes within it — a full circle "
+     "by any point on it; not with near_point); "
      "expected_count makes the result carry ok true/false. Covers UNNAMED "
      "elements too; matches carry stable names where they exist. Every "
      "measure here is MILLIMETRES — radius, radius_tol, max_distance, "
@@ -1349,7 +1352,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "angle_tol_deg in degrees, as its name says.",
      "angle_tol_deg, axis, body, element_type, expected_count, geometry_type, "
      "max_area, max_distance, max_length, max_results, min_area, min_length, "
-     "near_point, normal, part, radius, radius_tol"},
+     "near_point, normal, on_point, part, radius, radius_tol"},
     {"compare_geometry",
      "Boolean-diff similarity: {golden_path} (STEP/BREP reference) vs the "
      "active doc, or {a, b} bodies/occurrences. `metrics`: \"all\" (the "
@@ -2685,7 +2688,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // params: {part?, body?, element_type?: face|edge, geometry_type?,
     // normal? + angle_tol_deg?, axis? + angle_tol_deg?, radius? +
     // radius_tol?, min_area?/max_area?, min_length?/max_length?,
-    // near_point? + max_distance?, expected_count?, max_results? (50)}
+    // near_point? | on_point? + max_distance?, expected_count?,
+    // max_results? (50)}
     const auto& bodies =
         p.contains("part") ? ResolvePartParam(state, p.at("part"))->GetBodies()
                            : RequirePartDoc(doc, "query_geometry").GetBodies();
@@ -2706,14 +2710,31 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       return glm::dvec3(a.at(0).get<double>(), a.at(1).get<double>(),
                         a.at(2).get<double>());
     };
-    std::optional<glm::dvec3> wantNormal, wantAxis, nearPoint;
+    const auto point3 = [&](const char* key) {
+      const json& a = p.at(key);
+      if (!a.is_array() || a.size() != 3 ||
+          !std::all_of(a.begin(), a.end(),
+                       [](const json& v) { return v.is_number(); }))
+        throw std::runtime_error(std::string(key) + " must be [x, y, z] in mm");
+      return vec3(a);
+    };
+    if (p.contains("near_point") && p.contains("on_point"))
+      throw std::runtime_error(
+          "near_point and on_point both read max_distance; give one — "
+          "near_point measures to a face's centroid or an edge's midpoint, "
+          "on_point to the element itself");
+    std::optional<glm::dvec3> wantNormal, wantAxis, nearPoint, onPoint;
     if (p.contains("normal"))
       wantNormal = glm::normalize(vec3(p.at("normal")));
     if (p.contains("axis"))
       wantAxis = glm::normalize(vec3(p.at("axis")));
     if (p.contains("near_point"))
-      nearPoint = vec3(p.at("near_point"));
-    const double maxDistance = p.value("max_distance", 1e30);
+      nearPoint = point3("near_point");
+    if (p.contains("on_point"))
+      onPoint = point3("on_point");
+    const double maxDistance = p.value("max_distance", onPoint ? 1e-3 : 1e30);
+    if (!(maxDistance >= 0.0))
+      throw std::runtime_error("max_distance must be >= 0 mm");
     std::optional<double> wantRadius, minArea, maxArea, minLength, maxLength;
     if (p.contains("radius"))
       wantRadius = p.at("radius").get<double>();
@@ -2793,6 +2814,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         if (maxLength && length > *maxLength)
           continue;
         if (nearPoint && glm::length(point - *nearPoint) > maxDistance)
+          continue;
+        // Last: the one filter that runs an extrema per element.
+        if (onPoint && !Measure::DistanceToElementAt(bodies[bi], wantFaces, idx,
+                                                     *onPoint, maxDistance))
           continue;
         count++;
         if (matches.size() >= maxResults)

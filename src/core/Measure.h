@@ -96,6 +96,14 @@ struct EdgeInfo {
 };
 std::optional<FaceInfo> DescribeFaceAt(const Body& body, int faceIndex);
 std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex);
+// The distance (mm) from `point` to the face / edge at that index ITSELF —
+// the nearest point of its geometry, not its centroid or midpoint — or
+// nullopt when the index does not resolve or the distance is more than
+// `cutoff` (a box test skips the extrema then). query_geometry's on_point:
+// a full circle is found by any point on it, wherever its seam fell.
+std::optional<double> DistanceToElementAt(const Body& body, bool face,
+                                          int index, const glm::dvec3& point,
+                                          double cutoff);
 
 // Total pairwise intersection volume between two rigidly placed body sets
 // (I4 clash, assembly form): every body of A (placed by xfA) is intersected

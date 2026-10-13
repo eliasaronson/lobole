@@ -95,6 +95,45 @@ def main():
                    max_distance=4, expected_count=1)
         expect(r["ok"], f"one rim near the top of hole 1: {r}")
 
+        # on_point: the element ITSELF passes through the point, so a full
+        # circle is found by any point on it wherever its seam fell (a
+        # midpoint test cannot), and the match carries the name
+        # list_elements gives that edge.
+        import math
+        at = [6 + 3 * math.cos(1.0), 10 + 3 * math.sin(1.0), 10]
+        r = d.call("query_geometry", element_type="edge", on_point=at,
+                   expected_count=1)
+        expect(r["ok"] and r["matches"][0]["kind"] == "circle",
+               f"one rim through a point on it: {r}")
+        listed = {e["name"]: e for e in
+                  d.call("list_elements")["bodies"][0]["edges"]}
+        rim = listed.get(r["matches"][0].get("element"))
+        expect(rim is not None and rim["index"] == r["matches"][0]["index"]
+               and abs(rim["radius"] - 3) < 1e-9,
+               f"on_point names the edge list_elements lists: {r}, {rim}")
+        # A point on the hole's wall, half way down: the bore face alone.
+        r = d.call("query_geometry", on_point=[9, 10, 5], expected_count=1)
+        expect(r["ok"] and r["matches"][0]["kind"] == "cylinder", r)
+        # A point off every element matches none (here 0.01 above the top
+        # rim, outside the default 1e-3 mm), and max_distance widens it.
+        off = [at[0], at[1], 10.01]
+        r = d.call("query_geometry", element_type="edge", on_point=off,
+                   expected_count=1)
+        expect(not r["ok"] and r["count"] == 0, f"off every edge: {r}")
+        r = d.call("query_geometry", element_type="edge", on_point=off,
+                   max_distance=0.02, expected_count=1)
+        expect(r["ok"], f"max_distance widens on_point: {r}")
+        # Refused, not guessed: a point that is not [x, y, z], and both
+        # point filters at once (they read one max_distance two ways).
+        for bad in ({"on_point": [6, 10]},
+                    {"on_point": at, "near_point": at}):
+            try:
+                d.call("query_geometry", **bad)
+            except RuntimeError as e:
+                expect("on_point" in str(e), f"refusal names it: {e}")
+            else:
+                raise AssertionError(f"accepted {bad}")
+
         # Torus faces are assertable (round-8 retro: bent tubes were
         # "other"). A half-donut: circle 20 off the z axis, swept 180.
         sk2 = d.call("add_feature", feature={
