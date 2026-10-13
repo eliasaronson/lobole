@@ -67,8 +67,13 @@ glm::vec4 PromptPillRect(const AppState& state, float y, glm::vec2 textSize) {
   // The rect is a frame old (PreviewFeature records it after drawing), which
   // is fine: it moves when the viewport does, and so does the pill.
   float right = state.viewportPos.x + state.viewportSize.x;
+  // Shown THIS frame or the last: nothing clears the rect when the window
+  // closes, so a rect alone kept the pill pushed left of a window long gone.
   const glm::vec4& tw = state.toolWindowRect;
-  const bool toolWindowOpen = tw.z > tw.x && tw.w > tw.y;
+  // Frame 0 without a context: the headless tests call this as arithmetic.
+  const int frame = ImGui::GetCurrentContext() ? ImGui::GetFrameCount() : 0;
+  const bool toolWindowOpen =
+      state.toolWindowLastFrame >= frame - 1 && tw.z > tw.x && tw.w > tw.y;
   if (toolWindowOpen && y < tw.w && y + textSize.y + 2.0f * padY > tw.y)
     right = std::min(right, tw.x - 8.0f);
   // Never push it off the left edge: a cramped pill that overlaps slightly

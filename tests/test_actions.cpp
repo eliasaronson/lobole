@@ -428,6 +428,7 @@ TEST_CASE("prompt pill keeps clear of the tool window", "[actions][overlay]") {
   state.viewportSize = glm::vec2(1000.0f, 700.0f);
   const glm::vec2 text(300.0f, 16.0f);
   const float y = state.viewportPos.y + 34.0f;
+  state.toolWindowLastFrame = 0; // drawn this frame (no ImGui context: 0)
 
   SECTION("no tool window: centred on the viewport") {
     state.toolWindowRect = glm::vec4(0.0f);
@@ -458,6 +459,19 @@ TEST_CASE("prompt pill keeps clear of the tool window", "[actions][overlay]") {
     // a tool window further down the viewport is not in the way, and shoving
     // the pill left for it would be a different wrong answer.
     state.toolWindowRect = glm::vec4(900.0f, y + 400.0f, 1150.0f, y + 600.0f);
+    const glm::vec4 r = ui::PromptPillRect(state, y, text);
+    const float centre = state.viewportPos.x + state.viewportSize.x * 0.5f;
+    CHECK_THAT((r.x + r.z) * 0.5f, WithinAbs(centre, 0.5f));
+  }
+
+  SECTION("a closed tool window's rect does not move it") {
+    // Nothing clears the rect when the window closes; only the frame it last
+    // drew says it is gone. The rect alone kept the pill pushed left of a
+    // window that had closed long before.
+    const float twRight = state.viewportPos.x + state.viewportSize.x - 12.0f;
+    state.toolWindowRect =
+        glm::vec4(twRight - 420.0f, y - 10.0f, twRight, y + 200.0f);
+    state.toolWindowLastFrame = -2; // never drawn, or closed frames ago
     const glm::vec4 r = ui::PromptPillRect(state, y, text);
     const float centre = state.viewportPos.x + state.viewportSize.x * 0.5f;
     CHECK_THAT((r.x + r.z) * 0.5f, WithinAbs(centre, 0.5f));
