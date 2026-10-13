@@ -134,6 +134,13 @@ inline long SockWrite(int fd, const void* b, size_t n) {
   return ::write(fd, b, n);
 }
 } // namespace
+
+namespace {
+// How deep a request may nest. The deepest real one (a batch of sketch
+// features) is about a dozen levels, and the hostile sweep sends values 64
+// deep that must still reach their handlers.
+constexpr int kMaxRequestDepth = 256;
+} // namespace
 #endif
 
 // True when the executable this process is running has been replaced or
@@ -325,7 +332,17 @@ void RemoteServer::ClientThread(int client, uint64_t connection) {
       request.client = client;
       request.connection = connection;
       try {
-        json msg = json::parse(line);
+        // Refused past kMaxRequestDepth while it is parsed: nlohmann parses
+        // iteratively but copies recursively, a level a stack frame, and the
+        // params are copied from here on. A line nested 100 000 deep
+        // overflowed this thread's stack and took the instance down.
+        json msg = json::parse(line, [](int depth, json::parse_event_t, json&) {
+          if (depth > kMaxRequestDepth)
+            throw std::runtime_error("nesting deeper than " +
+                                     std::to_string(kMaxRequestDepth) +
+                                     " levels");
+          return true;
+        });
         request.id = msg.value("id", json());
         request.method = msg.value("method", "");
         request.params = msg.value("params", json::object());

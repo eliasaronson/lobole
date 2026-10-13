@@ -743,7 +743,14 @@ def sweep_raw(sw):
              b'{"id":3,"method":"ping"} {"id":4,"method":"ping"}',
              b"[]", b"5", b"null", b'{"id":{"a":1},"method":"ping"}',
              b'{"id":5,"method":5}', b'{"id":6,"method":"ping","params":5}',
-             b'{"id":7}', b'{"id":8,"method":""}']
+             b'{"id":7}', b'{"id":8,"method":""}',
+             # A million deep: copying the parsed value recursed once a
+             # level and overflowed the client thread's stack (100 000 was
+             # enough in a release build), so one line killed the instance.
+             b'{"id":9,"method":"ping","params":' + b"[" * 1000000
+             + b"]" * 1000000 + b"}",
+             b'{"id":10,"method":"ping","params":' + b'{"a":' * 1000000
+             + b"0" + b"}" * 1000000 + b"}"]
     for data in lines:
         sw.counts["calls"] += 1
         label = f"raw line {data[:60]!r}" + (

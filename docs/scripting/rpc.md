@@ -37,7 +37,10 @@ A new RPC goes in its domain module, with a row in that module's `MethodDoc`
 table beside the branch.
 
 A line that is not JSON — or that holds a number past a double, `1e400`,
-which the parser refuses rather than reading as infinity — is answered
+which the parser refuses rather than reading as infinity, or nests deeper
+than 256 levels (`kMaxRequestDepth`: a parsed value is copied recursively,
+and one line nested 100 000 deep overflowed the reader thread's stack) — is
+answered
 `{id: null, error: "parse: …"}`: the server cannot know the id. With one
 request in flight it is that request's answer, and `designer_remote.py`
 raises it as such rather than waiting for its own id. Every message goes out
