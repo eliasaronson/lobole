@@ -653,7 +653,7 @@ inline constexpr uint8_t kWholeEntity = 0xFF;
 // Datum geometry: the sketch origin + X/Y axes. These are always available as
 // constraint / mirror / snap references but are NOT stored in the entity list —
 // they live in a reserved id block above any real entity id (entities are
-// minted at random below kDatumBase, MintEntityId). `IndexOfEntity` returns
+// minted below kDatumBase, MintEntityId). `IndexOfEntity` returns
 // SIZE_MAX for them, so every ref-by-index site must check IsDatum first and
 // use the helpers below for their (fixed) geometry.
 constexpr uint32_t kDatumBase = 0xFFFFFF00u;
@@ -1059,12 +1059,17 @@ public:
   // dimension — can bind to the wrong face while the document rebuilds
   // perfectly and says nothing.
   //
-  // Random rather than sequential because, unlike a FEATURE id, an entity id
-  // is never a filename: it lives inside the sketch's own JSON, so the
-  // readability that kept feature ids sequential is not on the table here.
+  // A hash of the entity's own geometry rather than a counter, so two people
+  // drawing different entities mint different ids -- and rather than a
+  // random number, because a random id made the same calls build different
+  // models: a face's name, and so the order the kernel meets edges in, came
+  // out different on every run, a chamfer built on one run and failed on the
+  // next, and a --record session naming a primitive's edge could not be
+  // replayed (tools/fuzz.py: incremental against a rebuild from nothing).
+  // The same geometry added again gets the same id, which is the same edge.
   // Retried against this sketch's entities, so uniqueness within a sketch is
   // exact rather than probable.
-  [[nodiscard]] uint32_t MintEntityId() const;
+  [[nodiscard]] uint32_t MintEntityId(const sketch::Entity& e) const;
 
 private:
   // Shared by TrimLineAt/TrimSpanAt: for line `id` at `clickUV`, outputs the

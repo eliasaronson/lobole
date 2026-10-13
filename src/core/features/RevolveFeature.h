@@ -44,6 +44,18 @@ public:
     visit(angleExpr, angleDeg);
   }
 
+  // As Extrude's: a Pattern of a revolve that cuts or adds (a Sphere placed
+  // `on` a body is one) replicates the swept tool. Without it the pattern
+  // refused "source body not found" (tools/fuzz.py).
+  const CADShape* ToolShape() const override {
+    return (mode == ExtrudeMode::Cut || mode == ExtrudeMode::Add) &&
+                   m_tool.IsValid()
+               ? &m_tool
+               : nullptr;
+  }
+  const ElementMap* ToolMap() const override { return &m_toolMap; }
+  bool ToolAdds() const override { return mode == ExtrudeMode::Add; }
+
   uint64_t sketchId = 0;
   AxisRef axis;
   double angleDeg = 360.0;
@@ -53,4 +65,9 @@ public:
   ExtrudeMode mode = ExtrudeMode::NewBody;
   // Region selection (U2) — see ExtrudeFeature::regions.
   std::vector<std::vector<uint32_t>> regions;
+
+private:
+  // The last-swept cut or add solid and its names (Feature::ToolShape).
+  CADShape m_tool;
+  ElementMap m_toolMap;
 };

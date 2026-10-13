@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <TopTools_ListOfShape.hxx>
+
 #include "cad/CADKernel.h"
 #include "core/ElementMap.h"
 #include "core/Feature.h"                 // Body
@@ -76,6 +78,12 @@ ElementMap NamesThroughHistory(const CADShape& target,
 ElementMap NamesThroughHistory(const CADShape& input, const ElementMap& map,
                                const BRepTools_History& history,
                                const CADShape& result, uint64_t featureTag);
+
+// Every face and edge of `shape`, as the argument list BRepTools_History's
+// template constructor needs to be built from a maker (handing it the solid
+// alone yields a silently empty history): for an operation on one shape --
+// a shell, a draft -- named through NamesThroughHistory above.
+TopTools_ListOfShape HistoryArguments(const TopoDS_Shape& shape);
 
 // Constant-radius fillet or chamfer of the given edges (edgeIndex space,
 // the ElementMap convention). Blend faces are named

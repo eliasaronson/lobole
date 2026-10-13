@@ -3,6 +3,8 @@
 
 #include "core/features/PatternFeature.h"
 
+#include "core/ModelSpace.h"
+
 #include "common/Logger.h"
 #include "core/BodyMode.h"
 #include "core/ElementOrigin.h"
@@ -152,6 +154,35 @@ void CarryMarks(std::vector<Body>& bodies, const SeedMarks& marks,
 
 } // namespace
 
+// The count, the reach and the step angle, refused before any copy is made:
+// spacing 1e308 put copies past where OpenCASCADE can tell points apart and
+// the fuse hung; angle_deg 1e308 made the second copy's angle infinity, a NaN
+// rotation that hung the same way (hostile_params_smoke).
+bool PatternFeature::PatternInRange(int n) {
+  constexpr int kMaxCopies = 10000; // each is a boolean against the body
+  if (n > kMaxCopies) {
+    SetError("a pattern makes at most " + std::to_string(kMaxCopies) +
+             " copies; count is " + std::to_string(n));
+    return false;
+  }
+  if (kind == PatternKind::Linear &&
+      !InModelSpace(spacing * static_cast<double>(n - 1))) {
+    SetError("the pattern reaches " + std::to_string(spacing * (n - 1)) +
+             " mm (spacing x (count - 1)), past the " +
+             std::to_string(static_cast<long>(kModelSpaceMm)) +
+             " mm model space (core/ModelSpace.h)");
+    return false;
+  }
+  if (kind == PatternKind::Circular &&
+      !(std::isfinite(angleDeg) && std::abs(angleDeg) <= 360.0)) {
+    SetError("angle_deg is the angle between neighbouring copies, within "
+             "+-360; got " +
+             std::to_string(angleDeg));
+    return false;
+  }
+  return true;
+}
+
 bool PatternFeature::Execute(RegenContext& ctx) {
   // A step that lands every copy on the seed builds nothing while the
   // pattern reads as one that worked (a cut source only warned that its
@@ -243,6 +274,8 @@ bool PatternFeature::Execute(RegenContext& ctx) {
       }
     }
     n = std::max(1, n);
+    if (!PatternInRange(n)) // a count, spacing or angle past what it can take
+      return false;
 
     for (size_t i = 0; i < seedCount; i++) {
       for (int k = 1; k < n; k++) {
@@ -325,6 +358,8 @@ bool PatternFeature::ExecuteToolPattern(RegenContext& ctx, const CADShape& tool,
         n = static_cast<int>(std::lround(*v));
     }
     n = std::max(1, n);
+    if (!PatternInRange(n)) // a count, spacing or angle past what it can take
+      return false;
     for (int k = 1; k < n; k++) { // k = 0 is the source cut itself
       CADShape copy = tool;
       if (kind == PatternKind::Linear)

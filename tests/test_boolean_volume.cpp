@@ -461,3 +461,24 @@ TEST_CASE("An add that grows one of two overlapping bodies leaves the other",
   CHECK(bodies[1].name == "Cavity");
   CHECK_THAT(bodies[1].shape.Volume(), WithinRel(30.0 * 36.0, 1e-6));
 }
+
+TEST_CASE("A cut that leaves a sliver of a corner keeps it as a solid",
+          "[boolean]") {
+  // tools/fuzz.py (tests/fuzz/cases/boolean_failed-772.jsonl): a d30
+  // cylinder through a 55 x 57.5 block passes 0.08 mm inside its corner, so
+  // the corner comes off as a tiny solid of its own. Its volume is under the
+  // check's tolerance, and the check read "not more than the tolerance" as
+  // "turned inside out" and refused an ordinary cut.
+  const CADShape block = Box(-27.5, -28.75, 0, 55, 57.5, 17.5);
+  const CADShape tool(
+      BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(17.5, 17.5, -1), gp_Dir(0, 0, 1)),
+                               15.0, 20.0)
+          .Shape());
+  const CADShape cut(
+      BRepAlgoAPI_Cut(block.GetShape(), tool.GetShape()).Shape());
+  REQUIRE(cut.SolidCount() == 2); // the block and the corner's sliver
+  const std::string why =
+      BooleanRefusal("P1", BooleanOp::Subtract, "Base", block, tool, cut);
+  INFO(why);
+  CHECK(why.empty());
+}

@@ -18,6 +18,8 @@ RevolveFeature::RevolveFeature(const std::string& name, uint64_t sketchId,
 }
 
 bool RevolveFeature::Execute(RegenContext& ctx) {
+  m_tool = CADShape(); // a failed regen leaves no stale tool to pattern
+  m_toolMap = ElementMap();
   const auto* sketch =
       dynamic_cast<const SketchFeature*>(ctx.FindById(sketchId));
   if (!sketch) {
@@ -84,6 +86,10 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
+  if (mode == ExtrudeMode::Cut || mode == ExtrudeMode::Add) {
+    m_tool = solid; // for a Pattern of this cut or add (ToolShape)
+    m_toolMap = map;
+  }
   return ApplyBodyModeReporting(ctx.bodies, std::move(solid), std::move(map),
                                 mode, *this);
 }

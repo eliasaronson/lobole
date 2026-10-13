@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/features/FilletFeature.h"
+#include "core/Measure.h" // InvalidReasons
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
@@ -69,6 +70,15 @@ bool FilletFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
+  // Kept only when it is a valid solid: the blend builder reported success
+  // on blends that crossed themselves, and the part went on with a body
+  // check_geometry called invalid (tools/fuzz.py).
+  if (const std::string bad = Measure::InvalidReasons(result); !bad.empty()) {
+    SetError(std::string(what) + " produced an invalid solid (" + bad +
+             "); a smaller radius, or fewer edges in one " + what +
+             ", usually builds");
+    return false;
+  }
   body->shape = std::move(result);
   body->elementMap = std::move(map);
   return true;

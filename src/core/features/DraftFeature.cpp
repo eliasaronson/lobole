@@ -2,16 +2,21 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/features/DraftFeature.h"
+#include "cad/OccSignals.h"
 #include "core/Angles.h"
+#include "core/Measure.h" // InvalidReasons
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
 
 #include <BRepBndLib.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
+#include <BRepTools_History.hxx>
 #include <Bnd_Box.hxx>
 #include <Standard_Failure.hxx>
+#include <Standard_Type.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <gp_Dir.hxx>
@@ -132,7 +137,16 @@ bool DraftFeature::Execute(RegenContext& ctx) {
       SetError("no drafted faces resolved");
       return false;
     }
-    draft.Build();
+    // Faulted on ordinary designs (a draft after a chamfer and a shell:
+    // SIGSEGV in Draft_Modification::Perform, tools/fuzz.py). In a signal
+    // scope it is a failed draft, not a dead app (cad/OccSignals.h).
+    if (const auto why =
+            occsig::RunCatchingOccSignals([&] { draft.Build(); })) {
+      SetError("draft failed inside OpenCASCADE (" + *why +
+               "); a smaller angle, or the faces one at a time, usually "
+               "builds");
+      return false;
+    }
     if (!draft.IsDone()) {
       SetError("draft failed (angle too large for the geometry?)");
       return false;
@@ -150,6 +164,12 @@ bool DraftFeature::Execute(RegenContext& ctx) {
     }
     if (!result.IsValid() || result.Volume() < 1e-9) {
       SetError("draft produced an invalid solid");
+      return false;
+    }
+    if (const std::string bad = Measure::InvalidReasons(result); !bad.empty()) {
+      SetError("draft produced an invalid solid (" + bad +
+               "); a smaller angle, or the faces one at a time, usually "
+               "builds");
       return false;
     }
     // A draft that reshapes a large part of the body is valid geometry and
@@ -172,13 +192,35 @@ bool DraftFeature::Execute(RegenContext& ctx) {
                     angleDeg, maxTaper, changed * 100.0);
       SetWarning(msg);
     }
+    // Names through the builder's own history: a face a draft leaves alone
+    // keeps its name, one it moved keeps it with ";M<id>", one it made from
+    // an edge or a face is named by that ";G<id>". Fresh "<id>/faceN" names
+    // numbered the faces in the order the builder happened to hand them
+    // back, which changed from one run to the next: a draft on a shelled
+    // body's inner wall picked a different face after a rebuild from nothing
+    // (tools/fuzz.py). Fresh names only if no history is to be had.
     ElementMap map;
-    topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
+    {
+      TopTools_ListOfShape args = topo::HistoryArguments(shape);
+      const Handle(BRepTools_History) history =
+          new BRepTools_History(args, draft);
+      if (!history.IsNull())
+        map = topo::NamesThroughHistory(body->shape, body->elementMap, *history,
+                                        result, GetId());
+      else
+        topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
+    }
     body->shape = std::move(result);
     body->elementMap = std::move(map);
     return true;
   } catch (const Standard_Failure& e) {
-    SetError(std::string("draft failed: ") + e.GetMessageString());
+    // An OCC message can be empty ("shell failed:" said nothing); its type
+    // still says what threw.
+    const char* said = e.GetMessageString();
+    SetError(std::string("draft failed: OpenCASCADE threw ") +
+             e.DynamicType()->Name() +
+             (said != nullptr && *said ? std::string(" (") + said + ")" : "") +
+             "; a smaller angle, or the faces one at a time, usually builds");
     LOG_ERROR("DraftFeature '{}': {}", m_name, GetError());
     return false;
   }

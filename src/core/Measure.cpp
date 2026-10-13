@@ -1602,6 +1602,16 @@ GeometryReport CheckGeometry(const CADShape& shape) {
   return out;
 }
 
+std::string InvalidReasons(const CADShape& shape) {
+  const GeometryReport r = CheckGeometry(shape);
+  if (r.valid)
+    return {};
+  std::string out;
+  for (const std::string& why : r.reasons)
+    out += (out.empty() ? "" : ", ") + why;
+  return out.empty() ? std::string("not a valid solid") : out;
+}
+
 std::optional<Element> Describe(const std::vector<Body>& bodies,
                                 const ElementRef& ref) {
   std::string kind;

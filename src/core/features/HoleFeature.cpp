@@ -3,6 +3,8 @@
 
 #include "core/features/HoleFeature.h"
 
+#include "core/ModelSpace.h"
+
 #include "core/parts/AxisStack.h"
 
 #include <cmath>
@@ -199,6 +201,13 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   }
   if (diameter <= 1e-9 || (!through && depth <= 1e-9)) {
     SetError("hole diameter and depth must be positive");
+    return false;
+  }
+  if (!InModelSpace(diameter) || (!through && !InModelSpace(depth))) {
+    SetError("hole diameter " + std::to_string(diameter) + " mm and depth " +
+             std::to_string(depth) + " mm must each be at most " +
+             std::to_string(static_cast<long>(kModelSpaceMm)) +
+             " mm (the model space, core/ModelSpace.h)");
     return false;
   }
   // The drill point and the thread depth, refused rather than read as

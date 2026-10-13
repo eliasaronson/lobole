@@ -134,7 +134,9 @@ TEST_CASE("Shell that removes no material errors", "[shell]") {
   doc.AddFeature(std::make_unique<ShellFeature>(
       "TooThick", id, std::vector<ElementRef>{ElementRef{id, face}}, 2.5));
   CHECK_FALSE(doc.Regenerate());
-  CHECK(doc.GetFeature(1)->GetError().find("no effect") != std::string::npos);
+  // Refused before the offset builder runs: a wall of half the thinnest
+  // extent or more leaves no cavity.
+  CHECK(doc.GetFeature(1)->GetError().find("no cavity") != std::string::npos);
   CHECK_THAT(doc.GetBodies()[0].shape.Volume(), WithinRel(64.0, 1e-9));
 }
 

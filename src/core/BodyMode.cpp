@@ -8,6 +8,7 @@
 
 #include <BOPTools_AlgoTools3D.hxx>
 #include <BRepBndLib.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
@@ -159,17 +160,24 @@ std::string ShellDefect(const TopoDS_Shape& shape, double total, double tol) {
   }
   biggest->volume = total - rest;
   for (int s = 0; s < solids; s++) {
-    int outward = 0;
+    int outward = 0;  // shells enclosing more than the tolerance
+    int positive = 0; // shells enclosing anything at all
     double inward = 0.0;
     for (const Shell& sh : shells) {
       if (sh.solid != s)
         continue;
       if (sh.volume > tol)
         outward++;
+      if (sh.volume > 0.0)
+        positive++;
       else
         inward = std::min(inward, sh.volume);
     }
-    if (outward == 0)
+    // A sliver smaller than the tolerance is a solid, not an inverted one: a
+    // cylinder cut passing 0.1 mm inside a box's corner leaves the corner as
+    // a tiny solid of its own, which this used to refuse as turned inside out
+    // (tools/fuzz.py, tests/fuzz/cases/boolean_failed-772.jsonl).
+    if (positive == 0 && inward < -tol)
       return "a solid whose outer shell is oriented INWARD (it encloses " +
              Mm3(inward) + ")";
     if (outward > 1)
@@ -259,6 +267,25 @@ std::string BooleanRefusal(const std::string& feature, BooleanOp op,
     TopExp::MapShapes(result.GetShape(), TopAbs_FACE, faces);
     for (int i = 1; i <= faces.Extent(); i++) {
       const TopoDS_Face face = TopoDS::Face(faces(i));
+      // A face the boolean MADE, or took whole from the tool, must be a
+      // valid one. The volume and the places below were all right on a cut
+      // through a thin shelled wall that left a self-intersecting wire,
+      // which check_geometry then called invalid (tools/fuzz.py). Not the
+      // target's kept faces: each was checked when it was made, and asking
+      // BRepCheck about a whole part of hundreds of faces per boolean is not
+      // cheap.
+      if (!fromTarget.Contains(face) && !BRepCheck_Analyzer(face).IsValid()) {
+        gp_Pnt c;
+        gp_Pnt2d cuv;
+        const bool at =
+            BOPTools_AlgoTools3D::PointInFace(face, c, cuv, ctx) == 0;
+        return head + "left body '" + body + "' with an INVALID face" +
+               (at ? " at " + At(c) : std::string()) +
+               " (BRepCheck rejects it)" + volumes +
+               ". A tool that grazes a thin wall, or meets a face along a "
+               "seam, is the usual cause: move it clear of the wall's "
+               "other side, or through it";
+      }
       if (fromTool.Contains(face))
         continue; // the tool's own face, on the tool by definition
       const bool kept = fromTarget.Contains(face);

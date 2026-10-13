@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/ElementHistory.h"
+#include "cad/OccSignals.h"
 
 #include "core/ElementOrigin.h"
 
@@ -371,6 +372,12 @@ void AppendSubshapeArgs(const TopoDS_Shape& shape, TopTools_ListOfShape& args) {
 
 } // namespace
 
+TopTools_ListOfShape HistoryArguments(const TopoDS_Shape& shape) {
+  TopTools_ListOfShape args;
+  AppendSubshapeArgs(shape, args);
+  return args;
+}
+
 CADShape BooleanNamed(BooleanOp op, const CADShape& target,
                       const ElementMap& targetMap, const CADShape& tool,
                       const ElementMap& toolMap, uint64_t featureTag,
@@ -515,7 +522,14 @@ template <typename Maker>
 CADShape RunEdgeBlend(Maker& mk, const TopoDS_Shape& shape,
                       const ElementMap& bodyMap, uint64_t featureTag,
                       ElementMap& out, std::string* error) {
-  mk.Build();
+  // In an OCC signal scope (cad/OccSignals.h): the builder segfaults on a set
+  // it cannot build, and only inside such a scope is that an exception.
+  if (const auto why = occsig::RunCatchingOccSignals([&] { mk.Build(); })) {
+    if (error)
+      *error = "the blend builder failed inside OpenCASCADE (" + *why +
+               "); a smaller radius, or fewer edges at once, usually builds";
+    return CADShape();
+  }
   if (!mk.IsDone()) {
     if (error) {
       *error = "the blend could not be built (radius too large for the "
@@ -574,9 +588,7 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
     return CADShape();
   }
   // The blend builder segfaults on a set it cannot build rather than
-  // reporting a faulty contour, so the catch below only sees anything if
-  // OCC's signals are exceptions first.
-  ArmOccSignalHandlers();
+  // reporting a faulty contour; RunEdgeBlend builds it in a signal scope.
   try {
     const TopoDS_Shape& shape = body.GetShape();
     TopTools_IndexedMapOfShape edges;

@@ -49,6 +49,9 @@ public:
   }
 
 private:
+  // The count, the reach and the step angle: SetError and false when one is
+  // past what a pattern can take.
+  bool PatternInRange(int n);
   // The cut-source path: replicate the source's cutter and subtract each
   // transformed copy (the original cut already made instance 0).
   bool ExecuteToolPattern(RegenContext& ctx, const CADShape& tool,

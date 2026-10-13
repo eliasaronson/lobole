@@ -3,6 +3,7 @@
 
 #include "core/features/ExtrudeFeature.h"
 #include "core/ElementHistory.h"
+#include "core/Measure.h" // InvalidReasons
 
 #include "common/Logger.h"
 #include "core/Angles.h"
@@ -175,6 +176,14 @@ bool ExtrudeFeature::Execute(RegenContext& ctx) {
     prism.Translate(sketch->plane.GetNormal() * (sign * backOffset));
   }
 
+  // A profile whose edges overlap (a notch as deep as the rectangle it is
+  // cut from) swept to a solid BRepCheck rejects, and a new body kept it
+  // with a clean regen (tools/fuzz.py). Refused, naming why.
+  if (const std::string bad = Measure::InvalidReasons(prism); !bad.empty()) {
+    SetError("the profile sweeps to an invalid solid (" + bad +
+             "): its loops overlap or touch themselves; check the sketch");
+    return false;
+  }
   if (mode == ExtrudeMode::Cut || mode == ExtrudeMode::Add) {
     m_tool = prism; // for a Pattern of this cut or add (ToolShape)
     m_toolMap = map;

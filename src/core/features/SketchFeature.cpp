@@ -17,8 +17,9 @@
 #include <cmath>
 #include <limits>
 #include <map>
-#include <random>
 #include <set>
+#include <type_traits>
+#include <variant>
 #include <vector>
 
 namespace {
@@ -282,30 +283,110 @@ SketchFeature::SketchFeature(const std::string& name, const SketchPlane& p)
   m_name = name;
 }
 
-uint32_t SketchFeature::MintEntityId() const {
-  // Seeded once per process. Not reproducible run to run, which is fine:
-  // nothing asserts a particular entity id (the tests capture what AddEntity
-  // returns), and the goldens compare counts and volumes rather than bytes.
-  // One engine PER THREAD: a project's parts rebuild side by side when it
-  // opens (docs/ui/long-operations.md#opening-a-project), and a sketch that
-  // grows a projected or patterned entity mints one during that rebuild -- a
-  // shared engine was a data race.
-  thread_local std::mt19937 rng(std::random_device{}());
+namespace {
+
+// FNV-1a over the bytes that make an entity what it is.
+struct Fnv {
+  uint64_t h = 1469598103934665603ull;
+  void Bytes(const void* p, size_t n) {
+    const auto* b = static_cast<const unsigned char*>(p);
+    for (size_t i = 0; i < n; i++) {
+      h ^= b[i];
+      h *= 1099511628211ull;
+    }
+  }
+  void Num(double v) {
+    if (v == 0.0)
+      v = 0.0; // -0.0 and 0.0 are one coordinate
+    Bytes(&v, sizeof v);
+  }
+  void Vec(const glm::dvec2& v) {
+    Num(v.x);
+    Num(v.y);
+  }
+  void Text(const std::string& s) {
+    const uint64_t n = s.size();
+    Bytes(&n, sizeof n);
+    Bytes(s.data(), s.size());
+  }
+};
+
+uint64_t SplitMix(uint64_t x) {
+  x += 0x9E3779B97F4A7C15ull;
+  x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+  x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+  return x ^ (x >> 31);
+}
+
+uint64_t ContentHash(const sketch::Entity& e) {
+  Fnv f;
+  const uint64_t kind = e.index();
+  f.Bytes(&kind, sizeof kind);
+  std::visit(
+      [&f](const auto& x) {
+        using T = std::decay_t<decltype(x)>;
+        const bool construction = x.construction;
+        f.Bytes(&construction, sizeof construction);
+        if constexpr (std::is_same_v<T, sketch::Point>) {
+          f.Vec(x.p);
+        } else if constexpr (std::is_same_v<T, sketch::Line>) {
+          f.Vec(x.a);
+          f.Vec(x.b);
+        } else if constexpr (std::is_same_v<T, sketch::Circle>) {
+          f.Vec(x.center);
+          f.Num(x.radius);
+        } else if constexpr (std::is_same_v<T, sketch::Arc>) {
+          f.Vec(x.center);
+          f.Num(x.radius);
+          f.Num(x.startAngle);
+          f.Num(x.endAngle);
+        } else if constexpr (std::is_same_v<T, sketch::Ellipse>) {
+          f.Vec(x.center);
+          f.Num(x.rMajor);
+          f.Num(x.rMinor);
+          f.Num(x.rotation);
+        } else if constexpr (std::is_same_v<T, sketch::EllipseArc>) {
+          f.Vec(x.center);
+          f.Num(x.rMajor);
+          f.Num(x.rMinor);
+          f.Num(x.rotation);
+          f.Num(x.startParam);
+          f.Num(x.endParam);
+        } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
+          for (const glm::dvec2& pole : x.poles)
+            f.Vec(pole);
+        } else if constexpr (std::is_same_v<T, sketch::Text>) {
+          f.Vec(x.anchor);
+          f.Text(x.text);
+          f.Text(x.font);
+          f.Num(x.height);
+          f.Num(x.angle);
+          f.Num(x.spacing);
+        }
+      },
+      e);
+  return f.h;
+}
+
+} // namespace
+
+uint32_t SketchFeature::MintEntityId(const sketch::Entity& e) const {
   // 0 is "none", and ids from kDatumBase up are the origin and axes: a real
   // entity minted there would be read as a datum.
-  std::uniform_int_distribution<uint32_t> pick(1, sketch::kDatumBase - 1);
-  for (;;) {
-    const uint32_t id = pick(rng);
+  const uint64_t h = ContentHash(e);
+  for (uint64_t attempt = 0;; attempt++) {
+    const uint32_t id = static_cast<uint32_t>(
+        1 + SplitMix(h + attempt) % (uint64_t{sketch::kDatumBase} - 1));
     const bool taken = std::any_of(
         entities.begin(), entities.end(),
-        [id](const sketch::Entity& e) { return sketch::EntityId(e) == id; });
+        [id](const sketch::Entity& x) { return sketch::EntityId(x) == id; });
     if (!taken)
       return id;
   }
 }
 
 uint32_t SketchFeature::AddEntity(sketch::Entity e) {
-  const uint32_t id = MintEntityId();
+  const uint32_t id = MintEntityId(e);
   sketch::SetEntityId(e, id);
   entities.push_back(std::move(e));
   return id;

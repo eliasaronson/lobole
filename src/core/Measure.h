@@ -270,6 +270,11 @@ struct GeometryReport {
   std::vector<std::string> reasons; // distinct human-readable failure statuses
 };
 GeometryReport CheckGeometry(const CADShape& shape);
+// Empty when `shape` is a valid B-Rep; else CheckGeometry's reasons, joined
+// ("self-intersecting wire, unorientable shape"). What a feature that
+// reshapes a body (a blend, a shell, a draft) checks before it keeps the
+// result: their builders report success on solids that cross themselves.
+std::string InvalidReasons(const CADShape& shape);
 
 // The direction an element defines — the only thing an angle can be taken
 // between. A planar face's outward normal, a line edge's tangent, a
