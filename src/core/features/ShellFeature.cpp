@@ -10,6 +10,7 @@
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
 
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepOffsetAPI_MakeThickSolid.hxx>
 #include <BRepTools_History.hxx>
 #include <Standard_Failure.hxx>
@@ -20,7 +21,101 @@
 #include <TopoDS_Face.hxx>
 
 #include <algorithm>
+#include <optional>
 #include <string>
+
+namespace {
+
+// One build of the shell of `body` from `input`: the body's own shape, or a
+// copy of it (`onCopy`). Empty on success with `out` and `map` set, else why
+// it failed.
+std::string ShellOnce(const Body& body, const TopoDS_Shape& input, bool onCopy,
+                      const TopTools_ListOfShape& remove, double thickness,
+                      uint64_t featureTag, std::optional<CADShape>& out,
+                      ElementMap& map) {
+  try {
+    // Negative offset hollows inward, leaving a wall of `thickness`; the
+    // selected faces are removed (open shell).
+    BRepOffsetAPI_MakeThickSolid maker;
+    // In an OCC signal scope (cad/OccSignals.h): the offset builder faults
+    // rather than failing on walls it cannot make.
+    if (const auto why = occsig::RunCatchingOccSignals([&] {
+          maker.MakeThickSolidByJoin(input, remove, -thickness, 1.0e-3);
+        }))
+      return "shell failed inside OpenCASCADE (" + *why +
+             "); a thinner wall usually builds";
+    if (!maker.IsDone())
+      return "shell failed (wall too thick for the geometry?)";
+    CADShape result(maker.Shape());
+    if (!result.IsValid() || result.Volume() < 1e-9)
+      return "shell produced no solid (an empty result); a thinner wall "
+             "usually builds";
+    if (const std::string bad = Measure::InvalidReasons(result); !bad.empty())
+      return "shell produced an invalid solid (" + bad +
+             "); a thinner wall usually builds";
+    // OCC can report success and hand back the INPUT solid (a wall thicker
+    // than the geometry allows, or an offset that self-intersects around a
+    // hole). Opening a face always removes material, so a result that did
+    // not shrink is a silent failure — and it used to commit as a no-op
+    // feature that looked fine in the tree.
+    if (result.Volume() >= body.shape.Volume() - 1e-9)
+      return "shell had no effect: thickness " + std::to_string(thickness) +
+             " is too large for this body (or self-intersects around a "
+             "hole/fillet) - try a thinner wall";
+    // A shell hollows INWARD, so it can never reach past the body's own
+    // outside. The offset builder sometimes moved a face outward instead (a
+    // revolve with a bore in its floor, shelled 4.6 mm: its floor went 4.6
+    // mm down) and the result was a valid, wrong solid (tools/fuzz.py).
+    {
+      glm::dvec3 lo0, hi0, lo1, hi1;
+      body.shape.GetBoundingBox(lo0, hi0, /*tight=*/true);
+      result.GetBoundingBox(lo1, hi1, /*tight=*/true);
+      const double slack = 1e-6 * glm::length(hi0 - lo0) + 1e-6;
+      for (int a = 0; a < 3; a++) {
+        const double past = std::max(lo0[a] - lo1[a], hi1[a] - hi0[a]);
+        if (past > slack)
+          return "shell grew the body " + std::to_string(past) +
+                 " mm past its own outside along " + std::string(1, "xyz"[a]) +
+                 ": OpenCASCADE offset a face the wrong way. A thinner "
+                 "wall, or another open face, usually builds";
+      }
+    }
+    // Names through the builder's own history: a face a shell leaves alone
+    // keeps its name, one it moved keeps it with ";M<id>", one it made from
+    // an edge or a face is named by that ";G<id>". Fresh "<id>/faceN" names
+    // numbered the faces in the order the builder happened to hand them
+    // back, which changed from one run to the next: a draft on a shelled
+    // body's inner wall picked a different face after a rebuild from nothing
+    // (tools/fuzz.py). Built on a copy, the names come through the copy:
+    // BRepBuilderAPI_Copy rebuilds the shape sub-shape for sub-shape, so the
+    // copy's explorer order -- and with it every index-keyed name of the
+    // body's map -- is the body's. (Through a history from the body to the
+    // copy, every face the shell left alone read as modified, ";M<id>".)
+    // Fresh names only if no history is to be had.
+    {
+      const Handle(BRepTools_History) history =
+          new BRepTools_History(topo::HistoryArguments(input), maker);
+      const CADShape from = onCopy ? CADShape(input) : body.shape;
+      if (!history.IsNull())
+        map = topo::NamesThroughHistory(from, body.elementMap, *history, result,
+                                        featureTag);
+      else
+        topo::NamePrimitiveElements(result, std::to_string(featureTag), map);
+    }
+    out = std::move(result);
+    return {};
+  } catch (const Standard_Failure& e) {
+    // An OCC message can be empty ("shell failed:" said nothing); its type
+    // still says what threw.
+    const char* said = e.GetMessageString();
+    return std::string("shell failed: OpenCASCADE threw ") +
+           e.DynamicType()->Name() +
+           (said != nullptr && *said ? std::string(" (") + said + ")" : "") +
+           "; a thinner wall usually builds";
+  }
+}
+
+} // namespace
 
 ShellFeature::ShellFeature(const std::string& name, uint64_t bodyId,
                            std::vector<ElementRef> openFaces, double thickness)
@@ -92,98 +187,47 @@ bool ShellFeature::Execute(RegenContext& ctx) {
       facesToRemove.Append(ex.Current());
   }
 
-  try {
-    // Negative offset hollows inward, leaving a wall of `thickness`; the
-    // selected faces are removed (open shell).
-    BRepOffsetAPI_MakeThickSolid maker;
-    // In an OCC signal scope (cad/OccSignals.h): the offset builder faults
-    // rather than failing on walls it cannot make.
-    if (const auto why = occsig::RunCatchingOccSignals([&] {
-          maker.MakeThickSolidByJoin(shape, facesToRemove, -thickness, 1.0e-3);
-        })) {
-      SetError("shell failed inside OpenCASCADE (" + *why +
-               "); a thinner wall usually builds");
-      return false;
+  // The offset builder's answer depends on where its input lives in memory,
+  // not only on what it is: it walks maps hashed by shape ADDRESS, so the same
+  // solid at other addresses can come back a valid cavity or an invalid solid
+  // of five times the volume (a drilled box shelled through a bore's floor
+  // did the second one build in seven: tests/fuzz/cases/rebuild-139.jsonl,
+  // and "A shell builds the same wherever its input lives in memory"). The
+  // addresses are the allocator's, so the same document shelled in another
+  // process, or a second time in this one, is a new draw. Every bad answer is
+  // caught by the checks below, so a failed attempt is retried on a copy of
+  // the input -- the same solid at new addresses -- and a shell is refused
+  // only when every draw failed. A wall OCC can build is built, and since a
+  // good draw is the same solid whichever one it is, the result no longer
+  // depends on the process. kAttempts bounds what an honest refusal (a wall
+  // too thick for the geometry) costs.
+  constexpr int kAttempts = 5;
+  std::string error;
+  for (int attempt = 0; attempt < kAttempts; attempt++) {
+    std::optional<BRepBuilderAPI_Copy> copy;
+    TopoDS_Shape input = shape;
+    TopTools_ListOfShape remove = facesToRemove;
+    if (attempt > 0) {
+      copy.emplace(shape, /*copyGeom=*/false, /*copyMesh=*/false);
+      input = copy->Shape();
+      remove.Clear();
+      for (const TopoDS_Shape& f : facesToRemove)
+        remove.Append(copy->ModifiedShape(f));
     }
-    if (!maker.IsDone()) {
-      SetError("shell failed (wall too thick for the geometry?)");
-      return false;
-    }
-    CADShape result(maker.Shape());
-    if (!result.IsValid() || result.Volume() < 1e-9) {
-      SetError("shell produced no solid (an empty result); a thinner wall "
-               "usually builds");
-      return false;
-    }
-    if (const std::string bad = Measure::InvalidReasons(result); !bad.empty()) {
-      SetError("shell produced an invalid solid (" + bad +
-               "); a thinner wall usually builds");
-      return false;
-    }
-    // OCC can report success and hand back the INPUT solid (a wall thicker
-    // than the geometry allows, or an offset that self-intersects around a
-    // hole). Opening a face always removes material, so a result that did
-    // not shrink is a silent failure — and it used to commit as a no-op
-    // feature that looked fine in the tree.
-    if (result.Volume() >= body->shape.Volume() - 1e-9) {
-      SetError("shell had no effect: thickness " + std::to_string(thickness) +
-               " is too large for this body (or self-intersects around a "
-               "hole/fillet) - try a thinner wall");
-      return false;
-    }
-    // A shell hollows INWARD, so it can never reach past the body's own
-    // outside. The offset builder sometimes moved a face outward instead (a
-    // revolve with a bore in its floor, shelled 4.6 mm: its floor went 4.6
-    // mm down) and the result was a valid, wrong solid (tools/fuzz.py).
-    {
-      glm::dvec3 lo0, hi0, lo1, hi1;
-      body->shape.GetBoundingBox(lo0, hi0, /*tight=*/true);
-      result.GetBoundingBox(lo1, hi1, /*tight=*/true);
-      const double slack = 1e-6 * glm::length(hi0 - lo0) + 1e-6;
-      for (int a = 0; a < 3; a++) {
-        const double past = std::max(lo0[a] - lo1[a], hi1[a] - hi0[a]);
-        if (past > slack) {
-          SetError("shell grew the body " + std::to_string(past) +
-                   " mm past its own outside along " +
-                   std::string(1, "xyz"[a]) +
-                   ": OpenCASCADE offset a face the wrong way. A thinner "
-                   "wall, or another open face, usually builds");
-          return false;
-        }
-      }
-    }
-    // Topology is reorganized; give the result fresh primitive-style names so
-    // it stays referenceable (a later fillet picks from these).
-    // Names through the builder's own history: a face a shell leaves alone
-    // keeps its name, one it moved keeps it with ";M<id>", one it made from
-    // an edge or a face is named by that ";G<id>". Fresh "<id>/faceN" names
-    // numbered the faces in the order the builder happened to hand them
-    // back, which changed from one run to the next: a draft on a shelled
-    // body's inner wall picked a different face after a rebuild from nothing
-    // (tools/fuzz.py). Fresh names only if no history is to be had.
+    std::optional<CADShape> result;
     ElementMap map;
-    {
-      TopTools_ListOfShape args = topo::HistoryArguments(shape);
-      const Handle(BRepTools_History) history =
-          new BRepTools_History(args, maker);
-      if (!history.IsNull())
-        map = topo::NamesThroughHistory(body->shape, body->elementMap, *history,
-                                        result, GetId());
-      else
-        topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
+    error = ShellOnce(*body, input, copy.has_value(), remove, thickness,
+                      GetId(), result, map);
+    if (error.empty()) {
+      if (attempt > 0)
+        LOG_INFO("ShellFeature '{}': built on attempt {} of {}", m_name,
+                 attempt + 1, kAttempts);
+      body->shape = std::move(*result);
+      body->elementMap = std::move(map);
+      return true;
     }
-    body->shape = std::move(result);
-    body->elementMap = std::move(map);
-    return true;
-  } catch (const Standard_Failure& e) {
-    // An OCC message can be empty ("shell failed:" said nothing); its type
-    // still says what threw.
-    const char* said = e.GetMessageString();
-    SetError(std::string("shell failed: OpenCASCADE threw ") +
-             e.DynamicType()->Name() +
-             (said != nullptr && *said ? std::string(" (") + said + ")" : "") +
-             "; a thinner wall usually builds");
-    LOG_ERROR("ShellFeature '{}': {}", m_name, GetError());
-    return false;
   }
+  SetError(error);
+  LOG_ERROR("ShellFeature '{}': {} ({} attempts)", m_name, error, kAttempts);
+  return false;
 }

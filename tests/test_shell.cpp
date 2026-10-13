@@ -6,6 +6,7 @@
 
 #include "TestIO.h"
 #include "core/Document.h"
+#include "core/ElementHistory.h"
 #include "core/Feature.h"
 #include "core/features/BooleanFeature.h"
 #include "core/features/DraftFeature.h"
@@ -15,7 +16,17 @@
 #include "core/features/SplitFeature.h"
 #include "core/io/Serialization.h"
 
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
+#include <BRepGProp.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
+#include <GProp_GProps.hxx>
+#include <TopExp_Explorer.hxx>
+#include <gp_Ax2.hxx>
+
 #include <filesystem>
+#include <set>
 #include <vector>
 
 using Catch::Matchers::WithinRel;
@@ -166,4 +177,75 @@ TEST_CASE("Shell errors on a missing body and round-trips (v20)", "[shell]") {
   CHECK(rt->bodyId == id);
   CHECK_THAT(loaded->GetBodies()[0].shape.Volume(), WithinRel(v, 1e-9));
   std::filesystem::remove(path);
+}
+
+// The offset builder's answer depends on WHERE its input lives in memory: it
+// walks maps hashed by shape address, so the same solid at other addresses (a
+// copy, or the same document built in another process) can come back a valid
+// cavity or an invalid solid of five times the volume. A drilled box shelled
+// through one bore's floor (tests/fuzz/cases/rebuild-139.jsonl) did the second
+// about one build in seven, which made that case fail at random in a fresh
+// instance (fuzz_corpus_smoke). Every copy must shell alike.
+TEST_CASE("A shell builds the same wherever its input lives in memory",
+          "[shell][determinism]") {
+  // 57.5 x 40 x 27.5 on the XY plane, two d1.5 blind bores 40 deep from the
+  // -X face, the second's flat floor opened.
+  TopoDS_Shape box =
+      BRepPrimAPI_MakeBox(gp_Pnt(-28.75, -20.0, 0.0), 57.5, 40.0, 27.5).Shape();
+  for (const auto& [y, z] : {std::pair{5.0, 16.25}, std::pair{10.0, 21.25}})
+    box =
+        BRepAlgoAPI_Cut(
+            box, BRepPrimAPI_MakeCylinder(
+                     gp_Ax2(gp_Pnt(-28.75, y, z), gp_Dir(1, 0, 0)), 0.75, 40.0)
+                     .Shape())
+            .Shape();
+  Body base;
+  base.name = "Base";
+  base.createdBy = 1;
+  base.shape = CADShape(box);
+  topo::NamePrimitiveElements(base.shape, "1", base.elementMap);
+  // The floor: the planar face 40 in, about the second bore's axis.
+  std::string floor;
+  int k = 0;
+  for (TopExp_Explorer ex(box, TopAbs_FACE); ex.More(); ex.Next(), k++) {
+    GProp_GProps p;
+    BRepGProp::SurfaceProperties(ex.Current(), p);
+    if (p.CentreOfMass().Distance(gp_Pnt(11.25, 10.0, 21.25)) < 1e-6)
+      floor = base.elementMap.names.at(k);
+  }
+  REQUIRE(!floor.empty());
+
+  std::vector<std::unique_ptr<Feature>> none;
+  std::vector<double> volumes;
+  std::vector<std::set<std::string>> names;
+  int failed = 0;
+  std::string why;
+  for (int i = 0; i < 60; i++) {
+    // The same solid at new addresses; the explorer order, and so every
+    // index-keyed name, is the copy's too.
+    std::vector<Body> bodies{base};
+    bodies[0].shape = CADShape(BRepBuilderAPI_Copy(box, false).Shape());
+    ShellFeature shell("Sh", 1, {ElementRef{1, floor}}, 1.95);
+    RegenContext ctx{bodies, none, 0};
+    if (!shell.Execute(ctx)) {
+      failed++;
+      why = shell.GetError();
+      continue;
+    }
+    volumes.push_back(bodies[0].shape.Volume());
+    // Named through the history, however many draws it took: a retry on a
+    // copy names the result through the copy as well.
+    std::set<std::string> n;
+    for (const auto& [idx, name] : bodies[0].elementMap.names)
+      n.insert(name);
+    names.push_back(std::move(n));
+  }
+  INFO(failed << " of 60 copies failed: " << why);
+  CHECK(failed == 0);
+  REQUIRE(!volumes.empty());
+  for (double v : volumes)
+    CHECK_THAT(v, WithinRel(volumes.front(), 1e-9));
+  for (const auto& n : names)
+    CHECK(n == names.front());
+  CHECK(names.front().count(floor) == 0); // the opened floor is gone
 }

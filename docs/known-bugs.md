@@ -90,12 +90,16 @@ the heading if it is not here yet.
 - **Cause:** a U name (`<face>;U<k>`, `topo::ApplyFallbackPasses`) numbers a
   face's boundary edges in the order OpenCASCADE's blend builder hands the
   face back, and that order follows its maps keyed by shape address, so it
-  moves with the process's allocation history.
-  It is not only names: a design built a second time in one process
-  (`tests/fuzz/cases/rebuild-139.jsonl`, a shell of a drilled box, replayed
-  right after its own recorded session) came out with another volume and
-  its next step's body selector missed, so the corpus and seed smokes give
-  each run an instance of its own.
+  moves with the process's allocation history. A fresh instance is not a
+  cure, only another draw: the addresses are the allocator's, and differ
+  from one process to the next as from one build to the next. The same
+  mechanism moved a whole shape, not only names: the offset builder shelled
+  `tests/fuzz/cases/rebuild-139.jsonl` into an invalid solid about one build
+  in seven, in fresh instances as in reused ones, which is what made
+  `fuzz_corpus_smoke` fail at random; a Shell now retries on a copy
+  ([modeling](modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid)).
+  Whether the blend and draft builders' SHAPES (not only their face order)
+  move the same way is not measured.
 - **Where:** `FallbackPasses` in `src/core/ElementHistory.cpp`.
 - **Likely fix:** number a face's unnamed edges in an order the geometry
   fixes (by each edge's midpoint, then its length), not the wire's order.

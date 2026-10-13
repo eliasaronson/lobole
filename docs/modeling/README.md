@@ -446,6 +446,21 @@ and the body is left as it was; check_geometry would have called it invalid.
 A Shell that reaches past the body's own measured outside — the offset
 builder moving a face outward — is refused too: a shell hollows inward.
 
+The offset builder's answer depends on where its input lives in memory, not
+only on what it is: it walks OpenCASCADE maps hashed by shape address, so the
+same solid at other addresses — a copy, the same document built in another
+process or a second time in this one — can come back a valid cavity or an
+invalid solid of several times the volume. A drilled box shelled through one
+bore's floor (`tests/fuzz/cases/rebuild-139.jsonl`) did the second about one
+build in seven. Every such answer fails one of the checks above, so a Shell
+that fails them is built again on a `BRepBuilderAPI_Copy` of its input (the
+same solid at new addresses, sub-shape for sub-shape, so its index-keyed
+names are the body's), up to five draws, and is refused only when every draw
+failed: a wall OpenCASCADE can build is built whichever process builds it.
+An honest refusal (a wall too thick for the geometry) costs the five draws.
+`test_shell`'s "A shell builds the same wherever its input lives in memory"
+shells 60 copies of that box and requires one solid with one set of names.
+
 Their builders can also fault outright on input they should refuse.
 `ArmOccSignalHandlers` (`src/cad/CADKernel.h`, the one caller of
 `OSD::SetSignal`) installs OpenCASCADE's handler without losing the crash
@@ -699,7 +714,10 @@ undone, counted by its gist, and the design goes on — not a failure);
 bug); or a finding: `boolean_failed`, `invalid`, `wrong_way`, `identity`,
 `rebuild`, `reopen`, `undo`, `message`, `internal`, `nonfinite`, `crash`,
 `hang`, or `leak` (failed in a reused instance, clean in a fresh one: state
-the previous seed left behind). A message's **gist** is its class and first
+the previous seed left behind, or a kernel answer that follows shape
+addresses, for which the fresh instance was only a luckier draw —
+[known-bugs](../known-bugs.md#a-blend-faces-edge-names-depend-on-what-the-process-did-before)).
+A message's **gist** is its class and first
 60 characters less digits, and the report groups seeds by it.
 
     tools/fuzz.py run --from 0 --count 1000 [--jobs N] [--timeout 90] [--out DIR]
