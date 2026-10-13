@@ -344,6 +344,15 @@ TEST_CASE("Build info names the version and the kernel", "[buildinfo]") {
   // OpenCASCADE is what decides what a model does; never "none" in a build
   // that has it.
   CHECK(BuildInfo::KernelVersion() != "none");
+  // Whether the GUI test engine (ui_action, --gui-tests) is in the build.
+  // designer_app carries the define, which BuildInfo.cpp in designer_core
+  // did not see: every Build: line said "no test engine". This binary links
+  // designer_app, so it sees what the app sees.
+#ifdef HAVE_TEST_ENGINE
+  CHECK(BuildInfo::Configuration().find(", test engine") != std::string::npos);
+#else
+  CHECK(BuildInfo::Configuration().find("no test engine") != std::string::npos);
+#endif
 }
 
 TEST_CASE("FirstConsumerIndex finds what a sketch feeds",

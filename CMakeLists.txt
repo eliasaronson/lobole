@@ -659,8 +659,15 @@ target_compile_definitions(designer_core PUBLIC
 # The commit on the ONE file that reads it. As a PUBLIC define it was on 409
 # of 427 sources, so every reconfigure at a new commit recompiled all of them
 # and no worktree (configured at its own commit) could hit ccache.
+# The test engine is a define of designer_app, which this library does not
+# see: without it here every Build: line (crash reports, --version) said "no
+# test engine" in a build that has one.
+set(BUILD_INFO_DEFINITIONS "DESIGNER_GIT_COMMIT=\"${DESIGNER_GIT_COMMIT}\"")
+if(ENABLE_TEST_ENGINE)
+    list(APPEND BUILD_INFO_DEFINITIONS HAVE_TEST_ENGINE)
+endif()
 set_source_files_properties(src/common/BuildInfo.cpp PROPERTIES
-    COMPILE_DEFINITIONS "DESIGNER_GIT_COMMIT=\"${DESIGNER_GIT_COMMIT}\"")
+    COMPILE_DEFINITIONS "${BUILD_INFO_DEFINITIONS}")
 target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json fem_mesher)
 if(HAVE_CAM)
