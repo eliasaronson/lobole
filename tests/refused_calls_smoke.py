@@ -110,6 +110,11 @@ class World:
             "cwd": tree(self.work, skip=("fp",)),
             "app": tree(self.app.tmp, skip=(
                 "app.log",
+                # The session's own log (it grows with every call, as
+                # app.log does) and its crash-report marker, which names the
+                # open project (docs/architecture.md#crashes-and-stalls).
+                os.path.join("state", "lobole", "logs"),
+                os.path.join("state", "lobole", "sessions"),
                 os.path.join("state", "lobole", "instances"),
                 os.path.join("state", "lobole", "recent-projects.json"))),
         }

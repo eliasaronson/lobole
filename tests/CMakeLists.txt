@@ -47,6 +47,7 @@ add_executable(designer_tests
     test_open_project.cpp
     test_cam_rough_rest.cpp
     test_instance_registry.cpp
+    test_crash_reports.cpp
     test_rpc_contract.cpp
     test_screen_space_mapping.cpp
     test_recent_projects.cpp
@@ -865,6 +866,14 @@ add_test(NAME watchdog_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/watchdog_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(watchdog_smoke PROPERTIES TIMEOUT 120)
+
+# A crash leaves a report the next start collects: a real SIGSEGV, a kill -9,
+# a clean quit and an uncaught exception, in a scratch state dir
+# (docs/architecture.md#crashes-and-stalls).
+add_test(NAME crash_report_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/crash_report_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(crash_report_smoke PROPERTIES TIMEOUT 120)
 
 # An app a test launched dies with the test, SIGKILL included: smoke_app arms
 # DESIGNER_EXIT_WITH_PARENT for every launch (src/app/ParentWatch.h).

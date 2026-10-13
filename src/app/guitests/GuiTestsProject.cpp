@@ -5,6 +5,7 @@
 #include "core/Command.h"
 #include "core/MassProps.h"
 #include "core/features/DerivedFeature.h"
+#include "core/io/CrashReports.h"
 #include "remote/RemoteRequirements.h"
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
@@ -703,6 +704,72 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(box->width, 44.0);
     // And it is not pretending to be saved.
     IM_CHECK(ui::ProjectDirty(*s_App));
+  };
+
+  // The notice a crash leaves (core/io/CrashReports.h): a session that died
+  // with unsaved work is collected into a report with a copy of its
+  // autosave, the modal says so at start-up, and Recover unsaved work brings
+  // the edit back — dirty, since it was never saved. The dead session is
+  // PLANTED (a marker nobody holds), in a state dir of its own, and collected
+  // the way start-up collects; what is under test is the notice and the way
+  // back.
+  t = IM_REGISTER_TEST(engine, "crash", "the_notice_recovers_unsaved_work");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    namespace fs = std::filesystem;
+    const fs::path state = fs::temp_directory_path() / "lobole_crash_notice";
+    fs::remove_all(state);
+    fs::create_directories(state / "sessions");
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx);
+    ctx->ItemDoubleClick("//###Model/Box 1##0");
+    ctx->Yield();
+    ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 44.0f);
+    ctx->Yield();
+    IM_CHECK(s_App->projectPath.empty()); // never saved: the unsaved slot
+    Autosaver autosaver(0.001);
+    autosaver.Prime(0.0);
+    IM_CHECK(ui::AutosaveProject(*s_App, autosaver, 1.0) >= 1);
+
+    // The session that "crashed" with that autosave.
+    {
+      const nlohmann::json marker = {
+          {"stem", "20200101-000000-1"},
+          {"mode", "windowed"},
+          {"started", "2020-01-01 00:00:00"},
+          {"started_epoch", 0},
+          {"project", ""},
+          {"autosaves", {Autosaver::SidecarPath("")}}};
+      std::ofstream(state / "sessions" / "20200101-000000-1.json")
+          << marker.dump();
+    }
+    std::vector<crash::Report> reports = crash::CollectDeadSessions(state);
+    IM_CHECK_EQ(reports.size(), static_cast<size_t>(1));
+    IM_CHECK(!reports[0].autosaves.empty());
+
+    // The next session starts empty, and is told.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), static_cast<size_t>(0));
+    crash::SetNotice(reports[0]);
+    ctx->Yield(3);
+    ctx->SetRef("//###CrashNotice");
+    ctx->ItemClick("Recover unsaved work###crash_recover");
+    ctx->Yield(3);
+    IM_CHECK(!crash::Notice().has_value());
+    IM_CHECK(Doc()->FeatureCount() > 0);
+    BoxFeature* box = nullptr;
+    for (size_t i = 0; i < Doc()->FeatureCount() && !box; i++)
+      box = dynamic_cast<BoxFeature*>(Doc()->GetFeature(i));
+    IM_CHECK(box != nullptr);
+    IM_CHECK_EQ(box->width, 44.0);
+    IM_CHECK(ui::ProjectDirty(*s_App)); // recovered, not saved
+
+    Autosaver::Clear("");
+    fs::remove_all(state);
   };
 
   // A clean project must stop costing anything. The conflicts scan walks the
