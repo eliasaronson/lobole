@@ -149,7 +149,10 @@ The numbers were measured on this 22-core, 30 GB machine.
   environment, cached and keyed on `shell.nix` and nixpkgs: ~0.1 s against
   ~5 s to enter. It caches `nix-shell`'s own additions, because `nix
   print-dev-env` resolved a different nixpkgs, and it keeps the caller's
-  `TMPDIR` and `DISPLAY`.
+  `TMPDIR` and `DISPLAY`. It captures them from a clean environment: a
+  `nix-shell` run inside another appends to the outer one's search paths,
+  and a worktree whose `shell.nix` patched OpenCASCADE linked the outer
+  shell's stock library.
 - **Wait on a pid or a marker.** `tools/wait-for.sh` waits with a deadline
   under the tool's 600 s cap. A `pgrep -f` loop matches its own command line
   and never ends, and `pkill -f` kills the shell that ran it.

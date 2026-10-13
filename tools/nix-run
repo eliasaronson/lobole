@@ -15,7 +15,8 @@ mkdir -p "$dir"
 nixpkgs="$(nix-instantiate --find-file nixpkgs 2>/dev/null || echo none)"
 # FORMAT versions what the cache holds: a file written by an older nix-run
 # (the whole environment, DISPLAY and TMPDIR frozen in) must not be read.
-FORMAT=2
+# 3: the environment is captured from a clean one, not this shell's.
+FORMAT=3
 key="$( { sha256sum "$root/shell.nix"; echo "$nixpkgs"; echo "format $FORMAT"; } | sha256sum | cut -c1-16)"
 env="$dir/$key.sh"
 alive() { # every store path on the cached PATH still exists
@@ -33,9 +34,21 @@ if [ ! -s "$env" ] || ! alive; then
   # and the other). Not the whole `export -p` either: that froze DISPLAY (an
   # xvfb-run display would be overwritten) and TMPDIR (a directory the
   # generating nix-shell deleted on exit).
+  #
+  # Both sides start from a CLEAN environment, not this one. nix-shell
+  # appends to the search paths it inherits, so run from inside another
+  # nix-shell (an agent's session is one) the capture carried that shell's
+  # NIX_LDFLAGS and CMAKE prefixes along: a tree whose shell.nix patched
+  # OpenCASCADE configured against the outer shell's stock one, and linked
+  # it. PATH keeps what is not in the store, so ~/bin and the system's stay.
   outer="$(mktemp)"; inner="$(mktemp)"
-  env -0 > "$outer"
-  (cd "$root" && nix-shell shell.nix --run 'env -0') > "$inner"
+  basepath="$(tr ':' '\n' <<<"$PATH" | grep -v '^/nix/store/' | paste -sd: -)"
+  clean=(env -i HOME="$HOME" USER="${USER:-}" LOGNAME="${LOGNAME:-}"
+         TERM="${TERM:-dumb}" PATH="$basepath")
+  [ -n "${NIX_PATH:-}" ] && clean+=(NIX_PATH="$NIX_PATH")
+  [ -n "${NIX_REMOTE:-}" ] && clean+=(NIX_REMOTE="$NIX_REMOTE")
+  "${clean[@]}" env -0 > "$outer"
+  (cd "$root" && "${clean[@]}" nix-shell shell.nix --run 'env -0') > "$inner"
   python3 - "$outer" "$inner" > "$tmp" <<'PY'
 import shlex, sys
 def load(p):
