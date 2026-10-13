@@ -1337,7 +1337,11 @@ bool SketchFeature::Execute(RegenContext& ctx) {
 
 void SketchFeature::VisitExprs(const ExprVisitor& visit) {
   for (sketch::Constraint& c : constraints) {
-    if (!sketch::IsDimension(c.kind)) {
+    // A driven dimension has no input -- no expression, no value of its own
+    // (docs/sketching/README.md#constraints) -- so it is no slot: the
+    // variables lint would otherwise call its measure a literal, and
+    // extract_variables hand it an expression the loader refuses.
+    if (!sketch::IsDimension(c.kind) || c.driven) {
       continue;
     }
     if (c.kind == sketch::ConstraintKind::Angle) {

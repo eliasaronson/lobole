@@ -297,3 +297,38 @@ TEST_CASE("a variable's comment says what it measures", "[literals]") {
   REQUIRE(doc.SetParameter("plate_t", "10", "mm, the plate"));
   CHECK(literals::Lint(doc, Vars(doc)).literals.size() == 1);
 }
+
+TEST_CASE("a driven dimension is no literal and takes no variable",
+          "[literals][driven]") {
+  // A driven (reference) dimension has no input: it measures the sketch
+  // (docs/sketching/README.md#constraints). Listed as a field, the lint
+  // would call its measure a literal and extract_variables would hand it an
+  // expression the loader refuses.
+  Document doc;
+  REQUIRE(doc.SetParameter("side", "20"));
+  auto sk = std::make_unique<SketchFeature>("Plate sketch", kXY);
+  AddRect(*sk, {0, 0}, {20, 20});
+  const uint32_t bottom = sketch::EntityId(sk->entities[0]);
+  sketch::Constraint driving{
+      sketch::ConstraintKind::Distance, {bottom, 0}, {bottom, 1}, 20.0};
+  sketch::Constraint driven = driving;
+  driven.kind = sketch::ConstraintKind::DistanceX;
+  driven.driven = true;
+  sk->constraints.push_back(driving); // [0]
+  sk->constraints.push_back(driven);  // [1]
+  doc.AddFeature(std::move(sk));
+  doc.Regenerate();
+
+  const std::vector<literals::Field> fields =
+      literals::Fields(*doc.GetFeature(0));
+  const auto has = [&](const std::string& path) {
+    return std::any_of(
+        fields.begin(), fields.end(),
+        [&](const literals::Field& f) { return f.path == path; });
+  };
+  CHECK(has("constraints/0"));
+  CHECK_FALSE(has("constraints/1"));
+  const literals::Report r = literals::Lint(doc, Vars(doc));
+  CHECK(Finding(r, "Plate sketch", "constraints/0") != nullptr);
+  CHECK(Finding(r, "Plate sketch", "constraints/1") == nullptr);
+}
