@@ -463,7 +463,10 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   points and inserts the arc, with two Coincident and two Tangent constraints.
   The old corner becomes a **construction point**: constraints that held the
   corner are re-pointed onto it, and a point-on-line from each line to it
-  keeps both lines aimed as before. If that web over-determines the corner, one
+  keeps both lines aimed as before. Only a slot that names a POINT is
+  re-pointed: a line's corner end and the whole line are both `{line, 0}` or
+  `{line, 1}`, so a tangent, a point-on-line's curve or a one-line
+  horizontal naming the line keeps it. If that web over-determines the corner, one
   constraint *added by the fillet* that is redundant (same DOF without it) is
   dropped, so a good fillet does not read as conflicting; user constraints are
   never removed. Failure reasons go to `whyNot`.

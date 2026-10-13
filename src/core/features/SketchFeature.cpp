@@ -947,15 +947,54 @@ uint32_t SketchFeature::FilletCorner(uint32_t lineId1, uint32_t lineId2,
 
   // Re-point BEFORE adding the arc-connection constraints (which reuse the
   // corner endpoints and must NOT be caught).
+  // Only a slot that names a POINT is re-pointed. A line's corner end is
+  // {line, 0} or {line, 1}, and so is the WHOLE line in a curve slot (a
+  // tangent, the curve of a point-on-line, a one-line horizontal): moving
+  // those onto the point turned a rectangle's fourth fillet into "tangent
+  // ... got a point and an arc", the three before it having left their
+  // constraints on line 0's ends.
+  const auto isLine = [&](uint32_t id) {
+    const size_t i = IndexOfEntity(id);
+    return i != std::numeric_limits<size_t>::max() &&
+           std::holds_alternative<sketch::Line>(entities[i]);
+  };
+  const auto pointSlots = [&](const sketch::Constraint& con) {
+    struct Slots {
+      bool a = false, b = false, c = false;
+    };
+    switch (con.kind) {
+    case K::Coincident:
+    case K::Distance:
+    case K::DistanceX:
+    case K::DistanceY:
+      return Slots{true, true, false};
+    case K::Horizontal:
+    case K::Vertical: // two points, or one line with no second ref
+      return con.b.entity != 0 ? Slots{true, true, false} : Slots{};
+    case K::PointOnLine:
+    case K::Midpoint:
+    case K::DistancePL:
+    case K::Fixed:
+      return Slots{true, false, false};
+    case K::Symmetric: // about a line, or about a point
+      return Slots{true, true, !isLine(con.c.entity)};
+    default:
+      return Slots{};
+    }
+  };
   auto repoint = [&](sketch::PointRef& r) {
     if ((r.entity == lineId1 && r.which == w1) ||
         (r.entity == lineId2 && r.which == w2))
       r = {pId, 0};
   };
   for (auto& con : constraints) {
-    repoint(con.a);
-    repoint(con.b);
-    repoint(con.c);
+    const auto slots = pointSlots(con);
+    if (slots.a)
+      repoint(con.a);
+    if (slots.b)
+      repoint(con.b);
+    if (slots.c)
+      repoint(con.c);
   }
   // The old corner coincident is now P=P — drop it (plus any other degenerate
   // self-coincident the re-point produced).

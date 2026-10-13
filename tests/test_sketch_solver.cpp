@@ -1139,6 +1139,39 @@ TEST_CASE("Fillet on explicit H/V corner does not over-constrain",
   CHECK_THAT(A(l1), WithinAbs(0.0, 0.1));
 }
 
+TEST_CASE("Four fillets round a rectangle and every constraint still loads",
+          "[solver][arc][fillet]") {
+  // A line's corner end and the whole line share a ref ({line, 0}): the
+  // re-anchoring moved the curve slots too, so the fourth fillet left the
+  // earlier fillets' tangents naming a construction point ("tangent ... got
+  // a point and an arc"), solved as if absent.
+  SketchFeature s = MakeSketch();
+  using K = sketch::ConstraintKind;
+  const uint32_t l[4] = {s.AddEntity(sketch::Line{{0, 0}, {50, 0}}),
+                         s.AddEntity(sketch::Line{{50, 0}, {50, 30}}),
+                         s.AddEntity(sketch::Line{{50, 30}, {0, 30}}),
+                         s.AddEntity(sketch::Line{{0, 30}, {0, 0}})};
+  for (int i = 0; i < 4; i++)
+    s.constraints.push_back({K::Coincident, {l[i], 1}, {l[(i + 1) % 4], 0}});
+  s.constraints.push_back({K::Horizontal, {l[0], 0}, {}});
+  s.constraints.push_back({K::Vertical, {l[1], 0}, {}});
+  s.constraints.push_back({K::Horizontal, {l[2], 0}, {}});
+  s.constraints.push_back({K::Vertical, {l[3], 0}, {}});
+  for (int i = 0; i < 4; i++)
+    REQUIRE(s.FilletCorner(l[i], l[(i + 1) % 4], 5.0) != 0);
+  for (const sketch::Constraint& c : s.constraints) {
+    if (c.kind != K::Tangent && c.kind != K::Horizontal &&
+        c.kind != K::Vertical)
+      continue;
+    const sketch::Entity& e = s.entities[s.IndexOfEntity(c.a.entity)];
+    CHECK_FALSE(std::holds_alternative<sketch::Point>(e));
+  }
+  sketch::Solver solver;
+  solver.Load(s);
+  CHECK(solver.UnsupportedConstraints().empty());
+  REQUIRE(solver.Solve().ok);
+}
+
 TEST_CASE("Fillet does not hide a real over-constraint elsewhere",
           "[solver][arc][fillet]") {
   // The add-then-prune must never mask a GENUINE conflict. Here a separate
