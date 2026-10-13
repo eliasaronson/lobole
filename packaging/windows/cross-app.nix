@@ -83,6 +83,9 @@ cross.stdenv.mkDerivation {
 
   cmakeFlags = [
     "-DCMAKE_BUILD_TYPE=Release"
+    # The same compiler as OpenCASCADE's, and the same -O3 wrong code there
+    # (occ-cross.nix says what it got wrong): no IPA-CP clones here either.
+    "-DCMAKE_CXX_FLAGS=-fno-ipa-cp-clone"
     "-DDESIGNER_BUILD_TESTS=OFF"
     "-DDESIGNER_INSTALL_METAINFO=OFF"
     "-DDESIGNER_ENABLE_FEM_GPU=ON" # Vulkan-compute topology solver (shaders compile natively)
