@@ -4,7 +4,9 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include "cad/CADMaterials.h"
+#ifdef HAVE_CAM
 #include "core/cam/CamFeeds.h"
+#endif
 
 #include <algorithm>
 #include <set>
@@ -317,8 +319,10 @@ TEST_CASE("Building materials have a density, a look and a cut class",
     CHECK(m.pattern == SurfacePattern::Flat);
     CHECK((m.youngGPa > 0.0) == r.stiff);
     CHECK(m.yieldMPa == 0.0); // brittle or not a solid: no factor of safety
+#ifdef HAVE_CAM // the feed table is CAM's; -DENABLE_CAM=OFF does not link it
     CHECK(cam::CutClassOf(r.slug) == cam::CutClass::NotCut);
     CHECK_FALSE(cam::BandFor(cam::CutClassOf(r.slug), 6.0).known);
+#endif
   }
   // Brick reads red-brown, plaster pale, felt near black.
   const glm::vec3 brick = MaterialLibrary::GetMaterial(MT::BRICK).baseColor;
