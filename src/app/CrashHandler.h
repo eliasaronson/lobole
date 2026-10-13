@@ -25,7 +25,9 @@
 //
 // SIGTERM, SIGINT and SIGHUP delete the session marker and die as before: a
 // process asked to stop has not crashed. (Headless and offscreen replace the
-// first two with their own clean shutdown.)
+// first two with their own clean shutdown.) On Windows the console's events
+// (Ctrl+C, Ctrl+Break, close, logoff, shutdown) do the same, through
+// SetConsoleCtrlHandler; a mode with a SIGINT handler is asked to stop.
 void InstallCrashHandler();
 
 // Where this session's crash file and Windows minidump go, and the marker the
@@ -48,10 +50,13 @@ void RefreshCrashModules();
 // only CAPTURES return addresses into preallocated memory — no allocation, no
 // symbolizing, no locks — because the thread it interrupts may be slow rather
 // than dead, and a handler that allocated while that thread held the heap lock
-// would turn a slow frame into a permanent hang.
+// would turn a slow frame into a permanent hang. On Windows it keeps a handle
+// to the thread instead, which the capture suspends.
 void InstallStallCapture();
 
 // From the watchdog's thread: interrupt the main thread, wait up to
 // `timeoutSeconds` for its capture, and symbolize it here, where allocating is
-// safe. Empty when the capture did not arrive, or on Windows.
+// safe. Empty when the capture did not arrive. On Windows: the suspended
+// thread's stack walked from its registers, as module + RVA frames
+// (tools/symbolize-crash.py names them).
 std::string CaptureMainThreadStack(double timeoutSeconds);

@@ -793,7 +793,10 @@ def self_test(binary, work):
                 "bad_optional_access": "internal",
                 "standard_failure": "internal", "refusal": None,
                 "type_error": None, "edit_then_out_of_range": "internal",
-                "nonfinite": "nonfinite", "write_then_refuse": "changed"}
+                "nonfinite": "nonfinite", "write_then_refuse": "changed",
+                # a fault inside an OCC scope is that call's failure, not a
+                # crash, on the handler's thread and on a worker
+                "occ_fault": None}
         for kind, cls in want.items():
             n = len(sw.failures)
             sw.probe("self-test", "debug_fault", {"kind": kind}, tab)

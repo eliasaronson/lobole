@@ -173,7 +173,15 @@ std::string ReasonFrom(const std::string& crashText, bool* crashed) {
     return "crashed (the crash report is unreadable)";
   }
   *crashed = false;
+#if defined(_WIN32)
+  // A stop from the console deletes the marker (app/CrashHandler.cpp), and
+  // running out of memory is a failed allocation, which the crash handler
+  // sees. What it cannot see is TerminateProcess.
+  return "ended without a crash report: ended from outside (Task Manager, "
+         "taskkill /F) or power lost";
+#else
   return "ended without a crash report: killed, out of memory, or power lost";
+#endif
 }
 
 std::string ReportText(const Report& r, const std::string& crashText,
@@ -206,10 +214,17 @@ std::string ReportText(const Report& r, const std::string& crashText,
     row("Dump:", "crash.dmp");
   o << "\n";
   if (crashText.empty()) {
+#if defined(_WIN32)
+    o << "There is no stack: the process ended without running its crash\n"
+         "handler, so it was ended from outside (Task Manager's End task,\n"
+         "taskkill /F) or the machine lost power. The tail of session.log is\n"
+         "what it was doing.\n";
+#else
     o << "There is no stack: the process ended without running its crash\n"
          "handler, so it was killed (kill -9, the out-of-memory killer) or\n"
          "the machine lost power. The tail of session.log is what it was\n"
          "doing.\n";
+#endif
   } else {
     o << "--- the crash handler's report (raw frames are module+offset;\n"
          "--- tools/symbolize-crash.py report.txt BINARY names them) ---\n"

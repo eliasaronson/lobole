@@ -19,6 +19,20 @@
 #include <mutex>
 
 #if defined(_WIN32)
+#include <OSD_Exception_ACCESS_VIOLATION.hxx>
+#include <OSD_Exception_ARRAY_BOUNDS_EXCEEDED.hxx>
+#include <OSD_Exception_ILLEGAL_INSTRUCTION.hxx>
+#include <OSD_Exception_INT_OVERFLOW.hxx>
+#include <OSD_Exception_IN_PAGE_ERROR.hxx>
+#include <OSD_Exception_PRIV_INSTRUCTION.hxx>
+#include <Standard_DivideByZero.hxx>
+#include <Standard_NumericError.hxx>
+#include <Standard_ProgramError.hxx>
+
+#include <csignal>
+#include <cstdio>
+#include <cstdlib>
+#include <float.h>
 #include <windows.h>
 #else
 #include <pthread.h>
@@ -71,9 +85,139 @@ void Dispatch(int sig, siginfo_t* info, void* ctx) {
     Call(g_prior[sig], sig, info, ctx);
 }
 
+#else // _WIN32
+
+// OSD::SetSignal installs three things on Windows, and none of them stays:
+//
+// - signal(SIGSEGV|SIGILL|SIGFPE, OCC's). mingw's start-up code runs main --
+//   and winpthreads every thread it starts -- under an __except whose filter
+//   (_gnu_exception_handler, mingw-w64 crt/crt_handler.c) calls a signal()
+//   handler for an access violation BEFORE the exception can reach the
+//   unhandled-exception filter. OCC's, outside an OCC catch scope, printed
+//   "*** Abort *** an exception was raised, but no catch was found" and
+//   called exit(1): no crash report, no stack. So signal() keeps what it had
+//   (the default), and mingw's filter passes the exception on.
+// - the unhandled-exception filter, OCC's way of turning a fault inside an
+//   OCC catch scope into a Standard_Failure. It never sees one on a
+//   std::thread: mcfgthread's thread entry (__MCF_seh_top, mcfgthread
+//   src/xglobals.c) ends any exception it does not know in
+//   RaiseFailFastException, below which no filter runs. So the crash
+//   handler's filter goes back, and the conversion is a vectored handler of
+//   our own (OnFault, below), which runs first, on every thread, and acts
+//   only inside an OCC catch scope.
+// - a console control handler, which swallows Ctrl+C and exit(254)s on every
+//   other event; the one SetConsoleControlHandler names is put back in front
+//   of it.
+constexpr int kFaults[] = {SIGSEGV, SIGILL, SIGFPE};
+
+PHANDLER_ROUTINE g_console = nullptr;
+bool g_vectored = false;
+
+// What OCC's own filter raises for each code (OSD_signal.cxx, _osd_raise),
+// minus what it cannot be handed: a stack overflow, which a long jump would
+// leave with no guard page, so the next one would kill the process with no
+// handler at all.
+[[noreturn]] void JumpToOcc(const EXCEPTION_RECORD& rec, DWORD code) {
+  char what[160];
+  if (code == EXCEPTION_ACCESS_VIOLATION) {
+    std::snprintf(what, sizeof what,
+                  "ACCESS VIOLATION at address 0x%p during '%s' operation",
+                  reinterpret_cast<void*>(rec.ExceptionInformation[1]),
+                  rec.ExceptionInformation[0] ? "WRITE" : "READ");
+  } else {
+    std::snprintf(what, sizeof what, "Windows exception 0x%08lX",
+                  static_cast<unsigned long>(code));
+  }
+  Handle(Standard_Failure) failure;
+  switch (code) {
+  case EXCEPTION_ACCESS_VIOLATION:
+    failure = new OSD_Exception_ACCESS_VIOLATION(what);
+    break;
+  case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+    failure = new OSD_Exception_ARRAY_BOUNDS_EXCEEDED(what);
+    break;
+  case EXCEPTION_ILLEGAL_INSTRUCTION:
+    failure = new OSD_Exception_ILLEGAL_INSTRUCTION(what);
+    break;
+  case EXCEPTION_PRIV_INSTRUCTION:
+    failure = new OSD_Exception_PRIV_INSTRUCTION(what);
+    break;
+  case EXCEPTION_IN_PAGE_ERROR:
+    failure = new OSD_Exception_IN_PAGE_ERROR(what);
+    break;
+  case EXCEPTION_INT_OVERFLOW:
+    failure = new OSD_Exception_INT_OVERFLOW(what);
+    break;
+  case EXCEPTION_INT_DIVIDE_BY_ZERO:
+  case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+    failure = new Standard_DivideByZero(what);
+    break;
+  case EXCEPTION_DATATYPE_MISALIGNMENT:
+    failure = new Standard_ProgramError(what);
+    break;
+  default: // the floating-point traps
+    _clearfp();
+    failure = new Standard_NumericError(what);
+    break;
+  }
+  // Built with OCC_CONVERT_SIGNALS (any non-MSVC build of OCC): the long
+  // jump to the innermost OCC_CATCH_SIGNALS, which rethrows it there.
+  failure->Jump();
+  std::abort(); // not reached: Jump returns only when there is no scope
+}
+
+bool IsFault(DWORD code) {
+  switch (code) {
+  case EXCEPTION_ACCESS_VIOLATION:
+  case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+  case EXCEPTION_DATATYPE_MISALIGNMENT:
+  case EXCEPTION_ILLEGAL_INSTRUCTION:
+  case EXCEPTION_PRIV_INSTRUCTION:
+  case EXCEPTION_IN_PAGE_ERROR:
+  case EXCEPTION_INT_DIVIDE_BY_ZERO:
+  case EXCEPTION_INT_OVERFLOW:
+  case EXCEPTION_FLT_DENORMAL_OPERAND:
+  case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+  case EXCEPTION_FLT_INEXACT_RESULT:
+  case EXCEPTION_FLT_INVALID_OPERATION:
+  case EXCEPTION_FLT_OVERFLOW:
+  case EXCEPTION_FLT_UNDERFLOW:
+    return true;
+  default:
+    return false;
+  }
+}
+
+// First in line for every exception on every thread, so it does nothing
+// unless the fault is one an OCC catch scope on this thread is waiting for:
+// the same first-chance conversion OCC's MSVC build makes through its SE
+// translator. Everything else goes on to the crash handler.
+LONG WINAPI OnFault(EXCEPTION_POINTERS* info) {
+  const DWORD code = info->ExceptionRecord->ExceptionCode;
+  if (IsFault(code) && Standard_ErrorHandler::IsInTryBlock())
+    JumpToOcc(*info->ExceptionRecord, code);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void PutConsoleHandlerFirst() {
+  if (g_console == nullptr)
+    return;
+  // Handlers run last-registered first.
+  SetConsoleCtrlHandler(g_console, FALSE);
+  SetConsoleCtrlHandler(g_console, TRUE);
+}
+
 #endif
 
 } // namespace
+
+#if defined(_WIN32)
+void occsig::SetConsoleControlHandler(int(__stdcall* handler)(unsigned long)) {
+  const std::lock_guard<std::mutex> lock(g_armMutex);
+  g_console = reinterpret_cast<PHANDLER_ROUTINE>(handler);
+  PutConsoleHandlerFirst();
+}
+#endif
 
 void ArmOccSignalHandlers() {
   thread_local bool armed = false;
@@ -82,15 +226,25 @@ void ArmOccSignalHandlers() {
   armed = true;
   const std::lock_guard<std::mutex> lock(g_armMutex);
 #if defined(_WIN32)
-  // OSD::SetSignal installs OCC's unhandled-exception filter over ours; the
-  // SE translator it sets is what turns a fault into an exception inside a
-  // try block, so the filter can go back to the crash handler's.
-  const LPTOP_LEVEL_EXCEPTION_FILTER prior =
+  // What signal() has for the faults (the default, unless something set
+  // one), to put back over OCC's.
+  using Handler = void (*)(int);
+  Handler before[NSIG] = {};
+  for (int sig : kFaults) {
+    before[sig] = signal(sig, SIG_DFL);
+    signal(sig, before[sig]);
+  }
+  const LPTOP_LEVEL_EXCEPTION_FILTER filter =
       SetUnhandledExceptionFilter(nullptr);
-  SetUnhandledExceptionFilter(prior);
+  SetUnhandledExceptionFilter(filter);
   OSD::SetSignal(Standard_False);
-  if (prior != nullptr)
-    SetUnhandledExceptionFilter(prior);
+  for (int sig : kFaults)
+    signal(sig, before[sig]);
+  if (filter != nullptr)
+    SetUnhandledExceptionFilter(filter);
+  if (!g_vectored)
+    g_vectored = AddVectoredExceptionHandler(1, OnFault) != nullptr;
+  PutConsoleHandlerFirst();
 #else
   struct sigaction before[NSIG];
   for (int sig : kFaults)

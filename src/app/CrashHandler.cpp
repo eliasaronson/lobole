@@ -24,10 +24,16 @@
 #include <thread>
 
 #if defined(_WIN32)
+#include "cad/OccSignals.h"
+
 #include <io.h>
+#include <vector>
 #include <windows.h>
-// After windows.h, which it needs.
+// After windows.h, which they need.
 #include <dbghelp.h>
+// The K32 functions, which are kernel32's: no psapi.dll to link.
+#define PSAPI_VERSION 2
+#include <psapi.h>
 #else
 #include <cxxabi.h>
 #include <fcntl.h>
@@ -366,6 +372,7 @@ void OnTerminationSignal(int sig) {
 
 wchar_t g_crashPathW[kPathMax] = {};
 wchar_t g_dumpPathW[kPathMax] = {};
+wchar_t g_markerPathW[kPathMax] = {};
 
 void PutFrame(const Out& out, const char* tag, uintptr_t address) {
   out.Put(tag);
@@ -448,6 +455,92 @@ void WriteMinidump(EXCEPTION_POINTERS* info) {
   CloseHandle(dump);
 }
 
+// --- the modules we ship -----------------------------------------------------
+//
+// Everything in the executable's directory: lobole.exe and the DLLs built
+// with it (OpenCASCADE, libstdc++, mcfgthread, ...). Recorded at start-up and
+// again once the libraries loaded late are in, into a table the handler only
+// reads, twice-buffered like the POSIX module table.
+
+struct CodeRange {
+  uintptr_t lo = 0, hi = 0;
+};
+constexpr size_t kMaxShipped = 512;
+struct ShippedTable {
+  size_t count = 0;
+  CodeRange ranges[kMaxShipped];
+};
+ShippedTable g_shipped[2];
+std::atomic<int> g_activeShipped{-1};
+
+void RecordShippedModules() {
+  wchar_t exe[MAX_PATH];
+  const DWORD exeLen = GetModuleFileNameW(nullptr, exe, MAX_PATH);
+  size_t dirLen = exeLen;
+  while (dirLen > 0 && exe[dirLen - 1] != L'\\' && exe[dirLen - 1] != L'/')
+    --dirLen;
+  if (dirLen == 0)
+    return;
+  std::vector<HMODULE> modules(1024);
+  DWORD needed = 0;
+  if (!K32EnumProcessModules(
+          GetCurrentProcess(), modules.data(),
+          static_cast<DWORD>(modules.size() * sizeof(HMODULE)), &needed))
+    return;
+  modules.resize(std::min<size_t>(modules.size(), needed / sizeof(HMODULE)));
+  const int next = g_activeShipped.load(std::memory_order_acquire) == 0 ? 1 : 0;
+  ShippedTable& t = g_shipped[next];
+  t.count = 0;
+  for (HMODULE m : modules) {
+    wchar_t path[MAX_PATH];
+    const DWORD len = GetModuleFileNameW(m, path, MAX_PATH);
+    MODULEINFO info{};
+    if (len <= dirLen || _wcsnicmp(path, exe, dirLen) != 0 ||
+        std::wcschr(path + dirLen, L'\\') != nullptr ||
+        !K32GetModuleInformation(GetCurrentProcess(), m, &info, sizeof info))
+      continue;
+    if (t.count == kMaxShipped)
+      break;
+    const auto lo = reinterpret_cast<uintptr_t>(info.lpBaseOfDll);
+    t.ranges[t.count++] = {lo, lo + info.SizeOfImage};
+  }
+  g_activeShipped.store(next, std::memory_order_release);
+}
+
+bool InShippedCode(uintptr_t address) {
+  const int active = g_activeShipped.load(std::memory_order_acquire);
+  if (active < 0)
+    return false;
+  const ShippedTable& t = g_shipped[active];
+  for (size_t i = 0; i < t.count; ++i)
+    if (address >= t.ranges[i].lo && address < t.ranges[i].hi)
+      return true;
+  return false;
+}
+
+bool IsFatalCode(DWORD code) {
+  switch (code) {
+  case EXCEPTION_ACCESS_VIOLATION:
+  case EXCEPTION_ARRAY_BOUNDS_EXCEEDED:
+  case EXCEPTION_DATATYPE_MISALIGNMENT:
+  case EXCEPTION_ILLEGAL_INSTRUCTION:
+  case EXCEPTION_PRIV_INSTRUCTION:
+  case EXCEPTION_IN_PAGE_ERROR:
+  case EXCEPTION_INT_DIVIDE_BY_ZERO:
+  case EXCEPTION_INT_OVERFLOW:
+  case EXCEPTION_STACK_OVERFLOW:
+  case EXCEPTION_FLT_DENORMAL_OPERAND:
+  case EXCEPTION_FLT_DIVIDE_BY_ZERO:
+  case EXCEPTION_FLT_INEXACT_RESULT:
+  case EXCEPTION_FLT_INVALID_OPERATION:
+  case EXCEPTION_FLT_OVERFLOW:
+  case EXCEPTION_FLT_UNDERFLOW:
+    return true;
+  default:
+    return false;
+  }
+}
+
 // Windows has no POSIX signals/execinfo. An unhandled SEH exception writes
 // the crash file — the code, the faulting address and the faulting thread's
 // stack walked from the exception's own context, each frame as module + RVA
@@ -468,6 +561,15 @@ LONG WINAPI OnWindowsException(EXCEPTION_POINTERS* info) {
     reason[n] = '\0';
   }
   PutHeader(file, reason, ExceptionName(code));
+  if ((code == EXCEPTION_ACCESS_VIOLATION || code == EXCEPTION_IN_PAGE_ERROR) &&
+      info->ExceptionRecord->NumberParameters >= 2) {
+    // What was touched, as the POSIX handler's si_addr: all ones when the
+    // address was not canonical (a general-protection fault).
+    const ULONG_PTR how = info->ExceptionRecord->ExceptionInformation[0];
+    file.Put("address: ");
+    file.Hex(info->ExceptionRecord->ExceptionInformation[1]);
+    file.Put(how == 0 ? " (read)\n" : how == 8 ? " (execute)\n" : " (write)\n");
+  }
   file.Put("raw frames (module+offset):\n");
   const auto fault =
       reinterpret_cast<uintptr_t>(info->ExceptionRecord->ExceptionAddress);
@@ -512,6 +614,27 @@ LONG WINAPI OnWindowsException(EXCEPTION_POINTERS* info) {
   return EXCEPTION_CONTINUE_SEARCH;
 }
 
+// A fault in code we ship, at first chance. Nothing there can handle it: GCC
+// code has no __except, and the start-up filter mingw puts round main only
+// calls a signal() handler, which is left at the default
+// (cad/OccSignals.cpp). Waiting for the unhandled-exception filter loses it
+// on every std::thread: mcfgthread's thread entry ends the process with
+// RaiseFailFastException before any filter runs (__MCF_seh_top,
+// mcfgthread src/xglobals.c), and a worker's crash left no report. So it is
+// reported here, and the process ends with the exception's code. A fault in
+// the system's own code is left alone -- that code may be probing memory
+// under its own __try -- and reaches the filter as before. Registered last:
+// OCC's catch scopes, whose handler runs first, take their faults before it.
+LONG WINAPI OnFaultInShippedCode(EXCEPTION_POINTERS* info) {
+  const DWORD code = info->ExceptionRecord->ExceptionCode;
+  if (!IsFatalCode(code) || !InShippedCode(reinterpret_cast<uintptr_t>(
+                                info->ExceptionRecord->ExceptionAddress)))
+    return EXCEPTION_CONTINUE_SEARCH;
+  OnWindowsException(info);
+  TerminateProcess(GetCurrentProcess(), code);
+  return EXCEPTION_CONTINUE_SEARCH;
+}
+
 // abort() — and std::terminate through it — is a CRT signal on Windows, not
 // an SEH exception, so the filter above never sees it.
 void OnWindowsAbort(int) {
@@ -530,6 +653,41 @@ void OnWindowsAbort(int) {
   WriteMinidump(nullptr);
   WriteStderr("\n=== fatal signal SIGABRT ===\n");
 }
+
+// Ctrl+C, Ctrl+Break, the console closing, logoff and shutdown: somebody
+// asked the process to stop, which is not a crash -- what SIGINT, SIGTERM and
+// SIGHUP are on Linux. Runs on a thread of its own, which the system starts
+// for the event. Kept in front of OCC's (cad/OccSignals.h), which swallows
+// Ctrl+C and exit(254)s on the rest.
+BOOL WINAPI OnConsoleControl(DWORD event) {
+  const bool closing = event == CTRL_CLOSE_EVENT ||
+                       event == CTRL_LOGOFF_EVENT ||
+                       event == CTRL_SHUTDOWN_EVENT;
+  using Handler = void (*)(int);
+  const Handler stop = signal(SIGINT, SIG_DFL);
+  if (stop == SIG_IGN) {
+    signal(SIGINT, SIG_IGN);
+    if (!closing)
+      return TRUE;
+  } else if (stop != SIG_DFL && stop != SIG_ERR) {
+    // Headless and offscreen stop on SIGINT, and end the session the
+    // ordinary way.
+    stop(SIGINT);
+    if (!closing)
+      return TRUE;
+    // The process is ended when this returns, and at most ~5 s after the
+    // event: the loop's own exit, which ends this thread too, comes first.
+    Sleep(4000);
+  }
+  // Where nothing stops cleanly (the windowed app): the session marker goes,
+  // so the next start does not report a crash, and the process ends at once,
+  // as the default signal action does on Linux.
+  if (g_markerPathW[0])
+    DeleteFileW(g_markerPathW);
+  if (!closing)
+    TerminateProcess(GetCurrentProcess(), STATUS_CONTROL_C_EXIT);
+  return TRUE;
+}
 #endif
 
 } // namespace
@@ -538,7 +696,10 @@ void InstallCrashHandler() {
   g_previousTerminate = std::set_terminate(OnTerminate);
 #if defined(_WIN32)
   SetUnhandledExceptionFilter(OnWindowsException);
+  RecordShippedModules();
+  AddVectoredExceptionHandler(0, OnFaultInShippedCode);
   signal(SIGABRT, OnWindowsAbort);
+  occsig::SetConsoleControlHandler(OnConsoleControl);
 #else
   RecordModules();
   stack_t alt{};
@@ -574,8 +735,10 @@ void SetCrashReportFiles(const std::filesystem::path& crashFile,
   };
   widen(g_crashPathW, crashFile);
   widen(g_dumpPathW, dumpFile);
+  widen(g_markerPathW, markerFile);
   // dbghelp loads here, not inside the filter.
   (void)LoadLibraryW(L"dbghelp.dll");
+  RecordShippedModules();
 #else
   (void)dumpFile; // a core dump is the system's business on POSIX
   RecordModules();
@@ -585,7 +748,9 @@ void SetCrashReportFiles(const std::filesystem::path& crashFile,
 }
 
 void RefreshCrashModules() {
-#if !defined(_WIN32)
+#if defined(_WIN32)
+  RecordShippedModules();
+#else
   RecordModules();
 #endif
 }
@@ -867,6 +1032,185 @@ std::string CaptureMainThreadStack(double timeoutSeconds) {
   return out;
 }
 #else // _WIN32
-void InstallStallCapture() {}
-std::string CaptureMainThreadStack(double) { return {}; }
+namespace {
+
+// Windows has no signal to ask a thread for its own stack: the watchdog
+// suspends the main thread, reads its registers and walks its stack from
+// there with RtlVirtualUnwind, as the crash handler walks a fault's. The walk
+// runs while the thread is stopped, so it must take no lock that thread
+// might hold -- the heap's, or the loader's, which RtlLookupFunctionEntry
+// and GetModuleHandleEx take. So the functions are looked up in each
+// module's own exception table (.pdata), from a list of modules read and
+// pinned before the suspend, and named after the resume.
+
+HANDLE g_mainThread = nullptr;
+ULONG_PTR g_stackLow = 0, g_stackHigh = 0;
+constexpr int kMaxStallFrames = 64;
+
+struct PeModule {
+  HMODULE pinned = nullptr;
+  uintptr_t base = 0, end = 0;
+  const RUNTIME_FUNCTION* table = nullptr;
+  DWORD count = 0;
+};
+
+std::vector<PeModule> PinModules() {
+  std::vector<HMODULE> handles(1024);
+  DWORD needed = 0;
+  if (!K32EnumProcessModules(
+          GetCurrentProcess(), handles.data(),
+          static_cast<DWORD>(handles.size() * sizeof(HMODULE)), &needed))
+    return {};
+  handles.resize(std::min<size_t>(handles.size(), needed / sizeof(HMODULE)));
+  std::vector<PeModule> out;
+  for (HMODULE h : handles) {
+    PeModule m;
+    // A reference of our own, so none unloads while the walk reads it.
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+                            reinterpret_cast<LPCWSTR>(h), &m.pinned) ||
+        m.pinned != h) {
+      if (m.pinned)
+        FreeLibrary(m.pinned);
+      continue;
+    }
+    const auto base = reinterpret_cast<uintptr_t>(h);
+    const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
+    const auto* nt =
+        reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
+    m.base = base;
+    m.end = base + nt->OptionalHeader.SizeOfImage;
+    const IMAGE_DATA_DIRECTORY& dir =
+        nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION];
+    if (dir.VirtualAddress != 0 && dir.Size >= sizeof(RUNTIME_FUNCTION)) {
+      m.table =
+          reinterpret_cast<const RUNTIME_FUNCTION*>(base + dir.VirtualAddress);
+      m.count = dir.Size / sizeof(RUNTIME_FUNCTION);
+    }
+    out.push_back(m);
+  }
+  std::sort(out.begin(), out.end(), [](const PeModule& a, const PeModule& b) {
+    return a.base < b.base;
+  });
+  return out;
+}
+
+const PeModule* ModuleAt(const std::vector<PeModule>& modules, uintptr_t pc) {
+  auto it = std::upper_bound(
+      modules.begin(), modules.end(), pc,
+      [](uintptr_t a, const PeModule& m) { return a < m.base; });
+  if (it == modules.begin())
+    return nullptr;
+  --it;
+  return pc < it->end ? &*it : nullptr;
+}
+
+// The function entry for `pc`, from its module's table (sorted by address,
+// as the PE format requires): no lock, no allocation.
+RUNTIME_FUNCTION* FunctionAt(const std::vector<PeModule>& modules, uintptr_t pc,
+                             DWORD64* imageBase) {
+  const PeModule* m = ModuleAt(modules, pc);
+  if (m == nullptr || m->table == nullptr)
+    return nullptr;
+  const auto rva = static_cast<DWORD>(pc - m->base);
+  size_t lo = 0, hi = m->count;
+  while (lo < hi) {
+    const size_t mid = (lo + hi) / 2;
+    const RUNTIME_FUNCTION& f = m->table[mid];
+    if (rva < f.BeginAddress)
+      hi = mid;
+    else if (rva >= f.EndAddress)
+      lo = mid + 1;
+    else {
+      *imageBase = m->base;
+      auto* fn = const_cast<RUNTIME_FUNCTION*>(&f);
+      // An entry that names another entry (the low bit set).
+      if (fn->UnwindData & 1)
+        fn = reinterpret_cast<RUNTIME_FUNCTION*>(m->base + fn->UnwindData - 1);
+      return fn;
+    }
+  }
+  return nullptr;
+}
+
+} // namespace
+
+void InstallStallCapture() {
+  if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(),
+                       GetCurrentProcess(), &g_mainThread,
+                       THREAD_SUSPEND_RESUME | THREAD_GET_CONTEXT |
+                           THREAD_QUERY_INFORMATION,
+                       FALSE, 0))
+    g_mainThread = nullptr;
+  // The stack's whole reservation: from its allocation base to the top the
+  // TEB records (GetCurrentThreadStackLimits, without needing Windows 8).
+  MEMORY_BASIC_INFORMATION region{};
+  if (VirtualQuery(&region, &region, sizeof region) != 0) {
+    g_stackLow = reinterpret_cast<ULONG_PTR>(region.AllocationBase);
+    g_stackHigh = reinterpret_cast<ULONG_PTR>(
+        reinterpret_cast<NT_TIB*>(NtCurrentTeb())->StackBase);
+  }
+}
+
+std::string CaptureMainThreadStack(double) {
+  if (g_mainThread == nullptr)
+    return {};
+  const std::vector<PeModule> modules = PinModules();
+  uintptr_t frames[kMaxStallFrames];
+  int n = 0;
+  if (SuspendThread(g_mainThread) != static_cast<DWORD>(-1)) {
+    CONTEXT ctx{};
+    ctx.ContextFlags = CONTEXT_FULL;
+    if (GetThreadContext(g_mainThread, &ctx)) {
+      const auto onStack = [](DWORD64 sp) {
+        return sp >= g_stackLow && sp + 8 <= g_stackHigh;
+      };
+      frames[n++] = static_cast<uintptr_t>(ctx.Rip);
+      while (n < kMaxStallFrames && onStack(ctx.Rsp)) {
+        const DWORD64 sp = ctx.Rsp;
+        DWORD64 imageBase = 0;
+        RUNTIME_FUNCTION* fn = FunctionAt(modules, ctx.Rip, &imageBase);
+        if (fn != nullptr) {
+          void* handlerData = nullptr;
+          DWORD64 establisher = 0;
+          RtlVirtualUnwind(UNW_FLAG_NHANDLER, imageBase, ctx.Rip, fn, &ctx,
+                           &handlerData, &establisher, nullptr);
+        } else if (n == 1) {
+          // Stopped in a leaf function: its return address is on top.
+          ctx.Rip = *reinterpret_cast<const DWORD64*>(ctx.Rsp);
+          ctx.Rsp += 8;
+        } else {
+          break; // code with no unwind information: the walk is lost
+        }
+        if (ctx.Rip == 0 || ctx.Rsp < sp || !onStack(ctx.Rsp))
+          break;
+        frames[n++] = static_cast<uintptr_t>(ctx.Rip);
+      }
+    }
+    ResumeThread(g_mainThread);
+  }
+  // Named now the thread runs again, as the crash file does: module + RVA,
+  // for tools/symbolize-crash.py.
+  std::string out;
+  for (int i = 0; i < n; ++i) {
+    char line[64];
+    std::string module;
+    uintptr_t offset = frames[i];
+    if (const PeModule* m = ModuleAt(modules, frames[i])) {
+      wchar_t wide[MAX_PATH];
+      const DWORD len = GetModuleFileNameW(m->pinned, wide, MAX_PATH);
+      char name[MAX_PATH * 3];
+      const int bytes =
+          WideCharToMultiByte(CP_UTF8, 0, wide, static_cast<int>(len), name,
+                              sizeof name - 1, nullptr, nullptr);
+      module.assign(name, bytes > 0 ? bytes : 0);
+      offset -= m->base;
+    }
+    std::snprintf(line, sizeof line, "%s0x%llx", module.empty() ? "" : "+",
+                  static_cast<unsigned long long>(offset));
+    out += "  #" + std::to_string(i) + " " + module + line + "\n";
+  }
+  for (const PeModule& m : modules)
+    FreeLibrary(m.pinned);
+  return out;
+}
 #endif

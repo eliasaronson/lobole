@@ -14,6 +14,7 @@
 #include "cad/CADMaterials.h"
 #include "cad/FaceSelector.h"
 #include "cad/MeshExport.h"
+#include "cad/OccSignals.h"
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
 #include "core/Angles.h"
@@ -84,6 +85,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <thread>
 
 #include "imgui.h"
 #ifdef HAVE_TEST_ENGINE
@@ -367,13 +369,16 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "diagnostic.code internal), refusal (a deliberate runtime_error), "
      "type_error (the wrong-type path), edit_then_out_of_range (adds a Box, "
      "then falls over: rolled back), nonfinite (answers NaN and infinity, "
-     "listed under `nonfinite`) or write_then_refuse (writes "
+     "listed under `nonfinite`), write_then_refuse (writes "
      "debug_fault.txt in the app's cwd, then refuses: the one rule it "
-     "breaks on purpose). Refused unless the app was started with "
-     "LOBOLE_ALLOW_DEBUG_CRASH=1 in its environment.",
+     "breaks on purpose) or occ_fault (a null write inside an "
+     "OpenCASCADE signal scope, on this thread and on a new one: answers "
+     "{this_thread, worker_thread}, each the failure it became, where a "
+     "crash would mean the scope did not catch it). Refused unless the app "
+     "was started with LOBOLE_ALLOW_DEBUG_CRASH=1 in its environment.",
      "kind:'out_of_range'|'json_out_of_range'|'bad_optional_access'|"
      "'standard_failure'|'refusal'|'type_error'|'edit_then_out_of_range'|"
-     "'nonfinite'|'write_then_refuse'"},
+     "'nonfinite'|'write_then_refuse'|'occ_fault'"},
     {"background_jobs",
      "Every long operation running off the frame, as {jobs: [{id, kind, label, "
      "fraction, cancellable, elapsed_seconds}]}. `fraction` is -1 when the "
@@ -773,6 +778,27 @@ enum class DebugCrashKind { Segv, Abort, Exception };
     ThrowPastEveryCatch();
   }
   std::abort();
+}
+
+// debug_fault occ_fault: a null write inside an OCC signal scope, which must
+// come back as that call's failure, on this thread and on one of its own
+// (cad/OccSignals.h: on Windows the two reach different handlers).
+[[gnu::noinline]] void NullWrite() {
+  // The pointer itself volatile: a null constant is undefined behaviour the
+  // compiler may assume away, and mingw's GCC dropped the whole call.
+  volatile int* volatile p = nullptr;
+  *p = 1; // NOLINT: the point
+}
+json FaultInOccScope() {
+  const auto fault = [] {
+    return occsig::RunCatchingOccSignals([] { NullWrite(); })
+        .value_or("(returned: the fault did not happen)");
+  };
+  json out{{"this_thread", fault()}};
+  std::string worker;
+  std::thread([&] { worker = fault(); }).join();
+  out["worker_thread"] = worker;
+  return out;
 }
 } // namespace remote
 
@@ -1420,6 +1446,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       HandleSemantic(add, state, addHandled, addParams);
       return json(std::vector<int>{}.at(1));
     }
+    if (kind == "occ_fault")
+      return remote::FaultInOccScope();
     if (kind == "nonfinite")
       return {{"nan", std::numeric_limits<double>::quiet_NaN()},
               {"values", {1.0, std::numeric_limits<double>::infinity()}}};

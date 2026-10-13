@@ -28,6 +28,14 @@
 
 namespace occsig {
 
+#if defined(_WIN32)
+// The process's console-control handler (app/CrashHandler.cpp), registered
+// now and put back in front of the one OSD::SetSignal registers each time
+// OCC's handlers are armed: OCC's swallows Ctrl+C and exit(254)s on a
+// console close, logoff or shutdown. The signature is PHANDLER_ROUTINE's.
+void SetConsoleControlHandler(int(__stdcall* handler)(unsigned long));
+#endif
+
 // Runs fn(ctx) in an OCC signal scope; false with `why` set when a signal or
 // a Standard_Failure ended it.
 bool CallCatchingSignals(void (*fn)(void*), void* ctx, std::string* why);
