@@ -402,7 +402,8 @@ a `slot()` and a pattern's count at the numbers their Params held
 ([sdk](../../docs/scripting/sdk.md#parameters-carry-their-expression)),
 so the yoke's base and foot flanges kept their size while its joint-screw
 holes, drawn as points, moved out through the base's ends (each bore
-split in two, `39/p1/bore;M39.0` and `.1`, and three screws lost their
+split in two -- named `39/p1/bore;M39.0` and `.1` then, by the faces
+that bound each piece now -- and three screws lost their
 seats), the cradle's slot stayed under the camera's old seat and the
 knob kept its flutes; `cam_swing` was declared as the number `spec.swing`
 sampled, so the tilt axis stayed 40 mm low; and `fit_fastener`'s bolted

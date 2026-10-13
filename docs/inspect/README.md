@@ -372,7 +372,9 @@ every later measurement — `CADShape::IsValid` is only a null check.
   the filters ask for a feature's faces in a role (a pocket's floor), and an
   empty answer says `why` ([toponaming](../modeling/toponaming.md)).
   `unnamed_faces` counts faces the element map never named; zero is what
-  makes the list complete.
+  makes the list complete. A piece of a split face or edge carries `piece`
+  {`of`, `bounded_by`, `ordinal`}, `ordinal: true` when its name is by
+  position ([split pieces](../modeling/toponaming.md#split-pieces)).
 - `query_geometry` — declarative filters (`geometry_type`, `normal`/`axis`
   with `angle_tol_deg`, `radius` ± `radius_tol`, area and length bounds,
   `near_point`) and `expected_count`, which turns the query into a one-call

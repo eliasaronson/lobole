@@ -231,7 +231,8 @@ tables, which are metric, and is refused for an inch screw naming
   longer resolves is followed to the ONE face whose name is it plus whole,
   unsplit `;M<tag>` steps (`ConnectorLocalFrame`'s `followModified`, which
   a mate does not ask for). The stored names are not rewritten, so undoing
-  the chamfer finds them as they were. A face cut in pieces (`;M<tag>.<i>`)
+  the chamfer finds them as they were. A face cut in pieces (`;M<tag>[…]`,
+  [split pieces](../modeling/toponaming.md#split-pieces))
   names no one face to sit on, and the seat is lost saying which feature
   split it: on the pan/tilt head a joint-screw hole breaking out through the
   part's end split its bore in two (`feature 39 split the face into 2

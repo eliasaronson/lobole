@@ -211,7 +211,8 @@ and plaster inside, a painted end on a bare bar:
   (`Document::Regenerate`): each name is looked up in the `ElementMap` of
   every body its feature created and lands in `Body::faceAppearances` (face
   index → override). A face a later feature modified or cut in pieces is
-  renamed `…;M<tag>` / `…;M<tag>.<i>`; the paint follows it to every face
+  renamed `…;M<tag>` / `…;M<tag>[…]` (a piece,
+  [split pieces](../modeling/toponaming.md#split-pieces)); the paint follows it to every face
   so descended (a pocket in a painted top leaves the top painted). A name that resolves on none of them is **kept and
   reported** — `Feature::UnresolvedFaceLooks`, a warning carrying
   `face_appearance` in every regeneration summary (so the response to the
