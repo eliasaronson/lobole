@@ -43,7 +43,7 @@ incremental rebuild, a rebuild from nothing, a save and reopen, and undo/redo
 all produce the same solid.
 
 SolidCraft (`crates/engine/src/tests.rs`, `hostile_params_never_panic`;
-`docs/robustness.md`) does both, and it found bugs a hand-picked case never
+its robustness notes) does both, and it found bugs a hand-picked case never
 would: about half its random designs failed at first. This plan builds both
 for Loböle on what is already here: the `describe` rows, `batch`, `--record`
 sessions, `digest` on every mutating answer, `check_geometry`, and
