@@ -463,11 +463,20 @@ static constexpr MethodDoc ModelingMethods[] = {
      "major-axis ends, 5/6 = minor-axis ends (a radius is a `distance` from "
      "0 to 3 or 5); a spline's k = pole k. A constraint the solver cannot "
      "represent (radius on an ellipse, tangent to a spline away from its "
-     "end) is refused naming what its kind takes.",
+     "end) is refused naming what its kind takes. So is one that constrains "
+     "nothing -- the sketch already fixes it, or it contradicts the sketch "
+     "-- naming the constraints (indices) it repeats or contradicts. "
+     "`driven: true` on a dimension kind, with no value/value_deg/expr, adds "
+     "a DRIVEN (reference) dimension: no equation, its value is what the "
+     "geometry measures, answered as `measured` (mm; radians for an angle). "
+     "Every answer gives the sketch's `dof` after the add.",
      "*", remote::NeedsPart},
     {"add_constraints",
      "Append MANY constraints in one solve+regen+undo step: "
-     "{sketch_id, constraints: [...]}.",
+     "{sketch_id, constraints: [...]}, each spec as add_constraint's. "
+     "Judged over the whole list: one refused spec adds nothing and the "
+     "error names its index (constraints[i]). `measured` (when any spec is "
+     "driven) lists each spec's measure, null for a driving one.",
      "*", remote::NeedsPart},
     {"delete_entity",
      "Delete a sketch entity by {sketch_id, entity_id}, "
@@ -1290,16 +1299,51 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       // with measures (so a flip of the refs reads as one) to its new
       // value, and an edit that would turn the sketch over is refused
       // (docs/sketching/README.md#solving).
+      //
+      // A driven dimension's value is a measure, not an input, so it changes
+      // nothing; one made DRIVING is judged as an addition is, and refused
+      // when it would over-constrain the sketch
+      // (docs/sketching/README.md#constraints).
       std::vector<sketch::ValueChange> changes;
-      if (newSk != nullptr &&
-          newSk->constraints.size() == oldSk->constraints.size())
-        for (size_t c = 0; c < newSk->constraints.size(); c++)
-          if (sketch::IsDimension(newSk->constraints[c].kind) &&
-              newSk->constraints[c].value != oldSk->constraints[c].value) {
-            const auto from = sketch::MeasureDimension(*newSk, c);
-            changes.push_back({c, from.value_or(oldSk->constraints[c].value),
-                               newSk->constraints[c].value});
+      const bool sameList = newSk != nullptr && newSk->constraints.size() ==
+                                                    oldSk->constraints.size();
+      bool madeDriving = false;
+      if (sameList)
+        for (size_t c = 0; c < newSk->constraints.size(); c++) {
+          const sketch::Constraint& nc = newSk->constraints[c];
+          const sketch::Constraint& oc = oldSk->constraints[c];
+          if (!sketch::IsDimension(nc.kind) || nc.driven)
+            continue;
+          const auto from = sketch::MeasureDimension(*newSk, c);
+          if (oc.driven) {
+            madeDriving = true;
+            if (from && nc.value != *from)
+              changes.push_back({c, *from, nc.value});
+          } else if (nc.value != oc.value) {
+            changes.push_back({c, from.value_or(oc.value), nc.value});
           }
+        }
+      if (madeDriving) {
+        // Judged at the measured values, so only the switch is judged; the
+        // value change is the edit below.
+        newSk->plane = oldSk->plane;
+        SketchFeature was = *newSk, now = *newSk;
+        for (size_t c = 0; c < now.constraints.size(); c++) {
+          if (!oldSk->constraints[c].driven || now.constraints[c].driven)
+            continue;
+          was.constraints[c].driven = true;
+          now.constraints[c].value = sketch::MeasureDimension(now, c).value_or(
+              now.constraints[c].value);
+        }
+        const sketch::AddVerdict v = sketch::JudgeAddition(was, now);
+        if (!v.accepted)
+          throw std::runtime_error((v.unsupported != SIZE_MAX
+                                        ? v.reason
+                                        : "a dimension made driving would "
+                                          "over-constrain the sketch: " +
+                                              v.reason) +
+                                   "; the document is unchanged");
+      }
       if (!changes.empty()) {
         newSk->plane = oldSk->plane; // the resolved plane, for the solve
         sketch::Solver solver;
@@ -1602,6 +1646,32 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                  "\". Known kinds: " + known);
       }
       c.kind = it->second;
+      // A driven (reference) dimension measures the sketch: a dimension
+      // kind with no input (docs/sketching/README.md#constraints).
+      if (spec.contains("driven")) {
+        if (!spec.at("driven").is_boolean())
+          throw std::runtime_error("driven must be true or false");
+        c.driven = spec.at("driven").get<bool>();
+      }
+      if (c.driven) {
+        if (!sketch::IsDimension(c.kind)) {
+          std::string dims;
+          for (const auto& [name, kind] : kinds)
+            if (sketch::IsDimension(kind))
+              dims += (dims.empty() ? "" : ", ") + name;
+          throw std::runtime_error("a " + it->first +
+                                   " cannot be driven: only a dimension "
+                                   "measures something (" +
+                                   dims + ")");
+        }
+        for (const char* input : {"value", "value_deg", "expr"})
+          if (spec.contains(input))
+            throw std::runtime_error(
+                std::string("a driven dimension takes no ") + input +
+                ": its value is what the sketch measures. Drop driven to "
+                "drive it, or the " +
+                input + " to measure it");
+      }
       if (c.kind == sketch::ConstraintKind::Angle) {
         // `value` was DEGREES here and RADIANS in the same field of the same
         // sketch reached through add_feature (ConstraintFromJson), and
@@ -1640,31 +1710,79 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       return c;
     };
 
-    json before = DocumentIO::FeatureToJson(*sk);
-    const size_t had = sk->constraints.size();
-    size_t added = 0;
-    if (m == "add_constraints") {
-      for (const json& spec : p.at("constraints"))
-        sk->constraints.push_back(build(spec)), added++;
+    // Every spec is read before the sketch is touched: a refused call
+    // changes nothing (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+    const bool plural = m == "add_constraints";
+    std::vector<sketch::Constraint> adds;
+    if (plural) {
+      size_t i = 0;
+      for (const json& spec : p.at("constraints")) {
+        try {
+          adds.push_back(build(spec));
+        } catch (const std::exception& e) {
+          throw std::runtime_error("constraints[" + std::to_string(i) +
+                                   "]: " + e.what());
+        }
+        i++;
+      }
     } else {
-      sk->constraints.push_back(build(p.raw()));
-      added = 1;
+      adds.push_back(build(p.raw()));
     }
-    sketch::Solver solver;
-    solver.Load(*sk);
-    // A constraint the solver cannot represent is refused, naming what its
-    // kind takes, and the sketch is left as it was -- accepted, it would
-    // solve as if absent while the sketch looked constrained.
-    for (const auto& bad : solver.UnsupportedConstraints()) {
-      if (bad.index < had)
-        continue; // already in the sketch: its regen warning says so
-      sk->constraints.resize(had);
+    const size_t had = sk->constraints.size();
+    const auto refuse = [&](size_t i, const sketch::AddVerdict& v) {
+      const std::string at =
+          plural ? "constraints[" + std::to_string(i) + "]: " : std::string();
+      // One the solver cannot represent names what its kind takes.
+      if (v.unsupported != SIZE_MAX)
+        throw std::runtime_error(at + v.reason);
+      const sketch::Constraint& c = adds[i];
+      const bool offerDriven = sketch::IsDimension(c.kind) && !c.driven;
       throw std::runtime_error(
-          (added > 1 ? "constraints[" + std::to_string(bad.index - had) + "]: "
-                     : std::string()) +
-          bad.reason);
+          at + "not added: " + v.reason +
+          (offerDriven ? "; pass driven: true (and no value) to add it as a "
+                         "reference dimension"
+                       : "") +
+          ". The sketch is unchanged");
+    };
+
+    // Judged once over the whole list: a constraint the solver cannot
+    // represent, or one that constrains nothing (the sketch already fixes
+    // it, or it contradicts the sketch), is refused and nothing is added
+    // (docs/sketching/README.md#refusals). Only a refusal is traced one
+    // spec at a time, to name the first one refused.
+    SketchFeature trial = *sk;
+    sketch::Solver solver;
+    solver.Load(trial);
+    const sketch::SolveResult start = solver.Solve();
+    std::vector<bool> driving;
+    for (const sketch::Constraint& c : trial.constraints)
+      driving.push_back(!c.driven);
+    trial.constraints.insert(trial.constraints.end(), adds.begin(), adds.end());
+    sketch::AddVerdict verdict =
+        sketch::JudgeAddition(start, driving, trial, &solver);
+    if (!verdict.accepted && verdict.unsupported != SIZE_MAX)
+      refuse(verdict.unsupported - had, verdict);
+    if (!verdict.accepted) {
+      SketchFeature step = *sk;
+      sketch::SolveResult prev = start;
+      std::vector<bool> stepDriving = driving;
+      for (size_t i = 0; i < adds.size(); i++) {
+        step.constraints.push_back(adds[i]);
+        const sketch::AddVerdict v =
+            sketch::JudgeAddition(prev, stepDriving, step);
+        if (!v.accepted)
+          refuse(i, v);
+        prev = v.after;
+        stepDriving.push_back(!adds[i].driven);
+      }
+      // Each spec alone constrains but the list does not (they repeat each
+      // other in a way no prefix shows): name the last.
+      refuse(adds.size() - 1, verdict);
     }
-    if (solver.Solve().ok)
+
+    json before = DocumentIO::FeatureToJson(*sk);
+    sk->constraints.insert(sk->constraints.end(), adds.begin(), adds.end());
+    if (verdict.after.ok)
       solver.WriteBack(sk->entities);
     sk->RegenerateDerived();
     doc->Regenerate();
@@ -1672,9 +1790,32 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
-    return json{{"added", added},
-                {"regen", RegenSummaryJson(*doc)},
-                {"digest", DigestJson(preDigest, *doc)}};
+    json resp{{"added", adds.size()},
+              {"dof", verdict.after.dof},
+              {"regen", RegenSummaryJson(*doc)},
+              {"digest", DigestJson(preDigest, *doc)}};
+    // A driven dimension answers what it measures, in its kind's unit (mm;
+    // radians for an angle), read from the solved geometry.
+    const auto* now =
+        dynamic_cast<const SketchFeature*>(doc->GetFeature(index));
+    const auto measured = [&](size_t i) -> json {
+      if (!adds[i].driven || now == nullptr)
+        return nullptr;
+      const auto v = sketch::MeasureDimension(*now, had + i);
+      return v ? json(*v) : json(nullptr);
+    };
+    if (!plural) {
+      if (adds[0].driven)
+        resp["measured"] = measured(0);
+    } else if (std::any_of(
+                   adds.begin(), adds.end(),
+                   [](const sketch::Constraint& c) { return c.driven; })) {
+      json list = json::array();
+      for (size_t i = 0; i < adds.size(); i++)
+        list.push_back(measured(i));
+      resp["measured"] = std::move(list);
+    }
+    return resp;
   }
   if (m == "mirror" || m == "fillet" || m == "pattern" || m == "offset") {
     // Generative op on a sketch (by id), solve, and commit one edit.

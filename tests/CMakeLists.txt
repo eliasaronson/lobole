@@ -763,6 +763,15 @@ add_test(NAME regen_honesty_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(regen_honesty_smoke PROPERTIES TIMEOUT 120)
 
+# add_constraint refuses a constraint that constrains nothing (repeats or
+# contradicts the sketch), names what it runs into and changes nothing;
+# `driven: true` adds a reference dimension that answers `measured`. Headless.
+add_test(NAME sketch_constraint_refusal_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/sketch_constraint_refusal_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(sketch_constraint_refusal_smoke PROPERTIES TIMEOUT 120
+                     LABELS "sketch")
+
 # An edit that is saved but regenerates nothing (a tolerance, the units, a
 # study, a configuration that is not active) reads unsaved in `ping.dirty`,
 # the question the close prompt and autosave ask. Headless.
