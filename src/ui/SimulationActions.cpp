@@ -23,7 +23,7 @@
 #include "femgpu/TopoGpuSolver.h"
 #endif
 
-#include <OSD.hxx>
+#include "cad/CADKernel.h" // ArmOccSignalHandlers
 #include <glm/glm.hpp>
 
 #include <algorithm>
@@ -478,7 +478,7 @@ bool StartStudyRun(AppState& state, Document& doc, uint64_t studyId,
   // Made here: the worker must not read AppState.
   fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
   bg->thread = std::thread([job, raw, solveOptions]() {
-    OSD::SetSignal(Standard_False); // OCC's handlers are per thread
+    ArmOccSignalHandlers(); // OCC's handlers are per thread
     std::string err;
     if (!fem::MeshPlannedStudy(job->plan, job->input, &err))
       job->error = err.empty() ? "meshing failed" : err;
@@ -590,7 +590,7 @@ bool StartTopologyCheck(AppState& state, Document& doc, uint64_t topoId,
   // Made here: the worker must not read AppState.
   fem::SolveOptions solveOptions = JobSolveOptions(state, raw, nullptr);
   bg->thread = std::thread([job, raw, solveOptions]() {
-    OSD::SetSignal(Standard_False); // OCC's handlers are per thread
+    ArmOccSignalHandlers(); // OCC's handlers are per thread
     const double n = static_cast<double>(job->parts.size());
     for (size_t i = 0; i < job->parts.size() && !raw->cancel.load(); ++i) {
       Part& p = job->parts[i];
@@ -691,7 +691,7 @@ bool StartMeshRun(AppState& state, Document& doc, uint64_t studyId,
   bg->owner = jobStart ? jobStart->owner : 0;
   BackgroundJob* raw = bg.get();
   bg->thread = std::thread([job, raw]() {
-    OSD::SetSignal(Standard_False);
+    ArmOccSignalHandlers();
     std::string err;
     if (!fem::MeshPlanned(job->plan, job->meshes, &err))
       job->error = err.empty() ? "meshing failed" : err;
@@ -1080,7 +1080,7 @@ bool StartAssemblyStudyRun(AppState& state, AssemblyDocument& asmDoc,
   // Made here: the worker must not read AppState.
   fem::SolveOptions solveOptions = JobSolveOptions(state, raw, job.get());
   bg->thread = std::thread([job, raw, solveOptions]() {
-    OSD::SetSignal(Standard_False);
+    ArmOccSignalHandlers();
     std::string err;
     if (!fem::MeshPlannedStudy(job->plan, job->input, &err))
       job->error = err.empty() ? "meshing failed" : err;

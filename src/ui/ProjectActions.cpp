@@ -8,6 +8,7 @@
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
 
+#include "cad/CADKernel.h" // ArmOccSignalHandlers
 #include "core/Parallel.h"
 #include "core/Units.h"
 #include "core/io/GeometryCache.h"
@@ -15,7 +16,6 @@
 #include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
 #include "ui/CamTool.h"            // RunCamVerification (job undo)
 #include "ui/JobActions.h"
-#include <OSD.hxx>
 
 #include "imgui.h" // IsAnyItemActive (the undo guard coalesces a drag)         // JobBodies / JobRenderVersion (a job tab)
 #include <chrono>
@@ -618,7 +618,7 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
       if (progress && progress->cancel && progress->cancel->load())
         return;
       // OCC's signal handler is per thread; a pool thread has none yet.
-      OSD::SetSignal(Standard_False);
+      ArmOccSignalHandlers();
       if (progress && progress->delayEachMs > 0) {
         std::this_thread::sleep_for(
             std::chrono::milliseconds(progress->delayEachMs));

@@ -299,6 +299,7 @@ set(core_sources
     src/render/OutlineEdges.cpp
     src/render/StillOutlines.cpp
     src/cad/CADKernel.cpp
+    src/cad/OccSignals.cpp
     src/cad/CADMeshConverter.cpp
     src/cad/CADMaterials.cpp
     src/cad/MeshExport.cpp
@@ -313,6 +314,9 @@ set(core_sources
     src/remote/InstanceRegistry.cpp
     # The typed-params grammar (docs/scripting/rpc.md#typed-contracts).
     src/remote/RpcContract.cpp
+    # What a refusal was caused by (internal or deliberate), and the
+    # non-finite numbers an answer holds.
+    src/remote/RpcErrors.cpp
     src/core/io/Checkpoints.cpp
     src/core/io/GitVault.cpp
     src/core/io/ProjectMerge.cpp

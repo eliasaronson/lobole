@@ -11,7 +11,7 @@
 
 #include "imgui.h"
 
-#include <OSD.hxx>
+#include "cad/CADKernel.h" // ArmOccSignalHandlers
 
 #include <chrono>
 #include <filesystem>
@@ -81,7 +81,7 @@ bool StartOpenProject(AppState& state, const std::string& path,
   bg->thread = std::thread([job, raw] {
     // OCC's signal handler is per thread: without it a fault in a rebuild is
     // a raw SIGSEGV instead of the Standard_Failure the loader catches.
-    OSD::SetSignal(Standard_False);
+    ArmOccSignalHandlers();
     job->result = ReadProject(job->path, &job->progress);
     raw->done.store(true); // last: the result is visible before this
   });

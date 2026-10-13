@@ -18,29 +18,30 @@
 #include <vector>
 
 // Turn OCC's SIGSEGV and friends into catchable Standard_Failure exceptions,
-// once PER THREAD. `false` leaves floating-point traps unarmed.
+// once PER THREAD. Floating-point traps stay unarmed.
 //
-// Per thread, not once: OCC installs these through OCC_CONVERT_SIGNALS and
-// the tree says so in its own words where it already does this by hand —
-// "OCC's handlers are per thread" (ui/SimulationActions.cpp), and the
-// mesher's pool arms every worker (ui/TessellationCache.cpp). A `call_once`
-// here would arm whichever thread arrived first and leave the guard off
-// everywhere else, which is the same bug as not having one.
+// Per thread, not once: OSD::SetSignal also sets thread-local state (the FPE
+// mask; on Windows the SE translator), and the mesher's pool arms every
+// worker (ui/TessellationCache.cpp). A `call_once` would arm whichever thread
+// arrived first and leave the guard off everywhere else.
 //
 // Call it before any OCC algorithm known to fall over rather than fail.
 // Exact HLR has needed it for a long time; so does the fillet builder, which
-// takes the whole process down on a blend set it cannot build — nine edges of
+// takes the whole process down on a blend set it cannot build -- nine edges of
 // a brace blend and the tenth segfaults inside BRepBlend_SurfRstLineBuilder,
 // which for a generator means losing the session rather than one feature.
-// The callers already catch Standard_Failure; without this the exception
-// never arrives.
-inline void ArmOccSignalHandlers() {
-  thread_local bool armed = false;
-  if (!armed) {
-    OSD::SetSignal(Standard_False);
-    armed = true;
-  }
-}
+//
+// The only caller of OSD::SetSignal (cad/OccSignals.cpp; test_conventions.cpp
+// holds it). A signal's disposition is per PROCESS, and OCC's handler, outside
+// an OCC_CATCH_SIGNALS scope, prints "*** Abort *** an exception was raised,
+// but no catch was found" and calls exit(1): once anything had armed it, a
+// crash anywhere left no crash report and no stack, and Ctrl+C on headless
+// was the same exit(1). So the handler that was there before (the crash
+// handler, app/CrashHandler.h) is put back, and OCC's is called only for a
+// fault inside an OCC catch scope (Standard_ErrorHandler::IsInTryBlock), which
+// is the one place it can turn a fault into an exception. Stop requests
+// (SIGINT, SIGHUP, SIGQUIT, SIGTERM) are never OCC's.
+void ArmOccSignalHandlers();
 
 class CADShape {
 public:

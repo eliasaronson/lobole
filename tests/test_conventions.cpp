@@ -1771,3 +1771,83 @@ TEST_CASE("every doc a file cites exists, down to its heading",
   }());
   CHECK(broken.empty());
 }
+
+namespace {
+// Each line of `text` with its line comment dropped, numbered from 1.
+std::vector<std::pair<size_t, std::string>> CodeLines(const std::string& text) {
+  std::vector<std::pair<size_t, std::string>> out;
+  size_t line = 1;
+  for (size_t i = 0, start = 0; i <= text.size(); i++) {
+    if (i != text.size() && text[i] != '\n')
+      continue;
+    std::string row = text.substr(start, i - start);
+    start = i + 1;
+    if (const size_t c = row.find("//"); c != std::string::npos)
+      row.erase(c);
+    out.emplace_back(line++, row);
+  }
+  return out;
+}
+} // namespace
+
+TEST_CASE("OCC's signal handlers are armed in one place", "[convention]") {
+  // A signal's disposition is per PROCESS, and OCC's handler, outside an
+  // OCC_CATCH_SIGNALS scope, prints "no catch was found" and calls exit(1).
+  // A dozen call sites armed it directly, and after the first one a crash
+  // anywhere left no crash report and no stack -- found by
+  // hostile_params_smoke --self-test, whose planted SIGSEGV came back
+  // "ended without a crash report". ArmOccSignalHandlers (cad/OccSignals.cpp)
+  // puts the crash handler back and defers to OCC's only inside its scopes.
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"})
+    for (const SourceFile& src : SourcesUnder("src", ext)) {
+      if (Relative(src.path) == "src/cad/OccSignals.cpp")
+        continue;
+      for (const auto& [n, row] : CodeLines(src.text))
+        if (row.find("SetSignal(") != std::string::npos ||
+            row.find("SetThreadLocalSignal(") != std::string::npos)
+          offenders.push_back(Relative(src.path) + ":" + std::to_string(n) +
+                              ": " + row);
+    }
+  INFO("call ArmOccSignalHandlers() (cad/CADKernel.h) instead:\n" + [&] {
+    std::string s;
+    for (const std::string& o : offenders)
+      s += "  " + o + "\n";
+    return s;
+  }());
+  CHECK(offenders.empty());
+}
+
+TEST_CASE("a deliberate refusal throws std::runtime_error", "[convention]") {
+  // The dispatcher labels a logic_error (invalid_argument, out_of_range, ...)
+  // `internal`: the handler fell over rather than refused
+  // (remote/RpcErrors.h, docs/scripting/rpc.md#structured-errors). So code
+  // that refuses a caller throws runtime_error, and a logic_error is thrown
+  // only where reaching it IS a bug: an enum value no table names, a
+  // MethodDoc row the grammar cannot read.
+  const std::set<std::string> internalOnly = {"src/core/cam/CamNames.cpp",
+                                              "src/remote/RpcContract.cpp",
+                                              "src/remote/RemoteDispatch.cpp"};
+  static const std::regex logicThrow(
+      R"(throw\s+std::(logic_error|invalid_argument|out_of_range|)"
+      R"(length_error|domain_error)\b)");
+  std::vector<std::string> offenders;
+  for (const std::string& ext : {".cpp", ".h"})
+    for (const SourceFile& src : SourcesUnder("src", ext)) {
+      if (internalOnly.contains(Relative(src.path)))
+        continue;
+      for (const auto& [n, row] : CodeLines(src.text))
+        if (std::regex_search(row, logicThrow))
+          offenders.push_back(Relative(src.path) + ":" + std::to_string(n) +
+                              ": " + row);
+    }
+  INFO("a refusal is a std::runtime_error, or the dispatcher reports it as "
+       "an internal error:\n" +
+       [&] {
+         std::string s;
+         for (const std::string& o : offenders)
+           s += "  " + o + "\n";
+         return s;
+       }());
+  CHECK(offenders.empty());
+}

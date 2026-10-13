@@ -80,7 +80,6 @@
 #include <unordered_map>
 #include <unordered_set>
 
-#include <OSD.hxx>              // per-thread signal handler (prewarm workers)
 #include <Standard_Failure.hxx> // ...and what it converts faults into
 
 #include <atomic>
@@ -323,7 +322,7 @@ void PrewarmTessellations(AppState& state,
       // OCC turns hardware signals into Standard_Failure through a handler
       // installed PER THREAD (OCC_CONVERT_SIGNALS). Without this a fault in
       // the mesher here is a raw SIGSEGV rather than a catchable failure.
-      OSD::SetSignal(Standard_False);
+      ArmOccSignalHandlers();
       for (;;) {
         const size_t i = next.fetch_add(1, std::memory_order_relaxed);
         if (i >= groups.size())

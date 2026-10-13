@@ -14,7 +14,7 @@
 #include "ui/BackgroundJob.h"
 #include "ui/BackgroundJobs.h"
 
-#include <OSD.hxx>
+#include "cad/CADKernel.h" // ArmOccSignalHandlers
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -244,7 +244,7 @@ bool StartMotionRun(AppState& state, uint64_t studyId, std::string* error,
   bg->owner = jobStart ? jobStart->owner : 0;
   BackgroundJob* raw = bg.get();
   bg->thread = std::thread([run, raw]() {
-    OSD::SetSignal(Standard_False);
+    ArmOccSignalHandlers();
     run->result = motion::Run(
         run->asmCopy, PartsOf(*run), AssembliesOf(*run), run->study,
         [raw] { return raw->cancel.load(); },
@@ -681,7 +681,7 @@ std::shared_ptr<MotionPoses> PosesToPlay(AppState& state, uint64_t studyId,
     return nullptr;
   MotionPoses* raw = poses.get();
   poses->worker = std::thread([run, raw] {
-    OSD::SetSignal(Standard_False);
+    ArmOccSignalHandlers();
     auto r = std::make_shared<motion::Result>(motion::Run(
         run->asmCopy, PartsOf(*run), AssembliesOf(*run), run->study,
         [raw] { return raw->cancel.load(); }, nullptr, &run->meshes,

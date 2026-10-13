@@ -11,7 +11,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/ImportActions.h"
 
-#include <OSD.hxx>
+#include "cad/CADKernel.h" // ArmOccSignalHandlers
 #include <Standard_Failure.hxx>
 
 #include <algorithm>
@@ -63,7 +63,7 @@ void Run(ImportJob* job, BackgroundJob* bg) {
   // OCC_CONVERT_SIGNALS turns hardware signals into Standard_Failure, and the
   // handler is installed PER THREAD. Without this a fault inside the reader on
   // this thread is a raw SIGSEGV rather than a catchable failure.
-  OSD::SetSignal(Standard_False);
+  ArmOccSignalHandlers();
 
   while (g_holdWorker.load() && !bg->cancel.load())
     std::this_thread::sleep_for(std::chrono::milliseconds(2));
