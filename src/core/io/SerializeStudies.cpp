@@ -407,7 +407,8 @@ std::vector<double> ResultArrayReader::Reals(const json& ref,
       out[i] = f;
     }
   } else if (type == "f64") {
-    std::memcpy(out.data(), p, count * sizeof(double));
+    if (count > 0) // an empty array has no data pointer to copy from
+      std::memcpy(out.data(), p, count * sizeof(double));
   } else {
     throw std::runtime_error(m_what + ": " + name + " is " + type +
                              " (expected f32 or f64)");

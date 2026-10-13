@@ -576,7 +576,8 @@ TEST_CASE("Solver: the iterative solve agrees with the direct one",
   REQUIRE(b.has_value());
   CHECK(std::string(rd.solver) == fem::kDirectSolverName);
   CHECK(std::string(ri.solver) == fem::kIterativeSolverName);
-  CHECK(told == fem::kIterativeSolverName);
+  REQUIRE(told != nullptr);
+  CHECK(std::string(told) == fem::kIterativeSolverName); // not the address
   CHECK(ri.iterations > 0);
   CHECK(ri.worstResidual <= 1e-6);
   REQUIRE(a->size() == 2);
