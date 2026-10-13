@@ -247,6 +247,16 @@ is not a dimension (naming the dimension kinds), on a dimension with an
 `expr`, and when it is not a boolean. Making a driven dimension driving
 takes its measured value and is judged like an addition (below).
 
+Since it has no input, no path gives it one: it is no `VisitExprs` slot, so
+`check_literals` never calls its measure a literal and `extract_variables`
+never offers it a variable, and a configuration — which overrides variables,
+not dimensions ([configurations](../configurations/README.md)) — cannot
+reach it. A dimension an expression drives cannot be made driven with the
+expression kept (the loader, `add_constraint` and the GUI toggle all refuse
+it), so an override never lands on a driven dimension. Drawings never read
+sketch dimensions; their dimensions are measured from the projected view
+and are all driven anyway ([drawings](../drawings/README.md)).
+
 #### Refusals
 
 A constraint the solver cannot represent — a radius on an ellipse, a
@@ -790,7 +800,10 @@ link; `modify_feature` with an edited sketch JSON covers them.
   true` is added and answers `measured`; `driven` with an input or on a
   relation is refused; `add_constraints` with one bad spec in three adds
   nothing and names index 1; `modify_feature` switching a driven dimension
-  to driving where it would over-constrain is refused.
+  to driving where it would over-constrain is refused; and a dimension a
+  configuration drives through its variable cannot be made driven with the
+  expression kept. `tests/test_literals.cpp` `[driven]`: a driven dimension
+  is no literal and takes no variable.
 - `tests/regen_honesty_smoke.py` — a variable driving a radius out of
   reach warns in `set_variable`'s `regen`, naming the sketch and the
   dimension; `modify_feature` to 5000 keeps the minor arc, to 49 is
