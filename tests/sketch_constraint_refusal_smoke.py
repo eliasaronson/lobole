@@ -191,6 +191,33 @@ def main():
                      feature_id=sid, feature=flipped)
         expect(sketch_json(d, sid) == tri,
                "a refused driving switch changed nothing")
+        # A configuration overrides VARIABLES, and a driven dimension reads
+        # none: no path gives it an expression, so no override can be meant
+        # for it. A dimension a configuration drives (through `w`) cannot be
+        # made driven with its expression kept -- refused, unchanged.
+        d.call("set_variable", name="w", expression="40")
+        wide = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Wide",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [0, 0], "b": [40, 0]}]})
+        wl = wide["entity_ids"][0]
+        d.call("add_constraint", sketch_id=wide["id"], kind="distance",
+               refs=[[wl, 0], [wl, 1]], expr="w")
+        cfg = d.call("add_configuration", name="Narrow")["id"]
+        d.call("set_configuration", id=cfg,
+               parameter_overrides=[{"name": "w", "expression": "25"}])
+        wj = sketch_json(d, wide["id"])
+        made = dict(wj)
+        made["constraints"] = [dict(c) for c in wj["constraints"]]
+        made["constraints"][0]["driven"] = True
+        expect_error(d, "modify_feature", ["cannot carry an expression"],
+                     feature_id=wide["id"], feature=made)
+        expect_error(d, "add_constraint", ["a driven dimension takes no expr"],
+                     sketch_id=wide["id"], kind="distance_x",
+                     refs=[[wl, 0], [wl, 1]], driven=True, expr="w")
+        expect(sketch_json(d, wide["id"]) == wj,
+               "a dimension a configuration drives stayed driving")
         print("sketch_constraint_refusal_smoke: OK")
     finally:
         app.terminate()

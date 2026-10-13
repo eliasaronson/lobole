@@ -2255,6 +2255,25 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
     IM_CHECK(sk->constraints[0].driven);
+
+    // A dimension an expression drives (and so a configuration, through
+    // its variable) is not made driven: that would drop its input.
+    before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t l1 = sk->AddEntity(sketch::Line{{-1.5, 1.0}, {0.5, 1.0}});
+    after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    s_App->sketchEdit.selected = {{l1, 0}, {l1, 1}};
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Distance,
+                                       2.0, "2"));
+    ctx->Yield();
+    IM_CHECK(!ui::SetConstraintDriven(*s_App, 1, true));
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(!sk->constraints[1].driven);
+    IM_CHECK(sk->constraints[1].valueExpr == "2");
+    IM_CHECK(s_App->sketchEdit.actionMsg.find("clear the expression first") !=
+             std::string::npos);
     ctx->KeyPress(ImGuiKey_Escape);
     ctx->Yield();
   };
