@@ -174,7 +174,9 @@ reproduces it on a quiet machine instead, deterministically:
 
 Both come before `-f`, and a failed shard's `reproduce.sh` carries them.
 `--slow-frames 160` and `--slow-jobs 3000` are levels the whole suite
-passes at.
+passes at. `--headless` honours `--gui-test-job-latency-ms` too, so a smoke
+can hold its instance's jobs open the same way (`hostile_params_smoke
+--self-test`, [the hostile sweep](../scripting/rpc.md#the-hostile-sweep)).
 
 ## Making a widget addressable
 

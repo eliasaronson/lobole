@@ -1542,7 +1542,8 @@ void printUsage(const char* programName) {
             << std::endl;
   std::cout
       << "  --gui-test-job-latency-ms <ms>  Reap no background job sooner "
-         "than this after it started (starved workers)"
+         "than this after it started (starved workers; GUI tests and "
+         "--headless)"
       << std::endl;
   std::cout << "  --gui-test-list      List GUI tests as category/name and "
                "exit (no GPU needed)"
@@ -2367,6 +2368,9 @@ int main(int argc, char** argv) {
       std::cerr << "Error: --gui-tests cannot run with --headless" << std::endl;
       return 2;
     }
+    // The smokes' slow-job worst case: a job they read while it runs is
+    // still there a moment later (hostile_params_smoke --self-test).
+    ui::SetTestJobLatency(args.guiTestJobLatencyMs / 1000.0);
     return RunHeadless(args.remotePort, args.fileToLoad, args.autosaveSeconds,
                        args.recordPath, args.remoteBindAll);
   }

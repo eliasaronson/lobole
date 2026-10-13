@@ -355,7 +355,12 @@ changed the world (dirty against the fixture saved clean, the tabs, the parts'
 identities, a job started, the files under the cwd and the scratch dir, and
 for a `NotInBatch` method the whole `World`); a refusal with no measured
 condition. An accepted hostile call is not a failure — `1e308` is a legal
-depth — and the fixture is put back. A finding not fixed yet is listed in the
+depth — and the fixture is put back. Every open of the fixture waits out the
+jobs the open itself starts (the job tabs' box warm,
+[cam/gui.md](../cam/gui.md#job-tab-frame-cost)) before the world is read
+again: a warm still running at one read and gone at the next, or the other
+way round across the end-of-shard comparison of two opens, read as the world
+moving, about once a suite run on a loaded machine. A finding not fixed yet is listed in the
 sweep's `KNOWN` table with its [known-bugs](../known-bugs.md) entry and
 reported, not failed.
 
@@ -372,6 +377,8 @@ through a valid baseline, and how many feature types the fixture covers.
 answer, a write before a refusal, an edit then a fall, and a kernel throw
 inside a `batch`, and `debug_crash` a SIGSEGV whose crash report must name
 it; each must come out as its class, and the deliberate refusals as nothing.
+It then opens the fixture twice on an instance whose jobs are held 3 s
+(`--gui-test-job-latency-ms`) and requires the two worlds to agree.
 
 ## `batch`
 

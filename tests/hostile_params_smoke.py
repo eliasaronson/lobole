@@ -269,10 +269,11 @@ def internal(diag):
 
 
 class Sweep:
-    def __init__(self, binary, work, env=None):
+    def __init__(self, binary, work, env=None, extra_args=()):
         self.binary = binary
         self.work = work
         self.env = env
+        self.extra_args = tuple(extra_args)
         self.out = os.path.join(work, "out")
         os.makedirs(self.out, exist_ok=True)
         os.makedirs(os.path.join(work, "fp"), exist_ok=True)
@@ -292,7 +293,7 @@ class Sweep:
         env = dict(os.environ if self.env is None else self.env)
         if state_home:
             env["XDG_STATE_HOME"] = state_home
-        self.app = launch_app(self.binary, env=env)
+        self.app = launch_app(self.binary, self.extra_args, env=env)
         self.state_home = state_home or os.path.join(self.app.tmp, "state")
         from designer_remote import Designer
         self.d = Designer.wait_for(self.app.port)
@@ -418,13 +419,52 @@ class Sweep:
         shutil.rmtree(self.out, ignore_errors=True)
         os.makedirs(self.out)
         try:
-            d.call("open_project", path=self.fixture)
+            self.open_fixture()
             if [p["name"] for p in d.call("list_parts")["parts"]] != self.tabs:
                 raise RuntimeError("tabs moved")
         except Exception:  # noqa: BLE001
             self.build()
         self.tab = None
         self.quick_before = None
+
+    def open_fixture(self):
+        """open_project the fixture and wait out the jobs the open itself
+        starts. Every open warms the job tabs' boxes ("job-warm",
+        docs/cam/gui.md#job-tab-frame-cost); one still running when the world
+        is read and gone at the next read -- or the other way round, at the
+        end of the shard, where two opens are compared -- read as a refusal
+        or the shard having moved the world. On a loaded machine the warm
+        outlived the read about once a suite run (`--self-test` reproduces it
+        with --gui-test-job-latency-ms)."""
+        self.d.call("open_project", path=self.fixture)
+        self.wait_jobs()
+
+    def wait_jobs(self, timeout=TIMEOUT_S):
+        """Until no job but the CAM passes runs (they are the job's derived
+        toolpaths, which the world does not read)."""
+        deadline = time.time() + timeout
+        while True:
+            running = [j["kind"] for j in
+                       self.d.call("background_jobs")["jobs"]
+                       if j["kind"] != "cam"]
+            if not running:
+                return
+            if time.time() > deadline:
+                raise RuntimeError(f"background jobs {running} still running "
+                                   f"{timeout:g} s after the fixture opened")
+            time.sleep(0.05)
+
+    def end_drift(self):
+        """The whole world, once: against itself after the fixture is opened
+        again. A refusal that moved what the cheap check does not read."""
+        self.reset()
+        self.use_tab(self.part["name"])
+        self.world.settle()
+        end = self.world.cheap()
+        self.open_fixture()
+        self.world.settle()
+        return [x for x in changed(end, self.world.cheap())
+                if not x.startswith(("app:", "cwd:"))]
 
     def use_tab(self, tab):
         if tab != self.tab:
@@ -797,13 +837,27 @@ def self_test(binary, work):
             problems.append(f"after the crash: {sw.failures[n:]}")
     finally:
         sw.close()
+    calls = sw.counts["calls"]
+    # Jobs as slow as a loaded machine makes them: the fixture's job-tab warm
+    # outlives every read, and the end-of-shard comparison of two opens must
+    # still see a world that did not move.
+    slow = os.path.join(work, "slow-jobs")
+    os.makedirs(slow)
+    sw = Sweep(binary, slow, extra_args=("--gui-test-job-latency-ms", "3000"))
+    try:
+        drift = sw.end_drift()
+        if drift:
+            problems.append(f"slow jobs: two opens of the fixture differ: "
+                            f"{'; '.join(drift)}")
+    finally:
+        sw.close()
     if problems:
         print("hostile_params_smoke --self-test: FAILED")
         for p in problems:
             print("  - " + p)
         return 1
     print(f"hostile_params_smoke --self-test: every planted failure was "
-          f"reported as its class ({sw.counts['calls']} calls)")
+          f"reported as its class ({calls} calls)")
     return 0
 
 
@@ -879,16 +933,7 @@ def run(binary, work, args):
             sweep_batch(sw, values)
         if "raw:lines" in extra:
             sweep_raw(sw)
-        # The whole world, once, at the end of the shard: a refusal that
-        # moved what the cheap check does not read.
-        sw.reset()
-        sw.use_tab(sw.part["name"])
-        sw.world.settle()
-        end = sw.world.cheap()
-        sw.d.call("open_project", path=sw.fixture)
-        sw.world.settle()
-        diff = [x for x in changed(end, sw.world.cheap())
-                if not x.startswith(("app:", "cwd:"))]
+        diff = sw.end_drift()
         if diff:
             sw.fail("changed", "end of shard",
                     f"the world drifted: {'; '.join(diff)}")
