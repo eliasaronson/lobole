@@ -1766,8 +1766,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "target_id, tool_id (body created_by ids), op: "
      "union|subtract|intersect"},
     {"Split", 39,
-     "body_id, knife: {face {feature_id, element}} or "
-     "{datum_id} or {base_plane, offset (+_expr)}"},
+     "body_id, knife: \"plane\" (default) with datum_id or base_plane, "
+     "offset (+_expr); or \"face\" with face {feature_id, element}"},
     {"Refine", 47, "body_id (heals/simplifies the B-Rep)"},
     {"Fillet", 17, "edges [{feature_id, element}], radius (+_expr)"},
     {"Chamfer", 17,
@@ -2464,7 +2464,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "Split") { // v39
     auto sp =
         std::make_unique<SplitFeature>(name, j.at("body_id").get<uint64_t>());
-    if (j.value("knife", "plane") == "face") {
+    // Refused, never read as a plane: "plne" or {"face": …} would otherwise
+    // split along the XY plane and look like an answer.
+    const json knifeJ = j.value("knife", json("plane"));
+    if (!knifeJ.is_string() || (knifeJ != "face" && knifeJ != "plane"))
+      throw std::runtime_error("unknown Split knife " + knifeJ.dump() +
+                               " — one of \"plane\", \"face\"");
+    if (knifeJ == "face") {
       sp->knife = SplitKnifeKind::Face;
       const json& fj = j.at("face");
       sp->face = ElementRef{fj.at("feature_id").get<uint64_t>(),

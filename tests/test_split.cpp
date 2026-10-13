@@ -3,6 +3,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
 #include "core/Document.h"
@@ -158,6 +159,17 @@ TEST_CASE("A plane-knife split round-trips through JSON", "[split]") {
   CHECK(sp->basePlane == PlaneType::XY);
   CHECK_THAT(sp->offset, WithinRel(1.0, 1e-9));
   REQUIRE(loaded->GetBodies().size() == 2);
+}
+
+TEST_CASE("An unknown split knife is refused, not read as a plane", "[split]") {
+  for (const nlohmann::json& knife :
+       {nlohmann::json("plne"), nlohmann::json::object({{"face", 1}})}) {
+    const nlohmann::json j = {
+        {"type", "Split"}, {"name", "S"}, {"body_id", 1}, {"knife", knife}};
+    CHECK_THROWS_WITH(
+        DocumentIO::FeatureFromJson(j),
+        Catch::Matchers::ContainsSubstring("\"plane\", \"face\""));
+  }
 }
 
 TEST_CASE("A face-knife split round-trips through JSON", "[split]") {
