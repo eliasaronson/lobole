@@ -31,11 +31,31 @@ class RemoteError(RuntimeError):
         self.diagnostic = diagnostic
 
 
+class NonFiniteError(RemoteError):
+    """The answer held NaN or infinity, which JSON writes as null: the server
+    listed where under `nonfinite`
+    (docs/scripting/rpc.md#what-a-response-carries). The call itself ran --
+    a mutating one has happened -- so this is a wrong answer, not a refusal.
+    `result` is the answer as sent."""
+    def __init__(self, message, pointers, result):
+        super().__init__(message)
+        self.pointers = pointers
+        self.result = result
+
+
 class Designer:
-    def __init__(self, port, host="127.0.0.1", timeout=60.0):
+    """`strict`: an answer holding a non-finite number raises NonFiniteError
+    instead of warning. Unset, it follows DESIGNER_REMOTE_STRICT=1, which
+    tests/smoke_app.py sets, so every smoke runs strict."""
+
+    def __init__(self, port, host="127.0.0.1", timeout=60.0, strict=None):
         self.sock = socket.create_connection((host, port), timeout=timeout)
         self.file = self.sock.makefile("rw")
         self._id = 0
+        if strict is None:
+            import os
+            strict = os.environ.get("DESIGNER_REMOTE_STRICT") == "1"
+        self.strict = strict
 
     # `method` is POSITIONAL-ONLY, so an RPC with a parameter of that name —
     # `describe {method}` — is reachable as call("describe", method="x"). It
@@ -80,7 +100,22 @@ class Designer:
                 if not line:
                     raise ConnectionError("designer disconnected")
                 msg = json.loads(line)
+                # A line the server could not parse is answered with a null
+                # id (it cannot know ours); with one request in flight it is
+                # this one's, and waiting for our id would wait forever.
+                if msg.get("id") is None and str(
+                        msg.get("error", "")).startswith("parse:"):
+                    raise RemoteError(msg["error"], msg.get("diagnostic"))
                 if msg.get("id") == self._id:
+                    if "nonfinite" in msg:
+                        said = (f"{method}: the answer held non-finite "
+                                f"numbers, sent as null, at "
+                                f"{', '.join(msg['nonfinite'][:5])}")
+                        if self.strict:
+                            raise NonFiniteError(said, msg["nonfinite"],
+                                                 msg.get("result"))
+                        import warnings
+                        warnings.warn(said, RuntimeWarning, stacklevel=3)
                     if "error" in msg:
                         raise RemoteError(msg["error"], msg.get("diagnostic"))
                     return msg.get("result")
@@ -137,13 +172,13 @@ class Designer:
         return sorted(found, key=lambda i: i.get("started", 0), reverse=True)
 
     @staticmethod
-    def wait_for(port, timeout=30.0):
+    def wait_for(port, timeout=30.0, strict=None):
         """Connect, retrying while the app starts up."""
         deadline = time.time() + timeout
         last = None
         while time.time() < deadline:
             try:
-                return Designer(port)
+                return Designer(port, strict=strict)
             except OSError as e:
                 last = e
                 time.sleep(0.3)

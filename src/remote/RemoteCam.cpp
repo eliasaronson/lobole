@@ -2076,7 +2076,20 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
       if (named == nullptr)
         RefuseUnknownMachine(state, want);
     }
-    cam::Setup& setup = job->AddSetup(p.value("name", std::string()));
+    // ...and so are the rest: a wrong-typed safe_z was refused after the
+    // setup was made, and the rollback that took it out re-verified the job
+    // (hostile_params_smoke).
+    std::optional<std::string> post;
+    if (p.contains("post")) {
+      post = p.at("post").get<std::string>();
+      if (!cam::PostExists(*post))
+        throw std::runtime_error("unknown post '" + *post + "'");
+    }
+    std::optional<double> safeZ;
+    if (p.contains("safe_z"))
+      safeZ = p.at("safe_z").get<double>();
+    const std::string name = p.value("name", std::string());
+    cam::Setup& setup = job->AddSetup(name);
     (void)cam::RecomputeOrigin(setup, ui::JobBodies(state));
     // Safe Z clear of the stock, exactly as the panel does it. Without this
     // an RPC-built job kept the struct's bare 5 mm, which sits INSIDE any
@@ -2086,14 +2099,10 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
     setup.safeZ = ui::DeriveJobSafeZ(state, setup);
     if (named != nullptr)
       ui::ApplyMachine(setup, *named);
-    if (p.contains("post")) {
-      const std::string post = p.at("post").get<std::string>();
-      if (!cam::PostExists(post))
-        throw std::runtime_error("unknown post '" + post + "'");
-      setup.machine.post = post;
-    }
-    if (p.contains("safe_z"))
-      setup.safeZ = p.at("safe_z").get<double>();
+    if (post)
+      setup.machine.post = *post;
+    if (safeZ)
+      setup.safeZ = *safeZ;
     return json{{"id", setup.id},
                 {"name", setup.name},
                 {"post", setup.machine.post},

@@ -714,9 +714,7 @@ json NormalizeTransform(json t) {
     throw std::runtime_error(
         "pass either transform.orientation or transform.rotate, not both");
   const json& r = t.at("rotate");
-  const json& ax = r.at("axis");
-  const glm::dvec3 axis(ax.at(0).get<double>(), ax.at(1).get<double>(),
-                        ax.at(2).get<double>());
+  const glm::dvec3 axis = remote::Vec3Param(r.at("axis"), "rotate.axis");
   if (glm::length(axis) < 1e-9f)
     throw std::runtime_error("rotate.axis must be non-zero");
   const double rad = glm::radians(r.at("angle_deg").get<double>());
@@ -939,8 +937,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   if (m == "fit_fastener") {
     ui::RimPick rim;
     const auto& r = p.at("rim");
-    rim.element.featureId = r.at("feature_id").get<uint64_t>();
-    rim.element.name = r.at("element").get<std::string>();
+    std::tie(rim.element.featureId, rim.element.name) =
+        remote::ElementParam(r, "rim");
     // Optional, and only optional because a part placed ONCE has nothing to
     // disambiguate. Placed twice, the same element name is on both, and
     // leaving it out is refused rather than resolved to whichever comes
@@ -988,17 +986,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "add_fastener") {
     glm::dvec3 position(0.0);
-    if (p.contains("position")) {
-      const auto& v = p.at("position");
-      position = glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
-                            v.at(2).get<double>());
-    }
+    if (p.contains("position"))
+      position = remote::Vec3Param(p.at("position"), "position");
     glm::dquat orientation(1.0, 0.0, 0.0, 0.0);
-    if (p.contains("orientation")) {
-      const auto q = p.at("orientation");
-      orientation = glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
-                               q.at(1).get<double>(), q.at(2).get<double>());
-    }
+    if (p.contains("orientation"))
+      orientation = remote::QuatParam(p.at("orientation"), "orientation");
     std::string error;
     const uint64_t id = ui::AddFastener(
         state, p.value("standard", std::string("iso4762")),
@@ -1014,17 +1006,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "add_bearing") {
     glm::dvec3 position(0.0);
-    if (p.contains("position")) {
-      const auto& v = p.at("position");
-      position = glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
-                            v.at(2).get<double>());
-    }
+    if (p.contains("position"))
+      position = remote::Vec3Param(p.at("position"), "position");
     glm::dquat orientation(1.0, 0.0, 0.0, 0.0);
-    if (p.contains("orientation")) {
-      const auto q = p.at("orientation");
-      orientation = glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
-                               q.at(1).get<double>(), q.at(2).get<double>());
-    }
+    if (p.contains("orientation"))
+      orientation = remote::QuatParam(p.at("orientation"), "orientation");
     std::string error;
     const uint64_t id =
         ui::AddBearing(state, p.at("designation").get<std::string>(), position,
@@ -1067,17 +1053,11 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   }
   if (m == "add_retaining_ring") {
     glm::dvec3 position(0.0);
-    if (p.contains("position")) {
-      const auto& v = p.at("position");
-      position = glm::dvec3(v.at(0).get<double>(), v.at(1).get<double>(),
-                            v.at(2).get<double>());
-    }
+    if (p.contains("position"))
+      position = remote::Vec3Param(p.at("position"), "position");
     glm::dquat orientation(1.0, 0.0, 0.0, 0.0);
-    if (p.contains("orientation")) {
-      const auto q = p.at("orientation");
-      orientation = glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
-                               q.at(1).get<double>(), q.at(2).get<double>());
-    }
+    if (p.contains("orientation"))
+      orientation = remote::QuatParam(p.at("orientation"), "orientation");
     std::string error;
     const uint64_t id = ui::AddRetainingRing(
         state, p.at("standard").get<std::string>(), p.at("size").get<double>(),
@@ -1122,8 +1102,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   if (m == "fit_retaining_ring") {
     ui::RimPick groove;
     const auto& r = p.at("groove");
-    groove.element.featureId = r.at("feature_id").get<uint64_t>();
-    groove.element.name = r.at("element").get<std::string>();
+    std::tie(groove.element.featureId, groove.element.name) =
+        remote::ElementParam(r, "groove");
     groove.occurrence = r.value("occurrence", uint64_t{0});
     if (r.contains("inner_path"))
       groove.innerPath = r.at("inner_path").get<std::vector<uint64_t>>();
@@ -1150,8 +1130,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
   if (m == "fit_bearing") {
     ui::RimPick seat;
     const auto& r = p.at("seat");
-    seat.element.featureId = r.at("feature_id").get<uint64_t>();
-    seat.element.name = r.at("element").get<std::string>();
+    std::tie(seat.element.featureId, seat.element.name) =
+        remote::ElementParam(r, "seat");
     seat.occurrence = r.value("occurrence", uint64_t{0});
     if (r.contains("inner_path"))
       seat.innerPath = r.at("inner_path").get<std::vector<uint64_t>>();
@@ -1491,16 +1471,12 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       // the caller did not mention.
       const json t = NormalizeTransform(p.at("transform"));
       if (t.contains("position")) {
-        const json& pos = t.at("position");
         occ->position =
-            glm::dvec3(pos.at(0).get<double>(), pos.at(1).get<double>(),
-                       pos.at(2).get<double>());
+            remote::Vec3Param(t.at("position"), "transform.position");
       }
       if (t.contains("orientation")) {
-        const json& q = t.at("orientation"); // [x,y,z,w]
         occ->orientation =
-            glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
-                       q.at(1).get<double>(), q.at(2).get<double>());
+            remote::QuatParam(t.at("orientation"), "transform.orientation");
       }
       if (!t.contains("position") && !t.contains("orientation"))
         throw std::runtime_error(
@@ -1859,11 +1835,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       mate->dx = p.at("dx").get<double>(); // planar
     if (p.contains("dy"))
       mate->dy = p.at("dy").get<double>(); // planar
-    if (p.contains("ball_rotation")) {    // ball [x,y,z,w]
-      const json& q = p.at("ball_rotation");
+    if (p.contains("ball_rotation")) {     // ball [x,y,z,w]
       mate->ballRotation =
-          glm::dquat(q.at(3).get<double>(), q.at(0).get<double>(),
-                     q.at(1).get<double>(), q.at(2).get<double>());
+          remote::QuatParam(p.at("ball_rotation"), "ball_rotation");
     }
     // The mate just edited drives whatever it is related to: turning the
     // wheel turns the pinion as readily as the other way round.
@@ -2975,9 +2949,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           "no occurrence with id " + std::to_string(occId) +
           ". Occurrences: " + OccurrenceCandidates(*state.assembly));
     }
-    const auto& o = p.at("offset");
-    const glm::dvec3 offset(o.at(0).get<double>(), o.at(1).get<double>(),
-                            o.at(2).get<double>());
+    const glm::dvec3 offset = remote::Vec3Param(p.at("offset"), "offset");
     ui::SnapshotAssembly(state);
     ExplodeStep* step = nullptr;
     for (ExplodeStep& s : v->steps)

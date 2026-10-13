@@ -42,6 +42,7 @@ COLUMNS: dict[str, str] = {
     'crash_reports': '',
     'create_drawing': 'name?:string, sheet?:object',
     'debug_crash': "kind:'segv'|'abort'|'exception'",
+    'debug_fault': "kind:'out_of_range'|'json_out_of_range'|'bad_optional_access'|'standard_failure'|'refusal'|'type_error'|'edit_then_out_of_range'|'nonfinite'|'write_then_refuse'",
     'delete_feature': 'feature_id?:int>=0, id?:int>=0, index?:int>=0, expect_revision?:revision',
     'delete_part': 'part?:string|int, index?:int>=0',
     'describe': 'method?:string',
@@ -167,6 +168,9 @@ class CreateDrawingParams(TypedDict):
 
 class DebugCrashParams(TypedDict):
     kind: Literal['segv', 'abort', 'exception']
+
+class DebugFaultParams(TypedDict):
+    kind: Literal['out_of_range', 'json_out_of_range', 'bad_optional_access', 'standard_failure', 'refusal', 'type_error', 'edit_then_out_of_range', 'nonfinite', 'write_then_refuse']
 
 class DeleteFeatureParams(TypedDict):
     feature_id: NotRequired[int]
@@ -391,6 +395,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def debug_crash(self, _timeout: float | None = None, **params: Unpack[DebugCrashParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def debug_fault(self, _timeout: float | None = None, **params: Unpack[DebugFaultParams]) -> dict[str, Any]:
         raise NotImplementedError
 
     def delete_feature(self, _timeout: float | None = None, **params: Unpack[DeleteFeatureParams]) -> dict[str, Any]:

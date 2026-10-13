@@ -575,6 +575,13 @@ std::unique_ptr<Feature> FeatureFromJsonNamed(const nlohmann::json& j) {
   } catch (const nlohmann::json::out_of_range& e) {
     const std::string type = j.value("type", "");
     std::string missing = e.what();
+    // An array shorter than its field takes: [] where a point goes.
+    if (e.id == 401)
+      throw std::runtime_error(
+          (type.empty() ? std::string("that feature") : type) +
+          " has an array too short for its field (" +
+          missing.substr(missing.find(']') + 2) +
+          ") — describe feature_types[] lists the fields each type takes");
     // "...key 'direction' not found" -> direction
     const size_t open = missing.find('\'');
     const size_t close = open == std::string::npos
@@ -1280,7 +1287,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // Build a throwaway from the request first: validates the JSON AND lets
     // the round-trip unknown-field check run before anything is committed.
     {
-      const auto probe = DocumentIO::FeatureFromJson(p.at("feature"));
+      const auto probe = FeatureFromJsonNamed(p.at("feature"));
       RejectUnknownFeatureFields(p.at("feature"), *probe);
       RefuseThread(*probe);
     }
@@ -1293,7 +1300,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // and a primitive's size is exactly such a dimension
     // (docs/modeling/README.md#primitives).
     if (const auto* oldSk = dynamic_cast<const SketchFeature*>(feature)) {
-      auto built = DocumentIO::FeatureFromJson(after);
+      auto built = FeatureFromJsonNamed(after);
       auto* newSk = dynamic_cast<SketchFeature*>(built.get());
       // Each changed dimension steps from what the geometry it is sent
       // with measures (so a flip of the refs reads as one) to its new

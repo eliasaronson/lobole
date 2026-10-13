@@ -86,7 +86,7 @@ double LowestAlong(const TopoDS_Shape& shape, const glm::dvec3& up) {
   Bnd_Box box;
   BRepBndLib::AddOptimal(shape.Moved(TopLoc_Location(t)), box, false, false);
   if (box.IsVoid())
-    throw std::invalid_argument("a body has no extent");
+    throw std::runtime_error("a body has no extent");
   double x0, y0, z0, x1, y1, z1;
   box.Get(x0, y0, z0, x1, y1, z1);
   return z0;
@@ -410,14 +410,14 @@ void CheckFaces(const std::vector<const Body*>& bodies, const Options& o,
 
 Report Check(const std::vector<const Body*>& bodies, const Options& o) {
   if (bodies.empty())
-    throw std::invalid_argument("no bodies to check");
+    throw std::runtime_error("no bodies to check");
   if (!(glm::length(o.up) > 0.5) || !std::isfinite(o.up.x + o.up.y + o.up.z))
-    throw std::invalid_argument("the print direction is not a unit vector");
+    throw std::runtime_error("the print direction is not a unit vector");
   if (!(o.maxOverhangDeg > 0.0 && o.maxOverhangDeg < 90.0))
-    throw std::invalid_argument("the overhang limit is not in (0, 90)");
+    throw std::runtime_error("the overhang limit is not in (0, 90)");
   for (const Body* b : bodies)
     if (b == nullptr || b->shape.GetShape().IsNull())
-      throw std::invalid_argument("a body has no shape");
+      throw std::runtime_error("a body has no shape");
   const glm::dvec3 up = glm::normalize(o.up);
   Options opts = o;
   opts.up = up;

@@ -45,7 +45,6 @@
 #include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
-#include <OSD.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
@@ -2003,7 +2002,7 @@ uint64_t StartContactJob(ui::AppState& state, std::shared_ptr<ContactSweep> sw,
   bg->fraction.store(0.0); // the share of pairs checked: determinate
   ui::BackgroundJob* raw = bg.get();
   bg->thread = std::thread([run, raw]() {
-    OSD::SetSignal(Standard_False);
+    ArmOccSignalHandlers();
     try {
       run->report = RunContactSweep(*run->sweep, &raw->cancel, &raw->fraction);
     } catch (const Standard_Failure& e) {
@@ -2966,6 +2965,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       missingPath = p.at("missing_path").get<std::string>();
     if (p.contains("extra_path"))
       extraPath = p.at("extra_path").get<std::string>();
+    // Both targets checked before either is written: a good missing_path
+    // and a directory for extra_path wrote the first file and then refused.
+    for (const auto* target : {&missingPath, &extraPath})
+      if (std::string why;
+          *target && !DocumentIO::AtomicTargetOk(**target, &why))
+        throw std::runtime_error("compare_geometry: " + why);
     // `align`: put the candidate's centre of mass on the reference's before
     // the boolean, and answer about the SHAPE rather than about where it
     // happens to be. Without it a re-drawn port tube whose volume matched

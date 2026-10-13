@@ -10,7 +10,8 @@ Usage:
 
 Sends each recorded semantic request in order over the JSON-RPC remote
 (start the target with `lobole --headless --remote <port>` for a
-deterministic environment). Exits non-zero on the first failing call.
+deterministic environment). Exits non-zero on the first failing call. A
+first line `{"fuzz": {...}}` (a minimised case from tools/fuzz.py) is skipped.
 """
 import json
 import sys
@@ -30,6 +31,10 @@ def replay(port, path):
                 if not line:
                     continue
                 entry = json.loads(line)
+                # A fuzzer case (tools/fuzz.py) opens with a header naming
+                # its seed and failure class; it is not a request.
+                if "method" not in entry and "fuzz" in entry:
+                    continue
                 try:
                     d.call(entry["method"], **entry.get("params", {}))
                 except RuntimeError as e:

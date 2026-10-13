@@ -10,6 +10,7 @@
 #include "remote/RpcParams.h"
 
 #include <glm/glm.hpp>
+#include <glm/gtc/quaternion.hpp>
 #include <nlohmann/json.hpp>
 
 #include <map>
@@ -17,6 +18,9 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 // Small helpers shared by the RemoteServer RPC domain modules (RemoteModeling,
 // RemoteInspection, RemoteView, ...). Each module is
@@ -183,6 +187,61 @@ inline nlohmann::json ReceiptJson(const receipt::Receipt& r) {
 
 inline void AttachReceipt(nlohmann::json& out, const receipt::Receipt& r) {
   out["receipt"] = ReceiptJson(r);
+}
+
+// `n` numbers out of a parameter, refused with what it was when it is not:
+// "'position' must be [x, y, z] (3 numbers); got []". The hand-rolled
+// `v.at(2).get<double>()` it replaces fell over with nlohmann's "array index
+// 2 is out of range", labelled internal (hostile_params_smoke).
+inline std::vector<double> NumbersParam(const nlohmann::json& v, size_t n,
+                                        const std::string& what,
+                                        const char* shape) {
+  bool ok = v.is_array() && v.size() == n;
+  for (size_t i = 0; ok && i < n; i++)
+    ok = v[i].is_number();
+  if (!ok) {
+    std::string got = v.dump();
+    if (got.size() > 80)
+      got = got.substr(0, 77) + "...";
+    throw std::runtime_error("'" + what + "' must be " + shape + " (" +
+                             std::to_string(n) + " numbers); got " + got);
+  }
+  std::vector<double> out(n);
+  for (size_t i = 0; i < n; i++)
+    out[i] = v[i].get<double>();
+  return out;
+}
+inline glm::dvec3 Vec3Param(const nlohmann::json& v, const std::string& what) {
+  const std::vector<double> x = NumbersParam(v, 3, what, "[x, y, z]");
+  return {x[0], x[1], x[2]};
+}
+inline glm::dvec2 Vec2Param(const nlohmann::json& v, const std::string& what) {
+  const std::vector<double> x = NumbersParam(v, 2, what, "[x, y]");
+  return {x[0], x[1]};
+}
+// [x, y, z, w], as the occurrence schema writes a quaternion.
+inline glm::dquat QuatParam(const nlohmann::json& v, const std::string& what) {
+  const std::vector<double> x = NumbersParam(v, 4, what, "[x, y, z, w]");
+  return glm::dquat(x[3], x[0], x[1], x[2]);
+}
+
+// A {feature_id, element} reference out of a parameter, refused with what it
+// was when it is not one (`r.at("feature_id")` on {} fell over as internal).
+inline std::pair<uint64_t, std::string> ElementParam(const nlohmann::json& r,
+                                                     const std::string& what) {
+  if (!r.is_object() || !r.contains("feature_id") || !r.contains("element") ||
+      !r.at("feature_id").is_number_unsigned() ||
+      !r.at("element").is_string()) {
+    std::string got = r.dump();
+    if (got.size() > 80)
+      got = got.substr(0, 77) + "...";
+    throw std::runtime_error("'" + what +
+                             "' is {feature_id, element}: a face or an edge "
+                             "as list_elements names it; got " +
+                             got);
+  }
+  return {r.at("feature_id").get<uint64_t>(),
+          r.at("element").get<std::string>()};
 }
 
 inline nlohmann::json Vec3ToJson(const glm::dvec3& v) {

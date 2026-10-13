@@ -50,6 +50,13 @@ Load(const std::string& path, const ProjectScope& scope = {});
 bool WriteTextAtomic(const std::filesystem::path& target,
                      const std::string& text, std::string* error = nullptr);
 
+// Whether `target` can be written that way: it names a file (not nothing,
+// not a directory) in a directory that exists. Fills `error` with the
+// measured condition when it cannot; both atomic writers ask first, so a
+// refused write creates nothing.
+bool AtomicTargetOk(const std::filesystem::path& target,
+                    std::string* error = nullptr);
+
 // Where a NEW project picked in a save dialog should actually be written:
 // always the `.dsgn` directory form (F3). A flat single-file project is
 // still LOADED (legacy files, the RPC, tests), but saving one from the GUI

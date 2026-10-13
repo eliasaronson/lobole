@@ -382,6 +382,36 @@ void RequireFolder(const ui::AppState& state, const std::string& folder,
 
 } // namespace
 
+namespace {
+// An export's `body`: a body's 0-based index, or absent for all of them.
+// `p.value("body", -1)` read -5 as "all" and 1e308 as whatever the narrowing
+// made of it.
+int BodyIndexParam(const RpcParams& p) {
+  if (!p.contains("body"))
+    return -1;
+  const json& b = p.at("body");
+  if (!b.is_number_integer() || b.get<long long>() < 0 ||
+      b.get<long long>() > 1000000)
+    throw std::runtime_error("body is a body's 0-based index, as get_state "
+                             "lists them (omit it for every body); got " +
+                             b.dump());
+  return b.get<int>();
+}
+// A mesh's chord deviation in mm: at least a tenth of a micron, at most a
+// metre. Zero, less or 1e-308 reached BRepMesh as "invalid parameter value"
+// (an OpenCASCADE throw).
+std::optional<double> DeflectionParam(const RpcParams& p) {
+  if (!p.contains("deflection"))
+    return std::nullopt;
+  const double d = p.at("deflection").get<double>();
+  if (!(d >= 1e-4 && d <= 1000.0))
+    throw std::runtime_error("deflection is the chord deviation in mm, in "
+                             "[0.0001, 1000]; got " +
+                             p.at("deflection").dump());
+  return d;
+}
+} // namespace
+
 std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                                      const RpcParams& p) {
   Document* doc = state.document.get();
@@ -1350,6 +1380,13 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // STEP / binary STL / native BREP. params:
     // {path, body?: index, deflection?: 0.1 (STL only)}
     const std::string path = p.at("path").get<std::string>();
+    // Where it goes and what it takes, checked before anything is meshed or
+    // written: an empty path, a directory or a missing parent fell through to
+    // the writer's "export failed (see log)", and `body: -5` exported every
+    // body as if it had been left out (hostile_params_smoke).
+    if (std::string why; !DocumentIO::AtomicTargetOk(path, &why))
+      throw std::runtime_error(m + ": " + why);
+    const int bodyIndex = BodyIndexParam(p);
     // An ASSEMBLY exports every occurrence at its solved placement — the
     // same walk export_visual uses. STEP is the interchange format, and
     // "export the assembly" refusing with "switch to a part tab" made the
@@ -1365,8 +1402,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       if (!onAssembly && target == nullptr)
         throw std::runtime_error(
             "no part to export: switch to a part tab or pass `part`");
-      const auto counts = ui::ExportStep(state, onAssembly ? nullptr : target,
-                                         p.value("body", -1), path);
+      const auto counts =
+          ui::ExportStep(state, onAssembly ? nullptr : target, bodyIndex, path);
       if (!counts)
         throw std::runtime_error(counts.error());
       json out{{"path", path},
@@ -1384,11 +1421,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // Read in a scope of its own so that only export_stl's row lists it, and
     // the dispatcher refuses it on BREP before anything is written.
     if (m == "export_stl") {
-      std::optional<double> deflection;
-      if (p.contains("deflection"))
-        deflection = p.at("deflection").get<double>();
+      // rpc-params: body, deflection, path
       const auto r =
-          ui::ExportPartStl(*doc, path, p.value("body", -1), deflection);
+          ui::ExportPartStl(*doc, path, bodyIndex, DeflectionParam(p));
       if (!r)
         throw std::runtime_error(r.error());
       json out{{"path", path},
@@ -1417,7 +1452,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
           doc->GetBodies().empty()
               ? "no bodies to export"
               : "only reference bodies (derived ghosts); nothing to export");
-    const int only = p.value("body", -1);
+    const int only = bodyIndex;
     if (only >= static_cast<int>(bodies.size()))
       throw std::runtime_error("body index out of range");
     // BREP is single-shape; a whole-document export of several bodies fuses
@@ -1431,7 +1466,10 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
         shape = shape.Union(bodies[i].shape);
     }
     if (!CADKernel::Instance().SaveBREP(path, shape))
-      throw std::runtime_error("export failed (see log)");
+      throw std::runtime_error(
+          "export_brep: OpenCASCADE could not write " + path +
+          " (BRepTools::Write failed: the disk full or the file not "
+          "writable, or a shape it cannot write -- run check_geometry)");
     return json{{"path", path},
                 {"bodies", only < 0 ? bodies.size() : size_t{1}}};
   }
@@ -1441,12 +1479,15 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // the active assembly (occurrences at solved placements). Materials carry
     // through (glTF is PBR). params: {path, deflection?: 0.1}
     const std::string path = p.at("path").get<std::string>();
+    if (std::string why; !DocumentIO::AtomicTargetOk(path, &why))
+      throw std::runtime_error(m + ": " + why);
+    const double deflection = DeflectionParam(p).value_or(0.1);
     const std::vector<MeshExport::Item> items =
         ui::BuildVisualExportItems(state);
     if (items.empty())
       throw std::runtime_error("nothing to export");
     std::string err;
-    if (!MeshExport::SaveVisual(path, items, p.value("deflection", 0.1), &err))
+    if (!MeshExport::SaveVisual(path, items, deflection, &err))
       throw std::runtime_error(err);
     return json{{"path", path}, {"items", items.size()}};
   }

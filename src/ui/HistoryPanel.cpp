@@ -224,6 +224,16 @@ bool NameCurrentVersion(AppState& state, const std::string& name,
       *error = "a version name needs at least one letter or digit";
     return false;
   }
+  // The ref is a file under .git/refs: a name past a file name's length
+  // saved and committed the project and THEN failed to tag it
+  // (hostile_params_smoke). Checked before anything is written.
+  if (const size_t n = GitVault::TagRef(name).size(); n > 200) {
+    if (error)
+      *error = "a version name is at most about 200 characters (its tag, " +
+               std::string("cp/<name>, is a file name); this one makes ") +
+               std::to_string(n) + ". Nothing was saved.";
+    return false;
+  }
   std::string saveError;
   if (!SaveProject(state, state.projectPath, &saveError)) {
     if (error)

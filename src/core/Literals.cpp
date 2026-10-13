@@ -877,6 +877,16 @@ ExtractPlan PlanExtract(const Document& doc,
           "; check_literals and a dry run list them)");
     }
 
+  // A prefix no variable name can start with is refused here: the loop
+  // below appended _2, _3, ... to a name that stays invalid whatever the
+  // suffix, and `prefix: "1/0"` hung the app (hostile_params_smoke).
+  if (!options.prefix.empty() &&
+      !engine.IsValidParameterName(options.prefix + "x") &&
+      !engine.IsValidParameterName("v_" + options.prefix + "x"))
+    throw std::runtime_error(
+        "prefix '" + options.prefix +
+        "' cannot begin a variable name: use letters, digits and _ (a name "
+        "starts with a letter or _)");
   ExtractPlan plan;
   std::set<std::string> taken = options.taken;
   const auto freshName = [&](std::string base) {

@@ -12,6 +12,7 @@
 #include "cad/FaceSelector.h"
 #include "cad/MeshExport.h"
 #include "common/Logger.h"
+#include "common/Watchdog.h"
 #include "core/Conventions.h"
 #include "core/Expression.h"
 #include "core/MassProps.h"
@@ -36,6 +37,7 @@
 #include "remote/RemoteMotion.h"
 #include "remote/RemoteProject.h"
 #include "remote/RemoteSimulation.h"
+#include "remote/RpcErrors.h"
 #include "remote/RpcParams.h"
 
 #include "render/Camera.h"
@@ -349,10 +351,38 @@ void RemoteServer::ClientThread(int client, uint64_t connection) {
   LOG_INFO("Remote control: client disconnected");
 }
 
+// A message as one line. A string that is not valid UTF-8 -- a parse error
+// quoting the bytes it choked on, a refusal echoing a name cut mid-character
+// -- is written with U+FFFD in place of the bad bytes: nlohmann's default
+// throws, and from a client thread that was std::terminate, so one line of
+// invalid UTF-8 took the app down (hostile_params_smoke's raw lines).
+static std::string Dump(const json& message) {
+  return message.dump(-1, ' ', false, json::error_handler_t::replace);
+}
+
 void RemoteServer::Send(int client, const json& message) {
   if (client < 0)
     return;
-  std::string line = message.dump() + "\n";
+  // JSON has no NaN or infinity, and nlohmann writes them as `null`: a NaN
+  // volume would reach the caller as a missing value, a default where the
+  // answer should be. Each one is still written as null, and the message
+  // lists where they are (docs/scripting/rpc.md#what-a-response-carries).
+  // Not an error after the fact: a mutating call has already happened.
+  std::string line;
+  if (std::vector<std::string> bad = remote::NonFinitePointers(message);
+      !bad.empty() && message.is_object()) {
+    char label[160];
+    watchdog::CopyLabel(label, sizeof label);
+    LOG_WARN("{}: the answer holds {} non-finite number(s), sent as null: "
+             "{}{}",
+             label[0] != '\0' ? label : "a message", bad.size(), bad.front(),
+             bad.size() > 1 ? " ..." : "");
+    json marked = message;
+    marked["nonfinite"] = std::move(bad);
+    line = Dump(marked) + "\n";
+  } else {
+    line = Dump(message) + "\n";
+  }
   std::lock_guard<std::mutex> lock(m_sendMutex);
   size_t sent = 0;
   while (sent < line.size()) {

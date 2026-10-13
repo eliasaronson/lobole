@@ -12,8 +12,34 @@
 // file that silently resets someone's preferences.
 namespace DocumentIO {
 
+bool AtomicTargetOk(const std::filesystem::path& target, std::string* error) {
+  // An empty name wrote "<cwd>/.tmp" and then failed to rename it; a
+  // directory was read as the file it would replace ("basic_filebuf::
+  // underflow error reading the file: Is a directory"). Both refused before
+  // anything is created (hostile_params_smoke).
+  std::error_code ec;
+  std::string why;
+  if (target.empty() || !target.has_filename())
+    why = "'" + target.string() + "' names no file";
+  else if (std::filesystem::is_directory(target, ec))
+    why = "'" + target.string() + "' is a directory, not a file";
+  else if (const size_t n = target.filename().string().size(); n > 255)
+    why = "its file name is " + std::to_string(n) +
+          " bytes, and a file system takes at most 255";
+  else if (const auto dir = target.parent_path();
+           !dir.empty() && !std::filesystem::is_directory(dir, ec))
+    why = "the directory '" + dir.string() + "' does not exist";
+  if (why.empty())
+    return true;
+  if (error)
+    *error = "cannot write " + target.string() + ": " + why;
+  return false;
+}
+
 bool WriteTextAtomic(const std::filesystem::path& target,
                      const std::string& text, std::string* error) {
+  if (!AtomicTargetOk(target, error))
+    return false;
   // Skip identical content: an untouched feature keeps its mtime, so git
   // status, rsync, and build tools see exactly the files that changed.
   {
@@ -40,6 +66,7 @@ bool WriteTextAtomic(const std::filesystem::path& target,
   if (ec) {
     if (error)
       *error = "rename failed: " + ec.message();
+    std::filesystem::remove(tmp, ec); // never leave the half behind
     return false;
   }
   return true;

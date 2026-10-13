@@ -478,6 +478,8 @@ void LoadAssemblyStudies(AssemblyDocument& asmDoc,
 bool WriteBytesAtomic(const std::filesystem::path& target,
                       const std::vector<unsigned char>& bytes,
                       std::string* error) {
+  if (!AtomicTargetOk(target, error))
+    return false;
   {
     // Read the file only when its size could make it the same bytes.
     std::error_code sizeEc;
@@ -512,6 +514,7 @@ bool WriteBytesAtomic(const std::filesystem::path& target,
   if (ec) {
     if (error)
       *error = "rename failed: " + ec.message();
+    std::filesystem::remove(tmp, ec); // never leave the half behind
     return false;
   }
   return true;

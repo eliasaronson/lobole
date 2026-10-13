@@ -171,7 +171,7 @@ struct Report {
   [[nodiscard]] bool Ok() const;
 };
 
-// The check over `bodies`, as one print. Throws std::invalid_argument on an
+// The check over `bodies`, as one print. Throws std::runtime_error on an
 // empty list, a body with no shape, or Options out of range (a zero `up`, a
 // limit not in its range): the caller refuses those before it gets here.
 [[nodiscard]] Report Check(const std::vector<const Body*>& bodies,

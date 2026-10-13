@@ -984,9 +984,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       if (p.contains("num_modes"))
         s.numModes = p.at("num_modes").get<int>();
       if (p.contains("gravity")) {
-        const auto& g = p.at("gravity");
-        s.gravity = glm::dvec3(g.at(0).get<double>(), g.at(1).get<double>(),
-                               g.at(2).get<double>());
+        s.gravity = remote::Vec3Param(p.at("gravity"), "gravity");
       }
       // Topology parameters (expression-or-literal, like mesh size).
       if (p.contains("volume_fraction")) {
@@ -1343,9 +1341,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
       throw std::runtime_error("a torque load does not take `direction`; "
                                "it turns about axis_dir");
     if (p.contains("direction")) {
-      const auto& d = p.at("direction");
-      l.direction = glm::dvec3(d.at(0).get<double>(), d.at(1).get<double>(),
-                               d.at(2).get<double>());
+      l.direction = remote::Vec3Param(p.at("direction"), "direction");
     } else if (l.type == fem::LoadType::Force || remote) {
       // No direction given: push into the face, exactly as a GUI placement
       // does. The alternative was the struct's literal, which is a world
@@ -2211,10 +2207,23 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
                                "density, none");
     std::optional<float> deformScale, threshold;
     std::optional<int> mode, caseIndex;
-    if (p.contains("deform_scale"))
-      deformScale = static_cast<float>(p.at("deform_scale").get<double>());
-    if (p.contains("mode")) // modal: which mode shape to display (0-based)
-      mode = p.at("mode").get<int>();
+    // Float on the display side: a scale past its range would be infinity,
+    // answered as null (hostile_params_smoke).
+    if (p.contains("deform_scale")) {
+      const double v = p.at("deform_scale").get<double>();
+      if (!(std::abs(v) <= 1e9))
+        throw std::runtime_error("deform_scale must be within +-1e9; got " +
+                                 p.at("deform_scale").dump());
+      deformScale = static_cast<float>(v);
+    }
+    if (p.contains("mode")) { // modal: which mode shape to display (0-based)
+      const json& v = p.at("mode");
+      if (!v.is_number_integer() || v.get<long long>() < 0 ||
+          v.get<long long>() > 100000)
+        throw std::runtime_error("mode is a mode shape's 0-based index; got " +
+                                 v.dump());
+      mode = v.get<int>();
+    }
     if (p.contains("case")) {
       const fem::StudyRuntime* rt =
           host.Results(study.value_or(state.simulation.activeStudyId));
@@ -2222,8 +2231,14 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         throw std::runtime_error("`case`: the study has not been run");
       caseIndex = CaseIndex(rt->caseNames, p.at("case"));
     }
-    if (p.contains("threshold")) // topology iso-surface level (0..1, 0=auto)
-      threshold = static_cast<float>(p.at("threshold").get<double>());
+    if (p.contains("threshold")) { // topology iso-surface level (0..1, 0=auto)
+      const double v = p.at("threshold").get<double>();
+      if (!(v >= 0.0 && v <= 1.0))
+        throw std::runtime_error("threshold is the iso-surface level in "
+                                 "[0, 1] (0 = automatic); got " +
+                                 p.at("threshold").dump());
+      threshold = static_cast<float>(v);
+    }
 
     ui::EnterSimulation(state);
     if (study)

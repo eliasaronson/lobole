@@ -102,6 +102,11 @@ std::string RollBackEdits(ui::AppState& state, const EditMarks& marks);
 // each one takes. nlohmann's own message ("type must be string, but is
 // boolean") names none of those, so a caller who guessed `ssao: true` for a
 // parameter that takes off|half|full learns nothing from it.
+// A string anywhere in `params` holding a NUL byte, refused before any
+// handler runs (remote/RpcErrors.h, FirstNulString).
+std::optional<remote::ContractError>
+NulStringError(const std::string& method, const nlohmann::json& params);
+
 std::string TypeErrorMessage(const std::string& method,
                              const nlohmann::json& params,
                              const std::set<std::string>& seen,

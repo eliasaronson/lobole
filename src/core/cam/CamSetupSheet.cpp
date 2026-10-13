@@ -124,14 +124,30 @@ std::vector<std::string> Wrap(const std::string& text, double width,
       if (!line.empty())
         lines.push_back(line);
       line.clear();
-      while (Width(word, size, bold) > width && word.size() > 1) {
-        size_t cut = word.size() - 1;
-        while (cut > 1 && Width(word.substr(0, cut), size, bold) > width)
-          cut--;
-        lines.push_back(word.substr(0, cut));
-        word = word.substr(cut);
+      // The longest piece from `start` that fits, at least one character,
+      // measured as it grows. Measuring every prefix from the end down was
+      // cubic in the word's length: a 64 KB program name kept the setup
+      // sheet busy for minutes (hostile_params_smoke).
+      const double scale = size / kPt / 1000.0 * (bold ? kBoldWider : 1.0);
+      size_t start = 0;
+      for (;;) {
+        size_t end = start;
+        double w = 0.0;
+        while (end < word.size()) {
+          const double a =
+              Advance(static_cast<unsigned char>(word[end])) * scale;
+          if (end > start && w + a > width)
+            break;
+          w += a;
+          end++;
+        }
+        if (end == word.size()) {
+          line = word.substr(start);
+          break;
+        }
+        lines.push_back(word.substr(start, end - start));
+        start = end;
       }
-      line = word;
     }
     lines.push_back(line);
   }

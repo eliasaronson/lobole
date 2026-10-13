@@ -38,6 +38,7 @@
 #include "remote/RemoteMotion.h"
 #include "remote/RemoteProject.h"
 #include "remote/RemoteSimulation.h"
+#include "remote/RpcErrors.h"
 #include "remote/RpcParams.h"
 
 #include "render/Camera.h"
@@ -753,15 +754,14 @@ void RemoteServer::PollParked(ui::AppState& state) {
     try {
       const watchdog::Label label("RPC " + parked.request.method + " (parked)");
       next = parked.wait->Poll(state, *parked.params, answer);
-    } catch (const std::exception& e) {
-      RespondError(parked.request.client, parked.request.id, e.what());
-      it = m_parked.erase(it);
-      continue;
-    } catch (const Standard_Failure& e) {
-      RespondError(parked.request.client, parked.request.id,
-                   std::string("OpenCASCADE error: ") +
-                       (e.GetMessageString() ? e.GetMessageString()
-                                             : "unspecified failure"));
+    } catch (...) {
+      // The ladder's rule (below): a handler that fell over says `internal`.
+      const remote::CaughtError caught =
+          remote::DescribeCurrentException(parked.request.method);
+      json message{{"id", parked.request.id}, {"error", caught.message}};
+      if (!caught.diagnostic.is_null())
+        message["diagnostic"] = caught.diagnostic;
+      Send(parked.request.client, message);
       it = m_parked.erase(it);
       continue;
     }
@@ -1004,6 +1004,8 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       }
       std::optional<remote::ContractError> refusal =
           UndeclaredParamsError(request.method, request.params);
+      if (!refusal)
+        refusal = NulStringError(request.method, request.params);
       // Then the values, for a method whose row is typed
       // (docs/scripting/rpc.md#typed-contracts): a missing key, a wrong
       // type, an enum or a range is refused here, before anything runs.
@@ -1307,7 +1309,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       Send(request.client, {{"id", request.id},
                             {"error", e.what() + rolledBack()},
                             {"diagnostic", diagnostic}});
-    } catch (const json::exception& e) {
+    } catch (const json::type_error& e) {
       // A parameter of the wrong TYPE used to come back as nlohmann's own
       // words — "[json.exception.type_error.302] type must be string, but is
       // boolean" — which name neither the method, nor the parameter, nor
@@ -1319,20 +1321,26 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
                    TypeErrorMessage(request.method, request.params,
                                     params.SeenKeys(), e.what()) +
                        rolledBack());
-    } catch (const std::exception& e) {
-      RespondError(request.client, request.id, e.what() + rolledBack());
-    } catch (const Standard_Failure& e) {
-      // The last line of defence. OCC reports failure by throwing
-      // Standard_Failure, which does NOT derive from std::exception, so a
-      // kernel throw from any handler that forgot its own guard would escape
-      // every catch and terminate the process — one bad measure taking the
-      // whole application down. Individual features guard themselves; this
-      // makes a miss cost an error response instead of the app.
-      RespondError(request.client, request.id,
-                   std::string("OpenCASCADE error: ") +
-                       (e.GetMessageString() ? e.GetMessageString()
-                                             : "unspecified failure") +
-                       rolledBack());
+    } catch (...) {
+      // Everything else. A deliberate refusal (std::runtime_error) is sent
+      // as it was said. A handler that fell over -- std::logic_error and
+      // its out_of_range, nlohmann's out_of_range (an `at` on a key nobody
+      // checked), bad_optional_access, bad_alloc -- is labelled `internal`
+      // in its diagnostic, so a caller can tell a handler that checked its
+      // input from one that did not (remote/RpcErrors.h). So is the last
+      // line of defence: OCC reports failure by throwing Standard_Failure,
+      // which does NOT derive from std::exception, so a kernel throw from
+      // any handler that forgot its own guard would escape every catch and
+      // terminate the process. The call is rolled back either way.
+      const remote::CaughtError caught =
+          remote::DescribeCurrentException(request.method);
+      const std::string message = caught.message + rolledBack();
+      if (caught.diagnostic.is_null())
+        RespondError(request.client, request.id, message);
+      else
+        Send(request.client, {{"id", request.id},
+                              {"error", message},
+                              {"diagnostic", caught.diagnostic}});
     }
   }
 }

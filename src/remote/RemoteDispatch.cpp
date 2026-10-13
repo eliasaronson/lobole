@@ -7,6 +7,7 @@
 
 #include "remote/InstanceRegistry.h"
 
+#include <Standard_ConstructionError.hxx>
 #include <Standard_Failure.hxx>
 
 #include "cad/CADKernel.h"
@@ -47,6 +48,7 @@
 #include "remote/RemoteTemplates.h"
 #include "remote/RemoteTube.h"
 #include "remote/RpcContract.h"
+#include "remote/RpcErrors.h"
 #include "remote/RpcParams.h"
 #include "ui/TemplateActions.h"
 
@@ -79,7 +81,9 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <limits>
 #include <map>
+#include <optional>
 
 #include "imgui.h"
 #ifdef HAVE_TEST_ENGINE
@@ -223,6 +227,19 @@ std::string UnknownParamError(const std::string& method,
   return msg;
 }
 
+std::optional<remote::ContractError> NulStringError(const std::string& method,
+                                                    const json& params) {
+  const std::optional<std::string> at = remote::FirstNulString(params);
+  if (!at)
+    return std::nullopt;
+  return remote::ContractError(
+      method, "invalid_argument", "/params" + *at, "a string with no NUL byte",
+      "a string holding a NUL byte",
+      method + ": the string at /params" + *at +
+          " holds a NUL byte, which every file name, label and lookup below "
+          "this call would read as its end. Nothing was done.");
+}
+
 std::string TypeErrorMessage(const std::string& method, const json& params,
                              const std::set<std::string>& seen,
                              const std::string& what) {
@@ -339,6 +356,21 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "There is no answer. Refused unless the app was started with "
      "LOBOLE_ALLOW_DEBUG_CRASH=1 in its environment.",
      "kind:'segv'|'abort'|'exception'", remote::NotInBatch},
+    {"debug_fault",
+     "Fail on purpose, the ways a handler can, so the tests that judge a "
+     "failure can be shown to see it (tests/hostile_params_smoke.py "
+     "--self-test): kind out_of_range, json_out_of_range, "
+     "bad_optional_access or standard_failure (each refused with "
+     "diagnostic.code internal), refusal (a deliberate runtime_error), "
+     "type_error (the wrong-type path), edit_then_out_of_range (adds a Box, "
+     "then falls over: rolled back), nonfinite (answers NaN and infinity, "
+     "listed under `nonfinite`) or write_then_refuse (writes "
+     "debug_fault.txt in the app's cwd, then refuses: the one rule it "
+     "breaks on purpose). Refused unless the app was started with "
+     "LOBOLE_ALLOW_DEBUG_CRASH=1 in its environment.",
+     "kind:'out_of_range'|'json_out_of_range'|'bad_optional_access'|"
+     "'standard_failure'|'refusal'|'type_error'|'edit_then_out_of_range'|"
+     "'nonfinite'|'write_then_refuse'"},
     {"background_jobs",
      "Every long operation running off the frame, as {jobs: [{id, kind, label, "
      "fraction, cancellable, elapsed_seconds}]}. `fraction` is -1 when the "
@@ -828,6 +860,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         const json& sp = calls[i].at("params");
         std::optional<remote::ContractError> refusal =
             UndeclaredParamsError(sub, sp);
+        if (!refusal)
+          refusal = NulStringError(sub, sp);
         if (!refusal && stopOnError && !ContainsRef(sp)) {
           try {
             ValidateRequestContract(sub, sp);
@@ -930,7 +964,22 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           out[it.key()] = resolveRefs(it.value());
         return out;
       };
-      if ((MethodFlags(sub) & remote::Deferrable) && state.document) {
+      // A primitive placed `on` a face or a datum reads that geometry when
+      // it is ADDED, not when it regenerates: deferred behind the batch's
+      // regeneration it found no face, and [Box, Cylinder on the Box's
+      // face] was refused as a batch while the same two calls one at a time
+      // built (tools/fuzz.py, the replay from nothing). It flushes first.
+      const json* subFeature = calls[i].contains("params") &&
+                                       calls[i]["params"].is_object() &&
+                                       calls[i]["params"].contains("feature")
+                                   ? &calls[i]["params"]["feature"]
+                                   : nullptr;
+      const bool readsGeometryNow =
+          sub == "add_feature" && subFeature != nullptr &&
+          subFeature->is_object() && subFeature->contains("on") &&
+          (*subFeature)["on"].is_object();
+      if ((MethodFlags(sub) & remote::Deferrable) && state.document &&
+          !readsGeometryNow) {
         if (bulkDoc != state.document.get()) {
           flush();
           bulk.emplace(*state.document);
@@ -967,18 +1016,21 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         }
         byIndex[i] = r;
         results.push_back({{"call", i + 1}, {"method", sub}, {"result", r}});
-      } catch (const std::exception& e) {
-        json failure{{"call", i + 1}, {"method", sub}, {"error", e.what()}};
-        if (const auto* contract =
-                dynamic_cast<const remote::ContractError*>(&e)) {
-          failure["diagnostic"] = contract->diagnostic;
-          if (failure["diagnostic"].value("operation", "").empty())
-            failure["diagnostic"]["operation"] = sub; // RpcParams' refusal
-        }
+      } catch (...) {
+        // Every exception, a kernel Standard_Failure included: one that got
+        // past this used to leave the batch's earlier calls applied, since
+        // the rollback below never ran. A handler that fell over carries
+        // `internal` in its diagnostic (remote/RpcErrors.h).
+        const remote::CaughtError caught =
+            remote::DescribeCurrentException(sub);
+        json failure{
+            {"call", i + 1}, {"method", sub}, {"error", caught.message}};
+        if (!caught.diagnostic.is_null())
+          failure["diagnostic"] = caught.diagnostic;
         failures.push_back(failure);
         if (stopOnError) {
           fatal = "batch call " + std::to_string(i + 1) + " (" + sub +
-                  ") failed: " + e.what();
+                  ") failed: " + caught.message;
           break;
         }
         results.push_back(std::move(failure));
@@ -1323,6 +1375,55 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           "the app was started with LOBOLE_ALLOW_DEBUG_CRASH=1 in its "
           "environment. Nothing was done.");
     remote::DebugCrash(how);
+  }
+  if (m == "debug_fault") {
+    const std::string kind = p.at("kind").get<std::string>();
+    const char* allow = std::getenv("LOBOLE_ALLOW_DEBUG_CRASH");
+    if (allow == nullptr || std::string(allow) != "1")
+      throw std::runtime_error(
+          "debug_fault is refused: it fails on purpose, so it runs only when "
+          "the app was started with LOBOLE_ALLOW_DEBUG_CRASH=1 in its "
+          "environment. Nothing was done.");
+    LOG_WARN("debug_fault: failing on purpose ({})", kind);
+    if (kind == "out_of_range")
+      return json(std::vector<int>{}.at(1));
+    if (kind == "json_out_of_range")
+      return json::object().at("debug_fault");
+    if (kind == "bad_optional_access")
+      return json(std::optional<int>{}.value());
+    if (kind == "standard_failure")
+      throw Standard_ConstructionError("debug_fault: a kernel throw");
+    if (kind == "refusal")
+      throw std::runtime_error("debug_fault: a deliberate refusal");
+    if (kind == "type_error")
+      return json(json("text").get<int>());
+    if (kind == "edit_then_out_of_range") {
+      if (!state.document)
+        throw std::runtime_error("debug_fault edit_then_out_of_range needs "
+                                 "a part tab");
+      Request add;
+      add.method = "add_feature";
+      add.params = {{"feature",
+                     {{"type", "Box"},
+                      {"name", "debug_fault"},
+                      {"on", "Top"},
+                      {"width", 1.0},
+                      {"depth", 1.0},
+                      {"height", 1.0}}}};
+      remote::RpcParams addParams{add.params}; // holds a reference
+      bool addHandled = false;
+      HandleSemantic(add, state, addHandled, addParams);
+      return json(std::vector<int>{}.at(1));
+    }
+    if (kind == "nonfinite")
+      return {{"nan", std::numeric_limits<double>::quiet_NaN()},
+              {"values", {1.0, std::numeric_limits<double>::infinity()}}};
+    if (kind == "write_then_refuse") {
+      std::ofstream("debug_fault.txt") << "written before a refusal\n";
+      throw std::runtime_error("debug_fault: refused after writing "
+                               "debug_fault.txt");
+    }
+    throw std::runtime_error("debug_fault: no kind '" + kind + "'");
   }
   if (m == "background_jobs") {
     json jobs = json::array();
@@ -2312,26 +2413,47 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!state.camera)
       throw std::runtime_error("no camera");
     Camera& cam = *state.camera;
-    auto vec3 = [](const json& a) {
-      return glm::vec3(a.at(0).get<float>(), a.at(1).get<float>(),
-                       a.at(2).get<float>());
+    // Checked before anything moves. 1e308 narrowed to float is infinity,
+    // and the camera answered a NaN position as nulls.
+    float distance = 0.0f;
+    if (p.contains("distance")) {
+      const double d = p.at("distance").get<double>();
+      if (!(d > 0.0) || d > 1e9)
+        throw std::runtime_error("distance must be positive and at most 1e9 "
+                                 "mm; got " +
+                                 p.at("distance").dump());
+      distance = static_cast<float>(d);
+    }
+    // The camera is float; a value past its range is refused, never
+    // narrowed to infinity (a NaN camera answered with nulls before).
+    auto vec3 = [](const json& a, const char* what) {
+      const glm::dvec3 v = remote::Vec3Param(a, what);
+      for (int i = 0; i < 3; i++)
+        if (std::abs(v[i]) > 1e9)
+          throw std::runtime_error(std::string("'") + what +
+                                   "' is out of the camera's range: " +
+                                   a.dump() + " (each within 1e9 mm)");
+      return glm::vec3(v);
     };
+    for (const char* key : {"up", "target", "eye", "direction"})
+      if (p.contains(key))
+        (void)vec3(p[key], key);
     // An `up` within 1 degree of the line of sight fixes no roll: the view
     // comes back at whatever roll the cross product's rounding picks. Checked
     // against the direction this call ends up looking along, before anything
     // moves, so a refused call leaves the camera where it was.
     if (p.contains("up")) {
-      const glm::vec3 up = vec3(p["up"]);
+      const glm::vec3 up = vec3(p["up"], "up");
       if (glm::length(up) < 1e-9f)
         throw std::runtime_error("up must be non-zero");
       const glm::vec3 target =
-          p.contains("target") ? vec3(p["target"]) : cam.GetTarget();
+          p.contains("target") ? vec3(p["target"], "target") : cam.GetTarget();
       // Toward the camera, as `direction` is: the last of eye/direction wins.
       glm::vec3 back = -cam.GetForward();
       if (p.contains("eye"))
-        back = vec3(p["eye"]) - target;
+        back = vec3(p["eye"], "eye") - target;
       if (p.contains("direction"))
-        back = vec3(p["direction"]);
+        back = vec3(p["direction"], "direction");
       if (glm::length(back) > 1e-9f) {
         const double c = std::abs(glm::dot(glm::normalize(glm::dvec3(up)),
                                            glm::normalize(glm::dvec3(back))));
@@ -2349,36 +2471,35 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       }
     }
     if (p.contains("target"))
-      cam.SetTarget(vec3(p["target"]));
+      cam.SetTarget(vec3(p["target"], "target"));
     if (p.contains("eye")) {
       // V5: an explicit camera position — the intuitive form. Derives the
       // (target -> camera) direction and the distance, so it composes with
       // an earlier `target` in the same call.
-      const glm::vec3 eye = vec3(p["eye"]);
+      const glm::vec3 eye = vec3(p["eye"], "eye");
       const glm::vec3 offset = eye - cam.GetTarget();
       if (glm::length(offset) < 1e-6f)
         throw std::runtime_error("eye must not equal the target");
-      const glm::vec3 up = p.contains("up") ? vec3(p["up"]) : conv::kWorldUpF;
+      const glm::vec3 up =
+          p.contains("up") ? vec3(p["up"], "up") : conv::kWorldUpF;
       cam.SnapToView(glm::normalize(offset), up);
       cam.SetDistance(glm::length(offset));
     }
     if (p.contains("direction")) {
-      const glm::vec3 dir = vec3(p["direction"]);
+      const glm::vec3 dir = vec3(p["direction"], "direction");
       if (glm::length(dir) < 1e-9f)
         throw std::runtime_error("direction must be non-zero");
-      const glm::vec3 up = p.contains("up") ? vec3(p["up"]) : conv::kWorldUpF;
+      const glm::vec3 up =
+          p.contains("up") ? vec3(p["up"], "up") : conv::kWorldUpF;
       cam.SnapToView(glm::normalize(dir), up);
     }
     // `up` on its own re-rolls the current view. It used to be read only
     // alongside eye/direction and dropped silently otherwise.
     if (p.contains("up") && !p.contains("eye") && !p.contains("direction"))
-      cam.SnapToView(-cam.GetForward(), vec3(p["up"]));
+      cam.SnapToView(-cam.GetForward(), vec3(p["up"], "up"));
     if (p.contains("distance")) {
-      const float d = p.at("distance").get<float>();
-      if (d <= 0.0f)
-        throw std::runtime_error("distance must be positive");
-      cam.SetMaxDistance(std::max(20.0f * d, 1000.0f));
-      cam.SetDistance(d);
+      cam.SetMaxDistance(std::max(20.0f * distance, 1000.0f));
+      cam.SetDistance(distance);
     }
     return {{"position", Vec3ToJson(cam.GetPosition())},
             {"target", Vec3ToJson(cam.GetTarget())},
@@ -2595,8 +2716,12 @@ std::string RollBackEdits(ui::AppState& state, const EditMarks& marks) {
   }
   // Saved before the call and restored now: saved still. The restore moved
   // the stamp on, and without this a refused call would leave the project
-  // reading as edited.
-  if (!what.empty() && state.activePart == marks.activePart &&
+  // reading as edited. Also when nothing was undone: a batch's deferred
+  // regeneration runs even when its first call failed, and a regeneration
+  // moves the stamp too -- `batch {calls: [delete_feature {$ref: 2}, ...]}`
+  // was refused, "nothing had changed", and the project read as unsaved
+  // (hostile_params_smoke). The histories are back at their marks either way.
+  if (state.activePart == marks.activePart &&
       marks.activeStamp == marks.lastSaved &&
       state.lastSavedVersion == marks.lastSaved)
     state.lastSavedVersion = ActiveSaveStamp(state);
