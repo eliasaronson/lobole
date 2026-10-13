@@ -77,6 +77,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 "..", "tools"))
 from designer_remote import Designer  # noqa: E402
 
+# Every client a smoke makes is strict: an answer holding NaN or infinity
+# (sent as null, listed under `nonfinite`) fails the smoke instead of reading
+# as a missing value (docs/scripting/rpc.md#what-a-response-carries).
+os.environ.setdefault("DESIGNER_REMOTE_STRICT", "1")
+
 # Both the windowed and the headless path log this; matching either means the
 # helper does not care which one it launched.
 PORT_RE = re.compile(r"(?:listening on 127\.0\.0\.1:|remote port )(\d+)")
@@ -135,6 +140,11 @@ class AppProcess:
                 return f.read()
         except OSError:
             return ""
+
+    @property
+    def tmp(self):
+        """This run's own directory, as LaunchedApp.tmp."""
+        return self._tmp
 
     def terminate(self):
         self._proc.terminate()
