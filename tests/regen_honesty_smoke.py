@@ -31,7 +31,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from designer_remote import Designer, RemoteError  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box, cylinder  # noqa: E402
 
@@ -250,6 +250,80 @@ def main():
         expect("cut 'Slot'" in why and "mm3 before" in why
                and "mm3 after" in why and "INSIDE the tool" in why,
                f"naming the feature, the operation, both volumes and why: {why}")
+
+        # --- a dimension edit the sketch cannot take ----------------------
+        # docs/sketching/README.md#solving: an arc whose ends are fixed at
+        # (0,0) and (100,0), radius 58.31, a 118 degree arc below its chord.
+        # A variable driving the radius to 49 (under half the chord) cannot
+        # be met: the sketch keeps its geometry and the regen of the call
+        # that did it says so, naming the sketch and the dimension -- it used
+        # to answer ok, with a dimension reading 49 on an arc of 58.31.
+        d.call("new_project")
+        rad0 = math.hypot(50.0, 30.0)
+
+        def fixed_ends_arc(name, expr=None):
+            sk = d.call("add_feature", feature={
+                "type": "Sketch", "name": name,
+                "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                          "uAxis": [1, 0, 0]},
+                "entities": [{"type": "arc", "center": [50, -30],
+                              "radius": rad0,
+                              "start_angle": math.atan2(30, 50),
+                              "end_angle": math.atan2(30, -50)}]})
+            arc = sk["entity_ids"][0]
+            radius = {"kind": "radius", "refs": [[arc, 0]]}
+            radius.update({"expr": expr} if expr else {"value": rad0})
+            d.call("add_constraints", sketch_id=sk["id"], constraints=[
+                {"kind": "fixed", "refs": [[arc, 1]]},
+                {"kind": "fixed", "refs": [[arc, 2]]}, radius])
+            return sk["id"]
+
+        def arc_of(sketch_id):
+            f = next(f for f in d.call("get_state")["features"]
+                     if f["id"] == sketch_id)
+            return f, next(e for e in f["entities"] if e["type"] == "arc")
+
+        d.call("set_variable", name="arc_r", expression=str(rad0))
+        driven = fixed_ends_arc("Driven arc", expr="arc_r")
+        reg = d.call("set_variable", name="arc_r", expression="49")["regen"]
+        warned = [w for w in reg.get("warnings", [])
+                  if w["name"] == "Driven arc"]
+        expect(warned, f"an unreachable radius names the sketch: {reg}")
+        expect("radius (constraint 2) = 49 cannot be met" in
+               warned[0]["warning"] and "previous geometry" in
+               warned[0]["warning"],
+               f"... and the dimension, and what was kept: {warned[0]}")
+        expect(abs(arc_of(driven)[1]["radius"] - rad0) < 1e-6,
+               "the geometry it kept is the previous one")
+        reg = d.call("set_variable", name="arc_r", expression=str(rad0))["regen"]
+        expect(not [w for w in reg.get("warnings", [])
+                    if w["name"] == "Driven arc"],
+               f"and the warning goes when the value is reachable: {reg}")
+
+        # modify_feature: radius 5000 keeps the minor arc (one solver jump
+        # landed on the complement, its centre above the chord); 49 is
+        # refused naming the radius, and the document is unchanged.
+        literal = fixed_ends_arc("Literal arc")
+        spec, _ = arc_of(literal)
+        spec["constraints"][2]["value"] = 5000.0
+        healthy(d.call("modify_feature", feature_id=literal, feature=spec),
+                "radius 5000")
+        _, arc = arc_of(literal)
+        sweep = (arc["end_angle"] - arc["start_angle"]) % (2 * math.pi)
+        expect(abs(arc["radius"] - 5000.0) < 1e-6 and sweep < math.pi
+               and arc["center"][1] < 0,
+               f"radius 5000 keeps the minor arc below its chord: {arc}")
+        before, _ = arc_of(literal)
+        spec = dict(before)
+        spec["constraints"] = [dict(c) for c in before["constraints"]]
+        spec["constraints"][2]["value"] = 49.0
+        try:
+            d.call("modify_feature", feature_id=literal, feature=spec)
+            raise AssertionError("radius 49 on a 100 chord was accepted")
+        except RemoteError as e:
+            expect("radius (constraint 2) = 49 cannot be met" in str(e),
+                   f"the refusal names the dimension: {e}")
+        expect(arc_of(literal)[0] == before, "and the document is unchanged")
 
         print("regen_honesty_smoke: OK")
     finally:

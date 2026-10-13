@@ -5,6 +5,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
 #include "core/features/SketchFeature.h"
+#include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSolver.h"
 
@@ -1187,6 +1188,229 @@ TEST_CASE("Fillet does not hide a real over-constraint elsewhere",
   for (size_t i : r.conflictingConstraints)
     stillOnLc |= refsLc(s.constraints[i]);
   CHECK(stillOnLc);
+}
+
+// --- Value edits never flip the sketch (docs/sketching/README.md#solving) --
+// Each case first shows that the plain one-jump solve from the same seed
+// flips or fails, so the test keeps proving the guard does something.
+
+namespace {
+// Arc ends fixed at (0,0) and (100,0), radius 58.31: a 118 degree minor arc,
+// its centre (50, -30) below the chord. Constraint 2 is the radius.
+SketchFeature FixedEndsArc(uint32_t& arc) {
+  SketchFeature s = MakeSketch();
+  const glm::dvec2 c{50.0, -30.0};
+  const double r = std::sqrt(50.0 * 50.0 + 30.0 * 30.0);
+  const double a0 = std::atan2(0.0 - c.y, 100.0 - c.x); // (100,0)
+  const double a1 = std::atan2(0.0 - c.y, 0.0 - c.x);   // (0,0)
+  arc = s.AddEntity(sketch::Arc{c, r, a0, a1});
+  using K = sketch::ConstraintKind;
+  s.constraints.push_back({K::Fixed, {arc, 1}, {}});
+  s.constraints.push_back({K::Fixed, {arc, 2}, {}});
+  s.constraints.push_back({K::Radius, {arc, 0}, {}, r});
+  return s;
+}
+
+const sketch::Arc& ArcIn(const std::vector<sketch::Entity>& es, uint32_t id) {
+  for (const auto& e : es)
+    if (const auto* a = std::get_if<sketch::Arc>(&e); a && a->id == id)
+      return *a;
+  FAIL("no arc " << id);
+  static sketch::Arc none{};
+  return none;
+}
+
+double Sweep(const sketch::Arc& a) { return a.endAngle - a.startAngle; }
+
+// Edits constraint `k` of `s` to `to` and solves it the plain way (one
+// jump) and through SolveValueEdit, from the same seed.
+struct EditRun {
+  sketch::SolveResult plain;
+  std::vector<sketch::Entity> plainOut;
+  sketch::EditOutcome edit;
+  std::vector<sketch::Entity> editOut;
+  int editSolves = 0;
+};
+EditRun RunEdit(SketchFeature s,
+                const std::vector<std::pair<size_t, double>>& edits) {
+  std::vector<sketch::ValueChange> changes;
+  for (const auto& [k, to] : edits) {
+    changes.push_back({k, *sketch::MeasureDimension(s, k), to});
+    s.constraints[k].value = to;
+  }
+  EditRun run;
+  {
+    sketch::Solver plain;
+    plain.Load(s);
+    run.plain = plain.Solve();
+    plain.WriteBack(run.plainOut);
+  }
+  sketch::Solver solver;
+  solver.Load(s);
+  run.edit = solver.SolveValueEdit(changes);
+  solver.WriteBack(run.editOut);
+  run.editSolves = solver.SolveCount();
+  return run;
+}
+} // namespace
+
+TEST_CASE("A radius edit never turns an arc inside out", "[solver][flip]") {
+  uint32_t arc = 0;
+  const SketchFeature s = FixedEndsArc(arc);
+
+  SECTION("5000 keeps the minor arc") {
+    const EditRun run = RunEdit(s, {{2, 5000.0}});
+    // One jump lands on the complement.
+    REQUIRE(run.plain.ok);
+    REQUIRE(Sweep(ArcIn(run.plainOut, arc)) > M_PI);
+    REQUIRE(ArcIn(run.plainOut, arc).center.y > 0.0);
+    // Continuation keeps the side.
+    REQUIRE(run.edit.Accepted());
+    CHECK(run.edit.reached);
+    const sketch::Arc& a = ArcIn(run.editOut, arc);
+    CHECK_THAT(a.radius, WithinRel(5000.0, 1e-9));
+    CHECK(Sweep(a) < M_PI);
+    CHECK(a.center.y < 0.0);
+  }
+  SECTION("1e6 is reached") {
+    // One jump flips here too; 1e7 is past what PlaneGCS converges on for a
+    // 100 chord at all (a numerical limit -- small steps stall there too),
+    // so that one is refused as not met.
+    const EditRun run = RunEdit(s, {{2, 1e6}});
+    REQUIRE(run.plain.ok);
+    REQUIRE(Sweep(ArcIn(run.plainOut, arc)) > M_PI);
+    REQUIRE(run.edit.Accepted());
+    const sketch::Arc& a = ArcIn(run.editOut, arc);
+    CHECK_THAT(a.radius, WithinRel(1e6, 1e-9));
+    CHECK(Sweep(a) < M_PI);
+    CHECK(a.center.y < 0.0);
+  }
+  SECTION("49 cannot be met, and says which dimension") {
+    const EditRun run = RunEdit(s, {{2, 49.0}});
+    REQUIRE_FALSE(run.plain.ok);
+    CHECK_FALSE(run.edit.Accepted());
+    CHECK_FALSE(run.edit.reached);
+    CHECK(run.edit.refusal == "radius (constraint 2) = 49 cannot be met");
+    // The pre-edit geometry, untouched.
+    const sketch::Arc& a = ArcIn(run.editOut, arc);
+    CHECK_THAT(a.radius, WithinAbs(std::sqrt(3400.0), 1e-9));
+    CHECK_THAT(a.center.y, WithinAbs(-30.0, 1e-9));
+  }
+}
+
+TEST_CASE("Side lengths never mirror a triangle", "[solver][flip]") {
+  // A base 100 long, fixed at one end and horizontal; the other two sides
+  // 10000 each, set to 51 together.
+  SketchFeature s = MakeSketch();
+  using K = sketch::ConstraintKind;
+  const double h = std::sqrt(10000.0 * 10000.0 - 50.0 * 50.0);
+  const uint32_t base = s.AddEntity(sketch::Line{{0, 0}, {100, 0}});
+  const uint32_t l1 = s.AddEntity(sketch::Line{{100, 0}, {50, h}});
+  const uint32_t l2 = s.AddEntity(sketch::Line{{50, h}, {0, 0}});
+  s.constraints.push_back({K::Coincident, {base, 1}, {l1, 0}});
+  s.constraints.push_back({K::Coincident, {l1, 1}, {l2, 0}});
+  s.constraints.push_back({K::Coincident, {l2, 1}, {base, 0}});
+  s.constraints.push_back({K::Fixed, {base, 0}, {}});
+  s.constraints.push_back({K::Horizontal, {base, 0}, {}});
+  s.constraints.push_back({K::Distance, {base, 0}, {base, 1}, 100.0});
+  s.constraints.push_back({K::Distance, {l1, 0}, {l1, 1}, 10000.0}); // [6]
+  s.constraints.push_back({K::Distance, {l2, 0}, {l2, 1}, 10000.0}); // [7]
+  const auto apex = [&](const std::vector<sketch::Entity>& es) {
+    return std::get<sketch::Line>(es[s.IndexOfEntity(l1)]).b;
+  };
+
+  const EditRun run = RunEdit(s, {{6, 51.0}, {7, 51.0}});
+  REQUIRE(run.plain.ok);
+  REQUIRE(apex(run.plainOut).y < 0.0); // one jump mirrors it
+  REQUIRE(run.edit.Accepted());
+  CHECK_THAT(apex(run.editOut).x, WithinAbs(50.0, 1e-6));
+  CHECK_THAT(apex(run.editOut).y, WithinAbs(std::sqrt(101.0), 1e-6));
+
+  // With no value to step (an expression-driven coordinate is already in
+  // the entities), the one jump's flip is refused, named by its triangle.
+  sketch::Solver solver;
+  SketchFeature mirrored = s;
+  mirrored.constraints[6].value = mirrored.constraints[7].value = 51.0;
+  solver.Load(mirrored);
+  const sketch::EditOutcome none = solver.SolveValueEdit({});
+  REQUIRE_FALSE(none.Accepted());
+  CHECK(none.refusal ==
+        "the new values would mirror the triangle of constraints 5, 6, 7");
+  CHECK(none.flipped == std::vector<size_t>{5, 6, 7});
+}
+
+TEST_CASE("A sweep that passes a half turn continuously is accepted",
+          "[solver][flip]") {
+  // Centre and start fixed, radius 50; the end rides a line from the centre
+  // whose angle to the X axis is dimensioned. 120 -> 240 degrees takes the
+  // sweep through 180 on the way: the arc is not turned inside out, it grew.
+  SketchFeature s = MakeSketch();
+  using K = sketch::ConstraintKind;
+  const double a1 = 2.0 * M_PI / 3.0;
+  const uint32_t arc = s.AddEntity(sketch::Arc{{0, 0}, 50.0, 0.0, a1});
+  const uint32_t ln = s.AddEntity(
+      sketch::Line{{0, 0}, {50.0 * std::cos(a1), 50.0 * std::sin(a1)}});
+  s.constraints.push_back({K::Fixed, {arc, 0}, {}});
+  s.constraints.push_back({K::Fixed, {arc, 1}, {}});
+  s.constraints.push_back({K::Radius, {arc, 0}, {}, 50.0});
+  s.constraints.push_back({K::Coincident, {ln, 0}, {arc, 0}});
+  s.constraints.push_back({K::Coincident, {ln, 1}, {arc, 2}});
+  s.constraints.push_back({K::Angle, {sketch::kAxisX, 0}, {ln, 0}, a1});
+
+  const EditRun run = RunEdit(s, {{5, 4.0 * M_PI / 3.0}});
+  // The one jump gets there too, but reads as turned over (minor -> major),
+  // so this is continuation passing the half turn where it is not clear.
+  REQUIRE(run.plain.ok);
+  REQUIRE(Sweep(ArcIn(run.plainOut, arc)) > M_PI);
+  REQUIRE(run.edit.Accepted());
+  CHECK(run.editSolves > 1);
+  CHECK_THAT(Sweep(ArcIn(run.editOut, arc)), WithinAbs(4.0 * M_PI / 3.0, 1e-6));
+}
+
+TEST_CASE("A value edit with nothing to turn over costs one solve",
+          "[solver][flip]") {
+  SketchFeature s = MakeSketch();
+  const uint32_t ln = s.AddEntity(sketch::Line{{0, 0}, {10, 0}});
+  s.constraints.push_back(
+      {sketch::ConstraintKind::Distance, {ln, 0}, {ln, 1}, 10.0});
+  const EditRun run = RunEdit(s, {{0, 20.0}});
+  REQUIRE(run.plain.ok);
+  REQUIRE(run.edit.Accepted());
+  CHECK(run.editSolves == 1);
+  const auto& l = std::get<sketch::Line>(run.editOut[0]);
+  CHECK_THAT(glm::length(l.b - l.a), WithinAbs(20.0, 1e-9));
+}
+
+TEST_CASE("A drag never mirrors a triangle", "[solver][drag]") {
+  // An 80-60-100 triangle hinged at A, its free corner C dragged across AB
+  // in one frame. A point drag on a one-DOF hinge over-determines it, so
+  // PlaneGCS drops a redundant distance, and the one jump comes out
+  // mirrored; the guarded drag keeps the side.
+  SketchFeature s = MakeSketch();
+  using K = sketch::ConstraintKind;
+  const uint32_t a = s.AddEntity(sketch::Point{{0, 0}});
+  const uint32_t b = s.AddEntity(sketch::Point{{100, 0}});
+  const uint32_t c = s.AddEntity(sketch::Point{{64, 48}});
+  s.constraints.push_back({K::Fixed, {a, 0}, {}});
+  s.constraints.push_back({K::Distance, {a, 0}, {b, 0}, 100.0});
+  s.constraints.push_back({K::Distance, {a, 0}, {c, 0}, 80.0});
+  s.constraints.push_back({K::Distance, {b, 0}, {c, 0}, 60.0});
+  const auto drag = [&](sketch::Solver::DragGuard guard) {
+    sketch::Solver solver;
+    solver.Load(s);
+    REQUIRE(solver.BeginDrag({{c, 0}}));
+    solver.SetDragTargets({glm::dvec2(30, -60)});
+    REQUIRE(solver.SolveDrag(guard).ok);
+    std::vector<sketch::Entity> out;
+    solver.WriteBack(out);
+    const auto p = [&](uint32_t id) {
+      return std::get<sketch::Point>(out[s.IndexOfEntity(id)]).p;
+    };
+    const glm::dvec2 ab = p(b) - p(a), ac = p(c) - p(a);
+    return ab.x * ac.y - ab.y * ac.x;
+  };
+  REQUIRE(drag(sketch::Solver::DragGuard::None) < 0.0); // mirrored
+  CHECK(drag(sketch::Solver::DragGuard::Orientations) > 0.0);
 }
 
 #endif // HAVE_PLANEGCS

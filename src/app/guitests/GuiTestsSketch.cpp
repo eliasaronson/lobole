@@ -1751,6 +1751,69 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // A value the sketch cannot take is refused, not stored beside geometry
+  // that ignores it (docs/sketching/README.md#solving): an arc with both
+  // ends fixed 2 apart cannot have a radius under 1. The label still reads
+  // the old radius, the prompt bar says why, and undo has nothing new.
+  t = IM_REGISTER_TEST(engine, "dims", "edit_refuses_flip");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    s_App->sketchEdit.autoConstrain = false;
+    // Ends (1,0) and (-1,0), centre (0,-0.6): a 118 degree arc.
+    const double r0 = std::sqrt(1.36);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t arc = sk->AddEntity(sketch::Arc{
+        {0, -0.6}, r0, std::atan2(0.6, 1.0), std::atan2(0.6, -1.0)});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    using CK = sketch::ConstraintKind;
+    auto addCon = [&](std::vector<sketch::PointRef> refs, CK kind, double v) {
+      s_App->sketchEdit.selected = std::move(refs);
+      IM_CHECK(ui::ApplySketchConstraint(*s_App, kind, v));
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    };
+    addCon({{arc, 1}}, CK::Fixed, 0.0);
+    addCon({{arc, 2}}, CK::Fixed, 0.0);
+    addCon({{arc, 0}}, CK::Radius, r0);
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)3);
+    const size_t depth = s_App->commands->UndoDepth();
+    s_App->sketchEdit.actionMsg.clear();
+
+    s_App->sketchEdit.editingDim = 2;
+    ctx->Yield(2);
+    for (int i = 0; i < 12; i++)
+      ctx->KeyPress(ImGuiKey_Backspace);
+    ctx->KeyChars("0.9");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(s_App->sketchEdit.editingDim, -1);
+    IM_CHECK_LE(std::abs(sk->constraints[2].value - r0), 1e-9); // the label
+    IM_CHECK(sk->constraints[2].valueExpr.empty());
+    {
+      const auto& a =
+          std::get<sketch::Arc>(sk->entities[sk->IndexOfEntity(arc)]);
+      IM_CHECK_LE(std::abs(a.radius - r0), 1e-9); // the geometry
+    }
+    IM_CHECK(s_App->sketchEdit.actionMsg.rfind("Not changed: ", 0) == 0);
+    IM_CHECK(s_App->sketchEdit.actionMsg.find("cannot be met") !=
+             std::string::npos);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), depth); // nothing to undo
+
+    s_App->sketchEdit.autoConstrain = true;
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
   // ...and completes the document's variables, like every other expression
   // field (u14). The inline editor is a separate widget from ui::ExprInput —
   // its own InputText in a floating window — so it is separately wired and
