@@ -284,6 +284,13 @@ ImVec4 AccentColorHovered() {
 
 ImVec4 ElevatedWindowBorder() { return ImVec4(1.0f, 1.0f, 1.0f, 0.14f); }
 
+ImVec4 DimensionColor() {
+  return ImVec4(120 / 255.f, 200 / 255.f, 1.0f, 0.92f);
+}
+ImVec4 DrivenDimensionColor() {
+  return ImVec4(120 / 255.f, 150 / 255.f, 175 / 255.f, 0.80f);
+}
+
 void DrawWindowShadow(const ImVec2& min, const ImVec2& max) {
   ImDrawList* dl = ImGui::GetWindowDrawList();
   // The window clips its own draw list to its rect, and the shadow is

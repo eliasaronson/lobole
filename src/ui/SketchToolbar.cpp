@@ -19,6 +19,7 @@
 #include "ui/ImportActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/SketchInteraction.h"
+#include "ui/Theme.h" // DrivenDimensionColor
 
 #include <cstdio>
 
@@ -765,17 +766,32 @@ void DrawSketchModelSections(AppState& state) {
     if (ImGui::TreeNode("Constraints##list")) {
       std::set<size_t> bad(edit.conflictingConstraints.begin(),
                            edit.conflictingConstraints.end());
-      int toDelete = -1;
+      int toDelete = -1, toToggle = -1;
       for (size_t i = 0; i < sketch->constraints.size(); i++) {
         ImGui::PushID(static_cast<int>(i));
+        const sketch::Constraint& con = sketch->constraints[i];
         if (ImGui::SmallButton("x"))
           toDelete = static_cast<int>(i);
         ImGui::SameLine();
-        const char* name = ConstraintKindName(sketch->constraints[i].kind);
+        const char* name = ConstraintKindName(con.kind);
         if (bad.count(i))
           ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f), "%s", name);
+        else if (con.driven)
+          ImGui::TextColored(DrivenDimensionColor(), "(%s)", name);
         else
           ImGui::TextUnformatted(name);
+        // A dimension switches between driving and driven here, as on its
+        // label's context menu (docs/sketching/README.md#gui).
+        if (sketch::IsDimension(con.kind)) {
+          // One column for every row's toggle, at the row's own height.
+          ImGui::SameLine(ImGui::GetFontSize() * 8.5f);
+          ImGui::PushStyleVar(ImGuiStyleVar_FramePadding,
+                              ImVec2(ImGui::GetStyle().FramePadding.x, 0.0f));
+          bool driven = con.driven;
+          if (ImGui::Checkbox("Driven", &driven))
+            toToggle = static_cast<int>(i);
+          ImGui::PopStyleVar();
+        }
         ImGui::PopID();
       }
       ImGui::TreePop();
@@ -783,6 +799,12 @@ void DrawSketchModelSections(AppState& state) {
         // DeleteConstraint commits a ModifyFeatureCommand, replacing the
         // active feature — `sketch` dangles; redraw next frame.
         DeleteConstraint(state, static_cast<size_t>(toDelete));
+        return;
+      }
+      if (toToggle >= 0) {
+        // Same: SetConstraintDriven replaces the feature.
+        const auto i = static_cast<size_t>(toToggle);
+        SetConstraintDriven(state, i, !sketch->constraints[i].driven);
         return;
       }
     }

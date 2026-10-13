@@ -91,14 +91,20 @@ void CommitInferredDimension(AppState& state, sketch::ConstraintKind kind,
                              const glm::dvec2* labelOffset = nullptr) {
   SketchEditState& edit = state.sketchEdit;
   edit.selected = std::move(refs);
-  const bool ok = ApplySketchConstraint(state, kind, value, {}, labelOffset);
+  // Dimensioning geometry the sketch already fixes reads it: the dimension
+  // is added driven (a reference), with no editor to type a conflicting
+  // value into (docs/sketching/README.md#gui).
+  const bool ok = ApplySketchConstraint(state, kind, value, {}, labelOffset,
+                                        OverConstrained::AddDriven);
   edit.selected.clear(); // ApplySketchConstraint clears on success; ensure
   edit.dimPickBody.clear();
   if (!ok)
     return;
+  SketchFeature* sk = ResolveActiveSketch(state);
+  if (sk == nullptr || sk->constraints.empty() || sk->constraints.back().driven)
+    return; // actionMsg says why it is driven
   edit.actionMsg.clear();
-  if (SketchFeature* sk = ResolveActiveSketch(state))
-    edit.editingDim = static_cast<int>(sk->constraints.size()) - 1;
+  edit.editingDim = static_cast<int>(sk->constraints.size()) - 1;
 }
 // Arms the placement stage: the ghost in DrawDimensions takes over until a
 // click commits (or Esc drops back to target accumulation).

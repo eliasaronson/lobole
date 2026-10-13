@@ -166,15 +166,32 @@ std::vector<SketchPick> PickSketchCandidates(AppState& state,
 SketchPick PickSketchEntity(AppState& state, const SketchFeature& sketch,
                             glm::vec2 mousePos, float tolPx);
 
+// What ApplySketchConstraint does with a constraint that would constrain
+// nothing (sketch::JudgeAddition refuses it): leave the sketch as it was and
+// say why, or -- a dimension without an expression only -- add it DRIVEN, a
+// reference that measures the sketch (docs/sketching/README.md#gui).
+enum class OverConstrained { Refuse, AddDriven };
+
 // Adds a constraint from the current selection, solves, and commits one
-// ModifyFeatureCommand. Returns false if the selection isn't valid. A
-// non-empty `valueExpr` is stored as the driving expression (`value` must
-// already be its evaluation — regeneration re-evaluates it). A non-null
-// `labelOffset` places the dimension label there instead of the seeded
-// default (the placement-stage path).
+// ModifyFeatureCommand. Returns false if the selection isn't valid or the
+// constraint is refused (actionMsg says why). A non-empty `valueExpr` is
+// stored as the driving expression (`value` must already be its evaluation
+// — regeneration re-evaluates it). A non-null `labelOffset` places the
+// dimension label there instead of the seeded default (the placement-stage
+// path). With AddDriven, a fallback leaves the new constraint driven and
+// actionMsg saying so.
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
                            double value, const std::string& valueExpr = {},
-                           const glm::dvec2* labelOffset = nullptr);
+                           const glm::dvec2* labelOffset = nullptr,
+                           OverConstrained over = OverConstrained::Refuse);
+
+// Switches dimension `index` of the active sketch between driving and
+// driven, as one undoable edit. Made driving, it takes its measured value
+// and is judged like an addition: one that would over-constrain the sketch
+// stays driven, actionMsg saying why. A driving dimension with an expression
+// is refused (a driven one has no input to keep it in). Returns whether the
+// sketch changed.
+bool SetConstraintDriven(AppState& state, size_t index, bool driven);
 
 // Dimension-on-create: while a draw tool is live, typing a digit opens a
 // small value field near the cursor; Enter applies it as a driving dimension

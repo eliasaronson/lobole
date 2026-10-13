@@ -23,6 +23,7 @@
 #include "ui/SceneOverlays.h"
 #include "ui/SketchOverlay.h" // SelectFeature
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (Shift+E/R)
+#include "ui/Theme.h"         // DimensionColor, DrivenDimensionColor
 
 #include "imgui.h"
 #include "imgui_internal.h" // GetInputTextState (re-read after a completion)
@@ -142,6 +143,11 @@ void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
                         const std::string& expr = {}) {
   if (dimIdx < 0 || dimIdx >= (int)sketch.constraints.size())
     return;
+  if (sketch.constraints[dimIdx].driven) {
+    state.sketchEdit.actionMsg = "A driven dimension measures the sketch; "
+                                 "make it driving to edit it";
+    return;
+  }
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
   sketch::Constraint& con = sketch.constraints[dimIdx];
   const sketch::Constraint oldCon = con; // a refused edit restores it
@@ -262,8 +268,15 @@ void DrawDimensions(AppState& state) {
 
   ImDrawList* dl = ViewportDrawList();
   ImGuiIO& io = ImGui::GetIO();
-  const ImU32 col = IM_COL32(120, 200, 255, 235);
+  const ImU32 colDriving = ImGui::ColorConvertFloat4ToU32(DimensionColor());
+  const ImU32 colDriven =
+      ImGui::ColorConvertFloat4ToU32(DrivenDimensionColor());
   const ImU32 colHot = IM_COL32(255, 220, 130, 255);
+  // The label whose context menu is open (right-click on it), and a Driven
+  // toggle picked there: applied after the loop, since it replaces the
+  // sketch feature (one undo step) and `sketch` would dangle.
+  static int s_ctxDim = -1;
+  int toggleDriven = -1;
   auto scr = [&](glm::dvec2 uv) {
     glm::dvec2 s = SketchUVToScreen(state, sketch->plane, uv);
     return ImVec2(s.x, s.y);
@@ -327,6 +340,14 @@ void DrawDimensions(AppState& state) {
     sketch::Constraint& con = sketch->constraints[i]; // drag writes labelOffset
     if (!sketch::IsDimension(con.kind))
       continue;
+    // A driven dimension shows what the geometry measures, muted and in
+    // parentheses (docs/sketching/README.md#gui); its stored value is not
+    // its truth.
+    const ImU32 col = con.driven ? colDriven : colDriving;
+    const double conValue =
+        con.driven ? sketch::MeasureDimension(sketch->entities, con)
+                         .value_or(con.value)
+                   : con.value;
 
     char label[48] = "";
     ImVec2 labelPos;
@@ -375,11 +396,11 @@ void DrawDimensions(AppState& state) {
       // |value|: a negative-evaluating expr means a flip, never a "-R".
       snprintf(label, sizeof(label),
                con.kind == K::Diameter ? "\xC3\x98%.3g" : "R%.3g",
-               std::abs(con.value));
+               std::abs(conValue));
       labelPos = labS;
     } else if (con.kind == K::Angle) {
       snprintf(label, sizeof(label), "%.1f\xC2\xB0",
-               std::abs(con.value) * 57.2957795);
+               std::abs(conValue) * 57.2957795);
       const auto a0 = RefUV(*sketch, {con.a.entity, 0});
       const auto a1 = RefUV(*sketch, {con.a.entity, 1});
       const auto b0 = RefUV(*sketch, {con.b.entity, 0});
@@ -418,7 +439,7 @@ void DrawDimensions(AppState& state) {
                                       ? glm::dot(glm::normalize(mid), offDir)
                                       : 0.0;
             const double score =
-                std::abs(ang - std::abs((double)con.value)) * 4.0 - midDot;
+                std::abs(ang - std::abs(conValue)) * 4.0 - midDot;
             if (score < bestScore) {
               bestScore = score;
               bu = cu;
@@ -536,6 +557,8 @@ void DrawDimensions(AppState& state) {
     std::string shown = label;
     if (!con.valueExpr.empty())
       shown = con.valueExpr + " = " + shown;
+    if (con.driven)
+      shown = "(" + shown + ")";
     const ImVec2 tsz = ImGui::CalcTextSize(shown.c_str());
     ImVec2 tp(labelPos.x - tsz.x * 0.5, labelPos.y - tsz.y * 0.5);
     const ImVec2 pmin(tp.x - 5.0, tp.y - 2.0);
@@ -558,7 +581,9 @@ void DrawDimensions(AppState& state) {
                              : IM_COL32(20, 24, 30, 220),
                       rounding);
     dl->AddRect(pmin, pmax,
-                (hot || selCon) ? colHot : IM_COL32(96, 150, 200, 150),
+                (hot || selCon) ? colHot
+                : con.driven    ? IM_COL32(96, 112, 128, 120)
+                                : IM_COL32(96, 150, 200, 150),
                 rounding, 0, selCon ? 2.2 : 1.2);
     dl->AddText(tp, (hot || selCon) ? IM_COL32(255, 240, 200, 255) : col,
                 shown.c_str());
@@ -612,8 +637,22 @@ void DrawDimensions(AppState& state) {
 
     if (interactive && overLabel &&
         ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-      edit.editingDim = i;
       edit.dimDrag = -1; // the second press began a drag; editing wins
+      if (con.driven)
+        edit.actionMsg = "A driven dimension measures the sketch; make it "
+                         "driving to edit it";
+      else
+        edit.editingDim = i;
+    }
+    // Right-click (a release that did not orbit the view) opens the label's
+    // menu: the Driven toggle.
+    if (interactive && overLabel &&
+        ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
+      const ImVec2 d = io.MouseDragMaxDistanceAbs[ImGuiMouseButton_Right];
+      if (d.x * d.x + d.y * d.y < 16.0f) {
+        s_ctxDim = i;
+        ImGui::OpenPopup("##dimctx");
+      }
     }
 
     if (edit.editingDim == i) {
@@ -681,6 +720,23 @@ void DrawDimensions(AppState& state) {
 
   if (ghostPushed)
     sketch->constraints.pop_back(); // the placement ghost was render-only
+
+  if (ImGui::BeginPopup("##dimctx")) {
+    if (s_ctxDim >= 0 && s_ctxDim < (int)sketch->constraints.size() &&
+        sketch::IsDimension(sketch->constraints[s_ctxDim].kind)) {
+      const bool driven = sketch->constraints[s_ctxDim].driven;
+      if (ImGui::MenuItem("Driven", nullptr, driven))
+        toggleDriven = s_ctxDim;
+    } else {
+      ImGui::CloseCurrentPopup();
+    }
+    ImGui::EndPopup();
+  }
+  if (toggleDriven >= 0) {
+    const bool driven = sketch->constraints[toggleDriven].driven;
+    SetConstraintDriven(state, static_cast<size_t>(toggleDriven), !driven);
+    s_ctxDim = -1; // `sketch` is replaced: nothing below may touch it
+  }
 }
 
 void DrawDimensionOnCreate(AppState& state) {

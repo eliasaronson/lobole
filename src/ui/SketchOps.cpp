@@ -12,6 +12,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchInference.h"
+#include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSelection.h"
 #include "core/sketch/SketchSolver.h"
@@ -110,7 +111,8 @@ glm::dvec2 SeedLabelOffset(const SketchFeature& sk,
 
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
                            double value, const std::string& valueExpr,
-                           const glm::dvec2* labelOffset) {
+                           const glm::dvec2* labelOffset,
+                           OverConstrained over) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   if (!sketch)
@@ -329,21 +331,36 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   if (sketch::IsDimension(kind))
     c.labelOffset =
         labelOffset != nullptr ? *labelOffset : SeedLabelOffset(*sketch, c);
+  sketch::Solver solver;
+  solver.Load(*sketch);
+  const sketch::SolveResult had = solver.Solve();
+  std::vector<bool> driving;
+  for (const sketch::Constraint& k : sketch->constraints)
+    driving.push_back(!k.driven);
   sketch->constraints.push_back(c);
 
   // Solve and write the result back into the sketch -- unless the solver
-  // cannot hold this constraint, which it says, and nothing is added
+  // cannot hold this constraint, or it constrains nothing: the sketch already
+  // fixes what it says, or contradicts it. Then it says so and nothing is
+  // added; a dimension the Dimension tool measured is added driven instead
   // (docs/sketching/README.md#refusals).
-  sketch::Solver solver;
-  solver.Load(*sketch);
-  for (const auto& bad : solver.UnsupportedConstraints())
-    if (bad.index + 1 == sketch->constraints.size()) {
+  sketch::AddVerdict verdict =
+      sketch::JudgeAddition(had, driving, *sketch, &solver);
+  bool asDriven = false;
+  if (!verdict.accepted) {
+    const bool fallback = over == OverConstrained::AddDriven &&
+                          verdict.unsupported == SIZE_MAX &&
+                          sketch::IsDimension(kind) && valueExpr.empty();
+    if (!fallback) {
       sketch->constraints.pop_back();
-      state.sketchEdit.actionMsg = "Not added: " + bad.reason;
+      state.sketchEdit.actionMsg = "Not added: " + verdict.reason;
       return false;
     }
-  sketch::SolveResult r = solver.Solve();
-  if (r.ok)
+    sketch->constraints.back().driven = true;
+    verdict = sketch::JudgeAddition(had, driving, *sketch, &solver);
+    asDriven = true;
+  }
+  if (verdict.after.ok)
     solver.WriteBack(sketch->entities);
 
   state.document->Regenerate();
@@ -352,6 +369,58 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
   state.sketchEdit.selected.clear();
+  if (asDriven)
+    state.sketchEdit.actionMsg =
+        "That dimension would over-constrain the sketch, so it was added as a "
+        "driven (reference) dimension";
+  return true;
+}
+
+bool SetConstraintDriven(AppState& state, size_t cIndex, bool driven) {
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  SketchEditState& edit = state.sketchEdit;
+  if (!sketch || cIndex >= sketch->constraints.size())
+    return false;
+  sketch::Constraint& con = sketch->constraints[cIndex];
+  if (!sketch::IsDimension(con.kind) || con.driven == driven)
+    return false;
+  if (driven && !con.valueExpr.empty()) {
+    edit.actionMsg = "Not made driven: it is driven by the expression \"" +
+                     con.valueExpr +
+                     "\", which a driven dimension has no input for; clear "
+                     "the expression first";
+    return false;
+  }
+  const nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  sketch::Solver solver;
+  if (!driven) {
+    // Driving from what it measures now, so the geometry does not move; the
+    // judgement is the one an addition gets.
+    SketchFeature after = *sketch;
+    sketch::Constraint& made = after.constraints[cIndex];
+    made.value = sketch::MeasureDimension(after, cIndex).value_or(made.value);
+    made.driven = false;
+    const sketch::AddVerdict v = sketch::JudgeAddition(*sketch, after, &solver);
+    if (!v.accepted) {
+      edit.actionMsg = "Still driven: " + v.reason;
+      return false;
+    }
+    con = made;
+    if (v.after.ok)
+      solver.WriteBack(sketch->entities);
+  } else {
+    con.value = sketch::MeasureDimension(*sketch, cIndex).value_or(con.value);
+    con.driven = true;
+    if (edit.editingDim == static_cast<int>(cIndex))
+      edit.editingDim = -1; // nothing to edit any more
+  }
+  state.document->Regenerate();
+  const nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, after),
+      *state.document);
+  edit.actionMsg.clear();
   return true;
 }
 

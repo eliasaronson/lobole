@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "app/guitests/GuiTestsCommon.h"
+#include "core/sketch/SketchOrientation.h"
 #include "render/UnderlayRenderer.h"
 #include "ui/ImportActions.h"
 #include "ui/ProjectActions.h"
@@ -1445,6 +1446,8 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
                 0.05f);
 
     // Placed on the span's PERPENDICULAR → aligned (Distance), full length.
+    // The two above already fix it, so it is added DRIVEN: no editor opens
+    // (docs/sketching/README.md#gui).
     const glm::vec2 d = glm::normalize(pb - pa);
     const glm::vec2 n(-d.y, d.x);
     const glm::vec2 mid = 0.5f * (pa + pb);
@@ -1452,10 +1455,14 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     clickUV(pb);
     IM_CHECK(s_App->sketchEdit.dimPlacing);
     clickUV(mid + n * 1.2f);
-    closeEditor(3);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)3);
+    IM_CHECK(sk->constraints[2].driven);
+    IM_CHECK_EQ(s_App->sketchEdit.editingDim, -1);
     IM_CHECK(sk->constraints[2].kind == sketch::ConstraintKind::Distance);
-    IM_CHECK_LE(std::abs(sk->constraints[2].value - glm::length(pb - pa)),
-                0.03);
+    IM_CHECK_LE(
+        std::abs(*sketch::MeasureDimension(*sk, 2) - glm::length(pb - pa)),
+        0.03);
     const glm::vec2 off = sk->constraints[2].labelOffset;
     IM_CHECK_LE(std::abs(glm::dot(off, d)), 0.02f);  // ⟂ to the span
     IM_CHECK_LE(glm::length(off - n * 1.2f), 0.05f); // lands where clicked
@@ -2048,6 +2055,210 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
   // Center rectangle (Phase 3.6): Shift+G arms it; centre + corner clicks
   // build 4 lines plus a centre point anchored by a symmetric-about-point
   // constraint — dimensioning the width grows the rectangle symmetrically.
+  // Dimensioning geometry the sketch already fixes reads it: the Dimension
+  // tool adds a DRIVEN (reference) dimension, says why, paints nothing red
+  // and opens no editor -- a double-click says how to edit it instead
+  // (docs/sketching/README.md#gui).
+  t = IM_REGISTER_TEST(engine, "dims", "over_constraining_becomes_driven");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    using K = sketch::ConstraintKind;
+    // A fully defined 3 x 2 rectangle: corner fixed, sides H/V, two lengths.
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t bot = sk->AddEntity(sketch::Line{{-1.5, -1}, {1.5, -1}});
+    const uint32_t rgt = sk->AddEntity(sketch::Line{{1.5, -1}, {1.5, 1}});
+    const uint32_t top = sk->AddEntity(sketch::Line{{1.5, 1}, {-1.5, 1}});
+    const uint32_t lft = sk->AddEntity(sketch::Line{{-1.5, 1}, {-1.5, -1}});
+    sk->constraints.push_back({K::Coincident, {bot, 1}, {rgt, 0}});
+    sk->constraints.push_back({K::Coincident, {rgt, 1}, {top, 0}});
+    sk->constraints.push_back({K::Coincident, {top, 1}, {lft, 0}});
+    sk->constraints.push_back({K::Coincident, {lft, 1}, {bot, 0}});
+    sk->constraints.push_back({K::Horizontal, {bot, 0}, {}});
+    sk->constraints.push_back({K::Horizontal, {top, 0}, {}});
+    sk->constraints.push_back({K::Vertical, {rgt, 0}, {}});
+    sk->constraints.push_back({K::Vertical, {lft, 0}, {}});
+    sk->constraints.push_back({K::Fixed, {bot, 0}, {}});
+    sk->constraints.push_back({K::Distance, {bot, 0}, {bot, 1}, 3.0});
+    sk->constraints.push_back({K::Distance, {rgt, 0}, {rgt, 1}, 2.0});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    s_App->sketchEdit.autoConstrain = false;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f * LensScale()));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.dof, 0);
+    IM_CHECK(s_App->sketchEdit.conflictingConstraints.empty());
+
+    auto clickUV = [&](glm::vec2 uv) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, uv);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+    // The top side's length: the sketch already fixes it.
+    ctx->KeyPress(ImGuiKey_D);
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Dimension);
+    clickUV({0.5f, 1});
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({0.7f, 1.8f}); // place it above
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)12);
+    const sketch::Constraint& made = sk->constraints.back();
+    IM_CHECK(made.kind == K::Distance);
+    IM_CHECK(made.driven);
+    IM_CHECK_EQ(s_App->sketchEdit.editingDim, -1); // no editor
+    IM_CHECK(s_App->sketchEdit.actionMsg.find(
+                 "added as a driven (reference) dimension") !=
+             std::string::npos);
+    IM_CHECK(s_App->sketchEdit.conflictingConstraints.empty()); // no red
+    IM_CHECK_EQ(s_App->sketchEdit.dof, 0);
+    IM_CHECK_LE(std::abs(*sketch::MeasureDimension(*sk, 11) - 3.0), 1e-6);
+
+    // Back to Select, then double-click its label: no editor, and why.
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    s_App->sketchEdit.actionMsg.clear();
+    const glm::vec2 labelUV =
+        glm::vec2(0.0f, 1.0f) + glm::vec2(made.labelOffset);
+    const glm::vec2 labelScr = ui::SketchUVToScreen(*s_App, sk->plane, labelUV);
+    ctx->MouseMoveToPos(ImVec2(labelScr.x, labelScr.y));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.dimHot, 11);
+    ctx->MouseDoubleClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.editingDim, -1);
+    IM_CHECK(s_App->sketchEdit.actionMsg.find(
+                 "A driven dimension measures the sketch") !=
+             std::string::npos);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
+  // A relation the sketch already states is refused, nothing added, and the
+  // status line says why.
+  t = IM_REGISTER_TEST(engine, "constraints", "repeat_is_refused");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t l0 = sk->AddEntity(sketch::Line{{0, 0}, {4, 1.5}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    s_App->sketchEdit.selected = {{l0, 0}};
+    IM_CHECK(ui::ApplySketchConstraint(
+        *s_App, sketch::ConstraintKind::Horizontal, 0.0));
+    ctx->Yield();
+    const size_t undoDepth = s_App->commands->UndoDepth();
+    s_App->sketchEdit.selected = {{l0, 0}};
+    IM_CHECK(!ui::ApplySketchConstraint(
+        *s_App, sketch::ConstraintKind::Horizontal, 0.0));
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undoDepth); // nothing recorded
+    IM_CHECK(
+        s_App->sketchEdit.actionMsg.rfind(
+            "Not added: the sketch already fixes that (constraint 0)", 0) == 0);
+    IM_CHECK(s_App->sketchEdit.conflictingConstraints.empty());
+  };
+
+  // The Driven toggle on a dimension's label menu (right-click): made
+  // driven, the dimension stops constraining; made driving again on an
+  // under-defined sketch, it takes what the geometry measures and the DOF
+  // drops. Each is one undo step.
+  t = IM_REGISTER_TEST(engine, "dims", "toggle_driven");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t l0 = sk->AddEntity(sketch::Line{{-1.5, -0.5}, {1.5, -0.5}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f * LensScale()));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.dof, 4);
+
+    s_App->sketchEdit.selected = {{l0, 0}, {l0, 1}};
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Distance,
+                                       3.0));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.dof, 3);
+
+    // Right-click the label, pick Driven from its menu.
+    const auto toggleFromMenu = [&]() {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      const auto& line = std::get<sketch::Line>(sk->entities[0]);
+      const glm::vec2 mid = glm::vec2((line.a + line.b) * 0.5);
+      const glm::vec2 labelUV = mid + glm::vec2(sk->constraints[0].labelOffset);
+      const glm::vec2 scr = ui::SketchUVToScreen(*s_App, sk->plane, labelUV);
+      ctx->MouseMoveToPos(ImVec2(scr.x, scr.y));
+      ctx->Yield(2);
+      IM_CHECK_EQ(s_App->sketchEdit.dimHot, 0);
+      ctx->MouseClick(ImGuiMouseButton_Right);
+      ctx->Yield();
+      IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+      ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+      IM_CHECK_SILENT(popup != nullptr);
+      ctx->ItemClick((std::string("//") + popup->Name + "/Driven").c_str());
+      ctx->Yield(2);
+    };
+    toggleFromMenu();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk->constraints[0].driven);
+    IM_CHECK_EQ(s_App->sketchEdit.dof, 4); // it constrains nothing now
+
+    // The line is stretched to 4 while the dimension only measures it.
+    before = DocumentIO::FeatureToJson(*sk);
+    std::get<sketch::Line>(sk->entities[0]).b = {2.5, -0.5};
+    after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+
+    toggleFromMenu();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(!sk->constraints[0].driven);
+    IM_CHECK_LE(std::abs(sk->constraints[0].value - 4.0), 1e-9); // its measure
+    const auto& line = std::get<sketch::Line>(sk->entities[0]);
+    IM_CHECK_LE(std::abs(line.b.x - 2.5), 1e-6); // nothing moved
+    IM_CHECK_EQ(s_App->sketchEdit.dof, 3);
+
+    // One undo step back to driven.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk->constraints[0].driven);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
   t = IM_REGISTER_TEST(engine, "sketch", "center_rectangle");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

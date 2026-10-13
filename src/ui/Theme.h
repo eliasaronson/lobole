@@ -28,6 +28,12 @@ ImVec4 AccentColorHovered();
 // own — ImGuiCol_BorderShadow is vestigial and set transparent here.
 ImVec4 ElevatedWindowBorder();
 
+// A sketch dimension's label and lines, and a DRIVEN (reference) one's --
+// the same hue, muted, so it reads as a measurement rather than an input
+// (docs/sketching/README.md#gui).
+ImVec4 DimensionColor();
+ImVec4 DrivenDimensionColor();
+
 // A few nested rounded rects just OUTSIDE the given rect, fading out: the
 // standard ImGui stand-in for a drop shadow. Call after Begin(), with the
 // window's final rect; it draws into the current window's draw list with the

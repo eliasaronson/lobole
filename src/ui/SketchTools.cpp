@@ -79,24 +79,26 @@ void SnapSegmentConstraints(const sketch::Snap& snap, uint32_t id,
 }
 
 // Adds each candidate constraint only if it further constrains the sketch
-// (DOF drops) without conflicting — the add-then-diagnose safety net that keeps
-// inference from over-constraining. Settles geometry with the kept constraints.
+// (sketch::JudgeAddition, the test every add goes through) — the safety net
+// that keeps inference from over-constraining. Settles geometry with the
+// kept constraints.
 void ApplyInferred(SketchFeature& sketch,
                    const std::vector<sketch::Constraint>& candidates) {
   sketch::Solver solver;
   solver.Load(sketch);
   sketch::SolveResult r = solver.Solve();
-  int dof = r.ok ? r.dof : -1;
+  std::vector<bool> driving;
+  for (const sketch::Constraint& k : sketch.constraints)
+    driving.push_back(!k.driven);
   for (const auto& c : candidates) {
     sketch.constraints.push_back(c);
     sketch::Solver s2;
-    s2.Load(sketch);
-    sketch::SolveResult r2 = s2.Solve();
-    const bool keep =
-        r2.ok && r2.conflicting.empty() && (dof < 0 || r2.dof < dof);
-    if (keep) {
-      dof = r2.dof;
-      s2.WriteBack(sketch.entities); // settle with this constraint
+    const sketch::AddVerdict v = sketch::JudgeAddition(r, driving, sketch, &s2);
+    if (v.accepted) {
+      r = v.after;
+      driving.push_back(!c.driven);
+      if (v.after.ok)
+        s2.WriteBack(sketch.entities); // settle with this constraint
     } else {
       sketch.constraints.pop_back(); // redundant or conflicting — drop it
     }
