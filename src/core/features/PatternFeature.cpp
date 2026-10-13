@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <set>
 
 PatternFeature::PatternFeature(const std::string& name, PatternKind kind,
@@ -152,6 +153,33 @@ void CarryMarks(std::vector<Body>& bodies, const SeedMarks& marks,
 } // namespace
 
 bool PatternFeature::Execute(RegenContext& ctx) {
+  // A step that lands every copy on the seed builds nothing while the
+  // pattern reads as one that worked (a cut source only warned that its
+  // copies removed nothing). `angle_deg` is the STEP between instances, so
+  // six round a circle is 60 and 360 stacks all six on the first.
+  if (kind != PatternKind::Mirror) {
+    int n = count;
+    if (!countExpr.empty() && ctx.symbols != nullptr)
+      if (const auto v =
+              ExpressionEngine::Default().EvaluateText(countExpr, *ctx.symbols))
+        n = static_cast<int>(std::lround(*v));
+    if (n > 1 && kind == PatternKind::Linear && std::abs(spacing) < 1e-9) {
+      SetError("spacing 0 puts every copy on the seed");
+      return false;
+    }
+    if (n > 1 && kind == PatternKind::Circular) {
+      const double turn = std::fmod(std::abs(angleDeg), 360.0);
+      if (turn < 1e-9 || 360.0 - turn < 1e-9) {
+        char msg[200];
+        std::snprintf(msg, sizeof msg,
+                      "angle_deg %g puts every copy on the seed: it is the "
+                      "step between instances (%d round a circle is %g)",
+                      angleDeg, n, 360.0 / n);
+        SetError(msg);
+        return false;
+      }
+    }
+  }
   // Collect the seed body/bodies produced by the referenced feature, each
   // with its names — an instance that arrives unnamed leaves unnamed, and a
   // face with no name cannot be picked, threaded, filleted or fitted.

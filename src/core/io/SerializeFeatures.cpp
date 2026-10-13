@@ -1773,7 +1773,9 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
     {"Chamfer", 17,
      "edges [{feature_id, element}], radius (+_expr) = "
      "setback distance"},
-    {"Shell", 20, "open_faces [{feature_id, element}], thickness (+_expr)"},
+    {"Shell", 20,
+     "body_id (the body's created_by), open_faces [{feature_id, element}], "
+     "thickness (+_expr) mm — the wall, grown inward"},
     {"Loft", 20,
      "sketch_ids [id...] (section order), mode, path_id? (a spine the sections "
      "are carried along: a sketch or a curve), guide_id?"},
@@ -1833,8 +1835,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "radius, a mitre moves its plane back along the member"},
     {"Pattern", 1,
      "kind: linear|circular|mirror, source_id (feature to repeat); linear and "
-     "circular: axis, count (+_expr), then linear: spacing (+_expr), "
-     "circular: angle_deg (+_expr); mirror: the plane, base_plane: xy|xz|yz "
+     "circular: axis, count (+_expr), then linear: spacing (+_expr) mm, "
+     "circular: angle_deg (+_expr), the STEP between instances (six round a "
+     "circle is 60; one that lands every copy on the seed is refused); "
+     "mirror: the plane, base_plane: xy|xz|yz "
      "or parent_id (a datum plane). axis is the same {kind: x|y|z|"
      "sketch_line|datum_axis|custom} as Revolve's"},
 };
