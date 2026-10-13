@@ -215,7 +215,7 @@ Where it goes:
 | never saved | `unsaved.autosave.json` / `unsaved.autosave.d/` in the user state dir |
 
 The user state dir is `RuntimePaths::UserStateDir()`: `$XDG_STATE_HOME/lobole`
-or `~/.local/state/lobole`, and `%LOCALAPPDATA%\Loböle\state` on Windows.
+or `~/.local/state/lobole`, and `%LOCALAPPDATA%\Lobole\state` on Windows.
 
 Every sidecar file is written temp + rename, so each is complete or absent:
 a tool whose job is surviving a crash must never offer a half-written
@@ -231,6 +231,10 @@ A clean save clears every sidecar (and the unsaved slot). Recovery:
   newer work; accepting lays every recovered document over the project
   (`ui::RecoverProject`). All or nothing — half from one session and half
   from another is a state nobody can reason about. The project stays dirty.
+- After a crash: the next start's "Loböle closed unexpectedly" notice offers
+  the same recovery for the project the crashed session had open, or the
+  report's copy of the unsaved slot for one never saved
+  ([crash reports](../architecture.md#crashes-and-stalls)).
 - RPC: `open_project` returns `autosave_available` and `autosave_path`;
   `autosave_status` lists the documents with recoverable work;
   `autosave_now` writes every dirty document immediately.

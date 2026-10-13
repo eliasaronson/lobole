@@ -380,9 +380,75 @@ by the same name drift apart without any test noticing:
 
 ## Crashes and stalls
 
-- **A crash** (SIGSEGV, SIGABRT, SIGBUS, SIGFPE) prints a symbolized stack
-  to stderr from `CrashHandler.cpp`, then dies as it would have.
-  `lobole --crash-test` exercises it.
+- **A crash** (SIGSEGV, SIGABRT, SIGBUS, SIGFPE, SIGILL; on Windows an
+  unhandled SEH exception or `abort()`) is handled in `CrashHandler.cpp`, in
+  an order that matters: it opens this session's crash file
+  (`<state>/sessions/<started>-<pid>.crash`, a path copied into a fixed
+  buffer at start-up), writes the signal or exception code, the RPC in
+  flight (the watchdog's label) and an uncaught exception's message, then
+  the **raw frames as module + offset**, from a module table recorded at
+  start-up and again once the Vulkan driver is loaded. Nothing up to there
+  allocates, because symbolizing can hang in a corrupt heap. Only then, best
+  effort, the symbolized `std::stacktrace`, to the file and to stderr as it
+  always went, and on Windows a minidump (`MiniDumpNormal`: threads,
+  registers, stacks, no heap) beside the crash file. The default action is
+  restored first and the signal re-raised last, so the process still dies
+  and core-dumps as it would have. A stack overflow runs the handler on an
+  alternate stack. `lobole --crash-test` crashes before there are any
+  edits; the `debug_crash {kind: segv|abort|exception}` RPC crashes after
+  them, and is refused unless the app was started with
+  `LOBOLE_ALLOW_DEBUG_CRASH=1`.
+- **Every session leaves evidence only if it ends badly**
+  (`src/core/io/CrashReports.{h,cpp}`). At start-up, in every mode, the app
+  writes `<state>/sessions/<started>-<pid>.json` (version, build, mode, OS,
+  log path, the open project and its autosave paths, rewritten when the
+  project changes) and holds an **exclusive lock** on it for its whole life
+  (`platform::FileLock`: `flock`, `LockFileEx`). A clean exit deletes it,
+  and so do SIGTERM, SIGINT and SIGHUP, since a process asked to stop has
+  not crashed. A marker whose lock can be taken belongs to a process that is
+  gone, however it died (a crash, the OOM killer, `kill -9`, a power cut); a
+  pid check would not do, since pids are reused. The marker is locked under
+  a temporary name and renamed into place, so another instance starting at
+  the same moment never sees it unlocked.
+- **The next start collects it**, before the first frame and in every mode
+  (not under `--gui-tests`, which run on defaults): each unlocked marker
+  becomes `<state>/crashes/<started>-<pid>/` with `report.txt` (what
+  happened — "crashed: SIGSEGV", or "ended without a crash report: killed,
+  out of memory, or power lost" — version, build, OS, mode, project, and the
+  crash file), `report.json` (the same fields, for `crash_reports`),
+  `session.log` (the last 2000 lines of that session's log), `crash.dmp`
+  where there is one, and `autosave/` (copies of the autosaves that session
+  wrote: nothing older than it). Twenty reports are kept. Nothing is sent
+  anywhere, and `report.txt` says at the top that the folder may hold the
+  user's design and file paths.
+- **The windowed app says so**: a "Loböle closed unexpectedly" modal with
+  the reason and Recover unsaved work (when autosaves were copied: the
+  project through `ui::RecoverProject`, or the copied unsaved slot for a
+  project never saved — a never-saved project of several documents cannot
+  be reopened from its sidecars, and the modal says where they are), Open
+  report folder (`platform::RevealInFileManager`), Copy report (`report.txt`
+  to the clipboard) and Dismiss. `Help ▸ Crash reports…` opens the folder at
+  any time; the read-only `crash_reports` RPC lists the reports.
+- **The log is the activity journal**: every session's log also goes to
+  `<state>/logs/<started>-<pid>.log` (`common/LogFile.h`; same pattern and
+  flush-on-every-message as stdout, which is unchanged; the ten newest are
+  kept, never a live session's). Each edit is one info line as it happens:
+  `edit:`/`undo:`/`redo:` with the command's description, `edit: assembly`
+  (drawing, CAM job) for a snapshot, `rpc: <method>` by name only (a run of
+  the same call that changed nothing is one line, so a client polling
+  `get_state` does not bury the edits), and `open:`, `save:`, `tab:`,
+  `tool: <type> started|committed|cancelled`. So a report's `session.log`
+  says what the user was doing, and an autosave copy is the document they
+  were doing it to.
+- **`tools/symbolize-crash.py REPORT BINARY [LIBRARY…]`** names the raw
+  frames with `addr2line` against the unstripped binary of the same build
+  (the report's `Build:` line), reading a PE image base for a `.exe`, whose
+  offsets are RVAs (the mingw `x86_64-w64-mingw32-addr2line`). A release
+  build has function names and no line numbers; where addr2line finds no
+  debug info to read (a PE always), the name comes from `nm`'s symbol
+  table.
+  `tests/crash_report_smoke.py` crashes a headless instance in a scratch
+  state dir and checks each of the above.
 - **A stall** — the main thread not coming round its loop — is reported by
   the frame watchdog (`src/common/Watchdog.{h,cpp}`). Each loop (windowed,
   `--offscreen`, `--headless`) beats it once per iteration; a monitor thread

@@ -328,8 +328,14 @@ pointers, so `--call-graph dwarf` is the only mode with a usable stack.
 ## Crash debugging
 
 `main()` installs a `std::stacktrace` handler (CrashHandler.cpp) — SIGSEGV/ABRT
-print a symbolized stack to stderr → the dev-watch log. `lobole --crash-test`
-exercises it. A HANG is reported by the frame watchdog: `main thread stalled
+print a symbolized stack to stderr → the dev-watch log, and write raw frames
+to a crash file that the next start turns into a report folder under
+`<state>/crashes/` (`crash_reports` RPC; `tools/symbolize-crash.py` names
+the frames). `lobole --crash-test` exercises it; `debug_crash` does after
+edits (needs `LOBOLE_ALLOW_DEBUG_CRASH=1`). **A crash fix lands with a
+regression test built from its report**: the autosave copy is the starting
+document, `session.log`'s `edit:`/`rpc:` lines are the steps, and the test
+crashes before the fix. A HANG is reported by the frame watchdog: `main thread stalled
 N s (in <RPC or dialog>)` plus the main thread's stack, then `resumed after`
 (docs/architecture.md#crashes-and-stalls); `DESIGNER_WATCHDOG_S=0` turns it off
 under a debugger. `DEV_WATCH_VALIDATE=1 tools/dev-watch.sh` turns on Vulkan

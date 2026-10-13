@@ -43,8 +43,31 @@ At run time `RuntimePaths` (`src/common/RuntimePaths.{h,cpp}`) resolves:
   `$XDG_CONFIG_HOME` / `$XDG_STATE_HOME` / `$XDG_CACHE_HOME` + `/designer`,
   falling back to `~/.config`, `~/.local/state`, `~/.cache`. On Windows,
   which has neither `$HOME` nor `XDG_*`, they are
-  `%LOCALAPPDATA%\Loböle\{config,state,cache}`, never `%TEMP%`, which
+  `%LOCALAPPDATA%\Lobole\{config,state,cache}`, never `%TEMP%`, which
   Windows sweeps.
+
+## Crash reports
+
+A session that ends badly leaves a folder the user can zip and send, and the
+next start says so (docs/architecture.md#crashes-and-stalls). Nothing is
+sent anywhere; `Help ▸ Crash reports…` opens the folder, which is under the
+per-user state directory:
+
+| OS | where |
+|---|---|
+| Linux | `$XDG_STATE_HOME/lobole/crashes/`, else `~/.local/state/lobole/crashes/` (the Flatpak's own `~/.var/app/<id>/.local/state/lobole/crashes/`) |
+| Windows | `%LOCALAPPDATA%\Lobole\state\crashes\` |
+| macOS | `~/.local/state/lobole/crashes/`, as Linux without `XDG_STATE_HOME` |
+
+Each report holds `report.txt` (what happened, the build, the raw stack),
+`session.log`, copies of that session's autosaves and, on Windows,
+`crash.dmp`. A release build ships no line numbers and the Windows build no
+in-process symbolizer, so the raw frames are module + offset:
+`tools/symbolize-crash.py report.txt BINARY` names them against the
+unstripped binary of the build the report's `Build:` line names (the mingw
+`x86_64-w64-mingw32-addr2line` for `lobole.exe`). **macOS is untested**:
+the POSIX handler and the dyld module table compile for it by design, but
+nothing here can build or run it.
 
 ## The Nix flake
 
@@ -175,7 +198,13 @@ sketch constraint actually SOLVES (a circle whose radius is constrained from
 1 to 2 changes the extruded volume accordingly — the check that separates
 "OCC loaded" from "PlaneGCS is linked in"); and `wine designer.exe --gui-tests
 --gui-test-filter boots_and_renders --hidden` on the real GPU through
-winevulkan, from the extracted portable zip, which is what a tester gets.
+winevulkan, from the extracted portable zip, which is what a tester gets. A
+crash report: started with `LOBOLE_ALLOW_DEBUG_CRASH=1` and
+`WINEDLLOVERRIDES=winedbg.exe=d` (so Wine's debugger does not take the
+crash), `debug_crash {kind: "segv"}` after a couple of edits leaves a
+`.crash` with module + RVA frames and a `.dmp`, the next start collects
+them, and `tools/symbolize-crash.py` against that `lobole.exe` names
+`remote::DebugCrash`.
 
 Rules for code, since nothing in CI builds this target:
 
@@ -185,8 +214,10 @@ Rules for code, since nothing in CI builds this target:
   include. `tests/test_conventions.cpp` scans for the names.
 - **Platform code is `#ifdef _WIN32`-guarded with the Linux path unchanged**:
   `RuntimePaths` (`GetModuleFileNameA`, `%LOCALAPPDATA%`), `CrashHandler`
-  (`SetUnhandledExceptionFilter`), the remote server (Winsock), `GitVault`
-  (`nul`, `_pclose`), `_getpid`.
+  (`SetUnhandledExceptionFilter`, the stack walked with `RtlVirtualUnwind`,
+  `MiniDumpWriteDump` from `dbghelp`), `common/Platform` (`LockFileEx`,
+  `ShellExecuteW`), the remote server (Winsock), `GitVault` (`nul`,
+  `_pclose`), `_getpid`.
 - `std::filesystem::path::native()` is a `wstring` on Windows; compare path
   components, not string prefixes.
 - A second non-inline definition of a function that also exists inline links

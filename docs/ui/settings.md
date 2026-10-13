@@ -20,10 +20,10 @@ writes them and can regenerate them; the user did not choose them.
 ## Storage
 
 `$XDG_CONFIG_HOME/lobole/settings.json`, falling back to
-`~/.config/lobole/settings.json`; on Windows `%LOCALAPPDATA%\Loböle\config`.
+`~/.config/lobole/settings.json`; on Windows `%LOCALAPPDATA%\Lobole\config`.
 All three per-user directories (config, state, cache) resolve through
 `RuntimePaths::User{Config,State,Cache}Dir`, which on Windows gives
-`%LOCALAPPDATA%\Loböle\{config,state,cache}` rather than `%TEMP%`, which the
+`%LOCALAPPDATA%\Lobole\{config,state,cache}` rather than `%TEMP%`, which the
 OS sweeps.
 
 ```json
