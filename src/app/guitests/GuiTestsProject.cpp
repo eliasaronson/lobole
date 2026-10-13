@@ -1779,7 +1779,13 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     AddFixtureBox(ctx); // 2 x 2 x 2: 8 mm3
     ctx->Yield(2);
-    IM_CHECK(ImGui::FindWindowByName(ui::kPanelRequirements) == nullptr);
+    // Not shown. (ImGui keeps the window of an earlier test that showed
+    // the panel -- sim/a_probe_pins_a_face_and_holds_it does -- so "never
+    // created" only held when this test ran first.)
+    {
+      const ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelRequirements);
+      IM_CHECK(w == nullptr || !w->WasActive);
+    }
     const uint64_t part = s_App->parts[s_App->activePart].id;
     const auto make = [part](uint64_t id, const char* name, double most) {
       req::Requirement r;
