@@ -976,7 +976,7 @@ Feature* BodyOwnerFor(Document& doc, const RpcParams& p, const char* method,
   const auto& bodies = doc.GetBodies();
   uint64_t owner = 0;
   if (p.contains("body")) {
-    const int body = p.at("body").get<int>();
+    const int body = IntParam(p.at("body"), "body");
     if (body < 0 || body >= static_cast<int>(bodies.size()))
       throw std::runtime_error(
           IndexError("body", body, bodies.size(), "get_state lists bodies"));
@@ -1516,7 +1516,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                  " (get_state lists features with their ids)");
       stop = static_cast<int>(index); // the bar stops just BEFORE it
     } else {
-      stop = p.at("index").get<int>();
+      stop = IntParam(p.at("index"), "index");
     }
     doc->SetRollback(stop);
     return json{{"rollback", doc->Rollback()},
@@ -1854,7 +1854,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       std::vector<uint32_t> sources;
       for (const auto& s : p.at("sources"))
         sources.push_back(s.get<uint32_t>());
-      const int count = p.at("count").get<int>();
+      const int count = IntParam(p.at("count"), "count");
       const bool link = p.value("link", true);
       if (p.value("circular", false)) {
         const auto& c = p.at("center");

@@ -2185,7 +2185,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error("a freewheel needs its ratio (1 for a clutch "
                                  "between two parts on one arbor)");
       if (p.contains("teeth")) {
-        r.teeth = p.at("teeth").get<int>();
+        r.teeth = IntParam(p.at("teeth"), "teeth");
         if (r.teeth <= 0)
           throw std::runtime_error(
               "teeth is how many dogs a freewheel re-engages on (positive)");
@@ -2244,7 +2244,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
             "a worm relation needs starts (the worm's), teeth (the wheel's) "
             "and hand: right or left — a is the worm's mate, b the wheel's");
       {
-        const int z1 = p.at("starts").get<int>(), z2 = p.at("teeth").get<int>();
+        const int z1 = IntParam(p.at("starts"), "starts"),
+                  z2 = IntParam(p.at("teeth"), "teeth");
         if (z1 <= 0 || z2 <= 0)
           throw std::runtime_error("starts and teeth are positive counts");
         const std::string hand = p.at("hand").get<std::string>();
@@ -2544,8 +2545,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
           const double ratio = worm::RelationRatio(
               *state.assembly, *a, *b, r.mateAPath == r.mateBPath,
               r.mateAPath.empty() && r.mateBPath.empty(), *fa, *fb,
-              p.at("starts").get<int>(), p.at("teeth").get<int>(),
-              r.ratio > 0.0, &whyNot);
+              IntParam(p.at("starts"), "starts"),
+              IntParam(p.at("teeth"), "teeth"), r.ratio > 0.0, &whyNot);
           if (ratio == 0.0)
             throw std::runtime_error(whyNot);
           r.ratio = ratio;

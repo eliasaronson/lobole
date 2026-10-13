@@ -695,7 +695,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     if (p.contains("to"))
       s.to = RotAwareAngle(p.at("to").get<double>(), rot);
     if (p.contains("samples")) {
-      s.samples = p.at("samples").get<int>();
+      s.samples = IntParam(p.at("samples"), "samples");
       if (s.samples < 2)
         throw std::runtime_error("samples must be at least 2");
     }
@@ -840,7 +840,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
               "leave_at: \"start\", \"last\", or a sample index 0.." +
               std::to_string(n - 1) + " — got " + at.dump());
       } else {
-        idx = at.get<int>();
+        idx = IntParam(at, "leave_at");
         if (idx < 0 || idx >= n)
           throw std::runtime_error("leave_at: sample " + std::to_string(idx) +
                                    " of a study with " + std::to_string(n) +
@@ -927,7 +927,8 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error("width and height go together (pixels); "
                                  "pass both, or neither for the viewport's "
                                  "size");
-      const int w = p.at("width").get<int>(), h = p.at("height").get<int>();
+      const int w = IntParam(p.at("width"), "width"),
+                h = IntParam(p.at("height"), "height");
       if (w < 2 || h < 2)
         throw std::runtime_error("width and height are pixels, at least 2 "
                                  "each");
@@ -941,7 +942,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
                                  "per second (omit it for 60)");
     }
     if (p.contains("frames")) {
-      req.frames = p.at("frames").get<int>();
+      req.frames = IntParam(p.at("frames"), "frames");
       if (req.frames < 2)
         throw std::runtime_error("frames must be at least 2");
     }

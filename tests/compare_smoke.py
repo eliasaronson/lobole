@@ -97,6 +97,18 @@ def main():
                 expect(fragment in str(exc),
                        f"{params} refused clearly: {exc}")
 
+        # A body index that is not one is refused naming what was sent, not
+        # what narrowing made of it: 2^64 read as INT_MIN, and 2^32 + 1
+        # wrapped to body 1 and compared it.
+        for a, said in ((2 ** 64, "1.8446744073709552e+19"),
+                        (2 ** 32 + 1, "4294967297"), (1.5, "1.5")):
+            try:
+                d.call("compare_geometry", a=a, b=1)
+                raise AssertionError(f"a={a} must be refused")
+            except Exception as exc:
+                expect(said in str(exc) and "-2147483648" not in str(exc),
+                       f"a={a} refused naming the value given: {exc}")
+
         # Diff solids export as BREP.
         miss = os.path.join(tmp, "missing.brep")
         extra = os.path.join(tmp, "extra.brep")

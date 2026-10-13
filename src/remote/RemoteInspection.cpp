@@ -91,7 +91,9 @@ Document* ResolvePartParam(ui::AppState& state, const json& part) {
   std::optional<int> indexFallback;
   if (part.is_number_unsigned() || part.is_number_integer()) {
     id = part.get<uint64_t>();
-    indexFallback = part.get<int>();
+    // An id past int is no slot index: it must not wrap into one.
+    if (id <= static_cast<uint64_t>(std::numeric_limits<int>::max()))
+      indexFallback = static_cast<int>(id);
   } else if (part.is_string()) {
     const std::string s = part.get<std::string>();
     id = ui::PartIdByName(state, s);
@@ -2655,8 +2657,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
     const auto& bodies = RequirePartDoc(doc, "interference").GetBodies();
     const double touchTol = p.value("touch_tol", 1e-3);
-    const int ia = p.at("a").get<int>();
-    const int ib = p.at("b").get<int>();
+    const int ia = IntParam(p.at("a"), "a");
+    const int ib = IntParam(p.at("b"), "b");
     if (ia < 0 || ib < 0 || ia >= static_cast<int>(bodies.size()) ||
         ib >= static_cast<int>(bodies.size()))
       throw std::runtime_error(IndexError(
@@ -2906,7 +2908,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       candB = bodiesOfDoc();
     } else if (doc != nullptr) {
       const auto& bodies = doc->GetBodies();
-      const int ia = p.at("a").get<int>(), ib = p.at("b").get<int>();
+      const int ia = IntParam(p.at("a"), "a"), ib = IntParam(p.at("b"), "b");
       if (ia < 0 || ib < 0 || ia >= static_cast<int>(bodies.size()) ||
           ib >= static_cast<int>(bodies.size()))
         throw std::runtime_error(IndexError(

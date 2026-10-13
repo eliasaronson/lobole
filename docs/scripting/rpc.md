@@ -135,6 +135,12 @@ worse than a missing row, because an agent trusts it instead of guessing.
   was handed actually is, which keys the handler read, and where the
   vocabulary is — never nlohmann's own "type must be string, but is
   boolean".
+- **Integers are not narrowed.** A handler reads an integer parameter
+  through `remote::IntParam` (`src/remote/RemoteHelpers.h`), which refuses
+  what is not a whole number in range and names the value sent: `.get<int>()`
+  read 2^64 as INT_MIN ("body index -2147483648 out of range") and wrapped
+  2^32 + 1 to body 1. `test_conventions` fails on a bare `.get<int>()` under
+  `src/remote/`.
 - **Units.** A parameter carrying a physical quantity names its unit
   (`angle_deg`, `tolerance_mm`, `deflection_mm`) or has it stated in its row.
 - **Names.** `id` is the id of the thing the method is named after
@@ -358,9 +364,10 @@ condition. An accepted hostile call is not a failure — `1e308` is a legal
 depth — and the fixture is put back. Every open of the fixture waits out the
 jobs the open itself starts (the job tabs' box warm,
 [cam/gui.md](../cam/gui.md#job-tab-frame-cost)) before the world is read
-again: a warm still running at one read and gone at the next, or the other
-way round across the end-of-shard comparison of two opens, read as the world
-moving, about once a suite run on a loaded machine. A finding not fixed yet is listed in the
+again: a warm still running at one read and gone at the next — across a
+refused outside-the-document call, or across the end-of-shard comparison of
+two opens — read as the world moving, about once a suite run on a loaded
+machine. A finding not fixed yet is listed in the
 sweep's `KNOWN` table with its [known-bugs](../known-bugs.md) entry and
 reported, not failed.
 

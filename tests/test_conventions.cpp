@@ -1851,3 +1851,36 @@ TEST_CASE("a deliberate refusal throws std::runtime_error", "[convention]") {
        }());
   CHECK(offenders.empty());
 }
+
+TEST_CASE("an RPC integer parameter is read through remote::IntParam",
+          "[convention]") {
+  // `.get<int>()` on a parameter NARROWS: 2^64 arrives as a double and came
+  // out INT_MIN, so compare_geometry {a: 2^64} was refused as "body index
+  // -2147483648 out of range" -- a value nobody sent -- and an integer past
+  // 2^31 wraps to a small one, a valid index nobody asked for
+  // (hostile_params_smoke). IntParam refuses what is not a whole number in
+  // range and names the value given. A site that has range-checked the value
+  // as a long long first, or reads the app's own JSON, says so on its line.
+  std::vector<std::string> offenders;
+  for (const SourceFile& src : SourcesUnder("src/remote", ".cpp")) {
+    size_t line = 1;
+    for (size_t i = 0, start = 0; i <= src.text.size(); i++) {
+      if (i != src.text.size() && src.text[i] != '\n')
+        continue;
+      const std::string row = src.text.substr(start, i - start);
+      start = i + 1;
+      const size_t n = line++;
+      if (row.find(".get<int>()") != std::string::npos &&
+          row.find("// checked") == std::string::npos)
+        offenders.push_back(Relative(src.path) + ":" + std::to_string(n) +
+                            ": " + row);
+    }
+  }
+  INFO("read these through remote::IntParam (RemoteHelpers.h):\n" + [&] {
+    std::string s;
+    for (const std::string& o : offenders)
+      s += "  " + o + "\n";
+    return s;
+  }());
+  CHECK(offenders.empty());
+}

@@ -842,7 +842,7 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
     // does not have is REFUSED rather than silently cutting with tool 1.
     // BEFORE the table's fields, so a stepdown stated in the same call wins.
     std::string why;
-    if (!cam::Retool(setup, op, p.at("tool").get<int>(), why))
+    if (!cam::Retool(setup, op, IntParam(p.at("tool"), "tool"), why))
       throw std::runtime_error(why);
   }
   // A thread mill's depths are its thread's: the helix runs over the span the
@@ -865,7 +865,7 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
       cam::SetOpField(row, p.at(row.key), op);
   // The rows with rules of their own.
   if (p.contains("finish_tool")) {
-    op.finishTool = p.at("finish_tool").get<int>();
+    op.finishTool = IntParam(p.at("finish_tool"), "finish_tool");
     if (op.finishTool != 0 && setup.FindTool(op.finishTool) == nullptr)
       throw std::runtime_error("finish_tool " + std::to_string(op.finishTool) +
                                " is not in this setup's tool table");
@@ -2439,7 +2439,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
             "edit, and without it this would silently edit tool 1. Note that "
             "`id` (the setup) and `tool` are SIBLING parameters: "
             "set_cam_setup {id: <setup>, tool: {number: 2, ...}}");
-      const int number = tj.at("number").get<int>();
+      const int number = IntParam(tj.at("number"), "tool number");
       cam::Tool* existing = nullptr;
       for (cam::Tool& t : setup.tools)
         if (t.number == number)
@@ -2590,7 +2590,7 @@ std::optional<json> HandleCamRpc(ui::AppState& state, Document* doc,
           break;
         }
     if (p.contains("tool"))
-      op.toolNumber = p.at("tool").get<int>();
+      op.toolNumber = IntParam(p.at("tool"), "tool");
     // Derive when no depth was typed. This is the door the GUI's verbs go
     // through (cam::DeriveOperation), and until now it was GUI-only: a script
     // had to supply top_z/bottom_z by hand, which is exactly the failure mode

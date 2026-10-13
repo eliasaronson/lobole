@@ -395,7 +395,7 @@ int BodyIndexParam(const RpcParams& p) {
     throw std::runtime_error("body is a body's 0-based index, as get_state "
                              "lists them (omit it for every body); got " +
                              b.dump());
-  return b.get<int>();
+  return b.get<int>(); // checked above
 }
 // A mesh's chord deviation in mm: at least a tenth of a micron, at most a
 // metre. Zero, less or 1e-308 reached BRepMesh as "invalid parameter value"

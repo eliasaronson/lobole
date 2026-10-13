@@ -596,7 +596,7 @@ json Summary(const json& rows) {
          {"unchecked", 0}};
   for (const json& r : rows)
     s[r.at("state").get<std::string>()] =
-        s[r.at("state").get<std::string>()].get<int>() + 1;
+        s[r.at("state").get<std::string>()].get<int>() + 1; // checked: ours
   return s;
 }
 

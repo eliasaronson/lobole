@@ -13,6 +13,8 @@
 #include <glm/gtc/quaternion.hpp>
 #include <nlohmann/json.hpp>
 
+#include <cmath>
+#include <limits>
 #include <map>
 #include <set>
 #include <span>
@@ -338,6 +340,41 @@ inline std::set<uint64_t> ResolvePartBodies(const Document& doc,
     }
   }
   return out;
+}
+
+// An integer parameter: a whole number in [lo, hi], else refused naming the
+// value given. `.get<int>()` narrows instead: 2^64 arrives as a double and
+// came out INT_MIN, so compare_geometry {a: 2^64} was refused as "body index
+// -2147483648 out of range" (hostile_params_smoke), and an integer past 2^31
+// wraps to a small one -- a valid index nobody asked for. A double that is a
+// whole number (3.0) is that number; 1.5 is refused, not rounded.
+inline int IntParam(const nlohmann::json& v, const std::string& what,
+                    long long lo = std::numeric_limits<int>::min(),
+                    long long hi = std::numeric_limits<int>::max()) {
+  bool ok = false;
+  long long n = 0;
+  if (v.is_number_unsigned()) {
+    const uint64_t u = v.get<uint64_t>();
+    ok = u <= static_cast<uint64_t>(std::numeric_limits<long long>::max());
+    n = ok ? static_cast<long long>(u) : 0;
+  } else if (v.is_number_integer()) {
+    ok = true;
+    n = v.get<long long>();
+  } else if (v.is_number_float()) {
+    const double d = v.get<double>();
+    ok = std::isfinite(d) && d == std::floor(d) && d >= -9.0e18 && d <= 9.0e18;
+    n = ok ? static_cast<long long>(d) : 0;
+  }
+  if (!ok || n < lo || n > hi) {
+    const bool full = lo == std::numeric_limits<int>::min() &&
+                      hi == std::numeric_limits<int>::max();
+    throw std::runtime_error(
+        what + " is a whole number" +
+        (full ? std::string(" that fits 32 bits")
+              : " from " + std::to_string(lo) + " to " + std::to_string(hi)) +
+        "; got " + v.dump());
+  }
+  return static_cast<int>(n);
 }
 
 inline std::string IndexError(const char* what, long long given, size_t count,

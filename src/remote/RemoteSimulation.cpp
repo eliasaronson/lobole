@@ -174,7 +174,7 @@ int CaseIndex(const std::vector<std::string>& names, const json& v) {
   if (names.empty())
     throw std::runtime_error("`case`: this study has no load cases");
   if (v.is_number_integer()) {
-    const int k = v.get<int>();
+    const int k = IntParam(v, "case");
     if (k < 0 || k >= static_cast<int>(names.size()))
       throw std::runtime_error("`case` " + std::to_string(k) +
                                " is out of range; the cases are " + known);
@@ -982,7 +982,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         }
       }
       if (p.contains("num_modes"))
-        s.numModes = p.at("num_modes").get<int>();
+        s.numModes = IntParam(p.at("num_modes"), "num_modes");
       if (p.contains("gravity")) {
         s.gravity = remote::Vec3Param(p.at("gravity"), "gravity");
       }
@@ -1006,7 +1006,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         }
       }
       if (p.contains("max_iterations"))
-        s.maxIterations = p.at("max_iterations").get<int>();
+        s.maxIterations = IntParam(p.at("max_iterations"), "max_iterations");
       if (p.contains("load_cases")) {
         const json& list = p.at("load_cases");
         if (!list.is_array())
@@ -1126,7 +1126,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
   if (m == "remove_keep_out") {
     const uint64_t id = p.at("study").get<uint64_t>();
     keepOutStudy(id);
-    const int index = p.at("index").get<int>();
+    const int index = IntParam(p.at("index"), "index");
     modifyStudy(id, "Remove keep-out", [&](fem::Study& s) {
       if (index < 0 || index >= static_cast<int>(s.keepOuts.size()))
         throw std::runtime_error("keep-out index " + std::to_string(index) +
@@ -2222,7 +2222,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           v.get<long long>() > 100000)
         throw std::runtime_error("mode is a mode shape's 0-based index; got " +
                                  v.dump());
-      mode = v.get<int>();
+      mode = v.get<int>(); // checked above
     }
     if (p.contains("case")) {
       const fem::StudyRuntime* rt =

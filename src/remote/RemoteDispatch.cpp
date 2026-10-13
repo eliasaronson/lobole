@@ -1401,7 +1401,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (kind == "refusal")
       throw std::runtime_error("debug_fault: a deliberate refusal");
     if (kind == "type_error")
-      return json(json("text").get<int>());
+      return json(json("text").get<int>()); // checked: the planted throw
     if (kind == "edit_then_out_of_range") {
       if (!state.document)
         throw std::runtime_error("debug_fault edit_then_out_of_range needs "
@@ -2334,7 +2334,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (p.contains("shadows"))
       state.showShadows = p.at("shadows").get<bool>();
     if (p.contains("shadow_map")) {
-      const int size = p.at("shadow_map").get<int>();
+      const int size = remote::IntParam(p.at("shadow_map"), "shadow_map");
       if (size != 1024 && size != 2048)
         throw std::runtime_error("shadow_map must be 1024 or 2048");
       state.shadowMapSize = size;
