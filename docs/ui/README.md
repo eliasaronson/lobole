@@ -75,8 +75,42 @@ that size. The window title is the project name, `*` when dirty.
 - **Fit fills the frame.** The camera's aim and standoff are solved together
   for the box's projected extent (in perspective the projected centre of a
   box is not its 3D centre), and fitting slides the view (`Camera::SetPivot`)
-  rather than re-aiming. With a tool window open the fit keeps the model
-  clear of the part of the viewport it covers.
+  rather than re-aiming.
+- **Fit uses the free part of the viewport.** Things draw over the central
+  dock node, and a fit into the whole of it parked the model behind them.
+  The fit frames the model in `LargestFreeRect` (`ViewActions.cpp`): the
+  largest rectangle that overlaps none of the obstacles, chosen from every
+  pair of x and y edges the viewport and the obstacles give. The obstacles
+  are the **view cube**, every **floating window** (`BeginFloatingWindow`:
+  CAM generate, the playback transport, Save as template, the BOM),
+  the **in-context banner** and the **controls cheat sheet**, each recording
+  its rect (`RecordViewportObstacle`) as it draws into
+  `viewportObstaclesNext`; `DrawUI` publishes that as `viewportObstacles` at
+  the start of the next frame, so a fit taken mid-frame or from a remote call
+  sees one complete, one-frame-old set. The **tool window** counts only
+  while the session state says a session is open (a pending feature, a
+  feature edit, measure, dimension, mate or the CAM verbs): a remote call
+  opens and closes it before the UI draws, and a stale rect pushed the model
+  aside for a window already gone. The prompt pills do not count — one line
+  high, they already dodge the tool window (`PromptPillRect`), and avoiding
+  them would give up the top strip in every sketch. All rects are in the
+  main viewport's space, as `viewportPos` is.
+- The free rect is solved as an **off-axis frustum**: its NDC centre and
+  half-extents scale the half-angles and shear the camera's right and up
+  axes, so the same exact standoff and re-centring loop as a whole-frame fit
+  holds for it and no corner can leave it. Only the aim and distance change;
+  the projection, picking and the overlays' anchors are the viewport's as
+  before. A rect narrower or shorter than **half the viewport** is refused
+  for the whole viewport — a model fitted into a sliver is worse than one a
+  movable window partly covers. A fit for a picture (`forAspect`, a
+  `render_still` or the CAM setup sheet) and a `render_sheet` capture get
+  the whole frame: they draw no overlays. A named view with `fit` (the
+  `view` RPC) orients first and fits after, because the fitted aim is off
+  the model's centre whenever the free rect is. Pinned by
+  `viewport/fit_lands_in_the_free_rect`,
+  `viewport/fit_uses_the_band_under_a_short_window`,
+  `cam/fit_keeps_the_model_clear_of_the_tool` (every corner, not the
+  centre) and the `[camera]` unit tests in `test_actions.cpp`.
 - The lens is 30° vertical (`Camera::kDefaultFovDegrees`).
 - **Reference geometry is sized by the part**: the base planes, datum quads,
   frame triads and the sketch grid derive from the document's reach

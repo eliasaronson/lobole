@@ -65,7 +65,9 @@ border and a drawn shadow (`DrawWindowShadow`; ImGui has no shadow
 primitive), and `NoSavedSettings`. A window anchored `BelowToolWindow` stacks
 under the tool window (`state.toolWindowRect`) instead of opening on top of
 it. Users: the tool window itself, the Generate window, the BOM window and
-the CAM playback transport (bottom-centre).
+the CAM playback transport (bottom-centre). Every one but the tool window
+records its rect as an obstacle Fit keeps the model out from under
+([README.md](README.md#viewport)).
 
 ## Part tab: the Model panel
 

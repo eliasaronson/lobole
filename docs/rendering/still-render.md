@@ -62,7 +62,10 @@ framebuffer happens to be. So:
   can reproduce the projection and check its own framing.
 
 `ui::FitCameraToDocument(state, forAspect)` (`src/ui/ViewActions.cpp`) is the
-one fit; `forAspect = 0` means the camera's own. `tests/headless_smoke.py`
+one fit; `forAspect = 0` means the camera's own. A viewport fit keeps the
+model out from under the tool window and the view cube
+([../ui/README.md](../ui/README.md#viewport)); a fit for a picture does not,
+because a still draws no overlays and gets the whole frame. `tests/headless_smoke.py`
 fits for three very different picture shapes and projects the part's bbox
 corners through the reported camera at that aspect, asserting all land in
 NDC — and first asserts that a plain `fit_view` does *not* already frame a

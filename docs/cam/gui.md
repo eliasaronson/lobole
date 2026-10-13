@@ -100,7 +100,8 @@ while its pick is armed.
   a closed job tab ends every CAM session with it — an armed pick, an open
   verb window, a playback — so none is left pointing at a job that is gone.
 - The window follows the viewport and re-anchors when it reopens; fitting the
-  camera keeps the model in the band the window leaves.
+  camera keeps the model in the largest part of the viewport the window and
+  the view cube leave free ([../ui/README.md](../ui/README.md#viewport)).
 - **It keeps a bounded height and scrolls past it**: half the viewport's
   height (never less than eight rows). It grew with what it lists, and
   Engrave's -- an operation per label, the verdict's every line -- grew down
