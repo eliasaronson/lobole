@@ -355,6 +355,10 @@ source by feature id. `count`, `spacing` and `angle_deg` are expressions.
   transformed copy. In the GUI the pick for this is the cut's tree row with the
   Source slot armed; a body pick resolves to the body's `createdBy`, which is
   the plate, not the cut.
+- `angle_deg` is the STEP between instances (six round a circle is 60). A
+  step that puts every copy on the seed — a whole number of turns, or a
+  linear `spacing` of 0 — is refused: it builds nothing while reading as a
+  pattern that worked.
 - Every instance carries the source's element names with an instance suffix
   (`4/g7` becomes `4/g7#2`, a mirror's `#m`), so a face of the third copy is as
   referenceable as one of the first.
@@ -631,11 +635,20 @@ names. GUI coverage is in `src/app/guitests/GuiTestsModeling.cpp` and the
 `defaults/*` suite, which asserts every creation tool either changes the
 document or refuses visibly.
 
+Whole parts are checked by the [reference parts](reference-parts.md)
+(`tests/reference_parts.py`, `tools/ctest -L reference`): each built over
+the RPC, picked by points, compared tightly against closed-form volume,
+area, centroid, box and counts, and again after a STEP round trip, with a
+known-failure ratchet. A feature whose result has a closed form lands with a
+reference case.
+
 ## Not built
 
-- Split pieces all share one `createdBy`, so a later fillet, boolean or
-  shell that names a piece binds to the first; a body sub-ordinal would tell
-  them apart. Splitting by a sketch (sketch as knife) is not built.
+- Splitting by a sketch (sketch as knife). (That split pieces share one
+  `createdBy`, so a feature naming the second binds to the first, is a
+  [known bug](../known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build).)
+- A thin extrude of an OPEN profile: `thin` walls every closed loop, and an
+  open polyline is refused as "sketch has no closed profile".
 
 - A thread runout (DIN 76) or a faded end on a modelled thread, and a
   blind tapped hole's thread trimmed by its drill point: the ends are square.
