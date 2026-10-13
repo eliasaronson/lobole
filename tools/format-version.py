@@ -57,8 +57,18 @@ def k_of(digit: str) -> int:
 
 
 def git(*args: str, check: bool = True) -> str:
-    return subprocess.run(["git", "-C", str(ROOT), *args], check=check,
-                          capture_output=True, text=True).stdout
+    # safe.directory: CI's containers run as root over a checkout the runner's
+    # user owns, and git then refuses the repository as "dubious ownership"
+    # (exit 128). This script reads the checkout it lives in, so trusting it
+    # is no new trust; command-line config is one git honours for this key.
+    r = subprocess.run(["git", "-c", f"safe.directory={ROOT}", "-C", str(ROOT),
+                        *args], capture_output=True, text=True)
+    if check and r.returncode != 0:
+        # git's own words: a bare CalledProcessError said "exit status 128"
+        # and nothing else, which is how this sat red in CI undiagnosed.
+        raise SystemExit(f"git {' '.join(args)} failed (exit {r.returncode}) "
+                         f"in {ROOT}:\n{r.stderr.strip()}")
+    return r.stdout
 
 
 def read(rel: str) -> str:

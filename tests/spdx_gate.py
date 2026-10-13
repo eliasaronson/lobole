@@ -67,8 +67,15 @@ def comment_prefix(path: pathlib.Path) -> str | None:
 
 def tracked_sources() -> list[pathlib.Path]:
     repo = pathlib.Path(__file__).resolve().parent.parent
-    out = subprocess.run(["git", "-C", str(repo), "ls-files"],
-                         capture_output=True, text=True, check=True).stdout
+    # safe.directory: CI's containers run as root over a checkout another
+    # user owns, and git refuses that repository as "dubious ownership".
+    # Trusting the checkout this script lives in is no new trust.
+    r = subprocess.run(["git", "-c", f"safe.directory={repo}", "-C", str(repo),
+                        "ls-files"], capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit(f"git ls-files failed (exit {r.returncode}) in "
+                         f"{repo}:\n{r.stderr.strip()}")
+    out = r.stdout
     files = []
     for rel in out.split("\n"):
         if not rel or rel.startswith(EXCLUDED_PREFIXES) or rel in EXCLUDED_FILES:

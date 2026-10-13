@@ -273,6 +273,15 @@ fi
 # ---- job 2: the stock-Ubuntu containers ------------------------------------
 if [ "$run_containers" = 1 ]; then
   command -v docker > /dev/null || { fail "docker not found — skipping containers"; exit $((failures > 0)); }
+  # In a worktree, .git is a FILE naming the main checkout's .git/worktrees/X
+  # by absolute path, and with only /src mounted every git call in the suite
+  # (spdx_gate, format_version_gate) died "not a git repository". The common
+  # git dir is mounted at its own path, read-only, so that pointer resolves.
+  git_mount=()
+  if [ -f "$root/.git" ]; then
+    common="$(git -C "$root" rev-parse --path-format=absolute --git-common-dir)"
+    git_mount=(--mount "type=bind,src=$common,dst=$common,readonly")
+  fi
   for entry in "${MATRIX[@]}"; do
     image="${entry%%@@*}"
     exclude="${entry#*@@}"
@@ -298,7 +307,7 @@ if [ "$run_containers" = 1 ]; then
     # status and every run looks green.
     run_tests "${image//[:.]/-}" "$image" \
       docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
-        -v "$root:/src:ro" -v "$root/$build_dir:/b" "$tag" bash -c "
+        -v "$root:/src:ro" "${git_mount[@]}" -v "$root/$build_dir:/b" "$tag" bash -c "
          set -o pipefail
          cmake -S /src -B /b -G Ninja -DCMAKE_BUILD_TYPE=Release &&
          cmake --build /b -j$jobs && $ctest_cmd"
