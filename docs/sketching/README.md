@@ -839,7 +839,7 @@ link; `modify_feature` with an edited sketch JSON covers them.
   migrate), `v35-linked-copy`, `v38-entity-exprs`, `v40-spline`,
   `v46-ellipse-arc`, `v49-reference-image`, `v50-linear-pattern-2d`,
   `v51-mirror-and-center-ref`, `v137-text`, `v155-ellipse-axis-ends`,
-  `v166-underlay-show-always`, `vNEXT-driven-dimension`.
+  `v166-underlay-show-always`, `v177-driven-dimension`.
 - `tests/test_sketch_curves.cpp` `[ellipse]` `[spline]` `[refusal]` —
   ellipses, elliptical arcs and splines solved: DOF, radii by axis-end
   distance through an extrude and a revolve, tangency checked as directions

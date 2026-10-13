@@ -402,7 +402,7 @@ json ConstraintToJson(const sketch::Constraint& c) {
             {"value", c.value}};
   if (!c.valueExpr.empty()) // literals stay plain numbers (v11)
     j["expr"] = c.valueExpr;
-  if (c.driven) // vNEXT; `value` is then the measure (the sketch writes it)
+  if (c.driven) // v177; `value` is then the measure (the sketch writes it)
     j["driven"] = true;
   if (c.kind == sketch::ConstraintKind::Symmetric) // only Symmetric uses c
     j["c"] = {c.c.entity, c.c.which};
@@ -430,7 +430,7 @@ sketch::Constraint ConstraintFromJson(const json& j) {
     c.c = {j.at("c").at(0).get<uint32_t>(), j.at("c").at(1).get<uint8_t>()};
   if (j.contains("label"))
     c.labelOffset = Vec2FromJson(j.at("label"));
-  // vNEXT: a driven (reference) dimension. Only a dimension measures
+  // v177: a driven (reference) dimension. Only a dimension measures
   // something, and a driven one has no input, so neither half is guessed
   // at (docs/sketching/README.md#constraints).
   if (j.contains("driven")) {

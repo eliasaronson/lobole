@@ -1120,7 +1120,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       CHECK_FALSE(doc.PrintProcess()->profile.has_value());
     }
   }
-  // vNEXT: driven (reference) dimensions, [constraint index, measure] in the
+  // v177: driven (reference) dimensions, [constraint index, measure] in the
   // first sketch. Reloaded driving, a reference dimension becomes an input
   // the sketch now has to meet -- one more equation, and a conflict the
   // file never had; so the flag is checked, and the value against what the
