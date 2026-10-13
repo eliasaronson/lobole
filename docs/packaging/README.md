@@ -95,9 +95,41 @@ and the fonts are vendored in-tree.
 - `devShells.x86_64-linux.default`: `nix develop`, the same toolchain as
   `nix-shell shell.nix` plus validation layers and the Python tooling.
 
+OpenCASCADE is built with the patches in `nix/patches/`, through the
+overlay in `nix/occt-overlay.nix` that `shell.nix` and the flake both
+apply, so netgen links the same patched library. The Flatpak manifest and
+`packaging/windows/occ-cross.nix` apply the same files; a new patch goes in
+all three. The one carried today makes a Shell's result independent of
+memory addresses
+([modeling](../modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid)).
+Patching OpenCASCADE means nixpkgs' binary cache no longer has it: the first
+`nix-shell` on a machine compiles OpenCASCADE and netgen.
+
 On NixOS the loader finds the host driver through `/run/opengl-driver`.
 There is no binary cache yet, so `nix run` builds OpenCASCADE and Netgen from
 source unless the user's store already has them.
+
+## GCC 16 and IPA-CP clones
+
+GCC 16.2 at `-O3` miscompiles OpenCASCADE's `BRepClass3d_SClassifier.cxx`,
+natively and in the mingw cross build alike. It clones
+`NCollection_UBTree::Select` for the line selector, devirtualized, and sends
+the point selector's recursion into that clone, so
+`BRepClass3d_BndBoxTreeSelectorLine::Accept` runs on the point selector and
+reads a curve from past its end. Every point-in-solid test can call through
+a garbage vtable in `Extrema_ExtCC::Perform`: on Windows a Hole crashed
+(`tests/fuzz/cases/crash-181.jsonl`, 'H6'), on Linux every boolean's
+refusal check did, and 66 headless tests with it. `-O2`, or `-O3` without
+the cloning, is right; GCC 15 is right.
+
+So OpenCASCADE is built with `-fno-ipa-cp-clone` (`nix/occt-overlay.nix`,
+`packaging/windows/occ-cross.nix`), and so is the app under GCC 16 or newer
+(`CMakeLists.txt`; `cross-app.nix` for Windows), because it instantiates
+the same templates from OpenCASCADE's headers. The Flatpak's SDK compiler is
+older and needs neither. nixpkgs moved to GCC 16 under a build tree
+configured before the move: CMake keeps the library paths it found, so such
+a tree still links the GCC 15 OpenCASCADE and passes, and the next fresh
+configure is the one that crashes. The miscompile is not reported to GCC.
 
 ## The headless AppImage
 
@@ -171,14 +203,7 @@ on a 30 GB machine.
   stock nixpkgs pulls Tcl/Tk (and through them bash) for Draw, which do not
   build for Windows.
 - **No IPA-CP clones** (`-fno-ipa-cp-clone`, OpenCASCADE and the app):
-  mingw GCC 16.2 at `-O3` miscompiles `BRepClass3d_SClassifier.cxx`. It
-  clones `NCollection_UBTree::Select` for the line selector, devirtualized,
-  and sends the point selector's recursion into that clone, so
-  `BRepClass3d_BndBoxTreeSelectorLine::Accept` runs on the point selector
-  and reads a curve from past its end: a point-in-solid test on a plain box
-  crashed (`tests/fuzz/cases/crash-181.jsonl`, Hole 'H6'). `-O2`, or `-O3`
-  without the cloning, is right, and the Linux build of the same compiler
-  and source is right.
+  [GCC 16 and IPA-CP clones](#gcc-16-and-ipa-cp-clones).
 - **Boost is headers only**: Boost's own cross-build fails on its MPI
   component, so a hand-written `BoostConfig.cmake` exposes the
   `Boost::boost` interface target.

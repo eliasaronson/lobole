@@ -96,7 +96,8 @@ the heading if it is not here yet.
   mechanism moved a whole shape, not only names: the offset builder shelled
   `tests/fuzz/cases/rebuild-139.jsonl` into an invalid solid about one build
   in seven, in fresh instances as in reused ones, which is what made
-  `fuzz_corpus_smoke` fail at random; a Shell now retries on a copy
+  `fuzz_corpus_smoke` fail at random. That one was OpenCASCADE's quilt
+  order, now patched in every build we make
   ([modeling](modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid)).
   Whether the blend and draft builders' SHAPES (not only their face order)
   move the same way is not measured.

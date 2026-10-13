@@ -6,16 +6,14 @@
 # FoundationClasses/ModelingData/ModelingAlgorithms/DataExchange/AppFramework.
 { cross }:
 cross.opencascade-occt.overrideAttrs (old: {
+  # The same kernel patches as the Linux overlay (nix/occt-overlay.nix).
+  patches = (old.patches or [ ]) ++ [ ../../nix/patches/occt-shell-cap-order.patch ];
   buildInputs = [ ];                       # drop tcl tk libglvnd glu libx* rapidjson
   cmakeFlags = [
     "-DCMAKE_BUILD_TYPE=Release"
-    # mingw GCC 16.2 at -O3 miscompiles BRepClass3d_SClassifier.cxx: IPA-CP
-    # clones NCollection_UBTree::Select for the LINE selector, devirtualized,
-    # and the POINT selector's recursion calls that clone, so
-    # BRepClass3d_BndBoxTreeSelectorLine::Accept runs on the point selector
-    # and reads a curve from past its end. A solid classifier on a plain box
-    # crashed (tests/fuzz/cases/crash-181.jsonl, Hole 'H6'); -O2, or -O3
-    # without the cloning, is right, and so is the Linux build.
+    # GCC 16.2 at -O3 miscompiles BRepClass3d_SClassifier.cxx, here as in the
+    # Linux overlay: a point-in-solid test calls through a garbage vtable
+    # (docs/packaging/README.md#gcc-16-and-ipa-cp-clones).
     "-DCMAKE_CXX_FLAGS=-fno-ipa-cp-clone"
     "-DBUILD_LIBRARY_TYPE=Shared"
     "-DBUILD_MODULE_Draw=OFF"

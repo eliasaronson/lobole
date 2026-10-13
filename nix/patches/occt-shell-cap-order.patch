@@ -1,0 +1,39 @@
+--- a/src/BRepOffset/BRepOffset_MakeOffset.cxx	2026-10-13 09:12:48.537569729 -0700
++++ b/src/BRepOffset/BRepOffset_MakeOffset.cxx	2026-10-13 09:13:04.737592503 -0700
+@@ -3613,6 +3613,16 @@
+   TopTools_ListOfShape               aLSF;
+   const TopTools_ListOfShape&        R = myImageOffset.Roots();
+   TopTools_ListIteratorOfListOfShape it(R);
++  // The splits of the caps (the removed faces) are built on the reversed
++  // face (BRepOffset_MakeLoops::BuildOnContext), which matches the offset
++  // faces only where the cap is trimmed inside the face (convex edges). Where
++  // the offset faces extend the cap beyond its boundary (e.g. the floor of a
++  // blind hole) the split is oriented against them. BRepTools_Quilt keeps the
++  // orientation of whichever face starts a shell and reverses the shells it
++  // merges into it, so with the caps mixed in the result depended on the
++  // order of the roots - which follows a map hashed on shape addresses.
++  // Add the caps last so that the offset faces decide the orientation.
++  TopTools_ListOfShape aLCaps;
+   //
+   for (; it.More(); it.Next())
+   {
+@@ -3625,15 +3635,17 @@
+     if (myThickening) // offsetted faces must change their orientations
+       aF.Reverse();
+     //
+-    TopTools_ListOfShape Image;
++    TopTools_ListOfShape& aLDst = myFaces.Contains(aF) ? aLCaps : aLSF;
++    TopTools_ListOfShape  Image;
+     myImageOffset.LastImage(aF, Image);
+     TopTools_ListIteratorOfListOfShape it2(Image);
+     for (; it2.More(); it2.Next())
+     {
+       const TopoDS_Shape& aFIm = it2.Value();
+-      aLSF.Append(aFIm);
++      aLDst.Append(aFIm);
+     }
+   }
++  aLSF.Append(aLCaps);
+   //
+   if (myThickening)
+   {

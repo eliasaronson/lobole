@@ -63,6 +63,17 @@ if(CCACHE_PROGRAM)
   message(STATUS "ccache enabled: ${CCACHE_PROGRAM} (base_dir ${CMAKE_SOURCE_DIR})")
 endif()
 
+# GCC 16 at -O3 miscompiles OpenCASCADE's BRepClass3d_SClassifier.cxx: an
+# IPA-CP clone of NCollection_UBTree::Select made for the line selector runs
+# on the point selector, and a point-in-solid test calls through a garbage
+# vtable (docs/packaging/README.md#gcc-16-and-ipa-cp-clones). OCC is built
+# without the clones (nix/occt-overlay.nix); the app instantiates the same
+# templates from OCC's headers, so it is built without them too.
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+   CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  add_compile_options(-fno-ipa-cp-clone)
+endif()
+
 # Opt-in AddressSanitizer + UndefinedBehaviorSanitizer build
 # (cmake -DENABLE_SANITIZERS=ON). Off by default so normal builds pay nothing.
 option(ENABLE_SANITIZERS "Build with ASan + UBSan" OFF)

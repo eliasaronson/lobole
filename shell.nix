@@ -4,7 +4,8 @@
 # Note: only build-time deps live here. The Vulkan ICD (GPU driver) comes from
 # the system configuration (`hardware.graphics.enable = true` plus your GPU's
 # driver module) — without it the app builds but finds no Vulkan device.
-{ pkgs ? import <nixpkgs> { } }:
+# The OpenCASCADE overlay carries our kernel patches (nix/occt-overlay.nix).
+{ pkgs ? import <nixpkgs> { overlays = [ (import ./nix/occt-overlay.nix) ]; } }:
 
 let
   # The same trimmed netgen the flake builds against, so a dev build and a

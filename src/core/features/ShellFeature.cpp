@@ -187,19 +187,17 @@ bool ShellFeature::Execute(RegenContext& ctx) {
       facesToRemove.Append(ex.Current());
   }
 
-  // The offset builder's answer depends on where its input lives in memory,
-  // not only on what it is: it walks maps hashed by shape ADDRESS, so the same
-  // solid at other addresses can come back a valid cavity or an invalid solid
-  // of five times the volume (a drilled box shelled through a bore's floor
-  // did the second one build in seven: tests/fuzz/cases/rebuild-139.jsonl,
-  // and "A shell builds the same wherever its input lives in memory"). The
-  // addresses are the allocator's, so the same document shelled in another
-  // process, or a second time in this one, is a new draw. Every bad answer is
-  // caught by the checks below, so a failed attempt is retried on a copy of
-  // the input -- the same solid at new addresses -- and a shell is refused
-  // only when every draw failed. A wall OCC can build is built, and since a
-  // good draw is the same solid whichever one it is, the result no longer
-  // depends on the process. kAttempts bounds what an honest refusal (a wall
+  // Stock OCC's offset builder answers by where its input lives in memory,
+  // not only by what it is: MakeShells quilts the faces in the order of a map
+  // hashed on shape ADDRESS, so a drilled box shelled through a bore's floor
+  // came back an invalid solid of five times the volume one build in seven
+  // (tests/fuzz/cases/rebuild-139.jsonl, and "A shell builds the same
+  // wherever its input lives in memory"). Our builds carry the fix
+  // (nix/patches/occt-shell-cap-order.patch); a build against an unpatched
+  // OCC -- CI's Ubuntu job, apt's -- still draws. Every bad answer is caught
+  // by the checks below, so a failed attempt is retried on a copy of the
+  // input -- the same solid at new addresses -- and a shell is refused only
+  // when every draw failed. kAttempts bounds what an honest refusal (a wall
   // too thick for the geometry) costs.
   constexpr int kAttempts = 5;
   std::string error;

@@ -165,6 +165,9 @@ modules:
       - type: git
         url: https://github.com/Open-Cascade-SAS/OCCT.git
         tag: V7_9_3
+      # The kernel patches every build carries (nix/occt-overlay.nix).
+      - type: patch
+        path: ../../nix/patches/occt-shell-cap-order.patch
 
   # ---- Netgen (FEM tet mesher; nglib/ngcore, LGPL) -------------------------
   # MPI/GUI/Python all off — we only link nglib + ngcore against OCC. Matches

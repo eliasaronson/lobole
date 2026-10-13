@@ -24,8 +24,9 @@ Loböle dynamically links the following LGPL-family libraries:
 - **Netgen 6.2.2605** — LGPL-2.1-or-later, unmodified upstream source:
   <https://github.com/NGSolve/netgen/tree/v6.2.2605>.
 - **OpenCASCADE Technology 7.9.3** — LGPL-2.1 with the OCCT exception,
-  unmodified upstream source:
-  <https://github.com/Open-Cascade-SAS/OCCT/tree/V7_9_3>.
+  upstream source <https://github.com/Open-Cascade-SAS/OCCT/tree/V7_9_3>
+  with the patches in `nix/patches/` applied (`nix/occt-overlay.nix` says
+  what each one changes).
 
 The shipped libraries remain separate shared objects. Users may replace them
 with compatible modified builds. For PlaneGCS, configure Loböle against the

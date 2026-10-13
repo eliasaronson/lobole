@@ -446,17 +446,25 @@ and the body is left as it was; check_geometry would have called it invalid.
 A Shell that reaches past the body's own measured outside — the offset
 builder moving a face outward — is refused too: a shell hollows inward.
 
-The offset builder's answer depends on where its input lives in memory, not
-only on what it is: it walks OpenCASCADE maps hashed by shape address, so the
-same solid at other addresses — a copy, the same document built in another
-process or a second time in this one — can come back a valid cavity or an
-invalid solid of several times the volume. A drilled box shelled through one
-bore's floor (`tests/fuzz/cases/rebuild-139.jsonl`) did the second about one
-build in seven. Every such answer fails one of the checks above, so a Shell
-that fails them is built again on a `BRepBuilderAPI_Copy` of its input (the
-same solid at new addresses, sub-shape for sub-shape, so its index-keyed
-names are the body's), up to five draws, and is refused only when every draw
-failed: a wall OpenCASCADE can build is built whichever process builds it.
+Stock OpenCASCADE's offset builder answers by where its input lives in
+memory, not only by what it is. A drilled box shelled through one bore's
+floor (`tests/fuzz/cases/rebuild-139.jsonl`) came back an invalid solid of
+several times the volume about one build in seven, in a copy, in another
+process or a second time in the same one. `MakeShells` quilts the offset
+faces in the order of a map hashed on shape addresses, the split of a cap
+that the offset extends (a bore's floor) is oriented against them, and the
+quilt keeps the orientation of whichever face comes first. Every build here
+(nix, the Flatpak, the Windows cross build) carries
+`nix/patches/occt-shell-cap-order.patch`, which quilts the caps last; the
+overlay in `nix/occt-overlay.nix` applies it, and netgen is built against
+the same patched library.
+
+The CI Ubuntu job links apt's OpenCASCADE, which is unpatched, so the Shell
+also keeps its own guard. Every such answer fails one of the checks above,
+so a Shell that fails them is built again on a `BRepBuilderAPI_Copy` of its
+input (the same solid at new addresses, sub-shape for sub-shape, so its
+index-keyed names are the body's), up to five draws, and is refused only
+when every draw failed. On the patched kernel the first draw is the answer.
 An honest refusal (a wall too thick for the geometry) costs the five draws.
 `test_shell`'s "A shell builds the same wherever its input lives in memory"
 shells 60 copies of that box and requires one solid with one set of names.

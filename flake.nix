@@ -38,7 +38,11 @@
   outputs = { self, nixpkgs, imgui-src, imgui-test-engine-src, nfd-src, clipper2-src }:
     let
       system = "x86_64-linux";
-      pkgs = import nixpkgs { inherit system; };
+      # The kernel patches Loböle carries (nix/occt-overlay.nix).
+      pkgs = import nixpkgs {
+        inherit system;
+        overlays = [ (import ./nix/occt-overlay.nix) ];
+      };
 
       # Netgen minus MPI/python/GUI — see the file for what that saves and
       # why deleting the files afterwards does not work.
