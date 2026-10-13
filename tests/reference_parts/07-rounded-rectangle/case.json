@@ -1,0 +1,50 @@
+{
+  "title": "Rectangle 50×30 with four sketch fillets r5, extruded 8",
+  "exercises": "the sketch `fillet` RPC trimming two lines and adding a tangent arc, four times",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Plate",
+          "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [0, 0], "b": [50, 0]},
+            {"type": "line", "id": 2, "a": [50, 0], "b": [50, 30]},
+            {"type": "line", "id": 3, "a": [50, 30], "b": [0, 30]},
+            {"type": "line", "id": 4, "a": [0, 30], "b": [0, 0]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "fillet",
+      "params": {"sketch_id": {"$ref": 1}, "line1": 1, "line2": 2, "radius": 5}
+    },
+    {
+      "method": "fillet",
+      "params": {"sketch_id": {"$ref": 1}, "line1": 2, "line2": 3, "radius": 5}
+    },
+    {
+      "method": "fillet",
+      "params": {"sketch_id": {"$ref": 1}, "line1": 3, "line2": 4, "radius": 5}
+    },
+    {
+      "method": "fillet",
+      "params": {"sketch_id": {"$ref": 1}, "line1": 4, "line2": 1, "radius": 5}
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Plate",
+          "sketch_id": {"$ref": 1},
+          "distance": 8,
+          "mode": "new_body"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "title": "Vase: a profile of lines and one arc revolved 360°",
+  "exercises": "Revolve of a mixed profile whose edge on the axis sweeps nothing: a disc, a cylinder, a torus zone, a cone and a disc",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Profile",
+          "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [0, 0], "b": [20, 0]},
+            {"type": "line", "id": 2, "a": [20, 0], "b": [20, 30]},
+            {
+              "type": "arc",
+              "id": 3,
+              "center": [20, 40],
+              "radius": 10,
+              "start_angle_deg": -90,
+              "end_angle_deg": 90
+            },
+            {"type": "line", "id": 4, "a": [20, 50], "b": [12, 70]},
+            {"type": "line", "id": 5, "a": [12, 70], "b": [0, 70]},
+            {"type": "line", "id": 6, "a": [0, 70], "b": [0, 0]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Revolve",
+          "name": "Vase",
+          "sketch_id": {"$ref": 1},
+          "axis": {"kind": "z"},
+          "angle_deg": 360,
+          "mode": "new_body"
+        }
+      }
+    }
+  ]
+}

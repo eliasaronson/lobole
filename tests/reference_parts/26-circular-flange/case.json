@@ -1,0 +1,70 @@
+{
+  "title": "Flange R50/r15 h10 with six holes r5 on R40",
+  "exercises": "a two-circle sketch (an annulus) and a circular Pattern of a cut",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Flange",
+          "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "circle", "id": 1, "center": [0, 0], "radius": 50},
+            {"type": "circle", "id": 2, "center": [0, 0], "radius": 15}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Flange",
+          "sketch_id": {"$ref": 1},
+          "distance": 10,
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Bolt",
+          "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [{"type": "circle", "id": 1, "center": [40, 0], "radius": 5}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Bolt",
+          "sketch_id": {"$ref": 3},
+          "distance": 10,
+          "reversed": true,
+          "mode": "cut"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Pattern",
+          "name": "Bolts",
+          "kind": "circular",
+          "source_id": {"$ref": 4},
+          "axis": {"kind": "z"},
+          "count": 6,
+          "angle_deg": 60
+        }
+      }
+    }
+  ]
+}

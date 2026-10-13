@@ -1,0 +1,58 @@
+{
+  "title": "Cube [−20, 20]³ ∩ sphere R25",
+  "exercises": "Boolean `intersect`: six planar caps cut off a sphere",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Cube",
+          "plane": {"origin": [0, 0, -20], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [-20, -20], "b": [20, -20]},
+            {"type": "line", "id": 2, "a": [20, -20], "b": [20, 20]},
+            {"type": "line", "id": 3, "a": [20, 20], "b": [-20, 20]},
+            {"type": "line", "id": 4, "a": [-20, 20], "b": [-20, -20]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Cube",
+          "sketch_id": {"$ref": 1},
+          "distance": 40,
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sphere",
+          "name": "Ball",
+          "on": "Top",
+          "radius": 25,
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Boolean",
+          "name": "Common",
+          "target_id": {"$ref": 2},
+          "tool_id": {"$ref": 3},
+          "op": "intersect"
+        }
+      }
+    }
+  ]
+}

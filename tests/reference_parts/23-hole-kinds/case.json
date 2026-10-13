@@ -1,0 +1,98 @@
+{
+  "title": "Plate with a counterbore, a countersink and a 118° blind hole",
+  "exercises": "the Hole kinds: a counterbore, a countersink and a blind hole whose floor is a drill point",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Plate",
+          "on": "Top",
+          "width": 80,
+          "depth": 40,
+          "height": 20
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "CB",
+          "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [{"type": "point", "id": 1, "p": [-25, 0]}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Hole",
+          "name": "Counterbore",
+          "sketch_id": {"$ref": 2},
+          "hole_kind": "counterbore",
+          "diameter": 6.6,
+          "through": true,
+          "depth": 20,
+          "cb_diameter": 11,
+          "cb_depth": 6.5
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "CS",
+          "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [{"type": "point", "id": 1, "p": [0, 0]}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Hole",
+          "name": "Countersink",
+          "sketch_id": {"$ref": 4},
+          "hole_kind": "countersink",
+          "diameter": 6.6,
+          "through": true,
+          "depth": 20,
+          "cs_diameter": 13,
+          "cs_depth": 3.2
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Blind",
+          "plane": {"origin": [0, 0, 20], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [{"type": "point", "id": 1, "p": [25, 0]}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Hole",
+          "name": "Blind",
+          "sketch_id": {"$ref": 6},
+          "hole_kind": "simple",
+          "diameter": 8,
+          "depth": 12,
+          "drill_point_deg": 118
+        }
+      }
+    }
+  ]
+}

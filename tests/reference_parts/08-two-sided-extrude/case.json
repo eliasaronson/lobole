@@ -1,0 +1,36 @@
+{
+  "title": "Rectangle extruded 10 up and 25 down",
+  "exercises": "Extrude `end_mode: two_sided`: which side `distance` and `distance2` go",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Block",
+          "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [0, 0], "b": [30, 0]},
+            {"type": "line", "id": 2, "a": [30, 0], "b": [30, 20]},
+            {"type": "line", "id": 3, "a": [30, 20], "b": [0, 20]},
+            {"type": "line", "id": 4, "a": [0, 20], "b": [0, 0]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Block",
+          "sketch_id": {"$ref": 1},
+          "distance": 10,
+          "end_mode": "two_sided",
+          "distance2": 25,
+          "mode": "new_body"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "title": "Box minus a sphere centred on its top face",
+  "exercises": "a Sphere placed on a picked face, and Boolean `subtract`",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Box",
+          "on": "Top",
+          "width": 40,
+          "depth": 30,
+          "height": 20
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sphere",
+          "name": "Ball",
+          "on": {"$pick": "face", "at": [0, 0, 20]},
+          "radius": 8,
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Boolean",
+          "name": "Dish",
+          "target_id": {"$ref": 1},
+          "tool_id": {"$ref": 2},
+          "op": "subtract"
+        }
+      }
+    }
+  ]
+}

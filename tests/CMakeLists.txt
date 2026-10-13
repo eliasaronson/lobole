@@ -799,6 +799,15 @@ add_test(NAME query_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(query_smoke PROPERTIES TIMEOUT 120)
 
+# Reference parts: whole parts built over the RPC against closed forms, a
+# STEP round trip each, the known-failure ratchet and the generated page
+# (docs/modeling/reference-parts.md). `tools/ctest -L reference`.
+add_test(NAME reference_parts
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/reference_parts.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(reference_parts PROPERTIES TIMEOUT 300
+                     LABELS reference)
+
 # v54 appearance override: set_appearance, inheritance, persistence,
 # clearing, validation, and the no-rebuild guarantee. Headless.
 add_test(NAME appearance_smoke

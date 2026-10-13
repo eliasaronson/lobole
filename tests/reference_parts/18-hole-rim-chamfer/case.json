@@ -1,0 +1,59 @@
+{
+  "title": "Plate with a through hole r5, top rim chamfered 1",
+  "exercises": "a cut extrude making a bore, then a Chamfer on its circular rim",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Plate",
+          "on": "Top",
+          "width": 60,
+          "depth": 40,
+          "height": 10
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Bore",
+          "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [{"type": "circle", "id": 1, "center": [0, 0], "radius": 5}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Bore",
+          "sketch_id": {"$ref": 2},
+          "distance": 10,
+          "reversed": true,
+          "mode": "cut"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Chamfer",
+          "name": "Rim",
+          "radius": 1,
+          "edges": [
+            {
+              "$pick": "edge",
+              "at": [3.5355339059327378, 3.5355339059327378, 10]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

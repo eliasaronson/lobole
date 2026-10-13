@@ -1,0 +1,19 @@
+{
+  "title": "Box primitive 40×30×20",
+  "exercises": "the Box primitive (a sketch and an extrude), centred on Top",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Box",
+          "on": "Top",
+          "width": 40,
+          "depth": 30,
+          "height": 20
+        }
+      }
+    }
+  ]
+}

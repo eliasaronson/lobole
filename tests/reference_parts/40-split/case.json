@@ -1,0 +1,32 @@
+{
+  "title": "Box split off-centre by a plane",
+  "exercises": "Split by an offset base plane into two bodies",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Bar",
+          "on": "Top",
+          "width": 60,
+          "depth": 30,
+          "height": 20
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Split",
+          "name": "Halves",
+          "body_id": {"$ref": 1},
+          "knife": "plane",
+          "base_plane": "yz",
+          "offset": 10
+        }
+      }
+    }
+  ]
+}

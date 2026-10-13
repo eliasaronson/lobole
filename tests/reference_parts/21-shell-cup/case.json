@@ -1,0 +1,30 @@
+{
+  "title": "Cylinder r20 h30 shelled 2, top open",
+  "exercises": "Shell of a cylinder: the inner wall is an offset cylinder",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Cylinder",
+          "name": "Cup",
+          "on": "Top",
+          "radius": 20,
+          "height": 30
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Shell",
+          "name": "Cup",
+          "body_id": {"$ref": 1},
+          "thickness": 2,
+          "open_faces": [{"$pick": "face", "at": [5, 5, 30]}]
+        }
+      }
+    }
+  ]
+}

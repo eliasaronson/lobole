@@ -1,0 +1,44 @@
+{
+  "title": "Box split at mid-length, an edge of the second piece filleted r2",
+  "exercises": "a Fillet on the second piece of a Split, whose pieces share one `created_by`",
+  "known_failure": "docs/known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Bar",
+          "on": "Top",
+          "width": 60,
+          "depth": 30,
+          "height": 20
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Split",
+          "name": "Halves",
+          "body_id": {"$ref": 1},
+          "knife": "plane",
+          "base_plane": "yz",
+          "offset": 0
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Fillet",
+          "name": "Round",
+          "radius": 2,
+          "edges": [{"$pick": "edge", "at": [30, 0, 20]}]
+        }
+      }
+    }
+  ]
+}

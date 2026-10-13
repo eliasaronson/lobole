@@ -1,0 +1,12 @@
+{
+  "title": "Sphere primitive r12",
+  "exercises": "the Sphere primitive (a half disc revolved), centred on Top's origin",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {"type": "Sphere", "name": "Ball", "on": "Top", "radius": 12}
+      }
+    }
+  ]
+}

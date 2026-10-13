@@ -1,0 +1,51 @@
+{
+  "title": "Circle r3 swept along 30 up, a quarter arc R20, 30 across",
+  "exercises": "Sweep of a circle along a sketch path of a line, an arc and a line",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Path",
+          "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [0, 0], "b": [0, 30]},
+            {
+              "type": "arc",
+              "id": 2,
+              "center": [20, 30],
+              "radius": 20,
+              "start_angle_deg": 90,
+              "end_angle_deg": 180
+            },
+            {"type": "line", "id": 3, "a": [20, 50], "b": [50, 50]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Section",
+          "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [{"type": "circle", "id": 1, "center": [0, 0], "radius": 3}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sweep",
+          "name": "Rod",
+          "profile_id": {"$ref": 2},
+          "path_id": {"$ref": 1},
+          "mode": "new_body"
+        }
+      }
+    }
+  ]
+}

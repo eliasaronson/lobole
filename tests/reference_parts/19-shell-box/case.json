@@ -1,0 +1,31 @@
+{
+  "title": "Box 50×40×30 shelled 2, top open",
+  "exercises": "Shell inward with one open face, picked by a point on it",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Box",
+          "on": "Top",
+          "width": 50,
+          "depth": 40,
+          "height": 30
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Shell",
+          "name": "Tray",
+          "body_id": {"$ref": 1},
+          "thickness": 2,
+          "open_faces": [{"$pick": "face", "at": [0, 0, 30]}]
+        }
+      }
+    }
+  ]
+}

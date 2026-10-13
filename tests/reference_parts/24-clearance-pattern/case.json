@@ -1,0 +1,59 @@
+{
+  "title": "Four M6 normal clearance holes by a linear pattern",
+  "exercises": "a Hole whose diameter is derived from `fit` (ISO 273), repeated by a linear Pattern",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Plate",
+          "on": "Top",
+          "width": 100,
+          "depth": 40,
+          "height": 10
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Hole",
+          "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [{"type": "point", "id": 1, "p": [-40, 0]}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Hole",
+          "name": "M6",
+          "sketch_id": {"$ref": 2},
+          "hole_kind": "simple",
+          "diameter": 6,
+          "depth": 10,
+          "through": true,
+          "fit": {"thread": "M6", "kind": "normal"}
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Pattern",
+          "name": "Row",
+          "kind": "linear",
+          "source_id": {"$ref": 3},
+          "axis": {"kind": "x"},
+          "count": 4,
+          "spacing": 20
+        }
+      }
+    }
+  ]
+}

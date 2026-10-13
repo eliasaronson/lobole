@@ -1,0 +1,49 @@
+{
+  "title": "Triangle solved from base 50, 60° and far side 45",
+  "exercises": "the sketch solver landing on the root of a quadratic nearest the drawn apex; an angle constraint in degrees",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Triangle",
+          "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [0, 0], "b": [50, 0]},
+            {"type": "line", "id": 2, "a": [50, 0], "b": [19, 31.5]},
+            {"type": "line", "id": 3, "a": [0, 0], "b": [19, 31.5]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_constraints",
+      "params": {
+        "sketch_id": {"$ref": 1},
+        "constraints": [
+          {"kind": "coincident", "refs": [[1, 0], [3, 0]]},
+          {"kind": "coincident", "refs": [[1, 1], [2, 0]]},
+          {"kind": "coincident", "refs": [[2, 1], [3, 1]]},
+          {"kind": "fixed", "refs": [[1, 0]]},
+          {"kind": "horizontal", "refs": [[1, 0]]},
+          {"kind": "distance", "refs": [[1, 0], [1, 1]], "value": 50},
+          {"kind": "angle", "refs": [[1, 0], [3, 0]], "value_deg": 60},
+          {"kind": "distance", "refs": [[2, 0], [2, 1]], "value": 45}
+        ]
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Triangle",
+          "sketch_id": {"$ref": 1},
+          "distance": 10,
+          "mode": "new_body"
+        }
+      }
+    }
+  ]
+}

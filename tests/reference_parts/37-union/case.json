@@ -1,0 +1,45 @@
+{
+  "title": "Box and an overlapping cylinder, Boolean union",
+  "exercises": "Boolean `union` of two bodies sharing a volume",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Box",
+          "on": "Top",
+          "width": 40,
+          "depth": 30,
+          "height": 20
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Cylinder",
+          "name": "Post",
+          "on": "Top",
+          "radius": 10,
+          "height": 30,
+          "offset": [20, 0],
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Boolean",
+          "name": "Union",
+          "target_id": {"$ref": 1},
+          "tool_id": {"$ref": 2},
+          "op": "union"
+        }
+      }
+    }
+  ]
+}

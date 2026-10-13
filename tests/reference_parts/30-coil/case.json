@@ -1,0 +1,51 @@
+{
+  "title": "Circle r1 swept along a 3-turn helix R10, pitch 5",
+  "exercises": "Sweep along a Curve3D helix: a swept B-spline tube",
+  "compare": ["bodies", "volume", "area", "center_of_mass", "bbox"],
+  "tolerance": {"volume": 0.001, "area": 0.001, "center_of_mass": 0.001, "bbox": 0.01},
+  "note": "the helix and the tube along it are B-spline approximations, so volume, area and centroid are held to 1e-3 and the box to 0.01 mm",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Curve3D",
+          "name": "Helix",
+          "kind": "helix",
+          "origin": [0, 0, 0],
+          "axis": [0, 0, 1],
+          "radius": 10,
+          "pitch": 5,
+          "turns": 3
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Section",
+          "plane": {
+            "origin": [10, 0, 0],
+            "normal": [0, 62.83185307179586, 5],
+            "uAxis": [1, 0, 0]
+          },
+          "entities": [{"type": "circle", "id": 1, "center": [0, 0], "radius": 1}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sweep",
+          "name": "Coil",
+          "profile_id": {"$ref": 2},
+          "path_id": {"$ref": 1},
+          "mode": "new_body"
+        }
+      }
+    }
+  ]
+}

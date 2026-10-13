@@ -1,0 +1,69 @@
+{
+  "title": "Obround R6, centres 40 apart, extruded 10",
+  "exercises": "the sketch solver: coincident, tangent at shared ends, equal radii, a radius and a centre distance, from a sketch drawn off",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Slot",
+          "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [0.2, -5.8], "b": [39.6, -5.6]},
+            {
+              "type": "arc",
+              "id": 2,
+              "center": [39.6, 0.3],
+              "radius": 5.9,
+              "start_angle_deg": -90,
+              "end_angle_deg": 90
+            },
+            {"type": "line", "id": 3, "a": [39.6, 6.2], "b": [0.2, 6.0]},
+            {
+              "type": "arc",
+              "id": 4,
+              "center": [0, 0],
+              "radius": 6.0,
+              "start_angle_deg": 90,
+              "end_angle_deg": 270
+            }
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_constraints",
+      "params": {
+        "sketch_id": {"$ref": 1},
+        "constraints": [
+          {"kind": "coincident", "refs": [[1, 1], [2, 1]]},
+          {"kind": "coincident", "refs": [[2, 2], [3, 0]]},
+          {"kind": "coincident", "refs": [[3, 1], [4, 1]]},
+          {"kind": "coincident", "refs": [[4, 2], [1, 0]]},
+          {"kind": "tangent", "refs": [[1, 0], [2, 0]]},
+          {"kind": "tangent", "refs": [[2, 0], [3, 0]]},
+          {"kind": "tangent", "refs": [[3, 0], [4, 0]]},
+          {"kind": "tangent", "refs": [[4, 0], [1, 0]]},
+          {"kind": "equal", "refs": [[2, 0], [4, 0]]},
+          {"kind": "radius", "refs": [[4, 0]], "value": 6},
+          {"kind": "fixed", "refs": [[4, 0]]},
+          {"kind": "horizontal", "refs": [[1, 0]]},
+          {"kind": "distance", "refs": [[4, 0], [2, 0]], "value": 40}
+        ]
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Slot",
+          "sketch_id": {"$ref": 1},
+          "distance": 10,
+          "mode": "new_body"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "title": "Three bosses by a linear pattern, the third's top rim filleted r2",
+  "exercises": "a Fillet whose edge is picked on a pattern instance, not on the seed",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Block",
+          "on": "Top",
+          "width": 100,
+          "depth": 30,
+          "height": 10
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Boss",
+          "plane": {"origin": [0, 0, 10], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [{"type": "circle", "id": 1, "center": [-30, 0], "radius": 5}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Boss",
+          "sketch_id": {"$ref": 2},
+          "distance": 10,
+          "mode": "add"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Pattern",
+          "name": "Row",
+          "kind": "linear",
+          "source_id": {"$ref": 3},
+          "axis": {"kind": "x"},
+          "count": 3,
+          "spacing": 30
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Fillet",
+          "name": "Rim",
+          "radius": 2,
+          "edges": [
+            {
+              "$pick": "edge",
+              "at": [33.53553390593274, 3.5355339059327378, 20]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

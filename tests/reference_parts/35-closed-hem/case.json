@@ -1,0 +1,48 @@
+{
+  "title": "Base flange with a closed hem, return 10",
+  "exercises": "Hem `kind: closed`: a 180° bend whose inside radius is half the tenth-of-t gap",
+  "steps": [
+    {
+      "method": "set_sheet_metal_rules",
+      "params": {
+        "material": "aluminum",
+        "gauge": "1.5mm",
+        "bend_radius_mm": 3,
+        "k_factor": 0.41
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Blank",
+          "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [0, 0], "b": [100, 0]},
+            {"type": "line", "id": 2, "a": [100, 0], "b": [100, 60]},
+            {"type": "line", "id": 3, "a": [100, 60], "b": [0, 60]},
+            {"type": "line", "id": 4, "a": [0, 60], "b": [0, 0]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {"type": "BaseFlange", "name": "Base", "sketch_id": {"$ref": 2}}
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Hem",
+          "name": "Hem",
+          "length": 10,
+          "edges": [{"$pick": "edge", "at": [100, 30, 1.5]}]
+        }
+      }
+    }
+  ]
+}

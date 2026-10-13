@@ -1,0 +1,18 @@
+{
+  "title": "Cylinder primitive r15 h50",
+  "exercises": "the Cylinder primitive (a circle extruded), on Top",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Cylinder",
+          "name": "Cylinder",
+          "on": "Top",
+          "radius": 15,
+          "height": 50
+        }
+      }
+    }
+  ]
+}

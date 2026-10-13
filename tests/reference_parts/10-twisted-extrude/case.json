@@ -1,0 +1,38 @@
+{
+  "title": "Square 20 extruded 30, twisted 90°",
+  "exercises": "Extrude `twist_deg`: a ruled, approximated side surface",
+  "compare": ["bodies", "volume", "center_of_mass", "bbox"],
+  "tolerance": {"volume": 0.0001, "center_of_mass": 0.0001, "bbox": 0.01},
+  "note": "the twisted sides are approximated surfaces, so volume and centroid are held to 1e-4 and the box to 0.01 mm; the side area has no closed form and is not compared",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Square",
+          "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [-10, -10], "b": [10, -10]},
+            {"type": "line", "id": 2, "a": [10, -10], "b": [10, 10]},
+            {"type": "line", "id": 3, "a": [10, 10], "b": [-10, 10]},
+            {"type": "line", "id": 4, "a": [-10, 10], "b": [-10, -10]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Twist",
+          "sketch_id": {"$ref": 1},
+          "distance": 30,
+          "twist_deg": 90,
+          "mode": "new_body"
+        }
+      }
+    }
+  ]
+}

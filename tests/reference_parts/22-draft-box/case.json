@@ -1,0 +1,37 @@
+{
+  "title": "Box 40×40×30, the four sides drafted 5° about the bottom",
+  "exercises": "Draft of four faces about a neutral plane at the body's base",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Box",
+          "on": "Top",
+          "width": 40,
+          "depth": 40,
+          "height": 30
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Draft",
+          "name": "Taper",
+          "body_id": {"$ref": 1},
+          "angle_deg": 5,
+          "neutral_plane": "xy",
+          "faces": [
+            {"$pick": "face", "at": [0, -20, 15]},
+            {"$pick": "face", "at": [20, 0, 15]},
+            {"$pick": "face", "at": [0, 20, 15]},
+            {"$pick": "face", "at": [-20, 0, 15]}
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,47 @@
+{
+  "title": "L-bracket, its inner edge filleted r4",
+  "exercises": "Fillet on a concave edge: material added, not removed",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Section",
+          "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [0, 0], "b": [60, 0]},
+            {"type": "line", "id": 2, "a": [60, 0], "b": [60, 8]},
+            {"type": "line", "id": 3, "a": [60, 8], "b": [8, 8]},
+            {"type": "line", "id": 4, "a": [8, 8], "b": [8, 40]},
+            {"type": "line", "id": 5, "a": [8, 40], "b": [0, 40]},
+            {"type": "line", "id": 6, "a": [0, 40], "b": [0, 0]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Bracket",
+          "sketch_id": {"$ref": 1},
+          "distance": 30,
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Fillet",
+          "name": "Root",
+          "radius": 4,
+          "edges": [{"$pick": "edge", "at": [8, -15, 8]}]
+        }
+      }
+    }
+  ]
+}

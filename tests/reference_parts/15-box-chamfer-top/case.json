@@ -1,0 +1,35 @@
+{
+  "title": "Box 40×30×20, the 4 top edges chamfered 2",
+  "exercises": "Chamfer (equal setback) on a closed ring of edges",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Box",
+          "on": "Top",
+          "width": 40,
+          "depth": 30,
+          "height": 20
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Chamfer",
+          "name": "Bevel",
+          "radius": 2,
+          "edges": [
+            {"$pick": "edge", "at": [0, -15, 20]},
+            {"$pick": "edge", "at": [20, 0, 20]},
+            {"$pick": "edge", "at": [0, 15, 20]},
+            {"$pick": "edge", "at": [-20, 0, 20]}
+          ]
+        }
+      }
+    }
+  ]
+}

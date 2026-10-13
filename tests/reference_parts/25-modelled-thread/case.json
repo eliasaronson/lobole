@@ -1,0 +1,37 @@
+{
+  "title": "Cylinder Ø8 with a modelled M8 thread over its length",
+  "exercises": "Thread `modeled: true`: the helical groove swept and cut",
+  "compare": ["bodies", "volume", "center_of_mass", "bbox"],
+  "tolerance": {"volume": 0.001, "center_of_mass": 0.001, "bbox": 0.01},
+  "note": "the groove is a swept B-spline surface, so volume and centroid are held to 1e-3; the helicoid flanks' area is not compared",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Cylinder",
+          "name": "Rod",
+          "on": "Top",
+          "radius": 4,
+          "height": 20
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Thread",
+          "name": "M8",
+          "designation": "M8",
+          "length": 0,
+          "modeled": true,
+          "face": {
+            "$pick": "face",
+            "at": [2.8284271247461903, 2.8284271247461903, 10]
+          }
+        }
+      }
+    }
+  ]
+}

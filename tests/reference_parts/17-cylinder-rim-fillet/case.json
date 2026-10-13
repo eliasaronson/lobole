@@ -1,0 +1,34 @@
+{
+  "title": "Cylinder R20 h30, top rim r3",
+  "exercises": "Fillet on a full circular edge, picked by a point on it wherever its seam lies",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Cylinder",
+          "name": "Puck",
+          "on": "Top",
+          "radius": 20,
+          "height": 30
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Fillet",
+          "name": "Rim",
+          "radius": 3,
+          "edges": [
+            {
+              "$pick": "edge",
+              "at": [14.142135623730951, 14.142135623730951, 30]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

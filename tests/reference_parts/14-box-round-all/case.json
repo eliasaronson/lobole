@@ -1,0 +1,43 @@
+{
+  "title": "Box 40×30×20, all 12 edges r3",
+  "exercises": "Fillet on twelve edges meeting at eight corners (the corner blends)",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Box",
+          "name": "Box",
+          "on": "Top",
+          "width": 40,
+          "depth": 30,
+          "height": 20
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Fillet",
+          "name": "Round",
+          "radius": 3,
+          "edges": [
+            {"$pick": "edge", "at": [0, -15, 0]},
+            {"$pick": "edge", "at": [20, 0, 0]},
+            {"$pick": "edge", "at": [0, 15, 0]},
+            {"$pick": "edge", "at": [-20, 0, 0]},
+            {"$pick": "edge", "at": [0, -15, 20]},
+            {"$pick": "edge", "at": [20, 0, 20]},
+            {"$pick": "edge", "at": [0, 15, 20]},
+            {"$pick": "edge", "at": [-20, 0, 20]},
+            {"$pick": "edge", "at": [-20, -15, 10]},
+            {"$pick": "edge", "at": [-20, 15, 10]},
+            {"$pick": "edge", "at": [20, -15, 10]},
+            {"$pick": "edge", "at": [20, 15, 10]}
+          ]
+        }
+      }
+    }
+  ]
+}

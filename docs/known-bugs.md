@@ -9,20 +9,24 @@ yet".
 Entries are grouped by area. Add a new one under its area's heading, creating
 the heading if it is not here yet.
 
-## Sheet metal
+## Modeling
 
-### A circular corner relief on a fold that is not square leaves the flat pattern thick
+### A fillet on the second piece of a split does not build
 
-- **Symptom:** at a 60° fold the flat blank comes out 1.67 mm thick on 1 mm
-  sheet (2.27 mm at 45°); a rectangular relief is fine. The part passes
-  `check_sheet_metal` and cannot be cut.
-- **Cause:** the circular relief tool is an upright cylinder of height
-  `t + radius` along the panel normal. Only the plan angle between the two
-  bend lines is checked (and refused when not square); the fold angle is not.
-- **Where:** `src/core/features/CornerReliefFeature.cpp`.
-- **Likely fix:** refuse the circular style when a bend's fold angle is not
-  90°, or size and place the tool from the bend region's real extent (or cut
-  it in the flat state).
+- **Symptom:** split a body, pick an edge of the second piece
+  (`query_geometry` hands back `{feature_id: <its created_by>, element}`)
+  and fillet it: the fillet fails with "edge '…' no longer exists". The
+  reference the app gave out is one it cannot resolve.
+  `tests/reference_parts/41-split-then-fillet` is the case.
+- **Cause:** every piece of a split keeps the split body's `createdBy`, and an
+  `ElementRef` names a body by that id alone, so the feature binds to the
+  first body carrying it and looks the name up there.
+- **Where:** the body lookup in `src/core/features/FilletFeature.cpp`, and
+  every feature that finds its body by `createdBy` the same way (Shell,
+  Boolean, Draft and the rest).
+- **Likely fix:** a body sub-ordinal on `Body` and `ElementRef` (a piece's
+  names already differ: `…/b2/…`); short of that, resolve a named element
+  against every body sharing the id and refuse a name that two of them carry.
 
 ## Inspection
 

@@ -1,0 +1,30 @@
+{
+  "title": "Circle r4 at R20 revolved 360°",
+  "exercises": "a full Revolve about the world z axis of a sketch on the XZ plane",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Section",
+          "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0], "uAxis": [1, 0, 0]},
+          "entities": [{"type": "circle", "id": 1, "center": [20, 0], "radius": 4}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Revolve",
+          "name": "Ring",
+          "sketch_id": {"$ref": 1},
+          "axis": {"kind": "z"},
+          "angle_deg": 360,
+          "mode": "new_body"
+        }
+      }
+    }
+  ]
+}
