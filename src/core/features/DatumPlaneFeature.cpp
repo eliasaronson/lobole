@@ -104,6 +104,9 @@ DatumPlaneFeature::DatumPlaneFeature(const std::string& name,
 }
 
 bool DatumPlaneFeature::Execute(RegenContext& ctx) {
+  // What a failed evaluation leaves is the default, as on a fresh object
+  // -- never the last good one, which a dependent would build on.
+  m_outPlane = SketchPlane(PlaneType::XY);
   switch (kind) {
   case DatumPlaneKind::Offset: {
     const auto parent = ResolveParentPlane(ctx, parentId, basePlane);

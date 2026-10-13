@@ -715,7 +715,7 @@ Report Lint(const Document& doc, const std::vector<Variable>& variables) {
     report.placementsChecked++;
 
     // The faces it could have been attached to: the bodies as they stood
-    // when it ran. The prefix cache has them unless the part was opened
+    // when it ran. The regen cache has them unless the part was opened
     // from baked geometry, which carries only the tip; then the final
     // bodies, keeping only faces every feature named in had run by then.
     const std::vector<Body>* cached = doc.CachedBodiesAfter(i - 1);

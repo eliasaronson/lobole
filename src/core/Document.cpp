@@ -8,6 +8,7 @@
 #include "core/features/DerivedFeature.h"
 #include "core/features/HoleFeature.h"
 #include "core/features/RetainingRingGrooveFeature.h"
+#include "core/features/SketchFeature.h"
 
 #include "common/Logger.h"
 #include "core/io/Serialization.h" // FeatureToJson: the regen-cache hash input
@@ -20,6 +21,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 
 static bool PrintDrivesGeometry(const Feature& f);
 
@@ -111,7 +113,7 @@ Document::Document(const Document& other) : Document(other, false) {}
 // initializer, which mints a fresh one).
 //
 // Anything absent below is absent on purpose — it is cache, and the
-// Regenerate() at the end rebuilds it: m_bodies, the prefix cache,
+// Regenerate() at the end rebuilds it: m_bodies, the regen cache,
 // m_tipHash, m_lastStats. m_version starts at 0 like any other new document.
 // The baked-geometry hand-off is the one exception, and only under
 // `reuseGeometry`: it is set precisely so that Regenerate has something to
@@ -445,6 +447,9 @@ bool Document::Regenerate() {
   for (size_t i = upTo; i < m_features.size(); i++) {
     m_features[i]->ClearError();
     m_features[i]->ClearWarning();
+    // Its object no longer holds an evaluation: rolling forward restores
+    // the cached one, errors and all.
+    m_features[i]->SetDerivedFor(0);
   }
 
   // Refresh expression-driven fields before hashing: the serialized feature
@@ -475,10 +480,10 @@ bool Document::Regenerate() {
   }
 
   // Incremental regeneration (R3): chain hashes make any change invalidate
-  // everything after it — editing feature k re-runs [k, N) only. Precise
-  // dependency tracking is deliberately v2; chaining is what makes retained
-  // feature-internal state (solved sketches, cached datum planes) safe: a
-  // matching prefix implies identical inputs, hence identical state.
+  // everything after it — editing feature k re-runs [k, N) at most. Precise
+  // dependency tracking is deliberately v2: a matching hash implies identical
+  // inputs all the way down, hence an identical evaluation, which a hit
+  // restores (feature state included, Feature::CopyDerivedState).
   std::vector<size_t> hashes(upTo);
   size_t chain = 0x9e3779b97f4a7c15ull;
   // The sheet-metal rules seed the chain rather than sitting in any one
@@ -532,6 +537,16 @@ bool Document::Regenerate() {
     // hashes whatever the process. The rows' CONTENT, not the names: a
     // profile's gap edited from a coupon (v169) is the same name with a
     // different number, and must rebuild what was modelled from the old one.
+    // A sketch standing on a face, a datum plane, another sketch or a frame
+    // works its plane out in Execute and writes it back: an OUTPUT, so it is
+    // not keyed on. Kept in, the key carried the plane of whichever history
+    // last executed the sketch, and a value set back missed from that sketch
+    // on (Execute refuses rather than fall back to it when the reference
+    // fails to resolve, so leaving it out cannot make two inputs one).
+    if (const auto* sk =
+            dynamic_cast<const SketchFeature*>(m_features[i].get()))
+      if (sk->faceRef.IsSet() || sk->planeRef != 0)
+        fj.erase("plane");
     if (m_print && PrintDrivesGeometry(*m_features[i]))
       fj["print"] = printfit::Fingerprint(*m_print);
     chain = std::hash<std::string>{}(
@@ -542,8 +557,8 @@ bool Document::Regenerate() {
   m_tipHash = upTo > 0 ? hashes[upTo - 1] : 0;
 
   // Baked geometry: if the blob the loader adopted describes exactly this
-  // feature list, install it and execute nothing. The prefix cache stays
-  // empty, so the first edit rebuilds from the start — the trade recorded in
+  // feature list, install it and execute nothing. The regen cache holds no
+  // evaluation of it, so the first edit rebuilds from the start — the trade in
   // docs/versioning/README.md#baked-geometry. Either way the hand-off is
   // consumed here, so a later edit can never resurrect it.
   if (!m_bakedBodies.empty()) {
@@ -563,18 +578,25 @@ bool Document::Regenerate() {
       // A bake from before the marks followed their faces holds the old
       // names.
       FollowModifiedFaces(m_bodies);
-      // Seed the prefix cache so a LATER regeneration (the UI syncs, the RPC
+      // Seed the regen cache so a LATER regeneration (the UI syncs, the RPC
       // layer, an unrelated document-version bump) is free too — without it,
       // the next Regenerate found an empty cache and rebuilt everything the
       // blob had just saved us. Only the tip entry carries bodies; the rest
       // are hashes with bodiesValid=false, which is what makes an edit
       // anywhere in the history fall back to a full rebuild.
+      //
+      // None of them holds a clone: nothing executed, so each object's
+      // derived state is what a bake leaves (none, a datum's below), and
+      // DerivedFor says the entry may be used only while that stays so.
       m_cache.clear();
-      m_cache.reserve(upTo);
+      m_chain = hashes;
       for (size_t i = 0; i + 1 < upTo; i++)
-        m_cache.push_back({hashes[i], {}, /*bodiesValid=*/false});
+        m_cache[hashes[i]] = {{}, /*bodiesValid=*/false, nullptr, 0};
       if (upTo > 0)
-        m_cache.push_back({hashes[upTo - 1], m_bodies, /*bodiesValid=*/true});
+        m_cache[hashes[upTo - 1]] = {m_bodies, /*bodiesValid=*/true, nullptr,
+                                     0};
+      for (size_t i = 0; i < upTo; i++)
+        m_features[i]->SetDerivedFor(hashes[i]);
       // Restore the advice the features gave when this geometry was built:
       // nothing executed, so nothing would have raised it again.
       for (const auto& [id, text] : bakedWarnings) {
@@ -618,66 +640,118 @@ bool Document::Regenerate() {
     LOG_INFO("Baked geometry does not match the recipe; rebuilding");
   }
 
-  size_t divergence = 0;
-  while (divergence < upTo && divergence < m_cache.size() &&
-         m_cache[divergence].hash == hashes[divergence]) {
-    divergence++;
-  }
-  // A divergence that resumes from a placeholder entry (baked geometry) has
-  // no bodies to resume FROM: rebuild the whole list instead.
-  if (divergence > 0 && !m_cache[divergence - 1].bodiesValid) {
-    divergence = 0;
-    m_cache.clear();
-  }
-  m_lastStats.cached = divergence;
-  m_bodies = divergence > 0 ? m_cache[divergence - 1].bodiesAfter
-                            : std::vector<Body>{};
-  // Errors in the cached prefix persist from their last (deterministic)
-  // execution; they still count against the result.
-  bool anyFailedYet = false;
-  for (size_t i = 0; i < divergence; i++) {
-    if (!m_features[i]->GetError().empty()) {
-      allOk = false;
-      anyFailedYet = true;
-    }
-  }
-
-  if (divergence < upTo) {
-    m_bodiesFromBlob = 0; // executed: the bodies are this build's now
-    m_bodiesBlobSource.clear();
-    m_cache.resize(divergence); // stale suffix; rebuilt below
-    for (size_t i = divergence; i < upTo; i++) {
-      m_features[i]->ClearError();
-      m_features[i]->ClearWarning();
-      if (!EffectiveSuppressed(i)) {
+  // Each feature is a lookup of its chain hash, so a hit is a hit wherever
+  // the entry came from: the current history, or one an undo or a value set
+  // back has just returned to. Once the chain diverges it cannot re-converge
+  // (the hash folds everything before it), so a run is hits up to the edit,
+  // then all hits (a state seen before) or all misses.
+  //
+  // `input` is feature i's input: m_bodies, or the entry that last hit,
+  // copied out only when something executes or at the end (a copy per hit
+  // would be a copy of every element map per feature). Null after a bake's
+  // placeholder, which knows its hash but not its bodies: a feature that
+  // must execute there cannot, and the pass restarts with every feature
+  // executing, as a bake's first edit always has.
+  bool chainOk = true;
+  for (bool executeAll : {false, true}) {
+    chainOk = true;
+    m_lastStats = {};
+    m_bodies.clear();
+    const std::vector<Body>* input = &m_bodies;
+    bool anyFailedYet = false;
+    bool restart = false;
+    for (size_t i = 0; i < upTo && !restart; i++) {
+      Feature& f = *m_features[i];
+      const size_t h = hashes[i];
+      const bool suppressed = EffectiveSuppressed(i);
+      const auto it = executeAll ? m_cache.end() : m_cache.find(h);
+      // A clone restores whatever the object last executed; without one the
+      // object itself must already be this evaluation (the bake's entries).
+      if (it != m_cache.end() &&
+          (suppressed || it->second.executed != nullptr ||
+           f.DerivedFor() == h)) {
+        RegenCacheEntry& e = it->second;
+        e.lastUse = ++m_regenClock;
+        if (suppressed) {
+          f.ClearError();
+          f.ClearWarning();
+        } else if (e.executed != nullptr && f.DerivedFor() != h) {
+          f.CopyDerivedState(*e.executed);
+        } else if (e.executed != nullptr) {
+          f.CopyRegenStatus(*e.executed);
+        }
+        f.SetDerivedFor(h);
+        input = e.bodiesValid ? &e.bodiesAfter : nullptr;
+        m_lastStats.cached++;
+        // Errors from the evaluation that made the entry still count
+        // against the result.
+        if (!f.GetError().empty()) {
+          chainOk = false;
+          anyFailedYet = true;
+        }
+        continue;
+      }
+      if (input == nullptr) {
+        restart = true;
+        break;
+      }
+      if (input != &m_bodies) {
+        m_bodies = *input;
+        input = &m_bodies;
+      }
+      m_bodiesFromBlob = 0; // executed: the bodies are this build's now
+      m_bodiesBlobSource.clear();
+      f.ClearError();
+      f.ClearWarning();
+      if (!suppressed) {
         RegenContext ctx{m_bodies,  m_features,
                          i,         &m_symbols,
                          &m_assets, m_sheetMetal ? &*m_sheetMetal : nullptr};
         ctx.configuration = ActiveConfig();
         ctx.print = m_print ? &*m_print : nullptr;
         m_lastStats.executed++;
-        if (!ExecuteNoting(*m_features[i], ctx)) {
-          if (m_features[i]->GetError().empty()) {
-            m_features[i]->SetError("regeneration failed");
+        if (!ExecuteNoting(f, ctx)) {
+          if (f.GetError().empty()) {
+            f.SetError("regeneration failed");
           }
           // A failure downstream of another failure is usually collateral —
           // tag it so clients can point at the first red feature.
-          m_features[i]->SetErrorAfterEarlierFailure(anyFailedYet);
+          f.SetErrorAfterEarlierFailure(anyFailedYet);
           anyFailedYet = true;
           // Continue past the failure (R1): the broken feature contributes
           // nothing; downstream features see the bodies as of this point
           // and fail on their own if they referenced its outputs.
-          LOG_ERROR("Feature '{}' failed to regenerate: {}",
-                    m_features[i]->GetName(), m_features[i]->GetError());
-          allOk = false;
+          LOG_ERROR("Feature '{}' failed to regenerate: {}", f.GetName(),
+                    f.GetError());
+          chainOk = false;
         }
         FollowModifiedFaces(m_bodies);
       }
-      m_cache.push_back({hashes[i], m_bodies});
+      f.SetDerivedFor(h);
+      m_cache.insert_or_assign(
+          h, RegenCacheEntry{m_bodies, true,
+                             suppressed
+                                 ? nullptr
+                                 : std::shared_ptr<const Feature>(f.Clone()),
+                             ++m_regenClock});
     }
+    if (!restart && input != nullptr) {
+      if (input != &m_bodies)
+        m_bodies = *input;
+      break;
+    }
+    // Only a bake's placeholders can get here, and a full rebuild replaces
+    // every one of them.
+    LOG_INFO("Regeneration resumes from baked geometry; rebuilding");
   }
-  // divergence == upTo: fully cached — keep any entries beyond upTo so
-  // rolling the bar forward again is instant (their hashes re-verify then).
+  if (!chainOk)
+    allOk = false;
+  // The current chain. Entries past the rollback bar stay in it while the
+  // features before the bar are unchanged, so rolling forward is instant.
+  if (m_chain.size() < upTo ||
+      !std::equal(hashes.begin(), hashes.end(), m_chain.begin()))
+    m_chain = hashes;
+  EvictRegenCache();
 
   // Fail-loud (Phase V): stamp the expression-resolution failures collected in
   // the refresh pass. Applied here — after Execute — so a rebuilt feature's
@@ -698,6 +772,29 @@ bool Document::Regenerate() {
   // like the appearance they are stamped here and not by a feature.
   fitband::Stamp(*this, m_bodies);
   return allOk;
+}
+
+// The current chain plus about two alternatives for the whole list, more
+// for edits low in it. An entry costs what its feature made and nothing it
+// passed through (bodies are shared shapes), so this bounds memory at a few
+// times one full chain.
+size_t Document::RegenCacheCap() const {
+  return std::max<size_t>(256, 3 * m_features.size());
+}
+
+void Document::EvictRegenCache() {
+  const size_t cap = RegenCacheCap();
+  if (m_cache.size() <= cap)
+    return;
+  const std::unordered_set<size_t> current(m_chain.begin(), m_chain.end());
+  std::vector<std::pair<uint64_t, size_t>> others; // lastUse, hash
+  for (const auto& [hash, entry] : m_cache)
+    if (current.count(hash) == 0)
+      others.emplace_back(entry.lastUse, hash);
+  std::sort(others.begin(), others.end());
+  const size_t excess = std::min(m_cache.size() - cap, others.size());
+  for (size_t i = 0; i < excess; i++)
+    m_cache.erase(others[i].second);
 }
 
 const Parameter* Document::FindParameter(const std::string& name) const {

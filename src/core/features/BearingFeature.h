@@ -48,6 +48,10 @@ public:
     return std::make_unique<BearingFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<BearingFeature>(executed);
+  }
+
   // Steel unless told otherwise, like a fastener.
   bool StampsOwnMaterial() const override { return true; }
 

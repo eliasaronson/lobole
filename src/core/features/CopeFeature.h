@@ -44,6 +44,10 @@ public:
     return std::make_unique<CopeFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<CopeFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {

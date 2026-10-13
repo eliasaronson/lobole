@@ -25,7 +25,7 @@ namespace DocumentIO {
 //     0.brep …      one binary B-Rep per body
 //
 // The blob is only ever an accelerator. It is keyed by the same chain hash the
-// regeneration prefix cache uses (Document::TipChainHash), so a stale one
+// regeneration cache uses (Document::TipChainHash), so a stale one
 // cannot be mistaken for the truth: the hash matches and it loads, or it does
 // not and the document rebuilds. A missing, truncated or foreign-format blob
 // is ignored in silence.

@@ -19,9 +19,9 @@ enum class DatumPlaneKind { Offset, Angled, ThroughPoints };
 // toponaming-free: parents are base planes or earlier datums by id, axes are
 // global axes or sketch lines by stable ids.
 //
-// Contributes no bodies. A missing/degenerate input fails Execute, stopping
-// regeneration there (same contract as ExtrudeFeature's missing sketch);
-// the cached output plane keeps its last good value for UI overlays.
+// Contributes no bodies. A missing/degenerate input fails Execute (same
+// contract as ExtrudeFeature's missing sketch) and leaves the output plane at
+// its default, as on a fresh object -- never the last good one.
 class DatumPlaneFeature : public Feature {
 public:
   DatumPlaneFeature(const std::string& name,
@@ -31,6 +31,10 @@ public:
 
   std::unique_ptr<Feature> Clone() const override {
     return std::make_unique<DatumPlaneFeature>(*this);
+  }
+
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<DatumPlaneFeature>(executed);
   }
 
   bool Execute(RegenContext& ctx) override;

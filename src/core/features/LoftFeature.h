@@ -34,6 +34,10 @@ public:
     return std::make_unique<LoftFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<LoftFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {

@@ -26,6 +26,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -533,7 +534,7 @@ public:
 
   // Whether feature `index` is suppressed under the active configuration: its
   // authored `suppressed` flag OR the active config suppresses its id. This is
-  // what regeneration honors (and folds into the prefix-cache key).
+  // what regeneration honors (and folds into the regen cache key).
   bool EffectiveSuppressed(size_t index) const;
 
   // Allocates the next document-unique id (studies and their loads draw from
@@ -555,7 +556,7 @@ public:
   // Suspends regeneration for a batch of edits (loading a file, importing an
   // assembly), running exactly one Regenerate when the last guard releases.
   //
-  // Every InsertFeature regenerates, which the prefix cache keeps cheap in
+  // Every InsertFeature regenerates, which the regen cache keeps cheap in
   // EXECUTION — but not in bookkeeping: each pass re-serializes and re-hashes
   // every feature so far, so loading N features costs N^2/2 feature-JSON
   // dumps (about 11k of them for a 148-feature part, tens of seconds before
@@ -659,7 +660,7 @@ public:
   uint64_t InstanceId() const { return m_instanceId; }
 
   // Incremental regeneration (R3): how much of the last Regenerate came
-  // from the prefix cache vs. actually executed. Observable, not vibes.
+  // from the regeneration cache vs. actually executed. Observable, not vibes.
   struct RegenStats {
     size_t executed = 0;
     size_t cached = 0;
@@ -667,7 +668,7 @@ public:
   const RegenStats& LastRegenStats() const { return m_lastStats; }
 
   // The chain hash of the whole feature list as of the last regeneration —
-  // the same value the prefix cache keys its last entry on, exposed so the
+  // the same value the regen cache keys its last entry on, exposed so the
   // saved geometry can be tagged with it (and a load can ask "is this blob
   // still the answer?"). 0 before the first regeneration or with no features.
   size_t TipChainHash() const { return m_tipHash; }
@@ -684,14 +685,24 @@ public:
     return m_bodiesFromBlob != 0 && m_bodiesFromBlob == hash &&
            !source.empty() && m_bodiesBlobSource == source;
   }
-  void ClearRegenCache() { m_cache.clear(); }
+  void ClearRegenCache() {
+    m_cache.clear();
+    m_chain.clear();
+  }
+  // How many evaluations the regeneration cache holds, across every history
+  // it remembers, and the most it may (RegenCacheCap). For the cap test.
+  size_t RegenCacheSize() const { return m_cache.size(); }
+  size_t RegenCacheCap() const;
 
   // The body list as it stood after feature `index` executed, from the regen
-  // prefix cache — i.e. feature `index + 1`'s input. Valid for the prefix the
-  // last successful Regenerate covered; null when the cache doesn't reach
-  // `index`. Used by edge picking to resolve refs against a blend's input.
+  // cache — i.e. feature `index + 1`'s input. Valid for the chain the last
+  // Regenerate covered; null when the cache doesn't reach `index`. Used by
+  // edge picking to resolve refs against a blend's input.
   const std::vector<Body>* CachedBodiesAfter(size_t index) const {
-    return index < m_cache.size() ? &m_cache[index].bodiesAfter : nullptr;
+    if (index >= m_chain.size())
+      return nullptr;
+    const auto it = m_cache.find(m_chain[index]);
+    return it != m_cache.end() ? &it->second.bodiesAfter : nullptr;
   }
 
   // Rollback bar (R2): regeneration executes features [0, rollback) only;
@@ -808,19 +819,36 @@ private:
   std::string m_bodiesBlobSource; // see BodiesAreBlob()
   bool m_commitGeometry = true;
 
-  // Prefix cache (R3): per feature, the chain hash of everything up to and
-  // including it, plus a snapshot of the body list after it executed. Body
-  // snapshots are cheap (TopoDS_Shape is refcounted). Entries beyond the
-  // current rollback stay — rolling forward again is then instant.
+  // Regeneration cache (R3): one entry per feature EVALUATION, keyed on the
+  // chain hash of everything up to and including that feature, so an entry
+  // means "identical inputs all the way down" wherever it sits. It remembers
+  // more than the current history: setting a value back, undo and redo find
+  // the evaluations an earlier history made and execute nothing
+  // (docs/architecture.md#the-document-model-and-regeneration). Bounded by
+  // RegenCacheCap(), least recently used first, never an entry of the
+  // current chain. Body snapshots are cheap (TopoDS_Shape is refcounted).
   struct RegenCacheEntry {
-    size_t hash = 0;
     std::vector<Body> bodiesAfter;
     // False for the placeholder entries baked geometry installs: the blob
     // carries only the TIP bodies, so intermediate entries know their hash
-    // but not the body list at that point. A divergence landing on one of
-    // those cannot resume from it — Regenerate falls back to a full rebuild.
+    // but not the body list at that point. Execution cannot resume from
+    // one — Regenerate falls back to a full rebuild.
     bool bodiesValid = true;
+    // The feature as its Execute left it (a Clone taken right after), which
+    // a hit restores through Feature::CopyDerivedState: the live object may
+    // last have executed in ANOTHER history. Null for a suppressed feature
+    // (nothing executed) and for the bake's entries, which are usable only
+    // while the live object still holds that evaluation
+    // (Feature::DerivedFor).
+    std::shared_ptr<const Feature> executed;
+    uint64_t lastUse = 0; // m_regenClock of the last regeneration it served
   };
-  std::vector<RegenCacheEntry> m_cache;
+  std::unordered_map<size_t, RegenCacheEntry> m_cache;
+  // The chain hashes of the current feature list, by index: what
+  // CachedBodiesAfter reads. Entries beyond the rollback bar stay, so rolling
+  // forward again is instant (their hashes re-verify then).
+  std::vector<size_t> m_chain;
+  uint64_t m_regenClock = 0;
+  void EvictRegenCache();
   RegenStats m_lastStats;
 };

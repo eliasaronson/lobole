@@ -29,6 +29,10 @@ public:
     return std::make_unique<RevolveFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<RevolveFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {

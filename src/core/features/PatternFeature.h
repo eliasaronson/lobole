@@ -35,6 +35,10 @@ public:
     return std::make_unique<PatternFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<PatternFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
   uint64_t MaterialSource() const override { return sourceId; }
 

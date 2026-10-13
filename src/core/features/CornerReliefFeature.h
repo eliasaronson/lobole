@@ -33,6 +33,10 @@ public:
     return std::make_unique<CornerReliefFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<CornerReliefFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {

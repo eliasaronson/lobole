@@ -211,10 +211,10 @@ bool CutTeethBySectors(Feature& f, Body& body, const gp_Ax3& frame, int teeth,
 
 // The last few wheels built, by their exact inputs: the blank's body (the
 // same shape, not an equal one) and names, and every number the wheel
-// reads. A wheel's inputs come back unchanged whenever an edit to it is
-// undone or redone, or a configuration is switched back — the regeneration
-// cache has dropped it by then, since it keeps only the one history it last
-// ran. Holding the input keeps its shape alive, so an entry cannot match a
+// reads. The regeneration cache already serves an undone or redone edit;
+// this serves a wheel that executes again on the same blank with the same
+// numbers (a change it does not read, an evaluation that cache evicted).
+// Holding the input keeps its shape alive, so an entry cannot match a
 // later shape that reuses its address. Shapes are copied in and out: a
 // document's later booleans write onto the shapes it holds, and the open
 // path regenerates parts on several threads.

@@ -108,6 +108,9 @@ bool frame::ElementFrame(const std::vector<Body>& bodies, const ElementRef& ref,
 }
 
 bool FrameFeature::Execute(RegenContext& ctx) {
+  // What a failed evaluation leaves is the default, as on a fresh object
+  // -- never the last good one, which a dependent would build on.
+  m_frame = glm::dmat4(1.0);
   switch (kind) {
   case FrameKind::Explicit: {
     if (glm::dot(zAxis, zAxis) < 1e-12) {

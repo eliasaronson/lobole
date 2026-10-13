@@ -55,6 +55,10 @@ public:
     return std::make_unique<DerivedFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<DerivedFeature>(executed);
+  }
+
   // inherits the SOURCE body's material when its own is empty, so Document's
   // material re-stamp must leave it alone.
   bool StampsOwnMaterial() const override { return true; }

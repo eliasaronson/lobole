@@ -26,6 +26,10 @@ public:
     return std::make_unique<RibFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<RibFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(sketchId); // the open profile

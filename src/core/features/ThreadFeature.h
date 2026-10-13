@@ -31,6 +31,10 @@ public:
     return std::make_unique<ThreadFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<ThreadFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
   // Why these inputs are refused, without the face (empty = fine): a
   // designation claiming a row the tables lack, a table thread at another

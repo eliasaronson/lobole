@@ -30,6 +30,10 @@ public:
   std::unique_ptr<Feature> Clone() const override {
     return std::make_unique<WormFeature>(*this);
   }
+
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<WormFeature>(executed);
+  }
   bool Execute(RegenContext& ctx) override;
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     VisitRefs(face, visit);
@@ -77,6 +81,10 @@ public:
   std::string TypeName() const override { return "WormWheel"; }
   std::unique_ptr<Feature> Clone() const override {
     return std::make_unique<WormWheelFeature>(*this);
+  }
+
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<WormWheelFeature>(executed);
   }
   bool Execute(RegenContext& ctx) override;
   void VisitFeatureRefs(const RefVisitor& visit) const override {

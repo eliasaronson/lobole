@@ -32,17 +32,25 @@
 class TemplateFeature : public Feature {
 public:
   explicit TemplateFeature(const std::string& name) { m_name = name; }
-  // Everything but the expansion, which the next Execute rebuilds (the
-  // features are owning pointers, so the compiler cannot write this one).
+  // The expansion is cloned feature by feature (owning pointers, so the
+  // compiler cannot write this one): a copy is the instance as it last
+  // executed, which is what the regeneration cache keeps of it.
   TemplateFeature(const TemplateFeature& other)
       : Feature(other), templateName(other.templateName),
-        definition(other.definition), values(other.values), ids(other.ids) {}
+        definition(other.definition), values(other.values), ids(other.ids) {
+    m_expanded.reserve(other.m_expanded.size());
+    for (const auto& f : other.m_expanded)
+      m_expanded.push_back(f->Clone());
+  }
 
   std::string TypeName() const override { return "Template"; }
 
   std::unique_ptr<Feature> Clone() const override {
     return std::make_unique<TemplateFeature>(*this);
   }
+
+  // The expansion is owning pointers, so it is cloned rather than assigned.
+  void CopyDerivedState(const Feature& executed) override;
 
   bool Execute(RegenContext& ctx) override;
 

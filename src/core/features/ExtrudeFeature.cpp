@@ -37,6 +37,10 @@ std::string ExtrudeFeature::WhyIncomplete() const {
 }
 
 bool ExtrudeFeature::Execute(RegenContext& ctx) {
+  // The tool is THIS evaluation's or none: a failed or new-body extrude that
+  // kept the last one would hand a Pattern of it a cutter it no longer makes.
+  m_tool = CADShape();
+  m_toolMap = ElementMap();
   if (const std::string why = WhyIncomplete(); !why.empty()) {
     SetError(why);
     return false;

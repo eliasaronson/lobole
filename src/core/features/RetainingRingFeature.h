@@ -35,6 +35,10 @@ public:
     return std::make_unique<RetainingRingFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<RetainingRingFeature>(executed);
+  }
+
   // Spring steel unless told otherwise, like a fastener.
   bool StampsOwnMaterial() const override { return true; }
 

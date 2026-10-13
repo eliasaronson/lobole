@@ -441,16 +441,50 @@ public:
 
   virtual std::string TypeName() const = 0;
 
-  // A deep copy of this feature — id, name, material and all. The one
-  // deep-copy path there is: duplicating a tab clones the document, which
-  // clones every feature through here. PURE virtual on purpose, so a new
-  // feature type cannot arrive without one; a runtime table could be
-  // forgotten, and the copy would then silently lose that feature.
-  // Every concrete feature is a plain value (no owning pointers), so each
-  // override is `make_unique<T>(*this)`. Cached geometry (a cut tool's
-  // shape/element map) comes along and is overwritten by the clone's first
-  // regeneration — harmless either way.
+  // A deep copy of this feature — id, name, material and all, and the state
+  // its last Execute left (a cut tool's shape and element map). Duplicating a
+  // tab clones the document through here, and the regeneration cache keeps a
+  // clone of every evaluation, which CopyDerivedState restores from. PURE
+  // virtual on purpose, so a new feature type cannot arrive without one; a
+  // runtime table could be forgotten, and the copy would then silently lose
+  // that feature. Each override is `make_unique<T>(*this)`; Import and
+  // Template write their copy constructors, since they hold owning pointers.
   [[nodiscard]] virtual std::unique_ptr<Feature> Clone() const = 0;
+
+  // Makes this feature what its Execute left it as, from `executed`: a
+  // Clone() of this same feature (same type, id and chain hash) taken right
+  // after it executed. The regeneration cache calls it on a hit, because the
+  // hit may come from ANOTHER history than the one this object last executed
+  // in — undo, a value set back — and everything Execute leaves on the
+  // object (a cut's tool, a frame's placement, a sketch's resolved plane, a
+  // hole's thread-fit diameter, the error and warning it raised) is then
+  // that other history's
+  // (docs/architecture.md#the-document-model-and-regeneration).
+  //
+  // PURE virtual for the reason Clone() is: a new feature type has to say
+  // what its Execute retains. Nearly every one says RestoreExecuted<Self>,
+  // which copies the whole object except what the chain hash leaves out
+  // (appearance, material), so a member added later cannot be forgotten;
+  // test_conventions.cpp holds the overrides to that.
+  virtual void CopyDerivedState(const Feature& executed) = 0;
+
+  // The regeneration status `executed` was left with: error, warning and
+  // the after-an-earlier-failure flag. Part of every CopyDerivedState, and
+  // applied on its own by a hit whose object already holds that evaluation
+  // (an expression error stamped after the last one is not its).
+  void CopyRegenStatus(const Feature& executed) {
+    m_error = executed.m_error;
+    m_warning = executed.m_warning;
+    m_errorAfterEarlierFailure = executed.m_errorAfterEarlierFailure;
+  }
+
+  // The chain hash of the evaluation this object's derived state is from —
+  // the last Execute, or the last CopyDerivedState — stamped by
+  // Document::Regenerate; 0 = none (a feature fresh from JSON, or one an
+  // undo put back). Lets a cache hit skip the restore when the object is
+  // already that evaluation. Transient, never serialized.
+  [[nodiscard]] size_t DerivedFor() const { return m_derivedFor; }
+  void SetDerivedFor(size_t chainHash) { m_derivedFor = chainHash; }
 
   // Applies this feature to the model. Returns false on failure, which
   // aborts regeneration of subsequent features.
@@ -523,9 +557,9 @@ public:
   // replicate (a cut removes, an add fuses into a body another feature made),
   // so the pattern replicates the TOOL instead, in the source's own mode —
   // R14 for cuts, and for adds since the watch's contrate teeth needed one.
-  // Null for everything else. Valid only within the same regeneration pass —
+  // Null for everything else. The tool of the source's CURRENT evaluation —
   // features regen in order and a pattern may only reference an earlier
-  // feature, so it always reads the tool its source just built.
+  // feature, which either just executed or was restored from the cache.
   virtual const CADShape* ToolShape() const { return nullptr; }
   // The names of that tool's faces/edges, so each patterned instance can carry
   // suffixed copies of them (…#2) instead of arriving nameless.
@@ -577,6 +611,22 @@ public:
   void SetSuppressed(bool suppressed) { m_suppressed = suppressed; }
 
 protected:
+  // The usual CopyDerivedState: becomes `executed` whole, keeping its own
+  // appearance, material and the face looks Regenerate stamps — what the
+  // chain hash leaves out, so they may differ between two objects with one
+  // evaluation. Everything else is either hashed (and so equal) or derived.
+  template <class T> void RestoreExecuted(const Feature& executed) {
+    Appearance appearance = std::move(m_appearance);
+    std::vector<FaceAppearance> faces = std::move(m_faceAppearances);
+    std::vector<std::string> unresolved = std::move(m_unresolvedFaceLooks);
+    std::string material = std::move(m_material);
+    static_cast<T&>(*this) = static_cast<const T&>(executed);
+    m_appearance = std::move(appearance);
+    m_faceAppearances = std::move(faces);
+    m_unresolvedFaceLooks = std::move(unresolved);
+    m_material = std::move(material);
+  }
+
   std::string m_name;
   std::string m_material;
   Appearance m_appearance;
@@ -587,6 +637,7 @@ protected:
   std::string m_warning;
   bool m_errorAfterEarlierFailure = false;
   bool m_suppressed = false;
+  size_t m_derivedFor = 0; // see DerivedFor()
 };
 
 struct AxisRef; // core/AxisRef.h
@@ -607,6 +658,10 @@ public:
 
   std::unique_ptr<Feature> Clone() const override {
     return std::make_unique<BoxFeature>(*this);
+  }
+
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<BoxFeature>(executed);
   }
 
   bool Execute(RegenContext& ctx) override;
@@ -641,6 +696,10 @@ public:
     return std::make_unique<SphereFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<SphereFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   // Names no other feature: a primitive is built from numbers alone.
@@ -664,6 +723,10 @@ public:
 
   std::unique_ptr<Feature> Clone() const override {
     return std::make_unique<CylinderFeature>(*this);
+  }
+
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<CylinderFeature>(executed);
   }
 
   bool Execute(RegenContext& ctx) override;
@@ -703,12 +766,18 @@ public:
   ImportFeature(const ImportFeature& other)
       : Feature(other), path(other.path), keepOrigin(other.keepOrigin),
         lengthUnit(other.lengthUnit), hasColor(other.hasColor),
-        color(other.color) {}
+        color(other.color), m_shift(other.m_shift) {}
 
   std::string TypeName() const override { return "Import"; }
 
   std::unique_ptr<Feature> Clone() const override {
     return std::make_unique<ImportFeature>(*this);
+  }
+
+  // Its one derived member is the shift; the parse seed is a hand-off.
+  void CopyDerivedState(const Feature& executed) override {
+    CopyRegenStatus(executed);
+    m_shift = static_cast<const ImportFeature&>(executed).m_shift;
   }
 
   bool Execute(RegenContext& ctx) override;

@@ -125,6 +125,15 @@ TemplateFeature::UpdateTo(const tmpl::Template& next, const tmpl::Values& extra,
   return {};
 }
 
+void TemplateFeature::CopyDerivedState(const Feature& executed) {
+  const auto& e = static_cast<const TemplateFeature&>(executed);
+  CopyRegenStatus(e);
+  m_expanded.clear();
+  m_expanded.reserve(e.m_expanded.size());
+  for (const auto& f : e.m_expanded)
+    m_expanded.push_back(f->Clone());
+}
+
 bool TemplateFeature::Execute(RegenContext& ctx) {
   m_expanded.clear();
   if (const std::string why = WhyIncomplete(); !why.empty()) {

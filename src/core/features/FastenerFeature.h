@@ -42,6 +42,10 @@ public:
     return std::make_unique<FastenerFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<FastenerFeature>(executed);
+  }
+
   // defaults to steel when its own is empty, so Document's
   // material re-stamp must leave it alone.
   bool StampsOwnMaterial() const override { return true; }

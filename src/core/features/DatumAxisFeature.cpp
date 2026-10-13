@@ -13,6 +13,10 @@ DatumAxisFeature::DatumAxisFeature(const std::string& name, DatumAxisKind kind)
 }
 
 bool DatumAxisFeature::Execute(RegenContext& ctx) {
+  // What a failed evaluation leaves is the default, as on a fresh object
+  // -- never the last good one, which a dependent would build on.
+  m_origin = glm::dvec3(0.0);
+  m_dir = glm::dvec3(1.0, 0.0, 0.0);
   switch (kind) {
   case DatumAxisKind::GlobalX:
     m_origin = glm::dvec3(0.0);

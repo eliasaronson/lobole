@@ -69,6 +69,10 @@ public:
     return std::make_unique<CurveFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<CurveFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   // A bent path whose corners cannot be bent (a straight too short for the

@@ -40,6 +40,10 @@ public:
     return std::make_unique<PipeFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<PipeFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(pathId); // a sketch or a Curve3D

@@ -29,6 +29,10 @@ public:
     return std::make_unique<HoleFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<HoleFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
 
   // A hole drilled for a thread IS threaded: `fit.kind == "tapped"` records

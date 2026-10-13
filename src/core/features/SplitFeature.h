@@ -50,6 +50,10 @@ public:
     return std::make_unique<SplitFeature>(*this);
   }
 
+  void CopyDerivedState(const Feature& executed) override {
+    RestoreExecuted<SplitFeature>(executed);
+  }
+
   bool Execute(RegenContext& ctx) override;
   uint64_t MaterialSource() const override { return bodyId; }
 

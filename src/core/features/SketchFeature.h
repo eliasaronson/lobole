@@ -815,6 +815,15 @@ public:
     return std::make_unique<SketchFeature>(*this);
   }
 
+  // Its reference images are out of the chain hash, like an appearance.
+  void CopyDerivedState(const Feature& executed) override {
+    std::vector<sketch::ReferenceImage> keep = std::move(images);
+    const uint32_t keepNext = nextImageId;
+    RestoreExecuted<SketchFeature>(executed);
+    images = std::move(keep);
+    nextImageId = keepNext;
+  }
+
   // Contributes no bodies, but when any dimension is expression-driven the
   // sketch re-solves here so downstream consumers (extrudes) see geometry
   // matching the current parameter values. A failed solve keeps the last
