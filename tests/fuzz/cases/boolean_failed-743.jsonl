@@ -1,0 +1,15 @@
+{"fuzz": {"seed": 743, "class": "boolean_failed", "gist": "boolean_failed: pattern linear: cut 'Pat' left body 'Base' with a solid whos", "generator": 1, "design": [{"op": "base revolve", "expect": "new_body", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Sketch", "name": "Base section", "id": 101, "plane": {"origin": [0, 0, 0], "normal": [0, 1, 0], "uAxis": [1, 0, 0]}, "entities": [{"type": "rect", "c1": [7.5, 0], "c2": [17.5, -7.5]}]}}}, {"method": "add_feature", "params": {"feature": {"type": "Revolve", "name": "Base", "id": 100, "sketch_id": 101, "axis": {"kind": "custom", "origin": [0, 0, 0], "direction": [0, 0, 1]}, "angle_deg": 270.0, "mode": "new_body"}}}], "k": 0}, {"op": "hole simple", "expect": "cut", "deps": [], "patternable": true, "calls": [{"method": "add_feature", "params": {"feature": {"type": "Sketch", "name": "HS1", "id": 111, "plane": {"origin": [-2.7940534453910475, 2.7940534453910484, 0.0], "normal": [-0.0, 0.0, -1.0], "uAxis": [1.0, 0.0, 0.0]}, "entities": [{"type": "point", "p": [5.0, -2.5]}, {"type": "point", "p": [5.0, 2.5]}, {"type": "point", "p": [7.5, -5.0]}]}}}, {"method": "add_feature", "params": {"feature": {"type": "Hole", "name": "H1", "id": 110, "hole_kind": "simple", "sketch_id": 111, "diameter": 5.0, "depth": 20.0, "through": true}}}], "k": 1}, {"op": "pattern linear", "expect": "cut", "deps": [1], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Pattern", "name": "Pat2", "id": 120, "kind": "linear", "source_id": {"$step": 1}, "axis": {"kind": "x"}, "count": 4, "spacing": 5.0}}}], "k": 2}]}}
+{"method":"new_project","params":{}}
+{"method":"add_feature","params":{"feature":{"entities":[{"c1":[7.5,0],"c2":[17.5,-7.5],"type":"rect"}],"id":101,"name":"Base section","plane":{"normal":[0,1,0],"origin":[0,0,0],"uAxis":[1,0,0]},"type":"Sketch"}}}
+{"method":"add_feature","params":{"feature":{"angle_deg":270.0,"axis":{"direction":[0,0,1],"kind":"custom","origin":[0,0,0]},"id":100,"mode":"new_body","name":"Base","sketch_id":101,"type":"Revolve"}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"add_feature","params":{"feature":{"entities":[{"p":[5.0,-2.5],"type":"point"},{"p":[5.0,2.5],"type":"point"},{"p":[7.5,-5.0],"type":"point"}],"id":111,"name":"HS1","plane":{"normal":[-0.0,0.0,-1.0],"origin":[-2.7940534453910475,2.7940534453910484,0.0],"uAxis":[1.0,0.0,0.0]},"type":"Sketch"}}}
+{"method":"add_feature","params":{"feature":{"depth":20.0,"diameter":5.0,"hole_kind":"simple","id":110,"name":"H1","sketch_id":111,"through":true,"type":"Hole"}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"add_feature","params":{"feature":{"axis":{"kind":"x"},"count":4,"id":120,"kind":"linear","name":"Pat2","source_id":110,"spacing":5.0,"type":"Pattern"}}}

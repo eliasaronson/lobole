@@ -1,0 +1,60 @@
+{"fuzz": {"seed": 0, "class": "invalid", "gist": "invalid: check_geometry: [('Base', ['self-intersecting wire', 'unorie", "generator": 1, "design": [{"op": "base profile", "expect": "new_body", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Sketch", "name": "Base sketch", "id": 101, "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]}, "entities": [{"type": "line", "a": [-23.75, -15.0], "b": [23.75, -15.0]}, {"type": "line", "a": [23.75, -15.0], "b": [23.75, 15.0]}, {"type": "line", "a": [23.75, 15.0], "b": [7.5, 15.0]}, {"type": "line", "a": [7.5, 15.0], "b": [7.5, 5.0]}, {"type": "line", "a": [7.5, 5.0], "b": [-7.5, 5.0]}, {"type": "line", "a": [-7.5, 5.0], "b": [-7.5, 15.0]}, {"type": "line", "a": [-7.5, 15.0], "b": [-23.75, 15.0]}, {"type": "line", "a": [-23.75, 15.0], "b": [-23.75, -15.0]}]}}}, {"method": "add_feature", "params": {"feature": {"type": "Extrude", "name": "Base", "id": 100, "sketch_id": 101, "distance": 15.0, "mode": "new_body"}}}], "k": 0}, {"op": "draft", "expect": "any", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Draft", "name": "D1", "id": 110, "angle_deg": 10.0, "neutral_plane": "xy", "body_id": {"$body": {"near": [0.0, 0.0, 7.5], "volume": 19125.0}}, "faces": [{"$face": {"near": [1.6306400674181987e-16, 5.0, 7.5], "normal": [-0.0, 1.0, -0.0]}}]}}}], "k": 1}, {"op": "fillet", "expect": "any", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Fillet", "name": "F2", "id": 120, "edges": [{"$edge": {"near": [23.75, 0.0, 15.0]}}, {"$edge": {"near": [-7.5, 15.0, 7.5]}}, {"$edge": {"near": [23.75, 15.0, 7.5]}}], "radius": 2.23}}}], "k": 2}, {"op": "draft", "expect": "any", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Draft", "name": "D3", "id": 130, "angle_deg": 8.0, "neutral_plane": "xy", "body_id": {"$body": {"near": [0.0, 0.0, 7.500000000000003], "volume": 18764.47976820058}}, "faces": [{"$face": {"near": [-0.034879280914738686, -15.000000000000002, 7.489496730116895], "normal": [0.0, -1.0, -0.0]}}]}}}], "k": 3}, {"op": "shell", "expect": "cut", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Shell", "name": "Sh4", "id": 140, "body_id": {"$body": {"near": [1.7763568394002505e-15, 7.027041171170367e-09, 7.500000000000003], "volume": 18015.639727952213}}, "thickness": 2.78, "open_faces": [{"$face": {"near": [-16.740000000000002, 14.999999999999998, 7.499999999999999], "normal": [-0.0, 1.0, -0.0]}}]}}}], "k": 4, "limit": "shell had no effect: thickness 2.780000 is too large for this body (or self-intersects around a hole/fillet) - try a thinner wall"}, {"op": "fillet", "expect": "any", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Fillet", "name": "F5", "id": 150, "edges": [{"$edge": {"near": [21.52, 15.0, 7.5]}}], "radius": 1.14}}}], "k": 5, "limit": "OCCT error: There are no suitable edges for chamfer or fillet"}, {"op": "draft", "expect": "any", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Draft", "name": "D6", "id": 160, "angle_deg": 8.0, "neutral_plane": "xy", "body_id": {"$body": {"near": [1.7763568394002505e-15, 7.027041171170367e-09, 7.500000000000003], "volume": 18015.639727952213}}, "faces": [{"$face": {"near": [-16.740000000000002, 14.999999999999998, 7.499999999999999], "normal": [-0.0, 1.0, -0.0]}}]}}}], "k": 6}, {"op": "chamfer", "expect": "any", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Chamfer", "name": "C7", "id": 170, "edges": [{"$edge": {"near": [-23.75, -13.945943725677983, 7.5]}}, {"$edge": {"near": [-23.75, 0.0, 0.0]}}, {"$edge": {"near": [-16.740000000000002, 14.999999985945918, 1.0339757656912846e-25]}}], "radius": 2.25}}}], "k": 7}]}}
+{"method":"new_project","params":{}}
+{"method":"add_feature","params":{"feature":{"entities":[{"a":[-23.75,-15.0],"b":[23.75,-15.0],"type":"line"},{"a":[23.75,-15.0],"b":[23.75,15.0],"type":"line"},{"a":[23.75,15.0],"b":[7.5,15.0],"type":"line"},{"a":[7.5,15.0],"b":[7.5,5.0],"type":"line"},{"a":[7.5,5.0],"b":[-7.5,5.0],"type":"line"},{"a":[-7.5,5.0],"b":[-7.5,15.0],"type":"line"},{"a":[-7.5,15.0],"b":[-23.75,15.0],"type":"line"},{"a":[-23.75,15.0],"b":[-23.75,-15.0],"type":"line"}],"id":101,"name":"Base sketch","plane":{"normal":[0,0,1],"origin":[0,0,0],"uAxis":[1,0,0]},"type":"Sketch"}}}
+{"method":"add_feature","params":{"feature":{"distance":15.0,"id":100,"mode":"new_body","name":"Base","sketch_id":101,"type":"Extrude"}}}
+{"method":"check_geometry","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"angle_deg":10.0,"body_id":100,"faces":[{"element":"100/g5","feature_id":100}],"id":110,"name":"D1","neutral_plane":"xy","type":"Draft"}}}
+{"method":"check_geometry","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g2;U3","feature_id":100},{"element":"100/g6;U1","feature_id":100},{"element":"100/g2;U1","feature_id":100}],"id":120,"name":"F2","radius":2.23,"type":"Fillet"}}}
+{"method":"check_geometry","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"angle_deg":8.0,"body_id":100,"faces":[{"element":"100/g1;M120","feature_id":100}],"id":130,"name":"D3","neutral_plane":"xy","type":"Draft"}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"body_id":100,"id":140,"name":"Sh4","open_faces":[{"element":"100/g7;M120","feature_id":100}],"thickness":2.78,"type":"Shell"}}}
+{"method":"undo","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g2;U1;G120;U2","feature_id":100}],"id":150,"name":"F5","radius":1.14,"type":"Fillet"}}}
+{"method":"undo","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"angle_deg":8.0,"body_id":100,"faces":[{"element":"100/g7;M120","feature_id":100}],"id":160,"name":"D6","neutral_plane":"xy","type":"Draft"}}}
+{"method":"check_geometry","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g1;M120;G130;U4","feature_id":100},{"element":"100/cap0;M120;U4","feature_id":100},{"element":"100/cap0;M120;U6","feature_id":100}],"id":170,"name":"C7","radius":2.25,"type":"Chamfer"}}}
+{"method":"undo","params":{}}
+{"method":"get_state","params":{}}
+{"method":"list_parts","params":{}}
+{"method":"add_part","params":{"name":"Rebuild"}}
+{"method":"set_active_part","params":{"part":"Rebuild"}}
+{"method":"batch","params":{"calls":[{"method":"add_feature","params":{"feature":{"entities":[{"a":[-23.75,-15.0],"b":[23.75,-15.0],"type":"line"},{"a":[23.75,-15.0],"b":[23.75,15.0],"type":"line"},{"a":[23.75,15.0],"b":[7.5,15.0],"type":"line"},{"a":[7.5,15.0],"b":[7.5,5.0],"type":"line"},{"a":[7.5,5.0],"b":[-7.5,5.0],"type":"line"},{"a":[-7.5,5.0],"b":[-7.5,15.0],"type":"line"},{"a":[-7.5,15.0],"b":[-23.75,15.0],"type":"line"},{"a":[-23.75,15.0],"b":[-23.75,-15.0],"type":"line"}],"id":101,"name":"Base sketch","plane":{"normal":[0,0,1],"origin":[0,0,0],"uAxis":[1,0,0]},"type":"Sketch"}}},{"method":"add_feature","params":{"feature":{"distance":15.0,"id":100,"mode":"new_body","name":"Base","sketch_id":101,"type":"Extrude"}}},{"method":"add_feature","params":{"feature":{"angle_deg":10.0,"body_id":100,"faces":[{"element":"100/g5","feature_id":100}],"id":110,"name":"D1","neutral_plane":"xy","type":"Draft"}}},{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g2;U3","feature_id":100},{"element":"100/g6;U1","feature_id":100},{"element":"100/g2;U1","feature_id":100}],"id":120,"name":"F2","radius":2.23,"type":"Fillet"}}},{"method":"add_feature","params":{"feature":{"angle_deg":8.0,"body_id":100,"faces":[{"element":"100/g1;M120","feature_id":100}],"id":130,"name":"D3","neutral_plane":"xy","type":"Draft"}}},{"method":"add_feature","params":{"feature":{"angle_deg":8.0,"body_id":100,"faces":[{"element":"100/g7;M120","feature_id":100}],"id":160,"name":"D6","neutral_plane":"xy","type":"Draft"}}}]}}
+{"method":"get_state","params":{}}
+{"method":"set_active_part","params":{"part":"Part 1"}}
+{"method":"undo","params":{}}
+{"method":"undo","params":{}}
+{"method":"undo","params":{}}
+{"method":"undo","params":{}}
+{"method":"undo","params":{}}
+{"method":"undo","params":{}}
+{"method":"get_state","params":{}}
+{"method":"redo","params":{}}
+{"method":"redo","params":{}}
+{"method":"redo","params":{}}
+{"method":"redo","params":{}}
+{"method":"redo","params":{}}
+{"method":"redo","params":{}}
+{"method":"get_state","params":{}}
+{"method":"save_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_v5qors4i/fuzz.dsgn"}}
+{"method":"open_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_v5qors4i/fuzz.dsgn"}}
+{"method":"set_active_part","params":{"part":"Part 1"}}
+{"method":"get_state","params":{}}

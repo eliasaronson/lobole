@@ -1,0 +1,18 @@
+{"fuzz": {"seed": 373, "class": "wrong_way", "gist": "wrong_way: a pattern circular grew the bbox from [-., -., .]..[., ., .]", "generator": 1, "design": [{"op": "base box", "expect": "new_body", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Box", "name": "Base", "on": "Top", "width": 20.0, "depth": 40.0, "height": 30.0, "ids": [100, 101]}}}], "k": 0}, {"op": "sphere cut", "expect": "cut", "deps": [], "patternable": true, "calls": [{"method": "add_feature", "params": {"feature": {"type": "Sphere", "name": "P1", "on": {"$face": {"near": [7.5, 5.689893001203927e-16, 16.25], "normal": [1.0, -0.0, -0.0]}}, "offset": [10.0, -5.0], "mode": "cut", "ids": [110, 111], "diameter": 20.0}}}], "k": 1}, {"op": "pattern circular", "expect": "cut", "deps": [1], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Pattern", "name": "Pat2", "id": 120, "kind": "circular", "source_id": {"$step": 1}, "axis": {"kind": "custom", "origin": [0.0, 0.0, 20.0], "direction": [0, 0, 1]}, "count": 5, "angle_deg": 72.0}}}], "k": 2}]}}
+{"method":"new_project","params":{}}
+{"method":"add_feature","params":{"feature":{"depth":40.0,"height":30.0,"ids":[100,101],"name":"Base","on":"Top","type":"Box","width":20.0}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"diameter":20.0,"ids":[110,111],"mode":"cut","name":"P1","offset":[10.0,-5.0],"on":{"element":"100/g1931262163","feature_id":100},"type":"Sphere"}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"add_feature","params":{"feature":{"angle_deg":72.0,"axis":{"direction":[0,0,1],"kind":"custom","origin":[0.0,0.0,20.0]},"count":5,"id":120,"kind":"circular","name":"Pat2","source_id":110,"type":"Pattern"}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}

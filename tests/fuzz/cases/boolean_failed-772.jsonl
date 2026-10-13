@@ -1,0 +1,9 @@
+{"fuzz": {"seed": 772, "class": "boolean_failed", "gist": "boolean_failed: cylinder cut: cut 'P' left body 'Base' with a solid whose ou", "generator": 1, "design": [{"op": "base box", "expect": "new_body", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Box", "name": "Base", "on": "Top", "width": 55.0, "depth": 57.5, "height": 17.5, "ids": [100, 101]}}}], "k": 0}, {"op": "cylinder cut", "expect": "cut", "deps": [], "patternable": true, "calls": [{"method": "add_feature", "params": {"feature": {"type": "Cylinder", "name": "P1", "on": {"$face": {"near": [-3.33066907387547e-16, 1.0335167065601459e-15, 17.5], "normal": [0.0, 0.0, 1.0]}}, "offset": [17.5, 17.5], "mode": "cut", "ids": [110, 111], "diameter": 30.0, "height": 25.0, "reversed": true}}}], "k": 1}]}}
+{"method":"new_project","params":{}}
+{"method":"add_feature","params":{"feature":{"depth":57.5,"height":17.5,"ids":[100,101],"name":"Base","on":"Top","type":"Box","width":55.0}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"diameter":30.0,"height":25.0,"ids":[110,111],"mode":"cut","name":"P1","offset":[17.5,17.5],"on":{"element":"100/cap1","feature_id":100},"reversed":true,"type":"Cylinder"}}}

@@ -49,6 +49,7 @@ add_executable(designer_tests
     test_instance_registry.cpp
     test_crash_reports.cpp
     test_rpc_contract.cpp
+    test_rpc_errors.cpp
     test_screen_space_mapping.cpp
     test_recent_projects.cpp
     test_gitvault.cpp
@@ -1226,3 +1227,41 @@ add_test(NAME flexible_subassembly_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/flexible_subassembly_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(flexible_subassembly_smoke PROPERTIES TIMEOUT 180)
+
+# --- Hostile parameters and random designs -----------------------------------
+# (docs/scripting/rpc.md#the-hostile-sweep, docs/modeling/README.md#random-designs)
+# The hostile sweep: every method of `describe`, every key of its row, each
+# hostile value alone and inside a valid baseline, on an instance of its own
+# per shard (methods sharded by a stable hash of their name). The compact set
+# runs everywhere; --full is `slow` (tools/ci-local.sh --asan runs it, which is
+# where UBSan reports a 1e308 narrowed to int).
+set(HOSTILE_SHARDS 8)
+math(EXPR HOSTILE_LAST "${HOSTILE_SHARDS} - 1")
+foreach(k RANGE ${HOSTILE_LAST})
+  add_test(NAME hostile_params_${k}
+           COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/hostile_params_smoke.py
+                   $<TARGET_FILE:designer> --shard ${k}/${HOSTILE_SHARDS})
+  set_tests_properties(hostile_params_${k} PROPERTIES TIMEOUT 180)
+  add_test(NAME hostile_params_full_${k}
+           COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/hostile_params_smoke.py
+                   $<TARGET_FILE:designer> --shard ${k}/${HOSTILE_SHARDS} --full)
+  set_tests_properties(hostile_params_full_${k} PROPERTIES LABELS slow
+                       TIMEOUT 900)
+endforeach()
+# The sweep detects what it claims: debug_fault plants each failure (an
+# internal error, a NaN answer, a write before a refusal, a kernel throw in a
+# batch) and debug_crash a SIGSEGV whose crash report must be found.
+add_test(NAME hostile_params_selftest
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/hostile_params_smoke.py
+                 $<TARGET_FILE:designer> --self-test)
+set_tests_properties(hostile_params_selftest PROPERTIES TIMEOUT 120)
+# Random designs: a fixed list of seeds that must stay clean (with the
+# fuzzer's own self-test first), and every minimised case replayed.
+add_test(NAME fuzz_seeds_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fuzz_seeds_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(fuzz_seeds_smoke PROPERTIES TIMEOUT 180)
+add_test(NAME fuzz_corpus_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fuzz_corpus_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(fuzz_corpus_smoke PROPERTIES TIMEOUT 180)

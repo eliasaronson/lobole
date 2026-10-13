@@ -1,0 +1,48 @@
+{"fuzz": {"seed": 153, "class": "crash", "gist": "crash: add_feature: designer disconnected", "generator": 1, "design": [{"op": "base profile", "expect": "new_body", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Sketch", "name": "Base sketch", "id": 101, "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]}, "entities": [{"type": "line", "a": [-7.5, -11.25], "b": [7.5, -11.25]}, {"type": "line", "a": [7.5, -11.25], "b": [7.5, 0]}, {"type": "arc", "center": [0, 0], "radius": 7.5, "start_angle_deg": 0, "end_angle_deg": 180}, {"type": "line", "a": [-7.5, 0], "b": [-7.5, -11.25]}]}}}, {"method": "add_feature", "params": {"feature": {"type": "Extrude", "name": "Base", "id": 100, "sketch_id": 101, "distance": 35.0, "mode": "new_body"}}}], "k": 0}, {"op": "sphere cut", "expect": "cut", "deps": [], "patternable": true, "calls": [{"method": "add_feature", "params": {"feature": {"type": "Sphere", "name": "P1", "on": {"$face": {"near": [-7.5, -5.624999999999999, 17.5], "normal": [-1.0, -0.0, -0.0]}}, "offset": [5.0, 2.5], "mode": "cut", "ids": [110, 111], "diameter": 7.5}}}], "k": 1}, {"op": "chamfer", "expect": "any", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Chamfer", "name": "C2", "id": 120, "edges": [{"$edge": {"near": [7.5, -5.625, 35.0]}}], "radius": 3.92}}}], "k": 2}, {"op": "shell", "expect": "cut", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Shell", "name": "Sh3", "id": 130, "body_id": {"$body": {"near": [-1.5786305596066086e-10, -1.8750000000000004, 17.5], "volume": 8568.750553638907}}, "thickness": 0.92, "open_faces": [{"$face": {"near": [5.539999999999999, -5.625, 33.04], "normal": [0.7071067811865477, -6.347058710723734e-17, 0.7071067811865475]}}]}}}], "k": 3, "limit": "shell produced an invalid solid"}, {"op": "draft", "expect": "any", "deps": [], "calls": [{"method": "add_feature", "params": {"feature": {"type": "Draft", "name": "D4", "id": 140, "angle_deg": 5.0, "neutral_plane": "xy", "body_id": {"$body": {"near": [-1.5786305596066086e-10, -1.8750000000000004, 17.5], "volume": 8568.750553638907}}, "faces": [{"$face": {"near": [7.500000000000001, -5.625, 15.540000000000001], "normal": [1.0, -0.0, -0.0]}}]}}}], "k": 4}]}}
+{"method":"new_project","params":{}}
+{"method":"add_feature","params":{"feature":{"entities":[{"a":[-7.5,-11.25],"b":[7.5,-11.25],"type":"line"},{"a":[7.5,-11.25],"b":[7.5,0],"type":"line"},{"center":[0,0],"end_angle_deg":180,"radius":7.5,"start_angle_deg":0,"type":"arc"},{"a":[-7.5,0],"b":[-7.5,-11.25],"type":"line"}],"id":101,"name":"Base sketch","plane":{"normal":[0,0,1],"origin":[0,0,0],"uAxis":[1,0,0]},"type":"Sketch"}}}
+{"method":"add_feature","params":{"feature":{"distance":35.0,"id":100,"mode":"new_body","name":"Base","sketch_id":101,"type":"Extrude"}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"diameter":7.5,"ids":[110,111],"mode":"cut","name":"P1","offset":[5.0,2.5],"on":{"element":"100/g4","feature_id":100},"type":"Sphere"}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g2;U3","feature_id":100}],"id":120,"name":"C2","radius":3.92,"type":"Chamfer"}}}
+{"method":"check_geometry","params":{}}
+{"method":"get_state","params":{}}
+{"method":"mass_properties","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"body_id":100,"id":130,"name":"Sh3","open_faces":[{"element":"100/g2;U3;G120","feature_id":100}],"thickness":0.92,"type":"Shell"}}}
+{"method":"undo","params":{}}
+{"method":"list_elements","params":{}}
+{"method":"get_state","params":{}}
+{"method":"add_feature","params":{"feature":{"angle_deg":5.0,"body_id":100,"faces":[{"element":"100/g2;M120","feature_id":100}],"id":140,"name":"D4","neutral_plane":"xy","type":"Draft"}}}
+{"method":"undo","params":{}}
+{"method":"get_state","params":{}}
+{"method":"list_parts","params":{}}
+{"method":"add_part","params":{"name":"Rebuild"}}
+{"method":"set_active_part","params":{"part":"Rebuild"}}
+{"method":"batch","params":{"calls":[{"method":"add_feature","params":{"feature":{"entities":[{"a":[-7.5,-11.25],"b":[7.5,-11.25],"type":"line"},{"a":[7.5,-11.25],"b":[7.5,0],"type":"line"},{"center":[0,0],"end_angle_deg":180,"radius":7.5,"start_angle_deg":0,"type":"arc"},{"a":[-7.5,0],"b":[-7.5,-11.25],"type":"line"}],"id":101,"name":"Base sketch","plane":{"normal":[0,0,1],"origin":[0,0,0],"uAxis":[1,0,0]},"type":"Sketch"}}},{"method":"add_feature","params":{"feature":{"distance":35.0,"id":100,"mode":"new_body","name":"Base","sketch_id":101,"type":"Extrude"}}},{"method":"add_feature","params":{"feature":{"diameter":7.5,"ids":[110,111],"mode":"cut","name":"P1","offset":[5.0,2.5],"on":{"element":"100/g4","feature_id":100},"type":"Sphere"}}},{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g2;U3","feature_id":100}],"id":120,"name":"C2","radius":3.92,"type":"Chamfer"}}}]}}
+{"method":"get_state","params":{}}
+{"method":"set_active_part","params":{"part":"Part 1"}}
+{"method":"undo","params":{}}
+{"method":"undo","params":{}}
+{"method":"undo","params":{}}
+{"method":"undo","params":{}}
+{"method":"get_state","params":{}}
+{"method":"redo","params":{}}
+{"method":"redo","params":{}}
+{"method":"redo","params":{}}
+{"method":"redo","params":{}}
+{"method":"get_state","params":{}}
+{"method":"save_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_sijqu0jv/fuzz.dsgn"}}
+{"method":"open_project","params":{"path":"/tmp/nix-shell.hV1RQn/designer_smoke_sijqu0jv/fuzz.dsgn"}}
+{"method":"set_active_part","params":{"part":"Part 1"}}
+{"method":"get_state","params":{}}
