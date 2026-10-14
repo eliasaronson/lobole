@@ -33,4 +33,4 @@ designer-remote = "designer_remote:main"
 
 [tool.setuptools]
 package-dir = { "" = "tools" }
-py-modules = ["designer_mcp", "designer_remote"]
+py-modules = ["designer_mcp", "designer_remote", "designer_contracts"]

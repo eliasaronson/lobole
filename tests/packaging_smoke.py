@@ -11,10 +11,17 @@ a console script — surfaces as a broken command line on a user's machine
 instead of a red test here. The py_compile gates prove the files parse; this
 one proves the packaging metadata still points AT them.
 
+It also proves the listed modules are CLOSED under import: a module that
+imports a sibling from tools/ which is not in `py-modules` works here, where
+tools/ is on the path, and raises ModuleNotFoundError once installed — the
+way `help()` on a typed method did when `designer_contracts` was left out.
+Function-level imports count; that one was inside a function.
+
 The `mcp` SDK is not on the stock-Ubuntu CI image, so an entry point whose
 module needs it is checked as far as importability allows there and fully in
 the nix shell; the module file existing is asserted unconditionally.
 """
+import ast
 import importlib
 import pathlib
 import sys
@@ -31,6 +38,29 @@ def main():
     for mod in data["tool"]["setuptools"]["py-modules"]:
         if not (pkgdir / f"{mod}.py").is_file():
             failures.append(f"py-module {mod!r} has no file {pkgdir}/{mod}.py")
+
+    # Every import of a tools/ sibling, at any depth, is a module that must
+    # ship too.
+    listed = set(data["tool"]["setuptools"]["py-modules"])
+    siblings = {p.stem for p in pkgdir.glob("*.py")}
+    for mod in sorted(listed):
+        path = pkgdir / f"{mod}.py"
+        if not path.is_file():
+            continue
+        for node in ast.walk(ast.parse(path.read_text(), str(path))):
+            if isinstance(node, ast.Import):
+                names = [a.name for a in node.names]
+            elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                names = [node.module]
+            else:
+                continue
+            for name in names:
+                top = name.split(".")[0]
+                if top in siblings and top not in listed:
+                    failures.append(
+                        f"{mod}.py:{node.lineno} imports {top!r}, which is "
+                        "not in py-modules — it would be missing once "
+                        "installed")
 
     sys.path.insert(0, str(pkgdir))
     for script, target in data["project"]["scripts"].items():
