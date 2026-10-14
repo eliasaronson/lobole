@@ -142,7 +142,7 @@ def geometry(app, S, occ, P):
 
 def _body_centre_y(app, part):
     return app.call("mass_properties",
-                    part=part.id)["total"]["center_of_mass"][1]
+                    part=part.id)["total"]["center_of_mass_mm"][1]
 
 
 def _want(what, got, want, tol):

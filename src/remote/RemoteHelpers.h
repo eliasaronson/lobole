@@ -135,6 +135,12 @@ struct MethodDoc {
   // `tests/rpc_returns_gate.py`. A mutating verb's answer is its `regen`
   // summary and its row says so already, so most rows leave this empty.
   const char* returns = "";
+
+  // The `kApiVersion` (remote/ApiVersion.h) this method arrived in, which
+  // describe publishes as `since`. A row added after the first published
+  // surface states it; tests/api_surface_gate.py fails a new method that
+  // does not.
+  int since = 1;
 };
 
 // The columns above, as a bitmask.
@@ -413,7 +419,7 @@ inline nlohmann::json BodyDigestJson(const Document& doc) {
     b.shape.GetBoundingBox(mn, mx);
     arr.push_back({{"name", b.name},
                    {"created_by", b.createdBy},
-                   {"volume", b.shape.Volume()},
+                   {"volume_mm3", b.shape.Volume()},
                    {"bbox_min", Vec3ToJson(mn)},
                    {"bbox_max", Vec3ToJson(mx)},
                    {"solids", b.shape.SolidCount()}});
@@ -426,7 +432,7 @@ inline nlohmann::json DigestDeltaJson(const nlohmann::json& before,
   auto total = [](const nlohmann::json& bodies) {
     double v = 0.0;
     for (const auto& b : bodies)
-      v += b.at("volume").get<double>();
+      v += b.at("volume_mm3").get<double>();
     return v;
   };
   auto names = [](const nlohmann::json& bodies) {
@@ -444,7 +450,7 @@ inline nlohmann::json DigestDeltaJson(const nlohmann::json& before,
   for (const auto& [id, name] : pre)
     if (post.find(id) == post.end())
       removed.push_back(name);
-  return {{"volume", total(after) - total(before)},
+  return {{"volume_mm3", total(after) - total(before)},
           {"added", std::move(added)},
           {"removed", std::move(removed)}};
 }

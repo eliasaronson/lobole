@@ -256,9 +256,9 @@ def section_area(d):
     names = sorted(walls)
     r = d.call("section", base_plane="xy", offset=25, bodies=names,
                enclosed=True)
-    expect(abs(r["enclosed_area"] - 6400.0) < 1e-6,
+    expect(abs(r["enclosed_area_mm2"] - 6400.0) < 1e-6,
            f"the four walls enclose the 80 x 80 floor: {r}")
-    expect(abs(r["area"] - 3600.0) < 1e-6, f"the walls' own footprint: {r}")
+    expect(abs(r["area_mm2"] - 3600.0) < 1e-6, f"the walls' own footprint: {r}")
     refused(d, "section", "no body 'Roof'", base_plane="xy", offset=25,
             bodies=["Roof"], enclosed=True)
     refused(d, "section", "accepted: xy, xz, yz", base_plane="top",
@@ -339,7 +339,7 @@ def section_area(d):
     # Three walls ring nothing, and the answer says why rather than a bare 0.
     r = d.call("section", base_plane="xy", offset=25, enclosed=True,
                bodies=["South wall", "North wall", "West wall"])
-    expect(r["enclosed_area"] == 0 and "opening" in r["enclosed_note"], r)
+    expect(r["enclosed_area_mm2"] == 0 and "opening" in r["enclosed_note"], r)
 
 
 def studied_part(d, study):

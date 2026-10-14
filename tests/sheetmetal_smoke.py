@@ -75,7 +75,7 @@ def blank(d):
 
 
 def volume(d):
-    return d.call("get_state")["bodies"][0]["volume"]
+    return d.call("get_state")["bodies"][0]["volume_mm3"]
 
 
 def tier2(d):
@@ -307,8 +307,8 @@ def main():
         # The blank rebuilt itself the moment the stock was declared.
         bodies = d.call("get_state")["bodies"]
         expect(len(bodies) == 1, bodies)
-        expect(abs(bodies[0]["volume"] - WIDTH * DEPTH * THICKNESS) < 1e-6,
-               bodies[0]["volume"])
+        expect(abs(bodies[0]["volume_mm3"] - WIDTH * DEPTH * THICKNESS) < 1e-6,
+               bodies[0]["volume_mm3"])
 
         base = d.call("get_state")["features"][1]["id"]
         top = straight_edge(d, (WIDTH / 2.0, 0.0, THICKNESS))
@@ -341,8 +341,8 @@ def main():
         want = (WIDTH * DEPTH * THICKNESS + bend_volume
                 + wall * THICKNESS * WIDTH)
         bodies = d.call("get_state")["bodies"]
-        expect(abs(bodies[0]["volume"] - want) / want < 1e-4,
-               f"flanged volume {bodies[0]['volume']} want {want}")
+        expect(abs(bodies[0]["volume_mm3"] - want) / want < 1e-4,
+               f"flanged volume {bodies[0]['volume_mm3']} want {want}")
 
         # Exporting the FOLDED part is refused: its silhouette is a picture
         # of a part that cuts to nothing.
@@ -361,7 +361,7 @@ def main():
             "type": "FlatPattern", "name": "Flat",
             "body_id": base})["id"]
         d.call("suppress_feature", feature_id=flat, suppressed=True)
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - want)
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - want)
                / want < 1e-4, "suppressing the flat pattern changed the part")
 
         cfg = d.call("add_configuration", name="Flat")["id"]
@@ -372,8 +372,8 @@ def main():
         blank = (WIDTH * DEPTH + allowance * WIDTH
                  + wall * WIDTH) * THICKNESS
         bodies = d.call("get_state")["bodies"]
-        expect(abs(bodies[0]["volume"] - blank) / blank < 1e-4,
-               f"blank volume {bodies[0]['volume']} want {blank}")
+        expect(abs(bodies[0]["volume_mm3"] - blank) / blank < 1e-4,
+               f"blank volume {bodies[0]['volume_mm3']} want {blank}")
         # A blank is one gauge thick everywhere. Any bend left unrotated
         # shows up here and nowhere else.
         span = bodies[0]["bbox_max"][2] - bodies[0]["bbox_min"][2]
@@ -404,7 +404,7 @@ def main():
 
         # Back to the authored model, and the part is folded again.
         d.call("set_active_configuration", id=0)
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - want)
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - want)
                / want < 1e-4, "leaving the configuration did not refold")
 
         # And it survives the round trip through disk.
@@ -412,7 +412,7 @@ def main():
         d.call("save_project", path=project)
         d.call("open_project", path=project)
         again = d.call("get_state")["bodies"]
-        expect(abs(again[0]["volume"] - want) / want < 1e-4, again[0])
+        expect(abs(again[0]["volume_mm3"] - want) / want < 1e-4, again[0])
         back = d.call("get_sheet_metal_rules")["rules"]
         expect(back["gauge"] == "1.5mm" and back["material"] == "aluminum",
                back)

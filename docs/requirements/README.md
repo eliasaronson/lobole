@@ -49,7 +49,7 @@ and the call a person would make agree by construction.
 | `check_fits` | assembly | `check_fits` | verdict | `allow_unverified?` |
 | `check_seat` | assembly | `check_seat` | verdict | `occurrences` (the bearings), `allow_unverified?` |
 | `bearing_bore` | assembly | `check_seat` (its `d`) | mm, the smallest bore of the bearings | `occurrences` (the bearings) |
-| `section_area` | part | `section` (`area`, or `enclosed_area`) | mm², the material a plane cuts or the area it encloses | `of`: material \| enclosed, `base_plane` (xy \| xz \| yz) with `offset` (mm) or `origin` and `normal`, `bodies?` (body names or feature ids) |
+| `section_area` | part | `section` (`area_mm2`, or `enclosed_area_mm2`) | mm², the material a plane cuts or the area it encloses | `of`: material \| enclosed, `base_plane` (xy \| xz \| yz) with `offset` (mm) or `origin` and `normal`, `bodies?` (body names or feature ids) |
 | `check_fasteners` | assembly | `check_fasteners` | verdict | `allow?` [{`part?`, `why?`, `max?`}], `allow_skipped?` |
 | `check_literals` | part, parts, or none | `check_literals` | verdict | `documents?` (several parts); neither: every part |
 | `motion_clean` | assembly | `run_motion_study` | verdict | `study` |

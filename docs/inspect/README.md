@@ -141,10 +141,10 @@ taken over RPC give the same numbers.
 
 ## Mass properties
 
-`mass_properties {body?, part?}` → per body `volume`, `surface_area`,
-`center_of_mass`, `inertia` (3×3 about the centre of mass), `material`,
-`density`, `mass_g`, and a measured `bbox`; plus `total {volume,
-center_of_mass, mass_g}`. Density comes from the body's material; a body with
+`mass_properties {body?, part?}` → per body `volume_mm3`, `surface_area_mm2`,
+`center_of_mass_mm`, `inertia` (3×3 about the centre of mass), `material`,
+`density`, `mass_g`, and a measured `bbox`; plus `total {volume_mm3,
+center_of_mass_mm, mass_g}`. Density comes from the body's material; a body with
 no material has no mass rather than an assumed density, and the BOM names it
 in `warnings`. On an assembly tab without `part` it aggregates every visible
 occurrence in world space. Its bbox is measured off the surfaces; `get_state`'s
@@ -157,11 +157,11 @@ viewport.
 ## Sections
 
 **The number.** `section {base_plane | origin+normal, offset?, part?,
-bodies?, regions?, loops?, enclosed?}` returns the cross-section area where a plane cuts the
+bodies?, regions?, loops?, enclosed?}` returns the cross-section area (`area_mm2`) where a plane cuts the
 bodies — on an assembly tab, every visible occurrence in place. `offset` is
 mm along the normal; omitted, the cut goes through the middle of what is
 shown and the chosen offset comes back. `regions: true` adds each connected
-island `{area, centroid}` and `region_count`: the total cannot say whether
+island `{area_mm2, centroid}` and `region_count`: the total cannot say whether
 material is where you think it is, an island can. `loops: true` adds each
 island's outline as line/arc/other segments, for recovering the shape of a
 part you did not draw. `bodies` (body names or the feature ids that created
@@ -170,7 +170,7 @@ naming the bodies there are. An unknown `base_plane` is refused.
 
 ### Enclosed area
 
-`enclosed: true` adds `enclosed_area`, mm²: the area the cut RINGS rather
+`enclosed: true` adds `enclosed_area_mm2`: the area the cut RINGS rather
 than the area it crosses (`Measure::SectionEnclosedArea`). Each body's cut
 face is taken out of one oversized plane in a single boolean, so faces of
 separate bodies that meet or overlap act as one; what is left is the open
@@ -229,7 +229,7 @@ default keeps the half opposite the plane's normal (z ≤ offset for `xy`);
 
 - `{a, b}` (bodies or occurrences; a part inside a sub-assembly by path,
   `"Gangway/Board 19"`, or id chain `"2/17"`) →
-  `{clash, volume, distance, state: clash | touching | clear}`. `touch_tol`
+  `{clash, volume_mm3, distance, state: clash | touching | clear}`. `touch_tol`
   (mm, default 0.001) splits touching from clear, and the contact boolean
   runs with the same 1 µm fuzz, so parts designed to touch report contact,
   not a sliver of clash. Assert every bolted joint `touching` and every

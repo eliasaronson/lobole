@@ -85,7 +85,7 @@ def four_bar(d):
             return d.call("add_mate", type="revolute", name=name,
                           a={"occurrence": a, "frame": fa},
                           b={"occurrence": b, "frame": fb},
-                          flipped=False, rotation=rot)
+                          flipped=False, rotation_deg=math.degrees(rot))
         joint("main bearing", g, "p0", c, "p0", 1.2)
         pin = joint("crank pin", c, "p1", k, "p0", -0.8)["id"]
         joint("rocker pin", k, "p1", r, "p1", 1.0)

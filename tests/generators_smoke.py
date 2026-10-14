@@ -69,12 +69,12 @@ def main():
             v_bore = math.pi * (bore / 2) ** 2 * t
             lo_v = math.pi * rf ** 2 * t - v_bore
             hi_v = math.pi * ra ** 2 * t - v_bore
-            expect(lo_v < b["volume"] < hi_v,
-                   f"volume {b['volume']:.1f} outside root..tip "
+            expect(lo_v < b["volume_mm3"] < hi_v,
+                   f"volume {b['volume_mm3']:.1f} outside root..tip "
                    f"({lo_v:.1f}..{hi_v:.1f})")
             # Roughly half the annulus between root and tip is tooth — a
             # profile that came out as petals or as a full disc fails this.
-            frac = (b["volume"] - lo_v) / (hi_v - lo_v)
+            frac = (b["volume_mm3"] - lo_v) / (hi_v - lo_v)
             expect(0.35 < frac < 0.65,
                    f"tooth fill fraction {frac:.2f} is not gear-like")
             for i, (name, want) in enumerate(

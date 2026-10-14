@@ -324,7 +324,7 @@ class Jar:
         under = self.gasket.frame("underside").origin[2]
         depth = rim_z - under
         r = self.interference("gasket", "jar")
-        vol = r.get("volume", 0.0) if r.get("clash") else 0.0
+        vol = r.get("volume_mm3", 0.0) if r.get("clash") else 0.0
         want = squeeze_volume(s, depth) if depth > 0.0 else 0.0
         frac = depth / s["gasket_t"]
         ok = (SQUEEZE_BAND[0] <= frac <= SQUEEZE_BAND[1]
@@ -342,7 +342,7 @@ def find_phase(jar, s, step_deg=15.0):
     def vol(th):
         jar.pose(th, 0.0)
         r = jar.interference("lid", "jar")
-        return r.get("volume", 0.0) if r.get("clash") else 0.0
+        return r.get("volume_mm3", 0.0) if r.get("clash") else 0.0
 
     n = int(round(360.0 / step_deg))
     samples = [(i * step_deg, vol(i * step_deg)) for i in range(n)]
@@ -486,7 +486,7 @@ def main():
         raise SystemExit("jar: the lid half a pitch out of phase reads clean; "
                          "the thread check cannot see the thread")
     print(f"  control, lid half a pitch out: clash "
-          f"{bad.get('volume', 0):.0f} mm3")
+          f"{bad.get('volume_mm3', 0):.0f} mm3")
     jar.pose(phase, 0.0)
 
     # The squeeze at the stop.

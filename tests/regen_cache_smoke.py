@@ -36,7 +36,7 @@ def expect(cond, msg):
 
 def signature(d):
     s = d.call("get_state")
-    bodies = [(b.get("name"), round(b.get("volume", 0.0), 6))
+    bodies = [(b.get("name"), round(b.get("volume_mm3", 0.0), 6))
               for b in s["bodies"]]
     feats = [(f.get("name"), f.get("error", ""), f.get("warning", ""))
              for f in s["features"]]

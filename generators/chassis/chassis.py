@@ -274,7 +274,7 @@ def main():
           f"{sched['members']} members")
     mass = d.call("mass_properties")
     print(f"frame mass: {mass['total']['mass_g'] / 1000.0:.1f} kg, "
-          f"centre of mass at x={mass['total']['center_of_mass'][0]:.0f} mm")
+          f"centre of mass at x={mass['total']['center_of_mass_mm'][0]:.0f} mm")
 
     out = args.out or os.path.join(HERE, "..", "..", "scratch")
     os.makedirs(out, exist_ok=True)

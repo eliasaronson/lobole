@@ -239,12 +239,12 @@ def main():
         expect(r["regen"]["ok"], f"the referenced batch built: {r['regen']}")
         expect(r["regenerations"] == 1,
                f"still ONE regeneration: {r['regenerations']}")
-        vol = d.call("mass_properties")["total"]["volume"]
+        vol = d.call("mass_properties")["total"]["volume_mm3"]
         drilled = 60 * 30 * 8 - 6 * 3.14159265 * 4.0 * 8
         expect(abs(vol - drilled) < 1.0,
                f"six holes were actually drilled: {vol:.1f} vs {drilled:.1f}")
         d.call("undo")  # the whole drilling batch, one step
-        expect(abs(d.call("mass_properties")["total"]["volume"] - 60 * 30 * 8)
+        expect(abs(d.call("mass_properties")["total"]["volume_mm3"] - 60 * 30 * 8)
                < 1e-6, "one undo took all twelve features back")
 
         # A $ref that points forward, at a failed call, or at a missing field
@@ -283,7 +283,7 @@ def main():
                 "type": "Box", "name": "Slab2", "on": "Top",
                 "centered": False, "offset": [70, 0],
                 "width": 2, "depth": 2, "height": 2}}}])
-        vol = r["results"][1]["result"]["total"]["volume"]
+        vol = r["results"][1]["result"]["total"]["volume_mm3"]
         expect(abs(vol - (1000.0 + 64.0)) < 1e-6,
                f"the query saw the box the same batch had just added, and "
                f"NOT the one added after it: {vol}")

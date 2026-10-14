@@ -28,7 +28,7 @@ def main():
                   app.interference(mode="exact", **kw))
         assert not report.get("truncated"), report
         hits = report["clashes"] if mode == "contacts" else report["pairs"]
-        clashes = sorted((c["a"], c["b"], c["volume"]) for c in hits)
+        clashes = sorted((c["a"], c["b"], c["volume_mm3"]) for c in hits)
         if reports:
             assert clashes == next(iter(reports.values()))["clashes"]
         row = dict(wall_s=time.perf_counter() - started,

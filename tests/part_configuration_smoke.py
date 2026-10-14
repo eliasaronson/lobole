@@ -88,7 +88,7 @@ def main():
                near(by_cfg["big"]["unit_mass_g"], 2000 * 610e-6, 1e-4),
                f"each line's mass is its material's: {rows}")
         mass = d.call("mass_properties")
-        expect(near(mass["total"]["volume"], 3000.0),
+        expect(near(mass["total"]["volume_mm3"], 3000.0),
                f"the assembly weighs both as placed: {mass['total']}")
 
         # Editing `big`, which nobody has ACTIVE, reaches its placement.

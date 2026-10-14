@@ -73,7 +73,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Remove an occurrence. Takes `occurrence` as well as `id`.",
      "id, occurrence"},
     {"list_occurrences",
-     "List occurrences with transforms, state and ref_kind (part|assembly); a "
+     "List occurrences with transforms, state and ref_kind (part|assembly) "
+     "(a rider's `attach_offset` in mm, `attach_rotation` a quaternion "
+     "[x,y,z,w]); a "
      "rider (`attached_to`, a placed fastener) names the faces it is seated "
      "on (its hole) in `attach_seat`, says `attach_error` when they no longer "
      "resolve and `attach_warning` when it rides at a fixed offset; a "
@@ -152,10 +154,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "snap_edge?} (a face's centroid + normal, or a snapped hole centre), or "
      "{occurrence, origin: true}; inner_path? reaches into a sub-assembly. "
      "The mate's starting position along whatever it leaves free is "
-     "`rotation` (RADIANS) or `rotation_deg`, and `offset` in mm. On a "
-     "FASTENED mate — which leaves nothing free — `rotation` is still the "
+     "`rotation_deg` (degrees), and `offset` in mm. On a "
+     "FASTENED mate — which leaves nothing free — `rotation_deg` is still the "
      "authored twist about the connector axis: `flipped` says which side, "
-     "`rotation` says which way up, and two faces can be right on both "
+     "`rotation_deg` says which way up, and two faces can be right on both "
      "counts and still land a quarter turn out. `flipped` "
      "DEFAULTS TO TRUE: the two connectors meet face to face with their "
      "normals opposed, which is what two touching FACES do and the opposite "
@@ -167,7 +169,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "that is also what drops a geared loop's DOF count. `describe` lists "
      "both vocabularies as `mate_types` and `relation_kinds`. "
      "`derive` READS those numbers off where the two occurrences already "
-     "lie, for a fastened mate: 'twist' takes `flipped` and `rotation` and "
+     "lie, for a fastened mate: 'twist' takes `flipped` and the rotation and "
      "leaves the anchors coincident (an exact joint, turned the way the part "
      "already roughly was — which is the answer to 'it landed a quarter turn "
      "out'), 'pose' takes all five so the mate holds the parts exactly where "
@@ -176,24 +178,24 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "them and a nearest quarter turn would be a guess wearing a joint's "
      "clothes.",
      "type?:@mate_types, a:object, b:object, name?:string, flipped?:bool, "
-     "rotation?:number, rotation_deg?:number, offset?:number, dx?:number, "
+     "rotation_deg?:number, offset?:number, dx?:number, "
      "dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose'"},
     {"set_mate",
      "Edit a mate's parameters, and the way to POSE a mechanism: turn a "
-     "revolute or cylindrical mate with `rotation` (RADIANS) or "
-     "`rotation_deg` — not both — slide it with `offset` (mm), and the "
+     "revolute or cylindrical mate with `rotation_deg` (degrees), slide it "
+     "with `offset` (mm), and the "
      "solver holds what you set instead of treating it as one more unknown. "
-     "The same `rotation` on a FASTENED mate is its authored twist about "
+     "The same `rotation_deg` on a FASTENED mate is its authored twist about "
      "the connector axis (the GUI's Rotate), not a pose. "
      "To sweep a range rather than jump to one pose use a motion study: it "
      "walks its samples in order, so each solve starts from the last and a "
      "closed loop stays on the branch it is already on. "
      "With {path: [occurrence]} `id` is a mate INSIDE that flexible "
-     "sub-assembly placement (its own id there): only rotation, "
+     "sub-assembly placement (its own id there): only "
      "rotation_deg or offset — THIS placement's pose of it, kept on the "
      "occurrence; refused where the placement's configuration holds it.",
      "id:int>=0, path?:int[]|null, name?:string, flipped?:bool, "
-     "rotation?:number, rotation_deg?:number, offset?:number, dx?:number, "
+     "rotation_deg?:number, offset?:number, dx?:number, "
      "dy?:number, ball_rotation?:number[4]"},
     {"remove_mate", "Remove a mate by id.", "id:int>=0"},
     {"list_mates",
@@ -599,7 +601,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "(`found: coaxial`), since a one-solid bearing in a mechanism is mated "
      "to one seat only — the journal/bore diameter (must be the ring's "
      "basic size), whether the ring sits on its shoulder, the fillet into "
-     "the shoulder and the shoulder's diameter. All in mm. The shoulder and "
+     "the shoulder (`fillet_radius`) and the shoulder's diameter "
+     "(`shoulder_diameter`). All in mm. The shoulder and "
      "fillet are judged against the SUPPLIER'S abutment limits, carried for "
      "every bearing SKF lists (SKF Rolling bearings, PUB BU/P1 17000 EN, "
      "2018, table 1.1; docs/parts/README.md#abutment-limits): a shaft "
@@ -738,27 +741,18 @@ json NormalizeTransform(json t) {
 // 132, 345, 198. That reads exactly like a loop solver jumping between
 // branches, and was diagnosed as one twice.
 //
-// So `rotation_deg` joins the family that says what it means, and every
-// response carries both. Converting `rotation` itself to degrees was tried
-// first and reverted: it left relations speaking radians and mates speaking
-// degrees, which is a worse trap than the one being fixed.
+// So `rotation_deg` joins the family that says what it means. Converting
+// `rotation` itself to degrees was tried first and reverted: it left
+// relations speaking radians and mates speaking degrees, which is a worse
+// trap than the one being fixed. So a mate TAKES only `rotation_deg` — the
+// unitless key that bit is gone from the input — and every response still
+// carries both, `rotation` documented as radians beside it.
 
-// Radians from whichever the caller used, refusing both at once — a mate
-// pinned to two different angles has no right answer. Takes the values
-// rather than the params so both key names stay visible at the call site:
-// `rpc_params_gate` reads the handler for the keys it touches, and a helper
-// that reached into `p` itself made add_mate look as though it had quietly
-// stopped accepting either.
-double MateRotationRadians(bool hasRad, double rad, bool hasDeg, double deg,
-                           double current) {
-  if (hasRad && hasDeg)
-    throw std::runtime_error(
-        "pass rotation (radians) or rotation_deg, not both");
-  if (hasDeg)
-    return angles::ToRadians(deg);
-  if (hasRad)
-    return rad;
-  return current;
+// Radians from `rotation_deg`, or `current` when it was not given. Takes the
+// value rather than the params so the key name stays visible at the call
+// site: `rpc_params_gate` reads the handler for the keys it touches.
+double MateRotationRadians(bool hasDeg, double deg, double current) {
+  return hasDeg ? angles::ToRadians(deg) : current;
 }
 
 json MateJson(const Mate& m) {
@@ -1657,10 +1651,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         {"a", connToJson(p.at("a"))},
         {"b", connToJson(p.at("b"))},
         {"flipped", p.value("flipped", true)},
-        {"rotation",
-         MateRotationRadians(p.contains("rotation"), p.value("rotation", 0.0),
-                             p.contains("rotation_deg"),
-                             p.value("rotation_deg", 0.0), 0.0)},
+        {"rotation", MateRotationRadians(p.contains("rotation_deg"),
+                                         p.value("rotation_deg", 0.0), 0.0)},
         {"offset", p.value("offset", 0.0)}};
     if (p.contains("dx"))
       mateJson["dx"] = p.at("dx"); // planar
@@ -1743,13 +1735,13 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error(
             std::string(k) +
             " is the sub-assembly's to edit, on its own tab; "
-            "a mate inside a flexible placement takes rotation, rotation_deg "
+            "a mate inside a flexible placement takes rotation_deg "
             "or offset here — this placement's pose of it");
-    const bool turn = p.contains("rotation") || p.contains("rotation_deg");
+    const bool turn = p.contains("rotation_deg");
     const MateDof dof = turn ? MateDof::Rotation : MateDof::Offset;
     if (!turn && !p.contains("offset"))
       throw std::runtime_error("set_mate with a path poses the mate: give "
-                               "rotation, rotation_deg or offset");
+                               "rotation_deg or offset");
     if (!assembly::MateHasDof(mate->type, dof))
       throw std::runtime_error("mate " + std::to_string(mate->id) + " (" +
                                mate->name + ") has no " +
@@ -1769,9 +1761,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                             ui::AssemblyResolverFor(state))
             .value_or(0.0);
     const double value =
-        turn ? MateRotationRadians(p.contains("rotation"),
-                                   p.value("rotation", 0.0),
-                                   p.contains("rotation_deg"),
+        turn ? MateRotationRadians(p.contains("rotation_deg"),
                                    p.value("rotation_deg", 0.0), current)
              : p.at("offset").get<double>();
     ui::SnapshotAssembly(state);
@@ -1807,7 +1797,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
     // writing the mate here would edit the AUTHORED value under the hold —
     // another configuration's mate — and move nothing on screen.
     if (const MateOverride* hold = state.assembly->MateOverrideFor(mate->id)) {
-      const bool turn = p.contains("rotation") || p.contains("rotation_deg");
+      const bool turn = p.contains("rotation_deg");
       if ((turn && hold->rotation) || (p.contains("offset") && hold->offset)) {
         const Configuration* c = state.assembly->ActiveConfig();
         throw std::runtime_error(
@@ -1820,11 +1810,9 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       }
     }
     ui::SnapshotAssembly(state);
-    if (p.contains("rotation") || p.contains("rotation_deg"))
-      mate->rotation =
-          MateRotationRadians(p.contains("rotation"), p.value("rotation", 0.0),
-                              p.contains("rotation_deg"),
-                              p.value("rotation_deg", 0.0), mate->rotation);
+    if (p.contains("rotation_deg"))
+      mate->rotation = MateRotationRadians(true, p.value("rotation_deg", 0.0),
+                                           mate->rotation);
     if (p.contains("offset"))
       mate->offset = p.at("offset").get<double>();
     if (p.contains("flipped"))

@@ -89,7 +89,7 @@ def main():
         r = box(d, (0, 0, 0), (20, 30, 40), "Box 1")
         expect(r.get("regen", {}).get("ok"), f"box regenerates ({r})")
         mp = d.call("mass_properties")
-        expect(abs(mp["total"]["volume"] - 24000.0) < 1.0,
+        expect(abs(mp["total"]["volume_mm3"] - 24000.0) < 1.0,
                f"box volume is 24000 mm^3 ({mp})")
         # A second box forming a step: the concave corner is where shadows
         # and AO visibly land, so the render-option toggle below has pixels

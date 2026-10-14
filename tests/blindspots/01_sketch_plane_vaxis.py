@@ -25,7 +25,7 @@ def run(d, expect):
     r = d.call("add_feature", feature={
         "type": "Extrude", "name": "Cut", "sketch_id": sk["id"],
         "distance": 25, "mode": "cut"})
-    expect(abs(r["digest"]["delta"]["volume"]) < 1e-6,
+    expect(abs(r["digest"]["delta"]["volume_mm3"]) < 1e-6,
            f"the miss must be visible as a zero delta: {r['digest']}")
     expect(r["regen"]["warnings"],
            f"a no-op cut must WARN, not pass silently: {r['regen']}")
@@ -43,6 +43,6 @@ def run(d, expect):
         "type": "Extrude", "name": "Cut", "sketch_id": sk["id"],
         "distance": 25, "mode": "cut"})
     import math
-    expect(abs(r["digest"]["delta"]["volume"] + math.pi * 16 * 20) < 1.0,
+    expect(abs(r["digest"]["delta"]["volume_mm3"] + math.pi * 16 * 20) < 1.0,
            f"flipped plane must cut the full bore: {r['digest']['delta']}")
     expect(not r["regen"]["warnings"], f"clean cut: {r['regen']}")

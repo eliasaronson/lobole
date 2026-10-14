@@ -219,9 +219,9 @@ def measure(d):
     out = {"bodies": len(bodies)}
     if not bodies:
         return out
-    out["volume"] = mp["total"]["volume"]
-    out["center_of_mass"] = mp["total"]["center_of_mass"]
-    out["area"] = sum(b["surface_area"] for b in mp["bodies"])
+    out["volume"] = mp["total"]["volume_mm3"]
+    out["center_of_mass"] = mp["total"]["center_of_mass_mm"]
+    out["area"] = sum(b["surface_area_mm2"] for b in mp["bodies"])
     lo = [min(b["bbox_min"][i] for b in mp["bodies"]) for i in range(3)]
     hi = [max(b["bbox_max"][i] for b in mp["bodies"]) for i in range(3)]
     out["bbox"] = [lo, hi]

@@ -84,7 +84,7 @@ def main():
 
         # --- The named pair ------------------------------------------------
         r = d.call("interference", a="Housing", b=bearing)
-        expect(r["clash"] is False and r["volume"] < 1e-9,
+        expect(r["clash"] is False and r["volume_mm3"] < 1e-9,
                f"a press fit is not a clash: {r}")
         expect(r["state"] == "touching", f"pressed together: {r}")
         expect(r["press_fit_pairs"] == 1, f"one press fit: {r}")

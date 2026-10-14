@@ -15,6 +15,7 @@ import argparse
 import glob
 import keyword
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -65,6 +66,14 @@ def title(method):
     return "".join(w.title() for w in method.split("_"))
 
 
+def api_version():
+    text = (ROOT / "src/remote/ApiVersion.h").read_text()
+    m = re.search(r"kApiVersion\s*=\s*(\d+)\s*;", text)
+    if not m:
+        raise SystemExit("no kApiVersion in src/remote/ApiVersion.h")
+    return int(m.group(1))
+
+
 def generate():
     rows = contracts()
     lines = [
@@ -75,6 +84,10 @@ def generate():
         "# MethodDoc rows (docs/scripting/rpc.md#typed-contracts). Do not edit.",
         "from collections.abc import Mapping, Sequence",
         "from typing import Any, Literal, NotRequired, TypedDict, Unpack",
+        "",
+        "# The RPC surface these were generated against (src/remote/ApiVersion.h);",
+        "# lobole.sdk.App warns when the app reports another.",
+        f"API_VERSION = {api_version()}",
         "",
         "",
         "class Revision(TypedDict):",

@@ -965,6 +965,14 @@ add_test(NAME rpc_units_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_units_gate.py)
 set_tests_properties(rpc_units_gate PROPERTIES TIMEOUT 60)
 
+# The RPC surface against its last published snapshot (api/rpc-surface.json):
+# a method or parameter that goes away needs kApiVersion raised once the
+# surface is released, and the snapshot refreshed either way, so a caller
+# written against one api_version keeps working while it stands.
+add_test(NAME api_surface_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/api_surface_gate.py)
+set_tests_properties(api_surface_gate PROPERTIES TIMEOUT 60)
+
 # A format bump on a branch is written as a placeholder and numbered when it
 # lands (docs/versioning/format.md#a-bump-takes-its-number-when-it-lands): the
 # header's arithmetic, the pending rows, the goldens' names against their

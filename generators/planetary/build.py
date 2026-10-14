@@ -479,7 +479,7 @@ def build_assembly(d, s, ph, diameter, proc):
         o = f"planet {i + 1}"
         mates[o] = d.call("add_mate", type="revolute", name=f"{o} axis",
                           a={"occurrence": occ["carrier"], "frame": o},
-                          b=origin(o), flipped=False, rotation=phi)["id"]
+                          b=origin(o), flipped=False, rotation_deg=math.degrees(phi))["id"]
     # The train as written on paper: sun, ring and carrier by Willis, and
     # each planet's turn on the carrier, from the tooth counts
     # (docs/assemblies/relations.md#relations-over-several-mates). The

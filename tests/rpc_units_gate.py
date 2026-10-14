@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Gate: a dimensional RPC parameter says what unit it is in.
+"""Gate: a dimensional RPC parameter, or result key, says what unit it is in.
 
 Every unit bug this project has shipped is a BOUNDARY bug — a number crossing
 between JSON and a struct field, where nothing carries the unit but the name
@@ -72,8 +72,8 @@ DIMENSIONAL = {
 # and the convention the codebase already spells: angle_deg, mass_g,
 # max_von_mises_mpa, feed_mm_min, deflection_mm, budget_s.
 UNIT_SUFFIX = re.compile(
-    r"_(mm|cm|m|in|deg|rad|g|kg|lb|s|ms|n|n_mm|nmm|n_m|mpa|gpa|hz|rpm|mm_min|"
-    r"m_s|px|pct)$")
+    r"_(mm|mm2|mm3|cm|m|in|deg|rad|g|kg|lb|s|ms|n|n_mm|nmm|n_m|mpa|gpa|hz|rpm|"
+    r"mm_min|m_s|px|pct)$")
 
 # Unit words a row's prose can use, in any case — rows shout MILLIMETRES and
 # RADIANS where the confusion has actually bitten, and that has to count.
@@ -127,8 +127,27 @@ ALLOW = {
 }
 
 
-def dimensional(key):
+# What a RESULT can carry that a parameter does not: a measured volume or
+# area. (A position is a length too, and is not listed for either side —
+# `origin`, `center`, `bbox_min` are mm throughout, which docs/conventions.md
+# says once rather than every row.)
+RESULT_ONLY = {"volume", "area"}
+
+# Result keys that match a stem and carry no unit, deliberately.
+ALLOW_RESULT = {
+    # The VALUES are unit names ("mm", "g", "deg"): this is where the
+    # document says which units it displays in.
+    ("get_units", "length"),
+    ("get_units", "mass"),
+    ("get_units", "angle"),
+}
+
+
+def dimensional(key, result=False):
     """Does this key name a physical quantity?"""
+    if result and (key in RESULT_ONLY
+                   or key.split("_")[-1] in RESULT_ONLY):
+        return True
     if key in DIMENSIONAL:
         return True
     parts = key.split("_")
@@ -161,6 +180,27 @@ def main():
                 continue
             problems.append((name, key, os.path.basename(info["file"])))
 
+        # The RESULT keys the row's `returns` column names, by the same rule:
+        # a caller reading `volume` off an answer guesses its unit exactly
+        # as one writing it into a call does.
+        returns = info.get("returns") or ""
+        text = doc + " " + returns
+        row_names_a_unit = bool(UNIT_WORD.search(text)
+                                or UNIT_SYMBOL.search(text))
+        for key in sorted(set(re.findall(r"\b([a-z][a-z0-9_]*)\b",
+                                         returns))):
+            if not dimensional(key, result=True) or \
+                    (name, key) in ALLOW_RESULT or (name, key) in ALLOW:
+                continue
+            if UNIT_SUFFIX.search(key):
+                continue
+            # Named in the PROSE: the returns column always names the key,
+            # which says nothing about its unit.
+            if row_names_a_unit and re.search(r"\b" + key + r"\b", doc):
+                continue
+            problems.append((name, key + " (result)",
+                             os.path.basename(info["file"])))
+
     if problems:
         print("A dimensional RPC parameter must say what unit it is in —")
         print("either in the KEY (`angle_deg`, `tolerance_mm`) or by naming")
@@ -169,10 +209,10 @@ def main():
         print("the row an agent reads and not in the handler.\n")
         for name, key, where in problems:
             print(f"  {where}: {name}.{key}")
-        print(f"\n{len(problems)} undocumented dimensional parameters.")
+        print(f"\n{len(problems)} dimensional keys with no unit.")
         return 1
 
-    print(f"ok: {len(docs)} methods, every dimensional parameter names a unit")
+    print(f"ok: {len(docs)} methods, every dimensional parameter and result key names a unit")
     return 0
 
 

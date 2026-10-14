@@ -117,7 +117,8 @@ a fastened mate's twist solves and round-trips. The inspector shows the angle
 for a fastened mate too, so a twist set in the tool window can be read and
 undone later. Ball is excluded because its twist folds into its ball
 rotation. The prompt reads "Accept, Flip, Rotate, or Cancel". Over RPC,
-`add_mate` / `set_mate` take `rotation` / `rotation_deg`.
+`add_mate` / `set_mate` take it as `rotation_deg` (responses carry `rotation`,
+in radians, beside it).
 
 ## Simulation load drag
 

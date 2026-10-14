@@ -713,7 +713,7 @@ def build_assembly(d, s):
 def set_count(d, mates, count):
     """Stand the units at `count` and let the relations place the rest."""
     d.call("set_mate", id=mates[wheel_name(0)],
-           rotation=math.radians(-36.0 * count))
+           rotation_deg=-36.0 * count)
     d.call("solve_assembly")
 
 

@@ -339,7 +339,7 @@ def camera(app, S):
     part.check()
     mp = part.app.mass_properties(part=part.id)["total"]
     print(f"camera: {mp['mass_g']:.1f} g (load_kg {S['load_kg']:g}), CoM "
-          f"{mp['center_of_mass']} (spec.py: x {S['cam_cx']:.2f}, z "
+          f"{mp['center_of_mass_mm']} (spec.py: x {S['cam_cx']:.2f}, z "
           f"{S['cam_cz']:.2f})")
     # The socket's tapped hole is the one thing not given back, as before.
     if abs(mp["mass_g"] - 1000 * S["load_kg"]) > 1.0:

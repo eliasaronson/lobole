@@ -171,7 +171,7 @@ def main():
         state = d.call("get_state")
         expect(not any("error" in f for f in state["features"]),
                "no feature errors")
-        expect(abs(state["bodies"][0]["volume"] - expected_volume) < 1e-2,
+        expect(abs(state["bodies"][0]["volume_mm3"] - expected_volume) < 1e-2,
                "bracket volume")
 
         phase("Mass properties")
@@ -179,12 +179,12 @@ def main():
         d.call("set_material", feature_id=pad["id"], material="aluminum")
         mp = d.call("mass_properties")
         b = mp["bodies"][0]
-        expect(abs(b["volume"] - expected_volume) < 1e-2, "massprops volume")
+        expect(abs(b["volume_mm3"] - expected_volume) < 1e-2, "massprops volume")
         expect(abs(b["mass_g"] - 2700 * expected_volume * 1e-6) < 1e-3,
                "aluminum mass in grams")
-        expect(abs(b["center_of_mass"][2] - 2.5) < 1e-6, "CoM mid-thickness")
+        expect(abs(b["center_of_mass_mm"][2] - 2.5) < 1e-6, "CoM mid-thickness")
         expect(abs(mp["total"]["mass_g"] - b["mass_g"]) < 1e-9, "total mass")
-        surface = b["surface_area"]
+        surface = b["surface_area_mm2"]
         expect(surface > 0, "surface area computed")
         inertia = b["inertia"]
         expect(len(inertia) == 3 and len(inertia[0]) == 3, "inertia is 3x3")
@@ -203,12 +203,12 @@ def main():
         face = next(f["name"] for f in pels["faces"])
         marea = d.call("measure", a={"feature_id": pels["created_by"],
                                      "element": face})
-        expect(marea["kind"] == "face" and marea["area"] > 0,
+        expect(marea["kind"] == "face" and marea["area_mm2"] > 0,
                "measure face area")
         edge = pels["edges"][0]["name"]
         mlen = d.call("measure", a={"feature_id": pels["created_by"],
                                     "element": edge})
-        expect(mlen["kind"] == "edge" and mlen["length"] > 0,
+        expect(mlen["kind"] == "edge" and mlen["length_mm"] > 0,
                "measure edge length")
         try:
             d.call("measure", a={"feature_id": pels["created_by"],
@@ -226,9 +226,9 @@ def main():
         # list_elements enrichment: every face carries kind+area, every edge
         # kind+length; the bracket's sketch fillet extrudes to a cylindrical
         # face and radius-4 arc edges.
-        expect(all("kind" in f and f["area"] > 0 for f in els["faces"]),
+        expect(all("kind" in f and f["area_mm2"] > 0 for f in els["faces"]),
                "faces carry kind and area")
-        expect(all("kind" in e and e["length"] > 0 for e in els["edges"]),
+        expect(all("kind" in e and e["length_mm"] > 0 for e in els["edges"]),
                "edges carry kind and length")
         fkinds = {f["kind"] for f in els["faces"]}
         expect("plane" in fkinds and "cylinder" in fkinds,
@@ -238,7 +238,7 @@ def main():
                "fillet arc edges report radius 4")
         expect(any(e["kind"] == "line" for e in els["edges"]),
                "straight edges classify as line")
-        before = d.call("get_state")["bodies"][0]["volume"]
+        before = d.call("get_state")["bodies"][0]["volume_mm3"]
         d.call("add_feature", feature={
             "type": "Chamfer", "name": "Break", "radius": 0.5,
             "edges": [{"feature_id": els["created_by"],
@@ -246,7 +246,7 @@ def main():
         state = d.call("get_state")
         expect(not any("error" in f for f in state["features"]),
                "chamfer regenerated clean")
-        expect(state["bodies"][0]["volume"] < before, "chamfer removed volume")
+        expect(state["bodies"][0]["volume_mm3"] < before, "chamfer removed volume")
         d.call("undo")
 
         phase("Project round-trip + undo/redo")
@@ -257,7 +257,7 @@ def main():
         expect(len(d.call("get_state")["features"]) == 0, "cleared")
         d.call("open_project", path=project)
         state = d.call("get_state")
-        expect(abs(state["bodies"][0]["volume"] - expected_volume) < 1e-2,
+        expect(abs(state["bodies"][0]["volume_mm3"] - expected_volume) < 1e-2,
                "reloaded volume")
         d.call("undo")  # camera/view state functions without a GUI
         v = d.call("view", name="front")
@@ -502,7 +502,7 @@ def main():
         state = d.call("get_state")
         expect(not any("error" in f for f in state["features"]),
                "rib regenerated clean")
-        expect(state["bodies"][0]["volume"] > 1000.0 + 1.0, "rib added volume")
+        expect(state["bodies"][0]["volume_mm3"] > 1000.0 + 1.0, "rib added volume")
 
         phase("Cosmetic thread")
         # Cosmetic thread (v36): annotates a cylindrical face, geometry
@@ -511,7 +511,7 @@ def main():
         els = next(b for b in d.call("list_elements")["bodies"]
                    if b["created_by"] == cyl["id"])
         boss_before = next(b for b in d.call("get_state")["bodies"]
-                           if abs(b["volume"] - math.pi * 16 * 20) < 1e-3)
+                           if abs(b["volume_mm3"] - math.pi * 16 * 20) < 1e-3)
         d.call("add_feature", feature={
             "type": "Thread", "name": "M8", "designation": "M8",
             "pitch": 1.25,
@@ -521,8 +521,8 @@ def main():
         expect(not any("error" in f for f in state["features"]),
                "thread regenerated clean")
         boss_after = next(b for b in state["bodies"]
-                          if abs(b["volume"] - math.pi * 16 * 20) < 1e-3)
-        expect(abs(boss_after["volume"] - boss_before["volume"]) < 1e-9,
+                          if abs(b["volume_mm3"] - math.pi * 16 * 20) < 1e-3)
+        expect(abs(boss_after["volume_mm3"] - boss_before["volume_mm3"]) < 1e-9,
                "cosmetic thread left the volume untouched")
 
         phase("Ellipse radii through add_constraint, and refusals")
@@ -565,11 +565,11 @@ def main():
             "type": "Extrude", "name": "Oval pad", "sketch_id": sk["id"],
             "distance": 2.0, "mode": "new_body",
             "regions": [[el]]})
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - math.pi * 30 * 10 * 2) < 1e-2,
                f"the oval pads at its dimensioned size ({vol})")
         d.call("set_variable", name="oval_a", expression="40")
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - math.pi * 40 * 10 * 2) < 1e-2,
                f"the oval follows its variable ({vol})")
 
@@ -581,7 +581,7 @@ def main():
         # A side face: pick the first whose name resolves; the feature rejects
         # caps, so try faces until one drafts. Use get_state face normals via
         # measure is overkill — just try face names, catching the cap error.
-        vol0 = d.call("get_state")["bodies"][0]["volume"]
+        vol0 = d.call("get_state")["bodies"][0]["volume_mm3"]
         drafted = False
         for f in bx["faces"]:
             try:
@@ -593,7 +593,7 @@ def main():
                                "element": f["name"]}]})
                 st = d.call("get_state")
                 if not any("error" in ff for ff in st["features"]):
-                    expect(st["bodies"][0]["volume"] < vol0,
+                    expect(st["bodies"][0]["volume_mm3"] < vol0,
                            "draft reduced the volume")
                     drafted = True
                     break
@@ -623,7 +623,7 @@ def main():
         st = d.call("get_state")
         expect(not any("error" in f for f in st["features"]),
                "holes regenerated clean")
-        expect(abs(st["bodies"][0]["volume"]
+        expect(abs(st["bodies"][0]["volume_mm3"]
                    - (400.0 - 4.0 * _m3.pi * 0.25 * 4.0)) < 0.5,
                "4-hole plate volume")
 
@@ -635,10 +635,10 @@ def main():
         shapes.box(d, (0, 0, 0), (2, 2, 2), "A")
         d.call("add_part", name="Arm")
         shapes.box(d, (0, 0, 0), (3, 3, 3), "B")
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 27) < 1e-6,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 27) < 1e-6,
                "part 2 has its own box")
         d.call("set_active_part", index=0)
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8) < 1e-6,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 8) < 1e-6,
                "part 1 intact after switching back")
         # Save + reload the whole multi-part project.
         proj = os.path.join(tmp, "asm.dsgn")
@@ -651,7 +651,7 @@ def main():
         expect([p["name"] for p in parts] == ["Part 1", "Arm"],
                "both parts reloaded")
         d.call("set_active_part", index=1)
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 27) < 1e-6,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 27) < 1e-6,
                "reloaded part 2 geometry")
         # #10: rename an existing part (the default "Part 1" isn't permanent).
         # Resolvable by name; occurrences reference parts by stable id, so the
@@ -807,7 +807,7 @@ def main():
             "type": "Extrude", "name": "P1", "sketch_id": sk1["id"],
             "distance_expr": "bore", "mode": "new_body"})
         expect("error" not in p1, f"extrude with only distance_expr built: {p1}")
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 6) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 8 * 6) < 1e-3,
                "part 1 driven by the project variable (distance_expr only)")
         d.call("add_part", name="Two")
         sk2 = d.call("add_feature", feature={
@@ -817,25 +817,25 @@ def main():
         d.call("add_feature", feature={
             "type": "Extrude", "name": "P2", "sketch_id": sk2["id"],
             "distance": 1.0, "distance_expr": "bore * 2", "mode": "new_body"})
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 10 * 12) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 10 * 12) < 1e-3,
                "part 2 driven by the SAME project variable")
         lv = d.call("list_variables")["variables"]
         expect(any(v["name"] == "bore" and v["scope"] == "project" for v in lv),
                "list_variables tags bore as project scope")
         # Edit the project variable: BOTH parts' geometry follows.
         d.call("set_variable", name="bore", expression="10")
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 10 * 20) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 10 * 20) < 1e-3,
                "part 2 followed the project-variable edit")
         d.call("set_active_part", index=0)
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 10) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 8 * 10) < 1e-3,
                "part 1 followed the project-variable edit too")
         # Project-variable edits are undoable across tabs (their own undo stack,
         # routed by the global most-recent-action rule).
         d.call("undo")
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 6) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 8 * 6) < 1e-3,
                "undo reverted the project-variable edit")
         d.call("redo")
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 10) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 8 * 10) < 1e-3,
                "redo re-applied the project-variable edit")
         # Save + reload preserves the project scope and both geometries.
         pvproj = os.path.join(tmp, "projvars.dsgn")
@@ -847,15 +847,15 @@ def main():
                    and abs(v["value"] - 10) < 1e-9 for v in lv),
                "project variable reloaded at project scope")
         d.call("set_active_part", index=1)
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 10 * 20) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 10 * 20) < 1e-3,
                "part 2 geometry survived the reload")
         # A part-scoped variable of the same name shadows the project one here.
         r = d.call("set_variable", name="bore", expression="1", scope="part")
         expect(r["scope"] == "part", "scope='part' honored")
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 10 * 2) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 10 * 2) < 1e-3,
                "part-local bore shadows the project bore in THIS part")
         d.call("set_active_part", index=0)
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 8 * 10) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 8 * 10) < 1e-3,
                "the other part still resolves the project bore")
         # Fail-loud: an expression over an undefined variable errors the feature.
         badsk = d.call("add_feature", feature={
@@ -886,9 +886,9 @@ def main():
         expect_error(d, "add_section", "not one of xy, xz, yz",
                      base_plane="front")
         sec = d.call("section", base_plane="xy", offset=3.0)  # z=3 -> 4x5=20
-        expect(abs(sec["area"] - 20.0) < 1e-3, "cross-section area 20")
+        expect(abs(sec["area_mm2"] - 20.0) < 1e-3, "cross-section area 20")
         miss = d.call("section", base_plane="xy", offset=99.0)
-        expect(abs(miss["area"]) < 1e-6, "section miss = 0 area")
+        expect(abs(miss["area_mm2"]) < 1e-6, "section miss = 0 area")
 
         # P2/P3: several cuts, a tilt, a datum source, and persistence.
         d.call("remove_section", all=True)
@@ -978,7 +978,7 @@ def main():
         shapes.box(d, (0, 0, 0), (2, 2, 2), "A")
         shapes.box(d, (1, 0, 0), (2, 2, 2), "B", offset_expr=["b_x", "0"])
         clash = d.call("interference", a=0, b=1)
-        expect(clash["clash"] and abs(clash["volume"] - 4.0) < 1e-3,
+        expect(clash["clash"] and abs(clash["volume_mm3"] - 4.0) < 1e-3,
                "overlapping boxes clash with overlap volume 4")
         # Move B clear: its sketch's offset follows the variable.
         d.call("set_variable", name="b_x", expression="10")
@@ -1010,7 +1010,7 @@ def main():
                     transform={"position": [1, 1, 1],
                                "orientation": [0, 0, 0, 1]})["id"]
         clash = d.call("interference", a=o1, b=o2)
-        expect(clash["clash"] and abs(clash["volume"] - 1.0) < 1e-3,
+        expect(clash["clash"] and abs(clash["volume_mm3"] - 1.0) < 1e-3,
                f"overlapping occurrences clash with volume 1: {clash}")
         # Occurrence names resolve too (rename first: two occurrences of one
         # part share a default name).
@@ -1021,7 +1021,7 @@ def main():
         # No pair named -> sweep every visible occurrence pair.
         sweep = d.call("interference")
         expect(sweep["clash"] and len(sweep["pairs"]) == 1
-               and abs(sweep["pairs"][0]["volume"] - 1.0) < 1e-3,
+               and abs(sweep["pairs"][0]["volume_mm3"] - 1.0) < 1e-3,
                f"all-pairs sweep finds the clash: {sweep}")
         # Project-level reads work from the assembly tab (were part-gated).
         d.call("history_log")
@@ -1035,22 +1035,22 @@ def main():
         # volume/mass are the sum, the world CoM the volume-weighted midpoint.
         amp = d.call("mass_properties")  # active tab is the assembly
         expect(len(amp["occurrences"]) == 2, f"two occurrence rows: {amp}")
-        expect(abs(amp["total"]["volume"] - 16.0) < 1e-3,
+        expect(abs(amp["total"]["volume_mm3"] - 16.0) < 1e-3,
                f"assembly total volume 16: {amp['total']}")
         one_mass = 2700 * 8 * 1e-6  # aluminum, 8 mm^3
         expect(abs(amp["total"]["mass_g"] - 2 * one_mass) < 1e-6,
                f"assembly total mass = 2x the part: {amp['total']}")
-        com = amp["total"]["center_of_mass"]
+        com = amp["total"]["center_of_mass_mm"]
         expect(all(abs(c - 1.5) < 1e-4 for c in com),
                f"world CoM at the midpoint (1.5,1.5,1.5): {com}")
         shifted = next(o for o in amp["occurrences"] if o["name"] == "CubeB")
-        expect(all(abs(c - 2.0) < 1e-4 for c in shifted["center_of_mass"]),
+        expect(all(abs(c - 2.0) < 1e-4 for c in shifted["center_of_mass_mm"]),
                f"shifted occurrence world CoM at (2,2,2): {shifted}")
         # Hiding an occurrence drops it from the aggregate (BOM convention).
         d.call("set_occurrence_visible", id=o2, visible=False)
         amp2 = d.call("mass_properties")
         expect(len(amp2["occurrences"]) == 1 and
-               abs(amp2["total"]["volume"] - 8.0) < 1e-3,
+               abs(amp2["total"]["volume_mm3"] - 8.0) < 1e-3,
                f"hidden occurrence excluded: {amp2['total']}")
         d.call("set_occurrence_visible", id=o2, visible=True)
 
@@ -1080,15 +1080,15 @@ def main():
                      if o["id"] == o2)
         expect(abs(o2occ["transform"]["position"][2] - (-3.0)) < 1e-3,
                f"negative offset seats CubeB at -Z (z=-3): {o2occ}")
-        # The mate's rotational DOF is RADIANS, and `rotation_deg` is the
-        # named alias beside it. Nothing here covered `rotation` at all —
-        # only `offset` — which is how a parameter that named no unit came
-        # to be read as degrees by every caller: `set_mate(rotation=60)`
-        # looked like 60 degrees and pinned the mate to 197.7, so a linkage
-        # stepped 10, 20, 30 landed on 213, 66, 279. That reads as a loop
-        # solver picking branches at random, and was diagnosed as one twice.
+        # A mate is turned by `rotation_deg`, and only by it. The key used to
+        # be `rotation`, in radians, which named no unit — so it was read as
+        # degrees by every caller: `set_mate(rotation=60)` looked like 60
+        # degrees and pinned the mate to 197.7, so a linkage stepped 10, 20,
+        # 30 landed on 213, 66, 279. That reads as a loop solver picking
+        # branches at random, and was diagnosed as one twice. The answer
+        # still carries `rotation`, documented as radians, beside it.
         d.call("set_mate", id=rev["id"], offset=0.0)
-        d.call("set_mate", id=rev["id"], rotation=0.0)
+        d.call("set_mate", id=rev["id"], rotation_deg=0.0)
         base = pose_of(d, o2)
         d.call("set_mate", id=rev["id"], rotation_deg=90.0)
         back = next(m for m in d.call("list_mates")["mates"]
@@ -1099,24 +1099,20 @@ def main():
                f"...and `rotation` is the radians beside it: {back}")
         quarter = pose_of(d, o2)
         expect(quarter != base, "90 degrees actually moved it")
-        # The two spellings are the same pose, which is the whole point of
-        # the alias: whichever the caller reaches for, it means one angle.
-        d.call("set_mate", id=rev["id"], rotation=math.pi / 2)
-        expect(all(abs(a - b) < 1e-3 for a, b in zip(pose_of(d, o2), quarter)),
-               "rotation=pi/2 and rotation_deg=90 are one pose")
-        # And a whole turn is the identity in either spelling.
+        # And a whole turn is the identity.
         d.call("set_mate", id=rev["id"], rotation_deg=360.0)
         expect(all(abs(a - b) < 1e-3 for a, b in zip(pose_of(d, o2), base)),
                "360 degrees returns to where 0 put it")
-        # Both at once has no right answer, so it is refused rather than
-        # resolved in favour of one of them.
-        try:
-            d.call("set_mate", id=rev["id"], rotation=1.0, rotation_deg=90.0)
-            raise AssertionError("two angles for one mate were accepted")
-        except RuntimeError as e:
-            expect("not both" in str(e),
-                   f"the refusal says what is wrong: {e}")
-        d.call("set_mate", id=rev["id"], rotation=0.0)
+        # The unitless key is refused by name, not read in some unit.
+        for method, extra in (("set_mate", {"id": rev["id"]}),
+                              ("add_mate", {"a": {}, "b": {}})):
+            try:
+                d.call(method, rotation=1.0, **extra)
+                raise AssertionError(f"{method} accepted `rotation`")
+            except RuntimeError as e:
+                expect("rotation_deg" in str(e),
+                       f"the refusal names the key it takes: {e}")
+        d.call("set_mate", id=rev["id"], rotation_deg=0.0)
         d.call("remove_mate", id=rev["id"])
 
         phase("Cross-part list_elements/measure from the ASSEMBLY tab")
@@ -1130,8 +1126,8 @@ def main():
         m = d.call("measure", part="Part 1",
                    a={"feature_id": pels["created_by"],
                       "element": face["name"]})
-        expect(abs(m["area"] - face["area"]) < 1e-9 and
-               abs(m["area"] - 4.0) < 1e-6,
+        expect(abs(m["area_mm2"] - face["area_mm2"]) < 1e-9 and
+               abs(m["area_mm2"] - 4.0) < 1e-6,
                "cross-part measure: cube face area 4")
         expect_error(d, "measure", "no part with id or index", part="Nope",
                      a={"feature_id": pels["created_by"],
@@ -1146,8 +1142,8 @@ def main():
         m_by_id = d.call("measure", part=pinfo["id"],
                          a={"feature_id": pels["created_by"],
                             "element": face["name"]})
-        expect(abs(m_by_index["area"] - 4.0) < 1e-6 and
-               abs(m_by_id["area"] - 4.0) < 1e-6,
+        expect(abs(m_by_index["area_mm2"] - 4.0) < 1e-6 and
+               abs(m_by_id["area_mm2"] - 4.0) < 1e-6,
                "measure resolves a part by slot index AND by stable id")
         expect_error(d, "measure", "no part with id or index", part=99999,
                      a={"feature_id": pels["created_by"],
@@ -1168,7 +1164,7 @@ def main():
                       flipped=True)
         expect(mate.get("errored_mates", 0) == 0, f"seat mate solved: {mate}")
         seated = d.call("interference", a=o1, b=o2)
-        expect(not seated["clash"] and seated["volume"] < 1e-6,
+        expect(not seated["clash"] and seated["volume_mm3"] < 1e-6,
                f"mated-apart occurrences do not clash: {seated}")
 
         phase("Mate-connector diagnostics")
@@ -1219,25 +1215,25 @@ def main():
         st = d.call("get_state")
         expect(not any("error" in f for f in st["features"]),
                "expr-entity model regenerated clean")
-        expect(abs(st["bodies"][0]["volume"] - math.pi * 9 * 2) < 1e-2,
+        expect(abs(st["bodies"][0]["volume_mm3"] - math.pi * 9 * 2) < 1e-2,
                "circle radius follows bore/2 = 3")
         ent = st["features"][0]["entities"][0]
         expect(ent.get("r_expr") == "bore / 2",
                f"entity expr surfaces in get_state: {ent}")
         d.call("set_variable", name="bore", expression="10")
         st = d.call("get_state")
-        expect(abs(st["bodies"][0]["volume"] - math.pi * 25 * 2) < 1e-2,
+        expect(abs(st["bodies"][0]["volume_mm3"] - math.pi * 25 * 2) < 1e-2,
                "set_variable ripples the entity expr into the volume")
         eproj = os.path.join(tmp, "exprs.json")
         d.call("save_project", path=eproj)
         d.call("new_project")
         d.call("open_project", path=eproj)
         st = d.call("get_state")
-        expect(abs(st["bodies"][0]["volume"] - math.pi * 25 * 2) < 1e-2,
+        expect(abs(st["bodies"][0]["volume_mm3"] - math.pi * 25 * 2) < 1e-2,
                "entity exprs survive save/load")
         d.call("set_variable", name="bore", expression="4")
         st = d.call("get_state")
-        expect(abs(st["bodies"][0]["volume"] - math.pi * 4 * 2) < 1e-2,
+        expect(abs(st["bodies"][0]["volume_mm3"] - math.pi * 4 * 2) < 1e-2,
                "reloaded entity expr still drives the geometry")
 
         phase("Sweep")
@@ -1260,7 +1256,7 @@ def main():
         expect(not any("error" in f for f in st["features"]),
                "sweep regenerated clean")
         import math as _m2
-        expect(abs(st["bodies"][0]["volume"] - _m2.pi * 8) < 0.2,
+        expect(abs(st["bodies"][0]["volume_mm3"] - _m2.pi * 8) < 0.2,
                "swept cylinder volume ~8pi")
 
         phase("Bent path")
@@ -1439,7 +1435,7 @@ def main():
                "loft regenerated clean")
         # Conical frustum r=3->1 over h=6: V = pi h/3 (R^2+Rr+r^2) = pi*2*13.
         import math as _m
-        expect(abs(st["bodies"][0]["volume"] - _m.pi * 2 * 13) < 1.0,
+        expect(abs(st["bodies"][0]["volume_mm3"] - _m.pi * 2 * 13) < 1.0,
                "loft frustum volume")
 
         phase("What the shop gets")
@@ -1570,7 +1566,7 @@ def main():
         st = d.call("get_state")
         expect(not any("error" in f for f in st["features"]),
                "shell regenerated clean")
-        expect(abs(st["bodies"][0]["volume"] - 424.0) < 5.0, "bin volume ~424")
+        expect(abs(st["bodies"][0]["volume_mm3"] - 424.0) < 5.0, "bin volume ~424")
 
         phase("Export STEP/STL/BREP")
         # Export STEP/STL/BREP (E1), then re-import the STEP to verify it
@@ -1594,7 +1590,7 @@ def main():
                    os.path.getsize(stl) > 84, "stl is binary")
         d.call("new_project")
         rep = d.call("import_step", path=step)
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 24.0) < 1e-3,
                "re-imported STEP has the original volume")
         # Centred on import, and the reply says by how much — as add_feature
         # does for an Import. The box is 2x3x4 from the origin, so its centre
@@ -1612,13 +1608,13 @@ def main():
         # sewn shell is promoted), so volume works; a box tessellates exactly.
         d.call("new_project")
         d.call("import_step", path=stl)
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 24.0) < 1e-3,
                "re-imported STL is a solid with the original volume")
         # An STL carries no unit, so the caller says what it was drawn in
         # (docs/interchange/README.md#importing-into-a-part): read as cm, the 2x3x4 box is 10x per side.
         d.call("new_project")
         d.call("import_step", path=stl, units="cm")
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24000.0) < 0.1,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 24000.0) < 0.1,
                "an STL read in cm is 10x per side")
         expect_error(d, "import_step", "Accepted", path=stl, units="furlong")
         expect_error(d, "import_step", "declares its own", path=step,
@@ -1689,7 +1685,7 @@ def main():
                     if p["type"] == "part" and p.get("folder") == "part"]
         expect(len(imported) == 1, f"imported part reloads: {parts}")
         d.call("set_active_part", index=imported[0]["index"])
-        expect(abs(d.call("get_state")["bodies"][0]["volume"] - 24.0) < 1e-3,
+        expect(abs(d.call("get_state")["bodies"][0]["volume_mm3"] - 24.0) < 1e-3,
                "adopted sidecar regenerates with the original volume")
         d.call("new_project")  # empty document
         try:
@@ -1712,7 +1708,7 @@ def main():
         d.call("checkpoint_create", name="v1")
         expect(os.path.exists(cp_project + ".checkpoints/v1.json"),
                "checkpoint file written beside the project")
-        volume_before = d.call("get_state")["bodies"][0]["volume"]
+        volume_before = d.call("get_state")["bodies"][0]["volume_mm3"]
         shapes.box(d, (90, 0, 0), (1, 1, 1), "Extra")
         expect(len(d.call("get_state")["bodies"]) == 2, "mutated after cp")
         cps = d.call("checkpoint_list")["checkpoints"]
@@ -1720,7 +1716,7 @@ def main():
         d.call("checkpoint_restore", name="v1")
         st = d.call("get_state")
         expect(len(st["bodies"]) == 1
-               and abs(st["bodies"][0]["volume"] - volume_before) < 1e-9,
+               and abs(st["bodies"][0]["volume_mm3"] - volume_before) < 1e-9,
                "restore returns the checkpointed state")
         try:
             d.call("checkpoint_restore", name="missing")

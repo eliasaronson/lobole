@@ -52,7 +52,7 @@ def main():
         blk = box(d, (0, 0, 0), (10, 10, 10), "Blk")
         d.call("set_material", feature_id=blk["id"], material="steel")
         mp = d.call("mass_properties")  # refactored path: same numbers as BOM
-        expect(abs(mp["total"]["volume"] - 1000.0) < 1e-6,
+        expect(abs(mp["total"]["volume_mm3"] - 1000.0) < 1e-6,
                f"block volume: {mp['total']}")
         steel_g = mp["total"]["mass_g"]
         expect(steel_g and steel_g > 0, f"steel block has a mass: {mp['total']}")

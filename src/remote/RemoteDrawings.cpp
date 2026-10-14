@@ -184,8 +184,9 @@ static constexpr MethodDoc DrawingMethods[] = {
      "would rather poll background_jobs.",
      "async, budget_s, drawing"},
     {"list_drawing_geometry",
-     "Projected 2D curves of a view (for picking/dimensioning).", "view",
-     remote::NoFlags,
+     "Projected 2D curves of a view (for picking/dimensioning): `center`, "
+     "`radius`, `p1`/`p2` in the view plane, mm at model scale.",
+     "view", remote::NoFlags,
      "geometry[]{kind,source_id,ref,visible,source_feature?,type?,center?,"
      "radius?,closed?,p1?,p2?,bbox?}"},
     {"add_drawing_dim",

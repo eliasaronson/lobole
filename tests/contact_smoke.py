@@ -175,7 +175,7 @@ def main():
         # region both boxes share — rather than a site it does not know.
         mesh = next(p for p in d.call("interference", mode="mesh")["pairs"]
                     if {p["a"], p["b"]} == {"P3", "P4"})
-        expect("centroid_mm" not in mesh and "volume" not in mesh,
+        expect("centroid_mm" not in mesh and "volume_mm3" not in mesh,
                f"a mesh hit invents no site: {mesh}")
         expect(abs(mesh["within_min_mm"][0] - 100) < 1e-3
                and abs(mesh["within_max_mm"][0] - 105.5) < 1e-3,
@@ -236,7 +236,7 @@ def main():
         expect({(p["a"], p["b"]) for p in mesh["pairs"]} ==
                {(p["a"], p["b"]) for p in exact["pairs"]},
                f"pair for pair: {mesh['pairs']} vs {exact['pairs']}")
-        expect(all("volume" not in p for p in mesh["pairs"]),
+        expect(all("volume_mm3" not in p for p in mesh["pairs"]),
                f"and reports no volume: {mesh['pairs'][:2]}")
         expect(mesh.get("deflection_mm", 0) > 0,
                f"but says how close 'clear' was decided: {mesh}")

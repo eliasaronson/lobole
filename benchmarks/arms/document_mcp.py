@@ -75,12 +75,12 @@ def write_document(document: str) -> dict:
     out = {"ok": True}
     try:
         state = d.call("get_state")
-        out["bodies"] = [{"name": b.get("name"), "volume": b.get("volume"),
+        out["bodies"] = [{"name": b.get("name"), "volume": b.get("volume_mm3"),
                           "bbox_min": b.get("bbox_min"),
                           "bbox_max": b.get("bbox_max")}
                          for p in state.get("parts", [])
                          for b in p.get("bodies", [])] or [
-                             {"name": b.get("name"), "volume": b.get("volume")}
+                             {"name": b.get("name"), "volume": b.get("volume_mm3")}
                              for b in state.get("bodies", [])]
         errs = [f for f in state.get("features", []) if f.get("error")]
         if errs:

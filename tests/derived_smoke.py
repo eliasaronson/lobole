@@ -86,7 +86,7 @@ def main():
         expect(row["stale"] is False, f"fresh copy reads {row['stale']!r}")
         expect(row["source_name"] == "servo", row)
         b = bodies(d)
-        expect(len(b) == 1 and abs(b[0]["volume"] - 1000.0) < 1e-6, b)
+        expect(len(b) == 1 and abs(b[0]["volume_mm3"] - 1000.0) < 1e-6, b)
         refused(d, "mass_properties", "reference: false")
         refused(d, "export_step", "reference",
                 path=os.path.join(tmp, "jaw.step"))
@@ -94,7 +94,7 @@ def main():
         # z -4..0: on Top, extruded down.
         box(d, (0, 0, 0), (20, 10, 4), "Jaw", reversed=True)
         mass = d.call("mass_properties")
-        expect(abs(mass["total"]["volume"] - 800.0) < 1e-6, mass)
+        expect(abs(mass["total"]["volume_mm3"] - 800.0) < 1e-6, mass)
         expect(len(mass["bodies"]) == 1, mass)
         chk = d.call("check_geometry")
         expect("stale_derived" not in chk, chk)
@@ -116,21 +116,21 @@ def main():
         d.call("set_active_part", part="jaw")
         row = derived_row(d)
         expect(row["stale"] is True, f"moved source not reported: {row}")
-        expect(abs(bodies(d)[0]["volume"] - 1000.0) < 1e-6, "auto-updated!")
+        expect(abs(bodies(d)[0]["volume_mm3"] - 1000.0) < 1e-6, "auto-updated!")
         chk = d.call("check_geometry")
         expect([s["id"] for s in chk.get("stale_derived", [])] == [did], chk)
 
         # update_derived: the new geometry, fresh, one undo step.
         r = d.call("update_derived", feature_id=did)
         expect(r["updated"] == [did] and r["regen"]["ok"], r)
-        expect(abs(bodies(d)[0]["volume"] - 2000.0) < 1e-6, bodies(d))
+        expect(abs(bodies(d)[0]["volume_mm3"] - 2000.0) < 1e-6, bodies(d))
         expect(derived_row(d)["stale"] is False, derived_row(d))
         d.call("undo")
-        expect(abs(bodies(d)[0]["volume"] - 1000.0) < 1e-6, bodies(d))
+        expect(abs(bodies(d)[0]["volume_mm3"] - 1000.0) < 1e-6, bodies(d))
         expect(derived_row(d)["stale"] is True, derived_row(d))
         r = d.call("update_derived", all=True)
         expect(r["updated"] == [did], r)
-        expect(abs(bodies(d)[0]["volume"] - 2000.0) < 1e-6, bodies(d))
+        expect(abs(bodies(d)[0]["volume_mm3"] - 2000.0) < 1e-6, bodies(d))
 
         # A cycle: the servo may not derive from the jaw that derives it.
         d.call("set_active_part", part="servo")
@@ -183,7 +183,7 @@ def main():
                [f["type"] for f in feats])
         expect(all(f["stale"] is False for f in feats if f["type"] == "Derived"),
                feats)
-        vols = sorted(round(b["volume"], 3) for b in bodies(d))
+        vols = sorted(round(b["volume_mm3"], 3) for b in bodies(d))
         expect(vols == [800.0, 2000.0, 2000.0], vols)
         # v85: pick the source's bodies by NAME. One Import creates every
         # body of a STEP (a camera module arrives as 197), so the created_by
@@ -196,7 +196,7 @@ def main():
             "body_names": ["Lug"]})
         expect(r["regen"]["ok"], r)
         lug = [b for b in bodies(d) if b["name"].endswith("Lug")]
-        expect(len(lug) == 1 and abs(lug[0]["volume"] - 125.0) < 1e-6,
+        expect(len(lug) == 1 and abs(lug[0]["volume_mm3"] - 125.0) < 1e-6,
                f"only the named body came across: {bodies(d)}")
         refused(d, "add_feature", "no body named 'Flange'", feature={
             "type": "Derived", "name": "x", "source_part": servo,

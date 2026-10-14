@@ -215,7 +215,7 @@ from lobole import Client
 d = Client(8437)
 d.call("add_feature", feature={"type": "Box", "name": "B", "on": "Top",
                                "width": 10, "depth": 6, "height": 4})
-print(d.call("get_state")["bodies"][0]["volume"])
+print(d.call("get_state")["bodies"][0]["volume_mm3"])
 ```
 
 The same surface is exposed to MCP clients — see

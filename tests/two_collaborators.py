@@ -142,7 +142,7 @@ def main():
                f"Bob's resolution arrived: {state['features']}")
         # THE BAR: not "git exited 0" but "the project still works".
         expect(len(state["bodies"]) == 1, "and it regenerates to a body")
-        expect(state["bodies"][0]["volume"] > 0, "with real volume")
+        expect(state["bodies"][0]["volume_mm3"] > 0, "with real volume")
 
         phase("Both name a version the same thing, and both names survive")
         alice.call("checkpoint_create", name="before the lid")

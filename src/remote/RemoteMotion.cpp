@@ -99,7 +99,7 @@ constexpr MethodDoc MotionMethods[] = {
      "anyway. Synchronous by default and "
      "returns the COLLISION TABLE — per sample: the driver value, whether "
      "it solved, the loop residual, and the clashing pairs (each with "
-     "`rigid`, and under an EXACT check its `volume`, `centroid_mm` and "
+     "`rigid`, and under an EXACT check its `volume_mm3`, `centroid_mm` and "
      "`bbox_min_mm`/`bbox_max_mm` — the overlap's centre and world bounds "
      "in mm, which is how a pair of names becomes something to act on; a "
      "mesh check knows only THAT, and gives `within_min_mm`/`within_max_mm`, "
@@ -277,7 +277,7 @@ json ClashJson(const motion::Clash& c) {
   // An exact check knows how much and where; a mesh one only knows THAT, and
   // says where it COULD be rather than a zero that reads like a measurement.
   if (c.known) {
-    j["volume"] = c.volume;
+    j["volume_mm3"] = c.volume;
     AddOverlapSite(j, c.centroid, c.bboxMin, c.bboxMax);
   } else {
     AddOverlapBound(j, c.withinMin, c.withinMax);

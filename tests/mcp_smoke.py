@@ -190,7 +190,7 @@ async def run(port):
                 "distance": 1.0, "distance_expr": "thickness",
                 "mode": "new_body"})
             state = await call("get_state")
-            expect(abs(state["bodies"][0]["volume"] - 40 * 20 * 5) < 1e-3,
+            expect(abs(state["bodies"][0]["volume_mm3"] - 40 * 20 * 5) < 1e-3,
                    "pad volume 4000")
 
             # A key the app accepts that the hand-kept wrapper does not
@@ -206,14 +206,14 @@ async def run(port):
                                    radius=4.0))
             state = await call("get_state")
             expected = 40 * 20 * 5 - (16 - math.pi * 4) * 5
-            expect(abs(state["bodies"][0]["volume"] - expected) < 1e-2,
+            expect(abs(state["bodies"][0]["volume_mm3"] - expected) < 1e-2,
                    f"filleted volume {expected:.2f}, "
-                   f"got {state['bodies'][0]['volume']:.2f}")
+                   f"got {state['bodies'][0]['volume_mm3']:.2f}")
 
             # Variables drive the model end-to-end
             await call("set_variable", name="thickness", expression="8")
             state = await call("get_state")
-            expect(abs(state["bodies"][0]["volume"] - expected * 8 / 5) < 1e-2,
+            expect(abs(state["bodies"][0]["volume_mm3"] - expected * 8 / 5) < 1e-2,
                    "thickness edit rebuilds the pad")
             await call("undo")
 
@@ -238,7 +238,7 @@ async def run(port):
             pad_json = state["features"][1]
             pad_json["reversed"] = True
             await call("modify_feature", index=1, feature=pad_json)
-            expect(abs((await call("get_state"))["bodies"][0]["volume"]
+            expect(abs((await call("get_state"))["bodies"][0]["volume_mm3"]
                        - expected) < 1e-2, "reversed pad keeps its volume")
 
             # execute_script (R11): the loop-and-computed-args path for
@@ -262,7 +262,7 @@ async def run(port):
                    f"the scripted boxes landed ({before}->{len(after)})")
             grid = [b for b in (await call("get_state"))["bodies"]
                     if b["name"].startswith("grid ")]
-            expect(sorted(round(b["volume"], 6) for b in grid)
+            expect(sorted(round(b["volume_mm3"], 6) for b in grid)
                    == [256.0, 320.0, 384.0],
                    f"8 x 8 x (4 + k) each: {grid}")
 

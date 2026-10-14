@@ -60,6 +60,8 @@ from lobole.errors import SdkError, UnknownArgument  # noqa: E402
 from lobole.inspection import (  # noqa: E402
     CONTRACT_HASH, CONTRACT_VERSION, InspectionClient)
 
+from lobole.rpc import API_VERSION  # noqa: E402
+
 if TYPE_CHECKING:
     from lobole.snapshots import MeasurementSnapshot
     # The contracted RPCs, typed for a checker only: at runtime every RPC is
@@ -315,6 +317,18 @@ class App(_RpcSurface):
                 m.get("params_free_form", False))
         self.enums = {k: v for k, v in d.items() if k != "methods"}
         self.format_version = d.get("document_format_version")
+        # The RPC surface's version (docs/scripting/rpc.md#the-api-version).
+        # Another than this package was generated against still works for
+        # every method both know, so it warns rather than refuses: a removed
+        # method or key is refused by name when it is called.
+        self.api_version = d.get("api_version")
+        if self.api_version != API_VERSION:
+            import warnings
+            warnings.warn(
+                f"the app's RPC surface is api_version {self.api_version}, "
+                f"and this lobole package was generated against "
+                f"{API_VERSION}; a method or key one of them lacks is "
+                "refused when called", RuntimeWarning, stacklevel=2)
         # Which tab the app is on, as far as this client knows. Tracked so a
         # handle can make itself active without a round trip when it already
         # is — a script that builds a part, then places it, then builds
@@ -866,7 +880,7 @@ class Element:
 class Face(Element):
     def __init__(self, part, body, raw):
         super().__init__(part, body, raw)
-        self.area = raw.get("area", 0.0)
+        self.area = raw.get("area_mm2", 0.0)
         self.centroid = V(raw["centroid"]) if "centroid" in raw else None
         self.normal = V(raw["normal"]) if "normal" in raw else None
         self.axis = V(raw["axis"]) if "axis" in raw else None
@@ -890,7 +904,7 @@ class Face(Element):
 class Edge(Element):
     def __init__(self, part, body, raw):
         super().__init__(part, body, raw)
-        self.length = raw.get("length", 0.0)
+        self.length = raw.get("length_mm", 0.0)
         self.midpoint = V(raw["midpoint"]) if "midpoint" in raw else None
         # the names of the faces it joins
         self.faces = list(raw.get("faces", []))
@@ -1089,7 +1103,7 @@ class Body:
     def __init__(self, part, index, raw):
         self._part, self._raw, self.index = part, raw, index
         self.name = raw.get("name", "")
-        self.volume = raw.get("volume", 0.0)
+        self.volume = raw.get("volume_mm3", 0.0)
         self.reference = raw.get("reference", False)
         self.bbox = (V(raw["bbox_min"]), V(raw["bbox_max"])) \
             if "bbox_min" in raw else None
@@ -2458,7 +2472,7 @@ class Part(_Tab):
             origin = (0.0, 0.0, float(z or 0.0))
         r = self.app.section(origin=list(V(origin)), normal=list(V(normal)),
                              regions=True, part=self.id)
-        return [x["area"] for x in r["regions"]]
+        return [x["area_mm2"] for x in r["regions"]]
 
     def bored_through(self, normal=(0, 1, 0), origin=(0, 0, 0)):
         """Is this duct actually open end to end?
@@ -2524,7 +2538,7 @@ class Part(_Tab):
         return self
 
     def volume(self):
-        return self.app.mass_properties(part=self.id)["total"]["volume"]
+        return self.app.mass_properties(part=self.id)["total"]["volume_mm3"]
 
     def bbox(self):
         """The part's MEASURED extent, from mass_properties.
@@ -3185,7 +3199,7 @@ class Asm(_Tab):
                 over.append(c)
                 continue
             used.add(key)
-            if c["volume"] > cap:
+            if c["volume_mm3"] > cap:
                 over.append(dict(c, allowed=cap))
         if over:
             problems.append(f"{len(over)} clash(es): {over[:4]}")

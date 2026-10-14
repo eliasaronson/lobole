@@ -53,7 +53,7 @@ def part_checks(d):
         "axis": {"kind": "custom", "origin": [10, 0, 0], "direction": [0, 1, 0]},
         "angle_deg": 360, "mode": "new_body"})
     expect(r["regen"]["ok"], f"custom-axis revolve regenerates: {r}")
-    vol = d.call("mass_properties")["bodies"][0]["volume"]
+    vol = d.call("mass_properties")["bodies"][0]["volume_mm3"]
     expect(abs(vol - 24 * math.pi) < 0.1, f"Pappus volume 24 pi: {vol}")
     refused(d, "add_feature", ["direction is zero"], feature={
         "type": "Revolve", "name": "Bad", "sketch_id": sk,
@@ -96,7 +96,7 @@ def part_checks(d):
         sk.pop(key, None)
     r = d.call("modify_feature", feature_id=sketch, feature=sk)
     vol = [b for b in r["digest"]["bodies"] if b["created_by"] == solid]
-    expect(vol and abs(vol[0]["volume"] - 25 * 4 * 2) < 1e-6,
+    expect(vol and abs(vol[0]["volume_mm3"] - 25 * 4 * 2) < 1e-6,
            f"a changed width re-solves the sketch: {r['digest']}")
     refused(d, "modify_feature", ["not a stored feature", "modify_feature on "
                                   "the sketch"], feature_id=solid,

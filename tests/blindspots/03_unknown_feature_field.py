@@ -41,7 +41,7 @@ def run(d, expect):
     r = d.call("add_feature", feature={
         "type": "Extrude", "name": "Riser", "sketch_id": sk["id"],
         "distance": 5, "mode": "add"})
-    expect(abs(r["digest"]["delta"]["volume"] - 500.0) < 1e-6,
+    expect(abs(r["digest"]["delta"]["volume_mm3"] - 500.0) < 1e-6,
            f"the add merges into the body: {r['digest']['delta']}")
     expect(len(r["digest"]["bodies"]) == 1,
            f"still ONE body: {r['digest']['bodies']}")

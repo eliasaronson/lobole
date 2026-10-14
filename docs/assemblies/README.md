@@ -337,7 +337,7 @@ omitted = whichever is active).
   cost (`pairs_rigid_checked`) and how many later checks were skipped
   (`pairs_rigid`); the table's last line says the same.
 - Every clash says where it is, in the names `interference` uses: an exact
-  check gives the overlap's `volume`, `centroid_mm` and
+  check gives the overlap's `volume_mm3`, `centroid_mm` and
   `bbox_min_mm`/`bbox_max_mm`; a mesh check knows only that two bodies
   overlap and gives `within_min_mm`/`within_max_mm`, the region their boxes
   share.

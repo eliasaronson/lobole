@@ -86,7 +86,7 @@ def face_by(body, want, radius=None, area=None):
     hits = [f for f in body["faces"]
             if f.get("kind") == want
             and (radius is None or abs(f.get("radius", -1) - radius) < 0.01)
-            and (area is None or abs(f.get("area", -1) - area) / area < 0.05)]
+            and (area is None or abs(f.get("area_mm2", -1) - area) / area < 0.05)]
     if not hits:
         raise SystemExit(f"no {want} face with r={radius} area={area}; the "
                          f"model changed and this job's picks are stale")

@@ -189,9 +189,9 @@ class Generator:
         r = self.rng
         bodies = state["bodies"]
         planar = [(b, f) for b in bodies for f in b["faces"]
-                  if f["kind"] == "plane" and f.get("area", 0) > 1.0]
+                  if f["kind"] == "plane" and f.get("area_mm2", 0) > 1.0]
         edges = [(b, e) for b in bodies for e in b["edges"]
-                 if e["kind"] in ("line", "circle") and e.get("length", 0)
+                 if e["kind"] in ("line", "circle") and e.get("length_mm", 0)
                  > 0.5]
         choices = ["extrude", "primitive", "fillet", "chamfer", "shell",
                    "hole", "draft"]
@@ -228,7 +228,7 @@ class Generator:
         body, face = r.choice(planar)
         c, n, u, v = self._face_frame(face)
         ext = max(self._extent(body))
-        side = math.sqrt(face["area"])
+        side = math.sqrt(face["area_mm2"])
         mode = r.choice(["add", "cut", "new_body"])
         w = max(GRID, snap(side * r.uniform(0.2, 0.8)))
         h = max(GRID, snap(side * r.uniform(0.2, 0.8)))
@@ -263,7 +263,7 @@ class Generator:
     def step_primitive(self, k, bodies, planar, edges, last):
         r = self.rng
         body, face = r.choice(planar)
-        side = math.sqrt(face["area"])
+        side = math.sqrt(face["area_mm2"])
         ext = max(self._extent(body))
         kind = r.choice(["Box", "Cylinder", "Sphere"])
         mode = r.choice(["add", "cut", "new_body"])
@@ -291,7 +291,7 @@ class Generator:
         r = self.rng
         n = min(len(edges), r.randint(1, 3))
         picked = r.sample(edges, n)
-        shortest = min(e["length"] for _, e in picked)
+        shortest = min(e["length_mm"] for _, e in picked)
         refs = [{"$edge": {"near": e["midpoint"]}} for _, e in picked]
         return refs, shortest
 
@@ -325,7 +325,7 @@ class Generator:
         r = self.rng
         body, face = r.choice(planar)
         c, n, u, v = self._face_frame(face)
-        side = math.sqrt(face["area"])
+        side = math.sqrt(face["area_mm2"])
         dia = max(1.0, snap(side * r.uniform(0.05, 0.3), 0.5))
         pts = [{"type": "point",
                 "p": [snap(r.uniform(-side / 3, side / 3)),
@@ -467,7 +467,7 @@ def resolve(value, elements):
                 if best is None or d < best[0]:
                     best = (d, b, f)
         if best is None or best[0] > 1e-3 + 0.5 * math.sqrt(
-                best[2].get("area", 1.0)):
+                best[2].get("area_mm2", 1.0)):
             raise Failure("unresolved", f"no planar face near {sel}")
         return {"feature_id": best[1]["created_by"],
                 "element": best[2]["name"]}
@@ -490,7 +490,7 @@ def resolve(value, elements):
             c = [(x + y) / 2 for x, y in zip(b["bbox_min"], b["bbox_max"])]
             # By its centre, and among bodies centred alike by its volume:
             # two bodies about one centre are not one body.
-            d = _dist(c, sel["near"]) + abs(b.get("volume", 0.0) -
+            d = _dist(c, sel["near"]) + abs(b.get("volume_mm3", 0.0) -
                                              sel.get("volume", 0.0)) * 1e-6
             if best is None or d < best[0]:
                 best = (d, b)
@@ -515,7 +515,7 @@ def summarise(elements, digest_bodies=None):
         d = by.get(b["created_by"], {})
         bodies.append({
             "created_by": b["created_by"], "name": b.get("name", ""),
-            "volume": d.get("volume", 0.0),
+            "volume": d.get("volume_mm3", 0.0),
             "bbox_min": d.get("bbox_min", [0, 0, 0]),
             "bbox_max": d.get("bbox_max", [0, 0, 0]),
             "faces": sorted(b["faces"], key=lambda f: f["name"]),
@@ -554,7 +554,7 @@ def check_step(step, before, answer, geometry, part_volume, boxes=None):
             raise Failure("message", f"{f.get('name')}: {msg!r}")
     after = digest.get("bodies", before)
     for b in after:
-        v = b.get("volume")
+        v = b.get("volume_mm3")
         if v is None or not math.isfinite(v) or v <= 0:
             raise Failure("invalid", f"body {b.get('name')} has volume {v}")
         if b.get("solids", 1) < 1:
@@ -564,7 +564,7 @@ def check_step(step, before, answer, geometry, part_volume, boxes=None):
                geometry.get("bodies", []) if not b.get("valid", True)]
         raise Failure("invalid", f"check_geometry: {bad}")
     tol = 1e-6 * max(part_volume, 1.0)
-    delta = digest.get("delta", {}).get("volume", 0.0)
+    delta = digest.get("delta", {}).get("volume_mm3", 0.0)
     expect = step["expect"]
     if expect == "cut" and delta > tol:
         raise Failure("wrong_way", f"a {step['op']} added {delta:.6g} mm3")
@@ -579,7 +579,7 @@ def check_step(step, before, answer, geometry, part_volume, boxes=None):
             raise Failure("wrong_way", f"a {step['op']} added "
                           f"{len(added)} bodies, not one")
         for c, b in old.items():
-            if c not in new or abs(new[c]["volume"] - b["volume"]) > tol:
+            if c not in new or abs(new[c]["volume_mm3"] - b["volume_mm3"]) > tol:
                 raise Failure("wrong_way", f"a {step['op']} changed body "
                               f"{b.get('name')}")
     if expect == "cut" and before and after:
@@ -605,10 +605,10 @@ def same_bodies(a, b, rel=1e-9, what="rebuild"):
         raise Failure(what, f"bodies {sorted(ka)} vs {sorted(kb)}")
     for c in ka:
         x, y = ka[c], kb[c]
-        scale = max(abs(x["volume"]), 1.0)
-        if abs(x["volume"] - y["volume"]) > rel * scale:
+        scale = max(abs(x["volume_mm3"]), 1.0)
+        if abs(x["volume_mm3"] - y["volume_mm3"]) > rel * scale:
             raise Failure(what, f"body {x.get('name')} volume "
-                          f"{x['volume']!r} vs {y['volume']!r}")
+                          f"{x['volume_mm3']!r} vs {y['volume_mm3']!r}")
         size = max(max(abs(v) for v in x["bbox_max"] + x["bbox_min"]), 1.0)
         for k in ("bbox_min", "bbox_max"):
             if any(abs(p - q) > max(rel * size, 1e-7) for p, q in
@@ -683,7 +683,7 @@ class Runner:
 
     def bodies(self):
         st = self.call("get_state", {})
-        return [{k: b.get(k) for k in ("created_by", "name", "volume",
+        return [{k: b.get(k) for k in ("created_by", "name", "volume_mm3",
                                        "bbox_min", "bbox_max", "solids")}
                 for b in st.get("bodies", [])]
 
@@ -710,7 +710,7 @@ class Runner:
             sent.append({"method": c["method"], "params": params})
         regen = answer.get("regen", {}) if isinstance(answer, dict) else {}
         failed = regen.get("failed", [])
-        part_volume = sum(b["volume"] for b in before) or 1.0
+        part_volume = sum(b["volume_mm3"] for b in before) or 1.0
         mine = failed
         if mine:
             names = {c["params"].get("feature", {}).get("type")
@@ -739,7 +739,7 @@ class Runner:
         check = dict(answer)
         if "digest" not in check:
             check["digest"] = {"bodies": self.bodies(),
-                               "delta": {"volume": 0.0}}
+                               "delta": {"volume_mm3": 0.0}}
         try:
             check_step(step, before, check, geometry, part_volume,
                        boxes=(tight_before, self.tight_box())
@@ -873,7 +873,7 @@ def identity(run, d, pair):
     d.request("new_project", {})
     for f in pair:
         run.call("add_feature", {"feature": f})
-    bodies = {b["created_by"]: b["volume"] for b in run.bodies()}
+    bodies = {b["created_by"]: b["volume_mm3"] for b in run.bodies()}
     a, b = fid(90), fid(91)
     if a not in bodies or b not in bodies:
         raise Failure("identity", f"the pair did not make two bodies: "
@@ -894,10 +894,10 @@ def identity(run, d, pair):
             else:
                 raise Failure("boolean_failed", f"{op}: {msg}")
         else:
-            out[op] = sum(x["volume"] for x in run.bodies())
+            out[op] = sum(x["volume_mm3"] for x in run.bodies())
             if op != "union":
                 # the tool body is consumed; what is left is A's result
-                out[op] = sum(x["volume"] for x in run.bodies()
+                out[op] = sum(x["volume_mm3"] for x in run.bodies()
                               if x["created_by"] != b)
         run.call("undo", {})
     check_identity(va, vb, out["union"], out["intersect"], out["subtract"])
@@ -986,29 +986,29 @@ def self_test():
             return
         problems.append(f"expected {cls}, nothing was raised")
 
-    box = {"created_by": 100, "name": "Base", "volume": 1000.0,
+    box = {"created_by": 100, "name": "Base", "volume_mm3": 1000.0,
            "bbox_min": [0, 0, 0], "bbox_max": [10, 10, 10], "solids": 1}
-    grown = dict(box, volume=1010.0)
+    grown = dict(box, volume_mm3=1010.0)
     cut = {"op": "extrude cut", "expect": "cut"}
     expect_class("wrong_way", lambda: check_step(
         cut, [box], {"regen": {"ok": True, "failed": []},
                      "digest": {"bodies": [grown],
-                                "delta": {"volume": 10.0}}},
+                                "delta": {"volume_mm3": 10.0}}},
         {"valid": True}, 1000.0))
     expect_class("wrong_way", lambda: check_step(
         cut, [box], {"regen": {"ok": True, "failed": []},
                      "digest": {"bodies": [dict(box, bbox_max=[10, 10, 11],
-                                                volume=990.0)],
-                                "delta": {"volume": -10.0}}},
+                                                volume_mm3=990.0)],
+                                "delta": {"volume_mm3": -10.0}}},
         {"valid": True}, 1000.0))
     expect_class("invalid", lambda: check_step(
         {"op": "fillet", "expect": "any"}, [box],
         {"regen": {"ok": True, "failed": []},
-         "digest": {"bodies": [dict(box, volume=0.0)],
-                    "delta": {"volume": -1000.0}}},
+         "digest": {"bodies": [dict(box, volume_mm3=0.0)],
+                    "delta": {"volume_mm3": -1000.0}}},
         {"valid": True}, 1000.0))
     expect_class("nonfinite", lambda: check_step(
-        cut, [box], {"nonfinite": ["/digest/bodies/0/volume"]}, None, 1.0))
+        cut, [box], {"nonfinite": ["/digest/bodies/0/volume_mm3"]}, None, 1.0))
     expect_class("message", lambda: check_step(
         cut, [box], {"regen": {"failed": [{"name": "E1", "error":
                                            "failed"}]}}, None, 1.0))
@@ -1017,7 +1017,7 @@ def self_test():
                                                     800))
     check_identity(1000, 500, 1400, 100, 900)  # holds: must not raise
     expect_class("reopen", lambda: same_bodies(
-        [box], [dict(box, volume=1000.001)], 1e-9, "reopen"))
+        [box], [dict(box, volume_mm3=1000.001)], 1e-9, "reopen"))
     same_bodies([box], [dict(box)], 1e-9, "reopen")
     # The minimiser: a failure planted at step 5 of 8 that needs steps 2
     # and 5, and nothing else, comes out as exactly those two.

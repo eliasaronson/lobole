@@ -274,7 +274,7 @@ def facet_plane(d):
              and f["normal"][2] > 0.5]
     if not faces:
         raise SystemExit("the lid has no back facet to weld an ear to")
-    best = max(faces, key=lambda f: f["area"])
+    best = max(faces, key=lambda f: f["area_mm2"])
     return best["normal"], best["centroid"]
 
 
@@ -439,7 +439,7 @@ def heat_tent(d):
     tilt = math.radians(180.0 + (180.0 - S.TENT_DEG) / 2.0)
     drop = 0.0
     for e in d.call("list_elements")["bodies"][0]["edges"]:
-        if e["kind"] != "line" or e["length"] < S.TENT_LEN - 1.0:
+        if e["kind"] != "line" or e["length_mm"] < S.TENT_LEN - 1.0:
             continue
         m = e["midpoint"]
         drop = max(drop, -(m[0] * -math.sin(tilt) + m[2] * math.cos(tilt)))

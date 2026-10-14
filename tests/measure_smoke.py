@@ -67,10 +67,10 @@ def main():
             expect(r["kind"] == "edge", f"edge kind: {r}")
             if "radius" in r:
                 radius_seen = r["radius"]
-                expect(abs(r["length"] - 2 * math.pi * 5) < 1e-3,
+                expect(abs(r["length_mm"] - 2 * math.pi * 5) < 1e-3,
                        f"circumference: {r}")
             else:
-                length_seen = r["length"]
+                length_seen = r["length_mm"]
         expect(radius_seen is not None and abs(radius_seen - 5.0) < 1e-6,
                f"a circular edge reported radius 5: {radius_seen}")
 
@@ -85,7 +85,7 @@ def main():
             a = d.call("measure", a={"feature_id": fid, "element": f["name"]})
             if a["shape"] == "cylinder":
                 wall = a
-            elif abs(a["area"] - math.pi * 25) < 1e-2:
+            elif abs(a["area_mm2"] - math.pi * 25) < 1e-2:
                 cap = a
         expect(cap is not None, "a cap face reports pi*r^2 area")
         expect(cap["shape"] == "plane", f"a cap is a plane: {cap}")
@@ -108,7 +108,7 @@ def main():
         cap_names = []
         for f in els["faces"]:
             a = d.call("measure", a={"feature_id": fid, "element": f["name"]})
-            if abs(a["area"] - math.pi * 25) < 1e-2:
+            if abs(a["area_mm2"] - math.pi * 25) < 1e-2:
                 cap_names.append(f["name"])
         expect(len(cap_names) == 2, f"two caps: {cap_names}")
         dist = d.call("measure",
@@ -192,11 +192,11 @@ def main():
 
         # Mass properties: CoM on the axis at half height (the CoG marker).
         total = d.call("mass_properties")["total"]
-        com = total["center_of_mass"]
+        com = total["center_of_mass_mm"]
         expect(abs(com[0]) < 1e-3 and abs(com[1]) < 1e-3
                and abs(com[2] - 5.0) < 1e-3, f"CoM at axis mid-height: {com}")
-        expect(abs(total["volume"] - math.pi * 25 * 10) < 1e-1,
-               f"volume pi*r^2*h: {total['volume']}")
+        expect(abs(total["volume_mm3"] - math.pi * 25 * 10) < 1e-1,
+               f"volume pi*r^2*h: {total['volume_mm3']}")
 
         # A SPHERE defines no direction, and an angle against one is REFUSED
         # naming which element and what would work — not answered with a

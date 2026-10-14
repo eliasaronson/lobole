@@ -206,7 +206,7 @@ def main():
         elif "names" in spec:
             rows = _by_name(parts, spec["names"])
         else:
-            rows = _by_shape(app, parts, spec["volume"], spec["size"])
+            rows = _by_shape(app, parts, spec["volume_mm3"], spec["size"])
         path = out / spec["file"]
         if len(rows) == 1:
             app.set_active_part(part=rows[0]["id"])

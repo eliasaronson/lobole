@@ -115,7 +115,7 @@ def main(binary):
         # Mass is the same aggregation: 5 boards of 100x10x20 mm.
         mp = d.call("mass_properties")
         want = 5 * 100 * 10 * 20
-        got = mp.get("total", {}).get("volume", mp.get("volume", 0))
+        got = mp.get("total", {}).get("volume_mm3", mp.get("volume_mm3", 0))
         expect(abs(got - want) < 1.0,
                f"mass properties see the whole tree ({got} mm^3, want {want})")
 
@@ -127,8 +127,8 @@ def main(binary):
         # (Deliberately NOT the derived mid-scene offset: this model has a gap
         # in the middle, so the honest answer there is zero area.)
         sec = d.call("section", base_plane="yz", offset=50)
-        expect(abs(sec["area"] - 600.0) < 1.0,
-               f"a section cuts nested geometry ({sec['area']:.0f} mm^2, want 600)")
+        expect(abs(sec["area_mm2"] - 600.0) < 1.0,
+               f"a section cuts nested geometry ({sec['area_mm2']:.0f} mm^2, want 600)")
 
         # --- reading INTO a unit: the query no tab can answer ---------------
         # The loose Board sits at y=200; the near Gangway's boards are at

@@ -55,7 +55,7 @@ def features(d):
 
 
 def volume(d):
-    return sum(b["volume"] for b in d.call("mass_properties")["bodies"])
+    return sum(b["volume_mm3"] for b in d.call("mass_properties")["bodies"])
 
 
 def variables(d):

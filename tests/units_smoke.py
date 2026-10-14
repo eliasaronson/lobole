@@ -70,7 +70,7 @@ def main():
             "distance": 5.0, "distance_expr": "0.5 cm", "mode": "new_body"})
         st = d.call("get_state")
         expect(len(st["bodies"]) == 1, f"one body: {st['bodies']}")
-        vol = st["bodies"][0]["volume"]
+        vol = st["bodies"][0]["volume_mm3"]
         expect(abs(vol - 10 * 4 * 5) < 1e-3,
                f"0.5cm extrude -> 5mm, volume 200: {vol}")
 
@@ -83,7 +83,7 @@ def main():
         pad = [f for f in st["features"] if f.get("name") == "Pad"][0]
         expect(pad.get("distance_expr") == "0.5 cm",
                f"unit expr text survived the round-trip: {pad}")
-        expect(abs(st["bodies"][0]["volume"] - 200.0) < 1e-3,
+        expect(abs(st["bodies"][0]["volume_mm3"] - 200.0) < 1e-3,
                "reopened volume still 200")
 
         # --- DISPLAY units (v64) --------------------------------------
@@ -102,7 +102,7 @@ def main():
         expect(d.call("get_units")["angle"] == "deg", "angle untouched")
 
         st = d.call("get_state")
-        expect(abs(st["bodies"][0]["volume"] - 200.0) < 1e-3,
+        expect(abs(st["bodies"][0]["volume_mm3"] - 200.0) < 1e-3,
                f"a display unit did NOT convert the geometry: {st['bodies'][0]}")
 
         # Refused, not substituted: a document that said "inches" and loaded

@@ -82,7 +82,7 @@ def main():
         base_index = r["index"]  # the Extrude; its sketch is before it
         dg = r["digest"]
         expect(len(dg["bodies"]) == 1, f"digest bodies: {dg}")
-        expect(abs(dg["delta"]["volume"] - 1000.0) < 1e-6,
+        expect(abs(dg["delta"]["volume_mm3"] - 1000.0) < 1e-6,
                f"digest volume delta: {dg['delta']}")
         expect(dg["delta"]["added"] == [dg["bodies"][0]["name"]],
                f"digest added: {dg['delta']}")
@@ -101,7 +101,7 @@ def main():
             "type": "Extrude", "name": "Cut", "sketch_id": sk["id"],
             "distance": 1.0, "distance_expr": "hole_r * 6", "mode": "cut"})
         expect(r["regen"]["ok"], f"cut regen: {r}")
-        dv = r["digest"]["delta"]["volume"]
+        dv = r["digest"]["delta"]["volume_mm3"]
         import math
         expect(abs(dv + math.pi * 4 * 10) < 1.0, f"cut delta: {dv}")
         expect(r["digest"]["delta"]["added"] == [], f"cut added: {r['digest']}")
@@ -110,7 +110,7 @@ def main():
         idx = d.call("get_state")
         n = len(idx["features"])
         r = d.call("delete_feature", index=n - 1)
-        expect(abs(r["digest"]["delta"]["volume"] - math.pi * 4 * 10) < 1.0,
+        expect(abs(r["digest"]["delta"]["volume_mm3"] - math.pi * 4 * 10) < 1.0,
                f"delete delta: {r['digest']['delta']}")
 
         # modify_feature validates too: on the Extrude the Box became...

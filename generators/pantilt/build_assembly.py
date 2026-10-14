@@ -503,7 +503,7 @@ def bom(app, asm):
 def masses(app, asm, o):
     asm.activate()
     total = app.mass_properties()["total"]
-    out = {"assembly_g": total["mass_g"], "com_mm": total["center_of_mass"]}
+    out = {"assembly_g": total["mass_g"], "com_mm": total["center_of_mass_mm"]}
     for name in ("base_plate", "pan_wheel", "yoke", "tilt_wheel", "cradle",
                  "worm", "worm_block", "knob", "camera"):
         part = app.part(name, create=False)

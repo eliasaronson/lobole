@@ -228,7 +228,7 @@ def build_assembly(app, P):
     # pitch — 22 minutes of hour hand, on a 32-tooth hour wheel — so each hand
     # is fastened at the angle that cancels its arbor's resting dof: the
     # watch reads 12:00:00 with the barrel at zero.
-    app.call("set_mate", id=m["barrel"], rotation=0.0)
+    app.call("set_mate", id=m["barrel"], rotation_deg=0.0)
     app.solve_assembly()
     dof = {x["id"]: x.get("rotation", 0.0) for x in app.list_mates()["mates"]}
     for hand, arbor in (("hour_hand", "hour"), ("minute_hand", "cannon"),
@@ -237,7 +237,7 @@ def build_assembly(app, P):
         asm.app.add_mate(type="fastened",
                          a={"occurrence": occ[arbor].id, "frame": "axis"},
                          b={"occurrence": occ[hand].id, "frame": "axis"},
-                         flipped=False, rotation=-dof.get(base, 0.0))
+                         flipped=False, rotation_deg=math.degrees(-dof.get(base, 0.0)))
     keyless_positions(app, m, rel)
     solved = app.solve_assembly()
     return asm, occ, m, rel, solved
@@ -595,10 +595,10 @@ def check_setting(app, occ, m, rel, sweep=True):
             bad.append(f"crown out, the clutch moved "
                        f"{info['clutch offset']:+.4f}, want "
                        f"{-float(CLUTCH_TRAVEL):+.4f}")
-        app.call("set_mate", id=m["stem"], rotation=stem0 + math.pi / 2)
+        app.call("set_mate", id=m["stem"], rotation_deg=math.degrees(stem0 + math.pi / 2))
         app.solve_assembly()
         after = _mates(app)
-        app.call("set_mate", id=m["stem"], rotation=stem0)
+        app.call("set_mate", id=m["stem"], rotation_deg=math.degrees(stem0))
         app.solve_assembly()
         for k in ("cannon", "center", "winding_pinion"):
             info[k] = _turn(before, after, m[k])
@@ -617,7 +617,7 @@ def check_setting(app, occ, m, rel, sweep=True):
             if r.get("pairs") or r["receipt"]["standing"] != "verified":
                 bad.append(f"crown out, the exact sweep: {info['sweep']} "
                            + "; ".join(f"{p.get('a')}/{p.get('b')} "
-                                       f"{p.get('volume', 0):.6f}"
+                                       f"{p.get('volume_mm3', 0):.6f}"
                                        for p in r.get("pairs", [])[:6]))
     finally:
         to_winding(app, m, rel)
@@ -748,7 +748,7 @@ def check_meshes(app, occ, m, samples=9, meshes=None):
                      rotation_deg=start + pitch_deg * i / (samples - 1))
             app.solve_assembly()
             r = app.interference(a=occ[a].id, b=occ[b].id, mode="exact")
-            v_max = max(v_max, r.get("volume", 0.0) or 0.0)
+            v_max = max(v_max, r.get("volume_mm3", 0.0) or 0.0)
         worst[f"{occ[a].name} / {occ[b].name}"] = v_max
     app.solve_assembly()
     return worst
@@ -830,7 +830,7 @@ def verify(app, occ, m, rel, cache=None):
     if standing != "verified":
         bad.append(f"the clash sweep is {standing}: {r['receipt']['summary']}")
     for p in r.get("pairs", [])[:12]:
-        bad.append(f"clash {p['a']} <-> {p['b']} {p.get('volume', 0):.4f} mm3")
+        bad.append(f"clash {p['a']} <-> {p['b']} {p.get('volume_mm3', 0):.4f} mm3")
 
     with phase("keyless"):
         wind, why = check_winding(app, m)

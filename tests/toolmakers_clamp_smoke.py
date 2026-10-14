@@ -37,7 +37,7 @@ with (
     app.import_step(path=str(out / "toolmakers-clamp.step"))
     measured = app.measure(a={"part": app.parts()[0]["id"]})
     assert measured["solids"] == 8, measured
-    assert abs(measured["volume"] - original) < 0.01, (measured, original)
+    assert abs(measured["volume_mm3"] - original) < 0.01, (measured, original)
     app.open_project(path=str(out / "toolmakers-clamp.dsgn"))
     rig = app.assembly("Toolmakers clamp", create=False)
     assert rig.solve()["loops_closed"]

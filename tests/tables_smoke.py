@@ -74,7 +74,7 @@ def main():
         # A feature reads one too: a box as wide as a 6002 is thick.
         box(d, (0, 0, 0), (1, 10, 10), "Block",
             width_expr="lookup('bearings', 6002, 'B')")
-        vol = d.call("mass_properties")["bodies"][0]["volume"]
+        vol = d.call("mass_properties")["bodies"][0]["volume_mm3"]
         expect(abs(vol - 900.0) < 1e-6, f"9 x 10 x 10: {vol}")
 
         # A miss names what there is.

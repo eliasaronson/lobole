@@ -6,6 +6,10 @@
 from collections.abc import Mapping, Sequence
 from typing import Any, Literal, NotRequired, TypedDict, Unpack
 
+# The RPC surface these were generated against (src/remote/ApiVersion.h);
+# lobole.sdk.App warns when the app reports another.
+API_VERSION = 1
+
 
 class Revision(TypedDict):
     """A part revision: geometry_snapshot, get_state and every guarded
@@ -22,7 +26,7 @@ COLUMNS: dict[str, str] = {
     'add_assembly': 'name?:string',
     'add_configuration': 'name?:string',
     'add_feature': 'feature:object, expect_revision?:revision',
-    'add_mate': "type?:@mate_types, a:object, b:object, name?:string, flipped?:bool, rotation?:number, rotation_deg?:number, offset?:number, dx?:number, dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose'",
+    'add_mate': "type?:@mate_types, a:object, b:object, name?:string, flipped?:bool, rotation_deg?:number, offset?:number, dx?:number, dy?:number, ball_rotation?:number[4], derive?:'twist'|'pose'",
     'add_occurrence': 'part:string|int, name?:string, transform?:object, visible?:bool, fixed?:bool, configuration?:string|int|null, material?:string|null, flexible?:bool',
     'add_part': 'name?:string',
     'autosave_now': '',
@@ -96,7 +100,7 @@ COLUMNS: dict[str, str] = {
     'save_project': 'path:string, message?:string, force?:bool',
     'set_active_configuration': 'id?:int>=0',
     'set_active_part': 'part?:string|int, name?:string|int, index?:int>=0',
-    'set_mate': 'id:int>=0, path?:int[]|null, name?:string, flipped?:bool, rotation?:number, rotation_deg?:number, offset?:number, dx?:number, dy?:number, ball_rotation?:number[4]',
+    'set_mate': 'id:int>=0, path?:int[]|null, name?:string, flipped?:bool, rotation_deg?:number, offset?:number, dx?:number, dy?:number, ball_rotation?:number[4]',
     'set_material': 'material?:string, feature_id?:int>=0, body?:int>=0, body_name?:string, expect_revision?:revision',
     'set_occurrence_transform': 'id?:int>=0, occurrence?:int>=0, transform:object',
     'set_variable': "name:string, expression:string|number, scope?:'project'|'part', comment?:string",
@@ -123,7 +127,6 @@ class AddMateParams(TypedDict):
     b: Mapping[str, Any]
     name: NotRequired[str]
     flipped: NotRequired[bool]
-    rotation: NotRequired[float]
     rotation_deg: NotRequired[float]
     offset: NotRequired[float]
     dx: NotRequired[float]
@@ -290,7 +293,6 @@ class SetMateParams(TypedDict):
     path: NotRequired[Sequence[int] | None]
     name: NotRequired[str]
     flipped: NotRequired[bool]
-    rotation: NotRequired[float]
     rotation_deg: NotRequired[float]
     offset: NotRequired[float]
     dx: NotRequired[float]

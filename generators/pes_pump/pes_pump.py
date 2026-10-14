@@ -234,7 +234,7 @@ def run_study(app, sid, label):
     r = app.run_motion_study(study=sid, include_poses=True, _timeout=7200)
     dt = time.perf_counter() - t
     bad = [x for x in r["samples"] if not x.get("solved", True)]
-    clashes = [(x["value"], c["a_name"], c["b_name"], c.get("volume"))
+    clashes = [(x["value"], c["a_name"], c["b_name"], c.get("volume_mm3"))
                for x in r["samples"] for c in x.get("clashes", [])]
     print(f"  {label}: {len(r['samples'])} samples, {r.get('pairs_checked')} "
           f"pair checks, {dt:.1f} s, clean={r.get('clean')}", flush=True)
@@ -380,7 +380,7 @@ def main():
     t = time.perf_counter()
     st = app.interference(mode="exact", max_pairs=20000, deadline_s=300,
                           _timeout=900)
-    stand = [(c.get("a_name"), c.get("b_name"), c.get("volume"))
+    stand = [(c.get("a_name"), c.get("b_name"), c.get("volume_mm3"))
              for c in st.get("pairs", [])]
     report["standing"] = dict(seconds=round(time.perf_counter() - t, 1),
                               pairs_checked=st.get("pairs_checked"),

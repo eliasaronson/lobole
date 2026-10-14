@@ -1419,7 +1419,7 @@ def check_mounting_structure(app, rig):
             section = app.section(part=bracket.id, base_plane="yz", offset=x,
                                   regions=True)
             if not section["regions"] or any(
-                region["area"] < minimum for region in section["regions"]
+                region["area_mm2"] < minimum for region in section["regions"]
             ):
                 raise SdkError(f"{name}: insufficient support section at X={x}: {section}")
             sections.append(dict(part=name, x=x, minimum_area=minimum, **section))
@@ -1476,7 +1476,7 @@ def check_mountings(app, rig, hanging=True):
     structure = check_mounting_structure(app, rig)
     cover = app.part("timing cover", create=False)
     section = app.section(part=cover.id, base_plane="yz", offset=VAC_X, regions=True)
-    if section["area"] < 1500:
+    if section["area_mm2"] < 1500:
         raise SdkError(f"Vacuum drive pocket has insufficient side section: {section}")
     rig.activate()
     pairs = [
@@ -1526,7 +1526,7 @@ def check_mountings(app, rig, hanging=True):
     measured = []
     for a, b in pairs:
         r = app.measure(a=dict(occurrence=a), b=dict(occurrence=b))
-        if r["distance"] > 0.002 or r.get("overlap_volume", 0) > 0.01:
+        if r["distance"] > 0.002 or r.get("overlap_volume_mm3", 0) > 0.01:
             raise SdkError(f"Mounting contact failed: {a} / {b}: {r}")
         measured.append(dict(a=a, b=b, **r))
     return dict(structure=structure, pocket_side_section=section, contacts=measured)

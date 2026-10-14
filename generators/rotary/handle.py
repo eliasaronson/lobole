@@ -183,7 +183,7 @@ def main():
     d = connect(args.port)
     build(d)
     mp = d.call("mass_properties")
-    print(f"  volume {mp['total']['volume'] / 1000.0:.1f} cm3")
+    print(f"  volume {mp['total']['volume_mm3'] / 1000.0:.1f} cm3")
     print(f"  check_geometry: {d.call('check_geometry')}")
 
 

@@ -46,7 +46,7 @@ def expect(condition, message):
 
 
 def volume(sdk):
-    return sdk.call("mass_properties")["total"]["volume"]
+    return sdk.call("mass_properties")["total"]["volume_mm3"]
 
 
 def load_doc(path):

@@ -491,7 +491,7 @@ def verify(app, asm, parts, occ, props):
                              _timeout=400)
     if r.get("truncated"):
         bad.append(f"the interference sweep was truncated: {r['truncation']}")
-    over = [p for p in r.get("pairs", []) if p.get("volume", 0) > RESIDUE_MM3]
+    over = [p for p in r.get("pairs", []) if p.get("volume_mm3", 0) > RESIDUE_MM3]
     print(f"  interference: {len(r.get('pairs', []))} contacts, "
           f"{len(over)} above {RESIDUE_MM3} mm3 of thread-surface residue")
     for p in over:
@@ -499,7 +499,7 @@ def verify(app, asm, parts, occ, props):
         # M3x10", so a failure that names only the part sends whoever reads
         # it hunting through list_occurrences for which screw.
         bad.append(f"clash {p['a']} (#{p.get('a_id')}) <-> "
-                   f"{p['b']} (#{p.get('b_id')}) {p['volume']:.2f} mm3")
+                   f"{p['b']} (#{p.get('b_id')}) {p['volume_mm3']:.2f} mm3")
 
     with phase("fastener check"):
         findings = app.check_fasteners().get("findings", [])

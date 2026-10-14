@@ -64,7 +64,7 @@ def literal(field):
 
 
 def method_docs(paths):
-    """{method: {"doc", "params", "returns", "file"}}.
+    """{method: {"doc", "params", "returns", "since", "file"}}.
 
     `returns` is the fifth field where a row carries one, else "" — the
     response contract, which only the read family is required to state
@@ -93,9 +93,13 @@ def method_docs(paths):
                 fields = split_fields(row)
                 doc = literal(fields[1]) if len(fields) > 1 else ""
                 rets = literal(fields[4]) if len(fields) > 4 else ""
+                # The sixth field, MethodDoc::since; 1 when the row omits it.
+                since = (int(fields[5].strip()) if len(fields) > 5
+                         and fields[5].strip().isdigit() else 1)
                 if len(fields) < 3:
                     out[nm.group(1)] = {"doc": doc, "params": None,
-                                        "returns": rets, "file": path}
+                                        "returns": rets, "since": since,
+                                        "file": path}
                     continue
                 ps = literal(fields[2])
                 out[nm.group(1)] = {
@@ -105,6 +109,7 @@ def method_docs(paths):
                     # contract (rpc_contract.parse_column).
                     "column": ps,
                     "returns": rets,
+                    "since": since,
                     "file": path,
                 }
     return out

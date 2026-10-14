@@ -36,7 +36,7 @@ def refused(d, method, needle, **kw):
 
 
 def volume(d):
-    return sum(b["volume"] for b in d.call("get_state")["bodies"])
+    return sum(b["volume_mm3"] for b in d.call("get_state")["bodies"])
 
 
 def rows(d):

@@ -67,5 +67,5 @@ jobs:
           PYTHONPATH=python python3 -m lobole.client 8437 add_feature \
             '{"feature": {"type": "Box", "name": "B", "position": [0,0,0],
                           "width": 4, "height": 4, "depth": 4}}'
-          PYTHONPATH=python python3 -m lobole.client 8437 get_state | grep -q '"volume": 64'
+          PYTHONPATH=python python3 -m lobole.client 8437 get_state | grep -q '"volume_mm3": 64'
           docker rm -f designer

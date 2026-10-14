@@ -58,7 +58,7 @@ One row per method (`src/remote/RemoteHelpers.h`):
 | `doc` | prose: what it does, the units, the traps |
 | `params` | accepted top-level keys, comma-separated; `""` for none; `"*"` for a free-form spec the handler reads opaquely. The dispatcher refuses any other key before the handler runs; under `"*"` the handler checks its own. A row may type its keys, and is then a [contract](#typed-contracts) |
 | `flags` | what the dispatcher needs to know (below) |
-| `returns` | the response's top-level keys with nesting shown (`bodies[]{name,volume}`, `total{mass_g}`), required for every `list_*`, `get_*` and `check_*` method |
+| `returns` | the response's top-level keys with nesting shown (`bodies[]{name,volume_mm3}`, `total{mass_g}`), required for every `list_*`, `get_*` and `check_*` method |
 
 The flags are stated only where they differ from the default:
 
@@ -88,7 +88,7 @@ the part document, or the test records why it is gated anyway).
 `describe` returns every method with its `doc`, `params` (or
 `params_free_form: true`), `requires_part_doc` and `returns`, and a
 `request_schema` for a method with a [contract](#typed-contracts). `{method}`
-narrows the answer to that one row, with only `app` and
+narrows the answer to that one row, with only `app`, `api_version` and
 `document_format_version` beside it, and refuses an unknown name naming the
 close matches. Without it, `describe` also publishes the vocabularies an agent otherwise has
 to guess: `feature_types` and `sketch_entity_types` (each with its field
@@ -101,6 +101,21 @@ does not know left out), `views`, the `document_format_version`, and the
 the same tables the parsers refuse against, so `describe` cannot list a value
 the parser rejects. A feature type the parser accepts but `describe` does not
 list fails `FeatureFromJson` itself (`test_serialization.cpp`).
+
+### The API version
+
+`describe` publishes `api_version` (`src/remote/ApiVersion.h`), the version
+of the RPC surface, independent of the document format's. It is raised when
+a public method or one of its parameters is removed or renamed — the changes
+that break a caller — and not when one is added: each row carries `since`,
+the version it arrived in. `api/rpc-surface.json` is the surface as last
+published, and `api_surface_gate` holds the rows to it: a method or a key
+that disappears needs `kApiVersion` raised once the surface is released
+(`released: true`), and the snapshot refreshed either way
+(`tests/api_surface_gate.py --update`), so the next removal has something to
+be caught against. Before the first release the version is 1 and is still
+being written. The Python package is generated against one version
+(`lobole.rpc.API_VERSION`), and `App` warns when the app reports another.
 
 `describe` is the source of truth for the SDK's generated surface and for the
 MCP server's `help`. A row that promises something the handler does not do is
@@ -190,13 +205,13 @@ the active tab never changed.
   so in its own response, never only in a later `get_state` —
   `regen_honesty_smoke`. That includes `undo` and `set_active_configuration`.
 - **`digest`** on every geometry-mutating response: per body `{name,
-  created_by, volume, bbox_min, bbox_max, solids}`, and a `delta` against the
-  state before the call: `{volume, added[], removed[]}`. Bodies key on
+  created_by, volume_mm3, bbox_min, bbox_max, solids}`, and a `delta` against the
+  state before the call: `{volume_mm3, added[], removed[]}`. Bodies key on
   `created_by`, so a zero-volume add, a body removed, or a body that split
   into two lumps is visible in the call that caused it.
 - **`nonfinite`** on any message holding NaN or infinity: JSON has no
   spelling for them, so each is written `null`, and the message gains a
-  top-level `nonfinite: ["/result/bodies/0/volume", …]` of JSON pointers to
+  top-level `nonfinite: ["/result/bodies/0/volume_mm3", …]` of JSON pointers to
   where they were; the app logs a warning naming the RPC. The call is not
   turned into an error after the fact — a mutating one has happened.
   `lobole/client.py` raises `NonFiniteError` on it in strict mode

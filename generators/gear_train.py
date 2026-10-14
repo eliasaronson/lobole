@@ -208,13 +208,13 @@ def main():
     pitch = 2 * math.pi / ZA
     for i in range(9):
         theta = pitch * i / 8
-        d.call("set_mate", id=mates["pinion"], rotation=theta)
+        d.call("set_mate", id=mates["pinion"], rotation_deg=math.degrees(theta))
         pairs = []
         for x, y in (("pinion", "idler"), ("idler", "wheel")):
             r = d.call("interference", a=occ[x], b=occ[y])
-            worst = max(worst, r.get("volume", 0.0))
+            worst = max(worst, r.get("volume_mm3", 0.0))
             pairs.append("%s-%s %s %.3f" % (x, y, r["state"],
-                                             r.get("volume", 0.0)))
+                                             r.get("volume_mm3", 0.0)))
         rack_x = next(o for o in d.call("list_occurrences")["occurrences"]
                       if o["name"] == "rack")["transform"]["position"][0]
         print("pinion %.3f rad: %s; rack x %.2f" % (theta, ", ".join(pairs),
@@ -228,7 +228,7 @@ def main():
     clashes = [(c["a"], c["b"]) for c in rep.get("clashes", [])]
     print("contact report: %d component(s), clashes: %s" % (
         len(rep.get("components", [])), clashes or "none"))
-    d.call("set_mate", id=mates["pinion"], rotation=pitch / 4)
+    d.call("set_mate", id=mates["pinion"], rotation_deg=math.degrees(pitch / 4))
     if a.save:
         d.call("save_project", path=a.save)
         print("saved", a.save)

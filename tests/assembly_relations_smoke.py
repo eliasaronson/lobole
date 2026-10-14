@@ -85,11 +85,11 @@ def main():
         expect(len(d.call("list_relations")["relations"]) == 1, "listed")
 
         # Turn the pinion: the wheel follows.
-        d.call("set_mate", id=a, rotation=0.6)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(0.6))
         expect(abs(mate(d, b)["rotation"] + 0.2) < 1e-5,
                f"wheel followed the pinion: {mate(d, b)['rotation']}")
         # Turn the wheel: the pinion follows, three times as far, backwards.
-        d.call("set_mate", id=b, rotation=0.4)
+        d.call("set_mate", id=b, rotation_deg=math.degrees(0.4))
         expect(abs(mate(d, a)["rotation"] + 1.2) < 1e-5,
                f"pinion followed the wheel: {mate(d, a)['rotation']}")
         # And the occurrence really turned (not just the number).
@@ -135,7 +135,7 @@ def main():
         rr = d.call("add_relation", type="rack", a=a, b=s, pitch_radius=12)
         expect(abs(rr["ratio"] - 12.0) < 1e-12, "rack ratio is the radius")
         expect("warnings" not in rr, f"an across slider draws no warning: {rr}")
-        d.call("set_mate", id=a, rotation=0.5)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(0.5))
         expect(abs(mate(d, s)["offset"] - 6.0) < 1e-4,
                f"rack slid 6 mm: {mate(d, s)['offset']}")
 
@@ -156,7 +156,7 @@ def main():
                     teeth_b=36, name="chain")
         expect(abs(ch["ratio"] - 1.0 / 3.0) < 1e-9,
                f"a chain's ratio keeps its sign: {ch}")
-        d.call("set_mate", id=a, rotation=0.6)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(0.6))
         expect(abs(mate(d, b)["rotation"] - 0.2) < 1e-5,
                f"the driven sprocket turns the SAME way: "
                f"{mate(d, b)['rotation']}")
@@ -177,23 +177,23 @@ def main():
         rock = d.call("add_relation", type="cam", a=cyl, b=a, rise_deg=30.0,
                       duration_deg=180, name="rocker")
         expect(rock["dof_b"] == "rotation", f"a revolute follower turns: {rock}")
-        d.call("set_mate", id=cyl, rotation=math.pi / 2)
+        d.call("set_mate", id=cyl, rotation_deg=math.degrees(math.pi / 2))
         expect(abs(math.degrees(mate(d, a)["rotation"]) - 30.0) < 0.05,
                f"the lobe's peak turns the rocker 30 deg: "
                f"{math.degrees(mate(d, a)['rotation']):.3f}")
         d.call("remove_relation", id=rock["id"])
-        d.call("set_mate", id=cyl, rotation=0.0)
+        d.call("set_mate", id=cyl, rotation_deg=0.0)
         # A cylindrical follower has both: dof_b names the turn, and the
         # default stays the slide every earlier caller meant.
         turn = d.call("add_relation", type="cam", a=a, b=cyl, dof_b="rotation",
                       lift=[[0, 0], [90, 40], [180, 0], [270, 0]])
-        d.call("set_mate", id=a, rotation=math.pi / 2)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(math.pi / 2))
         expect(abs(math.degrees(mate(d, cyl)["rotation"]) - 40.0) < 0.05,
                f"dof_b rotation turns the cylindrical follower: "
                f"{math.degrees(mate(d, cyl)['rotation']):.3f}")
         d.call("remove_relation", id=turn["id"])
-        d.call("set_mate", id=a, rotation=0.0)
-        d.call("set_mate", id=cyl, rotation=0.0)
+        d.call("set_mate", id=a, rotation_deg=0.0)
+        d.call("set_mate", id=cyl, rotation_deg=0.0)
         refused(d, "add_relation", "rise (mm)", type="cam", a=a, b=cyl,
                 rise_deg=8.0, duration_deg=180)
         cam = d.call("add_relation", type="cam", a=a, b=cyl, rise=8.0,
@@ -211,7 +211,7 @@ def main():
         expect("error" not in cam, f"the cam solved clean: {cam}")
         # 90 degrees is the lobe's peak; 180 closes it; 270 dwells.
         for deg, want in ((90.0, 8.0), (180.0, 0.0), (270.0, 0.0)):
-            d.call("set_mate", id=a, rotation=deg * math.pi / 180.0)
+            d.call("set_mate", id=a, rotation_deg=deg)
             got = mate(d, cyl)["offset"]
             expect(abs(got - want) < 1e-2,
                    f"at {deg} deg the follower is at {got:.3f}, not {want}")
@@ -226,7 +226,7 @@ def main():
         tab = d.call("add_relation", type="cam", a=a, b=cyl, name="table",
                      lift=[[0, 0], [90, 5], [180, 0], [270, 0]])
         expect(len(tab["lift"]) == 4, f"the table is stored as given: {tab}")
-        d.call("set_mate", id=a, rotation=math.pi / 2)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(math.pi / 2))
         expect(abs(mate(d, cyl)["offset"] - 5.0) < 1e-2,
                f"and drives it: {mate(d, cyl)['offset']}")
         d.call("remove_relation", id=tab["id"])
@@ -239,8 +239,8 @@ def main():
         # ---- freewheel (v104, docs/assemblies/relations.md#freewheel) ---------------------
         for r in d.call("list_relations")["relations"]:
             d.call("remove_relation", id=r["id"])
-        d.call("set_mate", id=a, rotation=0.0)
-        d.call("set_mate", id=cyl, rotation=0.0)
+        d.call("set_mate", id=a, rotation_deg=0.0)
+        d.call("set_mate", id=cyl, rotation_deg=0.0)
         # Its direction is the whole of it: required, and only the two.
         refused(d, "add_relation", "drives", type="freewheel", a=a, b=cyl,
                 ratio=1.0)
@@ -260,20 +260,20 @@ def main():
             return next(r for r in d.call("list_relations")["relations"]
                         if r["id"] == fw["id"])["lead"]
 
-        d.call("set_mate", id=a, rotation=0.5)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(0.5))
         expect(abs(rot(cyl) - 0.5) < 1e-4, f"driven forward: {rot(cyl)}")
-        d.call("set_mate", id=a, rotation=0.2)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(0.2))
         expect(abs(rot(cyl) - 0.5) < 1e-4 and abs(lead() - 0.3) < 1e-4,
                f"back, it slips: b {rot(cyl)}, lead {lead()}")
-        d.call("set_mate", id=cyl, rotation=1.0)
+        d.call("set_mate", id=cyl, rotation_deg=math.degrees(1.0))
         expect(abs(rot(a) - 0.2) < 1e-4,
                f"the output run on ahead leaves the input: {rot(a)}")
-        d.call("set_mate", id=cyl, rotation=0.8)
+        d.call("set_mate", id=cyl, rotation_deg=math.degrees(0.8))
         expect(abs(rot(a) - 0.0) < 1e-4,
                f"the output pushed back drags the input: {rot(a)}")
         # Undo restores the history with the pose.
         kept = lead()
-        d.call("set_mate", id=a, rotation=-0.3)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(-0.3))
         expect(abs(lead() - (kept + 0.3)) < 1e-4, f"slipped again: {lead()}")
         d.call("undo")
         expect(abs(lead() - kept) < 1e-6 and abs(rot(a)) < 1e-6,
@@ -300,19 +300,19 @@ def main():
                 drives="positive")
         refused(d, "add_relation", "a click needs drives", type="click", a=a,
                 b=a)
-        d.call("set_mate", id=a, rotation=0.0)
+        d.call("set_mate", id=a, rotation_deg=0.0)
         ck = d.call("add_relation", type="click", a=a, b=a, drives="positive",
                     name="pawl")
-        d.call("set_mate", id=a, rotation=1.0)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(1.0))
         expect(abs(rot(a) - 1.0) < 1e-4,
                f"the click lets it turn its own way: {rot(a)}")
-        d.call("set_mate", id=a, rotation=0.4)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(0.4))
         expect(abs(rot(a) - 1.0) < 1e-4,
                f"turned back, the click holds it at its mark: {rot(a)}")
         d.call("remove_relation", id=ck["id"])
         d.call("remove_relation", id=g["id"])
-        d.call("set_mate", id=a, rotation=0.0)
-        d.call("set_mate", id=cyl, rotation=0.0, offset=0.0)
+        d.call("set_mate", id=a, rotation_deg=0.0)
+        d.call("set_mate", id=cyl, rotation_deg=0.0, offset=0.0)
         # Riding over the dogs lifts the clutch: a ride needs its teeth.
         refused(d, "add_relation", "a ride needs teeth", type="freewheel",
                 a=a, b=cyl, ratio=1.0, drives="positive", ride_mate=cyl,
@@ -324,11 +324,11 @@ def main():
                      drives="positive", teeth=4, ride_mate=cyl,
                      ride_dof="offset", ride_mm=1.0, name="dogs")
         # Off its notch it stands clear of the dogs...
-        d.call("set_mate", id=a, rotation=-math.pi / 4)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(-math.pi / 4))
         expect(abs(mate(d, cyl)["offset"] - 1.0) < 1e-3,
                f"off a notch it lifts clear: {mate(d, cyl)['offset']}")
         # ...and a whole tooth drops it into the next notch.
-        d.call("set_mate", id=a, rotation=-math.pi / 2)
+        d.call("set_mate", id=a, rotation_deg=math.degrees(-math.pi / 2))
         expect(abs(mate(d, cyl)["offset"]) < 1e-3,
                f"a whole tooth drops it back: {mate(d, cyl)['offset']}")
         d.call("remove_relation", id=fw2["id"])
@@ -367,7 +367,7 @@ def main():
                f"an epicyclic with its planet: {epi}")
         expect([t["teeth"] for t in epi["terms"][:2]] == [14, 40],
                f"the teeth are kept: {epi['terms']}")
-        d.call("set_mate", id=em["sun"], rotation=0.9)
+        d.call("set_mate", id=em["sun"], rotation_deg=math.degrees(0.9))
         carrier_at = 0.9 * 14 / 54
         expect(abs(rot(em["ring"])) < 1e-6, f"the ring held: {rot(em['ring'])}")
         expect(abs(rot(em["arm"]) - carrier_at) < 1e-4,

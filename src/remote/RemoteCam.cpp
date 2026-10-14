@@ -233,7 +233,8 @@ constexpr MethodDoc kCamMethods[] = {
      "EMBEDS a copy, so the job file opens anywhere.",
      "job, machine, name, post, safe_z"},
     {"list_cam_setups",
-     "Every setup: id, name, post, safe_z, origin (Z zero), top_face (the "
+     "Every setup: id, name, post, safe_z, origin (Z zero), reach_offset "
+     "([x,y] mm, where the bed is on the sheet), top_face (the "
      "face it was picked from), origin_at (the corner it is measured FROM), "
      "frame (how the part is CLAMPED, as "
      "[x,y,z,w]; identity = as modelled), has_rotary_axis, rotation_a, "

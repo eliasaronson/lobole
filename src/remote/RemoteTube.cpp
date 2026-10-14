@@ -48,7 +48,8 @@ static constexpr MethodDoc TubeMethods[] = {
      "tail_length_mm",
      remote::NeedsPart},
     {"get_tube_rules",
-     "This part's tube rules, with every derived value RESOLVED (so a caller "
+     "This part's tube rules (`min_straight` and `tail_length` in mm), with "
+     "every derived value RESOLVED (so a caller "
      "sees the minimum straight it will actually be checked against, not a "
      "0 meaning 'derived'), plus the minimum former this stock takes and "
      "where that number came from. With no rules set it answers null and "

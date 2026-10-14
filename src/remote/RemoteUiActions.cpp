@@ -368,7 +368,7 @@ std::vector<std::string> BuildSheetFooter(ui::AppState& state, Document* doc) {
       if (auto r =
               remote::HandleInspectionRpc(state, doc, "mass_properties", p)) {
         const nlohmann::json& total = r->at("total");
-        volume = total.value("volume", 0.0);
+        volume = total.value("volume_mm3", 0.0);
         if (total.contains("mass_g") && !total.at("mass_g").is_null()) {
           massKnown = true;
           massG = total.at("mass_g").get<double>();

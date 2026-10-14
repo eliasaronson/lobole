@@ -41,7 +41,7 @@ def build_part(d, name, size):
     """One agent's share of the work: a part, in its own instance."""
     d.call("add_part", name=name)
     box(d, (0, 0, 0), (size, size, size), name)
-    return d.call("mass_properties")["total"]["volume"]
+    return d.call("mass_properties")["total"]["volume_mm3"]
 
 
 def main():
@@ -110,7 +110,7 @@ def main():
         # Every part is the one its own agent built, byte for byte in volume.
         for name, volume in volumes.items():
             d0.call("set_active_part", part=name)
-            got = d0.call("mass_properties")["total"]["volume"]
+            got = d0.call("mass_properties")["total"]["volume_mm3"]
             expect(abs(got - volume) < 1e-6,
                    f"{name} is {got}, its builder made {volume}")
 

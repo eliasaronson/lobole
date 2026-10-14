@@ -299,7 +299,7 @@ def main():
         st = app.call("get_state")
         assert st["regen"]["ok"], (kind, st["regen"])
         bodies = [b for b in st.get("bodies", []) if b.get("visible", True)]
-        vol = sum(b.get("volume", 0) for b in bodies)
+        vol = sum(b.get("volume_mm3", 0) for b in bodies)
         print(f"{kind:7s} bodies {len(bodies)} volume {vol:9.0f} mm3 "
               f"bbox {part.bbox()}")
         part.render(str(OUT / f"piece_{kind}.png"), view="iso")

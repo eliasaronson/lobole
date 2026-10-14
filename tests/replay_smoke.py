@@ -63,7 +63,7 @@ def main():
         d.call("set_variable", name="w", expression="6")
         recorded = d.call("get_state")
         expect(len(recorded["bodies"]) == 1, "recorded state: one body")
-        recorded_volume = recorded["bodies"][0]["volume"]
+        recorded_volume = recorded["bodies"][0]["volume_mm3"]
         expect(abs(recorded_volume - 8 * 3) < 1e-6, "recorded volume 24")
     finally:
         app.terminate()
@@ -77,7 +77,7 @@ def main():
         d2 = Client.wait_for(app2.port)
         st = d2.call("get_state")
         expect(len(st["bodies"]) == 1, "replayed state: one body")
-        expect(abs(st["bodies"][0]["volume"] - recorded_volume) < 1e-9,
+        expect(abs(st["bodies"][0]["volume_mm3"] - recorded_volume) < 1e-9,
                "replayed volume matches the recording")
         lv = d2.call("list_variables")["variables"]
         expect(lv[0]["expression"] == "6", "replayed variable expression")

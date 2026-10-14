@@ -282,7 +282,7 @@ def _chamber_occupants(app, asm, p):
         if not (abs(mid[0]) < half_w and abs(mid[1]) < half_d
                 and floor < mid[2] < top):
             continue
-        total += app.mass_properties(part=o["part_id"])["total"]["volume"] / 1e6
+        total += app.mass_properties(part=o["part_id"])["total"]["volume_mm3"] / 1e6
         if o["name"] == "port tube":
             bore = float(p["port_internal_dia"]) / 2000.0
             length = (hi[2] - lo[2]) / 1000.0

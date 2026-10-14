@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
+#include "remote/ApiVersion.h"
 #include "remote/InspectionContracts.h"
 #include "remote/RemoteCatalog.h"
 #include "remote/RemoteServer.h"
@@ -416,8 +417,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Refuses a kind that is not running, naming what is.",
      "kind"},
     {"get_state",
-     "Full snapshot: features (with errors), bodies (volume, bbox), "
-     "selection, camera, undo/redo, rollback, regen summary. `part` (a slot "
+     "Full snapshot: features (with errors), bodies (volume_mm3, bbox), "
+     "selection, camera (its `distance` in mm), undo/redo, rollback, regen "
+     "summary. `part` (a slot "
      "name, stable id or index) reads ANOTHER part without switching to it — "
      "the tab-wide fields (selection, camera, undo/redo) then describe the "
      "active tab still, since that is where they live. Prefer it to "
@@ -430,7 +432,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "features[]{type,name,index,id?,material?,appearance?,suppressed?,error?,"
      "stale?,warning?,after_earlier_failure?,face_appearance_unresolved?, "
      "plus per-type keys}, "
-     "bodies[]{name,volume,material,created_by,bbox_min,bbox_max,reference?,"
+     "bodies[]{name,volume_mm3,material,created_by,bbox_min,bbox_max,reference?"
+     ","
      "appearance?,face_appearance?[]{element,face,color?,roughness?,"
      "metallic?},mesh?}, "
      "selection{mesh,face,normal,center}, "
@@ -1160,6 +1163,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         // already describes.
         if (d.returns != nullptr && *d.returns != '\0')
           entry["returns"] = d.returns;
+        entry["since"] = d.since;
         // A typed method's request contract
         // (docs/scripting/rpc.md#typed-contracts), and an inspection
         // method's result schema too.
@@ -1197,6 +1201,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     if (!only.empty())
       return json{
           {"app", "lobole"},
+          {"api_version", remote::kApiVersion},
           {"document_format_version", DocumentIO::DocumentFormatVersion()},
           {"methods", std::move(methods)}};
     json featureTypes = json::array();
@@ -1213,6 +1218,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                              {"params", et.params}});
     return json{
         {"app", "lobole"},
+        {"api_version", remote::kApiVersion},
         {"inspection_contract",
          {{"version", remote::InspectionContracts()["version"]},
           {"hash", std::string(remote::kInspectionContractHash)},
@@ -1604,7 +1610,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // made, so a cylinder head paid 341 ms a time, 161 times, for 55 s of
       // full surface analysis it never looked at.
       json entry = {
-          {"name", body.name},           {"volume", body.shape.Volume()},
+          {"name", body.name},           {"volume_mm3", body.shape.Volume()},
           {"material", body.material},   {"created_by", body.createdBy},
           {"bbox_min", Vec3ToJson(min)}, {"bbox_max", Vec3ToJson(max)}};
       if (body.reference) // a Derived ghost: drawn on, weighed as nothing

@@ -288,7 +288,7 @@ def mass_g(app, part):
 
 
 def volume(app, part):
-    return app.mass_properties(part=part.id)["total"]["volume"]
+    return app.mass_properties(part=part.id)["total"]["volume_mm3"]
 
 
 def topo_step(app, S, G, cases, target_volume, fresh_run, clock):

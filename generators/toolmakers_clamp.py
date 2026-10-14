@@ -455,7 +455,7 @@ def verify(app, parts, rig, drives, moving):
     volumes = {}
     for key, p in parts.items():
         p.check(solids=1)
-        volumes[key] = app.measure(a={"part": p.id})["volume"]
+        volumes[key] = app.measure(a={"part": p.id})["volume_mm3"]
     # Independent stock-minus-tools calculation catches missing cuts/plane mistakes.
     blank = 75 * 12 * 12 - 30 * (12 - 2.5) * 12 / 2
     cone = lambda d: math.pi * (d / 2) ** 3 * math.tan(math.radians(31)) / 3

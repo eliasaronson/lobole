@@ -959,7 +959,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "keeps its copy and reports `match: missing`.",
      "name", remote::NotInBatch},
     {"set_print_process",
-     "Declare how this PART is printed: {process, material} — `fdm` with "
+     "Declare how this PART is printed (a thread's `pitch` in mm): "
+     "{process, material} — `fdm` with "
      "`petg` or `pla`, the built-in tables, the defaults — or {profile}, one "
      "of YOUR print profiles (list_print_profiles), whose copy the part "
      "embeds and reads from then on — or {clear: true} for a part that is "
@@ -1004,7 +1005,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "repeatability_mm,repeatability_source,min_reliable_thread_mm,rows[]{"
      "kind,from_mm,to_mm,allowance_mm,source}}, confirm, threads?[]"},
     {"print_allowance",
-     "What to MODEL for one printed diameter: {kind: hole|shaft|"
+     "What to MODEL for one printed diameter (a thread's `pitch` in mm): "
+     "{kind: hole|shaft|"
      "internal_thread|external_thread|gap, size_mm} (the size it should "
      "PRINT at) or, for a thread, {designation: \"M8\"} for the table's "
      "major. A `gap` is two surfaces printed together that must come apart "
@@ -1096,16 +1098,17 @@ static constexpr MethodDoc InspectionMethods[] = {
      "status, passed, warned, failed, reported, unverified, "
      "receipt{schema,standing,summary,claims}"},
     {"mass_properties",
-     "Mass (`mass_g`)/volume/center_of_mass/bbox per body and total (density "
+     "Mass (`mass_g`), `volume_mm3`, `center_of_mass_mm`, bbox per body and "
+     "total (density "
      "from "
      "materials). The bbox here is MEASURED off the surfaces; get_state's is "
      "a cheap conservative bound that can read ~60% over on a swept surface. "
      "`part` reads another part without switching to it; from an assembly tab "
      "with no `part`, aggregates every visible occurrence in world space.",
      "part?:string|int, body?:int", remote::NoFlags,
-     "bodies[]{body, name, volume, surface_area, center_of_mass, inertia, "
-     "material, bbox_min?, bbox_max?, density?, mass_g}, total{volume, "
-     "center_of_mass, mass_g}"},
+     "bodies[]{body, name, volume_mm3, surface_area_mm2, center_of_mass_mm, "
+     "inertia, material, bbox_min?, bbox_max?, density?, mass_g}, "
+     "total{volume_mm3, center_of_mass_mm, mass_g}"},
     // This row said "point/distance/angle/radius" for a year and the handler
     // implemented distance. `describe` is what an agent trusts INSTEAD of
     // guessing, so a row that promises a branch nobody wrote is the
@@ -1117,9 +1120,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "for a whole BODY, or {occurrence: id|name|\"Unit/Part\"} for a whole "
      "placed part — and each carries its own {part} or {occurrence}, so a "
      "measurement can span two parts or two occurrences. {a}: that thing's "
-     "own measure (face area / edge length + shape kind + radius/diameter; a "
-     "body reports volume, surface area and bounding size). {a,b}: distance, "
-     "closest points and a SIGNED delta, plus overlap_volume/clash for two "
+     "own measure (a face's `area_mm2` / an edge's `length_mm` + shape kind + "
+     "radius/diameter; a body reports `volume_mm3`, `surface_area_mm2` and "
+     "bounding size). {a,b}: distance, closest points and a SIGNED delta, "
+     "plus `overlap_volume_mm3`/clash for two "
      "whole shapes. distance_kind: minimum (default) | maximum (clearance) | "
      "centres. kind:'angle' or 'both' adds the angle, taken between the "
      "outward normals when both are planar faces (adjacent box faces read 90, "
@@ -1158,7 +1162,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "revision"},
     {"list_elements",
      "Stable face/edge names per body (the toponaming handles "
-     "measure/fillet/mates use). Bounded by max_faces (default 4000, the "
+     "measure/fillet/mates use), with a face's `area_mm2`, an edge's "
+     "`length_mm` and a `radius` in mm. Bounded by max_faces (default 4000, "
+     "the "
      "faces it would DESCRIBE — each is an OCC surface analysis): pass "
      "body: <index> for one body of a many-bodied part. `unnamed_faces` says "
      "how many faces the body has that the element map never named: they are "
@@ -1200,7 +1206,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "made_by?:string|int, role?:string, via?:string|int, max_faces?:int>=0",
      remote::NoFlags,
      "bodies[]{body,name,created_by,job_part,faces[]{index,name,made_by,"
-     "role,entity?,instance?,derived?,kind,area,centroid,normal,radius?,"
+     "role,entity?,instance?,derived?,kind,area_mm2,centroid,normal,radius?,"
      "axis?},edges[]{...,faces},unnamed_faces}, matched_faces?, "
      "matched_edges?, "
      "why?"},
@@ -1237,7 +1243,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "length_mm, bends, coped_off_mm?, outer_diameter_mm?, wall_mm?}, "
      "count, members"},
     {"interference",
-     "Pairwise check between bodies or occurrences: {clash, volume, distance, "
+     "Pairwise check between bodies or occurrences: {clash, volume_mm3, "
+     "distance, "
      "state: clash|touching|clear}. touch_tol (mm, default 0.001) splits "
      "touching from clear; the no-pair assembly sweep stays clash-only — use "
      "contact_report for the full picture. The no-pair sweep reports its "
@@ -1319,9 +1326,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "async, deadline_s, exact_face_budget, max_pairs, mode, near_tol, "
      "outlive_client, touch_tol",
      remote::NoFlags,
-     "connected, clash, components, pairs[]{a, b, state, distance, volume, "
+     "connected, clash, components, pairs[]{a, b, state, distance, volume_mm3, "
      "checked?, press_fits?}, "
-     "near_misses[]{a, b, distance}, clashes[]{a, b, volume, centroid_mm, "
+     "near_misses[]{a, b, distance}, clashes[]{a, b, volume_mm3, centroid_mm, "
      "bbox_min_mm, bbox_max_mm, press_fit_refused?}, press_fits[]{a, b, "
      "fits, volume_mm3}, touch_tol, "
      "near_tol, mode, mesh_cleared?, deflection_mm?, pairs_checked, "
@@ -1383,12 +1390,14 @@ static constexpr MethodDoc InspectionMethods[] = {
      "model. Harmless when there is none.",
      ""},
     {"section",
-     "Cross-section area where a plane cuts the bodies; on an assembly tab, "
+     "Cross-section area (`area_mm2`) where a plane cuts the bodies; on an "
+     "assembly tab, "
      "every visible occurrence in place. `offset` is MILLIMETRES along the "
      "plane's normal; omit it to cut through the "
      "middle of what is shown (the chosen offset comes back). "
      "{regions: true} also returns each connected ISLAND the cut crosses "
-     "({area, centroid}, biggest first) and `region_count`. The total cannot "
+     "({area_mm2, centroid}, biggest first) and `region_count`. The total "
+     "cannot "
      "tell you whether the material is where you think it is: a barrel whose "
      "bolt bosses hang off its deck flange sections at 3293.8 where the sound "
      "one sections at 2586.9, and the difference is a boss standing as its "
@@ -1400,7 +1409,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "recovering the SHAPE of a part you did not draw — the whole job when "
      "porting one in — needs the boundary, and without it a brace was "
      "measured in screenshots and then redrawn to a rule. "
-     "{enclosed: true} adds `enclosed_area` (mm2): the area the cut RINGS "
+     "{enclosed: true} adds `enclosed_area_mm2`: the area the cut RINGS "
      "rather than crosses, with the bodies' cut faces joined first -- four "
      "separate wall bodies meeting at the corners enclose the floor "
      "between them, a plate encloses its bore; a ring with a gap (a door "
@@ -1889,7 +1898,7 @@ json RunContactSweep(ContactSweep& sw, const std::atomic<bool>* cancel,
         sides(pair);
         pair["state"] = st;
         pair["distance"] = c.distance;
-        pair["volume"] = c.volume;
+        pair["volume_mm3"] = c.volume;
         if (sw.mesh)
           pair["checked"] = r.screened ? "distance" : "boolean";
         AddPressFits(pair, c);
@@ -1909,7 +1918,7 @@ json RunContactSweep(ContactSweep& sw, const std::atomic<bool>* cancel,
         if (std::string_view(st) == "clash") {
           json clash{{"a", ents[i].name}, {"b", ents[j].name}};
           sides(clash);
-          clash["volume"] = c.volume;
+          clash["volume_mm3"] = c.volume;
           AddOverlapSite(clash, c);
           clashes.push_back(std::move(clash));
         } else if (c.distance > sw.touchTol && c.distance <= sw.nearTol) {
@@ -2281,7 +2290,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       throw std::runtime_error(
           "section failed — the plane may cut no body at all; check the "
           "bodies' bbox_min/bbox_max in get_state against the plane");
-    json out{{"area", *area}};
+    json out{{"area_mm2", *area}};
     if (derived)
       out["offset"] = usedOffset; // say where it chose to cut
     // The area the cut RINGS, not the area it crosses: the floor inside the
@@ -2291,7 +2300,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           Measure::SectionEnclosedArea(*bodies, origin, normal);
       if (!enclosed)
         throw std::runtime_error("enclosed area failed -- see the log");
-      out["enclosed_area"] = *enclosed;
+      out["enclosed_area_mm2"] = *enclosed;
       // Zero with material cut is the ring not closing HERE, which is worth
       // saying: a wall with a door or a window in it at this height is
       // open, and a plane above the openings encloses the room.
@@ -2311,7 +2320,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         throw std::runtime_error("section regions failed — see the log");
       json arr = json::array();
       for (const Measure::SectionRegion& r : *regions) {
-        json one{{"area", r.area},
+        json one{{"area_mm2", r.area},
                  {"centroid", {r.centroid.x, r.centroid.y, r.centroid.z}}};
         if (withLoops) {
           json loops = json::array();
@@ -2584,7 +2593,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                 AddOverlapBound(hit, glm::dvec3(glm::max(km[ki], km[kj])),
                                 glm::dvec3(glm::min(kx[ki], kx[kj])));
               } else {
-                hit["volume"] = a.contact.volume;
+                hit["volume_mm3"] = a.contact.volume;
                 if (a.contact.overlaps)
                   remote::AddOverlapSite(hit, a.contact.centroid,
                                          a.contact.overlapMin,
@@ -2645,7 +2654,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             "threw, usually on an invalid or empty body; run "
             "check_geometry on both sides");
       json out{{"clash", c->volume > 1e-9},
-               {"volume", c->volume},
+               {"volume_mm3", c->volume},
                {"distance", c->distance},
                {"state", ContactState(*c, touchTol)},
                {"mode", mode},
@@ -2675,7 +2684,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           "threw, usually on an invalid or empty body; run "
           "check_geometry on both sides");
     json out{{"clash", c->volume > 1e-9},
-             {"volume", c->volume},
+             {"volume_mm3", c->volume},
              {"distance", c->distance},
              {"state", ContactState(*c, touchTol)}};
     AddOverlapSite(out, *c);
@@ -2831,10 +2840,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             {"created_by", bodies[bi].createdBy},
             {wantFaces ? "centroid" : "midpoint", {point.x, point.y, point.z}}};
         if (wantFaces) {
-          entry["area"] = area;
+          entry["area_mm2"] = area;
           entry["normal"] = {normal.x, normal.y, normal.z};
         } else {
-          entry["length"] = length;
+          entry["length_mm"] = length;
         }
         if (hasRadius)
           entry["radius"] = radius;
@@ -3340,8 +3349,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             {"occurrence", om.occurrenceId},
             {"name", om.name},
             {"part_id", om.partId},
-            {"volume", om.volume},
-            {"center_of_mass",
+            {"volume_mm3", om.volume},
+            {"center_of_mass_mm",
              {om.centerOfMass.x, om.centerOfMass.y, om.centerOfMass.z}}};
         entry["mass_g"] = om.massKnown ? json(om.massG) : json(nullptr);
         rows.push_back(entry);
@@ -3350,8 +3359,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       json out = {
           {"occurrences", rows},
           {"total",
-           {{"volume", am.volume},
-            {"center_of_mass", {com.x, com.y, com.z}},
+           {{"volume_mm3", am.volume},
+            {"center_of_mass_mm", {com.x, com.y, com.z}},
             {"mass_g", am.massKnown ? json(am.massG) : json(nullptr)}}}};
       if (!am.skipped.empty())
         out["skipped"] = am.skipped;
@@ -3387,9 +3396,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             {bm.inertia[r][0], bm.inertia[r][1], bm.inertia[r][2]});
       json entry = {{"body", only >= 0 ? static_cast<size_t>(only) : i},
                     {"name", bm.name},
-                    {"volume", bm.volume},
-                    {"surface_area", bm.surfaceArea},
-                    {"center_of_mass",
+                    {"volume_mm3", bm.volume},
+                    {"surface_area_mm2", bm.surfaceArea},
+                    {"center_of_mass_mm",
                      {bm.centerOfMass.x, bm.centerOfMass.y, bm.centerOfMass.z}},
                     {"inertia", inertia},
                     {"material", bm.material}};
@@ -3418,8 +3427,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     return json{
         {"bodies", out},
         {"total",
-         {{"volume", mass->volume},
-          {"center_of_mass", {com.x, com.y, com.z}},
+         {{"volume_mm3", mass->volume},
+          {"center_of_mass_mm", {com.x, com.y, com.z}},
           {"mass_g", mass->massKnown ? json(mass->massG) : json(nullptr)}}}};
   }
   if (m == "check_geometry") {
@@ -4771,7 +4780,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         const double apart =
             dk == Measure::DistanceKind::Minimum ? d->distance : -1.0;
         if (const auto ov = Measure::OverlapBetween(ta, tb, apart)) {
-          out["overlap_volume"] = ov->volume;
+          out["overlap_volume_mm3"] = ov->volume;
           out["clash"] = ov->volume > 0.0;
         }
       }
@@ -4818,8 +4827,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         throw std::runtime_error("measure: that body or occurrence did not "
                                  "resolve to any geometry");
       return json{{"kind", "solid"},
-                  {"volume", d->volume},
-                  {"surface_area", d->surfaceArea},
+                  {"volume_mm3", d->volume},
+                  {"surface_area_mm2", d->surfaceArea},
                   {"size", {d->size.x, d->size.y, d->size.z}},
                   {"solids", d->solids}};
     }
@@ -4829,9 +4838,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       throw std::runtime_error("measure: element did not resolve");
     json out = {{"kind", e->kind}, {"shape", e->shape}};
     if (e->kind == "face")
-      out["area"] = e->area;
+      out["area_mm2"] = e->area;
     else
-      out["length"] = e->length;
+      out["length_mm"] = e->length;
     // A radius wherever one is defined: a circular/arc edge, and now a
     // cylinder/sphere/torus FACE too — `query_geometry` has returned the
     // face radius all along off the same classification, so an agent could
@@ -5273,7 +5282,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         PieceJson(name, origin, f);
         if (const auto fi = Measure::DescribeFaceAt(bodies[i], idx)) {
           f["kind"] = fi->kind;
-          f["area"] = fi->area;
+          f["area_mm2"] = fi->area;
           // Centroid: lets an importer match a specific face geometrically
           // (an importer's shell/draft face queries -> our stable face names).
           f["centroid"] = {fi->centroid.x, fi->centroid.y, fi->centroid.z};
@@ -5309,7 +5318,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           e["faces"] = joins[static_cast<size_t>(idx)];
         if (const auto ei = Measure::DescribeEdgeAt(bodies[i], idx)) {
           e["kind"] = ei->kind;
-          e["length"] = ei->length;
+          e["length_mm"] = ei->length;
           if (ei->hasRadius)
             e["radius"] = ei->radius;
           // Midpoint: lets an importer match a specific edge geometrically

@@ -110,7 +110,7 @@ def joined(d):
           f"{len(contact.get('clashes', []))} clashes, "
           f"{len(contact.get('near_misses', []))} near misses")
     for c in contact.get("clashes", [])[:12]:
-        print(f"    CLASH {c['a']} / {c['b']}  {c['volume']:.1f} mm3")
+        print(f"    CLASH {c['a']} / {c['b']}  {c['volume_mm3']:.1f} mm3")
     if parts > 1:
         for comp in contact["components"][:20]:
             print(f"    island: {comp}")
@@ -165,8 +165,8 @@ def main():
             t0 = time.time()
             fn()
             body = d.call("get_state")["bodies"][0]
-            made.append((name, body["volume"], time.time() - t0))
-            print(f"  {name:18s} {body['volume']:10.1f} mm3  "
+            made.append((name, body["volume_mm3"], time.time() - t0))
+            print(f"  {name:18s} {body['volume_mm3']:10.1f} mm3  "
                   f"{time.time() - t0:5.1f}s")
     if not args.only or "assembly" in args.only:
         recover(d, ctx)

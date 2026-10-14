@@ -491,7 +491,7 @@ The loop that works — follow it every time:
    trust the error text — it names the accepted vocabulary.
 4. VERIFY after every mutating step — the order is EXECUTE, MEASURE, then
    RENDER. Measure first: every mutating call already returns a `digest`
-   (per-body volume/bbox/solid-count plus a delta: volume moved, bodies
+   (per-body volume_mm3/bbox/solid-count plus a delta: volume_mm3 moved, bodies
    added/removed) — read it before anything else; a cut whose delta is ~0 or
    a body whose `solids` jumped to 2 is wrong NOW, not three features later.
    Check `regen.warnings` (a warning = built but likely did nothing, e.g. a
@@ -934,7 +934,7 @@ def describe(method: str = "") -> dict:
 @mcp.tool(description="Full document state: features (with ids and per-type "
           "fields, plus 'error' if regeneration failed and 'warning' for a "
           "valid-but-likely-unintended no-op such as a cut that removed no "
-          "material), bodies (name, volume, bbox_min/bbox_max, material, and "
+          "material), bodies (name, volume_mm3, bbox_min/bbox_max, material, and "
           "the render 'mesh' id select_face needs — mesh ids change on every "
           "regeneration, always read them fresh), current selection, camera, "
           "undo/redo availability. Call after every mutating step to verify.")
@@ -974,9 +974,9 @@ def set_section(enabled: bool = True, base_plane: str = "xy",
 
 @_reference(description="Cross-section area where a plane cuts through all "
           "bodies (inspection). Plane: base_plane 'xy'|'xz'|'yz' + offset, "
-          "or explicit origin+normal. Returns {area}. Use to check wall "
+          "or explicit origin+normal. Returns {area_mm2}. Use to check wall "
           "thickness / material at a cut. regions=True adds each connected "
-          "ISLAND ({area, centroid}, biggest first) — two islands where you "
+          "ISLAND ({area_mm2, centroid}, biggest first) — two islands where you "
           "expected one is a feature that is not joined. loops=True adds "
           "each island's OUTLINE as line/arc segments, which is how you "
           "recover the shape of a part you did not draw. The area a cut "
@@ -997,12 +997,12 @@ def section(base_plane: str = "xy", offset: float = 0.0,
 
 
 @_reference(description="Interference (clash) check: returns {clash: bool, "
-          "volume} — the volume of the overlap. On a PART tab a/b are body "
+          "volume_mm3} — the volume of the overlap. On a PART tab a/b are body "
           "indices. On an active ASSEMBLY tab a/b are occurrence ids (int) "
           "or occurrence names (str); each occurrence's part bodies are "
           "placed by its solved transform and checked in world space — or "
           "OMIT a/b to sweep EVERY visible occurrence pair (returns {clash, "
-          "pairs: [{a, b, a_name, b_name, a_id?, b_id?, clash, volume, "
+          "pairs: [{a, b, a_name, b_name, a_id?, b_id?, clash, volume_mm3, "
           "centroid_mm, bbox_min_mm, bbox_max_mm}] — "
           "a/b and a_name/b_name are the names, a_id/b_id the occurrence "
           "ids when both are occurrences of this assembly, and the centroid "
@@ -1017,14 +1017,14 @@ def interference(a: int | str | None = None, b: int | str | None = None) -> dict
 
 
 @mcp.tool(description="Mass properties per body (and a document total): "
-          "volume, surface_area, center_of_mass, inertia matrix (about the "
+          "volume_mm3, surface_area_mm2, center_of_mass_mm, inertia matrix (about the "
           "CoM), density and mass_g (grams, assuming model units are mm; "
           "null when the body has no material assigned). The geometry "
           "oracle — verify against the brief with this, not just volume. "
           "Optional body index restricts to one body. On an ASSEMBLY tab "
           "(no body arg) it aggregates every visible, non-suppressed "
           "occurrence in WORLD space: `occurrences` lists per-part rows "
-          "(volume, world center_of_mass, mass_g) and `total` is the combined "
+          "(volume_mm3, world center_of_mass_mm, mass_g) and `total` is the combined "
           "mass/volume/world CoM.")
 def mass_properties(body: int = -1) -> dict:
     return _call("mass_properties", **({"body": body} if body >= 0 else {}))
@@ -1731,11 +1731,11 @@ def list_occurrences() -> dict:
           "pick by area. The reply's errored_mates is the GLOBAL count after "
           "re-solve; `errored` lists which mates failed and why. `b`'s "
           "occurrence is placed relative to `a`. flipped opposes the two Z "
-          "axes (default true, so touching faces mate); rotation/offset/dx/dy "
+          "axes (default true, so touching faces mate); rotation_deg/offset/dx/dy "
           "and ball_rotation ([x,y,z,w]) set the DOF pose — except on a "
-          "FASTENED mate, which leaves nothing free and whose `rotation` "
-          "(radians) is the AUTHORED twist about the connector axis: "
-          "flipped says which side, rotation says which way up, and two "
+          "FASTENED mate, which leaves nothing free and whose `rotation_deg` "
+          "(degrees) is the AUTHORED twist about the connector axis: "
+          "flipped says which side, rotation_deg says which way up, and two "
           "faces can be right on both counts and still land a quarter turn "
           "out. offset slides `b` "
           "along +Z of `a`'s connector frame (a's outward face normal) — for "
@@ -1743,11 +1743,11 @@ def list_occurrences() -> dict:
           "slider/cylindrical the DOF, for planar the plane gap; POSITIVE = "
           "along a's normal. Solves immediately.")
 def add_mate(type: str, a: dict, b: dict, name: str = "",
-             flipped: bool = True, rotation: float = 0.0, offset: float = 0.0,
-             dx: float = 0.0, dy: float = 0.0,
+             flipped: bool = True, rotation_deg: float = 0.0,
+             offset: float = 0.0, dx: float = 0.0, dy: float = 0.0,
              ball_rotation: list | None = None) -> dict:
     params = {"type": type, "a": a, "b": b, "flipped": flipped,
-              "rotation": rotation, "offset": offset}
+              "rotation_deg": rotation_deg, "offset": offset}
     if dx:
         params["dx"] = dx
     if dy:
@@ -1760,21 +1760,22 @@ def add_mate(type: str, a: dict, b: dict, name: str = "",
 
 
 @_reference(description="Adjust a mate (by id) and re-solve — how you MOVE a "
-          "mechanism numerically. rotation (revolute/cylindrical angle, "
-          "radians — on a FASTENED mate the same field is its authored "
+          "mechanism numerically. rotation_deg (revolute/cylindrical angle, "
+          "degrees — on a FASTENED mate the same field is its authored "
           "twist about the connector axis, the GUI's Rotate, not a pose), "
           "offset (slide along +Z of a's connector normal: "
           "slider/cylindrical DOF, revolute axial seat depth, planar gap; "
           "POSITIVE = along a's outward normal), dx/dy (planar in-plane "
           "slide), ball_rotation ([x,y,z,w] for a ball), flipped, or name. "
-          "e.g. set a revolute's rotation to swing a hinge, or its offset to "
+          "e.g. set a revolute's rotation_deg to swing a hinge, or its offset to "
           "seat the part along the shaft.")
-def set_mate(id: int, rotation: float | None = None, offset: float | None = None,
+def set_mate(id: int, rotation_deg: float | None = None,
+             offset: float | None = None,
              dx: float | None = None, dy: float | None = None,
              ball_rotation: list | None = None,
              flipped: bool | None = None, name: str | None = None) -> dict:
     params: dict = {"id": id}
-    for k, v in (("rotation", rotation), ("offset", offset), ("dx", dx),
+    for k, v in (("rotation_deg", rotation_deg), ("offset", offset), ("dx", dx),
                  ("dy", dy), ("ball_rotation", ball_rotation),
                  ("flipped", flipped), ("name", name)):
         if v is not None:

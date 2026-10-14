@@ -70,8 +70,11 @@ solver and mate frames speak radians. Rules:
   elsewhere is a claim that the value is not an angle conversion.
   (`glm::radians`/`glm::degrees` are allowed: they name their direction.)
 - A field or key that holds degrees ends in `Deg`/`_deg`.
-- Where an RPC parameter has a bare radians form (a mate's `rotation` on
-  `add_mate`/`set_mate` and in configuration overrides, an `add_constraint`
+- A mate is turned by `rotation_deg` alone: `add_mate`/`set_mate` refuse the
+  bare `rotation`, which named no unit and was read as degrees by every
+  caller; `list_mates` still answers `rotation` (radians) beside it.
+- Where an RPC parameter has a bare radians form (a mate's `rotation` in
+  configuration overrides, an `add_constraint`
   angle `value`, the sketch `pattern`'s per-step `angle`,
   `set_reference_image`'s `rotation`), it has a `_deg` twin. Passing both is
   refused, and a bare radians value over a full turn is refused naming
@@ -89,8 +92,16 @@ pressure). `torque` and `moment` count as dimensional stems. A wrong unit is inv
 radians, an FEM load that scales every result), so the name is where it has
 to be caught.
 
-**Gates:** `tests/rpc_units_gate.py` (a dimensional key without a suffix or a
-unit in its row fails), the `test_conventions.cpp` case "no bare
+**So do the keys an answer carries**, by the same rule, read from each row's
+`returns` column: a measured quantity is `volume_mm3`, `surface_area_mm2`,
+`area_mm2`, `length_mm`, `center_of_mass_mm` (`mass_properties`, `measure`,
+`section`, `list_elements`, `query_geometry`, `get_state`'s bodies, the
+`digest` every mutating call returns, contact and interference), or the row's
+prose names the key and its unit. Positions — `origin`, `center`,
+`bbox_min`/`bbox_max` — are millimetres throughout and carry no suffix.
+
+**Gates:** `tests/rpc_units_gate.py` (a dimensional parameter or result key
+without a suffix or a unit in its row fails), the `test_conventions.cpp` case "no bare
 degree/radian conversion outside core/Angles.h", `tests/test_units.cpp`,
 `tests/units_smoke.py`, and the twin/refusal cases in
 `tests/remote_smoke.py` and `tests/headless_smoke.py`.

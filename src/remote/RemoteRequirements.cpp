@@ -991,7 +991,7 @@ Taken MeasureContact(ui::AppState& state, const json& m) {
   const std::string want = m.at("expect").get<std::string>();
   t.pass = want == "not_clashing" ? st != "clash" && !st.empty() : st == want;
   t.detail = {{"state", st}};
-  for (const char* k : {"volume", "distance", "press_fits"})
+  for (const char* k : {"volume_mm3", "distance", "press_fits"})
     if (r.contains(k))
       t.detail[k] = r.at(k);
   return t;
@@ -1010,7 +1010,7 @@ Taken MeasureMass(ui::AppState& state, const json& m, bool mass) {
     t.value = total.at("mass_g").get<double>();
     t.unit = "g";
   } else {
-    t.value = total.at("volume").get<double>();
+    t.value = total.at("volume_mm3").get<double>();
     t.unit = "mm3";
   }
   return t;
@@ -1144,10 +1144,10 @@ Taken MeasureSectionArea(ui::AppState& state, const json& m) {
   if (enclosed)
     params["enclosed"] = true;
   const json r = Call(state, "section", params);
-  t.value = r.at(enclosed ? "enclosed_area" : "area").get<double>();
+  t.value = r.at(enclosed ? "enclosed_area_mm2" : "area_mm2").get<double>();
   t.unit = "mm2";
   if (enclosed)
-    t.detail["material_area"] = r.at("area");
+    t.detail["material_area"] = r.at("area_mm2");
   if (r.contains("enclosed_note"))
     t.detail["note"] = r.at("enclosed_note");
   return t;

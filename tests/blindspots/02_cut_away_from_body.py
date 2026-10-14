@@ -24,7 +24,7 @@ def run(d, expect):
     r = d.call("add_feature", feature={
         "type": "Extrude", "name": "Cut", "sketch_id": sk["id"],
         "distance": 10, "mode": "cut"})
-    expect(abs(r["digest"]["delta"]["volume"]) < 1e-6,
+    expect(abs(r["digest"]["delta"]["volume_mm3"]) < 1e-6,
            f"away-cut must show a zero delta: {r['digest']['delta']}")
     expect(r["regen"]["warnings"], f"away-cut must warn: {r['regen']}")
     d.call("undo")
@@ -34,5 +34,5 @@ def run(d, expect):
         "type": "Extrude", "name": "Cut", "sketch_id": sk["id"],
         "distance": 10, "mode": "cut", "reversed": True})
     import math
-    expect(abs(r["digest"]["delta"]["volume"] + math.pi * 16 * 10) < 1.0,
+    expect(abs(r["digest"]["delta"]["volume_mm3"] + math.pi * 16 * 10) < 1.0,
            f"reversed cut must remove the bore: {r['digest']['delta']}")

@@ -166,19 +166,19 @@ def main():
                f"a box is a sketch and an extrude: {state['features']}")
         expect(added["id"] == state["features"][1]["id"]
                and added["index"] == 1, f"the answer names the solid: {added}")
-        expect(abs(state["bodies"][0]["volume"] - 8.0) < 1e-6, "volume 8")
+        expect(abs(state["bodies"][0]["volume_mm3"] - 8.0) < 1e-6, "volume 8")
 
         # Its height is the extrude's distance: the edit is on the Extrude.
         modified = dict(state["features"][1], distance=5.0)
         d.call("modify_feature", index=1, feature=modified)
         state = d.call("get_state")
-        expect(abs(state["bodies"][0]["volume"] - 20.0) < 1e-6, "volume 20")
+        expect(abs(state["bodies"][0]["volume_mm3"] - 20.0) < 1e-6, "volume 20")
 
         phase("UI tier")
         # UI tier: same edit path a human uses
         d.call("menu_click", path="Edit/Undo")
         state = d.call("get_state")
-        expect(abs(state["bodies"][0]["volume"] - 8.0) < 1e-6, "undo via menu")
+        expect(abs(state["bodies"][0]["volume_mm3"] - 8.0) < 1e-6, "undo via menu")
 
         d.call("key_press", chord="Ctrl+Z")
         state = d.call("get_state")
@@ -237,7 +237,7 @@ def main():
             "distance": 3.0, "mode": "new_body"})
         state = d.call("get_state")
         expect(len(state["features"]) == 2, "sketch + extrude")
-        expect(abs(state["bodies"][0]["volume"] - 24.0) < 1e-6,
+        expect(abs(state["bodies"][0]["volume_mm3"] - 24.0) < 1e-6,
                "extruded volume 24")
 
         phase("Variables")
@@ -256,14 +256,14 @@ def main():
             "type": "Extrude", "name": "Pad", "sketch_id": skv["id"],
             "distance": 1.0, "distance_expr": "depth * 2",
             "mode": "new_body"})
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - 8.0 * 6.0) < 1e-6, "expression-driven extrude")
         d.call("set_variable", name="depth", expression="5")
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - 8.0 * 10.0) < 1e-6,
                "editing a variable rebuilds the extrude")
         d.call("undo")
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - 8.0 * 6.0) < 1e-6, "variable edit is undoable")
         d.call("redo")
         d.call("rename_variable", name="depth", new_name="h")
@@ -296,11 +296,11 @@ def main():
         d.call("add_feature", feature={
             "type": "Extrude", "name": "Rod", "sketch_id": skc2["id"],
             "distance": 2.0, "mode": "new_body"})
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - math.pi * 1.5 * 1.5 * 2.0) < 0.05,
                "radius expression applied through the solve")
         d.call("set_variable", name="r", expression="3")
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - math.pi * 3.0 * 3.0 * 2.0) < 0.2,
                "variable edit re-solves the sketch and rebuilds the rod")
 
@@ -351,11 +351,11 @@ def main():
             "type": "Revolve", "name": "Rev", "sketch_id": skr["id"],
             "axis": {"kind": "y"}, "angle_deg": 1.0, "angle_expr": "sweep",
             "mode": "new_body"})
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         # Washer: 2*pi*R*(w*h) with R=2, w=2, h=3 -> 24pi.
         expect(abs(vol - 2 * math.pi * 2.0 * 6.0) < 0.1, "full revolve is 24pi")
         d.call("set_variable", name="sweep", expression="180")
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - 12 * math.pi) < 0.1,
                "editing the angle variable rebuilds the revolve")
 
@@ -374,7 +374,7 @@ def main():
             "type": "Revolve", "name": "Rev", "sketch_id": skr2["id"],
             "axis": {"kind": "datum_axis", "datum_axis_id": ax["id"]},
             "angle_deg": 360.0, "mode": "new_body"})
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - 24 * math.pi) < 0.1, "revolve about a datum axis")
 
         phase("Boolean")
@@ -389,12 +389,12 @@ def main():
             "target_id": ba["id"], "tool_id": bb["id"]})
         st = d.call("get_state")
         expect(len(st["bodies"]) == 1, "boolean consumes both into one body")
-        expect(abs(st["bodies"][0]["volume"] - 4.0) < 1e-4, "subtract = 8 - 4")
+        expect(abs(st["bodies"][0]["volume_mm3"] - 4.0) < 1e-4, "subtract = 8 - 4")
         # Switch the op to union via modify_feature -> volume 12.
         d.call("modify_feature", index=boo["index"], feature={
             "type": "Boolean", "name": "Cut", "op": "union",
             "target_id": ba["id"], "tool_id": bb["id"], "id": boo["id"]})
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - 12.0) < 1e-4, "union = 8 + 8 - 4")
 
         phase("Pattern")
@@ -421,7 +421,7 @@ def main():
             "source_id": mbox["id"], "base_plane": "yz"})
         st = d.call("get_state")
         expect(len(st["bodies"]) == 2, "mirror across YZ = two bodies")
-        total = sum(b["volume"] for b in st["bodies"])
+        total = sum(b["volume_mm3"] for b in st["bodies"])
         expect(abs(total - 16.0) < 1e-3, "mirror total volume 2x8")
 
         phase("Ellipse round-trips through JSON and extrudes to an elliptic prism")
@@ -439,7 +439,7 @@ def main():
         d.call("add_feature", feature={
             "type": "Extrude", "name": "Pad", "sketch_id": ske["id"],
             "distance": 3.0, "mode": "new_body"})
-        vol = d.call("get_state")["bodies"][0]["volume"]
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
         expect(abs(vol - math.pi * 2.0 * 1.0 * 3.0) < 0.05,
                "ellipse extrudes to pi*a*b*h")
 
