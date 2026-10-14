@@ -5,10 +5,12 @@
 
 Seventeen build scripts in scratch/ each copied the same forty lines: a
 plane at a height, a plane at an offset, a line, a rect, an arc through
-three points, and a check that raises on a failed regeneration. This is
+three points, and a check that raises on a failed regeneration. (Its sketch
+planes went to the SDK: `lobole.sdk.Plane.xy(z).json()` and friends.) This is
 that block, once. Import it from a generator:
 
-    from _lib import connect, plane_at_z, line, arc_through, check
+    from _lib import connect, line, arc_through, check
+    from lobole.sdk import Plane        # Plane.xy(z).json() is a plane at z
 
 A printed part asks the app whether it will print with `check_print(d, what,
 need=...)` rather than scanning its own STL.
@@ -25,20 +27,9 @@ import sys
 from lobole.client import Client  # noqa: E402
 
 
-# --- sketch planes --------------------------------------------------------
-# In-plane V = normal x uAxis (docs/sketching: the V-axis gotcha), which is
-# why each helper spells the axis out instead of leaving it to be guessed.
-
-def plane_at_z(z, flip=False):
-    """XY plane at height z. flip: normal -Z (V = -Y), for cutting downward."""
-    return {"origin": [0, 0, z], "normal": [0, 0, -1 if flip else 1],
-            "uAxis": [1, 0, 0]}
-
-
-def plane_at_x(x):
-    """YZ plane at x; u = world Y, v = world Z."""
-    return {"origin": [x, 0, 0], "normal": [1, 0, 0], "uAxis": [0, 1, 0]}
-
+# --- sketch frames --------------------------------------------------------
+# Sketch planes are the SDK's `Plane` (Plane.xy/xz/yz, each spelling out its
+# V axis: V = normal x uAxis, the V-axis gotcha).
 
 def uv_on(face, point):
     """Where a world point lands in the frame a primitive standing on `face`
@@ -49,11 +40,6 @@ def uv_on(face, point):
     d = [p - o for p, o in zip(point, f.origin)]
     return (sum(a * b for a, b in zip(d, f.x)),
             sum(a * b for a, b in zip(d, f.y)))
-
-
-def plane_at_y(y):
-    """XZ plane at y with normal -Y, so v = world Z (not -Z)."""
-    return {"origin": [0, y, 0], "normal": [0, -1, 0], "uAxis": [1, 0, 0]}
 
 
 # --- entities ---------------------------------------------------------------

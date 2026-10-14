@@ -32,7 +32,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from _lib import arc_through, check, connect, line, plane_at_y  # noqa: E402
+from lobole.sdk import Plane  # noqa: E402
+from _lib import arc_through, check, connect, line  # noqa: E402
 
 # --- the pin, in millimetres ----------------------------------------------
 LENGTH = 300.0
@@ -132,7 +133,7 @@ def round_ends(d):
     for name, ents in ends.items():
         sk = check(d.call("add_feature", feature={
             "type": "Sketch", "name": f"{name} corner",
-            "plane": plane_at_y(0.0), "entities": ents}), f"{name} sketch")
+            "plane": Plane.xz(0.0).json(), "entities": ents}), f"{name} sketch")
         check(d.call("add_feature", feature={
             "type": "Revolve", "name": f"{name} round", "sketch_id": sk["id"],
             "axis": {"kind": "x"}, "angle_deg": 360.0,

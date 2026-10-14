@@ -78,8 +78,9 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from lobole.sdk import Plane  # noqa: E402
 from _lib import (check, check_print, circle, connect,  # noqa: E402
-                  fresh_project, line, plane_at_z, print_receipt)
+                  fresh_project, line, print_receipt)
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "scratch" / "print_coupon"
@@ -346,7 +347,7 @@ def build_ring(d, r):
     name = f"Ring {r['label']}"
     sk = check(d.call("add_feature", feature={
         "type": "Sketch", "name": f"{name} sketch",
-        "plane": plane_at_z(r["bottom"]),
+        "plane": Plane.xy(r["bottom"]).json(),
         "entities": [circle((r["x"], r["y"]), r["r_ring"]),
                      circle((r["x"], r["y"]), r["r_hole"])]}),
         f"{name} sketch")
@@ -576,7 +577,7 @@ def main():
         report["z_gap"] = {k: zrow[k] for k in ("layer_mm", "layer_from",
                                                 "layers", "gap_side_mm")}
 
-    top = plane_at_z(thick)
+    top = Plane.xy(thick).json()
     if pins:
         check(d.call("add_feature", feature={
             "type": "Sketch", "name": "Pins", "plane": top,
@@ -605,7 +606,7 @@ def main():
     # The loose discs: their own bodies, standing on the bed in their holes.
     if discs:
         check(d.call("add_feature", feature={
-            "type": "Sketch", "name": "Discs", "plane": plane_at_z(0),
+            "type": "Sketch", "name": "Discs", "plane": Plane.xy(0).json(),
             "entities": discs}), "disc sketch")
         check(d.call("add_feature", feature={
             "type": "Extrude", "name": "Discs up", "mode": "new_body",

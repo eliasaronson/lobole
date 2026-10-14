@@ -20,7 +20,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-from lobole.sdk import Plane, V, _id  # noqa: E402
+from lobole.sdk import Plane, V, ref_of  # noqa: E402
 import bike_shop as shop  # noqa: E402
 from bike_shop import (axle_frame, cut, disc, seat_frame,  # noqa: E402
                        sprocket_outline, tangent_hull, tube, union)
@@ -37,7 +37,7 @@ def _extrude(part, plane, loops, distance, name, holes=()):
         else:
             sk.polyline([(float(u), float(v)) for u, v in hole], close=True)
     return part._add({"type": "Extrude", "name": name,
-                      "sketch_id": _id(sk.add()), "mode": "new_body",
+                      "sketch_id": ref_of(sk.add()), "mode": "new_body",
                       "distance": float(distance)})["id"]
 
 
@@ -95,7 +95,7 @@ def crankset(app, S):
         sk = part.sketch(Plane.xy(spider_z), name=f"Spider {k} profile")
         sk.slot((0, 0), (58.0 * math.cos(a), 58.0 * math.sin(a)), 15.0)
         ids.append(part._add({"type": "Extrude", "name": f"Spider {k}",
-                              "sketch_id": _id(sk.add()), "mode": "new_body",
+                              "sketch_id": ref_of(sk.add()), "mode": "new_body",
                               "distance": abs(spider_z - ring_z) + 1.0})["id"])
 
     ids.append(_extrude(
@@ -258,7 +258,7 @@ def chainguard(app, S):
     sk.circle((0, 0), d=2 * disc_r)
     sk.circle((0, 0), d=float(S["GUARD_EYE_D"]))
     plate = part._add({"type": "Extrude", "name": "Guard plate",
-                       "sketch_id": _id(sk.add()), "mode": "new_body",
+                       "sketch_id": ref_of(sk.add()), "mode": "new_body",
                        "distance": float(S["GUARD_T"])})["id"]
     tail_id = _extrude(part, plane, strip, float(S["GUARD_T"]), "Guard tail")
     # The lip that turns in over the teeth. Three things about it are not

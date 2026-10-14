@@ -20,7 +20,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-from lobole.sdk import Plane, SdkError, V, _id  # noqa: E402
+from lobole.sdk import Plane, SdkError, V, ref_of  # noqa: E402
 import bike_shop as shop  # noqa: E402
 from bike_shop import (axle_frame, bowed_tube, cut, disc,  # noqa: E402
                        seat_frame, tube, union)
@@ -179,7 +179,7 @@ def brake_lever(app, S):
     sk = part.sketch(Plane.xy(-6.0), name="Blade profile")
     sk.slot((14.0, 0.0), (float(S["LEVER_LEN"]), 0.0), 13.0)
     ids.append(part._add({"type": "Extrude", "name": "Blade",
-                          "sketch_id": _id(sk.add()), "mode": "new_body",
+                          "sketch_id": ref_of(sk.add()), "mode": "new_body",
                           "distance": 12.0})["id"])
     union(part, ids, "Lever build")
     shop.finish(part, "aluminum", "alloy")
@@ -302,7 +302,7 @@ def saddle(app, S):
         sk = part.sketch(Plane.xy(z), name=f"Saddle {scale:.2f}")
         sk.polyline([(seat[0] + x * scale, y * scale) for x, y in outline],
                     close=True)
-        sketches.append(_id(sk.add()))
+        sketches.append(ref_of(sk.add()))
     shell = part._add({"type": "Loft", "name": "Saddle shell",
                        "sketch_ids": sketches, "mode": "new_body"})["id"]
     rails = [shell]

@@ -23,7 +23,8 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from grill_lib import check, drill, frame, part, sketch, tapped  # noqa: E402
-from _lib import circle, line, plane_at_x, plane_at_y, plane_at_z, rect  # noqa: E402
+from lobole.sdk import Plane  # noqa: E402
+from _lib import circle, line, rect  # noqa: E402
 
 import grill_spec as S  # noqa: E402
 
@@ -141,7 +142,7 @@ def burner(d):
     part(d, "Burner")
     r_tube = S.BURNER_D / 2.0
     r_vent = S.VENTURI_D / 2.0
-    revolve(d, "Tube", plane_at_y(0.0),
+    revolve(d, "Tube", Plane.xz(0.0).json(),
             [(0.0, 0.0), (r_vent, 0.0), (r_vent, S.VENTURI_L),
              (r_tube, S.VENTURI_L), (r_tube, S.BURNER_LEN),
              (0.0, S.BURNER_LEN)], axis="z")
@@ -158,7 +159,7 @@ def manifold(d):
     half = S.MANIFOLD_LEN / 2.0
     r_out = S.MANIFOLD_D / 2.0
     r_in = r_out - S.MANIFOLD_WALL
-    revolve(d, "Manifold tube", plane_at_y(0.0),
+    revolve(d, "Manifold tube", Plane.xz(0.0).json(),
             [(r_in, -half), (r_out, -half), (r_out, half), (r_in, half)],
             axis="z")
     drill(d, "y", -r_out - 5.0, +1,
@@ -177,13 +178,13 @@ def valve(d):
     """
     part(d, "Valve")
     w, h, dp = S.VALVE_BODY
-    body = extrude(d, "Body", plane_at_z(0.0),
+    body = extrude(d, "Body", Plane.xy(0.0).json(),
                    [rect((-w / 2.0, -h / 2.0), (w / 2.0, h / 2.0))], dp)
-    stem = extrude(d, "Stem", plane_at_z(0.0),
+    stem = extrude(d, "Stem", Plane.xy(0.0).json(),
                    [circle((0.0, 0.0), S.VALVE_STEM_D / 2.0)],
                    -S.VALVE_STEM_L)
     body = boolean(d, "Body and stem", body, stem)
-    orifice = extrude(d, "Orifice", plane_at_z(dp),
+    orifice = extrude(d, "Orifice", Plane.xy(dp).json(),
                       [circle((0.0, 0.0), S.ORIFICE_D / 2.0)], S.ORIFICE_L)
     body = boolean(d, "With orifice", body, orifice)
     # Up into the manifold, line to line with the port drilled for it.
@@ -207,11 +208,11 @@ def knob(d):
     is what a turned knob is — bored for the stem it grips."""
     part(d, "Knob")
     r = S.KNOB_D / 2.0
-    revolve(d, "Knob body", plane_at_y(0.0),
+    revolve(d, "Knob body", Plane.xz(0.0).json(),
             [(0.0, 0.0), (r - 8.0, 0.0), (r, 4.0), (r, 16.0),
              (r - 6.0, S.KNOB_H), (0.0, S.KNOB_H)], axis="z")
     # The pointer a thumb finds.
-    extrude(d, "Pointer", plane_at_z(2.0),
+    extrude(d, "Pointer", Plane.xy(2.0).json(),
             [rect((-3.0, r - 12.0), (3.0, r + 4.0))], S.KNOB_H - 4.0,
             mode="add")
     drill(d, "z", -5.0, +1, [(0.0, 0.0, 0.0)], S.VALVE_STEM_D,
@@ -227,14 +228,14 @@ def grate(d):
     part(d, "Cooking grate")
     rail_w = 10.0
     half_x, half_y = S.GRATE_X / 2.0, S.GRATE_Y / 2.0
-    left = extrude(d, "Left rail", plane_at_z(0.0),
+    left = extrude(d, "Left rail", Plane.xy(0.0).json(),
                    [rect((-half_x, -half_y), (-half_x + rail_w, half_y))],
                    S.GRATE_BAR_D)
-    right = extrude(d, "Right rail", plane_at_z(0.0),
+    right = extrude(d, "Right rail", Plane.xy(0.0).json(),
                     [rect((half_x - rail_w, -half_y), (half_x, half_y))],
                     S.GRATE_BAR_D)
     left = boolean(d, "Rails", left, right)
-    bar = extrude(d, "Bar", plane_at_x(-half_x + rail_w),
+    bar = extrude(d, "Bar", Plane.yz(-half_x + rail_w).json(),
                   [circle((-half_y + 10.0, S.GRATE_BAR_D / 2.0),
                           S.GRATE_BAR_D / 2.0)],
                   S.GRATE_X - 2 * rail_w)
@@ -252,12 +253,12 @@ def warming_rack(d):
     part(d, "Warming rack")
     r = S.RACK_BAR_D / 2.0
     half = S.RACK_LEN / 2.0
-    front = extrude(d, "Front rail", plane_at_x(-half),
+    front = extrude(d, "Front rail", Plane.yz(-half).json(),
                     [circle((-S.RACK_Y / 2.0, r), r)], S.RACK_LEN)
-    back = extrude(d, "Back rail", plane_at_x(-half),
+    back = extrude(d, "Back rail", Plane.yz(-half).json(),
                    [circle((S.RACK_Y / 2.0, r), r)], S.RACK_LEN)
     front = boolean(d, "Rails", front, back)
-    bar = extrude(d, "Bar", plane_at_y(S.RACK_Y / 2.0),
+    bar = extrude(d, "Bar", Plane.xz(S.RACK_Y / 2.0).json(),
                   [circle((-half + 20.0, r), r)], S.RACK_Y)
     count = int((S.RACK_LEN - 40.0) // 40.0) + 1
     check(d.call("add_feature", feature={
@@ -277,7 +278,7 @@ def wheel(d):
     r_out = S.WHEEL_D / 2.0
     r_bore = S.WHEEL_BORE / 2.0
     w = S.WHEEL_W
-    revolve(d, "Wheel", plane_at_y(0.0),
+    revolve(d, "Wheel", Plane.xz(0.0).json(),
             [(r_bore, 0.0), (r_out - 18.0, 0.0), (r_out - 18.0, 6.0),
              (r_out, 6.0), (r_out, w - 6.0), (r_out - 18.0, w - 6.0),
              (r_out - 18.0, w), (r_bore, w)], axis="z")
@@ -298,7 +299,7 @@ def axle_bolt(d):
     r_sh = S.AXLE_BOLT_D / 2.0
     r_th = 5.0
     grip = S.WHEEL_W + S.T_CART
-    revolve(d, "Bolt", plane_at_y(0.0),
+    revolve(d, "Bolt", Plane.xz(0.0).json(),
             [(0.0, -5.0), (r_head, -5.0), (r_head, 0.0), (r_sh, 0.0),
              (r_sh, grip), (r_th, grip), (r_th, grip + 12.0),
              (0.0, grip + 12.0)], axis="z")
@@ -315,7 +316,7 @@ def foot(d):
     # About Z the profile is (radius, height): u is the distance from the
     # axis and v is how far up it. About X or Y it is the other way round,
     # which is the one thing to get right in every one of these.
-    revolve(d, "Foot", plane_at_y(0.0),
+    revolve(d, "Foot", Plane.xz(0.0).json(),
             [(0.0, 0.0), (r, 0.0), (r, -(S.FOOT_H - 6.0)),
              (r - 5.0, -S.FOOT_H), (0.0, -S.FOOT_H)], axis="z")
     tapped(d, "z", 5.0, -1, [(0.0, 0.0, 0.0)], S.FOOT_BOLT, 5.0 + 15.0,
@@ -334,24 +335,24 @@ def tank(d):
     wall = 2.5
     r = S.TANK_D / 2.0
     top = S.TANK_H
-    body = revolve(d, "Bottle", plane_at_y(0.0),
+    body = revolve(d, "Bottle", Plane.xz(0.0).json(),
                    [(0.0, 0.0), (r - 12.0, 0.0), (r - 6.0, 18.0), (r, 40.0),
                     (r, top - 70.0), (r - 30.0, top - 30.0),
                     (r - 95.0, top), (0.0, top)], axis="z")
     # The same shape a wall in: what makes it a bottle and not a billet.
-    void = revolve(d, "Void", plane_at_y(0.0),
+    void = revolve(d, "Void", Plane.xz(0.0).json(),
                    [(0.0, wall), (r - 12.0 - wall, wall),
                     (r - 6.0 - wall, 18.0), (r - wall, 40.0),
                     (r - wall, top - 70.0), (r - 30.0 - wall, top - 30.0),
                     (r - 95.0, top - wall), (0.0, top - wall)], axis="z")
     body = boolean(d, "Shell", body, void, op="subtract")
-    collar = revolve(d, "Collar", plane_at_y(0.0),
+    collar = revolve(d, "Collar", Plane.xz(0.0).json(),
                      [(r - 95.0, top - 20.0), (r - 83.0, top - 20.0),
                       (r - 83.0, top + S.TANK_COLLAR_H - 20.0),
                       (r - 95.0, top + S.TANK_COLLAR_H - 20.0)], axis="z")
     body = boolean(d, "With collar", body, collar)
     valve_h = S.TANK_COLLAR_H - 45.0
-    valve_body = revolve(d, "Valve", plane_at_y(0.0),
+    valve_body = revolve(d, "Valve", Plane.xz(0.0).json(),
                          [(0.0, top - 5.0), (20.0, top - 5.0),
                           (20.0, top + valve_h - 8.0), (14.0, top + valve_h),
                           (0.0, top + valve_h)], axis="z")
@@ -364,12 +365,12 @@ def tank(d):
 def regulator(d):
     """The regulator, and the hose stub that runs off to the manifold."""
     part(d, "Regulator")
-    body = revolve(d, "Bell", plane_at_y(0.0),
+    body = revolve(d, "Bell", Plane.xz(0.0).json(),
                    [(0.0, 0.0), (22.0, 0.0), (22.0, 6.0), (35.0, 10.0),
                     (35.0, 40.0), (26.0, 46.0), (0.0, 46.0)], axis="z")
     # High on the bell: the hose has to clear the bottle's collar, and the
     # stub's own radius is what kept catching its rim.
-    stub = extrude(d, "Hose stub", plane_at_x(0.0), [circle((0.0, 36.0), 7.0)],
+    stub = extrude(d, "Hose stub", Plane.yz(0.0).json(), [circle((0.0, 36.0), 7.0)],
                    90.0)
     boolean(d, "Bell and stub", body, stub)
     frame(d, "origin", (0.0, 0.0, 0.0))
@@ -416,13 +417,13 @@ def lid_handle(d):
     # does).
     for i, sx in enumerate(S.sides()):
         bore = S.HANDLE_PLUG - 2.0
-        plug = extrude(d, f"Plug {i + 1}", plane_at_z(0.0),
+        plug = extrude(d, f"Plug {i + 1}", Plane.xy(0.0).json(),
                        [circle((sx * half, 0.0),
                                S.HANDLE_D / 2.0 - S.HANDLE_WALL),
                         circle((sx * half, 0.0), S.TAP[S.HANDLE_BOLT] / 2.0)],
                        bore)
         body = boolean(d, f"With plug {i + 1}", body, plug)
-        cap = extrude(d, f"Plug cap {i + 1}", plane_at_z(bore),
+        cap = extrude(d, f"Plug cap {i + 1}", Plane.xy(bore).json(),
                       [circle((sx * half, 0.0),
                               S.HANDLE_D / 2.0 - S.HANDLE_WALL)], 2.0)
         body = boolean(d, f"With plug cap {i + 1}", body, cap)
@@ -438,7 +439,7 @@ def thermometer(d):
     part(d, "Thermometer")
     r = S.THERMO_BEZEL_D / 2.0
     stem = S.THERMO_STEM_D / 2.0
-    revolve(d, "Thermometer", plane_at_y(0.0),
+    revolve(d, "Thermometer", Plane.xz(0.0).json(),
             [(0.0, -40.0), (stem, -40.0), (stem, 0.0), (r - 6.0, 0.0),
              (r, 4.0), (r, 16.0), (r - 4.0, 18.0), (0.0, 18.0)], axis="z")
     thread_on(d, stem, "M10", name="Stem thread")
@@ -453,7 +454,7 @@ def hinge_pin(d, name, diameter, length, head=2.5):
     cross hole for the split pin that keeps it there."""
     part(d, name)
     r = diameter / 2.0
-    revolve(d, "Pin", plane_at_y(0.0),
+    revolve(d, "Pin", Plane.xz(0.0).json(),
             [(0.0, -head), (r + 2.5, -head), (r + 2.5, 0.0), (r, 0.0),
              (r, length), (0.0, length)], axis="z")
     drill(d, "x", -diameter, +1, [(0.0, 0.0, length - 3.0)],
@@ -480,9 +481,9 @@ def hinge_leaf(d):
     part(d, "Hinge leaf")
     rk = S.HINGE_KNUCKLE_D / 2.0
     length, tall = S.HINGE_LEAF
-    body = extrude(d, "Knuckle", plane_at_z(0.0), [circle((0.0, 0.0), rk)],
+    body = extrude(d, "Knuckle", Plane.xy(0.0).json(), [circle((0.0, 0.0), rk)],
                    tall)
-    extrude(d, "Leaf", plane_at_z(0.0),
+    extrude(d, "Leaf", Plane.xy(0.0).json(),
             [rect((0.0, rk - S.T_BRK), (length, rk))], tall, mode="add")
     drill(d, "z", -5.0, +1, [(0.0, 0.0, 0.0)], S.HINGE_PIN_D,
           5.0 + tall + 5.0, name="Pin bore")

@@ -444,9 +444,6 @@ class App(_RpcSurface):
         return Catalogs(self)
 
     # --- tabs --------------------------------------------------------------
-    def parts(self):
-        return self.call("list_parts")["parts"]
-
     def part(self, name=None, create=True, reuse=False):
         """Create a part tab and return a `Part` — or, when asked, open one.
 
@@ -1991,7 +1988,7 @@ class Part(_Tab):
     # --- features ----------------------------------------------------------
     def extrude(self, sketch, distance, mode="new_body", name=None, **kw):
         f = {"type": "Extrude", "name": name or f"Extrude {sketch.name}",
-             "sketch_id": _id(sketch), "mode": mode}
+             "sketch_id": ref_of(sketch), "mode": mode}
         _dim(f, "distance", distance)
         f.update(kw)
         return self._body_from(self._add(f), f)
@@ -2003,7 +2000,7 @@ class Part(_Tab):
     def revolve(self, sketch, axis="z", angle_deg=360.0, mode="new_body",
                 name=None, **kw):
         f = {"type": "Revolve", "name": name or f"Revolve {sketch.name}",
-             "sketch_id": _id(sketch), "mode": mode,
+             "sketch_id": ref_of(sketch), "mode": mode,
              "axis": axis if isinstance(axis, dict) else {"kind": axis}}
         _dim(f, "angle_deg", angle_deg)
         f.update(kw)
@@ -2087,7 +2084,7 @@ class Part(_Tab):
         sketch that PROJECTED another body's hole edges drills exactly
         there."""
         f = {"type": "Hole", "name": kw.pop("name", "Hole"),
-             "sketch_id": _id(sketch), "hole_kind": kind}
+             "sketch_id": ref_of(sketch), "hole_kind": kind}
         _dim(f, "diameter", d)
         if through:
             f["through"] = True
@@ -2110,7 +2107,7 @@ class Part(_Tab):
         def fid(x):
             if isinstance(x, Body) and getattr(x, "feature", None) is not None:
                 return x.feature.id
-            return _id(x)
+            return ref_of(x)
         kw = {"name": name, "feature_ids": [fid(f) for f in features]}
         if literals:
             kw["literals"] = [{"feature_id": fid(l["feature"]),
@@ -2294,7 +2291,7 @@ class Part(_Tab):
                 f["flip"] = True
         elif parent is not None or any(offset) or any(rotate_deg):
             f = {"type": "Frame", "name": name, "kind": "offset",
-                 "parent_id": _id(parent) if parent is not None else 0,
+                 "parent_id": ref_of(parent) if parent is not None else 0,
                  "rotation_deg": list(rotate_deg)}
             _dim3(f, "offset", offset)
         else:
@@ -2333,7 +2330,7 @@ class Part(_Tab):
         if isinstance(count, str):
             raise SdkError("pattern: count takes a number or a Param, not an "
                            "expression string (it has no value to check)")
-        f = {"type": "Pattern", "name": name, "source_id": _id(source)}
+        f = {"type": "Pattern", "name": name, "source_id": ref_of(source)}
         n = int(count)
         if isinstance(count, Param):
             if abs(float(count) - n) > 1e-9:
@@ -2662,7 +2659,7 @@ class Occurrence:
         {path, mate} (v129): its id in the sub-assembly, from that
         assembly's own tab. A relation or a motion study here can then drive
         it — an engine's chain turning its pump's camshaft."""
-        return InnerMate(_id(mate), [self.id])
+        return InnerMate(ref_of(mate), [self.id])
 
     def __repr__(self):
         return f"Occurrence({self.name!r}, id={self.id})"
@@ -2713,7 +2710,7 @@ class InnerMate(dict):
 def _mate_ref(key, mate):
     """`{key: id}`, plus `{key}_path` for a mate inside a flexible
     placement."""
-    out = {key: _id(mate)}
+    out = {key: ref_of(mate)}
     if isinstance(mate, InnerMate):
         out[f"{key}_path"] = mate.path
     return out
@@ -2723,7 +2720,7 @@ def _member(mate, **extra):
     """A member of a relation over several mates (v171): `{mate, path?}`
     plus whatever the member carries (a planet's teeth, a term's dof and
     coefficient)."""
-    out = {"mate": _id(mate)}
+    out = {"mate": ref_of(mate)}
     if isinstance(mate, InnerMate):
         out["path"] = mate.path
     out.update({k: v for k, v in extra.items() if v is not None})
@@ -3023,8 +3020,8 @@ class Asm(_Tab):
         self.activate()
         return self.app.add_relation(
             type="screw",
-            a=_id(mate),
-            b=_id(mate),
+            a=ref_of(mate),
+            b=ref_of(mate),
             thread_part=thread.part.id,
             thread_feature=thread.id,
             **kw,
@@ -3089,7 +3086,7 @@ class Asm(_Tab):
         """A pawl (v105): one mate's rotation, free the way it `drives`
         ("positive" or "negative") and held at its mark the other way."""
         self.activate()
-        return self.app.add_relation(type="click", a=_id(mate), b=_id(mate),
+        return self.app.add_relation(type="click", a=ref_of(mate), b=ref_of(mate),
                                      drives=drives, **kw)
 
     def bolt(self, rim, occurrence, standard="iso4762", **kw):
@@ -3102,7 +3099,7 @@ class Asm(_Tab):
         """
         self.activate()
         ref = rim.ref if hasattr(rim, "ref") else dict(rim)
-        ref["occurrence"] = _id(occurrence)
+        ref["occurrence"] = ref_of(occurrence)
         if isinstance(occurrence, InnerOccurrence):
             ref["inner_path"] = occurrence.inner_path
         return self.app.fit_fastener(rim=ref, standard=standard, **kw)
@@ -3409,8 +3406,15 @@ class Batch:
 # Small shared helpers
 # --------------------------------------------------------------------------
 
-def _id(x):
-    """A feature id from a handle, a dict response, or an int."""
+def ref_of(x):
+    """The id an RPC takes for `x`: a handle (`Sketch`, `Frame`, `Feature`,
+    `Occurrence`; a `Body` gives the feature that created it), a dict
+    response (its `id`), a `$ref` inside a batch, or an id as it is. For
+    building a raw feature dict around a handle:
+
+        part.add_feature(feature={"type": "Revolve", "sketch_id": ref_of(sk),
+                                  ...})
+    """
     if x is None:
         return 0
     if isinstance(x, Ref):

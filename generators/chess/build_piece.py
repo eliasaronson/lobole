@@ -304,7 +304,7 @@ def main():
               f"bbox {part.bbox()}")
         part.render(str(OUT / f"piece_{kind}.png"), view="iso")
     # The empty part a new project opens with is not the set's.
-    for p in app.call("list_parts")["parts"]:
+    for p in app.parts():
         if p["name"] == "Part 1":
             app.call("delete_part", part=p["id"])
     app.save_project(path=str(OUT / "piece.dsgn"))

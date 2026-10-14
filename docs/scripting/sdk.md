@@ -127,6 +127,13 @@ Only what `describe` cannot express:
   plane's V axis is normal x U, which is why `Plane.xz` has a normal of −Y.
   See [the principal planes](#the-principal-planes) for each helper's axes
   and `flip=True`.
+  `plane.json()` is the `{origin, normal, uAxis}` a raw feature dict takes,
+  so a script on the plain client uses the same planes.
+- **Handles to ids.** `ref_of(x)` is the id an RPC takes for a handle (a
+  `Body` gives the feature that made it), a response dict or a batch `$ref`,
+  for building a raw feature dict around SDK handles. `app.parts()` and
+  `app.assemblies()` list the tabs of that kind (`list_parts` lists every
+  tab, drawings included); `app.part(name, create=False)` opens one.
 - **Compositions** of several RPCs: `revolve_profile`, `bolt_circle`,
   `polyline`, `slot`, `polygon`, `arc_through`, `project`, `pattern`,
   `fillet(edges=...)`, `hole`, `thread` (whose `Thread.mill(setup)` adds a

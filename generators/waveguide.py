@@ -37,8 +37,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from _lib import (arc_through, check, circle, connect, line,  # noqa: E402
-                  plane_at_y, plane_at_z)
+from lobole.sdk import Plane  # noqa: E402
+from _lib import arc_through, check, circle, connect, line  # noqa: E402
 
 # --- the part, in millimetres ---------------------------------------------
 #
@@ -100,7 +100,7 @@ def build(d, name="Waveguide"):
     rim_mid = (rim_c[0] + RIM_R * math.cos(math.radians(45)),
                rim_c[1] + RIM_R * math.sin(math.radians(45)))
 
-    # `plane_at_y` and not a bare XZ plane: that helper exists because the XZ
+    # `Plane.xz` and not a bare XZ plane: that helper exists because the XZ
     # plane's V axis is -Z (V = normal x uAxis, normal +Y), so a profile drawn
     # with +v up comes out upside down and the revolve is a mirror of the part
     # (docs, and the sketch-plane gotcha this project has paid for twice).
@@ -114,7 +114,7 @@ def build(d, name="Waveguide"):
     ]
     sk = check(d.call("add_feature", feature={
         "type": "Sketch", "name": "Waveguide profile",
-        "plane": plane_at_y(0.0), "entities": ents}), "profile sketch")
+        "plane": Plane.xz(0.0).json(), "entities": ents}), "profile sketch")
     body = check(d.call("add_feature", feature={
         "type": "Revolve", "name": name, "sketch_id": sk["id"],
         "axis": {"kind": "z"}, "angle_deg": 360.0,
@@ -130,7 +130,7 @@ def build(d, name="Waveguide"):
              for i in range(BOLT_N)]
     hsk = check(d.call("add_feature", feature={
         "type": "Sketch", "name": "Driver bolts",
-        "plane": plane_at_z(DEPTH + 1.0, flip=True), "entities": holes}),
+        "plane": Plane.xy(DEPTH + 1.0, flip=True).json(), "entities": holes}),
         "bolt sketch")
     check(d.call("add_feature", feature={
         "type": "Extrude", "name": "Driver bolts", "sketch_id": hsk["id"],

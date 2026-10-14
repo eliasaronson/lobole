@@ -20,7 +20,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-from lobole.sdk import Plane, V, _id  # noqa: E402
+from lobole.sdk import Plane, V, ref_of  # noqa: E402
 import bike_frame as frame_mod  # noqa: E402
 import bike_shop as shop  # noqa: E402
 from bike_shop import (axle_frame, bowed_tube, cut, seat_frame,  # noqa: E402
@@ -153,7 +153,7 @@ def reflector(app, S):
     sk = part.sketch(Plane.xy(0.0), name="Lens profile")
     sk.centered_rect((0, 0), 2 * w, 2 * h)
     body = part._add({"type": "Extrude", "name": "Lens",
-                      "sketch_id": _id(sk.add()), "mode": "new_body",
+                      "sketch_id": ref_of(sk.add()), "mode": "new_body",
                       "distance": 9.0})["id"]
     del body
     shop.finish(part, "plastic_black", "red")

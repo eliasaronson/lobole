@@ -21,7 +21,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-from lobole.sdk import Plane, SdkError, V, _id  # noqa: E402
+from lobole.sdk import Plane, SdkError, V, ref_of  # noqa: E402
 
 # There is no paint, chrome or tyre-rubber material — these are appearance
 # overrides on real slugs, so the mass still comes from the slug.
@@ -96,7 +96,7 @@ def _frame_of(a, b, bulge=None):
 
 
 def path_tube(part, sketch_id, od, wall=0.0, name="Tube", mode="new_body"):
-    f = {"type": "Pipe", "name": name, "path_id": _id(sketch_id),
+    f = {"type": "Pipe", "name": name, "path_id": ref_of(sketch_id),
          "outer_diameter": float(od), "wall_thickness": float(wall),
          "mode": mode}
     return part._add(f)["id"]
@@ -292,7 +292,7 @@ def revolved(part, profile, center, axis, name="Revolved", ref=None,
     plane = Plane(V(center), u.cross(n), u)
     sk = part.sketch(plane, name=f"{name} profile")
     sk.polyline([(float(r), float(z)) for r, z in profile], close=True)
-    f = {"type": "Revolve", "name": name, "sketch_id": _id(sk.add()),
+    f = {"type": "Revolve", "name": name, "sketch_id": ref_of(sk.add()),
          "mode": "new_body", "angle_deg": float(angle_deg),
          "axis": {"kind": AXES[key]}}
     return part._add(f)["id"]

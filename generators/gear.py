@@ -28,7 +28,8 @@ import sys
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from _lib import arc_through, check, circle, connect, line, plane_at_z  # noqa
+from lobole.sdk import Plane  # noqa: E402
+from _lib import arc_through, check, circle, connect, line  # noqa
 
 
 def involute_profile(module, teeth, pressure_deg, samples=5, backlash=0.0,
@@ -121,7 +122,7 @@ def wedge(d, radius, half_deg, thickness, name):
     ents = [line(pts[i], pts[i + 1]) for i in range(len(pts) - 1)]
     ents.append(line(pts[-1], pts[0]))
     sk = check(d.call("add_feature", feature={
-        "type": "Sketch", "name": f"{name} wedge", "plane": plane_at_z(0),
+        "type": "Sketch", "name": f"{name} wedge", "plane": Plane.xy(0).json(),
         "entities": ents}), "wedge sketch")
     return check(d.call("add_feature", feature={
         "type": "Extrude", "name": f"{name} wedge", "sketch_id": sk["id"],
@@ -138,7 +139,7 @@ def build(d, module, teeth, pressure_deg, thickness, bore, name,
                                 ("gear_bore", bore, "bore diameter, mm")):
         d.call("set_variable", name=var, expression=str(value), comment=comment)
     sk = check(d.call("add_feature", feature={
-        "type": "Sketch", "name": f"{name} profile", "plane": plane_at_z(0),
+        "type": "Sketch", "name": f"{name} profile", "plane": Plane.xy(0).json(),
         "entities": ents}), "profile sketch")
     t_sketch = time.perf_counter()
     body = check(d.call("add_feature", feature={
@@ -153,7 +154,7 @@ def build(d, module, teeth, pressure_deg, thickness, bore, name,
         # a full gear there is material in the way of the next part.
         keep = wedge(d, radii["ra"] + 1.0, sector_deg, thickness, name)
         hub_sk = check(d.call("add_feature", feature={
-            "type": "Sketch", "name": f"{name} hub", "plane": plane_at_z(0),
+            "type": "Sketch", "name": f"{name} hub", "plane": Plane.xy(0).json(),
             "entities": [circle((0, 0), radii["rf"])]}), "hub sketch")
         hub = check(d.call("add_feature", feature={
             "type": "Extrude", "name": f"{name} hub", "sketch_id": hub_sk["id"],
@@ -167,7 +168,7 @@ def build(d, module, teeth, pressure_deg, thickness, bore, name,
     if bore > 0:
         skb = check(d.call("add_feature", feature={
             "type": "Sketch", "name": f"{name} bore",
-            "plane": plane_at_z(thickness, flip=True),
+            "plane": Plane.xy(thickness, flip=True).json(),
             # The app's expression field for a circle's radius is `r_expr`
             # (v38). This said `radius_expr`, which is not a field of any
             # entity, so it was DROPPED — and the bore this file advertises

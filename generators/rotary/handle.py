@@ -34,7 +34,8 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from _lib import arc_through, check, connect, line, plane_at_y  # noqa: E402
+from lobole.sdk import Plane  # noqa: E402
+from _lib import arc_through, check, connect, line  # noqa: E402
 
 # --- the part, in millimetres ---------------------------------------------
 LENGTH = 130.0        # tip to ferrule
@@ -163,7 +164,7 @@ def surface_radius(x):
 def build(d, name="Handle"):
     sk = check(d.call("add_feature", feature={
         "type": "Sketch", "name": "Handle profile",
-        "plane": plane_at_y(0.0), "entities": profile()}), "profile sketch")
+        "plane": Plane.xz(0.0).json(), "entities": profile()}), "profile sketch")
     body = check(d.call("add_feature", feature={
         "type": "Revolve", "name": name, "sketch_id": sk["id"],
         # About X, because the rotary axis is setup-space X and a part
