@@ -634,7 +634,7 @@ def check_identity(va, vb, vu, vi, vd):
 
 # --- the runner ---------------------------------------------------------
 class Runner:
-    """Runs a design against an answer source `d` (a Designer client, or
+    """Runs a design against an answer source `d` (a lobole.client.Client, or
     the self-test's fake): `d.request(method, params)` returns the result
     or raises an exception whose `.diagnostic` says `internal`."""
 

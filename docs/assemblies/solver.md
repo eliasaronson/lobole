@@ -77,8 +77,8 @@ field.
 
 `flipped` **defaults to true**: b's Z is reversed against a's, which is what
 two touching faces want (opposed normals). Two seat *frames* usually want
-`flipped: false`. `rotation` is radians on the wire and in the file;
-`rotation_deg` is accepted beside it.
+`flipped: false`. `rotation` is radians in the file and in answers; an edit
+takes `rotation_deg` only ([units](../conventions.md#units-and-angles)).
 
 ### The alignment
 

@@ -808,7 +808,7 @@ def _resolve_port():
         if cmd is None:
             raise RuntimeError(
                 "No running Loböle found, and no installed one to start: "
-                "probed for build/lobole beside this server, `designer` on "
+                "probed for build/lobole beside this server, `lobole` on "
                 "PATH, and the org.lobole.Lobole flatpak. "
                 "Install the app, then start it with `lobole --remote "
                 f"{DEFAULT_PORT}`.")
@@ -835,7 +835,7 @@ def _connect():
     except OSError as e:
         raise RuntimeError(
             f"Loböle announced port {port} but is not answering there "
-            f"({e}). If it just exited, start it again with: designer "
+            f"({e}). If it just exited, start it again with: lobole "
             f"--remote {port}") from e
     try:
         _attached = _client.call("ping")
@@ -1103,7 +1103,8 @@ def measure(a: dict, b: dict | None = None, kind: str | None = None,
           "made_by then names a feature of its SOURCE part) -- 'the "
           "pocket's floor' is made_by='Pocket', role='floor'. A filter that "
           "matches nothing answers `why`. Every face also carries kind, "
-          "area, `centroid` and outward `normal`; every edge kind, length, "
+          "`area_mm2`, `centroid` and outward `normal`; every edge kind, "
+          "`length_mm`, "
           "`midpoint`, radius when circular, and the names of the `faces` "
           "it joins -- the edges where a top meets its walls are the ones "
           "joining one of each. This is how Fillet/Chamfer "

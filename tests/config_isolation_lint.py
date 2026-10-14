@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""A test that launches Designer must give it its own XDG_CONFIG_HOME.
+"""A test that launches Loböle must give it its own XDG_CONFIG_HOME.
 
 `set_settings` persists immediately — deliberately, because a --headless
 instance runs no GUI main loop to pump the settings-window debounce, so a
@@ -88,7 +88,7 @@ def main() -> int:
         return 1
 
     if offenders:
-        print("A test must launch Designer through smoke_app.launch_app(),\n"
+        print("A test must launch Loböle through smoke_app.launch_app(),\n"
               "which gives it a scratch XDG_CONFIG_HOME (so set_settings\n"
               "cannot rewrite the developer's real settings.json), binds the\n"
               "port in the process that KEEPS it (no pick-then-hand-off race),\n"

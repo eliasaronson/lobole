@@ -192,7 +192,7 @@ class Client:
             except OSError as e:
                 last = e
                 time.sleep(0.3)
-        raise TimeoutError(f"designer not reachable on port {port}: {last}")
+        raise TimeoutError(f"Loböle not reachable on port {port}: {last}")
 
 
 def method_help(call, method="", reference=None):

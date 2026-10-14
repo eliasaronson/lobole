@@ -1,6 +1,6 @@
 # Interchange: import and export
 
-Getting geometry into and out of Designer. Document storage and the
+Getting geometry into and out of Loböle. Document storage and the
 project format are in [../versioning/README.md](../versioning/README.md).
 
 | format | import | export |

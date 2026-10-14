@@ -268,8 +268,9 @@ the loop in the mates' own joint coordinates and reports remaining DOF,
 redundant-but-consistent mates, and how far a loop that cannot close misses.
 All of it is in [solver.md](solver.md).
 
-Units on the wire: a mate's `rotation` is **radians**; `rotation_deg` is the
-same field in degrees (giving both is refused). `offset`, `dx`, `dy` are mm.
+Units on the wire: `add_mate` and `set_mate` take a mate's angle as
+`rotation_deg` only (a bare `rotation` is refused by name); answers carry
+`rotation`, in radians, beside it. `offset`, `dx`, `dy` are mm.
 
 **Re-solve triggers**, all through `ui::SolveActiveAssembly`: any mate or
 occurrence edit, opening a project, activating an assembly tab whose parts

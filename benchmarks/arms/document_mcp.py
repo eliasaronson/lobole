@@ -47,7 +47,7 @@ def _client():
 @mcp.tool(description=(
     "Replace the open document with the one you supply, and report what the "
     "kernel made of it. `document` is the COMPLETE project as JSON, in "
-    "Designer's own save format — the same thing save_project writes. Call "
+    "Loböle's own save format — the same thing save_project writes. Call "
     "document_format() first to see that format: it returns the current "
     "format version and a worked example of a part with a sketch, an extrude "
     "and a hole.\n\n"

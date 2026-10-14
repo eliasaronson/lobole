@@ -41,7 +41,7 @@ measurement can span two parts or two occurrences.
   kind, radius and diameter for a round face or edge; a body reports volume,
   surface area and bounding size.
 - `{a, b}`: distance, the closest points, a signed `delta`, and
-  `overlap_volume` / `clash` for two whole shapes.
+  `overlap_volume_mm3` / `clash` for two whole shapes.
 - `distance_kind`: `minimum` (default), `maximum` (the clearance question),
   `centres` (hole spacing — a circle's or bore's true centre, not a point on
   its rim).
@@ -89,7 +89,7 @@ BRepExtrema over two interpenetrating solids takes minutes.
 `test_measure.cpp` "A shaft whose mesh crosses its bore's is measured, not
 called touching".
 
-Between two whole shapes `measure` also reports `overlap_volume` / `clash`.
+Between two whole shapes `measure` also reports `overlap_volume_mm3` / `clash`.
 When the distance it has just measured is positive, the surfaces meet
 nowhere, so the solids overlap only if one lies wholly inside the other; one
 vertex of each solid classified against the other settles that, and the

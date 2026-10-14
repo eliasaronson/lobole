@@ -44,7 +44,7 @@ def expect(condition, message):
 
 class Raw:
     """A bare connection that can SEND without waiting for the answer --
-    what a pipelining client does, and what Designer.call cannot."""
+    what a pipelining client does, and what Client.call cannot."""
 
     def __init__(self, port):
         self.sock = socket.create_connection(("127.0.0.1", port), timeout=300)

@@ -52,7 +52,7 @@ from grade import grade_file          # noqa: E402
 
 # Everything the agent is told beyond the task itself. Identical for every arm
 # — an arm that needs its own briefing puts it in `append_system_prompt`.
-HARNESS_PREFIX = """You are connected to a running instance of Designer, a
+HARNESS_PREFIX = """You are connected to a running instance of Loböle, a
 parametric CAD application, through its MCP tools. A new empty document is
 already open. Build the part described below in that document.
 
