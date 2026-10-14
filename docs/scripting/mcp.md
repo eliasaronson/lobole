@@ -97,17 +97,20 @@ FEM and topology studies, configurations, sketch constraints and ops,
 checkpoints and history, tolerances, sections, CAM, the raw GUI actions — is
 reached with **`rpc(method, params)`** and documented by **`help(method)`**.
 
-- `rpc` routes through a kept wrapper when the server has one and the
-  params fit its signature (so its argument shaping and defaults still
-  apply), and otherwise passes the call straight to the app — a key the app
-  accepts that the wrapper never learned reaches the app, which validates — so an RPC newer than this file still works. An unknown
-  name comes back with close matches.
-- `help(method)` returns the wrapper's prose and signature, or, for an RPC
-  the server does not wrap, the app's own `describe` row — with
-  `param_types`, each key's type in words, for a method with a typed
-  contract ([rpc.md](rpc.md#typed-contracts)). The lookup is
-  `lobole.client.method_help`, which the python client's `help` also is;
-  this server only adds its wrapper prose.
+- `rpc` sends the call straight to the app: its `describe` row is the
+  contract and its defaults the only ones, so an RPC newer than this file
+  works the day it lands. An unknown name comes back with close matches.
+  `ui_action` is the one name that is this server's own, a door to the
+  GUI-action RPCs.
+- `help(method)` returns the app's own `describe` row — its parameters,
+  `param_types` (each key's type in words, for a method with a typed
+  contract, [rpc.md](rpc.md#typed-contracts)) and what comes back — with
+  this server's longer prose in place of the row's one-liner where it keeps
+  some (`_reference` in `lobole/mcp.py`: prose, never a wrapper). The lookup
+  is `lobole.client.method_help`, which the python client's `help` also is.
+- An announced tool in front of an RPC takes exactly that RPC's keys and
+  passes only the ones given, so every default is the app's;
+  `mcp_formats_gate` holds each tool's signature to its row.
 - `screenshot` and `render_still` return the image inline.
 
 Keeping most RPCs behind `rpc`/`help` keeps the schema bulk every client loads
@@ -154,11 +157,16 @@ dialects are in front of it. `FEATURE_FORMATS` and `MATERIAL_SLUGS` in
 truth is `SerializeFeatures.cpp` (`FeatureFromJson`, `EntityFromJson`), served
 at runtime by `describe`. `mcp_formats_gate` (headless, on the default path)
 fails when a feature type, sketch entity type or material slug in `describe`
-is missing from the prose, so a new feature type needs a row in both places.
+is missing from the prose, and when a field in a type's typed contract
+([rpc.md](rpc.md#typed-feature-specs)) is not named in it (an `x_expr` twin
+by its `x`, which the prose states once; the keys a spec only carries back
+from `get_state` are exempt), so a new feature type or field needs its row
+and its prose.
 
 ## Testing
 
-- `mcp_formats_gate` — the prose against `describe`, headless.
+- `mcp_formats_gate` — the prose against `describe`, and each announced
+  tool's signature against its RPC's row, headless.
 - `python_package_compiles` — compiles every module of the package on the
   default path, with no display and no SDK. `mcp_smoke` is GUI-labelled, so
   without it a syntax error in the server would pass every default run.
@@ -167,7 +175,7 @@ is missing from the prose, so a new feature type needs a row in both places.
 - `mcp_smoke` (GUI) — models a dimensioned bracket end to end through the
   SDK's stdio client, so the MCP layer itself is exercised; skips without the
   `mcp` SDK.
-- `packaging_smoke` — the `pyproject.toml` metadata.
+- `packaging_smoke` — the wheel `pyproject.toml` builds, imported alone.
 
 `--only-tools a,b,c` serves only the named tools and refuses loudly if it
 cannot (an unknown name, or FastMCP's registry having moved), because a

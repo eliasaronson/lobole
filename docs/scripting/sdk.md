@@ -63,8 +63,16 @@ mypy sees `app.add_mate(a=..., b=..., derive="sideways")`, a string
 the generated one. A key that is a Python keyword is typed with its
 trailing underscore (`async_`), as it is passed. A vocabulary
 (`@mate_types`) is typed `str`: its values are the running app's, which the
-runtime check enforces. `inspection_typing_gate` type-checks a valid script
-and one seeded with errors against the stubs.
+runtime check enforces. A feature spec can be annotated as its type's
+`TypedDict` (`ExtrudeSpec`, …, [typed feature specs](rpc.md#typed-feature-specs))
+and is then checked field by field; a plain dict still passes.
+
+The package ships `py.typed`, so its signatures are part of its API: the
+hand-written layer annotates what each public function returns (a `Body`, a
+`list[Face]`, a typed answer such as `MassPropertiesResult`).
+`inspection_typing_gate` type-checks a valid script and one seeded with
+errors against the stubs, and the whole `lobole` package with mypy, from
+outside the checkout as an installed copy is read.
 
 ## Errors
 

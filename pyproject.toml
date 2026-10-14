@@ -17,7 +17,7 @@ build-backend = "setuptools.build_meta"
 name = "lobole"
 version = "0.1.0"
 description = "Drive a running Loböle CAD instance: JSON-RPC client, SDK and MCP server"
-requires-python = ">=3.10"
+requires-python = ">=3.11"  # typing.Self, NotRequired, Unpack
 license = "AGPL-3.0-or-later"
 # <2: mcp 2.x renamed FastMCP to MCPServer and changed other APIs; the server
 # is written against 1.x, which is also what nixpkgs pins. Lift the pin only

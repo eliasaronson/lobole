@@ -89,8 +89,10 @@ async def run(port):
             expect("add_mate" in index["methods"], "help indexes add_mate")
             doc = result(await session.call_tool("help", {"method":
                                                           "add_mate"}))
-            expect(len(doc["doc"]) > 200 and "type" in doc["arguments"],
-                   "help('add_mate') carries the prose and the signature")
+            expect(len(doc["doc"]) > 200 and "type" in doc["params"]
+                   and "rotation_deg" in doc["param_types"],
+                   "help('add_mate') carries the prose and the app's own "
+                   "parameters, typed")
             try:
                 result(await session.call_tool("help", {"method": "add_mat"}))
                 raise RuntimeError("a typo should not resolve")
@@ -156,8 +158,8 @@ async def run(port):
                 ]})
             sk_id, (bot, right, top, left) = sk["id"], sk["entity_ids"]
 
-            # Through rpc(), the door every non-exposed RPC uses now — and
-            # the wrapper behind it still shapes the arguments.
+            # Through rpc(), the door every non-exposed RPC uses, straight
+            # to the app.
             async def constrain(kind, refs, **kw):
                 await call("rpc", method="add_constraint",
                            params=dict(sketch_id=sk_id, kind=kind, refs=refs,

@@ -2,7 +2,8 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Require static diagnostics on each seeded error, not simply a failing mypy."""
+"""Require static diagnostics on each seeded error, not simply a failing mypy;
+and the whole lobole package type-checks."""
 import importlib.util
 import os
 from pathlib import Path
@@ -42,8 +43,16 @@ with tempfile.TemporaryDirectory(prefix='inspection-mypy-') as cache:
                     if '# type-error' in line}
         assert errors == expected, result.stdout
         assert result.returncode == (1 if expected else 0), result.stdout
-    generated = subprocess.run(base + [str(ROOT / 'python/lobole/inspection.py'),
-                                      str(ROOT / 'python/lobole/rpc.py')],
-                               env=env, text=True, capture_output=True)
-    assert generated.returncode == 0, generated.stdout + generated.stderr
-print('inspection + rpc typing: valid fixtures and every seeded error verified')
+    # The whole package type-checks, as a user's checker reads it: it ships
+    # py.typed, so every signature in it is a claim about its API — the
+    # generated stubs and the hand-written SDK alike. Run from a scratch
+    # directory so the checkout's own python/ is found only through
+    # MYPYPATH, as an installed package would be.
+    package = subprocess.run(
+        [sys.executable, '-m', 'mypy', '--show-error-codes',
+         '--no-error-summary', '--no-pretty', '--cache-dir', cache,
+         '-p', 'lobole'],
+        env=env, text=True, capture_output=True, cwd=cache)
+    assert package.returncode == 0, package.stdout + package.stderr
+print('inspection + rpc typing: valid fixtures and every seeded error '
+      'verified, and the lobole package type-checks')

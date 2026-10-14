@@ -46,12 +46,15 @@ Usage:
     seat = part.frame("wrist_pin", top.faces(kind="cylinder")[0])
     part.check()                                 # raises on any broken feature
 """
+from __future__ import annotations
+
 import functools
 import math
 import os
 import sys
 import time
-from typing import TYPE_CHECKING
+from collections.abc import Callable, Iterator, KeysView
+from typing import TYPE_CHECKING, Any, NoReturn, Self, TypeVar
 
 from lobole.client import Client as _Remote  # noqa: E402
 from lobole.contracts import contract_refusal  # noqa: E402
@@ -68,11 +71,19 @@ if TYPE_CHECKING:
     # The contracted RPCs, typed for a checker only: at runtime every RPC is
     # the generated describe surface (docs/scripting/sdk.md#typed-stubs).
     from lobole.rpc import RpcSurface as _RpcSurface
+    from lobole.rpc import (CheckSeatResult, ContactReportResult,
+                            GetStateResult, ListPartsResultParts,
+                            ListRequirementsResult,
+                            ListVariablesResultVariables, SaveTemplateResult,
+                            SolveAssemblyResult)
 else:
     _RpcSurface = object
 
 
-def _renamed(**renames):
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _renamed(**renames: tuple[str, str]) -> Callable[[_F], _F]:
     """Refuse a keyword this SDK used to spell without its unit.
 
     Each value is (new name, what the new one takes). A bare angle meant
@@ -128,18 +139,18 @@ class V(tuple):
 
     __rmul__ = __mul__
 
-    def dot(self, o):
+    def dot(self, o) -> float:
         return sum(a * b for a, b in zip(self, o))
 
-    def cross(self, o):
+    def cross(self, o) -> V:
         return V(self[1] * o[2] - self[2] * o[1],
                  self[2] * o[0] - self[0] * o[2],
                  self[0] * o[1] - self[1] * o[0])
 
-    def length(self):
+    def length(self) -> float:
         return math.sqrt(self.dot(self))
 
-    def unit(self):
+    def unit(self) -> V:
         n = self.length()
         if n < 1e-12:
             raise SdkError("cannot normalize a zero-length vector")
@@ -182,6 +193,7 @@ class Param(float):
     """
 
     __slots__ = ("expr",)
+    expr: str
 
     def __new__(cls, value, expr):
         self = float.__new__(cls, value)
@@ -383,7 +395,7 @@ class App(_RpcSurface):
                                    expected, observed)
         return self.call(method, **params)
 
-    def call(self, method, /, _timeout=None, **params):
+    def call(self, method, /, _timeout=None, **params) -> Any:
         # `method` positional-only: describe(method=...) is a parameter, not
         # this argument (lobole.client.call says the same).
         if method in self._schemas:
@@ -403,7 +415,7 @@ class App(_RpcSurface):
             self._created.add(out["id"])
         return out
 
-    def active(self):
+    def active(self) -> int:
         """The id of the tab that is in front, asked rather than remembered.
 
         `_MOVES_TAB` above is an optimization, not a source of truth: it saves
@@ -416,7 +428,7 @@ class App(_RpcSurface):
         """
         return self.list_parts()["active_id"]
 
-    def param(self, name, value, comment=""):
+    def param(self, name, value, comment="") -> Param:
         """A PROJECT variable, and a Param that knows it.
 
         The project-scope twin of `Part.param`. A dimension several parts must
@@ -432,7 +444,7 @@ class App(_RpcSurface):
         raise SdkError(f"the app accepted variable '{name}' and then did not "
                        f"list it")
 
-    def params(self, table, comment=""):
+    def params(self, table, comment="") -> dict[str, Param]:
         """Declare a whole dimension table at project scope; {name: Param}.
 
         Insertion order matters: a derived entry may name any entry declared
@@ -440,11 +452,11 @@ class App(_RpcSurface):
         """
         return {k: self.param(k, v, comment=comment) for k, v in table.items()}
 
-    def methods(self, contains=""):
+    def methods(self, contains="") -> list[str]:
         """The documented method names, optionally filtered."""
         return sorted(n for n in self._methods if contains in n)
 
-    def help(self, method=""):
+    def help(self, method="") -> dict[str, Any]:
         """What `method` does, takes and returns — the one lookup every
         client shares (lobole.client.method_help), so the SDK, the plain
         client and the MCP server's help() give the same answer. With no
@@ -452,16 +464,16 @@ class App(_RpcSurface):
         from lobole.client import method_help
         return method_help(self._remote.call, method)
 
-    def close(self):
+    def close(self) -> None:
         self._remote.close()
 
     @property
-    def catalogs(self):
+    def catalogs(self) -> Catalogs:
         """Project engineering catalogs; handles pin immutable content."""
         return Catalogs(self)
 
     # --- tabs --------------------------------------------------------------
-    def part(self, name=None, create=True, reuse=False):
+    def part(self, name=None, create=True, reuse=False) -> Part:
         """Create a part tab and return a `Part` — or, when asked, open one.
 
         Which of the two a name means is the CALLER's choice, never a lookup
@@ -484,24 +496,24 @@ class App(_RpcSurface):
         """
         return _open_tab(self, name, "part", create, reuse)
 
-    def parts(self):
+    def parts(self) -> list[ListPartsResultParts]:
         """The PART tabs only. `list_parts` lists every tab — assemblies and
         drawings included, whatever its name says — and taking it at its
         word filed an engine and a carburettor under Fasteners."""
         return [x for x in self.list_parts()["parts"]
                 if x.get("type") == "part"]
 
-    def assemblies(self):
+    def assemblies(self) -> list[ListPartsResultParts]:
         """The ASSEMBLY tabs only. See `parts()`."""
         return [x for x in self.list_parts()["parts"]
                 if x.get("type") == "assembly"]
 
-    def assembly(self, name=None, create=True, reuse=False):
+    def assembly(self, name=None, create=True, reuse=False) -> Asm:
         """An assembly tab, by the same rule as `part()`: `assembly(name)`
         creates, `create=False` opens an existing one, `reuse=True` either."""
         return _open_tab(self, name, "assembly", create, reuse)
 
-    def transaction(self, stop_on_error=True):
+    def transaction(self, stop_on_error=True) -> Batch:
         """A `Batch` over several calls: one transaction, one regeneration,
         one undo step, and a rollback if any of them fails.
 
@@ -512,13 +524,13 @@ class App(_RpcSurface):
         """
         return Batch(self, stop_on_error)
 
-    def new(self):
+    def new(self) -> App:
         self.call("new_project")
         return self
 
     # ---- Requirements (docs/requirements/README.md) -----------------------
 
-    def require(self, name, measure, bound=None, source="", **bound_kw):
+    def require(self, name, measure, bound=None, source="", **bound_kw) -> int:
         """State a requirement the design must meet, held by the project:
 
             app.require("lens at 3 g", {"kind": "study_probe", ...},
@@ -562,7 +574,8 @@ class App(_RpcSurface):
                          bound=bound, source=source)["id"]
 
     def verify_requirements(self, ids=None, recompute=False, poll=1.0,
-                           timeout=3600.0, raise_on_failure=True):
+                           timeout=3600.0,
+                           raise_on_failure=True) -> ListRequirementsResult:
         """Check the project's requirements and wait for the answer: as a
         job (check_requirements {async}) followed by id, since a check may
         run studies. Returns list_requirements' answer. Raises SdkError
@@ -648,7 +661,7 @@ def _open_tab(app, name, kind, create, reuse=False):
     return (Part if kind == "part" else Asm)(app, hit)
 
 
-def connect(port=None, host="127.0.0.1"):
+def connect(port=None, host="127.0.0.1") -> App:
     """The running app, by port or by discovery — never a guess.
 
     With no port: the ONE announced instance, or a refusal naming the ones it
@@ -734,13 +747,13 @@ class Plane:
     # and left-right is mirrored. `world()` / `uv()` do the arithmetic.
 
     @staticmethod
-    def xy(z=0.0, flip=False):
+    def xy(z=0.0, flip=False) -> Plane:
         """The plane at height z. Normal +Z, U +X, V +Y; flipped, normal -Z
         and V -Y (U stays +X)."""
         return Plane((0, 0, z), (0, 0, -1 if flip else 1), (1, 0, 0))
 
     @staticmethod
-    def xz(y=0.0, flip=False):
+    def xz(y=0.0, flip=False) -> Plane:
         """The plane at y. Normal -Y so V = world +Z (not -Z) — the V-axis
         trap, once — with U +X. Flipped, normal +Y and U -X (V stays +Z)."""
         if flip:
@@ -748,31 +761,31 @@ class Plane:
         return Plane((0, y, 0), (0, -1, 0), (1, 0, 0))
 
     @staticmethod
-    def yz(x=0.0, flip=False):
+    def yz(x=0.0, flip=False) -> Plane:
         """The plane at x. Normal +X, U +Y, V +Z; flipped, normal -X and
         U -Y (V stays +Z)."""
         if flip:
             return Plane((x, 0, 0), (-1, 0, 0), (0, -1, 0))
         return Plane((x, 0, 0), (1, 0, 0), (0, 1, 0))
 
-    def world(self, u, v=None):
+    def world(self, u, v=None) -> V:
         """The world point at sketch coordinates (u, v)."""
         if v is None:
             u, v = u
         return self.origin + self.u * float(u) + self.v * float(v)
 
-    def uv(self, point):
+    def uv(self, point) -> tuple[float, float]:
         """The sketch coordinates of a world point (projected onto the
         plane). The inverse of `world`."""
         d = V(point) - self.origin
         return (d.dot(self.u), d.dot(self.v))
 
-    def offset(self, distance):
+    def offset(self, distance) -> Plane:
         """A parallel plane `distance` along the normal."""
         return Plane(self.origin + self.normal * distance, self.normal,
                      self.u)
 
-    def json(self):
+    def json(self) -> dict[str, list[float]]:
         return {"origin": list(self.origin), "normal": list(self.normal),
                 "uAxis": list(self.u)}
 
@@ -791,15 +804,15 @@ class DatumPlane(Plane):
         super().__init__(basis.origin, basis.normal, basis.u)
         self.part, self.id = part, id
 
-    def uv(self, point):
+    def uv(self, point) -> NoReturn:
         raise SdkError(
             "a live datum needs native projection; use sketch UV coordinates"
         )
 
-    def world(self, u, v=None):
+    def world(self, u, v=None) -> NoReturn:
         raise SdkError("a live datum is a reference, not an evaluated world plane")
 
-    def offset(self, distance):
+    def offset(self, distance) -> NoReturn:
         raise SdkError(
             "create a persistent datum with part.datum_plane(parent=datum, offset=...)"
         )
@@ -811,7 +824,7 @@ class Thread:
     def __init__(self, part, id, face=None):
         self.part, self.id, self.face = part, id, face
 
-    def mill(self, setup, job=None, tool=None, **kw):
+    def mill(self, setup, job=None, tool=None, **kw) -> dict[str, Any]:
         """A CAM thread mill for this thread (docs/cam/operations.md#thread-mill):
         ``add_cam_op`` of type ``thread_mill`` on the threaded face, so its
         size, pitch, hand, side and class come from the Thread rather than
@@ -839,7 +852,7 @@ class ProjectedCurve:
             raise SdkError("expected a list_drawing_geometry curve")
         self.row = row
 
-    def pick(self, endpoint="middle"):
+    def pick(self, endpoint="middle") -> dict[str, Any]:
         ends = {"middle": 0, "start": 1, "end": 2}
         if endpoint not in ends:
             raise SdkError("endpoint must be middle, start or end")
@@ -864,11 +877,11 @@ class Element:
         self.entity = raw.get("entity")
 
     @property
-    def ref(self):
+    def ref(self) -> dict[str, Any]:
         """The {feature_id, element} an RPC takes."""
         return {"feature_id": self.feature_id, "element": self.name}
 
-    def frame(self):
+    def frame(self) -> Frame:
         """This element's frame, from the app — the same one a mate anchored
         here would use."""
         return Frame.from_query(
@@ -890,10 +903,10 @@ class Face(Element):
         self.radius = raw.get("radius")
 
     @property
-    def diameter(self):
+    def diameter(self) -> float | None:
         return None if self.radius is None else 2.0 * self.radius
 
-    def plane(self, offset=0.0, u=None):
+    def plane(self, offset=0.0, u=None) -> Plane:
         """This face as a sketch plane: origin at its centroid, normal its
         outward normal. `offset` lifts it along that normal."""
         if self.kind != "plane":
@@ -914,7 +927,7 @@ class Edge(Element):
         self.radius = raw.get("radius")
 
     @property
-    def center(self):
+    def center(self) -> V:
         """A circular edge's centre — asked of the app, not guessed from the
         midpoint (which is a point ON the circle)."""
         if self.kind not in ("circle", "arc"):
@@ -977,6 +990,10 @@ class Feature:
     returning an empty list a script would carry on with.
     """
 
+    # Set on a Template instance only (Part.template): the features it
+    # expanded into.
+    features: list[Feature]
+
     def __init__(self, part, raw):
         self.part = part
         self._raw = dict(raw)
@@ -988,13 +1005,13 @@ class Feature:
     def __getitem__(self, key):
         return self._raw[key]
 
-    def get(self, key, default=None):
+    def get(self, key, default=None) -> Any:
         return self._raw.get(key, default)
 
     def __contains__(self, key):
         return key in self._raw
 
-    def keys(self):
+    def keys(self) -> KeysView[str]:
         return self._raw.keys()
 
     def __repr__(self):
@@ -1021,7 +1038,7 @@ class Feature:
                            + (f" in role {role!r}" if role else ""))
         return out
 
-    def faces(self, role=None, entity=None):
+    def faces(self, role=None, entity=None) -> list[Face]:
         """The faces this feature made, in `role` if given: start_cap,
         end_cap (floor), side (walls; `entity=` the sketch line), generated,
         bore, bottom, counterbore, counterbore_floor, countersink, point
@@ -1029,43 +1046,43 @@ class Feature:
         boundary."""
         return self._ask(role, entity, edges=False)
 
-    def edges(self, role=None, entity=None):
+    def edges(self, role=None, entity=None) -> list[Edge]:
         """The edges named from the faces this feature made."""
         return self._ask(role, entity, edges=True)
 
-    def floors(self):
+    def floors(self) -> list[Face]:
         """A cut's floors -- one per pattern copy when it has copies."""
         return self.faces(role="end_cap")
 
-    def floor(self):
+    def floor(self) -> Face:
         """A cut's floor, when it has exactly one."""
         return _only(self.floors(), "floor", {"feature": self.id})
 
-    def walls(self, entity=None):
+    def walls(self, entity=None) -> list[Face]:
         """A cut's or an extrude's side faces; `entity=` the sketch line
         one was swept from."""
         return self.faces(role="side", entity=entity)
 
-    def end_cap(self):
+    def end_cap(self) -> Face:
         """An extrude's far end (a revolve's, when partial)."""
         return _only(self.faces(role="end_cap"), "end cap",
                      {"feature": self.id})
 
-    def start_cap(self):
+    def start_cap(self) -> Face:
         """An extrude's first end, on its sketch plane."""
         return _only(self.faces(role="start_cap"), "start cap",
                      {"feature": self.id})
 
-    def bores(self):
+    def bores(self) -> list[Face]:
         """Every bore a Hole drilled."""
         return self.faces(role="bore")
 
-    def bottoms(self):
+    def bottoms(self) -> list[Face]:
         """Every flat-floored blind hole's bottom. A hole drilled with a
         point (a fit's, by default) ends in a cone instead: points()."""
         return self.faces(role="bottom")
 
-    def points(self):
+    def points(self) -> list[Face]:
         """Every blind hole's drill point: the cone its floor is."""
         return self.faces(role="point")
 
@@ -1079,11 +1096,11 @@ class Frame:
         self.space = space
 
     @staticmethod
-    def from_query(part, r, id=None, name=None):
+    def from_query(part, r, id=None, name=None) -> Frame:
         return Frame(part, id, name or r.get("source", ""), r["origin"],
                      r["x"], r["y"], r["z"], r.get("space", "part"))
 
-    def plane(self, offset=0.0):
+    def plane(self, offset=0.0) -> Plane:
         """This frame as a sketch plane (its Z is the normal, its X the U)."""
         p = Plane(self.origin, self.z, self.x)
         return p.offset(offset) if offset else p
@@ -1134,7 +1151,7 @@ class Body:
         return self._els
 
     @property
-    def created_by(self):
+    def created_by(self) -> int:
         # From the CHEAP body list when it is there. This one integer used to
         # come from `list_elements`, which enumerates every face and edge of
         # the body to produce it — and `_body_from` reads it after every
@@ -1154,7 +1171,7 @@ class Body:
 
     def faces(self, kind=None, where=None, normal=None, radius=None,
               tol=0.01, radius_tol=0.05, made_by=None, role=None, via=None,
-              entity=None):
+              entity=None) -> list[Face]:
         """Faces, filtered. `normal=(0,0,1)` keeps the ones pointing that
         way; `where` is any predicate over a Face.
 
@@ -1183,7 +1200,7 @@ class Body:
 
     def edges(self, kind=None, where=None, radius=None, circular=None,
               tol=0.05, made_by=None, role=None, via=None, entity=None,
-              between=None):
+              between=None) -> list[Edge]:
         """Edges, filtered.
 
         `circular=True` means "a round rim" — circle OR arc. Whether the
@@ -1227,12 +1244,12 @@ class Body:
             out = [e for e in out if where(e)]
         return out
 
-    def face(self, **kw):
+    def face(self, **kw) -> Face:
         """Exactly one face matching, or a refusal that says how many there
         were — never the first of several."""
         return _only(self.faces(**kw), "face", kw)
 
-    def edge(self, **kw):
+    def edge(self, **kw) -> Edge:
         return _only(self.edges(**kw), "edge", kw)
 
     def __repr__(self):
@@ -1285,16 +1302,17 @@ class SketchBuilder:
         self._pending_exprs = []  # (entity index, field, expression)
 
     # --- primitives -------------------------------------------------------
-    def point(self, at):
+    def point(self, at) -> SketchBuilder:
         n = len(self.entities)
         self.entities.append(
             {"type": "point", "p": list(_uv(self, at, n, 0, "point"))})
         self._attach_exprs(n)
         return self
 
-    def line(self, a, b, construction=False):
+    def line(self, a, b, construction=False) -> SketchBuilder:
         n = len(self.entities)
-        e = {"type": "line", "a": list(_uv(self, a, n, 0, "line")),
+        e: dict[str, Any] = {"type": "line",
+                             "a": list(_uv(self, a, n, 0, "line")),
              "b": list(_uv(self, b, n, 1, "line"))}
         if construction:
             e["construction"] = True
@@ -1302,15 +1320,17 @@ class SketchBuilder:
         self._attach_exprs(n)
         return self
 
-    def circle(self, center, d=None, r=None, construction=False):
+    def circle(self, center, d=None, r=None,
+               construction=False) -> SketchBuilder:
         """A circle. Give `d` (diameter) or `r`; either may be an EXPRESSION
         string OR a `Param`, which keeps the dimension a variable."""
         if (d is None) == (r is None):
             raise SdkError("circle takes exactly one of d= (diameter) or "
                            "r= (radius)")
         n = len(self.entities)
-        e = {"type": "circle",
-             "center": list(_uv(self, center, n, 0, "circle"))}
+        e: dict[str, Any] = {
+            "type": "circle",
+            "center": list(_uv(self, center, n, 0, "circle"))}
         # A Param counts as an expression, the same way `_dim` treats one.
         # It did not, and a Param is a float subclass, so `circle(d=P["bore"])`
         # took the literal branch below and wrote the NUMBER with no `r_expr`
@@ -1346,7 +1366,8 @@ class SketchBuilder:
                 rest.append((ent, field, expr))
         self._pending_exprs = rest
 
-    def arc(self, center, radius, start_deg, end_deg, construction=False):
+    def arc(self, center, radius, start_deg, end_deg,
+            construction=False) -> SketchBuilder:
         """An arc, counter-clockwise from `start_deg` to `end_deg`.
 
         The entity type always existed — `slot` emits two of them — but there
@@ -1379,7 +1400,7 @@ class SketchBuilder:
 
     def text(self, s, at, height, font="sans", angle_deg=0.0,
              halign="left", valign="baseline", spacing=0.0,
-             construction=False):
+             construction=False) -> SketchBuilder:
         """A one-line text label (the app's `text` entity, v137) anchored at
         `at`. `height` is the CAP height in mm (a number, a Param or an
         expression string); `font` is "sans" (outline: extruding it cuts or
@@ -1408,7 +1429,8 @@ class SketchBuilder:
         self._attach_exprs(n)
         return self
 
-    def spline(self, poles, degree=3, closed=False, construction=False):
+    def spline(self, poles, degree=3, closed=False,
+               construction=False) -> SketchBuilder:
         """A B-spline through CONTROL POLES [(u, v), ...] (the app's `spline`
         entity, v40): the curve follows the poles and touches only the first
         and last. `closed` repeats the first pole at the end, which makes a
@@ -1448,7 +1470,7 @@ class SketchBuilder:
         self._attach_exprs(n)
         return self
 
-    def rect(self, c1, c2):
+    def rect(self, c1, c2) -> SketchBuilder:
         """An axis-aligned rectangle between two opposite corners.
 
         A corner coordinate that is a `Param` or an expression string makes
@@ -1466,7 +1488,7 @@ class SketchBuilder:
                               "c2": list(_uv(self, c2))})
         return self
 
-    def centered_rect(self, center, w, h):
+    def centered_rect(self, center, w, h) -> SketchBuilder:
         """A rectangle `w` by `h` about `center`; Params stay variables (the
         corners are Param arithmetic, which rect() keeps)."""
         given = list(center) if _driven(center) else []
@@ -1477,7 +1499,7 @@ class SketchBuilder:
         return self.rect((cu - w / 2.0, cv - h / 2.0),
                          (cu + w / 2.0, cv + h / 2.0))
 
-    def polyline(self, points, close=True):
+    def polyline(self, points, close=True) -> SketchBuilder:
         """A chain of lines. `close` joins the last point to the first, which
         is what makes it a profile an extrude can use."""
         pts = list(points)
@@ -1496,7 +1518,7 @@ class SketchBuilder:
             self.line(pts[-1], pts[0])
         return self
 
-    def extent(self):
+    def extent(self) -> tuple[V, V]:
         """The (u, v) bounding box of everything drawn so far, as
         ((umin, vmin), (umax, vmax)).
 
@@ -1529,7 +1551,8 @@ class SketchBuilder:
         return (V((lo[0], lo[1], 0)), V((hi[0], hi[1], 0)))
 
     @_renamed(rotate=("rotate_deg", "DEGREES (the old name took radians)"))
-    def polygon(self, center, n, r=None, across_flats=None, rotate_deg=0.0):
+    def polygon(self, center, n, r=None, across_flats=None,
+                rotate_deg=0.0) -> SketchBuilder:
         """A regular n-gon. `r` is the circumradius; `across_flats` is the
         spanner size, converted rather than approximated. `rotate_deg` turns
         the first vertex off the +U axis."""
@@ -1544,7 +1567,7 @@ class SketchBuilder:
                for i in range(n)]
         return self.polyline(pts, close=True)
 
-    def slot(self, a, b, width):
+    def slot(self, a, b, width) -> SketchBuilder:
         """A rounded slot between two centres — two lines and two arcs, so it
         is a real closed profile rather than a stadium approximation.
 
@@ -1617,7 +1640,7 @@ class SketchBuilder:
         self.arc((au, av), rad, ang + 90.0, ang + 270.0)
         return self
 
-    def arc_through(self, start, mid, end):
+    def arc_through(self, start, mid, end) -> SketchBuilder:
         """An arc through three points, in the direction that passes through
         `mid` — the check every scratch script used to get wrong."""
         (ax, ay), (bx, by), (cx, cy) = (_uv(self, start), _uv(self, mid),
@@ -1642,7 +1665,7 @@ class SketchBuilder:
         return self
 
     # --- geometry that comes from the model -------------------------------
-    def project(self, *elements):
+    def project(self, *elements) -> SketchBuilder:
         """Project faces/edges of existing bodies into this sketch as live
         construction geometry. A projected hole edge is a circle, and a Hole
         takes its centre — so a hole lands on another body's hole with no
@@ -1655,7 +1678,7 @@ class SketchBuilder:
         return self
 
     # --- commit -----------------------------------------------------------
-    def json(self):
+    def json(self) -> dict[str, Any]:
         f = {"type": "Sketch", "name": self.name, "plane": self.plane.json(),
              "entities": self.entities}
         if self.projections:
@@ -1670,7 +1693,7 @@ class SketchBuilder:
             f["plane_ref"] = self.plane.id
         return f
 
-    def add(self):
+    def add(self) -> Sketch:
         """Commit; returns a `Sketch` handle."""
         r = self.part._add(self.json())
         return Sketch(self.part, r["id"], self)
@@ -1683,7 +1706,8 @@ class Sketch:
         self.part, self.id, self.plane = part, id, builder.plane
         self.name = builder.name
 
-    def constrain(self, kind, refs, value=None, expr=None, value_deg=None):
+    def constrain(self, kind, refs, value=None, expr=None,
+                  value_deg=None) -> Sketch:
         """One sketch constraint.
 
         `value` is MILLIMETRES for the length kinds and RADIANS for `angle` —
@@ -1716,7 +1740,7 @@ class Sketch:
         self.part.app.add_constraint(**kw)
         return self
 
-    def entities(self):
+    def entities(self) -> list[dict[str, Any]]:
         """This sketch's entities as the document holds them — including the
         construction geometry a projection produced."""
         for f in self.part.state()["features"]:
@@ -1724,7 +1748,7 @@ class Sketch:
                 return f.get("entities", [])
         return []
 
-    def projected_centers(self):
+    def projected_centers(self) -> list[tuple[float, float]]:
         """The distinct centres of the circles and arcs this sketch's
         projections produced, in sketch UV. This is how a hole pattern is
         taken from another body without a number being read off a screen."""
@@ -1816,12 +1840,15 @@ def _uv(builder, at, entity=None, point=0, kind=None):
 # A part tab
 # --------------------------------------------------------------------------
 
+_P = TypeVar("_P")
+
+
 class _Tab:
     def __init__(self, app, slot):
         self.app, self.slot = app, slot
         self.name, self.id = slot["name"], slot["id"]
 
-    def activate(self):
+    def activate(self) -> Self:
         """Make this tab the active one. Free when it already is: the client
         knows which tab it last switched to."""
         if self.app._active != self.id:
@@ -1832,7 +1859,7 @@ class _Tab:
     def __repr__(self):
         return f"{type(self).__name__}({self.name!r})"
 
-    def render(self, path, view="iso"):
+    def render(self, path: _P, view="iso") -> _P:
         """Screenshot this part or assembly on its own, fitted. Needs a
         renderer, so an `--offscreen` instance (a `--headless` one refuses,
         saying so).
@@ -1860,7 +1887,7 @@ class Part(_Tab):
                                   type=feature.get("type")))
 
     # --- parameters --------------------------------------------------------
-    def var(self, name, expression, comment="", scope="part"):
+    def var(self, name, expression, comment="", scope="part") -> Self:
         """A named parameter. Every dimension the spec names should be one:
         that is what makes the document parametric rather than a script's
         output.
@@ -1874,7 +1901,7 @@ class Part(_Tab):
                               comment=comment, scope=scope)
         return self
 
-    def param(self, name, value, comment="", scope="part"):
+    def param(self, name, value, comment="", scope="part") -> Param:
         """Declare a document variable and hand back a number that knows it.
 
         The half of `var()` that was missing. `var` declares; using the result
@@ -1895,7 +1922,7 @@ class Part(_Tab):
         self.var(name, value, comment=comment, scope=scope)
         return Param(self.value_of(name), name)
 
-    def params(self, table, comment="", scope="part"):
+    def params(self, table, comment="", scope="part") -> dict[str, Param]:
         """Declare a whole dimension table at once; returns {name: Param}.
 
         Generators already keep their dimensions in exactly this shape — the
@@ -1911,15 +1938,15 @@ class Part(_Tab):
         return {k: self.param(k, v, comment=comment, scope=scope)
                 for k, v in table.items()}
 
-    def param_of(self, name):
+    def param_of(self, name) -> Param:
         """An already-declared variable, as a Param."""
         return Param(self.value_of(name), name)
 
-    def vars(self):
+    def vars(self) -> dict[str, ListVariablesResultVariables]:
         self.activate()
         return {v["name"]: v for v in self.app.list_variables()["variables"]}
 
-    def value_of(self, name):
+    def value_of(self, name) -> float:
         """A variable's current value, as the DOCUMENT holds it.
 
         Deliberately not an expression evaluator: the document owns the
@@ -1939,7 +1966,8 @@ class Part(_Tab):
             f"needed here, and the document — not this SDK — evaluates "
             f"expressions; pass a number or a variable name")
 
-    def datum_plane(self, base="xy", offset=0, parent=None, name="Datum plane"):
+    def datum_plane(self, base="xy", offset=0, parent=None,
+                    name="Datum plane") -> DatumPlane:
         """Live offset plane. XZ uses SDK axes (+X,+Z; normal -Y).
 
         Numeric Plane/Frame arguments to sketch remain snapshots; this handle
@@ -1976,7 +2004,7 @@ class Part(_Tab):
         return DatumPlane(self, self._add(feature)["id"], basis)
 
     # --- sketches ----------------------------------------------------------
-    def sketch(self, plane=None, name="Sketch", on=None):
+    def sketch(self, plane=None, name="Sketch", on=None) -> SketchBuilder:
         """A sketch builder. `on=<Face>` puts it ON that face (so it moves
         with the body), `on=<Frame>` (one this part made) on the frame's XY
         plane and `on=<DatumPlane>` on the datum, each followed at every
@@ -2003,19 +2031,20 @@ class Part(_Tab):
         return SketchBuilder(self, plane, name)
 
     # --- features ----------------------------------------------------------
-    def extrude(self, sketch, distance, mode="new_body", name=None, **kw):
+    def extrude(self, sketch, distance, mode="new_body", name=None,
+                **kw) -> Body | Feature:
         f = {"type": "Extrude", "name": name or f"Extrude {sketch.name}",
              "sketch_id": ref_of(sketch), "mode": mode}
         _dim(f, "distance", distance)
         f.update(kw)
         return self._body_from(self._add(f), f)
 
-    def cut(self, sketch, distance, **kw):
+    def cut(self, sketch, distance, **kw) -> Body | Feature:
         return self.extrude(sketch, distance, mode="cut", **kw)
 
     @_renamed(angle=("angle_deg", "the same degrees"))
     def revolve(self, sketch, axis="z", angle_deg=360.0, mode="new_body",
-                name=None, **kw):
+                name=None, **kw) -> Body | Feature:
         f = {"type": "Revolve", "name": name or f"Revolve {sketch.name}",
              "sketch_id": ref_of(sketch), "mode": mode,
              "axis": axis if isinstance(axis, dict) else {"kind": axis}}
@@ -2025,7 +2054,7 @@ class Part(_Tab):
 
     @_renamed(angle=("angle_deg", "the same degrees"))
     def revolve_profile(self, points, plane=None, axis="z", angle_deg=360.0,
-                        name="Revolved", **kw):
+                        name="Revolved", **kw) -> Body | Feature:
         """A closed profile and the revolve of it, in one call — the shape a
         turned part (a piston, a bushing, a pulley) is actually described
         in."""
@@ -2054,7 +2083,8 @@ class Part(_Tab):
               d=("depth", "the extent along the frame's v (it was the Z "
                           "extent)"))
     def box(self, on, width=None, depth=None, height=None, at=None,
-            centered=True, mode="new_body", reversed=False, name="Box"):
+            centered=True, mode="new_body", reversed=False,
+            name="Box") -> Body | Feature:
         """A box on `on`: `width` along u, `depth` along v, `height` along
         the normal (`reversed=True` the other way). `at` is its centre, or
         with `centered=False` its low-u low-v corner."""
@@ -2075,7 +2105,8 @@ class Part(_Tab):
                                "normal"),
               h=("height", "the same length, along the normal"))
     def cylinder(self, on, d=None, r=None, height=None, at=None,
-                 mode="new_body", reversed=False, name="Cylinder"):
+                 mode="new_body", reversed=False,
+                 name="Cylinder") -> Body | Feature:
         """A cylinder standing on `on`, its axis along the normal through
         `at`."""
         f = {"type": "Cylinder", "name": name, "on": _on(on), "mode": mode}
@@ -2089,14 +2120,15 @@ class Part(_Tab):
     @_renamed(center=("on", "what the sphere sits on; `at=(u, v)` puts its "
                             "centre there, ON that plane"))
     def sphere(self, on, d=None, r=None, at=None, mode="new_body",
-               name="Sphere"):
+               name="Sphere") -> Body | Feature:
         """A sphere centred at `at` on `on` (half above it, half below)."""
         f = {"type": "Sphere", "name": name, "on": _on(on), "mode": mode}
         _diameter(f, d, r, "sphere")
         _at(f, at)
         return self._body_from(self._add(f), f)
 
-    def hole(self, sketch, d, depth=None, through=False, kind="simple", **kw):
+    def hole(self, sketch, d, depth=None, through=False, kind="simple",
+             **kw) -> Feature:
         """Holes at a sketch's points and at its circles' centres — so a
         sketch that PROJECTED another body's hole edges drills exactly
         there."""
@@ -2113,7 +2145,7 @@ class Part(_Tab):
     # --- templates (docs/modeling/templates.md) ---------------------------
     def save_template(self, name, features, literals=None, strings=None,
                       rename=None, comments=None, comment="", replace=False,
-                      dry_run=False):
+                      dry_run=False) -> SaveTemplateResult:
         """Save `features` of this part (Feature/Body objects or ids) as a
         template in the project's library. Every variable they read becomes
         a parameter of its name (or `rename`'s); `literals` makes literal
@@ -2146,7 +2178,7 @@ class Part(_Tab):
         self.activate()
         return self.app.save_template(**kw)
 
-    def template(self, template, on, params, name=None):
+    def template(self, template, on, params, name=None) -> Feature:
         """An instance of the library's `template` standing on `on` (a Face,
         a DatumPlane, a Frame, a Sketch or "Top"/"Front"/"Right"), with a
         value for EVERY parameter in `params` -- a number, a Param or an
@@ -2155,7 +2187,7 @@ class Part(_Tab):
         `.features` are the features it expanded into, each a Feature whose
         faces can be asked for like any (the instance's own faces are named
         under their ids)."""
-        values = {}
+        values: dict[str, Any] = {}
         for k, v in params.items():
             if isinstance(v, Param):
                 values[k] = v.expr
@@ -2173,7 +2205,8 @@ class Part(_Tab):
         return feat
 
     def thread(self, face, designation, allow_engagement=False, minimum_engagement=0,
-               modeled=False, hand="right", flank_angle_deg=None, pitch=None):
+               modeled=False, hand="right", flank_angle_deg=None,
+               pitch=None) -> Thread:
         """Annotate actual manufacturing geometry; engagement is explicit opt-in.
 
         Matching coaxial threads relieve only their common axial span during
@@ -2225,7 +2258,7 @@ class Part(_Tab):
             raise SdkError(f"{what} face belongs to a different part or connection")
 
     def worm(self, face, module=None, starts=1, hand="right", backlash=0.0,
-             length=0.0, pressure_angle_deg=20.0, name="Worm"):
+             length=0.0, pressure_angle_deg=20.0, name="Worm") -> Feature:
         """Cut a ZA worm into a cylindrical blank (docs/modeling/worm-gears.md).
 
         The blank's outside is the worm's tip: its pitch diameter is the tip
@@ -2249,7 +2282,7 @@ class Part(_Tab):
 
     def worm_wheel(self, face, teeth=40, module=None, starts=1,
                    worm_diameter=None, hand="right", pressure_angle_deg=20.0,
-                   name="Worm wheel"):
+                   name="Worm wheel") -> Feature:
         """Hob a worm wheel from a cylindrical blank: its rim is the face,
         its length the face width. Give the mating worm's starts, pitch
         diameter (``worm_diameter``; omitted = 10 modules) and hand; the
@@ -2266,10 +2299,10 @@ class Part(_Tab):
             f["worm_diameter"] = worm_diameter
         return self._feature(f)
 
-    def fillet(self, edges, r, name="Fillet"):
+    def fillet(self, edges, r, name="Fillet") -> Feature:
         return self._blend("Fillet", edges, r, name)
 
-    def chamfer(self, edges, r, name="Chamfer"):
+    def chamfer(self, edges, r, name="Chamfer") -> Feature:
         return self._blend("Chamfer", edges, r, name)
 
     def _blend(self, type_, edges, r, name):
@@ -2285,7 +2318,7 @@ class Part(_Tab):
     @_renamed(rotate=("rotate_deg", "the same degrees per axis"))
     def frame(self, name, of=None, origin=None, z=(0, 0, 1), x=(1, 0, 0),
               parent=None, offset=(0, 0, 0), rotate_deg=(0, 0, 0),
-              flip=False):
+              flip=False) -> Frame:
         """A named datum frame (v86). `of=` one element, or several circular
         ones for a bolt circle; `parent=` another frame; otherwise explicit.
 
@@ -2319,17 +2352,17 @@ class Part(_Tab):
         return Frame.from_query(self, self.app.frame(frame=fid), id=fid,
                                 name=name)
 
-    def frames(self):
+    def frames(self) -> list[dict[str, Any]]:
         return [f for f in self.state()["features"] if f["type"] == "Frame"]
 
-    def get_frame(self, name):
+    def get_frame(self, name) -> Frame:
         return Frame.from_query(self, self.app.frame(frame=name), name=name)
 
     @_renamed(angle=("step_deg", "the same degrees PER STEP; leave it out "
                                "to space the copies evenly round a full "
                                "turn"))
     def pattern(self, source, count, linear=None, circular=None, spacing=None,
-                step_deg=None, name="Pattern"):
+                step_deg=None, name="Pattern") -> Feature:
         """A linear or circular pattern of a feature. `linear=` an axis and
         `spacing=` (mm); `circular=` an axis and `step_deg=`.
 
@@ -2378,7 +2411,7 @@ class Part(_Tab):
     @_renamed(start_angle=("start_deg",
                            "DEGREES (the old name took radians)"))
     def bolt_circle(self, plane, n, pcd, d, start_deg=0.0, name="Bolt holes",
-                    through=True, depth=None):
+                    through=True, depth=None) -> tuple[Feature, Frame | None]:
         """N holes on a pitch circle, and the frame that names the pattern.
         The first hole sits `start_deg` off the plane's +U axis.
 
@@ -2408,10 +2441,10 @@ class Part(_Tab):
     # session, simulation mode and the explode state. Read a part on somebody's
     # running instance and that was their work
     # (docs/scripting/rpc.md#reads-name-their-part).
-    def state(self):
+    def state(self) -> GetStateResult:
         return self.app.get_state(part=self.id)
 
-    def bodies(self, reference=None):
+    def bodies(self, reference=None) -> list[Body]:
         """This part's bodies. Cheap: the LIST comes from get_state, and each
         body's faces and edges are read only when asked for. `reference=`
         filters ghosts in or out."""
@@ -2421,7 +2454,7 @@ class Part(_Tab):
             out = [b for b in out if b.reference == reference]
         return out
 
-    def body(self, name=None, index=None):
+    def body(self, name=None, index=None) -> Body:
         bs = self.bodies()
         if index is not None:
             return bs[index]
@@ -2434,7 +2467,7 @@ class Part(_Tab):
                 f"{[b.name for b in bs]}")
         return bs[0]
 
-    def faces(self, **kw):
+    def faces(self, **kw) -> list[Face]:
         """Every body's faces, filtered as Body.faces. With `made_by=`,
         `role=`, `via=` or `entity=` it is one question of the whole part,
         and one with no answer raises with the app's why; `configuration=`
@@ -2450,7 +2483,7 @@ class Part(_Tab):
             return [f for f in got if _face_passes(f, **kw)] if kw else got
         return [f for b in self.bodies() for f in b.faces(**kw)]
 
-    def feature(self, name):
+    def feature(self, name) -> Feature:
         """A feature of this part by name (or id), as a Feature: its faces
         are then `.faces(role=...)`, and it is what `made_by=` takes -- also
         for a Derived copy of this part, with `via=`."""
@@ -2458,10 +2491,10 @@ class Part(_Tab):
         hit = [f for f in rows if f.get("name") == name or f.get("id") == name]
         return Feature(self, _only(hit, "feature", {"name": name}))
 
-    def edges(self, **kw):
+    def edges(self, **kw) -> list[Edge]:
         return [e for b in self.bodies() for e in b.edges(**kw)]
 
-    def islands(self, z=None, normal=(0, 0, 1), origin=None):
+    def islands(self, z=None, normal=(0, 0, 1), origin=None) -> list[float]:
         """The connected regions of material a plane cuts this part into.
 
         `part.islands(z=200)` cuts a horizontal plane at z=200 and returns the
@@ -2477,7 +2510,7 @@ class Part(_Tab):
                              regions=True, part=self.id)
         return [x["area_mm2"] for x in r["regions"]]
 
-    def bored_through(self, normal=(0, 1, 0), origin=(0, 0, 0)):
+    def bored_through(self, normal=(0, 1, 0), origin=(0, 0, 0)) -> bool:
         """Is this duct actually open end to end?
 
         The dual of `islands()`, and the same one call: a plane CONTAINING a
@@ -2497,7 +2530,7 @@ class Part(_Tab):
         return len(self.islands(origin=origin, normal=normal)) >= 2
 
     def extrude_shapes(self, plane, draws, distance, name="Shape",
-                       mode=None, **kw):
+                       mode=None, **kw) -> Body | Feature | None:
         """Extrude several OVERLAPPING shapes as one lump.
 
         A sketch refuses loops that overlap ("profile loops overlap or nest
@@ -2525,7 +2558,7 @@ class Part(_Tab):
                                 else name, **kw)
         return body
 
-    def material(self, slug, body=None):
+    def material(self, slug, body=None) -> Self:
         """Give this part's bodies a material, so mass properties and the BOM
         have a density to work with (and the viewport something to shade).
 
@@ -2540,10 +2573,10 @@ class Part(_Tab):
             self.app.set_material(body=i, material=slug)
         return self
 
-    def volume(self):
+    def volume(self) -> float:
         return self.app.mass_properties(part=self.id)["total"]["volume_mm3"]
 
-    def bbox(self):
+    def bbox(self) -> tuple[V, V]:
         """The part's MEASURED extent, from mass_properties.
 
         Not get_state's, which is a cheap conservative bound — it wraps a
@@ -2565,7 +2598,7 @@ class Part(_Tab):
         return lo, hi
 
     # --- the standing check ------------------------------------------------
-    def check(self, warn=True, *, solids=None):
+    def check(self, warn=True, *, solids=None) -> Self:
         """Raise if any feature is broken; print advisories. The scripted
         equivalent of looking at the tree — every generator used to hand-roll
         this and most scratch scripts forgot to. ``solids=1`` additionally
@@ -2597,7 +2630,7 @@ class Part(_Tab):
         return self
 
     # --- transactions ------------------------------------------------------
-    def batch(self):
+    def batch(self) -> Batch:
         """One transaction: `with part.batch() as b:` collects calls and
         sends them as one `batch` RPC — one regeneration, one undo step, and
         a rollback if any of them fails."""
@@ -2628,7 +2661,7 @@ class Occurrence:
         self.asm, self.id, self.name = asm, raw["id"], raw["name"]
         self.part_id = raw.get("part_id")
 
-    def frame(self, name=None):
+    def frame(self, name=None) -> Frame:
         """WHERE a named frame of this occurrence is, in world space.
 
         The read half of `Part.frame(...)`, which creates them. Origin and
@@ -2644,7 +2677,7 @@ class Occurrence:
             kw["frame"] = name
         return Frame.from_query(self.asm, self.asm.app.frame(**kw), name=name)
 
-    def bbox(self):
+    def bbox(self) -> tuple[tuple[float, ...], tuple[float, ...]]:
         """This occurrence's WORLD bounding box, as (min, max).
 
         Not the part's own box transformed: that is a box around a rotated
@@ -2661,7 +2694,7 @@ class Occurrence:
                 "or one whose bodies all failed to build")
         return tuple(o["bbox_min"]), tuple(o["bbox_max"])
 
-    def inner(self, occurrence, name=None):
+    def inner(self, occurrence, name=None) -> InnerOccurrence:
         """An occurrence INSIDE this placed sub-assembly, by its id there (or
         an Occurrence handle from that assembly's own tab): a mate side
         `(occ.inner(k), "frame")` reaches into it with `inner_path`, and
@@ -2671,7 +2704,7 @@ class Occurrence:
         label = name or getattr(occurrence, "name", None) or str(inner_id)
         return InnerOccurrence(self, inner_id, label)
 
-    def mate(self, mate):
+    def mate(self, mate) -> InnerMate:
         """A mate INSIDE this flexible sub-assembly placement, named
         {path, mate} (v129): its id in the sub-assembly, from that
         assembly's own tab. A relation or a motion study here can then drive
@@ -2692,10 +2725,10 @@ class InnerOccurrence:
         self.name = f"{root.name}/{name}"
 
     @property
-    def path(self):
+    def path(self) -> list[int]:
         return [self.root.id] + self.inner_path
 
-    def frame(self, name=None):
+    def frame(self, name=None) -> Frame:
         """WHERE a named frame of it is, in world space — as the placement
         has it standing (a flexible one's own pose of it)."""
         self.asm.activate()
@@ -2716,11 +2749,11 @@ class InnerMate(dict):
         super().__init__(id=mate_id, path=list(path))
 
     @property
-    def id(self):
+    def id(self) -> int:
         return self["id"]
 
     @property
-    def path(self):
+    def path(self) -> list[int]:
         return self["path"]
 
 
@@ -2746,7 +2779,7 @@ def _member(mate, **extra):
 
 class Asm(_Tab):
     def place(self, part, at=None, fixed=False, name=None, flexible=False,
-              configuration=None, material=None):
+              configuration=None, material=None) -> Occurrence:
         """Place a part OR ANOTHER ASSEMBLY. `at` is a world position; leave
         it out and mate it instead — which is the point.
 
@@ -2780,12 +2813,12 @@ class Asm(_Tab):
         r = self.app.add_occurrence(**kw)
         return Occurrence(self, dict(r, name=r.get("name", name or "")))
 
-    def occurrences(self):
+    def occurrences(self) -> list[Occurrence]:
         self.activate()
         return [Occurrence(self, o)
                 for o in self.app.list_occurrences()["occurrences"]]
 
-    def occurrence(self, name):
+    def occurrence(self, name) -> Occurrence:
         return _only([o for o in self.occurrences() if o.name == name],
                      "occurrence", {"name": name})
 
@@ -2814,10 +2847,10 @@ class Asm(_Tab):
             kw["flipped"] = False
         return self.app.add_mate(type=type_, a=ca, b=cb, **kw)
 
-    def fasten(self, a, b, **kw):
+    def fasten(self, a, b, **kw) -> dict[str, Any]:
         return self._mate("fastened", a, b, **kw)
 
-    def join(self, a, b, **kw):
+    def join(self, a, b, **kw) -> dict[str, Any]:
         """Fasten, with the app choosing which side and how far round.
 
         The one question a fastened mate between two frames cannot be asked
@@ -2839,7 +2872,7 @@ class Asm(_Tab):
         """
         return self._mate("fastened", a, b, derive="twist", **kw)
 
-    def fasten_in_place(self, a, b, tol=0.05, **kw):
+    def fasten_in_place(self, a, b, tol=0.05, **kw) -> dict[str, Any]:
         """Fasten, and pick the way round that leaves the moving part where
         it already is.
 
@@ -2910,7 +2943,7 @@ class Asm(_Tab):
             f"(nearest {nearest:.2f} mm out, and not along one axis) — the "
             f"two halves of the joint disagree, which a mate cannot fix")
 
-    def seat(self, mate, measure, want, tol=0.01):
+    def seat(self, mate, measure, want, tol=0.01) -> float:
         """Solve a fastened mate's offset so something LANDS where it should.
 
         `measure` returns the quantity (a face's height, a bbox edge) and
@@ -2949,22 +2982,23 @@ class Asm(_Tab):
                 return float(m.get("offset", 0.0))
         return 0.0
 
-    def revolute(self, a, b, **kw):
+    def revolute(self, a, b, **kw) -> dict[str, Any]:
         return self._mate("revolute", a, b, **kw)
 
-    def slider(self, a, b, **kw):
+    def slider(self, a, b, **kw) -> dict[str, Any]:
         return self._mate("slider", a, b, **kw)
 
-    def cylindrical(self, a, b, **kw):
+    def cylindrical(self, a, b, **kw) -> dict[str, Any]:
         return self._mate("cylindrical", a, b, **kw)
 
-    def planar(self, a, b, **kw):
+    def planar(self, a, b, **kw) -> dict[str, Any]:
         return self._mate("planar", a, b, **kw)
 
-    def ball(self, a, b, **kw):
+    def ball(self, a, b, **kw) -> dict[str, Any]:
         return self._mate("ball", a, b, **kw)
 
-    def gear(self, mate_a, mate_b, teeth_a, teeth_b, internal=False, **kw):
+    def gear(self, mate_a, mate_b, teeth_a, teeth_b, internal=False,
+             **kw) -> dict[str, Any]:
         """A gear pair from its tooth counts: meshing outside they
         counter-rotate (ratio -teeth_a/teeth_b); `internal=True` is a gear
         meshing INSIDE a ring, which turns the same way (+teeth_a/teeth_b)."""
@@ -2976,7 +3010,7 @@ class Asm(_Tab):
                                      teeth_b=teeth_b, **kw)
 
     def epicyclic(self, sun, ring, carrier, teeth_sun, teeth_ring,
-                  planets=(), **kw):
+                  planets=(), **kw) -> dict[str, Any]:
         """An epicyclic train by Willis (v171): sun, ring and carrier are
         their revolute mates, all turning about one axis in one frame.
         `planets` is [(planet_mate, teeth), ...], each planet's mate on the
@@ -2992,7 +3026,7 @@ class Asm(_Tab):
             args["planets"] = [_member(m, teeth=z) for m, z in planets]
         return self.app.add_relation(**args, **kw)
 
-    def linear_n(self, terms, **kw):
+    def linear_n(self, terms, **kw) -> dict[str, Any]:
         """sum(coefficient * dof) = constant over several mates (v171):
         `terms` is [(mate, coefficient), ...] or [(mate, coefficient, dof),
         ...] — dof "rotation" or "offset", required of a cylindrical mate.
@@ -3004,7 +3038,8 @@ class Asm(_Tab):
             out.append(_member(mate, coefficient=coefficient, dof=dof))
         return self.app.add_relation(type="linear_n", terms=out, **kw)
 
-    def worm(self, worm_mate, wheel_mate, starts, teeth, hand, **kw):
+    def worm(self, worm_mate, wheel_mate, starts, teeth, hand,
+             **kw) -> dict[str, Any]:
         """Couple a worm's revolute to its wheel's on crossed axes. The ratio
         is starts/teeth; its sign is read from the hand and from where the
         worm sits (docs/assemblies/relations.md#worm) — a gear relation's
@@ -3016,7 +3051,7 @@ class Asm(_Tab):
                                      **_mate_ref("b", wheel_mate), starts=starts,
                                      teeth=teeth, hand=hand, **kw)
 
-    def thread_engagement(self, a, b):
+    def thread_engagement(self, a, b) -> dict[str, Any]:
         """Check that a declared thread joint exists, not merely that it is clash-free.
 
         A separated pair fails this gate even though ordinary interference
@@ -3030,7 +3065,7 @@ class Asm(_Tab):
             raise SdkError(f"thread engagement failed for {a.name} / {b.name}: {result}")
         return result
 
-    def screw(self, mate, thread, **kw):
+    def screw(self, mate, thread, **kw) -> dict[str, Any]:
         """Couple a cylindrical mate to a persistent thread feature's pitch."""
         if not isinstance(thread, Thread) or thread.part.app is not self.app:
             raise SdkError("screw requires a Thread handle from this connection")
@@ -3044,7 +3079,7 @@ class Asm(_Tab):
             **kw,
         )
 
-    def chain(self, mate_a, mate_b, teeth_a, teeth_b, **kw):
+    def chain(self, mate_a, mate_b, teeth_a, teeth_b, **kw) -> dict[str, Any]:
         """A chain or belt: like a gear, but both sprockets turn the SAME
         way (v88)."""
         self.activate()
@@ -3052,7 +3087,7 @@ class Asm(_Tab):
                                      **_mate_ref("b", mate_b), teeth_a=teeth_a,
                                      teeth_b=teeth_b, **kw)
 
-    def rack(self, rotating, sliding, pitch_radius, **kw):
+    def rack(self, rotating, sliding, pitch_radius, **kw) -> dict[str, Any]:
         """Rack and pinion: `rotating`'s turn and `sliding`'s slide, coupled
         by the pinion's pitch radius (mm) — offset = pitch_radius * angle.
         Either side can drive: a rack slider turns the pinion, a turned
@@ -3063,7 +3098,7 @@ class Asm(_Tab):
                                      **_mate_ref("b", sliding),
                                      pitch_radius=pitch_radius, **kw)
 
-    def cam(self, mate_a, mate_b, **kw):
+    def cam(self, mate_a, mate_b, **kw) -> dict[str, Any]:
         """A cam: rotation to the follower's slide or turn through a lift
         table (lift in mm for a slide, degrees for a turn), or {rise (mm) |
         rise_deg, duration_deg, start_deg} for a cosine lobe. A cylindrical
@@ -3072,7 +3107,8 @@ class Asm(_Tab):
         return self.app.add_relation(type="cam", **_mate_ref("a", mate_a),
                                      **_mate_ref("b", mate_b), **kw)
 
-    def intermittent(self, mate_a, mate_b, start_deg, slots=None, **kw):
+    def intermittent(self, mate_a, mate_b, start_deg, slots=None,
+                     **kw) -> dict[str, Any]:
         """A carry (v174): a's rotation steps b once per turn (or
         period_deg) during a window opening at start_deg, b standing still
         the rest of it. With `slots`, an external Geneva's exact law, step
@@ -3088,7 +3124,8 @@ class Asm(_Tab):
                                      **_mate_ref("b", mate_b),
                                      start_deg=start_deg, **kw)
 
-    def freewheel(self, mate_a, mate_b, drives, ratio=1.0, **kw):
+    def freewheel(self, mate_a, mate_b, drives, ratio=1.0, **kw) -> dict[str,
+                  Any]:
         """A one-way clutch, rotation to rotation (v104): b follows a while
         a drives it in `drives` ("positive" or "negative") and slips when a
         goes back. Its history is the relation's `lead`."""
@@ -3099,14 +3136,15 @@ class Asm(_Tab):
         # teeth=N and ride_mate/ride_dof/ride_mm|ride_deg (v105) make it a
         # toothed clutch that LIFTS what it names as it rides over them.
 
-    def click(self, mate, drives, **kw):
+    def click(self, mate, drives, **kw) -> dict[str, Any]:
         """A pawl (v105): one mate's rotation, free the way it `drives`
         ("positive" or "negative") and held at its mark the other way."""
         self.activate()
         return self.app.add_relation(type="click", a=ref_of(mate), b=ref_of(mate),
                                      drives=drives, **kw)
 
-    def bolt(self, rim, occurrence, standard="iso4762", **kw):
+    def bolt(self, rim, occurrence, standard="iso4762", **kw) -> dict[str,
+             Any]:
         """Fit a fastener to a hole rim, deriving its size and length.
 
         Self-activating like every other Asm verb, and that is the point:
@@ -3121,7 +3159,7 @@ class Asm(_Tab):
             ref["inner_path"] = occurrence.inner_path
         return self.app.fit_fastener(rim=ref, standard=standard, **kw)
 
-    def motion(self, driver, **kw):
+    def motion(self, driver, **kw) -> dict[str, Any]:
         """A motion study on this assembly (v87). `configuration=` names the
         assembly configuration it runs under (v128): an id, 0 for the base,
         omitted for whichever is active when it runs."""
@@ -3129,7 +3167,7 @@ class Asm(_Tab):
         ref = _mate_ref("driver", driver)
         return self.app.add_motion_study(**ref, **kw)
 
-    def solve(self):
+    def solve(self) -> SolveAssemblyResult:
         """Run the mate solver. Always answers errored_mates, placed,
         occurrences, placed_by_mates, placed_by_transform and mates[]; the
         loop keys — dof, loop_mates, loops_closed, residual_mm,
@@ -3138,7 +3176,7 @@ class Asm(_Tab):
         self.activate()
         return self.app.solve_assembly()
 
-    def check_clashes(self, **kw):
+    def check_clashes(self, **kw) -> dict[str, Any]:
         """Exact standing interference gate, without contact distances.
 
         Use `check` when connectivity, near misses or realized mates matter.
@@ -3163,7 +3201,7 @@ class Asm(_Tab):
         return r
 
     def check(self, connected=True, clearances=True, realized=False,
-              allow=None, **kw):
+              allow=None, **kw) -> ContactReportResult:
         """The assembly's standing check: nothing clashing, nothing floating,
         and no near miss under a millimetre — which is almost always an
         arithmetic slip, and is exactly what a transcribed coordinate
@@ -3378,7 +3416,7 @@ class Ref(dict):
         self.n = n
 
     @property
-    def id(self):
+    def id(self) -> Ref:
         return self
 
 
@@ -3412,7 +3450,7 @@ class Batch:
             return Ref(len(self.calls))
         return queue
 
-    def send(self):
+    def send(self) -> dict[str, Any]:
         self.response = self.app.batch(calls=self.calls,
                                        stop_on_error=self.stop_on_error)
         self.results = [r.get("result") for r in self.response["results"]]
@@ -3440,7 +3478,7 @@ def _validate_feature(spec, method):
     _validate_contract(schema, spec, method, "/params/feature")
 
 
-def ref_of(x):
+def ref_of(x) -> Any:
     """The id an RPC takes for `x`: a handle (`Sketch`, `Frame`, `Feature`,
     `Occurrence`; a `Body` gives the feature that created it), a dict
     response (its `id`), a `$ref` inside a batch, or an id as it is. For
@@ -3576,7 +3614,7 @@ class Catalogs:
         self.app = app
 
     def preview_file(self, path, *, id, revision, source, license, units,
-                     storage="reference", mapping=None):
+                     storage="reference", mapping=None) -> CatalogImport:
         options = dict(id=id, revision=revision, source=source, license=license,
                        units=units, storage=storage)
         if mapping is not None:
@@ -3584,15 +3622,15 @@ class Catalogs:
         result = self.app.preview_catalog(path=os.fspath(path), options=options)
         return CatalogImport(self.app, os.fspath(path), options, result)
 
-    def import_file(self, path, **options):
+    def import_file(self, path, **options) -> CatalogVersion:
         return self.preview_file(path, **options).install()
 
-    def import_package(self, path, *, storage="reference"):
+    def import_package(self, path, *, storage="reference") -> CatalogVersion:
         options = dict(storage=storage)
         result = self.app.preview_catalog(path=os.fspath(path), options=options)
         return CatalogImport(self.app, os.fspath(path), options, result).install()
 
-    def open(self, id, revision):
+    def open(self, id, revision) -> CatalogVersion:
         for entry in self.app.list_catalogs()["catalogs"]:
             if entry["id"] == id and entry["revision"] == revision:
                 return CatalogVersion(self.app, entry)
@@ -3607,7 +3645,7 @@ class CatalogImport:
         self.summary = summary
         self._hash = summary["hash"]
 
-    def install(self):
+    def install(self) -> CatalogVersion:
         result = self.app.import_catalog(path=self.path, options=self._options,
                                          expected_hash=self._hash)
         return CatalogVersion(self.app, result["catalog"])
@@ -3620,11 +3658,11 @@ class CatalogVersion:
         self._ref = dict(catalog=metadata["id"], revision=metadata["revision"],
                          hash=metadata["hash"])
 
-    def find(self, designation):
+    def find(self, designation) -> CatalogRecord:
         result = self.app.query_catalog(**self._ref, designation=designation)
         return CatalogRecord(self, result["record"])
 
-    def records(self, page_size=50):
+    def records(self, page_size=50) -> Iterator[CatalogRecord]:
         offset = 0
         while offset is not None:
             result = self.app.query_catalog(**self._ref, offset=offset,
@@ -3633,7 +3671,7 @@ class CatalogVersion:
                 yield CatalogRecord(self, record)
             offset = result["next_offset"]
 
-    def export(self, path, *, mode):
+    def export(self, path, *, mode) -> dict[str, Any]:
         return self.app.export_catalog(**self._ref, path=os.fspath(path), mode=mode)
 
 
@@ -3645,7 +3683,8 @@ class CatalogRecord:
         self.fields = dict(fields)
         self.designation = fields["designation"]
 
-    def check_seat(self, occurrence=None, **measurements_mm):
+    def check_seat(self, occurrence=None,
+                   **measurements_mm) -> CheckSeatResult | dict[str, Any]:
         """Explicit observations, never an automatic fit choice or geometry edit.
 
         Returns pass/fail/unverified with individual requirements. Missing

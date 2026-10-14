@@ -5,6 +5,8 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from lobole.inspection import ValidateSnapshotArgumentRevision
+
 if TYPE_CHECKING:
     from lobole.sdk import App, V
 
@@ -33,9 +35,10 @@ class SnapshotRevision:
     instance: int
     version: int
 
-    def as_dict(self) -> dict:
-        return dict(session=self.session, part_id=self.part_id,
-                    instance=self.instance, version=self.version)
+    def as_dict(self) -> ValidateSnapshotArgumentRevision:
+        return ValidateSnapshotArgumentRevision(
+            session=self.session, part_id=self.part_id,
+            instance=self.instance, version=self.version)
 
 
 @dataclass(frozen=True)

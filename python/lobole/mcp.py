@@ -42,6 +42,11 @@ written out: the one for a turned feature off the origin)."""
 
 FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
 
+A dimension "x" below takes an "x_expr"?: str twin -- an expression over
+the document's variables that drives it on every regeneration (the literal
+is then only its last value). describe's feature_types carry each type's
+typed `contract`: every field, its type and its enum values.
+
 - Box / Cylinder / Sphere — a primitive is for a fixture, a stand-in or a
   first rough block, and is always placed ON something; it is stored as a
   dimensioned Sketch on that thing plus an Extrude (Sphere: a Revolve), one
@@ -65,7 +70,11 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   plane, X as u) — follows it instead of baking>,
   "face_ref"?: {{"feature_id": id, "element": name}} (a planar body face —
   the sketch takes its frame and follows it),
-  "entities": [<entity>, ...]}} . Entity formats (2D UV coords on the plane):
+  "entities": [<entity>, ...], "constraints"?: [<constraint>, ...] (as
+  add_constraint takes them, solved with the sketch), "external"?:
+  [{{"feature_id", "element", "kind": "face"|"edge"}}] (live projected
+  construction geometry of another body, as project_geometry adds)}} .
+  Entity formats (2D UV coords on the plane):
     {{"type": "point", "p": [u,v]}}
     {{"type": "line", "a": [u,v], "b": [u,v]}}
     {{"type": "circle", "center": [u,v], "radius": num}}
@@ -194,7 +203,10 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   "hole_kind": "simple"|"counterbore"|"countersink", "diameter": num,
   "diameter_expr"?: str, "depth": num, "depth_expr"?: str, "through"?: bool,
   counterbore: "cb_diameter"/"cb_depth", countersink: "cs_diameter"/
-  "cs_depth", "drill_point_deg"?: a blind floor's point (absent: 118 with a
+  "cs_depth", "fit"?: {{"thread": "M6", "kind": "close"|"normal"|"loose"|
+  "tapped", "pitch"?}} (what the hole is FOR: it derives the diameter, and
+  a tapped fit threads the bore so a screw in it engages),
+  "drill_point_deg"?: a blind floor's point (absent: 118 with a
   fit, else flat), "thread_depth"?: a tapped fit's thread from the mouth
   (absent: the depth less 3 pitches)}} — far cleaner than a construction circle + cut-extrude per
   bolt hole; put the point sketch on the face you drill from.
@@ -271,7 +283,12 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
   custom thread's, required; a table thread's is its row's, omit it or give
   exactly that -- another is REFUSED), "thread_class"?: str, "length"?: num (mm), "length_expr"?: str,
   "modeled"?: bool (true cuts the real 60-degree helical groove, slow;
-  a failure keeps the body), "hand"?: "right"|"left"}}. It is also what a
+  a failure keeps the body), "hand"?: "right"|"left",
+  "flank_angle_deg"?: num (half the thread angle: 30 is the ISO/UTS
+  60-degree profile, the only one a table designation takes; a custom
+  thread 15-60), "allow_engagement"?: bool (a mating thread overlapping
+  this one is an ENGAGED pair in contact checks, not a clash),
+  "minimum_engagement"?: num (mm, the shortest engagement accepted)}}. It is also what a
   CAM job mills: rpc('add_cam_op', {{type: "thread_mill", target: the
   threaded face}}) with a thread_mill tool reads the size, pitch, hand,
   side and class from it (a Hole with a tapped fit carries one too), and
@@ -350,12 +367,16 @@ FEATURE_FORMATS = f"""Feature JSON formats (field: value type; ? = optional):
 - Refold (fold an Unfold's bends back up): {{"type": "Refold", "name": str,
   "unfold_id": <the Unfold's id>}} — through-cuts made in between are
   wrapped onto the bend; a partial-depth cut across a crease is refused.
-- Import (STEP): {{"type": "Import", "name": str, "path": str}}
+- Import (STEP, STL, BREP): {{"type": "Import", "name": str, "path": str,
+  "units"?: "mm"|"cm"|"m"|"in" (what an STL or BREP was drawn in; refused
+  on STEP, which declares its own), "keep_origin"?: bool (default false:
+  the import is centred on its bounding box; true keeps the file's
+  coordinates)}}
 - Derived (a copy of another part's bodies, to draw on): {{"type":
   "Derived", "name": str, "source_part": <part slot id from
   list_parts>, "configuration"?: <the source's configuration, id or
-  name> (absent = its active one), "bodies"?: [<created_by ids>]
-  (absent = all),
+  name> (absent = its active one), "bodies"?: [<created_by ids>] and/or
+  "body_names"?: [<names, as get_state shows them>] (both absent = all),
   "placement"?: {{"position": [x,y,z], "orientation": [x,y,z,w]}},
   "reference"?: true (a ghost: absent from mass, BOM, export, CAM and
   booleans) | false (an ordinary body of this part)}} — the snapshot is
@@ -837,6 +858,19 @@ def attached_to():
     return f"Loböle on {where}: {project}{dirty}, {mode}"
 
 
+def _text(out):
+    """A subprocess's captured output as text, or "(none)"."""
+    if isinstance(out, bytes):
+        out = out.decode(errors="replace")
+    return out or "(none)"
+
+
+def _given(**params):
+    """The arguments a caller actually gave: a tool passes only those, so
+    every default is the app's (CLAUDE.md, "Defaults")."""
+    return {k: v for k, v in params.items() if v is not None}
+
+
 def _call(method, /, **params):
     """Call the app, reconnecting once across a dropped connection.
 
@@ -885,15 +919,15 @@ def _call(method, /, **params):
 # it just does not spend context announcing itself.
 # ---------------------------------------------------------------------------
 
-_REFERENCE = {}  # method -> {"doc": str, "fn": callable}
+_REFERENCE: dict[str, dict[str, str]] = {}  # method -> {"doc": str}
 
 
-def _reference(description):
-    """Keep a wrapper and its prose, without registering it as an MCP tool."""
-    def wrap(fn):
-        _REFERENCE[fn.__name__] = {"doc": description, "fn": fn}
-        return fn
-    return wrap
+def _reference(method, description):
+    """The prose for an RPC reached through rpc(), which help() gives beside
+    the app's own row. Not a tool and not a wrapper: rpc() sends every call
+    straight to the app, so the app's parameters and defaults are the only
+    ones (docs/scripting/mcp.md#the-tool-surface)."""
+    _REFERENCE[method] = {"doc": description}
 
 
 # The tools this server announces, for help()'s index. Kept next to the
@@ -938,8 +972,8 @@ def describe(method: str = "") -> dict:
           "the render 'mesh' id select_face needs — mesh ids change on every "
           "regeneration, always read them fresh), current selection, camera, "
           "undo/redo availability. Call after every mutating step to verify.")
-def get_state() -> dict:
-    return _call("get_state")
+def get_state(part: str | int | None = None) -> dict:
+    return _call("get_state", **_given(part=part))
 
 
 @mcp.tool(description="List variables: name, expression, evaluated value, "
@@ -962,17 +996,18 @@ def list_variables() -> dict:
           "the half above, and the answer's `keeps` says which. View the "
           "cut from the removed side. (This is the visual cut; use "
           "`section` for the cross-section AREA.)")
-def set_section(enabled: bool = True, base_plane: str = "xy",
-                offset: float = 0.0, reverse: bool = False) -> dict:
-    # origin/normal were forwarded here and refused by the RPC, which never
-    # had them: a datum plane (add_section plane_id) or a tilt cuts off-axis.
+def set_section(enabled: bool = True, base_plane: str | None = None,
+                offset: float | None = None, reverse: bool | None = None,
+                add: bool | None = None) -> dict:
+    # Only what was given: an omitted offset cuts through the middle of what
+    # is shown, which a default of 0 here used to override.
     if not enabled:
         return _call("set_section", enabled=False)
-    return _call("set_section", enabled=True, base_plane=base_plane,
-                 offset=offset, reverse=reverse)
+    return _call("set_section", enabled=True, **_given(
+        base_plane=base_plane, offset=offset, reverse=reverse, add=add))
 
 
-@_reference(description="Cross-section area where a plane cuts through all "
+_reference("section", "Cross-section area where a plane cuts through all "
           "bodies (inspection). Plane: base_plane 'xy'|'xz'|'yz' + offset, "
           "or explicit origin+normal. Returns {area_mm2}. Use to check wall "
           "thickness / material at a cut. regions=True adds each connected "
@@ -983,20 +1018,9 @@ def set_section(enabled: bool = True, base_plane: str = "xy",
           "ENCLOSES (the floor inside separate wall bodies) and a cut of "
           "only some bodies are rpc('section', {enclosed: true, bodies: "
           "[names or feature ids]}).")
-def section(base_plane: str = "xy", offset: float = 0.0,
-            origin: list | None = None, normal: list | None = None,
-            regions: bool = False, loops: bool = False) -> dict:
-    kw = {}
-    if regions or loops:
-        kw["regions"] = True
-    if loops:
-        kw["loops"] = True
-    if origin is not None and normal is not None:
-        return _call("section", origin=origin, normal=normal, **kw)
-    return _call("section", base_plane=base_plane, offset=offset, **kw)
 
 
-@_reference(description="Interference (clash) check: returns {clash: bool, "
+_reference("interference", "Interference (clash) check: returns {clash: bool, "
           "volume_mm3} — the volume of the overlap. On a PART tab a/b are body "
           "indices. On an active ASSEMBLY tab a/b are occurrence ids (int) "
           "or occurrence names (str); each occurrence's part bodies are "
@@ -1010,10 +1034,6 @@ def section(base_plane: str = "xy", offset: float = 0.0,
           "list again as "
           "`clashes`, which is what contact_report calls it). Run it after "
           "mating — clash checks matter most in assemblies.")
-def interference(a: int | str | None = None, b: int | str | None = None) -> dict:
-    if a is None and b is None:
-        return _call("interference")
-    return _call("interference", a=a, b=b)
 
 
 @mcp.tool(description="Mass properties per body (and a document total): "
@@ -1026,8 +1046,9 @@ def interference(a: int | str | None = None, b: int | str | None = None) -> dict
           "occurrence in WORLD space: `occurrences` lists per-part rows "
           "(volume_mm3, world center_of_mass_mm, mass_g) and `total` is the combined "
           "mass/volume/world CoM.")
-def mass_properties(body: int = -1) -> dict:
-    return _call("mass_properties", **({"body": body} if body >= 0 else {}))
+def mass_properties(body: int | None = None,
+                    part: str | int | None = None) -> dict:
+    return _call("mass_properties", **_given(body=body, part=part))
 
 
 @mcp.tool(description="Did the model build? Returns {ok, valid, body_count, "
@@ -1037,11 +1058,11 @@ def mass_properties(body: int = -1) -> dict:
           "B-Rep check (OCC BRepCheck_Analyzer) — vacuously true over zero "
           "bodies, so read it with body_count. Read-only — run it on imported "
           "STEP or after booleans. Optional body index restricts to one body.")
-def check_geometry(body: int = -1) -> dict:
-    return _call("check_geometry", **({"body": body} if body >= 0 else {}))
+def check_geometry(body: int | None = None) -> dict:
+    return _call("check_geometry", **_given(body=body))
 
 
-@_reference(description="Project external geometry into a sketch (FreeCAD's "
+_reference("project_geometry", "Project external geometry into a sketch (FreeCAD's "
           "ShapeBinder): reference a FACE or EDGE of a body earlier in the "
           "history, projected onto the sketch plane as LOCKED construction "
           "geometry that tracks the source when it moves. Returns "
@@ -1049,10 +1070,6 @@ def check_geometry(body: int = -1) -> dict:
           "(from list_elements). Use it to align new geometry to existing "
           "edges/holes. params: sketch_id, feature_id (the body's producer), "
           "element, kind ('face' or 'edge').")
-def project_geometry(sketch_id: int, feature_id: int, element: str,
-                     kind: str = "face") -> dict:
-    return _call("project_geometry", sketch_id=sketch_id, feature_id=feature_id,
-                 element=element, kind=kind)
 
 
 @mcp.tool(description="Measure geometry over stable element names (from "
@@ -1063,14 +1080,11 @@ def project_geometry(sketch_id: int, feature_id: int, element: str,
           "measures against that part WITHOUT switching the active tab — "
           "works from an assembly tab too. Verify dimensions with this "
           "instead of trusting your inputs.")
-def measure(a: dict, b: dict | None = None,
+def measure(a: dict, b: dict | None = None, kind: str | None = None,
+            distance_kind: str | None = None, mode: str | None = None,
             part: str | int | None = None) -> dict:
-    params = {"a": a}
-    if b is not None:
-        params["b"] = b
-    if part is not None:
-        params["part"] = part
-    return _call("measure", **params)
+    return _call("measure", a=a, **_given(
+        b=b, kind=kind, distance_kind=distance_kind, mode=mode, part=part))
 
 
 @mcp.tool(description="Stable element names (topological naming) for each "
@@ -1101,21 +1115,14 @@ def measure(a: dict, b: dict | None = None,
           "tab too — and with it `configuration` (name or id) lists the part "
           "as it is in that configuration: what a placement or a job part "
           "in it is made of.")
-def list_elements(body: int = -1, part: str | int | None = None,
+def list_elements(body: int | None = None, part: str | int | None = None,
                   configuration: str | int | None = None,
                   made_by: str | int | None = None, role: str | None = None,
                   entity: int | None = None, via: str | int | None = None,
                   max_faces: int | None = None) -> dict:
-    params = {}
-    if body >= 0:
-        params["body"] = body
-    for key, value in (("part", part), ("configuration", configuration),
-                       ("made_by", made_by), ("role", role),
-                       ("entity", entity), ("via", via),
-                       ("max_faces", max_faces)):
-        if value is not None:
-            params[key] = value
-    return _call("list_elements", **params)
+    return _call("list_elements", **_given(
+        body=body, part=part, configuration=configuration, made_by=made_by,
+        role=role, entity=entity, via=via, max_faces=max_faces))
 
 
 # ---------------------------------------------------------------------------
@@ -1132,24 +1139,30 @@ def list_elements(body: int = -1, part: str | int | None = None,
           "first non-collateral failure); a warning means it built but likely "
           "did nothing intended (e.g. a cut whose profile missed every "
           "body).\n\n" + FEATURE_FORMATS)
-def add_feature(feature: dict) -> dict:
-    return _call("add_feature", feature=feature)
+def add_feature(feature: dict, expect_revision: dict | None = None) -> dict:
+    return _call("add_feature", feature=feature,
+                 **_given(expect_revision=expect_revision))
 
 
 @mcp.tool(description="Replace the feature at a history index with new "
           "feature JSON (same formats as add_feature; keep the same type and "
           "id). Regenerates. Get indices from get_state.")
-def modify_feature(index: int, feature: dict) -> dict:
-    return _call("modify_feature", index=index, feature=feature)
+def modify_feature(feature: dict, feature_id: int | None = None,
+                   index: int | None = None,
+                   expect_revision: dict | None = None) -> dict:
+    return _call("modify_feature", feature=feature, **_given(
+        feature_id=feature_id, index=index, expect_revision=expect_revision))
 
 
 @mcp.tool(description="Delete the feature at a history index. Later features "
           "referencing it will fail to regenerate — check get_state after.")
-def delete_feature(index: int) -> dict:
-    return _call("delete_feature", index=index)
+def delete_feature(feature_id: int | None = None, index: int | None = None,
+                   expect_revision: dict | None = None) -> dict:
+    return _call("delete_feature", **_given(
+        feature_id=feature_id, index=index, expect_revision=expect_revision))
 
 
-@_reference(description="Assign a material — it drives mass, BOM and FEM as "
+_reference("set_material", "Assign a material — it drives mass, BOM and FEM as "
           "well as appearance. Target ONE of: feature_id "
           "(the body's created_by from get_state/list_elements) or body (an "
           "index into get_state's bodies — add/cut keep the original creator, "
@@ -1159,102 +1172,50 @@ def delete_feature(index: int) -> dict:
           "Slugs: "
           + MATERIAL_SLUGS + ". Empty string restores the default; any other "
           "unrecognised slug is refused.")
-def set_material(material: str, feature_id: int = -1, body: int = -1) -> dict:
-    args = {"feature_id": feature_id} if feature_id >= 0 else \
-        ({"body": body} if body >= 0 else {})
-    return _call("set_material", material=material, **args)
 
 
 # ---------------------------------------------------------------------------
 # Sketch
 # ---------------------------------------------------------------------------
 
-@_reference(description="Add a constraint to a sketch (by feature id), solve, "
+_reference("add_constraint", "Add a constraint to a sketch (by feature id), solve, "
           "and regenerate. The solve may move geometry — read positions back "
           "via get_state, never assume.\n\n" + CONSTRAINT_FORMATS)
-def add_constraint(sketch_id: int, kind: str, refs: list,
-                   value: float = 0.0, value_deg: float | None = None,
-                   expr: str = "") -> dict:
-    params = {"sketch_id": sketch_id, "kind": kind, "refs": refs}
-    # Only one of them reaches the app: passing both is refused there, and
-    # `value` has a default so it cannot simply be forwarded unconditionally
-    # alongside an explicit value_deg.
-    if value_deg is not None:
-        params["value_deg"] = value_deg
-    else:
-        params["value"] = value
-    if expr:
-        params["expr"] = expr
-    return _call("add_constraint", **params)
 
 
-@_reference(description="Delete a sketch entity by id; constraints referencing "
+_reference("delete_entity", "Delete a sketch entity by id; constraints referencing "
           "it are dropped (count returned as dropped_constraints).")
-def delete_entity(sketch_id: int, entity_id: int) -> dict:
-    return _call("delete_entity", sketch_id=sketch_id, entity_id=entity_id)
 
 
-@_reference(description="Mirror sketch entities across a line entity. sources: "
+_reference("mirror", "Mirror sketch entities across a line entity. sources: "
           "entity ids; axis: the mirror line's entity id (construction lines "
           "work). link=true keeps mirrors following their sources. Returns "
           "generated entity ids.")
-def mirror(sketch_id: int, sources: list, axis: int,
-           link: bool = True) -> dict:
-    return _call("mirror", sketch_id=sketch_id, sources=sources, axis=axis,
-                 link=link)
 
 
-@_reference(description="Fillet the corner where two sketch lines meet with an "
+_reference("fillet", "Fillet the corner where two sketch lines meet with an "
           "arc of the given radius. Returns the arc's entity id (arc_id).")
-def fillet(sketch_id: int, line1: int, line2: int, radius: float) -> dict:
-    return _call("fillet", sketch_id=sketch_id, line1=line1, line2=line2,
-                 radius=radius)
 
 
-@_reference(description="Repeat sketch entities in a linear or circular "
+_reference("pattern", "Repeat sketch entities in a linear or circular "
           "pattern. sources: entity ids; count includes the originals. "
           "Linear: step=[du,dv] spacing in mm. Circular: circular=true, "
           "center=[u,v], and the PER-STEP angle about the centre — "
           "angle_deg=45 for three instances 45 degrees apart, or angle= in "
           "radians. Not the total sweep. link=true keeps copies following "
           "their sources. Returns generated entity ids.")
-def pattern(sketch_id: int, sources: list, count: int,
-            circular: bool = False, step: list | None = None,
-            center: list | None = None, angle: float | None = None,
-            angle_deg: float | None = None,
-            link: bool = True) -> dict:
-    params = {"sketch_id": sketch_id, "sources": sources, "count": count,
-              "circular": circular, "link": link}
-    if circular:
-        params["center"] = center or [0, 0]
-        # Pass through whichever the caller named. This said "total sweep in
-        # degrees" and forwarded the number unconverted into a handler that
-        # reads it as radians PER STEP: two errors in one parameter, and the
-        # sketch it builds looks deliberate. The app refuses `angle` over a
-        # full turn now, so the old spelling fails loudly instead.
-        if angle is not None:
-            params["angle"] = angle
-        if angle_deg is not None:
-            params["angle_deg"] = angle_deg
-    else:
-        params["step"] = step or [1, 0]
-    return _call("pattern", **params)
 
 
-@_reference(description="Offset a connected chain of sketch entities by a "
+_reference("offset", "Offset a connected chain of sketch entities by a "
           "distance (sign picks the side). chain: entity ids in order. "
           "join_arc=true rounds convex corners. Returns generated entity ids.")
-def offset(sketch_id: int, chain: list, distance: float,
-           join_arc: bool = True) -> dict:
-    return _call("offset", sketch_id=sketch_id, chain=chain,
-                 distance=distance, join_arc=join_arc)
 
 
 # ---------------------------------------------------------------------------
 # Reference images (sketch underlays)
 # ---------------------------------------------------------------------------
 
-@_reference(description="Import a raster image (PNG/JPEG/BMP) into a sketch (by "
+_reference("add_reference_image", "Import a raster image (PNG/JPEG/BMP) into a sketch (by "
           "feature id) as a reference underlay to trace geometry over. path is "
           "read by the running app (must be reachable by it). Placement, the "
           "same here as in set_reference_image: 'at' [u,v] is the image's "
@@ -1266,41 +1227,17 @@ def offset(sketch_id: int, chain: list, distance: float,
           "keeps it drawn when the sketch is not being edited and in quick "
           "stills, to check a model against the plan it was traced from. "
           "Returns {image_id, width_px, height_px, asset, at, origin}.")
-def add_reference_image(sketch_id: int, path: str, at: list | None = None,
-                        origin: list | None = None,
-                        units_per_pixel: float | None = None,
-                        opacity: float = 0.5,
-                        rotation_deg: float | None = None,
-                        show_always: bool = False) -> dict:
-    params = {"sketch_id": sketch_id, "path": path, "opacity": opacity}
-    if at is not None:
-        params["at"] = at
-    if origin is not None:
-        params["origin"] = origin
-    if units_per_pixel is not None:
-        params["units_per_pixel"] = units_per_pixel
-    if rotation_deg is not None:
-        params["rotation_deg"] = rotation_deg
-    if show_always:
-        params["show_always"] = True
-    return _call("add_reference_image", **params)
 
 
-@_reference(description="Scale a sketch reference image so its two picked "
+_reference("calibrate_reference_image", "Scale a sketch reference image so its two picked "
           "plane-UV points p1,p2 are 'distance' plane units apart (p1 held "
           "fixed). This is how you match an image's printed dimension: click "
           "the two ends of a dimension line, pass its real length. "
           "align='horizontal'|'vertical' also rotates the image so the p1->p2 "
           "line lands on that axis; 'none' (default) keeps the orientation.")
-def calibrate_reference_image(sketch_id: int, image_id: int, p1: list,
-                              p2: list, distance: float,
-                              align: str = "none") -> dict:
-    return _call("calibrate_reference_image", sketch_id=sketch_id,
-                 image_id=image_id, p1=p1, p2=p2, distance=distance,
-                 align=align)
 
 
-@_reference(description="Edit a sketch reference image (by image_id): pass any "
+_reference("set_reference_image", "Edit a sketch reference image (by image_id): pass any "
           "of opacity (0..1), hidden (bool), show_always (bool: drawn outside "
           "sketch edit and in quick stills), rotation (RADIANS) or "
           "rotation_deg (degrees) but never both, units_per_pixel (sketch mm "
@@ -1308,39 +1245,9 @@ def calibrate_reference_image(sketch_id: int, image_id: int, p1: list,
           "at [u,v] (the image's centre) or origin [u,v] (its (0,0) pixel "
           "corner), never both. A turn or a rescale with neither keeps the "
           "centre where it was. Only the fields you pass change.")
-def set_reference_image(sketch_id: int, image_id: int,
-                        opacity: float | None = None,
-                        hidden: bool | None = None,
-                        show_always: bool | None = None,
-                        rotation: float | None = None,
-                        rotation_deg: float | None = None,
-                        units_per_pixel: float | None = None,
-                        at: list | None = None,
-                        origin: list | None = None) -> dict:
-    params = {"sketch_id": sketch_id, "image_id": image_id}
-    if opacity is not None:
-        params["opacity"] = opacity
-    if hidden is not None:
-        params["hidden"] = hidden
-    if show_always is not None:
-        params["show_always"] = show_always
-    if rotation is not None:
-        params["rotation"] = rotation
-    if rotation_deg is not None:
-        params["rotation_deg"] = rotation_deg
-    if units_per_pixel is not None:
-        params["units_per_pixel"] = units_per_pixel
-    if at is not None:
-        params["at"] = at
-    if origin is not None:
-        params["origin"] = origin
-    return _call("set_reference_image", **params)
 
 
-@_reference(description="Remove a sketch reference image by image_id.")
-def delete_reference_image(sketch_id: int, image_id: int) -> dict:
-    return _call("delete_reference_image", sketch_id=sketch_id,
-                 image_id=image_id)
+_reference("delete_reference_image", "Remove a sketch reference image by image_id.")
 
 
 # ---------------------------------------------------------------------------
@@ -1364,58 +1271,41 @@ def set_variable(name: str, expression: str, comment: str = "",
     return _call("set_variable", **params)
 
 
-@_reference(description="Rename a variable and rewrite every expression that "
+_reference("rename_variable", "Rename a variable and rewrite every expression that "
           "references it (a project variable's references span all parts). "
           "scope auto-detects (project first, then the active part's local) "
           "when omitted.")
-def rename_variable(name: str, new_name: str, scope: str = "") -> dict:
-    params = {"name": name, "new_name": new_name}
-    if scope:
-        params["scope"] = scope
-    return _call("rename_variable", **params)
 
 
-@_reference(description="Delete a variable. Refused (with the referencing fields "
+_reference("delete_variable", "Delete a variable. Refused (with the referencing fields "
           "listed) while anything still uses it — a project variable checks "
           "every part. scope auto-detects (project first, then the active "
           "part's local) when omitted.")
-def delete_variable(name: str, scope: str = "") -> dict:
-    params = {"name": name}
-    if scope:
-        params["scope"] = scope
-    return _call("delete_variable", **params)
 
 
 # ---------------------------------------------------------------------------
 # Configurations (parametric variants of the active part OR assembly)
 # ---------------------------------------------------------------------------
 
-@_reference(description="Add a configuration to the active part or assembly — a "
+_reference("add_configuration", "Add a configuration to the active part or assembly — a "
           "named variant. On a part it overrides variables / suppresses "
           "features; on an assembly it suppresses occurrences. Empty until you "
           "set_configuration it. Returns its id.")
-def add_configuration(name: str = "") -> dict:
-    return _call("add_configuration", **({"name": name} if name else {}))
 
 
-@_reference(description="Remove a configuration by id (falls back to base if it "
+_reference("remove_configuration", "Remove a configuration by id (falls back to base if it "
           "was active).")
-def remove_configuration(id: int) -> dict:
-    return _call("remove_configuration", id=id)
 
 
-@_reference(description="List the active part's or assembly's configurations "
+_reference("list_configurations", "List the active part's or assembly's configurations "
           "and which is active (0 = base, the model as authored) -- or "
           "`part`'s (id or name) from any tab. A part's "
           "carry parameter overrides and suppressed feature ids; an "
           "assembly's carry suppressed occurrence, mate and relation ids and "
           "the mate DOFs they hold (mate_overrides).")
-def list_configurations(part: str | int | None = None) -> dict:
-    return _call("list_configurations",
-                 **({} if part is None else {"part": part}))
 
 
-@_reference(description="Edit a configuration (by id). On a PART: "
+_reference("set_configuration", "Edit a configuration (by id). On a PART: "
           "parameter_overrides = a list of {name, expression} replacing the "
           "config's variable overrides (e.g. {'name':'depth','expression':"
           "'12'}); suppressed_features = feature ids to suppress. On an "
@@ -1426,56 +1316,30 @@ def list_configurations(part: str | int | None = None) -> dict:
           "mates. The other kind's keys are refused. name renames. Each list "
           "replaces. Read list_configurations, adjust, send back. One "
           "undoable edit; editing the active one re-solves.")
-def set_configuration(id: int, name: str = "",
-                      parameter_overrides: list | None = None,
-                      suppressed_features: list | None = None,
-                      suppressed_occurrences: list | None = None,
-                      suppressed_mates: list | None = None,
-                      suppressed_relations: list | None = None,
-                      mate_overrides: list | None = None) -> dict:
-    params = {"id": id}
-    if name:
-        params["name"] = name
-    for key, value in (("parameter_overrides", parameter_overrides),
-                       ("suppressed_features", suppressed_features),
-                       ("suppressed_occurrences", suppressed_occurrences),
-                       ("suppressed_mates", suppressed_mates),
-                       ("suppressed_relations", suppressed_relations),
-                       ("mate_overrides", mate_overrides)):
-        if value is not None:
-            params[key] = value
-    return _call("set_configuration", **params)
 
 
-@_reference(description="Switch the active configuration of the part or "
+_reference("set_active_configuration", "Switch the active configuration of the part or "
           "assembly (0 = base). A part regenerates against it — subsequent "
           "geometry, export, drawings and FEM all reflect it — and returns "
           "the resulting body count and volumes; an assembly re-solves with "
           "its suppressions and held DOFs.")
-def set_active_configuration(id: int) -> dict:
-    return _call("set_active_configuration", id=id)
 
 
 # ---------------------------------------------------------------------------
 # History & project
 # ---------------------------------------------------------------------------
 
-@_reference(description="Suppress or unsuppress a feature (by feature id): "
+_reference("suppress_feature", "Suppress or unsuppress a feature (by feature id): "
           "suppressed features are skipped by regeneration but keep their "
           "parameters; anything referencing their outputs errors like a "
           "deleted reference. One undoable edit.")
-def suppress_feature(feature_id: int, suppressed: bool) -> dict:
-    return _call("suppress_feature", feature_id=feature_id,
-                 suppressed=suppressed)
 
 
-@_reference(description="Move the rollback bar: regeneration executes only "
+_reference("set_rollback", "Move the rollback bar: regeneration executes only "
           "features [0, index); -1 = end. Features after the bar keep their "
           "params but contribute nothing — use it to inspect intermediate "
           "history states. Not undoable (a view, not an edit); "
           "get_state.rollback shows the position.")
-def set_rollback(index: int) -> dict:
-    return _call("set_rollback", index=index)
 
 
 @mcp.tool(description="Undo the last document edit. Prefer this over "
@@ -1484,9 +1348,7 @@ def undo() -> dict:
     return _call("undo")
 
 
-@_reference(description="Redo the last undone edit.")
-def redo() -> dict:
-    return _call("redo")
+_reference("redo", "Redo the last undone edit.")
 
 
 @mcp.tool(description="Replace the document with an empty one. Not undoable "
@@ -1505,8 +1367,10 @@ def open_project(path: str) -> dict:
           "format) is a project DIRECTORY, git-backed: every save commits "
           "with `message`. A .json path is the single-file interchange "
           "form.")
-def save_project(path: str, message: str = "save") -> dict:
-    return _call("save_project", path=path, message=message)
+def save_project(path: str, message: str = "save",
+                 force: bool | None = None) -> dict:
+    return _call("save_project", path=path, message=message,
+                 **_given(force=force))
 
 
 @mcp.tool(description="Export to STEP, the exact B-Rep other CAD opens. "
@@ -1517,10 +1381,9 @@ def save_project(path: str, message: str = "save") -> dict:
           "per occurrence in its configuration; sub-assemblies nest. `body` "
           "exports one body of a "
           "part by index.")
-def export_step(path: str, body: int = -1, part: str = "") -> dict:
-    return _call("export_step", path=path,
-                 **({"body": body} if body >= 0 else {}),
-                 **({"part": part} if part else {}))
+def export_step(path: str, body: int | None = None,
+                part: str | None = None) -> dict:
+    return _call("export_step", path=path, **_given(body=body, part=part))
 
 
 @mcp.tool(description="Export to binary STL (re-meshed at `deflection`, "
@@ -1529,28 +1392,24 @@ def export_step(path: str, body: int = -1, part: str = "") -> dict:
           "the source shape's watertightness ({watertight, shells, "
           "free_edges}); a non-watertight source still exports, but flag it "
           "before anyone slices the file.")
-def export_stl(path: str, body: int = -1, deflection: float = 0.1) -> dict:
-    return _call("export_stl", path=path, deflection=deflection,
-                 **({"body": body} if body >= 0 else {}))
+def export_stl(path: str, body: int | None = None,
+               deflection: float | None = None) -> dict:
+    return _call("export_stl", path=path,
+                 **_given(body=body, deflection=deflection))
 
 
-@_reference(description="Export to native OCC BREP text (exact, no "
+_reference("export_brep", "Export to native OCC BREP text (exact, no "
           "tessellation) — useful for kernel bug reports.")
-def export_brep(path: str, body: int = -1) -> dict:
-    return _call("export_brep", path=path,
-                 **({"body": body} if body >= 0 else {}))
 
 
-@_reference(description="Export the tessellated mesh to glTF (.glb/.gltf), OBJ, "
+_reference("export_visual", "Export the tessellated mesh to glTF (.glb/.gltf), OBJ, "
           "or PLY, chosen by the path extension — for viewers (Blender, web, "
           "engines), not CAD round-trips. Materials carry through (glTF is "
           "PBR). Works on a part OR the active assembly (all occurrences at "
           "their solved placements). `deflection` sets mesh fineness.")
-def export_visual(path: str, deflection: float = 0.1) -> dict:
-    return _call("export_visual", path=path, deflection=deflection)
 
 
-@_reference(description="Film a motion study of the active assembly to a "
+_reference("export_motion_video", "Film a motion study of the active assembly to a "
           "video: format mp4, webm or gif (encoded by ffmpeg, which must be on "
           "the app's PATH — ping's features.ffmpeg says; without it these are "
           "REFUSED by name) or png (numbered frames into a FOLDER, no "
@@ -1566,48 +1425,28 @@ def export_visual(path: str, deflection: float = 0.1) -> dict:
           "file is written and answers its "
           "bytes; rpc('export_motion_video', {..., 'async': True}) with "
           "motion_video_status for a long one.")
-def export_motion_video(study: int, path: str, format: str = "",
-                        width: int = 0, height: int = 0, fps: float = 0.0,
-                        frames: int = 0, quality: str = "") -> dict:
-    params = {"study": study, "path": path}
-    for key, value in (("format", format), ("width", width),
-                       ("height", height), ("fps", fps), ("frames", frames),
-                       ("quality", quality)):
-        if value:
-            params[key] = value
-    return _call("export_motion_video", **params)
 
 
-@_reference(description="List the project's tabs (parts and assemblies) with "
+_reference("list_parts", "List the project's tabs (parts and assemblies) with "
           "each one's type and stable id, and which is active. Modeling tools "
           "act on the active part; assembly tools on the active assembly.")
-def list_parts() -> dict:
-    return _call("list_parts")
 
 
-@_reference(description="Add a new empty part to the project and switch to it "
+_reference("add_part", "Add a new empty part to the project and switch to it "
           "(subsequent modeling goes into it). Returns its index.")
-def add_part(name: str = "") -> dict:
-    return _call("add_part", **({"name": name} if name else {}))
 
 
-@_reference(description="Switch the active part by index (from list_parts). "
+_reference("set_active_part", "Switch the active part by index (from list_parts). "
           "The document tools then act on that part.")
-def set_active_part(index: int) -> dict:
-    return _call("set_active_part", index=index)
 
 
-@_reference(description="Delete a part by index (never the last one).")
-def delete_part(index: int) -> dict:
-    return _call("delete_part", index=index)
+_reference("delete_part", "Delete a part by index (never the last one).")
 
 
-@_reference(description="Rename an existing part/assembly/drawing tab so the "
+_reference("rename_part", "Rename an existing part/assembly/drawing tab so the "
           "default 'Part 1' isn't permanent (it feeds BOM + add_occurrence). "
           "`part` is a name, stable id, or slot index (from list_parts). "
           "Occurrences reference parts by stable id, so the rename is safe.")
-def rename_part(part, new_name: str) -> dict:
-    return _call("rename_part", part=part, new_name=new_name)
 
 
 # ---------------------------------------------------------------------------
@@ -1615,15 +1454,13 @@ def rename_part(part, new_name: str) -> dict:
 # parts. list_parts reports each tab's type ("part"/"assembly") and stable id.
 # ---------------------------------------------------------------------------
 
-@_reference(description="Add a new empty ASSEMBLY tab to the project and switch "
+_reference("add_assembly", "Add a new empty ASSEMBLY tab to the project and switch "
           "to it. An assembly places copies (occurrences) of parts by "
           "transform. Part-editing tools do not act on an assembly tab — use "
           "add_occurrence. Returns its index and stable id.")
-def add_assembly(name: str = "") -> dict:
-    return _call("add_assembly", **({"name": name} if name else {}))
 
 
-@_reference(description="Place a part OR ANOTHER ASSEMBLY into the ACTIVE assembly "
+_reference("add_occurrence", "Place a part OR ANOTHER ASSEMBLY into the ACTIVE assembly "
           "as an occurrence (A5 sub-assemblies). part = the name of either, "
           "resolved to a stable id, so renames are safe; parts are matched "
           "first. transform = {position:[x,y,z], orientation:[x,y,z,w] "
@@ -1641,84 +1478,49 @@ def add_assembly(name: str = "") -> dict:
           "(set_occurrence_flexible). Change them later with "
           "set_occurrence_configuration / set_occurrence_material. "
           "Returns {id, part_id, ref_kind}.")
-def add_occurrence(part: str, name: str = "", transform: dict | None = None,
-                   fixed: bool = False, visible: bool = True,
-                   configuration: str | int | None = None,
-                   material: str | None = None,
-                   flexible: bool = False) -> dict:
-    params = {"part": part, "fixed": fixed, "visible": visible}
-    if name:
-        params["name"] = name
-    if transform is not None:
-        params["transform"] = transform
-    if configuration is not None:
-        params["configuration"] = configuration
-    if material:
-        params["material"] = material
-    if flexible:
-        params["flexible"] = True
-    return _call("add_occurrence", **params)
 
 
-@_reference(description="Remove an occurrence from the active assembly by id.")
-def remove_occurrence(id: int) -> dict:
-    return _call("remove_occurrence", id=id)
+_reference("remove_occurrence", "Remove an occurrence from the active assembly by id.")
 
 
-@_reference(description="Reposition an occurrence. transform = {position:[x,y,z], "
+_reference("set_occurrence_transform", "Reposition an occurrence. transform = {position:[x,y,z], "
           "orientation:[x,y,z,w] quaternion}. Undoable. Returns the occurrence.")
-def set_occurrence_transform(id: int, transform: dict) -> dict:
-    return _call("set_occurrence_transform", id=id, transform=transform)
 
 
-@_reference(description="Show or hide an occurrence (hidden ones are not "
+_reference("set_occurrence_visible", "Show or hide an occurrence (hidden ones are not "
           "rendered or pickable). Undoable.")
-def set_occurrence_visible(id: int, visible: bool) -> dict:
-    return _call("set_occurrence_visible", id=id, visible=visible)
 
 
-@_reference(description="Ground an occurrence (fixed=true) or free it. A fixed "
+_reference("set_occurrence_fixed", "Ground an occurrence (fixed=true) or free it. A fixed "
           "occurrence is the assembly's immovable anchor. Undoable.")
-def set_occurrence_fixed(id: int, fixed: bool) -> dict:
-    return _call("set_occurrence_fixed", id=id, fixed=fixed)
 
 
-@_reference(description="Rename an occurrence (its display label; the referenced "
+_reference("rename_occurrence", "Rename an occurrence (its display label; the referenced "
           "part is unchanged). Undoable.")
-def rename_occurrence(id: int, name: str) -> dict:
-    return _call("rename_occurrence", id=id, name=name)
 
 
-@_reference(description="Choose which configuration of the placed part or "
+_reference("set_occurrence_configuration", "Choose which configuration of the placed part or "
           "sub-assembly an occurrence uses: configuration = a name or id, "
           "or None for that document's active one. Two placements of one "
           "part can differ, and the part is drawn, measured, mated and listed "
           "in the BOM as that configuration; one it lacks or does not build "
           "in is refused, saying which feature fails. Undoable.")
-def set_occurrence_configuration(id: int,
-                                 configuration: str | int | None) -> dict:
-    return _call("set_occurrence_configuration", id=id,
-                 configuration=configuration)
 
 
-@_reference(description="What this placement of a part is made of: material = "
+_reference("set_occurrence_material", "What this placement of a part is made of: material = "
           "a slug, or \"\" for the part's own. It overrides every body's "
           "material for mass, BOM, rendering and STEP (one piece part placed "
           "in maple and in walnut is one part). A sub-assembly placement is "
           "refused, as is an unknown slug. Undoable.")
-def set_occurrence_material(id: int, material: str) -> dict:
-    return _call("set_occurrence_material", id=id, material=material)
 
 
-@_reference(description="List the active assembly's occurrences: id, name, "
+_reference("list_occurrences", "List the active assembly's occurrences: id, name, "
           "part_id, transform, visible, fixed, configuration_id (0 = the "
           "placed document's active configuration) and material (present "
           "when the placement overrides its part's).")
-def list_occurrences() -> dict:
-    return _call("list_occurrences")
 
 
-@_reference(description="Add a MATE between two occurrences of the active "
+_reference("add_mate", "Add a MATE between two occurrences of the active "
           "assembly (A3). type is 'fastened' (rigid), 'revolute' (rotate "
           "about Z), 'slider' (slide along Z), 'cylindrical' (rotate AND "
           "slide), 'planar' (slide in-plane via dx/dy + spin), or 'ball' "
@@ -1742,24 +1544,9 @@ def list_occurrences() -> dict:
           "revolute it's the axial seat depth (slide up/down the shaft), for "
           "slider/cylindrical the DOF, for planar the plane gap; POSITIVE = "
           "along a's normal. Solves immediately.")
-def add_mate(type: str, a: dict, b: dict, name: str = "",
-             flipped: bool = True, rotation_deg: float = 0.0,
-             offset: float = 0.0, dx: float = 0.0, dy: float = 0.0,
-             ball_rotation: list | None = None) -> dict:
-    params = {"type": type, "a": a, "b": b, "flipped": flipped,
-              "rotation_deg": rotation_deg, "offset": offset}
-    if dx:
-        params["dx"] = dx
-    if dy:
-        params["dy"] = dy
-    if ball_rotation is not None:
-        params["ball_rotation"] = ball_rotation
-    if name:
-        params["name"] = name
-    return _call("add_mate", **params)
 
 
-@_reference(description="Adjust a mate (by id) and re-solve — how you MOVE a "
+_reference("set_mate", "Adjust a mate (by id) and re-solve — how you MOVE a "
           "mechanism numerically. rotation_deg (revolute/cylindrical angle, "
           "degrees — on a FASTENED mate the same field is its authored "
           "twist about the connector axis, the GUI's Rotate, not a pose), "
@@ -1769,34 +1556,18 @@ def add_mate(type: str, a: dict, b: dict, name: str = "",
           "slide), ball_rotation ([x,y,z,w] for a ball), flipped, or name. "
           "e.g. set a revolute's rotation_deg to swing a hinge, or its offset to "
           "seat the part along the shaft.")
-def set_mate(id: int, rotation_deg: float | None = None,
-             offset: float | None = None,
-             dx: float | None = None, dy: float | None = None,
-             ball_rotation: list | None = None,
-             flipped: bool | None = None, name: str | None = None) -> dict:
-    params: dict = {"id": id}
-    for k, v in (("rotation_deg", rotation_deg), ("offset", offset), ("dx", dx),
-                 ("dy", dy), ("ball_rotation", ball_rotation),
-                 ("flipped", flipped), ("name", name)):
-        if v is not None:
-            params[k] = v
-    return _call("set_mate", **params)
 
 
-@_reference(description="Remove a mate (by id) and re-solve. Occurrences it "
+_reference("remove_mate", "Remove a mate (by id) and re-solve. Occurrences it "
           "positioned keep their last solved pose.")
-def remove_mate(id: int) -> dict:
-    return _call("remove_mate", id=id)
 
 
-@_reference(description="List the active assembly's mates: id, name, type, the "
+_reference("list_mates", "List the active assembly's mates: id, name, type, the "
           "two connectors, DOF pose, and a per-mate 'error' when a connector "
           "ref is dangling or the mate is over-constrained.")
-def list_mates() -> dict:
-    return _call("list_mates")
 
 
-@_reference(description="Re-solve the active assembly's mates (place every "
+_reference("solve_assembly", "Re-solve the active assembly's mates (place every "
           "mated, non-fixed occurrence by frame alignment). Always returns "
           "errored_mates, placed, occurrences, placed_by_mates, "
           "placed_by_transform and mates[] (each with its status); the loop "
@@ -1804,124 +1575,82 @@ def list_mates() -> dict:
           "redundant_mates — only when the assembly HAS mate loops, so read "
           "them with a default. Solves run "
           "automatically after mate/occurrence edits; call this to inspect.")
-def solve_assembly() -> dict:
-    return _call("solve_assembly")
 
 
-@_reference(description="Add a named exploded view to the active assembly "
+_reference("add_exploded_view", "Add a named exploded view to the active assembly "
           "(A4). Returns its id. Views are persistent; apply one with "
           "set_explode.")
-def add_exploded_view(name: str = "Exploded") -> dict:
-    return _call("add_exploded_view", name=name)
 
 
-@_reference(description="Remove an exploded view by id.")
-def remove_exploded_view(id: int) -> dict:
-    return _call("remove_exploded_view", id=id)
+_reference("remove_exploded_view", "Remove an exploded view by id.")
 
 
-@_reference(description="List the active assembly's exploded views (id, name, "
+_reference("list_exploded_views", "List the active assembly's exploded views (id, name, "
           "per-occurrence offsets) plus the applied view id and factor.")
-def list_exploded_views() -> dict:
-    return _call("list_exploded_views")
 
 
-@_reference(description="Set one occurrence's world-space offset in an "
+_reference("set_explode_step", "Set one occurrence's world-space offset in an "
           "exploded view (creates the step if missing). offset is [x,y,z] "
           "at factor 1.")
-def set_explode_step(view: int, occurrence: int, offset: list) -> dict:
-    return _call("set_explode_step", view=view, occurrence=occurrence,
-                 offset=offset)
 
 
-@_reference(description="Seed an exploded view radially: every occurrence "
+_reference("auto_explode", "Seed an exploded view radially: every occurrence "
           "pushed away from the assembly centroid, scaled by assembly size. "
           "A starting point to refine with set_explode_step. Omit `view` (or "
           "pass 0) to auto-create a fresh exploded view; the returned `view` "
           "is its id.")
-def auto_explode(view: int = 0) -> dict:
-    return _call("auto_explode", **({"view": view} if view else {}))
 
 
-@_reference(description="Apply an exploded view to the display (transient, "
+_reference("set_explode", "Apply an exploded view to the display (transient, "
           "never saved): view id (0 = none) and/or factor 0..1. The solved "
           "transforms are untouched — screenshot an exploded assembly with "
           "set_explode + screenshot.")
-def set_explode(view: int = -1, factor: float = -1.0) -> dict:
-    args = {}
-    if view >= 0:
-        args["view"] = view
-    if factor >= 0:
-        args["factor"] = factor
-    return _call("set_explode", **args)
 
 
-@_reference(description="Bill of materials for the active assembly (A4): one "
+_reference("bom", "Bill of materials for the active assembly (A4): one "
           "row per (part, configuration, material) placed, with "
           "configuration (its name; \"\" = the part's active one), "
           "configuration_id, quantity, material, unit/total mass "
           "(grams; null when a body has no material density) and a mass "
           "total. Derived fresh from the document on every call.")
-def bom() -> dict:
-    return _call("bom")
 
 
-@_reference(description="Write the active assembly's bill of materials to a "
+_reference("export_bom", "Write the active assembly's bill of materials to a "
           "CSV file at `path` (same rows as `bom`, with a `configuration` "
           "column after `part`).")
-def export_bom(path: str) -> dict:
-    return _call("export_bom", path=path)
 
 
-@_reference(description="Import a STEP, STL or BREP file's bodies as an "
+_reference("import_step", "Import a STEP, STL or BREP file's bodies as an "
           "Import feature. `units` is the length unit an STL/BREP was drawn "
           "in (mm default, cm, m, in) — those formats carry none; a STEP "
           "declares its own and refuses it. keep_origin=True keeps the "
           "file's OWN coordinates: without it the import is centred on its "
           "bounding box, so a bought part loses the placement it was "
           "exported at and every one of them lands on the origin.")
-def import_step(path: str, units: str | None = None,
-                keep_origin: bool = False) -> dict:
-    kw = {"path": path}
-    if units is not None:
-        kw["units"] = units
-    if keep_origin:
-        kw["keep_origin"] = True
-    return _call("import_step", **kw)
 
 
-@_reference(description="Save the WHOLE project and name this state a "
+_reference("checkpoint_create", "Save the WHOLE project and name this state a "
           "version (save_project to a .dsgn project first). Name a version "
           "before risky multi-step edits; restoring beats reconstructing.")
-def checkpoint_create(name: str) -> dict:
-    return _call("checkpoint_create", name=name)
 
 
-@_reference(description="List the project's named versions (name + unix "
+_reference("checkpoint_list", "List the project's named versions (name + unix "
           "time, newest first).")
-def checkpoint_list() -> dict:
-    return _call("checkpoint_list")
 
 
-@_reference(description="Put the WHOLE project back to a named version and "
+_reference("checkpoint_restore", "Put the WHOLE project back to a named version and "
           "reopen it. The restore is itself recorded, so the state you left "
           "stays in history_log.")
-def checkpoint_restore(name: str) -> dict:
-    return _call("checkpoint_restore", name=name)
 
 
-@_reference(description="History of a directory (.dsgn) project: every save "
+_reference("history_log", "History of a directory (.dsgn) project: every save "
           "is a version, named ones are tagged. Returns {log: [{hash, "
           "subject, unix, named}]}, newest first.")
-def history_log(limit: int = 20) -> dict:
-    return _call("history_log", limit=limit)
 
 
-@_reference(description="Put the WHOLE project back to a version (hash, tag "
+_reference("history_restore", "Put the WHOLE project back to a version (hash, tag "
           "like 'cp/v1', or any git rev) and reopen it. History stays linear "
           "— the restore is recorded on top, so nothing is lost.")
-def history_restore(commit: str) -> dict:
-    return _call("history_restore", commit=commit)
 
 
 # ---------------------------------------------------------------------------
@@ -1932,11 +1661,10 @@ def history_restore(commit: str) -> dict:
           "look at it. Optional view (front|back|left|right|top|bottom|iso) "
           "orients + fits first; iso for shape checks, axis views for "
           "dimensional ones. Optional path also keeps the file on disk.")
-def screenshot(view: str = "", path: str = "") -> Image:
-    if view:
-        _call("view", name=view)
+def screenshot(view: str = "", path: str = "",
+               fit: bool | None = None) -> Image:
     out = path or os.path.join(tempfile.gettempdir(), "lobole_mcp_shot.png")
-    _call("screenshot", path=out)
+    _call("screenshot", path=out, **_given(view=view or None, fit=fit))
     return Image(path=out)
 
 
@@ -1947,27 +1675,21 @@ def view(name: str, fit: bool = True) -> dict:
     return _call("view", name=name, fit=fit)
 
 
-@_reference(description="Frame the whole model at the current orientation.")
-def fit_view() -> dict:
-    return _call("fit_view")
+_reference("fit_view", "Frame the whole model at the current orientation.")
 
 
-@_reference(description="Read the user's preferences: GPU device, font size, "
+_reference("get_settings", "Read the user's preferences: GPU device, font size, "
           "shadows/SSAO/shadow map, autosave interval. Also returns `path` "
           "(the settings file) and `devices` (what gpu_device may be set to). "
           "These are per-USER and persist; a project's own settings do not "
           "live here.")
-def get_settings() -> dict:
-    return _call("get_settings")
 
 
-@_reference(description="Change user preferences, e.g. "
+_reference("set_settings", "Change user preferences, e.g. "
           "{\"ssao\": \"full\", \"ui_font_scale\": 1.2}. Validates first "
           "— a bad value changes nothing and names itself — then applies and "
           "writes the file. The viewport GPU needs a restart; everything else "
           "is immediate.")
-def set_settings(**values) -> dict:
-    return _call("set_settings", **values)
 
 
 @mcp.tool(description="Viewport render-quality options; all fields optional, "
@@ -1979,25 +1701,15 @@ def set_settings(**values) -> dict:
           "errors under --headless.")
 def set_render_options(shadows: bool | None = None, ssao: str | None = None,
                        shadow_map: int | None = None) -> dict:
-    params = {}
-    if shadows is not None:
-        params["shadows"] = shadows
-    if ssao is not None:
-        params["ssao"] = ssao
-    if shadow_map is not None:
-        params["shadow_map"] = shadow_map
-    return _call("set_render_options", **params)
+    return _call("set_render_options", **_given(
+        shadows=shadows, ssao=ssao, shadow_map=shadow_map))
 
 
-@_reference(description="Select a B-Rep face. Preferred: by STABLE element name "
+_reference("select_face", "Select a B-Rep face. Preferred: by STABLE element name "
           "(list_elements), e.g. element='2/g4' — survives regeneration. "
           "Legacy: by render mesh id + face index (get_state bodies[].mesh; "
           "ids change every regeneration). Returns the face normal and "
           "center. Follow with orient_to_face to look straight at it.")
-def select_face(mesh: int = -1, face: int = -1, element: str = "") -> dict:
-    if element:
-        return _call("select_face", element=element)
-    return _call("select_face", mesh=mesh, face=face)
 
 
 @mcp.tool(description="Direct camera control (view/fit only snap to standard "
@@ -2006,31 +1718,21 @@ def select_face(mesh: int = -1, face: int = -1, element: str = "") -> dict:
           "zoom). Each field optional, applied in that order. `up` sets "
           "the roll and is refused within 1 degree of the view direction. "
           "Returns the resulting position/target/distance.")
-def set_camera(target: list | None = None, direction: list | None = None,
-               up: list | None = None, distance: float | None = None) -> dict:
-    params = {}
-    if target is not None:
-        params["target"] = target
-    if direction is not None:
-        params["direction"] = direction
-    if up is not None:
-        params["up"] = up
-    if distance is not None:
-        params["distance"] = distance
-    return _call("set_camera", **params)
+def set_camera(target: list | None = None, eye: list | None = None,
+               direction: list | None = None, up: list | None = None,
+               distance: float | None = None) -> dict:
+    return _call("set_camera", **_given(target=target, eye=eye,
+                                        direction=direction, up=up,
+                                        distance=distance))
 
 
-@_reference(description="Rebuild the default panel layout (Model left, "
+_reference("reset_layout", "Rebuild the default panel layout (Model left, "
           "Properties right, 3D center) — recovery for a wedged or "
           "misdocked panel arrangement, without restarting the app.")
-def reset_layout() -> dict:
-    return _call("reset_layout")
 
 
-@_reference(description="Orient the camera to look squarely at the selected "
+_reference("orient_to_face", "Orient the camera to look squarely at the selected "
           "face (select_face first).")
-def orient_to_face() -> dict:
-    return _call("orient_to_face")
 
 
 @mcp.tool(description="A rendered still of the model, returned as an image. "
@@ -2055,15 +1757,14 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
                  line_weight: float = 0.0, path: str = "",
                  backdrop: str | None = None,
                  sun_azimuth_deg: float | None = None,
-                 sun_elevation_deg: float | None = None) -> Image:
+                 sun_elevation_deg: float | None = None,
+                 fit: bool | None = None) -> Image:
     out = path or os.path.join(tempfile.gettempdir(), "lobole_mcp_still.png")
     # A backdrop or sun the caller GAVE goes to the app in either mode, so a
     # quick still asked for a sky is refused there rather than quietly drawn
     # without one (CLAUDE.md, "Refuse, don't substitute").
-    given = {k: v for k, v in (("backdrop", backdrop),
-                               ("sun_azimuth_deg", sun_azimuth_deg),
-                               ("sun_elevation_deg", sun_elevation_deg))
-             if v is not None}
+    given = _given(backdrop=backdrop, sun_azimuth_deg=sun_azimuth_deg,
+                   sun_elevation_deg=sun_elevation_deg, fit=fit)
     if mode == "quick":
         extra = {"line_weight": line_weight} if line_weight else {}
         r = _call("render_still", width=width, height=height, mode="quick",
@@ -2090,31 +1791,20 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
 # re-run explicitly. The whole loop is headless: no GUI needed.
 
 
-@_reference(description="Create a FEM study on the active part. kind = "
+_reference("add_study", "Create a FEM study on the active part. kind = "
           "'static' (default) | 'modal' | 'topology'. Returns {id, name, "
           "kind}. A study fixes/loads faces and solves for stress.")
-def add_study(name: str = "", kind: str = "") -> dict:
-    params = {}
-    if name:
-        params["name"] = name
-    if kind:
-        params["kind"] = kind
-    return _call("add_study", **params)
 
 
-@_reference(description="Delete a study (by id) and its cached results.")
-def remove_study(study: int) -> dict:
-    return _call("remove_study", study=study)
+_reference("remove_study", "Delete a study (by id) and its cached results.")
 
 
-@_reference(description="List studies: id, name, evaluated mesh_size, loads, "
+_reference("list_studies", "List studies: id, name, evaluated mesh_size, loads, "
           "refinement count, has_results, and stale (results outdated by an "
           "edit).")
-def list_studies() -> dict:
-    return _call("list_studies")
 
 
-@_reference(description="Set a study's name, global mesh size, analysis type, or "
+_reference("set_study", "Set a study's name, global mesh size, analysis type, or "
           "loads. mesh_size (mm; 0 = auto) may be a number or an expression "
           "string. type is 'static' (stress), 'modal' (natural frequencies), or "
           "'topology' (generative shape). num_modes sets how many modes a modal "
@@ -2123,74 +1813,41 @@ def list_studies() -> dict:
           "topology study: volume_fraction (0..1 target kept, number or "
           "expression), filter_radius (mm minimum member size; 0 = auto), and "
           "max_iterations.")
-def set_study(study: int, name: str | None = None, mesh_size=None,
-              type: str | None = None, num_modes: int | None = None,
-              gravity: list | None = None, volume_fraction=None,
-              filter_radius=None, max_iterations: int | None = None) -> dict:
-    params: dict = {"study": study}
-    for k, v in (("name", name), ("mesh_size", mesh_size), ("type", type),
-                 ("num_modes", num_modes), ("gravity", gravity),
-                 ("volume_fraction", volume_fraction),
-                 ("filter_radius", filter_radius),
-                 ("max_iterations", max_iterations)):
-        if v is not None:
-            params[k] = v
-    return _call("set_study", **params)
 
 
-@_reference(description="Add a KEEP FACE to a topology study (frozen solid, so a "
+_reference("add_keep_face", "Add a KEEP FACE to a topology study (frozen solid, so a "
           "bolt boss or bearing seat survives the optimization). face is "
           "{feature_id, element}.")
-def add_keep_face(study: int, face: dict) -> dict:
-    return _call("add_keep_face", study=study, face=face)
 
 
-@_reference(description="Remove a keep face ({feature_id, element}) from a "
+_reference("remove_keep_face", "Remove a keep face ({feature_id, element}) from a "
           "topology study.")
-def remove_keep_face(study: int, face: dict) -> dict:
-    return _call("remove_keep_face", study=study, face=face)
 
 
-@_reference(description="Add a per-face mesh refinement (smaller elements on one "
+_reference("add_refinement", "Add a per-face mesh refinement (smaller elements on one "
           "face). face is {feature_id, element}; size is mm (number or "
           "expression).")
-def add_refinement(study: int, face: dict, size) -> dict:
-    return _call("add_refinement", study=study, face=face, size=size)
 
 
-@_reference(description="Remove the refinement on a face ({feature_id, element}).")
-def remove_refinement(study: int, face: dict) -> dict:
-    return _call("remove_refinement", study=study, face=face)
+_reference("remove_refinement", "Remove the refinement on a face ({feature_id, element}).")
 
 
-@_reference(description="Add a boundary condition to a study. type is 'fixed' "
+_reference("add_load", "Add a boundary condition to a study. type is 'fixed' "
           "(zero displacement), 'force' (a total vector in N over the face), "
           "or 'pressure' (MPa along the inward normal). face is {feature_id, "
           "element}. magnitude is N/MPa (number or expression); direction is "
           "[x,y,z] for a force. Returns {id} of the new load. Every loaded "
           "body needs at least one fixed face.")
-def add_load(study: int, type: str, face: dict, magnitude=None,
-             direction: list | None = None) -> dict:
-    params: dict = {"study": study, "type": type, "face": face}
-    if magnitude is not None:
-        params["magnitude"] = magnitude
-    if direction is not None:
-        params["direction"] = direction
-    return _call("add_load", **params)
 
 
-@_reference(description="Remove a load (by id) from a study.")
-def remove_load(study: int, load: int) -> dict:
-    return _call("remove_load", study=study, load=load)
+_reference("remove_load", "Remove a load (by id) from a study.")
 
 
-@_reference(description="Mesh a study's bodies without solving (a quick check). "
+_reference("mesh_study", "Mesh a study's bodies without solving (a quick check). "
           "Returns per-body node/element counts and worst element quality.")
-def mesh_study(study: int) -> dict:
-    return _call("mesh_study", study=study)
 
 
-@_reference(description="Mesh + solve a study now (explicit; never automatic). "
+_reference("run_study", "Mesh + solve a study now (explicit; never automatic). "
           "A static study returns nodes, elements, max_von_mises_mpa {value, "
           "at, body}, max_displacement_mm, factor_of_safety (vs yield), and "
           "stale:false. A modal study returns per-body frequencies_hz (the "
@@ -2201,34 +1858,24 @@ def mesh_study(study: int) -> dict:
           "for big meshes (a synchronous solve can outlive the client "
           "timeout; note a running static solve cannot be cancelled). "
           "Errors name the offending face/material/support.")
-def run_study(study: int, async_run: bool = False) -> dict:
-    if async_run:
-        return _call("run_study", study=study, **{"async": True})
-    return _call("run_study", study=study)
 
 
-@_reference(description="Poll an async topology run. While running, returns "
+_reference("study_status", "Poll an async topology run. While running, returns "
           "{running:true, iteration, max_iterations, compliance, "
           "volume_fraction}. Once done, {running:false, has_results, converged, "
           "cancelled, iterations, stale}.")
-def study_status(study: int) -> dict:
-    return _call("study_status", study=study)
 
 
-@_reference(description="Cancel an in-progress topology run (keeps the best "
+_reference("cancel_study", "Cancel an in-progress topology run (keeps the best "
           "shape found so far as a 'cancelled' result). Returns {cancelled}.")
-def cancel_study(study: int) -> dict:
-    return _call("cancel_study", study=study)
 
 
-@_reference(description="Read a study's cached results (never solves). Same "
+_reference("study_results", "Read a study's cached results (never solves). Same "
           "summary as run_study plus the current stale flag. For topology: "
           "iterations, converged, volume_fraction, compliance.")
-def study_results(study: int) -> dict:
-    return _call("study_results", study=study)
 
 
-@_reference(description="Export a topology study's optimized shape (the "
+_reference("export_topo_stl", "Export a topology study's optimized shape (the "
           "iso-surface, Taubin-smoothed) to a binary STL for 3D printing. "
           "threshold (0..1, 0 = auto volume-matched) sets how much material to "
           "keep; smooth is the number of smoothing passes (default 3). The "
@@ -2236,22 +1883,16 @@ def study_results(study: int) -> dict:
           "non-watertight mesh before anyone slices it. Note: the organic STL "
           "cannot be re-imported as a B-Rep; view results via "
           "set_result_display field='shape'.")
-def export_topo_stl(study: int, path: str, threshold: float = 0.0,
-                    smooth: int = 3) -> dict:
-    return _call("export_topo_stl", study=study, path=path,
-                 threshold=threshold, smooth=smooth)
 
 
-@_reference(description="Toggle the topology SHAPE GUIDE: a translucent overlay "
+_reference("set_topo_ghost", "Toggle the topology SHAPE GUIDE: a translucent overlay "
           "of a study's optimized shape in the normal modeling workspace, to "
           "re-model clean geometry against. on=false hides it. The opaque "
           "body can hide the guide from most angles — to LOOK at a result, "
           "set_result_display field='shape' is the reliable view.")
-def set_topo_ghost(study: int, on: bool = True) -> dict:
-    return _call("set_topo_ghost", study=study, on=on)
 
 
-@_reference(description="Show a study's result overlay in the viewport (for a "
+_reference("set_result_display", "Show a study's result overlay in the viewport (for a "
           "screenshot). field is 'von_mises', 'displacement', or 'none' for a "
           "static/modal study, or 'shape' (grey optimized iso-surface) / "
           "'density' (colormap) for a topology study. deform_scale exaggerates "
@@ -2259,20 +1900,6 @@ def set_topo_ghost(study: int, on: bool = True) -> dict:
           "which mode shape (0-based). For a topology 'shape' view, threshold "
           "(0..1, 0 = auto) sets the iso-surface level. Enters simulation mode; "
           "display-only, like set_explode.")
-def set_result_display(study: int | None = None, field: str = "von_mises",
-                       deform_scale: float | None = None,
-                       mode: int | None = None,
-                       threshold: float | None = None) -> dict:
-    params: dict = {"field": field}
-    if study is not None:
-        params["study"] = study
-    if deform_scale is not None:
-        params["deform_scale"] = deform_scale
-    if mode is not None:
-        params["mode"] = mode
-    if threshold is not None:
-        params["threshold"] = threshold
-    return _call("set_result_display", **params)
 
 
 # ---------------------------------------------------------------------------
@@ -2280,27 +1907,18 @@ def set_result_display(study: int | None = None, field: str = "von_mises",
 # of a part or assembly. list_parts reports drawing tabs with type "drawing".
 # ---------------------------------------------------------------------------
 
-@_reference(description="Add a new DRAWING tab (a 2D sheet) and switch to it. "
+_reference("create_drawing", "Add a new DRAWING tab (a 2D sheet) and switch to it. "
           "Optional sheet = {size: 'a4'|'a3'|'a2'|'a1'|'a0'|'letter', "
           "landscape: bool, title_block: {project, document, author, date}}. "
           "Views and dimensions are added in later tools. Returns its index, "
           "stable id, and sheet size.")
-def create_drawing(name: str = "", sheet: dict | None = None) -> dict:
-    params = {}
-    if name:
-        params["name"] = name
-    if sheet is not None:
-        params["sheet"] = sheet
-    return _call("create_drawing", **params)
 
 
-@_reference(description="List the project's drawing tabs with each one's stable "
+_reference("list_drawings", "List the project's drawing tabs with each one's stable "
           "id, index, and view/dimension counts.")
-def list_drawings() -> dict:
-    return _call("list_drawings")
 
 
-@_reference(description="Add a projected VIEW of a part to the ACTIVE drawing. "
+_reference("add_drawing_view", "Add a projected VIEW of a part to the ACTIVE drawing. "
           "source = the part's name. orientation = 'front'|'back'|'left'|"
           "'right'|'top'|'bottom'|'iso' (default front). scale = drawing:model "
           "ratio, e.g. 0.5 for 1:2 (default 1.0). position = [x,y] sheet mm "
@@ -2312,32 +1930,12 @@ def list_drawings() -> dict:
           "(a part modelled lying along X drawn upright is front at 90). "
           "The view is added but NOT projected — call update_drawing. "
           "Returns the new view id.")
-def add_drawing_view(source: str, orientation: str = "", scale: float = 1.0,
-                     position: list | None = None, name: str = "",
-                     base_view: int = 0, configuration: str = "",
-                     rotation_deg: float = 0.0) -> dict:
-    params = {"source": source, "scale": scale}
-    if rotation_deg:
-        params["rotation_deg"] = rotation_deg
-    if configuration:
-        params["configuration"] = configuration
-    if orientation:
-        params["orientation"] = orientation
-    if position is not None:
-        params["position"] = position
-    if name:
-        params["name"] = name
-    if base_view:
-        params["base_view"] = base_view
-    return _call("add_drawing_view", **params)
 
 
-@_reference(description="Remove a view (by id) from the active drawing.")
-def remove_drawing_view(id: int) -> dict:
-    return _call("remove_drawing_view", id=id)
+_reference("remove_drawing_view", "Remove a view (by id) from the active drawing.")
 
 
-@_reference(description="Edit a view in place: position [x,y] sheet mm, scale, "
+_reference("set_drawing_view", "Edit a view in place: position [x,y] sheet mm, scale, "
           "name, show_hidden, quality ('exact'|'fast'), configuration (a "
           "configuration of the source part, by name; '' leaves it alone and "
           "'base' draws whatever the part has active), base_view (0 clears "
@@ -2346,84 +1944,43 @@ def remove_drawing_view(id: int) -> dict:
           "folded child's shared axis follows its base — the reply's "
           "effective_position/folded_axes say when a requested coordinate "
           "was overridden.")
-def set_drawing_view(id: int, position: list | None = None, scale: float = 0,
-                     name: str = "", show_hidden: int = -1,
-                     base_view: int = -1, quality: str = "",
-                     configuration: str = "",
-                     rotation_deg: float | None = None) -> dict:
-    params = {"id": id}
-    if rotation_deg is not None:
-        params["rotation_deg"] = rotation_deg
-    if quality:
-        params["quality"] = quality
-    if configuration:
-        params["configuration"] = 0 if configuration == "base" else configuration
-    if position is not None:
-        params["position"] = position
-    if scale > 0:
-        params["scale"] = scale
-    if name:
-        params["name"] = name
-    if show_hidden >= 0:
-        params["show_hidden"] = bool(show_hidden)
-    if base_view >= 0:
-        params["base_view"] = base_view
-    return _call("set_drawing_view", **params)
 
 
-@_reference(description="Edit the active drawing's sheet after creation: size "
+_reference("set_drawing_sheet", "Edit the active drawing's sheet after creation: size "
           "('a4'..'a0'|'letter', case-insensitive — unknown sizes ERROR), "
           "landscape, title_block fields. Views keep their positions; run "
           "check_drawing to see what no longer fits.")
-def set_drawing_sheet(size: str = "", landscape: int = -1,
-                      title_block: dict | None = None) -> dict:
-    params = {}
-    if size:
-        params["size"] = size
-    if landscape >= 0:
-        params["landscape"] = bool(landscape)
-    if title_block is not None:
-        params["title_block"] = title_block
-    return _call("set_drawing_sheet", **params)
 
 
-@_reference(description="Validate the active drawing's sheet layout — the "
+_reference("check_drawing", "Validate the active drawing's sheet layout — the "
           "checks a drafter does by eye: every view inside the border, no "
           "view/view or view/title-block overlaps, dimensions on the paper, "
           "nothing dangling or stale. Returns {ok, issues:[{kind, detail, "
           "view?, other_view?, dim?}]}. update=False judges the cached "
           "projection instead of re-projecting. Run before export_drawing "
           "(whose reply echoes the same issues).")
-def check_drawing(update: bool = True) -> dict:
-    return _call("check_drawing", update=update)
 
 
-@_reference(description="Re-project every view of the active drawing (the "
+_reference("update_drawing", "Re-project every view of the active drawing (the "
           "explicit hidden-line-removal pass — expensive, never automatic). "
           "Returns per-view curve counts (visible/hidden/silhouettes) and any "
           "projection error. Run after adding views or editing the source part.")
-def update_drawing() -> dict:
-    return _call("update_drawing")
 
 
-@_reference(description="List the active drawing's views with their orientation, "
+_reference("list_drawing_views", "List the active drawing's views with their orientation, "
           "scale, position, projected curve count, and whether each is stale "
           "(source changed since last projection).")
-def list_drawing_views() -> dict:
-    return _call("list_drawing_views")
 
 
-@_reference(description="Export the active drawing to a vector file (path ending "
+_reference("export_drawing", "Export the active drawing to a vector file (path ending "
           ".svg or .pdf). Re-projects first so the file reflects the current "
           "geometry, then writes the sheet — border, title block, every view's "
           "visible (solid)/hidden (dashed) edges, and each resolved dimension. "
           "Returns the path, view count, and the check_drawing issue list "
           "(export never blocks on issues — read them).")
-def export_drawing(path: str) -> dict:
-    return _call("export_drawing", path=path)
 
 
-@_reference(description="List a projected view's dimensionable geometry: each "
+_reference("list_drawing_geometry", "List a projected view's dimensionable geometry: each "
           "distinct source edge / silhouette with the `ref` to pass to "
           "add_drawing_dim, its type (line/circle/curve), sheet-mm endpoints "
           "p1/p2 and `bbox` [[min],[max]] (how far a curve reaches -- a "
@@ -2432,11 +1989,9 @@ def export_drawing(path: str) -> dict:
           "bore rim; false = an arc such as a corner fillet — do NOT put a "
           "diameter dim on those), and `source_feature` {type,name} (part "
           "sources). Call update_drawing first.")
-def list_drawing_geometry(view: int) -> dict:
-    return _call("list_drawing_geometry", view=view)
 
 
-@_reference(description="Add a driven dimension to a view of the active drawing. "
+_reference("add_drawing_dim", "Add a driven dimension to a view of the active drawing. "
           "kind = 'distance'|'distance_x'|'distance_y'|'radius'|'diameter'|"
           "'angle'|'hole_callout'|'pattern_callout'. refs = a list of {edge OR "
           "sil_face: {feature_id, element} (from list_drawing_geometry), "
@@ -2451,24 +2006,14 @@ def list_drawing_geometry(view: int) -> dict:
           "sheet mm; OMIT it to auto-place the dim clear of the view. The "
           "value is MEASURED from the projected geometry (read-only). Returns "
           "the id, measured value/text, and the stored offset.")
-def add_drawing_dim(view: int, kind: str, refs: list,
-                    offset: list | None = None) -> dict:
-    params = {"view": view, "kind": kind, "refs": refs}
-    if offset is not None:
-        params["offset"] = offset
-    return _call("add_drawing_dim", **params)
 
 
-@_reference(description="Remove a dimension (by id) from the active drawing.")
-def remove_drawing_dim(id: int) -> dict:
-    return _call("remove_drawing_dim", id=id)
+_reference("remove_drawing_dim", "Remove a dimension (by id) from the active drawing.")
 
 
-@_reference(description="List the active drawing's dimensions with each one's "
+_reference("list_drawing_dims", "List the active drawing's dimensions with each one's "
           "kind, measured value + formatted text, and whether it resolved "
           "(false = a ref dangles after a source edit).")
-def list_drawing_dims() -> dict:
-    return _call("list_drawing_dims")
 
 
 # ---------------------------------------------------------------------------
@@ -2480,7 +2025,7 @@ _UI_ACTIONS = ("menu_click", "item_click", "item_double_click", "item_input",
                "viewport_drag", "key_press", "scroll")
 
 
-@_reference(description="Raw GUI event, for driving or testing the Loböle "
+_UI_ACTION_DOC = ("Raw GUI event, for driving or testing the Loböle "
           "GUI itself — for modeling, use the semantic tools instead. "
           "A `ref` is a test-engine path: '//WindowName/**/###stable_id' "
           "(** = any depth; ### ids are stable across labels/icons); "
@@ -2496,10 +2041,15 @@ _UI_ACTIONS = ("menu_click", "item_click", "item_double_click", "item_input",
           "VIEWPORT), button?: 0/1/2, ctrl?}; viewport_drag {x0, y0, x1, "
           "y1, button?: 2=MMB orbit, ctrl?: pan, shift?: zoom}; key_press "
           "{chord: 'Ctrl+Z'}; scroll {x, y, amount}.")
+
+
 def ui_action(action: str, params: dict | None = None) -> dict:
     if action not in _UI_ACTIONS:
         raise ValueError(f"unknown action {action!r}; one of {_UI_ACTIONS}")
     return _call(action, **(params or {}))
+
+
+_reference("ui_action", _UI_ACTION_DOC)
 
 
 
@@ -2516,21 +2066,14 @@ def ui_action(action: str, params: dict | None = None) -> dict:
           "help('add_mate') for its arguments and gotchas. Prefer this over "
           "guessing; a wrong method name returns the list of close matches.")
 def rpc(method: str, params: dict | None = None) -> dict:
-    entry = _REFERENCE.get(method)
-    if entry is not None:
-        # Route through the wrapper so its defaults and argument shaping
-        # still apply — rpc() is a smaller door to the same room. But the
-        # wrapper's signature is a hand-kept subset of the app's contract:
-        # a key the app accepts and the wrapper never learned
-        # (set_material's body_name) died here as a Python TypeError. When
-        # the params do not fit the wrapper they go to the app unshaped,
-        # and the app — the one that validates — accepts or refuses them.
-        import inspect
-        try:
-            inspect.signature(entry["fn"]).bind(**(params or {}))
-        except TypeError:
-            return _call(method, **(params or {}))
-        return entry["fn"](**(params or {}))
+    # Straight to the app: its row is the contract, its defaults the only
+    # ones. Python wrappers in front of it kept a hand-copied subset of each
+    # method's keys and drifted from them — set_material without body_name,
+    # delete_feature without feature_id — and a key the app accepted died
+    # here as a Python TypeError. ui_action is this server's own, a door to
+    # the GUI-action RPCs, and the one name that is not an RPC.
+    if method == "ui_action":
+        return ui_action(**(params or {}))
     known = sorted(_REFERENCE) + sorted(_EXPOSED)
     if method not in known:
         import difflib
@@ -2585,7 +2128,7 @@ def execute_script(script: str, timeout: float = 120.0) -> dict:
         raise RuntimeError(
             f"script exceeded {timeout:g}s (pass a larger timeout for long "
             "solves/renders; partial stdout:\n"
-            + ((e.stdout or "")[-2000:] if e.stdout else "(none)") + ")")
+            + _text(e.stdout)[-2000:] + ")")
 
     def cap(s):
         return s if len(s) <= 20000 else s[:10000] + "\n…[capped]…\n" + s[-10000:]
@@ -2632,15 +2175,12 @@ def help(method: str = "") -> dict:
                 "doc": "Exposed directly as the MCP tool of the same "
                        "name — see its tool description."}
     # The lookup is lobole.client.method_help, which the python client's
-    # help() also is: this server adds only its own prose for the methods it
-    # wraps. Anything else — most RPCs (motion studies, appearance,
-    # sections...) — is answered from the app's describe row.
-    import inspect
+    # help() also is: the app's describe row (parameters, their types, what
+    # comes back), with this server's longer prose in place of the row's
+    # one-liner where it keeps some.
     from lobole.client import method_help
     from lobole.errors import Refused
-    reference = {name: {"doc": e["doc"],
-                        "arguments": str(inspect.signature(e["fn"]))}
-                 for name, e in _REFERENCE.items()}
+    reference = {name: {"doc": e["doc"]} for name, e in _REFERENCE.items()}
     try:
         out = method_help(_call, method, reference)
     except Refused as e:

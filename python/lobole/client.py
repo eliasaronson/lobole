@@ -203,7 +203,8 @@ def method_help(call, method="", reference=None):
     two cannot drift into different answers. `call(name, **params)` reaches
     the app. `reference` is a client's own prose for methods it wraps,
     {method: {"doc": ..., ...}}: the MCP server passes the tool descriptions
-    it keeps out of the context, and they win over the app's one-liner. An
+    it keeps out of the context, and they win over the app's one-liner;
+    the parameters, their types and the answer are always the app's row. An
     unknown method is refused naming close matches — the app's for its own
     methods, plus the close ones among `reference`.
     """
@@ -213,18 +214,21 @@ def method_help(call, method="", reference=None):
         return {"methods": sorted({r["name"] for r in rows} | set(reference)),
                 "hint": "help('add_mate') for one method; describe() for "
                         "the app's type tables and enums"}
-    if method in reference:
-        return {"method": method, **reference[method]}
     try:
         row = call("describe", method=method)["methods"][0]
     except Refused as e:
+        # A client's own name for something that is not an RPC (the MCP
+        # server's ui_action) has only its prose.
+        if method in reference:
+            return {"method": method, **reference[method]}
         import difflib
         near = [n for n in difflib.get_close_matches(method, sorted(reference),
                                                      n=5)
                 if n not in str(e)]
         raise type(e)(str(e) + (f"; also {', '.join(near)}" if near else ""),
                       e.diagnostic) from None
-    out = {"method": method, "doc": row.get("doc", "")}
+    out = {"method": method,
+           "doc": reference.get(method, {}).get("doc") or row.get("doc", "")}
     if row.get("params_free_form"):
         out["params_free_form"] = True
     else:
