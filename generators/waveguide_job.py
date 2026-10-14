@@ -39,8 +39,6 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "tools"))
 
 from _lib import connect  # noqa: E402
 import waveguide  # noqa: E402
@@ -208,7 +206,7 @@ def report(d, sid, path):
     # A long timeout, explicitly. Generating and posting a 3D finishing pass
     # is minutes of work, and the client's 60 s default kills the connection
     # while the server carries on -- which reads as a hang followed by a
-    # mystery (designer_remote.py says so for mesh_study; a surfacing job is
+    # mystery (lobole/client.py says so for mesh_study; a surfacing job is
     # the same class of call).
     r = d.request("cam_post", {"setup": sid, "path": path}, timeout=900)
     v = d.request("cam_verify", {"setup": sid}, timeout=900)

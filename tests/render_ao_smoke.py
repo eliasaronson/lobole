@@ -27,9 +27,7 @@ import tempfile
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 import smoke_shapes as shapes  # noqa: E402
 
@@ -83,7 +81,7 @@ def main():
     shot_bare = os.path.join(tmp, f"ao_bare_{app.port}.png")
     shot_half = os.path.join(tmp, f"ao_half_{app.port}.png")
     try:
-        d = Designer.wait_for(app.port, timeout=90)
+        d = Client.wait_for(app.port, timeout=90)
 
         # A wide flat plate with one tall post at the FAR end. Correct AO
         # darkens only where the post meets the plate; everything else is open

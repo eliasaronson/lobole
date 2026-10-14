@@ -26,7 +26,7 @@ Anchored to the cabinet's outer floor, because that is what the port is bolted
 through. Each offset below says what it seats against; none of them is a
 coordinate read off the model and left unexplained.
 """
-from designer_sdk import Plane
+from lobole.sdk import Plane
 
 import seating
 

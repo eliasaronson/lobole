@@ -20,7 +20,8 @@ import time
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tests'))
-from designer_sdk import App
+sys.path.insert(0, str(ROOT / 'python'))  # the lobole package
+from lobole.sdk import App
 from smoke_app import launch
 
 

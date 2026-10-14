@@ -25,8 +25,7 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
 SRC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "src")
@@ -111,7 +110,7 @@ def main():
     app = launch_app(binary, env=env)
     problems = []
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         gated = sorted(m["name"] for m in d.call("describe")["methods"]
                        if m.get("requires_part_doc"))
         bodies = handler_bodies()

@@ -21,7 +21,6 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, os.path.join(ROOT, "generators"))
 sys.path.insert(0, HERE)
 from smoke_app import launch_app  # noqa: E402
@@ -106,17 +105,17 @@ def main():
     env.pop("WAYLAND_DISPLAY", None)
     app = launch_app(binary, env=env)
     try:
-        from designer_remote import Designer
-        Designer.wait_for(app.port).close()
+        from lobole.client import Client
+        Client.wait_for(app.port).close()
         out = subprocess.run(
             [sys.executable, os.path.join(ROOT, "generators", "gear.py"),
              "--port", str(app.port)],
             capture_output=True, text=True, env=env, timeout=120)
         expect(out.returncode == 0, f"gear.py failed:\n{out.stderr}")
-        d = Designer(app.port)
+        d = Client(app.port)
         walk_part(d, "gear")
 
-        from designer_sdk import connect
+        from lobole.sdk import connect
         from slider_crank import build
         build(connect(app.port))
         tabs = d.call("list_parts")

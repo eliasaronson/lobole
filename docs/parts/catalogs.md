@@ -19,10 +19,9 @@ browsed and checked against manually entered seat dimensions.
 The same workflow is available through the Python SDK:
 
 ```python
-from designer_remote import Designer
-from designer_sdk import App
+from lobole import connect
 
-app = App(Designer(8852))  # your own running instance
+app = connect(8852)  # your own running instance
 preview = app.catalogs.preview_file(
     "examples/catalogs/synthetic-bearings.csv",
     id="demo-bearings", revision="1",
@@ -148,5 +147,5 @@ geometry. Persistent requirements are not built.
 (the Variables-panel section and its undo history), `src/remote/RemoteCatalog.cpp`
 (RPCs: `preview_catalog`, `import_catalog`, `list_catalogs`, `query_catalog`,
 `catalog_requirements`, `export_catalog`; parameters via `describe`), and
-`App.catalogs` (`Catalogs`, `CatalogImport`) in `tools/designer_sdk.py`.
+`App.catalogs` (`Catalogs`, `CatalogImport`) in `python/lobole/sdk.py`.
 Tests: `tests/test_catalog.cpp`, `tests/catalog_smoke.py`.

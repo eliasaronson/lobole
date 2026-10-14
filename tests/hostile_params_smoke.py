@@ -47,7 +47,6 @@ import time
 import zlib
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, HERE)
 from smoke_app import launch_app  # noqa: E402
 from smoke_world import (World, build_fixture, changed,  # noqa: E402
@@ -316,8 +315,8 @@ class Sweep:
             env["XDG_STATE_HOME"] = state_home
         self.app = launch_app(self.binary, self.extra_args, env=env)
         self.state_home = state_home or os.path.join(self.app.tmp, "state")
-        from designer_remote import Designer
-        self.d = Designer.wait_for(self.app.port)
+        from lobole.client import Client
+        self.d = Client.wait_for(self.app.port)
         self.d.strict = False  # the sweep judges `nonfinite` itself
         self.conn = Conn(self.app.port)
         self.cam = self.d.call("ping").get("features", {}).get("cam", True)

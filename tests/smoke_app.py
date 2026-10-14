@@ -73,9 +73,7 @@ import tempfile
 import threading
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 
 # Every client a smoke makes is strict: an answer holding NaN or infinity
 # (sent as null, listed under `nonfinite`) fails the smoke instead of reading
@@ -93,7 +91,7 @@ class LaunchedApp:
         self.port = port
         self._log_path = log_path
         self._tmp = tmp
-        self.designer = Designer.wait_for(port)
+        self.designer = Client.wait_for(port)
 
     def log(self):
         try:

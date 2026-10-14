@@ -27,11 +27,10 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, os.path.join(HERE, "..", "generators"))
 sys.path.insert(0, HERE)
-from designer_remote import Designer  # noqa: E402
-from designer_sdk import connect  # noqa: E402
+from lobole.client import Client  # noqa: E402
+from lobole.sdk import connect  # noqa: E402
 from slider_crank import build  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
@@ -76,7 +75,7 @@ def main():
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     app = launch_app(binary, env=env)
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         d.timeout = 300
         feats = d.call("ping").get("features", {})
         if not (feats.get("fem") and feats.get("mesher")):

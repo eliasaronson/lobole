@@ -35,7 +35,7 @@ The uprights get their faces drilled here; their edges are jig work; and the
 side walls' side of the same joints is all face work.
 """
 import cam
-from designer_sdk import SdkError
+from lobole.sdk import SdkError
 
 # Which face of each upright is the inside, in the panel's own frame: the
 # coordinate along its thickness and the way that face looks. The two are

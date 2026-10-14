@@ -30,11 +30,10 @@ import tempfile
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, os.path.join(HERE, "..", "generators"))
 sys.path.insert(0, HERE)
-from designer_remote import Designer  # noqa: E402
-from designer_sdk import connect  # noqa: E402
+from lobole.client import Client  # noqa: E402
+from lobole.sdk import connect  # noqa: E402
 from fem_smoke import build_bar  # noqa: E402
 from slider_crank import build as build_crank  # noqa: E402
 from smoke_app import launch  # noqa: E402
@@ -469,7 +468,7 @@ def mesher_available(d):
 def main():
     binary = sys.argv[1]
     with launch(binary) as app:
-        d = Designer(app.port, timeout=300)
+        d = Client(app.port, timeout=300)
         study, created_by, _, load_face = build_bar(d)
         d.call("set_variable", name="yield_mpa", expression="250")
 

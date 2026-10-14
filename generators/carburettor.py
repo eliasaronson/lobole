@@ -24,9 +24,7 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
-from designer_sdk import Plane  # noqa: E402
+from lobole.sdk import Plane  # noqa: E402
 
 # ---- the one set of numbers everything else is derived from --------------
 FLANGE_R = 31.0         # matches the head's port flange

@@ -160,7 +160,7 @@
         # Build and run:
         #   nix build .#dockerHeadless && docker load < result
         #   docker run --rm -p 8437:8437 designer-headless:latest
-        #   python3 tools/designer_remote.py 8437 get_state
+        #   python3 -m lobole.client 8437 get_state
         #
         # --remote-bind-all is what makes the published port reachable: the
         # server is loopback-only by default because it is unauthenticated

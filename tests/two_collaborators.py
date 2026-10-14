@@ -20,8 +20,7 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
 _PHASE = "startup"
@@ -43,7 +42,7 @@ def start(binary, env):
     # to retry against here — it either reports one or raises with the app's
     # own log attached.
     app = launch_app(binary, env=env)
-    return app, Designer(app.port)
+    return app, Client(app.port)
 
 
 def box(name, height):

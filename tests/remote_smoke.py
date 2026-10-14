@@ -14,8 +14,7 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
 def box_on_top(name, x, y, size):
@@ -114,7 +113,7 @@ def main():
                          headless=False)  # a real renderer: screenshots
     tmp = tempfile.mkdtemp(prefix="designer_remote_")
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
 
         pong = d.call("ping")
         expect(pong["ok"], "ping")

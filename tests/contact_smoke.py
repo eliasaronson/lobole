@@ -18,8 +18,7 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box, cylinder  # noqa: E402
 
@@ -57,7 +56,7 @@ def main():
     env["DESIGNER_TEST_CONTACT_PAIR_MS"] = "1500"
     app = launch_app(binary, env=env)
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         d.call("new_project")
 
         # --- Part tab: two bodies, touching then apart ---------------------

@@ -14,10 +14,10 @@ import tempfile
 
 sys.path[:0] = [
     os.path.join(os.path.dirname(__file__), "..", directory)
-    for directory in ("tools", "generators", "generators/om615")
+    for directory in ("generators", "generators/om615")
 ]
-from designer_sdk import App, Part, Plane, SdkError
-from designer_remote import Designer
+from lobole.sdk import App, Part, Plane, SdkError
+from lobole.client import Client
 from smoke_app import launch_app
 import om615
 import om615_accessories as A
@@ -41,7 +41,7 @@ def main():
             env=dict(os.environ, XDG_STATE_HOME=tmp, XDG_CONFIG_HOME=tmp + "/config"),
         )
         try:
-            app = App(Designer.wait_for(proc.port))
+            app = App(Client.wait_for(proc.port))
             app.new()
             rig = app.assembly("engine")
             occ, main = om615.bottom_end(app, rig)

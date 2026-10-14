@@ -13,7 +13,7 @@ third of an airframe's structural mass.
 """
 import math
 
-from designer_sdk import Plane
+from lobole.sdk import Plane
 
 from fpv_drone_spec import *  # noqa: F401,F403  — the dimensions, by name
 

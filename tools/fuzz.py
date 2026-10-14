@@ -24,7 +24,7 @@ workers are waited on by pid, and an instance is killed only by its pid.
 
 `one --minimise` cuts a failing design down to the steps its failure needs
 and writes the case as a --record session with a header line, which
-tests/fuzz_corpus_smoke.py replays and tools/designer_replay.py plays by
+tests/fuzz_corpus_smoke.py replays and python/lobole/replay.py plays by
 hand. `replay` runs a case with the checks applied. `case` writes a run's
 seed file as a case, cut at its failing step: for a failure already fixed,
 which a minimiser has nothing left to reproduce.
@@ -43,6 +43,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
+sys.path.insert(0, os.path.join(ROOT, "python"))  # the lobole package
 
 import fuzz_design as fd  # noqa: E402
 
@@ -70,10 +71,10 @@ class Instance:
 
     def __init__(self, binary, timeout, record=None, env=None):
         from smoke_app import launch_app
-        from designer_remote import Designer
+        from lobole.client import Client
         args = ["--record", record] if record else []
         self.app = launch_app(binary, extra_args=args, env=env)
-        self.d = Designer.wait_for(self.app.port, strict=True)
+        self.d = Client.wait_for(self.app.port, strict=True)
         self.d.scratch_path = os.path.join(self.app.tmp, "fuzz.dsgn")
         self.timeout = timeout
         self.deadline = None

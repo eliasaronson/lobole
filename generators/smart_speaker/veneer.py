@@ -40,7 +40,7 @@ listed here per covering: the uprights mitre at their vertical corners and
 along the top, the top covering mitres all four sides. Nothing mitres at the
 plinth, where there is no neighbour.
 """
-from designer_sdk import SdkError
+from lobole.sdk import SdkError
 
 # Which way each covering faces, which of its edges meet a neighbour, and how
 # far past its own wall it runs.
@@ -119,7 +119,7 @@ def build(app, p, name, source_part, outward, mitres):
     """One covering: a ghost of its wall for reference, the wall's own
     outline, 3.6 mm of ply, and a 45 degree mitre where it meets a
     neighbour."""
-    from designer_sdk import Plane
+    from lobole.sdk import Plane
     import walls
     part = app.part(name)
     part.activate()

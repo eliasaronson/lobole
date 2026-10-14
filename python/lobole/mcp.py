@@ -2,12 +2,13 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""MCP server for Designer — drive a running instance over its JSON-RPC remote.
+"""MCP server for Loböle — drive a running instance over its JSON-RPC remote.
 
 Design: docs/scripting/mcp.md. Register this server with an MCP client:
 
-    claude mcp add lobole -- python3 tools/designer_mcp.py   # from a checkout
-    claude mcp add lobole -- designer-mcp    # installed (uv tool install .)
+    claude mcp add lobole -- lobole-mcp      # installed (uv tool install .)
+    claude mcp add lobole -- env PYTHONPATH=python python3 -m lobole.mcp
+                                             # from a checkout
 
 No port needed: running instances announce themselves and the server attaches
 (several running → it asks; pin with --port or $DESIGNER_PORT, flag wins).
@@ -23,8 +24,7 @@ import tempfile
 
 from mcp.server.fastmcp import FastMCP, Image
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Format reference, embedded into tool descriptions. Source of truth:
@@ -465,7 +465,7 @@ MATERIAL_SLUGS = ("aluminum, steel, stainless_steel, brass, bronze, copper, "
                   "soil, wood_oak, wood_pine, wood_walnut, wood_maple, "
                   "wood_beech, plywood_birch, plywood_pine, mdf")
 
-WORKFLOW = """You are modeling in Designer, a parametric B-Rep CAD app
+WORKFLOW = """You are modeling in Loböle, a parametric B-Rep CAD app
 (sketch → constrain → extrude/revolve, feature history, expressions).
 The world is Z-up: +Z is height, the XY plane is the Top plane / the floor,
 gravity pulls -Z — the usual CAD and G-code convention.
@@ -621,23 +621,23 @@ DEFAULT_PORT = 8437
 
 def _running_instances():
     try:
-        return Designer.instances()
+        return Client.instances()
     except Exception:
         return []  # discovery is a convenience, never a failure mode
 
 
-def _designer_argv():
-    """THIS machine's Designer as an argv, probed — not guessed.
+def _lobole_argv():
+    """THIS machine's Loböle as an argv, probed — not guessed.
 
     The server can be installed far from any checkout (`uv tool install`), so
     a refusal that always says `lobole --remote …` names a command half the
     machines don't have. Suggest only what is actually here: a dev-tree
-    binary beside this file, `designer` on PATH, or the flatpak.
+    binary in the checkout this file is in, `lobole` on PATH, or the flatpak.
     """
     import pathlib
     import shutil
     import subprocess
-    dev = pathlib.Path(__file__).resolve().parent.parent / "build" / "lobole"
+    dev = pathlib.Path(__file__).resolve().parents[2] / "build" / "lobole"
     if dev.is_file():
         return [str(dev)]
     if shutil.which("lobole"):
@@ -655,7 +655,7 @@ def _designer_argv():
 
 
 def _start_hint():
-    argv = _designer_argv()
+    argv = _lobole_argv()
     return " ".join(argv) if argv else None
 
 
@@ -684,7 +684,7 @@ def _stop_autostarted():
 
 def _autostart():
     """Spawn `--offscreen --remote 0`; return its announced port, or None
-    when no Designer is installed here (the caller then refuses, naming what
+    when no Loböle is installed here (the caller then refuses, naming what
     was probed). A spawn that dies or never announces raises with the app's
     own words — an agent must see WHY, not a generic timeout."""
     global _autostarted
@@ -693,10 +693,10 @@ def _autostart():
     import shutil
     import subprocess
     import time
-    argv = _designer_argv()
+    argv = _lobole_argv()
     if argv is None:
         return None
-    scratch = tempfile.mkdtemp(prefix="designer-mcp-autostart-")
+    scratch = tempfile.mkdtemp(prefix="lobole-mcp-autostart-")
     env = dict(os.environ)
     # Same reasoning as tools/headless-preview.sh: set_settings persists
     # immediately, so a scratch instance must not write the human's real
@@ -744,7 +744,7 @@ def _autostart():
         # chosen port under its pid, so there is no port to race for.
         for info in _running_instances():
             if int(info.get("pid", 0)) == proc.pid:
-                print(f"designer-mcp: autostarted `{' '.join(argv)} "
+                print(f"lobole-mcp: autostarted `{' '.join(argv)} "
                       f"--offscreen` on port {info['port']} (it dies with "
                       "this server; disable with --no-autostart)",
                       file=sys.stderr)
@@ -786,13 +786,13 @@ def _resolve_port():
         cmd = _start_hint()
         if cmd is None:
             raise RuntimeError(
-                "No running Designer found, and no installed one to start: "
+                "No running Loböle found, and no installed one to start: "
                 "probed for build/lobole beside this server, `designer` on "
                 "PATH, and the org.lobole.Lobole flatpak. "
                 "Install the app, then start it with `lobole --remote "
                 f"{DEFAULT_PORT}`.")
         raise RuntimeError(
-            f"No running Designer found (autostart is off). Start one with:  "
+            f"No running Loböle found (autostart is off). Start one with:  "
             f"{cmd} --remote {DEFAULT_PORT}   (add --offscreen for no window "
             "with renders, or --headless for the document engine alone). If "
             "it is already running, it is on a build older than instance "
@@ -800,7 +800,7 @@ def _resolve_port():
     listed = ", ".join(
         f"{i['port']} ({i.get('mode', '?')})" for i in live)
     raise RuntimeError(
-        f"{len(live)} Designer instances are running: {listed}. Which one? "
+        f"{len(live)} Loböle instances are running: {listed}. Which one? "
         "Set DESIGNER_PORT (or --port) — attaching to the wrong window would "
         "answer questions about a document you are not looking at.")
 
@@ -810,10 +810,10 @@ def _connect():
     port = _resolve_port()
     try:
         # Generous timeout: render_still runs synchronously in-app.
-        _client = Designer(port, timeout=600.0)
+        _client = Client(port, timeout=600.0)
     except OSError as e:
         raise RuntimeError(
-            f"Designer announced port {port} but is not answering there "
+            f"Loböle announced port {port} but is not answering there "
             f"({e}). If it just exited, start it again with: designer "
             f"--remote {port}") from e
     try:
@@ -832,15 +832,15 @@ def attached_to():
     mode = _attached.get("mode")
     project = _attached.get("project") or "unsaved project"
     if mode is None:
-        return f"Designer on {where}"
+        return f"Loböle on {where}"
     dirty = " (unsaved changes)" if _attached.get("dirty") else ""
-    return f"Designer on {where}: {project}{dirty}, {mode}"
+    return f"Loböle on {where}: {project}{dirty}, {mode}"
 
 
 def _call(method, /, **params):
     """Call the app, reconnecting once across a dropped connection.
 
-    `method` is positional-ONLY, like designer_remote.call's: an RPC
+    `method` is positional-ONLY, like lobole.client.call's: an RPC
     parameter named "method" (describe narrows by one) would otherwise
     collide with this function's own first argument — which happened the
     first time an MCP client called describe(method=...). The body goes
@@ -1495,7 +1495,7 @@ def new_project() -> dict:
     return _call("new_project")
 
 
-@mcp.tool(description="Load a Designer project (.json) from a path, "
+@mcp.tool(description="Load a Loböle project (.json) from a path, "
           "replacing the current document.")
 def open_project(path: str) -> dict:
     return _call("open_project", path=path)
@@ -1934,7 +1934,7 @@ def history_restore(commit: str) -> dict:
 def screenshot(view: str = "", path: str = "") -> Image:
     if view:
         _call("view", name=view)
-    out = path or os.path.join(tempfile.gettempdir(), "designer_mcp_shot.png")
+    out = path or os.path.join(tempfile.gettempdir(), "lobole_mcp_shot.png")
     _call("screenshot", path=out)
     return Image(path=out)
 
@@ -2055,7 +2055,7 @@ def render_still(width: int = 1920, height: int = 1080, mode: str = "quick",
                  backdrop: str | None = None,
                  sun_azimuth_deg: float | None = None,
                  sun_elevation_deg: float | None = None) -> Image:
-    out = path or os.path.join(tempfile.gettempdir(), "designer_mcp_still.png")
+    out = path or os.path.join(tempfile.gettempdir(), "lobole_mcp_still.png")
     # A backdrop or sun the caller GAVE goes to the app in either mode, so a
     # quick still asked for a sky is refused there rather than quietly drawn
     # without one (CLAUDE.md, "Refuse, don't substitute").
@@ -2471,7 +2471,7 @@ def list_drawing_dims() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Escape hatch: raw UI events (for driving/testing the Designer GUI itself)
+# Escape hatch: raw UI events (for driving/testing the Loböle GUI itself)
 # ---------------------------------------------------------------------------
 
 _UI_ACTIONS = ("menu_click", "item_click", "item_double_click", "item_input",
@@ -2479,7 +2479,7 @@ _UI_ACTIONS = ("menu_click", "item_click", "item_double_click", "item_input",
                "viewport_drag", "key_press", "scroll")
 
 
-@_reference(description="Raw GUI event, for driving or testing the Designer "
+@_reference(description="Raw GUI event, for driving or testing the Loböle "
           "GUI itself — for modeling, use the semantic tools instead. "
           "A `ref` is a test-engine path: '//WindowName/**/###stable_id' "
           "(** = any depth; ### ids are stable across labels/icons); "
@@ -2507,7 +2507,7 @@ def ui_action(action: str, params: dict | None = None) -> dict:
 # Meta: reach everything, and read the manual for it
 # ---------------------------------------------------------------------------
 
-@mcp.tool(description="Call any Designer RPC by name — the whole API, not "
+@mcp.tool(description="Call any Loböle RPC by name — the whole API, not "
           "just the tools listed here. Assemblies, drawings, studies, "
           "configurations, sketch constraints, patterns, checkpoints, "
           "exports and the GUI-driving actions are all reached this way: "
@@ -2550,9 +2550,9 @@ def rpc(method: str, params: dict | None = None) -> dict:
           "would be dozens of tool calls (feature patterns with computed "
           "positions, build-measure-adjust loops, batch queries). The "
           "script runs in a subprocess with `d` PRE-BOUND to a connected "
-          "designer_remote.Designer client: call d.request(method, params) "
+          "lobole.client.Client: call d.request(method, params) "
           "/ d.call(method, **params) directly — no imports, no port "
-          "(DESIGNER_PORT is set; tools/designer_remote.py is importable "
+          "(DESIGNER_PORT is set; the lobole package is importable "
           "for anything fancier). print() what matters: stdout/stderr come "
           "back (capped at 20000 chars each). Relative file paths land in "
           "the returned cwd, a scratch directory. Same trust domain as the "
@@ -2564,13 +2564,14 @@ def execute_script(script: str, timeout: float = 120.0) -> dict:
     port = _attached.get("port") if _attached else None
     if not port:
         raise RuntimeError("no instance attached")
-    tools_dir = os.path.dirname(os.path.abspath(__file__))
+    # The directory holding the lobole package, for the script's sys.path.
+    pkg_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     cwd = tempfile.mkdtemp(prefix="designer-script-")
     prelude = (
         "import os, sys\n"
-        f"sys.path.insert(0, {tools_dir!r})\n"
-        "from designer_remote import Designer\n"
-        "d = Designer(int(os.environ['DESIGNER_PORT']), timeout=600.0)\n"
+        f"sys.path.insert(0, {pkg_root!r})\n"
+        "from lobole.client import Client\n"
+        "d = Client(int(os.environ['DESIGNER_PORT']), timeout=600.0)\n"
         "# --- script ---\n")
     path = pathlib.Path(cwd, "script.py")
     path.write_text(prelude + script)
@@ -2599,7 +2600,7 @@ def _connect_if_needed():
         _connect()
 
 
-@mcp.tool(description="Which Designer instances are running, and which one "
+@mcp.tool(description="Which Loböle instances are running, and which one "
           "these tools are talking to. Instances announce themselves when "
           "they open a remote port, so no port has to be guessed. Use this "
           "when a call reports several instances (set DESIGNER_PORT to "
@@ -2629,12 +2630,12 @@ def help(method: str = "") -> dict:
         return {"method": method,
                 "doc": "Exposed directly as the MCP tool of the same "
                        "name — see its tool description."}
-    # The lookup is designer_remote.method_help, which the python client's
+    # The lookup is lobole.client.method_help, which the python client's
     # help() also is: this server adds only its own prose for the methods it
     # wraps. Anything else — most RPCs (motion studies, appearance,
     # sections...) — is answered from the app's describe row.
     import inspect
-    from designer_remote import method_help, RemoteError
+    from lobole.client import method_help, RemoteError
     reference = {name: {"doc": e["doc"],
                         "arguments": str(inspect.signature(e["fn"]))}
                  for name, e in _REFERENCE.items()}
@@ -2648,7 +2649,7 @@ def help(method: str = "") -> dict:
     return out
 
 @mcp.prompt(name="modeling-workflow",
-            description="How to model a part in Designer with these tools")
+            description="How to model a part in Loböle with these tools")
 def modeling_workflow() -> str:
     return WORKFLOW
 

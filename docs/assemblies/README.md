@@ -575,7 +575,7 @@ requirements.
   (`pairsRigidChecked`, `pairsRigid`).
 - Exact queries on spline-heavy bought parts (imported STEP motors, drivers)
   dominate sweep time.
-- SDK: `Asm.check_clashes()` (`tools/designer_sdk.py`) is the whole-assembly,
+- SDK: `Asm.check_clashes()` (`python/lobole/sdk.py`) is the whole-assembly,
   exact, volume-only gate (`interference`; refuses mesh mode or a named-pair
   restriction). `Asm.check()` is the contact, connectivity and near-miss report
   (`contact_report`, `near_tol` default 1.0). `interference` takes
@@ -704,7 +704,7 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
   `src/remote/RemoteRequirements.cpp`).
 - `edit_in_context`.
 
-The Python SDK (`tools/designer_sdk.py`) wraps these on `Asm`: `gear`,
+The Python SDK (`python/lobole/sdk.py`) wraps these on `Asm`: `gear`,
 `chain`, `rack`, `screw`, `cam`, `freewheel`, `click`, `motion`, `check`
 (connectivity, declared clearances and clashes, with an `allow` map of exact
 pairs and volume ceilings for intended contact). `Occurrence.frame(name)`

@@ -11,7 +11,7 @@ vacuum pump and what hangs on the block and head on the pump side
 """
 
 import math
-from designer_sdk import Part, Plane, V, SdkError
+from lobole.sdk import Part, Plane, V, SdkError
 import om615_bottom as B
 import om615_top as T
 from om615_spec import BELT_Y, PULLEY_D, WP_PULLEY_D, WATER_PUMP_Z

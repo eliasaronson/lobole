@@ -21,10 +21,9 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, HERE)
-import designer_sdk as sdk  # noqa: E402
-from designer_remote import Designer  # noqa: E402
+import lobole.sdk as sdk  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -81,8 +80,8 @@ def check_generated_surface(app):
            "the feature-type table should carry Frame (v86)")
     # (d) a typo'd keyword is caught HERE, naming what the method takes.
     refused(lambda: app.add_part(named="x"), "named", "it takes", "name")
-    src = open(os.path.join(HERE, "..", "tools",
-                            "designer_sdk.py")).read()
+    src = open(os.path.join(HERE, "..", "python", "lobole",
+                            "sdk.py")).read()
     for kind in ("coincident", "perpendicular", "distance_pl"):
         expect(f'"{kind}"' not in src,
                f"the constraint kind '{kind}' is hard-coded in the SDK; read "
@@ -636,7 +635,7 @@ def main():
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     app_proc = launch_app(binary, env=env)
     try:
-        app = sdk.App(Designer.wait_for(app_proc.port))
+        app = sdk.App(Client.wait_for(app_proc.port))
         check_generated_surface(app)
         app.new()
 

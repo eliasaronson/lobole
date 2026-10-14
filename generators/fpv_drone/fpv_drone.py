@@ -65,9 +65,8 @@ def report_phases():
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))  # generators/, for _lib
-sys.path.insert(0, str(HERE.parent.parent / "tools"))
 
-from designer_sdk import SdkError, connect  # noqa: E402
+from lobole.sdk import SdkError, connect  # noqa: E402
 
 import fpv_drone_parts as P  # noqa: E402
 import fpv_drone_parts as parts_module  # noqa: E402 — rebound by declare()
@@ -102,7 +101,7 @@ def place(asm, part, position=(0, 0, 0), orientation=None, name=None,
     if name:
         kw["name"] = name
     r = asm.app.add_occurrence(**kw)
-    from designer_sdk import Occurrence
+    from lobole.sdk import Occurrence
     return Occurrence(asm, dict(r, name=r.get("name", name or part.name)))
 
 

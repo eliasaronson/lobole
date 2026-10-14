@@ -2,21 +2,21 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Remote-control client for Designer (start the app with --remote <port>).
+"""Remote-control client for Loböle (start the app with --remote <port>).
 
 Library:
-    from designer_remote import Designer
-    d = Designer(8437)
+    from lobole.client import Client
+    d = Client(8437)
     d.call("add_feature", feature={"type": "Box", "name": "Box 1",
                                    "on": "Top",
                                    "width": 2, "depth": 2, "height": 2})
     print(d.call("get_state"))
 
 CLI:
-    designer_remote.py <port> <method> ['<params-json>']
-    designer_remote.py 8437 get_state
-    designer_remote.py 8437 menu_click '{"path": "File/New"}'
-    designer_remote.py 8437 screenshot '{"path": "/tmp/shot.png"}'
+    python3 -m lobole.client <port> <method> ['<params-json>']
+    python3 -m lobole.client 8437 get_state
+    python3 -m lobole.client 8437 menu_click '{"path": "File/New"}'
+    python3 -m lobole.client 8437 screenshot '{"path": "/tmp/shot.png"}'
 """
 import json
 import socket
@@ -43,7 +43,7 @@ class NonFiniteError(RemoteError):
         self.result = result
 
 
-class Designer:
+class Client:
     """`strict`: an answer holding a non-finite number raises NonFiniteError
     instead of warning. Unset, it follows DESIGNER_REMOTE_STRICT=1, which
     tests/smoke_app.py sets, so every smoke runs strict."""
@@ -178,7 +178,7 @@ class Designer:
         last = None
         while time.time() < deadline:
             try:
-                return Designer(port, strict=strict)
+                return Client(port, strict=strict)
             except OSError as e:
                 last = e
                 time.sleep(0.3)
@@ -189,7 +189,7 @@ def method_help(call, method="", reference=None):
     """help(method) for every client: what the method does, the parameter
     keys it takes, and what it returns, from the app's own `describe` row.
 
-    Shared by this client and the MCP server (tools/designer_mcp.py), so the
+    Shared by this client and the MCP server (lobole.mcp), so the
     two cannot drift into different answers. `call(name, **params)` reaches
     the app. `reference` is a client's own prose for methods it wraps,
     {method: {"doc": ..., ...}}: the MCP server passes the tool descriptions
@@ -223,7 +223,7 @@ def method_help(call, method="", reference=None):
     # type in words, from the same schema the server validates against.
     schema = row.get("request_schema") or {}
     if schema.get("properties"):
-        from designer_contracts import describe
+        from lobole.contracts import describe
         required = set(schema.get("required", []))
         out["param_types"] = {
             k: describe(s) + ("" if k in required else " (optional)")
@@ -241,7 +241,7 @@ def main():
     port = int(sys.argv[1])
     method = sys.argv[2]
     params = json.loads(sys.argv[3]) if len(sys.argv) > 3 else {}
-    d = Designer(port)
+    d = Client(port)
     try:
         print(json.dumps(d.request(method, params), indent=2))
     finally:

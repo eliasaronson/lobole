@@ -170,7 +170,7 @@ These are the ones a newcomer trips over. Most have a test behind them.
   [`docs/ui/tool-sessions.md#defaults-and-refusals`](docs/ui/tool-sessions.md#defaults-and-refusals).
 - **A feature an assistant cannot drive is half-shipped.** A new feature type
   needs its row in the `describe` table (`remote_smoke` fails otherwise) and
-  in `FEATURE_FORMATS` in `tools/designer_mcp.py` (`mcp_formats_gate`
+  in `FEATURE_FORMATS` in `python/lobole/mcp.py` (`mcp_formats_gate`
   cross-checks it against `describe`).
 - **A new tool must be reachable by clicking.** Give the button a stable
   `###tb_*` id and add a GUI test that finishes the tool and checks the
@@ -210,9 +210,9 @@ build/lobole --headless --remote 8437   # no GPU, no display: full modeling
 Then drive it from Python:
 
 ```python
-import sys; sys.path.insert(0, "tools")
-from designer_remote import Designer
-d = Designer(8437)
+# PYTHONPATH=python (nix-shell sets it), or `uv tool install .`
+from lobole import Client
+d = Client(8437)
 d.call("add_feature", feature={"type": "Box", "name": "B", "on": "Top",
                                "width": 10, "depth": 6, "height": 4})
 print(d.call("get_state")["bodies"][0]["volume"])

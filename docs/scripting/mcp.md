@@ -1,9 +1,9 @@
 # The MCP server
 
-`tools/designer_mcp.py` exposes a running Loböle instance to any MCP client
-(Claude Code, Claude Desktop, a custom agent). It is a stdio server built on
-the official MCP Python SDK's `FastMCP`, a thin layer over
-`tools/designer_remote.py`: every tool ends in an RPC ([rpc.md](rpc.md)).
+`lobole.mcp` (`python/lobole/mcp.py`) exposes a running Loböle instance to
+any MCP client (Claude Code, Claude Desktop, a custom agent). It is a stdio
+server built on the official MCP Python SDK's `FastMCP`, a thin layer over
+`lobole.client`: every tool ends in an RPC ([rpc.md](rpc.md)).
 
 ## Setup
 
@@ -12,7 +12,7 @@ checked-in `.mcp.json`, which runs it inside `nix-shell` (the `mcp` package
 comes from `shell.nix`). For other clients:
 
 ```
-claude mcp add lobole -- python3 /path/to/Designer/tools/designer_mcp.py
+claude mcp add lobole -- env PYTHONPATH=/path/to/checkout/python python3 -m lobole.mcp
 ```
 
 No port is needed; see "Finding the app" below. `--port` or `$DESIGNER_PORT`
@@ -20,20 +20,19 @@ No port is needed; see "Finding the app" below. `--port` or `$DESIGNER_PORT`
 
 ### Installing without the checkout
 
-The repo root `pyproject.toml` packages `designer_mcp` and `designer_remote`
-from `tools/` with two console scripts, `designer-mcp` (the server) and
-`designer-remote` (the CLI client):
+The repo root `pyproject.toml` builds the `lobole` package (`python/lobole/`)
+with two console scripts, `lobole-mcp` (the server) and `lobole-remote` (the
+CLI client):
 
 ```
-uv tool install /path/to/Designer       # or: uvx --from git+ssh://<remote> designer-mcp
-claude mcp add lobole -- designer-mcp
+uv tool install /path/to/checkout       # or: uvx --from git+<url> lobole-mcp
+claude mcp add lobole -- lobole-mcp
 ```
 
-The package name `designer-mcp` is a placeholder and is not on PyPI; install
-from a path or a git URL. `mcp` is pinned `<2`: mcp 2.x renamed `FastMCP` and
-changed other APIs, and the pin is lifted by migrating the server, not by
-loosening it. `packaging_smoke` checks that every `py-modules` entry exists
-and every console script resolves to a real callable.
+It is not on PyPI yet; install from a path or a git URL. `mcp` is pinned
+`<2`: mcp 2.x renamed `FastMCP` and changed other APIs, and the pin is lifted
+by migrating the server, not by loosening it. `packaging_smoke` builds the
+wheel and imports every module from it alone.
 
 ## Finding the app
 
@@ -82,7 +81,7 @@ server.
 
 The announced tools are what a person asks an assistant for in a
 conversation, plus two doors to everything else. The `@mcp.tool`
-functions in `designer_mcp.py` are the authority; grouped:
+functions in `lobole/mcp.py` are the authority; grouped:
 
 | group | tools |
 |---|---|
@@ -98,15 +97,16 @@ FEM and topology studies, configurations, sketch constraints and ops,
 checkpoints and history, tolerances, sections, CAM, the raw GUI actions — is
 reached with **`rpc(method, params)`** and documented by **`help(method)`**.
 
-- `rpc` routes through a kept wrapper when the server has one (so its
-  argument shaping and defaults still apply), and otherwise passes the call
-  straight to the app, so an RPC newer than this file still works. An unknown
+- `rpc` routes through a kept wrapper when the server has one and the
+  params fit its signature (so its argument shaping and defaults still
+  apply), and otherwise passes the call straight to the app — a key the app
+  accepts that the wrapper never learned reaches the app, which validates — so an RPC newer than this file still works. An unknown
   name comes back with close matches.
 - `help(method)` returns the wrapper's prose and signature, or, for an RPC
   the server does not wrap, the app's own `describe` row — with
   `param_types`, each key's type in words, for a method with a typed
   contract ([rpc.md](rpc.md#typed-contracts)). The lookup is
-  `designer_remote.method_help`, which the python client's `help` also is;
+  `lobole.client.method_help`, which the python client's `help` also is;
   this server only adds its wrapper prose.
 - `screenshot` and `render_still` return the image inline.
 
@@ -122,8 +122,8 @@ this build can drive its GUI.
 ### `execute_script`
 
 Runs a Python snippet in a subprocess with `d` pre-bound to a connected
-`designer_remote.Designer` on the attached instance. `DESIGNER_PORT` is set,
-`tools/` is on `sys.path` (so `designer_sdk` imports), stdout and stderr come
+`lobole.client.Client` on the attached instance. `DESIGNER_PORT` is set,
+the `lobole` package is on `sys.path` (so `lobole.sdk` imports), stdout and stderr come
 back capped at 20000 characters each, relative paths land in a returned
 scratch `cwd`, and `timeout` (default 120 s) bounds long solves. This is the
 path for building a part with loops or computed arguments — one round trip
@@ -150,7 +150,7 @@ Changing it changes what the benchmark measures.
 
 An agent can only use `add_feature` if the feature, entity and constraint
 dialects are in front of it. `FEATURE_FORMATS` and `MATERIAL_SLUGS` in
-`designer_mcp.py` carry them as prose in the tool descriptions; the source of
+`lobole/mcp.py` carry them as prose in the tool descriptions; the source of
 truth is `SerializeFeatures.cpp` (`FeatureFromJson`, `EntityFromJson`), served
 at runtime by `describe`. `mcp_formats_gate` (headless, on the default path)
 fails when a feature type, sketch entity type or material slug in `describe`
@@ -159,10 +159,9 @@ is missing from the prose, so a new feature type needs a row in both places.
 ## Testing
 
 - `mcp_formats_gate` — the prose against `describe`, headless.
-- `mcp_server_compiles`, `py_client_compiles` — `py_compile` the server and
-  client on the default path, with no display and no SDK. `mcp_smoke` is
-  GUI-labelled, so without these a syntax error in the server would pass
-  every default run.
+- `python_package_compiles` — compiles every module of the package on the
+  default path, with no display and no SDK. `mcp_smoke` is GUI-labelled, so
+  without it a syntax error in the server would pass every default run.
 - `mcp_autostart_smoke` — the autostart lifecycle (skips without the `mcp`
   SDK or a Vulkan device).
 - `mcp_smoke` (GUI) — models a dimensioned bracket end to end through the

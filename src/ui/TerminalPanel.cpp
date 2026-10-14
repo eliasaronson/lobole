@@ -14,6 +14,7 @@
 
 #include "imgui.h"
 #include "imgui_internal.h" // ImGuiWindow, for the dock-on-first-use path
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -201,19 +202,20 @@ void StartSession(AppState& state, Session& t,
   t.label = label;
 }
 
-// tools/designer_mcp.py, if this build can find it: next to the executable
-// in a dev tree, or in the installed data directory. Empty when neither has
-// it — the session still starts, just without MCP wired up.
-std::string FindMcpServer() {
+// The directory holding the lobole Python package (python/lobole/), if this
+// build can find one: the checkout's own beside a dev build, the copy staged
+// in its assets, or the installed data directory. Empty when none has it —
+// the session still starts, just without MCP wired up.
+std::string FindPythonPackageRoot() {
   std::error_code ec;
   const std::array<std::filesystem::path, 3> candidates{
-      RuntimePaths::DataDir() / "tools" / "designer_mcp.py",
-      RuntimePaths::ExecutableDir() / ".." / "tools" / "designer_mcp.py",
-      RuntimePaths::ExecutableDir() / "tools" / "designer_mcp.py",
+      RuntimePaths::DataDir() / "python",
+      RuntimePaths::ExecutableDir() / ".." / "python",
+      RuntimePaths::ExecutableDir() / "python",
   };
   for (const std::filesystem::path& p : candidates) {
     const std::filesystem::path norm = p.lexically_normal();
-    if (std::filesystem::exists(norm, ec))
+    if (std::filesystem::exists(norm / "lobole" / "mcp.py", ec))
       return norm.string();
   }
   return {};
@@ -235,16 +237,19 @@ int InstancePort(AppState& state) {
 // mcp add`: this is per session, it must not edit the user's global MCP
 // registration, and a project .mcp.json belongs to the project, not to us.
 std::string WriteMcpConfig(int port) {
-  const std::string server = FindMcpServer();
-  if (port <= 0 || server.empty())
+  const std::string root = FindPythonPackageRoot();
+  if (port <= 0 || root.empty())
     return {};
   const std::filesystem::path cfg =
       std::filesystem::temp_directory_path() /
-      ("designer-mcp-" + std::to_string(port) + ".json");
-  const std::string json = "{\"mcpServers\":{\"lobole\":{\"command\":"
-                           "\"python3\",\"args\":[\"" +
-                           server + "\",\"--port\",\"" + std::to_string(port) +
-                           "\"]}}}";
+      ("lobole-mcp-" + std::to_string(port) + ".json");
+  const nlohmann::json config = {
+      {"mcpServers",
+       {{"lobole",
+         {{"command", "python3"},
+          {"args", {"-m", "lobole.mcp", "--port", std::to_string(port)}},
+          {"env", {{"PYTHONPATH", root}}}}}}}};
+  const std::string json = config.dump();
   FILE* f = std::fopen(cfg.string().c_str(), "wb");
   if (f == nullptr)
     return {};
@@ -266,7 +271,7 @@ std::string ClaudeCommand(AppState& state) {
 }
 
 // $SHELL, with this window's port already exported: typing `claude` — or
-// `python3 tools/designer_remote.py`, or anything else that reads
+// `python3 -m lobole.client`, or anything else that reads
 // DESIGNER_PORT — then talks to the model on screen without being told which
 // instance to attach to.
 void StartShell(AppState& state, Session& t) {
@@ -568,6 +573,8 @@ std::string TabLabel(const Session& s) {
 }
 
 } // namespace
+
+std::string WriteTerminalMcpConfig(int port) { return WriteMcpConfig(port); }
 
 bool TerminalCapturesKeys(const AppState& state) {
   // Computed from the window rect rather than read from a flag set while

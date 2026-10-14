@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from designer_sdk import App, V
+    from lobole.sdk import App, V
 
 
 @dataclass(frozen=True)
@@ -52,7 +52,7 @@ class MeasurementSnapshot:
     @classmethod
     def capture(cls, app, part_id, body, circular=False,
                 fields=('center', 'radius'), max_elements=2000):
-        from designer_sdk import V
+        from lobole.sdk import V
         fields = tuple(fields)
         result = app.inspection.geometry_snapshot(
             part_id=part_id, body=body, circular=circular, fields=fields,

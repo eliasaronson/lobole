@@ -44,10 +44,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
-sys.path.insert(0, str(HERE.parent.parent / "tools"))
 
-from designer_remote import RemoteError  # noqa: E402
-from designer_sdk import Batch, Part, SdkError, connect  # noqa: E402
+from lobole.client import RemoteError  # noqa: E402
+from lobole.sdk import Batch, Part, SdkError, connect  # noqa: E402
 
 DEFAULT_STEP = Path.home() / "Downloads/step_files/speaker.step"
 DEFAULT_OUT = HERE.parent.parent / "scratch/smart_speaker/bought"

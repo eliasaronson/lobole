@@ -51,7 +51,7 @@ router cuts a knife edge either.
 """
 import math
 
-from designer_sdk import Plane
+from lobole.sdk import Plane
 
 MDF = "mdf"
 

@@ -4,14 +4,16 @@
 
 """Generate wire types and embedded schemas from the inspection contract.
 
-Run with --check in CI. No running Designer or third-party packages required.
+Run with --check in CI. No running Loböle or third-party packages required.
 """
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / 'python'))  # the lobole package
 SOURCE = ROOT / 'api/inspection-contracts.json'
 
 
@@ -32,7 +34,7 @@ def generate():
         if schema['type'] == 'array':
             check_schema(schema['items'])
         if 'default' in schema:
-            from designer_contracts import validate
+            from lobole.contracts import validate
             validate(schema, schema['default'], 'contract default')
 
     for spec in contract['methods'].values():
@@ -98,7 +100,7 @@ def generate():
               '    def __init__(self, call: Callable[[str, dict[str, object]], object]):\n'
               '        self._call = call\n\n' + '\n\n'.join(methods) + '\n')
     return {ROOT / 'src/remote/InspectionContracts.generated.h': header,
-            ROOT / 'tools/designer_inspection.py': python}
+            ROOT / 'python/lobole/inspection.py': python}
 
 
 def main():

@@ -28,7 +28,7 @@ if importlib.util.find_spec('mypy') is None:
           f'({sys.executable}). nix-shell has it; apt: python3-mypy')
     sys.exit(SKIP)
 with tempfile.TemporaryDirectory(prefix='inspection-mypy-') as cache:
-    env = dict(os.environ, MYPYPATH=str(ROOT / 'tools'))
+    env = dict(os.environ, MYPYPATH=str(ROOT / 'python'))
     base = [sys.executable, '-m', 'mypy', '--follow-imports=silent',
             '--show-error-codes', '--no-error-summary', '--no-pretty',
             '--cache-dir', cache]
@@ -42,8 +42,8 @@ with tempfile.TemporaryDirectory(prefix='inspection-mypy-') as cache:
                     if '# type-error' in line}
         assert errors == expected, result.stdout
         assert result.returncode == (1 if expected else 0), result.stdout
-    generated = subprocess.run(base + [str(ROOT / 'tools/designer_inspection.py'),
-                                      str(ROOT / 'tools/designer_rpc.py')],
+    generated = subprocess.run(base + [str(ROOT / 'python/lobole/inspection.py'),
+                                      str(ROOT / 'python/lobole/rpc.py')],
                                env=env, text=True, capture_output=True)
     assert generated.returncode == 0, generated.stdout + generated.stderr
 print('inspection + rpc typing: valid fixtures and every seeded error verified')

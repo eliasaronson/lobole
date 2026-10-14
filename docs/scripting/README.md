@@ -11,9 +11,17 @@ A feature an agent cannot drive is half-built.
   lobole --remote <port>          the app: one JSON-RPC server (src/remote/)
      ^            ^           ^
      |            |           |
-  designer_remote.py   designer_sdk.py      designer_mcp.py
-  (raw client)         (generated SDK)      (MCP server for agents)
+  lobole.client      lobole.sdk         lobole.mcp
+  (raw client)       (generated SDK)    (MCP server for agents)
 ```
+
+All three are modules of one Python package, `lobole`, in `python/lobole/`.
+In the repo nothing is installed: `shell.nix` and ctest put `python/` on
+`PYTHONPATH`, so every script, test and generator says `import lobole`
+without touching `sys.path`; a script in `tools/` that runs outside the
+shell puts `python/` on its own path. Elsewhere it installs as a wheel
+(`uv tool install <repo>`; [packaging](../packaging/README.md#the-agent-surface)),
+and `packaging_smoke` builds that wheel and imports every module from it.
 
 Pages:
 
@@ -83,8 +91,8 @@ file behind, so the pid is the truth: readers skip entries whose process is
 gone and delete them. The file holds only what does not change while the app
 runs; the open project and whether it is dirty come from `ping`, live.
 
-`Designer.instances()` in `tools/designer_remote.py` reads the registry; the
-MCP server and `designer_sdk.connect()` attach through it, so no client has
+`Client.instances()` in `python/lobole/client.py` reads the registry; the
+MCP server and `lobole.sdk.connect()` attach through it, so no client has
 to guess a port. `tools/scratch_port.py` picks a port that is free per the
 kernel, unclaimed per the registry, and never the human's.
 
@@ -95,8 +103,8 @@ process started, so the instance is serving old code.
 
 ## Clients
 
-- **`tools/designer_remote.py`** — the stdlib client every script and smoke
-  test imports. `Designer(port).call(method, **params)`; `request(method,
+- **`lobole.client`** — the stdlib client every script and smoke
+  test imports. `Client(port).call(method, **params)`; `request(method,
   params, timeout=)` for a dict and a per-call timeout; `wait_for(port)`;
   `instances()`. A refusal raises `RemoteError` (a `RuntimeError`) carrying
   the server's structured `.diagnostic` when there is one. `method` is
@@ -106,14 +114,12 @@ process started, so the instance is serving old code.
   client) is `method_help`, the lookup the SDK and the MCP server's `help`
   share: the method's doc, params (and `param_types` for a typed one) and
   returns from its `describe` row. Also
-  a CLI:
-  `designer_remote.py <port> <method> ['<params-json>']`.
-- **`tools/designer_sdk.py`** — the SDK ([sdk.md](sdk.md)). Its RPC surface
+  a CLI, `python3 -m lobole.client <port> <method> ['<params-json>']`
+  (`lobole-remote` once installed).
+- **`lobole.sdk`** — the SDK ([sdk.md](sdk.md)). Its RPC surface
   is generated from `describe` at connect time; the hand-written part is
   geometry references and compositions.
-- **`tools/designer.py`** — a small fluent client (`d.sketch(...).line(...)
-  .add()`, `d.extrude(...)`) over the same RPCs, tested by `pyclient_smoke`.
-- **`tools/designer_mcp.py`** — the MCP server ([mcp.md](mcp.md)).
+- **`lobole.mcp`** — the MCP server ([mcp.md](mcp.md)).
 
 The server accepts up to eight connections at once. Connections are
 concurrent; execution is not: every request goes through one main-thread
@@ -131,7 +137,7 @@ does a drawing request waiting for its views' projection (`update_drawing`,
 
 `--record <file>` tees every successful semantic request to a JSONL file
 (UI actions and screenshots are not recorded; they cannot replay headless).
-`tools/designer_replay.py <port> <session.jsonl>` sends them to another
+`python3 -m lobole.replay <port> <session.jsonl>` sends them to another
 instance in order and stops at the first failure — a reported bug becomes a
 replayable case. `replay_smoke` records a session and replays it into a
 fresh headless instance. A random-design case (`tools/fuzz.py`) is such a
@@ -178,9 +184,10 @@ editing has its save refused rather than clobbering the first.
 A generator is a Python program that builds parts through the SDK
 (`generators/`). Two SDK modules support re-running one without starting
 over; both are described in [sdk.md](sdk.md#validation-stages):
-`designer_validation.validate(app, stage=preview|local|full)` for staged
-checks, and `designer_components.claim` / `plan` for rebuilding one
+`lobole.validation.validate(app, stage=preview|local|full)` for staged
+checks, and `lobole.components.claim` / `plan` for rebuilding one
 generator-owned part in place.
+
 ## Inspection snapshots
 
 `tools/benchmark_inspection.py --project P --parts ... --output J` times live
@@ -199,9 +206,9 @@ both paths to agree on every edge name and centre before it accepts a timing.
 | shared helpers (`MethodDoc`, flags, regen/digest, `KnownList`, `IndexError`, `ResolvePartParam`) | `src/remote/RemoteHelpers.h` |
 | instance registry | `src/remote/InstanceRegistry.{h,cpp}` |
 | typed inspection contracts | `api/inspection-contracts.json`, `src/remote/InspectionContracts.h`, `tools/generate_inspection_contracts.py` |
-| clients | `tools/designer_remote.py`, `designer_sdk.py`, `designer.py`, `designer_mcp.py`, `designer_replay.py` |
-| SDK support modules | `tools/designer_validation.py`, `designer_components.py`, `designer_snapshots.py`, `designer_inspection.py` (generated), `designer_contracts.py` |
-| packaging of the MCP server | `pyproject.toml`, `.mcp.json` |
+| clients (the `lobole` package) | `python/lobole/`: `client.py`, `sdk.py`, `mcp.py`, `replay.py` |
+| SDK support modules | `python/lobole/`: `validation.py`, `components.py`, `snapshots.py`, `inspection.py` and `rpc.py` (both generated), `contracts.py` |
+| packaging | `pyproject.toml`, `.mcp.json` |
 
 ## How it is tested
 
@@ -220,11 +227,14 @@ Headless, on the default `ctest -LE gui` path:
 - `batch_smoke`, `regen_honesty_smoke`, `strict_inputs_smoke`,
   `papercuts_smoke`, `tabless_read_smoke`, `refused_calls_smoke` — the
   contracts in [rpc.md](rpc.md).
-- `sdk_smoke`, `pyclient_smoke`, `replay_smoke`, `fanout_smoke`,
+- `sdk_smoke`, `replay_smoke`, `fanout_smoke`,
   `component_update_smoke`, `inspection_contracts_smoke`,
   `inspection_contracts_generated`, `inspection_typing_gate`.
-- `mcp_formats_gate`, `mcp_server_compiles`, `py_client_compiles`,
-  `packaging_smoke`, `mcp_autostart_smoke` — the MCP server ([mcp.md](mcp.md)).
+- `mcp_formats_gate`, `mcp_autostart_smoke` — the MCP server
+  ([mcp.md](mcp.md)).
+- `python_package_compiles` — every module of the package compiles;
+  `packaging_smoke` — the wheel builds, carries every module and `py.typed`,
+  and each module imports from it alone.
 - `offscreen_smoke` — the offscreen renderer over RPC (skips without a
   Vulkan device).
 

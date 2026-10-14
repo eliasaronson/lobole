@@ -13,7 +13,7 @@ instance of its own, `new_project` between them:
   - the design, with every check of tools/fuzz_design.py after each step
     and at the end. A case passes when every check holds: the bug it was
     found by no longer happens;
-  - the session as recorded, through tools/designer_replay.py (which skips
+  - the session as recorded, through python/lobole/replay.py (which skips
     the header): the literal calls still run, as a person replaying it by
     hand would see.
 
@@ -30,7 +30,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, HERE)
 import fuzz_design as fd  # noqa: E402
-from designer_replay import replay  # noqa: E402
+from lobole.replay import replay  # noqa: E402
 from smoke_app import launch  # noqa: E402
 
 CASES = os.path.join(HERE, "fuzz", "cases")

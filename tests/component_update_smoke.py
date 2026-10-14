@@ -6,11 +6,10 @@
 import os
 import sys
 import tempfile
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'tools'))
-from designer_sdk import App, SdkError
-from designer_remote import Designer
-from designer_components import claim, plan
-from designer_validation import validate
+from lobole.sdk import App, SdkError
+from lobole.client import Client
+from lobole.components import claim, plan
+from lobole.validation import validate
 from smoke_app import launch_app
 
 
@@ -27,7 +26,7 @@ def main():
         env = dict(os.environ, XDG_STATE_HOME=tmp, XDG_CONFIG_HOME=tmp+'/config')
         proc = launch_app(sys.argv[1], env=env)
         try:
-            app = App(Designer.wait_for(proc.port))
+            app = App(Client.wait_for(proc.port))
             app.new()
             def builder(width):
                 def build(a):

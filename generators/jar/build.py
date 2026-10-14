@@ -29,9 +29,8 @@ from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = Path(HERE).resolve().parent.parent
-sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "generators"))
-from designer_sdk import Plane, SdkError, connect  # noqa: E402
+from lobole.sdk import Plane, SdkError, connect  # noqa: E402
 from _lib import check_print, print_receipt  # noqa: E402
 
 OUT = Path(os.environ.get("DESIGNER_SCRATCH", ROOT / "scratch")) / "jar"

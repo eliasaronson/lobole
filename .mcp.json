@@ -4,7 +4,7 @@
       "command": "nix-shell",
       "args": [
         "--run",
-        "python3 tools/designer_mcp.py"
+        "python3 -m lobole.mcp"
       ]
     }
   }

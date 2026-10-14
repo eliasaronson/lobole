@@ -1053,32 +1053,26 @@ add_test(NAME topo_build_smoke
 set_tests_properties(topo_build_smoke PROPERTIES TIMEOUT 240
                      SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
 
-# Models a bracket through the pythonic client (S3).
-add_test(NAME pyclient_smoke
-         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/pyclient_smoke.py
-                 $<TARGET_FILE:designer>)
-set_tests_properties(pyclient_smoke PROPERTIES TIMEOUT 120)
-
 # Records a session and replays it into a fresh headless instance (S4).
 add_test(NAME replay_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/replay_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(replay_smoke PROPERTIES TIMEOUT 300)
 
-# The MCP server has to at least COMPILE, in every run and in CI. mcp_smoke
-# below is gui-labeled (it needs a live app and the python mcp SDK), so a
-# plain syntax error in the server shipped undetected for four days in August
-# 2026 — nothing on the default path ever imported the file. This costs
-# milliseconds and needs neither a display nor the SDK.
-# `python3 -m py_compile` writes __pycache__ NEXT TO THE SOURCE, which fails
-# against a read-only checkout (tools/ci-local.sh mounts one) and litters the
-# tree otherwise. Compile to an explicit path in the build dir instead.
-add_test(NAME mcp_server_compiles
+# Every module of the lobole package has to at least COMPILE, in every run
+# and in CI. mcp_smoke below is gui-labeled (it needs a live app and the
+# python mcp SDK), so a plain syntax error in the MCP server shipped
+# undetected for four days in August 2026 — nothing on the default path ever
+# imported the file. This costs milliseconds and needs neither a display nor
+# the SDK. It compiles in memory and writes nothing: `py_compile` writes
+# __pycache__ next to the source, which fails against a read-only checkout
+# (tools/ci-local.sh mounts one), and a `mcp.pyc` written into this
+# directory was imported as the `mcp` SDK by every test run from here.
+add_test(NAME python_package_compiles
          COMMAND python3 -c
-                 "import py_compile,sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)"
-                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer_mcp.py
-                 ${CMAKE_CURRENT_BINARY_DIR}/designer_mcp.pyc)
-set_tests_properties(mcp_server_compiles PROPERTIES TIMEOUT 60)
+                 "import glob,os,sys; [compile(open(f).read(), f, 'exec') for f in glob.glob(os.path.join(sys.argv[1], '*.py'))]"
+                 ${CMAKE_SOURCE_DIR}/python/lobole)
+set_tests_properties(python_package_compiles PROPERTIES TIMEOUT 60)
 
 # The server's hand-written format prose (FEATURE_FORMATS, MATERIAL_SLUGS)
 # against the app's `describe`, HEADLESS. mcp_smoke has the same check, but
@@ -1135,20 +1129,12 @@ foreach(gen_budget om615:420 pes_pump:180 chess:360 pantilt:720 planetary:240
                        LABELS "generators;slow" TIMEOUT ${gen_timeout})
 endforeach()
 
-# Same for the python client every script and smoke test imports.
-add_test(NAME py_client_compiles
-         COMMAND python3 -c
-                 "import py_compile,sys; py_compile.compile(sys.argv[1], cfile=sys.argv[2], doraise=True)"
-                 ${CMAKE_CURRENT_SOURCE_DIR}/../tools/designer_remote.py
-                 ${CMAKE_CURRENT_BINARY_DIR}/designer_remote.pyc)
-set_tests_properties(py_client_compiles PROPERTIES TIMEOUT 60)
-
 # The pyproject's claims resolve: its modules exist and each console script
 # names a real callable — `uv tool install` happens on machines where no test
 # runs, so metadata rot has to be caught here.
 add_test(NAME packaging_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/packaging_smoke.py)
-set_tests_properties(packaging_smoke PROPERTIES TIMEOUT 60)
+set_tests_properties(packaging_smoke PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 
 # Models a bracket through the MCP server (stdio) over the same live app.
 # Skips (77) when the python mcp SDK is not installed.
@@ -1278,3 +1264,11 @@ add_test(NAME fuzz_corpus_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/fuzz_corpus_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(fuzz_corpus_smoke PROPERTIES TIMEOUT 180)
+
+# Every test finds the lobole Python package (python/lobole/) without
+# editing sys.path, on the stock-Ubuntu CI image as in the nix shell (which
+# exports the same). Last in the file, so it reaches every test above; the
+# Catch2 cases discovered at test time are C++ and do not need it.
+get_property(LOBOLE_ALL_TESTS DIRECTORY PROPERTY TESTS)
+set_property(TEST ${LOBOLE_ALL_TESTS} APPEND PROPERTY
+             ENVIRONMENT "PYTHONPATH=${CMAKE_SOURCE_DIR}/python")

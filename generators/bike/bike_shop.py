@@ -21,8 +21,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
-from designer_sdk import Plane, SdkError, V, _id  # noqa: E402
+from lobole.sdk import Plane, SdkError, V, _id  # noqa: E402
 
 # There is no paint, chrome or tyre-rubber material — these are appearance
 # overrides on real slugs, so the mass still comes from the slug.

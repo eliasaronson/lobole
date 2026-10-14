@@ -6,7 +6,7 @@
 
 - The server's `request_schema` for every typed or parameterless row equals
   the Python reading of the same row (tools/rpc_contract.py), which is what
-  the generated stubs (tools/designer_rpc.py) are built from, and every
+  the generated stubs (python/lobole/rpc.py) are built from, and every
   `@vocabulary` a row names is one describe publishes.
 - Every typed method refuses a missing required key, a value of the wrong
   type, an enum miss and a range miss before its handler runs, with the
@@ -24,10 +24,10 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
-from designer_contracts import accepts  # noqa: E402
-from designer_remote import RemoteError  # noqa: E402
-from designer_rpc import COLUMNS  # noqa: E402
-from designer_sdk import App  # noqa: E402
+from lobole.contracts import accepts  # noqa: E402
+from lobole.client import RemoteError  # noqa: E402
+from lobole.rpc import COLUMNS  # noqa: E402
+from lobole.sdk import App  # noqa: E402
 from method_doc_scan import method_docs  # noqa: E402
 from rpc_contract import parse_column, request_schema  # noqa: E402
 from smoke_app import launch  # noqa: E402
@@ -180,7 +180,7 @@ def check_sdk(raw):
     try:
         app.add_mate(type='revolut', a={}, b={})
         raise AssertionError('the SDK sent an invalid add_mate')
-    except Exception as e:  # designer_contracts.ContractError
+    except Exception as e:  # lobole.contracts.ContractError
         client = e.diagnostic
     finally:
         raw.call = real

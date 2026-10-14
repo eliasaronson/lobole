@@ -22,9 +22,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from smoke_app import launch_app  # noqa: E402
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_shapes import box, cylinder  # noqa: E402
 
 _T0 = time.time()
@@ -71,7 +69,7 @@ def main():
             return 77
         raise
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         pong = d.call("ping")
         expect(pong["ok"], "ping answers")
         expect(pong["mode"] == "offscreen", f"ping mode is offscreen ({pong})")

@@ -20,8 +20,7 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -47,7 +46,7 @@ def main(binary):
         d = None
         for _ in range(120):
             try:
-                d = Designer(app.port)
+                d = Client(app.port)
                 d.call("ping")
                 break
             except Exception:

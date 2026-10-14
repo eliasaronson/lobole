@@ -31,9 +31,8 @@ import sys
 import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, HERE)
-from designer_sdk import App, SdkError  # noqa: E402
+from lobole.sdk import App, SdkError  # noqa: E402
 from smoke_app import launch  # noqa: E402
 
 

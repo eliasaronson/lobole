@@ -30,7 +30,7 @@ prints the plan, the run count and the cost ceiling for free.
   script), `no-inspect` (the floor: no tool that can ask an independent
   question about the part), and `document` (no RPC surface; the agent emits a
   whole project through `benchmarks/arms/document_mcp.py`). Arms narrow the
-  server with `designer_mcp.py --only-tools`, which refuses rather than
+  server with `lobole/mcp.py --only-tools`, which refuses rather than
   silently serving the full surface.
 - **The agent** runs with no built-in tools (`--tools ""`), no project
   context (`--setting-sources ""`), from an empty directory, against its own

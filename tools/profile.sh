@@ -163,7 +163,7 @@ if [ "$MODE" = app ]; then
   # Wait for the instance to answer rather than sleeping: a fixed sleep is
   # either a race or wasted profile. Gives up when perf does.
   ping_pid() {
-    python3 "$ROOT/tools/designer_remote.py" "$PORT" ping 2>/dev/null |
+    PYTHONPATH="$ROOT/python" python3 -m lobole.client "$PORT" ping 2>/dev/null |
       python3 -c 'import json, sys; print(json.load(sys.stdin).get("pid", ""))' \
         2>/dev/null || true
   }

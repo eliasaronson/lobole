@@ -15,10 +15,9 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from designer_remote import Designer  # noqa: E402
-from designer_sdk import Plane, connect  # noqa: E402
+from lobole.client import Client  # noqa: E402
+from lobole.sdk import Plane, connect  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 import smoke_shapes as shapes  # noqa: E402
 
@@ -171,9 +170,9 @@ def assembly_checks(d):
 def client_checks(port):
     # `method` is positional-only in both clients, so a parameter of that
     # name reaches the RPC.
-    d = Designer.wait_for(port)
+    d = Client.wait_for(port)
     row = d.call("describe", method="add_mate")
-    expect("add_mate" in str(row), f"describe(method=) via designer_remote")
+    expect("add_mate" in str(row), f"describe(method=) via lobole.client")
     app = connect(port)
     expect("add_mate" in str(app.describe(method="add_mate")),
            "describe(method=) via the SDK")
@@ -193,7 +192,7 @@ def client_checks(port):
     # help() over the python client, the same lookup the MCP server's is.
     h = d.help("add_mate")
     expect(h["method"] == "add_mate" and h["doc"] and "type" in h["params"],
-           f"help(method) via designer_remote: {h}")
+           f"help(method) via lobole.client: {h}")
     expect(d.call("help", method="add_mate") == h,
            "call('help', method=) is the same answer")
     expect("add_mate" in d.help()["methods"], "help() indexes the methods")
@@ -229,7 +228,7 @@ def main():
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     app = launch_app(binary, env=env)
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         part_checks(d)
         assembly_checks(d)
         client_checks(app.port)

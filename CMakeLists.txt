@@ -933,12 +933,13 @@ file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf
 # (docs/sketching/README.md#text).
 file(COPY ${CMAKE_SOURCE_DIR}/deps/fonts/LiberationSans-Regular.ttf
      DESTINATION ${CMAKE_BINARY_DIR}/assets/fonts)
-# The MCP server and its client, beside the assets: the terminal panel points
-# a Claude Code session at THIS instance by generating a config that names
-# this file, so it has to exist in a dev tree and in an install alike.
-file(COPY ${CMAKE_SOURCE_DIR}/tools/designer_mcp.py
-          ${CMAKE_SOURCE_DIR}/tools/designer_remote.py
-     DESTINATION ${CMAKE_BINARY_DIR}/assets/tools)
+# The lobole Python package (the MCP server among it), beside the assets:
+# the terminal panel points a Claude Code session at THIS instance by
+# generating a config that runs `python3 -m lobole.mcp` from here, so it has
+# to exist in a dev tree and in an install alike (installed below).
+file(COPY ${CMAKE_SOURCE_DIR}/python/lobole
+     DESTINATION ${CMAKE_BINARY_DIR}/assets/python
+     PATTERN "__pycache__" EXCLUDE)
 include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 
 # Studio HDRI for image-based lighting, loaded at runtime relative to the
@@ -1416,6 +1417,9 @@ install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole/hdri")
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/parts"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole")
+install(DIRECTORY "${CMAKE_SOURCE_DIR}/python/lobole"
+        DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole/python"
+        PATTERN "__pycache__" EXCLUDE)
 install(FILES "${CMAKE_SOURCE_DIR}/packaging/org.lobole.Lobole.desktop"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/applications")
 # AppStream metainfo. Installing it triggers `appstreamcli compose` during a

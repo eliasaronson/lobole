@@ -61,11 +61,11 @@ jobs:
         run: |
           docker run -d --rm --name designer -p 8437:8437 designer-headless:latest
           for i in $(seq 30); do
-            python3 tools/designer_remote.py 8437 ping > /dev/null 2>&1 && break
+            PYTHONPATH=python python3 -m lobole.client 8437 ping > /dev/null 2>&1 && break
             sleep 1
           done
-          python3 tools/designer_remote.py 8437 add_feature \
+          PYTHONPATH=python python3 -m lobole.client 8437 add_feature \
             '{"feature": {"type": "Box", "name": "B", "position": [0,0,0],
                           "width": 4, "height": 4, "depth": 4}}'
-          python3 tools/designer_remote.py 8437 get_state | grep -q '"volume": 64'
+          PYTHONPATH=python python3 -m lobole.client 8437 get_state | grep -q '"volume": 64'
           docker rm -f designer

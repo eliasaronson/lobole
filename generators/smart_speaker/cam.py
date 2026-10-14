@@ -28,7 +28,7 @@ own parts here (veneer.py) and there is no chamfer, so the panel already IS
 the machining shape. That configuration was a workaround for a part that held
 two things at once.
 """
-from designer_sdk import SdkError
+from lobole.sdk import SdkError
 
 # The machine, as the ported job embedded it. Saved to the store so a fresh
 # checkout can cut: a setup NAMES a machine and embeds a copy, and naming one

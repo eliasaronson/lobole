@@ -29,8 +29,7 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -66,7 +65,7 @@ def sweep(binary, env, threads, side):
         e["DESIGNER_SWEEP_THREADS"] = str(threads)
     app = launch_app(binary, env=e)
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         build(d, side)
         return d.call("contact_report", max_pairs=20000, deadline_s=600)
     finally:

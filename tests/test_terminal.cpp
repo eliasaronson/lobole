@@ -5,10 +5,14 @@
 
 #include "common/PtySession.h"
 #include "common/TerminalScreen.h"
+#include "ui/TerminalPanel.h"
 
 #include <catch2/catch_test_macros.hpp>
+#include <nlohmann/json.hpp>
 
 #include <chrono>
+#include <filesystem>
+#include <fstream>
 #include <thread>
 
 // The terminal's testable half (docs/ui/terminal.md): bytes in, grid
@@ -421,6 +425,27 @@ TEST_CASE("terminal: the last clipboard write wins", "[terminal]") {
   auto write = s.TakeClipboardWrite();
   REQUIRE(write.has_value());
   CHECK(*write == "second");
+}
+
+// The Claude Code button's config has to start a server that exists. It
+// named a script by path until the MCP server became `lobole.mcp`, a module
+// of a package; a stale path there leaves the button starting Claude Code
+// with no tools and nothing failing.
+TEST_CASE("terminal: the Claude Code MCP config runs the staged package",
+          "[terminal]") {
+  const std::string path = ui::WriteTerminalMcpConfig(8437);
+  REQUIRE_FALSE(path.empty()); // the build staged python/lobole beside it
+  std::ifstream in(path);
+  const nlohmann::json cfg = nlohmann::json::parse(in);
+  const nlohmann::json& server = cfg.at("mcpServers").at("lobole");
+  CHECK(server.at("command") == "python3");
+  CHECK(server.at("args") ==
+        nlohmann::json({"-m", "lobole.mcp", "--port", "8437"}));
+  const std::filesystem::path root =
+      server.at("env").at("PYTHONPATH").get<std::string>();
+  CHECK(std::filesystem::is_regular_file(root / "lobole" / "mcp.py"));
+  CHECK(std::filesystem::is_regular_file(root / "lobole" / "client.py"));
+  std::filesystem::remove(path);
 }
 
 #endif // HAVE_TERMINAL

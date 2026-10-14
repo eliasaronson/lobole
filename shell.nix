@@ -21,8 +21,9 @@ pkgs.mkShell {
     pkg-config
     ccache # auto-detected by CMakeLists, no-op if absent
     # tools/*.py + the remote/mcp ctests; pillow for render_ao_smoke, which
-    # compares pixels and would otherwise skip itself into uselessness.
-    (python3.withPackages (ps: [ ps.mcp ps.pillow ps.mypy ]))
+    # compares pixels and would otherwise skip itself into uselessness;
+    # setuptools for packaging_smoke, which builds the lobole wheel.
+    (python3.withPackages (ps: [ ps.mcp ps.pillow ps.mypy ps.setuptools ]))
     git # submodules
     # export_motion_video encodes mp4/webm/gif by running ffmpeg (an external
     # program, never linked); here so the smoke always has it. The headless
@@ -55,4 +56,12 @@ pkgs.mkShell {
 
   # Let the Vulkan loader find the validation layers from this shell.
   VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
+
+  # The lobole Python package (python/lobole/), importable from anywhere in
+  # this shell: the tests, generators and benchmarks import it without
+  # editing sys.path. `toString` keeps it the checkout's own path (a
+  # worktree's, in a worktree) rather than a copy in the store.
+  shellHook = ''
+    export PYTHONPATH="${toString ./python}''${PYTHONPATH:+:$PYTHONPATH}"
+  '';
 }

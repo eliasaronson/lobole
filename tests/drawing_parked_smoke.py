@@ -28,8 +28,7 @@ import tempfile
 import threading
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer, RemoteError  # noqa: E402
+from lobole.client import Client, RemoteError  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -56,7 +55,7 @@ class Waiting:
     waits, while the test's own connection looks on."""
 
     def __init__(self, port, method, **params):
-        self.d = Designer.wait_for(port)
+        self.d = Client.wait_for(port)
         self.answer = None
         self.error = None
         self.seconds = 0.0
@@ -93,7 +92,7 @@ def main():
             return 77
         raise
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         expect(d.call("ping")["mode"] == "offscreen", "an offscreen instance")
         d.call("new_project")
         d.call("add_part", name="spring")

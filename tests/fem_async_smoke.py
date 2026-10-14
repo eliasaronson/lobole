@@ -45,7 +45,7 @@ def main():
             # The synchronous answer, to compare the worker's against.
             #
             # An explicit timeout, because the client's default is 60 s and
-            # this call blocks for the whole solve. designer_remote.request's
+            # this call blocks for the whole solve. lobole.client.request's
             # own docstring names the trap: a solve that outlives the default
             # kills the client mid-call while the server finishes anyway,
             # which reads as a hang followed by a mystery. Here it would read

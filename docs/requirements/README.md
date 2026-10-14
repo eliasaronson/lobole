@@ -283,7 +283,7 @@ reference for every parameter and key.
 | `check_requirements {ids?, async?, recompute?, outlive_client?}` | measures (above) |
 | `add_assertion`, `list_assertions`, `remove_assertion`, `verify_assertions` | clearance requirements in the old words |
 
-The SDK (`tools/designer_sdk.py`): `App.require(name, measure, at_most= |
+The SDK (`python/lobole/sdk.py`): `App.require(name, measure, at_most= |
 at_least= | within=(lo, hi), source=)` states one, or edits the one of that
 name, so a generator re-run states the same set; `App.verify_requirements()`
 checks as a job, waits, and raises naming every requirement that is not

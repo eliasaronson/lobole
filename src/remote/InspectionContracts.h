@@ -18,7 +18,7 @@ namespace remote {
 // person reads, `diagnostic` is {operation, code, path, param?, expected,
 // observed, accepted?} (docs/scripting/rpc.md#structured-errors). `param` is
 // the top-level key the path runs through; `accepted` the values an enum, a
-// vocabulary or a key list takes. tools/designer_contracts.py builds the
+// vocabulary or a key list takes. python/lobole/contracts.py builds the
 // same object client-side, field for field.
 class ContractError : public std::runtime_error {
 public:
@@ -143,7 +143,7 @@ inline bool SchemaAccepts(const nlohmann::json& schema,
 // The supported JSON Schema subset, from one source per family: the
 // inspection contracts (api/inspection-contracts.json) and the typed MethodDoc
 // rows (remote/RpcContract.h). Domain checks (ownership, freshness, geometry)
-// stay in the handler. tools/designer_contracts.py is the same walk in the
+// stay in the handler. python/lobole/contracts.py is the same walk in the
 // same order, so a client preflight and the server name the same fault.
 inline void ValidateInspectionValue(const nlohmann::json& schema,
                                     const nlohmann::json& value,

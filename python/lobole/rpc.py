@@ -321,7 +321,7 @@ class ViewParams(TypedDict):
 
 
 class RpcSurface:
-    """The contracted RPCs, typed. `designer_sdk.App` inherits this for a
+    """The contracted RPCs, typed. `lobole.sdk.App` inherits this for a
     type checker only: at runtime every method is the generated
     `describe` surface, validated against the same contract."""
 

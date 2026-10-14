@@ -17,13 +17,12 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
-sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
 
 import chassis_spec as S          # noqa: E402
 import chassis_jig                # noqa: E402
 import chassis_panels             # noqa: E402
 from chassis_frame import Frame   # noqa: E402
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 
 
 def _name(a, b):
@@ -175,7 +174,7 @@ def main():
                          "the frame is ONE connected thing, and on 47 members "
                          "that is 1081 pairs and about four minutes")
     args = ap.parse_args()
-    d = Designer(port=args.port)
+    d = Client(port=args.port)
     t0 = time.time()
 
     d.call("new_project")

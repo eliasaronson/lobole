@@ -150,7 +150,7 @@ jobs:
       # does not depend on the host CPU — only on the driver, which the key
       # names.
       - name: Pixel regression (software Vulkan, NO Xvfb)
-        run: python3 tests/render_pixel_smoke.py build/lobole --require-baseline
+        run: PYTHONPATH="$PWD/python" python3 tests/render_pixel_smoke.py build/lobole --require-baseline
 
       # A pixel diff nobody can look at is a failure nobody can act on: the
       # smoke writes the render it got beside the baseline, so hand it over.
@@ -182,7 +182,7 @@ jobs:
             libocct-modeling-data-dev libocct-foundation-dev \
             libocct-ocaf-dev libocct-visualization-dev libtbb-dev \
             libvterm-dev \
-            python3-mypy
+            python3-mypy python3-setuptools
 
       # See the gui-suite job: the save half runs on failure too, so a red
       # test step still leaves a warm compile cache behind.
@@ -222,7 +222,11 @@ jobs:
       # installs it. Running the script directly makes a dropped package a red
       # build rather than a gate that quietly stopped applying everywhere.
       - name: Typing gate (mypy is installed here, so it must not skip)
-        run: python3 tests/inspection_typing_gate.py
+        run: PYTHONPATH="$PWD/python" python3 tests/inspection_typing_gate.py
+
+      # The same for the wheel: setuptools is installed here for it.
+      - name: Packaging smoke (setuptools is installed here, so it must not skip)
+        run: python3 tests/packaging_smoke.py
 
       # Nothing pending on main: a branch's format bump is numbered by
       # tools/merge-branch.sh as it lands, and one cherry-picked without it
@@ -245,7 +249,7 @@ jobs:
 
       - name: Smoke the engine-free build
         run: |
-          python3 tests/headless_smoke.py build-no-te/lobole
+          PYTHONPATH="$PWD/python" python3 tests/headless_smoke.py build-no-te/lobole
           ! build-no-te/lobole --gui-tests --hidden 2>/dev/null
 
       # The build without CAM, for exactly the reason stated above and with

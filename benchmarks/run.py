@@ -114,11 +114,12 @@ def mcp_config(port, arm):
                 "--port", str(port)]
         return {"mcpServers": {"lobole":
                                {"command": sys.executable, "args": args}}}
-    args = [os.path.join(ROOT, "tools", "designer_mcp.py"), "--port", str(port),
-            "--no-autostart"]
+    args = ["-m", "lobole.mcp", "--port", str(port), "--no-autostart"]
     if arm.get("only_tools"):
         args += ["--only-tools", ",".join(arm["only_tools"])]
-    return {"mcpServers": {"lobole": {"command": sys.executable, "args": args}}}
+    return {"mcpServers": {"lobole": {
+        "command": sys.executable, "args": args,
+        "env": {"PYTHONPATH": os.path.join(ROOT, "python")}}}}
 
 
 def run_agent(prompt, cfg_path, arm, model, cwd, budget, timeout):

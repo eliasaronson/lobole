@@ -51,7 +51,8 @@ body:
       label: "`ping` output"
       description: |
         Start the app with `--remote <port>` (or `--headless --remote <port>`)
-        and paste `python3 tools/designer_remote.py <port> ping`. It lists the
+        and paste `PYTHONPATH=python python3 -m lobole.client <port> ping`
+        (from the checkout). It lists the
         version and which optional features the build has.
       render: json
   - type: textarea

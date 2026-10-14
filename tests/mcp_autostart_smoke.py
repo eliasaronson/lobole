@@ -19,8 +19,6 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
 
 
 def main():
@@ -34,11 +32,11 @@ def main():
     os.environ.pop("DISPLAY", None)
     os.environ.pop("WAYLAND_DISPLAY", None)
     try:
-        import designer_mcp as m
+        import lobole.mcp as m
     except ModuleNotFoundError as e:
         print(f"SKIP: python mcp SDK not installed ({e})")
         return 77
-    from designer_remote import Designer
+    from lobole.client import Client
 
     try:
         port = m._resolve_port()
@@ -51,7 +49,7 @@ def main():
     assert child is not None and child.poll() is None, \
         f"_resolve_port returned {port} without a live autostarted child"
 
-    d = Designer.wait_for(port)
+    d = Client.wait_for(port)
     pong = d.request("ping")
     assert pong["mode"] == "offscreen", f"autostart is offscreen ({pong})"
     assert pong["port"] == port, f"attached where it announced ({pong})"
@@ -59,7 +57,7 @@ def main():
 
     m._stop_autostarted()
     assert child.poll() is not None, "the child dies with the server"
-    leftover = [i for i in Designer.instances()
+    leftover = [i for i in Client.instances()
                 if int(i.get("pid", 0)) == child.pid]
     assert not leftover, f"no registry orphan remains ({leftover})"
     print(f"autostart: spawned on {port}, attached offscreen, "

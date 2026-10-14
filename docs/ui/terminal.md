@@ -80,14 +80,18 @@ break the rule that contexts are the toolbar's branches
 Opening the panel starts `$SHELL` in the project directory (the working
 directory when the project is unsaved). Every session exports
 `DESIGNER_PORT` = this instance's remote port, so `claude`,
-`tools/designer_remote.py` or anything else that reads it reaches this window.
+`python3 -m lobole.client` or anything else that reads it reaches this
+window.
 If the app was started without `--remote`, the panel opens a port on demand
 (`AppState::ensureRemotePort`), since a terminal is useless to the agent if
 the app it sits in is unreachable.
 
 The **Claude Code** button (`###term_claude`) types
-`claude --mcp-config <tmp>/designer-mcp-<port>.json` into the shell. The
-config is written per session and names this instance's port; it never edits
+`claude --mcp-config <tmp>/lobole-mcp-<port>.json` into the shell. The
+config is written per session: it runs `python3 -m lobole.mcp` against this
+instance's port, with `PYTHONPATH` naming the package the build staged
+beside its assets (or installed under `share/lobole/python/`;
+[packaging](../packaging/README.md#the-agent-surface)). It it never edits
 the user's global MCP registration or a project's `.mcp.json`. Typing the
 command rather than running it keeps it legible and repeatable, and makes
 Claude Code a child of the user's shell, so quitting it returns to a prompt.

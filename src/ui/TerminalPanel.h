@@ -53,6 +53,9 @@ const term::Screen* TerminalTabScreen(const AppState& state, int index);
 // Which tab is on top. The tab bar is the authority on this, so a test that
 // asks for a tab must check it got it.
 int TerminalActiveTab(const AppState& state);
+// The MCP config the Claude Code button writes for `port`, and its path
+// (empty when this build finds no lobole package to point it at).
+std::string WriteTerminalMcpConfig(int port);
 #endif
 
 } // namespace ui

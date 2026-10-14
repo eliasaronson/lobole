@@ -1,8 +1,8 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-from designer_inspection import InspectionClient
-from designer_sdk import App
+from lobole.inspection import InspectionClient
+from lobole.sdk import App
 
 
 def mistakes(client: InspectionClient, app: App) -> None:

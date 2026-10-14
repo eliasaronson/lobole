@@ -23,10 +23,9 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
 import watch_gearing  # noqa: E402
 from _lib import arc_through  # noqa: E402
-from designer_sdk import Param  # noqa: E402
+from lobole.sdk import Param  # noqa: E402
 import watch_spec as S  # noqa: E402
 from watch_spec import *  # noqa: F401,F403,E402 — rebound by declare()
 

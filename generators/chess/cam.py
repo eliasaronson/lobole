@@ -28,9 +28,8 @@ HERE = Path(__file__).resolve().parent
 OUT = Path(os.environ.get("DESIGNER_SCRATCH")
            or HERE.parent.parent / "scratch") / "chess"
 OUT.mkdir(parents=True, exist_ok=True)
-sys.path.insert(0, str(HERE.parent.parent / "tools"))
 sys.path.insert(0, str(HERE))
-from designer_sdk import connect  # noqa: E402
+from lobole.sdk import connect  # noqa: E402
 
 CHUCK_R = 32.0   # the jaws stand this far out from the axis
 TAIL_R = 17.0    # a live centre's body, about 34 across

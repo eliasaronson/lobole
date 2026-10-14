@@ -42,7 +42,6 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 CASES = os.path.join(HERE, "reference_parts")
 PAGE = os.path.join(ROOT, "docs", "modeling", "reference-parts.md")
-sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, HERE)
 sys.path.insert(0, CASES)
 
@@ -484,9 +483,9 @@ def main():
         print(f"BROKEN CASE: {e}")
         return 1
 
-    from designer_remote import Designer
+    from lobole.client import Client
     if args.port:
-        bad = run(Designer.wait_for(args.port), cases, bool(args.k))
+        bad = run(Client.wait_for(args.port), cases, bool(args.k))
     else:
         from smoke_app import launch
         with launch(args.binary) as app:

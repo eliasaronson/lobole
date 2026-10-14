@@ -31,9 +31,7 @@ import tempfile
 import zlib
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from render_glass_smoke import read_png  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
@@ -81,7 +79,7 @@ def main():
     app = launch_app(binary, extra_args=["--offscreen"], env=env,
                      headless=False)
     try:
-        d = Designer(app.port, timeout=300)
+        d = Client(app.port, timeout=300)
         d.request("new_project", {})
         box(d, (0, 0, 0), (20, 20, 20), "Block")
         plan = d.call("add_feature", feature={

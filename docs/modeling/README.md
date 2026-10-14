@@ -219,7 +219,7 @@ from sketches.
   `src/core/Primitives.{h,cpp}`). It returns `id`/`index` of the solid
   (the body's `created_by`) and `ids` [solid, sketch]. A request may pin
   both with `ids` [solid, sketch], which is how a component builder keeps
-  their identity across rebuilds (`tools/designer_components.py`).
+  their identity across rebuilds (`python/lobole/components.py`).
 - **Edited through what it stored.** `modify_feature` on the sketch with a
   dimension's `value` changed re-solves the sketch before committing it, so
   the geometry follows the number (a literal dimension is not re-solved at
@@ -754,7 +754,7 @@ background. `one --minimise` drops steps (with the steps that name them)
 while the failure keeps its class and gist, then rounds the numbers, and
 writes the case: a header `{"fuzz": {seed, class, gist, generator,
 design}}`, then the minimised design's `--record` session, which
-`tools/designer_replay.py` plays by hand (it skips the header). A failure
+`python/lobole/replay.py` plays by hand (it skips the header). A failure
 that depends on timing is replayed under `tools/with-cpu-load.sh`.
 
 A fixed case lands in `tests/fuzz/cases/<class>-<seed>.jsonl`, which

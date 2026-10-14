@@ -37,7 +37,7 @@ solution the mate settles into, which is why they are not arbitrary either.
 """
 from pathlib import Path
 
-from designer_sdk import SdkError
+from lobole.sdk import SdkError
 
 HERE = Path(__file__).resolve().parent
 BOUGHT = HERE.parent.parent / "scratch/smart_speaker/bought"

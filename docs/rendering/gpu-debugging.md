@@ -67,7 +67,7 @@ Launch the app from RenderDoc's **Launch Application** tab:
   with renderdoc also in scope), or the app will not find its Vulkan loader
   and OCC libraries.
 - **Drive the capture from the remote**: set the camera and render options
-  over `tools/designer_remote.py` so the frame you capture is the frame you
+  over `python/lobole/client.py` so the frame you capture is the frame you
   meant to, and the same one can be captured again after a fix.
 
 What to look at, in order:

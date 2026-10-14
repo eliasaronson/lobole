@@ -28,7 +28,6 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
 import bike_cockpit as C  # noqa: E402
 import bike_drive as D  # noqa: E402
 import bike_fittings as G  # noqa: E402
@@ -216,7 +215,7 @@ def main():
 
 def _sdk(remote):
     """`_lib.connect` hands back the raw client; the SDK wraps it."""
-    from designer_sdk import App
+    from lobole.sdk import App
     return App(remote)
 
 

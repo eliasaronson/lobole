@@ -15,9 +15,8 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
 THICKNESS = 1.5      # aluminum "1.5mm"
@@ -250,7 +249,7 @@ def main():
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     app = launch_app(binary, env=env)
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         d.call("new_project")
 
         # Nothing set yet: the catalogue is still readable, which is how an

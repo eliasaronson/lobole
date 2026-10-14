@@ -31,10 +31,9 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
 import watch_parts as W  # noqa: E402
 import watch_spec as spec  # noqa: E402
-from designer_sdk import SdkError, connect  # noqa: E402
+from lobole.sdk import SdkError, connect  # noqa: E402
 from watch_spec import *  # noqa: F401,F403,E402 — rebound by declare()
 
 PHASES = []

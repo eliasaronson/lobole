@@ -12,10 +12,10 @@ import tempfile
 from pathlib import Path
 
 sys.path[:0] = [
-    str(Path(__file__).resolve().parents[1] / p) for p in ("tools", "generators")
+    str(Path(__file__).resolve().parents[1] / p) for p in ("generators",)
 ]
 from smoke_app import launch
-from designer_sdk import App
+from lobole.sdk import App
 import toolmakers_clamp as C
 
 with (

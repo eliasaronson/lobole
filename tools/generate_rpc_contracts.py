@@ -5,9 +5,9 @@
 """Generate the typed SDK stubs from the typed MethodDoc rows.
 
 The rows in src/remote/Remote*.cpp are the one source
-(docs/scripting/rpc.md#typed-contracts). This writes tools/designer_rpc.py:
+(docs/scripting/rpc.md#typed-contracts). This writes python/lobole/rpc.py:
 a TypedDict of each contracted method's parameters and an `RpcSurface`
-class with one typed method per contracted RPC, which `designer_sdk.App`
+class with one typed method per contracted RPC, which `lobole.sdk.App`
 inherits for a type checker only. Checked in; `--check` (ctest
 `rpc_contracts_generated`) fails when it is stale. Needs no running app.
 """
@@ -24,7 +24,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 from method_doc_scan import method_docs  # noqa: E402
 from rpc_contract import parse_column  # noqa: E402
 
-OUT = ROOT / "tools/designer_rpc.py"
+OUT = ROOT / "python/lobole/rpc.py"
 
 
 def contracts():
@@ -107,7 +107,7 @@ def generate():
         "",
         "",
         "class RpcSurface:",
-        '    """The contracted RPCs, typed. `designer_sdk.App` inherits this for a',
+        '    """The contracted RPCs, typed. `lobole.sdk.App` inherits this for a',
         "    type checker only: at runtime every method is the generated",
         '    `describe` surface, validated against the same contract."""',
     ]

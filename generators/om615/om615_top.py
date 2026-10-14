@@ -13,9 +13,7 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "..", "tools"))
-from designer_sdk import Plane, SdkError, V  # noqa: E402
+from lobole.sdk import Plane, SdkError, V  # noqa: E402
 # This generator's own directory, and generators/ above it for _lib.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 ".."))

@@ -9,7 +9,7 @@ and an interface designed so that LLM assistants can use the same commands as
 human users.
 
 Scripting happens outside the process: the app serves a JSON-RPC interface,
-and a generated Python SDK (`tools/designer_sdk.py`), an MCP server for agents
+and a generated Python SDK (the `lobole` package, `python/lobole/`), an MCP server for agents
 and plain scripts all drive it (see
 [docs/scripting/README.md](docs/scripting/README.md)). An optional terminal
 panel runs a shell or an agent inside the app window, already pointed at that
@@ -201,7 +201,7 @@ distro-package build cannot:
 ```
 nix build .#dockerHeadless && docker load < result
 docker run --rm -p 8437:8437 designer-headless:latest
-python3 tools/designer_remote.py 8437 get_state
+PYTHONPATH=python python3 -m lobole.client 8437 get_state
 ```
 
 It models, measures, meshes, solves, and exports; `screenshot` and the
@@ -290,12 +290,13 @@ Scripts and AI assistants can drive a live session over JSON-RPC
 
 ```
 ./lobole --remote 8437
-python3 tools/designer_remote.py 8437 get_state
-python3 tools/designer_remote.py 8437 add_feature \
+export PYTHONPATH=$PWD/python   # the lobole package; nix-shell sets this
+python3 -m lobole.client 8437 get_state
+python3 -m lobole.client 8437 add_feature \
     '{"feature": {"type": "Box", "name": "Box 1", "on": "Top",
                   "width": 2, "depth": 2, "height": 2}}'
-python3 tools/designer_remote.py 8437 menu_click '{"path": "Edit/Undo"}'
-python3 tools/designer_remote.py 8437 screenshot '{"path": "/tmp/view.png"}'
+python3 -m lobole.client 8437 menu_click '{"path": "Edit/Undo"}'
+python3 -m lobole.client 8437 screenshot '{"path": "/tmp/view.png"}'
 ```
 
 Two tiers share the same underlying command layer as the GUI: semantic
@@ -304,7 +305,8 @@ format, `undo`/`redo`, project I/O, `import_step`, `select_face`, `fit_view`,
 `measure`, `mass_properties`) and human-parity UI actions executed through the
 embedded test engine (`menu_click`, `item_click`, `item_input`,
 `viewport_click`, `viewport_drag`, `key_press`, `scroll`), plus `screenshot`.
-See `tools/designer_remote.py` and `tests/remote_smoke.py` for reference usage.
+See `lobole.client` (`python/lobole/client.py`) and `tests/remote_smoke.py`
+for reference usage.
 
 `--headless` runs the whole semantic tier with no GPU and no display — full
 modeling, measurement and export — which is what CI and scripted work use:
@@ -317,7 +319,7 @@ Running instances **announce themselves**, so a client finds the app rather
 than being told a port; `ping` reports which project is open, whether it has
 unsaved changes, and whether the UI-action tier is available in this build.
 MCP clients (Claude and others) get the same surface through
-`tools/designer_mcp.py` — see [`docs/scripting/mcp.md`](docs/scripting/mcp.md).
+`lobole.mcp` — see [`docs/scripting/mcp.md`](docs/scripting/mcp.md).
 
 ## License
 

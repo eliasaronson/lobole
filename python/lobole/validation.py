@@ -10,7 +10,7 @@ study on the chosen assembly; it is not continuous collision detection.
 """
 from dataclasses import dataclass
 from typing import Literal
-from designer_sdk import Part, SdkError
+from lobole.sdk import Part, SdkError
 
 Stage = Literal['preview', 'local', 'full']
 

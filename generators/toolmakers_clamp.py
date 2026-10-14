@@ -11,8 +11,7 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from designer_sdk import Plane, ProjectedCurve, SdkError, connect
+from lobole.sdk import Plane, ProjectedCurve, SdkError, connect
 
 SOURCE = "https://journeymans-workshop.uk/images/projects/toolmkrs/toolmkrs.pdf"
 PAGE = "https://journeymans-workshop.uk/toolclamps.php"

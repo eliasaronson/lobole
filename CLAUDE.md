@@ -238,7 +238,7 @@ overwritten.
 
 The app must own a real renderer to screenshot; true `--headless` has none.
 - **The human's instance is `dev-watch.sh`, and the REGISTRY says which port** —
-  `~/.local/state/lobole/instances/*.json`, or `Designer.instances()`; a port
+  `~/.local/state/lobole/instances/*.json`, or `Client.instances()`; a port
   number written in a doc goes stale while the registry cannot. It is a
   windowed build in their display session that relaunches on rebuild, and it is
   the build under review. Read from it (get_state) freely; do NOT mutate their
@@ -273,11 +273,11 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   needs a GUI: `headless-preview.sh --gui <port>` (windowed under Xvfb).
 - **Non-visual checks need no GPU**: `build/lobole --headless --remote <port>`.
 - **Don't guess ports**: every instance announces itself in
-  `~/.local/state/lobole/instances/<port>.json` (`Designer.instances()` in
+  `~/.local/state/lobole/instances/<port>.json` (`Client.instances()` in
   the python client). `ping` reports the port, the open project, whether it is
   dirty, and whether ui_action is available in that build.
-- Drive any of them with `python3` importing `Designer` from
-  `tools/designer_remote.py`, or the `lobole` MCP tools. Screenshots come back
+- Drive any of them with `python3` and `from lobole import Client` (or the
+  SDK, `lobole.connect()`), or the `lobole` MCP tools. Screenshots come back
   as images — actually look at them; verify volumes with real numbers.
 
 ## Parallel work in git worktrees

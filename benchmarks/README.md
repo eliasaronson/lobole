@@ -207,7 +207,7 @@ a worked example the app builds itself (so it cannot drift from what the
 loader accepts), and `write_document(json)`, which swallows a whole project
 and reports what the kernel made of it.
 
-It deliberately does NOT live in `tools/designer_mcp.py`. A product tool that
+It deliberately does NOT live in `python/lobole/mcp.py`. A product tool that
 takes a whole document would be a second way to author, and the benchmark
 would then be measuring a surface that exists because the benchmark wanted it.
 
@@ -304,7 +304,7 @@ the old three.
 only schema bulk in the context window. Chamfer credited most of its efficiency
 win to that exact trade (six curated tools against 59 schemas); this arm tests
 whether it holds against an API that was not designed around it. The narrowing
-is real, not a permission filter: `designer_mcp.py --only-tools` unregisters the
+is real, not a permission filter: `lobole/mcp.py --only-tools` unregisters the
 rest, and refuses loudly if it cannot, because an arm that silently served the
 full surface would look like a valid comparison and be a duplicate.
 

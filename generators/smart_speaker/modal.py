@@ -108,9 +108,9 @@ import time
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-sys.path[:0] = [str(HERE), str(HERE.parent.parent / "tools")]
+sys.path.insert(0, str(HERE))
 
-from designer_sdk import connect  # noqa: E402
+from lobole.sdk import connect  # noqa: E402
 
 PROJECT = HERE.parent.parent / "scratch/smart_speaker.dsgn"
 

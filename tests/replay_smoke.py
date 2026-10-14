@@ -13,11 +13,10 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
-import designer_replay  # noqa: E402
+import lobole.replay  # noqa: E402
 
 
 def expect(condition, message):
@@ -47,7 +46,7 @@ def main():
     # Record: a small parametric model, including an undone step.
     app = launch(binary, env, record=session)
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         d.call("new_project")
         d.call("set_variable", name="w", expression="4")
         sk = d.call("add_feature", feature={
@@ -74,8 +73,8 @@ def main():
     # Replay into a FRESH instance; assert the same geometry falls out.
     app2 = launch(binary, env)
     try:
-        expect(designer_replay.replay(app2.port, session) == 0, "replay clean")
-        d2 = Designer.wait_for(app2.port)
+        expect(lobole.replay.replay(app2.port, session) == 0, "replay clean")
+        d2 = Client.wait_for(app2.port)
         st = d2.call("get_state")
         expect(len(st["bodies"]) == 1, "replayed state: one body")
         expect(abs(st["bodies"][0]["volume"] - recorded_volume) < 1e-9,

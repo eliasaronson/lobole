@@ -36,7 +36,7 @@ python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.dsgn -
   older names for `preview` and `local`.
 - **Components.** `--component KEY` builds one part in isolation for shape
   iteration; `--update-component KEY --project P` rebuilds one part inside a
-  saved engine through the component staging layer (`tools/designer_components.py`),
+  saved engine through the component staging layer (`python/lobole/components.py`),
   keeping part, feature and occurrence identities and reusing unchanged
   geometry. Keys: `belt`, `fan`, `vacuum-pump` (the casting), `block`, `head`,
   `sump`, `timing-cover`, `damper`, `engine-mount-left`, `engine-mount-right`,

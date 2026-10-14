@@ -7,7 +7,7 @@
 # Run this ONCE in your own GPU/display session (a normal terminal, or your
 # window-manager autostart). It launches the windowed app on a fixed port and
 # relaunches it whenever `build/lobole` changes (i.e. after every rebuild),
-# so an assistant — or you, via tools/designer_remote.py — can always drive and
+# so an assistant — or you, via `python3 -m lobole.client` — can always drive and
 # screenshot the CURRENT build without you restarting anything.
 #
 # Why a windowed instance and not --headless: --headless has no renderer, so it

@@ -12,7 +12,7 @@ A T-nut here is built along local +Z from its origin: flange first, then the
 barrel. `seat(..., proud=FLANGE_T)` therefore puts the flange proud of the
 face and drives the barrel into the material behind it.
 """
-from designer_sdk import Plane
+from lobole.sdk import Plane
 
 import seating
 

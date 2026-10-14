@@ -34,7 +34,7 @@ Heights are derived from the chamber they belong to, never written twice:
 left of it once the Alpair chamber and the port bay are taken out.
 """
 
-from designer_sdk import SdkError
+from lobole.sdk import SdkError
 
 # The table, in declaration order. (name, expression, comment) — the comment
 # reaches the document, so the reason a number is what it is travels with it.

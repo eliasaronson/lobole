@@ -19,7 +19,7 @@ Emitting the document format in one shot beat driving their API. Our `full`,
 `rpc-only` and `script-first` arms all go through the API, so no arm we have
 can see this. This one hands the agent the document format and nothing else.
 
-Deliberately NOT part of tools/designer_mcp.py: this is a measuring
+Deliberately NOT part of python/lobole/mcp.py: this is a measuring
 instrument, not a capability we ship. A product tool that swallows a whole
 document would be a second way to author, and the benchmark would then be
 measuring a surface that exists only because the benchmark wanted it.
@@ -33,17 +33,15 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "..", "tools"))
 from mcp.server.fastmcp import FastMCP  # noqa: E402
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 
 mcp = FastMCP("designer-document")
 _PORT = None
 
 
 def _client():
-    return Designer(port=_PORT)
+    return Client(port=_PORT)
 
 
 @mcp.tool(description=(

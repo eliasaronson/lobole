@@ -29,11 +29,10 @@ import sys
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "tools"))
 sys.path.insert(0, os.path.join(HERE, "..", "generators"))
 sys.path.insert(0, HERE)
-from designer_remote import Designer  # noqa: E402
-from designer_sdk import connect  # noqa: E402
+from lobole.client import Client  # noqa: E402
+from lobole.sdk import connect  # noqa: E402
 from slider_crank import build  # noqa: E402
 from smoke_app import launch  # noqa: E402
 
@@ -61,7 +60,7 @@ def main():
     with launch(sys.argv[1]) as app:
         a = connect(app.port)
         rig, axle, _, _ = build(a, 20.0, 70.0)
-        d = Designer(app.port, timeout=300)
+        d = Client(app.port, timeout=300)
         long_study = d.call("add_motion_study", driver=axle, dof="rotation",
                             to=360, samples=LONG, clash_mode="exact",
                             name="long", **{"from": 0})["id"]
@@ -70,7 +69,7 @@ def main():
                        **{"from": 0})["id"]
 
         # ---- A job dies with the connection that started it ---------------
-        starter = Designer(app.port)
+        starter = Client(app.port)
         job = starter.call("run_motion_study", study=long_study,
                            **{"async": True})
         expect(job["started"] and isinstance(job["job"], int)
@@ -88,7 +87,7 @@ def main():
                f"its client went, so did it: {st}")
 
         # ---- ...unless it was asked to outlive it; then cancel by id -------
-        starter = Designer(app.port)
+        starter = Client(app.port)
         job = starter.call("run_motion_study", study=long_study,
                            outlive_client=True, **{"async": True})
         expect(job["outlives_client"] is True, f"outlives: {job}")

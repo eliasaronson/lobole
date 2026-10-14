@@ -18,7 +18,7 @@ import csv
 import math
 import os
 
-from designer_sdk import SdkError
+from lobole.sdk import SdkError
 
 from fpv_drone_spec import *  # noqa: F401,F403
 

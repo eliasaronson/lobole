@@ -26,9 +26,8 @@ import shutil
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -59,7 +58,7 @@ def main():
             env["XDG_CONFIG_HOME"] = os.path.join(tmp, f"config{i}")
             apps.append(launch_app(binary, env=env))
         for app in apps:
-            clients.append(Designer.wait_for(app.port))
+            clients.append(Client.wait_for(app.port))
         ports = {c.call("ping")["port"] for c in clients}
         expect(len(ports) == 3, f"three instances, three ports: {ports}")
 

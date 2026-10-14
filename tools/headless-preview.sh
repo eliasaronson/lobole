@@ -27,7 +27,7 @@
 #   tools/headless-preview.sh --render PROJECT OUT.png [port]
 #                                               # one-shot: open, screenshot, exit
 #
-# Drive it with tools/designer_remote.py <port> ... or the MCP server
+# Drive it with `python3 -m lobole.client <port> ...` or the MCP server
 # (DESIGNER_PORT=<port>). Screenshots work exactly as against dev-watch.
 set -eu
 
@@ -68,7 +68,7 @@ wait_ready() {
         "answering (is the port taken?)" >&2
       return 1
     fi
-    if out="$(python3 "$ROOT/tools/designer_remote.py" "$port" ping 2>/dev/null)"; then
+    if out="$(PYTHONPATH="$ROOT/python" python3 -m lobole.client "$port" ping 2>/dev/null)"; then
       [ -z "$want" ] && return 0
       got="$(printf '%s' "$out" | python3 -c \
         'import json, sys; print(json.load(sys.stdin).get("pid", ""))')"
@@ -148,7 +148,7 @@ reg_pid() {
   sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9]*\).*/\1/p' "$1" 2>/dev/null
 }
 ping_pid() {
-  python3 "$ROOT/tools/designer_remote.py" "$1" ping 2>/dev/null |
+  PYTHONPATH="$ROOT/python" python3 -m lobole.client "$1" ping 2>/dev/null |
     python3 -c 'import json, sys; print(json.load(sys.stdin).get("pid", ""))' \
       2>/dev/null
 }
@@ -228,9 +228,9 @@ if [ "${1:-}" = "--render" ]; then
   APP=$!
   trap 'kill "$APP" 2>/dev/null || true' EXIT
   wait_ready "$PORT" "$APP"
-  python3 "$ROOT/tools/designer_remote.py" "$PORT" open_project "{\"path\": \"$PROJECT\"}" >/dev/null
-  python3 "$ROOT/tools/designer_remote.py" "$PORT" fit_view >/dev/null 2>&1 || true
-  python3 "$ROOT/tools/designer_remote.py" "$PORT" screenshot "{\"path\": \"$OUT\"}" >/dev/null
+  PYTHONPATH="$ROOT/python" python3 -m lobole.client "$PORT" open_project "{\"path\": \"$PROJECT\"}" >/dev/null
+  PYTHONPATH="$ROOT/python" python3 -m lobole.client "$PORT" fit_view >/dev/null 2>&1 || true
+  PYTHONPATH="$ROOT/python" python3 -m lobole.client "$PORT" screenshot "{\"path\": \"$OUT\"}" >/dev/null
   echo "headless-preview: wrote $OUT"
   exit 0
 fi

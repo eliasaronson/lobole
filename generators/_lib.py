@@ -22,9 +22,7 @@ import math
 import os
 import sys
 
-TOOLS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools")
-sys.path.insert(0, TOOLS)
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 
 
 # --- sketch planes --------------------------------------------------------
@@ -150,7 +148,7 @@ def fresh_project(d):
 def connect(port=None):
     """The running app, by port or by discovery. Refuses to guess."""
     if port is None:
-        found = Designer.instances()
+        found = Client.instances()
         if len(found) == 1:
             port = found[0]["port"]
         elif not found:
@@ -161,7 +159,7 @@ def connect(port=None):
             raise SystemExit("several instances are running, pass --port: "
                              + ", ".join(f"{i['port']} ({i.get('project') or 'no project'})"
                                          for i in found))
-    return Designer.wait_for(int(port))
+    return Client.wait_for(int(port))
 
 
 # --- printing -----------------------------------------------------------------

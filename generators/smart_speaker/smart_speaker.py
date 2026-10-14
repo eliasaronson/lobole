@@ -37,9 +37,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
-sys.path.insert(0, str(HERE.parent.parent / "tools"))
 
-from designer_sdk import connect  # noqa: E402
+from lobole.sdk import connect  # noqa: E402
 
 import bought  # noqa: E402
 import braces  # noqa: E402

@@ -10,7 +10,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 import uuid
 
-from designer_sdk import Part, SdkError
+from lobole.sdk import Part, SdkError
 
 
 class _StagingPart(Part):

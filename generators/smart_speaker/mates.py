@@ -54,7 +54,7 @@ assertions: each names a thing that went wrong on a real run (a flare upside
 down three times, an amplifier standing on edge) and now fails loudly instead
 of being searched around.
 """
-from designer_sdk import Part, SdkError
+from lobole.sdk import Part, SdkError
 
 import joinery
 

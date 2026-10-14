@@ -42,7 +42,7 @@ than 256 levels (`kMaxRequestDepth`: a parsed value is copied recursively,
 and one line nested 100 000 deep overflowed the reader thread's stack) — is
 answered
 `{id: null, error: "parse: …"}`: the server cannot know the id. With one
-request in flight it is that request's answer, and `designer_remote.py`
+request in flight it is that request's answer, and `lobole/client.py`
 raises it as such rather than waiting for its own id. Every message goes out
 as one line of valid UTF-8: a string holding bytes that are not (a parse
 error quoting what it choked on) is written with U+FFFD in their place, never
@@ -199,8 +199,8 @@ the active tab never changed.
   top-level `nonfinite: ["/result/bodies/0/volume", …]` of JSON pointers to
   where they were; the app logs a warning naming the RPC. The call is not
   turned into an error after the fact — a mutating one has happened.
-  `designer_remote.py` raises `NonFiniteError` on it in strict mode
-  (`Designer(strict=True)`, or `DESIGNER_REMOTE_STRICT=1`, which
+  `lobole/client.py` raises `NonFiniteError` on it in strict mode
+  (`Client(strict=True)`, or `DESIGNER_REMOTE_STRICT=1`, which
   `tests/smoke_app.py` sets, so every smoke is strict) and warns otherwise.
 - **`receipt`** on every RPC that returns a verdict — the clash sweeps of
   `interference` and `contact_report`, `check_geometry`, `check_fits`,
@@ -486,7 +486,7 @@ for a batch's calls once their `$ref`s are resolved. `describe` publishes the
 schema as the method's `request_schema`, and its `params` stays a list of
 names. One validator (`ValidateInspectionValue`) serves both families, in a
 fixed order — unknown keys, then missing ones, then each value in key order —
-which `tools/designer_contracts.py` repeats client-side.
+which `python/lobole/contracts.py` repeats client-side.
 
 Kept true by:
 
@@ -566,7 +566,7 @@ Two methods — `geometry_snapshot` and `validate_snapshot` — carry
 machine-readable request AND result schemas. `api/inspection-contracts.json`
 is the source; `python3 tools/generate_inspection_contracts.py` regenerates
 the embedded server schemas (`src/remote/InspectionContracts.generated.h`)
-and the Python records and facade (`tools/designer_inspection.py`). The
+and the Python records and facade (`python/lobole/inspection.py`). The
 generated files are checked in and `inspection_contracts_generated` fails
 when they are stale.
 

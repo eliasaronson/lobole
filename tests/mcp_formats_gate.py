@@ -5,7 +5,7 @@
 """Gate: the MCP server's hand-written format prose matches the app.
 
 `describe` is the app-side truth for feature types, sketch entity types and
-material slugs; `tools/designer_mcp.py` carries prose copies of all three
+material slugs; `python/lobole/mcp.py` carries prose copies of all three
 (FEATURE_FORMATS, MATERIAL_SLUGS) because an agent with only the MCP surface
 reads the prose, not the RPC. mcp_smoke has always cross-checked them — but
 mcp_smoke opens a (hidden) window, so it is `gui`-labelled and off the
@@ -23,17 +23,15 @@ import sys
 import tempfile
 import types
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from smoke_app import launch_app  # noqa: E402
 
 
 def load_mcp_constants():
-    """Import designer_mcp for its constants, with or without the mcp SDK."""
+    """Import lobole.mcp for its constants, with or without the mcp SDK."""
     try:
-        import designer_mcp  # noqa: F401
-        return designer_mcp
+        import lobole.mcp
+        return lobole.mcp
     except ImportError:
         pass
     # No SDK: satisfy `from mcp.server.fastmcp import FastMCP, Image` with
@@ -55,19 +53,19 @@ def load_mcp_constants():
     mcp.server = server
     sys.modules.update({"mcp": mcp, "mcp.server": server,
                         "mcp.server.fastmcp": fastmcp})
-    import designer_mcp
-    return designer_mcp
+    import lobole.mcp
+    return lobole.mcp
 
 
 def main():
     binary = sys.argv[1]
-    state = tempfile.mkdtemp(prefix="designer-mcp-formats-")
+    state = tempfile.mkdtemp(prefix="lobole-mcp-formats-")
     env = dict(os.environ, XDG_STATE_HOME=state,
                XDG_CONFIG_HOME=os.path.join(state, "config"))
     app = launch_app(binary, env=env)  # headless
     try:
-        from designer_remote import Designer
-        d = Designer.wait_for(app.port)
+        from lobole.client import Client
+        d = Client.wait_for(app.port)
         try:
             desc = d.call("describe")
         finally:
@@ -97,7 +95,7 @@ def main():
                         f"prose-only {sorted(prose - app_slugs)}, "
                         f"app-only {sorted(app_slugs - prose)}")
     if problems:
-        print("mcp formats gate: tools/designer_mcp.py has drifted from the "
+        print("mcp formats gate: python/lobole/mcp.py has drifted from the "
               "app:")
         for p in problems:
             print("  " + p)

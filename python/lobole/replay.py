@@ -2,11 +2,11 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Replay a recorded Designer session (--record JSONL) against a live
+"""Replay a recorded Loböle session (--record JSONL) against a live
 instance — every reported bug becomes a replayable regression (S4).
 
 Usage:
-    designer_replay.py <port> <session.jsonl>
+    python3 -m lobole.replay <port> <session.jsonl>
 
 Sends each recorded semantic request in order over the JSON-RPC remote
 (start the target with `lobole --headless --remote <port>` for a
@@ -16,13 +16,13 @@ first line `{"fuzz": {...}}` (a minimised case from tools/fuzz.py) is skipped.
 import json
 import sys
 
-from designer_remote import Designer
+from lobole.client import Client
 
 
 def replay(port, path):
     # Close when done: the remote takes at most eight clients at once, and a
     # held connection is one of them for as long as it stays open.
-    d = Designer.wait_for(port)
+    d = Client.wait_for(port)
     try:
         count = 0
         with open(path) as f:

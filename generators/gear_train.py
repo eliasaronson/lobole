@@ -90,8 +90,8 @@ def main():
     d = connect(a.port)
     port = a.port
     if port is None:
-        from designer_remote import Designer
-        port = Designer.instances()[0]["port"]
+        from lobole.client import Client
+        port = Client.instances()[0]["port"]
     d.call("new_project")
 
     # The carrier: a plate with three axle holes, and a rail block whose +X

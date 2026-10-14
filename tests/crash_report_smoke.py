@@ -35,8 +35,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 from smoke_app import launch_app  # noqa: E402
 
-sys.path.insert(0, os.path.join(HERE, "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 
 
 def expect(condition, message):
@@ -72,7 +71,7 @@ def main():
     def launch(extra=(), environment=env):
         app = launch_app(binary, extra_args=list(extra), env=environment)
         apps.append(app)
-        return app, Designer(app.port, timeout=30)
+        return app, Client(app.port, timeout=30)
 
     try:
         # 1 -------------------------------------------------------------

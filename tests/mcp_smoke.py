@@ -5,7 +5,7 @@
 """Integration test: model a dimensioned bracket through the MCP server.
 
 Exercises the MCP layer itself (stdio transport, tool schemas, image
-content), not just the RPC underneath: lobole --remote <- designer_mcp.py
+content), not just the RPC underneath: lobole --remote <- lobole/mcp.py
 <- the SDK's stdio client.
 
 Usage: mcp_smoke.py <path-to-designer-binary>
@@ -30,10 +30,6 @@ except ImportError:
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from smoke_app import launch_app  # noqa: E402
-
-TOOLS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
-                         "tools")
-
 
 
 
@@ -60,8 +56,10 @@ def result(r):
 async def run(port):
     server = StdioServerParameters(
         command=sys.executable,
-        args=[os.path.join(TOOLS_DIR, "designer_mcp.py"), "--port",
-              str(port)])
+        args=["-m", "lobole.mcp", "--port", str(port)],
+        # stdio_client passes only a few named variables by default, and
+        # PYTHONPATH (where the lobole package is found) is not one of them.
+        env=dict(os.environ))
     async with stdio_client(server) as (read, write):
         async with ClientSession(read, write) as session:
             await session.initialize()
@@ -109,7 +107,7 @@ async def run(port):
             # documented in FEATURE_FORMATS (the standing rule from
             # docs/scripting/mcp.md#format-documentation, enforced). `describe` is the app-side
             # truth; the module constant is the MCP-side prose.
-            import designer_mcp
+            import lobole.mcp
             desc = await call("describe")
             # Narrowed describe: its RPC parameter is named `method`, which
             # collided with _call's own first argument the first time an
@@ -119,17 +117,17 @@ async def run(port):
                    and one["methods"][0]["name"] == "add_feature",
                    f"describe narrows to one method ({one['methods'][:2]})")
             for ft in desc["feature_types"]:
-                expect(ft["type"] in designer_mcp.FEATURE_FORMATS,
+                expect(ft["type"] in lobole.mcp.FEATURE_FORMATS,
                        f"feature type {ft['type']} missing from "
                        "FEATURE_FORMATS")
             for ent in desc["sketch_entity_types"]:
-                expect(f'"{ent["type"]}"' in designer_mcp.FEATURE_FORMATS,
+                expect(f'"{ent["type"]}"' in lobole.mcp.FEATURE_FORMATS,
                        f"entity type {ent['type']} missing from "
                        "FEATURE_FORMATS")
             # Same drift gate for the material-slug prose: the hand-written
             # MATERIAL_SLUGS literal must list exactly the app's slugs.
             prose = {s.strip() for s in
-                     designer_mcp.MATERIAL_SLUGS.split(",")}
+                     lobole.mcp.MATERIAL_SLUGS.split(",")}
             expect(prose == set(desc["material_slugs"]),
                    "MATERIAL_SLUGS drifted from describe.material_slugs: "
                    f"prose-only {prose - set(desc['material_slugs'])}, "
@@ -276,7 +274,7 @@ def main():
     # A scratch state dir: the app announces itself there (instance
     # discovery), and a test must never write into the developer's real
     # ~/.local/state/lobole or see the instances they have open.
-    state = tempfile.mkdtemp(prefix="designer-mcp-smoke-")
+    state = tempfile.mkdtemp(prefix="lobole-mcp-smoke-")
     # CONFIG too: set_settings persists immediately, so a run that touched
     # preferences would edit the developer's real settings.json.
     env = dict(os.environ, XDG_STATE_HOME=state,
@@ -286,15 +284,14 @@ def main():
     try:
         # The MCP server fails fast when the app is unreachable (that is the
         # behavior an agent should see), so wait for startup here instead.
-        sys.path.insert(0, TOOLS_DIR)
-        from designer_remote import Designer
-        Designer.wait_for(app.port).close()
+        from lobole.client import Client
+        Client.wait_for(app.port).close()
 
         # Discovery: the running app announced itself, so a client can find
         # it without being told the port (the failure this replaced was
         # "Designer is not reachable" while the app was running happily).
         os.environ["XDG_STATE_HOME"] = state
-        found = Designer.instances()
+        found = Client.instances()
         expect([i for i in found if i["port"] == app.port],
                f"the running instance announced itself ({found})")
 

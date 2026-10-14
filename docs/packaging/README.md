@@ -242,7 +242,7 @@ against that `lobole.exe` names `remote::DebugCrash`. Then, on the same
 instance kind: `debug_fault {kind: "occ_fault"}` answers an
 `OSD_Exception_ACCESS_VIOLATION` for both threads instead of dying; the
 fuzzer's `tests/fuzz/cases/crash-153.jsonl` and `crash-181.jsonl` replay to
-the end (`tools/designer_replay.py`); `--stall-test` logs a main-thread
+the end (`python/lobole/replay.py`); `--stall-test` logs a main-thread
 stack that `symbolize-crash.py` names (`StallSelfTest`); and a Ctrl+C
 (`SIGINT` to the Wine process, which Wine turns into `CTRL_C_EVENT`) after a
 fillet stops headless and leaves no report. All of it runs under Wine; no
@@ -295,11 +295,15 @@ installs them with every binary.
 
 ## The agent surface
 
-The MCP server and the Python client ship separately from the app: the
-repository's `pyproject.toml` packages `tools/designer_mcp.py` and
-`tools/designer_remote.py` with `designer-mcp` / `designer-remote` entry
-points (`uv tool install <repo>`, then `claude mcp add lobole --
-designer-mcp`). `tests/packaging_smoke.py` gates the metadata. See
+The Python package `lobole` — the client, the SDK and the MCP server — ships
+separately from the app: the repository's `pyproject.toml` builds it from
+`python/lobole/` with `lobole-mcp` / `lobole-remote` entry points
+(`uv tool install <repo>`, then `claude mcp add lobole -- lobole-mcp`).
+`tests/packaging_smoke.py` builds the wheel and imports every module from
+it alone. The app also stages the package beside its assets and installs it
+under `share/lobole/python/`, so the terminal panel can start the MCP server
+(`python3 -m lobole.mcp`) against its own instance
+([terminal](../ui/terminal.md)). See
 [../scripting/README.md](../scripting/README.md).
 
 ## Build options that change what ships

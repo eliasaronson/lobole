@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""The Designer SDK — geometry references instead of transcribed numbers.
+"""The Loböle SDK — geometry references instead of transcribed numbers.
 
 Two layers, and the split is the whole design:
 
@@ -37,7 +37,7 @@ what the SO-101 gripper dogfood was missing (docs/scripting/sdk.md#the-hand-writ
 
 Usage:
 
-    from designer_sdk import connect
+    from lobole.sdk import connect
     app = connect()                      # the announced instance, or --port
     part = app.part("piston")
     part.var("bore", 86)
@@ -53,17 +53,16 @@ import sys
 import time
 from typing import TYPE_CHECKING
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from designer_remote import Designer as _Remote  # noqa: E402
-from designer_contracts import ContractError, validate as _validate_contract  # noqa: E402
-from designer_inspection import (  # noqa: E402
+from lobole.client import Client as _Remote  # noqa: E402
+from lobole.contracts import ContractError, validate as _validate_contract  # noqa: E402
+from lobole.inspection import (  # noqa: E402
     CONTRACT_HASH, CONTRACT_VERSION, InspectionClient)
 
 if TYPE_CHECKING:
-    from designer_snapshots import MeasurementSnapshot
+    from lobole.snapshots import MeasurementSnapshot
     # The contracted RPCs, typed for a checker only: at runtime every RPC is
     # the generated describe surface (docs/scripting/sdk.md#typed-stubs).
-    from designer_rpc import RpcSurface as _RpcSurface
+    from lobole.rpc import RpcSurface as _RpcSurface
 else:
     _RpcSurface = object
 
@@ -287,7 +286,7 @@ class _Rpc:
 
 
 class App(_RpcSurface):
-    """A connection to one running Designer, with its whole RPC surface.
+    """A connection to one running Loböle, with its whole RPC surface.
 
     Every method `describe` lists is an attribute. The enums it publishes
     (constraint kinds, extrude modes, material slugs, feature types) are on
@@ -363,7 +362,7 @@ class App(_RpcSurface):
 
     def call(self, method, /, _timeout=None, **params):
         # `method` positional-only: describe(method=...) is a parameter, not
-        # this argument (designer_remote.call says the same).
+        # this argument (lobole.client.call says the same).
         if method in self._schemas:
             _validate_contract(self._schemas[method], params, method)
         if method in self._MOVES_TAB:
@@ -422,10 +421,10 @@ class App(_RpcSurface):
 
     def help(self, method=""):
         """What `method` does, takes and returns — the one lookup every
-        client shares (designer_remote.method_help), so the SDK, the plain
+        client shares (lobole.client.method_help), so the SDK, the plain
         client and the MCP server's help() give the same answer. With no
         method, the index."""
-        from designer_remote import method_help
+        from lobole.client import method_help
         return method_help(self._remote.call, method)
 
     def close(self):
@@ -640,7 +639,7 @@ def connect(port=None, host="127.0.0.1"):
             port = found[0]["port"]
         elif not found:
             raise SdkError(
-                "no running Designer instance announced itself; start one "
+                "no running Loböle instance announced itself; start one "
                 "(tools/headless-preview.sh <port>, or the app) or pass port=")
         else:
             # The registry says which ports; only the instance knows what it
@@ -1098,7 +1097,7 @@ class Body:
         Coordinates are part-local. validate() checks freshness; refresh()
         returns a new snapshot. Existing Edge.center remains a live query.
         """
-        from designer_snapshots import MeasurementSnapshot
+        from lobole.snapshots import MeasurementSnapshot
         return MeasurementSnapshot.capture(self._part.app, self._part.id,
                                            self.index, circular, fields,
                                            max_elements)

@@ -26,7 +26,6 @@ import tempfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-sys.path.insert(0, os.path.join(ROOT, "tools"))
 sys.path.insert(0, HERE)
 from smoke_app import launch_app  # noqa: E402
 
@@ -43,8 +42,8 @@ def main():
                XDG_CONFIG_HOME=os.path.join(state, "config"))
     app = launch_app(binary, env=env)  # headless
     try:
-        from designer_remote import Designer
-        Designer.wait_for(app.port).close()
+        from lobole.client import Client
+        Client.wait_for(app.port).close()
 
         m, z, t, bore = 2.0, 24, 8.0, 6.0
         gear = os.path.join(ROOT, "generators", "gear.py")
@@ -57,7 +56,7 @@ def main():
         expect("192 sketch entities" in out.stdout,
                f"24 teeth is 8 entities a tooth ({out.stdout.strip()})")
 
-        d = Designer(app.port)
+        d = Client(app.port)
         try:
             s = d.call("get_state")
             errs = [(f["name"], f["error"]) for f in s["features"]
@@ -107,7 +106,7 @@ def main():
         expect("unchanged, so not driven" not in out.stdout,
                f"a part stopped following its table:\n{out.stdout}")
 
-        d = Designer(app.port)
+        d = Client(app.port)
         try:
             slots = {s["name"]: s for s in d.call("list_parts")["parts"]}
             for want in ("side_wall", "front_wall", "top_wall", "veneer_top"):

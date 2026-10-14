@@ -26,9 +26,7 @@ import tempfile
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
 
@@ -58,7 +56,7 @@ def main():
         expect("StallSelfTest" in log, "the stack names the stalled function")
         resumed = [ln for ln in log.splitlines() if "resumed after" in ln]
         expect(len(resumed) == 1, f"one resume line ({resumed})")
-        d = Designer(app.port, timeout=30)
+        d = Client(app.port, timeout=30)
         expect(d.call("ping").get("ok"), "and the app carries on")
     finally:
         app.terminate()

@@ -61,10 +61,8 @@ import shutil
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from designer_remote import Designer  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -181,7 +179,7 @@ def main():
             return SKIP
         raise
     try:
-        d = Designer.wait_for(app.port, timeout=120)
+        d = Client.wait_for(app.port, timeout=120)
         gpu = d.call("ping").get("gpu", "")
         if not gpu:
             print("render_pixel_smoke: instance reports no GPU — skipping")

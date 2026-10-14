@@ -79,7 +79,7 @@ struct Spec {
   std::string material;
   // The ids the two features get, [solid, sketch] (0 = the document mints
   // them): what a generator that keeps feature identity across rebuilds
-  // (tools/designer_components.py) pins.
+  // (python/lobole/components.py) pins.
   uint64_t solidId = 0, sketchId = 0;
 };
 

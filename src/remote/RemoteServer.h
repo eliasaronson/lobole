@@ -88,7 +88,7 @@ public:
   void SetWakeCallback(std::function<void()> wake) { m_wake = std::move(wake); }
 
   // Session recording (S4): tee every handled semantic request as one JSON
-  // per line — a replayable session (tools/designer_replay.py). UI actions
+  // per line — a replayable session (python/lobole/replay.py). UI actions
   // and screenshots are not recorded (not replayable headless).
   bool StartRecording(const std::string& path);
 

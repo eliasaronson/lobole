@@ -9,8 +9,7 @@ from pathlib import Path
 import sys
 import tempfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tools"))
-from designer_sdk import App
+from lobole.sdk import App
 from smoke_app import launch
 
 

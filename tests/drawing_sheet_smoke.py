@@ -22,8 +22,7 @@ import subprocess
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer, RemoteError  # noqa: E402
+from lobole.client import Client, RemoteError  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -52,7 +51,7 @@ def main():
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     app = launch_app(binary, env=env)
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         d.call("new_project")
         # A 40 x 20 x 10 plate with a Ø8 bore through it, held to H7.
         d.call("add_part", name="plate")

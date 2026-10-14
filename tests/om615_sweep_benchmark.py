@@ -12,8 +12,7 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_sdk import connect
+from lobole.sdk import connect
 
 
 def main():

@@ -21,8 +21,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
-from designer_sdk import SdkError, V  # noqa: E402
+from lobole.sdk import SdkError, V  # noqa: E402
 
 # Contacts that are MEANT to happen. Every one of these is a part bolted to
 # another part, which is two solids touching and has no other way to be said.

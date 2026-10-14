@@ -48,12 +48,13 @@ the one announced instance or take `--port`; they never guess:
 A generator that is one file sits here; one that spans several has its own
 directory. Each file in a group puts its own directory on `sys.path`, so a
 group's modules import each other by bare name; those that use `_lib` or
-`gear` add `generators/` too, and `tools/` for the SDK.
+`gear` add `generators/` too. The SDK is the `lobole` package, found
+through `PYTHONPATH` (the nix shell and ctest set it), never by path.
 
 `_lib.py` holds what scripts would otherwise each copy: sketch planes that
 spell out the V axis, entity builders, an arc through three points, a
 `check` that raises on a failed regeneration, and `connect`. Most newer
-generators use the SDK (`tools/designer_sdk.py`) directly.
+generators use the SDK (`python/lobole/sdk.py`) directly.
 
 What a generator makes goes to the untracked `scratch/<name>/`, or under
 `$DESIGNER_SCRATCH` when that is set (the tests below run each in a private

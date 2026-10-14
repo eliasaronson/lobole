@@ -1,10 +1,10 @@
 # The Python SDK
 
-`tools/designer_sdk.py` is what generators and agent scripts build parts
-with. It has two layers, and the split is the design.
+`lobole.sdk` (`python/lobole/sdk.py`) is what generators and agent scripts
+build parts with. It has two layers, and the split is the design.
 
 ```python
-from designer_sdk import connect
+from lobole.sdk import connect
 
 app = connect()                         # the one announced instance, or port=
 part = app.part("piston")               # create a part tab (create=False opens one)
@@ -41,7 +41,7 @@ cannot drift from the server.
   `add_motion_study(from_=0, to=360)`.
 - `app.call(method, **params)` is the raw escape hatch; `app.methods()` and
   `app.help(method)` list and describe. `help` is the same lookup as the
-  plain client's and the MCP server's (`designer_remote.method_help`).
+  plain client's and the MCP server's (`lobole.client.method_help`).
 - `app.transaction()` / `part.batch()` is a context manager over the `batch`
   RPC ([rpc.md](rpc.md#batch)); handles returned inside it are `$ref`s. On
   `App` it is `transaction` because `app.batch` is the generated RPC.
@@ -52,7 +52,7 @@ copied, and no constraint-kind string is hard-coded in the module.
 
 ### Typed stubs
 
-For a type checker, the contracted RPCs are typed: `tools/designer_rpc.py`
+For a type checker, the contracted RPCs are typed: `python/lobole/rpc.py`
 is generated from the typed rows by `tools/generate_rpc_contracts.py`
 (checked in; `rpc_contracts_generated` fails when it is stale) and holds a
 `TypedDict` of each method's parameters and an `RpcSurface` class with one
@@ -310,10 +310,10 @@ Faces, world space and pagination are not covered
 
 ## Validation stages
 
-`tools/designer_validation.py`:
+`python/lobole/validation.py`:
 
 ```python
-from designer_validation import validate
+from lobole.validation import validate
 report = validate(app, stage="preview")
 report = validate(app, stage="local", assembly=rig)
 report = validate(app, stage="full", assembly=rig)
@@ -344,11 +344,11 @@ motion stage; they are described with motion studies in docs/assemblies/.
 
 ## Generator-owned components
 
-`tools/designer_components.py` rebuilds one generator-made part in place,
+`python/lobole/components.py` rebuilds one generator-made part in place,
 keeping its part id, feature ids and occurrences:
 
 ```python
-from designer_components import claim, plan
+from lobole.components import claim, plan
 
 part = build_housing(app)
 claim(part, namespace="my-generator", key="housing", fingerprint=inputs_hash)
@@ -377,9 +377,3 @@ with plan(app, namespace="my-generator", key="housing",
 - The builder proxy is an adapter for trusted generator code, not a sandbox.
 
 `component_update_smoke` gates it.
-
-## Other clients
-
-`tools/designer.py` is a smaller fluent client (`d.sketch(plane="xy")
-.line(...).add()`, `d.extrude(sk, depth="w / 8")`) over the same RPCs,
-tested by `pyclient_smoke`. New code uses the SDK.

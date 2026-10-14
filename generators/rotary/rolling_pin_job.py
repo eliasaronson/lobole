@@ -24,9 +24,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.join(
-    os.path.dirname(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__)))), "tools"))
 
 from _lib import connect, fresh_project  # noqa: E402
 import rolling_pin as pin  # noqa: E402

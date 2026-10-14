@@ -23,8 +23,7 @@ import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "tools"))
-from designer_remote import Designer, RemoteError  # noqa: E402
+from lobole.client import Client, RemoteError  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 import smoke_shapes as shapes  # noqa: E402
 
@@ -116,7 +115,7 @@ def main():
     # what every smoke script gets.
     app = launch_app(binary, extra_args=["--autosave", "1"], env=env)
     try:
-        d = Designer.wait_for(app.port)
+        d = Client.wait_for(app.port)
         expect(d.call("ping")["ok"], "ping")
 
         # What this BUILD contains: optional subsystems are compile-time, so a
@@ -462,7 +461,7 @@ def main():
         phase("A SECOND simultaneous client works")
         # A SECOND simultaneous client works (multi-client remote): both see
         # the same document and responses route to the right connection.
-        d2 = Designer(app.port)
+        d2 = Client(app.port)
         expect(len(d2.call("get_state")["bodies"]) == 1, "second client reads")
         expect(len(d.call("get_state")["bodies"]) == 1, "first client still ok")
         d2.close()
@@ -2643,7 +2642,7 @@ def main():
 
         app2 = launch_app(binary, extra_args=["--autosave", "1"], env=env)
         try:
-            d2 = Designer.wait_for(app2.port)
+            d2 = Client.wait_for(app2.port)
             r = d2.call("open_project", path=crash_project)
             expect(r["autosave_available"], "recovery offered after crash")
             expect(len(d2.call("get_state")["features"]) == saved_features,
@@ -2662,7 +2661,7 @@ def main():
         phase("Clean shutdown on SIGTERM")
         # Clean shutdown on SIGTERM (fresh instance; the first was SIGKILLed)
         app3 = launch_app(binary, env=env)
-        Designer.wait_for(app3.port).close()
+        Client.wait_for(app3.port).close()
         app3.send_signal(signal.SIGTERM)
         expect(wait_exit(app3, 30, "SIGTERMed app") == 0, "exit 0 on SIGTERM")
 

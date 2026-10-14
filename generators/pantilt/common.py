@@ -26,9 +26,8 @@ OUT.mkdir(parents=True, exist_ok=True)
 FINAL = OUT / "pantilt.dsgn"
 STAGES = OUT / "stages"
 STAGES.mkdir(parents=True, exist_ok=True)
-sys.path.insert(0, str(HERE.parent.parent / "tools"))
 sys.path.insert(0, str(HERE))
-from designer_sdk import connect, Plane, Param  # noqa: E402,F401
+from lobole.sdk import connect, Plane, Param  # noqa: E402,F401
 
 PRINT = {"process": "fdm", "material": "petg"}
 
@@ -95,7 +94,7 @@ def frame(part, name, origin, z, x):
 class named(dict):
     """The project's variables as Params: `X = named(S)`, then `X.tilt_z`
     is the number AND the name, and Python arithmetic on them hands the
-    document the formula (designer_sdk.Param). A layout written in these
+    document the formula (lobole.sdk.Param). A layout written in these
     follows its variables; one written in `S[...]` floats is numbers."""
 
     def __init__(self, S):

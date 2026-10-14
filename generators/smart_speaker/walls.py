@@ -18,7 +18,7 @@ their outline FROM these walls by reference — see veneer.py.
 """
 import math
 
-from designer_sdk import Plane
+from lobole.sdk import Plane
 
 import joinery
 

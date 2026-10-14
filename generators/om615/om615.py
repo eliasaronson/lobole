@@ -26,11 +26,9 @@ import os
 import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "..", "tools"))
-from designer_components import claim, plan
-from designer_validation import validate
-from designer_sdk import SdkError, V, connect  # noqa: E402
+from lobole.components import claim, plan
+from lobole.validation import validate
+from lobole.sdk import SdkError, V, connect  # noqa: E402
 # This generator's own directory, and generators/ above it for _lib.
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                 ".."))
@@ -719,8 +717,8 @@ def component_fingerprint(key):
                           json.dumps(A.assembly_inputs(), sort_keys=True).encode()).hexdigest()
     inputs = [root / 'om615_top.py', root / 'om615_bottom.py',
               root / 'om615_accessories.py', root / 'om615_finish.py',
-              root.parent.parent / 'tools/designer_sdk.py',
-              root.parent.parent / 'tools/designer_components.py']
+              root.parent.parent / 'python/lobole/sdk.py',
+              root.parent.parent / 'python/lobole/components.py']
     digest = hashlib.sha256(key.encode())
     for path in inputs:
         digest.update(path.read_bytes())

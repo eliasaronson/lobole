@@ -9,10 +9,9 @@ from pathlib import Path
 import sys
 import tempfile
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from designer_contracts import ContractError, validate
-from designer_remote import RemoteError
-from designer_sdk import App, V
+from lobole.contracts import ContractError, validate
+from lobole.client import RemoteError
+from lobole.sdk import App, V
 from smoke_app import launch
 
 

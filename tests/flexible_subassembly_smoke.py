@@ -18,10 +18,8 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                "..", "tools"))
-import designer_sdk as sdk  # noqa: E402
-from designer_remote import Designer  # noqa: E402
+import lobole.sdk as sdk  # noqa: E402
+from lobole.client import Client  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 
 
@@ -57,7 +55,7 @@ def main():
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     proc = launch_app(binary, env=env)
     try:
-        app = sdk.App(Designer.wait_for(proc.port))
+        app = sdk.App(Client.wait_for(proc.port))
         app.new()
         housing = app.part("housing")
         housing.box(housing.datum_plane("xy", -5), width=8, depth=10,

@@ -20,8 +20,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-sys.path.insert(0, os.path.join(HERE, "..", "..", "tools"))
-from designer_sdk import Plane, V, _id  # noqa: E402
+from lobole.sdk import Plane, V, _id  # noqa: E402
 import bike_shop as shop  # noqa: E402
 from bike_shop import (axle_frame, cut, disc, seat_frame,  # noqa: E402
                        sprocket_outline, tangent_hull, tube, union)

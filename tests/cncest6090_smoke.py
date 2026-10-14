@@ -8,10 +8,10 @@ import os
 import sys
 
 sys.path[:0] = [
-    os.path.join(os.path.dirname(__file__), "..", p) for p in ("tools", "generators", "generators/cncest6090")
+    os.path.join(os.path.dirname(__file__), "..", p) for p in ("generators", "generators/cncest6090")
 ]
 from smoke_app import launch
-from designer_sdk import App
+from lobole.sdk import App
 from cncest6090_spec import dimensions, manifest
 import cncest6090 as C
 
