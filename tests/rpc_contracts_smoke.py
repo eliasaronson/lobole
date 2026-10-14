@@ -25,7 +25,8 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from lobole.contracts import accepts  # noqa: E402
-from lobole import errors  # noqa: E402
+import generate_rpc_contracts  # noqa: E402
+from lobole import errors, rpc  # noqa: E402
 from lobole.errors import (InvalidArgument, MissingArgument,  # noqa: E402
                            Refused, UnknownArgument)
 from lobole.rpc import COLUMNS  # noqa: E402
@@ -283,6 +284,73 @@ def check_error_classes():
     print('errors: one class per code, Refused for the rest')
 
 
+def _sample(schema):
+    """A value `schema` accepts, for the keys a fault-free spec needs."""
+    if "anyOf" in schema:
+        return _sample(schema["anyOf"][0])
+    if "enum" in schema:
+        return schema["enum"][0]
+    t = schema.get("type")
+    return {"integer": 1, "number": 1.0, "boolean": True, "string": "x",
+            "object": {}, "array": [], "null": None}.get(t, 1)
+
+
+def _wrong(schema):
+    """A value `schema` refuses: a type it does not take."""
+    t = schema.get("type")
+    return [1] if t != "array" else "not-a-list"
+
+
+def check_feature_contracts(raw):
+    """Every feature type's contract
+    (docs/scripting/rpc.md#typed-feature-specs): describe publishes the
+    column the generator types the SDK from,
+    and the server refuses an unknown field, a wrong type, an enum miss and
+    a missing required field by its path under /params/feature, with the
+    class for the code, the diagnostic the SDK's preflight gives, and
+    nothing built."""
+    app = App(raw)
+    types = {t["type"]: t for t in raw.call("describe")["feature_types"]}
+    expected = generate_rpc_contracts.feature_contracts()
+    assert set(types) == set(expected), set(types) ^ set(expected)
+    before = len(raw.call("get_state")["features"])
+    faults = 0
+    for name, row in types.items():
+        assert row["contract"] == expected[name], (name, row["contract"])
+        schema = rpc.FEATURE_SCHEMAS[name]
+        props, required = schema["properties"], schema["required"]
+        base = {k: _sample(props[k]) for k in required}
+        cases = [("unknown_argument", dict(base, zz_not_a_field=1))]
+        for k, sub in props.items():
+            if k == "type":
+                continue
+            if "enum" in sub:
+                cases.append(("invalid_argument", dict(base, **{k: "zz"})))
+            elif sub.get("type") in ("integer", "number", "boolean",
+                                     "string", "array"):
+                cases.append(("invalid_argument",
+                              dict(base, **{k: _wrong(sub)})))
+        for k in required:
+            if k != "type":
+                cases.append(("missing_argument",
+                              {x: v for x, v in base.items() if x != k}))
+        for code, spec in cases:
+            server = refused(lambda: raw.call("add_feature", feature=spec),
+                             code)
+            assert server.path.startswith("/params/feature"), server.path
+            try:
+                app.add_feature(feature=spec)
+                raise AssertionError(f"the SDK sent {spec}")
+            except Refused as client:
+                assert type(client) is type(server), (type(client), server)
+                assert client.diagnostic == server.diagnostic, (
+                    client.diagnostic, server.diagnostic)
+            faults += 1
+    assert len(raw.call("get_state")["features"]) == before
+    print(f"feature contracts: {len(types)} types, {faults} faults refused "
+          "alike by the server and the SDK, nothing built")
+
+
 def main():
     check_error_classes()
     with tempfile.TemporaryDirectory(prefix='rpc-contracts-') as tmp:
@@ -297,6 +365,7 @@ def main():
             check_refusals(raw, rows, typed)
             check_uncontracted(raw)
             check_sdk(raw)
+            check_feature_contracts(raw)
             check_revision_guard(raw)
     print('rpc contracts smoke: OK')
 

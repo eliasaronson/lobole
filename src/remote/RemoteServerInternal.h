@@ -11,6 +11,7 @@
 // (docs/architecture.md#the-remote-json-rpc) left exactly two helpers used by
 // two of them, plus two the session owns and the dispatch reports in `ping`.
 
+#include "core/io/Serialization.h"
 #include "remote/InspectionContracts.h"
 #include "remote/RemoteServer.h"
 #include "remote/RpcContract.h"
@@ -57,9 +58,17 @@ UndeclaredParamsError(const std::string& method, const nlohmann::json& params);
 const nlohmann::json* RequestSchemaOf(const std::string& method);
 
 // Refuses (ContractError) a request its schema does not accept; a method
-// without one passes.
+// without one passes. add_feature and modify_feature also hold the spec in
+// `feature` to its type's contract.
 void ValidateRequestContract(const std::string& method,
                              const nlohmann::json& params);
+
+// A feature type's whole contract column -- its `type`, the keys every spec
+// may carry (kFeatureCommonContract) and the row's own typed fields -- and
+// the schema built from it, or nullptr for a type no row names
+// (docs/scripting/rpc.md#typed-feature-specs).
+std::string FeatureContractColumn(const DocumentIO::FeatureTypeInfo& info);
+const nlohmann::json* FeatureSchemaOf(const std::string& type);
 
 // The vocabulary a typed row names as `@name`, or nullptr.
 const remote::contract::Vocabulary* ContractVocabulary(std::string_view name);

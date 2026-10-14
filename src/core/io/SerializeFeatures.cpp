@@ -1565,7 +1565,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "[{feature_id, element, kind: face|edge}] — live projected construction "
      "geometry of another body, the same thing project_geometry adds to an "
      "existing sketch (a projected hole edge is a circle, and Hole takes "
-     "circle centres, so a hole pattern needs no coordinates)"},
+     "circle centres, so a hole pattern needs no coordinates)",
+     "plane:object, entities?:object[], constraints?:object[], "
+     "face_ref?:object, plane_ref?:int>=0, external?:object[], "
+     "derived_ops?:object[], images?:object[], next_image_id?:int"},
     {"Extrude", 1,
      "sketch_id, distance (+_expr), mode: new_body|add|cut, end_mode?: "
      "blind|symmetric|two_sided|up_to_face|through_all, distance2? (+_expr), "
@@ -1576,7 +1579,13 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "over the length, right-handed about the direction of travel (a "
      "helical gear, a twisted vase); blind or symmetric, not thin. "
      "herringbone?: true climbs the first half at that rate and back over "
-     "the second (a V)"},
+     "the second (a V)",
+     "sketch_id:int>=0, distance?:number, distance_expr?:string, "
+     "mode?:'new_body'|'add'|'cut', "
+     "end_mode?:'blind'|'symmetric'|'two_sided'|'up_to_face'|'through_all', "
+     "distance2?:number, distance2_expr?:string, reversed?:bool, "
+     "regions?:any[], end_target?:object, thin?:object, "
+     "twist_deg?:number, twist_expr?:string, herringbone?:bool"},
     // A primitive asked for through add_feature is EXPANDED into a Sketch
     // and an Extrude/Revolve (core/Primitives.h); these rows are
     // that dialect. A stored Box/Sphere/Cylinder (position/center, from an
@@ -1588,15 +1597,27 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "from what it is on; offset [u, v] mm (+offset_expr) of its centre, or "
      "of its low corner with centered: false; mode: new_body|add|cut; "
      "reversed?; ids? [solid, sketch] pins the two feature ids. Stored as a "
-     "Sketch + Extrude, one undo step"},
+     "Sketch + Extrude, one undo step",
+     "on:string|object, width?:number, width_expr?:string, "
+     "depth?:number, depth_expr?:string, height?:number, "
+     "height_expr?:string, offset?:number[], offset_expr?:string[], "
+     "centered?:bool, mode?:'new_body'|'add'|'cut', reversed?:bool, "
+     "ids?:int[]"},
     {"Sphere", 1,
      "on (as Box) — required; diameter OR radius mm (+_expr); offset [u, v] "
      "mm (+offset_expr) of its centre, which lies ON the plane; mode. Stored "
-     "as a Sketch (a half disc) + a Revolve"},
+     "as a Sketch (a half disc) + a Revolve",
+     "on:string|object, diameter?:number, diameter_expr?:string, "
+     "radius?:number, radius_expr?:string, offset?:number[], "
+     "offset_expr?:string[], mode?:'new_body'|'add'|'cut', ids?:int[]"},
     {"Cylinder", 1,
      "on (as Box) — required; diameter OR radius mm, height mm (each "
      "+_expr); offset [u, v] mm (+offset_expr) of its axis; mode; reversed?. "
-     "Stored as a Sketch (a circle) + an Extrude along the normal"},
+     "Stored as a Sketch (a circle) + an Extrude along the normal",
+     "on:string|object, diameter?:number, diameter_expr?:string, "
+     "radius?:number, radius_expr?:string, height?:number, "
+     "height_expr?:string, offset?:number[], offset_expr?:string[], "
+     "mode?:'new_body'|'add'|'cut', reversed?:bool, ids?:int[]"},
     {"Fastener", 69,
      "standard: iso4762|iso14579|iso4017|iso10642|iso7380 (screws), "
      "asme_b18_3 (inch socket head cap screw, size a UNC designation such as "
@@ -1606,7 +1627,9 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "omitted for a nut or a washer; drive?: leave empty for the one the "
      "standard is made with. Every other dimension is READ from the table — "
      "an unstocked size is refused naming the nearest that are stocked "
-     "(docs/parts/README.md)"},
+     "(docs/parts/README.md)",
+     "standard:string, size:string, length?:number, "
+     "length_expr?:string, drive?:string"},
     {"Worm", 146,
      "face (the blank's cylindrical OUTSIDE: the worm's tip), module? "
      "(+_expr) mm (axial; omitted = tip dia / 12, a diameter quotient of 10), "
@@ -1614,7 +1637,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(axial; each flank thinned by half), length? mm (0 = the whole face). "
      "Cuts a ZA worm into the blank; the pitch diameter is the tip less two "
      "modules. get_state reports the lead angle and whether it self-locks "
-     "(docs/modeling/worm-gears.md)"},
+     "(docs/modeling/worm-gears.md)",
+     "face:object, module?:number, module_expr?:string, starts?:int, "
+     "pressure_angle_deg?:number, hand?:'right'|'left', "
+     "backlash?:number, length?:number"},
     {"WormWheel", 146,
      "face (the blank's cylindrical OUTSIDE: the rim; its length is the face "
      "width), teeth? (40), module? (+_expr) mm (omitted = rim dia / (teeth + "
@@ -1622,14 +1648,18 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "diameter; omitted = 10 modules), pressure_angle_deg? (20), hand? "
      "right|left. Hobs the wheel: throat, tip and enveloping teeth. "
      "get_state reports the centre distance, the ratio and self-locking "
-     "(docs/modeling/worm-gears.md)"},
+     "(docs/modeling/worm-gears.md)",
+     "face:object, teeth?:int, module?:number, module_expr?:string, "
+     "starts?:int, worm_diameter?:number, pressure_angle_deg?:number, "
+     "hand?:'right'|'left'"},
     {"Bearing", 141,
      "designation: an ISO 15 deep-groove ball bearing, 618/619/60/62/63 "
      "series, bores 3 to 30 mm (\"6200\", \"608\", \"618/4\"). d, D, B and "
      "the chamfer are READ from the table; an unknown designation is refused "
      "naming the ones carried. Faces are named <id>/bore, /outside, "
      "/inner_side_a|b, /outer_side_a|b, /shield_a|b; side A on z = 0 "
-     "(docs/parts/README.md#bearings)"},
+     "(docs/parts/README.md#bearings)",
+     "designation:string"},
     {"RetainingRing", 156,
      "standard: din471 (external, for a shaft, sizes 3-56) | din472 "
      "(internal, for a bore, sizes 8-72); size: the nominal shaft or bore "
@@ -1638,7 +1668,8 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "and the list. A flat annulus at the FREE diameter (no opening, no "
      "lugs). Faces <id>/bore, /outside, /ring_side_a|b; axis +Z, side A on "
      "z = 0. In an assembly, add_retaining_ring places one "
-     "(docs/parts/README.md#retaining-rings)"},
+     "(docs/parts/README.md#retaining-rings)",
+     "standard:'din471'|'din472', size:number"},
     {"RetainingRingGroove", 156,
      "face {feature_id, element} (a CYLINDRICAL face: a shaft takes din471, "
      "a bore din472), from {feature_id, element} (a circular edge at ONE END "
@@ -1650,13 +1681,16 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "is not a carried size, when the groove runs off the face, or when "
      "less than the edge distance n is left past it. Faces <id>/groove_floor, "
      "/groove_flank_a (the near flank, the one a ring bears on), "
-     "/groove_flank_b (docs/parts/README.md#the-groove)"},
+     "/groove_flank_b (docs/parts/README.md#the-groove)",
+     "face:object, from:object, offset:number, offset_expr?:string, "
+     "standard?:'din471'|'din472'"},
     {"BaseFlange", 109,
      "sketch_id, reversed?, regions? - the FIRST wall of a sheet part: the "
      "closed profile thickened by the document's sheet-metal thickness, so "
      "it takes no thickness of its own (set_sheet_metal_rules first, or it "
      "REFUSES - a blank is cut from one sheet). The profile is the inside "
-     "face; `reversed` grows the material the other way"},
+     "face; `reversed` grows the material the other way",
+     "sketch_id:int>=0, reversed?:bool, regions?:any[]"},
     {"EdgeFlange", 109,
      "edges [{feature_id, element}] (STRAIGHT edges of a flat panel of one "
      "sheet body), length (+_expr) mm, angle_deg (+_expr, default 90 - the "
@@ -1670,7 +1704,16 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "document's), corners?: open (default) | closed - carry two flanges "
      "that meet at a square corner past it and mitre them shut. One bend "
      "per edge, each recorded on the body; edges meeting at a corner whose "
-     "flanges would overlap are always mitred"},
+     "flanges would overlap are always mitred",
+     "edges:object[], length?:number, length_expr?:string, "
+     "angle_deg?:number, angle_deg_expr?:string, radius?:number, "
+     "radius_expr?:string, "
+     "position?:'material_inside'|'material_outside'|'bend_outside', "
+     "length_mode?:'flat'|'outside'|'inside', offset_start?:number, "
+     "offset_start_expr?:string, offset_end?:number, "
+     "offset_end_expr?:string, "
+     "relief?:'none'|'rectangular'|'obround'|'tear', "
+     "corners?:'open'|'closed'"},
     {"FlatPattern", 110,
      "body_id (the sheet body's created_by), fixed_face? {feature_id, "
      "element} - the BLANK: the body laid flat, replacing its shape in "
@@ -1678,18 +1721,21 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "occupy the same space). Author it SUPPRESSED and put it in a "
      "configuration's `unsuppressed_features` to switch between folded and "
      "flat. Must sit after every feature that reshapes the sheet, since it "
-     "flattens from the bends those features recorded"},
+     "flattens from the bends those features recorded",
+     "body_id:int>=0, fixed_face?:object"},
     {"Unfold", 111,
      "body_id (the sheet body's created_by), fixed_face? {feature_id, "
      "element}, bends? [the ids of the flange features whose bends to lay "
      "flat; omitted = all] - lays those bends flat IN PLACE so the features "
      "after it are drawn and cut in the flat; a Refold folds them back, "
-     "carrying every through-thickness cut across each crease onto the bend"},
+     "carrying every through-thickness cut across each crease onto the bend",
+     "body_id:int>=0, fixed_face?:object, bends?:int[]"},
     {"Refold", 111,
      "unfold_id - folds back up every bend that Unfold laid flat. A cut made "
      "between the two that crosses a crease is WRAPPED onto the bend; one "
      "that does not go right through the sheet is refused, since the "
-     "neutral-axis map cannot carry it"},
+     "neutral-axis map cannot carry it",
+     "unfold_id:int>=0"},
     {"Hem", 112,
      "edges [{feature_id, element}] (straight panel edges, as EdgeFlange), "
      "length (+_expr) mm - the return past the fold, kind?: closed "
@@ -1700,25 +1746,34 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "the picked edge: a hem running the full length of a pan's wall meets "
      "the wall beside it at the corner and fuses to it, and the part then "
      "flattens from no blank. A hem is crushed, so it is exempt from the "
-     "minimum bend radius and cuts no relief"},
+     "minimum bend radius and cuts no relief",
+     "edges:object[], length?:number, length_expr?:string, "
+     "kind?:'closed'|'open', gap?:number, gap_expr?:string, "
+     "outside?:bool, offset_start?:number, offset_start_expr?:string, "
+     "offset_end?:number, offset_end_expr?:string"},
     {"Jog", 112,
      "sketch_id (a sketch holding ONE line drawn on a panel face), height "
      "(+_expr) mm - face to face, angle_deg? (+_expr, (0, 90], default 90), "
      "flip? - which side of the line is carried up. Two opposing bends the "
      "full width of the panel; a height under what the two bends alone climb, "
-     "(2R + t)(1 - cos angle), is refused"},
+     "(2R + t)(1 - cos angle), is refused",
+     "sketch_id:int>=0, height?:number, height_expr?:string, "
+     "angle_deg?:number, angle_deg_expr?:string, flip?:bool"},
     {"CornerRelief", 113,
      "body_id, style?: circular (default) | rectangular, size? (+_expr) mm - "
      "radius or half-side, omitted = bend radius + thickness. Cuts a relief "
      "at EVERY corner where two bends of the body cross; three bends at one "
-     "corner, or two at other than a right angle, are refused"},
+     "corner, or two at other than a right angle, are refused",
+     "body_id:int>=0, style?:'circular'|'rectangular', size?:number, "
+     "size_expr?:string"},
     {"NormalCut", 114,
      "sketch_id (a closed profile), body_id? (omitted = the body the "
      "profile lands on), regions? - cut through a SHEET normal to it wherever "
      "the profile lands along the sketch's normal: square to a panel, "
      "radially through a bend. Use it rather than an extrude cut on sheet: "
      "an extrude cut goes straight along the sketch normal and comes out "
-     "slanted to the metal on a bend or a leaning wall"},
+     "slanted to the metal on a bend or a leaning wall",
+     "sketch_id:int>=0, body_id?:int>=0, regions?:any[]"},
     {"Import", 1,
      "path (STEP/STL/BREP file); units?: the length unit an STL or BREP was "
      "drawn in — mm (default), cm, m, in — since neither format carries one "
@@ -1727,7 +1782,9 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "combined bounding box by default — pass true to keep the file's own "
      "coordinates, which is what a neighbour part, a fixture in a shared "
      "frame, or a re-import of your own export needs. The applied shift is "
-     "reported as `recentred_by`"},
+     "reported as `recentred_by`",
+     "path:string, units?:'mm'|'cm'|'m'|'in', keep_origin?:bool, "
+     "color?:any"},
     {"Derived", 84,
      "source_part (a part slot id), configuration?: the source's "
      "configuration to copy, an id (or its name, which add_feature resolves) "
@@ -1741,7 +1798,10 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "part). A COPY of another part's bodies, taken when the feature is "
      "added and on update_derived; regeneration reads the snapshot, never "
      "the source, and get_state reports `stale` when the source has moved "
-     "(docs/modeling/derived.md)"},
+     "(docs/modeling/derived.md)",
+     "source_part:int>=0, configuration?:int|string, bodies?:int[], "
+     "body_names?:string[], placement?:object, reference?:bool, "
+     "snapshot?:any, source_name?:string"},
     {"Template", 161,
      "template (a name in the project's library: list_templates), "
      "parameters {name: value} — EVERY parameter the template declares, "
@@ -1754,12 +1814,18 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "their faces are named under ids of its own. Carries the definition "
      "it expanded; get_state says template_changed when the library's "
      "differs (update_template_instances). unlink_template turns it into "
-     "plain features (docs/modeling/templates.md)"},
+     "plain features (docs/modeling/templates.md)",
+     "template:string, parameters?:object, on?:string|object, "
+     "definition?:object, ids?:any[], revision?:int"},
     {"DatumPlane", 1,
      "kind: offset|angled|through_points; offset and angled take base_plane: "
      "xy|xz|yz or parent_id; offset: offset (+_expr), flip?; angled: axis "
      "{kind: x|y|z|sketch_line|datum_axis|custom}, the same as Revolve's, "
-     "angle_deg (+_expr); through_points: points [[x,y,z] x3] (mm)"},
+     "angle_deg (+_expr); through_points: points [[x,y,z] x3] (mm)",
+     "kind:'offset'|'angled'|'through_points', "
+     "base_plane?:'xy'|'xz'|'yz', parent_id?:int>=0, offset?:number, "
+     "offset_expr?:string, flip?:bool, axis?:object, angle_deg?:number, "
+     "angle_expr?:string, points?:any[]"},
     {"Revolve", 1,
      "sketch_id, axis {kind: x|y|z (world axes THROUGH THE WORLD ORIGIN)|"
      "sketch_line {sketch_id, entity_id}|datum_axis {datum_axis_id}|custom "
@@ -1769,8 +1835,12 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(+_expr), mode: new_body|add|cut, symmetric?, reversed?. Positive "
      "angles sweep RIGHT-HANDED about the axis direction starting from the "
      "sketch position (about +x, a point at +z rotates toward -y) — confirm "
-     "partial-sweep orientation from the digest bbox, not a render tile"},
-    {"DatumAxis", 1, "kind, points?/sketch_id?/entity_id?"},
+     "partial-sweep orientation from the digest bbox, not a render tile",
+     "sketch_id:int>=0, axis:object, angle_deg?:number, "
+     "angle_expr?:string, mode?:'new_body'|'add'|'cut', reversed?:bool, "
+     "symmetric?:bool, regions?:any[]"},
+    {"DatumAxis", 1, "kind, points?/sketch_id?/entity_id?",
+     "kind:string, points?:any[], sketch_id?:int>=0, entity_id?:int>=0"},
     {"Frame", 86,
      "kind: explicit|from_element|offset — a NAMED datum frame (origin + "
      "axes) that mates anchor to by name ({occurrence, frame: <id|name>}) "
@@ -1781,7 +1851,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "circle (centre of the pattern, X toward the first hole); flip? "
      "negates Z. offset: parent_id (a Frame; 0 = the part origin), offset "
      "[x,y,z] (+offset_expr), rotation_deg [rx,ry,rz] (+rotation_expr), "
-     "applied as parent · T · Rx · Ry · Rz"},
+     "applied as parent · T · Rx · Ry · Rz",
+     "kind:'explicit'|'from_element'|'offset', origin?:number[], "
+     "origin_expr?:string[], z_axis?:number[], x_axis?:number[], "
+     "elements?:object[], parent_id?:int>=0, offset?:number[], "
+     "offset_expr?:string[], rotation_deg?:number[], flip?:bool"},
     {"Curve3D", 42,
      "kind: fit_spline|control_poly|bent_path|helix; points [[x,y,z]...], "
      "degree?, closed?; bent_path: points are the CORNERS in order and "
@@ -1791,34 +1865,58 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "(+_expr): where it starts round the axis, degrees right-handed about "
      "`axis` from the reference direction — +X for a +Z axis, -X for -Z, +Z "
      "for +X or +Y, -Z for -X or -Y (in general OpenCASCADE's gp_Ax3 "
-     "choice). The helix then winds right-handed (or left) from there"},
+     "choice). The helix then winds right-handed (or left) from there",
+     "kind:'fit_spline'|'control_poly'|'bent_path'|'helix', "
+     "points?:any[], degree?:int, closed?:bool, radius?:number, "
+     "radius_expr?:string, origin?:number[], axis?:number[], "
+     "pitch?:number, pitch_expr?:string, turns?:number, "
+     "turns_expr?:string, left_handed?:bool, start_deg?:number, "
+     "start_deg_expr?:string"},
     {"Boolean", 1,
      "target_id, tool_id (body created_by ids), op: "
-     "union|subtract|intersect"},
+     "union|subtract|intersect",
+     "target_id:int>=0, tool_id:int>=0, "
+     "op?:'union'|'subtract'|'intersect'"},
     {"Split", 39,
      "body_id, knife: \"plane\" (default) with datum_id or base_plane, "
-     "offset (+_expr); or \"face\" with face {feature_id, element}"},
-    {"Refine", 47, "body_id (heals/simplifies the B-Rep)"},
-    {"Fillet", 17, "edges [{feature_id, element}], radius (+_expr)"},
+     "offset (+_expr); or \"face\" with face {feature_id, element}",
+     "body_id:int>=0, knife?:'plane'|'face', datum_id?:int>=0, "
+     "base_plane?:'xy'|'xz'|'yz', offset?:number, offset_expr?:string, "
+     "face?:object"},
+    {"Refine", 47, "body_id (heals/simplifies the B-Rep)", "body_id:int>=0"},
+    {"Fillet", 17, "edges [{feature_id, element}], radius (+_expr)",
+     "edges:object[], radius?:number, radius_expr?:string"},
     {"Chamfer", 17,
      "edges [{feature_id, element}], radius (+_expr) = "
-     "setback distance"},
+     "setback distance",
+     "edges:object[], radius?:number, radius_expr?:string"},
     {"Shell", 20,
      "body_id (the body's created_by), open_faces [{feature_id, element}], "
-     "thickness (+_expr) mm — the wall, grown inward"},
+     "thickness (+_expr) mm — the wall, grown inward",
+     "body_id:int>=0, thickness?:number, thickness_expr?:string, "
+     "open_faces?:object[]"},
     {"Loft", 20,
      "sketch_ids [id...] (section order), mode, path_id? (a spine the sections "
-     "are carried along: a sketch or a curve), guide_id?"},
+     "are carried along: a sketch or a curve), guide_id?",
+     "sketch_ids:int[], mode?:'new_body'|'add'|'cut', path_id?:int>=0, "
+     "guide_id?:int>=0"},
     {"Sweep", 20,
      "profile_id (sketch), path_id (sketch or curve), mode, "
-     "guide_id?, frame?"},
+     "guide_id?, frame?",
+     "profile_id:int>=0, path_id:int>=0, mode?:'new_body'|'add'|'cut', "
+     "guide_id?:int>=0, frame?:string"},
     {"Pipe", 43,
      "path_id (curve), outer_diameter (+_expr), wall_thickness "
-     "(+_expr), mode"},
+     "(+_expr), mode",
+     "path_id:int>=0, outer_diameter?:number, "
+     "outer_diameter_expr?:string, wall_thickness?:number, "
+     "wall_thickness_expr?:string, mode?:'new_body'|'add'|'cut'"},
     {"Rib", 36,
      "sketch_id (open profile), thickness (+_expr), flip?, body_id? (the body "
      "it joins; default the nearest one the rib's slab overlaps, else the "
-     "newest)"},
+     "newest)",
+     "sketch_id:int>=0, thickness?:number, thickness_expr?:string, "
+     "flip?:bool, body_id?:int>=0"},
     {"Thread", 36,
      "face {feature_id, element} (cylindrical), designation: ISO metric "
      "(\"M8\", \"M8x1\") or unified (\"3/8-16 UNC\", \"#10-32 UNF\"), "
@@ -1834,7 +1932,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "thread angle, degrees from the plane normal to the axis: 30 = the "
      "ISO/UTS 60-degree profile, the only one a table designation takes; a "
      "custom thread 15-60, and 45 prints with no flank past 45 degrees of "
-     "overhang); allow_engagement?, minimum_engagement? (mm)"},
+     "overhang); allow_engagement?, minimum_engagement? (mm)",
+     "face:object, designation?:string, pitch?:number, "
+     "thread_class?:string, length?:number, length_expr?:string, "
+     "modeled?:bool, hand?:'right'|'left', flank_angle_deg?:number, "
+     "allow_engagement?:bool, minimum_engagement?:number"},
     {"Hole", 21,
      "hole_kind: simple|counterbore|countersink, sketch_id (centres: its "
      "points and its circles' centres, so a projected hole edge places a hole; "
@@ -1849,10 +1951,19 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "floor's point, included angle 30-180; absent = 118 with a fit, a "
      "jobber drill's, else flat); thread_depth? (mm, +_expr; a tapped fit's "
      "thread from the mouth; absent = the depth less 3 pitches, a tap's "
-     "lead, or the whole bore when through)"},
+     "lead, or the whole bore when through)",
+     "sketch_id:int>=0, "
+     "hole_kind?:'simple'|'counterbore'|'countersink', "
+     "diameter?:number, diameter_expr?:string, depth?:number, "
+     "depth_expr?:string, through?:bool, cb_diameter?:number, "
+     "cb_depth?:number, cs_diameter?:number, cs_depth?:number, "
+     "drill_point_deg?:number, thread_depth?:number, "
+     "thread_depth_expr?:string, fit?:object"},
     {"Draft", 22,
      "faces [{feature_id, element}], angle_deg (+_expr), "
-     "neutral_plane, body_id?"},
+     "neutral_plane, body_id?",
+     "faces:object[], angle_deg?:number, angle_expr?:string, "
+     "neutral_plane?:string, body_id?:int>=0"},
     {"Cope", 119,
      "member_id (the member being cut); against: [ids whose SIDE it lands "
      "on] cut with their OUTER solid, a fishmouth; mitre: [ids it meets END "
@@ -1862,7 +1973,9 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "nodes (a plane through the very end of a tube shaves a wedge instead "
      "of mitring it), and once they are, a corner and a tee look alike. "
      "Every neighbour SURVIVES either cut. gap (+_expr): a cope opens on the "
-     "radius, a mitre moves its plane back along the member"},
+     "radius, a mitre moves its plane back along the member",
+     "member_id:int>=0, against?:int[], mitre?:int[], gap?:number, "
+     "gap_expr?:string"},
     {"Pattern", 1,
      "kind: linear|circular|mirror, source_id (feature to repeat); linear and "
      "circular: axis, count (+_expr), then linear: spacing (+_expr) mm, "
@@ -1870,7 +1983,11 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "circle is 60; one that lands every copy on the seed is refused); "
      "mirror: the plane, base_plane: xy|xz|yz "
      "or parent_id (a datum plane). axis is the same {kind: x|y|z|"
-     "sketch_line|datum_axis|custom} as Revolve's"},
+     "sketch_line|datum_axis|custom} as Revolve's",
+     "kind:'linear'|'circular'|'mirror', source_id:int>=0, "
+     "parent_id?:int>=0, count?:int, count_expr?:string, "
+     "spacing?:number, spacing_expr?:string, angle_deg?:number, "
+     "angle_expr?:string, base_plane?:'xy'|'xz'|'yz', axis?:object"},
 };
 std::span<const FeatureTypeInfo> FeatureTypes() { return kFeatureTypes; }
 

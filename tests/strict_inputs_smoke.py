@@ -57,11 +57,11 @@ def main():
         # --- Unknown fields error instead of vanishing --------------------
         # A field another primitive takes is still unknown to this one, and
         # the refusal names what this one accepts.
-        expect_error(d, "unknown field 'height' for Sphere. It accepts:",
+        expect_error(d, "unknown parameter 'feature/height'; it takes:",
                      method="add_feature",
                      feature={"type": "Sphere", "name": "S", "on": "Top",
                               "diameter": 10, "height": 10})
-        expect_error(d, "unknown field 'distace' for Box. It accepts:",
+        expect_error(d, "unknown parameter 'feature/distace'; it takes:",
                      method="add_feature",
                      feature={"type": "Box", "name": "B", "on": "Top",
                               "width": 10, "depth": 10, "height": 10,
@@ -116,7 +116,8 @@ def main():
         # modify_feature validates too: on the Extrude the Box became...
         base = d.call("get_state")["features"][base_index]
         expect(base["type"] == "Extrude", f"the box's solid: {base}")
-        expect_error(d, "unknown field 'distace'", method="modify_feature",
+        expect_error(d, "unknown parameter 'feature/distace'",
+                     method="modify_feature",
                      index=base_index, feature=dict(base, distace=20))
         # ...and a Box itself is not modified at all: it is not a feature
         # the document stores, so there is nothing of that type to edit.

@@ -25,7 +25,8 @@ def run(d, expect):
             "width": 10, "depth": 10, "length": 10})
         raise AssertionError("Box length must be rejected")
     except RuntimeError as e:
-        expect("unknown field 'length'" in str(e), f"names the field: {e}")
+        expect("unknown parameter 'feature/length'" in str(e),
+               f"names the field: {e}")
         expect("width" in str(e) and "height" in str(e),
                f"lists the fields it does hold: {e}")
         expect("mode" in str(e) and "offset" in str(e),

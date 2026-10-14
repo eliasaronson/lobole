@@ -24,6 +24,7 @@
 #include "remote/RemoteInspection.h" // PrintedThreadJson
 #include "remote/RemoteProject.h"    // RequireFreshTabName
 #include "remote/RemoteTemplates.h"
+#include "remote/RpcContract.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h" // PartDocById
 #include "ui/DerivedActions.h"
@@ -124,41 +125,26 @@ void RejectUnknownFeatureFields(const json& request, const Feature& built) {
   // a get_state feature entry — a legitimate agent pattern — stays valid.
   // A template instance's row adds what get_state says about it
   // (template_changed, expanded).
-  static const std::set<std::string> kAllow = {"type",
-                                               "index",
-                                               "error",
-                                               "warning",
-                                               "after_earlier_failure",
-                                               "report",
-                                               "template_changed",
-                                               "expanded",
-                                               "face_appearance_unresolved"};
+  std::set<std::string> allow = {"type"};
+  for (const char* k : DocumentIO::kFeatureEnvelopeKeys)
+    allow.insert(k);
   // The round trip alone is not enough: a key whose value is EMPTY
   // serializes back to nothing, so `"external": []` on a sketch (a filter
   // that found no edges — the SO-101 gripper's) was refused as an unknown
-  // field naming a vocabulary that did not include it. The type's own
-  // documented dialect settles those.
+  // field naming a vocabulary that did not include it. The type's own typed
+  // contract settles those: its keys, which the dispatcher has already held
+  // the request to (docs/scripting/rpc.md#typed-feature-specs). This is the
+  // check behind it, for a spec that reaches here by another way.
   std::set<std::string> dialect;
   for (const DocumentIO::FeatureTypeInfo& info : DocumentIO::FeatureTypes()) {
     if (built.TypeName() != info.type)
       continue;
-    std::string word;
-    for (const char* c = info.params; *c != '\0'; ++c) {
-      if ((*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') ||
-          (*c >= '0' && *c <= '9') || *c == '_') {
-        word += *c;
-        continue;
-      }
-      if (!word.empty())
-        dialect.insert(word);
-      word.clear();
-    }
-    if (!word.empty())
-      dialect.insert(word);
+    for (const std::string& k : remote::contract::ParamNames(info.contract))
+      dialect.insert(k);
     break;
   }
   for (auto it = request.begin(); it != request.end(); ++it) {
-    if (out.contains(it.key()) || kAllow.count(it.key()) != 0)
+    if (out.contains(it.key()) || allow.count(it.key()) != 0)
       continue;
     // Documented for this type, and it did not serialize back: an empty
     // value, or the DEFAULT, which the dialect omits so older files re-save

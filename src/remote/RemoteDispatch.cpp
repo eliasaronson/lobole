@@ -1214,7 +1214,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     for (const auto& ft : DocumentIO::FeatureTypes())
       featureTypes.push_back({{"type", ft.type},
                               {"since_version", ft.sinceVersion},
-                              {"params", ft.params}});
+                              {"params", ft.params},
+                              {"contract", FeatureContractColumn(ft)}});
     // Same shape as feature_types: an entity type that names no fields is a
     // type an agent can see and cannot use.
     json entityTypes = json::array();
@@ -2683,10 +2684,61 @@ const json* RequestSchemaOf(const std::string& method) {
   return it == schemas.end() ? nullptr : &it->second;
 }
 
+// A feature spec's schema, by its type: the row's typed fields
+// (FeatureTypeInfo::contract) with the keys every spec may carry beside
+// them (docs/scripting/rpc.md#typed-feature-specs). Null for a type no row
+// names; FeatureFromJson refuses that with the list of types.
+const json* FeatureSchemaOf(const std::string& type) {
+  static const std::map<std::string, json> schemas = [] {
+    std::map<std::string, json> out;
+    for (const DocumentIO::FeatureTypeInfo& info : DocumentIO::FeatureTypes()) {
+      const std::string column = FeatureContractColumn(info);
+      try {
+        out[info.type] = remote::contract::RequestSchema(
+            *remote::contract::ParseColumn(column), ContractVocabulary);
+      } catch (const std::invalid_argument& e) {
+        throw std::logic_error(std::string("feature type '") + info.type +
+                               "' contract: " + e.what());
+      }
+    }
+    return out;
+  }();
+  const auto it = schemas.find(type);
+  return it == schemas.end() ? nullptr : &it->second;
+}
+
+std::string FeatureContractColumn(const DocumentIO::FeatureTypeInfo& info) {
+  return std::string("type:'") + info.type + "', " +
+         DocumentIO::kFeatureCommonContract + ", " + info.contract;
+}
+
 void ValidateRequestContract(const std::string& method, const json& params) {
   if (const json* schema = RequestSchemaOf(method))
     remote::ValidateInspectionValue(
         *schema, params.is_null() ? json::object() : params, method);
+  // The spec inside add_feature and modify_feature is `feature:object` to
+  // the method's own row; its type's contract types what is inside it, so a
+  // wrong field is refused with the same structured diagnostic, by path,
+  // before anything is built.
+  if ((method == "add_feature" || method == "modify_feature") &&
+      params.is_object() && params.contains("feature")) {
+    const json& f = params.at("feature");
+    if (f.is_object() && f.contains("type") && f.at("type").is_string())
+      if (const json* schema =
+              FeatureSchemaOf(f.at("type").get<std::string>())) {
+        json spec = f;
+        for (const char* k : DocumentIO::kFeatureEnvelopeKeys)
+          spec.erase(k);
+        const std::string type = spec.at("type").get<std::string>();
+        bool retired = false;
+        if (type == "Box" || type == "Sphere" || type == "Cylinder")
+          for (const char* k : DocumentIO::kPrimitiveRetiredKeys)
+            retired = retired || spec.contains(k);
+        if (!retired)
+          remote::ValidateInspectionValue(*schema, spec, method,
+                                          "/params/feature");
+      }
+  }
 }
 
 // The active tab's save stamp, whichever kind of document it holds (the

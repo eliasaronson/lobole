@@ -1619,7 +1619,7 @@ def main():
         expect_error(d, "import_step", "Accepted", path=stl, units="furlong")
         expect_error(d, "import_step", "declares its own", path=step,
                      units="in")
-        expect_error(d, "add_feature", "Accepted", feature={
+        expect_error(d, "add_feature", "must be one of", feature={
             "type": "Import", "name": "Bad", "path": stl, "units": "furlong"})
         # The default said out loud is not an unknown field, though it does
         # not serialize back (absent = mm).

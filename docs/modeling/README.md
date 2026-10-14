@@ -129,7 +129,8 @@ a later `get_state` (`tests/regen_honesty_smoke.py`).
 
 The authoritative list, with every field, is `kFeatureTypes` in
 `src/core/io/SerializeFeatures.cpp`, served as the RPC `describe`
-`feature_types` rows. General solid features:
+`feature_types` rows; each row's typed `contract` is what `add_feature`
+holds a spec to ([typed feature specs](../scripting/rpc.md#typed-feature-specs)). General solid features:
 
 | type | what it does |
 |---|---|

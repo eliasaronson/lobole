@@ -118,7 +118,7 @@ class AddConfigurationParams(TypedDict):
     name: NotRequired[str]
 
 class AddFeatureParams(TypedDict):
-    feature: Mapping[str, Any]
+    feature: FeatureSpec | Mapping[str, Any]
     expect_revision: NotRequired[Revision]
 
 class AddMateParams(TypedDict):
@@ -243,7 +243,7 @@ class MeasureParams(TypedDict):
     part: NotRequired[str | int]
 
 class ModifyFeatureParams(TypedDict):
-    feature: Mapping[str, Any]
+    feature: FeatureSpec | Mapping[str, Any]
     feature_id: NotRequired[int]
     index: NotRequired[int]
     expect_revision: NotRequired[Revision]
@@ -320,6 +320,781 @@ class SetVariableParams(TypedDict):
 class ViewParams(TypedDict):
     fit: NotRequired[bool]
     name: str
+
+
+# Each feature type's spec, as add_feature and modify_feature take it
+# (docs/scripting/rpc.md#typed-feature-specs): its schema, the keys
+# get_state stamps around a spec and the old primitive keys the parser
+# refuses by name (neither is held to a schema), and its type.
+FEATURE_SCHEMAS: dict[str, dict[str, Any]] = {
+    'Sketch': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Sketch']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'plane': {'type': 'object'}, 'entities': {'type': 'array', 'items': {'type': 'object'}}, 'constraints': {'type': 'array', 'items': {'type': 'object'}}, 'face_ref': {'type': 'object'}, 'plane_ref': {'type': 'integer', 'minimum': 0.0}, 'external': {'type': 'array', 'items': {'type': 'object'}}, 'derived_ops': {'type': 'array', 'items': {'type': 'object'}}, 'images': {'type': 'array', 'items': {'type': 'object'}}, 'next_image_id': {'type': 'integer'}}, 'required': ['type', 'plane'], 'additionalProperties': False},
+    'Extrude': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Extrude']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'distance': {'type': 'number'}, 'distance_expr': {'type': 'string'}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}, 'end_mode': {'type': 'string', 'enum': ['blind', 'symmetric', 'two_sided', 'up_to_face', 'through_all']}, 'distance2': {'type': 'number'}, 'distance2_expr': {'type': 'string'}, 'reversed': {'type': 'boolean'}, 'regions': {'type': 'array', 'items': {}}, 'end_target': {'type': 'object'}, 'thin': {'type': 'object'}, 'twist_deg': {'type': 'number'}, 'twist_expr': {'type': 'string'}, 'herringbone': {'type': 'boolean'}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
+    'Box': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Box']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'on': {'anyOf': [{'type': 'string'}, {'type': 'object'}]}, 'width': {'type': 'number'}, 'width_expr': {'type': 'string'}, 'depth': {'type': 'number'}, 'depth_expr': {'type': 'string'}, 'height': {'type': 'number'}, 'height_expr': {'type': 'string'}, 'offset': {'type': 'array', 'items': {'type': 'number'}}, 'offset_expr': {'type': 'array', 'items': {'type': 'string'}}, 'centered': {'type': 'boolean'}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}, 'reversed': {'type': 'boolean'}, 'ids': {'type': 'array', 'items': {'type': 'integer'}}}, 'required': ['type', 'on'], 'additionalProperties': False},
+    'Sphere': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Sphere']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'on': {'anyOf': [{'type': 'string'}, {'type': 'object'}]}, 'diameter': {'type': 'number'}, 'diameter_expr': {'type': 'string'}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}, 'offset': {'type': 'array', 'items': {'type': 'number'}}, 'offset_expr': {'type': 'array', 'items': {'type': 'string'}}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}, 'ids': {'type': 'array', 'items': {'type': 'integer'}}}, 'required': ['type', 'on'], 'additionalProperties': False},
+    'Cylinder': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Cylinder']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'on': {'anyOf': [{'type': 'string'}, {'type': 'object'}]}, 'diameter': {'type': 'number'}, 'diameter_expr': {'type': 'string'}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}, 'height': {'type': 'number'}, 'height_expr': {'type': 'string'}, 'offset': {'type': 'array', 'items': {'type': 'number'}}, 'offset_expr': {'type': 'array', 'items': {'type': 'string'}}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}, 'reversed': {'type': 'boolean'}, 'ids': {'type': 'array', 'items': {'type': 'integer'}}}, 'required': ['type', 'on'], 'additionalProperties': False},
+    'Fastener': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Fastener']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'standard': {'type': 'string'}, 'size': {'type': 'string'}, 'length': {'type': 'number'}, 'length_expr': {'type': 'string'}, 'drive': {'type': 'string'}}, 'required': ['type', 'standard', 'size'], 'additionalProperties': False},
+    'Worm': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Worm']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'face': {'type': 'object'}, 'module': {'type': 'number'}, 'module_expr': {'type': 'string'}, 'starts': {'type': 'integer'}, 'pressure_angle_deg': {'type': 'number'}, 'hand': {'type': 'string', 'enum': ['right', 'left']}, 'backlash': {'type': 'number'}, 'length': {'type': 'number'}}, 'required': ['type', 'face'], 'additionalProperties': False},
+    'WormWheel': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['WormWheel']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'face': {'type': 'object'}, 'teeth': {'type': 'integer'}, 'module': {'type': 'number'}, 'module_expr': {'type': 'string'}, 'starts': {'type': 'integer'}, 'worm_diameter': {'type': 'number'}, 'pressure_angle_deg': {'type': 'number'}, 'hand': {'type': 'string', 'enum': ['right', 'left']}}, 'required': ['type', 'face'], 'additionalProperties': False},
+    'Bearing': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Bearing']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'designation': {'type': 'string'}}, 'required': ['type', 'designation'], 'additionalProperties': False},
+    'RetainingRing': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['RetainingRing']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'standard': {'type': 'string', 'enum': ['din471', 'din472']}, 'size': {'type': 'number'}}, 'required': ['type', 'standard', 'size'], 'additionalProperties': False},
+    'RetainingRingGroove': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['RetainingRingGroove']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'face': {'type': 'object'}, 'from': {'type': 'object'}, 'offset': {'type': 'number'}, 'offset_expr': {'type': 'string'}, 'standard': {'type': 'string', 'enum': ['din471', 'din472']}}, 'required': ['type', 'face', 'from', 'offset'], 'additionalProperties': False},
+    'BaseFlange': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['BaseFlange']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'reversed': {'type': 'boolean'}, 'regions': {'type': 'array', 'items': {}}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
+    'EdgeFlange': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['EdgeFlange']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'edges': {'type': 'array', 'items': {'type': 'object'}}, 'length': {'type': 'number'}, 'length_expr': {'type': 'string'}, 'angle_deg': {'type': 'number'}, 'angle_deg_expr': {'type': 'string'}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}, 'position': {'type': 'string', 'enum': ['material_inside', 'material_outside', 'bend_outside']}, 'length_mode': {'type': 'string', 'enum': ['flat', 'outside', 'inside']}, 'offset_start': {'type': 'number'}, 'offset_start_expr': {'type': 'string'}, 'offset_end': {'type': 'number'}, 'offset_end_expr': {'type': 'string'}, 'relief': {'type': 'string', 'enum': ['none', 'rectangular', 'obround', 'tear']}, 'corners': {'type': 'string', 'enum': ['open', 'closed']}}, 'required': ['type', 'edges'], 'additionalProperties': False},
+    'FlatPattern': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['FlatPattern']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'fixed_face': {'type': 'object'}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
+    'Unfold': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Unfold']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'fixed_face': {'type': 'object'}, 'bends': {'type': 'array', 'items': {'type': 'integer'}}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
+    'Refold': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Refold']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'unfold_id': {'type': 'integer', 'minimum': 0.0}}, 'required': ['type', 'unfold_id'], 'additionalProperties': False},
+    'Hem': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Hem']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'edges': {'type': 'array', 'items': {'type': 'object'}}, 'length': {'type': 'number'}, 'length_expr': {'type': 'string'}, 'kind': {'type': 'string', 'enum': ['closed', 'open']}, 'gap': {'type': 'number'}, 'gap_expr': {'type': 'string'}, 'outside': {'type': 'boolean'}, 'offset_start': {'type': 'number'}, 'offset_start_expr': {'type': 'string'}, 'offset_end': {'type': 'number'}, 'offset_end_expr': {'type': 'string'}}, 'required': ['type', 'edges'], 'additionalProperties': False},
+    'Jog': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Jog']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'height': {'type': 'number'}, 'height_expr': {'type': 'string'}, 'angle_deg': {'type': 'number'}, 'angle_deg_expr': {'type': 'string'}, 'flip': {'type': 'boolean'}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
+    'CornerRelief': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['CornerRelief']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'style': {'type': 'string', 'enum': ['circular', 'rectangular']}, 'size': {'type': 'number'}, 'size_expr': {'type': 'string'}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
+    'NormalCut': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['NormalCut']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'regions': {'type': 'array', 'items': {}}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
+    'Import': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Import']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'path': {'type': 'string'}, 'units': {'type': 'string', 'enum': ['mm', 'cm', 'm', 'in']}, 'keep_origin': {'type': 'boolean'}, 'color': {}}, 'required': ['type', 'path'], 'additionalProperties': False},
+    'Derived': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Derived']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'source_part': {'type': 'integer', 'minimum': 0.0}, 'configuration': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}, 'bodies': {'type': 'array', 'items': {'type': 'integer'}}, 'body_names': {'type': 'array', 'items': {'type': 'string'}}, 'placement': {'type': 'object'}, 'reference': {'type': 'boolean'}, 'snapshot': {}, 'source_name': {'type': 'string'}}, 'required': ['type', 'source_part'], 'additionalProperties': False},
+    'Template': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Template']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'template': {'type': 'string'}, 'parameters': {'type': 'object'}, 'on': {'anyOf': [{'type': 'string'}, {'type': 'object'}]}, 'definition': {'type': 'object'}, 'ids': {'type': 'array', 'items': {}}, 'revision': {'type': 'integer'}}, 'required': ['type', 'template'], 'additionalProperties': False},
+    'DatumPlane': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['DatumPlane']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'kind': {'type': 'string', 'enum': ['offset', 'angled', 'through_points']}, 'base_plane': {'type': 'string', 'enum': ['xy', 'xz', 'yz']}, 'parent_id': {'type': 'integer', 'minimum': 0.0}, 'offset': {'type': 'number'}, 'offset_expr': {'type': 'string'}, 'flip': {'type': 'boolean'}, 'axis': {'type': 'object'}, 'angle_deg': {'type': 'number'}, 'angle_expr': {'type': 'string'}, 'points': {'type': 'array', 'items': {}}}, 'required': ['type', 'kind'], 'additionalProperties': False},
+    'Revolve': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Revolve']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'axis': {'type': 'object'}, 'angle_deg': {'type': 'number'}, 'angle_expr': {'type': 'string'}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}, 'reversed': {'type': 'boolean'}, 'symmetric': {'type': 'boolean'}, 'regions': {'type': 'array', 'items': {}}}, 'required': ['type', 'sketch_id', 'axis'], 'additionalProperties': False},
+    'DatumAxis': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['DatumAxis']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'kind': {'type': 'string'}, 'points': {'type': 'array', 'items': {}}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'entity_id': {'type': 'integer', 'minimum': 0.0}}, 'required': ['type', 'kind'], 'additionalProperties': False},
+    'Frame': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Frame']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'kind': {'type': 'string', 'enum': ['explicit', 'from_element', 'offset']}, 'origin': {'type': 'array', 'items': {'type': 'number'}}, 'origin_expr': {'type': 'array', 'items': {'type': 'string'}}, 'z_axis': {'type': 'array', 'items': {'type': 'number'}}, 'x_axis': {'type': 'array', 'items': {'type': 'number'}}, 'elements': {'type': 'array', 'items': {'type': 'object'}}, 'parent_id': {'type': 'integer', 'minimum': 0.0}, 'offset': {'type': 'array', 'items': {'type': 'number'}}, 'offset_expr': {'type': 'array', 'items': {'type': 'string'}}, 'rotation_deg': {'type': 'array', 'items': {'type': 'number'}}, 'flip': {'type': 'boolean'}}, 'required': ['type', 'kind'], 'additionalProperties': False},
+    'Curve3D': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Curve3D']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'kind': {'type': 'string', 'enum': ['fit_spline', 'control_poly', 'bent_path', 'helix']}, 'points': {'type': 'array', 'items': {}}, 'degree': {'type': 'integer'}, 'closed': {'type': 'boolean'}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}, 'origin': {'type': 'array', 'items': {'type': 'number'}}, 'axis': {'type': 'array', 'items': {'type': 'number'}}, 'pitch': {'type': 'number'}, 'pitch_expr': {'type': 'string'}, 'turns': {'type': 'number'}, 'turns_expr': {'type': 'string'}, 'left_handed': {'type': 'boolean'}, 'start_deg': {'type': 'number'}, 'start_deg_expr': {'type': 'string'}}, 'required': ['type', 'kind'], 'additionalProperties': False},
+    'Boolean': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Boolean']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'target_id': {'type': 'integer', 'minimum': 0.0}, 'tool_id': {'type': 'integer', 'minimum': 0.0}, 'op': {'type': 'string', 'enum': ['union', 'subtract', 'intersect']}}, 'required': ['type', 'target_id', 'tool_id'], 'additionalProperties': False},
+    'Split': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Split']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'knife': {'type': 'string', 'enum': ['plane', 'face']}, 'datum_id': {'type': 'integer', 'minimum': 0.0}, 'base_plane': {'type': 'string', 'enum': ['xy', 'xz', 'yz']}, 'offset': {'type': 'number'}, 'offset_expr': {'type': 'string'}, 'face': {'type': 'object'}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
+    'Refine': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Refine']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
+    'Fillet': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Fillet']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'edges': {'type': 'array', 'items': {'type': 'object'}}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}}, 'required': ['type', 'edges'], 'additionalProperties': False},
+    'Chamfer': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Chamfer']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'edges': {'type': 'array', 'items': {'type': 'object'}}, 'radius': {'type': 'number'}, 'radius_expr': {'type': 'string'}}, 'required': ['type', 'edges'], 'additionalProperties': False},
+    'Shell': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Shell']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'thickness': {'type': 'number'}, 'thickness_expr': {'type': 'string'}, 'open_faces': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
+    'Loft': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Loft']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_ids': {'type': 'array', 'items': {'type': 'integer'}}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}, 'path_id': {'type': 'integer', 'minimum': 0.0}, 'guide_id': {'type': 'integer', 'minimum': 0.0}}, 'required': ['type', 'sketch_ids'], 'additionalProperties': False},
+    'Sweep': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Sweep']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'profile_id': {'type': 'integer', 'minimum': 0.0}, 'path_id': {'type': 'integer', 'minimum': 0.0}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}, 'guide_id': {'type': 'integer', 'minimum': 0.0}, 'frame': {'type': 'string'}}, 'required': ['type', 'profile_id', 'path_id'], 'additionalProperties': False},
+    'Pipe': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Pipe']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'path_id': {'type': 'integer', 'minimum': 0.0}, 'outer_diameter': {'type': 'number'}, 'outer_diameter_expr': {'type': 'string'}, 'wall_thickness': {'type': 'number'}, 'wall_thickness_expr': {'type': 'string'}, 'mode': {'type': 'string', 'enum': ['new_body', 'add', 'cut']}}, 'required': ['type', 'path_id'], 'additionalProperties': False},
+    'Rib': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Rib']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'thickness': {'type': 'number'}, 'thickness_expr': {'type': 'string'}, 'flip': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
+    'Thread': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Thread']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'face': {'type': 'object'}, 'designation': {'type': 'string'}, 'pitch': {'type': 'number'}, 'thread_class': {'type': 'string'}, 'length': {'type': 'number'}, 'length_expr': {'type': 'string'}, 'modeled': {'type': 'boolean'}, 'hand': {'type': 'string', 'enum': ['right', 'left']}, 'flank_angle_deg': {'type': 'number'}, 'allow_engagement': {'type': 'boolean'}, 'minimum_engagement': {'type': 'number'}}, 'required': ['type', 'face'], 'additionalProperties': False},
+    'Hole': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Hole']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'hole_kind': {'type': 'string', 'enum': ['simple', 'counterbore', 'countersink']}, 'diameter': {'type': 'number'}, 'diameter_expr': {'type': 'string'}, 'depth': {'type': 'number'}, 'depth_expr': {'type': 'string'}, 'through': {'type': 'boolean'}, 'cb_diameter': {'type': 'number'}, 'cb_depth': {'type': 'number'}, 'cs_diameter': {'type': 'number'}, 'cs_depth': {'type': 'number'}, 'drill_point_deg': {'type': 'number'}, 'thread_depth': {'type': 'number'}, 'thread_depth_expr': {'type': 'string'}, 'fit': {'type': 'object'}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
+    'Draft': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Draft']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'faces': {'type': 'array', 'items': {'type': 'object'}}, 'angle_deg': {'type': 'number'}, 'angle_expr': {'type': 'string'}, 'neutral_plane': {'type': 'string'}, 'body_id': {'type': 'integer', 'minimum': 0.0}}, 'required': ['type', 'faces'], 'additionalProperties': False},
+    'Cope': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Cope']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'member_id': {'type': 'integer', 'minimum': 0.0}, 'against': {'type': 'array', 'items': {'type': 'integer'}}, 'mitre': {'type': 'array', 'items': {'type': 'integer'}}, 'gap': {'type': 'number'}, 'gap_expr': {'type': 'string'}}, 'required': ['type', 'member_id'], 'additionalProperties': False},
+    'Pattern': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Pattern']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'kind': {'type': 'string', 'enum': ['linear', 'circular', 'mirror']}, 'source_id': {'type': 'integer', 'minimum': 0.0}, 'parent_id': {'type': 'integer', 'minimum': 0.0}, 'count': {'type': 'integer'}, 'count_expr': {'type': 'string'}, 'spacing': {'type': 'number'}, 'spacing_expr': {'type': 'string'}, 'angle_deg': {'type': 'number'}, 'angle_expr': {'type': 'string'}, 'base_plane': {'type': 'string', 'enum': ['xy', 'xz', 'yz']}, 'axis': {'type': 'object'}}, 'required': ['type', 'kind', 'source_id'], 'additionalProperties': False},
+}
+FEATURE_ENVELOPE_KEYS: tuple[str, ...] = ('index', 'error', 'warning', 'after_earlier_failure', 'report', 'template_changed', 'expanded', 'face_appearance_unresolved')
+PRIMITIVE_RETIRED_KEYS: tuple[str, ...] = ('position', 'center', 'direction')
+
+
+SketchSpec = TypedDict('SketchSpec', {
+    'type': Literal['Sketch'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'plane': Mapping[str, Any],
+    'entities': NotRequired[Sequence[Mapping[str, Any]]],
+    'constraints': NotRequired[Sequence[Mapping[str, Any]]],
+    'face_ref': NotRequired[Mapping[str, Any]],
+    'plane_ref': NotRequired[int],
+    'external': NotRequired[Sequence[Mapping[str, Any]]],
+    'derived_ops': NotRequired[Sequence[Mapping[str, Any]]],
+    'images': NotRequired[Sequence[Mapping[str, Any]]],
+    'next_image_id': NotRequired[int],
+})
+
+ExtrudeSpec = TypedDict('ExtrudeSpec', {
+    'type': Literal['Extrude'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'sketch_id': int,
+    'distance': NotRequired[float],
+    'distance_expr': NotRequired[str],
+    'mode': NotRequired[Literal['new_body', 'add', 'cut']],
+    'end_mode': NotRequired[Literal['blind', 'symmetric', 'two_sided', 'up_to_face', 'through_all']],
+    'distance2': NotRequired[float],
+    'distance2_expr': NotRequired[str],
+    'reversed': NotRequired[bool],
+    'regions': NotRequired[Sequence[Any]],
+    'end_target': NotRequired[Mapping[str, Any]],
+    'thin': NotRequired[Mapping[str, Any]],
+    'twist_deg': NotRequired[float],
+    'twist_expr': NotRequired[str],
+    'herringbone': NotRequired[bool],
+})
+
+BoxSpec = TypedDict('BoxSpec', {
+    'type': Literal['Box'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'on': str | Mapping[str, Any],
+    'width': NotRequired[float],
+    'width_expr': NotRequired[str],
+    'depth': NotRequired[float],
+    'depth_expr': NotRequired[str],
+    'height': NotRequired[float],
+    'height_expr': NotRequired[str],
+    'offset': NotRequired[Sequence[float]],
+    'offset_expr': NotRequired[Sequence[str]],
+    'centered': NotRequired[bool],
+    'mode': NotRequired[Literal['new_body', 'add', 'cut']],
+    'reversed': NotRequired[bool],
+    'ids': NotRequired[Sequence[int]],
+})
+
+SphereSpec = TypedDict('SphereSpec', {
+    'type': Literal['Sphere'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'on': str | Mapping[str, Any],
+    'diameter': NotRequired[float],
+    'diameter_expr': NotRequired[str],
+    'radius': NotRequired[float],
+    'radius_expr': NotRequired[str],
+    'offset': NotRequired[Sequence[float]],
+    'offset_expr': NotRequired[Sequence[str]],
+    'mode': NotRequired[Literal['new_body', 'add', 'cut']],
+    'ids': NotRequired[Sequence[int]],
+})
+
+CylinderSpec = TypedDict('CylinderSpec', {
+    'type': Literal['Cylinder'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'on': str | Mapping[str, Any],
+    'diameter': NotRequired[float],
+    'diameter_expr': NotRequired[str],
+    'radius': NotRequired[float],
+    'radius_expr': NotRequired[str],
+    'height': NotRequired[float],
+    'height_expr': NotRequired[str],
+    'offset': NotRequired[Sequence[float]],
+    'offset_expr': NotRequired[Sequence[str]],
+    'mode': NotRequired[Literal['new_body', 'add', 'cut']],
+    'reversed': NotRequired[bool],
+    'ids': NotRequired[Sequence[int]],
+})
+
+FastenerSpec = TypedDict('FastenerSpec', {
+    'type': Literal['Fastener'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'standard': str,
+    'size': str,
+    'length': NotRequired[float],
+    'length_expr': NotRequired[str],
+    'drive': NotRequired[str],
+})
+
+WormSpec = TypedDict('WormSpec', {
+    'type': Literal['Worm'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'face': Mapping[str, Any],
+    'module': NotRequired[float],
+    'module_expr': NotRequired[str],
+    'starts': NotRequired[int],
+    'pressure_angle_deg': NotRequired[float],
+    'hand': NotRequired[Literal['right', 'left']],
+    'backlash': NotRequired[float],
+    'length': NotRequired[float],
+})
+
+WormWheelSpec = TypedDict('WormWheelSpec', {
+    'type': Literal['WormWheel'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'face': Mapping[str, Any],
+    'teeth': NotRequired[int],
+    'module': NotRequired[float],
+    'module_expr': NotRequired[str],
+    'starts': NotRequired[int],
+    'worm_diameter': NotRequired[float],
+    'pressure_angle_deg': NotRequired[float],
+    'hand': NotRequired[Literal['right', 'left']],
+})
+
+BearingSpec = TypedDict('BearingSpec', {
+    'type': Literal['Bearing'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'designation': str,
+})
+
+RetainingRingSpec = TypedDict('RetainingRingSpec', {
+    'type': Literal['RetainingRing'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'standard': Literal['din471', 'din472'],
+    'size': float,
+})
+
+RetainingRingGrooveSpec = TypedDict('RetainingRingGrooveSpec', {
+    'type': Literal['RetainingRingGroove'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'face': Mapping[str, Any],
+    'from': Mapping[str, Any],
+    'offset': float,
+    'offset_expr': NotRequired[str],
+    'standard': NotRequired[Literal['din471', 'din472']],
+})
+
+BaseFlangeSpec = TypedDict('BaseFlangeSpec', {
+    'type': Literal['BaseFlange'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'sketch_id': int,
+    'reversed': NotRequired[bool],
+    'regions': NotRequired[Sequence[Any]],
+})
+
+EdgeFlangeSpec = TypedDict('EdgeFlangeSpec', {
+    'type': Literal['EdgeFlange'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'edges': Sequence[Mapping[str, Any]],
+    'length': NotRequired[float],
+    'length_expr': NotRequired[str],
+    'angle_deg': NotRequired[float],
+    'angle_deg_expr': NotRequired[str],
+    'radius': NotRequired[float],
+    'radius_expr': NotRequired[str],
+    'position': NotRequired[Literal['material_inside', 'material_outside', 'bend_outside']],
+    'length_mode': NotRequired[Literal['flat', 'outside', 'inside']],
+    'offset_start': NotRequired[float],
+    'offset_start_expr': NotRequired[str],
+    'offset_end': NotRequired[float],
+    'offset_end_expr': NotRequired[str],
+    'relief': NotRequired[Literal['none', 'rectangular', 'obround', 'tear']],
+    'corners': NotRequired[Literal['open', 'closed']],
+})
+
+FlatPatternSpec = TypedDict('FlatPatternSpec', {
+    'type': Literal['FlatPattern'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'body_id': int,
+    'fixed_face': NotRequired[Mapping[str, Any]],
+})
+
+UnfoldSpec = TypedDict('UnfoldSpec', {
+    'type': Literal['Unfold'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'body_id': int,
+    'fixed_face': NotRequired[Mapping[str, Any]],
+    'bends': NotRequired[Sequence[int]],
+})
+
+RefoldSpec = TypedDict('RefoldSpec', {
+    'type': Literal['Refold'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'unfold_id': int,
+})
+
+HemSpec = TypedDict('HemSpec', {
+    'type': Literal['Hem'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'edges': Sequence[Mapping[str, Any]],
+    'length': NotRequired[float],
+    'length_expr': NotRequired[str],
+    'kind': NotRequired[Literal['closed', 'open']],
+    'gap': NotRequired[float],
+    'gap_expr': NotRequired[str],
+    'outside': NotRequired[bool],
+    'offset_start': NotRequired[float],
+    'offset_start_expr': NotRequired[str],
+    'offset_end': NotRequired[float],
+    'offset_end_expr': NotRequired[str],
+})
+
+JogSpec = TypedDict('JogSpec', {
+    'type': Literal['Jog'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'sketch_id': int,
+    'height': NotRequired[float],
+    'height_expr': NotRequired[str],
+    'angle_deg': NotRequired[float],
+    'angle_deg_expr': NotRequired[str],
+    'flip': NotRequired[bool],
+})
+
+CornerReliefSpec = TypedDict('CornerReliefSpec', {
+    'type': Literal['CornerRelief'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'body_id': int,
+    'style': NotRequired[Literal['circular', 'rectangular']],
+    'size': NotRequired[float],
+    'size_expr': NotRequired[str],
+})
+
+NormalCutSpec = TypedDict('NormalCutSpec', {
+    'type': Literal['NormalCut'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'sketch_id': int,
+    'body_id': NotRequired[int],
+    'regions': NotRequired[Sequence[Any]],
+})
+
+ImportSpec = TypedDict('ImportSpec', {
+    'type': Literal['Import'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'path': str,
+    'units': NotRequired[Literal['mm', 'cm', 'm', 'in']],
+    'keep_origin': NotRequired[bool],
+    'color': NotRequired[Any],
+})
+
+DerivedSpec = TypedDict('DerivedSpec', {
+    'type': Literal['Derived'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'source_part': int,
+    'configuration': NotRequired[int | str],
+    'bodies': NotRequired[Sequence[int]],
+    'body_names': NotRequired[Sequence[str]],
+    'placement': NotRequired[Mapping[str, Any]],
+    'reference': NotRequired[bool],
+    'snapshot': NotRequired[Any],
+    'source_name': NotRequired[str],
+})
+
+TemplateSpec = TypedDict('TemplateSpec', {
+    'type': Literal['Template'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'template': str,
+    'parameters': NotRequired[Mapping[str, Any]],
+    'on': NotRequired[str | Mapping[str, Any]],
+    'definition': NotRequired[Mapping[str, Any]],
+    'ids': NotRequired[Sequence[Any]],
+    'revision': NotRequired[int],
+})
+
+DatumPlaneSpec = TypedDict('DatumPlaneSpec', {
+    'type': Literal['DatumPlane'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'kind': Literal['offset', 'angled', 'through_points'],
+    'base_plane': NotRequired[Literal['xy', 'xz', 'yz']],
+    'parent_id': NotRequired[int],
+    'offset': NotRequired[float],
+    'offset_expr': NotRequired[str],
+    'flip': NotRequired[bool],
+    'axis': NotRequired[Mapping[str, Any]],
+    'angle_deg': NotRequired[float],
+    'angle_expr': NotRequired[str],
+    'points': NotRequired[Sequence[Any]],
+})
+
+RevolveSpec = TypedDict('RevolveSpec', {
+    'type': Literal['Revolve'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'sketch_id': int,
+    'axis': Mapping[str, Any],
+    'angle_deg': NotRequired[float],
+    'angle_expr': NotRequired[str],
+    'mode': NotRequired[Literal['new_body', 'add', 'cut']],
+    'reversed': NotRequired[bool],
+    'symmetric': NotRequired[bool],
+    'regions': NotRequired[Sequence[Any]],
+})
+
+DatumAxisSpec = TypedDict('DatumAxisSpec', {
+    'type': Literal['DatumAxis'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'kind': str,
+    'points': NotRequired[Sequence[Any]],
+    'sketch_id': NotRequired[int],
+    'entity_id': NotRequired[int],
+})
+
+FrameSpec = TypedDict('FrameSpec', {
+    'type': Literal['Frame'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'kind': Literal['explicit', 'from_element', 'offset'],
+    'origin': NotRequired[Sequence[float]],
+    'origin_expr': NotRequired[Sequence[str]],
+    'z_axis': NotRequired[Sequence[float]],
+    'x_axis': NotRequired[Sequence[float]],
+    'elements': NotRequired[Sequence[Mapping[str, Any]]],
+    'parent_id': NotRequired[int],
+    'offset': NotRequired[Sequence[float]],
+    'offset_expr': NotRequired[Sequence[str]],
+    'rotation_deg': NotRequired[Sequence[float]],
+    'flip': NotRequired[bool],
+})
+
+Curve3DSpec = TypedDict('Curve3DSpec', {
+    'type': Literal['Curve3D'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'kind': Literal['fit_spline', 'control_poly', 'bent_path', 'helix'],
+    'points': NotRequired[Sequence[Any]],
+    'degree': NotRequired[int],
+    'closed': NotRequired[bool],
+    'radius': NotRequired[float],
+    'radius_expr': NotRequired[str],
+    'origin': NotRequired[Sequence[float]],
+    'axis': NotRequired[Sequence[float]],
+    'pitch': NotRequired[float],
+    'pitch_expr': NotRequired[str],
+    'turns': NotRequired[float],
+    'turns_expr': NotRequired[str],
+    'left_handed': NotRequired[bool],
+    'start_deg': NotRequired[float],
+    'start_deg_expr': NotRequired[str],
+})
+
+BooleanSpec = TypedDict('BooleanSpec', {
+    'type': Literal['Boolean'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'target_id': int,
+    'tool_id': int,
+    'op': NotRequired[Literal['union', 'subtract', 'intersect']],
+})
+
+SplitSpec = TypedDict('SplitSpec', {
+    'type': Literal['Split'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'body_id': int,
+    'knife': NotRequired[Literal['plane', 'face']],
+    'datum_id': NotRequired[int],
+    'base_plane': NotRequired[Literal['xy', 'xz', 'yz']],
+    'offset': NotRequired[float],
+    'offset_expr': NotRequired[str],
+    'face': NotRequired[Mapping[str, Any]],
+})
+
+RefineSpec = TypedDict('RefineSpec', {
+    'type': Literal['Refine'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'body_id': int,
+})
+
+FilletSpec = TypedDict('FilletSpec', {
+    'type': Literal['Fillet'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'edges': Sequence[Mapping[str, Any]],
+    'radius': NotRequired[float],
+    'radius_expr': NotRequired[str],
+})
+
+ChamferSpec = TypedDict('ChamferSpec', {
+    'type': Literal['Chamfer'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'edges': Sequence[Mapping[str, Any]],
+    'radius': NotRequired[float],
+    'radius_expr': NotRequired[str],
+})
+
+ShellSpec = TypedDict('ShellSpec', {
+    'type': Literal['Shell'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'body_id': int,
+    'thickness': NotRequired[float],
+    'thickness_expr': NotRequired[str],
+    'open_faces': NotRequired[Sequence[Mapping[str, Any]]],
+})
+
+LoftSpec = TypedDict('LoftSpec', {
+    'type': Literal['Loft'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'sketch_ids': Sequence[int],
+    'mode': NotRequired[Literal['new_body', 'add', 'cut']],
+    'path_id': NotRequired[int],
+    'guide_id': NotRequired[int],
+})
+
+SweepSpec = TypedDict('SweepSpec', {
+    'type': Literal['Sweep'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'profile_id': int,
+    'path_id': int,
+    'mode': NotRequired[Literal['new_body', 'add', 'cut']],
+    'guide_id': NotRequired[int],
+    'frame': NotRequired[str],
+})
+
+PipeSpec = TypedDict('PipeSpec', {
+    'type': Literal['Pipe'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'path_id': int,
+    'outer_diameter': NotRequired[float],
+    'outer_diameter_expr': NotRequired[str],
+    'wall_thickness': NotRequired[float],
+    'wall_thickness_expr': NotRequired[str],
+    'mode': NotRequired[Literal['new_body', 'add', 'cut']],
+})
+
+RibSpec = TypedDict('RibSpec', {
+    'type': Literal['Rib'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'sketch_id': int,
+    'thickness': NotRequired[float],
+    'thickness_expr': NotRequired[str],
+    'flip': NotRequired[bool],
+    'body_id': NotRequired[int],
+})
+
+ThreadSpec = TypedDict('ThreadSpec', {
+    'type': Literal['Thread'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'face': Mapping[str, Any],
+    'designation': NotRequired[str],
+    'pitch': NotRequired[float],
+    'thread_class': NotRequired[str],
+    'length': NotRequired[float],
+    'length_expr': NotRequired[str],
+    'modeled': NotRequired[bool],
+    'hand': NotRequired[Literal['right', 'left']],
+    'flank_angle_deg': NotRequired[float],
+    'allow_engagement': NotRequired[bool],
+    'minimum_engagement': NotRequired[float],
+})
+
+HoleSpec = TypedDict('HoleSpec', {
+    'type': Literal['Hole'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'sketch_id': int,
+    'hole_kind': NotRequired[Literal['simple', 'counterbore', 'countersink']],
+    'diameter': NotRequired[float],
+    'diameter_expr': NotRequired[str],
+    'depth': NotRequired[float],
+    'depth_expr': NotRequired[str],
+    'through': NotRequired[bool],
+    'cb_diameter': NotRequired[float],
+    'cb_depth': NotRequired[float],
+    'cs_diameter': NotRequired[float],
+    'cs_depth': NotRequired[float],
+    'drill_point_deg': NotRequired[float],
+    'thread_depth': NotRequired[float],
+    'thread_depth_expr': NotRequired[str],
+    'fit': NotRequired[Mapping[str, Any]],
+})
+
+DraftSpec = TypedDict('DraftSpec', {
+    'type': Literal['Draft'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'faces': Sequence[Mapping[str, Any]],
+    'angle_deg': NotRequired[float],
+    'angle_expr': NotRequired[str],
+    'neutral_plane': NotRequired[str],
+    'body_id': NotRequired[int],
+})
+
+CopeSpec = TypedDict('CopeSpec', {
+    'type': Literal['Cope'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'member_id': int,
+    'against': NotRequired[Sequence[int]],
+    'mitre': NotRequired[Sequence[int]],
+    'gap': NotRequired[float],
+    'gap_expr': NotRequired[str],
+})
+
+PatternSpec = TypedDict('PatternSpec', {
+    'type': Literal['Pattern'],
+    'name': NotRequired[str],
+    'id': NotRequired[int],
+    'material': NotRequired[str],
+    'appearance': NotRequired[Mapping[str, Any]],
+    'face_appearance': NotRequired[Sequence[Mapping[str, Any]]],
+    'suppressed': NotRequired[bool],
+    'kind': Literal['linear', 'circular', 'mirror'],
+    'source_id': int,
+    'parent_id': NotRequired[int],
+    'count': NotRequired[int],
+    'count_expr': NotRequired[str],
+    'spacing': NotRequired[float],
+    'spacing_expr': NotRequired[str],
+    'angle_deg': NotRequired[float],
+    'angle_expr': NotRequired[str],
+    'base_plane': NotRequired[Literal['xy', 'xz', 'yz']],
+    'axis': NotRequired[Mapping[str, Any]],
+})
+
+FeatureSpec = SketchSpec | ExtrudeSpec | BoxSpec | SphereSpec | CylinderSpec | FastenerSpec | WormSpec | WormWheelSpec | BearingSpec | RetainingRingSpec | RetainingRingGrooveSpec | BaseFlangeSpec | EdgeFlangeSpec | FlatPatternSpec | UnfoldSpec | RefoldSpec | HemSpec | JogSpec | CornerReliefSpec | NormalCutSpec | ImportSpec | DerivedSpec | TemplateSpec | DatumPlaneSpec | RevolveSpec | DatumAxisSpec | FrameSpec | Curve3DSpec | BooleanSpec | SplitSpec | RefineSpec | FilletSpec | ChamferSpec | ShellSpec | LoftSpec | SweepSpec | PipeSpec | RibSpec | ThreadSpec | HoleSpec | DraftSpec | CopeSpec | PatternSpec
+
 
 
 # Each typed `returns` column, as the JSON Schema an answer is held to

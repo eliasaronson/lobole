@@ -23,8 +23,9 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 from method_doc_scan import method_docs  # noqa: E402
+from method_doc_scan import literal  # noqa: E402
 from rpc_contract import (parse_column, parse_result_column,  # noqa: E402
-                          result_schema)
+                          request_schema, result_schema)
 
 OUT = ROOT / "python/lobole/rpc.py"
 
@@ -37,6 +38,32 @@ def contracts():
         params = parse_column(row["column"] or "")
         if params is not None:
             out[name] = (row["column"], params)
+    return out
+
+
+def _header_literal(name):
+    """A `const char* name = "..." "...";` or a `std::array` of literals in
+    core/io/Serialization.h, joined or listed."""
+    text = (ROOT / "src/core/io/Serialization.h").read_text()
+    m = re.search(name + r"\s*=\s*\{?(.*?)\}?;", text, re.S)
+    if not m:
+        raise SystemExit(f"no {name} in Serialization.h")
+    return m.group(1)
+
+
+def feature_contracts():
+    """{type: whole contract column} from kFeatureTypes' rows
+    (docs/scripting/rpc.md#typed-feature-specs), each with its `type` and
+    the keys every spec may carry, as the server composes it."""
+    common = literal(_header_literal("kFeatureCommonContract"))
+    src = (ROOT / "src/core/io/SerializeFeatures.cpp").read_text()
+    table = src[src.index("kFeatureTypes[] = {"):]
+    table = table[:table.index("\n};")]
+    out = {}
+    for m in re.finditer(r'\{\s*"([A-Za-z0-9]+)",\s*\d+,((?:\s*"(?:[^"\\]|\\.)*")+)'
+                         r'\s*,((?:\s*"(?:[^"\\]|\\.)*")+)\s*\}', table):
+        out[m.group(1)] = (f"type:'{m.group(1)}', {common}, "
+                           + literal(m.group(3)))
     return out
 
 
@@ -165,11 +192,41 @@ def generate():
         lines += ["", f"class {title(name)}Params(TypedDict):"]
         for p in params:
             t = py_type(p)
+            # A spec typed by its feature type, or any mapping: generators
+            # build specs as plain dicts, and only a spec annotated as one
+            # (`ExtrudeSpec`) is checked field by field.
+            if name in ("add_feature", "modify_feature") and \
+                    p["name"] == "feature":
+                t = "FeatureSpec | Mapping[str, Any]"
             # A key that is a Python keyword (`async`, `from`) is passed with
             # a trailing underscore, which the SDK strips (sdk.md).
             key = p["name"] + ("_" if keyword.iskeyword(p["name"]) else "")
             lines.append(f"    {key}: "
                          + (t if p["required"] else f"NotRequired[{t}]"))
+    features = feature_contracts()
+    lines += ["", "", "# Each feature type's spec, as add_feature and modify_feature take it",
+              "# (docs/scripting/rpc.md#typed-feature-specs): its schema, the keys",
+              "# get_state stamps around a spec and the old primitive keys the parser",
+              "# refuses by name (neither is held to a schema), and its type.",
+              "FEATURE_SCHEMAS: dict[str, dict[str, Any]] = {"]
+    for name, column in features.items():
+        lines.append(f"    {name!r}: {request_schema(parse_column(column), None)!r},")
+    def keys(name):
+        return repr(tuple(re.findall(r'"([a-z_]+)"', _header_literal(name))))
+    lines += ["}",
+              "FEATURE_ENVELOPE_KEYS: tuple[str, ...] = "
+              + keys("kFeatureEnvelopeKeys"),
+              "PRIMITIVE_RETIRED_KEYS: tuple[str, ...] = "
+              + keys("kPrimitiveRetiredKeys"),
+              ""]
+    for name, column in features.items():
+        fields = []
+        for prm in parse_column(column):
+            t = py_type(prm)
+            fields.append(f"    {prm['name']!r}: "
+                          + (t if prm["required"] else f"NotRequired[{t}]") + ",")
+        lines += ["", f"{name}Spec = TypedDict({name + 'Spec'!r}, {{"] + fields + ["})"]
+    lines += ["", "FeatureSpec = " + " | ".join(f"{n}Spec" for n in features), ""]
     typed_results = results()
     lines += ["", "", "# Each typed `returns` column, as the JSON Schema an answer is held to",
               "# (a strict lobole.client validates against these), and as types.",

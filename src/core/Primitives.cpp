@@ -10,6 +10,7 @@
 #include "core/features/FrameFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
+#include "core/io/Serialization.h"
 
 #include <algorithm>
 #include <cctype>
@@ -287,7 +288,7 @@ Spec SpecFromJson(const json& j) {
   const std::string type = KindName(s.kind);
   // The old world-coordinate dialect, refused by name: the fields look
   // plausible and used to work, so an agent will send them.
-  for (const char* old : {"position", "center", "direction"})
+  for (const char* old : DocumentIO::kPrimitiveRetiredKeys)
     if (j.contains(old))
       throw std::runtime_error(
           type + " no longer takes `" + old +

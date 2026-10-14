@@ -169,8 +169,10 @@ These are the ones a newcomer trips over. Most have a test behind them.
   `defaults/*` GUI suite is the gate. See
   [`docs/ui/tool-sessions.md#defaults-and-refusals`](docs/ui/tool-sessions.md#defaults-and-refusals).
 - **A feature an assistant cannot drive is half-shipped.** A new feature type
-  needs its row in the `describe` table (`remote_smoke` fails otherwise) and
-  in `FEATURE_FORMATS` in `python/lobole/mcp.py` (`mcp_formats_gate`
+  needs its `kFeatureTypes` row, with its prose `params` and its typed
+  `contract` ([typed feature specs](docs/scripting/rpc.md#typed-feature-specs);
+  `rpc_contracts_smoke` refuses every field's faults through it), and its
+  entry in `FEATURE_FORMATS` in `python/lobole/mcp.py` (`mcp_formats_gate`
   cross-checks it against `describe`).
 - **A new tool must be reachable by clicking.** Give the button a stable
   `###tb_*` id and add a GUI test that finishes the tool and checks the

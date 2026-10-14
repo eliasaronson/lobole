@@ -60,7 +60,8 @@ from lobole.errors import SdkError, UnknownArgument  # noqa: E402
 from lobole.inspection import (  # noqa: E402
     CONTRACT_HASH, CONTRACT_VERSION, InspectionClient)
 
-from lobole.rpc import API_VERSION  # noqa: E402
+from lobole.rpc import (API_VERSION, FEATURE_ENVELOPE_KEYS,  # noqa: E402
+                        FEATURE_SCHEMAS, PRIMITIVE_RETIRED_KEYS)
 
 if TYPE_CHECKING:
     from lobole.snapshots import MeasurementSnapshot
@@ -387,6 +388,8 @@ class App(_RpcSurface):
         # this argument (lobole.client.call says the same).
         if method in self._schemas:
             _validate_contract(self._schemas[method], params, method)
+        if method in ("add_feature", "modify_feature"):
+            _validate_feature(params.get("feature"), method)
         if method in self._MOVES_TAB:
             self._active = None
         if method in ("new_project", "open_project"):
@@ -3419,6 +3422,23 @@ class Batch:
 # --------------------------------------------------------------------------
 # Small shared helpers
 # --------------------------------------------------------------------------
+
+def _validate_feature(spec, method):
+    """Hold a feature spec to its type's contract before it is sent, as the
+    server does (RemoteDispatch.cpp, ValidateRequestContract): the
+    get_state envelope dropped, an old primitive key left to the parser's
+    own refusal by name (docs/scripting/rpc.md#typed-feature-specs)."""
+    if not isinstance(spec, dict) or not isinstance(spec.get("type"), str):
+        return
+    schema = FEATURE_SCHEMAS.get(spec["type"])
+    if schema is None:
+        return
+    spec = {k: v for k, v in spec.items() if k not in FEATURE_ENVELOPE_KEYS}
+    if spec["type"] in ("Box", "Sphere", "Cylinder") and any(
+            k in spec for k in PRIMITIVE_RETIRED_KEYS):
+        return
+    _validate_contract(schema, spec, method, "/params/feature")
+
 
 def ref_of(x):
     """The id an RPC takes for `x`: a handle (`Sketch`, `Frame`, `Feature`,

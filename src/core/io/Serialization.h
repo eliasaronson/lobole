@@ -10,6 +10,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <array>
 #include <expected>
 #include <filesystem>
 #include <memory>
@@ -84,8 +85,39 @@ struct FeatureTypeInfo {
   // One-line JSON dialect for the describe endpoint (V5): field names, axis
   // conventions, defaults. `?` marks optional, `(+_expr)` an expression twin.
   const char* params;
+  // The same fields TYPED, in the RPC contract grammar
+  // (docs/scripting/rpc.md#typed-feature-specs): what add_feature and
+  // modify_feature validate a spec of this type against before it is
+  // built, with kFeatureCommonContract's keys beside them. `params` stays
+  // the prose an agent reads; this is the half a validator and the SDK's
+  // types read.
+  const char* contract;
 };
 std::span<const FeatureTypeInfo> FeatureTypes();
+
+// The keys every feature spec may carry whatever its type: what
+// FeatureToJson writes for any feature.
+inline constexpr const char* kFeatureCommonContract =
+    "name?:string, id?:int>=0, material?:string, appearance?:object, "
+    "face_appearance?:object[], suppressed?:bool";
+
+// What get_state stamps AROUND a feature's dialect (index and error state,
+// a template instance's template_changed / expanded). A read-modify-write of
+// a get_state entry -- a legitimate agent pattern -- sends them back, so
+// they are dropped before a spec is checked rather than listed as fields a
+// spec takes.
+// A primitive's old world-coordinate dialect. The primitive parser refuses
+// each BY NAME, pointing at `on` (core/Primitives.cpp) -- it used to work, so
+// it is what an agent will send -- so a spec carrying one is left to that
+// refusal rather than called an unknown parameter by the type's contract.
+inline constexpr std::array<const char*, 3> kPrimitiveRetiredKeys = {
+    "position", "center", "direction"};
+
+inline constexpr std::array<const char*, 8> kFeatureEnvelopeKeys = {
+    "index",    "error",
+    "warning",  "after_earlier_failure",
+    "report",   "template_changed",
+    "expanded", "face_appearance_unresolved"};
 
 // A sketch entity's JSON dialect, same shape and same job as FeatureTypeInfo.
 // It used to be a bare list of NAMES, so `describe` could tell an agent that

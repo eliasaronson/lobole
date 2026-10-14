@@ -91,7 +91,8 @@ the part document, or the test records why it is gated anyway).
 narrows the answer to that one row, with only `app`, `api_version` and
 `document_format_version` beside it, and refuses an unknown name naming the
 close matches. Without it, `describe` also publishes the vocabularies an agent otherwise has
-to guess: `feature_types` and `sketch_entity_types` (each with its field
+to guess: `feature_types` (each with its field list and its typed `contract`,
+[below](#typed-feature-specs)) and `sketch_entity_types` (each with its field
 list), `constraint_kinds`, `constraint_value_units`, `mate_types`,
 `relation_kinds`, `extrude_modes`, `extrude_end_modes`, `axis_kinds`,
 `drawing_dim_kinds`, `material_slugs` and `materials` (each slug's density,
@@ -548,6 +549,39 @@ every typed answer to its schema, so a handler that adds, drops or retypes a
 key without its row fails the test that saw it rather than reaching a caller
 as a KeyError three calls later. `rpc_returns_gate` reads a typed column's
 keys, and `rpc_units_gate` holds every dimensional result key to its unit.
+
+### Typed feature specs
+
+`add_feature` and `modify_feature` take `feature:object`; what is inside it
+has a contract of its own, by its `type`. Each row of `kFeatureTypes`
+(`src/core/io/SerializeFeatures.cpp`) carries its fields twice: `params`,
+the prose an agent reads (defaults, axis conventions, what refuses), and
+`contract`, the same fields typed in the request grammar:
+
+```
+"sketch_id:int>=0, distance?:number, distance_expr?:string, mode?:'new_body'|'add'|'cut', end_mode?:'blind'|'symmetric'|…"
+```
+
+The whole contract is the row's beside `type` and the keys every spec may
+carry (`kFeatureCommonContract`: `name`, `id`, `material`, `appearance`,
+`face_appearance`, `suppressed`); `describe` publishes it as each feature
+type's `contract`. The dispatcher holds `params.feature` to it in
+`ValidateRequestContract`, by path (`/params/feature/end_mode`), before
+anything is built, after dropping what `get_state` stamps around a spec
+(`kFeatureEnvelopeKeys`, so a read-modify-write of a `get_state` entry stays
+valid). A primitive carrying its old world-coordinate keys
+(`kPrimitiveRetiredKeys`) is left to the primitive parser, which refuses
+each by name pointing at `on`. `RejectUnknownFeatureFields` stays behind it
+for a spec that arrives another way, reading its keys from the same column.
+
+Generated from the rows: a `TypedDict` per type (`ExtrudeSpec`, …) and their
+union `FeatureSpec` in `lobole.rpc`, which `feature` accepts beside any
+mapping, so a spec annotated as one is checked field by field and a plain
+dict still passes; and `FEATURE_SCHEMAS`, which the SDK holds a spec to
+before it is sent, with the server's diagnostic. `rpc_contracts_smoke`
+refuses an unknown field, a wrong type, an enum miss and a missing field of
+every type, alike from the server and the SDK, and holds `describe`'s
+column equal to the generator's.
 
 ### Structured errors
 

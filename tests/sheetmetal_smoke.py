@@ -85,7 +85,7 @@ def tier2(d):
     top_front = straight_edge(d, (WIDTH / 2.0, 0.0, THICKNESS))
 
     # A hem on the front edge; an unknown kind is refused by name.
-    refused(d, "add_feature", "expected one of", feature={
+    refused(d, "add_feature", "must be one of", feature={
         "type": "Hem", "name": "x", "length": 6, "kind": "tight",
         "edges": [{"feature_id": base, "element": top_front}]})
     r = d.call("add_feature", feature={
@@ -165,7 +165,7 @@ def tier2(d):
 
     # The hem and the side wall meet at the front-left corner: relieve it.
     # An unknown style is refused by name first.
-    refused(d, "add_feature", "expected one of", feature={
+    refused(d, "add_feature", "must be one of", feature={
         "type": "CornerRelief", "name": "x", "body_id": base,
         "style": "oval"})
     before = volume(d)
@@ -323,7 +323,7 @@ def main():
         d.call("delete_feature", id=r["id"])
 
         # An unknown enum is refused by NAME, at the boundary.
-        refused(d, "add_feature", "expected one of", feature={
+        refused(d, "add_feature", "must be one of", feature={
             "type": "EdgeFlange", "name": "x",
             "edges": [{"feature_id": base, "element": top}],
             "length": 20, "position": "material_middle"})
