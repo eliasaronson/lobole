@@ -186,6 +186,16 @@ These are the ones a newcomer trips over. Most have a test behind them.
   gives it its number
   ([how](docs/versioning/format.md#a-bump-takes-its-number-when-it-lands));
   `test_golden.cpp` and `format_version_gate` check it.
+- **Every authored source file starts with an SPDX header**, after any
+  shebang (`#` for Python, shell and CMake):
+  ```
+  // SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+  // SPDX-License-Identifier: AGPL-3.0-or-later
+  ```
+  No year and no author list — git records authorship. `tests/spdx_gate.py`
+  fails a file without it; its docstring says what is exempt (`deps/`,
+  `src/thirdparty/`, `assets/`, docs and goldens) and why it is not
+  `reuse lint`.
 - **Edit the domain module, not the monolith.** RPCs live in
   `src/remote/Remote{Modeling,Assembly,Inspection,…}.cpp`; serialization in
   `src/core/io/Serialize*.cpp`.

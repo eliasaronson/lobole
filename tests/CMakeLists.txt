@@ -1002,7 +1002,7 @@ set_tests_properties(linkage_gate PROPERTIES TIMEOUT 60 SKIP_RETURN_CODE 77)
 # file with no notice is one whose licence someone copying a function out of it
 # has to guess. Not `reuse lint`, which requires LICENSES/ to be named by SPDX
 # identifier; ours is a distribution bundle named by component and referenced
-# by filename from THIRD_PARTY.md (docs/plans/spdx-headers.md).
+# by filename from THIRD_PARTY.md (spdx_gate.py says what is exempt).
 add_test(NAME spdx_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/spdx_gate.py)
 set_tests_properties(spdx_gate PROPERTIES TIMEOUT 60)
