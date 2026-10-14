@@ -396,11 +396,11 @@ jobs:
           path: ~/.cache/ccache
           key: ccache-asan-${{ runner.os }}-${{ github.sha }}
 
-      # The exclusions are two lists: the sanitizer's (long numeric gates —
-      # see tools/sanitizer-env.sh) and this runner's OCC 7.6 pair, the same
+      # The exclusions are two lists: the sanitizer's (long numeric gates and
+      # the asan_slow label — see tools/sanitizer-env.sh) and this runner's OCC 7.6 pair, the same
       # two build-and-test skips.
       - name: Sanitized suite
         run: |
           source tools/sanitizer-env.sh
-          ctest --test-dir build-asan -LE gui -j "$(nproc)" --output-on-failure \
+          ctest --test-dir build-asan -LE "$SANITIZER_LABEL_EXCLUDE" -j "$(nproc)" --output-on-failure \
             -E "$SANITIZER_TEST_EXCLUDE|Assembly import plan|Shell that removes no material"

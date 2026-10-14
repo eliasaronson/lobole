@@ -26,5 +26,11 @@
 # topology gates and the FEM/GPU numeric tests are minutes-long under ASan
 # (the SIMP gate alone ran past 20 minutes) and exercise arithmetic, not
 # memory. Everything else — including the app smokes, which launch the
-# instrumented binary — is in.
+# instrumented binary — is in, except what carries the `asan_slow` label.
 SANITIZER_TEST_EXCLUDE='Topo:|femgpu|topo_smoke'
+# Labels a sanitized run leaves out (ctest -LE). `asan_slow` goes on a test,
+# where it is written ([asan_slow] in Catch, LABELS in tests/CMakeLists.txt),
+# that ASan makes many times longer while quicker tests already put the same
+# code under it: the CAM clearing cases that ran 11 and 20 minutes, and the
+# app smokes that ran past their timeouts.
+SANITIZER_LABEL_EXCLUDE='gui|asan_slow'

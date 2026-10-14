@@ -1992,7 +1992,7 @@ TEST_CASE("cam: clearing the outline passes over holes", "[cam][slow]") {
 }
 
 TEST_CASE("cam: an opening the cutter fits into is still an island",
-          "[cam][slow]") {
+          "[cam][slow][asan_slow]") {
   // `useOutline` crosses an opening because going AROUND one leaves a sliver
   // the tool can never come back to. That reasoning only holds for an opening
   // the tool cannot enter. A BIG opening is one the job removes anyway — the
@@ -2033,7 +2033,7 @@ TEST_CASE("cam: an opening the cutter fits into is still an island",
 }
 
 TEST_CASE("cam: clearing the outline still goes around material",
-          "[cam][slow]") {
+          "[cam][slow][asan_slow]") {
   // The hazard the option must NOT open. A boss standing up from the floor
   // has the same kind of inner wire as a hole and the opposite meaning:
   // driving over one is a full-width cut at full depth into material nobody

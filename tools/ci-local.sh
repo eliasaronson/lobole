@@ -251,7 +251,7 @@ if [ "$run_asan" = 1 ]; then
   run_build asan -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON \
     -- build-asan -j"$jobs" --target designer designer_tests
   run_tests asan "sanitized suite" \
-    "$root/tools/ctest" --test-dir build-asan -LE gui -j"$(nproc)" --output-on-failure -E "$SANITIZER_TEST_EXCLUDE"
+    "$root/tools/ctest" --test-dir build-asan -LE "$SANITIZER_LABEL_EXCLUDE" -j"$(nproc)" --output-on-failure -E "$SANITIZER_TEST_EXCLUDE"
 fi
 
 # ---- the race job (opt-in; separate tree, ASan and TSan cannot combine) -----

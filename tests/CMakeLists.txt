@@ -627,7 +627,8 @@ set_tests_properties(part_configuration_smoke PROPERTIES TIMEOUT 120)
 add_test(NAME cam_parked_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/cam_parked_smoke.py
                  $<TARGET_FILE:designer>)
-set_tests_properties(cam_parked_smoke PROPERTIES LABELS "cam;slow" TIMEOUT 300)
+set_tests_properties(cam_parked_smoke PROPERTIES LABELS "cam;slow;asan_slow"
+                     TIMEOUT 300)
 
 # Sheet metal (v108/v109): the rules and the first two features over the RPC —
 # the gauge tables, the refusals in words, and a flanged volume checked
@@ -1218,7 +1219,7 @@ add_test(NAME om615_mounting_smoke
 # suite packed the rest of the machine around it and it ran 136-140 s, then
 # past its 180 s timeout once anything else was also building. PROCESSORS is
 # what it actually takes, so ctest leaves it room.
-set_tests_properties(om615_mounting_smoke PROPERTIES LABELS slow TIMEOUT 180
+set_tests_properties(om615_mounting_smoke PROPERTIES LABELS "slow;asan_slow" TIMEOUT 180
                      PROCESSORS 3)
 
 add_test(NAME cncest6090_smoke
