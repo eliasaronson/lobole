@@ -42,6 +42,7 @@ ROOT = os.path.dirname(HERE)
 sys.path.insert(0, os.path.join(ROOT, "tools"))
 
 from method_doc_scan import method_docs  # noqa: E402
+from rpc_contract import parse_result_column  # noqa: E402
 from rpc_params_scan import scan_files  # noqa: E402
 
 REMOTE = os.path.join(ROOT, "src", "remote")
@@ -93,6 +94,11 @@ def declared_keys(spec):
     never reads, so checking nested names would fail every row that documents
     its rows properly — punishing exactly the rows worth having.
     """
+    # A typed column (docs/scripting/rpc.md#typed-results) names its keys
+    # outright; its words are types too, which are not keys.
+    typed = parse_result_column(spec)
+    if typed is not None:
+        return sorted(e["name"] for e in typed["entries"])
     flat = spec
     while True:
         stripped = NESTED_RE.sub(" ", flat)

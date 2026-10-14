@@ -728,7 +728,7 @@ json FitsRefusedJson(const Measure::SetContact& c) {
 void AddPressFits(json& j, const Measure::SetContact& c) {
   if (!c.pressFits.empty()) {
     j["press_fits"] = PressFitsJson(c);
-    j["press_fit_volume"] = c.pressFitVolume;
+    j["press_fit_volume_mm3"] = c.pressFitVolume;
   }
   if (!c.fitsRefused.empty())
     j["press_fit_refused"] = FitsRefusedJson(c);
@@ -736,9 +736,9 @@ void AddPressFits(json& j, const Measure::SetContact& c) {
 
 void AddOverlapSite(json& j, const Measure::SetContact& c) {
   j["engaged_thread_pairs"] = c.engagedThreadPairs;
-  j["thread_engagement_volume"] = c.threadEngagementVolume;
+  j["thread_engagement_volume_mm3"] = c.threadEngagementVolume;
   j["ring_grip_pairs"] = c.ringGripPairs;
-  j["ring_grip_volume"] = c.ringGripVolume;
+  j["ring_grip_volume_mm3"] = c.ringGripVolume;
   j["press_fit_pairs"] = c.pressFits.size();
   AddPressFits(j, c);
   if (!c.overlaps)
@@ -837,14 +837,16 @@ static constexpr MethodDoc InspectionMethods[] = {
      "gives the exact gaps. Naming a `body` checks that one and skips the "
      "connectivity pass entirely.",
      "body?:int", remote::NeedsPart,
-     "ok, valid, "
-     "bodies[]{body,name,valid,bad_faces,bad_edges,bad_wires,reasons}, "
-     "body_count, "
-     "feature_errors[]{index,name,error,after_earlier_failure?}, "
-     "receipt{schema,standing,summary,claims}, "
-     "stale_derived?[]{id,name,source}, "
-     "templates_changed?[]{id,name,template,revision}, body_components?, "
-     "connected?, warnings?"},
+     "bodies:{bad_edges:int, bad_faces:int, bad_wires:int, body:int, "
+     "name:string, reasons:string[], valid:bool}[], "
+     "body_components?:string[][], body_count:int, connected?:bool, "
+     "feature_errors:{error:string, index:int, name:string, "
+     "after_earlier_failure?:bool}[], ok:bool, "
+     "receipt:{claims:object[], schema:string, standing:string, "
+     "summary:string}, valid:bool, warnings?:string[], "
+     "templates_changed?:{id:int, name:string, revision:int, "
+     "template:string}[], stale_derived?:{id:int, name:string, "
+     "source:string}[]"},
     {"check_print",
      "Will this PART print? (docs/tolerances/README.md#checking-a-print) "
      "Six items over its bodies (or `bodies`: names or creating-feature "
@@ -872,15 +874,24 @@ static constexpr MethodDoc InspectionMethods[] = {
      "max_bridge_mm?:number>0, min_gap_mm?:number>0, "
      "stl_deflection_mm?:number>0",
      remote::NoFlags,
-     "ok, process, direction, bodies[]{body,name,solids,watertight,"
-     "lowest_mm}, bed{status,lowest_mm,tol_mm,contact_area_mm2,on_bed}, "
-     "shells{status,pieces,expected,watertight,joined,split}, "
-     "overhang{status,limit_deg,limit_from,allowance_mm2,area_mm2,"
-     "worst_deg,worst?,faces[],note}, bridges{status,limit_mm,limit_from,"
-     "worst_span_mm,area_mm2,faces[],note}, clearance{status,required_mm,"
-     "required_from,tolerance_mm,min_mm?,pairs[],pruned,note}, "
-     "chords{status,deflection_mm,deflection_from,limit_mm,note}, "
-     "receipt{schema,standing,summary,claims}"},
+     "bed:{contact_area_mm2:number, lowest_mm:number, on_bed:string[], "
+     "status:string, tol_mm:number}, bodies:{body:int, "
+     "lowest_mm:number, name:string, solids:int, watertight:bool}[], "
+     "bridges:{area_mm2:number, faces:object[], limit_from:string, "
+     "limit_mm:number, note:string, status:string, "
+     "worst_span_mm:number, source?:string}, "
+     "chords:{deflection_from:string, deflection_mm:number, "
+     "limit_mm:number, note:string, status:string}, "
+     "clearance:{note:string, pairs:object[], pruned:int, "
+     "required_from:string, required_mm:number, status:string, "
+     "tolerance_mm:number, min_mm?:number}, direction:number[], "
+     "ok:bool, overhang:{allowance_mm2:number, area_mm2:number, "
+     "faces:object[], limit_deg:number, limit_from:string, note:string, "
+     "status:string, worst_deg:number, source?:string, worst?:object}, "
+     "process:string|null, receipt:{claims:object[], schema:string, "
+     "standing:string, summary:string}, shells:{expected:int, "
+     "joined:string[][], pieces:int, split:any[], status:string, "
+     "watertight:bool}"},
     {"check_fit",
      "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
      "class's band; adding {shaft:{class:\"g6\"}} gives the fit between "
@@ -909,11 +920,14 @@ static constexpr MethodDoc InspectionMethods[] = {
      "A side with no face may say {print: {process, material}} to ask before "
      "there is a model.",
      "hole, intent, part, shaft, size", remote::NoFlags,
-     "size, size_from, hole{class,lower,upper,min,max,it_grade,it}, "
-     "measured?{hole?,shaft?}, "
-     "shaft?{class,lower,upper,min,max,it_grade,it}, kind?, min_clearance?, "
-     "max_clearance?, note?, intent?, intent_ok?, print?{hole?,shaft?}, "
-     "print_notes?"},
+     "hole:{class:string, it:number, it_grade:int, lower:number, "
+     "max:number, min:number, upper:number}, print?:{hole?:object, "
+     "shaft?:object}, print_notes?:string[], size:number, "
+     "size_from:string, measured?:{hole?:number, shaft?:number}, "
+     "intent?:string, intent_ok?:bool, kind?:string, "
+     "max_clearance?:number, min_clearance?:number, note?:string, "
+     "shaft?:{class:string, it:number, it_grade:int, lower:number, "
+     "max:number, min:number, upper:number}"},
     {"list_print_profiles",
      "Your print profiles, from ~/.config/lobole/print_profiles/*.json "
      "(docs/tolerances/README.md#print-profiles): each a named copy of an "
@@ -929,10 +943,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`defaults` are the built-in tables, read-only, that a new profile "
      "starts from (get_print_process's `tables`).",
      "", remote::NoFlags,
-     "profiles[]{name,process,material,conditions?,stl_deflection_mm,"
-     "stl_deflection_stated,layer_height_mm?,z_gap_mm?,rows[]{kind,from_mm,"
-     "to_mm?,allowance_mm,"
-     "source?}}, defaults[]{process,material,conditions,rows[]}, dir"},
+     "defaults:{conditions:string, material:string, "
+     "min_reliable_thread_mm:number, process:string, "
+     "repeatability_mm:number, repeatability_source:string, "
+     "rows:object[]}[], dir:string, profiles:{material:string, "
+     "name:string, process:string, rows:object[], "
+     "stl_deflection_mm:number, stl_deflection_stated:bool, "
+     "layer_height_mm?:number, z_gap_mm?:number, conditions?:string}[]"},
     {"save_print_profile",
      "Write a print profile to your store {profile: {name, process, "
      "material, conditions?, stl_deflection_mm?, layer_height_mm?, "
@@ -952,8 +969,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "would share a file with another. Open parts keep their copy; "
      "get_print_process then reports `match: differs`.",
      "from_part, part, profile", remote::NotInBatch,
-     "name, process, material, conditions?, stl_deflection_mm, "
-     "stl_deflection_stated, layer_height_mm?, z_gap_mm?, rows[]"},
+     "conditions?:string, material:string, name:string, process:string, "
+     "rows:{allowance_mm:number, from_mm:number, kind:string, "
+     "source:string}[], stl_deflection_mm:number, "
+     "stl_deflection_stated:bool, layer_height_mm?:number, "
+     "z_gap_mm?:number"},
     {"delete_print_profile",
      "Remove a print profile from your store {name}. A part printed with it "
      "keeps its copy and reports `match: missing`.",
@@ -979,13 +999,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "at. `part` (name, stable id or slot index) sets it on any part, not "
      "only the active one, in that part's undo history.",
      "clear, material, part, process, profile", remote::NoFlags,
-     "print{process,material,profile?,match?,conditions?,rows?,"
-     "layer_height_mm?,z_gap_mm?,stl_deflection_mm}, "
-     "threads[]{feature_id,name,designation,"
-     "side,modeled,known,pitch,allowance_mm,modelled_major,prints_major,"
-     "want_major?,model_major?,model_face?,notes,sentence,confirm}"},
+     "print:{material:string, process:string, stl_deflection_mm:number, "
+     "match?:string, profile?:string, conditions?:string, "
+     "rows?:object[], layer_height_mm?:number, z_gap_mm?:number}, "
+     "threads:object[], confirm?:string"},
     {"get_print_process",
-     "This part's print process (null when it is not printed) and the whole "
+     "This part's print process (null when it is not printed; a thread's "
+     "`pitch` in mm) and the whole "
      "allowance table: per process and material, the signed allowance ON "
      "THE DIAMETER for a hole, a shaft, an internal and an external thread "
      "(model = basic + allowance), the size range each row covers, the "
@@ -999,11 +1019,18 @@ static constexpr MethodDoc InspectionMethods[] = {
      "missing. `stl_deflection_mm` is what export_stl meshes it at. A "
      "printed part also lists its Threads with what to model for each.",
      "part", remote::Deferrable,
-     "print{process,material,profile?,match?,conditions?,rows?,"
-     "layer_height_mm?,z_gap_mm?,stl_deflection_mm}, "
-     "tables[]{process,material,conditions,"
-     "repeatability_mm,repeatability_source,min_reliable_thread_mm,rows[]{"
-     "kind,from_mm,to_mm,allowance_mm,source}}, confirm, threads?[]"},
+     "confirm:string, print:{material:string, process:string, "
+     "stl_deflection_mm:number, match?:string, profile?:string, "
+     "conditions?:string, rows?:object[], layer_height_mm?:number, "
+     "z_gap_mm?:number}|null, tables:{conditions:string, "
+     "material:string, min_reliable_thread_mm:number, process:string, "
+     "repeatability_mm:number, repeatability_source:string, "
+     "rows:object[]}[], threads?:{allowance_mm:number, confirm:string, "
+     "designation:string, feature_id:int, known:bool, "
+     "model_face?:number, model_major?:number, modeled:bool, "
+     "modelled_major:number, name:string, notes:string[], pitch:number, "
+     "prints_major:number, sentence:string, side:string, "
+     "want_major?:number}[]"},
     {"print_allowance",
      "What to MODEL for one printed diameter (a thread's `pitch` in mm): "
      "{kind: hole|shaft|"
@@ -1023,10 +1050,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "designation, kind, material, part, process, profile, size_mm, "
      "stl_deflection_mm",
      remote::Deferrable,
-     "profile?, process, material, kind, basic_mm, allowance_mm, model_mm, "
-     "source, "
-     "confirm, stl_deflection_mm, stl_chord_loss_mm, stl_note, designation?, "
-     "pitch?, note?"},
+     "allowance_mm:number, basic_mm:number, confirm:string, "
+     "designation?:string, kind:string, material:string, "
+     "model_mm:number, pitch?:number, process:string, source:string, "
+     "stl_chord_loss_mm:number, stl_deflection_mm:number, "
+     "stl_note:string, profile?:string, note?:string"},
     {"set_tolerance",
      "Record what a face's SIZE is allowed to vary by: {feature_id, element, "
      "class: \"H7\"} — or {lower, upper} in mm for limits no class "
@@ -1052,8 +1080,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "resolves is listed `resolved: false` rather than dropped: the intent "
      "outlives the topology that carried it.",
      "part", remote::NoFlags,
-     "tolerances[]{id,feature_id,element,kind,resolved,comment?,b?,lower?,"
-     "upper?,class?,nominal?,min?,max?,error?}"},
+     "tolerances:{class?:string, element:string, feature_id:int, "
+     "id:int, kind:string, max:number, min:number, nominal:number, "
+     "resolved:bool, b?:object, comment?:string, lower?:number, "
+     "upper?:number, error?:string}[]"},
     {"clear_tolerance",
      "Remove one tolerance by {id}, from the active part or `part` (name, "
      "stable id or slot index).",
@@ -1092,11 +1122,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "carries `print` with what to model; one modelled at the bare size is "
      "unverified as two basic sizes, and the reason says what to model.",
      "", remote::NoFlags,
-     "fits[]{mate,mate_name,mate_type,status,reason?,size?,hole?{occurrence,"
-     "class,min,max,print?},shaft?{...},kind?,"
-     "min_clearance?,max_clearance?,note?}, "
-     "status, passed, warned, failed, reported, unverified, "
-     "receipt{schema,standing,summary,claims}"},
+     "failed:int, fits:{hole?:object, kind?:string, mate:int, "
+     "mate_name:string, mate_type:string, max_clearance?:number, "
+     "min_clearance?:number, note?:string, shaft?:object, size?:number, "
+     "status:string, reason?:string}[], passed:int, "
+     "receipt:{claims:object[], schema:string, standing:string, "
+     "summary:string}, reported:int, status:string, unverified:int, "
+     "warned:int"},
     {"mass_properties",
      "Mass (`mass_g`), `volume_mm3`, `center_of_mass_mm`, bbox per body and "
      "total (density "
@@ -1106,9 +1138,14 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`part` reads another part without switching to it; from an assembly tab "
      "with no `part`, aggregates every visible occurrence in world space.",
      "part?:string|int, body?:int", remote::NoFlags,
-     "bodies[]{body, name, volume_mm3, surface_area_mm2, center_of_mass_mm, "
-     "inertia, material, bbox_min?, bbox_max?, density?, mass_g}, "
-     "total{volume_mm3, center_of_mass_mm, mass_g}"},
+     "bodies?:{bbox_max:number[], bbox_min:number[], body:int, "
+     "center_of_mass_mm:number[], inertia:number[][], "
+     "mass_g:number|null, material:string, name:string, "
+     "surface_area_mm2:number, volume_mm3:number, density?:number}[], "
+     "total:{center_of_mass_mm:number[], mass_g:number|null, "
+     "volume_mm3:number}, occurrences?:{center_of_mass_mm:number[], "
+     "mass_g:number|null, name:string, occurrence:int, part_id:int, "
+     "volume_mm3:number}[]"},
     // This row said "point/distance/angle/radius" for a year and the handler
     // implemented distance. `describe` is what an agent trusts INSTEAD of
     // guessing, so a row that promises a branch nobody wrote is the
@@ -1205,11 +1242,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "part?:string|int, configuration?:string|int, body?:int, entity?:int>=0, "
      "made_by?:string|int, role?:string, via?:string|int, max_faces?:int>=0",
      remote::NoFlags,
-     "bodies[]{body,name,created_by,job_part,faces[]{index,name,made_by,"
-     "role,entity?,instance?,derived?,kind,area_mm2,centroid,normal,radius?,"
-     "axis?},edges[]{...,faces},unnamed_faces}, matched_faces?, "
-     "matched_edges?, "
-     "why?"},
+     "bodies:{body:int, created_by:int, edges:object[], faces:object[], "
+     "job_part:int, name:string, unnamed_faces:int}[], "
+     "matched_edges?:int, matched_faces?:int, why?:string"},
     {"curve_points",
      "The polyline a Curve3D actually BUILT, sampled to `deflection_mm` "
      "(default 0.1) with the arc length of each point from the start. A bent "
@@ -1220,7 +1255,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "drift from this one. `curve` names the Curve3D; omit it on a part with "
      "exactly one and it is taken.",
      "curve, deflection_mm, part", Deferrable,
-     "curve, name, kind, length_mm, points, at_mm"},
+     "at_mm:number[], curve:int, kind:string, length_mm:number, "
+     "name:string, points:number[][]"},
     {"tube_schedule",
      "The cut list and the bend schedule for every tube MEMBER of the part. "
      "It walks the BODIES: a member is a length of tube that EXISTS, so a "
@@ -1239,9 +1275,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "in `tight_rule`. `curve` narrows it to one path. The sheet side's "
      "answer to the same question is list_bends.",
      "part, curve", Deferrable,
-     "tubes[]{curve, name, quantity, bodies, cut_length_mm, path_length_mm, "
-     "length_mm, bends, coped_off_mm?, outer_diameter_mm?, wall_mm?}, "
-     "count, members"},
+     "count:int, members:int, tubes:{bends:object[], bodies:string[], "
+     "curve:int, cut_length_mm:number, length_mm:number, name:string, "
+     "outer_diameter_mm:number, path_length_mm:number, quantity:int, "
+     "wall_mm:number, coped_off_mm?:number}[]"},
     {"interference",
      "Pairwise check between bodies or occurrences: {clash, volume_mm3, "
      "distance, "
@@ -1326,14 +1363,28 @@ static constexpr MethodDoc InspectionMethods[] = {
      "async, deadline_s, exact_face_budget, max_pairs, mode, near_tol, "
      "outlive_client, touch_tol",
      remote::NoFlags,
-     "connected, clash, components, pairs[]{a, b, state, distance, volume_mm3, "
-     "checked?, press_fits?}, "
-     "near_misses[]{a, b, distance}, clashes[]{a, b, volume_mm3, centroid_mm, "
-     "bbox_min_mm, bbox_max_mm, press_fit_refused?}, press_fits[]{a, b, "
-     "fits, volume_mm3}, touch_tol, "
-     "near_tol, mode, mesh_cleared?, deflection_mm?, pairs_checked, "
-     "elapsed_s, receipt, scope?, bodies?, occurrences?, not_checked?, "
-     "started?, running?, job?, kind?, outlives_client?"},
+     "clash?:bool, clashes?:{a:string, a_id:int, b:string, b_id:int, "
+     "bbox_max_mm:number[], bbox_min_mm:number[], centroid_mm:number[], "
+     "engaged_thread_pairs:int, press_fit_pairs:int, "
+     "press_fit_refused?:object[], ring_grip_pairs:int, "
+     "ring_grip_volume_mm3:number, thread_engagement_volume_mm3:number, "
+     "volume_mm3:number}[], components?:string[][], connected?:bool, "
+     "elapsed_s?:number, mode?:string, near_misses?:{a:string, "
+     "a_id:int, b:string, b_id:int, distance:number}[], "
+     "near_tol?:number, occurrences?:int, pairs?:{a:string, a_id?:int, "
+     "b:string, b_id?:int, distance:number, press_fit_volume_mm3?:number, "
+     "press_fits?:object[], state:string, volume_mm3:number, "
+     "press_fit_refused?:object[], checked?:string}[], "
+     "pairs_box_cleared?:int, pairs_checked?:int, "
+     "press_fits?:{a:string, a_id:int, b:string, b_id:int, "
+     "fits:object[], volume_mm3:number}[], receipt?:{claims:object[], "
+     "schema:string, standing:string, summary:string}, "
+     "touch_tol?:number, unmated_contacts?:{a:string, b:string}[], "
+     "unrealized_mates?:{id:int, mate:string}[], bodies?:int, "
+     "scope?:string, pairs_unchecked?:int, truncated?:bool, "
+     "truncation?:string, deflection_mm?:number, mesh_cleared?:int, "
+     "job?:int, kind?:string, outlives_client?:bool, running?:bool, "
+     "started?:bool, not_checked?:any"},
     {"contact_status",
      "An async contact_report by its `job` id, from any tab: {job, kind, "
      "label, running: true, fraction, elapsed_seconds, cancellable, "
@@ -1343,9 +1394,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "synchronous call would have answered (a cancelled run keeps none). "
      "An id that names no contact job is refused, naming those there are.",
      "job", remote::NoFlags,
-     "job, kind, running, fraction?, label?, elapsed_seconds?, "
-     "cancellable?, cancel_requested?, outlives_client?, outcome?, "
-     "seconds?, error?, cancel_reason?, report?"},
+     "cancel_requested?:bool, cancellable?:bool, "
+     "elapsed_seconds?:number, fraction?:number, job:int, kind:string, "
+     "label?:string, outlives_client?:bool, running:bool, "
+     "outcome?:string, seconds?:number, error?:string, "
+     "cancel_reason?:string, report?:object"},
     {"query_geometry",
      "Declarative element query with a built-in assertion: filter faces/"
      "edges by geometry_type, normal/axis (+angle_tol_deg), radius "
@@ -1446,7 +1499,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "cutting), offset, tilt, reverse, visible, and the cut plane "
      "{normal, d}.",
      "", remote::NoFlags,
-     "sections[]{id,offset,tilt_u,tilt_v,reverse,visible,normal,d,source}"},
+     "sections:{d:number, id:int, normal:number[], offset:number, "
+     "reverse:bool, source:object, tilt_u:number, tilt_v:number, "
+     "visible:bool}[]"},
     {"update_section",
      "Change one cut {id, base_plane?, plane_id?, offset? (mm along the "
      "normal), tilt_u?, tilt_v? (degrees), reverse? (false keeps the half "

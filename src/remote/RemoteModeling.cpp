@@ -333,9 +333,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "(docs/topopt/README.md#split-for-printing).",
      "body, bed_mm, cuts, dry_run, part, prefix",
      remote::NeedsPart | remote::NotInBatch,
-     "{part, body, bed_mm, automatic, fits_whole, cuts[]{axis, at_mm}, "
-     "pieces[]{index, size_mm, bbox_min, bbox_max, volume_mm3, solids, fits, "
-     "material, orientation{bed_x, bed_y, up}, part?, part_id?}}"},
+     "automatic:bool, bed_mm:number[], body:string, cuts:{at_mm:number, "
+     "axis:string}[], fits_whole:bool, part:string, "
+     "pieces:{bbox_max:number[], bbox_min:number[], fits:bool, "
+     "index:int, material:string, orientation:object, size_mm:number[], "
+     "solids:int, volume_mm3:number, part?:string, part_id?:int}[]"},
     {"update_derived",
      "Retake a Derived feature's snapshot from its source part (one undo "
      "step): {feature_id} or {index}, or {all: true} for every Derived of "
@@ -524,10 +526,12 @@ static constexpr MethodDoc ModelingMethods[] = {
      "Run it after building a part from literals; extract_variables "
      "{reuse: true} binds the literal findings.",
      "part", remote::NeedsPart,
-     "{part, literals[]{feature_id, feature, field, label, value, quantity, "
-     "variables[]}, placements[]{feature_id, feature, on, origin, normal, "
-     "face{feature_id, element}, face_made_by, face_feature}, "
-     "checked{fields, placements}}"},
+     "checked:{fields:int, placements:int}, literals:{feature:string, "
+     "feature_id:int, field:string, label:string, quantity:string, "
+     "value:number, variables:string[]}[], part:string, "
+     "placements:{face:object, face_feature:string, face_made_by:int, "
+     "feature:string, feature_id:int, normal:number[], on:string, "
+     "origin:number[]}[]"},
     {"extract_variables",
      "Turn the active part's literal dimensions into named variables with "
      "expressions (docs/variables/README.md#extracting-variables). Without "
@@ -550,10 +554,11 @@ static constexpr MethodDoc ModelingMethods[] = {
      "degrees for an angle.",
      "apply, feature_ids, fields, merge_equal, prefix, reuse, scope",
      remote::NeedsPart,
-     "{applied, scope, variables[]{name, expression, value, quantity, "
-     "existing, uses[]{feature_id, feature, field, label, expression}}, "
-     "left_alone[]{feature_id, feature, field, label, value, reason}, "
-     "regen, digest}"},
+     "applied:bool, left_alone:{feature:string, feature_id:int, "
+     "field:string, label:string, reason:string, value:number}[], "
+     "scope:string, variables:{existing:bool, expression:string, "
+     "name:string, quantity:string, uses:object[], value:number}[], "
+     "digest?:object, regen?:object"},
     // NOTE: list_variables is documented and handled in RemoteProject.cpp,
     // where the handler is. A second row here made `describe` list the
     // method TWICE — the convention is one row per `m ==` branch, and this
@@ -1021,6 +1026,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     return SplitForPrinting(state, document, p);
   }
   if (m == "check_literals") {
+    // rpc-returns-from: src/remote/RemoteModeling.cpp
     return CheckLiterals(state, document, p);
   }
   if (m == "extract_variables") {

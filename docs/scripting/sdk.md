@@ -55,8 +55,9 @@ copied, and no constraint-kind string is hard-coded in the module.
 For a type checker, the contracted RPCs are typed: `python/lobole/rpc.py`
 is generated from the typed rows by `tools/generate_rpc_contracts.py`
 (checked in; `rpc_contracts_generated` fails when it is stale) and holds a
-`TypedDict` of each method's parameters and an `RpcSurface` class with one
-method per contracted RPC. `App` inherits it under `TYPE_CHECKING` only, so
+`TypedDict` of each method's parameters, a `TypedDict` of each typed
+answer ([typed results](rpc.md#typed-results)), and an `RpcSurface` class
+with one method per contracted RPC, returning its answer's type. `App` inherits it under `TYPE_CHECKING` only, so
 mypy sees `app.add_mate(a=..., b=..., derive="sideways")`, a string
 `rotation_deg` or a missing `a` as an error while the runtime surface stays
 the generated one. A key that is a Python keyword is typed with its

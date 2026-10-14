@@ -94,16 +94,19 @@ const MethodDoc RequirementMethods[] = {
      "that does not exist is refused. Units: mm, deg, MPa, g, mm2, mm3 as the "
      "measure reports them.",
      "bound, measure, name, source", NotInBatch,
-     "id, requirement{id,name,state,...}"},
+     "id:int, requirement:{bound:object, id:int, measure:object, "
+     "name:string, note:string, revision:int, source?:string, "
+     "state:string}"},
     {"set_requirement",
      "Edit a requirement {id, name?, source?, measure?, bound?}. Any edit "
      "bumps its revision and DROPS its evidence: a check of the old "
      "requirement says nothing about the new one, so it reads unchecked "
      "until checked again.",
      "bound, id, measure, name, source", NotInBatch,
-     "requirement{id,name,revision,state}"},
+     "requirement:{bound:object, id:int, measure:object, name:string, "
+     "note:string, revision:int, source?:string, state:string}"},
     {"remove_requirement", "Remove a requirement {id}.", "id", NotInBatch,
-     "removed"},
+     "removed:int"},
     {"list_requirements",
      "Every requirement and where it stands, WITHOUT measuring: state pass | "
      "fail (evidence for the current model and revision) | stale (the model "
@@ -111,9 +114,13 @@ const MethodDoc RequirementMethods[] = {
      "gone, or the measure could not be taken; never a pass) | unchecked "
      "(never checked, or edited since). Cheap: hashes, no solves.",
      "", NoFlags,
-     "requirements[]{id,name,source?,revision,state,measure,bound,value?,"
-     "unit?,limit?,limit_min?,limit_max?,note?,detail?,checked_at?,"
-     "input_hash?}, summary{pass,fail,stale,unresolved,unchecked}, all_pass"},
+     "all_pass:bool, requirements:{bound:object, id:int, "
+     "measure:object, name:string, note?:string, revision:int, "
+     "source?:string, state:string, checked_at?:string, detail?:object, "
+     "evidence_revision?:int, input_hash?:string, limit?:number, "
+     "unit?:string, value?:number, limit_max?:number, "
+     "limit_min?:number}[], summary:{fail:int, pass:int, stale:int, "
+     "unchecked:int, unresolved:int}"},
     {"check_requirements",
      "Check the requirements {ids?: some of them, async?, recompute?, "
      "outlive_client?}: measure each through the RPC that computes it and "
@@ -128,8 +135,16 @@ const MethodDoc RequirementMethods[] = {
      "once when nothing needs measuring. A check visits each requirement's "
      "tab and comes back to the one it started on.",
      "async, ids, outlive_client, recompute", NotInBatch,
-     "requirements[]{...}, summary{...}, all_pass, checked, reused, job?, "
-     "receipt{schema,standing,summary,claims}"},
+     "all_pass?:bool, checked?:int, receipt?:{claims:object[], "
+     "schema:string, standing:string, summary:string}, "
+     "requirements:{bound:object, checked_at?:string, detail?:object, "
+     "evidence_revision?:int, id:int, input_hash?:string, "
+     "limit?:number, measure:object, name:string, revision:int, "
+     "source?:string, state:string, unit?:string, value?:number, "
+     "limit_max?:number, limit_min?:number, note?:string}[], "
+     "reused?:int, summary:{fail:int, pass:int, stale:int, "
+     "unchecked:int, unresolved:int}, checking?:int, job?:int, "
+     "kind?:string, started?:bool"},
     // The declared clearances (v97) are clearance requirements now
     // (docs/requirements/README.md#clearance-assertions). These four keep
     // their words for the scripts that use them.
@@ -138,13 +153,14 @@ const MethodDoc RequirementMethods[] = {
      "occurrence ids, min_mm, mode?: mesh|exact, why?}. It is a REQUIREMENT "
      "(measure clearance, bound at_least min_mm, source why) on the active "
      "assembly; list_requirements shows it with every other one.",
-     "a, b, min_mm, mode, name, why", NotInBatch, "id"},
+     "a, b, min_mm, mode, name, why", NotInBatch, "id:int, name:string"},
     {"list_assertions",
      "The active assembly's clearance requirements and where each stands, "
      "WITHOUT re-checking: holds | violated | unverifiable | stale | never.",
      "", NoFlags,
-     "assertions[]{id,name,a,b,min_mm,mode,standing,why?,measured_mm?,last_"
-     "verdict?,note?}"},
+     "assertions:{a:int, b:int, id:int, min_mm:number, mode:string, "
+     "name:string, note?:string, standing:string, why:string, "
+     "last_verdict?:string, measured_mm?:number}[]"},
     {"remove_assertion", "Remove a declared clearance (a requirement) {id}.",
      "id", NotInBatch},
     {"verify_assertions",
@@ -153,7 +169,11 @@ const MethodDoc RequirementMethods[] = {
      "occurrence no longer resolves is UNVERIFIABLE, never a pass. In mesh "
      "mode the tessellation tolerance is SUBTRACTED from the measured gap.",
      "id", NotInBatch,
-     "assertions[]{...}, receipt{schema,standing,summary,claims}"},
+     "assertions:{a:int, b:int, id:int, last_verdict:string, "
+     "measured_mm?:number, min_mm:number, mode:string, name:string, "
+     "standing:string, why:string, note?:string}[], "
+     "receipt:{claims:object[], schema:string, standing:string, "
+     "summary:string}"},
 };
 
 // ---- Documents --------------------------------------------------------------

@@ -56,10 +56,9 @@ static constexpr MethodDoc TubeMethods[] = {
      "lists what IS stocked, so a picker built from it cannot offer a size "
      "set_tube_rules would refuse.",
      "part", remote::Deferrable,
-     "rules{material, max_thinning, former_radii_mm, min_straight, "
-     "tail_length | the whole object is null when the part is not a tube "
-     "part}, stocked?{per-material sizes, present only when rules is "
-     "null}"},
+     "rules:{material:string, max_thinning:number, "
+     "former_radii_mm:number[], min_straight:number|string, "
+     "tail_length:number|string}|null, stocked?:object"},
     {"check_frame",
      "Is this frame a TRUSS? Three questions on the member graph: a member "
      "welded to nothing at one end (a lever, and a space frame has none), a "

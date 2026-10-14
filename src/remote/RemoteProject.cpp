@@ -123,8 +123,9 @@ static constexpr MethodDoc ProjectMethods[] = {
      "chord deviation used and where it came from (asked, profile, gap, "
      "default), and the SOURCE B-Rep's watertightness.",
      "body, deflection, path", remote::NeedsPart | remote::NotInBatch,
-     "path, bodies, watertight, shells, free_edges, deflection_mm, "
-     "deflection_from, smallest_gap_side_mm?, chord_share?, warning?"},
+     "bodies:int, deflection_from:string, deflection_mm:number, "
+     "free_edges:int, path:string, shells:int, watertight:bool, "
+     "chord_share?:number, smallest_gap_side_mm?:number, warning?:string"},
     {"export_brep",
      "Export to BREP {path}: the exact solid, so no `deflection` (that is "
      "export_stl's tessellation tolerance).",
@@ -178,7 +179,8 @@ static constexpr MethodDoc ProjectMethods[] = {
      remote::Deferrable},
     {"list_variables", "Project variables and the active part's local ones.",
      "", remote::NoFlags,
-     "variables[]{name,expression,value,scope,comment?,error?}"},
+     "variables:{comment?:string, expression:string, name:string, "
+     "scope:string, value:number, error?:string}[]"},
     {"set_table",
      "Add or replace a PROJECT table {name, columns: [names], rows, "
      "comment?} (docs/variables/README.md#tables), read in any expression "
@@ -191,12 +193,15 @@ static constexpr MethodDoc ProjectMethods[] = {
      "project variables; every part re-evaluates. A malformed table is "
      "refused saying what is wrong, never stored as a different one.",
      "columns, comment, name, rows", remote::Deferrable,
-     "table{name,comment?,columns,rows[]{key,values}}, regen?"},
+     "regen:{failed:any[], ok:bool, warnings:any[]}, "
+     "table:{columns:string[], name:string, rows:object[], "
+     "comment?:string}"},
     {"list_tables",
      "The project's tables {name?}: every one, or the one named (refused "
      "naming the tables there are).",
      "name", remote::NoFlags,
-     "tables[]{name,comment?,columns,rows[]{key,values}}"},
+     "tables:{columns:string[], name:string, rows:object[], "
+     "comment?:string}[]"},
     {"delete_table",
      "Delete a project table {name}; refused while any expression reads it "
      "(naming them), or when there is no such table (naming the ones "
@@ -209,7 +214,7 @@ static constexpr MethodDoc ProjectMethods[] = {
      "an unrecognised one is refused, naming what is accepted.",
      "angle, length, mass"},
     {"get_units", "The active document's display units.", "", remote::NoFlags,
-     "length, mass, angle"},
+     "angle:string, length:string, mass:string"},
     {"rename_variable",
      "Rename a variable {name, new_name, scope?}, rewriting "
      "every referencing expression.",

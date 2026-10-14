@@ -23,7 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "tools"))
 
 from method_doc_scan import method_docs  # noqa: E402
-from rpc_contract import parse_column  # noqa: E402
+from rpc_contract import (parse_column, parse_result_column,  # noqa: E402
+                          result_schema)
 
 OUT = ROOT / "python/lobole/rpc.py"
 
@@ -37,6 +38,59 @@ def contracts():
         if params is not None:
             out[name] = (row["column"], params)
     return out
+
+
+def results():
+    """{method: parsed returns column} for every row whose `returns` is
+    typed (docs/scripting/rpc.md#typed-results)."""
+    paths = sorted(glob.glob(str(ROOT / "src/remote/Remote*.cpp")))
+    out = {}
+    for name, row in sorted(method_docs(paths).items()):
+        parsed = parse_result_column(row["returns"] or "")
+        if parsed is not None:
+            out[name] = parsed
+    return out
+
+
+def _result_classes(cls, parsed, out):
+    """The TypedDicts for one object literal, nested ones first. The
+    functional form, because a key may be a Python keyword (`from`)."""
+    fields = []
+    for e in parsed["entries"]:
+        types = []
+        for a in e["alts"]:
+            if a["kind"] == "object_lit":
+                sub = cls + title(e["name"])
+                _result_classes(sub, a, out)
+                t = sub
+                if a.get("array"):
+                    t = f"list[{t}]"
+                for _ in a.get("outer") or []:
+                    t = f"list[{t}]"
+            elif a["kind"] == "literal":
+                t = f"Literal[{a['text']!r}]"
+            else:
+                t = _result_alt_type(a)
+            if t not in types:
+                types.append(t)
+        t = " | ".join(types)
+        fields.append(f"    {e['name']!r}: "
+                      + (t if e["required"] else f"NotRequired[{t}]") + ",")
+    out.append("")
+    out.append(f"{cls} = TypedDict({cls!r}, {{")
+    out += fields
+    out.append("})")
+
+
+def _result_alt_type(alt):
+    t = {"int": "int", "number": "float", "bool": "bool", "string": "str",
+         "object": "dict[str, Any]", "null": "None", "any": "Any",
+         "revision": "Revision", "vocab": "str"}[alt["kind"]]
+    if alt.get("array"):
+        t = f"list[{t}]"
+    for _ in alt.get("outer") or []:
+        t = f"list[{t}]"
+    return t
 
 
 def _alt_type(alt):
@@ -116,6 +170,15 @@ def generate():
             key = p["name"] + ("_" if keyword.iskeyword(p["name"]) else "")
             lines.append(f"    {key}: "
                          + (t if p["required"] else f"NotRequired[{t}]"))
+    typed_results = results()
+    lines += ["", "", "# Each typed `returns` column, as the JSON Schema an answer is held to",
+              "# (a strict lobole.client validates against these), and as types.",
+              "RESULT_SCHEMAS: dict[str, dict[str, Any]] = {"]
+    for name, parsed in typed_results.items():
+        lines.append(f"    {name!r}: {result_schema(parsed, None)!r},")
+    lines += ["}", ""]
+    for name, parsed in typed_results.items():
+        _result_classes(f"{title(name)}Result", parsed, lines)
     lines += [
         "",
         "",
@@ -124,11 +187,15 @@ def generate():
         "    type checker only: at runtime every method is the generated",
         '    `describe` surface, validated against the same contract."""',
     ]
-    for name, (_, params) in rows.items():
+    for name in sorted(set(rows) | set(typed_results)):
         args = "self, _timeout: float | None = None"
-        if params:
+        if name not in rows:
+            args += ", **params: Any"
+        elif rows[name][1]:
             args += f", **params: Unpack[{title(name)}Params]"
-        lines += ["", f"    def {name}({args}) -> dict[str, Any]:",
+        ret = (f"{title(name)}Result" if name in typed_results
+               else "dict[str, Any]")
+        lines += ["", f"    def {name}({args}) -> {ret}:",
                   "        raise NotImplementedError"]
     return {OUT: "\n".join(lines) + "\n"}
 

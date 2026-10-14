@@ -40,10 +40,11 @@ constexpr MethodDoc TemplateMethods[] = {
      "comment, comments, dry_run, feature_ids, literals, name, rename, "
      "replace, strings",
      remote::NeedsPart,
-     "template{name,revision,comment?,parameters[]{name,kind,example,"
-     "comment?,choices?},features[]{id,type,name}}, instances_marked[]{part,"
-     "part_id,feature_id,name}, suggestions?{variables,literals[]{feature_id,"
-     "feature,path,label,kind,value,suggested},references}, error?"},
+     "suggestions?:{literals:any[], references:string[], "
+     "variables:string[]}, template:{features:object[], name:string, "
+     "parameters:object[], revision:int, comment?:string}, "
+     "instances_marked?:{feature_id:int, name:string, part:string, "
+     "part_id:int, revision:int, template_changed:bool}[]"},
     {"list_templates",
      "The project's feature templates {name?, definition?}: each one's "
      "parameters (name, kind, the example it was saved with), features and "
@@ -51,9 +52,8 @@ constexpr MethodDoc TemplateMethods[] = {
      "library's template is not the one it expands: update_template_instances "
      "follows it). definition: true adds the saved JSON.",
      "definition, name", remote::NoFlags,
-     "templates[]{name,revision,comment?,parameters[]{name,kind,example,"
-     "comment?,choices?},features[]{id,type,name},instances[]{part,part_id,"
-     "feature_id,name,revision,template_changed},definition?}"},
+     "templates:{features:object[], instances:object[], name:string, "
+     "parameters:object[], revision:int}[]"},
     {"delete_template",
      "Remove a template from the library {name}. Its instances keep the "
      "definitions they carry and read as no longer in the library. One undo "

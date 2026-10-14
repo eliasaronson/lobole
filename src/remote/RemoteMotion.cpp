@@ -82,10 +82,12 @@ constexpr MethodDoc MotionMethods[] = {
     {"list_motion_studies",
      "Every study, with whether it has a result and whether one is running.",
      "", remote::NoFlags,
-     "studies[]{type,id,name,driver_mate,driver_dof,from,to,samples,check_"
-     "clash,clash_mode,clash_deflection_mm?,configuration?,unit,has_result,"
-     "running,why_not?,"
-     "stale?,clean?,collision_checked?}"},
+     "studies:{check_clash:bool, clash_mode:string, driver_dof:string, "
+     "driver_mate:int, from:number, has_result:bool, id:int, "
+     "name:string, running:bool, samples:int, to:number, type:string, "
+     "unit:string, clean?:bool, collision_checked?:bool, stale?:bool, "
+     "clash_deflection_mm?:number, configuration?:int, "
+     "why_not?:string}[]"},
     {"run_motion_study",
      "Run it: {study, async?, include_poses?, leave_at?, leave_at_deg?, "
      "leave_at_mm?, recompute?, outlive_client?}. A run whose INPUTS hash "

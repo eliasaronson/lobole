@@ -149,7 +149,11 @@ def validate(schema, value, operation, path='/params'):
         # Sorted: the server's objects iterate in key order. Unknown keys
         # first, then missing ones, then each value -- the server's order.
         for key in sorted(value):
-            if key not in props:
+            # An open object (a result's `{..., *}`) carries keys it does
+            # not list. Every request schema closes its objects, so this is
+            # still the server's walk for everything the server validates.
+            if key not in props and \
+                    schema.get('additionalProperties', True) is False:
                 at = path + '/' + key
                 raise contract_refusal(
                     operation, 'unknown_argument', at, props, value[key],
@@ -163,7 +167,8 @@ def validate(schema, value, operation, path='/params'):
                     f'{operation}: missing required parameter {_where(at)} '
                     f'({describe(props[key])})')
         for key in sorted(value):
-            validate(props[key], value[key], operation, path + '/' + key)
+            if key in props:
+                validate(props[key], value[key], operation, path + '/' + key)
     if isinstance(value, (list, tuple)):
         if len(value) < schema.get('minItems', 0):
             fail()

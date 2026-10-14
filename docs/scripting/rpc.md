@@ -517,6 +517,38 @@ Kept true by:
   revision guard below.
 - `test_rpc_contract.cpp` — the grammar, its schema and its messages.
 
+### Typed results
+
+A row's `returns` column is a contract too, in the same grammar plus what an
+answer nests and a request does not: object literals, `{key:type, …}`, and
+nested arrays, `string[][]`.
+
+```
+"parts:{id:int, index:int, name:string, type:string, folder?:string}[], active:int, active_id:int, folders?:string[]"
+"total:{volume_mm3:number, center_of_mass_mm:number[], mass_g:number|null}, bodies?:{…}[]"
+"features:object[], selection:{mesh:int, face:int, normal:number[], center:number[]}|null"
+```
+
+- `key?` is a key the answer may leave out; `number|null` one it may send
+  as null.
+- An object closes over its keys: one the row does not list fails. `{…, *}`
+  is an object that carries more than it lists (a user's machine file).
+- A column types the answer's top level and one level inside it. What
+  nests deeper is `object` or `object[]`: a CAM operation's fields, a
+  receipt's claims, a feature's per-type keys each have a shape of their
+  own, which a row would otherwise copy and let drift.
+- A column still in prose (no `key:type` in it) is untyped.
+
+`tools/rpc_contract.py` reads the column (`parse_result_column`,
+`result_schema`); the server publishes it as written, in `returns`. From it
+`tools/generate_rpc_contracts.py` writes each method's result `TypedDict`
+and its JSON Schema (`lobole.rpc.RESULT_SCHEMAS`), and a **strict**
+`lobole.client.Client` — every smoke test's, through `smoke_app` — holds
+every typed answer to its schema, so a handler that adds, drops or retypes a
+key without its row fails the test that saw it rather than reaching a caller
+as a KeyError three calls later. `rpc_returns_gate` reads a typed column's
+keys, and `rpc_units_gate` holds every dimensional result key to its unit.
+
 ### Structured errors
 
 A refusal carries the sentence in `error` and, where the dispatcher can say

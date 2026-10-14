@@ -14,3 +14,5 @@ def mistakes(app: App) -> None:
     app.set_variable(name="w", expression=True, scope="global")  # type-error
     app.add_feature(feature={}, expect_revision={"version": 1})  # type-error
     app.list_parts(part=1)  # type-error
+    app.list_parts()["parts"][0]["nmae"]  # type-error
+    count: int = app.mass_properties()["total"]["volume_mm3"]  # type-error

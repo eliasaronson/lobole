@@ -25,8 +25,9 @@ const MethodDoc docs[] = {
      "List project catalog revisions and resolution status, without private "
      "record data.",
      "", remote::NoFlags,
-     "catalogs[]{id,revision,source,license,schema,units,storage,hash,resolved,"
-     "record_count?}"},
+     "catalogs:{hash:string, id:string, license:string, "
+     "record_count:int, resolved:bool, revision:string, schema:string, "
+     "source:string, storage:string, units:string}[]"},
     {"query_catalog",
      "Get a designation or a page (limit <=100) of records from a resolved "
      "catalog. Optional hash pins the expected content. Missing references "

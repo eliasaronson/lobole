@@ -367,9 +367,12 @@ static constexpr MethodDoc SimulationMethods[] = {
      "`study`, because there `id` would mean the load or the refinement.",
      "id, study"},
     {"list_studies", "List studies with status.", "", remote::NoFlags,
-     "studies[]{id,name,type,mesh_size,loads,refinements,has_results,stale,"
-     "participants?,volume_fraction?,filter_radius?,max_iterations?,keep_faces?"
-     ",keep_outs?,load_cases?,shape_from?}"},
+     "studies:{filter_radius?:number, has_results:bool, id:int, "
+     "keep_faces?:int, keep_outs?:object[], load_cases?:object[], "
+     "loads:object[], max_iterations?:int, mesh_size:number, "
+     "name:string, refinements:int, stale:bool, type:string, "
+     "volume_fraction?:number, shape_from?:object, "
+     "participants?:object[]}[]"},
     {"set_study",
      "Edit study settings (mesh size, materials, solver options). mesh_size "
      "and filter_radius are MILLIMETRES; `gravity` is metres per second "
@@ -478,12 +481,13 @@ static constexpr MethodDoc SimulationMethods[] = {
      "a threshold, not SIMP-penalised stiffness "
      "(docs/topopt/README.md#a-static-study-of-the-optimised-shape).",
      "outlive_client, recompute, study, threshold", remote::NoFlags,
-     "{started, job, kind, shape_study, solid_study, outlives_client} | "
-     "{reused, topology, threshold, shape_study, solid_study, dropped_tets, "
-     "islands, cases[]{name, shape{study, max_displacement_mm, "
-     "max_displacement_at, max_von_mises_mpa, max_von_mises_at, "
-     "factor_of_safety?, volume_mm3, mass_g?}, solid{...}, "
-     "displacement_ratio}}"},
+     "job?:int, kind?:string, outlives_client?:bool, running?:bool, "
+     "shape_study:int, solid_study:int, started?:bool, "
+     "cases?:{displacement_ratio:number, name:string, shape:object, "
+     "solid:object}[], dropped_tets?:int, islands?:{components:int, "
+     "keep_faces:any[], load_path_broken:bool, tets:int, "
+     "volume_mm3:number}, reused?:bool, threshold?:number, "
+     "threshold_lowered_from?:number, topology?:int"},
     {"remove_keep_face", "Unmark a kept face.", "face, study"},
     {"mesh_study",
      "Mesh the study (Netgen tets); returns element counts/quality. "
@@ -624,8 +628,8 @@ static constexpr MethodDoc SimulationMethods[] = {
      "Returns the part, its volume_mm3, the triangle count and whether the "
      "surface was watertight (docs/topopt/README.md#a-body-from-the-result).",
      "name, path, smooth, study, threshold", remote::NotInBatch,
-     "{part, part_id, path, triangles, watertight, threshold, volume_mm3, "
-     "valid}"},
+     "part:string, part_id:int, path:string, threshold:number, "
+     "triangles:int, valid:bool, volume_mm3:number, watertight:bool"},
 };
 std::span<const MethodDoc> SimulationMethodDocs() { return SimulationMethods; }
 
@@ -1183,6 +1187,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     return json{{"index", index}};
   }
   if (m == "check_topology") {
+    // rpc-returns-from: src/remote/RemoteSimulation.cpp
     return CheckTopology(state, host, doc, p);
   }
   if (m == "add_refinement") {

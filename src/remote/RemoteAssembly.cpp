@@ -85,12 +85,14 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "boxes are in the part's own space. For a single named point or axis "
      "use `frame` with an occurrence instead.",
      "bounds?:bool", remote::NoFlags,
-     "occurrences[]{type,id,name,part_id,ref_kind,part_version,transform,"
-     "visible,fixed,configuration_id,attached_to?,attach_offset?,attach_"
-     "rotation?,attach_seat?{face,axis,inner_path?},attach_error?,"
-     "attach_warning?,material?,flexible?,inner_poses?,inner_mate_dofs?,bbox_"
-     "min?,"
-     "bbox_max?,leaf_count?,leaves?}"},
+     "occurrences:{configuration_id:int, fixed:bool, id:int, "
+     "name:string, part_id:int, part_version:int|null, ref_kind:string, "
+     "transform:object, type:string, visible:bool, bbox_max?:number[], "
+     "bbox_min?:number[], attach_offset?:number[], "
+     "attach_rotation?:number[], attach_seat?:object, attached_to?:int, "
+     "flexible?:bool, inner_mate_dofs?:object[], inner_poses?:object[], "
+     "leaf_count?:int, leaves?:string[], material?:string, "
+     "attach_error?:string, attach_warning?:string}[]"},
     {"set_occurrence_transform",
      "Set an occurrence's world transform {id, transform: {position, "
      "orientation [x,y,z,w] OR rotate {axis, angle_deg}}}. Either half may "
@@ -207,8 +209,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "close carries `residual_mm`, its own closure error from the last "
      "solve.",
      "", remote::NoFlags,
-     "mates[]{type,id,name,a,b,flipped,rotation,offset,rotation_deg,"
-     "status,dx?,dy?,ball_rotation?,error?,residual_mm?,suppressed?,held?}"},
+     "mates:{a:object, b:object, flipped:bool, id:int, name:string, "
+     "offset:number, rotation:number, rotation_deg:number, "
+     "status:string, type:string, held?:object, error?:string, "
+     "residual_mm?:number, dx?:number, dy?:number, "
+     "ball_rotation?:number[], suppressed?:bool}[]"},
     {"add_relation",
      "Couple two mates' degrees of freedom {type: "
      "gear|chain|rack|screw|linear|cam|freewheel|click|worm|intermittent, "
@@ -338,11 +343,15 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "relation lists its step (b's unit, degrees for a turn), period_deg, "
      "start_deg, duration_deg, motion and, for a Geneva, slots.",
      "", remote::NoFlags,
-     "relations[]{type,id,name,kind,mate_a?,mate_b?,dof_a?,dof_b?,ratio?,"
-     "phase?,teeth_a?,teeth_b?,internal?,terms?,constant?,"
-     "thread_part?,thread_feature?,lift?,drives?,lead?,teeth?,ride?,"
-     "step?,period_deg?,start_deg?,duration_deg?,motion?,slots?,"
-     "mate_a_path?,mate_b_path?,error?,held?}"},
+     "relations:{dof_a?:string, dof_b?:string, id:int, kind:string, "
+     "mate_a?:int, mate_b?:int, name:string, phase?:number, "
+     "ratio?:number, thread_feature?:int, thread_part?:int, "
+     "type:string, teeth_a?:int, teeth_b?:int, drives?:string, "
+     "lead?:number, constant?:number, held?:string, terms?:object[], "
+     "duration_deg?:number, error?:string, motion?:string, "
+     "period_deg?:number, slots?:int, start_deg?:number, step?:number, "
+     "mate_b_path?:int[], mate_a_path?:int[], internal?:bool, "
+     "lift?:any, ride?:any}[]"},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
      "Run the mate solver. Returns every mate with a `status` (satisfied | "
@@ -373,14 +382,16 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "error?, residual_mm?, rotation_deg?, offset?}} or its `error` when it "
      "could not move.",
      "", remote::NoFlags,
-     "errored_mates,placed,occurrences,placed_by_mates,placed_by_transform,"
-     "mates[]{id,name,status,error?,residual_mm?},errored_attachments?,"
-     "attachment_errors?[]{occurrence,name,error},loop_mates?,dof?,"
-     "loops_closed?,residual_mm?,redundant_mates?,"
-     "suspects?[]{mate,name,tilt_deg,connector?,closes,sole},"
-     "flexible?[]{occurrence,name,configuration_id,placed_by_mates?,"
-     "placed_by_transform?,mates?[]{path,id,name,status,error?,residual_mm?,"
-     "rotation_deg?,offset?},error?}"},
+     "errored_mates:int, mates:{id:int, name:string, status:string, "
+     "error?:string, residual_mm?:number}[], occurrences:int, "
+     "placed:int, placed_by_mates:int, placed_by_transform:int, "
+     "dof?:int, loop_mates?:int, loops_closed?:bool, "
+     "redundant_mates?:int[], residual_mm?:number, "
+     "flexible?:{configuration_id:int, mates:object[], name:string, "
+     "occurrence:int, placed_by_mates:int, placed_by_transform:int}[], "
+     "errored_attachments?:int, attachment_errors?:object[], "
+     "suspects?:{closes:int[], connector:string, mate:int, name:string, "
+     "sole:bool, tilt_deg:number}[]"},
     {"add_fastener",
      "Place a standard fastener in the active assembly (docs/parts/README.md). "
      "Every dimension but the length is READ from the vendored table for that "
@@ -479,8 +490,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "passed. The receipt is unverifiable when nothing was examined and never "
      "verified while any screw was skipped.",
      "", remote::NoFlags,
-     "ok, examined, skipped, findings[]{occurrence,part,why}, "
-     "receipt{schema,standing,summary,claims}"},
+     "examined:int, findings:{occurrence:int, part:string, "
+     "why:string}[], ok:bool, receipt:{claims:object[], schema:string, "
+     "standing:string, summary:string}, skipped:int"},
     {"add_bearing",
      "Place an ISO 15 deep-groove ball bearing in the active assembly where "
      "told (docs/parts/README.md#bearings). `designation` is what a supplier "
@@ -493,7 +505,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "[x,y,z,w]} place it: the bearing's axis is its local +Z, side A on "
      "z = 0. `fit_bearing` derives all of that from a picked seat and is "
      "what you usually want.",
-     "designation, orientation, position", remote::NoFlags, "occurrence, part"},
+     "designation, orientation, position", remote::NoFlags,
+     "occurrence:int, part:string"},
     {"list_bearings",
      "The ISO 15 table this build carries, before anything is placed "
      "(docs/parts/README.md#bearings): {series?, min_bore_mm?} answers the "
@@ -510,8 +523,10 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "r_a_max_mm for either fillet; SKF's, null where SKF prints none), so "
      "the shoulders are modelled inside them.",
      "min_bore_mm, series", remote::NoFlags,
-     "bearings[]{designation,series,d_mm,D_mm,B_mm,r_min_mm,d_a_min_mm,"
-     "d_a_max_mm,D_a_max_mm,r_a_max_mm}"},
+     "bearings:{B_mm:number, D_a_max_mm:number|null, D_mm:number, "
+     "d_a_max_mm:number|null, d_a_min_mm:number|null, d_mm:number, "
+     "designation:string, r_a_max_mm:number|null, r_min_mm:number, "
+     "series:string}[]"},
     {"add_retaining_ring",
      "Place a DIN 471 (external, for a shaft) or DIN 472 (internal, for a "
      "bore) retaining ring in the active assembly where told "
@@ -543,14 +558,16 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "is lost). The free ring overlaps the groove's floor by (d2 - d3)/2: that "
      "grip is relieved by interference, contact_report and motion studies, "
      "and only for a ring of the groove's own standard and size sitting "
-     "coaxially inside its width (`ring_grip_pairs`, `ring_grip_volume` on a "
+     "coaxially inside its width (`ring_grip_pairs`, `ring_grip_volume_mm3` on "
+     "a "
      "named pair). check_seat counts a ring seated beside a bearing ring as "
      "locating it. Refused: a face no groove made, a groove on several "
      "placements without `occurrence`, a groove that already holds a ring. "
      "`dry_run` works it out without placing.",
      "dry_run, groove", remote::NoFlags,
-     "occurrence, part, standard, size_mm, designation, parent, "
-     "groove_feature, position, orientation, summary"},
+     "designation:string, groove_feature:int, occurrence:int, "
+     "orientation:number[], parent:int, part:string, position:number[], "
+     "size_mm:number, standard:string, summary:string"},
     {"list_retaining_rings",
      "The DIN 471 / DIN 472 table this build carries "
      "(docs/parts/README.md#retaining-rings): {standard, min_size_mm?} "
@@ -564,8 +581,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "m + n past a shoulder) before cutting it. An unknown standard is "
      "refused naming din471 and din472.",
      "min_size_mm, standard", remote::NoFlags,
-     "standard, source, rings[]{size_mm,designation,s_mm,d3_mm,a_mm,b_mm,"
-     "d5_mm,groove{d2_mm,m_mm,t_mm,n_mm}}"},
+     "rings:{a_mm:number, b_mm:number, d3_mm:number, d5_mm:number, "
+     "designation:string, groove:object, s_mm:number, "
+     "size_mm:number}[], source:string, standard:string"},
     {"fit_bearing",
      "Put a bearing on a picked SEAT and mate it there "
      "(docs/parts/README.md#bearings). `seat` is {feature_id, element, "
@@ -590,8 +608,11 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "{dry_run: true} derives "
      "without placing.",
      "designation, dry_run, mate_other, seat, series", remote::NoFlags,
-     "designation, candidates[], shaft, seat_diameter_mm, shoulder, "
-     "overhang_mm, summary, occurrence, mate, other_ring, other_mate"},
+     "candidates:string[], designation:string, mate:int, "
+     "occurrence:int, other_mate:int, "
+     "other_ring:{diameter_check:object, ring:string, seat:object}, "
+     "overhang_mm:number, seat_diameter_mm:number, shaft:bool, "
+     "shoulder:bool, summary:string"},
     {"check_seat",
      "Check a PLACED bearing's seats against the bearing "
      "(docs/parts/README.md#bearings): its d, D, B and r_s min come from the "
@@ -602,7 +623,9 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "to one seat only — the journal/bore diameter (must be the ring's "
      "basic size), whether the ring sits on its shoulder, the fillet into "
      "the shoulder (`fillet_radius`) and the shoulder's diameter "
-     "(`shoulder_diameter`). All in mm. The shoulder and "
+     "(`shoulder_diameter`), with the seats' own `shaft_diameter`, "
+     "`housing_diameter` and `modelled_diameter`. All in mm. The shoulder "
+     "and "
      "fillet are judged against the SUPPLIER'S abutment limits, carried for "
      "every bearing SKF lists (SKF Rolling bearings, PUB BU/P1 17000 EN, "
      "2018, table 1.1; docs/parts/README.md#abutment-limits): a shaft "
@@ -619,13 +642,20 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "unverified with a reason; a ring with no seat found is unverified, "
      "never a pass.",
      "catalog, designation, hash, occurrence, revision", remote::NoFlags,
-     "occurrence, designation, d, D, B, r_min, abutment{source,d_a_min,"
-     "d_a_max,D_a_max,r_a_max,variant}, seats[]{ring,mate,found?,"
-     "part?,occurrence?,inner_path?,feature_id?,"
-     "face?,diameter?,shoulder?,shoulder_diameter?,fillet_radius?,gap_mm?,"
-     "error?}, checks[]{characteristic,status,observed?,required?,minimum?,"
-     "maximum?,limit?,source?,variant?,reason?}, measurements, catalog?, "
-     "status, evidence"},
+     "B:number, D:number, abutment:{D_a_max:number, d_a_max:number, "
+     "d_a_min:number, r_a_max:number, source:string, variant:string}, "
+     "checks:{characteristic:string, observed:number, required?:number, "
+     "status:string, maximum?:number, reason?:string, units?:string, "
+     "limit?:string, source?:string, variant?:string, printed?:string, "
+     "minimum?:number}[], d:number, designation:string, "
+     "evidence:string, measurements:{fillet_radius:number, "
+     "housing_diameter:number, shaft_diameter:number, "
+     "shoulder_diameter:number}, occurrence:int, r_min:number, "
+     "seats:{diameter:number, face:string, feature_id:int, "
+     "fillet_radius?:number, gap_mm?:number, inner_path:any[], "
+     "mate:int|null, occurrence:int, part:string, ring:string, "
+     "shoulder:bool, shoulder_diameter?:number, found?:string, "
+     "modelled_diameter?:number, retainer?:object}[], status:string"},
     {"export_bom",
      "Export the BOM as CSV {path}: the bom rows, with a `configuration` "
      "column after `part`.",
@@ -635,7 +665,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"add_exploded_view", "Add an exploded view.", "name"},
     {"remove_exploded_view", "Remove an exploded view.", "id"},
     {"list_exploded_views", "List exploded views.", "", remote::NoFlags,
-     "views[]{type,id,name,steps}, active, factor"},
+     "active:int, factor:number, views:{id:int, name:string, "
+     "steps:object[], type:string}[]"},
     {"set_explode_step",
      "Add/edit an explode step (occurrence + offset). `offset` is a [x, y, z] "
      "displacement in MILLIMETRES, applied for display only — it never moves "

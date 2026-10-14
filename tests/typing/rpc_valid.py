@@ -20,3 +20,9 @@ def build(app: App, revision: Revision) -> None:
     app.batch(calls=[{"method": "undo"}], expect_revision=revision)
     app.solve_assembly(_timeout=30)
     print(state["features"])
+    # Answers are typed too (docs/scripting/rpc.md#typed-results).
+    names: list[str] = [p["name"] for p in app.list_parts()["parts"]]
+    volume: float = app.mass_properties()["total"]["volume_mm3"]
+    mass = app.mass_properties()["total"]["mass_g"]
+    if mass is not None:
+        print(names, volume, mass + 1.0)

@@ -362,7 +362,7 @@ and an overlap of at least the larger of each side's `minimum_engagement` and
 one pitch. Anything else — an unknown designation, a stale face, a wrong axis,
 diameter or pitch, too little overlap — gets no relief, and any other
 intersection between the same two bodies is still a collision. Interference
-reports expose `engaged_thread_pairs` and `thread_engagement_volume`. Mesh
+reports expose `engaged_thread_pairs` and `thread_engagement_volume_mm3`. Mesh
 collision is geometric only and applies no relief.
 
 ## Tests

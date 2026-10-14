@@ -41,7 +41,7 @@ static constexpr MethodDoc DrawingMethods[] = {
      "Edit the active drawing's sheet {size?, landscape?, title_block?}.",
      "landscape, size, title_block"},
     {"list_drawings", "List drawing documents.", "", remote::NoFlags,
-     "drawings[]{name,index,id,views,dims}"},
+     "drawings:{dims:int, id:int, index:int, name:string, views:int}[]"},
     {"set_drawing_view",
      "Edit a view {id, position?, scale?, name?, "
      "show_hidden?, quality?, base_view?, configuration?, rotation_deg?}; "
@@ -96,8 +96,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "does; a dimension or note on a view still projecting is `pending`, "
      "never `dangling_dim`.",
      "drawing, update", remote::NoFlags,
-     "ok, issues[]{kind,detail,view?,other_view?,dim?,note?}, views, dims, "
-     "receipt{schema,standing,summary,claims}"},
+     "dims:int, issues:{detail:string, kind:string, view?:int, "
+     "other_view?:int, dim?:int, note?:int}[], ok:bool, "
+     "receipt:{claims:object[], schema:string, standing:string, "
+     "summary:string}, views:int"},
     {"add_drawing_view",
      "Add an HLR view of a part/assembly {drawing, source, orientation, "
      "scale, position, configuration?, rotation_deg?}. `rotation_deg` turns "
@@ -156,9 +158,12 @@ static constexpr MethodDoc DrawingMethods[] = {
      "leaving out either avoids it. A cached re-projection reports zero, "
      "which is what it spent.",
      "", remote::NoFlags,
-     "views[]{id,name,source_id,orientation,scale,base_view,position,show_"
-     "hidden,quality,hidden,configuration,curves,has_geometry,stale,bbox,bend_"
-     "lines?,warnings?,cost?,error?}"},
+     "views:{base_view:int, bbox:number[][]|null, bend_lines?:int, "
+     "configuration:int, cost?:object, curves:int, has_geometry:bool, "
+     "hidden:any[], id:int, name:string, orientation:string, "
+     "position:number[], quality:string, scale:number, "
+     "show_hidden:bool, source_id:int, stale:bool, section?:object, "
+     "detail?:object, warnings?:string[], error?:string}[]"},
     {"update_drawing",
      "Re-project all views from current geometry. {drawing?} names the sheet. "
      "`budget_s` bounds the WHOLE "
@@ -187,8 +192,10 @@ static constexpr MethodDoc DrawingMethods[] = {
      "Projected 2D curves of a view (for picking/dimensioning): `center`, "
      "`radius`, `p1`/`p2` in the view plane, mm at model scale.",
      "view", remote::NoFlags,
-     "geometry[]{kind,source_id,ref,visible,source_feature?,type?,center?,"
-     "radius?,closed?,p1?,p2?,bbox?}"},
+     "geometry:{bbox?:number[][], kind:string, p1?:number[], "
+     "p2?:number[], ref:object, source_feature?:object, source_id:int, "
+     "type:string, visible:bool, center?:number[], closed?:bool, "
+     "radius?:number}[]"},
     {"add_drawing_dim",
      "Add a driven dimension between picked view geometry {view, kind, refs: "
      "[{edge | sil_face: {feature_id, element}, end?: 1 | 2, extreme?, "
@@ -207,7 +214,8 @@ static constexpr MethodDoc DrawingMethods[] = {
      "kind, offset, refs, view"},
     {"remove_drawing_dim", "Remove a dimension by id.", "id"},
     {"list_drawing_dims", "List dimensions with values.", "", remote::NoFlags,
-     "dims[]{id,kind,view,resolved,value,text}"},
+     "dims:{id:int, kind:string, resolved:bool, text:string, "
+     "value:number, view:int}[]"},
     {"export_drawing",
      "Export the drawing to SVG or PDF by extension {path}. The views are "
      "brought up to date first: a stale or half-projected sheet is never "
@@ -262,17 +270,17 @@ static constexpr MethodDoc DrawingMethods[] = {
      "note numbers them when there is one). The views are brought up to "
      "date first, waiting for their projection as update_drawing does.",
      "views", remote::NoFlags,
-     "placed[]{note,item,part,view,occurrence,position}, unplaced[], "
-     "crossings"},
+     "crossings:int, placed:{item:int, note:int, occurrence:int, "
+     "part:string, position:number[], view:int}[], unplaced:any[]"},
     {"remove_drawing_note",
      "Remove a note by id. A datum a feature control frame names is refused, "
      "naming the frame: remove or change the frame first.",
      "id"},
     {"list_drawing_notes", "List notes with leader state and table kind.", "",
      remote::NoFlags,
-     "notes[]{id,text,resolved_text,resolved,error,pos,view,table,style,"
-     "leader_resolved,fcf?{symbol,tolerance_mm,diameter,modifier,datums},"
-     "dim?}"},
+     "notes:{error:string, id:int, leader_resolved:bool, pos:number[], "
+     "resolved:bool, resolved_text:string, style:string, table:string, "
+     "text:string, view:int, fcf?:object, dim?:int}[]"},
 };
 std::span<const MethodDoc> DrawingMethodDocs() { return DrawingMethods; }
 

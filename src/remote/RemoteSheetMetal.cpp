@@ -42,11 +42,11 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "materials and gauges this build carries. `rules` is null when the part "
      "is not sheet metal.",
      "part", Deferrable,
-     "rules{material, gauge, thickness_mm, bend_radius_mm, "
-     "bend_radius_source, min_bend_radius_mm, k_factor, k_factor_source, "
-     "relief, relief_width_mm, relief_depth_mm | the whole object is null "
-     "when the part is not sheet metal}, stock{per-material gauges}, "
-     "relief_styles"},
+     "relief_styles:string[], rules:{bend_radius_mm:number, "
+     "bend_radius_source:string, gauge:string, k_factor:number, "
+     "k_factor_source:string, material:string, "
+     "min_bend_radius_mm:number, relief:string, relief_depth_mm:number, "
+     "relief_width_mm:number, thickness_mm:number}|null, stock:object"},
     {"check_sheet_metal",
      "Can a brake actually make this? Every finding names the element and the "
      "required-versus-actual number: a bend tighter than the material takes "
@@ -56,8 +56,9 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "enough to a bend to draw into an oval. `not_checked` says what this "
      "build cannot answer, so a clean verdict is never mistaken for one.",
      "body, part", Deferrable,
-     "ok, violations[]{kind,message,actual_mm,required_mm,bend?,element?}, "
-     "bends_checked, holes_checked, not_checked"},
+     "bends_checked:int, holes_checked:int, not_checked:string[], "
+     "ok:bool, violations:{actual_mm:number, bend:int, element?:object, "
+     "kind:string, message:string, required_mm:number}[]"},
     {"list_bends",
      "Every bend of a sheet body, as DATA: its inside radius against the "
      "material's minimum (`below_minimum` is the DFM verdict, and a HEM is "
@@ -70,11 +71,16 @@ static constexpr MethodDoc SheetMetalMethods[] = {
      "back beside them, so a bend audit is ONE call instead of three plus a "
      "drawing note's text.",
      "part, body, side", Deferrable,
-     "bends[]{index,body,feature_id,angle_deg,radius_mm,min_radius_mm,crushed,"
-     "below_minimum,width_mm,k_factor,k_source,flat,axis,axis_origin,allowance_"
-     "mm?,folds?}, "
-     "count, "
-     "rules{material,gauge,thickness_mm,bend_radius_mm,k_factor,relief}"},
+     "bends:{angle_deg:number, axis:number[], axis_origin:number[], "
+     "below_minimum:bool, body:int, crushed:bool, feature_id:int, "
+     "flat:bool, folds?:string|null, index:int, k_factor:number, "
+     "k_source:string, min_radius_mm:number, radius_mm:number, "
+     "width_mm:number, allowance_mm?:number}[], count:int, "
+     "rules:{bend_radius_mm:number, bend_radius_source:string, "
+     "gauge:string, k_factor:number, k_factor_source:string, "
+     "material:string, min_bend_radius_mm:number, relief:string, "
+     "relief_depth_mm:number, relief_width_mm:number, "
+     "thickness_mm:number}"},
     {"export_dxf",
      "Write a sheet body's FLAT PATTERN to a DXF a shop can cut: R12 ASCII, "
      "millimetres ($INSUNITS 4), outline and holes on CUT, bend lines on "

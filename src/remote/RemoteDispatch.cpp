@@ -363,8 +363,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "of that session's autosaves in the folder's autosave/. Read-only, and "
      "nothing is ever sent anywhere.",
      "", remote::Deferrable,
-     "folder, reports[]{path,stem,started,reason,crashed,mode,version,build,"
-     "os,project,autosaves[]}"},
+     "folder:string, reports:{autosaves:string[], build:string, "
+     "crashed:bool, mode:string, os:string, path:string, "
+     "project:string, reason:string, started:string, stem:string, "
+     "version:string}[]"},
     {"debug_crash",
      "Crash this process on purpose, to test crash reports end to end after "
      "edits have been made (--crash-test crashes before there are any): "
@@ -429,18 +431,18 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "guarded write (add_feature, modify_feature, delete_feature, "
      "set_material, batch) names as expect_revision.",
      "part?:string|int", remote::NoFlags,
-     "features[]{type,name,index,id?,material?,appearance?,suppressed?,error?,"
-     "stale?,warning?,after_earlier_failure?,face_appearance_unresolved?, "
-     "plus per-type keys}, "
-     "bodies[]{name,volume_mm3,material,created_by,bbox_min,bbox_max,reference?"
-     ","
-     "appearance?,face_appearance?[]{element,face,color?,roughness?,"
-     "metallic?},mesh?}, "
-     "selection{mesh,face,normal,center}, "
-     "selection_items[]{kind,id?,element?}, selected_feature, "
-     "camera{position,target,distance,fov_deg,aspect}, can_undo, can_redo, "
-     "rollback, view_rollback, regen{ok,failed,warnings,executed,cached}, "
-     "revision{session,part_id,instance,version}, pending_feature_id"},
+     "bodies:{bbox_max:number[], bbox_min:number[], created_by:int, "
+     "material:string, name:string, volume_mm3:number, reference?:bool, "
+     "mesh?:int, face_appearance?:object[], appearance?:object}[], "
+     "camera:{aspect:number, distance:number, fov_deg:number, "
+     "position:number[], target:number[]}, can_redo:bool, "
+     "can_undo:bool, features:object[], pending_feature_id:int, "
+     "regen:{cached:int, executed:int, failed:object[], ok:bool, "
+     "warnings:object[]}, revision:{instance:int, part_id:int, "
+     "session:string, version:int}, rollback:int, selected_feature:int, "
+     "selection:{mesh:int, face:int, normal:number[], "
+     "center:number[]}|null, selection_items:{kind:string, id?:int, "
+     "path?:int[], element?:object}[], view_rollback:int"},
     {"undo", "Undo one step (assembly snapshot history on an assembly tab).",
      "", remote::NotInBatch},
     {"redo", "Redo one step.", "", remote::NotInBatch},
@@ -529,11 +531,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "hud, renders, reset, window"},
     {"get_settings", "Read the user preferences (docs/ui/settings.md).", "",
      remote::NoFlags,
-     "settings_format, ui_font_scale, lock_lights_to_model, gpu_device, "
-     "shadows, ssao, "
-     "idle_throttle, shadow_map, git_user_name, git_user_email, "
-     "terminal_panel, autosave_interval, keys{per-command chord}, "
-     "window{x,y,w,h,maximized}, path, devices"},
+     "autosave_interval:number, devices:string[], "
+     "git_user_email:string, git_user_name:string, gpu_device:string, "
+     "idle_throttle:bool, keys:object, lock_lights_to_model:bool, "
+     "path:string, settings_format:int, shadow_map:int, shadows:bool, "
+     "ssao:string, terminal_panel:bool, ui_font_scale:number, "
+     "window:{h:int, maximized:bool, w:int, x:int, y:int}"},
     {"set_settings", "Change user preferences {key: value, ...}; persists.",
      "*", remote::NotInBatch},
     {"get_keymap",
@@ -543,9 +546,11 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "one with the same chord — that is how N is Coincident while sketching "
      "and align-to-face everywhere else.",
      "context", remote::NoFlags,
-     "contexts, "
-     "bindings[]{id,context,section,label,chord,default,custom,alt?,hidden?}, "
-     "active, conflicts[]{context,chord,commands}"},
+     "active:string, bindings:{chord:string, context:string, "
+     "custom:bool, default:string, id:string, label:string, "
+     "section:string, alt?:string, hidden?:bool}[], "
+     "conflicts:{context:string, chord:string, commands:string[]}[], "
+     "contexts:string[]"},
     {"set_keybinding",
      "Rebind one command: {command: \"part.fillet\", chord: \"Shift+B\"}. "
      "An empty chord unbinds it; {reset: true} restores the default. "
@@ -561,7 +566,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Fasteners folder put the engine and the carburettor there. Filter on "
      "`type` unless you mean all four.",
      "", remote::NoFlags,
-     "parts[]{name,index,id,type,folder?}, active, active_id, folders?"},
+     "active:int, active_id:int, parts:{id:int, index:int, name:string, "
+     "type:string, folder?:string}[], folders?:string[]"},
     {"rename_part", "Rename a part.", "new_name:string, part:string|int"},
     {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\".", "path",
      remote::UiAction},

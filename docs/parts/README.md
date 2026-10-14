@@ -638,7 +638,7 @@ a name several placements answer to is refused naming them.
   ring half a millimetre out of its groove, or a ring of the next size in
   it. It is geometry, not a flag on the pair, so it holds wherever contact
   is asked — `interference` (a named pair reports `ring_grip_pairs` and
-  `ring_grip_volume`), the exact sweep, `contact_report`, an exact motion
+  `ring_grip_volume_mm3`), the exact sweep, `contact_report`, an exact motion
   study (which bypasses its contact cache for a body with grips, as for
   threads) — and needs no assembly: the seat is how a ring gets there, the
   grip is why it may be there. It is the same designed-overlap step that

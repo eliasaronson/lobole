@@ -295,15 +295,15 @@ named pair, the exact sweep, `contact_report`, an exact motion study and an
 exact clearance requirement all take — removes each from the overlap before
 it is weighed, as an exact annulus, and reports it apart from the clash:
 
-- an engaged thread: `engaged_thread_pairs`, `thread_engagement_volume`
+- an engaged thread: `engaged_thread_pairs`, `thread_engagement_volume_mm3`
   ([threads](../modeling/holes-and-threads.md));
-- a ring in its groove (`RingGrip`): `ring_grip_pairs`, `ring_grip_volume`
+- a ring in its groove (`RingGrip`): `ring_grip_pairs`, `ring_grip_volume_mm3`
   ([a ring in its groove](../parts/README.md#a-ring-in-its-groove));
 - a press fit, two coaxial round faces whose size bands allow the overlap
   ([press fits](../tolerances/README.md#press-fits)): on the named pair
   `press_fit_pairs`, `press_fits` [{fit, diameter_mm, interference_mm,
   max_interference_mm, engaged_length_mm, volume_mm3}] and
-  `press_fit_volume`; on every `contact_report` pair it applies to, the same
+  `press_fit_volume_mm3`; on every `contact_report` pair it applies to, the same
   `press_fits`; and a top-level `press_fits` list [{a, b, fits, volume_mm3}]
   on the exact sweep and on `contact_report`. A round overlap next to a
   banded face that is NOT a fit stays a clash and carries

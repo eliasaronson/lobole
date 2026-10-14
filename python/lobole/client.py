@@ -23,8 +23,25 @@ import socket
 import sys
 import time
 
-from lobole.errors import (ConnectionLost, NonFiniteError, Refused,
-                           UnknownArgument, refusal)
+from lobole.errors import (ConnectionLost, LoboleError, NonFiniteError,
+                           Refused, UnknownArgument, refusal)
+
+
+def _check_result(method, result):
+    """A strict client holds an answer to its row's typed `returns` column
+    (docs/scripting/rpc.md#typed-results): every smoke runs strict, so a
+    key the handler adds, drops or retypes without its row fails the test
+    that saw it, instead of reaching a caller as a KeyError."""
+    from lobole.rpc import RESULT_SCHEMAS
+    schema = RESULT_SCHEMAS.get(method)
+    if schema is None:
+        return
+    from lobole.contracts import validate
+    try:
+        validate(schema, result, method, "/result")
+    except Refused as e:
+        raise LoboleError(f"{method}: the answer breaks its returns "
+                          f"contract — {e}") from None
 
 
 class Client:
@@ -109,6 +126,8 @@ class Client:
                         warnings.warn(said, RuntimeWarning, stacklevel=3)
                     if "error" in msg:
                         raise refusal(msg["error"], msg.get("diagnostic"))
+                    if self.strict:
+                        _check_result(method, msg.get("result"))
                     return msg.get("result")
         finally:
             if timeout is not None:

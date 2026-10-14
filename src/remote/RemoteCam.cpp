@@ -90,10 +90,9 @@ constexpr MethodDoc kCamMethods[] = {
      "set_cam_setup "
      "{machine} puts one on a setup.",
      "", remote::NoFlags,
-     "machines[]{name,post,travel?,fit_arcs?,has_rotary_axis?,rapid_feed?,"
-     "a_max_deg_min?,"
-     "tools?}, "
-     "dir"},
+     "dir:string, machines:{name:string, post:string, travel?:object, "
+     "fit_arcs?:bool, has_rotary_axis?:bool, rapid_feed?:number, "
+     "a_max_deg_min?:number, tools?:object[], *}[]"},
     {"save_machine",
      "Write a machine to the store {machine: {name, post?, travel?: {min: "
      "[x,y,z], max: [x,y,z]}, fit_arcs?, has_rotary_axis?, rapid_feed?, "
@@ -143,7 +142,7 @@ constexpr MethodDoc kCamMethods[] = {
      "re-clamp does, and `moved` says how many operations' depths did -- the "
      "same action as the CAM panel's Parts row > Configuration.",
      "configuration, id, job", remote::NoFlags,
-     "id, configuration, configuration_name?, moved"},
+     "configuration:int, id:int, moved:int, configuration_name?:string"},
     {"remove_job_part",
      "Drop a part from the job {id}. Every placement and every operation "
      "target that named it goes with it -- a target on a part the job no "
@@ -158,8 +157,9 @@ constexpr MethodDoc kCamMethods[] = {
      "rot_z, enabled, frame, clamped_per_part}. The id is what an operation "
      "target and a placement name.",
      "job", remote::NoFlags,
-     "parts[]{id,source,name,configuration,configuration_name?,missing,why?,"
-     "placements}"},
+     "parts:{configuration:int, configuration_name?:string, id:int, "
+     "missing:bool, name:string, placements:any[], source:int, "
+     "why?:string}[]"},
     {"check_layout",
      "How the parts are arranged in the stock {job?, setup?}. Per placement: "
      "`fit` -- `inside`, `partly_outside` (hanging over an edge) or "
@@ -202,7 +202,8 @@ constexpr MethodDoc kCamMethods[] = {
      "is wider than the stock and otherwise takes the next free side. Safe "
      "Z is re-derived to clear it. A part the job CUTS is refused.",
      "box, job, name, part, pos, rot_z, setup, side", remote::NoFlags,
-     "id, part|box, name, pos, rot_z, enabled, setup, safe_z"},
+     "box?:number[], enabled:bool, id:int, name:string, pos:number[], "
+     "rot_z:number, safe_z:number, setup:int, part?:int"},
     {"set_job_fixture",
      "Move or change a fixture {setup, fixture: id, pos?: [x,y,z] mm in "
      "setup space, side?: -x|+x|-y|+y|centre|top (re-derive against the "
@@ -218,7 +219,11 @@ constexpr MethodDoc kCamMethods[] = {
      "it has. A seat with pos, side or rot_z is refused. Safe Z is "
      "re-derived.",
      "box, enabled, fixture, job, name, pos, rot_z, seat, setup, side",
-     remote::NoFlags, "id, part|box, name, pos, rot_z, enabled, setup, safe_z"},
+     remote::NoFlags,
+     "enabled:bool, id:int, name:string, part?:int, pos:number[], "
+     "rot_z:number, safe_z:number, setup:int, seat?:{along_mm:number, "
+     "edge:string, element:string, feature_id:int, over_mm:number, "
+     "spin_deg:number}, box?:number[]"},
     {"remove_job_fixture",
      "Take a fixture off a setup {setup, fixture: id}. Safe Z is re-derived.",
      "fixture, job, setup"},
@@ -246,9 +251,13 @@ constexpr MethodDoc kCamMethods[] = {
      "SETUP space, "
      "so a setup that lays the part flat reports the box the machine sees.",
      "job", remote::NoFlags,
-     "setups[]{id,name,post,safe_z,rotation_a,has_rotary_axis,frame,origin,"
-     "origin_at,reach_offset,fit_arcs,machine,machine_match,split_output,order,"
-     "tools,operations,fixtures,top_face?,stock?}"},
+     "setups:{chuck:int, fit_arcs:bool, fixtures:object[], "
+     "frame:number[], grip_mm:number, has_rotary_axis:bool, "
+     "held_in:string, id:int, machine:object, machine_match:string, "
+     "name:string, operations:object[], order:string, origin:number[], "
+     "origin_at:string, post:string, reach_offset:number[], "
+     "rotation_a:number, safe_z:number, split_output:bool, "
+     "stock?:object, tailstock:int, tools:object[], top_face?:object}[]"},
     {"set_cam_setup",
      "Change a setup {id, name?, machine?: name, post?, safe_z?, "
      "lay_face_up?: {feature_id, "

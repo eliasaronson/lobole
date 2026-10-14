@@ -322,6 +322,1935 @@ class ViewParams(TypedDict):
     name: str
 
 
+# Each typed `returns` column, as the JSON Schema an answer is held to
+# (a strict lobole.client validates against these), and as types.
+RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
+    'add_assertion': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}}, 'required': ['id', 'name'], 'additionalProperties': False},
+    'add_bearing': {'type': 'object', 'properties': {'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}}, 'required': ['occurrence', 'part'], 'additionalProperties': False},
+    'add_job_fixture': {'type': 'object', 'properties': {'box': {'type': 'array', 'items': {'type': 'number'}}, 'enabled': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'pos': {'type': 'array', 'items': {'type': 'number'}}, 'rot_z': {'type': 'number'}, 'safe_z': {'type': 'number'}, 'setup': {'type': 'integer'}, 'part': {'type': 'integer'}}, 'required': ['enabled', 'id', 'name', 'pos', 'rot_z', 'safe_z', 'setup'], 'additionalProperties': False},
+    'add_requirement': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'requirement': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'id': {'type': 'integer'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}}, 'required': ['bound', 'id', 'measure', 'name', 'note', 'revision', 'state'], 'additionalProperties': False}}, 'required': ['id', 'requirement'], 'additionalProperties': False},
+    'check_drawing': {'type': 'object', 'properties': {'dims': {'type': 'integer'}, 'issues': {'type': 'array', 'items': {'type': 'object', 'properties': {'detail': {'type': 'string'}, 'kind': {'type': 'string'}, 'view': {'type': 'integer'}, 'other_view': {'type': 'integer'}, 'dim': {'type': 'integer'}, 'note': {'type': 'integer'}}, 'required': ['detail', 'kind'], 'additionalProperties': False}}, 'ok': {'type': 'boolean'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'views': {'type': 'integer'}}, 'required': ['dims', 'issues', 'ok', 'receipt', 'views'], 'additionalProperties': False},
+    'check_fasteners': {'type': 'object', 'properties': {'examined': {'type': 'integer'}, 'findings': {'type': 'array', 'items': {'type': 'object', 'properties': {'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}, 'why': {'type': 'string'}}, 'required': ['occurrence', 'part', 'why'], 'additionalProperties': False}}, 'ok': {'type': 'boolean'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'skipped': {'type': 'integer'}}, 'required': ['examined', 'findings', 'ok', 'receipt', 'skipped'], 'additionalProperties': False},
+    'check_fit': {'type': 'object', 'properties': {'hole': {'type': 'object', 'properties': {'class': {'type': 'string'}, 'it': {'type': 'number'}, 'it_grade': {'type': 'integer'}, 'lower': {'type': 'number'}, 'max': {'type': 'number'}, 'min': {'type': 'number'}, 'upper': {'type': 'number'}}, 'required': ['class', 'it', 'it_grade', 'lower', 'max', 'min', 'upper'], 'additionalProperties': False}, 'print': {'type': 'object', 'properties': {'hole': {'type': 'object'}, 'shaft': {'type': 'object'}}, 'required': [], 'additionalProperties': False}, 'print_notes': {'type': 'array', 'items': {'type': 'string'}}, 'size': {'type': 'number'}, 'size_from': {'type': 'string'}, 'measured': {'type': 'object', 'properties': {'hole': {'type': 'number'}, 'shaft': {'type': 'number'}}, 'required': [], 'additionalProperties': False}, 'intent': {'type': 'string'}, 'intent_ok': {'type': 'boolean'}, 'kind': {'type': 'string'}, 'max_clearance': {'type': 'number'}, 'min_clearance': {'type': 'number'}, 'note': {'type': 'string'}, 'shaft': {'type': 'object', 'properties': {'class': {'type': 'string'}, 'it': {'type': 'number'}, 'it_grade': {'type': 'integer'}, 'lower': {'type': 'number'}, 'max': {'type': 'number'}, 'min': {'type': 'number'}, 'upper': {'type': 'number'}}, 'required': ['class', 'it', 'it_grade', 'lower', 'max', 'min', 'upper'], 'additionalProperties': False}}, 'required': ['hole', 'size', 'size_from'], 'additionalProperties': False},
+    'check_fits': {'type': 'object', 'properties': {'failed': {'type': 'integer'}, 'fits': {'type': 'array', 'items': {'type': 'object', 'properties': {'hole': {'type': 'object'}, 'kind': {'type': 'string'}, 'mate': {'type': 'integer'}, 'mate_name': {'type': 'string'}, 'mate_type': {'type': 'string'}, 'max_clearance': {'type': 'number'}, 'min_clearance': {'type': 'number'}, 'note': {'type': 'string'}, 'shaft': {'type': 'object'}, 'size': {'type': 'number'}, 'status': {'type': 'string'}, 'reason': {'type': 'string'}}, 'required': ['mate', 'mate_name', 'mate_type', 'status'], 'additionalProperties': False}}, 'passed': {'type': 'integer'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'reported': {'type': 'integer'}, 'status': {'type': 'string'}, 'unverified': {'type': 'integer'}, 'warned': {'type': 'integer'}}, 'required': ['failed', 'fits', 'passed', 'receipt', 'reported', 'status', 'unverified', 'warned'], 'additionalProperties': False},
+    'check_geometry': {'type': 'object', 'properties': {'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'bad_edges': {'type': 'integer'}, 'bad_faces': {'type': 'integer'}, 'bad_wires': {'type': 'integer'}, 'body': {'type': 'integer'}, 'name': {'type': 'string'}, 'reasons': {'type': 'array', 'items': {'type': 'string'}}, 'valid': {'type': 'boolean'}}, 'required': ['bad_edges', 'bad_faces', 'bad_wires', 'body', 'name', 'reasons', 'valid'], 'additionalProperties': False}}, 'body_components': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'string'}}}, 'body_count': {'type': 'integer'}, 'connected': {'type': 'boolean'}, 'feature_errors': {'type': 'array', 'items': {'type': 'object', 'properties': {'error': {'type': 'string'}, 'index': {'type': 'integer'}, 'name': {'type': 'string'}, 'after_earlier_failure': {'type': 'boolean'}}, 'required': ['error', 'index', 'name'], 'additionalProperties': False}}, 'ok': {'type': 'boolean'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'valid': {'type': 'boolean'}, 'warnings': {'type': 'array', 'items': {'type': 'string'}}, 'templates_changed': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'revision': {'type': 'integer'}, 'template': {'type': 'string'}}, 'required': ['id', 'name', 'revision', 'template'], 'additionalProperties': False}}, 'stale_derived': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'source': {'type': 'string'}}, 'required': ['id', 'name', 'source'], 'additionalProperties': False}}}, 'required': ['bodies', 'body_count', 'feature_errors', 'ok', 'receipt', 'valid'], 'additionalProperties': False},
+    'check_literals': {'type': 'object', 'properties': {'checked': {'type': 'object', 'properties': {'fields': {'type': 'integer'}, 'placements': {'type': 'integer'}}, 'required': ['fields', 'placements'], 'additionalProperties': False}, 'literals': {'type': 'array', 'items': {'type': 'object', 'properties': {'feature': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'field': {'type': 'string'}, 'label': {'type': 'string'}, 'quantity': {'type': 'string'}, 'value': {'type': 'number'}, 'variables': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['feature', 'feature_id', 'field', 'label', 'quantity', 'value', 'variables'], 'additionalProperties': False}}, 'part': {'type': 'string'}, 'placements': {'type': 'array', 'items': {'type': 'object', 'properties': {'face': {'type': 'object'}, 'face_feature': {'type': 'string'}, 'face_made_by': {'type': 'integer'}, 'feature': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'normal': {'type': 'array', 'items': {'type': 'number'}}, 'on': {'type': 'string'}, 'origin': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['face', 'face_feature', 'face_made_by', 'feature', 'feature_id', 'normal', 'on', 'origin'], 'additionalProperties': False}}}, 'required': ['checked', 'literals', 'part', 'placements'], 'additionalProperties': False},
+    'check_print': {'type': 'object', 'properties': {'bed': {'type': 'object', 'properties': {'contact_area_mm2': {'type': 'number'}, 'lowest_mm': {'type': 'number'}, 'on_bed': {'type': 'array', 'items': {'type': 'string'}}, 'status': {'type': 'string'}, 'tol_mm': {'type': 'number'}}, 'required': ['contact_area_mm2', 'lowest_mm', 'on_bed', 'status', 'tol_mm'], 'additionalProperties': False}, 'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'body': {'type': 'integer'}, 'lowest_mm': {'type': 'number'}, 'name': {'type': 'string'}, 'solids': {'type': 'integer'}, 'watertight': {'type': 'boolean'}}, 'required': ['body', 'lowest_mm', 'name', 'solids', 'watertight'], 'additionalProperties': False}}, 'bridges': {'type': 'object', 'properties': {'area_mm2': {'type': 'number'}, 'faces': {'type': 'array', 'items': {'type': 'object'}}, 'limit_from': {'type': 'string'}, 'limit_mm': {'type': 'number'}, 'note': {'type': 'string'}, 'status': {'type': 'string'}, 'worst_span_mm': {'type': 'number'}, 'source': {'type': 'string'}}, 'required': ['area_mm2', 'faces', 'limit_from', 'limit_mm', 'note', 'status', 'worst_span_mm'], 'additionalProperties': False}, 'chords': {'type': 'object', 'properties': {'deflection_from': {'type': 'string'}, 'deflection_mm': {'type': 'number'}, 'limit_mm': {'type': 'number'}, 'note': {'type': 'string'}, 'status': {'type': 'string'}}, 'required': ['deflection_from', 'deflection_mm', 'limit_mm', 'note', 'status'], 'additionalProperties': False}, 'clearance': {'type': 'object', 'properties': {'note': {'type': 'string'}, 'pairs': {'type': 'array', 'items': {'type': 'object'}}, 'pruned': {'type': 'integer'}, 'required_from': {'type': 'string'}, 'required_mm': {'type': 'number'}, 'status': {'type': 'string'}, 'tolerance_mm': {'type': 'number'}, 'min_mm': {'type': 'number'}}, 'required': ['note', 'pairs', 'pruned', 'required_from', 'required_mm', 'status', 'tolerance_mm'], 'additionalProperties': False}, 'direction': {'type': 'array', 'items': {'type': 'number'}}, 'ok': {'type': 'boolean'}, 'overhang': {'type': 'object', 'properties': {'allowance_mm2': {'type': 'number'}, 'area_mm2': {'type': 'number'}, 'faces': {'type': 'array', 'items': {'type': 'object'}}, 'limit_deg': {'type': 'number'}, 'limit_from': {'type': 'string'}, 'note': {'type': 'string'}, 'status': {'type': 'string'}, 'worst_deg': {'type': 'number'}, 'source': {'type': 'string'}, 'worst': {'type': 'object'}}, 'required': ['allowance_mm2', 'area_mm2', 'faces', 'limit_deg', 'limit_from', 'note', 'status', 'worst_deg'], 'additionalProperties': False}, 'process': {'anyOf': [{'type': 'string'}, {'type': 'null'}]}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'shells': {'type': 'object', 'properties': {'expected': {'type': 'integer'}, 'joined': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'string'}}}, 'pieces': {'type': 'integer'}, 'split': {'type': 'array', 'items': {}}, 'status': {'type': 'string'}, 'watertight': {'type': 'boolean'}}, 'required': ['expected', 'joined', 'pieces', 'split', 'status', 'watertight'], 'additionalProperties': False}}, 'required': ['bed', 'bodies', 'bridges', 'chords', 'clearance', 'direction', 'ok', 'overhang', 'process', 'receipt', 'shells'], 'additionalProperties': False},
+    'check_requirements': {'type': 'object', 'properties': {'all_pass': {'type': 'boolean'}, 'checked': {'type': 'integer'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'requirements': {'type': 'array', 'items': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'checked_at': {'type': 'string'}, 'detail': {'type': 'object'}, 'evidence_revision': {'type': 'integer'}, 'id': {'type': 'integer'}, 'input_hash': {'type': 'string'}, 'limit': {'type': 'number'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}, 'unit': {'type': 'string'}, 'value': {'type': 'number'}, 'limit_max': {'type': 'number'}, 'limit_min': {'type': 'number'}, 'note': {'type': 'string'}}, 'required': ['bound', 'id', 'measure', 'name', 'revision', 'state'], 'additionalProperties': False}}, 'reused': {'type': 'integer'}, 'summary': {'type': 'object', 'properties': {'fail': {'type': 'integer'}, 'pass': {'type': 'integer'}, 'stale': {'type': 'integer'}, 'unchecked': {'type': 'integer'}, 'unresolved': {'type': 'integer'}}, 'required': ['fail', 'pass', 'stale', 'unchecked', 'unresolved'], 'additionalProperties': False}, 'checking': {'type': 'integer'}, 'job': {'type': 'integer'}, 'kind': {'type': 'string'}, 'started': {'type': 'boolean'}}, 'required': ['requirements', 'summary'], 'additionalProperties': False},
+    'check_seat': {'type': 'object', 'properties': {'B': {'type': 'number'}, 'D': {'type': 'number'}, 'abutment': {'type': 'object', 'properties': {'D_a_max': {'type': 'number'}, 'd_a_max': {'type': 'number'}, 'd_a_min': {'type': 'number'}, 'r_a_max': {'type': 'number'}, 'source': {'type': 'string'}, 'variant': {'type': 'string'}}, 'required': ['D_a_max', 'd_a_max', 'd_a_min', 'r_a_max', 'source', 'variant'], 'additionalProperties': False}, 'checks': {'type': 'array', 'items': {'type': 'object', 'properties': {'characteristic': {'type': 'string'}, 'observed': {'type': 'number'}, 'required': {'type': 'number'}, 'status': {'type': 'string'}, 'maximum': {'type': 'number'}, 'reason': {'type': 'string'}, 'units': {'type': 'string'}, 'limit': {'type': 'string'}, 'source': {'type': 'string'}, 'variant': {'type': 'string'}, 'printed': {'type': 'string'}, 'minimum': {'type': 'number'}}, 'required': ['characteristic', 'observed', 'status'], 'additionalProperties': False}}, 'd': {'type': 'number'}, 'designation': {'type': 'string'}, 'evidence': {'type': 'string'}, 'measurements': {'type': 'object', 'properties': {'fillet_radius': {'type': 'number'}, 'housing_diameter': {'type': 'number'}, 'shaft_diameter': {'type': 'number'}, 'shoulder_diameter': {'type': 'number'}}, 'required': ['fillet_radius', 'housing_diameter', 'shaft_diameter', 'shoulder_diameter'], 'additionalProperties': False}, 'occurrence': {'type': 'integer'}, 'r_min': {'type': 'number'}, 'seats': {'type': 'array', 'items': {'type': 'object', 'properties': {'diameter': {'type': 'number'}, 'face': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'fillet_radius': {'type': 'number'}, 'gap_mm': {'type': 'number'}, 'inner_path': {'type': 'array', 'items': {}}, 'mate': {'anyOf': [{'type': 'integer'}, {'type': 'null'}]}, 'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}, 'ring': {'type': 'string'}, 'shoulder': {'type': 'boolean'}, 'shoulder_diameter': {'type': 'number'}, 'found': {'type': 'string'}, 'modelled_diameter': {'type': 'number'}, 'retainer': {'type': 'object'}}, 'required': ['diameter', 'face', 'feature_id', 'inner_path', 'mate', 'occurrence', 'part', 'ring', 'shoulder'], 'additionalProperties': False}}, 'status': {'type': 'string'}}, 'required': ['B', 'D', 'abutment', 'checks', 'd', 'designation', 'evidence', 'measurements', 'occurrence', 'r_min', 'seats', 'status'], 'additionalProperties': False},
+    'check_sheet_metal': {'type': 'object', 'properties': {'bends_checked': {'type': 'integer'}, 'holes_checked': {'type': 'integer'}, 'not_checked': {'type': 'array', 'items': {'type': 'string'}}, 'ok': {'type': 'boolean'}, 'violations': {'type': 'array', 'items': {'type': 'object', 'properties': {'actual_mm': {'type': 'number'}, 'bend': {'type': 'integer'}, 'element': {'type': 'object'}, 'kind': {'type': 'string'}, 'message': {'type': 'string'}, 'required_mm': {'type': 'number'}}, 'required': ['actual_mm', 'bend', 'kind', 'message', 'required_mm'], 'additionalProperties': False}}}, 'required': ['bends_checked', 'holes_checked', 'not_checked', 'ok', 'violations'], 'additionalProperties': False},
+    'check_topology': {'type': 'object', 'properties': {'job': {'type': 'integer'}, 'kind': {'type': 'string'}, 'outlives_client': {'type': 'boolean'}, 'running': {'type': 'boolean'}, 'shape_study': {'type': 'integer'}, 'solid_study': {'type': 'integer'}, 'started': {'type': 'boolean'}, 'cases': {'type': 'array', 'items': {'type': 'object', 'properties': {'displacement_ratio': {'type': 'number'}, 'name': {'type': 'string'}, 'shape': {'type': 'object'}, 'solid': {'type': 'object'}}, 'required': ['displacement_ratio', 'name', 'shape', 'solid'], 'additionalProperties': False}}, 'dropped_tets': {'type': 'integer'}, 'islands': {'type': 'object', 'properties': {'components': {'type': 'integer'}, 'keep_faces': {'type': 'array', 'items': {}}, 'load_path_broken': {'type': 'boolean'}, 'tets': {'type': 'integer'}, 'volume_mm3': {'type': 'number'}}, 'required': ['components', 'keep_faces', 'load_path_broken', 'tets', 'volume_mm3'], 'additionalProperties': False}, 'reused': {'type': 'boolean'}, 'threshold': {'type': 'number'}, 'threshold_lowered_from': {'type': 'number'}, 'topology': {'type': 'integer'}}, 'required': ['shape_study', 'solid_study'], 'additionalProperties': False},
+    'contact_report': {'type': 'object', 'properties': {'clash': {'type': 'boolean'}, 'clashes': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'string'}, 'a_id': {'type': 'integer'}, 'b': {'type': 'string'}, 'b_id': {'type': 'integer'}, 'bbox_max_mm': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min_mm': {'type': 'array', 'items': {'type': 'number'}}, 'centroid_mm': {'type': 'array', 'items': {'type': 'number'}}, 'engaged_thread_pairs': {'type': 'integer'}, 'press_fit_pairs': {'type': 'integer'}, 'press_fit_refused': {'type': 'array', 'items': {'type': 'object'}}, 'ring_grip_pairs': {'type': 'integer'}, 'ring_grip_volume_mm3': {'type': 'number'}, 'thread_engagement_volume_mm3': {'type': 'number'}, 'volume_mm3': {'type': 'number'}}, 'required': ['a', 'a_id', 'b', 'b_id', 'bbox_max_mm', 'bbox_min_mm', 'centroid_mm', 'engaged_thread_pairs', 'press_fit_pairs', 'ring_grip_pairs', 'ring_grip_volume_mm3', 'thread_engagement_volume_mm3', 'volume_mm3'], 'additionalProperties': False}}, 'components': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'string'}}}, 'connected': {'type': 'boolean'}, 'elapsed_s': {'type': 'number'}, 'mode': {'type': 'string'}, 'near_misses': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'string'}, 'a_id': {'type': 'integer'}, 'b': {'type': 'string'}, 'b_id': {'type': 'integer'}, 'distance': {'type': 'number'}}, 'required': ['a', 'a_id', 'b', 'b_id', 'distance'], 'additionalProperties': False}}, 'near_tol': {'type': 'number'}, 'occurrences': {'type': 'integer'}, 'pairs': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'string'}, 'a_id': {'type': 'integer'}, 'b': {'type': 'string'}, 'b_id': {'type': 'integer'}, 'distance': {'type': 'number'}, 'press_fit_volume_mm3': {'type': 'number'}, 'press_fits': {'type': 'array', 'items': {'type': 'object'}}, 'state': {'type': 'string'}, 'volume_mm3': {'type': 'number'}, 'press_fit_refused': {'type': 'array', 'items': {'type': 'object'}}, 'checked': {'type': 'string'}}, 'required': ['a', 'b', 'distance', 'state', 'volume_mm3'], 'additionalProperties': False}}, 'pairs_box_cleared': {'type': 'integer'}, 'pairs_checked': {'type': 'integer'}, 'press_fits': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'string'}, 'a_id': {'type': 'integer'}, 'b': {'type': 'string'}, 'b_id': {'type': 'integer'}, 'fits': {'type': 'array', 'items': {'type': 'object'}}, 'volume_mm3': {'type': 'number'}}, 'required': ['a', 'a_id', 'b', 'b_id', 'fits', 'volume_mm3'], 'additionalProperties': False}}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'touch_tol': {'type': 'number'}, 'unmated_contacts': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'string'}, 'b': {'type': 'string'}}, 'required': ['a', 'b'], 'additionalProperties': False}}, 'unrealized_mates': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'mate': {'type': 'string'}}, 'required': ['id', 'mate'], 'additionalProperties': False}}, 'bodies': {'type': 'integer'}, 'scope': {'type': 'string'}, 'pairs_unchecked': {'type': 'integer'}, 'truncated': {'type': 'boolean'}, 'truncation': {'type': 'string'}, 'deflection_mm': {'type': 'number'}, 'mesh_cleared': {'type': 'integer'}, 'job': {'type': 'integer'}, 'kind': {'type': 'string'}, 'outlives_client': {'type': 'boolean'}, 'running': {'type': 'boolean'}, 'started': {'type': 'boolean'}, 'not_checked': {}}, 'required': [], 'additionalProperties': False},
+    'contact_status': {'type': 'object', 'properties': {'cancel_requested': {'type': 'boolean'}, 'cancellable': {'type': 'boolean'}, 'elapsed_seconds': {'type': 'number'}, 'fraction': {'type': 'number'}, 'job': {'type': 'integer'}, 'kind': {'type': 'string'}, 'label': {'type': 'string'}, 'outlives_client': {'type': 'boolean'}, 'running': {'type': 'boolean'}, 'outcome': {'type': 'string'}, 'seconds': {'type': 'number'}, 'error': {'type': 'string'}, 'cancel_reason': {'type': 'string'}, 'report': {'type': 'object'}}, 'required': ['job', 'kind', 'running'], 'additionalProperties': False},
+    'crash_reports': {'type': 'object', 'properties': {'folder': {'type': 'string'}, 'reports': {'type': 'array', 'items': {'type': 'object', 'properties': {'autosaves': {'type': 'array', 'items': {'type': 'string'}}, 'build': {'type': 'string'}, 'crashed': {'type': 'boolean'}, 'mode': {'type': 'string'}, 'os': {'type': 'string'}, 'path': {'type': 'string'}, 'project': {'type': 'string'}, 'reason': {'type': 'string'}, 'started': {'type': 'string'}, 'stem': {'type': 'string'}, 'version': {'type': 'string'}}, 'required': ['autosaves', 'build', 'crashed', 'mode', 'os', 'path', 'project', 'reason', 'started', 'stem', 'version'], 'additionalProperties': False}}}, 'required': ['folder', 'reports'], 'additionalProperties': False},
+    'curve_points': {'type': 'object', 'properties': {'at_mm': {'type': 'array', 'items': {'type': 'number'}}, 'curve': {'type': 'integer'}, 'kind': {'type': 'string'}, 'length_mm': {'type': 'number'}, 'name': {'type': 'string'}, 'points': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}}, 'required': ['at_mm', 'curve', 'kind', 'length_mm', 'name', 'points'], 'additionalProperties': False},
+    'export_stl': {'type': 'object', 'properties': {'bodies': {'type': 'integer'}, 'deflection_from': {'type': 'string'}, 'deflection_mm': {'type': 'number'}, 'free_edges': {'type': 'integer'}, 'path': {'type': 'string'}, 'shells': {'type': 'integer'}, 'watertight': {'type': 'boolean'}, 'chord_share': {'type': 'number'}, 'smallest_gap_side_mm': {'type': 'number'}, 'warning': {'type': 'string'}}, 'required': ['bodies', 'deflection_from', 'deflection_mm', 'free_edges', 'path', 'shells', 'watertight'], 'additionalProperties': False},
+    'extract_variables': {'type': 'object', 'properties': {'applied': {'type': 'boolean'}, 'left_alone': {'type': 'array', 'items': {'type': 'object', 'properties': {'feature': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'field': {'type': 'string'}, 'label': {'type': 'string'}, 'reason': {'type': 'string'}, 'value': {'type': 'number'}}, 'required': ['feature', 'feature_id', 'field', 'label', 'reason', 'value'], 'additionalProperties': False}}, 'scope': {'type': 'string'}, 'variables': {'type': 'array', 'items': {'type': 'object', 'properties': {'existing': {'type': 'boolean'}, 'expression': {'type': 'string'}, 'name': {'type': 'string'}, 'quantity': {'type': 'string'}, 'uses': {'type': 'array', 'items': {'type': 'object'}}, 'value': {'type': 'number'}}, 'required': ['existing', 'expression', 'name', 'quantity', 'uses', 'value'], 'additionalProperties': False}}, 'digest': {'type': 'object'}, 'regen': {'type': 'object'}}, 'required': ['applied', 'left_alone', 'scope', 'variables'], 'additionalProperties': False},
+    'fit_bearing': {'type': 'object', 'properties': {'candidates': {'type': 'array', 'items': {'type': 'string'}}, 'designation': {'type': 'string'}, 'mate': {'type': 'integer'}, 'occurrence': {'type': 'integer'}, 'other_mate': {'type': 'integer'}, 'other_ring': {'type': 'object', 'properties': {'diameter_check': {'type': 'object'}, 'ring': {'type': 'string'}, 'seat': {'type': 'object'}}, 'required': ['diameter_check', 'ring', 'seat'], 'additionalProperties': False}, 'overhang_mm': {'type': 'number'}, 'seat_diameter_mm': {'type': 'number'}, 'shaft': {'type': 'boolean'}, 'shoulder': {'type': 'boolean'}, 'summary': {'type': 'string'}}, 'required': ['candidates', 'designation', 'mate', 'occurrence', 'other_mate', 'other_ring', 'overhang_mm', 'seat_diameter_mm', 'shaft', 'shoulder', 'summary'], 'additionalProperties': False},
+    'fit_retaining_ring': {'type': 'object', 'properties': {'designation': {'type': 'string'}, 'groove_feature': {'type': 'integer'}, 'occurrence': {'type': 'integer'}, 'orientation': {'type': 'array', 'items': {'type': 'number'}}, 'parent': {'type': 'integer'}, 'part': {'type': 'string'}, 'position': {'type': 'array', 'items': {'type': 'number'}}, 'size_mm': {'type': 'number'}, 'standard': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['designation', 'groove_feature', 'occurrence', 'orientation', 'parent', 'part', 'position', 'size_mm', 'standard', 'summary'], 'additionalProperties': False},
+    'get_keymap': {'type': 'object', 'properties': {'active': {'type': 'string'}, 'bindings': {'type': 'array', 'items': {'type': 'object', 'properties': {'chord': {'type': 'string'}, 'context': {'type': 'string'}, 'custom': {'type': 'boolean'}, 'default': {'type': 'string'}, 'id': {'type': 'string'}, 'label': {'type': 'string'}, 'section': {'type': 'string'}, 'alt': {'type': 'string'}, 'hidden': {'type': 'boolean'}}, 'required': ['chord', 'context', 'custom', 'default', 'id', 'label', 'section'], 'additionalProperties': False}}, 'conflicts': {'type': 'array', 'items': {'type': 'object', 'properties': {'context': {'type': 'string'}, 'chord': {'type': 'string'}, 'commands': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['context', 'chord', 'commands'], 'additionalProperties': False}}, 'contexts': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['active', 'bindings', 'conflicts', 'contexts'], 'additionalProperties': False},
+    'get_print_process': {'type': 'object', 'properties': {'confirm': {'type': 'string'}, 'print': {'anyOf': [{'type': 'object', 'properties': {'material': {'type': 'string'}, 'process': {'type': 'string'}, 'stl_deflection_mm': {'type': 'number'}, 'match': {'type': 'string'}, 'profile': {'type': 'string'}, 'conditions': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}}, 'required': ['material', 'process', 'stl_deflection_mm'], 'additionalProperties': False}, {'type': 'null'}]}, 'tables': {'type': 'array', 'items': {'type': 'object', 'properties': {'conditions': {'type': 'string'}, 'material': {'type': 'string'}, 'min_reliable_thread_mm': {'type': 'number'}, 'process': {'type': 'string'}, 'repeatability_mm': {'type': 'number'}, 'repeatability_source': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['conditions', 'material', 'min_reliable_thread_mm', 'process', 'repeatability_mm', 'repeatability_source', 'rows'], 'additionalProperties': False}}, 'threads': {'type': 'array', 'items': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'confirm': {'type': 'string'}, 'designation': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'known': {'type': 'boolean'}, 'model_face': {'type': 'number'}, 'model_major': {'type': 'number'}, 'modeled': {'type': 'boolean'}, 'modelled_major': {'type': 'number'}, 'name': {'type': 'string'}, 'notes': {'type': 'array', 'items': {'type': 'string'}}, 'pitch': {'type': 'number'}, 'prints_major': {'type': 'number'}, 'sentence': {'type': 'string'}, 'side': {'type': 'string'}, 'want_major': {'type': 'number'}}, 'required': ['allowance_mm', 'confirm', 'designation', 'feature_id', 'known', 'modeled', 'modelled_major', 'name', 'notes', 'pitch', 'prints_major', 'sentence', 'side'], 'additionalProperties': False}}}, 'required': ['confirm', 'print', 'tables'], 'additionalProperties': False},
+    'get_settings': {'type': 'object', 'properties': {'autosave_interval': {'type': 'number'}, 'devices': {'type': 'array', 'items': {'type': 'string'}}, 'git_user_email': {'type': 'string'}, 'git_user_name': {'type': 'string'}, 'gpu_device': {'type': 'string'}, 'idle_throttle': {'type': 'boolean'}, 'keys': {'type': 'object'}, 'lock_lights_to_model': {'type': 'boolean'}, 'path': {'type': 'string'}, 'settings_format': {'type': 'integer'}, 'shadow_map': {'type': 'integer'}, 'shadows': {'type': 'boolean'}, 'ssao': {'type': 'string'}, 'terminal_panel': {'type': 'boolean'}, 'ui_font_scale': {'type': 'number'}, 'window': {'type': 'object', 'properties': {'h': {'type': 'integer'}, 'maximized': {'type': 'boolean'}, 'w': {'type': 'integer'}, 'x': {'type': 'integer'}, 'y': {'type': 'integer'}}, 'required': ['h', 'maximized', 'w', 'x', 'y'], 'additionalProperties': False}}, 'required': ['autosave_interval', 'devices', 'git_user_email', 'git_user_name', 'gpu_device', 'idle_throttle', 'keys', 'lock_lights_to_model', 'path', 'settings_format', 'shadow_map', 'shadows', 'ssao', 'terminal_panel', 'ui_font_scale', 'window'], 'additionalProperties': False},
+    'get_sheet_metal_rules': {'type': 'object', 'properties': {'relief_styles': {'type': 'array', 'items': {'type': 'string'}}, 'rules': {'anyOf': [{'type': 'object', 'properties': {'bend_radius_mm': {'type': 'number'}, 'bend_radius_source': {'type': 'string'}, 'gauge': {'type': 'string'}, 'k_factor': {'type': 'number'}, 'k_factor_source': {'type': 'string'}, 'material': {'type': 'string'}, 'min_bend_radius_mm': {'type': 'number'}, 'relief': {'type': 'string'}, 'relief_depth_mm': {'type': 'number'}, 'relief_width_mm': {'type': 'number'}, 'thickness_mm': {'type': 'number'}}, 'required': ['bend_radius_mm', 'bend_radius_source', 'gauge', 'k_factor', 'k_factor_source', 'material', 'min_bend_radius_mm', 'relief', 'relief_depth_mm', 'relief_width_mm', 'thickness_mm'], 'additionalProperties': False}, {'type': 'null'}]}, 'stock': {'type': 'object'}}, 'required': ['relief_styles', 'rules', 'stock'], 'additionalProperties': False},
+    'get_state': {'type': 'object', 'properties': {'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'bbox_max': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min': {'type': 'array', 'items': {'type': 'number'}}, 'created_by': {'type': 'integer'}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'volume_mm3': {'type': 'number'}, 'reference': {'type': 'boolean'}, 'mesh': {'type': 'integer'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'appearance': {'type': 'object'}}, 'required': ['bbox_max', 'bbox_min', 'created_by', 'material', 'name', 'volume_mm3'], 'additionalProperties': False}}, 'camera': {'type': 'object', 'properties': {'aspect': {'type': 'number'}, 'distance': {'type': 'number'}, 'fov_deg': {'type': 'number'}, 'position': {'type': 'array', 'items': {'type': 'number'}}, 'target': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['aspect', 'distance', 'fov_deg', 'position', 'target'], 'additionalProperties': False}, 'can_redo': {'type': 'boolean'}, 'can_undo': {'type': 'boolean'}, 'features': {'type': 'array', 'items': {'type': 'object'}}, 'pending_feature_id': {'type': 'integer'}, 'regen': {'type': 'object', 'properties': {'cached': {'type': 'integer'}, 'executed': {'type': 'integer'}, 'failed': {'type': 'array', 'items': {'type': 'object'}}, 'ok': {'type': 'boolean'}, 'warnings': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['cached', 'executed', 'failed', 'ok', 'warnings'], 'additionalProperties': False}, 'revision': {'type': 'object', 'properties': {'instance': {'type': 'integer'}, 'part_id': {'type': 'integer'}, 'session': {'type': 'string'}, 'version': {'type': 'integer'}}, 'required': ['instance', 'part_id', 'session', 'version'], 'additionalProperties': False}, 'rollback': {'type': 'integer'}, 'selected_feature': {'type': 'integer'}, 'selection': {'anyOf': [{'type': 'object', 'properties': {'mesh': {'type': 'integer'}, 'face': {'type': 'integer'}, 'normal': {'type': 'array', 'items': {'type': 'number'}}, 'center': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['mesh', 'face', 'normal', 'center'], 'additionalProperties': False}, {'type': 'null'}]}, 'selection_items': {'type': 'array', 'items': {'type': 'object', 'properties': {'kind': {'type': 'string'}, 'id': {'type': 'integer'}, 'path': {'type': 'array', 'items': {'type': 'integer'}}, 'element': {'type': 'object'}}, 'required': ['kind'], 'additionalProperties': False}}, 'view_rollback': {'type': 'integer'}}, 'required': ['bodies', 'camera', 'can_redo', 'can_undo', 'features', 'pending_feature_id', 'regen', 'revision', 'rollback', 'selected_feature', 'selection', 'selection_items', 'view_rollback'], 'additionalProperties': False},
+    'get_tube_rules': {'type': 'object', 'properties': {'rules': {'anyOf': [{'type': 'object', 'properties': {'material': {'type': 'string'}, 'max_thinning': {'type': 'number'}, 'former_radii_mm': {'type': 'array', 'items': {'type': 'number'}}, 'min_straight': {'anyOf': [{'type': 'number'}, {'type': 'string'}]}, 'tail_length': {'anyOf': [{'type': 'number'}, {'type': 'string'}]}}, 'required': ['material', 'max_thinning', 'former_radii_mm', 'min_straight', 'tail_length'], 'additionalProperties': False}, {'type': 'null'}]}, 'stocked': {'type': 'object'}}, 'required': ['rules'], 'additionalProperties': False},
+    'get_units': {'type': 'object', 'properties': {'angle': {'type': 'string'}, 'length': {'type': 'string'}, 'mass': {'type': 'string'}}, 'required': ['angle', 'length', 'mass'], 'additionalProperties': False},
+    'layout_balloons': {'type': 'object', 'properties': {'crossings': {'type': 'integer'}, 'placed': {'type': 'array', 'items': {'type': 'object', 'properties': {'item': {'type': 'integer'}, 'note': {'type': 'integer'}, 'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}, 'position': {'type': 'array', 'items': {'type': 'number'}}, 'view': {'type': 'integer'}}, 'required': ['item', 'note', 'occurrence', 'part', 'position', 'view'], 'additionalProperties': False}}, 'unplaced': {'type': 'array', 'items': {}}}, 'required': ['crossings', 'placed', 'unplaced'], 'additionalProperties': False},
+    'list_assertions': {'type': 'object', 'properties': {'assertions': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'integer'}, 'b': {'type': 'integer'}, 'id': {'type': 'integer'}, 'min_mm': {'type': 'number'}, 'mode': {'type': 'string'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'standing': {'type': 'string'}, 'why': {'type': 'string'}, 'last_verdict': {'type': 'string'}, 'measured_mm': {'type': 'number'}}, 'required': ['a', 'b', 'id', 'min_mm', 'mode', 'name', 'standing', 'why'], 'additionalProperties': False}}}, 'required': ['assertions'], 'additionalProperties': False},
+    'list_bearings': {'type': 'object', 'properties': {'bearings': {'type': 'array', 'items': {'type': 'object', 'properties': {'B_mm': {'type': 'number'}, 'D_a_max_mm': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'D_mm': {'type': 'number'}, 'd_a_max_mm': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'd_a_min_mm': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'd_mm': {'type': 'number'}, 'designation': {'type': 'string'}, 'r_a_max_mm': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'r_min_mm': {'type': 'number'}, 'series': {'type': 'string'}}, 'required': ['B_mm', 'D_a_max_mm', 'D_mm', 'd_a_max_mm', 'd_a_min_mm', 'd_mm', 'designation', 'r_a_max_mm', 'r_min_mm', 'series'], 'additionalProperties': False}}}, 'required': ['bearings'], 'additionalProperties': False},
+    'list_bends': {'type': 'object', 'properties': {'bends': {'type': 'array', 'items': {'type': 'object', 'properties': {'angle_deg': {'type': 'number'}, 'axis': {'type': 'array', 'items': {'type': 'number'}}, 'axis_origin': {'type': 'array', 'items': {'type': 'number'}}, 'below_minimum': {'type': 'boolean'}, 'body': {'type': 'integer'}, 'crushed': {'type': 'boolean'}, 'feature_id': {'type': 'integer'}, 'flat': {'type': 'boolean'}, 'folds': {'anyOf': [{'type': 'string'}, {'type': 'null'}]}, 'index': {'type': 'integer'}, 'k_factor': {'type': 'number'}, 'k_source': {'type': 'string'}, 'min_radius_mm': {'type': 'number'}, 'radius_mm': {'type': 'number'}, 'width_mm': {'type': 'number'}, 'allowance_mm': {'type': 'number'}}, 'required': ['angle_deg', 'axis', 'axis_origin', 'below_minimum', 'body', 'crushed', 'feature_id', 'flat', 'index', 'k_factor', 'k_source', 'min_radius_mm', 'radius_mm', 'width_mm'], 'additionalProperties': False}}, 'count': {'type': 'integer'}, 'rules': {'type': 'object', 'properties': {'bend_radius_mm': {'type': 'number'}, 'bend_radius_source': {'type': 'string'}, 'gauge': {'type': 'string'}, 'k_factor': {'type': 'number'}, 'k_factor_source': {'type': 'string'}, 'material': {'type': 'string'}, 'min_bend_radius_mm': {'type': 'number'}, 'relief': {'type': 'string'}, 'relief_depth_mm': {'type': 'number'}, 'relief_width_mm': {'type': 'number'}, 'thickness_mm': {'type': 'number'}}, 'required': ['bend_radius_mm', 'bend_radius_source', 'gauge', 'k_factor', 'k_factor_source', 'material', 'min_bend_radius_mm', 'relief', 'relief_depth_mm', 'relief_width_mm', 'thickness_mm'], 'additionalProperties': False}}, 'required': ['bends', 'count', 'rules'], 'additionalProperties': False},
+    'list_cam_setups': {'type': 'object', 'properties': {'setups': {'type': 'array', 'items': {'type': 'object', 'properties': {'chuck': {'type': 'integer'}, 'fit_arcs': {'type': 'boolean'}, 'fixtures': {'type': 'array', 'items': {'type': 'object'}}, 'frame': {'type': 'array', 'items': {'type': 'number'}}, 'grip_mm': {'type': 'number'}, 'has_rotary_axis': {'type': 'boolean'}, 'held_in': {'type': 'string'}, 'id': {'type': 'integer'}, 'machine': {'type': 'object'}, 'machine_match': {'type': 'string'}, 'name': {'type': 'string'}, 'operations': {'type': 'array', 'items': {'type': 'object'}}, 'order': {'type': 'string'}, 'origin': {'type': 'array', 'items': {'type': 'number'}}, 'origin_at': {'type': 'string'}, 'post': {'type': 'string'}, 'reach_offset': {'type': 'array', 'items': {'type': 'number'}}, 'rotation_a': {'type': 'number'}, 'safe_z': {'type': 'number'}, 'split_output': {'type': 'boolean'}, 'stock': {'type': 'object'}, 'tailstock': {'type': 'integer'}, 'tools': {'type': 'array', 'items': {'type': 'object'}}, 'top_face': {'type': 'object'}}, 'required': ['chuck', 'fit_arcs', 'fixtures', 'frame', 'grip_mm', 'has_rotary_axis', 'held_in', 'id', 'machine', 'machine_match', 'name', 'operations', 'order', 'origin', 'origin_at', 'post', 'reach_offset', 'rotation_a', 'safe_z', 'split_output', 'tailstock', 'tools'], 'additionalProperties': False}}}, 'required': ['setups'], 'additionalProperties': False},
+    'list_catalogs': {'type': 'object', 'properties': {'catalogs': {'type': 'array', 'items': {'type': 'object', 'properties': {'hash': {'type': 'string'}, 'id': {'type': 'string'}, 'license': {'type': 'string'}, 'record_count': {'type': 'integer'}, 'resolved': {'type': 'boolean'}, 'revision': {'type': 'string'}, 'schema': {'type': 'string'}, 'source': {'type': 'string'}, 'storage': {'type': 'string'}, 'units': {'type': 'string'}}, 'required': ['hash', 'id', 'license', 'record_count', 'resolved', 'revision', 'schema', 'source', 'storage', 'units'], 'additionalProperties': False}}}, 'required': ['catalogs'], 'additionalProperties': False},
+    'list_configurations': {'type': 'object', 'properties': {'active': {'type': 'integer'}, 'configurations': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'parameter_overrides': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed_features': {'type': 'array', 'items': {'type': 'integer'}}, 'unsuppressed_features': {'type': 'array', 'items': {'type': 'integer'}}, 'mate_overrides': {'type': 'array', 'items': {}}, 'suppressed_mates': {'type': 'array', 'items': {}}, 'suppressed_occurrences': {'type': 'array', 'items': {'type': 'integer'}}, 'suppressed_relations': {'type': 'array', 'items': {}}}, 'required': ['id', 'name'], 'additionalProperties': False}}}, 'required': ['active', 'configurations'], 'additionalProperties': False},
+    'list_drawing_dims': {'type': 'object', 'properties': {'dims': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'kind': {'type': 'string'}, 'resolved': {'type': 'boolean'}, 'text': {'type': 'string'}, 'value': {'type': 'number'}, 'view': {'type': 'integer'}}, 'required': ['id', 'kind', 'resolved', 'text', 'value', 'view'], 'additionalProperties': False}}}, 'required': ['dims'], 'additionalProperties': False},
+    'list_drawing_geometry': {'type': 'object', 'properties': {'geometry': {'type': 'array', 'items': {'type': 'object', 'properties': {'bbox': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'kind': {'type': 'string'}, 'p1': {'type': 'array', 'items': {'type': 'number'}}, 'p2': {'type': 'array', 'items': {'type': 'number'}}, 'ref': {'type': 'object'}, 'source_feature': {'type': 'object'}, 'source_id': {'type': 'integer'}, 'type': {'type': 'string'}, 'visible': {'type': 'boolean'}, 'center': {'type': 'array', 'items': {'type': 'number'}}, 'closed': {'type': 'boolean'}, 'radius': {'type': 'number'}}, 'required': ['kind', 'ref', 'source_id', 'type', 'visible'], 'additionalProperties': False}}}, 'required': ['geometry'], 'additionalProperties': False},
+    'list_drawing_notes': {'type': 'object', 'properties': {'notes': {'type': 'array', 'items': {'type': 'object', 'properties': {'error': {'type': 'string'}, 'id': {'type': 'integer'}, 'leader_resolved': {'type': 'boolean'}, 'pos': {'type': 'array', 'items': {'type': 'number'}}, 'resolved': {'type': 'boolean'}, 'resolved_text': {'type': 'string'}, 'style': {'type': 'string'}, 'table': {'type': 'string'}, 'text': {'type': 'string'}, 'view': {'type': 'integer'}, 'fcf': {'type': 'object'}, 'dim': {'type': 'integer'}}, 'required': ['error', 'id', 'leader_resolved', 'pos', 'resolved', 'resolved_text', 'style', 'table', 'text', 'view'], 'additionalProperties': False}}}, 'required': ['notes'], 'additionalProperties': False},
+    'list_drawing_views': {'type': 'object', 'properties': {'views': {'type': 'array', 'items': {'type': 'object', 'properties': {'base_view': {'type': 'integer'}, 'bbox': {'anyOf': [{'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, {'type': 'null'}]}, 'bend_lines': {'type': 'integer'}, 'configuration': {'type': 'integer'}, 'cost': {'type': 'object'}, 'curves': {'type': 'integer'}, 'has_geometry': {'type': 'boolean'}, 'hidden': {'type': 'array', 'items': {}}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'orientation': {'type': 'string'}, 'position': {'type': 'array', 'items': {'type': 'number'}}, 'quality': {'type': 'string'}, 'scale': {'type': 'number'}, 'show_hidden': {'type': 'boolean'}, 'source_id': {'type': 'integer'}, 'stale': {'type': 'boolean'}, 'section': {'type': 'object'}, 'detail': {'type': 'object'}, 'warnings': {'type': 'array', 'items': {'type': 'string'}}, 'error': {'type': 'string'}}, 'required': ['base_view', 'bbox', 'configuration', 'curves', 'has_geometry', 'hidden', 'id', 'name', 'orientation', 'position', 'quality', 'scale', 'show_hidden', 'source_id', 'stale'], 'additionalProperties': False}}}, 'required': ['views'], 'additionalProperties': False},
+    'list_drawings': {'type': 'object', 'properties': {'drawings': {'type': 'array', 'items': {'type': 'object', 'properties': {'dims': {'type': 'integer'}, 'id': {'type': 'integer'}, 'index': {'type': 'integer'}, 'name': {'type': 'string'}, 'views': {'type': 'integer'}}, 'required': ['dims', 'id', 'index', 'name', 'views'], 'additionalProperties': False}}}, 'required': ['drawings'], 'additionalProperties': False},
+    'list_elements': {'type': 'object', 'properties': {'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'body': {'type': 'integer'}, 'created_by': {'type': 'integer'}, 'edges': {'type': 'array', 'items': {'type': 'object'}}, 'faces': {'type': 'array', 'items': {'type': 'object'}}, 'job_part': {'type': 'integer'}, 'name': {'type': 'string'}, 'unnamed_faces': {'type': 'integer'}}, 'required': ['body', 'created_by', 'edges', 'faces', 'job_part', 'name', 'unnamed_faces'], 'additionalProperties': False}}, 'matched_edges': {'type': 'integer'}, 'matched_faces': {'type': 'integer'}, 'why': {'type': 'string'}}, 'required': ['bodies'], 'additionalProperties': False},
+    'list_exploded_views': {'type': 'object', 'properties': {'active': {'type': 'integer'}, 'factor': {'type': 'number'}, 'views': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'steps': {'type': 'array', 'items': {'type': 'object'}}, 'type': {'type': 'string'}}, 'required': ['id', 'name', 'steps', 'type'], 'additionalProperties': False}}}, 'required': ['active', 'factor', 'views'], 'additionalProperties': False},
+    'list_job_parts': {'type': 'object', 'properties': {'parts': {'type': 'array', 'items': {'type': 'object', 'properties': {'configuration': {'type': 'integer'}, 'configuration_name': {'type': 'string'}, 'id': {'type': 'integer'}, 'missing': {'type': 'boolean'}, 'name': {'type': 'string'}, 'placements': {'type': 'array', 'items': {}}, 'source': {'type': 'integer'}, 'why': {'type': 'string'}}, 'required': ['configuration', 'id', 'missing', 'name', 'placements', 'source'], 'additionalProperties': False}}}, 'required': ['parts'], 'additionalProperties': False},
+    'list_machines': {'type': 'object', 'properties': {'dir': {'type': 'string'}, 'machines': {'type': 'array', 'items': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'post': {'type': 'string'}, 'travel': {'type': 'object'}, 'fit_arcs': {'type': 'boolean'}, 'has_rotary_axis': {'type': 'boolean'}, 'rapid_feed': {'type': 'number'}, 'a_max_deg_min': {'type': 'number'}, 'tools': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['name', 'post']}}}, 'required': ['dir', 'machines'], 'additionalProperties': False},
+    'list_mates': {'type': 'object', 'properties': {'mates': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'object'}, 'b': {'type': 'object'}, 'flipped': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'offset': {'type': 'number'}, 'rotation': {'type': 'number'}, 'rotation_deg': {'type': 'number'}, 'status': {'type': 'string'}, 'type': {'type': 'string'}, 'held': {'type': 'object'}, 'error': {'type': 'string'}, 'residual_mm': {'type': 'number'}, 'dx': {'type': 'number'}, 'dy': {'type': 'number'}, 'ball_rotation': {'type': 'array', 'items': {'type': 'number'}}, 'suppressed': {'type': 'boolean'}}, 'required': ['a', 'b', 'flipped', 'id', 'name', 'offset', 'rotation', 'rotation_deg', 'status', 'type'], 'additionalProperties': False}}}, 'required': ['mates'], 'additionalProperties': False},
+    'list_motion_studies': {'type': 'object', 'properties': {'studies': {'type': 'array', 'items': {'type': 'object', 'properties': {'check_clash': {'type': 'boolean'}, 'clash_mode': {'type': 'string'}, 'driver_dof': {'type': 'string'}, 'driver_mate': {'type': 'integer'}, 'from': {'type': 'number'}, 'has_result': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'running': {'type': 'boolean'}, 'samples': {'type': 'integer'}, 'to': {'type': 'number'}, 'type': {'type': 'string'}, 'unit': {'type': 'string'}, 'clean': {'type': 'boolean'}, 'collision_checked': {'type': 'boolean'}, 'stale': {'type': 'boolean'}, 'clash_deflection_mm': {'type': 'number'}, 'configuration': {'type': 'integer'}, 'why_not': {'type': 'string'}}, 'required': ['check_clash', 'clash_mode', 'driver_dof', 'driver_mate', 'from', 'has_result', 'id', 'name', 'running', 'samples', 'to', 'type', 'unit'], 'additionalProperties': False}}}, 'required': ['studies'], 'additionalProperties': False},
+    'list_occurrences': {'type': 'object', 'properties': {'occurrences': {'type': 'array', 'items': {'type': 'object', 'properties': {'configuration_id': {'type': 'integer'}, 'fixed': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'part_version': {'anyOf': [{'type': 'integer'}, {'type': 'null'}]}, 'ref_kind': {'type': 'string'}, 'transform': {'type': 'object'}, 'type': {'type': 'string'}, 'visible': {'type': 'boolean'}, 'bbox_max': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min': {'type': 'array', 'items': {'type': 'number'}}, 'attach_offset': {'type': 'array', 'items': {'type': 'number'}}, 'attach_rotation': {'type': 'array', 'items': {'type': 'number'}}, 'attach_seat': {'type': 'object'}, 'attached_to': {'type': 'integer'}, 'flexible': {'type': 'boolean'}, 'inner_mate_dofs': {'type': 'array', 'items': {'type': 'object'}}, 'inner_poses': {'type': 'array', 'items': {'type': 'object'}}, 'leaf_count': {'type': 'integer'}, 'leaves': {'type': 'array', 'items': {'type': 'string'}}, 'material': {'type': 'string'}, 'attach_error': {'type': 'string'}, 'attach_warning': {'type': 'string'}}, 'required': ['configuration_id', 'fixed', 'id', 'name', 'part_id', 'part_version', 'ref_kind', 'transform', 'type', 'visible'], 'additionalProperties': False}}}, 'required': ['occurrences'], 'additionalProperties': False},
+    'list_parts': {'type': 'object', 'properties': {'active': {'type': 'integer'}, 'active_id': {'type': 'integer'}, 'parts': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'index': {'type': 'integer'}, 'name': {'type': 'string'}, 'type': {'type': 'string'}, 'folder': {'type': 'string'}}, 'required': ['id', 'index', 'name', 'type'], 'additionalProperties': False}}, 'folders': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['active', 'active_id', 'parts'], 'additionalProperties': False},
+    'list_print_profiles': {'type': 'object', 'properties': {'defaults': {'type': 'array', 'items': {'type': 'object', 'properties': {'conditions': {'type': 'string'}, 'material': {'type': 'string'}, 'min_reliable_thread_mm': {'type': 'number'}, 'process': {'type': 'string'}, 'repeatability_mm': {'type': 'number'}, 'repeatability_source': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['conditions', 'material', 'min_reliable_thread_mm', 'process', 'repeatability_mm', 'repeatability_source', 'rows'], 'additionalProperties': False}}, 'dir': {'type': 'string'}, 'profiles': {'type': 'array', 'items': {'type': 'object', 'properties': {'material': {'type': 'string'}, 'name': {'type': 'string'}, 'process': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'stl_deflection_mm': {'type': 'number'}, 'stl_deflection_stated': {'type': 'boolean'}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}, 'conditions': {'type': 'string'}}, 'required': ['material', 'name', 'process', 'rows', 'stl_deflection_mm', 'stl_deflection_stated'], 'additionalProperties': False}}}, 'required': ['defaults', 'dir', 'profiles'], 'additionalProperties': False},
+    'list_relations': {'type': 'object', 'properties': {'relations': {'type': 'array', 'items': {'type': 'object', 'properties': {'dof_a': {'type': 'string'}, 'dof_b': {'type': 'string'}, 'id': {'type': 'integer'}, 'kind': {'type': 'string'}, 'mate_a': {'type': 'integer'}, 'mate_b': {'type': 'integer'}, 'name': {'type': 'string'}, 'phase': {'type': 'number'}, 'ratio': {'type': 'number'}, 'thread_feature': {'type': 'integer'}, 'thread_part': {'type': 'integer'}, 'type': {'type': 'string'}, 'teeth_a': {'type': 'integer'}, 'teeth_b': {'type': 'integer'}, 'drives': {'type': 'string'}, 'lead': {'type': 'number'}, 'constant': {'type': 'number'}, 'held': {'type': 'string'}, 'terms': {'type': 'array', 'items': {'type': 'object'}}, 'duration_deg': {'type': 'number'}, 'error': {'type': 'string'}, 'motion': {'type': 'string'}, 'period_deg': {'type': 'number'}, 'slots': {'type': 'integer'}, 'start_deg': {'type': 'number'}, 'step': {'type': 'number'}, 'mate_b_path': {'type': 'array', 'items': {'type': 'integer'}}, 'mate_a_path': {'type': 'array', 'items': {'type': 'integer'}}, 'internal': {'type': 'boolean'}, 'lift': {}, 'ride': {}}, 'required': ['id', 'kind', 'name', 'type'], 'additionalProperties': False}}}, 'required': ['relations'], 'additionalProperties': False},
+    'list_requirements': {'type': 'object', 'properties': {'all_pass': {'type': 'boolean'}, 'requirements': {'type': 'array', 'items': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'id': {'type': 'integer'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}, 'checked_at': {'type': 'string'}, 'detail': {'type': 'object'}, 'evidence_revision': {'type': 'integer'}, 'input_hash': {'type': 'string'}, 'limit': {'type': 'number'}, 'unit': {'type': 'string'}, 'value': {'type': 'number'}, 'limit_max': {'type': 'number'}, 'limit_min': {'type': 'number'}}, 'required': ['bound', 'id', 'measure', 'name', 'revision', 'state'], 'additionalProperties': False}}, 'summary': {'type': 'object', 'properties': {'fail': {'type': 'integer'}, 'pass': {'type': 'integer'}, 'stale': {'type': 'integer'}, 'unchecked': {'type': 'integer'}, 'unresolved': {'type': 'integer'}}, 'required': ['fail', 'pass', 'stale', 'unchecked', 'unresolved'], 'additionalProperties': False}}, 'required': ['all_pass', 'requirements', 'summary'], 'additionalProperties': False},
+    'list_retaining_rings': {'type': 'object', 'properties': {'rings': {'type': 'array', 'items': {'type': 'object', 'properties': {'a_mm': {'type': 'number'}, 'b_mm': {'type': 'number'}, 'd3_mm': {'type': 'number'}, 'd5_mm': {'type': 'number'}, 'designation': {'type': 'string'}, 'groove': {'type': 'object'}, 's_mm': {'type': 'number'}, 'size_mm': {'type': 'number'}}, 'required': ['a_mm', 'b_mm', 'd3_mm', 'd5_mm', 'designation', 'groove', 's_mm', 'size_mm'], 'additionalProperties': False}}, 'source': {'type': 'string'}, 'standard': {'type': 'string'}}, 'required': ['rings', 'source', 'standard'], 'additionalProperties': False},
+    'list_sections': {'type': 'object', 'properties': {'sections': {'type': 'array', 'items': {'type': 'object', 'properties': {'d': {'type': 'number'}, 'id': {'type': 'integer'}, 'normal': {'type': 'array', 'items': {'type': 'number'}}, 'offset': {'type': 'number'}, 'reverse': {'type': 'boolean'}, 'source': {'type': 'object'}, 'tilt_u': {'type': 'number'}, 'tilt_v': {'type': 'number'}, 'visible': {'type': 'boolean'}}, 'required': ['d', 'id', 'normal', 'offset', 'reverse', 'source', 'tilt_u', 'tilt_v', 'visible'], 'additionalProperties': False}}}, 'required': ['sections'], 'additionalProperties': False},
+    'list_studies': {'type': 'object', 'properties': {'studies': {'type': 'array', 'items': {'type': 'object', 'properties': {'filter_radius': {'type': 'number'}, 'has_results': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'keep_faces': {'type': 'integer'}, 'keep_outs': {'type': 'array', 'items': {'type': 'object'}}, 'load_cases': {'type': 'array', 'items': {'type': 'object'}}, 'loads': {'type': 'array', 'items': {'type': 'object'}}, 'max_iterations': {'type': 'integer'}, 'mesh_size': {'type': 'number'}, 'name': {'type': 'string'}, 'refinements': {'type': 'integer'}, 'stale': {'type': 'boolean'}, 'type': {'type': 'string'}, 'volume_fraction': {'type': 'number'}, 'shape_from': {'type': 'object'}, 'participants': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['has_results', 'id', 'loads', 'mesh_size', 'name', 'refinements', 'stale', 'type'], 'additionalProperties': False}}}, 'required': ['studies'], 'additionalProperties': False},
+    'list_tables': {'type': 'object', 'properties': {'tables': {'type': 'array', 'items': {'type': 'object', 'properties': {'columns': {'type': 'array', 'items': {'type': 'string'}}, 'name': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'comment': {'type': 'string'}}, 'required': ['columns', 'name', 'rows'], 'additionalProperties': False}}}, 'required': ['tables'], 'additionalProperties': False},
+    'list_templates': {'type': 'object', 'properties': {'templates': {'type': 'array', 'items': {'type': 'object', 'properties': {'features': {'type': 'array', 'items': {'type': 'object'}}, 'instances': {'type': 'array', 'items': {'type': 'object'}}, 'name': {'type': 'string'}, 'parameters': {'type': 'array', 'items': {'type': 'object'}}, 'revision': {'type': 'integer'}}, 'required': ['features', 'instances', 'name', 'parameters', 'revision'], 'additionalProperties': False}}}, 'required': ['templates'], 'additionalProperties': False},
+    'list_tolerances': {'type': 'object', 'properties': {'tolerances': {'type': 'array', 'items': {'type': 'object', 'properties': {'class': {'type': 'string'}, 'element': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'id': {'type': 'integer'}, 'kind': {'type': 'string'}, 'max': {'type': 'number'}, 'min': {'type': 'number'}, 'nominal': {'type': 'number'}, 'resolved': {'type': 'boolean'}, 'b': {'type': 'object'}, 'comment': {'type': 'string'}, 'lower': {'type': 'number'}, 'upper': {'type': 'number'}, 'error': {'type': 'string'}}, 'required': ['element', 'feature_id', 'id', 'kind', 'max', 'min', 'nominal', 'resolved'], 'additionalProperties': False}}}, 'required': ['tolerances'], 'additionalProperties': False},
+    'list_variables': {'type': 'object', 'properties': {'variables': {'type': 'array', 'items': {'type': 'object', 'properties': {'comment': {'type': 'string'}, 'expression': {'type': 'string'}, 'name': {'type': 'string'}, 'scope': {'type': 'string'}, 'value': {'type': 'number'}, 'error': {'type': 'string'}}, 'required': ['expression', 'name', 'scope', 'value'], 'additionalProperties': False}}}, 'required': ['variables'], 'additionalProperties': False},
+    'mass_properties': {'type': 'object', 'properties': {'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'bbox_max': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min': {'type': 'array', 'items': {'type': 'number'}}, 'body': {'type': 'integer'}, 'center_of_mass_mm': {'type': 'array', 'items': {'type': 'number'}}, 'inertia': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'mass_g': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'surface_area_mm2': {'type': 'number'}, 'volume_mm3': {'type': 'number'}, 'density': {'type': 'number'}}, 'required': ['bbox_max', 'bbox_min', 'body', 'center_of_mass_mm', 'inertia', 'mass_g', 'material', 'name', 'surface_area_mm2', 'volume_mm3'], 'additionalProperties': False}}, 'total': {'type': 'object', 'properties': {'center_of_mass_mm': {'type': 'array', 'items': {'type': 'number'}}, 'mass_g': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'volume_mm3': {'type': 'number'}}, 'required': ['center_of_mass_mm', 'mass_g', 'volume_mm3'], 'additionalProperties': False}, 'occurrences': {'type': 'array', 'items': {'type': 'object', 'properties': {'center_of_mass_mm': {'type': 'array', 'items': {'type': 'number'}}, 'mass_g': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'name': {'type': 'string'}, 'occurrence': {'type': 'integer'}, 'part_id': {'type': 'integer'}, 'volume_mm3': {'type': 'number'}}, 'required': ['center_of_mass_mm', 'mass_g', 'name', 'occurrence', 'part_id', 'volume_mm3'], 'additionalProperties': False}}}, 'required': ['total'], 'additionalProperties': False},
+    'print_allowance': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'basic_mm': {'type': 'number'}, 'confirm': {'type': 'string'}, 'designation': {'type': 'string'}, 'kind': {'type': 'string'}, 'material': {'type': 'string'}, 'model_mm': {'type': 'number'}, 'pitch': {'type': 'number'}, 'process': {'type': 'string'}, 'source': {'type': 'string'}, 'stl_chord_loss_mm': {'type': 'number'}, 'stl_deflection_mm': {'type': 'number'}, 'stl_note': {'type': 'string'}, 'profile': {'type': 'string'}, 'note': {'type': 'string'}}, 'required': ['allowance_mm', 'basic_mm', 'confirm', 'kind', 'material', 'model_mm', 'process', 'source', 'stl_chord_loss_mm', 'stl_deflection_mm', 'stl_note'], 'additionalProperties': False},
+    'remove_requirement': {'type': 'object', 'properties': {'removed': {'type': 'integer'}}, 'required': ['removed'], 'additionalProperties': False},
+    'save_print_profile': {'type': 'object', 'properties': {'conditions': {'type': 'string'}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'process': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'from_mm': {'type': 'number'}, 'kind': {'type': 'string'}, 'source': {'type': 'string'}}, 'required': ['allowance_mm', 'from_mm', 'kind', 'source'], 'additionalProperties': False}}, 'stl_deflection_mm': {'type': 'number'}, 'stl_deflection_stated': {'type': 'boolean'}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}}, 'required': ['material', 'name', 'process', 'rows', 'stl_deflection_mm', 'stl_deflection_stated'], 'additionalProperties': False},
+    'save_template': {'type': 'object', 'properties': {'suggestions': {'type': 'object', 'properties': {'literals': {'type': 'array', 'items': {}}, 'references': {'type': 'array', 'items': {'type': 'string'}}, 'variables': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['literals', 'references', 'variables'], 'additionalProperties': False}, 'template': {'type': 'object', 'properties': {'features': {'type': 'array', 'items': {'type': 'object'}}, 'name': {'type': 'string'}, 'parameters': {'type': 'array', 'items': {'type': 'object'}}, 'revision': {'type': 'integer'}, 'comment': {'type': 'string'}}, 'required': ['features', 'name', 'parameters', 'revision'], 'additionalProperties': False}, 'instances_marked': {'type': 'array', 'items': {'type': 'object', 'properties': {'feature_id': {'type': 'integer'}, 'name': {'type': 'string'}, 'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'revision': {'type': 'integer'}, 'template_changed': {'type': 'boolean'}}, 'required': ['feature_id', 'name', 'part', 'part_id', 'revision', 'template_changed'], 'additionalProperties': False}}}, 'required': ['template'], 'additionalProperties': False},
+    'set_job_fixture': {'type': 'object', 'properties': {'enabled': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'part': {'type': 'integer'}, 'pos': {'type': 'array', 'items': {'type': 'number'}}, 'rot_z': {'type': 'number'}, 'safe_z': {'type': 'number'}, 'setup': {'type': 'integer'}, 'seat': {'type': 'object', 'properties': {'along_mm': {'type': 'number'}, 'edge': {'type': 'string'}, 'element': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'over_mm': {'type': 'number'}, 'spin_deg': {'type': 'number'}}, 'required': ['along_mm', 'edge', 'element', 'feature_id', 'over_mm', 'spin_deg'], 'additionalProperties': False}, 'box': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['enabled', 'id', 'name', 'pos', 'rot_z', 'safe_z', 'setup'], 'additionalProperties': False},
+    'set_job_part': {'type': 'object', 'properties': {'configuration': {'type': 'integer'}, 'id': {'type': 'integer'}, 'moved': {'type': 'integer'}, 'configuration_name': {'type': 'string'}}, 'required': ['configuration', 'id', 'moved'], 'additionalProperties': False},
+    'set_print_process': {'type': 'object', 'properties': {'print': {'type': 'object', 'properties': {'material': {'type': 'string'}, 'process': {'type': 'string'}, 'stl_deflection_mm': {'type': 'number'}, 'match': {'type': 'string'}, 'profile': {'type': 'string'}, 'conditions': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}}, 'required': ['material', 'process', 'stl_deflection_mm'], 'additionalProperties': False}, 'threads': {'type': 'array', 'items': {'type': 'object'}}, 'confirm': {'type': 'string'}}, 'required': ['print', 'threads'], 'additionalProperties': False},
+    'set_requirement': {'type': 'object', 'properties': {'requirement': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'id': {'type': 'integer'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}}, 'required': ['bound', 'id', 'measure', 'name', 'note', 'revision', 'state'], 'additionalProperties': False}}, 'required': ['requirement'], 'additionalProperties': False},
+    'set_table': {'type': 'object', 'properties': {'regen': {'type': 'object', 'properties': {'failed': {'type': 'array', 'items': {}}, 'ok': {'type': 'boolean'}, 'warnings': {'type': 'array', 'items': {}}}, 'required': ['failed', 'ok', 'warnings'], 'additionalProperties': False}, 'table': {'type': 'object', 'properties': {'columns': {'type': 'array', 'items': {'type': 'string'}}, 'name': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'comment': {'type': 'string'}}, 'required': ['columns', 'name', 'rows'], 'additionalProperties': False}}, 'required': ['regen', 'table'], 'additionalProperties': False},
+    'solve_assembly': {'type': 'object', 'properties': {'errored_mates': {'type': 'integer'}, 'mates': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'status': {'type': 'string'}, 'error': {'type': 'string'}, 'residual_mm': {'type': 'number'}}, 'required': ['id', 'name', 'status'], 'additionalProperties': False}}, 'occurrences': {'type': 'integer'}, 'placed': {'type': 'integer'}, 'placed_by_mates': {'type': 'integer'}, 'placed_by_transform': {'type': 'integer'}, 'dof': {'type': 'integer'}, 'loop_mates': {'type': 'integer'}, 'loops_closed': {'type': 'boolean'}, 'redundant_mates': {'type': 'array', 'items': {'type': 'integer'}}, 'residual_mm': {'type': 'number'}, 'flexible': {'type': 'array', 'items': {'type': 'object', 'properties': {'configuration_id': {'type': 'integer'}, 'mates': {'type': 'array', 'items': {'type': 'object'}}, 'name': {'type': 'string'}, 'occurrence': {'type': 'integer'}, 'placed_by_mates': {'type': 'integer'}, 'placed_by_transform': {'type': 'integer'}}, 'required': ['configuration_id', 'mates', 'name', 'occurrence', 'placed_by_mates', 'placed_by_transform'], 'additionalProperties': False}}, 'errored_attachments': {'type': 'integer'}, 'attachment_errors': {'type': 'array', 'items': {'type': 'object'}}, 'suspects': {'type': 'array', 'items': {'type': 'object', 'properties': {'closes': {'type': 'array', 'items': {'type': 'integer'}}, 'connector': {'type': 'string'}, 'mate': {'type': 'integer'}, 'name': {'type': 'string'}, 'sole': {'type': 'boolean'}, 'tilt_deg': {'type': 'number'}}, 'required': ['closes', 'connector', 'mate', 'name', 'sole', 'tilt_deg'], 'additionalProperties': False}}}, 'required': ['errored_mates', 'mates', 'occurrences', 'placed', 'placed_by_mates', 'placed_by_transform'], 'additionalProperties': False},
+    'split_for_printing': {'type': 'object', 'properties': {'automatic': {'type': 'boolean'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'body': {'type': 'string'}, 'cuts': {'type': 'array', 'items': {'type': 'object', 'properties': {'at_mm': {'type': 'number'}, 'axis': {'type': 'string'}}, 'required': ['at_mm', 'axis'], 'additionalProperties': False}}, 'fits_whole': {'type': 'boolean'}, 'part': {'type': 'string'}, 'pieces': {'type': 'array', 'items': {'type': 'object', 'properties': {'bbox_max': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min': {'type': 'array', 'items': {'type': 'number'}}, 'fits': {'type': 'boolean'}, 'index': {'type': 'integer'}, 'material': {'type': 'string'}, 'orientation': {'type': 'object'}, 'size_mm': {'type': 'array', 'items': {'type': 'number'}}, 'solids': {'type': 'integer'}, 'volume_mm3': {'type': 'number'}, 'part': {'type': 'string'}, 'part_id': {'type': 'integer'}}, 'required': ['bbox_max', 'bbox_min', 'fits', 'index', 'material', 'orientation', 'size_mm', 'solids', 'volume_mm3'], 'additionalProperties': False}}}, 'required': ['automatic', 'bed_mm', 'body', 'cuts', 'fits_whole', 'part', 'pieces'], 'additionalProperties': False},
+    'topo_to_body': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'path': {'type': 'string'}, 'threshold': {'type': 'number'}, 'triangles': {'type': 'integer'}, 'valid': {'type': 'boolean'}, 'volume_mm3': {'type': 'number'}, 'watertight': {'type': 'boolean'}}, 'required': ['part', 'part_id', 'path', 'threshold', 'triangles', 'valid', 'volume_mm3', 'watertight'], 'additionalProperties': False},
+    'tube_schedule': {'type': 'object', 'properties': {'count': {'type': 'integer'}, 'members': {'type': 'integer'}, 'tubes': {'type': 'array', 'items': {'type': 'object', 'properties': {'bends': {'type': 'array', 'items': {'type': 'object'}}, 'bodies': {'type': 'array', 'items': {'type': 'string'}}, 'curve': {'type': 'integer'}, 'cut_length_mm': {'type': 'number'}, 'length_mm': {'type': 'number'}, 'name': {'type': 'string'}, 'outer_diameter_mm': {'type': 'number'}, 'path_length_mm': {'type': 'number'}, 'quantity': {'type': 'integer'}, 'wall_mm': {'type': 'number'}, 'coped_off_mm': {'type': 'number'}}, 'required': ['bends', 'bodies', 'curve', 'cut_length_mm', 'length_mm', 'name', 'outer_diameter_mm', 'path_length_mm', 'quantity', 'wall_mm'], 'additionalProperties': False}}}, 'required': ['count', 'members', 'tubes'], 'additionalProperties': False},
+    'verify_assertions': {'type': 'object', 'properties': {'assertions': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'integer'}, 'b': {'type': 'integer'}, 'id': {'type': 'integer'}, 'last_verdict': {'type': 'string'}, 'measured_mm': {'type': 'number'}, 'min_mm': {'type': 'number'}, 'mode': {'type': 'string'}, 'name': {'type': 'string'}, 'standing': {'type': 'string'}, 'why': {'type': 'string'}, 'note': {'type': 'string'}}, 'required': ['a', 'b', 'id', 'last_verdict', 'min_mm', 'mode', 'name', 'standing', 'why'], 'additionalProperties': False}}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}}, 'required': ['assertions', 'receipt'], 'additionalProperties': False},
+}
+
+
+AddAssertionResult = TypedDict('AddAssertionResult', {
+    'id': int,
+    'name': str,
+})
+
+AddBearingResult = TypedDict('AddBearingResult', {
+    'occurrence': int,
+    'part': str,
+})
+
+AddJobFixtureResult = TypedDict('AddJobFixtureResult', {
+    'box': NotRequired[list[float]],
+    'enabled': bool,
+    'id': int,
+    'name': str,
+    'pos': list[float],
+    'rot_z': float,
+    'safe_z': float,
+    'setup': int,
+    'part': NotRequired[int],
+})
+
+AddRequirementResultRequirement = TypedDict('AddRequirementResultRequirement', {
+    'bound': dict[str, Any],
+    'id': int,
+    'measure': dict[str, Any],
+    'name': str,
+    'note': str,
+    'revision': int,
+    'source': NotRequired[str],
+    'state': str,
+})
+
+AddRequirementResult = TypedDict('AddRequirementResult', {
+    'id': int,
+    'requirement': AddRequirementResultRequirement,
+})
+
+CheckDrawingResultIssues = TypedDict('CheckDrawingResultIssues', {
+    'detail': str,
+    'kind': str,
+    'view': NotRequired[int],
+    'other_view': NotRequired[int],
+    'dim': NotRequired[int],
+    'note': NotRequired[int],
+})
+
+CheckDrawingResultReceipt = TypedDict('CheckDrawingResultReceipt', {
+    'claims': list[dict[str, Any]],
+    'schema': str,
+    'standing': str,
+    'summary': str,
+})
+
+CheckDrawingResult = TypedDict('CheckDrawingResult', {
+    'dims': int,
+    'issues': list[CheckDrawingResultIssues],
+    'ok': bool,
+    'receipt': CheckDrawingResultReceipt,
+    'views': int,
+})
+
+CheckFastenersResultFindings = TypedDict('CheckFastenersResultFindings', {
+    'occurrence': int,
+    'part': str,
+    'why': str,
+})
+
+CheckFastenersResultReceipt = TypedDict('CheckFastenersResultReceipt', {
+    'claims': list[dict[str, Any]],
+    'schema': str,
+    'standing': str,
+    'summary': str,
+})
+
+CheckFastenersResult = TypedDict('CheckFastenersResult', {
+    'examined': int,
+    'findings': list[CheckFastenersResultFindings],
+    'ok': bool,
+    'receipt': CheckFastenersResultReceipt,
+    'skipped': int,
+})
+
+CheckFitResultHole = TypedDict('CheckFitResultHole', {
+    'class': str,
+    'it': float,
+    'it_grade': int,
+    'lower': float,
+    'max': float,
+    'min': float,
+    'upper': float,
+})
+
+CheckFitResultPrint = TypedDict('CheckFitResultPrint', {
+    'hole': NotRequired[dict[str, Any]],
+    'shaft': NotRequired[dict[str, Any]],
+})
+
+CheckFitResultMeasured = TypedDict('CheckFitResultMeasured', {
+    'hole': NotRequired[float],
+    'shaft': NotRequired[float],
+})
+
+CheckFitResultShaft = TypedDict('CheckFitResultShaft', {
+    'class': str,
+    'it': float,
+    'it_grade': int,
+    'lower': float,
+    'max': float,
+    'min': float,
+    'upper': float,
+})
+
+CheckFitResult = TypedDict('CheckFitResult', {
+    'hole': CheckFitResultHole,
+    'print': NotRequired[CheckFitResultPrint],
+    'print_notes': NotRequired[list[str]],
+    'size': float,
+    'size_from': str,
+    'measured': NotRequired[CheckFitResultMeasured],
+    'intent': NotRequired[str],
+    'intent_ok': NotRequired[bool],
+    'kind': NotRequired[str],
+    'max_clearance': NotRequired[float],
+    'min_clearance': NotRequired[float],
+    'note': NotRequired[str],
+    'shaft': NotRequired[CheckFitResultShaft],
+})
+
+CheckFitsResultFits = TypedDict('CheckFitsResultFits', {
+    'hole': NotRequired[dict[str, Any]],
+    'kind': NotRequired[str],
+    'mate': int,
+    'mate_name': str,
+    'mate_type': str,
+    'max_clearance': NotRequired[float],
+    'min_clearance': NotRequired[float],
+    'note': NotRequired[str],
+    'shaft': NotRequired[dict[str, Any]],
+    'size': NotRequired[float],
+    'status': str,
+    'reason': NotRequired[str],
+})
+
+CheckFitsResultReceipt = TypedDict('CheckFitsResultReceipt', {
+    'claims': list[dict[str, Any]],
+    'schema': str,
+    'standing': str,
+    'summary': str,
+})
+
+CheckFitsResult = TypedDict('CheckFitsResult', {
+    'failed': int,
+    'fits': list[CheckFitsResultFits],
+    'passed': int,
+    'receipt': CheckFitsResultReceipt,
+    'reported': int,
+    'status': str,
+    'unverified': int,
+    'warned': int,
+})
+
+CheckGeometryResultBodies = TypedDict('CheckGeometryResultBodies', {
+    'bad_edges': int,
+    'bad_faces': int,
+    'bad_wires': int,
+    'body': int,
+    'name': str,
+    'reasons': list[str],
+    'valid': bool,
+})
+
+CheckGeometryResultFeatureErrors = TypedDict('CheckGeometryResultFeatureErrors', {
+    'error': str,
+    'index': int,
+    'name': str,
+    'after_earlier_failure': NotRequired[bool],
+})
+
+CheckGeometryResultReceipt = TypedDict('CheckGeometryResultReceipt', {
+    'claims': list[dict[str, Any]],
+    'schema': str,
+    'standing': str,
+    'summary': str,
+})
+
+CheckGeometryResultTemplatesChanged = TypedDict('CheckGeometryResultTemplatesChanged', {
+    'id': int,
+    'name': str,
+    'revision': int,
+    'template': str,
+})
+
+CheckGeometryResultStaleDerived = TypedDict('CheckGeometryResultStaleDerived', {
+    'id': int,
+    'name': str,
+    'source': str,
+})
+
+CheckGeometryResult = TypedDict('CheckGeometryResult', {
+    'bodies': list[CheckGeometryResultBodies],
+    'body_components': NotRequired[list[list[str]]],
+    'body_count': int,
+    'connected': NotRequired[bool],
+    'feature_errors': list[CheckGeometryResultFeatureErrors],
+    'ok': bool,
+    'receipt': CheckGeometryResultReceipt,
+    'valid': bool,
+    'warnings': NotRequired[list[str]],
+    'templates_changed': NotRequired[list[CheckGeometryResultTemplatesChanged]],
+    'stale_derived': NotRequired[list[CheckGeometryResultStaleDerived]],
+})
+
+CheckLiteralsResultChecked = TypedDict('CheckLiteralsResultChecked', {
+    'fields': int,
+    'placements': int,
+})
+
+CheckLiteralsResultLiterals = TypedDict('CheckLiteralsResultLiterals', {
+    'feature': str,
+    'feature_id': int,
+    'field': str,
+    'label': str,
+    'quantity': str,
+    'value': float,
+    'variables': list[str],
+})
+
+CheckLiteralsResultPlacements = TypedDict('CheckLiteralsResultPlacements', {
+    'face': dict[str, Any],
+    'face_feature': str,
+    'face_made_by': int,
+    'feature': str,
+    'feature_id': int,
+    'normal': list[float],
+    'on': str,
+    'origin': list[float],
+})
+
+CheckLiteralsResult = TypedDict('CheckLiteralsResult', {
+    'checked': CheckLiteralsResultChecked,
+    'literals': list[CheckLiteralsResultLiterals],
+    'part': str,
+    'placements': list[CheckLiteralsResultPlacements],
+})
+
+CheckPrintResultBed = TypedDict('CheckPrintResultBed', {
+    'contact_area_mm2': float,
+    'lowest_mm': float,
+    'on_bed': list[str],
+    'status': str,
+    'tol_mm': float,
+})
+
+CheckPrintResultBodies = TypedDict('CheckPrintResultBodies', {
+    'body': int,
+    'lowest_mm': float,
+    'name': str,
+    'solids': int,
+    'watertight': bool,
+})
+
+CheckPrintResultBridges = TypedDict('CheckPrintResultBridges', {
+    'area_mm2': float,
+    'faces': list[dict[str, Any]],
+    'limit_from': str,
+    'limit_mm': float,
+    'note': str,
+    'status': str,
+    'worst_span_mm': float,
+    'source': NotRequired[str],
+})
+
+CheckPrintResultChords = TypedDict('CheckPrintResultChords', {
+    'deflection_from': str,
+    'deflection_mm': float,
+    'limit_mm': float,
+    'note': str,
+    'status': str,
+})
+
+CheckPrintResultClearance = TypedDict('CheckPrintResultClearance', {
+    'note': str,
+    'pairs': list[dict[str, Any]],
+    'pruned': int,
+    'required_from': str,
+    'required_mm': float,
+    'status': str,
+    'tolerance_mm': float,
+    'min_mm': NotRequired[float],
+})
+
+CheckPrintResultOverhang = TypedDict('CheckPrintResultOverhang', {
+    'allowance_mm2': float,
+    'area_mm2': float,
+    'faces': list[dict[str, Any]],
+    'limit_deg': float,
+    'limit_from': str,
+    'note': str,
+    'status': str,
+    'worst_deg': float,
+    'source': NotRequired[str],
+    'worst': NotRequired[dict[str, Any]],
+})
+
+CheckPrintResultReceipt = TypedDict('CheckPrintResultReceipt', {
+    'claims': list[dict[str, Any]],
+    'schema': str,
+    'standing': str,
+    'summary': str,
+})
+
+CheckPrintResultShells = TypedDict('CheckPrintResultShells', {
+    'expected': int,
+    'joined': list[list[str]],
+    'pieces': int,
+    'split': list[Any],
+    'status': str,
+    'watertight': bool,
+})
+
+CheckPrintResult = TypedDict('CheckPrintResult', {
+    'bed': CheckPrintResultBed,
+    'bodies': list[CheckPrintResultBodies],
+    'bridges': CheckPrintResultBridges,
+    'chords': CheckPrintResultChords,
+    'clearance': CheckPrintResultClearance,
+    'direction': list[float],
+    'ok': bool,
+    'overhang': CheckPrintResultOverhang,
+    'process': str | None,
+    'receipt': CheckPrintResultReceipt,
+    'shells': CheckPrintResultShells,
+})
+
+CheckRequirementsResultReceipt = TypedDict('CheckRequirementsResultReceipt', {
+    'claims': list[dict[str, Any]],
+    'schema': str,
+    'standing': str,
+    'summary': str,
+})
+
+CheckRequirementsResultRequirements = TypedDict('CheckRequirementsResultRequirements', {
+    'bound': dict[str, Any],
+    'checked_at': NotRequired[str],
+    'detail': NotRequired[dict[str, Any]],
+    'evidence_revision': NotRequired[int],
+    'id': int,
+    'input_hash': NotRequired[str],
+    'limit': NotRequired[float],
+    'measure': dict[str, Any],
+    'name': str,
+    'revision': int,
+    'source': NotRequired[str],
+    'state': str,
+    'unit': NotRequired[str],
+    'value': NotRequired[float],
+    'limit_max': NotRequired[float],
+    'limit_min': NotRequired[float],
+    'note': NotRequired[str],
+})
+
+CheckRequirementsResultSummary = TypedDict('CheckRequirementsResultSummary', {
+    'fail': int,
+    'pass': int,
+    'stale': int,
+    'unchecked': int,
+    'unresolved': int,
+})
+
+CheckRequirementsResult = TypedDict('CheckRequirementsResult', {
+    'all_pass': NotRequired[bool],
+    'checked': NotRequired[int],
+    'receipt': NotRequired[CheckRequirementsResultReceipt],
+    'requirements': list[CheckRequirementsResultRequirements],
+    'reused': NotRequired[int],
+    'summary': CheckRequirementsResultSummary,
+    'checking': NotRequired[int],
+    'job': NotRequired[int],
+    'kind': NotRequired[str],
+    'started': NotRequired[bool],
+})
+
+CheckSeatResultAbutment = TypedDict('CheckSeatResultAbutment', {
+    'D_a_max': float,
+    'd_a_max': float,
+    'd_a_min': float,
+    'r_a_max': float,
+    'source': str,
+    'variant': str,
+})
+
+CheckSeatResultChecks = TypedDict('CheckSeatResultChecks', {
+    'characteristic': str,
+    'observed': float,
+    'required': NotRequired[float],
+    'status': str,
+    'maximum': NotRequired[float],
+    'reason': NotRequired[str],
+    'units': NotRequired[str],
+    'limit': NotRequired[str],
+    'source': NotRequired[str],
+    'variant': NotRequired[str],
+    'printed': NotRequired[str],
+    'minimum': NotRequired[float],
+})
+
+CheckSeatResultMeasurements = TypedDict('CheckSeatResultMeasurements', {
+    'fillet_radius': float,
+    'housing_diameter': float,
+    'shaft_diameter': float,
+    'shoulder_diameter': float,
+})
+
+CheckSeatResultSeats = TypedDict('CheckSeatResultSeats', {
+    'diameter': float,
+    'face': str,
+    'feature_id': int,
+    'fillet_radius': NotRequired[float],
+    'gap_mm': NotRequired[float],
+    'inner_path': list[Any],
+    'mate': int | None,
+    'occurrence': int,
+    'part': str,
+    'ring': str,
+    'shoulder': bool,
+    'shoulder_diameter': NotRequired[float],
+    'found': NotRequired[str],
+    'modelled_diameter': NotRequired[float],
+    'retainer': NotRequired[dict[str, Any]],
+})
+
+CheckSeatResult = TypedDict('CheckSeatResult', {
+    'B': float,
+    'D': float,
+    'abutment': CheckSeatResultAbutment,
+    'checks': list[CheckSeatResultChecks],
+    'd': float,
+    'designation': str,
+    'evidence': str,
+    'measurements': CheckSeatResultMeasurements,
+    'occurrence': int,
+    'r_min': float,
+    'seats': list[CheckSeatResultSeats],
+    'status': str,
+})
+
+CheckSheetMetalResultViolations = TypedDict('CheckSheetMetalResultViolations', {
+    'actual_mm': float,
+    'bend': int,
+    'element': NotRequired[dict[str, Any]],
+    'kind': str,
+    'message': str,
+    'required_mm': float,
+})
+
+CheckSheetMetalResult = TypedDict('CheckSheetMetalResult', {
+    'bends_checked': int,
+    'holes_checked': int,
+    'not_checked': list[str],
+    'ok': bool,
+    'violations': list[CheckSheetMetalResultViolations],
+})
+
+CheckTopologyResultCases = TypedDict('CheckTopologyResultCases', {
+    'displacement_ratio': float,
+    'name': str,
+    'shape': dict[str, Any],
+    'solid': dict[str, Any],
+})
+
+CheckTopologyResultIslands = TypedDict('CheckTopologyResultIslands', {
+    'components': int,
+    'keep_faces': list[Any],
+    'load_path_broken': bool,
+    'tets': int,
+    'volume_mm3': float,
+})
+
+CheckTopologyResult = TypedDict('CheckTopologyResult', {
+    'job': NotRequired[int],
+    'kind': NotRequired[str],
+    'outlives_client': NotRequired[bool],
+    'running': NotRequired[bool],
+    'shape_study': int,
+    'solid_study': int,
+    'started': NotRequired[bool],
+    'cases': NotRequired[list[CheckTopologyResultCases]],
+    'dropped_tets': NotRequired[int],
+    'islands': NotRequired[CheckTopologyResultIslands],
+    'reused': NotRequired[bool],
+    'threshold': NotRequired[float],
+    'threshold_lowered_from': NotRequired[float],
+    'topology': NotRequired[int],
+})
+
+ContactReportResultClashes = TypedDict('ContactReportResultClashes', {
+    'a': str,
+    'a_id': int,
+    'b': str,
+    'b_id': int,
+    'bbox_max_mm': list[float],
+    'bbox_min_mm': list[float],
+    'centroid_mm': list[float],
+    'engaged_thread_pairs': int,
+    'press_fit_pairs': int,
+    'press_fit_refused': NotRequired[list[dict[str, Any]]],
+    'ring_grip_pairs': int,
+    'ring_grip_volume_mm3': float,
+    'thread_engagement_volume_mm3': float,
+    'volume_mm3': float,
+})
+
+ContactReportResultNearMisses = TypedDict('ContactReportResultNearMisses', {
+    'a': str,
+    'a_id': int,
+    'b': str,
+    'b_id': int,
+    'distance': float,
+})
+
+ContactReportResultPairs = TypedDict('ContactReportResultPairs', {
+    'a': str,
+    'a_id': NotRequired[int],
+    'b': str,
+    'b_id': NotRequired[int],
+    'distance': float,
+    'press_fit_volume_mm3': NotRequired[float],
+    'press_fits': NotRequired[list[dict[str, Any]]],
+    'state': str,
+    'volume_mm3': float,
+    'press_fit_refused': NotRequired[list[dict[str, Any]]],
+    'checked': NotRequired[str],
+})
+
+ContactReportResultPressFits = TypedDict('ContactReportResultPressFits', {
+    'a': str,
+    'a_id': int,
+    'b': str,
+    'b_id': int,
+    'fits': list[dict[str, Any]],
+    'volume_mm3': float,
+})
+
+ContactReportResultReceipt = TypedDict('ContactReportResultReceipt', {
+    'claims': list[dict[str, Any]],
+    'schema': str,
+    'standing': str,
+    'summary': str,
+})
+
+ContactReportResultUnmatedContacts = TypedDict('ContactReportResultUnmatedContacts', {
+    'a': str,
+    'b': str,
+})
+
+ContactReportResultUnrealizedMates = TypedDict('ContactReportResultUnrealizedMates', {
+    'id': int,
+    'mate': str,
+})
+
+ContactReportResult = TypedDict('ContactReportResult', {
+    'clash': NotRequired[bool],
+    'clashes': NotRequired[list[ContactReportResultClashes]],
+    'components': NotRequired[list[list[str]]],
+    'connected': NotRequired[bool],
+    'elapsed_s': NotRequired[float],
+    'mode': NotRequired[str],
+    'near_misses': NotRequired[list[ContactReportResultNearMisses]],
+    'near_tol': NotRequired[float],
+    'occurrences': NotRequired[int],
+    'pairs': NotRequired[list[ContactReportResultPairs]],
+    'pairs_box_cleared': NotRequired[int],
+    'pairs_checked': NotRequired[int],
+    'press_fits': NotRequired[list[ContactReportResultPressFits]],
+    'receipt': NotRequired[ContactReportResultReceipt],
+    'touch_tol': NotRequired[float],
+    'unmated_contacts': NotRequired[list[ContactReportResultUnmatedContacts]],
+    'unrealized_mates': NotRequired[list[ContactReportResultUnrealizedMates]],
+    'bodies': NotRequired[int],
+    'scope': NotRequired[str],
+    'pairs_unchecked': NotRequired[int],
+    'truncated': NotRequired[bool],
+    'truncation': NotRequired[str],
+    'deflection_mm': NotRequired[float],
+    'mesh_cleared': NotRequired[int],
+    'job': NotRequired[int],
+    'kind': NotRequired[str],
+    'outlives_client': NotRequired[bool],
+    'running': NotRequired[bool],
+    'started': NotRequired[bool],
+    'not_checked': NotRequired[Any],
+})
+
+ContactStatusResult = TypedDict('ContactStatusResult', {
+    'cancel_requested': NotRequired[bool],
+    'cancellable': NotRequired[bool],
+    'elapsed_seconds': NotRequired[float],
+    'fraction': NotRequired[float],
+    'job': int,
+    'kind': str,
+    'label': NotRequired[str],
+    'outlives_client': NotRequired[bool],
+    'running': bool,
+    'outcome': NotRequired[str],
+    'seconds': NotRequired[float],
+    'error': NotRequired[str],
+    'cancel_reason': NotRequired[str],
+    'report': NotRequired[dict[str, Any]],
+})
+
+CrashReportsResultReports = TypedDict('CrashReportsResultReports', {
+    'autosaves': list[str],
+    'build': str,
+    'crashed': bool,
+    'mode': str,
+    'os': str,
+    'path': str,
+    'project': str,
+    'reason': str,
+    'started': str,
+    'stem': str,
+    'version': str,
+})
+
+CrashReportsResult = TypedDict('CrashReportsResult', {
+    'folder': str,
+    'reports': list[CrashReportsResultReports],
+})
+
+CurvePointsResult = TypedDict('CurvePointsResult', {
+    'at_mm': list[float],
+    'curve': int,
+    'kind': str,
+    'length_mm': float,
+    'name': str,
+    'points': list[list[float]],
+})
+
+ExportStlResult = TypedDict('ExportStlResult', {
+    'bodies': int,
+    'deflection_from': str,
+    'deflection_mm': float,
+    'free_edges': int,
+    'path': str,
+    'shells': int,
+    'watertight': bool,
+    'chord_share': NotRequired[float],
+    'smallest_gap_side_mm': NotRequired[float],
+    'warning': NotRequired[str],
+})
+
+ExtractVariablesResultLeftAlone = TypedDict('ExtractVariablesResultLeftAlone', {
+    'feature': str,
+    'feature_id': int,
+    'field': str,
+    'label': str,
+    'reason': str,
+    'value': float,
+})
+
+ExtractVariablesResultVariables = TypedDict('ExtractVariablesResultVariables', {
+    'existing': bool,
+    'expression': str,
+    'name': str,
+    'quantity': str,
+    'uses': list[dict[str, Any]],
+    'value': float,
+})
+
+ExtractVariablesResult = TypedDict('ExtractVariablesResult', {
+    'applied': bool,
+    'left_alone': list[ExtractVariablesResultLeftAlone],
+    'scope': str,
+    'variables': list[ExtractVariablesResultVariables],
+    'digest': NotRequired[dict[str, Any]],
+    'regen': NotRequired[dict[str, Any]],
+})
+
+FitBearingResultOtherRing = TypedDict('FitBearingResultOtherRing', {
+    'diameter_check': dict[str, Any],
+    'ring': str,
+    'seat': dict[str, Any],
+})
+
+FitBearingResult = TypedDict('FitBearingResult', {
+    'candidates': list[str],
+    'designation': str,
+    'mate': int,
+    'occurrence': int,
+    'other_mate': int,
+    'other_ring': FitBearingResultOtherRing,
+    'overhang_mm': float,
+    'seat_diameter_mm': float,
+    'shaft': bool,
+    'shoulder': bool,
+    'summary': str,
+})
+
+FitRetainingRingResult = TypedDict('FitRetainingRingResult', {
+    'designation': str,
+    'groove_feature': int,
+    'occurrence': int,
+    'orientation': list[float],
+    'parent': int,
+    'part': str,
+    'position': list[float],
+    'size_mm': float,
+    'standard': str,
+    'summary': str,
+})
+
+GetKeymapResultBindings = TypedDict('GetKeymapResultBindings', {
+    'chord': str,
+    'context': str,
+    'custom': bool,
+    'default': str,
+    'id': str,
+    'label': str,
+    'section': str,
+    'alt': NotRequired[str],
+    'hidden': NotRequired[bool],
+})
+
+GetKeymapResultConflicts = TypedDict('GetKeymapResultConflicts', {
+    'context': str,
+    'chord': str,
+    'commands': list[str],
+})
+
+GetKeymapResult = TypedDict('GetKeymapResult', {
+    'active': str,
+    'bindings': list[GetKeymapResultBindings],
+    'conflicts': list[GetKeymapResultConflicts],
+    'contexts': list[str],
+})
+
+GetPrintProcessResultPrint = TypedDict('GetPrintProcessResultPrint', {
+    'material': str,
+    'process': str,
+    'stl_deflection_mm': float,
+    'match': NotRequired[str],
+    'profile': NotRequired[str],
+    'conditions': NotRequired[str],
+    'rows': NotRequired[list[dict[str, Any]]],
+    'layer_height_mm': NotRequired[float],
+    'z_gap_mm': NotRequired[float],
+})
+
+GetPrintProcessResultTables = TypedDict('GetPrintProcessResultTables', {
+    'conditions': str,
+    'material': str,
+    'min_reliable_thread_mm': float,
+    'process': str,
+    'repeatability_mm': float,
+    'repeatability_source': str,
+    'rows': list[dict[str, Any]],
+})
+
+GetPrintProcessResultThreads = TypedDict('GetPrintProcessResultThreads', {
+    'allowance_mm': float,
+    'confirm': str,
+    'designation': str,
+    'feature_id': int,
+    'known': bool,
+    'model_face': NotRequired[float],
+    'model_major': NotRequired[float],
+    'modeled': bool,
+    'modelled_major': float,
+    'name': str,
+    'notes': list[str],
+    'pitch': float,
+    'prints_major': float,
+    'sentence': str,
+    'side': str,
+    'want_major': NotRequired[float],
+})
+
+GetPrintProcessResult = TypedDict('GetPrintProcessResult', {
+    'confirm': str,
+    'print': GetPrintProcessResultPrint | None,
+    'tables': list[GetPrintProcessResultTables],
+    'threads': NotRequired[list[GetPrintProcessResultThreads]],
+})
+
+GetSettingsResultWindow = TypedDict('GetSettingsResultWindow', {
+    'h': int,
+    'maximized': bool,
+    'w': int,
+    'x': int,
+    'y': int,
+})
+
+GetSettingsResult = TypedDict('GetSettingsResult', {
+    'autosave_interval': float,
+    'devices': list[str],
+    'git_user_email': str,
+    'git_user_name': str,
+    'gpu_device': str,
+    'idle_throttle': bool,
+    'keys': dict[str, Any],
+    'lock_lights_to_model': bool,
+    'path': str,
+    'settings_format': int,
+    'shadow_map': int,
+    'shadows': bool,
+    'ssao': str,
+    'terminal_panel': bool,
+    'ui_font_scale': float,
+    'window': GetSettingsResultWindow,
+})
+
+GetSheetMetalRulesResultRules = TypedDict('GetSheetMetalRulesResultRules', {
+    'bend_radius_mm': float,
+    'bend_radius_source': str,
+    'gauge': str,
+    'k_factor': float,
+    'k_factor_source': str,
+    'material': str,
+    'min_bend_radius_mm': float,
+    'relief': str,
+    'relief_depth_mm': float,
+    'relief_width_mm': float,
+    'thickness_mm': float,
+})
+
+GetSheetMetalRulesResult = TypedDict('GetSheetMetalRulesResult', {
+    'relief_styles': list[str],
+    'rules': GetSheetMetalRulesResultRules | None,
+    'stock': dict[str, Any],
+})
+
+GetStateResultBodies = TypedDict('GetStateResultBodies', {
+    'bbox_max': list[float],
+    'bbox_min': list[float],
+    'created_by': int,
+    'material': str,
+    'name': str,
+    'volume_mm3': float,
+    'reference': NotRequired[bool],
+    'mesh': NotRequired[int],
+    'face_appearance': NotRequired[list[dict[str, Any]]],
+    'appearance': NotRequired[dict[str, Any]],
+})
+
+GetStateResultCamera = TypedDict('GetStateResultCamera', {
+    'aspect': float,
+    'distance': float,
+    'fov_deg': float,
+    'position': list[float],
+    'target': list[float],
+})
+
+GetStateResultRegen = TypedDict('GetStateResultRegen', {
+    'cached': int,
+    'executed': int,
+    'failed': list[dict[str, Any]],
+    'ok': bool,
+    'warnings': list[dict[str, Any]],
+})
+
+GetStateResultRevision = TypedDict('GetStateResultRevision', {
+    'instance': int,
+    'part_id': int,
+    'session': str,
+    'version': int,
+})
+
+GetStateResultSelection = TypedDict('GetStateResultSelection', {
+    'mesh': int,
+    'face': int,
+    'normal': list[float],
+    'center': list[float],
+})
+
+GetStateResultSelectionItems = TypedDict('GetStateResultSelectionItems', {
+    'kind': str,
+    'id': NotRequired[int],
+    'path': NotRequired[list[int]],
+    'element': NotRequired[dict[str, Any]],
+})
+
+GetStateResult = TypedDict('GetStateResult', {
+    'bodies': list[GetStateResultBodies],
+    'camera': GetStateResultCamera,
+    'can_redo': bool,
+    'can_undo': bool,
+    'features': list[dict[str, Any]],
+    'pending_feature_id': int,
+    'regen': GetStateResultRegen,
+    'revision': GetStateResultRevision,
+    'rollback': int,
+    'selected_feature': int,
+    'selection': GetStateResultSelection | None,
+    'selection_items': list[GetStateResultSelectionItems],
+    'view_rollback': int,
+})
+
+GetTubeRulesResultRules = TypedDict('GetTubeRulesResultRules', {
+    'material': str,
+    'max_thinning': float,
+    'former_radii_mm': list[float],
+    'min_straight': float | str,
+    'tail_length': float | str,
+})
+
+GetTubeRulesResult = TypedDict('GetTubeRulesResult', {
+    'rules': GetTubeRulesResultRules | None,
+    'stocked': NotRequired[dict[str, Any]],
+})
+
+GetUnitsResult = TypedDict('GetUnitsResult', {
+    'angle': str,
+    'length': str,
+    'mass': str,
+})
+
+LayoutBalloonsResultPlaced = TypedDict('LayoutBalloonsResultPlaced', {
+    'item': int,
+    'note': int,
+    'occurrence': int,
+    'part': str,
+    'position': list[float],
+    'view': int,
+})
+
+LayoutBalloonsResult = TypedDict('LayoutBalloonsResult', {
+    'crossings': int,
+    'placed': list[LayoutBalloonsResultPlaced],
+    'unplaced': list[Any],
+})
+
+ListAssertionsResultAssertions = TypedDict('ListAssertionsResultAssertions', {
+    'a': int,
+    'b': int,
+    'id': int,
+    'min_mm': float,
+    'mode': str,
+    'name': str,
+    'note': NotRequired[str],
+    'standing': str,
+    'why': str,
+    'last_verdict': NotRequired[str],
+    'measured_mm': NotRequired[float],
+})
+
+ListAssertionsResult = TypedDict('ListAssertionsResult', {
+    'assertions': list[ListAssertionsResultAssertions],
+})
+
+ListBearingsResultBearings = TypedDict('ListBearingsResultBearings', {
+    'B_mm': float,
+    'D_a_max_mm': float | None,
+    'D_mm': float,
+    'd_a_max_mm': float | None,
+    'd_a_min_mm': float | None,
+    'd_mm': float,
+    'designation': str,
+    'r_a_max_mm': float | None,
+    'r_min_mm': float,
+    'series': str,
+})
+
+ListBearingsResult = TypedDict('ListBearingsResult', {
+    'bearings': list[ListBearingsResultBearings],
+})
+
+ListBendsResultBends = TypedDict('ListBendsResultBends', {
+    'angle_deg': float,
+    'axis': list[float],
+    'axis_origin': list[float],
+    'below_minimum': bool,
+    'body': int,
+    'crushed': bool,
+    'feature_id': int,
+    'flat': bool,
+    'folds': NotRequired[str | None],
+    'index': int,
+    'k_factor': float,
+    'k_source': str,
+    'min_radius_mm': float,
+    'radius_mm': float,
+    'width_mm': float,
+    'allowance_mm': NotRequired[float],
+})
+
+ListBendsResultRules = TypedDict('ListBendsResultRules', {
+    'bend_radius_mm': float,
+    'bend_radius_source': str,
+    'gauge': str,
+    'k_factor': float,
+    'k_factor_source': str,
+    'material': str,
+    'min_bend_radius_mm': float,
+    'relief': str,
+    'relief_depth_mm': float,
+    'relief_width_mm': float,
+    'thickness_mm': float,
+})
+
+ListBendsResult = TypedDict('ListBendsResult', {
+    'bends': list[ListBendsResultBends],
+    'count': int,
+    'rules': ListBendsResultRules,
+})
+
+ListCamSetupsResultSetups = TypedDict('ListCamSetupsResultSetups', {
+    'chuck': int,
+    'fit_arcs': bool,
+    'fixtures': list[dict[str, Any]],
+    'frame': list[float],
+    'grip_mm': float,
+    'has_rotary_axis': bool,
+    'held_in': str,
+    'id': int,
+    'machine': dict[str, Any],
+    'machine_match': str,
+    'name': str,
+    'operations': list[dict[str, Any]],
+    'order': str,
+    'origin': list[float],
+    'origin_at': str,
+    'post': str,
+    'reach_offset': list[float],
+    'rotation_a': float,
+    'safe_z': float,
+    'split_output': bool,
+    'stock': NotRequired[dict[str, Any]],
+    'tailstock': int,
+    'tools': list[dict[str, Any]],
+    'top_face': NotRequired[dict[str, Any]],
+})
+
+ListCamSetupsResult = TypedDict('ListCamSetupsResult', {
+    'setups': list[ListCamSetupsResultSetups],
+})
+
+ListCatalogsResultCatalogs = TypedDict('ListCatalogsResultCatalogs', {
+    'hash': str,
+    'id': str,
+    'license': str,
+    'record_count': int,
+    'resolved': bool,
+    'revision': str,
+    'schema': str,
+    'source': str,
+    'storage': str,
+    'units': str,
+})
+
+ListCatalogsResult = TypedDict('ListCatalogsResult', {
+    'catalogs': list[ListCatalogsResultCatalogs],
+})
+
+ListConfigurationsResultConfigurations = TypedDict('ListConfigurationsResultConfigurations', {
+    'id': int,
+    'name': str,
+    'parameter_overrides': NotRequired[list[dict[str, Any]]],
+    'suppressed_features': NotRequired[list[int]],
+    'unsuppressed_features': NotRequired[list[int]],
+    'mate_overrides': NotRequired[list[Any]],
+    'suppressed_mates': NotRequired[list[Any]],
+    'suppressed_occurrences': NotRequired[list[int]],
+    'suppressed_relations': NotRequired[list[Any]],
+})
+
+ListConfigurationsResult = TypedDict('ListConfigurationsResult', {
+    'active': int,
+    'configurations': list[ListConfigurationsResultConfigurations],
+})
+
+ListDrawingDimsResultDims = TypedDict('ListDrawingDimsResultDims', {
+    'id': int,
+    'kind': str,
+    'resolved': bool,
+    'text': str,
+    'value': float,
+    'view': int,
+})
+
+ListDrawingDimsResult = TypedDict('ListDrawingDimsResult', {
+    'dims': list[ListDrawingDimsResultDims],
+})
+
+ListDrawingGeometryResultGeometry = TypedDict('ListDrawingGeometryResultGeometry', {
+    'bbox': NotRequired[list[list[float]]],
+    'kind': str,
+    'p1': NotRequired[list[float]],
+    'p2': NotRequired[list[float]],
+    'ref': dict[str, Any],
+    'source_feature': NotRequired[dict[str, Any]],
+    'source_id': int,
+    'type': str,
+    'visible': bool,
+    'center': NotRequired[list[float]],
+    'closed': NotRequired[bool],
+    'radius': NotRequired[float],
+})
+
+ListDrawingGeometryResult = TypedDict('ListDrawingGeometryResult', {
+    'geometry': list[ListDrawingGeometryResultGeometry],
+})
+
+ListDrawingNotesResultNotes = TypedDict('ListDrawingNotesResultNotes', {
+    'error': str,
+    'id': int,
+    'leader_resolved': bool,
+    'pos': list[float],
+    'resolved': bool,
+    'resolved_text': str,
+    'style': str,
+    'table': str,
+    'text': str,
+    'view': int,
+    'fcf': NotRequired[dict[str, Any]],
+    'dim': NotRequired[int],
+})
+
+ListDrawingNotesResult = TypedDict('ListDrawingNotesResult', {
+    'notes': list[ListDrawingNotesResultNotes],
+})
+
+ListDrawingViewsResultViews = TypedDict('ListDrawingViewsResultViews', {
+    'base_view': int,
+    'bbox': list[list[float]] | None,
+    'bend_lines': NotRequired[int],
+    'configuration': int,
+    'cost': NotRequired[dict[str, Any]],
+    'curves': int,
+    'has_geometry': bool,
+    'hidden': list[Any],
+    'id': int,
+    'name': str,
+    'orientation': str,
+    'position': list[float],
+    'quality': str,
+    'scale': float,
+    'show_hidden': bool,
+    'source_id': int,
+    'stale': bool,
+    'section': NotRequired[dict[str, Any]],
+    'detail': NotRequired[dict[str, Any]],
+    'warnings': NotRequired[list[str]],
+    'error': NotRequired[str],
+})
+
+ListDrawingViewsResult = TypedDict('ListDrawingViewsResult', {
+    'views': list[ListDrawingViewsResultViews],
+})
+
+ListDrawingsResultDrawings = TypedDict('ListDrawingsResultDrawings', {
+    'dims': int,
+    'id': int,
+    'index': int,
+    'name': str,
+    'views': int,
+})
+
+ListDrawingsResult = TypedDict('ListDrawingsResult', {
+    'drawings': list[ListDrawingsResultDrawings],
+})
+
+ListElementsResultBodies = TypedDict('ListElementsResultBodies', {
+    'body': int,
+    'created_by': int,
+    'edges': list[dict[str, Any]],
+    'faces': list[dict[str, Any]],
+    'job_part': int,
+    'name': str,
+    'unnamed_faces': int,
+})
+
+ListElementsResult = TypedDict('ListElementsResult', {
+    'bodies': list[ListElementsResultBodies],
+    'matched_edges': NotRequired[int],
+    'matched_faces': NotRequired[int],
+    'why': NotRequired[str],
+})
+
+ListExplodedViewsResultViews = TypedDict('ListExplodedViewsResultViews', {
+    'id': int,
+    'name': str,
+    'steps': list[dict[str, Any]],
+    'type': str,
+})
+
+ListExplodedViewsResult = TypedDict('ListExplodedViewsResult', {
+    'active': int,
+    'factor': float,
+    'views': list[ListExplodedViewsResultViews],
+})
+
+ListJobPartsResultParts = TypedDict('ListJobPartsResultParts', {
+    'configuration': int,
+    'configuration_name': NotRequired[str],
+    'id': int,
+    'missing': bool,
+    'name': str,
+    'placements': list[Any],
+    'source': int,
+    'why': NotRequired[str],
+})
+
+ListJobPartsResult = TypedDict('ListJobPartsResult', {
+    'parts': list[ListJobPartsResultParts],
+})
+
+ListMachinesResultMachines = TypedDict('ListMachinesResultMachines', {
+    'name': str,
+    'post': str,
+    'travel': NotRequired[dict[str, Any]],
+    'fit_arcs': NotRequired[bool],
+    'has_rotary_axis': NotRequired[bool],
+    'rapid_feed': NotRequired[float],
+    'a_max_deg_min': NotRequired[float],
+    'tools': NotRequired[list[dict[str, Any]]],
+})
+
+ListMachinesResult = TypedDict('ListMachinesResult', {
+    'dir': str,
+    'machines': list[ListMachinesResultMachines],
+})
+
+ListMatesResultMates = TypedDict('ListMatesResultMates', {
+    'a': dict[str, Any],
+    'b': dict[str, Any],
+    'flipped': bool,
+    'id': int,
+    'name': str,
+    'offset': float,
+    'rotation': float,
+    'rotation_deg': float,
+    'status': str,
+    'type': str,
+    'held': NotRequired[dict[str, Any]],
+    'error': NotRequired[str],
+    'residual_mm': NotRequired[float],
+    'dx': NotRequired[float],
+    'dy': NotRequired[float],
+    'ball_rotation': NotRequired[list[float]],
+    'suppressed': NotRequired[bool],
+})
+
+ListMatesResult = TypedDict('ListMatesResult', {
+    'mates': list[ListMatesResultMates],
+})
+
+ListMotionStudiesResultStudies = TypedDict('ListMotionStudiesResultStudies', {
+    'check_clash': bool,
+    'clash_mode': str,
+    'driver_dof': str,
+    'driver_mate': int,
+    'from': float,
+    'has_result': bool,
+    'id': int,
+    'name': str,
+    'running': bool,
+    'samples': int,
+    'to': float,
+    'type': str,
+    'unit': str,
+    'clean': NotRequired[bool],
+    'collision_checked': NotRequired[bool],
+    'stale': NotRequired[bool],
+    'clash_deflection_mm': NotRequired[float],
+    'configuration': NotRequired[int],
+    'why_not': NotRequired[str],
+})
+
+ListMotionStudiesResult = TypedDict('ListMotionStudiesResult', {
+    'studies': list[ListMotionStudiesResultStudies],
+})
+
+ListOccurrencesResultOccurrences = TypedDict('ListOccurrencesResultOccurrences', {
+    'configuration_id': int,
+    'fixed': bool,
+    'id': int,
+    'name': str,
+    'part_id': int,
+    'part_version': int | None,
+    'ref_kind': str,
+    'transform': dict[str, Any],
+    'type': str,
+    'visible': bool,
+    'bbox_max': NotRequired[list[float]],
+    'bbox_min': NotRequired[list[float]],
+    'attach_offset': NotRequired[list[float]],
+    'attach_rotation': NotRequired[list[float]],
+    'attach_seat': NotRequired[dict[str, Any]],
+    'attached_to': NotRequired[int],
+    'flexible': NotRequired[bool],
+    'inner_mate_dofs': NotRequired[list[dict[str, Any]]],
+    'inner_poses': NotRequired[list[dict[str, Any]]],
+    'leaf_count': NotRequired[int],
+    'leaves': NotRequired[list[str]],
+    'material': NotRequired[str],
+    'attach_error': NotRequired[str],
+    'attach_warning': NotRequired[str],
+})
+
+ListOccurrencesResult = TypedDict('ListOccurrencesResult', {
+    'occurrences': list[ListOccurrencesResultOccurrences],
+})
+
+ListPartsResultParts = TypedDict('ListPartsResultParts', {
+    'id': int,
+    'index': int,
+    'name': str,
+    'type': str,
+    'folder': NotRequired[str],
+})
+
+ListPartsResult = TypedDict('ListPartsResult', {
+    'active': int,
+    'active_id': int,
+    'parts': list[ListPartsResultParts],
+    'folders': NotRequired[list[str]],
+})
+
+ListPrintProfilesResultDefaults = TypedDict('ListPrintProfilesResultDefaults', {
+    'conditions': str,
+    'material': str,
+    'min_reliable_thread_mm': float,
+    'process': str,
+    'repeatability_mm': float,
+    'repeatability_source': str,
+    'rows': list[dict[str, Any]],
+})
+
+ListPrintProfilesResultProfiles = TypedDict('ListPrintProfilesResultProfiles', {
+    'material': str,
+    'name': str,
+    'process': str,
+    'rows': list[dict[str, Any]],
+    'stl_deflection_mm': float,
+    'stl_deflection_stated': bool,
+    'layer_height_mm': NotRequired[float],
+    'z_gap_mm': NotRequired[float],
+    'conditions': NotRequired[str],
+})
+
+ListPrintProfilesResult = TypedDict('ListPrintProfilesResult', {
+    'defaults': list[ListPrintProfilesResultDefaults],
+    'dir': str,
+    'profiles': list[ListPrintProfilesResultProfiles],
+})
+
+ListRelationsResultRelations = TypedDict('ListRelationsResultRelations', {
+    'dof_a': NotRequired[str],
+    'dof_b': NotRequired[str],
+    'id': int,
+    'kind': str,
+    'mate_a': NotRequired[int],
+    'mate_b': NotRequired[int],
+    'name': str,
+    'phase': NotRequired[float],
+    'ratio': NotRequired[float],
+    'thread_feature': NotRequired[int],
+    'thread_part': NotRequired[int],
+    'type': str,
+    'teeth_a': NotRequired[int],
+    'teeth_b': NotRequired[int],
+    'drives': NotRequired[str],
+    'lead': NotRequired[float],
+    'constant': NotRequired[float],
+    'held': NotRequired[str],
+    'terms': NotRequired[list[dict[str, Any]]],
+    'duration_deg': NotRequired[float],
+    'error': NotRequired[str],
+    'motion': NotRequired[str],
+    'period_deg': NotRequired[float],
+    'slots': NotRequired[int],
+    'start_deg': NotRequired[float],
+    'step': NotRequired[float],
+    'mate_b_path': NotRequired[list[int]],
+    'mate_a_path': NotRequired[list[int]],
+    'internal': NotRequired[bool],
+    'lift': NotRequired[Any],
+    'ride': NotRequired[Any],
+})
+
+ListRelationsResult = TypedDict('ListRelationsResult', {
+    'relations': list[ListRelationsResultRelations],
+})
+
+ListRequirementsResultRequirements = TypedDict('ListRequirementsResultRequirements', {
+    'bound': dict[str, Any],
+    'id': int,
+    'measure': dict[str, Any],
+    'name': str,
+    'note': NotRequired[str],
+    'revision': int,
+    'source': NotRequired[str],
+    'state': str,
+    'checked_at': NotRequired[str],
+    'detail': NotRequired[dict[str, Any]],
+    'evidence_revision': NotRequired[int],
+    'input_hash': NotRequired[str],
+    'limit': NotRequired[float],
+    'unit': NotRequired[str],
+    'value': NotRequired[float],
+    'limit_max': NotRequired[float],
+    'limit_min': NotRequired[float],
+})
+
+ListRequirementsResultSummary = TypedDict('ListRequirementsResultSummary', {
+    'fail': int,
+    'pass': int,
+    'stale': int,
+    'unchecked': int,
+    'unresolved': int,
+})
+
+ListRequirementsResult = TypedDict('ListRequirementsResult', {
+    'all_pass': bool,
+    'requirements': list[ListRequirementsResultRequirements],
+    'summary': ListRequirementsResultSummary,
+})
+
+ListRetainingRingsResultRings = TypedDict('ListRetainingRingsResultRings', {
+    'a_mm': float,
+    'b_mm': float,
+    'd3_mm': float,
+    'd5_mm': float,
+    'designation': str,
+    'groove': dict[str, Any],
+    's_mm': float,
+    'size_mm': float,
+})
+
+ListRetainingRingsResult = TypedDict('ListRetainingRingsResult', {
+    'rings': list[ListRetainingRingsResultRings],
+    'source': str,
+    'standard': str,
+})
+
+ListSectionsResultSections = TypedDict('ListSectionsResultSections', {
+    'd': float,
+    'id': int,
+    'normal': list[float],
+    'offset': float,
+    'reverse': bool,
+    'source': dict[str, Any],
+    'tilt_u': float,
+    'tilt_v': float,
+    'visible': bool,
+})
+
+ListSectionsResult = TypedDict('ListSectionsResult', {
+    'sections': list[ListSectionsResultSections],
+})
+
+ListStudiesResultStudies = TypedDict('ListStudiesResultStudies', {
+    'filter_radius': NotRequired[float],
+    'has_results': bool,
+    'id': int,
+    'keep_faces': NotRequired[int],
+    'keep_outs': NotRequired[list[dict[str, Any]]],
+    'load_cases': NotRequired[list[dict[str, Any]]],
+    'loads': list[dict[str, Any]],
+    'max_iterations': NotRequired[int],
+    'mesh_size': float,
+    'name': str,
+    'refinements': int,
+    'stale': bool,
+    'type': str,
+    'volume_fraction': NotRequired[float],
+    'shape_from': NotRequired[dict[str, Any]],
+    'participants': NotRequired[list[dict[str, Any]]],
+})
+
+ListStudiesResult = TypedDict('ListStudiesResult', {
+    'studies': list[ListStudiesResultStudies],
+})
+
+ListTablesResultTables = TypedDict('ListTablesResultTables', {
+    'columns': list[str],
+    'name': str,
+    'rows': list[dict[str, Any]],
+    'comment': NotRequired[str],
+})
+
+ListTablesResult = TypedDict('ListTablesResult', {
+    'tables': list[ListTablesResultTables],
+})
+
+ListTemplatesResultTemplates = TypedDict('ListTemplatesResultTemplates', {
+    'features': list[dict[str, Any]],
+    'instances': list[dict[str, Any]],
+    'name': str,
+    'parameters': list[dict[str, Any]],
+    'revision': int,
+})
+
+ListTemplatesResult = TypedDict('ListTemplatesResult', {
+    'templates': list[ListTemplatesResultTemplates],
+})
+
+ListTolerancesResultTolerances = TypedDict('ListTolerancesResultTolerances', {
+    'class': NotRequired[str],
+    'element': str,
+    'feature_id': int,
+    'id': int,
+    'kind': str,
+    'max': float,
+    'min': float,
+    'nominal': float,
+    'resolved': bool,
+    'b': NotRequired[dict[str, Any]],
+    'comment': NotRequired[str],
+    'lower': NotRequired[float],
+    'upper': NotRequired[float],
+    'error': NotRequired[str],
+})
+
+ListTolerancesResult = TypedDict('ListTolerancesResult', {
+    'tolerances': list[ListTolerancesResultTolerances],
+})
+
+ListVariablesResultVariables = TypedDict('ListVariablesResultVariables', {
+    'comment': NotRequired[str],
+    'expression': str,
+    'name': str,
+    'scope': str,
+    'value': float,
+    'error': NotRequired[str],
+})
+
+ListVariablesResult = TypedDict('ListVariablesResult', {
+    'variables': list[ListVariablesResultVariables],
+})
+
+MassPropertiesResultBodies = TypedDict('MassPropertiesResultBodies', {
+    'bbox_max': list[float],
+    'bbox_min': list[float],
+    'body': int,
+    'center_of_mass_mm': list[float],
+    'inertia': list[list[float]],
+    'mass_g': float | None,
+    'material': str,
+    'name': str,
+    'surface_area_mm2': float,
+    'volume_mm3': float,
+    'density': NotRequired[float],
+})
+
+MassPropertiesResultTotal = TypedDict('MassPropertiesResultTotal', {
+    'center_of_mass_mm': list[float],
+    'mass_g': float | None,
+    'volume_mm3': float,
+})
+
+MassPropertiesResultOccurrences = TypedDict('MassPropertiesResultOccurrences', {
+    'center_of_mass_mm': list[float],
+    'mass_g': float | None,
+    'name': str,
+    'occurrence': int,
+    'part_id': int,
+    'volume_mm3': float,
+})
+
+MassPropertiesResult = TypedDict('MassPropertiesResult', {
+    'bodies': NotRequired[list[MassPropertiesResultBodies]],
+    'total': MassPropertiesResultTotal,
+    'occurrences': NotRequired[list[MassPropertiesResultOccurrences]],
+})
+
+PrintAllowanceResult = TypedDict('PrintAllowanceResult', {
+    'allowance_mm': float,
+    'basic_mm': float,
+    'confirm': str,
+    'designation': NotRequired[str],
+    'kind': str,
+    'material': str,
+    'model_mm': float,
+    'pitch': NotRequired[float],
+    'process': str,
+    'source': str,
+    'stl_chord_loss_mm': float,
+    'stl_deflection_mm': float,
+    'stl_note': str,
+    'profile': NotRequired[str],
+    'note': NotRequired[str],
+})
+
+RemoveRequirementResult = TypedDict('RemoveRequirementResult', {
+    'removed': int,
+})
+
+SavePrintProfileResultRows = TypedDict('SavePrintProfileResultRows', {
+    'allowance_mm': float,
+    'from_mm': float,
+    'kind': str,
+    'source': str,
+})
+
+SavePrintProfileResult = TypedDict('SavePrintProfileResult', {
+    'conditions': NotRequired[str],
+    'material': str,
+    'name': str,
+    'process': str,
+    'rows': list[SavePrintProfileResultRows],
+    'stl_deflection_mm': float,
+    'stl_deflection_stated': bool,
+    'layer_height_mm': NotRequired[float],
+    'z_gap_mm': NotRequired[float],
+})
+
+SaveTemplateResultSuggestions = TypedDict('SaveTemplateResultSuggestions', {
+    'literals': list[Any],
+    'references': list[str],
+    'variables': list[str],
+})
+
+SaveTemplateResultTemplate = TypedDict('SaveTemplateResultTemplate', {
+    'features': list[dict[str, Any]],
+    'name': str,
+    'parameters': list[dict[str, Any]],
+    'revision': int,
+    'comment': NotRequired[str],
+})
+
+SaveTemplateResultInstancesMarked = TypedDict('SaveTemplateResultInstancesMarked', {
+    'feature_id': int,
+    'name': str,
+    'part': str,
+    'part_id': int,
+    'revision': int,
+    'template_changed': bool,
+})
+
+SaveTemplateResult = TypedDict('SaveTemplateResult', {
+    'suggestions': NotRequired[SaveTemplateResultSuggestions],
+    'template': SaveTemplateResultTemplate,
+    'instances_marked': NotRequired[list[SaveTemplateResultInstancesMarked]],
+})
+
+SetJobFixtureResultSeat = TypedDict('SetJobFixtureResultSeat', {
+    'along_mm': float,
+    'edge': str,
+    'element': str,
+    'feature_id': int,
+    'over_mm': float,
+    'spin_deg': float,
+})
+
+SetJobFixtureResult = TypedDict('SetJobFixtureResult', {
+    'enabled': bool,
+    'id': int,
+    'name': str,
+    'part': NotRequired[int],
+    'pos': list[float],
+    'rot_z': float,
+    'safe_z': float,
+    'setup': int,
+    'seat': NotRequired[SetJobFixtureResultSeat],
+    'box': NotRequired[list[float]],
+})
+
+SetJobPartResult = TypedDict('SetJobPartResult', {
+    'configuration': int,
+    'id': int,
+    'moved': int,
+    'configuration_name': NotRequired[str],
+})
+
+SetPrintProcessResultPrint = TypedDict('SetPrintProcessResultPrint', {
+    'material': str,
+    'process': str,
+    'stl_deflection_mm': float,
+    'match': NotRequired[str],
+    'profile': NotRequired[str],
+    'conditions': NotRequired[str],
+    'rows': NotRequired[list[dict[str, Any]]],
+    'layer_height_mm': NotRequired[float],
+    'z_gap_mm': NotRequired[float],
+})
+
+SetPrintProcessResult = TypedDict('SetPrintProcessResult', {
+    'print': SetPrintProcessResultPrint,
+    'threads': list[dict[str, Any]],
+    'confirm': NotRequired[str],
+})
+
+SetRequirementResultRequirement = TypedDict('SetRequirementResultRequirement', {
+    'bound': dict[str, Any],
+    'id': int,
+    'measure': dict[str, Any],
+    'name': str,
+    'note': str,
+    'revision': int,
+    'source': NotRequired[str],
+    'state': str,
+})
+
+SetRequirementResult = TypedDict('SetRequirementResult', {
+    'requirement': SetRequirementResultRequirement,
+})
+
+SetTableResultRegen = TypedDict('SetTableResultRegen', {
+    'failed': list[Any],
+    'ok': bool,
+    'warnings': list[Any],
+})
+
+SetTableResultTable = TypedDict('SetTableResultTable', {
+    'columns': list[str],
+    'name': str,
+    'rows': list[dict[str, Any]],
+    'comment': NotRequired[str],
+})
+
+SetTableResult = TypedDict('SetTableResult', {
+    'regen': SetTableResultRegen,
+    'table': SetTableResultTable,
+})
+
+SolveAssemblyResultMates = TypedDict('SolveAssemblyResultMates', {
+    'id': int,
+    'name': str,
+    'status': str,
+    'error': NotRequired[str],
+    'residual_mm': NotRequired[float],
+})
+
+SolveAssemblyResultFlexible = TypedDict('SolveAssemblyResultFlexible', {
+    'configuration_id': int,
+    'mates': list[dict[str, Any]],
+    'name': str,
+    'occurrence': int,
+    'placed_by_mates': int,
+    'placed_by_transform': int,
+})
+
+SolveAssemblyResultSuspects = TypedDict('SolveAssemblyResultSuspects', {
+    'closes': list[int],
+    'connector': str,
+    'mate': int,
+    'name': str,
+    'sole': bool,
+    'tilt_deg': float,
+})
+
+SolveAssemblyResult = TypedDict('SolveAssemblyResult', {
+    'errored_mates': int,
+    'mates': list[SolveAssemblyResultMates],
+    'occurrences': int,
+    'placed': int,
+    'placed_by_mates': int,
+    'placed_by_transform': int,
+    'dof': NotRequired[int],
+    'loop_mates': NotRequired[int],
+    'loops_closed': NotRequired[bool],
+    'redundant_mates': NotRequired[list[int]],
+    'residual_mm': NotRequired[float],
+    'flexible': NotRequired[list[SolveAssemblyResultFlexible]],
+    'errored_attachments': NotRequired[int],
+    'attachment_errors': NotRequired[list[dict[str, Any]]],
+    'suspects': NotRequired[list[SolveAssemblyResultSuspects]],
+})
+
+SplitForPrintingResultCuts = TypedDict('SplitForPrintingResultCuts', {
+    'at_mm': float,
+    'axis': str,
+})
+
+SplitForPrintingResultPieces = TypedDict('SplitForPrintingResultPieces', {
+    'bbox_max': list[float],
+    'bbox_min': list[float],
+    'fits': bool,
+    'index': int,
+    'material': str,
+    'orientation': dict[str, Any],
+    'size_mm': list[float],
+    'solids': int,
+    'volume_mm3': float,
+    'part': NotRequired[str],
+    'part_id': NotRequired[int],
+})
+
+SplitForPrintingResult = TypedDict('SplitForPrintingResult', {
+    'automatic': bool,
+    'bed_mm': list[float],
+    'body': str,
+    'cuts': list[SplitForPrintingResultCuts],
+    'fits_whole': bool,
+    'part': str,
+    'pieces': list[SplitForPrintingResultPieces],
+})
+
+TopoToBodyResult = TypedDict('TopoToBodyResult', {
+    'part': str,
+    'part_id': int,
+    'path': str,
+    'threshold': float,
+    'triangles': int,
+    'valid': bool,
+    'volume_mm3': float,
+    'watertight': bool,
+})
+
+TubeScheduleResultTubes = TypedDict('TubeScheduleResultTubes', {
+    'bends': list[dict[str, Any]],
+    'bodies': list[str],
+    'curve': int,
+    'cut_length_mm': float,
+    'length_mm': float,
+    'name': str,
+    'outer_diameter_mm': float,
+    'path_length_mm': float,
+    'quantity': int,
+    'wall_mm': float,
+    'coped_off_mm': NotRequired[float],
+})
+
+TubeScheduleResult = TypedDict('TubeScheduleResult', {
+    'count': int,
+    'members': int,
+    'tubes': list[TubeScheduleResultTubes],
+})
+
+VerifyAssertionsResultAssertions = TypedDict('VerifyAssertionsResultAssertions', {
+    'a': int,
+    'b': int,
+    'id': int,
+    'last_verdict': str,
+    'measured_mm': NotRequired[float],
+    'min_mm': float,
+    'mode': str,
+    'name': str,
+    'standing': str,
+    'why': str,
+    'note': NotRequired[str],
+})
+
+VerifyAssertionsResultReceipt = TypedDict('VerifyAssertionsResultReceipt', {
+    'claims': list[dict[str, Any]],
+    'schema': str,
+    'standing': str,
+    'summary': str,
+})
+
+VerifyAssertionsResult = TypedDict('VerifyAssertionsResult', {
+    'assertions': list[VerifyAssertionsResultAssertions],
+    'receipt': VerifyAssertionsResultReceipt,
+})
+
+
 class RpcSurface:
     """The contracted RPCs, typed. `lobole.sdk.App` inherits this for a
     type checker only: at runtime every method is the generated
@@ -333,10 +2262,19 @@ class RpcSurface:
     def add_assembly(self, _timeout: float | None = None, **params: Unpack[AddAssemblyParams]) -> dict[str, Any]:
         raise NotImplementedError
 
+    def add_assertion(self, _timeout: float | None = None, **params: Any) -> AddAssertionResult:
+        raise NotImplementedError
+
+    def add_bearing(self, _timeout: float | None = None, **params: Any) -> AddBearingResult:
+        raise NotImplementedError
+
     def add_configuration(self, _timeout: float | None = None, **params: Unpack[AddConfigurationParams]) -> dict[str, Any]:
         raise NotImplementedError
 
     def add_feature(self, _timeout: float | None = None, **params: Unpack[AddFeatureParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def add_job_fixture(self, _timeout: float | None = None, **params: Any) -> AddJobFixtureResult:
         raise NotImplementedError
 
     def add_mate(self, _timeout: float | None = None, **params: Unpack[AddMateParams]) -> dict[str, Any]:
@@ -346,6 +2284,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def add_part(self, _timeout: float | None = None, **params: Unpack[AddPartParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def add_requirement(self, _timeout: float | None = None, **params: Any) -> AddRequirementResult:
         raise NotImplementedError
 
     def autosave_now(self, _timeout: float | None = None) -> dict[str, Any]:
@@ -369,16 +2310,37 @@ class RpcSurface:
     def cancel_pending(self, _timeout: float | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
-    def check_fasteners(self, _timeout: float | None = None) -> dict[str, Any]:
+    def check_drawing(self, _timeout: float | None = None, **params: Any) -> CheckDrawingResult:
         raise NotImplementedError
 
-    def check_fits(self, _timeout: float | None = None) -> dict[str, Any]:
+    def check_fasteners(self, _timeout: float | None = None) -> CheckFastenersResult:
         raise NotImplementedError
 
-    def check_geometry(self, _timeout: float | None = None, **params: Unpack[CheckGeometryParams]) -> dict[str, Any]:
+    def check_fit(self, _timeout: float | None = None, **params: Any) -> CheckFitResult:
         raise NotImplementedError
 
-    def check_print(self, _timeout: float | None = None, **params: Unpack[CheckPrintParams]) -> dict[str, Any]:
+    def check_fits(self, _timeout: float | None = None) -> CheckFitsResult:
+        raise NotImplementedError
+
+    def check_geometry(self, _timeout: float | None = None, **params: Unpack[CheckGeometryParams]) -> CheckGeometryResult:
+        raise NotImplementedError
+
+    def check_literals(self, _timeout: float | None = None, **params: Any) -> CheckLiteralsResult:
+        raise NotImplementedError
+
+    def check_print(self, _timeout: float | None = None, **params: Unpack[CheckPrintParams]) -> CheckPrintResult:
+        raise NotImplementedError
+
+    def check_requirements(self, _timeout: float | None = None, **params: Any) -> CheckRequirementsResult:
+        raise NotImplementedError
+
+    def check_seat(self, _timeout: float | None = None, **params: Any) -> CheckSeatResult:
+        raise NotImplementedError
+
+    def check_sheet_metal(self, _timeout: float | None = None, **params: Any) -> CheckSheetMetalResult:
+        raise NotImplementedError
+
+    def check_topology(self, _timeout: float | None = None, **params: Any) -> CheckTopologyResult:
         raise NotImplementedError
 
     def checkpoint_list(self, _timeout: float | None = None) -> dict[str, Any]:
@@ -390,10 +2352,19 @@ class RpcSurface:
     def conflict_list(self, _timeout: float | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
-    def crash_reports(self, _timeout: float | None = None) -> dict[str, Any]:
+    def contact_report(self, _timeout: float | None = None, **params: Any) -> ContactReportResult:
+        raise NotImplementedError
+
+    def contact_status(self, _timeout: float | None = None, **params: Any) -> ContactStatusResult:
+        raise NotImplementedError
+
+    def crash_reports(self, _timeout: float | None = None) -> CrashReportsResult:
         raise NotImplementedError
 
     def create_drawing(self, _timeout: float | None = None, **params: Unpack[CreateDrawingParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def curve_points(self, _timeout: float | None = None, **params: Any) -> CurvePointsResult:
         raise NotImplementedError
 
     def debug_crash(self, _timeout: float | None = None, **params: Unpack[DebugCrashParams]) -> dict[str, Any]:
@@ -420,82 +2391,136 @@ class RpcSurface:
     def export_step(self, _timeout: float | None = None, **params: Unpack[ExportStepParams]) -> dict[str, Any]:
         raise NotImplementedError
 
+    def export_stl(self, _timeout: float | None = None, **params: Any) -> ExportStlResult:
+        raise NotImplementedError
+
+    def extract_variables(self, _timeout: float | None = None, **params: Any) -> ExtractVariablesResult:
+        raise NotImplementedError
+
+    def fit_bearing(self, _timeout: float | None = None, **params: Any) -> FitBearingResult:
+        raise NotImplementedError
+
+    def fit_retaining_ring(self, _timeout: float | None = None, **params: Any) -> FitRetainingRingResult:
+        raise NotImplementedError
+
     def frame(self, _timeout: float | None = None, **params: Unpack[FrameParams]) -> dict[str, Any]:
         raise NotImplementedError
 
-    def get_settings(self, _timeout: float | None = None) -> dict[str, Any]:
+    def get_keymap(self, _timeout: float | None = None, **params: Any) -> GetKeymapResult:
         raise NotImplementedError
 
-    def get_state(self, _timeout: float | None = None, **params: Unpack[GetStateParams]) -> dict[str, Any]:
+    def get_print_process(self, _timeout: float | None = None, **params: Any) -> GetPrintProcessResult:
         raise NotImplementedError
 
-    def get_units(self, _timeout: float | None = None) -> dict[str, Any]:
+    def get_settings(self, _timeout: float | None = None) -> GetSettingsResult:
+        raise NotImplementedError
+
+    def get_sheet_metal_rules(self, _timeout: float | None = None, **params: Any) -> GetSheetMetalRulesResult:
+        raise NotImplementedError
+
+    def get_state(self, _timeout: float | None = None, **params: Unpack[GetStateParams]) -> GetStateResult:
+        raise NotImplementedError
+
+    def get_tube_rules(self, _timeout: float | None = None, **params: Any) -> GetTubeRulesResult:
+        raise NotImplementedError
+
+    def get_units(self, _timeout: float | None = None) -> GetUnitsResult:
         raise NotImplementedError
 
     def interference(self, _timeout: float | None = None, **params: Unpack[InterferenceParams]) -> dict[str, Any]:
         raise NotImplementedError
 
-    def list_assertions(self, _timeout: float | None = None) -> dict[str, Any]:
+    def layout_balloons(self, _timeout: float | None = None, **params: Any) -> LayoutBalloonsResult:
         raise NotImplementedError
 
-    def list_catalogs(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_assertions(self, _timeout: float | None = None) -> ListAssertionsResult:
         raise NotImplementedError
 
-    def list_configurations(self, _timeout: float | None = None, **params: Unpack[ListConfigurationsParams]) -> dict[str, Any]:
+    def list_bearings(self, _timeout: float | None = None, **params: Any) -> ListBearingsResult:
         raise NotImplementedError
 
-    def list_drawing_dims(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_bends(self, _timeout: float | None = None, **params: Any) -> ListBendsResult:
         raise NotImplementedError
 
-    def list_drawing_notes(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_cam_setups(self, _timeout: float | None = None, **params: Any) -> ListCamSetupsResult:
         raise NotImplementedError
 
-    def list_drawing_views(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_catalogs(self, _timeout: float | None = None) -> ListCatalogsResult:
         raise NotImplementedError
 
-    def list_drawings(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_configurations(self, _timeout: float | None = None, **params: Unpack[ListConfigurationsParams]) -> ListConfigurationsResult:
         raise NotImplementedError
 
-    def list_elements(self, _timeout: float | None = None, **params: Unpack[ListElementsParams]) -> dict[str, Any]:
+    def list_drawing_dims(self, _timeout: float | None = None) -> ListDrawingDimsResult:
         raise NotImplementedError
 
-    def list_exploded_views(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_drawing_geometry(self, _timeout: float | None = None, **params: Any) -> ListDrawingGeometryResult:
         raise NotImplementedError
 
-    def list_machines(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_drawing_notes(self, _timeout: float | None = None) -> ListDrawingNotesResult:
         raise NotImplementedError
 
-    def list_mates(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_drawing_views(self, _timeout: float | None = None) -> ListDrawingViewsResult:
         raise NotImplementedError
 
-    def list_motion_studies(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_drawings(self, _timeout: float | None = None) -> ListDrawingsResult:
         raise NotImplementedError
 
-    def list_occurrences(self, _timeout: float | None = None, **params: Unpack[ListOccurrencesParams]) -> dict[str, Any]:
+    def list_elements(self, _timeout: float | None = None, **params: Unpack[ListElementsParams]) -> ListElementsResult:
         raise NotImplementedError
 
-    def list_parts(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_exploded_views(self, _timeout: float | None = None) -> ListExplodedViewsResult:
         raise NotImplementedError
 
-    def list_print_profiles(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_job_parts(self, _timeout: float | None = None, **params: Any) -> ListJobPartsResult:
         raise NotImplementedError
 
-    def list_relations(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_machines(self, _timeout: float | None = None) -> ListMachinesResult:
         raise NotImplementedError
 
-    def list_requirements(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_mates(self, _timeout: float | None = None) -> ListMatesResult:
         raise NotImplementedError
 
-    def list_sections(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_motion_studies(self, _timeout: float | None = None) -> ListMotionStudiesResult:
         raise NotImplementedError
 
-    def list_studies(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_occurrences(self, _timeout: float | None = None, **params: Unpack[ListOccurrencesParams]) -> ListOccurrencesResult:
         raise NotImplementedError
 
-    def list_variables(self, _timeout: float | None = None) -> dict[str, Any]:
+    def list_parts(self, _timeout: float | None = None) -> ListPartsResult:
         raise NotImplementedError
 
-    def mass_properties(self, _timeout: float | None = None, **params: Unpack[MassPropertiesParams]) -> dict[str, Any]:
+    def list_print_profiles(self, _timeout: float | None = None) -> ListPrintProfilesResult:
+        raise NotImplementedError
+
+    def list_relations(self, _timeout: float | None = None) -> ListRelationsResult:
+        raise NotImplementedError
+
+    def list_requirements(self, _timeout: float | None = None) -> ListRequirementsResult:
+        raise NotImplementedError
+
+    def list_retaining_rings(self, _timeout: float | None = None, **params: Any) -> ListRetainingRingsResult:
+        raise NotImplementedError
+
+    def list_sections(self, _timeout: float | None = None) -> ListSectionsResult:
+        raise NotImplementedError
+
+    def list_studies(self, _timeout: float | None = None) -> ListStudiesResult:
+        raise NotImplementedError
+
+    def list_tables(self, _timeout: float | None = None, **params: Any) -> ListTablesResult:
+        raise NotImplementedError
+
+    def list_templates(self, _timeout: float | None = None, **params: Any) -> ListTemplatesResult:
+        raise NotImplementedError
+
+    def list_tolerances(self, _timeout: float | None = None, **params: Any) -> ListTolerancesResult:
+        raise NotImplementedError
+
+    def list_variables(self, _timeout: float | None = None) -> ListVariablesResult:
+        raise NotImplementedError
+
+    def mass_properties(self, _timeout: float | None = None, **params: Unpack[MassPropertiesParams]) -> MassPropertiesResult:
         raise NotImplementedError
 
     def measure(self, _timeout: float | None = None, **params: Unpack[MeasureParams]) -> dict[str, Any]:
@@ -525,6 +2550,9 @@ class RpcSurface:
     def ping(self, _timeout: float | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
+    def print_allowance(self, _timeout: float | None = None, **params: Any) -> PrintAllowanceResult:
+        raise NotImplementedError
+
     def project_changed_on_disk(self, _timeout: float | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
@@ -535,6 +2563,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def remove_mate(self, _timeout: float | None = None, **params: Unpack[RemoveMateParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def remove_requirement(self, _timeout: float | None = None, **params: Any) -> RemoveRequirementResult:
         raise NotImplementedError
 
     def rename_part(self, _timeout: float | None = None, **params: Unpack[RenamePartParams]) -> dict[str, Any]:
@@ -552,13 +2583,25 @@ class RpcSurface:
     def run_study(self, _timeout: float | None = None, **params: Unpack[RunStudyParams]) -> dict[str, Any]:
         raise NotImplementedError
 
+    def save_print_profile(self, _timeout: float | None = None, **params: Any) -> SavePrintProfileResult:
+        raise NotImplementedError
+
     def save_project(self, _timeout: float | None = None, **params: Unpack[SaveProjectParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def save_template(self, _timeout: float | None = None, **params: Any) -> SaveTemplateResult:
         raise NotImplementedError
 
     def set_active_configuration(self, _timeout: float | None = None, **params: Unpack[SetActiveConfigurationParams]) -> dict[str, Any]:
         raise NotImplementedError
 
     def set_active_part(self, _timeout: float | None = None, **params: Unpack[SetActivePartParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def set_job_fixture(self, _timeout: float | None = None, **params: Any) -> SetJobFixtureResult:
+        raise NotImplementedError
+
+    def set_job_part(self, _timeout: float | None = None, **params: Any) -> SetJobPartResult:
         raise NotImplementedError
 
     def set_mate(self, _timeout: float | None = None, **params: Unpack[SetMateParams]) -> dict[str, Any]:
@@ -570,16 +2613,37 @@ class RpcSurface:
     def set_occurrence_transform(self, _timeout: float | None = None, **params: Unpack[SetOccurrenceTransformParams]) -> dict[str, Any]:
         raise NotImplementedError
 
+    def set_print_process(self, _timeout: float | None = None, **params: Any) -> SetPrintProcessResult:
+        raise NotImplementedError
+
+    def set_requirement(self, _timeout: float | None = None, **params: Any) -> SetRequirementResult:
+        raise NotImplementedError
+
+    def set_table(self, _timeout: float | None = None, **params: Any) -> SetTableResult:
+        raise NotImplementedError
+
     def set_variable(self, _timeout: float | None = None, **params: Unpack[SetVariableParams]) -> dict[str, Any]:
         raise NotImplementedError
 
-    def solve_assembly(self, _timeout: float | None = None) -> dict[str, Any]:
+    def solve_assembly(self, _timeout: float | None = None) -> SolveAssemblyResult:
+        raise NotImplementedError
+
+    def split_for_printing(self, _timeout: float | None = None, **params: Any) -> SplitForPrintingResult:
+        raise NotImplementedError
+
+    def topo_to_body(self, _timeout: float | None = None, **params: Any) -> TopoToBodyResult:
+        raise NotImplementedError
+
+    def tube_schedule(self, _timeout: float | None = None, **params: Any) -> TubeScheduleResult:
         raise NotImplementedError
 
     def undo(self, _timeout: float | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
     def validation_revision(self, _timeout: float | None = None) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def verify_assertions(self, _timeout: float | None = None, **params: Any) -> VerifyAssertionsResult:
         raise NotImplementedError
 
     def view(self, _timeout: float | None = None, **params: Unpack[ViewParams]) -> dict[str, Any]:
