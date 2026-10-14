@@ -195,6 +195,13 @@ async def run(port):
             expect(abs(state["bodies"][0]["volume"] - 40 * 20 * 5) < 1e-3,
                    "pad volume 4000")
 
+            # A key the app accepts that the hand-kept wrapper does not
+            # know (set_material's signature has no body_name) reaches the
+            # app instead of dying as a Python TypeError in the wrapper.
+            await call("rpc", method="set_material",
+                       params=dict(material="aluminum",
+                                   body_name=state["bodies"][0]["name"]))
+
             # Round one corner; the volume drop pins the arc really extruded
             await call("rpc", method="fillet",
                        params=dict(sketch_id=sk_id, line1=top, line2=left,

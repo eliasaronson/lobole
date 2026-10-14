@@ -2518,7 +2518,17 @@ def rpc(method: str, params: dict | None = None) -> dict:
     entry = _REFERENCE.get(method)
     if entry is not None:
         # Route through the wrapper so its defaults and argument shaping
-        # still apply — rpc() is a smaller door to the same room.
+        # still apply — rpc() is a smaller door to the same room. But the
+        # wrapper's signature is a hand-kept subset of the app's contract:
+        # a key the app accepts and the wrapper never learned
+        # (set_material's body_name) died here as a Python TypeError. When
+        # the params do not fit the wrapper they go to the app unshaped,
+        # and the app — the one that validates — accepts or refuses them.
+        import inspect
+        try:
+            inspect.signature(entry["fn"]).bind(**(params or {}))
+        except TypeError:
+            return _call(method, **(params or {}))
         return entry["fn"](**(params or {}))
     known = sorted(_REFERENCE) + sorted(_EXPOSED)
     if method not in known:
