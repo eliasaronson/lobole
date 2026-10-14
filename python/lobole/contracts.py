@@ -11,6 +11,8 @@ refusal and the server's name the same fault field for field
 import json
 import math
 
+from lobole.errors import Refused, refusal
+
 
 def _accepted(schema):
     out = list(schema.get('enum', []))
@@ -61,18 +63,19 @@ def describe(schema):
     return s
 
 
-class ContractError(RuntimeError):
-    """Client preflight failure; diagnostic has the same shape as server errors."""
-    def __init__(self, operation, code, path, expected, observed, message=None,
-                 accepted=None):
-        self.diagnostic = dict(operation=operation, code=code, path=path,
-                               expected=expected, observed=observed)
-        if path.startswith('/params/'):
-            self.diagnostic['param'] = path[len('/params/'):].split('/')[0]
-        if accepted:
-            self.diagnostic['accepted'] = accepted
-        super().__init__(message or
-                         f'{operation}: {code} at {path}; expected {expected}')
+def contract_refusal(operation, code, path, expected, observed, message=None,
+                     accepted=None):
+    """A client preflight refusal: the Refused subclass the server would
+    raise for `code`, with the diagnostic it would send (lobole.errors)."""
+    diagnostic = dict(operation=operation, code=code, path=path,
+                      expected=expected, observed=observed)
+    if path.startswith('/params/'):
+        diagnostic['param'] = path[len('/params/'):].split('/')[0]
+    if accepted:
+        diagnostic['accepted'] = accepted
+    return refusal(message or
+                   f'{operation}: {code} at {path}; expected {expected}',
+                   diagnostic)
 
 
 def _where(path):
@@ -96,7 +99,7 @@ def accepts(schema, value):
     try:
         validate(schema, value, '', '/params')
         return True
-    except ContractError:
+    except Refused:
         return False
 
 
@@ -106,7 +109,7 @@ def validate(schema, value, operation, path='/params'):
         hint = expected.get('description') or next(
             (a['description'] for a in expected.get('anyOf', [])
              if a.get('description')), '')
-        raise ContractError(
+        raise contract_refusal(
             operation, 'invalid_argument', path, expected, value,
             f'{operation}: {_where(path)} must be {describe(expected)}; '
             f'got {_shown(value)}' + (f'. {hint}' if hint else ''),
@@ -148,14 +151,14 @@ def validate(schema, value, operation, path='/params'):
         for key in sorted(value):
             if key not in props:
                 at = path + '/' + key
-                raise ContractError(
+                raise contract_refusal(
                     operation, 'unknown_argument', at, props, value[key],
                     f'{operation}: unknown parameter {_where(at)}; it takes: '
                     + ', '.join(sorted(props)), sorted(props))
         for key in schema.get('required', []):
             if key not in value:
                 at = path + '/' + key
-                raise ContractError(
+                raise contract_refusal(
                     operation, 'missing_argument', at, props[key], None,
                     f'{operation}: missing required parameter {_where(at)} '
                     f'({describe(props[key])})')

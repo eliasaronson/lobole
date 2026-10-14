@@ -9,8 +9,8 @@ from pathlib import Path
 import sys
 import tempfile
 
-from lobole.contracts import ContractError, validate
-from lobole.client import RemoteError
+from lobole.contracts import validate
+from lobole.errors import Refused
 from lobole.sdk import App, V
 from smoke_app import launch
 
@@ -18,7 +18,7 @@ from smoke_app import launch
 def refusal(fn, code):
     try:
         fn()
-    except (ContractError, RemoteError) as error:
+    except Refused as error:
         assert error.diagnostic['code'] == code, error.diagnostic
         return error.diagnostic
     raise AssertionError(f'expected {code}')

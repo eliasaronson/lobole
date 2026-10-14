@@ -41,7 +41,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "generators"))
 sys.path.insert(0, HERE)
-from lobole.client import RemoteError  # noqa: E402
+from lobole.errors import Refused  # noqa: E402
 from lobole.sdk import connect  # noqa: E402
 from slider_crank import build  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
@@ -105,7 +105,7 @@ def pixels_differing(a_path, b_path):
 def refused(app, needles, **kw):
     try:
         r = app.export_motion_video(_timeout=600, **kw)
-    except RemoteError as e:
+    except Refused as e:
         text = str(e)
         missing = [n for n in needles if n not in text]
         if missing:

@@ -23,24 +23,8 @@ import socket
 import sys
 import time
 
-
-class RemoteError(RuntimeError):
-    """A server refusal, preserving the full structured diagnostic when present."""
-    def __init__(self, message, diagnostic=None):
-        super().__init__(message)
-        self.diagnostic = diagnostic
-
-
-class NonFiniteError(RemoteError):
-    """The answer held NaN or infinity, which JSON writes as null: the server
-    listed where under `nonfinite`
-    (docs/scripting/rpc.md#what-a-response-carries). The call itself ran --
-    a mutating one has happened -- so this is a wrong answer, not a refusal.
-    `result` is the answer as sent."""
-    def __init__(self, message, pointers, result):
-        super().__init__(message)
-        self.pointers = pointers
-        self.result = result
+from lobole.errors import (ConnectionLost, NonFiniteError, Refused,
+                           UnknownArgument, refusal)
 
 
 class Client:
@@ -82,10 +66,16 @@ class Client:
         # `help` is answered here, from `describe`, rather than being a
         # second copy of the method table in the app (method_help).
         if method == "help":
-            extra = set(params or {}) - {"method"}
+            extra = sorted(set(params or {}) - {"method"})
             if extra:
-                raise RemoteError(f"unknown parameter(s) {sorted(extra)} for "
-                                  f"'help'. Accepted: method")
+                raise UnknownArgument(
+                    f"unknown parameter(s) {extra} for 'help'. Accepted: "
+                    "method",
+                    {"operation": "help", "code": "unknown_argument",
+                     "path": f"/params/{extra[0]}", "param": extra[0],
+                     "expected": ["method"],
+                     "observed": (params or {})[extra[0]],
+                     "accepted": ["method"]})
             return self.help((params or {}).get("method", ""))
         self._id += 1
         request = {"id": self._id, "method": method, "params": {} if params is None else params}
@@ -98,14 +88,15 @@ class Client:
             while True:
                 line = self.file.readline()
                 if not line:
-                    raise ConnectionError("designer disconnected")
+                    raise ConnectionLost(f"{method}: the app disconnected "
+                                         "before answering")
                 msg = json.loads(line)
                 # A line the server could not parse is answered with a null
                 # id (it cannot know ours); with one request in flight it is
                 # this one's, and waiting for our id would wait forever.
                 if msg.get("id") is None and str(
                         msg.get("error", "")).startswith("parse:"):
-                    raise RemoteError(msg["error"], msg.get("diagnostic"))
+                    raise refusal(msg["error"], msg.get("diagnostic"))
                 if msg.get("id") == self._id:
                     if "nonfinite" in msg:
                         said = (f"{method}: the answer held non-finite "
@@ -117,7 +108,7 @@ class Client:
                         import warnings
                         warnings.warn(said, RuntimeWarning, stacklevel=3)
                     if "error" in msg:
-                        raise RemoteError(msg["error"], msg.get("diagnostic"))
+                        raise refusal(msg["error"], msg.get("diagnostic"))
                     return msg.get("result")
         finally:
             if timeout is not None:
@@ -207,13 +198,13 @@ def method_help(call, method="", reference=None):
         return {"method": method, **reference[method]}
     try:
         row = call("describe", method=method)["methods"][0]
-    except RemoteError as e:
+    except Refused as e:
         import difflib
         near = [n for n in difflib.get_close_matches(method, sorted(reference),
                                                      n=5)
                 if n not in str(e)]
-        raise RemoteError(str(e) + (f"; also {', '.join(near)}" if near
-                                    else "")) from None
+        raise type(e)(str(e) + (f"; also {', '.join(near)}" if near else ""),
+                      e.diagnostic) from None
     out = {"method": method, "doc": row.get("doc", "")}
     if row.get("params_free_form"):
         out["params_free_form"] = True

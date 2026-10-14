@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import lobole.sdk as sdk  # noqa: E402
 from lobole.client import Client  # noqa: E402
+from lobole.errors import UnknownArgument  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -80,6 +81,22 @@ def check_generated_surface(app):
            "the feature-type table should carry Frame (v86)")
     # (d) a typo'd keyword is caught HERE, naming what the method takes.
     refused(lambda: app.add_part(named="x"), "named", "it takes", "name")
+    # ...and for a method with no typed contract it is the refusal the app
+    # would send, class and diagnostic, without the round trip.
+    # Any such method will do: a refused call runs no handler.
+    name = next(m for m in sorted(app.methods())
+                if m not in app._schemas and not getattr(app, m).free_form
+                and m.startswith(("list_", "get_")))
+    seen = {}
+    for side, call in (("client", lambda: getattr(app, name)(typo_key=1)),
+                       ("app", lambda: app.call(name, typo_key=1))):
+        try:
+            call()
+            raise AssertionError(f"{name}(typo_key=1) was accepted")
+        except UnknownArgument as e:
+            seen[side] = e.diagnostic
+    expect(seen["client"] == seen["app"],
+           f"the SDK's refusal differs from the app's: {seen}")
     src = open(os.path.join(HERE, "..", "python", "lobole",
                             "sdk.py")).read()
     for kind in ("coincident", "perpendicular", "distance_pl"):
@@ -463,7 +480,7 @@ def check_cam_op_fields(app):
                 continue
             try:
                 app.set_cam_op(id=op["id"], **{k: v})
-            except sdk.SdkError as e:
+            except UnknownArgument as e:
                 raise AssertionError(
                     f"{t} reports `{k}` but the SDK's set_cam_op refuses it "
                     f"-- add it to the describe row: {e}") from None

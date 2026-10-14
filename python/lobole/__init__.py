@@ -9,9 +9,19 @@
 
 `Client` is the plain JSON-RPC client (dict in, dict out); `App` is the SDK
 over it, with the whole RPC surface generated from the running app's
-`describe` and geometry handles instead of transcribed numbers.
+`describe` and geometry handles instead of transcribed numbers. Every error
+either raises is a `LoboleError`; a refused call is a `Refused`
+(lobole.errors).
 """
-from lobole.client import Client, RemoteError
-from lobole.sdk import App, SdkError, connect
+from lobole.client import Client
+from lobole.errors import (BudgetExceeded, ConnectionLost, InternalError,
+                           InvalidArgument, LoboleError, MissingArgument,
+                           NonFiniteError, Refused, SdkError, StaleRevision,
+                           StaleSnapshot, UnknownArgument)
+from lobole.sdk import App, connect
 
-__all__ = ["App", "Client", "RemoteError", "SdkError", "connect"]
+__all__ = [
+    "App", "BudgetExceeded", "Client", "ConnectionLost", "InternalError",
+    "InvalidArgument", "LoboleError", "MissingArgument", "NonFiniteError",
+    "Refused", "SdkError", "StaleRevision", "StaleSnapshot",
+    "UnknownArgument", "connect"]

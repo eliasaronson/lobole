@@ -30,7 +30,8 @@ import subprocess
 import sys
 import tempfile
 
-from lobole.client import Client, RemoteError  # noqa: E402
+from lobole.client import Client  # noqa: E402
+from lobole.errors import Refused  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box, cylinder  # noqa: E402
 
@@ -319,7 +320,7 @@ def main():
         try:
             d.call("modify_feature", feature_id=literal, feature=spec)
             raise AssertionError("radius 49 on a 100 chord was accepted")
-        except RemoteError as e:
+        except Refused as e:
             expect("radius (constraint 2) = 49 cannot be met" in str(e),
                    f"the refusal names the dimension: {e}")
         expect(arc_of(literal)[0] == before, "and the document is unchanged")

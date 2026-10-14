@@ -54,7 +54,9 @@ import time
 from typing import TYPE_CHECKING
 
 from lobole.client import Client as _Remote  # noqa: E402
-from lobole.contracts import ContractError, validate as _validate_contract  # noqa: E402
+from lobole.contracts import contract_refusal  # noqa: E402
+from lobole.contracts import validate as _validate_contract  # noqa: E402
+from lobole.errors import SdkError, UnknownArgument  # noqa: E402
 from lobole.inspection import (  # noqa: E402
     CONTRACT_HASH, CONTRACT_VERSION, InspectionClient)
 
@@ -65,10 +67,6 @@ if TYPE_CHECKING:
     from lobole.rpc import RpcSurface as _RpcSurface
 else:
     _RpcSurface = object
-
-
-class SdkError(RuntimeError):
-    """A refusal from the SDK itself (never from the app)."""
 
 
 def _renamed(**renames):
@@ -278,10 +276,20 @@ class _Rpc:
         if not self.free_form and self.name not in self._app._schemas:
             unknown = sorted(k for k in kw if k not in self.params)
             if unknown:
+                # The refusal the app would send (UndeclaredParamsError in
+                # RemoteDispatch.cpp), raised without the round trip.
                 takes = ", ".join(sorted(self.params)) or "no parameters"
-                raise SdkError(
+                accepted = sorted(self.params)
+                diagnostic = {
+                    "operation": self.name, "code": "unknown_argument",
+                    "path": f"/params/{unknown[0]}", "param": unknown[0],
+                    "expected": accepted, "observed": kw[unknown[0]],
+                    "accepted": accepted}
+                if len(unknown) > 1:
+                    diagnostic["unknown"] = unknown
+                raise UnknownArgument(
                     f"{self.name}() got {', '.join(unknown)}; it takes "
-                    f"{takes}")
+                    f"{takes}", diagnostic)
         return self._app.call(self.name, _timeout=_timeout, **kw)
 
 
@@ -355,9 +363,9 @@ class App(_RpcSurface):
         expected = dict(version=CONTRACT_VERSION, hash=CONTRACT_HASH)
         observed = {k: self._inspection_contract.get(k) for k in expected}
         if observed != expected:
-            raise ContractError(method, "unsupported_contract",
-                                "/capabilities/inspection_contract", expected,
-                                observed)
+            raise contract_refusal(method, "unsupported_contract",
+                                   "/capabilities/inspection_contract",
+                                   expected, observed)
         return self.call(method, **params)
 
     def call(self, method, /, _timeout=None, **params):

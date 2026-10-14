@@ -581,7 +581,8 @@ and refuses to talk to a server whose contract hash differs
 `uniqueItems`, `default` — and the generator refuses any other keyword rather
 than publishing a constraint nothing enforces.
 
-A contract refusal is a `ContractError` with the
+A contract refusal is a `lobole.Refused` (the subclass for its code,
+[lobole.errors](sdk.md#errors)) with the
 [structured diagnostic](#structured-errors); batch failures keep the nested
 diagnostics, including when the batch rolls back.
 

@@ -65,6 +65,33 @@ trailing underscore (`async_`), as it is passed. A vocabulary
 runtime check enforces. `inspection_typing_gate` type-checks a valid script
 and one seeded with errors against the stubs.
 
+## Errors
+
+Everything the package raises is a `lobole.LoboleError`, in one hierarchy
+(`python/lobole/errors.py`):
+
+```
+LoboleError
+├── ConnectionLost      the app went away mid-call (also a ConnectionError)
+├── Refused             the call was not done, and nothing changed
+│   ├── MissingArgument, UnknownArgument, InvalidArgument
+│   ├── StaleRevision, StaleSnapshot, BudgetExceeded
+│   └── InternalError   the handler fell over; rolled back all the same
+├── NonFiniteError      the call ran, and its answer held NaN/inf
+└── SdkError            misuse the SDK caught without asking the app
+```
+
+A `Refused` carries the server's [structured diagnostic](rpc.md#structured-errors)
+as `.diagnostic` and its fields as attributes (`.code`, `.path`, `.param`,
+`.expected`, `.observed`, `.accepted`, `.call`). The class is chosen by
+`code`; a code with no class here — a newer app's, or a method's own such as
+`unknown_part` — is a plain `Refused`, so catching the base still catches
+it. A typed contract's client-side refusal raises the same class with the
+same diagnostic the app would have sent, so a caller cannot tell which side
+refused (`rpc_contracts_smoke` holds the two equal). `SdkError` is never the
+app's: a keyword renamed to carry its unit, a handle used against another
+document.
+
 ## The hand-written layer
 
 Only what `describe` cannot express:

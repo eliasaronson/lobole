@@ -45,7 +45,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 
-from lobole.client import RemoteError  # noqa: E402
+from lobole.errors import Refused  # noqa: E402
 from lobole.sdk import Batch, Part, SdkError, connect  # noqa: E402
 
 DEFAULT_STEP = Path.home() / "Downloads/step_files/speaker.step"
@@ -130,7 +130,7 @@ def _by_shape(app, parts, volume, size):
             got = _bbox_size(part)
             if all(_close(got[i], size[i]) for i in range(3)):
                 hits.append(row)
-        except (SdkError, RemoteError):
+        except (SdkError, Refused):
             # An empty tab (the export has one) answers 'no bodies'; it is
             # not a candidate, and it is not an error worth stopping for.
             continue

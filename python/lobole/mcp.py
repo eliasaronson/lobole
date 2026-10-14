@@ -2635,13 +2635,14 @@ def help(method: str = "") -> dict:
     # wraps. Anything else — most RPCs (motion studies, appearance,
     # sections...) — is answered from the app's describe row.
     import inspect
-    from lobole.client import method_help, RemoteError
+    from lobole.client import method_help
+    from lobole.errors import Refused
     reference = {name: {"doc": e["doc"],
                         "arguments": str(inspect.signature(e["fn"]))}
                  for name, e in _REFERENCE.items()}
     try:
         out = method_help(_call, method, reference)
-    except RemoteError as e:
+    except Refused as e:
         raise ValueError(str(e)) from None
     if method not in reference:
         out["source"] = ("the app's describe row; reach it with "

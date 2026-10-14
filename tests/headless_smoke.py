@@ -23,7 +23,8 @@ import sys
 import tempfile
 import time
 
-from lobole.client import Client, RemoteError  # noqa: E402
+from lobole.client import Client  # noqa: E402
+from lobole.errors import Refused  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 import smoke_shapes as shapes  # noqa: E402
 
@@ -1517,7 +1518,7 @@ def main():
         try:
             d.call("export_members", dir=members_dir)
             expect(False, "a second export into the same directory refuses")
-        except RemoteError as e:
+        except Refused as e:
             expect("overwrite" in str(e),
                    "a second export refuses rather than half-replacing an "
                    "order nobody could then check")

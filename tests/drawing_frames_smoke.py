@@ -22,7 +22,8 @@ import subprocess
 import sys
 import tempfile
 
-from lobole.client import Client, RemoteError  # noqa: E402
+from lobole.client import Client  # noqa: E402
+from lobole.errors import Refused  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 import smoke_shapes as shapes  # noqa: E402
 
@@ -35,7 +36,7 @@ def expect(cond, msg):
 def refused(d, method, needle, **params):
     try:
         d.call(method, **params)
-    except RemoteError as e:
+    except Refused as e:
         expect(needle in str(e), f"{method} refused, naming {needle}: {e}")
         return
     raise AssertionError(f"{method} accepted {params}")

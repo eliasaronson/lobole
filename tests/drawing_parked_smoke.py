@@ -28,7 +28,8 @@ import tempfile
 import threading
 import time
 
-from lobole.client import Client, RemoteError  # noqa: E402
+from lobole.client import Client  # noqa: E402
+from lobole.errors import Refused  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
 
@@ -64,7 +65,7 @@ class Waiting:
             t0 = time.monotonic()
             try:
                 self.answer = self.d.call(method, **params)
-            except RemoteError as e:
+            except Refused as e:
                 self.error = str(e)
             self.seconds = time.monotonic() - t0
 

@@ -25,7 +25,9 @@ import tempfile
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'tools'))
 from lobole.contracts import accepts  # noqa: E402
-from lobole.client import RemoteError  # noqa: E402
+from lobole import errors  # noqa: E402
+from lobole.errors import (InvalidArgument, MissingArgument,  # noqa: E402
+                           Refused, UnknownArgument)
 from lobole.rpc import COLUMNS  # noqa: E402
 from lobole.sdk import App  # noqa: E402
 from method_doc_scan import method_docs  # noqa: E402
@@ -36,10 +38,14 @@ PROBES = [True, 'text', 1.5, -1, [], {}, None, [True]]
 
 
 def refused(fn, code):
+    """The call is refused with `code`, raised as the class for that code
+    (lobole.errors), whose attributes read the diagnostic."""
     try:
         fn()
-    except RemoteError as e:
+    except Refused as e:
         assert e.diagnostic and e.diagnostic['code'] == code, (str(e), e.diagnostic)
+        assert e.code == code and e.path == e.diagnostic['path'], e
+        assert type(e).CODE == code, (type(e).__name__, code)
         return e
     raise AssertionError(f'expected a {code} refusal')
 
@@ -180,15 +186,28 @@ def check_sdk(raw):
     try:
         app.add_mate(type='revolut', a={}, b={})
         raise AssertionError('the SDK sent an invalid add_mate')
-    except Exception as e:  # lobole.contracts.ContractError
-        client = e.diagnostic
+    except Refused as e:  # the client-side preflight
+        client = e
     finally:
         raw.call = real
     assert not sent, sent
     server = refused(lambda: raw.call('add_mate', type='revolut', a={}, b={}),
-                     'invalid_argument').diagnostic
-    assert client == server, (client, server)
-    print('sdk: preflight refuses with the server\'s diagnostic')
+                     'invalid_argument')
+    assert client.diagnostic == server.diagnostic, (client.diagnostic,
+                                                    server.diagnostic)
+    # The same CLASS too: a caller catching InvalidArgument cannot tell which
+    # side refused.
+    assert type(client) is type(server) is InvalidArgument, (
+        type(client), type(server))
+    # And each preflight code raises its class, as the server's would.
+    for params, cls in ((dict(a={}, b={}, typo=1), UnknownArgument),
+                        (dict(b={}), MissingArgument)):
+        try:
+            app.add_mate(**params)
+            raise AssertionError(f'the SDK sent {params}')
+        except cls as e:
+            assert e.code == cls.CODE, e.diagnostic
+    print('sdk: preflight refuses with the server\'s diagnostic and class')
 
 
 def check_revision_guard(raw):
@@ -248,7 +267,24 @@ def check_revision_guard(raw):
     print('revision guard: pass, chain, stale, foreign, batch, wrong tab')
 
 
+def check_error_classes():
+    """Every code the app sends that has a class gets it; an unknown code, or
+    none, is still a Refused, so a newer app raises something catchable."""
+    for cls in (MissingArgument, UnknownArgument, InvalidArgument,
+                errors.StaleRevision, errors.StaleSnapshot,
+                errors.BudgetExceeded, errors.InternalError):
+        e = errors.refusal('x', {'code': cls.CODE})
+        assert type(e) is cls and isinstance(e, errors.LoboleError), cls
+    for diagnostic in ({'code': 'a_code_from_a_newer_app'}, {}, None):
+        assert type(errors.refusal('x', diagnostic)) is Refused, diagnostic
+    # A dropped connection is ours AND the builtin a retry loop catches.
+    assert issubclass(errors.ConnectionLost, ConnectionError)
+    assert not issubclass(errors.NonFiniteError, Refused)  # the call RAN
+    print('errors: one class per code, Refused for the rest')
+
+
 def main():
+    check_error_classes()
     with tempfile.TemporaryDirectory(prefix='rpc-contracts-') as tmp:
         env = dict(os.environ, XDG_STATE_HOME=tmp,
                    XDG_CONFIG_HOME=tmp + '/config')

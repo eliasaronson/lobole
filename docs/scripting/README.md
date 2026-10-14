@@ -106,8 +106,9 @@ process started, so the instance is serving old code.
 - **`lobole.client`** — the stdlib client every script and smoke
   test imports. `Client(port).call(method, **params)`; `request(method,
   params, timeout=)` for a dict and a per-call timeout; `wait_for(port)`;
-  `instances()`. A refusal raises `RemoteError` (a `RuntimeError`) carrying
-  the server's structured `.diagnostic` when there is one. `method` is
+  `instances()`. A refusal raises `lobole.Refused` — the subclass for its
+  code ([errors](sdk.md#errors)) — carrying the server's structured
+  `.diagnostic` when there is one. `method` is
   positional-only, so `call("describe", method="add_mate")` works, and
   returns that method's row alone; an unknown name is refused with close
   matches. `help(method)` (also `call("help", method=...)`, answered in the

@@ -66,7 +66,7 @@ class MeasurementSnapshot:
                    result['space'], edges, circular, fields, max_elements)
 
     def validate(self) -> None:
-        """One RPC; raises RemoteError with code stale_snapshot if replaced/edited.
+        """One RPC; raises StaleSnapshot (lobole.errors) if replaced/edited.
 
         This is a point-in-time check, not a lock or a mutation precondition.
         """

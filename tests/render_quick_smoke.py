@@ -38,7 +38,8 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from lobole.client import Client, RemoteError  # noqa: E402
+from lobole.client import Client  # noqa: E402
+from lobole.errors import Refused  # noqa: E402
 from render_glass_smoke import read_png  # noqa: E402
 from smoke_app import launch_app  # noqa: E402
 from smoke_shapes import box  # noqa: E402
@@ -65,7 +66,7 @@ def sha(path):
 def refused(d, params, needle):
     try:
         r = d.request("render_still", params)
-    except RemoteError as e:
+    except Refused as e:
         return needle in str(e)
     return not r.get("ok") and needle in (r.get("error") or "")
 
