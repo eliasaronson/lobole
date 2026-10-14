@@ -30,6 +30,7 @@
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepCheck_Analyzer.hxx>
 #include <BRepCheck_Result.hxx>
+#include <BRepClass3d.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
@@ -61,6 +62,8 @@
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Quaternion.hxx>
@@ -1556,6 +1559,58 @@ const char* CheckStatusStr(BRepCheck_Status s) {
 }
 } // namespace
 
+namespace {
+// Does a cavity of some solid in `s` reach outside that solid's outer skin?
+// BRepCheck_Analyzer asks it with ONE point per shell (0.432 of the way along
+// the first edge in face order), so its verdict on a void poking through the
+// wall followed the order of the faces -- which the offset builder takes from
+// a map hashed on addresses: a Draft that tilted a shelled cavity's wall
+// through the outer wall was refused in some processes and kept in others
+// (tests/fuzz/cases/rebuild-139.jsonl). Every vertex and edge midpoint of
+// every inner shell is classified against the outer one instead.
+bool CavityReachesOutside(const TopoDS_Shape& s) {
+  for (TopExp_Explorer sol(s, TopAbs_SOLID); sol.More(); sol.Next()) {
+    const TopoDS_Solid& solid = TopoDS::Solid(sol.Current());
+    int shells = 0;
+    for (TopExp_Explorer sh(solid, TopAbs_SHELL); sh.More(); sh.Next())
+      shells++;
+    if (shells < 2)
+      continue;
+    const TopoDS_Shell outer = BRepClass3d::OuterShell(solid);
+    if (outer.IsNull())
+      continue; // BRepCheck says what is wrong with that one
+    TopoDS_Solid skin;
+    BRep_Builder builder;
+    builder.MakeSolid(skin);
+    builder.Add(skin, outer);
+    BRepClass3d_SolidClassifier inside(skin);
+    const auto out = [&](const gp_Pnt& p, double tol) {
+      inside.Perform(p, std::max(tol, Precision::Confusion()));
+      return inside.State() == TopAbs_OUT;
+    };
+    for (TopExp_Explorer sh(solid, TopAbs_SHELL); sh.More(); sh.Next()) {
+      if (sh.Current().IsSame(outer))
+        continue;
+      for (TopExp_Explorer v(sh.Current(), TopAbs_VERTEX); v.More(); v.Next()) {
+        const TopoDS_Vertex& vx = TopoDS::Vertex(v.Current());
+        if (out(BRep_Tool::Pnt(vx), BRep_Tool::Tolerance(vx)))
+          return true;
+      }
+      for (TopExp_Explorer e(sh.Current(), TopAbs_EDGE); e.More(); e.Next()) {
+        const TopoDS_Edge& edge = TopoDS::Edge(e.Current());
+        if (BRep_Tool::Degenerated(edge))
+          continue;
+        const BRepAdaptor_Curve c(edge);
+        if (out(c.Value(0.5 * (c.FirstParameter() + c.LastParameter())),
+                BRep_Tool::Tolerance(edge)))
+          return true;
+      }
+    }
+  }
+  return false;
+}
+} // namespace
+
 GeometryReport CheckGeometry(const CADShape& shape) {
   GeometryReport out;
   const TopoDS_Shape& s = shape.GetShape();
@@ -1565,10 +1620,14 @@ GeometryReport CheckGeometry(const CADShape& shape) {
   }
   BRepCheck_Analyzer ana(s);
   out.valid = ana.IsValid();
-  if (out.valid)
+  const bool escapes = CavityReachesOutside(s);
+  if (out.valid && !escapes)
     return out;
+  out.valid = false;
 
   std::set<std::string> reasons;
+  if (escapes)
+    reasons.insert("a cavity reaches outside the body");
   const auto collect = [&](const TopoDS_Shape& sub) {
     Handle(BRepCheck_Result) res = ana.Result(sub);
     if (res.IsNull())

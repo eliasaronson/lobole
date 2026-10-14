@@ -360,7 +360,12 @@ spoked wheel) costs hundreds of times the validity check.
 derived parts whose source moved. Validity is `BRepCheck_Analyzer`; the
 reasons are scanned at the face, wire, edge, shell and solid levels, so a
 shape whose faces are each fine but whose shell is not ("not connected")
-still names why. A boolean or sweep feature runs the same check on its own
+still names why. A solid with a cavity also has every vertex and edge
+midpoint of each inner shell classified against its outer skin ("a cavity
+reaches outside the body"): `BRepCheck_Analyzer` tests one sample point per
+shell, chosen by face order, so its verdict on a void that pokes through the
+wall followed an order the offset builder takes from shape addresses. A
+boolean or sweep feature runs the same check on its own
 result and fails, naming the reasons, rather than handing an invalid solid to
 every later measurement — `CADShape::IsValid` is only a null check.
 

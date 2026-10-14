@@ -13,10 +13,14 @@
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepCheck_Analyzer.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRep_Builder.hxx>
+#include <TopoDS_Shell.hxx>
+#include <TopoDS_Solid.hxx>
 #include <gp_Ax2.hxx>
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -99,6 +103,32 @@ TEST_CASE("An element's position is not quantised to float", "[measure]") {
   }
   CHECK(sawFace); // a check that examined nothing is not a check
   CHECK(sawEdge);
+}
+
+// A cavity is checked whole, not by BRepCheck's one sample point per shell,
+// whose verdict followed the order of the faces: a Draft that tilted a
+// shelled cavity's wall through the outer wall was kept in some processes
+// and refused in others (tests/fuzz/cases/rebuild-139.jsonl). The sample
+// point here (on the cavity's first edge) is inside the body, so BRepCheck
+// alone passes the escaping cavity.
+TEST_CASE("A cavity that reaches outside the body is invalid", "[measure]") {
+  const auto withCavity = [](gp_Pnt corner, double size) {
+    BRep_Builder b;
+    TopoDS_Solid solid;
+    b.MakeSolid(solid);
+    b.Add(solid, BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shell());
+    b.Add(solid,
+          BRepPrimAPI_MakeBox(corner, size, size, size).Shell().Reversed());
+    return CADShape(solid);
+  };
+  const CADShape sealed = withCavity(gp_Pnt(2, 2, 2), 6.0);
+  CHECK(Measure::InvalidReasons(sealed).empty());
+  CHECK_THAT(sealed.Volume(), Catch::Matchers::WithinRel(1000.0 - 216.0, 1e-9));
+
+  const CADShape escaping = withCavity(gp_Pnt(2, 2, 2), 9.0);
+  REQUIRE(BRepCheck_Analyzer(escaping.GetShape()).IsValid()); // the gap
+  CHECK(Measure::InvalidReasons(escaping).find(
+            "a cavity reaches outside the body") != std::string::npos);
 }
 
 TEST_CASE("Measure a box's face areas and edge lengths", "[measure]") {

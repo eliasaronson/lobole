@@ -469,6 +469,14 @@ An honest refusal (a wall too thick for the geometry) costs the five draws.
 `test_shell`'s "A shell builds the same wherever its input lives in memory"
 shells 60 copies of that box and requires one solid with one set of names.
 
+The patch fixes which way the shell's faces point, not the order they come
+in, which still follows those addresses (upstream's
+Open-Cascade-SAS/OCCT#1600 fixes the order). A feature after it sees the
+same solid with its faces in another order, which mattered to one check: a
+Draft that tilted the wall of a sealed cavity through the outer wall passed
+or failed BRepCheck by face order, and is now refused every time
+([inspect](../inspect/README.md#geometry-checks)).
+
 Their builders can also fault outright on input they should refuse.
 `ArmOccSignalHandlers` (`src/cad/CADKernel.h`, the one caller of
 `OSD::SetSignal`) installs OpenCASCADE's handler without losing the crash

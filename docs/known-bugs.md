@@ -99,8 +99,12 @@ the heading if it is not here yet.
   `fuzz_corpus_smoke` fail at random. That one was OpenCASCADE's quilt
   order, now patched in every build we make
   ([modeling](modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid)).
-  Whether the blend and draft builders' SHAPES (not only their face order)
-  move the same way is not measured.
+  The blend and draft builders' shapes do not: Fillet, Chamfer and Draft
+  gave one volume and one set of names over 60 copies of a drilled box, ten
+  cases between them. The offset builder still returns its faces in an
+  address order, which made a later Draft's validity a coin toss until the
+  check stopped sampling one point per cavity
+  ([inspect](inspect/README.md#geometry-checks)).
 - **Where:** `FallbackPasses` in `src/core/ElementHistory.cpp`.
 - **Likely fix:** number a face's unnamed edges in an order the geometry
   fixes (by each edge's midpoint, then its length), not the wire's order.
