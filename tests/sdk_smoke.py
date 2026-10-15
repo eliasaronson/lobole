@@ -937,6 +937,16 @@ def main():
         lo, hi = probe.extent()
         expect(abs(lo.y + 45.0) < 1e-6 and abs(hi.y - 88.0) < 1e-6,
                f"the slot spans -45..88, not 0..43: {lo.y}..{hi.y}")
+        # Every entity type counts: it skipped points, rects, text and
+        # splines, so a profile reaching out by one of them measured short.
+        # An arc counts the sweep it draws, not its whole circle.
+        reach = d.sketch(sdk.Plane.xy(0), name="reach")
+        reach.point((-7, 0)).rect((0, 0), (5, 3)).text("A", (2, -9), 2.0)
+        reach.spline([(5, 0), (12, 4), (6, 8), (5, 9)])
+        reach.arc((0, 20), 4.0, 0, 90)
+        lo, hi = reach.extent()
+        expect((lo.x, lo.y, hi.x, hi.y) == (-7, -9, 12, 24),
+               f"point/text/spline/arc all reach: {lo}..{hi}")
 
         # extrude_shapes(): overlapping loops are refused in ONE sketch, so
         # this is one extrude each, added together.
