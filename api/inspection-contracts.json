@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "dialect": "https://json-schema.org/draft/2020-12/schema",
   "methods": {
     "geometry_snapshot": {
@@ -27,7 +27,7 @@
               "enum": [
                 "center",
                 "radius",
-                "length",
+                "length_mm",
                 "midpoint"
               ]
             },
@@ -148,7 +148,7 @@
                 "radius": {
                   "type": "number"
                 },
-                "length": {
+                "length_mm": {
                   "type": "number"
                 }
               },

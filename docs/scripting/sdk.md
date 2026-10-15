@@ -319,7 +319,7 @@ to a rim on that leaf. `occ.mate(m)` is one of its mates, `{path, mate}`:
 `body.snapshot(circular=, fields=, max_elements=)` (or the typed
 `app.inspection.geometry_snapshot(part_id=, body=, ...)`) captures a frozen
 record of a body's edges in one RPC. Reading `edge.center`, `edge.radius`,
-`edge.length`, `edge.midpoint` or `edge.ref` then costs no RPC.
+`edge.length_mm`, `edge.midpoint` or `edge.ref` then costs no RPC.
 
 - Coordinates are **part space**, lengths mm. A circle's or arc's `center` is
   its centre, not a point on the rim. Unrequested fields and inapplicable

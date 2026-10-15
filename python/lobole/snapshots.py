@@ -19,7 +19,7 @@ class MeasuredEdge:
     kind: str
     center: 'V | None'
     radius: float | None
-    length: float | None
+    length_mm: float | None
     midpoint: 'V | None'
 
     @property
@@ -63,7 +63,7 @@ class MeasurementSnapshot:
         edges = tuple(MeasuredEdge(
             e['index'], e['ref']['feature_id'], e['ref']['element'], e['kind'],
             V(e['center']) if 'center' in e else None, e.get('radius'),
-            e.get('length'), V(e['midpoint']) if 'midpoint' in e else None)
+            e.get('length_mm'), V(e['midpoint']) if 'midpoint' in e else None)
             for e in result['elements'])
         return cls(app, SnapshotRevision(**result['revision']), result['body'],
                    result['space'], edges, circular, fields, max_elements)

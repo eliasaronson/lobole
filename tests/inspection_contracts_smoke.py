@@ -49,7 +49,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='inspection-contracts-') as tmp:
         env = dict(os.environ, XDG_STATE_HOME=tmp, XDG_CONFIG_HOME=tmp + '/config')
         with launch(sys.argv[1], env=env) as running:
-            raw = running.designer
+            raw = running.client
             counted = CountedRemote(raw)
             app = App(counted)
             app.new()
@@ -113,8 +113,8 @@ def main():
             explicit_defaults = raw.call('geometry_snapshot', **good,
                 circular=False, fields=['center', 'radius'], max_elements=2000)
             assert result == explicit_defaults
-            length_only = raw.call('geometry_snapshot', **good, fields=['length'])
-            assert all('length' in e and 'center' not in e for e in length_only['elements'])
+            length_only = raw.call('geometry_snapshot', **good, fields=['length_mm'])
+            assert all('length_mm' in e and 'center' not in e for e in length_only['elements'])
             for invalid_params in (False, [], 'bad'):
                 refusal(lambda: raw.request('geometry_snapshot', invalid_params), 'invalid_argument')
             bad_requests = [

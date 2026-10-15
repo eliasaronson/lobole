@@ -1190,7 +1190,8 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"geometry_snapshot",
      "Immutable, bounded edge measurements in part coordinates. Requires a "
      "stable part_id and body index; never switches tabs. fields defaults to "
-     "center,radius; circular filters circles and arcs. max_elements bounds "
+     "center,radius (`radius` and `length_mm` in mm, `center`/`midpoint` "
+     "positions in mm); circular filters circles and arcs. max_elements bounds "
      "the edges scanned, before analysis. Revision is process/document scoped.",
      "part_id, body, circular, fields, max_elements"},
     {"validate_snapshot",
@@ -5113,8 +5114,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                  {"ref", {{"feature_id", body.createdBy}, {"element", name}}}};
       if (wants("radius") && edge->hasRadius)
         entry["radius"] = edge->radius;
-      if (wants("length"))
-        entry["length"] = edge->length;
+      if (wants("length_mm"))
+        entry["length_mm"] = edge->length;
       if (wants("midpoint"))
         entry["midpoint"] = {edge->midpoint.x, edge->midpoint.y,
                              edge->midpoint.z};

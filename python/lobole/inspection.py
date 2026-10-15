@@ -5,14 +5,14 @@
 from collections.abc import Callable, Sequence
 from typing import Literal, NotRequired, TypedDict, cast
 
-CONTRACT_VERSION = 1
-CONTRACT_HASH = '0effee5acc447c286c7a16bacf8266eb9bbc104cb53c5f180820a93be6d223f9'
+CONTRACT_VERSION = 2
+CONTRACT_HASH = '9990c746141c85c18ee348ad4b72286711a8be2703b082ca42040933eacbc3d7'
 
 class GeometrySnapshotRequest(TypedDict):
     part_id: int
     body: int
     circular: NotRequired[bool]
-    fields: NotRequired[Sequence[Literal['center', 'radius', 'length', 'midpoint']]]
+    fields: NotRequired[Sequence[Literal['center', 'radius', 'length_mm', 'midpoint']]]
     max_elements: NotRequired[int]
 
 class GeometrySnapshotResultRevision(TypedDict):
@@ -32,7 +32,7 @@ class GeometrySnapshotResultElementsItem(TypedDict):
     center: NotRequired[list[float]]
     midpoint: NotRequired[list[float]]
     radius: NotRequired[float]
-    length: NotRequired[float]
+    length_mm: NotRequired[float]
 
 class GeometrySnapshotResult(TypedDict):
     revision: GeometrySnapshotResultRevision
@@ -72,7 +72,7 @@ class InspectionClient:
     def __init__(self, call: Callable[[str, dict[str, object]], object]):
         self._call = call
 
-    def geometry_snapshot(self, *, part_id: int, body: int, circular: bool | None = None, fields: Sequence[Literal['center', 'radius', 'length', 'midpoint']] | None = None, max_elements: int | None = None) -> GeometrySnapshotResult:
+    def geometry_snapshot(self, *, part_id: int, body: int, circular: bool | None = None, fields: Sequence[Literal['center', 'radius', 'length_mm', 'midpoint']] | None = None, max_elements: int | None = None) -> GeometrySnapshotResult:
         params: dict[str, object] = {}
         params['part_id'] = part_id
         params['body'] = body
