@@ -39,7 +39,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='inspection-benchmark-') as tmp:
         env = dict(os.environ, XDG_STATE_HOME=tmp, XDG_CONFIG_HOME=tmp+'/config')
         with launch(args.binary, env=env) as running:
-            app = App(running.designer)
+            app = App(running.client)
             app.open_project(path=str(Path(args.project).resolve()))
             for name in args.parts:
                 part = app.part(name, create=False)

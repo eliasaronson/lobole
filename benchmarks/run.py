@@ -173,7 +173,7 @@ def parse_stream(stdout, stderr, timed_out, wall):
         if ev.get("type") == "assistant":
             for block in ev.get("message", {}).get("content", []):
                 if block.get("type") == "tool_use":
-                    name = block.get("name", "?").replace("mcp__designer__", "")
+                    name = block.get("name", "?").replace("mcp__lobole__", "")
                     out["tool_calls"] += 1
                     out["tools_used"][name] = out["tools_used"].get(name, 0) + 1
         elif ev.get("type") == "result":
@@ -265,7 +265,7 @@ def one_run(task, arm, rep, model, outdir, args):
     rec = {"task": task["id"], "tier": task["tier"], "arm": arm["name"],
            "rep": rep, "model": model, "id": rid}
     with launch(args.binary) as app:
-        d = app.designer
+        d = app.client
         d.call("new_project")
         cfg = os.path.join(rundir, "mcp.json")
         json.dump(mcp_config(app.port, arm), open(cfg, "w"), indent=2)

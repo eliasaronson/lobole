@@ -116,7 +116,7 @@ def test_param_arithmetic():
 
 def test_drives_geometry(binary):
     with launch(binary) as app:
-        sdk = App(app.designer)
+        sdk = App(app.client)
         sdk.call("new_project")
         part = sdk.part("Arm")
         L = part.param("arm_len", 110.0)
@@ -148,7 +148,7 @@ def test_perturbation(binary):
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "p.dsgn")
         with launch(binary) as app:
-            sdk = App(app.designer)
+            sdk = App(app.client)
             sdk.call("new_project")
             part = sdk.part("Arm")
             L = part.param("arm_len", 110.0)

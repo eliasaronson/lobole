@@ -357,7 +357,7 @@ def main():
         env = dict(os.environ, XDG_STATE_HOME=tmp,
                    XDG_CONFIG_HOME=tmp + '/config')
         with launch(sys.argv[1], env=env) as running:
-            raw = running.designer
+            raw = running.client
             raw.call('new_project')
             raw.call('add_part', name='probe')
             docs = raw.call('describe')

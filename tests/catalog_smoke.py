@@ -24,7 +24,7 @@ def refused(fn, text):
 
 def main(binary):
     with tempfile.TemporaryDirectory(prefix="catalog-test-") as temp, launch(binary) as running:
-        app = App(running.designer)
+        app = App(running.client)
         app.new()
         part = app.part("test block")
         part.box("Top", width=10, depth=10, height=10, at=(0, 0), centered=False)

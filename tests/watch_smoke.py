@@ -48,7 +48,7 @@ def main():
     import watch_spec
 
     with launch(sys.argv[1]) as launched:
-        app = App(launched.designer)
+        app = App(launched.client)
         app.call("new_project")
         dims = watch_spec.declare(app)
         watch.__dict__.update(dims)

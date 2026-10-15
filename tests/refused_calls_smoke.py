@@ -70,7 +70,7 @@ def main():
     problems = []
     try:
         with launch(binary) as app:
-            d = app.designer
+            d = app.client
             cam = d.call("ping").get("features", {}).get("cam", True)
             part, occ, setup = build_fixture(d, cam)
             world = World(d, app, work)

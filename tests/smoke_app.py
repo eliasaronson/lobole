@@ -39,10 +39,10 @@ USAGE
     from smoke_app import launch
 
     with launch(sys.argv[1]) as app:          # exits non-zero and prints the
-        d = app.designer                      # app's log if anything raises
+        d = app.client                      # app's log if anything raises
         d.call("ping")
 
-`launch` yields an object with `.designer` (connected), `.port`, `.log()`
+`launch` yields an object with `.client` (connected), `.port`, `.log()`
 and `.proc`. Extra CLI arguments and environment go in as keyword
 arguments; a temporary XDG_CONFIG_HOME is set up by default so a suite run
 cannot rewrite the developer's own preferences (tests/fem_smoke.py learned
@@ -91,7 +91,7 @@ class LaunchedApp:
         self.port = port
         self._log_path = log_path
         self._tmp = tmp
-        self.designer = Client.wait_for(port)
+        self.client = Client.wait_for(port)
 
     def log(self):
         try:
@@ -108,7 +108,7 @@ class LaunchedApp:
 
     def close(self):
         with contextlib.suppress(Exception):
-            self.designer.close()
+            self.client.close()
         self.proc.terminate()
         try:
             self.proc.wait(timeout=5)
@@ -185,7 +185,7 @@ def launch_app(binary, extra_args=(), env=None, timeout=30.0, headless=True):
     def hook(exc_type, exc, tb):
         said = app.log().strip()
         if said:
-            print("--- designer log ---\n" + said + "\n--- end ---",
+            print("--- lobole log ---\n" + said + "\n--- end ---",
                   file=sys.stderr)
         previous(exc_type, exc, tb)
 
@@ -209,7 +209,7 @@ def launch(binary, extra_args=(), env=None, timeout=30.0, headless=True):
         # The whole point: say what the app said, before the traceback.
         said = app.log().strip()
         if said:
-            print("--- designer log ---\n" + said + "\n--- end ---",
+            print("--- lobole log ---\n" + said + "\n--- end ---",
                   file=sys.stderr)
         _archive_failure(said)
         raise
@@ -252,7 +252,7 @@ def _archive_failure(app_log):
         out = os.path.join(root, f"{stamp}-{name}")
         os.makedirs(out, exist_ok=True)
         if app_log:
-            with open(os.path.join(out, "designer.log"), "w") as f:
+            with open(os.path.join(out, "lobole.log"), "w") as f:
                 f.write(app_log)
         with open(os.path.join(out, "traceback.txt"), "w") as f:
             traceback.print_exc(file=f)
@@ -374,7 +374,7 @@ def _spawn(binary, extra_args, env, timeout, headless):
     # Who owns this directory, for the sweep in the next launch.
     with open(os.path.join(tmp, OWNER_FILE), "w") as f:
         f.write(f"{os.getpid()} {proc.pid}\n")
-    print(f"smoke_app: designer pid {proc.pid}, scratch {tmp}",
+    print(f"smoke_app: lobole pid {proc.pid}, scratch {tmp}",
           file=sys.stderr)
 
     port = None
@@ -402,7 +402,7 @@ def _spawn(binary, extra_args, env, timeout, headless):
             said = ""
         shutil.rmtree(tmp, ignore_errors=True)
         raise RuntimeError(
-            f"designer never reported a port within {timeout:g}s "
+            f"lobole never reported a port within {timeout:g}s "
             f"(exit={proc.poll()}). It said:\n"
             + (said or "  (nothing)"))
 

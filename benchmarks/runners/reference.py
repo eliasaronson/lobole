@@ -279,7 +279,7 @@ def main():
     for t in tasks:
         step = os.path.join(out, f"{t['id']}.step")
         with launch(a.binary) as app:
-            d = app.designer
+            d = app.client
             d.call("new_project")
             BUILDERS[t["id"]](d)
             d.call("export_step", path=step)

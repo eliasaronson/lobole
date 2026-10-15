@@ -52,7 +52,7 @@ def main():
     # edge names) lets one seed's run move the next one's names.
     for seed in SEEDS:
         with launch(os.path.abspath(sys.argv[1])) as app:
-            d = app.designer
+            d = app.client
             d.scratch_path = os.path.join(app.tmp, "fuzz.dsgn")
             outcome, design = fd.generate_and_run(d, seed)
         limits += len(outcome["limits"])

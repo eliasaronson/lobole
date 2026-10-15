@@ -199,7 +199,7 @@ def main():
 
     rows = []
     with launch(a.binary) as app:
-        d = app.designer
+        d = app.client
         for name, fn in probes:
             step = os.path.join(out, f"{name}.step")
             note, err = "", None

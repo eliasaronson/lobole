@@ -34,7 +34,7 @@ def main():
         else:
             raise AssertionError(f"invalid specification accepted: {bad}")
     with launch(os.path.abspath(sys.argv[1])) as proc:
-        app = App(proc.designer)
+        app = App(proc.client)
         parts, rig, slide, spindle, machine = C.build(app, v)
         original_ids = [f["id"] for f in parts["clamp"].state()["features"]]
         for d in (82, 80):

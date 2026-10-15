@@ -22,7 +22,7 @@ with (
     tempfile.TemporaryDirectory(prefix="clamp-test-") as tmp,
     launch(os.path.abspath(sys.argv[1])) as proc,
 ):
-    app = App(proc.designer)
+    app = App(proc.client)
     out = Path(tmp)
     result = C.run(app, out)
     assert len(result["bom"]["rows"]) == 8

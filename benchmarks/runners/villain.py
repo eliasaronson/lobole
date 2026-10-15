@@ -102,7 +102,7 @@ def main():
             continue
         step = os.path.join(out, f"{t['id']}.step")
         with launch(a.binary) as app:
-            d = app.designer
+            d = app.client
             d.call("new_project")
             build_block(d, size)
             d.call("export_step", path=step)

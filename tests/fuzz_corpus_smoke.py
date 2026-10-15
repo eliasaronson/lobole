@@ -50,7 +50,7 @@ def main():
             bad.append(f"{name}: no {{\"fuzz\": {{..., design}}}} header")
             continue
         with launch(os.path.abspath(sys.argv[1])) as app:
-            d = app.designer
+            d = app.client
             d.scratch_path = os.path.join(app.tmp, "fuzz.dsgn")
             # The checks first, on the fresh instance; then the literal
             # session, after a new_project.

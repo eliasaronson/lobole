@@ -39,7 +39,7 @@ def main():
     binary = sys.argv[1]
     try:
         with launch(binary) as app:
-            d = app.designer
+            d = app.client
             study, _, _, _ = build_bar(d)
 
             # The synchronous answer, to compare the worker's against.

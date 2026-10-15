@@ -172,7 +172,7 @@ def main():
                                            tid + ".json")))
         step = os.path.join(out, tid + ".step")
         with launch(a.binary) as app:
-            d = app.designer
+            d = app.client
             d.call("new_project")
             build(d)
             d.call("export_step", path=step)

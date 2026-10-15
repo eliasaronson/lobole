@@ -78,6 +78,9 @@ designer-appimage
 # Python packaging residue (`uv build` / pip leave these beside the sources).
 *.egg-info/
 dist/
+# nix provides the environment; a uv lock beside pyproject.toml pins nothing
+# the build uses.
+uv.lock
 
 # Assistant/agent working directories and their notes — machine-local
 # configuration, not project source.

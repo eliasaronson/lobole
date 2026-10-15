@@ -357,7 +357,7 @@ def main():
     binary = sys.argv[1]
     try:
         with launch(binary) as app:
-            d = app.designer
+            d = app.client
             expect(d.call("ping")["ok"], "ping")
 
             study, created_by, fixed_face, _ = build_bar(d)

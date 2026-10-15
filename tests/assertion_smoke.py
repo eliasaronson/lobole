@@ -64,7 +64,7 @@ def main():
     binary = sys.argv[1]
 
     with launch(binary) as app:
-        sdk = App(app.designer)
+        sdk = App(app.client)
         a, b = rig(sdk)
         aid = sdk.call("add_assertion", name="pin to pin", a=a, b=b,
                        min_mm=10.0, why="room for the collar")["id"]
@@ -135,14 +135,14 @@ def main():
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "rig.dsgn")
         with launch(binary) as app:
-            sdk = App(app.designer)
+            sdk = App(app.client)
             a, b = rig(sdk)
             sdk.call("add_assertion", name="pin to pin", a=a, b=b, min_mm=10.0,
                      why="room for the collar")
             sdk.call("verify_assertions")
             sdk.call("save_project", path=path)
         with launch(binary) as app2:
-            sdk2 = App(app2.designer)
+            sdk2 = App(app2.client)
             sdk2.call("open_project", path=path)
             rows = sdk2.call("list_assertions")["assertions"]
             expect(len(rows) == 1, rows)
@@ -158,7 +158,7 @@ def main():
     # transform. Not an error — placing a nut is legitimate — but an unstated
     # fact, and the fix for an unstated fact is to state it.
     with launch(binary) as app:
-        sdk = App(app.designer)
+        sdk = App(app.client)
         a, b = rig(sdk)                      # two occurrences, no mates at all
         s = sdk.call("solve_assembly")
         expect(s["occurrences"] == 2, s)

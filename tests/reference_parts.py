@@ -489,7 +489,7 @@ def main():
     else:
         from smoke_app import launch
         with launch(args.binary) as app:
-            bad = run(app.designer, cases, bool(args.k))
+            bad = run(app.client, cases, bool(args.k))
 
     if bad:
         print(f"reference_parts: {len(bad)} case(s) failed: {bad}")
