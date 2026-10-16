@@ -201,6 +201,17 @@ symbols. On NixOS the bundle's `/nix/store` mount also shadows
 that glibc-to-driver contract. A release builds it and smokes it headless
 ([Releasing](#releasing)).
 
+What it needs from the host, measured in a stock `ubuntu:24.04` container:
+`/dev/fuse` (no `libfuse2`: the runtime is static) and unprivileged user
+namespaces, because its launcher bind-mounts the bundle's `/nix` in one.
+Without FUSE, `APPIMAGE_EXTRACT_AND_RUN=1` extracts instead, but still
+needs the namespace. So it does not run in a default Docker container (use
+the container image there), and on Ubuntu 23.10 and later, which restrict
+unprivileged user namespaces through AppArmor, it needs
+`sysctl kernel.apparmor_restrict_unprivileged_userns=0` — what the release
+workflow sets on its Ubuntu runner before the smoke. No Ubuntu desktop has
+run it yet.
+
 ## The Flatpak
 
 `packaging/flatpak/org.lobole.Lobole.yaml`, built and

@@ -42,9 +42,11 @@ Each release (the GitHub releases page) carries:
 - **Windows:** a portable zip and an installer. Built on Linux and tested
   under Wine only, and not signed, so SmartScreen warns; Netgen meshing (and
   so FEM) is missing there.
-- **Any Linux, headless:** an AppImage that runs the document engine and its
-  JSON-RPC interface without a window (`--headless --remote PORT`). For the
-  GUI on a non-Nix distribution, build from source (below).
+- **Linux, headless:** an AppImage that runs the document engine and its
+  JSON-RPC interface without a window (`--headless --remote PORT`). It needs
+  FUSE and unprivileged user namespaces, which Ubuntu 23.10+ restricts
+  ([the headless AppImage](docs/packaging/README.md#the-headless-appimage)).
+  For the GUI on a non-Nix distribution, build from source (below).
 - **Container:** `ghcr.io/eliasaronson/lobole-headless`, the same headless
   engine ([Container](#container-headless)).
 - **Python:** `pip install lobole` (or `uv tool install lobole`) — the
