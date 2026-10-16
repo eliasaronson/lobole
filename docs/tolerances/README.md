@@ -487,36 +487,61 @@ hand. The material defaults to `pla`. When every disc comes free, or none
 does, `--gap-only --gap-center <mm a side> --step <mm>` prints a second
 coupon of the gap row alone, centred where the first one pointed.
 
-The **Z-gap row** measures the vertical gap: rings captured on posts, each
-ring's underside N whole layers over the plate (`--z-layers`, default 1, 2
-and 3, or either side of the profile's `z_gap_mm` when it has one). The
-layers are the profile's `layer_height_mm`, else `--layer`; with neither the
-coupon refuses rather than assume one. Sized from `--size`: a post Ø0.5
-size, a ring Ø1.6 size and 0.25 size thick, clear of its post by the
-profile's gap a side (already measured, so the Z gap is the only thing that
-varies), kept by a 45-degree head overlapping the ring's hole by 0.15 size
-and two layers clear above the largest gap's ring — only the ring's
-underside is under test, and nothing overhangs past 45 degrees. Each is
-labelled with its gap in mm. Print it, give every ring a firm twist: the
-fewest layers that turn cleanly are the Z gap. The full coupon carries the
-row (a new printer needs every number); `--z-gap-only` prints it alone on a
-plate a quarter of `size` thick — three rings, 60 x 20 mm at Ø8 — for a
-profile whose sideways numbers are already measured:
+Two rows of rings measure what a print-in-place design leans on. Every
+ring stands **on the bed**, in a pocket through the plate, round a post of
+the plate (Ø half the size, as the counter's axles); a rail a little wider
+than the post bridges the pocket and ties the post to the plate, and a
+45-degree head on the post flares out over the ring's inner edge. That head
+is the one face over another part: self-supporting, as a design's should
+be. Sized from `--size`: a ring Ø1.6 size and 0.25 size thick, its pocket
+0.15 size clear of it all round, the head overlapping the ring's hole by
+0.15 size; the part of the plate under the rows a quarter of the size
+thick, so a fingertip reaches the rings.
+
+- The **air row** puts N whole layers of vertical air under the head at the
+  ring's inner edge (`--z-layers`, default 1, 2, 3 and 4, or four round the
+  profile's `z_gap_mm` when it has one), the ring clear of its post by
+  twice the profile's gap a side so only the air varies. The layers are the
+  profile's `layer_height_mm`, else `--layer`; with neither the coupon
+  refuses rather than assume one. Turn each ring: the fewest layers that
+  turn cleanly are the air, which `--record --z-gap-layers N` keeps as
+  `z_gap_mm`.
+- The **small-gap row** is the same ring and post with the head at the air
+  row's largest air, and the bore's gap a side stepped round the profile's
+  (one `--step` under it, three over: −0.05 … +0.15 at the default). It
+  measures the sideways gap at the post's size on the first layers, which
+  a Ø`size` disc does not. `--record --post-gap-side MM` keeps the
+  tightest that turned as a `gap` row from Ø0 to Ø`size`, on top of the
+  profile, whose own gap carries on from Ø`size` (the disc row's size).
+
+Each ring is labelled with its air or its gap a side in mm. The full coupon
+carries both rows (a new printer needs every number); `--z-gap-only` prints
+them alone on a plate a quarter of `size` thick — 100 × 40 mm at Ø8 — for a
+profile whose other numbers are already measured:
 
     python3 generators/print_coupon.py --port PORT --z-gap-only \
         --profile "K5 PLA on P1S" --layer 0.2
     python3 generators/print_coupon.py --port PORT --record \
-        --profile "K5 PLA on P1S" --layer 0.2 --z-gap-layers 1
+        --profile "K5 PLA on P1S" --layer 0.2 --z-gap-layers 3 \
+        --post-gap-side 0.1
+
+The coupon passes [`check_print`](#checking-a-print) itself, every item,
+with `min_gap_mm` and `min_air_mm` set to the least the coupon holds on
+purpose (its tightest disc and ring, its one-layer ring; a head comes
+within its air/√2 of its ring's edge): every piece starts on the bed and
+nothing is closer than it means to be. With a thread its overhang item is
+reported, not required — a metric thread's flanks overhang past 45°.
 
 - `--profile NAME` builds against one of your profiles and exports at its
   chord deviation.
 - `--record --profile NAME --gap-side MM --bore MM --pin MM --thread-went
-  yes|no --z-gap-layers N` keeps the answer: the winners become rows over
-  the profile (or, for a new name, the built-in table of
-  `--process`/`--material`), each `source` naming the coupon and its date,
-  and the Z gap its `z_gap_mm` (N layers of the profile's layer height, or
-  `--layer`, which it then states too), saved with `save_print_profile` at
-  the deflection the coupon was exported at.
+  yes|no --z-gap-layers N --post-gap-side MM` keeps the answer: the
+  winners become rows over the profile (or, for a new name, the built-in
+  table of `--process`/`--material`), each `source` naming the coupon and
+  its date, the air its `z_gap_mm` (N layers of the profile's layer height,
+  or `--layer`, which it then states too) and the post's gap a `gap` row
+  under Ø`size`, saved with `save_print_profile` at the deflection the
+  coupon was exported at.
 - `--seed` installs [the two measured profiles](#from-a-measurement), at
   the preset's 0.2 mm layers and with no Z gap measured.
 
