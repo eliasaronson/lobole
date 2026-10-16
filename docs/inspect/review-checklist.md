@@ -35,7 +35,8 @@ reports done, a person before a review. Every box is one RPC call. The MCP
 - [ ] `check_print`: `ok`, with every item that matters `pass` — on the bed,
       one piece per solid (a print-in-place pair that touches is one), no
       overhang or bridge past the process, the gap between bodies, the STL's
-      chords. A `skipped` item had no limit: declare the print
+      chords, every piece on the bed with no face within the minimum air
+      over another (`stacking`). A `skipped` item had no limit: declare the print
       (`set_print_process`) or state it
       ([checking a print](../tolerances/README.md#checking-a-print)).
 

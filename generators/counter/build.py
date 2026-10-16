@@ -201,9 +201,10 @@ def solve(h, digits, gap, layer, z_gap=None):
     }
     s["h_band"] = s["chamfer"] + s["h_face"]
     # Where one part sits over another the space is whole layers: the
-    # profile's measured Z gap (print_coupon's Z-gap row), else at least the
-    # gap -- one layer at the P1S's 0.1 a side (the slicer prints the upper
-    # part on the lower as on a support's interface), two at 0.25.
+    # profile's z_gap_mm (print_coupon's air row), else at least the gap --
+    # one layer at the P1S's 0.1 a side, two at 0.25. The 2026-10-15 print
+    # fused at these interfaces and check_print's stacking fails them
+    # (docs/tolerances/README.md#one-part-printed-over-another).
     if z_gap:
         s["zgap"], s["zgap_from"] = z_gap, "the profile's z_gap_mm"
     else:
@@ -826,7 +827,7 @@ def main():
                  size_mm=args.digit_height, **proc)
     # The layer and the Z gap the profile states
     # (docs/tolerances/README.md#print-profiles): the vertical counterpart of
-    # the gap, measured by print_coupon's Z-gap row.
+    # the gap, measured by print_coupon's air row.
     prof = next((p for p in d.call("list_print_profiles")["profiles"]
                  if p["name"] == args.profile), {}) if args.profile else {}
     layer = args.layer or prof.get("layer_height_mm") or 0.2

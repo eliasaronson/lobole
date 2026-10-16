@@ -457,8 +457,9 @@ measured ([requirements](../requirements/README.md)).
 ## Will it print
 
 `check_print` answers for a printed part: on the bed, one piece per solid,
-overhangs and bridges against the process, the gap between bodies and the
-STL's chords — [../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).
+overhangs and bridges against the process, the gap between bodies, the
+STL's chords, and stacking: every piece on the bed and none printed within
+the minimum air over another — [../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).
 
 ## Before delivering a model
 

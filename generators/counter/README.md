@@ -84,7 +84,7 @@ parts are sliced at (the profile's `layer_height_mm`, else `--layer`, else
   Geneva 4 nozzle widths wide at its tip, relieved where the Geneva swings
   through it at mid-carry.
 - Vertical spaces (one part printed over another) are the profile's
-  measured Z gap, `z_gap_mm`, from the coupon's Z-gap row
+  `z_gap_mm`, now the air the coupon's air row measures
   ([the coupon](../../docs/tolerances/README.md#the-coupon)); a profile
   without one gets whole layers at least the gap: one layer at 0.1 a side,
   two at 0.25. A `--layer` other than the one the profile's Z gap was
@@ -96,9 +96,11 @@ Axle vertical, the most significant wheel on the bed, the units on top
 under the knob. Every surface that slides is a vertical wall spaced by the
 profile's gap, which is the gap the coupon measured. Where one part sits
 over another — a wheel on the wheel below, a Geneva on the band, a housing
-fin on a band — the space is whole layers: the slicer prints the upper part
-on the lower as it prints a part on a support's interface, and a firm first
-turn frees it. Each wheel's band overhangs its lock disc, so the band's
+fin on a band — the space is whole layers, on the assumption that the
+slicer prints the upper part on the lower as it prints a part on a
+support's interface and a firm first turn frees it. The print disproved
+that: a flat face over another part fuses at any number of layers
+([one part printed over another](../../docs/tolerances/README.md#one-part-printed-over-another)). Each wheel's band overhangs its lock disc, so the band's
 underside is a 45° cone. The housing is a block minus every moving part's
 swept envelope grown by the gap and the vertical space, so what is left is
 the base, the walls, the posts, the ceiling, and the fins between the bands

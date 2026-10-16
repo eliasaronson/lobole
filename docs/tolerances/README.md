@@ -316,6 +316,31 @@ Where the numbers come from, beyond the table's column:
   `print_notes` add that the part was modelled with a different copy, or one
   the store does not have, and that the answer is the part's copy.
 
+### One part printed over another
+
+A flat face over another part fails at any number of layers. One empty
+layer under it, and the slicer prints it onto the part below, bonded
+across its whole area; more, and a part with nothing of its own to bridge
+from is printed into the air, its first layer drooping into strands that
+weld to whatever they land on. The 2026-10-15 K5 PLA print on a P1S showed
+both: the [counter](../../generators/counter/README.md)'s wheels, each one
+layer over the next, came off fused solid (the ceiling's skin stayed on
+the units wheel when the lid was torn off), and the coupon's old Z-gap
+rings, started a few layers over the plate, welded to their posts. A part
+printed in place follows two rules instead:
+
+1. **every piece starts on the bed;**
+2. **where one part prints over another, the face above is
+   self-supporting** — a 45° flank, or a bridge between the part's own
+   walls — **and leaves enough vertical air** for the strands not to reach
+   the part below.
+
+How much air is the profile's `z_gap_mm` ([below](#print-profiles)),
+measured by the coupon's [air row](#the-coupon); `check_print`'s
+[stacking item](#checking-a-print) checks both rules; and
+[`generators/hinge_box/`](../../generators/hinge_box/README.md) is the
+smallest part built to them.
+
 ### Print profiles
 
 A **print profile** (`printfit::Profile {name, table, stlDeflectionMm,
@@ -336,15 +361,9 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   thread is not negative, a shaft or external thread not positive, and a gap
   is positive (a gap of zero fuses). A refusal writes nothing.
 - **The air over another part** (v175). The `gap` rows are sideways: two
-  walls printed beside each other. Vertically, a part never STARTS on
-  another: a face one empty layer over another part bonds to it across its
-  whole area, and a part with more air under it and nothing of its own to
-  bridge from is printed into the air, droops and welds to what it lands on
-  (the counter and the coupon's old Z-gap row both came off a P1S fused
-  that way). So every piece starts on the bed, and where one part prints
-  over another its face is self-supporting and leaves enough air for the
-  strands not to reach the part below. How much air that is belongs to the
-  printer and the preset, not a diameter, so it is not a row:
+  walls printed beside each other. How much vertical air a face needs
+  over [another part printed under it](#one-part-printed-over-another)
+  belongs to the printer and the preset, not a diameter, so it is not a row:
   `layer_height_mm` (the preset's layer) and `z_gap_mm`, the vertical air
   a face needs over another part to come away from it, in whole layers of
   it (the slicer ends air at a layer); each 0 / absent until stated. A
@@ -440,13 +459,12 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
   bed fails the bed item alone, not every face on its underside. Stacking
   measures from the same point: the bed item asks that the PRINT is on the
   bed, stacking that every PIECE is.
-- **A flat face over another piece fails at any number of layers it could
-  start in**: one layer of air bonds it, more prints it into the air. What
-  passes is a piece that starts on the bed and reaches over another with a
-  face that holds itself up — a 45° flank, or a bridge between its own
-  walls — the minimum air above it (the counter's wheels, one layer over
-  each other, fail; a ring round a post under a 45° head with three layers
-  passes).
+- **A flat face over another piece fails at any number of layers**
+  ([why](#one-part-printed-over-another)). What passes is a piece that
+  starts on the bed and reaches over another with a face that holds itself
+  up, the minimum air above it: the counter's wheels, one layer over each
+  other, fail; a ring round a post under a 45° head with three layers
+  passes.
 - **Every limit can be stated** (`max_overhang_deg`,
   `overhang_allowance_mm2`, `max_bridge_mm`, `min_gap_mm`,
   `stl_deflection_mm`, `min_air_mm`); each item says where its limit came
@@ -644,17 +662,28 @@ printed part, and the advised custom thread printing the right major; the
 profile store's RPCs and refusals, a disc in a hole exported at the
 profile's chords with the gap in the STL within 0.005 mm of the model, a
 coarse deflection warned, the match after the store changes, a Z gap off
-whole layers refused, and `print_coupon --record` (the Z gap too) and
-`--seed`),
+whole layers refused, `print_coupon --record` (the Z gap too) and
+`--seed`, and `check_print`'s minimum air taken from a profile's `z_gap_mm`
+and else from three of its layers),
 `tests/test_print_allowance.cpp` "A printed clearance hole is modelled at its
 fit plus the allowance", `tests/test_print_check.cpp` (a box on and off the
 bed, a 45° funnel reading 45 and passing and a 60° one failing with its
 area, a slot's ceiling spanning its inscribed 10 mm, two boxes keeping the
 gap, too close, touching and overlapping, one body of loose solids, chords
-past a fifth of the gap, another print direction),
+past a fifth of the gap, another print direction; and, tagged
+`[printcheck]`, stacking: a block one layer over another failing as a piece
+off the bed and as 100 mm² at 0.2 mm of air, side by side passing; a ring
+round a post under a 45° head passing at three layers and failing at one
+with the cone's area over the ring; a body's own bridge over its own floor
+not counted; no minimum air skipping the item and one not over 0 refused;
+the limit from a profile's `z_gap_mm`, its layers, FDM's default, and none
+for a process that is not FDM),
 `tests/print_check_smoke.py` (the same negative controls over RPC — a 60°
-overhang, a fused pair, a near pair, a part off the bed — the limits from
-the print, an unprinted part's skipped items, and the refusals), `tests/tolerances_smoke.py` (set_tolerance on a part
+overhang, a fused pair, a near pair, a part off the bed, a block one layer
+over another failing stacking off the bed and under the air, still lifted
+under a stated `min_air_mm` below its air — the limits from the print, an
+unprinted part's skipped items stacking among them, and the refusals,
+`min_air_mm` among them), `tests/tolerances_smoke.py` (set_tolerance on a part
 that is not the active one), GUI
 `tolerance/print_process_from_the_panel`,
 `tolerance/print_profiles_are_kept_in_preferences`,
@@ -662,15 +691,25 @@ that is not the active one), GUI
 `tolerance/printed_stl_export_says_its_chords`,
 `tolerance/print_check_from_the_panel`, `tolerance/a_measured_bore_gets_a_class`,
 `tolerance/a_plane_is_told_what_to_do`, `tolerance/the_panel_lists_and_clears`,
-`tolerance/check_fits_from_the_panel`.
+`tolerance/check_fits_from_the_panel`. The generators run as tests
+([the big generators as tests](../../generators/README.md#the-big-generators-as-tests)) keep the checks
+honest on real parts: `generator_hinge_box` passes every `check_print`
+item, stacking included, swings the lid 0-180° clean onto the rim, and
+fails stacking on both negative controls (half the cone's air, the lid a
+layer off the bed).
 
 ## Not built
 
-- In `check_print`: a ceiling resting on the part below across a
-  print-in-place layer gap reads as a bridge; a bridge anchored on two
-  edges only reads its inscribed diameter, not its length; no support or
-  island detection (a downward face that starts in air); no wall thickness;
-  no overhang shading in the viewport.
+- In `check_print`: a ceiling over another piece also reads as a bridge
+  (stacking is what fails it); a bridge anchored on two edges only reads
+  its inscribed diameter, not its length; no support or island detection
+  within a piece (a piece that starts off the bed is stacking's); no wall
+  thickness; no overhang shading in the viewport. Stacking can read the
+  air about 0.02 mm under where a sample lies on a face boundary of the
+  tessellation, since which face a ray meets there is the triangles'.
+- A print job exported for the slicer: a 3MF carrying the profile's layer
+  height and per-object settings, so the preset the air was measured at is
+  the one that slices the part.
 
 - An inferred stack-up chain, and correlation between terms (needs tracking
   from measured geometry back to the variables that drove it).

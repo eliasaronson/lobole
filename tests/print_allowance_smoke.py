@@ -233,7 +233,7 @@ def profiles(d, port):
     r = d.call("print_allowance", kind="hole", size_mm=8,
                profile="Coupon P1S")
     expect(near(r["model_mm"], 8.25), f"the recorded bore: {r}")
-    # The Z-gap row's answer: whole layers, kept as the profile's z_gap_mm.
+    # The air row's answer: whole layers, kept as the profile's z_gap_mm.
     out = subprocess.run(
         [sys.executable, coupon, "--port", str(port), "--record",
          "--profile", "Coupon P1S", "--layer", "0.2", "--z-gap-layers", "2"],

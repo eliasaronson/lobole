@@ -11,7 +11,7 @@ rim.
     python3 generators/hinge_box/build.py --port 8801 --size 80
 
 The test piece for the two rules a print-in-place part follows
-(docs/plans/printed-on-another-part.md): every piece starts on the bed, and
+(docs/tolerances/README.md#one-part-printed-over-another): every piece starts on the bed, and
 where one part prints over another the face above is self-supporting (45
 degrees, or a bridge between its own walls) with at least the print's
 minimum air under it. Here the only faces over another part are the cone
