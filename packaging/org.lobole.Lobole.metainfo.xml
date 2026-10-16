@@ -10,7 +10,7 @@
   </developer>
   <description>
     <p>
-      Designer is an open-source parametric 3D CAD application built around a
+      Loböle is an open-source parametric 3D CAD application built around a
       deterministic, scriptable document model. Create constrained sketches,
       solid features, assemblies, drawings, configurations, and FEM studies.
     </p>
@@ -24,7 +24,20 @@
   <url type="homepage">https://github.com/eliasaronson/Designer</url>
   <url type="bugtracker">https://github.com/eliasaronson/Designer/issues</url>
   <releases>
-    <release version="0.1.0" date="2026-07-24"/>
+    <release version="0.1.0" date="2026-07-24">
+      <description>
+        <p>The first public release.</p>
+        <ul>
+          <li>Parametric parts: constrained sketches, solid, sheet-metal and tube features, driven by variables and expressions</li>
+          <li>Assemblies with mates, motion studies and an exploded bill of materials</li>
+          <li>Drawings exported to SVG and PDF</li>
+          <li>FEM studies and topology optimisation</li>
+          <li>CAM: milling toolpaths, simulation and G-code, including a fourth axis</li>
+          <li>Git-backed history, checkpoints and merges of a diffable project format</li>
+          <li>A JSON-RPC interface with a Python SDK and an MCP server, the same command layer the GUI uses</li>
+        </ul>
+      </description>
+    </release>
   </releases>
   <content_rating type="oars-1.1"/>
 </component>

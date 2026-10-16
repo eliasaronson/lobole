@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-# Build (and user-install) the Designer Flatpak.
+# Build (and user-install) the Loböle Flatpak.
 #
 # Runs entirely in user mode via nix-shell, so it needs NO NixOS
 # `services.flatpak.enable` and no root — just a working `nix-shell`. The first
@@ -17,7 +17,7 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MANIFEST="$REPO/packaging/flatpak/org.lobole.Lobole.yaml"
-WORK="$(dirname "$REPO")/designer-flatpak-work"
+WORK="$(dirname "$REPO")/lobole-flatpak-work"
 BUILDDIR="$WORK/build"
 STATEDIR="$WORK/state"   # persistent: downloaded sources + ccache
 APP_ID="org.lobole.Lobole"

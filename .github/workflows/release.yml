@@ -1,0 +1,231 @@
+# A tag builds the release: every download is built, started and made to
+# model a part (tools/release-smoke.py) before any of it is published.
+#
+#   push a tag v<VERSION>   build, smoke, then publish: a GitHub release with
+#                           the files and SHA256SUMS, the wheel to PyPI, the
+#                           headless image to GHCR
+#   workflow_dispatch       the same builds and smokes, publishing nothing —
+#                           how this workflow is tested before a tag
+#
+# docs/packaging/README.md#releasing says what to do before tagging.
+#
+# Cachix: set the repository variable CACHIX_CACHE (the cache's name) and the
+# secret CACHIX_AUTH_TOKEN, and every nix job here pulls from and pushes to
+# it. Without them the jobs build OpenCASCADE and Netgen from source, which is
+# slow but correct.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # A tag that disagrees with what it builds is refused, not shipped.
+  check:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Tag, VERSION and metainfo agree
+        run: |
+          version="$(cat VERSION)"
+          tag="${GITHUB_REF_NAME}"
+          [ "${{ github.ref_type }}" = "tag" ] || tag="v$version"
+          python3 tools/release-notes.py "$tag" > notes.md
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: notes
+          path: notes.md
+
+  # The flake's package: the headless AppImage and the container image.
+  linux:
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
+      - uses: cachix/cachix-action@v15
+        if: vars.CACHIX_CACHE != ''
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Build the package
+        run: nix build .#default -L
+
+      # Headless only: the bundle carries its own glibc, which the host's GPU
+      # driver cannot share (docs/packaging/README.md#the-headless-appimage).
+      - name: Bundle the headless AppImage
+        run: |
+          nix bundle \
+            --bundler github:ralismark/nix-appimage/7946addbc0d97e358a6d7aefe5e82310f0fe6b18 \
+            .#default -o appimage
+          cp -L appimage "lobole-${{ needs.check.outputs.version }}-x86_64-headless.AppImage"
+          chmod +x lobole-*.AppImage
+
+      - name: Smoke the AppImage
+        run: |
+          python3 tools/release-smoke.py --port 8437 \
+            --version "${{ needs.check.outputs.version }}" \
+            -- "./lobole-${{ needs.check.outputs.version }}-x86_64-headless.AppImage"
+
+      - name: Build the container image
+        run: nix build .#dockerHeadless -o image.tar.gz
+
+      - name: Smoke the container image
+        run: |
+          docker load < image.tar.gz
+          docker run -d --rm --name lobole -p 8437:8437 lobole-headless:latest
+          python3 tools/release-smoke.py --attach --port 8437
+          docker rm -f lobole
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            lobole-*.AppImage
+            image.tar.gz
+
+  # Cross-built on Linux (docs/packaging/README.md#windows), from the
+  # flake's nixpkgs rather than whatever a channel says today.
+  windows:
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - uses: cachix/install-nix-action@v27
+        with:
+          extra_nix_config: "experimental-features = nix-command flakes"
+      - uses: cachix/cachix-action@v15
+        if: vars.CACHIX_CACHE != ''
+        with:
+          name: ${{ vars.CACHIX_CACHE }}
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+
+      - name: Pin NIX_PATH to the flake's nixpkgs
+        run: |
+          nixpkgs="$(nix eval --raw --impure --expr \
+            '(builtins.getFlake (toString ./.)).inputs.nixpkgs.outPath')"
+          echo "NIX_PATH=nixpkgs=$nixpkgs" >> "$GITHUB_ENV"
+
+      # --cores 4: the cross link runs out of memory at full parallelism.
+      - name: Build the zip and the installer
+        run: nix-build packaging/windows/installer.nix --cores 4 -o win
+
+      - name: Smoke the portable zip under Wine
+        run: |
+          mkdir unpacked && (cd unpacked && unzip -q ../win/lobole-*-portable.zip)
+          nix shell nixpkgs#wineWow64Packages.stable -c \
+            python3 tools/release-smoke.py --port 8437 \
+              --version "${{ needs.check.outputs.version }}" \
+              -- wine unpacked/app/bin/lobole.exe
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: win/*
+
+  python:
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # The oldest Python pyproject.toml accepts: rpc.py once imported only
+      # on 3.14, which defers annotations by itself, while promising 3.11.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build the sdist and the wheel
+        run: |
+          python -m pip install --upgrade build setuptools
+          python -m build
+      - name: Smoke the wheel
+        run: python tests/packaging_smoke.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python
+          path: dist/*
+
+  # Everything below publishes, and runs only for a tag whose every build and
+  # smoke above passed.
+  github-release:
+    if: github.ref_type == 'tag'
+    needs: [check, linux, windows, python]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir files
+          cp linux/*.AppImage windows/* python/* files/
+          (cd files && sha256sum * > SHA256SUMS)
+          {
+            cat notes/notes.md
+            echo
+            echo "**Windows:** built and tested under Wine only; no Windows"
+            echo "machine has run it yet, and the installer is not signed, so"
+            echo "SmartScreen will warn. **AppImage:** headless only (the"
+            echo "document engine and its JSON-RPC interface, no window)."
+          } > body.md
+          gh release create "$GITHUB_REF_NAME" files/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Loböle ${{ needs.check.outputs.version }}" \
+            --notes-file body.md
+
+  # Trusted publishing: PyPI trusts this workflow by name, so no token is
+  # stored. Configure it once on pypi.org (project lobole, workflow
+  # release.yml, environment pypi) before the first tag.
+  pypi:
+    if: github.ref_type == 'tag'
+    needs: [github-release]
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: python
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  ghcr:
+    if: github.ref_type == 'tag'
+    needs: [check, github-release]
+    runs-on: ubuntu-24.04
+    permissions:
+      packages: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux
+      - name: Push the image
+        run: |
+          docker load < image.tar.gz
+          echo "${{ secrets.GITHUB_TOKEN }}" \
+            | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          repo="ghcr.io/${{ github.repository_owner }}/lobole-headless"
+          repo="$(echo "$repo" | tr '[:upper:]' '[:lower:]')"   # GHCR is lowercase
+          for tag in "${{ needs.check.outputs.version }}" latest; do
+            docker tag lobole-headless:latest "$repo:$tag"
+            docker push "$repo:$tag"
+          done

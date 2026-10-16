@@ -33,6 +33,27 @@ path tracer; the animation is its motion-video export. See
 | [![Bicycle](docs/gallery/bicycle.jpg)](generators/bike) | [![FPV quadcopter](docs/gallery/fpv-drone.jpg)](generators/fpv_drone) |
 | **Bicycle** — modelled from photographs: frame, wheels with laced spokes, chain drive | **5-inch FPV quadcopter** — 91 occurrences, fitted fasteners, FEM on the arms |
 
+## Installing
+
+Each release (the GitHub releases page) carries:
+
+- **Nix / NixOS:** `nix run github:eliasaronson/Designer` — the full app,
+  GUI included.
+- **Windows:** a portable zip and an installer. Built on Linux and tested
+  under Wine only, and not signed, so SmartScreen warns; Netgen meshing (and
+  so FEM) is missing there.
+- **Any Linux, headless:** an AppImage that runs the document engine and its
+  JSON-RPC interface without a window (`--headless --remote PORT`). For the
+  GUI on a non-Nix distribution, build from source (below).
+- **Container:** `ghcr.io/eliasaronson/lobole-headless`, the same headless
+  engine ([Container](#container-headless)).
+- **Python:** `pip install lobole` (or `uv tool install lobole`) — the
+  client, the SDK and the MCP server (`lobole-mcp`), which drive a running
+  app ([docs/scripting/README.md](docs/scripting/README.md)).
+
+[docs/packaging/README.md](docs/packaging/README.md) says how each is built
+and what a release checks before it publishes one.
+
 ## Requirements
 
 Loböle builds on any Linux with the libraries below; two paths are verified
@@ -200,7 +221,7 @@ distro-package build cannot:
 
 ```
 nix build .#dockerHeadless && docker load < result
-docker run --rm -p 8437:8437 designer-headless:latest
+docker run --rm -p 8437:8437 lobole-headless:latest
 PYTHONPATH=python python3 -m lobole.client 8437 get_state
 ```
 

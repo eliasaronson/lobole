@@ -7,7 +7,10 @@
 #  cmake -g "Visual Studio 14 2015" ..
 
 cmake_minimum_required(VERSION 3.14)
-project(designer VERSION 0.1.0 LANGUAGES C CXX)
+# The one version number: VERSION, read by the flake, the Windows packaging
+# and pyproject.toml too (docs/packaging/README.md#one-version).
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" LOBOLE_VERSION_FILE LIMIT_COUNT 1)
+project(designer VERSION ${LOBOLE_VERSION_FILE} LANGUAGES C CXX)
 include(GNUInstallDirs)
 
 if(NOT CMAKE_BUILD_TYPE)

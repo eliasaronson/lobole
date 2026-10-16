@@ -1,15 +1,15 @@
 # Corresponding source and LGPL replacement notice
 
-Loböle 0.1.0 and the locally modified PlaneGCS and libarea libraries are
-available in source form at:
+Every Loböle release, with the locally modified PlaneGCS and libarea
+libraries, is available in source form at its tag, `v<version>`:
 
-<https://github.com/eliasaronson/Designer/tree/v0.1.0>
+<https://github.com/eliasaronson/Designer/tags>
 
 The release source archive generated from that tag is the exact corresponding
 source for Loböle, `libplanegcs` and `libdesigner_adaptive`, including build
-scripts and all local PlaneGCS and libarea modifications. Until the `v0.1.0`
-tag is published, the corresponding source is the commit identified by the
-release artifact's build metadata.
+scripts and all local PlaneGCS and libarea modifications. A build that is not
+a release names its commit in its build metadata (`lobole --version`), and
+that commit is its corresponding source.
 
 Loböle dynamically links the following LGPL-family libraries:
 

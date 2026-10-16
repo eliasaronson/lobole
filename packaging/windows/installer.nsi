@@ -1,16 +1,16 @@
-# NSIS installer for Designer (Windows x86_64). Built on Linux with makensis.
+# NSIS installer for Loböle (Windows x86_64). Built on Linux with makensis.
 # Expects the cross-built bundle staged at ./app/{bin,share} next to this script.
 # Pass -DVERSION=<x.y.z> to makensis.
 
 !ifndef VERSION
   !define VERSION "0.0.0"
 !endif
-!define APPNAME "Designer"
+!define APPNAME "Loböle"
 !define PUBLISHER "Elias Hogbom Aronsson"
 !define REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
 
 Name "${APPNAME} ${VERSION}"
-OutFile "designer-${VERSION}-win64-setup.exe"
+OutFile "lobole-${VERSION}-win64-setup.exe"
 Unicode true
 InstallDir "$PROGRAMFILES64\${APPNAME}"
 InstallDirRegKey HKLM "Software\${APPNAME}" "InstallDir"
@@ -28,7 +28,7 @@ Section "Install"
   File /r "app\share\*"
 
   CreateDirectory "$SMPROGRAMS\${APPNAME}"
-  CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\bin\designer.exe"
+  CreateShortcut "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk" "$INSTDIR\bin\lobole.exe"
   CreateShortcut "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk" "$INSTDIR\Uninstall.exe"
 
   WriteRegStr HKLM "Software\${APPNAME}" "InstallDir" "$INSTDIR"

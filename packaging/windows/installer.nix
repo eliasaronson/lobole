@@ -1,15 +1,15 @@
 # Package the cross-built Windows app into distributables — all on Linux:
-#   - designer-<ver>-win64-portable.zip   (unzip and run bin/designer.exe)
-#   - designer-<ver>-win64-setup.exe       (NSIS installer, makensis runs on Linux)
+#   - lobole-<ver>-win64-portable.zip   (unzip and run bin/lobole.exe)
+#   - lobole-<ver>-win64-setup.exe       (NSIS installer, makensis runs on Linux)
 # Build:  nix-build packaging/windows/installer.nix
 { }:
 let
   pkgs = import <nixpkgs> { config.allowUnsupportedSystem = true; };
   app = import ./cross-app.nix { };
-  version = "0.1.0";
+  version = pkgs.lib.fileContents ../../VERSION;
 in
 pkgs.stdenvNoCC.mkDerivation {
-  pname = "designer-win-dist";
+  pname = "lobole-win-dist";
   inherit version;
   dontUnpack = true;
 
@@ -29,8 +29,8 @@ pkgs.stdenvNoCC.mkDerivation {
     cp -rL ${app}/share/. app/share/
     chmod -R u+w app
 
-    # Portable zip: unzip anywhere, run bin/designer.exe.
-    zip -qr designer-${version}-win64-portable.zip app/bin app/share
+    # Portable zip: unzip anywhere, run bin/lobole.exe.
+    zip -qr lobole-${version}-win64-portable.zip app/bin app/share
 
     # NSIS setup.exe (makensis reads app/{bin,share} relative to CWD).
     cp ${./installer.nsi} installer.nsi
@@ -41,8 +41,8 @@ pkgs.stdenvNoCC.mkDerivation {
   installPhase = ''
     runHook preInstall
     mkdir -p $out
-    cp designer-${version}-win64-portable.zip $out/
-    cp designer-${version}-win64-setup.exe $out/
+    cp lobole-${version}-win64-portable.zip $out/
+    cp lobole-${version}-win64-setup.exe $out/
     runHook postInstall
   '';
 }

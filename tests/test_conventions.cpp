@@ -1884,3 +1884,92 @@ TEST_CASE("an RPC integer parameter is read through remote::IntParam",
   }());
   CHECK(offenders.empty());
 }
+
+TEST_CASE("no environment variable or CMake option keeps the old prefix",
+          "[convention]") {
+  // Users set these (the MCP server's port, the watchdog, packagers' build
+  // options), so a second prefix is a second name for one thing. Spelt in
+  // two halves so this file does not match itself.
+  const std::string old = std::string("DESIGN") + "ER_";
+  const fs::path repo(TestSourceDir());
+  const std::set<std::string> exts = {
+      ".cpp", ".h",    ".py",  ".md",  ".sh", ".txt",   ".yml", ".yaml",
+      ".nix", ".toml", ".xml", ".nsi", ".in", ".cmake", ".json"};
+  std::vector<fs::path> files;
+  for (const char* top :
+       {"src", "tests", "tools", "python", "packaging", "nix", "benchmarks",
+        "generators", "docs", ".github", ".githooks", "cmake"}) {
+    const fs::path root = repo / top;
+    if (!fs::exists(root))
+      continue;
+    for (const auto& e : fs::recursive_directory_iterator(root)) {
+      const std::string s = e.path().string();
+      if (e.is_regular_file() && exts.contains(e.path().extension()) &&
+          s.find("thirdparty") == std::string::npos &&
+          s.find("__pycache__") == std::string::npos &&
+          s.find("/.flatpak-builder/") == std::string::npos)
+        files.push_back(e.path());
+    }
+  }
+  for (const char* top :
+       {"CMakeLists.txt", "flake.nix", "shell.nix", "pyproject.toml",
+        "README.md", "CLAUDE.md", "CONTRIBUTING.md", "THIRD_PARTY.md"})
+    files.push_back(repo / top);
+
+  std::vector<std::string> found;
+  for (const fs::path& file : files) {
+    std::ifstream f(file);
+    size_t n = 0;
+    for (std::string line; std::getline(f, line);) {
+      ++n;
+      if (line.find(old) != std::string::npos)
+        found.push_back(Relative(file) + ":" + std::to_string(n));
+    }
+  }
+  INFO([&] {
+    std::string s = "Rename to LOBOLE_:\n";
+    for (const std::string& h : found)
+      s += "  " + h + "\n";
+    return s;
+  }());
+  CHECK(found.empty());
+}
+
+TEST_CASE("the version is written once, in VERSION", "[convention]") {
+  const fs::path repo(TestSourceDir());
+  const auto slurp = [&](const char* rel) {
+    std::ifstream f(repo / rel);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+  };
+  std::string version = slurp("VERSION");
+  while (!version.empty() &&
+         std::isspace(static_cast<unsigned char>(version.back())))
+    version.pop_back();
+  REQUIRE(std::regex_match(version, std::regex(R"(\d+\.\d+\.\d+)")));
+
+  // The newest <release> comes first; it is what a tag of this version
+  // ships, and release.yml refuses a tag the metainfo does not name.
+  const std::string meta = slurp("packaging/org.lobole.Lobole.metainfo.xml");
+  std::smatch m;
+  REQUIRE(
+      std::regex_search(meta, m, std::regex(R"(<release version="([^"]+)\")")));
+  CHECK(m[1].str() == version);
+
+  // Everything else reads the file; a literal would drift from it. The
+  // cross build also pins its Boost, so there only the reading is checked.
+  for (const char* rel :
+       {"flake.nix", "pyproject.toml", "packaging/windows/installer.nix",
+        "packaging/windows/cross-app.nix"}) {
+    INFO(rel);
+    const std::string text = slurp(rel);
+    CHECK(std::regex_search(
+        text, std::regex(R"((fileContents |file = ")\S*VERSION)")));
+    if (std::string(rel) != "packaging/windows/cross-app.nix")
+      CHECK_FALSE(
+          std::regex_search(text, std::regex(R"((^|\n)\s*version\s*=\s*"\d)")));
+  }
+  CHECK(slurp("CMakeLists.txt").find("project(designer VERSION ${") !=
+        std::string::npos);
+}

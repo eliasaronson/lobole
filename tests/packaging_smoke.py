@@ -13,10 +13,12 @@ here and breaks on the user's machine. `designer_contracts` (now
 `lobole.contracts`) was left out that way, and `help()` on every typed
 method raised ModuleNotFoundError once installed.
 
-So this builds the wheel from a COPY of the tree (setuptools writes build/
-and *.egg-info next to its input, and build/ is ours), unpacks it, and with
-the source tree off sys.path:
+So this builds the sdist from a COPY of the tree (setuptools writes build/
+and *.egg-info next to its input, and build/ is ours), the wheel from that
+sdist (what pip does with a PyPI release), unpacks it, and with the source
+tree off sys.path:
 
+- the wheel carries VERSION's version (the sdist must ship the file);
 - every module in python/lobole/ is in the wheel, and `py.typed` with it;
 - every module imports from the wheel alone;
 - every console script names a callable, and `lobole-remote` runs.
@@ -48,20 +50,37 @@ def main():
         tmp = pathlib.Path(tmp)
         src = tmp / "src"
         src.mkdir()
-        shutil.copy(ROOT / "pyproject.toml", src)
+        for name in ("pyproject.toml", "VERSION"):
+            shutil.copy(ROOT / name, src)
         shutil.copytree(ROOT / "python", src / "python",
                         ignore=shutil.ignore_patterns("__pycache__"))
         dist = tmp / "dist"
-        build = subprocess.run(
-            [sys.executable, "-c",
-             "import sys; from setuptools import build_meta as b; "
-             "print(b.build_wheel(sys.argv[1]))", str(dist)],
-            cwd=src, capture_output=True, text=True)
-        if build.returncode != 0:
-            print(build.stdout + build.stderr)
-            print("FAIL: the wheel does not build")
+
+        def build(kind, cwd):
+            r = subprocess.run(
+                [sys.executable, "-c",
+                 "import sys; from setuptools import build_meta as b; "
+                 f"print(b.build_{kind}(sys.argv[1]))", str(dist)],
+                cwd=cwd, capture_output=True, text=True)
+            if r.returncode != 0:
+                print(r.stdout + r.stderr)
+                return None
+            return dist / r.stdout.strip().splitlines()[-1]
+
+        sdist = build("sdist", src)
+        if sdist is None:
+            print("FAIL: the sdist does not build")
             return 1
-        wheel = dist / build.stdout.strip().splitlines()[-1]
+        unpacked = tmp / "sdist"
+        shutil.unpack_archive(sdist, unpacked)
+        wheel = build("wheel", next(unpacked.iterdir()))
+        if wheel is None:
+            print("FAIL: the wheel does not build from the sdist")
+            return 1
+        version = (ROOT / "VERSION").read_text().strip()
+        if f"-{version}-" not in wheel.name:
+            failures.append(f"the wheel is {wheel.name}, not version "
+                            f"{version} from VERSION")
         site = tmp / "site"
         with zipfile.ZipFile(wheel) as z:
             names = set(z.namelist())
@@ -119,7 +138,7 @@ def main():
         print(f"FAIL: {failure}")
     if failures:
         return 1
-    print(f"lobole wheel: {len(modules)} modules ship, import alone, and "
+    print(f"lobole {version} wheel, built from its sdist: {len(modules)} modules ship, import alone, and "
           f"{len(scripts)} console scripts resolve")
     return 0
 

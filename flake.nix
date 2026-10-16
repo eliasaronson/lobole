@@ -1,5 +1,5 @@
 {
-  description = "Designer — parametric B-Rep CAD (Vulkan, OpenCASCADE, PlaneGCS)";
+  description = "Loböle — parametric B-Rep CAD (Vulkan, OpenCASCADE, PlaneGCS)";
 
   # ---------------------------------------------------------------------------
   # Inputs
@@ -68,9 +68,9 @@
         catch2_3 # find_package(Catch2) runs at configure even for the app target
       ]) ++ [ netgenLean ];
 
-      designer = pkgs.stdenv.mkDerivation {
-        pname = "designer";
-        version = "0.1.0"; # Keep in sync with CMake project(VERSION).
+      lobole = pkgs.stdenv.mkDerivation {
+        pname = "lobole";
+        version = pkgs.lib.fileContents ./VERSION;
 
         # The flake source is the git tree (submodule dirs arrive empty and are
         # overlaid in postUnpack below). assets/ and deps/{planegcs,fonts} are
@@ -109,8 +109,10 @@
 
         # Keep the build-tree PlaneGCS RPATH relocatable. CMake's canonical
         # install rules place the app in bin/, PlaneGCS in lib/, and runtime
-        # data under share/designer; the app resolves data relative to itself.
-        cmakeFlags = [ "-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON" ];
+        # data under share/lobole; the app resolves data relative to itself.
+        # Tests off: `ninja install` builds every target, so ninjaFlags alone
+        # still compiled the whole suite into the package's build.
+        cmakeFlags = [ "-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON" "-DLOBOLE_BUILD_TESTS=OFF" ];
 
         # buildInputs' store paths land in the binary's RPATH automatically
         # (OCC/netgen/etc. are linked by absolute path via CMake imported
@@ -129,8 +131,9 @@
         };
       };
 
-      designerHeadlessChecks = designer.overrideAttrs (old: {
-        pname = "designer-headless-checks";
+      loboleHeadlessChecks = lobole.overrideAttrs (old: {
+        pname = "lobole-headless-checks";
+        cmakeFlags = [ "-DCMAKE_BUILD_RPATH_USE_ORIGIN=ON" "-DLOBOLE_BUILD_TESTS=ON" ];
         nativeBuildInputs = old.nativeBuildInputs ++ [ pkgs.git pkgs.python3 ];
         ninjaFlags = [ "designer" "designer_tests" "femgpu_tests" ];
         doCheck = true;
@@ -147,8 +150,8 @@
     in
     {
       packages.${system} = {
-        default = designer;
-        designer = designer;
+        default = lobole;
+        lobole = lobole;
 
         # A headless image: the document engine and its JSON-RPC surface with
         # no GPU, no display server and no desktop stack. That is the whole
@@ -159,7 +162,7 @@
         #
         # Build and run:
         #   nix build .#dockerHeadless && docker load < result
-        #   docker run --rm -p 8437:8437 designer-headless:latest
+        #   docker run --rm -p 8437:8437 lobole-headless:latest
         #   python3 -m lobole.client 8437 get_state
         #
         # --remote-bind-all is what makes the published port reachable: the
@@ -168,30 +171,30 @@
         # that is the right trade; do not publish the port to a network you
         # do not trust.
         dockerHeadless = pkgs.dockerTools.buildLayeredImage {
-          name = "designer-headless";
+          name = "lobole-headless";
           tag = "latest";
           # Layer the closure so a rebuild of the app does not re-push
           # OpenCASCADE and Netgen.
           maxLayers = 100;
           contents = [
-            designer
+            lobole
             pkgs.cacert  # TLS roots, for anything that reaches out
             pkgs.busybox # a shell, so `docker exec` is useful
           ];
           # No python inside: clients drive the port from OUTSIDE the
           # container, and it costs 200 MB.
           #
-          # The image is designer's runtime closure. Netgen comes from
+          # The image is the app's runtime closure. Netgen comes from
           # nix/netgen-lean.nix, built without MPI, python bindings and its
           # GUI, so numpy and gfortran are not in it (the closure measured
           # 503 MiB there, against 1.8 GiB with stock netgen).
           config = {
-            Entrypoint = [ "${designer}/bin/designer" ];
+            Entrypoint = [ "${lobole}/bin/lobole" ];
             Cmd = [ "--headless" "--remote" "8437" "--remote-bind-all" ];
             ExposedPorts = { "8437/tcp" = { }; };
             WorkingDir = "/work";
             Labels = {
-              "org.opencontainers.image.title" = "Designer (headless)";
+              "org.opencontainers.image.title" = "Loböle (headless)";
               "org.opencontainers.image.description" =
                 "Parametric B-Rep CAD engine with a JSON-RPC interface; no GUI.";
               "org.opencontainers.image.licenses" = "AGPL-3.0-or-later";
@@ -202,12 +205,12 @@
         };
       };
 
-      checks.${system}.headless = designerHeadlessChecks;
+      checks.${system}.headless = loboleHeadlessChecks;
 
       # `nix develop` == today's `nix-shell shell.nix`: build tools + libs +
       # the test/tooling extras (validation layers, python-mcp, ccache).
       devShells.${system}.default = pkgs.mkShell {
-        inputsFrom = [ designer ];
+        inputsFrom = [ lobole ];
         packages = with pkgs; [
           gcc
           ccache

@@ -7,7 +7,7 @@ ninja …"`) are in the repository's `CLAUDE.md` and `CONTRIBUTING.md`.
 | channel | who it is for | recipe | GUI |
 |---|---|---|---|
 | Nix flake | Nix and NixOS users | `flake.nix` | yes |
-| Container image | CI, servers, agents | `flake.nix` `dockerHeadless`, `.github/workflows/docker.yml` | no |
+| Container image | CI, servers, agents | `flake.nix` `dockerHeadless` | no |
 | `nix bundle` AppImage | headless use on any distro | `nix bundle --bundler github:ralismark/nix-appimage .#default` | no |
 | Flatpak | desktop users on any distro | `packaging/flatpak/`, `tools/flatpak-build.sh` | yes |
 | Windows | Windows users | `packaging/windows/` (cross-compiled on Linux) | yes |
@@ -15,13 +15,67 @@ ninja …"`) are in the repository's `CLAUDE.md` and `CONTRIBUTING.md`.
 The Vulkan driver (ICD) is always the host's; no channel bundles one, and
 every channel needs a working Vulkan driver for the GUI.
 
+A release is built from one tag by `.github/workflows/release.yml`, which
+publishes the AppImage, the Windows zip and installer, the Python package
+and the container image ([Releasing](#releasing)). The flake and the
+Flatpak are built from the source.
+
+## One version
+
+`VERSION` at the repository root is the version, and the only place it is
+written: CMake's `project(VERSION)`, the flake, the Windows packaging and
+`pyproject.toml` all read it. The AppStream metainfo's newest `<release>`
+must name the same version, which `test_conventions.cpp` checks along with
+the absence of a literal anywhere else.
+
+## Releasing
+
+1. Raise `VERSION`, and add the release to the top of `<releases>` in
+   `packaging/org.lobole.Lobole.metainfo.xml` with its date and a
+   `<description>`. That description IS the release notes: software
+   centres show it, and the GitHub release takes the same text
+   (`tools/release-notes.py`).
+2. Run the release workflow by hand (`workflow_dispatch`): it builds and
+   smokes everything and publishes nothing.
+3. Push the tag `v<VERSION>`.
+
+On the tag, `release.yml` refuses a tag that is not `v` + `VERSION` or whose
+metainfo release is missing or has no notes. It then builds, in parallel:
+
+- the headless AppImage from the flake (`nix bundle`, the bundler pinned by
+  revision);
+- the container image (`.#dockerHeadless`);
+- the Windows portable zip and installer, cross-built against the flake's
+  nixpkgs (`NIX_PATH` is pinned to it, rather than a channel);
+- the Python sdist and wheel.
+
+**Every one is started before it is published.** `tools/release-smoke.py`
+starts it headless (the Windows one under Wine), waits for `ping`, then
+makes it model: a 4 mm box must be 64 mm³ (OpenCASCADE works) and a circle
+drawn at r 1 and constrained to r 2 must extrude to 8π mm³ (the sketch
+solver is linked; a build that loses Boost configures PlaneGCS off without
+a word). With `--version` it also checks that the binary's `--version` is
+the release's. The wheel goes through `tests/packaging_smoke.py`, which
+builds it from the sdist, as pip does with a PyPI release.
+
+Only when all of that passes does the tag publish: a GitHub release with
+every file, `SHA256SUMS`, and the notes; the wheel and sdist to PyPI by
+trusted publishing (configured once on pypi.org for project `lobole`,
+workflow `release.yml`, environment `pypi`; no token is stored); the image
+to GHCR as `lobole-headless:<version>` and `:latest`.
+
+**Cachix.** With the repository variable `CACHIX_CACHE` (the cache's name)
+and the secret `CACHIX_AUTH_TOKEN` set, every nix job in the workflow pulls
+from and pushes to that cache. Without them it builds OpenCASCADE and
+Netgen from source, which is slow but correct.
+
 ## The install layout
 
 CMake's `install()` rules define the layout every packager uses:
-`bin/designer`; the shared libraries `libplanegcs.so` and
+`bin/lobole`; the shared libraries `libplanegcs.so` and
 `libdesigner_adaptive.so` under the library directory, found through an
 `$ORIGIN`-relative RUNPATH; runtime data (shaders, fonts, the HDRI, the
-standard-parts tables) under `share/designer`; and the `.desktop` file,
+standard-parts tables) under `share/lobole`; and the `.desktop` file,
 AppStream metainfo (`LOBOLE_INSTALL_METAINFO`, default ON) and icons (SVG
 and a 256×256 PNG) under their standard `share/` locations. The metadata
 sources are in `packaging/`.
@@ -35,12 +89,12 @@ object file` at start. To check, `cmake --install` to a scratch prefix and
 At run time `RuntimePaths` (`src/common/RuntimePaths.{h,cpp}`) resolves:
 
 - **read-only data**: `LOBOLE_DATA_DIR` if set, else the staged build-tree
-  directories beside the executable, else `../share/designer` relative to it;
+  directories beside the executable, else `../share/lobole` relative to it;
 - **per-user directories**, never beside the executable (read-only under
   Nix, Flatpak and an installed prefix): `UserConfigDir` (settings),
   `UserStateDir` (autosaves, recent projects, the instance registry, import
   staging), `UserCacheDir` (the precomputed IBL maps). On Linux these are
-  `$XDG_CONFIG_HOME` / `$XDG_STATE_HOME` / `$XDG_CACHE_HOME` + `/designer`,
+  `$XDG_CONFIG_HOME` / `$XDG_STATE_HOME` / `$XDG_CACHE_HOME` + `/lobole`,
   falling back to `~/.config`, `~/.local/state`, `~/.cache`. On Windows,
   which has neither `$HOME` nor `XDG_*`, they are
   `%LOCALAPPDATA%\Lobole\{config,state,cache}`, never `%TEMP%`, which
@@ -78,8 +132,8 @@ revisions in sync with `.gitmodules` when a submodule moves; a missing
 clipper2 does not fail the build, it configures CAM off. PlaneGCS, libarea
 and the fonts are vendored in-tree.
 
-- `packages.x86_64-linux.default` (= `designer`): a Release build of the app
-  only, installed through the CMake install phase. Netgen is
+- `packages.x86_64-linux.default` (= `lobole`): a Release build of the app
+  only, tests off, installed through the CMake install phase. Netgen is
   `nix/netgen-lean.nix`: built without MPI, Python and its GUI, which Loböle
   never uses and which would otherwise pull numpy and a Fortran compiler into
   the runtime closure through metadata references.
@@ -87,9 +141,9 @@ and the fonts are vendored in-tree.
   `lobole --headless --remote 8437 --remote-bind-all`. The RPC server is
   unauthenticated and loopback-only by default; `--remote-bind-all` is right
   inside a container's namespaced network, and the port should not be
-  published to a network you do not trust. CI builds it, smokes it and
-  pushes it to GHCR (`.github/workflows/docker.yml`).
-- `checks.x86_64-linux.headless`: builds `designer`, `designer_tests` and
+  published to a network you do not trust. A release tag builds it, smokes
+  it and pushes it to GHCR ([Releasing](#releasing)).
+- `checks.x86_64-linux.headless`: builds the app, `designer_tests` and
   `femgpu_tests` and runs `ctest -LE gui` in the sandbox with a clean
   `$HOME` and GPU topology disabled (`LOBOLE_TOPO_GPU=0`).
 - `devShells.x86_64-linux.default`: `nix develop`, the same toolchain as
@@ -106,8 +160,10 @@ Patching OpenCASCADE means nixpkgs' binary cache no longer has it: the first
 `nix-shell` on a machine compiles OpenCASCADE and netgen.
 
 On NixOS the loader finds the host driver through `/run/opengl-driver`.
-There is no binary cache yet, so `nix run` builds OpenCASCADE and Netgen from
-source unless the user's store already has them.
+Without a binary cache, `nix run` builds OpenCASCADE and Netgen from source
+unless the user's store already has them; the release workflow fills one
+when it is configured ([Releasing](#releasing)), and the flake's
+`nixConfig` should then name it.
 
 ## GCC 16 and IPA-CP clones
 
@@ -226,11 +282,11 @@ casts; `netgen-cross.nix` holds the attempt and its blocker notes), and the
 terminal panel (`ENABLE_TERMINAL` is `NOT WIN32`). `ping` reports which
 optional subsystems a build has.
 
-Verifying a build, all from Linux: `wine designer.exe --version`; a
+Verifying a build, all from Linux: `wine lobole.exe --version`; a
 headless `--remote` instance driven from the host over 127.0.0.1 in which a
 sketch constraint actually SOLVES (a circle whose radius is constrained from
 1 to 2 changes the extruded volume accordingly — the check that separates
-"OCC loaded" from "PlaneGCS is linked in"); and `wine designer.exe --gui-tests
+"OCC loaded" from "PlaneGCS is linked in"); and `wine lobole.exe --gui-tests
 --gui-test-filter boots_and_renders --hidden` on the real GPU through
 winevulkan, from the extracted portable zip, which is what a tester gets. A
 crash report: started with `LOBOLE_ALLOW_DEBUG_CRASH=1` and
@@ -248,7 +304,8 @@ stack that `symbolize-crash.py` names (`StallSelfTest`); and a Ctrl+C
 fillet stops headless and leaves no report. All of it runs under Wine; no
 real Windows machine has run it.
 
-Rules for code, since nothing in CI builds this target:
+Rules for code, since nothing builds this target on a push (a release
+cross-builds it and runs `tools/release-smoke.py` on it under Wine):
 
 - **Nothing in `src/` is named `near` or `far`.** `windows.h` defines both as
   empty macros, so `double far = -1.0;` becomes `double = -1.0;` on the one
@@ -320,15 +377,16 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
 
 ## Not done
 
-- A binary cache (Cachix) for the flake, so `nix run` substitutes instead of
-  building.
-- Building the headless AppImage in CI.
+- The Cachix cache itself: create it once the repository is public, set
+  `CACHIX_CACHE` / `CACHIX_AUTH_TOKEN`, and add its substituter and public
+  key to the flake's `nixConfig` so `nix run` offers to use it.
 - Flathub: pin every source by `commit:` + `sha256`, re-enable metainfo and
   the SVG icon, confirm the renderer on the runtime's Mesa / llvmpipe (only
   NVIDIA has run it), narrow `--filesystem=host` toward the portal, and
   submit.
 - Windows: Netgen, real-hardware QA, code signing (an unsigned installer
-  trips SmartScreen), a stripped bundle, and any CI job that cross-builds.
+  trips SmartScreen) and a stripped bundle. A release cross-builds and
+  smokes it under Wine; nothing builds it on a push.
 - macOS (MoltenVK; no ray tracing there, and the GPU path cannot be tested
   off a Mac), and native deb / rpm / AUR packages (distributions ship older
   OpenCASCADE than 7.9).

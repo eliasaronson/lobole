@@ -67,8 +67,9 @@ wordmark and `lobole` the identifier everywhere a user or another program
 sees it: the binary (`OUTPUT_NAME lobole` on the `designer` target), the
 application id `org.lobole.Lobole`, the per-user directories
 (`src/common/RuntimePaths.cpp`), the instance-registry handshake
-(`{"app": "lobole"}`) and the MCP server's name. Never the ö in an
-identifier. The CMake target names, the `LOBOLE_*` environment variables,
+(`{"app": "lobole"}`), the MCP server's name, and every environment
+variable and CMake option (`LOBOLE_*`; `test_conventions.cpp` fails on
+the old prefix). Never the ö in an identifier. The CMake target names,
 the C++ namespaces and the document format (`kFormat`, `.dsgn`) are
 invisible outside the build and keep "designer"; the format moves only with
 a `kVersion` bump wanted for its own reasons. "designer" in prose is also the

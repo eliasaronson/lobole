@@ -1,4 +1,4 @@
-# Flatpak manifest for Designer.
+# Flatpak manifest for Loböle.
 #
 # Built against the Freedesktop runtime (NOT the Nix flake — flatpak-builder has
 # its own module system). The runtime/SDK 24.08 already provides gcc 14.3,
@@ -15,7 +15,7 @@ app-id: org.lobole.Lobole
 runtime: org.freedesktop.Platform
 runtime-version: '24.08'
 sdk: org.freedesktop.Sdk
-command: designer
+command: lobole
 
 finish-args:
   - --share=ipc                 # X11/MIT-SHM
@@ -194,8 +194,8 @@ modules:
         tag: v6.2.2605
         disable-submodules: true   # pybind11 submodule only needed for USE_PYTHON
 
-  # ---- Designer itself ------------------------------------------------------
-  - name: designer
+  # ---- Loböle itself --------------------------------------------------------
+  - name: lobole
     buildsystem: cmake-ninja
     builddir: true
     config-opts:

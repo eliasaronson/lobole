@@ -1,4 +1,4 @@
-# Cross-compile Designer for Windows (x86_64-w64-mingw32) from Linux, via nixpkgs
+# Cross-compile Loböle for Windows (x86_64-w64-mingw32) from Linux, via nixpkgs
 # cross infrastructure. Scope: the windowed app + PlaneGCS sketch solver + Spectra
 # modal + the GPU-FEM (Vulkan compute) topology solver, minus Netgen (FEM
 # meshing; see below). Shaders compile natively (glslc → arch-independent
@@ -45,8 +45,8 @@ let
   };
 in
 cross.stdenv.mkDerivation {
-  pname = "designer-win";
-  version = "0.1.0";
+  pname = "lobole-win";
+  version = pkgs.lib.fileContents ../../VERSION;
   # The working tree, minus what is not source: the build trees (several GB
   # each), the local CI's trees (with root-owned core dumps nix cannot read),
   # scratch projects and tool state. Without this every build copied them all

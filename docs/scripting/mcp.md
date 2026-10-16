@@ -29,7 +29,8 @@ uv tool install /path/to/checkout       # or: uvx --from git+<url> lobole-mcp
 claude mcp add lobole -- lobole-mcp
 ```
 
-It is not on PyPI yet; install from a path or a git URL. `mcp` is pinned
+A release publishes it to PyPI (`uv tool install lobole`); between releases,
+install from a path or a git URL. `mcp` is pinned
 `<2`: mcp 2.x renamed `FastMCP` and changed other APIs, and the pin is lifted
 by migrating the server, not by loosening it. `packaging_smoke` builds the
 wheel and imports every module from it alone.
