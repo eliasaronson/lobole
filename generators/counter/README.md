@@ -6,6 +6,17 @@ wheel, and a Geneva carry between each pair of wheels that steps the next
 wheel one digit per turn and locks it in between. It comes off the bed
 reading 0000.
 
+**It does not print as designed.** The 2026-10-15 print on a P1S came off
+the bed fused solid: every wheel and transfer starts one empty layer over
+the part below, and the slicer printed each onto that part. `check_print`
+passed it then; its `stacking` item
+([checking a print](../../docs/tolerances/README.md#checking-a-print)) now
+fails it: `build.py` prints the failure and the receipt keeps it, but
+does not require the item, so the build still completes. The design needs
+every piece on the bed and self-supporting faces with three layers of air
+over the part below; until then the rest of this page describes the
+counter as it was built.
+
     tools/headless-preview.sh --start <port>
     python3 generators/counter/build.py --port <port> --profile "K5 PLA on P1S"
     python3 generators/counter/build.py --port <port> --digits 3 --digit-height 10
@@ -107,7 +118,15 @@ gear face while the tens is locked; that friction is the lock's to carry.
   every one is 0.100–0.102), and the STL's chord deviation (the profile's
   0.01 mm) is at most a fifth of the gap. Its overhang and bridge items are
   recorded in the receipt's `print`, not required: the layer gaps print as
-  ceilings over the part below.
+  ceilings over the part below. Its `stacking` item FAILS (printed and
+  recorded, not required): on the 2026-10-15 plate (K5 PLA, no layer
+  height in the embedded profile, so 3 × 0.2 = 0.6 mm of air required)
+  seven of the eight pieces start off the bed (the thousands wheel 2.2 mm
+  up, one layer over the base, the units wheel 51.6 mm), and every
+  interface is 0.2 mm of air, one layer: each wheel's underside over the
+  next, 609 mm² each; the housing over the units wheel, 773 mm²; the
+  thousands wheel over the base, 698 mm²; each transfer over the housing,
+  about 89 mm²; 20 pairs in all.
 - **The counting**, in the assembly: each wheel on a revolute to the
   housing's frames; per carry an `intermittent` relation (Geneva, 3 slots)
   wheel → transfer and a `gear` relation (9:30) transfer → next wheel. Two
@@ -153,4 +172,5 @@ about 45 s.
    turned away from you counts up.
 
 Not modelled: the friction the stacked faces carry, and the force a hand
-puts through a triple carry. Untested on the printer.
+puts through a triple carry. Printed once (2026-10-15, above): it fused, as
+the layer interfaces predicted by `stacking` say it must.
