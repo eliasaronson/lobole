@@ -177,7 +177,7 @@ jobs:
         run: |
           mkdir files
           cp linux/*.AppImage windows/* python/* files/
-          (cd files && sha256sum * > SHA256SUMS)
+          (cd files && sha256sum -- * > SHA256SUMS)
           {
             cat notes/notes.md
             echo
