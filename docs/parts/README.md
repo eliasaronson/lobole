@@ -12,7 +12,7 @@ Engineering catalogs (user-imported bearing data) are on their own page:
 ## The data
 
 `assets/parts/`, staged by CMake to `build/assets/parts` and installed to
-`share/designer/parts`; `RuntimePaths::PartsDir()` (`src/common/RuntimePaths.h`)
+`share/lobole/parts`; `RuntimePaths::PartsDir()` (`src/common/RuntimePaths.h`)
 is the one place the directory name is written, under `DataDir()`
 (`LOBOLE_DATA_DIR` overrides it).
 

@@ -198,7 +198,8 @@ With the bundle's glibc in charge the host driver's `.so` cannot be found;
 with the host's, the bundle's own libraries fail on their newer glibc
 symbols. On NixOS the bundle's `/nix/store` mount also shadows
 `/run/opengl-driver`, so every ICD dangles. The Flatpak runtime is what owns
-that glibc-to-driver contract. Nothing in CI builds the AppImage.
+that glibc-to-driver contract. A release builds it and smokes it headless
+([Releasing](#releasing)).
 
 ## The Flatpak
 

@@ -155,7 +155,7 @@ every machine:
 
 - **Outline** glyphs come from OpenCASCADE's `StdPrs_BRepFont` (FreeType,
   `TKService`, linked explicitly), initialised on the TTF under
-  `share/designer/fonts/` (`deps/fonts/` in the tree; `DataDir()`), never by
+  `share/lobole/fonts/` (`deps/fonts/` in the tree; `DataDir()`), never by
   a font-manager name. OCC's unicode-subset fallback is switched OFF (it
   would borrow a missing glyph from a SYSTEM font), and every character is
   checked with `HasSymbol` first: a missing glyph is refused, naming it.
