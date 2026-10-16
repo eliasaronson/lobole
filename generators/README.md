@@ -23,7 +23,7 @@ the one announced instance or take `--port`; they never guess:
 | `slider_crank.py` | block, crank, rod and piston closing a loop; a 360° study checks the stroke is 2R with no clash | `--crank`, `--rod` |
 | `single_cylinder.py`, `aircooled_engine.py`, `carburettor.py` | a single-cylinder four-stroke on primitives, the same engine from sketches only, and its carburettor as a subassembly | [below](#single-cylinder-and-air-cooled-engines) |
 | `toolmakers_clamp.py` | an eight-part toolmaker's clamp from a published drawing | [below](#toolmakers-clamp) |
-| `print_coupon.py` | a printable coupon of bores, pins and threads at the print allowance table's sizes and ± steps, each engraved with its modelled diameter, loose discs for the sideways print-in-place gap and rings on posts for the vertical one (whole layers), to calibrate a print profile | [printed parts](../docs/tolerances/README.md#the-coupon) |
+| `print_coupon.py` | a printable coupon of bores, pins and threads at the print allowance table's sizes and ± steps, each engraved with its modelled diameter, loose discs for the sideways print-in-place gap, and rings on the bed round posts with 45° heads: an air row for the vertical air a face needs over another part (whole layers) and a small-gap row for the gap at the post's size, to calibrate a print profile | [printed parts](../docs/tolerances/README.md#the-coupon) |
 | `waveguide.py`, `waveguide_job.py` | a constant-directivity waveguide for the Alpair 7MS, and its 3-axis surfacing job on the 6090 | CAM |
 | `rotary/` | a file handle and a barley-twist rolling pin, and their 4-axis jobs | CAM |
 | `bike/` | a roadster bicycle modelled from photographs | [README](bike/README.md) |
@@ -35,6 +35,7 @@ the one announced instance or take `--port`; they never guess:
 | `om615/` | the OM615 four-cylinder diesel | [README](om615/README.md) |
 | `pantilt/` | a geared pan/tilt head for a 1.5 kg camera: two worm pairs, bearings, a machined base plate, printed PETG yoke | [README](pantilt/README.md) |
 | `counter/` | a print-in-place four-digit counter: number wheels, a Geneva carry between each pair that locks the next wheel between carries, a housing with a window per digit; counted and locked in motion studies | [README](counter/README.md) |
+| `hinge_box/` | a print-in-place hinged box: box and lid flat side by side on the bed, teardrop knuckles on 45° cone pins whose sockets leave the stacking air, swung 0-180° onto the rim in a motion study, with negative controls that fail stacking | [README](hinge_box/README.md) |
 | `planetary/` | a print-in-place herringbone planetary gear set: one plate off the bed already turning, its gaps from the print allowance table, proved by an assembly's motion study | [README](planetary/README.md) |
 | `hook/` | a PLA wall hook sized for a load, printed flat and upright, with a predicted breaking load for each to test on a luggage scale | [README](hook/README.md) |
 | `jar/` | a screw-top jar: PLA jar and lid with modelled 45° threads at the print allowance, a TPU gasket squeezed 25 % at the lid's stop, checked in an assembly with negative controls | [README](jar/README.md) |
@@ -99,6 +100,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 | `generator_hook` | `hook/build.py`: both prints checked on the bed, the study at two meshes read for both orientations, the test card (headless) | 13 s | 60 s |
 | `generator_jar` | `jar/build.py --no-render`: the three parts with modelled threads, the thread's phase found by interference, the squeeze measured twice, the unscrewing study, the three negative controls and the STLs (headless) | 83-198 s | 400 s |
 | `generator_counter` | `counter/build.py --no-render --digit-height 10`: the plate's clearances and STL shells, the negative controls, both counting studies with their readings, every lock both ways (headless) | 45 s | 120 s |
+| `generator_hinge_box` | `hinge_box/build.py`: the plate's every `check_print` item, stacking included, the swing 0-180° and both negative controls (headless) | 3 s | 60 s |
 | `generator_pantilt` | `run_all.sh --skip yoke_topo renders` with `PANTILT_SAMPLES=6`: every part, the assembly with its exact sweeps and studies, the CAM job, the drawings (offscreen) | 181-349 s | 720 s |
 
 A test passes when the generator exits 0 AND its own success marker is in

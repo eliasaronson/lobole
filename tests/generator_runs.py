@@ -112,6 +112,16 @@ def counter(port, out):
             None)
 
 
+def hinge_box(port, out):
+    # The whole run: the plate's every check_print item, the swing from 0
+    # to 180 degrees onto the rim, and both negative controls failing
+    # stacking.
+    return ([PY, "-u", os.path.join(GEN, "hinge_box", "build.py"),
+             "--port", str(port), "--out", os.path.join(out, "hinge_box")],
+            [r"motion, lid 0 -> 180 .*: clean to 180",
+             r"hinge_box: 2 shells"], None)
+
+
 def hook(port, out):
     # The whole run: both prints checked on the bed, the study solved at two
     # meshes and read for both orientations, the test card written.
@@ -141,6 +151,7 @@ RUNS = {
     "hook": (hook, True, {}),
     "jar": (jar, True, {}),
     "counter": (counter, True, {}),
+    "hinge_box": (hinge_box, True, {}),
 }
 
 
