@@ -10,6 +10,7 @@
 
 #include <Standard_ConstructionError.hxx>
 #include <Standard_Failure.hxx>
+#include <Standard_Version.hxx>
 
 #include "cad/CADKernel.h"
 #include "cad/CADMaterials.h"
@@ -341,11 +342,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "method?:string"},
     {"ping",
      "Liveness check; returns {ok, app, port, pid, mode, ui_actions, "
-     "project, dirty, gpu, features, binary_replaced}. `pid` is this "
+     "project, dirty, gpu, occ, features, binary_replaced}. `pid` is this "
      "process's id, so "
      "a launcher can tell its own instance from one already on the port. `gpu` "
      "is the device that answers "
-     "renders — empty under --headless, which has no renderer. `features` "
+     "renders — empty under --headless, which has no renderer. `occ` is the "
+     "OpenCASCADE version this build was compiled against. `features` "
      "is what this BUILD contains (cam, cam_adaptive, fem, mesher) and "
      "whether ffmpeg is on PATH (ffmpeg: export_motion_video's mp4, webm "
      "and gif). "
@@ -1344,6 +1346,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // report. It is also what lets a pixel baseline be keyed to the
             // device that produced it (tests/render_pixel_smoke.py).
             {"gpu", state.gpuName},
+            // Which OpenCASCADE answers, for the same reason: the kernel
+            // behind a wrong Boolean is the first question about it, and a
+            // distro build links whatever that distro ships (Ubuntu 24.04:
+            // 7.6.3). tests/fuzz_seeds_smoke.py keys its expectations on it.
+            {"occ", OCC_VERSION_COMPLETE},
             // What this BUILD contains. Optional subsystems are compile-time
             // (`cmake -DENABLE_CAM=OFF`), so a method can be absent for a
             // reason that has nothing to do with the document or the tab, and

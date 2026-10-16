@@ -97,7 +97,7 @@ to guess a port. `tools/scratch_port.py` picks a port that is free per the
 kernel, unclaimed per the registry, and never the human's.
 
 `ping` reports `port`, `mode`, `ui_actions`, `project`, `dirty`, `gpu`,
-`features` (optional subsystems compiled in, e.g. `cam`) and
+`occ` (the OpenCASCADE version it was built against), `features` (optional subsystems compiled in, e.g. `cam`) and
 `binary_replaced` — true when the executable on disk was rebuilt after this
 process started, so the instance is serving old code.
 

@@ -150,9 +150,16 @@ container on every push so this stays honest:
   throws where 7.9 accepts the identical input. Fixed by building rigid
   placements from a normalized quaternion, so neither version has to forgive
   it.)
+- **Some Booleans come out wrong** on 7.6: a cylinder and a sphere standing on
+  the same plane, the sphere touching the cylinder's floor at one point,
+  intersect to nothing or to the whole sphere. `fuzz_seeds_smoke` names the
+  seeds 7.6 gets wrong by the `occ` version `ping` reports, and requires them
+  to keep failing as they do, so the rest of its seeds stay a full check on
+  7.6. (A shell 7.6 refused also wrote its own tolerance into the body it was
+  handed; that one was ours, and every shell now builds on a copy.)
 
-These are deterministic, not flaky: the same two fail on every run against
-7.6.3 and neither fails against 7.9.x. **You do not need to build OpenCASCADE
+These are deterministic, not flaky: the same answers come back on every run
+against 7.6.3 and none of them against 7.9.x. **You do not need to build OpenCASCADE
 yourself** to work on Loböle — every distro package listed above is a
 supported configuration and CI keeps 26.04 and 24.04 that way. On an older
 release, the cheap routes to full parity are Ubuntu 26.04, Nix or the Flatpak; compiling OCC from source takes far longer

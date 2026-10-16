@@ -391,7 +391,8 @@ by the same name drift apart without any test noticing:
 - `--remote <port>` serves JSON-RPC (`--remote 0` binds a kernel-chosen
   port); every instance announces itself in
   `~/.local/state/lobole/instances/<port>.json`. `ping` reports the port,
-  the open project, the build's optional `features`, and `binary_replaced`
+  the open project, the OpenCASCADE version (`occ`), the build's optional
+  `features`, and `binary_replaced`
   (Linux: the executable was rebuilt under a running instance).
 
 ## Crashes and stalls

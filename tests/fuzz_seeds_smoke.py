@@ -18,6 +18,11 @@ generator changes what each seed builds, so the list is chosen again with it
 themselves are shown to catch what they claim first, by
 tools/fuzz_design.py's self-test.
 
+An older OpenCASCADE gets some of them wrong itself, and KERNEL names those
+seeds by the version `ping` reports: each must still fail, and as the class
+written there, so the other seeds stay a full check on that kernel and a
+kernel that starts getting one right says so.
+
 Usage: fuzz_seeds_smoke.py <path-to-designer-binary>
 """
 import os
@@ -33,6 +38,25 @@ from smoke_app import launch  # noqa: E402
 GENERATOR = 1
 # Chosen from a clean run of seeds 0-399 on generator 1, sized to ~30 s.
 SEEDS = list(range(40))
+
+# OpenCASCADE version prefix -> {seed: the class that kernel fails it as}.
+# 7.6.3 (Ubuntu 24.04's apt): a cylinder and a sphere both standing on the
+# XY plane, the sphere touching the cylinder's floor at one point, intersect
+# to nothing or to the whole sphere -- so the identity fails -- and seed 9's
+# sphere cut leaves a face BRepCheck rejects, which the app refuses. 7.9
+# answers every one of them.
+KERNEL = {
+    "7.6.": {9: "boolean_failed", 13: "identity", 14: "identity",
+             15: "identity", 20: "identity", 29: "identity", 33: "identity",
+             34: "identity"},
+}
+
+
+def kernel_expects(occ):
+    for prefix, seeds in KERNEL.items():
+        if occ.startswith(prefix):
+            return seeds
+    return {}
 
 
 def main():
@@ -50,23 +74,35 @@ def main():
     # An instance of its own per seed: what a seed builds is meant to depend
     # on the seed alone, and a known bug (docs/known-bugs.md, a blend face's
     # edge names) lets one seed's run move the next one's names.
+    occ = ""
     for seed in SEEDS:
         with launch(os.path.abspath(sys.argv[1])) as app:
             d = app.client
+            occ = d.request("ping", {}).get("occ", "")
             d.scratch_path = os.path.join(app.tmp, "fuzz.dsgn")
             outcome, design = fd.generate_and_run(d, seed)
         limits += len(outcome["limits"])
-        if outcome["class"] != "clean":
-            bad.append(f"seed {seed}: {outcome['class']} at step "
-                       f"{outcome['step']}: {outcome['message']}\n"
+        expected = kernel_expects(occ).get(seed, "clean")
+        if outcome["class"] != expected:
+            said = (f"{outcome['class']} at step {outcome['step']}: "
+                    f"{outcome['message']}" if outcome["class"] != "clean"
+                    else "clean")
+            if expected != "clean":
+                said += (f" (OpenCASCADE {occ} was expected to fail it as "
+                         f"{expected}: if it now answers, drop the seed "
+                         f"from KERNEL)")
+            bad.append(f"seed {seed}: {said}\n"
                        f"    replay: tools/fuzz.py one {seed} --design")
     if bad:
         print("fuzz_seeds_smoke: FAILED")
         for b in bad:
             print("  - " + b)
         return 1
+    known = len(kernel_expects(occ))
     print(f"fuzz_seeds_smoke: {len(SEEDS)} seeds of generator {GENERATOR} "
-          f"clean ({limits} limits undone) in {time.time() - t0:.1f} s")
+          f"clean ({limits} limits undone) in {time.time() - t0:.1f} s"
+          + (f"; {known} failed as OpenCASCADE {occ} is known to"
+             if known else ""))
     return 0
 
 
