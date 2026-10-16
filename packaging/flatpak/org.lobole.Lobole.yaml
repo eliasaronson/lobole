@@ -19,8 +19,10 @@ command: lobole
 
 finish-args:
   - --share=ipc                 # X11/MIT-SHM
-  - --socket=fallback-x11       # GLFW is built X11-only; Xwayland covers Wayland hosts
-  - --socket=wayland
+  - --socket=x11                # GLFW is built X11-only, so X11 always, through Xwayland
+                                # on a Wayland desktop. NOT fallback-x11 + wayland: that
+                                # withholds X11 whenever a Wayland session is running, and
+                                # the window then never opens (no DISPLAY).
   - --device=dri                # GPU (Vulkan via the host ICD + Mesa in the runtime)
   - --filesystem=host           # open/save projects anywhere (portal-first; broad fs for now)
   - --share=network             # the --remote JSON-RPC server binds 127.0.0.1; a private

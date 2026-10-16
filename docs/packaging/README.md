@@ -226,9 +226,13 @@ dir` source would otherwise copy them into itself.
 - The SDK's gcc ships without `libstdc++exp`, so CMake defines
   `HAVE_STDCXX_STACKTRACE` only when `std::stacktrace` links, and the crash
   handler otherwise falls back to glibc `backtrace()`.
-- finish-args: `--share=ipc`, `--socket=fallback-x11`, `--socket=wayland`,
-  `--device=dri`, `--filesystem=host`, and `--share=network` so the
-  `--remote` RPC server is reachable from host clients.
+- finish-args: `--share=ipc`, `--socket=x11`, `--device=dri`,
+  `--filesystem=host`, and `--share=network` so the `--remote` RPC server
+  is reachable from host clients.
+- **X11, not `fallback-x11`.** GLFW is built X11-only. `fallback-x11` grants
+  X11 only when no Wayland session is running, so on a Wayland desktop the
+  app got no `DISPLAY` and never opened its window; `--socket=x11` reaches
+  Xwayland there.
 - The local build turns off AppStream metainfo
   (`-DLOBOLE_INSTALL_METAINFO=OFF`) and deletes the SVG icon in
   `post-install`: a bare `nix-shell` lacks the gdk-pixbuf loaders that
