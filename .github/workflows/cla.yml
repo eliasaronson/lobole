@@ -1,0 +1,47 @@
+# The contributor licence agreement (CLA.md): the author of a pull request
+# signs once, by commenting the sentence below on it, and every later pull
+# request of theirs passes. Signatures are kept in the repository itself, on
+# the `cla-signatures` branch, so there is no outside service to trust or
+# lose.
+#
+# OFF until the agreement is in force: every step is skipped while the
+# repository variable CLA_IN_FORCE is not `true`, because CLA.md is a draft
+# that nobody may be asked to sign before it has been reviewed.
+#
+# pull_request_target runs with this repository's token on a fork's pull
+# request. That is safe here only because nothing checks out or runs the pull
+# request's code -- keep it that way.
+name: CLA
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+permissions:
+  actions: write
+  contents: write
+  pull-requests: write
+  statuses: write
+
+jobs:
+  cla:
+    if: vars.CLA_IN_FORCE == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Signed?
+        if: >-
+          github.event_name == 'pull_request_target' ||
+          github.event.comment.body == 'recheck' ||
+          github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA'
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-document: https://github.com/eliasaronson/Designer/blob/main/CLA.md
+          # A new version of CLA.md that needs signing again goes in a new
+          # file (version2/), so a signature names what was signed.
+          path-to-signatures: signatures/version1/cla.json
+          branch: cla-signatures
+          allowlist: eliasaronson,dependabot[bot],github-actions[bot]

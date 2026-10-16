@@ -249,15 +249,22 @@ pass".
 
 ## Licensing a contribution
 
-By contributing you agree that your work is licensed under
-**AGPL-3.0-or-later**, the license of the project.
+Loböle is AGPL-3.0-or-later, and every contribution is published under it.
+Before a first pull request is merged, its author signs the [contributor
+licence agreement](CLA.md) — once, by a comment on the pull request, which
+the CLA check asks for.
 
-Sign off each commit (`git commit -s`). That appends a `Signed-off-by:` line
-certifying you wrote the patch, or otherwise have the right to submit it under
-that licence — the [Developer Certificate of
-Origin](https://developercertificate.org/), as the Linux kernel and the CNCF
-projects use it. If your employer holds rights in work you do, have their
-permission before you send it.
+The agreement exists for one reason: it lets the maintainer also sell
+commercial licences to people who cannot accept the AGPL (a company embedding
+the kernel in a closed product), and that funds the work. You keep the
+copyright in what you wrote and can reuse it anywhere. In return the
+agreement binds the project: your contribution stays available under the
+licence in force the day you sent it, and a version with every contribution
+in it is published at least once every twelve months — if not, the rights you
+granted revert to you (§2.3–§2.5).
+
+If your employer holds rights in work you do, have their permission before
+you send it (§3).
 
 **A new dependency is a licensing change, not a build change, and is reviewed
 as one.** The LGPL libraries here are linked as *separate shared objects*, and

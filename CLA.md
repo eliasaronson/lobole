@@ -6,7 +6,9 @@ reviewed by a Swedish IP lawyer.** Nothing here is legal advice. The notes in
 check on fit rather than an audit of novel drafting — every operative clause is
 adapted from an existing, published instrument, and the notes say which.
 
-One decision is still open and marked `[DECIDE]` in §2.1.
+Signing is wired up (`.github/workflows/cla.yml`) and switched off until the
+review is done: it asks nobody anything while the repository variable
+`CLA_IN_FORCE` is unset.
 
 ---
 
@@ -60,32 +62,16 @@ Contribution".
 
 **2.1 Copyright licence to Us.**
 
-`[DECIDE — one of:]`
+(a) You retain ownership of the Copyright in Your Contribution and have the
+same rights to use or license the Contribution that You would have had without
+entering into this Agreement.
 
-> **(Non-exclusive variant — recommended)**
-> (a) You retain ownership of the Copyright in Your Contribution and have the
-> same rights to use or license the Contribution that You would have had
-> without entering into this Agreement.
->
-> (b) You grant Us a perpetual, worldwide, non-exclusive, transferable,
-> royalty-free, irrevocable licence under the Copyright covering the
-> Contribution, with the right to sublicense through multiple tiers of
-> sublicensees, to reproduce, modify, display, perform and distribute the
-> Contribution as part of the Material; provided that this licence is
-> conditioned upon compliance with §2.3.
-
-> **(Exclusive variant)**
-> You grant Us a worldwide, royalty-free, exclusive, perpetual and irrevocable
-> licence, with the right to transfer an unlimited number of non-exclusive
-> licences or to grant sublicences to third parties, under the Copyright
-> covering the Contribution, to publish, modify, prepare derivative works based
-> upon or containing the Contribution, combine it with other Materials,
-> reproduce it in original or modified form, and distribute, display and
-> publicly perform it; provided that this licence is conditioned upon
-> compliance with §2.3. Upon that grant We immediately grant You back a
-> worldwide, royalty-free, non-exclusive, perpetual and irrevocable licence of
-> the same extent, limited to Your Contribution and conferring no rights in the
-> Material.
+(b) You grant Us a perpetual, worldwide, non-exclusive, transferable,
+royalty-free, irrevocable licence under the Copyright covering the
+Contribution, with the right to sublicense through multiple tiers of
+sublicensees, to reproduce, modify, display, perform and distribute the
+Contribution as part of the Material; provided that this licence is
+conditioned upon compliance with §2.3.
 
 **2.2 Patent licence.** For patent claims You own, control or have the right to
 grant, now or in the future, You grant Us and recipients of the Material a
@@ -195,8 +181,7 @@ check fit rather than audit new drafting.
 
 | Clause | Taken from | Why |
 |---|---|---|
-| §2.1 non-exclusive variant | Harmony HA-CLA-I §2.1 | What Canonical, Grafana, GitLab and most commercial OSS actually use. The explicit retention in (a) is what makes it comfortable to sign. |
-| §2.1 exclusive variant | FSFE FLA-2.0 §2.1 + §2.3 | Stronger: lets Us enforce against an infringer alone, and is cleaner if the project is ever sold. |
+| §2.1 | Harmony HA-CLA-I §2.1 (non-exclusive) | What Canonical, Grafana, GitLab and most commercial OSS actually use. The explicit retention in (a) is what makes it comfortable to sign. |
 | §2.2 | Harmony §2.2 + FLA-2.0 §3.2 | Harmony's grant with FLA's defensive-purpose revocation, which is the fairer formulation. |
 | §2.3 | **Harmony §2.3 Option Five** | The clause that makes dual licensing possible while binding Us to keep the AGPL version available. Harmony grades these One (inbound=outbound) to Five (commercial permitted); this is Five, widened to any OSI-approved licence so We can later move to a permissive licence if that serves the project. |
 | §2.4 | The Qt Company / KDE Free Qt Foundation agreement | Qt's twelve-month publication rule, which exists to stop the promise in §2.3 being honoured by freezing an old release while development continues behind closed doors. Without this, §2.3 has a hole. |
@@ -206,21 +191,15 @@ check fit rather than audit new drafting.
 | §6.3 | Harmony §6.3 | **The successor clause.** Without it, signing contributors to a natural person and later forming a company means re-papering everyone. FLA-2.0 has no equivalent. Cheapest clause here, and only free before incorporation. |
 | §6.6 | FLA-2.0 §9.3 | Long-lived project; worth having. |
 
-### The open decision in §2.1
+### Why the licence in §2.1 is non-exclusive
 
-**Non-exclusive** is what the commercial world uses — Canonical, Grafana and
-every Apache-derived CLA. It is a markedly easier ask, and in practice the
-maintainer owns the overwhelming bulk of the code, so there is standing to bring
-an infringement claim regardless.
-
-**Exclusive** buys cleaner enforcement — the ability to act alone on a
-contributor's portion without involving them — and a cleaner position if the
-project is ever sold. It costs real goodwill: "exclusive" alarms people, and it
-is incompatible with the retention language in the non-exclusive variant (a),
-which is the part that makes signing feel safe.
-
-Recommendation: **non-exclusive**, unless selling the project is a live
-possibility rather than a distant one.
+An exclusive licence (FSFE FLA-2.0 §2.1 + §2.3) would let Us act alone against
+an infringer of a contributor's portion and leave a cleaner position if the
+project were ever sold. It costs goodwill — "exclusive" alarms people — and it
+cannot coexist with the retention in (a), which is what makes signing feel
+safe. The maintainer owns the bulk of the code, so there is standing to
+enforce regardless. Revisit only if selling the project becomes a live
+possibility, and before many people have signed.
 
 ### What this agreement deliberately does not cover
 
@@ -236,9 +215,12 @@ possibility rather than a distant one.
 
 ### Before this goes into force
 
-1. Swedish IP counsel reviews it, with this table as the brief.
-2. Decide §2.1.
-3. `CONTRIBUTING.md` replaces its current inbound=outbound sentence and links
-   here, saying plainly why the agreement exists.
-4. Signing is wired up (CLA Assistant or equivalent) so a contributor signs once
-   in under a minute.
+1. Swedish IP counsel reviews it, with this table as the brief — including
+   whether an entity version (Harmony HA-CLA-E) is needed for §3(b)'s "Your
+   employer has signed this agreement".
+2. Remove the draft banner at the top.
+3. Create the `cla-signatures` branch (`git push origin main:cla-signatures`),
+   then set the repository variable `CLA_IN_FORCE` to `true`. From then on
+   `.github/workflows/cla.yml` asks the author of each pull request to sign
+   once, by a comment, and keeps the signatures on the `cla-signatures`
+   branch.
