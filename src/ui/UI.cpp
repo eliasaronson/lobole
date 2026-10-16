@@ -539,6 +539,13 @@ void DrawPartTabs(AppState& state) {
     static std::string renameFolderTarget;
     static uint64_t newFolderDocId = 0;
     static bool openFolderNamePopup = false;
+    // Document-rename entry state, the same shape: the tab is held by stable
+    // id (indices shift if a tab closes while the popup is open), and a
+    // refusal stays under the field until the name is changed.
+    static char docNameBuf[128];
+    static uint64_t renameDocId = 0;
+    static bool openDocNamePopup = false;
+    static std::string docRenameError;
 
     // The registry is THE folder list (it can hold empty folders). Slot
     // folders something else set directly (import, hand-edited project.json)
@@ -591,6 +598,17 @@ void DrawPartTabs(AppState& state) {
         openFolderNamePopup = true;
       }
       ImGui::EndMenu();
+    };
+    // Rename menu item shared by top-level tabs and flyout entries; every
+    // document kind is renamed the same way.
+    const auto renameMenuItem = [&](size_t i) {
+      if (ImGui::MenuItem("Rename...##docrename")) {
+        renameDocId = state.parts[i].id;
+        std::snprintf(docNameBuf, sizeof(docNameBuf), "%s",
+                      state.parts[i].name.c_str());
+        docRenameError.clear();
+        openDocNamePopup = true;
+      }
     };
     // Duplicate/delete menu items shared by top-level tabs and flyout entries.
     const auto duplicateMenuItem = [&](size_t i) {
@@ -682,6 +700,7 @@ void DrawPartTabs(AppState& state) {
       // Right-click a tab: move to a folder, or delete it (never the last).
       if (ImGui::BeginPopupContextItem(
               ("##pctx" + std::to_string(i)).c_str())) {
+        renameMenuItem(i);
         moveToFolderMenu(i);
         duplicateMenuItem(i);
         deleteMenuItem(i);
@@ -745,6 +764,7 @@ void DrawPartTabs(AppState& state) {
                   ("##fpctx" + std::to_string(i)).c_str())) {
             if (ImGui::MenuItem("Move out of folder"))
               MoveToFolder(state, i, "");
+            renameMenuItem(i);
             moveToFolderMenu(i);
             duplicateMenuItem(i);
             deleteMenuItem(i);
@@ -834,6 +854,44 @@ void DrawPartTabs(AppState& state) {
           }
         }
         ImGui::CloseCurrentPopup();
+      }
+      ImGui::EndPopup();
+    }
+    // Document-name popup (Rename... on a tab), opened outside the context
+    // menus for the same reason. Enter commits; a refused name keeps the
+    // popup open with the reason under the field.
+    if (openDocNamePopup) {
+      ImGui::OpenPopup("##docname");
+      openDocNamePopup = false;
+    }
+    if (ImGui::BeginPopup("##docname")) {
+      size_t slot = SIZE_MAX;
+      for (size_t i = 0; i < state.parts.size(); i++)
+        if (state.parts[i].id == renameDocId)
+          slot = i;
+      if (slot == SIZE_MAX) { // the tab went away under the popup
+        ImGui::CloseCurrentPopup();
+      } else {
+        ImGui::Text("Rename %s", TabKindName(state.parts[slot].kind));
+        // Focus on opening, and again after a refusal: Enter deactivates
+        // the field, and the name is still there to correct.
+        if (ImGui::IsWindowAppearing() || !docRenameError.empty())
+          if (!ImGui::IsAnyItemActive())
+            ImGui::SetKeyboardFocusHere();
+        ImGui::SetNextItemWidth(220.0f);
+        const bool entered =
+            ImGui::InputText("##dname", docNameBuf, sizeof(docNameBuf),
+                             ImGuiInputTextFlags_EnterReturnsTrue);
+        if (ImGui::IsItemEdited())
+          docRenameError.clear(); // the refusal was about the old text
+        if (entered && RenameDocument(state, slot, docNameBuf, &docRenameError))
+          ImGui::CloseCurrentPopup();
+        if (!docRenameError.empty()) {
+          ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + 320.0f);
+          ImGui::TextColored(ImVec4(1.0f, 0.45f, 0.4f, 1.0f), "%s",
+                             docRenameError.c_str());
+          ImGui::PopTextWrapPos();
+        }
       }
       ImGui::EndPopup();
     }

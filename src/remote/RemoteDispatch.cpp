@@ -2069,12 +2069,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // resolves by name, stable id, or slot index. params: {part, new_name}
     const size_t slot = remote::ResolveSlotIndex(state, p.at("part"));
     const std::string newName = p.at("new_name").get<std::string>();
-    if (newName.empty())
-      throw std::runtime_error("new_name must be non-empty");
-    if (state.parts[slot].name != newName) // renaming to itself is a no-op
-      remote::RequireFreshTabName(state, newName);
-    state.parts[slot].name = newName;
-    state.projectMetaDirty = true; // tab names live in project.json only
+    // The tab menu's Rename goes through the same action and refusals.
+    std::string why;
+    if (!ui::RenameDocument(state, slot, newName, &why))
+      throw std::runtime_error(why);
     return {{"index", slot}, {"name", newName}, {"id", state.parts[slot].id}};
   }
   if (auto r = remote::HandleDrawingRpc(state, m, p))

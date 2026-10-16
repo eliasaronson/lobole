@@ -374,6 +374,52 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->parts[3].folder, std::string("Rigs"));
   };
 
+  // Right-click a tab > Rename... — every document kind, from both menus a
+  // tab has (top-level and folder flyout). A taken name is refused in the
+  // popup, which stays open with the reason, and nothing is renamed.
+  t = IM_REGISTER_TEST(engine, "tabs", "rename_from_context_menu");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ui::AddAssembly(*s_App, "Assembly 2");
+    ui::AddDrawing(*s_App, "Drawing 3");
+    ui::AddJob(*s_App, "Job 4");
+    s_App->parts.back().folder = "Shop";
+    ctx->Yield(2);
+    const auto rename = [&](const char* tab, const char* to) {
+      ctx->ItemClick(tab, ImGuiMouseButton_Right);
+      ctx->ItemClick("//$FOCUSED/Rename...##docrename");
+      ctx->Yield();
+      ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+      ctx->KeyChars(to);
+      ctx->KeyPress(ImGuiKey_Enter);
+      ctx->Yield(2);
+    };
+    rename("//##PartTabs/**/###part0", "Bracket");
+    rename("//##PartTabs/**/###part1", "Rig");
+    rename("//##PartTabs/**/###part2", "Sheet A");
+    IM_CHECK_EQ(s_App->parts[0].name, std::string("Bracket"));
+    IM_CHECK_EQ(s_App->parts[1].name, std::string("Rig"));
+    IM_CHECK_EQ(s_App->parts[2].name, std::string("Sheet A"));
+    IM_CHECK(ui::ProjectDirty(*s_App)); // names live in project.json
+
+    ctx->ItemClick("//##PartTabs/**/###folderShop");
+    ctx->ItemClick("//$FOCUSED/###fpart3", ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/Rename...##docrename");
+    ctx->Yield();
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+    ctx->KeyChars("Rig"); // taken by the assembly
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->parts[3].name, std::string("Job 4"));
+    IM_CHECK(ctx->ItemExists("//$FOCUSED/##dname")); // still open, to fix
+    ctx->KeyPress(ImGuiMod_Ctrl | ImGuiKey_A);
+    ctx->KeyChars("Mill job");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->parts[3].name, std::string("Mill job"));
+    IM_CHECK_EQ(s_App->parts[3].folder, std::string("Shop"));
+  };
+
   // U13b: enough documents to overrun the bar, which the Marsliden dock (17)
   // does at 1280x720. Three properties, none of which held before:
   //

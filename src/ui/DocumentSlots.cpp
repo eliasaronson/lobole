@@ -510,6 +510,30 @@ size_t AddJob(AppState& state, const std::string& name) {
   return state.parts.size() - 1;
 }
 
+bool RenameDocument(AppState& state, size_t index, const std::string& name,
+                    std::string* why) {
+  const auto refuse = [&](std::string reason) {
+    if (why)
+      *why = std::move(reason);
+    return false;
+  };
+  if (index >= state.parts.size())
+    return refuse("no tab at index " + std::to_string(index));
+  if (name.empty())
+    return refuse("a tab's name must be non-empty");
+  if (state.parts[index].name == name)
+    return true;
+  for (const PartSlot& ps : state.parts)
+    if (ps.name == name)
+      return refuse("a tab named '" + name +
+                    "' already exists — names address tabs (add_occurrence, "
+                    "set_active_part), so two answering to one would be "
+                    "ambiguous");
+  state.parts[index].name = name;
+  state.projectMetaDirty = true; // tab names live in project.json only
+  return true;
+}
+
 size_t DuplicateDocument(AppState& state, size_t index) {
   EnsureParts(state);
   if (index >= state.parts.size())

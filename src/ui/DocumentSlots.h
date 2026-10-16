@@ -76,6 +76,14 @@ size_t DuplicateDocument(AppState& state, size_t index);
 
 void SetActivePart(AppState& state, size_t index);
 
+// Renames the tab at `index`. Refused (with the reason in `why`) for an empty
+// name or one another tab already answers to — names address tabs
+// (add_occurrence, set_active_part), so two sharing one would be ambiguous.
+// Renaming a tab to its own name succeeds and changes nothing. Nothing else
+// needs repointing: occurrences and drawing sources hold the stable id.
+bool RenameDocument(AppState& state, size_t index, const std::string& name,
+                    std::string* why = nullptr);
+
 // Closes a tab. Refused (with the reason in `why`) for the last tab, or
 // while any assembly still places this part or assembly — a dangling
 // reference is not something to create on purpose.

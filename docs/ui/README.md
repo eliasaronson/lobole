@@ -28,8 +28,11 @@ the dockspace; and the **document tab bar** at the bottom.
   project, with a glyph per kind and stable ids. The strip scrolls
   horizontally with a visible scrollbar when it overflows, and its `+`
   (the add menu) sits outside the scrolling strip, so it is always reachable.
-  Tabs can be grouped into folders (flyouts). Switching tabs stashes the
-  active document and cancels a pending preview.
+  Tabs can be grouped into folders (flyouts). Right-clicking a tab (on the
+  bar or in a flyout) renames, files, duplicates or deletes it, the same for
+  every kind; Rename goes through `ui::RenameDocument`, as `rename_part`
+  does, so a taken name is refused in the popup rather than accepted.
+  Switching tabs stashes the active document and cancels a pending preview.
 - **The left dock node** holds the panels as tabs: Model, Variables,
   Configurations, History, Conflicts, Requirements (while the project states
   any), and the CAM panel on a job tab
