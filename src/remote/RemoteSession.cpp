@@ -134,6 +134,7 @@ inline long SockWrite(int fd, const void* b, size_t n) {
   return ::write(fd, b, n);
 }
 } // namespace
+#endif
 
 namespace {
 // How deep a request may nest. The deepest real one (a batch of sketch
@@ -141,7 +142,6 @@ namespace {
 // deep that must still reach their handlers.
 constexpr int kMaxRequestDepth = 256;
 } // namespace
-#endif
 
 // True when the executable this process is running has been replaced or
 // removed on disk since it started. See the `ping` handler for why.
