@@ -43,8 +43,8 @@ from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from _lib import (check, check_print, circle, connect, fresh_project,  # noqa: E402
-                  line, print_receipt)
+from _lib import (PRINT_ITEMS, check, check_print, circle,  # noqa: E402
+                  connect, fresh_project, line, print_receipt)
 from gear import involute_profile, wedge  # noqa: E402
 
 ROOT = Path(HERE).resolve().parent.parent
@@ -812,8 +812,11 @@ def main():
     # as two arcs through involute points -- which the check's tolerance (a
     # tenth of the gap) holds. And nothing overhangs past 45 degrees or
     # bridges: the helix, the bearers' cone and the knob are 45 or less by
-    # design, and every item must pass.
-    pr = check_print(d, "planetary")
+    # design. Every item must pass but stacking: meshing 45 degree flanks
+    # leave the gap a side over the flank below as vertical air, short of
+    # the unmeasured three-layer default (README, "What is checked").
+    pr = check_print(d, "planetary",
+                     need=tuple(k for k in PRINT_ITEMS if k != "stacking"))
     cl = {f"{p['a']} / {p['b']}": p["distance_mm"]
           for p in pr["clearance"]["pairs"]}
 

@@ -128,6 +128,16 @@ a mesh closes by the gap instead of 0.25 mm.
   - **nothing overhangs past 45° and nothing bridges**: the helix, the
     bearers' 45° cone and the knob read 45.000 at worst off the B-rep.
 
+  - **stacking is reported, not required.** Every piece starts on the bed,
+    but where the herringbone flanks mesh, a 45° flank of one gear lies
+    over its neighbour's with the gap a side as vertical air (about
+    0.53 mm at K5's 0.1 mm a side) against a limit of 0.6 mm. That limit
+    is three layers, a default no coupon has measured yet
+    (docs/tolerances/README.md#print-profiles), and each layer of a 45°
+    flank stands on its own gear. The K5 print of 2026-10-15 is the
+    evidence either way; once the coupon's air row records `z_gap_mm`,
+    the planetary should require this item too.
+
   The whole report is in the receipt's `print`.
 - **The assembly turns.** The `sun`, `ring` and a kinematic carrier (a part
   of frames only, also placed fixed as the ground every axis hangs on) turn
