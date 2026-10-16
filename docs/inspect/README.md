@@ -505,7 +505,7 @@ two-shape constructor followed by `SetNonDestructive`, where the flag comes
 too late to do anything.
 
 `tests/sweep_parallel_smoke.py` diffs a one-thread report
-(`DESIGNER_SWEEP_THREADS=1`) against an all-thread one byte for byte; it cannot
+(`LOBOLE_SWEEP_THREADS=1`) against an all-thread one byte for byte; it cannot
 see this bug class, because the answer is usually still right. ThreadSanitizer
 can: `tools/ci-local.sh --tsan`.
 
@@ -538,7 +538,7 @@ headless smokes `measure_smoke`, `contact_smoke` (also: `contact_report`
 in mesh mode naming the clashes and distances the exact one does, and an
 async run reporting progress while the instance answers `ping`, landing the
 synchronous report, and ending `cancelled` when cancelled; a test-only
-`DESIGNER_TEST_CONTACT_PAIR_MS` holds each async pair so the run is seen
+`LOBOLE_TEST_CONTACT_PAIR_MS` holds each async pair so the run is seen
 running on any machine), `compare_smoke`,
 `query_smoke`, `strict_inputs_smoke`, `papercuts_smoke`,
 `sweep_parallel_smoke` (a one-thread sweep and an all-thread sweep give

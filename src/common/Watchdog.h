@@ -75,7 +75,7 @@ private:
   double m_duration = 0.0;
 };
 
-// DESIGNER_WATCHDOG_S, default 3 s; 0 turns the watchdog off (a debugger
+// LOBOLE_WATCHDOG_S, default 3 s; 0 turns the watchdog off (a debugger
 // stopping the process is not a hang). A value that is not a number of
 // seconds is REFUSED — false, with `error` saying what is accepted — rather
 // than replaced by the default.

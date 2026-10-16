@@ -14,7 +14,7 @@ for every launch by tests/smoke_app.py.
      child is SIGKILLed; the app must be gone within a few seconds, and by its
      CLEAN stop (the SIGTERM handler's log line), not a default-signal death.
   2. The race the kernel cannot cover: a launcher already dead when the app
-     starts. Named by DESIGNER_EXIT_WITH_PARENT, the app exits at once.
+     starts. Named by LOBOLE_EXIT_WITH_PARENT, the app exits at once.
   3. A malformed value is refused, not ignored.
 
 The app is found by the pid smoke_app announced, never by a pattern, and
@@ -103,7 +103,7 @@ def main():
     print("2. launcher dead before startup -> app exits at once")
     gone = subprocess.Popen(["true"])
     gone.wait()                         # reaped: its pid names no process
-    env["DESIGNER_EXIT_WITH_PARENT"] = str(gone.pid)
+    env["LOBOLE_EXIT_WITH_PARENT"] = str(gone.pid)
     r = subprocess.run([binary, "--headless", "--remote", "0"], env=env,
                        capture_output=True, text=True, timeout=30)
     expect(r.returncode == 0 and "exited before startup" in r.stderr,
@@ -112,7 +112,7 @@ def main():
 
     print("3. a value that is not a pid is refused")
     for bad in ("yes", "1", "-5"):
-        env["DESIGNER_EXIT_WITH_PARENT"] = bad
+        env["LOBOLE_EXIT_WITH_PARENT"] = bad
         r = subprocess.run([binary, "--headless", "--remote", "0"], env=env,
                            capture_output=True, text=True, timeout=30)
         expect(r.returncode == 2 and "launcher's pid" in r.stderr,

@@ -316,7 +316,7 @@ at a time.
 surface). `designer_core` stays GPU-free: `TopologyOptimize` takes an
 optional `fem::TopoLinearSolver` (the seam in `FemTopo.h`), and the app
 passes a `gpu::TopoGpuSolver` when a usable hardware device exists. The build
-option is `DESIGNER_ENABLE_FEM_GPU` (default ON); compute shaders are
+option is `LOBOLE_ENABLE_FEM_GPU` (default ON); compute shaders are
 compiled to embedded SPIR-V (`src/shaders/fem_*.comp`, `cg_*.comp`,
 `cheb_*.comp`, `mg_*.comp`).
 
@@ -368,7 +368,7 @@ SIMP's solve accepts any progress; it polls a cancel between steps.
 
 Device choice: discrete over integrated; the settings' `gpuDevice` names one.
 Software devices (llvmpipe) lose to the CPU and are not used by the app.
-Environment overrides: `DESIGNER_TOPO_GPU=0` forces the CPU, `=1` admits a
+Environment overrides: `LOBOLE_TOPO_GPU=0` forces the CPU, `=1` admits a
 software device; `FEMGPU_PRECOND=mg|jacobi|cheb`, `FEMGPU_CHEB_DEGREE`,
 `FEMGPU_CHEB_RATIO`. Diagnostics: `TOPO_PROFILE=1` prints per-phase SIMP
 timing, `FEMGPU_SOLVE_TRACE=1` one line per linear solve, `FEMGPU_CG_TRACE=1`

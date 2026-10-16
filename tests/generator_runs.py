@@ -11,7 +11,7 @@ the unit tests pin what each feature does alone, and only a whole generator
 puts hundreds of them in one document. So each generator here runs its own
 cheapest stage that still CHECKS, from nothing -- against a private instance
 launched by smoke_app.py (its own XDG_STATE_HOME and XDG_CONFIG_HOME),
-writing to a private directory (DESIGNER_SCRATCH, or the generator's
+writing to a private directory (LOBOLE_SCRATCH, or the generator's
 --out), never the repo's scratch/ -- and passes only when it exits 0 AND
 its own success marker is in its output. A run that exits 0 without the
 marker stopped early, which is not a pass.
@@ -159,7 +159,7 @@ def main():
     binary, name, budget = sys.argv[1], sys.argv[2], float(sys.argv[3])
     build, kind, extra = RUNS[name]
     out = tempfile.mkdtemp(prefix=f"designer-gen-{name}-")
-    env = dict(os.environ, DESIGNER_SCRATCH=out, PYTHONUNBUFFERED="1",
+    env = dict(os.environ, LOBOLE_SCRATCH=out, PYTHONUNBUFFERED="1",
                **extra)
     with launch(binary, headless=kind) as app:
         cmd, markers, own_log = build(app.port, out)

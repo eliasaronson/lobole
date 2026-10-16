@@ -66,7 +66,7 @@ def default_jobs():
 
 class Instance:
     """One headless app for a worker: smoke_app's isolation (scratch XDG
-    dirs, DESIGNER_EXIT_WITH_PARENT), plus a scratch path to save into and
+    dirs, LOBOLE_EXIT_WITH_PARENT), plus a scratch path to save into and
     a per-call deadline."""
 
     def __init__(self, binary, timeout, record=None, env=None):

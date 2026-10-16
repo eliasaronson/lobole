@@ -22,7 +22,7 @@ CMake's `install()` rules define the layout every packager uses:
 `libdesigner_adaptive.so` under the library directory, found through an
 `$ORIGIN`-relative RUNPATH; runtime data (shaders, fonts, the HDRI, the
 standard-parts tables) under `share/designer`; and the `.desktop` file,
-AppStream metainfo (`DESIGNER_INSTALL_METAINFO`, default ON) and icons (SVG
+AppStream metainfo (`LOBOLE_INSTALL_METAINFO`, default ON) and icons (SVG
 and a 256×256 PNG) under their standard `share/` locations. The metadata
 sources are in `packaging/`.
 
@@ -34,7 +34,7 @@ object file` at start. To check, `cmake --install` to a scratch prefix and
 
 At run time `RuntimePaths` (`src/common/RuntimePaths.{h,cpp}`) resolves:
 
-- **read-only data**: `DESIGNER_DATA_DIR` if set, else the staged build-tree
+- **read-only data**: `LOBOLE_DATA_DIR` if set, else the staged build-tree
   directories beside the executable, else `../share/designer` relative to it;
 - **per-user directories**, never beside the executable (read-only under
   Nix, Flatpak and an installed prefix): `UserConfigDir` (settings),
@@ -91,7 +91,7 @@ and the fonts are vendored in-tree.
   pushes it to GHCR (`.github/workflows/docker.yml`).
 - `checks.x86_64-linux.headless`: builds `designer`, `designer_tests` and
   `femgpu_tests` and runs `ctest -LE gui` in the sandbox with a clean
-  `$HOME` and GPU topology disabled (`DESIGNER_TOPO_GPU=0`).
+  `$HOME` and GPU topology disabled (`LOBOLE_TOPO_GPU=0`).
 - `devShells.x86_64-linux.default`: `nix develop`, the same toolchain as
   `nix-shell shell.nix` plus validation layers and the Python tooling.
 
@@ -165,7 +165,7 @@ dir` source would otherwise copy them into itself.
 - **Boost must be a real install**, not a header copy: `find_package(Boost)`
   is quiet, and without it the PlaneGCS sketch solver is silently disabled.
   The manifest `b2 install`s the `system` library to get `BoostConfig.cmake`.
-- The app module passes `DESIGNER_BUILD_TESTS=OFF` so configure does not try
+- The app module passes `LOBOLE_BUILD_TESTS=OFF` so configure does not try
   to fetch Catch2 inside the offline sandbox.
 - The SDK's gcc ships without `libstdc++exp`, so CMake defines
   `HAVE_STDCXX_STACKTRACE` only when `std::stacktrace` links, and the crash
@@ -174,7 +174,7 @@ dir` source would otherwise copy them into itself.
   `--device=dri`, `--filesystem=host`, and `--share=network` so the
   `--remote` RPC server is reachable from host clients.
 - The local build turns off AppStream metainfo
-  (`-DDESIGNER_INSTALL_METAINFO=OFF`) and deletes the SVG icon in
+  (`-DLOBOLE_INSTALL_METAINFO=OFF`) and deletes the SVG icon in
   `post-install`: a bare `nix-shell` lacks the gdk-pixbuf loaders that
   `appstreamcli compose` and `flatpak build-export`'s icon check need.
 - File dialogs go through `xdg-desktop-portal`, which the app already uses.
@@ -310,12 +310,12 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
 
 | option | default | effect |
 |---|---|---|
-| `DESIGNER_BUILD_TESTS` | ON | configure the test targets |
-| `DESIGNER_INSTALL_METAINFO` | ON | install AppStream metainfo |
+| `LOBOLE_BUILD_TESTS` | ON | configure the test targets |
+| `LOBOLE_INSTALL_METAINFO` | ON | install AppStream metainfo |
 | `ENABLE_CAM` | ON | milling toolpaths and G-code; OFF is a supported configuration CI builds and tests |
 | `ENABLE_CAM_ADAPTIVE` | ON | adaptive clearing (LGPL libarea, shared) |
 | `ENABLE_TERMINAL` | ON | the embedded terminal (libvterm); never on Windows |
-| `DESIGNER_ENABLE_FEM_GPU` | ON | the Vulkan-compute topology solver |
+| `LOBOLE_ENABLE_FEM_GPU` | ON | the Vulkan-compute topology solver |
 | `ENABLE_TEST_ENGINE` | ON | the ImGui test engine (`--gui-tests`, `ui_action`); CI also builds without it |
 
 ## Not done

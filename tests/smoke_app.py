@@ -50,7 +50,7 @@ that one the hard way).
 
 THE APP DIES WITH ITS LAUNCHER
 ------------------------------
-Every launch sets DESIGNER_EXIT_WITH_PARENT to this process's pid, so the
+Every launch sets LOBOLE_EXIT_WITH_PARENT to this process's pid, so the
 kernel sends the app SIGTERM when this process dies — however it dies. The
 `finally:` and `with` cleanup here never runs on SIGKILL (a ctest timeout, an
 agent stopping a test), and two `--headless --remote 0` instances orphaned
@@ -78,7 +78,7 @@ from lobole.client import Client  # noqa: E402
 # Every client a smoke makes is strict: an answer holding NaN or infinity
 # (sent as null, listed under `nonfinite`) fails the smoke instead of reading
 # as a missing value (docs/scripting/rpc.md#what-a-response-carries).
-os.environ.setdefault("DESIGNER_REMOTE_STRICT", "1")
+os.environ.setdefault("LOBOLE_REMOTE_STRICT", "1")
 
 # Both the windowed and the headless path log this; matching either means the
 # helper does not care which one it launched.
@@ -328,7 +328,7 @@ def _spawn(binary, extra_args, env, timeout, headless):
     if threading.current_thread() is not threading.main_thread():
         raise RuntimeError("smoke_app launches only from the main thread: "
                            "the app exits when the thread that started it "
-                           "does (DESIGNER_EXIT_WITH_PARENT)")
+                           "does (LOBOLE_EXIT_WITH_PARENT)")
     _sweep_orphaned_scratch()
     tmp = tempfile.mkdtemp(prefix="designer_smoke_")
     e = dict(os.environ if env is None else env)
@@ -338,9 +338,9 @@ def _spawn(binary, extra_args, env, timeout, headless):
     # needs no asking, since when a pid namespace's init exits the kernel
     # kills every process left in it.
     if os.getpid() != 1:
-        e["DESIGNER_EXIT_WITH_PARENT"] = str(os.getpid())
+        e["LOBOLE_EXIT_WITH_PARENT"] = str(os.getpid())
     else:
-        e.pop("DESIGNER_EXIT_WITH_PARENT", None)
+        e.pop("LOBOLE_EXIT_WITH_PARENT", None)
     if headless:
         # No display: these paths run under ctest with no X, and a stray
         # DISPLAY makes it look like the windowed path is wanted. ONLY for

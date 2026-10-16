@@ -994,7 +994,7 @@ static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
 // costs whatever its own pruning makes it, and on the cases measured here it
 // pruned no better (a sun inside its ring, 16 mm apart: minutes whole). It
 // is a FIXED number, never derived from the thread count, so a one-thread run
-// (DESIGNER_SWEEP_THREADS=1) refines exactly the pairs an all-thread run does
+// (LOBOLE_SWEEP_THREADS=1) refines exactly the pairs an all-thread run does
 // and answers bit for bit the same (sweep_parallel_smoke).
 constexpr size_t kMaxRefinedPairs = 4096;
 

@@ -3,5 +3,5 @@
 
 #include "TestPaths.h"
 
-const char* TestSourceDir() { return DESIGNER_SOURCE_DIR; }
-const char* TestBinaryPath() { return DESIGNER_TEST_BINARY; }
+const char* TestSourceDir() { return LOBOLE_SOURCE_DIR; }
+const char* TestBinaryPath() { return LOBOLE_TEST_BINARY; }

@@ -15,7 +15,7 @@ watchdog (common/Watchdog.h) must log, from its own thread:
   - one "main thread resumed after" line,
 
 and the app must carry on (it answers `ping` afterwards). A bad
-DESIGNER_WATCHDOG_S is refused at start-up rather than defaulted.
+LOBOLE_WATCHDOG_S is refused at start-up rather than defaulted.
 
 Usage: watchdog_smoke.py <path-to-designer-binary>
 """
@@ -42,7 +42,7 @@ def main():
     env = dict(os.environ)
     env["XDG_STATE_HOME"] = os.path.join(scratch, "state")
     env["XDG_CONFIG_HOME"] = os.path.join(scratch, "config")
-    env.pop("DESIGNER_WATCHDOG_S", None)
+    env.pop("LOBOLE_WATCHDOG_S", None)
 
     app = launch_app(binary, extra_args=["--stall-test"], env=env)
     try:
@@ -61,7 +61,7 @@ def main():
     finally:
         app.terminate()
 
-    env["DESIGNER_WATCHDOG_S"] = "3s"
+    env["LOBOLE_WATCHDOG_S"] = "3s"
     r = subprocess.run([binary, "--headless", "--remote", "0"], env=env,
                        capture_output=True, text=True, timeout=30)
     expect(r.returncode == 2 and "number of seconds" in r.stderr,

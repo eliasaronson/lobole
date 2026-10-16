@@ -148,7 +148,7 @@ uint64_t AddBox(Document& doc, const glm::vec3& at, double w, double h,
 // study_status said "cpu (Eigen CG-IC)" with no reason.
 TEST_CASE("a build with the GPU topology solver starts runs with it",
           "[actions][topopt]") {
-#ifdef DESIGNER_EXPECT_TOPO_GPU
+#ifdef LOBOLE_EXPECT_TOPO_GPU
   CHECK(ui::TopologyGpuBuiltIn());
 #else
   CHECK_FALSE(ui::TopologyGpuBuiltIn());

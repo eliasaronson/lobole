@@ -2416,7 +2416,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield(2);
 
-    const std::string fixture = std::string(DESIGNER_SOURCE_DIR) +
+    const std::string fixture = std::string(LOBOLE_SOURCE_DIR) +
                                 "/tests/fixtures/images/checker16x12.png";
     const uint32_t id = ui::AddReferenceImageToSketch(*s_App, fixture);
     IM_CHECK(id != 0);
@@ -2496,7 +2496,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield(2);
-    const std::string fixture = std::string(DESIGNER_SOURCE_DIR) +
+    const std::string fixture = std::string(LOBOLE_SOURCE_DIR) +
                                 "/tests/fixtures/images/checker16x12.png";
     const uint32_t id = ui::AddReferenceImageToSketch(*s_App, fixture);
     IM_CHECK(id != 0);
@@ -2547,7 +2547,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->SetRef("//##MainMenuBar");
     EnterSketchOnPlane(ctx, 0);
     ctx->Yield(2);
-    const std::string fixture = std::string(DESIGNER_SOURCE_DIR) +
+    const std::string fixture = std::string(LOBOLE_SOURCE_DIR) +
                                 "/tests/fixtures/images/checker16x12.png";
     const uint32_t id = ui::AddReferenceImageToSketch(*s_App, fixture);
     IM_CHECK(id != 0);

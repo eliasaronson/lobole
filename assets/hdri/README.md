@@ -6,7 +6,7 @@ and [r4-offline-render.md](../../docs/rendering/still-render.md) for the
 path-traced still).
 
 The filename lives in ONE place per language — `RuntimePaths::
-kEnvironmentHdriFile` and CMake's `DESIGNER_HDRI` — because it used to be
+kEnvironmentHdriFile` and CMake's `LOBOLE_HDRI` — because it used to be
 written out at six sites, which is how a resolution nobody revisits gets six
 places to be wrong in.
 

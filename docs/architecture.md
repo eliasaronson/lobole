@@ -59,7 +59,7 @@ stays GPU-free.
 | `designer_core` | `core/`, `cad/`, `common/`, `remote/InstanceRegistry.cpp` | the unit-testable target; carries OpenCASCADE, PlaneGCS, Eigen/Spectra, Netgen (via `fem_mesher`) |
 | `designer_app` | `ui/`, `render/`, `remote/`, the GUI suite, ImGui | everything the app is except its entry points, so `designer_tests` can link the actions layer |
 | `designer` | `main.cpp`, `HeadlessMain.cpp`, `CrashHandler.cpp` | links `designer_app`, `designer_core` and (when built) `fem_gpu` |
-| `fem_gpu` | `src/femgpu/` | Vulkan compute; `DESIGNER_ENABLE_FEM_GPU` |
+| `fem_gpu` | `src/femgpu/` | Vulkan compute; `LOBOLE_ENABLE_FEM_GPU` |
 | `designer_tests`, `femgpu_tests` | Catch2 | see [Tests](#tests) |
 
 **The targets keep the old name; what ships does not.** Loböle is the
@@ -68,7 +68,7 @@ sees it: the binary (`OUTPUT_NAME lobole` on the `designer` target), the
 application id `org.lobole.Lobole`, the per-user directories
 (`src/common/RuntimePaths.cpp`), the instance-registry handshake
 (`{"app": "lobole"}`) and the MCP server's name. Never the ö in an
-identifier. The CMake target names, the `DESIGNER_*` environment variables,
+identifier. The CMake target names, the `LOBOLE_*` environment variables,
 the C++ namespaces and the document format (`kFormat`, `.dsgn`) are
 invisible outside the build and keep "designer"; the format moves only with
 a `kVersion` bump wanted for its own reasons. "designer" in prose is also the
@@ -87,7 +87,7 @@ and reported by the `ping` RPC's `features`:
   separate shared library, `designer_adaptive`, so only the bridge translation
   unit touches its symbols.
 - `ENABLE_TERMINAL` (libvterm), `ENABLE_TEST_ENGINE` (no GUI suite and no
-  `ui_action` without it), `DESIGNER_ENABLE_FEM_GPU`.
+  `ui_action` without it), `LOBOLE_ENABLE_FEM_GPU`.
 - Netgen, Eigen and Spectra are detected: without Spectra modal analysis
   refuses, without Eigen the FEM solver and the mate-loop solver are absent.
 
@@ -126,7 +126,7 @@ What makes a worktree share main's cache:
 Measured on 22 cores, `designer` plus `designer_tests` in a fresh worktree:
 **2 min 8 s, 404 of 423 compiles from the cache.** It was 11 min 30 s before.
 The misses are `BuildInfo.cpp` and the sources that carry the tree's path in
-a define (`DESIGNER_SOURCE_DIR`).
+a define (`LOBOLE_SOURCE_DIR`).
 
 **Headers include what they use.** Turning the PCH off found two sources that
 compiled only because it supplied their includes.
@@ -362,7 +362,7 @@ by the same name drift apart without any test noticing:
   run on workers and are applied by their `Poll…` (above).
 - `core/Parallel.h` is the one parallel-for: flat batches of independent
   OpenCASCADE work, results collected per index and merged in order so a
-  response is reproducible. `DESIGNER_SWEEP_THREADS` pins the thread count.
+  response is reproducible. `LOBOLE_SWEEP_THREADS` pins the thread count.
   A `For` nested in another's body gets its worker's share of the threads
   (`Workers()` is that share inside a `For`), so the other setups of a job
   inspected at once, each split into bands, divide the machine rather than
@@ -528,7 +528,7 @@ by the same name drift apart without any test noticing:
   found in each module's own `.pdata`, from a list of modules read and
   pinned before the suspend, and named after the resume, as module + RVA
   frames that `tools/symbolize-crash.py` names from the log.
-- `DESIGNER_WATCHDOG_S` sets the threshold (default 3; 0 turns it off, as a
+- `LOBOLE_WATCHDOG_S` sets the threshold (default 3; 0 turns it off, as a
   debugger stopping the process is not a hang); a value that is not seconds
   is refused at start-up. `lobole --stall-test` stalls the loop for 4 s once,
   and `tests/watchdog_smoke.py` checks the stall line, the label, the stack and
@@ -551,7 +551,7 @@ by the same name drift apart without any test noticing:
   spawns the binary directly. It keeps the app's log, prints it on failure,
   and archives the log, traceback and a `reproduce.sh` under
   `$XDG_STATE_HOME/lobole/smoke-failures/`. Every launch sets
-  `DESIGNER_EXIT_WITH_PARENT=<its pid>`, so the app gets SIGTERM when the
+  `LOBOLE_EXIT_WITH_PARENT=<its pid>`, so the app gets SIGTERM when the
   test dies however it dies — a SIGKILLed smoke used to leave its instance
   serving nothing under init for hours (`src/app/ParentWatch.h`,
   `tests/exit_with_parent_smoke.py`). A launcher that is PID 1 (a

@@ -161,7 +161,7 @@ list kept elsewhere drifts.
   runner's `--slow-frames 160` / `--slow-jobs 3000`, which make it fail on a
   quiet machine (docs/ui/testing.md#wait-on-the-condition-not-a-frame-count).
   `tests/smoke_app.py` is the one launcher for smokes, keeps the app's log,
-  and makes the app die with the test (`DESIGNER_EXIT_WITH_PARENT`).
+  and makes the app die with the test (`LOBOLE_EXIT_WITH_PARENT`).
 - **An OpenCASCADE boolean MODIFIES its arguments** (it writes the p-curves it
   computes onto their edges). Two threads running booleans on pairs that share
   a body corrupt the heap — `malloc(): unaligned tcache chunk` frames away from
@@ -338,7 +338,7 @@ regression test built from its report**: the autosave copy is the starting
 document, `session.log`'s `edit:`/`rpc:` lines are the steps, and the test
 crashes before the fix. A HANG is reported by the frame watchdog: `main thread stalled
 N s (in <RPC or dialog>)` plus the main thread's stack, then `resumed after`
-(docs/architecture.md#crashes-and-stalls); `DESIGNER_WATCHDOG_S=0` turns it off
+(docs/architecture.md#crashes-and-stalls); `LOBOLE_WATCHDOG_S=0` turns it off
 under a debugger. `DEV_WATCH_VALIDATE=1 tools/dev-watch.sh` turns on Vulkan
 sync/GPU-assisted validation (slow; for device-lost/OOB bugs).
 

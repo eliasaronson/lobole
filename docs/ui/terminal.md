@@ -79,7 +79,7 @@ break the rule that contexts are the toolbar's branches
 
 Opening the panel starts `$SHELL` in the project directory (the working
 directory when the project is unsaved). Every session exports
-`DESIGNER_PORT` = this instance's remote port, so `claude`,
+`LOBOLE_PORT` = this instance's remote port, so `claude`,
 `python3 -m lobole.client` or anything else that reads it reaches this
 window.
 If the app was started without `--remote`, the panel opens a port on demand

@@ -43,8 +43,8 @@ from _lib import (arc_through, check, check_print, connect,  # noqa: E402
                   fresh_project, line, print_receipt)
 
 ROOT = Path(HERE).resolve().parent.parent
-OUT = Path(os.environ["DESIGNER_SCRATCH"]) / "hook" if \
-    os.environ.get("DESIGNER_SCRATCH") else ROOT / "scratch" / "hook"
+OUT = Path(os.environ["LOBOLE_SCRATCH"]) / "hook" if \
+    os.environ.get("LOBOLE_SCRATCH") else ROOT / "scratch" / "hook"
 
 G = 9.81  # m/s^2, kg to N
 # Prusament PLA's datasheet (v1.1, printed specimens, the source the app's

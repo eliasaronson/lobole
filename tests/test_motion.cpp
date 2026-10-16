@@ -251,9 +251,9 @@ TEST_CASE("A motion study round-trips, and the v87 golden loads",
   CHECK_THROWS_WITH(DocumentIO::MotionStudyFromJson(bad),
                     ContainsSubstring("mesh or exact"));
 
-  // The golden: written by this recipe (DESIGNER_WRITE_GOLDEN=<path>), and
+  // The golden: written by this recipe (LOBOLE_WRITE_GOLDEN=<path>), and
   // loaded here every time.
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
+  if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN"))
     REQUIRE(DocumentIO::SaveAssembly(r.asmDoc, out).has_value());
   const fs::path golden =
       fs::path(TestSourceDir()) / "tests/golden/assembly/v87-motion-study.json";
@@ -434,7 +434,7 @@ TEST_CASE("A cancelled motion run keeps the samples it finished", "[motion]") {
   // Cancelled at the first check, as progress reports them.
   // One worker, so the batch stops where the cancel lands rather than with
   // every candidate already handed out.
-  setenv("DESIGNER_SWEEP_THREADS", "1", 1);
+  setenv("LOBOLE_SWEEP_THREADS", "1", 1);
   std::atomic<bool> stop{false};
   const motion::Result res = motion::Run(
       r.asmDoc, r.Parts(), nullptr, study, [&stop] { return stop.load(); },
@@ -442,7 +442,7 @@ TEST_CASE("A cancelled motion run keeps the samples it finished", "[motion]") {
         if (f > 0.1) // the first check landed
           stop.store(true);
       });
-  unsetenv("DESIGNER_SWEEP_THREADS");
+  unsetenv("LOBOLE_SWEEP_THREADS");
   REQUIRE(res.error.empty());
   CHECK(res.cancelled);
   CHECK(res.samples.size() < 25);
@@ -548,7 +548,7 @@ TEST_CASE("Every sample records the moving mates' values", "[motion]") {
 }
 
 // The v128 assembly golden: a study that names its configuration.
-// DESIGNER_WRITE_GOLDEN_V128_ASM=<path> writes it.
+// LOBOLE_WRITE_GOLDEN_V128_ASM=<path> writes it.
 TEST_CASE("The v128 golden: a study that names its configuration",
           "[motion][golden]") {
   Rig r = MakeRig(90.0);
@@ -558,7 +558,7 @@ TEST_CASE("The v128 golden: a study that names its configuration",
   s.name = "turn without the stop";
   s.configuration = noStop.id;
   r.asmDoc.AddMotionStudy(s);
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V128_ASM"))
+  if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN_V128_ASM"))
     REQUIRE(DocumentIO::SaveAssembly(r.asmDoc, out).has_value());
 
   const fs::path golden = fs::path(TestSourceDir()) /
@@ -582,7 +582,7 @@ TEST_CASE("The v167 golden: a study that states its clash deflection",
   s.name = "turn, finely";
   s.clashDeflectionMm = 0.05;
   r.asmDoc.AddMotionStudy(s);
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V167_ASM"))
+  if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN_V167_ASM"))
     REQUIRE(DocumentIO::SaveAssembly(r.asmDoc, out).has_value());
 
   // What the run meshes at is what it was asked for, and it still finds the

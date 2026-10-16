@@ -70,13 +70,13 @@ const char* __lsan_default_suppressions() {
 const char* __ubsan_default_options() {
   // The alignment reports from OpenCASCADE's inline headers, and Dear
   // ImGui's (VkPresentModeKHR)~0 "unset" sentinel.
-  // DESIGNER_SANITIZER_SOURCE_DIR is baked in by CMake: a sanitizer build is a
+  // LOBOLE_SANITIZER_SOURCE_DIR is baked in by CMake: a sanitizer build is a
   // developer build, and its source tree is where it was configured.
-  return "suppressions=" DESIGNER_SANITIZER_SOURCE_DIR
+  return "suppressions=" LOBOLE_SANITIZER_SOURCE_DIR
          "/tools/ubsan-suppressions.txt:print_stacktrace=1";
 }
 
-#ifdef DESIGNER_TSAN
+#ifdef LOBOLE_TSAN
 const char* __tsan_default_options() {
   // Netgen is not instrumented, so TSan cannot see its task scheduler's
   // happens-before edges and reports its internal parallel-for as a race —
@@ -87,7 +87,7 @@ const char* __tsan_default_options() {
   // history_size lifted because the default 1 keeps too few stack frames of
   // the *previous* access to identify it, which is the half of a race report
   // that tells you what raced with what.
-  return "suppressions=" DESIGNER_SANITIZER_SOURCE_DIR
+  return "suppressions=" LOBOLE_SANITIZER_SOURCE_DIR
          "/tools/tsan-suppressions.txt:history_size=4:second_deadlock_stack=1";
 }
 #endif

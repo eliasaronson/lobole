@@ -28,7 +28,7 @@
 #                                               # one-shot: open, screenshot, exit
 #
 # Drive it with `python3 -m lobole.client <port> ...` or the MCP server
-# (DESIGNER_PORT=<port>). Screenshots work exactly as against dev-watch.
+# (LOBOLE_PORT=<port>). Screenshots work exactly as against dev-watch.
 set -eu
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -91,12 +91,12 @@ wait_ready() {
 # per-port scratch dir, seeded from the real one so the preview still LOOKS
 # like the user's app. Same reasoning as the per-shard isolation in
 # gui-tests-xvfb.sh. Override by exporting XDG_CONFIG_HOME yourself.
-if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
-  DESIGNER_PREVIEW_CONFIG="${TMPDIR:-/tmp}/designer-preview-config-$$"
-  mkdir -p "$DESIGNER_PREVIEW_CONFIG/lobole"
+if [ -z "${LOBOLE_PREVIEW_CONFIG:-}" ]; then
+  LOBOLE_PREVIEW_CONFIG="${TMPDIR:-/tmp}/designer-preview-config-$$"
+  mkdir -p "$LOBOLE_PREVIEW_CONFIG/lobole"
   REAL_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/lobole"
   [ -f "$REAL_DIR/settings.json" ] &&
-    cp "$REAL_DIR/settings.json" "$DESIGNER_PREVIEW_CONFIG/lobole/settings.json"
+    cp "$REAL_DIR/settings.json" "$LOBOLE_PREVIEW_CONFIG/lobole/settings.json"
   # ...and the MACHINE store. A setup names its machine by name, so a preview
   # without one refuses every CAM job with "no machine called '6090'" against
   # a machine plainly on disk -- the same trap the headless RPC path fell into
@@ -111,11 +111,11 @@ if [ -z "${DESIGNER_PREVIEW_CONFIG:-}" ]; then
   # the whole directory would take anything else kept there with it, and a
   # scratch dir under /tmp is not where credentials belong.
   [ -d "$REAL_DIR/machines" ] &&
-    cp -r "$REAL_DIR/machines" "$DESIGNER_PREVIEW_CONFIG/lobole/"
+    cp -r "$REAL_DIR/machines" "$LOBOLE_PREVIEW_CONFIG/lobole/"
   [ -d "$REAL_DIR/print_profiles" ] &&
-    cp -r "$REAL_DIR/print_profiles" "$DESIGNER_PREVIEW_CONFIG/lobole/"
+    cp -r "$REAL_DIR/print_profiles" "$LOBOLE_PREVIEW_CONFIG/lobole/"
 fi
-export XDG_CONFIG_HOME="$DESIGNER_PREVIEW_CONFIG"
+export XDG_CONFIG_HOME="$LOBOLE_PREVIEW_CONFIG"
 
 # --stop <port>: kill the instance on that port, by the PID IT ANNOUNCED.
 # There was no supported way to stop one, so the reflex is `pkill -f designer`
@@ -199,7 +199,7 @@ fi
 # one. `wait_ready` below is the answer and was reachable only from --render.
 if [ "${1:-}" = "--start" ]; then
   PORT="${2:-8798}"
-  LOG="${DESIGNER_PREVIEW_LOG:-${TMPDIR:-/tmp}/designer-preview-$PORT.log}"
+  LOG="${LOBOLE_PREVIEW_LOG:-${TMPDIR:-/tmp}/designer-preview-$PORT.log}"
   # Its own session, so it survives the shell that started it and takes no
   # SIGHUP when that shell goes away. `nohup` is the fallback where setsid is
   # not installed; both leave the app parented to init, which is what --stop

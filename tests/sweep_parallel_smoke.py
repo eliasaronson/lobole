@@ -62,7 +62,7 @@ def build(d, side):
 def sweep(binary, env, threads, side):
     e = dict(env)
     if threads:
-        e["DESIGNER_SWEEP_THREADS"] = str(threads)
+        e["LOBOLE_SWEEP_THREADS"] = str(threads)
     app = launch_app(binary, env=e)
     try:
         d = Client.wait_for(app.port)

@@ -200,12 +200,12 @@ modules:
     builddir: true
     config-opts:
       - -DCMAKE_BUILD_TYPE=Release
-      - -DDESIGNER_BUILD_TESTS=OFF   # skip the test tree (would FetchContent Catch2 offline)
+      - -DLOBOLE_BUILD_TESTS=OFF   # skip the test tree (would FetchContent Catch2 offline)
       # Local smoke builds skip AppStream metainfo: flatpak-builder's
       # `appstreamcli compose` needs gdk-pixbuf icon loaders a bare nix-shell
       # lacks. RE-ENABLE (drop this line) for a Flathub build, where the
       # builders have them, so the catalog metadata ships.
-      - -DDESIGNER_INSTALL_METAINFO=OFF
+      - -DLOBOLE_INSTALL_METAINFO=OFF
     # Same nix-shell gap: `flatpak build-export`'s icon validator can't parse
     # SVG without those loaders, so drop the scalable icon locally and ship the
     # 256x256 PNG. Remove this post-install for a Flathub build.

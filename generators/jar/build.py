@@ -33,7 +33,7 @@ sys.path.insert(0, str(ROOT / "generators"))
 from lobole.sdk import Plane, SdkError, connect  # noqa: E402
 from _lib import check_print, print_receipt  # noqa: E402
 
-OUT = Path(os.environ.get("DESIGNER_SCRATCH", ROOT / "scratch")) / "jar"
+OUT = Path(os.environ.get("LOBOLE_SCRATCH", ROOT / "scratch")) / "jar"
 
 NOZZLE_MM = 0.4  # the P1S's stock nozzle, which the allowance tables assume
 LAYER_MM = 0.2   # the layer height the profiles were measured at

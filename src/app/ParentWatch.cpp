@@ -16,7 +16,7 @@
 #endif
 
 namespace {
-constexpr const char* kEnv = "DESIGNER_EXIT_WITH_PARENT";
+constexpr const char* kEnv = "LOBOLE_EXIT_WITH_PARENT";
 }
 
 int ArmExitWithParent(bool requestedByFlag) {

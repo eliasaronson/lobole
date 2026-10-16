@@ -182,7 +182,7 @@ target_include_directories(designer_tests PRIVATE ${CMAKE_SOURCE_DIR}/src)
 # What the build option promised, stated apart from the define the app's
 # library carries, so a test can hold the one to the other.
 if(HAVE_FEM_GPU)
-    target_compile_definitions(designer_tests PRIVATE DESIGNER_EXPECT_TOPO_GPU)
+    target_compile_definitions(designer_tests PRIVATE LOBOLE_EXPECT_TOPO_GPU)
 endif()
 
 # Precompiled headers. designer_core has carried one since round 1 for the same
@@ -218,7 +218,7 @@ endif()
 # can compare its own mtime against the source it was built from: a stale
 # binary fails like a regression, and twice in one round it was one.
 set_source_files_properties(TestPaths.cpp PROPERTIES COMPILE_DEFINITIONS
-    "DESIGNER_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\";DESIGNER_TEST_BINARY=\"$<TARGET_FILE:designer_tests>\"")
+    "LOBOLE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\";LOBOLE_TEST_BINARY=\"$<TARGET_FILE:designer_tests>\"")
 
 include(CTest)
 include(Catch)
@@ -248,15 +248,15 @@ include(Catch)
 # this is the same isolation for the ones that run in-process, and it covers
 # every future test rather than the one that was noticed. Autosave sidecars
 # for unsaved documents and the instance registry land here too.
-set(DESIGNER_TEST_HOME "${CMAKE_CURRENT_BINARY_DIR}/test-home")
-file(MAKE_DIRECTORY "${DESIGNER_TEST_HOME}/state" "${DESIGNER_TEST_HOME}/config")
+set(LOBOLE_TEST_HOME "${CMAKE_CURRENT_BINARY_DIR}/test-home")
+file(MAKE_DIRECTORY "${LOBOLE_TEST_HOME}/state" "${LOBOLE_TEST_HOME}/config")
 # The semicolon is ESCAPED: unescaped, CMake splits the string into two list
 # elements, so ENVIRONMENT takes the first and the second is read as another
 # property name — and the whole thing is silently dropped. It generated tests
 # with no ENVIRONMENT at all, which looked exactly like it had worked.
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
                      PROPERTIES ENVIRONMENT
-                     "XDG_STATE_HOME=${DESIGNER_TEST_HOME}/state\;XDG_CONFIG_HOME=${DESIGNER_TEST_HOME}/config")
+                     "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
 
 # Release metadata smoke: --version must exit before GLFW/Vulkan initialization,
 # so the packaged binary can be identified on a display-less machine.
@@ -285,14 +285,14 @@ if(TARGET fem_gpu)
     catch_discover_tests(femgpu_tests ADD_TAGS_AS_LABELS
                          PROPERTIES RESOURCE_LOCK gpu SKIP_RETURN_CODE 4
                          ENVIRONMENT
-                         "XDG_STATE_HOME=${DESIGNER_TEST_HOME}/state\;XDG_CONFIG_HOME=${DESIGNER_TEST_HOME}/config")
+                         "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
 endif()
 
 # GUI smoke tests drive the real app through ImGui Test Engine. They go
 # through tools/xvfb-exec.sh, which runs them on a virtual display and holds
 # the GPU lock: on a developer's own display they stall to ~1 fps whenever the
 # screen locks (FIFO present), which reads as a 600 s timeout and not as the
-# passing suite it is. Set DESIGNER_NO_XVFB=1 to watch them run for real.
+# passing suite it is. Set LOBOLE_NO_XVFB=1 to watch them run for real.
 set(XVFB_EXEC ${CMAKE_CURRENT_SOURCE_DIR}/../tools/xvfb-exec.sh)
 
 # `gui_smoke` is the SAME suite tools/gui-tests-xvfb.sh shards, run serially
@@ -896,7 +896,7 @@ add_test(NAME crash_report_smoke
 set_tests_properties(crash_report_smoke PROPERTIES TIMEOUT 120)
 
 # An app a test launched dies with the test, SIGKILL included: smoke_app arms
-# DESIGNER_EXIT_WITH_PARENT for every launch (src/app/ParentWatch.h).
+# LOBOLE_EXIT_WITH_PARENT for every launch (src/app/ParentWatch.h).
 add_test(NAME exit_with_parent_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/exit_with_parent_smoke.py
                  $<TARGET_FILE:designer>)

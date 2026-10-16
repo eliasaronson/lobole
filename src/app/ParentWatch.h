@@ -9,7 +9,7 @@
 // ctest timeout, an agent stopping it, SIGKILL — and the `designer --headless
 // --remote 0` it started then reparents to init and serves nothing, forever:
 // two of them were found 16 hours on, each holding a scratch state dir and
-// its memory. `--exit-with-parent`, or DESIGNER_EXIT_WITH_PARENT=<launcher
+// its memory. `--exit-with-parent`, or LOBOLE_EXIT_WITH_PARENT=<launcher
 // pid>, asks the kernel for SIGTERM when the parent dies
 // (prctl(PR_SET_PDEATHSIG)); the headless and offscreen loops already stop
 // cleanly on SIGTERM. tests/smoke_app.py sets the variable for every launch.

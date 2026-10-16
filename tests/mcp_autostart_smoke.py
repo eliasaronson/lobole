@@ -28,7 +28,7 @@ def main():
     # in the child could never touch real preferences.
     os.environ["XDG_STATE_HOME"] = tmp
     os.environ["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
-    os.environ.pop("DESIGNER_PORT", None)  # a pin would disable autostart
+    os.environ.pop("LOBOLE_PORT", None)  # a pin would disable autostart
     os.environ.pop("DISPLAY", None)
     os.environ.pop("WAYLAND_DISPLAY", None)
     try:

@@ -694,7 +694,7 @@ which writes once the views have landed); the format is chosen by extension and 
   hashes as the regenerated one's; `up` is not an input), and a projection
   turned on the sheet against the turned view's. Manual benchmarks:
   `[hlr-cache-benchmark]`, and
-  `[hlr-project-benchmark]` with `DESIGNER_HLR_PROJECT=<copy of a project>`.
+  `[hlr-project-benchmark]` with `LOBOLE_HLR_PROJECT=<copy of a project>`.
 - `tests/test_drawing.cpp` (`[drawing]`): model ids, round-trips and
   goldens (v162: saved projections load as candidates, a foreign hash
   included, a torn bin dropped, none in the single-file form), formatters, dimension resolution and callouts, SVG and PDF output

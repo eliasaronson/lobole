@@ -58,8 +58,8 @@ FAST_LIMIT=4.0
 # microseconds; a contended one waits its turn instead of corrupting both.
 # The shards below run under this one lock — they are one suite, not several.
 LOCK=/tmp/designer-gui-gpu.lock
-if [ "${DESIGNER_GUI_LOCKED:-}" != "1" ]; then
-  export DESIGNER_GUI_LOCKED=1
+if [ "${LOBOLE_GUI_LOCKED:-}" != "1" ]; then
+  export LOBOLE_GUI_LOCKED=1
   exec flock "$LOCK" "$ROOT/tools/gui-tests-xvfb.sh" "$@"
 fi
 
@@ -195,7 +195,7 @@ while [ "$#" -gt 0 ]; do
       # wrapper must not start a second Xvfb inside this one.
       exec "$XVFB_RUN" -a -s "$SCREEN" \
         "$ROOT/tools/nix-run" \
-        "cd '$ROOT/build' && DESIGNER_NO_XVFB=1 ctest $* --output-on-failure"
+        "cd '$ROOT/build' && LOBOLE_NO_XVFB=1 ctest $* --output-on-failure"
       ;;
   esac
 done

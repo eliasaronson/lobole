@@ -380,7 +380,7 @@ TEST_CASE("A custom axis round-trips, and a zero direction is refused",
 }
 
 // The v128 part golden: a custom-axis revolve and a helix that starts at
-// 90 degrees. Written by this recipe (DESIGNER_WRITE_GOLDEN_V128=<path>) and
+// 90 degrees. Written by this recipe (LOBOLE_WRITE_GOLDEN_V128=<path>) and
 // loaded here every time, so the file and the code cannot drift.
 TEST_CASE("The v128 golden: custom axis and helix start", "[revolve][golden]") {
   Document doc;
@@ -400,7 +400,7 @@ TEST_CASE("The v128 golden: custom axis and helix start", "[revolve][golden]") {
   cv->startDeg = 90.0;
   doc.AddFeature(std::move(cv));
   REQUIRE(doc.Regenerate());
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN_V128"))
+  if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN_V128"))
     REQUIRE(testio::Save(doc, out));
 
   const fs::path golden = fs::path(TestSourceDir()) /

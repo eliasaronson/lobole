@@ -272,7 +272,7 @@ void FreezeProgram(const cam::Setup& setup, const std::vector<Body>& bodies,
         std::filesystem::path(TestSourceDir()) / "tests" / "golden" /
         (stem + "-" + post + ".nc");
 
-    if (std::getenv("DESIGNER_REFRESH_CAM_GOLDEN") != nullptr) {
+    if (std::getenv("LOBOLE_REFRESH_CAM_GOLDEN") != nullptr) {
       std::ofstream(golden) << gcode;
       continue;
     }
@@ -305,7 +305,7 @@ TEST_CASE("cam: a curved model's program is frozen too", "[cam][golden]") {
 TEST_CASE("cam: the emitted program is frozen, per dialect", "[cam][golden]") {
   // Substring checks prove the pieces are present; only a byte-for-byte
   // golden proves the FILE stopped changing. Regenerate deliberately with
-  // DESIGNER_REFRESH_CAM_GOLDEN=1 and read the diff before committing it —
+  // LOBOLE_REFRESH_CAM_GOLDEN=1 and read the diff before committing it —
   // every line of this file eventually moves a machine.
   auto doc = BlockDoc(40, 30, 20);
   const cam::Setup setup = GoldenJob();
@@ -319,7 +319,7 @@ TEST_CASE("cam: the emitted program is frozen, per dialect", "[cam][golden]") {
         std::filesystem::path(TestSourceDir()) / "tests" / "golden" /
         ("cam-block-" + post + ".nc");
 
-    if (std::getenv("DESIGNER_REFRESH_CAM_GOLDEN") != nullptr) {
+    if (std::getenv("LOBOLE_REFRESH_CAM_GOLDEN") != nullptr) {
       std::ofstream(golden) << gcode;
       continue;
     }

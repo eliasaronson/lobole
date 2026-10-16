@@ -94,7 +94,7 @@ if(ENABLE_SANITIZERS)
   # Where the UBSan suppression file lives. Global (sanitizer builds only)
   # rather than a source-file property, because the same file is compiled into
   # targets in two different CMake directory scopes.
-  add_compile_definitions(DESIGNER_SANITIZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+  add_compile_definitions(LOBOLE_SANITIZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
   message(STATUS "Sanitizers enabled (ASan + UBSan)")
 endif()
 
@@ -124,8 +124,8 @@ if(ENABLE_TSAN)
   # from a shell behaves the same as one launched through a wrapper. Without
   # it the first run drowns in Netgen's uninstrumented thread pool.
   set(SANITIZER_DEFAULTS_SRC ${CMAKE_CURRENT_SOURCE_DIR}/src/common/SanitizerDefaults.cpp)
-  add_compile_definitions(DESIGNER_SANITIZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
-                          DESIGNER_TSAN)
+  add_compile_definitions(LOBOLE_SANITIZER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
+                          LOBOLE_TSAN)
   message(STATUS "ThreadSanitizer enabled")
 endif()
 
@@ -533,7 +533,7 @@ endif()
 # The commit is read at CONFIGURE time — it names the commit the build tree was
 # configured on, which is why About says so rather than implying it is live.
 execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short HEAD
-                OUTPUT_VARIABLE DESIGNER_GIT_COMMIT
+                OUTPUT_VARIABLE LOBOLE_GIT_COMMIT
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET)
 
@@ -666,14 +666,14 @@ if(WIN32)
     target_link_libraries(designer_core PUBLIC shell32)
 endif()
 target_compile_definitions(designer_core PUBLIC
-    DESIGNER_VERSION="${PROJECT_VERSION}")
+    LOBOLE_VERSION="${PROJECT_VERSION}")
 # The commit on the ONE file that reads it. As a PUBLIC define it was on 409
 # of 427 sources, so every reconfigure at a new commit recompiled all of them
 # and no worktree (configured at its own commit) could hit ccache.
 # The test engine is a define of designer_app, which this library does not
 # see: without it here every Build: line (crash reports, --version) said "no
 # test engine" in a build that has one.
-set(BUILD_INFO_DEFINITIONS "DESIGNER_GIT_COMMIT=\"${DESIGNER_GIT_COMMIT}\"")
+set(BUILD_INFO_DEFINITIONS "LOBOLE_GIT_COMMIT=\"${LOBOLE_GIT_COMMIT}\"")
 if(ENABLE_TEST_ENGINE)
     list(APPEND BUILD_INFO_DEFINITIONS HAVE_TEST_ENGINE)
 endif()
@@ -946,8 +946,8 @@ include_directories(${CMAKE_SOURCE_DIR}/deps/fonts)
 # executable (main.cpp ExecutableDir()) — same relocatable scheme as the fonts.
 # One name, staged here and installed below; it must match
 # RuntimePaths::kEnvironmentHdriFile, which is the C++ side of the same name.
-set(DESIGNER_HDRI "brown_photostudio_02_2k.hdr")
-file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}
+set(LOBOLE_HDRI "brown_photostudio_02_2k.hdr")
+file(COPY ${CMAKE_SOURCE_DIR}/assets/hdri/${LOBOLE_HDRI}
      DESTINATION ${CMAKE_BINARY_DIR}/assets/hdri)
 # The vendored standard-parts tables (docs/parts/README.md). Staged beside the
 # executable for a development build; installed under share/lobole below.
@@ -1051,7 +1051,7 @@ if(ENABLE_TEST_ENGINE)
   # ONE file that reads it. Public, it was on every app and test source, and
   # a path is different in every tree: a worktree missed ccache on them all.
   set_source_files_properties(src/app/guitests/GuiTestsSketch.cpp PROPERTIES
-      COMPILE_DEFINITIONS "DESIGNER_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
+      COMPILE_DEFINITIONS "LOBOLE_SOURCE_DIR=\"${CMAKE_SOURCE_DIR}\"")
 endif()
 
 add_executable(designer ${SANITIZER_DEFAULTS_SRC}
@@ -1063,12 +1063,12 @@ if(HAVE_STDCXX_STACKTRACE)
     target_compile_definitions(designer PRIVATE HAVE_STDCXX_STACKTRACE)
 endif()
 if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
-    set(DESIGNER_INSTALL_RPATH "${CMAKE_INSTALL_LIBDIR}")
+    set(LOBOLE_INSTALL_RPATH "${CMAKE_INSTALL_LIBDIR}")
 else()
-    set(DESIGNER_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
+    set(LOBOLE_INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
 endif()
 set_target_properties(designer PROPERTIES OUTPUT_NAME lobole
-                      INSTALL_RPATH "${DESIGNER_INSTALL_RPATH}")
+                      INSTALL_RPATH "${LOBOLE_INSTALL_RPATH}")
 
 # imgui.cpp must see IMGUI_ENABLE_TEST_ENGINE so it emits the test hooks.
 # HAVE_TEST_ENGINE is ours: the app's own code switches on it (matching the
@@ -1107,9 +1107,9 @@ endif()
 # binaries don't share).
 # GPU-compute FEM is opt-out so slimmer builds (e.g. the Windows cross MVP) can
 # drop the topology-solver compute stack. Default ON preserves current behavior.
-option(DESIGNER_ENABLE_FEM_GPU "Build the Vulkan-compute FEM topology solver" ON)
+option(LOBOLE_ENABLE_FEM_GPU "Build the Vulkan-compute FEM topology solver" ON)
 find_program(GLSLC glslc HINTS $ENV{VULKAN_SDK}/bin)
-if(GLSLC AND DESIGNER_ENABLE_FEM_GPU)
+if(GLSLC AND LOBOLE_ENABLE_FEM_GPU)
     set(FEMGPU_GEN_DIR "${CMAKE_BINARY_DIR}/femgpu_gen")
     file(MAKE_DIRECTORY ${FEMGPU_GEN_DIR})
     function(embed_compute_shader NAME)
@@ -1178,7 +1178,7 @@ if(GLSLC AND DESIGNER_ENABLE_FEM_GPU)
         target_link_libraries(fem_gpu PUBLIC Eigen3::Eigen)
         target_compile_definitions(fem_gpu PRIVATE HAVE_FEM_SOLVER)
         # The app auto-selects the GPU solver for topology runs when a usable
-        # hardware device exists (DESIGNER_TOPO_GPU=0 disables, =1 admits a
+        # hardware device exists (LOBOLE_TOPO_GPU=0 disables, =1 admits a
         # software device).
         # On designer_app, where the topology run is started
         # (src/ui/SimulationActions.cpp): on the `designer` executable alone
@@ -1193,8 +1193,8 @@ endif()
 # Tests. Opt-out so packaging builds (e.g. the Flatpak) don't configure the test
 # tree — which would otherwise FetchContent Catch2 over the network, unavailable
 # in an offline build sandbox. Default ON preserves the normal dev/CI behavior.
-option(DESIGNER_BUILD_TESTS "Configure the test targets" ON)
-if(DESIGNER_BUILD_TESTS)
+option(LOBOLE_BUILD_TESTS "Configure the test targets" ON)
+if(LOBOLE_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
@@ -1413,7 +1413,7 @@ install(FILES
         "${CMAKE_SOURCE_DIR}/deps/fonts/JetBrainsMono-Regular.ttf"
         "${CMAKE_SOURCE_DIR}/deps/fonts/LiberationSans-Regular.ttf"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole/fonts")
-install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${DESIGNER_HDRI}"
+install(FILES "${CMAKE_SOURCE_DIR}/assets/hdri/${LOBOLE_HDRI}"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole/hdri")
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/assets/parts"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/lobole")
@@ -1428,8 +1428,8 @@ install(FILES "${CMAKE_SOURCE_DIR}/packaging/org.lobole.Lobole.desktop"
 # build. Flathub's builders have them, so keep this ON by default and only pass
 # OFF for a local Flatpak smoke build. Off just omits catalog metadata — the
 # desktop entry and icons below still install.
-option(DESIGNER_INSTALL_METAINFO "Install AppStream metainfo" ON)
-if(DESIGNER_INSTALL_METAINFO)
+option(LOBOLE_INSTALL_METAINFO "Install AppStream metainfo" ON)
+if(LOBOLE_INSTALL_METAINFO)
     install(FILES "${CMAKE_SOURCE_DIR}/packaging/org.lobole.Lobole.metainfo.xml"
             DESTINATION "${CMAKE_INSTALL_DATADIR}/metainfo")
 endif()

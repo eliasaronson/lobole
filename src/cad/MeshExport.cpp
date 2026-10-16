@@ -19,7 +19,7 @@
 // whole distro path (same spirit as the STEP/STL library renaming handled in
 // CMakeLists.txt).
 #if OCC_VERSION_HEX >= 0x070700
-#define DESIGNER_HAVE_PLY_WRITER 1
+#define LOBOLE_HAVE_PLY_WRITER 1
 #include <RWPly_CafWriter.hxx>
 #endif
 #include "cad/XcafDocument.h"
@@ -200,7 +200,7 @@ bool SaveVisual(const std::string& path, const std::vector<Item>& items,
       RWObj_CafWriter writer(path.c_str());
       ok = writer.Perform(doc, fileInfo, progress);
     } else {
-#ifdef DESIGNER_HAVE_PLY_WRITER
+#ifdef LOBOLE_HAVE_PLY_WRITER
       RWPly_CafWriter writer(path.c_str());
       ok = writer.Perform(doc, fileInfo, progress);
 #else

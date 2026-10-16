@@ -20,7 +20,7 @@
 # the drawings stage saves pantilt.dsgn, which renders opens); `--from`
 # starts at one and reuses what the earlier ones left there; `--skip`
 # leaves stages out (no later stage opens yoke_topo's or renders' output).
-# DESIGNER_SCRATCH moves scratch/ (tests/generator_runs.py). Run it
+# LOBOLE_SCRATCH moves scratch/ (tests/generator_runs.py). Run it
 # against a scratch instance (tools/headless-preview.sh --start PORT), never
 # somebody's open document.
 #
@@ -28,7 +28,7 @@
 # (tools/wait-for.sh --file scratch/pantilt/run_all.log --line '^(done|failed)$').
 set -u
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT="${DESIGNER_SCRATCH:-$HERE/../../scratch}/pantilt"
+OUT="${LOBOLE_SCRATCH:-$HERE/../../scratch}/pantilt"
 mkdir -p "$OUT"
 P=${1:?usage: run_all.sh PORT [--from STAGE] [--skip STAGE...]}
 shift

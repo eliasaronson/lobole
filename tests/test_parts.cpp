@@ -234,7 +234,7 @@ TEST_CASE("parts: an unstocked size is refused, naming what is stocked",
   CHECK_FALSE(parts::Dimensions("iso9999def", "M6", &error).has_value());
   INFO(error);
   CHECK_THAT(error, ContainsSubstring("iso9999def"));
-  CHECK_THAT(error, ContainsSubstring("DESIGNER_DATA_DIR"));
+  CHECK_THAT(error, ContainsSubstring("LOBOLE_DATA_DIR"));
 }
 
 TEST_CASE("parts: a derived length snaps to a size that is made", "[parts]") {

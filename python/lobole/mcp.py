@@ -11,10 +11,10 @@ Design: docs/scripting/mcp.md. Register this server with an MCP client:
                                              # from a checkout
 
 No port needed: running instances announce themselves and the server attaches
-(several running → it asks; pin with --port or $DESIGNER_PORT, flag wins).
+(several running → it asks; pin with --port or $LOBOLE_PORT, flag wins).
 With NOTHING running it autostarts `lobole --offscreen --remote 0` — a real
 renderer, no window — and kills it on exit; disable with --no-autostart or
-DESIGNER_AUTOSTART=0. Requires the official MCP Python SDK (`mcp` on PyPI,
+LOBOLE_AUTOSTART=0. Requires the official MCP Python SDK (`mcp` on PyPI,
 `python3Packages.mcp` on nixpkgs).
 """
 import argparse
@@ -633,7 +633,7 @@ _client = None
 # An EXPLICIT port (flag or env) is an instruction, not a guess: it pins the
 # instance and never falls back to discovery, so a client told to drive one
 # app cannot silently start driving another.
-_pinned_port = os.environ.get("DESIGNER_PORT")
+_pinned_port = os.environ.get("LOBOLE_PORT")
 _port = int(_pinned_port) if _pinned_port else None
 _attached = None  # what ping said about the instance we are talking to
 
@@ -684,10 +684,10 @@ def _start_hint():
 # discovery finds nothing running (a pinned port never autostarts), spawns
 # --offscreen (no window to shadow the user's document, and renders — the two
 # objections the old autostart rejection rested on), and the child dies with
-# this process. Off switch: --no-autostart / DESIGNER_AUTOSTART=0.
+# this process. Off switch: --no-autostart / LOBOLE_AUTOSTART=0.
 _autostarted = None
 _autostart_enabled = os.environ.get(
-    "DESIGNER_AUTOSTART", "").lower() not in ("0", "off", "no")
+    "LOBOLE_AUTOSTART", "").lower() not in ("0", "off", "no")
 
 
 def _stop_autostarted():
@@ -752,7 +752,7 @@ def _autostart():
     import threading
     if (threading.current_thread() is threading.main_thread()
             and os.getpid() != 1):
-        env["DESIGNER_EXIT_WITH_PARENT"] = str(os.getpid())
+        env["LOBOLE_EXIT_WITH_PARENT"] = str(os.getpid())
     log_path = os.path.join(scratch, "app.log")
     with open(log_path, "w") as log:
         proc = subprocess.Popen(argv + ["--offscreen", "--remote", "0"],
@@ -817,12 +817,12 @@ def _resolve_port():
             f"{cmd} --remote {DEFAULT_PORT}   (add --offscreen for no window "
             "with renders, or --headless for the document engine alone). If "
             "it is already running, it is on a build older than instance "
-            "discovery: pass --port/DESIGNER_PORT.")
+            "discovery: pass --port/LOBOLE_PORT.")
     listed = ", ".join(
         f"{i['port']} ({i.get('mode', '?')})" for i in live)
     raise RuntimeError(
         f"{len(live)} Loböle instances are running: {listed}. Which one? "
-        "Set DESIGNER_PORT (or --port) — attaching to the wrong window would "
+        "Set LOBOLE_PORT (or --port) — attaching to the wrong window would "
         "answer questions about a document you are not looking at.")
 
 
@@ -2097,7 +2097,7 @@ def rpc(method: str, params: dict | None = None) -> dict:
           "script runs in a subprocess with `d` PRE-BOUND to a connected "
           "lobole.client.Client: call d.request(method, params) "
           "/ d.call(method, **params) directly — no imports, no port "
-          "(DESIGNER_PORT is set; the lobole package is importable "
+          "(LOBOLE_PORT is set; the lobole package is importable "
           "for anything fancier). print() what matters: stdout/stderr come "
           "back (capped at 20000 chars each). Relative file paths land in "
           "the returned cwd, a scratch directory. Same trust domain as the "
@@ -2116,12 +2116,12 @@ def execute_script(script: str, timeout: float = 120.0) -> dict:
         "import os, sys\n"
         f"sys.path.insert(0, {pkg_root!r})\n"
         "from lobole.client import Client\n"
-        "d = Client(int(os.environ['DESIGNER_PORT']), timeout=600.0)\n"
+        "d = Client(int(os.environ['LOBOLE_PORT']), timeout=600.0)\n"
         "# --- script ---\n")
     path = pathlib.Path(cwd, "script.py")
     path.write_text(prelude + script)
     env = dict(os.environ)
-    env["DESIGNER_PORT"] = str(port)
+    env["LOBOLE_PORT"] = str(port)
     try:
         proc = subprocess.run([sys.executable, str(path)], cwd=cwd, env=env,
                               capture_output=True, text=True, timeout=timeout)
@@ -2148,7 +2148,7 @@ def _connect_if_needed():
 @mcp.tool(description="Which Loböle instances are running, and which one "
           "these tools are talking to. Instances announce themselves when "
           "they open a remote port, so no port has to be guessed. Use this "
-          "when a call reports several instances (set DESIGNER_PORT to "
+          "when a call reports several instances (set LOBOLE_PORT to "
           "choose) or nothing reachable.")
 def instances() -> dict:
     live = _running_instances()
@@ -2157,7 +2157,7 @@ def instances() -> dict:
             "instances": live,
             "hint": (f"Start one with `{cmd} --remote {DEFAULT_PORT}`."
                      if not live else
-                     "Pin one with DESIGNER_PORT=<port> if several are up.")}
+                     "Pin one with LOBOLE_PORT=<port> if several are up.")}
 
 
 @mcp.tool(description="Documentation for one RPC: what it does, its "

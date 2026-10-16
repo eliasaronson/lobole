@@ -57,7 +57,7 @@ spell out the V axis, entity builders, an arc through three points, a
 generators use the SDK (`python/lobole/sdk.py`) directly.
 
 What a generator makes goes to the untracked `scratch/<name>/`, or under
-`$DESIGNER_SCRATCH` when that is set (the tests below run each in a private
+`$LOBOLE_SCRATCH` when that is set (the tests below run each in a private
 directory that way); those with an `--out` take that instead.
 
 Conventions every generator here keeps:

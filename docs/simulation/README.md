@@ -362,7 +362,7 @@ shared with topology optimization), namespace `fem`, GUI-free. Gated
     direct factor of a tet10 mesh fills in steeply, so each case is solved
     iteratively:
     - On the GPU when the build has it and a hardware device exists, under
-      topology's rules (`DESIGNER_TOPO_GPU`, the preferred device): the same
+      topology's rules (`LOBOLE_TOPO_GPU`, the preferred device): the same
       mixed-precision refinement
       ([../topopt/README.md](../topopt/README.md#the-gpu-solver)), from a
       cold start, through `TopoLinearSolver::SetupDomains` (each tet its

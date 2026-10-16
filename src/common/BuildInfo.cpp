@@ -3,7 +3,7 @@
 
 #include "common/BuildInfo.h"
 
-#include "common/DesignerVersion.h" // the DESIGNER_VERSION fallback
+#include "common/DesignerVersion.h" // the LOBOLE_VERSION fallback
 
 #ifdef HAVE_OPENCASCADE
 #include <Standard_Version.hxx>
@@ -11,11 +11,11 @@
 
 namespace BuildInfo {
 
-std::string Version() { return DESIGNER_VERSION; }
+std::string Version() { return LOBOLE_VERSION; }
 
 std::string Commit() {
-#ifdef DESIGNER_GIT_COMMIT
-  const std::string commit = DESIGNER_GIT_COMMIT;
+#ifdef LOBOLE_GIT_COMMIT
+  const std::string commit = LOBOLE_GIT_COMMIT;
   return commit.empty() ? "unknown" : commit;
 #else
   return "unknown";
@@ -28,7 +28,7 @@ std::string Configuration() {
 #else
   std::string s = "Debug";
 #endif
-#if defined(__SANITIZE_ADDRESS__) || defined(DESIGNER_SANITIZER_SOURCE_DIR)
+#if defined(__SANITIZE_ADDRESS__) || defined(LOBOLE_SANITIZER_SOURCE_DIR)
   s += ", sanitizers";
 #endif
 #ifdef HAVE_TEST_ENGINE

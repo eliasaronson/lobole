@@ -11,12 +11,12 @@
 #
 # Stages, in order: piece, blanks, board, set, cam. `--from` starts at one and
 # reuses what the earlier ones left in scratch/chess/; `--only` names the CAM
-# jobs to run (cam.py's own flag). DESIGNER_SCRATCH moves scratch/
+# jobs to run (cam.py's own flag). LOBOLE_SCRATCH moves scratch/
 # (tests/generator_runs.py). The full run is the acceptance check after
 # a change; one stage, one job, is the loop (docs/architecture.md#the-development-loop).
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-OUT="${DESIGNER_SCRATCH:-$HERE/../../scratch}/chess"
+OUT="${LOBOLE_SCRATCH:-$HERE/../../scratch}/chess"
 mkdir -p "$OUT/nc"
 P=$1
 shift

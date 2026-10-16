@@ -306,7 +306,7 @@ const TableFile* Load(const std::string& named, std::string* error) {
       *error = "no table for \"" + stem + "\": " + path.string() +
                " is not readable. A development build stages assets/parts/ "
                "beside the executable; an installed one uses "
-               "share/lobole/parts (DESIGNER_DATA_DIR overrides both).";
+               "share/lobole/parts (LOBOLE_DATA_DIR overrides both).";
     return nullptr;
   }
   std::stringstream buffer;

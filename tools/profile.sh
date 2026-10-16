@@ -184,7 +184,7 @@ if [ "$MODE" = app ]; then
   echo "profile: app pid $APP_PID, under perf $RECORD_PID"
   set +e
   nix-shell "$ROOT/shell.nix" --run \
-    "DESIGNER_PORT=$PORT python3 '$ARG'"
+    "LOBOLE_PORT=$PORT python3 '$ARG'"
   SCRIPT_STATUS=$?
   set -e
   # SIGTERM the APP, not perf: perf would stop recording and leave the app

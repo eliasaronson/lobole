@@ -14,9 +14,9 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 # What the run makes -- projects, renders, reports -- is regenerable, so it
 # goes to the untracked scratch/, not beside the code.
-# DESIGNER_SCRATCH moves it (tests/generator_runs.py runs it in a private
+# LOBOLE_SCRATCH moves it (tests/generator_runs.py runs it in a private
 # directory); unset, the repo's scratch/.
-OUT = Path(os.environ.get("DESIGNER_SCRATCH")
+OUT = Path(os.environ.get("LOBOLE_SCRATCH")
            or HERE.parent.parent / "scratch") / "pantilt"
 OUT.mkdir(parents=True, exist_ok=True)
 # The head is ONE project at the top, the drawings stage's: parts, assembly,

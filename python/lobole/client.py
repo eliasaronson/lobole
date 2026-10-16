@@ -46,7 +46,7 @@ def _check_result(method, result):
 
 class Client:
     """`strict`: an answer holding a non-finite number raises NonFiniteError
-    instead of warning. Unset, it follows DESIGNER_REMOTE_STRICT=1, which
+    instead of warning. Unset, it follows LOBOLE_REMOTE_STRICT=1, which
     tests/smoke_app.py sets, so every smoke runs strict."""
 
     def __init__(self, port, host="127.0.0.1", timeout=60.0, strict=None):
@@ -55,7 +55,7 @@ class Client:
         self._id = 0
         if strict is None:
             import os
-            strict = os.environ.get("DESIGNER_REMOTE_STRICT") == "1"
+            strict = os.environ.get("LOBOLE_REMOTE_STRICT") == "1"
         self.strict = strict
 
     # `method` is POSITIONAL-ONLY, so an RPC with a parameter of that name —

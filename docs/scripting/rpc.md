@@ -216,7 +216,7 @@ the active tab never changed.
   where they were; the app logs a warning naming the RPC. The call is not
   turned into an error after the fact — a mutating one has happened.
   `lobole/client.py` raises `NonFiniteError` on it in strict mode
-  (`Client(strict=True)`, or `DESIGNER_REMOTE_STRICT=1`, which
+  (`Client(strict=True)`, or `LOBOLE_REMOTE_STRICT=1`, which
   `tests/smoke_app.py` sets, so every smoke is strict) and warns otherwise.
 - **`receipt`** on every RPC that returns a verdict — the clash sweeps of
   `interference` and `contact_report`, `check_geometry`, `check_fits`,

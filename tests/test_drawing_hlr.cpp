@@ -848,7 +848,7 @@ TEST_CASE(
 
 TEST_CASE("HLR project benchmark compares incremental assembly visibility",
           "[.][hlr-project-benchmark]") {
-  const char* project = std::getenv("DESIGNER_HLR_PROJECT");
+  const char* project = std::getenv("LOBOLE_HLR_PROJECT");
   REQUIRE(project != nullptr);
   nlohmann::json index;
   std::ifstream(std::filesystem::path(project) / "project.json") >> index;

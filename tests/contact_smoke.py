@@ -53,7 +53,7 @@ def main():
     env["XDG_CONFIG_HOME"] = os.path.join(tmp, "config")
     # Holds each pair of an ASYNC contact_report, so the smoke sees one
     # running and cancels it before it ends (tests only).
-    env["DESIGNER_TEST_CONTACT_PAIR_MS"] = "1500"
+    env["LOBOLE_TEST_CONTACT_PAIR_MS"] = "1500"
     app = launch_app(binary, env=env)
     try:
         d = Client.wait_for(app.port)
@@ -278,7 +278,7 @@ def main():
                 outlive_client=True)
 
         # --- contact_report async: a `contact` job -----------------------
-        # DESIGNER_TEST_CONTACT_PAIR_MS (set at launch) holds every pair of
+        # LOBOLE_TEST_CONTACT_PAIR_MS (set at launch) holds every pair of
         # an ASYNC run, so it is still running when it is looked at.
         started = d.call("contact_report", mode="mesh", **{"async": True})
         expect(started["started"] and started["kind"] == "contact"

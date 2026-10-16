@@ -1576,7 +1576,7 @@ void printUsage(const char* programName) {
             << std::endl;
   std::cout << "  --exit-with-parent   Exit (SIGTERM) when the launching "
                "process dies; for test launchers.\n                       "
-               "DESIGNER_EXIT_WITH_PARENT=<launcher pid> does the same"
+               "LOBOLE_EXIT_WITH_PARENT=<launcher pid> does the same"
             << std::endl;
   std::cout << "  --perf-hud           Show the frame-time overlay from "
                "launch (also Ctrl+Shift+F, or the\n                       "
@@ -1627,7 +1627,7 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       printUsage(argv[0]);
       exit(0);
     } else if (arg == "--version") {
-      std::cout << "Lobole " << DESIGNER_VERSION << std::endl;
+      std::cout << "Lobole " << LOBOLE_VERSION << std::endl;
       exit(0);
     } else if (arg == "-f" || arg == "--file") {
       if (i + 1 < argc) {

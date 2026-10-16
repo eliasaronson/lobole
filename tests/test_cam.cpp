@@ -3299,7 +3299,7 @@ TEST_CASE("cam: one operation at a time cuts what all of them cut",
 //
 // Hidden, and machine-bound by nature — the part is not in the repo:
 //     build/lobole_tests "[frontwall]"
-//     DESIGNER_FRONT_WALL=<part dir> build/lobole_tests "[frontwall]"
+//     LOBOLE_FRONT_WALL=<part dir> build/lobole_tests "[frontwall]"
 //
 // It answers one question. If the outer loop of the section carries a notch
 // at the cross-dowel height and not above or below it, the fixtures were
@@ -3336,14 +3336,14 @@ LoopStats StatsOf(const cam::Loop& l) {
 TEST_CASE("cam probe: what the front_wall section does by depth",
           "[.][frontwall]") {
   // The part is the smart speaker's saved front_wall, which is not in the
-  // repo: point DESIGNER_FRONT_WALL at its part directory.
-  const char* env = std::getenv("DESIGNER_FRONT_WALL");
+  // repo: point LOBOLE_FRONT_WALL at its part directory.
+  const char* env = std::getenv("LOBOLE_FRONT_WALL");
   if (!env)
-    SKIP("DESIGNER_FRONT_WALL is not set (the front_wall part directory of a "
+    SKIP("LOBOLE_FRONT_WALL is not set (the front_wall part directory of a "
          "saved smart_speaker project; the part is not in the repo)");
   const std::string dir = env;
   if (!std::filesystem::exists(std::filesystem::path(dir) / "index.json"))
-    SKIP("no front_wall at " << dir << " (DESIGNER_FRONT_WALL)");
+    SKIP("no front_wall at " << dir << " (LOBOLE_FRONT_WALL)");
   auto loaded = DocumentIO::Load(dir);
   REQUIRE(loaded.has_value());
   std::unique_ptr<Document>& doc = *loaded;
@@ -3362,9 +3362,9 @@ TEST_CASE("cam probe: what the front_wall section does by depth",
   // probe needs to be pointed at one. Warn rather than iterate nothing: a
   // diagnostic that silently examines an empty list is worse than one that
   // says it has nothing to examine.
-  const char* jobEnv = std::getenv("DESIGNER_FRONT_WALL_JOB");
+  const char* jobEnv = std::getenv("LOBOLE_FRONT_WALL_JOB");
   if (jobEnv == nullptr) {
-    WARN("set DESIGNER_FRONT_WALL_JOB to a job document to probe its setups");
+    WARN("set LOBOLE_FRONT_WALL_JOB to a job document to probe its setups");
     return;
   }
   auto loadedJob = DocumentIO::LoadJob(jobEnv);
@@ -3435,7 +3435,7 @@ TEST_CASE("cam probe: what the front_wall section does by depth",
   // clear of them, near the x extremes — where a 22 mm slot in from x = +-105
   // would live. Printed as points so a notch is visible as a shape rather
   // than inferred from a number.
-  const char* zenv = std::getenv("DESIGNER_PROBE_Z");
+  const char* zenv = std::getenv("LOBOLE_PROBE_Z");
   const double zProbe = zenv ? std::atof(zenv) : -8.0;
   for (const double z : {zProbe, zProbe + 6.0}) {
     const std::vector<cam::Loop> loops = cam::SectionLoops(framed, z);
@@ -3568,14 +3568,14 @@ TEST_CASE("cam probe: a bore that opens onto an edge", "[.][frontwall]") {
 // repo.  build/lobole_tests "[frontwall]"
 TEST_CASE("cam probe: the front_wall job's verdict", "[.][frontwall]") {
   // The part is the smart speaker's saved front_wall, which is not in the
-  // repo: point DESIGNER_FRONT_WALL at its part directory.
-  const char* env = std::getenv("DESIGNER_FRONT_WALL");
+  // repo: point LOBOLE_FRONT_WALL at its part directory.
+  const char* env = std::getenv("LOBOLE_FRONT_WALL");
   if (!env)
-    SKIP("DESIGNER_FRONT_WALL is not set (the front_wall part directory of a "
+    SKIP("LOBOLE_FRONT_WALL is not set (the front_wall part directory of a "
          "saved smart_speaker project; the part is not in the repo)");
   const std::string dir = env;
   if (!std::filesystem::exists(std::filesystem::path(dir) / "index.json"))
-    SKIP("no front_wall at " << dir << " (DESIGNER_FRONT_WALL)");
+    SKIP("no front_wall at " << dir << " (LOBOLE_FRONT_WALL)");
   auto loaded = DocumentIO::Load(dir);
   REQUIRE(loaded.has_value());
   std::unique_ptr<Document>& doc = *loaded;
@@ -3584,9 +3584,9 @@ TEST_CASE("cam probe: the front_wall job's verdict", "[.][frontwall]") {
   // row.
   REQUIRE(doc->SetActiveConfiguration(0));
 
-  const char* jobEnv = std::getenv("DESIGNER_FRONT_WALL_JOB");
+  const char* jobEnv = std::getenv("LOBOLE_FRONT_WALL_JOB");
   if (jobEnv == nullptr) {
-    WARN("set DESIGNER_FRONT_WALL_JOB to a job document to post its setups");
+    WARN("set LOBOLE_FRONT_WALL_JOB to a job document to post its setups");
     return;
   }
   auto loadedJob = DocumentIO::LoadJob(jobEnv);

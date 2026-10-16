@@ -3,6 +3,6 @@
 
 #pragma once
 
-#ifndef DESIGNER_VERSION
-#define DESIGNER_VERSION "0.0.0-dev"
+#ifndef LOBOLE_VERSION
+#define LOBOLE_VERSION "0.0.0-dev"
 #endif

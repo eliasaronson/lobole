@@ -444,7 +444,7 @@ TEST_CASE("a derived copy picks source bodies by name", "[derived]") {
 // How tests/golden/v133-derived-configuration.json was made: the source
 // below with a configuration that suppresses its boss, derived IN that
 // configuration while the source shows its authored model. Set
-// DESIGNER_WRITE_GOLDEN=<path> to write it again.
+// LOBOLE_WRITE_GOLDEN=<path> to write it again.
 TEST_CASE("the v133 derived-configuration golden builds from this recipe",
           "[derived][configuration]") {
   auto source = MakeSource();
@@ -478,7 +478,7 @@ TEST_CASE("the v133 derived-configuration golden builds from this recipe",
   CHECK(derived::IsStale(*taken, [&](uint64_t) { return source.get(); }) ==
         std::optional<bool>{true});
 
-  const char* out = std::getenv("DESIGNER_WRITE_GOLDEN");
+  const char* out = std::getenv("LOBOLE_WRITE_GOLDEN");
   const fs::path path = out ? fs::path(out) : TempPath("derived-v133.json");
   REQUIRE(testio::Save(host, path.string()));
   auto reloaded = testio::Load(path.string());
@@ -496,7 +496,7 @@ TEST_CASE("the v133 derived-configuration golden builds from this recipe",
 
 // How tests/golden/v85-derived-by-name.json was made: the source below,
 // with ONE of its two bodies derived BY NAME into a host that draws on the
-// copy. Set DESIGNER_WRITE_GOLDEN=<path> to write it again.
+// copy. Set LOBOLE_WRITE_GOLDEN=<path> to write it again.
 TEST_CASE("the v85 derived-by-name golden builds from this recipe",
           "[derived]") {
   auto source = MakeSource();
@@ -511,7 +511,7 @@ TEST_CASE("the v85 derived-by-name golden builds from this recipe",
                                                20.0, 10.0, 4.0));
   REQUIRE(host.Regenerate());
   REQUIRE(host.GetBodies().size() == 2);
-  const char* out = std::getenv("DESIGNER_WRITE_GOLDEN");
+  const char* out = std::getenv("LOBOLE_WRITE_GOLDEN");
   const fs::path path = out ? fs::path(out) : TempPath("derived-v85.json");
   REQUIRE(testio::Save(host, path.string()));
   auto reloaded = testio::Load(path.string());
@@ -525,7 +525,7 @@ TEST_CASE("the v85 derived-by-name golden builds from this recipe",
 
 // How tests/golden/v84-derived-servo.json was made: the source part below,
 // derived (placed, one body filtered out) into a host with a foot drawn on
-// the copy's top face. Set DESIGNER_WRITE_GOLDEN=<path> to write it again;
+// the copy's top face. Set LOBOLE_WRITE_GOLDEN=<path> to write it again;
 // unset, this only checks that the document builds and round-trips.
 TEST_CASE("the v84 derived golden builds from this recipe", "[derived]") {
   auto source = MakeSource();
@@ -557,7 +557,7 @@ TEST_CASE("the v84 derived golden builds from this recipe", "[derived]") {
     CHECK(f->GetError().empty());
   }
   REQUIRE(host.GetBodies().size() == 2);
-  const char* out = std::getenv("DESIGNER_WRITE_GOLDEN");
+  const char* out = std::getenv("LOBOLE_WRITE_GOLDEN");
   const fs::path path = out ? fs::path(out) : TempPath("derived-golden.json");
   REQUIRE(testio::Save(host, path.string()));
   auto reloaded = testio::Load(path.string());

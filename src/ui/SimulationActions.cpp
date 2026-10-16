@@ -163,7 +163,7 @@ namespace {
 // job is cancelled (a factorisation still cannot), the job learns which
 // solver it is waiting on, and a solve large enough to go iterative tries
 // the GPU first, under the rules topology's does (StartTopologyRun):
-// DESIGNER_TOPO_GPU=0 keeps it on the CPU, =1 admits a software device, and
+// LOBOLE_TOPO_GPU=0 keeps it on the CPU, =1 admits a software device, and
 // the user's preferred device is asked for. The device is made on the
 // worker, and only for a solve that wants one.
 fem::SolveOptions JobSolveOptions(const AppState& state, BackgroundJob* raw,
@@ -173,7 +173,7 @@ fem::SolveOptions JobSolveOptions(const AppState& state, BackgroundJob* raw,
   if (job != nullptr)
     o.solving = [job](const char* name) { job->solverNow.store(name); };
 #ifdef HAVE_FEM_GPU
-  const char* pref = std::getenv("DESIGNER_TOPO_GPU");
+  const char* pref = std::getenv("LOBOLE_TOPO_GPU");
   if (!pref || std::string(pref) != "0") {
     const bool allowSoftware = pref && std::string(pref) == "1";
     o.makeExternal =
@@ -284,12 +284,12 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   // Pick the linear solver here on the main thread, so study_status can
   // report it from the first poll: the GPU matrix-free CG when a usable
   // hardware device exists, else the built-in Eigen CG-IC. The worker is the
-  // only thread that touches it after launch. DESIGNER_TOPO_GPU=0 forces CPU;
+  // only thread that touches it after launch. LOBOLE_TOPO_GPU=0 forces CPU;
   // =1 also admits a software (llvmpipe) device — for exercising the GPU path.
   job->solverName = fem::CpuSolverName(fem::AnalysisType::Topology);
 #ifdef HAVE_FEM_GPU
   {
-    const char* pref = std::getenv("DESIGNER_TOPO_GPU");
+    const char* pref = std::getenv("LOBOLE_TOPO_GPU");
     if (!pref || std::string(pref) != "0") {
       std::string gerr;
       auto gs = gpu::TopoGpuSolver::Create(pref && std::string(pref) == "1",

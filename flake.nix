@@ -138,7 +138,7 @@
           runHook preCheck
           export HOME="$TMPDIR/home"
           export XDG_CACHE_HOME="$HOME/.cache"
-          export DESIGNER_TOPO_GPU=0
+          export LOBOLE_TOPO_GPU=0
           mkdir -p "$XDG_CACHE_HOME"
           ctest -LE gui -j "$NIX_BUILD_CORES" --output-on-failure
           runHook postCheck

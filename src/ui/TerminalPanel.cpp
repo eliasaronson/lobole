@@ -272,13 +272,13 @@ std::string ClaudeCommand(AppState& state) {
 
 // $SHELL, with this window's port already exported: typing `claude` — or
 // `python3 -m lobole.client`, or anything else that reads
-// DESIGNER_PORT — then talks to the model on screen without being told which
+// LOBOLE_PORT — then talks to the model on screen without being told which
 // instance to attach to.
 void StartShell(AppState& state, Session& t) {
   term::PtySession::Options opts; // empty program = $SHELL
   const int port = InstancePort(state);
   if (port > 0)
-    opts.env.emplace_back("DESIGNER_PORT", std::to_string(port));
+    opts.env.emplace_back("LOBOLE_PORT", std::to_string(port));
   const char* shell = std::getenv("SHELL");
   StartSession(state, t, opts,
                shell != nullptr && *shell != '\0'

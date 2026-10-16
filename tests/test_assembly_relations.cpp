@@ -886,7 +886,7 @@ TEST_CASE("A turning cam round-trips, and the v102 golden drives",
   rocker.ratio = 1.0;
   rocker.lift = {{0.0, -10.0}, {90.0, 10.0}, {180.0, 10.0}, {270.0, -10.0}};
   t.asmDoc.AddRelation(rocker);
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
+  if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN"))
     REQUIRE(DocumentIO::SaveAssembly(t.asmDoc, out).has_value());
 
   const fs::path golden = fs::path(TestSourceDir()) /
@@ -1235,7 +1235,7 @@ TEST_CASE("A click and a toothed clutch round-trip, and the v105 golden "
   click.ratio = 1.0;
   click.drives = 1;
   t.asmDoc.AddRelation(click);
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
+  if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN"))
     REQUIRE(DocumentIO::SaveAssembly(t.asmDoc, out).has_value());
   // `teeth` and `ride` are a freewheel's; a click writes neither.
   const nlohmann::json dj = DocumentIO::RelationToJson(dogs);
@@ -1291,7 +1291,7 @@ TEST_CASE("A freewheel round-trips with its history, and the v104 golden "
   Freewheel f(-1);
   f.t.asmDoc.GetRelations()[0].name = "one-way wheel";
   f.t.asmDoc.GetRelations()[0].lead = -0.25;
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
+  if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN"))
     REQUIRE(DocumentIO::SaveAssembly(f.t.asmDoc, out).has_value());
   // `drives` and `lead` are a freewheel's; no other kind writes them.
   const nlohmann::json gj =
@@ -1367,7 +1367,7 @@ TEST_CASE("Chain and cam round-trip, and the v88 golden loads",
   CHECK_THROWS_WITH(DocumentIO::RelationKindFromString("belt"),
                     Catch::Matchers::ContainsSubstring("chain, cam"));
 
-  if (const char* out = std::getenv("DESIGNER_WRITE_GOLDEN"))
+  if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN"))
     REQUIRE(DocumentIO::SaveAssembly(t.asmDoc, out).has_value());
   const fs::path golden = fs::path(TestSourceDir()) /
                           "tests/golden/assembly/v88-chain-and-cam.json";

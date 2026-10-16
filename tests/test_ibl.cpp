@@ -75,8 +75,8 @@ TEST_CASE("IBL precompute produces sane maps from the studio HDR", "[ibl]") {
     CHECK(p.y <= 1.01f);
   }
 
-  // Optional: dump maps for manual inspection when DESIGNER_IBL_DUMP is set.
-  if (const char* dir = std::getenv("DESIGNER_IBL_DUMP")) {
+  // Optional: dump maps for manual inspection when LOBOLE_IBL_DUMP is set.
+  if (const char* dir = std::getenv("LOBOLE_IBL_DUMP")) {
     ibl.DumpDebugPNGs(dir);
   }
 }

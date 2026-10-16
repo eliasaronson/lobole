@@ -21,12 +21,12 @@ set -euo pipefail
 
 LOCK=/tmp/designer-gui-gpu.lock
 
-if [ "${DESIGNER_GUI_LOCKED:-}" != "1" ]; then
-  export DESIGNER_GUI_LOCKED=1
+if [ "${LOBOLE_GUI_LOCKED:-}" != "1" ]; then
+  export LOBOLE_GUI_LOCKED=1
   exec flock "$LOCK" "$0" "$@"
 fi
 
-if [ -n "${DESIGNER_NO_XVFB:-}" ]; then
+if [ -n "${LOBOLE_NO_XVFB:-}" ]; then
   exec "$@" # opt out: run against whatever DISPLAY is set
 fi
 

@@ -1730,7 +1730,7 @@ struct ContactSweep {
   std::map<uint64_t, std::string> occNames;
   bool copies = false; // the bodies are this sweep's own (an async run)
   // Tests only: how long each pair of an ASYNC run waits before it is
-  // checked (DESIGNER_TEST_CONTACT_PAIR_MS), so a smoke can watch a run in
+  // checked (LOBOLE_TEST_CONTACT_PAIR_MS), so a smoke can watch a run in
   // progress and cancel it before it ends, on any machine. A cancel ends
   // the wait.
   int pairDelayMs = 0;
@@ -3316,7 +3316,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             "): contact_status {job} reports it, cancel_background_job "
             "{kind: \"contact\"} stops it");
       sw->copies = true;
-      if (const char* ms = std::getenv("DESIGNER_TEST_CONTACT_PAIR_MS"))
+      if (const char* ms = std::getenv("LOBOLE_TEST_CONTACT_PAIR_MS"))
         sw->pairDelayMs = std::max(0, std::atoi(ms));
     }
     if (doc != nullptr)

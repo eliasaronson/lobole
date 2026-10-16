@@ -651,15 +651,15 @@ TEST_CASE("cam verify: a cell on the cutter's wall is outside by a decision, "
 namespace {
 struct ScopedSweepThreads {
   explicit ScopedSweepThreads(const char* n) {
-    if (const char* was = std::getenv("DESIGNER_SWEEP_THREADS"))
+    if (const char* was = std::getenv("LOBOLE_SWEEP_THREADS"))
       m_was = was;
-    setenv("DESIGNER_SWEEP_THREADS", n, 1);
+    setenv("LOBOLE_SWEEP_THREADS", n, 1);
   }
   ~ScopedSweepThreads() {
     if (m_was.empty())
-      unsetenv("DESIGNER_SWEEP_THREADS");
+      unsetenv("LOBOLE_SWEEP_THREADS");
     else
-      setenv("DESIGNER_SWEEP_THREADS", m_was.c_str(), 1);
+      setenv("LOBOLE_SWEEP_THREADS", m_was.c_str(), 1);
   }
   std::string m_was;
 };

@@ -359,7 +359,7 @@ concentrically. `src/core/cam/` compiles with `-Werror=switch`, so an
   (`test_cam.cpp`), setups/frames/stock/origin (`test_cam_setup.cpp`),
   machine profiles, dialects and the frozen G-code goldens
   (`test_cam_machine.cpp`, `tests/golden/cam-{block,curved}-{mach3,linuxcnc,grbl}.nc`,
-  regenerated with `DESIGNER_REFRESH_CAM_GOLDEN=1` and the diff read before
+  regenerated with `LOBOLE_REFRESH_CAM_GOLDEN=1` and the diff read before
   committing), the verifier (`test_cam_verify.cpp`), the simulation
   (`test_cam_sim.cpp`), surfacing (`test_cam_surface.cpp`), rough and rest
   (`test_cam_rough_rest.cpp`), surfacing passes on disk

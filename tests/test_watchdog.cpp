@@ -57,23 +57,23 @@ TEST_CASE("Watchdog: the threshold is read from the environment or refused",
           "[watchdog]") {
   double s = -1.0;
   std::string error;
-  unsetenv("DESIGNER_WATCHDOG_S");
+  unsetenv("LOBOLE_WATCHDOG_S");
   CHECK(watchdog::ThresholdFromEnvironment(&s, &error));
   CHECK(s == 3.0);
-  setenv("DESIGNER_WATCHDOG_S", "0", 1);
+  setenv("LOBOLE_WATCHDOG_S", "0", 1);
   CHECK(watchdog::ThresholdFromEnvironment(&s, &error));
   CHECK(s == 0.0);
-  setenv("DESIGNER_WATCHDOG_S", "1.5", 1);
+  setenv("LOBOLE_WATCHDOG_S", "1.5", 1);
   CHECK(watchdog::ThresholdFromEnvironment(&s, &error));
   CHECK(s == 1.5);
   // Not a number of seconds: refused, naming what is accepted — never
   // quietly replaced by the default.
   for (const char* bad : {"3s", "fast", "-1"}) {
-    setenv("DESIGNER_WATCHDOG_S", bad, 1);
+    setenv("LOBOLE_WATCHDOG_S", bad, 1);
     error.clear();
     CHECK_FALSE(watchdog::ThresholdFromEnvironment(&s, &error));
     CHECK(error.find("seconds") != std::string::npos);
   }
-  unsetenv("DESIGNER_WATCHDOG_S");
+  unsetenv("LOBOLE_WATCHDOG_S");
 }
 #endif

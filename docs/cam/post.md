@@ -271,6 +271,6 @@ What the verifier cannot check for you, in the order it matters:
 `tests/golden/cam-block-{mach3,linuxcnc,grbl}.nc` and
 `cam-curved-{mach3,linuxcnc,grbl}.nc` are compared byte for byte
 (`test_cam_machine.cpp`): substring checks prove pieces are present, only a
-golden proves the file stopped changing. `DESIGNER_REFRESH_CAM_GOLDEN=1`
+golden proves the file stopped changing. `LOBOLE_REFRESH_CAM_GOLDEN=1`
 regenerates them, and the diff is read before it is committed — every line
 of those files eventually moves a machine.

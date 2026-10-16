@@ -15,7 +15,7 @@ comes from `shell.nix`). For other clients:
 claude mcp add lobole -- env PYTHONPATH=/path/to/checkout/python python3 -m lobole.mcp
 ```
 
-No port is needed; see "Finding the app" below. `--port` or `$DESIGNER_PORT`
+No port is needed; see "Finding the app" below. `--port` or `$LOBOLE_PORT`
 (the flag wins) pins one instance.
 
 ### Installing without the checkout
@@ -38,7 +38,7 @@ wheel and imports every module from it alone.
 
 The server resolves which instance to talk to, in this order:
 
-1. **`--port` / `$DESIGNER_PORT`** — a pin. It never falls back to
+1. **`--port` / `$LOBOLE_PORT`** — a pin. It never falls back to
    discovery, so a client told to drive one app cannot drift onto another.
 2. **Exactly one running instance** in the registry
    ([README.md](README.md#the-instance-registry)) — attach to it.
@@ -73,7 +73,7 @@ safe:
 - It dies with the server. A spawn that exits or never announces raises with
   the tail of the child's own log.
 
-`--no-autostart` or `DESIGNER_AUTOSTART=0` turns it off.
+`--no-autostart` or `LOBOLE_AUTOSTART=0` turns it off.
 `mcp_autostart_smoke` pins that no process or registry entry outlives the
 server.
 
@@ -125,7 +125,7 @@ this build can drive its GUI.
 ### `execute_script`
 
 Runs a Python snippet in a subprocess with `d` pre-bound to a connected
-`lobole.client.Client` on the attached instance. `DESIGNER_PORT` is set,
+`lobole.client.Client` on the attached instance. `LOBOLE_PORT` is set,
 the `lobole` package is on `sys.path` (so `lobole.sdk` imports), stdout and stderr come
 back capped at 20000 characters each, relative paths land in a returned
 scratch `cwd`, and `timeout` (default 120 s) bounds long solves. This is the

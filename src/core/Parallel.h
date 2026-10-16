@@ -38,7 +38,7 @@
 
 namespace parallel {
 
-// How many threads the heavy loops may use. DESIGNER_SWEEP_THREADS pins it:
+// How many threads the heavy loops may use. LOBOLE_SWEEP_THREADS pins it:
 // the gate sets it to 1 so a parallel answer can be diffed against a serial
 // one, and it is the escape hatch if OpenCASCADE ever misbehaves under
 // concurrency on somebody's machine.
@@ -53,7 +53,7 @@ inline thread_local size_t tlShare = 0; // 0: not inside a For
 } // namespace detail
 
 inline size_t MachineWorkers() {
-  if (const char* env = std::getenv("DESIGNER_SWEEP_THREADS")) {
+  if (const char* env = std::getenv("LOBOLE_SWEEP_THREADS")) {
     const int want = std::atoi(env);
     if (want > 0)
       return static_cast<size_t>(want);

@@ -175,13 +175,13 @@ StallDetector::Event StallDetector::Observe(uint64_t beat, double now) {
 
 bool ThresholdFromEnvironment(double* seconds, std::string* error) {
   *seconds = 3.0;
-  const char* env = std::getenv("DESIGNER_WATCHDOG_S");
+  const char* env = std::getenv("LOBOLE_WATCHDOG_S");
   if (env == nullptr || *env == '\0')
     return true;
   char* end = nullptr;
   const double v = std::strtod(env, &end);
   if (end == env || *end != '\0' || v < 0.0) {
-    *error = std::string("DESIGNER_WATCHDOG_S=") + env +
+    *error = std::string("LOBOLE_WATCHDOG_S=") + env +
              " is not a number of seconds; give the stall threshold in "
              "seconds (default 3), or 0 to turn the watchdog off";
     return false;

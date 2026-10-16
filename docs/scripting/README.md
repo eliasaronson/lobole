@@ -58,7 +58,7 @@ engine. `--offscreen` conflicts with `--headless`, `--hidden` and
 parsing rather than resolved by precedence.
 
 An instance a program starts for its own use should die with that program:
-`--exit-with-parent`, or `DESIGNER_EXIT_WITH_PARENT=<launcher pid>`, has the
+`--exit-with-parent`, or `LOBOLE_EXIT_WITH_PARENT=<launcher pid>`, has the
 kernel send it SIGTERM when its parent exits — SIGKILL included, where no
 cleanup code runs — and the headless and offscreen loops stop cleanly on it.
 The variable names the launcher, so an instance whose launcher died before
@@ -160,11 +160,11 @@ git worktree add ../lobole-wt1 -b wt1 && (cd ../lobole-wt1 && tools/worktree-bui
 # worktree-build.sh clones the submodules from the main checkout (no
 # network unless main lacks a pinned commit) and prints a scratch port
 ../lobole-wt1/build/lobole --headless --remote <port1> &
-DESIGNER_PORT=<port1> claude -p "build the bracket in parts/bracket" ...
+LOBOLE_PORT=<port1> claude -p "build the bracket in parts/bracket" ...
 ```
 
 One worktree, one instance and one part per agent; the MCP server pins an
-instance with `DESIGNER_PORT`. Integrate serially: merge one branch, run the
+instance with `LOBOLE_PORT`. Integrate serially: merge one branch, run the
 suites, then the next (CLAUDE.md, "Parallel work in git worktrees").
 `branch_merge` refuses a merge that would produce duplicate ids;
 `conflict_list` / `conflict_resolve` / `merge_finish` handle the rest.

@@ -42,7 +42,7 @@ std::filesystem::path ExecutableDir() {
 }
 
 std::filesystem::path DataDir() {
-  if (const char* overrideDir = std::getenv("DESIGNER_DATA_DIR"))
+  if (const char* overrideDir = std::getenv("LOBOLE_DATA_DIR"))
     return overrideDir;
 
   const std::filesystem::path executable = ExecutableDir();
