@@ -26,10 +26,9 @@
 
 namespace {
 
-// One build of the shell of `body` from `input`: the body's own shape, or a
-// copy of it (`onCopy`). Empty on success with `out` and `map` set, else why
-// it failed.
-std::string ShellOnce(const Body& body, const TopoDS_Shape& input, bool onCopy,
+// One build of the shell of `body` from `input`, a copy of the body's shape.
+// Empty on success with `out` and `map` set, else why it failed.
+std::string ShellOnce(const Body& body, const TopoDS_Shape& input,
                       const TopTools_ListOfShape& remove, double thickness,
                       uint64_t featureTag, std::optional<CADShape>& out,
                       ElementMap& map) {
@@ -95,10 +94,9 @@ std::string ShellOnce(const Body& body, const TopoDS_Shape& input, bool onCopy,
     {
       const Handle(BRepTools_History) history =
           new BRepTools_History(topo::HistoryArguments(input), maker);
-      const CADShape from = onCopy ? CADShape(input) : body.shape;
       if (!history.IsNull())
-        map = topo::NamesThroughHistory(from, body.elementMap, *history, result,
-                                        featureTag);
+        map = topo::NamesThroughHistory(CADShape(input), body.elementMap,
+                                        *history, result, featureTag);
       else
         topo::NamePrimitiveElements(result, std::to_string(featureTag), map);
     }
@@ -199,23 +197,24 @@ bool ShellFeature::Execute(RegenContext& ctx) {
   // input -- the same solid at new addresses -- and a shell is refused only
   // when every draw failed. kAttempts bounds what an honest refusal (a wall
   // too thick for the geometry) costs.
+  //
+  // The first attempt is on a copy too. The offset builder WRITES to its
+  // input -- apt's 7.6 raised every edge of a body to its own 1e-3
+  // tolerance, and did so on a shell it then refused -- and the body's shape
+  // is the previous feature's cached result. A refused shell left the part
+  // unlike a rebuild from nothing (tests/fuzz_seeds_smoke.py, on CI's
+  // Ubuntu job). The copy is topology only; the geometry is shared.
   constexpr int kAttempts = 5;
   std::string error;
   for (int attempt = 0; attempt < kAttempts; attempt++) {
-    std::optional<BRepBuilderAPI_Copy> copy;
-    TopoDS_Shape input = shape;
-    TopTools_ListOfShape remove = facesToRemove;
-    if (attempt > 0) {
-      copy.emplace(shape, /*copyGeom=*/false, /*copyMesh=*/false);
-      input = copy->Shape();
-      remove.Clear();
-      for (const TopoDS_Shape& f : facesToRemove)
-        remove.Append(copy->ModifiedShape(f));
-    }
+    BRepBuilderAPI_Copy copy(shape, /*copyGeom=*/false, /*copyMesh=*/false);
+    TopTools_ListOfShape remove;
+    for (const TopoDS_Shape& f : facesToRemove)
+      remove.Append(copy.ModifiedShape(f));
     std::optional<CADShape> result;
     ElementMap map;
-    error = ShellOnce(*body, input, copy.has_value(), remove, thickness,
-                      GetId(), result, map);
+    error =
+        ShellOnce(*body, copy.Shape(), remove, thickness, GetId(), result, map);
     if (error.empty()) {
       if (attempt > 0)
         LOG_INFO("ShellFeature '{}': built on attempt {} of {}", m_name,

@@ -18,13 +18,20 @@
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BRepPrimAPI_MakeRevol.hxx>
+#include <BRep_Tool.hxx>
 #include <GProp_GProps.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 
+#include <cmath>
 #include <filesystem>
 #include <set>
 #include <vector>
@@ -248,4 +255,56 @@ TEST_CASE("A shell builds the same wherever its input lives in memory",
   for (const auto& n : names)
     CHECK(n == names.front());
   CHECK(names.front().count(floor) == 0); // the opened floor is gone
+}
+
+// The offset builder writes to its input: apt's OpenCASCADE 7.6 raised every
+// edge of a revolve to the builder's own 1e-3 tolerance, on a shell it then
+// refused. The input is the previous feature's cached body, so the part no
+// longer matched a rebuild from nothing (fuzz_seeds_smoke, seed 27, on CI's
+// Ubuntu 24.04 job). Whatever the shell answers, the body it was handed is
+// left as it was.
+TEST_CASE("A shell leaves the body it was handed as it found it", "[shell]") {
+  const auto tolerances = [](const TopoDS_Shape& s) {
+    std::vector<double> t;
+    for (TopExp_Explorer ex(s, TopAbs_EDGE); ex.More(); ex.Next())
+      t.push_back(BRep_Tool::Tolerance(TopoDS::Edge(ex.Current())));
+    for (TopExp_Explorer ex(s, TopAbs_VERTEX); ex.More(); ex.Next())
+      t.push_back(BRep_Tool::Tolerance(TopoDS::Vertex(ex.Current())));
+    return t;
+  };
+  // A 2.5..25 x 15 section revolved 270 degrees about Z, opened at the
+  // bottom: seed 27's base and its shell.
+  BRepBuilderAPI_MakePolygon outline(gp_Pnt(2.5, 0, 0), gp_Pnt(25, 0, 0),
+                                     gp_Pnt(25, 0, 15), gp_Pnt(2.5, 0, 15),
+                                     /*Close=*/true);
+  const TopoDS_Face section = BRepBuilderAPI_MakeFace(outline.Wire()).Face();
+  const TopoDS_Shape revolve =
+      BRepPrimAPI_MakeRevol(section, gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                            270.0 * M_PI / 180.0)
+          .Shape();
+  Body base;
+  base.name = "Base";
+  base.createdBy = 1;
+  base.shape = CADShape(revolve);
+  topo::NamePrimitiveElements(base.shape, "1", base.elementMap);
+  std::string bottom;
+  int k = 0;
+  for (TopExp_Explorer ex(revolve, TopAbs_FACE); ex.More(); ex.Next(), k++) {
+    GProp_GProps p;
+    BRepGProp::SurfaceProperties(ex.Current(), p);
+    if (std::abs(p.CentreOfMass().Z()) < 1e-9)
+      bottom = base.elementMap.names.at(k);
+  }
+  REQUIRE(!bottom.empty());
+  const std::vector<double> before = tolerances(revolve);
+
+  std::vector<std::unique_ptr<Feature>> none;
+  for (const double wall : {1.0, 2.12, 4.0, 6.0, 7.4}) {
+    INFO("wall " << wall);
+    std::vector<Body> bodies{base};
+    ShellFeature shell("Sh", 1, {ElementRef{1, bottom}}, wall);
+    RegenContext ctx{bodies, none, 0};
+    shell.Execute(ctx);
+    CHECK(tolerances(revolve) == before);
+  }
 }
