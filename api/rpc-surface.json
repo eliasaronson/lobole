@@ -61,7 +61,7 @@
   "check_geometry": ["body"],
   "check_layout": ["job", "setup"],
   "check_literals": ["part"],
-  "check_print": ["bodies", "direction", "max_bridge_mm", "max_overhang_deg", "min_gap_mm", "overhang_allowance_mm2", "part", "stl_deflection_mm"],
+  "check_print": ["bodies", "direction", "max_bridge_mm", "max_overhang_deg", "min_air_mm", "min_gap_mm", "overhang_allowance_mm2", "part", "stl_deflection_mm"],
   "check_requirements": ["async", "ids", "outlive_client", "recompute"],
   "check_seat": ["catalog", "designation", "hash", "occurrence", "revision"],
   "check_sheet_metal": ["body", "part"],

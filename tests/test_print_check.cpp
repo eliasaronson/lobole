@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/Feature.h"
+#include "core/PrintAllowance.h"
 #include "core/PrintCheck.h"
 
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRep_Builder.hxx>
 #include <TopoDS_Compound.hxx>
 #include <catch2/catch_approx.hpp>
@@ -194,4 +197,160 @@ TEST_CASE("Another print direction", "[print][check]") {
   CHECK(r.bed.contactAreaMm2 == Approx(100.0));
   o.up = {0.0, 0.0, 0.0};
   CHECK_THROWS(Run({Box(0, 0, 0, 1, 1, 1)}, o));
+}
+
+namespace {
+
+// A post of radius 3 standing on the bed, with a 45° head flaring out to
+// radius 3.5 and a rim above it; a ring round it on the bed, bore 3.2 (0.2 a
+// side), 2 high, with `layers` x 0.2 of air between the head and the ring's
+// inner edge -- the coupon's air row, and the counter's axles.
+std::vector<Body> PostAndRing(int layers) {
+  const double rp = 3.0, ri = 3.2, rc = 3.5, ro = 6.0, H = 2.0;
+  const double z0 = H + layers * 0.2 - (ri - rp); // the head meets the post
+  const gp_Ax2 at(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
+  const double top = z0 + (rc - rp) + 1.0;
+  TopoDS_Shape post = BRepPrimAPI_MakeCylinder(at, rp, top).Shape();
+  post = BRepAlgoAPI_Fuse(post, BRepPrimAPI_MakeCone(
+                                    gp_Ax2(gp_Pnt(0, 0, z0), gp_Dir(0, 0, 1)),
+                                    rp, rc, rc - rp)
+                                    .Shape())
+             .Shape();
+  post = BRepAlgoAPI_Fuse(
+             post, BRepPrimAPI_MakeCylinder(
+                       gp_Ax2(gp_Pnt(0, 0, z0 + rc - rp), gp_Dir(0, 0, 1)), rc,
+                       top - (z0 + rc - rp))
+                       .Shape())
+             .Shape();
+  const TopoDS_Shape ring =
+      BRepAlgoAPI_Cut(BRepPrimAPI_MakeCylinder(at, ro, H).Shape(),
+                      BRepPrimAPI_MakeCylinder(at, ri, H).Shape())
+          .Shape();
+  std::vector<Body> out;
+  out.push_back(Make(post, "post"));
+  out.push_back(Make(ring, "ring"));
+  return out;
+}
+
+} // namespace
+
+TEST_CASE("A block one layer over another is off the bed and fused",
+          "[print][check][printcheck]") {
+  printcheck::Options o;
+  o.minAirMm = 0.6;
+  const auto r = Run({Box(0, 0, 0, 10, 10, 2), Box(0, 0, 2.2, 10, 10, 2)}, o);
+  const printcheck::Stacking& st = r.stacking;
+  CHECK(st.status == printcheck::Status::Fail);
+  CHECK(st.limitMm == 0.6);
+  CHECK(st.toleranceMm == Approx(0.06));
+  REQUIRE(st.pieces.size() == 2);
+  // Every piece starts on the bed: the upper one starts 2.2 over it.
+  REQUIRE(st.lifted.size() == 1);
+  CHECK(st.pieces[st.lifted[0].piece].bodies == std::vector<int>{1});
+  CHECK(st.lifted[0].heightMm == Approx(2.2));
+  CHECK(st.lifted[0].where.body == 1);
+  // And its underside lies one layer over the lower block, all of it.
+  REQUIRE(st.pairs.size() == 1);
+  CHECK(st.pieces[st.pairs[0].above].bodies == std::vector<int>{1});
+  CHECK(st.pieces[st.pairs[0].below].bodies == std::vector<int>{0});
+  CHECK(st.pairs[0].minAirMm == Approx(0.2).margin(1e-6));
+  CHECK(st.pairs[0].areaMm2 == Approx(100.0).epsilon(1e-6));
+  CHECK(st.pairs[0].where.body == 1);
+  CHECK_FALSE(r.Ok());
+  // The other items see nothing wrong: the bed has the print's lowest point,
+  // the blocks are apart, and a ceiling flat on the bed of its own piece
+  // is no bridge.
+  CHECK(r.bed.status == printcheck::Status::Pass);
+  CHECK(r.shells.status == printcheck::Status::Pass);
+
+  // Over the limit's air, side by side, both on the bed: it prints.
+  const auto apart =
+      Run({Box(0, 0, 0, 10, 10, 2), Box(12, 0, 0, 10, 10, 4)}, o);
+  CHECK(apart.stacking.status == printcheck::Status::Pass);
+  CHECK(apart.stacking.pairs.empty());
+  CHECK(apart.stacking.lifted.empty());
+}
+
+TEST_CASE("A ring under a 45 degree head needs three layers of air",
+          "[print][check][printcheck]") {
+  printcheck::Options o;
+  o.minAirMm = 0.6;
+  o.gapSideMm = 0.2;
+  const auto three = Run(PostAndRing(3), o);
+  CHECK(three.stacking.status == printcheck::Status::Pass);
+  CHECK(three.stacking.lifted.empty());
+  CHECK(three.overhang.status == printcheck::Status::Pass);
+  CHECK(three.Ok());
+  // The head is listed over the ring, at the limit and not under it.
+  for (const auto& pr : three.stacking.pairs) {
+    CHECK(pr.minAirMm >= 0.6 - 0.06);
+    CHECK(pr.areaMm2 == 0.0);
+  }
+
+  const auto one = Run(PostAndRing(1), o);
+  const printcheck::Stacking& st = one.stacking;
+  CHECK(st.status == printcheck::Status::Fail);
+  CHECK(st.lifted.empty());
+  REQUIRE(st.pairs.size() == 1);
+  CHECK(st.pieces[st.pairs[0].above].bodies == std::vector<int>{0});
+  CHECK(st.pieces[st.pairs[0].below].bodies == std::vector<int>{1});
+  CHECK(st.pairs[0].minAirMm == Approx(0.2).margin(0.02));
+  // The cone's area over the ring, 3.2 to 3.5, at 45°: all of it under
+  // 0.54 of air, and none of what is over the bore's gap.
+  const double cone = M_PI * (3.5 * 3.5 - 3.2 * 3.2) * std::sqrt(2.0);
+  CHECK(st.pairs[0].areaMm2 == Approx(cone).epsilon(0.05));
+  CHECK(st.pairs[0].where.body == 0);
+}
+
+TEST_CASE("A body's own bridge over its own floor is not stacking",
+          "[print][check][printcheck]") {
+  // A block with a slot 0.2 high through it, 1 above the bed: its ceiling
+  // is one layer over its own floor, the bridges item's business.
+  const TopoDS_Shape block = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 20, 10, 4);
+  const TopoDS_Shape slot = BRepPrimAPI_MakeBox(gp_Pnt(5, -1, 1), 8, 12, 0.2);
+  printcheck::Options o;
+  o.minAirMm = 0.6;
+  const auto r =
+      Run({Make(BRepAlgoAPI_Cut(block, slot).Shape(), "slotted")}, o);
+  CHECK(r.stacking.status == printcheck::Status::Pass);
+  CHECK(r.stacking.pairs.empty());
+  CHECK(r.bridges.faces.size() == 1);
+}
+
+TEST_CASE("Stacking needs a minimum air, and refuses one not over 0",
+          "[print][check][printcheck]") {
+  const auto r = Run({Box(0, 0, 0, 10, 10, 2), Box(0, 0, 2.2, 10, 10, 2)});
+  CHECK(r.stacking.status == printcheck::Status::Skipped);
+  CHECK(r.stacking.note.find("min_air_mm") != std::string::npos);
+  printcheck::Options o;
+  o.minAirMm = 0.0;
+  CHECK_THROWS(Run({Box(0, 0, 0, 1, 1, 1)}, o));
+  o.minAirMm = -1.0;
+  CHECK_THROWS(Run({Box(0, 0, 0, 1, 1, 1)}, o));
+}
+
+TEST_CASE("The minimum air comes from the profile, its layers, or FDM",
+          "[print][check][printcheck]") {
+  printfit::Process proc{"fdm", "pla", std::nullopt};
+  CHECK(printfit::MinAirMm(proc) == Approx(0.6));
+  CHECK(printfit::MinAirFrom(proc) == "process");
+  CHECK(printfit::MinAirSource(proc).find("coupon") != std::string::npos);
+
+  printfit::Profile prof = *printfit::ProfileFromBuiltin("K5", "fdm", "pla");
+  prof.layerHeightMm = 0.16;
+  proc = printfit::FromProfile(prof);
+  CHECK(printfit::MinAirMm(proc) == Approx(0.48));
+  CHECK(printfit::MinAirFrom(proc) == "layers");
+
+  prof.zGapMm = 0.32;
+  proc = printfit::FromProfile(prof);
+  CHECK(printfit::MinAirMm(proc) == Approx(0.32));
+  CHECK(printfit::MinAirFrom(proc) == "profile");
+  CHECK(printfit::MinAirSource(proc).find("z_gap_mm") != std::string::npos);
+
+  // A process that is not FDM knows no air: the item is skipped.
+  proc.process = "sla";
+  CHECK(printfit::MinAirMm(proc) == 0.0);
+  CHECK(printfit::MinAirFrom(proc).empty());
+  CHECK(printfit::MinAirSource(proc).find("not FDM") != std::string::npos);
 }

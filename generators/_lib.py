@@ -150,7 +150,12 @@ def connect(port=None):
 
 # --- printing -----------------------------------------------------------------
 
-PRINT_ITEMS = ("bed", "shells", "overhang", "bridges", "clearance", "chords")
+PRINT_ITEMS = ("bed", "shells", "overhang", "bridges", "clearance", "chords",
+               "stacking")
+
+
+def _piece(names):
+    return " + ".join(names)
 
 
 def print_item_line(name, item):
@@ -178,6 +183,20 @@ def print_item_line(name, item):
                 + (f" ({near['a']} / {near['b']})" if near else "")
                 + f" against {item['required_mm']:g} mm a side, "
                   f"down to {item['required_mm'] - item['tolerance_mm']:.4f}")
+    elif name == "stacking":
+        parts = [f"{_piece(l['piece'])} starts {l['height_mm']:.3f} mm off "
+                 "the bed" for l in item["lifted"][:3]]
+        pairs = item["pairs"]
+        if pairs:
+            w = pairs[0]
+            parts.append(f"{_piece(w['above'])} over {_piece(w['below'])}: "
+                         f"{w['min_air_mm']:.3f} mm of air, "
+                         f"{w['area_mm2']:.2f} mm2 under the limit"
+                         + (f" (+{len(pairs) - 1} pairs)"
+                            if len(pairs) > 1 else ""))
+        text = ("; ".join(parts) or f"{item['pieces']} pieces on the bed")
+        text += (f" against {item['limit_mm']:g} mm of air "
+                 f"({item['limit_from']})")
     else:
         text = (f"{item['deflection_mm']:g} mm against "
                 f"{item['limit_mm']:g} mm")
@@ -213,4 +232,5 @@ def print_receipt(r):
         out[k] = {key: v for key, v in r[k].items()
                   if key not in ("faces", "pairs", "note", "source")}
     out["clearance"]["closest"] = r["clearance"]["pairs"][:3]
+    out["stacking"]["closest"] = r["stacking"]["pairs"][:3]
     return out

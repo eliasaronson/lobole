@@ -75,11 +75,15 @@ struct Profile {
   double stlDeflectionMm = 0.0;
   // The slicer preset's layer height, mm; 0 = not stated.
   double layerHeightMm = 0.0;
-  // The vertical gap between two parts printed one over the other that
-  // still comes apart, mm, whole layers of layerHeightMm; 0 = not measured
-  // (print_coupon's Z-gap row, docs/tolerances/README.md#the-coupon). The
-  // sideways counterpart is the `gap` rows. Drives no geometry in the app:
-  // a print-in-place generator reads it (generators/counter/).
+  // The vertical AIR a face needs over another part to come away from it,
+  // mm, whole layers of layerHeightMm (the slicer ends air at a layer); 0 =
+  // not measured (print_coupon's air row,
+  // docs/tolerances/README.md#print-profiles). Not a gap a part may START
+  // in: a part printed one empty layer over another bonds to it, and one
+  // with more under it is printed into the air -- every piece starts on the
+  // bed. The sideways counterpart is the `gap` rows. Drives no geometry:
+  // check_print's stacking item judges by it (MinAirMm), and a
+  // print-in-place generator reads it.
   double zGapMm = 0.0;
   bool operator==(const Profile&) const = default;
 };
@@ -213,6 +217,19 @@ ForModelled(const Table& t, const std::string& label, Printed kind,
 [[nodiscard]] std::string MaxOverhangSource(const Process& p);
 [[nodiscard]] double MaxBridgeMm(const Process& p);
 [[nodiscard]] std::string MaxBridgeSource(const Process& p);
+
+// The vertical air a face needs over ANOTHER part printed under it, mm:
+// the profile's z_gap_mm when it states one, else kMinAirLayers of its
+// layer_height_mm, else kMinAirLayers of FDM's common kFdmLayerMm; 0 for a
+// process that is not FDM (check_print's stacking item skips, saying why).
+inline constexpr int kMinAirLayers = 3;
+inline constexpr double kFdmLayerMm = 0.2;
+[[nodiscard]] double MinAirMm(const Process& p);
+// Where it came from: "profile" (its z_gap_mm), "layers" (its layer
+// height) or "process"; "" when there is none.
+[[nodiscard]] std::string MinAirFrom(const Process& p);
+// The sentence saying so.
+[[nodiscard]] std::string MinAirSource(const Process& p);
 
 // Below this major diameter a printed thread is not reliable in this
 // process (the community's reading: printed threads work from M8 up); the

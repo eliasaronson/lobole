@@ -760,19 +760,20 @@ void DrawPrintProfileForm(AppState& state, int index) {
     p.layerHeightMm = layer;
     edited = true;
   }
-  ImGui::SetItemTooltip("The slicer preset's layer height: what a Z gap is "
-                        "counted in.");
+  ImGui::SetItemTooltip("The slicer preset's layer height: what the air "
+                        "over another part is counted in.");
   double zgap = p.zGapMm;
-  FormLabel("Z gap (mm, whole layers; 0 = not measured)");
+  FormLabel("Air over another part (mm, whole layers; 0 = not measured)");
   if (ExprInputDouble(state, "###prof_zgap", &zgap, "%.4g") &&
       zgap != p.zGapMm) {
     p.zGapMm = zgap;
     edited = true;
   }
-  ImGui::SetItemTooltip("The vertical gap between two parts printed one "
-                        "over the other that still comes apart: the print "
-                        "coupon's Z-gap row says which. A print-in-place "
-                        "generator stacks its parts this far apart.");
+  ImGui::SetItemTooltip("The vertical air a face needs over another part "
+                        "printed under it to come away from it: the print "
+                        "coupon's air row says how many layers. Every part "
+                        "still starts on the bed; Check print's stacking "
+                        "line judges by this, else by three layers.");
 
   // The rows: kind, size range, allowance, source.
   ImGui::Spacing();

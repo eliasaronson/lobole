@@ -335,17 +335,28 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   within its kind, and an allowance of the wrong sign: a hole or internal
   thread is not negative, a shaft or external thread not positive, and a gap
   is positive (a gap of zero fuses). A refusal writes nothing.
-- **The vertical gap** (v175). The `gap` rows are sideways: two walls
-  printed beside each other. Two parts printed one OVER the other — a
-  print-in-place wheel on the one below — are separated by whole layers,
-  and how many still come apart is the printer's and the preset's, not a
-  diameter's, so it is not a row: `layer_height_mm` (the preset's layer)
-  and `z_gap_mm` (whole layers of it), each 0 / absent until stated. A Z
-  gap without a layer height, or not whole layers of it, is refused naming
-  the two nearest that are (0.3 at 0.2 mm layers: 0.2 or 0.4) — never
-  rounded. Neither drives geometry in the app, so neither is in
-  `printfit::Fingerprint`: the coupon's [Z-gap row](#the-coupon) measures
-  it and a print-in-place generator (`generators/counter/`) reads it.
+- **The air over another part** (v175). The `gap` rows are sideways: two
+  walls printed beside each other. Vertically, a part never STARTS on
+  another: a face one empty layer over another part bonds to it across its
+  whole area, and a part with more air under it and nothing of its own to
+  bridge from is printed into the air, droops and welds to what it lands on
+  (the counter and the coupon's old Z-gap row both came off a P1S fused
+  that way). So every piece starts on the bed, and where one part prints
+  over another its face is self-supporting and leaves enough air for the
+  strands not to reach the part below. How much air that is belongs to the
+  printer and the preset, not a diameter, so it is not a row:
+  `layer_height_mm` (the preset's layer) and `z_gap_mm`, the vertical air
+  a face needs over another part to come away from it, in whole layers of
+  it (the slicer ends air at a layer); each 0 / absent until stated. A
+  `z_gap_mm` without a layer height, or not whole layers of it, is refused
+  naming the two nearest that are (0.3 at 0.2 mm layers: 0.2 or 0.4) —
+  never rounded. Neither drives geometry in the app, so neither is in
+  `printfit::Fingerprint`. `check_print`'s
+  [stacking item](#checking-a-print) judges by it through
+  `printfit::MinAirMm`: the profile's `z_gap_mm`, else three layers of its
+  `layer_height_mm`, else three layers of FDM's common 0.2 mm (source
+  "process", to confirm with the coupon); a process that is not FDM has
+  none. The coupon measures it, and a print-in-place generator reads it.
 - **The built-in tables stay**, read-only, as what a profile starts from: a
   new profile is the built-in table of its pair, "the defaults, corrected".
 - **The document carries its numbers.** A part printed with a profile has
@@ -409,8 +420,8 @@ print*, and every print-in-place generator through `generators/_lib.py`'s
 the limits from the part's print, so the button and the RPC cannot disagree;
 the core takes bodies and limits and no document. It answers over the
 part's non-reference bodies (or `bodies`) as one print along `direction`
-(default +Z; the bed is the plane below it through the origin). Six items,
-each `{status: pass | fail | skipped, measured, limit, note}`:
+(default +Z; the bed is the plane below it through the origin). Seven
+items, each `{status: pass | fail | skipped, measured, limit, note}`:
 
 | item | measured | limit | how |
 |---|---|---|---|
@@ -420,18 +431,30 @@ each `{status: pass | fail | skipped, measured, limit, note}`:
 | `bridges` | the widest span of the ceilings, and each one's area and height | the process's (`printfit::MaxBridgeMm`, 10 mm for FDM) | a ceiling is a downward face within 1° of horizontal everywhere, off the bed: a plane by its one normal, any other surface (a derived or lofted face is often a B-spline) by every sample. Its span is its inscribed diameter, as if anchored along its whole edge: twice the largest distance from a point of the face to its edges (polylines at a quarter of the tessellation's chord), on a grid over its UV and then climbed |
 | `clearance` | the minimum distance between any two solids, with the closest pairs | the gap a side (`printfit::SmallestGapSideMm` of the print), passing down to a tenth under it | `Measure::ClearanceBetween` per pair (BRepExtrema, the distance `measure` gives), `ContactBetween` when it cannot prove them apart; a pair whose oriented boxes are four gaps apart is clear without measuring |
 | `chords` | the chord deviation `export_stl` meshes this print at | a fifth of the gap a side | `printfit::StlDeflectionMm`, as [the export](#exporting-a-printed-part) takes it, or `stl_deflection_mm` |
+| `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places: a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else. So the air is exact and only which face is met, at a face's boundary, is the tessellation's (`IntCurvesFace` per sample was exact there too, and took minutes on the counter where this takes seconds). A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
 
 - **A tenth under the gap passes**: an arc-approximated involute (gear.py)
   comes out microns short of its gap, and FDM holds about ±0.2 mm; a
   clearance modelled within 10% of the profile's prints the same.
 - **Faces are judged from the part's own lowest point**, so a part off the
-  bed fails the bed item alone, not every face on its underside.
+  bed fails the bed item alone, not every face on its underside. Stacking
+  measures from the same point: the bed item asks that the PRINT is on the
+  bed, stacking that every PIECE is.
+- **A flat face over another piece fails at any number of layers it could
+  start in**: one layer of air bonds it, more prints it into the air. What
+  passes is a piece that starts on the bed and reaches over another with a
+  face that holds itself up — a 45° flank, or a bridge between its own
+  walls — the minimum air above it (the counter's wheels, one layer over
+  each other, fail; a ring round a post under a 45° head with three layers
+  passes).
 - **Every limit can be stated** (`max_overhang_deg`,
   `overhang_allowance_mm2`, `max_bridge_mm`, `min_gap_mm`,
-  `stl_deflection_mm`); each item says where its limit came from
-  (`limit_from` / `required_from` / `deflection_from`: `asked`, `process`,
-  `profile`, `gap`). An **unprinted** part has no limit to take, so
-  overhang, bridges, clearance and chords are `skipped`, the note naming
+  `stl_deflection_mm`, `min_air_mm`); each item says where its limit came
+  from (`limit_from` / `required_from` / `deflection_from`: `asked`,
+  `process`, `profile`, `gap`, and for the air `layers`), the process's
+  with its `source`. A process that is not FDM knows no air, so stacking
+  is skipped, saying so. An **unprinted** part has no limit to take, so
+  overhang, bridges, clearance, chords and stacking are `skipped`, the note naming
   `set_print_process` or the parameter, and the receipt is `unverified` —
   never judged against a number nobody chose. `ok` is every item that ran
   passing.
@@ -440,9 +463,11 @@ each `{status: pass | fail | skipped, measured, limit, note}`:
 - **The Print process section** has *Check print* (`###print_check`) under
   the part's rows and threads: one line per item, measured against limit, a
   failure amber, a skipped item greyed with its reason, and "the part has
-  changed since" once it has. The overhang and bridge lines have *Show*
-  (`###print_check_overhang`, `###print_check_bridge`), which selects the
-  worst face so the viewport points at it.
+  changed since" once it has. The overhang, bridge and stacking lines have
+  *Show* (`###print_check_overhang`, `###print_check_bridge`,
+  `###print_check_stacking`), which selects the worst face so the viewport
+  points at it: for stacking, the face with the least air over another
+  piece, else the lowest face of the highest piece off the bed.
 
 ### The coupon
 
@@ -541,7 +566,8 @@ profile whose sideways numbers are already measured:
 - **Preferences › Print profiles**, a library page
   ([library pages](../ui/settings.md#library-pages), id prefix `prof`):
   name (a rename refused when taken), process and material, conditions, the
-  STL chord deviation, the layer height and the Z gap, and the rows — kind, from, to (0 = and up), allowance
+  STL chord deviation, the layer height and the air over another part
+  (`z_gap_mm`), and the rows — kind, from, to (0 = and up), allowance
   and source — each written on every edit. A typed allowance is a
   measurement: its source becomes "coupon <date>". The tolerance editor
   says what a printed face prints at and what to model once a class is
@@ -556,7 +582,7 @@ part?}`, `list_tolerances {part?}`, `clear_tolerance {id, part?}`,
 `list_print_profiles`, `save_print_profile {profile | from_part, part?}`,
 `delete_print_profile {name}`, `check_print {part?, bodies?, direction?,
 max_overhang_deg?, overhang_allowance_mm2?, max_bridge_mm?, min_gap_mm?,
-stl_deflection_mm?}` ([checking a print](#checking-a-print)) — all in `src/remote/RemoteInspection.cpp`;
+stl_deflection_mm?, min_air_mm?}` ([checking a print](#checking-a-print)) — all in `src/remote/RemoteInspection.cpp`;
 `export_stl` in `RemoteProject.cpp`. Tolerance edits are
 undoable commands (`src/core/Command.h`). The edits take `part` (a name,
 stable id or slot index) to act on **any** part, not only the active one —

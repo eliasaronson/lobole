@@ -400,7 +400,7 @@ namespace ui {
 
 namespace {
 
-// Check print (docs/tolerances/README.md#checking-a-print): the six items of
+// Check print (docs/tolerances/README.md#checking-a-print): the seven items of
 // ui::RunPrintCheck, measured against limit, a failure amber. The same call
 // check_print makes, so the button and the RPC cannot disagree.
 void DrawPrintCheck(AppState& state, Document& doc) {
@@ -417,8 +417,9 @@ void DrawPrintCheck(AppState& state, Document& doc) {
     }
   }
   ImGui::SetItemTooltip("On the bed, one piece per body, overhangs, "
-                        "bridges, the gap between bodies and the STL's "
-                        "chords, against this print");
+                        "bridges, the gap between bodies, the STL's "
+                        "chords, and every piece on the bed with the air "
+                        "over another, against this print");
   const ImVec4 amber(0.95f, 0.80f, 0.40f, 1.0f);
   if (!state.printCheckError.empty()) {
     ImGui::PushStyleColor(ImGuiCol_Text, amber);
@@ -497,6 +498,47 @@ void DrawPrintCheck(AppState& state, Document& doc) {
        r.chords.status == printcheck::Status::Skipped
            ? r.chords.note
            : mm(r.chords.deflectionMm) + " of " + mm(r.chords.limitMm));
+  // Stacking: the pieces off the bed, then the closest pair.
+  const printcheck::Stacking& st = r.stacking;
+  const auto piece = [&](int pc) {
+    std::string out;
+    for (int b : st.pieces.at(static_cast<size_t>(pc)).bodies)
+      out +=
+          (out.empty() ? "" : " + ") +
+          doc.GetBodies()
+              .at(static_cast<size_t>(run.bodyIndex.at(static_cast<size_t>(b))))
+              .name;
+    return out;
+  };
+  std::string stack;
+  if (st.status == printcheck::Status::Skipped)
+    stack = st.note;
+  else {
+    if (!st.lifted.empty())
+      stack = piece(st.lifted.front().piece) + " starts " +
+              mm(st.lifted.front().heightMm) + " off the bed" +
+              (st.lifted.size() > 1
+                   ? " (" + std::to_string(st.lifted.size()) + " pieces)"
+                   : "");
+    if (!st.pairs.empty()) {
+      const printcheck::Stacked& w = st.pairs.front();
+      stack += (stack.empty() ? "" : "; ") + piece(w.above) + " over " +
+               piece(w.below) + ": " + mm(w.minAirMm) + " of air for " +
+               mm(st.limitMm) + ", " + units::FormatNumber(w.areaMm2) +
+               " mm² under it";
+    }
+    if (stack.empty())
+      stack = "every piece on the bed, " + mm(st.limitMm) + " of air kept";
+  }
+  line("stacking", st.status, stack);
+  // The closest pair, else the highest piece off the bed.
+  const printcheck::Where* worst =
+      !st.pairs.empty() ? &st.pairs.front().where
+      : !st.lifted.empty() && st.lifted.front().where.body >= 0
+          ? &st.lifted.front().where
+          : nullptr;
+  if (worst != nullptr)
+    show("Show###print_check_stacking", *worst);
 }
 
 } // namespace

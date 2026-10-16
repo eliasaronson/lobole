@@ -7,8 +7,9 @@
 docs/tolerances/README.md#checking-a-print. The negative controls a check
 needs to be one: a 60 degree overhang fails where a 45 degree flank passes
 (and reads 45, off the B-rep, not a facet's 47), a print-in-place pair that
-touches fails as one piece, a pair closer than the gap fails, and a part off
-the bed fails. Then the limits it takes from the part's print, what an
+touches fails as one piece, a pair closer than the gap fails, a part off
+the bed fails, and a block one layer over another fails stacking twice: off
+the bed, and under the minimum air. Then the limits it takes from the part's print, what an
 unprinted part skips, and the refusals.
 
 Usage: print_check_smoke.py <path-to-designer-binary>
@@ -175,20 +176,53 @@ def main():
         expect(r["direction"] == [1.0, 0.0, 0.0], f"normalised: {r}")
         expect(r["bed"]["status"] == "pass", f"on x = 0: {r['bed']}")
 
+        # --- Stacking: a block one layer over another ----------------------
+        d.call("add_part", name="stacked")
+        d.call("set_print_process", **PLA)
+        box(d, (0, 0, 0), (10, 10, 2), "Lower")
+        box(d, (0, 0, 2.2), (10, 10, 2), "Upper")
+        r = d.call("check_print")
+        st = r["stacking"]
+        expect(st["status"] == "fail" and not r["ok"],
+               f"a block one layer over another fails: {st}")
+        expect(abs(st["limit_mm"] - 0.6) < 1e-9
+               and st["limit_from"] == "process"
+               and "coupon" in st["source"],
+               f"three layers of 0.2 for fdm pla, to confirm: {st}")
+        expect(st["pieces"] == 2 and len(st["lifted"]) == 1
+               and st["lifted"][0]["piece"] == ["Upper"]
+               and abs(st["lifted"][0]["height_mm"] - 2.2) < 1e-6,
+               f"the upper block starts off the bed: {st}")
+        expect(len(st["pairs"]) == 1, f"one pair: {st}")
+        pr = st["pairs"][0]
+        expect(pr["above"] == ["Upper"] and pr["below"] == ["Lower"]
+               and abs(pr["min_air_mm"] - 0.2) < 1e-6
+               and abs(pr["area_mm2"] - 100.0) < 1e-3
+               and "element" in pr["where"],
+               f"its whole underside one layer over the lower: {pr}")
+        expect(r["bed"]["status"] == "pass", f"the print is on the bed: {r}")
+        # A stated air under the layer: no face is within it, and the
+        # lifted piece still fails.
+        r = d.call("check_print", min_air_mm=0.1)
+        st = r["stacking"]
+        expect(st["limit_from"] == "asked" and st["status"] == "fail"
+               and not st["pairs"] and len(st["lifted"]) == 1,
+               f"stated 0.1 mm: still off the bed: {st}")
+
         # --- An unprinted part ---------------------------------------------
         d.call("add_part", name="unprinted")
         box(d, (0, 0, 0), (10, 10, 10), "Block")
         r = d.call("check_print")
         expect(r["process"] is None, f"no process: {r}")
-        for k in ("overhang", "bridges", "clearance", "chords"):
+        for k in ("overhang", "bridges", "clearance", "chords", "stacking"):
             expect(r[k]["status"] == "skipped"
                    and "set_print_process" in r[k]["note"],
                    f"{k} skipped, saying why: {r[k]}")
         expect(r["receipt"]["standing"] == "unverified",
                f"skipped items are unverified: {r['receipt']}")
         r = d.call("check_print", max_overhang_deg=45, max_bridge_mm=10,
-                   min_gap_mm=0.2)
-        for k in ("overhang", "bridges", "clearance"):
+                   min_gap_mm=0.2, min_air_mm=0.6)
+        for k in ("overhang", "bridges", "clearance", "stacking"):
             expect(r[k]["status"] == "pass", f"{k} stated, run: {r[k]}")
 
         # --- Refusals --------------------------------------------------------
@@ -197,6 +231,9 @@ def main():
         refused(d, "max_overhang_deg", max_overhang_deg=90)
         refused(d, "max_overhang_deg", max_overhang_deg=-5)
         refused(d, "min_gap_mm", min_gap_mm=0)
+        refused(d, "min_air_mm", min_air_mm=0)
+        refused(d, "min_air_mm", min_air_mm=-0.2)
+        refused(d, "min_air_mm", min_air_mm="three layers")
         refused(d, "no body", bodies=["Nope"])
         refused(d, "part", part="no such part")
         print("print_check_smoke: OK")

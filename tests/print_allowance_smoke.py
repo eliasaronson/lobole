@@ -261,6 +261,18 @@ def profiles(d, port):
         expect(near(names[name].get("layer_height_mm", 0), 0.2) and
                "z_gap_mm" not in names[name],
                f"{name}: the preset's layer, no Z gap measured yet")
+    # check_print's stacking takes its air from the profile: its z_gap_mm,
+    # else three of its layers (docs/tolerances/README.md#print-profiles).
+    d.call("add_part", name="Stacked")
+    box(d, (0, 0, 0), (10, 10, 2), "Lower")
+    box(d, (12, 0, 0), (10, 10, 2), "Beside")
+    for name, air, src in (("Coupon P1S", 0.4, "profile"),
+                           ("K5 PLA on P1S", 0.6, "layers")):
+        d.call("set_print_process", profile=name)
+        st = d.call("check_print")["stacking"]
+        expect(near(st["limit_mm"], air) and st["limit_from"] == src
+               and st["status"] == "pass" and "source" in st,
+               f"{name}: the air is {air} from the {src}: {st}")
 
 
 def main():

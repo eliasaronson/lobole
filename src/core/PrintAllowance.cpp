@@ -258,12 +258,13 @@ std::string ValidateProfile(const Profile& p) {
            Mm(p.layerHeightMm);
   if (!std::isfinite(p.zGapMm) || p.zGapMm < 0.0)
     return who +
-           "z_gap_mm must be 0 (not measured) or a positive number of "
-           "whole layers in mm, not " +
+           "z_gap_mm (the vertical air a face needs over another part) "
+           "must be 0 (not measured) or a positive number of whole layers "
+           "in mm, not " +
            Mm(p.zGapMm);
   if (p.zGapMm > 0.0) {
-    // A slicer prints whole layers: a Z gap between them is not a gap it
-    // can print, so it is refused rather than rounded either way.
+    // A slicer ends air at a layer: air between layers is not air it can
+    // print, so it is refused rather than rounded either way.
     if (!(p.layerHeightMm > 0.0))
       return who + "a z_gap_mm of " + Mm(p.zGapMm) +
              " needs the layer_height_mm it is whole layers of";
@@ -516,6 +517,52 @@ std::string MaxBridgeSource(const Process& p) {
                "10 mm cleanly without tuning, and longer ones sag; to "
                "confirm on your printer"
              : std::string{};
+}
+
+double MinAirMm(const Process& p) {
+  if (p.process != "fdm")
+    return 0.0;
+  if (p.profile && p.profile->zGapMm > 0.0)
+    return p.profile->zGapMm;
+  // Whole layers, read as they are written: 3 x 0.2 is 0.6, not
+  // 0.6000000000000001.
+  const auto layers = [](double layer) {
+    return std::round(kMinAirLayers * layer * 1e9) / 1e9;
+  };
+  if (p.profile && p.profile->layerHeightMm > 0.0)
+    return layers(p.profile->layerHeightMm);
+  return layers(kFdmLayerMm);
+}
+
+std::string MinAirFrom(const Process& p) {
+  if (p.process != "fdm")
+    return {};
+  if (p.profile && p.profile->zGapMm > 0.0)
+    return "profile";
+  if (p.profile && p.profile->layerHeightMm > 0.0)
+    return "layers";
+  return "process";
+}
+
+std::string MinAirSource(const Process& p) {
+  const std::string from = MinAirFrom(p);
+  const std::string confirm =
+      ": to confirm with the coupon's air row (generators/print_coupon.py)";
+  if (from == "profile")
+    return "the profile's z_gap_mm, " + Mm(p.profile->zGapMm) +
+           " mm: the air the coupon measured" +
+           (p.profile->layerHeightMm > 0.0
+                ? ", " + Mm(p.profile->zGapMm / p.profile->layerHeightMm) +
+                      " layers of " + Mm(p.profile->layerHeightMm) + " mm"
+                : std::string());
+  if (from == "layers")
+    return std::to_string(kMinAirLayers) + " layers of the profile's " +
+           Mm(p.profile->layerHeightMm) + " mm layer height" + confirm;
+  if (from == "process")
+    return std::to_string(kMinAirLayers) + " layers of FDM's common " +
+           Mm(kFdmLayerMm) + " mm layer height" + confirm;
+  return "the process '" + p.process +
+         "' is not FDM: no minimum air between stacked parts is known for it";
 }
 
 double MinReliableThreadMm(const Process& p) {

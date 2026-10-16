@@ -22,18 +22,26 @@
 #include <Poly_Triangulation.hxx>
 #include <Precision.hxx>
 #include <Standard_Failure.hxx>
+#include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
+#include <gp_Lin.hxx>
+#include <gp_Pln.hxx>
 #include <gp_Quaternion.hxx>
 #include <gp_Trsf.hxx>
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <limits>
+#include <map>
+#include <memory>
 #include <numeric>
+#include <optional>
 #include <stdexcept>
 
 namespace printcheck {
@@ -52,7 +60,7 @@ const char* StatusName(Status s) {
 
 bool Report::Ok() const {
   for (Status s : {bed.status, shells.status, overhang.status, bridges.status,
-                   clearance.status, chords.status})
+                   clearance.status, chords.status, stacking.status})
     if (s == Status::Fail)
       return false;
   return true;
@@ -228,7 +236,7 @@ Bridge CeilingSpan(FaceEval& fe, double chordMm) {
 }
 
 void CheckFaces(const std::vector<const Body*>& bodies, const Options& o,
-                double bedMm, Report& r) {
+                double bedMm, Report& r, std::vector<TopoDS_Shape>& meshed) {
   const glm::dvec3 up = o.up;
   const double limit = o.maxOverhangDeg;
   for (size_t bi = 0; bi < bodies.size(); ++bi) {
@@ -243,6 +251,7 @@ void CheckFaces(const std::vector<const Body*>& bodies, const Options& o,
     const TopoDS_Shape& shape = copy.Shape();
     const double lin = std::max(1e-3, 0.002 * diag);
     BRepMesh_IncrementalMesh mesh(shape, lin, false, 0.25, false);
+    meshed.push_back(shape); // stacking samples the same tessellation
     int faceIndex = -1;
     for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
       ++faceIndex;
@@ -406,6 +415,510 @@ void CheckFaces(const std::vector<const Body*>& bodies, const Options& o,
   }
 }
 
+// An axis-aligned box in the bodies' frame.
+struct Box3 {
+  glm::dvec3 lo{std::numeric_limits<double>::infinity()};
+  glm::dvec3 hi{-std::numeric_limits<double>::infinity()};
+  void Add(const glm::dvec3& p) {
+    lo = glm::min(lo, p);
+    hi = glm::max(hi, p);
+  }
+  void Add(const Box3& b) {
+    lo = glm::min(lo, b.lo);
+    hi = glm::max(hi, b.hi);
+  }
+  [[nodiscard]] bool Overlaps(const Box3& b, double pad) const {
+    for (int k = 0; k < 3; ++k)
+      if (lo[k] > b.hi[k] + pad || b.lo[k] > hi[k] + pad)
+        return false;
+    return true;
+  }
+  // Does the segment a -> b pass within `pad` of the box? Slabs.
+  [[nodiscard]] bool Crosses(const glm::dvec3& a, const glm::dvec3& b,
+                             double pad) const {
+    double t0 = 0.0, t1 = 1.0;
+    const glm::dvec3 d = b - a;
+    for (int k = 0; k < 3; ++k) {
+      const double l = lo[k] - pad, h = hi[k] + pad;
+      if (std::abs(d[k]) < 1e-15) {
+        if (a[k] < l || a[k] > h)
+          return false;
+        continue;
+      }
+      double ta = (l - a[k]) / d[k], tb = (h - a[k]) / d[k];
+      if (ta > tb)
+        std::swap(ta, tb);
+      t0 = std::max(t0, ta);
+      t1 = std::min(t1, tb);
+      if (t0 > t1)
+        return false;
+    }
+    return true;
+  }
+};
+
+// One solid of the print, as the stacking item sees it: its meshed copy, the
+// piece it belongs to and its box.
+struct StackUnit {
+  int body = 0, piece = 0;
+  TopoDS_Shape shape;
+  Box3 box;
+  std::vector<int> around; // units within the limit of its box, itself too
+  bool otherNear = false;  // one of them is another piece
+  double lowestH = std::numeric_limits<double>::infinity();
+  Where lowest; // the lowest tessellation node, and its face
+};
+
+// What the air under one point of a downward face is: the piece below
+// within the limit (-1 for none: nothing, or the point's own piece first),
+// and how far.
+struct AirSample {
+  int piece = -1;
+  double airMm = 0.0;
+  glm::dvec3 p{0.0};
+};
+
+// Where a ray down first meets material. Only a surface that faces UP can be
+// met first from outside, so only those triangles are kept: binned on a grid
+// in the plane across the print direction, a ray is a lookup and a few 2D
+// point-in-triangle tests. The triangle says which face is met and where on
+// it; the air is then taken off the face's own surface, closed-form on a
+// plane and by Newton from the triangle's UV on anything else, so only the
+// face's boundary is the tessellation's.
+class RayDown {
+public:
+  RayDown(const glm::dvec3& up, double cell) : up_(up), cell_(cell) {
+    e1_ = glm::normalize(std::abs(up.x) < 0.9
+                             ? glm::cross(up, glm::dvec3(1, 0, 0))
+                             : glm::cross(up, glm::dvec3(0, 1, 0)));
+    e2_ = glm::cross(up, e1_);
+  }
+  // A face's upward triangles, of unit `unit`.
+  void AddFace(int unit, const TopoDS_Face& face,
+               const Handle(Poly_Triangulation) & tri, const gp_Trsf& tr) {
+    const bool reversed = face.Orientation() == TopAbs_REVERSED;
+    const int f = static_cast<int>(faces_.size());
+    faces_.push_back({face, nullptr, false});
+    const int base = static_cast<int>(pos_.size());
+    for (int i = 1; i <= tri->NbNodes(); ++i) {
+      const glm::dvec3 p = V(tri->Node(i).Transformed(tr));
+      pos_.push_back(p);
+      const gp_Pnt2d uv = tri->HasUVNodes() ? tri->UVNode(i) : gp_Pnt2d();
+      uv_.push_back({uv.X(), uv.Y()});
+    }
+    for (int t = 1; t <= tri->NbTriangles(); ++t) {
+      int a, b, c;
+      tri->Triangle(t).Get(a, b, c);
+      if (reversed)
+        std::swap(b, c);
+      const glm::dvec3 &pa = pos_[base + a - 1], &pb = pos_[base + b - 1],
+                       &pc = pos_[base + c - 1];
+      if (glm::dot(glm::cross(pb - pa, pc - pa), up_) <= 0.0)
+        continue; // faces down or sideways: never met first from outside
+      const int id = static_cast<int>(tris_.size());
+      tris_.push_back({{base + a - 1, base + b - 1, base + c - 1}, f, unit});
+      double x0 = std::numeric_limits<double>::infinity(), y0 = x0;
+      double x1 = -x0, y1 = -x0;
+      for (const glm::dvec3* q : {&pa, &pb, &pc}) {
+        x0 = std::min(x0, glm::dot(*q, e1_));
+        x1 = std::max(x1, glm::dot(*q, e1_));
+        y0 = std::min(y0, glm::dot(*q, e2_));
+        y1 = std::max(y1, glm::dot(*q, e2_));
+      }
+      for (long long i = Cell(x0); i <= Cell(x1); ++i)
+        for (long long j = Cell(y0); j <= Cell(y1); ++j)
+          bins_.emplace_back(Key(i, j), id);
+    }
+  }
+  void Build() { std::sort(bins_.begin(), bins_.end()); }
+
+  // The nearest material straight down from `p` with tMin < t < tMax: its
+  // unit and the distance, or unit -1.
+  std::pair<int, double> Cast(const glm::dvec3& p, double tMin, double tMax) {
+    const double x = glm::dot(p, e1_), y = glm::dot(p, e2_),
+                 h = glm::dot(p, up_);
+    const long long k = Key(Cell(x), Cell(y));
+    auto it = std::lower_bound(bins_.begin(), bins_.end(),
+                               std::pair<long long, int>(k, -1));
+    int bestTri = -1;
+    double best = tMax;
+    glm::dvec3 bestBary(0.0);
+    for (; it != bins_.end() && it->first == k; ++it) {
+      const Tri& t = tris_[it->second];
+      const glm::dvec3 &a = pos_[t.n[0]], &b = pos_[t.n[1]], &c = pos_[t.n[2]];
+      const glm::dvec2 a2(glm::dot(a, e1_), glm::dot(a, e2_)),
+          b2(glm::dot(b, e1_), glm::dot(b, e2_)),
+          c2(glm::dot(c, e1_), glm::dot(c, e2_));
+      const double den =
+          (b2.y - c2.y) * (a2.x - c2.x) + (c2.x - b2.x) * (a2.y - c2.y);
+      if (std::abs(den) < 1e-18)
+        continue;
+      const double l0 =
+          ((b2.y - c2.y) * (x - c2.x) + (c2.x - b2.x) * (y - c2.y)) / den;
+      const double l1 =
+          ((c2.y - a2.y) * (x - c2.x) + (a2.x - c2.x) * (y - c2.y)) / den;
+      const double l2 = 1.0 - l0 - l1;
+      constexpr double eps = -1e-9;
+      if (l0 < eps || l1 < eps || l2 < eps)
+        continue;
+      const double hit =
+          l0 * glm::dot(a, up_) + l1 * glm::dot(b, up_) + l2 * glm::dot(c, up_);
+      const double tt = h - hit;
+      if (tt > tMin && tt < best) {
+        best = tt;
+        bestTri = it->second;
+        bestBary = {l0, l1, l2};
+      }
+    }
+    if (bestTri < 0)
+      return {-1, tMax};
+    const Tri& t = tris_[bestTri];
+    // Off the face's own surface.
+    Face& f = faces_[t.face];
+    if (!f.surf) {
+      f.surf = std::make_unique<BRepAdaptor_Surface>(f.face);
+      f.plane = f.surf->GetType() == GeomAbs_Plane;
+    }
+    double exact = best;
+    if (f.plane) {
+      const gp_Pln pl = f.surf->Plane();
+      const gp_Dir& n = pl.Axis().Direction();
+      const double dn = -(n.X() * up_.x + n.Y() * up_.y + n.Z() * up_.z);
+      if (std::abs(dn) > 1e-12)
+        exact =
+            gp_Vec(n).Dot(gp_Vec(gp_Pnt(p.x, p.y, p.z), pl.Location())) / dn;
+    } else {
+      glm::dvec2 uv = bestBary.x * uv_[t.n[0]] + bestBary.y * uv_[t.n[1]] +
+                      bestBary.z * uv_[t.n[2]];
+      double tt = best;
+      bool ok = false;
+      for (int it2 = 0; it2 < 12; ++it2) {
+        gp_Pnt s;
+        gp_Vec su, sv;
+        f.surf->D1(uv.x, uv.y, s, su, sv);
+        // S(u, v) - (p - t up) = 0, for u, v and t.
+        const glm::dvec3 r = V(s) - (p - tt * up_);
+        const glm::dvec3 cu(su.X(), su.Y(), su.Z()), cv(sv.X(), sv.Y(), sv.Z());
+        const glm::dmat3 J(cu, cv, up_);
+        if (std::abs(glm::determinant(J)) < 1e-14)
+          break;
+        const glm::dvec3 step = glm::inverse(J) * r;
+        uv -= glm::dvec2(step.x, step.y);
+        tt -= step.z;
+        if (glm::length(r) < 1e-9) {
+          ok = true;
+          break;
+        }
+      }
+      if (ok && std::abs(tt - best) < 4.0 * cell_)
+        exact = tt;
+    }
+    if (exact > tMin && exact < tMax)
+      best = exact;
+    else if (!(best > tMin && best < tMax))
+      return {-1, tMax};
+    return {t.unit, best};
+  }
+
+private:
+  struct Tri {
+    int n[3];
+    int face, unit;
+  };
+  struct Face {
+    TopoDS_Face face;
+    std::unique_ptr<BRepAdaptor_Surface> surf;
+    bool plane = false;
+  };
+  long long Cell(double v) const {
+    return static_cast<long long>(std::floor(v / cell_));
+  }
+  static long long Key(long long i, long long j) {
+    return (i + (1LL << 30)) * (1LL << 31) + (j + (1LL << 30));
+  }
+  glm::dvec3 up_, e1_, e2_;
+  double cell_;
+  std::vector<glm::dvec3> pos_;
+  std::vector<glm::dvec2> uv_;
+  std::vector<Tri> tris_;
+  std::vector<Face> faces_;
+  std::vector<std::pair<long long, int>> bins_;
+};
+
+// The stacking item (docs/tolerances/README.md#checking-a-print): every
+// piece starts on the bed, and no downward face lies within the minimum air
+// over another piece. The tessellation CheckFaces made places the samples:
+// each is a point of a downward face's own surface, at a UV a triangle
+// interpolates, where the exact normal faces down; the air under it is a
+// ray down to the nearest material (RayDown). A triangle is split while it
+// is wider than four limits, or while its samples disagree and it is wider
+// than a sixteenth of one; the area under the limit is the leaves whose
+// centroid is.
+void CheckStacking(const std::vector<const Body*>& bodies,
+                   const std::vector<TopoDS_Shape>& meshed,
+                   const std::vector<std::pair<int, int>>& unitBodySolid,
+                   const std::vector<int>& unitPiece, int pieces,
+                   const Options& o, double bedMm, Report& r) {
+  Stacking& st = r.stacking;
+  const glm::dvec3 up = o.up;
+  const double limit = *o.minAirMm;
+  st.limitMm = limit;
+  st.toleranceMm = kGapToleranceShare * limit;
+  const double failBelow = limit - st.toleranceMm;
+  const int nu = static_cast<int>(unitBodySolid.size());
+  const int nb = static_cast<int>(bodies.size());
+
+  // The units over the meshed copies, in the order Check made them.
+  std::vector<StackUnit> units(nu);
+  std::vector<std::vector<int>> unitOf(nb); // body -> its units by solid
+  for (int i = 0; i < nu; ++i) {
+    units[i].body = unitBodySolid[i].first;
+    units[i].piece = unitPiece[i];
+    unitOf[units[i].body].push_back(i);
+  }
+  // Each body's solids, and which of them each face is on.
+  std::vector<std::vector<TopTools_IndexedMapOfShape>> faceMaps(nb);
+  for (int b = 0; b < nb; ++b) {
+    std::vector<TopoDS_Shape> solids;
+    for (TopExp_Explorer ex(meshed[b], TopAbs_SOLID); ex.More(); ex.Next())
+      solids.push_back(ex.Current());
+    if (solids.empty())
+      solids.push_back(meshed[b]);
+    for (size_t k = 0; k < solids.size() && k < unitOf[b].size(); ++k) {
+      StackUnit& u = units[unitOf[b][k]];
+      u.shape = solids[k];
+      Bnd_Box bb;
+      BRepBndLib::Add(u.shape, bb, false);
+      if (!bb.IsVoid()) {
+        double x0, y0, z0, x1, y1, z1;
+        bb.Get(x0, y0, z0, x1, y1, z1);
+        u.box.Add({x0, y0, z0});
+        u.box.Add({x1, y1, z1});
+      }
+      faceMaps[b].emplace_back();
+      TopExp::MapShapes(u.shape, TopAbs_FACE, faceMaps[b].back());
+    }
+  }
+  for (int i = 0; i < nu; ++i)
+    for (int j = 0; j < nu; ++j)
+      if (i == j || units[i].box.Overlaps(units[j].box, limit)) {
+        units[i].around.push_back(j);
+        if (units[j].piece != units[i].piece)
+          units[i].otherNear = true;
+      }
+
+  // The pieces, with their bodies and lowest points.
+  st.pieces.resize(pieces);
+  std::vector<double> pieceLow(pieces, std::numeric_limits<double>::infinity());
+  for (int i = 0; i < nu; ++i) {
+    Piece& pc = st.pieces[units[i].piece];
+    if (std::find(pc.bodies.begin(), pc.bodies.end(), units[i].body) ==
+        pc.bodies.end())
+      pc.bodies.push_back(units[i].body);
+    pieceLow[units[i].piece] =
+        std::min(pieceLow[units[i].piece],
+                 units[i].shape.IsNull() ? r.bodies[units[i].body].lowestMm
+                                         : LowestAlong(units[i].shape, up));
+  }
+  for (Piece& pc : st.pieces)
+    std::sort(pc.bodies.begin(), pc.bodies.end());
+
+  // Every face once: its unit, its lowest node, its upward triangles for
+  // the rays, and whether it is worth sampling.
+  struct ToSample {
+    int body, faceIndex, unit;
+    TopoDS_Face face;
+  };
+  std::vector<ToSample> todo;
+  RayDown rays(up, std::max(limit / 2.0, 1e-3));
+  for (int b = 0; b < nb; ++b) {
+    int faceIndex = -1;
+    for (TopExp_Explorer ex(meshed[b], TopAbs_FACE); ex.More(); ex.Next()) {
+      ++faceIndex;
+      const TopoDS_Face& face = TopoDS::Face(ex.Current());
+      int ui = -1;
+      for (size_t k = 0; k < faceMaps[b].size(); ++k)
+        if (faceMaps[b][k].Contains(face)) {
+          ui = unitOf[b][k];
+          break;
+        }
+      if (ui < 0)
+        continue;
+      StackUnit& u = units[ui];
+      TopLoc_Location loc;
+      const Handle(Poly_Triangulation) tri =
+          BRep_Tool::Triangulation(face, loc);
+      if (tri.IsNull() || !tri->HasUVNodes())
+        continue;
+      const gp_Trsf tr = loc.Transformation();
+      Box3 fbox;
+      for (int i = 1; i <= tri->NbNodes(); ++i) {
+        const glm::dvec3 p = V(tri->Node(i).Transformed(tr));
+        fbox.Add(p);
+        if (glm::dot(up, p) < u.lowestH) {
+          u.lowestH = glm::dot(up, p);
+          u.lowest = Where{b, faceIndex, p};
+        }
+      }
+      rays.AddFace(ui, face, tri, tr);
+      if (!u.otherNear)
+        continue;
+      // Only a face with another piece's box in the column under it.
+      Box3 column = fbox;
+      column.Add(Box3{fbox.lo - limit * up, fbox.hi - limit * up});
+      for (int v : u.around)
+        if (units[v].piece != u.piece && column.Overlaps(units[v].box, 1e-6)) {
+          todo.push_back({b, faceIndex, ui, face});
+          break;
+        }
+    }
+  }
+  rays.Build();
+
+  const double res = limit / 16.0, spacing = 4.0 * limit;
+  const double tMin = 1e-4; // past the point's own surface
+  std::map<std::pair<int, int>, Stacked> pairs;
+  for (const ToSample& ts : todo) {
+    const StackUnit& u = units[ts.unit];
+    const int b = ts.body, faceIndex = ts.faceIndex;
+    TopLoc_Location loc;
+    const Handle(Poly_Triangulation) tri =
+        BRep_Tool::Triangulation(ts.face, loc);
+    const gp_Trsf tr = loc.Transformation();
+    const int nn = tri->NbNodes();
+    std::vector<glm::dvec3> nodes(nn);
+    std::vector<double> h(nn);
+    for (int i = 1; i <= nn; ++i) {
+      nodes[i - 1] = V(tri->Node(i).Transformed(tr));
+      h[i - 1] = glm::dot(up, nodes[i - 1]);
+    }
+    FaceEval fe(ts.face);
+    const auto air = [&](const glm::dvec2& uv) {
+      AirSample s;
+      glm::dvec3 n;
+      if (!fe.At(uv.x, uv.y, s.p, n) || OverhangDeg(n, up) <= 1e-6 ||
+          glm::dot(up, s.p) <= bedMm + kBedTolMm)
+        return s;
+      st.samples++;
+      const auto [hit, t] = rays.Cast(s.p, tMin, limit);
+      if (hit >= 0 && units[hit].piece != u.piece) {
+        s.piece = units[hit].piece;
+        s.airMm = t;
+        Stacked& pr = pairs[{u.piece, s.piece}];
+        if (pr.above < 0 || t < pr.minAirMm) {
+          pr.above = u.piece;
+          pr.below = s.piece;
+          pr.minAirMm = t;
+          pr.where = Where{b, faceIndex, s.p};
+        }
+      }
+      return s;
+    };
+    // Under the limit: the piece below; anything else, -1.
+    const auto key = [&](const AirSample& s) {
+      return s.piece >= 0 && s.airMm < failBelow ? s.piece : -1;
+    };
+    struct Corner {
+      glm::dvec3 p;  // on the triangle, for its size and area
+      glm::dvec2 uv; // on the face
+      AirSample s;
+    };
+    const auto mid = [&](const Corner& a, const Corner& c) {
+      Corner m{0.5 * (a.p + c.p), 0.5 * (a.uv + c.uv), {}};
+      m.s = air(m.uv);
+      return m;
+    };
+    std::function<void(const Corner&, const Corner&, const Corner&, int)>
+        visit = [&](const Corner& a, const Corner& b2, const Corner& c,
+                    int depth) {
+          const double edge =
+              std::max({glm::length(b2.p - a.p), glm::length(c.p - b2.p),
+                        glm::length(a.p - c.p)});
+          const AirSample cs = air((a.uv + b2.uv + c.uv) / 3.0);
+          const int k = key(cs);
+          const bool uniform = key(a.s) == k && key(b2.s) == k && key(c.s) == k;
+          if (depth < 14 && (edge > spacing || (!uniform && edge > res))) {
+            const Corner ab = mid(a, b2), bc = mid(b2, c), ca = mid(c, a);
+            visit(a, ab, ca, depth + 1);
+            visit(ab, b2, bc, depth + 1);
+            visit(ca, bc, c, depth + 1);
+            visit(ab, bc, ca, depth + 1);
+            return;
+          }
+          if (k >= 0)
+            pairs[{u.piece, k}].areaMm2 += TriArea(a.p, b2.p, c.p);
+        };
+    // Each node once: neighbouring triangles share it.
+    std::vector<std::optional<Corner>> at(nn);
+    const auto node = [&](int i) -> const Corner& {
+      if (!at[i - 1]) {
+        const gp_Pnt2d uv = tri->UVNode(i);
+        Corner c{nodes[i - 1], {uv.X(), uv.Y()}, {}};
+        c.s = air(c.uv);
+        at[i - 1] = c;
+      }
+      return *at[i - 1];
+    };
+    for (int t = 1; t <= tri->NbTriangles(); ++t) {
+      int ia, ib, ic;
+      tri->Triangle(t).Get(ia, ib, ic);
+      if (std::max({h[ia - 1], h[ib - 1], h[ic - 1]}) <= bedMm + kBedTolMm)
+        continue; // on the bed
+      // A triangle with no other piece's box in the column under it is
+      // clear without a sample.
+      Box3 tcol;
+      for (int i : {ia, ib, ic}) {
+        tcol.Add(nodes[i - 1]);
+        tcol.Add(nodes[i - 1] - limit * up);
+      }
+      bool below = false;
+      for (int v : u.around)
+        if (units[v].piece != u.piece && tcol.Overlaps(units[v].box, 1e-6))
+          below = true;
+      if (!below)
+        continue;
+      visit(node(ia), node(ib), node(ic), 0);
+    }
+  }
+
+  // Pieces that start in the air.
+  for (int pc = 0; pc < pieces; ++pc) {
+    st.pieces[pc].lowestMm = pieceLow[pc] - bedMm;
+    if (st.pieces[pc].lowestMm <= kBedTolMm)
+      continue;
+    Lifted l;
+    l.piece = pc;
+    l.heightMm = st.pieces[pc].lowestMm;
+    double best = std::numeric_limits<double>::infinity();
+    for (const StackUnit& u : units)
+      if (u.piece == pc && u.lowest.body >= 0 && u.lowestH < best) {
+        best = u.lowestH;
+        l.where = u.lowest;
+      }
+    st.lifted.push_back(l);
+  }
+  std::sort(
+      st.lifted.begin(), st.lifted.end(),
+      [](const Lifted& a, const Lifted& b) { return a.heightMm > b.heightMm; });
+  bool close = false;
+  for (auto& [k, pr] : pairs) {
+    close = close || pr.minAirMm < failBelow;
+    st.pairs.push_back(pr);
+  }
+  std::sort(st.pairs.begin(), st.pairs.end(),
+            [](const Stacked& a, const Stacked& b) {
+              return a.minAirMm < b.minAirMm;
+            });
+  st.status = st.lifted.empty() && !close ? Status::Pass : Status::Fail;
+  st.note =
+      "every piece's lowest point from the B-Rep; the air under each "
+      "downward face by rays down from points of the face's own surface "
+      "that a tessellation places (split to a sixteenth of the limit where "
+      "the answer changes): the face a ray meets is the tessellation's, the "
+      "air is taken off that face's exact surface; the area is the leaves "
+      "whose centre is under the limit";
+}
+
 } // namespace
 
 Report Check(const std::vector<const Body*>& bodies, const Options& o) {
@@ -415,6 +928,8 @@ Report Check(const std::vector<const Body*>& bodies, const Options& o) {
     throw std::runtime_error("the print direction is not a unit vector");
   if (!(o.maxOverhangDeg > 0.0 && o.maxOverhangDeg < 90.0))
     throw std::runtime_error("the overhang limit is not in (0, 90)");
+  if (o.minAirMm && !(std::isfinite(*o.minAirMm) && *o.minAirMm > 0.0))
+    throw std::runtime_error("the minimum air is not more than 0");
   for (const Body* b : bodies)
     if (b == nullptr || b->shape.GetShape().IsNull())
       throw std::runtime_error("a body has no shape");
@@ -451,7 +966,8 @@ Report Check(const std::vector<const Body*>& bodies, const Options& o) {
   r.overhang.limitDeg = o.maxOverhangDeg;
   r.overhang.allowanceMm2 = o.overhangAllowanceMm2;
   r.bridges.limitMm = o.maxBridgeMm;
-  CheckFaces(bodies, opts, bed, r);
+  std::vector<TopoDS_Shape> meshed;
+  CheckFaces(bodies, opts, bed, r, meshed);
   std::sort(r.overhang.faces.begin(), r.overhang.faces.end(),
             [](const FaceOver& a, const FaceOver& b) {
               return a.worstDeg > b.worstDeg;
@@ -557,9 +1073,12 @@ Report Check(const std::vector<const Body*>& bodies, const Options& o) {
   for (int i = 0; i < nu; ++i)
     groups[find(i)].push_back(i);
   int pieces = 0;
+  std::vector<int> unitPiece(nu, -1);
   for (const auto& g : groups) {
     if (g.empty())
       continue;
+    for (int u : g)
+      unitPiece[u] = pieces;
     pieces++;
     if (g.size() > 1) {
       std::vector<int> joined;
@@ -577,6 +1096,18 @@ Report Check(const std::vector<const Body*>& bodies, const Options& o) {
   r.shells.expected = nu;
   r.shells.status =
       pieces == nu && r.shells.watertight ? Status::Pass : Status::Fail;
+
+  // Stacking: the pieces again, against the minimum air.
+  if (o.minAirMm) {
+    std::vector<std::pair<int, int>> unitBodySolid;
+    for (const Unit& u : units)
+      unitBodySolid.emplace_back(u.body, u.solid);
+    CheckStacking(bodies, meshed, unitBodySolid, unitPiece, pieces, opts, bed,
+                  r);
+  } else {
+    r.stacking.note = "no minimum air to judge a part printed over another "
+                      "by (set_print_process, or state min_air_mm)";
+  }
 
   if (!o.gapSideMm) {
     r.clearance.note = "the part is not printed: no gap to hold the bodies "

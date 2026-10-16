@@ -849,7 +849,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "source:string}[]"},
     {"check_print",
      "Will this PART print? (docs/tolerances/README.md#checking-a-print) "
-     "Six items over its bodies (or `bodies`: names or creating-feature "
+     "Seven items over its bodies (or `bodies`: names or creating-feature "
      "ids) as ONE print along `direction` (default [0,0,1], the bed the "
      "plane below it through the origin), each {status: pass|fail|skipped, "
      "the measured value, the limit, note}: `bed` (the lowest point within "
@@ -863,16 +863,26 @@ static constexpr MethodDoc InspectionMethods[] = {
      "against `max_bridge_mm`), `clearance` (the minimum distance between "
      "any two bodies in mm against the gap a side, passing down to a tenth "
      "under it) and `chords` (the STL chord deviation export_stl meshes at "
-     "against a fifth of the gap a side). Every limit defaults to the "
+     "against a fifth of the gap a side) and `stacking` (every piece -- "
+     "solids that touch -- starts on the bed: `lifted` lists each that "
+     "does not with its height; and no downward face lies within "
+     "`min_air_mm` of vertical air over ANOTHER piece, passing down to a "
+     "tenth under it: rays down from the faces, exact on the B-Rep, and "
+     "`pairs` gives each piece over another with the area under the limit, "
+     "the least air and where. A part's own bridge over its own floor is "
+     "the bridges item's). Every limit defaults to the "
      "part's print process (set_print_process): the process's overhang and "
-     "bridge, the profile's smallest gap a side and its STL deflection; an "
+     "bridge, the profile's smallest gap a side and its STL deflection, and "
+     "the minimum air from the profile's z_gap_mm, else 3 layers of its "
+     "layer_height_mm, else 3 layers of 0.2 mm (`limit_from` profile | "
+     "layers | process; a process that is not FDM skips it); an "
      "unprinted part skips what has no limit unless it is stated. `ok` is "
      "every item that ran passing. Read-only; `part` reads any part from "
      "any tab.",
      "part?:string|int, bodies?:any[], direction?:number[3], "
      "max_overhang_deg?:number>0<90, overhang_allowance_mm2?:number>=0, "
      "max_bridge_mm?:number>0, min_gap_mm?:number>0, "
-     "stl_deflection_mm?:number>0",
+     "stl_deflection_mm?:number>0, min_air_mm?:number>0",
      remote::NoFlags,
      "bed:{contact_area_mm2:number, lowest_mm:number, on_bed:string[], "
      "status:string, tol_mm:number}, bodies:{body:int, "
@@ -891,7 +901,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "process:string|null, receipt:{claims:object[], schema:string, "
      "standing:string, summary:string}, shells:{expected:int, "
      "joined:string[][], pieces:int, split:any[], status:string, "
-     "watertight:bool}"},
+     "watertight:bool}, stacking:{lifted:object[], limit_from:string, "
+     "limit_mm:number, note:string, pairs:object[], pieces:int, "
+     "samples:int, status:string, tolerance_mm:number, source?:string}"},
     {"check_fit",
      "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
      "class's band; adding {shaft:{class:\"g6\"}} gives the fit between "
@@ -935,9 +947,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "process, material, conditions, stl_deflection_mm (the chord deviation "
      "a printed part's STL is exported at: the stated one, else a tenth of "
      "the smallest gap a side), stl_deflection_stated, layer_height_mm? "
-     "(the slicer preset's layer), z_gap_mm? (the vertical gap between "
-     "parts printed one over another that comes apart, whole layers; both "
-     "absent when not stated), rows[]{kind, "
+     "(the slicer preset's layer), z_gap_mm? (the vertical air a face "
+     "needs over another part to come away from it, whole layers; "
+     "check_print's stacking limit; both absent when not stated), "
+     "rows[]{kind, "
      "from_mm, to_mm (absent = and up), allowance_mm, source}}. A printed "
      "part names one (set_print_process {profile}) and EMBEDS a copy. "
      "`defaults` are the built-in tables, read-only, that a new profile "
@@ -953,7 +966,8 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"save_print_profile",
      "Write a print profile to your store {profile: {name, process, "
      "material, conditions?, stl_deflection_mm?, layer_height_mm?, "
-     "z_gap_mm? (whole layers of layer_height_mm), rows?: [{kind: hole|shaft|"
+     "z_gap_mm? (the vertical air a face needs over another part, whole "
+     "layers of layer_height_mm), rows?: [{kind: hole|shaft|"
      "internal_thread|external_thread|gap, from_mm?, to_mm? (absent = and "
      "up), allowance_mm (signed, on the DIAMETER; a gap's is the whole "
      "diametral clearance), source?}]}}, replacing one of that name; without "
@@ -3768,6 +3782,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     ask.stlDeflectionMm =
         number("stl_deflection_mm", p.contains("stl_deflection_mm"), 1e-9, 1e12,
                "the STL chord deviation in mm, more than 0");
+    ask.minAirMm =
+        number("min_air_mm", p.contains("min_air_mm"), 1e-9, 1e12,
+               "the vertical air in mm a face needs over another piece, "
+               "more than 0");
 
     const ui::PrintCheckRun run =
         ui::RunPrintCheck(part, only ? &*only : nullptr, ask);
@@ -3867,6 +3885,36 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                    {"note", r.clearance.note}};
     if (r.clearance.minMm)
       clearance["min_mm"] = *r.clearance.minMm;
+    const printcheck::Stacking& st = r.stacking;
+    const auto piece = [&](int pc) {
+      return names(st.pieces.at(static_cast<size_t>(pc)).bodies);
+    };
+    json lifted = json::array();
+    for (size_t i = 0; i < st.lifted.size() && i < kListed; ++i) {
+      json l{{"piece", piece(st.lifted[i].piece)},
+             {"height_mm", st.lifted[i].heightMm}};
+      if (st.lifted[i].where.body >= 0)
+        l["where"] = where(st.lifted[i].where);
+      lifted.push_back(std::move(l));
+    }
+    json stackPairs = json::array();
+    for (size_t i = 0; i < st.pairs.size() && i < kListed; ++i)
+      stackPairs.push_back({{"above", piece(st.pairs[i].above)},
+                            {"below", piece(st.pairs[i].below)},
+                            {"area_mm2", st.pairs[i].areaMm2},
+                            {"min_air_mm", st.pairs[i].minAirMm},
+                            {"where", where(st.pairs[i].where)}});
+    json stacking{{"status", status(st.status)},
+                  {"limit_mm", st.limitMm},
+                  {"limit_from", run.airFrom},
+                  {"tolerance_mm", st.toleranceMm},
+                  {"pieces", static_cast<int>(st.pieces.size())},
+                  {"lifted", std::move(lifted)},
+                  {"pairs", std::move(stackPairs)},
+                  {"samples", st.samples},
+                  {"note", st.note}};
+    if (!run.airSource.empty())
+      stacking["source"] = run.airSource;
     json out{
         {"ok", r.Ok()},
         {"process", run.process.empty() ? json(nullptr) : json(run.process)},
@@ -3893,7 +3941,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           {"deflection_mm", r.chords.deflectionMm},
           {"deflection_from", run.deflectionFrom},
           {"limit_mm", r.chords.limitMm},
-          {"note", r.chords.note}}}};
+          {"note", r.chords.note}}},
+        {"stacking", std::move(stacking)}};
 
     receipt::Receipt rc;
     const receipt::Oracle oracle{"designer/print_check", "1"};
@@ -3924,6 +3973,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           r.clearance.minMm.value_or(0.0), "mm", r.clearance.note);
     claim("the STL chords keep the gap", r.chords.status, r.chords.deflectionMm,
           "mm", r.chords.note);
+    claim("every piece on the bed, with air over the others", st.status,
+          st.pairs.empty() ? st.limitMm : st.pairs.front().minAirMm, "mm",
+          st.note);
     AttachReceipt(out, rc);
     return out;
   }

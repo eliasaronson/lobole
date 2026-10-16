@@ -84,6 +84,20 @@ PrintCheckRun RunPrintCheck(const Document& part,
                              : "gap";
   }
 
+  // The air a face needs over another piece (printfit::MinAirMm): stated,
+  // else the print's; a process that is not FDM has none, and says so.
+  std::string noAir;
+  if (ask.minAirMm) {
+    o.minAirMm = *ask.minAirMm;
+    run.airFrom = "asked";
+  } else if (proc && printfit::MinAirMm(*proc) > 0.0) {
+    o.minAirMm = printfit::MinAirMm(*proc);
+    run.airFrom = printfit::MinAirFrom(*proc);
+    run.airSource = printfit::MinAirSource(*proc);
+  } else if (proc) {
+    noAir = printfit::MinAirSource(*proc) + "; state min_air_mm";
+  }
+
   run.report = printcheck::Check(bodies, o);
   const std::string unprinted =
       "the part has no print process: set_print_process, or state ";
@@ -101,6 +115,8 @@ PrintCheckRun RunPrintCheck(const Document& part,
     run.report.bridges.note = unprinted + "max_bridge_mm";
     run.report.bridges.limitMm = 0.0;
   }
+  if (!o.minAirMm)
+    run.report.stacking.note = noAir.empty() ? unprinted + "min_air_mm" : noAir;
   return run;
 }
 

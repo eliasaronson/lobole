@@ -28,6 +28,7 @@ struct PrintCheckAsk {
   std::optional<double> maxBridgeMm;
   std::optional<double> minGapMm; // the gap a side
   std::optional<double> stlDeflectionMm;
+  std::optional<double> minAirMm; // the air over another piece
 };
 
 struct PrintCheckRun {
@@ -36,10 +37,12 @@ struct PrintCheckRun {
   std::vector<int> bodyIndex; // report body i is part.GetBodies()[bodyIndex[i]]
   std::string process;        // printfit::Label, or "" for an unprinted part
   // Where each limit came from: "asked", "process" (the process's own
-  // number), "profile" / "gap" (the print's chord deviation), or "" when
-  // the item was skipped for want of one.
-  std::string overhangFrom, bridgeFrom, gapFrom, deflectionFrom;
-  std::string overhangSource, bridgeSource; // the process's, when used
+  // number), "profile" / "gap" (the print's chord deviation), "profile" /
+  // "layers" (the minimum air: the profile's z_gap_mm or its layer height),
+  // or "" when the item was skipped for want of one.
+  std::string overhangFrom, bridgeFrom, gapFrom, deflectionFrom, airFrom;
+  // The process's, when used.
+  std::string overhangSource, bridgeSource, airSource;
 };
 
 // The check over the part's non-reference bodies (only those created by a

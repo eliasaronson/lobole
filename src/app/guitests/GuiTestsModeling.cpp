@@ -2813,10 +2813,11 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
 
   // Check print (docs/tolerances/README.md#checking-a-print): the button in
   // the Print process section runs ui::RunPrintCheck on the part and lists
-  // the six items; a ceiling's Show selects the face it is about. A
+  // the seven items; a ceiling's Show selects the face it is about. A
   // cylinder standing at z = 0 and a second one held 3 above the bed: the
   // part is on the bed, two pieces, and the upper one's underside is a
-  // ceiling as wide as it is.
+  // ceiling as wide as it is -- and a piece that starts in the air, which
+  // the stacking line fails and its Show points at.
   t = IM_REGISTER_TEST(engine, "tolerance", "print_check_from_the_panel");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     Doc()->AddFeature(std::make_unique<CylinderFeature>(
@@ -2853,6 +2854,14 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(r.bridges.faces[0].heightMm - 3.0) < 1e-6);
     s_App->selection.Clear();
     ctx->ItemClick("###print_check_bridge");
+    ctx->Yield(2);
+    IM_CHECK(s_App->selection.First(ui::SelectionItem::Kind::Face) != nullptr);
+    IM_CHECK(r.stacking.status == printcheck::Status::Fail);
+    IM_CHECK(std::abs(r.stacking.limitMm - 0.6) < 1e-9);
+    IM_CHECK_SILENT(r.stacking.lifted.size() == 1);
+    IM_CHECK(std::abs(r.stacking.lifted[0].heightMm - 3.0) < 1e-6);
+    s_App->selection.Clear();
+    ctx->ItemClick("###print_check_stacking");
     ctx->Yield(2);
     IM_CHECK(s_App->selection.First(ui::SelectionItem::Kind::Face) != nullptr);
     Doc()->SetPrintProcess(std::nullopt);

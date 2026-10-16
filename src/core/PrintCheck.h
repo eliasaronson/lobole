@@ -13,7 +13,7 @@ struct Body;
 
 // Will this print? (docs/tolerances/README.md#checking-a-print): the one
 // printability check every printed part runs -- check_print, the Print
-// process section's Check print, and every print-in-place generator. Six
+// process section's Check print, and every print-in-place generator. Seven
 // items, each a measured value against a limit:
 //
 //   bed        the lowest point along the print direction is on the bed
@@ -22,6 +22,8 @@ struct Body;
 //   bridges    no ceiling spans further than the process bridges
 //   clearance  no two bodies are closer than the print's gap a side
 //   chords     the STL's chords cannot eat the gap
+//   stacking   every piece starts on the bed, and no face lies within the
+//              minimum air over another piece
 //
 // Measured on the B-Rep wherever the B-Rep can answer: the bed from an
 // optimal box without triangulation, every overhang angle from the surface
@@ -63,6 +65,9 @@ struct Options {
   std::optional<double> gapSideMm;
   // The chord deviation the part's STL is exported at.
   std::optional<double> stlDeflectionMm;
+  // The vertical air a face needs over another piece to come away from it
+  // (printfit::MinAirMm); nullopt skips stacking.
+  std::optional<double> minAirMm;
 };
 
 // Where an item's worst value is: the body (an index into the bodies the
@@ -159,6 +164,38 @@ struct Chords {
   std::string note;
 };
 
+// A piece: solids that touch print as one (the shells item's).
+struct Piece {
+  std::vector<int> bodies; // every body with a solid in it, in order
+  double lowestMm = 0.0;   // above the print's lowest point
+};
+
+// A piece that does not start on the bed: printed into the air.
+struct Lifted {
+  int piece = -1;
+  double heightMm = 0.0; // its lowest point above the print's
+  Where where;           // its lowest face
+};
+
+// One piece printed over another within the minimum air.
+struct Stacked {
+  int above = -1, below = -1; // pieces
+  double areaMm2 = 0.0;       // of the upper piece's faces under the limit
+  double minAirMm = 0.0;      // the least vertical air between them
+  Where where;                // the upper piece's face there, and the point
+};
+
+struct Stacking {
+  Status status = Status::Skipped;
+  double limitMm = 0.0;     // the minimum air
+  double toleranceMm = 0.0; // passes down to limit - tolerance
+  std::vector<Piece> pieces;
+  std::vector<Lifted> lifted; // highest first
+  std::vector<Stacked> pairs; // least air first
+  int samples = 0;            // points the air was measured from
+  std::string note;
+};
+
 struct Report {
   std::vector<BodyInfo> bodies;
   Bed bed;
@@ -167,6 +204,7 @@ struct Report {
   Bridges bridges;
   Clearance clearance;
   Chords chords;
+  Stacking stacking;
   // Every item that ran passed.
   [[nodiscard]] bool Ok() const;
 };
