@@ -464,7 +464,20 @@ struct OccurrenceMass {
   glm::dvec3 centerOfMass{0.0}; // world space
   bool massKnown = false;       // false when the part has a density-less body
   double massG = 0.0;           // valid when massKnown
+  // About centerOfMass, world axes, in g mm^2; valid when massKnown.
+  glm::dmat3 inertiaGmm2{0.0};
 };
+
+// The inertia of masses about their common centre, world axes, g mm^2: each
+// one's own (about its centre, world axes) carried there by the parallel
+// axis theorem. `centre` is the common centre.
+struct PointInertia {
+  double massG = 0.0;
+  glm::dvec3 centre{0.0};
+  glm::dmat3 inertiaGmm2{0.0};
+};
+glm::dmat3 InertiaAbout(const std::vector<PointInertia>& parts,
+                        const glm::dvec3& centre);
 
 // Combined mass properties of an assembly: the total plus a per-occurrence
 // breakdown, all in world space. Suppressed (by the active configuration) and

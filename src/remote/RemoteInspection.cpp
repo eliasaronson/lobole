@@ -1220,7 +1220,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`settings` it used and the `method`), or {why} naming what is "
      "unstated (set_print_settings walls, top_layers, bottom_layers, "
      "infill_pct, and the profile's layer_height_mm and line_width_mm); "
-     "`total.printed` sums them.",
+     "`total.printed` sums them. From an assembly, each occurrence says "
+     "`mass_from` (printed when its part is printed, with its `printed` "
+     "{mass_g, center_of_mass_mm} or {why}; solid otherwise), and, when one "
+     "is printed, `total.printed` weighs the assembly as built: {mass_g, "
+     "center_of_mass_mm, inertia_g_mm2 (about that centre, world axes), "
+     "printed[], solid[] (the occurrences weighed each way)} or {why}.",
      "part?:string|int, body?:int", remote::NoFlags,
      "bodies?:{bbox_max:number[], bbox_min:number[], body:int, "
      "center_of_mass_mm:number[], inertia:number[][], "
@@ -1232,7 +1237,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "volume_mm3:number, printed?:object}, "
      "occurrences?:{center_of_mass_mm:number[], "
      "mass_g:number|null, name:string, occurrence:int, part_id:int, "
-     "volume_mm3:number}[]"},
+     "volume_mm3:number, mass_from:string, printed?:object}[]"},
     // This row said "point/distance/angle/radius" for a year and the handler
     // implemented distance. `describe` is what an agent trusts INSTEAD of
     // guessing, so a row that promises a branch nobody wrote is the
@@ -3684,8 +3689,29 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       const assembly::PartResolver resolve = ui::PartResolverFor(state);
       const assembly::AssemblyMass am = assembly::MassProperties(
           *state.assembly, resolve, ui::AssemblyResolverFor(state));
+      const auto flat = assembly::Flatten(*state.assembly, resolve,
+                                          ui::AssemblyResolverFor(state));
+      // Each occurrence's printed estimate, by its leaf: MassProperties
+      // weighs the visible leaves in Flatten's order, skipping the ones it
+      // could not measure, and names each by its path.
+      std::vector<const assembly::FlatInstance*> leafOf(am.occurrences.size(),
+                                                        nullptr);
+      if (flat) {
+        size_t k = 0;
+        for (const assembly::FlatInstance& inst : *flat)
+          if (inst.visible && k < am.occurrences.size() &&
+              am.occurrences[k].name == inst.path)
+            leafOf[k++] = &inst;
+      }
+      // As built: a printed part's occurrence by its printed estimate, any
+      // other by its solid (docs/tolerances/README.md#printed-mass).
+      std::vector<assembly::PointInertia> built;
+      json printedNames = json::array(), solidNames = json::array();
+      std::string builtWhy;
+      bool anyPrinted = false;
       json rows = json::array();
-      for (const assembly::OccurrenceMass& om : am.occurrences) {
+      for (size_t k = 0; k < am.occurrences.size(); k++) {
+        const assembly::OccurrenceMass& om = am.occurrences[k];
         json entry = {
             {"occurrence", om.occurrenceId},
             {"name", om.name},
@@ -3694,14 +3720,88 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             {"center_of_mass_mm",
              {om.centerOfMass.x, om.centerOfMass.y, om.centerOfMass.z}}};
         entry["mass_g"] = om.massKnown ? json(om.massG) : json(nullptr);
+        // The leaf's printed bodies, summed in the part's frame.
+        std::vector<assembly::PointInertia> bodies;
+        std::string why;
+        bool printedPart = false;
+        if (const assembly::FlatInstance* inst = leafOf[k]) {
+          std::string err;
+          const auto mass = Measure::MassOfBodies(inst->part->GetBodies(), &err,
+                                                  inst->material);
+          size_t i = 0;
+          for (const Body& b : inst->part->GetBodies()) {
+            if (b.reference)
+              continue;
+            const Measure::BodyMass* bm =
+                mass && i < mass->bodies.size() ? &mass->bodies[i] : nullptr;
+            i++;
+            const json pr = PrintedMassJson(
+                state, *inst->part, b, bm && bm->massKnown ? bm->density : 0.0);
+            if (pr.is_null())
+              continue;
+            printedPart = true;
+            if (!pr.contains("mass_g") || pr["mass_g"].is_null()) {
+              why = pr.value("why", std::string("its filament's density is "
+                                                "unknown"));
+              continue;
+            }
+            const double g = pr["mass_g"].get<double>();
+            const double v = pr["volume_mm3"].get<double>();
+            const auto& c = pr["center_of_mass_mm"];
+            const auto& in = pr["inertia"];
+            glm::dmat3 own(0.0);
+            for (int r = 0; r < 3; r++)
+              for (int col = 0; col < 3; col++)
+                own[col][r] = in[r][col].get<double>() * (v > 0 ? g / v : 0.0);
+            bodies.push_back(
+                {g,
+                 {c[0].get<double>(), c[1].get<double>(), c[2].get<double>()},
+                 own});
+          }
+          if (printedPart && why.empty()) {
+            double g = 0.0;
+            glm::dvec3 moment(0.0);
+            for (const auto& b : bodies) {
+              g += b.massG;
+              moment += b.massG * b.centre;
+            }
+            const glm::dvec3 local = g > 0.0 ? moment / g : glm::dvec3(0.0);
+            const glm::dmat3 rot(inst->world);
+            const glm::dmat3 I = rot * assembly::InertiaAbout(bodies, local) *
+                                 glm::transpose(rot);
+            const glm::dvec3 world =
+                glm::dvec3(inst->world * glm::dvec4(local, 1.0));
+            entry["printed"] = {
+                {"mass_g", g},
+                {"center_of_mass_mm", {world.x, world.y, world.z}},
+                {"estimate", true}};
+            built.push_back({g, world, I});
+          } else if (printedPart) {
+            entry["printed"] = {{"why", why}};
+          }
+        }
+        if (printedPart) {
+          anyPrinted = true;
+          entry["mass_from"] = "printed";
+          printedNames.push_back(om.name);
+          if (!why.empty() && builtWhy.empty())
+            builtWhy = om.name + ": " + why;
+        } else {
+          entry["mass_from"] = "solid";
+          solidNames.push_back(om.name);
+          if (om.massKnown)
+            built.push_back({om.massG, om.centerOfMass, om.inertiaGmm2});
+          else if (builtWhy.empty())
+            builtWhy = om.name + ": its solid mass is unknown (a body with "
+                                 "no material)";
+        }
         rows.push_back(entry);
       }
       const glm::dvec3& com = am.centerOfMass;
       // Everything weighed, together: every visible leaf where the solve
       // put it.
       Bnd_Box all;
-      if (const auto flat = assembly::Flatten(*state.assembly, resolve,
-                                              ui::AssemblyResolverFor(state)))
+      if (flat)
         for (const assembly::FlatInstance& inst : *flat)
           if (inst.visible && inst.part != nullptr)
             AddMeasuredBox(all, inst.part->GetBodies(), inst.world);
@@ -3712,6 +3812,29 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
            {{"volume_mm3", am.volume},
             {"center_of_mass_mm", {com.x, com.y, com.z}},
             {"mass_g", am.massKnown ? json(am.massG) : json(nullptr)}}}};
+      if (anyPrinted) {
+        json tp = {{"printed", printedNames}, {"solid", solidNames}};
+        if (builtWhy.empty()) {
+          double g = 0.0;
+          glm::dvec3 moment(0.0);
+          for (const auto& b : built) {
+            g += b.massG;
+            moment += b.massG * b.centre;
+          }
+          const glm::dvec3 c = g > 0.0 ? moment / g : glm::dvec3(0.0);
+          const glm::dmat3 I = assembly::InertiaAbout(built, c);
+          json inertia = json::array();
+          for (int r = 0; r < 3; r++)
+            inertia.push_back({I[0][r], I[1][r], I[2][r]});
+          tp["mass_g"] = g;
+          tp["center_of_mass_mm"] = {c.x, c.y, c.z};
+          tp["inertia_g_mm2"] = inertia;
+          tp["estimate"] = true;
+        } else {
+          tp["why"] = builtWhy;
+        }
+        out["total"]["printed"] = tp;
+      }
       if (!am.skipped.empty())
         out["skipped"] = am.skipped;
       return out;

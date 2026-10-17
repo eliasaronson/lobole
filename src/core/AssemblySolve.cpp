@@ -2117,6 +2117,17 @@ SolveReport Solve(AssemblyDocument& asmDoc, const PartResolver& partById,
   return report;
 }
 
+glm::dmat3 InertiaAbout(const std::vector<PointInertia>& parts,
+                        const glm::dvec3& centre) {
+  glm::dmat3 out(0.0);
+  for (const PointInertia& p : parts) {
+    const glm::dvec3 d = p.centre - centre;
+    out += p.inertiaGmm2 + p.massG * (glm::dot(d, d) * glm::dmat3(1.0) -
+                                      glm::outerProduct(d, d));
+  }
+  return out;
+}
+
 AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
                             const PartResolver& partById,
                             const AssemblyResolver& asmById) {
@@ -2159,6 +2170,21 @@ AssemblyMass MassProperties(const AssemblyDocument& asmDoc,
     om.centerOfMass = worldCom;
     om.massKnown = mass->massKnown; // mass is rigid-transform invariant
     om.massG = mass->massG;
+    if (om.massKnown) {
+      // Each body's own, by its density (g/mm^3 = kg/m^3 * 1e-6), about the
+      // part's centre, then turned with the placement.
+      std::vector<PointInertia> bodies;
+      for (const Measure::BodyMass& bm : mass->bodies) {
+        glm::dmat3 own(0.0);
+        for (int r = 0; r < 3; r++)
+          for (int c = 0; c < 3; c++)
+            own[c][r] = bm.inertia[r][c] * bm.density * 1e-6;
+        bodies.push_back({bm.massG, bm.centerOfMass, own});
+      }
+      const glm::dmat3 rot(xf);
+      om.inertiaGmm2 =
+          rot * InertiaAbout(bodies, mass->centerOfMass) * glm::transpose(rot);
+    }
     out.occurrences.push_back(om);
 
     out.volume += mass->volume;

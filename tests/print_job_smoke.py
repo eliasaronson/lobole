@@ -306,6 +306,47 @@ def main():
                f"an unstated setting is named: {unstated}")
         d.call("set_print_settings", walls=4)
 
+        # --- an assembly's printed mass ---------------------------------------
+        # The block printed, beside a steel block that is not: the total
+        # weighs each as it is made and says which.
+        block_printed = m["printed"]["mass_g"]
+        d.call("add_part", name="steel")
+        sb = box(d, (0, 0, 0), (10, 10, 10), name="Steel")
+        d.call("set_material", feature_id=sb["id"], material="steel")
+        steel = d.call("mass_properties")["total"]
+        d.call("add_assembly", name="printed rig")
+        d.call("add_occurrence", part="block", fixed=True)
+        d.call("add_occurrence", part="steel", fixed=True, transform={
+            "position": [40.0, 0.0, 0.0], "orientation": [0, 0, 0, 1]})
+        am = d.call("mass_properties")
+        rows = {r["name"]: r for r in am["occurrences"]}
+        expect(rows["block"]["mass_from"] == "printed" and
+               abs(rows["block"]["printed"]["mass_g"] - block_printed)
+               < 1e-9 * block_printed, f"the block weighs printed: {rows}")
+        expect(rows["steel"]["mass_from"] == "solid" and
+               "printed" not in rows["steel"], f"the steel solid: {rows}")
+        tp = am["total"]["printed"]
+        want = block_printed + steel["mass_g"]
+        expect(abs(tp["mass_g"] - want) < 1e-9 * want,
+               f"the total is the block printed and the steel solid: {tp} "
+               f"against {want}")
+        expect(tp["printed"] == ["block"] and tp["solid"] == ["steel"], tp)
+        # The centre: the printed block's (10, 10, 5) and the steel's
+        # (45, 5, 5), by their masses; the solid total stays the solid's.
+        cx = (block_printed * 10.0 + steel["mass_g"] * 45.0) / want
+        expect(abs(tp["center_of_mass_mm"][0] - cx) < 1e-3,
+               f"the centre by the printed masses: {tp} against x {cx}")
+        expect(am["total"]["mass_g"] is None or
+               am["total"]["mass_g"] != tp["mass_g"],
+               f"the solid total is not the printed one: {am['total']}")
+        # Inertia about the centre, in g mm^2: the steel's own (m a^2 / 6
+        # for a cube), the printed block's, and both carried to the centre.
+        I = tp["inertia_g_mm2"]
+        expect(len(I) == 3 and I[0][1] == I[1][0], f"a symmetric tensor: {I}")
+        own_steel = steel["mass_g"] * 100.0 / 6.0
+        expect(I[1][1] > own_steel + steel["mass_g"] * (45.0 - cx) ** 2,
+               f"Iyy holds the steel's own and its offset: {I}")
+
         # --- the job ------------------------------------------------------------
         plate(d, "plate 1", [("bob", 60, 60), ("block", 120, 60)])
         plate(d, "plate 2", [("plain", 120, 120)])
