@@ -36,14 +36,17 @@ sys.path.insert(0, os.path.dirname(HERE))
 import clock_parts as P  # noqa: E402
 import clock_spec as S  # noqa: E402
 import cycloidal as C  # noqa: E402
-from _lib import (PRINT_ITEMS, check_print, fresh_project,  # noqa: E402
+from _lib import (PRINT_ITEMS, bed_zones, check_print,  # noqa: E402
+                  clear_x, export_print_job, fresh_project, job_receipt,
                   print_item_line, print_receipt)
 from lobole.sdk import SdkError, connect  # noqa: E402
 
 ROOT = Path(HERE).resolve().parent.parent
 OUT = Path(os.environ.get("LOBOLE_SCRATCH", ROOT / "scratch")) / "clock"
-BED_MM = 256.0        # the P1S's bed, square
+BED_MM = 256.0        # the P1S's bed, square; the profile's bed_mm when
+                      # it states one (main)
 BED_MARGIN = 4.0      # kept clear round its edge
+BED_ZONES = []        # the profile's keep-out zones (bed_exclude_mm)
 PHASES = []
 
 
@@ -145,18 +148,53 @@ def build_parts(d, s, proc):
     P.build_dial_spacer(d, s, proc)
 
 
+# What swings is weighed as it PRINTS (mass_properties' printed estimate,
+# docs/tolerances/README.md#printed-mass), so the period is the period of
+# the plastic on the bed. SOLID is the other reading, kept to say what the
+# infill moves.
+WEIGH = {"as": "printed"}
+
+
 def body_props(d, part):
-    """Each body's (mass_g, centre of mass, I_zz about it g mm^2)."""
+    """Each body's (mass_g, centre of mass, I_zz about it g mm^2), as it
+    prints: the printed estimate at the part's slicer settings. A part
+    printed solid (100 %) with no estimate (no profile states a layer and a
+    line width) is its solid self; any other part without one is refused --
+    its period would be the solid's, which it does not print as."""
     r = d.call("mass_properties", part=part)
     out = []
     for b in r["bodies"]:
-        rho = b["mass_g"] / b["volume_mm3"]
-        out.append((b["mass_g"], b["center_of_mass_mm"],
-                    b["inertia"][2][2] * rho))
+        pr = b.get("printed")
+        solid = WEIGH["as"] == "solid"
+        if not solid and (not pr or pr.get("mass_g") is None):
+            st = d.call("get_print_settings", part=part)["bodies"][0]
+            if st["settings"].get("infill_pct") != 100:
+                raise SystemExit(
+                    f"clock: {part} has no printed mass ("
+                    f"{(pr or {}).get('why', 'not printed')}), and at "
+                    f"{st['described']} it is not its solid self: the "
+                    "period is computed for what prints, or refused")
+            solid = True
+        if solid:
+            rho = b["mass_g"] / b["volume_mm3"]
+            out.append((b["mass_g"], b["center_of_mass_mm"],
+                        b["inertia"][2][2] * rho))
+        else:
+            rho = pr["mass_g"] / pr["volume_mm3"]
+            out.append((pr["mass_g"], pr["center_of_mass_mm"],
+                        pr["inertia"][2][2] * rho))
     return out
 
 
 PENDULUM = ("pendulum rod", "bob", "rating nut")
+# The pendulum prints SOLID, rectilinear (Bambu refuses grid at 100 %):
+# its period was designed for its mass, and a 15 % bob is a lighter,
+# shorter-swinging one. Bob and nut stand on end, the rod's axis (+Y) up;
+# the rod lies on its back (+Z up).
+PENDULUM_PRINT = {"walls": 3, "top_layers": 5, "bottom_layers": 5,
+                  "infill_pct": 100, "infill_pattern": "rectilinear"}
+PENDULUM_UP = {"pendulum rod": [0, 0, 1], "bob": [0, 1, 0],
+               "rating nut": [0, 1, 0]}
 
 
 def build_pendulum(d, s, proc, length):
@@ -168,6 +206,10 @@ def build_pendulum(d, s, proc, length):
     y_n = S.nut_y(s, length)
     P.build_rating_nut(d, s, proc, y_n)
     P.build_bob(d, s, proc, y_n + s["nut"]["h"])
+    if proc is not None:
+        for name in PENDULUM:
+            d.call("set_print_settings", part=name, direction=PENDULUM_UP[name],
+                   **PENDULUM_PRINT)
     s["pend"]["length"] = length
     s["pend"]["nut_y"] = y_n
 
@@ -768,6 +810,12 @@ def pack(d, pieces, spacing):
         boxes.append((part, label, kind, lo, hi))
     boxes.sort(key=lambda b: -(b[4][1] - b[3][1]))
     usable = BED_MM - 2.0 * BED_MARGIN
+    # The bed's keep-out zones, in the packing's frame (the margin off).
+    zones = [[z[0] - BED_MARGIN, z[1] - BED_MARGIN, z[2] - BED_MARGIN,
+              z[3] - BED_MARGIN] for z in BED_ZONES]
+
+    def free(x, y, w, h):
+        return clear_x(x, y, w, h, zones, spacing)
     beds = []
     for box in boxes:
         w, h = box[4][0] - box[3][0], box[4][1] - box[3][1]
@@ -777,37 +825,46 @@ def pack(d, pieces, spacing):
         placed = False
         for bed in beds:
             for row in bed["rows"]:
-                if row["x"] + w <= usable + 1e-9 and h <= row["h"] + 1e-9:
-                    bed["items"].append((box, row["x"], row["y"]))
-                    row["x"] += w + spacing
+                x = free(row["x"], row["y"], w, h)
+                if x + w <= usable + 1e-9 and h <= row["h"] + 1e-9:
+                    bed["items"].append((box, x, row["y"]))
+                    row["x"] = x + w + spacing
                     placed = True
                     break
             if placed:
                 break
-            if bed["y"] + h <= usable + 1e-9:
-                bed["rows"].append({"x": w + spacing, "y": bed["y"],
+            x = free(0.0, bed["y"], w, h)
+            if bed["y"] + h <= usable + 1e-9 and x + w <= usable + 1e-9:
+                bed["rows"].append({"x": x + w + spacing, "y": bed["y"],
                                     "h": h})
-                bed["items"].append((box, 0.0, bed["y"]))
+                bed["items"].append((box, x, bed["y"]))
                 bed["y"] += h + spacing
                 placed = True
                 break
         if not placed:
-            beds.append({"rows": [{"x": w + spacing, "y": 0.0, "h": h}],
-                         "items": [(box, 0.0, 0.0)], "y": h + spacing})
+            x = free(0.0, 0.0, w, h)
+            beds.append({"rows": [{"x": x + w + spacing, "y": 0.0, "h": h}],
+                         "items": [(box, x, 0.0)], "y": h + spacing})
     return [[(b[0], b[1], b[2], (BED_MARGIN + x, BED_MARGIN + y), b[3])
              for b, x, y in bed["items"]] for bed in beds]
 
 
 def pendulum_bed(d):
-    """The rod corner to corner (it is longer than the bed), the bob and
-    the rating nut in the two corners it leaves."""
+    """The rod corner to corner (it is longer than the bed), from the
+    front right to the back left so it stays clear of the keep-out zone in
+    the front-left corner, and the bob and the rating nut in the two
+    corners it leaves: the bob at the back right, the nut at the front
+    left, past the zone."""
     lo, hi = bbox(d, "pendulum rod")
     out = [("pendulum rod", "pendulum rod", "diag", None, (lo, hi))]
-    for part, corner in (("bob", "top-left"), ("rating nut", "bottom-right")):
+    for part, corner in (("bob", "top-right"), ("rating nut", "bottom-left")):
         rl, rh = rotated_box(*bbox(d, part), "up")
         w, h = rh[0] - rl[0], rh[1] - rl[1]
-        x = BED_MARGIN if corner == "top-left" else BED_MM - BED_MARGIN - w
-        y = BED_MM - BED_MARGIN - h if corner == "top-left" else BED_MARGIN
+        if corner == "top-right":
+            x, y = BED_MM - BED_MARGIN - w, BED_MM - BED_MARGIN - h
+        else:
+            y = BED_MARGIN
+            x = clear_x(BED_MARGIN, y, w, h, BED_ZONES, S.lines(10))
         out.append((part, part, "up", (x, y), rl))
     return out
 
@@ -822,13 +879,14 @@ def make_bed(d, proc, name, items):
     for part, label, kind, at, lo in items:
         if kind == "diag":
             blo, bhi = lo
-            # The rod's Y along the bed's diagonal: turned -45 degrees about
-            # Z (its top, +Y, towards the far corner), centred on the bed.
-            h = math.radians(-45.0) / 2.0
+            # The rod's Y along the bed's diagonal: turned 45 degrees about
+            # Z (its top, +Y, towards the back left corner, away from the
+            # front-left keep-out zone), centred on the bed.
+            h = math.radians(45.0) / 2.0
             q = [0.0, 0.0, math.sin(h), math.cos(h)]
             cx, cy = (blo[0] + bhi[0]) / 2.0, (blo[1] + bhi[1]) / 2.0
-            c, sn = math.cos(math.radians(-45.0)), math.sin(math.radians(
-                -45.0))
+            c, sn = math.cos(math.radians(45.0)), math.sin(math.radians(
+                45.0))
             rx, ry = c * cx - sn * cy, sn * cx + c * cy
             pos = [BED_MM / 2.0 - rx, BED_MM / 2.0 - ry, -blo[2]]
             orient = "flat on its back face, diagonal"
@@ -867,12 +925,13 @@ def print_plates(d, s, proc, out):
         "centre spacer", "drum", "cannon pinion", "minute wheel",
         "hour wheel", "minute hand", "hour hand", "dial ring")] +
         [("dial spacer", f"dial spacer {k + 1}", "flat") for k in range(2)])
-    plates = {}
+    plates, jobs = {}, {}
     for stage, pieces in (("stage1", stage1), ("stage2", stage2)):
         beds = pack(d, pieces, sp)
         if stage == "stage1":
             beds.append(pendulum_bed(d))
         (out / stage).mkdir(parents=True, exist_ok=True)
+        names = []
         for k, items in enumerate(beds):
             name = f"{stage} plate {k + 1}"
             rows = make_bed(d, proc, name, items)
@@ -882,14 +941,26 @@ def print_plates(d, s, proc, out):
             pr = check_print(d, f"  {name}", need=PRINT_ITEMS, quiet=True)
             path = out / stage / f"plate{k + 1}.stl"
             exp = d.call("export_stl", path=str(path))
+            total = d.call("mass_properties")["total"]
             plates[name] = {"stl": str(path), "pieces": rows,
                             "shells": exp.get("shells"),
                             "deflection_mm": exp.get("deflection_mm"),
+                            "solid_g": total.get("mass_g"),
+                            "printed_g": (total.get("printed") or {}).get(
+                                "mass_g"),
                             "print": print_receipt(pr)}
+            names.append(name)
             print(f"  {name}: {len(rows)} pieces, every check_print item "
                   f"passes ({print_item_line('stacking', pr['stacking'])})"
                   f" -> {path.name}")
-    return plates
+        # One job a stage, every piece its own object with its settings: the
+        # pendulum solid, the rest at the frame's.
+        jobs[stage] = (job_receipt(export_print_job(
+            d, [(n, n) for n in names],
+            out / stage / f"clock_{stage}_job.3mf", "pla"))
+            if "profile" in proc else
+            {"skipped": "printed on the built-in table: no printer"})
+    return plates, jobs
 
 
 # --- the test card ---------------------------------------------------------------------
@@ -912,7 +983,8 @@ profile {profile}. Predicted before printing, by build.py.
 
 | what | predicted |
 |---|---|
-| period at the design swing (±{e['amplitude_deg']:.2f}°) | {pred['period_s']:.5f} s |
+| period at the design swing (±{e['amplitude_deg']:.2f}°), printed as set below | {pred['period_s']:.5f} s |
+| the same parts read solid | {pred['period_read_solid_s']:.5f} s |
 | rate, as built | {pred['rate_s_day']:+.1f} s/day |
 | a turn of the rating nut that lowers the bob | {pred['per_turn_s_day']:+.0f} s/day ({pred['per_notch_s_day']:+.1f} a notch of {s['nut']['notches']}) |
 | a degree more swing either way | {pred['per_degree_s_day']:+.1f} s/day (circular error) |
@@ -923,7 +995,8 @@ profile {profile}. Predicted before printing, by build.py.
 The pendulum: rod {pend['length']:.1f} mm from the anchor arbor to its lower end, bob
 {pend['bob_w']:g} × {pend['bob_h']:g} × {s['bob_depth']:g} mm on the rating nut;
 equivalent length {pred['equivalent_length_mm']:.1f} mm, {pred['pendulum_g']:.0f} g swinging
-(rod, bob, nut, anchor and arbor, modelled solid). Escape wheel {e['Z']} teeth, train
+(rod, bob, nut, anchor and arbor, weighed as they print: the pendulum at
+{pred['period_at']['pendulum']}, the anchor at {pred['period_at']['anchor']}). Escape wheel {e['Z']} teeth, train
 {c['escape_pinion']}/{c['third']} and {c['third_pinion']}/{c['centre']} (escape to centre {c['escape_to_centre']:g}:1), motion
 works {S.Z_CANNON}/{S.Z_MINUTE_W} and {S.Z_MINUTE_P}/{S.Z_HOUR}, module {s['module']:g}.
 
@@ -933,9 +1006,11 @@ the clock gains.
 
 ## Print
 
-Solid (100 % infill) or every swinging part at the same infill: the period
-depends on how the mass is spread, not how much there is. 0.2 mm layers, no
-supports, no brim.
+The pendulum (rod, bob and rating nut) SOLID, 100 % rectilinear, as its
+period is computed; every other part at Bambu Studio's 0.20 mm Standard (2
+walls, 5/3 shells, 15 % grid). Each stage's print job (`clock_stage1_job.3mf`,
+`clock_stage2_job.3mf`) carries those per object; printed from bare STLs, set
+them by hand. 0.2 mm layers, no supports, no brim.
 
 | plate | piece | orientation |
 |---|---|---|
@@ -965,6 +1040,7 @@ supports, no brim.
 # --- main ------------------------------------------------------------------------------
 
 def main():
+    global BED_MM, BED_ZONES
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--port", type=int)
     ap.add_argument("--period", type=float, default=1.0,
@@ -1005,6 +1081,12 @@ def main():
         if prof is None:
             raise SystemExit(f"clock: no print profile '{args.profile}'; "
                              "list_print_profiles names yours")
+    if prof.get("bed_mm"):
+        if prof["bed_mm"][0] != prof["bed_mm"][1]:
+            raise SystemExit("clock: the packer fills a square bed; "
+                             f"'{args.profile}' is {prof['bed_mm']}")
+        BED_MM = float(prof["bed_mm"][0])
+        BED_ZONES = bed_zones(prof)
     if prof.get("material", args.material) != "pla":
         raise SystemExit("clock: the parts are PLA (its density is in the "
                          "pendulum's sums)")
@@ -1159,12 +1241,27 @@ def main():
                              "check")
 
     with phase("predictions"):
+        # The period is the printed pendulum's; the same parts read solid
+        # say what the infill moves.
+        WEIGH["as"] = "solid"
+        cp_solid = S.compound_period(swinging(d), e["amplitude_deg"])
+        WEIGH["as"] = "printed"
+        pend_print = d.call("get_print_settings", part="bob")["bodies"][0]
+        print(f"  the period at the pendulum's {pend_print['described']}: "
+              f"{cp['period_s']:.6f} s (read solid, "
+              f"{cp_solid['period_s']:.6f} s)")
         p_turn = rating_per_turn(d, s, cp)
         amp = e["amplitude_deg"]
         cp1 = S.compound_period(swinging(d), amp + 1.0)
         r_cord = s["drum"]["r_cord"]
         pred = {
             "period_s": cp["period_s"], "small_swing_s": cp["small_swing_s"],
+            "period_at": {"pendulum": pend_print["described"],
+                          "anchor": d.call("get_print_settings",
+                                           part="anchor")["bodies"][0][
+                                               "described"],
+                          "weighed": "printed (mass_properties' estimate)"},
+            "period_read_solid_s": cp_solid["period_s"],
             "rate_s_day": -86400.0 * (cp["period_s"] - args.period)
             / args.period,
             "per_turn_s_day": p_turn,
@@ -1196,7 +1293,16 @@ def main():
                   f"{', reused' if v['reused'] else ''})")
 
     with phase("print plates"):
-        plates = print_plates(d, s, proc, out)
+        plates, jobs = print_plates(d, s, proc, out)
+        solid = sum(p["solid_g"] or 0.0 for p in plates.values())
+        printed = [p["printed_g"] for p in plates.values()]
+        weight = {"solid_g": solid,
+                  "printed_g": sum(printed) if all(printed) else None}
+        if weight["printed_g"]:
+            weight["printed_share"] = weight["printed_g"] / solid
+            print(f"  the clock prints {weight['printed_g']:.0f} g against "
+                  f"{solid:.0f} g solid "
+                  f"({100 * weight['printed_share']:.0f} %)")
 
     if not args.no_render:
         with phase("renders"):
@@ -1225,6 +1331,7 @@ def main():
                               allow.cache.items()},
                "jar": jar, "sizes": spec, "predictions": pred,
                "checks": checks, "fem": fem_r, "plates": plates,
+               "jobs": jobs, "weight": weight,
                "confirm": allow.confirm,
                "seconds": round(time.perf_counter() - t_start, 1),
                "phases": {n: round(t, 1) for n, t in PHASES}}

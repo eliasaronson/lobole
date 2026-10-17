@@ -21,8 +21,12 @@ The profile must state its bed (`bed_mm`): the plates are packed into it.
 
 Output, untracked, in `scratch/engine/` (or `$LOBOLE_SCRATCH/engine`, or
 `--out`): `engine.dsgn`, the receipt `engine.json`, the test card
-`engine_card.md`, `plate1.stl` and `plate2.stl` (PLA), `plate_tpu.stl`, and
-two stills (`engine.png`, `engine_section.png`).
+`engine_card.md`, `plate1.stl` and `plate2.stl` (PLA), `plate_tpu.stl`, the
+[print jobs](../../docs/tolerances/README.md#print-jobs) `engine_job.3mf`
+(the PLA plates, a Bambu project when `$LOBOLE_SLICER_CONFIGS` holds
+`pla.json`) and `engine_tpu_job.3mf` (the TPU plate, a spool of its own),
+and two stills (`engine.png`, `engine_section.png`). The plates pack round
+the profile's keep-out zone, and every piece is its own object in the job.
 
 | file | what |
 |---|---|
@@ -164,8 +168,9 @@ open, which errs safe for the valve-to-piston check.
     events leave its lobe's table;
   - rods 10 % long: every piston meets the head.
 - **Every print plate's `check_print`**, every item, `bed_fit` in the
-  profile's bed included, every piece on the bed; the TPU plate with its
-  limits stated (no TPU table), its box checked against the bed by hand.
+  profile's bed and clear of its keep-out zone included, every piece on
+  the bed; the TPU plate printed by the same profile's printer, its pieces
+  TPU, with the limits the PLA rows would set stated (no TPU table).
 
 `generator_engine` (generators/README.md#the-big-generators-as-tests) runs
 all of it but the stills, on the seeded P1S profile.
@@ -212,8 +217,11 @@ not an evening's print, the plan's hope, but two long ones.
 - **Contact, friction and the springs' force** are the bench's: whether
   a hand turns it easily, and whether TPU bellows close the valves against
   the buckets' friction, is what the print answers.
-- **A TPU part has no print process** (the tables carry PLA and PETG), so
-  its plate states every limit and `bed_fit` cannot run on it.
+- **A TPU part has no allowance table** (the tables carry PLA and PETG):
+  its plate is printed by the PLA profile's printer for its bed and layer,
+  its pieces TPU by their material, and states every limit the PLA rows
+  would set. The springs state only their walls, so the TPU plate has no
+  printed mass.
 - **No draft on an extrude**: a lobe printed standing would need one (or
   an intersection with a cone) under every lobe; the lobes are separate
   parts pressed on a bar instead.

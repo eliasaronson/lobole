@@ -13,8 +13,10 @@ pins and the foot, then the walker.
 
 The walker packs its plates into the printer's bed, the profile's
 `bed_mm`, so it needs a profile that states one: `print_coupon.py --seed`
-gives the P1S profiles theirs (256 x 256 x 256), and Settings, Print
-profiles sets anyone's. Without one it refuses, saying so.
+gives the P1S profiles theirs (256 x 256 x 250, and the 18 x 28 mm
+keep-out zone in its front-left corner, which the packer keeps clear of),
+and Settings, Print profiles sets anyone's. Without one it refuses, saying
+so.
 
 Output goes to `scratch/strandbeest/` (or `--out`):
 
@@ -24,9 +26,17 @@ Output goes to `scratch/strandbeest/` (or `--out`):
   bed;
 - the `.dsgn` of each stage, holding the parts, the plates, the assemblies
   and their studies;
+- `stage1/strandbeest_stage1_job.3mf` and `stage2/strandbeest_job.3mf`,
+  each stage's [print job](../../docs/tolerances/README.md#print-jobs):
+  every piece its own object where the packer put it, the standing pins at
+  three walls (`PIN_PRINT`: a standing shaft is all wall, and the preset's
+  two lines are thin round a pin a bar turns on), the rest at the preset,
+  no supports and no brim. The walker's is a Bambu project of its plates
+  when `$LOBOLE_SLICER_CONFIGS` holds `pla.json` (`tools/bambu-config.py`),
+  and is not written without one, the receipt saying why;
 - `strandbeest.json`, the receipt: every size, the layers, the
-  allowances it was built with, every check, the controls and the
-  predictions.
+  allowances it was built with, every check, the controls, the
+  predictions and the jobs.
 
 `linkage.py` is the leg as plain numbers: the lengths, the joints at a crank
 angle by circle intersections, the foot curve and the layer search. The
@@ -195,7 +205,7 @@ On every print plate:
 
 - `check_geometry` verified;
 - every `check_print` item passes, `bed_fit` among them: the plate in the
-  profile's bed;
+  profile's bed, every piece clear of its keep-out zone;
 - every piece starts on the bed;
 - the plate's box (`mass_properties`' `bbox_mm`) starts at the bed's
   corner, where the packer put it.

@@ -640,12 +640,13 @@ def print_footprints(s):
     return items
 
 
-def pack(items, bed, gap):
+def pack(items, bed, gap, zones=()):
     """MaxRects, best short side (generators/strandbeest/build.py's packer,
     on rectangles): each (key, w, h) onto beds of bed[0] x bed[1], `gap`
-    between boxes and from the edges, each turned a quarter if that fits
-    better. Returns beds of [(key, turned, x, y)], (x, y) the low corner of
-    the footprint as placed."""
+    between boxes and from the edges and from each of the bed's keep-out
+    `zones` [x0, y0, x1, y1], each turned a quarter if that fits better.
+    Returns beds of [(key, turned, x, y)], (x, y) the low corner of the
+    footprint as placed."""
     W, H = bed[0] - gap, bed[1] - gap
     order = sorted(items, key=lambda it: -(it[1] * it[2]))
     beds = []
@@ -696,7 +697,13 @@ def pack(items, bed, gap):
 
     for key, w, h in order:
         if all(not try_bed(b, key, w, h) for b in beds):
-            b = {"free": [(0.0, 0.0, W, H)], "items": []}
+            # A box at free-space x spans the bed's x + gap .. x + w + gap,
+            # so a zone taken out from x0 - gap to x1 keeps a gap round it.
+            free = [(0.0, 0.0, W, H)]
+            for z in zones:
+                free = split(free, z[0] - gap, z[1] - gap,
+                             z[2] - z[0] + gap, z[3] - z[1] + gap)
+            b = {"free": free, "items": []}
             if not try_bed(b, key, w, h):
                 raise ValueError(f"{key} ({w:.0f} x {h:.0f} mm) does not "
                                  f"fit the {bed[0]:g} x {bed[1]:g} mm bed")
@@ -711,15 +718,15 @@ def spacing(s):
     return lines(10)
 
 
-def plates_needed(s, bed):
+def plates_needed(s, bed, zones=()):
     items = []
     for name, (w, h), n in print_footprints(s):
         for k in range(n):
             items.append(((name, k), w, h))
-    return len(pack(items, bed, spacing(s)))
+    return len(pack(items, bed, spacing(s), zones))
 
 
-def search_bore(table, layer, bed, lo=20, hi=60):
+def search_bore(table, layer, bed, lo=20, hi=60, zones=()):
     """The default bore: the largest whole millimetre at which the PLA
     pieces pack into two beds and every size still prints (solve() does
     not refuse it), else the largest that packs into three. Returns (bore,
@@ -729,7 +736,7 @@ def search_bore(table, layer, bed, lo=20, hi=60):
     for b in range(hi, lo - 1, -1):
         try:
             s = solve(b, table, layer)
-            n = plates_needed(s, bed)
+            n = plates_needed(s, bed, zones)
         except ValueError as exc:
             tried.append((b, None, str(exc)))
             continue

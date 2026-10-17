@@ -144,6 +144,17 @@ def p_y(y):
     return {"origin": [0.0, y, 0.0], "normal": [0, 1, 0], "uAxis": [1, 0, 0]}
 
 
+# Bambu Studio's "0.20mm Standard" on the P1S, for every PLA part.
+PLA_PRINT = {"walls": 2, "top_layers": 5, "bottom_layers": 3,
+             "infill_pct": 15, "infill_pattern": "grid"}
+# The TPU parts, as the test card says: three walls, and the belt solid
+# (all walls at its size), rectilinear since grid cannot print 100 %.
+TPU_PRINT = {"timing belt": {"walls": 3, "top_layers": 5, "bottom_layers": 3,
+                             "infill_pct": 100,
+                             "infill_pattern": "rectilinear"},
+             "valve spring": {"walls": 3}}
+
+
 class Part:
     """Features into one part (generators/clock/clock_parts.py's
     Builder)."""
@@ -153,6 +164,12 @@ class Part:
         d.call("add_part", name=name)
         if proc is not None:
             d.call("set_print_process", **proc)
+        # What it prints with (set_print_settings): the PLA parts at the
+        # P1S's 0.20 mm Standard, stated so the printed mass weighs what
+        # prints; the TPU ones as the card asks.
+        settings = TPU_PRINT.get(name, PLA_PRINT if material == "pla" else {})
+        if settings:
+            d.call("set_print_settings", **settings)
         self.n = 0
         PRINT[name] = print_q
 

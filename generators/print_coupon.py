@@ -108,7 +108,8 @@ from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from lobole.sdk import Plane  # noqa: E402
 from _lib import (PRINT_ITEMS, check, check_print, circle,  # noqa: E402
-                  connect, fresh_project, line, print_receipt)
+                  connect, export_print_job, fresh_project, job_receipt,
+                  line, print_receipt)
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "scratch" / "print_coupon"
@@ -160,32 +161,49 @@ SEED = [
                "ordinary PLA: 0.15 mm a side slid freely"},
 ]
 # The P1S's build volume, mm (x, y, z): Bambu Lab's published 256 x 256 x
-# 256. The printer's, not the filament's, so both profiles carry it.
-P1S_BED_MM = [256.0, 256.0, 256.0]
+# 256, but 250 high in Bambu Studio's P1S preset (`printable_height`), the
+# slicer's limit and so the one a plate must fit. The printer's, not the
+# filament's, so both profiles carry it.
+P1S_BED_MM = [256.0, 256.0, 250.0]
+# Its keep-out zone, from Bambu Studio's P1S machine preset
+# (`bed_exclude_area` 0x0, 18x0, 18x28, 0x28): the front-left corner its
+# nozzle wiper sweeps, which the slicer refuses a part on.
+P1S_BED_EXCLUDE_MM = [[0.0, 0.0, 18.0, 28.0]]
+# The wall line width of Bambu Studio's "0.20mm Standard" process on a
+# 0.4 mm nozzle (`inner_wall_line_width`): what a printed part's mass takes
+# a wall loop as.
+P1S_LINE_WIDTH_MM = 0.45
+# What seeding gives a profile of that name that lacks it: the printer's
+# own numbers, never a filament's measurement.
+P1S_PRINTER = {"bed_mm": P1S_BED_MM, "bed_exclude_mm": P1S_BED_EXCLUDE_MM,
+               "line_width_mm": P1S_LINE_WIDTH_MM}
 
 
 def seed(d):
     """Install the two P1S profiles, leaving any name already stored -- but
-    giving one that states no bed the P1S's, its one missing number."""
+    giving one that lacks the P1S's bed, keep-out zone or line width
+    those, the printer's numbers it is missing."""
     have = {p["name"]: p for p in d.call("list_print_profiles")["profiles"]}
     for s in SEED:
         if s["name"] in have:
             mine = have[s["name"]]
-            if mine.get("bed_mm"):
+            missing = {k: v for k, v in P1S_PRINTER.items()
+                       if not mine.get(k)}
+            if not missing:
                 print(f"print_coupon: '{s['name']}' is already one of your "
                       f"profiles; left as it is")
                 continue
             keep = {k: mine[k] for k in (
                 "name", "process", "material", "conditions", "rows",
-                "layer_height_mm", "z_gap_mm") if k in mine}
+                "layer_height_mm", "z_gap_mm", "bed_mm", "bed_exclude_mm",
+                "line_width_mm") if k in mine}
             if mine.get("stl_deflection_stated"):
                 keep["stl_deflection_mm"] = mine["stl_deflection_mm"]
-            keep["bed_mm"] = P1S_BED_MM
+            keep.update(missing)
             d.call("save_print_profile", profile=keep)
             print(f"print_coupon: '{s['name']}' is already one of your "
-                  f"profiles; gave it the P1S's bed, "
-                  f"{' x '.join(f'{v:g}' for v in P1S_BED_MM)} mm, and left "
-                  f"the rest as it is")
+                  f"profiles; gave it the P1S's "
+                  f"{', '.join(sorted(missing))} and left the rest as it is")
             continue
         rows = [r for r in builtin_rows(d, "fdm", "pla")
                 if r["kind"] != "gap"]
@@ -195,7 +213,7 @@ def seed(d):
         p = d.call("save_print_profile", profile={
             "name": s["name"], "process": "fdm", "material": "pla",
             "conditions": P1S_CONDITIONS, "stl_deflection_mm": 0.01,
-            "layer_height_mm": s["layer"], "bed_mm": P1S_BED_MM,
+            "layer_height_mm": s["layer"], **P1S_PRINTER,
             "rows": rows})
         print(f"print_coupon: saved '{p['name']}' (gap {s['gap_side']:g} mm "
               f"a side)")
@@ -325,8 +343,9 @@ def record(d, args):
         out["layer_height_mm"] = layer
     if z_gap:
         out["z_gap_mm"] = z_gap
-    if prof.get("bed_mm"):
-        out["bed_mm"] = prof["bed_mm"]  # the printer's, kept as it was
+    for k in ("bed_mm", "bed_exclude_mm", "line_width_mm"):
+        if prof.get(k):
+            out[k] = prof[k]  # the printer's, kept as it was
     saved = d.call("save_print_profile", profile=out)
     z = (f", Z gap {saved['z_gap_mm']:g} mm" if saved.get("z_gap_mm")
          else "")
@@ -647,6 +666,44 @@ def press_row(d, proc, size, steps, step, name, cap_d=None, cap_t=None):
             "part": name}
 
 
+# The coupon's own part stands at the origin, in the bed's keep-out corner
+# on a P1S: its check leaves bed_fit to the plate the job prints it on.
+COUPON_ITEMS = tuple(k for k in PRINT_ITEMS if k != "bed_fit")
+
+
+def coupon_job(d, args, proc, name, out):
+    """The coupon's print job: a plate part with a Derived copy of it in
+    the middle of the profile's bed (clear of its keep-out zones), every
+    check_print item on it, then the job. Only with a profile that states
+    a bed and a layer: the built-in table is no printer, and a job slices
+    every object at the profile's layer."""
+    prof = (next((p for p in d.call("list_print_profiles")["profiles"]
+                  if p["name"] == args.profile), None)
+            if args.profile else None)
+    if not prof or not prof.get("bed_mm") or not prof.get("layer_height_mm"):
+        return {"skipped": "no print profile with a bed and a layer"}
+    box = d.call("mass_properties", part=name)["bbox_mm"]
+    bed = prof["bed_mm"]
+    at = [bed[k] / 2.0 - (box["min"][k] + box["max"][k]) / 2.0
+          for k in range(2)] + [0.0]
+    ids = {p["name"]: p["id"] for p in d.call("list_parts")["parts"]}
+    plate = f"{name} plate"
+    d.call("add_part", name=plate)
+    d.call("set_print_process", **proc)
+    check(d.call("add_feature", feature={
+        "type": "Derived", "name": name, "source_part": ids[name],
+        "reference": False,
+        "placement": {"position": at, "orientation": [0, 0, 0, 1]}}),
+        "the coupon on its plate")
+    check_print(d, f"{name} on the bed", need=("bed", "shells", "bed_fit"),
+                quiet=True)
+    r = job_receipt(export_print_job(d, [(plate, name)],
+                                     out / f"{name}_job.3mf",
+                                     prof["material"]))
+    d.call("set_active_part", part=name)
+    return r
+
+
 def press_coupon(d, args, proc):
     """--press-only: the press row on its own plate, checked, exported."""
     name = args.name or ("coupon_" + (
@@ -659,7 +716,8 @@ def press_coupon(d, args, proc):
     params = {"min_gap_mm": gap["allowance_mm"] / 2.0}
     if args.deflection is not None:
         params["stl_deflection_mm"] = args.deflection
-    pr = check_print(d, "press coupon", quiet=True, **params)
+    pr = check_print(d, "press coupon", quiet=True, need=COUPON_ITEMS,
+                     **params)
     if pr["shells"]["expected"] != 1 + len(row["caps"]):
         raise SystemExit(f"print_coupon: {pr['shells']['expected']} solids, "
                          f"not the plate and {len(row['caps'])} caps")
@@ -672,6 +730,7 @@ def press_coupon(d, args, proc):
         exp["deflection"] = args.deflection
     r = d.call("export_stl", **exp)
     row["stl_deflection_mm"] = r.get("deflection_mm")
+    row["job"] = coupon_job(d, args, proc, name, out)
     d.call("save_project", path=str(out / f"{name}.dsgn"))
     (out / f"{name}.json").write_text(json.dumps(row, indent=1))
     print(f"print_coupon: press row of {len(row['caps'])} -> {stl}")
@@ -1024,7 +1083,7 @@ def main():
         params["min_air_mm"] = min(r["air"] for r in rings)
     if args.deflection is not None:
         params["stl_deflection_mm"] = args.deflection
-    need = tuple(k for k in PRINT_ITEMS if not (nut and k == "overhang"))
+    need = tuple(k for k in COUPON_ITEMS if not (nut and k == "overhang"))
     pr = check_print(d, "print_coupon", quiet=True, need=need, **params)
     if pr["shells"]["expected"] != 1 + len(discs) + len(rings):
         raise SystemExit(f"print_coupon: {pr['shells']['expected']} solids, "
@@ -1039,6 +1098,7 @@ def main():
         exp["deflection"] = args.deflection
     r = d.call("export_stl", **exp)
     report["stl_deflection_mm"] = r.get("deflection_mm")
+    report["job"] = coupon_job(d, args, proc, name, out)
     d.call("save_project", path=str(out / f"{name}.dsgn"))
     (out / f"{name}.json").write_text(json.dumps(report, indent=1))
     print(f"print_coupon: {len(report['features'])} features -> {stl}")

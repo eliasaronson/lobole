@@ -34,7 +34,8 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
 import engine_parts as P  # noqa: E402
 import engine_spec as S  # noqa: E402
-from _lib import (PRINT_ITEMS, check, check_print, fresh_project,  # noqa: E402
+from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
+                  export_print_job, fresh_project, job_receipt,
                   print_item_line, print_receipt)
 from lobole.sdk import SdkError, connect  # noqa: E402
 
@@ -503,10 +504,10 @@ def pieces(d, kinds):
     return out
 
 
-def lay_out(pcs, bed, gap):
+def lay_out(pcs, bed, gap, zones=()):
     items = [(i, p["hi"][0] - p["lo"][0], p["hi"][1] - p["lo"][1])
              for i, p in enumerate(pcs)]
-    beds = S.pack(items, bed, gap)
+    beds = S.pack(items, bed, gap, zones)
     out = []
     for b in beds:
         rows = []
@@ -565,8 +566,9 @@ def print_plates(d, s, proc, prof, out):
     ids = {p["name"]: p["id"] for p in d.call("list_parts")["parts"]
            if p["type"] == "part"}
     plates = {}
-    pla = lay_out(pieces(d, PLA_PIECES), bed, gap)
-    tpu = lay_out(pieces(d, TPU_PIECES), bed, gap)
+    zones = bed_zones(prof)
+    pla = lay_out(pieces(d, PLA_PIECES), bed, gap, zones)
+    tpu = lay_out(pieces(d, TPU_PIECES), bed, gap, zones)
     if len(tpu) != 1:
         fail(f"the TPU pieces need {len(tpu)} plates")
     jobs = [(f"plate {k + 1}", rows, proc, f"plate{k + 1}.stl")
@@ -575,16 +577,19 @@ def print_plates(d, s, proc, prof, out):
     gs = S.Spec()
     del gs
     for name, rows, pp, fn in jobs:
-        placed = make_plate(d, name, pp, rows, ids)
+        # The TPU plate is printed by the same printer: its process gives
+        # the job its bed and layer, and its pieces' material says TPU.
+        placed = make_plate(d, name, proc, rows, ids)
         geo = d.call("check_geometry")
         if geo["receipt"]["standing"] != "verified":
             fail(f"{name} is not verified: {geo['receipt'].get('summary')}")
         if pp is not None:
             pr = check_print(d, f"  {name}", need=PRINT_ITEMS, quiet=True)
         else:
-            # TPU: no print process (the tables carry no TPU), so every
-            # limit is stated: the profile's printer, its air and chords,
-            # the 45-degree rule and the 10 mm bridge.
+            # TPU: the plate's process is the PLA profile's (the printer,
+            # its bed and layer; the tables carry no TPU), so every limit
+            # the PLA rows would set is stated: the profile's air and
+            # chords, the 45-degree rule and the 10 mm bridge.
             pr = check_print(d, f"  {name}", need=PRINT_ITEMS, quiet=True,
                              max_overhang_deg=45.0, max_bridge_mm=10.0,
                              min_gap_mm=s.g_side_min,
@@ -608,6 +613,8 @@ def print_plates(d, s, proc, prof, out):
         plates[name] = {"stl": str(out / fn), "pieces": placed,
                         "volume_cm3": mp["volume_mm3"] / 1000.0,
                         "mass_g": mp.get("mass_g"),
+                        "printed_g": (mp.get("printed") or {}).get("mass_g"),
+                        "printed_why": (mp.get("printed") or {}).get("why"),
                         "shells": exp.get("shells"),
                         "deflection_mm": exp.get("deflection_mm"),
                         "bbox_mm": box, "print": print_receipt(pr)}
@@ -628,7 +635,9 @@ def card(s, pred, plates, profile, why):
     rows_mass = "\n".join(
         f"| {Path(p['stl']).name} | {len(p['pieces'])} | "
         f"{p['volume_cm3']:.0f} cm³"
-        + (f" ({p['mass_g']:.0f} g solid)" if p.get("mass_g") else "")
+        + (f" ({p['mass_g']:.0f} g solid" if p.get("mass_g") else "")
+        + (f", {p['printed_g']:.0f} g printed" if p.get("printed_g") else "")
+        + (")" if p.get("mass_g") else "")
         + " |" for p in plates.values())
     rows_pl = []
     for name, p in plates.items():
@@ -668,10 +677,13 @@ then at the top of its exhaust stroke, both valves just open (overlap).
 ## Print
 
 PLA plates on {profile}, TPU (95A) on its own. 0.2 mm layers, no supports,
-no brim. The springs and the belt in TPU: 3 walls, 100 % infill on the
-belt (it is all walls at this size).
+no brim. The PLA parts at Bambu Studio's 0.20 mm Standard (2 walls, 5/3
+shells, 15 % grid). The springs and the belt in TPU: 3 walls, 100 %
+rectilinear infill on the belt (it is all walls at this size). The print
+jobs carry every one of those per object: `engine_job.3mf` (the PLA
+plates) and `engine_tpu_job.3mf` (the TPU plate, a spool of its own).
 
-| plate | pieces | material, modelled solid |
+| plate | pieces | material: solid, and printed at the settings above |
 |---|---|---|
 {rows_mass}
 
@@ -761,7 +773,8 @@ def main():
 
     with phase("sizes"):
         if args.bore is None:
-            bore, n_plates, why, tried = S.search_bore(allow, layer, bed)
+            bore, n_plates, why, tried = S.search_bore(
+                allow, layer, bed, zones=bed_zones(prof))
             print(f"engine: bore {bore} mm, {n_plates} PLA plates: {why}")
             for b, n, note in tried[:12]:
                 print(f"  bore {b}: {n if n else '-'} plates ({note})")
@@ -769,7 +782,7 @@ def main():
             bore, why, tried = args.bore, "as asked", []
         s = S.solve(bore, allow, layer)
         s.g_side_min = min(allow("gap", dd) for dd in (s.d_s, s.d_bk)) / 2.0
-        n_est = S.plates_needed(s, bed)
+        n_est = S.plates_needed(s, bed, bed_zones(prof))
         print(f"  bore {s.bore:g} x stroke {s.S:g}, rod {s.L:.1f}, pitch "
               f"{s.pitch:.1f}, deck {s.z_deck:.1f} over the crank, cam "
               f"{s.z_cam:.1f}; belt {s.belt_n} teeth of {s.belt_p:g} on "
@@ -952,6 +965,25 @@ def main():
         plates = print_plates(d, s, proc, prof, out)
         n_pla = sum(1 for k in plates if k != "plate TPU")
         print(f"  {n_pla} PLA plates and one TPU")
+        # One job a spool: the PLA plates together, the TPU plate alone.
+        pla_names = [k for k in plates if k != "plate TPU"]
+        jobs = {"pla": job_receipt(export_print_job(
+                    d, [(k, k) for k in pla_names], out / "engine_job.3mf",
+                    "pla")),
+                "tpu": job_receipt(export_print_job(
+                    d, [("plate TPU", "TPU")], out / "engine_tpu_job.3mf",
+                    "tpu"))}
+        solid = sum(plates[k]["mass_g"] or 0.0 for k in pla_names)
+        printed = [plates[k]["printed_g"] for k in pla_names]
+        weight = {"pla_solid_g": solid,
+                  "pla_printed_g": sum(printed) if all(printed) else None,
+                  "tpu_solid_g": plates["plate TPU"]["mass_g"],
+                  "tpu_printed_g": plates["plate TPU"]["printed_g"],
+                  "tpu_printed_why": plates["plate TPU"]["printed_why"]}
+        if weight["pla_printed_g"]:
+            print(f"  the PLA plates print {weight['pla_printed_g']:.0f} g "
+                  f"against {solid:.0f} g solid "
+                  f"({100 * weight['pla_printed_g'] / solid:.0f} %)")
 
     if not args.no_render:
         with phase("renders"):
@@ -982,7 +1014,7 @@ def main():
                "allowances": {f"{k}@{sz}": v for (k, sz), v in
                               allow.answers.items()},
                "sizes": spec, "predictions": pred, "checks": checks,
-               "plates": plates,
+               "plates": plates, "jobs": jobs, "weight": weight,
                "seconds": round(time.perf_counter() - t_start, 1),
                "phases": {nm: round(t, 1) for nm, t in PHASES}}
     (out / "engine.json").write_text(json.dumps(receipt, indent=1,

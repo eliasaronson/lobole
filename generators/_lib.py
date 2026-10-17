@@ -202,7 +202,13 @@ def print_item_line(name, item):
         text = (f"{x(item['extent_mm'])} mm in {x(item['bed_mm'])} "
                 f"({item.get('profile')})"
                 + (f", over by {x(item['shortfall_mm'])}"
-                   if st == "fail" else "")) if "bed_mm" in item else ""
+                   if st == "fail" and any(item["shortfall_mm"]) else "")
+                + "".join(
+                    f"; {i['body']} "
+                    + ("off the bed" if i.get("off_bed") else
+                       f"in keep-out zone {i['zone_mm']}")
+                    for i in item.get("intrusions", [])[:3])
+                ) if "bed_mm" in item else ""
     else:
         text = (f"{item['deflection_mm']:g} mm against "
                 f"{item['limit_mm']:g} mm")
@@ -244,3 +250,83 @@ def print_receipt(r):
     out["clearance"]["closest"] = r["clearance"]["pairs"][:3]
     out["stacking"]["closest"] = r["stacking"]["pairs"][:3]
     return out
+
+
+# --- print jobs -----------------------------------------------------------------
+
+def slicer_config(filament):
+    """The Bambu Studio project config a job of more than one plate needs
+    (docs/tolerances/README.md#print-jobs): `$LOBOLE_SLICER_CONFIGS/
+    <filament>.json` (pla, petg, tpu), as tools/bambu-config.py makes it
+    from your Bambu Studio's presets. None when there is none: Loböle has no
+    slicer presets of its own and does not invent one."""
+    d = os.environ.get("LOBOLE_SLICER_CONFIGS")
+    if not d:
+        return None
+    p = os.path.join(d, f"{filament}.json")
+    return p if os.path.exists(p) else None
+
+
+def export_print_job(d, plates, path, filament, name=None):
+    """Write one print job (export_print_job): `plates` a list of
+    (part, plate name), every piece of each plate its own object with its
+    settings. `filament` names the job's one spool, for its slicer config.
+    A job of one plate needs no config; one of several without one is NOT
+    written, and the reply says why ({"skipped": ...}) -- the receipt
+    carries that rather than a job Bambu would read as one plate."""
+    cfg = slicer_config(filament)
+    if len(plates) > 1 and cfg is None:
+        why = (f"{len(plates)} plates need a Bambu project config for "
+               f"{filament}: set LOBOLE_SLICER_CONFIGS to a folder of "
+               "<filament>.json made by tools/bambu-config.py")
+        print(f"  print job {os.path.basename(path)}: skipped, {why}")
+        return {"skipped": why, "path": None}
+    params = {"path": str(path),
+              "plates": [{"part": p, "name": n} for p, n in plates]}
+    if cfg is not None:
+        params["slicer_config"] = cfg
+    if name:
+        params["name"] = name
+    r = d.call("export_print_job", **params)
+    objs = sum(len(p["objects"]) for p in r["plates"])
+    print(f"  print job {os.path.basename(path)}: {len(r['plates'])} "
+          f"plate(s), {objs} objects, {r['filament']}, {r['form']} form")
+    return r
+
+
+def job_receipt(r):
+    """An export_print_job reply as a receipt keeps it: per plate, each
+    object's name and what it prints with."""
+    if r.get("skipped"):
+        return {"skipped": r["skipped"]}
+    return {"path": r["path"], "form": r["form"], "filament": r["filament"],
+            "profile": r["profile"], "layer_height_mm": r["layer_height_mm"],
+            "slicer_config": r.get("slicer_config"),
+            "plates": [{"name": p["name"], "part": p["part"],
+                        "objects": [{"name": o["name"],
+                                     "described": o["described"]}
+                                    for o in p["objects"]]}
+                       for p in r["plates"]]}
+
+
+# --- the bed's keep-out zones -------------------------------------------------------
+
+def bed_zones(prof):
+    """A print profile's keep-out rectangles [x0, y0, x1, y1] (bed_exclude_mm,
+    the bed's own coordinates from its front-left corner): where no piece
+    may sit. Empty when the profile states none."""
+    return [list(map(float, z)) for z in (prof or {}).get("bed_exclude_mm", [])]
+
+
+def clear_x(x, y, w, h, zones, gap):
+    """The least x' >= x at which a w x h footprint at (x', y) keeps `gap`
+    clear of every zone: a shelf packer's next free place along its row."""
+    moved = True
+    while moved:
+        moved = False
+        for z in zones:
+            if (x < z[2] + gap and x + w > z[0] - gap and
+                    y < z[3] + gap and y + h > z[1] - gap):
+                x = z[2] + gap
+                moved = True
+    return x

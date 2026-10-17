@@ -31,7 +31,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = Path(HERE).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "generators"))
 from lobole.sdk import Plane, SdkError, connect  # noqa: E402
-from _lib import check_print, print_receipt  # noqa: E402
+from _lib import (check_print, export_print_job, job_receipt,  # noqa: E402
+                  print_receipt)
 
 OUT = Path(os.environ.get("LOBOLE_SCRATCH", ROOT / "scratch")) / "jar"
 
@@ -242,6 +243,32 @@ def build_gasket(app, s):
     p.frame("underside", of=body.edge(
         kind="circle", radius=ro, where=lambda e: abs(e.midpoint[2]) < 1e-6))
     return p
+
+
+# The gasket's slicer settings (set_print_settings): one wall and two
+# layers top and bottom of 15 % gyroid, so the TPU stays soft enough to
+# seal. Counts and a percentage.
+GASKET_PRINT = {"walls": 1, "top_layers": 2, "bottom_layers": 2,
+                "infill_pct": 15, "infill_pattern": "gyroid"}
+
+
+def job_plate(app, name, proc, pieces, bed):
+    """A print plate for a job: a Derived copy of each (part, x offset from
+    the bed's middle) on the bed, every piece round its own axis, and its
+    check_print. Returns the plate's check."""
+    ids = {p["name"]: p["id"] for p in app.call("list_parts")["parts"]}
+    app.call("add_part", name=name)
+    app.call("set_print_process", **proc)
+    for part, dx in pieces:
+        r = app.call("add_feature", feature={
+            "type": "Derived", "name": part, "source_part": ids[part],
+            "reference": False,
+            "placement": {"position": [bed[0] / 2.0 + dx, bed[1] / 2.0, 0.0],
+                          "orientation": [0.0, 0.0, 0.0, 1.0]}})
+        if not r.get("regen", {}).get("ok", True):
+            raise SystemExit(f"jar: {name}: {part}: {r['regen']}")
+    return check_print(app, f"jar: {name}", need=("bed", "shells", "bed_fit"),
+                       quiet=True, max_overhang_deg=OVERHANG_DEG)
 
 
 def frame_z(part, name):
@@ -603,6 +630,31 @@ def main():
           f"{'fails, as it must' if iso['status'] == 'fail' else 'PASSES (bad)'}")
     if iso["status"] != "fail":
         raise SystemExit("jar: an ISO-flank thread passes the overhang check")
+    # The jobs: the jar and the lid on one PLA plate, the gasket on a TPU
+    # plate of its own -- one job a spool. Only with a profile's bed: the
+    # built-in table is no printer to place them on.
+    app.call("set_print_settings", part="gasket", **GASKET_PRINT)
+    prof = (next((p for p in app.list_print_profiles()["profiles"]
+                  if p["name"] == args.profile), None)
+            if args.profile else None)
+    jobs = {}
+    if prof and prof.get("bed_mm"):
+        bed = prof["bed_mm"]
+        # Side by side, two walls apart.
+        gap = s["outer_d"] / 2.0 + s["wall"]
+        job_plate(app, "jar plate", proc, [("jar", -gap), ("lid", gap)], bed)
+        jobs["pla"] = job_receipt(export_print_job(
+            app, [("jar plate", "jar and lid")], out / "jar_job.3mf",
+            material))
+        job_plate(app, "gasket plate", proc, [("gasket", 0.0)], bed)
+        jobs["tpu"] = job_receipt(export_print_job(
+            app, [("gasket plate", "gasket")], out / "jar_tpu_job.3mf", "tpu"))
+        mp = app.call("mass_properties", part="gasket plate")["bodies"][0]
+        jobs["gasket_g"] = {"solid": mp.get("mass_g"),
+                            "printed": (mp.get("printed") or {}).get("mass_g")}
+    else:
+        jobs["skipped"] = ("no print profile with a bed: the built-in table "
+                           "is no printer to place the plates on")
     for k, v in stls.items():
         print(f"  {k}.stl ({v['material']}): {v['shells']} shell, "
               f"chords {v['deflection_mm']} mm, steepest overhang "
@@ -622,6 +674,7 @@ def main():
 
     receipt = {"process": proc, "allowances": allow, **s,
                "printed_threads": printed, "checks": checks, "stl": stls,
+               "jobs": jobs, "gasket_print": GASKET_PRINT,
                "confirm": confirm,
                "seconds": round(time.perf_counter() - t0, 1)}
     (out / "jar.json").write_text(json.dumps(receipt, indent=1))

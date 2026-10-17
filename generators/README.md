@@ -57,8 +57,15 @@ through `PYTHONPATH` (the nix shell and ctest set it), never by path.
 
 `_lib.py` holds what scripts would otherwise each copy: sketch planes that
 spell out the V axis, entity builders, an arc through three points, a
-`check` that raises on a failed regeneration, and `connect`. Most newer
-generators use the SDK (`python/lobole/sdk.py`) directly.
+`check` that raises on a failed regeneration, and `connect`; for printed
+parts `check_print` and `print_receipt`, `bed_zones` and `clear_x` (the
+profile's keep-out zones, which every plate packer keeps clear of), and
+`export_print_job` and `job_receipt`
+([print jobs](../docs/tolerances/README.md#print-jobs)): a job of several
+plates takes its slicer config from `$LOBOLE_SLICER_CONFIGS/<filament>.json`
+(`tools/bambu-config.py` makes them) and without one is not written, the
+receipt saying why. Most newer generators use the SDK
+(`python/lobole/sdk.py`) directly.
 
 What a generator makes goes to the untracked `scratch/<name>/`, or under
 `$LOBOLE_SCRATCH` when that is set (the tests below run each in a private
@@ -105,7 +112,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 | `generator_counter` | `counter/build.py --no-render --digit-height 10`: the plate's clearances and STL shells, the negative controls, both counting studies with their readings, every lock both ways (headless) | 45 s | 120 s |
 | `generator_hinge_box` | `hinge_box/build.py`: the plate's every `check_print` item, stacking included, the swing 0-180° and both negative controls (headless) | 3 s | 60 s |
 | `generator_strandbeest` | `print_coupon.py --seed`, then `strandbeest/build.py --profile "K5 PLA on P1S"` (the walker packs into the profile's bed): both stages, every check on the leg pair and the walker (solved, no branch jump and the knees, the exact clash with every cap's printed press listed, the layers' air, the feet, the stability), both negative controls failing, every print plate's `check_print` items, `bed_fit` among them (headless) | 410 s (beside four other runs) | 540 s |
-| `generator_clock` | `clock/build.py --no-render`: every part verified, the escapement's studies in both stages with every beat's lock, the ratios, every mesh exact, the click, both negative controls failing, both FEM studies and every print plate's `check_print`, on the built-in PLA table (headless) | 270 s | 600 s |
+| `generator_clock` | `print_coupon.py --seed`, then `clock/build.py --profile "K5 PLA on P1S" --no-render` (the period is the printed pendulum's, which needs a profile's layer and line width): every part verified, the escapement's studies in both stages with every beat's lock, the ratios, every mesh exact, the click, both negative controls failing, both FEM studies, every print plate's `check_print` and the period stated at the pendulum's infill (headless) | 270 s | 600 s |
 | `generator_engine` | `engine/build.py --no-render` on the seeded P1S profile: the bore search, every part verified, the 720° study with its press fits, the timing, firing order and springs off its traces, the valve-to-piston requirements, the belt at every tooth, both negative controls failing and every plate's `check_print` (headless) | 127 s | 420 s |
 | `generator_watch` | `watch/watch.py --stage assembly`: the parts and the assembly with every check `verify()` makes, the exact mesh sweeps included (headless) | 316 s | 660 s |
 | `generator_pantilt` | `run_all.sh --skip yoke_topo renders` with `PANTILT_SAMPLES=6`: every part, the assembly with its exact sweeps and studies, the CAM job, the drawings (offscreen) | 181-349 s | 720 s |

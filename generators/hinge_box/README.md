@@ -13,6 +13,10 @@ Output goes to `scratch/hinge_box/` (or `--out`): `hinge_box.stl` (the
 plate, one shell per piece), `hinge_box.dsgn` (the parts, the plate, the
 assembly and its study, the negative controls) and `hinge_box.json`, the
 receipt (every size, `check_print`'s items, the swing and the controls).
+With a profile that states a bed, the plate stands in the middle of it,
+clear of its keep-out zone, and `hinge_box_job.3mf` is its
+[print job](../../docs/tolerances/README.md#print-jobs): the box and the lid
+two objects where they print together, no supports and no brim.
 
 ## Why it exists
 
@@ -90,9 +94,10 @@ the cones (0.424 normal).
   a side apart on the exact B-Rep (the knuckles' end faces are the
   closest), the STL's chords a fifth of the gap, stacking: both pieces
   on the bed and no face within the minimum air over the other, and
-  `bed_fit`: the plate inside the profile's bed (`bed_mm`), its extent
-  printed and kept in the receipt. On the built-in table there is no
-  printer, and bed_fit is skipped, saying so.
+  `bed_fit`: the plate inside the profile's bed (`bed_mm`), in its middle
+  and clear of its keep-out zone, its extent printed and kept in the
+  receipt. On the built-in table there is no printer, and bed_fit is
+  skipped, saying so.
 - **The swing**, in the assembly `hinge box`: the box fixed, the lid on a
   revolute to the box's `hinge` frame. A motion study turns it from 0° to
   180° in 5° samples with the mesh clash check at a fifth of the gap. Every
@@ -114,8 +119,9 @@ runs the whole of it on the built-in table, in a few seconds.
 ## Printing it
 
 1. Build with your measured profile (`--profile "K5 PLA on P1S"`).
-2. Slice `hinge_box.stl` as it comes, at the layer height the minimum air
-   was taken from, **no supports**.
+2. Open `hinge_box_job.3mf` in Bambu Studio (or slice `hinge_box.stl` as
+   it comes), at the layer height the minimum air was taken from, **no
+   supports**.
 3. Off the bed, hold the box and lift the lid's free edge: the hinge
    should turn at once. Swing it over onto the rim.
 

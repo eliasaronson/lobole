@@ -46,8 +46,9 @@ from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
-from _lib import (PRINT_ITEMS, check, check_print, circle,  # noqa: E402
-                  connect, fresh_project, line, print_receipt)
+from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
+                  circle, connect, export_print_job, fresh_project,
+                  job_receipt, line, print_receipt)
 from lobole.sdk import Plane  # noqa: E402
 import linkage as lk  # noqa: E402
 import print_coupon  # noqa: E402
@@ -63,6 +64,9 @@ NOZZLE_MM = 0.4
 MIN_WALL_MM = 4 * NOZZLE_MM
 FDM_LAYER_MM = 0.2  # Bambu Studio's "0.20 mm" preset: the FDM fallback
 SIDES = lk.SIDES
+# A pin printed standing: its slicer settings (set_print_settings), the
+# rest of the walker at the preset's. Counts, not sizes.
+PIN_PRINT = {"walls": 3}
 
 
 # ---- sizes ------------------------------------------------------------------
@@ -404,6 +408,9 @@ def build_pin(d, s, lay, side, joint, proc, mat):
     z0 = z_bottom(s, lo) - s["th"]          # the head's underside, slab z
     zs = shoulder(s, hi)
     part = Part(d, f"pin {side} {joint}", proc, mat)
+    # Standing, a pin's shaft is all wall: three loops, not the preset's
+    # two, so the shaft a bar turns on is not two lines thick.
+    d.call("set_print_settings", part=part.name, **PIN_PRINT)
     part.cylinders(0.0, [(0, 0)], s["dh"], s["th"], "new_body", "head")
     part.cylinders(s["th"], [(0, 0)], s["dp"], zs - z0 - s["th"], "add",
                    "shaft")
@@ -1118,10 +1125,11 @@ def best_turn(circles):
     return best[1]
 
 
-def pack(items, bed, gap):
+def pack(items, bed, gap, zones=()):
     """MaxRects, best short side: each item {name, circles} onto beds of
-    `bed` (x, y) mm, `gap` between boxes and from the edges. Returns beds
-    of [(item, angle, x, y)] -- the part turned by angle, then moved by
+    `bed` (x, y) mm, `gap` between boxes and from the edges, and from each
+    of the bed's keep-out `zones` [x0, y0, x1, y1]. Returns beds of
+    [(item, angle, x, y)] -- the part turned by angle, then moved by
     (x, y)."""
     def boxes(it):
         a = best_turn(it["circles"])
@@ -1182,7 +1190,14 @@ def pack(items, bed, gap):
             if done:
                 break
         if not done:
-            b = {"free": [(0.0, 0.0, size_x, size_y)], "items": []}
+            # A box at free-space x spans the bed's x + gap .. x + w, so a
+            # zone taken out of the free space from x0 - gap to x1 keeps a
+            # gap from it on either side.
+            free = [(0.0, 0.0, size_x, size_y)]
+            for z in zones:
+                free = split(free, z[0] - gap, z[1] - gap,
+                             z[2] - z[0] + gap, z[3] - z[1] + gap)
+            b = {"free": free, "items": []}
             for a, x0, y0, w, h in boxes(it):
                 spot = place(b["free"], w, h)
                 if spot:
@@ -1574,13 +1589,16 @@ def main():
         o1 = out / "stage1"
         o1.mkdir(parents=True, exist_ok=True)
         items = print_items(s, lay, frames, 1, with_press=press)
-        beds = pack(items, bed, s["w"] / 2.0)
+        beds = pack(items, bed, s["w"] / 2.0, bed_zones(prof))
         if len(beds) != 1:
             raise SystemExit(f"strandbeest: stage 1 needs {len(beds)} beds, "
                              f"not one")
         build_plate_part(d, "stage1 plate", proc, beds[0])
         receipt["stage1"]["plate"] = check_plate(d, "stage1 plate", proc,
                                                  beds[0], o1, bed)
+        receipt["stage1"]["job"] = job_receipt(export_print_job(
+            d, [("stage1 plate", "stage 1")],
+            o1 / "strandbeest_stage1_job.3mf", "pla"))
         d.call("save_project", path=str(o1 / "strandbeest_stage1.dsgn"))
         print(f"  stage 1: one plate, {len(beds[0])} pieces -> "
               f"{receipt['stage1']['plate']['stl']}")
@@ -1611,7 +1629,7 @@ def main():
         o2 = out / "stage2"
         o2.mkdir(parents=True, exist_ok=True)
         beds = pack(print_items(s, lay, frames, throws), bed,
-                    s["w"] / 2.0)
+                    s["w"] / 2.0, bed_zones(prof))
         plates = []
         for k, plate in enumerate(beds):
             name = f"stage2 plate {k + 1}"
@@ -1621,6 +1639,10 @@ def main():
             print(f"  {name}: {len(plate)} pieces, every check_print item "
                   f"passes -> {plates[-1]['stl']}")
         receipt["stage2"]["plates"] = plates
+        receipt["stage2"]["job"] = job_receipt(export_print_job(
+            d, [(f"stage2 plate {k + 1}", f"plate {k + 1}")
+                for k in range(len(beds))],
+            o2 / "strandbeest_job.3mf", "pla"))
         d.call("save_project", path=str(o2 / "strandbeest.dsgn"))
 
     receipt["seconds"] = time.perf_counter() - t_all

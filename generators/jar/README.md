@@ -25,6 +25,17 @@ negative controls), `jar.png` and `jar-section.png` (a cut through the
 axis), and `jar.json`, the receipt: every size, the allowances it used,
 the clearances, the measured squeeze and every check's verdict.
 
+With a profile that states a bed, the run also writes two
+[print jobs](../../docs/tolerances/README.md#print-jobs), one a spool:
+`jar_job.3mf` (the jar and lid side by side on one PLA plate) and
+`jar_tpu_job.3mf` (the gasket on a plate of its own, carrying its 1 wall,
+2/2 shells and 15 % gyroid per object, below). Each is a Bambu project when
+`$LOBOLE_SLICER_CONFIGS` holds `pla.json` and `tpu.json`
+(`tools/bambu-config.py`), else a one-plate 3MF Bambu opens with your own
+presets. Sliced by Bambu's CLI, the gasket prints one wall on each of its
+two outlines and two solid layers top and bottom; Bambu weighs it 0.93 g of
+TPU, and `mass_properties` estimates 0.83 g printed against 1.22 g solid.
+
 ## Where every size comes from
 
 The inputs are `--inner-diameter` (the opening, 60 mm) and `--volume`
@@ -187,7 +198,8 @@ and the lid's top edge, both chamfered 0.4 mm for it.
   HF grade. Keep the part cooling fan on.
 - Print it flat at 0.2 mm, so its 2.0 mm is exactly ten layers. Use no
   brim and no supports.
-- **Print it soft: 1 wall, 2 top and 2 bottom layers, 15 % gyroid.** A
+- **Print it soft: 1 wall, 2 top and 2 bottom layers, 15 % gyroid** (the
+  gasket part's slicer settings, which `jar_tpu_job.3mf` carries). A
   solid 95A ring takes more torque to squeeze than a hand gives (see
   above). With one wall, the walls lie outside the rim's contact (the
   gasket spans r 29.3-31.9 and the rim touches r 30.0-31.3), so the rim

@@ -46,7 +46,8 @@ from pathlib import Path
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 from _lib import (PRINT_ITEMS, check, check_print, connect,  # noqa: E402
-                  fresh_project, line, print_item_line, print_receipt)
+                  export_print_job, fresh_project, job_receipt, line,
+                  print_item_line, print_receipt)
 
 ROOT = Path(HERE).resolve().parent.parent
 OUT = Path(os.environ["LOBOLE_SCRATCH"]) / "hinge_box" if \
@@ -331,18 +332,33 @@ def build_part(d, name, proc, mat, fn, *a, **kw):
     return body
 
 
-def plate(d, name, proc, placed):
+def plate(d, name, proc, placed, at=(0.0, 0.0)):
     """A part of Derived copies, each where it prints: `placed` is
-    [(label, source part, z lift)]."""
+    [(label, source part, z lift)], all moved by `at` on the bed."""
     ids = {src: part_id(d, src) for _, src, _ in placed}
     new_part(d, name, proc)
     for label, src, lift in placed:
         check(d.call("add_feature", feature={
             "type": "Derived", "name": label, "source_part": ids[src],
             "reference": False,
-            "placement": {"position": [0.0, 0.0, lift],
+            "placement": {"position": [at[0], at[1], lift],
                           "orientation": [0.0, 0.0, 0.0, 1.0]}}),
             f"derived {label}")
+
+
+def bed_centre(d, parts, bed):
+    """The move that puts `parts`, together, in the middle of the bed: a
+    plate's x and y are the bed's from its front-left corner, where a job
+    puts them and its keep-out zones are judged. None without a bed."""
+    if not bed:
+        return (0.0, 0.0)
+    lo, hi = [1e300, 1e300], [-1e300, -1e300]
+    for p in parts:
+        b = d.call("mass_properties", part=p)["bbox_mm"]
+        for k in range(2):
+            lo[k] = min(lo[k], b["min"][k])
+            hi[k] = max(hi[k], b["max"][k])
+    return tuple(bed[k] / 2.0 - (lo[k] + hi[k]) / 2.0 for k in range(2))
 
 
 def build_assembly(d):
@@ -524,8 +540,9 @@ def main():
     mat = material_of(d, proc)
     build_part(d, "box", proc, mat, build_box, s)
     build_part(d, "lid", proc, mat, build_lid, s)
+    centre = bed_centre(d, ("box", "lid"), prof.get("bed_mm"))
     plate(d, "hinge box print", proc, [("box", "box", 0.0),
-                                       ("lid", "lid", 0.0)])
+                                       ("lid", "lid", 0.0)], at=centre)
     geo = d.call("check_geometry")
     if geo["receipt"]["standing"] != "verified":
         raise SystemExit(f"hinge_box: the print part is not verified: {geo}")
@@ -552,6 +569,13 @@ def main():
                          f"the box and the lid")
     stl = out / "hinge_box.stl"
     exp = d.call("export_stl", path=str(stl))
+    # The job: one plate, the box and the lid printed in place. Only with a
+    # profile: the built-in table is no printer to place them on.
+    job = ({"skipped": "no print profile: the built-in table is no "
+                       "printer to place the plate on"}
+           if not prof.get("bed_mm") else
+           job_receipt(export_print_job(d, [("hinge box print", "hinge box")],
+                                        out / "hinge_box_job.3mf", mat)))
     d.call("save_project", path=str(out / "hinge_box.dsgn"))
 
     # The swing.
@@ -599,7 +623,7 @@ def main():
                "negative_controls": controls, "stl": str(stl),
                "stl_shells": exp.get("shells"),
                "stl_deflection_mm": exp.get("deflection_mm"),
-               "confirm": gap.get("confirm")}
+               "job": job, "confirm": gap.get("confirm")}
     (out / "hinge_box.json").write_text(json.dumps(receipt, indent=1,
                                                    default=str))
     d.call("save_project", path=str(out / "hinge_box.dsgn"))

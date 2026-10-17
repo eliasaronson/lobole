@@ -113,10 +113,19 @@ class Builder:
             name)
 
 
+# What every printed part of the clock prints with (set_print_settings):
+# Bambu Studio's "0.20mm Standard" process on the P1S, stated so the
+# printed mass weighs what prints. The pendulum overrides it (build.py's
+# PENDULUM_PRINT). Counts and a percentage, not sizes.
+FRAME_PRINT = {"walls": 2, "top_layers": 5, "bottom_layers": 3,
+               "infill_pct": 15, "infill_pattern": "grid"}
+
+
 def new_part(d, name, proc, material="pla"):
     d.call("add_part", name=name)
     if proc is not None:
         d.call("set_print_process", **proc)
+        d.call("set_print_settings", **FRAME_PRINT)
     return Builder(d)
 
 

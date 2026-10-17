@@ -164,13 +164,21 @@ def clock(port, out):
     # studies (a period at 2 deg, an escape-wheel turn at 4 samples a beat
     # in both stages), the ratios, every mesh exact, the click, both
     # negative controls failing, both FEM studies and every print plate's
-    # check_print. With the built-in PLA table: the instance has no
-    # profiles of its own.
-    return ([PY, "-u", os.path.join(GEN, "clock", "build.py"),
-             "--port", str(port), "--no-render",
-             "--out", os.path.join(out, "clock")],
+    # check_print. On the P1S's K5 profile seeded into the instance's own
+    # config: the period is the PRINTED pendulum's, which needs a profile
+    # that states a layer and a line width (the built-in table states
+    # neither), and the plates pack round its bed's keep-out zone.
+    seed = [PY, "-u", os.path.join(GEN, "print_coupon.py"), "--port",
+            str(port), "--seed"]
+    build = [PY, "-u", os.path.join(GEN, "clock", "build.py"),
+             "--port", str(port), "--profile", "K5 PLA on P1S",
+             "--no-render", "--out", os.path.join(out, "clock")]
+    return (["bash", "-c", " ".join(shlex.quote(a) for a in seed) + " && " +
+             " ".join(shlex.quote(a) for a in build)],
             [r"negative control, pallets .* too deep: .*anchor",
              r"teeth on the third wheel: fails, as it must",
+             r"the period at the pendulum's walls 3, top/bottom 5/5, "
+             r"100 % rectilinear",
              r"clock: done"], None)
 
 
