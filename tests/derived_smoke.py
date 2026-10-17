@@ -96,6 +96,13 @@ def main():
         mass = d.call("mass_properties")
         expect(abs(mass["total"]["volume_mm3"] - 800.0) < 1e-6, mass)
         expect(len(mass["bodies"]) == 1, mass)
+        # The row is the Jaw's, after the ghost: its index among the part's
+        # bodies and its own box (z -4..0), not the ghost's (z 0..5).
+        jaw_row = mass["bodies"][0]
+        expect(jaw_row["body"] == 1 and jaw_row["name"] == "Jaw", jaw_row)
+        expect(abs(jaw_row["bbox_min"][2] + 4.0) < 1e-6
+               and abs(jaw_row["bbox_max"][2]) < 1e-6,
+               f"the Jaw's row carries another body's box: {jaw_row}")
         chk = d.call("check_geometry")
         expect("stale_derived" not in chk, chk)
 

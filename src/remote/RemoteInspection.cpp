@@ -3732,11 +3732,19 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                          : "only reference bodies (derived ghosts), which "
                            "weigh nothing here; set reference: false on the "
                            "Derived feature to count one");
-    // The bodies MassOfBodies weighed, in its order (it skips references).
+    // The bodies MassOfBodies weighed, in its order (it skips references),
+    // and each one's index among the part's bodies: a reference body before
+    // a real one shifts every row after it.
     std::vector<const Body*> weighed;
-    for (const Body& b : only >= 0 ? subset : bodies)
-      if (!b.reference)
-        weighed.push_back(&b);
+    std::vector<size_t> weighedIndex;
+    for (size_t k = 0; k < bodies.size(); k++) {
+      if (only >= 0 && k != static_cast<size_t>(only))
+        continue;
+      if (!bodies[k].reference) {
+        weighed.push_back(&bodies[k]);
+        weighedIndex.push_back(k);
+      }
+    }
     double printedG = 0.0;
     glm::dvec3 printedMoment(0.0);
     std::string printedWhy;
@@ -3748,7 +3756,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       for (int r = 0; r < 3; r++)
         inertia.push_back(
             {bm.inertia[r][0], bm.inertia[r][1], bm.inertia[r][2]});
-      json entry = {{"body", only >= 0 ? static_cast<size_t>(only) : i},
+      const size_t which = i < weighedIndex.size() ? weighedIndex[i] : i;
+      json entry = {{"body", which},
                     {"name", bm.name},
                     {"volume_mm3", bm.volume},
                     {"surface_area_mm2", bm.surfaceArea},
@@ -3761,7 +3770,6 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       // because it is recomputed after every edit; this call is the one that
       // exists to measure, so it pays for the exact answer.
       {
-        const size_t which = only >= 0 ? static_cast<size_t>(only) : i;
         if (which < bodies.size()) {
           glm::dvec3 bmin, bmax;
           bodies[which].shape.GetBoundingBox(bmin, bmax, /*tight=*/true);
