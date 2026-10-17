@@ -340,9 +340,14 @@ Where the numbers come from, beyond the table's column:
   basic minor: M8 internal in PETG → a Ø7.047 bore, which prints the Ø8
   major). A custom thread's major from a bore is the wall plus twice its
   basic depth at its own [flank
-  angle](../modeling/holes-and-threads.md#flank-angle). It notes a cosmetic thread prints nothing, and that printed threads
-  are unreliable below M8 (tap a plain bore at the tap drill, or use an
-  insert). `add_feature` and `modify_feature` on a Thread return it as
+  angle](../modeling/holes-and-threads.md#flank-angle). It notes a cosmetic thread prints nothing, a modelled one whose
+  groove was not cut prints nothing either (with the feature's error), and
+  that printed threads are unreliable below M8 (tap a plain bore at the tap
+  drill, or use an insert). A thread that did not build has no size to
+  report: it carries `failed` (why) and its sentence says "not built",
+  never a Ø0 that reads like a measurement -- and add_feature refuses a
+  designation the tables refuse, so only a file can hold one.
+  `add_feature` and `modify_feature` on a Thread return it as
   `print`; `set_print_process` and `get_print_process` list every thread.
 - **`print_allowance`** answers one diameter — `{kind: hole|shaft|
   internal_thread|external_thread|gap|press, size_mm | designation}` against the
@@ -354,6 +359,15 @@ Where the numbers come from, beyond the table's column:
   part](#exporting-a-printed-part)). The table came through somebody's
   export: export the parts and the coupon at the same deflection and the
   coupon calibrates both.
+- **The confirm note** a report on one row ends with is that row's: a
+  built-in row (or a profile row still carrying a built-in source, copied
+  and never measured) asks for the coupon -- "the built-in tables are
+  community practice ..." -- and a profile's own measured row names its
+  source instead ("measured: MEASURED, print_coupon on a P1S ...", and to
+  print the coupon again when the printer, filament or preset changes;
+  `printfit::ConfirmNote(source)`). `print_allowance`, a printed side of a
+  fit and a printed thread all say it; `get_print_process`'s top-level
+  `confirm` is about the built-in tables it lists.
 - **A profile that is not the store's** says so: `check_fit`'s
   `print_notes` add that the part was modelled with a different copy, or one
   the store does not have, and that the answer is the part's copy.

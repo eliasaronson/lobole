@@ -250,6 +250,7 @@ default keeps the half opposite the plane's normal (z ≤ offset for `xy`);
   `within_min_mm` / `within_max_mm` instead: the region the two sides' boxes
   share, which holds the overlap somewhere. Motion studies use the same names
   ([assemblies](../assemblies/README.md#motion-studies)).
+- An exact named pair waits off the frame ([threads](#threads)).
 
 `contact_report` is the connectivity gate: `connected` (one component = one
 structure; anything in its own component is floating), `components`, per-pair
@@ -353,6 +354,38 @@ and is for questions asked over and over.
   normals. Without the last six, coplanar triangles have no separating axis
   and read as intersecting however far apart they are — and a pin whose end
   cap is flush with the face it passes through is coplanar.
+
+#### Touching is not a clash
+
+Two faces seated on each other are coplanar triangles that overlap in their
+plane, and the separating-axis test says any two such triangles meet. So
+the mesh check used to call every seat a clash where the exact check (a
+volume of 0) calls it touching: the clock spaced its wheels an end shake
+apart to get a motion study past it. `collide::Mesh::Classify` answers
+three ways instead:
+
+- **Overlapping** -- a triangle pierces another, by however little, or one
+  body is inside the other.
+- **Touching** -- every pair that meets does so on a surface: one of the
+  two lies wholly on one side of the other's plane, to the tessellation's
+  float noise (a millionth of the part's size) -- two coplanar triangles,
+  or one whose edge lies on the other's face. And a point a micron inside
+  each solid, at the centroid of a spread of those triangles (24 of them),
+  is outside the other solid: that is what tells a seat from two equal
+  blocks sunk into each other end to end, where with flush sides no
+  triangle pierces another and only the volume differs. NOT within the
+  deflection: a nut's flank sunk 0.1 mm into its pillar's, meshed at
+  0.26 mm, would read touching, and the clock's thread search took such a
+  pose for a clean one.
+- **Clear** -- nothing meets.
+
+`interference {mode: mesh}` reports touching as `state: touching` (its sweep
+lists clashes only), a motion study lists each sample's touching pairs
+under `touching` and does not count them as clashes, and the contact
+sweep's mesh screen still sends a touching pair to the exact check that
+weighs it. Any overlap is a clash as before (`tests/test_meshcollide.cpp`:
+blocks face to face touch, sunk by two deflections they clash, flush sides
+included). A stored motion result keeps each sample's `touching` (vNEXT).
 
 `check_geometry`'s floating-bodies warning uses the mesh answer too: it is a
 yes/no riding on a cheap check, and an exact contact on concentric bodies (a
@@ -522,6 +555,34 @@ can: `tools/ci-local.sh --tsan`.
 `interference` and the contact queries reject a pair by bounding box before
 any exact boolean: almost every pair in a real assembly is nowhere near its
 partner, and an all-pairs sweep is quadratic.
+
+### Threads
+
+A modelled thread is two helicoids of B-spline faces, and an exact
+interference of a nut on its pillar cost 1.7 s, the clock's rating nut on
+its rod 4.4 s -- held on the main thread, past the watchdog's 3 s. The
+profile (`tools/profile.sh`) put two thirds of it in the boolean's
+face/face intersections and the rest in the distance pass. Two changes:
+
+- **Surfaces proven apart need no boolean.** Where the caller asks for a
+  distance too (the named pair, `contact_report`, `check_print`), the
+  meshes bound the pair first: a true distance is at least the
+  tessellations' less both deflections, and when that is past the contact
+  fuzz the solids overlap only if one is wholly inside the other, which a
+  vertex answers. Meshes within their deflections of each other are asked
+  again of copies meshed ten times finer, as the distance pass narrows a
+  long list. A pair the designed-overlap step reports either way (two
+  printed presses, two engaging thread regions, a ring and its groove) is
+  always weighed. On the clock's threads: 1.7 s to 0.7 s, 4.4 s to 1.4 s.
+- **An exact named pair waits off the frame**
+  ([requests that wait](../architecture.md#requests-that-wait)):
+  `ParkInspectionRequest` lets the handler resolve the two sides and
+  deep-copy their bodies on the main thread, and the boolean and the
+  distance run on an `interference` background job; the call answers when
+  it lands, and the window and other clients carry on. The sweep (bounded
+  by its deadline), mesh mode (milliseconds) and a call inside `batch` or
+  with `expect_revision` answer on the frame as before. `contact_smoke`
+  watches one run (`LOBOLE_TEST_INTERFERENCE_MS` holds it, tests only).
 
 ## Positions are double
 

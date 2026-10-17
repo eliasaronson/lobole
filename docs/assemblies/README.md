@@ -315,6 +315,12 @@ omitted = whichever is active).
   It belongs to the mesh check only: on an `exact` study it is refused, and
   `set_motion_study {clash_deflection_mm: null}` derives it again. The
   Motion window's Validate always checks exactly, so it has no field there.
+- The mesh check calls two faces seated on each other, no triangle
+  piercing another, `touching`: listed per sample under `touching` (and
+  kept with a stored result, vNEXT), not a clash, as exact mode calls the
+  same pair
+  ([touching is not a clash](../inspect/README.md#touching-is-not-a-clash)).
+  Any overlap is still a clash.
 - Samples are walked in order, each solve starting from the last, so a closed
   loop stays on the branch it is on — and the first sample is WALKED to from
   wherever the document has the driver, at the study's own spacing, as the
@@ -331,8 +337,9 @@ omitted = whichever is active).
   decides which pairs move (the relative transform of two top-level
   occurrences changes at some sample); then every sample's checks run in
   one batch ([what a check costs](#clash-sweeps-what-a-check-costs)).
-  The rigid check is always EXACT, whatever `clash_mode` says: touching is
-  what a bolted joint does, and a mesh check calls touching a clash. A clash
+  The rigid check is always EXACT, whatever `clash_mode` says: a bolted
+  joint's engaged thread and press fit are relieved only by an exact check.
+  A clash
   found there is a standing clash: reported at sample 0 with `rigid: true`,
   listed again in `rigid_clashes`, left out of `seated_contacts` and
   `appeared`, and the study is not clean. The result says where the rigid
@@ -399,8 +406,15 @@ Each sample's solve starts from the last, and a step too large for that
 seed can land on a mirror branch that closes every loop exactly: the Jansen
 leg at 45 degrees a step does, at 360 degrees
 ([coupled loops](solver.md#coupled-loops)). Its residual is zero, so the
-solve cannot tell. So the run watches every free joint coordinate (each
-moving mate's rotation and offset, `motion::Run`'s `BranchWatch`):
+solve cannot tell. So the run watches every coordinate the loop solve
+CHOOSES (each moving mate's rotation and offset, `motion::Run`'s
+`BranchWatch`) -- not the driver's, and not one a relation sets as a
+function of another (a gear, a cam, an intermittent, a screw, a member of a
+relation over several mates), walked outward from the driver as
+propagation walks it. Those have no branch to flip to: a tangent cam's
+follower leaving its base circle after a dwell changes its rate at once,
+and that is the lift table, not a jump (`tests/test_motion.cpp`, a cam
+follower at 22.5 degrees a step).
 
 - **The rate.** Along a branch a coordinate's rate, its move per unit of
   the driver, changes smoothly. A step whose rate for some coordinate moves

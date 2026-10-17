@@ -49,6 +49,15 @@ cache hit) still reaches every body.
   listing the bodies there are. Every form writes the creating feature,
   so after a Boolean the body has the Boolean's name and a write lands on
   the Boolean. The feature tree's right-click menu writes there too.
+- A `feature_id` that creates no body -- a cut, a fillet, a modelled
+  thread, a sketch -- is **refused**, naming the feature that made the body
+  it modifies ("It modifies 'boss', made by feature_id 2 (Extrude
+  'boss')"), or the bodies there are when it touches none: the write would
+  land on a feature no body takes its material from, and the call used to
+  answer ok and set nothing (the clock and the counter weighed every body
+  null that way). A feature a body's material is continued from (a
+  Boolean's target, through `MaterialSource`) is accepted, since its
+  material reaches that body.
 - The appearance override is not continued the same way: a Boolean's body
   shows the Boolean's appearance, which is empty unless one was set on it.
 

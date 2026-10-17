@@ -42,6 +42,15 @@ default 1 s, so a beat every half second) and the print profile, through
   size plus twice the gap at an arbor's (0.5 mm on K5 PLA on P1S: 0.1 and
   0.15 a side). It is the escapement's drop and its lock, the backlash in
   the teeth, and the end shake.
+- **The end shake** is the axial play between every two parts that turn
+  against each other and overlap seen from the front: the centre wheel an
+  end shake above the escape pinion, the hour wheel over the cannon pinion.
+  It was first added to get the mesh-mode motion study past a face seated
+  on a face, which that check called a clash; it now calls that touching
+  ([inspect](../../docs/inspect/README.md#touching-is-not-a-clash)). It
+  stays, because it is not only a workaround: two printed faces turning at
+  different rates rub, and a print's layers need the play. The geometry is
+  unchanged.
 - **The escape wheel** has 30 teeth (a tooth a period, a turn in 30
   periods). Half its tooth pitch must hold a tooth's tip (two lines), the
   rest gap (the gap a side between a locked tooth and its locking face), the

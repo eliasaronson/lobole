@@ -749,7 +749,7 @@ def run_motion(d, name, driver, from_deg, to_deg, samples, clash, poses=False):
 
 def appeared(result):
     """Every pair a study found clashing at any sample. (Its `appeared`
-    leaves out a pair already touching at the first sample, which is how a
+    leaves out a pair already clashing at the first sample, which is how a
     gear put half a tooth out starts.)"""
     return {tuple(sorted((c["a_name"], c["b_name"])))
             for smp in result.get("samples", [])

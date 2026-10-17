@@ -1061,7 +1061,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "material:string, min_reliable_thread_mm:number, process:string, "
      "repeatability_mm:number, repeatability_source:string, "
      "rows:object[]}[], threads?:{allowance_mm:number, confirm:string, "
-     "designation:string, feature_id:int, known:bool, "
+     "designation:string, failed?:string, feature_id:int, known:bool, "
      "model_face?:number, model_major?:number, modeled:bool, "
      "modelled_major:number, name:string, notes:string[], pitch:number, "
      "prints_major:number, sentence:string, side:string, "
@@ -1359,8 +1359,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "mesh (triangles + an AABB tree: ~10x faster, a yes/no and no "
      "volume, decided to the reported deflection_mm; re-run exact on "
      "anything that must be certain). Mesh mode calls a pair that meets "
-     "only on the surface -- a face seated on a face, within the "
-     "deflection -- `touching`, not a clash, as exact mode does; its sweep "
+     "only on a surface -- a face seated on a face, no triangle piercing "
+     "another -- `touching`, not a clash, as exact mode does; its sweep "
      "lists clashes only. An EXACT named pair waits off the frame: its "
      "boolean and distance run on an `interference` background job on "
      "copies of the two sides, and the call answers when it lands, so a "
@@ -2789,7 +2789,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       };
       // A pair is a clash when any body pair overlaps, touching when the
       // rest only meet on the surface (collide::Mesh::Classify: a face
-      // seated on a face, within the deflection), the answer exact mode
+      // seated on a face, no triangle piercing another), the answer exact mode
       // gives the same pair (docs/inspect/README.md#touching-is-not-a-clash).
       bool meshTouching = false;
       const auto pairMesh = [&](const Target& ta, const Target& tb,

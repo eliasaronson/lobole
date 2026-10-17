@@ -125,7 +125,7 @@ constexpr MethodDoc MotionMethods[] = {
      "mesh check cannot relieve a thread or a press fit, so the pairs "
      "already clashing at the first sample are counted and the rest are "
      "listed). A mesh check calls a pair that meets only on the surface "
-     "-- a face seated on a face, within the deflection -- `touching`, "
+     "-- a face seated on a face, no triangle piercing another -- `touching`, "
      "listed per sample {a, b, a_name, b_name}, not a clash, as an exact "
      "check calls it touching. `worst_sample`, "
      "`table` (the same as text, for a report), "

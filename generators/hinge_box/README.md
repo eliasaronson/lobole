@@ -99,8 +99,9 @@ the cones (0.424 normal).
   sample before 180° must be clean; half way the lid must be over the axis
   (a lid swung the other way would pass through the bed, which no clash
   check sees); at 180° its inner face must stand at the box's height over
-  the box's footprint, and the only clash allowed there is the lid on the
-  rim (a mesh check calls touching a clash).
+  the box's footprint, clean, with the lid touching the rim (a mesh check
+  calls a face seated on a face touching, not a clash:
+  [inspect](../../docs/inspect/README.md#touching-is-not-a-clash)).
 - **Negative controls that must fail stacking:** the same box with a lid
   whose sockets give the cones half the air (between the lid's and the
   box's knuckles), and the plate with the lid lifted one layer off the bed

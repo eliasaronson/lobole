@@ -143,14 +143,22 @@ parts area).
   row (`M8` with `pitch: 1` is refused for `M8x1`, the fine pitches being
   rows of their own), never quietly replaced by the table's
   (`threads::PitchError`). A custom thread needs its pitch: one without is
-  refused, never given a default. Regeneration refuses either as the
-  feature's error (`ThreadFeature::WhyRefused`, every check that needs no
-  face) — so a saved file that contradicts itself opens and says which
-  feature and what it accepts — and `add_feature`/`modify_feature` refuse
-  them before anything is committed (`ThreadFeature::PitchRefusal`); a
-  thread's other errors, such as a row the tables lack, stay the feature's,
-  reported in the call's `regen`. The editor shows a stored pitch that is
-  not the row's as it is, with *Use the table's*.
+  refused, never given a default.
+- **One check refuses a thread before it is stored.**
+  `ThreadFeature::WhyRefused` is every check that needs no face: a
+  designation that claims a series and is not a row ("M8 printed" and "M8
+  printed nut" alike), a pitch that is not the row's, a custom thread
+  without one, a class suffix the series lacks (or one that disagrees with
+  `thread_class`), a flank angle out of range. `add_feature` and
+  `modify_feature` refuse with it before anything is committed, the GUI's
+  Accept refuses with it (`WhyIncomplete`), and regeneration makes it the
+  feature's error -- so a saved file that contradicts itself opens and says
+  which feature and what it accepts. A refused thread is never stored, so
+  no report describes one as a thread of Ø0. What needs the face -- a
+  `thread_class` on the wrong side, a designation that does not fit the
+  face's diameter -- stays the feature's regeneration error, named in the
+  call's `regen`. The editor shows a stored pitch that is not the row's as
+  it is, with *Use the table's*.
 - **The class** (`thread_class`, or the designation's suffix: `M8-6g`,
   `3/8-16 UNC-2B`) must be one the series has on the face's side: ISO 965
   `6g`, `4h`, `6h`, `4g`, `8g`, `6e`, `6f` external and `6H`, `4H`, `5H`,
@@ -270,9 +278,16 @@ only need the callout.
   (`CheckedBooleanNamed`), with the tool's faces named as a primitive's
   (per-flank naming is not done). Any failure — a groove whose root would be
   outside the boss, a sweep or a boolean the kernel refuses — is the
-  feature's error: the body stays as it was and the overlay stays drawn. A
-  cut that succeeds sets `overlay.cut`, and the UI draws no convention over
-  the real flanks.
+  feature's error, named in the `regen` of the call that made it: the body
+  stays as it was and the overlay stays drawn, but nothing reads it as a
+  thread -- it puts no thread on the body, and a printed part's thread
+  report says the groove was NOT cut. The SDK's `Part.thread(...,
+  modeled=True)` refuses one (SdkError, naming why) and undoes it, since a
+  script that never reads `regen` would carry on with a part that cannot
+  screw together (`tests/regen_honesty_smoke.py`, which also builds the
+  clock's case: a relief beside the thread at exactly its root radius,
+  which cuts). A cut that succeeds sets `overlay.cut`, and the UI draws no
+  convention over the real flanks.
 - **`HelicalSweep`** takes an axis frame, a span, a lead, a number of
   starts, a hand and any closed axial profile, and returns the swept tool,
   so a worm is the same call with a gear's axial profile

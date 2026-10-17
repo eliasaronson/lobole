@@ -13,7 +13,7 @@ registry, and the frame keeps drawing. The rule every job follows:
 | field | meaning |
 |---|---|
 | `id` | handed out by `StartBackgroundJob` from a session counter, never reused: the handle a study job is asked about and cancelled by |
-| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"`, `"contact"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"`, `"contact"`, `"interference"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
@@ -376,6 +376,20 @@ stops dispatching pairs on a cancel; its `finish` keeps the report in
 `AppState::contactReports` (the last eight) for `contact_status {job}`, and
 a cancelled run keeps none. It is owned by the RPC connection that started it
 unless `outlive_client: true`.
+
+## Interference of a named pair
+
+An exact `interference {a, b}` is a REQUEST THAT WAITS
+([architecture](../architecture.md#requests-that-wait)), not a job the
+caller polls: `remote::ParkInspectionRequest` runs the handler on the main
+thread with a slot set, the handler resolves the two sides and deep-copies
+their bodies (`ContactBody`, as a contact report does), and the boolean and
+the distance run on an `interference` job; the call answers when it lands.
+One boolean has nothing to stop between, so it is not cancellable. Not
+parked: the sweep (no pair; bounded by `deadline_s`), mesh mode, a call
+inside `batch` or carrying `expect_revision`, and a call whose keys the
+handler did not all read, which the server refuses before any job starts
+([inspect](../inspect/README.md#threads)).
 
 ## What is not on the registry
 

@@ -547,9 +547,9 @@ def verify(app, asm, parts, occ, props):
     with phase("motion study"):
         run = app.run_motion_study(study=study["id"], _timeout=900)
     samples = run.get("samples") or []
-    # `appeared` is what TURNING changed — the app subtracts the contacts
-    # that were already there at rest, which on a working machine is most of
-    # them (a propeller touches its motor, its nut and four screws).
+    # `appeared` is what TURNING changed — the app subtracts the pairs
+    # already clashing at rest (a mesh check relieves no thread or press
+    # fit; a face merely seated on a face reads touching, not a clash).
     unsolved = sum(1 for sample in samples if not sample.get("solved"))
     appeared = run.get("appeared", [])
     print(f"  motion: {len(samples)} samples over "

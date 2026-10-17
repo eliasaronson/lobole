@@ -92,21 +92,18 @@ double AngleParam(bool hasRad, double rad, bool hasDeg, double deg,
   return rad;
 }
 
-// A Thread whose pitch regeneration would refuse — a table designation
-// with another pitch than its row's, a custom one with none — is refused
-// BEFORE it is committed, so the call changes nothing and the caller's
-// number is never swapped for the table's
-// (docs/scripting/rpc.md#a-refused-call-changes-nothing). Regeneration
-// still refuses the same, for a loaded file; the thread's other errors (a
-// row the tables lack) stay the feature's, reported in `regen`.
 // A Thread the tables refuse -- a designation that claims a series and is
-// not a row ("M8 printed nut"), a pitch that is not the row's, a custom
-// thread without one, a class the series lacks, a flank angle outside the
-// range -- is refused before it is stored: ThreadFeature::WhyRefused, the
-// one check regeneration also makes, so the call and the feature's error
-// can never disagree. A thread that was stored refused was reported later
-// as "external, Ø0" by get_print_process, describing a thread that was
-// never there.
+// not a row ("M8 printed nut"), a pitch that is not the row's (never
+// swapped for the table's), a custom thread without one, a class suffix
+// the series lacks or that disagrees with thread_class, a flank angle
+// outside the range -- is refused before it is stored, so the call changes
+// nothing (docs/scripting/rpc.md#a-refused-call-changes-nothing):
+// ThreadFeature::WhyRefused, the one check regeneration also makes, so the
+// call and the feature's error can never disagree. What needs the face (a
+// thread_class on the wrong side, a designation that does not fit the
+// face) stays the feature's error, reported in `regen`. A thread that was
+// stored refused was reported later as "external, Ø0" by get_print_process,
+// describing a thread that was never there.
 void RefuseThread(const Feature& f) {
   if (const auto* th = dynamic_cast<const ThreadFeature*>(&f))
     if (const std::string why = th->WhyRefused(); !why.empty())

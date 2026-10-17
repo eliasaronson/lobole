@@ -534,12 +534,13 @@ public:
   // ahead of them, and a feature naming one of them depends on this one.
   virtual void VisitOwnedIds(const RefVisitor& visit) const { (void)visit; }
 
-  // Why this feature cannot be COMMITTED as it stands (empty = fine).
-  // Distinct from GetError(), which reports a regeneration failure: a fillet
-  // with no edges regenerates perfectly happily and does nothing, so only the
-  // feature itself can say that its inputs are not there yet. Checked when a
-  // preview is accepted and when `add_feature` arrives over the RPC — NOT
-  // during regeneration, because an empty tool must still be able to open.
+  // Why this feature cannot be COMMITTED as it stands (empty = fine): an
+  // input not there yet, or (a Thread) one the tables refuse. Distinct from
+  // GetError(), which reports a regeneration failure: a fillet with no edges
+  // regenerates perfectly happily and does nothing, so only the feature
+  // itself can say that its inputs are not there yet. Checked when a
+  // preview is accepted and when `add_feature` arrives over the RPC — not
+  // by Regenerate, because an empty tool must still be able to open.
   [[nodiscard]] virtual std::string WhyIncomplete() const { return {}; }
 
   // A DATUM: a feature whose output is not geometry — a plane, an axis, a

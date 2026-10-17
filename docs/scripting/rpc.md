@@ -20,8 +20,9 @@ one reader thread per connection (up to eight), all feeding one queue.
 once per frame in the GUI and once per tick headless, so a handler always
 runs against a coherent document. Screenshots, `render_sheet` and UI actions
 span frames; while one is in flight every later request waits behind it.
-A CAM request whose passes are not cut yet, and a drawing request whose
-views are projecting (windowed or `--offscreen`), is PARKED instead: only
+A CAM request whose passes are not cut yet, a drawing request whose
+views are projecting (windowed or `--offscreen`), and an exact
+`interference` of two named sides (any mode) are PARKED instead: only
 its own connection's later requests wait behind it
 ([architecture.md](../architecture.md#requests-that-wait)).
 
