@@ -16,6 +16,10 @@ case is really for is the joinery: the panels used to drill their own dowels
 independently and the holes did not meet (side walls at +/-126, the top wall
 at +/-110), so nothing could be mated to anything. It asserts they line up.
 
+And a generator's `--fresh` (generators/_lib.py fresh_project): an untitled
+scratch project is discarded, saying so; unsaved work in a project with a
+path is refused.
+
 Usage: generators_smoke.py <path-to-designer-binary>
 """
 import math
@@ -33,6 +37,47 @@ from smoke_app import launch_app  # noqa: E402
 def expect(cond, msg):
     if not cond:
         raise AssertionError(msg)
+
+
+def fresh(port, state):
+    """A generator's `--fresh` (generators/_lib.py fresh_project) discards
+    an untitled scratch project, saying so, and refuses unsaved work in a
+    project that has a path."""
+    from lobole.client import Client
+    sys.path.insert(0, os.path.join(ROOT, "generators"))
+    from _lib import fresh_project
+    from smoke_shapes import box
+    import contextlib
+    import io
+    d = Client.wait_for(port)
+    try:
+        d.call("new_project")
+        box(d, (0, 0, 0), (10, 10, 10), "scratch")
+        ping = d.call("ping")
+        expect(ping["dirty"] and not ping["project"],
+               f"an untitled project with work in it: {ping}")
+        said = io.StringIO()
+        with contextlib.redirect_stdout(said):
+            fresh_project(d)
+        expect("discarded" in said.getvalue(),
+               f"--fresh says it discarded the scratch project: "
+               f"{said.getvalue()!r}")
+        expect(not d.call("ping")["dirty"], "--fresh left a new project")
+
+        path = os.path.join(state, "kept.dsgn")
+        box(d, (0, 0, 0), (10, 10, 10), "kept")
+        d.call("save_project", path=path)
+        box(d, (20, 0, 0), (10, 10, 10), "unsaved")
+        try:
+            fresh_project(d)
+        except SystemExit as e:
+            expect("unsaved" in str(e), f"the refusal names why: {e}")
+        else:
+            raise AssertionError("--fresh discarded unsaved work in a saved "
+                                 "project")
+        expect(d.call("ping")["project"], "the saved project is still open")
+    finally:
+        d.close()
 
 
 def main():
@@ -135,6 +180,8 @@ def main():
                    f"the top wall's side-joint dowels sit at +/-110: {ys}")
         finally:
             d.close()
+
+        fresh(app.port, state)
     finally:
         app.terminate()
         try:

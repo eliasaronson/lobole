@@ -117,17 +117,22 @@ def fresh_project(d):
 
     A generator refuses to build into an instance that already has its tab --
     a rebuild renames the elements the first job's operations point at -- so
-    every comparison meant restarting an instance. This clears it instead,
-    and REFUSES when the open project has unsaved changes: `new_project` does
-    not ask, and the instance may be somebody's working session.
+    every comparison meant restarting an instance. This clears it instead.
+    `new_project` does not ask, and the instance may be somebody's working
+    session, so a project WITH A PATH and unsaved changes is refused; an
+    untitled one is scratch -- nothing on disk names it, and a generator's
+    last run left it -- and is discarded, saying so.
     """
     ping = d.call("ping")
     if ping.get("dirty"):
-        raise SystemExit(
-            f"--fresh refused: the project open on port {ping.get('port')} "
-            f"({ping.get('project') or 'unsaved'}) has unsaved changes. Save "
-            "it, or run against a scratch instance "
-            "(tools/headless-preview.sh --start <port>).")
+        if ping.get("project"):
+            raise SystemExit(
+                f"--fresh refused: the project open on port {ping.get('port')} "
+                f"({ping['project']}) has unsaved changes. Save it, or run "
+                "against a scratch instance "
+                "(tools/headless-preview.sh --start <port>).")
+        print(f"--fresh: discarded the untitled project on port "
+              f"{ping.get('port')} (unsaved, and never saved anywhere)")
     d.call("new_project")
 
 
