@@ -149,6 +149,31 @@ def strandbeest(port, out):
              r"walker: .* mm a crank turn", r"strandbeest: done"], None)
 
 
+def clock(port, out):
+    # The whole run but the stills: every part verified, the escapement's
+    # studies (a period at 2 deg, an escape-wheel turn at 4 samples a beat
+    # in both stages), the ratios, every mesh exact, the click, both
+    # negative controls failing, both FEM studies and every print plate's
+    # check_print. With the built-in PLA table: the instance has no
+    # profiles of its own.
+    return ([PY, "-u", os.path.join(GEN, "clock", "build.py"),
+             "--port", str(port), "--no-render",
+             "--out", os.path.join(out, "clock")],
+            [r"negative control, pallets .* too deep: .*anchor",
+             r"teeth on the third wheel: fails, as it must",
+             r"clock: done"], None)
+
+
+def watch(port, out):
+    # The parts and the assembly with every check verify() makes, the
+    # exact mesh sweeps included (no cache in a fresh directory): the watch
+    # still builds now that its gearing is generators/cycloidal.py.
+    return ([PY, "-u", os.path.join(GEN, "watch", "watch.py"),
+             "--port", str(port), "--stage", "assembly",
+             "--out", os.path.join(out, "watch")],
+            [r"parts: \d+ built, 0 not verified", r"\nsaved\n"], None)
+
+
 # name -> (builder, instance kind, extra environment). The offscreen ones
 # take screenshots or renders, which a --headless instance refuses.
 RUNS = {
@@ -163,6 +188,8 @@ RUNS = {
     "counter": (counter, True, {}),
     "hinge_box": (hinge_box, True, {}),
     "strandbeest": (strandbeest, True, {}),
+    "clock": (clock, True, {}),
+    "watch": (watch, True, {}),
 }
 
 
