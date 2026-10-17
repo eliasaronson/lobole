@@ -10,7 +10,8 @@
 // hands back what to poll, the request is parked, and the frame and every
 // other client's requests carry on until the poll answers it. The CAM
 // requests wait on their toolpath passes (remote/RemoteCam.h), the drawing
-// ones on a projection (remote/RemoteDrawings.h).
+// ones on a projection (remote/RemoteDrawings.h), an exact interference of
+// two named sides on its boolean (remote/RemoteInspection.h).
 
 #include <nlohmann/json.hpp>
 
