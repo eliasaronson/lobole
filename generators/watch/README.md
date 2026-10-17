@@ -39,7 +39,7 @@ studies, the renders.
 | file | what |
 |---|---|
 | `watch_spec.py` | every dimension (CLASS, MOVEMENT, CASE), the layout derived from it, and the checks that run at IMPORT; `declare(app)` binds every dimension as a document variable |
-| `watch_gearing.py` | cycloidal tooth outlines as sketch entities, tooth 0 along +X; `rack_profile` for contrate teeth |
+| [`../cycloidal.py`](../cycloidal.py) | cycloidal tooth outlines as sketch entities, tooth 0 along +X; `rack_profile` for contrate teeth. |
 | `watch_parts.py` | one function per part; `arbor()` puts a wheel and its pinion at two depths on one staff |
 | `watch.py` | parts, assembly, mates, relations, configurations, declared clearances, verification, renders |
 

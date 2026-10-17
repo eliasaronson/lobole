@@ -33,7 +33,7 @@ VPH = 21600                # 3 Hz — an integer rate, not a dimension
 
 # --- MOVEMENT: the going train ---------------------------------------------
 MODULE = 0.10              # going train, winding train and motion works
-# Cycloidal teeth (watch_gearing.py) run at the EXACT pitch centre distance —
+# Cycloidal teeth (generators/cycloidal.py) run at the EXACT pitch centre distance —
 # their action does not forgive a spread centre — so the backlash lives in the
 # teeth: a pinion leaf takes less than half the pitch.
 BACKLASH = 0.0
@@ -256,7 +256,7 @@ def _derive(g):
     return g
 
 
-import watch_gearing as _G  # noqa: E402 — the tooth forms
+import cycloidal as _G  # noqa: E402 — the tooth forms (generators/)
 
 # Every tooth set, and what it meshes. A wheel and its pinion on one arbor are
 # two tooth sets; only the ratchet meshes two mates with the same teeth.
@@ -509,7 +509,7 @@ def click_table(per_tooth=48, clear=0.09, outline_points=96):
     sits as deep as it can with every point of its beak clear of the teeth,
     and zero is where it is DRAWN, dropped in.
 
-    Tooth 0 points along +X (watch_gearing.profile), so a tooth's centre is
+    Tooth 0 points along +X (cycloidal.profile), so a tooth's centre is
     at the arbor's angle plus 2*pi*k/z.
     """
     pitch = 2 * math.pi / Z_RATCHET

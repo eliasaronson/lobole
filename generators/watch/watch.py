@@ -35,6 +35,7 @@ import watch_parts as W  # noqa: E402
 import watch_spec as spec  # noqa: E402
 from lobole.sdk import SdkError, connect  # noqa: E402
 from watch_spec import *  # noqa: F401,F403,E402 — rebound by declare()
+from cycloidal import mesh_phase  # noqa: E402 — shared with the clock
 
 PHASES = []
 
@@ -114,24 +115,6 @@ def check_parts(app, P):
 
 
 # --- the assembly -------------------------------------------------------------------
-
-def mesh_phase(pa, pb, za, zb):
-    """The relation phase that puts a GAP of b where a has a tooth, on the
-    line between them.
-
-    Every arbor is built with tooth 0 along +X and mated so that dof 0 keeps
-    it there. With a's teeth at alpha + 2*pi*k/za, b's gaps at
-    beta + 2*pi*(j + 1/2)/zb and beta = -(za/zb) * alpha + phase, a tooth of a
-    on the centre line (angle phi) meeting a gap of b (at phi + pi) gives
-
-        phase = phi * (1 + za/zb) + pi - pi/zb      (mod 2*pi/zb)
-
-    gear_train.py gets away with pi/24 because its centre line IS +X; a watch
-    train turns corners.
-    """
-    phi = math.atan2(pb[1] - pa[1], pb[0] - pa[0])
-    return (phi * (1 + za / zb) + math.pi - math.pi / zb) % (2 * math.pi / zb)
-
 
 def build_assembly(app, P):
     asm = app.assembly("Watch")
@@ -756,14 +739,14 @@ def check_meshes(app, occ, m, samples=9, meshes=None):
 
 def mesh_cache_key(app):
     """What a mesh's result depends on: the tooth geometry and the phases
-    (this generator's four files) and the kernel that swept them (the app's
+    (this generator's three files and the shared cycloidal.py) and the kernel that swept them (the app's
     source, by git revision and uncommitted diff under src/). None when the
     key cannot vouch for the app — its binary was rebuilt under the running
     instance, or there is no git to ask."""
     if app.call("ping").get("binary_replaced"):
         return None
     h = hashlib.sha256()
-    for f in ("watch_spec.py", "watch_gearing.py", "watch_parts.py",
+    for f in ("watch_spec.py", "../cycloidal.py", "watch_parts.py",
               "watch.py"):
         with open(os.path.join(HERE, f), "rb") as fh:
             h.update(fh.read())

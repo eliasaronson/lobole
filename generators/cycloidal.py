@@ -1,7 +1,8 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""Cycloidal watch gearing: epicycloidal addenda on radial flanks.
+"""Cycloidal gearing: epicycloidal addenda on radial flanks, for the watch
+(generators/watch/) and the clock (generators/clock/).
 
 Why not involute (generators/gear.py): the gates in watch_spec proved it
 cannot work at watch pinion counts. Unshifted, EIGHT of the nine meshes
@@ -29,8 +30,7 @@ import math
 import os
 import sys
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                                ".."))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from _lib import arc_through, line  # noqa: E402
 
 
@@ -229,3 +229,81 @@ def rack_profile(module, rho_add, rho_ded, frac, h_a, h_f, samples=7,
     else:
         ents.append(line(right[-1], left[0]))           # the root line
     return ents
+
+
+# --- phasing a mesh -------------------------------------------------------------
+
+def mesh_phase(pa, pb, za, zb):
+    """The relation phase that puts a GAP of b where a has a tooth, on the
+    line between them.
+
+    Every arbor is built with tooth 0 along +X and mated so that dof 0 keeps
+    it there. With a's teeth at alpha + 2*pi*k/za, b's gaps at
+    beta + 2*pi*(j + 1/2)/zb and beta = -(za/zb) * alpha + phase, a tooth of a
+    on the centre line (angle phi) meeting a gap of b (at phi + pi) gives
+
+        phase = phi * (1 + za/zb) + pi - pi/zb      (mod 2*pi/zb)
+
+    gear_train.py gets away with pi/24 because its centre line IS +X; a watch
+    train turns corners.
+    """
+    phi = math.atan2(pb[1] - pa[1], pb[0] - pa[0])
+    return (phi * (1 + za / zb) + math.pi - math.pi / zb) % (2 * math.pi / zb)
+
+
+# --- a pair, designed together -------------------------------------------------
+# What watch_spec.gearing() does for a whole movement, for ONE pair: each
+# dedendum traced by half its own pitch radius (a radial flank), each
+# addendum by its mate's dedendum circle, each addendum capped, and each
+# dedendum the mate's addendum plus a root clearance.
+
+def pair(module, z_a, z_b, frac_a, frac_b, cap_a, cap_b, clearance_mm):
+    """Two conjugate tooth sets meshing at m(z_a + z_b)/2. `frac` is each
+    tooth's share of the pitch on the pitch circle (their sum under 1 is the
+    backlash), `cap` each addendum's most in modules, `clearance_mm` from
+    each root to the mate's tip. Returns (a, b), each {z, rp, rho_add,
+    rho_ded, frac, h_a, h_f}: what profile() takes."""
+    r_a, r_b = module * z_a / 2.0, module * z_b / 2.0
+    ga = {"z": z_a, "rp": r_a, "rho_ded": r_a / 2.0, "rho_add": r_b / 2.0,
+          "frac": frac_a}
+    gb = {"z": z_b, "rp": r_b, "rho_ded": r_b / 2.0, "rho_add": r_a / 2.0,
+          "frac": frac_b}
+    ga["h_a"] = addendum_height(module, z_a, ga["rho_add"], frac_a, cap_a)
+    gb["h_a"] = addendum_height(module, z_b, gb["rho_add"], frac_b, cap_b)
+    ga["h_f"] = gb["h_a"] + clearance_mm
+    gb["h_f"] = ga["h_a"] + clearance_mm
+    return ga, gb
+
+
+def outline(module, g, samples=7):
+    """profile()'s entities for a tooth set from pair()."""
+    return profile(module, g["z"], g["rho_add"], g["rho_ded"], g["frac"],
+                   g["h_a"], g["h_f"], samples)[0]
+
+
+def tip_land(module, g):
+    """The width of a tooth across its tip, mm: the arc between the two
+    flanks where each addendum ends. Zero where the flanks meet in a point
+    (an ogive). A printed tooth wants this at least two extrusion lines, as
+    the planetary's and the counter's involute `tip_land` asks."""
+    r = g["rp"]
+    beta = g["frac"] * math.pi / g["z"]
+    _, add = flank_points(r, g["rho_add"], g["rho_ded"], g["h_a"], g["h_f"])
+    tip = add[-1]
+    half = beta - math.atan2(tip[1], tip[0])
+    return max(0.0, 2.0 * half * (r + g["h_a"]))
+
+
+def addendum_arc(g):
+    """The pitch arc the contact rolls while it climbs this set's addendum:
+    this set's share of the arc of action."""
+    r = g["rp"]
+    t_a = _solve(lambda t: math.hypot(*_epi(r, g["rho_add"], t)),
+                 r + g["h_a"], 1e-9, math.pi * g["rho_add"] / r * 0.999)
+    return r * t_a
+
+
+def contact_ratio(module, ga, gb):
+    """The arc of action over the circular pitch (watch_spec.check_meshes):
+    under 1 one tooth pair lets go before the next has met."""
+    return (addendum_arc(ga) + addendum_arc(gb)) / (math.pi * module)

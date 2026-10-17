@@ -23,7 +23,7 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, ".."))
-import watch_gearing  # noqa: E402
+import cycloidal  # noqa: E402 — generators/cycloidal.py
 from _lib import arc_through  # noqa: E402
 from lobole.sdk import Param  # noqa: E402
 import watch_spec as S  # noqa: E402
@@ -143,11 +143,11 @@ def pads(centres, r, n=24):
 # --- gears ----------------------------------------------------------------------
 
 def teeth(key):
-    """A tooth set's cycloidal outline (watch_gearing.py), by its name in
+    """A tooth set's cycloidal outline (generators/cycloidal.py), by its name in
     watch_spec.TOOTH_SETS — the design is per tooth SET, not per tooth
     count, because each addendum is traced by its mate's rolling circle."""
     g = S.GEAR[key]
-    return watch_gearing.profile(float(MODULE), g["z"], g["rho_add"],
+    return cycloidal.profile(float(MODULE), g["z"], g["rho_add"],
                                  g["rho_ded"], g["frac"], g["h_a"],
                                  g["h_f"])[0]
 
@@ -964,13 +964,13 @@ def crown_wheel(app):
 def contrate(app, key, x_face, sign, name):
     """A ring of contrate teeth on the end face at x_face, standing out
     towards sign * X. Past the contact a contrate tooth moves as a rack tooth
-    does, so each is watch_gearing's cycloidal rack tooth, drawn in the plane
+    does, so each is cycloidal.py's cycloidal rack tooth, drawn in the plane
     through its radial line and extruded across the face width — one tooth,
     then a circular Pattern round the stem. (A Pattern of an extrude that
     ADDS used to fail, and this went in as one extrude per tooth.)"""
     g = S.GEAR[key]
     w = float(CONTRATE_W)
-    ents = watch_gearing.rack_profile(float(MODULE), g["rho_add"],
+    ents = cycloidal.rack_profile(float(MODULE), g["rho_add"],
                                       g["rho_ded"], g["frac"], g["h_a"],
                                       g["h_f"], sink=0.02)
     # Tooth 0 on +Y: its plane faces along +Y (the radial line), u runs
