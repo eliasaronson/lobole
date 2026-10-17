@@ -295,12 +295,15 @@ checkout, not the network), builds main's build type
 at a `-j` sized by free memory, and hits main's ccache: ~2 min for `designer`
 plus `designer_tests` in a fresh tree (docs/architecture.md#precompiled-headers).
 If it compiles everything, main's `build/` is on an old toolchain:
-`tools/fix-stale-nix-cache.sh`. It then **picks and prints a scratch port** for that worktree
-(`tools/scratch_port.py` — free per the kernel, unclaimed per the announced
-instances, and never the human's). Integrate SERIALLY, in the order branches finish:
-`tools/merge-branch.sh BRANCH [--full]` cherry-picks under `build/`'s lock,
-builds, runs the suites and removes the worktree once every commit is on main
-and it holds nothing uncommitted. By hand, REMOVE the worktree as soon as its
+`tools/fix-stale-nix-cache.sh`. It then **claims and prints a scratch port** for that
+worktree, kept until the worktree is deleted (`tools/scratch_port.py` — free per
+the kernel, unclaimed by any running instance or worktree, never the human's;
+`tools/stray-instances.sh` lists every running lobole, an orphan's deleted cwd
+marked). Integrate SERIALLY, in the order branches finish:
+`tools/merge-branch.sh BRANCH [--full]` cherry-picks under `build/`'s lock
+(remaking `rpc.py` and `rpc-surface.json` when only they conflict), builds,
+runs the suites (whole output in `build/merge-branch-suite.log`) and removes
+the worktree once every commit is on main and it holds nothing uncommitted. By hand, REMOVE the worktree as soon as its
 branch is in. `git worktree remove` REFUSES here ("working trees containing
 submodules cannot be moved or removed"), so it is:
 ```
