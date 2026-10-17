@@ -138,6 +138,22 @@ def main():
         expect(abs(mate["rotation"]) < 1e-9,
                f"the run drove a COPY; the mate is where it was: {mate}")
 
+        # ---- Branch watching (docs/assemblies/README.md#branch-jumps) ------
+        # A plain revolute turns at the driver's own rate: nothing refined,
+        # nothing jumped, and max_refine stated, refused or listed.
+        expect(r["refined_samples"] == 0 and r["branch_jumps"] == 0 and
+               all("branch_jump" not in s for s in r["samples"]),
+               f"an arm on an axle stays on its one branch: "
+               f"{r['refined_samples']} {r['branch_jumps']}")
+        # (Refused, so no undo step: the undo checks below count them.)
+        refused(d, "set_motion_study", ["from 0 to 12"], study=sid,
+                max_refine=13)
+        refused(d, "set_motion_study", ["from 0 to 12"], study=sid,
+                max_refine=1.5)
+        listed = d.call("list_motion_studies")["studies"]
+        expect(listed[0]["max_refine"] == 6,
+               f"the default, down to a 64th of a step: {listed[0]}")
+
         # ---- Trace a point (docs/assemblies/README.md#tracing-a-point) ----
         # The arm's far end, (30, 0, 0) in its own part, sweeps a circle of
         # 30 about the axle; the carrier's point stands still.

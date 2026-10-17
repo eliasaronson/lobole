@@ -492,6 +492,13 @@ struct MotionStudy {
   // the last person left switched on — and one that must run with nothing
   // held has to be able to say "base", which is why unset and 0 differ.
   std::optional<uint64_t> configuration;
+  // vNEXT: how many times a step may be halved where a free joint
+  // coordinate jumps between samples (docs/assemblies/README.md#branch-jumps):
+  // the default goes down to a 64th of the driver's step. 0 judges each
+  // step as it is, refining nothing.
+  static constexpr int kDefaultMaxRefine = 6;
+  static constexpr int kMaxMaxRefine = 12;
+  int maxRefine = kDefaultMaxRefine;
 };
 
 // Why `study`'s clash_deflection_mm cannot stand, or empty when it can: it

@@ -3,6 +3,7 @@
 
 #include "core/ToleranceStack.h"
 
+#include "core/FitBands.h"
 #include "core/FitStandards.h"
 #include "core/Measure.h"
 
@@ -65,7 +66,21 @@ std::optional<Result> Sum(const Document& doc, const std::vector<Term>& terms,
     r.what = t->ref.name;
     if (t->IsDistance())
       r.what += " -> " + t->ref2.name;
-    if (t->isoClass.empty()) {
+    if (t->printedPress) {
+      // The band the print profile gives it, at the face's modelled size.
+      std::string why;
+      const auto pb = fitband::PrintedPressBand(doc, t->ref, &why);
+      if (!pb) {
+        Fail(error, "tolerance " + std::to_string(term.toleranceId) +
+                        " (printed press): " + why);
+        return std::nullopt;
+      }
+      // Its deviations are about the pin's size; the nominal here is the
+      // face's own modelled diameter.
+      const double shift = pb->band.basicMm - pb->modelledMm;
+      r.lower = pb->band.lowerMm + shift;
+      r.upper = pb->band.upperMm + shift;
+    } else if (t->isoClass.empty()) {
       r.lower = t->lower;
       r.upper = t->upper;
     } else {

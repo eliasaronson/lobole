@@ -6,6 +6,7 @@
 
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/FitBands.h"
 #include "core/FitStandards.h"
 #include "core/Measure.h"
 #include "core/Units.h"
@@ -23,6 +24,22 @@
 
 namespace ui {
 namespace {
+
+// A printed press in words: the band its print profile gives the face
+// (docs/tolerances/README.md#printed-press-fits), or why it has none.
+std::string PrintedPressText(const Document& doc, const Tolerance& t,
+                             const units::System& sys) {
+  std::string why;
+  const auto pb = fitband::PrintedPressBand(doc, t.ref, &why);
+  if (!pb)
+    return "printed press (" + why + ")";
+  return "printed press: " +
+         units::FormatLength(pb->band.basicMm + pb->band.lowerMm, sys) +
+         " .. " +
+         units::FormatLength(pb->band.basicMm + pb->band.upperMm, sys) +
+         " (press " + units::FormatNumber(pb->band.pressMm) + " mm, from " +
+         printfit::Label(*doc.PrintProcess()) + ")";
+}
 
 // What the current picks are a tolerance ON, or nothing.
 //
@@ -212,7 +229,9 @@ void DrawTolerancePick(AppState& state) {
   // it are different statements and must not shadow each other here either.
   if (const Tolerance* have = doc.ToleranceForSubject(subject.a, subject.b)) {
     std::string band;
-    if (have->isoClass.empty()) {
+    if (have->printedPress) {
+      band = PrintedPressText(doc, *have, sys);
+    } else if (have->isoClass.empty()) {
       band = units::FormatLength(nominal + have->lower, sys) + " .. " +
              units::FormatLength(nominal + have->upper, sys);
     } else {
@@ -362,7 +381,8 @@ void DrawTolerancesSection(AppState& state) {
         nominal = el->radius * 2.0;
     }
 
-    const std::string band = t.isoClass.empty()
+    const std::string band = t.printedPress ? std::string("printed press")
+                             : t.isoClass.empty()
                                  ? units::FormatNumber(t.lower) + " / " +
                                        units::FormatNumber(t.upper)
                                  : t.isoClass;
@@ -370,6 +390,8 @@ void DrawTolerancesSection(AppState& state) {
     if (!nominal) {
       // Kept, not dropped: the intent outlives the topology that carried it.
       limits = "unresolved";
+    } else if (t.printedPress) {
+      limits = PrintedPressText(doc, t, sys);
     } else if (t.isoClass.empty()) {
       limits = units::FormatLength(*nominal + t.lower, sys) + " .. " +
                units::FormatLength(*nominal + t.upper, sys);
@@ -400,7 +422,7 @@ namespace ui {
 
 namespace {
 
-// Check print (docs/tolerances/README.md#checking-a-print): the seven items of
+// Check print (docs/tolerances/README.md#checking-a-print): the eight items of
 // ui::RunPrintCheck, measured against limit, a failure amber. The same call
 // check_print makes, so the button and the RPC cannot disagree.
 void DrawPrintCheck(AppState& state, Document& doc) {
@@ -418,8 +440,9 @@ void DrawPrintCheck(AppState& state, Document& doc) {
   }
   ImGui::SetItemTooltip("On the bed, one piece per body, overhangs, "
                         "bridges, the gap between bodies, the STL's "
-                        "chords, and every piece on the bed with the air "
-                        "over another, against this print");
+                        "chords, every piece on the bed with the air "
+                        "over another, and the plate inside the printer's "
+                        "bed, against this print");
   const ImVec4 amber(0.95f, 0.80f, 0.40f, 1.0f);
   if (!state.printCheckError.empty()) {
     ImGui::PushStyleColor(ImGuiCol_Text, amber);
@@ -539,6 +562,19 @@ void DrawPrintCheck(AppState& state, Document& doc) {
           : nullptr;
   if (worst != nullptr)
     show("Show###print_check_stacking", *worst);
+  // The plate in the printer's build volume (the profile's bed_mm).
+  const printcheck::BedFit& bf = r.bedFit;
+  const auto xyz = [&](const glm::dvec3& v) {
+    return units::FormatNumber(v.x) + " x " + units::FormatNumber(v.y) + " x " +
+           units::FormatNumber(v.z) + " mm";
+  };
+  line("fits the bed", bf.status,
+       bf.status == printcheck::Status::Skipped
+           ? bf.note
+           : xyz(bf.extentMm) + " in " + xyz(bf.bedMm) +
+                 (bf.status == printcheck::Status::Fail
+                      ? ", over by " + xyz(bf.shortfallMm)
+                      : std::string()));
 }
 
 } // namespace

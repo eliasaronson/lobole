@@ -65,6 +65,8 @@ json PrintProfileToJson(const printfit::Profile& p) {
     j["layer_height_mm"] = p.layerHeightMm;
   if (p.zGapMm > 0.0)
     j["z_gap_mm"] = p.zGapMm;
+  if (p.bedMm) // vNEXT; absent = not stated
+    j["bed_mm"] = *p.bedMm;
   json rows = json::array();
   for (const printfit::Row& r : p.table.rows)
     rows.push_back(PrintRowToJson(r));
@@ -76,7 +78,7 @@ printfit::Profile PrintProfileFromJson(const json& j) {
   if (!j.is_object())
     throw std::runtime_error("a print profile is an object {name, process, "
                              "material, conditions?, stl_deflection_mm?, "
-                             "layer_height_mm?, z_gap_mm?, rows}");
+                             "layer_height_mm?, z_gap_mm?, bed_mm?, rows}");
   printfit::Profile p;
   p.name = j.value("name", std::string());
   p.table.process = j.value("process", std::string());
@@ -90,6 +92,17 @@ printfit::Profile PrintProfileFromJson(const json& j) {
                                " must be a number of mm");
   p.layerHeightMm = j.value("layer_height_mm", 0.0);
   p.zGapMm = j.value("z_gap_mm", 0.0);
+  if (j.contains("bed_mm")) { // vNEXT
+    const json& b = j.at("bed_mm");
+    if (!b.is_array() || b.size() != 3 ||
+        !std::all_of(b.begin(), b.end(),
+                     [](const json& v) { return v.is_number(); }))
+      throw std::runtime_error("print profile bed_mm is the build volume "
+                               "[x, y, z] in mm, three numbers; got " +
+                               b.dump());
+    p.bedMm = std::array<double, 3>{b[0].get<double>(), b[1].get<double>(),
+                                    b[2].get<double>()};
+  }
   if (j.contains("rows")) {
     if (!j.at("rows").is_array())
       throw std::runtime_error("print profile rows must be an array");

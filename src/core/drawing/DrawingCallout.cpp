@@ -87,6 +87,8 @@ std::string FormatToleranceSuffix(const Tolerance& tol,
     const std::string n = core::FormatDeviation(v, units);
     return v >= 0.0 ? "+" + n : n;
   };
+  if (tol.printedPress)
+    return " printed press"; // its band is the print profile's
   if (!tol.isoClass.empty()) {
     std::string out = " " + tol.isoClass;
     if (nominal > 0.0)

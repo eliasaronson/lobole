@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -96,6 +97,10 @@ struct Profile {
   // check_print's stacking item judges by it (MinAirMm), and a
   // print-in-place generator reads it.
   double zGapMm = 0.0;
+  // vNEXT: the printer's build volume, mm along its bed's x and y and up
+  // its z: what check_print's bed_fit item fits a plate into. Unset = not
+  // stated, and bed_fit skips saying so: nothing guesses a printer.
+  std::optional<std::array<double, 3>> bedMm;
   bool operator==(const Profile&) const = default;
 };
 
@@ -138,7 +143,8 @@ struct Process {
 
 // Empty when `p` may be stored; otherwise what is wrong with it: no name, a
 // base process/material the built-in tables do not carry, a negative or
-// non-finite chord deviation or layer height, a Z gap without a layer
+// non-finite chord deviation or layer height, a bed whose sides are not all
+// finite and positive, a Z gap without a layer
 // height or not whole layers of it, no rows, a size range that is empty,
 // overlapping or out of order within its kind, or an allowance of the wrong
 // sign for its kind (a hole, internal thread or gap is opened, so not
@@ -181,6 +187,30 @@ ProfileFromBuiltin(const std::string& name, const std::string& process,
 // stated one, else a tenth of the smallest gap a side (0 when the table has
 // nothing to keep).
 [[nodiscard]] double StlDeflectionMm(const Process& p);
+
+// A PRINTED PRESS's size band (docs/tolerances/README.md#printed-press-fits):
+// the band a printed cap's bore and the printed pin it is pressed on carry,
+// so the contact checks relieve the press as they relieve an ISO press fit.
+// The bore's is the profile's press allowance on the diameter, the pin's
+// zero, each give or take kPressToleranceShare of the profile's gap at that
+// size -- the share check_print's clearance item allows a gap. Deviations
+// on the diameter from `basicMm`, the PIN's modelled diameter: both faces
+// are modelled at what the press needs, so neither carries a process
+// allowance on top.
+inline constexpr double kPressToleranceShare = 0.1;
+struct PressBand {
+  double basicMm = 0.0;     // the pin's modelled diameter
+  double pressMm = 0.0;     // the press allowance (bore - pin), signed
+  double toleranceMm = 0.0; // either way, on the diameter
+  double lowerMm = 0.0, upperMm = 0.0;
+  bool builtinFallback = false; // the press row is the built-in default
+};
+// The band of the face modelled at `modelledMm`, a bore when `bore`.
+// Refused (nullopt, `why` set) for a process that is not FDM -- a printed
+// press is the allowance an FDM printer's bore and pin need -- or a size
+// the profile's press or gap rows do not cover.
+[[nodiscard]] std::optional<PressBand>
+PrintedPress(const Process& p, bool bore, double modelledMm, std::string* why);
 
 // The answer for one diameter.
 struct Allowance {

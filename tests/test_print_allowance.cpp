@@ -673,3 +673,45 @@ TEST_CASE("Editing a profile's allowance rebuilds what was modelled from it",
   stack.Undo(*doc);
   CHECK(holeOf()->diameter == Approx(6.8));
 }
+
+TEST_CASE("A print profile's bed is three positive millimetres, or unstated",
+          "[tolerances][print][profile][bed]") {
+  printfit::Profile p = K5();
+  CHECK_FALSE(DocumentIO::PrintProfileToJson(p).contains("bed_mm"));
+  p.bedMm = std::array<double, 3>{256.0, 256.0, 256.0};
+  CHECK(printfit::ValidateProfile(p).empty());
+  const auto j = DocumentIO::PrintProfileToJson(p);
+  CHECK(j.at("bed_mm") == nlohmann::json::array({256.0, 256.0, 256.0}));
+  CHECK(DocumentIO::PrintProfileFromJson(j) == p);
+  // An embedded copy carries it, so a part printed with it fits its plate
+  // to the printer it was made for.
+  auto bad = j;
+  bad["bed_mm"] = {256.0, 256.0};
+  CHECK_THROWS(DocumentIO::PrintProfileFromJson(bad));
+  bad["bed_mm"] = "256";
+  CHECK_THROWS(DocumentIO::PrintProfileFromJson(bad));
+  p.bedMm = std::array<double, 3>{256.0, 0.0, 256.0};
+  CHECK(Contains(printfit::ValidateProfile(p), "its y is 0"));
+}
+
+TEST_CASE("A printed press is banded by the profile's press and gap",
+          "[tolerances][print][press]") {
+  // PLA's built-in table: the press at 0 (the bore at the pin's size), the
+  // gap 0.5 on the diameter, so a tenth of it either way.
+  const printfit::Process pla{"fdm", "pla", std::nullopt};
+  std::string why;
+  const auto bore = printfit::PrintedPress(pla, true, 3.2, &why);
+  REQUIRE(bore);
+  CHECK(bore->basicMm == 3.2);
+  CHECK(bore->pressMm == 0.0);
+  CHECK(bore->toleranceMm == Approx(0.05));
+  CHECK(bore->lowerMm == Approx(-0.05));
+  CHECK(bore->upperMm == Approx(0.05));
+  const auto pin = printfit::PrintedPress(pla, false, 3.2, &why);
+  REQUIRE(pin);
+  CHECK(pin->lowerMm == Approx(-0.05));
+  // A process that is not FDM has no printed press.
+  const printfit::Process other{"sla", "resin", std::nullopt};
+  CHECK_FALSE(printfit::PrintedPress(other, true, 3.2, &why));
+  CHECK(Contains(why, "FDM"));
+}

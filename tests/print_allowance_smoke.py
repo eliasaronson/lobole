@@ -259,6 +259,8 @@ def profiles(d, port):
            f"the built-in press: {r}")
     d.call("save_print_profile", profile={
         "name": "No press", "process": "fdm", "material": "pla",
+        # The printer's bed: the coupon's plate is checked against it.
+        "bed_mm": [256, 256, 256],
         "rows": [{"kind": "gap", "allowance_mm": 0.2}]})
     r = d.call("print_allowance", kind="press", size_mm=3, profile="No press")
     expect(r["from"] == "builtin" and "has no press row" in r["note"]

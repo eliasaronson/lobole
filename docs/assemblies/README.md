@@ -320,8 +320,10 @@ omitted = whichever is active).
   wherever the document has the driver, at the study's own spacing, as the
   scrub walks: a jump from a crank left at 180 degrees to 0 landed a
   slider-crank on its mirrored branch, and the whole run followed it there.
-  A sample that does not solve is reported unsolved with its residual, never
-  drawn in the last good pose.
+  Between samples every free joint is watched, and a step too coarse for
+  its seed is re-solved finer ([branch jumps](#branch-jumps)). A sample
+  that does not solve is reported unsolved with its residual, never drawn
+  in the last good pose.
 - Pairs rigid to each other over the whole study — fastened, or carried by
   the same moving part — cannot be made to collide by the motion, so they are
   checked once, at the first sample, and skipped at every later one. The
@@ -390,6 +392,50 @@ omitted = whichever is active).
 
 Code: `src/core/MotionStudy.{h,cpp}`, `src/remote/RemoteMotion.cpp`,
 `src/ui/MotionActions.cpp`.
+
+### Branch jumps
+
+Each sample's solve starts from the last, and a step too large for that
+seed can land on a mirror branch that closes every loop exactly: the Jansen
+leg at 45 degrees a step does, at 360 degrees
+([coupled loops](solver.md#coupled-loops)). Its residual is zero, so the
+solve cannot tell. So the run watches every free joint coordinate (each
+moving mate's rotation and offset, `motion::Run`'s `BranchWatch`):
+
+- **The rate.** Along a branch a coordinate's rate, its move per unit of
+  the driver, changes smoothly. A step whose rate for some coordinate moves
+  by more than half that coordinate's largest rate so far (or of a tenth of
+  the fastest coordinate's, for one that has barely moved) is re-solved
+  from where it started at half the step, then halved again where needed,
+  down to the study's `max_refine` halvings (default 6: a 64th of the
+  step; 0 refines nothing). Where the rates hold again the steps grow back.
+  The sample is the continued pose, marked `refined`, and the run counts
+  them (`refined_samples`). The first step of a run, with no rate yet, is
+  taken from the finest step up.
+- **The jump that stays.** At the finest step the change is asked again
+  scale by scale: the rate over the step against the rate over the same
+  step back from where it started, and the same at twice the step. Along a
+  branch the change is the curvature times the step and halves with it (a
+  knee near straight, a slider at its dead centre); across a flip it
+  doubles; at a kink, where the linkage passes a singular pose, it keeps
+  two thirds or more in one of the steps either side. A change that keeps
+  more than 0.6 of itself is a jump: the sample carries `branch_jump`
+  {mate, name, path?, dof, its move and the move its rate gave, the driver
+  value and the step}, the run counts `branch_jumps`, the table says
+  `BRANCH JUMP`, the verdict says "Jumps branch at sample N", and the study
+  is not clean, as an unsolved sample is not.
+- **What it finds**: the Jansen leg at 45 degrees a step comes back on its
+  built branch at every sample, with 6 of its 9 samples refined; at 2
+  degrees nothing is refined. A parallelogram four-bar driven through its
+  dead point, where all four links lie in line, leaves it as an
+  anti-parallelogram, and the sample there says so: a mate that turned at
+  the crank's rate stops (`tests/test_motion.cpp`, "A four-bar driven
+  through its dead point reports the branch jump").
+- **What it cannot find**: a linkage passing a singular pose where the two
+  branches cross with the same rates (a Grashof change point whose knee
+  goes straight through) changes branch without a change of rate. A
+  generator that cares which branch it is on still checks it, as the
+  Strandbeest checks its knees' signs.
 
 ### Tracing a point
 

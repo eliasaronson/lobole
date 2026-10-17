@@ -98,6 +98,25 @@ PrintCheckRun RunPrintCheck(const Document& part,
     noAir = printfit::MinAirSource(*proc) + "; state min_air_mm";
   }
 
+  // The build volume is the printer's, so only a profile states one
+  // (vNEXT): the built-in tables are a process, not a printer, and nothing
+  // guesses one.
+  if (proc && proc->profile && proc->profile->bedMm) {
+    const auto& b = *proc->profile->bedMm;
+    o.bedMm = glm::dvec3(b[0], b[1], b[2]);
+  } else if (proc && proc->profile) {
+    o.bedNote = "print profile '" + proc->profile->name +
+                "' states no bed_mm, the printer's build volume (Settings, "
+                "Print profiles; or save_print_profile)";
+  } else if (proc) {
+    o.bedNote = "the part is printed on the built-in " + run.process +
+                " table, which is no printer's: print it with a profile "
+                "that states bed_mm";
+  } else {
+    o.bedNote = "the part has no print process, so no printer to fit "
+                "(set_print_process with a profile that states bed_mm)";
+  }
+
   run.report = printcheck::Check(bodies, o);
   const std::string unprinted =
       "the part has no print process: set_print_process, or state ";

@@ -176,6 +176,46 @@ mate at ONE basic size, and two faces modelled at different diameters are
 `unverified` there. A model drawn at the interference is what this section
 is for.
 
+### Printed press fits
+
+A printed cap pressed on a printed pin is a press, but no ISO band says so:
+p6 at Ø3 allows about 0.01 mm, and a printed press is whatever the
+profile's [press allowance](#press-allowance) is. So a size tolerance has a
+**printed press** class besides an ISO class and explicit deviations
+(`Tolerance::printedPress`, vNEXT; `set_tolerance {printed: "press"}`, the
+one value accepted). It is set on both faces of the press, the cap's bore
+and the pin.
+
+- **Its band is not stored.** `printfit::PrintedPress` reads it off the
+  part's print profile, as an ISO class is read off its table, so a
+  corrected profile reaches every press. Both faces are modelled at what the
+  press needs, so the band is about the pin's modelled diameter with no
+  process allowance on top: the bore's is the profile's `press` allowance,
+  the pin's zero, each give or take a tenth of the profile's gap at that
+  size (`kPressToleranceShare`, the tenth the clearance item allows a gap).
+  A profile with no press row reads its pair's built-in one, and the reply
+  says `press_from`.
+- **Refused when it is set**, naming why: a part with no print process, a
+  process that is not FDM, a face that is not a cylinder, a size the
+  profile's press or gap rows do not cover. `fitband::PrintedPressBand` is
+  the one check, and `list_tolerances` reports a band that stopped
+  resolving as `error`.
+- **The relief** is the [press fit](#press-fits) one, unchanged:
+  `fitband::Stamp` stamps the band (`FitBand::printedPress`), and
+  `Measure::ContactBetween` relieves the annulus. Two differences. A
+  printed press is reported even where the model shows no interference
+  (a press allowance of 0 still holds, because FDM prints the bore small and
+  the pin large), with a relieved volume of 0; it is skipped only when the
+  model is looser than the band. And it pairs only with another printed
+  press: against an ISO band it is refused, saying so.
+- **Reported** as `"Ø<pin> printed press <interference> (<profile>)"`
+  ("Ø3.22 printed press 0 ('K5 PLA on P1S' (fdm pla))"); past the band it is
+  a clash with `press_fit_refused` and its `excess_mm`, as an ISO fit is.
+- Elsewhere: `check_fits` reports a printed pair (`reported`, it is the
+  contact check's) and refuses one paired with an ISO class; `stack_up`
+  adds its band; a drawing callout says "printed press"; a CAM job mills
+  nothing to it.
+
 ## CAM
 
 A CAM job cuts a toleranced round face, and a floor or shoulder whose
@@ -346,7 +386,7 @@ smallest part built to them.
 ### Print profiles
 
 A **print profile** (`printfit::Profile {name, table, stlDeflectionMm,
-layerHeightMm, zGapMm}`) is a named, user-owned copy of a table: one
+layerHeightMm, zGapMm, bedMm}`) is a named, user-owned copy of a table: one
 printer, one filament, one slicer preset. The CAM machine store is the pattern
 ([machine profiles](../cam/setup.md#machine-profiles)).
 
@@ -379,11 +419,20 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   `layer_height_mm`, else three layers of FDM's common 0.2 mm (source
   "process", to confirm with the coupon); a process that is not FDM has
   none. The coupon measures it, and a print-in-place generator reads it.
+- **The bed** (vNEXT): `bed_mm` [x, y, z], the printer's build volume,
+  absent until stated; three positive numbers or refused. It drives no
+  geometry. `check_print`'s [bed_fit](#checking-a-print) fits a plate into
+  it, and a generator that packs plates (the Strandbeest, the hinge box)
+  reads it. Only a profile states one: the built-in tables are a process,
+  not a printer, and nothing guesses a printer. `print_coupon --seed`'s P1S
+  profiles carry 256 x 256 x 256; a profile saved before has none until it
+  is set in Settings, Print profiles (`###prof_bed_x`/`_y`/`_z`) or with
+  `save_print_profile`.
 - **The built-in tables stay**, read-only, as what a profile starts from: a
   new profile is the built-in table of its pair, "the defaults, corrected".
 - **The document carries its numbers.** A part printed with a profile has
   `print {process, material, profile, conditions, stl_deflection_mm?,
-  layer_height_mm?, z_gap_mm?, rows}`:
+  layer_height_mm?, z_gap_mm?, bed_mm?, rows}`:
   the name and an embedded copy, the way a CAM setup embeds its machine. The
   copy is what every lookup reads (`printfit::Find` resolves it before the
   built-in table), so a part opens anywhere with what it was modelled with —
@@ -409,8 +458,9 @@ mm chord deviation), with `print_coupon --gap-only`:
 They live in the user's config, not in the build:
 `python3 generators/print_coupon.py --port PORT --seed` saves both through
 `save_print_profile` on the instance at PORT — into whatever config dir that
-instance was started with — and leaves any name already stored. The other
-rows are the built-in PLA rows.
+instance was started with — with the P1S's 256 x 256 x 256 mm bed, and
+leaves any name already stored, except that one which states no bed is
+given the P1S's and nothing else. The other rows are the built-in PLA rows.
 
 ### Press allowance
 
@@ -447,11 +497,10 @@ modelled much under the pin splits a thin cap.
   presses caps prints the row beside its first parts, at its own pin and
   cap (`press_row(d, proc, size, steps, step, name, cap_d, cap_t)`), as the
   Strandbeest's first plate does (generators/strandbeest/README.md).
-- **Not seen by the clash checks.** A press is an overlap on purpose, but
-  its faces carry no ISO band, so a [press fit](#press-fits) relief does
-  not apply to it: a pressed cap and its pin, as two placed occurrences,
-  are a clash. A generator models what is pressed together as ONE
-  occurrence, as assembled, and checks the press with the coupon instead.
+- **Seen by the clash checks** once both faces carry a
+  [printed press](#printed-press-fits): a pressed cap and its pin are two
+  occurrences on a fastened mate, and the exact check relieves and lists
+  the press. The coupon still says what the press is.
 
 ### Exporting a printed part
 
@@ -483,7 +532,7 @@ print*, and every print-in-place generator through `generators/_lib.py`'s
 the limits from the part's print, so the button and the RPC cannot disagree;
 the core takes bodies and limits and no document. It answers over the
 part's non-reference bodies (or `bodies`) as one print along `direction`
-(default +Z; the bed is the plane below it through the origin). Seven
+(default +Z; the bed is the plane below it through the origin). Eight
 items, each `{status: pass | fail | skipped, measured, limit, note}`:
 
 | item | measured | limit | how |
@@ -496,6 +545,16 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 | `chords` | the chord deviation `export_stl` meshes this print at | a fifth of the gap a side | `printfit::StlDeflectionMm`, as [the export](#exporting-a-printed-part) takes it, or `stl_deflection_mm` |
 | `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places: a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else. So the air is exact and only which face is met, at a face's boundary, is the tessellation's (`IntCurvesFace` per sample was exact there too, and took minutes on the counter where this takes seconds). A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
 
+| `bed_fit` | the plate's box: `extent_mm`, x along the bed's x (the world's x, or y when the direction is x), z up the direction | the profile's `bed_mm`, with `shortfall_mm` per axis | `BRepBndLib::AddOptimal` of every body in the printer's frame. The extent, not a position: a slicer places the plate, so it fits when its box does |
+
+- **bed_fit is the printer's**, so it runs only on a part printed with a
+  profile that states `bed_mm` (vNEXT) and is skipped otherwise, its note
+  saying which: the built-in table is no printer's, and a profile without
+  a bed has not said one. A skipped bed_fit makes no claim in the receipt:
+  without a printer there is nothing to claim. `generators/_lib.py`'s
+  `PRINT_ITEMS` carries it, and `check_print` there demands it pass on a
+  part with a profile; on the built-in table it is printed as skipped and
+  not demanded.
 - **A tenth under the gap passes**: an arc-approximated involute (gear.py)
   comes out microns short of its gap, and FDM holds about ±0.2 mm; a
   clearance modelled within 10% of the profile's prints the same.
@@ -529,7 +588,9 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
   *Show* (`###print_check_overhang`, `###print_check_bridge`,
   `###print_check_stacking`), which selects the worst face so the viewport
   points at it: for stacking, the face with the least air over another
-  piece, else the lowest face of the highest piece off the bed.
+  piece, else the lowest face of the highest piece off the bed. The last
+  line, *fits the bed*, gives the plate's extent in the bed and, failing,
+  what it is over by.
 
 ### The coupon
 

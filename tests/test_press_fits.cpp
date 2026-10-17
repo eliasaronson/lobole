@@ -17,6 +17,7 @@
 #include "core/AssemblySolve.h"
 #include "core/Document.h"
 #include "core/Feature.h"
+#include "core/FitBands.h"
 #include "core/Measure.h"
 #include "core/MotionStudy.h"
 #include "core/PrintAllowance.h"
@@ -439,4 +440,120 @@ TEST_CASE("Frozen v159 golden: an exact motion study relieves a press fit",
       motion::Run(**g, parts, nullptr, (*g)->GetMotionStudies()[0]);
   CHECK_FALSE(h7.clean);
   CHECK(h7.pressFits.empty());
+}
+
+// ---------------------------------------------------------------------------
+// Printed press fits (docs/tolerances/README.md#printed-press-fits): a
+// printed cap pressed on a printed pin, banded by the part's print profile.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// PLA's built-in table with the press row at `press` (the bore under its
+// pin by that much when negative): a gap of 0.5, so a band of +-0.05.
+printfit::Process PressProfile(double press) {
+  auto prof = printfit::ProfileFromBuiltin("Test PLA", "fdm", "pla");
+  REQUIRE(prof);
+  for (printfit::Row& r : prof->table.rows)
+    if (r.kind == printfit::Printed::Press)
+      r.allowanceMm = press;
+  return printfit::FromProfile(*prof);
+}
+
+void PrintedPress(Document& doc, double dia) {
+  Tolerance t;
+  t.ref = RoundFace(doc, dia);
+  REQUIRE(t.ref.IsSet());
+  t.printedPress = true;
+  doc.SetTolerance(t);
+}
+
+} // namespace
+
+TEST_CASE("A printed cap on a printed pin at the profile's press is relieved",
+          "[measure][tolerances][press_fit][print]") {
+  // The press row says the cap's bore is 0.05 under its Ø3.2 pin: the bore
+  // band is -0.05 give or take 0.05, the pin's 0 give or take 0.05, so up
+  // to 0.15 of interference is the press.
+  const printfit::Process proc = PressProfile(-0.05);
+  auto cap = Housing(3.15);
+  auto pin = Pin(3.2);
+  cap->SetPrintProcess(proc);
+  pin->SetPrintProcess(proc);
+  PrintedPress(*cap, 3.15);
+  PrintedPress(*pin, 3.2);
+  REQUIRE(cap->GetBodies().front().fitBands.size() == 1);
+  const FitBand& bore = cap->GetBodies().front().fitBands.front();
+  CHECK(bore.printedPress);
+  CHECK(bore.side == FitBand::Side::Hole);
+  CHECK_THAT(bore.lower, WithinAbs(-0.10, 1e-12));
+  CHECK_THAT(bore.upper, WithinAbs(0.0, 1e-12));
+  CHECK_THAT(bore.allowance, WithinAbs(0.0, 1e-12));
+
+  Measure::SetContact c = Contact(*cap, *pin);
+  CHECK(c.volume < 1e-9);
+  REQUIRE(c.pressFits.size() == 1);
+  const auto& fit = c.pressFits.front();
+  CHECK(fit.fit == "Ø3.2 printed press 0.05 ('Test PLA' (fdm pla))");
+  CHECK_THAT(fit.interference, WithinAbs(0.05, 1e-9));
+  CHECK_THAT(fit.maxInterference, WithinAbs(0.15, 1e-9));
+  CHECK_THAT(fit.volume, WithinAbs(Annulus(3.2, 3.15, 10.0), 1e-6));
+  CHECK(c.fitsRefused.empty());
+
+  SECTION("past the band it is a clash naming the excess") {
+    auto tight = Housing(3.0);
+    tight->SetPrintProcess(proc);
+    PrintedPress(*tight, 3.0);
+    c = Contact(*tight, *pin);
+    CHECK(c.pressFits.empty());
+    CHECK_THAT(c.volume, WithinAbs(Annulus(3.2, 3.0, 10.0), 1e-6));
+    REQUIRE(c.fitsRefused.size() == 1);
+    CHECK_THAT(c.fitsRefused.front().excess, WithinAbs(0.05, 1e-9));
+    CHECK_THAT(c.fitsRefused.front().fit, ContainsSubstring("printed press"));
+  }
+  SECTION("at no interference in the model it is still the press") {
+    // The built-in default: the bore at its pin's size. FDM prints it small
+    // and the pin large, which is where the hold comes from.
+    auto flush = Housing(3.2);
+    const printfit::Process builtin{"fdm", "pla", std::nullopt};
+    flush->SetPrintProcess(builtin);
+    auto pin0 = Pin(3.2);
+    pin0->SetPrintProcess(builtin);
+    PrintedPress(*flush, 3.2);
+    PrintedPress(*pin0, 3.2);
+    c = Contact(*flush, *pin0);
+    CHECK(c.volume < 1e-9);
+    REQUIRE(c.pressFits.size() == 1);
+    CHECK_THAT(c.pressFits.front().interference, WithinAbs(0.0, 1e-9));
+    CHECK(c.pressFits.front().volume == 0.0);
+    CHECK_THAT(c.pressFits.front().fit,
+               ContainsSubstring("printed press 0 (fdm pla)"));
+  }
+  SECTION("against an ISO band it is not a fit") {
+    auto steel = Pin(3.2);
+    Tolerate(*steel, 3.2, "p6");
+    c = Contact(*cap, *steel);
+    CHECK(c.volume > 1e-6);
+    REQUIRE(c.fitsRefused.size() == 1);
+    CHECK_THAT(c.fitsRefused.front().reason,
+               ContainsSubstring("pairs with a printed press"));
+  }
+}
+
+TEST_CASE("A printed press needs a printed part to band it",
+          "[measure][tolerances][press_fit][print]") {
+  auto cap = Housing(3.2);
+  std::string why;
+  CHECK_FALSE(fitband::PrintedPressBand(*cap, RoundFace(*cap, 3.2), &why));
+  CHECK_THAT(why, ContainsSubstring("no print process"));
+  // Set anyway, it stamps nothing: nothing is relieved on its account.
+  PrintedPress(*cap, 3.2);
+  CHECK(cap->GetBodies().front().fitBands.empty());
+  // Printed, it bands.
+  cap->SetPrintProcess(PressProfile(-0.05));
+  const auto pb = fitband::PrintedPressBand(*cap, RoundFace(*cap, 3.2), &why);
+  REQUIRE(pb);
+  CHECK(pb->bore);
+  CHECK_THAT(pb->band.basicMm, WithinAbs(3.25, 1e-12));
+  CHECK_THAT(pb->band.toleranceMm, WithinAbs(0.05, 1e-12));
 }

@@ -191,7 +191,12 @@ def main():
 
 
         # Mass properties: CoM on the axis at half height (the CoG marker).
-        total = d.call("mass_properties")["total"]
+        mp = d.call("mass_properties")
+        total = mp["total"]
+        box_ = mp["bbox_mm"]
+        expect(all(abs(a - b) < 1e-6 for a, b in
+                   zip(box_["min"] + box_["max"], [-5, -5, 0, 5, 5, 10])),
+               f"one box for everything measured, off the surfaces: {box_}")
         com = total["center_of_mass_mm"]
         expect(abs(com[0]) < 1e-3 and abs(com[1]) < 1e-3
                and abs(com[2] - 5.0) < 1e-3, f"CoM at axis mid-height: {com}")

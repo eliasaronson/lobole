@@ -55,7 +55,8 @@ uint64_t JobSourceVersion(AppState& state, uint64_t sourceDocId) {
   for (const Tolerance& t : doc->GetTolerances()) {
     key = (key ^ t.id) * 1099511628211ull;
     key = (key ^ std::hash<std::string>{}(t.ref.name + "|" + t.isoClass + "|" +
-                                          t.ref2.name)) *
+                                          t.ref2.name +
+                                          (t.printedPress ? "|press" : ""))) *
           1099511628211ull;
     key = (key ^ static_cast<uint64_t>(std::llround(t.lower * 1e6))) *
           1099511628211ull;

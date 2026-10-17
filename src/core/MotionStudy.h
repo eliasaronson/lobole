@@ -115,6 +115,25 @@ struct Sample {
     bool turns = false, slides = false;
   };
   std::vector<MateValue> mates;
+  // vNEXT: a free joint coordinate that still jumped at the smallest step
+  // the study may take (docs/assemblies/README.md#branch-jumps): the
+  // linkage passes through a singular pose here, and may have come out of
+  // it on another branch. The sample keeps the pose the run continued to,
+  // and the study does not pass.
+  struct BranchJump {
+    uint64_t mate = 0;
+    std::vector<uint64_t> path; // as MateValue's
+    std::string name;
+    bool rotation = true;   // the coordinate: the mate's rotation, else offset
+    double jump = 0.0;      // its move over the smallest step, rad or mm
+    double expected = 0.0;  // the move its rate before would have made
+    double atValue = 0.0;   // the driver value the step ended at
+    double stepValue = 0.0; // the smallest step, in the driver's unit
+  };
+  std::optional<BranchJump> branchJump;
+  // The interval to this sample was re-solved at a finer step: a
+  // coordinate's rate changed too much between steps to trust the one step.
+  bool refined = false;
 };
 
 struct Result {
@@ -129,7 +148,8 @@ struct Result {
   size_t pairsRigid = 0;
   size_t pairsRigidChecked = 0;
   int rigidCheckedAt = -1;   // -1: never (no clash check ran)
-  bool clean = true;         // no clash at any sample, and every one solved
+  bool clean = true;         // no clash at any sample, every one solved,
+                             // and none jumped branch
   size_t worstSample = 0;    // the sample with the most clashes (or the
                              // first unsolved one)
   double deflectionMm = 0.0; // the mesh check's deflection, 0 for exact
@@ -142,6 +162,11 @@ struct Result {
   // Every press fit an exact check relieved (PressFit, above). A mesh check
   // relieves none, and reports such a pair as the clash its triangles see.
   std::vector<PressFit> pressFits;
+  // vNEXT: samples whose interval was re-solved at a finer step
+  // (Sample::refined), and those that still jumped at the finest
+  // (Sample::branchJump).
+  size_t refinedSamples = 0;
+  size_t branchJumps = 0;
   bool checkedClashes = false;
   size_t pairsChecked = 0; // over all samples
   double seconds = 0.0;

@@ -161,6 +161,10 @@ struct FitBand {
   // Explicit deviations say neither, and the geometry decides.
   enum class Side : uint8_t { Either, Hole, Shaft };
   Side side = Side::Either;
+  // vNEXT: a printed press's band (Tolerance::printedPress), read from the
+  // part's print profile. It pairs only with another, and `label` is then
+  // the profile it came from ("'K5 PLA on P1S' (fdm pla)").
+  bool printedPress = false;
   std::string label; // "K7", "+0.010/-0.020", "6005 outside (ISO 492 normal)"
 };
 

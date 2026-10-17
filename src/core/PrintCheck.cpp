@@ -59,8 +59,9 @@ const char* StatusName(Status s) {
 }
 
 bool Report::Ok() const {
-  for (Status s : {bed.status, shells.status, overhang.status, bridges.status,
-                   clearance.status, chords.status, stacking.status})
+  for (Status s :
+       {bed.status, shells.status, overhang.status, bridges.status,
+        clearance.status, chords.status, stacking.status, bedFit.status})
     if (s == Status::Fail)
       return false;
   return true;
@@ -1107,6 +1108,44 @@ Report Check(const std::vector<const Body*>& bodies, const Options& o) {
   } else {
     r.stacking.note = "no minimum air to judge a part printed over another "
                       "by (set_print_process, or state min_air_mm)";
+  }
+
+  // Bed fit: the plate's box in the printer's frame -- x on the bed (the
+  // world's x, or y when the print direction is x), up the print direction
+  // -- against the build volume.
+  if (o.bedMm) {
+    const glm::dvec3 world_x(1.0, 0.0, 0.0), world_y(0.0, 1.0, 0.0);
+    glm::dvec3 bx = world_x - glm::dot(world_x, up) * up;
+    if (glm::length(bx) < 1e-6)
+      bx = world_y - glm::dot(world_y, up) * up;
+    bx = glm::normalize(bx);
+    const glm::dvec3 by = glm::cross(up, bx);
+    gp_Trsf t;
+    t.SetValues(bx.x, bx.y, bx.z, 0.0, by.x, by.y, by.z, 0.0, up.x, up.y, up.z,
+                0.0);
+    Bnd_Box box;
+    for (const Body* b : bodies)
+      BRepBndLib::AddOptimal(b->shape.GetShape().Moved(TopLoc_Location(t)), box,
+                             false, false);
+    double x0, y0, z0, x1, y1, z1;
+    box.Get(x0, y0, z0, x1, y1, z1);
+    BedFit& f = r.bedFit;
+    f.bedMm = *o.bedMm;
+    f.extentMm = {x1 - x0, y1 - y0, z1 - z0};
+    bool fits = true;
+    for (int k = 0; k < 3; k++) {
+      f.shortfallMm[k] = std::max(0.0, f.extentMm[k] - f.bedMm[k]);
+      if (f.extentMm[k] > f.bedMm[k] + kBedTolMm)
+        fits = false;
+    }
+    f.status = fits ? Status::Pass : Status::Fail;
+    f.note = "the plate's box, x along the bed's x and z up the print "
+             "direction, against the build volume: a slicer places the "
+             "plate, so it fits when its box does";
+  } else {
+    r.bedFit.note = o.bedNote.empty()
+                        ? std::string("no build volume to fit the plate in")
+                        : o.bedNote;
   }
 
   if (!o.gapSideMm) {

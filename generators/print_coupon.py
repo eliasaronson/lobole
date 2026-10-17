@@ -69,8 +69,9 @@ profile (or, for a new one, the built-in table of `--process`/`--material`)
 gap into a `gap` row below Ø`size` -- and saves it with
 `save_print_profile`, each row's `source` naming the coupon. `--seed`
 installs the two profiles measured on a Bambu Lab P1S (K5 PLA at 0.1 mm a
-side, a plain PLA at 0.15, both at the preset's 0.2 mm layers), skipping any
-name the store already has.
+side, a plain PLA at 0.15, both at the preset's 0.2 mm layers, on the
+P1S's 256 x 256 x 256 mm bed), skipping any name the store already has
+except to give one that states no bed the P1S's.
 
 `--press-only` prints the PRESS row (docs/tolerances/README.md#press-allowance):
 pins of Ø`size` on shoulders on a plate, and a loose cap for each on the bed
@@ -158,15 +159,33 @@ SEED = [
      "source": "MEASURED, print_coupon --gap-only on a Bambu Lab P1S in an "
                "ordinary PLA: 0.15 mm a side slid freely"},
 ]
+# The P1S's build volume, mm (x, y, z): Bambu Lab's published 256 x 256 x
+# 256. The printer's, not the filament's, so both profiles carry it.
+P1S_BED_MM = [256.0, 256.0, 256.0]
 
 
 def seed(d):
-    """Install the two P1S profiles, leaving any name already stored."""
-    have = {p["name"] for p in d.call("list_print_profiles")["profiles"]}
+    """Install the two P1S profiles, leaving any name already stored -- but
+    giving one that states no bed the P1S's, its one missing number."""
+    have = {p["name"]: p for p in d.call("list_print_profiles")["profiles"]}
     for s in SEED:
         if s["name"] in have:
+            mine = have[s["name"]]
+            if mine.get("bed_mm"):
+                print(f"print_coupon: '{s['name']}' is already one of your "
+                      f"profiles; left as it is")
+                continue
+            keep = {k: mine[k] for k in (
+                "name", "process", "material", "conditions", "rows",
+                "layer_height_mm", "z_gap_mm") if k in mine}
+            if mine.get("stl_deflection_stated"):
+                keep["stl_deflection_mm"] = mine["stl_deflection_mm"]
+            keep["bed_mm"] = P1S_BED_MM
+            d.call("save_print_profile", profile=keep)
             print(f"print_coupon: '{s['name']}' is already one of your "
-                  f"profiles; left as it is")
+                  f"profiles; gave it the P1S's bed, "
+                  f"{' x '.join(f'{v:g}' for v in P1S_BED_MM)} mm, and left "
+                  f"the rest as it is")
             continue
         rows = [r for r in builtin_rows(d, "fdm", "pla")
                 if r["kind"] != "gap"]
@@ -176,7 +195,8 @@ def seed(d):
         p = d.call("save_print_profile", profile={
             "name": s["name"], "process": "fdm", "material": "pla",
             "conditions": P1S_CONDITIONS, "stl_deflection_mm": 0.01,
-            "layer_height_mm": s["layer"], "rows": rows})
+            "layer_height_mm": s["layer"], "bed_mm": P1S_BED_MM,
+            "rows": rows})
         print(f"print_coupon: saved '{p['name']}' (gap {s['gap_side']:g} mm "
               f"a side)")
     return 0
@@ -305,6 +325,8 @@ def record(d, args):
         out["layer_height_mm"] = layer
     if z_gap:
         out["z_gap_mm"] = z_gap
+    if prof.get("bed_mm"):
+        out["bed_mm"] = prof["bed_mm"]  # the printer's, kept as it was
     saved = d.call("save_print_profile", profile=out)
     z = (f", Z gap {saved['z_gap_mm']:g} mm" if saved.get("z_gap_mm")
          else "")

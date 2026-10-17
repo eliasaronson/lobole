@@ -829,6 +829,10 @@ void AssertTolerances(const Document& doc, const nlohmann::json& expect) {
     CHECK(got.ref2.featureId == want[i].value("b_feature_id", uint64_t{0}));
     CHECK(got.IsDistance() == want[i].contains("b_element"));
     CHECK(got.isoClass == want[i].value("class", std::string{}));
+    // vNEXT: a printed press. Lost, the cap and its pin reload as two
+    // unbanded faces, and their press is a clash again.
+    CHECK(got.printedPress ==
+          (want[i].value("printed", std::string{}) == "press"));
     CHECK_THAT(got.lower,
                Catch::Matchers::WithinAbs(want[i].value("lower", 0.0), 1e-12));
     CHECK_THAT(got.upper,
@@ -1126,6 +1130,15 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
         CHECK_FALSE(press->builtinFallback);
         CHECK_THAT(press->allowanceMm,
                    WithinRel(pe.at("press_allowance_mm").get<double>(), 1e-12));
+      }
+      // vNEXT: the printer's build volume. Dropped, check_print's bed_fit
+      // would skip, and a plate too big for the printer would pass.
+      if (pe.contains("bed_mm")) {
+        REQUIRE(pr.bedMm.has_value());
+        for (int k = 0; k < 3; k++)
+          CHECK((*pr.bedMm)[k] == pe.at("bed_mm")[k].get<double>());
+      } else {
+        CHECK_FALSE(pr.bedMm.has_value());
       }
     } else {
       CHECK_FALSE(doc.PrintProcess()->profile.has_value());

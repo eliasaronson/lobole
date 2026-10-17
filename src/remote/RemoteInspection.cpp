@@ -11,6 +11,7 @@
 #include "core/Configuration.h"
 #include "core/Document.h"
 #include "core/ElementOrigin.h"
+#include "core/FitBands.h"
 #include "core/FitStandards.h"
 #include "core/FrameMath.h"
 #include "core/MassProps.h"
@@ -45,12 +46,17 @@
 #include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
+#include <BRepBndLib.hxx>
+#include <Bnd_Box.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopLoc_Location.hxx>
 #include <TopTools_DataMapOfShapeInteger.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <gp_Quaternion.hxx>
+#include <gp_Trsf.hxx>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -849,7 +855,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "source:string}[]"},
     {"check_print",
      "Will this PART print? (docs/tolerances/README.md#checking-a-print) "
-     "Seven items over its bodies (or `bodies`: names or creating-feature "
+     "Eight items over its bodies (or `bodies`: names or creating-feature "
      "ids) as ONE print along `direction` (default [0,0,1], the bed the "
      "plane below it through the origin), each {status: pass|fail|skipped, "
      "the measured value, the limit, note}: `bed` (the lowest point within "
@@ -870,7 +876,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "tenth under it: rays down from the faces, exact on the B-Rep, and "
      "`pairs` gives each piece over another with the area under the limit, "
      "the least air and where. A part's own bridge over its own floor is "
-     "the bridges item's). Every limit defaults to the "
+     "the bridges item's) and `bed_fit` (the plate's box -- x along the "
+     "bed's x, z up the print direction -- inside the print profile's "
+     "`bed_mm`, the printer's build volume: `extent_mm` against `bed_mm`, "
+     "and `shortfall_mm` per axis where it does not fit, `profile` the "
+     "part's print profile whenever it has one; skipped, saying so, without "
+     "a profile that states one -- nothing guesses a printer). Every limit "
+     "defaults to the "
      "part's print process (set_print_process): the process's overhang and "
      "bridge, the profile's smallest gap a side and its STL deflection, and "
      "the minimum air from the profile's z_gap_mm, else 3 layers of its "
@@ -885,7 +897,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "stl_deflection_mm?:number>0, min_air_mm?:number>0",
      remote::NoFlags,
      "bed:{contact_area_mm2:number, lowest_mm:number, on_bed:string[], "
-     "status:string, tol_mm:number}, bodies:{body:int, "
+     "status:string, tol_mm:number}, bed_fit:{note:string, status:string, "
+     "bed_mm?:number[], extent_mm?:number[], profile?:string, "
+     "shortfall_mm?:number[]}, bodies:{body:int, "
      "lowest_mm:number, name:string, solids:int, watertight:bool}[], "
      "bridges:{area_mm2:number, faces:object[], limit_from:string, "
      "limit_mm:number, note:string, status:string, "
@@ -950,7 +964,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "(the slicer preset's layer), z_gap_mm? (the vertical air a face "
      "needs over another part to come away from it, whole layers; "
      "check_print's stacking limit; both absent when not stated), "
-     "rows[]{kind, "
+     "bed_mm? ([x, y, z], the printer's build volume, check_print's "
+     "bed_fit; absent when not stated), rows[]{kind, "
      "from_mm, to_mm (absent = and up), allowance_mm, source}}. A printed "
      "part names one (set_print_process {profile}) and EMBEDS a copy. "
      "`defaults` are the built-in tables, read-only, that a new profile "
@@ -962,12 +977,15 @@ static constexpr MethodDoc InspectionMethods[] = {
      "rows:object[]}[], dir:string, profiles:{material:string, "
      "name:string, process:string, rows:object[], "
      "stl_deflection_mm:number, stl_deflection_stated:bool, "
-     "layer_height_mm?:number, z_gap_mm?:number, conditions?:string}[]"},
+     "layer_height_mm?:number, z_gap_mm?:number, bed_mm?:number[], "
+     "conditions?:string}[]"},
     {"save_print_profile",
      "Write a print profile to your store {profile: {name, process, "
      "material, conditions?, stl_deflection_mm?, layer_height_mm?, "
      "z_gap_mm? (the vertical air a face needs over another part, whole "
-     "layers of layer_height_mm), rows?: [{kind: hole|shaft|"
+     "layers of layer_height_mm), bed_mm? ([x, y, z] in mm, the printer's "
+     "build volume: what check_print's bed_fit fits a plate into), "
+     "rows?: [{kind: hole|shaft|"
      "internal_thread|external_thread|gap|press, from_mm?, to_mm? (absent "
      "= and up), allowance_mm (signed, on the DIAMETER; a gap's is the whole "
      "diametral clearance, a press's the cap's bore less its pin), "
@@ -981,7 +999,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "gap positive, a shaft/external thread not positive; a press may be "
      "either), a z_gap_mm "
      "without a layer_height_mm or not whole layers of it (naming the two "
-     "nearest that are), or a name that "
+     "nearest that are), a bed_mm that is not three positive numbers, or a "
+     "name that "
      "would share a file with another. Open parts keep their copy; "
      "get_print_process then reports `match: differs`.",
      "from_part, part, profile", remote::NotInBatch,
@@ -989,7 +1008,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "rows:{allowance_mm:number, from_mm:number, kind:string, "
      "source?:string, to_mm?:number}[], stl_deflection_mm:number, "
      "stl_deflection_stated:bool, layer_height_mm?:number, "
-     "z_gap_mm?:number"},
+     "z_gap_mm?:number, bed_mm?:number[]"},
     {"delete_print_profile",
      "Remove a print profile from your store {name}. A part printed with it "
      "keeps its copy and reports `match: missing`.",
@@ -1017,8 +1036,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "clear, material, part, process, profile", remote::NoFlags,
      "print:{material:string, process:string, stl_deflection_mm:number, "
      "match?:string, profile?:string, conditions?:string, "
-     "rows?:object[], layer_height_mm?:number, z_gap_mm?:number}, "
-     "threads:object[], confirm?:string"},
+     "rows?:object[], layer_height_mm?:number, z_gap_mm?:number, "
+     "bed_mm?:number[]}, threads:object[], confirm?:string"},
     {"get_print_process",
      "This part's print process (null when it is not printed; a thread's "
      "`pitch` in mm) and the whole "
@@ -1038,7 +1057,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "confirm:string, print:{material:string, process:string, "
      "stl_deflection_mm:number, match?:string, profile?:string, "
      "conditions?:string, rows?:object[], layer_height_mm?:number, "
-     "z_gap_mm?:number}|null, tables:{conditions:string, "
+     "z_gap_mm?:number, bed_mm?:number[]}|null, tables:{conditions:string, "
      "material:string, min_reliable_thread_mm:number, process:string, "
      "repeatability_mm:number, repeatability_source:string, "
      "rows:object[]}[], threads?:{allowance_mm:number, confirm:string, "
@@ -1094,8 +1113,19 @@ static constexpr MethodDoc InspectionMethods[] = {
      "the face's measured size when you set it, not when something later "
      "looks. `part` (name, stable id or slot index) records it on ANY "
      "part — a generator need not switch tabs — in that part's own undo "
-     "history; without it, the active part.",
-     "b, class, comment, element, feature_id, lower, part, upper",
+     "history; without it, the active part. {printed: \"press\"} instead "
+     "of a class (\"press\" is the one accepted) marks a PRINTED PRESS, "
+     "set on both faces of a printed cap pressed on a printed pin "
+     "(docs/tolerances/README.md#printed-press-fits): its band is not "
+     "stored but read from the part's print profile -- the bore at the "
+     "profile's `press` allowance, the pin at zero, each give or take a "
+     "tenth of the profile's gap -- so the exact contact checks relieve "
+     "the press and report it. Refused on a part with no print process "
+     "or one that is not FDM, and where the profile has no row for the "
+     "size, naming why. The reply carries the band (`press_mm`, "
+     "`tolerance_mm`, `min`/`max` the face may print at in the model's "
+     "terms).",
+     "b, class, comment, element, feature_id, lower, part, printed, upper",
      remote::NoFlags},
     {"list_tolerances",
      "Every tolerance on this part, each tagged `kind: size|distance`, with "
@@ -1107,7 +1137,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "tolerances:{class?:string, element:string, feature_id:int, "
      "id:int, kind:string, max:number, min:number, nominal:number, "
      "resolved:bool, b?:object, comment?:string, lower?:number, "
-     "upper?:number, error?:string}[]"},
+     "upper?:number, printed?:string, press_mm?:number, "
+     "tolerance_mm?:number, side?:string, press_from?:string, "
+     "error?:string}[]"},
     {"clear_tolerance",
      "Remove one tolerance by {id}, from the active part or `part` (name, "
      "stable id or slot index).",
@@ -1155,7 +1187,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "warned:int"},
     {"mass_properties",
      "Mass (`mass_g`), `volume_mm3`, `center_of_mass_mm`, bbox per body and "
-     "total (density "
+     "`bbox_mm` {min, max, size} of everything measured together (density "
      "from "
      "materials). The bbox here is MEASURED off the surfaces; get_state's is "
      "a cheap conservative bound that can read ~60% over on a swept surface. "
@@ -1166,6 +1198,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "center_of_mass_mm:number[], inertia:number[][], "
      "mass_g:number|null, material:string, name:string, "
      "surface_area_mm2:number, volume_mm3:number, density?:number}[], "
+     "bbox_mm:{max:number[], min:number[], size:number[]}|null, "
      "total:{center_of_mass_mm:number[], mass_g:number|null, "
      "volume_mm3:number}, occurrences?:{center_of_mass_mm:number[], "
      "mass_g:number|null, name:string, occurrence:int, part_id:int, "
@@ -1626,6 +1659,8 @@ json ProcessJson(const ui::AppState& state,
       j["layer_height_mm"] = p->profile->layerHeightMm;
     if (p->profile->zGapMm > 0.0)
       j["z_gap_mm"] = p->profile->zGapMm;
+    if (p->profile->bedMm)
+      j["bed_mm"] = *p->profile->bedMm;
   }
   j["stl_deflection_mm"] = printfit::StlDeflectionMm(*p);
   return j;
@@ -1684,6 +1719,45 @@ printfit::Process ProcessFromParams(const ui::AppState& state, const Params& p,
   if (const std::string why = printfit::Validate(proc); !why.empty())
     throw std::runtime_error(method + ": " + why);
   return proc;
+}
+
+// A printed press's band on the wire: the allowance and the tolerance it is
+// banded by, and the sizes the face may be in the model's terms (the pin's
+// modelled diameter plus the band).
+void AddPressBand(json& out, const fitband::PrintedBand& pb) {
+  out["printed"] = "press";
+  out["press_mm"] = pb.band.pressMm;
+  out["tolerance_mm"] = pb.band.toleranceMm;
+  out["min"] = pb.band.basicMm + pb.band.lowerMm;
+  out["max"] = pb.band.basicMm + pb.band.upperMm;
+  out["side"] = pb.bore ? "bore" : "pin";
+  if (pb.band.builtinFallback)
+    out["press_from"] = "the built-in default: the profile has no press row";
+}
+
+// The MEASURED box of `bodies` placed at `world`, grown into `box`: off the
+// surfaces (BRepBndLib::AddOptimal, no triangulation, no tolerances), as
+// mass_properties' per-body boxes are.
+void AddMeasuredBox(Bnd_Box& box, const std::vector<Body>& bodies,
+                    const glm::dmat4& world) {
+  const glm::dquat q = glm::normalize(glm::quat_cast(glm::dmat3(world)));
+  gp_Trsf t;
+  t.SetRotation(gp_Quaternion(q.x, q.y, q.z, q.w));
+  t.SetTranslationPart(gp_Vec(world[3][0], world[3][1], world[3][2]));
+  const TopLoc_Location loc(t);
+  for (const Body& b : bodies)
+    if (!b.reference && !b.shape.GetShape().IsNull())
+      BRepBndLib::AddOptimal(b.shape.GetShape().Moved(loc), box, false, false);
+}
+
+json BoxJson(const Bnd_Box& box) {
+  if (box.IsVoid())
+    return nullptr;
+  double x0, y0, z0, x1, y1, z1;
+  box.Get(x0, y0, z0, x1, y1, z1);
+  return json{{"min", {x0, y0, z0}},
+              {"max", {x1, y1, z1}},
+              {"size", {x1 - x0, y1 - y0, z1 - z0}}};
 }
 
 json PrintProfileWire(const ui::AppState& state, const printfit::Profile& pr) {
@@ -3436,8 +3510,17 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         rows.push_back(entry);
       }
       const glm::dvec3& com = am.centerOfMass;
+      // Everything weighed, together: every visible leaf where the solve
+      // put it.
+      Bnd_Box all;
+      if (const auto flat = assembly::Flatten(*state.assembly, resolve,
+                                              ui::AssemblyResolverFor(state)))
+        for (const assembly::FlatInstance& inst : *flat)
+          if (inst.visible && inst.part != nullptr)
+            AddMeasuredBox(all, inst.part->GetBodies(), inst.world);
       json out = {
           {"occurrences", rows},
+          {"bbox_mm", BoxJson(all)},
           {"total",
            {{"volume_mm3", am.volume},
             {"center_of_mass_mm", {com.x, com.y, com.z}},
@@ -3504,8 +3587,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       out.push_back(entry);
     }
     const glm::dvec3& com = mass->centerOfMass;
+    // Every body measured, together (the reference ones weigh nothing and
+    // are not in it).
+    Bnd_Box all;
+    AddMeasuredBox(all, only >= 0 ? subset : bodies, glm::dmat4(1.0));
     return json{
         {"bodies", out},
+        {"bbox_mm", BoxJson(all)},
         {"total",
          {{"volume_mm3", mass->volume},
           {"center_of_mass_mm", {com.x, com.y, com.z}},
@@ -3649,7 +3737,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       throw std::runtime_error(
           "save_print_profile: `profile` {name, process, material, "
           "conditions?, stl_deflection_mm?, layer_height_mm?, z_gap_mm?, "
-          "rows?} or `from_part: true` (the "
+          "bed_mm?, rows?} or `from_part: true` (the "
           "part's embedded copy), one of the two");
     if (!fromPart && p.contains("part"))
       throw std::runtime_error(
@@ -3953,6 +4041,20 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           {"limit_mm", r.chords.limitMm},
           {"note", r.chords.note}}},
         {"stacking", std::move(stacking)}};
+    {
+      const printcheck::BedFit& f = r.bedFit;
+      json bedFit{{"status", status(f.status)}, {"note", f.note}};
+      if (f.status != printcheck::Status::Skipped) {
+        bedFit["bed_mm"] = vec(f.bedMm);
+        bedFit["extent_mm"] = vec(f.extentMm);
+        bedFit["shortfall_mm"] = vec(f.shortfallMm);
+      }
+      // The profile, whenever the part has one: a skip with a profile is a
+      // bed nobody stated, without one there is no printer at all.
+      if (part.PrintProcess() && part.PrintProcess()->profile)
+        bedFit["profile"] = part.PrintProcess()->profile->name;
+      out["bed_fit"] = std::move(bedFit);
+    }
 
     receipt::Receipt rc;
     const receipt::Oracle oracle{"designer/print_check", "1"};
@@ -3986,6 +4088,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     claim("every piece on the bed, with air over the others", st.status,
           st.pairs.empty() ? st.limitMm : st.pairs.front().minAirMm, "mm",
           st.note);
+    // Claimed only where there is a printer to fit: without a profile's
+    // bed there is no such claim to make, and bed_fit says why it skipped.
+    if (r.bedFit.status != printcheck::Status::Skipped) {
+      const glm::dvec3& sf = r.bedFit.shortfallMm;
+      claim("the plate fits the printer's bed", r.bedFit.status,
+            std::max({sf.x, sf.y, sf.z}), "mm", r.bedFit.note);
+    }
     AttachReceipt(out, rc);
     return out;
   }
@@ -4395,6 +4504,22 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     ElementRef ref2;
     double nominal = 0.0;
     const bool hasClass = p.contains("class");
+    const bool printed = p.contains("printed");
+    if (printed) {
+      const json& v = p.at("printed");
+      if (!v.is_string() || v.get<std::string>() != "press")
+        throw std::runtime_error("set_tolerance: printed " + v.dump() +
+                                 " is not a printed tolerance; accepted: "
+                                 "press");
+      if (hasClass || p.contains("lower") || p.contains("upper"))
+        throw std::runtime_error(
+            "set_tolerance: a printed press takes no `class` and no "
+            "`lower`/`upper` -- its band is the print profile's");
+      if (p.contains("b"))
+        throw std::runtime_error(
+            "set_tolerance: a printed press is a SIZE, of a bore or a pin, "
+            "not a distance between two faces");
+    }
     if (p.contains("b")) {
       const json& bj = p.at("b");
       if (!bj.contains("feature_id") || !bj.contains("element"))
@@ -4439,24 +4564,36 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     }
 
     const bool hasLower = p.contains("lower"), hasUpper = p.contains("upper");
+    // Checked against the face and the part's profile before anything is
+    // stored: a press nothing can band is refused now, not when a contact
+    // check later finds no band to relieve.
+    std::optional<fitband::PrintedBand> pressBand;
+    if (printed) {
+      std::string why;
+      pressBand = fitband::PrintedPressBand(part, ref, &why);
+      if (!pressBand)
+        throw std::runtime_error("set_tolerance: " + why);
+    }
     if (hasClass && (hasLower || hasUpper))
       throw std::runtime_error(
           "set_tolerance: give a `class` OR a `lower`/`upper` pair, not both "
           "— two statements of the same band can disagree, and then which is "
           "the part made to?");
-    if (!hasClass && !(hasLower && hasUpper))
+    if (!printed && !hasClass && !(hasLower && hasUpper))
       throw std::runtime_error(
           hasLower || hasUpper
               ? "set_tolerance: `lower` and `upper` come as a pair — half a "
                 "band silently becomes an unbounded one"
-              : "set_tolerance: needs a `class` (\"H7\") or a "
-                "`lower`/`upper` pair in mm");
+              : "set_tolerance: needs a `class` (\"H7\"), a "
+                "`lower`/`upper` pair in mm, or `printed: \"press\"`");
 
     Tolerance t;
     t.ref = ref;
     t.ref2 = ref2;
     t.comment = p.value("comment", std::string{});
-    if (hasClass) {
+    if (printed) {
+      t.printedPress = true;
+    } else if (hasClass) {
       t.isoClass = p.at("class").get<std::string>();
       // Validated HERE, against this face's own size, rather than when
       // something later looks: a class that cannot apply to the face it is
@@ -4485,7 +4622,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (stored->IsDistance())
       out["b"] = {{"feature_id", stored->ref2.featureId},
                   {"element", stored->ref2.name}};
-    if (!stored->isoClass.empty()) {
+    if (stored->printedPress) {
+      AddPressBand(out, *pressBand);
+    } else if (!stored->isoClass.empty()) {
       out["class"] = stored->isoClass;
       std::string why;
       const auto b = fits::Limits(nominal, stored->isoClass, &why);
@@ -4529,13 +4668,22 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       // still what somebody decided about this part, and saying so is more
       // use than quietly having fewer tolerances than yesterday.
       e["resolved"] = measured.has_value();
-      if (t.isoClass.empty()) {
+      if (t.printedPress) {
+        e["printed"] = "press";
+      } else if (t.isoClass.empty()) {
         e["lower"] = t.lower;
         e["upper"] = t.upper;
       } else {
         e["class"] = t.isoClass;
       }
-      if (measured) {
+      if (measured && t.printedPress) {
+        e["nominal"] = *measured;
+        std::string why;
+        if (const auto pb = fitband::PrintedPressBand(part, t.ref, &why))
+          AddPressBand(e, *pb);
+        else
+          e["error"] = why;
+      } else if (measured) {
         const double nominal = *measured;
         e["nominal"] = nominal;
         if (t.isoClass.empty()) {

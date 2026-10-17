@@ -263,11 +263,17 @@ follows — so the loop pass writes the solved DOFs back to the mates. The
 file then reopens where it converged, and the next solve seeds from there. A
 loop-free document is never dirtied by a solve.
 
+### Branches
+
 A mechanism can close on more than one branch (a four-bar's open and crossed
 modes); which one a solve lands on is a property of the seed. Seeding from
 the stored values keeps it on the branch it is on, and motion studies walk
 their samples in order for the same reason (`test_assembly_loops.cpp`, "A
-four-bar seeded on a branch stays on it").
+four-bar seeded on a branch stays on it"). A step too large for its seed
+can still land on another branch with every loop closed, so a motion study
+watches the joints' rates and re-solves such a step finer
+([branch jumps](README.md#branch-jumps)); the solver itself has no branch
+guard.
 
 ### Coupled loops
 
@@ -282,12 +288,14 @@ crank a full turn at 2 degrees a step, seeded from the last step as a motion
 study is. It asserts closure, all three signs at every step, and the foot
 against the leg's own circle-intersection kinematics.
 
-The solver needs no branch guard there. Seeded from the previous step it
-stays on the built branch at every step up to 30 degrees. At 45 degrees a
-step it lands on a mirror branch, first at 360 degrees, and stays there,
-still closed. So a study of a linkage with mirror branches samples finely,
-and a generator that cares which branch it is on checks the knees' signs
-itself, as the Strandbeest does at every sample of its 2-degree study
+Seeded from the previous step the solver stays on the built branch at
+every step up to 30 degrees. At 45 degrees a step it lands on a mirror
+branch, first at 360 degrees, and stays there, still closed. A motion study
+no longer follows it there: it sees the joints' rates jump, re-solves those
+steps finer, and comes back on the built branch
+([branch jumps](README.md#branch-jumps)); with `max_refine: 0` it reports
+the jump instead. The Strandbeest still checks its knees' signs at every
+sample of its 2-degree study, as a second witness
 ([its README](../../generators/strandbeest/README.md#checked-every-run)).
 
 The twelve-leg walker is the largest component yet: 109 revolute columns

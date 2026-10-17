@@ -70,7 +70,43 @@ std::optional<Round> RoundFace(const Body& body, const std::string& name) {
   return std::nullopt;
 }
 
+// The body of `doc` the face's feature made.
+const Body* BodyOf(const Document& doc, const ElementRef& face) {
+  for (const Body& b : doc.GetBodies())
+    if (b.createdBy == face.featureId && !b.shape.GetShape().IsNull() &&
+        b.elementMap.Resolve(face.name))
+      return &b;
+  return nullptr;
+}
+
 } // namespace
+
+std::optional<PrintedBand> PrintedPressBand(const Document& doc,
+                                            const ElementRef& face,
+                                            std::string* why) {
+  const auto say = [&](std::string w) {
+    if (why)
+      *why = std::move(w);
+    return std::nullopt;
+  };
+  if (!doc.PrintProcess())
+    return say("a printed press reads its band from the part's print "
+               "profile, and this part has no print process "
+               "(set_print_process)");
+  const Body* body = BodyOf(doc, face);
+  if (body == nullptr)
+    return say("face '" + face.name + "' does not resolve");
+  const auto round = RoundFace(*body, face.name);
+  if (!round)
+    return say("a printed press is between a round bore and a round pin, "
+               "and " +
+               face.name + " is not a cylinder");
+  const auto band = printfit::PrintedPress(*doc.PrintProcess(), round->bore,
+                                           round->diameter, why);
+  if (!band)
+    return std::nullopt;
+  return PrintedBand{*band, round->bore, round->diameter};
+}
 
 void Stamp(const Document& doc, std::vector<Body>& bodies) {
   const printfit::Process* print =
@@ -111,6 +147,22 @@ void Stamp(const Document& doc, std::vector<Body>& bodies) {
         continue; // a size is only a round face's; list_tolerances says so
       FitBand b;
       b.face = t.ref;
+      if (t.printedPress) {
+        // Modelled at what the press needs: no process allowance on top.
+        const auto band = print
+                              ? printfit::PrintedPress(*print, round->bore,
+                                                       round->diameter, nullptr)
+                              : std::nullopt;
+        if (!band)
+          continue; // list_tolerances says why
+        b.lower = band->lowerMm;
+        b.upper = band->upperMm;
+        b.side = round->bore ? FitBand::Side::Hole : FitBand::Side::Shaft;
+        b.printedPress = true;
+        b.label = printfit::Label(*print);
+        body.fitBands.push_back(std::move(b));
+        continue;
+      }
       // The size the face is made at: a printed part carries the process's
       // allowance in its model, and prints at the modelled size less it.
       double made = round->diameter;

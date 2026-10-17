@@ -14,6 +14,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -22,6 +23,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 
 namespace motion {
@@ -57,7 +59,7 @@ uint64_t InputKey(const AssemblyDocument& asmDoc,
   // The algorithm's own version: a change to what a run computes (the clash
   // rule, the walk to the start) bumps it, so no answer stored before is
   // handed out as one from after.
-  h.Str("motion/1");
+  h.Str("motion/2"); // 2: refined steps and branch jumps (vNEXT)
   nlohmann::json definition = DocumentIO::MotionStudyToJson(study);
   definition.erase("name"); // a label: two studies alike share an answer
   definition.erase("id");
@@ -391,6 +393,250 @@ void WalkToStart(assembly::FlexibleExpansion& ex, Mate& driver,
                     /*diagnose=*/false);
   }
 }
+
+// ---- Branches (docs/assemblies/README.md#branch-jumps) ---------------------
+//
+// Each sample's solve is seeded from the last, and a step too large for the
+// seed can land on a mirror branch that closes every loop exactly: the
+// Jansen leg at 45 degrees a step. So every free joint coordinate is
+// watched between steps. A coordinate's RATE (its move per unit of the
+// driver) changes smoothly along a branch -- by about its second derivative
+// times the step -- and jumps where the solve did: by the whole flip at
+// any step, or by the change of slope where the linkage passes a singular
+// pose. A step whose rates moved more than kRateJump of the coordinate's
+// largest rate so far is re-solved at half the step from where it started,
+// and so on down to the study's max_refine halvings: a flip that was the
+// step's goes away, and the rate change that is the linkage's stays.
+
+// How far a coordinate's rate may move between steps, as a share of its
+// largest rate so far (or of a tenth of the fastest coordinate's, for one
+// that has barely moved).
+constexpr double kRateJump = 0.5;
+constexpr double kSlowShare = 0.1;
+// At the finest step, a change that keeps more than this share of itself
+// when the step is doubled is not the curvature's: smooth, it halves (0.5),
+// a flip doubles (2), and a kink keeps 2/3 or more in one of the two steps
+// either side of it, wherever in them it falls.
+constexpr double kScaleKept = 0.6;
+
+// What Solve changes in the document a run steps: every placement and every
+// mate's value. Taken before a step, put back to take it again finer.
+struct Snapshot {
+  std::vector<Occurrence> occurrences;
+  std::vector<Mate> mates;
+  explicit Snapshot(const AssemblyDocument& d)
+      : occurrences(d.GetOccurrences()), mates(d.GetMates()) {}
+  // Element by element, so pointers into the document (the driver) stay.
+  void Restore(AssemblyDocument& d) const {
+    auto& o = d.GetOccurrences();
+    auto& m = d.GetMates();
+    for (size_t k = 0; k < o.size() && k < occurrences.size(); k++)
+      o[k] = occurrences[k];
+    for (size_t k = 0; k < m.size() && k < mates.size(); k++)
+      m[k] = mates[k];
+  }
+};
+
+class BranchWatch {
+public:
+  BranchWatch(assembly::FlexibleExpansion& ex, Mate& driver,
+              const assembly::PartResolver& parts,
+              const assembly::AssemblyResolver& assemblies,
+              const MotionStudy& study)
+      : m_ex(ex), m_driver(driver), m_parts(parts), m_assemblies(assemblies),
+        m_study(study) {
+    const auto& mates = ex.doc.GetMates();
+    for (size_t k = 0; k < mates.size(); k++)
+      for (const bool rot : {true, false})
+        if (assembly::MateHasDof(mates[k].type,
+                                 rot ? MateDof::Rotation : MateDof::Offset))
+          m_coords.push_back({k, rot});
+    m_maxRate.assign(m_coords.size(), 0.0);
+  }
+
+  // The sample at `value` from the pose at the last one, `prev`: one step
+  // when the rates hold, finer where they do not.
+  assembly::SolveReport Advance(double prev, double value, Sample& s) {
+    if (!m_last) // the first sample, or after one that did not solve
+      return Restart(value);
+    const double h = value - prev;
+    const int maxDepth = std::max(0, m_study.maxRefine);
+    int depth = m_haveRate ? 0 : maxDepth;
+    double pos = prev;
+    assembly::SolveReport rep;
+    for (;;) {
+      const double hs = h / double(1 << depth);
+      const bool last = std::abs(value - pos) <= std::abs(hs) * (1.0 + 1e-9);
+      const double target = last ? value : pos + hs;
+      const Snapshot before(m_ex.doc);
+      rep = SolveAt(target);
+      const bool solved = rep.erroredMates == 0 && rep.loopsClosed;
+      const std::vector<double> now = Read();
+      const double step = target - pos;
+      std::vector<double> rate(now.size());
+      for (size_t k = 0; k < now.size(); k++)
+        rate[k] = Move(k, now[k], (*m_last)[k]) / step;
+      // The worst coordinate: its rate change against what it may be.
+      double worst = 0.0;
+      size_t worstK = 0;
+      if (m_haveRate) {
+        double fastest = 0.0;
+        for (double r : m_maxRate)
+          fastest = std::max(fastest, r);
+        for (size_t k = 0; k < rate.size(); k++) {
+          const double ref =
+              std::max({m_maxRate[k], kSlowShare * fastest, 1e-9});
+          const double q = std::abs(rate[k] - m_lastRate[k]) / ref;
+          if (q > worst) {
+            worst = q;
+            worstK = k;
+          }
+        }
+      }
+      bool jumped = m_haveRate && worst > kRateJump;
+      if (jumped && solved && depth == maxDepth) {
+        // The last rate was measured over a longer step, so a fast but
+        // smooth joint (a knee near straight, a slider at its dead centre)
+        // can change its rate by more than a share of what it has done so
+        // far. So at the finest step the change is asked again, scale by
+        // scale: the rate over this step against the rate over the same
+        // step BACK from where it started, and the same over twice the
+        // step. Along a branch the change is the curvature times the step,
+        // and halves with it; at a kink it stays; across a flip it doubles.
+        const Snapshot after(m_ex.doc);
+        const auto at = [&](double v, std::vector<double>& out) {
+          before.Restore(m_ex.doc);
+          const assembly::SolveReport r = SolveAt(v);
+          out = Read();
+          return r.erroredMates == 0 && r.loopsClosed;
+        };
+        std::vector<double> back1, back2, fwd2;
+        const bool ok = at(pos - step, back1) && at(pos - 2.0 * step, back2) &&
+                        at(pos + 2.0 * step, fwd2);
+        after.Restore(m_ex.doc);
+        if (ok) {
+          const std::vector<double>& c0 = *m_last;
+          double fastest = 0.0;
+          for (double r : m_maxRate)
+            fastest = std::max(fastest, r);
+          double q = 0.0;
+          size_t qk = 0;
+          double fine = 0.0, coarse = 0.0;
+          for (size_t k = 0; k < now.size(); k++) {
+            const double d1 = std::abs(Move(k, now[k], c0[k]) / step -
+                                       Move(k, c0[k], back1[k]) / step);
+            const double d2 = std::abs(Move(k, fwd2[k], c0[k]) / (2.0 * step) -
+                                       Move(k, c0[k], back2[k]) / (2.0 * step));
+            const double ref =
+                std::max({m_maxRate[k], kSlowShare * fastest, 1e-9});
+            if (d1 / ref > q) {
+              q = d1 / ref;
+              qk = k;
+              fine = d1;
+              coarse = d2;
+            }
+          }
+          jumped = q > kRateJump && fine > kScaleKept * coarse;
+          worstK = qk;
+          if (jumped)
+            m_lastRate[qk] = Move(qk, c0[qk], back1[qk]) / step;
+        }
+      }
+      if ((!solved || jumped) && depth < maxDepth) {
+        before.Restore(m_ex.doc);
+        depth++;
+        s.refined = true;
+        continue;
+      }
+      if (!solved) {
+        // Locked at the finest step too: the sample is what one solve at
+        // its value gives, and is reported unsolved.
+        if (!last)
+          rep = SolveAt(value);
+        m_last.reset();
+        return rep;
+      }
+      if (jumped) {
+        Sample::BranchJump j;
+        const Mate& m = m_ex.doc.GetMates()[m_coords[worstK].first];
+        j.rotation = m_coords[worstK].second;
+        j.name = m.name;
+        j.mate = m.id;
+        if (const auto it = m_ex.mateOf.find(m.id); it != m_ex.mateOf.end()) {
+          j.path = {it->second.first};
+          j.mate = it->second.second;
+        }
+        j.jump = rate[worstK] * step;
+        j.expected = m_lastRate[worstK] * step;
+        j.atValue = target;
+        j.stepValue = step;
+        if (!s.branchJump ||
+            std::abs(j.jump - j.expected) >
+                std::abs(s.branchJump->jump - s.branchJump->expected))
+          s.branchJump = j;
+        // The rate after a jump says nothing of the branch it landed on:
+        // the next step measures it afresh, at the finest step.
+        m_haveRate = false;
+      } else {
+        for (size_t k = 0; k < rate.size(); k++)
+          m_maxRate[k] = std::max(m_maxRate[k], std::abs(rate[k]));
+        m_lastRate = rate;
+        m_haveRate = true;
+      }
+      m_last = now;
+      if (last)
+        return rep;
+      pos = target;
+      depth = m_haveRate ? std::max(0, depth - 1) : maxDepth;
+    }
+  }
+
+  // The first sample: one solve, and the coordinates to watch from.
+  assembly::SolveReport Restart(double value) {
+    assembly::SolveReport rep = SolveAt(value);
+    m_haveRate = false;
+    if (rep.erroredMates == 0 && rep.loopsClosed)
+      m_last = Read();
+    else
+      m_last.reset();
+    return rep;
+  }
+
+private:
+  assembly::SolveReport SolveAt(double value) {
+    assembly::SetMateDof(m_driver, m_study.driverDof, value);
+    assembly::PropagateRelations(m_ex.doc, m_driver.id, m_parts);
+    return assembly::Solve(m_ex.doc, m_parts, m_assemblies,
+                           {m_driver.id, m_study.driverDof},
+                           /*diagnose=*/false);
+  }
+  std::vector<double> Read() const {
+    std::vector<double> v;
+    v.reserve(m_coords.size());
+    const auto& mates = m_ex.doc.GetMates();
+    for (const auto& [k, rot] : m_coords)
+      v.push_back(assembly::MateDofValue(mates[k], rot ? MateDof::Rotation
+                                                       : MateDof::Offset));
+    return v;
+  }
+  // A rotation's move is the shortest way round: a solve that wraps an
+  // angle has not turned it a whole turn.
+  double Move(size_t k, double now, double was) const {
+    const double d = now - was;
+    return m_coords[k].second ? std::remainder(d, 2.0 * 3.14159265358979323846)
+                              : d;
+  }
+
+  assembly::FlexibleExpansion& m_ex;
+  Mate& m_driver;
+  const assembly::PartResolver& m_parts;
+  const assembly::AssemblyResolver& m_assemblies;
+  const MotionStudy& m_study;
+  std::vector<std::pair<size_t, bool>> m_coords; // mate index, rotation?
+  std::optional<std::vector<double>> m_last;
+  std::vector<double> m_lastRate, m_maxRate;
+  bool m_haveRate = false;
+};
 
 // Of a run's progress, the share the solves take when clashes are checked
 // too; the checks have the rest.
@@ -831,6 +1077,7 @@ Result Run(const AssemblyDocument& asmDocIn,
   // recorded. The same pass records which pairs move relative to each other,
   // so the checks can ask the rigid ones once instead of at every sample.
   RelativeMotion motion;
+  BranchWatch watch(ex, *driver, parts, assemblies, study);
   std::vector<std::vector<Placed>> placed;
   std::vector<char> flattened;
   for (int i = 0; i < study.samples; i++) {
@@ -843,11 +1090,14 @@ Result Run(const AssemblyDocument& asmDocIn,
     s.t = static_cast<double>(i) / static_cast<double>(study.samples - 1);
     s.value = ValueAt(study, s.t);
 
-    assembly::SetMateDof(*driver, study.driverDof, s.value);
-    assembly::PropagateRelations(ex.doc, driver->id, parts);
-    assembly::SolveReport rep = assembly::Solve(ex.doc, parts, assemblies,
-                                                {driver->id, study.driverDof},
-                                                /*diagnose=*/false);
+    // Stepped from the last sample, finer where a coordinate jumps.
+    assembly::SolveReport rep =
+        i == 0 ? watch.Restart(s.value)
+               : watch.Advance(out.samples.back().value, s.value, s);
+    if (s.refined)
+      out.refinedSamples++;
+    if (s.branchJump)
+      out.branchJumps++;
     if (study.checkClash)
       motion.Record(ex);
     // Collapsed whenever there were units at all, so one that could not
@@ -935,19 +1185,23 @@ Result Run(const AssemblyDocument& asmDocIn,
   bool worstSet = false;
   for (size_t i = 0; i < out.samples.size(); i++) {
     const Sample& s = out.samples[i];
-    const bool bad =
-        !s.solved || !s.clashes.empty() || !s.unknownContacts.empty();
+    const bool bad = !s.solved || s.branchJump || !s.clashes.empty() ||
+                     !s.unknownContacts.empty();
     if (bad)
       out.clean = false;
     // The worst sample: the first unsolved one wins outright, else the one
     // with the most clashes.
-    if (!s.solved && (!worstSet || out.samples[out.worstSample].solved)) {
+    const auto kinematic = [](const Sample& x) {
+      return !x.solved || x.branchJump.has_value();
+    };
+    if (kinematic(s) &&
+        (!worstSet || !kinematic(out.samples[out.worstSample]))) {
       out.worstSample = i;
       worstSet = true;
       worstCount = SIZE_MAX;
-    } else if (s.solved &&
+    } else if (!kinematic(s) &&
                s.clashes.size() + s.unknownContacts.size() > worstCount &&
-               (!worstSet || out.samples[out.worstSample].solved)) {
+               (!worstSet || !kinematic(out.samples[out.worstSample]))) {
       out.worstSample = i;
       worstCount = s.clashes.size() + s.unknownContacts.size();
       worstSet = true;
@@ -959,6 +1213,19 @@ Result Run(const AssemblyDocument& asmDocIn,
       std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
           .count();
   return out;
+}
+
+static std::string BranchJumpText(const Sample::BranchJump& j, bool deg) {
+  const auto value = [&](double v, bool rot) {
+    char b[48];
+    std::snprintf(b, sizeof b, "%.4g %s", rot ? angles::ToDegrees(v) : v,
+                  rot ? "deg" : "mm");
+    return std::string(b);
+  };
+  return "'" + j.name + "' " + (j.rotation ? "turned " : "slid ") +
+         value(j.jump, j.rotation) + " where its rate gave " +
+         value(j.expected, j.rotation) + ", over a step of " +
+         value(j.stepValue, deg) + " to " + value(j.atValue, deg);
 }
 
 std::string Table(const Result& result, const MotionStudy& study) {
@@ -985,6 +1252,11 @@ std::string Table(const Result& result, const MotionStudy& study) {
         clashes += ", ";
       clashes += "UNKNOWN " + c.aName + " x " + c.bName + ": " + c.reason;
     }
+    if (s.branchJump) {
+      if (!clashes.empty())
+        clashes += ", ";
+      clashes += "BRANCH JUMP " + BranchJumpText(*s.branchJump, deg);
+    }
     std::snprintf(line, sizeof line, "%-6zu %-12.2f %-8s %-10.4f %s\n", i,
                   shown, s.solved ? "yes" : "NO", s.residualMm,
                   clashes.empty() ? "-" : clashes.c_str());
@@ -993,6 +1265,7 @@ std::string Table(const Result& result, const MotionStudy& study) {
   std::snprintf(line, sizeof line, "%s: %zu samples, %zu pair checks, %.2f s\n",
                 !result.error.empty()    ? "ERROR"
                 : result.cancelled       ? "INCOMPLETE"
+                : result.branchJumps     ? "BRANCH JUMP"
                 : !result.checkedClashes ? "KINEMATICS ONLY"
                 : result.pairsUnknown    ? "UNVERIFIED"
                 : result.clean           ? "CLEAN"
@@ -1006,6 +1279,10 @@ std::string Table(const Result& result, const MotionStudy& study) {
   if (result.pairsUnknown)
     out += std::to_string(result.pairsUnknown) +
            " exact pair checks could not be verified.\n";
+  if (result.refinedSamples)
+    out += std::to_string(result.refinedSamples) +
+           " samples re-solved at a finer step, where a joint's rate jumped "
+           "between samples.\n";
   if (result.rigidCheckedAt >= 0)
     out += "Rigid pairs (no relative motion) checked once, exactly, at "
            "sample " +
@@ -1068,6 +1345,19 @@ Verdict Summarize(const Result& r, const MotionStudy& study, bool stale) {
     v.text = line;
     return v;
   }
+  // Did it stay on its branch? A jump that the finest step still makes is
+  // a singular pose the linkage passes, and it may leave on either branch.
+  for (size_t i = 0; i < r.samples.size(); i++)
+    if (const auto& j = r.samples[i].branchJump) {
+      v.level = Verdict::Level::Bad;
+      v.text = "Jumps branch at sample " + std::to_string(i) + ": " +
+               BranchJumpText(*j, deg) +
+               ". The linkage passes a singular "
+               "pose there; " +
+               std::to_string(r.branchJumps) + " sample" +
+               (r.branchJumps == 1 ? "" : "s") + " jumped.";
+      return v;
+    }
   if (!r.checkedClashes) {
     std::snprintf(line, sizeof line,
                   "Moves through all %zu samples. Collisions not checked "

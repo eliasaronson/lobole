@@ -25,6 +25,7 @@
 #include "imgui_internal.h" // PushOverrideID: flat ids across the panes
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cfloat>
 #include <cmath>
@@ -774,6 +775,39 @@ void DrawPrintProfileForm(AppState& state, int index) {
                         "coupon's air row says how many layers. Every part "
                         "still starts on the bed; Check print's stacking "
                         "line judges by this, else by three layers.");
+
+  // The printer's build volume (vNEXT): what Check print's bed line fits a
+  // plate into. Three zeros = not stated, and that line is skipped.
+  {
+    std::array<double, 3> bed = p.bedMm.value_or(std::array<double, 3>{});
+    FormLabel("Bed x, y, z (mm, 0 = not stated)");
+    const float w = (ImGui::GetContentRegionAvail().x -
+                     2.0f * ImGui::GetStyle().ItemSpacing.x) /
+                    3.0f;
+    bool changed = false;
+    const char* ids[] = {"###prof_bed_x", "###prof_bed_y", "###prof_bed_z"};
+    for (int k = 0; k < 3; k++) {
+      if (k > 0)
+        ImGui::SameLine();
+      ImGui::SetNextItemWidth(w);
+      double v = bed[k];
+      if (ExprInputDouble(state, ids[k], &v, "%.4g") && v != bed[k]) {
+        bed[k] = v;
+        changed = true;
+      }
+    }
+    if (changed) {
+      if (bed[0] == 0.0 && bed[1] == 0.0 && bed[2] == 0.0)
+        p.bedMm.reset();
+      else
+        p.bedMm = bed;
+      edited = true;
+    }
+    ImGui::SetItemTooltip("The printer's build volume: Check print's bed "
+                          "line, and the generators that pack plates, fit "
+                          "a plate into it. A Bambu Lab P1S is 256 x 256 x "
+                          "256.");
+  }
 
   // The rows: kind, size range, allowance, source.
   ImGui::Spacing();

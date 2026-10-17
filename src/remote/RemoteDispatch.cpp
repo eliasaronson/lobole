@@ -323,9 +323,11 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "throws rolls the WHOLE batch back and names which call failed and why "
      "(stop_on_error, default true; false runs on and reports each error in "
      "place). Returns {results: [...], regen, calls, failed?, "
-     "regenerations}: the per-call `regen`/`digest` are STRIPPED — geometry "
-     "is answered once, at the end, by the batch's own `regen` — so a "
-     "result carries the identities a call created. Refuses to nest, and "
+     "regenerations}: each result is {call, method, id?, result} -- `id` "
+     "the one the call created (a feature, a mate, an occurrence), as "
+     "the call alone answers it -- and the per-call `regen`/`digest` are "
+     "STRIPPED: geometry is answered once, at the end, by the batch's own "
+     "`regen`. Refuses to nest, and "
      "refuses anything whose effect a rollback could not take back "
      "(screenshots, exports, project and git verbs, UI actions), naming it. "
      "A feature that fails to BUILD is not a failed call: it is reported in "
@@ -1067,7 +1069,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
           r.erase("digest");
         }
         byIndex[i] = r;
-        results.push_back({{"call", i + 1}, {"method", sub}, {"result", r}});
+        json entry{{"call", i + 1}, {"method", sub}, {"result", r}};
+        // The id the call created, beside its number, as the same call made
+        // alone answers it at its top level: a caller reads results[k].id
+        // instead of listing what it just made.
+        if (r.is_object() && r.contains("id"))
+          entry["id"] = r.at("id");
+        results.push_back(std::move(entry));
       } catch (...) {
         // Every exception, a kernel Standard_Failure included: one that got
         // past this used to leave the batch's earlier calls applied, since

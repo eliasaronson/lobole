@@ -221,6 +221,8 @@ SetToleranceCommand::SetToleranceCommand(Tolerance tolerance)
     : m_after(std::move(tolerance)) {}
 
 std::string SetToleranceCommand::Description() const {
+  if (m_after.printedPress)
+    return "Set tolerance printed press";
   return m_after.isoClass.empty() ? "Set tolerance"
                                   : "Set tolerance " + m_after.isoClass;
 }

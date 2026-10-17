@@ -13,6 +13,7 @@
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtc/quaternion.hpp>
 
 #include "TestIO.h"
 #include "core/AssemblySolve.h"
@@ -22,10 +23,12 @@
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
 #include "core/features/BearingFeature.h"
+#include "core/features/FrameFeature.h"
 #include "core/io/GlbAnimation.h"
 #include "core/io/Serialization.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cmath>
 #include <cstdlib>
@@ -1182,4 +1185,312 @@ TEST_CASE("A saved motion study on an assembly with relations reopens "
   CHECK(motion::InputKey(*reloaded, over(back), nullptr, reread) !=
         result.inputHash);
   fs::remove_all(dir);
+}
+
+// ---------------------------------------------------------------------------
+// Branches (docs/assemblies/solver.md#branches): a study does not jump to a
+// mirror branch between samples without saying so.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// A link part: nothing but named Frame features at its joints.
+std::unique_ptr<Document> Link(const std::vector<glm::dvec2>& joints) {
+  auto doc = std::make_unique<Document>();
+  for (size_t i = 0; i < joints.size(); i++) {
+    auto fr = std::make_unique<FrameFeature>("j" + std::to_string(i),
+                                             FrameKind::Explicit);
+    fr->origin[0] = joints[i].x;
+    fr->origin[1] = joints[i].y;
+    doc->AddFeature(std::move(fr));
+  }
+  doc->Regenerate();
+  return doc;
+}
+
+// A planar linkage of links whose frames sit at their joints in WORLD
+// coordinates at the built pose: every occurrence at the origin, every
+// revolute at zero. Mate k joins link a's joint i to link b's joint j.
+struct Linkage {
+  std::vector<std::unique_ptr<Document>> parts;
+  AssemblyDocument asmDoc;
+  std::vector<uint64_t> occ;
+  std::vector<uint64_t> mates;
+  assembly::PartResolver Parts() {
+    return [this](uint64_t id, uint64_t) -> const Document* {
+      return id >= 1 && id <= parts.size() ? parts[id - 1].get() : nullptr;
+    };
+  }
+  // Each link's own frame has its origin at its first joint and its x axis
+  // toward its second (the fixed link's is the world's), as a part drawn
+  // along its bar is; `angle` remembers where it was placed.
+  std::vector<double> angle;
+  void AddLink(const char* name, const std::vector<glm::dvec2>& joints,
+               bool fixed = false) {
+    const glm::dvec2 o0 = fixed ? glm::dvec2(0.0) : joints[0];
+    const double phi = fixed ? 0.0
+                             : std::atan2(joints[1].y - joints[0].y,
+                                          joints[1].x - joints[0].x);
+    const glm::dvec2 x(std::cos(phi), std::sin(phi)), y(-x.y, x.x);
+    std::vector<glm::dvec2> local;
+    for (const glm::dvec2& j : joints)
+      local.push_back({glm::dot(j - o0, x), glm::dot(j - o0, y)});
+    parts.push_back(Link(local));
+    Occurrence o;
+    o.name = name;
+    o.partId = parts.size();
+    o.fixed = fixed;
+    o.position = glm::dvec3(o0, 0.0);
+    o.orientation = glm::angleAxis(phi, glm::dvec3(0.0, 0.0, 1.0));
+    occ.push_back(asmDoc.AddOccurrence(std::move(o)));
+    angle.push_back(phi);
+  }
+  // A world point of the built pose in link `k`'s own coordinates.
+  glm::dvec3 Local(size_t k, glm::dvec2 world) const {
+    const Occurrence* o = asmDoc.FindById(occ[k]);
+    const glm::dvec2 x(std::cos(angle[k]), std::sin(angle[k])), y(-x.y, x.x);
+    const glm::dvec2 d = world - glm::dvec2(o->position);
+    return {glm::dot(d, x), glm::dot(d, y), 0.0};
+  }
+  uint64_t Join(const char* name, size_t a, size_t ja, size_t b, size_t jb) {
+    Mate m;
+    m.rotation = angle[b] - angle[a];
+    m.name = name;
+    m.type = MateType::Revolute;
+    m.a.occurrenceId = occ[a];
+    m.a.anchor.frameId = parts[a]->GetFeature(ja)->GetId();
+    m.b.occurrenceId = occ[b];
+    m.b.anchor.frameId = parts[b]->GetFeature(jb)->GetId();
+    m.flipped = false;
+    mates.push_back(asmDoc.AddMate(m));
+    return mates.back();
+  }
+};
+
+// Jansen's "holy numbers", mm (a crank of 15).
+struct JansenLengths {
+  double a = 38.0, b = 41.5, c = 39.3, d = 40.1, e = 55.8, f = 39.4, g = 36.7,
+         h = 65.7, i = 49.0, j = 50.0, k = 61.9, l = 7.8, m = 15.0;
+};
+
+glm::dvec2 Dyad(glm::dvec2 p, double r1, glm::dvec2 q, double r2, double side) {
+  const glm::dvec2 d = q - p;
+  const double L = glm::length(d);
+  const double along = (r1 * r1 - r2 * r2 + L * L) / (2.0 * L);
+  const double h = std::sqrt(std::max(0.0, r1 * r1 - along * along));
+  const glm::dvec2 u = d / L;
+  return p + along * u + side * h * glm::dvec2(-u.y, u.x);
+}
+
+double Cross2(glm::dvec2 u, glm::dvec2 v) { return u.x * v.y - u.y * v.x; }
+
+// The leg at crank angle 0, by circle intersections on the built branch;
+// links 0 frame, 1 crank, 2 j, 3 k, 4 BCD, 5 c, 6 f, 7 EFG.
+struct JansenLeg {
+  Linkage l;
+  glm::dvec2 O, A, B, C, D, E, F, G;
+  uint64_t crank = 0;
+};
+std::unique_ptr<JansenLeg> BuildJansen() {
+  const JansenLengths L;
+  auto leg = std::make_unique<JansenLeg>();
+  JansenLeg& p = *leg;
+  p.O = {0.0, 0.0};
+  p.B = {-L.a, -L.l};
+  p.A = {L.m, 0.0};
+  p.C = Dyad(p.A, L.j, p.B, L.b, -1.0);
+  p.E = Dyad(p.A, L.k, p.B, L.c, +1.0);
+  p.D = Dyad(p.B, L.d, p.C, L.e, +1.0);
+  p.F = Dyad(p.D, L.f, p.E, L.g, -1.0);
+  p.G = Dyad(p.E, L.i, p.F, L.h, +1.0);
+  Linkage& k = p.l;
+  k.AddLink("frame", {p.O, p.B}, /*fixed=*/true);
+  k.AddLink("crank", {p.O, p.A});
+  k.AddLink("j", {p.A, p.C});
+  k.AddLink("k", {p.A, p.E});
+  k.AddLink("BCD", {p.B, p.C, p.D});
+  k.AddLink("c", {p.B, p.E});
+  k.AddLink("f", {p.D, p.F});
+  k.AddLink("EFG", {p.E, p.F, p.G});
+  p.crank = k.Join("O", 0, 0, 1, 0);
+  k.Join("A j", 1, 1, 2, 0);
+  k.Join("A k", 1, 1, 3, 0);
+  k.Join("B BCD", 0, 1, 4, 0);
+  k.Join("B c", 0, 1, 5, 0);
+  k.Join("D", 4, 2, 6, 0);
+  k.Join("E c", 5, 1, 7, 0);
+  k.Join("C", 2, 1, 4, 1);
+  k.Join("E k", 3, 1, 5, 1);
+  k.Join("F", 6, 1, 7, 1);
+  return leg;
+}
+
+// The knees' signs at every sample of `res`, traced: C, E and F, each the
+// side of the line through its two other joints its vertex is on.
+std::vector<std::array<double, 3>> JansenKnees(JansenLeg& leg,
+                                               const motion::Result& res) {
+  const std::vector<motion::TracePoint> pts = {
+      {"A", leg.l.occ[1], 0, leg.l.Local(1, leg.A)},
+      {"C", leg.l.occ[2], 0, leg.l.Local(2, leg.C)},
+      {"E", leg.l.occ[3], 0, leg.l.Local(3, leg.E)},
+      {"D", leg.l.occ[6], 0, leg.l.Local(6, leg.D)},
+      {"F", leg.l.occ[6], 0, leg.l.Local(6, leg.F)}};
+  std::vector<motion::TracePath> paths;
+  std::string why;
+  REQUIRE(motion::TracePoints(res, pts, &paths, &why));
+  std::vector<std::array<double, 3>> out;
+  for (size_t i = 0; i < res.samples.size(); i++) {
+    const auto at = [&](size_t k) { return glm::dvec2(*paths[k].points[i]); };
+    const glm::dvec2 A = at(0), C = at(1), E = at(2), D = at(3), F = at(4);
+    out.push_back({Cross2(A - C, leg.B - C), Cross2(A - E, leg.B - E),
+                   Cross2(D - F, E - F)});
+  }
+  return out;
+}
+
+} // namespace
+
+// A four-bar: ground pivots O (0, 0) and Q (d, 0), crank O-A (a), coupler
+// A-B (b), rocker Q-B (c), built at crank angle th0 with the elbow on
+// `side`. Links 0 ground, 1 crank, 2 coupler, 3 rocker.
+std::unique_ptr<Linkage> FourBar(double d, double a, double b, double c,
+                                 double th0, double side, uint64_t* crank) {
+  auto l = std::make_unique<Linkage>();
+  const glm::dvec2 O(0, 0), Q(d, 0), A(a * std::cos(th0), a * std::sin(th0));
+  const glm::dvec2 B = Dyad(A, b, Q, c, side);
+  l->AddLink("ground", {O, Q}, true);
+  l->AddLink("crank", {O, A});
+  l->AddLink("coupler", {A, B});
+  l->AddLink("rocker", {Q, B});
+  *crank = l->Join("O", 0, 0, 1, 0);
+  l->Join("A", 1, 1, 2, 0);
+  l->Join("B", 2, 1, 3, 1);
+  l->Join("Q", 0, 1, 3, 0);
+  return l;
+}
+
+TEST_CASE("A Jansen leg at 45 degrees a step stays on its branch",
+          "[motion][branch][jansen]") {
+  // Seeded from the last sample, a 45-degree step lands the leg on a
+  // mirror branch at 360 degrees, every loop closed
+  // (docs/assemblies/solver.md#branches). The run refines the steps whose
+  // joint rates jump, and comes back on the built branch.
+  auto leg = BuildJansen();
+  MotionStudy study = FullTurn(leg->crank, 9);
+  study.checkClash = false;
+  const motion::Result res =
+      motion::Run(leg->l.asmDoc, leg->l.Parts(), nullptr, study);
+  REQUIRE(res.error.empty());
+  INFO(motion::Table(res, study));
+  const auto knees = JansenKnees(*leg, res);
+  for (size_t i = 0; i < res.samples.size(); i++) {
+    INFO("sample " << i);
+    CHECK(res.samples[i].solved);
+    CHECK_FALSE(res.samples[i].branchJump);
+    CHECK(knees[i][0] * knees[0][0] > 0.0);
+    CHECK(knees[i][1] * knees[0][1] > 0.0);
+    CHECK(knees[i][2] * knees[0][2] > 0.0);
+  }
+  CHECK(res.refinedSamples > 0);
+  CHECK(res.branchJumps == 0);
+  CHECK(res.clean);
+  std::printf("Jansen at 45 deg a step: %zu of %zu samples refined\n",
+              res.refinedSamples, res.samples.size());
+
+  // Without refinement the same study lands on the mirror branch, and
+  // says so rather than calling it solved.
+  study.maxRefine = 0;
+  const motion::Result coarse =
+      motion::Run(leg->l.asmDoc, leg->l.Parts(), nullptr, study);
+  CHECK(coarse.branchJumps > 0);
+  CHECK_FALSE(coarse.clean);
+
+  // At 2 degrees a step nothing is refined: the watch costs nothing there.
+  study.maxRefine = MotionStudy::kDefaultMaxRefine;
+  study.samples = 181;
+  const motion::Result fine =
+      motion::Run(leg->l.asmDoc, leg->l.Parts(), nullptr, study);
+  CHECK(fine.refinedSamples == 0);
+  CHECK(fine.branchJumps == 0);
+}
+
+TEST_CASE("A four-bar driven through its dead point reports the branch jump",
+          "[motion][branch]") {
+  // A parallelogram four-bar (ground = coupler, crank = rocker) has a dead
+  // point where all four links lie in line. There it can leave as a
+  // parallelogram or as an anti-parallelogram, and the solver takes the
+  // second: the coupler, which never turned, starts to. No step is fine
+  // enough to make that go away, so the sample says so.
+  uint64_t crank = 0;
+  auto l = FourBar(100, 30, 100, 30, 1.0, 1.0, &crank);
+  MotionStudy study = FullTurn(crank, 73);
+  study.from = 1.0;
+  study.to = 1.0 + 2.0 * kPi;
+  study.checkClash = false;
+  const motion::Result res = motion::Run(l->asmDoc, l->Parts(), nullptr, study);
+  REQUIRE(res.error.empty());
+  INFO(motion::Table(res, study));
+  REQUIRE(res.branchJumps > 0);
+  CHECK_FALSE(res.clean);
+  size_t first = res.samples.size();
+  for (size_t i = 0; i < res.samples.size(); i++)
+    if (res.samples[i].branchJump) {
+      first = i;
+      break;
+    }
+  REQUIRE(first < res.samples.size());
+  const motion::Sample::BranchJump& j = *res.samples[first].branchJump;
+  std::printf("four-bar: jump at sample %zu, '%s' %.4f deg where its rate "
+              "gave %.4f, over %.4f deg to %.3f deg\n",
+              first, j.name.c_str(), j.jump * 180 / kPi, j.expected * 180 / kPi,
+              j.stepValue * 180 / kPi, j.atValue * 180 / kPi);
+  // At the dead point, half a turn on from the crank's start at 0 in line.
+  CHECK_THAT(j.atValue, WithinAbs(kPi, 0.01));
+  // Over the smallest step: a 64th of the study's.
+  CHECK_THAT(std::abs(j.stepValue),
+             WithinAbs(std::abs(study.to - study.from) / 72.0 / 64.0, 1e-9));
+  CHECK(res.worstSample == first);
+  const motion::Verdict v = motion::Summarize(res, study, false);
+  CHECK(v.level == motion::Verdict::Level::Bad);
+  CHECK_THAT(v.text, ContainsSubstring("Jumps branch at sample"));
+  CHECK_THAT(motion::Table(res, study), ContainsSubstring("BRANCH JUMP"));
+}
+
+TEST_CASE("A study's max_refine and a run's branch jump round-trip",
+          "[motion][branch][serialize]") {
+  MotionStudy s = FullTurn(7, 9);
+  CHECK_FALSE(DocumentIO::MotionStudyToJson(s).contains("max_refine"));
+  s.maxRefine = 3;
+  nlohmann::json j = DocumentIO::MotionStudyToJson(s);
+  CHECK(j.at("max_refine") == 3);
+  CHECK(DocumentIO::MotionStudyFromJson(j).maxRefine == 3);
+  j["max_refine"] = 13;
+  CHECK_THROWS_WITH(DocumentIO::MotionStudyFromJson(j),
+                    ContainsSubstring("from 0 to 12"));
+
+  uint64_t crank = 0;
+  auto l = FourBar(100, 30, 100, 30, 1.0, 1.0, &crank);
+  MotionStudy study = FullTurn(crank, 73);
+  study.from = 1.0;
+  study.to = 1.0 + 2.0 * kPi;
+  study.checkClash = false;
+  const motion::Result res = motion::Run(l->asmDoc, l->Parts(), nullptr, study);
+  REQUIRE(res.branchJumps > 0);
+  const motion::Result back =
+      DocumentIO::MotionResultFromJson(DocumentIO::MotionResultToJson(res));
+  CHECK(back.branchJumps == res.branchJumps);
+  CHECK(back.refinedSamples == res.refinedSamples);
+  for (size_t i = 0; i < res.samples.size(); i++) {
+    CHECK(back.samples[i].refined == res.samples[i].refined);
+    REQUIRE(back.samples[i].branchJump.has_value() ==
+            res.samples[i].branchJump.has_value());
+    if (res.samples[i].branchJump) {
+      CHECK(back.samples[i].branchJump->name ==
+            res.samples[i].branchJump->name);
+      CHECK(back.samples[i].branchJump->jump ==
+            res.samples[i].branchJump->jump);
+    }
+  }
+  CHECK(motion::Summarize(back, study, false).text ==
+        motion::Summarize(res, study, false).text);
 }

@@ -10,10 +10,14 @@
 // bodies, so every copy of a body that reaches a contact check carries them,
 // the way a RingGrip rides on a ring.
 
+#include "core/PrintAllowance.h"
+
 #include <optional>
+#include <string>
 #include <vector>
 
 class Document;
+struct ElementRef;
 class TopoDS_Face;
 struct Body;
 
@@ -31,5 +35,20 @@ void Stamp(const Document& doc, std::vector<Body>& bodies);
 // rather than a shaft, from its outward normal. nullopt for a face that is
 // not a cylinder.
 [[nodiscard]] std::optional<bool> IsBore(const TopoDS_Face& face);
+
+// A printed press's band at the face `face` of `doc`
+// (docs/tolerances/README.md#printed-press-fits): the face's modelled
+// diameter and side read off the geometry, the band off the part's print
+// profile (printfit::PrintedPress). Refused (nullopt, `why` set) on a part
+// with no print process, a face that does not resolve or is not a cylinder,
+// and whatever PrintedPress refuses. set_tolerance asks it before storing
+// one, so a press that cannot be banded is never set.
+struct PrintedBand {
+  printfit::PressBand band;
+  bool bore = false;
+  double modelledMm = 0.0;
+};
+[[nodiscard]] std::optional<PrintedBand>
+PrintedPressBand(const Document& doc, const ElementRef& face, std::string* why);
 
 } // namespace fitband

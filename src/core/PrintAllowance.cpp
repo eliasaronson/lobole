@@ -291,6 +291,15 @@ std::string ValidateProfile(const Profile& p) {
            "must be 0 (not measured) or a positive number of whole layers "
            "in mm, not " +
            Mm(p.zGapMm);
+  if (p.bedMm) {
+    const char* axis[] = {"x", "y", "z"};
+    for (int i = 0; i < 3; i++)
+      if (!std::isfinite((*p.bedMm)[i]) || !((*p.bedMm)[i] > 0.0))
+        return who +
+               "bed_mm is the build volume [x, y, z] in mm, each "
+               "positive; its " +
+               axis[i] + " is " + Mm((*p.bedMm)[i]);
+  }
   if (p.zGapMm > 0.0) {
     // A slicer ends air at a layer: air between layers is not air it can
     // print, so it is refused rather than rounded either way.
@@ -451,6 +460,51 @@ double StlDeflectionMm(const Process& p) {
     return p.profile->stlDeflectionMm;
   const Table* t = Find(p);
   return t == nullptr ? 0.0 : SmallestGapSideMm(*t) / 10.0;
+}
+
+std::optional<PressBand> PrintedPress(const Process& p, bool bore,
+                                      double modelledMm, std::string* why) {
+  if (p.process != "fdm") {
+    if (why)
+      *why = "a printed press is the fit an FDM printer's bore and pin need, "
+             "and this part is printed by " +
+             p.process;
+    return std::nullopt;
+  }
+  const Table* t = Find(p);
+  if (t == nullptr) {
+    if (why)
+      *why = Validate(p);
+    return std::nullopt;
+  }
+  // The press row: the profile's own, else its pair's built-in default
+  // (Allowance::builtinFallback).
+  const bool own =
+      std::any_of(t->rows.begin(), t->rows.end(),
+                  [](const Row& r) { return r.kind == Printed::Press; });
+  const Table* rows = own ? t : FindBuiltin(p.process, p.material);
+  if (rows == nullptr) {
+    if (why)
+      *why = "the " + Label(p) + " table has no press row";
+    return std::nullopt;
+  }
+  const auto press =
+      bore ? ForModelled(*rows, Label(p), Printed::Press, modelledMm, why)
+           : ForBasic(*rows, Label(p), Printed::Press, modelledMm, why);
+  if (!press)
+    return std::nullopt;
+  const auto gap = ForBasic(p, Printed::Gap, press->basicMm, why);
+  if (!gap)
+    return std::nullopt;
+  PressBand b;
+  b.basicMm = press->basicMm;
+  b.pressMm = press->allowanceMm;
+  b.toleranceMm = kPressToleranceShare * gap->allowanceMm;
+  b.builtinFallback = !own && p.profile.has_value();
+  const double centre = bore ? b.pressMm : 0.0;
+  b.lowerMm = centre - b.toleranceMm;
+  b.upperMm = centre + b.toleranceMm;
+  return b;
 }
 
 std::optional<Allowance> ForBasic(const Process& p, Printed kind,

@@ -13,7 +13,7 @@ struct Body;
 
 // Will this print? (docs/tolerances/README.md#checking-a-print): the one
 // printability check every printed part runs -- check_print, the Print
-// process section's Check print, and every print-in-place generator. Seven
+// process section's Check print, and every print-in-place generator. Eight
 // items, each a measured value against a limit:
 //
 //   bed        the lowest point along the print direction is on the bed
@@ -24,6 +24,7 @@ struct Body;
 //   chords     the STL's chords cannot eat the gap
 //   stacking   every piece starts on the bed, and no face lies within the
 //              minimum air over another piece
+//   bed_fit    the plate fits the printer's build volume (vNEXT)
 //
 // Measured on the B-Rep wherever the B-Rep can answer: the bed from an
 // optimal box without triangulation, every overhang angle from the surface
@@ -68,6 +69,10 @@ struct Options {
   // The vertical air a face needs over another piece to come away from it
   // (printfit::MinAirMm); nullopt skips stacking.
   std::optional<double> minAirMm;
+  // The printer's build volume, x and y on the bed and z up it (the
+  // profile's bed_mm); nullopt skips bed_fit, saying `bedNote`.
+  std::optional<glm::dvec3> bedMm;
+  std::string bedNote;
 };
 
 // Where an item's worst value is: the body (an index into the bodies the
@@ -196,6 +201,18 @@ struct Stacking {
   std::string note;
 };
 
+// The plate in the printer: its extent on the bed (x along the bed's x,
+// the print direction's own x when it is not z) and up it, against the
+// build volume, with what does not fit per axis. The extent, not a
+// position: a slicer places the plate, so a plate fits when its box does.
+struct BedFit {
+  Status status = Status::Skipped;
+  glm::dvec3 bedMm{0.0};
+  glm::dvec3 extentMm{0.0};
+  glm::dvec3 shortfallMm{0.0}; // extent - bed where positive, else 0
+  std::string note;
+};
+
 struct Report {
   std::vector<BodyInfo> bodies;
   Bed bed;
@@ -205,6 +222,7 @@ struct Report {
   Clearance clearance;
   Chords chords;
   Stacking stacking;
+  BedFit bedFit;
   // Every item that ran passed.
   [[nodiscard]] bool Ok() const;
 };

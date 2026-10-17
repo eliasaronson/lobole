@@ -354,3 +354,41 @@ TEST_CASE("The minimum air comes from the profile, its layers, or FDM",
   CHECK(printfit::MinAirFrom(proc).empty());
   CHECK(printfit::MinAirSource(proc).find("not FDM") != std::string::npos);
 }
+
+TEST_CASE("A plate over the bed fails bed_fit with its shortfall",
+          "[print][check][bed]") {
+  // Two blocks side by side, 300 mm across in all: on a 256 mm bed it is 44
+  // over in x, and fits in y and up.
+  const std::vector<Body> plate = {Box(0, 0, 0, 150, 40, 10),
+                                   Box(150, 0, 0, 150, 40, 30)};
+  printcheck::Options o;
+  o.bedMm = glm::dvec3(256.0, 256.0, 256.0);
+  printcheck::Report r = Run(plate, o);
+  CHECK(r.bedFit.status == printcheck::Status::Fail);
+  CHECK(r.bedFit.extentMm.x == Approx(300.0));
+  CHECK(r.bedFit.extentMm.y == Approx(40.0));
+  CHECK(r.bedFit.extentMm.z == Approx(30.0));
+  CHECK(r.bedFit.shortfallMm.x == Approx(44.0));
+  CHECK(r.bedFit.shortfallMm.y == 0.0);
+  CHECK(r.bedFit.shortfallMm.z == 0.0);
+  CHECK_FALSE(r.Ok());
+
+  // Turned onto its side it is 300 tall: the bed's z is the print's up.
+  o.up = glm::dvec3(0.0, 1.0, 0.0);
+  r = Run(plate, o);
+  CHECK(r.bedFit.status == printcheck::Status::Fail);
+  CHECK(r.bedFit.extentMm.z == Approx(40.0));
+
+  // On a bigger bed it fits.
+  o.up = glm::dvec3(0.0, 0.0, 1.0);
+  o.bedMm = glm::dvec3(350.0, 350.0, 350.0);
+  r = Run(plate, o);
+  CHECK(r.bedFit.status == printcheck::Status::Pass);
+
+  // Without a bed it is skipped, saying why: nothing guesses a printer.
+  o.bedMm.reset();
+  o.bedNote = "print profile 'X' states no bed_mm";
+  r = Run(plate, o);
+  CHECK(r.bedFit.status == printcheck::Status::Skipped);
+  CHECK(r.bedFit.note == "print profile 'X' states no bed_mm");
+}

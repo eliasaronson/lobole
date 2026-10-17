@@ -305,6 +305,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A size tolerance's `printed: "press"` (no `class`, no `lower`/`upper`): a printed press, its band read from the part's print profile, not stored ([printed press fits](../tolerances/README.md#printed-press-fits)); any other `printed` is refused. A print profile's `bed_mm` [x, y, z], the printer's build volume, omitted when not stated -- in the profile store and in a printed part's embedded copy; not three positive numbers is refused. A motion study's `max_refine` (halvings of a step, 0..12), omitted at its default of 6; a stored motion result's per-sample `refined` and `branch_jump` and its `refined_samples` and `branch_jumps` ([branch jumps](../assemblies/README.md#branch-jumps)). An older build reads the tolerance as explicit 0/0 deviations and the profile without its bed. Golden `vNEXT-printed-press` |
 
 ## The directory form
 

@@ -58,7 +58,10 @@ constexpr MethodDoc MotionMethods[] = {
      "judged and is scrubbed UNDER, whatever is active; 0 = the base, with "
      "nothing held or suppressed; omitted = whichever is active when it "
      "runs — so a study that measures one load or one variant should name "
-     "it), name?}. Returns the study and, if it cannot run, `why_not`. Nothing "
+     "it), max_refine? (how many times a step may be halved where a free "
+     "joint jumps between samples, 0..12, default 6: down to a 64th of the "
+     "step; docs/assemblies/README.md#branch-jumps), name?}. Returns the "
+     "study and, if it cannot run, `why_not`. Nothing "
      "runs until run_motion_study. ONE driver moves the whole mechanism "
      "when the rest follows through mates and RELATIONS (add_relation): a "
      "geared pair turns because the relation propagates, not because two "
@@ -66,25 +69,29 @@ constexpr MethodDoc MotionMethods[] = {
      "SINGULAR configuration — a symmetric linkage that can also move "
      "antisymmetrically passes through one — because the solve continues "
      "from the previous sample and can come out of it on the other branch. "
-     "The driver to choose is the DOF that cannot change on the branch you "
-     "do not want; the clash check is what makes the jump visible.",
+     "The run watches every free joint: a step whose joint RATES change "
+     "too much is re-solved at half the step, down to max_refine halvings, "
+     "so a step too coarse for its seed no longer lands on a mirror branch; "
+     "a jump that stays at the finest step is a singular pose, reported as "
+     "the sample's `branch_jump`, and the study does not pass.",
      "check_clash, clash_deflection_mm, clash_mode, configuration, dof, "
-     "driver, driver_path, from, name, samples, to"},
+     "driver, driver_path, from, max_refine, name, samples, to"},
     {"set_motion_study",
      "Edit a study {study, name?, from?, to?, samples?, check_clash?, "
      "clash_mode?, clash_deflection_mm? (mm, null = derived per body "
      "again), configuration? (an id, 0 = the base, null = whichever "
-     "is active)}; a stored "
+     "is active), max_refine? (0..12)}; a stored "
      "result is dropped, since it described the old definition.",
      "check_clash, clash_deflection_mm, clash_mode, configuration, from, "
-     "name, samples, study, to"},
+     "max_refine, name, samples, study, to"},
     {"remove_motion_study", "Remove a study by id.", "study"},
     {"list_motion_studies",
      "Every study, with whether it has a result and whether one is running.",
      "", remote::NoFlags,
      "studies:{check_clash:bool, clash_mode:string, driver_dof:string, "
      "driver_mate:int, from:number, has_result:bool, id:int, "
-     "name:string, running:bool, samples:int, to:number, type:string, "
+     "max_refine:int, name:string, running:bool, samples:int, to:number, "
+     "type:string, "
      "unit:string, clean?:bool, collision_checked?:bool, stale?:bool, "
      "clash_deflection_mm?:number, configuration?:int, "
      "why_not?:string}[]"},
@@ -127,6 +134,14 @@ constexpr MethodDoc MotionMethods[] = {
      "relieved pair once {a, b, a_name, b_name, fit, interference_mm, "
      "max_interference_mm, volume_mm3}, and a mesh run says it relieves "
      "none (`relieves`) except on rigid pairs. "
+     "Every free joint is watched between samples "
+     "(docs/assemblies/README.md#branch-jumps): `refined_samples` counts the "
+     "samples whose step was re-solved finer (each marked `refined`), and a "
+     "sample that still jumped at the finest step carries `branch_jump` "
+     "{mate, name, path?, dof, jump_deg|jump_mm (its move over that step), "
+     "expected_deg|expected_mm (what its rate gave), at_deg|at_mm, "
+     "step_deg|step_mm}: the linkage passes a singular pose there, "
+     "`branch_jumps` counts them, and the study is not clean. "
      "include_poses adds, per sample, every occurrence's placement "
      "(`poses`: position mm, orientation quaternion [x,y,z,w]) and every "
      "moving mate's value (`mates`: {mate, name, rotation_deg, offset} — "
@@ -254,6 +269,22 @@ void ReadClashDeflection(const RpcParams& p, MotionStudy& s) {
     throw std::runtime_error(why);
 }
 
+// `max_refine`: how many times a step may be halved where a joint jumps
+// (docs/assemblies/README.md#branch-jumps), 0 to kMaxMaxRefine.
+void ReadMaxRefine(const RpcParams& p, MotionStudy& s) {
+  if (!p.contains("max_refine"))
+    return;
+  const json& v = p.at("max_refine");
+  if (!v.is_number_integer() || v.get<int64_t>() < 0 ||
+      v.get<int64_t>() > MotionStudy::kMaxMaxRefine)
+    throw std::runtime_error(
+        "max_refine " + v.dump() + " is not a number of halvings from 0 to " +
+        std::to_string(MotionStudy::kMaxMaxRefine) + " (default " +
+        std::to_string(MotionStudy::kDefaultMaxRefine) +
+        ": down to a 64th of the step)");
+  s.maxRefine = static_cast<int>(v.get<int64_t>());
+}
+
 json StudyJson(ui::AppState& state, const AssemblyDocument& asmDoc,
                const MotionStudy& s) {
   json j = DocumentIO::MotionStudyToJson(s);
@@ -263,6 +294,7 @@ json StudyJson(ui::AppState& state, const AssemblyDocument& asmDoc,
   j["unit"] = rot ? "deg" : "mm";
   j["from"] = rot ? angles::ToDegrees(s.from) : s.from;
   j["to"] = rot ? angles::ToDegrees(s.to) : s.to;
+  j["max_refine"] = s.maxRefine;
   const std::string why =
       motion::WhyNot(asmDoc, s, ui::AssemblyResolverFor(state));
   if (!why.empty())
@@ -424,6 +456,24 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
             {"errored_mates", sm.erroredMates},
             {"residual_mm", sm.residualMm},
             {"clashes", clashes}};
+    if (sm.refined)
+      sj["refined"] = true;
+    if (const auto& b = sm.branchJump) {
+      const auto shown = [&](double v, bool r) {
+        return r ? angles::ToDegrees(v) : v;
+      };
+      json bj{{"mate", b->mate},
+              {"name", b->name},
+              {"dof", b->rotation ? "rotation" : "offset"}};
+      const char* unit = b->rotation ? "_deg" : "_mm";
+      bj[std::string("jump") + unit] = shown(b->jump, b->rotation);
+      bj[std::string("expected") + unit] = shown(b->expected, b->rotation);
+      bj[rot ? "at_deg" : "at_mm"] = shown(b->atValue, rot);
+      bj[rot ? "step_deg" : "step_mm"] = shown(b->stepValue, rot);
+      if (!b->path.empty())
+        bj["path"] = b->path;
+      sj["branch_jump"] = std::move(bj);
+    }
     sj["unknown_contacts"] = json::array();
     for (const auto& c : sm.unknownContacts) {
       json uj{{"a", c.a},
@@ -527,6 +577,8 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
        r.rigidCheckedAt >= 0 ? json(r.rigidCheckedAt) : json(nullptr)},
       {"rigid_clashes", rigidClashes},
       {"seconds", r.seconds},
+      {"refined_samples", r.refinedSamples},
+      {"branch_jumps", r.branchJumps},
       {"unit", rot ? "deg" : "mm"},
       {"table", motion::Table(r, s)}};
   if (s.clashMode == "mesh" && s.checkClash)
@@ -778,6 +830,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("clash_mode '" + s.clashMode +
                                "' is not one of: mesh, exact");
     ReadClashDeflection(p, s);
+    ReadMaxRefine(p, s);
     if (p.contains("configuration")) {
       // null clears it (whichever is active); 0 is the base; else an id.
       if (p.at("configuration").is_null()) {
@@ -831,6 +884,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
                                  "' is not one of: mesh, exact");
     }
     ReadClashDeflection(p, s);
+    ReadMaxRefine(p, s);
     if (p.contains("configuration")) {
       // null clears it (whichever is active); 0 is the base; else an id.
       if (p.at("configuration").is_null()) {

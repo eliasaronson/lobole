@@ -804,8 +804,19 @@ static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
         continue;
       const BandSpan& bore = x.bore ? x : y;
       const BandSpan& shaft = x.bore ? y : x;
-      if (shaft.radius - bore.radius <= 1e-7)
+      // A printed press (docs/tolerances/README.md#printed-press-fits) is a
+      // press at whatever the model shows, an interference or none: FDM
+      // prints the bore small and the pin large, so a press allowance of 0
+      // still holds. Within its band it is reported, overlap or not.
+      const bool printed = bore.band != nullptr && shaft.band != nullptr &&
+                           bore.band->printedPress && shaft.band->printedPress;
+      if (printed) {
+        const double least = shaft.band->lower - bore.band->upper;
+        if (2.0 * (shaft.radius - bore.radius) < least - 1e-7)
+          continue; // looser than the band: a clearance, not this press
+      } else if (shaft.radius - bore.radius <= 1e-7) {
         continue; // the shaft is not larger: these two do not overlap
+      }
       const double dot = glm::dot(bore.axis, shaft.axis);
       if (std::abs(dot) < 0.99)
         continue; // crossing, not one inside the other
@@ -873,8 +884,11 @@ static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
           }
         }
       }
-      refused.fit =
-          "Ø" + Mm(basic) + " " + bore.band->label + " / " + shaft.band->label;
+      refused.fit = printed
+                        ? "Ø" + Mm(ds) + " printed press " + Mm(interference) +
+                              " (" + bore.band->label + ")"
+                        : "Ø" + Mm(basic) + " " + bore.band->label + " / " +
+                              shaft.band->label;
       refused.interference = interference;
       refused.maxInterference = maxInterference;
       if (!coaxial) {
@@ -887,6 +901,15 @@ static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
         refuse(buf);
         continue;
       }
+      if (bore.band->printedPress != shaft.band->printedPress) {
+        const bool borePrinted = bore.band->printedPress;
+        refuse(std::string("a printed press pairs with a printed press, and "
+                           "the ") +
+               (borePrinted ? "shaft" : "bore") + " carries " +
+               (borePrinted ? shaft.band->label : bore.band->label) +
+               "; set_tolerance printed: press on both faces");
+        continue;
+      }
       if (bore.band->side == FitBand::Side::Shaft ||
           shaft.band->side == FitBand::Side::Hole) {
         const bool boreWrong = bore.band->side == FitBand::Side::Shaft;
@@ -894,6 +917,19 @@ static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
                " carries a " + (boreWrong ? "shaft" : "hole") + " band (" +
                (boreWrong ? bore.band->label : shaft.band->label) +
                "), so the pair is not a fit");
+        continue;
+      }
+      if (printed && interference <= 1e-7) {
+        // Within the band and no solid in solid: nothing to relieve, and
+        // the press is still the press.
+        Measure::SetContact::PressFit fit;
+        fit.fit = refused.fit;
+        fit.diameter = ds;
+        fit.interference = interference;
+        fit.maxInterference = maxInterference;
+        fit.length = hi - lo;
+        fit.volume = 0.0;
+        out.pressFits.push_back(std::move(fit));
         continue;
       }
       if (maxInterference <= 1e-9) {
@@ -933,7 +969,7 @@ static TopoDS_Shape RelievePressFits(TopoDS_Shape overlap,
         continue; // the faces overlap, their solids did not: nothing to say
       Measure::SetContact::PressFit fit;
       fit.fit = refused.fit;
-      fit.diameter = basic;
+      fit.diameter = printed ? ds : basic;
       fit.interference = interference;
       fit.maxInterference = maxInterference;
       fit.length = hi - lo;
@@ -1264,8 +1300,15 @@ std::optional<SetContact> ContactImpl(const std::vector<Body>& bodiesA,
                                    out.ringGripPairs);
           out.ringGripVolume += std::max(0.0, before - VolumeOf(overlap));
         }
+        // A printed press is reported overlapping or not, so a pair that
+        // both carry one is looked at either way.
+        const auto pressed = [](const Body& b) {
+          return std::any_of(b.fitBands.begin(), b.fitBands.end(),
+                             [](const FitBand& f) { return f.printedPress; });
+        };
         if ((!pa[i].body->fitBands.empty() || !pb[j].body->fitBands.empty()) &&
-            VolumeOf(overlap) > 1e-9)
+            (VolumeOf(overlap) > 1e-9 ||
+             (pressed(*pa[i].body) && pressed(*pb[j].body))))
           overlap =
               RelievePressFits(overlap, pa[i].Spans(), pb[j].Spans(), out);
         GProp_GProps props;

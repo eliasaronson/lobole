@@ -223,6 +223,24 @@ void TubeToEnvelope(const std::optional<tube::TubeRules>& rules, json& j) {
 // reads, whichever store opens it; a copy the profile rules refuse is
 // refused here too. v175: and the profile's `layer_height_mm` and
 // `z_gap_mm` when it states them.
+// vNEXT: a tolerance's `printed`
+// (docs/tolerances/README.md#printed-press-fits). Only "press" is a printed
+// tolerance; anything else is refused, never read as an unprinted one.
+bool TolerancePrintedFromJson(const json& tj) {
+  if (!tj.contains("printed"))
+    return false;
+  const json& v = tj.at("printed");
+  if (!v.is_string() || v.get<std::string>() != "press")
+    throw std::runtime_error(
+        "tolerance " + tj.value("ref", json::object()).dump() + ": printed " +
+        v.dump() + " is not a printed tolerance; accepted: press");
+  if (tj.contains("class") || tj.contains("lower") || tj.contains("upper"))
+    throw std::runtime_error("a printed press tolerance carries no class and "
+                             "no lower/upper: its band is the print "
+                             "profile's");
+  return true;
+}
+
 std::optional<printfit::Process> PrintFromEnvelope(const json& j) {
   if (!j.contains("print"))
     return std::nullopt;
@@ -262,7 +280,7 @@ void PrintToEnvelope(const std::optional<printfit::Process>& p, json& j) {
     json pj = DocumentIO::PrintProfileToJson(*p->profile);
     m["profile"] = p->profile->name;
     for (const char* key : {"conditions", "stl_deflection_mm",
-                            "layer_height_mm", "z_gap_mm", "rows"})
+                            "layer_height_mm", "z_gap_mm", "bed_mm", "rows"})
       if (pj.contains(key))
         m[key] = pj.at(key);
   }
@@ -329,7 +347,9 @@ json DocumentEnvelope(const Document& doc) {
       // The class is what is stored; a deviation pair is the fallback for a
       // drawing that states limits no class expresses. Writing both would
       // invite them to disagree.
-      if (!t.isoClass.empty()) {
+      if (t.printedPress) {
+        tj["printed"] = "press"; // vNEXT: the band is the print profile's
+      } else if (!t.isoClass.empty()) {
         tj["class"] = t.isoClass;
       } else {
         tj["lower"] = t.lower;
@@ -981,6 +1001,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
       t.isoClass = tj.value("class", std::string{});
       t.lower = tj.value("lower", 0.0);
       t.upper = tj.value("upper", 0.0);
+      t.printedPress = TolerancePrintedFromJson(tj);
       t.comment = tj.value("comment", std::string{});
       doc->RestoreTolerance(std::move(t));
     }
@@ -1726,6 +1747,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
       t.isoClass = tj.value("class", std::string{});
       t.lower = tj.value("lower", 0.0);
       t.upper = tj.value("upper", 0.0);
+      t.printedPress = TolerancePrintedFromJson(tj);
       t.comment = tj.value("comment", std::string{});
       doc->RestoreTolerance(std::move(t));
     }

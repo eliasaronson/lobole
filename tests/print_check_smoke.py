@@ -91,6 +91,41 @@ def main():
         expect(r["receipt"]["standing"] == "verified",
                f"a passing receipt: {r['receipt']}")
 
+        bf = r["bed_fit"]
+        expect(bf["status"] == "skipped" and "profile" not in bf and
+               "no printer" in bf["note"],
+               f"the built-in table is no printer's: {bf}")
+
+        # --- The bed: a profile's build volume ------------------------------
+        prof = {"name": "Small bed", "process": "fdm", "material": "pla",
+                "bed_mm": [100, 100, 50]}
+        saved = d.call("save_print_profile", profile=prof)
+        expect(saved["bed_mm"] == [100, 100, 50], f"saved with it: {saved}")
+        d.call("add_part", name="plate")
+        d.call("set_print_process", profile="Small bed")
+        box(d, (0, 0, 0), (60, 20, 10), "A")
+        box(d, (61, 0, 0), (60, 20, 10), "B")
+        r = d.call("check_print")
+        bf = r["bed_fit"]
+        expect(bf["status"] == "fail" and abs(bf["extent_mm"][0] - 121) < 1e-6
+               and abs(bf["shortfall_mm"][0] - 21) < 1e-6 and
+               bf["shortfall_mm"][1] == 0 and bf["profile"] == "Small bed",
+               f"121 mm on a 100 mm bed is 21 over: {bf}")
+        expect(not r["ok"], "a plate off the bed does not print")
+        d.call("save_print_profile", profile=dict(prof, bed_mm=[200, 200, 50]))
+        d.call("set_print_process", profile="Small bed")  # use mine
+        r = d.call("check_print")
+        expect(r["bed_fit"]["status"] == "pass", f"it fits: {r['bed_fit']}")
+        d.call("save_print_profile",
+               profile={"name": "No bed", "process": "fdm",
+                        "material": "pla"})
+        d.call("set_print_process", profile="No bed")
+        r = d.call("check_print")
+        bf = r["bed_fit"]
+        expect(bf["status"] == "skipped" and bf["profile"] == "No bed" and
+               "states no bed_mm" in bf["note"],
+               f"a profile without a bed skips, saying so: {bf}")
+
         d.call("add_part", name="flank 60")
         d.call("set_print_process", **PLA)
         wedge(d, "Wedge", 60.0)

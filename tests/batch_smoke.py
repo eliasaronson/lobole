@@ -95,6 +95,9 @@ def main():
         expect("regen" not in first and "digest" not in first,
                f"per-call regen/digest stripped: {first}")
         expect("id" in first, f"but the identity it created survives: {first}")
+        expect(all(e["id"] == e["result"]["id"] for e in r["results"]),
+               "and each call's created id is at the top of its entry, as "
+               "the call alone answers it")
         print(f"  40 features in one batch: {elapsed:.2f}s, "
               f"{r['regenerations']} regeneration")
 

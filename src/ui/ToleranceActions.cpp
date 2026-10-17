@@ -392,6 +392,23 @@ std::vector<FitCheck> CheckFits(AppState& state) {
       stop(!a.reason.empty() ? a.reason : b.reason);
       continue;
     }
+    if ((a.tol && a.tol->printedPress) || (b.tol && b.tol->printedPress)) {
+      // A printed press (docs/tolerances/README.md#printed-press-fits) is
+      // the print's own fit, banded by its profile: the exact contact
+      // check relieves it and lists it, which is where it is checked.
+      e.status = "reported";
+      e.reason =
+          (a.tol && a.tol->printedPress) && (b.tol && b.tol->printedPress)
+              ? "a printed press: the exact contact check (interference, "
+                "contact_report, an exact motion study) relieves it and "
+                "lists it in press_fits"
+              : "a printed press pairs with a printed press: set_tolerance "
+                "printed: press on the other face as well";
+      if (!((a.tol && a.tol->printedPress) && (b.tol && b.tol->printedPress)))
+        e.status = "unverified";
+      out.push_back(std::move(e));
+      continue;
+    }
     if (a.ring || b.ring) {
       // A bearing ring: the ring's band is ISO 492's and the ring says which
       // side it is, so the other side may be a class OR explicit deviations.

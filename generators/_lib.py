@@ -151,7 +151,7 @@ def connect(port=None):
 # --- printing -----------------------------------------------------------------
 
 PRINT_ITEMS = ("bed", "shells", "overhang", "bridges", "clearance", "chords",
-               "stacking")
+               "stacking", "bed_fit")
 
 
 def _piece(names):
@@ -197,6 +197,12 @@ def print_item_line(name, item):
         text = ("; ".join(parts) or f"{item['pieces']} pieces on the bed")
         text += (f" against {item['limit_mm']:g} mm of air "
                  f"({item['limit_from']})")
+    elif name == "bed_fit":
+        x = lambda v: " x ".join(f"{a:.1f}" for a in v)  # noqa: E731
+        text = (f"{x(item['extent_mm'])} mm in {x(item['bed_mm'])} "
+                f"({item.get('profile')})"
+                + (f", over by {x(item['shortfall_mm'])}"
+                   if st == "fail" else "")) if "bed_mm" in item else ""
     else:
         text = (f"{item['deflection_mm']:g} mm against "
                 f"{item['limit_mm']:g} mm")
@@ -216,7 +222,11 @@ def check_print(d, what, need=PRINT_ITEMS, quiet=False, **params):
     if not quiet:
         for k in PRINT_ITEMS:
             print(f"  {what}: {print_item_line(k, r[k])}")
-    bad = [k for k in need if r[k]["status"] != "pass"]
+    # A part on the built-in table is printed by no printer: its bed_fit has
+    # no bed to fit and is skipped, said, and not demanded. With a profile it
+    # is demanded, so a profile that states no bed_mm fails here.
+    bad = [k for k in need if r[k]["status"] != "pass"
+           and not (k == "bed_fit" and "profile" not in r[k])]
     if bad:
         raise SystemExit(f"{what}: will not print: "
                          + "; ".join(print_item_line(k, r[k]) for k in bad))

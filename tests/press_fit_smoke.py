@@ -155,6 +155,58 @@ def main():
         expect(not r.get("reused"), "a tolerance edit invalidates the run")
         expect(r["collision_status"] == "failed" and r["press_fits"] == [],
                f"and the run now fails: {r['collision_status']}")
+        # --- A printed press (docs/tolerances/README.md#printed-press-fits)
+        d.call("new_project")
+        cf, cname = housing(d, 3.2)
+        refusal = None
+        try:
+            d.call("set_tolerance", feature_id=cf, element=cname,
+                   printed="press")
+        except Exception as e:  # noqa: BLE001
+            refusal = str(e)
+        expect(refusal and "no print process" in refusal,
+               f"a printed press on an unprinted part is refused: {refusal}")
+        expect(d.call("list_tolerances")["tolerances"] == [],
+               "and nothing was set")
+        d.call("set_print_process", process="fdm", material="pla")
+        try:
+            d.call("set_tolerance", feature_id=cf, element=cname,
+                   printed="pres")
+            refusal = None
+        except Exception as e:  # noqa: BLE001
+            refusal = str(e)
+        expect(refusal and "accepted: press" in refusal,
+               f"an unknown printed tolerance names what is: {refusal}")
+        r = d.call("set_tolerance", feature_id=cf, element=cname,
+                   printed="press")
+        expect(r["printed"] == "press" and r["side"] == "bore" and
+               r["press_mm"] == 0 and abs(r["tolerance_mm"] - 0.05) < 1e-12,
+               f"the band is the profile's: {r}")
+        d.call("add_part", name="Pin")
+        from smoke_shapes import cylinder
+        cylinder(d, (0, 0, -5), "z", 1.6, 20, "Pin")
+        d.call("set_print_process", process="fdm", material="pla")
+        pf, pname = [(b["created_by"], f["name"])
+                     for b in d.call("list_elements")["bodies"]
+                     for f in b.get("faces", [])
+                     if f.get("kind") == "cylinder"][0]
+        d.call("set_tolerance", feature_id=pf, element=pname, printed="press")
+        listed = d.call("list_tolerances")["tolerances"]
+        expect(listed[0]["printed"] == "press" and listed[0]["side"] == "pin",
+               f"listed with its band: {listed}")
+        d.call("add_assembly", name="Pressed")
+        oc = d.call("add_occurrence", part="Housing", fixed=True)["id"]
+        op = d.call("add_occurrence", part="Pin")["id"]
+        d.call("add_mate", type="fastened", name="pressed",
+               a={"occurrence": oc, "origin": True},
+               b={"occurrence": op, "origin": True}, flipped=False)
+        names = {o["id"]: o["name"]
+                 for o in d.call("list_occurrences")["occurrences"]}
+        r = d.call("interference", a=names[oc], b=names[op])
+        expect(r["clash"] is False and r["press_fit_pairs"] == 1,
+               f"a printed press is not a clash: {r}")
+        expect(r["press_fits"][0]["fit"] == "Ø3.2 printed press 0 (fdm pla)",
+               f"and is named as one: {r['press_fits']}")
         print("press_fit_smoke: all checks passed")
         return 0
     finally:

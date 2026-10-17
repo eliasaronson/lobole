@@ -842,6 +842,8 @@ void StampBands(const Document& doc, Body& body) {
       body.bands.push_back(std::move(band));
       continue;
     }
+    if (t.printedPress)
+      continue; // a printed press is the printer's, nothing to mill to
     const std::optional<Measure::Element> el =
         Measure::Describe(doc.GetBodies(), t.ref);
     if (!el || !el->hasRadius)

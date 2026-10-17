@@ -676,6 +676,8 @@ json MotionStudyToJson(const MotionStudy& s) {
     j["clash_deflection_mm"] = s.clashDeflectionMm; // v167; absent = derived
   if (s.configuration)
     j["configuration"] = *s.configuration; // v128; 0 = the base
+  if (s.maxRefine != MotionStudy::kDefaultMaxRefine)
+    j["max_refine"] = s.maxRefine; // vNEXT; absent = the default
   return j;
 }
 
@@ -699,6 +701,16 @@ MotionStudy MotionStudyFromJson(const json& j) {
                              "' (expected mesh or exact)");
   if (j.contains("configuration") && !j.at("configuration").is_null())
     s.configuration = j.at("configuration").get<uint64_t>();
+  if (j.contains("max_refine")) { // vNEXT
+    const json& v = j.at("max_refine");
+    if (!v.is_number_integer() || v.get<int>() < 0 ||
+        v.get<int>() > MotionStudy::kMaxMaxRefine)
+      throw std::runtime_error("motion study '" + s.name + "': max_refine " +
+                               v.dump() +
+                               " is not a number of halvings from 0 to " +
+                               std::to_string(MotionStudy::kMaxMaxRefine));
+    s.maxRefine = v.get<int>();
+  }
   if (j.contains("clash_deflection_mm")) { // v167
     s.clashDeflectionMm = j.at("clash_deflection_mm").get<double>();
     if (const std::string why = MotionStudyDeflectionProblem(s); !why.empty())
@@ -964,6 +976,17 @@ json MotionResultToJson(const motion::Result& r) {
       }
       sj["unknown_contacts"] = std::move(unknown);
     }
+    if (s.refined)
+      sj["refined"] = true; // vNEXT
+    if (const auto& b = s.branchJump) {
+      json bj = {{"mate", b->mate},         {"name", b->name},
+                 {"rotation", b->rotation}, {"jump", b->jump},
+                 {"expected", b->expected}, {"at", b->atValue},
+                 {"step", b->stepValue}};
+      if (!b->path.empty())
+        bj["path"] = b->path;
+      sj["branch_jump"] = std::move(bj); // vNEXT
+    }
     if (!s.mates.empty()) {
       json mates = json::array();
       for (const motion::Sample::MateValue& m : s.mates) {
@@ -996,6 +1019,10 @@ json MotionResultToJson(const motion::Result& r) {
               {"pairs_checked", r.pairsChecked},
               {"seconds", r.seconds},
               {"cancelled", r.cancelled}};
+  if (r.refinedSamples != 0)
+    out["refined_samples"] = r.refinedSamples; // vNEXT
+  if (r.branchJumps != 0)
+    out["branch_jumps"] = r.branchJumps; // vNEXT
   if (!r.error.empty())
     out["error"] = r.error;
   if (!r.pressFits.empty()) {
@@ -1083,6 +1110,20 @@ motion::Result MotionResultFromJson(const json& j) {
       u.bInner = uj.value("b_inner", uint64_t{0});
       s.unknownContacts.push_back(std::move(u));
     }
+    s.refined = sj.value("refined", false);
+    if (sj.contains("branch_jump")) {
+      const json& bj = sj.at("branch_jump");
+      motion::Sample::BranchJump b;
+      b.mate = bj.at("mate").get<uint64_t>();
+      b.name = bj.value("name", std::string{});
+      b.rotation = bj.value("rotation", true);
+      b.jump = bj.value("jump", 0.0);
+      b.expected = bj.value("expected", 0.0);
+      b.atValue = bj.value("at", 0.0);
+      b.stepValue = bj.value("step", 0.0);
+      b.path = bj.value("path", std::vector<uint64_t>{});
+      s.branchJump = std::move(b);
+    }
     for (const json& mj : sj.value("mates", json::array())) {
       motion::Sample::MateValue m;
       m.mate = mj.at("mate").get<uint64_t>();
@@ -1109,6 +1150,8 @@ motion::Result MotionResultFromJson(const json& j) {
   r.pairsChecked = j.value("pairs_checked", size_t{0});
   r.seconds = j.value("seconds", 0.0);
   r.cancelled = j.value("cancelled", false);
+  r.refinedSamples = j.value("refined_samples", size_t{0});
+  r.branchJumps = j.value("branch_jumps", size_t{0});
   r.error = j.value("error", std::string{});
   for (const json& fj : j.value("press_fits", json::array()))
     r.pressFits.push_back(PressFitFromJson(fj));
