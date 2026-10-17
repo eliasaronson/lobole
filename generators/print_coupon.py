@@ -727,7 +727,7 @@ def press_coupon(d, args, proc):
     stl = out / f"{name}.stl"
     exp = {"path": str(stl)}
     if args.deflection is not None:
-        exp["deflection"] = args.deflection
+        exp["stl_deflection_mm"] = args.deflection
     r = d.call("export_stl", **exp)
     row["stl_deflection_mm"] = r.get("deflection_mm")
     row["job"] = coupon_job(d, args, proc, name, out)
@@ -1095,7 +1095,7 @@ def main():
     stl = out / f"{name}.stl"
     exp = {"path": str(stl)}
     if args.deflection is not None:
-        exp["deflection"] = args.deflection
+        exp["stl_deflection_mm"] = args.deflection
     r = d.call("export_stl", **exp)
     report["stl_deflection_mm"] = r.get("deflection_mm")
     report["job"] = coupon_job(d, args, proc, name, out)

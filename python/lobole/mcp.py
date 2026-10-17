@@ -1391,16 +1391,16 @@ def export_step(path: str, body: int | None = None,
     return _call("export_step", path=path, **_given(body=body, part=part))
 
 
-@mcp.tool(description="Export to binary STL (re-meshed at `deflection`, "
-          "smaller = finer). Whole document fuses to one solid, or one body "
+@mcp.tool(description="Export to binary STL (re-meshed at "
+          "`stl_deflection_mm`, the chord deviation, smaller = finer). Whole document fuses to one solid, or one body "
           "by index. STL is how a part gets 3D-printed. The reply reports "
           "the source shape's watertightness ({watertight, shells, "
           "free_edges}); a non-watertight source still exports, but flag it "
           "before anyone slices the file.")
 def export_stl(path: str, body: int | None = None,
-               deflection: float | None = None) -> dict:
+               stl_deflection_mm: float | None = None) -> dict:
     return _call("export_stl", path=path,
-                 **_given(body=body, deflection=deflection))
+                 **_given(body=body, stl_deflection_mm=stl_deflection_mm))
 
 
 _reference("export_brep", "Export to native OCC BREP text (exact, no "

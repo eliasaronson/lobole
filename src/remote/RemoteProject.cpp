@@ -112,8 +112,8 @@ static constexpr MethodDoc ProjectMethods[] = {
      "No `deflection`: STEP is exact, so it is refused.",
      "path:string, part?:string|int, body?:int", remote::NotInBatch},
     {"export_stl",
-     "Export to STL {path, deflection?, body?}. `deflection` is the "
-     "tessellation chord tolerance in MILLIMETRES (smaller = finer, more "
+     "Export to STL {path, stl_deflection_mm?, body?}. `stl_deflection_mm` "
+     "is the tessellation chord tolerance (smaller = finer, more "
      "triangles); STEP and BREP are exact solids and refuse it. Left out, an "
      "unprinted part meshes at 0.1 mm and a PRINTED part (set_print_process) "
      "at its print profile's stl_deflection_mm, else a tenth of its smallest "
@@ -121,8 +121,10 @@ static constexpr MethodDoc ProjectMethods[] = {
      "coarser one asked for is exported as asked and the reply's `warning` "
      "says how much of the smallest gap the chords can take. Replies the "
      "chord deviation used and where it came from (asked, profile, gap, "
-     "default), and the SOURCE B-Rep's watertightness.",
-     "body, deflection, path", remote::NeedsPart | remote::NotInBatch,
+     "default), and the SOURCE B-Rep's watertightness. The name is "
+     "check_print's for the same deviation; `deflection` is refused, naming "
+     "it.",
+     "body, path, stl_deflection_mm", remote::NeedsPart | remote::NotInBatch,
      "bodies:int, deflection_from:string, deflection_mm:number, "
      "free_edges:int, path:string, shells:int, watertight:bool, "
      "chord_share?:number, smallest_gap_side_mm?:number, warning?:string"},
@@ -405,14 +407,15 @@ int BodyIndexParam(const RpcParams& p) {
 // A mesh's chord deviation in mm: at least a tenth of a micron, at most a
 // metre. Zero, less or 1e-308 reached BRepMesh as "invalid parameter value"
 // (an OpenCASCADE throw).
-std::optional<double> DeflectionParam(const RpcParams& p) {
-  if (!p.contains("deflection"))
+std::optional<double> DeflectionParam(const RpcParams& p, const char* key) {
+  if (!p.contains(key))
     return std::nullopt;
-  const double d = p.at("deflection").get<double>();
+  const double d = p.at(key).get<double>();
   if (!(d >= 1e-4 && d <= 1000.0))
-    throw std::runtime_error("deflection is the chord deviation in mm, in "
+    throw std::runtime_error(std::string(key) +
+                             " is the chord deviation in mm, in "
                              "[0.0001, 1000]; got " +
-                             p.at("deflection").dump());
+                             p.at(key).dump());
   return d;
 }
 } // namespace
@@ -1426,9 +1429,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // Read in a scope of its own so that only export_stl's row lists it, and
     // the dispatcher refuses it on BREP before anything is written.
     if (m == "export_stl") {
-      // rpc-params: body, deflection, path
-      const auto r =
-          ui::ExportPartStl(*doc, path, bodyIndex, DeflectionParam(p));
+      // rpc-params: body, path, stl_deflection_mm
+      const auto r = ui::ExportPartStl(*doc, path, bodyIndex,
+                                       DeflectionParam(p, "stl_deflection_mm"));
       if (!r)
         throw std::runtime_error(r.error());
       json out{{"path", path},
@@ -1486,7 +1489,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     const std::string path = p.at("path").get<std::string>();
     if (std::string why; !DocumentIO::AtomicTargetOk(path, &why))
       throw std::runtime_error(m + ": " + why);
-    const double deflection = DeflectionParam(p).value_or(0.1);
+    // rpc-params: deflection, path
+    const double deflection = DeflectionParam(p, "deflection").value_or(0.1);
     const std::vector<MeshExport::Item> items =
         ui::BuildVisualExportItems(state);
     if (items.empty())

@@ -1577,7 +1577,7 @@ def main():
         stl = os.path.join(tmp, "part.stl")
         brep = os.path.join(tmp, "part.brep")
         expect(d.call("export_step", path=step)["bodies"] == 1, "export step")
-        stl_rep = d.call("export_stl", path=stl, deflection=0.05)
+        stl_rep = d.call("export_stl", path=stl, stl_deflection_mm=0.05)
         expect(stl_rep["watertight"] is True and stl_rep["shells"] == 1 and
                stl_rep["free_edges"] == 0,
                f"exported solid reports watertight: {stl_rep}")

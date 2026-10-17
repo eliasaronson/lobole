@@ -209,6 +209,19 @@ const char* JsonTypeName(const json& v) {
 // Message for a request whose params carried keys the handler never read —
 // a silently-ignored typo under the old path. Names the offending key(s),
 // suggests the closest accepted key, and lists the method's vocabulary.
+// A parameter renamed, by method: the old name is refused, as any unknown
+// key is, and the refusal says what it is called now. Never accepted as an
+// alias -- a caller reading its own call would go on believing the old name.
+const std::map<std::pair<std::string, std::string>, std::string>&
+RenamedParams() {
+  static const std::map<std::pair<std::string, std::string>, std::string>
+      renamed = {
+          // check_print's name for the same chord deviation.
+          {{"export_stl", "deflection"}, "stl_deflection_mm"},
+      };
+  return renamed;
+}
+
 std::string UnknownParamError(const std::string& method,
                               const std::vector<std::string>& unknown,
                               const std::set<std::string>& accepted) {
@@ -216,6 +229,11 @@ std::string UnknownParamError(const std::string& method,
   msg += unknown.size() > 1 ? "s " : " ";
   for (size_t i = 0; i < unknown.size(); i++) {
     msg += (i ? ", '" : "'") + unknown[i] + "'";
+    if (const auto it = RenamedParams().find({method, unknown[i]});
+        it != RenamedParams().end()) {
+      msg += " (renamed: it is '" + it->second + "' now)";
+      continue;
+    }
     // Closest accepted key within a small edit distance = probable typo.
     std::string best;
     size_t bestDist = 3; // only suggest a genuinely near miss

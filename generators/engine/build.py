@@ -609,7 +609,7 @@ def print_plates(d, s, proc, prof, out):
                 or box["max"][1] > bed[1] + 1e-6 or \
                 abs(box["min"][2]) > 1e-6:
             fail(f"{name} is off the bed: {box}")
-        kw = {} if pp is not None else {"deflection":
+        kw = {} if pp is not None else {"stl_deflection_mm":
                                         prof["stl_deflection_mm"]}
         exp = d.call("export_stl", path=str(out / fn), **kw)
         mp = d.call("mass_properties")["total"]

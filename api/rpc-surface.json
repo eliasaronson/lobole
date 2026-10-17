@@ -114,7 +114,7 @@
   "export_print_job": ["name", "path", "plates", "slicer_config"],
   "export_setup_sheet": ["job", "path", "picture", "program", "setup"],
   "export_step": ["body", "part", "path"],
-  "export_stl": ["body", "deflection", "path"],
+  "export_stl": ["body", "path", "stl_deflection_mm"],
   "export_templates": ["names", "path"],
   "export_topo_stl": ["path", "smooth", "study", "threshold"],
   "export_visual": ["deflection", "path"],

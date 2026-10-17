@@ -48,7 +48,7 @@ def main():
     for name, _ in PRINTED:
         d.call("set_active_part", part=name)
         slug = name.lower().replace(" ", "_")
-        d.call("export_stl", path=f"{OUT}/stl/{slug}.stl", deflection=0.02)
+        d.call("export_stl", path=f"{OUT}/stl/{slug}.stl", stl_deflection_mm=0.02)
         d.call("export_step", path=f"{OUT}/step/{slug}.step")
         print("  ", name)
 

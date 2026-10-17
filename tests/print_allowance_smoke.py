@@ -202,7 +202,7 @@ def profiles(d, port):
     expect(narrow > 0.1 - 0.01 - 1e-4,
            f"no chord closes more than 0.01 of it: {narrow:.4f}")
     # A coarse one asked for is exported as asked, and warned.
-    e = d.call("export_stl", path=stl, deflection=0.1)
+    e = d.call("export_stl", path=stl, stl_deflection_mm=0.1)
     expect(near(e["deflection_mm"], 0.1) and e["deflection_from"] == "asked",
            f"exported as asked: {e}")
     expect("100% of the smallest gap" in e.get("warning", ""),

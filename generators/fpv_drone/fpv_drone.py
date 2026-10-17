@@ -662,7 +662,7 @@ def _exports(app, out):
             path = os.path.join(out, part.lower().replace(" ", "-")
                                 + "." + kind)
             if kind == "stl":
-                app.export_stl(path=path, deflection=0.02)
+                app.export_stl(path=path, stl_deflection_mm=0.02)
             else:
                 app.export_step(path=path)
 

@@ -293,7 +293,7 @@ def export(app, part, path, deflection=None, **limits):
                      quiet=True, **limits)
     kw = {"path": str(path)}
     if deflection is not None:
-        kw["deflection"] = deflection
+        kw["stl_deflection_mm"] = deflection
     exp = app.export_stl(**kw)
     oh = pr["overhang"]
     return {"path": str(path), "deflection_mm": exp.get("deflection_mm"),

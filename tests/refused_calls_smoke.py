@@ -241,6 +241,11 @@ def main():
             check("export_step deflection", "export_step",
                   {"path": path("late.step"), "deflection": 0.1},
                   needle="unknown parameter 'deflection'", tab=part["name"])
+            # Renamed to check_print's name for it: refused, naming it.
+            check("export_stl deflection", "export_stl",
+                  {"path": path("late.stl"), "deflection": 0.1},
+                  needle="'deflection' (renamed: it is 'stl_deflection_mm' "
+                         "now)", tab=part["name"])
             check("save_project message", "save_project",
                   {"path": path("late.designer"), "message": 5},
                   tab=part["name"])
