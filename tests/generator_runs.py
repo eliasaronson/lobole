@@ -188,7 +188,8 @@ def engine(port, out):
     # every part verified, the 720-degree study clean with its press fits,
     # the timing and the springs off its traces, the valve-to-piston
     # requirements, the belt at every tooth, both negative controls failing
-    # and every print plate's check_print.
+    # and every print plate's check_print; and the saved project reopened
+    # with every requirement passing as it lies, unmeasured.
     seed = [PY, "-u", os.path.join(GEN, "print_coupon.py"), "--port",
             str(port), "--seed"]
     build = [PY, "-u", os.path.join(GEN, "engine", "build.py"),
@@ -199,6 +200,7 @@ def engine(port, out):
             [r"fires 1-3-4-2 at \[180.0, 180.0, 180.0\]",
              r"the cam pulley a tooth off: FAILS, as it must",
              r"rods 10 % long: FAILS, as it must",
+             r"reopened: (\d+) of \1 requirements pass as saved",
              r"engine: done, 2 PLA plates"], None)
 
 

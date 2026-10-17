@@ -148,7 +148,8 @@ open, which errs safe for the valve-to-piston check.
   through the crankcase in 2-D before anything is built.
 - **The 720° study**: the crank driven from 0 to 720° at a fifth of a belt
   tooth (4° at 37 mm), every sample solved and clash free at a mesh
-  deflection of a fifth of the smallest gap, the belt hidden (it cannot
+  deflection of a fifth of the smallest gap, under the assembly's
+  configuration "the drive, no belt", which suppresses the belt (it cannot
   move with its pulleys, below). Every pressed pair is relieved as a
   printed press and listed (74).
 - **Timing from the study's traces**: each valve's lift against its
@@ -157,12 +158,15 @@ open, which errs safe for the valve-to-piston check.
   valves shut, and the four firing 180° apart in 1-3-4-2.
 - **The springs' squeeze** from the buckets' traced undersides: 10 % and
   30 %.
-- **Requirements** in the project: each valve's least clearance to its
-  piston over the study (`clearance` with `motion_study`, exact), at least
-  `c_stack`; and the study clean (`motion_clean`).
-- **The belt**: the same 720° with the belt shown, sampled at every crank
-  pulley tooth, where both pulleys stand where the belt's teeth were
-  modelled: clean.
+- **The belt**: the same 720° in the base configuration, belt and all,
+  sampled at every crank pulley tooth, where both pulleys stand where the
+  belt's teeth were modelled: clean.
+- **Requirements** in the project, checked last (after the controls, which
+  move the assembly): each valve's least clearance to its piston over the
+  720° study (`clearance` with `motion_study`, exact), at least `c_stack`;
+  that study clean, and the belt's (`motion_clean`). Then the saved file is
+  reopened, and every requirement must read `pass` as it lies, unmeasured:
+  what the app's Requirements panel shows on opening it.
 - **Negative controls**, which must fail and do:
   - the cam pulley a tooth off (20 crank degrees at 37 mm): every intake
     valve meets its piston at the overlap, and every valve's lift and
@@ -215,8 +219,9 @@ a plate). Not an evening's print, the plan's hope, but two long ones.
   buckets' traces, not seen.
 - **A belt cannot move.** It is a part fastened to the block; its teeth
   meet the pulleys' only at the samples where both pulleys have turned a
-  whole tooth, so the 720° study hides it and a second study checks it at
-  those samples. The teeth on the straight spans are where the belt was
+  whole tooth, so the 720° study runs without it (a configuration the
+  study names, so the app runs the same study) and a second study checks
+  it at those samples. The teeth on the straight spans are where the belt was
   modelled, not where a running belt's would be.
 - **Contact, friction and the springs' force** are the bench's: whether
   a hand turns it easily, and whether TPU bellows close the valves against

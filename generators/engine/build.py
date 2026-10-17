@@ -283,13 +283,16 @@ def traces(a, s):
 
 
 def run_motion(a, name, samples, clash, to_deg=720.0, check_clash=True,
-               trace=True, s=None):
+               trace=True, s=None, configuration=0):
+    """A study of two turns (or `to_deg`) under `configuration` (0: the
+    base, every occurrence in it). The study SAYS which, so the app runs the
+    same study the generator did, whatever is hidden or active then."""
     d = a.d
     a.activate()
     st = d.call("add_motion_study", driver=a.mates["crank"],
                 dof="rotation", **{"from": 0.0}, to=to_deg, samples=samples,
                 clash_mode="mesh", clash_deflection_mm=clash, name=name,
-                check_clash=check_clash)
+                check_clash=check_clash, configuration=configuration)
     if st.get("why_not"):
         fail(f"motion study {name}: {st['why_not']}")
     sid = st.get("id", st.get("study"))
@@ -808,14 +811,22 @@ def main():
         print(f"  {len(a.occ)} occurrences, {len(a.mates)} mates, "
               f"{len(a.rel)} relations; dof {sol.get('dof')}, loops closed "
               f"{sol.get('loops_closed', True)}")
+        # The belt is one rigid ring: it sits in its pulleys at whole teeth
+        # and nowhere between, so the drive is turned without it and the
+        # belt at every tooth (the "belt" phase). A configuration, not the
+        # belt hidden: the study saves which, and so the app checks what was
+        # checked here (a hidden belt saved shown re-ran the study with it).
+        a.activate()
+        no_belt = d.call("add_configuration", name="the drive, no belt")["id"]
+        d.call("set_configuration", id=no_belt,
+               suppressed_occurrences=[a.occ["timing belt"]])
         d.call("save_project", path=str(out / "engine.dsgn"))
 
     step = args.step or (360.0 / s.z1) / 5.0
     n = int(round(720.0 / step)) + 1
     with phase("study"):
-        d.call("set_occurrence_visible", occurrence=a.occ["timing belt"],
-               visible=False)
-        r = run_motion(a, f"720 deg at {step:g}", n, clash, s=s)
+        r = run_motion(a, f"720 deg at {step:g}", n, clash, s=s,
+                       configuration=no_belt)
         bad = clashing(r)
         print(f"  720 deg, {n} samples: {r['collision_status']}, "
               f"unsolved {unsolved(r)[:4]}, clashing {bad[:6]} "
@@ -860,46 +871,10 @@ def main():
             fail(f"the springs' squeeze: {sq}")
         main_study = r["study_id"]
 
-    with phase("requirements"):
-        req_ids = []
-        for i, lb in enumerate(s.lobes):
-            rq = d.call("add_requirement", name=f"valve {i + 1} clears "
-                        f"piston {lb['cyl']}", measure={
-                            "kind": "clearance", "document": a.id,
-                            "a": a.occ[f"valve {i + 1}"],
-                            "b": a.occ[f"piston {lb['cyl']}"],
-                            "mode": "exact", "motion_study": main_study},
-                        bound={"kind": "at_least", "value": s.c_vp},
-                        source="the tolerance stack of the five printed "
-                               "sizes between a valve and its piston")
-            req_ids.append(rq["id"])
-        rq = d.call("add_requirement", name="the engine turns clean",
-                    measure={"kind": "motion_clean", "document": a.id,
-                             "study": main_study},
-                    bound={"kind": "pass"},
-                    source="every sample of two turns solves, nothing "
-                           "clashes")
-        req_ids.append(rq["id"])
-        rr = d.call("check_requirements", ids=req_ids, _timeout=3600)
-        reqs = rr.get("requirements", rr.get("results", []))
-        vp = []
-        for q in reqs:
-            ev = q.get("evidence", q)
-            print(f"  {q.get('name')}: {ev.get('value')} -> "
-                  f"{q.get('state', ev.get('pass'))}")
-            if q.get("state") not in ("pass", "met", "passed") and \
-                    ev.get("pass") is not True:
-                fail(f"requirement {q.get('name')}: {q}")
-            if isinstance(ev.get("value"), (int, float)):
-                vp.append(ev["value"])
-        checks["requirements"] = reqs
-        checks["valve_piston_min_mm"] = min(vp) if vp else None
-
     with phase("belt"):
-        d.call("set_occurrence_visible", occurrence=a.occ["timing belt"],
-               visible=True)
         r = run_motion(a, "the belt at every tooth", 2 * s.z1 + 1, clash,
                        trace=False, s=s)
+        belt_study = r["study_id"]
         bad = clashing(r)
         print(f"  the belt on its pulleys at each of {2 * s.z1} teeth: "
               f"{r['collision_status']} {bad[:6]}")
@@ -947,6 +922,47 @@ def main():
                                              "clashing": bad}
         if not hits:
             fail("a rod 10 % long does not reach the head")
+
+    with phase("requirements"):
+        req_ids = []
+        for i, lb in enumerate(s.lobes):
+            rq = d.call("add_requirement", name=f"valve {i + 1} clears "
+                        f"piston {lb['cyl']}", measure={
+                            "kind": "clearance", "document": a.id,
+                            "a": a.occ[f"valve {i + 1}"],
+                            "b": a.occ[f"piston {lb['cyl']}"],
+                            "mode": "exact", "motion_study": main_study},
+                        bound={"kind": "at_least", "value": s.c_vp},
+                        source="the tolerance stack of the five printed "
+                               "sizes between a valve and its piston")
+            req_ids.append(rq["id"])
+        rq = d.call("add_requirement", name="the engine turns clean",
+                    measure={"kind": "motion_clean", "document": a.id,
+                             "study": main_study},
+                    bound={"kind": "pass"},
+                    source="every sample of two turns solves, nothing "
+                           "clashes (the drive, without the belt)")
+        req_ids.append(rq["id"])
+        rq = d.call("add_requirement", name="the belt sits in its pulleys",
+                    measure={"kind": "motion_clean", "document": a.id,
+                             "study": belt_study},
+                    bound={"kind": "pass"},
+                    source="the belt is one rigid ring: at every tooth of "
+                           "two turns it meets neither pulley")
+        req_ids.append(rq["id"])
+        rr = d.call("check_requirements", ids=req_ids, _timeout=3600)
+        reqs = rr.get("requirements", rr.get("results", []))
+        vp = []
+        for q in reqs:
+            ev = q.get("evidence", q)
+            print(f"  {q.get('name')}: {ev.get('value')} -> "
+                  f"{q.get('state', ev.get('pass'))}")
+            if q.get("state") != "pass":
+                fail(f"requirement {q.get('name')}: {q}")
+            if isinstance(ev.get("value"), (int, float)):
+                vp.append(ev["value"])
+        checks["requirements"] = reqs
+        checks["valve_piston_min_mm"] = min(vp) if vp else None
 
     with phase("predictions"):
         vc = math.pi / 4.0 * s.bore ** 2 * s.s_q
@@ -1005,6 +1021,20 @@ def main():
 
     a.activate()
     d.call("save_project", path=str(out / "engine.dsgn"))
+    # What the app sees: the file reopened, every requirement current and
+    # passing WITHOUT measuring (list_requirements reads hashes). A check
+    # taken on a state the file does not keep -- the belt hidden, then
+    # shown and saved -- opens stale, and the panel's Check measured a
+    # different engine and failed it.
+    d.call("open_project", path=str(out / "engine.dsgn"))
+    reopened = d.call("list_requirements")["requirements"]
+    not_pass = [(q["name"], q["state"], q.get("note")) for q in reopened
+                if q["state"] != "pass"]
+    print(f"  reopened: {len(reopened) - len(not_pass)} of {len(reopened)} "
+          f"requirements pass as saved")
+    if not_pass or len(reopened) != len(checks["requirements"]):
+        fail(f"the saved engine's requirements do not stand as checked: "
+             f"{not_pass}")
     (out / "engine_card.md").write_text(card(s, pred, plates, args.profile,
                                              why))
     spec = {k: v for k, v in vars(s).items()
