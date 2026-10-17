@@ -264,7 +264,8 @@ or the GUI. The saved form did not change, so this is not a format version.
   extrude to picked regions (each named by the sorted entity ids of its outer
   loop); a region that no longer matches a loop is an error.
 - **End conditions** (`end_mode`): `blind` (`distance`), `symmetric` (centred
-  on the plane), `two_sided` (`distance` forward, `distance2` back),
+  on the plane: half of `distance` each way; the tool window's *End* combo,
+  and there is no separate `symmetric` key), `two_sided` (`distance` forward, `distance2` back),
   `up_to_face` (`end_target`, a **planar** face by `ElementRef`, followed
   across upstream edits), `through_all` (cut only; past every body's extent).
   Every variant builds one prism of the computed length, translated back along

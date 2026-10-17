@@ -1269,6 +1269,48 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     };
   }
 
+  // A symmetric extrude is the tool's End choice, not a key of its own
+  // (docs/modeling/README.md#extrude): from its defaults, End = Symmetric
+  // in the tool window sweeps half the distance each way from the sketch
+  // plane, and accepts.
+  t = IM_REGISTER_TEST(engine, "defaults", "extrude_symmetric_from_the_tool");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddRectSketch(ctx, 1, 1.0f, /*centreU=*/3.0f);
+    ToolbarClick(ctx, "###tb_extrude");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###End/Symmetric");
+    ctx->SetRef("//##MainMenuBar");
+    ctx->Yield(2);
+    const ImGuiTestItemInfo accept =
+        ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) == 0);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    auto* ext = dynamic_cast<ExtrudeFeature*>(
+        Doc()->GetFeature(Doc()->FeatureCount() - 1));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(ext->endMode == ExtrudeEnd::Symmetric);
+    IM_CHECK(ext->GetError().empty());
+    IM_CHECK(ext->distance > 0.0);
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    // The sketch plane runs through the origin: along its normal the body
+    // reaches distance/2 either side of it.
+    glm::dvec3 lo(0.0), hi(0.0);
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi);
+    int spans = 0;
+    for (int a = 0; a < 3; a++)
+      if (std::abs(hi[a] - lo[a] - ext->distance) < 1e-6 &&
+          std::abs(hi[a] - ext->distance * 0.5) < 1e-6 &&
+          std::abs(lo[a] + ext->distance * 0.5) < 1e-6)
+        spans++;
+    IM_CHECK_EQ(spans, 1);
+  };
+
   // U10: a tool that runs cleanly and changes nothing says so — and is still
   // acceptable, because Refine on an already-clean body is a fair answer.
   t = IM_REGISTER_TEST(engine, "defaults", "no_op_warns_without_blocking");

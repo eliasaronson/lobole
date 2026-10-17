@@ -306,7 +306,9 @@ The sketch's own entity selection stays in `SketchEditState`
 
 ## Tests
 
-- `defaults/*` (one per creation tool), `defaults/no_op_warns_without_blocking`.
+- `defaults/*` (one per creation tool), `defaults/no_op_warns_without_blocking`,
+  `defaults/extrude_symmetric_from_the_tool` (End = Symmetric in the tool
+  window sweeps half the distance each way).
 - `primitive/face_pick_drag_snap_accept` (the ghost on the face, a free
   drag, flush and centre snaps, Accept: a DOF-0 face-attached sketch and a
   27 mm³ extrude, one Ctrl+Z takes both), `primitive/escape_leaves_document_unchanged`,
