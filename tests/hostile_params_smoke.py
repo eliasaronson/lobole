@@ -215,8 +215,14 @@ class Conn:
             raise Died(f"send failed: {e}")
 
     def read_line(self, timeout=TIMEOUT_S):
+        # Chunks are kept apart and only the new one is searched: appending
+        # to one buffer and searching all of it is quadratic, and a 70 MB
+        # answer (extract_variables echoing a 1 MB prefix) took 28 s where
+        # the app gave it in 2.
         self.sock.settimeout(timeout)
-        while b"\n" not in self.buf:
+        chunks = [self.buf]
+        nl = self.buf.find(b"\n")
+        while nl < 0:
             try:
                 chunk = self.sock.recv(1 << 16)
             except socket.timeout:
@@ -225,8 +231,10 @@ class Conn:
                 raise Died(f"recv failed: {e}")
             if not chunk:
                 raise Died("the connection closed")
-            self.buf += chunk
-        line, self.buf = self.buf.split(b"\n", 1)
+            chunks.append(chunk)
+            nl = chunk.find(b"\n")
+        data = b"".join(chunks)
+        line, self.buf = data.split(b"\n", 1)
         return line
 
     def request(self, method, params_text):
@@ -438,11 +446,19 @@ class Sweep:
                     else os.unlink(p)
         shutil.rmtree(self.out, ignore_errors=True)
         os.makedirs(self.out)
+        # An accepted call may have left a fixture that no longer opens or
+        # has other tabs; that is built again. A job still running 30 s
+        # after a good open is a failure to report, not a reason to build
+        # the fixture again on top of it.
         try:
-            self.open_fixture()
-            if [p["name"] for p in d.call("list_parts")["parts"]] != self.tabs:
-                raise RuntimeError("tabs moved")
+            d.call("open_project", path=self.fixture)
+            ok = [p["name"] for p in d.call("list_parts")["parts"]] == \
+                self.tabs
         except Exception:  # noqa: BLE001
+            ok = False
+        if ok:
+            self.wait_jobs()
+        else:
             self.build()
         self.tab = None
         self.quick_before = None

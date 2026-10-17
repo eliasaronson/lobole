@@ -9,7 +9,7 @@
 
 #include "cad/MeshExport.h"
 #include <algorithm>
-#include <chrono>
+#include <ctime>
 
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -242,17 +242,18 @@ TEST_CASE("FaceSnapPoints stays linear on a drilled plate", "[kernel][slow]") {
   REQUIRE(worst >= 0);
   CHECK(worstEdges > 100); // 4 outline + one rim per hole
 
-  const auto t0 = std::chrono::steady_clock::now();
+  // CPU time, not wall clock: on a machine loaded by other work the wall
+  // clock counts their time too, and a full suite beside four builds read
+  // 2.02 ms here.
+  const std::clock_t t0 = std::clock();
   constexpr int kFrames = 30;
   for (int f = 0; f < kFrames; f++) {
     std::vector<CADShape::FaceSnap> snaps;
     plate.FaceSnapPoints(worst, snaps);
     CHECK(snaps.size() == worstEdges);
   }
-  const double msPerFrame = std::chrono::duration<double, std::milli>(
-                                std::chrono::steady_clock::now() - t0)
-                                .count() /
-                            kFrames;
+  const double msPerFrame =
+      1000.0 * double(std::clock() - t0) / CLOCKS_PER_SEC / kFrames;
   INFO("FaceSnapPoints on a " << worstEdges << "-edge face: " << msPerFrame
                               << " ms");
   // Measured at 0.16 ms once the map is built once; 10 ms when it was built

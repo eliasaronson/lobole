@@ -94,8 +94,14 @@ elif [ -f "$base_file" ]; then
 fi
 
 "$root/tools/build.sh"
+# The suite's whole output, a failing test's own included, is kept: the
+# summary below is all that is printed, and a failure that passes on the
+# rerun is otherwise gone (LastTest.log is the next run's).
+suite_log="$root/build/merge-branch-suite.log"
+echo "merge-branch: the suite's whole output goes to $suite_log"
 if [ "$full" = 1 ]; then
-  "$root/tools/ctest" -LE gui -j"$("$root/tools/build-jobs" 700)" | grep -E 'tests passed|\(Failed\)'
+  "$root/tools/ctest" -LE gui -j"$("$root/tools/build-jobs" 700)" --output-on-failure 2>&1 |
+    tee "$suite_log" | grep -E 'tests passed|\(Failed\)'
   # The big generators, each from nothing on its own instance
   # (generators/README.md#the-big-generators-as-tests): after the headless
   # suite, not beside it -- two at a time is what memory and one GPU take.
@@ -113,7 +119,8 @@ if [ "$full" = 1 ]; then
     grep -E '^--- shard|test failed|Error |archived:|^GUI tests: [0-9]+/|^MISMATCH' |
     sed 's/\x1b\[[0-9;]*m//g'
 else
-  "$root/tools/test-fast.sh" | grep -E 'tests passed|\(Failed\)'
+  "$root/tools/test-fast.sh" 2>&1 | tee "$suite_log" |
+    grep -E 'tests passed|\(Failed\)'
 fi
 
 # Every commit of the branch now on main (by patch), and nothing uncommitted.

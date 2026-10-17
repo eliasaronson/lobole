@@ -17,14 +17,18 @@ import os
 from smoke_shapes import box, cylinder
 
 
-def tree(root, skip=()):
-    """{relative path: content hash} under root, minus `skip`."""
+def tree(root, skip=(), autosaves=True):
+    """{relative path: content hash} under root, minus `skip`, and minus
+    every `*.autosave.d` when `autosaves` is false."""
     out = {}
     if not os.path.isdir(root):
         return out
     for r, _dirs, files in os.walk(root):
         rel = os.path.relpath(r, root)
         if any(rel == s or rel.startswith(s + os.sep) for s in skip):
+            continue
+        if not autosaves and any(part.endswith(".autosave.d")
+                                 for part in rel.split(os.sep)):
             continue
         for f in files:
             relf = os.path.normpath(os.path.join(rel, f))
@@ -73,7 +77,10 @@ class World:
             "machines": (d.call("list_machines")["machines"]
                          if self.cam else None),
             "settings": d.call("get_settings"),
-            "cwd": tree(self.work, skip=("fp",)),
+            # Not an autosave beside a project: it is written on a timer,
+            # whatever the call in flight, as the hostile sweep's quick()
+            # already knows (docs/versioning/README.md).
+            "cwd": tree(self.work, skip=("fp",), autosaves=False),
             "app": tree(self.app.tmp, skip=(
                 "app.log",
                 # The session's own log (it grows with every call, as
