@@ -7,6 +7,13 @@ click, two plates on four threaded pillars closed by printed nuts, a dial
 ring, hands, and a pendulum with a rating nut on a printed thread. The
 weight is the [jar](../jar/README.md) full of sand.
 
+It is the first print dogfood that has to run on its own. The planetary and
+the counter were turned by a hand that could push through a tight mesh; a
+clock train sees grams at the escape wheel, and its rate is a number a phone
+stopwatch checks. So the design states its period, its rate and its run per
+winding before anything is printed, and the print tests the design, as the
+[hook](../hook/README.md)'s breaking load did.
+
     tools/headless-preview.sh --start <port>
     python3 generators/clock/build.py --port <port> --profile "K5 PLA on P1S"
     python3 generators/clock/build.py --port <port> --period 0.8
