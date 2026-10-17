@@ -1973,3 +1973,41 @@ TEST_CASE("the version is written once, in VERSION", "[convention]") {
   CHECK(slurp("CMakeLists.txt").find("project(designer VERSION ${") !=
         std::string::npos);
 }
+
+TEST_CASE("every background job kind is in background_jobs' row",
+          "[convention]") {
+  // background_jobs lists the kinds a caller can see and cancel_background_job
+  // takes; a kind missing from its row is a job a caller meets and cannot
+  // look up (`contact`, contact_report's async sweep, was). Every kind a
+  // job is given -- `->kind = "x"` or a `k...Kind = "x"` constant -- must be
+  // named in the row as `x`.
+  const std::regex assigned(R"re(->kind = "([a-z-]+)";)re");
+  const std::regex constant(
+      R"re(constexpr const char\* k\w*Kind = "([a-z-]+)";)re");
+  std::map<std::string, std::string> kinds; // kind -> where
+  for (const char* dir : {"src/ui", "src/remote"})
+    for (const SourceFile& f : SourcesUnder(dir, ".cpp"))
+      for (const std::regex* re : {&assigned, &constant})
+        for (std::sregex_iterator it(f.text.begin(), f.text.end(), *re), end;
+             it != end; ++it)
+          kinds.emplace((*it)[1].str(), Relative(f.path));
+  REQUIRE(kinds.size() > 10);
+
+  std::string row;
+  for (const SourceFile& f : SourcesUnder("src/remote", ".cpp")) {
+    const size_t at = f.text.find("{\"background_jobs\",");
+    if (at == std::string::npos)
+      continue;
+    const size_t stop = f.text.find("\n    {\"", at + 1);
+    // The literals joined, so a name split across two of them still reads.
+    row = std::regex_replace(f.text.substr(at, stop - at),
+                             std::regex("\"\\s*\n\\s*\""), "");
+  }
+  REQUIRE(!row.empty());
+  std::string missing;
+  for (const auto& [kind, where] : kinds)
+    if (row.find("`" + kind + "`") == std::string::npos)
+      missing += "  `" + kind + "` (" + where + ")\n";
+  INFO("background_jobs' row does not name these job kinds:\n" << missing);
+  CHECK(missing.empty());
+}

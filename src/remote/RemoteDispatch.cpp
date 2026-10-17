@@ -434,7 +434,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "check_drawing, export_drawing, layout_balloons, add_drawing_view or "
      "set_drawing_view is waiting for), `interference` (an exact "
      "interference of two named sides: its boolean and distance, what the "
-     "waiting call is waiting for). Empty when nothing is running. Not the "
+     "waiting call is waiting for), `contact` (contact_report with "
+     "`async`: the sweep over every pair, followed by contact_status). "
+     "Empty when nothing is running. Not the "
      "CAM "
      "job document -- that is list_job_parts.",
      ""},
