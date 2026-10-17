@@ -17,12 +17,23 @@ Two sources, because neither alone is enough:
   - the announced instances, for "does an app own this even though it is
     momentarily unbound" — a relaunching dev-watch is exactly that.
 
+A third source covers the gap between a worktree being built and its
+instance announcing itself: a claim. `--claim PATH` (tools/worktree-build.sh
+passes the worktree) records the port it picks in
+~/.local/state/lobole/port-claims/<port>.json, and every later pick skips it
+for as long as PATH exists, so two worktrees built minutes apart are not both
+told 8801. Asked again for the same PATH, it answers the same port. A claim
+whose PATH is gone (a merged worktree is deleted) is stale and removed. Run
+from inside a claimed worktree without `--claim`, it answers that worktree's
+port, so "which port is mine" has one answer.
+
 8799 is excluded whatever both say. It is the human's dev-watch: the windowed
 build under review, whose open document an agent must never mutate (CLAUDE.md).
 
 Usage:
     tools/scratch_port.py           # prints one port, or nothing if none free
     tools/scratch_port.py --range 9000 9100
+    tools/scratch_port.py --claim /path/to/worktree
 Exit status is 1 when nothing is free, so a caller can branch on it.
 """
 
@@ -59,6 +70,41 @@ def announced_ports():
     return claimed
 
 
+CLAIMS = os.path.expanduser("~/.local/state/lobole/port-claims")
+
+
+def live_claims():
+    """{port: path} for every claim whose worktree still exists. A stale one
+    (its path deleted) is removed as it is found."""
+    claims = {}
+    for path in glob.glob(os.path.join(CLAIMS, "*.json")):
+        try:
+            with open(path) as f:
+                c = json.load(f)
+            port, owner = int(c["port"]), c["path"]
+        except (OSError, ValueError, KeyError, TypeError,
+                json.JSONDecodeError):
+            continue  # unreadable: leave it, and do not hand its port out
+        if os.path.isdir(owner):
+            claims[port] = owner
+        else:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    return claims
+
+
+def claim_for(claims, path):
+    """The port claimed for the worktree PATH is in, if any."""
+    path = os.path.realpath(path)
+    for port, owner in claims.items():
+        owner = os.path.realpath(owner)
+        if path == owner or path.startswith(owner + os.sep):
+            return port
+    return None
+
+
 def bindable(port):
     """Whether the kernel will give us this port right now."""
     with socket.socket() as s:
@@ -74,11 +120,31 @@ def main():
     ap.add_argument("--range", nargs=2, type=int, metavar=("LO", "HI"),
                     default=[8800, 8899],
                     help="inclusive port range to search (default 8800 8899)")
+    ap.add_argument("--claim", metavar="PATH",
+                    help="record the port for the worktree at PATH, so no "
+                         "later pick hands it out while PATH exists")
     args = ap.parse_args()
 
-    claimed = announced_ports() | {DEV_WATCH_PORT}
+    claims = live_claims()
+    if args.claim is not None:
+        if not os.path.isdir(args.claim):
+            print(f"--claim: {args.claim} is not a directory", file=sys.stderr)
+            return 2
+        mine = claim_for(claims, args.claim)
+    else:
+        mine = claim_for(claims, os.getcwd())
+    if mine is not None:
+        print(mine)
+        return 0
+
+    claimed = announced_ports() | set(claims) | {DEV_WATCH_PORT}
     for port in range(args.range[0], args.range[1] + 1):
         if port not in claimed and bindable(port):
+            if args.claim is not None:
+                os.makedirs(CLAIMS, exist_ok=True)
+                with open(os.path.join(CLAIMS, f"{port}.json"), "w") as f:
+                    json.dump({"port": port,
+                               "path": os.path.realpath(args.claim)}, f)
             print(port)
             return 0
     print(f"no free port in {args.range[0]}-{args.range[1]}", file=sys.stderr)

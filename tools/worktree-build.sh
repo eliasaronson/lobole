@@ -16,7 +16,8 @@
 #     script PICKS one and prints the command. It used to say "pass a distinct
 #     one per worktree" — a value a human had to hold, in a repo that
 #     everywhere else refuses to let one (tools/scratch_port.py asks the
-#     kernel and the announced instances, and never hands out 8799).
+#     kernel, the announced instances and the ports other worktrees claimed,
+#     claims this one's, and never hands out 8799).
 #   - Integration is SERIAL: each worktree branch merges to main one at a time
 #     with full suites between merges. Parallel *implementation*, sequential
 #     *integration*. Only worth it when the work is genuinely file-disjoint
@@ -88,7 +89,10 @@ echo "worktree-build: configuring + building [$TARGETS] in $ROOT/build ($BUILD_T
 "$ROOT/tools/nix-run" \
   "cmake -S '$ROOT' -B '$ROOT/build' -G Ninja -DCMAKE_BUILD_TYPE=$BUILD_TYPE >/dev/null && ninja -C '$ROOT/build' -j$JOBS $TARGETS"
 echo "worktree-build: done."
-if PORT="$("$ROOT/tools/scratch_port.py")"; then
+# Claimed for this worktree until it is deleted: an instance announces its
+# port only once it runs, and two worktrees built minutes apart were both
+# told the same one.
+if PORT="$("$ROOT/tools/scratch_port.py" --claim "$ROOT")"; then
   echo "  scratch port for this worktree: $PORT   (8799 is main's dev-watch)"
   echo "  tools/headless-preview.sh $PORT"
 else
