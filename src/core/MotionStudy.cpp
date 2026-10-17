@@ -59,7 +59,9 @@ uint64_t InputKey(const AssemblyDocument& asmDoc,
   // The algorithm's own version: a change to what a run computes (the clash
   // rule, the walk to the start) bumps it, so no answer stored before is
   // handed out as one from after.
-  h.Str("motion/2"); // 2: refined steps and branch jumps (v179)
+  // 2: refined steps and branch jumps (v179); 3: a mesh check's touching
+  // pairs, and no branch watched on a coordinate a relation sets (vNEXT).
+  h.Str("motion/3");
   nlohmann::json definition = DocumentIO::MotionStudyToJson(study);
   definition.erase("name"); // a label: two studies alike share an answer
   definition.erase("id");
@@ -318,10 +320,11 @@ using Key = std::pair<uint64_t, uint64_t>;
 // Which keys move relative to each other over the study, read off a
 // kinematics-only pass through every sample.
 //
-// Two parts bolted together touch — that is what a bolted joint is — and a
-// mesh check reported touching as a clash, so checking every fixed joint at
-// every sample made `clean` impossible on a real engine. It is also the
-// wrong question to ask 48 times: a pair whose relative pose never changes
+// Two parts bolted together touch — that is what a bolted joint is — and
+// they carry an engaged thread or a press fit that only an exact check
+// relieves, so checking every fixed joint by triangles at every sample made
+// `clean` impossible on a real engine. It is also the wrong question to ask
+// 48 times: a pair whose relative pose never changes
 // has the same answer at every pose. So a rigid pair is checked ONCE, at the
 // first sample, exactly, and skipped after. Skipping it outright hid three
 // standing clashes in a pump that passed four exact studies.
@@ -944,8 +947,8 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
     const Cand& cd = cands[k];
     const Placed& pa = placed[cd.s][cd.a];
     const Placed& pb = placed[cd.s][cd.b];
-    // A rigid pair is always asked exactly: touching is what fastened parts
-    // do, and a mesh check would call every bolted joint a clash.
+    // A rigid pair is always asked exactly: a fastened pair's engaged thread
+    // and press fit are relieved only by an exact check.
     hits[k] = exact || cd.rigid
                   ? ExactHit(pa, pb, contacts)
                   : MeshHit(pa, pb, meshes, study.clashDeflectionMm);

@@ -960,6 +960,19 @@ json MotionResultToJson(const motion::Result& r) {
         clashes.push_back(ClashToJson(c));
       sj["clashes"] = std::move(clashes);
     }
+    if (!s.touching.empty()) { // vNEXT: a mesh check's seated pairs
+      json touching = json::array();
+      for (const motion::Touch& t : s.touching) {
+        json tj = {
+            {"a", t.a}, {"b", t.b}, {"a_name", t.aName}, {"b_name", t.bName}};
+        if (t.aInner != 0)
+          tj["a_inner"] = t.aInner;
+        if (t.bInner != 0)
+          tj["b_inner"] = t.bInner;
+        touching.push_back(std::move(tj));
+      }
+      sj["touching"] = std::move(touching);
+    }
     if (!s.unknownContacts.empty()) {
       json unknown = json::array();
       for (const motion::UnknownContact& u : s.unknownContacts) {
@@ -1099,6 +1112,16 @@ motion::Result MotionResultFromJson(const json& j) {
     }
     for (const json& cj : sj.value("clashes", json::array()))
       s.clashes.push_back(ClashFromJson(cj));
+    for (const json& tj : sj.value("touching", json::array())) {
+      motion::Touch t;
+      t.a = tj.at("a").get<uint64_t>();
+      t.b = tj.at("b").get<uint64_t>();
+      t.aName = tj.value("a_name", std::string{});
+      t.bName = tj.value("b_name", std::string{});
+      t.aInner = tj.value("a_inner", uint64_t{0});
+      t.bInner = tj.value("b_inner", uint64_t{0});
+      s.touching.push_back(std::move(t));
+    }
     for (const json& uj : sj.value("unknown_contacts", json::array())) {
       motion::UnknownContact u;
       u.a = uj.at("a").get<uint64_t>();

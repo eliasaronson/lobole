@@ -1,0 +1,92 @@
+{
+  "format": "designer-document",
+  "kind": "assembly",
+  "mates": [
+    {
+      "a": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 1
+      },
+      "b": {
+        "anchor": {
+          "origin": true
+        },
+        "occurrence": 2
+      },
+      "flipped": false,
+      "id": 3,
+      "mate_type": "revolute",
+      "name": "turntable",
+      "offset": 0.0,
+      "rotation": 0.0,
+      "type": "Mate"
+    }
+  ],
+  "motion": [
+    {
+      "check_clash": true,
+      "clash_mode": "mesh",
+      "driver_dof": "rotation",
+      "driver_mate": 3,
+      "from": 0.0,
+      "id": 4,
+      "name": "turn on the plate",
+      "samples": 9,
+      "to": 6.283185307179586,
+      "type": "MotionStudy"
+    }
+  ],
+  "occurrences": [
+    {
+      "configuration_id": 0,
+      "fixed": true,
+      "id": 1,
+      "name": "Plate",
+      "part_id": 1,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    },
+    {
+      "configuration_id": 0,
+      "fixed": false,
+      "id": 2,
+      "name": "Block",
+      "part_id": 2,
+      "part_version": null,
+      "ref_kind": "part",
+      "transform": {
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ],
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Occurrence",
+      "visible": true
+    }
+  ],
+  "version": 180
+}

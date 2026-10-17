@@ -306,6 +306,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A stored motion result's per-sample `touching` [{a, b, a_name, b_name, a_inner?, b_inner?}]: the pairs a mesh check found meeting only on a surface, which are not clashes ([touching is not a clash](../inspect/README.md#touching-is-not-a-clash)); omitted when empty. The run's input hash moves to `motion/3` (no format change of its own), so a result stored before -- whose seats were clashes, and whose cam followers could carry a branch jump -- is run again rather than reused. An older build reads the result without the list. Golden `vNEXT-touching-sample` |
 
 ## The directory form
 

@@ -829,8 +829,7 @@ TEST_CASE("A study checks rigid pairs once, at the first sample, and reports "
     CHECK_THAT(ab->bboxMin.z, WithinAbs(-2.0, 1e-3));
     CHECK_THAT(ab->bboxMax.z, WithinAbs(2.0, 1e-3));
 
-    // B and C only touch: a bolted joint is not a clash — which in mesh
-    // mode it would be, had the rigid pair been asked by triangles.
+    // B and C only touch: a bolted joint is not a clash.
     for (const motion::Sample& s : res.samples)
       for (const motion::Clash& c : s.clashes)
         CHECK_FALSE(IsPair(c, "Plate B", "Plate C"));
@@ -1566,4 +1565,73 @@ TEST_CASE("A cam follower leaving its dwell at a coarse step is no branch "
   CHECK(res.branchJumps == 0);
   for (const motion::Sample& s : res.samples)
     CHECK_FALSE(s.branchJump);
+}
+
+TEST_CASE("The vNEXT golden: a mesh study lists a seated pair as touching, "
+          "and its result keeps it",
+          "[motion][golden]") {
+  // A block turning on a plate it is seated on: its underside on the
+  // plate's top face at every pose. A mesh check called that a clash at
+  // every sample; it is touching, as exact interference calls it
+  // (docs/inspect/README.md#touching-is-not-a-clash), and a stored result
+  // keeps the list (vNEXT).
+  using Parts = std::map<uint64_t, std::unique_ptr<Document>>;
+  Parts parts;
+  parts[1] = BoxPart({-50, -10, -5}, {100, 20, 5});
+  parts[2] = BoxPart({-5, -5, 0}, {10, 10, 10});
+  const assembly::PartResolver resolver(
+      [&parts](uint64_t id, uint64_t) -> const Document* {
+        const auto it = parts.find(id);
+        return it == parts.end() ? nullptr : it->second.get();
+      });
+  AssemblyDocument d;
+  Occurrence plate;
+  plate.name = "Plate";
+  plate.partId = 1;
+  plate.fixed = true;
+  const uint64_t plateOcc = d.AddOccurrence(std::move(plate));
+  Occurrence block;
+  block.name = "Block";
+  block.partId = 2;
+  const uint64_t blockOcc = d.AddOccurrence(std::move(block));
+  Mate turn;
+  turn.type = MateType::Revolute;
+  turn.name = "turntable";
+  turn.a = Origin(plateOcc);
+  turn.b = Origin(blockOcc);
+  turn.flipped = false;
+  const uint64_t axle = d.AddMate(turn);
+  MotionStudy study = FullTurn(axle, 9);
+  study.name = "turn on the plate";
+  study.clashMode = "mesh";
+  d.AddMotionStudy(study);
+  if (const char* out = std::getenv("LOBOLE_WRITE_GOLDEN_VNEXT_ASM"))
+    REQUIRE(DocumentIO::SaveAssembly(d, out).has_value());
+
+  const fs::path golden = fs::path(TestSourceDir()) /
+                          "tests/golden/assembly/vNEXT-touching-sample.json";
+  auto g = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(g.has_value());
+  REQUIRE((*g)->GetMotionStudies().size() == 1);
+  const motion::Result res =
+      motion::Run(**g, resolver, nullptr, (*g)->GetMotionStudies()[0]);
+  REQUIRE(res.error.empty());
+  INFO(motion::Table(res, (*g)->GetMotionStudies()[0]));
+  CHECK(res.clean);
+  REQUIRE(res.samples.size() == 9);
+  for (const motion::Sample& s : res.samples) {
+    CHECK(s.clashes.empty());
+    REQUIRE(s.touching.size() == 1);
+    CHECK(((s.touching[0].aName == "Plate" && s.touching[0].bName == "Block") ||
+           (s.touching[0].aName == "Block" && s.touching[0].bName == "Plate")));
+  }
+  const motion::Result back =
+      DocumentIO::MotionResultFromJson(DocumentIO::MotionResultToJson(res));
+  REQUIRE(back.samples.size() == res.samples.size());
+  for (size_t i = 0; i < back.samples.size(); i++) {
+    REQUIRE(back.samples[i].touching.size() == 1);
+    CHECK(back.samples[i].touching[0].a == res.samples[i].touching[0].a);
+    CHECK(back.samples[i].touching[0].bName ==
+          res.samples[i].touching[0].bName);
+  }
 }
