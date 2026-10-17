@@ -445,13 +445,73 @@ public:
               const MotionStudy& study)
       : m_ex(ex), m_driver(driver), m_parts(parts), m_assemblies(assemblies),
         m_study(study) {
+    const std::set<std::pair<uint64_t, bool>> set =
+        SetForward(ex.doc, driver, study);
     const auto& mates = ex.doc.GetMates();
     for (size_t k = 0; k < mates.size(); k++)
       for (const bool rot : {true, false})
         if (assembly::MateHasDof(mates[k].type,
-                                 rot ? MateDof::Rotation : MateDof::Offset))
+                                 rot ? MateDof::Rotation : MateDof::Offset) &&
+            set.count({mates[k].id, rot}) == 0)
           m_coords.push_back({k, rot});
     m_maxRate.assign(m_coords.size(), 0.0);
+  }
+
+  // The coordinates nothing CHOOSES: the driver's, and every one a relation
+  // sets as a function of another (PropagateRelations: a gear, a cam, an
+  // intermittent, a screw, a member of a relation over several mates),
+  // walked outward from the driver as propagation walks. They have no
+  // branch to jump to -- a cam's follower leaving its base circle after a
+  // dwell changes its rate at once, and is the lift table, not a flip --
+  // so only what the loop solve picks is watched.
+  static std::set<std::pair<uint64_t, bool>>
+  SetForward(const AssemblyDocument& doc, const Mate& driver,
+             const MotionStudy& study) {
+    using Coord = std::pair<uint64_t, bool>;
+    std::set<Coord> set{{driver.id, study.driverDof == MateDof::Rotation}};
+    const auto rot = [](MateDof d) { return d == MateDof::Rotation; };
+    const std::vector<Relation>& rels = doc.GetRelations();
+    std::vector<bool> done(rels.size(), false);
+    // Outward from what is set: a relation with a side set sets the other.
+    // What the walk never reaches is applied A to B, as an unprompted
+    // propagation applies it.
+    for (bool reached = true; reached;) {
+      reached = false;
+      for (size_t i = 0; i < rels.size(); i++) {
+        if (done[i] || doc.RelationSuppressed(rels[i].id))
+          continue;
+        const Relation& r = rels[i];
+        if (r.HasTerms()) {
+          std::vector<Coord> open;
+          for (const RelationTerm& t : r.terms)
+            if (set.count({t.mate, rot(t.dof)}) == 0)
+              open.push_back({t.mate, rot(t.dof)});
+          if (open.size() < r.terms.size() && !open.empty()) {
+            set.insert(open.begin(), open.end());
+            done[i] = reached = true;
+          }
+          continue;
+        }
+        const Coord a{r.mateA, rot(r.dofA)}, b{r.mateB, rot(r.dofB)};
+        if (set.count(a) != 0 || set.count(b) != 0) {
+          set.insert(a);
+          set.insert(b);
+          done[i] = reached = true;
+        }
+      }
+    }
+    for (size_t i = 0; i < rels.size(); i++) {
+      if (done[i] || doc.RelationSuppressed(rels[i].id))
+        continue;
+      const Relation& r = rels[i];
+      if (r.HasTerms()) {
+        if (!r.terms.empty())
+          set.insert({r.terms.back().mate, rot(r.terms.back().dof)});
+      } else {
+        set.insert({r.mateB, rot(r.dofB)});
+      }
+    }
+    return set;
   }
 
   // The sample at `value` from the pose at the last one, `prev`: one step

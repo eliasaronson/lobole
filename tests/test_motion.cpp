@@ -1494,3 +1494,76 @@ TEST_CASE("A study's max_refine and a run's branch jump round-trip",
   CHECK(motion::Summarize(back, study, false).text ==
         motion::Summarize(res, study, false).text);
 }
+
+TEST_CASE("A cam follower leaving its dwell at a coarse step is no branch "
+          "jump",
+          "[motion][branch]") {
+  // A valve on a slider, lifted by a cam that dwells half a turn and then
+  // rises: at 22.5 degrees a step the lobe leaving its base circle changes
+  // the valve's rate at once. That is the lift table, a function of the
+  // driver the relation sets forward -- it has no branch to flip to, and
+  // the watcher judged it as if the loop solve had chosen it (the engine's
+  // belt study). Only what the solve chooses is watched; the dead-point
+  // four-bar above still reports its jump.
+  using Parts = std::map<uint64_t, std::unique_ptr<Document>>;
+  Parts parts;
+  parts[1] = BoxPart({-5, -5, -5}, {10, 10, 10});
+  const assembly::PartResolver resolver(
+      [&parts](uint64_t id, uint64_t) -> const Document* {
+        const auto it = parts.find(id);
+        return it == parts.end() ? nullptr : it->second.get();
+      });
+  AssemblyDocument d;
+  const auto add = [&d](const char* name, bool fixed) {
+    Occurrence o;
+    o.name = name;
+    o.partId = 1;
+    o.fixed = fixed;
+    return d.AddOccurrence(std::move(o));
+  };
+  const uint64_t head = add("Head", true), camOcc = add("Cam", false),
+                 valveOcc = add("Valve", false);
+  Mate turn;
+  turn.type = MateType::Revolute;
+  turn.name = "cam axle";
+  turn.a = Origin(head);
+  turn.b = Origin(camOcc);
+  turn.flipped = false;
+  const uint64_t cam = d.AddMate(turn);
+  Mate slide;
+  slide.type = MateType::Slider;
+  slide.name = "valve guide";
+  slide.a = Origin(head);
+  slide.b = Origin(valveOcc);
+  slide.flipped = false;
+  const uint64_t valve = d.AddMate(slide);
+  Relation lobe;
+  lobe.kind = RelationKind::Cam;
+  lobe.mateA = cam;
+  lobe.mateB = valve;
+  lobe.dofA = MateDof::Rotation;
+  lobe.dofB = MateDof::Offset;
+  // Base circle 0..180, then up 8 mm by 270 and back by 360, tabulated
+  // every degree: a tangent cam's lift leaves its base circle with a slope,
+  // a velocity step, as the engine's flat-follower lobes do.
+  for (int deg = 0; deg < 360; deg++)
+    lobe.lift.emplace_back(deg, deg <= 180   ? 0.0
+                                : deg <= 270 ? 8.0 * (deg - 180) / 90.0
+                                             : 8.0 * (360 - deg) / 90.0);
+  d.AddRelation(lobe);
+
+  MotionStudy study = FullTurn(cam, 17); // 22.5 degrees a step
+  study.checkClash = false;
+  const motion::Result res = motion::Run(d, resolver, nullptr, study);
+  REQUIRE(res.error.empty());
+  INFO(motion::Table(res, study));
+  double peak = 0.0;
+  for (const motion::Sample& s : res.samples)
+    for (const motion::Sample::MateValue& v : s.mates)
+      if (v.mate == valve)
+        peak = std::max(peak, v.offset);
+  CHECK_THAT(peak, WithinAbs(8.0, 1e-3)); // it did lift
+  CHECK(res.branchJumps == 0);
+  for (const motion::Sample& s : res.samples)
+    CHECK_FALSE(s.branchJump);
+}
