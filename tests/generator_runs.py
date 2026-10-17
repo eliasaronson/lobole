@@ -174,6 +174,26 @@ def clock(port, out):
              r"clock: done"], None)
 
 
+def engine(port, out):
+    # The whole run but the stills, on the P1S's K5 profile seeded into the
+    # instance's own config (the plates pack into its bed): the bore search,
+    # every part verified, the 720-degree study clean with its press fits,
+    # the timing and the springs off its traces, the valve-to-piston
+    # requirements, the belt at every tooth, both negative controls failing
+    # and every print plate's check_print.
+    seed = [PY, "-u", os.path.join(GEN, "print_coupon.py"), "--port",
+            str(port), "--seed"]
+    build = [PY, "-u", os.path.join(GEN, "engine", "build.py"),
+             "--port", str(port), "--profile", "K5 PLA on P1S",
+             "--no-render", "--out", os.path.join(out, "engine")]
+    return (["bash", "-c", " ".join(shlex.quote(a) for a in seed) + " && " +
+             " ".join(shlex.quote(a) for a in build)],
+            [r"fires 1-3-4-2 at \[180.0, 180.0, 180.0\]",
+             r"the cam pulley a tooth off: FAILS, as it must",
+             r"rods 10 % long: FAILS, as it must",
+             r"engine: done, 2 PLA plates"], None)
+
+
 def watch(port, out):
     # The parts and the assembly with every check verify() makes, the
     # exact mesh sweeps included (no cache in a fresh directory): the watch
@@ -199,6 +219,7 @@ RUNS = {
     "hinge_box": (hinge_box, True, {}),
     "strandbeest": (strandbeest, True, {}),
     "clock": (clock, True, {}),
+    "engine": (engine, True, {}),
     "watch": (watch, True, {}),
 }
 

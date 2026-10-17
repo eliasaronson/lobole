@@ -1122,12 +1122,13 @@ set_tests_properties(generators_smoke PROPERTIES TIMEOUT 300)
 # The budget (s) is about twice the run measured alone on the development
 # machine -- om615 217, pes_pump 44, chess 140, pantilt 349, planetary
 # ~90, hook 13, jar 83 (198 beside the GUI suite), counter 45, hinge_box
-# 3, strandbeest ~260, clock 270, watch 316 -- for a loaded one. The
+# 3, strandbeest ~260, clock 270, watch 316, engine ~180 -- for a loaded
+# one. The
 # TIMEOUT is the budget plus a minute: the script kills its generator at
 # the budget and says so, which a ctest kill would not.
 foreach(gen_budget om615:420 pes_pump:180 chess:360 pantilt:720 planetary:240
                    hook:60 jar:400 counter:120 hinge_box:60
-                   strandbeest:540 clock:600 watch:660)
+                   strandbeest:540 clock:600 watch:660 engine:420)
   string(REPLACE ":" ";" gen_budget "${gen_budget}")
   list(GET gen_budget 0 gen)
   list(GET gen_budget 1 budget)
