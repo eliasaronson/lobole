@@ -309,6 +309,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A Hole's `printed` (`round` \| `teardrop` \| `teardrop_flat`, absent = round): its roof pointed up the part's print direction; an Extrude's `taper_deg` (+`taper_expr`, absent = 0); a study load's `region` (`{normal, from_mm, to_mm}` or `{center_mm, radius_mm}`, absent = the whole face). Additive: an older file reads as before. Golden `vNEXT-printed-features` |
 
 ## The directory form
 

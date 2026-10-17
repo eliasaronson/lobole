@@ -130,7 +130,10 @@ typed `contract`: every field, its type and its enum values.
   the normal through the SKETCH ORIGIN over the length, right-handed about
   the direction of travel (a helical gear: tan(helix)/r_pitch radians per
   mm times the length); blind or symmetric only, never thin,
-  "herringbone"?: bool — climb the first half at that rate and back}}.
+  "herringbone"?: bool — climb the first half at that rate and back,
+  "taper_deg"?: num, "taper_expr"?: str — every wall leans IN that many
+  degrees over the length (negative: out); blind only, not thin or
+  twisted; refused past the angle that closes the profile}}.
   Extrudes sweep along the sketch plane's +normal; "reversed": true flips
   them. So a cut whose sketch sits ON a face wants "reversed" (into the
   material) — no need to park the plane behind the part and overshoot;
@@ -208,7 +211,10 @@ typed `contract`: every field, its type and its enum values.
   a tapped fit threads the bore so a screw in it engages),
   "drill_point_deg"?: a blind floor's point (absent: 118 with a
   fit, else flat), "thread_depth"?: a tapped fit's thread from the mouth
-  (absent: the depth less 3 pitches)}} — far cleaner than a construction circle + cut-extrude per
+  (absent: the depth less 3 pitches), "printed"?: "teardrop"|
+  "teardrop_flat" (a hole across the print direction on a printed part:
+  its roof pointed at 45 degrees up the part's print direction, or flat
+  at the process's bridge)}} — far cleaner than a construction circle + cut-extrude per
   bolt hole; put the point sketch on the face you drill from.
 - Sweep (sweep a closed profile sketch along an open path):
   {{"type": "Sweep", "name": str, "profile_id": <sketch feature id>,
@@ -1097,7 +1103,8 @@ def measure(a: dict, b: dict | None = None, kind: str | None = None,
           "and `role` -- start_cap | end_cap (a cut's floor) | side (swept "
           "from sketch `entity`) | generated (a fillet's or chamfer's face) "
           "| bore | bottom | counterbore | counterbore_floor | countersink "
-          "| point (a Hole's) | outside | inner_side | outer_side | shield (a "
+          "| point | roof (a Hole's) | outside | inner_side | outer_side | "
+          "shield (a "
           "bearing's) | positional (a feature that names by index) | "
           "boundary | pole | seam; `instance` for a pattern copy, `derived` "
           "for one that came in through a Derived feature. ASK for faces "

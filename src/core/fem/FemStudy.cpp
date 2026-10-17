@@ -181,12 +181,58 @@ bool EvaluateStudyExprs(Study& study, const SymbolTable& symbols,
   return ok;
 }
 
+bool LoadRegion::Contains(const glm::dvec3& p) const {
+  switch (kind) {
+  case Kind::Whole:
+    return true;
+  case Kind::Band: {
+    const double t = glm::dot(p, glm::normalize(normal));
+    return t >= fromMm && t <= toMm;
+  }
+  case Kind::Sphere:
+    return glm::length(p - center) <= radiusMm;
+  }
+  return true;
+}
+
+std::string LoadRegion::Why() const {
+  if (kind == Kind::Band) {
+    if (!(glm::length(normal) > 1e-12) || !std::isfinite(glm::length(normal)))
+      return "a band region's normal is a non-zero [x, y, z]";
+    if (!std::isfinite(fromMm) || !std::isfinite(toMm) || !(toMm > fromMm))
+      return "a band region runs from from_mm to a larger to_mm (mm along "
+             "its normal)";
+  }
+  if (kind == Kind::Sphere && (!(radiusMm > 0.0) || !std::isfinite(radiusMm) ||
+                               !std::isfinite(glm::length(center))))
+    return "a radius region needs center_mm [x, y, z] and a positive "
+           "radius_mm";
+  return {};
+}
+
 bool ValidateLoadCases(const Study& study, std::string* error) {
   auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
     return false;
   };
+  // A load on part of a face
+  // (docs/simulation/README.md#loads-on-part-of-a-face): a static or modal
+  // study of a part. A topology study's frozen skin is whole faces.
+  for (const Load& l : study.loads) {
+    if (l.region.IsWhole())
+      continue;
+    if (const std::string why = l.region.Why(); !why.empty())
+      return fail("load " + std::to_string(l.id) + ": " + why);
+    if (study.type == AnalysisType::Topology)
+      return fail("load " + std::to_string(l.id) +
+                  " acts on part of its face (region), and a topology "
+                  "study freezes whole faces: load a face of its own");
+    if (study.IsAssemblyStudy())
+      return fail("load " + std::to_string(l.id) +
+                  " acts on part of its face (region), which is a part "
+                  "study's; on an assembly study load a whole face");
+  }
   const auto known = [&] {
     std::string k;
     for (const LoadCase& c : study.loadCases)
@@ -877,17 +923,37 @@ bool MeshPlannedStudy(const StudyPlan& plan, StudyJobInput& out,
     // A torque or remote load on a face the imprint split arrives once per
     // piece: its pieces are one FaceLoad, so its field is the whole face's.
     std::map<uint64_t, std::pair<size_t, size_t>> fieldLoad; // id -> (case, i)
+    // A facet is in a load's region when its centroid is (LoadRegion).
+    const auto inRegion = [&](const FemMesh::BoundaryTri& tri,
+                              const LoadRegion& region) {
+      if (region.IsWhole())
+        return true;
+      glm::dvec3 c(0.0);
+      for (int k = 0; k < 3; ++k)
+        c += mesh->nodes[tri.nodes[k]];
+      return region.Contains(c / 3.0);
+    };
     for (const auto& [faceIndex, load] : bp.loads) {
       if (load.type == LoadType::Fixed) {
+        size_t before = fixedSet.size();
         for (const auto& tri : mesh->boundary)
-          if (tri.faceIndex == faceIndex)
+          if (tri.faceIndex == faceIndex && inRegion(tri, load.region))
             for (int n : tri.nodes)
               fixedSet.insert(n);
+        if (!load.region.IsWhole() && fixedSet.size() == before)
+          return fail("body '" + bp.bodyName + "': load " +
+                      std::to_string(load.id) +
+                      "'s region holds none of its face's mesh facets");
       } else {
         std::vector<int> tris;
         for (int t = 0; t < static_cast<int>(mesh->boundary.size()); ++t)
-          if (mesh->boundary[t].faceIndex == faceIndex)
+          if (mesh->boundary[t].faceIndex == faceIndex &&
+              inRegion(mesh->boundary[t], load.region))
             tris.push_back(t);
+        if (tris.empty() && !load.region.IsWhole())
+          return fail("body '" + bp.bodyName + "': load " +
+                      std::to_string(load.id) +
+                      "'s region holds none of its face's mesh facets");
         if (tris.empty() && bp.premeshed)
           return fail("body '" + bp.bodyName + "': load " +
                       std::to_string(load.id) +

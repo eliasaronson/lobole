@@ -429,9 +429,17 @@ static constexpr MethodDoc SimulationMethods[] = {
      "{feature_id, element}, or just the element name — the body that has "
      "it is then found for you. On a study with load cases a force, "
      "pressure, torque or remote load names its `case`; a support names "
-     "none (it holds in every case).",
+     "none (it holds in every case). `region` puts the load or the support "
+     "on PART of its face, on a part study: {normal, from_mm, to_mm} the "
+     "band of the face between the planes n.p = from_mm and n.p = to_mm "
+     "(n the unit normal, mm in the part's frame), or {center_mm, "
+     "radius_mm} the face within that radius of a point; applied to the "
+     "face's mesh facets whose centroids are in it, the force the whole "
+     "`magnitude` over them (a seat on a shaft, without a step to make it "
+     "a face; docs/simulation/README.md#loads-on-part-of-a-face).",
      "axis_dir, axis_origin_mm, case, contact_with, direction, face, "
-     "force_n, magnitude, occurrence, point_mm, study, torque_nmm, type"},
+     "force_n, magnitude, occurrence, point_mm, region, study, torque_nmm, "
+     "type"},
     {"remove_load",
      "Remove a load from a study {study, id}. `load` is accepted for the "
      "same thing. It is the load's ID, as `add_load` and `list_studies` "
@@ -851,6 +859,12 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
         }
         if (!l.loadCase.empty())
           lj["case"] = l.loadCase;
+        if (!l.region.IsWhole())
+          lj["region"] = DocumentIO::StudyToJson([&] {
+            fem::Study one;
+            one.loads.push_back(l);
+            return one;
+          }())["loads"][0]["region"];
         loads.push_back(std::move(lj));
       }
       json sj = {{"id", s.id},
@@ -1374,6 +1388,17 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           names.push_back(c.name);
         CaseIndex(names, p.at("case")); // refuses, naming the cases
       }
+    }
+    if (p.contains("region")) {
+      if (host.IsAssembly())
+        throw std::runtime_error(
+            "region puts a load on part of a face of a PART study; on an "
+            "assembly study load a whole face");
+      if (host.Require(id).type == fem::AnalysisType::Topology)
+        throw std::runtime_error(
+            "region: a topology study freezes whole faces, so its loads "
+            "are on whole faces");
+      l.region = DocumentIO::LoadRegionFromJson(p.at("region"), "add_load");
     }
     modifyStudy(id, "Add load", [&](fem::Study& s) { s.loads.push_back(l); });
     return json{{"id", l.id}};

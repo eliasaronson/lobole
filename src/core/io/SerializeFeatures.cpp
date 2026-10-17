@@ -982,6 +982,11 @@ json FeatureToJson(const Feature& feature) {
       j["twist_expr"] = ext->twistExpr;
     if (ext->herringbone)
       j["herringbone"] = true;
+    // vNEXT: a taper, omitted when there is none.
+    if (ext->taperDeg != 0.0 || !ext->taperExpr.empty())
+      j["taper_deg"] = ext->taperDeg;
+    if (!ext->taperExpr.empty())
+      j["taper_expr"] = ext->taperExpr;
     if (ext->thin) { // v18; omit when off
       json thin = {{"thickness", ext->thinThickness},
                    {"side", ext->thinSide == sketch::ThinSide::Out  ? "out"
@@ -1507,6 +1512,8 @@ json FeatureToJson(const Feature& feature) {
       j["thread_depth"] = ho->threadDepth;
     if (!ho->threadDepthExpr.empty())
       j["thread_depth_expr"] = ho->threadDepthExpr;
+    if (ho->printed != HolePrinted::Round) // vNEXT; absent = round
+      j["printed"] = HolePrintedName(ho->printed);
     if (ho->kind == HoleKind::Counterbore) {
       j["cb_diameter"] = ho->cbDiameter;
       j["cb_depth"] = ho->cbDepth;
@@ -1598,13 +1605,19 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "over the length, right-handed about the direction of travel (a "
      "helical gear, a twisted vase); blind or symmetric, not thin. "
      "herringbone?: true climbs the first half at that rate and back over "
-     "the second (a V)",
+     "the second (a V). taper_deg? (+taper_expr): every wall leans IN by "
+     "that many degrees from the extrude direction over the length "
+     "(negative leans out), the sketch the section at its plane -- a "
+     "boss or a cam lobe whose underside prints at 45; blind, not thin, "
+     "not twisted; refused past the angle at which the profile closes up, "
+     "naming it (docs/modeling/README.md#tapered-extrudes)",
      "sketch_id:int>=0, distance?:number, distance_expr?:string, "
      "mode?:'new_body'|'add'|'cut', "
      "end_mode?:'blind'|'symmetric'|'two_sided'|'up_to_face'|'through_all', "
      "distance2?:number, distance2_expr?:string, reversed?:bool, "
      "regions?:any[], end_target?:object, thin?:object, "
-     "twist_deg?:number, twist_expr?:string, herringbone?:bool"},
+     "twist_deg?:number, twist_expr?:string, herringbone?:bool, "
+     "taper_deg?:number, taper_expr?:string"},
     // A primitive asked for through add_feature is EXPANDED into a Sketch
     // and an Extrude/Revolve (core/Primitives.h); these rows are
     // that dialect. A stored Box/Sphere/Cylinder (position/center, from an
@@ -1970,14 +1983,21 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "floor's point, included angle 30-180; absent = 118 with a fit, a "
      "jobber drill's, else flat); thread_depth? (mm, +_expr; a tapped fit's "
      "thread from the mouth; absent = the depth less 3 pitches, a tap's "
-     "lead, or the whole bore when through)",
+     "lead, or the whole bore when through); printed?: "
+     "round|teardrop|teardrop_flat (a hole across the print direction: its "
+     "roof raised to a 45-degree point up the part's print direction, or "
+     "to a flat on the round's top no wider than the process bridges; "
+     "refused on an unprinted part, on a hole within 45 degrees of the "
+     "print direction, and with a countersink; "
+     "docs/modeling/holes-and-threads.md#printed-holes)",
      "sketch_id:int>=0, "
      "hole_kind?:'simple'|'counterbore'|'countersink', "
      "diameter?:number, diameter_expr?:string, depth?:number, "
      "depth_expr?:string, through?:bool, cb_diameter?:number, "
      "cb_depth?:number, cs_diameter?:number, cs_depth?:number, "
      "drill_point_deg?:number, thread_depth?:number, "
-     "thread_depth_expr?:string, fit?:object"},
+     "thread_depth_expr?:string, fit?:object, "
+     "printed?:'round'|'teardrop'|'teardrop_flat'"},
     {"Draft", 22,
      "faces [{feature_id, element}], angle_deg (+_expr), "
      "neutral_plane, body_id?",
@@ -2334,6 +2354,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     ext->twistDeg = j.value("twist_deg", 0.0); // v168
     ext->twistExpr = j.value("twist_expr", std::string{});
     ext->herringbone = j.value("herringbone", false);
+    ext->taperDeg = j.value("taper_deg", 0.0); // vNEXT
+    ext->taperExpr = j.value("taper_expr", std::string{});
     if (j.contains("regions")) // v34
       ext->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
     if (j.contains("end_target")) {
@@ -2970,6 +2992,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     ho->pointAngleDeg = j.value("drill_point_deg", 0.0);
     ho->threadDepth = j.value("thread_depth", 0.0);
     ho->threadDepthExpr = j.value("thread_depth_expr", std::string{});
+    if (j.contains("printed")) { // vNEXT: a teardrop's roof
+      const std::string name = j.at("printed").get<std::string>();
+      const auto printed = HolePrintedFromName(name);
+      if (!printed)
+        throw std::runtime_error(
+            "printed \"" + name +
+            "\" is not how a hole prints; accepted: " + HolePrintedNames());
+      ho->printed = *printed;
+    }
     out = std::move(ho);
   } else if (type == "Draft") { // v22
     std::vector<ElementRef> refs;

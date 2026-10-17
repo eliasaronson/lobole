@@ -9,6 +9,8 @@
 
 #include <cstdint>
 
+class SketchFeature;
+
 enum class ExtrudeMode { NewBody, Add, Cut };
 
 // End condition (M3.2/M3.3): Blind sweeps `distance` from the sketch plane;
@@ -63,6 +65,7 @@ public:
     visit(distance2Expr, distance2);
     visit(thinThicknessExpr, thinThickness);
     visit(twistExpr, twistDeg);
+    visit(taperExpr, taperDeg);
   }
 
   // A twist is a Blind or Symmetric solid extrude's: the other end modes
@@ -99,12 +102,28 @@ public:
   double twistDeg = 0.0;
   std::string twistExpr;
   bool herringbone = false;
+  // Tapered extrude (docs/modeling/README.md#tapered-extrudes): every wall
+  // leans IN by `taperDeg` from the extrude direction over the length
+  // (negative leans out), about the sketch plane, so the profile is the
+  // section there. 0 = a straight prism. Blind only, not thin, not twisted;
+  // refused past the angle at which the profile closes up.
+  double taperDeg = 0.0;
+  std::string taperExpr;
   ExtrudeMode mode = ExtrudeMode::NewBody;
   // Region selection (U2): each entry is one selected region — the sorted
   // entity ids of its outer loop (sketch::LoopEntityIds). Empty = the whole
   // sketch (every region), the pre-v34 behavior. A region that no longer
   // matches a loop fails regeneration with a reattach-style error.
   std::vector<std::vector<uint32_t>> regions;
+
+  // How far the walls can move in (out, for a negative taper: its holes')
+  // before the profile closes up, mm; very large when nothing closes.
+  [[nodiscard]] double
+  TaperCloseDistance(const std::vector<sketch::Loop>& loops) const;
+  // Leans `prism`'s walls by taperDeg about the sketch plane, carrying
+  // their names in `map`. False (`why` set) when the kernel cannot.
+  bool TaperPrism(const SketchFeature& sketch, bool reversed, CADShape& prism,
+                  ElementMap& map, std::string* why) const;
 
   // The last-swept cut or add prism and its face/edge names
   // (Feature::ToolShape).

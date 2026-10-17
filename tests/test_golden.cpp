@@ -16,6 +16,7 @@
 #include "core/cam/CamToolpath.h"
 #include "core/features/CurveFeature.h"
 #include "core/features/ExtrudeFeature.h"
+#include "core/features/HoleFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/features/TemplateFeature.h"
 #include "core/features/ThreadFeature.h"
@@ -1088,6 +1089,42 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       CHECK_THAT(ext->twistDeg, WithinRel(want.at(1).get<double>(), 1e-9));
       CHECK(ext->twistExpr == want.at(2).get<std::string>());
       CHECK(ext->herringbone == want.at(3).get<bool>());
+    }
+  }
+  // vNEXT: an extrude's taper, a hole's printed roof and a load's region.
+  // The volumes see the first two; each [name, value] must still hold, and
+  // each [load index, region json] of the first study.
+  if (expect.contains("extrude_tapers")) {
+    for (const auto& want : expect.at("extrude_tapers")) {
+      const ExtrudeFeature* ext = nullptr;
+      for (const auto& f : doc.GetFeatures())
+        if (const auto* e = dynamic_cast<const ExtrudeFeature*>(f.get());
+            e && e->GetName() == want.at(0).get<std::string>())
+          ext = e;
+      REQUIRE(ext != nullptr);
+      CHECK_THAT(ext->taperDeg, WithinRel(want.at(1).get<double>(), 1e-9));
+    }
+  }
+  if (expect.contains("hole_printed")) {
+    for (const auto& want : expect.at("hole_printed")) {
+      const HoleFeature* hole = nullptr;
+      for (const auto& f : doc.GetFeatures())
+        if (const auto* h = dynamic_cast<const HoleFeature*>(f.get());
+            h && h->GetName() == want.at(0).get<std::string>())
+          hole = h;
+      REQUIRE(hole != nullptr);
+      CHECK(std::string(HolePrintedName(hole->printed)) ==
+            want.at(1).get<std::string>());
+    }
+  }
+  if (expect.contains("load_regions")) {
+    REQUIRE_FALSE(doc.GetStudies().empty());
+    const nlohmann::json saved =
+        DocumentIO::StudyToJson(doc.GetStudies().front());
+    for (const auto& want : expect.at("load_regions")) {
+      const size_t i = want.at(0).get<size_t>();
+      REQUIRE(i < saved.at("loads").size());
+      CHECK(saved.at("loads")[i].at("region") == want.at(1));
     }
   }
   // v173: a custom thread's flank angle. The volume above sees the groove,

@@ -1,0 +1,243 @@
+{
+  "format": "designer-document",
+  "version": 182,
+  "print": {
+    "process": "fdm",
+    "material": "pla"
+  },
+  "features": [
+    {
+      "type": "Sketch",
+      "id": 1,
+      "name": "Base",
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            0.0,
+            0.0
+          ],
+          "b": [
+            30.0,
+            0.0
+          ],
+          "id": 1,
+          "type": "line"
+        },
+        {
+          "a": [
+            30.0,
+            0.0
+          ],
+          "b": [
+            30.0,
+            20.0
+          ],
+          "id": 2,
+          "type": "line"
+        },
+        {
+          "a": [
+            30.0,
+            20.0
+          ],
+          "b": [
+            0.0,
+            20.0
+          ],
+          "id": 3,
+          "type": "line"
+        },
+        {
+          "a": [
+            0.0,
+            20.0
+          ],
+          "b": [
+            0.0,
+            0.0
+          ],
+          "id": 4,
+          "type": "line"
+        }
+      ],
+      "plane": {
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "type": "Extrude",
+      "id": 2,
+      "name": "Block",
+      "sketch_id": 1,
+      "distance": 20.0,
+      "mode": "new_body",
+      "reversed": false
+    },
+    {
+      "type": "Sketch",
+      "id": 3,
+      "name": "Pin centre",
+      "constraints": [],
+      "entities": [
+        {
+          "type": "point",
+          "p": [
+            10.0,
+            10.0
+          ],
+          "id": 1
+        }
+      ],
+      "plane": {
+        "origin": [
+          30.0,
+          0.0,
+          0.0
+        ],
+        "normal": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "type": "Hole",
+      "id": 4,
+      "name": "Pin bore",
+      "sketch_id": 3,
+      "hole_kind": "simple",
+      "diameter": 6.0,
+      "depth": 1.0,
+      "through": true,
+      "printed": "teardrop"
+    },
+    {
+      "type": "Sketch",
+      "id": 5,
+      "name": "Boss sketch",
+      "constraints": [],
+      "entities": [
+        {
+          "type": "circle",
+          "center": [
+            15.0,
+            10.0
+          ],
+          "radius": 4.0,
+          "id": 1
+        }
+      ],
+      "plane": {
+        "origin": [
+          0.0,
+          0.0,
+          20.0
+        ],
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      }
+    },
+    {
+      "type": "Extrude",
+      "id": 6,
+      "name": "Boss",
+      "sketch_id": 5,
+      "distance": 4.0,
+      "mode": "add",
+      "reversed": false,
+      "taper_deg": 30.0
+    }
+  ],
+  "studies": [
+    {
+      "type": "Study",
+      "id": 7,
+      "name": "Pin seat",
+      "loads": [
+        {
+          "id": 8,
+          "type": "fixed",
+          "face": {
+            "feature_id": 2,
+            "element": "2/cap0"
+          },
+          "magnitude": 0.0
+        },
+        {
+          "id": 9,
+          "type": "force",
+          "face": {
+            "feature_id": 2,
+            "element": "2/cap1"
+          },
+          "magnitude": 10.0,
+          "direction": [
+            0,
+            0,
+            -1
+          ],
+          "region": {
+            "normal": [
+              1.0,
+              0.0,
+              0.0
+            ],
+            "from_mm": 5.0,
+            "to_mm": 10.0
+          }
+        },
+        {
+          "id": 10,
+          "type": "force",
+          "face": {
+            "feature_id": 2,
+            "element": "2/cap1"
+          },
+          "magnitude": 5.0,
+          "direction": [
+            0,
+            0,
+            -1
+          ],
+          "region": {
+            "center_mm": [
+              25.0,
+              15.0,
+              20.0
+            ],
+            "radius_mm": 3.0
+          }
+        }
+      ]
+    }
+  ]
+}

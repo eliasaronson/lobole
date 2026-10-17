@@ -1,0 +1,62 @@
+{
+  "title": "Cube 20 with a printed teardrop hole Ø6 through along X",
+  "exercises": "Hole `printed: teardrop`: the roof pointed at 45° up the print direction",
+  "compare": ["bodies", "volume", "area", "center_of_mass", "bbox", "faces"],
+  "steps": [
+    {"method": "set_print_process", "params": {"process": "fdm", "material": "pla"}},
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Square",
+          "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+          "entities": [
+            {"type": "line", "id": 1, "a": [0, 0], "b": [20, 0]},
+            {"type": "line", "id": 2, "a": [20, 0], "b": [20, 20]},
+            {"type": "line", "id": 3, "a": [20, 20], "b": [0, 20]},
+            {"type": "line", "id": 4, "a": [0, 20], "b": [0, 0]}
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Cube",
+          "sketch_id": {"$ref": 2},
+          "distance": 20,
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Centre",
+          "plane": {"origin": [20, 0, 0], "normal": [1, 0, 0], "uAxis": [0, 1, 0]},
+          "entities": [{"type": "point", "id": 1, "p": [10, 10]}]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Hole",
+          "name": "Teardrop",
+          "sketch_id": {"$ref": 4},
+          "hole_kind": "simple",
+          "diameter": 6,
+          "depth": 1,
+          "through": true,
+          "printed": "teardrop"
+        }
+      }
+    }
+  ]
+}

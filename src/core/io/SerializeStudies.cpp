@@ -150,10 +150,71 @@ json StudyToJson(const fem::Study& s) {
         lj["point"] = {l.point.x, l.point.y, l.point.z};
       if (!l.loadCase.empty())
         lj["case"] = l.loadCase;
+      // vNEXT: part of the face; omitted for the whole of it.
+      if (l.region.kind == fem::LoadRegion::Kind::Band)
+        lj["region"] = {
+            {"normal",
+             {l.region.normal.x, l.region.normal.y, l.region.normal.z}},
+            {"from_mm", l.region.fromMm},
+            {"to_mm", l.region.toMm}};
+      else if (l.region.kind == fem::LoadRegion::Kind::Sphere)
+        lj["region"] = {
+            {"center_mm",
+             {l.region.center.x, l.region.center.y, l.region.center.z}},
+            {"radius_mm", l.region.radiusMm}};
       j["loads"].push_back(std::move(lj));
     }
   }
   return j;
+}
+
+fem::LoadRegion LoadRegionFromJson(const json& r, const std::string& who) {
+  const auto vec = [&](const char* key) {
+    const json& v = r.at(key);
+    if (!v.is_array() || v.size() != 3 || !v[0].is_number() ||
+        !v[1].is_number() || !v[2].is_number())
+      throw std::runtime_error(who + ": region " + key + " is [x, y, z]");
+    return glm::dvec3(v[0].get<double>(), v[1].get<double>(),
+                      v[2].get<double>());
+  };
+  const auto num = [&](const char* key) {
+    const json& v = r.at(key);
+    if (!v.is_number())
+      throw std::runtime_error(who + ": region " + key + " is a number");
+    return v.get<double>();
+  };
+  if (!r.is_object())
+    throw std::runtime_error(who + ": a region is {normal, from_mm, to_mm} "
+                                   "or {center_mm, radius_mm}");
+  const bool band =
+      r.contains("normal") || r.contains("from_mm") || r.contains("to_mm");
+  const bool sphere = r.contains("center_mm") || r.contains("radius_mm");
+  for (const auto& [key, _] : r.items())
+    if (key != "normal" && key != "from_mm" && key != "to_mm" &&
+        key != "center_mm" && key != "radius_mm")
+      throw std::runtime_error(
+          who + ": a region does not take `" + key +
+          "`; it is {normal, from_mm, to_mm} (a band between two planes) "
+          "or {center_mm, radius_mm} (within a radius of a point)");
+  if (band == sphere)
+    throw std::runtime_error(
+        who + ": a region is EITHER {normal, from_mm, to_mm} (a band "
+              "between two planes) OR {center_mm, radius_mm} (within a "
+              "radius of a point)");
+  fem::LoadRegion g;
+  if (band) {
+    g.kind = fem::LoadRegion::Kind::Band;
+    g.normal = vec("normal");
+    g.fromMm = num("from_mm");
+    g.toMm = num("to_mm");
+  } else {
+    g.kind = fem::LoadRegion::Kind::Sphere;
+    g.center = vec("center_mm");
+    g.radiusMm = num("radius_mm");
+  }
+  if (const std::string why = g.Why(); !why.empty())
+    throw std::runtime_error(who + ": " + why);
+  return g;
 }
 
 fem::Study StudyFromJson(const json& j) {
@@ -294,6 +355,9 @@ fem::Study StudyFromJson(const json& j) {
       l.point = point("point");
       l.hasPoint = true;
     }
+    if (lj.contains("region")) // vNEXT
+      l.region =
+          LoadRegionFromJson(lj.at("region"), "load " + std::to_string(l.id));
     s.loads.push_back(std::move(l));
   }
   return s;

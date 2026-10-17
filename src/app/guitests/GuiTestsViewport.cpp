@@ -1498,6 +1498,63 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->commands->CanUndo());
   };
 
+  // A tapered extrude (docs/modeling/README.md#tapered-extrudes): the tool
+  // window's Taper field leans the walls in the preview, and a taper past
+  // the angle that closes the profile is refused there, naming it.
+  t = IM_REGISTER_TEST(engine, "modeling", "extrude_taper_field");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sketch = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sketch != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+    sketch->AddRectangle({-10, -5}, {10, 5});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+
+    ToolbarClick(ctx, "###tb_sk_extrude");
+    ctx->Yield(2);
+    auto* ext =
+        dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->taperDeg, 0.0); // the default: a straight prism
+
+    ctx->ItemInputValue("//Extrude###ToolWindow/Taper (deg)/##Taper (deg)",
+                        5.0f);
+    ctx->Yield(2);
+    ext = dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(std::abs(ext->taperDeg - 5.0) < 1e-9);
+    IM_CHECK(ext->GetError().empty());
+
+    // Past the angle that closes the 10 mm-wide profile: refused, by name.
+    ctx->ItemInputValue("//Extrude###ToolWindow/Taper (deg)/##Taper (deg)",
+                        89.0f);
+    ctx->Yield(2);
+    ext = dynamic_cast<ExtrudeFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK(ext->GetError().find("the taper must be under") !=
+             std::string::npos);
+
+    ctx->ItemInputValue("//Extrude###ToolWindow/Taper (deg)/##Taper (deg)",
+                        5.0f);
+    ctx->Yield(2);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield(2);
+    auto* kept = dynamic_cast<ExtrudeFeature*>(Doc()->GetFeature(1));
+    IM_CHECK(kept != nullptr);
+    IM_CHECK(std::abs(kept->taperDeg - 5.0) < 1e-9);
+    IM_CHECK(kept->GetError().empty());
+    // Leaning in, the solid is less than its straight prism.
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(Doc()->GetBodies()[0].shape.Volume() <
+             200.0 * kept->distance - 1e-6);
+    IM_CHECK(s_App->commands->CanUndo());
+  };
+
   // A twisted extrude (docs/modeling/README.md#twisted-extrudes): the tool
   // window's Twist field, then the twist ARC beside the distance arrow — the
   // first preview with two live handles, so the drag must take the arc and

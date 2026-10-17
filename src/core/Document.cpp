@@ -24,6 +24,18 @@
 #include <unordered_set>
 
 static bool PrintDrivesGeometry(const Feature& f);
+// The part's print direction (printset::Settings::direction, unset = +Z),
+// unit: what a printed hole's roof points along.
+static glm::dvec3 PrintUp(const printset::PartSettings& s) {
+  const glm::dvec3 d = s.part.direction.value_or(glm::dvec3(0.0, 0.0, 1.0));
+  const double len = glm::length(d);
+  return len > 1e-12 ? d / len : glm::dvec3(0.0, 0.0, 1.0);
+}
+// A Hole printed as a teardrop reads the print direction.
+static bool PrintUpDrivesGeometry(const Feature& f) {
+  const auto* hole = dynamic_cast<const HoleFeature*>(&f);
+  return hole != nullptr && hole->printed != HolePrinted::Round;
+}
 
 // A face a later feature MODIFIES keeps its name with ";M<tag>" appended
 // (core/ElementHistory.h), and a thread recorded on it before -- a Thread, a
@@ -550,6 +562,12 @@ bool Document::Regenerate() {
         fj.erase("plane");
     if (m_print && PrintDrivesGeometry(*m_features[i]))
       fj["print"] = printfit::Fingerprint(*m_print);
+    // A teardrop's roof points up the print direction: an input of the
+    // printed holes alone.
+    if (PrintUpDrivesGeometry(*m_features[i])) {
+      const glm::dvec3 up = PrintUp(m_printSettings);
+      fj["print_up"] = {up.x, up.y, up.z};
+    }
     chain = std::hash<std::string>{}(
         std::to_string(chain) + fj.dump() +
         (EffectiveSuppressed(i) ? "|cfg-suppressed" : ""));
@@ -621,6 +639,7 @@ bool Document::Regenerate() {
                          &m_assets, m_sheetMetal ? &*m_sheetMetal : nullptr};
         ctx.configuration = ActiveConfig();
         ctx.print = m_print ? &*m_print : nullptr;
+        ctx.printUp = PrintUp(m_printSettings);
         datums++;
         if (!ExecuteNoting(*m_features[i], ctx)) {
           if (m_features[i]->GetError().empty())
@@ -710,6 +729,7 @@ bool Document::Regenerate() {
                          &m_assets, m_sheetMetal ? &*m_sheetMetal : nullptr};
         ctx.configuration = ActiveConfig();
         ctx.print = m_print ? &*m_print : nullptr;
+        ctx.printUp = PrintUp(m_printSettings);
         m_lastStats.executed++;
         if (!ExecuteNoting(f, ctx)) {
           if (f.GetError().empty()) {
@@ -1125,8 +1145,11 @@ static bool PrintDrivesGeometry(const Feature& f) {
   if (dynamic_cast<const RetainingRingGrooveFeature*>(&f) != nullptr)
     return true;
   const auto* hole = dynamic_cast<const HoleFeature*>(&f);
-  return hole != nullptr && !hole->fitThread.empty() &&
-         hole->fitKind != "tapped";
+  // A printed hole is refused without a process, and its flat is the
+  // process's bridge.
+  return hole != nullptr &&
+         ((!hole->fitThread.empty() && hole->fitKind != "tapped") ||
+          hole->printed != HolePrinted::Round);
 }
 
 void Document::SetPrintProcess(std::optional<printfit::Process> p) {
@@ -1140,8 +1163,14 @@ void Document::SetPrintProcess(std::optional<printfit::Process> p) {
 }
 
 void Document::SetPrintSettings(printset::PartSettings s) {
+  const bool turned = PrintUp(s) != PrintUp(m_printSettings);
   m_printSettings = std::move(s);
   MarkEdited();
+  // A printed hole's roof follows the print direction.
+  if (turned &&
+      std::any_of(m_features.begin(), m_features.end(),
+                  [](const auto& f) { return PrintUpDrivesGeometry(*f); }))
+    Regenerate();
 }
 
 void Document::EvaluateParameters() {

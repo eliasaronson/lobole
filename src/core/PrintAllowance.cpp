@@ -67,6 +67,30 @@ constexpr const char* kPressSource =
     "press row and keep the smallest step that holds by hand and does not "
     "split (--record --press-side)";
 
+// TPU 95A (docs/tolerances/README.md#tpu): every row a published
+// starting point, none measured here -- each to confirm with a coupon.
+constexpr const char* kTpuHoleSource =
+    "TO CONFIRM WITH A COUPON. FDM holes print 0.1-0.4 mm undersize on the "
+    "diameter and are modelled about 0.2 mm oversize (3dprintbounty.com, 3D "
+    "printing tolerances guide); nothing published measures TPU 95A apart "
+    "from that, so the FDM row is carried and not refined";
+constexpr const char* kTpuShaftSource =
+    "TO CONFIRM WITH A COUPON. An outside diameter grows by about a tenth "
+    "in FDM (3dprintbounty.com, 3D printing tolerances guide); TPU 95A's "
+    "own is not published";
+constexpr const char* kTpuGapSource =
+    "TO CONFIRM WITH A COUPON. Print-in-place in TPU 95A wants about 0.5 mm "
+    "a side to slide: the material sags into a gap under its own weight as "
+    "it prints and bonds to itself (blog.uavmodel.com, print-in-place "
+    "clearance guides, 2026: 0.5 mm sliding, 0.3 for a hinge pin that "
+    "deforms to turn; another table gives TPU 95A 0.5 mm and up). The "
+    "guides disagree, and none measured a Bambu printer";
+constexpr const char* kTpuPressSource =
+    "TO CONFIRM WITH A COUPON. TPU stretches over what it is pressed on: a "
+    "TPU sleeve fitted at 0, or 0.1 mm under on the radius, holds "
+    "(forum.prusa3d.com, \"question about designing for TPU\": 0 to -0.1 mm "
+    "a radius on a 95A); the bore is modelled at the pin's size";
+
 std::vector<Table> BuildTables() {
   std::vector<Table> out;
   Table petg;
@@ -96,8 +120,25 @@ std::vector<Table> BuildTables() {
       {Printed::Gap, 0.0, kAbove, 0.5, kPlaGapSource},
       {Printed::Press, 0.0, kAbove, 0.0, kPressSource},
   };
+  // No thread rows: a printed thread in a 95A flexes off its flank, and
+  // nothing published says what allowance holds one; a TPU thread is
+  // refused naming the table rather than read from PLA's.
+  Table tpu;
+  tpu.process = "fdm";
+  tpu.material = "tpu";
+  tpu.conditions =
+      "TPU 95A (Bambu Lab TPU 95A HF's data sheet), 0.4 mm nozzle, slicer "
+      "XY and hole compensation at 0; every row a published starting point "
+      "to confirm with a coupon";
+  tpu.rows = {
+      {Printed::Hole, 0.0, kAbove, 0.2, kTpuHoleSource},
+      {Printed::Shaft, 0.0, kAbove, -0.1, kTpuShaftSource},
+      {Printed::Gap, 0.0, kAbove, 1.0, kTpuGapSource},
+      {Printed::Press, 0.0, kAbove, 0.0, kTpuPressSource},
+  };
   out.push_back(std::move(petg));
   out.push_back(std::move(pla));
+  out.push_back(std::move(tpu));
   return out;
 }
 
@@ -439,7 +480,7 @@ std::optional<Profile> ProfileFromBuiltin(const std::string& name,
   const Table* t = FindBuiltin(process, material);
   if (t == nullptr)
     return std::nullopt;
-  return Profile{name, *t, 0.0};
+  return Profile{name, *t, BuiltinStlDeflectionMm(process, material)};
 }
 
 std::string Fingerprint(const Process& p) {
@@ -456,6 +497,13 @@ std::string Fingerprint(const Process& p) {
     s += buf;
   }
   return s;
+}
+
+// TPU's gap is wide (0.5 a side), and a tenth of it, 0.05, is a quarter of
+// the 0.2 its holes are opened by: its chords are held to a tenth of that.
+double BuiltinStlDeflectionMm(const std::string& process,
+                              const std::string& material) {
+  return process == "fdm" && material == "tpu" ? 0.02 : 0.0;
 }
 
 double SmallestGapSideMm(const Table& t) {
@@ -476,6 +524,9 @@ double SmallestGapSideMm(const Table& t) {
 double StlDeflectionMm(const Process& p) {
   if (p.profile && p.profile->stlDeflectionMm > 0.0)
     return p.profile->stlDeflectionMm;
+  if (const double own = BuiltinStlDeflectionMm(p.process, p.material);
+      own > 0.0)
+    return own;
   const Table* t = Find(p);
   return t == nullptr ? 0.0 : SmallestGapSideMm(*t) / 10.0;
 }
@@ -616,6 +667,10 @@ double MaxOverhangDeg(const Process& p) {
 }
 
 std::string MaxOverhangSource(const Process& p) {
+  if (p.process == "fdm" && p.material == "tpu")
+    return "the 45-degree rule of FDM design guides, kept for TPU: Bambu "
+           "Lab's TPU 95A HF data sheet gives about 55 degrees as the most "
+           "its profile prints, and a flexible layer sags first";
   return p.process == "fdm"
              ? "the 45-degree rule of FDM design guides: a layer stands on "
                "the one below while it overhangs it by no more than about "
@@ -623,14 +678,24 @@ std::string MaxOverhangSource(const Process& p) {
              : std::string{};
 }
 
-double MaxBridgeMm(const Process& p) { return p.process == "fdm" ? 10.0 : 0.0; }
+double MaxBridgeMm(const Process& p) {
+  if (p.process != "fdm")
+    return 0.0;
+  return p.material == "tpu" ? 5.0 : 10.0;
+}
 
 std::string MaxBridgeSource(const Process& p) {
-  return p.process == "fdm"
-             ? "community practice: a desktop FDM printer bridges about "
-               "10 mm cleanly without tuning, and longer ones sag; to "
-               "confirm on your printer"
-             : std::string{};
+  if (p.process != "fdm")
+    return {};
+  if (p.material == "tpu")
+    return "TO CONFIRM WITH A COUPON: TPU sags and strings across a gap -- "
+           "Bambu Lab lists bridging among TPU 95A HF's weaknesses "
+           "(bambulab.com, TPU 95A HF) -- so half the 10 mm FDM rule. Its "
+           "data sheet's 20 mm (Technical Data Sheet V1.0) is the longest "
+           "its tuned profile spans, not a clean ceiling";
+  return "community practice: a desktop FDM printer bridges about "
+         "10 mm cleanly without tuning, and longer ones sag; to "
+         "confirm on your printer";
 }
 
 double MinAirMm(const Process& p) {

@@ -78,8 +78,10 @@ struct Settings {
   std::optional<bool> supports;
   std::optional<Brim> brim;
   // The print direction in the PART's frame, unit: the way up the bed when
-  // the part is printed. Unset is the part's +Z. Only the printed mass reads
-  // it (a plate's pieces are placed on their plate, whose +Z is the bed's).
+  // the part is printed. Unset is the part's +Z. The printed mass reads it,
+  // and the part's own direction is where a printed hole's teardrop points
+  // (RegenContext::printUp); a plate's pieces are placed on their plate,
+  // whose +Z is the bed's.
   std::optional<glm::dvec3> direction;
   [[nodiscard]] bool Empty() const;
   bool operator==(const Settings&) const = default;

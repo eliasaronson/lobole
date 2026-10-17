@@ -21,7 +21,7 @@
   "add_job_part": ["configuration", "job", "part"],
   "add_keep_face": ["face", "study"],
   "add_keep_out": ["body", "box_max", "box_min", "study"],
-  "add_load": ["axis_dir", "axis_origin_mm", "case", "contact_with", "direction", "face", "force_n", "magnitude", "occurrence", "point_mm", "study", "torque_nmm", "type"],
+  "add_load": ["axis_dir", "axis_origin_mm", "case", "contact_with", "direction", "face", "force_n", "magnitude", "occurrence", "point_mm", "region", "study", "torque_nmm", "type"],
   "add_mate": ["a", "b", "ball_rotation", "derive", "dx", "dy", "flipped", "name", "offset", "rotation_deg", "type"],
   "add_motion_study": ["check_clash", "clash_deflection_mm", "clash_mode", "configuration", "dof", "driver", "driver_path", "from", "max_refine", "name", "samples", "to"],
   "add_occurrence": ["configuration", "fixed", "flexible", "material", "name", "part", "transform", "visible"],

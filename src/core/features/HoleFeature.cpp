@@ -22,8 +22,14 @@
 #include "core/features/SketchFeature.h"
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepTools.hxx>
+#include <GC_MakeArcOfCircle.hxx>
+#include <GC_MakeSegment.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
 #include <Precision.hxx>
 #include <Standard_Failure.hxx>
@@ -131,7 +137,73 @@ double FitPitch(const std::string& thread, double stated) {
   return table ? table->pitch : 0.0;
 }
 
+// A printed hole's section
+// (docs/modeling/holes-and-threads.md#printed-holes): the round of radius `r`
+// about `c` with its roof, toward `up`, raised to a 45-degree point -- or, when
+// `flatAt` is below the point's height, cut flat there -- swept `depth` along
+// `axis`. The round keeps every point of the circle under its 45-degree
+// tangents, so a pin in it bears on the whole of its lower round.
+CADShape TeardropBore(const glm::dvec3& c, const glm::dvec3& axis,
+                      const glm::dvec3& up, double r, double depth,
+                      double flatAt) {
+  const glm::dvec3 side = glm::normalize(glm::cross(axis, up));
+  const auto at = [&](double s, double u) {
+    const glm::dvec3 p = c + side * s + up * u;
+    return gp_Pnt(p.x, p.y, p.z);
+  };
+  const double t = r / std::sqrt(2.0);    // the tangent points' offsets
+  const double apex = r * std::sqrt(2.0); // the point's height
+  try {
+    BRepBuilderAPI_MakeWire wire;
+    wire.Add(BRepBuilderAPI_MakeEdge(
+                 GC_MakeArcOfCircle(at(t, t), at(0.0, -r), at(-t, t)).Value())
+                 .Edge());
+    if (flatAt < apex - 1e-9 * std::max(1.0, r)) {
+      const double w = apex - flatAt; // half the flat's width
+      wire.Add(BRepBuilderAPI_MakeEdge(at(-t, t), at(-w, flatAt)).Edge());
+      wire.Add(BRepBuilderAPI_MakeEdge(at(-w, flatAt), at(w, flatAt)).Edge());
+      wire.Add(BRepBuilderAPI_MakeEdge(at(w, flatAt), at(t, t)).Edge());
+    } else {
+      wire.Add(BRepBuilderAPI_MakeEdge(at(-t, t), at(0.0, apex)).Edge());
+      wire.Add(BRepBuilderAPI_MakeEdge(at(0.0, apex), at(t, t)).Edge());
+    }
+    if (!wire.IsDone())
+      return CADShape();
+    BRepBuilderAPI_MakeFace face(wire.Wire(), /*OnlyPlane=*/true);
+    if (!face.IsDone())
+      return CADShape();
+    BRepPrimAPI_MakePrism prism(
+        face.Face(), gp_Vec(axis.x * depth, axis.y * depth, axis.z * depth));
+    prism.Build();
+    return prism.IsDone() ? CADShape(prism.Shape()) : CADShape();
+  } catch (const Standard_Failure&) {
+    return CADShape();
+  }
+}
+
 } // namespace
+
+const char* HolePrintedName(HolePrinted p) {
+  switch (p) {
+  case HolePrinted::Round:
+    return "round";
+  case HolePrinted::Teardrop:
+    return "teardrop";
+  case HolePrinted::TeardropFlat:
+    return "teardrop_flat";
+  }
+  return "round";
+}
+
+std::optional<HolePrinted> HolePrintedFromName(const std::string& name) {
+  for (HolePrinted p :
+       {HolePrinted::Round, HolePrinted::Teardrop, HolePrinted::TeardropFlat})
+    if (name == HolePrintedName(p))
+      return p;
+  return std::nullopt;
+}
+
+const char* HolePrintedNames() { return "round, teardrop, teardrop_flat"; }
 
 double HoleFeature::PointAngleUsed() const {
   if (pointAngleDeg > 0.0)
@@ -156,6 +228,7 @@ double HoleFeature::ThreadDepthUsed() const {
 bool HoleFeature::Execute(RegenContext& ctx) {
   m_tool = CADShape(); // a failed regen leaves no stale tool to pattern
   m_unpointed.clear();
+  m_roofUp = glm::dvec3(0.0);
   m_toolMap = {};
   const auto* sk = dynamic_cast<const SketchFeature*>(ctx.FindById(sketchId));
   if (!sk) {
@@ -264,6 +337,65 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   }
 
   const glm::dvec3 axis = -sk->plane.GetNormal(); // drill into the material
+  const double r = diameter / 2.0;
+
+  // A printed hole's roof
+  // (docs/modeling/holes-and-threads.md#printed-holes): toward the part's print
+  // direction, across the bore. Refused where it has no meaning rather than
+  // drilled round. Where a printed round of radius `rr` is roofed, above its
+  // axis: the 45-degree point, or a teardrop_flat's flat on the round's top,
+  // raised until it is no wider than the process bridges.
+  double bridgeMm = 0.0;
+  const auto RoofAt = [&](double rr) {
+    const double apex = rr * std::sqrt(2.0);
+    return printed == HolePrinted::TeardropFlat
+               ? std::max(rr, apex - bridgeMm / 2.0)
+               : apex;
+  };
+  double flatAt = 0.0; // the bore's
+  if (printed != HolePrinted::Round) {
+    const std::string what =
+        std::string("printed: ") + HolePrintedName(printed);
+    if (ctx.print == nullptr) {
+      SetError(what +
+               " points the hole's roof up the part's print direction, and "
+               "this part is not printed: set_print_process first, or drop "
+               "`printed`");
+      return false;
+    }
+    if (kind == HoleKind::Countersink) {
+      SetError(what + " shapes a round bore and a counterbore; a "
+                      "countersink's cone has no teardrop (hole_kind simple "
+                      "or counterbore)");
+      return false;
+    }
+    const glm::dvec3 up = glm::normalize(ctx.printUp);
+    const glm::dvec3 across = up - axis * glm::dot(up, axis);
+    const double fromUpDeg = glm::degrees(
+        std::acos(std::clamp(std::abs(glm::dot(up, axis)), 0.0, 1.0)));
+    if (fromUpDeg <= 45.0 + 1e-6) {
+      char buf[64];
+      std::snprintf(buf, sizeof buf, "%.1f", fromUpDeg);
+      SetError(what +
+               " is for a hole across the print direction, and this "
+               "hole's axis is " +
+               buf +
+               " degrees from it: a hole within 45 degrees of the print "
+               "direction prints its own roof, so drill it round (drop "
+               "`printed`)");
+      return false;
+    }
+    m_roofUp = glm::normalize(across);
+    if (printed == HolePrinted::TeardropFlat) {
+      bridgeMm = printfit::MaxBridgeMm(*ctx.print);
+      if (!(bridgeMm > 0.0)) {
+        SetError(what + ": the part's process '" + ctx.print->process +
+                 "' states no bridge it spans; use printed: teardrop");
+        return false;
+      }
+    }
+    flatAt = RoofAt(r);
+  }
   // Through-all: drill well past any body (bbox diagonal of all bodies).
   glm::dvec3 lo(1e30), hi(-1e30);
   for (const auto& b : ctx.bodies) {
@@ -277,7 +409,6 @@ bool HoleFeature::Execute(RegenContext& ctx) {
     boreDepth = ctx.bodies.empty() ? depth : glm::length(hi - lo) + 1.0;
 
   auto& kernel = CADKernel::Instance();
-  const double r = diameter / 2.0;
 
   // Build one tool solid per hole (bore + optional cbore/csink), then gather
   // them into ONE cutter.
@@ -298,7 +429,9 @@ bool HoleFeature::Execute(RegenContext& ctx) {
       pointed ? r / std::tan(glm::radians(pointDeg * 0.5)) : 0.0;
   for (size_t site = 0; site < centers.size(); site++) {
     const glm::dvec3& c = centers[site];
-    CADShape hole = kernel.CreateCylinder(c, axis, r, boreDepth);
+    const bool tear = printed != HolePrinted::Round;
+    CADShape hole = tear ? TeardropBore(c, axis, m_roofUp, r, boreDepth, flatAt)
+                         : kernel.CreateCylinder(c, axis, r, boreDepth);
     // Only where the floor is in material: a hole drilled on into a pocket
     // or out of the far side has no floor for a point to be on, and a cone
     // in the air would only rename the faces it touches.
@@ -325,8 +458,11 @@ bool HoleFeature::Execute(RegenContext& ctx) {
     }
     if (kind == HoleKind::Counterbore && cbDiameter > diameter &&
         cbDepth > 1e-9) {
-      hole =
-          hole.Union(kernel.CreateCylinder(c, axis, cbDiameter / 2.0, cbDepth));
+      // A printed counterbore's roof is shaped as the bore's is.
+      const double cr = cbDiameter / 2.0;
+      hole = hole.Union(
+          tear ? TeardropBore(c, axis, m_roofUp, cr, cbDepth, RoofAt(cr))
+               : kernel.CreateCylinder(c, axis, cr, cbDepth));
     } else if (kind == HoleKind::Countersink && csDiameter > diameter &&
                csDepth > 1e-9) {
       // Cone from the surface (csDiameter/2) tapering down to the bore radius.
@@ -344,9 +480,11 @@ bool HoleFeature::Execute(RegenContext& ctx) {
   // other fails outright (the 480-hole benchmark, whose holes were 6 mm apart
   // at Ø6, produced no body at all). Overlap is decided on the outer radius
   // of each hole, O(n^2) on a list that is a few hundred long at worst.
-  double outer = r;
+  // A teardrop's point reaches sqrt(2) r from the axis.
+  const double reach = printed != HolePrinted::Round ? std::sqrt(2.0) : 1.0;
+  double outer = r * reach;
   if (kind == HoleKind::Counterbore && cbDiameter > diameter)
-    outer = std::max(outer, cbDiameter / 2.0);
+    outer = std::max(outer, reach * cbDiameter / 2.0);
   else if (kind == HoleKind::Countersink && csDiameter > diameter)
     outer = std::max(outer, csDiameter / 2.0);
   bool anyOverlap = false;
@@ -572,7 +710,13 @@ void HoleFeature::NameByRole(const CADShape& tool,
       if (same(t, boreDepth))
         role = "point";
     }
-    if (s.GetType() == GeomAbs_Plane) {
+    // A teardrop's flanks and flat lie along the bore (their normals
+    // across it): its roof.
+    const bool along = s.GetType() == GeomAbs_Plane &&
+                       std::abs(s.Plane().Axis().Direction().Dot(dir)) < 1e-6;
+    if (along && glm::dot(m_roofUp, m_roofUp) > 0.0) {
+      role = "roof";
+    } else if (s.GetType() == GeomAbs_Plane) {
       const glm::dvec3& c = centers[site];
       const double t = gp_Vec(gp_Pnt(c.x, c.y, c.z), p).Dot(gp_Vec(dir));
       if (same(t, boreDepth))

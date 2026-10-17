@@ -122,7 +122,7 @@ struct Profile {
 // Only the pairs the built-in tables carry are accepted (Validate).
 struct Process {
   std::string process;  // "fdm"
-  std::string material; // "petg" | "pla"
+  std::string material; // "petg" | "pla" | "tpu"
   std::optional<Profile> profile;
   bool operator==(const Process&) const = default;
 };
@@ -197,6 +197,10 @@ ProfileFromBuiltin(const std::string& name, const std::string& process,
 // stated one, else a tenth of the smallest gap a side (0 when the table has
 // nothing to keep).
 [[nodiscard]] double StlDeflectionMm(const Process& p);
+// A built-in material's own chord deviation, where a tenth of its gap a side
+// would let the chords eat its holes (TPU's); 0 = none of its own.
+[[nodiscard]] double BuiltinStlDeflectionMm(const std::string& process,
+                                            const std::string& material);
 
 // A PRINTED PRESS's size band (docs/tolerances/README.md#printed-press-fits):
 // the band a printed cap's bore and the printed pin it is pressed on carry,

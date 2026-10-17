@@ -1,0 +1,12 @@
+{
+  "features": 6,
+  "bodies": 1,
+  "volumes": [11201.15],
+  "print": {"process": "fdm", "material": "pla"},
+  "extrude_tapers": [["Boss", 30.0]],
+  "hole_printed": [["Pin bore", "teardrop"]],
+  "load_regions": [
+    [1, {"normal": [1.0, 0.0, 0.0], "from_mm": 5.0, "to_mm": 10.0}],
+    [2, {"center_mm": [25.0, 15.0, 20.0], "radius_mm": 3.0}]
+  ]
+}

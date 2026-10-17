@@ -76,6 +76,27 @@ const char* ParticipantRoleToString(ParticipantRole role);
 [[nodiscard]] bool ParticipantRoleFromString(const std::string& s,
                                              ParticipantRole& out);
 
+// Part of a load's face (docs/simulation/README.md#loads-on-part-of-a-face):
+// the face's mesh facets whose centroids lie in a band between two planes
+// across `normal` (from <= n.p <= to, n the unit normal, mm), or within
+// `radius` of a point. A seat on a shaft, a drum's bearing on an arbor: a
+// load where the face is not its own face. Whole = the face, as ever.
+struct LoadRegion {
+  enum class Kind { Whole, Band, Sphere };
+  Kind kind = Kind::Whole;
+  glm::dvec3 normal{0.0}; // Band: the planes' normal (need not be unit)
+  double fromMm = 0.0, toMm = 0.0;
+  glm::dvec3 center{0.0}; // Sphere
+  double radiusMm = 0.0;
+  bool IsWhole() const { return kind == Kind::Whole; }
+  // Is `p` (mm, the part's frame) in the region? Always, for Whole.
+  bool Contains(const glm::dvec3& p) const;
+  // Empty when the region can be applied; otherwise why not (a zero
+  // normal, an empty band, a radius that is not positive).
+  std::string Why() const;
+  bool operator==(const LoadRegion&) const = default;
+};
+
 // One boundary condition. `magnitude` is N (Force, Remote), MPa (Pressure) or
 // N*mm (Torque), ignored for Fixed. `direction` is the force direction (Force
 // and Remote; need not be normalized — it is normalized at solve time).
@@ -118,6 +139,8 @@ struct Load {
   // (docs/topopt/README.md#load-cases). Empty on a study with no cases, and
   // always on a support: supports are shared by every case.
   std::string loadCase;
+  // Part of the face only (vNEXT); Whole, the face, as ever. A part study's.
+  LoadRegion region;
 };
 
 // One load case of a study (docs/topopt/README.md#load-cases): the force and

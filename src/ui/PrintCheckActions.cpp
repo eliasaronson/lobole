@@ -79,9 +79,11 @@ PrintCheckRun RunPrintCheck(const Document& part,
     run.deflectionFrom = "asked";
   } else if (proc && printfit::StlDeflectionMm(*proc) > 0.0) {
     o.stlDeflectionMm = printfit::StlDeflectionMm(*proc);
-    run.deflectionFrom = proc->profile && proc->profile->stlDeflectionMm > 0.0
-                             ? "profile"
-                             : "gap";
+    run.deflectionFrom =
+        proc->profile && proc->profile->stlDeflectionMm > 0.0 ? "profile"
+        : printfit::BuiltinStlDeflectionMm(proc->process, proc->material) > 0.0
+            ? "material"
+            : "gap";
   }
 
   // The air a face needs over another piece (printfit::MinAirMm): stated,

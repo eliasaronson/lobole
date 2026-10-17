@@ -76,7 +76,9 @@ TEST_CASE("The PETG table says what to model for each kind of diameter",
   CHECK(a->modelMm == Approx(7.9));
 
   // Every table names where each number comes from, and covers every kind
-  // from zero with no hole in the size range.
+  // from zero with no hole in the size range -- but TPU's threads, which it
+  // does not carry (docs/tolerances/README.md#tpu): a printed thread in a
+  // 95A is refused naming the table, not read from another's.
   for (const printfit::Table& t : printfit::Tables()) {
     INFO(t.process << " " << t.material);
     CHECK(!t.conditions.empty());
@@ -90,7 +92,13 @@ TEST_CASE("The PETG table says what to model for each kind of diameter",
         CHECK(r.fromMm == Approx(reach));
         reach = r.toMm;
       }
-      CHECK(reach > 500.0);
+      const bool uncarried =
+          t.material == "tpu" && (k == printfit::Printed::InternalThread ||
+                                  k == printfit::Printed::ExternalThread);
+      if (uncarried)
+        CHECK(reach == 0.0);
+      else
+        CHECK(reach > 500.0);
     }
   }
   CHECK(Contains(printfit::ConfirmNote(), "coupon"));

@@ -6,9 +6,21 @@
 #include "core/Feature.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 
 enum class HoleKind { Simple, Counterbore, Countersink };
+
+// How a hole across the print direction is printed
+// (docs/modeling/holes-and-threads.md#printed-holes): round, or with its roof
+// raised to a 45-degree point (Teardrop) or to a flat no wider than the
+// process bridges (TeardropFlat), so no face over it looks down past 45.
+enum class HolePrinted { Round, Teardrop, TeardropFlat };
+// "round" | "teardrop" | "teardrop_flat"
+[[nodiscard]] const char* HolePrintedName(HolePrinted p);
+[[nodiscard]] std::optional<HolePrinted>
+HolePrintedFromName(const std::string& name);
+[[nodiscard]] const char* HolePrintedNames();
 
 // Drills holes at a sketch's Point entities (modeling M8 hole wizard): each
 // point is a hole center on the sketch plane, and the hole is cut into the
@@ -103,6 +115,13 @@ public:
   double threadDepth = 0.0;
   std::string threadDepthExpr;
 
+  // A hole printed across its layers
+  // (docs/modeling/holes-and-threads.md#printed-holes): its roof raised to a
+  // point, or to a flat, toward the part's print direction
+  // (RegenContext::printUp). Refused on a part with no print process, on a hole
+  // along the print direction, and with a countersink.
+  HolePrinted printed = HolePrinted::Round;
+
   // Counterbore: a `cbDiameter` recess `cbDepth` deep at the surface.
   double cbDiameter = 2.0;
   double cbDepth = 0.5;
@@ -115,6 +134,11 @@ private:
   void NameByRole(const CADShape& tool, const std::vector<glm::dvec3>& centers,
                   const std::vector<uint32_t>& entities, const glm::dvec3& axis,
                   double boreDepth, ElementMap& out) const;
+
+  // The roof's direction in the section across the bore (unit, normal to
+  // `axis`) when the hole is printed as a teardrop; the zero vector for a
+  // round one.
+  glm::dvec3 m_roofUp{0.0};
 
   // The sketch entities whose hole has no floor in material for a point to
   // be on (drilled on into a pocket): their HoleMark says flat.

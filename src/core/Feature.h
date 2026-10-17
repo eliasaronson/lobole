@@ -352,6 +352,10 @@ struct RegenContext {
   // hole allowance (docs/tolerances/README.md#printed-parts); the regen hash
   // folds the process into exactly those holes, so nothing else rebuilds.
   const printfit::Process* print = nullptr;
+  // The part's print direction in its own frame, unit (the part's print
+  // settings' `direction`, else +Z): the way a teardrop hole's point faces
+  // (docs/modeling/holes-and-threads.md#printed-holes).
+  glm::dvec3 printUp{0.0, 0.0, 1.0};
 
   // A Template instance executes its expanded features against this same
   // context (docs/modeling/templates.md#expansion): `inner` lists them and

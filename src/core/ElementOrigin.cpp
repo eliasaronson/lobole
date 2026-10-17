@@ -34,6 +34,7 @@ constexpr RoleSpelling kRoles[] = {
     {ElementRole::CounterboreFloor, "counterbore_floor"},
     {ElementRole::Countersink, "countersink"},
     {ElementRole::DrillPoint, "point"},
+    {ElementRole::Roof, "roof"},
     {ElementRole::Outside, "outside"},
     {ElementRole::InnerSide, "inner_side"},
     {ElementRole::OuterSide, "outer_side"},
@@ -188,12 +189,12 @@ bool DecodeSeed(const std::vector<std::string>& words, ElementOrigin& o) {
         return true;
       }
       for (const RoleSpelling& r : kRoles) {
-        const bool holeRole = r.role == ElementRole::Bore ||
-                              r.role == ElementRole::Bottom ||
-                              r.role == ElementRole::Counterbore ||
-                              r.role == ElementRole::CounterboreFloor ||
-                              r.role == ElementRole::Countersink ||
-                              r.role == ElementRole::DrillPoint;
+        const bool holeRole =
+            r.role == ElementRole::Bore || r.role == ElementRole::Bottom ||
+            r.role == ElementRole::Counterbore ||
+            r.role == ElementRole::CounterboreFloor ||
+            r.role == ElementRole::Countersink ||
+            r.role == ElementRole::DrillPoint || r.role == ElementRole::Roof;
         if (holeRole && word == r.name) {
           o.role = r.role;
           o.entity = *e;

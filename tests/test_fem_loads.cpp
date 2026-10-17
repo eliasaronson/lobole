@@ -440,4 +440,93 @@ TEST_CASE("a torque on a shaft's cylindrical face turns it about its own axis",
   CHECK_THAT(err, ContainsSubstring("not cylindrical"));
 }
 
+// A load on part of a face
+// (docs/simulation/README.md#loads-on-part-of-a-face): a cantilever pulled
+// along its axis on the upper half of its end face only. The pull acts h/4 over
+// the section's centroid, so the beam bends under the constant moment F h/4 and
+// its tip drops M L^2 / 2EI -- which a pull on the whole face does not do at
+// all.
+TEST_CASE("a pull on half a cantilever's end bends it by its eccentricity",
+          "[fem][loads][region][run]") {
+  const double L = 100.0, b = 10.0, h = 10.0, F = 2000.0;
+  Document doc;
+  auto box = std::make_unique<BoxFeature>("Beam", glm::dvec3(0), L, b, h);
+  box->SetMaterial("steel");
+  doc.AddFeature(std::move(box));
+  REQUIRE(doc.GetBodies().size() == 1);
+  const Body& body = doc.GetBodies()[0];
+  ElementRef root, tip;
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, index);
+    REQUIRE(info.has_value());
+    if (std::abs(info->centroid.x) < 1e-6)
+      root = {body.createdBy, name};
+    else if (std::abs(info->centroid.x - L) < 1e-6)
+      tip = {body.createdBy, name};
+  }
+  REQUIRE_FALSE(root.name.empty());
+  REQUIRE_FALSE(tip.name.empty());
+  fem::Study& s = doc.AddStudy("Pull");
+  s.meshSize = 2.5;
+  fem::Load fx;
+  fx.id = doc.AllocateId();
+  fx.type = fem::LoadType::Fixed;
+  fx.face = root;
+  s.loads.push_back(fx);
+  fem::Load pull;
+  pull.id = doc.AllocateId();
+  pull.type = fem::LoadType::Force;
+  pull.face = tip;
+  pull.magnitude = F;
+  pull.direction = glm::dvec3(1, 0, 0);
+  pull.region.kind = fem::LoadRegion::Kind::Band;
+  pull.region.normal = glm::dvec3(0, 0, 2); // need not be unit
+  pull.region.fromMm = h / 2;
+  pull.region.toMm = h + 1.0;
+  s.loads.push_back(pull);
+
+  const auto& mp = CADMaterials::MaterialLibrary::GetMaterial(
+      CADMaterials::MaterialLibrary::MaterialTypeFromString("steel"));
+  const double E = mp.youngGPa * 1000.0;
+  const double I = b * h * h * h / 12.0;
+  const double drop = F * (h / 4) * L * L / (2.0 * E * I);
+  const auto tipDrop = [&](fem::Study& st) {
+    fem::StudyRuntime rt;
+    std::string err;
+    INFO(err);
+    REQUIRE(fem::RunStudy(doc, st, rt, &err));
+    fem::ResolvedFace rf;
+    REQUIRE(fem::ResolveFace(doc, tip, "tip", rf, &err));
+    const auto fm = fem::FitFaceMotion(
+        rt.bodies[0].mesh, rt.bodies[0].results.displacement, rf.faceIndex);
+    REQUIRE(fm.has_value());
+    return -fm->translation.z;
+  };
+  const double half = tipDrop(s);
+  INFO("tip drop " << half << " mm, F (h/4) L^2 / 2EI " << drop);
+  // The facets' centroids, not the face's own split: the band's edge falls
+  // inside a row of facets, so the resultant's height is the mesh's.
+  CHECK_THAT(half, WithinRel(drop, 0.1));
+
+  // The whole face: a straight pull, no drop.
+  s.loads[1].region = {};
+  CHECK(std::abs(tipDrop(s)) < 0.02 * drop);
+
+  // A region off the face holds none of it, and says so.
+  s.loads[1].region.kind = fem::LoadRegion::Kind::Sphere;
+  s.loads[1].region.center = glm::dvec3(0, 0, 0);
+  s.loads[1].region.radiusMm = 1.0;
+  fem::StudyRuntime rt;
+  std::string err;
+  CHECK_FALSE(fem::RunStudy(doc, s, rt, &err));
+  CHECK_THAT(err, ContainsSubstring("region holds none"));
+  // An empty band is refused before anything is meshed.
+  s.loads[1].region.kind = fem::LoadRegion::Kind::Band;
+  s.loads[1].region.normal = glm::dvec3(0, 0, 1);
+  s.loads[1].region.fromMm = 3.0;
+  s.loads[1].region.toMm = 3.0;
+  CHECK_FALSE(fem::RunStudy(doc, s, rt, &err));
+  CHECK_THAT(err, ContainsSubstring("larger to_mm"));
+}
+
 #endif // HAVE_NETGEN && HAVE_FEM_SOLVER

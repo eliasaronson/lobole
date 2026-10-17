@@ -191,6 +191,10 @@ MotionStudy MotionStudyFromJson(const nlohmann::json& j);
 // files and to echo/snapshot studies from the RPCs and Commands. Throws on
 // malformed input.
 nlohmann::json StudyToJson(const fem::Study& study);
+// A load's region (vNEXT): {normal, from_mm, to_mm} or {center_mm,
+// radius_mm}; throws naming `who` and what is accepted.
+fem::LoadRegion LoadRegionFromJson(const nlohmann::json& j,
+                                   const std::string& who);
 
 // CAM setups (v58) — SerializeCam.cpp. Inline in both save formats.
 nlohmann::json CamSetupToJson(const cam::Setup& setup);

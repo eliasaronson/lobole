@@ -1866,6 +1866,17 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
                    ImGui::Checkbox("Herringbone", &ext->herringbone), index,
                    commit);
     }
+    // A taper is a blind solid extrude's
+    // (docs/modeling/README.md#tapered-extrudes); WhyIncomplete says so for
+    // the rest.
+    if (ext->endMode == ExtrudeEnd::Blind && !ext->thin) {
+      ExprDim(state, feature, index, commit, "Taper (deg)", ext->taperExpr,
+              ext->taperDeg, /*minValue=*/-89.9);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Every wall leans in by this many degrees from the "
+                          "extrude direction (negative leans out); 45 prints "
+                          "the underside of a boss or a cam lobe");
+    }
     if (ext->endMode == ExtrudeEnd::Blind ||
         ext->endMode == ExtrudeEnd::TwoSided ||
         ext->endMode == ExtrudeEnd::ThroughAll) // no effect otherwise
@@ -2021,6 +2032,22 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
     }
     HandleEdit(state, feature, ImGui::Checkbox("Through all", &ho->through),
                index, commit);
+    // How a hole across the print direction prints
+    // (docs/modeling/holes-and-threads.md#printed-holes).
+    {
+      const char* printedNames[] = {"Round", "Teardrop", "Teardrop, flat"};
+      int pr = std::to_underlying(ho->printed);
+      if (LabeledCombo("Printed", &pr, printedNames, 3)) {
+        nlohmann::json before = DocumentIO::FeatureToJson(*ho);
+        ho->printed = static_cast<HolePrinted>(pr);
+        CommitDiscrete(state, feature, before, index, commit);
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("A hole across the print direction: its roof "
+                          "raised to a 45-degree point, or to a flat no "
+                          "wider than the process bridges, so it prints "
+                          "without sagging. Needs the part's print process");
+    }
     if (!ho->through)
       ExprDim(state, feature, index, commit, "Depth", ho->depthExpr, ho->depth);
     // The floor's drill point and a tapped hole's thread depth, each 0 to
