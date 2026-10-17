@@ -102,7 +102,16 @@ uint64_t ShapeDigest(const CADShape& shape) {
   // the reads settle) stands for the shape: a reopened shape is one read
   // further along the same sequence and reaches the same cycle. Each read
   // is written for the next, and those bytes are what is hashed.
-  constexpr int kMaxReads = 8;
+  //
+  // Eight reads were not enough for every shape: the engine's one-piece
+  // camshaft (eight lobes over tapered undersides) drifts a last place at a
+  // time for longer before its reads repeat, so the regenerated camshaft
+  // hashed one read short of its cycle and the one reopened from the file
+  // hashed on it, and every requirement over the engine opened stale
+  // (tests/test_printed_features.cpp, tests/fixtures/engine-camshaft.json).
+  // Most shapes settle in two or three reads; the bound only costs the
+  // ones that drift.
+  constexpr int kMaxReads = 32;
   const auto write = [](const TopoDS_Shape& s) {
     std::stringstream bin;
     BinTools::Write(s, bin, /*theWithTriangles=*/false,

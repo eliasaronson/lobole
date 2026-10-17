@@ -13,9 +13,11 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
+#include "TestPaths.h"
 #include "core/Document.h"
 #include "core/ElementOrigin.h"
 #include "core/Feature.h"
+#include "core/InputHash.h"
 #include "core/PrintAllowance.h"
 #include "core/PrintCheck.h"
 #include "core/features/ExtrudeFeature.h"
@@ -26,11 +28,13 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <BinTools.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS.hxx>
 #include <gp_Ax2.hxx>
 
 #include <cmath>
+#include <filesystem>
 #include <map>
 #include <set>
 #include <string>
@@ -456,4 +460,60 @@ TEST_CASE("a TPU plate fits the bed of its printer's profile",
       printcheck::FitOnBed(bodies, glm::dvec3(0, 0, 1),
                            glm::dvec3(256.0, 256.0, 250.0), prof->bedExcludeMm);
   CHECK(fit.status == printcheck::Status::Pass);
+}
+
+// A shape is hashed as the project reads it back (inputhash's ShapeDigest),
+// so a requirement checked on a regenerated part stays current when the
+// part's baked geometry is reopened. A taper's drafted faces (cones and
+// inclined planes off BRepOffsetAPI_DraftAngle) must keep that.
+TEST_CASE("a tapered extrude hashes the same after the baked round trip",
+          "[extrude][taper][hash]") {
+  for (const double deg : {15.0, 45.0}) {
+    INFO("taper " << deg);
+    Tapered t;
+    Taper(
+        t,
+        [](SketchFeature& sk) {
+          sk.AddEntity(sketch::Circle{{0, 0}, 5.2});
+          sk.AddEntity(sketch::Circle{{0, 0}, 1.0});
+        },
+        1.4, deg, /*reversed=*/true);
+    REQUIRE(t.ext->GetError().empty());
+    const CADShape& live = t.doc.GetBodies()[0].shape;
+    const auto path =
+        std::filesystem::temp_directory_path() / "lobole_taper_roundtrip.brep";
+    REQUIRE(BinTools::Write(live.GetShape(), path.string().c_str()));
+    TopoDS_Shape back;
+    REQUIRE(BinTools::Read(back, path.string().c_str()));
+    std::filesystem::remove(path);
+    inputhash::Hasher a, b;
+    a.Shape(live);
+    b.Shape(CADShape(back));
+    CHECK(a.Digest() == b.Digest());
+  }
+}
+
+// The engine's one-piece camshaft as its generator builds it (eight lobes,
+// each underside tapered at 45, D flats at its ends; tests/fixtures/
+// engine-camshaft.json). Reading it back moves it a last place at a time
+// for more than eight reads before the reads repeat: hashed within eight,
+// the regenerated camshaft and the one reopened from its baked geometry
+// hashed differently, and every requirement over the engine opened stale.
+TEST_CASE("the engine's camshaft hashes the same after the baked round trip",
+          "[extrude][taper][hash]") {
+  auto doc = testio::Load(std::string(TestSourceDir()) +
+                          "/tests/fixtures/engine-camshaft.json");
+  REQUIRE(doc != nullptr);
+  REQUIRE(doc->GetBodies().size() == 1);
+  const CADShape& live = doc->GetBodies()[0].shape;
+  inputhash::Hasher a, b;
+  a.Shape(live);
+  const auto path =
+      std::filesystem::temp_directory_path() / "lobole_engine_camshaft.brep";
+  REQUIRE(BinTools::Write(live.GetShape(), path.string().c_str()));
+  TopoDS_Shape back;
+  REQUIRE(BinTools::Read(back, path.string().c_str()));
+  std::filesystem::remove(path);
+  b.Shape(CADShape(back));
+  CHECK(a.Digest() == b.Digest());
 }

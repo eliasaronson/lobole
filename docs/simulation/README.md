@@ -219,7 +219,10 @@ and X direction as it is read, and for some frames the X flips a last
 place between two values on every read (the engine's cam pulley has one) --
 so the shape is read back until a read repeats an earlier one, and the
 smallest digest of that cycle stands for it: the regenerated shape and the
-one a reopen reads are one input.
+one a reopen reads are one input. Up to 32 reads: most shapes settle in two
+or three, but the engine's one-piece camshaft (tapered lobes) drifts for
+more than eight, and hashed within eight it opened every requirement over
+the engine stale.
 
 A version string leads each hash (`motion/1`, `fem/1`); a change to what a
 run computes bumps it. The solver a run picks (GPU or CPU, direct or
