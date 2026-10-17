@@ -7,14 +7,21 @@ a printed cap pressed on. It is built in two stages: one leg pair to test the
 pins and the foot, then the walker.
 
     tools/headless-preview.sh --start <port>
+    python3 generators/print_coupon.py --port <port> --seed   # the P1S's bed
     python3 generators/strandbeest/build.py --port <port> --profile "K5 PLA on P1S"
-    python3 generators/strandbeest/build.py --port <port> --size 12 --stage 1
+    python3 generators/strandbeest/build.py --port <port> --profile "K5 PLA on P1S" --size 12 --stage 1
+
+The walker packs its plates into the printer's bed, the profile's
+`bed_mm`, so it needs a profile that states one: `print_coupon.py --seed`
+gives the P1S profiles theirs (256 x 256 x 256), and Settings, Print
+profiles sets anyone's. Without one it refuses, saying so.
 
 Output goes to `scratch/strandbeest/` (or `--out`):
 
 - `stage1/stage1_plate.stl`: one leg pair on its crank and the press row,
   one plate;
-- `stage2/stage2_plate_N.stl`: the walker, as plates for a 256 mm bed;
+- `stage2/stage2_plate_N.stl`: the walker, as plates for the profile's
+  bed;
 - the `.dsgn` of each stage, holding the parts, the plates, the assemblies
   and their studies;
 - `strandbeest.json`, the receipt: every size, the layers, the
@@ -38,7 +45,9 @@ It asks of the app what no earlier dogfood did:
   ([tracing a point](../../docs/assemblies/README.md#tracing-a-point)).
 - **pins that are assembled**: a walker's pins must turn freely and stay
   in. Each pin is closed by a cap pressed on at the profile's press
-  allowance ([press allowance](../../docs/tolerances/README.md#press-allowance)).
+  allowance ([press allowance](../../docs/tolerances/README.md#press-allowance)),
+  a separate occurrence whose press the exact clash check relieves
+  ([printed press fits](../../docs/tolerances/README.md#printed-press-fits)).
 
 ## The walker
 
@@ -91,12 +100,15 @@ It asks of the app what no earlier dogfood did:
   crank's vertical, at the nearest spots above and below the disc that no
   bar, head or cap ever comes near over the turn.
 
-What is pressed together moves together. So the assembly has one
-occurrence for the frame (its plates and the pivots' caps), one for the
-crankshaft, and one for each pin with its cap. An interference meant to be
-there is not a clash. The clash check cannot tell a printed press from a
-collision, because a press has no ISO band; the coupon checks the press
-instead.
+The assembly has one occurrence for the frame (its plates), one for the
+crankshaft, one for each pin and one for each cap, the frame pivots' caps
+too. Each cap is fastened to its pin, or to the frame, and its bore and
+the stub under it carry a printed press
+([printed press fits](../../docs/tolerances/README.md#printed-press-fits)):
+the part's print profile bands them, so the exact clash check relieves
+the press and lists it. The discs' keys, the standoffs and the handle are
+pressed too, but inside the crankshaft's and the frame's one part, where
+no check looks.
 
 ## Where every size comes from
 
@@ -106,8 +118,9 @@ The inputs are:
 - the profile's gap (`print_allowance` kind `gap` at each diameter: the
   pin, the disc), and its press (kind `press` at the stub);
 - the profile's layer height;
-- the P1S's 0.4 mm nozzle and 256 mm bed, which belong to the machine and
-  are not derived.
+- the profile's bed (`bed_mm`), which the plates are packed into;
+- the P1S's 0.4 mm nozzle, which belongs to the machine and is not
+  derived.
 
 `solve()` derives the rest. It refuses a wall under four nozzle widths and
 a stub under four nozzle widths.
@@ -148,12 +161,17 @@ On each assembly, a leg pair and the walker:
 
 - **Solved:** with the crank driven, nothing is left free (DOF 0) and every
   loop closes.
-- **The study:** a 360° turn at 2°, 181 samples, with a mesh clash check at
-  a fifth of the smallest running gap (0.02 mm). Every sample must solve
-  and be clash free.
-- **On the built branch:** at every sample, each knee of every leg (C, E
-  and F, linkage.KNEES) is on the side it was built on. The joints are read
-  off the study's trace.
+- **The study:** a 360° turn at 2°, 181 samples, with an EXACT clash check.
+  Every sample must solve and be clash free, and every cap on its pin, or
+  on its frame pivot, must be listed as a printed press fit
+  (`press_fits`), relieved and not a clash: 10 on the leg pair, 60 on the
+  walker.
+- **On the built branch**, twice. The study watches every joint for a
+  branch jump between samples
+  ([branch jumps](../../docs/assemblies/README.md#branch-jumps)) and must
+  report none. And, as a second witness, at every sample each knee of every
+  leg (C, E and F, linkage.KNEES) is on the side it was built on. The
+  joints are read off the study's trace.
 - **The layers' air:** at every 15th sample, slab 0's bars in adjacent
   layers that overlap seen along the axis are measured exactly with the
   assembly left there (168 pairs). None may be closer than the gap a side.
@@ -176,9 +194,11 @@ On each assembly, a leg pair and the walker:
 On every print plate:
 
 - `check_geometry` verified;
-- every `check_print` item passes;
+- every `check_print` item passes, `bed_fit` among them: the plate in the
+  profile's bed;
 - every piece starts on the bed;
-- the plate's bodies lie inside the bed.
+- the plate's box (`mass_properties`' `bbox_mm`) starts at the bed's
+  corner, where the packer put it.
 
 ### Negative controls, which must fail
 
@@ -237,10 +257,6 @@ its tightest, half a bar apart. At 12 mm, three plates hold the walker.
 
 ## Not built
 
-- **The clash check cannot see a printed press.** It relieves a press fit
-  only between faces that carry ISO bands. A pressed cap and its pin as two
-  occurrences would be a clash, so what is pressed together is one
-  occurrence here, and the press row checks the press instead.
 - **No path in the Motion window.** A trace is a request parameter, and
   nothing in the document holds it for the window to draw.
 - **Strength is not checked.** The pins, the frame pivots and the crank

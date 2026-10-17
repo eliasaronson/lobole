@@ -12,7 +12,7 @@ crankshaft, every joint a printed pin with a printed cap pressed on.
 Everything derives from `--size`, the crank radius (Jansen's 15 at the
 default), the print profile's gap (`print_allowance` kind `gap` at each
 diameter, half of it a side), its press (kind `press`), its layer height
-and the P1S's bed and nozzle: nothing here is a literal in millimetres
+and its bed (`bed_mm`), and the P1S's nozzle: nothing here is a literal in millimetres
 (generators/strandbeest/README.md#where-every-size-comes-from).
 
 What it builds (generators/strandbeest/README.md):
@@ -57,10 +57,9 @@ OUT = Path(os.environ["LOBOLE_SCRATCH"]) / "strandbeest" if \
     os.environ.get("LOBOLE_SCRATCH") else ROOT / "scratch" / "strandbeest"
 
 # The machine the profile is for, a Bambu Lab P1S: its stock nozzle, which
-# the allowance table assumes, and its bed. Neither is a property of the
-# part, so neither can be derived from it.
+# the allowance table assumes. Not a property of the part, so not derived
+# from it. Its bed is the print profile's `bed_mm`.
 NOZZLE_MM = 0.4
-BED_MM = 256.0
 MIN_WALL_MM = 4 * NOZZLE_MM
 FDM_LAYER_MM = 0.2  # Bambu Studio's "0.20 mm" preset: the FDM fallback
 SIDES = lk.SIDES
@@ -349,6 +348,32 @@ class Part:
         return self
 
 
+def printed_press(d, what, dia, centres=None):
+    """Mark every round face of Ø`dia` of the active part a PRINTED PRESS
+    (docs/tolerances/README.md#printed-press-fits): banded by the print
+    profile's press allowance, so the exact clash check relieves the press
+    and lists it. `centres`, when given, keeps only faces on those axes."""
+    n = 0
+    for b in d.call("list_elements")["bodies"]:
+        for f in b.get("faces", []):
+            if f.get("kind") != "cylinder" or \
+                    abs(2.0 * f.get("radius", 0.0) - dia) > 1e-6:
+                continue
+            c = f.get("center") or f.get("axis_origin")
+            if centres is not None and c is not None and not any(
+                    math.hypot(c[0] - x, c[1] - y) < 1e-6
+                    for x, y in centres):
+                continue
+            check(d.call("set_tolerance", feature_id=b["created_by"],
+                         element=f["name"], printed="press"),
+                  f"{what}: printed press")
+            n += 1
+    if n == 0:
+        raise SystemExit(f"strandbeest: {what} has no Ø{dia:.3f} face to "
+                         f"press")
+    return n
+
+
 def build_bar(d, s, lay, frames, side, bar, proc, mat, name=None,
               layer=None):
     """One of the leg's six bodies, flat, its joint holes at the pin's gap;
@@ -384,7 +409,9 @@ def build_pin(d, s, lay, side, joint, proc, mat):
                    "shaft")
     part.cylinders(zs - z0, [(0, 0)], s["ds"], s["tc"], "add", "stub")
     part.frame("J", (0.0, 0.0, -z0))
+    part.frame("cap", (0.0, 0.0, zs - z0))  # where its cap seats
     part.finish()
+    printed_press(d, part.name, s["ds"])
     return {"lo": lo, "hi": hi, "z0": z0, "shoulder": zs,
             "length": zs - z0 + s["tc"]}
 
@@ -394,7 +421,10 @@ def build_cap(d, s, proc, mat):
     part.extrude(0.0, [circle((0, 0), s["dh"] / 2.0),
                        circle((0, 0), s["cap_bore"] / 2.0)], s["tc"],
                  "new_body", "cap")
-    return part.finish()
+    part.frame("seat", (0.0, 0.0, 0.0))
+    part.finish()
+    printed_press(d, "cap", s["cap_bore"])
+    return part
 
 
 def b_pins(s, lay):
@@ -551,10 +581,10 @@ def throw_angle(p, step_deg):
 
 
 def build_frame(d, s, lay, throws, proc, mat):
-    """The frame as assembled: its plates where they stand, the pivots'
-    caps pressed on. ONE occurrence: what is pressed together moves
-    together, and an interference on purpose is not a clash
-    (docs/tolerances/README.md#press-allowance)."""
+    """The frame as assembled: its plates where they stand. The pivots'
+    caps are occurrences of their own, fastened on, their press a printed
+    press the exact clash check relieves
+    (docs/tolerances/README.md#printed-press-fits)."""
     name = f"frame x{throws}"
     d.call("add_part", name=name)
     d.call("set_print_process", **proc)
@@ -562,10 +592,6 @@ def build_frame(d, s, lay, throws, proc, mat):
         kind = "first" if p == 0 else "last" if p == throws else "middle"
         derived(d, f"plate {p}", f"plate {kind}",
                 (0.0, 0.0, slab_base(s, p) - s["tp"]))
-    for p in range(throws):
-        for b in b_pins(s, lay):
-            derived(d, f"pivot cap {p} {b['side']}", "cap",
-                    (b["at"][0], b["at"][1], slab_base(s, p) + b["shoulder"]))
     d.call("add_feature", feature={
         "type": "Frame", "name": "O", "kind": "explicit",
         "origin": [0, 0, 0], "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]})
@@ -576,6 +602,15 @@ def build_frame(d, s, lay, throws, proc, mat):
                 "kind": "explicit",
                 "origin": [b["at"][0], b["at"][1], slab_base(s, p)],
                 "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]})
+            d.call("add_feature", feature={
+                "type": "Frame", "name": f"cap {b['side']} {p}",
+                "kind": "explicit",
+                "origin": [b["at"][0], b["at"][1],
+                           slab_base(s, p) + b["shoulder"]],
+                "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]})
+    # The pivots' stubs: a Derived copy carries no tolerance of its source,
+    # so the frame marks its own.
+    printed_press(d, name, s["ds"], [b["at"] for b in b_pins(s, lay)])
     return name
 
 
@@ -610,19 +645,6 @@ def build_crankshaft(d, s, throws, step_deg, tops, proc):
     return name
 
 
-def build_pin_assembled(d, s, side, joint, pin, proc):
-    name = f"pin {side} {joint} assembled"
-    d.call("add_part", name=name)
-    d.call("set_print_process", **proc)
-    derived(d, "pin", f"pin {side} {joint}", (0.0, 0.0, 0.0))
-    derived(d, "cap", "cap", (0.0, 0.0, pin["shoulder"] - pin["z0"]))
-    d.call("add_feature", feature={
-        "type": "Frame", "name": "J", "kind": "explicit",
-        "origin": [0, 0, -pin["z0"]], "z_axis": [0, 0, 1],
-        "x_axis": [1, 0, 0]})
-    return name
-
-
 # ---- the assembly -----------------------------------------------------------
 
 def place(d, part, name, pos, angle, fixed=False):
@@ -651,7 +673,7 @@ def build_assembly(d, s, lay, throws, step_deg, name, parts, L=None,
     need."""
     L = L or s["lengths"]
     d.call("add_assembly", name=name)
-    ids = {"bars": {}, "pins": {}, "throws": throws}
+    ids = {"bars": {}, "pins": {}, "caps": {}, "throws": throws}
     ids["frame"] = place(d, parts["frame"], "frame", (0, 0, 0), 0.0,
                          fixed=True)
     ids["crankshaft"] = place(d, parts["crankshaft"], "crankshaft",
@@ -707,6 +729,22 @@ def build_assembly(d, s, lay, throws, step_deg, name, parts, L=None,
                 ids["pins"][(p, side, joint)] = pin
                 mates.append(("fastened", occ[head], joint, pin, "J", 0.0,
                               f"pin {side} {joint} {p}"))
+                # Its cap, pressed on: an occurrence of its own on a
+                # fastened mate, the press relieved as a printed press.
+                info = parts["pin_info"][(side, joint)]
+                cap = place(d, "cap", f"cap {side} {joint} {p}",
+                            (jx, jy, zb + z_bottom(s, lo) - s["th"] +
+                             info["shoulder"] - info["z0"]),
+                            bodies[head][1])
+                ids["caps"][(p, side, joint)] = cap
+                mates.append(("fastened", pin, "cap", cap, "seat", 0.0,
+                              f"cap {side} {joint} {p}"))
+        for b in b_pins(s, lay):
+            cap = place(d, "cap", f"cap {b['side']} B {p}",
+                        (b["at"][0], b["at"][1], zb + b["shoulder"]), 0.0)
+            ids["caps"][(p, b["side"], "B")] = cap
+            mates.append(("fastened", ids["frame"], f"cap {b['side']} {p}",
+                          cap, "seat", 0.0, f"cap {b['side']} B {p}"))
     t0 = time.perf_counter()
     calls = []
     for kind, a, fa, b, fb, rot, what in mates:
@@ -719,10 +757,10 @@ def build_assembly(d, s, lay, throws, step_deg, name, parts, L=None,
     if r.get("failed"):
         raise SystemExit(f"strandbeest: {name}: a mate was refused: "
                          f"{r.get('failed')}")
-    crank = next(m["id"] for m in d.call("list_mates")["mates"]
-                 if m["name"] == "crank")
-    ids["crank"] = crank
+    # The crank is the first mate: the batch says the id it created.
+    ids["crank"] = r["results"][0]["id"]
     ids["mates"] = len(mates)
+    ids["revolutes"] = sum(1 for m in mates if m[0] == "revolute")
     rep = d.request("solve_assembly", {}, timeout=3600)
     ids["solve"] = {k: rep.get(k) for k in ("dof", "errored_mates",
                                             "loops_closed", "residual_mm",
@@ -770,10 +808,12 @@ def joint_traces(s, ids, frames, throws):
 
 
 def run_study(d, s, ids, frames, samples, clash, name, extra=()):
+    """The turn, its clash check EXACT: the boolean, which relieves each
+    cap's printed press on its pin and lists it in `press_fits`, where a
+    mesh calls it the overlap it is."""
     st = d.call("add_motion_study", driver=ids["crank"], dof="rotation",
                 **{"from": 0.0}, to=360.0, samples=samples,
-                check_clash=clash, clash_mode="mesh",
-                clash_deflection_mm=s["deflection"], name=name)
+                check_clash=clash, clash_mode="exact", name=name)
     if st.get("why_not"):
         raise SystemExit(f"strandbeest: {name}: {st['why_not']}")
     trace = joint_traces(s, ids, frames, ids["throws"]) + list(extra)
@@ -1080,7 +1120,7 @@ def best_turn(circles):
 
 def pack(items, bed, gap):
     """MaxRects, best short side: each item {name, circles} onto beds of
-    `bed` mm square, `gap` between boxes and from the edges. Returns beds
+    `bed` (x, y) mm, `gap` between boxes and from the edges. Returns beds
     of [(item, angle, x, y)] -- the part turned by angle, then moved by
     (x, y)."""
     def boxes(it):
@@ -1090,7 +1130,8 @@ def pack(items, bed, gap):
             x0, y0, x1, y1 = turned_box(it["circles"], a + extra)
             out.append((a + extra, x0, y0, x1 - x0 + gap, y1 - y0 + gap))
         return out
-    size = bed - gap  # the far edge's gap is in each box
+    size_x, size_y = bed[0] - gap, bed[1] - gap  # the far edges' gap is in
+    # each box
     order = sorted(items, key=lambda it: -max(
         b[3] * b[4] for b in boxes(it)))
     beds = []
@@ -1141,7 +1182,7 @@ def pack(items, bed, gap):
             if done:
                 break
         if not done:
-            b = {"free": [(0.0, 0.0, size, size)], "items": []}
+            b = {"free": [(0.0, 0.0, size_x, size_y)], "items": []}
             for a, x0, y0, w, h in boxes(it):
                 spot = place(b["free"], w, h)
                 if spot:
@@ -1151,7 +1192,7 @@ def pack(items, bed, gap):
                     break
             else:
                 raise SystemExit(f"strandbeest: {it['name']} does not fit a "
-                                 f"{bed:g} mm bed")
+                                 f"{bed[0]:g} x {bed[1]:g} mm bed")
             beds.append(b)
     return [b["items"] for b in beds]
 
@@ -1178,12 +1219,14 @@ def check_plate(d, name, proc, placed, out, bed, quiet=False):
     if pr["shells"]["pieces"] != want:
         raise SystemExit(f"strandbeest: {name}: {pr['shells']['pieces']} "
                          f"pieces for the {want} placed")
-    bodies = d.request("mass_properties", {}, timeout=600)["bodies"]
-    lo = [min(b["bbox_min"][k] for b in bodies) for k in range(3)]
-    hi = [max(b["bbox_max"][k] for b in bodies) for k in range(3)]
-    if min(lo[0], lo[1]) < -1e-6 or max(hi[0], hi[1]) > bed + 1e-6:
-        raise SystemExit(f"strandbeest: {name} runs off the {bed:g} mm bed: "
-                         f"{lo} .. {hi}")
+    # check_print's bed_fit says the plate's box fits the profile's bed;
+    # the packer also placed it ON the bed, from its corner.
+    box = d.request("mass_properties", {}, timeout=600)["bbox_mm"]
+    lo, hi = box["min"], box["max"]
+    if min(lo[0], lo[1]) < -1e-6 or hi[0] > bed[0] + 1e-6 or \
+            hi[1] > bed[1] + 1e-6:
+        raise SystemExit(f"strandbeest: {name} runs off the {bed[0]:g} x "
+                         f"{bed[1]:g} mm bed: {lo} .. {hi}")
     stl = out / f"{name.replace(' ', '_')}.stl"
     exp = d.call("export_stl", path=str(stl))
     return {"part": name, "stl": str(stl), "shells": exp.get("shells"),
@@ -1223,19 +1266,13 @@ def build_print_parts(d, s, lay, frames, proc, mat, step_deg, throws):
     return pins, tops
 
 
-_ASSEMBLED_PINS = {}
-
-
 def assembled(d, s, lay, pins, tops, throws, step_deg, proc):
     """The parts a walker of `throws` throws is assembled from: the bars,
-    each pin with its cap pressed on, the frame and the crankshaft."""
-    for k, v in pins.items():
-        if k not in _ASSEMBLED_PINS:
-            _ASSEMBLED_PINS[k] = build_pin_assembled(d, s, k[0], k[1], v,
-                                                     proc)
+    the pins and their caps, the frame and the crankshaft."""
     parts = {"bars": {(side, bar): f"{side} {bar}" for side in SIDES
                       for bar in lk.BARS},
-             "pins": dict(_ASSEMBLED_PINS)}
+             "pins": {k: f"pin {k[0]} {k[1]}" for k in pins},
+             "pin_info": pins}
     parts["frame"] = build_frame(d, s, lay, throws, proc, None)
     parts["crankshaft"] = build_crankshaft(d, s, throws, step_deg, tops,
                                            proc)
@@ -1250,6 +1287,8 @@ def part_names_of(ids, parts):
         out[occ] = parts["bars"][(side, bar)]
     for (p, side, j), occ in ids["pins"].items():
         out[occ] = parts["pins"][(side, j)]
+    for occ in ids["caps"].values():
+        out[occ] = "cap"
     return out
 
 
@@ -1357,7 +1396,7 @@ def stage(d, s, lay, frames, parts, throws, step_deg, samples, name,
           stability):
     """One walker: assembled, studied, and every check."""
     ids = build_assembly(d, s, lay, throws, step_deg, name, parts)
-    print(f"  {name}: {len(ids['bars']) + len(ids['pins']) + 2} occurrences,"
+    print(f"  {name}: {len(ids['bars']) + len(ids['pins']) + len(ids['caps']) + 2} occurrences,"
           f" {ids['mates']} mates, solve {ids['solve']} "
           f"({ids['mate_seconds']:.0f} s)")
     extra, mass = [], None
@@ -1372,21 +1411,43 @@ def stage(d, s, lay, frames, parts, throws, step_deg, samples, name,
     r = run_study(d, s, ids, frames, samples, True, f"{name} turn", extra)
     n = len(r["samples"])
     per = r["seconds"] / n
-    print(f"  {name}: study {n} samples, {r['collision_status']}, "
+    print(f"  {name}: exact study {n} samples, {r['collision_status']}, "
           f"{r['seconds']:.1f} s ({1000 * per:.0f} ms a sample), "
-          f"{r['pairs_checked']} pair checks")
+          f"{r['pairs_checked']} pair checks, {r['refined_samples']} "
+          f"samples refined, {r['branch_jumps']} branch jumps")
     if r["collision_status"] != "passed":
         raise SystemExit(f"strandbeest: {name}: {r['collision_status']}\n"
                          f"{r['table'][-3000:]}")
-    out = {"occurrences": len(ids["bars"]) + len(ids["pins"]) + 2,
+    out = {"occurrences": len(ids["bars"]) + len(ids["pins"]) +
+           len(ids["caps"]) + 2,
            "mates": ids["mates"], "solve": ids["solve"],
            "study": {"samples": n, "seconds": r["seconds"],
                      "ms_per_sample": 1000 * per,
                      "solve_ms_per_sample": solve_ms,
-                     "revolute_columns": ids["mates"] - 4 * 2 * throws,
+                     "revolute_columns": ids["revolutes"],
                      "collision_status": r["collision_status"],
+                     "clash_mode": "exact",
                      "pairs_checked": r["pairs_checked"],
-                     "deflection_mm": r.get("deflection_mm")}}
+                     "refined_samples": r["refined_samples"],
+                     "branch_jumps": r["branch_jumps"]}}
+    # Every cap on its pin is a printed press the exact check relieved and
+    # listed, once a pair: none of them is a clash, and none is missing.
+    capped = {frozenset((ids["pins"][k] if k[2] != "B" else ids["frame"],
+                         c)) for k, c in ids["caps"].items()}
+    fits = {frozenset((f["a"], f["b"])): f for f in r["press_fits"]}
+    missing = [k for k in capped if k not in fits]
+    if missing:
+        raise SystemExit(f"strandbeest: {name}: {len(missing)} of "
+                         f"{len(capped)} caps not listed as a press fit")
+    first = next(iter(fits.values()))
+    out["press_fits"] = {
+        "caps": len(capped), "listed": len(fits),
+        "fit": first["fit"], "interference_mm": first["interference_mm"],
+        "max_interference_mm": first["max_interference_mm"],
+        "kinds": sorted({f["fit"] for f in fits.values()})}
+    print(f"  {name}: {len(fits)} press fits relieved and listed, each cap "
+          f"on its pin: {first['fit']} (up to "
+          f"{first['max_interference_mm']:g} mm)")
     out["branch"] = check_branch(r, throws)
     foot = check_foot(r, s, throws, step_deg)
     if not foot["ok"]:
@@ -1454,6 +1515,16 @@ def main():
     if args.profile and prof is None:
         raise SystemExit(f"strandbeest: no print profile '{args.profile}'")
     layer = args.layer or prof.get("layer_height_mm") or FDM_LAYER_MM
+    # The bed is the printer's, so the profile's: nothing guesses one.
+    if not prof or not prof.get("bed_mm"):
+        raise SystemExit(
+            "strandbeest: the walker is packed into the printer's bed, and "
+            + (f"profile '{args.profile}' states no bed_mm" if prof else
+               "the built-in table is no printer's")
+            + ": --profile one that states it (print_coupon.py --seed gives "
+              "the P1S profiles theirs; Settings, Print profiles, for "
+              "yours)")
+    bed = (float(prof["bed_mm"][0]), float(prof["bed_mm"][1]))
 
     allowances = {}
 
@@ -1466,8 +1537,6 @@ def main():
     s = solve(args.size, layer, allow)
     t0 = time.perf_counter()
     lay = layout(s, 90)
-    s["deflection"] = min(s["gz"], s["gap_disc"] / 2.0,
-                          s["gap_pin"] / 2.0) / 5.0
     step_deg = 360.0 / args.pairs
     throws = 2 * args.pairs
     L = s["lengths"]
@@ -1496,6 +1565,7 @@ def main():
                               "caps")}}
     receipt["sizes"]["standoffs"] = s["standoffs"]
 
+    receipt["bed_mm"] = prof["bed_mm"]
     if args.stage in ("1", "all"):
         one = assembled(d, s, lay, pins, tops, 1, step_deg, proc)
         _, r1, chk1 = stage(d, s, lay, frames, one, 1, step_deg,
@@ -1504,13 +1574,13 @@ def main():
         o1 = out / "stage1"
         o1.mkdir(parents=True, exist_ok=True)
         items = print_items(s, lay, frames, 1, with_press=press)
-        beds = pack(items, BED_MM, s["w"] / 2.0)
+        beds = pack(items, bed, s["w"] / 2.0)
         if len(beds) != 1:
             raise SystemExit(f"strandbeest: stage 1 needs {len(beds)} beds, "
                              f"not one")
         build_plate_part(d, "stage1 plate", proc, beds[0])
         receipt["stage1"]["plate"] = check_plate(d, "stage1 plate", proc,
-                                                 beds[0], o1, BED_MM)
+                                                 beds[0], o1, bed)
         d.call("save_project", path=str(o1 / "strandbeest_stage1.dsgn"))
         print(f"  stage 1: one plate, {len(beds[0])} pieces -> "
               f"{receipt['stage1']['plate']['stl']}")
@@ -1540,15 +1610,15 @@ def main():
               f"deg, {st['feet_on_ground']} feet down)")
         o2 = out / "stage2"
         o2.mkdir(parents=True, exist_ok=True)
-        beds = pack(print_items(s, lay, frames, throws), BED_MM,
+        beds = pack(print_items(s, lay, frames, throws), bed,
                     s["w"] / 2.0)
         plates = []
-        for k, bed in enumerate(beds):
+        for k, plate in enumerate(beds):
             name = f"stage2 plate {k + 1}"
-            build_plate_part(d, name, proc, bed)
-            plates.append(check_plate(d, name, proc, bed, o2, BED_MM,
+            build_plate_part(d, name, proc, plate)
+            plates.append(check_plate(d, name, proc, plate, o2, bed,
                                       quiet=True))
-            print(f"  {name}: {len(bed)} pieces, every check_print item "
+            print(f"  {name}: {len(plate)} pieces, every check_print item "
                   f"passes -> {plates[-1]['stl']}")
         receipt["stage2"]["plates"] = plates
         d.call("save_project", path=str(o2 / "strandbeest.dsgn"))

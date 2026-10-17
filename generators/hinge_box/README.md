@@ -88,8 +88,11 @@ the cones (0.424 normal).
   for two bodies, no overhang past 45° (the teardrops' flanks and the
   cones are 45° exactly), no ceiling, every pair of faces at least the gap
   a side apart on the exact B-Rep (the knuckles' end faces are the
-  closest), the STL's chords a fifth of the gap, and stacking: both pieces
-  on the bed and no face within the minimum air over the other.
+  closest), the STL's chords a fifth of the gap, stacking: both pieces
+  on the bed and no face within the minimum air over the other, and
+  `bed_fit`: the plate inside the profile's bed (`bed_mm`), its extent
+  printed and kept in the receipt. On the built-in table there is no
+  printer, and bed_fit is skipped, saying so.
 - **The swing**, in the assembly `hinge box`: the box fixed, the lid on a
   revolute to the box's `hinge` frame. A motion study turns it from 0° to
   180° in 5° samples with the mesh clash check at a fifth of the gap. Every

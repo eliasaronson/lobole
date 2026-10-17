@@ -526,7 +526,15 @@ def main():
     # teardrops and cones are 45), no ceiling, the gap a side between every
     # pair of faces, the chords a fifth of it, and no face within the
     # minimum air over the other piece, each piece on the bed.
+    # bed_fit too: the plate in the printer's bed, the profile's bed_mm
+    # (on the built-in table there is no printer, and it says so).
     pr = check_print(d, "hinge box", need=PRINT_ITEMS)
+    bed = prof.get("bed_mm")
+    if bed:
+        print(f"  hinge box: the plate, "
+              f"{' x '.join(f'{v:.1f}' for v in pr['bed_fit']['extent_mm'])}"
+              f" mm, in {args.profile}'s "
+              f"{' x '.join(f'{v:g}' for v in bed)} mm bed")
     lim = pr["stacking"]["limit_mm"]
     if abs(lim - min_air) > 1e-9:
         raise SystemExit(f"hinge_box: check_print's stacking limit is "
@@ -580,6 +588,7 @@ def main():
                "min_air_mm": min_air, "min_air_from": air_from,
                "sizes": s, "segments": segments(s),
                "print": print_receipt(pr), "motion": swing,
+               "bed_mm": bed, "bed_from": args.profile if bed else None,
                "negative_controls": controls, "stl": str(stl),
                "stl_shells": exp.get("shells"),
                "stl_deflection_mm": exp.get("deflection_mm"),

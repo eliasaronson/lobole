@@ -27,6 +27,7 @@ tools/merge-branch.sh --full does after the headless suite
 """
 import os
 import re
+import shlex
 import shutil
 import signal
 import subprocess
@@ -140,12 +141,21 @@ def jar(port, out):
 
 
 def strandbeest(port, out):
-    # The whole run on the built-in PLA table: both stages, every check (the
-    # branch, the clash, the layers, the feet, the stability), both negative
-    # controls failing, and every print plate checked.
-    return ([PY, "-u", os.path.join(GEN, "strandbeest", "build.py"),
-             "--port", str(port), "--out", os.path.join(out, "strandbeest")],
+    # The whole run on the P1S's K5 profile, seeded first into the instance's
+    # own config: the walker packs its plates into the profile's bed, and the
+    # built-in table has none. Both stages, every check (the branch, the
+    # exact clash with each cap's printed press listed, the layers, the
+    # feet, the stability), both negative controls failing, and every print
+    # plate checked.
+    seed = [PY, "-u", os.path.join(GEN, "print_coupon.py"), "--port",
+            str(port), "--seed"]
+    build = [PY, "-u", os.path.join(GEN, "strandbeest", "build.py"),
+             "--port", str(port), "--profile", "K5 PLA on P1S",
+             "--out", os.path.join(out, "strandbeest")]
+    return (["bash", "-c", " ".join(shlex.quote(a) for a in seed) + " && " +
+             " ".join(shlex.quote(a) for a in build)],
             [r"negative control, two crossing bars on one layer: FAILS",
+             r"walker: .* press fits relieved and listed",
              r"walker: .* mm a crank turn", r"strandbeest: done"], None)
 
 
