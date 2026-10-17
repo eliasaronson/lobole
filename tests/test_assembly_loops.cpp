@@ -16,6 +16,8 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <memory>
 
 using Catch::Matchers::WithinAbs;
@@ -907,4 +909,211 @@ TEST_CASE("Solve names the tilted connector in the failing mate's error",
   CHECK(m->error.find("crank pin") == std::string::npos);
   (void)c;
   (void)k;
+}
+
+// ---------------------------------------------------------------------------
+// Coupled loops: Theo Jansen's leg (docs/assemblies/solver.md#coupled-loops).
+// Eight bodies, ten revolutes, three independent loops and one degree of
+// freedom -- the walker's leg, which no single four-bar or slider exercises:
+// its three "knees" are each a dyad with a mirror branch, and a sweep that
+// jumped to one would still close every loop exactly.
+// ---------------------------------------------------------------------------
+
+namespace {
+
+// Jansen's "holy numbers", mm (a crank of 15).
+struct JansenLengths {
+  double a = 38.0, b = 41.5, c = 39.3, d = 40.1, e = 55.8, f = 39.4, g = 36.7,
+         h = 65.7, i = 49.0, j = 50.0, k = 61.9, l = 7.8, m = 15.0;
+};
+
+// The point at distance r1 from p and r2 from q, on `side` (+1 left of p->q).
+glm::dvec2 Dyad(glm::dvec2 p, double r1, glm::dvec2 q, double r2, double side) {
+  const glm::dvec2 d = q - p;
+  const double L = glm::length(d);
+  const double along = (r1 * r1 - r2 * r2 + L * L) / (2.0 * L);
+  const double h = std::sqrt(std::max(0.0, r1 * r1 - along * along));
+  const glm::dvec2 u = d / L;
+  return p + along * u + side * h * glm::dvec2(-u.y, u.x);
+}
+
+// Every joint of the leg at crank angle `theta`, by circle intersections on
+// the built branch: the leg's own published kinematics, independent of the
+// solver. O the crank axis, B the frame pivot, A the crank pin, C and E the
+// upper and lower joints, D the upper triangle's outer vertex, F the knee and
+// G the foot.
+struct JansenPose {
+  glm::dvec2 O, A, B, C, D, E, F, G;
+};
+JansenPose JansenAt(const JansenLengths& L, double theta) {
+  JansenPose p;
+  p.O = {0.0, 0.0};
+  p.B = {-L.a, -L.l};
+  p.A = {L.m * std::cos(theta), L.m * std::sin(theta)};
+  p.C = Dyad(p.A, L.j, p.B, L.b, -1.0);
+  p.E = Dyad(p.A, L.k, p.B, L.c, +1.0);
+  p.D = Dyad(p.B, L.d, p.C, L.e, +1.0);
+  p.F = Dyad(p.D, L.f, p.E, L.g, -1.0);
+  p.G = Dyad(p.E, L.i, p.F, L.h, +1.0);
+  return p;
+}
+
+double Cross(glm::dvec2 u, glm::dvec2 v) { return u.x * v.y - u.y * v.x; }
+
+// The knees' signed angles: which side of the line through its two other
+// joints each dyad's vertex is on. A sweep on the built branch keeps all
+// three signs.
+std::array<double, 3> Knees(const JansenPose& p) {
+  return {Cross(p.A - p.C, p.B - p.C), Cross(p.A - p.E, p.B - p.E),
+          Cross(p.D - p.F, p.E - p.F)};
+}
+
+glm::dmat4 At2(glm::dvec2 v) {
+  return glm::translate(glm::dmat4(1.0), glm::dvec3(v, 0.0));
+}
+
+// A point of a body in its local frame, which has its origin at `origin` and
+// its x axis along `toward`, both world.
+glm::dvec2 LocalOf(glm::dvec2 origin, glm::dvec2 toward, glm::dvec2 point) {
+  const glm::dvec2 x = glm::normalize(toward - origin);
+  const glm::dvec2 y(-x.y, x.x);
+  const glm::dvec2 d = point - origin;
+  return {glm::dot(d, x), glm::dot(d, y)};
+}
+
+double AngleOf(glm::dvec2 from, glm::dvec2 to) {
+  const glm::dvec2 d = to - from;
+  return std::atan2(d.y, d.x);
+}
+
+//   occ 10 frame (fixed)  20 crank  30 j  40 k  50 triangle BCD  60 c
+//       70 f  80 triangle EFG (the foot)
+// Each body's frame has its origin at its first joint and x toward its
+// second; the triangles' third vertex is placed in it once, at the built
+// pose, which is where the leg's geometry lives.
+struct JansenLeg {
+  assembly::LoopProblem p;
+  glm::dvec2 gLocal; // the foot in the EFG body's frame
+};
+
+JansenLeg BuildJansenLeg(const JansenLengths& L, double theta0) {
+  const JansenPose q = JansenAt(L, theta0);
+  JansenLeg leg;
+  assembly::LoopProblem& p = leg.p;
+  const double phi[] = {0.0,
+                        theta0,
+                        AngleOf(q.A, q.C),
+                        AngleOf(q.A, q.E),
+                        AngleOf(q.B, q.C),
+                        AngleOf(q.B, q.E),
+                        AngleOf(q.D, q.F),
+                        AngleOf(q.E, q.F)};
+  const auto body = [&](uint64_t occ) { return phi[occ / 10 - 1]; };
+  const glm::dvec2 dLocal = LocalOf(q.B, q.C, q.D);
+  leg.gLocal = LocalOf(q.E, q.F, q.G);
+  // Each joint: the two bodies and where it is in each one's frame.
+  struct J {
+    uint64_t id, a;
+    glm::dvec2 pa;
+    uint64_t b;
+    glm::dvec2 pb;
+  };
+  const J joints[] = {
+      {1, 10, {0, 0}, 20, {0, 0}},       // O
+      {2, 20, {L.m, 0}, 30, {0, 0}},     // A: crank-j
+      {3, 20, {L.m, 0}, 40, {0, 0}},     // A: crank-k
+      {4, 10, {-L.a, -L.l}, 50, {0, 0}}, // B: frame-BCD
+      {5, 10, {-L.a, -L.l}, 60, {0, 0}}, // B: frame-c
+      {6, 50, dLocal, 70, {0, 0}},       // D: BCD-f
+      {7, 60, {L.c, 0}, 80, {0, 0}},     // E: c-EFG
+      {8, 30, {L.j, 0}, 50, {L.b, 0}},   // C: j-BCD (cut)
+      {9, 40, {L.k, 0}, 60, {L.c, 0}},   // E: k-c (cut)
+      {10, 70, {L.f, 0}, 80, {L.g, 0}},  // F: f-EFG (cut)
+  };
+  for (const J& jt : joints)
+    p.mates.push_back(Revolute(jt.id, jt.a, At2(jt.pa), jt.b, At2(jt.pb),
+                               body(jt.b) - body(jt.a)));
+  p.tree = {{0, 10, 20, false}, {1, 20, 30, false}, {2, 20, 40, false},
+            {3, 10, 50, false}, {4, 10, 60, false}, {5, 50, 70, false},
+            {6, 60, 80, false}};
+  p.cut = {7, 8, 9};
+  p.anchor.emplace_back(10, glm::dmat4(1.0));
+  p.pinned.push_back({0, MateDof::Rotation, theta0});
+  return leg;
+}
+
+glm::dvec2 WorldOf(const assembly::LoopSolution& s, uint64_t occ,
+                   glm::dvec2 local) {
+  return glm::dvec2(s.world.at(occ) * glm::dvec4(local, 0.0, 1.0));
+}
+
+} // namespace
+
+TEST_CASE("A Jansen leg has one degree of freedom and walks its own curve",
+          "[assembly][solve][loops][jansen]") {
+  const JansenLengths L;
+  constexpr double kDeg = 3.14159265358979323846 / 180.0;
+  JansenLeg leg = BuildJansenLeg(L, 0.0);
+  const std::array<double, 3> built = Knees(JansenAt(L, 0.0));
+
+  // Seeded exactly closed: the solver confirms it, and the rank says one
+  // degree of freedom -- eight bodies, ten revolutes, three loops.
+  assembly::LoopProblem free = leg.p;
+  free.pinned.clear();
+  assembly::LoopSolution s = assembly::SolveLoops(free);
+  REQUIRE(s.unavailable.empty());
+  REQUIRE(s.converged);
+  CHECK(s.dof == 1);
+  CHECK(s.conflicting.empty());
+  CHECK(s.redundant.empty());
+  // Driven, the crank takes that one: nothing is left free.
+  s = assembly::SolveLoops(leg.p);
+  REQUIRE(s.converged);
+  CHECK(s.dof == 0);
+
+  // A full turn of the crank at 2 degrees a step, each solve seeded from the
+  // last (as a motion study's is): it must close at every step, stay on the
+  // built branch -- every knee keeps its sign -- and put the foot where the
+  // leg's own kinematics do.
+  double worstFoot = 0.0;
+  double lowest = 1e9, highest = -1e9, minX = 1e9, maxX = -1e9;
+  for (int deg = 2; deg <= 360; deg += 2) {
+    const double theta = deg * kDeg;
+    leg.p.pinned[0].value = theta;
+    leg.p.mates[0].rotation = theta;
+    s = assembly::SolveLoops(leg.p);
+    INFO("crank at " << deg << " deg");
+    REQUIRE(s.converged);
+    CHECK(s.residualMm < 1e-3); // the solver's closing tolerance
+    for (size_t i = 0; i < leg.p.mates.size(); i++)
+      leg.p.mates[i].rotation = s.solved[i].rotation;
+
+    JansenPose solved;
+    solved.A = WorldOf(s, 20, {L.m, 0});
+    solved.B = {-L.a, -L.l};
+    solved.C = WorldOf(s, 30, {L.j, 0});
+    solved.E = WorldOf(s, 40, {L.k, 0});
+    solved.D = WorldOf(s, 70, {0, 0});
+    solved.F = WorldOf(s, 70, {L.f, 0});
+    solved.G = WorldOf(s, 80, leg.gLocal);
+    const std::array<double, 3> knees = Knees(solved);
+    for (int k = 0; k < 3; k++) {
+      INFO("knee " << k);
+      CHECK(knees[k] * built[k] > 0.0);
+    }
+    const JansenPose ref = JansenAt(L, theta);
+    worstFoot = std::max(worstFoot, glm::length(solved.G - ref.G));
+    lowest = std::min(lowest, solved.G.y);
+    highest = std::max(highest, solved.G.y);
+    minX = std::min(minX, solved.G.x);
+    maxX = std::max(maxX, solved.G.x);
+  }
+  // The foot is on Jansen's curve at every step, to the solver's tolerance.
+  CHECK(worstFoot < 1e-3);
+  // ...and the curve is the one he published for these numbers: a stride
+  // sweeping 67.9 mm under a 15 mm crank, lifting 22.5 mm, its lowest
+  // point 91.8 below the crank axis.
+  CHECK_THAT(lowest, WithinAbs(-91.83, 0.02));
+  CHECK_THAT(highest - lowest, WithinAbs(22.46, 0.02));
+  CHECK_THAT(maxX - minX, WithinAbs(67.90, 0.02));
 }

@@ -269,6 +269,26 @@ the stored values keeps it on the branch it is on, and motion studies walk
 their samples in order for the same reason (`test_assembly_loops.cpp`, "A
 four-bar seeded on a branch stays on it").
 
+### Coupled loops
+
+A Theo Jansen leg is the coupled-loop case: eight bodies, ten revolutes,
+three independent loops in one component, and one degree of freedom by
+rank. Its three knees are dyads, each with a mirror branch that closes
+every loop just as exactly, so a jump to one cannot be seen in the
+residual. Only the knee's signed angle shows it: which side of the line
+through its two other joints the vertex is on. `test_assembly_loops.cpp`,
+"A Jansen leg has one degree of freedom and walks its own curve", drives the
+crank a full turn at 2 degrees a step, seeded from the last step as a motion
+study is. It asserts closure, all three signs at every step, and the foot
+against the leg's own circle-intersection kinematics.
+
+The solver needs no branch guard there. Seeded from the previous step it
+stays on the built branch at every step up to 30 degrees. At 45 degrees a
+step it lands on a mirror branch, first at 360 degrees, and stays there,
+still closed. So a study of a linkage with mirror branches samples finely,
+and a generator that cares which branch it is on checks the knees' signs
+itself.
+
 ### Without Eigen
 
 The loop pass needs Eigen (`HAVE_EIGEN`). A build without it places trees as
