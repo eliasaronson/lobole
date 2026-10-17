@@ -30,13 +30,15 @@
 // and reporting one would invite exactly the false precision this is not for.
 // The contract is:
 //
-//   * `true`  — the tessellations of A and B intersect, or one is inside the
+//   * overlapping — a triangle of A pierces one of B, or one is inside the
 //               other. At this deflection that means the solids do too, to
 //               within the deflection.
-//   * `false` — they do not. A pair separated by less than the deflection may
-//               read either way; anything that must be certain re-runs the
-//               exact test, which is what the motion study does on its worst
-//               sample.
+//   * touching — they meet only on a surface: a face seated on a face, which
+//               exact mode calls touching too (Mesh::Classify below).
+//   * clear — they do not meet. A pair separated by less than the deflection
+//               may read either way; anything that must be certain re-runs
+//               the exact test, which is what the motion study does on its
+//               worst sample.
 //
 // Deflection is DERIVED from each body's own size (its bounding diagonal),
 // so a 2 mm screw and a 2 m dock are meshed to the same relative fidelity
@@ -71,13 +73,15 @@ public:
   // (docs/inspect/README.md#touching-is-not-a-clash):
   //   * Clear       -- no triangle of one meets one of the other, and
   //                    neither is inside the other;
-  //   * Touching    -- triangles meet, but only on the surface: every pair
-  //                    that meets is within the coarser deflection of
-  //                    separating, and a point a deflection inside either
-  //                    surface at each meeting is outside the other solid.
-  //                    Two blocks face to face, a part seated on a shoulder:
+  //   * Touching    -- triangles meet, but only on a surface: in every
+  //                    pair that meets, one triangle lies on one side of
+  //                    the other's plane (to the mesh's float noise), and
+  //                    a point a micron inside either surface at a spread
+  //                    of those meetings is outside the other solid. Two
+  //                    blocks face to face, a part seated on a shoulder:
   //                    what exact mode calls touching (volume 0);
-  //   * Overlapping -- one solid is in the other deeper than that.
+  //   * Overlapping -- a triangle pierces another, by however little, or
+  //                    one solid is in the other.
   // Coplanar triangles always meet under the separating-axis test, so
   // without the middle answer every face-to-face contact was a clash.
   enum class Contact { Clear, Touching, Overlapping };
@@ -128,8 +132,9 @@ private:
 
   uint32_t BuildNode(uint32_t start, uint32_t count, int depth);
   // The triangle pairs that meet: `deep` set (and the walk stopped) by the
-  // first that is further than `tolerance` from separating, the rest
-  // collected in `shallow` (indices into m_tris / other.m_tris), up to a cap.
+  // first that meets other than on a surface (to `tolerance`, the float
+  // noise), the rest collected in `shallow` (indices into m_tris /
+  // other.m_tris), up to a cap.
   struct Meeting {
     double tolerance = 0.0;
     bool deep = false;

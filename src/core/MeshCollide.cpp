@@ -66,49 +66,30 @@ bool TrianglesIntersect(const glm::dvec3* A, const glm::dvec3* B) {
   return true;
 }
 
-// How far two triangles that meet are from separating: the least overlap
-// of their projections over the same seventeen axes, each normalised -- the
-// separating-axis test's penetration depth. 0 for two coplanar triangles
-// (along their shared normal) and for a triangle whose edge lies on the
-// other's face; the depth of the deeper side for one that pierces another.
-// Negative when an axis separates them.
-double PairDepth(const glm::dvec3* A, const glm::dvec3* B) {
-  double best = 1e300;
-  const auto along = [&](const glm::dvec3& axis) {
-    const double len2 = glm::dot(axis, axis);
-    if (len2 < 1e-18)
-      return true; // degenerate axis proves nothing
-    const double inv = 1.0 / std::sqrt(len2);
-    double aMin = 1e300, aMax = -1e300, bMin = 1e300, bMax = -1e300;
+// Whether two triangles that meet do so only ON A SURFACE: one of them
+// lies wholly on one side of the other's plane, to within `eps` (the
+// tessellation's own float noise). Two coplanar triangles, and a triangle
+// whose edge lies on the other's face, meet so; a triangle that pierces
+// another, by however little, does not. Within the DEFLECTION would not
+// do: a nut's flank sunk 0.1 mm into its pillar's, meshed at 0.26 mm, read
+// as touching, and the clock's thread search took a pose that overlaps for
+// a clean one.
+bool OnSurface(const glm::dvec3* A, const glm::dvec3* B, double eps) {
+  const auto oneSide = [eps](const glm::dvec3* P, const glm::dvec3* Q) {
+    glm::dvec3 n = glm::cross(P[1] - P[0], P[2] - P[0]);
+    const double len = glm::length(n);
+    if (len < 1e-18)
+      return false;
+    n /= len;
+    double lo = 1e300, hi = -1e300;
     for (int i = 0; i < 3; i++) {
-      const double pa = glm::dot(axis, A[i]) * inv;
-      aMin = std::min(aMin, pa);
-      aMax = std::max(aMax, pa);
-      const double pb = glm::dot(axis, B[i]) * inv;
-      bMin = std::min(bMin, pb);
-      bMax = std::max(bMax, pb);
+      const double d = glm::dot(n, Q[i] - P[0]);
+      lo = std::min(lo, d);
+      hi = std::max(hi, d);
     }
-    const double overlap = std::min(aMax - bMin, bMax - aMin);
-    best = std::min(best, overlap);
-    return overlap >= 0.0;
+    return lo >= -eps || hi <= eps;
   };
-  const glm::dvec3 ea[3] = {A[1] - A[0], A[2] - A[1], A[0] - A[2]};
-  const glm::dvec3 eb[3] = {B[1] - B[0], B[2] - B[1], B[0] - B[2]};
-  const glm::dvec3 na = glm::cross(ea[0], ea[1]);
-  const glm::dvec3 nb = glm::cross(eb[0], eb[1]);
-  if (!along(na) || !along(nb))
-    return -1.0;
-  for (const glm::dvec3& u : ea)
-    for (const glm::dvec3& v : eb)
-      if (!along(glm::cross(u, v)))
-        return -1.0;
-  for (const glm::dvec3& u : ea)
-    if (!along(glm::cross(u, na)))
-      return -1.0;
-  for (const glm::dvec3& v : eb)
-    if (!along(glm::cross(v, nb)))
-      return -1.0;
-  return best;
+  return oneSide(A, B) || oneSide(B, A);
 }
 
 bool BoxesOverlap(const glm::dvec3& aLo, const glm::dvec3& aHi,
@@ -380,7 +361,7 @@ void Mesh::Descend(uint32_t nodeA, const Mesh& other, uint32_t nodeB,
                                  glm::dvec3(bToA * glm::dvec4(tb.c, 1.0))};
         if (!TrianglesIntersect(A, B))
           continue;
-        if (PairDepth(A, B) > meet.tolerance) {
+        if (!OnSurface(A, B, meet.tolerance)) {
           meet.deep = true;
           return;
         }
@@ -544,22 +525,27 @@ Mesh::Contact Mesh::Classify(const glm::dmat4& xfA, const Mesh& other,
     return Contact::Clear;
   const glm::dmat4 bToA = glm::inverse(xfA) * xfB;
   Meeting meet;
-  meet.tolerance = std::max(m_deflection, other.m_deflection);
+  // The float noise of a tessellation at this size: its vertices are
+  // single precision.
+  const double scale =
+      std::max({glm::length(m_min), glm::length(m_max),
+                glm::length(other.m_min), glm::length(other.m_max), 1.0});
+  meet.tolerance = 1e-6 * scale;
   Descend(0, other, 0, bToA, meet);
   if (meet.deep)
     return Contact::Overlapping;
   if (meet.shallowSeen > 0) {
-    // Every pair that meets is within a deflection of separating. That is
-    // what two faces seated on each other look like -- and also what two
-    // solids sunk into each other look like when their sides are FLUSH
-    // (equal blocks overlapping end to end: each meeting pair is coplanar
-    // or meets on an edge), since no triangle then pierces another. The
-    // difference is the volume, so ask it: a deflection inside each
-    // triangle's own solid, at its centroid, is that point inside the
-    // other solid? On a seat it lies a deflection clear of the other; on
-    // an overlap deeper than the deflection it lies inside.
+    // Every pair that meets does so on a surface. That is what two faces
+    // seated on each other look like -- and also what two solids sunk into
+    // each other look like when their sides are FLUSH (equal blocks
+    // overlapping end to end: each meeting pair is coplanar or meets on an
+    // edge), since no triangle then pierces another. The difference is the
+    // volume, so ask it: a little inside each triangle's own solid, at its
+    // centroid, is that point inside the other solid? On a seat it lies
+    // clear of the other; on an overlap it lies inside. A micron, the
+    // exact contact's fuzz, or the noise's hundredfold on a big part.
     const glm::dmat4 aToB = glm::inverse(bToA);
-    const double depth = meet.tolerance;
+    const double depth = std::max(1e-3, 100.0 * meet.tolerance);
     // Inward: the side of the triangle its own solid is on, asked of the
     // solid rather than of the winding, which a tessellation does not
     // promise.
