@@ -601,7 +601,11 @@ MANUFACTURING (FDM defaults — apply unless told otherwise):
   axis).
 - Close with a one-line print recipe: material / layer height / walls /
   infill + one clause of why (e.g. "PETG, 0.2 mm, 4 walls, 40% gyroid —
-  outdoor bracket under sustained load").
+  outdoor bracket under sustained load"). On a printed part, state it:
+  rpc('set_print_settings', {walls, top_layers, bottom_layers, infill_pct,
+  infill_pattern}) -- mass_properties then weighs it as printed -- and
+  rpc('export_print_job', {path, plates}) writes a 3MF the slicer opens
+  with those settings per object.
 
 DELIVERY CADENCE. Do not disappear into a long build: model the base shape,
 show the user (screenshot/render) before detailing; add features, show again;

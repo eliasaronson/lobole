@@ -208,6 +208,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 | `export_visual {path, deflection?}` | RemoteProject | glTF / OBJ / PLY of the part or assembly |
 | `export_members {dir}` | RemoteTube | one STEP per tube member |
 | `export_dxf` | RemoteSheetMetal | a flat pattern as R12 DXF |
+| `export_print_job {path, plates, slicer_config?, name?}` | RemotePrint | a print job, one 3MF of plates for Bambu Studio ([print jobs](../tolerances/README.md#print-jobs)) |
 | `add_feature` with `type: "Import"` | RemoteModeling | the feature directly; reports `recentred_by` |
 
 ## Tests
@@ -228,7 +229,9 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
 ## Not done
 
 - IGES import or export.
-- 3MF (OpenCASCADE has no writer).
+- 3MF as an export of a part or an assembly (OpenCASCADE has no writer).
+  A print job is a 3MF of Loböle's own writing
+  ([print jobs](../tolerances/README.md#print-jobs)).
 - DXF of a drawing, and DXF import.
 - Mesh bodies: an STL arrives as sewn B-Rep faces, not as a lightweight
   reference mesh.

@@ -151,6 +151,10 @@ no material has no mass rather than an assumed density, and the BOM names it
 in `warnings`. On an assembly tab without `part` it aggregates every visible
 occurrence in world space. Its bbox is measured off the surfaces; `get_state`'s
 is a cheap conservative bound that can read well over on a swept surface.
+A PRINTED part's bodies also carry `printed`, what the slicer's walls,
+shells and infill weigh at its slicer settings, and `total.printed` their
+sum ([printed mass](../tolerances/README.md#printed-mass)); `{why}` when a
+setting is unstated.
 
 The Properties dock shows the same numbers for the active part (cached by
 document version), and a centre-of-gravity marker can be drawn in the
@@ -499,7 +503,10 @@ measured ([requirements](../requirements/README.md)).
 overhangs and bridges against the process, the gap between bodies, the
 STL's chords, stacking: every piece on the bed and none printed within
 the minimum air over another, and bed_fit: the plate inside the print
-profile's bed — [../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).
+profile's bed and, when it states keep-out zones, every piece clear of
+them — [../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).
+`export_print_job` then writes the plates as a 3MF the slicer opens with
+every piece's settings ([print jobs](../tolerances/README.md#print-jobs)).
 
 ## Before delivering a model
 

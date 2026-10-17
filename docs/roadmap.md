@@ -108,7 +108,8 @@ them:
 
 - **PMI in STEP** (AP242 GD&T and tolerances); tolerances stay in the app.
 - **IGES**, **mesh import beyond STL** (OBJ, PLY and glTF are export-only),
-  and **3MF**.
+  and **3MF** import and a general 3MF export (a print job is written as
+  one, [print jobs](tolerances/README.md#print-jobs)).
 
 ## 6. The agent interface
 

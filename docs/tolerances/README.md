@@ -488,9 +488,10 @@ mm chord deviation), with `print_coupon --gap-only`:
 They live in the user's config, not in the build:
 `python3 generators/print_coupon.py --port PORT --seed` saves both through
 `save_print_profile` on the instance at PORT — into whatever config dir that
-instance was started with — with the P1S's 256 x 256 x 256 mm bed, and
-leaves any name already stored, except that one which states no bed is
-given the P1S's and nothing else. The other rows are the built-in PLA rows.
+instance was started with — with the P1S's 256 x 256 x 250 mm bed, its
+keep-out zone and its wall line width, and leaves any name already stored,
+except that one which lacks any of those three is given the P1S's and
+nothing else. The other rows are the built-in PLA rows.
 
 ### Press allowance
 
@@ -689,7 +690,10 @@ infill weigh (`printmass::EstimatePrinted`, `src/core/PrintedMass.{h,cpp}`).
   material; otherwise CORE, weighted by the infill. Mass, centre and
   inertia (about the centre, world axes, OCC's matrix of inertia, as the
   solid's) are the weighted sums, each pixel a slab with its own moment.
-- **It is an estimate and says so** (`estimate: true`, `method`): the
+- **Printed solid, it is the solid**: at 100 % infill the answer is the
+  body's own mass properties off the B-Rep, exactly (`estimate: false`, no
+  raster), so a pendulum's period does not move with a pixel.
+- **Otherwise it is an estimate and says so** (`estimate: true`, `method`): the
   slicer's paths differ at small features, and a wall is taken as walls x
   line width. A cube is exact to the pixel: 20 mm at 0.5 mm lines and 0.2
   mm layers is its shell plus its core by hand (`[print][mass]`).
@@ -840,7 +844,11 @@ nothing is closer than it means to be. With a thread its overhang item is
 reported, not required — a metric thread's flanks overhang past 45°.
 
 - `--profile NAME` builds against one of your profiles and exports at its
-  chord deviation.
+  chord deviation; with a profile that states a bed and a layer it also
+  writes `<name>_job.3mf`, the coupon's [print job](#print-jobs), from a
+  plate part with a copy of the coupon in the middle of the bed (the coupon
+  itself stands at the origin, in a P1S's keep-out corner, so its own
+  check leaves bed_fit to the plate).
 - `--record --profile NAME --gap-side MM --bore MM --pin MM --thread-went
   yes|no --z-gap-layers N --post-gap-side MM` keeps the answer: the
   winners become rows over the profile (or, for a new name, the built-in
@@ -850,7 +858,10 @@ reported, not required — a metric thread's flanks overhang past 45°.
   under Ø`size`, saved with `save_print_profile` at the deflection the
   coupon was exported at.
 - `--seed` installs [the two measured profiles](#from-a-measurement), at
-  the preset's 0.2 mm layers and with no Z gap measured.
+  the preset's 0.2 mm layers and with no Z gap measured, with the P1S's
+  bed (256 x 256 x 250), its keep-out zone and the preset's 0.45 mm wall
+  line width -- given, too, to a stored profile of either name that lacks
+  them.
 
 ## Drawings
 
