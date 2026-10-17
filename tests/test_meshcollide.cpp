@@ -338,3 +338,61 @@ TEST_CASE("A stated deflection is the one the mesh is cut to", "[collide]") {
   const auto again = collide::Mesh::Build(ring);
   CHECK(again->TriangleCount() == derived->TriangleCount());
 }
+
+// docs/inspect/README.md#touching-is-not-a-clash. Two faces seated on each
+// other have coplanar triangles, and the separating-axis test reports any
+// two coplanar triangles that overlap in their plane as meeting: a mesh
+// check called every seat a clash, where exact interference (volume 0) calls
+// it touching. The clock spaced its wheels an end shake apart to get past
+// it. Touching is now its own answer, and an overlap deeper than the
+// deflection is still a clash -- flush sides included, where no triangle
+// pierces another and only the volume tells the two apart.
+TEST_CASE("Two blocks face to face touch; overlapped by two deflections "
+          "they clash",
+          "[collide]") {
+  collide::ClearCache();
+  const CADShape a = Box({0, 0, 0}, {10, 10, 10});
+  const CADShape b = Box({0, 0, 0}, {10, 10, 10});
+  const collide::Result seated =
+      collide::Overlap(a, glm::dmat4(1.0), b, At(10));
+  const double d = seated.deflection;
+  REQUIRE(d > 0.0);
+  CHECK(seated.touching);
+  CHECK_FALSE(seated.intersects);
+  CHECK_FALSE(ExactOverlap(a, glm::mat4(1.0), b, glm::mat4(At(10))));
+
+  // Flush sides, sunk end to end by twice the deflection.
+  const collide::Result sunk =
+      collide::Overlap(a, glm::dmat4(1.0), b, At(10 - 2 * d));
+  CHECK(sunk.intersects);
+  CHECK_FALSE(sunk.touching);
+  CHECK(ExactOverlap(a, glm::mat4(1.0), b, glm::mat4(At(10 - 2 * d))));
+
+  // Apart by a little more than nothing: clear.
+  const collide::Result apart =
+      collide::Overlap(a, glm::dmat4(1.0), b, At(10 + 0.5));
+  CHECK_FALSE(apart.intersects);
+  CHECK_FALSE(apart.touching);
+}
+
+TEST_CASE("A small block seated on a big one touches; sunk into it, it "
+          "clashes",
+          "[collide]") {
+  collide::ClearCache();
+  const CADShape big = Box({0, 0, 0}, {40, 40, 10});
+  const CADShape small = Box({0, 0, 0}, {6, 6, 6});
+  const collide::Result seated =
+      collide::Overlap(big, glm::dmat4(1.0), small, At(5, 7, 10));
+  const double d = seated.deflection;
+  CHECK(seated.touching);
+  CHECK_FALSE(seated.intersects);
+  const collide::Result sunk =
+      collide::Overlap(big, glm::dmat4(1.0), small, At(5, 7, 10 - 2 * d));
+  CHECK(sunk.intersects);
+  CHECK(ExactOverlap(big, glm::mat4(1.0), small,
+                     glm::mat4(At(5, 7, 10 - 2 * d))));
+  // Seated with a side flush with the big block's side.
+  CHECK(collide::Overlap(big, glm::dmat4(1.0), small, At(0, 7, 10)).touching);
+  CHECK(collide::Overlap(big, glm::dmat4(1.0), small, At(0, 7, 10 - 2 * d))
+            .intersects);
+}

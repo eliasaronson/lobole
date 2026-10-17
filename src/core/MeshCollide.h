@@ -67,7 +67,23 @@ public:
   [[nodiscard]] const glm::dvec3& Min() const { return m_min; }
   [[nodiscard]] const glm::dvec3& Max() const { return m_max; }
 
-  // Does this mesh, placed by `xfA`, overlap `other` placed by `xfB`?
+  // How this mesh, placed by `xfA`, meets `other` placed by `xfB`
+  // (docs/inspect/README.md#touching-is-not-a-clash):
+  //   * Clear       -- no triangle of one meets one of the other, and
+  //                    neither is inside the other;
+  //   * Touching    -- triangles meet, but only on the surface: every pair
+  //                    that meets is within the coarser deflection of
+  //                    separating, and a point a deflection inside either
+  //                    surface at each meeting is outside the other solid.
+  //                    Two blocks face to face, a part seated on a shoulder:
+  //                    what exact mode calls touching (volume 0);
+  //   * Overlapping -- one solid is in the other deeper than that.
+  // Coplanar triangles always meet under the separating-axis test, so
+  // without the middle answer every face-to-face contact was a clash.
+  enum class Contact { Clear, Touching, Overlapping };
+  [[nodiscard]] Contact Classify(const glm::dmat4& xfA, const Mesh& other,
+                                 const glm::dmat4& xfB) const;
+  // Classify(...) == Overlapping: touching is not overlapping.
   [[nodiscard]] bool Overlaps(const glm::dmat4& xfA, const Mesh& other,
                               const glm::dmat4& xfB) const;
 
@@ -111,8 +127,17 @@ private:
   };
 
   uint32_t BuildNode(uint32_t start, uint32_t count, int depth);
+  // The triangle pairs that meet: `deep` set (and the walk stopped) by the
+  // first that is further than `tolerance` from separating, the rest
+  // collected in `shallow` (indices into m_tris / other.m_tris), up to a cap.
+  struct Meeting {
+    double tolerance = 0.0;
+    bool deep = false;
+    std::vector<std::pair<uint32_t, uint32_t>> shallow;
+    size_t shallowSeen = 0;
+  };
   void Descend(uint32_t nodeA, const Mesh& other, uint32_t nodeB,
-               const glm::dmat4& bToA, bool& hit) const;
+               const glm::dmat4& bToA, Meeting& meet) const;
   // One recursion, two jobs: with `faces` null it MINIMISES (pruning against
   // the best found so far, which shrinks); with `faces` it COLLECTS every
   // face pair within the fixed `limit`.
@@ -129,7 +154,8 @@ private:
 
 // The result of one pair test.
 struct Result {
-  bool intersects = false;
+  bool intersects = false; // Overlapping (Mesh::Classify)
+  bool touching = false;   // Touching: meets on the surface only
   double deflection = 0.0; // the coarser of the two meshes', mm
 };
 

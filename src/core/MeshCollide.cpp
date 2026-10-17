@@ -66,6 +66,51 @@ bool TrianglesIntersect(const glm::dvec3* A, const glm::dvec3* B) {
   return true;
 }
 
+// How far two triangles that meet are from separating: the least overlap
+// of their projections over the same seventeen axes, each normalised -- the
+// separating-axis test's penetration depth. 0 for two coplanar triangles
+// (along their shared normal) and for a triangle whose edge lies on the
+// other's face; the depth of the deeper side for one that pierces another.
+// Negative when an axis separates them.
+double PairDepth(const glm::dvec3* A, const glm::dvec3* B) {
+  double best = 1e300;
+  const auto along = [&](const glm::dvec3& axis) {
+    const double len2 = glm::dot(axis, axis);
+    if (len2 < 1e-18)
+      return true; // degenerate axis proves nothing
+    const double inv = 1.0 / std::sqrt(len2);
+    double aMin = 1e300, aMax = -1e300, bMin = 1e300, bMax = -1e300;
+    for (int i = 0; i < 3; i++) {
+      const double pa = glm::dot(axis, A[i]) * inv;
+      aMin = std::min(aMin, pa);
+      aMax = std::max(aMax, pa);
+      const double pb = glm::dot(axis, B[i]) * inv;
+      bMin = std::min(bMin, pb);
+      bMax = std::max(bMax, pb);
+    }
+    const double overlap = std::min(aMax - bMin, bMax - aMin);
+    best = std::min(best, overlap);
+    return overlap >= 0.0;
+  };
+  const glm::dvec3 ea[3] = {A[1] - A[0], A[2] - A[1], A[0] - A[2]};
+  const glm::dvec3 eb[3] = {B[1] - B[0], B[2] - B[1], B[0] - B[2]};
+  const glm::dvec3 na = glm::cross(ea[0], ea[1]);
+  const glm::dvec3 nb = glm::cross(eb[0], eb[1]);
+  if (!along(na) || !along(nb))
+    return -1.0;
+  for (const glm::dvec3& u : ea)
+    for (const glm::dvec3& v : eb)
+      if (!along(glm::cross(u, v)))
+        return -1.0;
+  for (const glm::dvec3& u : ea)
+    if (!along(glm::cross(u, na)))
+      return -1.0;
+  for (const glm::dvec3& v : eb)
+    if (!along(glm::cross(v, nb)))
+      return -1.0;
+  return best;
+}
+
 bool BoxesOverlap(const glm::dvec3& aLo, const glm::dvec3& aHi,
                   const glm::dvec3& bLo, const glm::dvec3& bHi) {
   return aLo.x <= bHi.x && bLo.x <= aHi.x && aLo.y <= bHi.y && bLo.y <= aHi.y &&
@@ -308,8 +353,11 @@ uint32_t Mesh::BuildNode(uint32_t start, uint32_t count, int depth) {
 }
 
 void Mesh::Descend(uint32_t nodeA, const Mesh& other, uint32_t nodeB,
-                   const glm::dmat4& bToA, bool& hit) const {
-  if (hit)
+                   const glm::dmat4& bToA, Meeting& meet) const {
+  // Enough meeting pairs to probe (Classify): past this they are counted,
+  // not kept.
+  constexpr size_t kKeep = 4096;
+  if (meet.deep)
     return;
   const Node& a = m_nodes[nodeA];
   const Node& b = other.m_nodes[nodeB];
@@ -320,18 +368,25 @@ void Mesh::Descend(uint32_t nodeA, const Mesh& other, uint32_t nodeB,
   const bool aLeaf = a.count > 0;
   const bool bLeaf = b.count > 0;
   if (aLeaf && bLeaf) {
-    for (uint32_t i = 0; i < a.count && !hit; i++) {
-      const Tri& ta = m_tris[m_order[a.start + i]];
+    for (uint32_t i = 0; i < a.count; i++) {
+      const uint32_t ia = m_order[a.start + i];
+      const Tri& ta = m_tris[ia];
       const glm::dvec3 A[3] = {ta.a, ta.b, ta.c};
       for (uint32_t j = 0; j < b.count; j++) {
-        const Tri& tb = other.m_tris[other.m_order[b.start + j]];
+        const uint32_t ib = other.m_order[b.start + j];
+        const Tri& tb = other.m_tris[ib];
         const glm::dvec3 B[3] = {glm::dvec3(bToA * glm::dvec4(tb.a, 1.0)),
                                  glm::dvec3(bToA * glm::dvec4(tb.b, 1.0)),
                                  glm::dvec3(bToA * glm::dvec4(tb.c, 1.0))};
-        if (TrianglesIntersect(A, B)) {
-          hit = true;
+        if (!TrianglesIntersect(A, B))
+          continue;
+        if (PairDepth(A, B) > meet.tolerance) {
+          meet.deep = true;
           return;
         }
+        if (meet.shallow.size() < kKeep)
+          meet.shallow.emplace_back(ia, ib);
+        meet.shallowSeen++;
       }
     }
     return;
@@ -341,11 +396,11 @@ void Mesh::Descend(uint32_t nodeA, const Mesh& other, uint32_t nodeB,
   const double aSize = glm::length(a.hi - a.lo);
   const double bSize = glm::length(bHi - bLo);
   if (bLeaf || (!aLeaf && aSize >= bSize)) {
-    Descend(a.left, other, nodeB, bToA, hit);
-    Descend(a.right, other, nodeB, bToA, hit);
+    Descend(a.left, other, nodeB, bToA, meet);
+    Descend(a.right, other, nodeB, bToA, meet);
   } else {
-    Descend(nodeA, other, b.left, bToA, hit);
-    Descend(nodeA, other, b.right, bToA, hit);
+    Descend(nodeA, other, b.left, bToA, meet);
+    Descend(nodeA, other, b.right, bToA, meet);
   }
 }
 
@@ -480,13 +535,64 @@ bool Mesh::Contains(const glm::dvec3& point) const {
 
 bool Mesh::Overlaps(const glm::dmat4& xfA, const Mesh& other,
                     const glm::dmat4& xfB) const {
+  return Classify(xfA, other, xfB) == Contact::Overlapping;
+}
+
+Mesh::Contact Mesh::Classify(const glm::dmat4& xfA, const Mesh& other,
+                             const glm::dmat4& xfB) const {
   if (m_tris.empty() || other.m_tris.empty())
-    return false;
+    return Contact::Clear;
   const glm::dmat4 bToA = glm::inverse(xfA) * xfB;
-  bool hit = false;
-  Descend(0, other, 0, bToA, hit);
-  if (hit)
-    return true;
+  Meeting meet;
+  meet.tolerance = std::max(m_deflection, other.m_deflection);
+  Descend(0, other, 0, bToA, meet);
+  if (meet.deep)
+    return Contact::Overlapping;
+  if (meet.shallowSeen > 0) {
+    // Every pair that meets is within a deflection of separating. That is
+    // what two faces seated on each other look like -- and also what two
+    // solids sunk into each other look like when their sides are FLUSH
+    // (equal blocks overlapping end to end: each meeting pair is coplanar
+    // or meets on an edge), since no triangle then pierces another. The
+    // difference is the volume, so ask it: a deflection inside each
+    // triangle's own solid, at its centroid, is that point inside the
+    // other solid? On a seat it lies a deflection clear of the other; on
+    // an overlap deeper than the deflection it lies inside.
+    const glm::dmat4 aToB = glm::inverse(bToA);
+    const double depth = meet.tolerance;
+    // Inward: the side of the triangle its own solid is on, asked of the
+    // solid rather than of the winding, which a tessellation does not
+    // promise.
+    const auto probe = [depth](const Mesh& own, const Tri& t,
+                               const Mesh& against,
+                               const glm::dmat4& ownToAgainst) {
+      const glm::dvec3 c = (t.a + t.b + t.c) / 3.0;
+      glm::dvec3 n = glm::cross(t.b - t.a, t.c - t.a);
+      const double len = glm::length(n);
+      if (len < 1e-18)
+        return false;
+      n /= len;
+      for (const double sgn : {1.0, -1.0}) {
+        const glm::dvec3 p = c + n * (sgn * depth);
+        if (!own.Contains(p))
+          continue;
+        return against.Contains(glm::dvec3(ownToAgainst * glm::dvec4(p, 1.0)));
+      }
+      return false;
+    };
+    // Spread over the pairs found: a seat's contact can be thousands of
+    // coplanar pairs, and a few dozen spread across it decide it.
+    constexpr size_t kProbes = 24;
+    const size_t n = meet.shallow.size();
+    const size_t step = std::max<size_t>(1, n / kProbes);
+    for (size_t k = 0; k < n; k += step) {
+      const auto [ia, ib] = meet.shallow[k];
+      if (probe(*this, m_tris[ia], other, aToB) ||
+          probe(other, other.m_tris[ib], *this, bToA))
+        return Contact::Overlapping;
+    }
+    return Contact::Touching;
+  }
   // No triangle crosses. One may still be wholly INSIDE the other — a bolt
   // buried in a block — which a surface test alone calls clear.
   //
@@ -521,13 +627,15 @@ bool Mesh::Overlaps(const glm::dmat4& xfA, const Mesh& other,
     return glm::dvec3(into * glm::dvec4(c, 1.0));
   };
   if (boxInside(bLo, bHi, m_min, m_max))
-    return Contains(pointOf(other, bToA));
+    return Contains(pointOf(other, bToA)) ? Contact::Overlapping
+                                          : Contact::Clear;
   const glm::dmat4 aToB = glm::inverse(bToA);
   glm::dvec3 aLo, aHi;
   TransformBox(aToB, m_min, m_max, aLo, aHi);
   if (boxInside(aLo, aHi, other.m_min, other.m_max))
-    return other.Contains(pointOf(*this, aToB));
-  return false;
+    return other.Contains(pointOf(*this, aToB)) ? Contact::Overlapping
+                                                : Contact::Clear;
+  return Contact::Clear;
 }
 
 Result Overlap(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
@@ -536,7 +644,9 @@ Result Overlap(const CADShape& a, const glm::dmat4& xfA, const CADShape& b,
   const auto mb = CachedMesh(b);
   Result out;
   out.deflection = std::max(ma->Deflection(), mb->Deflection());
-  out.intersects = ma->Overlaps(xfA, *mb, xfB);
+  const Mesh::Contact c = ma->Classify(xfA, *mb, xfB);
+  out.intersects = c == Mesh::Contact::Overlapping;
+  out.touching = c == Mesh::Contact::Touching;
   return out;
 }
 

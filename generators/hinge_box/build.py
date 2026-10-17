@@ -387,9 +387,10 @@ def run_swing(d, s, mate, lid_occ, clash, samples):
 
 def check_swing(s, res, lid_occ):
     """Clean all the way over, and the lid on the rim at the end: its inner
-    face (z = lid thickness on the bed) at the box's height. A mesh check
-    calls touching a clash (run_motion_study), so the last sample may show
-    the lid against the rim and nothing else."""
+    face (z = lid thickness on the bed) at the box's height. The mesh check
+    calls a face seated on a face touching, not a clash
+    (docs/inspect/README.md#touching-is-not-a-clash), so the last sample is
+    clean too, with the lid touching the box."""
     samples = res["samples"]
     D, a = s["depth"], s["standoff"]
     path = {t["name"]: t["points_mm"] for t in res["trace"]}
@@ -412,15 +413,21 @@ def check_swing(s, res, lid_occ):
     before = [smp for smp in samples[:-1] if smp.get("clashes")]
     last = {tuple(sorted((c["a_name"], c["b_name"])))
             for c in samples[-1].get("clashes", [])}
+    touching = {tuple(sorted((c["a_name"], c["b_name"])))
+                for c in samples[-1].get("touching", [])}
     if before:
         raise SystemExit(f"hinge_box: the lid clashes on its way over at "
                          f"{[smp['value'] for smp in before]} deg: "
                          f"{res.get('table')}")
-    if last - {("box", "lid")}:
-        raise SystemExit(f"hinge_box: at 180 {last}")
+    if last:
+        raise SystemExit(f"hinge_box: at 180 {last} clash: the lid on the "
+                         f"rim should touch it, no more")
+    if ("box", "lid") not in touching:
+        raise SystemExit(f"hinge_box: at 180 the lid does not touch the "
+                         f"box's rim: touching {touching}")
     return {"status": res["collision_status"], "samples": len(samples),
             "clean_before_180": True,
-            "at_180": sorted(" x ".join(p) for p in last) or ["clean"],
+            "at_180": ["box x lid touching"],
             "lid_inner_face_z": rim, "rim_z": s["height"],
             "half_way_centre_z": up[2]}
 

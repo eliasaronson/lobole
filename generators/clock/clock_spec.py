@@ -548,9 +548,11 @@ def layers_z(s):
     z["anchor"] = z["escape"]
     z["third"] = (z["escape_pinion"][0] + es, z["escape_pinion"][0] + es + t_w)
     # The centre wheel starts an end shake above the escape pinion's top,
-    # which it overlaps seen from the front: a face shared there is
-    # contact, and the clash check calls it one. The third pinion runs on
-    # an end shake past it.
+    # which it overlaps seen from the front: two faces turning at different
+    # rates must not share a face (they rub). The mesh clash check used to
+    # call a shared face a clash too; it calls it touching now
+    # (docs/inspect/README.md#touching-is-not-a-clash), and the play stays
+    # for the rubbing. The third pinion runs on an end shake past it.
     z["centre"] = (z["escape_pinion"][1] + es, z["escape_pinion"][1] + es
                    + t_w)
     z["third_pinion"] = (z["third"][1], z["centre"][1] + es)

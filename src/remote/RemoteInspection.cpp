@@ -1929,7 +1929,9 @@ bool MeshCrosses(const ContactEnt& a, const ContactEnt& b, double& deflection) {
       const collide::Result r =
           collide::Overlap(x.shape, glm::dmat4(1.0), y.shape, glm::dmat4(1.0));
       deflection = std::max(deflection, r.deflection);
-      if (r.intersects)
+      // Touching too: a seated pair is in contact, and the boolean is
+      // what says so exactly.
+      if (r.intersects || r.touching)
         return true;
     }
   }
@@ -2630,7 +2632,14 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                seen, d, std::memory_order_relaxed))
           ;
       };
-      const auto pairMesh = [&](const Target& ta, const Target& tb) {
+      // A pair is a clash when any body pair overlaps, touching when the
+      // rest only meet on the surface (collide::Mesh::Classify: a face
+      // seated on a face, within the deflection), the answer exact mode
+      // gives the same pair (docs/inspect/README.md#touching-is-not-a-clash).
+      bool meshTouching = false;
+      const auto pairMesh = [&](const Target& ta, const Target& tb,
+                                bool* touching = nullptr) {
+        bool touch = false;
         for (const Body& a : ta.bodies) {
           if (!a.shape.IsValid())
             continue;
@@ -2642,8 +2651,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
             widenDeflection(r.deflection);
             if (r.intersects)
               return true;
+            touch = touch || r.touching;
           }
         }
+        if (touching)
+          *touching = touch;
         return false;
       };
       // The sweep's exact check: the overlap's volume AND where it is. The

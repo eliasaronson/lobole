@@ -75,6 +75,16 @@ struct PressFit {
   double volume = 0.0; // relieved, mm3
 };
 
+// A pair a MESH check found meeting on the surface only
+// (collide::Mesh::Contact::Touching): two faces seated on each other. Not a
+// clash -- exact mode calls the same pair touching, a volume of 0 -- and
+// listed per sample so the contact is still visible.
+struct Touch {
+  uint64_t a = 0, b = 0;
+  uint64_t aInner = 0, bInner = 0; // as Clash
+  std::string aName, bName;
+};
+
 struct UnknownContact {
   uint64_t a = 0, b = 0;
   std::string aName, bName;
@@ -100,6 +110,7 @@ struct Sample {
   };
   std::vector<LeafWorld> leaves;
   std::vector<Clash> clashes;
+  std::vector<Touch> touching; // mesh mode only
   std::vector<UnknownContact> unknownContacts;
   // Every moving mate's DOF values at this sample (radians, mm): what the
   // study actually turned and slid, so a caller need not recover an angle
@@ -143,8 +154,8 @@ struct Result {
   // collide, so they are checked once, at `rigidCheckedAt` (the first sample
   // whose clashes were checked), and skipped at every later sample:
   // `pairsRigidChecked` body pairs checked there, `pairsRigid` skips after.
-  // Checked EXACTLY whatever `clashMode` says: touching is what a fastened
-  // pair does, and a mesh check calls touching a clash.
+  // Checked EXACTLY whatever `clashMode` says: an exact check is what
+  // relieves a fastened pair's engaged thread and press fit.
   size_t pairsRigid = 0;
   size_t pairsRigidChecked = 0;
   int rigidCheckedAt = -1;   // -1: never (no clash check ran)

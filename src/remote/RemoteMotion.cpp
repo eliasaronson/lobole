@@ -122,9 +122,12 @@ constexpr MethodDoc MotionMethods[] = {
      "clash there is a STANDING clash, marked `rigid: true` and listed in "
      "`rigid_clashes`, and the study is not clean. Plus "
      "`clean`, `seated_contacts` and `appeared` (what TURNING changed: a "
-     "mesh check calls touching a clash, and at rest a propeller touches "
-     "its motor and its screws, so the pairs already in contact at the "
-     "first sample are counted and the rest are listed), `worst_sample`, "
+     "mesh check cannot relieve a thread or a press fit, so the pairs "
+     "already clashing at the first sample are counted and the rest are "
+     "listed). A mesh check calls a pair that meets only on the surface "
+     "-- a face seated on a face, within the deflection -- `touching`, "
+     "listed per sample {a, b, a_name, b_name}, not a clash, as an exact "
+     "check calls it touching. `worst_sample`, "
      "`table` (the same as text, for a report), "
      "`deflection_mm` for a mesh check (the coarsest tessellation it "
      "decided on: the study's clash_deflection_mm when it sets one), and "
@@ -475,6 +478,14 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
         bj["path"] = b->path;
       sj["branch_jump"] = std::move(bj);
     }
+    // A mesh check's pairs that met on the surface only: seated, not
+    // clashing (docs/inspect/README.md#touching-is-not-a-clash).
+    sj["touching"] = json::array();
+    for (const motion::Touch& t : sm.touching) {
+      json tj{{"a", t.a}, {"b", t.b}, {"a_name", t.aName}, {"b_name", t.bName}};
+      AddSidePaths(tj, t.a, t.aInner, t.b, t.bInner);
+      sj["touching"].push_back(std::move(tj));
+    }
     sj["unknown_contacts"] = json::array();
     for (const auto& c : sm.unknownContacts) {
       json uj{{"a", c.a},
@@ -519,11 +530,13 @@ json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
     }
     samples.push_back(sj);
   }
-  // What TURNING changed. A mesh sweep calls touching a clash, and at rest a
-  // propeller touches its motor, its nut and four screws — so a study of a
-  // working machine is never "clean" and the caller has to work out which
-  // contacts are news. That is this: the pairs in contact at the FIRST
-  // sample are seated, and anything else that shows up appeared.
+  // What TURNING changed. A mesh sweep called touching a clash, and at rest
+  // a propeller touches its motor, its nut and four screws -- so a study of
+  // a working machine was never "clean" and the caller had to work out
+  // which contacts were news. A face seated on a face now reads touching
+  // (each sample's `touching`), but a mesh check still cannot relieve a
+  // thread or a press fit, so: the pairs clashing at the FIRST sample are
+  // seated, and anything else that shows up appeared.
   //
   // A RIGID pair's clash is neither: the two never move relative to each
   // other, so it is a standing clash, checked once, and listed on its own.

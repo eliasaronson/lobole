@@ -319,7 +319,7 @@ using Key = std::pair<uint64_t, uint64_t>;
 // kinematics-only pass through every sample.
 //
 // Two parts bolted together touch — that is what a bolted joint is — and a
-// mesh check reports touching as a clash, so checking every fixed joint at
+// mesh check reported touching as a clash, so checking every fixed joint at
 // every sample made `clean` impossible on a real engine. It is also the
 // wrong question to ask 48 times: a pair whose relative pose never changes
 // has the same answer at every pose. So a rigid pair is checked ONCE, at the
@@ -678,6 +678,7 @@ bool WorldBox(const Body& b, const glm::dmat4& world, glm::dvec3& lo,
 struct Hit {
   bool cached = false;
   bool hit = false, known = false;
+  bool touching = false; // a mesh check: met on the surface only
   double volume = 0.0, deflection = 0.0;
   glm::dvec3 centroid{0.0}, bboxMin{0.0}, bboxMax{0.0};
   // The press fits the exact check relieved (Measure::SetContact).
@@ -727,7 +728,9 @@ Hit MeshHit(const Placed& a, const Placed& b, MeshCache& meshes,
   const auto ma = MeshFor(meshes, a.body->shape, deflectionMm);
   const auto mb = MeshFor(meshes, b.body->shape, deflectionMm);
   h.deflection = std::max(ma->Deflection(), mb->Deflection());
-  h.hit = ma->Overlaps(a.world, *mb, b.world);
+  const collide::Mesh::Contact c = ma->Classify(a.world, *mb, b.world);
+  h.hit = c == collide::Mesh::Contact::Overlapping;
+  h.touching = c == collide::Mesh::Contact::Touching;
   return h;
 }
 
@@ -931,6 +934,7 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
   // that is inherently sequential, so it lives here and not in the workers.
   // `pairsChecked` counts every check answered, repeats included.
   std::vector<std::map<std::pair<Key, Key>, Clash>> found(placed.size());
+  std::vector<std::set<std::pair<Key, Key>>> touched(placed.size());
   std::set<std::pair<Key, Key>> pressFitted;
   for (const PressFit& f : out.pressFits)
     pressFitted.insert({std::min(Key{f.a, f.aInner}, Key{f.b, f.bInner}),
@@ -978,6 +982,16 @@ size_t CheckAllClashes(const std::vector<std::vector<Placed>>& placed,
         f.volume += pf.volume;
       }
       out.pressFits.push_back(std::move(f));
+    }
+    if (h.touching && !h.hit && touched[cd.s].insert(cd.key).second) {
+      Touch t;
+      t.a = p1.key.first;
+      t.aInner = p1.key.second;
+      t.b = p2.key.first;
+      t.bInner = p2.key.second;
+      t.aName = p1.name;
+      t.bName = p2.name;
+      s.touching.push_back(std::move(t));
     }
     if (!h.hit || found[cd.s].count(cd.key))
       continue;
