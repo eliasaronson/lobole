@@ -59,7 +59,8 @@ seed  := tag '/g' entityId       side face swept from sketch entity <entityId>
        | tag '/p' entityId '/' role
                                  a hole's face by role (bore, bottom, counterbore,
                                  counterbore_floor, countersink, point -- a
-                                 blind floor's drill point; '.n' when one
+                                 blind floor's drill point, roof -- a printed
+                                 teardrop's flanks and flat; '.n' when one
                                  role is in pieces), per sketch point; a face
                                  with no role is '/p' entityId '/face' k
        | tag '/' role            a generated bearing's face by role (bore,
@@ -187,6 +188,12 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   `<outer face>;G<tag>`. Index-order names numbered the faces in the order the
   builder handed them back, which changes from run to run, so a draft on a
   shelled body's inner wall picked another face after a rebuild.
+- **A tapered extrude** keeps a straight one's names: the prism is named
+  as ever and each wall's name moves to the face the draft made of it
+  (`BRepOffsetAPI_DraftAngle::ModifiedShape`); the caps keep theirs and the
+  edges are named again from their faces. Turning a taper on, changing it,
+  or changing the length renames nothing
+  ([tapered extrudes](README.md#tapered-extrudes)).
 - **Holes** (`HoleFeature::NameByRole`) name each drilled face by what it is,
   keyed by the sketch point it was drilled at: `<hole>/p<entity>/bore`, and
   so on. Deleting one point renames none of the other holes. These names

@@ -94,6 +94,37 @@ cylinder's side through `RunStudy` twists the end by `TL/2GJ`; a remote
 force's nodal loads are `F` and `(p − c) × F`, and the reactions at the
 clamp answer them; the refusals.
 
+### Loads on part of a face
+
+A drum turning on a stretch of an arbor, a rod's small end on the middle of
+a wrist pin, a pin held where it is pressed into its bosses: the load is on
+PART of a face that is not a face of its own. A load or a support takes
+`region` (`fem::LoadRegion`, vNEXT):
+
+- `{normal, from_mm, to_mm}`, a **band**: the face between the planes
+  `n·p = from_mm` and `n·p = to_mm` (`n` the unit normal, mm in the part's
+  frame); or `{center_mm, radius_mm}`, the face **within a radius** of a
+  point.
+- It is applied to the face's **mesh facets whose centroids lie in it**
+  (`MeshPlannedStudy`): a force's whole `magnitude` spread over them, a
+  pressure on them, a support's nodes theirs; a torque or a remote load is
+  the field over them. The band's edge falls inside a row of facets, so the
+  resultant's place is the mesh's: a finer mesh puts it closer.
+- **Refused**: a zero normal, a band whose `to_mm` is not past `from_mm`, a
+  radius that is not positive, a key that is neither form (naming both) —
+  by `add_load` and on load; a region on an assembly or topology study
+  (a topology study freezes whole faces); and at the run, a region that
+  holds none of its face's facets, naming the load.
+- The generators load a seat this way rather than modelling a step on the
+  shaft to make it a face: the clock's barrel arbor, the engine's wrist pin
+  (`generators/_lib.py`'s `pin_strength`).
+
+The serialized study carries it, so it is in the input hash. Test:
+`tests/test_fem_loads.cpp`, "a pull on half a cantilever's end bends it by
+its eccentricity": a pull along the axis on the upper half of the end face
+drops the tip by `F (h/4) L² / 2EI`, within 10 %; on the whole face, not at
+all; a region off the face is refused, and so is an empty band.
+
 ### Units
 
 The solver works in mm–N–MPa (lengths and displacements mm, forces N,
@@ -507,6 +538,15 @@ beam and nothing across it, its bottom no tension), the round trip in
 `tests/test_study_inputs.cpp`, the RPCs and their refusals in
 `tests/fem_smoke.py`.
 
+**A printed pin.** `generators/_lib.py`'s `pin_strength(d, part, face,
+load_n, direction, seat, layer_normal, region=…)` is the hook's pattern for
+a pin: one static study of the pin's part as printed, held at its seat and
+loaded on its face (each optionally a [region](#loads-on-part-of-a-face)),
+read with `layer_normal`; it returns `interlayer_factor_of_safety` and the
+stresses for a receipt, and a factor under 2 stops the run. The
+Strandbeest's crank stub, the clock's barrel arbor and the engine's wrist
+pin state theirs in their receipts.
+
 ## Assembly studies
 
 A study on an `AssemblyDocument` names **occurrences**, each in one role
@@ -649,7 +689,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
 | `add_study {type?, name?}` | `type`: static \| modal \| topology (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
 | `set_study` | `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes`, `participants`, `load_cases`, `shape_from`, topology parameters |
-| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)) |
+| `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |
 | `mesh_study {id, async?}` | per-body nodes, elements, worst quality |

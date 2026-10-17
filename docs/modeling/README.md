@@ -278,6 +278,8 @@ or the GUI. The saved form did not change, so this is not a format version.
   ring (OCC `MakeOffset`), composing with any end condition.
 - **Twist** (`twist_deg`, `herringbone`): the profile turns about the sketch
   normal as it goes ([twisted extrudes](#twisted-extrudes)).
+- **Taper** (`taper_deg`): the walls lean in or out as it goes
+  ([tapered extrudes](#tapered-extrudes)).
 - A cut or add extrude keeps the prism it swept (`ToolShape()`), which is what
   lets a pattern repeat it; a Hole keeps its drilled tool the same way, so a
   bolt circle is one Hole and a pattern.
@@ -343,6 +345,41 @@ right-handed helix whichever way the extrude runs.
   about 12 s for the same pair as lofts through turned sections: the flanks
   nearly touch along a line, which is the hard case for OCC's
   surface-to-surface extrema.
+
+### Tapered extrudes
+
+`taper_deg` (+ `taper_expr`) leans every wall of a blind extrude IN by that
+angle from the extrude direction over its length (negative leans out), about
+the sketch plane: the section on the plane is the sketch, and the far end is
+the profile offset by `distance · tan(taper)`. A boss whose underside prints
+at 45°, a cam lobe printed standing, a draft for a moulded or cast pocket.
+
+- **Built by drafting the straight prism.** `ExtrudeFeature::TaperPrism`
+  runs `BRepOffsetAPI_DraftAngle` on each side face of the prism
+  `BuildPrismNamed` swept, about the neutral plane of the sketch with the
+  extrude direction as the pull: a line's wall becomes an inclined plane,
+  an arc's a cone. A profile of several regions is a compound, drafted
+  solid by solid. A hole's walls lean the other way round from the
+  outer's, so the material narrows (or widens) everywhere alike.
+- **Names are a straight extrude's.** Each wall's name moves to the face
+  the draft made of it (`ModifiedShape`), the caps keep `cap0` and `cap1`,
+  and the edges are named again from their faces: a fillet, a sketch on a
+  wall or a face reference survives turning a taper on, changing it, or
+  changing the length (`test_printed_features.cpp`,
+  "a taper keeps every wall's name across an edit").
+- **Refused past the angle at which the profile closes up**, naming it: the
+  walls move in by `L tan(taper)` at the far end, so the profile is gone
+  when that reaches its inradius (the largest circle inside its material,
+  found on its tessellated boundary by a grid and a pattern search), or,
+  leaning out, a hole's inradius. A 20 mm square over 10 mm is refused at
+  45° and over: "the taper must be under 45 degrees". A profile with a
+  feature smaller than that — a cam lobe whose nose circle is narrower than
+  the taper's offset — can still fail in the kernel before it, and says so.
+- **Refused with** `two_sided`, `symmetric`, `up_to_face` or `through_all`,
+  thin, or a twist (`WhyIncomplete`, so the tool window shows it and
+  `add_feature` refuses it), and at ±90° and past.
+- **In the GUI:** the Extrude window's *Taper (deg)* field, on a blind solid
+  extrude.
 
 ### Patterns
 
@@ -813,7 +850,8 @@ reference case.
 
 - A thread runout (DIN 76) or a faded end on a modelled thread, and a
   blind tapped hole's thread trimmed by its drill point: the ends are square.
-- Draft angle on an extrude or a rib; per-side rib thickness; multi-profile
+- Draft angle on a rib (an extrude has one: `taper_deg`); per-side rib
+  thickness; multi-profile
   rib networks.
 - Up-to-face against a curved face (only planar targets).
 - A tapered (conical) helix; more than one loft guide; a scaling

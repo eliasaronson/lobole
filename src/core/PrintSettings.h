@@ -22,8 +22,9 @@
 // stated is the slicer preset's, and the job leaves it to the slicer.
 //
 // No I/O. What reads them: export_print_job (one object per body, these as
-// its per-object settings) and the printed mass (core/PrintedMass.h), which
-// needs walls, both shells and the infill stated.
+// its per-object settings), the printed mass (core/PrintedMass.h), which
+// needs walls, both shells and the infill stated, and a printed hole's
+// teardrop, which points up the part's `direction`.
 namespace printset {
 
 // The infill patterns a job can name, in display order.

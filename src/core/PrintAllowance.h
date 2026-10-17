@@ -15,9 +15,10 @@
 // MODELLED at its size plus an allowance, and this is the table that says by
 // how much.
 //
-// Like a tolerance it drives NO geometry. It is what check_fit, check_fits,
-// print_allowance and the Thread editor REPORT — "H7 on a printed Ø8 bore:
-// model Ø8.2" — and a generator applies it where it models the part.
+// It is what check_fit, check_fits, print_allowance and the Thread editor
+// REPORT — "H7 on a printed Ø8 bore: model Ø8.2" — and a generator applies
+// it where it models the part. The geometry it drives itself is a Hole's:
+// a clearance fit's allowance, and a printed teardrop's flat (its bridge).
 //
 // No I/O, every number MILLIMETRES ON THE DIAMETER and signed so that
 // model = basic + allowance: a hole's is positive (model it larger), a
@@ -83,7 +84,8 @@ struct Profile {
   std::string name;
   Table table; // its base process and material, conditions and rows
   // The STL chord deviation the profile was calibrated at, mm; 0 = not
-  // stated, and an export takes a tenth of the smallest gap a side.
+  // stated, and an export takes its material's own (BuiltinStlDeflectionMm)
+  // or a tenth of the smallest gap a side.
   double stlDeflectionMm = 0.0;
   // The slicer preset's layer height, mm; 0 = not stated.
   double layerHeightMm = 0.0;
@@ -194,8 +196,8 @@ ProfileFromBuiltin(const std::string& name, const std::string& process,
 // press (an interference opens nothing); 0 for none.
 [[nodiscard]] double SmallestGapSideMm(const Table& t);
 // The chord deviation a printed part's STL is exported at: the profile's
-// stated one, else a tenth of the smallest gap a side (0 when the table has
-// nothing to keep).
+// stated one, else its material's own (TPU's), else a tenth of the smallest
+// gap a side (0 when the table has nothing to keep).
 [[nodiscard]] double StlDeflectionMm(const Process& p);
 // A built-in material's own chord deviation, where a tenth of its gap a side
 // would let the chords eat its holes (TPU's); 0 = none of its own.

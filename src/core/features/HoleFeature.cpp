@@ -653,7 +653,8 @@ void HoleFeature::RecordTapping(std::vector<Body>& bodies) const {
 
 // Each face of the drilled tool by what it is, keyed by the sketch entity
 // its hole was drilled at: `<id>/p<entity>/bore`, `/bottom`, `/counterbore`,
-// `/counterbore_floor`, `/countersink`. Positional names interleaved every
+// `/counterbore_floor`, `/countersink`, `/point`, `/roof` (a printed
+// teardrop's flanks and flat). Positional names interleaved every
 // hole's faces, so nothing could ask for "the bores", and adding a point
 // renumbered the rest (docs/modeling/toponaming.md#naming-grammar).
 void HoleFeature::NameByRole(const CADShape& tool,

@@ -1848,7 +1848,9 @@ _reference("add_load", "Add a boundary condition to a study. type is 'fixed' "
           "(zero displacement), 'force' (a total vector in N over the face), "
           "or 'pressure' (MPa along the inward normal). face is {feature_id, "
           "element}. magnitude is N/MPa (number or expression); direction is "
-          "[x,y,z] for a force. Returns {id} of the new load. Every loaded "
+          "[x,y,z] for a force. region? puts it on PART of its face: "
+          "{normal, from_mm, to_mm} (a band) or {center_mm, radius_mm}. "
+          "Returns {id} of the new load. Every loaded "
           "body needs at least one fixed face.")
 
 

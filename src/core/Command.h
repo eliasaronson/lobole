@@ -294,9 +294,10 @@ private:
 };
 
 // Sets (or clears, with nullopt) how the part is printed
-// (docs/tolerances/README.md#printed-parts). Drives no geometry, so unlike
-// the sheet's rules it rebuilds nothing — it changes what the fit checks
-// report.
+// (docs/tolerances/README.md#printed-parts). It drives the geometry of the
+// holes modelled from it -- a clearance fit's allowance, a printed
+// teardrop -- and rebuilds those (Document::SetPrintProcess); otherwise it
+// changes what the fit checks report.
 class SetPrintProcessCommand : public Command {
 public:
   explicit SetPrintProcessCommand(std::optional<printfit::Process> process);
@@ -311,7 +312,8 @@ private:
 };
 
 // Sets a part's slicer settings (core/PrintSettings.h), the part's and its
-// bodies' overrides together. Drives no geometry.
+// bodies' overrides together. Drives no geometry but a printed hole's
+// teardrop, which follows the part's direction.
 class SetPrintSettingsCommand : public Command {
 public:
   explicit SetPrintSettingsCommand(printset::PartSettings settings);

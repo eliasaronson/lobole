@@ -1042,7 +1042,7 @@ class Feature:
         """The faces this feature made, in `role` if given: start_cap,
         end_cap (floor), side (walls; `entity=` the sketch line), generated,
         bore, bottom, counterbore, counterbore_floor, countersink, point
-        (a blind hole's drill point), outside, inner_side, outer_side, shield (a bearing's), positional,
+        (a blind hole's drill point), roof (a printed teardrop's), outside, inner_side, outer_side, shield (a bearing's), positional,
         boundary."""
         return self._ask(role, entity, edges=False)
 

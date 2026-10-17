@@ -34,8 +34,8 @@ face, cosmetic by default; a modelled one cuts the real helical groove.
   ([printed parts](../tolerances/README.md#printed-parts)) it is modelled at
   that size plus the process's hole allowance: M6 normal is Ø6.6 in steel
   and a Ø6.8 model in PETG. A tapped hole keeps its tap drill. The regen hash
-  folds the process into these holes alone, so setting or clearing it
-  rebuilds them and nothing else.
+  folds the process into these holes and [printed](#printed-holes) ones
+  alone, so setting or clearing it rebuilds them and nothing else.
 - **A unified thread taps too.** `fit: {thread: "3/8-16 UNC", kind:
   "tapped"}` drills the unified table's own tap drill (5/16" here, see
   [Thread standards](#thread-standards)), because the vendored tap table is
@@ -100,6 +100,36 @@ GUI: the Hole tool (`###tb_hole`: pick a flat face, click the centres). The
 editor's **Drilled for** combo lists the clearance table's own sizes (so it
 cannot offer a size the lookup would refuse) and a **Fit** combo; under a fit
 the diameter row is read-only, since the next regeneration would overwrite it.
+
+### Printed holes
+
+A hole across the print direction prints its roof as a ceiling that sags.
+`printed: teardrop` raises the roof to a 45-degree point; `teardrop_flat`
+cuts the point off in a flat on the round's top, raised until it is no wider
+than the process bridges (`printfit::MaxBridgeMm`: 10 mm for FDM PLA and
+PETG, 5 for [TPU](../tolerances/README.md#tpu)): on a small hole the flat
+sits on the round's top, on a large one higher, where it is that wide.
+
+- **The section** is three quarters of the round under its 45-degree
+  tangents and the kite from the centre to the point, `(3/4)·π·r² + r²`
+  (a flat takes the tip's `h²` off it). Every point of the round under the
+  tangents is kept, so a pin in it bears on the whole of its lower round,
+  and the point is air over it: the clash check sees no overlap there.
+- **The point is up the part's print direction**: the part's print
+  settings' `direction` (`set_print_settings`, unset +Z), in the part's
+  frame (`RegenContext::printUp`). A part printed on its side points its
+  teardrops sideways in the model and up on the bed. The regen hash folds
+  the direction into printed holes only, and setting it rebuilds them.
+- **Refused**, naming why: on a part with no print process (a teardrop is
+  printing's), on a hole whose axis is within 45° of the print direction
+  (it prints its own roof), and with a countersink. A counterbore is pointed
+  as its bore is. An unknown spelling on load names the three accepted.
+- **Faces by role**: the round is `bore`, the flanks and the flat `roof`
+  (`<id>/p<entity>/roof`, `roof.1`, ...).
+- `check_print`'s overhang passes a teardrop hole (its flanks read 45.000)
+  and fails the round one.
+- **GUI:** the Hole editor's *Printed* combo (Round, Teardrop, Teardrop,
+  flat).
 
 **Drawings.** `drawing::FormatHoleCallout` (`src/core/drawing/DrawingCallout.cpp`)
 writes `Ø4.5 THRU` / `Ø4.5 DEEP 6` plus counterbore/countersink. A clearance

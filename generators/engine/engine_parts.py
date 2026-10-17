@@ -171,8 +171,8 @@ TPU_PRINT = {"timing belt": {"walls": 3, "top_layers": 5, "bottom_layers": 3,
              "valve spring": {"walls": 3}}
 
 
-# A part's own settings over those: the camshaft stands 170 mm tall on a
-# bar's end, so it prints with a brim to hold it down.
+# A part's own settings over those: the camshaft stands about 200 mm tall
+# on a bar's end, so it prints with a brim to hold it down.
 PART_PRINT = {"camshaft": {"brim": "outer"}}
 
 

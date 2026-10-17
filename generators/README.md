@@ -65,7 +65,9 @@ profile's keep-out zones, which every plate packer keeps clear of), and
 ([print jobs](../docs/tolerances/README.md#print-jobs)): a job of several
 plates takes its slicer config from `$LOBOLE_SLICER_CONFIGS/<filament>.json`
 (`tools/bambu-config.py` makes them) and without one is not written, the
-receipt saying why. Most newer generators use the SDK
+receipt saying why. `pin_strength` studies a printed pin across its layers
+and stops a run under a factor of 2
+([printed layers](../docs/simulation/README.md#printed-layers)). Most newer generators use the SDK
 (`python/lobole/sdk.py`) directly.
 
 What a generator makes goes to the untracked `scratch/<name>/`, or under

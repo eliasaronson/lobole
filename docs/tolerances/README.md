@@ -301,24 +301,66 @@ Where the numbers come from, beyond the table's column:
   same PETG is printed or moulded with different allowances, so it is not the
   material. It is not a preference, because a part printed on one machine is
   printed on every one that opens it. `set_print_process` is an undoable
-  command that rebuilds nothing.
+  command that rebuilds only the holes modelled from it (below).
 - **Refused, never substituted.** An unknown process names the processes; a
   material the process has no data for names the ones it has. The same
   refusal on load, and in `check_fit`'s `print`.
-- **Drives one geometry: a Hole's clearance fit.** A Hole with a fit
+- **Drives a Hole's geometry: its clearance fit, and a printed
+  teardrop.** A Hole with a fit
   (`M6 normal`, [../modeling/holes-and-threads.md](../modeling/holes-and-threads.md#hole))
   names the size the hole must come out at, so on a printed part it is
   modelled at that size plus the hole allowance: M6 normal is Ø6.6 in steel
   and a Ø6.8 model in PETG. A tapped hole stays at its tap drill (what a
-  printed thread wants is the thread report's to say). The regen hash folds
-  the process — `printfit::Fingerprint`, the pair, the profile's name and
-  every row's range and allowance — into fitted clearance holes only, so
+  printed thread wants is the thread report's to say). A Hole printed as a
+  teardrop (`printed`,
+  [../modeling/holes-and-threads.md](../modeling/holes-and-threads.md#printed-holes))
+  is refused without a process, and its flat is the process's bridge. The
+  regen hash folds the process — `printfit::Fingerprint`, the pair, the
+  profile's name and every row's range and allowance — into fitted
+  clearance holes and printed holes only, so
   setting it, or taking a profile whose hole row changed, rebuilds those and
   what follows them, and nothing on a part without one. The requirements
   hash folds the same fingerprint, so a profile edit restales a printed
   fit's verdict. Everywhere else
   the generator applies it where it models the part, and the checks say what
   to model.
+
+### TPU
+
+| fdm, tpu | size | allowance | source |
+|---|---|---|---|
+| hole | any | +0.2 | **to confirm with a coupon**: the FDM row (3dprintbounty.com tolerances guide); nothing published measures TPU 95A apart from it |
+| shaft | any | −0.1 | **to confirm**: the FDM row; TPU 95A's own is not published |
+| gap | any | +1.0 | **to confirm**: 0.5 a side to slide (blog.uavmodel.com print-in-place clearance guides, 2026: 0.5 sliding, 0.3 for a hinge pin that deforms to turn; another table, 0.5 and up). TPU sags into a gap as it prints and bonds to itself; the guides disagree, and none measured a Bambu printer |
+| press | any | 0 | **to confirm**: a TPU sleeve fits at 0, or 0.1 mm under on the radius (forum.prusa3d.com, "question about designing for TPU", on a 95A) |
+
+TPU 95A (Bambu Lab TPU 95A HF) is a built-in table so that a printed TPU part
+— a belt, a spring, a gasket — is a printed part like any other:
+`check_print` judges it, its allowances come from `print_allowance`, and a
+TPU profile on the printer fits its plate to the bed. Every row says
+**TO CONFIRM WITH A COUPON** in its source; none is measured here. It
+carries **no thread rows**: a printed thread in a 95A flexes off its flank
+and nothing published says what allowance holds one, so a TPU thread is
+refused naming the table rather than read from PLA's. Its limits:
+
+- **overhang 45°**, the FDM rule. Bambu's TPU 95A HF data sheet (Technical
+  Data Sheet V1.0) gives about 55° as the most its tuned profile prints; a
+  flexible layer sags first, so the rule is kept.
+- **bridge 5 mm**, half the FDM rule: Bambu lists bridging among TPU 95A
+  HF's weaknesses (bambulab.com), and its data sheet's 20 mm is the longest
+  its profile spans, not a clean ceiling. `printfit::MaxBridgeMm` and
+  `MaxBridgeSource` are per material for that reason.
+- **its own chords, 0.02 mm** (`printfit::BuiltinStlDeflectionMm`): a
+  tenth of its 0.5 gap a side would be 0.05, a quarter of the 0.2 its holes
+  are opened by, so the chords are held to a tenth of the hole's. A profile
+  that states `stl_deflection_mm` keeps its own; `check_print`'s chords
+  item says `deflection_from: material`.
+
+**The bed is the printer's, not the material's**: a TPU plate fits the
+same P1S a PLA one does. `print_coupon.py --seed` installs `TPU 95A on P1S`,
+the built-in TPU rows on the P1S's bed, keep-out zone, line width and 0.2 mm
+layer, so `bed_fit` runs on a TPU plate and a print job takes it. The
+engine's springs and belt and the jar's gasket print with it.
 
 ### What the checks say
 
@@ -488,7 +530,8 @@ mm chord deviation), with `print_coupon --gap-only`:
 | PLA on P1S | 0.15 | an ordinary PLA slid at 0.15 |
 
 They live in the user's config, not in the build:
-`python3 generators/print_coupon.py --port PORT --seed` saves both through
+`python3 generators/print_coupon.py --port PORT --seed` saves both, and
+`TPU 95A on P1S` ([TPU](#tpu)), through
 `save_print_profile` on the instance at PORT — into whatever config dir that
 instance was started with — with the P1S's 256 x 256 x 250 mm bed, its
 keep-out zone and its wall line width, and leaves any name already stored,
@@ -544,8 +587,9 @@ the slicer closed the two narrowest. So `ui::ExportPartStl`
 both call, picks the chord deviation:
 
 - **A printed part with no deflection given** meshes at
-  `printfit::StlDeflectionMm`: the profile's `stl_deflection_mm`, else a
-  tenth of its smallest gap a side (0.025 on the built-in PLA table). An
+  `printfit::StlDeflectionMm`: the profile's `stl_deflection_mm`, else its
+  material's own (TPU's 0.02, [TPU](#tpu)), else a tenth of its smallest
+  gap a side (0.025 on the built-in PLA table). An
   unprinted part keeps 0.1 mm.
 - **A coarser deflection asked for** is exported as asked, and the reply's
   `warning` says how much of the smallest gap the chords can take. The GUI
@@ -573,7 +617,7 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 | `bed` | the lowest point along the direction | within 1 µm of 0 | exact: each body rotated so the direction is +Z, boxed by `BRepBndLib::AddOptimal` without triangulation; plus the area lying on the bed |
 | `shells` | the pieces the print comes off the bed as | one per solid | solids within 1 µm of each other are one piece, from the clearance item's distances; no boolean. A fused print-in-place pair fails; an extrude of loose discs is one body of several solids and several pieces |
 | `overhang` | area of downward faces past the limit, the worst angle, and where (body, face, element, point) | the process's (`printfit::MaxOverhangDeg`, 45° for FDM), FROM VERTICAL, and an area allowance (default 0) | the B-Rep's surface normals: a plane is one exact normal; a curved face is sampled at every node and triangle centroid of a tessellation (on a copy, 0.2% of the body's size) by its UV, then the worst sample is climbed on the face's own UV domain. A designed 45° flank reads 45.000, not a facet's 47-50, so no slack is needed. The AREA is the tessellation's triangles each classified by the exact normal at its centroid: its error is the triangles that straddle the limit |
-| `bridges` | the widest span of the ceilings, and each one's area and height | the process's (`printfit::MaxBridgeMm`, 10 mm for FDM) | a ceiling is a downward face within 1° of horizontal everywhere, off the bed: a plane by its one normal, any other surface (a derived or lofted face is often a B-spline) by every sample. Its span is its inscribed diameter, as if anchored along its whole edge: twice the largest distance from a point of the face to its edges (polylines at a quarter of the tessellation's chord), on a grid over its UV and then climbed |
+| `bridges` | the widest span of the ceilings, and each one's area and height | the process's (`printfit::MaxBridgeMm`, 10 mm for FDM, 5 for [TPU](#tpu)) | a ceiling is a downward face within 1° of horizontal everywhere, off the bed: a plane by its one normal, any other surface (a derived or lofted face is often a B-spline) by every sample. Its span is its inscribed diameter, as if anchored along its whole edge: twice the largest distance from a point of the face to its edges (polylines at a quarter of the tessellation's chord), on a grid over its UV and then climbed |
 | `clearance` | the minimum distance between any two solids, with the closest pairs | the gap a side (`printfit::SmallestGapSideMm` of the print), passing down to a tenth under it | `Measure::ClearanceBetween` per pair (BRepExtrema, the distance `measure` gives), `ContactBetween` when it cannot prove them apart; a pair whose oriented boxes are four gaps apart is clear without measuring; the boxes are the B-Rep's, never its triangulation's, so the prune is the same meshed or not and a box never stops inside a curved surface by the chord deviation |
 | `chords` | the chord deviation `export_stl` meshes this print at | a fifth of the gap a side | `printfit::StlDeflectionMm`, as [the export](#exporting-a-printed-part) takes it, or `stl_deflection_mm` |
 | `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places: a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else. So the air is exact and only which face is met, at a face's boundary, is the tessellation's (`IntCurvesFace` per sample was exact there too, and took minutes on the counter where this takes seconds). A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
@@ -604,7 +648,8 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
   `overhang_allowance_mm2`, `max_bridge_mm`, `min_gap_mm`,
   `stl_deflection_mm`, `min_air_mm`); each item says where its limit came
   from (`limit_from` / `required_from` / `deflection_from`: `asked`,
-  `process`, `profile`, `gap`, and for the air `layers`), the process's
+  `process`, `profile`, `gap`, `material` (TPU's own chords), and for the
+  air `layers`), the process's
   with its `source`. A process that is not FDM knows no air, so stacking
   is skipped, saying so. An **unprinted** part has no limit to take, so
   overhang, bridges, clearance, chords and stacking are `skipped`, the note naming
@@ -644,8 +689,9 @@ slicer's 15 % it swings at another. `printset::Settings`
   slicer preset's, and the job leaves it to the slicer -- except supports
   and brim, which a job writes off and none unless set.
 - `direction`, the print direction in the part's frame, unit (default +Z):
-  only the [printed mass](#printed-mass) reads it, for a part printed lying
-  down or on its end. A plate's piece never carries its source's: the
+  the [printed mass](#printed-mass) reads it, for a part printed lying
+  down or on its end, and a printed hole's teardrop points up the part's
+  ([printed holes](../modeling/holes-and-threads.md#printed-holes)). A plate's piece never carries its source's: the
   plate's frame is the bed's.
 - **Refused** (`printset::Validate`, every parser and the GUI through it):
   walls under 1, a layer count under 0, an infill outside 0-100, a
@@ -666,14 +712,14 @@ slicer's 15 % it swings at another. `printset::Settings`
 - **Stored** (v181) as the document's `print_settings {part?, bodies?:
   {"<created_by>": {...}}}`, only what is stated, omitted when there are
   none (`src/core/io/SerializePrintSettings.cpp`); an undoable
-  `SetPrintSettingsCommand`; no regeneration, since nothing is modelled
-  from them. Golden `v181-print-settings`.
+  `SetPrintSettingsCommand`; no regeneration but the printed holes', when
+  the part's `direction` changes. Golden `v181-print-settings`.
 - **The filament is the body's material** when that is one (pla, petg,
   tpu), else the process's: what the mass weighs must be what the slicer is
   loaded with, so there is no separate filament setting, and a body of a
   material that is no filament is refused by a job. A TPU part (the jar's
-  gasket, the engine's belt and springs) is printed by the PLA profile's
-  printer (its bed and layer) with its material TPU.
+  gasket, the engine's belt and springs) is printed in the TPU process, on
+  the TPU profile of the same printer ([TPU](#tpu)).
 
 ### Printed mass
 
@@ -859,7 +905,8 @@ reported, not required — a metric thread's flanks overhang past 45°.
   or `--layer`, which it then states too) and the post's gap a `gap` row
   under Ø`size`, saved with `save_print_profile` at the deflection the
   coupon was exported at.
-- `--seed` installs [the two measured profiles](#from-a-measurement), at
+- `--seed` installs [the two measured profiles](#from-a-measurement) and
+  `TPU 95A on P1S` (the built-in TPU rows), at
   the preset's 0.2 mm layers and with no Z gap measured, with the P1S's
   bed (256 x 256 x 250), its keep-out zone and the preset's 0.45 mm wall
   line width -- given, too, to a stored profile of either name that lacks

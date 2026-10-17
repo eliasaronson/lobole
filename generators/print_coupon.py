@@ -815,7 +815,7 @@ def main():
     ap.add_argument("--conditions", default=None,
                     help="--record: printer, nozzle, slicer preset")
     ap.add_argument("--seed", action="store_true",
-                    help="install the two profiles measured on a P1S")
+                    help="install the two profiles measured on a P1S and its TPU 95A one")
     ap.add_argument("--size", type=float, default=8.0,
                     help="the diameter the fit is at, mm (the printed size)")
     ap.add_argument("--steps", type=int, default=2,

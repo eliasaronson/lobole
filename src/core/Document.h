@@ -498,7 +498,9 @@ public:
   // The part's SLICER settings and its bodies' overrides (v181,
   // core/PrintSettings.h): walls, shells, infill, supports, brim. What
   // export_print_job hands the slicer per object and what the printed mass
-  // weighs. Drive no geometry, so setting them regenerates nothing.
+  // weighs. Only the part's `direction` drives geometry -- a printed hole's
+  // teardrop points up it -- so a new one rebuilds those holes and nothing
+  // else regenerates.
   const printset::PartSettings& PrintSettings() const {
     return m_printSettings;
   }

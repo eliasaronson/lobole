@@ -138,6 +138,6 @@ card's table, two of each orientation.
   hole says the support was the weak link.
 - Plasticity and the layer lines' notches: the study is linear and the
   part smooth. Both are why the bending-bar bracket exists.
-- TPU: the material library has no TPU row (and no interlayer strength
-  for it), so `--material tpu` is refused, naming the materials that have
-  one (pla, petg).
+- TPU: the material library has no interlayer strength for it, so
+  `--material tpu` is refused, naming the materials that have one (pla,
+  petg).

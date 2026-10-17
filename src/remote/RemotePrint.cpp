@@ -73,7 +73,8 @@ static constexpr MethodDoc PrintMethods[] = {
      "accepted), walls under 1, a layer count under 0, an infill outside "
      "0-100, and 100 % with a pattern that cannot print solid or with none "
      "(Bambu refuses grid there: rectilinear, aligned_rectilinear, "
-     "concentric, hilbert_curve). Undoable; drives no geometry. `part` sets "
+     "concentric, hilbert_curve). Undoable; drives no geometry but a printed "
+     "hole's teardrop, which a new `direction` rebuilds. `part` sets "
      "it on any part.",
      "part?:string|int, body?:string|int, clear?:bool, walls?:int|null, "
      "top_layers?:int|null, bottom_layers?:int|null, "
