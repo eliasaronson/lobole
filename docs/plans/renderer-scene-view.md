@@ -20,6 +20,12 @@ renderer missing from the loop, so on its own this buys a compile error in
 place of a wrong picture on a path nobody has written yet; built with a new
 path, it protects that path from its first frame.
 
+Build it after the full-window capture (docs/plans/demo-video.md): that
+makes this plan's windowed check automatic. The screenshots under
+Verification, which `--offscreen` cannot show and which today need the
+human's window, become captures an agent takes on its own windowed instance
+before and after the change, and compares.
+
 ## The fix
 
 Pass the frame state with the call:

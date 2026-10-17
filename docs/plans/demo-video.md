@@ -26,19 +26,23 @@ presents the swapchain without going through Xvfb's framebuffer: x11grab and
    interface, after ImGui has drawn) into a host-visible buffer before
    presenting it, and `ScreenCaptureFunc` hands the requested rect of the
    last such frame to the engine; `ImGuiTestEngine_PostSwap` is called after
-   each present. Nothing is copied while no capture runs, so an ordinary
-   frame is unchanged. The swapchain needs `TRANSFER_SRC` usage, checked
-   against the surface's capabilities and refused with a message if absent.
+   each present. Nothing is copied while no capture runs. The copy needs the
+   swapchain created with `TRANSFER_SRC` usage, and an ordinary launch does
+   not ask for it: some drivers drop their internal image compression for a
+   swapchain with extra usage, a cost every frame would pay for a feature
+   almost never on. Only `--capture-dir` asks, checked against the surface's
+   capabilities and refused with a message if the surface cannot.
    Recording runs on the fixed 1/60 s clock the GUI suite already uses, so
    every frame is one video frame at 60 fps however long it took to render.
 2. **Demo scenes as GUI tests**, category `demo`, in
    `src/app/guitests/GuiTestsDemo.cpp`. Each scene drives the real widgets
    at Cinematic speed and wraps itself in `CaptureBeginVideo` /
-   `CaptureEndVideo`. They are not part of the GUI suite: `--gui-tests` with
-   the default filter skips the category, and the runner's every-test-ran
-   check counts the suite without them. A new `--gui-test-speed
-   fast|normal|cinematic` (default fast) picks the run speed, and
-   `--capture-dir` where the clips land.
+   `CaptureEndVideo`. They run in the GUI suite like any other test, at the
+   suite's fast speed and with nothing recorded (no `--capture-dir`), so a
+   UI change that breaks a scene fails the suite the day it lands rather
+   than at the next release. A new `--gui-test-speed fast|normal|cinematic`
+   (default fast) picks the run speed, and `--capture-dir` turns the
+   recording on and says where the clips land.
 3. **`tools/demo/record.sh`**: one Xvfb display at 1920x1080, a scratch
    config and state directory (the scenes must not touch the user's), every
    scene recorded to `scratch/demo/<scene>.mp4`.
@@ -80,7 +84,7 @@ presents the swapchain without going through Xvfb's framebuffer: x11grab and
   and opens a panel, and checks the file: 120 frames at 1920x1080, not
   black, the panel's pixels present, consecutive frames differing.
 - `tests/render_pixel_smoke.py` passes unchanged (no capture, no copy).
-- The GUI suite's count is unchanged, and the demo scenes run only when
-  asked for.
+- The demo scenes pass in the GUI suite at fast speed, recording nothing;
+  a launch without `--capture-dir` creates its swapchain exactly as before.
 - Each scene recorded by `tools/demo/record.sh` is watched end to end
   before it goes into the edit.
