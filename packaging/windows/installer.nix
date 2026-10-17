@@ -34,6 +34,7 @@ pkgs.stdenvNoCC.mkDerivation {
 
     # NSIS setup.exe (makensis reads app/{bin,share} relative to CWD).
     cp ${./installer.nsi} installer.nsi
+    cp ${../../assets/icons/org.lobole.Lobole.ico} lobole.ico
     makensis -DVERSION=${version} installer.nsi
     runHook postBuild
   '';

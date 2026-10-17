@@ -10,6 +10,10 @@
 !define REGKEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
 
 Name "${APPNAME} ${VERSION}"
+; The app's own icon on the installer and the uninstaller (installer.nix puts
+; assets/icons/org.lobole.Lobole.ico beside this script).
+Icon "lobole.ico"
+UninstallIcon "lobole.ico"
 OutFile "lobole-${VERSION}-win64-setup.exe"
 Unicode true
 InstallDir "$PROGRAMFILES64\${APPNAME}"

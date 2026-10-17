@@ -1,0 +1,5 @@
+// The executable's icon (configured by CMakeLists.txt with the icon's
+// absolute path). Named GLFW_ICON because that is the resource GLFW loads
+// for every window's class -- the title bar and the taskbar -- and, as the
+// executable's only icon, it is also the one Explorer and a shortcut show.
+GLFW_ICON ICON "@LOBOLE_WINDOWS_ICON@"

@@ -78,7 +78,8 @@ CMake's `install()` rules define the layout every packager uses:
 standard-parts tables) under `share/lobole`; and the `.desktop` file,
 AppStream metainfo (`LOBOLE_INSTALL_METAINFO`, default ON) and icons (SVG
 and a 256×256 PNG) under their standard `share/` locations. The metadata
-sources are in `packaging/`.
+sources are in `packaging/`; the icons are made from the master mark by
+`generators/logo/brand.py` ([assets/brand](../../assets/brand/README.md)).
 
 **Every shared library the app links needs its own `install()` rule.** Every
 test runs from the build tree, where the libraries sit beside the binary, so
@@ -285,6 +286,11 @@ on a 30 GB machine.
   are symlinks into other store paths. A dangling one makes a DLL that is
   present report itself "not found", because what is actually missing is a
   DLL it imports.
+- **The icon** (`assets/icons/org.lobole.Lobole.ico`, 16-256 px) is compiled
+  into `lobole.exe` as the resource `GLFW_ICON` (`lobole.rc.in`): GLFW loads
+  that name for every window's title bar and taskbar button, and as the
+  executable's only icon it is also the one Explorer and a shortcut show.
+  The installer and uninstaller carry it too (`Icon` in `installer.nsi`).
 - The NSIS installer is 32-bit; testing install-then-run under Wine needs
   WoW64 (or the 32-bit `pkgs.wine` for the installer and `wine64` for the
   app).
