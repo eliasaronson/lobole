@@ -330,3 +330,83 @@ def clear_x(x, y, w, h, zones, gap):
                 x = z[2] + gap
                 moved = True
     return x
+
+
+# --- printed pins across their layers -------------------------------------------
+
+def _run_static(d, sid, timeout_s):
+    import time
+    run = d.call("run_study", study=sid, **{"async": True})
+    t0 = time.monotonic()
+    while d.call("study_status", study=sid).get("running"):
+        if time.monotonic() - t0 > timeout_s:
+            d.call("cancel_study", study=sid)
+            raise SystemExit(f"pin_strength: the study ran past "
+                             f"{timeout_s:.0f} s")
+        time.sleep(0.5)
+    st = d.call("study_status", study=sid)
+    if st.get("error") or not st.get("has_results"):
+        raise SystemExit(f"pin_strength: the study did not solve: {st}")
+    return bool(run.get("reused"))
+
+
+def pin_strength(d, part, face, load_n, direction, seat, layer_normal,
+                 region=None, seat_region=None, name=None, mesh_size=None,
+                 need=2.0, timeout_s=600.0):
+    """How strong a printed pin is ACROSS its layers
+    (docs/simulation/README.md#printed-layers): one static study of `part`
+    as printed, held at `seat` (a face name, {face, region}, or a list of
+    them), loaded with
+    `load_n` newtons along `direction` on `face` -- each optionally only on
+    part of its face (`region`, `seat_region`: add_load's region,
+    docs/simulation/README.md#loads-on-part-of-a-face) -- read with the
+    build direction `layer_normal` in the part's frame. The hook's pattern
+    (generators/hook/build.py), for a pin: a pin printed standing bends
+    across its layers, and the interlayer strength is what breaks it.
+
+    Returns the factor of safety against the interlayer strength with the
+    stresses it came from, for a receipt. A factor under `need` STOPS the
+    run, as the hook's prediction would: a generator states its pins' load
+    and must not print one that this says breaks."""
+    d.call("set_active_part", part=part)
+    st = d.call("add_study", type="static",
+                name=name or f"{part}: pin across its layers")
+    sid = st.get("id", st.get("study"))
+    seats = [seat] if isinstance(seat, (str, dict)) else list(seat)
+    for f in seats:
+        # A seat is a face name, or {face, region} for part of one.
+        face_f, reg = ((f["face"], f.get("region")) if isinstance(f, dict)
+                       else (f, seat_region))
+        kw = {"region": reg} if reg else {}
+        d.call("add_load", study=sid, type="fixed", face=face_f, **kw)
+    kw = {"region": region} if region else {}
+    d.call("add_load", study=sid, type="force", face=face,
+           magnitude=float(load_n), direction=[float(v) for v in direction],
+           **kw)
+    if mesh_size:
+        d.call("set_study", study=sid, mesh_size=float(mesh_size))
+    reused = _run_static(d, sid, timeout_s)
+    r = d.call("study_results", study=sid,
+               layer_normal=[float(v) for v in layer_normal])
+    across = r["max_across_layers_mpa"]
+    out = {"part": part, "study": sid, "load_n": float(load_n),
+           "direction": list(direction), "layer_normal": list(layer_normal),
+           "region": region, "seat_region": seat_region,
+           "interlayer_factor_of_safety": r["interlayer_factor_of_safety"],
+           "max_across_layers_mpa": across["value"],
+           "max_across_layers_at_mm": across.get("at"),
+           "max_von_mises_mpa": r.get("max_von_mises_mpa"),
+           "max_displacement_mm": r.get("max_displacement_mm"),
+           "max_principal_mpa": (r.get("max_principal_mpa") or {}).get(
+               "value"),
+           "factor_of_safety": r.get("factor_of_safety"),
+           "nodes": r.get("nodes"), "reused": reused, "need": need}
+    f = out["interlayer_factor_of_safety"]
+    print(f"  {part}: {load_n:.1f} N, {across['value']:.2f} MPa across "
+          f"its layers, factor {f:.2f} against the interlayer strength")
+    if f < need:
+        raise SystemExit(
+            f"{part}: the pin breaks across its layers: factor {f:.2f} under "
+            f"{need:g} at {load_n:.1f} N ({across['value']:.2f} MPa across "
+            f"the layers at {across.get('at')})")
+    return out

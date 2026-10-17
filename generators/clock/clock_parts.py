@@ -437,8 +437,7 @@ def build_drum(d, s, proc, name="drum", stage1=False):
     body = b.revolve(name, prof)
     teeth = b.prism(f"{name} ratchet", ratchet_ents(s), z0, zf)
     body = b.boolean(f"{name} + ratchet", body, teeth, "union")
-    body = b.prism(f"{name} bore", [circle((0, 0), s["run_d"] / 2.0
-                                          - s["seat_step"])],
+    body = b.prism(f"{name} bore", [circle((0, 0), s["run_d"] / 2.0)],
                    z0, z1, mode="cut")
     # The cord's end is tied through a hole in the rear flange.
     tie_r = rc + s["cord_mm"] / 2.0 + L(1)
@@ -450,20 +449,15 @@ def build_drum(d, s, proc, name="drum", stage1=False):
 
 # --- arbors and spacers --------------------------------------------------------------
 
-def build_arbor(d, s, proc, name, z0, z1, d_ranges, seat=None):
+def build_arbor(d, s, proc, name, z0, z1, d_ranges):
     """A printed arbor standing on its back end: a rod of arbor_d with a D
     flat over each of `d_ranges` (z0, z1), each D's upper end a 45-degree
-    ramp so it faces nothing down. `seat` (z0, z1) is a band a quarter
-    line smaller, back to full size up a 45-degree cone: what something
-    turns on there (the drum) runs at the gap on it, and it is a face of
-    its own for a study to load."""
+    ramp so it faces nothing down. What turns on it (the drum) runs at the
+    gap on the plain round; a study loads that band of it as a region
+    (docs/simulation/README.md#loads-on-part-of-a-face)."""
     b = new_part(d, name, proc)
     r = s["arbor_d"] / 2.0
     prof = [(0.0, z0), (r, z0)]
-    if seat:
-        dr = s["seat_step"]
-        prof += [(r, seat[0]), (r - dr, seat[0]), (r - dr, seat[1]),
-                 (r, seat[1] + dr)]
     body = b.revolve(name, prof + [(r, z1), (0.0, z1)])
     f = s["flat"]
     for k, (a, c) in enumerate(d_ranges):

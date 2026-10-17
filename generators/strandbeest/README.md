@@ -167,6 +167,18 @@ default, Ø3.22: the stub's own size.
 
 ## Checked every run
 
+First, before any assembly, **the crank stub across its layers**
+(`_lib.pin_strength`, docs/simulation/README.md#printed-layers): the first
+disc as it prints, flat, so its crank pin and key stub stand across their
+layers, held on its underside, with the whole hand crank's torque on the
+key stub as torque / crank radius, tangential. The torque is `--hand-n`
+(30 N, a firm push) on the knob at the arm's length. The factor against the
+interlayer strength goes in the receipt (`crank_stub`), and **under 2 the
+run stops**: the default walker does, at a factor of 0.06 (127 N on the
+stub, 276 MPa across the layers at the crank pin's root, the pin a 23 mm
+cantilever of Ø4.95 from its disc to its key). It would take under 1 N on
+the knob to pass. See [Not built](#not-built).
+
 On each assembly, a leg pair and the walker:
 
 - **Solved:** with the crank driven, nothing is left free (DOF 0) and every
@@ -269,9 +281,14 @@ its tightest, half a bar apart. At 12 mm, three plates hold the walker.
 
 - **No path in the Motion window.** A trace is a request parameter, and
   nothing in the document holds it for the window to draw.
-- **Strength is not checked.** The pins, the frame pivots and the crank
-  pins print standing, so they bend across their layer lines. The
-  crankshaft's torque passes through Ø3.2 stubs at the crank radius. Stage
-  1 is where that shows.
+- **A crankshaft that carries a hand's torque.** The crank stub is now
+  checked across its layers, and it fails: the torque between two discs
+  goes through one Ø4.95 crank pin standing 23 mm as a cantilever between
+  them, printed across its layers, which holds about 1 N on the knob at a
+  factor of 2. The run stops there until the crankshaft is redesigned (a
+  through shaft, the discs keyed to it; or pins printed lying down) or
+  the torque it must carry is stated from the walker's own need. The
+  joint pins and the frame pivots print standing too, and are not yet
+  studied.
 - **Packing goes by boxes.** Triangles nest poorly by their boxes, so four
   plates hold the 15 mm walker where three might.

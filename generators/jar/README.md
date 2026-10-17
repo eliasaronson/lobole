@@ -29,12 +29,16 @@ With a profile that states a bed, the run also writes two
 [print jobs](../../docs/tolerances/README.md#print-jobs), one a spool:
 `jar_job.3mf` (the jar and lid side by side on one PLA plate) and
 `jar_tpu_job.3mf` (the gasket on a plate of its own, carrying its 1 wall,
-2/2 shells and 15 % gyroid per object, below). Each is a Bambu project when
+2/2 shells and 15 % gyroid per object, below, printed with the TPU profile
+on the same printer: `--tpu-profile`, else the one TPU profile on the PLA
+profile's bed, which `print_coupon.py --seed` installs as `TPU 95A on
+P1S`). Each is a Bambu project when
 `$LOBOLE_SLICER_CONFIGS` holds `pla.json` and `tpu.json`
 (`tools/bambu-config.py`), else a one-plate 3MF Bambu opens with your own
 presets. Sliced by Bambu's CLI, the gasket prints one wall on each of its
-two outlines and two solid layers top and bottom; Bambu weighs it 0.93 g of
-TPU, and `mass_properties` estimates 0.83 g printed against 1.22 g solid.
+two outlines and two solid layers top and bottom; Bambu weighs it 0.89 g of
+TPU in 2.5 minutes, and `mass_properties` estimates 0.80 g printed against
+1.15 g solid. The jar and lid's plate: 67.8 g in 1.5 h.
 
 ## Where every size comes from
 
@@ -96,11 +100,10 @@ by 0.5 mm with the gasket squeezed.
 
 The gasket sits in a 1 mm groove in the lid's ceiling. Its outside is
 pressed in by 0.1 mm a side, and its bore clears the groove's boss by
-0.1. The groove's walls take the PLA `hole` and `shaft` allowances. The
-gasket takes none, because no TPU table exists
-(docs/tolerances/README.md#printed-parts refuses a material without
-sourced numbers). Its fits are elastic, so it is modelled at the size it
-should print.
+0.1. The groove's walls take the PLA `hole` and `shaft` allowances, the
+gasket the TPU table's (docs/tolerances/README.md#tpu): it is printed in
+fdm tpu, its bore modelled +0.2 and its outside −0.1 on the diameter, both
+rows to confirm with a coupon.
 
 **The force.** Bambu Lab gives TPU 95A a Young's modulus of 7.8 MPa. A
 solid gasket squeezed 25 % under the rim's 1.3 mm-wide contact takes
@@ -149,8 +152,8 @@ elastomer strain, and a linear one would not be honest at that strain.
 - **Printability**: `check_print`
   (docs/tolerances/README.md#checking-a-print) on each part in its print
   orientation: on the bed, one watertight piece, and nothing facing down
-  more than 45° from vertical off the bed (the process's limit; stated for
-  the TPU gasket, which has no print process). The angles are the B-rep's
+  more than 45° from vertical off the bed (each part's process's limit,
+  the gasket's TPU's too). The angles are the B-rep's
   surface normals, so the 45° thread flanks and edge chamfers read 45.0
   with no area past it and need no slack. Each part's whole report is in
   the receipt's `stl.<part>.print`.

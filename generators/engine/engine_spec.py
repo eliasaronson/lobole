@@ -358,6 +358,16 @@ def solve(bore, allow, layer):
     s.w_lobe = 2.0 * (math.sqrt(s.r_bk ** 2 - (s.contact_max + margin) ** 2)
                       - margin)
     s.w_lobe = at_least("lobe width", s.w_lobe, lines(6))
+    # The one-piece camshaft prints standing, each lobe's underside a 45
+    # degree taper of its outline down to the bar: as deep as the base
+    # circle stands over the bar, and half a line into it. A taper past the
+    # nose circle's radius closes the nose up, which the tapered extrude
+    # refuses: the lobes would have to be pressed on a bar again.
+    s.d_taper = s.r_base - s.r_bar + lines(1) / 2.0
+    if s.d_taper >= s.r_nose:
+        raise ValueError(f"a lobe's underside taper ({s.d_taper:.2f} mm) "
+                         f"closes its nose (r {s.r_nose:.2f}): no one-piece "
+                         "camshaft")
     s.r_trough = s.r_lobe + side(2.0 * s.r_lobe)
     # --- head heights, from its deck (hz) ---
     s.hz_cb = s.t_e + (math.sqrt(2.0) - 1.0) * s.g_seat  # counterbore top
@@ -493,7 +503,8 @@ def solve(bore, allow, layer):
     s.x_cam1 = s.x_r + s.g_lobe_ax + s.t_collar     # the bar's rear end
     s.x_cam0 = s.x_belt0 - g                        # and its front end
     # The cam's troughs, a cylinder's two lobes in each; towers between.
-    s.troughs = [(x - s.a_v - s.w_lobe / 2.0 - s.g_lobe_ax,
+    # Each trough reaches its first lobe's tapered underside (toward -X).
+    s.troughs = [(x - s.a_v - s.w_lobe / 2.0 - s.d_taper - s.g_lobe_ax,
                   x + s.a_v + s.w_lobe / 2.0 + s.g_lobe_ax) for x in s.x_cyl]
     for (a0, a1), (b0, b1) in zip(s.troughs, s.troughs[1:]):
         if b0 - a1 < 2.0 * s.d_dw:
@@ -624,8 +635,7 @@ def print_footprints(s):
         ("wrist pin", (s.d_wp, s.d_wp), 4),
         ("valve", (s.d_v, s.d_v), 8),
         ("bucket", (s.d_bk, s.d_bk), 8),
-        ("cam bar", (s.x_cam1 - s.x_cam0, s.d_bar), 1),
-        ("lobe", (2 * s.r_lobe, 2 * s.r_lobe), 8),
+        ("camshaft", (2 * s.r_lobe, 2 * s.r_lobe), 1),
         ("cam pulley", (2 * (s.r_p2 + s.belt_t), 2 * (s.r_p2 + s.belt_t)),
          1),
         ("crank pulley", (2 * (s.r_p1 + s.belt_t), 2 * (s.r_p1 + s.belt_t)),

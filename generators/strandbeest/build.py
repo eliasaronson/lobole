@@ -48,7 +48,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 sys.path.insert(0, HERE)
 from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
                   circle, connect, export_print_job, fresh_project,
-                  job_receipt, line, print_receipt)
+                  job_receipt, line, pin_strength, print_receipt)
 from lobole.sdk import Plane  # noqa: E402
 import linkage as lk  # noqa: E402
 import print_coupon  # noqa: E402
@@ -526,6 +526,43 @@ def build_disc(d, s, kind, step_deg, proc, mat):
                        s["socket"] - s["gz"], "add", "key")
     part.finish()
     return top
+
+
+# What a hand pushes on the crank's knob, N: a firm push, about 3 kg. The
+# crank stub's study takes it (crank_stub_strength) and so does the card.
+HAND_N = 30.0
+# A printed pin's factor against its interlayer strength must be at least
+# this, or the run stops: the hook's design factor (generators/hook).
+PIN_NEED = 2.0
+
+
+def crank_stub_strength(d, s, hand_n):
+    """The first disc's crank pin and key stub as printed (flat, so the
+    stub stands across its layers), carrying the whole hand crank's torque
+    into the next disc: hand_n at the knob's arm is the torque, and the
+    stub at the crank radius takes it as torque / m, tangential. Held on
+    the disc's underside, where the stub's root bends. _lib.pin_strength
+    runs it; under PIN_NEED the run stops."""
+    d.call("set_active_part", part="disc first")
+    fs = d.call("list_elements")["bodies"][0]["faces"]
+    m = s["lengths"]["m"]
+    key = [f["name"] for f in fs if f["kind"] == "cylinder" and
+           abs(f.get("radius", 0.0) - s["ds"] / 2.0) < 1e-6 and
+           math.hypot(f["centroid"][0] - m, f["centroid"][1]) < 1e-3]
+    base = [f["name"] for f in fs if f["kind"] == "plane" and
+            abs(f["centroid"][2]) < 1e-6]
+    if len(key) != 1 or not base:
+        raise SystemExit(f"strandbeest: the crank stub's study faces: "
+                         f"{key}, {base}")
+    torque = hand_n * s["arm"]
+    # need=0: the factor is judged by the caller, which writes it into the
+    # receipt before it stops the run.
+    out = pin_strength(d, "disc first", key[0], torque / m, [0.0, 1.0, 0.0],
+                       seat=base, layer_normal=[0.0, 0.0, 1.0],
+                       name="crank stub under the hand crank", need=0.0)
+    out.update(hand_n=hand_n, arm_mm=s["arm"], torque_nmm=torque,
+               crank_r_mm=m, need=PIN_NEED)
+    return out
 
 
 def build_handle(d, s, proc, mat):
@@ -1511,6 +1548,9 @@ def main():
                     help="study samples over the turn (181: 2 degrees)")
     ap.add_argument("--stage", choices=("1", "2", "all"), default="all")
     ap.add_argument("--no-controls", action="store_true")
+    ap.add_argument("--hand-n", type=float, default=HAND_N,
+                    help="what a hand pushes on the crank's knob, N: the "
+                         "crank stub's study load")
     ap.add_argument("--fresh", action="store_true",
                     help="start a new project first (refused on unsaved work)")
     ap.add_argument("--out", default=None)
@@ -1569,7 +1609,22 @@ def main():
     pins, tops = build_print_parts(d, s, lay, frames, proc, mat, step_deg,
                                    throws)
     press = press_row_part(d, s, proc, mat)
+    crank_stub = crank_stub_strength(d, s, args.hand_n)
+    if crank_stub["interlayer_factor_of_safety"] < PIN_NEED:
+        # The receipt says so before the run stops.
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "strandbeest.json").write_text(json.dumps(
+            {"size": args.size, "pairs": args.pairs, "process": proc,
+             "crank_stub": crank_stub, "stopped": "the crank stub breaks "
+             "across its layers"}, indent=1, default=str))
+        raise SystemExit(
+            f"strandbeest: the crank stub breaks across its layers under "
+            f"{args.hand_n:g} N on the knob: factor "
+            f"{crank_stub['interlayer_factor_of_safety']:.2f} under "
+            f"{PIN_NEED:g} ({crank_stub['max_across_layers_mpa']:.0f} MPa "
+            f"across the layers at {crank_stub['max_across_layers_at_mm']})")
     receipt = {"size": args.size, "pairs": args.pairs, "process": proc,
+               "crank_stub": crank_stub,
                "layer_mm": layer,
                "sizes": {k: v for k, v in s.items() if k != "lengths"},
                "lengths": L, "layers": {f"{a} {b}": v for (a, b), v in

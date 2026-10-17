@@ -38,7 +38,7 @@ import clock_spec as S  # noqa: E402
 import cycloidal as C  # noqa: E402
 from _lib import (PRINT_ITEMS, bed_zones, check_print,  # noqa: E402
                   clear_x, export_print_job, fresh_project, job_receipt,
-                  print_item_line, print_receipt)
+                  pin_strength, print_item_line, print_receipt)
 from lobole.sdk import SdkError, connect  # noqa: E402
 
 ROOT = Path(HERE).resolve().parent.parent
@@ -124,7 +124,7 @@ def build_parts(d, s, proc):
                   [(rz0, rz1), (0.0, H)])
     P.build_arbor(d, s, proc, "third arbor", -t, H + t, [(0.0, H)])
     P.build_arbor(d, s, proc, "centre arbor", -t, s["centre_arbor_top"],
-                  [(0.0, z["centre"][1])], seat=z["drum"])
+                  [(0.0, z["centre"][1])])
     P.build_third(d, s, proc)
     P.build_spacer(d, s, proc, "third spacer", es, z["third"][0])
     P.build_centre(d, s, proc)
@@ -697,6 +697,11 @@ def faces(d, part):
     return d.call("list_elements")["bodies"][0]["faces"]
 
 
+# A printed pin's factor against its interlayer strength must be at least
+# this, or the run stops: the hook's design factor (generators/hook).
+PIN_NEED = 2.0
+
+
 def fem(d, s, weight_g, timeout_s):
     """Two static studies, each solved once: the pendulum rod holding the
     bob and nut by its D (the weight hung from its lower end, the D's faces
@@ -734,43 +739,41 @@ def fem(d, s, weight_g, timeout_s):
                   "nodes": r.get("nodes"), "reused": r["reused"],
                   "seconds": round(time.perf_counter() - t0, 1)}
     # The arbor: the cord pulls the drum, and the drum the arbor, straight
-    # down; the pivots hold it.
+    # down, on the band the drum turns on; the pivots hold it, each the
+    # band of the round in its plate. One round face carries all three, so
+    # each is a REGION of it
+    # (docs/simulation/README.md#loads-on-part-of-a-face): no step on the arbor makes the seat a face of its own. It is a
+    # printed pin standing on its back end, so its layers are across it:
+    # the interlayer factor is what the receipt states (_lib.pin_strength).
     z = s["z"]
     H, t = s["H"], s["t_plate"]
     fs = faces(d, "centre arbor")
-
-    def cyl_in(z0, z1, r):
-        return [f["name"] for f in fs if f["kind"] == "cylinder" and
-                z0 - 1e-3 <= f["centroid"][2] <= z1 + 1e-3 and
-                abs(f.get("radius", 0) - r) < 1e-6]
     r = s["arbor_d"] / 2.0
-    # Held: the round surface behind the seat (the back pivot and the
-    # wheel's pressed D) and the round end in front of it (the front pivot
-    # and the cannon's seat). The arbor's faces are split only where its
-    # section changes, so each support is a little longer than its pivot:
-    # the span the cord bends is the seat's, between them.
-    pivots = cyl_in(-t, z["drum"][0], r) + cyl_in(z["drum"][1], 1e9, r)
-    seat = cyl_in(*z["drum"], r - s["seat_step"])
-    if len(pivots) < 2 or not seat:
-        raise SystemExit(f"clock: the arbor's study faces: {pivots}, {seat}")
-    st = d.call("add_study", type="static", name="centre arbor under the "
-                "weight")
-    sid = st.get("id", st.get("study"))
-    for f in pivots:
-        d.call("add_load", study=sid, type="fixed", face=f)
+    rounds = [f["name"] for f in fs if f["kind"] == "cylinder" and
+              abs(f.get("radius", 0) - r) < 1e-6]
+    if len(rounds) != 1:
+        raise SystemExit(f"clock: the arbor's round is {rounds}, not one "
+                         "face")
+    band = lambda z0, z1: {"normal": [0.0, 0.0, 1.0], "from_mm": z0,  # noqa
+                           "to_mm": z1}
     pull = weight_g / 1000.0 * S.G
-    for f in seat:
-        d.call("add_load", study=sid, type="force", face=f,
-               magnitude=pull / len(seat), direction=[0.0, -1.0, 0.0])
     t0 = time.perf_counter()
-    r = run_study(d, sid, timeout_s)
+    pin = pin_strength(
+        d, "centre arbor", rounds[0], pull, [0.0, -1.0, 0.0],
+        seat=[{"face": rounds[0], "region": band(z0, z1)}
+              for z0, z1 in ((-t, 0.0), (H, H + t))],
+        layer_normal=[0.0, 0.0, 1.0], region=band(*z["drum"]),
+        name="centre arbor under the weight", need=PIN_NEED,
+        timeout_s=timeout_s)
     out["centre arbor"] = {
         "load_n": pull, "weight_g": weight_g,
-        "max_von_mises_mpa": r.get("max_von_mises_mpa"),
-        "max_displacement_mm": r.get("max_displacement_mm"),
-        "max_principal_mpa": r.get("max_principal_mpa"),
-        "factor_of_safety": r.get("factor_of_safety"),
-        "nodes": r.get("nodes"), "reused": r["reused"],
+        "seat_band_mm": list(z["drum"]),
+        "pivot_bands_mm": [[-t, 0.0], [H, H + t]],
+        "max_von_mises_mpa": pin["max_von_mises_mpa"],
+        "max_displacement_mm": pin["max_displacement_mm"],
+        "max_principal_mpa": pin["max_principal_mpa"],
+        "factor_of_safety": pin["factor_of_safety"],
+        "pin": pin, "nodes": pin["nodes"], "reused": pin["reused"],
         "seconds": round(time.perf_counter() - t0, 1)}
     return out
 

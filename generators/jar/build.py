@@ -54,13 +54,13 @@ SQUEEZE_BAND = (0.20, 0.30)
 # pitch also lifts the lid clear of the neck in two turns.
 TURNS = 2
 # Steepest overhang, from vertical, before a face needs support: 45, the
-# rule of thumb, which check_print takes from the PLA parts' print process.
-# The TPU gasket has no print process, so it is stated for it. check_print
-# reads every angle off the B-rep's surface normals, so a surface AT 45 (the
-# thread flanks, the edge chamfers) reads 45 rather than the 46-50 its
-# facets lean to, and no slack is needed; an ISO 60-degree thread on the
-# same neck fails (the negative control in main()).
-OVERHANG_DEG = 45.0
+# rule of thumb, which check_print takes from each part's print process --
+# the PLA jar's and lid's, and the TPU gasket's own (fdm tpu,
+# docs/tolerances/README.md#tpu). check_print reads every angle off the
+# B-rep's surface normals, so a surface AT 45 (the thread flanks, the edge
+# chamfers) reads 45 rather than the 46-50 its facets lean to, and no slack
+# is needed; an ISO 60-degree thread on the same neck fails (the negative
+# control in main()).
 
 
 def lines(mm, at_least):
@@ -228,11 +228,16 @@ def build_lid(app, s, proc, material, name="lid", extra_skirt=0.0):
     return p, t
 
 
-def build_gasket(app, s):
-    """The gasket, flat: a rectangular ring. TPU has no print allowance
-    table, so it is modelled at the size it should print."""
+def build_gasket(app, s, tpu_proc, tpu_allow):
+    """The gasket, flat: a rectangular ring, printed in TPU 95A
+    (`tpu_proc`), its bore and its outside modelled at the size they
+    should print plus the TPU table's hole and shaft allowances
+    (`tpu_allow`, docs/tolerances/README.md#tpu)."""
     p = app.part("gasket")
-    ri, ro, t = s["gasket_in_d"] / 2.0, s["gasket_out_d"] / 2.0, s["gasket_t"]
+    app.set_print_process(**tpu_proc)
+    ri = (s["gasket_in_d"] + tpu_allow["hole"]) / 2.0
+    ro = (s["gasket_out_d"] + tpu_allow["shaft"]) / 2.0
+    t = s["gasket_t"]
     p.revolve_profile([(ri, 0), (ro, 0), (ro, t), (ri, t)],
                       plane=Plane.xz(), name="gasket")
     p.material("tpu")
@@ -268,7 +273,7 @@ def job_plate(app, name, proc, pieces, bed):
         if not r.get("regen", {}).get("ok", True):
             raise SystemExit(f"jar: {name}: {part}: {r['regen']}")
     return check_print(app, f"jar: {name}", need=("bed", "shells", "bed_fit"),
-                       quiet=True, max_overhang_deg=OVERHANG_DEG)
+                       quiet=True)
 
 
 def frame_z(part, name):
@@ -415,6 +420,10 @@ def main():
                     help="one of your print profiles (list_print_profiles), "
                          "measured on your printer; without it the built-in "
                          "--process/--material table")
+    ap.add_argument("--tpu-profile", default=None,
+                    help="the gasket's TPU print profile; default the one "
+                         "TPU profile of yours on --profile's printer (its "
+                         "bed), else the built-in fdm tpu table")
     ap.add_argument("--fresh", action="store_true",
                     help="start a new project first (refused on unsaved work)")
     ap.add_argument("--out", default=None)
@@ -431,12 +440,32 @@ def main():
     proc = ({"profile": args.profile} if args.profile else
             {"process": args.process, "material": args.material})
     material = args.material
+    profiles = app.list_print_profiles()["profiles"]
     if args.profile:
-        material = next((p["material"] for p in
-                         app.list_print_profiles()["profiles"]
+        material = next((p["material"] for p in profiles
                          if p["name"] == args.profile), None)
         if material is None:
             raise SystemExit(f"jar: no print profile '{args.profile}'")
+    # The gasket's process: TPU on the same printer -- the bed is the
+    # printer's, so its TPU profile is the one sharing the PLA profile's
+    # bed -- or the built-in TPU table without a profile.
+    tpu_proc = {"process": "fdm", "material": "tpu"}
+    if args.tpu_profile:
+        if not any(p["name"] == args.tpu_profile and p["material"] == "tpu"
+                   for p in profiles):
+            raise SystemExit(f"jar: no TPU print profile "
+                             f"'{args.tpu_profile}'")
+        tpu_proc = {"profile": args.tpu_profile}
+    elif args.profile:
+        bed = next(p for p in profiles
+                   if p["name"] == args.profile).get("bed_mm")
+        mine = [p["name"] for p in profiles if p["material"] == "tpu"
+                and bed and p.get("bed_mm") == bed]
+        if len(mine) > 1:
+            raise SystemExit(f"jar: several TPU profiles on that printer "
+                             f"({', '.join(mine)}): pass --tpu-profile")
+        if mine:
+            tpu_proc = {"profile": mine[0]}
 
     # The allowances, each at the size it applies to. The thread's sizes
     # depend on its own allowances only through the clearance, so the
@@ -453,6 +482,12 @@ def main():
         allow[kind] = r["allowance_mm"]
         confirm = r.get("confirm", confirm)
     s = solve(args.inner_diameter, args.volume, allow)
+    tpu_allow = {
+        "hole": app.print_allowance(kind="hole", size_mm=s["gasket_in_d"],
+                                    **tpu_proc)["allowance_mm"],
+        "shaft": app.print_allowance(kind="shaft",
+                                     size_mm=s["gasket_out_d"],
+                                     **tpu_proc)["allowance_mm"]}
     print(f"jar: Ø{args.inner_diameter:g} x {s['inner_height']:.1f} "
           f"({args.volume:g} ml), thread {s['basic_major']:.2f} x "
           f"{s['pitch']:g} at {FLANK_DEG:g} deg, {s['turns']} turns; "
@@ -463,7 +498,7 @@ def main():
 
     jar_p, jar_t = build_jar(app, s, proc, material)
     lid_p, lid_t = build_lid(app, s, proc, material)
-    gasket_p = build_gasket(app, s)
+    gasket_p = build_gasket(app, s, tpu_proc, tpu_allow)
     for p in (jar_p, lid_p, gasket_p):
         verified(app, p)
 
@@ -610,11 +645,9 @@ def main():
     stls = {
         "jar": dict(export(app, jar_p, out / "jar.stl"), material=material),
         "lid": dict(export(app, lid_p, out / "lid.stl"), material=material),
-        # No print process for TPU, so the chords are asked for -- the
-        # PLA parts' own -- and so is the overhang limit.
-        "gasket": dict(export(app, gasket_p, out / "gasket.stl",
-                              deflection=0.01,
-                              max_overhang_deg=OVERHANG_DEG), material="tpu"),
+        # Printed in TPU: its own process's limits and chords.
+        "gasket": dict(export(app, gasket_p, out / "gasket.stl"),
+                       material="tpu"),
     }
     # Negative control: the same jar with the ISO 60-degree flank must fail
     # the overhang check, or the check cannot see a thread.
@@ -646,7 +679,12 @@ def main():
         jobs["pla"] = job_receipt(export_print_job(
             app, [("jar plate", "jar and lid")], out / "jar_job.3mf",
             material))
-        job_plate(app, "gasket plate", proc, [("gasket", 0.0)], bed)
+        if "profile" not in tpu_proc:
+            raise SystemExit("jar: the gasket's job needs a TPU print "
+                             "profile on the printer (print_coupon.py "
+                             "--seed installs 'TPU 95A on P1S', or pass "
+                             "--tpu-profile)")
+        job_plate(app, "gasket plate", tpu_proc, [("gasket", 0.0)], bed)
         jobs["tpu"] = job_receipt(export_print_job(
             app, [("gasket plate", "gasket")], out / "jar_tpu_job.3mf", "tpu"))
         mp = app.call("mass_properties", part="gasket plate")["bodies"][0]
@@ -673,6 +711,7 @@ def main():
         app.set_section(enabled=False)
 
     receipt = {"process": proc, "allowances": allow, **s,
+               "gasket_process": tpu_proc, "gasket_allowances": tpu_allow,
                "printed_threads": printed, "checks": checks, "stl": stls,
                "jobs": jobs, "gasket_print": GASKET_PRINT,
                "confirm": confirm,

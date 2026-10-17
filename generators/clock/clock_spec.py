@@ -519,7 +519,6 @@ def solve(period_s, allow, layer, z_gap, weight_od, cord_mm):
     # gap at the arbor's size for what turns on it.
     s["press_d"] = press_d
     s["run_d"] = d_a + 2.0 * g_small
-    s["seat_step"] = lines(1) / 4.0
     s["flat"] = lines(2)            # the D's flat, from the round
     s["hub_r"] = s["press_d"] / 2.0 + lines(WALL_LINES)
     e["hub_r"] = s["hub_r"]

@@ -41,6 +41,22 @@ Y_DOWN = q_axis((1, 0, 0), 90.0)          # -Y on the bed
 PRINT = {}
 
 
+def print_up(q):
+    """The print direction in the part's frame: the world's +Z turned back
+    by the print rotation `q` (x, y, z, w)."""
+    x, y, z, w = q
+    # Rotate (0, 0, 1) by the conjugate (-x, -y, -z, w).
+    qx, qy, qz = -x, -y, -z
+    vx, vy, vz = 0.0, 0.0, 1.0
+    tx = 2.0 * (qy * vz - qz * vy)
+    ty = 2.0 * (qz * vx - qx * vz)
+    tz = 2.0 * (qx * vy - qy * vx)
+    out = (vx + w * tx + (qy * tz - qz * ty),
+           vy + w * ty + (qz * tx - qx * tz),
+           vz + w * tz + (qx * ty - qy * tx))
+    return [round(c, 12) + 0.0 for c in out]
+
+
 # --- sketch entities -----------------------------------------------------------
 
 def poly(pts):
@@ -155,6 +171,11 @@ TPU_PRINT = {"timing belt": {"walls": 3, "top_layers": 5, "bottom_layers": 3,
              "valve spring": {"walls": 3}}
 
 
+# A part's own settings over those: the camshaft stands 170 mm tall on a
+# bar's end, so it prints with a brim to hold it down.
+PART_PRINT = {"camshaft": {"brim": "outer"}}
+
+
 class Part:
     """Features into one part (generators/clock/clock_parts.py's
     Builder)."""
@@ -167,7 +188,13 @@ class Part:
         # What it prints with (set_print_settings): the PLA parts at the
         # P1S's 0.20 mm Standard, stated so the printed mass weighs what
         # prints; the TPU ones as the card asks.
-        settings = TPU_PRINT.get(name, PLA_PRINT if material == "pla" else {})
+        settings = dict(TPU_PRINT.get(name, PLA_PRINT if material == "pla"
+                                      else {}))
+        settings.update(PART_PRINT.get(name, {}))
+        # The way up it prints, in its own frame: what its printed mass
+        # stacks layers along and where a printed hole's teardrop points.
+        if print_q != UP:
+            settings["direction"] = print_up(print_q)
         if settings:
             d.call("set_print_settings", **settings)
         self.n = 0
@@ -211,6 +238,20 @@ class Part:
 
     def along_x(self, what, x0, x1, ents, mode="add"):
         return self.extrude(what, p_x(x0), ents, x1 - x0, mode)
+
+    def hole_x(self, what, x0, centres, dia, printed="teardrop"):
+        """Holes through along +X from x0, at (y, z) `centres`, printed
+        with their roofs pointed up the part's print direction (a Hole
+        feature's `printed`,
+        docs/modeling/holes-and-threads.md#printed-holes)."""
+        sk = self.sketch(what, p_xm(x0), [{"type": "point",
+                                           "p": [float(y), -float(z)]}
+                                          for y, z in centres])
+        return check(self.d.call("add_feature", feature={
+            "type": "Hole", "name": self._name(what), "sketch_id": sk,
+            "hole_kind": "simple", "diameter": float(dia), "depth": 1.0,
+            "through": True, "printed": printed}),
+            f"{self.name}: {what}")["id"]
 
     def cyl_x(self, what, x0, x1, r, c=(0.0, 0.0), mode="add"):
         return self.along_x(what, x0, x1, [circle(c, r)], mode)
@@ -407,8 +448,7 @@ def piston(d, s, proc, name="piston"):
         x0, x1 = sorted((sgn * s.x_boss, sgn * (ri + lines(1))))
         p.box("boss", (x0, -s.r_boss, -s.r_boss),
               (x1, s.r_boss, top - s.t_crown + lines(1)))
-    p.along_x("pin bore", -r - 1, r + 1,
-              teardrop(s.r_wpb, up=(0.0, -1.0)), mode="cut")
+    p.hole_x("pin bore", -r - 1, [(0.0, 0.0)], 2.0 * s.r_wpb)
     p.frame("wrist_pin", (0, 0, 0), z=(1, 0, 0), x=(0, 0, 1))
     p.frame("slide", (0, 0, 0), z=(0, 0, 1), x=(1, 0, 0))
     p.frame("crown", (0, 0, top), z=(0, 0, 1), x=(1, 0, 0))
@@ -677,10 +717,10 @@ def bellows(s, length):
     return outer + inner[::-1], n, dz, dr
 
 
-def spring(d, s, length, name):
-    """The valve spring: TPU, standing on its lower turn. Not a printed
-    PLA part, so no print process (no TPU table)."""
-    p = Part(d, name, None, material="tpu")
+def spring(d, s, length, name, tpu_proc):
+    """The valve spring: TPU, standing on its lower turn, printed in the
+    TPU process `tpu_proc` (docs/tolerances/README.md#tpu)."""
+    p = Part(d, name, tpu_proc, material="tpu")
     pts, n, dz, dr = bellows(s, length)
     p.revolve("bellows", pts, mode="new_body")
     p.frame("base", (0, 0, 0))
@@ -690,42 +730,37 @@ def spring(d, s, length, name):
 
 # --- cam --------------------------------------------------------------------------
 
-def cam_bar(d, s, proc):
-    """The camshaft's bar, in the cam frame (its axis X at the origin): a
-    round with a flat it prints on, that keys the lobes and the pulley."""
-    p = Part(d, "cam bar", proc, print_q=Y_DOWN)
-    p.along_x("bar", s.x_cam0, s.x_cam1, d_shape(s.r_bar), mode="new_body")
-    p.frame("axis", (0, 0, 0), z=(1, 0, 0), x=(0, 0, 1))
-    p.finish()
-    p.press(s.d_bar)
-    return p
-
-
 def lobe_ents(s, peak_cam_deg):
     """The lobe's outline in (y, z) of the cam frame: the hull of the base
     circle and the nose circle, the nose pointing at the bucket (-Z) when
     the cam has turned `peak_cam_deg`."""
     a = -math.radians(peak_cam_deg)
     nose = (s.cam_d * math.sin(a), -s.cam_d * math.cos(a))
-    return hull2((0.0, 0.0), s.r_base, nose, s.r_nose) + d_shape(s.r_bar)
+    return hull2((0.0, 0.0), s.r_base, nose, s.r_nose)
 
 
-def lobe(d, s, proc, i, lb):
-    p = Part(d, f"lobe {i + 1}", proc, print_q=X_UP)
-    x0 = lb["x"] - s.w_lobe / 2.0
-    p.along_x("lobe", x0, x0 + s.w_lobe, lobe_ents(s, lb["peak_cam_deg"]),
-              mode="new_body")
-    # Its number, so the lobes go back on the bar in their places: on the
-    # nose, between the bore and the tip.
-    a = -math.radians(lb["peak_cam_deg"])
-    ax, az = math.sin(a), -math.cos(a)
-    rr = (s.r_bar + s.r_lobe) / 2.0
-    p.extrude("number", p_x(x0 + s.w_lobe - s.d_engrave),
-              [{"type": "text", "text": str(i + 1),
-                "anchor": [ax * rr, az * rr],
-                "height": s.label_h, "font": "sans", "angle_deg": 0.0,
-                "halign": "center", "valign": "middle"}],
-              s.d_engrave + 1.0, mode="cut")
+def camshaft(d, s, proc):
+    """The camshaft in one piece, in the cam frame (its axis X at the
+    origin): a round bar, the eight lobes on it, each lobe's underside a
+    TAPERED extrude of its own outline leaning in at 45 degrees down to
+    the bar (docs/modeling/README.md#tapered-extrudes), and a D flat where
+    the pulley and the collar are pressed. It prints standing, front end
+    down (+X up), so each underside faces down at 45 and the lobes need no
+    pressing on: their angles are the model's."""
+    p = Part(d, "camshaft", proc, print_q=X_UP)
+    p.cyl_x("bar", s.x_cam0, s.x_cam1, s.r_bar, mode="new_body")
+    for lb in s.lobes:
+        x0 = lb["x"] - s.w_lobe / 2.0
+        ents = lobe_ents(s, lb["peak_cam_deg"])
+        p.along_x("lobe", x0, x0 + s.w_lobe, ents)
+        p.extrude("lobe underside", p_x(x0), ents, s.d_taper, mode="add",
+                  reversed=True, taper_deg=45.0)
+    big = 2.0 * s.r_lobe
+    for what, x0, x1 in (("pulley flat", s.x_cam0 - 1.0, s.x_f - s.belt_gr),
+                         ("collar flat", s.x_r + s.g_lobe_ax,
+                          s.x_cam1 + 1.0)):
+        p.box(what, (x0, -big, -big), (x1, -s.h_bar, big), mode="cut")
+    p.frame("axis", (0, 0, 0), z=(1, 0, 0), x=(0, 0, 1))
     p.finish()
     p.press(s.d_bar)
     return p
@@ -934,11 +969,11 @@ def belt_ents(s, path, rho_off):
                                           pol((0, 0), r1, a1))]
 
 
-def belt(d, s):
+def belt(d, s, tpu_proc):
     """The timing belt in TPU, as it runs on the pulleys at crank 0: a
-    band on the pitch line's outside and N teeth in. It prints flat (no
-    print process: there is no TPU table)."""
-    p = Part(d, "timing belt", None, material="tpu", print_q=X_UP)
+    band on the pitch line's outside and N teeth in. It prints flat, in
+    the TPU process `tpu_proc`."""
+    p = Part(d, "timing belt", tpu_proc, material="tpu", print_q=X_UP)
     path = s.belt_path
     p.along_x("band", s.x_belt0, s.x_belt1,
               belt_ents(s, path, -s.belt_pld) +

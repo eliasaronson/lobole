@@ -140,7 +140,13 @@ for.
   pillar's (the jar's phase search);
 - static studies of the pendulum rod under its bob and nut, and of the
   centre arbor in its pivots under the jar full of sand, each once, with a
-  timeout;
+  timeout. The arbor is a printed pin standing on its back end, so its
+  study is `_lib.pin_strength` (docs/simulation/README.md#printed-layers):
+  the cord's pull on the band of its round the drum turns on and the
+  pivots held on the bands in the plates, each a region of the one round
+  face (docs/simulation/README.md#loads-on-part-of-a-face), read across its
+  layers. Its interlayer factor goes in the receipt, and under 2 the run
+  stops;
 - every print plate's `check_print`, every item.
 
 `generator_clock` (generators/README.md#the-big-generators-as-tests) runs
@@ -180,8 +186,10 @@ the train's friction, is what stage 2 needs. A bigger drum would give more
 torque and less run; the drum is the smallest that holds the cord.
 
 FEM, each study once: the rod under the bob and nut peaks at 0.08 MPa
-(0.04 mm of stretch); the centre arbor under the jar full of sand at
-3.4 MPa, a factor of safety of 14, 0.02 mm of bending.
+(0.04 mm of stretch); the centre arbor under the jar full of sand (3.1 N
+on the drum's band) at 2.2 MPa von Mises, a factor of safety of 22,
+0.04 mm of bending, and 2.24 MPa across its layers: **a factor of 7.6**
+against PLA's interlayer strength.
 
 ### Print plates
 

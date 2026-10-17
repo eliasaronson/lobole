@@ -4,7 +4,8 @@
 
 """A printed inline four: a flat-plane crank in a split block, rods with
 lapped caps on pressed pins, pistons on pressed wrist pins, a single
-overhead cam of pressed lobes on bucket followers, eight valves closed by
+overhead camshaft printed in one piece, its lobes' undersides tapered to
+45 degrees, on bucket followers, eight valves closed by
 TPU bellows springs, a printed TPU toothed belt at 2:1, a flywheel with
 TDC marks and a hand crank. Everything printed, nothing bought.
 
@@ -36,7 +37,7 @@ import engine_parts as P  # noqa: E402
 import engine_spec as S  # noqa: E402
 from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
                   export_print_job, fresh_project, job_receipt,
-                  print_item_line, print_receipt)
+                  pin_strength, print_item_line, print_receipt)
 from lobole.sdk import SdkError, connect  # noqa: E402
 
 ROOT = Path(HERE).resolve().parent.parent
@@ -62,7 +63,7 @@ def fail(msg):
 
 # --- parts --------------------------------------------------------------------------
 
-def build_parts(d, s, proc):
+def build_parts(d, s, proc, tpu_proc):
     """Every part, each verified. Returns {name: Part}."""
     parts = {}
 
@@ -81,9 +82,7 @@ def build_parts(d, s, proc):
     add(P.pin_x(d, s, proc, "wrist pin", s.d_wp, s.l_wp))
     add(P.valve(d, s, proc))
     add(P.bucket(d, s, proc))
-    add(P.cam_bar(d, s, proc))
-    for i, lb in enumerate(s.lobes):
-        add(P.lobe(d, s, proc, i, lb))
+    add(P.camshaft(d, s, proc))
     g = s.belt_gr
     cp, r_tip2, _ = P.pulley(
         d, s, proc, "cam pulley", s.r_p2, s.z2, s.phase2,
@@ -104,13 +103,50 @@ def build_parts(d, s, proc):
     add(P.crank_arm(d, s, proc))
     add(P.handle(d, s, proc))
     add(P.dowel(d, s, proc))
-    sp, n, dz, dr = P.spring(d, s, s.l_free, "valve spring")
+    sp, n, dz, dr = P.spring(d, s, s.l_free, "valve spring", tpu_proc)
     s.spring_turns = n
     s.spring_dz = dz
     add(sp)
-    add(P.spring(d, s, s.l_show, "valve spring (at full lift)")[0])
-    add(P.belt(d, s))
+    add(P.spring(d, s, s.l_show, "valve spring (at full lift)", tpu_proc)[0])
+    add(P.belt(d, s, tpu_proc))
     return parts
+
+
+# What a hand pushes on the crank's handle, N: a firm push, about 3 kg.
+HAND_N = 30.0
+# A printed pin's factor against its interlayer strength must be at least
+# this, or the run stops: the hook's design factor (generators/hook).
+PIN_NEED = 2.0
+
+
+def wrist_pin_strength(d, s, hand_n):
+    """A wrist pin as printed (standing, +X up, so it bends across its
+    layers) under the hand crank's push: hand_n at the handle's radius is
+    the torque, and a rod at the crank radius pushes its piston by torque /
+    R at the most (the crank at 90 degrees). The rod's small end bears on
+    the pin's middle and the piston's bosses hold its ends, each a REGION
+    of the pin's one round face
+    (docs/simulation/README.md#loads-on-part-of-a-face). _lib.pin_strength
+    runs it; under PIN_NEED the run stops."""
+    d.call("set_active_part", part="wrist pin")
+    fs = d.call("list_elements")["bodies"][0]["faces"]
+    rounds = [f["name"] for f in fs if f["kind"] == "cylinder" and
+              abs(2.0 * f.get("radius", 0.0) - s.d_wp) < 1e-6]
+    if len(rounds) != 1:
+        fail(f"the wrist pin's round is {rounds}, not one face")
+
+    def band(x0, x1):
+        return {"normal": [1.0, 0.0, 0.0], "from_mm": x0, "to_mm": x1}
+    force = hand_n * s.r_arm / s.R
+    out = pin_strength(
+        d, "wrist pin", rounds[0], force, [0.0, 0.0, -1.0],
+        seat=[{"face": rounds[0], "region": band(-s.l_wp / 2.0, -s.x_boss)},
+              {"face": rounds[0], "region": band(s.x_boss, s.l_wp / 2.0)}],
+        layer_normal=[1.0, 0.0, 0.0],
+        region=band(-s.w_r / 2.0, s.w_r / 2.0),
+        name="wrist pin under the hand crank", need=PIN_NEED)
+    out.update(hand_n=hand_n, handle_r_mm=s.r_arm, crank_r_mm=s.R)
+    return out
 
 
 def verify_parts(d, names):
@@ -238,14 +274,11 @@ def build_engine(d, s, name="engine"):
     a.on("crankshaft", "flywheel", "flywheel")
     a.on("crankshaft", "crank arm", "crank arm")
     a.on("crank arm", "handle", "handle")
-    a.place("cam bar", "cam bar", (0.0, 0.0, s.z_cam))
+    a.place("camshaft", "camshaft", (0.0, 0.0, s.z_cam))
     a.mate("revolute", "cam", {"occurrence": a.occ["head"], "frame": "cam"},
-           {"occurrence": a.occ["cam bar"], "frame": "axis"})
-    for i in range(len(s.lobes)):
-        a.on("cam bar", f"lobe {i + 1}", f"lobe {i + 1}",
-             pos=(0.0, 0.0, s.z_cam))
-    a.on("cam bar", "cam pulley", "cam pulley", pos=(0.0, 0.0, s.z_cam))
-    a.on("cam bar", "cam collar", "cam collar", pos=(0.0, 0.0, s.z_cam))
+           {"occurrence": a.occ["camshaft"], "frame": "axis"})
+    a.on("camshaft", "cam pulley", "cam pulley", pos=(0.0, 0.0, s.z_cam))
+    a.on("camshaft", "cam collar", "cam collar", pos=(0.0, 0.0, s.z_cam))
     a.on("block", "timing belt", "timing belt")
     a.relate("timing belt", type="chain", a=a.mates["crank"],
              b=a.mates["cam"], teeth_a=s.z1, teeth_b=s.z2, phase=0.0)
@@ -488,10 +521,9 @@ def turned_box(lo, hi, q):
 PLA_PIECES = [("block", 1), ("bedplate", 1), ("sump", 1), ("head", 1),
               ("cam cover", 1), ("crankshaft", 1), ("rod", 4),
               ("rod cap", 4), ("cap pin", 8), ("piston", 4),
-              ("wrist pin", 4), ("valve", 8), ("bucket", 8), ("cam bar", 1)] \
-    + [(f"lobe {i + 1}", 1) for i in range(8)] + \
-    [("cam pulley", 1), ("crank pulley", 1), ("cam collar", 1),
-     ("flywheel", 1), ("crank arm", 1), ("handle", 1), ("dowel", 16)]
+              ("wrist pin", 4), ("valve", 8), ("bucket", 8),
+              ("camshaft", 1), ("cam pulley", 1), ("crank pulley", 1),
+              ("cam collar", 1), ("flywheel", 1), ("crank arm", 1), ("handle", 1), ("dowel", 16)]
 TPU_PIECES = [("timing belt", 1), ("valve spring", 8)]
 
 
@@ -553,17 +585,16 @@ ORIENT = {
     "its throws)", "rod": "flat, lap tongues down", "rod cap": "flat, lap "
     "tongues down", "cap pin": "standing", "piston": "crown down",
     "wrist pin": "standing", "valve": "head down", "bucket": "crown down",
-    "cam bar": "on its flat", "cam pulley": "flange down",
+    "camshaft": "standing, front end down, with a brim",
+    "cam pulley": "flange down",
     "crank pulley": "flange down", "cam collar": "flat",
     "flywheel": "marked face up", "crank arm": "flat",
     "handle": "grip down", "dowel": "standing",
     "timing belt": "flat, on its edge", "valve spring": "standing",
 }
-for _i in range(8):
-    ORIENT[f"lobe {_i + 1}"] = "flat, number up"
 
 
-def print_plates(d, s, proc, prof, out):
+def print_plates(d, s, proc, tpu_proc, prof, out):
     bed = (float(prof["bed_mm"][0]), float(prof["bed_mm"][1]))
     gap = S.spacing(s)
     ids = {p["name"]: p["id"] for p in d.call("list_parts")["parts"]
@@ -576,31 +607,19 @@ def print_plates(d, s, proc, prof, out):
         fail(f"the TPU pieces need {len(tpu)} plates")
     jobs = [(f"plate {k + 1}", rows, proc, f"plate{k + 1}.stl")
             for k, rows in enumerate(pla)]
-    jobs.append(("plate TPU", tpu[0], None, "plate_tpu.stl"))
+    jobs.append(("plate TPU", tpu[0], tpu_proc, "plate_tpu.stl"))
     gs = S.Spec()
     del gs
     for name, rows, pp, fn in jobs:
-        # The TPU plate is printed by the same printer: its process gives
-        # the job its bed and layer, and its pieces' material says TPU.
-        placed = make_plate(d, name, proc, rows, ids)
+        # The TPU plate is its own process -- TPU 95A on the same printer
+        # (docs/tolerances/README.md#tpu) -- so check_print judges it by the
+        # TPU table: its bridge, its gap and its chords, and the printer's
+        # bed.
+        placed = make_plate(d, name, pp, rows, ids)
         geo = d.call("check_geometry")
         if geo["receipt"]["standing"] != "verified":
             fail(f"{name} is not verified: {geo['receipt'].get('summary')}")
-        if pp is not None:
-            pr = check_print(d, f"  {name}", need=PRINT_ITEMS, quiet=True)
-        else:
-            # TPU: the plate's process is the PLA profile's (the printer,
-            # its bed and layer; the tables carry no TPU), so every limit
-            # the PLA rows would set is stated: the profile's air and
-            # chords, the 45-degree rule and the 10 mm bridge.
-            pr = check_print(d, f"  {name}", need=PRINT_ITEMS, quiet=True,
-                             max_overhang_deg=45.0, max_bridge_mm=10.0,
-                             min_gap_mm=s.g_side_min,
-                             stl_deflection_mm=prof["stl_deflection_mm"],
-                             # the profile's air, else three layers, as
-                             # check_print falls back itself
-                             min_air_mm=prof.get("z_gap_mm") or
-                             3.0 * prof["layer_height_mm"])
+        pr = check_print(d, f"  {name}", need=PRINT_ITEMS, quiet=True)
         if pr["shells"]["pieces"] != len(rows):
             fail(f"{name}: {pr['shells']['pieces']} pieces for the "
                  f"{len(rows)} placed")
@@ -609,9 +628,7 @@ def print_plates(d, s, proc, prof, out):
                 or box["max"][1] > bed[1] + 1e-6 or \
                 abs(box["min"][2]) > 1e-6:
             fail(f"{name} is off the bed: {box}")
-        kw = {} if pp is not None else {"stl_deflection_mm":
-                                        prof["stl_deflection_mm"]}
-        exp = d.call("export_stl", path=str(out / fn), **kw)
+        exp = d.call("export_stl", path=str(out / fn))
         mp = d.call("mass_properties")["total"]
         plates[name] = {"stl": str(out / fn), "pieces": placed,
                         "volume_cm3": mp["volume_mm3"] / 1000.0,
@@ -680,8 +697,8 @@ then at the top of its exhaust stroke, both valves just open (overlap).
 ## Print
 
 PLA plates on {profile}, TPU (95A) on its own. 0.2 mm layers, no supports,
-no brim. The PLA parts at Bambu Studio's 0.20 mm Standard (2 walls, 5/3
-shells, 15 % grid). The springs and the belt in TPU: 3 walls, 100 %
+no brim but the camshaft's (it stands on a bar's end). The PLA parts at
+Bambu Studio's 0.20 mm Standard (2 walls, 5/3 shells, 15 % grid). The springs and the belt in TPU: 3 walls, 100 %
 rectilinear infill on the belt (it is all walls at this size). The print
 jobs carry every one of those per object: `engine_job.3mf` (the PLA
 plates) and `engine_tpu_job.3mf` (the TPU plate, a spool of its own).
@@ -705,9 +722,9 @@ plates) and `engine_tpu_job.3mf` (the TPU plate, a spool of its own).
    its dowels.
 4. Valves up through their seats; a spring over each stem into its bucket
    bore; press a bucket on each stem. The head on the deck's dowels.
-5. Lobes on the bar by their numbers, front to back (each fits one way on
-   the flat), the bar into the head's saddles, the collar on its rear end,
-   the cam pulley on its front. The cover on its dowels.
+5. The camshaft into the head's saddles (one piece, its lobes printed
+   on it), the collar on its rear end, the cam pulley on its front, each
+   on its flat. The cover on its dowels.
 6. Crank pulley on the nose, the crankshaft at the `1 4` mark, the belt
    over both pulleys with the cam's lobes 1 and 2 (cylinder 1) both shut.
    The hand crank on the nose, the flywheel on the tail.
@@ -742,6 +759,12 @@ def main():
                          "fifth of the belt's tooth step)")
     ap.add_argument("--fresh", action="store_true",
                     help="start a new project first (refused on unsaved work)")
+    ap.add_argument("--hand-n", type=float, default=HAND_N,
+                    help="what a hand pushes on the crank's handle, N: the "
+                         "wrist pin study's load")
+    ap.add_argument("--tpu-profile", default=None,
+                    help="the springs' and belt's TPU print profile; default "
+                         "the one TPU profile on --profile's bed")
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-render", action="store_true",
                     help="skip the stills (a --headless instance has no "
@@ -770,6 +793,25 @@ def main():
     if not prof.get("layer_height_mm"):
         fail(f"profile '{args.profile}' states no layer height")
     proc = {"profile": args.profile}
+    # The springs and the belt: TPU 95A on the same printer, so the TPU
+    # profile is the one on this profile's bed (print_coupon.py --seed
+    # installs 'TPU 95A on P1S'), or --tpu-profile.
+    tpus = [p for p in d.call("list_print_profiles")["profiles"]
+            if p.get("material") == "tpu" and
+            (p["name"] == args.tpu_profile if args.tpu_profile
+             else p.get("bed_mm") == prof["bed_mm"])]
+    if len(tpus) != 1:
+        fail((f"no TPU print profile '{args.tpu_profile}'"
+              if args.tpu_profile else
+              f"{len(tpus)} TPU print profiles on '{args.profile}''s "
+              "printer (its bed): the springs and belt print in one -- "
+              "print_coupon.py --seed installs 'TPU 95A on P1S', or pass "
+              "--tpu-profile"))
+    if tpus[0].get("bed_mm") != prof["bed_mm"] or \
+            tpus[0].get("layer_height_mm") != prof["layer_height_mm"]:
+        fail(f"TPU profile '{tpus[0]['name']}' is another printer or layer "
+             f"than '{args.profile}'")
+    tpu_proc = {"profile": tpus[0]["name"]}
     layer = prof["layer_height_mm"]
     bed = (float(prof["bed_mm"][0]), float(prof["bed_mm"][1]))
     allow = S.Allow(d, proc)
@@ -797,12 +839,13 @@ def main():
               f"crankcase (at least {s.c_stack:.2f})")
 
     with phase("parts"):
-        parts = build_parts(d, s, proc)
+        parts = build_parts(d, s, proc, tpu_proc)
         for p in d.call("list_parts")["parts"]:
             if p["type"] == "part" and p["name"] not in parts:
                 d.call("delete_part", part=p["name"])  # new_project's
         n_parts = verify_parts(d, list(parts))
         print(f"  {n_parts} parts, every one verified")
+        wrist = wrist_pin_strength(d, s, args.hand_n)
 
     clash = s.g_side_min / 5.0
     checks = {"clash_deflection_mm": clash}
@@ -978,7 +1021,7 @@ def main():
               f"lift {s.lift:.2f}")
 
     with phase("print plates"):
-        plates = print_plates(d, s, proc, prof, out)
+        plates = print_plates(d, s, proc, tpu_proc, prof, out)
         n_pla = sum(1 for k in plates if k != "plate TPU")
         print(f"  {n_pla} PLA plates and one TPU")
         # One job a spool: the PLA plates together, the TPU plate alone.
@@ -1045,6 +1088,7 @@ def main():
                               allow.answers.items()},
                "sizes": spec, "predictions": pred, "checks": checks,
                "plates": plates, "jobs": jobs, "weight": weight,
+               "wrist_pin": wrist, "tpu_process": tpu_proc,
                "seconds": round(time.perf_counter() - t_start, 1),
                "phases": {nm: round(t, 1) for nm, t in PHASES}}
     (out / "engine.json").write_text(json.dumps(receipt, indent=1,

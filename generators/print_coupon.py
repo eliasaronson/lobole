@@ -70,8 +70,9 @@ gap into a `gap` row below Ø`size` -- and saves it with
 `save_print_profile`, each row's `source` naming the coupon. `--seed`
 installs the two profiles measured on a Bambu Lab P1S (K5 PLA at 0.1 mm a
 side, a plain PLA at 0.15, both at the preset's 0.2 mm layers, on the
-P1S's 256 x 256 x 256 mm bed), skipping any name the store already has
-except to give one that states no bed the P1S's.
+P1S's 256 x 256 x 256 mm bed) and a TPU 95A one on the same printer from
+the built-in TPU table, skipping any name the store already has except to
+give one that states no bed the P1S's.
 
 `--press-only` prints the PRESS row (docs/tolerances/README.md#press-allowance):
 pins of Ø`size` on shoulders on a plate, and a loose cap for each on the bed
@@ -179,11 +180,31 @@ P1S_PRINTER = {"bed_mm": P1S_BED_MM, "bed_exclude_mm": P1S_BED_EXCLUDE_MM,
                "line_width_mm": P1S_LINE_WIDTH_MM}
 
 
+# The P1S's TPU profile: the built-in TPU 95A table, every row to confirm
+# with a coupon, on the same printer (docs/tolerances/README.md#tpu). The
+# bed is the printer's, not the filament's: a TPU plate fits the P1S as a
+# PLA one does. Not measured: its rows keep the built-in sources.
+TPU_SEED = {"name": "TPU 95A on P1S", "layer": 0.2,
+            "conditions": "Bambu Lab P1S, 0.4 mm nozzle, Bambu Studio 0.20 "
+                          "mm, Bambu Lab TPU 95A HF, X-Y hole and contour "
+                          "compensation 0; the built-in TPU table, not yet "
+                          "measured on this printer"}
+
+
 def seed(d):
-    """Install the two P1S profiles, leaving any name already stored -- but
+    """Install the P1S profiles -- the two PLA ones measured, and the TPU
+    one from the built-in table -- leaving any name already stored, but
     giving one that lacks the P1S's bed, keep-out zone or line width
     those, the printer's numbers it is missing."""
     have = {p["name"]: p for p in d.call("list_print_profiles")["profiles"]}
+    if TPU_SEED["name"] not in have:
+        p = d.call("save_print_profile", profile={
+            "name": TPU_SEED["name"], "process": "fdm", "material": "tpu",
+            "conditions": TPU_SEED["conditions"],
+            "layer_height_mm": TPU_SEED["layer"], **P1S_PRINTER,
+            "rows": builtin_rows(d, "fdm", "tpu")})
+        print(f"print_coupon: saved '{p['name']}' (the built-in TPU table, "
+              "to confirm with a coupon)")
     for s in SEED:
         if s["name"] in have:
             mine = have[s["name"]]
