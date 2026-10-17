@@ -96,3 +96,7 @@ AGENTS.md
 .direnv/
 .envrc
 .nix-env/
+
+# Renders and screenshots dropped at the top level while working. A picture
+# the project keeps lives under docs/ or assets/.
+/*.png
