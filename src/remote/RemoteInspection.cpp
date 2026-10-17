@@ -17,6 +17,7 @@
 #include "core/FrameMath.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/MeasureSeal.h"
 #include "core/MeshCollide.h"
 #include "core/Occurrence.h"
 #include "core/Parallel.h"
@@ -1373,6 +1374,29 @@ static constexpr MethodDoc InspectionMethods[] = {
      "curve:int, cut_length_mm:number, length_mm:number, name:string, "
      "outer_diameter_mm:number, path_length_mm:number, quantity:int, "
      "wall_mm:number, coped_off_mm?:number}[]"},
+    {"check_seal",
+     "Whether two occurrences' contact SEALS (docs/inspect/README.md#seals) "
+     "{a, b: top-level occurrence ids or names}: where they overlap (a "
+     "gasket pressed) and where analytic faces lie on each other within "
+     "1 µm (a skirt on a shoulder), cut by a half-plane through the "
+     "contact's axis every half degree; a RING is a path of those traces, "
+     "each touching the next, that comes back to the trace it left -- a "
+     "thread's flanks go round but come back a pitch along, and are no "
+     "ring. Answers {sealed, least_width_mm (the widest closed ring's "
+     "narrowest trace, mm; 0 when none closes), rings[]{least_width_mm, "
+     "at_deg, least_interference_mm (0 = touching), radius_mm, centre_mm "
+     "(on the axis, level with it)}, angles about the axis from world X "
+     "(world Y for an axis near X), "
+     "open[]{from_deg, to_deg} (arcs with no contact at all: a notch), "
+     "axis_point_mm, axis_dir, axis_from, samples, touch_tol_mm, "
+     "contact_area_mm2, overlap_volume_mm3, note?}. Refused when the two "
+     "do not touch. Runs on the frame: seconds on modelled threads. The "
+     "requirement kind `seal` bounds least_width_mm.",
+     "a:int|string, b:int|string", remote::NoFlags,
+     "sealed:bool, least_width_mm:number, rings:object[], open:object[], "
+     "axis_point_mm:number[], axis_dir:number[], axis_from:string, "
+     "samples:int, touch_tol_mm:number, contact_area_mm2:number, "
+     "overlap_volume_mm3:number, note?:string"},
     {"interference",
      "Pairwise check between bodies or occurrences: {clash, volume_mm3, "
      "distance, "
@@ -2412,6 +2436,35 @@ std::unique_ptr<Parking> ParkInspectionRequest(ui::AppState& state,
   }
 }
 
+json SealJson(const Measure::SealReport& r) {
+  json rings = json::array();
+  for (const Measure::SealRing& g : r.rings)
+    rings.push_back({{"least_width_mm", g.leastWidthMm},
+                     {"at_deg", g.atDeg},
+                     {"least_interference_mm", g.leastInterferenceMm},
+                     {"radius_mm", g.radiusMm},
+                     {"centre_mm", {g.centre.x, g.centre.y, g.centre.z}}});
+  json open = json::array();
+  for (const Measure::SealArc& a : r.open)
+    open.push_back({{"from_deg", a.fromDeg}, {"to_deg", a.toDeg}});
+  json out = {
+      {"sealed", !r.rings.empty()},
+      {"least_width_mm", r.rings.empty() ? 0.0 : r.rings[0].leastWidthMm},
+      {"rings", rings},
+      {"open", open},
+      {"axis_point_mm", {r.axisPoint.x, r.axisPoint.y, r.axisPoint.z}},
+      {"axis_dir", {r.axisDir.x, r.axisDir.y, r.axisDir.z}},
+      {"axis_from", r.axisFrom},
+      {"samples", r.samples},
+      {"touch_tol_mm", r.touchTolMm},
+      {"contact_area_mm2", r.contactAreaMm2},
+      {"overlap_volume_mm3", r.overlapVolumeMm3}};
+  if (r.roundButOpen)
+    out["note"] = "contact all the way round, but no path round comes back "
+                  "to where it started: a helix (a thread) is not a seal";
+  return out;
+}
+
 std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                                         const std::string& m,
                                         const RpcParams& p) {
@@ -2703,6 +2756,42 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       out["region_count"] = arr.size();
     }
     return out;
+  }
+  if (m == "check_seal") {
+    // rpc-params: a, b
+    // rpc-returns-from: src/remote/RemoteInspection.cpp
+    if (state.assembly == nullptr || doc != nullptr)
+      throw std::runtime_error("check_seal runs on an assembly tab: a seal "
+                               "is between two placed occurrences");
+    const auto side = [&](const char* key) -> uint64_t {
+      const json& v = p.at(key);
+      if (v.is_number_integer()) {
+        if (state.assembly->FindById(v.get<uint64_t>()) == nullptr)
+          throw std::runtime_error(std::string(key) + ": occurrence id " +
+                                   v.dump() +
+                                   " not found (see list_occurrences)");
+        return v.get<uint64_t>();
+      }
+      if (!v.is_string())
+        throw std::runtime_error(std::string(key) +
+                                 " is a top-level occurrence id or name");
+      for (const Occurrence& o : state.assembly->GetOccurrences())
+        if (o.name == v.get<std::string>())
+          return o.id;
+      throw std::runtime_error(std::string(key) +
+                               ": no top-level "
+                               "occurrence is called " +
+                               v.dump() + " (see list_occurrences)");
+    };
+    const uint64_t a = side("a"), b = side("b");
+    if (a == b)
+      throw std::runtime_error("a and b are the same occurrence");
+    const std::vector<Body> A = ui::OccurrenceSubtreeBodies(state, a),
+                            B = ui::OccurrenceSubtreeBodies(state, b);
+    const auto r = Measure::Seal(A, glm::dmat4(1.0), B, glm::dmat4(1.0));
+    if (!r)
+      throw std::runtime_error("check_seal: " + r.error());
+    return SealJson(*r);
   }
   if (m == "interference") {
     // Clash detection (inspection I4). Part tab: two bodies interfere when

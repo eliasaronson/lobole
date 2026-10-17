@@ -296,6 +296,43 @@ receipt's "no pair interferes" reads.
   own shapes while the worker reads them; the copies' cached meshes are
   dropped when the run ends (`collide::Forget`).
 
+### Seals
+
+`check_seal {a, b}` (assembly tab, top-level occurrences by id or name)
+answers whether the contact of two placed occurrences closes all the way
+round: a lid on a jar, a gasket on its rim. The contact is where the two
+overlap (a pressed gasket, the 1 µm-fuzzy boolean `interference` uses) and
+where an analytic face of one lies on an analytic face of the other within
+1 µm (a skirt flat on a shoulder: the faces' common, a 2-D boolean). The
+axis is the one most of the contact's circular edges share, else the
+contact's own principal axis that stands apart from the other two.
+
+A half-plane through the axis every half degree cuts the contact into
+**traces**: a chain of section edges through faces that lie on each other
+(its width the chain's length), or a region of the overlap (its width its
+longest extent, a pressed ring's chord, and its depth its area over that).
+A **ring** is a path round of traces, each touching the next (their boxes
+in the half-plane within 0.02 mm), that comes back to the trace it left;
+of the paths from each trace on the first half-plane, the one whose
+narrowest trace is widest. A thread's flank contact goes round too but
+comes back a pitch along, so it is no ring.
+
+The answer: `sealed`, `least_width_mm` (the widest closed ring's narrowest
+trace; 0 when none closes), `rings[]` (`least_width_mm`, `at_deg`,
+`least_interference_mm`, 0 where it only touches, `radius_mm`,
+`centre_mm`), `open[]` (the arcs, `from_deg`-`to_deg`, with no contact at
+all: a notch in a skirt), the axis and what gave it, the contact's area and
+overlap volume. Angles run about the axis from world X (world Y for an
+axis near X). Two that do not touch are refused. It runs on the frame:
+seconds on modelled threads, whose helicoids are left out of the touching
+faces but not of the overlap. The requirement kind `seal`
+([requirements](../requirements/README.md#measures)) bounds
+`least_width_mm`, off the frame and over a motion study if asked.
+
+What it does not judge: whether the ring is pressed enough. It reports the
+overlap's depth and leaves the pressure to the material: no study models a
+25 % elastomer strain here, and a linear one would not be honest at it.
+
 ### Designed overlaps
 
 Some solid in solid is meant: an engaged thread, a retaining ring gripping

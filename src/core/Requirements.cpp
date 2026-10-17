@@ -50,6 +50,11 @@ const std::vector<KindSpec>& Specs() {
        "assembly",
        {"document", "a", "b", "expect"},
        {"document", "a", "b", "expect"}},
+      {"seal",
+       true,
+       "assembly",
+       {"document", "a", "b", "motion_study"},
+       {"document", "a", "b"}},
       {"mass", true, "part|assembly", {"document"}, {"document"}},
       {"volume", true, "part|assembly", {"document"}, {"document"}},
       {"fit_class",
@@ -244,10 +249,10 @@ void ValidateValues(const std::string& kind, const json& m) {
   } else if (kind == "study_result") {
     oneOf("quantity",
           {"max_displacement", "max_von_mises", "factor_of_safety"});
-  } else if (kind == "clearance" || kind == "contact") {
+  } else if (kind == "clearance" || kind == "contact" || kind == "seal") {
     if (kind == "clearance")
       oneOf("mode", {"mesh", "exact"});
-    else
+    else if (kind == "contact")
       oneOf("expect", {"clear", "touching", "not_clashing"});
     if (!m.at("a").is_number_integer() || !m.at("b").is_number_integer() ||
         m.at("a").get<int64_t>() < 0 || m.at("b").get<int64_t>() < 0)

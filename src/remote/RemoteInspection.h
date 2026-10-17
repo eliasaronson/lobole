@@ -13,6 +13,9 @@
 #include <string>
 
 class Document;
+namespace Measure {
+struct SealReport;
+}
 namespace ui {
 struct AppState;
 struct PrintedDiameter;
@@ -55,5 +58,10 @@ std::unique_ptr<Parking> ParkInspectionRequest(ui::AppState& state,
 nlohmann::json PrintedDiameterJson(const ui::PrintedDiameter& d,
                                    const std::string& cls);
 nlohmann::json PrintedThreadJson(const ui::PrintedThread& t);
+
+// check_seal's answer for a report (docs/inspect/README.md#seals): sealed,
+// least_width_mm (the widest closed ring's narrowest; 0 when none closes),
+// rings[], open[] (arcs with no contact), the axis and how it was found.
+nlohmann::json SealJson(const Measure::SealReport& r);
 
 } // namespace remote

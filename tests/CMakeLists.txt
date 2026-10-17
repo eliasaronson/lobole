@@ -42,6 +42,7 @@ add_executable(designer_tests
     test_press_fits.cpp
     test_print_allowance.cpp
     test_print_check.cpp
+    test_measure_seal.cpp
     test_print_job.cpp
     test_serialization.cpp
     test_baked_geometry.cpp

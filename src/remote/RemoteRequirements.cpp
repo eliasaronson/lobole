@@ -10,6 +10,7 @@
 #include "core/Expression.h"
 #include "core/InputHash.h"
 #include "core/Measure.h"
+#include "core/MeasureSeal.h"
 #include "core/MeshCollide.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
@@ -80,7 +81,10 @@ const MethodDoc RequirementMethods[] = {
      "max_von_mises|factor_of_safety, case?}, clearance {document: "
      "assembly, a, b: occurrence ids, mode?: mesh|exact, motion_study?: the "
      "smallest gap over that study's samples}, contact {document, a, b, "
-     "expect: clear|touching|not_clashing}, mass / volume {document: part "
+     "expect: clear|touching|not_clashing}, seal {document: assembly, a, "
+     "b: occurrence ids, motion_study?: the worst of its samples} (mm: the "
+     "widest ring a and b's contact closes round its axis, by its narrowest "
+     "-- 0 when none closes; check_seal), mass / volume {document: part "
      "or assembly}, fit_class {document, mate, class: clearance|transition|"
      "interference}, check_fits {document, allow_unverified?}, check_seat "
      "{document, occurrences: [bearing ids], allow_unverified?}, "
@@ -503,7 +507,7 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
               state.parts[*slot].name + "'";
       return s;
     };
-    if (kind == "clearance" || kind == "contact") {
+    if (kind == "clearance" || kind == "contact" || kind == "seal") {
       if (!needOcc("a") || !needOcc("b"))
         return 0;
     }
@@ -521,8 +525,8 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
       return 0;
     }
     const MotionStudy* study = nullptr;
-    if (kind == "motion_clean" ||
-        (kind == "clearance" && m.contains("motion_study"))) {
+    if (kind == "motion_clean" || ((kind == "clearance" || kind == "seal") &&
+                                   m.contains("motion_study"))) {
       study = needStudy(kind == "motion_clean" ? "study" : "motion_study");
       if (!study)
         return 0;
@@ -530,7 +534,7 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
     if (study) {
       h.U64(motion::InputKey(*a, ui::PartResolverFor(state),
                              ui::AssemblyResolverFor(state), *study));
-    } else if (kind == "clearance" || kind == "contact") {
+    } else if (kind == "clearance" || kind == "contact" || kind == "seal") {
       // Only what the gap is between: each side's placement and what it
       // places. A part moved elsewhere in the assembly is not this answer's
       // business, and a key that said it was would cry wolf.
@@ -1095,6 +1099,57 @@ void SmallestGap(const ClearanceInputs& in, Taken& t,
     t.detail["smallest_at_driver_mm"] = at;
 }
 
+// Where a motion study puts occurrences a and b, as the matrices that carry
+// each from where it stands now, at every sample, and whether the driver
+// turns. A study job to wait for when the study is not current (nothing
+// filled then). Throws when a sample did not solve: the answer there is
+// unknown, not the best of the rest.
+uint64_t StudyPoses(ui::AppState& state, uint64_t a, uint64_t b, uint64_t sid,
+                    const Ctx& ctx, std::vector<ClearanceInputs::Pose>& poses,
+                    bool& turns) {
+  if (const uint64_t job =
+          RunStudy(state, "run_motion_study", "study", sid, ctx))
+    return job;
+  const motion::Result* res = ui::MotionResultFor(state, sid);
+  if (!res)
+    throw std::runtime_error("motion study " + std::to_string(sid) +
+                             " has no result");
+  const MotionStudy* study = state.assembly->FindMotionStudyById(sid);
+  turns = study && study->driverDof == MateDof::Rotation;
+  const Occurrence* oa = state.assembly->FindById(a);
+  const Occurrence* ob = state.assembly->FindById(b);
+  const glm::dmat4 nowA = ui::OccurrenceMatrix(*oa);
+  const glm::dmat4 nowB = ui::OccurrenceMatrix(*ob);
+  const auto worldOf = [](const motion::Sample& s,
+                          uint64_t id) -> std::optional<glm::dmat4> {
+    for (const auto& [occ, w] : s.worlds)
+      if (occ == id)
+        return w;
+    return std::nullopt;
+  };
+  size_t unsolved = 0;
+  for (const motion::Sample& s : res->samples) {
+    if (!s.solved) {
+      unsolved++;
+      continue;
+    }
+    const auto wa = worldOf(s, a), wb = worldOf(s, b);
+    if (!wa || !wb)
+      continue;
+    poses.push_back(
+        {*wa * glm::inverse(nowA), *wb * glm::inverse(nowB), s.value});
+  }
+  if (unsolved > 0)
+    throw std::runtime_error(std::to_string(unsolved) + " of " +
+                             std::to_string(res->samples.size()) +
+                             " samples of motion study " + std::to_string(sid) +
+                             " did not solve, so the answer there is unknown");
+  if (poses.empty())
+    throw std::runtime_error("no sample of motion study " +
+                             std::to_string(sid) + " could be measured");
+  return 0;
+}
+
 Taken MeasureClearance(ui::AppState& state, const json& m, const Ctx& ctx) {
   Taken t;
   t.unit = "mm";
@@ -1122,50 +1177,11 @@ Taken MeasureClearance(ui::AppState& state, const json& m, const Ctx& ctx) {
   } else {
     // The smallest gap over a motion study's samples: each side moved from
     // where it stands now to where the study put it.
-    const uint64_t sid = m.at("motion_study").get<uint64_t>();
-    if ((t.waitJob = RunStudy(state, "run_motion_study", "study", sid, ctx)))
-      return t;
-    const motion::Result* res = ui::MotionResultFor(state, sid);
-    if (!res)
-      throw std::runtime_error("motion study " + std::to_string(sid) +
-                               " has no result");
+    in->studyId = m.at("motion_study").get<uint64_t>();
     in->overStudy = true;
-    in->studyId = sid;
-    const MotionStudy* study = state.assembly->FindMotionStudyById(sid);
-    in->turns = study && study->driverDof == MateDof::Rotation;
-    const Occurrence* oa = state.assembly->FindById(a);
-    const Occurrence* ob = state.assembly->FindById(b);
-    const glm::dmat4 nowA = ui::OccurrenceMatrix(*oa);
-    const glm::dmat4 nowB = ui::OccurrenceMatrix(*ob);
-    const auto worldOf = [](const motion::Sample& s,
-                            uint64_t id) -> std::optional<glm::dmat4> {
-      for (const auto& [occ, w] : s.worlds)
-        if (occ == id)
-          return w;
-      return std::nullopt;
-    };
-    size_t unsolved = 0;
-    for (const motion::Sample& s : res->samples) {
-      if (!s.solved) {
-        unsolved++;
-        continue;
-      }
-      const auto wa = worldOf(s, a), wb = worldOf(s, b);
-      if (!wa || !wb)
-        continue;
-      in->poses.push_back(
-          {*wa * glm::inverse(nowA), *wb * glm::inverse(nowB), s.value});
-    }
-    // A sample that did not solve has no pose, so the gap there is unknown:
-    // not the smallest of the rest.
-    if (unsolved > 0)
-      throw std::runtime_error(
-          std::to_string(unsolved) + " of " +
-          std::to_string(res->samples.size()) + " samples of motion study " +
-          std::to_string(sid) + " did not solve, so the gap there is unknown");
-    if (in->poses.empty())
-      throw std::runtime_error("no sample of motion study " +
-                               std::to_string(sid) + " could be measured");
+    if ((t.waitJob =
+             StudyPoses(state, a, b, in->studyId, ctx, in->poses, in->turns)))
+      return t;
   }
   if (ctx.async) {
     t.work = [in](Taken& out, const std::atomic<bool>& cancel,
@@ -1191,6 +1207,89 @@ Taken MeasureContact(ui::AppState& state, const json& m) {
   for (const char* k : {"volume_mm3", "distance", "press_fits"})
     if (r.contains(k))
       t.detail[k] = r.at(k);
+  return t;
+}
+
+// A seal (docs/inspect/README.md#seals): the widest ring the contact of a
+// and b closes round its axis, by its narrowest -- 0 when none closes -- at
+// the worst sample of a motion study when one is named.
+struct SealInputs {
+  std::vector<Body> A, B;
+  std::vector<ClearanceInputs::Pose> poses;
+  bool copies = false, turns = false, overStudy = false;
+  SealInputs() = default;
+  SealInputs(const SealInputs&) = delete;
+  SealInputs& operator=(const SealInputs&) = delete;
+};
+
+void SealOver(const SealInputs& in, Taken& t, const std::atomic<bool>& cancel,
+              std::atomic<double>& fraction) {
+  t.unit = "mm";
+  double worst = std::numeric_limits<double>::infinity();
+  for (size_t i = 0; i < in.poses.size(); i++) {
+    const auto& p = in.poses[i];
+    const auto r = Measure::Seal(in.A, p.xa, in.B, p.xb, 720, 1e-3, &cancel);
+    if (cancel.load())
+      throw std::runtime_error("cancelled");
+    // Nothing touching is no seal: a reading of 0, and why.
+    const double v =
+        r ? (r->rings.empty() ? 0.0 : r->rings[0].leastWidthMm) : 0.0;
+    if (v < worst) {
+      worst = v;
+      t.detail = r ? SealJson(*r)
+                   : json{{"sealed", false},
+                          {"least_width_mm", 0.0},
+                          {"why", r.error()}};
+      if (in.overStudy) {
+        if (in.turns)
+          t.detail["worst_at_driver_deg"] = angles::ToDegrees(p.driver);
+        else
+          t.detail["worst_at_driver_mm"] = p.driver;
+      }
+    }
+    fraction.store(static_cast<double>(i + 1) /
+                   static_cast<double>(in.poses.size()));
+  }
+  if (in.overStudy)
+    t.detail["samples"] = in.poses.size();
+  t.value = worst;
+}
+
+Taken MeasureSeal(ui::AppState& state, const json& m, const Ctx& ctx) {
+  Taken t;
+  t.unit = "mm";
+  const uint64_t a = m.at("a").get<uint64_t>(), b = m.at("b").get<uint64_t>();
+  auto in = std::make_shared<SealInputs>();
+  in->copies = ctx.async;
+  for (const auto& [id, side] : {std::pair{a, &in->A}, std::pair{b, &in->B}})
+    for (const Body& body : ui::OccurrenceSubtreeBodies(state, id)) {
+      Body nb = body;
+      if (in->copies)
+        nb.shape = body.shape.DetachedUnlocated().LocatedLike(body.shape);
+      side->push_back(std::move(nb));
+    }
+  if (in->A.empty() || in->B.empty())
+    throw std::runtime_error("one side places no visible matter (hidden, or a "
+                             "part with no bodies), so there is no seal");
+  if (!m.contains("motion_study")) {
+    in->poses.push_back({});
+  } else {
+    in->overStudy = true;
+    if ((t.waitJob =
+             StudyPoses(state, a, b, m.at("motion_study").get<uint64_t>(), ctx,
+                        in->poses, in->turns)))
+      return t;
+  }
+  if (ctx.async) {
+    t.work = [in](Taken& out, const std::atomic<bool>& cancel,
+                  std::atomic<double>& fraction) {
+      SealOver(*in, out, cancel, fraction);
+    };
+    return t;
+  }
+  std::atomic<bool> never{false};
+  std::atomic<double> fraction{0.0};
+  SealOver(*in, t, never, fraction);
   return t;
 }
 
@@ -1577,6 +1676,8 @@ Taken MeasureOn(ui::AppState& state, const req::Requirement& r,
     return MeasureClearance(state, m, ctx);
   if (kind == "contact")
     return MeasureContact(state, m);
+  if (kind == "seal")
+    return MeasureSeal(state, m, ctx);
   if (kind == "mass" || kind == "volume")
     return MeasureMass(state, m, kind == "mass");
   if (kind == "fit_class")

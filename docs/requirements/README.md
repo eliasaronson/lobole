@@ -44,6 +44,7 @@ and the call a person would make agree by construction.
 | `study_result` | part | `run_study`, `study_results` | mm, MPa, or a factor | `study`, `quantity`: max_displacement \| max_von_mises \| factor_of_safety, `case?` |
 | `clearance` | assembly | the gap `interference` measures | mm | `a`, `b` (top-level occurrences), `mode?`: mesh \| exact, `motion_study?` |
 | `contact` | assembly | `interference` | verdict | `a`, `b`, `expect`: clear \| touching \| not_clashing |
+| `seal` | assembly | `check_seal` | mm, the widest closed ring's narrowest trace (0 when none closes) | `a`, `b` (top-level occurrences), `motion_study?` (the worst of its samples) |
 | `mass`, `volume` | part or assembly | `mass_properties` | g, mm3 | |
 | `fit_class` | assembly | `check_fits` | verdict | `mate`, `class`: clearance \| transition \| interference |
 | `check_fits` | assembly | `check_fits` | verdict | `allow_unverified?` |
@@ -88,6 +89,14 @@ where they stand now to where the study put them. The study is run, or its
 result reused, first; a sample that did not solve makes the measure
 unresolved, since the gap there is unknown. Only top-level placements move:
 a flexible placement's inner poses are not followed.
+
+**A seal** (`seal`) is a contact that closes all the way round
+([seals](../inspect/README.md#seals)): bounded `at_least` the width the
+seal needs, it fails on a contact that is open anywhere (a notch reads 0,
+and `detail.open` says where) or narrower than that, and its detail is
+`check_seal`'s answer. Nothing touching reads 0, with `detail.why`. Over a
+motion study it is the worst sample's, like a clearance. The
+[jar](../../generators/jar/README.md) states two.
 
 **A bearing against its shaft** (`bearing_bore`): a bearing is a catalogue
 row, chosen once, and does not follow a variable; the shaft it carries is
@@ -167,8 +176,8 @@ exactly what the measure reads:
 | measure | input hash |
 |---|---|
 | `study_probe`, `study_result` | the study's (`fem::StudyInputKey`: the study with its expressions evaluated, the part's B-Rep, names and materials) |
-| `motion_clean`, a clearance over a study | the motion study's (`motion::InputKey`) |
-| `clearance`, `contact` | the two occurrences as saved and what each places |
+| `motion_clean`, a clearance or a seal over a study | the motion study's (`motion::InputKey`) |
+| `clearance`, `contact`, `seal` | the two occurrences as saved and what each places |
 | the other assembly measures | the assembly's content through every sub-assembly and every placed part's bodies (`motion::AssemblyInputKey`), with each placed part's tolerances and print process |
 | `mass`, `volume` of a part | its bodies, tolerances and print process |
 | `check_literals` | the part's features, bodies and variables, and the project's variables |
@@ -222,7 +231,7 @@ Nothing to measure answers at once either way.
 - The job's `finish` steps on the main thread, one requirement a frame.
   The main thread only reads the model and writes evidence: a measure whose
   reading is expensive hands it to a **worker** the run owns. A clearance
-  does (one pose or over a motion study's samples, mesh or exact): the main
+  and a seal do (one pose or over a motion study's samples): the main
   thread takes both sides' bodies as deep copies, OCC's booleans and
   extrema writing into their arguments
   ([query booleans](../inspect/README.md#query-booleans-are-non-destructive)),
