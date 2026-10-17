@@ -202,8 +202,9 @@ json PrintedMassJson(ui::AppState& state, const Document& part,
            {"layers", r->layers},
            {"pixel_mm", r->pixelMm},
            {"settings", DocumentIO::PrintSettingsToJson(bp.settings)},
-           {"estimate", true},
-           {"method", printmass::MethodNote()}};
+           {"estimate", !r->exact},
+           {"method", r->exact ? "printed at 100 %: the solid, exactly"
+                               : printmass::MethodNote()}};
   // A body with no material prints in the filament: the process's.
   if (!(density > 0.0)) {
     std::string fwhy;

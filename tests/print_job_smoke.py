@@ -279,7 +279,9 @@ def main():
         expect(abs(pv - sv) < 1e-6 * sv, f"100 % is the solid: {pv} {sv}")
         expect(b["printed"]["density_from"] == "the filament, pla",
                b["printed"])
-        expect(b["printed"]["estimate"], "said to be an estimate")
+        # Solid all through it is the solid, exactly, and says so.
+        expect(not b["printed"]["estimate"] and
+               "exactly" in b["printed"]["method"], b["printed"])
 
         d.call("add_part", name="block")
         d.call("set_print_process", profile=PROFILE["name"])
@@ -294,6 +296,7 @@ def main():
         got = m["printed"]["volume_mm3"]
         expect(abs(got - want) < 1e-6 * want,
                f"the block's printed volume {got} against {want} by hand")
+        expect(m["printed"]["estimate"], "an infill is an estimate")
         unstated = None
         d.call("add_part", name="plain")
         d.call("set_print_process", profile=PROFILE["name"])

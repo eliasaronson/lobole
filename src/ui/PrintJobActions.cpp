@@ -265,6 +265,20 @@ bool MeshObject(const Body& body, double deflection, printjob::Object& o) {
   return !o.triangles.empty();
 }
 
+// What the slicer lists an object as: a plate's piece by the name its
+// Derived feature gives it ("dowel 7"), with the body's when that feature
+// made several; any other body by its own name.
+std::string ObjectName(const Document& part, const Body& body) {
+  const Feature* f =
+      body.createdBy != 0 ? part.FindFeatureById(body.createdBy) : nullptr;
+  if (f == nullptr || dynamic_cast<const DerivedFeature*>(f) == nullptr)
+    return body.name;
+  int made = 0;
+  for (const Body& b : part.GetBodies())
+    made += !b.reference && b.createdBy == body.createdBy ? 1 : 0;
+  return made > 1 ? f->GetName() + " / " + body.name : f->GetName();
+}
+
 json BambuJson(const std::vector<std::pair<std::string, std::string>>& kv) {
   json j = json::object();
   for (const auto& [k, v] : kv)
@@ -404,12 +418,13 @@ BuildPrintJob(AppState& state, const std::vector<JobPlateAsk>& plates,
             ": a job is one spool. Put each filament's plates in a job "
             "of their own");
       printjob::Object o;
-      o.name = b->name;
+      o.name = ObjectName(part, *b);
       if (!MeshObject(*b, deflection, o))
         return unexpected(piece + " did not mesh");
       o.settings =
           printset::BambuObjectSettings(bp.settings, prof.layerHeightMm);
-      json row{{"name", b->name},
+      json row{{"name", o.name},
+               {"body", b->name},
                {"created_by", b->createdBy},
                {"settings", DocumentIO::PrintSettingsToJson(bp.settings)},
                {"described", printset::Describe(bp.settings)},

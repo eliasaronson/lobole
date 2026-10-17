@@ -405,6 +405,23 @@ std::optional<Result> EstimatePrinted(const printfit::Process* proc,
     return refuse("no printed mass without " + missing +
                   " (set_print_settings; the slicer's own defaults are not "
                   "Loböle's to guess)");
+  // Printed solid all through, the print IS the solid: its mass properties
+  // exactly, off the B-Rep, with no raster to round them. (A pendulum's
+  // period is computed from these, and a raster's pixel moving with the
+  // rod's length would make the length search chase it.)
+  if (*s.infillPct >= 100.0) {
+    CADShape::MassProps mp;
+    if (!body.shape.ComputeMassProps(mp) || !(mp.volume > 0.0))
+      return refuse("body '" + body.name + "' has no volume to weigh");
+    Result r;
+    r.solidMm3 = r.shellMm3 = r.effectiveMm3 = mp.volume;
+    r.centerOfMass = mp.centerOfMass;
+    for (int a = 0; a < 3; a++)
+      for (int b = 0; b < 3; b++)
+        r.inertia[a][b] = mp.inertia[a][b];
+    r.exact = true;
+    return r;
+  }
   Input in;
   in.layerMm = prof.layerHeightMm;
   in.lineWidthMm = prof.lineWidthMm;

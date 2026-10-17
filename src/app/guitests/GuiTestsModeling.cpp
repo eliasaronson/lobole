@@ -2811,6 +2811,54 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield(2);
   };
 
+  // The slicer settings under the print process
+  // (docs/tolerances/README.md#slicer-settings): each field stated or left
+  // to the preset, the pattern from the accepted list, and a combination
+  // the slicer refuses -- grid at 100 % -- said and not stored.
+  t = IM_REGISTER_TEST(engine, "tolerance", "slicer_settings_from_the_panel");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    AddFixtureCylinder(ctx);
+    ctx->Yield(2);
+    Doc()->SetPrintProcess(printfit::Process{"fdm", "pla", std::nullopt});
+    IM_CHECK(Doc()->PrintSettings().Empty());
+    const uint64_t version = Doc()->Version();
+    ImGuiWindow* w = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+    ctx->ItemClick(w->TabId);
+    ctx->Yield(2);
+    if (ctx->ItemInfo("//###Variables/###print_process",
+                      ImGuiTestOpFlags_NoError)
+            .ID == 0) {
+      ctx->ItemClick("//###Variables/Print process");
+      ctx->Yield(2);
+    }
+    ctx->SetRef("//###Variables");
+    ctx->ItemClick("###slicer_on_walls");
+    ctx->Yield(2);
+    IM_CHECK(Doc()->PrintSettings().part.walls.has_value());
+    ctx->ItemClick("###slicer_on_infill");
+    ctx->Yield(2);
+    IM_CHECK(Doc()->PrintSettings().part.infillPct.has_value());
+    ctx->ComboClick("###slicer_pattern/###slicer_pattern_grid");
+    ctx->Yield(2);
+    IM_CHECK(Doc()->PrintSettings().part.infill == printset::Infill::Grid);
+    // Grid cannot print 100 %: refused, the stored settings unchanged.
+    const double before = *Doc()->PrintSettings().part.infillPct;
+    ctx->ItemInputValue("###slicer_infill", "100");
+    ctx->Yield(2);
+    IM_CHECK_EQ(*Doc()->PrintSettings().part.infillPct, before);
+    ctx->ComboClick("###slicer_pattern/###slicer_pattern_rectilinear");
+    ctx->Yield(2);
+    ctx->ItemInputValue("###slicer_infill", "100");
+    ctx->Yield(2);
+    IM_CHECK_EQ(*Doc()->PrintSettings().part.infillPct, 100.0);
+    IM_CHECK(Doc()->PrintSettings().part.infill ==
+             printset::Infill::Rectilinear);
+    IM_CHECK_EQ(Doc()->Version(), version); // drives no geometry
+    ctx->ItemClick(ImGui::FindWindowByName(ui::kPanelModel)->TabId);
+    ctx->Yield(2);
+  };
+
   // Check print (docs/tolerances/README.md#checking-a-print): the button in
   // the Print process section runs ui::RunPrintCheck on the part and lists
   // the seven items; a ceiling's Show selects the face it is about. A

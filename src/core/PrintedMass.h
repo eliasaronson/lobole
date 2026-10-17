@@ -55,6 +55,9 @@ struct Result {
   double inertia[3][3] = {};
   int layers = 0;
   double pixelMm = 0.0;
+  // Printed at 100 %: the solid's own properties, exactly (EstimatePrinted
+  // takes them off the B-Rep; no layers, no pixels).
+  bool exact = false;
 };
 
 // nullopt (with `why`) for a body with no shape, an input out of range, or a
@@ -66,8 +69,9 @@ struct Result {
 // width from proc's profile, the rest from `s` (direction unset = +Z).
 // nullopt with `why` naming what is missing: no process, a profile that
 // states no layer_height_mm or line_width_mm, or walls, top_layers,
-// bottom_layers or infill_pct unstated. Remembered per shape and inputs,
-// so a generator asking again pays nothing.
+// bottom_layers or infill_pct unstated. At 100 % infill the print is the
+// solid, and the answer is its exact mass properties (`exact`). Remembered
+// per shape and inputs, so a generator asking again pays nothing.
 [[nodiscard]] std::optional<Result>
 EstimatePrinted(const printfit::Process* proc, const printset::Settings& s,
                 const Body& body, std::string* why);
