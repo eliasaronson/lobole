@@ -641,6 +641,18 @@ def push_check(d, s, ph, diameter):
     return out
 
 
+def air_stated(d, proc):
+    """The vertical air the print profile states (z_gap_mm, from the
+    coupon's air row), or None: the built-in table, or a profile that has
+    not measured it."""
+    if "profile" not in proc:
+        return None
+    for p in d.call("list_print_profiles")["profiles"]:
+        if p["name"] == proc["profile"]:
+            return p.get("z_gap_mm") or None
+    raise SystemExit(f"planetary: no print profile '{proc['profile']}'")
+
+
 def material_of(d, proc):
     """The material slug of a print process: given, or its profile's."""
     if "material" in proc:
@@ -822,11 +834,24 @@ def main():
     # as two arcs through involute points -- which the check's tolerance (a
     # tenth of the gap) holds. And nothing overhangs past 45 degrees or
     # bridges: the helix, the bearers' cone and the knob are 45 or less by
-    # design. Every item must pass but stacking: meshing 45 degree flanks
-    # leave the gap a side over the flank below as vertical air, short of
-    # the unmeasured three-layer default (README, "What is checked").
+    # design. Every item must pass, and stacking too under a profile that
+    # states its air (z_gap_mm, measured on the coupon's air row): meshing
+    # 45 degree flanks leave the gap a side over the flank below as
+    # vertical air, which the built-in table's three-layer default was never
+    # measured against, so there it is reported and not required (README,
+    # "What is checked").
+    stated = air_stated(d, proc)
     pr = check_print(d, "planetary",
-                     need=tuple(k for k in PRINT_ITEMS if k != "stacking"))
+                     need=PRINT_ITEMS if stated else
+                     tuple(k for k in PRINT_ITEMS if k != "stacking"))
+    st = pr["stacking"]
+    if stated and st.get("limit_from") != "profile":
+        raise SystemExit(f"planetary: the profile states its air, but "
+                         f"stacking judged by {st.get('limit_from')}")
+    print(f"planetary: stacking {st['status']}, "
+          + (f"required: the profile's air {stated:g} mm" if stated else
+             "reported, not required: no measured air "
+             f"(the limit is {st.get('limit_from')}'s)"))
     cl = {f"{p['a']} / {p['b']}": p["distance_mm"]
           for p in pr["clearance"]["pairs"]}
 

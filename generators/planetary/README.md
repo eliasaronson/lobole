@@ -128,15 +128,25 @@ a mesh closes by the gap instead of 0.25 mm.
   - **nothing overhangs past 45° and nothing bridges**: the helix, the
     bearers' 45° cone and the knob read 45.000 at worst off the B-rep.
 
-  - **stacking is reported, not required.** Every piece starts on the bed,
-    but where the herringbone flanks mesh, a 45° flank of one gear lies
-    over its neighbour's with the gap a side as vertical air (about
-    0.53 mm at K5's 0.1 mm a side) against a limit of 0.6 mm. That limit
-    is three layers, a default no coupon has measured yet
-    (docs/tolerances/README.md#print-profiles), and each layer of a 45°
-    flank stands on its own gear. The K5 print of 2026-10-15 is the
-    evidence either way; once the coupon's air row records `z_gap_mm`,
-    the planetary should require this item too.
+  - **stacking, under a profile that states its air.** Every piece starts
+    on the bed, but where the herringbone flanks mesh, a 45° flank of one
+    gear lies over its neighbour's with about the gap a side between them
+    as vertical air. A profile whose air row has been printed and recorded
+    (`z_gap_mm`, docs/tolerances/README.md#print-profiles) is a measured
+    limit, and the planetary is held to it: built at 70 mm on "K5 PLA on
+    P1S" with its measured 0.4 mm, the flanks leave 0.205 mm (planet 3
+    over the sun, and eleven pairs more), so it **fails**, saying so -- the
+    design needs that much more air before the check will pass it. On the
+    built-in table, or a profile that has not measured its air, the limit
+    is the unmeasured three-layer default, and stacking is reported and
+    not required: `planetary: stacking ..., reported, not required`.
+
+  - **Not yet on a profile's bed.** A profile that states its bed and a
+    keep-out zone makes `bed_fit` positional (the part's frame is the
+    bed's), and the plate is built round the origin: on either P1S profile
+    `bed_fit` fails (the sun and ring off the bed, the sun in the wiper's
+    corner) before stacking is reached. The plate has to be built at the
+    bed's centre for a profile build to pass.
 
   The whole report is in the receipt's `print`.
 - **The assembly turns.** The `sun`, `ring` and a kinematic carrier (a part
