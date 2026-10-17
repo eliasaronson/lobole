@@ -235,3 +235,4 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine);
 void RegisterViewportGuiTests(ImGuiTestEngine* engine);
 void RegisterShellGuiTests(ImGuiTestEngine* engine);
 void RegisterTerminalGuiTests(ImGuiTestEngine* engine);
+void RegisterDemoGuiTests(ImGuiTestEngine* engine);

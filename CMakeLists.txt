@@ -175,6 +175,13 @@ set_source_files_properties(
     ${IMGUI_TEST_ENGINE_DIR}/imgui_te_perftool.cpp
     ${IMGUI_TEST_ENGINE_DIR}/imgui_te_utils.cpp
     PROPERTIES COMPILE_OPTIONS "-Wno-unused-result")
+# The capture tool would compile its own stb_image_write, and
+# render/Screenshot.cpp already does; stb's functions are extern "C", so two
+# copies clash at link time whatever namespace one is in. The engine uses
+# Screenshot.cpp's.
+set_source_files_properties(
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_capture_tool.cpp
+    PROPERTIES COMPILE_DEFINITIONS "IMGUI_DISABLE_STB_IMAGE_WRITE_IMPLEMENTATION")
 if(ENABLE_TEST_ENGINE)
   include_directories(SYSTEM ${IMGUI_TEST_ENGINE_DIR})
 endif()
@@ -791,6 +798,7 @@ set(app_sources
     src/app/guitests/GuiTestsModeling.cpp
     src/app/guitests/GuiTestsSketch.cpp
     src/app/guitests/GuiTestsViewport.cpp
+    src/app/guitests/GuiTestsDemo.cpp
     src/app/guitests/GuiTestsAssembly.cpp
     src/app/guitests/GuiTestsFlexible.cpp
     src/app/guitests/GuiTestsDrawing.cpp
@@ -973,6 +981,7 @@ if(NOT ENABLE_TEST_ENGINE)
        src/app/guitests/GuiTestsModeling.cpp
        src/app/guitests/GuiTestsSketch.cpp
        src/app/guitests/GuiTestsViewport.cpp
+       src/app/guitests/GuiTestsDemo.cpp
        src/app/guitests/GuiTestsAssembly.cpp
        src/app/guitests/GuiTestsFlexible.cpp
        src/app/guitests/GuiTestsDrawing.cpp
@@ -1055,7 +1064,11 @@ if(ENABLE_TEST_ENGINE)
   target_compile_definitions(designer_app PUBLIC
       HAVE_TEST_ENGINE
       IMGUI_ENABLE_TEST_ENGINE
-      IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1)
+      IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
+      # Screenshots and video from the engine, fed by main.cpp's
+      # CaptureForTestEngine. The engine's own config template turns it on,
+      # but nothing here includes that template, so it read as 0.
+      IMGUI_TEST_ENGINE_ENABLE_CAPTURE=1)
   # Where the checked-in GUI-test fixtures live (tests/fixtures/...), on the
   # ONE file that reads it. Public, it was on every app and test source, and
   # a path is different in every tree: a worktree missed ccache on them all.

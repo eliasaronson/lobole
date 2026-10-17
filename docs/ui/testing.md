@@ -178,6 +178,42 @@ passes at. `--headless` honours `--gui-test-job-latency-ms` too, so a smoke
 can hold its instance's jobs open the same way (`hostile_params_smoke
 --self-test`, [the hostile sweep](../scripting/rpc.md#the-hostile-sweep)).
 
+## Recording a scene
+
+The test engine records video: `ctx->CaptureBeginVideo()` and
+`CaptureEndVideo()` around a test's steps write an mp4 through ffmpeg (found
+on `PATH`, as `export_motion_video` finds it). The frames come from the app,
+not the display: the engine asks for each frame's pixels from inside
+`ImGuiTestEngine_PostSwap`, and `CaptureForTestEngine` (`app/main.cpp`)
+re-renders that frame, scene and interface from the same draw data, through
+`CaptureScreenshot`, the remote screenshot's path. The swapchain is never
+read, and under Xvfb nothing outside the app could read it: the driver
+presents without passing through the X framebuffer, so `x11grab` and
+`xwd -root` both see black. The engine calls the hook only while it
+captures, so an ordinary frame costs nothing.
+
+- **The clock.** A recording is one video frame per frame of the suite's
+  fixed 1/60 s clock, at 60 fps, however long each frame took to render.
+  Ending a video sets the engine's `ConfigFixedDeltaTime` to 0 (wall clock),
+  so `EndRecording` (`guitests/GuiTestsDemo.cpp`) puts the suite's back --
+  every test after it would otherwise judge double-clicks by machine load.
+- **The speed.** While it records, the engine switches a Fast run to
+  Cinematic: a mouse move glides and then pauses. Step a timed sequence with
+  `ctx->Yield()`, one frame each, not with mouse moves --
+  `capture/records_a_clip` once recorded two minutes where it meant two
+  seconds. `--gui-test-speed fast|normal|cinematic` sets the speed for a
+  whole run.
+- **The size.** The engine rounds a video's size to even sides and then,
+  on a window already even, rounds it down by two (1280x720 became
+  1278x718); `BeginRecording` asks an even window for no rounding.
+- `capture/records_a_clip` records two seconds of a turning camera, decodes
+  them and checks the clip: every frame, the window's size, not black,
+  moving. CI's GUI job installs ffmpeg for it.
+
+`--capture-dir <dir>` is where a scene writes its clip
+(`GuiTestCaptureDir()`); a scene given none runs the same steps and records
+nothing, which is how it stays in the suite.
+
 ## Making a widget addressable
 
 Tests, `ui_items` and remote UI driving all address widgets by path. What

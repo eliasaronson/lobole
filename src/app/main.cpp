@@ -1516,6 +1516,79 @@ static void FramePresent(ImGui_ImplVulkanH_Window* wd) {
   wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount;
 }
 
+#ifdef HAVE_TEST_ENGINE
+// The test engine's screen capture: its screenshots and the videos a demo
+// scene records (docs/ui/testing.md#recording-a-scene). The engine asks for
+// a rect of the frame just presented, from inside ImGuiTestEngine_PostSwap;
+// this re-renders that frame -- the scene AND the interface, from the same
+// draw data -- into a readable image through CaptureScreenshot, the remote
+// screenshot's path. The swapchain itself is never read: its images are not
+// created for transfer, and under Xvfb the driver presents them without
+// passing through the X framebuffer, so nothing outside the app could read
+// them either. The engine calls this only while it captures, so an ordinary
+// frame pays nothing.
+static ImDrawData* s_CaptureDrawData = nullptr; // set only across PostSwap
+static int s_CaptureFrame = -1;
+static std::vector<uint8_t> s_CaptureRgb;
+static uint32_t s_CaptureW = 0;
+static uint32_t s_CaptureH = 0;
+
+static bool CaptureForTestEngine(ImGuiID /*viewport*/, int x, int y, int w,
+                                 int h, unsigned int* pixels, void* /*user*/) {
+  if (s_CaptureDrawData == nullptr || w <= 0 || h <= 0)
+    return false;
+  ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
+  // One render per frame, however many rects the engine asks for in it.
+  if (ImGui::GetFrameCount() != s_CaptureFrame) {
+    vkQueueWaitIdle(g_Queue); // the frame's resources must be reusable
+    if (g_OutlineRenderer)
+      g_OutlineRenderer->SettleSilhouettes();
+    s_CaptureW = static_cast<uint32_t>(wd->Width);
+    s_CaptureH = static_cast<uint32_t>(wd->Height);
+    s_CaptureRgb.clear();
+    std::string error;
+    ImDrawData* drawData = s_CaptureDrawData;
+    if (!CaptureScreenshot(
+            g_Device, g_PhysicalDevice, g_Queue, g_CommandPool, wd->RenderPass,
+            wd->SurfaceFormat.format, s_CaptureW, s_CaptureH, wd->ClearValue,
+            [&](VkCommandBuffer cb) {
+              for (SceneRenderer* r : g_Scene)
+                r->Render(cb, wd->FrameIndex);
+              ImGui_ImplVulkan_RenderDrawData(drawData, cb);
+            },
+            /*outputPath=*/"", &error, g_MSAASamples,
+            [&](VkCommandBuffer cb) {
+              RecordScenePrepasses(cb, wd->FrameIndex);
+            },
+            nullptr, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, 1, {}, &s_CaptureRgb)) {
+      LOG_ERROR("test engine capture: {}", error);
+      return false;
+    }
+    s_CaptureFrame = ImGui::GetFrameCount();
+  }
+  // The engine's rect is in ImGui units; the frame is in framebuffer pixels.
+  const ImVec2 k = ImGui::GetIO().DisplayFramebufferScale;
+  for (int row = 0; row < h; row++) {
+    const int fy = static_cast<int>((y + row) * k.y);
+    for (int col = 0; col < w; col++) {
+      const int fx = static_cast<int>((x + col) * k.x);
+      unsigned char* out =
+          reinterpret_cast<unsigned char*>(&pixels[size_t(row) * w + col]);
+      if (fx < 0 || fy < 0 || fx >= int(s_CaptureW) || fy >= int(s_CaptureH)) {
+        out[0] = out[1] = out[2] = 0;
+      } else {
+        const uint8_t* in = &s_CaptureRgb[(size_t(fy) * s_CaptureW + fx) * 3];
+        out[0] = in[0];
+        out[1] = in[1];
+        out[2] = in[2];
+      }
+      out[3] = 255; // RGBA in memory: what the engine pipes to ffmpeg
+    }
+  }
+  return true;
+}
+#endif
+
 void printUsage(const char* programName) {
   std::cout << "Usage: " << programName << " [OPTIONS]" << std::endl;
   std::cout << "Options:" << std::endl;
@@ -1545,6 +1618,12 @@ void printUsage(const char* programName) {
          "than this after it started (starved workers; GUI tests and "
          "--headless)"
       << std::endl;
+  std::cout << "  --gui-test-speed <fast|normal|cinematic>  How the GUI tests "
+               "move the mouse and pause (cinematic: for recording)"
+            << std::endl;
+  std::cout << "  --capture-dir <dir>  Demo scenes record their clips here "
+               "(needs ffmpeg on PATH)"
+            << std::endl;
   std::cout << "  --gui-test-list      List GUI tests as category/name and "
                "exit (no GPU needed)"
             << std::endl;
@@ -1603,6 +1682,12 @@ struct CommandLineArgs {
   // --gui-test-job-latency-ms: no background job is reaped sooner than this
   // after it started — its workers starved, the frames not (SetTestJobLatency).
   double guiTestJobLatencyMs = 0.0;
+#ifdef HAVE_TEST_ENGINE
+  // --gui-test-speed: the engine's own speeds. Cinematic moves the mouse
+  // visibly and pauses between actions, for a scene that is being recorded.
+  ImGuiTestRunSpeed guiTestSpeed = ImGuiTestRunSpeed_Fast;
+#endif
+  std::string captureDir; // --capture-dir (GuiTestCaptureDir)
   bool headless = false;
   bool offscreen = false;
   bool hidden = false;
@@ -1684,6 +1769,29 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       (arg == "--gui-test-min-frame-ms" ? args.guiTestMinFrameMs
                                         : args.guiTestJobLatencyMs) = ms;
       ++i;
+    } else if (arg == "--gui-test-speed") {
+      const std::string speed = i + 1 < argc ? argv[++i] : "";
+#ifdef HAVE_TEST_ENGINE
+      if (speed == "fast")
+        args.guiTestSpeed = ImGuiTestRunSpeed_Fast;
+      else if (speed == "normal")
+        args.guiTestSpeed = ImGuiTestRunSpeed_Normal;
+      else if (speed == "cinematic")
+        args.guiTestSpeed = ImGuiTestRunSpeed_Cinematic;
+      else {
+        std::cerr << "--gui-test-speed takes fast, normal or cinematic, not '"
+                  << speed << "'" << std::endl;
+        exit(1);
+      }
+#else
+      (void)speed;
+#endif
+    } else if (arg == "--capture-dir") {
+      if (i + 1 >= argc) {
+        std::cerr << "--capture-dir requires a directory" << std::endl;
+        exit(1);
+      }
+      args.captureDir = argv[++i];
     } else if (arg == "--gui-test-list") {
       args.listGuiTests = true;
     } else if (arg == "--headless") {
@@ -2837,7 +2945,19 @@ int main(int argc, char** argv) {
   ImGuiTestEngineIO& testEngineIO = ImGuiTestEngine_GetIO(testEngine);
   testEngineIO.ConfigVerboseLevel = ImGuiTestVerboseLevel_Info;
   testEngineIO.ConfigVerboseLevelOnError = ImGuiTestVerboseLevel_Debug;
-  testEngineIO.ConfigRunSpeed = ImGuiTestRunSpeed_Fast;
+  testEngineIO.ConfigRunSpeed = args.guiTestSpeed;
+  // Capture: screenshots and a demo scene's video. The frames come from
+  // CaptureForTestEngine; ffmpeg (from PATH, as export_motion_video finds it)
+  // encodes them. Without ffmpeg a scene still runs -- it just cannot record.
+  testEngineIO.ScreenCaptureFunc = &CaptureForTestEngine;
+  if (const std::string ffmpeg = ui::FfmpegPath(); !ffmpeg.empty())
+    std::snprintf(testEngineIO.VideoCaptureEncoderPath,
+                  sizeof(testEngineIO.VideoCaptureEncoderPath), "%s",
+                  ffmpeg.c_str());
+  std::snprintf(testEngineIO.VideoCaptureEncoderParams,
+                sizeof(testEngineIO.VideoCaptureEncoderParams), "%s",
+                IMGUI_CAPTURE_DEFAULT_VIDEO_PARAMS_FOR_FFMPEG);
+  SetGuiTestCaptureDir(args.captureDir);
   testEngineIO.ConfigLogToTTY = args.runGuiTests;
   testEngineIO.ConfigWatchdogWarning = 60.0f;
   testEngineIO.ConfigWatchdogKillTest = 300.0f;
@@ -3206,7 +3326,9 @@ int main(int argc, char** argv) {
       // image is presented, not when we have finished idling.
       g_App.frameTimer.EndFrame(glfwGetTime());
 #ifdef HAVE_TEST_ENGINE
+      s_CaptureDrawData = draw_data; // what CaptureForTestEngine re-renders
       ImGuiTestEngine_PostSwap(testEngine);
+      s_CaptureDrawData = nullptr;
 #endif
 
       // In uncapped test mode, cap the frame rate so the GPU isn't driven to

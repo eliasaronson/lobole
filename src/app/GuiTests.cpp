@@ -33,6 +33,7 @@ void RegisterGuiTests(ImGuiTestEngine* engine, ui::AppState* state) {
   RegisterSimulationGuiTests(engine);
   RegisterProjectGuiTests(engine);
   RegisterTerminalGuiTests(engine);
+  RegisterDemoGuiTests(engine);
 
   // Wrap every registered test so ResetAppForTest() runs before it — this is
   // what makes the suite order-independent. Done once here, after every

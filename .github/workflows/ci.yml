@@ -38,6 +38,7 @@ jobs:
         with:
           submodules: true
 
+      # ffmpeg: capture/records_a_clip encodes a clip and decodes it back.
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -50,7 +51,7 @@ jobs:
             libocct-modeling-data-dev libocct-foundation-dev \
             libocct-ocaf-dev libocct-visualization-dev libtbb-dev \
             libvterm-dev \
-            xvfb mesa-vulkan-drivers
+            xvfb mesa-vulkan-drivers ffmpeg
 
       # restore + save rather than actions/cache, because the save half must
       # run on FAILURE too. actions/cache only saves when the job succeeds, and
