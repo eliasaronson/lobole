@@ -213,7 +213,9 @@ the window's red line and Accept stays disabled. Accept is one undo step.
 ## Cam
 
 A cam drives b through a **lift table** — `[[angle_deg, lift], …]` spanning
-one turn — instead of a ratio. The lift is in the follower's unit: mm for a
+one turn, `0 <= angle_deg < 360`: the table wraps, its last point joining
+its first, so it stops short of 360 (a point at 360 is the one at 0, and is
+refused) — instead of a ratio. The lift is in the follower's unit: mm for a
 slide, **degrees** for a turn. The table is stored as authored and converted
 to radians where it is read (`RelationValue`, the loop row). The follower is
 whatever DOF mate b has: a slider slides, a revolute turns, and a cylindrical

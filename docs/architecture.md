@@ -147,7 +147,12 @@ The numbers were measured on this 22-core, 30 GB machine.
   on the build directory. `tools/merge-branch.sh` takes the same lock before
   it cherry-picks, numbers a branch's format bump
   ([versioning/format.md](versioning/format.md#a-bump-takes-its-number-when-it-lands)),
-  then builds, tests and removes the worktree. A merge that
+  then builds, tests and removes the worktree. A pick that conflicts only
+  in the files made from the MethodDoc rows (`python/lobole/rpc.py`,
+  `api/rpc-surface.json`) has them made again from the merged rows and goes
+  on, since every pair of branches that each add an RPC conflicted there;
+  any other conflict stops for a person. `--pick-only` picks and numbers
+  without building, testing or removing anything. A merge that
   landed mid-build once linked objects that saw two versions of `AppState.h`,
   and the binary died with a `bad_alloc` that looked like heap corruption.
   `tools/ctest` (ctest, every argument passed through) and the GUI runner

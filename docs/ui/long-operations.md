@@ -64,7 +64,9 @@ the job runs (an import or an open is building the document); elsewhere the
 bar sits where the work was asked for and the rest of the UI stays live.
 
 **RPC.** `background_jobs` lists what is running (id, kind, label, fraction,
-cancellable) and `cancel_background_job {kind}` requests a cancel; a study
+cancellable), its row naming every kind a job is given (`test_conventions.cpp`,
+"every background job kind is in background_jobs' row"), and
+`cancel_background_job {kind}` requests a cancel; a study
 job is also asked about and cancelled by its id, `study_status {job}` and
 `cancel_study {job}`
 ([studies as jobs](../simulation/README.md#studies-as-jobs)); for `cam`

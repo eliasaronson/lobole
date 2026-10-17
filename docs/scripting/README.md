@@ -91,10 +91,26 @@ file behind, so the pid is the truth: readers skip entries whose process is
 gone and delete them. The file holds only what does not change while the app
 runs; the open project and whether it is dirty come from `ping`, live.
 
+**The port claim.** The registry follows `XDG_STATE_HOME`, and an agent's
+instance (a smoke's, a generator test's, a `headless-preview.sh` run with a
+scratch state dir) announces itself where nothing else looks: a port it held
+could be handed out again, and one from a deleted worktree ran for 33 hours
+unnoticed. So every instance also claims its port machine-wide,
+`/tmp/lobole-ports-<uid>/<port>`, one line holding its pid -- never under
+`XDG_STATE_HOME` or `TMPDIR` (which a nix-shell moves per shell);
+`LOBOLE_PORT_CLAIMS_DIR` moves it for a test. It is written when the port
+opens and removed when it closes, while it is still this process's
+(`remote::PortClaimFile`); a crash leaves it, and readers drop a claim whose
+pid is gone. Not on Windows.
+
 `Client.instances()` in `python/lobole/client.py` reads the registry; the
 MCP server and `lobole.sdk.connect()` attach through it, so no client has
 to guess a port. `tools/scratch_port.py` picks a port that is free per the
-kernel, unclaimed per the registry, and never the human's.
+kernel, unclaimed per the registry and the port claims, and never the
+human's. `tools/stray-instances.sh` lists every running lobole of this
+user from `/proc` -- pid, port (its claim, else the sockets it listens on),
+age, and working directory, marked `[DELETED]` when the worktree it ran
+from is gone -- and kills nothing.
 
 `ping` reports `port`, `mode`, `ui_actions`, `project`, `dirty`, `gpu`,
 `occ` (the OpenCASCADE version it was built against), `features` (optional subsystems compiled in, e.g. `cam`) and
@@ -238,6 +254,12 @@ Headless, on the default `ctest -LE gui` path:
   and each module imports from it alone.
 - `offscreen_smoke` — the offscreen renderer over RPC (skips without a
   Vulkan device).
+- `port_claims_smoke` — an instance with its own `XDG_STATE_HOME` claims
+  its port with its pid, `scratch_port.py` will not hand out a port a live
+  claim holds (bound or not) and drops a dead pid's, and the claim goes with
+  the instance; `test_instance_registry.cpp` ("An instance claims its port
+  outside its state dir") the same in process, and that a claim another
+  process holds is not withdrawn.
 
 GUI-labelled: `remote_smoke` (the RPC surface including screenshots and UI
 actions, and the measure parity gate) and `mcp_smoke` (a bracket modelled

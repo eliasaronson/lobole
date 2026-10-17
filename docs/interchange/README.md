@@ -155,10 +155,11 @@ structured multi-body file still yields one shape per body.
 
 ## Exporting STL and BREP
 
-`export_stl {path, body?, deflection?}` and `export_brep {path, body?}`
+`export_stl {path, body?, stl_deflection_mm?}` and `export_brep {path, body?}`
 write the active part. Without `body` the non-reference bodies are fused
 into one shape; STL and BREP hold one shape each. STL is binary and
-re-meshed at `deflection` (chord tolerance in mm), never the viewport's
+re-meshed at `stl_deflection_mm` (chord tolerance, the name `check_print`
+takes for the same deviation; `deflection` is refused, naming it), never the viewport's
 tessellation; the reply reports the deflection used, where it came from, and
 whether the source B-Rep was watertight. Left out, it is 0.1 mm on an
 unprinted part and, on a printed one, the print profile's chord deviation or
@@ -204,7 +205,7 @@ on an assembly tab, and unknown extensions, are refused by name.
 |---|---|---|
 | `import_step {path, as_assembly?, keep_origin?, units?}` | RemoteProject | STEP / STL / BREP into the part, or a STEP as parts + an assembly |
 | `export_step {path, part?, body?}` | RemoteProject | structured STEP of a part or the assembly |
-| `export_stl {path, body?, deflection?}`, `export_brep {path, body?}` | RemoteProject | one shape of the active part |
+| `export_stl {path, body?, stl_deflection_mm?}`, `export_brep {path, body?}` | RemoteProject | one shape of the active part |
 | `export_visual {path, deflection?}` | RemoteProject | glTF / OBJ / PLY of the part or assembly |
 | `export_members {dir}` | RemoteTube | one STEP per tube member |
 | `export_dxf` | RemoteSheetMetal | a flat pattern as R12 DXF |

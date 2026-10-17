@@ -143,7 +143,9 @@ taken over RPC give the same numbers.
 
 `mass_properties {body?, part?}` → per body `volume_mm3`, `surface_area_mm2`,
 `center_of_mass_mm`, `inertia` (3×3 about the centre of mass), `material`,
-`density`, `mass_g`, and a measured `bbox`; plus `total {volume_mm3,
+`density`, `mass_g`, and a measured `bbox`, each row's `body` its index
+among the part's bodies (a Derived ghost is not weighed, and the rows after
+it keep their own indices and boxes); plus `total {volume_mm3,
 center_of_mass_mm, mass_g}` and `bbox_mm {min, max, size}`, the measured box
 of everything it weighed together (on an assembly, every visible leaf where
 the solve put it). Density comes from the body's material; a body with

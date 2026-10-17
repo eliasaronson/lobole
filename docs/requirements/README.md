@@ -292,9 +292,23 @@ undo stack.
 `src/ui/RequirementsPanel.cpp`, docked with the Model panel, and present only
 while the project states a requirement (like the Conflicts panel). Each row
 shows the state (coloured), the name (its tooltip: the measure kind, the
-source, the note, a failed verdict's findings, when it was checked and at
-which revision), the value with
-its unit (or "clean" / "findings" for a verdict) and the bound as evaluated.
+source, the note, the finding, when it was checked and at which revision),
+the value with its unit (or "clean" / "findings" for a verdict) and the
+bound as evaluated. The value and bound columns fit what they say, so a
+narrow panel clips the name, which its tooltip gives back, rather than
+"findings".
+
+**A requirement that does not pass says why, whole.** Under a failing or
+unresolved row, a line in its state's colour runs across the table, wrapped
+to it, holding the whole finding: a number against its bound ("measured 8
+mm3, must be <= 5 mm3"), a failed verdict's findings one a line (a
+bearing's under its designation, a fit's reason, the detail's note), or why
+it could not be measured. `req::FindingLines` (`src/core/Requirements.cpp`)
+is the one wording: the panel draws it, and every check -- the job, the
+synchronous call, a check with nothing to measure -- ends by logging each
+requirement it was asked about that does not pass, `requirement '<name>'
+fail: <finding>; <finding>`, so a failing check read from the log says
+why.
 **Check** starts the job for every requirement that is not current, and
 shows its progress while it runs on the bar every long operation draws
 (`DrawJobProgress`), with Cancel (`###req_cancel`); Shift+Check measures
@@ -353,6 +367,12 @@ before delivering.
 - GUI `requirements/panel_checks_and_goes_stale`: the panel appears with
   the requirements, Check measures them as a job, and an edit to the model
   makes them stale.
+- GUI `requirements/a_failure_says_why`: a volume over its bound, a
+  `check_fasteners` over an assembly with no screw and a mass on a part
+  that is gone each show their whole finding under the row (read back as
+  the panel drew it, `ui::RequirementRowDrawnForTest`), wrapped inside the
+  table, the Value column fitting "findings", and the name's tooltip up.
+  `requirements_smoke.py` reads the log line of a failing clearance.
 - GUI `requirements/a_slow_check_keeps_the_frame`: a clearance held 1.5 s
   in its measure (`remote::SetTestRequirementHold`) leaves every frame
   under 250 ms of main-thread CPU; the panel's Cancel ends a 30 s hold

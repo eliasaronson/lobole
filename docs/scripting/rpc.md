@@ -129,7 +129,10 @@ worse than a missing row, because an agent trusts it instead of guessing.
   request's top-level keys against the method's row — before parking, before
   the part gate, before the handler, before a UI action or a capture — and
   refuses a key the row does not list with a "did you mean" from an edit
-  distance over the row (`UndeclaredParamsError`). `params` that are not an
+  distance over the row (`UndeclaredParamsError`). A parameter that was
+  renamed is refused the same way, the refusal naming what it is called now
+  (`RenamedParams`: `export_stl`'s `deflection` is `stl_deflection_mm`) --
+  never taken as an alias. `params` that are not an
   object are refused there too. `batch` checks every call's keys the same
   way before the first call runs. The row can carry this because
   `rpc_params_gate` holds it equal to the keys the handler reads; a `"*"`
