@@ -25,10 +25,17 @@
 
 #include <nlohmann/json.hpp>
 
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepTools.hxx>
+#include <BinTools.hxx>
+#include <Geom_Plane.hxx>
+#include <gp_Ax3.hxx>
+
 #include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <sstream>
 #include <string>
 
 namespace {
@@ -382,6 +389,51 @@ TEST_CASE("A part with a bore hashes the same after a save and reopen",
           re->GetBodies()[i].elementMap.names);
   }
   fs::remove_all(proj);
+}
+
+// Reading a shape back is not idempotent: a plane's frame is rebuilt from
+// its normal and X direction as it is read, and for some frames the rebuilt
+// X moves in the last place on every read, between two values. The
+// engine's cam pulley has such a plane (this one, off a tooth's flank): it
+// hashed one way regenerated and the other read back from the project, so
+// every requirement over its motion study opened stale. The digest reads
+// the shape back until it repeats: the shape, and the shape as the project
+// reads it back, are one input.
+TEST_CASE("A shape hashes the same as itself read back from the project",
+          "[studyjobs][serialize]") {
+  const auto readBack = [](const TopoDS_Shape& s) {
+    std::stringstream bin;
+    BinTools::Write(s, bin, false, false, BinTools_FormatVersion_CURRENT);
+    TopoDS_Shape out;
+    BinTools::Read(out, bin);
+    return out;
+  };
+  const auto text = [](const TopoDS_Shape& s) {
+    std::ostringstream t;
+    BRepTools::Write(s, t, false, false, TopTools_FormatVersion_VERSION_1);
+    return t.str();
+  };
+  const gp_Ax3 frame(gp_Pnt(-16.48, 7.920695497499735, -7.7904500585180569),
+                     gp_Dir(0.0, -0.58199801560289643, -0.81319020520065965),
+                     gp_Dir(0.0, -0.81319020520065954, 0.58199801560289632));
+  const TopoDS_Shape flank =
+      BRepBuilderAPI_MakeFace(new Geom_Plane(frame), -1.0, 1.0, -1.5, 1.5, 1e-7)
+          .Shape();
+  REQUIRE(CADShape(flank).IsValid());
+  const TopoDS_Shape once = readBack(flank);
+  const TopoDS_Shape twice = readBack(once);
+  const TopoDS_Shape thrice = readBack(twice);
+  // The case this is about: each read moves it again.
+  CHECK(text(once) != text(twice));
+  CHECK(text(twice) != text(thrice));
+  inputhash::Hasher a, b, c, d;
+  a.Shape(CADShape(flank));
+  b.Shape(CADShape(once));
+  c.Shape(CADShape(twice));
+  d.Shape(CADShape(thrice));
+  CHECK(a.Digest() == b.Digest());
+  CHECK(b.Digest() == c.Digest());
+  CHECK(c.Digest() == d.Digest());
 }
 
 #ifdef HAVE_NETGEN

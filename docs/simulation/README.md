@@ -165,9 +165,8 @@ when it ends.
 
 **Results keyed by inputs.** A run computes a 64-bit input hash
 (`src/core/InputHash.h`; FNV-1a) over the exact B-Rep of the bodies it reads
-(BinTools bytes without triangulation, memoized per shape identity), their
-names, materials and the library's numbers for them, thread regions and face
-names, and:
+(memoized per shape identity), their names, materials and the library's
+numbers for them, thread regions and face names, and:
 
 - an FEM study (`fem::StudyInputKey`, `fem::AssemblyStudyInputKey`,
   `src/core/fem/FemInputKey.cpp`): the study as saved with its expressions
@@ -180,6 +179,16 @@ names, and:
   pose the document is in, so a scrub or a `leave_at` moves the next run's
   inputs --, relations, configurations and the active one, through every
   sub-assembly, and every placed (part, configuration).
+
+A body's B-Rep is hashed as the project reads it back: written and read
+through BinTools (the baked geometry's format), with OCC's bookkeeping
+flags set one way, the bytes of BinTools' format 1 (no cached UV points).
+Reading is not idempotent -- a plane's frame is rebuilt from its normal
+and X direction as it is read, and for some frames the X flips a last
+place between two values on every read (the engine's cam pulley has one) --
+so the shape is read back until a read repeats an earlier one, and the
+smallest digest of that cycle stands for it: the regenerated shape and the
+one a reopen reads are one input.
 
 A version string leads each hash (`motion/1`, `fem/1`); a change to what a
 run computes bumps it. The solver a run picks (GPU or CPU, direct or
@@ -656,7 +665,8 @@ verb that names a study for context (`add_load`, `add_refinement`,
 
 - `tests/test_study_inputs.cpp` (`[studyjobs]`): the input hash moves on
   each input class and on nothing else; a saved topology result reopens
-  with its hash, fresh, and stale when saved against other inputs.
+  with its hash, fresh, and stale when saved against other inputs; a shape
+  whose reads flip a plane's frame hashes as itself read back.
 - `tests/study_jobs_smoke.py`: job ids, a job cancelled with its
   connection and one that outlives it, a cancel by id, an unknown id
   refused, a hung-up synchronous run stopping, reuse, and `leave_at` in one

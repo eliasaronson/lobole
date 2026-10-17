@@ -7,17 +7,18 @@
 #include "cad/CADMaterials.h"
 #include "core/Feature.h"
 
-#include <BRepTools.hxx>
 #include <BinTools.hxx>
 #include <TopTools_MapOfShape.hxx>
 #include <TopoDS_Iterator.hxx>
 #include <TopoDS_TShape.hxx>
 
+#include <algorithm>
 #include <bit>
 #include <cstdio>
 #include <mutex>
 #include <sstream>
 #include <utility>
+#include <vector>
 
 namespace inputhash {
 
@@ -62,20 +63,6 @@ void NeutralFlags(const TopoDS_Shape& shape) {
   }
 }
 
-// "-0" (a whole token) as "0": the sign of a zero is not geometry.
-std::string FoldNegativeZeros(const std::string& in) {
-  std::string out;
-  out.reserve(in.size());
-  const auto sep = [](char c) { return c == ' ' || c == '\n' || c == '\t'; };
-  for (size_t i = 0; i < in.size(); ++i) {
-    if (in[i] == '-' && i + 1 < in.size() && in[i + 1] == '0' &&
-        (i == 0 || sep(in[i - 1])) && (i + 2 == in.size() || sep(in[i + 2])))
-      continue;
-    out += in[i];
-  }
-  return out;
-}
-
 uint64_t ShapeDigest(const CADShape& shape) {
   if (!shape.IsValid())
     return 0;
@@ -91,34 +78,56 @@ uint64_t ShapeDigest(const CADShape& shape) {
   // The geometry, not the bookkeeping OCC keeps on it, and the same however
   // the shape came to be. Meshing a face (Netgen for a study, BRepMesh for
   // the viewport) clears its TShape's `Checked` flag and its cached UV
-  // points, and BinTools wrote both: a topology run hashed its envelope,
-  // meshed it in place, and the project saved the meshed shape, so the
-  // reopened part hashed otherwise and its result read stale and ran again.
-  // And a shape read back from the project's baked geometry carries a +0
-  // where the regenerated one had a -0 (a circle's axis): a reopened part
-  // with a bore hashed otherwise too. So: a copy (the copy carries the
-  // flags over) with those flags set one way, written as text in format 1
-  // (no UV points), every "-0" read as "0".
+  // points: a topology run hashed its envelope, meshed it in place, and the
+  // project saved the meshed shape, so the reopened part hashed otherwise
+  // and its result read stale and ran again. So what is hashed is a copy
+  // with those flags set one way, in BinTools' format 1, which writes no UV
+  // points.
   //
   // And the copy is the shape AS THE PROJECT READS IT BACK: through BinTools,
   // the baked geometry's own format. Reading a direction normalises it
   // again, so a unit vector that came off a rotation returns a unit in the
   // last place away (a 6005's chamfer line, -0.70710678118654746 saved and
-  // -0.70710678118654757 read), and the pan/tilt head's motion studies read
-  // stale after every reopen. Hashed as read back, the regenerated shape and
-  // the reopened one are one input.
-  std::stringstream bin;
-  BinTools::Write(shape.GetShape(), bin, /*theWithTriangles=*/false,
-                  /*theWithNormals=*/false, BinTools_FormatVersion_CURRENT);
-  TopoDS_Shape copy;
-  BinTools::Read(copy, bin);
-  NeutralFlags(copy);
-  std::ostringstream text;
-  BRepTools::Write(copy, text, /*theWithTriangles=*/false,
-                   /*theWithNormals=*/false, TopTools_FormatVersion_VERSION_1);
-  Hasher h;
-  h.Str(FoldNegativeZeros(text.str()));
-  const uint64_t digest = h.Digest();
+  // -0.70710678118654757 read; a circle's axis -0 regenerated and +0 read),
+  // and the pan/tilt head's motion studies read stale after every reopen.
+  //
+  // Once is not enough: reading is not idempotent. A plane's frame is
+  // rebuilt from its normal and X direction as it is read (gp_Ax3), and for
+  // some frames the rebuilt X flips between two values a last place apart on
+  // every read. The engine's cam pulley has one (a tooth's flank), so the
+  // pulley read back from a project hashed otherwise than the one
+  // regenerated, and every requirement over its motion study opened stale
+  // and was measured again. So the shape is read back until a read repeats
+  // one before it, and the smallest digest of that cycle (one digest when
+  // the reads settle) stands for the shape: a reopened shape is one read
+  // further along the same sequence and reaches the same cycle. Each read
+  // is written for the next, and those bytes are what is hashed.
+  constexpr int kMaxReads = 8;
+  const auto write = [](const TopoDS_Shape& s) {
+    std::stringstream bin;
+    BinTools::Write(s, bin, /*theWithTriangles=*/false,
+                    /*theWithNormals=*/false, BinTools_FormatVersion_VERSION_1);
+    return bin;
+  };
+  std::vector<uint64_t> seen;
+  std::stringstream bin = write(shape.GetShape());
+  uint64_t digest = 0;
+  for (int pass = 0; pass < kMaxReads; ++pass) {
+    TopoDS_Shape copy;
+    BinTools::Read(copy, bin);
+    NeutralFlags(copy);
+    bin = write(copy);
+    Hasher h;
+    h.Str(bin.view());
+    const uint64_t d = h.Digest();
+    const auto again = std::find(seen.begin(), seen.end(), d);
+    if (again != seen.end()) {
+      digest = *std::min_element(again, seen.end());
+      break;
+    }
+    seen.push_back(d);
+    digest = d; // past kMaxReads: the last read
+  }
   std::lock_guard lock(memo.mutex);
   if (!memo.entries.contains(key)) {
     while (memo.entries.size() >= ShapeMemo::kCapacity) {
