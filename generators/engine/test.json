@@ -15,7 +15,7 @@
   "instance": "headless",
   "budget_s": 420,
   "readme": {
-    "runs": "`engine/build.py --no-render` on the seeded P1S profile: the bore search, every part verified, the 720° study with its press fits, the timing, firing order and springs off its traces, the belt at every tooth, both negative controls failing, the valve-to-piston requirements and both studies clean as requirements, every plate's `check_print`, and the saved project reopened with every requirement passing as it lies",
+    "runs": "`engine/build.py --no-render` on the seeded P1S profile: the bore search, every part verified, the 720° study with its press fits, the timing, firing order and springs off its traces, the belt at every tooth, the wrist pin's interlayer factor at least 2, both negative controls failing, the valve-to-piston requirements and both studies clean as requirements, every plate's `check_print` (the TPU plate on the seeded TPU profile), and the saved project reopened with every requirement passing as it lies",
     "measured": "127 s"
   }
 }

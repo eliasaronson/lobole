@@ -14,7 +14,7 @@
   "instance": "headless",
   "budget_s": 540,
   "readme": {
-    "runs": "`print_coupon.py --seed`, then `strandbeest/build.py --profile \"K5 PLA on P1S\"` (the walker packs into the profile's bed): both stages, every check on the leg pair and the walker (solved, no branch jump and the knees, the exact clash with every cap's printed press listed, the layers' air, the feet, the stability), both negative controls failing, every print plate's `check_print` items, `bed_fit` among them",
+    "runs": "`print_coupon.py --seed`, then `strandbeest/build.py --profile \"K5 PLA on P1S\"` (the walker packs into the profile's bed): both stages, every check on the leg pair and the walker (solved, no branch jump and the knees, the exact clash with every cap's printed press listed, the layers' air, the feet, the stability), both negative controls failing, every print plate's `check_print` items, `bed_fit` among them, and every pin study at a factor of 2",
     "measured": "410 s (beside four other runs)"
   }
 }
