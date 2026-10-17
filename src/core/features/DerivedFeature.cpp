@@ -102,6 +102,7 @@ bool DerivedFeature::Execute(RegenContext& ctx) {
     body.shape = std::move(placed);
     body.material = m_material.empty() ? sb.material : m_material;
     body.createdBy = GetId();
+    body.derivedFrom = sb.sourceCreatedBy;
     body.reference = reference;
     for (const auto& [index, name] : sb.elementMap.names)
       body.elementMap.names[index] = DerivedName(sb.sourceCreatedBy, name);

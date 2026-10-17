@@ -42,6 +42,7 @@ add_executable(designer_tests
     test_press_fits.cpp
     test_print_allowance.cpp
     test_print_check.cpp
+    test_print_job.cpp
     test_serialization.cpp
     test_baked_geometry.cpp
     test_open_project.cpp
@@ -712,6 +713,16 @@ add_test(NAME print_check_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/print_check_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(print_check_smoke PROPERTIES TIMEOUT 120)
+
+# Slicer settings, the printed mass and export_print_job
+# (docs/tolerances/README.md#print-jobs): the refusals, a two-plate job read
+# back, and -- when Bambu Studio's CLI is installed -- the job sliced and
+# every object's walls, shells and infill read out of the G-code. Without
+# the CLI that half is skipped, and said so. Headless.
+add_test(NAME print_job_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/print_job_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(print_job_smoke PROPERTIES TIMEOUT 300)
 
 # V1 contact & connectivity: interference distance/state + contact_report
 # components/near-misses/clashes. Headless (no display).

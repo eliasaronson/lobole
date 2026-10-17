@@ -3,6 +3,7 @@
 
 #include "remote/RemoteInspection.h"
 #include "remote/InspectionContracts.h"
+#include "remote/RemotePrint.h"
 
 #include "cad/CADKernel.h"
 #include "common/BuildInfo.h"
@@ -881,7 +882,11 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`bed_mm`, the printer's build volume: `extent_mm` against `bed_mm`, "
      "and `shortfall_mm` per axis where it does not fit, `profile` the "
      "part's print profile whenever it has one; skipped, saying so, without "
-     "a profile that states one -- nothing guesses a printer). Every limit "
+     "a profile that states one -- nothing guesses a printer. A profile "
+     "with keep-out zones (`bed_exclude_mm`) makes it positional: the part's "
+     "x and y are the bed's from its front-left corner, printed up +Z, and "
+     "`intrusions` names every piece whose footprint box is off the bed or "
+     "in a zone, with the zone; `exclude_mm` the zones). Every limit "
      "defaults to the "
      "part's print process (set_print_process): the process's overhang and "
      "bridge, the profile's smallest gap a side and its STL deflection, and "
@@ -898,8 +903,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      remote::NoFlags,
      "bed:{contact_area_mm2:number, lowest_mm:number, on_bed:string[], "
      "status:string, tol_mm:number}, bed_fit:{note:string, status:string, "
-     "bed_mm?:number[], extent_mm?:number[], profile?:string, "
-     "shortfall_mm?:number[]}, bodies:{body:int, "
+     "bed_mm?:number[], exclude_mm?:number[][], extent_mm?:number[], "
+     "intrusions?:{body:string, footprint_mm:number[], off_bed?:bool, "
+     "overlap_mm2?:number, zone?:int, zone_mm?:number[]}[], "
+     "profile?:string, shortfall_mm?:number[]}, bodies:{body:int, "
      "lowest_mm:number, name:string, solids:int, watertight:bool}[], "
      "bridges:{area_mm2:number, faces:object[], limit_from:string, "
      "limit_mm:number, note:string, status:string, "
@@ -965,7 +972,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "needs over another part to come away from it, whole layers; "
      "check_print's stacking limit; both absent when not stated), "
      "bed_mm? ([x, y, z], the printer's build volume, check_print's "
-     "bed_fit; absent when not stated), rows[]{kind, "
+     "bed_fit; absent when not stated), bed_exclude_mm? (the bed's "
+     "keep-out rectangles [x0, y0, x1, y1] in mm, which make bed_fit "
+     "positional), line_width_mm? (the slicer's wall line width, what the "
+     "printed mass takes a wall as), rows[]{kind, "
      "from_mm, to_mm (absent = and up), allowance_mm, source}}. A printed "
      "part names one (set_print_process {profile}) and EMBEDS a copy. "
      "`defaults` are the built-in tables, read-only, that a new profile "
@@ -978,6 +988,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "name:string, process:string, rows:object[], "
      "stl_deflection_mm:number, stl_deflection_stated:bool, "
      "layer_height_mm?:number, z_gap_mm?:number, bed_mm?:number[], "
+     "bed_exclude_mm?:number[][], line_width_mm?:number, "
      "conditions?:string}[]"},
     {"save_print_profile",
      "Write a print profile to your store {profile: {name, process, "
@@ -985,6 +996,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "z_gap_mm? (the vertical air a face needs over another part, whole "
      "layers of layer_height_mm), bed_mm? ([x, y, z] in mm, the printer's "
      "build volume: what check_print's bed_fit fits a plate into), "
+     "bed_exclude_mm? ([[x0, y0, x1, y1], ...] mm, the bed's keep-out "
+     "zones in its own coordinates; needs bed_mm), line_width_mm? (the "
+     "slicer's wall line width), "
      "rows?: [{kind: hole|shaft|"
      "internal_thread|external_thread|gap|press, from_mm?, to_mm? (absent "
      "= and up), allowance_mm (signed, on the DIAMETER; a gap's is the whole "
@@ -1008,7 +1022,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "rows:{allowance_mm:number, from_mm:number, kind:string, "
      "source?:string, to_mm?:number}[], stl_deflection_mm:number, "
      "stl_deflection_stated:bool, layer_height_mm?:number, "
-     "z_gap_mm?:number, bed_mm?:number[]"},
+     "z_gap_mm?:number, bed_mm?:number[], bed_exclude_mm?:number[][], "
+     "line_width_mm?:number"},
     {"delete_print_profile",
      "Remove a print profile from your store {name}. A part printed with it "
      "keeps its copy and reports `match: missing`.",
@@ -1037,7 +1052,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "print:{material:string, process:string, stl_deflection_mm:number, "
      "match?:string, profile?:string, conditions?:string, "
      "rows?:object[], layer_height_mm?:number, z_gap_mm?:number, "
-     "bed_mm?:number[]}, threads:object[], confirm?:string"},
+     "bed_mm?:number[], bed_exclude_mm?:number[][], line_width_mm?:number}, "
+     "threads:object[], confirm?:string"},
     {"get_print_process",
      "This part's print process (null when it is not printed; a thread's "
      "`pitch` in mm) and the whole "
@@ -1057,7 +1073,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "confirm:string, print:{material:string, process:string, "
      "stl_deflection_mm:number, match?:string, profile?:string, "
      "conditions?:string, rows?:object[], layer_height_mm?:number, "
-     "z_gap_mm?:number, bed_mm?:number[]}|null, tables:{conditions:string, "
+     "z_gap_mm?:number, bed_mm?:number[], bed_exclude_mm?:number[][], "
+     "line_width_mm?:number}|null, tables:{conditions:string, "
      "material:string, min_reliable_thread_mm:number, process:string, "
      "repeatability_mm:number, repeatability_source:string, "
      "rows:object[]}[], threads?:{allowance_mm:number, confirm:string, "
@@ -1192,15 +1209,24 @@ static constexpr MethodDoc InspectionMethods[] = {
      "materials). The bbox here is MEASURED off the surfaces; get_state's is "
      "a cheap conservative bound that can read ~60% over on a swept surface. "
      "`part` reads another part without switching to it; from an assembly tab "
-     "with no `part`, aggregates every visible occurrence in world space.",
+     "with no `part`, aggregates every visible occurrence in world space. "
+     "A PRINTED part's bodies also carry `printed`: the estimate of what the "
+     "slicer's walls, shells and infill weigh (`mass_g`, `volume_mm3` the "
+     "solid-equivalent, `shell_mm3` and `core_mm3`, centre and inertia, the "
+     "`settings` it used and the `method`), or {why} naming what is "
+     "unstated (set_print_settings walls, top_layers, bottom_layers, "
+     "infill_pct, and the profile's layer_height_mm and line_width_mm); "
+     "`total.printed` sums them.",
      "part?:string|int, body?:int", remote::NoFlags,
      "bodies?:{bbox_max:number[], bbox_min:number[], body:int, "
      "center_of_mass_mm:number[], inertia:number[][], "
      "mass_g:number|null, material:string, name:string, "
-     "surface_area_mm2:number, volume_mm3:number, density?:number}[], "
+     "surface_area_mm2:number, volume_mm3:number, density?:number, "
+     "printed?:object|null}[], "
      "bbox_mm:{max:number[], min:number[], size:number[]}|null, "
      "total:{center_of_mass_mm:number[], mass_g:number|null, "
-     "volume_mm3:number}, occurrences?:{center_of_mass_mm:number[], "
+     "volume_mm3:number, printed?:object}, "
+     "occurrences?:{center_of_mass_mm:number[], "
      "mass_g:number|null, name:string, occurrence:int, part_id:int, "
      "volume_mm3:number}[]"},
     // This row said "point/distance/angle/radius" for a year and the handler
@@ -1675,6 +1701,10 @@ json ProcessJson(const ui::AppState& state,
       j["z_gap_mm"] = p->profile->zGapMm;
     if (p->profile->bedMm)
       j["bed_mm"] = *p->profile->bedMm;
+    if (!p->profile->bedExcludeMm.empty()) // vNEXT
+      j["bed_exclude_mm"] = p->profile->bedExcludeMm;
+    if (p->profile->lineWidthMm > 0.0) // vNEXT
+      j["line_width_mm"] = p->profile->lineWidthMm;
   }
   j["stl_deflection_mm"] = printfit::StlDeflectionMm(*p);
   return j;
@@ -3702,6 +3732,15 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                          : "only reference bodies (derived ghosts), which "
                            "weigh nothing here; set reference: false on the "
                            "Derived feature to count one");
+    // The bodies MassOfBodies weighed, in its order (it skips references).
+    std::vector<const Body*> weighed;
+    for (const Body& b : only >= 0 ? subset : bodies)
+      if (!b.reference)
+        weighed.push_back(&b);
+    double printedG = 0.0;
+    glm::dvec3 printedMoment(0.0);
+    std::string printedWhy;
+    bool anyPrinted = false;
     json out = json::array();
     for (size_t i = 0; i < mass->bodies.size(); i++) {
       const Measure::BodyMass& bm = mass->bodies[i];
@@ -3736,6 +3775,26 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       } else {
         entry["mass_g"] = nullptr;
       }
+      // vNEXT: what it weighs PRINTED (walls, shells, infill), beside the
+      // solid; null for a part that is not printed.
+      if (i < weighed.size()) {
+        json printed = PrintedMassJson(state, *massDoc, *weighed[i],
+                                       bm.massKnown ? bm.density : 0.0);
+        if (!printed.is_null()) {
+          if (printed.contains("mass_g") && !printed["mass_g"].is_null()) {
+            printedG += printed["mass_g"].get<double>();
+            const auto& c = printed["center_of_mass_mm"];
+            printedMoment += printed["mass_g"].get<double>() *
+                             glm::dvec3(c[0].get<double>(), c[1].get<double>(),
+                                        c[2].get<double>());
+          } else {
+            printedWhy = printed.value("why", std::string("a body's mass is "
+                                                          "unknown"));
+          }
+          anyPrinted = true;
+        }
+        entry["printed"] = std::move(printed);
+      }
       out.push_back(entry);
     }
     const glm::dvec3& com = mass->centerOfMass;
@@ -3743,13 +3802,20 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // are not in it).
     Bnd_Box all;
     AddMeasuredBox(all, only >= 0 ? subset : bodies, glm::dmat4(1.0));
-    return json{
-        {"bodies", out},
-        {"bbox_mm", BoxJson(all)},
-        {"total",
-         {{"volume_mm3", mass->volume},
-          {"center_of_mass_mm", {com.x, com.y, com.z}},
-          {"mass_g", mass->massKnown ? json(mass->massG) : json(nullptr)}}}};
+    json total{{"volume_mm3", mass->volume},
+               {"center_of_mass_mm", {com.x, com.y, com.z}},
+               {"mass_g", mass->massKnown ? json(mass->massG) : json(nullptr)}};
+    if (anyPrinted) {
+      if (printedWhy.empty() && printedG > 0.0) {
+        const glm::dvec3 c = printedMoment / printedG;
+        total["printed"] = {{"mass_g", printedG},
+                            {"center_of_mass_mm", {c.x, c.y, c.z}},
+                            {"estimate", true}};
+      } else {
+        total["printed"] = {{"why", printedWhy}};
+      }
+    }
+    return json{{"bodies", out}, {"bbox_mm", BoxJson(all)}, {"total", total}};
   }
   if (m == "check_geometry") {
     // B-Rep validity per body (OCC BRepCheck_Analyzer) — flags invalid faces/
@@ -4200,6 +4266,26 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         bedFit["bed_mm"] = vec(f.bedMm);
         bedFit["extent_mm"] = vec(f.extentMm);
         bedFit["shortfall_mm"] = vec(f.shortfallMm);
+      }
+      // vNEXT: keep-out zones make the fit positional; each piece that is
+      // off the bed or in a zone, named.
+      if (f.positional) {
+        bedFit["exclude_mm"] = f.zonesMm;
+        json bad = json::array();
+        for (const printcheck::BedIntrusion& in : f.intrusions) {
+          json e{{"body", bodyName(in.body)},
+                 {"footprint_mm",
+                  {in.minMm.x, in.minMm.y, in.maxMm.x, in.maxMm.y}}};
+          if (in.zone >= 0) {
+            e["zone"] = in.zone;
+            e["zone_mm"] = f.zonesMm[static_cast<size_t>(in.zone)];
+            e["overlap_mm2"] = in.overlapMm2;
+          } else {
+            e["off_bed"] = true;
+          }
+          bad.push_back(std::move(e));
+        }
+        bedFit["intrusions"] = std::move(bad);
       }
       // The profile, whenever the part has one: a skip with a profile is a
       // bed nobody stated, without one there is no printer at all.

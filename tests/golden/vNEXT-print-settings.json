@@ -1,0 +1,91 @@
+{
+  "format": "designer-document",
+  "version": 180,
+  "print": {
+    "process": "fdm",
+    "material": "pla",
+    "profile": "K5 PLA on P1S",
+    "conditions": "Bambu Lab P1S, 0.4 mm nozzle, Bambu Studio 0.20 mm, X-Y hole and contour compensation 0",
+    "stl_deflection_mm": 0.01,
+    "rows": [
+      {
+        "kind": "hole",
+        "from_mm": 0,
+        "allowance_mm": 0.2,
+        "source": "the built-in fdm pla row"
+      },
+      {
+        "kind": "shaft",
+        "from_mm": 0,
+        "allowance_mm": -0.1,
+        "source": "the built-in fdm pla row"
+      },
+      {
+        "kind": "gap",
+        "from_mm": 0,
+        "to_mm": 50,
+        "allowance_mm": 0.2,
+        "source": "print_coupon --gap-only, 0.1 a side slid freely"
+      },
+      {
+        "kind": "press",
+        "from_mm": 0,
+        "allowance_mm": -0.05,
+        "source": "print_coupon press row: 0.025 a side held by hand and did not split"
+      }
+    ],
+    "layer_height_mm": 0.2,
+    "z_gap_mm": 0.4,
+    "bed_mm": [
+      256,
+      256,
+      256
+    ],
+    "bed_exclude_mm": [
+      [
+        0,
+        0,
+        18,
+        28
+      ]
+    ],
+    "line_width_mm": 0.45
+  },
+  "features": [
+    {
+      "type": "Cylinder",
+      "name": "Pendulum bob",
+      "id": 1,
+      "center": [
+        0,
+        0,
+        0
+      ],
+      "direction": [
+        0,
+        0,
+        1
+      ],
+      "radius": 4,
+      "height": 20
+    }
+  ],
+  "print_settings": {
+    "part": {
+      "walls": 3,
+      "top_layers": 5,
+      "bottom_layers": 3,
+      "infill_pct": 100,
+      "infill_pattern": "rectilinear"
+    },
+    "bodies": {
+      "1": {
+        "walls": 1,
+        "infill_pct": 15,
+        "infill_pattern": "gyroid",
+        "brim": "none",
+        "supports": false
+      }
+    }
+  }
+}

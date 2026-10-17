@@ -101,6 +101,16 @@ struct Profile {
   // its z: what check_print's bed_fit item fits a plate into. Unset = not
   // stated, and bed_fit skips saying so: nothing guesses a printer.
   std::optional<std::array<double, 3>> bedMm;
+  // vNEXT: the bed's keep-out rectangles, [x0, y0, x1, y1] mm in the bed's
+  // own coordinates (origin at its front-left corner, as the slicer's
+  // printable area): a P1S keeps 18 x 28 mm at the front left clear for its
+  // nozzle wiper. bed_fit fails a piece whose footprint enters one, and the
+  // positions a plate's pieces have are where the job puts them.
+  std::vector<std::array<double, 4>> bedExcludeMm;
+  // vNEXT: the slicer preset's wall line width, mm; 0 = not stated. A wall
+  // loop's share of the shell the printed mass weighs solid
+  // (core/PrintedMass.h).
+  double lineWidthMm = 0.0;
   bool operator==(const Profile&) const = default;
 };
 

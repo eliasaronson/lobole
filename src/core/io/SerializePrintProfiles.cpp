@@ -67,6 +67,10 @@ json PrintProfileToJson(const printfit::Profile& p) {
     j["z_gap_mm"] = p.zGapMm;
   if (p.bedMm) // v179; absent = not stated
     j["bed_mm"] = *p.bedMm;
+  if (!p.bedExcludeMm.empty()) // vNEXT
+    j["bed_exclude_mm"] = p.bedExcludeMm;
+  if (p.lineWidthMm > 0.0) // vNEXT
+    j["line_width_mm"] = p.lineWidthMm;
   json rows = json::array();
   for (const printfit::Row& r : p.table.rows)
     rows.push_back(PrintRowToJson(r));
@@ -76,9 +80,11 @@ json PrintProfileToJson(const printfit::Profile& p) {
 
 printfit::Profile PrintProfileFromJson(const json& j) {
   if (!j.is_object())
-    throw std::runtime_error("a print profile is an object {name, process, "
-                             "material, conditions?, stl_deflection_mm?, "
-                             "layer_height_mm?, z_gap_mm?, bed_mm?, rows}");
+    throw std::runtime_error(
+        "a print profile is an object {name, process, "
+        "material, conditions?, stl_deflection_mm?, "
+        "layer_height_mm?, z_gap_mm?, bed_mm?, bed_exclude_mm?, "
+        "line_width_mm?, rows}");
   printfit::Profile p;
   p.name = j.value("name", std::string());
   p.table.process = j.value("process", std::string());
@@ -102,6 +108,28 @@ printfit::Profile PrintProfileFromJson(const json& j) {
                                b.dump());
     p.bedMm = std::array<double, 3>{b[0].get<double>(), b[1].get<double>(),
                                     b[2].get<double>()};
+  }
+  if (j.contains("bed_exclude_mm")) { // vNEXT
+    const json& zs = j.at("bed_exclude_mm");
+    const auto four = [](const json& z) {
+      return z.is_array() && z.size() == 4 &&
+             std::all_of(z.begin(), z.end(),
+                         [](const json& v) { return v.is_number(); });
+    };
+    if (!zs.is_array() || !std::all_of(zs.begin(), zs.end(), four))
+      throw std::runtime_error(
+          "print profile bed_exclude_mm is a list of keep-out rectangles "
+          "[x0, y0, x1, y1], mm in the bed's coordinates; got " +
+          zs.dump());
+    for (const json& z : zs)
+      p.bedExcludeMm.push_back({z[0].get<double>(), z[1].get<double>(),
+                                z[2].get<double>(), z[3].get<double>()});
+  }
+  if (j.contains("line_width_mm")) { // vNEXT
+    if (!j.at("line_width_mm").is_number())
+      throw std::runtime_error("print profile line_width_mm must be a "
+                               "number of mm");
+    p.lineWidthMm = j.at("line_width_mm").get<double>();
   }
   if (j.contains("rows")) {
     if (!j.at("rows").is_array())

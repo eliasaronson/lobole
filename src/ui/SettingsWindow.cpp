@@ -809,6 +809,64 @@ void DrawPrintProfileForm(AppState& state, int index) {
                           "256.");
   }
 
+  // vNEXT: the bed's keep-out zones, in its own coordinates from the
+  // front-left corner. With any, Check print's bed line judges where each
+  // piece is, as the print job puts it there.
+  {
+    FormLabel("Keep-out zones (x0, y0, x1, y1 mm on the bed)");
+    int remove = -1;
+    for (size_t z = 0; z < p.bedExcludeMm.size(); z++) {
+      ImGui::PushID(static_cast<int>(z));
+      double v[4] = {p.bedExcludeMm[z][0], p.bedExcludeMm[z][1],
+                     p.bedExcludeMm[z][2], p.bedExcludeMm[z][3]};
+      const float w =
+          (ImGui::GetContentRegionAvail().x - ImGui::GetFrameHeight() -
+           4.0f * ImGui::GetStyle().ItemSpacing.x) /
+          4.0f;
+      const char* ids[] = {"###prof_zone_x0", "###prof_zone_y0",
+                           "###prof_zone_x1", "###prof_zone_y1"};
+      for (int k = 0; k < 4; k++) {
+        if (k > 0)
+          ImGui::SameLine();
+        ImGui::SetNextItemWidth(w);
+        if (ExprInputDouble(state, ids[k], &v[k], "%.4g") &&
+            v[k] != p.bedExcludeMm[z][static_cast<size_t>(k)]) {
+          p.bedExcludeMm[z][static_cast<size_t>(k)] = v[k];
+          edited = true;
+        }
+      }
+      ImGui::SameLine();
+      if (ImGui::SmallButton("x###prof_zone_remove"))
+        remove = static_cast<int>(z);
+      ImGui::SetItemTooltip("Remove this keep-out zone");
+      ImGui::PopID();
+    }
+    if (remove >= 0) {
+      p.bedExcludeMm.erase(p.bedExcludeMm.begin() + remove);
+      edited = true;
+    }
+    if (ImGui::SmallButton("Add a keep-out zone###prof_zone_add")) {
+      // A zone in the bed's front-left corner, a tenth of the bed each way:
+      // a start to type the printer's own over.
+      const double bx = p.bedMm ? (*p.bedMm)[0] : 0.0;
+      const double by = p.bedMm ? (*p.bedMm)[1] : 0.0;
+      p.bedExcludeMm.push_back({0.0, 0.0, bx / 10.0, by / 10.0});
+      edited = true;
+    }
+    ImGui::SetItemTooltip("A rectangle of the bed no piece may sit on: a "
+                          "P1S keeps 0, 0 to 18, 28 clear for its wiper. "
+                          "Needs the bed above.");
+  }
+  double lineWidth = p.lineWidthMm;
+  FormLabel("Wall line width (mm, 0 = not stated)");
+  if (ExprInputDouble(state, "###prof_line_width", &lineWidth, "%.4g") &&
+      lineWidth != p.lineWidthMm) {
+    p.lineWidthMm = lineWidth;
+    edited = true;
+  }
+  ImGui::SetItemTooltip("The slicer preset's wall line width: a printed "
+                        "part's mass takes each wall loop as this thick.");
+
   // The rows: kind, size range, allowance, source.
   ImGui::Spacing();
   ImGui::TextUnformatted("Allowances (mm on the diameter)");

@@ -44,6 +44,7 @@
 #include "remote/RemoteInspection.h"
 #include "remote/RemoteModeling.h"
 #include "remote/RemoteMotion.h"
+#include "remote/RemotePrint.h"
 #include "remote/RemoteProject.h"
 #include "remote/RemoteRequirements.h"
 #include "remote/RemoteSheetMetal.h"
@@ -678,6 +679,7 @@ std::span<const std::span<const remote::MethodDoc>> AllMethodTables() {
       remote::ConfigurationMethodDocs(),
       remote::SheetMetalMethodDocs(),
       remote::TubeMethodDocs(),
+      remote::PrintMethodDocs(),
       remote::SimulationMethodDocs(),
       remote::RequirementMethodDocs()};
   return tables;
@@ -1303,6 +1305,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // refuses for itself when there is neither a name nor an active part.
   if (json tubeOut; remote::HandleTubeRpc(state, doc, m, p, tubeOut))
     return tubeOut;
+  if (json printOut; remote::HandlePrintRpc(state, doc, m, p, printOut))
+    return printOut;
   if (json smOut; remote::HandleSheetMetalRpc(state, doc, m, p, smOut))
     return smOut;
   // A read that names its part answers from any tab, like get_state.

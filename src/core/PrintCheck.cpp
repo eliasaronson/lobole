@@ -10,9 +10,11 @@
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepLProp_SLProps.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepTools.hxx>
 #include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRep_Tool.hxx>
@@ -922,6 +924,104 @@ void CheckStacking(const std::vector<const Body*>& bodies,
 
 } // namespace
 
+namespace {
+
+// A body's box in the bed's frame (x on the bed, z up `up`).
+void BedBox(const Body& b, const gp_Trsf& t, double box[6]) {
+  Bnd_Box bb;
+  BRepBndLib::AddOptimal(b.shape.GetShape().Moved(TopLoc_Location(t)), bb,
+                         false, false);
+  bb.Get(box[0], box[1], box[2], box[3], box[4], box[5]);
+}
+
+} // namespace
+
+BedFit FitOnBed(const std::vector<const Body*>& bodies, const glm::dvec3& upIn,
+                const glm::dvec3& bedMm,
+                const std::vector<std::array<double, 4>>& zonesMm) {
+  const glm::dvec3 up = glm::normalize(upIn);
+  const glm::dvec3 world_x(1.0, 0.0, 0.0), world_y(0.0, 1.0, 0.0);
+  glm::dvec3 bx = world_x - glm::dot(world_x, up) * up;
+  if (glm::length(bx) < 1e-6)
+    bx = world_y - glm::dot(world_y, up) * up;
+  bx = glm::normalize(bx);
+  const glm::dvec3 by = glm::cross(up, bx);
+  gp_Trsf t;
+  t.SetValues(bx.x, bx.y, bx.z, 0.0, by.x, by.y, by.z, 0.0, up.x, up.y, up.z,
+              0.0);
+  BedFit f;
+  f.bedMm = bedMm;
+  f.zonesMm = zonesMm;
+  double all[6] = {
+      std::numeric_limits<double>::max(),  std::numeric_limits<double>::max(),
+      std::numeric_limits<double>::max(),  -std::numeric_limits<double>::max(),
+      -std::numeric_limits<double>::max(), -std::numeric_limits<double>::max()};
+  std::vector<std::array<double, 6>> boxes;
+  for (const Body* b : bodies) {
+    std::array<double, 6> box{};
+    BedBox(*b, t, box.data());
+    for (int k = 0; k < 3; k++) {
+      all[k] = std::min(all[k], box[k]);
+      all[k + 3] = std::max(all[k + 3], box[k + 3]);
+    }
+    boxes.push_back(box);
+  }
+  f.extentMm = {all[3] - all[0], all[4] - all[1], all[5] - all[2]};
+  bool fits = true;
+  for (int k = 0; k < 3; k++) {
+    f.shortfallMm[k] = std::max(0.0, f.extentMm[k] - f.bedMm[k]);
+    if (f.extentMm[k] > f.bedMm[k] + kBedTolMm)
+      fits = false;
+  }
+  f.note = "the plate's box, x along the bed's x and z up the print "
+           "direction, against the build volume: a slicer places the "
+           "plate, so it fits when its box does";
+  if (!zonesMm.empty()) {
+    f.positional = true;
+    if (std::abs(up.z - 1.0) > 1e-9) {
+      fits = false;
+      f.note = "the bed has keep-out zones, and they are judged where the "
+               "pieces are: a part printed up +Z, its x and y the bed's. "
+               "Printed up another direction, its frame is not the bed's";
+    } else {
+      f.note = "every piece on the bed (x and y from its front-left corner, "
+               "as the part places it) and clear of each keep-out zone (the "
+               "piece itself, not its box), and the plate's box against the "
+               "build volume";
+      for (size_t i = 0; i < boxes.size(); i++) {
+        const auto& b = boxes[i];
+        const glm::dvec2 lo(b[0], b[1]), hi(b[3], b[4]);
+        if (lo.x < -kBedTolMm || lo.y < -kBedTolMm ||
+            hi.x > bedMm.x + kBedTolMm || hi.y > bedMm.y + kBedTolMm)
+          f.intrusions.push_back({static_cast<int>(i), -1, lo, hi, 0.0});
+        for (size_t z = 0; z < zonesMm.size(); z++) {
+          const auto& r = zonesMm[z];
+          const double ox = std::min(hi.x, r[2]) - std::max(lo.x, r[0]);
+          const double oy = std::min(hi.y, r[3]) - std::max(lo.y, r[1]);
+          if (!(ox > kBedTolMm && oy > kBedTolMm))
+            continue;
+          // The boxes meet; the piece itself must, too. A rod laid along
+          // the bed's diagonal has a box over the whole bed and misses a
+          // corner by a hand's width.
+          const double z0 = b[2] - 1.0, z1 = b[5] + 1.0;
+          const TopoDS_Shape zone = BRepPrimAPI_MakeBox(gp_Pnt(r[0], r[1], z0),
+                                                        gp_Pnt(r[2], r[3], z1))
+                                        .Shape();
+          BRepExtrema_DistShapeShape dist(bodies[i]->shape.GetShape(), zone);
+          if (dist.IsDone() && dist.Value() > kBedTolMm)
+            continue;
+          f.intrusions.push_back(
+              {static_cast<int>(i), static_cast<int>(z), lo, hi, ox * oy});
+        }
+      }
+      if (!f.intrusions.empty())
+        fits = false;
+    }
+  }
+  f.status = fits ? Status::Pass : Status::Fail;
+  return f;
+}
+
 Report Check(const std::vector<const Body*>& bodies, const Options& o) {
   if (bodies.empty())
     throw std::runtime_error("no bodies to check");
@@ -1112,36 +1212,9 @@ Report Check(const std::vector<const Body*>& bodies, const Options& o) {
 
   // Bed fit: the plate's box in the printer's frame -- x on the bed (the
   // world's x, or y when the print direction is x), up the print direction
-  // -- against the build volume.
+  // -- against the build volume; with keep-out zones, every piece's place.
   if (o.bedMm) {
-    const glm::dvec3 world_x(1.0, 0.0, 0.0), world_y(0.0, 1.0, 0.0);
-    glm::dvec3 bx = world_x - glm::dot(world_x, up) * up;
-    if (glm::length(bx) < 1e-6)
-      bx = world_y - glm::dot(world_y, up) * up;
-    bx = glm::normalize(bx);
-    const glm::dvec3 by = glm::cross(up, bx);
-    gp_Trsf t;
-    t.SetValues(bx.x, bx.y, bx.z, 0.0, by.x, by.y, by.z, 0.0, up.x, up.y, up.z,
-                0.0);
-    Bnd_Box box;
-    for (const Body* b : bodies)
-      BRepBndLib::AddOptimal(b->shape.GetShape().Moved(TopLoc_Location(t)), box,
-                             false, false);
-    double x0, y0, z0, x1, y1, z1;
-    box.Get(x0, y0, z0, x1, y1, z1);
-    BedFit& f = r.bedFit;
-    f.bedMm = *o.bedMm;
-    f.extentMm = {x1 - x0, y1 - y0, z1 - z0};
-    bool fits = true;
-    for (int k = 0; k < 3; k++) {
-      f.shortfallMm[k] = std::max(0.0, f.extentMm[k] - f.bedMm[k]);
-      if (f.extentMm[k] > f.bedMm[k] + kBedTolMm)
-        fits = false;
-    }
-    f.status = fits ? Status::Pass : Status::Fail;
-    f.note = "the plate's box, x along the bed's x and z up the print "
-             "direction, against the build volume: a slicer places the "
-             "plate, so it fits when its box does";
+    r.bedFit = FitOnBed(bodies, up, *o.bedMm, o.bedExcludeMm);
   } else {
     r.bedFit.note = o.bedNote.empty()
                         ? std::string("no build volume to fit the plate in")

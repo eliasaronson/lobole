@@ -10,6 +10,7 @@
 #include "core/Feature.h"
 #include "core/LookupTable.h"
 #include "core/PrintAllowance.h"
+#include "core/PrintSettings.h"
 #include "core/SheetMetal.h"
 #include "core/Template.h"
 #include "core/Units.h"
@@ -494,6 +495,14 @@ public:
     return m_print;
   }
   void SetPrintProcess(std::optional<printfit::Process> p);
+  // The part's SLICER settings and its bodies' overrides (vNEXT,
+  // core/PrintSettings.h): walls, shells, infill, supports, brim. What
+  // export_print_job hands the slicer per object and what the printed mass
+  // weighs. Drive no geometry, so setting them regenerates nothing.
+  const printset::PartSettings& PrintSettings() const {
+    return m_printSettings;
+  }
+  void SetPrintSettings(printset::PartSettings s);
 
   // ---- Configurations ---------------------------------------------------
   // Named variants (parameter overrides + feature suppression), a sibling to
@@ -792,6 +801,7 @@ private:
   std::optional<sheet::SheetMetalRules> m_sheetMetal;
   std::optional<tube::TubeRules> m_tube;
   std::optional<printfit::Process> m_print;
+  printset::PartSettings m_printSettings;
   uint64_t m_activeConfiguration = 0; // 0 = base; persisted like m_rollback
   SymbolTable m_symbols;
   // Non-owning; owned by AppState (Phase V). Null for a bare Document.

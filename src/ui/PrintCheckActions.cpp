@@ -104,6 +104,7 @@ PrintCheckRun RunPrintCheck(const Document& part,
   if (proc && proc->profile && proc->profile->bedMm) {
     const auto& b = *proc->profile->bedMm;
     o.bedMm = glm::dvec3(b[0], b[1], b[2]);
+    o.bedExcludeMm = proc->profile->bedExcludeMm; // vNEXT
   } else if (proc && proc->profile) {
     o.bedNote = "print profile '" + proc->profile->name +
                 "' states no bed_mm, the printer's build volume (Settings, "

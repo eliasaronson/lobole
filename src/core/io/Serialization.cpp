@@ -3,6 +3,7 @@
 
 #include "core/io/Serialization.h"
 #include "core/drawing/ViewProjection.h"
+#include "core/io/SerializePrintSettings.h"
 
 #include "core/MotionStudy.h"
 #include "core/Requirements.h"
@@ -279,8 +280,9 @@ void PrintToEnvelope(const std::optional<printfit::Process>& p, json& j) {
   if (p->profile) {
     json pj = DocumentIO::PrintProfileToJson(*p->profile);
     m["profile"] = p->profile->name;
-    for (const char* key : {"conditions", "stl_deflection_mm",
-                            "layer_height_mm", "z_gap_mm", "bed_mm", "rows"})
+    for (const char* key :
+         {"conditions", "stl_deflection_mm", "layer_height_mm", "z_gap_mm",
+          "bed_mm", "bed_exclude_mm", "line_width_mm", "rows"})
       if (pj.contains(key))
         m[key] = pj.at(key);
   }
@@ -375,6 +377,10 @@ json DocumentEnvelope(const Document& doc) {
   SheetMetalToEnvelope(doc.SheetMetal(), j);
   TubeToEnvelope(doc.Tube(), j);
   PrintToEnvelope(doc.PrintProcess(), j); // v143
+  // vNEXT: the slicer settings, only when a part states some.
+  if (!doc.PrintSettings().Empty())
+    j["print_settings"] =
+        DocumentIO::PartPrintSettingsToJson(doc.PrintSettings());
   return j;
 }
 
@@ -1010,6 +1016,9 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     doc->SetSheetMetal(SheetMetalFromEnvelope(index));
     doc->SetTube(TubeFromEnvelope(index));
     doc->SetPrintProcess(PrintFromEnvelope(index));
+    if (index.contains("print_settings")) // vNEXT
+      doc->SetPrintSettings(
+          DocumentIO::PartPrintSettingsFromJson(index.at("print_settings")));
     // Feature files are found by their id prefix — the type suffix is
     // cosmetic and may lag a (hypothetical) rename.
     std::map<uint64_t, fs::path> byId;
@@ -1755,6 +1764,9 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     doc->SetSheetMetal(SheetMetalFromEnvelope(j));
     doc->SetTube(TubeFromEnvelope(j));
     doc->SetPrintProcess(PrintFromEnvelope(j));
+    if (j.contains("print_settings")) // vNEXT
+      doc->SetPrintSettings(
+          DocumentIO::PartPrintSettingsFromJson(j.at("print_settings")));
     // Assets (v49 image bytes, v84 derived snapshots): decode the base64
     // "assets" map into the doc store BEFORE the features regenerate — a
     // Derived feature reads its B-Reps from it during Execute.

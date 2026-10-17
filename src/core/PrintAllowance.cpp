@@ -300,6 +300,24 @@ std::string ValidateProfile(const Profile& p) {
                "positive; its " +
                axis[i] + " is " + Mm((*p.bedMm)[i]);
   }
+  // vNEXT: keep-out zones and the wall line width.
+  for (size_t i = 0; i < p.bedExcludeMm.size(); i++) {
+    const auto& z = p.bedExcludeMm[i];
+    if (!std::isfinite(z[0]) || !std::isfinite(z[1]) || !std::isfinite(z[2]) ||
+        !std::isfinite(z[3]) || !(z[2] > z[0]) || !(z[3] > z[1]))
+      return who + "bed_exclude_mm[" + std::to_string(i) +
+             "] is a rectangle [x0, y0, x1, y1] in mm with x1 > x0 and y1 > "
+             "y0; got [" +
+             Mm(z[0]) + ", " + Mm(z[1]) + ", " + Mm(z[2]) + ", " + Mm(z[3]) +
+             "]";
+  }
+  if (!p.bedExcludeMm.empty() && !p.bedMm)
+    return who + "bed_exclude_mm needs the bed_mm it keeps parts of clear";
+  if (!std::isfinite(p.lineWidthMm) || p.lineWidthMm < 0.0)
+    return who +
+           "line_width_mm (the slicer's wall line width) must be 0 (not "
+           "stated) or a positive number of mm, not " +
+           Mm(p.lineWidthMm);
   if (p.zGapMm > 0.0) {
     // A slicer ends air at a layer: air between layers is not air it can
     // print, so it is refused rather than rounded either way.

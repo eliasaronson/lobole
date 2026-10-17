@@ -142,6 +142,7 @@ Document::Document(const Document& other, bool reuseGeometry)
   m_sheetMetal = other.m_sheetMetal; // every flange's thickness comes from it
   m_tube = other.m_tube;             // what check_frame and the cut list read
   m_print = other.m_print;           // what the fit checks model a print at
+  m_printSettings = other.m_printSettings; // what the slicer is handed
   m_tables = other.m_tables;         // a lone part's project tables
   m_templates = other.m_templates;   // ...and its template library
   m_features.reserve(other.m_features.size());
@@ -1136,6 +1137,11 @@ void Document::SetPrintProcess(std::optional<printfit::Process> p) {
     Regenerate();
   // A printed face's band is read at the size it prints (core/FitBands.h).
   fitband::Stamp(*this, m_bodies);
+}
+
+void Document::SetPrintSettings(printset::PartSettings s) {
+  m_printSettings = std::move(s);
+  MarkEdited();
 }
 
 void Document::EvaluateParameters() {

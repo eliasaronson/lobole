@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 
+#include <array>
 #include <optional>
 #include <string>
 #include <vector>
@@ -73,6 +74,11 @@ struct Options {
   // profile's bed_mm); nullopt skips bed_fit, saying `bedNote`.
   std::optional<glm::dvec3> bedMm;
   std::string bedNote;
+  // vNEXT: the bed's keep-out rectangles [x0, y0, x1, y1], mm in the bed's
+  // coordinates (the profile's bed_exclude_mm). Stated, they make bed_fit
+  // POSITIONAL: the part's frame is the bed's, and every piece must lie on
+  // it and clear of each zone.
+  std::vector<std::array<double, 4>> bedExcludeMm;
 };
 
 // Where an item's worst value is: the body (an index into the bodies the
@@ -201,17 +207,42 @@ struct Stacking {
   std::string note;
 };
 
+// A piece that is not where a bed with keep-out zones lets it be: its
+// footprint box (in the bed's x and y) off the bed (`zone` -1), or the
+// piece itself (not merely its box) into zone `zone`.
+struct BedIntrusion {
+  int body = -1;
+  int zone = -1;
+  glm::dvec2 minMm{0.0}, maxMm{0.0}; // the body's footprint
+  double overlapMm2 = 0.0;           // with the zone (0 off the bed)
+};
+
 // The plate in the printer: its extent on the bed (x along the bed's x,
 // the print direction's own x when it is not z) and up it, against the
-// build volume, with what does not fit per axis. The extent, not a
-// position: a slicer places the plate, so a plate fits when its box does.
+// build volume, with what does not fit per axis. Without keep-out zones the
+// extent, not a position: a slicer places the plate, so a plate fits when
+// its box does. With them (vNEXT) the part's frame is the bed's -- printed
+// up +Z, x and y from the bed's front-left corner -- and every piece must
+// lie on the bed and miss every zone: that is where a print job puts it.
 struct BedFit {
   Status status = Status::Skipped;
   glm::dvec3 bedMm{0.0};
   glm::dvec3 extentMm{0.0};
   glm::dvec3 shortfallMm{0.0}; // extent - bed where positive, else 0
+  bool positional = false;     // zones stated: positions judged too
+  std::vector<std::array<double, 4>> zonesMm;
+  std::vector<BedIntrusion> intrusions;
   std::string note;
 };
+
+// bed_fit alone, for `bodies` printed up `up` on a bed of `bedMm` with
+// `zonesMm` kept out (export_print_job checks every plate with it). Zones
+// with an `up` that is not +Z cannot be judged (the part's frame is not the
+// bed's) and fail, saying so.
+[[nodiscard]] BedFit
+FitOnBed(const std::vector<const Body*>& bodies, const glm::dvec3& up,
+         const glm::dvec3& bedMm,
+         const std::vector<std::array<double, 4>>& zonesMm);
 
 struct Report {
   std::vector<BodyInfo> bodies;

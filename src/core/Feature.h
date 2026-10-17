@@ -304,6 +304,11 @@ struct Body {
   // Every size band its round faces carry, for the contact checks' press
   // fits (FitBand, above).
   std::vector<FitBand> fitBands;
+  // A Derived copy's SOURCE body: the createdBy it has in the source part
+  // (0 for every body that is not a copy). Transient, stamped by the Derived
+  // feature: what a plate's piece reads its source part's per-body print
+  // settings by (core/PrintSettings.h).
+  uint64_t derivedFrom = 0;
 };
 
 class Feature;

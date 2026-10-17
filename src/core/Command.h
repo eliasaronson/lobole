@@ -310,6 +310,21 @@ private:
   std::optional<printfit::Process> m_before;
 };
 
+// Sets a part's slicer settings (core/PrintSettings.h), the part's and its
+// bodies' overrides together. Drives no geometry.
+class SetPrintSettingsCommand : public Command {
+public:
+  explicit SetPrintSettingsCommand(printset::PartSettings settings);
+
+  std::string Description() const override;
+  bool Execute(Document& doc) override;
+  void Undo(Document& doc) override;
+
+private:
+  printset::PartSettings m_after;
+  printset::PartSettings m_before;
+};
+
 // ---- Configurations (the study command trio, verbatim) --------------------
 
 // Adds a new (empty) configuration; the created id is captured for redo.

@@ -400,7 +400,8 @@ smallest part built to them.
 ### Print profiles
 
 A **print profile** (`printfit::Profile {name, table, stlDeflectionMm,
-layerHeightMm, zGapMm, bedMm}`) is a named, user-owned copy of a table: one
+layerHeightMm, zGapMm, bedMm, bedExcludeMm, lineWidthMm}`) is a named,
+user-owned copy of a table: one
 printer, one filament, one slicer preset. The CAM machine store is the pattern
 ([machine profiles](../cam/setup.md#machine-profiles)).
 
@@ -439,14 +440,29 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   it, and a generator that packs plates (the Strandbeest, the hinge box)
   reads it. Only a profile states one: the built-in tables are a process,
   not a printer, and nothing guesses a printer. `print_coupon --seed`'s P1S
-  profiles carry 256 x 256 x 256; a profile saved before has none until it
-  is set in Settings, Print profiles (`###prof_bed_x`/`_y`/`_z`) or with
-  `save_print_profile`.
+  profiles carry 256 x 256 x 250 (the height is Bambu Studio's P1S
+  `printable_height`, the slicer's limit, under the published 256); a
+  profile saved before has none until it is set in Settings, Print profiles
+  (`###prof_bed_x`/`_y`/`_z`) or with `save_print_profile`.
+- **The bed's keep-out zones** (vNEXT): `bed_exclude_mm`, rectangles
+  [x0, y0, x1, y1] in the bed's own coordinates (from its front-left
+  corner, as the slicer's printable area), absent until stated; each with
+  x1 > x0 and y1 > y0, and only with a `bed_mm`, or refused. A P1S keeps
+  [0, 0, 18, 28] clear for its nozzle wiper (Bambu's `bed_exclude_area`),
+  and Bambu refuses a part there at every rotation, so with zones bed_fit
+  becomes [positional](#checking-a-print). `--seed` writes the P1S's.
+- **The wall line width** (vNEXT): `line_width_mm`, the slicer preset's,
+  absent until stated: what the [printed mass](#printed-mass) takes a wall
+  loop as. `--seed` writes 0.45, the inner wall line width of Bambu
+  Studio's 0.20 mm Standard on a 0.4 mm nozzle; and to a profile of a
+  seeded name that lacks the bed, the zones or the line width, those, the
+  rest left as it is.
 - **The built-in tables stay**, read-only, as what a profile starts from: a
   new profile is the built-in table of its pair, "the defaults, corrected".
 - **The document carries its numbers.** A part printed with a profile has
   `print {process, material, profile, conditions, stl_deflection_mm?,
-  layer_height_mm?, z_gap_mm?, bed_mm?, rows}`:
+  layer_height_mm?, z_gap_mm?, bed_mm?, bed_exclude_mm?, line_width_mm?,
+  rows}`:
   the name and an embedded copy, the way a CAM setup embeds its machine. The
   copy is what every lookup reads (`printfit::Find` resolves it before the
   built-in table), so a part opens anywhere with what it was modelled with —
@@ -558,7 +574,7 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 | `clearance` | the minimum distance between any two solids, with the closest pairs | the gap a side (`printfit::SmallestGapSideMm` of the print), passing down to a tenth under it | `Measure::ClearanceBetween` per pair (BRepExtrema, the distance `measure` gives), `ContactBetween` when it cannot prove them apart; a pair whose oriented boxes are four gaps apart is clear without measuring |
 | `chords` | the chord deviation `export_stl` meshes this print at | a fifth of the gap a side | `printfit::StlDeflectionMm`, as [the export](#exporting-a-printed-part) takes it, or `stl_deflection_mm` |
 | `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places: a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else. So the air is exact and only which face is met, at a face's boundary, is the tessellation's (`IntCurvesFace` per sample was exact there too, and took minutes on the counter where this takes seconds). A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
-| `bed_fit` | the plate's box: `extent_mm`, x along the bed's x (the world's x, or y when the direction is x), z up the direction | the profile's `bed_mm`, with `shortfall_mm` per axis | `BRepBndLib::AddOptimal` of every body in the printer's frame. The extent, not a position: a slicer places the plate, so it fits when its box does |
+| `bed_fit` | the plate's box: `extent_mm`, x along the bed's x (the world's x, or y when the direction is x), z up the direction; with keep-out zones, every piece where it is (`intrusions`) | the profile's `bed_mm`, with `shortfall_mm` per axis; and its `bed_exclude_mm` (`exclude_mm`) | `BRepBndLib::AddOptimal` of every body in the printer's frame. Without zones the extent, not a position: a slicer places the plate, so it fits when its box does. With zones (vNEXT, `printcheck::FitOnBed`) the part's x and y ARE the bed's, printed up +Z: a piece whose footprint box leaves the bed, or which itself (`BRepExtrema` against the zone's prism, after the boxes meet) enters a zone, is an intrusion naming the zone. A piece laid along the bed's diagonal has a box over the whole bed and misses the corner. Another print direction with zones fails, saying the frame is not the bed's |
 
 - **bed_fit is the printer's**, so it runs only on a part printed with a
   profile that states `bed_mm` (v179) and is skipped otherwise, its note
@@ -594,6 +610,10 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
   passing.
 - **Refused**: a direction that is not three numbers or has no length, a
   limit out of its range, a body or part that does not exist.
+- **A part placed for a job**: with zones a part checked where it was
+  modelled (a coupon at the origin, in the keep-out corner) fails bed_fit;
+  a generator checks the part's own shape without it and bed_fit on the
+  plate it prints on.
 - **The Print process section** has *Check print* (`###print_check`) under
   the part's rows and threads: one line per item, measured against limit, a
   failure amber, a skipped item greyed with its reason, and "the part has
@@ -604,6 +624,157 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
   piece, else the lowest face of the highest piece off the bed. The last
   line, *fits the bed*, gives the plate's extent in the bed and, failing,
   what it is over by.
+
+### Slicer settings
+
+A printed part's slicer settings are part of the design: a pendulum's
+period is computed for the plastic it is printed with, and printed at the
+slicer's 15 % it swings at another. `printset::Settings`
+(`src/core/PrintSettings.{h,cpp}`) holds them beside the print process:
+
+- `walls` (wall loops, at least 1), `top_layers` and `bottom_layers` (0 or
+  more), `infill_pct` (0-100) and `infill_pattern` (rectilinear,
+  aligned_rectilinear, grid, gyroid, honeycomb, cubic, triangles, line,
+  concentric, lightning, adaptive_cubic, tri_hexagon, 3d_honeycomb,
+  cross_hatch, hilbert_curve), `supports` (default off) and `brim` (none,
+  outer, inner, both, ears; default none). Each is optional: unset is the
+  slicer preset's, and the job leaves it to the slicer -- except supports
+  and brim, which a job writes off and none unless set.
+- `direction`, the print direction in the part's frame, unit (default +Z):
+  only the [printed mass](#printed-mass) reads it, for a part printed lying
+  down or on its end. A plate's piece never carries its source's: the
+  plate's frame is the bed's.
+- **Refused** (`printset::Validate`, every parser and the GUI through it):
+  walls under 1, a layer count under 0, an infill outside 0-100, a
+  direction that is not a finite non-zero vector, an unknown pattern or
+  brim (naming the accepted), and 100 % with a pattern that cannot print
+  solid -- Bambu Studio refuses grid there and asks to switch to
+  rectilinear; the solid ones are its top-surface patterns, rectilinear,
+  aligned_rectilinear, concentric and hilbert_curve -- or with none, since
+  the preset's may be grid.
+- **The part and its bodies** (`printset::PartSettings`): the part's, and
+  per body an override keyed by the creating feature's id
+  (`Body::createdBy`, the key `set_material` uses), merged field by field
+  over the part's and validated merged. A plate's piece is a Derived copy,
+  and its settings are its SOURCE's, between the plate part's own and the
+  plate's override for that piece: plate part < source part < source body
+  (`Body::derivedFrom`, the source's createdBy, stamped by the Derived
+  feature) < plate body (`ui::PrintOf`, `src/ui/PrintJobActions.cpp`).
+- **Stored** (vNEXT) as the document's `print_settings {part?, bodies?:
+  {"<created_by>": {...}}}`, only what is stated, omitted when there are
+  none (`src/core/io/SerializePrintSettings.cpp`); an undoable
+  `SetPrintSettingsCommand`; no regeneration, since nothing is modelled
+  from them. Golden `vNEXT-print-settings`.
+- **The filament is the body's material** when that is one (pla, petg,
+  tpu), else the process's: what the mass weighs must be what the slicer is
+  loaded with, so there is no separate filament setting, and a body of a
+  material that is no filament is refused by a job. A TPU part (the jar's
+  gasket, the engine's belt and springs) is printed by the PLA profile's
+  printer (its bed and layer) with its material TPU.
+
+### Printed mass
+
+For a printed part, `mass_properties` reports `printed` beside every
+body's solid mass, and `total.printed`: what the slicer's walls, shells and
+infill weigh (`printmass::EstimatePrinted`, `src/core/PrintedMass.{h,cpp}`).
+
+- **The method is the slicer's, on a raster.** The body is meshed (a chord
+  of a tenth of the line width) and cut at the profile's layers up the
+  print direction, each layer at its middle; each section is filled
+  even-odd on a grid of a quarter of the line width (coarsened to at most
+  2 million pixels a layer and 200 million a body, said in `pixel_mm`). A
+  pixel is SHELL within the walls' thickness (walls x `line_width_mm`) of
+  the outline, by an exact Euclidean distance transform, or where any of
+  the `top_layers` above it or the `bottom_layers` below it is not
+  material; otherwise CORE, weighted by the infill. Mass, centre and
+  inertia (about the centre, world axes, OCC's matrix of inertia, as the
+  solid's) are the weighted sums, each pixel a slab with its own moment.
+- **It is an estimate and says so** (`estimate: true`, `method`): the
+  slicer's paths differ at small features, and a wall is taken as walls x
+  line width. A cube is exact to the pixel: 20 mm at 0.5 mm lines and 0.2
+  mm layers is its shell plus its core by hand (`[print][mass]`).
+- **Its inputs are stated, never guessed**: the profile's `layer_height_mm`
+  and `line_width_mm`, and walls, both shells and the infill. Any unstated
+  gives `printed: {why}` naming them; a part not printed gives `null`. A
+  body with no material weighs as its filament, the process's
+  (`density_from`).
+- **Remembered** per shape, placement and inputs (the shape held, so its
+  address cannot be reused), so a generator that weighs the same pendulum
+  many times pays once.
+- **What reads it**: the clock's pendulum sums (its period is the printed
+  pendulum's, the receipt and card saying at what), FEM's self-weight and
+  modal mass (the printed share of the solid, spread evenly; the stiffness
+  stays the solid material's, `src/core/fem/FemStudy.cpp`), and the study
+  panel's self-weight seed (`ui::SimulationWeightN`). Motion studies are
+  kinematic and weigh nothing.
+
+### Print jobs
+
+`export_print_job {path, plates: [{part, name?}], slicer_config?, name?}`
+writes ONE 3MF Bambu Studio opens and slices (`src/core/io/
+PrintJob3mf.{h,cpp}`, `ui::BuildPrintJob`, `src/remote/RemotePrint.cpp`).
+A plate is a part whose bodies are the pieces where they lie on the bed --
+x and y from its front-left corner, as a generator places them.
+
+- **What it contains**: the 3MF core model with every PIECE its own object
+  (a welded mesh at the print's chord deviation, never one merged mesh: a
+  merged plate is one object whose extent reaches the keep-out corner, and
+  Bambu then arranges it off the bed); Bambu's per-object settings in
+  `Metadata/model_settings.config` (`printset::BambuObjectSettings`: the
+  profile's `layer_height`, `wall_loops`, `top_shell_layers` and
+  `bottom_shell_layers` with their thickness floors zeroed so the count is
+  what prints -- the preset's 1 mm `top_shell_thickness` would raise two
+  layers to five -- `sparse_infill_density`, `sparse_infill_pattern`,
+  `enable_support` 0 and `brim_type` no_brim unless set); one `<plate>`
+  per plate, its objects placed at Bambu's plate grid (columns
+  sqrt(n), one more when it rounds down, each plate a bed and a fifth
+  on); and `Metadata/lobole_job.json`, the job as the answer gives it.
+- **A project, or the model form.** Measured with Bambu's CLI (02.08):
+  per-object settings are read from any 3MF, but PLATES are kept only in a
+  Bambu project (the Application metadata and a
+  `Metadata/project_settings.config`), and Bambu applies a project's
+  config over its built-in defaults -- a partial one slices on a 200 mm bed
+  with a generic start G-code, and one without the printer, process and
+  filament ids crashes the CLI. Loböle has no slicer presets of its own, so
+  `slicer_config` (a path to a JSON config, or the object) makes the job a
+  project, written whole; `tools/bambu-config.py --printer ... --process
+  ... --filament ... -o pla.json` makes one from your Bambu Studio's
+  system presets (flattened through `inherits` and `include`, then a
+  one-cube project built by the CLI). Without one a job is one plate, in
+  the model form, which Bambu opens with your own presets.
+- **One job is one spool.** Every piece's filament must be the same: a
+  TPU plate is a job of its own (`jar_tpu_job.3mf`). On a P1S the spool is
+  swapped between them anyway, and the CLI crashes slicing a second
+  filament of a project, its own included.
+- **Checked before anything is written** (a refusal writes nothing):
+  every plate printed with a profile that states `bed_mm` and
+  `layer_height_mm`; one printer and layer for the job; every piece on the
+  bed and clear of the profile's keep-out zones (`printcheck::FitOnBed`,
+  positional; on a bed without zones, every piece's box on the bed); every
+  piece's merged settings valid and its filament resolved; more than one
+  plate without `slicer_config`; and a config that lacks a key a project
+  needs, is for another bed (`printable_area`), is lower than the profile
+  (`printable_height`: bed_fit would pass what the slicer refuses), keeps
+  out a zone the profile does not cover, or is for another filament.
+- **The answer** names the `form` (project | model), the filament, the
+  profile and layer, and per plate every object with its settings
+  (`described`: "walls 3, top/bottom 5/5, 100 % rectilinear, no supports,
+  no brim"), its `slicer` keys, its source part, and the plate's bed_fit.
+- **Verified by slicing**: `print_job_smoke` exports a two-plate PLA job
+  and a TPU job and, when Bambu Studio is installed
+  (`$LOBOLE_BAMBU_STUDIO`, `bambu-studio` on PATH, or
+  `~/.local/state/nix-roots/bambu-studio`), slices them with the CLI and
+  reads every object's walls (the extrusion runs of its outer and inner
+  walls at mid-height, under its G-code label), its infill (the sparse
+  infill's E against its neighbour's) and its shells (the layers before
+  sparse infill starts) back out of the G-code, with no brim and no
+  support anywhere. Without the CLI it reads the 3MF back and says the
+  slice was skipped.
+- `generators/_lib.py`'s `export_print_job(d, plates, path, filament)`
+  takes the config from `$LOBOLE_SLICER_CONFIGS/<filament>.json` and, for a
+  job of several plates without one, writes nothing and says why in the
+  receipt. The clock, the Strandbeest, the hinge box, the coupon, the jar
+  and the engine write their jobs beside their STLs.
 
 ### The coupon
 
@@ -723,12 +894,18 @@ reported, not required — a metric thread's flanks overhang past 45°.
   With no profiles yet, a `Preferences › Print profiles` button
   (`###print_prefs`). Then the rows of the part's own copy with their sources
   as tooltips, the confirm-with-a-coupon note on a built-in table, and the
-  part's threads.
+  part's threads. Then *Slicer settings*: walls, top and bottom layers and
+  infill each stated (`###slicer_on_<field>`) or left to the preset, the
+  pattern (`###slicer_pattern`) and brim (`###slicer_brim`) from the lists
+  the RPC accepts, supports (`###slicer_supports`); a refused combination
+  is said in red and not stored, and the bodies' overrides are counted.
 - **Preferences › Print profiles**, a library page
   ([library pages](../ui/settings.md#library-pages), id prefix `prof`):
   name (a rename refused when taken), process and material, conditions, the
   STL chord deviation, the layer height and the air over another part
-  (`z_gap_mm`), and the rows — kind, from, to (0 = and up), allowance
+  (`z_gap_mm`), the bed, its keep-out zones (`###prof_zone_x0` ...,
+  `###prof_zone_add`, `###prof_zone_remove`) and the wall line width
+  (`###prof_line_width`), and the rows — kind, from, to (0 = and up), allowance
   and source — each written on every edit. A typed allowance is a
   measurement: its source becomes "coupon <date>". The tolerance editor
   says what a printed face prints at and what to model once a class is
@@ -744,7 +921,12 @@ part?}`, `list_tolerances {part?}`, `clear_tolerance {id, part?}`,
 `delete_print_profile {name}`, `check_print {part?, bodies?, direction?,
 max_overhang_deg?, overhang_allowance_mm2?, max_bridge_mm?, min_gap_mm?,
 stl_deflection_mm?, min_air_mm?}` ([checking a print](#checking-a-print)) — all in `src/remote/RemoteInspection.cpp`;
-`export_stl` in `RemoteProject.cpp`. Tolerance edits are
+`set_print_settings {part?, body?, clear?, walls?, top_layers?,
+bottom_layers?, infill_pct?, infill_pattern?, supports?, brim?,
+direction?}` (each key set, `null` unsetting it), `get_print_settings
+{part?}` and `export_print_job {path, plates, slicer_config?, name?}` in
+`src/remote/RemotePrint.cpp` ([slicer settings](#slicer-settings),
+[print jobs](#print-jobs)); `export_stl` in `RemoteProject.cpp`. Tolerance edits are
 undoable commands (`src/core/Command.h`). The edits take `part` (a name,
 stable id or slot index) to act on **any** part, not only the active one —
 a generator or an assembly tab records intent on the parts it placed without
@@ -801,6 +983,14 @@ with the cone's area over the ring; a body's own bridge over its own floor
 not counted; no minimum air skipping the item and one not over 0 refused;
 the limit from a profile's `z_gap_mm`, its layers, FDM's default, and none
 for a process that is not FDM),
+`tests/test_print_job.cpp` (`[print]`: the settings refused where the
+slicer refuses them and an override over its part, the slicer's keys, a
+printed cube against its shell and core by hand -- centre, the solid
+inertia, the same cube printed on its side -- a printed mass naming what it
+lacks, bed_fit's keep-out zones, and the 3MF's entries, plate grid and
+zip), golden `vNEXT-print-settings`, `tests/print_job_smoke.py` (the
+settings' refusals changing nothing, the printed masses, a two-plate job
+read back, the refusals writing nothing, and the Bambu CLI slice, above),
 `tests/print_check_smoke.py` (the same negative controls over RPC — a 60°
 overhang, a fused pair, a near pair, a part off the bed, a block one layer
 over another failing stacking off the bed and under the air, still lifted
@@ -830,9 +1020,11 @@ layer off the bed).
   thickness; no overhang shading in the viewport. Stacking can read the
   air about 0.02 mm under where a sample lies on a face boundary of the
   tessellation, since which face a ray meets there is the triangles'.
-- A print job exported for the slicer: a 3MF carrying the profile's layer
-  height and per-object settings, so the preset the air was measured at is
-  the one that slices the part.
+- In a print job: a second filament in one project (the CLI cannot slice
+  it), supports' and brim's own parameters (only on and off), the
+  slicer's per-object modifiers (a region of a part at another infill).
+- The printed mass of an assembly: `mass_properties` from an assembly tab
+  sums the solid occurrences.
 
 - An inferred stack-up chain, and correlation between terms (needs tracking
   from measured geometry back to the variables that drove it).

@@ -579,6 +579,137 @@ void DrawPrintCheck(AppState& state, Document& doc) {
 
 } // namespace
 
+namespace {
+
+// The part's slicer settings (core/PrintSettings.h): each field stated or
+// left to the slicer preset, the pattern and brim picked from the lists the
+// RPC accepts, so this cannot store what set_print_settings refuses. A body's
+// override is made with set_print_settings {body}; here it is counted.
+void DrawSlicerSettings(AppState& state, Document& doc) {
+  static std::string refused;
+  ImGui::SeparatorText("Slicer settings");
+  const printset::PartSettings& have = doc.PrintSettings();
+  printset::Settings next = have.part;
+  bool edited = false;
+  const auto count = [&](const char* label, const char* id,
+                         std::optional<int>& v, int fallback) {
+    bool on = v.has_value();
+    const std::string box = std::string("###slicer_on_") + id;
+    if (ImGui::Checkbox(box.c_str(), &on)) {
+      v = on ? std::optional<int>(fallback) : std::nullopt;
+      edited = true;
+    }
+    ImGui::SetItemTooltip("Stated here, or left to the slicer preset");
+    ImGui::SameLine();
+    if (!v) {
+      ImGui::TextDisabled("%s: preset", label);
+      return;
+    }
+    int n = *v;
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+    const std::string field = std::string(label) + "###slicer_" + id;
+    if (ExprInputInt(state, field.c_str(), &n) && n != *v) {
+      v = n;
+      edited = true;
+    }
+  };
+  count("Walls", "walls", next.walls, 2);
+  count("Top layers", "top", next.topLayers, 5);
+  count("Bottom layers", "bottom", next.bottomLayers, 3);
+  {
+    bool on = next.infillPct.has_value();
+    if (ImGui::Checkbox("###slicer_on_infill", &on)) {
+      next.infillPct = on ? std::optional<double>(15.0) : std::nullopt;
+      edited = true;
+    }
+    ImGui::SetItemTooltip("Stated here, or left to the slicer preset");
+    ImGui::SameLine();
+    if (!next.infillPct) {
+      ImGui::TextDisabled("Infill: preset");
+    } else {
+      double pct = *next.infillPct;
+      ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+      if (ExprInputDouble(state, "Infill %###slicer_infill", &pct, "%.0f") &&
+          pct != *next.infillPct) {
+        next.infillPct = pct;
+        edited = true;
+      }
+    }
+  }
+  {
+    const std::string cur =
+        next.infill ? printset::InfillName(*next.infill) : "preset";
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 10.0f);
+    if (ImGui::BeginCombo("Pattern###slicer_pattern", cur.c_str())) {
+      if (ImGui::Selectable("preset###slicer_pattern_preset", !next.infill)) {
+        next.infill.reset();
+        edited = true;
+      }
+      for (printset::Infill i : printset::AllInfills()) {
+        const std::string label = printset::InfillName(i) +
+                                  "###slicer_pattern_" +
+                                  printset::InfillName(i);
+        if (ImGui::Selectable(label.c_str(), next.infill == i)) {
+          next.infill = i;
+          edited = true;
+        }
+      }
+      ImGui::EndCombo();
+    }
+  }
+  {
+    bool supports = next.supports.value_or(false);
+    if (ImGui::Checkbox("Supports###slicer_supports", &supports)) {
+      next.supports = supports;
+      edited = true;
+    }
+    ImGui::SameLine();
+    const printset::Brim brim = next.brim.value_or(printset::Brim::None);
+    ImGui::SetNextItemWidth(ImGui::GetFontSize() * 6.0f);
+    if (ImGui::BeginCombo("Brim###slicer_brim",
+                          printset::BrimName(brim).c_str())) {
+      for (printset::Brim b : printset::AllBrims()) {
+        const std::string label =
+            printset::BrimName(b) + "###slicer_brim_" + printset::BrimName(b);
+        if (ImGui::Selectable(label.c_str(), b == brim)) {
+          next.brim = b;
+          edited = true;
+        }
+      }
+      ImGui::EndCombo();
+    }
+  }
+  if (edited) {
+    printset::PartSettings all = have;
+    all.part = next;
+    std::string why = printset::Validate(next);
+    for (const auto& [id, b] : all.bodies)
+      if (why.empty())
+        why = printset::Validate(printset::Merge(next, b));
+    if (!why.empty()) {
+      refused = why;
+    } else {
+      refused.clear();
+      if (state.commands != nullptr && !(all == have))
+        state.commands->Execute(
+            std::make_unique<SetPrintSettingsCommand>(std::move(all)), doc);
+    }
+  }
+  if (!refused.empty()) {
+    ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.40f, 1.0f));
+    ImGui::TextWrapped("%s", refused.c_str());
+    ImGui::PopStyleColor();
+  }
+  if (!have.bodies.empty())
+    ImGui::TextDisabled("%zu bod%s override%s these (set_print_settings "
+                        "{body})",
+                        have.bodies.size(),
+                        have.bodies.size() == 1 ? "y" : "ies",
+                        have.bodies.size() == 1 ? "s" : "");
+}
+
+} // namespace
+
 void DrawPrintProcessSection(AppState& state) {
   if (state.document == nullptr)
     return;
@@ -717,6 +848,7 @@ void DrawPrintProcessSection(AppState& state) {
     if (const auto* th = dynamic_cast<const ThreadFeature*>(doc.GetFeature(i)))
       if (const auto r = PrintedThreadFor(doc, *th))
         ImGui::TextWrapped("%s", r->Sentence().c_str());
+  DrawSlicerSettings(state, doc);
   DrawPrintCheck(state, doc);
 }
 

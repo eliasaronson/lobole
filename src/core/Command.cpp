@@ -291,6 +291,24 @@ void SetPrintProcessCommand::Undo(Document& doc) {
   doc.SetPrintProcess(m_before);
 }
 
+SetPrintSettingsCommand::SetPrintSettingsCommand(
+    printset::PartSettings settings)
+    : m_after(std::move(settings)) {}
+
+std::string SetPrintSettingsCommand::Description() const {
+  return "Set print settings";
+}
+
+bool SetPrintSettingsCommand::Execute(Document& doc) {
+  m_before = doc.PrintSettings();
+  doc.SetPrintSettings(m_after);
+  return true;
+}
+
+void SetPrintSettingsCommand::Undo(Document& doc) {
+  doc.SetPrintSettings(m_before);
+}
+
 ClearToleranceCommand::ClearToleranceCommand(uint64_t toleranceId)
     : m_id(toleranceId) {}
 

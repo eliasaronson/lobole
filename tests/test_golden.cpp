@@ -21,6 +21,7 @@
 #include "core/features/ThreadFeature.h"
 #include "core/fem/FemStudy.h"
 #include "core/io/Serialization.h"
+#include "core/io/SerializePrintSettings.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/tube/Rules.h"
 
@@ -1140,8 +1141,33 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       } else {
         CHECK_FALSE(pr.bedMm.has_value());
       }
+      // vNEXT: the bed's keep-out zones and the wall line width. Dropped,
+      // bed_fit would pass a piece in the printer's wiper corner, and the
+      // printed mass would have no wall to weigh.
+      if (pe.contains("bed_exclude_mm")) {
+        REQUIRE(pr.bedExcludeMm.size() == pe.at("bed_exclude_mm").size());
+        for (size_t z = 0; z < pr.bedExcludeMm.size(); z++)
+          for (int k = 0; k < 4; k++)
+            CHECK(pr.bedExcludeMm[z][k] ==
+                  pe.at("bed_exclude_mm")[z][k].get<double>());
+      }
+      CHECK(pr.lineWidthMm == pe.value("line_width_mm", 0.0));
     } else {
       CHECK_FALSE(doc.PrintProcess()->profile.has_value());
+    }
+  }
+  // vNEXT: the slicer settings (core/PrintSettings.h), the part's and a
+  // body's override. Dropped, the pendulum prints at the slicer's 15 % and
+  // swings at another period.
+  if (expect.contains("print_settings")) {
+    const nlohmann::json& se = expect.at("print_settings");
+    const printset::PartSettings& ps = doc.PrintSettings();
+    CHECK(DocumentIO::PrintSettingsToJson(ps.part) == se.at("part"));
+    CHECK(ps.bodies.size() == se.at("bodies").size());
+    for (const auto& [id, want] : se.at("bodies").items()) {
+      const auto it = ps.bodies.find(std::stoull(id));
+      REQUIRE(it != ps.bodies.end());
+      CHECK(DocumentIO::PrintSettingsToJson(it->second) == want);
     }
   }
   // v177: driven (reference) dimensions, [constraint index, measure] in the

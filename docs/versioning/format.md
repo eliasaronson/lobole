@@ -307,6 +307,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A part's `print_settings` {part?, bodies?: {"<created_by>": ...}}, each {walls?, top_layers?, bottom_layers?, infill_pct?, infill_pattern?, supports?, brim?, direction?}, only what is stated, omitted when there are none ([slicer settings](../tolerances/README.md#slicer-settings)); an unknown key, pattern or brim, a count out of range, or 100 % infill with a pattern that cannot print solid is refused on load. A print profile's `bed_exclude_mm` [[x0, y0, x1, y1], ...] (the bed's keep-out zones; needs `bed_mm`) and `line_width_mm`, omitted when not stated, in the store and in a part's embedded copy. An older build reads the part without its settings and the profile without its zones. Golden `vNEXT-print-settings` |
 
 ## The directory form
 

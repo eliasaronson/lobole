@@ -3,6 +3,7 @@
 
 #include "core/fem/FemStudy.h"
 #include "core/ElementHistory.h"
+#include "core/PrintedMass.h"
 
 #include <BRepAdaptor_Surface.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
@@ -772,6 +773,18 @@ bool PlanStudy(const Document& doc, Study& study, StudyPlan& out,
     bp.bodyIndex = bodyIndex;
     bp.bodyName = body.name;
     bp.mat = Material{mp.youngGPa * 1000.0, mp.poisson, mp.density * 1e-12};
+    // A PRINTED part weighs what its walls, shells and infill weigh
+    // (docs/tolerances/README.md#printed-mass): its self-weight and modal
+    // mass take the printed estimate's share of the solid, spread evenly.
+    // The stiffness stays the solid material's.
+    if (doc.PrintProcess()) {
+      std::string why;
+      if (const auto pm = printmass::EstimatePrinted(
+              &*doc.PrintProcess(), doc.PrintSettings().For(body.createdBy),
+              body, &why);
+          pm && pm->solidMm3 > 0.0)
+        bp.mat.densityTPerMM3 *= pm->effectiveMm3 / pm->solidMm3;
+    }
     // A deep copy: the mesher writes triangulation into the faces it
     // meshes, and this shape may be meshed on a worker while the document's
     // own is being drawn.

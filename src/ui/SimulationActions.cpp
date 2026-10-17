@@ -4,6 +4,7 @@
 #include "ui/SimulationActions.h"
 #include "core/io/Serialization.h" // StudyToJson (undo pairs, contact key)
 #include "ui/AssemblyActions.h"
+#include "ui/PrintJobActions.h"
 #include "ui/StudyHost.h"
 
 #include "common/Logger.h"
@@ -813,7 +814,30 @@ double SimulationWeightN(AppState& state) {
   const auto mass = SimulationMass(state);
   if (!mass || !mass->massKnown || mass->massG <= 0.0)
     return 0.0;
-  return mass->massG * 0.001 * 9.81;
+  // A printed part weighs what it prints at (walls, shells, infill), when
+  // its slicer settings say: the printed estimate per body, its share of
+  // that body's solid mass.
+  double grams = mass->massG;
+  if (Document* doc = state.document.get(); doc && doc->PrintProcess()) {
+    const auto& bodies = doc->GetBodies();
+    std::vector<const Body*> weighed;
+    for (const Body& b : bodies)
+      if (!b.reference)
+        weighed.push_back(&b);
+    double printed = 0.0;
+    bool all = weighed.size() == mass->bodies.size();
+    for (size_t i = 0; all && i < weighed.size(); i++) {
+      const auto pm = PrintedMassOf(state, *doc, *weighed[i], nullptr);
+      if (!pm || !(pm->solidMm3 > 0.0)) {
+        all = false;
+        break;
+      }
+      printed += mass->bodies[i].massG * pm->effectiveMm3 / pm->solidMm3;
+    }
+    if (all)
+      grams = printed;
+  }
+  return grams * 0.001 * 9.81;
 }
 
 void SimulationArmTool(AppState& state, SimulationState::Tool tool) {

@@ -343,6 +343,8 @@ set(core_sources
     src/core/FitBands.cpp
     src/core/PrintAllowance.cpp
     src/core/PrintCheck.cpp
+    src/core/PrintSettings.cpp
+    src/core/PrintedMass.cpp
     src/core/SheetMetal.cpp
     src/core/features/BaseFlangeFeature.cpp
     src/core/features/EdgeFlangeFeature.cpp
@@ -425,6 +427,8 @@ set(core_sources
     src/core/io/SerializeDrawingProjections.cpp
     src/core/io/SerializeCam.cpp
     src/core/io/SerializePrintProfiles.cpp
+    src/core/io/SerializePrintSettings.cpp
+    src/core/io/PrintJob3mf.cpp
     src/core/io/SerializeConfigurations.cpp
     src/core/io/SerializeAssembly.cpp
     src/core/features/SketchFeature.cpp
@@ -855,6 +859,7 @@ set(app_sources
     src/ui/StepExport.cpp
     src/ui/StlExport.cpp
     src/ui/PrintCheckActions.cpp
+    src/ui/PrintJobActions.cpp
     src/ui/Bom.cpp
     src/ui/MateActions.cpp
     src/ui/GizmoInput.cpp
@@ -904,6 +909,7 @@ set(app_sources
     src/remote/RemoteConfigurations.cpp
     src/remote/RemoteSheetMetal.cpp
     src/remote/RemoteTube.cpp
+    src/remote/RemotePrint.cpp
     src/remote/RemoteRequirements.cpp
     src/remote/RemoteSimulation.cpp
     src/remote/RemoteCam.cpp
