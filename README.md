@@ -32,6 +32,8 @@ path tracer; the animation is its motion-video export. See
 | **OM615 diesel** — every part down to the bearing shells, with its Bosch injection pump chained to the crank and timed | **Two revolutions, in section** — one crank drives the pistons and the valve train, clash-checked all the way round |
 | [![Bicycle](docs/gallery/bicycle.jpg)](generators/bike) | [![FPV quadcopter](docs/gallery/fpv-drone.jpg)](generators/fpv_drone) |
 | **Bicycle** — modelled from photographs: frame, wheels with laced spokes, chain drive | **5-inch FPV quadcopter** — 91 occurrences, fitted fasteners, FEM on the arms |
+| [![The Loböle mark branded into a pine log end](docs/gallery/lobole-log-end.jpg)](generators/logo) | [![The Loböle icon as a part](docs/gallery/lobole-badge.jpg)](generators/logo) |
+| **The logo, branded** — the mark read from its master SVG and burned into end grain | **The icon as a part** — the same mark, raised on the tile in the sketch colour |
 
 ## Installing
 
