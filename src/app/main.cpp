@@ -1621,6 +1621,9 @@ void printUsage(const char* programName) {
   std::cout << "  --gui-test-speed <fast|normal|cinematic>  How the GUI tests "
                "move the mouse and pause (cinematic: for recording)"
             << std::endl;
+  std::cout << "  --window-size <WxH>  Open the window at this size (e.g. "
+               "1920x1080 for a recording)"
+            << std::endl;
   std::cout << "  --capture-dir <dir>  Demo scenes record their clips here "
                "(needs ffmpeg on PATH)"
             << std::endl;
@@ -1688,6 +1691,12 @@ struct CommandLineArgs {
   ImGuiTestRunSpeed guiTestSpeed = ImGuiTestRunSpeed_Fast;
 #endif
   std::string captureDir; // --capture-dir (GuiTestCaptureDir)
+  // --window-size WxH: the window's size, over the remembered one and the
+  // GUI suite's fixed 1280x720. Only a run that asks gets it -- a demo
+  // recording at 1920x1080 -- never the suite, whose layout tests assert
+  // what fits at the default.
+  int windowW = 0;
+  int windowH = 0;
   bool headless = false;
   bool offscreen = false;
   bool hidden = false;
@@ -1786,6 +1795,19 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
 #else
       (void)speed;
 #endif
+    } else if (arg == "--window-size") {
+      const std::string size = i + 1 < argc ? argv[++i] : "";
+      int w = 0, h = 0;
+      char tail = 0;
+      if (std::sscanf(size.c_str(), "%dx%d%c", &w, &h, &tail) != 2 || w < 320 ||
+          h < 240 || w > 7680 || h > 4320) {
+        std::cerr << "--window-size takes WIDTHxHEIGHT in pixels, 320x240 "
+                     "to 7680x4320, not '"
+                  << size << "'" << std::endl;
+        exit(1);
+      }
+      args.windowW = w;
+      args.windowH = h;
     } else if (arg == "--capture-dir") {
       if (i + 1 >= argc) {
         std::cerr << "--capture-dir requires a directory" << std::endl;
@@ -2515,7 +2537,10 @@ int main(int argc, char** argv) {
   // THAT SIZE, and gui-tests-xvfb.sh / headless-preview.sh --gui create that
   // screen. A host-derived size here would make layout tests depend on whose
   // monitor they ran on.
-  const bool rememberGeometry = !args.hidden && !args.runGuiTests;
+  // A size given on the command line is the run's, not the user's: it is
+  // neither placed by the remembered rect nor saved over it.
+  const bool rememberGeometry =
+      !args.hidden && !args.runGuiTests && args.windowW == 0;
   settings::WindowGeometry geom;
   geom.w = settings::kDefaultWidth;
   geom.h = settings::kDefaultHeight;
@@ -2532,6 +2557,10 @@ int main(int argc, char** argv) {
         monitors.push_back(m);
     }
     geom = settings::FitToMonitors(g_App.settings.window, monitors);
+  }
+  if (args.windowW > 0) {
+    geom.w = args.windowW;
+    geom.h = args.windowH;
   }
 
   GLFWwindow* window = glfwCreateWindow(

@@ -212,7 +212,11 @@ captures, so an ordinary frame costs nothing.
 
 `--capture-dir <dir>` is where a scene writes its clip
 (`GuiTestCaptureDir()`); a scene given none runs the same steps and records
-nothing, which is how it stays in the suite.
+nothing, which is how it stays in the suite. The `demo` category is the
+release video's scenes, recorded by `tools/demo/record.sh`
+([tools/demo/README.md](../../tools/demo/README.md)) at Cinematic speed in a
+window `--window-size` makes 1920x1080 -- a size only a run that asks gets,
+since the suite's layout tests assert what fits at 1280x720.
 
 ## Making a widget addressable
 

@@ -15,23 +15,9 @@ script that records them, and the footage around them.
 
 ## The shape of it
 
-1. **Full-window capture for the engine** is built: the app re-renders
-   each frame the engine asks for, and the engine encodes the clip
-   (docs/ui/testing.md#recording-a-scene, `capture/records_a_clip`).
-2. **Demo scenes as GUI tests**, category `demo`, in
-   `src/app/guitests/GuiTestsDemo.cpp`. Each scene drives the real widgets
-   at Cinematic speed and wraps itself in `CaptureBeginVideo` /
-   `CaptureEndVideo`. They run in the GUI suite like any other test, at the
-   suite's fast speed and with nothing recorded (no `--capture-dir`), so a
-   UI change that breaks a scene fails the suite the day it lands rather
-   than at the next release. A recording run passes `--gui-test-speed
-   cinematic` and `--capture-dir`.
-3. **`tools/demo/record.sh`**: one Xvfb display at 1920x1080, a scratch
-   config and state directory (the scenes must not touch the user's), every
-   scene recorded to `scratch/demo/<scene>.mp4`. A GUI test run opens its
-   window at 1280x720 on purpose -- the layout tests assert what fits at
-   that size -- so the video's 1920x1080 needs a `--window-size WxH` that
-   only a run asking for it gets, and the suite never does.
+1. **The app footage is built**: the capture, five demo scenes in the
+   suite, and `tools/demo/record.sh`, which records them at 1920x1080
+   (tools/demo/README.md).
 4. **Rendered footage** from what exists: `export_motion_video` for the
    OM615 in section and the planetary gearbox, `render_still` for still
    shots, and the branded log end (`generators/logo/`) for the close.
@@ -55,15 +41,15 @@ script that records them, and the footage around them.
 
 ## Files
 
-- `src/app/guitests/GuiTestsDemo.cpp`: the scenes, beside
-  `capture/records_a_clip`; each records through `BeginRecording` /
-  `EndRecording` when `GuiTestCaptureDir()` is set.
-- `tools/demo/record.sh` (new).
-- `docs/ui/testing.md`: the `demo` category; a short `tools/demo/README.md`
-  on recording and the shot list.
+- `tools/demo/footage.sh` (new): the rendered shots into `scratch/demo/` --
+  the OM615 and planetary gearbox motion studies through
+  `export_motion_video`, and the log end from `generators/logo/build.py` --
+  on a scratch instance.
+- `tools/demo/README.md`: the shot list, what each clip is, and where the
+  live agent segment and the edit come in.
 
 ## Verification
 
-- The demo scenes pass in the GUI suite at fast speed, recording nothing.
-- Each scene recorded by `tools/demo/record.sh` is watched end to end
-  before it goes into the edit.
+- Every clip in `scratch/demo/` watched end to end before it goes into the
+  edit; the finished video watched once at full size and once muted on a
+  phone.
