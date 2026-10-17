@@ -201,7 +201,7 @@ void Hasher::Bodies(const std::vector<Body>& bodies) {
         F64(f.allowance);
         U64(static_cast<uint64_t>(f.side));
         Str(f.label);
-        if (f.printedPress) // vNEXT; only when set, so others keep theirs
+        if (f.printedPress) // v179; only when set, so others keep theirs
           Str("printed_press");
       }
     }

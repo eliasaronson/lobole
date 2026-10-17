@@ -182,7 +182,7 @@ A printed cap pressed on a printed pin is a press, but no ISO band says so:
 p6 at Ø3 allows about 0.01 mm, and a printed press is whatever the
 profile's [press allowance](#press-allowance) is. So a size tolerance has a
 **printed press** class besides an ISO class and explicit deviations
-(`Tolerance::printedPress`, vNEXT; `set_tolerance {printed: "press"}`, the
+(`Tolerance::printedPress`, v179; `set_tolerance {printed: "press"}`, the
 one value accepted). It is set on both faces of the press, the cap's bore
 and the pin.
 
@@ -419,7 +419,7 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   `layer_height_mm`, else three layers of FDM's common 0.2 mm (source
   "process", to confirm with the coupon); a process that is not FDM has
   none. The coupon measures it, and a print-in-place generator reads it.
-- **The bed** (vNEXT): `bed_mm` [x, y, z], the printer's build volume,
+- **The bed** (v179): `bed_mm` [x, y, z], the printer's build volume,
   absent until stated; three positive numbers or refused. It drives no
   geometry. `check_print`'s [bed_fit](#checking-a-print) fits a plate into
   it, and a generator that packs plates (the Strandbeest, the hinge box)
@@ -547,7 +547,7 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 | `bed_fit` | the plate's box: `extent_mm`, x along the bed's x (the world's x, or y when the direction is x), z up the direction | the profile's `bed_mm`, with `shortfall_mm` per axis | `BRepBndLib::AddOptimal` of every body in the printer's frame. The extent, not a position: a slicer places the plate, so it fits when its box does |
 
 - **bed_fit is the printer's**, so it runs only on a part printed with a
-  profile that states `bed_mm` (vNEXT) and is skipped otherwise, its note
+  profile that states `bed_mm` (v179) and is skipped otherwise, its note
   saying which: the built-in table is no printer's, and a profile without
   a bed has not said one. A skipped bed_fit makes no claim in the receipt:
   without a printer there is nothing to claim. `generators/_lib.py`'s

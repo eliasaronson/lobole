@@ -776,7 +776,7 @@ void DrawPrintProfileForm(AppState& state, int index) {
                         "still starts on the bed; Check print's stacking "
                         "line judges by this, else by three layers.");
 
-  // The printer's build volume (vNEXT): what Check print's bed line fits a
+  // The printer's build volume (v179): what Check print's bed line fits a
   // plate into. Three zeros = not stated, and that line is skipped.
   {
     std::array<double, 3> bed = p.bedMm.value_or(std::array<double, 3>{});

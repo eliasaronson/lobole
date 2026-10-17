@@ -305,7 +305,7 @@ void HashPartExtras(inputhash::Hasher& h, const Document& doc) {
     h.Str(t.isoClass);
     h.F64(t.lower);
     h.F64(t.upper);
-    if (t.printedPress) // vNEXT; only when set, so others keep their hash
+    if (t.printedPress) // v179; only when set, so others keep their hash
       h.Str("printed_press");
   }
   if (const auto& pp = doc.PrintProcess()) {

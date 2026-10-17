@@ -829,7 +829,7 @@ void AssertTolerances(const Document& doc, const nlohmann::json& expect) {
     CHECK(got.ref2.featureId == want[i].value("b_feature_id", uint64_t{0}));
     CHECK(got.IsDistance() == want[i].contains("b_element"));
     CHECK(got.isoClass == want[i].value("class", std::string{}));
-    // vNEXT: a printed press. Lost, the cap and its pin reload as two
+    // v179: a printed press. Lost, the cap and its pin reload as two
     // unbanded faces, and their press is a clash again.
     CHECK(got.printedPress ==
           (want[i].value("printed", std::string{}) == "press"));
@@ -1131,7 +1131,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
         CHECK_THAT(press->allowanceMm,
                    WithinRel(pe.at("press_allowance_mm").get<double>(), 1e-12));
       }
-      // vNEXT: the printer's build volume. Dropped, check_print's bed_fit
+      // v179: the printer's build volume. Dropped, check_print's bed_fit
       // would skip, and a plate too big for the printer would pass.
       if (pe.contains("bed_mm")) {
         REQUIRE(pr.bedMm.has_value());

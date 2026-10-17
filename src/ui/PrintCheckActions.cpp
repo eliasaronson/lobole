@@ -99,7 +99,7 @@ PrintCheckRun RunPrintCheck(const Document& part,
   }
 
   // The build volume is the printer's, so only a profile states one
-  // (vNEXT): the built-in tables are a process, not a printer, and nothing
+  // (v179): the built-in tables are a process, not a printer, and nothing
   // guesses one.
   if (proc && proc->profile && proc->profile->bedMm) {
     const auto& b = *proc->profile->bedMm;

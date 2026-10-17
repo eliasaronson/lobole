@@ -97,7 +97,7 @@ struct Profile {
   // check_print's stacking item judges by it (MinAirMm), and a
   // print-in-place generator reads it.
   double zGapMm = 0.0;
-  // vNEXT: the printer's build volume, mm along its bed's x and y and up
+  // v179: the printer's build volume, mm along its bed's x and y and up
   // its z: what check_print's bed_fit item fits a plate into. Unset = not
   // stated, and bed_fit skips saying so: nothing guesses a printer.
   std::optional<std::array<double, 3>> bedMm;

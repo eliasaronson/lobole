@@ -677,7 +677,7 @@ json MotionStudyToJson(const MotionStudy& s) {
   if (s.configuration)
     j["configuration"] = *s.configuration; // v128; 0 = the base
   if (s.maxRefine != MotionStudy::kDefaultMaxRefine)
-    j["max_refine"] = s.maxRefine; // vNEXT; absent = the default
+    j["max_refine"] = s.maxRefine; // v179; absent = the default
   return j;
 }
 
@@ -701,7 +701,7 @@ MotionStudy MotionStudyFromJson(const json& j) {
                              "' (expected mesh or exact)");
   if (j.contains("configuration") && !j.at("configuration").is_null())
     s.configuration = j.at("configuration").get<uint64_t>();
-  if (j.contains("max_refine")) { // vNEXT
+  if (j.contains("max_refine")) { // v179
     const json& v = j.at("max_refine");
     if (!v.is_number_integer() || v.get<int>() < 0 ||
         v.get<int>() > MotionStudy::kMaxMaxRefine)
@@ -977,7 +977,7 @@ json MotionResultToJson(const motion::Result& r) {
       sj["unknown_contacts"] = std::move(unknown);
     }
     if (s.refined)
-      sj["refined"] = true; // vNEXT
+      sj["refined"] = true; // v179
     if (const auto& b = s.branchJump) {
       json bj = {{"mate", b->mate},         {"name", b->name},
                  {"rotation", b->rotation}, {"jump", b->jump},
@@ -985,7 +985,7 @@ json MotionResultToJson(const motion::Result& r) {
                  {"step", b->stepValue}};
       if (!b->path.empty())
         bj["path"] = b->path;
-      sj["branch_jump"] = std::move(bj); // vNEXT
+      sj["branch_jump"] = std::move(bj); // v179
     }
     if (!s.mates.empty()) {
       json mates = json::array();
@@ -1020,9 +1020,9 @@ json MotionResultToJson(const motion::Result& r) {
               {"seconds", r.seconds},
               {"cancelled", r.cancelled}};
   if (r.refinedSamples != 0)
-    out["refined_samples"] = r.refinedSamples; // vNEXT
+    out["refined_samples"] = r.refinedSamples; // v179
   if (r.branchJumps != 0)
-    out["branch_jumps"] = r.branchJumps; // vNEXT
+    out["branch_jumps"] = r.branchJumps; // v179
   if (!r.error.empty())
     out["error"] = r.error;
   if (!r.pressFits.empty()) {

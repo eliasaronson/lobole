@@ -59,7 +59,7 @@ uint64_t InputKey(const AssemblyDocument& asmDoc,
   // The algorithm's own version: a change to what a run computes (the clash
   // rule, the walk to the start) bumps it, so no answer stored before is
   // handed out as one from after.
-  h.Str("motion/2"); // 2: refined steps and branch jumps (vNEXT)
+  h.Str("motion/2"); // 2: refined steps and branch jumps (v179)
   nlohmann::json definition = DocumentIO::MotionStudyToJson(study);
   definition.erase("name"); // a label: two studies alike share an answer
   definition.erase("id");

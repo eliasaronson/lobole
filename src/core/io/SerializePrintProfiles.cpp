@@ -65,7 +65,7 @@ json PrintProfileToJson(const printfit::Profile& p) {
     j["layer_height_mm"] = p.layerHeightMm;
   if (p.zGapMm > 0.0)
     j["z_gap_mm"] = p.zGapMm;
-  if (p.bedMm) // vNEXT; absent = not stated
+  if (p.bedMm) // v179; absent = not stated
     j["bed_mm"] = *p.bedMm;
   json rows = json::array();
   for (const printfit::Row& r : p.table.rows)
@@ -92,7 +92,7 @@ printfit::Profile PrintProfileFromJson(const json& j) {
                                " must be a number of mm");
   p.layerHeightMm = j.value("layer_height_mm", 0.0);
   p.zGapMm = j.value("z_gap_mm", 0.0);
-  if (j.contains("bed_mm")) { // vNEXT
+  if (j.contains("bed_mm")) { // v179
     const json& b = j.at("bed_mm");
     if (!b.is_array() || b.size() != 3 ||
         !std::all_of(b.begin(), b.end(),

@@ -115,7 +115,7 @@ struct Sample {
     bool turns = false, slides = false;
   };
   std::vector<MateValue> mates;
-  // vNEXT: a free joint coordinate that still jumped at the smallest step
+  // v179: a free joint coordinate that still jumped at the smallest step
   // the study may take (docs/assemblies/README.md#branch-jumps): the
   // linkage passes through a singular pose here, and may have come out of
   // it on another branch. The sample keeps the pose the run continued to,
@@ -162,7 +162,7 @@ struct Result {
   // Every press fit an exact check relieved (PressFit, above). A mesh check
   // relieves none, and reports such a pair as the clash its triangles see.
   std::vector<PressFit> pressFits;
-  // vNEXT: samples whose interval was re-solved at a finer step
+  // v179: samples whose interval was re-solved at a finer step
   // (Sample::refined), and those that still jumped at the finest
   // (Sample::branchJump).
   size_t refinedSamples = 0;

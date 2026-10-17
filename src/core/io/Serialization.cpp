@@ -223,7 +223,7 @@ void TubeToEnvelope(const std::optional<tube::TubeRules>& rules, json& j) {
 // reads, whichever store opens it; a copy the profile rules refuse is
 // refused here too. v175: and the profile's `layer_height_mm` and
 // `z_gap_mm` when it states them.
-// vNEXT: a tolerance's `printed`
+// v179: a tolerance's `printed`
 // (docs/tolerances/README.md#printed-press-fits). Only "press" is a printed
 // tolerance; anything else is refused, never read as an unprinted one.
 bool TolerancePrintedFromJson(const json& tj) {
@@ -348,7 +348,7 @@ json DocumentEnvelope(const Document& doc) {
       // drawing that states limits no class expresses. Writing both would
       // invite them to disagree.
       if (t.printedPress) {
-        tj["printed"] = "press"; // vNEXT: the band is the print profile's
+        tj["printed"] = "press"; // v179: the band is the print profile's
       } else if (!t.isoClass.empty()) {
         tj["class"] = t.isoClass;
       } else {

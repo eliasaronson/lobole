@@ -53,7 +53,7 @@ struct Tolerance {
   std::string isoClass; // "H7"; empty means the pair below is authoritative
   double lower = 0.0;   // mm, signed deviation from nominal
   double upper = 0.0;   // mm, signed deviation from nominal
-  // vNEXT: a PRINTED PRESS (docs/tolerances/README.md#printed-press-fits),
+  // v179: a PRINTED PRESS (docs/tolerances/README.md#printed-press-fits),
   // set on both faces of a printed cap pressed on a printed pin. Its band is
   // not stored: it is the part's print profile's `press` allowance, give or
   // take a tenth of its gap (printfit::PrintedPress), so a corrected profile

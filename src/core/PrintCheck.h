@@ -24,7 +24,7 @@ struct Body;
 //   chords     the STL's chords cannot eat the gap
 //   stacking   every piece starts on the bed, and no face lies within the
 //              minimum air over another piece
-//   bed_fit    the plate fits the printer's build volume (vNEXT)
+//   bed_fit    the plate fits the printer's build volume (v179)
 //
 // Measured on the B-Rep wherever the B-Rep can answer: the bed from an
 // optimal box without triangulation, every overhang angle from the surface
