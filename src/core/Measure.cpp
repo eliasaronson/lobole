@@ -484,6 +484,10 @@ bool WorldBounds(const std::vector<Body>& bodies, const glm::dmat4& xf,
 namespace {
 
 // The oriented box of a placed body set, or a void box when it has no shape.
+// Off the B-Rep, never the triangulation: AddOBB reads a mesh when one is
+// there, and a chord sits inside the surface by up to the deflection, so
+// the same pair was pruned meshed and kept unmeshed, and a pruned one could
+// be closer than the limit (docs/tolerances/README.md#checking-a-print).
 Bnd_OBB PlacedOBB(const std::vector<Body>& bodies, const glm::dmat4& xf) {
   const TopLoc_Location loc(ToTrsf(xf));
   Bnd_OBB obb;
@@ -491,7 +495,8 @@ Bnd_OBB PlacedOBB(const std::vector<Body>& bodies, const glm::dmat4& xf) {
     if (b.shape.GetShape().IsNull())
       continue;
     Bnd_OBB one;
-    BRepBndLib::AddOBB(b.shape.GetShape().Moved(loc), one);
+    BRepBndLib::AddOBB(b.shape.GetShape().Moved(loc), one,
+                       /*theIsTriangulationUsed=*/false);
     if (!one.IsVoid())
       obb.Add(one);
   }

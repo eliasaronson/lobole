@@ -2,11 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/Feature.h"
+#include "core/Measure.h"
 #include "core/PrintAllowance.h"
 #include "core/PrintCheck.h"
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
@@ -15,6 +18,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <gp_Ax2.hxx>
+#include <gp_Trsf.hxx>
 
 #include <cmath>
 
@@ -160,6 +164,39 @@ TEST_CASE("Print-in-place bodies keep the gap, and touching ones fuse",
   CHECK(far.clearance.pruned == 1);
   CHECK(far.shells.pieces == 2);
   CHECK(far.clearance.status == printcheck::Status::Pass);
+}
+
+TEST_CASE("The clearance prune reads the B-Rep, meshed or not",
+          "[print][check]") {
+  // A Ø20 round beside a block, against a 0.5 limit. The oriented box of a
+  // meshed body was the box of its triangulation's nodes, and of the B-Rep
+  // unmeshed: the same pair 1 to 3 mm apart was pruned at some turns of the
+  // round only once it had been meshed, and kept at others only then -- the
+  // prune depended on whether something had drawn the part. Off the B-Rep
+  // it is the same either way, and never prunes a pair inside the limit.
+  for (const double gap : {0.3, 1.0, 1.5, 2.0, 3.0})
+    for (int deg = 0; deg < 60; deg += 7) {
+      INFO(gap << " mm apart, the round turned " << deg << " degrees");
+      gp_Trsf turn;
+      turn.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                       deg * M_PI / 180.0);
+      const TopoDS_Shape round =
+          BRepBuilderAPI_Transform(
+              BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                                       10.0, 10.0)
+                  .Shape(),
+              turn, /*copy=*/true)
+              .Shape();
+      const std::vector<Body> a{Make(round, "round")};
+      const std::vector<Body> b{Box(10.0 + gap, -10, 0, 10, 20, 10)};
+      const glm::dmat4 I(1.0);
+      const bool before = Measure::SeparatedByOBB(a, I, b, I, 0.5);
+      BRepMesh_IncrementalMesh(round, 0.5, false, 0.5);
+      const bool after = Measure::SeparatedByOBB(a, I, b, I, 0.5);
+      CHECK(before == after);
+      if (gap < 0.5)
+        CHECK_FALSE(after);
+    }
 }
 
 TEST_CASE("A body of loose solids is as many pieces", "[print][check]") {
