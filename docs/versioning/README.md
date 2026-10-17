@@ -75,7 +75,9 @@ beside it (`src/core/io/GeometryCache.{h,cpp}`):
 ```
 <part>.dsgn/geometry/
   index.json    geometry_format, chain_hash, occ_version, and per body its
-                name, material, producing feature and element map
+                name, material, producing feature, element map, and what
+                the features stamped on it (bends, thread regions, ring
+                grips, thread and hole marks, a Derived copy's source body)
   0.brep …      one binary B-Rep per body (BinTools)
 ```
 

@@ -1096,6 +1096,25 @@ json FeatureToJson(const Feature& feature) {
               {"element_map", ElementMapToJson(b.elementMap)}};
       if (b.hasDisplayColor)
         bj["display_color"] = Vec3ToJson(b.displayColor);
+      // vNEXT: the source's size bands, as it read them.
+      if (!b.fitBands.empty()) {
+        json bands = json::array();
+        for (const FitBand& f : b.fitBands) {
+          json fj{{"face", f.face.name},
+                  {"lower", f.lower},
+                  {"upper", f.upper},
+                  {"side", f.side == FitBand::Side::Hole    ? "hole"
+                           : f.side == FitBand::Side::Shaft ? "shaft"
+                                                            : "either"},
+                  {"label", f.label}};
+          if (f.allowance != 0.0)
+            fj["allowance"] = f.allowance;
+          if (f.printedPress)
+            fj["printed_press"] = true;
+          bands.push_back(std::move(fj));
+        }
+        bj["fit_bands"] = std::move(bands);
+      }
       bodies.push_back(std::move(bj));
     }
     j["snapshot"] = {{"source_chain_hash", d->sourceChainHash},
@@ -2458,6 +2477,25 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         if (bj.contains("display_color")) {
           b.hasDisplayColor = true;
           b.displayColor = Vec3FromJson(bj.at("display_color"));
+        }
+        for (const json& fj : bj.value("fit_bands", json::array())) { // vNEXT
+          FitBand f;
+          f.face.name = fj.at("face").get<std::string>();
+          f.lower = fj.at("lower").get<double>();
+          f.upper = fj.at("upper").get<double>();
+          const std::string side = fj.at("side").get<std::string>();
+          if (side == "hole")
+            f.side = FitBand::Side::Hole;
+          else if (side == "shaft")
+            f.side = FitBand::Side::Shaft;
+          else if (side != "either")
+            throw std::runtime_error("Derived '" + name +
+                                     "': a fit band's side is '" + side +
+                                     "' (accepted: hole, shaft, either)");
+          f.allowance = fj.value("allowance", 0.0);
+          f.printedPress = fj.value("printed_press", false);
+          f.label = fj.value("label", std::string{});
+          b.fitBands.push_back(std::move(f));
         }
         d->snapshot.push_back(std::move(b));
       }

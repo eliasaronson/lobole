@@ -8,6 +8,7 @@
 #include "core/FitStandards.h"
 #include "core/PrintAllowance.h"
 #include "core/features/BearingFeature.h"
+#include "core/features/DerivedFeature.h"
 #include "core/parts/BearingTable.h"
 
 #include <BRepAdaptor_Surface.hxx>
@@ -120,6 +121,23 @@ void Stamp(const Document& doc, std::vector<Body>& bodies) {
     body.fitBands.clear();
     if (body.shape.GetShape().IsNull())
       continue;
+    // A Derived copy: the bands its source stamped, carried in the
+    // snapshot as the source read them, under the copy's face names.
+    if (body.derivedFrom != 0)
+      if (const auto* derived = dynamic_cast<const DerivedFeature*>(
+              doc.FindFeatureById(body.createdBy)))
+        for (const DerivedBody& sb : derived->snapshot) {
+          if (sb.sourceCreatedBy != body.derivedFrom)
+            continue;
+          for (const FitBand& carried : sb.fitBands) {
+            FitBand b = carried;
+            b.face = ElementRef{
+                derived->GetId(),
+                derived->DerivedName(sb.sourceCreatedBy, carried.face.name)};
+            if (body.elementMap.Resolve(b.face.name))
+              body.fitBands.push_back(std::move(b));
+          }
+        }
     // A generated bearing: its two ring faces carry ISO 492's band, and the
     // ring says which side it is.
     if (row != nullptr && body.createdBy == bearing->GetId())

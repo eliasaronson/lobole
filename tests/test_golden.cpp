@@ -28,6 +28,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cstdio>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -923,6 +924,24 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       got.push_back(body.material);
     std::sort(got.begin(), got.end());
     CHECK(got == expect.at("body_materials").get<std::vector<std::string>>());
+  }
+  // vNEXT: a Derived copy's size bands, carried from its source in the
+  // snapshot and stamped on the copy under its own face names.
+  if (expect.contains("fit_bands")) {
+    std::vector<std::string> got;
+    for (const auto& body : doc.GetBodies())
+      for (const FitBand& f : body.fitBands) {
+        CHECK(f.face.featureId == body.createdBy);
+        CHECK(body.elementMap.Resolve(f.face.name));
+        char buf[160];
+        std::snprintf(buf, sizeof buf, "%s %s %+.4f/%+.4f%s", f.label.c_str(),
+                      f.side == FitBand::Side::Hole    ? "hole"
+                      : f.side == FitBand::Side::Shaft ? "shaft"
+                                                       : "either",
+                      f.upper, f.lower, f.printedPress ? " press" : "");
+        got.push_back(buf);
+      }
+    CHECK(got == expect.at("fit_bands").get<std::vector<std::string>>());
   }
   std::vector<double> volumes;
   for (const auto& body : doc.GetBodies())

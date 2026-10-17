@@ -202,6 +202,9 @@ std::string TakeSnapshot(DerivedFeature& feature, const Document& source,
     db.elementMap = b.elementMap;
     db.hasDisplayColor = b.hasDisplayColor;
     db.displayColor = b.displayColor;
+    db.fitBands = b.fitBands;
+    for (FitBand& band : db.fitBands)
+      band.face.featureId = 0; // the source's; the copy names its own
     if (host.GetAsset(db.asset) == nullptr)
       host.SetAsset(db.asset, std::move(bytes));
     taken.push_back(std::move(db));

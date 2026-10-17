@@ -9,6 +9,7 @@
 // boolean every contact check (interference, the sweeps, contact_report,
 // exact motion) takes — on real part documents whose bands the Document
 // stamps from its own tolerances, print process and bearing.
+#include "TestIO.h"
 #include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
@@ -23,6 +24,7 @@
 #include "core/PrintAllowance.h"
 #include "core/features/BearingFeature.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/DerivedFeature.h"
 #include "core/io/Serialization.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -556,4 +558,51 @@ TEST_CASE("A printed press needs a printed part to band it",
   CHECK(pb->bore);
   CHECK_THAT(pb->band.basicMm, WithinAbs(3.25, 1e-12));
   CHECK_THAT(pb->band.toleranceMm, WithinAbs(0.05, 1e-12));
+}
+
+TEST_CASE("A Derived copy of a printed pin keeps its press",
+          "[measure][tolerances][press_fit][print][derived]") {
+  // The pin's press is banded by ITS print profile; the part that derives
+  // it is not printed at all. The copy an assembly places must still be the
+  // press it was, and through the saved form.
+  const printfit::Process proc = PressProfile(-0.05);
+  auto cap = Housing(3.15);
+  auto pin = Pin(3.2);
+  cap->SetPrintProcess(proc);
+  pin->SetPrintProcess(proc);
+  PrintedPress(*cap, 3.15);
+  PrintedPress(*pin, 3.2);
+  REQUIRE(pin->GetBodies().front().fitBands.size() == 1);
+
+  Document host;
+  auto d = std::make_unique<DerivedFeature>("Pin copy", 7);
+  d->sourceName = "Pin";
+  d->reference = false;
+  REQUIRE(derived::TakeSnapshot(*d, *pin, host).empty());
+  host.AddFeature(std::move(d));
+  REQUIRE(host.Regenerate());
+  REQUIRE(host.GetBodies().size() == 1);
+  const Body& copy = host.GetBodies().front();
+  REQUIRE(copy.fitBands.size() == 1);
+  CHECK(copy.fitBands.front().printedPress);
+  CHECK(copy.fitBands.front().face.featureId == copy.createdBy);
+  CHECK(copy.elementMap.Resolve(copy.fitBands.front().face.name));
+
+  Measure::SetContact c = Contact(*cap, host);
+  CHECK(c.volume < 1e-9);
+  REQUIRE(c.pressFits.size() == 1);
+  CHECK(c.pressFits.front().fit ==
+        "Ø3.2 printed press 0.05 ('Test PLA' (fdm pla))");
+
+  // Saved and read back, the copy is still the press.
+  const auto path =
+      std::filesystem::temp_directory_path() / "lobole-derived-press.json";
+  REQUIRE(testio::Save(host, path.string()));
+  auto back = testio::Load(path.string());
+  REQUIRE(back);
+  REQUIRE(back->Regenerate());
+  std::filesystem::remove(path);
+  c = Contact(*cap, *back);
+  CHECK(c.volume < 1e-9);
+  CHECK(c.pressFits.size() == 1);
 }

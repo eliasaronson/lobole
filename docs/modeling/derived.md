@@ -113,6 +113,22 @@ A configuration the source does not have (deleted, or a name that matches
 none) is refused, naming the ones it has, and so is one in which a feature of
 the source fails.
 
+## Size bands on a copy
+
+A copy carries the size bands its source stamped on each body it copies
+(`DerivedBody::fitBands`): an ISO class or explicit deviations on a round
+face, a printed press, a bearing's rings
+([press fits](../tolerances/README.md#press-fits)). They are taken with the
+snapshot, as the SOURCE read them -- its tolerances under its own print
+process, so a printed pin derived into a part that is not printed is still
+the press its profile bands -- and `fitband::Stamp` puts them on the copy
+under the copy's own face names, beside any tolerance the host sets on the
+copy's faces. So a press on a source part is a press on the copy an
+assembly places, not a clash. They are part of the snapshot: a tolerance set
+on the source after it was taken reaches the copy with `update_derived`,
+like any other change, though it does not move the source's chain hash and
+so does not mark the copy stale.
+
 ## Refusals
 
 Deriving from this part itself, or from a part whose derived chain reaches
@@ -160,7 +176,11 @@ copy and its source, no ghost curves in a drawing view); GUI
 `derived/a_ghost_is_not_drawn_in_assemblies`, and `defaults/derive` (refuses
 until a source exists). Goldens `v84-derived-servo`, `v85-derived-by-name`,
 `v133-derived-configuration` (a copy taken in a configuration the source does
-not have active, and its stale check against that configuration).
+not have active, and its stale check against that configuration),
+`vNEXT-derived-fit-bands` (a printed pin's press band on its copy).
+`tests/test_press_fits.cpp`, "A Derived copy of a printed pin keeps its
+press": a pin printed under a profile, derived into a part that is not
+printed, is relieved against its printed cap, before and after a round trip.
 
 ## Not built
 

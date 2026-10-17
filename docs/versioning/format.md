@@ -308,6 +308,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A Derived feature's snapshot body may carry `fit_bands` [{`face` (the SOURCE's face name), `lower`, `upper` (mm on the diameter), `side`: `hole`\|`shaft`\|`either`, `label`, `allowance`? (mm, omitted at 0), `printed_press`? (true)}]: the size bands the source stamped on that body, as it read them (its tolerances under its print process, a bearing's rings), stamped on the copy under its own face names ([size bands on a copy](../modeling/derived.md#size-bands-on-a-copy)). An unknown `side` is refused on load. An older build reads the copy without its bands, so a press on the source is a clash on the copy. Golden `vNEXT-derived-fit-bands` |
 
 ## The directory form
 

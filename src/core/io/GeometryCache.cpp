@@ -49,7 +49,12 @@ namespace {
 // 5: ring grips. A retaining ring's and its groove's RingGrips (what a ring
 // in its groove may overlap) are stamped by their features the same way, so
 // a reopened head would have read every circlip as a clash with its shaft.
-constexpr int kGeometryFormat = 5;
+// 6: derived_from. A Derived copy's body names its source body's creator,
+// which is how it reads the size bands its snapshot carries and its source
+// part's per-body print settings; baked without it, a reopened copy of a
+// printed pin read its press as a clash, and a plate printed the copy at
+// the part's settings rather than the source body's.
+constexpr int kGeometryFormat = 6;
 
 // A bend record, whole. It is not document data — the features stamp it on
 // every regeneration — but a baked open regenerates nothing, so the blob has
@@ -360,6 +365,8 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
       // reloaded jaw would weigh its servo (v84).
       if (body.reference)
         entry["reference"] = true;
+      if (body.derivedFrom != 0)
+        entry["derived_from"] = body.derivedFrom;
       if (!body.bends.empty()) {
         json bends = json::array();
         for (const BendRegion& b : body.bends)
@@ -477,6 +484,7 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
                              c[2].get<float>()};
       }
       body.reference = bj.value("reference", false);
+      body.derivedFrom = bj.value("derived_from", uint64_t{0});
       for (const json& bendJson : bj.value("bends", json::array()))
         body.bends.push_back(BendFromJson(bendJson));
       for (const json& t : bj.value("thread_regions", json::array()))

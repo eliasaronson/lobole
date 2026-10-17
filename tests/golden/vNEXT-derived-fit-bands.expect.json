@@ -1,0 +1,10 @@
+{
+  "features": 1,
+  "bodies": 1,
+  "volumes": [
+    160.8495
+  ],
+  "fit_bands": [
+    "'Test PLA' (fdm pla) shaft +0.0500/-0.0500 press"
+  ]
+}
