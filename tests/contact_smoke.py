@@ -54,6 +54,9 @@ def main():
     # Holds each pair of an ASYNC contact_report, so the smoke sees one
     # running and cancels it before it ends (tests only).
     env["LOBOLE_TEST_CONTACT_PAIR_MS"] = "1500"
+    # Holds an exact named interference before it computes (tests only), so
+    # the smoke sees it waiting off the frame.
+    env["LOBOLE_TEST_INTERFERENCE_MS"] = "1500"
     app = launch_app(binary, env=env)
     try:
         d = Client.wait_for(app.port)
@@ -66,6 +69,33 @@ def main():
         expect(r["state"] == "touching", f"tangent boxes: {r}")
         expect(abs(r["distance"]) < 1e-6, f"tangent distance: {r}")
         expect(not r["clash"], f"tangent clash: {r}")
+
+        # Mesh mode says the same of the same pair: two faces seated on
+        # each other are touching, not a clash. Coplanar triangles always
+        # meet under the separating-axis test, so it called every seat a
+        # clash (docs/inspect/README.md#touching-is-not-a-clash).
+        # The exact named pair waits OFF the frame: an `interference` job
+        # while the instance answers another client, then the answer.
+        import threading
+        other = Client(port=app.port)
+        answer = {}
+        worker = threading.Thread(target=lambda: answer.update(
+            d.call("interference", a=0, b=1)))
+        worker.start()
+        kinds, slowest = set(), 0.0
+        while worker.is_alive():
+            t0 = time.monotonic()
+            for j in other.call("background_jobs")["jobs"]:
+                kinds.add(j["kind"])
+            slowest = max(slowest, time.monotonic() - t0)
+            time.sleep(0.05)
+        worker.join()
+        expect("interference" in kinds,
+               f"an exact pair runs as an interference job: {kinds}")
+        expect(slowest < 1.0,
+               f"and the instance answers while it runs ({slowest:.2f} s)")
+        expect(answer.get("state") == "touching",
+               f"the parked call answers as before: {answer}")
 
         box(d, (25, 0, 0), (10, 10, 10), "C")
         r = d.call("interference", a=1, b=2)
@@ -131,6 +161,13 @@ def main():
 
         r = d.call("interference", a="P1", b="P2")
         expect(r["state"] == "touching", f"P1/P2: {r}")
+        # Mesh mode says the same of the same pair: two faces seated on
+        # each other are touching, not a clash. Coplanar triangles always
+        # meet under the separating-axis test, so it called every seat a
+        # clash (docs/inspect/README.md#touching-is-not-a-clash).
+        r = d.call("interference", a="P1", b="P2", mode="mesh")
+        expect(r["state"] == "touching" and not r["clash"],
+               f"P1/P2, mesh mode: {r}")
         r = d.call("interference", a="P1", b="P4")
         expect(r["state"] == "clear" and r["distance"] > 100, f"P1/P4: {r}")
 

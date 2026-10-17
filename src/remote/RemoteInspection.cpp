@@ -1358,7 +1358,15 @@ static constexpr MethodDoc InspectionMethods[] = {
      "mode: exact (default — a real boolean, and the clash VOLUME) or "
      "mesh (triangles + an AABB tree: ~10x faster, a yes/no and no "
      "volume, decided to the reported deflection_mm; re-run exact on "
-     "anything that must be certain). On an assembly every pair names its "
+     "anything that must be certain). Mesh mode calls a pair that meets "
+     "only on the surface -- a face seated on a face, within the "
+     "deflection -- `touching`, not a clash, as exact mode does; its sweep "
+     "lists clashes only. An EXACT named pair waits off the frame: its "
+     "boolean and distance run on an `interference` background job on "
+     "copies of the two sides, and the call answers when it lands, so a "
+     "pair of modelled threads (seconds of helicoids) holds neither the "
+     "window nor other clients; a pair whose surfaces the meshes prove "
+     "apart is weighed with no boolean. On an assembly every pair names its "
      "sides `a_name`/`b_name` (and `a`/`b`, the same labels) plus "
      "`a_id`/`b_id` when both are occurrences of this assembly — the "
      "vocabulary run_motion_study and contact_report use. WHERE: an exact "
@@ -1852,6 +1860,61 @@ Body ContactBody(const Body& b, const CADShape& placed, bool copy) {
   return nb;
 }
 
+// An exact interference of two named sides, handed off the frame
+// (ParkInspectionRequest): set around the parking call into the handler,
+// which then resolves the pair and deep-copies its bodies (ContactBody) on
+// the main thread, leaves the boolean and the distance in `compute` for a
+// worker, and answers nothing itself.
+struct OffFrameInterference {
+  std::function<json()> compute;
+  std::string label;
+};
+thread_local OffFrameInterference* g_offFrame = nullptr;
+
+// The named-pair exact answer, from the pair's bodies: `base` carries what
+// the handler already knows (the mode, the sides' names). Pure, so a worker
+// may run it on deep copies; it forgets their meshes after.
+json ExactPairAnswer(const std::vector<Body>& a, const std::vector<Body>& b,
+                     double touchTol, json base, bool copies) {
+  const auto c =
+      Measure::ContactBetween(a, glm::dmat4(1.0), b, glm::dmat4(1.0));
+  if (copies)
+    for (const std::vector<Body>* side : {&a, &b})
+      for (const Body& x : *side)
+        collide::Forget(x.shape);
+  if (!c)
+    throw std::runtime_error(
+        "interference check failed — an OpenCASCADE boolean/extrema "
+        "threw, usually on an invalid or empty body; run "
+        "check_geometry on both sides");
+  json out = std::move(base);
+  out["clash"] = c->volume > 1e-9;
+  out["volume_mm3"] = c->volume;
+  out["distance"] = c->distance;
+  out["state"] = ContactState(*c, touchTol);
+  AddOverlapSite(out, *c);
+  return out;
+}
+
+// The handler's exact named pair: computed here, or -- parked -- packed for a
+// worker on deep copies, the request answered when it lands.
+json ExactPair(const std::vector<Body>& a, const std::vector<Body>& b,
+               double touchTol, json base, const std::string& label) {
+  if (g_offFrame == nullptr)
+    return ExactPairAnswer(a, b, touchTol, std::move(base), false);
+  std::vector<Body> ca, cb;
+  for (const Body& x : a)
+    ca.push_back(ContactBody(x, x.shape, true));
+  for (const Body& x : b)
+    cb.push_back(ContactBody(x, x.shape, true));
+  g_offFrame->label = label;
+  g_offFrame->compute = [ca = std::move(ca), cb = std::move(cb), touchTol,
+                         base = std::move(base)]() {
+    return ExactPairAnswer(ca, cb, touchTol, base, true);
+  };
+  return json::object(); // the parked request answers instead
+}
+
 void GatherContactBodies(ContactSweep& sw, const Document& doc) {
   sw.bodiesScope = true;
   for (const Body& b : doc.GetBodies()) {
@@ -2215,6 +2278,98 @@ static int BasePlaneFromString(const std::string& bp) {
   if (bp == "yz")
     return 2;
   throw std::runtime_error("base_plane '" + bp + "' is not one of xy, xz, yz");
+}
+
+namespace {
+
+// A parked exact interference: answered when its job lands.
+class InterferenceWait : public Parking {
+public:
+  struct Run {
+    std::function<json()> compute;
+    json answer;
+    std::string error;
+    std::atomic<bool> done{false};
+  };
+  explicit InterferenceWait(std::shared_ptr<Run> run) : m_run(std::move(run)) {}
+  Next Poll(ui::AppState&, const RpcParams&, json& answer) override {
+    if (!m_run->done.load(std::memory_order_acquire))
+      return Next::Wait;
+    if (!m_run->error.empty())
+      throw std::runtime_error(m_run->error);
+    answer = std::move(m_run->answer);
+    return Next::Answer;
+  }
+
+private:
+  std::shared_ptr<Run> m_run;
+};
+
+} // namespace
+
+std::unique_ptr<Parking> ParkInspectionRequest(ui::AppState& state,
+                                               const std::string& m,
+                                               const json& request,
+                                               const RpcParams& p) {
+  if (m != "interference")
+    return nullptr;
+  try {
+    // A named pair, asked exactly. The sweep (no pair) and mesh mode answer
+    // on the frame: the one is bounded by its deadline and the other is
+    // milliseconds. A guarded call is checked where it is dispatched.
+    if (!request.is_object() || !request.contains("a") ||
+        !request.contains("b") || request.contains("expect_revision") ||
+        request.value("mode", json("exact")) != json("exact"))
+      return nullptr;
+    OffFrameInterference slot;
+    g_offFrame = &slot;
+    std::optional<json> unused;
+    try {
+      unused = HandleInspectionRpc(state, state.document.get(), m, p);
+    } catch (...) {
+      g_offFrame = nullptr;
+      return nullptr; // the handler refuses it again, in its own words
+    }
+    g_offFrame = nullptr;
+    // A key no handler read is refused by the server, before anything is
+    // started: a refused call starts no job.
+    if (!slot.compute || !p.UnknownKeys().empty())
+      return nullptr;
+    auto run = std::make_shared<InterferenceWait::Run>();
+    run->compute = std::move(slot.compute);
+    // Holds the job before it computes (tests only), so a smoke can watch
+    // it run while the instance answers other calls.
+    int holdMs = 0;
+    if (const char* ms = std::getenv("LOBOLE_TEST_INTERFERENCE_MS"))
+      holdMs = std::max(0, std::atoi(ms));
+    auto bg = std::make_unique<ui::BackgroundJob>();
+    bg->kind = "interference";
+    bg->label = "Interference (" + slot.label + ")";
+    bg->cancellable = false; // one boolean: nothing to stop it between
+    bg->thread = std::thread([run, holdMs]() {
+      ArmOccSignalHandlers();
+      if (holdMs > 0)
+        std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
+      try {
+        run->answer = run->compute();
+      } catch (const Standard_Failure& e) {
+        run->error = std::string("interference check failed: ") +
+                     (e.GetMessageString() ? e.GetMessageString()
+                                           : "OpenCASCADE failure") +
+                     " — run check_geometry on both sides";
+      } catch (const std::exception& e) {
+        run->error = e.what();
+      }
+      run->compute = nullptr; // the copies go on the worker, not the frame
+      run->done.store(true, std::memory_order_release);
+    });
+    bg->finish = [](ui::AppState&) { return true; };
+    ui::StartBackgroundJob(state, std::move(bg));
+    return std::make_unique<InterferenceWait>(std::move(run));
+  } catch (...) {
+    g_offFrame = nullptr;
+    return nullptr;
+  }
 }
 
 std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
@@ -2810,31 +2965,21 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (mode == "mesh") {
         // The same yes/no the sweep gives, for ONE named pair: no volume,
         // no distance, and the deflection it was decided to.
-        const bool hit = pairMesh(ta, tb);
-        json out{{"clash", hit},  {"state", hit ? "clash" : "clear"},
-                 {"mode", mode},  {"deflection_mm", meshDeflection.load()},
-                 {"a", ta.label}, {"b", tb.label}};
+        const bool hit = pairMesh(ta, tb, &meshTouching);
+        json out{{"clash", hit},
+                 {"state", hit ? "clash" : meshTouching ? "touching" : "clear"},
+                 {"mode", mode},
+                 {"deflection_mm", meshDeflection.load()},
+                 {"a", ta.label},
+                 {"b", tb.label}};
         out["relieves"] = kMeshRelievesNothing;
         nameSides(out, ta, tb);
         return out;
       }
-      const auto c = Measure::ContactBetween(ta.bodies, glm::dmat4(1.0),
-                                             tb.bodies, glm::dmat4(1.0));
-      if (!c)
-        throw std::runtime_error(
-            "interference check failed — an OpenCASCADE boolean/extrema "
-            "threw, usually on an invalid or empty body; run "
-            "check_geometry on both sides");
-      json out{{"clash", c->volume > 1e-9},
-               {"volume_mm3", c->volume},
-               {"distance", c->distance},
-               {"state", ContactState(*c, touchTol)},
-               {"mode", mode},
-               {"a", ta.label},
-               {"b", tb.label}};
-      nameSides(out, ta, tb);
-      AddOverlapSite(out, *c);
-      return out;
+      json base{{"mode", mode}, {"a", ta.label}, {"b", tb.label}};
+      nameSides(base, ta, tb);
+      return ExactPair(ta.bodies, tb.bodies, touchTol, std::move(base),
+                       ta.label + " / " + tb.label);
     }
     const auto& bodies = RequirePartDoc(doc, "interference").GetBodies();
     const double touchTol = p.value("touch_tol", 1e-3);
@@ -2848,19 +2993,8 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     std::vector<Body> va(1), vb(1);
     va[0] = bodies[ia];
     vb[0] = bodies[ib];
-    const auto c =
-        Measure::ContactBetween(va, glm::dmat4(1.0), vb, glm::dmat4(1.0));
-    if (!c)
-      throw std::runtime_error(
-          "interference check failed — an OpenCASCADE boolean/extrema "
-          "threw, usually on an invalid or empty body; run "
-          "check_geometry on both sides");
-    json out{{"clash", c->volume > 1e-9},
-             {"volume_mm3", c->volume},
-             {"distance", c->distance},
-             {"state", ContactState(*c, touchTol)}};
-    AddOverlapSite(out, *c);
-    return out;
+    return ExactPair(va, vb, touchTol, json::object(),
+                     va[0].name + " / " + vb[0].name);
   }
   if (m == "query_geometry") {
     // Declarative geometry predicates with an assertion built in (survey

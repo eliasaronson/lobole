@@ -1270,6 +1270,47 @@ std::optional<SetContact> ContactImpl(const std::vector<Body>& bodiesA,
         cands.push_back({d, i, j});
         if (d > 0.0 || !wantOverlap)
           continue;
+        // Surfaces PROVEN apart need no boolean: their solids overlap only
+        // if one is wholly inside the other. The meshes bound it -- a pair's
+        // true distance is at least its tessellations' less the two
+        // deflections summed -- and a modelled thread's nut turned clear of
+        // its pillar is exactly that, at 1.1 s a boolean of two helicoids
+        // (the clock's nut search, docs/inspect/README.md#threads). Only
+        // where the distance pass will mesh them anyway (wantDistance:
+        // ExactDistance asks Nearest of the same cache), so no new caller
+        // meshes on a worker; and not for a pair the designed-overlap step
+        // reports whether it overlaps or not (two printed presses, two
+        // engaging thread regions, a ring and its groove).
+        const auto printedPress = [](const Body& b) {
+          return std::any_of(b.fitBands.begin(), b.fitBands.end(),
+                             [](const FitBand& f) { return f.printedPress; });
+        };
+        const bool designed =
+            (printedPress(*pa[i].body) && printedPress(*pb[j].body)) ||
+            (!pa[i].threads.empty() && !pb[j].threads.empty()) ||
+            (!pa[i].grips.empty() && !pb[j].grips.empty());
+        if (wantDistance && !designed) {
+          const collide::Gap gap =
+              collide::Nearest(*pa[i].source, xfA, *pb[j].source, xfB, 2.0);
+          bool apart = gap.known && gap.distance - gap.tolerance > kContactFuzz;
+          // Meshes that do not cross but are within their deflections of
+          // each other: a nut's thread 0.17 mm clear of its pillar's, meshed
+          // at 0.15 mm. Asked again of copies meshed ten times finer, as the
+          // distance pass narrows a long list (kRemeshFactor): 0.2-0.4 s on
+          // the clock's threads, against the boolean's 1-3 s.
+          if (gap.known && !apart && gap.distance > 0.0) {
+            const double fine = gap.tolerance / (2.0 * kRemeshFactor);
+            const auto ma = collide::Mesh::Build(*pa[i].source, fine);
+            const auto mb = collide::Mesh::Build(*pb[j].source, fine);
+            if (ma && mb && !ma->Empty() && !mb->Empty())
+              apart = ma->Nearest(xfA, *mb, xfB, 0.0).distance -
+                          (ma->Deflection() + mb->Deflection()) >
+                      kContactFuzz;
+          }
+          if (apart && !AnySolidInside(pa[i].shape, pb[j].shape) &&
+              !AnySolidInside(pb[j].shape, pa[i].shape))
+            continue;
+        }
         // Fuzzy, for the reason kContactFuzz documents: parts DESIGNED to
         // touch share a face, and an exact boolean over coincident faces
         // returns a sliver of contact-area x tolerance, which then reads as

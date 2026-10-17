@@ -89,13 +89,18 @@ mkdir -p "$OUT"
 # dwarf makes a bigger perf.data and is the only mode that produces a usable
 # call graph here.
 #
+# `--user-callchains`: at perf_event_paranoid 2 a call graph that asks for
+# the KERNEL's chain too is refused outright ("Failure to open any events
+# for recording"), even with a plain `perf record -g`. User space is all an
+# unprivileged profile can see anyway.
+#
 # perf is resolved ONCE to its store path, so the recorder is a plain child of
 # this script rather than of a nix-shell wrapper: --app has to own the
 # processes it starts (below).
 PERF="$(nix-shell -p perf --run 'command -v perf')"
 [ -x "$PERF" ] || { echo "profile: could not fetch perf" >&2; exit 1; }
 PERF_RECORD=("$PERF" record -e cpu-clock -F "$FREQ" --call-graph dwarf
-             -o "$OUT/perf.data")
+             --user-callchains -o "$OUT/perf.data")
 
 case "$MODE" in
   test)
