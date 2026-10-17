@@ -1,4 +1,4 @@
-# Loböle
+# <img src="assets/icons/org.lobole.Lobole.svg" width="48" height="48" alt="" align="top"> Loböle
 
 [![CI](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml/badge.svg)](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml)
 
