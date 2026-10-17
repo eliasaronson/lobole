@@ -6,6 +6,7 @@
     ["{python}", "-u", "{generators}/clock/build.py", "--port", "{port}", "--profile", "K5 PLA on P1S", "--no-render", "--out", "{out}/clock"]
   ],
   "markers": [
+    "the swing: the impulse and the lock and .* lock\\(s\\) past them, the wheel following the pallets by a table",
     "negative control, pallets .* too deep: .*anchor",
     "teeth on the third wheel: fails, as it must",
     "the period at the pendulum's walls 3, top/bottom 5/5, 100 % rectilinear",
@@ -15,6 +16,6 @@
   "budget_s": 600,
   "readme": {
     "runs": "`print_coupon.py --seed`, then `clock/build.py --profile \"K5 PLA on P1S\" --no-render` (the period is the printed pendulum's, which needs a profile's layer and line width): every part verified, the escapement's studies in both stages with every beat's lock, the ratios, every mesh exact, the click, both negative controls failing, both FEM studies (the arbor's interlayer factor at least 2), every print plate's `check_print` and the period stated at the pendulum's infill",
-    "measured": "270 s"
+    "measured": "330 s"
   }
 }

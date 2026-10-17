@@ -171,8 +171,41 @@ def choose_module(counts, backlash_mm, clear_side_mm, bore_r):
 
 # --- the escapement ---------------------------------------------------------------
 
-def escapement(g, g_small, play):
-    """The Graham escapement's every size, from the tooth pitch it needs.
+def escapement(g, g_small, play, hub_r):
+    """The Graham escapement at the smallest swing whose own sweep is clean:
+    `escapement_at` for one lock of supplementary arc past the impulse and
+    the lock, then a quarter of a lock more at a time, the escape wheel
+    following the pallets (window()), the first whose polygons clear by a
+    fifth of the gap twice over and lock the rest gap off a face at every
+    beat's end. Its window and sweep come with it (`window`, `sweep`), and
+    the swings tried and why each failed (`swing_tried`)."""
+    tried = []
+    for quarter in range(4, 21):
+        k = quarter / 4.0
+        e = escapement_at(g, g_small, play, k)
+        e["hub_r"] = hub_r
+        try:
+            win = window(e)
+        except SystemExit as why:
+            tried.append(f"{k:g} lock(s): {why}")
+            continue
+        sweep = escapement_sweep(e, win, 90, 2)
+        rest = [dm for _, dm, _ in sweep["ends"]]
+        if sweep["min_mm"] < 2.0 * g / 5.0:
+            tried.append(f"{k:g} lock(s): {sweep['min_mm']:.3f} mm least")
+            continue
+        if any(abs(r - e["rest_gap_mm"]) > 0.02 for r in rest):
+            tried.append(f"{k:g} lock(s): not locked at a beat's end")
+            continue
+        e.update(window=win, sweep=sweep, swing_tried=tried)
+        return e
+    raise SystemExit("clock: no swing up to five locks of supplementary arc "
+                     "clears: " + "; ".join(tried))
+
+
+def escapement_at(g, g_small, play, supplementary):
+    """The Graham escapement's every size, from the tooth pitch it needs,
+    at a swing `supplementary` locks past the impulse and the lock.
 
     A tooth's tip is two lines across; at rest it stands `g` (the gap a
     side) off the locking face it locks on; the DROP, the free flight after a
@@ -190,16 +223,17 @@ def escapement(g, g_small, play):
     lift = w / R                  # rad: the impulse face at 45 degrees
     lock = drop / R               # rad: a tooth lands `drop` deep
     delta = (lock - lift) / 2.0   # where each locking corner stands
-    # The swing: the impulse and the lock, and twice the lock again of
-    # supplementary arc. Less, and the impulse face runs away from a wheel
-    # that steps uniformly through the window too slowly for it to keep up
-    # (window()); this is the smallest whole multiple that lets it.
-    amp = (lift + lock) / 2.0 + 2.0 * lock
+    # The swing: the impulse and the lock, and `supplementary` locks of
+    # arc past them (escapement() takes the fewest that sweep clean). A
+    # wheel stepping uniformly needed two, to keep behind a face that ran
+    # away from it; following the face (window()) it needs no more than
+    # the escapement does.
+    amp = (lift + lock) / 2.0 + supplementary * lock
     e = {"R": R, "Z": Z_ESCAPE, "pitch_deg": 360.0 / Z_ESCAPE,
          "half_pitch_mm": half, "tip_mm": t_tip, "rest_gap_mm": m_rest,
          "drop_mm": drop, "pallet_w": w, "lift_deg": deg(lift),
          "lock_deg": deg(lock), "delta_deg": deg(delta),
-         "amplitude_deg": deg(amp),
+         "amplitude_deg": deg(amp), "supplementary_locks": supplementary,
          "anchor_d": R * math.sqrt(2.0),
          "arm_clear_mm": play, "arm_w": lines(ARM_LINES)}
     e["kappa_deg"] = e["amplitude_deg"] + deg(e["arm_clear_mm"] / R)
@@ -335,58 +369,107 @@ def cam_table(e, step_deg=2.0):
     return [[i * step_deg, anchor_deg(e, i * step_deg)] for i in range(n)]
 
 
-def window(e):
+def pallet_clearance(e, beat_deg, wheel_deg, deeper_deg=0.0):
+    """The least distance from either pallet to any tooth, the anchor where
+    the beat puts it and the wheel at `wheel_deg`, in the escapement's own
+    polygons: the wheel's centre at the origin, the anchor's pivot at
+    (0, anchor_d)."""
+    P = (0.0, e["anchor_d"])
+    a = anchor_deg(e, beat_deg)
+    teeth = wheel_teeth_polys(e, wheel_deg)
+    dmin = float("inf")
+    for side in ("left", "right"):
+        q = _xf([(x, y + P[1]) for x, y in
+                 pallet_outline(e, side, deeper_deg=deeper_deg)], a, P,
+                (0.0, 0.0))
+        cx = sum(x for x, _ in q) / len(q)
+        cy = sum(y for _, y in q) / len(q)
+        for t in teeth:
+            tx, ty = t[1]
+            if math.hypot(tx - cx, ty - cy) > 3.0 * e["tooth_h"] + 10:
+                continue
+            dmin = min(dmin, poly_distance(q, t))
+    return dmin
+
+
+def window(e, samples=60):
     """Where in the beat the escape wheel steps (the intermittent relation's
-    window), and over how much of it. It opens where the left pallet's
-    locking corner passes the resting tooth (anchor at -delta on the way
-    down), and closes once the wheel, moving uniformly, has never caught the
-    impulse face up: a stand-in that lags the face, never one that runs
-    into it. Half a tooth a beat, clockwise."""
+    window) and its law, a table (docs/assemblies/relations.md#intermittent).
+    It opens where the left pallet's locking corner passes the resting tooth
+    (anchor at -delta on the way down). From there the wheel FOLLOWS the
+    pallets: at each of `samples` beats to the swing's end it stands as far
+    on as it can go without coming nearer a pallet than the rest gap does
+    across a 45° impulse face (rest_gap/√2) -- behind the impulse face,
+    past its deep corner on the tooth's tip land, and then the drop -- and
+    the window closes where it has gone the whole half tooth. Half a tooth
+    a beat, clockwise."""
     A = e["amplitude_deg"]
+    if A <= abs(e["delta_deg"]):
+        raise SystemExit("the swing does not unlock")
     start = deg(math.acos(-e["delta_deg"] / A))
     step = -e["pitch_deg"] / 2.0
-    R, w = e["R"], e["pallet_w"]
-    lift = e["lift_deg"]
-    margin = e["rest_gap_mm"]
+    keep = e["rest_gap_mm"] / math.sqrt(2.0)
+    fine = 0.02  # of the step: how finely the way on is walked
 
-    def face_allows(b):
-        """How far (mm along the path) the impulse face has let the tooth
-        on, from its resting place, at beat b."""
-        a = anchor_deg(e, b)
-        into = (-e["delta_deg"] - a)        # how far past unlocking
-        if into <= 0.0:
-            return e["rest_gap_mm"]
-        if into >= lift:
-            return float("inf")
-        return e["rest_gap_mm"] + w * into / lift
+    def clear(b, sv):
+        # Both beats: the entry pallet's impulse, then the exit's, which
+        # slants the other way, by the same law half a turn of the beat on.
+        return min(pallet_clearance(e, b, step * sv),
+                   pallet_clearance(e, b + 180.0, step * (1.0 + sv)))
+    pts = [(start, 0.0)]
+    s_at = 0.0
+    for i in range(1, samples + 1):
+        b = start + (180.0 - start) * i / samples
+        s_new = s_at
+        while s_new < 1.0:
+            nxt = min(1.0, s_new + fine)
+            if clear(b, nxt) < keep:
+                lo, hi = s_new, nxt
+                for _ in range(12):
+                    mid = 0.5 * (lo + hi)
+                    if clear(b, mid) < keep:
+                        hi = mid
+                    else:
+                        lo = mid
+                s_new = lo
+                break
+            s_new = nxt
+        if s_new > s_at + 1e-12 or s_new >= 1.0:
+            pts.append((b, s_new))
+        s_at = s_new
+        if s_at >= 1.0:
+            break
+    if s_at < 1.0:
+        raise SystemExit("the wheel cannot go its half tooth within a beat")
+    end = pts[-1][0]
+    dur = end - start
+    table = [[0.0, 0.0]]
+    for b, sv in pts[1:]:
+        table.append([(b - start) / dur, sv])
+    table[-1] = [1.0, 1.0]
+    return {"start_deg": start, "duration_deg": dur, "step_deg": step,
+            "period_deg": 180.0, "table": table}
 
-    half = abs(step) / 360.0 * 2.0 * math.pi * R
-    for dur10 in range(10, 1100):
-        dur = dur10 / 10.0
-        ok = True
-        for i in range(1, 201):
-            b = start + dur * i / 200.0
-            u = half * i / 200.0
-            if u > face_allows(b) - margin:
-                ok = False
-                break
-        if ok:
-            if start + dur >= 180.0 - 1e-9:
-                break
-            return {"start_deg": start, "duration_deg": dur,
-                    "step_deg": step, "period_deg": 180.0}
-    raise SystemExit("clock: the escape wheel cannot step within a beat "
-                     "behind the impulse face")
+
+def table_law(table, t):
+    """The window's progress at fraction t of it, linear between the
+    table's points: IntermittentLaw in src/core/Occurrence.cpp."""
+    t = min(max(t, 0.0), 1.0)
+    for (f0, s0), (f1, s1) in zip(table, table[1:]):
+        if t <= f1:
+            return s0 + (s1 - s0) * (t - f0) / (f1 - f0)
+    return table[-1][1]
 
 
 def escape_deg(e, win, beat_deg):
     """The escape wheel's turn at the beat, as the intermittent relation
-    computes it (uniform law, phase 0): IntermittentValue in
+    computes it (table law, phase 0): IntermittentValue in
     src/core/Occurrence.cpp, docs/assemblies/relations.md#intermittent."""
     x = (beat_deg - win["start_deg"]) / win["period_deg"]
     n = math.floor(x)
     u = (x - n) * win["period_deg"]
-    s = u / win["duration_deg"] if u < win["duration_deg"] else 1.0
+    s = (table_law(win["table"], u / win["duration_deg"])
+         if u < win["duration_deg"] else 1.0)
     return win["step_deg"] * (n + s)
 
 
@@ -497,7 +580,10 @@ def solve(period_s, allow, layer, z_gap, weight_od, cord_mm):
     play = 2.0 * (g + g_small)
     s.update(arbor_d=d_a, g=g, g_small=g_small, play=play,
              end_shake=play)
-    e = escapement(g, g_small, play)
+    # The anchor's hub, round its arbor's light press: the sweep's pallets
+    # carry it.
+    hub_r = (d_a + allow("hole", d_a) / 2.0) / 2.0 + lines(WALL_LINES)
+    e = escapement(g, g_small, play, hub_r)
     s["escape"] = e
     if allow("gap", 2.0 * e["R"]) / 2.0 != g:
         raise SystemExit("clock: the escape wheel's gap is not the wheels'")
@@ -521,7 +607,7 @@ def solve(period_s, allow, layer, z_gap, weight_od, cord_mm):
     s["run_d"] = d_a + 2.0 * g_small
     s["flat"] = lines(2)            # the D's flat, from the round
     s["hub_r"] = s["press_d"] / 2.0 + lines(WALL_LINES)
-    e["hub_r"] = s["hub_r"]
+    assert e["hub_r"] == s["hub_r"]
     # Plates: a bearing as long as the arbor is thick.
     s["t_plate"] = up_to(d_a, layer)
     layers_z(s)

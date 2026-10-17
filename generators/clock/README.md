@@ -63,7 +63,12 @@ default 1 s, so a beat every half second) and the print profile, through
   through the pallets, so a tooth runs straight at a locking face that is
   an arc about the pivot: dead-beat. The lift is the pallet's width over the
   radius (a 45° impulse face), the lock the drop over the radius, and the
-  swing the impulse and lock plus twice the lock of supplementary arc.
+  swing the impulse and lock plus the fewest quarter-locks of
+  supplementary arc whose escapement sweeps clean (below): 1.5 at K5,
+  ±3.59°. A wheel that stepped uniformly needed two, to keep behind an
+  impulse face that ran away from it; following the face, fewer than 1.5
+  leave the exit pallet too shallow for the tooth to land on its locking
+  face within the beat.
 - **The teeth** are as deep as it takes for the tooth ahead's back to clear
   the pallet's deep corner by the gap at the pallet's deepest, and 15 % more.
 - **The train**: the smallest two wheels, with pinions of 8 leaves or
@@ -103,9 +108,15 @@ A hidden "beat" revolute turns once a period. Through an `intermittent`
 relation it steps the escape wheel half a tooth a beat, inside a window that
 opens where the locking corner passes the resting tooth; through a `cam`
 whose table is `A cos(beat)` it swings the anchor, and the pendulum
-fastened to it. The window is the shortest in which a wheel moving uniformly
-never catches the retreating impulse face up, so in the model a tooth always
-lags its face by at least the rest gap; in the print the tooth pushes on
+fastened to it. The step's law is a **table**
+([`motion: table`](../../docs/assemblies/relations.md#intermittent)):
+`clock_spec.window()` walks the beat in 60 samples and at each puts the
+wheel as far on as it can go without coming nearer either pallet than the
+rest gap does across a 45° face (rest gap/√2), on both beats at once, so
+the tooth follows the impulse face, crosses its deep corner on the tip
+land and drops onto the other locking face; the window closes where the
+wheel has gone its half tooth (33 points at the default). In the model a
+tooth lags its face by that rest gap; in the print the tooth pushes on
 it.
 
 What the stand-in can prove is geometry: that the pallets clear every tooth
@@ -156,24 +167,24 @@ the PRINTED pendulum's, which needs a profile's layer and line width.
 ## The default clock, and its test card
 
 `--period 1 --profile "K5 PLA on P1S"`: a 30-tooth escape wheel 58 mm
-across with teeth 6.9 deep, pallets 1.64 mm wide, lift 3.23°, lock 0.99°,
-a swing of ±4.09°; a train of 8/80 and 8/96 at module 1.3 (escape to
+across with teeth 6.3 deep, pallets 1.64 mm wide, lift 3.23°, lock 0.99°,
+a swing of ±3.59°; a train of 8/80 and 8/96 at module 1.3 (escape to
 centre 120:1) and motion works 10/30 and 8/32; plates 61.2 mm apart;
-a rod of 296.3 mm from the anchor arbor to its lower end and a bob
+a rod of 296.4 mm from the anchor arbor to its lower end and a bob
 63 × 49.8 × 20.4 mm. `clock_card.md`, as that run wrote it:
 
 | what | predicted |
 |---|---|
-| period at the design swing (±4.09°), printed as set | 1.00000 s (0.99968 s at a small swing) |
-| the same parts read solid | 0.99999 s |
+| period at the design swing (±3.59°), printed as set | 1.00000 s (0.99975 s at a small swing) |
+| the same parts read solid | 1.00000 s |
 | rate, as built | 0.0 s/day |
 | a turn of the rating nut that lowers the bob | −246 s/day (−10.2 a notch of 24) |
-| a degree more swing either way | −15.1 s/day (circular error) |
+| a degree more swing either way | −13.5 s/day (circular error) |
 | run per metre of drop (the first layer of cord) | 28.2 h |
 | torque at the escape wheel per 100 g, stage 2 | 0.046 N·mm |
 | torque at the escape wheel per 100 g, stage 1 | 5.54 N·mm |
 
-Equivalent length 248.2 mm, 98 g swinging (rod, bob, nut, anchor and
+Equivalent length 248.3 mm, 98 g swinging (rod, bob, nut, anchor and
 arbor, weighed as they PRINT: `mass_properties`' printed estimate). The
 pendulum prints solid, 100 % rectilinear (`PENDULUM_PRINT`; grid cannot
 print 100 %), so its rod, bob and nut are their solid selves exactly; the

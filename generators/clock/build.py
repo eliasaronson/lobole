@@ -359,15 +359,15 @@ def escapement_relations(a, s):
     """The escapement as the watch animates its own (watch.py
     escapement_relations): not simulated. A hidden beat turns once a
     period; it steps the escape wheel half a tooth a beat through an
-    intermittent relation, inside the window clock_spec.window() found,
-    and swings the anchor (and the pendulum fastened to it) through a cam
-    whose table is A cos(beat)."""
+    intermittent relation whose table law follows the pallets
+    (clock_spec.window()), and swings the anchor (and the pendulum fastened
+    to it) through a cam whose table is A cos(beat)."""
     win, e = s["window"], s["escape"]
     a.relate("tick", type="intermittent", a=a.mates["beat axis"],
-             b=a.mates["escape wheel axis"], motion="uniform",
-             start_deg=win["start_deg"], step_deg=win["step_deg"],
-             duration_deg=win["duration_deg"], period_deg=win["period_deg"],
-             phase=0.0)
+             b=a.mates["escape wheel axis"], motion="table",
+             table=win["table"], start_deg=win["start_deg"],
+             step_deg=win["step_deg"], duration_deg=win["duration_deg"],
+             period_deg=win["period_deg"], phase=0.0)
     a.relate("swing", type="cam", a=a.mates["beat axis"],
              b=a.mates["anchor axis"], lift=S.cam_table(e))
 
@@ -1101,7 +1101,7 @@ def main():
         s = S.solve(args.period, allow, layer, prof.get("z_gap_mm"),
                     jar["outer_d"], args.cord_mm)
         e = s["escape"]
-        s["window"] = win = S.window(e)
+        s["window"] = win = e["window"]
         c = s["counts"]
         print(f"clock: {args.period:g} s, escape wheel {e['Z']} teeth "
               f"R{e['R']:g}, train {c['escape_pinion']}/{c['third']} "
@@ -1115,7 +1115,11 @@ def main():
               f"teeth {e['tooth_h']:.1f} deep; the wheel steps over "
               f"{win['start_deg']:.1f}-{win['start_deg'] + win['duration_deg']:.1f}"
               f" deg of each beat")
-        sweep = S.escapement_sweep(e, win, 90, 2)
+        print(f"  the swing: the impulse and the lock and "
+              f"{e['supplementary_locks']:g} lock(s) past them, the wheel "
+              f"following the pallets by a table of {len(win['table'])} "
+              f"points ({'; '.join(e['swing_tried']) or 'the first tried'})")
+        sweep = e["sweep"]
         rest = [round(dm, 4) for _, dm, _ in sweep["ends"]]
         print(f"  the escapement's own sweep: {sweep['min_mm']:.3f} mm least "
               f"at beat {sweep['at_beat_deg']:.0f} deg, locked "
