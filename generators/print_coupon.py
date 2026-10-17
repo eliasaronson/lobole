@@ -17,6 +17,10 @@
     python3 generators/print_coupon.py --port 8800 --record \\
         --profile "K5 PLA on P1S" --layer 0.2 --z-gap-layers 3 \\
         --post-gap-side 0.1
+    python3 generators/print_coupon.py --port 8800 --press-only \\
+        --profile "K5 PLA on P1S" --size 3.2 --step 0.05
+    python3 generators/print_coupon.py --port 8800 --record \\
+        --profile "K5 PLA on P1S" --press-side 0.025
 
 The allowance table (docs/tolerances/README.md#printed-parts) is community
 practice and CAD-tool defaults, "to confirm with a test coupon". This is the
@@ -67,6 +71,15 @@ gap into a `gap` row below Ø`size` -- and saves it with
 installs the two profiles measured on a Bambu Lab P1S (K5 PLA at 0.1 mm a
 side, a plain PLA at 0.15, both at the preset's 0.2 mm layers), skipping any
 name the store already has.
+
+`--press-only` prints the PRESS row (docs/tolerances/README.md#press-allowance):
+pins of Ø`size` on shoulders on a plate, and a loose cap for each on the bed
+in front of it, its bore stepped `step` on the diameter either side of the
+table's `press` allowance. The pins are numbered on the plate and each cap
+carries as many notches in its rim. Press each cap down its pin onto the
+shoulder: the smallest interference that holds by hand and does not split
+is the press, which `--record --press-side MM` keeps (the interference a
+side, as modelled) as the profile's `press` row.
 
 `--gap-only` prints the disc row alone and `--z-gap-only` the air and
 small-gap rows, for a profile whose other rows are already measured. The
@@ -246,6 +259,12 @@ def record(d, args):
                                f"turned on its Ø{fmt(post)} post was "
                                f"{fmt(args.post_gap_side)} a side"})
         rows += above
+    if args.press_side is not None:
+        # The interference a side as modelled; the row is the cap's bore
+        # less its pin on the diameter, so its negative, doubled.
+        replace("press", round(-2.0 * args.press_side, 4),
+                f"the smallest cap that held by hand and did not split was "
+                f"{fmt(args.press_side)} a side of interference")
     if args.thread_went is not None:
         for r in rows:
             if r["kind"] in ("internal_thread", "external_thread"):
@@ -272,7 +291,7 @@ def record(d, args):
             and layer == prof.get("layer_height_mm")):
         raise SystemExit("print_coupon --record: nothing to record — pass "
                          "--gap-side, --bore, --pin, --thread-went, "
-                         "--z-gap-layers or --post-gap-side")
+                         "--z-gap-layers, --post-gap-side or --press-side")
     # The deflection the coupon was exported at: the one asked for, else
     # the profile's own, else the coupon's default.
     deflection = (args.deflection if args.deflection is not None else
@@ -490,6 +509,161 @@ def build_z_rows(d, rings, rails, size, width, top):
         build_post(d, r, rail_top[r["row"]])
 
 
+def press_sizes(size, cap_d=None, cap_t=None):
+    """The press row's pin and cap from the pin's diameter (`size`): a
+    shoulder Ø1.4 sizes and half a size tall on the plate, the pin standing
+    on it as long as the cap is thick, the cap Ø2.6 sizes and 0.9 of one
+    thick -- or the cap a part's own (`cap_d`, `cap_t`), so the row tests
+    the cap the part presses on. A position every 3.5 sizes (more where the
+    cap is wider), the plate 0.6 of a size thick, the caps on the bed in
+    front of it, half a pitch clear."""
+    cap_d = cap_d or 2.6 * size
+    cap_t = cap_t or 0.9 * size
+    pitch = max(3.5 * size, 1.4 * cap_d)
+    return {"pin": size, "shoulder_d": 1.4 * size, "shoulder_h": 0.5 * size,
+            "cap_d": cap_d, "cap_t": cap_t, "pitch": pitch,
+            "plate_t": 0.6 * size, "notch": 0.12 * cap_d,
+            "digit": 0.45 * pitch, "engrave": 0.1 * size}
+
+
+def press_row(d, proc, size, steps, step, name, cap_d=None, cap_t=None):
+    """A part of its own: a row of 2 * steps + 1 pins on a plate and a cap
+    for each, loose on the bed in front of it, the caps' bores stepped
+    `step` on the diameter either side of the table's press allowance
+    (print_allowance kind `press`). Pin and cap are numbered 1.. from the
+    left: the digit engraved on the plate behind the pin, as many notches
+    in the cap's rim. Push each cap down its pin onto the shoulder: the
+    smallest interference that holds by hand and does not split is the
+    press (`--record --press-side`). Returns the row's report."""
+    press = d.call("print_allowance", kind="press", size_mm=size, **proc)
+    z = press_sizes(size, cap_d, cap_t)
+    n = 2 * steps + 1
+    pitch = z["pitch"]
+    width, depth = n * pitch, pitch
+    d.call("add_part", name=name)
+    d.call("set_print_process", **proc)
+    check(d.call("add_feature", feature={
+        "type": "Box", "name": "Plate", "on": "Top", "centered": False,
+        "offset": [0, 0], "width": width, "depth": depth,
+        "height": z["plate_t"]}), "press plate")
+    xs = [pitch * (i + 0.5) for i in range(n)]
+    y_pin = 0.4 * depth
+    y_cap = -0.5 * pitch - z["cap_d"] / 2.0
+    top = Plane.xy(z["plate_t"]).json()
+    check(d.call("add_feature", feature={
+        "type": "Sketch", "name": "Shoulders", "plane": top,
+        "entities": [circle((x, y_pin), z["shoulder_d"] / 2.0)
+                     for x in xs]}), "shoulder sketch")
+    check(d.call("add_feature", feature={
+        "type": "Extrude", "name": "Shoulders up", "mode": "add",
+        "sketch_id": feature_id(d, "Shoulders"),
+        "distance": z["shoulder_h"]}), "shoulders")
+    check(d.call("add_feature", feature={
+        "type": "Sketch", "name": "Press pins",
+        "plane": Plane.xy(z["plate_t"] + z["shoulder_h"]).json(),
+        "entities": [circle((x, y_pin), size / 2.0) for x in xs]}),
+        "press pin sketch")
+    check(d.call("add_feature", feature={
+        "type": "Extrude", "name": "Press pins up", "mode": "add",
+        "sketch_id": feature_id(d, "Press pins"),
+        "distance": z["cap_t"]}), "press pins")
+    check(d.call("add_feature", feature={
+        "type": "Sketch", "name": "Press digits", "plane": top,
+        "entities": [text(str(i + 1), (x, depth - 0.05 * pitch),
+                          z["digit"]) for i, x in enumerate(xs)]}),
+        "digit sketch")
+    check(d.call("add_feature", feature={
+        "type": "Extrude", "name": "Engrave press digits", "mode": "cut",
+        "sketch_id": feature_id(d, "Press digits"),
+        "distance": z["engrave"], "reversed": True}), "engrave digits")
+    caps = []
+    report = []
+    for i, x in enumerate(xs):
+        k = i - steps
+        allow = round(press["allowance_mm"] + k * step, 4)
+        bore = round(size + allow, 4)
+        if bore <= 0.0:
+            raise SystemExit(f"print_coupon: a press step of {fmt(step)} "
+                             f"closes the Ø{fmt(size)} cap's bore -- fewer "
+                             f"--steps or a smaller --step")
+        r = z["cap_d"] / 2.0
+        ents = [circle((x, y_cap), r), circle((x, y_cap), bore / 2.0)]
+        # i + 1 notches in the rim, every 30 degrees from the back: which
+        # pin it goes on, once it is off the bed.
+        nw = z["notch"]
+        for j in range(i + 1):
+            a = math.radians(90.0 - 30.0 * j)
+            cx, cy = x + r * math.cos(a), y_cap + r * math.sin(a)
+            ents.append(circle((cx, cy), nw / 2.0))
+        caps.append(ents)
+        report.append({"index": i + 1, "pin_mm": size,
+                       "bore_mm": bore, "allowance_mm": allow,
+                       "interference_side_mm": round(-allow / 2.0, 4) + 0.0,
+                       "offset_mm": round(k * step, 4), "table": k == 0,
+                       "at": [x, y_pin], "cap_at": [x, y_cap]})
+    for i, ents in enumerate(caps):
+        cap = f"Cap {i + 1}"
+        check(d.call("add_feature", feature={
+            "type": "Sketch", "name": f"{cap} sketch",
+            "plane": Plane.xy(0).json(), "entities": ents[:2]}),
+            f"{cap} sketch")
+        check(d.call("add_feature", feature={
+            "type": "Extrude", "name": cap, "mode": "new_body",
+            "sketch_id": feature_id(d, f"{cap} sketch"),
+            "distance": z["cap_t"]}), cap)
+        check(d.call("add_feature", feature={
+            "type": "Sketch", "name": f"{cap} notches",
+            "plane": Plane.xy(z["cap_t"]).json(), "entities": ents[2:]}),
+            f"{cap} notches")
+        check(d.call("add_feature", feature={
+            "type": "Extrude", "name": f"{cap} notched", "mode": "cut",
+            "sketch_id": feature_id(d, f"{cap} notches"),
+            "distance": z["cap_t"], "reversed": True}), f"{cap} notched")
+    return {"kind": "press", "sizes": z, "allowance_mm": press["allowance_mm"],
+            "from": press.get("from"), "source": press["source"],
+            "note": press.get("note"), "step_mm": step, "caps": report,
+            "part": name}
+
+
+def press_coupon(d, args, proc):
+    """--press-only: the press row on its own plate, checked, exported."""
+    name = args.name or ("coupon_" + (
+        args.profile.lower().replace(" ", "_") if args.profile else
+        f"{args.process}_{args.material}") + f"_{fmt(args.size)}_press")
+    row = press_row(d, proc, args.size, args.steps, args.step, name)
+    gap = d.call("print_allowance", kind="gap", size_mm=args.size, **proc)
+    # Every piece on the bed, nothing closer than the caps' half pitch to
+    # the plate, the notches and digits clean: every item.
+    params = {"min_gap_mm": gap["allowance_mm"] / 2.0}
+    if args.deflection is not None:
+        params["stl_deflection_mm"] = args.deflection
+    pr = check_print(d, "press coupon", quiet=True, **params)
+    if pr["shells"]["expected"] != 1 + len(row["caps"]):
+        raise SystemExit(f"print_coupon: {pr['shells']['expected']} solids, "
+                         f"not the plate and {len(row['caps'])} caps")
+    row["print"] = print_receipt(pr)
+    out = Path(args.out) if args.out else OUT
+    out.mkdir(parents=True, exist_ok=True)
+    stl = out / f"{name}.stl"
+    exp = {"path": str(stl)}
+    if args.deflection is not None:
+        exp["deflection"] = args.deflection
+    r = d.call("export_stl", **exp)
+    row["stl_deflection_mm"] = r.get("deflection_mm")
+    d.call("save_project", path=str(out / f"{name}.dsgn"))
+    (out / f"{name}.json").write_text(json.dumps(row, indent=1))
+    print(f"print_coupon: press row of {len(row['caps'])} -> {stl}")
+    for c in row["caps"]:
+        print(f"  {c['index']}: bore Ø{fmt(c['bore_mm'])} on a "
+              f"Ø{fmt(c['pin_mm'])} pin, {c['interference_side_mm']:+g} a "
+              f"side" + ("  (the table's)" if c["table"] else ""))
+    print("  press each cap onto its pin; --record --press-side MM the "
+          "smallest that holds by hand and does not split")
+    if row.get("note"):
+        print(f"  {row['note']}")
+    return 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--port", type=int)
@@ -515,6 +689,13 @@ def main():
     ap.add_argument("--z-gap-layers", type=int, default=None,
                     help="--record: the fewest layers of air whose ring "
                          "turned cleanly (the air row)")
+    ap.add_argument("--press-side", type=float, default=None,
+                    help="--record: the smallest interference a side, as "
+                         "modelled, whose cap held by hand and did not "
+                         "split (the press row), mm")
+    ap.add_argument("--press-only", action="store_true",
+                    help="the press row alone: pins of Ø--size on a plate "
+                         "and a cap for each, stepped in interference")
     ap.add_argument("--post-gap-side", type=float, default=None,
                     help="--record: the tightest gap a side whose ring "
                          "turned cleanly on its post (the small-gap row), "
@@ -575,6 +756,11 @@ def main():
     if args.deflection is None and not args.profile:
         args.deflection = 0.01
     size = args.size
+    if args.press_only:
+        if args.gap_only or args.z_gap_only:
+            raise SystemExit("print_coupon: --press-only, --gap-only or "
+                             "--z-gap-only, one of them")
+        return press_coupon(d, args, proc)
 
     def allowance(kind, **kw):
         return d.call("print_allowance", kind=kind, **proc, **kw)

@@ -11,6 +11,7 @@ give, followed, is what they then accept.
 
 Usage: print_allowance_smoke.py <path-to-designer-binary>
 """
+import json
 import math
 import os
 import struct
@@ -247,6 +248,48 @@ def profiles(d, port):
     expect(near(d.call("print_allowance", kind="hole", size_mm=8,
                        profile="Coupon P1S")["model_mm"], 8.25),
            "recording the Z gap kept the rows")
+    # The press (docs/tolerances/README.md#press-allowance): the built-in
+    # default, to confirm; a profile with no press row reads it and says
+    # so; the coupon's answer becomes the profile's own row.
+    r = d.call("print_allowance", kind="press", size_mm=3, process="fdm",
+               material="pla")
+    expect(near(r["allowance_mm"], 0.0) and r["from"] == "builtin"
+           and "DEFAULT to confirm" in r["source"]
+           and near(r["interference_side_mm"], 0.0),
+           f"the built-in press: {r}")
+    d.call("save_print_profile", profile={
+        "name": "No press", "process": "fdm", "material": "pla",
+        "rows": [{"kind": "gap", "allowance_mm": 0.2}]})
+    r = d.call("print_allowance", kind="press", size_mm=3, profile="No press")
+    expect(r["from"] == "builtin" and "has no press row" in r["note"]
+           and near(r["model_mm"], 3.0), f"no press row of its own: {r}")
+    refused(d, "print_allowance", "Accepted: hole, shaft, internal_thread, "
+            "external_thread, gap, press", kind="pressfit", size_mm=3,
+            profile="No press")
+    out = subprocess.run(
+        [sys.executable, coupon, "--port", str(port), "--record",
+         "--profile", "No press", "--press-side", "0.025"],
+        capture_output=True, text=True, timeout=60)
+    expect(out.returncode == 0, f"print_coupon --record press: {out.stderr}")
+    r = d.call("print_allowance", kind="press", size_mm=3, profile="No press")
+    expect(r["from"] == "profile" and near(r["allowance_mm"], -0.05)
+           and near(r["model_mm"], 2.95) and "note" not in r
+           and "print_coupon" in r["source"], f"the recorded press: {r}")
+    # The coupon's press row: every piece on the bed, checked, a cap a pin.
+    tmp = tempfile.mkdtemp(prefix="designer_press_coupon_")
+    out = subprocess.run(
+        [sys.executable, coupon, "--port", str(port), "--press-only",
+         "--profile", "No press", "--size", "3", "--out", tmp],
+        capture_output=True, text=True, timeout=120)
+    expect(out.returncode == 0, f"print_coupon --press-only: {out.stderr}"
+                                f"{out.stdout}")
+    row = json.load(open(os.path.join(tmp, "coupon_no_press_3_press.json")))
+    bores = [c["bore_mm"] for c in row["caps"]]
+    expect(len(bores) == 5 and near(bores[2], 2.95)
+           and all(near(b - a, 0.05) for a, b in zip(bores, bores[1:])),
+           f"five caps stepped round the profile's press: {bores}")
+    expect(row["print"]["ok"] and row["print"]["stacking"]["status"]
+           == "pass", f"the press row prints: {row['print']}")
     # --seed installs the two P1S profiles.
     out = subprocess.run([sys.executable, coupon, "--port", str(port),
                           "--seed"], capture_output=True, text=True,

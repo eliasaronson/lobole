@@ -968,16 +968,18 @@ static constexpr MethodDoc InspectionMethods[] = {
      "material, conditions?, stl_deflection_mm?, layer_height_mm?, "
      "z_gap_mm? (the vertical air a face needs over another part, whole "
      "layers of layer_height_mm), rows?: [{kind: hole|shaft|"
-     "internal_thread|external_thread|gap, from_mm?, to_mm? (absent = and "
-     "up), allowance_mm (signed, on the DIAMETER; a gap's is the whole "
-     "diametral clearance), source?}]}}, replacing one of that name; without "
+     "internal_thread|external_thread|gap|press, from_mm?, to_mm? (absent "
+     "= and up), allowance_mm (signed, on the DIAMETER; a gap's is the whole "
+     "diametral clearance, a press's the cap's bore less its pin), "
+     "source?}]}}, replacing one of that name; without "
      "`rows` it starts as the built-in table of its process and material, "
      "the defaults to correct. Or {from_part: true, part?} saves the part's "
      "embedded copy (\"Save as mine\"). Refused: no name, an unknown "
      "process/material or kind (naming the accepted ones), a size range "
      "empty, overlapping or out of order within its kind, an allowance of "
      "the wrong sign for its kind (a hole/internal thread not negative, a "
-     "gap positive, a shaft/external thread not positive), a z_gap_mm "
+     "gap positive, a shaft/external thread not positive; a press may be "
+     "either), a z_gap_mm "
      "without a layer_height_mm or not whole layers of it (naming the two "
      "nearest that are), or a name that "
      "would share a file with another. Open parts keep their copy; "
@@ -985,7 +987,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "from_part, part, profile", remote::NotInBatch,
      "conditions?:string, material:string, name:string, process:string, "
      "rows:{allowance_mm:number, from_mm:number, kind:string, "
-     "source:string}[], stl_deflection_mm:number, "
+     "source?:string, to_mm?:number}[], stl_deflection_mm:number, "
      "stl_deflection_stated:bool, layer_height_mm?:number, "
      "z_gap_mm?:number"},
     {"delete_print_profile",
@@ -1048,11 +1050,18 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"print_allowance",
      "What to MODEL for one printed diameter (a thread's `pitch` in mm): "
      "{kind: hole|shaft|"
-     "internal_thread|external_thread|gap, size_mm} (the size it should "
-     "PRINT at) or, for a thread, {designation: \"M8\"} for the table's "
-     "major. A `gap` is two surfaces printed together that must come apart "
-     "(print-in-place): size_mm is the inner one's diameter, model_mm the "
-     "outer's, and allowance_mm the whole diametral clearance. "
+     "internal_thread|external_thread|gap|press, size_mm} (the size it "
+     "should PRINT at) or, for a thread, {designation: \"M8\"} for the "
+     "table's major. A `gap` is two surfaces printed together that must come "
+     "apart (print-in-place): size_mm is the inner one's diameter, model_mm "
+     "the outer's, and allowance_mm the whole diametral clearance. A `press` "
+     "is two parts printed apart and pressed together to stay (a cap on a "
+     "pin): size_mm is the pin's modelled diameter, model_mm the cap's bore, "
+     "allowance_mm the bore less the pin (negative: the bore under the pin), "
+     "and `interference_side_mm` its interference a side as modelled; a "
+     "profile with no press row of its own answers its pair's built-in "
+     "default and says so (`from: builtin`, "
+     "docs/tolerances/README.md#press-allowance). "
      "The process is the part's (set_print_process), {process, material} "
      "given here, or {profile}, one of yours. Answers the signed "
      "`allowance_mm` on the diameter, `model_mm`, the row's source, and what "
@@ -1068,7 +1077,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "designation?:string, kind:string, material:string, "
      "model_mm:number, pitch?:number, process:string, source:string, "
      "stl_chord_loss_mm:number, stl_deflection_mm:number, "
-     "stl_note:string, profile?:string, note?:string"},
+     "stl_note:string, profile?:string, note?:string, from?:string, "
+     "interference_side_mm?:number"},
     {"set_tolerance",
      "Record what a face's SIZE is allowed to vary by: {feature_id, element, "
      "class: \"H7\"} — or {lower, upper} in mm for limits no class "
@@ -4081,6 +4091,18 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                      "came through somebody's export: export the parts and "
                      "the print_coupon at the same deflection and the coupon "
                      "calibrates both"}});
+    if (*kind == printfit::Printed::Press) {
+      out["interference_side_mm"] = -a->allowanceMm / 2.0;
+      out["from"] = a->builtinFallback ? "builtin"
+                    : proc->profile    ? "profile"
+                                       : "builtin";
+      if (a->builtinFallback)
+        out["note"] = "profile '" + proc->profile->name +
+                      "' has no press row: this is the built-in " +
+                      proc->process + " " + proc->material +
+                      " default -- print the coupon's press row and keep "
+                      "its answer (print_coupon.py --record --press-side)";
+    }
     if (thread) {
       const double floor = printfit::MinReliableThreadMm(*proc);
       if (floor > 0.0 && basic < floor)

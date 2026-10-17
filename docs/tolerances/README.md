@@ -206,6 +206,7 @@ corrected from a coupon.
 | internal thread | any | +0.4 | FreeCAD Fasteners 3D-print nut 1.03·D + 0.10 (M8 → +0.34); BOSL2 4·`$slop` at 0.1 |
 | external thread | any | −0.1 | FreeCAD Fasteners 3D-print screw 0.99·d − 0.05 (M8 → −0.13) |
 | gap | any | +0.6 | sovol3d.com print-in-place guide (0.15-0.35 a side by printer and filament); PETG bonds to itself more than PLA, so 0.3 a side |
+| press | any | 0 | **a default to confirm with the coupon's press row** ([press allowance](#press-allowance)) |
 
 | fdm, pla | size | allowance | source |
 |---|---|---|---|
@@ -214,6 +215,7 @@ corrected from a coupon.
 | internal thread | any | +0.4 | as for PETG (the Fasteners and BOSL2 numbers are not per material) |
 | external thread | any | −0.1 | as for PETG |
 | gap | any | +0.5 | **a default to calibrate**: sovol3d.com print-in-place guide (0.15-0.35 a side by printer and filament); makerworld.com clearance tests on Bambu printers, 0.25 a side best. One P1S wanted far less ([from a measurement](#from-a-measurement)) |
+| press | any | 0 | **a default to confirm with the coupon's press row**: a printed bore pressed onto a printed pin is modelled at the pin's size, or up to 0.1 under ([press allowance](#press-allowance)) |
 
 A **gap** is two surfaces printed together that must come apart — a
 print-in-place joint or gear. Its size is the inner surface's diameter, its
@@ -303,7 +305,7 @@ Where the numbers come from, beyond the table's column:
   insert). `add_feature` and `modify_feature` on a Thread return it as
   `print`; `set_print_process` and `get_print_process` list every thread.
 - **`print_allowance`** answers one diameter — `{kind: hole|shaft|
-  internal_thread|external_thread|gap, size_mm | designation}` against the
+  internal_thread|external_thread|gap|press, size_mm | designation}` against the
   part's process, a stated `{process, material}` or `{profile}` — with
   `model_mm` and what the STL export takes off a round surface: its chords
   sit up to `deflection` inside it, so a hole can lose twice that on the
@@ -359,7 +361,8 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   not carry, no rows, a size range that is empty, overlapping or out of order
   within its kind, and an allowance of the wrong sign: a hole or internal
   thread is not negative, a shaft or external thread not positive, and a gap
-  is positive (a gap of zero fuses). A refusal writes nothing.
+  is positive (a gap of zero fuses); a press may be either. A refusal
+  writes nothing.
 - **The air over another part** (v175). The `gap` rows are sideways: two
   walls printed beside each other. How much vertical air a face needs
   over [another part printed under it](#one-part-printed-over-another)
@@ -408,6 +411,47 @@ They live in the user's config, not in the build:
 `save_print_profile` on the instance at PORT — into whatever config dir that
 instance was started with — and leaves any name already stored. The other
 rows are the built-in PLA rows.
+
+### Press allowance
+
+A **press** is the other way round from a gap: two parts printed APART and
+pressed together to stay, such as a printed cap on a printed pin
+(`printfit::Printed::Press`, vNEXT). Its size is the pin's modelled
+diameter, its model the cap's bore, and the allowance the bore less the
+pin on the diameter. It is quoted a side as the INTERFERENCE, minus half
+the allowance. Either sign is a press, because FDM already prints a bore
+small and a pin large (the hole and shaft rows). That is where the hold
+comes from with the bore modelled at the pin's size, and why a bore
+modelled much under the pin splits a thin cap.
+
+- **The built-in row is a default** of 0 for both materials: the bore at
+  the pin's size, the middle of community practice (the pin's size, or up
+  to 0.1 under for a tight fit). Its source says it is to confirm with the
+  coupon's press row.
+- **A profile with no press row**, one saved before the kind existed or
+  whose press row has not been printed yet, reads its pair's built-in row.
+  The lookup refuses nothing here, unlike a missing hole row:
+  `printfit::ForBasic` marks the answer `builtinFallback`, and
+  `print_allowance` says `from: builtin` with a note naming the profile and
+  the coupon. That is how an unmeasured `z_gap_mm` falls back to whole
+  layers, and it is the only kind that falls back. A profile states the
+  others from the start.
+- **The coupon's press row** (`print_coupon.py --press-only --size D`): pins
+  of Ø`D` on shoulders on a plate, and a loose cap for each on the bed in
+  front of it, its bore stepped `--step` on the diameter either side of the
+  table's press. Pins are numbered on the plate, and each cap carries as
+  many notches in its rim. Press each cap down its pin onto the shoulder.
+  The smallest interference that holds by hand and does not split is the
+  answer. `--record --press-side MM` keeps it (the interference a side, as
+  modelled) as the profile's `press` row from Ø0 up. A generator that
+  presses caps prints the row beside its first parts, at its own pin and
+  cap (`press_row(d, proc, size, steps, step, name, cap_d, cap_t)`), as the
+  Strandbeest's first plate does (generators/strandbeest/README.md).
+- **Not seen by the clash checks.** A press is an overlap on purpose, but
+  its faces carry no ISO band, so a [press fit](#press-fits) relief does
+  not apply to it: a pressed cap and its pin, as two placed occurrences,
+  are a clash. A generator models what is pressed together as ONE
+  occurrence, as assembled, and checks the press with the coupon instead.
 
 ### Exporting a printed part
 
@@ -656,15 +700,20 @@ table, its inverse, refusals, storage, the fit and thread sentences; a
 profile through its file, each refusal, a part reading its embedded copy and
 reporting same/differs/missing, a profile's hole row rebuilding a fitted
 clearance hole, and the layer height and Z gap round-tripped and refused
-off whole layers), goldens `v169-print-profile` and `v175-print-z-gap`,
+off whole layers; "A press is a cap's bore less its pin", the built-in
+default, a profile without a press row reading it and saying so, a
+measured one), goldens `v169-print-profile`, `v175-print-z-gap` and
+`vNEXT-press-allowance`,
 `tests/print_allowance_smoke.py` (check_fit, check_fits and a Thread on a
 printed part, and the advised custom thread printing the right major; the
 profile store's RPCs and refusals, a disc in a hole exported at the
 profile's chords with the gap in the STL within 0.005 mm of the model, a
 coarse deflection warned, the match after the store changes, a Z gap off
 whole layers refused, `print_coupon --record` (the Z gap too) and
-`--seed`, and `check_print`'s minimum air taken from a profile's `z_gap_mm`
-and else from three of its layers),
+`--seed`, `check_print`'s minimum air taken from a profile's `z_gap_mm`
+and else from three of its layers, and the press: the built-in default, a
+profile without a row answering `from: builtin`, `--record --press-side`
+and the `--press-only` coupon printing every item),
 `tests/test_print_allowance.cpp` "A printed clearance hole is modelled at its
 fit plus the allowance", `tests/test_print_check.cpp` (a box on and off the
 bed, a 45° funnel reading 45 and passing and a 60° one failing with its

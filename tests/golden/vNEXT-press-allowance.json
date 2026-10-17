@@ -1,0 +1,59 @@
+{
+  "format": "designer-document",
+  "version": 178,
+  "print": {
+    "process": "fdm",
+    "material": "pla",
+    "profile": "K5 PLA on P1S",
+    "conditions": "Bambu Lab P1S, 0.4 mm nozzle, Bambu Studio 0.20 mm, X-Y hole and contour compensation 0",
+    "stl_deflection_mm": 0.01,
+    "rows": [
+      {
+        "kind": "hole",
+        "from_mm": 0,
+        "allowance_mm": 0.2,
+        "source": "the built-in fdm pla row"
+      },
+      {
+        "kind": "shaft",
+        "from_mm": 0,
+        "allowance_mm": -0.1,
+        "source": "the built-in fdm pla row"
+      },
+      {
+        "kind": "gap",
+        "from_mm": 0,
+        "to_mm": 50,
+        "allowance_mm": 0.2,
+        "source": "print_coupon --gap-only, 0.1 a side slid freely"
+      },
+      {
+        "kind": "press",
+        "from_mm": 0,
+        "allowance_mm": -0.05,
+        "source": "print_coupon press row: 0.025 a side held by hand and did not split"
+      }
+    ],
+    "layer_height_mm": 0.2,
+    "z_gap_mm": 0.4
+  },
+  "features": [
+    {
+      "type": "Cylinder",
+      "name": "Pin",
+      "id": 1,
+      "center": [
+        0,
+        0,
+        0
+      ],
+      "direction": [
+        0,
+        0,
+        1
+      ],
+      "radius": 4,
+      "height": 20
+    }
+  ]
+}

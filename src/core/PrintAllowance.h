@@ -32,11 +32,22 @@ namespace printfit {
 // PRINTED TOGETHER that must come apart (a print-in-place joint): its basic
 // is the inner surface's diameter, its model the outer's, and the allowance
 // is the whole diametral gap — what a print needs so the two do not fuse.
-enum class Printed { Hole, Shaft, InternalThread, ExternalThread, Gap };
+//
+// A Press is the other way round (docs/tolerances/README.md#press-allowance):
+// two parts printed APART and pressed together to stay -- a printed cap on a
+// printed pin. Its basic is the pin's MODELLED diameter, its model the
+// cap's bore, and the allowance the bore less the pin on the diameter:
+// negative is a bore modelled under its pin. Either sign is a press, since
+// FDM already prints a bore small and a pin large; the coupon's press row
+// says where this printer holds without splitting. Quoted a side as the
+// INTERFERENCE, -allowance / 2, as a gap is quoted a side.
+enum class Printed { Hole, Shaft, InternalThread, ExternalThread, Gap, Press };
+// Every kind, in display order: the one list the parser, the Settings
+// window's kind column and the names below are drawn from.
+[[nodiscard]] const std::vector<Printed>& AllPrinted();
 [[nodiscard]] std::string PrintedName(Printed kind);
-// "hole" | "shaft" | "internal_thread" | "external_thread" | "gap"; nullopt
-// otherwise
-// (the caller refuses naming PrintedNames()).
+// "hole" | "shaft" | "internal_thread" | "external_thread" | "gap" |
+// "press"; nullopt otherwise (the caller refuses naming PrintedNames()).
 [[nodiscard]] std::optional<Printed> PrintedFromName(const std::string& name);
 [[nodiscard]] const std::string& PrintedNames();
 
@@ -132,7 +143,7 @@ struct Process {
 // overlapping or out of order within its kind, or an allowance of the wrong
 // sign for its kind (a hole, internal thread or gap is opened, so not
 // negative -- and a gap of zero fuses; a shaft or external thread is not
-// positive).
+// positive; a press may be either).
 [[nodiscard]] std::string ValidateProfile(const Profile& p);
 
 // How a part's embedded profile stands against the user's store, by name.
@@ -163,7 +174,8 @@ ProfileFromBuiltin(const std::string& name, const std::string& process,
 [[nodiscard]] std::string Fingerprint(const Process& p);
 
 // The smallest clearance a side the table opens -- half its smallest gap
-// row, or, without one, half its smallest non-zero allowance; 0 for none.
+// row, or, without one, half its smallest non-zero allowance that is not a
+// press (an interference opens nothing); 0 for none.
 [[nodiscard]] double SmallestGapSideMm(const Table& t);
 // The chord deviation a printed part's STL is exported at: the profile's
 // stated one, else a tenth of the smallest gap a side (0 when the table has
@@ -177,6 +189,14 @@ struct Allowance {
   double allowanceMm = 0.0; // signed, on the diameter
   double modelMm = 0.0;     // basic + allowance: what to MODEL
   const Row* row = nullptr;
+  // A press asked of a profile with no press row of its own: a profile
+  // saved before the kind existed, or one whose coupon has not been pressed
+  // yet. It reads the BUILT-IN press row of its pair -- a default to confirm
+  // with the coupon's press row, said so in `row->source` -- rather than
+  // refusing every press on every profile there is (the way an unmeasured
+  // z_gap_mm falls back to whole layers, MinAirFrom). No other kind falls
+  // back: a profile states those from the start.
+  bool builtinFallback = false;
 };
 
 // What to model for a printed diameter of `basicMm`. Refused (nullopt, `why`

@@ -807,10 +807,7 @@ void DrawPrintProfileForm(AppState& state, int index) {
       ImGui::SetNextItemWidth(-FLT_MIN);
       if (ImGui::BeginCombo(id("kind").c_str(),
                             printfit::PrintedName(r.kind).c_str())) {
-        for (printfit::Printed k :
-             {printfit::Printed::Hole, printfit::Printed::Shaft,
-              printfit::Printed::InternalThread,
-              printfit::Printed::ExternalThread, printfit::Printed::Gap})
+        for (printfit::Printed k : printfit::AllPrinted())
           if (ImGui::Selectable(printfit::PrintedName(k).c_str(),
                                 k == r.kind)) {
             r.kind = k;
@@ -851,6 +848,11 @@ void DrawPrintProfileForm(AppState& state, int index) {
       if (r.kind == printfit::Printed::Gap)
         ImGui::SetItemTooltip("The whole diametral gap: %s mm a side",
                               units::FormatNumber(r.allowanceMm / 2.0).c_str());
+      if (r.kind == printfit::Printed::Press)
+        ImGui::SetItemTooltip(
+            "A cap's bore less the pin it is pressed on, on the diameter: "
+            "%s mm of interference a side as modelled",
+            units::FormatNumber(-r.allowanceMm / 2.0).c_str());
       ImGui::TableNextColumn();
       ImGui::TextDisabled("%s", r.source.empty() ? "-" : r.source.c_str());
       if (!r.source.empty())

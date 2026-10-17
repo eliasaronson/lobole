@@ -80,10 +80,7 @@ TEST_CASE("The PETG table says what to model for each kind of diameter",
   for (const printfit::Table& t : printfit::Tables()) {
     INFO(t.process << " " << t.material);
     CHECK(!t.conditions.empty());
-    for (printfit::Printed k :
-         {printfit::Printed::Hole, printfit::Printed::Shaft,
-          printfit::Printed::InternalThread, printfit::Printed::ExternalThread,
-          printfit::Printed::Gap}) {
+    for (printfit::Printed k : printfit::AllPrinted()) {
       INFO(printfit::PrintedName(k));
       double reach = 0.0;
       for (const printfit::Row& r : t.rows) {
@@ -420,6 +417,64 @@ struct TempDir {
 };
 
 } // namespace
+
+TEST_CASE("A press is a cap's bore less its pin, a default to confirm",
+          "[tolerances][print]") {
+  // docs/tolerances/README.md#press-allowance: the built-in row is a
+  // default, sourced and marked so; a profile's own row wins; a profile
+  // saved before the kind existed reads the built-in one and SAYS so.
+  CHECK(printfit::PrintedFromName("press") == printfit::Printed::Press);
+  CHECK(Contains(printfit::PrintedNames(), "press"));
+  std::string why;
+  auto a =
+      printfit::ForBasic({"fdm", "pla"}, printfit::Printed::Press, 3.0, &why);
+  REQUIRE(a);
+  CHECK(a->allowanceMm == Approx(0.0));
+  CHECK(a->modelMm == Approx(3.0));
+  CHECK_FALSE(a->builtinFallback);
+  CHECK(Contains(a->row->source, "DEFAULT to confirm"));
+  CHECK(Contains(a->row->source, "coupon"));
+
+  // A profile with no press row (one saved before there was one).
+  printfit::Profile old = K5();
+  std::erase_if(old.table.rows, [](const printfit::Row& r) {
+    return r.kind == printfit::Printed::Press;
+  });
+  a = printfit::ForBasic(printfit::FromProfile(old), printfit::Printed::Press,
+                         3.0, &why);
+  REQUIRE(a);
+  CHECK(a->builtinFallback);
+  CHECK(a->allowanceMm == Approx(0.0));
+  // No other kind falls back: a profile without a hole row refuses a hole.
+  printfit::Profile holeless = old;
+  std::erase_if(holeless.table.rows, [](const printfit::Row& r) {
+    return r.kind == printfit::Printed::Hole;
+  });
+  CHECK_FALSE(printfit::ForBasic(printfit::FromProfile(holeless),
+                                 printfit::Printed::Hole, 3.0, &why));
+
+  // Measured: 0.025 a side of interference held by hand and did not split.
+  printfit::Profile pressed = old;
+  pressed.table.rows.push_back(
+      {printfit::Printed::Press, 0.0, printfit::kAboveMm, -0.05, "coupon"});
+  CHECK(printfit::ValidateProfile(pressed).empty());
+  a = printfit::ForBasic(printfit::FromProfile(pressed),
+                         printfit::Printed::Press, 3.0, &why);
+  REQUIRE(a);
+  CHECK_FALSE(a->builtinFallback);
+  CHECK(a->modelMm == Approx(2.95));
+  // Either sign is a press (FDM closes a bore by itself); the row round-trips
+  // through the profile's file form.
+  pressed.table.rows.back().allowanceMm = 0.05;
+  CHECK(printfit::ValidateProfile(pressed).empty());
+  CHECK(DocumentIO::PrintProfileFromJson(
+            DocumentIO::PrintProfileToJson(pressed)) == pressed);
+  // An interference opens nothing: the smallest gap a side ignores it.
+  printfit::Table onlyPress;
+  onlyPress.rows.push_back(
+      {printfit::Printed::Press, 0.0, printfit::kAboveMm, -0.05, ""});
+  CHECK(printfit::SmallestGapSideMm(onlyPress) == 0.0);
+}
 
 TEST_CASE("A print profile round-trips through its file",
           "[tolerances][print][profile]") {

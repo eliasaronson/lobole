@@ -56,6 +56,17 @@ constexpr const char* kPetgGapSource =
     "and bonds to itself more than PLA, so it takes 0.3; not yet measured "
     "here, as the PLA row has been";
 
+constexpr const char* kPressSource =
+    "A DEFAULT to confirm with the coupon's press row: a printed pin pressed "
+    "into a printed bore is commonly modelled with the bore at the pin's "
+    "size, or up to 0.1 mm under it for a tight fit (Prusa knowledge base, "
+    "modelling tolerances; the 3D-printing press-fit guides agree within "
+    "that). FDM already prints a bore small and a pin large -- the hole and "
+    "shaft rows -- which is where the hold comes from at 0, and why a bore "
+    "modelled much under the pin splits a thin cap. Print print_coupon.py's "
+    "press row and keep the smallest step that holds by hand and does not "
+    "split (--record --press-side)";
+
 std::vector<Table> BuildTables() {
   std::vector<Table> out;
   Table petg;
@@ -71,6 +82,7 @@ std::vector<Table> BuildTables() {
       {Printed::InternalThread, 0.0, kAbove, 0.4, kInternalThreadSource},
       {Printed::ExternalThread, 0.0, kAbove, -0.1, kExternalThreadSource},
       {Printed::Gap, 0.0, kAbove, 0.6, kPetgGapSource},
+      {Printed::Press, 0.0, kAbove, 0.0, kPressSource},
   };
   Table pla;
   pla.process = "fdm";
@@ -82,6 +94,7 @@ std::vector<Table> BuildTables() {
       {Printed::InternalThread, 0.0, kAbove, 0.4, kInternalThreadSource},
       {Printed::ExternalThread, 0.0, kAbove, -0.1, kExternalThreadSource},
       {Printed::Gap, 0.0, kAbove, 0.5, kPlaGapSource},
+      {Printed::Press, 0.0, kAbove, 0.0, kPressSource},
   };
   out.push_back(std::move(petg));
   out.push_back(std::move(pla));
@@ -103,6 +116,13 @@ std::string Mm(double v) {
 
 } // namespace
 
+const std::vector<Printed>& AllPrinted() {
+  static const std::vector<Printed> k = {
+      Printed::Hole,           Printed::Shaft, Printed::InternalThread,
+      Printed::ExternalThread, Printed::Gap,   Printed::Press};
+  return k;
+}
+
 std::string PrintedName(Printed kind) {
   switch (kind) {
   case Printed::Hole:
@@ -115,21 +135,26 @@ std::string PrintedName(Printed kind) {
     return "external_thread";
   case Printed::Gap:
     return "gap";
+  case Printed::Press:
+    return "press";
   }
   return "hole";
 }
 
 std::optional<Printed> PrintedFromName(const std::string& name) {
-  for (Printed k : {Printed::Hole, Printed::Shaft, Printed::InternalThread,
-                    Printed::ExternalThread, Printed::Gap})
+  for (Printed k : AllPrinted())
     if (PrintedName(k) == name)
       return k;
   return std::nullopt;
 }
 
 const std::string& PrintedNames() {
-  static const std::string s =
-      "hole, shaft, internal_thread, external_thread, gap";
+  static const std::string s = [] {
+    std::string out;
+    for (Printed k : AllPrinted())
+      out += (out.empty() ? "" : ", ") + PrintedName(k);
+    return out;
+  }();
   return s;
 }
 
@@ -175,7 +200,9 @@ std::string ValidatePair(const std::string& process,
 }
 
 // Which way a kind's allowance may point: +1 opened (not negative), -1
-// closed (not positive), 2 strictly opened (a gap of zero fuses).
+// closed (not positive), 2 strictly opened (a gap of zero fuses), 0 either
+// way (a press: whether the bore is modelled under its pin or over it is
+// what the coupon measures, since the process already closes a bore).
 int SignOf(Printed kind) {
   switch (kind) {
   case Printed::Hole:
@@ -186,6 +213,8 @@ int SignOf(Printed kind) {
     return -1;
   case Printed::Gap:
     return 2;
+  case Printed::Press:
+    return 0;
   }
   return 1;
 }
@@ -408,6 +437,8 @@ double SmallestGapSideMm(const Table& t) {
     const double a = std::abs(r.allowanceMm);
     if (!(a > 0.0))
       continue;
+    if (r.kind == Printed::Press)
+      continue; // an interference opens nothing
     if (r.kind == Printed::Gap)
       gap = gap > 0.0 ? std::min(gap, a) : a;
     any = any > 0.0 ? std::min(any, a) : a;
@@ -430,6 +461,17 @@ std::optional<Allowance> ForBasic(const Process& p, Printed kind,
       *why = Validate(p);
     return std::nullopt;
   }
+  // A profile with no press row reads its pair's built-in one, and says so
+  // (Allowance::builtinFallback).
+  if (kind == Printed::Press && p.profile &&
+      std::none_of(t->rows.begin(), t->rows.end(),
+                   [](const Row& r) { return r.kind == Printed::Press; }))
+    if (const Table* builtin = FindBuiltin(p.process, p.material)) {
+      auto a = ForBasic(*builtin, Label(p), kind, basicMm, why);
+      if (a)
+        a->builtinFallback = true;
+      return a;
+    }
   return ForBasic(*t, Label(p), kind, basicMm, why);
 }
 

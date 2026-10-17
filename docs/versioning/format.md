@@ -304,6 +304,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A print profile row's `kind` may be `press`: a printed cap pressed onto a printed pin, its `allowance_mm` the cap's bore less the pin on the diameter, either sign ([press allowance](../tolerances/README.md#press-allowance)). No new field; an older build refuses such a part by its version rather than by the row. A profile without a press row reads the built-in default of its pair. Golden `vNEXT-press-allowance` |
 
 ## The directory form
 

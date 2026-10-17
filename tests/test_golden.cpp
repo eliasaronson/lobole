@@ -1116,6 +1116,17 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       // measurement.
       CHECK(pr.layerHeightMm == pe.value("layer_height_mm", 0.0));
       CHECK(pr.zGapMm == pe.value("z_gap_mm", 0.0));
+      // vNEXT: a press row (docs/tolerances/README.md#press-allowance).
+      // Dropped, a cap would be modelled at the built-in default instead of
+      // what the coupon's press row measured.
+      if (pe.contains("press_allowance_mm")) {
+        const auto press = printfit::ForBasic(
+            *doc.PrintProcess(), printfit::Printed::Press, 3.0, nullptr);
+        REQUIRE(press);
+        CHECK_FALSE(press->builtinFallback);
+        CHECK_THAT(press->allowanceMm,
+                   WithinRel(pe.at("press_allowance_mm").get<double>(), 1e-12));
+      }
     } else {
       CHECK_FALSE(doc.PrintProcess()->profile.has_value());
     }
