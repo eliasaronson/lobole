@@ -1116,7 +1116,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       // measurement.
       CHECK(pr.layerHeightMm == pe.value("layer_height_mm", 0.0));
       CHECK(pr.zGapMm == pe.value("z_gap_mm", 0.0));
-      // vNEXT: a press row (docs/tolerances/README.md#press-allowance).
+      // v178: a press row (docs/tolerances/README.md#press-allowance).
       // Dropped, a cap would be modelled at the built-in default instead of
       // what the coupon's press row measured.
       if (pe.contains("press_allowance_mm")) {

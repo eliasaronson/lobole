@@ -295,6 +295,7 @@ here; the golden corpus and git history cover them.
 | 175 | A print profile's `layer_height_mm` (the slicer preset's layer) and `z_gap_mm` (whole layers of `layer_height_mm`; first defined as the gap between two parts printed one over the other, since read, with no format change, as the vertical air a face needs over another part), each omitted when not stated — in the profile store and in a printed part's embedded copy. A Z gap without a layer height, or not whole layers of it, is refused, naming the two nearest that are; a value that is not a number is refused on load. An older build reads the copy without them, so a print-in-place generator falls back on its rule ([print profiles](../tolerances/README.md#print-profiles)). Golden `v175-print-z-gap` |
 | 176 | A piece of a face or edge one operation split is named by the faces only it touches, `<name>;M<tag>[a\|b]` (an ordinal `.<i>` only where nothing tells pieces apart), not by its position `<name>;M<tag>.<i>`; every reference saved after this holds such names. No migration: a saved `.<i>` name resolves to the piece it named, in result order, and the regeneration warns that it is by position ([split pieces](../modeling/toponaming.md#split-pieces)). Golden `v176-split-piece-names` |
 | 177 | A sketch constraint's `driven` (true: a driven, or reference, dimension; omitted when false). It adds no equation to the solve and has no input: its `value` is written as what the geometry measures and is not read back as an input. `driven` on a kind that is not a dimension (`distance`, `distance_x`, `distance_y`, `distance_pl`, `radius`, `diameter`, `angle`), on one with an `expr`, or that is not a boolean is refused on load. An older build reads a driven dimension as driving, an equation the sketch may not meet ([constraints](../sketching/README.md#constraints)). Golden `v177-driven-dimension` |
+| 178 | A print profile row's `kind` may be `press`: a printed cap pressed onto a printed pin, its `allowance_mm` the cap's bore less the pin on the diameter, either sign ([press allowance](../tolerances/README.md#press-allowance)). No new field; an older build refuses such a part by its version rather than by the row. A profile without a press row reads the built-in default of its pair. Golden `v178-press-allowance` |
 
 ## Pending changes
 
@@ -304,7 +305,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A print profile row's `kind` may be `press`: a printed cap pressed onto a printed pin, its `allowance_mm` the cap's bore less the pin on the diameter, either sign ([press allowance](../tolerances/README.md#press-allowance)). No new field; an older build refuses such a part by its version rather than by the row. A profile without a press row reads the built-in default of its pair. Golden `vNEXT-press-allowance` |
 
 ## The directory form
 

@@ -416,7 +416,7 @@ rows are the built-in PLA rows.
 
 A **press** is the other way round from a gap: two parts printed APART and
 pressed together to stay, such as a printed cap on a printed pin
-(`printfit::Printed::Press`, vNEXT). Its size is the pin's modelled
+(`printfit::Printed::Press`, v178). Its size is the pin's modelled
 diameter, its model the cap's bore, and the allowance the bore less the
 pin on the diameter. It is quoted a side as the INTERFERENCE, minus half
 the allowance. Either sign is a press, because FDM already prints a bore
@@ -703,7 +703,7 @@ clearance hole, and the layer height and Z gap round-tripped and refused
 off whole layers; "A press is a cap's bore less its pin", the built-in
 default, a profile without a press row reading it and saying so, a
 measured one), goldens `v169-print-profile`, `v175-print-z-gap` and
-`vNEXT-press-allowance`,
+`v178-press-allowance`,
 `tests/print_allowance_smoke.py` (check_fit, check_fits and a Thread on a
 printed part, and the advised custom thread printing the right major; the
 profile store's RPCs and refusals, a disc in a hole exported at the
