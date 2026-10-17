@@ -127,7 +127,9 @@ std::string RelationTail(const Relation& r) {
     if (r.intermittent.slots > 0)
       std::snprintf(buf, sizeof(buf), "geneva %d", r.intermittent.slots);
     else
-      std::snprintf(buf, sizeof(buf), "step %.4g", r.intermittent.step);
+      std::snprintf(buf, sizeof(buf), "%s %.4g",
+                    r.intermittent.table.empty() ? "step" : "table step",
+                    r.intermittent.step);
     return buf;
   }
   return DocumentIO::RelationKindToString(r.kind);
@@ -214,6 +216,9 @@ void DrawRelationsSection(AppState& state) {
                     r.dofB == MateDof::Rotation ? " deg" : " mm", im.periodDeg,
                     im.durationDeg, im.startDeg);
       tip = buf;
+      if (!im.table.empty())
+        tip += ", following a table of " + std::to_string(im.table.size()) +
+               " points";
     } else {
       char buf[256];
       std::snprintf(buf, sizeof(buf), "%s drives %s, ratio %.5g, phase %.5g",

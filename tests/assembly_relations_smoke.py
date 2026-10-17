@@ -393,8 +393,23 @@ def main():
         before = len(d.call("list_relations")["relations"])
         refused(d, "add_relation", "start_deg", type="intermittent", a=u,
                 b=t, motion="geneva", slots=3)
-        refused(d, "add_relation", "uniform or geneva", type="intermittent",
-                a=u, b=t, motion="genva", slots=3, start_deg=0)
+        refused(d, "add_relation", "uniform, geneva or table",
+                type="intermittent", a=u, b=t, motion="genva", slots=3,
+                start_deg=0)
+        # A table law: refused unless it is one, and only under its motion.
+        refused(d, "add_relation", "needs its table", type="intermittent",
+                a=u, b=t, motion="table", start_deg=0, step_deg=36,
+                duration_deg=30)
+        refused(d, "add_relation", "monotone", type="intermittent", a=u,
+                b=t, motion="table", start_deg=0, step_deg=36,
+                duration_deg=30, table=[[0, 0], [0.5, 0.6], [0.7, 0.4],
+                                        [1, 1]])
+        refused(d, "add_relation", "ends at (1, 1)", type="intermittent",
+                a=u, b=t, motion="table", start_deg=0, step_deg=36,
+                duration_deg=30, table=[[0, 0], [1, 0.9]])
+        refused(d, "add_relation", "table motion's", type="intermittent",
+                a=u, b=t, start_deg=0, step_deg=36, duration_deg=30,
+                table=[[0, 0], [1, 1]])
         refused(d, "add_relation", "slots alone", type="intermittent", a=u,
                 b=t, motion="geneva", slots=3, start_deg=0, step_deg=-120)
         refused(d, "add_relation", "at least 3", type="intermittent", a=u,

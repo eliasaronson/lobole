@@ -310,6 +310,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | An intermittent relation's `motion` may be `table`, with `table`: the law over the window as `[driver fraction, step fraction]` points from `[0, 0]` to `[1, 1]`, the driver's rising and the step's never falling, linear between them. A table that is not such a law, a `table` motion without one and a `table` under another motion are refused on load; an older build refuses the motion by name ([intermittent](../assemblies/relations.md#intermittent)). Golden `assembly/vNEXT-intermittent-table` |
 
 ## The directory form
 

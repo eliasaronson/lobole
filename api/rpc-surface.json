@@ -28,7 +28,7 @@
   "add_part": ["name"],
   "add_reference_image": ["at", "opacity", "origin", "path", "rotation", "rotation_deg", "show_always", "sketch_id", "units_per_pixel"],
   "add_refinement": ["face", "occurrence", "size", "study"],
-  "add_relation": ["a", "a_path", "b", "b_path", "carrier", "constant", "dof_b", "drives", "duration_deg", "hand", "internal", "lead", "lift", "motion", "name", "period_deg", "phase", "pitch", "pitch_radius", "planet", "planets", "ratio", "ride_deg", "ride_dof", "ride_mate", "ride_mm", "ring", "rise", "rise_deg", "slots", "start_deg", "starts", "step_deg", "step_mm", "sun", "teeth", "teeth_a", "teeth_b", "teeth_planet", "teeth_ring", "teeth_sun", "terms", "thread_feature", "thread_part", "type"],
+  "add_relation": ["a", "a_path", "b", "b_path", "carrier", "constant", "dof_b", "drives", "duration_deg", "hand", "internal", "lead", "lift", "motion", "name", "period_deg", "phase", "pitch", "pitch_radius", "planet", "planets", "ratio", "ride_deg", "ride_dof", "ride_mate", "ride_mm", "ring", "rise", "rise_deg", "slots", "start_deg", "starts", "step_deg", "step_mm", "sun", "table", "teeth", "teeth_a", "teeth_b", "teeth_planet", "teeth_ring", "teeth_sun", "terms", "thread_feature", "thread_part", "type"],
   "add_requirement": ["bound", "measure", "name", "source"],
   "add_retaining_ring": ["orientation", "position", "size", "standard"],
   "add_section": ["base_plane", "id", "offset", "plane_id", "reverse", "tilt_u", "tilt_v", "visible"],

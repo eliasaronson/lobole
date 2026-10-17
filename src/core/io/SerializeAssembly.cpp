@@ -500,9 +500,10 @@ int FreewheelDrivesFromString(const std::string& s) {
 }
 
 int IntermittentSlotsFor(const std::string& motion, int slots) {
-  if (motion == "uniform") {
+  if (motion == "uniform" || motion == "table") {
     if (slots != 0)
-      throw std::runtime_error("slots is a Geneva's; a uniform step has none");
+      throw std::runtime_error("slots is a Geneva's; a " + motion +
+                               " step has none");
     return 0;
   }
   if (motion == "geneva") {
@@ -511,13 +512,42 @@ int IntermittentSlotsFor(const std::string& motion, int slots) {
     return slots;
   }
   throw std::runtime_error("unknown intermittent motion '" + motion +
-                           "' (expected uniform or geneva)");
+                           "' (expected uniform, geneva or table)");
+}
+
+std::vector<std::pair<double, double>>
+IntermittentTableFromJson(const json& j) {
+  std::vector<std::pair<double, double>> out;
+  if (!j.is_array())
+    throw std::runtime_error("an intermittent table is an array of "
+                             "[driver fraction, step fraction] points");
+  for (const json& pt : j) {
+    if (!pt.is_array() || pt.size() != 2 || !pt[0].is_number() ||
+        !pt[1].is_number())
+      throw std::runtime_error("an intermittent table's point is "
+                               "[driver fraction, step fraction]: " +
+                               pt.dump());
+    out.emplace_back(pt[0].get<double>(), pt[1].get<double>());
+  }
+  if (const std::string why = IntermittentTableError(out); !why.empty())
+    throw std::runtime_error(why);
+  return out;
 }
 
 namespace {
 int IntermittentMotionFromJson(const json& j) {
   return IntermittentSlotsFor(j.at("motion").get<std::string>(),
                               j.value("slots", 0));
+}
+// A table motion's points (vNEXT); a table under any other motion is
+// refused rather than dropped.
+std::vector<std::pair<double, double>> IntermittentTableOf(const json& j) {
+  const bool table = j.at("motion").get<std::string>() == "table";
+  if (table != j.contains("table"))
+    throw std::runtime_error(table ? "a table motion needs its `table`"
+                                   : "`table` is a table motion's");
+  return table ? IntermittentTableFromJson(j.at("table"))
+               : std::vector<std::pair<double, double>>{};
 }
 } // namespace
 
@@ -591,9 +621,17 @@ json RelationToJson(const Relation& r) {
     j["period_deg"] = im.periodDeg;
     j["start_deg"] = im.startDeg;
     j["duration_deg"] = im.durationDeg;
-    j["motion"] = im.slots > 0 ? "geneva" : "uniform";
+    j["motion"] = im.slots > 0        ? "geneva"
+                  : !im.table.empty() ? "table"
+                                      : "uniform";
     if (im.slots > 0)
       j["slots"] = im.slots;
+    if (!im.table.empty()) { // vNEXT
+      json t = json::array();
+      for (const auto& [f, st] : im.table)
+        t.push_back({f, st});
+      j["table"] = std::move(t);
+    }
   }
   if (r.kind == RelationKind::Freewheel || r.kind == RelationKind::Click) {
     j["drives"] = FreewheelDrivesToString(r.drives); // v104, click v105
@@ -787,6 +825,7 @@ Relation RelationFromJson(const json& j) {
     im.startDeg = j.at("start_deg").get<double>();
     im.durationDeg = j.at("duration_deg").get<double>();
     im.slots = IntermittentMotionFromJson(j);
+    im.table = IntermittentTableOf(j);
   }
   if (r.kind == RelationKind::Freewheel ||
       r.kind == RelationKind::Click) { // v104: the direction is required

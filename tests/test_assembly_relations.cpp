@@ -2016,8 +2016,9 @@ TEST_CASE("An intermittent relation round-trips, refuses what it does not "
   // An unknown motion is refused naming both; a Geneva needs three slots.
   nlohmann::json bad = DocumentIO::RelationToJson(gb);
   bad["motion"] = "genva";
-  CHECK_THROWS_WITH(DocumentIO::RelationFromJson(bad),
-                    Catch::Matchers::ContainsSubstring("uniform or geneva"));
+  CHECK_THROWS_WITH(
+      DocumentIO::RelationFromJson(bad),
+      Catch::Matchers::ContainsSubstring("uniform, geneva or table"));
   bad["motion"] = "geneva";
   bad["slots"] = 2;
   CHECK_THROWS(DocumentIO::RelationFromJson(bad));
@@ -2033,6 +2034,79 @@ TEST_CASE("An intermittent relation round-trips, refuses what it does not "
       "tests/golden/assembly/v174-intermittent-relation.json";
   auto gd = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(gd.has_value());
+  assembly::Solve(**gd, NoParts());
+  for (const Relation& rel : (*gd)->GetRelations())
+    CHECK(rel.error.empty());
+  CHECK_THAT(Deg((*gd)->FindMateById(6)->rotation), WithinAbs(1200.0, 1e-6));
+  CHECK_THAT(Deg((*gd)->FindMateById(7)->rotation), WithinAbs(-360.0, 1e-6));
+}
+
+TEST_CASE("A table law follows its points, and a table that is not a law is "
+          "refused",
+          "[assembly][relations][intermittent]") {
+  Relation r;
+  r.kind = RelationKind::Intermittent;
+  r.dofA = r.dofB = MateDof::Rotation;
+  r.intermittent.step = 36.0;
+  r.intermittent.durationDeg = 36.0;
+  r.intermittent.table = {{0.0, 0.0}, {0.5, 0.2}, {1.0, 1.0}};
+  const auto at = [&](double deg) {
+    return Deg(IntermittentValue(r, Rad(deg)));
+  };
+  // Linear between the points: a fifth of the step at half the window,
+  // the rest in the second half; whole steps outside it, as any carry.
+  CHECK_THAT(at(9.0), WithinAbs(3.6, 1e-9));
+  CHECK_THAT(at(18.0), WithinAbs(7.2, 1e-9));
+  CHECK_THAT(at(27.0), WithinAbs(21.6, 1e-9));
+  CHECK_THAT(at(36.0), WithinAbs(36.0, 1e-9));
+  CHECK_THAT(at(200.0), WithinAbs(36.0, 1e-9));
+  CHECK_THAT(at(360.0 + 9.0), WithinAbs(39.6, 1e-9));
+
+  using T = std::vector<std::pair<double, double>>;
+  CHECK(IntermittentTableError(r.intermittent.table).empty());
+  CHECK_THAT(IntermittentTableError(T{{0, 0}}),
+             Catch::Matchers::ContainsSubstring("two"));
+  CHECK_THAT(IntermittentTableError(T{{0, 0}, {0.5, 0.6}, {1, 0.9}}),
+             Catch::Matchers::ContainsSubstring("ends at (1, 1)"));
+  CHECK_THAT(IntermittentTableError(T{{0.1, 0}, {1, 1}}),
+             Catch::Matchers::ContainsSubstring("starts at (0, 0)"));
+  CHECK_THAT(IntermittentTableError(T{{0, 0}, {0.5, 0.6}, {0.7, 0.4}, {1, 1}}),
+             Catch::Matchers::ContainsSubstring("monotone"));
+  CHECK_THAT(IntermittentTableError(T{{0, 0}, {0.5, 0.2}, {0.5, 0.4}, {1, 1}}),
+             Catch::Matchers::ContainsSubstring("rise"));
+
+  // The file: written as motion table with its points, read back; a table
+  // that is not a law, a table motion without one and a table under
+  // another motion are refused on load.
+  r.mateA = 1;
+  r.mateB = 2;
+  r.ratio = 1.0;
+  const nlohmann::json j = DocumentIO::RelationToJson(r);
+  CHECK(j.at("motion") == "table");
+  const Relation back = DocumentIO::RelationFromJson(j);
+  CHECK(back.intermittent.table == r.intermittent.table);
+  CHECK(back.intermittent.slots == 0);
+  nlohmann::json bad = j;
+  bad["table"] = {{0, 0}, {0.6, 0.5}, {0.4, 0.7}, {1, 1}};
+  CHECK_THROWS_WITH(DocumentIO::RelationFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("rise"));
+  bad = j;
+  bad.erase("table");
+  CHECK_THROWS_WITH(DocumentIO::RelationFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("needs its `table`"));
+  bad = j;
+  bad["motion"] = "uniform";
+  CHECK_THROWS_WITH(DocumentIO::RelationFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("table motion's"));
+
+  // The golden: the v174 carry, its law a table, counts the same digits.
+  const fs::path golden = fs::path(TestSourceDir()) /
+                          "tests/golden/assembly/vNEXT-intermittent-table.json";
+  auto gd = DocumentIO::LoadAssembly(golden.string());
+  REQUIRE(gd.has_value());
+  const Relation& carry = (*gd)->GetRelations()[0];
+  REQUIRE(carry.intermittent.table.size() == 4);
+  CHECK_THAT(IntermittentLaw(carry.intermittent, 0.5), WithinAbs(0.5, 1e-12));
   assembly::Solve(**gd, NoParts());
   for (const Relation& rel : (*gd)->GetRelations())
     CHECK(rel.error.empty());

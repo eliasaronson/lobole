@@ -319,8 +319,16 @@ motion law:
   a motion study's clash check on a real Geneva checks the shapes, not a
   guess at their motion (`tests/test_assembly_relations.cpp`, "A Geneva's
   law is the pin in its slot").
+- `table` — any law a follower keeps to its driver's face by, given as
+  points: `{table: [[driver, step], ...]}` beside a uniform step's keys,
+  both fractions (of the window and of the step), s linear between them.
+  It runs from `[0, 0]` to `[1, 1]`, the driver's fractions rising and the
+  step's never falling; a table that is not that is refused, naming the
+  point, and so is a `table` under another motion. An escape wheel turned
+  by a pallet's impulse face is one: [generators/clock](../../generators/clock/README.md)
+  derives the table from the face it follows.
 
-`start_deg`, where a's window opens, is required for both: the timing is
+`start_deg`, where a's window opens, is required for all three: the timing is
 the whole of a carry, and no default would be the right one. `phase`
 defaults to where b stands, so adding a carry moves nothing. A cylindrical
 b names `dof_b`; a Geneva's b turns.

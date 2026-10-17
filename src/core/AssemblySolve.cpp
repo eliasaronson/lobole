@@ -1245,6 +1245,11 @@ int PropagateRelations(AssemblyDocument& asmDoc, uint64_t drivenMateId,
         r.error = "a Geneva has at least 3 slots and its wheel turns";
         continue;
       }
+      if (!im.table.empty())
+        if (std::string why = IntermittentTableError(im.table); !why.empty()) {
+          r.error = std::move(why);
+          continue;
+        }
     }
     usable[i] = true;
   }

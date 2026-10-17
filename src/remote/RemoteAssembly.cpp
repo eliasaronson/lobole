@@ -273,9 +273,14 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "start_deg and s the window's progress, 0 to 1 "
      "(docs/assemblies/relations.md#intermittent). {start_deg (required: "
      "the angle of a where each window opens), motion?: uniform (default; s "
-     "linear, a gear-driven step) | geneva}. Uniform takes {step_deg (a "
-     "turning b) | step_mm (a sliding b), signed, duration_deg (the window), "
-     "period_deg? (default 360)}; GENEVA takes {slots} (3 or more) and "
+     "linear, a gear-driven step) | table | geneva}. Uniform takes {step_deg "
+     "(a turning b) | step_mm (a sliding b), signed, duration_deg (the "
+     "window), period_deg? (default 360)}; TABLE takes the same and {table: "
+     "[[driver, step], ...]}, both FRACTIONS of the window and of the step "
+     "(unitless), s linear between the points: from [0, 0] to [1, 1], the "
+     "driver's rising and the step's never falling, else refused naming the "
+     "point — a follower that keeps to its driver's face, as an escape "
+     "wheel to a pallet's impulse face; GENEVA takes {slots} (3 or more) and "
      "derives the rest from it — step -360/slots (an external Geneva "
      "counter-rotates), window 180 - 360/slots, once a turn — with s the "
      "exact Geneva law, the pin entering and leaving the slot radially; "
@@ -321,8 +326,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "dof_b, drives, duration_deg, hand, internal, lead, "
      "lift, motion, name, period_deg, planet, planets, ride_deg, ride_dof, "
      "ride_mate, ride_mm, "
-     "ring, slots, step_deg, step_mm, sun, teeth, teeth_planet, teeth_ring, "
-     "teeth_sun, terms, "
+     "ring, slots, step_deg, step_mm, sun, table, teeth, teeth_planet, "
+     "teeth_ring, teeth_sun, terms, "
      "phase, pitch, pitch_radius, ratio, "
      "rise, rise_deg, start_deg, starts, teeth_a, teeth_b, type"},
     {"set_relation",
@@ -344,7 +349,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "of mate_a/mate_b/ratio/phase, and `held` names a member the last "
      "solve held where it stood because nothing drove it. An intermittent "
      "relation lists its step (b's unit, degrees for a turn), period_deg, "
-     "start_deg, duration_deg, motion and, for a Geneva, slots. A freewheel "
+     "start_deg, duration_deg, motion and, for a Geneva, slots, for a table "
+     "its table (fractions of the window and the step). A freewheel "
      "with teeth lists its `teeth`.",
      "", remote::NoFlags,
      "relations:{dof_a?:string, dof_b?:string, id:int, kind:string, "
@@ -354,6 +360,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "lead?:number, constant?:number, held?:string, terms?:object[], "
      "duration_deg?:number, error?:string, motion?:string, "
      "period_deg?:number, slots?:int, start_deg?:number, step?:number, "
+     "table?:number[][], "
      "mate_b_path?:int[], mate_a_path?:int[], internal?:bool, "
      "lift?:any, ride?:any, teeth?:int}[]"},
     {"select_mate", "Select a mate in the UI.", "id"},
@@ -2404,7 +2411,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       // per period of a's turn, during a window, and stands still between.
       // `motion` is the law over the window; a Geneva's step and window
       // follow from its slots, so giving them too is refused.
-      // rpc-params: motion, slots, step_deg, step_mm, period_deg
+      // rpc-params: motion, slots, step_deg, step_mm, period_deg, table
       r.dofA = MateDof::Rotation;
       if (p.contains("ratio"))
         throw std::runtime_error(
@@ -2428,8 +2435,17 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
             "from itself");
       const bool turns = r.dofB == MateDof::Rotation;
       Relation::Intermittent& im = r.intermittent;
-      im.slots = DocumentIO::IntermittentSlotsFor(
-          p.value("motion", std::string("uniform")), p.value("slots", 0));
+      const std::string motion = p.value("motion", std::string("uniform"));
+      im.slots = DocumentIO::IntermittentSlotsFor(motion, p.value("slots", 0));
+      if ((motion == "table") != p.contains("table"))
+        throw std::runtime_error(
+            motion == "table"
+                ? "a table motion needs its table: [[driver, step], ...], "
+                  "fractions of the window and of the step, from [0, 0] to "
+                  "[1, 1]"
+                : "table is a table motion's (motion: table)");
+      if (motion == "table")
+        im.table = DocumentIO::IntermittentTableFromJson(p.at("table"));
       if (!p.contains("start_deg"))
         throw std::runtime_error(
             "an intermittent relation needs start_deg, the angle of a where "

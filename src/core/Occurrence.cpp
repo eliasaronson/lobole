@@ -237,8 +237,46 @@ double CamLift(const std::vector<std::pair<double, double>>& table,
   return CamAt(table, angles::ToDegrees(angleRad), slopeOut);
 }
 
+std::string
+IntermittentTableError(const std::vector<std::pair<double, double>>& table) {
+  if (table.size() < 2)
+    return "a table law needs at least two (driver, step) points";
+  for (const auto& [f, s] : table)
+    if (!std::isfinite(f) || !std::isfinite(s))
+      return "a table law's points are numbers";
+  if (table.front() != std::pair{0.0, 0.0})
+    return "a table law starts at (0, 0): the window opens where the last "
+           "step ended";
+  if (table.back() != std::pair{1.0, 1.0})
+    return "a table law ends at (1, 1): the whole step, at the window's end";
+  for (size_t k = 1; k < table.size(); k++) {
+    if (!(table[k].first > table[k - 1].first))
+      return "a table law's driver fractions rise, each past the last (point " +
+             std::to_string(k) + " does not)";
+    if (table[k].second < table[k - 1].second)
+      return "a table law is monotone: its step fraction never falls (point " +
+             std::to_string(k) + " does)";
+  }
+  return {};
+}
+
 double IntermittentLaw(const Relation::Intermittent& i, double t) {
   t = std::clamp(t, 0.0, 1.0);
+  if (!i.table.empty()) {
+    // The table, linear between its points (checked monotone from (0, 0)
+    // to (1, 1) wherever one is made).
+    const auto& tb = i.table;
+    auto hi = std::lower_bound(tb.begin(), tb.end(), t,
+                               [](const std::pair<double, double>& p,
+                                  double v) { return p.first < v; });
+    if (hi == tb.begin())
+      return tb.front().second;
+    if (hi == tb.end())
+      return tb.back().second;
+    const auto lo = hi - 1;
+    const double w = (t - lo->first) / (hi->first - lo->first);
+    return lo->second + w * (hi->second - lo->second);
+  }
   if (i.slots <= 0)
     return t; // uniform: a gear-driven step
   // An external Geneva of N slots: the pin, at R = C sin(pi/N) from the

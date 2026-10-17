@@ -415,13 +415,17 @@ struct Relation {
   // external Geneva's exact law over the window (step -360/slots, window
   // 180 - 360/slots, both derived); 0 is a uniform step, a gear-driven
   // carry. A pure function of a — the count is in a's turns, so nothing
-  // here is history.
+  // here is history. `table` (vNEXT), when not empty, is the law over the
+  // window as (driver fraction, step fraction) points from (0, 0) to
+  // (1, 1), both monotone, linear between them: a follower that keeps to
+  // a driver's face, as an escape wheel to its pallet's impulse face.
   struct Intermittent {
     double step = 0.0;
     double periodDeg = 360.0;
     double startDeg = 0.0;
     double durationDeg = 0.0;
     int slots = 0;
+    std::vector<std::pair<double, double>> table;
   } intermittent;
   bool HasTerms() const {
     return kind == RelationKind::LinearN || kind == RelationKind::Epicyclic ||
@@ -443,6 +447,11 @@ struct Relation {
 // (docs/assemblies/relations.md#intermittent). `IntermittentLaw` is the
 // window's 0..1 progress at fraction t of it.
 double IntermittentLaw(const Relation::Intermittent& i, double t);
+// Why `table` is not an intermittent law (empty when it is): at least two
+// points, from (0, 0) to (1, 1), the driver's fractions rising and the
+// step's never falling.
+std::string
+IntermittentTableError(const std::vector<std::pair<double, double>>& table);
 double IntermittentValue(const Relation& r, double aRad);
 
 // The lift a cam profile gives at `angleRad`, and its slope (mm per radian).
