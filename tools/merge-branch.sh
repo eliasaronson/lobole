@@ -7,12 +7,18 @@
 #   tools/merge-branch.sh BRANCH            # test-fast after the build
 #   tools/merge-branch.sh BRANCH --full     # the headless suite, the big
 #                                           # generators and the GUI suite
+#   tools/merge-branch.sh BRANCH --pick-only  # pick and number, then stop:
+#                                           # no build, no suite, no removal
 #
 # The cherry-pick happens under build/'s lock, held exclusively
 # (tools/build-lock.sh), so it never lands while a build of this tree is
 # compiling or a suite (tools/ctest, the GUI runner) runs from it. A conflict
 # stops here with the cherry-pick in progress, for a person to resolve; `git cherry-pick
 # --continue` and then this script again with --no-pick finishes the rest.
+# A conflict ONLY in the files made from the MethodDoc rows
+# (python/lobole/rpc.py, api/rpc-surface.json) is not one: two branches that
+# each add an RPC both regenerate them, the rows themselves merge, and the
+# files are made again from the merged rows and the pick goes on.
 # The worktree is removed only when every commit is on main and it holds
 # nothing uncommitted -- `git worktree remove` refuses trees with submodules,
 # so it is rm -rf, which is why both are checked (CLAUDE.md).
@@ -23,12 +29,13 @@
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$root"
-branch="" full=0 pick=1
+branch="" full=0 pick=1 pick_only=0
 for a in "$@"; do
   case "$a" in
     --full) full=1 ;;
     --no-pick) pick=0 ;;
-    -h|--help) sed -n '2,21p' "$0"; exit 0 ;;
+    --pick-only) pick_only=1 ;;
+    -h|--help) sed -n '2,28p' "$0"; exit 0 ;;
     *) branch="$a" ;;
   esac
 done
@@ -42,6 +49,37 @@ fi
 wt="$(git worktree list --porcelain | awk -v b="refs/heads/$branch" '/^worktree /{w=$2} $0=="branch "b{print w}')"
 state="$(git rev-parse --git-dir)/merge-branch"
 base_file="$state/$branch.base"
+
+# The files made from the MethodDoc rows. A pick that conflicts in these
+# alone has them made again from the merged rows (which conflicted nowhere)
+# and goes on; anything else is a person's to resolve. Returns non-zero when
+# the conflict is not only theirs, or remaking them fails.
+generated="python/lobole/rpc.py api/rpc-surface.json"
+remake_generated() {
+  local unmerged f
+  unmerged="$(git diff --name-only --diff-filter=U)"
+  [ -n "$unmerged" ] || return 1
+  for f in $unmerged; do
+    case " $generated " in *" $f "*) ;; *) return 1 ;; esac
+  done
+  echo "merge-branch: $(echo $unmerged) conflicted alone: made again from the rows"
+  # Main's side first: the snapshot's own fields (released, its version)
+  # are read before it is rewritten, and a file full of markers reads as
+  # nothing.
+  # shellcheck disable=SC2086
+  git checkout --ours -- $unmerged &&
+    python3 "$root/tools/generate_rpc_contracts.py" >/dev/null &&
+    python3 "$root/tests/api_surface_gate.py" --update >/dev/null || return 1
+  # shellcheck disable=SC2086
+  git add -- $generated
+  # Either may stop on the next commit's conflict: the caller looks again.
+  if git diff --cached --quiet; then
+    # Made again, the commit changes nothing main does not already have.
+    git cherry-pick --skip || true
+  else
+    GIT_EDITOR=true git cherry-pick --continue || true
+  fi
+}
 
 # The branch's vNEXT format bumps get main's next numbers, in one commit; then
 # nothing may be pending. Run under build/'s lock, before the build.
@@ -78,8 +116,14 @@ if [ "$pick" = 1 ]; then
     git rev-parse HEAD > "$base_file"
     # shellcheck disable=SC2086
     if ! git cherry-pick $commits; then
-      echo "merge-branch: CONFLICT. Resolve, 'git cherry-pick --continue', then: $0 $branch --no-pick" >&2
-      exit 1
+      # Each later commit may stop on the generated files again.
+      while [ -e "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] &&
+            remake_generated; do :; done
+      if [ -e "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ] ||
+         [ -e "$(git rev-parse --git-path sequencer)" ]; then
+        echo "merge-branch: CONFLICT. Resolve, 'git cherry-pick --continue', then: $0 $branch --no-pick" >&2
+        exit 1
+      fi
     fi
     number_format
     exec 9>&-
@@ -91,6 +135,11 @@ elif [ -f "$base_file" ]; then
   build_lock_exclusive "$root/build" 9
   number_format
   exec 9>&-
+fi
+
+if [ "$pick_only" = 1 ]; then
+  echo "merge-branch: picked (--pick-only): not built, not tested, $branch kept"
+  exit 0
 fi
 
 "$root/tools/build.sh"
