@@ -16,7 +16,8 @@
 #     script PICKS one and prints the command. It used to say "pass a distinct
 #     one per worktree" — a value a human had to hold, in a repo that
 #     everywhere else refuses to let one (tools/scratch_port.py asks the
-#     kernel, the announced instances and the ports other worktrees claimed,
+#     kernel, the announced instances, the port claims running instances
+#     hold in /tmp/lobole-ports-<uid> and the ports other worktrees claimed,
 #     claims this one's, and never hands out 8799).
 #   - Integration is SERIAL: each worktree branch merges to main one at a time
 #     with full suites between merges. Parallel *implementation*, sequential

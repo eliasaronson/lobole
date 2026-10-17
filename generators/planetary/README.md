@@ -8,8 +8,12 @@ support; rolling bearers above the teeth hold the centre distances
 numbered planets orbit at the ratio engraved on the ring.
 
     tools/headless-preview.sh --start <port>
-    python3 generators/planetary/build.py --port <port> --profile "K5 PLA on P1S"
+    python3 generators/planetary/build.py --port <port> --profile "K5 PLA on P1S"   # fails today: see below
     python3 generators/planetary/build.py --port <port> --diameter 90 --study   # the built-in table
+
+On a P1S profile the build currently stops at `check_print`: the plate is
+not on the profile's bed, and under a measured air the meshing flanks leave
+too little of it ([what is checked](#what-is-checked-every-run)).
 
 Output goes to `scratch/planetary/` (or `--out`): `planetary.stl` (the plate,
 five shells), `planetary.dsgn`, `planetary.png` (the hero still) and
@@ -115,7 +119,8 @@ a mesh closes by the gap instead of 0.25 mm.
 
 - `check_geometry` on the print part is `verified`.
 - **`check_print`** (docs/tolerances/README.md#checking-a-print) on the
-  print part, which must pass every item:
+  print part, which must pass every item (stacking only under a profile that
+  states its air):
   - **every pair of bodies' exact B-rep distance is at least the gap a
     side**, less the check's tenth. The closest points come out about 5 µm
     short: 0.095 mm (sun) and 0.097 mm (ring) against the K5 profile's 0.1.

@@ -23,7 +23,10 @@ struct Body;
 
 namespace fitband {
 
-// Replaces every body's `fitBands` with what `doc` says of its faces: a size
+// Replaces every body's `fitBands` with what `doc` says of its faces -- and,
+// on a Derived copy, the bands its snapshot carries as the source read them,
+// under the copy's face names (docs/modeling/derived.md#size-bands-on-a-copy):
+// a size
 // tolerance on a round face (its class's band at the size the face is MADE
 // at — the printed size on a printed part — or its explicit deviations), and
 // a generated bearing's bore and outside with their ISO 492 normal bands. A

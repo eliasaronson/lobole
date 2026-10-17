@@ -3135,7 +3135,9 @@ class Asm(_Tab):
 
     def cam(self, mate_a, mate_b, **kw) -> dict[str, Any]:
         """A cam: rotation to the follower's slide or turn through a lift
-        table (lift in mm for a slide, degrees for a turn), or {rise (mm) |
+        table (lift in mm for a slide, degrees for a turn; angles
+        0 <= angle_deg < 360, the table wrapping, so it stops short of 360),
+        or {rise (mm) |
         rise_deg, duration_deg, start_deg} for a cosine lobe. A cylindrical
         follower takes dof_b="rotation" to turn (v88, turning v102)."""
         self.activate()

@@ -8,10 +8,10 @@ Parallel work in worktrees needs one instance per worktree, and the convention
 has been prose: "pass a distinct one per worktree" (tools/worktree-build.sh).
 That is a value a human has to hold, in a repo that everywhere else refuses to
 let one — free_port() races were fixed by having the app bind its own port,
-and every running instance already announces itself in
-~/.local/state/lobole/instances/<port>.json.
+and every running instance announces itself in its state dir's
+lobole/instances/<port>.json and claims its port machine-wide.
 
-Three sources, because none alone is enough:
+Four sources, because none alone is enough:
 
   - the kernel, for "is anything bound here right now";
   - the announced instances, for "does an app own this even though it is
@@ -21,17 +21,17 @@ Three sources, because none alone is enough:
     instance run with a scratch state dir announces itself there, where the
     registry read above never looks. A claim whose pid is gone is removed.
 
-A third source covers the gap between a worktree being built and its
-instance announcing itself: a claim. `--claim PATH` (tools/worktree-build.sh
+The fourth covers the gap between a worktree being built and its instance
+announcing itself: a worktree claim. `--claim PATH` (tools/worktree-build.sh
 passes the worktree) records the port it picks in
 ~/.local/state/lobole/port-claims/<port>.json, and every later pick skips it
 for as long as PATH exists, so two worktrees built minutes apart are not both
-told 8801. Asked again for the same PATH, it answers the same port. A claim
-whose PATH is gone (a merged worktree is deleted) is stale and removed. Run
+told 8801. Asked again for the same PATH, it answers the same port. A
+worktree claim whose PATH is gone (a merged worktree is deleted) is stale and removed. Run
 from inside a claimed worktree without `--claim`, it answers that worktree's
 port, so "which port is mine" has one answer.
 
-8799 is excluded whatever both say. It is the human's dev-watch: the windowed
+8799 is excluded whatever they all say. It is the human's dev-watch: the windowed
 build under review, whose open document an agent must never mutate (CLAUDE.md).
 
 Usage:

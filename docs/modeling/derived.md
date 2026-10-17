@@ -34,7 +34,9 @@ that need other documents), `src/remote/RemoteModeling.cpp` (RPCs).
   Derived's own material (and restores the source's when it is cleared),
   since `Execute`, where the copy otherwise stamps it, does not run.
 - `snapshot` — per body: its asset name, name, material, source `created_by`,
-  the source's element map and display colour; plus `source_chain_hash`.
+  the source's element map and display colour, and the size bands the
+  source stamped on it (`fit_bands`, [below](#size-bands-on-a-copy)); plus
+  `source_chain_hash`.
 
 **Execute reads the snapshot and never the source document.** Each body's
 B-Rep is a document asset `derived-<content hash>.brep` (binary BinTools),

@@ -307,7 +307,7 @@ it could not be measured. `req::FindingLines` (`src/core/Requirements.cpp`)
 is the one wording: the panel draws it, and every check -- the job, the
 synchronous call, a check with nothing to measure -- ends by logging each
 requirement it was asked about that does not pass, `requirement '<name>'
-fail: <finding>; <finding>`, so a failing check read from the log says
+<state>: <finding>; <finding>` (`fail` or `unresolved`), so a failing check read from the log says
 why.
 **Check** starts the job for every requirement that is not current, and
 shows its progress while it runs on the bar every long operation draws

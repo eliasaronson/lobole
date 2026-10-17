@@ -29,8 +29,8 @@ std::expected<StlExportResult, std::string>
 ExportPartStl(const Document& part, const std::string& path, int bodyIndex,
               std::optional<double> deflectionMm) {
   if (deflectionMm && !(std::isfinite(*deflectionMm) && *deflectionMm > 0.0))
-    return std::unexpected("deflection must be a positive chord deviation in "
-                           "mm, not " +
+    return std::unexpected("stl_deflection_mm must be a positive chord "
+                           "deviation in mm, not " +
                            Mm(*deflectionMm));
   // Derived reference bodies are other parts' geometry: never exported.
   std::vector<const Body*> bodies;
@@ -73,7 +73,7 @@ ExportPartStl(const Document& part, const std::string& path, int bodyIndex,
   if (deflectionMm && printed > 0.0 && *deflectionMm > printed + 1e-12) {
     char pct[16];
     std::snprintf(pct, sizeof(pct), "%.0f%%", 100.0 * r.chordShare);
-    r.warning = "deflection " + Mm(*deflectionMm) +
+    r.warning = "stl_deflection_mm " + Mm(*deflectionMm) +
                 " mm is coarser than this printed part's print asks (" +
                 Mm(printed) + " mm): the chords can take up to " +
                 Mm(*deflectionMm) + " mm, " + pct + " of the smallest gap (" +

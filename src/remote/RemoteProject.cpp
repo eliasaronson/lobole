@@ -1386,7 +1386,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
   if (m == "export_step" || m == "export_stl" || m == "export_brep") {
     // Export the whole document (all bodies) or one body (by index) to
     // STEP / binary STL / native BREP. params:
-    // {path, body?: index, deflection?: 0.1 (STL only)}
+    // {path, body?: index, stl_deflection_mm? (STL only; `deflection` is
+    // refused, naming it: RenamedParams)}
     const std::string path = p.at("path").get<std::string>();
     // Where it goes and what it takes, checked before anything is meshed or
     // written: an empty path, a directory or a missing parent fell through to

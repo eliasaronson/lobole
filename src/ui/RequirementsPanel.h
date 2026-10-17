@@ -24,7 +24,8 @@ struct RequirementsEngine {
 void SetRequirementsEngine(const RequirementsEngine& engine);
 
 // The Requirements panel (docs/requirements/README.md#the-panel): each
-// requirement's state, value and bound, and Check. Exists only while the
+// requirement's state, value and bound, the whole finding of one that does
+// not pass on a line under it, and Check. Exists only while the
 // project states requirements, like the Conflicts panel.
 void DrawRequirementsPanel(AppState& state);
 
