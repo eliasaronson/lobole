@@ -18,9 +18,9 @@
     "planetary: 5 shells"
   ],
   "instance": "headless",
-  "budget_s": 480,
+  "budget_s": 600,
   "readme": {
     "runs": "`print_coupon.py --seed` and `--record --z-gap-layers 2` (K5's measured air), then `planetary/build.py --no-render --profile \"K5 PLA on P1S\"` (every `check_print` item, stacking against the measured air and `bed_fit` on the P1S's bed, and the print job), then `--diameter 90` on the built-in table (its gap needs more than 70 mm): each the print plate, its exact mesh clearances and the STL's five shells, the assembly, both motion studies and the push check",
-    "measured": "~280 s"
+    "measured": "~470 s"
   }
 }
