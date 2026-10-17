@@ -99,7 +99,7 @@ clamp answer them; the refusals.
 A drum turning on a stretch of an arbor, a rod's small end on the middle of
 a wrist pin, a pin held where it is pressed into its bosses: the load is on
 PART of a face that is not a face of its own. A load or a support takes
-`region` (`fem::LoadRegion`, vNEXT):
+`region` (`fem::LoadRegion`, v183):
 
 - `{normal, from_mm, to_mm}`, a **band**: the face between the planes
   `n·p = from_mm` and `n·p = to_mm` (`n` the unit normal, mm in the part's

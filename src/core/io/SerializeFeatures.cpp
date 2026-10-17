@@ -982,7 +982,7 @@ json FeatureToJson(const Feature& feature) {
       j["twist_expr"] = ext->twistExpr;
     if (ext->herringbone)
       j["herringbone"] = true;
-    // vNEXT: a taper, omitted when there is none.
+    // v183: a taper, omitted when there is none.
     if (ext->taperDeg != 0.0 || !ext->taperExpr.empty())
       j["taper_deg"] = ext->taperDeg;
     if (!ext->taperExpr.empty())
@@ -1512,7 +1512,7 @@ json FeatureToJson(const Feature& feature) {
       j["thread_depth"] = ho->threadDepth;
     if (!ho->threadDepthExpr.empty())
       j["thread_depth_expr"] = ho->threadDepthExpr;
-    if (ho->printed != HolePrinted::Round) // vNEXT; absent = round
+    if (ho->printed != HolePrinted::Round) // v183; absent = round
       j["printed"] = HolePrintedName(ho->printed);
     if (ho->kind == HoleKind::Counterbore) {
       j["cb_diameter"] = ho->cbDiameter;
@@ -2354,7 +2354,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     ext->twistDeg = j.value("twist_deg", 0.0); // v168
     ext->twistExpr = j.value("twist_expr", std::string{});
     ext->herringbone = j.value("herringbone", false);
-    ext->taperDeg = j.value("taper_deg", 0.0); // vNEXT
+    ext->taperDeg = j.value("taper_deg", 0.0); // v183
     ext->taperExpr = j.value("taper_expr", std::string{});
     if (j.contains("regions")) // v34
       ext->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
@@ -2992,7 +2992,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     ho->pointAngleDeg = j.value("drill_point_deg", 0.0);
     ho->threadDepth = j.value("thread_depth", 0.0);
     ho->threadDepthExpr = j.value("thread_depth_expr", std::string{});
-    if (j.contains("printed")) { // vNEXT: a teardrop's roof
+    if (j.contains("printed")) { // v183: a teardrop's roof
       const std::string name = j.at("printed").get<std::string>();
       const auto printed = HolePrintedFromName(name);
       if (!printed)

@@ -139,7 +139,7 @@ struct Load {
   // (docs/topopt/README.md#load-cases). Empty on a study with no cases, and
   // always on a support: supports are shared by every case.
   std::string loadCase;
-  // Part of the face only (vNEXT); Whole, the face, as ever. A part study's.
+  // Part of the face only (v183); Whole, the face, as ever. A part study's.
   LoadRegion region;
 };
 

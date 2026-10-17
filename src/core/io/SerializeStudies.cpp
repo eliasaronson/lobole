@@ -150,7 +150,7 @@ json StudyToJson(const fem::Study& s) {
         lj["point"] = {l.point.x, l.point.y, l.point.z};
       if (!l.loadCase.empty())
         lj["case"] = l.loadCase;
-      // vNEXT: part of the face; omitted for the whole of it.
+      // v183: part of the face; omitted for the whole of it.
       if (l.region.kind == fem::LoadRegion::Kind::Band)
         lj["region"] = {
             {"normal",
@@ -355,7 +355,7 @@ fem::Study StudyFromJson(const json& j) {
       l.point = point("point");
       l.hasPoint = true;
     }
-    if (lj.contains("region")) // vNEXT
+    if (lj.contains("region")) // v183
       l.region =
           LoadRegionFromJson(lj.at("region"), "load " + std::to_string(l.id));
     s.loads.push_back(std::move(l));

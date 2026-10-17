@@ -300,6 +300,7 @@ here; the golden corpus and git history cover them.
 | 180 | A stored motion result's per-sample `touching` [{a, b, a_name, b_name, a_inner?, b_inner?}]: the pairs a mesh check found meeting only on a surface, which are not clashes ([touching is not a clash](../inspect/README.md#touching-is-not-a-clash)); omitted when empty. The run's input hash moves to `motion/3` (no format change of its own), so a result stored before -- whose seats were clashes, and whose cam followers could carry a branch jump -- is run again rather than reused. An older build reads the result without the list. Golden `v180-touching-sample` |
 | 181 | A part's `print_settings` {part?, bodies?: {"<created_by>": ...}}, each {walls?, top_layers?, bottom_layers?, infill_pct?, infill_pattern?, supports?, brim?, direction?}, only what is stated, omitted when there are none ([slicer settings](../tolerances/README.md#slicer-settings)); an unknown key, pattern or brim, a count out of range, or 100 % infill with a pattern that cannot print solid is refused on load. A print profile's `bed_exclude_mm` [[x0, y0, x1, y1], ...] (the bed's keep-out zones; needs `bed_mm`) and `line_width_mm`, omitted when not stated, in the store and in a part's embedded copy. An older build reads the part without its settings and the profile without its zones. Golden `v181-print-settings` |
 | 182 | A Derived feature's snapshot body may carry `fit_bands` [{`face` (the SOURCE's face name), `lower`, `upper` (mm on the diameter), `side`: `hole`\|`shaft`\|`either`, `label`, `allowance`? (mm, omitted at 0), `printed_press`? (true)}]: the size bands the source stamped on that body, as it read them (its tolerances under its print process, a bearing's rings), stamped on the copy under its own face names ([size bands on a copy](../modeling/derived.md#size-bands-on-a-copy)). An unknown `side` is refused on load. An older build reads the copy without its bands, so a press on the source is a clash on the copy. Golden `v182-derived-fit-bands` |
+| 183 | A Hole's `printed` (`round` \| `teardrop` \| `teardrop_flat`, absent = round): its roof pointed up the part's print direction; an Extrude's `taper_deg` (+`taper_expr`, absent = 0); a study load's `region` (`{normal, from_mm, to_mm}` or `{center_mm, radius_mm}`, absent = the whole face). Additive: an older file reads as before. Golden `v183-printed-features` |
 
 ## Pending changes
 
@@ -309,7 +310,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A Hole's `printed` (`round` \| `teardrop` \| `teardrop_flat`, absent = round): its roof pointed up the part's print direction; an Extrude's `taper_deg` (+`taper_expr`, absent = 0); a study load's `region` (`{normal, from_mm, to_mm}` or `{center_mm, radius_mm}`, absent = the whole face). Additive: an older file reads as before. Golden `vNEXT-printed-features` |
 
 ## The directory form
 

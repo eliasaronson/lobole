@@ -1091,7 +1091,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       CHECK(ext->herringbone == want.at(3).get<bool>());
     }
   }
-  // vNEXT: an extrude's taper, a hole's printed roof and a load's region.
+  // v183: an extrude's taper, a hole's printed roof and a load's region.
   // The volumes see the first two; each [name, value] must still hold, and
   // each [load index, region json] of the first study.
   if (expect.contains("extrude_tapers")) {
