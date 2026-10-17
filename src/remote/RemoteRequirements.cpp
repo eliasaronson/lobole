@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "remote/RemoteRequirements.h"
+#include "cad/CADKernel.h"
 
 #include "core/Angles.h"
 #include "core/AssemblySolve.h"
@@ -34,12 +35,19 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <format>
+#include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <set>
+#include <thread>
+
+#include <Standard_Failure.hxx>
 
 using json = nlohmann::json;
 
@@ -129,11 +137,13 @@ const MethodDoc RequirementMethods[] = {
      "study whose inputs are unchanged is answered from its stored result "
      "(docs/simulation/README.md#studies-as-jobs), so re-checking an "
      "unchanged design computes nothing; `recompute: true` measures and "
-     "re-runs anyway. It may run studies, so `async: true` runs it as a job "
-     "(`job`, polled with study_status {job}, stopped with cancel_study "
-     "{job}; cancelled with its client unless outlive_client), answering at "
-     "once when nothing needs measuring. A check visits each requirement's "
-     "tab and comes back to the one it started on.",
+     "re-runs anyway (each study once). What it measures it measures as a "
+     "job, off the frame: `async: true` answers at once with the `job` "
+     "(polled with study_status {job}, stopped with cancel_study {job}); "
+     "without it the call waits for the job and answers with the rows. "
+     "Either is cancelled with its client unless outlive_client; nothing "
+     "to measure answers at once. A check visits each requirement's tab "
+     "and comes back to the one it started on.",
      "async, ids, outlive_client, recompute", NotInBatch,
      "all_pass?:bool, checked?:int, receipt?:{claims:object[], "
      "schema:string, standing:string, summary:string}, "
@@ -727,6 +737,16 @@ void ActivateFirstPart(ui::AppState& state) {
     }
 }
 
+struct Taken;
+
+// A measure's expensive half, for a worker
+// (docs/requirements/README.md#checking-is-a-job): it owns everything it reads
+// -- deep copies taken on the main thread -- and fills the reading, or throws.
+// `cancel` is read between its pieces; `fraction` is how far through it is,
+// 0..1.
+using Work = std::function<void(Taken&, const std::atomic<bool>& cancel,
+                                std::atomic<double>& fraction)>;
+
 struct Taken {
   uint64_t waitJob = 0; // a study job to wait for before measuring again
   bool waitCam = false; // CAM passes being cut
@@ -735,6 +755,9 @@ struct Taken {
   bool pass = false;
   std::string error;
   json detail;
+  // Set instead of a reading when the measure was asked off the frame
+  // (Ctx::async) and the reading is worth a worker.
+  Work work;
 };
 
 struct Ctx {
@@ -922,86 +945,237 @@ std::optional<double> Gap(const std::vector<Body>& A, const glm::dmat4& xa,
   return c->volume > 1e-9 ? -1.0 : c->distance;
 }
 
+// How long a clearance measure holds before it measures (tests only:
+// SetTestRequirementHold, or LOBOLE_TEST_REQUIREMENT_MS), so a test can
+// watch a slow check run beside the frame and cancel it. In the measure
+// itself, wherever it runs: a measure put back on the frame stalls it.
+std::atomic<int> g_testHoldMs{-1}; // -1: not read from the environment yet
+
+int TestHoldMs() {
+  int ms = g_testHoldMs.load();
+  if (ms < 0) {
+    const char* env = std::getenv("LOBOLE_TEST_REQUIREMENT_MS");
+    ms = env ? std::max(0, std::atoi(env)) : 0;
+    g_testHoldMs.store(ms);
+  }
+  return ms;
+}
+
+// What the meshes prove of the exact gap: it is at least the tessellations'
+// distance less both deflections (each triangle lies within its deflection
+// of its surface). -inf when a pair has no tessellation, which proves
+// nothing.
+double MeshFloor(const std::vector<Body>& A, const glm::dmat4& xa,
+                 const std::vector<Body>& B, const glm::dmat4& xb) {
+  double floor = std::numeric_limits<double>::infinity();
+  for (const Body& ba : A)
+    for (const Body& bb : B) {
+      if (ba.shape.GetShape().IsNull() || bb.shape.GetShape().IsNull())
+        continue; // the exact measure skips it too
+      const collide::Gap g = collide::Nearest(ba.shape, xa, bb.shape, xb, 2.0);
+      if (!g.known)
+        return -std::numeric_limits<double>::infinity();
+      floor = std::min(floor, g.distance - g.tolerance);
+    }
+  return floor;
+}
+
+// One clearance's inputs, owned: both sides' bodies, and each pose to
+// measure them at (the sides' moves from where they stand now). On a
+// worker's behalf the bodies are deep copies, whose collision meshes are
+// forgotten with them.
+struct ClearanceInputs {
+  std::vector<Body> A, B;
+  struct Pose {
+    glm::dmat4 xa{1.0}, xb{1.0};
+    double driver = 0.0;
+  };
+  std::vector<Pose> poses;
+  bool mesh = true;
+  bool copies = false;
+  bool overStudy = false;
+  bool turns = false;   // the driver is a rotation, held in radians
+  uint64_t studyId = 0; // for the messages
+  int holdMs = 0;       // TestHoldMs
+  ClearanceInputs() = default;
+  ClearanceInputs(const ClearanceInputs&) = delete;
+  ClearanceInputs& operator=(const ClearanceInputs&) = delete;
+  ~ClearanceInputs() {
+    if (copies)
+      for (const std::vector<Body>* side : {&A, &B})
+        for (const Body& b : *side)
+          collide::Forget(b.shape);
+  }
+};
+
+// The smallest gap over the poses, into `t`. Exact mode measures the poses
+// in order of what their meshes prove (MeshFloor) and stops at the first
+// whose floor is no smaller than the best exact gap found: every pose left
+// is at least that far apart, so the minimum and where it is are the ones
+// measuring every pose would give, from the few poses that can hold it.
+void SmallestGap(const ClearanceInputs& in, Taken& t,
+                 const std::atomic<bool>& cancel,
+                 std::atomic<double>& fraction) {
+  const size_t n = in.poses.size();
+  double worst = std::numeric_limits<double>::infinity();
+  size_t worstAt = 0, measured = 0, exact = 0;
+  const auto take = [&](size_t i) {
+    const ClearanceInputs::Pose& p = in.poses[i];
+    const auto g = Gap(in.A, p.xa, in.B, p.xb, in.mesh);
+    if (!g)
+      return;
+    measured++;
+    if (*g < worst) {
+      worst = *g;
+      worstAt = i;
+    }
+  };
+  const auto stopped = [&] {
+    if (cancel.load())
+      throw std::runtime_error("cancelled");
+  };
+  const auto until =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(in.holdMs);
+  while (std::chrono::steady_clock::now() < until) {
+    stopped();
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  if (in.mesh) {
+    for (size_t i = 0; i < n; i++) {
+      stopped();
+      take(i);
+      fraction.store(static_cast<double>(i + 1) / static_cast<double>(n));
+    }
+  } else {
+    std::vector<std::pair<double, size_t>> order;
+    order.reserve(n);
+    for (size_t i = 0; i < n; i++) {
+      stopped();
+      const ClearanceInputs::Pose& p = in.poses[i];
+      order.emplace_back(MeshFloor(in.A, p.xa, in.B, p.xb), i);
+      fraction.store(0.2 * static_cast<double>(i + 1) / static_cast<double>(n));
+    }
+    std::stable_sort(
+        order.begin(), order.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+    for (size_t k = 0; k < order.size(); k++) {
+      if (order[k].first >= worst)
+        break;
+      stopped();
+      take(order[k].second);
+      exact++;
+      fraction.store(0.2 + 0.8 * static_cast<double>(k + 1) /
+                               static_cast<double>(order.size()));
+    }
+  }
+  if (measured == 0) {
+    if (!in.overStudy)
+      throw std::runtime_error("the gap could not be measured (no "
+                               "tessellation, or the kernel declined it)");
+    throw std::runtime_error("no sample of motion study " +
+                             std::to_string(in.studyId) + " could be measured");
+  }
+  t.value = worst;
+  t.unit = "mm";
+  t.detail = {{"mode", in.mesh ? "mesh" : "exact"}};
+  if (!in.overStudy)
+    return;
+  // Every pose is accounted for: measured, or proved no closer than the
+  // smallest by its meshes.
+  t.detail["samples"] = in.mesh ? measured : n;
+  if (!in.mesh)
+    t.detail["exact_samples"] = exact;
+  // The driver in the unit the study speaks (motion studies take degrees
+  // for a rotation and store radians).
+  const double at = in.poses[worstAt].driver;
+  if (in.turns)
+    t.detail["smallest_at_driver_deg"] = angles::ToDegrees(at);
+  else
+    t.detail["smallest_at_driver_mm"] = at;
+}
+
 Taken MeasureClearance(ui::AppState& state, const json& m, const Ctx& ctx) {
   Taken t;
   t.unit = "mm";
   const uint64_t a = m.at("a").get<uint64_t>(), b = m.at("b").get<uint64_t>();
-  const bool mesh = m.value("mode", std::string("mesh")) == "mesh";
-  const std::vector<Body> A = ui::OccurrenceSubtreeBodies(state, a);
-  const std::vector<Body> B = ui::OccurrenceSubtreeBodies(state, b);
-  if (A.empty() || B.empty())
+  auto in = std::make_shared<ClearanceInputs>();
+  in->mesh = m.value("mode", std::string("mesh")) == "mesh";
+  // Off the frame, the worker gets its own copies: a boolean and an
+  // extrema WRITE p-curves and triangulations into their arguments, and the
+  // frame is drawing these bodies
+  // (docs/inspect/README.md#query-booleans-are-non-destructive).
+  in->copies = ctx.async;
+  in->holdMs = TestHoldMs();
+  for (const auto& [id, side] : {std::pair{a, &in->A}, std::pair{b, &in->B}})
+    for (const Body& body : ui::OccurrenceSubtreeBodies(state, id)) {
+      Body nb = body;
+      if (in->copies)
+        nb.shape = body.shape.DetachedUnlocated().LocatedLike(body.shape);
+      side->push_back(std::move(nb));
+    }
+  if (in->A.empty() || in->B.empty())
     throw std::runtime_error("one side places no visible matter (hidden, or a "
                              "part with no bodies), so there is no gap");
   if (!m.contains("motion_study")) {
-    const auto g = Gap(A, glm::dmat4(1.0), B, glm::dmat4(1.0), mesh);
-    if (!g)
-      throw std::runtime_error("the gap could not be measured (no "
-                               "tessellation, or the kernel declined it)");
-    t.value = *g;
-    t.detail = {{"mode", mesh ? "mesh" : "exact"}};
+    in->poses.push_back({});
+  } else {
+    // The smallest gap over a motion study's samples: each side moved from
+    // where it stands now to where the study put it.
+    const uint64_t sid = m.at("motion_study").get<uint64_t>();
+    if ((t.waitJob = RunStudy(state, "run_motion_study", "study", sid, ctx)))
+      return t;
+    const motion::Result* res = ui::MotionResultFor(state, sid);
+    if (!res)
+      throw std::runtime_error("motion study " + std::to_string(sid) +
+                               " has no result");
+    in->overStudy = true;
+    in->studyId = sid;
+    const MotionStudy* study = state.assembly->FindMotionStudyById(sid);
+    in->turns = study && study->driverDof == MateDof::Rotation;
+    const Occurrence* oa = state.assembly->FindById(a);
+    const Occurrence* ob = state.assembly->FindById(b);
+    const glm::dmat4 nowA = ui::OccurrenceMatrix(*oa);
+    const glm::dmat4 nowB = ui::OccurrenceMatrix(*ob);
+    const auto worldOf = [](const motion::Sample& s,
+                            uint64_t id) -> std::optional<glm::dmat4> {
+      for (const auto& [occ, w] : s.worlds)
+        if (occ == id)
+          return w;
+      return std::nullopt;
+    };
+    size_t unsolved = 0;
+    for (const motion::Sample& s : res->samples) {
+      if (!s.solved) {
+        unsolved++;
+        continue;
+      }
+      const auto wa = worldOf(s, a), wb = worldOf(s, b);
+      if (!wa || !wb)
+        continue;
+      in->poses.push_back(
+          {*wa * glm::inverse(nowA), *wb * glm::inverse(nowB), s.value});
+    }
+    // A sample that did not solve has no pose, so the gap there is unknown:
+    // not the smallest of the rest.
+    if (unsolved > 0)
+      throw std::runtime_error(
+          std::to_string(unsolved) + " of " +
+          std::to_string(res->samples.size()) + " samples of motion study " +
+          std::to_string(sid) + " did not solve, so the gap there is unknown");
+    if (in->poses.empty())
+      throw std::runtime_error("no sample of motion study " +
+                               std::to_string(sid) + " could be measured");
+  }
+  if (ctx.async) {
+    t.work = [in](Taken& out, const std::atomic<bool>& cancel,
+                  std::atomic<double>& fraction) {
+      SmallestGap(*in, out, cancel, fraction);
+    };
     return t;
   }
-  // The smallest gap over a motion study's samples: each side moved from
-  // where it stands now to where the study put it.
-  const uint64_t sid = m.at("motion_study").get<uint64_t>();
-  if ((t.waitJob = RunStudy(state, "run_motion_study", "study", sid, ctx)))
-    return t;
-  const motion::Result* res = ui::MotionResultFor(state, sid);
-  if (!res)
-    throw std::runtime_error("motion study " + std::to_string(sid) +
-                             " has no result");
-  const Occurrence* oa = state.assembly->FindById(a);
-  const Occurrence* ob = state.assembly->FindById(b);
-  const glm::dmat4 nowA = ui::OccurrenceMatrix(*oa);
-  const glm::dmat4 nowB = ui::OccurrenceMatrix(*ob);
-  const auto worldOf = [](const motion::Sample& s,
-                          uint64_t id) -> std::optional<glm::dmat4> {
-    for (const auto& [occ, w] : s.worlds)
-      if (occ == id)
-        return w;
-    return std::nullopt;
-  };
-  double worst = std::numeric_limits<double>::infinity();
-  double worstAt = 0.0;
-  size_t measured = 0, unsolved = 0;
-  for (const motion::Sample& s : res->samples) {
-    if (!s.solved) {
-      unsolved++;
-      continue;
-    }
-    const auto wa = worldOf(s, a), wb = worldOf(s, b);
-    if (!wa || !wb)
-      continue;
-    const auto g =
-        Gap(A, *wa * glm::inverse(nowA), B, *wb * glm::inverse(nowB), mesh);
-    if (!g)
-      continue;
-    measured++;
-    if (*g < worst) {
-      worst = *g;
-      worstAt = s.value;
-    }
-  }
-  // A sample that did not solve has no pose, so the gap there is unknown:
-  // not the smallest of the rest.
-  if (unsolved > 0)
-    throw std::runtime_error(std::to_string(unsolved) + " of " +
-                             std::to_string(res->samples.size()) +
-                             " samples of motion study " + std::to_string(sid) +
-                             " did not solve, so the gap there is unknown");
-  if (measured == 0)
-    throw std::runtime_error("no sample of motion study " +
-                             std::to_string(sid) + " could be measured");
-  t.value = worst;
-  const MotionStudy* study = state.assembly->FindMotionStudyById(sid);
-  const bool turns = study && study->driverDof == MateDof::Rotation;
-  t.detail = {{"mode", mesh ? "mesh" : "exact"}, {"samples", measured}};
-  // The driver in the unit the study speaks (motion studies take degrees
-  // for a rotation and store radians).
-  if (turns)
-    t.detail["smallest_at_driver_deg"] = angles::ToDegrees(worstAt);
-  else
-    t.detail["smallest_at_driver_mm"] = worstAt;
+  std::atomic<bool> never{false};
+  std::atomic<double> fraction{0.0};
+  SmallestGap(*in, t, never, fraction);
   return t;
 }
 
@@ -1264,16 +1438,60 @@ Taken MeasureMotionClean(ui::AppState& state, const json& m, const Ctx& ctx) {
                              " has no result");
   if (!res->error.empty())
     throw std::runtime_error(res->error);
+  // The findings, in the study's words: which pairs clash and from where,
+  // which samples did not solve, where a branch jumped. A failed verdict
+  // that names nothing sends the reader to re-run the study to find out.
+  const MotionStudy* study = state.assembly->FindMotionStudyById(sid);
+  const bool turns = study && study->driverDof == MateDof::Rotation;
+  const auto driver = [turns](double v) {
+    return turns ? std::format("{:.6g} deg", angles::ToDegrees(v))
+                 : std::format("{:.6g} mm", v);
+  };
+  struct PairSeen {
+    size_t samples = 0;
+    double first = 0.0;
+    bool rigid = false;
+  };
+  std::map<std::pair<std::string, std::string>, PairSeen> pairs;
+  std::vector<double> unsolvedAt;
+  json findings = json::array();
   size_t clashes = 0, unsolved = 0;
   for (const motion::Sample& s : res->samples) {
     clashes += s.clashes.size();
-    unsolved += s.solved ? 0 : 1;
+    if (!s.solved) {
+      unsolved++;
+      unsolvedAt.push_back(s.value);
+    }
+    for (const motion::Clash& c : s.clashes) {
+      PairSeen& seen = pairs[std::minmax(c.aName, c.bName)];
+      if (seen.samples++ == 0)
+        seen.first = s.value;
+      seen.rigid = seen.rigid || c.rigid;
+    }
+    if (s.branchJump)
+      findings.push_back("'" + s.branchJump->name + "' jumped branch at " +
+                         driver(s.branchJump->atValue));
   }
+  for (const auto& [names, seen] : pairs)
+    findings.push_back(
+        "'" + names.first + "' clashes with '" + names.second + "' " +
+        (seen.rigid ? std::string("(rigid to each other, a standing clash)")
+                    : "at " + std::to_string(seen.samples) + " of " +
+                          std::to_string(res->samples.size()) +
+                          " samples, first at " + driver(seen.first)));
+  if (!unsolvedAt.empty())
+    findings.push_back(std::to_string(unsolvedAt.size()) +
+                       " samples did not solve, first at " +
+                       driver(unsolvedAt.front()));
+  if (res->cancelled)
+    findings.push_back("the run was cancelled");
   t.pass = res->clean && !res->cancelled;
   t.detail = {{"samples", res->samples.size()},
               {"clashes", clashes},
               {"unsolved", unsolved},
               {"pairs_checked", res->pairsChecked}};
+  if (!t.pass)
+    t.detail["findings"] = findings;
   return t;
 }
 
@@ -1384,11 +1602,81 @@ std::string Now() {
                                       std::chrono::system_clock::now()));
 }
 
+// A reading judged against the requirement's bound, into `e`. Throws when
+// the reading has no value or a bound expression does not evaluate.
+void Judge(ui::AppState& state, const req::Requirement& r, const Taken& t,
+           req::Evidence& e) {
+  e.value = t.value;
+  e.unit = t.unit;
+  e.detail = t.detail;
+  if (!req::IsNumericKind(r.Kind())) {
+    e.pass = t.pass;
+    return;
+  }
+  if (!t.value)
+    throw std::runtime_error("the measure returned no value");
+  const req::Bound& b = r.bound;
+  double lim = b.value, lo = b.min, hi = b.max;
+  if (!b.valueExpr.empty())
+    lim = Evaluate(state, b.valueExpr, {}, "bound");
+  if (!b.minExpr.empty())
+    lo = Evaluate(state, b.minExpr, {}, "bound min");
+  if (!b.maxExpr.empty())
+    hi = Evaluate(state, b.maxExpr, {}, "bound max");
+  if (b.kind == "within") {
+    e.limitMin = lo;
+    e.limitMax = hi;
+  } else {
+    e.limit = lim;
+  }
+  e.pass = req::Holds(b, *t.value, lim, lo, hi);
+}
+
+// A measure's worker (Taken::work), and what it measured for: the
+// requirement, its revision and the input hash when its copies were taken.
+// Owned by the check's run; destroying it stops and joins the worker.
+struct Pending {
+  uint64_t id = 0, revision = 0, hash = 0;
+  Work work;
+  Taken taken;
+  std::string error;
+  std::atomic<bool> cancel{false};
+  std::atomic<bool> done{false}; // the worker sets it LAST
+  std::atomic<double> fraction{0.0};
+  std::thread thread;
+  Pending() = default;
+  Pending(const Pending&) = delete;
+  Pending& operator=(const Pending&) = delete;
+  ~Pending() {
+    cancel.store(true);
+    if (thread.joinable())
+      thread.join();
+  }
+  void Start() {
+    thread = std::thread([this] {
+      ArmOccSignalHandlers();
+      try {
+        work(taken, cancel, fraction);
+      } catch (const Standard_Failure& e) {
+        error = std::string("the measure failed: ") +
+                (e.GetMessageString() ? e.GetMessageString()
+                                      : "OpenCASCADE failure");
+      } catch (const std::exception& e) {
+        error = e.what();
+      }
+      work = nullptr; // the copies go on the worker, not the frame
+      done.store(true, std::memory_order_release);
+    });
+  }
+};
+
 // One requirement measured and its evidence written. Returns a job or a CAM
-// wait instead when the measure has to wait for one.
+// wait instead when the measure has to wait for one, or the measure's
+// worker when it asked for one (Ctx::async only).
 struct StepOutcome {
   uint64_t waitJob = 0;
   bool waitCam = false;
+  std::unique_ptr<Pending> work;
 };
 
 StepOutcome CheckOne(ui::AppState& state, req::Requirement& r, const Ctx& ctx) {
@@ -1402,33 +1690,22 @@ StepOutcome CheckOne(ui::AppState& state, req::Requirement& r, const Ctx& ctx) {
     e.error = why;
   } else {
     try {
-      const Taken t = MeasureOn(state, r, ctx);
+      Taken t = MeasureOn(state, r, ctx);
       if (t.waitJob || t.waitCam)
-        return {t.waitJob, t.waitCam};
-      e.value = t.value;
-      e.unit = t.unit;
-      e.detail = t.detail;
-      if (req::IsNumericKind(r.Kind())) {
-        if (!t.value)
-          throw std::runtime_error("the measure returned no value");
-        const req::Bound& b = r.bound;
-        double lim = b.value, lo = b.min, hi = b.max;
-        if (!b.valueExpr.empty())
-          lim = Evaluate(state, b.valueExpr, {}, "bound");
-        if (!b.minExpr.empty())
-          lo = Evaluate(state, b.minExpr, {}, "bound min");
-        if (!b.maxExpr.empty())
-          hi = Evaluate(state, b.maxExpr, {}, "bound max");
-        if (b.kind == "within") {
-          e.limitMin = lo;
-          e.limitMax = hi;
-        } else {
-          e.limit = lim;
-        }
-        e.pass = req::Holds(b, *t.value, lim, lo, hi);
-      } else {
-        e.pass = t.pass;
+        return {t.waitJob, t.waitCam, nullptr};
+      if (t.work) {
+        StepOutcome o;
+        o.work = std::make_unique<Pending>();
+        o.work->id = r.id;
+        o.work->revision = r.revision;
+        // What the copies are of: an edit while the worker measures moves
+        // the hash, and the evidence reads stale rather than describing a
+        // model nobody measured.
+        o.work->hash = CurrentHash(state, r, why);
+        o.work->work = std::move(t.work);
+        return o;
       }
+      Judge(state, r, t, e);
     } catch (const std::exception& ex) {
       e.error = ex.what();
       e.pass = false;
@@ -1440,6 +1717,33 @@ StepOutcome CheckOne(ui::AppState& state, req::Requirement& r, const Ctx& ctx) {
   r.evidence = std::move(e);
   MarkRequirementsEdited(state);
   return {};
+}
+
+// A worker's reading, landed as its requirement's evidence. Nothing when the
+// requirement was removed or edited meanwhile: the reading is about one
+// that no longer exists. Returns whether it landed.
+bool Land(ui::AppState& state, Pending& p) {
+  req::Requirement* r = FindRequirement(state, p.id);
+  if (r == nullptr || r->revision != p.revision)
+    return false;
+  req::Evidence e;
+  e.taken = true;
+  e.revision = p.revision;
+  e.checkedAt = Now();
+  if (!p.error.empty()) {
+    e.error = p.error;
+  } else {
+    try {
+      Judge(state, *r, p.taken, e);
+    } catch (const std::exception& ex) {
+      e.error = ex.what();
+      e.pass = false;
+    }
+  }
+  e.inputHash = p.hash;
+  r->evidence = std::move(e);
+  MarkRequirementsEdited(state);
+  return true;
 }
 
 bool Current(ui::AppState& state, const req::Requirement& r) {
@@ -1482,10 +1786,11 @@ bool AnyStudyJobRunning(ui::AppState& state, uint64_t except) {
   return false;
 }
 
-// The check as a job (docs/requirements/README.md#checking-is-a-job): no
-// worker thread; its `finish` steps through the requirements on the main
-// thread, one per frame, and waits on the study jobs and CAM passes the
-// measures start.
+// The check as a job (docs/requirements/README.md#checking-is-a-job). Its
+// `finish` steps through the requirements on the main thread, one a frame;
+// it waits on the study jobs and CAM passes the measures start, and on the
+// worker a measure hands its expensive half to (Pending), so the main
+// thread only reads the model and writes evidence.
 struct CheckRun {
   std::vector<uint64_t> ids;
   size_t next = 0;
@@ -1493,6 +1798,10 @@ struct CheckRun {
   bool recomputeThis = false; // this requirement's first run, not its retry
   uint64_t waitJob = 0;
   bool waitCam = false;
+  std::unique_ptr<Pending> pending; // ids[next]'s worker
+  // The studies this run has re-run (recompute): run once, they are as
+  // current for the next requirement over them as a re-run would make them.
+  std::set<std::pair<uint64_t, uint64_t>> rerun; // {document, study}
   int returnTo = -1;
   bool busy = false;
   size_t checked = 0, reused = 0;
@@ -1516,6 +1825,29 @@ bool StepCheck(ui::AppState& state, CheckRun& run, ui::BackgroundJob& job) {
     bool& b;
     ~Unbusy() { b = false; }
   } unbusy{run.busy};
+  const double count = static_cast<double>(run.ids.size());
+  if (run.pending) {
+    // A measure on its worker. Cancel is a request it reads between its
+    // pieces; the job ends once it has stopped, so nothing outlives it.
+    if (job.cancel.load() && !run.pending->cancel.exchange(true))
+      job.label = "Cancelling the requirements check";
+    if (!run.pending->done.load(std::memory_order_acquire)) {
+      job.fraction.store((static_cast<double>(run.next) +
+                          std::clamp(run.pending->fraction.load(), 0.0, 1.0)) /
+                         count);
+      return false;
+    }
+    run.pending->thread.join();
+    if (!job.cancel.load()) {
+      Land(state, *run.pending);
+      run.checked++;
+      run.next++;
+      run.recomputeThis = run.recompute;
+    }
+    run.pending.reset();
+    if (!job.cancel.load())
+      return false; // one measured requirement per frame
+  }
   if (job.cancel.load()) {
     if (run.waitJob)
       ui::CancelBackgroundJobById(state, run.waitJob,
@@ -1568,12 +1900,26 @@ bool StepCheck(ui::AppState& state, CheckRun& run, ui::BackgroundJob& job) {
     }
     job.label = "Checking '" + r->name + "' (" + std::to_string(run.next + 1) +
                 " of " + std::to_string(run.ids.size()) + ")";
-    job.fraction.store(static_cast<double>(run.next) /
-                       static_cast<double>(run.ids.size()));
-    const StepOutcome o = CheckOne(state, *r, Ctx{true, run.recomputeThis});
+    job.fraction.store(static_cast<double>(run.next) / count);
+    const json& m = r->measure;
+    const std::pair<uint64_t, uint64_t> study{
+        r->Document(), m.contains("study") ? m.at("study").get<uint64_t>()
+                       : m.contains("motion_study")
+                           ? m.at("motion_study").get<uint64_t>()
+                           : 0};
+    const bool recompute =
+        run.recomputeThis && (study.second == 0 || !run.rerun.contains(study));
+    if (run.recomputeThis && study.second != 0)
+      run.rerun.insert(study);
+    StepOutcome o = CheckOne(state, *r, Ctx{true, recompute});
     if (o.waitJob || o.waitCam) {
       run.waitJob = o.waitJob;
       run.waitCam = o.waitCam;
+      return false;
+    }
+    if (o.work) {
+      run.pending = std::move(o.work);
+      run.pending->Start();
       return false;
     }
     run.checked++;
@@ -1586,8 +1932,9 @@ bool StepCheck(ui::AppState& state, CheckRun& run, ui::BackgroundJob& job) {
   return true;
 }
 
-uint64_t StartCheck(ui::AppState& state, std::vector<uint64_t> ids,
-                    bool recompute, uint64_t owner) {
+std::shared_ptr<CheckRun> StartCheck(ui::AppState& state,
+                                     std::vector<uint64_t> ids, bool recompute,
+                                     uint64_t owner, uint64_t* jobId) {
   auto run = std::make_shared<CheckRun>();
   run->ids = std::move(ids);
   run->recompute = recompute;
@@ -1604,9 +1951,53 @@ uint64_t StartCheck(ui::AppState& state, std::vector<uint64_t> ids,
   job->finish = [run, raw](ui::AppState& s) {
     return StepCheck(s, *run, *raw);
   };
-  job->done.store(true); // no worker: `finish` is the job
-  return ui::StartBackgroundJob(state, std::move(job)).id;
+  // No thread of the registry's: `finish` is the job, and the workers it
+  // starts are the run's (CheckRun::pending), joined before it returns true
+  // or when the run is dropped.
+  job->done.store(true);
+  *jobId = ui::StartBackgroundJob(state, std::move(job)).id;
+  return run;
 }
+
+// A synchronous check_requirements, parked on the check's job
+// (ParkRequirementsRequest): answered, as the synchronous form answers,
+// once the job is reaped.
+class CheckWait : public Parking {
+public:
+  CheckWait(uint64_t job, std::shared_ptr<CheckRun> run,
+            std::vector<uint64_t> ids)
+      : m_job(job), m_run(std::move(run)), m_ids(std::move(ids)) {}
+  Next Poll(ui::AppState& state, const RpcParams& p, json& answer) override {
+    if (ui::FindBackgroundJobById(state, m_job))
+      return Next::Wait;
+    // Read as the handler reads them, so the server finds no unknown key.
+    if (p.contains("ids"))
+      (void)p.at("ids");
+    (void)p.value("recompute", false);
+    (void)p.value("async", false);
+    (void)p.value("outlive_client", false);
+    const ui::FinishedJob* f = ui::FinishedJobById(state, m_job);
+    if (f && f->outcome != "done")
+      throw std::runtime_error(
+          "the requirements check (job " + std::to_string(m_job) + ") " +
+          f->outcome +
+          (f->cancelReason.empty() ? std::string()
+                                   : " (" + f->cancelReason + ")") +
+          (f->error.empty() ? std::string() : ": " + f->error) +
+          "; what it measured before is kept (list_requirements)");
+    json out = RowsJson(state, &m_ids);
+    out["checked"] = m_run->checked;
+    out["reused"] = m_ids.size() - std::min(m_ids.size(), m_run->checked);
+    AttachReceipt(out, ReceiptFor(out.at("requirements")));
+    answer = std::move(out);
+    return Next::Answer;
+  }
+
+private:
+  uint64_t m_job;
+  std::shared_ptr<CheckRun> m_run;
+  std::vector<uint64_t> m_ids;
+};
 
 // ---- Clearance assertions, as requirements
 // ------------------------------------
@@ -1738,6 +2129,8 @@ std::span<const MethodDoc> RequirementMethodDocs() {
 
 json RequirementRows(ui::AppState& state) { return RowsJson(state, nullptr); }
 
+void SetTestRequirementHold(int ms) { g_testHoldMs.store(std::max(0, ms)); }
+
 uint64_t StartRequirementsCheck(ui::AppState& state, bool recompute) {
   if (ui::FindBackgroundJob(state, kJobKind))
     return ui::FindBackgroundJob(state, kJobKind)->id;
@@ -1747,7 +2140,54 @@ uint64_t StartRequirementsCheck(ui::AppState& state, bool recompute) {
       ids.push_back(r.id);
   if (ids.empty())
     return 0;
-  return StartCheck(state, std::move(ids), recompute, 0);
+  uint64_t job = 0;
+  StartCheck(state, std::move(ids), recompute, 0, &job);
+  return job;
+}
+
+std::unique_ptr<Parking> ParkRequirementsRequest(ui::AppState& state,
+                                                 const std::string& m,
+                                                 const json& request) {
+  // A synchronous check with something to measure: the same job the async
+  // form starts, waited on off the frame. Anything the handler would refuse
+  // (a requirement that does not exist, a check already running) or answer
+  // at once (nothing to measure) is left to it, in its own words.
+  if (m != "check_requirements" || !request.is_object() ||
+      request.value("async", json(false)) != json(false))
+    return nullptr;
+  try {
+    ui::ReapBackgroundJobs(state);
+    if (ui::FindBackgroundJob(state, kJobKind))
+      return nullptr;
+    std::vector<uint64_t> ids;
+    if (request.contains("ids")) {
+      for (const json& v : request.at("ids")) {
+        if (!v.is_number_unsigned() ||
+            FindRequirement(state, v.get<uint64_t>()) == nullptr)
+          return nullptr;
+        ids.push_back(v.get<uint64_t>());
+      }
+    } else {
+      for (const req::Requirement& r : state.requirements)
+        ids.push_back(r.id);
+    }
+    const bool recompute =
+        request.value("recompute", json(false)) == json(true);
+    const bool outlive =
+        request.value("outlive_client", json(false)) == json(true);
+    std::vector<uint64_t> todo;
+    for (uint64_t id : ids)
+      if (recompute || !Current(state, *FindRequirement(state, id)))
+        todo.push_back(id);
+    if (todo.empty())
+      return nullptr;
+    uint64_t job = 0;
+    auto run = StartCheck(state, std::move(todo), recompute,
+                          outlive ? 0 : state.rpcConnection, &job);
+    return std::make_unique<CheckWait>(job, std::move(run), std::move(ids));
+  } catch (...) {
+    return nullptr; // the handler says what is wrong
+  }
 }
 
 std::optional<json> HandleRequirementsRpc(ui::AppState& state,
@@ -1823,8 +2263,9 @@ std::optional<json> HandleRequirementsRpc(ui::AppState& state,
       if (recompute || !Current(state, *FindRequirement(state, id)))
         todo.push_back(id);
     if (async && !todo.empty()) {
-      const uint64_t job =
-          StartCheck(state, todo, recompute, outlive ? 0 : state.rpcConnection);
+      uint64_t job = 0;
+      StartCheck(state, todo, recompute, outlive ? 0 : state.rpcConnection,
+                 &job);
       json out = RowsJson(state, &ids);
       out["job"] = job;
       out["kind"] = kJobKind;

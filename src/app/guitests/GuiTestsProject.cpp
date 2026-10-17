@@ -7,12 +7,15 @@
 #include "core/features/DerivedFeature.h"
 #include "core/io/CrashReports.h"
 #include "remote/RemoteRequirements.h"
+#include "ui/BackgroundJobs.h"
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
 #include "ui/OpenJob.h"
 #include "ui/PanelTitles.h"
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h"
+
+#include <chrono>
 
 // Project GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -1951,6 +1954,139 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_STR_EQ(states().c_str(), "fail,fail"); // 12 mm3 now
     s_App->requirements.clear();
     s_App->requirementsEdits++;
+    ctx->Yield(2);
+  };
+
+  // A check measures on a worker
+  // (docs/requirements/README.md#checking-is-a-job): a slow clearance keeps
+  // the frames coming, Cancel stops it and keeps what was measured, an edit
+  // while it measures leaves the evidence stale (not a pass for a model
+  // nobody measured), and a requirement removed meanwhile gets nothing. The
+  // hold is in the measure itself, so a measure put back on the frame fails the
+  // first part.
+  t = IM_REGISTER_TEST(engine, "requirements", "a_slow_check_keeps_the_frame");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx); // 2 x 2 x 2
+    ctx->Yield(2);
+    const uint64_t partId = s_App->parts[s_App->activePart].id;
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Pair");
+    ui::SetActivePart(*s_App, asmIdx);
+    const uint64_t asmId = s_App->parts[asmIdx].id;
+    Occurrence lo;
+    lo.name = "Left";
+    lo.partId = partId;
+    lo.fixed = true;
+    const uint64_t left = s_App->assembly->AddOccurrence(lo);
+    Occurrence ro;
+    ro.name = "Right";
+    ro.partId = partId;
+    ro.position = glm::dvec3(10.0, 0.0, 0.0); // 8 mm clear
+    const uint64_t right = s_App->assembly->AddOccurrence(ro);
+    ctx->Yield(3);
+    req::Requirement r;
+    r.id = 1;
+    r.revision = 1;
+    r.name = "the pair clears";
+    r.measure = {{"kind", "clearance"},
+                 {"document", asmId},
+                 {"a", left},
+                 {"b", right},
+                 {"mode", "exact"}};
+    r.bound = req::BoundFromJson({{"kind", "at_least"}, {"value", 1.0}});
+    s_App->requirements = {r};
+    s_App->nextRequirementId = 2;
+    s_App->requirementsEdits++;
+    ctx->Yield(3);
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelRequirements);
+    IM_CHECK(panel != nullptr);
+    ctx->ItemClick(panel->TabId);
+    ctx->Yield(2);
+    const auto state = [] {
+      return remote::RequirementRows(*s_App)
+          .at("requirements")[0]
+          .at("state")
+          .get<std::string>();
+    };
+    struct Hold {
+      explicit Hold(int ms) { remote::SetTestRequirementHold(ms); }
+      ~Hold() { remote::SetTestRequirementHold(0); }
+    };
+    using Clock = std::chrono::steady_clock;
+    const auto since = [](Clock::time_point t0) {
+      return std::chrono::duration<double>(Clock::now() - t0).count();
+    };
+
+    // Measured beside the frame: it holds 1.5 s, and no frame pays for it.
+    {
+      const Hold hold(1500);
+      ctx->SetRef("//###Requirements");
+      ctx->ItemClick("Check###req_check");
+      const auto t0 = Clock::now();
+      int frames = 0;
+      double worstMs = 0.0;
+      while (ui::BackgroundJobRunning(*s_App, "requirements")) {
+        if (since(t0) > kWaitSeconds) {
+          IM_ERRORF("the check ran %.0f s", since(t0));
+          return;
+        }
+        const double c0 = MainThreadCpuMs();
+        ctx->Yield();
+        worstMs = std::max(worstMs, MainThreadCpuMs() - c0);
+        frames++;
+      }
+      IM_CHECK(since(t0) > 1.4); // the hold was in the measure
+      IM_CHECK_GE(frames, 5);
+      IM_CHECK_LT(worstMs, 250.0);
+    }
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(state().c_str(), "pass");
+    IM_CHECK(s_App->requirements[0].evidence.value.has_value());
+    IM_CHECK(std::abs(*s_App->requirements[0].evidence.value - 8.0) < 1e-6);
+
+    // Cancel: the worker stops at its next look at the flag, not after
+    // the 30 s hold, and what was measured stays.
+    {
+      const Hold hold(30000);
+      remote::StartRequirementsCheck(*s_App, true);
+      ctx->SetRef("//###Requirements");
+      IM_CHECK(WaitFor(ctx, "the check's Cancel",
+                       [&] { return ctx->ItemExists("###req_cancel"); }));
+      const auto t0 = Clock::now();
+      ctx->ItemClick("###req_cancel");
+      IM_CHECK(WaitForJobs(ctx, "requirements"));
+      IM_CHECK_LT(since(t0), 15.0);
+    }
+    IM_CHECK_STR_EQ(state().c_str(), "pass");
+    IM_CHECK(std::abs(*s_App->requirements[0].evidence.value - 8.0) < 1e-6);
+
+    // An edit while it measures: the reading lands, about the model it
+    // copied, so the requirement reads stale.
+    {
+      const Hold hold(1500);
+      remote::StartRequirementsCheck(*s_App, true);
+      ctx->Yield(2);
+      IM_CHECK(ui::BackgroundJobRunning(*s_App, "requirements"));
+      Occurrence* moved = s_App->assembly->FindById(right);
+      IM_CHECK(moved != nullptr);
+      moved->position = glm::dvec3(20.0, 0.0, 0.0);
+      IM_CHECK(WaitForJobs(ctx, "requirements"));
+    }
+    ctx->Yield(2);
+    IM_CHECK_STR_EQ(state().c_str(), "stale");
+    IM_CHECK(std::abs(*s_App->requirements[0].evidence.value - 8.0) < 1e-6);
+
+    // Removed while it measures: the check ends, and nothing lands.
+    {
+      const Hold hold(1500);
+      remote::StartRequirementsCheck(*s_App, true);
+      ctx->Yield(2);
+      IM_CHECK(ui::BackgroundJobRunning(*s_App, "requirements"));
+      s_App->requirements.clear();
+      s_App->requirementsEdits++;
+      IM_CHECK(WaitForJobs(ctx, "requirements"));
+    }
+    IM_CHECK(s_App->requirements.empty());
     ctx->Yield(2);
   };
 }

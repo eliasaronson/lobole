@@ -245,7 +245,11 @@ the study jobs, `motion_status`, `contact_status {job}` for a contact
 report. A job started over RPC that belongs to a study or a contact report is
 cancelled when its connection closes, unless the call said `outlive_client:
 true`; `cancel_study {job}` or `cancel_background_job {kind}` cancels one by
-hand. The instance answers other calls while a job runs.
+hand. The instance answers other calls while a job runs. Some calls run as
+jobs even without `async` and wait PARKED for theirs, answering as they
+always did while the frame and other connections carry on
+([requests that wait](../architecture.md#requests-that-wait)): a
+synchronous `check_requirements` is one.
 
 ## Refusals
 

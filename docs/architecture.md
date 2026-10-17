@@ -320,13 +320,17 @@ PARKED instead (`RemoteServer::Parked`, `remote::Parking` in
 `RemoteParking.h`): the work goes to background jobs, `PollParked` asks it
 once a tick, after `ReapBackgroundJobs`, whether it is done, and the answer
 -- or a refusal, or the request put back at the head of the queue to run its
-handler from the caches -- goes out then. Three domains park: CAM, on its
+handler from the caches -- goes out then. Four domains park: CAM, on its
 toolpath passes ([cam/README.md](cam/README.md#requests-that-wait));
 drawings, on their views' projection, except on `--headless`, where the
 synchronous handler holds no frame
-([drawings](drawings/README.md#requests-that-wait)); and an exact
+([drawings](drawings/README.md#requests-that-wait)); an exact
 `interference` of two named sides, on its boolean, in every mode
-([inspect](inspect/README.md#threads)).
+([inspect](inspect/README.md#threads)); and a synchronous
+`check_requirements` with something to measure, on the check's job
+([requirements](requirements/README.md#checking-is-a-job)). The pump sets
+`AppState::rpcConnection` while it asks, so a job a parked request starts
+belongs to its client.
 A parked request holds only its OWN connection's later requests, so a
 pipelining client still gets its answers in order while other connections
 (the MCP server, a second script) are served. While anything is parked the

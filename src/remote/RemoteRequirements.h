@@ -4,9 +4,11 @@
 #pragma once
 
 #include "remote/RemoteHelpers.h"
+#include "remote/RemoteParking.h"
 #include "remote/RpcParams.h"
 #include <nlohmann/json.hpp>
 
+#include <memory>
 #include <optional>
 #include <span>
 #include <string>
@@ -29,6 +31,16 @@ std::optional<nlohmann::json> HandleRequirementsRpc(ui::AppState& state,
 
 std::span<const MethodDoc> RequirementMethodDocs();
 
+// A synchronous `check_requirements` with something to measure waits
+// instead of measuring on the frame
+// (docs/requirements/README.md#checking-is-a-job): it starts the check's job,
+// owned by the caller's connection, and is answered with what the synchronous
+// form answers once the job is reaped. nullptr: dispatch it now (async, nothing
+// to measure, or a request the handler refuses in its own words).
+std::unique_ptr<Parking> ParkRequirementsRequest(ui::AppState& state,
+                                                 const std::string& method,
+                                                 const nlohmann::json& request);
+
 // Every requirement's row with its state, as list_requirements answers it.
 nlohmann::json RequirementRows(ui::AppState& state);
 
@@ -36,5 +48,9 @@ nlohmann::json RequirementRows(ui::AppState& state);
 // the job id, 0 when every requirement was already current and nothing had
 // to run.
 uint64_t StartRequirementsCheck(ui::AppState& state, bool recompute);
+
+// Tests only: every clearance measure holds `ms` before it measures, on
+// whichever thread it runs (0: none). Also LOBOLE_TEST_REQUIREMENT_MS.
+void SetTestRequirementHold(int ms);
 
 } // namespace remote

@@ -20,13 +20,19 @@ slider-crank rig (an assembly with a motion study):
 - an unknown measure or bound kind, an unknown key, a number bounded `pass`
   and a reference that does not exist are refused, naming what is accepted;
 - requirements and their evidence survive both project forms (a lone part's
-  file and a project directory), current after the reopen.
+  file and a project directory), current after the reopen;
+- a slow clearance (held by LOBOLE_TEST_REQUIREMENT_MS) is measured off the
+  frame: a synchronous check_requirements waits while another client's
+  calls are answered, then answers as before; cancel_study stops an async
+  one well inside the hold and keeps what was measured; a check whose client
+  leaves is cancelled with it.
 
 Usage: requirements_smoke.py <path-to-designer-binary>
 """
 import os
 import sys
 import tempfile
+import threading
 import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -465,8 +471,98 @@ def mesher_available(d):
 
 
 
+def off_frame(binary):
+    """A slow check runs beside the frame
+    (docs/requirements/README.md#checking-is-a-job): the measure holds 2 s, and the instance answers
+    another client's calls meanwhile."""
+    hold = 2.0
+    env = dict(os.environ, LOBOLE_TEST_REQUIREMENT_MS=str(int(hold * 1000)))
+    with launch(binary, env=env) as app:
+        d = Client(app.port, timeout=300)
+        other = Client(app.port, timeout=30)
+        a = connect(app.port)
+        _, axle, _, _ = build_crank(a, 20.0, 70.0)
+        asm = [p for p in d.call("list_parts")["parts"]
+               if p["type"] == "assembly"][0]["id"]
+        d.call("set_active_part", part=asm)
+        occ = {o["name"]: o["id"]
+               for o in d.call("list_occurrences")["occurrences"]}
+        crank = next(occ[n] for n in sorted(occ) if "crank" in n)
+        piston = next(occ[n] for n in sorted(occ) if "piston" in n)
+        motion = d.call("add_motion_study", driver=axle, dof="rotation",
+                        to=360, samples=13, name="turn",
+                        **{"from": 0})["id"]
+        rid = add(d, "crank clears piston", {
+            "kind": "clearance", "document": asm, "a": crank, "b": piston,
+            "mode": "exact", "motion_study": motion},
+            {"kind": "at_least", "value": 1.0})
+        d.call("run_motion_study", study=motion)  # not part of the hold
+
+        # Synchronous: parked on the job, and the other client is answered.
+        answer = {}
+
+        def check():
+            t0 = time.time()
+            answer["r"] = d.call("check_requirements", ids=[rid])
+            answer["s"] = time.time() - t0
+
+        th = threading.Thread(target=check)
+        th.start()
+        slowest, pings = 0.0, 0
+        while th.is_alive():
+            t0 = time.time()
+            other.call("ping")
+            slowest = max(slowest, time.time() - t0)
+            pings += 1
+            time.sleep(0.05)
+        th.join()
+        r = answer["r"]
+        expect(answer["s"] >= hold * 0.9, f"the hold was measured: {answer}")
+        expect(pings >= 5 and slowest < 1.0,
+               f"another client waited on the check: {pings} pings, the "
+               f"slowest {slowest:.2f} s")
+        row = r["requirements"][0]
+        expect(row["state"] == "pass" and r["checked"] == 1
+               and r["reused"] == 0 and "receipt" in r,
+               f"the parked check answers as the synchronous one did: {r}")
+        expect(row["detail"]["samples"] == 13
+               and 1 <= row["detail"]["exact_samples"] <= 13, row["detail"])
+        gap = row["value"]
+
+        # Async, cancelled: stopped inside the hold, the evidence kept.
+        r = d.call("check_requirements", recompute=True, **{"async": True})
+        time.sleep(0.3)
+        t0 = time.time()
+        d.call("cancel_study", job=r["job"])
+        while d.call("study_status", job=r["job"])["running"]:
+            expect(time.time() - t0 < 30, "the cancel was not taken")
+            time.sleep(0.05)
+        st = d.call("study_status", job=r["job"])
+        expect(st["outcome"] == "cancelled", st)
+        expect(time.time() - t0 < hold, f"cancelled in {time.time() - t0} s")
+        now = rows(d)["crank clears piston"]
+        expect(now["state"] == "pass" and now["value"] == gap, now)
+
+        # The asking client leaves: its check goes with it.
+        gone = Client(app.port, timeout=30)
+        gone.sock.settimeout(0.5)
+        try:
+            gone.call("check_requirements", recompute=True)
+        except Exception:
+            pass  # timed out waiting, as meant
+        gone.sock.close()
+        t0 = time.time()
+        while any(j.get("kind") == "requirements" for j in
+                  other.call("background_jobs").get("jobs", [])):
+            expect(time.time() - t0 < 30, "the check outlived its client")
+            time.sleep(0.05)
+        expect(rows(other)["crank clears piston"]["state"] == "pass",
+               "a cancelled check keeps what was measured")
+
+
 def main():
     binary = sys.argv[1]
+    off_frame(binary)
     with launch(binary) as app:
         d = Client(app.port, timeout=300)
         study, created_by, _, load_face = build_bar(d)

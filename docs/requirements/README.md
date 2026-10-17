@@ -75,7 +75,9 @@ What a verdict needs to pass:
   parts, or every part (a standard part's length can equal a variable by
   coincidence, which is why `documents` exists).
 - `motion_clean`: the result is clean: every sample solved, no clash, no
-  standing clash.
+  standing clash, no branch jump. A failure's `detail.findings` names each
+  clashing pair (how many samples, the first driver value), the unsolved
+  samples and the branch jumps.
 - `cam_verify`: ok and complete, it cuts something, no operation failed,
   every thread judged in its band, every toleranced wall in its band, and
   every hole or thread the job leaves uncut matches an `allow_uncut` prefix.
@@ -172,6 +174,10 @@ exactly what the measure reads:
 | `check_literals` | the part's features, bodies and variables, and the project's variables |
 | `cam_verify` | the job's parts (each part's key) and setups as saved |
 
+A body's B-Rep is hashed as a reopened project reads it back
+([studies as jobs](../simulation/README.md#studies-as-jobs)), so evidence
+saved with the project reads current after the reopen.
+
 and the values of every variable a bound's or a formula's expression reads.
 So a heavier camera makes the yoke's deflection requirement stale (its
 study's loads read `load_kg`) and leaves the base plate's CAM requirement
@@ -204,21 +210,49 @@ stale by an edit that left its study's inputs alone (its bound, a variable
 only its bound reads) costs no solve either. `recompute: true` measures
 every one again and re-runs their studies.
 
-Synchronously it measures in order and answers with every row, the counts
-of each state and a receipt (a pass or fail claim per current requirement,
-an unverifiable one per other). `async: true` starts a job, kind
-`requirements`, unless nothing needs measuring (then it answers at once):
+It answers with every row, the counts of each state, `checked` and `reused`,
+and a receipt (a pass or fail claim per current requirement, an
+unverifiable one per other). Whatever it has to measure, it measures as a
+job, kind `requirements`: `async: true` answers at once with the `job`; a
+synchronous call starts the same job and waits for it parked
+([requests that wait](../architecture.md#requests-that-wait)), so the
+frame and other clients' calls carry on, and answers when it is reaped.
+Nothing to measure answers at once either way.
 
-- the job has no worker thread; its `finish` steps on the main thread, one
-  requirement a frame, so the app stays responsive;
-- a measure that starts a study job (or needs CAM passes cut) waits for it,
+- The job's `finish` steps on the main thread, one requirement a frame.
+  The main thread only reads the model and writes evidence: a measure whose
+  reading is expensive hands it to a **worker** the run owns. A clearance
+  does (one pose or over a motion study's samples, mesh or exact): the main
+  thread takes both sides' bodies as deep copies, OCC's booleans and
+  extrema writing into their arguments
+  ([query booleans](../inspect/README.md#query-booleans-are-non-destructive)),
+  and every sample's pose, and the worker measures those.
+- The evidence a worker lands carries the input hash taken when its copies
+  were made. An edit while it measures leaves the requirement `stale`, not
+  a pass for a model nobody measured; a requirement edited (its revision
+  moved) or removed meanwhile gets nothing.
+- A measure that starts a study job (or needs CAM passes cut) waits for it,
   frame by frame, and then measures; a study that fails or is cancelled is
-  that requirement's evidence (unresolved), not a reason to start it again;
-- it waits while any other study job runs, one run at a time;
+  that requirement's evidence (unresolved), not a reason to start it again.
+  With `recompute`, a study is re-run once a check, however many of its
+  requirements read it.
+- It waits while any other study job runs, one run at a time.
 - `study_status {job}` follows it (`label` names the requirement being
-  measured, `fraction` how far through), `cancel_study {job}` stops it and
-  the study it waits on, and a job started over the RPC is cancelled with
-  its client unless `outlive_client`.
+  measured, `fraction` how far through, the worker's share included),
+  `cancel_study {job}` stops it and the study it waits on, and a job
+  started over the RPC, parked or async, is cancelled with its client
+  unless `outlive_client`. A worker reads the cancel between samples, and
+  the job ends once it has stopped; what was measured before stays.
+
+**An exact clearance over a study is bounded by its meshes first.** At each
+sample the tessellations prove the exact gap is at least their distance
+less both deflections. The samples are measured exactly in order of that
+floor, and the walk stops at the first whose floor is no smaller than the
+best exact gap found, so the smallest gap and the sample it is at are the
+ones measuring every sample gives. The engine's valve-to-piston clearances
+(181 samples) measure 4 or 5 exactly, about 1.5-2 s each instead of 7-9.
+`detail.exact_samples` says how many; `samples` counts every pose
+accounted for.
 
 A measure runs on its document's tab (a study is the active part's), so a
 check visits each requirement's tab and comes back to the one it started on,
@@ -258,7 +292,8 @@ undo stack.
 `src/ui/RequirementsPanel.cpp`, docked with the Model panel, and present only
 while the project states a requirement (like the Conflicts panel). Each row
 shows the state (coloured), the name (its tooltip: the measure kind, the
-source, the note, when it was checked and at which revision), the value with
+source, the note, a failed verdict's findings, when it was checked and at
+which revision), the value with
 its unit (or "clean" / "findings" for a verdict) and the bound as evaluated.
 **Check** starts the job for every requirement that is not current, and
 shows its progress while it runs on the bar every long operation draws
@@ -309,11 +344,23 @@ before delivering.
   is not a bearing; and four wall bodies enclose exactly their floor (the
   slab under them left out by `bodies`), their material is their footprint,
   a plate encloses its Ø10 bore, a bound past the floor fails, and a wall
-  deleted reads unresolved.
+  deleted reads unresolved. With the measure held
+  (`LOBOLE_TEST_REQUIREMENT_MS`): a synchronous check parks while another
+  client is answered, then answers as before; `cancel_study` stops an async
+  one inside the hold, keeping what was measured; and a check whose client
+  leaves is cancelled with it.
 - `tests/assertion_smoke.py`: the clearance verbs, as requirements.
 - GUI `requirements/panel_checks_and_goes_stale`: the panel appears with
   the requirements, Check measures them as a job, and an edit to the model
   makes them stale.
+- GUI `requirements/a_slow_check_keeps_the_frame`: a clearance held 1.5 s
+  in its measure (`remote::SetTestRequirementHold`) leaves every frame
+  under 250 ms of main-thread CPU; the panel's Cancel ends a 30 s hold
+  at once, keeping the evidence; an edit while it measures reads stale; a
+  requirement removed meanwhile gets nothing.
+- The engine (`generators/engine`) states its valve clearances and both
+  studies clean as requirements, and reopens the saved project to see every
+  one read `pass` unmeasured (`generator_engine`).
 - Golden `v160-requirements` (a lone part's envelope) and
   `v163-bearing-bore-requirement` (the `bearing_bore` measure) and
   `v165-section-area-requirement` (`section_area`, on walls of the building

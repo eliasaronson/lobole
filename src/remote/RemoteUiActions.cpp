@@ -37,6 +37,7 @@
 #include "remote/RemoteModeling.h"
 #include "remote/RemoteMotion.h"
 #include "remote/RemoteProject.h"
+#include "remote/RemoteRequirements.h"
 #include "remote/RemoteSimulation.h"
 #include "remote/RpcErrors.h"
 #include "remote/RpcParams.h"
@@ -1026,7 +1027,8 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
 
     // A request that would compute on the frame waits instead
     // (remote/RemoteParking.h): a CAM one on its passes, a drawing one on its
-    // projection, an exact interference of two named sides on its boolean. A
+    // projection, an exact interference of two named sides on its boolean, a
+    // synchronous requirements check on its job. A
     // `batch` never parks -- its calls run inside HandleSemantic, one
     // transaction -- and neither does a request coming back from parking. Nor
     // does a drawing request on --headless, where no frame is held and the
@@ -1039,6 +1041,12 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       try {
         const watchdog::Label label("RPC " + parked->request.method +
                                     " (parking)");
+        // Who is asking, for a job a parked request starts to belong to.
+        struct Caller {
+          ui::AppState& state;
+          ~Caller() { state.rpcConnection = 0; }
+        } caller{state};
+        state.rpcConnection = parked->request.connection;
         parked->wait = remote::ParkCamRequest(state, parked->request.method,
                                               *parked->params);
         if (!parked->wait && m_mode != RemoteMode::Headless)
@@ -1048,6 +1056,9 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
           parked->wait = remote::ParkInspectionRequest(
               state, parked->request.method, parked->request.params,
               *parked->params);
+        if (!parked->wait)
+          parked->wait = remote::ParkRequirementsRequest(
+              state, parked->request.method, parked->request.params);
       } catch (...) {
         parked->wait = nullptr; // the handler says what went wrong
       }

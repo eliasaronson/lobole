@@ -147,6 +147,12 @@ void DrawRequirementsPanel(AppState& state) {
           tip += "\n" + row.at("source").get<std::string>();
         if (row.contains("note"))
           tip += "\n" + row.at("note").get<std::string>();
+        // A failed verdict's findings: "findings" in the Value column says
+        // there are some, and this is where they are read.
+        if (row.contains("detail") && row.at("detail").contains("findings"))
+          for (const nlohmann::json& f : row.at("detail").at("findings"))
+            if (f.is_string())
+              tip += "\n- " + f.get<std::string>();
         if (row.contains("checked_at"))
           tip += "\nchecked " + row.at("checked_at").get<std::string>() +
                  " (revision " +
