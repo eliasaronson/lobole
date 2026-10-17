@@ -341,7 +341,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "of mate_a/mate_b/ratio/phase, and `held` names a member the last "
      "solve held where it stood because nothing drove it. An intermittent "
      "relation lists its step (b's unit, degrees for a turn), period_deg, "
-     "start_deg, duration_deg, motion and, for a Geneva, slots.",
+     "start_deg, duration_deg, motion and, for a Geneva, slots. A freewheel "
+     "with teeth lists its `teeth`.",
      "", remote::NoFlags,
      "relations:{dof_a?:string, dof_b?:string, id:int, kind:string, "
      "mate_a?:int, mate_b?:int, name:string, phase?:number, "
@@ -351,7 +352,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "duration_deg?:number, error?:string, motion?:string, "
      "period_deg?:number, slots?:int, start_deg?:number, step?:number, "
      "mate_b_path?:int[], mate_a_path?:int[], internal?:bool, "
-     "lift?:any, ride?:any}[]"},
+     "lift?:any, ride?:any, teeth?:int}[]"},
     {"select_mate", "Select a mate in the UI.", "id"},
     {"solve_assembly",
      "Run the mate solver. Returns every mate with a `status` (satisfied | "
