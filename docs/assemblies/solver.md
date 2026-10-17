@@ -287,7 +287,14 @@ stays on the built branch at every step up to 30 degrees. At 45 degrees a
 step it lands on a mirror branch, first at 360 degrees, and stays there,
 still closed. So a study of a linkage with mirror branches samples finely,
 and a generator that cares which branch it is on checks the knees' signs
-itself.
+itself, as the Strandbeest does at every sample of its 2-degree study
+([its README](../../generators/strandbeest/README.md#checked-every-run)).
+
+The twelve-leg walker is the largest component yet: 109 revolute columns
+(twelve legs of nine joints and the crank) and 36 cut mates in one solve.
+Seeded from the last sample, it costs about 36 ms a sample on the
+development machine (6.6 s for a 181-sample turn with no clash check). That
+is fast enough that analytic Jacobians were not built ([cost](#cost)).
 
 ### Without Eigen
 
@@ -317,5 +324,6 @@ that breaks a loop says which connector to look at.
 The floor is one tree walk. A bolt pattern costs about the same as no loop
 (zero unknowns). A genuine mechanism costs one tree walk per unknown per LM
 iteration; analytic Jacobians (a revolute's column is a cross product) are the
-lever if that ever matters. A loop that fails to close also pays for its
+lever if that ever matters. It has not yet: the Strandbeest's 109 columns
+solve in about 36 ms a sample ([coupled loops](#coupled-loops)). A loop that fails to close also pays for its
 diagnosis: two more solves per axis-carrying mate in that component.

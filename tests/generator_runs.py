@@ -139,6 +139,16 @@ def jar(port, out):
             [r"unscrew 2 turns .*: passed", r"jar: done"], None)
 
 
+def strandbeest(port, out):
+    # The whole run on the built-in PLA table: both stages, every check (the
+    # branch, the clash, the layers, the feet, the stability), both negative
+    # controls failing, and every print plate checked.
+    return ([PY, "-u", os.path.join(GEN, "strandbeest", "build.py"),
+             "--port", str(port), "--out", os.path.join(out, "strandbeest")],
+            [r"negative control, two crossing bars on one layer: FAILS",
+             r"walker: .* mm a crank turn", r"strandbeest: done"], None)
+
+
 # name -> (builder, instance kind, extra environment). The offscreen ones
 # take screenshots or renders, which a --headless instance refuses.
 RUNS = {
@@ -152,6 +162,7 @@ RUNS = {
     "jar": (jar, True, {}),
     "counter": (counter, True, {}),
     "hinge_box": (hinge_box, True, {}),
+    "strandbeest": (strandbeest, True, {}),
 }
 
 
