@@ -179,7 +179,7 @@ copy and its source, no ghost curves in a drawing view); GUI
 until a source exists). Goldens `v84-derived-servo`, `v85-derived-by-name`,
 `v133-derived-configuration` (a copy taken in a configuration the source does
 not have active, and its stale check against that configuration),
-`vNEXT-derived-fit-bands` (a printed pin's press band on its copy).
+`v182-derived-fit-bands` (a printed pin's press band on its copy).
 `tests/test_press_fits.cpp`, "A Derived copy of a printed pin keeps its
 press": a pin printed under a profile, derived into a part that is not
 printed, is relieved against its printed cap, before and after a round trip.

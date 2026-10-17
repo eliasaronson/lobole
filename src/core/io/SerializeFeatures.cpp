@@ -1096,7 +1096,7 @@ json FeatureToJson(const Feature& feature) {
               {"element_map", ElementMapToJson(b.elementMap)}};
       if (b.hasDisplayColor)
         bj["display_color"] = Vec3ToJson(b.displayColor);
-      // vNEXT: the source's size bands, as it read them.
+      // v182: the source's size bands, as it read them.
       if (!b.fitBands.empty()) {
         json bands = json::array();
         for (const FitBand& f : b.fitBands) {
@@ -2478,7 +2478,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
           b.hasDisplayColor = true;
           b.displayColor = Vec3FromJson(bj.at("display_color"));
         }
-        for (const json& fj : bj.value("fit_bands", json::array())) { // vNEXT
+        for (const json& fj : bj.value("fit_bands", json::array())) { // v182
           FitBand f;
           f.face.name = fj.at("face").get<std::string>();
           f.lower = fj.at("lower").get<double>();

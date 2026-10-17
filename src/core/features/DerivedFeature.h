@@ -43,7 +43,7 @@ struct DerivedBody {
   ElementMap elementMap;
   bool hasDisplayColor = false;
   glm::vec3 displayColor{0.0f};
-  // vNEXT: the size bands the source stamped on this body (its ISO and
+  // v182: the size bands the source stamped on this body (its ISO and
   // printed tolerances, a bearing's rings), as the SOURCE read them -- its
   // print process, not the host's -- with the source's face names
   // (`face.featureId` unused). fitband::Stamp puts them on the copy under

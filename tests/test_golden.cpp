@@ -925,7 +925,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     std::sort(got.begin(), got.end());
     CHECK(got == expect.at("body_materials").get<std::vector<std::string>>());
   }
-  // vNEXT: a Derived copy's size bands, carried from its source in the
+  // v182: a Derived copy's size bands, carried from its source in the
   // snapshot and stamped on the copy under its own face names.
   if (expect.contains("fit_bands")) {
     std::vector<std::string> got;
