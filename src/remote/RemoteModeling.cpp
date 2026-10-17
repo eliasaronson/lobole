@@ -9,6 +9,7 @@
 #include "core/Angles.h"
 #include "core/Command.h"
 #include "core/Document.h"
+#include "core/ElementOrigin.h"
 #include "core/Expression.h"
 #include "core/Literals.h"
 #include "core/Primitives.h"
@@ -98,9 +99,17 @@ double AngleParam(bool hasRad, double rad, bool hasDeg, double deg,
 // (docs/scripting/rpc.md#a-refused-call-changes-nothing). Regeneration
 // still refuses the same, for a loaded file; the thread's other errors (a
 // row the tables lack) stay the feature's, reported in `regen`.
+// A Thread the tables refuse -- a designation that claims a series and is
+// not a row ("M8 printed nut"), a pitch that is not the row's, a custom
+// thread without one, a class the series lacks, a flank angle outside the
+// range -- is refused before it is stored: ThreadFeature::WhyRefused, the
+// one check regeneration also makes, so the call and the feature's error
+// can never disagree. A thread that was stored refused was reported later
+// as "external, Ø0" by get_print_process, describing a thread that was
+// never there.
 void RefuseThread(const Feature& f) {
   if (const auto* th = dynamic_cast<const ThreadFeature*>(&f))
-    if (const std::string why = th->PitchRefusal(); !why.empty())
+    if (const std::string why = th->WhyRefused(); !why.empty())
       throw std::runtime_error("Thread: " + why);
 }
 
@@ -363,7 +372,10 @@ static constexpr MethodDoc ModelingMethods[] = {
      "feature, by feature_id (its created_by), by body index, or by "
      "body_name (a name two bodies share is refused naming them; an "
      "unknown one is refused listing the bodies); '' restores "
-     "default. An unrecognised slug is refused, naming the accepted set. "
+     "default. An unrecognised slug is refused, naming the accepted set, "
+     "and so is a feature_id that creates no body (a cut, a fillet, a "
+     "thread, a sketch), naming the feature that made the body it "
+     "modifies: a material there would change nothing. "
      "Drives mass, BOM and FEM as well as appearance. The write lands on the "
      "CREATING feature: a Boolean, a body pattern or mirror and a Split make "
      "a new body named after themselves, which keeps its source's material "
@@ -962,7 +974,75 @@ Feature* BodyOwnerFor(Document& doc, const RpcParams& p, const char* method,
           " (must be a body's created_by — get_state lists bodies). "
           "Features here: " +
           FeatureCandidates(doc, false));
-    return f;
+    // The write lands on the CREATING feature, and the material is stamped
+    // from there (Document::Regenerate). A feature that creates no body -- a
+    // cut, a fillet, a modelled thread, a sketch -- would take the slug and
+    // change nothing: the clock's every body weighed null that way. Refused,
+    // naming the feature that made the body it modifies.
+    // A body's creator, or a feature it continues the material of (a
+    // Boolean, a body pattern or mirror, a Split re-owns its source's body
+    // and keeps the source's material: Feature::MaterialSource), counts.
+    const auto& bodies = doc.GetBodies();
+    const int self = static_cast<int>(index);
+    for (const Body& b : bodies) {
+      if (doc.OwnerIndex(b.createdBy) == self)
+        return f;
+      const Feature* c = doc.FindFeatureById(b.createdBy);
+      for (size_t hops = 0; c != nullptr && hops <= doc.FeatureCount();
+           hops++) {
+        if (c->GetId() == id)
+          return f;
+        c = c->MaterialSource() ? doc.FindFeatureById(c->MaterialSource())
+                                : nullptr;
+      }
+    }
+    std::vector<std::string> modifies;
+    for (const Body& b : bodies) {
+      bool touched = false;
+      for (const auto& [face, name] : b.elementMap.names) {
+        const topo::ElementOrigin o = topo::DecodeElementName(name);
+        if (o.madeBy == id ||
+            std::find(o.modifiedBy.begin(), o.modifiedBy.end(), id) !=
+                o.modifiedBy.end()) {
+          touched = true;
+          break;
+        }
+      }
+      if (!touched)
+        continue;
+      const Feature* owner = doc.FindFeatureById(b.createdBy);
+      const int ownerIdx = owner ? -1 : doc.OwnerIndex(b.createdBy);
+      const Feature* named = owner           ? owner
+                             : ownerIdx >= 0 ? doc.GetFeature(ownerIdx)
+                                             : nullptr;
+      modifies.push_back(
+          "'" + b.name + "', made by feature_id " +
+          std::to_string(named ? named->GetId() : b.createdBy) +
+          (named ? " (" + named->TypeName() + " '" + named->GetName() + "')"
+                 : std::string{}));
+    }
+    std::vector<std::string> made;
+    for (size_t i = 0; i < bodies.size(); i++)
+      made.push_back("#" + std::to_string(i) + " '" + bodies[i].name +
+                     "' (created_by " + std::to_string(bodies[i].createdBy) +
+                     ")");
+    std::string why = std::string(method) + ": feature " + std::to_string(id) +
+                      " (" + f->TypeName() + " '" + f->GetName() +
+                      "') created no body, so " +
+                      (std::string(method) == "set_appearance" ? "an appearance"
+                                                               : "a material") +
+                      " set on it would change nothing";
+    if (!f->GetError().empty())
+      why += " (it failed to build: " + f->GetError() + ")";
+    if (!modifies.empty())
+      why += ". It modifies " + KnownList(modifies) +
+             ": pass that feature_id (a body's created_by), or the body or "
+             "body_name";
+    else
+      why += ". Pass a body's created_by as feature_id, or body / "
+             "body_name. Bodies here: " +
+             (made.empty() ? std::string("none") : KnownList(made));
+    throw std::runtime_error(why + "; the document is unchanged");
   }
   const auto& bodies = doc.GetBodies();
   uint64_t owner = 0;
@@ -1100,10 +1180,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
           !why.empty())
         throw std::runtime_error("Derived: " + why);
     }
+    RefuseThread(*feature);
     if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
       throw std::runtime_error(feature->TypeName() + " is incomplete: " + why);
     }
-    RefuseThread(*feature);
     const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
         std::make_unique<AddFeatureCommand>(std::move(feature)), *doc);

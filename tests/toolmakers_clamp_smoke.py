@@ -16,6 +16,7 @@ sys.path[:0] = [
 ]
 from smoke_app import launch
 from lobole.sdk import App
+from lobole.errors import Refused
 import toolmakers_clamp as C
 
 with (
@@ -96,11 +97,22 @@ with (
     app.modify_feature(feature_id=spec["id"], feature=spec)
     fixture.solve()
     assert abs(app.list_relations()["relations"][0]["ratio"] - 2.5 / (2 * math.pi)) < 1e-9
-    # A thread the tables refuse is the feature's error, and the screw it
-    # backs errors with it rather than keeping the last pitch.
+    # A thread the tables refuse is refused before it is stored
+    # (ThreadFeature::WhyRefused), and the screw keeps the pitch it has.
     shaft.activate()
-    spec["designation"] = "M7.3"
-    app.modify_feature(feature_id=spec["id"], feature=spec)
+    refused = dict(spec, designation="M7.3")
+    try:
+        app.modify_feature(feature_id=spec["id"], feature=refused)
+        raise AssertionError("an M7.3 thread was accepted")
+    except Refused as e:
+        assert "not in the ISO metric thread table" in str(e), e
+    fixture.solve()
+    assert abs(app.list_relations()["relations"][0]["ratio"] - 2.5 / (2 * math.pi)) < 1e-9
+    # A thread that errors -- its face is no cylinder -- errors the screw
+    # it backs with it, rather than the screw keeping the last pitch.
+    shaft.activate()
+    flat = shaft.faces(kind="plane")[0]
+    app.modify_feature(feature_id=spec["id"], feature=dict(spec, face=flat.ref))
     assert fixture.solve()["errored_mates"] > 0
     print(
         "PASS: analytic volumes, screw travel, exact clashes, eight drawings, BOM, STEP round trip, saved project and live edits"

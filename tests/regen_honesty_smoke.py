@@ -325,6 +325,85 @@ def main():
                    f"the refusal names the dimension: {e}")
         expect(arc_of(literal)[0] == before, "and the document is unchanged")
 
+        # --- a modelled thread is cut, or its call says it was not ------
+        # The clock's pillar: a 45-degree thread whose relief beside it
+        # stands at EXACTLY the thread's root radius, so the groove's cutter
+        # runs along a surface the body already has. A modelled thread that
+        # cannot be cut is no thread at all -- nothing prints -- and the
+        # clock only learned it from check_geometry: its script read no
+        # regen, and the SDK's thread() handed back a Thread either way.
+        d.call("new_project")
+        r_ext, depth, pitch = 3.95, 0.625, 2.0
+        r_root = r_ext - depth
+        zt0, zt1, top = -13.2, -4.075, 20.0
+        prof = [(0.0, -36.4), (r_root - 0.8, -36.4),
+                (r_root - 0.8, zt0 - 0.8 - depth), (r_ext, zt0),
+                (r_ext, zt1), (r_root, zt1), (r_root, -2.0), (6.0, 0.0),
+                (6.0, top), (0.0, top)]
+        sk = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Pillar profile",
+            "plane": {"origin": [0, 0, 0], "normal": [0, -1, 0],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": list(prof[i]),
+                          "b": list(prof[(i + 1) % len(prof)])}
+                         for i in range(len(prof))]})["id"]
+        pillar = d.call("add_feature", feature={
+            "type": "Revolve", "name": "Pillar", "sketch_id": sk,
+            "axis": {"kind": "z"}, "angle_deg": 360.0,
+            "mode": "new_body"})["id"]
+        v0 = d.call("get_state")["bodies"][0]["volume_mm3"]
+        face = next(f["name"] for f in
+                    d.call("list_elements")["bodies"][0]["faces"]
+                    if f["kind"] == "cylinder" and
+                    abs(f["radius"] - r_ext) < 1e-6)
+        r = d.call("add_feature", feature={
+            "type": "Thread", "name": "Pillar thread",
+            "designation": "pillar thread", "pitch": pitch,
+            "flank_angle_deg": 45.0, "modeled": True,
+            "face": {"feature_id": pillar, "element": face}})
+        healthy(r, "the pillar's thread beside a relief at its root")
+        cut = v0 - d.call("get_state")["bodies"][0]["volume_mm3"]
+        # A turn of the groove is about depth * pitch / 2 of section round
+        # the mean radius; the span is (zt1 - zt0) / pitch turns.
+        turns = (zt1 - zt0) / pitch
+        want = depth * pitch / 2 * 2 * math.pi * (r_ext - depth / 2) * turns
+        expect(cut > 0.5 * want,
+               f"and the groove IS cut: {cut:.1f} mm3 removed, a groove is "
+               f"about {want:.1f}")
+
+        # One that cannot be cut: a groove deeper than the boss. Its call
+        # names it, and the SDK's thread() refuses it and undoes it.
+        boss = cylinder(d, (30, 0, 0), "z", 1.0, 10.0, "Thin boss")["id"]
+        thin = next(f["name"] for f in
+                    d.call("list_elements", body=1)["bodies"][0]["faces"]
+                    if f["kind"] == "cylinder")
+        bad = d.call("add_feature", feature={
+            "type": "Thread", "name": "Too deep", "designation": "coarse",
+            "pitch": 10.0, "flank_angle_deg": 45.0, "modeled": True,
+            "face": {"feature_id": boss, "element": thin}})
+        reg = bad["regen"]
+        expect(not reg["ok"] and [f for f in reg["failed"]
+                                  if f["name"] == "Too deep"],
+               f"an uncut modelled thread fails its own call: {reg}")
+        d.call("undo")
+        from lobole.sdk import App, SdkError
+        tabs = d.call("list_parts")
+        active = next(t["name"] for t in tabs["parts"]
+                      if t["index"] == tabs["active"])
+        part = App(d).part(active, create=False)
+        count = len(d.call("get_state")["features"])
+        face = next(f for f in part.body(index=1).faces(kind="cylinder"))
+        try:
+            part.thread(face, "coarse", modeled=True, pitch=10.0,
+                        flank_angle_deg=45.0)
+            raise AssertionError("the SDK handed back a modelled thread "
+                                 "whose groove was not cut")
+        except SdkError as e:
+            expect("not cut" in str(e) and "undone" in str(e),
+                   f"the SDK says why, and that it undid it: {e}")
+        expect(len(d.call("get_state")["features"]) == count,
+               "and the part is as it was")
+
         print("regen_honesty_smoke: OK")
     finally:
         app.terminate()

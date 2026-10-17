@@ -606,18 +606,30 @@ def new_part(d, name, proc):
     d.call("set_print_process", **proc)
 
 
+def weigh(d, mat):
+    """The material on the active part's one body, by the feature that
+    CREATED it: set_material on a later feature (the cut a builder returns)
+    is refused, since it would set nothing."""
+    bodies = d.call("list_elements")["bodies"]
+    if len(bodies) != 1:
+        raise SystemExit(f"counter: a part of {len(bodies)} bodies")
+    d.call("set_material", feature_id=bodies[0]["created_by"], material=mat)
+
+
 def build_parts(d, s, proc):
     b = Builder(d)
     mat = material_of(d, proc)
     t0 = time.perf_counter()
     for j in range(s["digits"]):
         new_part(d, wheel_name(j), proc)
-        body = build_wheel(b, s, j)
-        d.call("set_material", feature_id=body, material=mat)
+        build_wheel(b, s, j)
+        weigh(d, mat)
     new_part(d, "transfer", proc)
-    d.call("set_material", feature_id=build_transfer(b, s), material=mat)
+    build_transfer(b, s)
+    weigh(d, mat)
     new_part(d, "housing", proc)
-    d.call("set_material", feature_id=build_housing(b, s), material=mat)
+    build_housing(b, s)
+    weigh(d, mat)
     print(f"  parts: {s['digits']} wheels, a transfer and the housing in "
           f"{time.perf_counter() - t0:.0f} s")
 
@@ -969,6 +981,7 @@ def main():
     # locked and the transfer stands at its own zero.
     new_part(d, "control: half gap", proc)
     build_transfer(Builder(d), s, gap=gap["allowance_mm"] / 2.0)
+    weigh(d, material_of(d, proc))
     t0 = s["transfers"][0]["z0"]
     wheel = check(d.call("add_feature", feature={
         "type": "Derived", "name": wheel_name(0), "source_part":

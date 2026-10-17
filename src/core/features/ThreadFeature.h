@@ -40,12 +40,16 @@ public:
   // designation claiming a row the tables lack, a table thread at another
   // pitch or flank angle than its row's, a class suffix and thread_class
   // that disagree, a custom thread with no pitch, a flank angle out of
-  // range. Execute refuses with it, as the feature's error.
+  // range. add_feature and modify_feature refuse with it before anything
+  // is committed, and so does the GUI's Accept (WhyIncomplete); Execute
+  // refuses with it, as the feature's error, only for a file that holds
+  // one (docs/modeling/holes-and-threads.md#thread).
   [[nodiscard]] std::string WhyRefused() const;
+  [[nodiscard]] std::string WhyIncomplete() const override {
+    return WhyRefused();
+  }
   // The part of it about the pitch: a table thread at another pitch than
-  // its row's, a custom thread with none. add_feature and modify_feature
-  // refuse with it before committing, so the caller's number is never
-  // swapped for the table's (docs/modeling/holes-and-threads.md#thread).
+  // its row's, a custom thread with none.
   [[nodiscard]] std::string PitchRefusal() const;
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     VisitRefs(face, visit); // the cylindrical face being threaded

@@ -62,6 +62,11 @@ struct PrintedThread {
   bool resolved = false; // the face resolved (the overlay is valid)
   bool known = false;    // a table row, not a custom thread
   bool modeled = false;  // the groove is cut; a cosmetic thread prints nothing
+  // Why the thread did not build, when it did not (the feature's error): a
+  // thread that is not there has no size to report, and says why instead.
+  std::string failed;
+  // The allowance row's source, for the confirm note (printfit::ConfirmNote).
+  std::string source;
   double pitch = 0.0;
   double allowance = 0.0;     // signed, on the diameter
   double modelledMajor = 0.0; // the major the feature cuts

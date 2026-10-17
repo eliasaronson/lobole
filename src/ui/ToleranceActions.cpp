@@ -140,6 +140,8 @@ std::optional<PrintedDiameter> PrintedForModelled(const printfit::Process& p,
 }
 
 std::string PrintedThread::Sentence() const {
+  if (!failed.empty())
+    return "Thread " + designation + " (printed): not built -- " + failed;
   std::string out = "Thread " + designation + " (" +
                     (external ? "external" : "internal") + ", printed): ";
   if (known)
@@ -176,9 +178,18 @@ std::optional<PrintedThread> PrintedThreadFor(const Document& doc,
         r.external ? face
                    : face + 2.0 * threads::BasicDepth(r.pitch, th.flankDeg);
   }
+  // A thread that did not build has no size: say why, rather than a Ø0
+  // that reads like a measurement. add_feature refuses what the tables
+  // refuse (ThreadFeature::WhyRefused), so this is a file that holds one,
+  // or a face that stopped resolving.
+  if (!th.GetError().empty() && !r.resolved) {
+    r.failed = th.GetError();
+    r.notes.push_back("the thread did not build: " + r.failed);
+    return r;
+  }
   if (!row && !r.resolved) {
-    r.notes.push_back("the thread's face does not resolve, so its size is "
-                      "unknown");
+    r.failed = "the thread's face does not resolve, so its size is unknown";
+    r.notes.push_back(r.failed);
     return r;
   }
   const printfit::Printed kind = r.external ? printfit::Printed::ExternalThread
@@ -190,6 +201,7 @@ std::optional<PrintedThread> PrintedThreadFor(const Document& doc,
     return r;
   }
   r.allowance = a->allowanceMm;
+  r.source = a->row != nullptr ? a->row->source : std::string{};
   r.printsMajor = r.modelledMajor - r.allowance;
   if (row) {
     r.wantMajor = row->majorDia;
@@ -210,6 +222,11 @@ std::optional<PrintedThread> PrintedThreadFor(const Document& doc,
   if (!r.modeled)
     r.notes.push_back("cosmetic: the body has no groove, so nothing is "
                       "printed - a printed thread needs `modeled: true`");
+  else if (!th.overlay.cut)
+    r.notes.push_back(
+        "the modelled groove was NOT cut, so nothing is "
+        "printed" +
+        (th.GetError().empty() ? std::string{} : ": " + th.GetError()));
   const double floor = printfit::MinReliableThreadMm(*proc);
   if (floor > 0.0 && r.modelledMajor < floor)
     r.notes.push_back(

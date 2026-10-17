@@ -2233,8 +2233,9 @@ class Part(_Tab):
         Matching coaxial threads relieve only their common axial span during
         exact contact checks. Cosmetic by default: no geometry or STEP
         machining diameter is changed. ``modeled=True`` cuts the real helical
-        groove (``hand`` "right" or "left"); a cut that fails is the
-        feature's error and keeps the body.
+        groove (``hand`` "right" or "left"); a cut that fails is REFUSED
+        (SdkError, naming why) and the thread undone: a body with no groove
+        on it is not a thread that prints.
 
         ``pitch`` (mm) is a CUSTOM thread's -- a designation that names no
         series -- and it needs one. A table thread takes its row's: leave it
@@ -2270,6 +2271,19 @@ class Part(_Tab):
                 **extra,
             )
         )
+        # A modelled thread whose groove could not be cut is its feature's
+        # error, named in this call's regen -- and a script that never reads
+        # regen carried on with a body that has no thread on it, a print
+        # that cannot screw together. So it is refused here, and undone
+        # first: the call changes nothing.
+        failed = [f for f in (feature.get("regen") or {}).get("failed", [])
+                  if f.get("index") == feature.get("index")]
+        if modeled and failed:
+            self.app.undo()
+            raise SdkError(
+                f"thread {designation!r}: the modelled groove was not cut "
+                f"({failed[0].get('error')}); the thread was undone, so the "
+                f"part is as it was")
         return Thread(self, feature["id"], face)
 
     def _gear_blank(self, face, what):

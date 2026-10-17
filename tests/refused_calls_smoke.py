@@ -282,7 +282,38 @@ def main():
             check("custom thread without a pitch", "add_feature",
                   {"feature": dict(m6, designation="boss thread")},
                   needle="needs its pitch", tab=part["name"])
+            # A designation that claims a series and is not a row is refused
+            # the same way, before it is stored -- not kept as a feature
+            # error that get_print_process then read as "external, Ø0".
+            # Both spellings: "M8 printed" was stored and "M8 printed nut"
+            # refused by one path, each the other way round by another.
+            for bad in ("M6 printed", "M6 printed nut"):
+                check(f"thread designation {bad!r}", "add_feature",
+                      {"feature": dict(m6, designation=bad)},
+                      needle="not in the ISO metric thread table",
+                      tab=part["name"])
             tid = d.call("add_feature", feature=m6)["id"]
+            check("thread designation on modify", "modify_feature",
+                  {"feature_id": tid,
+                   "feature": dict(m6, designation="M6 printed")},
+                  needle="not in the ISO metric thread table",
+                  tab=part["name"])
+            # A material on a feature that creates no body sets nothing:
+            # refused, naming the feature that made the body it modifies
+            # (the clock weighed every body null this way).
+            boss = face["feature_id"]
+            bore = cylinder(d, (80, 0, 6), "z", 1.0, 10.0, name="M6 bore",
+                            mode="cut")["id"]
+            check("set_material on a cut", "set_material",
+                  {"feature_id": bore, "material": "steel"},
+                  needle=f"It modifies 'M6 boss', made by feature_id {boss}",
+                  tab=part["name"])
+            check("set_material on a thread", "set_material",
+                  {"feature_id": tid, "material": "steel"},
+                  needle="created no body", tab=part["name"])
+            check("set_appearance on a thread", "set_appearance",
+                  {"feature_id": tid, "color": [0.5, 0.5, 0.5]},
+                  needle="created no body", tab=part["name"])
             check("thread pitch on modify", "modify_feature",
                   {"feature_id": tid, "feature": dict(m6, pitch=1.25)},
                   needle="accepted: pitch 1 ", tab=part["name"])

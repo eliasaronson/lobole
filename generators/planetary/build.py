@@ -505,16 +505,26 @@ def bare_parts(d, s, ph, diameter):
     bearers (what the generator printed before them); and both rings as
     the sector planet 1 meets."""
     m, c = s["module"], s["tip_clearance"]
+    # Each in the gears' own material, so every body the generator builds
+    # weighs something: the sun part's, as the build gave it.
+    material = d.call("mass_properties", part="sun")["bodies"][0]["material"]
+
+    def weigh():
+        for fid in bodies_by_name(d).values():
+            d.call("set_material", feature_id=fid, material=material)
     d.call("add_part", name="sun, no bearer")
     herringbone(d, "sun teeth", s, s["zs"], (0, 0), ph["sun"], +1,
                 s["backlash"] / 2.0, dedendum=ADDENDUM + c / m)
+    weigh()
     d.call("add_part", name="planet, no bearer")
     herringbone(d, "planet teeth", s, s["zp"], (0, 0), 0.0, -1,
                 s["backlash"] / 2.0, dedendum=ADDENDUM + c / m)
+    weigh()
     for suffix, bearers in (("", True), (", no bearer", False)):
         d.call("add_part", name="ring sector" + suffix)
         ring(d, s, ph, diameter, engrave=False, bearers=bearers,
              sector_deg=RING_SECTOR_DEG)
+        weigh()
 
 
 def closure(d, moving, still, at, rot_deg, tol=1e-3):

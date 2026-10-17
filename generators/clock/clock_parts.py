@@ -122,8 +122,8 @@ def new_part(d, name, proc, material="pla"):
 
 def finish(d, body, material):
     """The material on the active part's one body, by the feature that
-    CREATED it: set_material on any later feature (a cut on it) answers ok
-    and sets nothing."""
+    CREATED it: set_material on a later feature (a cut on it) is refused,
+    since it would set nothing."""
     bodies = d.call("list_elements")["bodies"]
     if len(bodies) != 1:
         raise SystemExit(f"clock: a part of {len(bodies)} bodies")
