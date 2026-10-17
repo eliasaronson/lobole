@@ -1130,19 +1130,22 @@ set_tests_properties(generators_smoke PROPERTIES TIMEOUT 300)
 #   ctest -C generators -L generators
 # runs them (tools/merge-branch.sh --full does, after the headless suite).
 # They are `slow` too, for anything that does pass -C generators.
-# The budget (s) is about twice the run measured alone on the development
-# machine -- om615 217, pes_pump 44, chess 140, pantilt 349, planetary
-# ~90, hook 13, jar 83 (198 beside the GUI suite), counter 45, hinge_box
-# 3, strandbeest ~260, clock 270, watch 316, engine ~180 -- for a loaded
-# one. The
-# TIMEOUT is the budget plus a minute: the script kills its generator at
-# the budget and says so, which a ctest kill would not.
-foreach(gen_budget om615:420 pes_pump:180 chess:360 pantilt:720 planetary:240
-                   hook:60 jar:400 counter:120 hinge_box:60
-                   strandbeest:540 clock:600 watch:660 engine:420)
-  string(REPLACE ":" ";" gen_budget "${gen_budget}")
-  list(GET gen_budget 0 gen)
-  list(GET gen_budget 1 budget)
+# One test per generators/<name>/test.json, which holds its budget (about
+# twice the run measured alone, for a loaded machine) beside its command:
+# the TIMEOUT is the budget plus a minute, since the script kills its
+# generator at the budget and says so, which a ctest kill would not. A new
+# file is seen at the next build (CONFIGURE_DEPENDS).
+file(GLOB gen_tests CONFIGURE_DEPENDS
+     ${CMAKE_SOURCE_DIR}/generators/*/test.json)
+foreach(gen_test ${gen_tests})
+  get_filename_component(gen_dir ${gen_test} DIRECTORY)
+  get_filename_component(gen ${gen_dir} NAME)
+  file(READ ${gen_test} gen_json)
+  string(JSON budget ERROR_VARIABLE gen_error GET "${gen_json}" budget_s)
+  if(gen_error OR NOT budget MATCHES "^[1-9][0-9]*$")
+    message(FATAL_ERROR "${gen_test}: budget_s is not a whole number of "
+                        "seconds over 0 (${gen_error}${budget})")
+  endif()
   math(EXPR gen_timeout "${budget} + 60")
   add_test(NAME generator_${gen} CONFIGURATIONS generators
            COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/generator_runs.py
@@ -1150,6 +1153,12 @@ foreach(gen_budget om615:420 pes_pump:180 chess:360 pantilt:720 planetary:240
   set_tests_properties(generator_${gen} PROPERTIES
                        LABELS "generators;slow" TIMEOUT ${gen_timeout})
 endforeach()
+
+# The README's table of those tests is made from the same files
+# (tools/generator_tests.py); this fails when it was not remade.
+add_test(NAME generator_table_gate
+         COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/generator_tests.py --check)
+set_tests_properties(generator_table_gate PROPERTIES TIMEOUT 30)
 
 # The pyproject's claims resolve: its modules exist and each console script
 # names a real callable — `uv tool install` happens on machines where no test

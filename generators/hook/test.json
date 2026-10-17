@@ -1,0 +1,17 @@
+{
+  "order": 50,
+  "why": "The whole run: both prints checked on the bed, the study solved at two meshes and read for both orientations, the test card written.",
+  "steps": [
+    ["{python}", "-u", "{generators}/hook/build.py", "--port", "{port}", "--out", "{out}/hook"]
+  ],
+  "markers": [
+    "mesh: the prediction moved",
+    "hook: done"
+  ],
+  "instance": "headless",
+  "budget_s": 60,
+  "readme": {
+    "runs": "`hook/build.py`: both prints checked on the bed, the study at two meshes read for both orientations, the test card",
+    "measured": "13 s"
+  }
+}

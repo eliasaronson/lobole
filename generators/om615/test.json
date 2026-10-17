@@ -1,0 +1,16 @@
+{
+  "order": 10,
+  "why": "--stage preview: strict single-solid validity of every part, feature status, the accessory mounting structure. An add that fuses the cam cover's cavity into its shell (the body-mode fix) fails here.",
+  "steps": [
+    ["{python}", "-u", "{generators}/om615/om615.py", "--port", "{port}", "--stage", "preview", "--out", "{out}/om615"]
+  ],
+  "markers": [
+    "preview passed; motion NOT checked"
+  ],
+  "instance": "headless",
+  "budget_s": 420,
+  "readme": {
+    "runs": "`om615.py --stage preview`",
+    "measured": "221 s"
+  }
+}

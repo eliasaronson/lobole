@@ -1,0 +1,17 @@
+{
+  "order": 120,
+  "why": "The parts and the assembly with every check verify() makes, the exact mesh sweeps included (no cache in a fresh directory): the watch still builds now that its gearing is generators/cycloidal.py.",
+  "steps": [
+    ["{python}", "-u", "{generators}/watch/watch.py", "--port", "{port}", "--stage", "assembly", "--out", "{out}/watch"]
+  ],
+  "markers": [
+    "parts: \\d+ built, 0 not verified",
+    "\\nsaved\\n"
+  ],
+  "instance": "headless",
+  "budget_s": 660,
+  "readme": {
+    "runs": "`watch/watch.py --stage assembly`: the parts and the assembly with every check `verify()` makes, the exact mesh sweeps included",
+    "measured": "316 s"
+  }
+}

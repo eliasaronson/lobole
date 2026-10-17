@@ -1,0 +1,21 @@
+{
+  "order": 110,
+  "why": "The whole run but the stills, on the P1S's K5 profile seeded into the instance's own config (the plates pack into its bed): the bore search, every part verified, the 720-degree study clean with its press fits, the timing and the springs off its traces, the valve-to-piston requirements, the belt at every tooth, both negative controls failing and every print plate's check_print; and the saved project reopened with every requirement passing as it lies, unmeasured.",
+  "steps": [
+    ["{python}", "-u", "{generators}/print_coupon.py", "--port", "{port}", "--seed"],
+    ["{python}", "-u", "{generators}/engine/build.py", "--port", "{port}", "--profile", "K5 PLA on P1S", "--no-render", "--out", "{out}/engine"]
+  ],
+  "markers": [
+    "fires 1-3-4-2 at \\[180.0, 180.0, 180.0\\]",
+    "the cam pulley a tooth off: FAILS, as it must",
+    "rods 10 % long: FAILS, as it must",
+    "reopened: (\\d+) of \\1 requirements pass as saved",
+    "engine: done, 2 PLA plates"
+  ],
+  "instance": "headless",
+  "budget_s": 420,
+  "readme": {
+    "runs": "`engine/build.py --no-render` on the seeded P1S profile: the bore search, every part verified, the 720° study with its press fits, the timing, firing order and springs off its traces, the belt at every tooth, both negative controls failing, the valve-to-piston requirements and both studies clean as requirements, every plate's `check_print`, and the saved project reopened with every requirement passing as it lies",
+    "measured": "127 s"
+  }
+}

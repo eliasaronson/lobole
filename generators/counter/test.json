@@ -1,0 +1,17 @@
+{
+  "order": 70,
+  "why": "The whole run but the still: the plate's clearances and its STL's shells, the negative controls, both counting studies with their readings, and every lock turned both ways. The test's instance has no print profiles, and at the built-in table's 0.25 mm a side an 8 mm digit's 9-tooth pinion has no printable tip, so 10 mm.",
+  "steps": [
+    ["{python}", "-u", "{generators}/counter/build.py", "--port", "{port}", "--no-render", "--digit-height", "10", "--out", "{out}/counter"]
+  ],
+  "markers": [
+    "motion, the triple carry .*: passed",
+    "counter: 8 shells"
+  ],
+  "instance": "headless",
+  "budget_s": 120,
+  "readme": {
+    "runs": "`counter/build.py --no-render --digit-height 10`: the plate's clearances and STL shells, the negative controls, both counting studies with their readings, every lock both ways",
+    "measured": "45 s"
+  }
+}

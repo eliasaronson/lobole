@@ -1,0 +1,17 @@
+{
+  "order": 20,
+  "why": "The whole run but the path-traced still: the build, the standing exact sweep, the four studies with their strokes, firing order and rack turn, the GLB and the screenshots. `--no-studies` would check nothing, and the rest costs about 15 s more.",
+  "steps": [
+    ["{python}", "-u", "{generators}/pes_pump/pes_pump.py", "--port", "{port}", "--no-still", "--out", "{out}/pes_pump"]
+  ],
+  "markers": [
+    "GLB: ",
+    "render: .*exterior_drive_end"
+  ],
+  "instance": "offscreen",
+  "budget_s": 180,
+  "readme": {
+    "runs": "`pes_pump.py --no-still`: the build, the standing sweep, the four studies and their measured strokes, order and turns",
+    "measured": "44 s"
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "order": 130,
+  "why": "Every stage from nothing through the CAM job and the drawings, so each name a stage picks by is resolved by this binary. Left out: yoke_topo (25 minutes of statics, and a topology result kept in a 25 MB project; no later stage opens its output) and renders (path-traced stills, which check nothing). Six samples a motion study, each still checked exactly.",
+  "steps": [
+    ["bash", "{generators}/pantilt/run_all.sh", "{port}", "--skip", "yoke_topo", "renders"]
+  ],
+  "markers": [
+    "cam: every setup ok and complete",
+    "(?m)^done$"
+  ],
+  "own_log": "{out}/pantilt/run_all.log",
+  "instance": "offscreen",
+  "env": {
+    "PANTILT_SAMPLES": "6"
+  },
+  "budget_s": 720,
+  "readme": {
+    "runs": "`run_all.sh --skip yoke_topo renders` with `PANTILT_SAMPLES=6`: every part, the assembly with its exact sweeps and studies, the CAM job, the drawings",
+    "measured": "181-349 s"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "order": 60,
+  "why": "The jar, lid and gasket with modelled threads, every check and both negative controls, the unscrewing study and the three STLs; no still.",
+  "steps": [
+    ["{python}", "-u", "{generators}/jar/build.py", "--port", "{port}", "--no-render", "--out", "{out}/jar"]
+  ],
+  "markers": [
+    "unscrew 2 turns .*: passed",
+    "jar: done"
+  ],
+  "instance": "headless",
+  "budget_s": 400,
+  "readme": {
+    "runs": "`jar/build.py --no-render`: the three parts with modelled threads, the thread's phase found by interference, the squeeze measured twice, the unscrewing study, the three negative controls and the STLs",
+    "measured": "83-198 s"
+  }
+}

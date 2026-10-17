@@ -1,0 +1,17 @@
+{
+  "order": 30,
+  "why": "Every design stage from nothing, then one CAM job (the board: pockets, chamfer, engraving, cut-out, verified and posted). All the jobs are another six minutes.",
+  "steps": [
+    ["bash", "{generators}/chess/run_all.sh", "{port}", "--only", "board"]
+  ],
+  "markers": [
+    "(?m)^done$"
+  ],
+  "own_log": "{out}/chess/cam_all.log",
+  "instance": "offscreen",
+  "budget_s": 360,
+  "readme": {
+    "runs": "`run_all.sh --only board`: every design stage, then the board's CAM job verified and posted",
+    "measured": "140 s"
+  }
+}

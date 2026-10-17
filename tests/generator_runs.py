@@ -16,18 +16,20 @@ writing to a private directory (LOBOLE_SCRATCH, or the generator's
 its own success marker is in its output. A run that exits 0 without the
 marker stopped early, which is not a pass.
 
-The budget is set where the test is registered (tests/CMakeLists.txt, a
-minute under its ctest TIMEOUT): past it the generator's process group is
-killed and the test fails saying so, rather than ctest killing this script
-and orphaning the app. Registered for the ctest configuration `generators`
-only, so a plain ctest never runs them, and labelled `generators` and
-`slow`: `ctest -C generators -L generators` runs them, and
+What each one runs, its markers, its instance and its budget are declared in
+its own directory, generators/<name>/test.json (tools/generator_tests.py
+reads them; tests/CMakeLists.txt registers one test per file). The budget
+is passed on the command line, a minute under the test's ctest TIMEOUT:
+past it the generator's process group is killed and the test fails saying
+so, rather than ctest killing this script and orphaning the app. Registered
+for the ctest configuration `generators` only, so a plain ctest never runs
+them, and labelled `generators` and `slow`: `ctest -C generators -L
+generators` runs them, and
 tools/merge-branch.sh --full does after the headless suite
 (generators/README.md#the-big-generators-as-tests).
 """
 import os
 import re
-import shlex
 import shutil
 import signal
 import subprocess
@@ -37,201 +39,29 @@ import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
-GEN = os.path.join(ROOT, "generators")
 sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(ROOT, "tools"))
 from smoke_app import launch  # noqa: E402
+import generator_tests  # noqa: E402
 
 PY = sys.executable
 
 
-def om615(port, out):
-    # --stage preview: strict single-solid validity of every part, feature
-    # status, the accessory mounting structure. An add that fuses the cam
-    # cover's cavity into its shell (the body-mode fix) fails here.
-    return ([PY, "-u", os.path.join(GEN, "om615", "om615.py"),
-             "--port", str(port), "--stage", "preview",
-             "--out", os.path.join(out, "om615")],
-            [r"preview passed; motion NOT checked"], None)
+# name -> (builder, instance kind, extra environment), from each
+# generator's own generators/<name>/test.json (tools/generator_tests.py). The
+# offscreen ones take screenshots or renders, which a --headless instance
+# refuses.
+def _runs():
+    runs = {}
+    for name, t in generator_tests.load().items():
+        runs[name] = ((lambda port, out, t=t:
+                       generator_tests.command(t, port, out, PY)),
+                      True if t["instance"] == "headless" else "offscreen",
+                      dict(t.get("env", {})))
+    return runs
 
 
-def pes_pump(port, out):
-    # The whole run but the path-traced still: the build, the standing exact
-    # sweep, the four studies with their strokes, firing order and rack
-    # turn, the GLB and the screenshots. `--no-studies` would check nothing,
-    # and the rest costs about 15 s more.
-    return ([PY, "-u", os.path.join(GEN, "pes_pump", "pes_pump.py"),
-             "--port", str(port), "--no-still",
-             "--out", os.path.join(out, "pes_pump")],
-            [r"GLB: ", r"render: .*exterior_drive_end"], None)
-
-
-def chess(port, out):
-    # Every design stage from nothing, then one CAM job (the board: pockets,
-    # chamfer, engraving, cut-out, verified and posted). All the jobs are
-    # another six minutes.
-    return (["bash", os.path.join(GEN, "chess", "run_all.sh"), str(port),
-             "--only", "board"],
-            [r"(?m)^done$"], os.path.join(out, "chess", "cam_all.log"))
-
-
-def pantilt(port, out):
-    # Every stage from nothing through the CAM job and the drawings, so each
-    # name a stage picks by is resolved by this binary. Left out: yoke_topo
-    # (25 minutes of statics, and a topology result kept in a 25 MB
-    # project; no later stage opens its output) and renders (path-traced
-    # stills, which check nothing).
-    return (["bash", os.path.join(GEN, "pantilt", "run_all.sh"), str(port),
-             "--skip", "yoke_topo", "renders"],
-            [r"cam: every setup ok and complete", r"(?m)^done$"],
-            os.path.join(out, "pantilt", "run_all.log"))
-
-
-def planetary(port, out):
-    # The print plate with its exact mesh clearances and the STL's shell
-    # count, the assembly, both motion studies and the push check. Left
-    # out: the sun's static study (--study: a GPU, or two minutes of CPU)
-    # and the hero still. At 90 mm: the scratch instance has no measured
-    # profile, and the built-in table's 0.25 mm gap needs teeth bigger than
-    # a 70 mm ring holds (generators/planetary/README.md#bearers).
-    return ([PY, "-u", os.path.join(GEN, "planetary", "build.py"),
-             "--port", str(port), "--no-render", "--diameter", "90",
-             "--out", os.path.join(out, "planetary")],
-            [r"motion, one orbit .*: passed", r"push check: passed",
-             r"planetary: 5 shells"], None)
-
-
-def counter(port, out):
-    # The whole run but the still: the plate's clearances and its STL's
-    # shells, the negative controls, both counting studies with their
-    # readings, and every lock turned both ways. The test's instance has
-    # no print profiles, and at the built-in table's 0.25 mm a side an 8 mm
-    # digit's 9-tooth pinion has no printable tip, so 10 mm.
-    return ([PY, "-u", os.path.join(GEN, "counter", "build.py"),
-             "--port", str(port), "--no-render", "--digit-height", "10",
-             "--out", os.path.join(out, "counter")],
-            [r"motion, the triple carry .*: passed", r"counter: 8 shells"],
-            None)
-
-
-def hinge_box(port, out):
-    # The whole run: the plate's every check_print item, the swing from 0
-    # to 180 degrees onto the rim, and both negative controls failing
-    # stacking.
-    return ([PY, "-u", os.path.join(GEN, "hinge_box", "build.py"),
-             "--port", str(port), "--out", os.path.join(out, "hinge_box")],
-            [r"motion, lid 0 -> 180 .*: clean to 180",
-             r"hinge_box: 2 shells"], None)
-
-
-def hook(port, out):
-    # The whole run: both prints checked on the bed, the study solved at two
-    # meshes and read for both orientations, the test card written.
-    return ([PY, "-u", os.path.join(GEN, "hook", "build.py"),
-             "--port", str(port), "--out", os.path.join(out, "hook")],
-            [r"mesh: the prediction moved", r"hook: done"], None)
-
-
-def jar(port, out):
-    # The jar, lid and gasket with modelled threads, every check and both
-    # negative controls, the unscrewing study and the three STLs; no still.
-    return ([PY, "-u", os.path.join(GEN, "jar", "build.py"),
-             "--port", str(port), "--no-render",
-             "--out", os.path.join(out, "jar")],
-            [r"unscrew 2 turns .*: passed", r"jar: done"], None)
-
-
-def strandbeest(port, out):
-    # The whole run on the P1S's K5 profile, seeded first into the instance's
-    # own config: the walker packs its plates into the profile's bed, and the
-    # built-in table has none. Both stages, every check (the branch, the
-    # exact clash with each cap's printed press listed, the layers, the
-    # feet, the stability), both negative controls failing, and every print
-    # plate checked.
-    seed = [PY, "-u", os.path.join(GEN, "print_coupon.py"), "--port",
-            str(port), "--seed"]
-    build = [PY, "-u", os.path.join(GEN, "strandbeest", "build.py"),
-             "--port", str(port), "--profile", "K5 PLA on P1S",
-             "--out", os.path.join(out, "strandbeest")]
-    return (["bash", "-c", " ".join(shlex.quote(a) for a in seed) + " && " +
-             " ".join(shlex.quote(a) for a in build)],
-            [r"negative control, two crossing bars on one layer: FAILS",
-             r"walker: .* press fits relieved and listed",
-             r"walker: .* mm a crank turn", r"strandbeest: done"], None)
-
-
-def clock(port, out):
-    # The whole run but the stills: every part verified, the escapement's
-    # studies (a period at 2 deg, an escape-wheel turn at 4 samples a beat
-    # in both stages), the ratios, every mesh exact, the click, both
-    # negative controls failing, both FEM studies and every print plate's
-    # check_print. On the P1S's K5 profile seeded into the instance's own
-    # config: the period is the PRINTED pendulum's, which needs a profile
-    # that states a layer and a line width (the built-in table states
-    # neither), and the plates pack round its bed's keep-out zone.
-    seed = [PY, "-u", os.path.join(GEN, "print_coupon.py"), "--port",
-            str(port), "--seed"]
-    build = [PY, "-u", os.path.join(GEN, "clock", "build.py"),
-             "--port", str(port), "--profile", "K5 PLA on P1S",
-             "--no-render", "--out", os.path.join(out, "clock")]
-    return (["bash", "-c", " ".join(shlex.quote(a) for a in seed) + " && " +
-             " ".join(shlex.quote(a) for a in build)],
-            [r"negative control, pallets .* too deep: .*anchor",
-             r"teeth on the third wheel: fails, as it must",
-             r"the period at the pendulum's walls 3, top/bottom 5/5, "
-             r"100 % rectilinear",
-             r"clock: done"], None)
-
-
-def engine(port, out):
-    # The whole run but the stills, on the P1S's K5 profile seeded into the
-    # instance's own config (the plates pack into its bed): the bore search,
-    # every part verified, the 720-degree study clean with its press fits,
-    # the timing and the springs off its traces, the valve-to-piston
-    # requirements, the belt at every tooth, both negative controls failing
-    # and every print plate's check_print; and the saved project reopened
-    # with every requirement passing as it lies, unmeasured.
-    seed = [PY, "-u", os.path.join(GEN, "print_coupon.py"), "--port",
-            str(port), "--seed"]
-    build = [PY, "-u", os.path.join(GEN, "engine", "build.py"),
-             "--port", str(port), "--profile", "K5 PLA on P1S",
-             "--no-render", "--out", os.path.join(out, "engine")]
-    return (["bash", "-c", " ".join(shlex.quote(a) for a in seed) + " && " +
-             " ".join(shlex.quote(a) for a in build)],
-            [r"fires 1-3-4-2 at \[180.0, 180.0, 180.0\]",
-             r"the cam pulley a tooth off: FAILS, as it must",
-             r"rods 10 % long: FAILS, as it must",
-             r"reopened: (\d+) of \1 requirements pass as saved",
-             r"engine: done, 2 PLA plates"], None)
-
-
-def watch(port, out):
-    # The parts and the assembly with every check verify() makes, the
-    # exact mesh sweeps included (no cache in a fresh directory): the watch
-    # still builds now that its gearing is generators/cycloidal.py.
-    return ([PY, "-u", os.path.join(GEN, "watch", "watch.py"),
-             "--port", str(port), "--stage", "assembly",
-             "--out", os.path.join(out, "watch")],
-            [r"parts: \d+ built, 0 not verified", r"\nsaved\n"], None)
-
-
-# name -> (builder, instance kind, extra environment). The offscreen ones
-# take screenshots or renders, which a --headless instance refuses.
-RUNS = {
-    "om615": (om615, True, {}),
-    "pes_pump": (pes_pump, "offscreen", {}),
-    "chess": (chess, "offscreen", {}),
-    # Six samples a motion study, each still checked exactly.
-    "pantilt": (pantilt, "offscreen", {"PANTILT_SAMPLES": "6"}),
-    "planetary": (planetary, True, {}),
-    "hook": (hook, True, {}),
-    "jar": (jar, True, {}),
-    "counter": (counter, True, {}),
-    "hinge_box": (hinge_box, True, {}),
-    "strandbeest": (strandbeest, True, {}),
-    "clock": (clock, True, {}),
-    "engine": (engine, True, {}),
-    "watch": (watch, True, {}),
-}
+RUNS = _runs()
 
 
 def tail(path, n=60):

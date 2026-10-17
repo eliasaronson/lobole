@@ -102,6 +102,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 
     tools/ctest -C generators -L generators -j2      # ~6 min
 
+<!-- generator-tests: made by tools/generator_tests.py -->
 | test | runs | measured alone | budget |
 |---|---|---|---|
 | `generator_om615` | `om615.py --stage preview` (headless) | 221 s | 420 s |
@@ -117,6 +118,7 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 | `generator_engine` | `engine/build.py --no-render` on the seeded P1S profile: the bore search, every part verified, the 720° study with its press fits, the timing, firing order and springs off its traces, the belt at every tooth, both negative controls failing, the valve-to-piston requirements and both studies clean as requirements, every plate's `check_print`, and the saved project reopened with every requirement passing as it lies (headless) | 127 s | 420 s |
 | `generator_watch` | `watch/watch.py --stage assembly`: the parts and the assembly with every check `verify()` makes, the exact mesh sweeps included (headless) | 316 s | 660 s |
 | `generator_pantilt` | `run_all.sh --skip yoke_topo renders` with `PANTILT_SAMPLES=6`: every part, the assembly with its exact sweeps and studies, the CAM job, the drawings (offscreen) | 181-349 s | 720 s |
+<!-- generator-tests: end -->
 
 A test passes when the generator exits 0 AND its own success marker is in
 its output (om615's `preview passed`, the pump's GLB and screenshots, the
@@ -124,8 +126,20 @@ chess and pan/tilt logs' final `done`, the pan/tilt's `every setup ok and
 complete`): exit 0 without the marker means it stopped early. Past its
 budget the generator's process group is killed and the test says so; a
 failure keeps the output directory and names it, with the generator's last
-lines. `tests/generator_runs.py` holds the table, `tests/CMakeLists.txt` the
-budgets.
+lines.
+
+**Each one declares itself in its own directory**, `<name>/test.json`: its
+order in the table, why it runs what it runs, its steps (argv lists run in
+order with `&&`; `{python}`, `{generators}`, `{port}` and `{out}` filled in),
+its success markers, a log of its own if it writes one, its instance
+(`headless`, or `offscreen` when it renders), any extra environment, its
+budget, and this table's cells. `tests/generator_runs.py` runs them,
+`tests/CMakeLists.txt` registers one test per file, and
+`tools/generator_tests.py` writes the table above between its markers
+(`generator_table_gate` fails when it was not rerun). So a branch adding a
+generator test adds a file and touches no shared list, which is where three
+of five merges used to collide. An unknown key or instance kind, or a
+missing budget, is refused, naming what is accepted.
 
 They are registered for the ctest configuration `generators` only, so a
 plain `ctest` -- the headless suite, CI, the nix sandbox -- never runs them,

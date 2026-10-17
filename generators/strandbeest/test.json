@@ -1,0 +1,20 @@
+{
+  "order": 90,
+  "why": "The whole run on the P1S's K5 profile, seeded first into the instance's own config: the walker packs its plates into the profile's bed, and the built-in table has none. Both stages, every check (the branch, the exact clash with each cap's printed press listed, the layers, the feet, the stability), both negative controls failing, and every print plate checked.",
+  "steps": [
+    ["{python}", "-u", "{generators}/print_coupon.py", "--port", "{port}", "--seed"],
+    ["{python}", "-u", "{generators}/strandbeest/build.py", "--port", "{port}", "--profile", "K5 PLA on P1S", "--out", "{out}/strandbeest"]
+  ],
+  "markers": [
+    "negative control, two crossing bars on one layer: FAILS",
+    "walker: .* press fits relieved and listed",
+    "walker: .* mm a crank turn",
+    "strandbeest: done"
+  ],
+  "instance": "headless",
+  "budget_s": 540,
+  "readme": {
+    "runs": "`print_coupon.py --seed`, then `strandbeest/build.py --profile \"K5 PLA on P1S\"` (the walker packs into the profile's bed): both stages, every check on the leg pair and the walker (solved, no branch jump and the knees, the exact clash with every cap's printed press listed, the layers' air, the feet, the stability), both negative controls failing, every print plate's `check_print` items, `bed_fit` among them",
+    "measured": "410 s (beside four other runs)"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "order": 80,
+  "why": "The whole run: the plate's every check_print item, the swing from 0 to 180 degrees onto the rim, and both negative controls failing stacking.",
+  "steps": [
+    ["{python}", "-u", "{generators}/hinge_box/build.py", "--port", "{port}", "--out", "{out}/hinge_box"]
+  ],
+  "markers": [
+    "motion, lid 0 -> 180 .*: clean to 180",
+    "hinge_box: 2 shells"
+  ],
+  "instance": "headless",
+  "budget_s": 60,
+  "readme": {
+    "runs": "`hinge_box/build.py`: the plate's every `check_print` item, stacking included, the swing 0-180° and both negative controls",
+    "measured": "3 s"
+  }
+}
