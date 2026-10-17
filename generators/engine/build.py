@@ -758,7 +758,8 @@ def main():
                     help="the study's crank step, degrees (default: a "
                          "fifth of the belt's tooth step)")
     ap.add_argument("--fresh", action="store_true",
-                    help="start a new project first (refused on unsaved work)")
+                    help="start a new project first (an untitled scratch one is "
+                         "discarded; a saved one with unsaved work refused)")
     ap.add_argument("--hand-n", type=float, default=HAND_N,
                     help="what a hand pushes on the crank's handle, N: the "
                          "wrist pin study's load")

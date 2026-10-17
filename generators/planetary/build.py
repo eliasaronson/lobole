@@ -16,21 +16,23 @@ mesh. Turn the hex knob on the sun with the ring held and the planets
 orbit; the ratio is engraved on the ring.
 
 Every size derives from `--diameter` (the ring's outside) and the print
-process's gap (`print_allowance` kind `gap`): the module, the tooth counts,
-the face width, the ring's wall, the knob and the lettering. Nothing here is
+process's gap (`print_allowance` kind `gap`), the helix from the
+profile's air (`z_gap_mm`, helix_for()) and the plate's place from its
+bed: the module, the tooth counts, the face width, the ring's wall, the
+knob and the lettering. Nothing here is
 a literal in millimetres except what the diameter scales.
 
 What it builds (generators/planetary/README.md):
-- the part `planetary print`: the five bodies where they print, exported as
-  ONE STL whose shells must number five (two bodies that touch would fuse);
+- the part `planetary print`: the five bodies where they print, in the
+  middle of the profile's bed, exported as ONE STL whose shells must number five (two bodies that touch would fuse);
 - the parts `sun`, `planet` and `ring` and an assembly `planetary` with a
   kinematic carrier, the gear ratios as relations, and a motion study;
 - a static study on the sun's teeth under a firm pinch on the knob;
 - the push check: the worst push on the sun, against the engagement left on
   the mesh it opens, with the bearers and (the control) without.
 
-Output (generated, untracked): scratch/planetary/ — the STL, the project and
-planetary.json, the receipt (counts, module, ratio, gap, clearances, factor
+Output (generated, untracked): scratch/planetary/ — the STL, the print job
+(on a profile with a bed), the project and planetary.json, the receipt (counts, module, ratio, gap, clearances, factor
 of safety).
 """
 import argparse
@@ -866,7 +868,8 @@ def main():
                          "--process/--material table, the community's "
                          "numbers")
     ap.add_argument("--fresh", action="store_true",
-                    help="start a new project first (refused on unsaved work)")
+                    help="start a new project first (an untitled scratch one is "
+                         "discarded; a saved one with unsaved work refused)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--study", action="store_true",
                     help="also solve the sun's static study (half a minute on a GPU, two on the CPU)")

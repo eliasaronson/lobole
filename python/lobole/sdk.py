@@ -3150,7 +3150,9 @@ class Asm(_Tab):
         period_deg) during a window opening at start_deg, b standing still
         the rest of it. With `slots`, an external Geneva's exact law, step
         and window; otherwise a uniform step: step_deg (or step_mm for a
-        slide) and duration_deg. Forward only: b driven alone leaves a
+        slide) and duration_deg, or with motion="table" and
+        table=[[driver, step], ...] (fractions of the window and the step,
+        from [0, 0] to [1, 1]) a law that follows those points (vNEXT). Forward only: b driven alone leaves a
         where it is and the relation reports it — a lock holding
         (docs/assemblies/relations.md#intermittent)."""
         self.activate()

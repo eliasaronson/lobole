@@ -953,7 +953,8 @@ def main():
     ap.add_argument("--profile", default=None,
                     help="one of your print profiles (list_print_profiles)")
     ap.add_argument("--fresh", action="store_true",
-                    help="start a new project first (refused on unsaved work)")
+                    help="start a new project first (an untitled scratch one is "
+                         "discarded; a saved one with unsaved work refused)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-render", action="store_true",
                     help="skip the still (a --headless instance has no "

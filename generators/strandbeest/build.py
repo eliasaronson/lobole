@@ -1779,7 +1779,8 @@ def main():
                     help="the feet's static friction on the floor (FOOT_MU "
                          "says where 0.5 comes from)")
     ap.add_argument("--fresh", action="store_true",
-                    help="start a new project first (refused on unsaved work)")
+                    help="start a new project first (an untitled scratch one is "
+                         "discarded; a saved one with unsaved work refused)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     if args.pairs < 1:

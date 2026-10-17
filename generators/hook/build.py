@@ -440,7 +440,8 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--port", type=int)
     ap.add_argument("--fresh", action="store_true",
-                    help="start a new project first (refused on unsaved work)")
+                    help="start a new project first (an untitled scratch one is "
+                         "discarded; a saved one with unsaved work refused)")
     ap.add_argument("--load-kg", type=float, default=5.0,
                     help="the rated load, kg")
     ap.add_argument("--reach", type=float, default=30.0,

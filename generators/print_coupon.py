@@ -422,8 +422,7 @@ def z_row(d, args, gap):
 
 def ring_sizes(size):
     """The ring and post every Z-row feature shares, from the size: a post
-    a quarter of the size in radius (Ø half the size, as the counter's
-    axles), a ring 1.6 sizes across and a quarter of one thick, standing on
+    a quarter of the size in radius (Ø half the size), a ring 1.6 sizes across and a quarter of one thick, standing on
     the bed in a pocket 0.15 sizes clear of it all round, a 45-degree head
     overlapping the ring's hole by 0.15 sizes, and the rail that ties the
     posts to the plate a quarter of a size thick and a little wider than a
@@ -843,7 +842,8 @@ def main():
     ap.add_argument("--out", default=None,
                     help="output directory (default: scratch/print_coupon)")
     ap.add_argument("--fresh", action="store_true",
-                    help="start a new project first (refused on unsaved work)")
+                    help="start a new project first (an untitled scratch one is "
+                         "discarded; a saved one with unsaved work refused)")
     args = ap.parse_args()
 
     d = connect(args.port)

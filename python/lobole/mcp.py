@@ -1054,8 +1054,10 @@ _reference("interference", "Interference (clash) check: returns {clash: bool, "
           "Optional body index restricts to one body. On an ASSEMBLY tab "
           "(no body arg) it aggregates every visible, non-suppressed "
           "occurrence in WORLD space: `occurrences` lists per-part rows "
-          "(volume_mm3, world center_of_mass_mm, mass_g) and `total` is the combined "
-          "mass/volume/world CoM.")
+          "(volume_mm3, world center_of_mass_mm, mass_g, mass_from: printed | "
+          "solid) and `total` is the combined solid mass/volume/world CoM; "
+          "when an occurrence's part is printed, `total.printed` weighs the "
+          "assembly as built (printed parts printed, inertia_g_mm2).")
 def mass_properties(body: int | None = None,
                     part: str | int | None = None) -> dict:
     return _call("mass_properties", **_given(body=body, part=part))

@@ -151,7 +151,7 @@ def main():
     ap.add_argument("--save", default=None)
     ap.add_argument("--fresh", action="store_true",
                     help="start a new project first, so the instance can be "
-                         "reused (refused when its project has unsaved "
+                         "reused (refused when its project has a path and unsaved "
                          "changes)")
     a = ap.parse_args()
     d = connect(a.port)

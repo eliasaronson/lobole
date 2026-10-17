@@ -65,8 +65,7 @@ default 1 s, so a beat every half second) and the print profile, through
   radius (a 45° impulse face), the lock the drop over the radius, and the
   swing the impulse and lock plus the fewest quarter-locks of
   supplementary arc whose escapement sweeps clean (below): 1.5 at K5,
-  ±3.59°. A wheel that stepped uniformly needed two, to keep behind an
-  impulse face that ran away from it; following the face, fewer than 1.5
+  ±3.59°. Fewer than 1.5
   leave the exit pallet too shallow for the tooth to land on its locking
   face within the beat.
 - **The teeth** are as deep as it takes for the tooth ahead's back to clear

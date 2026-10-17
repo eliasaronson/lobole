@@ -495,7 +495,8 @@ def main():
     ap.add_argument("--samples", type=int, default=37,
                     help="motion study samples, 0 to 180 degrees")
     ap.add_argument("--fresh", action="store_true",
-                    help="start a new project first (refused on unsaved work)")
+                    help="start a new project first (an untitled scratch one is "
+                         "discarded; a saved one with unsaved work refused)")
     ap.add_argument("--out", default=None)
     args = ap.parse_args()
     out = Path(args.out) if args.out else OUT

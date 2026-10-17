@@ -624,7 +624,7 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 | `bridges` | the widest span of the ceilings, and each one's area and height | the process's (`printfit::MaxBridgeMm`, 10 mm for FDM, 5 for [TPU](#tpu)) | a ceiling is a downward face within 1° of horizontal everywhere, off the bed: a plane by its one normal, any other surface (a derived or lofted face is often a B-spline) by every sample. Its span is its inscribed diameter, as if anchored along its whole edge: twice the largest distance from a point of the face to its edges (polylines at a quarter of the tessellation's chord), on a grid over its UV and then climbed |
 | `clearance` | the minimum distance between any two solids, with the closest pairs | the gap a side (`printfit::SmallestGapSideMm` of the print), passing down to a tenth under it | `Measure::ClearanceBetween` per pair (BRepExtrema, the distance `measure` gives), `ContactBetween` when it cannot prove them apart; a pair whose oriented boxes are four gaps apart is clear without measuring; the boxes are the B-Rep's, never its triangulation's, so the prune is the same meshed or not and a box never stops inside a curved surface by the chord deviation |
 | `chords` | the chord deviation `export_stl` meshes this print at | a fifth of the gap a side | `printfit::StlDeflectionMm`, as [the export](#exporting-a-printed-part) takes it, or `stl_deflection_mm` |
-| `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places and inside the face (a triangle's UV past a curved edge is the surface beyond the face, not a sample): a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else, and a triangle whose surface puts the material outside the limit passes the ray on (a hollow's chord lies above its surface). A triangle on its face's boundary hands the ray to that face and every face across its edges, each intersected exactly (`IntCurvesFace`) and kept only where the ray meets it on the face, the least air of those: past a top's polygon the ray meets the flank's triangle, whose surface runs on above the top. So the air is exact up to a face's edge: the hinge box's cone pins read their modelled 0.4 mm on K5 to a micron, where they read 0.377. `IntCurvesFace` on every sample took minutes on the counter; on the boundary triangles alone it is seconds. A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
+| `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places and inside the face (a triangle's UV past a curved edge is the surface beyond the face, not a sample): a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else, and a triangle whose surface puts the material outside the limit passes the ray on (a hollow's chord lies above its surface). A triangle on its face's boundary hands the ray to that face and every face across its edges, each intersected exactly (`IntCurvesFace`) and kept only where the ray meets it on the face, the least air of those: past a top's polygon the ray meets the flank's triangle, whose surface runs on above the top. So the air is exact up to a face's edge: the hinge box's cone pins read their modelled 0.4 mm on K5 to a micron. The exact intersections run on boundary triangles alone, which keeps a plate of thousands of faces to seconds. A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
 | `bed_fit` | the plate's box: `extent_mm`, x along the bed's x (the world's x, or y when the direction is x), z up the direction; with keep-out zones, every piece where it is (`intrusions`) | the profile's `bed_mm`, with `shortfall_mm` per axis; and its `bed_exclude_mm` (`exclude_mm`) | `BRepBndLib::AddOptimal` of every body in the printer's frame. Without zones the extent, not a position: a slicer places the plate, so it fits when its box does. With zones (v181, `printcheck::FitOnBed`) the part's x and y ARE the bed's, printed up +Z: a piece whose footprint box leaves the bed, or which itself (`BRepExtrema` against the zone's prism, after the boxes meet) enters a zone, is an intrusion naming the zone. A piece laid along the bed's diagonal has a box over the whole bed and misses the corner. Another print direction with zones fails, saying the frame is not the bed's |
 
 - **bed_fit is the printer's**, so it runs only on a part printed with a
@@ -645,8 +645,9 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 - **A flat face over another piece fails at any number of layers**
   ([why](#one-part-printed-over-another)). What passes is a piece that
   starts on the bed and reaches over another with a face that holds itself
-  up, the minimum air above it: the counter's first wheels, one layer over
-  each other, fail (its run keeps them as a control); a ring round a post
+  up, the minimum air above it: wheels stacked one layer over each other
+  fail (the counter's run builds that layout as a negative control); a
+  ring round a post
   under a 45° head with three layers passes.
 - **Every limit can be stated** (`max_overhang_deg`,
   `overhang_allowance_mm2`, `max_bridge_mm`, `min_gap_mm`,
@@ -839,8 +840,9 @@ x and y from its front-left corner, as a generator places them.
 - `generators/_lib.py`'s `export_print_job(d, plates, path, filament)`
   takes the config from `$LOBOLE_SLICER_CONFIGS/<filament>.json` and, for a
   job of several plates without one, writes nothing and says why in the
-  receipt. The clock, the Strandbeest, the hinge box, the coupon, the jar
-  and the engine write their jobs beside their STLs.
+  receipt. The clock, the Strandbeest, the hinge box, the coupon, the jar,
+  the engine, the counter and the planetary write their jobs beside their
+  STLs.
 
 ### The coupon
 
@@ -862,7 +864,7 @@ coupon of the gap row alone, centred where the first one pointed.
 
 Two rows of rings measure what a print-in-place design leans on. Every
 ring stands **on the bed**, in a pocket through the plate, round a post of
-the plate (Ø half the size, as the counter's axles); a rail a little wider
+the plate (Ø half the size); a rail a little wider
 than the post bridges the pocket and ties the post to the plate, and a
 45-degree head on the post flares out over the ring's inner edge. That head
 is the one face over another part: self-supporting, as a design's should
@@ -1056,7 +1058,10 @@ round a post under a 45° head passing at three layers and failing at one
 with the cone's area over the ring; a body's own bridge over its own floor
 not counted; no minimum air skipping the item and one not over 0 refused;
 the limit from a profile's `z_gap_mm`, its layers, FDM's default, and none
-for a process that is not FDM),
+for a process that is not FDM; and at a face's boundary, a cone pin's air
+read exact up to its top edge, the air over a hollow at the limit read as
+the limit and not its chord, and a ray past a top's polygon reading the
+top and not the flank beyond),
 `tests/test_print_job.cpp` (`[print]`: the settings refused where the
 slicer refuses them and an override over its part, the slicer's keys, a
 printed cube against its shell and core by hand -- centre, the solid
@@ -1083,7 +1088,8 @@ that is not the active one), GUI
 honest on real parts: `generator_hinge_box` passes every `check_print`
 item, stacking included, swings the lid 0-180° clean onto the rim, and
 fails stacking on both negative controls (half the cone's air, the lid a
-layer off the bed).
+layer off the bed); `generator_counter` and `generator_planetary` pass
+every item too, on K5 with its measured air.
 
 ## Not built
 

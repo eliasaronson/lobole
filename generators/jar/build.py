@@ -436,7 +436,8 @@ def main():
                          "TPU profile of yours on --profile's printer (its "
                          "bed), else the built-in fdm tpu table")
     ap.add_argument("--fresh", action="store_true",
-                    help="start a new project first (refused on unsaved work)")
+                    help="start a new project first (an untitled scratch one is "
+                         "discarded; a saved one with unsaved work refused)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-render", action="store_true",
                     help="skip the stills (a --headless instance has no "

@@ -1060,7 +1060,8 @@ def main():
                     help="how far the weight can fall, mm: the run per "
                          "winding is reported for it")
     ap.add_argument("--fresh", action="store_true",
-                    help="start a new project first (refused on unsaved work)")
+                    help="start a new project first (an untitled scratch one is "
+                         "discarded; a saved one with unsaved work refused)")
     ap.add_argument("--fem-timeout", type=float, default=300.0,
                     help="the most one FEM study may take, s")
     ap.add_argument("--out", default=None)

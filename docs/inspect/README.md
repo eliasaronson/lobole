@@ -156,7 +156,10 @@ is a cheap conservative bound that can read well over on a swept surface.
 A PRINTED part's bodies also carry `printed`, what the slicer's walls,
 shells and infill weigh at its slicer settings, and `total.printed` their
 sum ([printed mass](../tolerances/README.md#printed-mass)); `{why}` when a
-setting is unstated.
+setting is unstated. On an assembly each occurrence says `mass_from`
+(printed or solid), and `total.printed` weighs the assembly as built: its
+printed parts' occurrences printed, the rest solid, with the inertia about
+that centre (`inertia_g_mm2`).
 
 The Properties dock shows the same numbers for the active part (cached by
 document version), and a centre-of-gravity marker can be drawn in the
@@ -657,7 +660,10 @@ synchronous report, and ending `cancelled` when cancelled; a test-only
 running on any machine), `compare_smoke`,
 `query_smoke`, `strict_inputs_smoke`, `papercuts_smoke`,
 `sweep_parallel_smoke` (a one-thread sweep and an all-thread sweep give
-byte-identical reports). Designed overlaps: `test_thread.cpp`,
+byte-identical reports). Seals: `test_measure_seal.cpp` (a skirt flat on a
+shoulder is a ring as wide as it lands, a notch opens it where it is, a
+pressed gasket is a ring with its interference, and two that do not touch
+are refused); the jar generator states two and fails a notched skirt. Designed overlaps: `test_thread.cpp`,
 `test_retaining_rings.cpp`, `test_press_fits.cpp` and `press_fit_smoke`
 ([press fits](../tolerances/README.md#tests)). GUI: the `measure/*` and `section/*` cases in the
 GUI suite, and the measure parity phase in `remote_smoke`.

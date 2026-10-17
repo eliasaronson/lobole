@@ -156,7 +156,7 @@ a mesh closes by the gap instead of 0.25 mm.
     measured limit, and the planetary is held to it through its helix
     ([the teeth](#the-teeth)): on "K5 PLA on P1S" no face lies within its
     0.4 mm over another gear (the least is 0.4015 mm, planet 2 over the
-    sun, against 0.205 at the old 30° helix). On the built-in table, or a
+    sun). On the built-in table, or a
     profile that has not measured its air, the limit is the unmeasured
     three-layer default, and stacking is reported and not required:
     `planetary: stacking ..., reported, not required`.
@@ -226,9 +226,11 @@ It reports two stresses and says which is which:
   of the part.
 
 The generator test `generator_planetary`
-(generators/README.md#the-big-generators-as-tests) builds at 90 mm on the
-built-in table (its scratch instance has no measured profile) without the
-still, and waits for the push check's verdict too.
+(generators/README.md#the-big-generators-as-tests) seeds K5 into its
+instance and records the air its coupon measured (two layers), builds at
+70 mm on "K5 PLA on P1S" (every `check_print` item, stacking and `bed_fit`
+included, and the print job), then at 90 mm on the built-in table, both
+without the still, and waits for the push check's verdict too.
 
 ## Printing it on a P1S
 
@@ -242,7 +244,7 @@ still, and waits for the push check's verdict too.
    gears; both generators export STL at the profile's fine chords, since at
    0.1 mm the facets took 0.03 mm a side off every gap and the slicer's gap
    closing shut the narrowest.
-2. Slice `planetary.stl` flat on the bed as it comes, **no supports**, 0.2 mm
+2. Slice `planetary_job.3mf` (or `planetary.stl` flat on the bed as it comes), **no supports**, 0.2 mm
    layers.
    - **No brim**, or an outer brim only. A brim between the gears welds them.
    - The first layer is where a print-in-place part fuses, so keep elephant
