@@ -206,7 +206,7 @@ class Part:
 
     def finish(self, solids=1):
         """One body, its material set on the feature that made it (a later
-        cut takes set_material and sets nothing)."""
+        cut refuses set_material: it would set nothing)."""
         bodies = self.d.call("list_elements")["bodies"]
         if len(bodies) != solids:
             raise SystemExit(f"engine: {self.name} is {len(bodies)} bodies, "

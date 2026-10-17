@@ -212,13 +212,6 @@ not an evening's print, the plan's hope, but two long ones.
 - **Contact, friction and the springs' force** are the bench's: whether
   a hand turns it easily, and whether TPU bellows close the valves against
   the buckets' friction, is what the print answers.
-- **Branch-jump watching flags a cam follower.** A flat-follower lobe
-  leaves its base circle with a slope; after a dwell in which the valve did
-  not move at all, any move reads as a jump. With the belt study's
-  whole-tooth steps (20° at 38 mm, 22.5° at 32) the study reports
-  `branch_jump` on valve sliders, which are driven by their cam relations
-  and have no branch. The run excuses a jump on a valve's slider, and only
-  there, and says so.
 - **A TPU part has no print process** (the tables carry PLA and PETG), so
   its plate states every limit and `bed_fit` cannot run on it.
 - **No draft on an extrude**: a lobe printed standing would need one (or

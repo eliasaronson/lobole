@@ -306,31 +306,23 @@ def clashing(result):
                    for c in smp.get("clashes", [])})
 
 
-def cam_jumps(result):
-    """The samples flagged `branch_jump` on a VALVE's slider. A valve is
-    driven by its cam relation, not solved for, so it has no branch to
-    jump to: what the watcher sees is the flat-follower lobe's lift leaving
-    the base circle with a slope (the tangent cam's velocity step) after a
-    dwell in which the valve did not move at all. Reported, and not taken
-    for a failure; a jump on any other mate is."""
-    out, other = [], []
-    for smp in result.get("samples", []):
-        j = smp.get("branch_jump")
-        if not j:
-            continue
-        (out if j.get("name", "").startswith("valve ") else other).append(
-            {"at_deg": j.get("at_deg"), "mate": j.get("name"),
-             "jump_mm": j.get("jump_mm"), "expected_mm": j.get("expected_mm")})
-    return out, other
+def jumps(result):
+    """The samples flagged `branch_jump`. The watcher judges only what the
+    loop solve chooses, so a valve its cam relation drives is never one
+    (docs/assemblies/README.md#branch-jumps): any jump is a failure."""
+    return [{"at_deg": smp["branch_jump"].get("at_deg"),
+             "mate": smp["branch_jump"].get("name"),
+             "jump_mm": smp["branch_jump"].get("jump_mm"),
+             "expected_mm": smp["branch_jump"].get("expected_mm")}
+            for smp in result.get("samples", []) if smp.get("branch_jump")]
 
 
 def turned_clean(result):
-    """Nothing clashes, every sample solved, no branch jump but the cam
-    followers' (cam_jumps)."""
-    excused, other = cam_jumps(result)
-    ok = (not clashing(result) and not unsolved(result) and not other
+    """Nothing clashes, every sample solved, no branch jump."""
+    jumped = jumps(result)
+    ok = (not clashing(result) and not unsolved(result) and not jumped
           and not result.get("rigid_clashes"))
-    return ok, excused, other
+    return ok, jumped
 
 
 def unsolved(result):
@@ -827,15 +819,11 @@ def main():
                            "status": r["collision_status"],
                            "clashing": bad, "unsolved": unsolved(r),
                            "seconds": r.get("seconds")}
-        ok, excused, other = turned_clean(r)
-        checks["study"]["cam_jumps_excused"] = excused
-        if excused:
-            print(f"  {len(excused)} samples flagged branch_jump on a "
-                  f"cam-driven valve (the lobe's lift leaving its base "
-                  f"circle), excused: {excused[0]}")
+        ok, jumped = turned_clean(r)
+        checks["study"]["branch_jumps"] = jumped
         if not ok:
             fail(f"the engine does not turn clean: {bad} {unsolved(r)[:4]} "
-                 f"{other[:2]}")
+                 f"{jumped[:2]}")
         tm, bad_t = timing(r, s)
         checks["timing"] = tm
         for v in tm["valves"]:
@@ -902,14 +890,11 @@ def main():
         bad = clashing(r)
         print(f"  the belt on its pulleys at each of {2 * s.z1} teeth: "
               f"{r['collision_status']} {bad[:6]}")
-        ok, excused, other = turned_clean(r)
+        ok, jumped = turned_clean(r)
         checks["belt"] = {"status": r["collision_status"], "clashing": bad,
-                          "cam_jumps_excused": excused}
-        if excused:
-            print(f"  {len(excused)} samples flagged branch_jump on a "
-                  f"cam-driven valve, excused (see the main study)")
+                          "branch_jumps": jumped}
         if not ok:
-            fail(f"the belt does not sit in its pulleys: {bad}")
+            fail(f"the belt does not sit in its pulleys: {bad} {jumped[:2]}")
 
     with phase("controls"):
         rid = a.rel["timing belt"]
