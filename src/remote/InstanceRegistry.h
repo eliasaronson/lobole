@@ -57,6 +57,14 @@ std::vector<InstanceInfo> LiveInstances();
 // The directory the files live in (created on demand by AnnounceInstance).
 std::string InstancesDir();
 
+// This instance's claim on `port`, machine-wide and NOT under
+// XDG_STATE_HOME: /tmp/lobole-ports-<uid>/<port> (LOBOLE_PORT_CLAIMS_DIR for
+// a test), one line holding the pid. AnnounceInstance writes it and
+// WithdrawInstance removes it while it is still this process's, so
+// tools/scratch_port.py sees an instance whatever state dir it was given
+// (docs/scripting/README.md#the-instance-registry). Empty on Windows.
+std::string PortClaimFile(uint16_t port);
+
 // This process's id, as announced and as `ping` reports it: a launcher checks
 // that the instance answering on a port is the one it started, not one that
 // already held the port.

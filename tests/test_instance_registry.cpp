@@ -18,10 +18,12 @@ namespace {
 // Point the registry at a scratch state dir: a test must never write into the
 // developer's real ~/.local/state/lobole, and two tests must not see each
 // other's instances.
+// The machine-wide port claims too (LOBOLE_PORT_CLAIMS_DIR), so a test's
+// announcement never stands for a real instance's port.
 struct ScratchState {
   fs::path dir;
-  std::string previous;
-  bool had = false;
+  std::string previous, previousClaims;
+  bool had = false, hadClaims = false;
 
   explicit ScratchState(const char* name) {
     dir = fs::temp_directory_path() / name;
@@ -31,13 +33,22 @@ struct ScratchState {
       previous = old;
       had = true;
     }
+    if (const char* old = std::getenv("LOBOLE_PORT_CLAIMS_DIR")) {
+      previousClaims = old;
+      hadClaims = true;
+    }
     setenv("XDG_STATE_HOME", dir.string().c_str(), 1);
+    setenv("LOBOLE_PORT_CLAIMS_DIR", (dir / "claims").string().c_str(), 1);
   }
   ~ScratchState() {
     if (had)
       setenv("XDG_STATE_HOME", previous.c_str(), 1);
     else
       unsetenv("XDG_STATE_HOME");
+    if (hadClaims)
+      setenv("LOBOLE_PORT_CLAIMS_DIR", previousClaims.c_str(), 1);
+    else
+      unsetenv("LOBOLE_PORT_CLAIMS_DIR");
     fs::remove_all(dir);
   }
 };
@@ -100,4 +111,34 @@ TEST_CASE("A dead instance's file is pruned, not believed",
   CHECK(remote::LiveInstances().empty());
   CHECK_FALSE(fs::exists(stale));   // and cleaned up as it was found
   CHECK_FALSE(fs::exists(garbage)); // unparseable announces nothing
+}
+
+// The registry follows XDG_STATE_HOME, so an agent's scratch instance
+// announces itself where tools/scratch_port.py does not look. Its claim
+// does not move with it: one line, the pid, in a machine-wide directory,
+// gone when the port closes -- and left alone when another process holds
+// it by then.
+TEST_CASE("An instance claims its port outside its state dir",
+          "[remote][registry]") {
+  ScratchState scratch("designer-registry-claim");
+  REQUIRE(remote::AnnounceInstance(8905, "headless"));
+  const fs::path claim = remote::PortClaimFile(8905);
+  CHECK(claim.parent_path() == scratch.dir / "claims");
+  {
+    std::ifstream in(claim);
+    int pid = 0;
+    REQUIRE(in >> pid);
+    CHECK(pid == static_cast<int>(::getpid()));
+  }
+  remote::WithdrawInstance(8905);
+  CHECK_FALSE(fs::exists(claim));
+
+  // Another process's claim on the port is not this one's to withdraw.
+  REQUIRE(remote::AnnounceInstance(8905, "headless"));
+  {
+    std::ofstream out(claim, std::ios::trunc);
+    out << (::getpid() + 1) << "\n";
+  }
+  remote::WithdrawInstance(8905);
+  CHECK(fs::exists(claim));
 }

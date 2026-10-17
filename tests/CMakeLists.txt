@@ -1160,6 +1160,14 @@ add_test(NAME generator_table_gate
          COMMAND python3 ${CMAKE_SOURCE_DIR}/tools/generator_tests.py --check)
 set_tests_properties(generator_table_gate PROPERTIES TIMEOUT 30)
 
+# Every instance claims its port outside its XDG_STATE_HOME, and
+# tools/scratch_port.py honours a live claim and drops a dead one
+# (docs/scripting/README.md#the-instance-registry).
+add_test(NAME port_claims_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/port_claims_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(port_claims_smoke PROPERTIES TIMEOUT 120)
+
 # The pyproject's claims resolve: its modules exist and each console script
 # names a real callable — `uv tool install` happens on machines where no test
 # runs, so metadata rot has to be caught here.

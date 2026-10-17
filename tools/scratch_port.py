@@ -11,11 +11,15 @@ let one — free_port() races were fixed by having the app bind its own port,
 and every running instance already announces itself in
 ~/.local/state/lobole/instances/<port>.json.
 
-Two sources, because neither alone is enough:
+Three sources, because none alone is enough:
 
   - the kernel, for "is anything bound here right now";
   - the announced instances, for "does an app own this even though it is
-    momentarily unbound" — a relaunching dev-watch is exactly that.
+    momentarily unbound" — a relaunching dev-watch is exactly that;
+  - the port claims every instance writes, /tmp/lobole-ports-<uid>/<port>
+    holding its pid, which do not follow XDG_STATE_HOME: an agent's
+    instance run with a scratch state dir announces itself there, where the
+    registry read above never looks. A claim whose pid is gone is removed.
 
 A third source covers the gap between a worktree being built and its
 instance announcing itself: a claim. `--claim PATH` (tools/worktree-build.sh
@@ -68,6 +72,49 @@ def announced_ports():
         except ValueError:
             pass
     return claimed
+
+
+def port_claims_dir():
+    """Where every instance claims its port, whatever its XDG_STATE_HOME
+    (src/remote/InstanceRegistry.cpp); LOBOLE_PORT_CLAIMS_DIR moves it for a
+    test."""
+    return (os.environ.get("LOBOLE_PORT_CLAIMS_DIR")
+            or f"/tmp/lobole-ports-{os.getuid()}")
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True  # another user's: alive, and not ours to drop
+    return True
+
+
+def instance_claims():
+    """{port: pid} for every running instance's claim. A claim whose
+    process is gone is removed as it is found; one that cannot be read
+    keeps its port, as a half-written announcement does."""
+    held = {}
+    for path in glob.glob(os.path.join(port_claims_dir(), "*")):
+        name = os.path.basename(path)
+        if not name.isdigit():
+            continue
+        try:
+            with open(path) as f:
+                pid = int(f.read().split()[0])
+        except (OSError, ValueError, IndexError):
+            held[int(name)] = None
+            continue
+        if _alive(pid):
+            held[int(name)] = pid
+        else:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    return held
 
 
 CLAIMS = os.path.expanduser("~/.local/state/lobole/port-claims")
@@ -137,7 +184,8 @@ def main():
         print(mine)
         return 0
 
-    claimed = announced_ports() | set(claims) | {DEV_WATCH_PORT}
+    claimed = (announced_ports() | set(claims) | set(instance_claims())
+               | {DEV_WATCH_PORT})
     for port in range(args.range[0], args.range[1] + 1):
         if port not in claimed and bindable(port):
             if args.claim is not None:

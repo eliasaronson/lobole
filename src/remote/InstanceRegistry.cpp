@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 
@@ -67,6 +68,42 @@ int64_t NowSeconds() {
       .count();
 }
 
+// The machine-wide claim (docs/scripting/README.md#the-instance-registry):
+// /tmp/lobole-ports-<uid>/<port>, holding the pid. Never under
+// XDG_STATE_HOME, which an agent's scratch instance points elsewhere and
+// tools/scratch_port.py then cannot see, and never under TMPDIR, which a
+// nix-shell moves per shell. LOBOLE_PORT_CLAIMS_DIR moves it for a test
+// (tools/scratch_port.py reads the same). Not on Windows, where no tool
+// reads it.
+fs::path ClaimFor(uint16_t port) {
+#ifndef _WIN32
+  if (const char* dir = std::getenv("LOBOLE_PORT_CLAIMS_DIR");
+      dir != nullptr && *dir != '\0')
+    return fs::path(dir) / std::to_string(port);
+  return fs::path("/tmp") / ("lobole-ports-" + std::to_string(::getuid())) /
+         std::to_string(port);
+#else
+  (void)port;
+  return {};
+#endif
+}
+
+void WriteClaim(uint16_t port) {
+  const fs::path claim = ClaimFor(port);
+  if (claim.empty())
+    return;
+  std::error_code ec;
+  fs::create_directories(claim.parent_path(), ec);
+  const fs::path tmp = claim.string() + ".tmp";
+  {
+    std::ofstream out(tmp, std::ios::trunc);
+    out << CurrentPid() << "\n";
+    if (!out)
+      return;
+  }
+  fs::rename(tmp, claim, ec);
+}
+
 } // namespace
 
 std::string InstancesDir() {
@@ -74,6 +111,9 @@ std::string InstancesDir() {
 }
 
 bool AnnounceInstance(uint16_t port, const std::string& mode) {
+  // First, and whatever the registry below does: an instance whose state
+  // dir is unwritable still holds its port.
+  WriteClaim(port);
   try {
     fs::create_directories(InstancesDir());
     // Sweep first: this process may be reusing a port whose previous owner
@@ -106,7 +146,20 @@ bool AnnounceInstance(uint16_t port, const std::string& mode) {
 void WithdrawInstance(uint16_t port) {
   std::error_code ec;
   fs::remove(FileFor(port), ec);
+  // The claim only if it is still ours: a later instance on the port wrote
+  // its own.
+  const fs::path claim = ClaimFor(port);
+  if (claim.empty())
+    return;
+  std::ifstream in(claim);
+  int pid = 0;
+  if (in >> pid && pid == CurrentPid()) {
+    in.close();
+    fs::remove(claim, ec);
+  }
 }
+
+std::string PortClaimFile(uint16_t port) { return ClaimFor(port).string(); }
 
 std::vector<InstanceInfo> LiveInstances() {
   std::vector<InstanceInfo> live;
