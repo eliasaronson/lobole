@@ -261,6 +261,10 @@ bool NameCurrentVersion(AppState& state, const std::string& name,
       *error = "could not name this version";
     return false;
   }
+  // Stamped again, after our own commit and tag: MarkProjectSaved stamped
+  // before the empty commit that carries the name, and the disk check then
+  // read that commit as someone else's ("changed on disk").
+  StampDiskState(state, state.projectPath);
   state.historyStamp = -1.0; // the list just changed
   return true;
 }

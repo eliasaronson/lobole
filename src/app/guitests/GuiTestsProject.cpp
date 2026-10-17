@@ -1520,6 +1520,12 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->historyLog[0].subject, std::string("before the lid"));
     IM_CHECK(s_App->historyLog[0].named);
     IM_CHECK(!s_App->historyLog[1].named); // the plain save under it
+    // Naming is our own write: the disk check must not call it someone
+    // else's. The empty commit that carries the name came after the save's
+    // stamp, and the poll read the new HEAD as a change from outside.
+    s_App->diskCheckStamp = -1.0; // poll now, not in a second
+    ctx->Yield(3);
+    IM_CHECK(!s_App->diskChanged);
 
     // A second part, saved: the version above predates it.
     ui::AddPart(*s_App, "Lid");
