@@ -6,6 +6,7 @@
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <string>
 
 namespace ui {
 
@@ -26,5 +27,17 @@ void SetRequirementsEngine(const RequirementsEngine& engine);
 // requirement's state, value and bound, and Check. Exists only while the
 // project states requirements, like the Conflicts panel.
 void DrawRequirementsPanel(AppState& state);
+
+// What the panel drew for requirement `id` on its last frame, for the GUI
+// suite to read back: the Value cell and the width it had, and the finding
+// line under the row (whole, wrapped) with the width it was wrapped in.
+// Null when the row was not drawn.
+struct RequirementRowDrawn {
+  std::string value;
+  float valueTextWidth = 0.0f, valueCellWidth = 0.0f;
+  std::string finding;
+  float findingWidth = 0.0f, findingCellWidth = 0.0f;
+};
+const RequirementRowDrawn* RequirementRowDrawnForTest(uint64_t id);
 
 } // namespace ui

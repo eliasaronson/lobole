@@ -3,6 +3,7 @@
 
 #include "ui/RequirementsPanel.h"
 
+#include "core/Requirements.h"
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/DockLayout.h" // PanelHeading
@@ -13,6 +14,7 @@
 #include "imgui_internal.h" // FindWindowByName, the Model panel's dock
 
 #include <cstdio>
+#include <map>
 #include <string>
 
 // The Requirements panel (docs/requirements/README.md#the-panel). It reads
@@ -45,29 +47,20 @@ std::string Number(double v) {
   return buf;
 }
 
-std::string BoundText(const nlohmann::json& b, const std::string& unit,
-                      const nlohmann::json& row) {
-  const std::string kind = b.value("kind", std::string());
-  const auto side = [&](const char* key, const char* evaluated) {
-    if (row.contains(evaluated))
-      return Number(row.at(evaluated).get<double>());
-    const nlohmann::json& v = b.at(key);
-    return v.is_number() ? Number(v.get<double>()) : v.get<std::string>();
-  };
-  const std::string u = unit.empty() ? "" : " " + unit;
-  if (kind == "at_most")
-    return "<= " + side("value", "limit") + u;
-  if (kind == "at_least")
-    return ">= " + side("value", "limit") + u;
-  if (kind == "within")
-    return side("min", "limit_min") + " .. " + side("max", "limit_max") + u;
-  return "passes";
+std::map<uint64_t, RequirementRowDrawn>& Drawn() {
+  static std::map<uint64_t, RequirementRowDrawn> drawn;
+  return drawn;
 }
 
 } // namespace
 
 void SetRequirementsEngine(const RequirementsEngine& engine) {
   Engine() = engine;
+}
+
+const RequirementRowDrawn* RequirementRowDrawnForTest(uint64_t id) {
+  const auto it = Drawn().find(id);
+  return it == Drawn().end() ? nullptr : &it->second;
 }
 
 void DrawRequirementsPanel(AppState& state) {
@@ -124,16 +117,30 @@ void DrawRequirementsPanel(AppState& state) {
   const ImGuiTableFlags flags = ImGuiTableFlags_RowBg |
                                 ImGuiTableFlags_BordersInnerH |
                                 ImGuiTableFlags_SizingStretchProp;
+  // The name takes what is left: a value or a bound clipped to "findi"
+  // says nothing, and the name's tooltip and the finding line under it
+  // give it back whole.
+  Drawn().clear();
   if (ImGui::BeginTable("###req_table", 4, flags)) {
-    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed);
-    ImGui::TableSetupColumn("Requirement");
-    ImGui::TableSetupColumn("Value");
-    ImGui::TableSetupColumn("Bound");
+    // The state's width is set rather than fitted: the finding line below
+    // a row starts in this column and runs across the table, and a fitted
+    // column would grow to it.
+    ImGui::TableSetupColumn("State", ImGuiTableColumnFlags_WidthFixed,
+                            ImGui::CalcTextSize("unresolved").x);
+    ImGui::TableSetupColumn("Requirement", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthFixed);
+    ImGui::TableSetupColumn("Bound", ImGuiTableColumnFlags_WidthFixed);
     ImGui::TableHeadersRow();
     for (const nlohmann::json& row : rows) {
       const std::string st = row.value("state", std::string());
       const std::string unit = row.value("unit", std::string());
-      const std::string id = std::to_string(row.value("id", uint64_t{0}));
+      const uint64_t rid = row.value("id", uint64_t{0});
+      const std::string id = std::to_string(rid);
+      RequirementRowDrawn& drawn = Drawn()[rid];
+      // A failing or unresolved row's whole finding, one a line.
+      std::string finding;
+      for (const std::string& line : req::FindingLines(row))
+        finding += (finding.empty() ? "" : "\n") + line;
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       ImGui::TextColored(StateColour(st), "%s", st.c_str());
@@ -145,14 +152,10 @@ void DrawRequirementsPanel(AppState& state) {
         std::string tip = row.at("measure").value("kind", std::string());
         if (row.contains("source"))
           tip += "\n" + row.at("source").get<std::string>();
-        if (row.contains("note"))
+        if (row.contains("note") && st != "unresolved")
           tip += "\n" + row.at("note").get<std::string>();
-        // A failed verdict's findings: "findings" in the Value column says
-        // there are some, and this is where they are read.
-        if (row.contains("detail") && row.at("detail").contains("findings"))
-          for (const nlohmann::json& f : row.at("detail").at("findings"))
-            if (f.is_string())
-              tip += "\n- " + f.get<std::string>();
+        if (!finding.empty())
+          tip += "\n" + finding;
         if (row.contains("checked_at"))
           tip += "\nchecked " + row.at("checked_at").get<std::string>() +
                  " (revision " +
@@ -161,14 +164,38 @@ void DrawRequirementsPanel(AppState& state) {
       }
       ImGui::TableNextColumn();
       if (row.contains("value"))
-        ImGui::Text("%s%s", Number(row.at("value").get<double>()).c_str(),
-                    unit.empty() ? "" : (" " + unit).c_str());
+        drawn.value = Number(row.at("value").get<double>()) +
+                      (unit.empty() ? "" : " " + unit);
       else if (st == "pass" || st == "fail")
-        ImGui::TextUnformatted(st == "pass" ? "clean" : "findings");
-      else
+        drawn.value = st == "pass" ? "clean" : "findings";
+      drawn.valueCellWidth = ImGui::GetContentRegionAvail().x;
+      drawn.valueTextWidth = ImGui::CalcTextSize(drawn.value.c_str()).x;
+      if (drawn.value.empty())
         ImGui::TextDisabled("-");
+      else
+        ImGui::TextUnformatted(drawn.value.c_str());
       ImGui::TableNextColumn();
-      ImGui::TextUnformatted(BoundText(row.at("bound"), unit, row).c_str());
+      ImGui::TextUnformatted(req::BoundText(row).c_str());
+      if (!finding.empty()) {
+        // Under the row, across the whole table and wrapped to it: nothing
+        // to hover for, and nothing cut off however narrow the panel is.
+        ImGui::TableNextRow();
+        ImGui::TableSetColumnIndex(0);
+        const ImGuiTable* table = ImGui::GetCurrentTable();
+        const float avail =
+            table->WorkRect.Max.x - ImGui::GetCursorScreenPos().x;
+        ImGui::PushClipRect(table->InnerClipRect.Min, table->InnerClipRect.Max,
+                            false);
+        ImGui::PushStyleColor(ImGuiCol_Text, StateColour(st));
+        ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + avail);
+        ImGui::TextUnformatted(finding.c_str());
+        ImGui::PopTextWrapPos();
+        ImGui::PopStyleColor();
+        ImGui::PopClipRect();
+        drawn.finding = finding;
+        drawn.findingWidth = ImGui::GetItemRectSize().x;
+        drawn.findingCellWidth = avail;
+      }
     }
     ImGui::EndTable();
   }

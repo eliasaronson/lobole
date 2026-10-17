@@ -4,6 +4,7 @@
 #include "app/guitests/GuiTestsCommon.h"
 #include "core/Command.h"
 #include "core/MassProps.h"
+#include "core/Requirements.h"
 #include "core/features/DerivedFeature.h"
 #include "core/io/CrashReports.h"
 #include "remote/RemoteRequirements.h"
@@ -13,6 +14,7 @@
 #include "ui/OpenJob.h"
 #include "ui/PanelTitles.h"
 #include "ui/ProjectActions.h"
+#include "ui/RequirementsPanel.h"
 #include "ui/SelectionPipeline.h"
 
 #include <chrono>
@@ -1952,6 +1954,94 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(WaitForJobs(ctx, "requirements"));
     ctx->Yield(2);
     IM_CHECK_STR_EQ(states().c_str(), "fail,fail"); // 12 mm3 now
+    s_App->requirements.clear();
+    s_App->requirementsEdits++;
+    ctx->Yield(2);
+  };
+
+  // A requirement that does not pass says why in the panel
+  // (docs/requirements/README.md#the-panel): a number against its bound, a
+  // failed verdict's findings, an unresolved one's reason, each whole on a
+  // wrapped line under its row, and the Value column fitting what it says
+  // rather than cutting "findings" short.
+  t = IM_REGISTER_TEST(engine, "requirements", "a_failure_says_why");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx); // 2 x 2 x 2: 8 mm3
+    ctx->Yield(2);
+    const uint64_t part = s_App->parts[s_App->activePart].id;
+    // An assembly with no screw in it: check_fasteners examines none, which
+    // is not a pass.
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Bare");
+    const uint64_t bare = s_App->parts[asmIdx].id;
+    ui::SetActivePart(*s_App, 0);
+    ctx->Yield(2);
+    const auto make = [](uint64_t id, const char* name, nlohmann::json m,
+                         nlohmann::json bound) {
+      req::Requirement r;
+      r.id = id;
+      r.name = name;
+      r.measure = std::move(m);
+      r.bound = req::BoundFromJson(bound);
+      return r;
+    };
+    s_App->requirements = {
+        make(1, "fits the small pocket",
+             {{"kind", "volume"}, {"document", part}},
+             {{"kind", "at_most"}, {"value", 5.0}}),
+        make(2, "every screw holds",
+             {{"kind", "check_fasteners"}, {"document", bare}},
+             {{"kind", "pass"}}),
+        make(3, "the other part's mass",
+             {{"kind", "mass"}, {"document", part + 1000}},
+             {{"kind", "at_most"}, {"value", 1.0}})};
+    s_App->nextRequirementId = 4;
+    s_App->requirementsEdits++;
+    ctx->Yield(3);
+    ImGuiWindow* panel = ImGui::FindWindowByName(ui::kPanelRequirements);
+    IM_CHECK(panel != nullptr);
+    ctx->ItemClick(panel->TabId);
+    ctx->SetRef("//###Requirements");
+    ctx->ItemClick("Check###req_check");
+    IM_CHECK(WaitForJobs(ctx, "requirements"));
+    ctx->Yield(4); // the fitted columns settle on what they hold
+    const nlohmann::json rows =
+        remote::RequirementRows(*s_App).at("requirements");
+    IM_CHECK_STR_EQ(rows[0].at("state").get<std::string>().c_str(), "fail");
+    IM_CHECK_STR_EQ(rows[1].at("state").get<std::string>().c_str(), "fail");
+    IM_CHECK_STR_EQ(rows[2].at("state").get<std::string>().c_str(),
+                    "unresolved");
+
+    const auto* volume = ui::RequirementRowDrawnForTest(1);
+    IM_CHECK(volume != nullptr);
+    IM_CHECK_STR_EQ(volume->finding.c_str(),
+                    "measured 8 mm3, must be <= 5 mm3");
+    const auto* screws = ui::RequirementRowDrawnForTest(2);
+    IM_CHECK(screws != nullptr);
+    IM_CHECK_STR_EQ(screws->value.c_str(), "findings");
+    // The finding is the evidence's, whole: every line of it.
+    std::string whole;
+    for (const std::string& l : req::FindingLines(rows[1]))
+      whole += (whole.empty() ? "" : "\n") + l;
+    IM_CHECK_STR_EQ(screws->finding.c_str(), whole.c_str());
+    IM_CHECK_STR_EQ(screws->finding.c_str(), "no fastener was examined");
+    const auto* gone = ui::RequirementRowDrawnForTest(3);
+    IM_CHECK(gone != nullptr);
+    IM_CHECK(gone->finding.find("is gone") != std::string::npos);
+    for (const auto* d : {volume, screws, gone}) {
+      ctx->LogInfo("value '%s' %.0f of %.0f px; finding %.0f of %.0f px",
+                   d->value.c_str(), d->valueTextWidth, d->valueCellWidth,
+                   d->findingWidth, d->findingCellWidth);
+      IM_CHECK_LE(d->valueTextWidth, d->valueCellWidth + 0.5f);
+      IM_CHECK_LE(d->findingWidth, d->findingCellWidth + 0.5f);
+    }
+
+    // The name's tooltip carries the finding too.
+    ctx->MouseMove("**/###req_row2");
+    ctx->Yield(3);
+    ImGuiWindow* tip = ImGui::FindWindowByName("##Tooltip_00");
+    IM_CHECK(tip != nullptr && tip->Active);
+
     s_App->requirements.clear();
     s_App->requirementsEdits++;
     ctx->Yield(2);

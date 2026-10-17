@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdio>
 #include <map>
 #include <set>
 #include <stdexcept>
@@ -638,6 +639,98 @@ std::string Slug(const std::string& name) {
   if (s.size() > 40)
     s.resize(40);
   return s.empty() ? "requirement" : s;
+}
+
+namespace {
+
+std::string Num(double v) {
+  char buf[64];
+  std::snprintf(buf, sizeof buf, "%.4g", v);
+  return buf;
+}
+
+// One finding as a line: a string as it is, an object as its fields
+// ("mate: shaft fit, status: fail, reason: ..."), names first.
+std::string FindingText(const json& f) {
+  if (f.is_string())
+    return f.get<std::string>();
+  if (!f.is_object())
+    return f.dump();
+  std::string out;
+  const auto add = [&](const std::string& k, const json& v) {
+    if (v.is_array() && v.empty())
+      return;
+    out += (out.empty() ? "" : ", ") + k + ": " +
+           (v.is_string()         ? v.get<std::string>()
+            : v.is_number_float() ? Num(v.get<double>())
+                                  : v.dump());
+  };
+  for (const char* k : {"part", "mate", "name", "designation"})
+    if (f.contains(k))
+      add(k, f.at(k));
+  for (const auto& [k, v] : f.items())
+    if (k != "part" && k != "mate" && k != "name" && k != "designation")
+      add(k, v);
+  return out;
+}
+
+} // namespace
+
+std::string BoundText(const json& row) {
+  const json& b = row.at("bound");
+  const std::string kind = b.value("kind", std::string());
+  const std::string unit = row.value("unit", std::string());
+  const auto side = [&](const char* key, const char* evaluated) {
+    if (row.contains(evaluated))
+      return Num(row.at(evaluated).get<double>());
+    const json& v = b.at(key);
+    return v.is_number() ? Num(v.get<double>()) : v.get<std::string>();
+  };
+  const std::string u = unit.empty() ? "" : " " + unit;
+  if (kind == "at_most")
+    return "<= " + side("value", "limit") + u;
+  if (kind == "at_least")
+    return ">= " + side("value", "limit") + u;
+  if (kind == "within")
+    return side("min", "limit_min") + " .. " + side("max", "limit_max") + u;
+  return "passes";
+}
+
+std::vector<std::string> FindingLines(const json& row) {
+  std::vector<std::string> lines;
+  const std::string st = row.value("state", std::string());
+  if (st == "unresolved") {
+    lines.push_back(row.value("note", std::string("could not be measured")));
+    return lines;
+  }
+  if (st != "fail")
+    return lines;
+  const std::string unit = row.value("unit", std::string());
+  if (row.contains("value"))
+    lines.push_back("measured " + Num(row.at("value").get<double>()) +
+                    (unit.empty() ? "" : " " + unit) + ", must be " +
+                    BoundText(row));
+  const json detail = row.value("detail", json::object());
+  if (!detail.is_object())
+    return lines;
+  for (const json& f : detail.value("findings", json::array()))
+    lines.push_back(FindingText(f));
+  // check_seat: per bearing.
+  for (const json& b : detail.value("bearings", json::array()))
+    for (const json& f : b.value("findings", json::array()))
+      lines.push_back(b.value("designation", std::string("bearing")) + ": " +
+                      FindingText(f));
+  for (const char* k : {"reason", "note"})
+    if (detail.contains(k) && detail.at(k).is_string())
+      lines.push_back(detail.at(k).get<std::string>());
+  // fit_class: the kind it came out as.
+  if (detail.contains("kind") && detail.contains("status") &&
+      !row.contains("value"))
+    lines.push_back("the fit is " + FindingText(detail.at("kind")) + ", " +
+                    FindingText(detail.at("status")));
+  if (lines.empty())
+    lines.push_back("the verdict failed: " + detail.dump());
+  return lines;
 }
 
 } // namespace req

@@ -3,6 +3,7 @@
 
 #include "remote/RemoteRequirements.h"
 #include "cad/CADKernel.h"
+#include "common/Logger.h"
 
 #include "core/Angles.h"
 #include "core/AssemblySolve.h"
@@ -1777,6 +1778,27 @@ receipt::Receipt ReceiptFor(const json& rows) {
   return rec;
 }
 
+// The log's line for every requirement a check was asked about that does
+// not pass: its name, its state and its whole finding, the lines the panel
+// shows under the row (req::FindingLines). A failing check read from the log
+// says why, not just that.
+void LogFindings(ui::AppState& state, const std::vector<uint64_t>& ids) {
+  for (uint64_t id : ids) {
+    const req::Requirement* r = FindRequirement(state, id);
+    if (r == nullptr)
+      continue;
+    const json row = Row(state, *r);
+    const std::vector<std::string> lines = req::FindingLines(row);
+    if (lines.empty())
+      continue;
+    std::string text;
+    for (const std::string& l : lines)
+      text += (text.empty() ? "" : "; ") + l;
+    LOG_WARN("requirement '{}' {}: {}", r->name,
+             row.at("state").get<std::string>(), text);
+  }
+}
+
 bool AnyStudyJobRunning(ui::AppState& state, uint64_t except) {
   for (const ui::BackgroundJobInfo& j : ui::ListBackgroundJobs(state))
     if (j.id != except &&
@@ -1793,6 +1815,7 @@ bool AnyStudyJobRunning(ui::AppState& state, uint64_t except) {
 // thread only reads the model and writes evidence.
 struct CheckRun {
   std::vector<uint64_t> ids;
+  std::vector<uint64_t> asked; // ids and the current ones answered as they lie
   size_t next = 0;
   bool recompute = false;
   bool recomputeThis = false; // this requirement's first run, not its retry
@@ -1854,6 +1877,7 @@ bool StepCheck(ui::AppState& state, CheckRun& run, ui::BackgroundJob& job) {
                                   job.cancelReason.empty() ? "cancel_study"
                                                            : job.cancelReason);
     Restore(state, run.returnTo);
+    LogFindings(state, run.asked);
     return true;
   }
   if (run.waitJob) {
@@ -1928,15 +1952,19 @@ bool StepCheck(ui::AppState& state, CheckRun& run, ui::BackgroundJob& job) {
     return false; // one measured requirement per frame
   }
   Restore(state, run.returnTo);
+  LogFindings(state, run.asked);
   job.fraction.store(1.0);
   return true;
 }
 
 std::shared_ptr<CheckRun> StartCheck(ui::AppState& state,
-                                     std::vector<uint64_t> ids, bool recompute,
-                                     uint64_t owner, uint64_t* jobId) {
+                                     std::vector<uint64_t> ids,
+                                     std::vector<uint64_t> asked,
+                                     bool recompute, uint64_t owner,
+                                     uint64_t* jobId) {
   auto run = std::make_shared<CheckRun>();
   run->ids = std::move(ids);
+  run->asked = std::move(asked);
   run->recompute = recompute;
   run->recomputeThis = recompute;
   run->returnTo = state.activePart;
@@ -2134,14 +2162,16 @@ void SetTestRequirementHold(int ms) { g_testHoldMs.store(std::max(0, ms)); }
 uint64_t StartRequirementsCheck(ui::AppState& state, bool recompute) {
   if (ui::FindBackgroundJob(state, kJobKind))
     return ui::FindBackgroundJob(state, kJobKind)->id;
-  std::vector<uint64_t> ids;
-  for (const req::Requirement& r : state.requirements)
+  std::vector<uint64_t> ids, asked;
+  for (const req::Requirement& r : state.requirements) {
+    asked.push_back(r.id);
     if (recompute || !Current(state, r))
       ids.push_back(r.id);
+  }
   if (ids.empty())
     return 0;
   uint64_t job = 0;
-  StartCheck(state, std::move(ids), recompute, 0, &job);
+  StartCheck(state, std::move(ids), std::move(asked), recompute, 0, &job);
   return job;
 }
 
@@ -2182,7 +2212,7 @@ std::unique_ptr<Parking> ParkRequirementsRequest(ui::AppState& state,
     if (todo.empty())
       return nullptr;
     uint64_t job = 0;
-    auto run = StartCheck(state, std::move(todo), recompute,
+    auto run = StartCheck(state, std::move(todo), ids, recompute,
                           outlive ? 0 : state.rpcConnection, &job);
     return std::make_unique<CheckWait>(job, std::move(run), std::move(ids));
   } catch (...) {
@@ -2264,7 +2294,7 @@ std::optional<json> HandleRequirementsRpc(ui::AppState& state,
         todo.push_back(id);
     if (async && !todo.empty()) {
       uint64_t job = 0;
-      StartCheck(state, todo, recompute, outlive ? 0 : state.rpcConnection,
+      StartCheck(state, todo, ids, recompute, outlive ? 0 : state.rpcConnection,
                  &job);
       json out = RowsJson(state, &ids);
       out["job"] = job;
@@ -2282,6 +2312,7 @@ std::optional<json> HandleRequirementsRpc(ui::AppState& state,
       checked++;
     }
     Restore(state, returnTo);
+    LogFindings(state, ids);
     json out = RowsJson(state, &ids);
     out["checked"] = checked;
     out["reused"] = ids.size() - checked;

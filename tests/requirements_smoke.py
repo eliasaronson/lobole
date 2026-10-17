@@ -656,6 +656,12 @@ def main():
                bound={"kind": "at_least", "value": gap + 5.0})
         r = d.call("check_requirements", ids=[cid])
         expect(r["requirements"][0]["state"] == "fail", r["requirements"])
+        # ...and the log says why, as the panel does
+        # (docs/requirements/README.md#the-panel).
+        said = (f"requirement 'crank clears piston here' fail: measured "
+                f"{gap:.4g} mm, must be >= {gap + 5.0:.4g} mm")
+        expect(said in app.log(), f"no log line '{said}':\n"
+               + "\n".join(app.log().splitlines()[-20:]))
 
         # Moving a part not in the pair leaves the pair's evidence current.
         d.call("remove_occurrence", id=block)

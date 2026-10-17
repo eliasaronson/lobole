@@ -153,6 +153,16 @@ nlohmann::json ListToJson(const std::vector<Requirement>& list);
 std::string StateOf(const Requirement& r, const std::string& unresolvedWhy,
                     uint64_t currentHash);
 
+// What a row of list_requirements says to a reader, in words
+// (docs/requirements/README.md#the-panel): the bound as evaluated
+// ("<= 10 mm3", "passes"), and the whole finding of a row that does not
+// pass -- a failing number against its bound, a failed verdict's findings
+// one a line (a bearing's or a part's under its name), or why an
+// unresolved one could not be measured. Empty for any other row. The panel
+// shows these lines and the check logs them, so the two say the same.
+std::string BoundText(const nlohmann::json& row);
+std::vector<std::string> FindingLines(const nlohmann::json& row);
+
 // A file-name-safe slug of the name, as the other per-item files use.
 std::string Slug(const std::string& name);
 
