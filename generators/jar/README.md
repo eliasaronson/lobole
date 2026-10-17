@@ -88,6 +88,17 @@ What that leaves is a running fit: 0.25 mm radial at crest and root, and
 
 ## The seal
 
+Two rings keep the water in, and the project states both as requirements
+(`seal`, [seals](../../docs/inspect/README.md#seals)), checked every run:
+
+- **the gasket on the rim**, at least the rim's flat wide (0.8 mm): the
+  rim's flat and chamfer pressed into it read 1.39 mm wide at the defaults,
+  and 0.38 mm deep on average there (the overlap's area over its width);
+- **the skirt on the shoulder**, at least two lines wide (0.8 mm, the
+  narrowest ring that prints solid): the lid's skirt lands flat on the
+  jar's shoulder, a ring 2.00 mm wide. The first print had no gasket, and
+  this ring alone held water upside down.
+
 The squeeze is set by a **hard stop**, not by torque. The lid's skirt
 lands on the jar's shoulder, and at that height the rim is a fixed depth
 into the gasket. "Hand-tight" then becomes a dimension instead of a
@@ -139,6 +150,8 @@ elastomer strain, and a linear one would not be honest at that strain.
   the exact overlap of gasket and jar against the rim's section above that
   depth, revolved: 100.7 mm³ against 100.7, within 2 %. The fraction must
   lie in 20-30 %.
+- **Both seals close all the way round** (`seal` requirements, above), each
+  at least its width.
 - **Nothing else clashes, nothing floats** (`asm.check`): the gasket's
   overlap with the jar is the one contact allowed, by its measured volume.
   Near misses are not raised, since the thread and the gasket's bore are
@@ -158,13 +171,15 @@ elastomer strain, and a linear one would not be honest at that strain.
   with no area past it and need no slack. Each part's whole report is in
   the receipt's `stl.<part>.print`.
 
-Three **negative controls**, each of which must fail its check or the run
+Four **negative controls**, each of which must fail its check or the run
 stops:
 
 - the lid turned half a pitch out of phase at its stop interferes with the
   jar (500 mm³);
 - a lid whose skirt is longer by the squeeze and a layer stops short:
   −0.2 mm, −10 %;
+- a lid with a slot a wall wide through its skirt's foot: `check_seal`
+  finds the ring on the shoulder open at the slot (178.5-181.5°);
 - the same jar with an ISO 30° flank has about 1050 mm² past the overhang
   limit (worst 60°).
 

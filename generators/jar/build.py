@@ -198,9 +198,12 @@ def build_jar(app, s, proc, material, name="jar", flank=FLANK_DEG):
     return p, t
 
 
-def build_lid(app, s, proc, material, name="lid", extra_skirt=0.0):
+def build_lid(app, s, proc, material, name="lid", extra_skirt=0.0,
+              notch=False):
     """The lid, top down: as it prints. `extra_skirt` lengthens the skirt
-    below the thread (the negative control: a lid that stops short)."""
+    below the thread (the negative control: a lid that stops short);
+    `notch` cuts a slot through the skirt's foot, a wall wide and five
+    layers high (the negative control: a skirt that does not seal)."""
     p = app.part(name)
     app.set_print_process(**proc)
     c = s["edge_chamfer"]
@@ -216,11 +219,19 @@ def build_lid(app, s, proc, material, name="lid", extra_skirt=0.0):
     bore = body.face(kind="cylinder", radius=rb)
     t = p.thread(bore, "jar lid", modeled=True, pitch=s["pitch"],
                  flank_angle_deg=FLANK_DEG)
+    if notch:
+        # On the skirt's foot, facing into the lid: through the skirt along
+        # +X, a wall wide.
+        sk = p.sketch(Plane.xy(z=mouth, flip=True), name="notch")
+        sk.rect((rb - 1.0, -s["wall"] / 2.0), (R + 1.0, s["wall"] / 2.0))
+        p.cut(sk.add(), 5 * LAYER_MM, name="notch")
     p.material(material)
     p.check()
     body = p.body()
+    # A notch leaves the mouth's outer edge an arc: its centre and axis
+    # are the circle's.
     p.frame("mouth", of=body.edge(
-        kind="circle", radius=R,
+        kind="arc" if notch else "circle", radius=R,
         where=lambda e: abs(e.midpoint[2] - mouth) < 1e-6))
     p.frame("groove", of=body.edge(
         kind="circle", radius=go,
@@ -573,6 +584,35 @@ def main():
     checks["contact_report"] = {"clashes": rep.get("clashes"),
                                 "components": len(rep.get("components", []))}
 
+    # The seals, stated in the project (docs/inspect/README.md#seals): the
+    # gasket's ring on the rim at least the rim's flat wide, and the
+    # skirt's on the shoulder -- the ring that held water when the jar was
+    # printed with no gasket -- at least two lines.
+    seals = {}
+    for name, a, b, least, why in (
+            ("the gasket seals on the rim", jar.gasket, jar.jar,
+             s["seal_flat"], "the rim's flat is what presses into the "
+             "gasket; a ring narrower than it is a rim that missed"),
+            ("the skirt seals on the shoulder", jar.lid, jar.jar,
+             2.0 * NOZZLE_MM, "the skirt's foot on the shoulder held water "
+             "with no gasket; two lines is the narrowest ring that prints "
+             "solid")):
+        seals[name] = app.require(
+            name, {"kind": "seal", "document": jar.asm.id, "a": a.id,
+                   "b": b.id}, at_least=least, source=why)
+    got = app.verify_requirements(ids=list(seals.values()),
+                                  raise_on_failure=False)
+    checks["seals"] = {}
+    for r in got["requirements"]:
+        checks["seals"][r["name"]] = {"state": r["state"],
+                                      "least_width_mm": r.get("value"),
+                                      "limit_mm": r.get("limit")}
+        print(f"  seal: {r['name']}: {r['state']}, a ring "
+              f"{r.get('value', 0):.2f} mm wide at its narrowest "
+              f"(at least {r.get('limit', 0):.2f})")
+        if r["state"] != "pass":
+            raise SystemExit(f"jar: {r['name']} does not hold: {r}")
+
     # Unscrewing: a screw relation backed by the lid's thread couples its
     # turn to its rise. From the turn where the gasket lets go, two turns
     # out, with a clash check fine enough to see the flank clearance.
@@ -640,6 +680,27 @@ def main():
     if sq_short["ok"]:
         raise SystemExit("jar: a lid that stops short passes the squeeze "
                          "check; it cannot see a lid that does not seal")
+
+    # Negative control: a slot through the skirt's foot opens its ring on
+    # the shoulder, and the seal check must say so, and where.
+    notched_p, _ = build_lid(app, s, proc, material,
+                             name="lid (notched skirt)", notch=True)
+    notched = Jar(app, "screw-top jar (notched skirt)", jar_p, notched_p,
+                  gasket_p)
+    notched.pose(phase, 0.0)
+    notched.asm.activate()
+    ns = app.call("check_seal", a="lid", b="jar")
+    checks["control_notched_skirt"] = {
+        "sealed": ns["sealed"], "least_width_mm": ns["least_width_mm"],
+        "open": ns["open"]}
+    print(f"  control, a notched skirt: "
+          f"{'SEALS (bad)' if ns['sealed'] else 'open'} at "
+          + ", ".join(f"{o['from_deg']:.1f}-{o['to_deg']:.1f} deg"
+                      for o in ns["open"])
+          + ("" if ns["sealed"] else " -> fails, as it must"))
+    if ns["sealed"] or not ns["open"]:
+        raise SystemExit("jar: a notched skirt reads sealed; the seal check "
+                         "cannot see a gap")
 
     out.mkdir(parents=True, exist_ok=True)
     stls = {
