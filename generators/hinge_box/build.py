@@ -357,26 +357,15 @@ def build_assembly(d):
     return box, lid, mate
 
 
-def quat_apply(q, p):
-    x, y, z, w = q
-    # v' = v + 2 w (q x v) + 2 q x (q x v)
-    qv = (x, y, z)
-
-    def cross(a, b):
-        return (a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2],
-                a[0] * b[1] - a[1] * b[0])
-    t = tuple(2.0 * c for c in cross(qv, p))
-    u = cross(qv, t)
-    return tuple(p[i] + w * t[i] + u[i] for i in range(3))
-
-
-def lid_point(sample, lid_occ, p):
-    """Where the lid's point p (print frame) stands at a study sample."""
-    for pose in sample.get("poses", []):
-        if pose.get("occurrence") == lid_occ:
-            r = quat_apply(pose["orientation"], p)
-            return tuple(r[i] + pose["position"][i] for i in range(3))
-    raise SystemExit("hinge_box: the study has no pose for the lid")
+def lid_points(s):
+    """The lid's points the swing is judged by, in the lid's own (print)
+    frame: its centre and its four inner corners, on its inner face."""
+    W, D, T, a = s["width"], s["depth"], s["lid"], s["standoff"]
+    pts = {"centre": (W / 2.0, a + D / 2.0, T)}
+    for i, x in enumerate((0.0, W)):
+        for j, y in enumerate((a, a + D)):
+            pts[f"corner {i}{j}"] = (x, y, T)
+    return pts
 
 
 def run_swing(d, s, mate, lid_occ, clash, samples):
@@ -388,7 +377,11 @@ def run_swing(d, s, mate, lid_occ, clash, samples):
     if st.get("why_not"):
         raise SystemExit(f"hinge_box: motion study: {st['why_not']}")
     sid = st.get("id", st.get("study"))
-    r = d.call("run_motion_study", study=sid, include_poses=True)
+    # The study traces the lid's points itself (run_motion_study `trace`):
+    # where each stands at every sample, in world mm.
+    r = d.call("run_motion_study", study=sid, trace=[
+        {"name": n, "occurrence": lid_occ, "point_mm": list(p)}
+        for n, p in lid_points(s).items()])
     return r.get("result", r)
 
 
@@ -398,16 +391,17 @@ def check_swing(s, res, lid_occ):
     calls touching a clash (run_motion_study), so the last sample may show
     the lid against the rim and nothing else."""
     samples = res["samples"]
-    W, D, T, a = s["width"], s["depth"], s["lid"], s["standoff"]
-    mid = samples[len(samples) // 2]
-    centre = (W / 2.0, a + D / 2.0, T)
-    up = lid_point(mid, lid_occ, centre)
+    D, a = s["depth"], s["standoff"]
+    path = {t["name"]: t["points_mm"] for t in res["trace"]}
+    if any(pt is None for pts in path.values() for pt in pts):
+        raise SystemExit(f"hinge_box: a sample of the swing did not solve: "
+                         f"{res.get('table')}")
+    up = path["centre"][len(samples) // 2]
     if up[2] < s["axis_z"]:
         raise SystemExit(f"hinge_box: half way over the lid's centre is at "
                          f"z {up[2]:.2f}, under the axis: it swings through "
                          f"the bed")
-    corners = [lid_point(samples[-1], lid_occ, (x, y, T))
-               for x in (0.0, W) for y in (a, a + D)]
+    corners = [pts[-1] for n, pts in path.items() if n.startswith("corner")]
     rim = [c[2] for c in corners]
     off = max(abs(z - s["height"]) for z in rim)
     over = all(-a - D - 1e-6 <= c[1] <= -a + 1e-6 for c in corners)

@@ -11,6 +11,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -193,6 +194,50 @@ double ValueAt(const MotionStudy& study, double t);
 // `assemblies` is needed only for a driver inside a flexible placement.
 std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study,
                    const assembly::AssemblyResolver& assemblies = nullptr);
+
+// A point TRACED through a run (docs/assemblies/README.md#tracing-a-point):
+// a point fixed on one occurrence, in that occurrence's own (part)
+// coordinates, followed through every sample. What a linkage is FOR is
+// usually a path -- a foot, a coupler point, a cam follower's tip -- and
+// every generator that wanted one transformed the run's poses by hand.
+//
+// `occurrence` is a top-level occurrence; with `inner` set, the point is on
+// that MOVING occurrence inside the flexible placement `occurrence` (the
+// path a Sample::LeafWorld is keyed by).
+struct TracePoint {
+  std::string name;
+  uint64_t occurrence = 0;
+  uint64_t inner = 0;
+  glm::dvec3 pointMm{0.0};
+};
+
+struct TracePath {
+  std::string name;
+  // One per sample, in world mm; nullopt where the sample did NOT solve. An
+  // unsolved sample's pose is the solver's last attempt, not the mechanism,
+  // and a path drawn through it would be the substitution this file
+  // refuses.
+  std::vector<std::optional<glm::dvec3>> points;
+  size_t unsolved = 0;
+  // The extent over the solved samples; `any` false when there were none.
+  bool any = false;
+  glm::dvec3 min{0.0}, max{0.0};
+};
+
+// Why `points` cannot be traced on `asmDoc` -- an empty or repeated name, an
+// occurrence that is not there, a path whose root is not a flexible
+// placement -- or empty when they can. Checked BEFORE a run, so a typo does
+// not cost one. (Whether an inner occurrence MOVES is known only from the
+// run; TracePoints says so.)
+std::string WhyNotTrace(const AssemblyDocument& asmDoc,
+                        const std::vector<TracePoint>& points);
+
+// Every point through every sample of `result`. Returns false, with `why`,
+// when a point's occurrence has no pose in the run (an inner occurrence that
+// does not move inside its placement is not recorded: trace the point on
+// the placement itself).
+bool TracePoints(const Result& result, const std::vector<TracePoint>& points,
+                 std::vector<TracePath>* out, std::string* why);
 
 // The collision table as text, one line per sample: what the plan asked to
 // be PRINTED, and what an agent pastes into its report.

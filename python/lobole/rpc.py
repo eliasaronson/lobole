@@ -100,7 +100,7 @@ COLUMNS: dict[str, str] = {
     'rename_part': 'new_name:string, part:string|int',
     'reset_layout': '',
     'rt_build': '',
-    'run_motion_study': 'study:int>=0, async?:bool, include_poses?:bool, leave_at?:string|int, leave_at_deg?:number, leave_at_mm?:number, outlive_client?:bool, recompute?:bool',
+    'run_motion_study': 'study:int>=0, async?:bool, include_poses?:bool, leave_at?:string|int, leave_at_deg?:number, leave_at_mm?:number, outlive_client?:bool, recompute?:bool, trace?:object[]',
     'run_study': 'id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, recompute?:bool',
     'save_project': 'path:string, message?:string, force?:bool',
     'set_active_configuration': 'id?:int>=0',
@@ -273,6 +273,7 @@ class RunMotionStudyParams(TypedDict):
     leave_at_mm: NotRequired[float]
     outlive_client: NotRequired[bool]
     recompute: NotRequired[bool]
+    trace: NotRequired[Sequence[Mapping[str, Any]]]
 
 class RunStudyParams(TypedDict):
     id: NotRequired[int]

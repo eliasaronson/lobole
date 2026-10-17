@@ -159,15 +159,27 @@ constexpr MethodDoc MotionMethods[] = {
      "range: the nearest sample's pose and one solve stepping from it, so a "
      "slider-crank stays on the branch the run found. The reply says "
      "`left_at` (the sample), `left_at_value` and `left_solves`. leave_at "
-     "with async is refused: its samples do not exist yet.",
+     "with async is refused: its samples do not exist yet. "
+     "`trace` [{name, occurrence (or path [placement, occurrence] inside a "
+     "flexible placement), point_mm}] follows each point -- given in the "
+     "occurrence's own part coordinates, mm -- through every sample: the "
+     "reply's `trace` gives each its `points_mm` (world mm, one per "
+     "sample, null where the sample did not solve -- never the last good "
+     "pose), `min_mm`/`max_mm`/`extent_mm` over the solved samples, and "
+     "`unsolved_samples`. A foot's path, a coupler point, a follower's tip "
+     "(docs/assemblies/README.md#tracing-a-point). An unknown occurrence, "
+     "an empty or repeated name, or an inner occurrence that does not move "
+     "is refused naming what there is; trace with async is refused (ask "
+     "motion_status {study, trace} once it lands).",
      "study:int>=0, async?:bool, include_poses?:bool, leave_at?:string|int, "
      "leave_at_deg?:number, leave_at_mm?:number, outlive_client?:bool, "
-     "recompute?:bool"},
+     "recompute?:bool, trace?:object[]"},
     {"motion_status",
      "{study}: whether a run of THIS study is in progress (with its `job` "
      "id and `fraction` while it is), and the stored result if one has "
-     "landed (the same shape run_motion_study returns).",
-     "include_poses, study"},
+     "landed (the same shape run_motion_study returns, `trace` included "
+     "when asked: {study, trace}).",
+     "include_poses, study, trace"},
     {"set_motion_pose",
      "Scrub: drive the study's mate to {t} (0..1 along the range) and "
      "re-solve, so the viewport and every query show that pose. No undo "
@@ -285,6 +297,115 @@ json ClashJson(const motion::Clash& c) {
     AddOverlapBound(j, c.withinMin, c.withinMax);
   }
   return j;
+}
+
+// `trace: [{name, occurrence, path?, point_mm}]`: the points a run follows
+// (motion::TracePoint). Read and checked against the assembly BEFORE the run,
+// so a typo is refused without costing one.
+std::vector<motion::TracePoint> ReadTrace(const AssemblyDocument& asmDoc,
+                                          const RpcParams& p) {
+  std::vector<motion::TracePoint> out;
+  if (!p.contains("trace"))
+    return out;
+  const json& t = p.at("trace");
+  if (!t.is_array())
+    throw std::runtime_error(
+        "trace is a list of {name, occurrence, point_mm} (or {name, path: "
+        "[placement, occurrence], point_mm} inside a flexible placement); "
+        "got " +
+        t.dump());
+  for (size_t i = 0; i < t.size(); i++) {
+    const json& e = t[i];
+    const std::string at = "trace " + std::to_string(i + 1) + ": ";
+    if (!e.is_object())
+      throw std::runtime_error(at +
+                               "each traced point is {name, occurrence | "
+                               "path, point_mm}; got " +
+                               e.dump());
+    for (const auto& [key, v] : e.items())
+      if (key != "name" && key != "occurrence" && key != "path" &&
+          key != "point_mm")
+        throw std::runtime_error(at + "unknown key '" + key +
+                                 "'; accepted: name, occurrence, path, "
+                                 "point_mm");
+    if (!e.contains("name") || !e.at("name").is_string())
+      throw std::runtime_error(at + "name (a string) is required");
+    if (!e.contains("point_mm"))
+      throw std::runtime_error(at + "point_mm [x, y, z] is required: the "
+                                    "point in the occurrence's own (part) "
+                                    "coordinates, mm");
+    if (e.contains("occurrence") == e.contains("path"))
+      throw std::runtime_error(
+          at + "name the point's occurrence by `occurrence` (a top-level "
+               "id) or `path` ([placement, occurrence] inside a flexible "
+               "placement), exactly one of them");
+    motion::TracePoint tp;
+    tp.name = e.at("name").get<std::string>();
+    tp.pointMm = Vec3Param(e.at("point_mm"), at + "point_mm");
+    if (e.contains("occurrence")) {
+      if (!e.at("occurrence").is_number_unsigned())
+        throw std::runtime_error(at + "occurrence is an occurrence id; got " +
+                                 e.at("occurrence").dump());
+      tp.occurrence = e.at("occurrence").get<uint64_t>();
+    } else {
+      const json& path = e.at("path");
+      if (!path.is_array() || path.size() != 2 ||
+          !path[0].is_number_unsigned() || !path[1].is_number_unsigned())
+        throw std::runtime_error(at +
+                                 "path is [placement, occurrence], two ids; "
+                                 "got " +
+                                 path.dump());
+      tp.occurrence = path[0].get<uint64_t>();
+      tp.inner = path[1].get<uint64_t>();
+    }
+    out.push_back(std::move(tp));
+  }
+  if (const std::string why = motion::WhyNotTrace(asmDoc, out); !why.empty())
+    throw std::runtime_error(why);
+  return out;
+}
+
+// Each traced path: a point per sample (null where it did not solve) and its
+// extent over the solved ones.
+json TraceJson(const std::vector<motion::TracePoint>& points,
+               const std::vector<motion::TracePath>& paths) {
+  json out = json::array();
+  const auto vec = [](const glm::dvec3& v) { return json{v.x, v.y, v.z}; };
+  for (size_t i = 0; i < paths.size(); i++) {
+    const motion::TracePath& t = paths[i];
+    const motion::TracePoint& p = points[i];
+    json pts = json::array();
+    for (const auto& q : t.points)
+      pts.push_back(q ? vec(*q) : json(nullptr));
+    json j{{"name", t.name},
+           {"point_mm", vec(p.pointMm)},
+           {"points_mm", std::move(pts)},
+           {"unsolved_samples", t.unsolved}};
+    if (p.inner != 0)
+      j["path"] = {p.occurrence, p.inner};
+    else
+      j["occurrence"] = p.occurrence;
+    if (t.any) {
+      j["min_mm"] = vec(t.min);
+      j["max_mm"] = vec(t.max);
+      j["extent_mm"] = vec(t.max - t.min);
+    } else {
+      j["min_mm"] = nullptr;
+      j["max_mm"] = nullptr;
+      j["extent_mm"] = nullptr;
+    }
+    out.push_back(std::move(j));
+  }
+  return out;
+}
+
+json TraceResultJson(const std::vector<motion::TracePoint>& points,
+                     const motion::Result& r) {
+  std::vector<motion::TracePath> paths;
+  std::string why;
+  if (!motion::TracePoints(r, points, &paths, &why))
+    throw std::runtime_error(why);
+  return TraceJson(points, paths);
 }
 
 json ResultJson(const AssemblyDocument& asmDoc, const motion::Result& r,
@@ -766,6 +887,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     AssemblyDocument& asmDoc = NeedAssembly(state);
     MotionStudy& s = NeedStudy(asmDoc, p);
     const bool includePoses = p.value("include_poses", false);
+    const std::vector<motion::TracePoint> trace = ReadTrace(asmDoc, p);
     const bool atValue =
         p.contains("leave_at_deg") || p.contains("leave_at_mm");
     // Who the run belongs to, and whether a stored answer may stand for it
@@ -789,6 +911,10 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
             at.dump());
     }
     if (p.value("async", false)) {
+      if (!trace.empty())
+        throw std::runtime_error(
+            "trace needs the run's samples, and an async run has none yet "
+            "-- poll motion_status, then motion_status {study, trace}");
       if (p.contains("leave_at") || atValue)
         throw std::runtime_error(
             "leave_at needs the run's samples, and an async run has none yet "
@@ -818,6 +944,10 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(r.error);
     json out = ResultJson(NeedAssembly(state), r, s, includePoses);
     out["reused"] = start.reused;
+    // Traced before anything is left anywhere: a point the run cannot trace
+    // is refused with the assembly still where it was.
+    if (!trace.empty())
+      out["trace"] = TraceResultJson(trace, r);
     // A run happens on a COPY, so the assembly is left exactly where it was
     // -- which means nothing about the far end of the travel can be measured
     // afterwards. `leave_at` poses the live assembly at one of the run's
@@ -863,6 +993,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     AssemblyDocument& asmDoc = NeedAssembly(state);
     const MotionStudy& s = NeedStudy(asmDoc, p);
     const bool includePoses = p.value("include_poses", false);
+    const std::vector<motion::TracePoint> trace = ReadTrace(asmDoc, p);
     // The job running THIS study, if any: its id and how far it is.
     ui::BackgroundJob* job = ui::FindBackgroundJob(state, "motion");
     if (job != nullptr && job->studyId != s.id)
@@ -874,6 +1005,8 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     }
     if (const motion::Result* r = ui::MotionResultFor(state, s.id)) {
       out["result"] = ResultJson(asmDoc, *r, s, includePoses);
+      if (!trace.empty())
+        out["result"]["trace"] = TraceResultJson(trace, *r);
       out["stale"] = ui::MotionResultStale(state, s.id);
       if (out["stale"].get<bool>()) {
         out["result"]["last_clean"] = r->clean;

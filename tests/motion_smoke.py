@@ -138,6 +138,57 @@ def main():
         expect(abs(mate["rotation"]) < 1e-9,
                f"the run drove a COPY; the mate is where it was: {mate}")
 
+        # ---- Trace a point (docs/assemblies/README.md#tracing-a-point) ----
+        # The arm's far end, (30, 0, 0) in its own part, sweeps a circle of
+        # 30 about the axle; the carrier's point stands still.
+        r = d.call("run_motion_study", study=sid, trace=[
+            {"name": "tip", "occurrence": arm, "point_mm": [30, 0, 0]},
+            {"name": "still", "occurrence": carrier, "point_mm": [1, 2, 3]}])
+        tip, still = r["trace"]
+        expect(tip["name"] == "tip" and tip["occurrence"] == arm,
+               f"keyed by name and occurrence: {tip.keys()}")
+        expect(len(tip["points_mm"]) == 25 and tip["unsolved_samples"] == 0,
+               f"a point per sample: {len(tip['points_mm'])}")
+        for smp, pt in zip(r["samples"], tip["points_mm"]):
+            a = math.radians(smp["value"])
+            expect(abs(pt[0] - 30 * math.cos(a)) < 1e-6
+                   and abs(pt[1] - 30 * math.sin(a)) < 1e-6
+                   and abs(pt[2]) < 1e-9,
+                   f"the tip on its circle at {smp['value']}: {pt}")
+        expect(abs(tip["extent_mm"][0] - 60) < 1e-6
+               and abs(tip["min_mm"][1] + 30) < 1e-6,
+               f"the extent of a full circle: {tip}")
+        expect(still["extent_mm"] == [0, 0, 0]
+               and still["points_mm"][7] == [1, 2, 3],
+               f"a fixed occurrence's point stands still: {still}")
+        # Asked of the stored result, the same paths.
+        st = d.call("motion_status", study=sid, trace=[
+            {"name": "tip", "occurrence": arm, "point_mm": [30, 0, 0]}])
+        expect(st["result"]["trace"][0]["points_mm"] == tip["points_mm"],
+               "motion_status traces the stored run")
+        # Refusals name what is accepted and change nothing: the mate stays
+        # where it was although each asks to leave the run at its end.
+        for bad, needle in (
+                ([{"name": "x", "occurrence": 9999, "point_mm": [0, 0, 0]}],
+                 "no occurrence 9999"),
+                ([{"name": "x", "occurrence": arm, "point_mm": [0, 0, 0]},
+                  {"name": "x", "occurrence": arm, "point_mm": [1, 0, 0]}],
+                 "already traced"),
+                ([{"name": "x", "occurrence": arm, "point": [0, 0, 0]}],
+                 "accepted: name, occurrence, path, point_mm"),
+                ([{"name": "x", "occurrence": arm}], "point_mm"),
+                ([{"name": "x", "path": [arm, 3], "point_mm": [0, 0, 0]}],
+                 "not a FLEXIBLE")):
+            refused(d, "run_motion_study", [needle], study=sid, trace=bad,
+                    leave_at="last")
+            mate = next(m for m in d.call("list_mates")["mates"]
+                        if m["id"] == axle)
+            expect(abs(mate["rotation"]) < 1e-9,
+                   f"a refused trace left the arm where it was: {mate}")
+        refused(d, "run_motion_study", ["async"], study=sid, trace=[
+            {"name": "tip", "occurrence": arm, "point_mm": [30, 0, 0]}],
+            **{"async": True})
+
         # ---- The same run as a job --------------------------------------
         # Unchanged inputs answer from the stored run even asked async;
         # recompute runs it as a job, with an id.

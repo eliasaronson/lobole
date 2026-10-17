@@ -547,6 +547,62 @@ TEST_CASE("Every sample records the moving mates' values", "[motion]") {
   }
 }
 
+TEST_CASE("A traced point follows its occurrence through every sample",
+          "[motion][trace]") {
+  // docs/assemblies/README.md#tracing-a-point: the arm's tip at (30, 0, 0)
+  // in its own coordinates sweeps a circle of radius 30 about the axle.
+  Rig r = MakeRig(0.0, /*withStop=*/false);
+  const MotionStudy study = FullTurn(r.axle, 9); // every 45 degrees
+  const motion::Result res = motion::Run(r.asmDoc, r.Parts(), nullptr, study);
+  REQUIRE(res.error.empty());
+  std::vector<motion::TracePoint> pts = {
+      {"tip", r.armOcc, 0, {30.0, 0.0, 0.0}},
+      {"root", r.carrierOcc, 0, {5.0, 1.0, 2.0}}};
+  CHECK(motion::WhyNotTrace(r.asmDoc, pts).empty());
+  std::vector<motion::TracePath> paths;
+  std::string why;
+  REQUIRE(motion::TracePoints(res, pts, &paths, &why));
+  REQUIRE(paths.size() == 2);
+  REQUIRE(paths[0].points.size() == 9);
+  for (size_t i = 0; i < 9; i++) {
+    REQUIRE(paths[0].points[i]);
+    const double a = res.samples[i].value;
+    CHECK_THAT(paths[0].points[i]->x, WithinAbs(30.0 * std::cos(a), 1e-6));
+    CHECK_THAT(paths[0].points[i]->y, WithinAbs(30.0 * std::sin(a), 1e-6));
+    CHECK_THAT(paths[0].points[i]->z, WithinAbs(0.0, 1e-9));
+    // The fixed carrier's point stands still, where its part puts it.
+    REQUIRE(paths[1].points[i]);
+    CHECK_THAT(paths[1].points[i]->x, WithinAbs(5.0, 1e-9));
+  }
+  CHECK(paths[0].any);
+  CHECK(paths[0].unsolved == 0);
+  CHECK_THAT(paths[0].min.x, WithinAbs(-30.0, 1e-6));
+  CHECK_THAT(paths[0].max.y, WithinAbs(30.0, 1e-6));
+  CHECK_THAT(paths[1].max.x - paths[1].min.x, WithinAbs(0.0, 1e-12));
+
+  // An unsolved sample gives no point -- never the last good one's.
+  motion::Result broken = res;
+  broken.samples[4].solved = false;
+  REQUIRE(motion::TracePoints(broken, pts, &paths, &why));
+  CHECK_FALSE(paths[0].points[4]);
+  CHECK(paths[0].unsolved == 1);
+  CHECK(paths[0].points[3]);
+
+  // Refused before a run: an unknown occurrence (naming those there are), an
+  // empty or a repeated name, and a path into a placement that is not
+  // flexible.
+  CHECK_THAT(motion::WhyNotTrace(r.asmDoc, {{"x", 999, 0, {}}}),
+             ContainsSubstring("no occurrence 999") &&
+                 ContainsSubstring("Arm"));
+  CHECK_THAT(motion::WhyNotTrace(r.asmDoc, {{"", r.armOcc, 0, {}}}),
+             ContainsSubstring("needs a name"));
+  CHECK_THAT(motion::WhyNotTrace(r.asmDoc, {{"a", r.armOcc, 0, {}},
+                                            {"a", r.carrierOcc, 0, {}}}),
+             ContainsSubstring("already traced"));
+  CHECK_THAT(motion::WhyNotTrace(r.asmDoc, {{"a", r.armOcc, 7, {}}}),
+             ContainsSubstring("not a FLEXIBLE"));
+}
+
 // The v128 assembly golden: a study that names its configuration.
 // LOBOLE_WRITE_GOLDEN_V128_ASM=<path> writes it.
 TEST_CASE("The v128 golden: a study that names its configuration",

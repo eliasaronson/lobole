@@ -113,6 +113,103 @@ double ValueAt(const MotionStudy& study, double t) {
   return study.from + t * (study.to - study.from);
 }
 
+std::string WhyNotTrace(const AssemblyDocument& asmDoc,
+                        const std::vector<TracePoint>& points) {
+  std::set<std::string> names;
+  for (size_t i = 0; i < points.size(); i++) {
+    const TracePoint& p = points[i];
+    const std::string at = "trace " + std::to_string(i + 1) + ": ";
+    if (p.name.empty())
+      return at + "a traced point needs a name, which is how the reply "
+                  "keys its path";
+    if (!names.insert(p.name).second)
+      return at + "the name '" + p.name +
+             "' is already traced; each point needs its own";
+    if (!std::isfinite(p.pointMm.x) || !std::isfinite(p.pointMm.y) ||
+        !std::isfinite(p.pointMm.z))
+      return at + "point_mm is not three finite numbers";
+    const Occurrence* o = asmDoc.FindById(p.occurrence);
+    if (o == nullptr) {
+      std::string have;
+      for (const Occurrence& c : asmDoc.GetOccurrences())
+        have += (have.empty() ? "" : ", ") + std::to_string(c.id) + " (" +
+                c.name + ")";
+      return at + "no occurrence " + std::to_string(p.occurrence) +
+             " in this assembly; occurrences: " +
+             (have.empty() ? std::string("none") : have);
+    }
+    if (p.inner != 0 && !o->flexible)
+      return at + "occurrence " + std::to_string(p.occurrence) + " (" +
+             o->name +
+             ") is not a FLEXIBLE placement, so nothing moves inside it: "
+             "trace the point on the occurrence itself";
+  }
+  return {};
+}
+
+bool TracePoints(const Result& result, const std::vector<TracePoint>& points,
+                 std::vector<TracePath>* out, std::string* why) {
+  std::vector<TracePath> paths;
+  for (const TracePoint& p : points) {
+    TracePath path;
+    path.name = p.name;
+    bool recorded = false;
+    for (const Sample& s : result.samples) {
+      const glm::dmat4* world = nullptr;
+      if (p.inner == 0) {
+        for (const auto& [id, m] : s.worlds)
+          if (id == p.occurrence)
+            world = &m;
+      } else {
+        for (const Sample::LeafWorld& l : s.leaves)
+          if (l.root == p.occurrence && l.occurrence == p.inner)
+            world = &l.world;
+      }
+      recorded = recorded || world != nullptr;
+      if (world == nullptr || !s.solved) {
+        // No pose (a sample that could not even be flattened) or one that
+        // did not close: no point, never the last good one's.
+        path.points.push_back(std::nullopt);
+        path.unsolved++;
+        continue;
+      }
+      const glm::dvec3 w = glm::dvec3(*world * glm::dvec4(p.pointMm, 1.0));
+      path.points.push_back(w);
+      path.min = path.any ? glm::min(path.min, w) : w;
+      path.max = path.any ? glm::max(path.max, w) : w;
+      path.any = true;
+    }
+    if (!recorded && !result.samples.empty()) {
+      if (why) {
+        if (p.inner != 0) {
+          std::string moving;
+          std::set<uint64_t> seen;
+          for (const Sample::LeafWorld& l : result.samples.front().leaves)
+            if (l.root == p.occurrence && seen.insert(l.occurrence).second)
+              moving +=
+                  (moving.empty() ? "" : ", ") + std::to_string(l.occurrence);
+          *why = "trace '" + p.name + "': occurrence " +
+                 std::to_string(p.inner) + " does not move inside placement " +
+                 std::to_string(p.occurrence) +
+                 ", so the run records no pose of its own for it; trace the "
+                 "point on the placement itself. Moving there: " +
+                 (moving.empty() ? std::string("none") : moving);
+        } else {
+          *why = "trace '" + p.name +
+                 "': the run recorded no pose for "
+                 "occurrence " +
+                 std::to_string(p.occurrence);
+        }
+      }
+      return false;
+    }
+    paths.push_back(std::move(path));
+  }
+  if (out)
+    *out = std::move(paths);
+  return true;
+}
+
 std::string WhyNot(const AssemblyDocument& asmDoc, const MotionStudy& study,
                    const assembly::AssemblyResolver& assemblies) {
   // A study that names its configuration is judged UNDER it: its holds and

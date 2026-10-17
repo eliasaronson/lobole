@@ -547,26 +547,31 @@ def carburettor(app, name="carburettor"):
     # still the right instrument here, because it reports a clash verdict at
     # every one of its thirteen poses instead of the two a pair of set_mate
     # calls can reach.
-    def disc_angle(sample, occ_id):
-        q = next(pp["orientation"] for pp in sample["poses"]
-                 if pp["occurrence"] == occ_id)
-        return q
-
+    # The BUTTERFLY's own rotation, traced: the disc's centre and a point
+    # out along its face normal (part +Z, square to the spindle), followed
+    # through the travel by the study itself (run_motion_study `trace`). The
+    # angle the normal turns through is the angle the disc does. A section
+    # through the bore was the first measure and it cannot be taken here:
+    # the study puts the assembly back where it found it, so the plane sees
+    # the shut throttle twice. The angle is the better quantity anyway -- it
+    # is the thing the linkage exists to deliver.
     study = asm.motion(cable, dof="rotation", **{"from": 0.0},
                        to=CABLE_SWING, samples=13, name="throttle travel")
-    r = app.run_motion_study(study=study["id"], include_poses=True)
+    do_id = next(o.id for o in asm.occurrences() if o.name == "throttle disc")
+    r = app.run_motion_study(study=study["id"], trace=[
+        {"name": "centre", "occurrence": do_id, "point_mm": [0, 0, 0.8]},
+        {"name": "normal", "occurrence": do_id,
+         "point_mm": [0, 0, 0.8 + DISC_R]}])
     if not r["clean"]:
         raise RuntimeError("the throttle linkage fouls somewhere in its "
                            f"travel:\n{r['table']}")
-    # The BUTTERFLY's own rotation, read off the poses. A section through
-    # the bore was the first measure and it cannot be taken here: the study
-    # puts the assembly back where it found it, so the plane sees the shut
-    # throttle twice. The angle is the better quantity anyway — it is the
-    # thing the linkage exists to deliver.
-    do_id = next(o.id for o in asm.occurrences() if o.name == "throttle disc")
-    q0, q1 = (disc_angle(r["samples"][i], do_id) for i in (0, -1))
-    dot = abs(sum(a * b for a, b in zip(q0, q1)))
-    swept = math.degrees(2.0 * math.acos(min(1.0, dot)))
+    path = {t["name"]: t["points_mm"] for t in r["trace"]}
+    if any(pt is None for pts in path.values() for pt in pts):
+        raise RuntimeError(f"the throttle travel did not solve:\n{r['table']}")
+    n0, n1 = ([b - a for a, b in zip(path["centre"][i], path["normal"][i])]
+              for i in (0, -1))
+    dot = sum(a * b for a, b in zip(n0, n1)) / (DISC_R * DISC_R)
+    swept = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
     print(f"  carburettor throttle: butterfly turns {swept:.1f} deg for "
           f"{abs(CABLE_SWING):.0f} of cable, clear at all "
           f"{len(r['samples'])} poses")

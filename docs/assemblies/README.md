@@ -391,6 +391,31 @@ omitted = whichever is active).
 Code: `src/core/MotionStudy.{h,cpp}`, `src/remote/RemoteMotion.cpp`,
 `src/ui/MotionActions.cpp`.
 
+### Tracing a point
+
+What a linkage is for is usually a PATH: a walker's foot, a coupler point,
+a follower's tip. `run_motion_study {study, trace: [{name, occurrence,
+point_mm}]}` follows each named point, given in its occurrence's own (part)
+coordinates, through every sample, from the poses the run already solved
+(`motion::TracePoints`); inside a flexible placement the point's occurrence
+is `path: [placement, occurrence]`, a moving one. The reply's `trace` gives
+each its `points_mm` (world mm, one per sample), `min_mm`, `max_mm` and
+`extent_mm` over the solved samples, and `unsolved_samples`. A sample that
+did not solve has `null` there, never the last good point. `motion_status
+{study, trace}` traces a stored run, which is how an `async` run is traced
+(`trace` with `async` is refused: there are no samples yet).
+
+The trace is asked for, not stored: it costs no format and no rerun, since
+a stored run with the same inputs answers it. It is checked before the run
+(an unknown occurrence, an empty or repeated name, a path into a placement
+that is not flexible, each refused naming what there is), and an inner
+occurrence that does not move inside its placement, which the run records
+no pose for, is refused after the run and before `leave_at` moves
+anything. The hinge box, the carburettor and the Strandbeest read their
+paths this way (`tests/test_motion.cpp`, `tests/motion_smoke.py`). The
+Motion window does not draw a path: a trace is a request parameter with no
+definition in the document for the window to show.
+
 ### Motion video
 
 `export_motion_video {study, path, format?, width?, height?, fps?, frames?,
