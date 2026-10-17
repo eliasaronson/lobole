@@ -1,18 +1,25 @@
 {
   "order": 40,
-  "why": "The print plate with its exact mesh clearances and the STL's shell count, the assembly, both motion studies and the push check. Left out: the sun's static study (--study: a GPU, or two minutes of CPU) and the hero still. At 90 mm: the scratch instance has no measured profile, and the built-in table's 0.25 mm gap needs teeth bigger than a 70 mm ring holds (generators/planetary/README.md#bearers).",
+  "why": "Twice. On the P1S's K5 profile seeded into the instance's own config, at the default 70 mm: every check_print item, stacking against the profile's measured air and bed_fit on its bed, and the print job. Then on the built-in table at 90 mm (its 0.25 mm gap needs teeth bigger than a 70 mm ring holds, generators/planetary/README.md#bearers), where stacking is reported, not required. Each: the print plate with its exact mesh clearances and the STL's shell count, the assembly, both motion studies and the push check. Left out: the sun's static study (--study: a GPU, or two minutes of CPU) and the hero still.",
   "steps": [
-    ["{python}", "-u", "{generators}/planetary/build.py", "--port", "{port}", "--no-render", "--diameter", "90", "--out", "{out}/planetary"]
+    ["{python}", "-u", "{generators}/print_coupon.py", "--port", "{port}", "--seed"],
+    ["{python}", "-u", "{generators}/planetary/build.py", "--port", "{port}", "--no-render", "--profile", "K5 PLA on P1S", "--out", "{out}/planetary-k5"],
+    ["{python}", "-u", "{generators}/planetary/build.py", "--port", "{port}", "--fresh", "--no-render", "--diameter", "90", "--out", "{out}/planetary"]
   ],
   "markers": [
+    "helix 15 degrees: .* leave the profile's 0.4 mm of air",
+    "planetary: stacking pass, required: the profile's air 0.4 mm",
+    "planetary: bed_fit pass",
+    "print job planetary_job.3mf",
     "motion, one orbit .*: passed",
     "push check: passed",
+    "planetary: stacking .*, reported, not required",
     "planetary: 5 shells"
   ],
   "instance": "headless",
-  "budget_s": 240,
+  "budget_s": 480,
   "readme": {
-    "runs": "`planetary/build.py --no-render --diameter 90` (the built-in table's gap needs more than 70 mm): the print plate, its exact mesh clearances and the STL's five shells, the assembly, both motion studies and the push check",
-    "measured": "~130 s"
+    "runs": "`print_coupon.py --seed`, then `planetary/build.py --no-render --profile \"K5 PLA on P1S\"` (every `check_print` item, stacking against the measured air and `bed_fit` on the P1S's bed, and the print job), then `--diameter 90` on the built-in table (its gap needs more than 70 mm): each the print plate, its exact mesh clearances and the STL's five shells, the assembly, both motion studies and the push check",
+    "measured": "~280 s"
   }
 }

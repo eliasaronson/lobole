@@ -43,8 +43,9 @@ from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from _lib import (PRINT_ITEMS, check, check_print, circle,  # noqa: E402
-                  connect, fresh_project, line, print_receipt)
+from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
+                  circle, clear_x, connect, export_print_job, fresh_project,
+                  job_receipt, line, print_receipt)
 from gear import involute_profile, wedge  # noqa: E402
 
 ROOT = Path(HERE).resolve().parent.parent
@@ -65,7 +66,8 @@ PRESSURE_DEG = 25.0
 ADDENDUM = 0.8
 # 30 degrees is the usual herringbone helix: steep enough that the V holds
 # the gears axially, shallow enough that a printed flank (which overhangs by
-# the helix angle) needs no support.
+# the helix angle) needs no support. Under a profile that states its air,
+# the helix is what leaves that air between meshing flanks (helix_for()).
 HELIX_DEG = 30.0
 # The fewest teeth whose involute is not undercut at PRESSURE_DEG (gear.py
 # draws no profile shift, and draws an undercut flank radially).
@@ -97,10 +99,39 @@ def frac(x):
     return x - math.floor(x)
 
 
-def solve(diameter, gap):
+def helix_for(g, air):
+    """The helix angle at the pitch circle, whole degrees, that leaves
+    `air` of vertical air between meshing flanks the gap `g` apart along
+    their normal (README "The teeth"). A helical flank leans off vertical by
+    the base helix angle beta_b, so the air over it is g / sin(beta_b): 30
+    degrees leaves 2.2 g, which is 0.22 mm at a 0.1 mm gap. The largest
+    whole degree up to HELIX_DEG that leaves the air: a smaller helix only
+    stands the flanks nearer vertical, so the 45 degree self-support holds
+    at any of them, and the V still holds every gear at its height, with
+    the air as its axial play. None without a stated air: 30 degrees."""
+    if not air:
+        return HELIX_DEG, None
+    alpha = math.radians(PRESSURE_DEG)
+    for deg in range(int(HELIX_DEG), 4, -1):
+        beta_b = math.atan(math.tan(math.radians(deg)) * math.cos(alpha))
+        if g / math.sin(beta_b) >= air:
+            return float(deg), (f"{deg} degrees: the steepest whole-degree "
+                                f"helix whose flanks, {g:g} mm apart along "
+                                f"their normal, leave the profile's "
+                                f"{air:g} mm of air vertically "
+                                f"({g / math.sin(beta_b):.3f} mm); "
+                                f"{HELIX_DEG:g} leaves "
+                                f"{g / math.sin(math.atan(math.tan(math.radians(HELIX_DEG)) * math.cos(alpha))):.3f}")
+    raise SystemExit(f"planetary: no helix of 5 degrees or more leaves "
+                     f"{air:g} mm of air over flanks {g:g} mm apart")
+
+
+def solve(diameter, gap, air=None):
     """Module, tooth counts and every derived size, from the ring's outside
-    diameter and the gap a side. Refuses what will not print."""
+    diameter, the gap a side and the profile's stated air (or None).
+    Refuses what will not print."""
     g = gap / 2.0
+    helix, helix_why = helix_for(g, air)
     # A module that scales with the part: 50 modules across the ring, to the
     # nearest 0.05 — 1.4 at 70 mm, where a tooth tip is several lines wide.
     m = max(0.05, round(diameter / 50.0 / 0.05) * 0.05)
@@ -146,7 +177,7 @@ def solve(diameter, gap):
                             "(a smaller gap)" if why else ""))
     _, zs, zp, zr = best
     alpha = math.radians(PRESSURE_DEG)
-    beta = math.radians(HELIX_DEG)
+    beta = math.radians(helix)
     beta_b = math.atan(math.tan(beta) * math.cos(alpha))
     # Backlash on the pitch circle that leaves `g` between flanks along their
     # NORMAL: the transverse gap times cos(alpha) is the gap in the
@@ -173,8 +204,11 @@ def solve(diameter, gap):
     # an addendum under every band, so the band stands on a 45 degree cone
     # that starts the gap plus an empty layer and the gap inside that reach:
     # it clears the tip by the gap in plan through the first layer, and
-    # crosses over it a layer up. Two modules of band: fourteen layers.
-    reach = ADDENDUM * m + g + (LAYER_MM + g)
+    # crosses over it a layer up -- or, under a profile that states its air,
+    # that air up: the cone at 45 degrees stands as high over the tip as it
+    # is in from it. Two modules of band: fourteen layers.
+    over = LAYER_MM if not air else max(LAYER_MM, air - 2.0 * g)
+    reach = ADDENDUM * m + g + (over + g)
     band = 2.0 * m
     cone = reach - g / 2.0
     teeth = height - cone - band
@@ -203,6 +237,7 @@ def solve(diameter, gap):
         # Three or four layers at the P1S's 0.2 mm: deep enough to read.
         "engrave": 0.01 * diameter,
         "gap": gap,
+        "helix_deg": helix, "helix_why": helix_why, "air": air,
     }
 
 
@@ -259,11 +294,12 @@ def herringbone(d, name, s, z, centre, phase, twist_sign, backlash,
     extruded with a twist up to the middle and back (Extrude `twist_deg` and
     `herringbone`, docs/modeling/README.md#twisted-extrudes). The flanks are
     exact helicoids about the sketch plane's origin, which is the gear's
-    centre; the twist over the full height makes a helix of HELIX_DEG at the
-    pitch circle, and the herringbone climbs half of it to the apex."""
+    centre; the twist over the full height makes a helix of s["helix_deg"]
+    at the pitch circle, and the herringbone climbs half of it to the
+    apex."""
     m, h = s["module"], s["teeth_height"]
     rp = m * z / 2.0
-    k = twist_sign * math.degrees(math.tan(math.radians(HELIX_DEG)) / rp)
+    k = twist_sign * math.degrees(math.tan(math.radians(s["helix_deg"])) / rp)
     ents, _ = involute_profile(m, z, PRESSURE_DEG, backlash=backlash,
                                phase_deg=math.degrees(phase),
                                addendum=addendum, dedendum=dedendum)
@@ -364,13 +400,14 @@ def planet(d, s, phase, centre=(0.0, 0.0), label=None):
     return body
 
 
-def ring(d, s, ph, diameter, engrave=True, bearers=True, sector_deg=0.0):
+def ring(d, s, ph, diameter, engrave=True, bearers=True, sector_deg=0.0,
+         at=(0.0, 0.0)):
     """A blank cut by an external gear of the ring's tooth count: the
     cutter's teeth are the ring's spaces, so the roles of addendum and
     dedendum swap and its backlash goes negative (fatter cutter teeth,
     wider spaces). `sector_deg`: only a pie of that half-angle about +X,
     the teeth planet 1 meets, for the push check (an exact distance to the
-    whole ring takes seconds)."""
+    whole ring takes seconds). `at`: where its centre stands."""
     m, c = s["module"], s["tip_clearance"]
     h = s["height"] if bearers else s["teeth_height"]
     if sector_deg > 0.0:
@@ -378,11 +415,11 @@ def ring(d, s, ph, diameter, engrave=True, bearers=True, sector_deg=0.0):
     else:
         sk = check(d.call("add_feature", feature={
             "type": "Sketch", "name": "ring blank", "plane": plane(0, 0, 0),
-            "entities": [circle((0, 0), diameter / 2.0)]}), "blank sketch")
+            "entities": [circle(at, diameter / 2.0)]}), "blank sketch")
         blank = check(d.call("add_feature", feature={
             "type": "Extrude", "name": "ring blank", "sketch_id": sk["id"],
             "distance": h, "mode": "new_body"}), "blank")["id"]
-    cutter = herringbone(d, "ring cutter", s, s["zr"], (0, 0), ph["ring"], -1,
+    cutter = herringbone(d, "ring cutter", s, s["zr"], at, ph["ring"], -1,
                          -s["backlash"] / 2.0, addendum=ADDENDUM + c / m,
                          dedendum=s["ring_addendum"])
     body = check(d.call("add_feature", feature={
@@ -391,7 +428,7 @@ def ring(d, s, ph, diameter, engrave=True, bearers=True, sector_deg=0.0):
     if bearers:
         body = check(d.call("add_feature", feature={
             "type": "Boolean", "name": "ring", "target_id": body,
-            "tool_id": bearer(d, "ring", s, s["zr"], (0, 0), internal=True),
+            "tool_id": bearer(d, "ring", s, s["zr"], at, internal=True),
             "op": "subtract"}), "ring bore")["id"]
     if engrave:
         r_root = m * s["zr"] / 2.0 + ADDENDUM * m + c
@@ -400,7 +437,8 @@ def ring(d, s, ph, diameter, engrave=True, bearers=True, sector_deg=0.0):
         sk = check(d.call("add_feature", feature={
             "type": "Sketch", "name": "ratio", "plane": plane(0, 0,
                                                              s["height"]),
-            "entities": [text(f"{s['ratio']:.2f} : 1", (0, -mid), th)]}),
+            "entities": [text(f"{s['ratio']:.2f} : 1",
+                              (at[0], at[1] - mid), th)]}),
             "ratio sketch")
         body = check(d.call("add_feature", feature={
             "type": "Extrude", "name": "ratio engrave", "sketch_id": sk["id"],
@@ -415,13 +453,36 @@ def bodies_by_name(d):
             for b in d.call("list_elements")["bodies"]}
 
 
-def build_print(d, s, ph, diameter, proc):
+def bed_place(d, proc, diameter, gap):
+    """Where the plate's centre stands: the middle of the profile's bed,
+    moved along x past its keep-out zones by the gap when it would sit on
+    one (x and y are the bed's, from its front-left corner, as a job and
+    bed_fit read them). The origin without a bed (the built-in table)."""
+    prof = profile_of(d, proc)
+    bed = prof.get("bed_mm") if prof else None
+    if not bed:
+        return (0.0, 0.0), None
+    r = diameter / 2.0
+    x0 = clear_x(bed[0] / 2.0 - r, bed[1] / 2.0 - r, 2.0 * r, 2.0 * r,
+                 bed_zones(prof), gap)
+    if x0 + 2.0 * r > bed[0] or 2.0 * r > bed[1]:
+        raise SystemExit(f"planetary: a Ø{diameter:g} plate does not fit "
+                         f"{proc['profile']}'s {bed[0]:g} x {bed[1]:g} bed "
+                         f"clear of its keep-out zones")
+    return (x0 + r, bed[1] / 2.0), bed
+
+
+def build_print(d, s, ph, diameter, proc, at=(0.0, 0.0)):
+    """The print part: the five bodies where they print, the plate's centre
+    at `at` (bed_place)."""
     d.call("add_part", name="planetary print")
     d.call("set_print_process", **proc)
     t0 = time.perf_counter()
-    ids = {"sun": sun(d, s, ph), "ring": ring(d, s, ph, diameter)}
+    ids = {"sun": sun(d, s, ph, centre=at),
+           "ring": ring(d, s, ph, diameter, at=at)}
     for i, (th, phi) in enumerate(ph["planets"]):
-        centre = (s["centre"] * math.cos(th), s["centre"] * math.sin(th))
+        centre = (at[0] + s["centre"] * math.cos(th),
+                  at[1] + s["centre"] * math.sin(th))
         ids[f"planet {i + 1}"] = planet(d, s, phi, centre, str(i + 1))
     ids = bodies_by_name(d)
     for fid in ids.values():
@@ -641,16 +702,22 @@ def push_check(d, s, ph, diameter):
     return out
 
 
-def air_stated(d, proc):
-    """The vertical air the print profile states (z_gap_mm, from the
-    coupon's air row), or None: the built-in table, or a profile that has
-    not measured it."""
+def profile_of(d, proc):
+    """The print profile a process names, or None for the built-in table."""
     if "profile" not in proc:
         return None
     for p in d.call("list_print_profiles")["profiles"]:
         if p["name"] == proc["profile"]:
-            return p.get("z_gap_mm") or None
+            return p
     raise SystemExit(f"planetary: no print profile '{proc['profile']}'")
+
+
+def air_stated(d, proc):
+    """The vertical air the print profile states (z_gap_mm, from the
+    coupon's air row), or None: the built-in table, or a profile that has
+    not measured it."""
+    p = profile_of(d, proc)
+    return (p.get("z_gap_mm") or None) if p else None
 
 
 def material_of(d, proc):
@@ -722,7 +789,8 @@ def sun_study(d, s, ph, material, mesh_modules=0.4):
         ang = math.atan2(y, x)
         # Which tooth: its angle less the helix's twist at this height.
         zh = z if z <= ht / 2.0 else ht - z
-        k = round((ang - math.tan(math.radians(HELIX_DEG)) * zh / rs) / pitch)
+        k = round((ang - math.tan(math.radians(s["helix_deg"])) * zh / rs)
+                  / pitch)
         t = (-math.sin(ang), math.cos(ang))
         for i, (th, _) in enumerate(ph["planets"]):
             # The tooth nearest the planet, and its flank that faces the way
@@ -815,14 +883,22 @@ def main():
             {"process": args.process, "material": args.material})
     gap = d.call("print_allowance", kind="gap", size_mm=args.diameter,
                  **proc)
-    s = solve(args.diameter, gap["allowance_mm"])
+    stated = air_stated(d, proc)
+    s = solve(args.diameter, gap["allowance_mm"], stated)
     ph = phases(s)
     print(f"planetary: Ø{args.diameter:g}, module {s['module']:g}, "
           f"sun {s['zs']} / planets {s['zp']} / ring {s['zr']}, "
           f"ratio {s['ratio']:.3f}:1, gap {gap['allowance_mm'] / 2:g} a side "
           f"({args.profile or args.material})")
 
-    ids = build_print(d, s, ph, args.diameter, proc)
+    if s["helix_why"]:
+        print(f"  helix {s['helix_why']}")
+    at, bed = bed_place(d, proc, args.diameter, gap["allowance_mm"] / 2.0)
+    s["plate_centre_mm"] = list(at)
+    if bed:
+        print(f"  the plate at ({at[0]:g}, {at[1]:g}) on {args.profile}'s "
+              f"{bed[0]:g} x {bed[1]:g} bed, clear of its keep-out zones")
+    ids = build_print(d, s, ph, args.diameter, proc, at)
     geo = d.call("check_geometry")
     if geo["receipt"]["standing"] != "verified":
         raise SystemExit(f"planetary: the print part is not verified: {geo}")
@@ -840,7 +916,6 @@ def main():
     # vertical air, which the built-in table's three-layer default was never
     # measured against, so there it is reported and not required (README,
     # "What is checked").
-    stated = air_stated(d, proc)
     pr = check_print(d, "planetary",
                      need=PRINT_ITEMS if stated else
                      tuple(k for k in PRINT_ITEMS if k != "stacking"))
@@ -861,6 +936,15 @@ def main():
     # of its smallest gap), the deviation check_print judged. The reply
     # says what it used.
     exp = d.call("export_stl", path=str(stl))
+    # The print job (docs/tolerances/README.md#print-jobs): the plate where
+    # it stands on the profile's bed. Without a bed there is no printer to
+    # place it on.
+    job = ({"skipped": "no print profile with a bed: the built-in table is "
+                       "no printer to place the plate on"}
+           if not bed else
+           job_receipt(export_print_job(d, [("planetary print", "planetary")],
+                                        out / "planetary_job.3mf",
+                                        material_of(d, proc))))
     # The print part is saved as built; the hero still is a separate look.
     d.call("save_project", path=str(out / "planetary.dsgn"))
 
@@ -964,6 +1048,7 @@ def main():
                           "planets": [list(p) for p in ph["planets"]]},
                "clearances_mm": cl, "print": print_receipt(pr),
                "stl": str(stl), "stl_deflection_mm": exp.get("deflection_mm"),
+               "print_job": job,
                "stl_shells": exp.get("shells"), "confirm": gap["confirm"]}
     (out / "planetary.json").write_text(json.dumps(receipt, indent=1))
     d.call("save_project", path=str(out / "planetary.dsgn"))
