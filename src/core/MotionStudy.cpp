@@ -60,7 +60,7 @@ uint64_t InputKey(const AssemblyDocument& asmDoc,
   // rule, the walk to the start) bumps it, so no answer stored before is
   // handed out as one from after.
   // 2: refined steps and branch jumps (v179); 3: a mesh check's touching
-  // pairs, and no branch watched on a coordinate a relation sets (vNEXT).
+  // pairs, and no branch watched on a coordinate a relation sets (v180).
   h.Str("motion/3");
   nlohmann::json definition = DocumentIO::MotionStudyToJson(study);
   definition.erase("name"); // a label: two studies alike share an answer

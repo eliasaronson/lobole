@@ -1567,14 +1567,14 @@ TEST_CASE("A cam follower leaving its dwell at a coarse step is no branch "
     CHECK_FALSE(s.branchJump);
 }
 
-TEST_CASE("The vNEXT golden: a mesh study lists a seated pair as touching, "
+TEST_CASE("The v180 golden: a mesh study lists a seated pair as touching, "
           "and its result keeps it",
           "[motion][golden]") {
   // A block turning on a plate it is seated on: its underside on the
   // plate's top face at every pose. A mesh check called that a clash at
   // every sample; it is touching, as exact interference calls it
   // (docs/inspect/README.md#touching-is-not-a-clash), and a stored result
-  // keeps the list (vNEXT).
+  // keeps the list (v180).
   using Parts = std::map<uint64_t, std::unique_ptr<Document>>;
   Parts parts;
   parts[1] = BoxPart({-50, -10, -5}, {100, 20, 5});
@@ -1609,7 +1609,7 @@ TEST_CASE("The vNEXT golden: a mesh study lists a seated pair as touching, "
     REQUIRE(DocumentIO::SaveAssembly(d, out).has_value());
 
   const fs::path golden = fs::path(TestSourceDir()) /
-                          "tests/golden/assembly/vNEXT-touching-sample.json";
+                          "tests/golden/assembly/v180-touching-sample.json";
   auto g = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(g.has_value());
   REQUIRE((*g)->GetMotionStudies().size() == 1);

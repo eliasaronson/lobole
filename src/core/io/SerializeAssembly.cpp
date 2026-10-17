@@ -960,7 +960,7 @@ json MotionResultToJson(const motion::Result& r) {
         clashes.push_back(ClashToJson(c));
       sj["clashes"] = std::move(clashes);
     }
-    if (!s.touching.empty()) { // vNEXT: a mesh check's seated pairs
+    if (!s.touching.empty()) { // v180: a mesh check's seated pairs
       json touching = json::array();
       for (const motion::Touch& t : s.touching) {
         json tj = {

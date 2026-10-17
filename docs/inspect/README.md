@@ -385,7 +385,7 @@ under `touching` and does not count them as clashes, and the contact
 sweep's mesh screen still sends a touching pair to the exact check that
 weighs it. Any overlap is a clash as before (`tests/test_meshcollide.cpp`:
 blocks face to face touch, sunk by two deflections they clash, flush sides
-included). A stored motion result keeps each sample's `touching` (vNEXT).
+included). A stored motion result keeps each sample's `touching` (v180).
 
 `check_geometry`'s floating-bodies warning uses the mesh answer too: it is a
 yes/no riding on a cheap check, and an exact contact on concentric bodies (a

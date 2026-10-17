@@ -317,7 +317,7 @@ omitted = whichever is active).
   Motion window's Validate always checks exactly, so it has no field there.
 - The mesh check calls two faces seated on each other, no triangle
   piercing another, `touching`: listed per sample under `touching` (and
-  kept with a stored result, vNEXT), not a clash, as exact mode calls the
+  kept with a stored result, v180), not a clash, as exact mode calls the
   same pair
   ([touching is not a clash](../inspect/README.md#touching-is-not-a-clash)).
   Any overlap is still a clash.
