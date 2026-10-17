@@ -21,7 +21,11 @@ winding before anything is printed, and the print tests the design, as the
 Output, untracked, in `scratch/clock/` (or `$LOBOLE_SCRATCH/clock`, or
 `--out`): `clock.dsgn`, the receipt `clock.json`, the test card
 `clock_card.md`, the stills, and `stage1/` and `stage2/`, one STL per
-print plate.
+print plate and each stage's [print job](../../docs/tolerances/README.md#print-jobs)
+(`clock_stage1_job.3mf`, `clock_stage2_job.3mf`: every piece its own
+object with its slicer settings, a Bambu project when
+`$LOBOLE_SLICER_CONFIGS` holds `pla.json`, else not written and the
+receipt says why).
 
 | file | what |
 |---|---|
@@ -140,7 +144,8 @@ for.
 - every print plate's `check_print`, every item.
 
 `generator_clock` (generators/README.md#the-big-generators-as-tests) runs
-the whole of it but the stills, on the built-in PLA table.
+the whole of it but the stills, on the seeded P1S profile: the period is
+the PRINTED pendulum's, which needs a profile's layer and line width.
 
 ## The default clock, and its test card
 
@@ -153,7 +158,8 @@ a rod of 296.3 mm from the anchor arbor to its lower end and a bob
 
 | what | predicted |
 |---|---|
-| period at the design swing (±4.09°) | 1.00000 s (0.99968 s at a small swing) |
+| period at the design swing (±4.09°), printed as set | 1.00000 s (0.99968 s at a small swing) |
+| the same parts read solid | 0.99999 s |
 | rate, as built | 0.0 s/day |
 | a turn of the rating nut that lowers the bob | −246 s/day (−10.2 a notch of 24) |
 | a degree more swing either way | −15.1 s/day (circular error) |
@@ -161,8 +167,13 @@ a rod of 296.3 mm from the anchor arbor to its lower end and a bob
 | torque at the escape wheel per 100 g, stage 2 | 0.046 N·mm |
 | torque at the escape wheel per 100 g, stage 1 | 5.54 N·mm |
 
-Equivalent length 248.2 mm, 99 g swinging (rod, bob, nut, anchor and
-arbor, modelled solid). The jar full of sand is about 320 g: 0.15 N·mm at
+Equivalent length 248.2 mm, 98 g swinging (rod, bob, nut, anchor and
+arbor, weighed as they PRINT: `mass_properties`' printed estimate). The
+pendulum prints solid, 100 % rectilinear (`PENDULUM_PRINT`; grid cannot
+print 100 %), so its rod, bob and nut are their solid selves exactly; the
+anchor and its arbor print at the frame's 15 %, which is why the solid
+reading differs in the sixth figure. A swinging part with no printed mass
+that is not printed solid is refused rather than weighed solid. The jar full of sand is about 320 g: 0.15 N·mm at
 the escape wheel in stage 2. Whether that runs the train is what stage 1
 answers: the least weight that keeps stage 1 ticking, times 120 and over
 the train's friction, is what stage 2 needs. A bigger drum would give more
@@ -175,17 +186,23 @@ FEM, each study once: the rod under the bob and nut peaks at 0.08 MPa
 ### Print plates
 
 Every piece prints the way it is modelled, its back face (the face towards
-the wall) on the bed, except the rod (flat, along the bed's diagonal, its
+the wall) on the bed, except the rod (flat, along the bed's diagonal from
+the front right to the back left, clear of the P1S's keep-out corner, its
 D-flatted thread on the bed) and the bob and rating nut (stood on end).
-No supports, no brim; every plate passes every `check_print` item.
+Every part but the pendulum states Bambu Studio's 0.20 mm Standard (2
+walls, 5/3 shells, 15 % grid; `clock_parts.FRAME_PRINT`). No supports, no
+brim; every plate passes every `check_print` item, its keep-out zone
+included. Printed, the clock weighs 329 g against 560 g solid (59 %);
+Bambu's own slice of the two jobs, 340 g.
 
 | plate | pieces |
 |---|---|
 | `stage1/plate1.stl` | the stage-1 back and front plates, escape wheel, anchor, stage-1 drum, 4 pillars and 8 nuts (stage 2 uses them too), the anchor arbor and the stage-1 escape arbor |
 | `stage1/plate2.stl` | the pendulum rod, bob and rating nut |
-| `stage2/plate1.stl` | the back and front plates, hour wheel, minute wheel, drum, cannon pinion, the two dial spacers, the third and centre spacers, the escape, third and centre arbors |
-| `stage2/plate2.stl` | the centre and third wheels and both hands |
-| `stage2/plate3.stl` | the dial ring |
+| `stage2/plate1.stl` | the back plate, third, hour and minute wheels, drum, cannon pinion, the two dial spacers, the third and centre spacers, the escape, third and centre arbors |
+| `stage2/plate2.stl` | the front plate and both hands |
+| `stage2/plate3.stl` | the centre wheel |
+| `stage2/plate4.stl` | the dial ring |
 
 ### Test
 

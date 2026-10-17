@@ -126,9 +126,10 @@ which. The rest:
   lift, so the free length is lift / 0.2.
 - **The default bore** is searched: the largest whole millimetre whose
   PLA pieces, by their footprints as they print, pack into **two** of the
-  profile's beds, else three. At K5 PLA on P1S that is **38 mm** in two
-  plates: 39 needs a third, and from 46 the crankshaft is longer than the
-  bed. The plates are packed again from the built parts' measured boxes,
+  profile's beds, else three, kept clear of its keep-out zones. At K5 PLA
+  on P1S that is **37 mm** in two plates (38 before the P1S's front-left
+  corner was kept clear): 38 needs a third, and from 49 the crankshaft is
+  longer than the bed. The plates are packed again from the built parts' measured boxes,
   and each one checked.
 
 ### Valve timing
@@ -146,7 +147,7 @@ open, which errs safe for the valve-to-piston check.
 - `check_geometry` verified on every part; the rods' and webs' sweep
   through the crankcase in 2-D before anything is built.
 - **The 720° study**: the crank driven from 0 to 720° at a fifth of a belt
-  tooth (4° at 38 mm), every sample solved and clash free at a mesh
+  tooth (4° at 37 mm), every sample solved and clash free at a mesh
   deflection of a fifth of the smallest gap, the belt hidden (it cannot
   move with its pulleys, below). Every pressed pair is relieved as a
   printed press and listed (74).
@@ -163,7 +164,7 @@ open, which errs safe for the valve-to-piston check.
   pulley tooth, where both pulleys stand where the belt's teeth were
   modelled: clean.
 - **Negative controls**, which must fail and do:
-  - the cam pulley a tooth off (20 crank degrees at 38 mm): every intake
+  - the cam pulley a tooth off (20 crank degrees at 37 mm): every intake
     valve meets its piston at the overlap, and every valve's lift and
     events leave its lobe's table;
   - rods 10 % long: every piston meets the head.
@@ -177,31 +178,34 @@ all of it but the stills, on the seeded P1S profile.
 
 ## The default engine, and its test card
 
-`--profile "K5 PLA on P1S"`: bore and stroke 38, rod 68.4, cylinders 42.2
-apart, the deck 103.9 over the crank and the cam 155.6; valves 13.7 on 4.1
-stems, buckets 15.2, lobes 6.4 wide, springs 17.1 free in four
-convolutions; belt 105 teeth on 18/36.
+`--profile "K5 PLA on P1S"`: bore and stroke 37 (38 before the plates
+packed round the P1S's keep-out corner), rod 66.6, cylinders 41.1 apart,
+the deck 101.2 over the crank and the cam 151.6; valves 13.3 on 4.0 stems,
+buckets 14.8, lobes 6.2 wide, springs 16.7 free; belt 103 teeth on 18/36.
 
 | what | predicted |
 |---|---|
-| swept volume, four cylinders | 172.4 cm³ |
-| geometric compression ratio | 30.3 : 1 (a 1.3 mm squish over a flat crown; the ports are open, so it compresses nothing) |
-| valve lift | 3.42 mm, lash 0.10 |
+| swept volume, four cylinders | 159.1 cm³ |
+| geometric compression ratio | 29.9 : 1 (a 1.3 mm squish over a flat crown; the ports are open, so it compresses nothing) |
+| valve lift | 3.33 mm, lash 0.10 |
 | valve events | as above, every valve within a sample |
 | firing | 1-3-4-2, TDC marks 180° apart |
-| springs | 10 % / 30 % of 17.1 mm |
+| springs | 10 % / 30 % of 16.7 mm |
 | valve to piston, least | 0.51 mm |
 
 | plate | pieces |
 |---|---|
-| `plate1.stl` | block, bedplate, sump, crankshaft, three rods, cap pins and dowels (19 pieces, 104 mm tall) |
-| `plate2.stl` | head, cam cover, the fourth rod, the caps, pistons, wrist pins, valves, buckets, cam bar and lobes, pulleys, collar, flywheel, hand crank, the rest of the dowels (58) |
+| `plate1.stl` | block, bedplate, sump, head, cam pulley, two rods, the caps, a bucket and two valves, the handle, wrist pins, dowels and cap pins (43 pieces, 101 mm tall) |
+| `plate2.stl` | crankshaft, flywheel, cam cover, two rods, cam bar and lobes, pistons, the crank arm and pulley, the other buckets and valves, collar (34) |
 | `plate_tpu.stl` | the belt and eight springs |
 
 Orientations, each piece's place on its plate and the assembly order are
-on the card. No supports, no brim. The two PLA plates are about 1.7 kg of
-PLA modelled solid (the block, head, bedplate and sump are most of it):
-not an evening's print, the plan's hope, but two long ones.
+on the card. No supports, no brim. Modelled solid the two PLA plates are
+1569 g of PLA (the block, head, bedplate and sump are most of it); printed
+at Bambu Studio's 0.20 mm Standard (2 walls, 5/3 shells, 15 % grid, the
+settings every PLA part states) `mass_properties` weighs them 581 g, 37 %
+of solid, and Bambu's own slice of `engine_job.3mf` 611 g (443 g and 168 g
+a plate). Not an evening's print, the plan's hope, but two long ones.
 
 ## Not modelled, and what the app could not say
 
