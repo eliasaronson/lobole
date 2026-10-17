@@ -437,8 +437,9 @@ as one transaction:
   another field — so a sketch and the extrude that names it go in one batch.
   References point backward only; one to a call that failed, or to a key it
   did not return, is refused naming what it did return.
-- **Results.** `{calls, results[{call, method, result}], regenerations,
-  failed?, regen}`. Each call's own `regen` and `digest` are stripped: under a
+- **Results.** `{calls, results[{call, method, id?, result}],
+  regenerations, failed?, regen}`, `id` the one the call created, at the top
+  of its entry as the call alone answers it. Each call's own `regen` and `digest` are stripped: under a
   deferred regeneration they would describe a document that has not been
   rebuilt. Geometry is answered once, by the batch's `regen`.
 - **Refused inside a batch:** another `batch`, any `NotInBatch` method

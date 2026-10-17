@@ -174,7 +174,9 @@ items. There are two:
   ([print profiles](../tolerances/README.md#print-profiles)). New starts from
   the built-in table of the selected profile's pair. The form is name,
   process and material, conditions, the STL chord deviation, the layer height
-  and the air over another part (`z_gap_mm`; each an `ExprInputDouble`) and the rows as a stretched table, never wider than the pane — kind, from,
+  and the air over another part (`z_gap_mm`), the bed's x, y and z
+  (`bed_mm`, `###prof_bed_x`/`_y`/`_z`, three zeros = not stated; each an
+  `ExprInputDouble`) and the rows as a stretched table, never wider than the pane — kind, from,
   to (0 = and up), allowance and source, each field a flat numbered id
   (`###prof_row_allow_<i>`) so a script reaches one without the table's id
   scope.

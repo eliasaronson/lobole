@@ -144,7 +144,9 @@ taken over RPC give the same numbers.
 `mass_properties {body?, part?}` → per body `volume_mm3`, `surface_area_mm2`,
 `center_of_mass_mm`, `inertia` (3×3 about the centre of mass), `material`,
 `density`, `mass_g`, and a measured `bbox`; plus `total {volume_mm3,
-center_of_mass_mm, mass_g}`. Density comes from the body's material; a body with
+center_of_mass_mm, mass_g}` and `bbox_mm {min, max, size}`, the measured box
+of everything it weighed together (on an assembly, every visible leaf where
+the solve put it). Density comes from the body's material; a body with
 no material has no mass rather than an assumed density, and the BOM names it
 in `warnings`. On an assembly tab without `part` it aggregates every visible
 occurrence in world space. Its bbox is measured off the surfaces; `get_state`'s
@@ -307,13 +309,17 @@ it is weighed, as an exact annulus, and reports it apart from the clash:
   `press_fits`; and a top-level `press_fits` list [{a, b, fits, volume_mm3}]
   on the exact sweep and on `contact_report`. A round overlap next to a
   banded face that is NOT a fit stays a clash and carries
-  `press_fit_refused` [{fit, reason, excess_mm?}] saying why.
+  `press_fit_refused` [{fit, reason, excess_mm?}] saying why. A
+  [printed press](../tolerances/README.md#printed-press-fits) is listed
+  the same way, and also where the model shows no interference
+  (`volume_mm3` 0).
 
 A relieved pair is in contact, so `contact_report` counts it `touching` and
 it joins its component. The ring grip and the press fit are one
 designed-overlap step in `ContactBetween` (`RemoveRingGrip`, then
 `RelievePressFits`, `src/core/Measure.cpp`), run only when a pair actually
-overlaps and a side carries a grip or a band. An exact motion study lists
+overlaps and a side carries a grip or a band, or both sides carry a
+printed press. An exact motion study lists
 its press fits once per pair
 ([motion studies](../assemblies/README.md#motion-studies)). A mesh check has
 no threads, grips or bands: its answers carry `relieves` saying so, and an
@@ -458,8 +464,9 @@ measured ([requirements](../requirements/README.md)).
 
 `check_print` answers for a printed part: on the bed, one piece per solid,
 overhangs and bridges against the process, the gap between bodies, the
-STL's chords, and stacking: every piece on the bed and none printed within
-the minimum air over another — [../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).
+STL's chords, stacking: every piece on the bed and none printed within
+the minimum air over another, and bed_fit: the plate inside the print
+profile's bed — [../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).
 
 ## Before delivering a model
 

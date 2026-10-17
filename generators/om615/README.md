@@ -28,8 +28,8 @@ python3 generators/om615/om615.py --port PORT --project /tmp/engine/om615.dsgn -
   feature status and the accessory mounting structure; `local` adds the exact
   standing sweep, the alternator subassemblies' own sweeps and the mounting
   contacts; `full` adds the exact motion study over two crank revolutions
-  (49 samples by default — coarse steps can land a slider-crank on its other
-  branch) and the measured strokes, lifts, firing order and the injection
+  (49 samples by default; a coarse step whose joints jump is re-solved finer
+  and a jump that stays is reported, docs/assemblies/README.md#branch-jumps) and the measured strokes, lifts, firing order and the injection
   pump's turn, strokes, order and timing. `om615-unchecked.dsgn`
   is saved before validation so a failed gate leaves geometry to inspect;
   `om615.dsgn` only when accepted. `--build-only` and `--no-study` are the
