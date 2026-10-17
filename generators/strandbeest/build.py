@@ -20,8 +20,12 @@ What it builds (generators/strandbeest/README.md):
   assigns; a headed pin for every joint but the crank pin and the frame
   pivot, and a cap pressed on each;
 - frame plates tied by pressed standoffs, the frame pivots printed on
-  them; a crankshaft of keyed discs, one throw each, the phases set by
-  where each disc's socket takes the last one's crank pin; a hand crank;
+  them; a crankshaft of discs, one throw each, joined by crank pins
+  printed lying down in the discs' D-sockets, the phases set by where each
+  disc's sockets are; a hand crank;
+- every pin in a load path studied as it prints under the walker's own
+  loads (the leg's statics, its weight and the floor's friction), a
+  factor of 2 or the run stops;
 - stage 1, one leg pair on its crank and the coupon's press row, as one
   plate; stage 2, the walker, as plates for the bed;
 - the assemblies, each with a 360-degree study at 2 degrees a sample, and
@@ -106,6 +110,10 @@ def solve(size, layer, allow):
     s["rf"] = s["rd"] + s["w"]           # the end flanges
     s["socket"] = whole_layers(0.6 * s["tp"], layer)  # a stub's depth
     s["key_bore"] = s["ds"] + s["press"]
+    # The crank pins and the handle are pins of their own, pressed into
+    # D-shaped sockets at the press allowance at their size.
+    s["press_pin"] = allow("press", dp)
+    s["pin_bore"] = dp + s["press_pin"]
     s["standoff"] = 1.5 * dp
     s["handle_d"] = 2.0 * dp
     s["handle_h"] = 2.5 * s["w"]
@@ -485,15 +493,37 @@ def disc_angle(s, step_deg):
     return (s["lengths"]["m"] * math.cos(a), s["lengths"]["m"] * math.sin(a))
 
 
+def d_round(c, r, toward):
+    """A round of radius r about c with a flat r/sqrt 2 off its centre on
+    the side at angle `toward` (radians): the D a crank pin prints lying on
+    (no face under it past 45 degrees), and the socket that keys it."""
+    a0 = toward + math.pi / 4.0
+    a1 = toward - math.pi / 4.0 + 2.0 * math.pi
+    p0 = (c[0] + r * math.cos(a0), c[1] + r * math.sin(a0))
+    p1 = (c[0] + r * math.cos(a1), c[1] + r * math.sin(a1))
+    return [{"type": "arc", "center": [float(c[0]), float(c[1])],
+             "radius": float(r), "start_angle": a0, "end_angle": a1},
+            line(p1, p0)]
+
+
+def pin_socket(s, angle):
+    """A crank pin's socket at the crank radius at `angle` in a disc's own
+    frame: the pin's D, its flat toward the crank axis."""
+    m = s["lengths"]["m"]
+    c = (m * math.cos(angle), m * math.sin(angle))
+    return d_round(c, s["pin_bore"] / 2.0, angle + math.pi)
+
+
 def build_disc(d, s, kind, step_deg, proc, mat):
-    """A crankshaft segment, printed flat: a disc in its plate with its
-    crank pin standing on it at angle 0, keyed into the next disc's socket.
-    `first` stands on the hand crank's flange and arm; `last` is the end
-    disc, socket and flange, printed flange down; `middle` has the socket
-    for the last throw's pin one phase back. Returns the z of the disc's
-    plate-side face in the part (where it meets its plate's bottom)."""
-    L = s["lengths"]
-    m = L["m"]
+    """A crankshaft segment, printed flat: a disc in its plate with a
+    D-socket on its top face at angle 0 for its own throw's crank pin, and
+    (a middle disc) one on its underside one phase back for the last
+    throw's. The crank pins are parts of their own, printed lying down
+    (build_crank_pin): no pin stands across its layers in the torque's
+    path. `first` stands on the hand crank's flange and arm; `last` is the
+    end disc, its one socket and its flange, printed flange down. Returns
+    the z of the disc's plate-side face in the part (where it meets its
+    plate's bottom)."""
     part = Part(d, f"disc {kind}", proc, mat)
     if kind in ("first", "last"):
         part.cylinders(0.0, [(0, 0)], 2 * s["rf"], s["tf"], "new_body",
@@ -503,7 +533,7 @@ def build_disc(d, s, kind, step_deg, proc, mat):
                                       s["w"] / 2.0 + s["wall"]),
                          s["tf"], "add", "arm")
             part.extrude(0.0, [circle((-s["arm"], 0.0),
-                                      s["key_bore"] / 2.0)],
+                                      s["pin_bore"] / 2.0)],
                          s["tf"], "cut", "handle bore")
         z = s["tf"]
         part.cylinders(z, [(0, 0)], 2 * s["rd"], s["gz"] + s["tp"], "add",
@@ -512,56 +542,211 @@ def build_disc(d, s, kind, step_deg, proc, mat):
     else:
         part.cylinders(0.0, [(0, 0)], 2 * s["rd"], s["tp"], "new_body",
                        "disc")
-        part.extrude(0.0, [circle(disc_angle(s, step_deg),
-                                  s["key_bore"] / 2.0)], s["socket"], "cut",
-                     "socket")
+        part.extrude(0.0, pin_socket(s, math.radians(-step_deg)),
+                     s["socket"], "cut", "socket below")
         top = s["tp"]
-    if kind == "last":
-        part.extrude(top, [circle((m, 0.0), s["key_bore"] / 2.0)],
-                     s["socket"], "cut", "socket", reversed_=True)
-    else:
-        part.cylinders(top, [(m, 0.0)], s["dp"], s["slab"], "add",
-                       "crank pin")
-        part.cylinders(top + s["slab"], [(m, 0.0)], s["ds"],
-                       s["socket"] - s["gz"], "add", "key")
+    # The socket its own throw's pin stands in (the last disc's is its one
+    # socket, from its top, the face it turns over onto).
+    part.extrude(top, pin_socket(s, 0.0), s["socket"], "cut",
+                 "socket" if kind == "last" else "socket above",
+                 reversed_=True)
     part.finish()
     return top
 
 
-# What a hand pushes on the crank's knob, N: a firm push, about 3 kg. The
-# crank stub's study takes it (crank_stub_strength) and so does the card.
-HAND_N = 30.0
-# A printed pin's factor against its interlayer strength must be at least
-# this, or the run stops: the hook's design factor (generators/hook).
+def build_crank_pin(d, s, proc, mat):
+    """A crank pin, printed lying on its flat (its axis along x, the D's
+    flat on the bed), so the torque that bends it between two discs bends
+    it ALONG its layers. It spans its slab and reaches into the discs'
+    sockets on both sides, a gap's play short of each socket's floor."""
+    length = s["slab"] + 2.0 * (s["socket"] - s["gz"])
+    r = s["dp"] / 2.0
+    h = r / math.sqrt(2.0)  # the axis over the flat
+    s["crank_pin_len"] = length
+    s["crank_pin_h"] = h
+    part = Part(d, "crank pin", proc, mat)
+    sk = check(d.call("add_feature", feature={
+        "type": "Sketch", "name": "crank pin section",
+        "plane": {"origin": [0.0, 0.0, 0.0], "normal": [1, 0, 0],
+                  "uAxis": [0, 1, 0]},
+        "entities": d_round((0.0, h), r, -math.pi / 2.0)}),
+        "crank pin")["id"]
+    check(d.call("add_feature", feature={
+        "type": "Extrude", "name": "crank pin", "sketch_id": sk,
+        "distance": length, "mode": "new_body"}), "crank pin")
+    return part.finish()
+
+
+# ---- strength ---------------------------------------------------------------
+
+# The friction between the feet and the floor (mu, static): 0.5, a STATED
+# upper value for dry printed PLA on a table. Published measurements of
+# printed PLA are against steel and vary with the load (Stoimenov et al.,
+# "Static and Kinetic Friction of 3D Printed Polymers and Composites",
+# Tribology in Industry 46(1), 2024); none is on a wooden table. To
+# confirm: tilt the walker on its floor until it slides, mu = tan(angle).
+FOOT_MU = 0.5
+# The walk's own torque is doubled for what the statics leaves out -- the
+# joints' friction, a rough floor -- before it is set against the most
+# the feet let a hand put through (the slip case).
+WALK_MARGIN = 2.0
+# Every pin studied must hold at least this factor, across its layers and
+# against the yield, or the run stops: the hook's design factor.
 PIN_NEED = 2.0
 
 
-def crank_stub_strength(d, s, hand_n):
-    """The first disc's crank pin and key stub as printed (flat, so the
-    stub stands across its layers), carrying the whole hand crank's torque
-    into the next disc: hand_n at the knob's arm is the torque, and the
-    stub at the crank radius takes it as torque / m, tangential. Held on
-    the disc's underside, where the stub's root bends. _lib.pin_strength
-    runs it; under PIN_NEED the run stops."""
-    d.call("set_active_part", part="disc first")
-    fs = d.call("list_elements")["bodies"][0]["faces"]
-    m = s["lengths"]["m"]
-    key = [f["name"] for f in fs if f["kind"] == "cylinder" and
-           abs(f.get("radius", 0.0) - s["ds"] / 2.0) < 1e-6 and
-           math.hypot(f["centroid"][0] - m, f["centroid"][1]) < 1e-3]
+def walker_weight(d, s, lay, frames, throws):
+    """The walker's weight, N: every printed piece's mass_properties, the
+    printed estimate where its settings give one, else solid (more, so the
+    loads err high)."""
+    grams, how = 0.0, set()
+    seen = {}
+    for it in print_items(s, lay, frames, throws):
+        part = it["part"]
+        if part not in seen:
+            mp = d.call("mass_properties", part=part)["total"]
+            pr = (mp.get("printed") or {}).get("mass_g")
+            seen[part] = (pr, "printed") if pr else (mp["mass_g"], "solid")
+        g, kind = seen[part]
+        grams += g
+        how.add(kind)
+    return grams / 1000.0 * 9.81, grams, sorted(how)
+
+
+def band_z(z0, z1):
+    return {"normal": [0.0, 0.0, 1.0], "from_mm": z0, "to_mm": z1}
+
+
+def strength(d, s, lay, frames, throws, step_deg, hand_n, mu):
+    """Every pin in a load path, studied as it prints (_lib.pin_strength)
+    under the walker's own loads (linkage.walking_loads): the weight on the
+    feet that stand, and the most friction the floor gives. The crank's
+    design torque is the larger of the walk's (doubled, WALK_MARGIN) and
+    the slip's -- or `hand_n` on the knob, when stated; the joints' loads
+    likewise. Studied: a crank pin carrying that torque between two discs
+    and its crank bars' pull, the handle under the push that makes it, each
+    joint pin of a leg pair, and the frame pivots. Under PIN_NEED either
+    way the run stops (pin_strength)."""
+    L = s["lengths"]
+    m = L["m"]
+    weight, grams, how = walker_weight(d, s, lay, frames, throws)
+    lo = lk.walking_loads(L, throws, math.radians(step_deg), weight, mu)
+    t_walk = lo["walk"]["torque_nmm"]
+    t_slip = lo["slip"]["torque_nmm"]
+    if hand_n is not None:
+        t_d, governs = hand_n * s["arm"], "the stated hand push"
+    elif WALK_MARGIN * t_walk >= t_slip:
+        t_d, governs = WALK_MARGIN * t_walk, "the walk, doubled"
+    else:
+        t_d, governs = t_slip, "the slip: the most the feet let a hand put through"
+    # The joints at the same case; a stated push beyond the slip scales
+    # them with it (the legs then carry it, the walker held).
+    scale = max(1.0, t_d / t_slip)
+    pins_n = {j: scale * max(WALK_MARGIN * lo["walk"]["pins_n"][j],
+                             lo["slip"]["pins_n"][j])
+              for j in lo["slip"]["pins_n"]}
+    out = {"weight_n": weight, "mass_g": grams, "mass_from": how,
+           "mu": mu, "mu_source": "stated (FOOT_MU)",
+           "walk_margin": WALK_MARGIN, "torque_walk_nmm": t_walk,
+           "torque_slip_nmm": t_slip, "crank_height_mm": lo["height_mm"],
+           "design_torque_nmm": t_d, "governs": governs,
+           "hand_n": hand_n, "pin_loads_n": pins_n, "need": PIN_NEED,
+           "studies": {}}
+    print(f"  loads: walker {grams:.0f} g ({'/'.join(how)}), mu {mu:g}: "
+          f"walking {t_walk:.1f} N mm, slipping {t_slip:.1f} N mm; design "
+          f"{t_d:.1f} N mm ({governs})")
+
+    def faces(part):
+        d.call("set_active_part", part=part)
+        return d.call("list_elements")["bodies"][0]["faces"]
+
+    def rounds(fs, r, near=None):
+        return [f["name"] for f in fs if f["kind"] == "cylinder" and
+                abs(f.get("radius", 0.0) - r) < 1e-6 and
+                (near is None or math.hypot(f["centroid"][0] - near[0],
+                                            f["centroid"][1] - near[1])
+                 < 1e-3)]
+
+    st = out["studies"]
+    # The crank pin, lying along x: torque between its discs. The pin is
+    # held in both sockets, which turn together, so it bends as a beam
+    # fixed at both ends and offset at one -- two cantilevers meeting at
+    # mid-span. One of them: held in a socket, the force at the middle.
+    Lp = s["crank_pin_len"]
+    xs = s["socket"] - s["gz"]
+    fs = faces("crank pin")
+    pin = rounds(fs, s["dp"] / 2.0)
+    if len(pin) != 1:
+        raise SystemExit(f"strandbeest: the crank pin's round: {pin}")
+    bx = lambda x0, x1: {"normal": [1.0, 0.0, 0.0],  # noqa: E731
+                         "from_mm": x0, "to_mm": x1}
+    mid = bx(Lp / 2.0 - s["t"] / 2.0, Lp / 2.0 + s["t"] / 2.0)
+    st["crank pin, torque"] = pin_strength(
+        d, "crank pin", pin[0], t_d / m, [0.0, 1.0, 0.0],
+        seat={"face": pin[0], "region": bx(0.0, xs)},
+        layer_normal=[0.0, 0.0, 1.0], region=mid,
+        name="crank pin: the design torque", need=PIN_NEED)
+    # Its crank bars' pull, in the slab, held in both sockets.
+    st["crank pin, bars"] = pin_strength(
+        d, "crank pin", pin[0], pins_n["A"], [0.0, 0.0, -1.0],
+        seat=[{"face": pin[0], "region": bx(0.0, xs)},
+              {"face": pin[0], "region": bx(Lp - xs, Lp)}],
+        layer_normal=[0.0, 0.0, 1.0], region=mid,
+        name="crank pin: its bars", need=PIN_NEED)
+    # The handle, standing on its knob: the push that makes the torque, on
+    # the knob, its stub held in the arm.
+    fs = faces("handle")
+    stub, knob = rounds(fs, s["dp"] / 2.0), rounds(fs, s["handle_d"] / 2.0)
+    if len(stub) != 1 or len(knob) != 1:
+        raise SystemExit(f"strandbeest: the handle's faces: {stub} {knob}")
+    st["handle"] = pin_strength(
+        d, "handle", knob[0], t_d / s["arm"], [1.0, 0.0, 0.0], seat=stub[0],
+        layer_normal=[0.0, 0.0, 1.0], name="handle: the push",
+        need=PIN_NEED)
+    # Each joint pin, standing on its head: the band of its top body
+    # loaded, the other bodies' bands holding it.
+    for side in SIDES:
+        for j in lk.PINS:
+            part = f"pin {side} {j}"
+            info = pin_span(lay, side, j)
+            z0 = z_bottom(s, info[0]) - s["th"]
+            bodies = sorted(lk.JOINTS[j],
+                            key=lambda b: layer_of(lay, side, b))
+            bands = {b: band_z(z_bottom(s, layer_of(lay, side, b)) - z0,
+                               z_bottom(s, layer_of(lay, side, b)) +
+                               s["t"] - z0) for b in bodies}
+            shaft = rounds(faces(part), s["dp"] / 2.0)
+            if len(shaft) != 1:
+                raise SystemExit(f"strandbeest: {part}'s shaft: {shaft}")
+            st[part] = pin_strength(
+                d, part, shaft[0], pins_n[j], [1.0, 0.0, 0.0],
+                seat=[{"face": shaft[0], "region": bands[b]}
+                      for b in bodies[:-1]],
+                layer_normal=[0.0, 0.0, 1.0], region=bands[bodies[-1]],
+                name=f"{part}: its legs' load", need=PIN_NEED)
+    # The frame pivots, printed on the first plate: held by the plate, the
+    # load on the band of their higher body.
+    fs = faces("plate first")
     base = [f["name"] for f in fs if f["kind"] == "plane" and
             abs(f["centroid"][2]) < 1e-6]
-    if len(key) != 1 or not base:
-        raise SystemExit(f"strandbeest: the crank stub's study faces: "
-                         f"{key}, {base}")
-    torque = hand_n * s["arm"]
-    # need=0: the factor is judged by the caller, which writes it into the
-    # receipt before it stops the run.
-    out = pin_strength(d, "disc first", key[0], torque / m, [0.0, 1.0, 0.0],
-                       seat=base, layer_normal=[0.0, 0.0, 1.0],
-                       name="crank stub under the hand crank", need=0.0)
-    out.update(hand_n=hand_n, arm_mm=s["arm"], torque_nmm=torque,
-               crank_r_mm=m, need=PIN_NEED)
+    for b in b_pins(s, lay):
+        side = b["side"]
+        piv = rounds(fs, s["dp"] / 2.0, near=b["at"])
+        if len(piv) != 1 or not base:
+            raise SystemExit(f"strandbeest: the {side} pivot's faces: "
+                             f"{piv} {base}")
+        top = max(layer_of(lay, side, x) for x in lk.JOINTS["B"])
+        z = s["tp"] + z_bottom(s, top)
+        st[f"pivot {side}"] = pin_strength(
+            d, "plate first", piv[0], pins_n["B"], [1.0, 0.0, 0.0],
+            seat=base, layer_normal=[0.0, 0.0, 1.0],
+            region=band_z(z, z + s["t"]),
+            name=f"{side} pivot: its legs' load", need=PIN_NEED)
+    out["least_factor"] = min(
+        min(v["interlayer_factor_of_safety"], v["factor_of_safety"])
+        for v in st.values())
+    print(f"  strength: {len(st)} pin studies, the least factor "
+          f"{out['least_factor']:.2f} (at least {PIN_NEED:g})")
     return out
 
 
@@ -569,7 +754,9 @@ def build_handle(d, s, proc, mat):
     part = Part(d, "handle", proc, mat)
     part.cylinders(0.0, [(0, 0)], s["handle_d"], s["handle_h"], "new_body",
                    "knob")
-    part.cylinders(s["handle_h"], [(0, 0)], s["ds"], s["tf"], "add", "stub")
+    # Its stub is a crank pin's size, not a cap's: it carries the hand's
+    # push across its layers (strength(), below).
+    part.cylinders(s["handle_h"], [(0, 0)], s["dp"], s["tf"], "add", "stub")
     return part.finish()
 
 
@@ -618,6 +805,25 @@ def part_id(d, name):
     if name not in _PART_IDS:
         raise SystemExit(f"strandbeest: no part '{name}'")
     return _PART_IDS[name]
+
+
+def mat_quat(rows):
+    """The quaternion (x, y, z, w) of the rotation whose matrix has these
+    ROWS (each the world x, y or z of the frame's three axes)."""
+    (m00, m01, m02), (m10, m11, m12), (m20, m21, m22) = rows
+    tr = m00 + m11 + m22
+    if tr > 0.0:
+        k = 0.5 / math.sqrt(tr + 1.0)
+        return ((m21 - m12) * k, (m02 - m20) * k, (m10 - m01) * k,
+                0.25 / k)
+    if m00 > m11 and m00 > m22:
+        k = 2.0 * math.sqrt(1.0 + m00 - m11 - m22)
+        return (0.25 * k, (m01 + m10) / k, (m02 + m20) / k, (m21 - m12) / k)
+    if m11 > m22:
+        k = 2.0 * math.sqrt(1.0 + m11 - m00 - m22)
+        return ((m01 + m10) / k, 0.25 * k, (m12 + m21) / k, (m02 - m20) / k)
+    k = 2.0 * math.sqrt(1.0 + m22 - m00 - m11)
+    return ((m02 + m20) / k, (m12 + m21) / k, 0.25 * k, (m10 - m01) / k)
 
 
 def throw_angle(p, step_deg):
@@ -674,12 +880,22 @@ def build_crankshaft(d, s, throws, step_deg, tops, proc):
     derived(d, f"disc {throws}", "disc last",
             (0.0, 0.0, slab_base(s, throws) + s["gz"] + s["tf"]),
             q_mul(q_z(throw_angle(throws - 1, step_deg)), Q_X180))
+    # The crank pins, each standing in its slab between two discs' sockets,
+    # its flat toward the crank axis as the sockets' D is.
+    m = s["lengths"]["m"]
+    h = s["crank_pin_h"]
+    for p in range(throws):
+        a = throw_angle(p, step_deg)
+        c, sn = math.cos(a), math.sin(a)
+        q = mat_quat(((0.0, sn, c), (0.0, -c, sn), (1.0, 0.0, 0.0)))
+        derived(d, f"crank pin {p}", "crank pin",
+                ((m - h) * c, (m - h) * sn,
+                 slab_base(s, p) - (s["socket"] - s["gz"])), q)
     derived(d, "handle", "handle",
             (-s["arm"], 0.0, -s["tp"] - s["gz"] - s["tf"] - s["handle_h"]))
     d.call("add_feature", feature={
         "type": "Frame", "name": "O", "kind": "explicit",
         "origin": [0, 0, 0], "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]})
-    m = s["lengths"]["m"]
     for p in range(throws):
         a = throw_angle(p, step_deg)
         d.call("add_feature", feature={
@@ -1123,6 +1339,9 @@ def footprint(s, lay, frames, part):
         return [((0.0, 0.0), s["dh"] / 2.0)]
     if kind == "handle":
         return [((0.0, 0.0), s["handle_d"] / 2.0)]
+    if kind == "crankpin":  # lying along x, its section dp wide
+        r = s["dp"] / 2.0
+        return [((r, 0.0), r), ((s["crank_pin_len"] - r, 0.0), r)]
     if kind == "plate":
         c = [((0.0, 0.0), s["rd"] + s["gap_disc"] / 2.0 + s["w"])]
         c += [(b["at"], s["w"]) for b in b_pins(s, lay)]
@@ -1313,7 +1532,8 @@ def build_print_parts(d, s, lay, frames, proc, mat, step_deg, throws):
     tops = {kind: build_disc(d, s, kind, step_deg, proc, mat)
             for kind in kinds}
     build_handle(d, s, proc, mat)
-    print(f"  {12 + 8 + 1 + 2 * len(kinds) + 1} print parts "
+    build_crank_pin(d, s, proc, mat)
+    print(f"  {12 + 8 + 1 + 2 * len(kinds) + 2} print parts "
           f"({time.perf_counter() - t0:.0f} s)")
     return pins, tops
 
@@ -1346,8 +1566,9 @@ def part_names_of(ids, parts):
 
 def print_items(s, lay, frames, throws, with_press=None):
     """The pieces one walker of `throws` throws prints: per throw a leg
-    pair's twelve bodies, eight pins and ten caps (two on the frame
-    pivots); a plate and a disc more than the throws; the handle."""
+    pair's twelve bodies, eight pins, ten caps (two on the frame pivots)
+    and a crank pin; a plate and a disc more than the throws; the
+    handle."""
     items = []
 
     def add(name, part, fp, n=1, bodies=1):
@@ -1367,6 +1588,7 @@ def print_items(s, lay, frames, throws, with_press=None):
     add("disc last", "disc last", ("disc", "last"))
     add("disc middle", "disc middle", ("disc", "middle"), throws - 1)
     add("handle", "handle", ("handle",))
+    add("crank pin", "crank pin", ("crankpin",), throws)
     if with_press:
         add("press row", with_press["part"],
             ("press",) + tuple(with_press["box"]),
@@ -1548,9 +1770,14 @@ def main():
                     help="study samples over the turn (181: 2 degrees)")
     ap.add_argument("--stage", choices=("1", "2", "all"), default="all")
     ap.add_argument("--no-controls", action="store_true")
-    ap.add_argument("--hand-n", type=float, default=HAND_N,
-                    help="what a hand pushes on the crank's knob, N: the "
-                         "crank stub's study load")
+    ap.add_argument("--hand-n", type=float, default=None,
+                    help="a push on the crank's knob to design for, N, "
+                         "instead of the walker's own loads (the larger of "
+                         "its walk, doubled, and the most its feet let a "
+                         "hand put through)")
+    ap.add_argument("--mu", type=float, default=FOOT_MU,
+                    help="the feet's static friction on the floor (FOOT_MU "
+                         "says where 0.5 comes from)")
     ap.add_argument("--fresh", action="store_true",
                     help="start a new project first (refused on unsaved work)")
     ap.add_argument("--out", default=None)
@@ -1609,22 +1836,10 @@ def main():
     pins, tops = build_print_parts(d, s, lay, frames, proc, mat, step_deg,
                                    throws)
     press = press_row_part(d, s, proc, mat)
-    crank_stub = crank_stub_strength(d, s, args.hand_n)
-    if crank_stub["interlayer_factor_of_safety"] < PIN_NEED:
-        # The receipt says so before the run stops.
-        out.mkdir(parents=True, exist_ok=True)
-        (out / "strandbeest.json").write_text(json.dumps(
-            {"size": args.size, "pairs": args.pairs, "process": proc,
-             "crank_stub": crank_stub, "stopped": "the crank stub breaks "
-             "across its layers"}, indent=1, default=str))
-        raise SystemExit(
-            f"strandbeest: the crank stub breaks across its layers under "
-            f"{args.hand_n:g} N on the knob: factor "
-            f"{crank_stub['interlayer_factor_of_safety']:.2f} under "
-            f"{PIN_NEED:g} ({crank_stub['max_across_layers_mpa']:.0f} MPa "
-            f"across the layers at {crank_stub['max_across_layers_at_mm']})")
+    strong = strength(d, s, lay, frames, throws, step_deg, args.hand_n,
+                      args.mu)
     receipt = {"size": args.size, "pairs": args.pairs, "process": proc,
-               "crank_stub": crank_stub,
+               "strength": strong,
                "layer_mm": layer,
                "sizes": {k: v for k, v in s.items() if k != "lengths"},
                "lengths": L, "layers": {f"{a} {b}": v for (a, b), v in

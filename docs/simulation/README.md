@@ -543,9 +543,10 @@ load_n, direction, seat, layer_normal, region=…)` is the hook's pattern for
 a pin: one static study of the pin's part as printed, held at its seat and
 loaded on its face (each optionally a [region](#loads-on-part-of-a-face)),
 read with `layer_normal`; it returns `interlayer_factor_of_safety` and the
-stresses for a receipt, and a factor under 2 stops the run. The
-Strandbeest's crank stub, the clock's barrel arbor and the engine's wrist
-pin state theirs in their receipts.
+stresses for a receipt, and a factor under 2, across the layers or
+against the yield, stops the run. The Strandbeest's crank pins, handle,
+joint pins and frame pivots (under its legs' statics), the clock's barrel
+arbor and the engine's wrist pin state theirs in their receipts.
 
 ## Assembly studies
 

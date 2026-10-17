@@ -364,10 +364,12 @@ def pin_strength(d, part, face, load_n, direction, seat, layer_normal,
     (generators/hook/build.py), for a pin: a pin printed standing bends
     across its layers, and the interlayer strength is what breaks it.
 
-    Returns the factor of safety against the interlayer strength with the
-    stresses it came from, for a receipt. A factor under `need` STOPS the
-    run, as the hook's prediction would: a generator states its pins' load
-    and must not print one that this says breaks."""
+    Returns the factor of safety against the interlayer strength, and the
+    in-layer one (von Mises against the yield), with the stresses they came
+    from, for a receipt. Either under `need` STOPS the run, as the hook's
+    prediction would: a generator states its pins' load and must not print
+    one that this says breaks -- across its layers, or (a pin printed lying
+    down, whose bending runs along them) along them."""
     d.call("set_active_part", part=part)
     st = d.call("add_study", type="static",
                 name=name or f"{part}: pin across its layers")
@@ -402,11 +404,17 @@ def pin_strength(d, part, face, load_n, direction, seat, layer_normal,
            "factor_of_safety": r.get("factor_of_safety"),
            "nodes": r.get("nodes"), "reused": reused, "need": need}
     f = out["interlayer_factor_of_safety"]
+    fy = out["factor_of_safety"]
     print(f"  {part}: {load_n:.1f} N, {across['value']:.2f} MPa across "
-          f"its layers, factor {f:.2f} against the interlayer strength")
+          f"its layers, factor {f:.2f} against the interlayer strength, "
+          f"{fy:.2f} against the yield")
     if f < need:
         raise SystemExit(
             f"{part}: the pin breaks across its layers: factor {f:.2f} under "
             f"{need:g} at {load_n:.1f} N ({across['value']:.2f} MPa across "
             f"the layers at {across.get('at')})")
+    if fy is not None and fy < need:
+        raise SystemExit(
+            f"{part}: the pin yields: factor {fy:.2f} against the yield "
+            f"under {need:g} at {load_n:.1f} N")
     return out

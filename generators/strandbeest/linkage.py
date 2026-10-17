@@ -321,3 +321,116 @@ def assign_layers(prox, width, head_r, crank_pin_r, clear, max_layers=10):
                              spans(best[1]).items()}}
     raise ValueError(f"no assignment of the bars to {max_layers} layers "
                      "keeps every crossing pair apart")
+
+
+# ---- statics ----------------------------------------------------------------
+
+def _unit(a, b):
+    """The unit vector from a toward b."""
+    dx, dy = b[0] - a[0], b[1] - a[1]
+    d = math.hypot(dx, dy)
+    return (dx / d, dy / d)
+
+
+def _cross2(r, f):
+    return r[0] * f[1] - r[1] * f[0]
+
+
+def _solve3(m, v):
+    """A 3 x 3 linear system by Cramer's rule."""
+    def det(a):
+        return (a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1])
+                - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+                + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]))
+    d = det(m)
+    if abs(d) < 1e-12:
+        raise ValueError("the leg is at a dead point: no static solution")
+    out = []
+    for k in range(3):
+        mk = [row[:] for row in m]
+        for i in range(3):
+            mk[i][k] = v[i]
+        out.append(det(mk) / d)
+    return out
+
+
+def statics(p, foot):
+    """One leg at pose `p` held still with the force `foot` (N, (x, y)) on
+    its foot G: every bar's tension (positive pulls its joints together),
+    the frame pivot's reaction, and the crank torque (N mm, about O, the
+    leg frame's sense) that holds it. The two-force members are j, k, c and
+    f; the triangles BCD and EFG and the crank carry the rest. Linear in
+    `foot`; no friction in the joints, no weight of the leg's own."""
+    A, B, C, D, E, F, G, O = (p[k] for k in "ABCDEFGO")
+    # EFG: t_k along E->A, t_c along E->B, t_f along F->D, and the foot.
+    uk, uc, uf = _unit(E, A), _unit(E, B), _unit(F, D)
+    rF = (F[0] - E[0], F[1] - E[1])
+    rG = (G[0] - E[0], G[1] - E[1])
+    m = [[uk[0], uc[0], uf[0]], [uk[1], uc[1], uf[1]],
+         [0.0, 0.0, _cross2(rF, uf)]]
+    v = [-foot[0], -foot[1], -_cross2(rG, foot)]
+    tk, tc, tf = _solve3(m, v)
+    # BCD about B: t_j along C->A, t_f along D->F.
+    uj, ufd = _unit(C, A), _unit(D, F)
+    rC = (C[0] - B[0], C[1] - B[1])
+    rD = (D[0] - B[0], D[1] - B[1])
+    tj = -tf * _cross2(rD, ufd) / _cross2(rC, uj)
+    rb = (-(tj * uj[0] + tf * ufd[0]), -(tj * uj[1] + tf * ufd[1]))
+    # The crank: the bars pull A along A->C and A->E.
+    fa = (tj * _unit(A, C)[0] + tk * _unit(A, E)[0],
+          tj * _unit(A, C)[1] + tk * _unit(A, E)[1])
+    torque = -_cross2((A[0] - O[0], A[1] - O[1]), fa)
+    # The bar c's pull on the frame pivot, and the pivot's whole load.
+    fc_b = (tc * _unit(B, E)[0], tc * _unit(B, E)[1])
+    pivot = (-(rb[0]) + fc_b[0], -(rb[1]) + fc_b[1])
+    efg_e = (tk * uk[0] + tc * uc[0], tk * uk[1] + tc * uc[1])
+    return {"t": {"j": tj, "k": tk, "c": tc, "f": tf},
+            "torque_nmm": torque,
+            # Per joint, the largest force any one body puts on its pin
+            # (what bends the pin between the bodies), N.
+            "pins": {"A": max(abs(tj), abs(tk), math.hypot(*fa)),
+                     "B": max(math.hypot(*rb), abs(tc),
+                              math.hypot(*pivot)),
+                     "C": abs(tj), "D": abs(tf), "F": abs(tf),
+                     "E": max(abs(tk), abs(tc), math.hypot(*efg_e))}}
+
+
+def walking_loads(L, throws, step, weight_n, mu, samples=360, band=None):
+    """The crankshaft's torque and every joint's load as the walker
+    stands on its feet over a turn: at each crank angle the feet within
+    `band` of the lowest bear the weight equally (on flat ground). Per pose
+    a leg's torque and pin loads are linear in its foot force, so two
+    cases are summed over the feet on the ground:
+
+    - `walk`: the weight alone -- what turning the crank takes when the
+      feet roll over the ground without sliding;
+    - `slip`: the weight and, at every foot, the most friction the ground
+      gives, mu times its share, each the worse way: the most a hand can
+      put through the legs before the feet slide.
+
+    Returns each case's peak crank torque (N mm) and peak load on each
+    joint's pin (N), and the crank axis's height over the ground (mm)."""
+    band = 0.02 * L["m"] if band is None else band
+    out = {"walk": {"torque_nmm": 0.0, "pins_n": {}},
+           "slip": {"torque_nmm": 0.0, "pins_n": {}}, "height_mm": 0.0}
+    for i in range(samples):
+        th = 2.0 * math.pi * i / samples
+        legs = [pose(L, th + q * step, mirror) for q in range(throws)
+                for mirror in (False, True)]
+        low = min(p["G"][1] for p in legs)
+        out["height_mm"] = max(out["height_mm"], -low)
+        on = [p for p in legs if p["G"][1] - low <= band]
+        n = len(on)
+        tw = ts = 0.0
+        for p in on:
+            v = statics(p, (0.0, weight_n / n))
+            h = statics(p, (mu * weight_n / n, 0.0))
+            tw += abs(v["torque_nmm"])
+            ts += abs(v["torque_nmm"]) + abs(h["torque_nmm"])
+            for j in v["pins"]:
+                w, sl = out["walk"]["pins_n"], out["slip"]["pins_n"]
+                w[j] = max(w.get(j, 0.0), v["pins"][j])
+                sl[j] = max(sl.get(j, 0.0), v["pins"][j] + h["pins"][j])
+        out["walk"]["torque_nmm"] = max(out["walk"]["torque_nmm"], tw)
+        out["slip"]["torque_nmm"] = max(out["slip"]["torque_nmm"], ts)
+    return out

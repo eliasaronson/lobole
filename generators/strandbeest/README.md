@@ -97,14 +97,21 @@ It asks of the app what no earlier dogfood did:
   above the shoulder, at the press allowance. The frame pivots B are pins
   printed on the plates and capped the same way. The crank pin is part of
   the crankshaft.
-- **The crankshaft** is a disc per throw. Each disc turns in its plate, its
-  crank pin stands on it, and the pin's stub is pressed into the next
-  disc's socket. A middle disc's socket is one phase behind its own pin, so
-  every middle disc is the same part, and the keys set the phases rather
-  than a hand. The first disc stands on the hand crank's flange and arm,
-  and the handle is pressed into the arm. The last disc has only a socket
-  and a flange, and prints flange down. The two flanges hold the crankshaft
-  in the frame.
+- **The crankshaft** is a disc per throw and a crank pin per throw. Each
+  disc turns in its plate. A crank pin is a part of its own, **printed
+  lying down** on a D-flat (`r/√2` under its axis, so nothing under it
+  looks down past 45°): the torque bends it between two discs ALONG its
+  layers, never across them. It spans its slab and is pressed into a
+  D-shaped socket in the disc on each side, its flat toward the crank
+  axis, so the D keys it. A disc's top socket takes its own throw's pin
+  and a middle disc's underside socket, one phase behind, the last
+  throw's: every middle disc is the same part, and the sockets set the
+  phases rather than a hand. The first disc stands on the hand crank's
+  flange and arm, and the handle is pressed into the arm, its stub a crank
+  pin's size. The last disc has only a socket and a flange, and prints
+  flange down. The two flanges hold the crankshaft in the frame.
+  A through shaft along the crank axis is not possible: the crank bars j
+  and k pass the axis itself over the turn.
 - **The frame** is a plate per disc. The plates are tied by two standoffs
   each, pressed into the next plate's sockets. The standoffs stand on the
   crank's vertical, at the nearest spots above and below the disc that no
@@ -146,9 +153,11 @@ a stub under four nozzle widths.
 - **Layers and slab:** layer to layer is a bar plus the gap a side, and the
   slab is every layer plus that gap.
 - **The crankshaft:** a disc reaches the crank pin plus half a bar, and a
-  flange reaches a bar beyond the disc. A socket is 0.6 of a plate deep.
-  The handle is 2.5 bars long, on an arm reaching three bars past the
-  flange.
+  flange reaches a bar beyond the disc. A socket is 0.6 of a plate deep;
+  a crank pin spans the slab and reaches into both sockets, a gap's play
+  short of their floors, and its sockets and the handle's bore are a pin
+  at the press allowance at its size. The handle is 2.5 bars long, on an
+  arm reaching three bars past the flange, its stub a pin across.
 
 At 15 mm with K5 PLA, the profile's numbers give:
 
@@ -167,17 +176,39 @@ default, Ø3.22: the stub's own size.
 
 ## Checked every run
 
-First, before any assembly, **the crank stub across its layers**
-(`_lib.pin_strength`, docs/simulation/README.md#printed-layers): the first
-disc as it prints, flat, so its crank pin and key stub stand across their
-layers, held on its underside, with the whole hand crank's torque on the
-key stub as torque / crank radius, tangential. The torque is `--hand-n`
-(30 N, a firm push) on the knob at the arm's length. The factor against the
-interlayer strength goes in the receipt (`crank_stub`), and **under 2 the
-run stops**: the default walker does, at a factor of 0.06 (127 N on the
-stub, 276 MPa across the layers at the crank pin's root, the pin a 23 mm
-cantilever of Ø4.95 from its disc to its key). It would take under 1 N on
-the knob to pass. See [Not built](#not-built).
+First, before any assembly, **every pin in a load path, under the
+walker's own loads** (`strength()`, `_lib.pin_strength`,
+docs/simulation/README.md#printed-layers):
+
+- **The loads** come from the leg's statics (`linkage.statics`: the bars
+  j, k, c, f as two-force members, the triangles and the crank in
+  equilibrium; checked against virtual work), over a turn, with the
+  walker's weight shared by the feet on the ground (within 2 % of the
+  crank radius of the lowest) and at every foot the most friction the
+  floor gives, mu times its share, the worse way (`linkage.walking_loads`).
+  The weight is every printed piece's `mass_properties` (solid where a
+  part states no print settings: more, so the loads err high). mu is 0.5
+  (`--mu`, `FOOT_MU`): a stated upper value for dry printed PLA on a table
+  -- the published measurements of printed PLA are against steel
+  (Stoimenov et al., Tribology in Industry 46(1), 2024) -- to confirm by
+  tilting the walker on its floor until it slides.
+- **The design torque** is the larger of the walk's own (the weight alone,
+  doubled for the joints' friction and a rough floor, `WALK_MARGIN`) and
+  the slip's: the most torque the feet let a hand put through the legs
+  before they slide. At 15 mm the walker is 500 g; walking takes 5.1 N mm
+  and slipping 60.4, so **the slip governs**: 60.4 N mm, 1 N on the knob.
+  `--hand-n` states a push on the knob instead.
+- **The studies**, each as the part prints, with its layers' direction,
+  each needing a factor of 2 against the interlayer strength AND against
+  the yield, or the run stops: a crank pin carrying the design torque
+  between its discs (held in its sockets, which turn together, so a beam
+  fixed at both ends and offset at one: held in one socket, the force at
+  mid-span), and its crank bars' pull; the handle under the push; every
+  joint pin of a leg pair (the band of its top body loaded, the others'
+  bands holding it); both frame pivots on their plate. At 15 mm the least
+  factor is **4.15**, a frame pivot across its layers; the crank pin's is
+  9.4 across and 12.2 against the yield. The receipt keeps every study
+  (`strength`).
 
 On each assembly, a leg pair and the walker:
 
@@ -268,11 +299,24 @@ For K5 PLA on a P1S at 15 mm, every plate passes every `check_print` item:
 
 | plate | pieces |
 |---|---|
-| stage 1 | one leg pair (12 bodies), 8 pins, 10 caps, the first and last plates and discs, the handle, and the press row (a plate of five pins and five caps): 36 pieces, 41 solids |
-| stage 2, 1 | first, last and 3 middle plates; first and last discs; 4 front k, 2 front EFG |
-| stage 2, 2 | 2 middle plates; 6 back k, 6 back EFG, 2 front k, 4 front EFG |
-| stage 2, 3 | 4 middle discs, the handle; 6 front and 6 back BCD, 6 front j, 2 back j, 2 back f; 1 pin |
-| stage 2, 4 | 1 middle disc; 6 front and 6 back c, 6 front f, 4 back f, 4 back j; 47 pins, 60 caps |
+| stage 1 | one leg pair (12 bodies), 8 pins, 10 caps, the first and last plates and discs, the crank pin, the handle, and the press row (a plate of five pins and five caps): 37 pieces, 42 solids |
+| stage 2, 1 | first, last and 3 middle plates; first and last discs; the 6 crank pins; 3 front k, 2 front EFG |
+| stage 2, 2 | 2 middle plates; 6 back EFG, 4 front EFG, 3 front k, 2 back k, 1 front j |
+| stage 2, 3 | 4 middle discs, the handle; 6 front and 6 back BCD, 4 back k, 3 front j; 5 pins |
+| stage 2, 4 | 1 middle disc; 6 front and 6 back c, 6 front and 6 back f, 6 back j, 2 front j; 43 pins, 60 caps |
+
+Bambu's slice of the jobs: stage 1 in 2.4 h and 81 g; the walker's four
+plates in 10.0 h and 319 g (2.7, 2.1, 2.2 and 3.0 h).
+
+**Stage 1 against the plate printed on 2026-10-16**
+(`scratch/strandbeest/old-2026-10-17/stage1`): the bars, the joint pins,
+the caps, both plates and the press row are the same parts, volume and
+box. Four pieces change, all in the crank: the **first disc** (its crank
+pin and key are gone, a D-socket in its top face takes the new pin, and
+its handle bore is Ø4.95 at the press, not Ø3.22), the **last disc** (its
+socket is the crank pin's D, Ø4.95, not a round Ø3.22 for a key), the
+**handle** (its stub is Ø4.95, not Ø3.22), and a new **crank pin**, printed
+lying down. Reprint those four.
 
 The assignment comes from a MaxRects packing of each piece's box, turned to
 its tightest, half a bar apart. At 12 mm, three plates hold the walker.
@@ -281,14 +325,9 @@ its tightest, half a bar apart. At 12 mm, three plates hold the walker.
 
 - **No path in the Motion window.** A trace is a request parameter, and
   nothing in the document holds it for the window to draw.
-- **A crankshaft that carries a hand's torque.** The crank stub is now
-  checked across its layers, and it fails: the torque between two discs
-  goes through one Ø4.95 crank pin standing 23 mm as a cantilever between
-  them, printed across its layers, which holds about 1 N on the knob at a
-  factor of 2. The run stops there until the crankshaft is redesigned (a
-  through shaft, the discs keyed to it; or pins printed lying down) or
-  the torque it must carry is stated from the walker's own need. The
-  joint pins and the frame pivots print standing too, and are not yet
-  studied.
+- **The loads are the statics'.** No inertia, no joint friction (the
+  margin stands for it), a flat floor; the standoffs and the caps' stubs
+  are not studied (the caps take no load across the pin, the standoffs
+  only the frame's own).
 - **Packing goes by boxes.** Triangles nest poorly by their boxes, so four
   plates hold the 15 mm walker where three might.
