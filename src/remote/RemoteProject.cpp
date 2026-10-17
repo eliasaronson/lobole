@@ -116,14 +116,15 @@ static constexpr MethodDoc ProjectMethods[] = {
      "is the tessellation chord tolerance (smaller = finer, more "
      "triangles); STEP and BREP are exact solids and refuse it. Left out, an "
      "unprinted part meshes at 0.1 mm and a PRINTED part (set_print_process) "
-     "at its print profile's stl_deflection_mm, else a tenth of its smallest "
-     "gap a side, so the chords cannot close what the print needs open. A "
+     "at its print profile's stl_deflection_mm, else its material's own "
+     "(TPU's 0.02), else a tenth of its smallest gap a side, so the chords "
+     "cannot close what the print needs open. A "
      "coarser one asked for is exported as asked and the reply's `warning` "
      "says how much of the smallest gap the chords can take. Replies the "
-     "chord deviation used and where it came from (asked, profile, gap, "
-     "default), and the SOURCE B-Rep's watertightness. The name is "
-     "check_print's for the same deviation; `deflection` is refused, naming "
-     "it.",
+     "chord deviation used and where it came from (asked, profile, "
+     "material, gap, default), and the SOURCE B-Rep's watertightness. The "
+     "name is check_print's for the same deviation; `deflection` is refused, "
+     "naming it.",
      "body, path, stl_deflection_mm", remote::NeedsPart | remote::NotInBatch,
      "bodies:int, deflection_from:string, deflection_mm:number, "
      "free_edges:int, path:string, shells:int, watertight:bool, "

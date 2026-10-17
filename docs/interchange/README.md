@@ -162,8 +162,8 @@ re-meshed at `stl_deflection_mm` (chord tolerance, the name `check_print`
 takes for the same deviation; `deflection` is refused, naming it), never the viewport's
 tessellation; the reply reports the deflection used, where it came from, and
 whether the source B-Rep was watertight. Left out, it is 0.1 mm on an
-unprinted part and, on a printed one, the print profile's chord deviation or
-a tenth of its smallest gap; a coarser one asked for on a printed part is
+unprinted part and, on a printed one, the print profile's chord deviation,
+else the material's own (TPU's 0.02), else a tenth of its smallest gap; a coarser one asked for on a printed part is
 written and warned about
 ([exporting a printed part](../tolerances/README.md#exporting-a-printed-part)).
 File › Export goes through the same helper (`ui::ExportPartStl`) and says

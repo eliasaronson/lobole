@@ -27,8 +27,9 @@ struct StlExportResult {
   size_t bodies = 0;
   double deflectionMm = 0.0; // what the file was meshed at
   // Where that came from: "asked" (the caller's), "profile" (the part's
-  // print profile states one), "gap" (a tenth of the smallest gap a side),
-  // or "default" (an unprinted part: 0.1 mm).
+  // print profile states one), "material" (the material's own, TPU's),
+  // "gap" (a tenth of the smallest gap a side), or "default" (an unprinted
+  // part: 0.1 mm).
   std::string deflectionFrom;
   // A printed part: its smallest clearance a side, and the share of it the
   // chords can take (deflection / that). 0 when not printed.

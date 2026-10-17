@@ -207,6 +207,13 @@ def profiles(d, port):
            f"exported as asked: {e}")
     expect("100% of the smallest gap" in e.get("warning", ""),
            f"and warned: {e}")
+    # Printed in TPU on the built-in table: its own chords, and said so.
+    d.call("set_print_process", process="fdm", material="tpu")
+    e = d.call("export_stl", path=stl)
+    expect(near(e["deflection_mm"], 0.02) and
+           e["deflection_from"] == "material",
+           f"TPU meshes at its own chords: {e}")
+    d.call("set_print_process", profile="Test P1S")
 
     # The store changes under the part: it keeps its copy, and says so.
     rows2 = [dict(x) for x in rows]
@@ -302,7 +309,7 @@ def profiles(d, port):
            f"five caps stepped round the profile's press: {bores}")
     expect(row["print"]["ok"] and row["print"]["stacking"]["status"]
            == "pass", f"the press row prints: {row['print']}")
-    # --seed installs the two P1S profiles.
+    # --seed installs the two measured P1S profiles (and the TPU one).
     out = subprocess.run([sys.executable, coupon, "--port", str(port),
                           "--seed"], capture_output=True, text=True,
                          timeout=60)

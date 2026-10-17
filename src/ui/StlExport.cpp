@@ -60,7 +60,10 @@ ExportPartStl(const Document& part, const std::string& path, int bodyIndex,
     r.deflectionMm = printed;
     const auto& proc = *part.PrintProcess();
     r.deflectionFrom =
-        proc.profile && proc.profile->stlDeflectionMm > 0.0 ? "profile" : "gap";
+        proc.profile && proc.profile->stlDeflectionMm > 0.0 ? "profile"
+        : printfit::BuiltinStlDeflectionMm(proc.process, proc.material) > 0.0
+            ? "material"
+            : "gap";
   } else {
     r.deflectionMm = kUnprintedDeflectionMm;
     r.deflectionFrom = "default";
