@@ -444,14 +444,14 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   `printable_height`, the slicer's limit, under the published 256); a
   profile saved before has none until it is set in Settings, Print profiles
   (`###prof_bed_x`/`_y`/`_z`) or with `save_print_profile`.
-- **The bed's keep-out zones** (vNEXT): `bed_exclude_mm`, rectangles
+- **The bed's keep-out zones** (v181): `bed_exclude_mm`, rectangles
   [x0, y0, x1, y1] in the bed's own coordinates (from its front-left
   corner, as the slicer's printable area), absent until stated; each with
   x1 > x0 and y1 > y0, and only with a `bed_mm`, or refused. A P1S keeps
   [0, 0, 18, 28] clear for its nozzle wiper (Bambu's `bed_exclude_area`),
   and Bambu refuses a part there at every rotation, so with zones bed_fit
   becomes [positional](#checking-a-print). `--seed` writes the P1S's.
-- **The wall line width** (vNEXT): `line_width_mm`, the slicer preset's,
+- **The wall line width** (v181): `line_width_mm`, the slicer preset's,
   absent until stated: what the [printed mass](#printed-mass) takes a wall
   loop as. `--seed` writes 0.45, the inner wall line width of Bambu
   Studio's 0.20 mm Standard on a 0.4 mm nozzle; and to a profile of a
@@ -575,7 +575,7 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 | `clearance` | the minimum distance between any two solids, with the closest pairs | the gap a side (`printfit::SmallestGapSideMm` of the print), passing down to a tenth under it | `Measure::ClearanceBetween` per pair (BRepExtrema, the distance `measure` gives), `ContactBetween` when it cannot prove them apart; a pair whose oriented boxes are four gaps apart is clear without measuring |
 | `chords` | the chord deviation `export_stl` meshes this print at | a fifth of the gap a side | `printfit::StlDeflectionMm`, as [the export](#exporting-a-printed-part) takes it, or `stl_deflection_mm` |
 | `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places: a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else. So the air is exact and only which face is met, at a face's boundary, is the tessellation's (`IntCurvesFace` per sample was exact there too, and took minutes on the counter where this takes seconds). A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
-| `bed_fit` | the plate's box: `extent_mm`, x along the bed's x (the world's x, or y when the direction is x), z up the direction; with keep-out zones, every piece where it is (`intrusions`) | the profile's `bed_mm`, with `shortfall_mm` per axis; and its `bed_exclude_mm` (`exclude_mm`) | `BRepBndLib::AddOptimal` of every body in the printer's frame. Without zones the extent, not a position: a slicer places the plate, so it fits when its box does. With zones (vNEXT, `printcheck::FitOnBed`) the part's x and y ARE the bed's, printed up +Z: a piece whose footprint box leaves the bed, or which itself (`BRepExtrema` against the zone's prism, after the boxes meet) enters a zone, is an intrusion naming the zone. A piece laid along the bed's diagonal has a box over the whole bed and misses the corner. Another print direction with zones fails, saying the frame is not the bed's |
+| `bed_fit` | the plate's box: `extent_mm`, x along the bed's x (the world's x, or y when the direction is x), z up the direction; with keep-out zones, every piece where it is (`intrusions`) | the profile's `bed_mm`, with `shortfall_mm` per axis; and its `bed_exclude_mm` (`exclude_mm`) | `BRepBndLib::AddOptimal` of every body in the printer's frame. Without zones the extent, not a position: a slicer places the plate, so it fits when its box does. With zones (v181, `printcheck::FitOnBed`) the part's x and y ARE the bed's, printed up +Z: a piece whose footprint box leaves the bed, or which itself (`BRepExtrema` against the zone's prism, after the boxes meet) enters a zone, is an intrusion naming the zone. A piece laid along the bed's diagonal has a box over the whole bed and misses the corner. Another print direction with zones fails, saying the frame is not the bed's |
 
 - **bed_fit is the printer's**, so it runs only on a part printed with a
   profile that states `bed_mm` (v179) and is skipped otherwise, its note
@@ -661,11 +661,11 @@ slicer's 15 % it swings at another. `printset::Settings`
   plate's override for that piece: plate part < source part < source body
   (`Body::derivedFrom`, the source's createdBy, stamped by the Derived
   feature) < plate body (`ui::PrintOf`, `src/ui/PrintJobActions.cpp`).
-- **Stored** (vNEXT) as the document's `print_settings {part?, bodies?:
+- **Stored** (v181) as the document's `print_settings {part?, bodies?:
   {"<created_by>": {...}}}`, only what is stated, omitted when there are
   none (`src/core/io/SerializePrintSettings.cpp`); an undoable
   `SetPrintSettingsCommand`; no regeneration, since nothing is modelled
-  from them. Golden `vNEXT-print-settings`.
+  from them. Golden `v181-print-settings`.
 - **The filament is the body's material** when that is one (pla, petg,
   tpu), else the process's: what the mass weighs must be what the slicer is
   loaded with, so there is no separate filament setting, and a body of a
@@ -999,7 +999,7 @@ slicer refuses them and an override over its part, the slicer's keys, a
 printed cube against its shell and core by hand -- centre, the solid
 inertia, the same cube printed on its side -- a printed mass naming what it
 lacks, bed_fit's keep-out zones, and the 3MF's entries, plate grid and
-zip), golden `vNEXT-print-settings`, `tests/print_job_smoke.py` (the
+zip), golden `v181-print-settings`, `tests/print_job_smoke.py` (the
 settings' refusals changing nothing, the printed masses, a two-plate job
 read back, the refusals writing nothing, and the Bambu CLI slice, above),
 `tests/print_check_smoke.py` (the same negative controls over RPC — a 60°

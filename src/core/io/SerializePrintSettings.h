@@ -7,7 +7,7 @@
 
 #include <nlohmann/json.hpp>
 
-// The wire and file form of a part's slicer settings (vNEXT,
+// The wire and file form of a part's slicer settings (v181,
 // core/PrintSettings.h): {walls?, top_layers?, bottom_layers?, infill_pct?,
 // infill_pattern?, supports?, brim?, direction?}, only what is stated. The
 // document carries {part: {...}, bodies: {"<created_by>": {...}}} as

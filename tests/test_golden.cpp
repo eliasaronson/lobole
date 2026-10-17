@@ -1141,7 +1141,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       } else {
         CHECK_FALSE(pr.bedMm.has_value());
       }
-      // vNEXT: the bed's keep-out zones and the wall line width. Dropped,
+      // v181: the bed's keep-out zones and the wall line width. Dropped,
       // bed_fit would pass a piece in the printer's wiper corner, and the
       // printed mass would have no wall to weigh.
       if (pe.contains("bed_exclude_mm")) {
@@ -1156,7 +1156,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
       CHECK_FALSE(doc.PrintProcess()->profile.has_value());
     }
   }
-  // vNEXT: the slicer settings (core/PrintSettings.h), the part's and a
+  // v181: the slicer settings (core/PrintSettings.h), the part's and a
   // body's override. Dropped, the pendulum prints at the slicer's 15 % and
   // swings at another period.
   if (expect.contains("print_settings")) {

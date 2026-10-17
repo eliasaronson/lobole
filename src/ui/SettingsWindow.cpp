@@ -809,7 +809,7 @@ void DrawPrintProfileForm(AppState& state, int index) {
                           "256.");
   }
 
-  // vNEXT: the bed's keep-out zones, in its own coordinates from the
+  // v181: the bed's keep-out zones, in its own coordinates from the
   // front-left corner. With any, Check print's bed line judges where each
   // piece is, as the print job puts it there.
   {

@@ -377,7 +377,7 @@ json DocumentEnvelope(const Document& doc) {
   SheetMetalToEnvelope(doc.SheetMetal(), j);
   TubeToEnvelope(doc.Tube(), j);
   PrintToEnvelope(doc.PrintProcess(), j); // v143
-  // vNEXT: the slicer settings, only when a part states some.
+  // v181: the slicer settings, only when a part states some.
   if (!doc.PrintSettings().Empty())
     j["print_settings"] =
         DocumentIO::PartPrintSettingsToJson(doc.PrintSettings());
@@ -1016,7 +1016,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     doc->SetSheetMetal(SheetMetalFromEnvelope(index));
     doc->SetTube(TubeFromEnvelope(index));
     doc->SetPrintProcess(PrintFromEnvelope(index));
-    if (index.contains("print_settings")) // vNEXT
+    if (index.contains("print_settings")) // v181
       doc->SetPrintSettings(
           DocumentIO::PartPrintSettingsFromJson(index.at("print_settings")));
     // Feature files are found by their id prefix — the type suffix is
@@ -1764,7 +1764,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     doc->SetSheetMetal(SheetMetalFromEnvelope(j));
     doc->SetTube(TubeFromEnvelope(j));
     doc->SetPrintProcess(PrintFromEnvelope(j));
-    if (j.contains("print_settings")) // vNEXT
+    if (j.contains("print_settings")) // v181
       doc->SetPrintSettings(
           DocumentIO::PartPrintSettingsFromJson(j.at("print_settings")));
     // Assets (v49 image bytes, v84 derived snapshots): decode the base64

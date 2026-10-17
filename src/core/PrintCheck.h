@@ -74,7 +74,7 @@ struct Options {
   // profile's bed_mm); nullopt skips bed_fit, saying `bedNote`.
   std::optional<glm::dvec3> bedMm;
   std::string bedNote;
-  // vNEXT: the bed's keep-out rectangles [x0, y0, x1, y1], mm in the bed's
+  // v181: the bed's keep-out rectangles [x0, y0, x1, y1], mm in the bed's
   // coordinates (the profile's bed_exclude_mm). Stated, they make bed_fit
   // POSITIONAL: the part's frame is the bed's, and every piece must lie on
   // it and clear of each zone.
@@ -221,7 +221,7 @@ struct BedIntrusion {
 // the print direction's own x when it is not z) and up it, against the
 // build volume, with what does not fit per axis. Without keep-out zones the
 // extent, not a position: a slicer places the plate, so a plate fits when
-// its box does. With them (vNEXT) the part's frame is the bed's -- printed
+// its box does. With them (v181) the part's frame is the bed's -- printed
 // up +Z, x and y from the bed's front-left corner -- and every piece must
 // lie on the bed and miss every zone: that is where a print job puts it.
 struct BedFit {

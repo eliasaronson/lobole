@@ -1701,9 +1701,9 @@ json ProcessJson(const ui::AppState& state,
       j["z_gap_mm"] = p->profile->zGapMm;
     if (p->profile->bedMm)
       j["bed_mm"] = *p->profile->bedMm;
-    if (!p->profile->bedExcludeMm.empty()) // vNEXT
+    if (!p->profile->bedExcludeMm.empty()) // v181
       j["bed_exclude_mm"] = p->profile->bedExcludeMm;
-    if (p->profile->lineWidthMm > 0.0) // vNEXT
+    if (p->profile->lineWidthMm > 0.0) // v181
       j["line_width_mm"] = p->profile->lineWidthMm;
   }
   j["stl_deflection_mm"] = printfit::StlDeflectionMm(*p);
@@ -3775,7 +3775,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       } else {
         entry["mass_g"] = nullptr;
       }
-      // vNEXT: what it weighs PRINTED (walls, shells, infill), beside the
+      // v181: what it weighs PRINTED (walls, shells, infill), beside the
       // solid; null for a part that is not printed.
       if (i < weighed.size()) {
         json printed = PrintedMassJson(state, *massDoc, *weighed[i],
@@ -4267,7 +4267,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         bedFit["extent_mm"] = vec(f.extentMm);
         bedFit["shortfall_mm"] = vec(f.shortfallMm);
       }
-      // vNEXT: keep-out zones make the fit positional; each piece that is
+      // v181: keep-out zones make the fit positional; each piece that is
       // off the bed or in a zone, named.
       if (f.positional) {
         bedFit["exclude_mm"] = f.zonesMm;

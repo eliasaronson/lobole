@@ -300,7 +300,7 @@ std::string ValidateProfile(const Profile& p) {
                "positive; its " +
                axis[i] + " is " + Mm((*p.bedMm)[i]);
   }
-  // vNEXT: keep-out zones and the wall line width.
+  // v181: keep-out zones and the wall line width.
   for (size_t i = 0; i < p.bedExcludeMm.size(); i++) {
     const auto& z = p.bedExcludeMm[i];
     if (!std::isfinite(z[0]) || !std::isfinite(z[1]) || !std::isfinite(z[2]) ||
