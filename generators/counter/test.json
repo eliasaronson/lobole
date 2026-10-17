@@ -1,17 +1,22 @@
 {
   "order": 70,
-  "why": "The whole run but the still: the plate's clearances and its STL's shells, the negative controls, both counting studies with their readings, and every lock turned both ways. The test's instance has no print profiles, and at the built-in table's 0.25 mm a side an 8 mm digit's 9-tooth pinion has no printable tip, so 10 mm.",
+  "why": "The whole run but the still, on the P1S's K5 profile seeded into the instance's own config with its air recorded as the coupon measured it, two layers (the profile the counter is printed with; that air is the stacking limit): every check_print item of the plate, stacking and bed_fit included, its STL's shells and its print job, the negative controls (the carry timed late, the gear half a tooth out, a transfer at half the gap, and the 2026-10-15 stacked layout, which must fail stacking), both counting studies with their readings, and every lock turned both ways.",
   "steps": [
-    ["{python}", "-u", "{generators}/counter/build.py", "--port", "{port}", "--no-render", "--digit-height", "10", "--out", "{out}/counter"]
+    ["{python}", "-u", "{generators}/print_coupon.py", "--port", "{port}", "--seed"],
+    ["{python}", "-u", "{generators}/print_coupon.py", "--port", "{port}", "--record", "--profile", "K5 PLA on P1S", "--z-gap-layers", "2"],
+    ["{python}", "-u", "{generators}/counter/build.py", "--port", "{port}", "--no-render", "--profile", "K5 PLA on P1S", "--out", "{out}/counter"]
   ],
   "markers": [
+    "counter: stacking pass: 8 pieces on the bed",
+    "counter: bed_fit pass",
     "motion, the triple carry .*: passed",
+    "negative control, the stacked layout: stacking fail",
     "counter: 8 shells"
   ],
   "instance": "headless",
-  "budget_s": 120,
+  "budget_s": 600,
   "readme": {
-    "runs": "`counter/build.py --no-render --digit-height 10`: the plate's clearances and STL shells, the negative controls, both counting studies with their readings, every lock both ways",
-    "measured": "45 s"
+    "runs": "`print_coupon.py --seed` and `--record --z-gap-layers 2` (K5's measured air), then `counter/build.py --no-render --profile \"K5 PLA on P1S\"`: every `check_print` item of the plate (stacking and `bed_fit` included) and its print job, the negative controls (the old stacked layout among them), both counting studies with their readings, every lock both ways",
+    "measured": "~310 s"
   }
 }

@@ -58,8 +58,11 @@ through `PYTHONPATH` (the nix shell and ctest set it), never by path.
 
 `_lib.py` holds what scripts would otherwise each copy: sketch planes that
 spell out the V axis, entity builders, an arc through three points, a
-`check` that raises on a failed regeneration, and `connect`; for printed
-parts `check_print` and `print_receipt`, `bed_zones` and `clear_x` (the
+`check` that raises on a failed regeneration, `connect`, and
+`fresh_project` for a generator's `--fresh`: it discards an untitled
+scratch project, saying so, and refuses one with a path and unsaved work,
+which is somebody's; for printed parts `check_print` (its answer waited
+for as long as a plate of engraved faces takes) and `print_receipt`, `bed_zones` and `clear_x` (the
 profile's keep-out zones, which every plate packer keeps clear of), and
 `export_print_job` and `job_receipt`
 ([print jobs](../docs/tolerances/README.md#print-jobs)): a job of several
@@ -110,10 +113,10 @@ nothing, against its own instance (`tests/smoke_app.py`: private
 | `generator_om615` | `om615.py --stage preview` (headless) | 221 s | 420 s |
 | `generator_pes_pump` | `pes_pump.py --no-still`: the build, the standing sweep, the four studies and their measured strokes, order and turns (offscreen) | 44 s | 180 s |
 | `generator_chess` | `run_all.sh --only board`: every design stage, then the board's CAM job verified and posted (offscreen) | 140 s | 360 s |
-| `generator_planetary` | `print_coupon.py --seed`, then `planetary/build.py --no-render --profile "K5 PLA on P1S"` (every `check_print` item, stacking against the measured air and `bed_fit` on the P1S's bed, and the print job), then `--diameter 90` on the built-in table (its gap needs more than 70 mm): each the print plate, its exact mesh clearances and the STL's five shells, the assembly, both motion studies and the push check (headless) | ~280 s | 480 s |
+| `generator_planetary` | `print_coupon.py --seed` and `--record --z-gap-layers 2` (K5's measured air), then `planetary/build.py --no-render --profile "K5 PLA on P1S"` (every `check_print` item, stacking against the measured air and `bed_fit` on the P1S's bed, and the print job), then `--diameter 90` on the built-in table (its gap needs more than 70 mm): each the print plate, its exact mesh clearances and the STL's five shells, the assembly, both motion studies and the push check (headless) | ~280 s | 480 s |
 | `generator_hook` | `hook/build.py`: both prints checked on the bed, the study at two meshes read for both orientations, the test card (headless) | 13 s | 60 s |
 | `generator_jar` | `jar/build.py --no-render`: the three parts with modelled threads, the thread's phase found by interference, the squeeze measured twice, both seals as requirements, the unscrewing study, the four negative controls and the STLs (headless) | 83-198 s | 400 s |
-| `generator_counter` | `counter/build.py --no-render --digit-height 10`: the plate's clearances and STL shells, the negative controls, both counting studies with their readings, every lock both ways (headless) | 45 s | 120 s |
+| `generator_counter` | `print_coupon.py --seed` and `--record --z-gap-layers 2` (K5's measured air), then `counter/build.py --no-render --profile "K5 PLA on P1S"`: every `check_print` item of the plate (stacking and `bed_fit` included) and its print job, the negative controls (the old stacked layout among them), both counting studies with their readings, every lock both ways (headless) | ~310 s | 600 s |
 | `generator_hinge_box` | `hinge_box/build.py`: the plate's every `check_print` item, stacking included, the swing 0-180° and both negative controls (headless) | 3 s | 60 s |
 | `generator_strandbeest` | `print_coupon.py --seed`, then `strandbeest/build.py --profile "K5 PLA on P1S"` (the walker packs into the profile's bed): both stages, every check on the leg pair and the walker (solved, no branch jump and the knees, the exact clash with every cap's printed press listed, the layers' air, the feet, the stability), both negative controls failing, every print plate's `check_print` items, `bed_fit` among them, and every pin study at a factor of 2 (headless) | 410 s (beside four other runs) | 540 s |
 | `generator_clock` | `print_coupon.py --seed`, then `clock/build.py --profile "K5 PLA on P1S" --no-render` (the period is the printed pendulum's, which needs a profile's layer and line width): every part verified, the escapement's studies in both stages with every beat's lock, the ratios, every mesh exact, the click, both negative controls failing, both FEM studies (the arbor's interlayer factor at least 2), every print plate's `check_print` and the period stated at the pendulum's infill (headless) | 330 s | 600 s |

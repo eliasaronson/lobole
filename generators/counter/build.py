@@ -2,34 +2,45 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""A print-in-place mechanical counter: number wheels on one axle, a Geneva
+"""A print-in-place mechanical counter: number wheels on one axis, a Geneva
 carry between each pair, a housing with a window per digit. One plate, off
-the bed reading 0000 and counting.
+the bed reading 0000 and counting, every piece of it printed from the bed.
 
     python3 generators/counter/build.py --port 8801 --profile "K5 PLA on P1S"
     python3 generators/counter/build.py --port 8801 --digits 3 --digit-height 10
 
-Each wheel carries a pin and a lock disc under its band of digits. The pin
-turns a three-slot Geneva on a transfer beside the stack once a turn, 120
-degrees, and the transfer's 9-tooth pinion turns the next wheel's 30-tooth
-gear 36 degrees: one digit. Between carries the lock disc rides in the
-Geneva's concave arc and the next wheel cannot turn.
+Each wheel carries a pin disc, a pin and a lock disc under its band of
+digits. The pin turns a three-slot Geneva on a transfer beside the stack
+once a turn, 120 degrees, and the transfer's 9-tooth pinion turns the next
+wheel's 30-tooth gear 36 degrees: one digit. Between carries the lock disc
+rides in the Geneva's concave arc and the next wheel cannot turn.
 
-Every size derives from `--digit-height` and the print process's gap
-(`print_allowance` kind `gap`), plus the layer height the profile was
-measured at: nothing here is a literal in millimetres except what those
-scale (generators/counter/README.md#where-every-size-comes-from).
+Every piece starts on the bed (generators/counter/README.md#the-print): each
+wheel stands on a tube that runs down inside the wheels under it, each
+transfer on a column of its own beside the stack, and no piece prints over
+another but through a 45-degree face with the profile's air under it. The
+2026-10-15 print, whose wheels each started one layer over the one below,
+fused solid; that layout is kept as a negative control (stacked.py).
+
+Every size derives from `--digit-height`, the print process's gap
+(`print_allowance` kind `gap`) and its air (the profile's `z_gap_mm`, else
+three layers): nothing here is a literal in millimetres except what those
+scale (README "Where every size comes from").
 
 What it builds:
-- parts `wheel 1` (units, the knob) to `wheel 1000`, `transfer` and
-  `housing`; an assembly `counter` with a revolute per wheel and transfer,
-  an `intermittent` (Geneva, 3 slots) relation wheel -> transfer and a
-  `gear` (9:30) relation transfer -> next wheel, and motion studies;
+- parts `wheel 1` (units, the knob) to `wheel 1000`, `transfer 1` to
+  `transfer 3` and `housing`; an assembly `counter` with a revolute per
+  wheel and transfer, an `intermittent` (Geneva, 3 slots) relation wheel ->
+  transfer and a `gear` (9:30) relation transfer -> next wheel, and motion
+  studies;
 - the part `counter print`: every body where it prints, as Derived copies
-  at the pose that reads 0000, exported as ONE STL of one shell per body.
+  at the pose that reads 0000 in the middle of the profile's bed, exported
+  as ONE STL of one shell per body and as a print job;
+- the controls: the carry put wrong, a transfer at half the gap, and the
+  old stacked layout (`control: stacked`), each of which must fail.
 
-Output (generated, untracked): scratch/counter/ — counter.stl,
-counter.dsgn and counter.json, the receipt.
+Output (generated, untracked): scratch/counter/ -- counter.stl,
+counter_job.3mf, counter.dsgn and counter.json, the receipt.
 """
 import argparse
 import json
@@ -40,13 +51,17 @@ import time
 from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.dirname(HERE))
-from _lib import (arc_through, check, check_print, circle, connect,  # noqa: E402
-                  fresh_project, line, print_receipt)
+from _lib import (PRINT_ITEMS, arc_through, bed_zones, check,  # noqa: E402
+                  check_print, circle, clear_x, connect, export_print_job,
+                  fresh_project, job_receipt, line, print_receipt)
 from gear import involute_profile  # noqa: E402
+import stacked  # noqa: E402
 
 ROOT = Path(HERE).resolve().parent.parent
-OUT = ROOT / "scratch" / "counter"
+OUT = Path(os.environ["LOBOLE_SCRATCH"]) / "counter" if \
+    os.environ.get("LOBOLE_SCRATCH") else ROOT / "scratch" / "counter"
 
 SLOTS = 3  # three, not four: a 60 degree window, so the next wheel stands
 #            a degree off its digit at 9 and 0 instead of 4.5 (README)
@@ -60,14 +75,20 @@ MIN_TEETH = 9
 NOZZLE_MM = 0.4  # the P1S's stock nozzle, which the allowance table assumes
 MIN_TIP_MM = 1.5 * NOZZLE_MM
 MIN_HORN_MM = 4 * NOZZLE_MM  # a Geneva's tip between slot and arc
-# A digit fills 70 % of its cell around the band; its glyph is about 0.6 of
-# its height wide (a sans numeral), and the band leaves 0.15 of the height
-# above and below it.
+WALL_LINES = 4  # a tube's wall, and the housing's round a column
+# A digit's glyph is about 0.6 of its height wide (a sans numeral) and the
+# band leaves 0.15 of the height beyond it, either side, along the axis. A
+# digit is wanted to fill 70 % of its cell round the band; the band is as
+# large as the carry needs, and at least that.
 DIGIT_FILL = 0.7
 GLYPH_WIDTH = 0.6
 FACE_MARGIN = 0.15
-# The window, measured around the band, as a fraction of a digit's cell.
-WINDOW_FRACTION = 0.9
+# The transfers stand round the +X side of the stack, the windows at -X.
+TRANSFER_SIDE_DEG = 0.0
+
+
+def lines(n):
+    return n * NOZZLE_MM
 
 
 # ---- the carry's motion, as the app's relation computes it ---------------
@@ -120,24 +141,36 @@ def horn_mm(c, r_g, w, r_lock_gap):
     return r_g * (math.pi / SLOTS - delta - phi)
 
 
-def solve(h, digits, gap, layer, z_gap=None):
-    """Every size from the digit height, the gap a side and the layer, and
-    the profile's measured Z gap when it has one."""
+def solve(h, digits, gap, layer, air):
+    """Every size from the digit height, the gap a side, the layer and the
+    air (the vertical space under a face over another piece)."""
     if digits < 2:
         raise SystemExit("counter: a counter of one digit carries nothing")
     g = gap / 2.0
-    cell = h / DIGIT_FILL                       # a digit's cell, around
-    r_band = DIGITS_PER_TURN * cell / (2.0 * math.pi)
-    # The transfer turns on a post of the housing's that rises past the
-    # next wheel's band, so its axis stands a post's radius outside it.
-    r_post = 0.25 * h
-    c = r_band + g + r_post
+    # The pin and each transfer's column.
+    r_pin = lines(3)
+    r_col = max(0.25 * h, lines(WALL_LINES))
+    # The Geneva's centre distance. A transfer's column rises from the bed
+    # past every wheel's pin disc, which reaches out to the pin circle and
+    # the pin, R + r_pin = c sin 60 + r_pin; the column clears it by the gap,
+    # so c (1 - sin 60) >= r_col + r_pin + g. The pin then comes within the
+    # gap of the column at the slot's bottom, which is where a three-slot
+    # Geneva's pin goes. The band is the pin disc's size, and at least what
+    # the digits fill.
+    sin_n = math.sin(math.pi / SLOTS)
+    r_digits = DIGITS_PER_TURN * (h / DIGIT_FILL) / (2.0 * math.pi)
+    c = max((r_col + r_pin + g) / (1.0 - sin_n),
+            (r_digits - r_pin) / sin_n) + 0.01
+    R = c * sin_n                        # the pin circle
+    r_g = c * math.cos(math.pi / SLOTS)  # the Geneva's radius
+    r_band = R + r_pin
+    cell = 2.0 * math.pi * r_band / DIGITS_PER_TURN
     # The gear: the next wheel's 30 teeth and the transfer's 9 turn a
     # 120-degree Geneva step into one digit (120 * 9/30 = 36). The coarsest
     # pair that keeps a printable tip.
     best = None
-    for k in (3, 4, 5):
-        zw, zp = 10 * k, 3 * k
+    for k in (1, 2, 3):
+        zw, zp = 30 * k, 9 * k
         m = 2.0 * c / (zw + zp)
         j = 2.0 * g / math.cos(math.radians(PRESSURE_DEG))
         if zp >= MIN_TEETH and tip_land(m, zp, j / 2.0) >= MIN_TIP_MM:
@@ -145,22 +178,29 @@ def solve(h, digits, gap, layer, z_gap=None):
             break
     if best is None:
         raise SystemExit(f"counter: no gear pair with a {MIN_TIP_MM:.2f} mm "
-                         f"tip fits a {h:g} mm digit at {g:g} mm a side — a "
-                         f"larger --digit-height, or the gap your printer "
-                         f"measured (--profile)")
+                         f"tip fits a {h:g} mm digit at {g:g} mm a side")
     zw, zp, m, j = best
     tip_c = max(0.25 * m, g)  # tip clearance at least the gap
-    # The Geneva: the pin enters radially at R = C sin(60), the wheel's
-    # radius is C cos(60).
-    r_pin_circle = c * math.sin(math.pi / SLOTS)
-    r_g = c * math.cos(math.pi / SLOTS)
-    r_pin = max(3 * NOZZLE_MM, 0.06 * c)
+    rp_p, rp_w = m * zp / 2.0, m * zw / 2.0
+    tip_p, tip_w = rp_p + ADDENDUM * m, rp_w + ADDENDUM * m
+    root_p = rp_p - (ADDENDUM * m + tip_c)
+    if tip_w + g > c - r_col:
+        raise SystemExit("counter: a wheel's gear reaches the columns")
+    if root_p < r_col + lines(2):
+        raise SystemExit("counter: the pinion's root is under two lines "
+                         "outside its column")
+    # The tubes, innermost the units': each wheel stands on a tube inside
+    # the wheels under it, a wall thick, the gap from the next.
+    wall = lines(WALL_LINES)
+    r_tube = [r_col + k_ * (g + wall) for k_ in range(digits)]
+    bore = [0.0] + [r_tube[k_ - 1] + g for k_ in range(1, digits)]
+    # The lock disc as large as the Geneva's horns allow, and round the
+    # tubes it is threaded on.
     w = r_pin + g
-    # The lock disc as large as the Geneva's horns allow.
-    lo, hi = 0.3 * c, r_pin_circle - r_pin - g
-    if horn_mm(c, r_g, w, lo + g) < MIN_HORN_MM:
+    lo, hi = bore[-1] + wall, R - r_pin - g
+    if lo >= hi or horn_mm(c, r_g, w, lo + g) < MIN_HORN_MM:
         raise SystemExit("counter: the Geneva's horns are too thin at any "
-                         "lock disc — a larger --digit-height")
+                         "lock disc round the tubes")
     for _ in range(60):
         mid = (lo + hi) / 2.0
         if horn_mm(c, r_g, w, mid + g) >= MIN_HORN_MM:
@@ -168,116 +208,124 @@ def solve(h, digits, gap, layer, z_gap=None):
         else:
             hi = mid
     r_lock = lo
-    slot_bottom = c - r_pin_circle  # the pin's nearest approach to O2
-    rp_p = m * zp / 2.0
-    root_p = rp_p - (ADDENDUM * m + tip_c)
-    tip_p = rp_p + ADDENDUM * m
-    rp_w = m * zw / 2.0
-    tip_w = rp_w + ADDENDUM * m
-    if root_p - (r_post + g) < 2 * NOZZLE_MM:
-        raise SystemExit(f"counter: the pinion's wall round its post is "
-                         f"{root_p - r_post - g:.2f} mm — a larger "
-                         f"--digit-height")
-    if tip_w + g >= r_band:
-        raise SystemExit("counter: the wheel's gear is wider than its band")
+    # The window: a teardrop on its side, a digit high and six lines over
+    # (the glyph's height runs round the band, its width, drawn out by the
+    # engraving's lean, along the axis), its roof flat under the bridge
+    # limit.
+    win_d = h + lines(6)
+    h_face = max(GLYPH_WIDTH * h + 2.0 * FACE_MARGIN * h, win_d + lines(2))
     s = {
         "digit_height": h, "digits": digits, "gap": gap, "g": g,
-        "layer": layer, "cell": cell, "r_band": r_band, "r_post": r_post,
-        "c": c, "zw": zw, "zp": zp, "module": m, "backlash": j,
+        "layer": layer, "air": air, "cell": cell, "fill": h / cell,
+        "r_digits": r_digits, "r_band": r_band, "r_col": r_col, "c": c,
+        "R": R, "r_geneva": r_g, "r_pin": r_pin, "r_lock": r_lock,
+        "zw": zw, "zp": zp, "module": m, "backlash": j,
         "tip_clearance": tip_c, "rp_w": rp_w, "tip_w": tip_w,
         "rp_p": rp_p, "tip_p": tip_p, "root_p": root_p,
-        "r_pin_circle": r_pin_circle, "r_geneva": r_g, "r_pin": r_pin,
-        "r_lock": r_lock, "slot_bottom": slot_bottom,
-        "horn_mm": horn_mm(c, r_g, w, r_lock + g),
-        "r_axle": 0.25 * h,
-        "h_lock": 0.4 * h,                    # the Geneva's working depth
-        "chamfer": r_band - r_lock,           # the band's 45-degree underside
-        "h_face": GLYPH_WIDTH * h + 2 * FACE_MARGIN * h,
-        "h_gear": 0.4 * h,
-        "t_base": 0.25 * h, "t_ceiling": 0.25 * h, "wall": 0.25 * h,
-        "r_knob": 0.5 * r_band, "h_knob": 0.75 * h,
+        "slot_bottom": c - R, "horn_mm": horn_mm(c, r_g, w, r_lock + g),
+        "r_tube": r_tube, "bore": bore, "wall": wall,
+        "h_lock": 0.4 * h,              # the Geneva's working depth
+        "h_mesh": 0.4 * h,              # the gears' full-tooth face
+        "h_face": h_face, "window_d": win_d,
+        "r_knob": 0.7 * r_band, "h_knob": 0.75 * h,
         # Two lines deep, plus the band's fall-away across half a glyph.
         "engrave": 1.5 * NOZZLE_MM,
     }
-    s["h_band"] = s["chamfer"] + s["h_face"]
-    # Where one part sits over another the space is whole layers: the
-    # profile's z_gap_mm (print_coupon's air row), else at least the gap --
-    # one layer at the P1S's 0.1 a side, two at 0.25. The 2026-10-15 print
-    # fused at these interfaces and check_print's stacking fails them
-    # (docs/tolerances/README.md#one-part-printed-over-another).
-    if z_gap:
-        s["zgap"], s["zgap_from"] = z_gap, "the profile's z_gap_mm"
-    else:
-        s["zgap"] = layer * math.ceil(g / layer - 1e-9)
-        s["zgap_from"] = "whole layers at least the gap a side"
     # The carry's window: centred where the driving wheel goes from 9 (36
     # degrees) to 0 (0 degrees), counting being a turn BACK 36 a digit.
     s["carry_centre_deg"] = 18.0
     s["window_deg"] = 180.0 - 360.0 / SLOTS
     s["start_deg"] = s["carry_centre_deg"] - s["window_deg"] / 2.0
-    s["pin_azimuth_deg"] = -s["carry_centre_deg"]
+    # The transfers round the stack, apart by what keeps one's Geneva clear
+    # of the next one's column and the housing round it.
+    reach = r_g + g + r_col + g + wall
+    spread = 2.0 * math.degrees(math.asin(min(1.0, reach / (2.0 * c))))
+    s["transfer_spread_deg"] = spread
+    n_t = digits - 1
+    s["transfer_az"] = [TRANSFER_SIDE_DEG + spread * (k_ - (n_t - 1) / 2.0)
+                        for k_ in range(n_t)]
     layout(s)
     return s
 
 
 def layout(s):
-    """Heights, bottom to top: the most significant wheel on the base, the
-    units on top under the knob. Wheel j (0 = units): its lock disc and pin
-    (j < digits-1), its band, its gear (j > 0) — the band over the pin's
-    zone is what the 45-degree chamfer is for."""
-    L = s["zgap"]
-    n = s["digits"]
-    z = s["t_base"] + L
+    """Heights, bottom to top: the most significant wheel on the bed, the
+    units on top under the knob. Every wheel and transfer starts on the bed;
+    each wheel's working parts stand over the wheel below through 45-degree
+    faces and the air."""
+    a, g, n = s["air"], s["g"], s["digits"]
+    rb, rl, rg, rc = s["r_band"], s["r_lock"], s["r_geneva"], s["r_col"]
     wheels = {}
     for j in range(n - 1, -1, -1):
-        w = {"z0": z}
-        if j < n - 1:
-            # The Geneva works over `lock`; the wheel's lock disc and pin
-            # rise a layer past its top to meet the band, which clears the
-            # Geneva by that layer.
-            w["lock"] = (z, z + s["h_lock"])
-            z += s["h_lock"] + L
-        w["band"] = (z, z + s["h_band"])
-        z += s["h_band"]
-        if j > 0:
-            w["gear"] = (z, z + s["h_gear"])
-            z += s["h_gear"]
-        else:
-            w["knob"] = (z, z + L + s["t_ceiling"] + s["h_knob"])
-            z = w["knob"][1]
-        w["z1"] = z
+        w = {}
         wheels[j] = w
+        if j == n - 1:
+            # The thousands' band stands on the bed.
+            w["band"] = (0.0, s["h_face"])
+            w["face"] = (0.0, s["h_face"])
+        else:
+            base = wheels[j + 1]["top"] + a
+            # The pin disc: a 45-degree cone from the wheel's tube out to
+            # the band's size, over the wheel below's gear.
+            z_pd = base + (rb - s["r_tube"][j])
+            w["pin_disc"] = (base, z_pd)
+            # The transfer's Geneva over it: its cone from the column, the
+            # air over the pin disc, then the working depth.
+            z_s0 = z_pd + a + (rg - rc)
+            z_s1 = z_s0 + s["h_lock"]
+            w["geneva"] = (z_pd + a, z_s0, z_s1)
+            w["pin"] = (z_pd, z_s1)
+            # The band over the Geneva: its 45-degree underside from the
+            # lock disc's edge, the air over the Geneva's arc there.
+            b0 = z_s1 + a - g
+            w["lock"] = (z_pd, b0)
+            f0 = b0 + (rb - rl)
+            w["band"] = (b0, f0 + s["h_face"])
+            w["face"] = (f0, f0 + s["h_face"])
+        z = w["band"][1]
         if j > 0:
-            z += L
+            # The gear on the band. The pinion that turns it starts the air
+            # over the band less the gap it stands off it by, and slopes up
+            # from its column at 45 degrees to full teeth: the gear runs on
+            # past that by the mesh, and by the play of both stacks.
+            z_p0 = z + a - g
+            full = z_p0 + (s["tip_p"] - rc)
+            top = full + s["h_mesh"] + 2.0 * a
+            w["gear"] = (z, top)
+            w["pinion"] = (z_p0, full, top)
+            w["top"] = top
     s["wheels"] = wheels
-    s["top"] = wheels[0]["knob"][0] + L + s["t_ceiling"]
-    # Transfer j sits beside wheel j+1's gear and wheel j's lock zone: its
-    # pinion a layer clear of wheel j+1's band, one layer of it joining the
-    # Geneva above the gear's top, the Geneva in the lock zone.
+    # The lip over the units' band that keeps the stack in, at 45 degrees
+    # from the wall in to the knob, the air over the band.
+    u = wheels[0]
+    z_l = u["band"][1] + a
+    rise = rb - s["r_knob"]
+    s["lip"] = (z_l, z_l + rise, z_l + rise + lines(4))
+    u["knob"] = (u["band"][1], s["lip"][2] + s["h_knob"])
+    u["top"] = u["knob"][1]
+    s["top"] = s["lip"][2]
+    s["height"] = u["top"]
     s["transfers"] = {}
     for j in range(n - 1):
-        g0, g1 = wheels[j + 1]["gear"]
-        l0, l1 = wheels[j]["lock"]
-        s["transfers"][j] = {"z0": g0, "pinion": (g0 + L, g1),
-                             "join": (g1, l0), "geneva": (l0, l1)}
+        s["transfers"][j] = {
+            "column": (0.0, wheels[j]["geneva"][2]),
+            "pinion": wheels[j + 1]["pinion"],
+            "geneva": wheels[j]["geneva"], "az": s["transfer_az"][j]}
 
 
 def wheel_name(j):
     return f"wheel {10 ** j}"
 
 
+def transfer_name(j):
+    return f"transfer {j + 1}"
+
+
 # ---- sketching --------------------------------------------------------------
 
-def plane_z(z, origin=(0.0, 0.0)):
-    return {"origin": [origin[0], origin[1], z], "normal": [0, 0, 1],
-            "uAxis": [1, 0, 0]}
-
-
-def plane_xz(x0=0.0):
-    """The XZ half-plane through (x0, 0): u = x - x0, v = z (V is +Z because
-    the normal is -Y, docs/../_lib.py's V-axis note)."""
-    return {"origin": [x0, 0.0, 0.0], "normal": [0, -1, 0],
-            "uAxis": [1, 0, 0]}
+def plane_z(z, origin=(0.0, 0.0), flip=False):
+    return {"origin": [origin[0], origin[1], z],
+            "normal": [0, 0, -1 if flip else 1], "uAxis": [1, 0, 0]}
 
 
 def rot(p, deg):
@@ -315,13 +363,26 @@ class Builder:
     def prism(self, name, ents, z0, z1, mode="new_body", origin=(0.0, 0.0)):
         return self.extrude(name, plane_z(z0, origin), ents, z1 - z0, mode)
 
-    def revolve(self, name, profile, x0=0.0):
-        """A solid of revolution about the vertical axis through (x0, 0):
+    def cone_under(self, name, r_top, z_top, r_bottom):
+        """A disc's 45-degree underside: the circle `r_top` at `z_top` on
+        the axis, extruded down to `r_bottom`, its wall leaning in at 45
+        degrees (a tapered extrude, docs/modeling/README.md#tapered-extrudes).
+        A downward plane's u runs along -X... a circle on the axis does not
+        mind."""
+        return self.extrude(name, plane_z(z_top, flip=True),
+                            [circle((0.0, 0.0), r_top)], r_top - r_bottom,
+                            taper_deg=45.0)
+
+    def revolve(self, name, profile, centre=(0.0, 0.0)):
+        """A solid of revolution about the vertical axis through `centre`:
         `profile` is (r, z) points, r >= 0, a closed polygon."""
-        sk = self.sketch(f"{name} profile", plane_xz(x0),
+        cx, cy = centre
+        sk = self.sketch(f"{name} profile",
+                         {"origin": [cx, cy, 0.0], "normal": [0, -1, 0],
+                          "uAxis": [1, 0, 0]},
                          polygon([(r, z) for r, z in profile]))
-        axis = ({"kind": "z"} if x0 == 0.0 else
-                {"kind": "custom", "origin": [x0, 0.0, 0.0],
+        axis = ({"kind": "z"} if centre == (0.0, 0.0) else
+                {"kind": "custom", "origin": [cx, cy, 0.0],
                  "direction": [0.0, 0.0, 1.0]})
         return check(self.d.call("add_feature", feature={
             "type": "Revolve", "name": name, "sketch_id": sk, "axis": axis,
@@ -359,79 +420,101 @@ def digit_text(label, height):
 
 
 # ---- the parts ------------------------------------------------------------
-# Each in its own frame: the axis is Z through the origin, z = 0 its bottom.
-# A wheel at rotation 0 shows 0 in the window (at -X); digit d is engraved
-# at azimuth 180 + 36 d, so counting is a turn BACK 36 degrees, and the
-# next digit comes up from below. The pin stands at -18 degrees, on the line
-# to the transfer (+X) when the wheel is at +18, half way from 9 to 0.
+# Each in its own frame: the axis is Z through the origin, z = 0 the bed. A
+# wheel at rotation 0 shows 0 in the window (at -X); digit d is engraved at
+# azimuth 180 + 36 d, so counting is a turn BACK 36 degrees, and the next
+# digit comes up from below. A transfer's frame has its +X pointing away
+# from the stack's axis, which is at its 180 degrees, c away. Wheel j's pin
+# stands 18 degrees short of its transfer's azimuth, on the line to it when
+# the wheel is at +18, half way from 9 to 0.
 
 def build_wheel(b, s, j):
     n = s["digits"]
     w = s["wheels"][j]
-    z0 = w["z0"]
-
-    def zz(v):
-        return v - z0
-
+    g, rb, rl = s["g"], s["r_band"], s["r_lock"]
     bodies = []
-    L = s["zgap"]
-    if "lock" in w:
-        l0, l1 = (zz(v) for v in w["lock"])
-        l1 += L  # up through the layer the Geneva clears the band by
-        disc = b.prism(f"{wheel_name(j)} lock disc",
-                       [circle((0, 0), s["r_lock"])], l0, l1)
-        # The relief the Geneva swings through at mid-carry: its circle,
-        # where it stands when the pin is on the line of centres.
-        relief = b.prism(f"{wheel_name(j)} relief",
-                         [circle(polar(s["c"], s["pin_azimuth_deg"]),
-                                 s["r_geneva"] + s["g"])], l0, l1)
-        bodies.append(b.boolean(f"{wheel_name(j)} lock", disc, relief,
-                                "subtract"))
-        pin_c = polar(s["r_pin_circle"], s["pin_azimuth_deg"])
+    if j < n - 1:
+        az = s["transfer_az"][j]
+        base, z_pd = w["pin_disc"]
+        bodies.append(b.prism(f"{wheel_name(j)} tube",
+                              [circle((0, 0), s["r_tube"][j])], 0.0, base))
+        bodies.append(b.cone_under(f"{wheel_name(j)} pin disc", rb, z_pd,
+                                   s["r_tube"][j]))
+        l0, l1 = w["lock"]
+        bodies.append(b.prism(f"{wheel_name(j)} lock disc",
+                              [circle((0, 0), rl)], l0, l1))
+        pin_c = polar(s["R"], az - s["carry_centre_deg"])
+        p0, p1 = w["pin"]
         bodies.append(b.prism(f"{wheel_name(j)} pin",
-                              [circle(pin_c, s["r_pin"])], l0, l1))
-        # Up into the band's chamfer, and no further out than the band.
-        up = b.prism(f"{wheel_name(j)} pin root",
-                     [circle(pin_c, s["r_pin"])], l1, l1 + s["chamfer"])
-        clip = b.prism(f"{wheel_name(j)} pin clip",
-                       [circle((0, 0), s["r_band"])], l1, l1 + s["chamfer"])
-        bodies.append(b.boolean(f"{wheel_name(j)} pin root clipped", up,
-                                clip, "intersect"))
-    b0, b1 = (zz(v) for v in w["band"])
-    bodies.append(b.revolve(f"{wheel_name(j)} band", [
-        (0.0, b0), (s["r_lock"], b0), (s["r_band"], b0 + s["chamfer"]),
-        (s["r_band"], b1), (0.0, b1)]))
-    if "gear" in w:
-        g0, g1 = (zz(v) for v in w["gear"])
-        bodies.append(b.prism(f"{wheel_name(j)} gear",
-                              gear_ents(s, s["zw"], 0.0), g0, g1))
+                              [circle(pin_c, s["r_pin"])], p0, p1))
+        f0 = w["face"][0]
+        bodies.append(b.cone_under(f"{wheel_name(j)} band underside", rb, f0,
+                                   rl))
+        bodies.append(b.prism(f"{wheel_name(j)} band",
+                              [circle((0, 0), rb)], f0, w["face"][1]))
     else:
-        k0, k1 = (zz(v) for v in w["knob"])
+        bodies.append(b.prism(f"{wheel_name(j)} band",
+                              [circle((0, 0), rb)], *w["band"]))
+    if "gear" in w:
+        # The gear's teeth face the transfer that turns it: rotated to its
+        # azimuth, as the pinion's phase expects.
+        g0, g1 = w["gear"]
+        bodies.append(b.prism(f"{wheel_name(j)} gear",
+                              gear_ents(s, s["zw"], s["transfer_az"][j - 1]),
+                              g0, g1))
+    else:
+        k0, k1 = w["knob"]
         # A fluted knob: 24 points alternating between two radii.
         r = s["r_knob"]
         pts = [polar(r if i % 2 == 0 else 0.9 * r, 360.0 * i / 24)
                for i in range(24)]
         bodies.append(b.prism(f"{wheel_name(j)} knob", polygon(pts), k0, k1))
     body = b.union(wheel_name(j), bodies)
-    # The axle's bore: through, or up into the knob's foot on the units.
-    bore_top = zz(w["z1"]) if "gear" in w else b1
-    body = b.prism(f"{wheel_name(j)} bore",
-                   [circle((0, 0), s["r_axle"] + s["g"])], 0.0, bore_top,
-                   mode="cut")
-    # The digits, engraved on the band's face from a plane just outside it.
-    f0 = b0 + s["chamfer"]
-    zmid = (f0 + b1) / 2.0
+    if j < n - 1:
+        # The relief the Geneva's horns swing through at mid-carry: its
+        # circle, where it stands when the pin is on the line of centres,
+        # through the lock disc to the air over the Geneva, then narrowing
+        # at 45 degrees into the band: a roof, not a ceiling. Only inside
+        # the lock disc's edge; past it the band's own underside clears.
+        az = s["transfer_az"][j]
+        centre = polar(s["c"], az - s["carry_centre_deg"])
+        z_top = w["geneva"][2] + s["air"]
+        rr = s["r_geneva"] + g
+        relief = b.revolve(f"{wheel_name(j)} relief", [
+            (0.0, w["lock"][0]), (rr, w["lock"][0]), (rr, z_top),
+            (0.0, z_top + rr)], centre=centre)
+        clip = b.prism(f"{wheel_name(j)} relief clip",
+                       [circle((0, 0), rl + g)], w["lock"][0], z_top + rr)
+        relief = b.boolean(f"{wheel_name(j)} relief inside", relief, clip,
+                           "intersect")
+        body = b.boolean(f"{wheel_name(j)} relieved", body, relief,
+                         "subtract")
+    if j > 0:
+        # The bore the tubes inside it turn in, through.
+        body = b.prism(f"{wheel_name(j)} bore",
+                       [circle((0, 0), s["bore"][j])], 0.0, w["top"],
+                       mode="cut")
+    # The digits, engraved on the band's face. Cut straight in, a glyph's
+    # upper walls would be ceilings over its pocket; cut in and DOWN at 45
+    # degrees, from a plane leaning back over the face, every wall of the
+    # pocket is a 45-degree face or one that looks up. The lean draws the
+    # glyph's width along the axis out by sqrt 2 (README "The digits").
+    f0, f1 = w["face"]
+    zmid = (f0 + f1) / 2.0
     out = 1.0
-    sag = (s["digit_height"] / 2.0) ** 2 / (2.0 * s["r_band"])
+    sag = (s["digit_height"] / 2.0) ** 2 / (2.0 * rb)
+    k = math.sqrt(0.5)
     for dgt in range(DIGITS_PER_TURN):
         az = 180.0 + 36.0 * dgt
         nx, ny = math.cos(math.radians(az)), math.sin(math.radians(az))
-        rr = s["r_band"] + out
-        plane = {"origin": [rr * nx, rr * ny, zmid], "normal": [nx, ny, 0.0],
-                 "uAxis": [0.0, 0.0, 1.0]}
+        rr = rb + out
+        plane = {"origin": [rr * nx, rr * ny, zmid + out],
+                 "normal": [k * nx, k * ny, k],
+                 "uAxis": [-k * nx, -k * ny, k]}
         body = b.extrude(f"{wheel_name(j)} digit {dgt}", plane,
                          [digit_text(str(dgt), s["digit_height"])],
-                         out + s["engrave"] + sag, mode="cut", reversed=True)
+                         (out + s["engrave"] + sag) / k, mode="cut",
+                         reversed=True)
     return body
 
 
@@ -442,29 +525,43 @@ def geneva_slots(s):
     return [180.0 + 360.0 / SLOTS * (k + 0.5) for k in range(SLOTS)]
 
 
-def build_transfer(b, s, gap=None):
-    """The transfer, frame at its bottom on its axis: pinion, one layer
-    joining it to the Geneva inside the pinion's root, the Geneva."""
+def build_transfer(b, s, j, gap=None):
+    """Transfer j, in its own frame: its column from the bed, its pinion
+    (sloping up from the column at 45 degrees), its Geneva (on a 45-degree
+    cone from the column), the slots and arcs cut through both."""
     g = s["g"] if gap is None else gap / 2.0
-    t = s["transfers"][0]
-    z0 = t["z0"]
-    p0, p1 = (v - z0 for v in t["pinion"])
-    j1 = t["join"][1] - z0
-    v0, v1 = (v - z0 for v in t["geneva"])
-    # The pinion meshes wheel j+1's gear (tooth 0 at +X there) across the
-    # line from O2 to the wheel axis, at 180: half a pitch off it.
+    t = s["transfers"][j]
+    rc = s["r_col"]
+    col0, col1 = t["column"]
+    p0, _, p1 = t["pinion"]
+    v0, v_s0, v1 = t["geneva"]
+    col = b.prism(f"{transfer_name(j)} column", [circle((0, 0), rc)],
+                  col0, col1)
+    # The pinion meshes the next wheel's gear across the line to the stack,
+    # at 180: half a pitch off it. Its teeth's undersides slope up from the
+    # column at 45 degrees (a prism cut by a cone), so the pinion prints
+    # over the band below through 45-degree faces.
     pin_phase = 180.0 + 180.0 / s["zp"]
-    pin = b.prism("transfer pinion", gear_ents(s, s["zp"], pin_phase), p0, p1)
-    join = b.prism("transfer join", [circle((0, 0), s["root_p"])], p1, j1)
-    gen = b.prism("transfer geneva", [circle((0, 0), s["r_geneva"])], v0, v1)
-    body = b.union("transfer", [pin, join, gen])
+    pin = b.prism(f"{transfer_name(j)} pinion",
+                  gear_ents(s, s["zp"], pin_phase), p0, p1)
+    big = s["tip_p"] + 1.0
+    cone = b.revolve(f"{transfer_name(j)} pinion slope", [
+        (0.0, p0), (rc, p0), (big, p0 + (big - rc)), (big, p1), (0.0, p1)])
+    pin = b.boolean(f"{transfer_name(j)} pinion sloped", pin, cone,
+                    "intersect")
+    gen_cone = b.cone_under(f"{transfer_name(j)} geneva underside",
+                            s["r_geneva"], v_s0, rc)
+    gen = b.prism(f"{transfer_name(j)} geneva",
+                  [circle((0, 0), s["r_geneva"])], v_s0, v1)
+    body = b.union(transfer_name(j), [col, pin, gen_cone, gen])
     w = s["r_pin"] + g
     for k, az in enumerate(geneva_slots(s)):
         # A slot: from its rounded bottom (the pin's nearest approach) out
-        # past the rim, w either side of its centre line.
+        # past the rim, w either side of its centre line, down through the
+        # cone the Geneva stands on, so the pin rising from its disc below
+        # passes through it.
         r0 = s["slot_bottom"]
         r1 = s["r_geneva"] + 2.0
-        c0 = polar(r0, az)
         a1 = rot((r1, w), az)
         a0 = rot((r0, w), az)
         b0_ = rot((r0, -w), az)
@@ -472,133 +569,130 @@ def build_transfer(b, s, gap=None):
         bottom = rot((r0 - w, 0.0), az)
         ents = [line(a0, a1), line(a1, b1_), line(b1_, b0_),
                 arc_through(b0_, bottom, a0)]
-        del c0
-        body = b.extrude(f"transfer slot {k + 1}", plane_z(p1), ents,
-                         v1 - p1, mode="cut")
+        body = b.extrude(f"{transfer_name(j)} slot {k + 1}", plane_z(v0),
+                         ents, v1 - v0, mode="cut")
     for k, az in enumerate(geneva_slots(s)):
         arc_az = az + 180.0 / SLOTS
-        body = b.extrude(f"transfer arc {k + 1}", plane_z(v0),
+        body = b.extrude(f"{transfer_name(j)} arc {k + 1}", plane_z(v0),
                          [circle(polar(s["c"], arc_az), s["r_lock"] + g)],
                          v1 - v0, mode="cut")
-    body = b.prism("transfer bore", [circle((0, 0), s["r_post"] + g)],
-                   p0, p1, mode="cut")
     return body
 
 
-def envelope(intervals):
-    """The union of (r, z0, z1) cylinders as one stepped (r, z) profile."""
-    zs = sorted({z for _, z0, z1 in intervals for z in (z0, z1)})
-    steps = []
-    for za, zb in zip(zs, zs[1:]):
-        rmax = max((r for r, z0, z1 in intervals if z0 <= za and zb <= z1),
-                   default=0.0)
-        if rmax > 0.0:
-            steps.append((rmax, za, zb))
-    # Merge equal neighbours and require one connected stack.
-    merged = []
-    for r, za, zb in steps:
-        if merged and abs(merged[-1][0] - r) < 1e-9 and \
-                abs(merged[-1][2] - za) < 1e-9:
-            merged[-1] = (r, merged[-1][1], zb)
-        else:
-            merged.append((r, za, zb))
-    for (_, _, zb), (_, za, _) in zip(merged, merged[1:]):
-        if abs(zb - za) > 1e-9:
-            raise SystemExit("counter: an envelope with a hole in it")
-    prof = [(0.0, merged[0][1])]
-    for r, za, zb in merged:
-        prof += [(r, za), (r, zb)]
-    prof.append((0.0, merged[-1][2]))
-    # Drop repeated points where neighbouring steps share a corner.
-    out = []
-    for p in prof:
-        if not out or abs(out[-1][0] - p[0]) > 1e-9 or \
-                abs(out[-1][1] - p[1]) > 1e-9:
-            out.append(p)
-    return out
+def envelope_wheels(s):
+    """The stack's swept envelope as (r, z) points: the band's size from
+    the bed up (the thousands' band stands on it), run up to the top."""
+    g = s["g"]
+    return [(0.0, 0.0), (s["r_band"] + g, 0.0),
+            (s["r_band"] + g, s["top"] + 1.0), (0.0, s["top"] + 1.0)]
+
+
+def envelope_transfer(s, j):
+    """Transfer j's swept envelope, (r, z) about its axis: everything it
+    sweeps and everything over it, the gap out and the air under. The
+    housing is what is left, so it holds the column from the bed to under
+    the pinion, and never stands over a moving part."""
+    g, a, rc = s["g"], s["air"], s["r_col"]
+    t = s["transfers"][j]
+    p0 = t["pinion"][0]
+    v0 = t["geneva"][0]
+    tp, rg = s["tip_p"], s["r_geneva"]
+    top = s["top"] + 1.0
+    return [(0.0, 0.0), (rc + g, 0.0), (rc + g, p0 - a),
+            (tp + g, p0 - a + (tp - rc)), (tp + g, v0 - a + (tp - rc)),
+            (rg + g, v0 - a + (rg - rc)), (rg + g, top), (0.0, top)]
+
+
+def housing_extent(s):
+    """The housing block's [x0, y0, x1, y1]: a wall round the stack and
+    every transfer's Geneva."""
+    m = s["g"] + s["wall"]
+    x0, y0 = -(s["r_band"] + m), -(s["r_band"] + m)
+    x1, y1 = s["r_band"] + m, s["r_band"] + m
+    for t in s["transfers"].values():
+        cx, cy = polar(s["c"], t["az"])
+        r = s["r_geneva"] + m
+        x0, y0 = min(x0, cx - r), min(y0, cy - r)
+        x1, y1 = max(x1, cx + r), max(y1, cy + r)
+    return [x0, y0, x1, y1]
 
 
 def build_housing(b, s):
-    """A block minus every moving part's swept envelope grown by the gap
-    (sideways) and the layer (up and down): what is left is the base, the
-    walls, the posts, the fins that hold each part at its height, and the
-    ceiling. Then a window per digit and the frames the mates use."""
-    g, L, n = s["g"], s["zgap"], s["digits"]
-    r_side = max(s["r_band"], s["r_pin_circle"] + s["r_pin"]) + g + s["wall"]
-    x1 = s["c"] + s["r_geneva"] + g + s["wall"]
-    block = b.prism("housing block", polygon([
-        (-r_side, -r_side), (x1, -r_side), (x1, r_side), (-r_side, r_side)]),
-        0.0, s["top"])
-    body = block
-    for j in range(n):
-        w = s["wheels"][j]
-        iv = []
-        if "lock" in w:
-            iv.append((s["r_pin_circle"] + s["r_pin"] + g,
-                       w["lock"][0] - L, w["lock"][1] + 2 * L))
-        iv.append((s["r_band"] + g, w["band"][0] - L, w["band"][1] + L))
-        if "gear" in w:
-            iv.append((s["tip_w"] + g, w["gear"][0] - L, w["gear"][1] + L))
-        else:
-            iv.append((s["r_knob"] + g, w["knob"][0] - L, s["top"] + 1.0))
-        env = b.revolve(f"housing: {wheel_name(j)} swept",
-                        envelope(iv))
-        body = b.boolean(f"housing - {wheel_name(j)}", body, env, "subtract")
+    """A block minus every moving part's swept envelope, each run up to the
+    top: what is left stands only beside and under the moving parts, never
+    over them. Then the lip over the units' band, a window per digit and
+    the frames the mates use."""
+    g, n = s["g"], s["digits"]
+    x0, y0, x1, y1 = housing_extent(s)
+    body = b.prism("housing block", polygon([
+        (x0, y0), (x1, y0), (x1, y1), (x0, y1)]), 0.0, s["top"])
+    env = b.revolve("housing: the stack swept", envelope_wheels(s))
+    body = b.boolean("housing - the stack", body, env, "subtract")
     for j in range(n - 1):
-        t = s["transfers"][j]
-        iv = [(s["tip_p"] + g, t["pinion"][0] - L, t["join"][1]),
-              (s["r_geneva"] + g, t["geneva"][0] - L, t["geneva"][1] + L)]
-        env = b.revolve(f"housing: transfer {j + 1} swept", envelope(iv),
-                        x0=s["c"])
-        body = b.boolean(f"housing - transfer {j + 1}", body, env,
+        env = b.revolve(f"housing: {transfer_name(j)} swept",
+                        envelope_transfer(s, j),
+                        centre=polar(s["c"], s["transfer_az"][j]))
+        body = b.boolean(f"housing - {transfer_name(j)}", body, env,
                          "subtract")
-    # The posts: the wheels' axle from the base up to under the knob, and
-    # each transfer's stub into its pinion.
-    axle = b.prism("axle", [circle((0, 0), s["r_axle"])], s["t_base"] - 0.5,
-                   s["wheels"][0]["band"][1] - L)
-    body = b.boolean("housing + axle", body, axle, "union")
-    for j in range(n - 1):
-        t = s["transfers"][j]
-        post = b.prism(f"transfer {j + 1} post",
-                       [circle((s["c"], 0.0), s["r_post"])],
-                       t["z0"] - 1.0, t["pinion"][1] - L)
-        body = b.boolean(f"housing + post {j + 1}", body, post, "union")
-    # A window per digit, at -X: the cell's height around the band, the
-    # face's width along the axle.
-    half = WINDOW_FRACTION * s["cell"] / 2.0
-    for j in range(n):
-        b0, b1 = s["wheels"][j]["band"]
-        f0 = b0 + s["chamfer"] + 0.5 * FACE_MARGIN * s["digit_height"]
-        f1 = b1 - 0.5 * FACE_MARGIN * s["digit_height"]
-        body = b.extrude(f"window {wheel_name(j)}", {
-            "origin": [-r_side - 1.0, 0.0, 0.0], "normal": [1, 0, 0],
-            "uAxis": [0, 1, 0]},
-            polygon([(-half, f0), (half, f0), (half, f1), (-half, f1)]),
-            # through the wall and on into the band's own clearance, short
-            # of the axle
-            r_side + 1.0 - 0.5 * s["r_band"], mode="cut")
+    # The lip: a quarter ring at -X over the units' band, its underside
+    # rising at 45 degrees from the wall in to the knob, the air over the
+    # band; it keeps the stack from lifting out.
+    z_l, z_r, z_t = s["lip"]
+    ri, ro = s["r_knob"] + g, s["r_band"] + g
+    # Its outside sinks half a wall into the housing: run out to the
+    # block's face it would graze it at -X, a seam no solid holds.
+    rw = ro + 0.5 * s["wall"]
+    lip = b.revolve("lip ring", [(ri, z_r), (ro, z_l), (rw, z_l),
+                                 (rw, z_t), (ri, z_t)])
+    sector = b.prism("lip sector", polygon([
+        (0.0, 0.0), polar(2.0 * ro, 135.0), (-2.0 * ro, 0.0),
+        polar(2.0 * ro, 225.0)]), z_l - 1.0, z_t + 1.0)
+    lip = b.boolean("lip", lip, sector, "intersect")
+    body = b.boolean("housing + lip", body, lip, "union")
+    # A window per digit, at -X: a teardrop on its side through the wall
+    # (docs/modeling/holes-and-threads.md#printed-holes), its point up,
+    # centred on the band's face. A Hole drills along its sketch plane's
+    # -normal: the plane faces -X, its (u, v) = (y, -z).
+    sk = b.sketch("windows", {"origin": [x0, 0.0, 0.0], "normal": [-1, 0, 0],
+                              "uAxis": [0, 1, 0]},
+                  [{"type": "point", "p": [0.0, -(f0 + f1) / 2.0]}
+                   for f0, f1 in (s["wheels"][j]["face"] for j in range(n))])
+    check(b.d.call("add_feature", feature={
+        "type": "Hole", "name": "windows", "sketch_id": sk,
+        "hole_kind": "simple", "diameter": s["window_d"],
+        "depth": s["wall"] + g + 1.0, "printed": "teardrop_flat"}),
+        "windows")
     for j in range(n):
         check(b.d.call("add_feature", feature={
             "type": "Frame", "name": wheel_name(j), "kind": "explicit",
-            "origin": [0.0, 0.0, s["wheels"][j]["z0"]],
+            "origin": [0.0, 0.0, 0.0],
             "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]}), "wheel frame")
     for j in range(n - 1):
+        az = s["transfer_az"][j]
+        cx, cy = polar(s["c"], az)
         check(b.d.call("add_feature", feature={
-            "type": "Frame", "name": f"transfer {j + 1}", "kind": "explicit",
-            "origin": [s["c"], 0.0, s["transfers"][j]["z0"]],
-            "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]}), "transfer frame")
+            "type": "Frame", "name": transfer_name(j), "kind": "explicit",
+            "origin": [cx, cy, 0.0], "z_axis": [0, 0, 1],
+            "x_axis": [math.cos(math.radians(az)),
+                       math.sin(math.radians(az)), 0]}), "transfer frame")
     return body
 
 
 # ---- the project ------------------------------------------------------------
 
+def profile_of(d, proc):
+    if "profile" not in proc:
+        return {}
+    for p in d.call("list_print_profiles")["profiles"]:
+        if p["name"] == proc["profile"]:
+            return p
+    raise SystemExit(f"counter: no print profile '{proc['profile']}'")
+
+
 def material_of(d, proc):
     if "material" in proc:
         return proc["material"]
-    for p in d.call("list_print_profiles")["profiles"]:
-        if p["name"] == proc["profile"]:
-            return p["material"]
-    raise SystemExit(f"counter: no print profile '{proc['profile']}'")
+    return profile_of(d, proc)["material"]
 
 
 def new_part(d, name, proc):
@@ -624,19 +718,20 @@ def build_parts(d, s, proc):
         new_part(d, wheel_name(j), proc)
         build_wheel(b, s, j)
         weigh(d, mat)
-    new_part(d, "transfer", proc)
-    build_transfer(b, s)
-    weigh(d, mat)
+    for j in range(s["digits"] - 1):
+        new_part(d, transfer_name(j), proc)
+        build_transfer(b, s, j)
+        weigh(d, mat)
     new_part(d, "housing", proc)
     build_housing(b, s)
     weigh(d, mat)
-    print(f"  parts: {s['digits']} wheels, a transfer and the housing in "
-          f"{time.perf_counter() - t0:.0f} s")
+    print(f"  parts: {s['digits']} wheels, {s['digits'] - 1} transfers and "
+          f"the housing in {time.perf_counter() - t0:.0f} s")
 
 
 def print_pose(s, count=0):
     """Each wheel's and transfer's turn, degrees, with the counter at
-    `count` — the relations' own arithmetic (phases 0)."""
+    `count` -- the relations' own arithmetic (phases 0)."""
     theta = {0: -36.0 * count}
     beta = {}
     for j in range(s["digits"] - 1):
@@ -658,29 +753,44 @@ def part_id(d, name):
     raise SystemExit(f"counter: no part '{name}'")
 
 
-def build_print(d, s, proc, count=0):
+def bed_place(s, prof, gap):
+    """Where the plate's axis stands on the bed: the housing's middle at
+    the bed's, moved along x past its keep-out zones by the gap when it
+    would sit on one. The origin without a bed (the built-in table)."""
+    bed = prof.get("bed_mm")
+    if not bed:
+        return (0.0, 0.0)
+    x0, y0, x1, y1 = housing_extent(s)
+    w, h = x1 - x0, y1 - y0
+    x = clear_x(bed[0] / 2.0 - w / 2.0, bed[1] / 2.0 - h / 2.0, w, h,
+                bed_zones(prof), gap)
+    return (x - x0, bed[1] / 2.0 - h / 2.0 - y0)
+
+
+def build_print(d, s, proc, at, count=0):
     """The plate: a Derived copy of every part where it prints, turned to
-    the pose that reads `count`. A copy, not a link, so the plate is what
-    was checked."""
+    the pose that reads `count`, the stack's axis at `at` on the bed. A
+    copy, not a link, so the plate is what was checked."""
     theta, beta = print_pose(s, count)
-    placed = [("housing", (0.0, 0.0, 0.0), 0.0)]
+    ax, ay = at
+    placed = [("housing", (ax, ay, 0.0), 0.0)]
     for j in range(s["digits"]):
-        placed.append((wheel_name(j), (0.0, 0.0, s["wheels"][j]["z0"]),
-                       theta[j]))
+        placed.append((wheel_name(j), (ax, ay, 0.0), theta[j]))
     for j in range(s["digits"] - 1):
-        placed.append(("transfer", (s["c"], 0.0, s["transfers"][j]["z0"]),
-                       beta[j]))
+        az = s["transfer_az"][j]
+        cx, cy = polar(s["c"], az)
+        placed.append((transfer_name(j), (ax + cx, ay + cy, 0.0),
+                       az + beta[j]))
     ids = {part: part_id(d, part) for part, _, _ in placed}
     new_part(d, "counter print", proc)
     names = {}
-    for k, (part, pos, deg) in enumerate(placed):
-        label = part if part != "transfer" else f"transfer {k - s['digits']}"
+    for part, pos, deg in placed:
         f = check(d.call("add_feature", feature={
-            "type": "Derived", "name": label, "source_part": ids[part],
+            "type": "Derived", "name": part, "source_part": ids[part],
             "reference": False,
             "placement": {"position": list(pos), "orientation": quat_z(deg)}}),
-            f"derived {label}")
-        names[label] = f["id"]
+            f"derived {part}")
+        names[part] = f["id"]
     return names, theta, beta
 
 
@@ -696,8 +806,9 @@ def build_assembly(d, s):
         occ[wheel_name(j)] = d.call("add_occurrence", part=wheel_name(j),
                                     name=wheel_name(j))["id"]
     for j in range(n - 1):
-        occ[f"transfer {j + 1}"] = d.call(
-            "add_occurrence", part="transfer", name=f"transfer {j + 1}")["id"]
+        occ[transfer_name(j)] = d.call(
+            "add_occurrence", part=transfer_name(j),
+            name=transfer_name(j))["id"]
     mates, rels = {}, {}
     for name in occ:
         if name == "housing":
@@ -707,7 +818,7 @@ def build_assembly(d, s):
             a={"occurrence": occ["housing"], "frame": name},
             b={"occurrence": occ[name], "origin": True}, flipped=False)["id"]
     for j in range(n - 1):
-        t = f"transfer {j + 1}"
+        t = transfer_name(j)
         rels[f"carry {j + 1}"] = check(d.call(
             "add_relation", type="intermittent", name=f"carry {j + 1}",
             a=mates[wheel_name(j)], b=mates[t], motion="geneva",
@@ -788,9 +899,9 @@ def counts(s, result):
 
 
 def hero(d, path):
-    """The plate cut through both axes, seen from the cut: the transfers'
-    Genevas and pinions in orange beside the wheels, the housing dark.
-    Colours are appearance only; the bodies stay the profile's PLA."""
+    """The plate cut through the stack's axis, seen from the cut: the
+    transfers' Genevas and pinions in orange beside the wheels, the housing
+    dark. Colours are appearance only; the bodies stay the profile's PLA."""
     d.call("set_active_part", part="counter print")
     for b_ in d.call("list_elements")["bodies"]:
         name = b_["name"]
@@ -799,11 +910,32 @@ def hero(d, path):
                   [0.70, 0.70, 0.68])
         d.call("set_appearance", feature_id=b_["created_by"], color=colour,
                roughness=0.5)
-    d.call("set_section", base_plane="xz", offset=0.0)  # keeps y <= 0
     d.call("view", name="iso")
-    d.call("set_camera", direction=[0.25, 1.0, 0.3])  # from the cut side
+    d.call("set_camera", direction=[0.25, 1.0, 0.3])
     d.call("render_still", path=str(path), width=1200, height=1300)
-    d.call("set_section", enabled=False)
+
+
+def fit_digits(s_of, digits, prof):
+    """The most digits, up to `digits`, whose counter stands within the
+    profile's bed (its bed_mm height and plan): (digits, sizes, why fewer)."""
+    bed = prof.get("bed_mm")
+    why = None
+    for n in range(digits, 1, -1):
+        s = s_of(n)
+        if not bed:
+            return n, s, why
+        x0, y0, x1, y1 = housing_extent(s)
+        too = []
+        if len(bed) > 2 and s["height"] > bed[2]:
+            too.append(f"{s['height']:.1f} mm tall against the bed's "
+                       f"{bed[2]:g}")
+        if x1 - x0 > bed[0] or y1 - y0 > bed[1]:
+            too.append(f"{x1 - x0:.1f} x {y1 - y0:.1f} mm in plan against "
+                       f"{bed[0]:g} x {bed[1]:g}")
+        if not too:
+            return n, s, why
+        why = (why or "") + f"{n} digits: " + ", ".join(too) + "; "
+    raise SystemExit(f"counter: not even two digits fit the bed: {why}")
 
 
 def main():
@@ -837,11 +969,11 @@ def main():
             {"process": args.process, "material": args.material})
     gap = d.call("print_allowance", kind="gap",
                  size_mm=args.digit_height, **proc)
-    # The layer and the Z gap the profile states
-    # (docs/tolerances/README.md#print-profiles): the vertical counterpart of
-    # the gap, measured by print_coupon's air row.
-    prof = next((p for p in d.call("list_print_profiles")["profiles"]
-                 if p["name"] == args.profile), {}) if args.profile else {}
+    # The layer and the air the profile states
+    # (docs/tolerances/README.md#print-profiles): the vertical counterpart
+    # of the gap, measured by print_coupon's air row; else three layers,
+    # which is what check_print's stacking holds a part to without one.
+    prof = profile_of(d, proc)
     layer = args.layer or prof.get("layer_height_mm") or 0.2
     z_gap = prof.get("z_gap_mm")
     if z_gap and args.layer and prof.get("layer_height_mm") and abs(
@@ -849,33 +981,48 @@ def main():
         raise SystemExit(f"counter: --layer {args.layer:g} is not the "
                          f"{prof['layer_height_mm']:g} mm the profile's Z gap "
                          f"was measured at")
-    s = solve(args.digit_height, args.digits, gap["allowance_mm"], layer,
-              z_gap)
+    air = z_gap or 3.0 * layer
+    air_from = ("the profile's z_gap_mm" if z_gap else
+                f"three layers of {layer:g}")
+    digits, s, fewer = fit_digits(
+        lambda n: solve(args.digit_height, n, gap["allowance_mm"], layer,
+                        air), args.digits, prof)
+    s["air_from"] = air_from
+    if fewer:
+        print(f"counter: {args.digits} digits do not fit "
+              f"{args.profile}'s bed ({fewer.rstrip('; ')}): building "
+              f"{digits}, the most that do")
     g = s["g"]
-    print(f"counter: {args.digits} digits {args.digit_height:g} mm high, "
-          f"band Ø{2 * s['r_band']:.1f}, Geneva {SLOTS} slots, gear "
-          f"{s['zp']}:{s['zw']} m{s['module']:.3f}, gap {g:g} a side "
+    print(f"counter: {digits} digits {args.digit_height:g} mm high, "
+          f"band Ø{2 * s['r_band']:.1f} ({s['fill']:.0%} of a cell), Geneva "
+          f"{SLOTS} slots at {s['c']:.2f}, gear {s['zp']}:{s['zw']} "
+          f"m{s['module']:.3f}, gap {g:g} a side "
           f"({args.profile or args.material}), lock disc "
-          f"r{s['r_lock']:.2f} (horns {s['horn_mm']:.2f} mm), Z gap "
-          f"{s['zgap']:g} ({s['zgap_from']})")
+          f"r{s['r_lock']:.2f} (horns {s['horn_mm']:.2f} mm), air "
+          f"{air:g} ({air_from}), {s['height']:.1f} mm tall")
 
     build_parts(d, s, proc)
-    feats, theta, beta = build_print(d, s, proc)
+    at = bed_place(s, prof, g)
+    feats, theta, beta = build_print(d, s, proc, at)
     geo = d.call("check_geometry")
     if geo["receipt"]["standing"] != "verified":
         raise SystemExit(f"counter: the print part is not verified: {geo}")
-    # The app's printability check (check_print): on the bed, one piece per
-    # body (housing, wheels and transfers), every pair of bodies at least
-    # the gap a side apart on the exact B-rep, and the STL's chords a fifth
-    # of the gap at most. Overhangs and bridges are reported: the bands'
-    # undersides are 45 degree chamfers by design, and the layer gaps print
-    # as ceilings over the part below.
-    pr = check_print(d, "counter",
-                     need=("bed", "shells", "clearance", "chords"))
+    # The app's printability check (check_print), every item: on the bed,
+    # one piece per body, nothing past 45 degrees, no ceiling past the
+    # bridge limit, the gap a side between every pair, the chords a fifth of
+    # it, every piece on the bed and no face within the air over another
+    # piece, and the plate on the profile's bed.
+    pr = check_print(d, "counter", need=PRINT_ITEMS)
     cl = {f"{p['a']} / {p['b']}": p["distance_mm"]
           for p in pr["clearance"]["pairs"]}
     stl = out / "counter.stl"
     exp = d.call("export_stl", path=str(stl))
+    job = ({"skipped": "no print profile with a bed: the built-in table is "
+                       "no printer to place the plate on"}
+           if not prof.get("bed_mm") else
+           job_receipt(export_print_job(d, [("counter print", "counter")],
+                                        out / "counter_job.3mf",
+                                        material_of(d, proc))))
     d.call("save_project", path=str(out / "counter.dsgn"))
 
     occ, mates, rels = build_assembly(d, s)
@@ -889,18 +1036,18 @@ def main():
     rel_ids = {r["name"]: r["id"] for r in
                d.call("list_relations")["relations"]}
     carry1 = rel_ids["carry 1"]
-    gear1 = rel_ids[f"transfer 1 drives {wheel_name(1)}"]
+    gear1 = rel_ids[f"{transfer_name(0)} drives {wheel_name(1)}"]
     window = (s["start_deg"] - 6.0, s["start_deg"] + s["window_deg"] + 6.0)
     # Each must clash, and between the parts it put wrong.
     controls = (
         ("the Geneva 10 degrees late",
          {"id": carry1, "start_deg": s["start_deg"] + 10.0},
          {"id": carry1, "start_deg": s["start_deg"]},
-         (wheel_name(0), "transfer 1")),
+         (wheel_name(0), transfer_name(0))),
         ("the gear half a tooth out",
          {"id": gear1, "phase": math.pi / s["zw"]},
          {"id": gear1, "phase": 0.0},
-         ("transfer 1", wheel_name(1))))
+         (transfer_name(0), wheel_name(1))))
     for label, bad_p, good_p, pair in controls:
         d.call("set_relation", **bad_p)
         r = run_motion(d, f"control: {label}", units, window[1], window[0],
@@ -917,8 +1064,11 @@ def main():
                              f"check cannot see it")
 
     # The counting.
+    top = 10 ** digits
     runs = (("ten digits and a carry", 0, 11),
-            ("the triple carry", 998, 1001))
+            ("the triple carry" if digits >= 4 else "the carries through",
+             top // 10 * 10 - 2 if digits >= 4 else top - 2,
+             top // 10 * 10 + 1 if digits >= 4 else top + 1))
     for name, c0, c1 in runs:
         a0, a1 = -36.0 * c0, -36.0 * c1
         r = run_motion(d, name, units, a0, a1,
@@ -929,23 +1079,23 @@ def main():
         motion[name] = {"from_count": c0, "to_count": c1,
                         "status": res["collision_status"],
                         "reads": read, "off_digit_deg": worst}
-        print(f"  motion, {name} ({c0:04d} -> {c1:04d}): "
-              f"{res['collision_status']}; reads {read[0]:04d} -> "
-              f"{read[1]:04d}; worst off a digit "
+        print(f"  motion, {name} ({c0:0{digits}d} -> {c1 % top:0{digits}d}): "
+              f"{res['collision_status']}; reads {read[0]:0{digits}d} -> "
+              f"{read[1]:0{digits}d}; worst off a digit "
               + ", ".join(f"{k} {v:.2f}" for k, v in worst.items()))
         if not res["clean"]:
             raise SystemExit(f"counter: {name} clashes: "
                              f"{res.get('table', res)}")
-        if read != [c0 % 10 ** s["digits"], c1 % 10 ** s["digits"]]:
+        if read != [c0 % top, c1 % top]:
             raise SystemExit(f"counter: {name} reads {read}, not "
-                             f"{[c0, c1]}")
+                             f"{[c0 % top, c1 % top]}")
         if max(worst.values()) > 1.5:
             raise SystemExit(f"counter: a wheel stands {worst} degrees off "
                              f"its digit at rest")
 
     # The locks: with the driving wheel between carries, the next wheel
     # turned 3 degrees either way must run its Geneva into the lock disc.
-    for j in range(s["digits"] - 1):
+    for j in range(digits - 1):
         count = 5 * 10 ** j            # wheel j at 5: mid-dwell
         set_count(d, mates, count)
         nxt = mates[wheel_name(j + 1)]
@@ -955,7 +1105,7 @@ def main():
         # What holds it: the transfer's Geneva arc against the driving
         # wheel's lock disc. (The carry also reports itself not satisfied,
         # since nothing turned its input: the lock, said by the relation.)
-        lock_pair = tuple(sorted((wheel_name(j), f"transfer {j + 1}")))
+        lock_pair = tuple(sorted((wheel_name(j), transfer_name(j))))
         for sign in (1, -1):
             r = run_motion(d, f"lock {j + 1} {'+' if sign > 0 else '-'}",
                            nxt, here, here + 3.0 * sign, 7, clash)
@@ -971,7 +1121,7 @@ def main():
                                  f"{appeared(r)}")
         motion["locks"][wheel_name(j + 1)] = verdicts
         print(f"  lock, {wheel_name(j + 1)} turned 3 deg each way at "
-              f"{count:04d}: " + ", ".join(
+              f"{count:0{digits}d}: " + ", ".join(
                   f"{v['status']} ({' x '.join(lock_pair)})"
                   for v in verdicts))
     set_count(d, mates, 0)
@@ -980,14 +1130,14 @@ def main():
     # units wheel copied beside one, at a count (5) where the Geneva is
     # locked and the transfer stands at its own zero.
     new_part(d, "control: half gap", proc)
-    build_transfer(Builder(d), s, gap=gap["allowance_mm"] / 2.0)
+    build_transfer(Builder(d), s, 0, gap=gap["allowance_mm"] / 2.0)
     weigh(d, material_of(d, proc))
-    t0 = s["transfers"][0]["z0"]
     wheel = check(d.call("add_feature", feature={
         "type": "Derived", "name": wheel_name(0), "source_part":
         part_id(d, wheel_name(0)), "reference": False,
-        "placement": {"position": [-s["c"], 0.0, s["wheels"][0]["z0"] - t0],
-                      "orientation": quat_z(-36.0 * 5)}}),
+        "placement": {"position": [-s["c"], 0.0, 0.0],
+                      "orientation": quat_z(-36.0 * 5
+                                            - s["transfer_az"][0])}}),
         "control wheel")["id"]
     others = [b_["created_by"] for b_ in d.call("list_elements")["bodies"]
               if b_["created_by"] != wheel]
@@ -1003,19 +1153,40 @@ def main():
         raise SystemExit("counter: a transfer at half the gap passes the "
                          "clearance check")
 
+    # The layout that fused, at two digits: its stacking must fail.
+    control = stacked.build_control(d, proc, args.digit_height,
+                                    gap["allowance_mm"], layer, z_gap)
+    old = check_print(d, "control: stacked", need=(), quiet=True,
+                      part=control)
+    ost = old["stacking"]
+    motion["negative_controls"]["the stacked layout"] = {
+        "status": ost["status"], "lifted": len(ost["lifted"]),
+        "pairs": len(ost["pairs"])}
+    print(f"  negative control, the stacked layout: stacking "
+          f"{ost['status']}, {len(ost['lifted'])} pieces off the bed, "
+          f"{len(ost['pairs'])} pairs within the air"
+          + (" -> fails, as it must" if ost["status"] == "fail" else ""))
+    if ost["status"] != "fail":
+        raise SystemExit("counter: the stacked layout passes stacking; the "
+                         "check cannot see it")
+
     if not args.no_render:
         hero(d, out / "counter.png")
 
-    receipt = {"digit_height": args.digit_height, "digits": args.digits,
+    receipt = {"digit_height": args.digit_height, "digits": digits,
+               "digits_asked": args.digits, "digits_why": fewer,
                "process": proc, "sizes": {k: v for k, v in s.items()
                                           if k not in ("wheels",
                                                        "transfers")},
+               "heights": {"wheels": s["wheels"],
+                           "transfers": s["transfers"]},
+               "plate_axis_mm": list(at),
                "print_pose_deg": {"wheels": theta, "transfers": beta},
                "clearances_mm": cl, "print": print_receipt(pr),
                "motion": motion, "stl": str(stl),
                "stl_shells": exp.get("shells"),
                "stl_deflection_mm": exp.get("deflection_mm"),
-               "confirm": gap.get("confirm")}
+               "print_job": job, "confirm": gap.get("confirm")}
     (out / "counter.json").write_text(json.dumps(receipt, indent=1))
     d.call("save_project", path=str(out / "counter.dsgn"))
     print(f"counter: {exp.get('shells')} shells -> {stl}")

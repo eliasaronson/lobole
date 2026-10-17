@@ -437,9 +437,13 @@ printed in place follows two rules instead:
 
 How much air is the profile's `z_gap_mm` ([below](#print-profiles)),
 measured by the coupon's [air row](#the-coupon); `check_print`'s
-[stacking item](#checking-a-print) checks both rules; and
+[stacking item](#checking-a-print) checks both rules;
 [`generators/hinge_box/`](../../generators/hinge_box/README.md) is the
-smallest part built to them.
+smallest part built to them, and the
+[counter](../../generators/counter/README.md#what-changed-from-the-print-that-fused),
+rebuilt, the largest: every wheel on a tube from the bed, every transfer
+on its own column, every face over another piece a 45° cone the air over
+it.
 
 ### Print profiles
 
@@ -620,7 +624,7 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 | `bridges` | the widest span of the ceilings, and each one's area and height | the process's (`printfit::MaxBridgeMm`, 10 mm for FDM, 5 for [TPU](#tpu)) | a ceiling is a downward face within 1° of horizontal everywhere, off the bed: a plane by its one normal, any other surface (a derived or lofted face is often a B-spline) by every sample. Its span is its inscribed diameter, as if anchored along its whole edge: twice the largest distance from a point of the face to its edges (polylines at a quarter of the tessellation's chord), on a grid over its UV and then climbed |
 | `clearance` | the minimum distance between any two solids, with the closest pairs | the gap a side (`printfit::SmallestGapSideMm` of the print), passing down to a tenth under it | `Measure::ClearanceBetween` per pair (BRepExtrema, the distance `measure` gives), `ContactBetween` when it cannot prove them apart; a pair whose oriented boxes are four gaps apart is clear without measuring; the boxes are the B-Rep's, never its triangulation's, so the prune is the same meshed or not and a box never stops inside a curved surface by the chord deviation |
 | `chords` | the chord deviation `export_stl` meshes this print at | a fifth of the gap a side | `printfit::StlDeflectionMm`, as [the export](#exporting-a-printed-part) takes it, or `stl_deflection_mm` |
-| `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places: a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else. So the air is exact and only which face is met, at a face's boundary, is the tessellation's (`IntCurvesFace` per sample was exact there too, and took minutes on the counter where this takes seconds). A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
+| `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places and inside the face (a triangle's UV past a curved edge is the surface beyond the face, not a sample): a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else, and a triangle whose surface puts the material outside the limit passes the ray on (a hollow's chord lies above its surface). A triangle on its face's boundary hands the ray to that face and every face across its edges, each intersected exactly (`IntCurvesFace`) and kept only where the ray meets it on the face, the least air of those: past a top's polygon the ray meets the flank's triangle, whose surface runs on above the top. So the air is exact up to a face's edge: the hinge box's cone pins read their modelled 0.4 mm on K5 to a micron, where they read 0.377. `IntCurvesFace` on every sample took minutes on the counter; on the boundary triangles alone it is seconds. A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
 | `bed_fit` | the plate's box: `extent_mm`, x along the bed's x (the world's x, or y when the direction is x), z up the direction; with keep-out zones, every piece where it is (`intrusions`) | the profile's `bed_mm`, with `shortfall_mm` per axis; and its `bed_exclude_mm` (`exclude_mm`) | `BRepBndLib::AddOptimal` of every body in the printer's frame. Without zones the extent, not a position: a slicer places the plate, so it fits when its box does. With zones (v181, `printcheck::FitOnBed`) the part's x and y ARE the bed's, printed up +Z: a piece whose footprint box leaves the bed, or which itself (`BRepExtrema` against the zone's prism, after the boxes meet) enters a zone, is an intrusion naming the zone. A piece laid along the bed's diagonal has a box over the whole bed and misses the corner. Another print direction with zones fails, saying the frame is not the bed's |
 
 - **bed_fit is the printer's**, so it runs only on a part printed with a
@@ -641,9 +645,9 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 - **A flat face over another piece fails at any number of layers**
   ([why](#one-part-printed-over-another)). What passes is a piece that
   starts on the bed and reaches over another with a face that holds itself
-  up, the minimum air above it: the counter's wheels, one layer over each
-  other, fail; a ring round a post under a 45° head with three layers
-  passes.
+  up, the minimum air above it: the counter's first wheels, one layer over
+  each other, fail (its run keeps them as a control); a ring round a post
+  under a 45° head with three layers passes.
 - **Every limit can be stated** (`max_overhang_deg`,
   `overhang_allowance_mm2`, `max_bridge_mm`, `min_gap_mm`,
   `stl_deflection_mm`, `min_air_mm`); each item says where its limit came
@@ -753,6 +757,16 @@ infill weigh (`printmass::EstimatePrinted`, `src/core/PrintedMass.{h,cpp}`).
 - **Remembered** per shape, placement and inputs (the shape held, so its
   address cannot be reused), so a generator that weighs the same pendulum
   many times pays once.
+- **An assembly weighs as built.** From an assembly tab each occurrence
+  says `mass_from`: `printed` when its part is printed (its `printed`
+  {mass_g, center_of_mass_mm}, the sum of its bodies' estimates carried
+  through its placement), `solid` otherwise. `total.printed` then weighs
+  the whole as it is made: each printed occurrence's printed mass, centre
+  and inertia, each other one's solid, with the inertia about the common
+  centre in world axes (`inertia_g_mm2`, the parallel-axis sum,
+  `assembly::InertiaAbout`) and the occurrences named each way (`printed`,
+  `solid`); a printed body with no estimate makes it `{why}`. `total.mass_g`
+  stays the solid sum, as a part's does (`print_job_smoke`).
 - **What reads it**: the clock's pendulum sums (its period is the printed
   pendulum's, the receipt and card saying at what), FEM's self-weight and
   modal mass (the printed share of the solid, spread evenly; the stiffness
@@ -1077,15 +1091,10 @@ layer off the bed).
   (stacking is what fails it); a bridge anchored on two edges only reads
   its inscribed diameter, not its length; no support or island detection
   within a piece (a piece that starts off the bed is stacking's); no wall
-  thickness; no overhang shading in the viewport. Stacking can read the
-  air about 0.02 mm under where a sample lies on a face boundary of the
-  tessellation, since which face a ray meets there is the triangles'.
+  thickness; no overhang shading in the viewport.
 - In a print job: a second filament in one project (the CLI cannot slice
   it), supports' and brim's own parameters (only on and off), the
   slicer's per-object modifiers (a region of a part at another infill).
-- The printed mass of an assembly: `mass_properties` from an assembly tab
-  sums the solid occurrences.
-
 - An inferred stack-up chain, and correlation between terms (needs tracking
   from measured geometry back to the variables that drove it).
 - Statistical stack-up; geometric (form/position) tolerances.

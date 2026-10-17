@@ -222,14 +222,18 @@ def print_item_line(name, item):
     return f"{name} {st}: {text}"
 
 
-def check_print(d, what, need=PRINT_ITEMS, quiet=False, **params):
+def check_print(d, what, need=PRINT_ITEMS, quiet=False, timeout=900.0,
+                **params):
     """Will this part print? The app's one check (check_print,
     docs/tolerances/README.md#checking-a-print) over the active part, or
     `part=...`. Raises naming each item in `need` that did not pass -- a
     skipped one too: what a generator needs checked must be checked. Prints
     every item unless `quiet`, and returns the reply, whose items go in the
-    receipt (`print_receipt`)."""
-    r = d.call("check_print", **params)
+    receipt (`print_receipt`). A plate of many engraved faces takes minutes:
+    `timeout` (seconds) is the wait for its answer."""
+    r = (d.request("check_print", params, timeout=timeout)
+         if isinstance(d, Client) else
+         d.call("check_print", _timeout=timeout, **params))
     if not quiet:
         for k in PRINT_ITEMS:
             print(f"  {what}: {print_item_line(k, r[k])}")
