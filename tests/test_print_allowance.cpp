@@ -94,6 +94,15 @@ TEST_CASE("The PETG table says what to model for each kind of diameter",
     }
   }
   CHECK(Contains(printfit::ConfirmNote(), "coupon"));
+  // A report on one row: a built-in row's source asks for the coupon; a
+  // profile's own measured row names where it came from instead.
+  const printfit::Row& builtin = printfit::Tables().front().rows.front();
+  CHECK(printfit::ConfirmNote(builtin.source) == printfit::ConfirmNote());
+  CHECK(printfit::ConfirmNote("") == printfit::ConfirmNote());
+  const std::string measured =
+      printfit::ConfirmNote("MEASURED, print_coupon on a P1S");
+  CHECK(Contains(measured, "MEASURED, print_coupon on a P1S"));
+  CHECK_FALSE(Contains(measured, "community practice"));
 }
 
 TEST_CASE("A print-in-place gap opens the outer surface by the whole "

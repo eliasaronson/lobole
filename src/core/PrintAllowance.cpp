@@ -675,4 +675,17 @@ const std::string& ConfirmNote() {
   return s;
 }
 
+std::string ConfirmNote(const std::string& rowSource) {
+  if (rowSource.empty())
+    return ConfirmNote();
+  for (const Table& t : Tables())
+    for (const Row& r : t.rows)
+      if (r.source == rowSource)
+        return ConfirmNote();
+  return "measured: " + rowSource +
+         " -- the print profile's own row. Print the coupon again "
+         "(generators/print_coupon.py) when the printer, the filament or "
+         "the slicer preset changes";
+}
+
 } // namespace printfit

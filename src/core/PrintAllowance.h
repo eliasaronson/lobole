@@ -296,7 +296,14 @@ inline constexpr double kFdmLayerMm = 0.2;
   return 2.0 * deflectionMm;
 }
 
-// The sentence every report ends with.
+// The sentence a report on the built-in tables ends with: confirm with a
+// coupon.
 [[nodiscard]] const std::string& ConfirmNote();
+// The one a report on ONE row ends with, from that row's `source`: a row
+// of a built-in table (or a profile row still carrying a built-in row's
+// source: copied, never measured) gets ConfirmNote(); a profile's own
+// measured row names its source instead, since the coupon that sentence
+// asks for is the one the row came from. Empty = ConfirmNote().
+[[nodiscard]] std::string ConfirmNote(const std::string& rowSource);
 
 } // namespace printfit

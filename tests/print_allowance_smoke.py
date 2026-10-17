@@ -169,6 +169,16 @@ def profiles(d, port):
     r = d.call("print_allowance", kind="gap", size_mm=10, profile="Test P1S")
     expect(near(r["model_mm"], 10.2) and r["profile"] == "Test P1S",
            f"answered from the profile: {r}")
+    # The row that answered is the profile's own, measured: its confirm
+    # note names that source, not the built-in tables' "community
+    # practice ... confirm with a coupon" -- which is still what a row the
+    # profile copied from the defaults says.
+    expect(r["source"] == "coupon" and "measured: coupon" in r["confirm"]
+           and "community practice" not in r["confirm"],
+           f"a measured row's confirm is its source: {r}")
+    r = d.call("print_allowance", kind="hole", size_mm=10, profile="Test P1S")
+    expect("community practice" in r["confirm"],
+           f"a row copied from the defaults still asks for a coupon: {r}")
 
     # A part printed with it: a disc in a hole, at the profile's gap.
     d.call("add_part", name="Gap")

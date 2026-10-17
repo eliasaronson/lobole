@@ -1574,11 +1574,15 @@ std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
 // A printed side of a fit on the wire
 // (docs/tolerances/README.md#printed-parts).
 json PrintedDiameterJson(const ui::PrintedDiameter& d, const std::string& cls) {
-  json j{{"process", d.process.process},      {"material", d.process.material},
-         {"kind", d.hole ? "bore" : "shaft"}, {"basic", d.basic},
-         {"allowance_mm", d.allowance},       {"model", d.model},
-         {"sentence", d.Sentence(cls)},       {"source", d.source},
-         {"confirm", printfit::ConfirmNote()}};
+  json j{{"process", d.process.process},
+         {"material", d.process.material},
+         {"kind", d.hole ? "bore" : "shaft"},
+         {"basic", d.basic},
+         {"allowance_mm", d.allowance},
+         {"model", d.model},
+         {"sentence", d.Sentence(cls)},
+         {"source", d.source},
+         {"confirm", printfit::ConfirmNote(d.source)}};
   if (d.modelled) {
     j["modelled"] = *d.modelled;
     j["prints"] = d.Prints();
@@ -1602,7 +1606,9 @@ json PrintedThreadJson(const ui::PrintedThread& t) {
          {"prints_major", t.printsMajor},
          {"notes", t.notes},
          {"sentence", t.Sentence()},
-         {"confirm", printfit::ConfirmNote()}};
+         {"confirm", printfit::ConfirmNote(t.source)}};
+  if (!t.failed.empty())
+    j["failed"] = t.failed;
   if (t.known) {
     j["want_major"] = t.wantMajor;
     j["model_major"] = t.modelMajor;
@@ -4190,7 +4196,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
                     {"allowance_mm", a->allowanceMm},
                     {"model_mm", a->modelMm},
                     {"source", a->row->source},
-                    {"confirm", printfit::ConfirmNote()},
+                    {"confirm", printfit::ConfirmNote(a->row->source)},
                     {"stl_deflection_mm", deflection},
                     {"stl_chord_loss_mm", printfit::ChordLossMm(deflection)},
                     {"stl_note",
