@@ -339,6 +339,82 @@ TEST_CASE("A ring under a 45 degree head needs three layers of air",
   CHECK(st.pairs[0].where.body == 0);
 }
 
+TEST_CASE("A cone pin's air reads exact up to its top edge",
+          "[print][check][printcheck]") {
+  // The hinge box's pin: a 45° cone with a flat top, under a socket that is
+  // the same cone 0.6 higher. The air is 0.6 vertically everywhere; a ray
+  // past the top's polygon but inside its circle meets a triangle of the
+  // cone, whose surface runs on above the top, and once read 0.02 under.
+  const gp_Ax2 at(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
+  const TopoDS_Shape pin = BRepPrimAPI_MakeCone(at, 6.0, 2.0, 4.0).Shape();
+  const TopoDS_Shape socket =
+      BRepPrimAPI_MakeCone(gp_Ax2(gp_Pnt(0, 0, 0.6), gp_Dir(0, 0, 1)), 6.0, 2.0,
+                           4.0)
+          .Shape();
+  const TopoDS_Shape lid = BRepAlgoAPI_Cut(
+      BRepPrimAPI_MakeBox(gp_Pnt(-10, -10, 1.0), 20, 20, 7).Shape(), socket);
+  printcheck::Options o;
+  o.minAirMm = 0.8;
+  const auto r = Run({Make(pin, "pin"), Make(lid, "lid")}, o);
+  const printcheck::Stacking& st = r.stacking;
+  REQUIRE(st.pairs.size() == 1);
+  CHECK(st.pieces[st.pairs[0].above].bodies == std::vector<int>{1});
+  CHECK(st.pairs[0].minAirMm == Approx(0.6).margin(1e-3));
+}
+
+TEST_CASE("Air over a hollow at the limit reads the limit, not its chord",
+          "[print][check][printcheck]") {
+  // A rod in a bore, 0.4 of air under it with a limit of 0.4: the bore's
+  // chords lie above its surface, and a ray that met one read the chord's
+  // 0.36 whenever the surface itself was past the limit.
+  const gp_Ax2 axis(gp_Pnt(0, 10, 6), gp_Dir(1, 0, 0));
+  const TopoDS_Shape block =
+      BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 20, 20, 12).Shape(),
+                      BRepPrimAPI_MakeCylinder(axis, 5.0, 20.0).Shape());
+  const TopoDS_Shape rod =
+      BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(2, 10, 6), gp_Dir(1, 0, 0)), 4.6,
+                               16.0)
+          .Shape();
+  printcheck::Options o;
+  o.minAirMm = 0.4;
+  const auto r = Run({Make(block, "block"), Make(rod, "rod")}, o);
+  // At the limit, a pair is listed only by rounding, and then at the limit.
+  for (const auto& pr : r.stacking.pairs) {
+    CHECK(pr.minAirMm == Approx(0.4).margin(1e-3));
+    CHECK(pr.areaMm2 == 0.0);
+  }
+  // Under a wider limit both are listed, the rod over the bore's floor and
+  // the bore's roof over the rod, each at its 0.4.
+  o.minAirMm = 0.5;
+  const auto wide = Run({Make(block, "block"), Make(rod, "rod")}, o);
+  REQUIRE(wide.stacking.pairs.size() == 2);
+  for (const auto& pr : wide.stacking.pairs)
+    CHECK(pr.minAirMm == Approx(0.4).margin(1e-3));
+}
+
+TEST_CASE("A ray past a top's polygon reads the top, not the flank beyond",
+          "[print][check][printcheck]") {
+  // A frustum's flat top, 0.3 under a plate. The top's tessellation is a
+  // polygon inside its circle; a ray between the two meets a triangle of
+  // the flank, whose cone runs on above the top there, and once read the
+  // air off that: up to a chord's height under 0.3.
+  const TopoDS_Shape post =
+      BRepPrimAPI_MakeCone(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), 14.0, 10.0,
+                           4.0)
+          .Shape();
+  const TopoDS_Shape plate =
+      BRepPrimAPI_MakeBox(gp_Pnt(-15, -15, 4.3), 30, 30, 2).Shape();
+  printcheck::Options o;
+  // A limit whose fail line, a tenth under it, is under 0.3: no sample
+  // fails but one that reads the flank.
+  o.minAirMm = 0.311;
+  const auto r = Run({Make(post, "post"), Make(plate, "plate")}, o);
+  const printcheck::Stacking& st = r.stacking;
+  REQUIRE(st.pairs.size() == 1);
+  CHECK(st.pairs[0].minAirMm == Approx(0.3).margin(1e-3));
+  CHECK(st.pairs[0].areaMm2 == 0.0);
+}
+
 TEST_CASE("A body's own bridge over its own floor is not stacking",
           "[print][check][printcheck]") {
   // A block with a slot 0.2 high through it, 1 above the bed: its ceiling

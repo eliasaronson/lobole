@@ -21,6 +21,8 @@
 #include <Bnd_Box.hxx>
 #include <GCPnts_QuasiUniformDeflection.hxx>
 #include <GProp_GProps.hxx>
+#include <IntCurvesFace_Intersector.hxx>
+#include <NCollection_DataMap.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Precision.hxx>
 #include <Standard_Failure.hxx>
@@ -28,6 +30,7 @@
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ShapeMapHasher.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Face.hxx>
@@ -486,8 +489,13 @@ struct AirSample {
 // in the plane across the print direction, a ray is a lookup and a few 2D
 // point-in-triangle tests. The triangle says which face is met and where on
 // it; the air is then taken off the face's own surface, closed-form on a
-// plane and by Newton from the triangle's UV on anything else, so only the
-// face's boundary is the tessellation's.
+// plane and by Newton from the triangle's UV on anything else; a triangle
+// whose face puts the material outside the window is passed over for the
+// next. Near a face's boundary the triangle can name the wrong face -- a
+// chord is not the face's edge, and the face beyond runs on past it -- so a
+// triangle on its face's boundary hands the ray to that face and every face
+// across its edges, each intersected exactly and kept only where the point
+// is on it.
 class RayDown {
 public:
   RayDown(const glm::dvec3& up, double cell) : up_(up), cell_(cell) {
@@ -501,7 +509,24 @@ public:
                const Handle(Poly_Triangulation) & tri, const gp_Trsf& tr) {
     const bool reversed = face.Orientation() == TopAbs_REVERSED;
     const int f = static_cast<int>(faces_.size());
-    faces_.push_back({face, nullptr, false});
+    faces_.push_back({face, nullptr, false, unit, nullptr, {}, false});
+    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+      if (std::vector<int>* fs = edgeFaces_.ChangeSeek(ex.Current()))
+        fs->push_back(f);
+      else
+        edgeFaces_.Bind(ex.Current(), std::vector<int>{f});
+    }
+    // The triangulation's edges used once are the face's boundary.
+    std::map<std::pair<int, int>, int> uses;
+    for (int t = 1; t <= tri->NbTriangles(); ++t) {
+      int a, b, c;
+      tri->Triangle(t).Get(a, b, c);
+      for (auto [i, j] : {std::pair{a, b}, {b, c}, {c, a}})
+        ++uses[{std::min(i, j), std::max(i, j)}];
+    }
+    const auto onBoundary = [&](int i, int j) {
+      return uses[{std::min(i, j), std::max(i, j)}] == 1;
+    };
     const int base = static_cast<int>(pos_.size());
     for (int i = 1; i <= tri->NbNodes(); ++i) {
       const glm::dvec3 p = V(tri->Node(i).Transformed(tr));
@@ -519,7 +544,10 @@ public:
       if (glm::dot(glm::cross(pb - pa, pc - pa), up_) <= 0.0)
         continue; // faces down or sideways: never met first from outside
       const int id = static_cast<int>(tris_.size());
-      tris_.push_back({{base + a - 1, base + b - 1, base + c - 1}, f, unit});
+      const bool edge =
+          onBoundary(a, b) || onBoundary(b, c) || onBoundary(c, a);
+      tris_.push_back(
+          {{base + a - 1, base + b - 1, base + c - 1}, f, unit, edge});
       double x0 = std::numeric_limits<double>::infinity(), y0 = x0;
       double x1 = -x0, y1 = -x0;
       for (const glm::dvec3* q : {&pa, &pb, &pc}) {
@@ -543,9 +571,12 @@ public:
     const long long k = Key(Cell(x), Cell(y));
     auto it = std::lower_bound(bins_.begin(), bins_.end(),
                                std::pair<long long, int>(k, -1));
-    int bestTri = -1;
-    double best = tMax;
-    glm::dvec3 bestBary(0.0);
+    struct Hit {
+      double t;
+      int tri;
+      glm::dvec3 bary;
+    };
+    std::vector<Hit> hits;
     for (; it != bins_.end() && it->first == k; ++it) {
       const Tri& t = tris_[it->second];
       const glm::dvec3 &a = pos_[t.n[0]], &b = pos_[t.n[1]], &c = pos_[t.n[2]];
@@ -567,15 +598,38 @@ public:
       const double hit =
           l0 * glm::dot(a, up_) + l1 * glm::dot(b, up_) + l2 * glm::dot(c, up_);
       const double tt = h - hit;
-      if (tt > tMin && tt < best) {
-        best = tt;
-        bestTri = it->second;
-        bestBary = {l0, l1, l2};
-      }
+      // Past the window by a chord's height or so: the face decides.
+      if (tt > tMin - cell_ && tt < tMax + cell_)
+        hits.push_back({tt, it->second, {l0, l1, l2}});
     }
-    if (bestTri < 0)
-      return {-1, tMax};
-    const Tri& t = tris_[bestTri];
+    std::sort(hits.begin(), hits.end(),
+              [](const Hit& a, const Hit& b) { return a.t < b.t; });
+    for (const Hit& hit : hits) {
+      if (tris_[hit.tri].boundary) {
+        // The face and its neighbours across its edges, exactly: the least
+        // air where the ray meets one of them on it.
+        const auto [unit, air] = OnFaces(p, tris_[hit.tri].face, tMin, tMax);
+        if (unit >= 0)
+          return {unit, air};
+        continue; // the chord is over air: nothing of these faces is here
+      }
+      if (const auto e = Exact(p, hit.tri, hit.t, hit.bary, tMin, tMax))
+        return *e;
+    }
+    return {-1, tMax};
+  }
+
+private:
+  // The air under `p` off the face of the triangle it met at `best`: the
+  // face's exact surface, or the triangle's where that does not solve.
+  // Nothing (the ray goes on) when the exact air is outside the window: a
+  // chord of a hollow lies above its surface, and once reported 0.383 where
+  // the socket it belonged to was 0.4 down.
+  std::optional<std::pair<int, double>> Exact(const glm::dvec3& p, int triIndex,
+                                              double best,
+                                              const glm::dvec3& bestBary,
+                                              double tMin, double tMax) {
+    const Tri& t = tris_[triIndex];
     // Off the face's own surface.
     Face& f = faces_[t.face];
     if (!f.surf) {
@@ -583,13 +637,16 @@ public:
       f.plane = f.surf->GetType() == GeomAbs_Plane;
     }
     double exact = best;
+    bool known = false;
     if (f.plane) {
       const gp_Pln pl = f.surf->Plane();
       const gp_Dir& n = pl.Axis().Direction();
       const double dn = -(n.X() * up_.x + n.Y() * up_.y + n.Z() * up_.z);
-      if (std::abs(dn) > 1e-12)
+      if (std::abs(dn) > 1e-12) {
         exact =
             gp_Vec(n).Dot(gp_Vec(gp_Pnt(p.x, p.y, p.z), pl.Location())) / dn;
+        known = true;
+      }
     } else {
       glm::dvec2 uv = bestBary.x * uv_[t.n[0]] + bestBary.y * uv_[t.n[1]] +
                       bestBary.z * uv_[t.n[2]];
@@ -613,26 +670,73 @@ public:
           break;
         }
       }
-      if (ok && std::abs(tt - best) < 4.0 * cell_)
+      if (ok && std::abs(tt - best) < 4.0 * cell_) {
         exact = tt;
+        known = true;
+      }
     }
-    if (exact > tMin && exact < tMax)
+    if (known)
       best = exact;
-    else if (!(best > tMin && best < tMax))
-      return {-1, tMax};
-    return {t.unit, best};
+    if (!(best > tMin && best < tMax))
+      return std::nullopt;
+    return std::pair{t.unit, best};
   }
 
-private:
+  // The ray down from `p` against face `f` and the faces across its edges,
+  // each exactly and classified: the least tMin < t < tMax on a face, and
+  // its unit, or unit -1.
+  std::pair<int, double> OnFaces(const glm::dvec3& p, int f, double tMin,
+                                 double tMax) {
+    Face& face = faces_[f];
+    if (!face.neighboursKnown) {
+      face.neighboursKnown = true;
+      face.neighbours.push_back(f);
+      for (TopExp_Explorer ex(face.face, TopAbs_EDGE); ex.More(); ex.Next())
+        if (const std::vector<int>* fs = edgeFaces_.Seek(ex.Current()))
+          for (int g : *fs)
+            if (std::find(face.neighbours.begin(), face.neighbours.end(), g) ==
+                face.neighbours.end())
+              face.neighbours.push_back(g);
+    }
+    const gp_Lin ray(gp_Pnt(p.x, p.y, p.z), gp_Dir(-up_.x, -up_.y, -up_.z));
+    int unit = -1;
+    double best = tMax;
+    for (int g : face.neighbours) {
+      Face& other = faces_[g];
+      if (!other.inter)
+        other.inter = std::make_unique<IntCurvesFace_Intersector>(
+            other.face, Precision::Confusion());
+      other.inter->Perform(ray, tMin, tMax);
+      if (!other.inter->IsDone())
+        continue;
+      for (int i = 1; i <= other.inter->NbPnt(); ++i) {
+        const TopAbs_State s = other.inter->State(i);
+        const double w = other.inter->WParameter(i);
+        if ((s == TopAbs_IN || s == TopAbs_ON) && w > tMin && w < best) {
+          best = w;
+          unit = other.unit;
+        }
+      }
+    }
+    return {unit, best};
+  }
+
   struct Tri {
     int n[3];
     int face, unit;
+    bool boundary; // an edge of it is its face's boundary
   };
   struct Face {
     TopoDS_Face face;
     std::unique_ptr<BRepAdaptor_Surface> surf;
     bool plane = false;
+    int unit = -1;
+    std::unique_ptr<IntCurvesFace_Intersector> inter;
+    std::vector<int> neighbours; // itself, and across its edges
+    bool neighboursKnown = false;
   };
+  NCollection_DataMap<TopoDS_Shape, std::vector<int>, TopTools_ShapeMapHasher>
+      edgeFaces_;
   long long Cell(double v) const {
     return static_cast<long long>(std::floor(v / cell_));
   }
@@ -799,8 +903,10 @@ void CheckStacking(const std::vector<const Body*>& bodies,
     const auto air = [&](const glm::dvec2& uv) {
       AirSample s;
       glm::dvec3 n;
-      if (!fe.At(uv.x, uv.y, s.p, n) || OverhangDeg(n, up) <= 1e-6 ||
-          glm::dot(up, s.p) <= bedMm + kBedTolMm)
+      // A triangle's UV past its face's boundary (a chord across a curved
+      // edge) is a point of the surface beyond the face: not a sample.
+      if (!fe.Inside(uv.x, uv.y) || !fe.At(uv.x, uv.y, s.p, n) ||
+          OverhangDeg(n, up) <= 1e-6 || glm::dot(up, s.p) <= bedMm + kBedTolMm)
         return s;
       st.samples++;
       const auto [hit, t] = rays.Cast(s.p, tMin, limit);
@@ -917,9 +1023,10 @@ void CheckStacking(const std::vector<const Body*>& bodies,
       "every piece's lowest point from the B-Rep; the air under each "
       "downward face by rays down from points of the face's own surface "
       "that a tessellation places (split to a sixteenth of the limit where "
-      "the answer changes): the face a ray meets is the tessellation's, the "
-      "air is taken off that face's exact surface; the area is the leaves "
-      "whose centre is under the limit";
+      "the answer changes), each on its face; the air is taken off the exact "
+      "surface of the face a ray meets, and next to a face's boundary off "
+      "every face across it, each where the ray meets it on the face; the "
+      "area is the leaves whose centre is under the limit";
 }
 
 } // namespace
