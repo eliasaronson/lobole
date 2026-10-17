@@ -350,6 +350,7 @@ void DrawShortcutsWindow(AppState& state) {
       row("Arrows", "Orbit; Ctrl pans, Alt rolls (fixed)");
       row("Click", "Select; Ctrl+click adds; click again cycles behind");
       row("Shift+click", "Select a face and look straight at it");
+      row("Right-click", "A part's menu, on an assembly; right drag orbits");
     }
     ImGui::EndTable();
   }

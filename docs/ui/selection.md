@@ -147,6 +147,12 @@ share the gesture and the verb
   row becomes the selection. Menu verbs count what they act on
   (`DeleteLabel`: "Delete 3 features"; `RowActionLabel`: "Hide 3
   occurrences").
+- A right **click** on an occurrence in the viewport is the same gesture
+  (`HandleSelectionInput`, on an assembly tab with nothing armed): the top
+  candidate under the cursor takes `ListRowContext`'s rule and its menu
+  opens. Only a release short of ImGui's drag threshold counts — a right drag
+  orbits, and moves the camera only once past that threshold, so a click
+  never nudges the view. Empty space opens nothing.
 - `DeleteSelection`: the one Delete, called by the Delete key (from the
   modal-key chain in `ViewportInput.cpp`, which yields to armed slots, a mate
   or fastener session, a text field, an edited sketch and an open editor) and

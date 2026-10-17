@@ -25,6 +25,24 @@ void DrawMateToolWindow(AppState& state);
 // where the feature tree is for a part). Defined in OccurrencePanel.cpp.
 void DrawOccurrencePanel(AppState& state);
 
+// An occurrence's context menu, the same from its row and from the viewport:
+// DrawOccurrenceMenu draws the items (inside an open popup) and returns what
+// was asked for; ApplyOccurrenceMenu does it, once the caller has stopped
+// walking the occurrence list, which Open, Detach and Delete change. Apply
+// returns true when the active document changed under the caller.
+struct OccurrenceMenuChoice {
+  enum class Verb { None, Open, Detach, Delete };
+  Verb verb = Verb::None;
+  uint64_t occurrenceId = 0; // Detach
+  size_t slot = 0;           // Open: the part/assembly tab
+};
+OccurrenceMenuChoice DrawOccurrenceMenu(AppState& state, uint64_t occId);
+bool ApplyOccurrenceMenu(AppState& state, const OccurrenceMenuChoice& choice);
+
+// The menu a right click on an occurrence in the viewport asked for
+// (state.occurrenceMenu). Drawn once a frame, after viewport input.
+void DrawViewportOccurrenceMenu(AppState& state);
+
 // The assembly's two viewport MODES, drawn in the floating tool window rather
 // than in the Model dock (docs/ui/panels.md#assembly-tab-the-model-panel): both
 // pose the occurrences and are driven with a slider or a drag gizmo, so they

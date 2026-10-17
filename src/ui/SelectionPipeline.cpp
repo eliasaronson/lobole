@@ -659,6 +659,22 @@ void HandleSelectionInput(AppState& state, bool overViewport,
     }
   }
 
+  // A right CLICK on an occurrence opens its menu; a right drag orbits
+  // (HandleViewportInput), so only a release short of the drag threshold
+  // counts. The menu puts the occurrence in the selection when it is not
+  // already there, the row menu's rule. An armed tool keeps the button.
+  if (state.assembly && !armed && !candidates.empty() &&
+      ImGui::IsMouseReleased(ImGuiMouseButton_Right) &&
+      io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] <
+          io.MouseDragThreshold * io.MouseDragThreshold) {
+    const SelectionItem& top = candidates.front().item;
+    if (top.kind == SelectionItem::Kind::Occurrence) {
+      state.occurrenceMenu.occurrenceId = top.id;
+      state.occurrenceMenu.open = true;
+    }
+    return;
+  }
+
   if (!ImGui::IsMouseClicked(ImGuiMouseButton_Left))
     return;
 

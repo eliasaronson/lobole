@@ -161,7 +161,15 @@ void HandleViewportInput(AppState& state) {
     }
   }
 
-  if (io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) {
+  // The right button is also a click (an occurrence's menu, in the pick
+  // pipeline), so its drag moves nothing until it passes the drag threshold:
+  // a click must not nudge the view.
+  const bool rightClickSoFar =
+      state.viewportDragButton == ImGuiMouseButton_Right &&
+      io.MouseDragMaxDistanceSqr[ImGuiMouseButton_Right] <
+          io.MouseDragThreshold * io.MouseDragThreshold;
+  if ((io.MouseDelta.x != 0.0f || io.MouseDelta.y != 0.0f) &&
+      !rightClickSoFar) {
     switch (state.viewportDrag) {
     case ViewportDrag::Orbit:
       state.camera->Orbit(io.MouseDelta.x, io.MouseDelta.y);

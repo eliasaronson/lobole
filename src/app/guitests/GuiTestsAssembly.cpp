@@ -1327,6 +1327,81 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(lit > 0); // the cursor found it at all
   };
 
+  // Right-clicking a part IN THE VIEWPORT opens the menu its row has: the
+  // part is under the cursor, and reaching its verbs meant finding its row.
+  // The right button also orbits, so only a click opens it: a drag turns the
+  // view and opens nothing, and empty space opens nothing either.
+  t = IM_REGISTER_TEST(engine, "assembly",
+                       "right_click_a_part_in_the_viewport");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    ctx->Yield();
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Menu");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence box;
+    box.name = "Box";
+    box.partId = s_App->parts[0].id;
+    box.fixed = true;
+    const uint64_t occId = s_App->assembly->AddOccurrence(box);
+    ui::SolveActiveAssembly(*s_App);
+    ctx->Yield(3);
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->StopAnimation();
+    ctx->Yield(3);
+    glm::vec3 lo, hi;
+    IM_CHECK(ui::VisibleSceneBounds(*s_App, lo, hi));
+    const ImVec2 at = WorldToWindow((lo + hi) * 0.5f);
+    const auto menuOpen = [&] {
+      return ctx->UiContext->OpenPopupStack.Size > 0;
+    };
+
+    // A drag from the part orbits and opens nothing.
+    const glm::vec3 eye = s_App->camera->GetPosition();
+    ctx->MouseMoveToPos(at);
+    ctx->MouseDown(ImGuiMouseButton_Right);
+    ctx->MouseMoveToPos(ImVec2(at.x + 80.0f, at.y + 40.0f));
+    ctx->MouseUp(ImGuiMouseButton_Right);
+    ctx->Yield(2);
+    IM_CHECK(glm::length(s_App->camera->GetPosition() - eye) > 0.1f);
+    IM_CHECK(!menuOpen());
+    ui::FitCameraToDocument(*s_App);
+    s_App->camera->StopAnimation();
+    ctx->Yield(3);
+    const ImVec2 back = WorldToWindow((lo + hi) * 0.5f);
+
+    // Empty space: nothing to name, so no menu (and nothing selected).
+    // (Off to the left, clear of the controls overlay in the bottom corner.)
+    ctx->MouseMoveToPos(
+        ImVec2(s_App->viewportPos.x + s_App->viewportSize.x * 0.1f,
+               s_App->viewportPos.y + s_App->viewportSize.y * 0.3f));
+    IM_CHECK(!ImGui::GetIO().WantCaptureMouse); // really over the viewport
+    ctx->MouseClick(ImGuiMouseButton_Right);
+    ctx->Yield(2);
+    IM_CHECK(!menuOpen());
+
+    // A click on the part: it becomes the selection, the menu names it, and
+    // the camera did not move under the click.
+    ctx->MouseMoveToPos(back);
+    const glm::vec3 still = s_App->camera->GetPosition();
+    ctx->MouseClick(ImGuiMouseButton_Right);
+    ctx->Yield(2);
+    IM_CHECK(menuOpen());
+    IM_CHECK(glm::length(s_App->camera->GetPosition() - still) < 1e-4f);
+    IM_CHECK(ui::IsOccurrenceSelected(*s_App, occId));
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    const std::string menu = std::string("//") + popup->Name;
+    IM_CHECK(ctx->ItemExists((menu + "/Hide occurrence###occ_hide").c_str()));
+    IM_CHECK(ctx->ItemExists((menu + "/###occ_delete").c_str()));
+
+    // ...and its verbs are the row's: Hide hides it.
+    ctx->ItemClick((menu + "/###occ_hide").c_str());
+    ctx->Yield(2);
+    IM_CHECK(!s_App->assembly->FindById(occId)->visible);
+    IM_CHECK(!menuOpen());
+  };
+
   // A part picked in the VIEWPORT is highlighted in a row that may be far
   // off the end of the list, where nobody sees it. The panel scrolls to it.
   t = IM_REGISTER_TEST(engine, "assembly",

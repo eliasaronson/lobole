@@ -1509,6 +1509,13 @@ struct AppState {
   // list, so the panel brings it into view — ONCE per change of selection,
   // or it would drag the list back every frame the part stayed selected.
   uint64_t occurrenceScrolledTo = 0;
+  // A right click on an occurrence in the viewport asks for its menu: the
+  // pick pipeline sets these, DrawViewportOccurrenceMenu opens the popup.
+  struct OccurrenceMenuRequest {
+    uint64_t occurrenceId = 0;
+    bool open = false; // opens on the next draw, then clears
+  };
+  OccurrenceMenuRequest occurrenceMenu;
   MateToolState mateTool;
   GizmoDrag gizmoDrag;
 

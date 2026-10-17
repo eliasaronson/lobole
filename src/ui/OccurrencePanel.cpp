@@ -1228,6 +1228,100 @@ void DrawBomWindow(AppState& state) {
   ImGui::End();
 }
 
+OccurrenceMenuChoice DrawOccurrenceMenu(AppState& state, uint64_t occId) {
+  OccurrenceMenuChoice choice;
+  const AssemblyDocument* asmDoc = state.assembly.get();
+  const Occurrence* live = asmDoc ? asmDoc->FindById(occId) : nullptr;
+  if (live == nullptr)
+    return choice;
+  const bool isSub = live->refKind == OccurrenceRef::Assembly;
+  if (ImGui::MenuItem("Edit###occ_edit"))
+    EditAssemblyOccurrence(state, occId);
+  ListRowContext(state, SelectionItem::Kind::Occurrence, occId,
+                 /*ownKindOnly=*/true);
+  const std::optional<size_t> slot = RefSlotIndex(state, *live);
+  const std::string item =
+      std::string("Open ") + (isSub ? "assembly" : "part") + "###occ_open";
+  if (ImGui::MenuItem(item.c_str(), nullptr, false, slot.has_value())) {
+    choice.verb = OccurrenceMenuChoice::Verb::Open;
+    choice.slot = *slot;
+  }
+  if (!slot && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    ImGui::SetTooltip("%s", isSub ? "That assembly is not in this project"
+                                  : "That part is not in this project");
+  const size_t pickedVis = SelectedOccurrenceIds(state).size();
+  const std::string visItem =
+      RowActionLabel(SelectionWouldHide(state) ? "Hide" : "Show", pickedVis,
+                     "occurrence") +
+      "###occ_hide";
+  if (ImGui::MenuItem(visItem.c_str()))
+    ToggleSelectedOccurrencesVisible(state); // rows keep their places
+  if (live->attachedTo != 0 &&
+      ImGui::MenuItem("Detach from its part###occ_detach")) {
+    choice.verb = OccurrenceMenuChoice::Verb::Detach;
+    choice.occurrenceId = occId;
+  }
+  ImGui::Separator();
+  const std::string del =
+      DeleteLabel(SelectedOccurrenceIds(state).size(), "occurrence") +
+      "###occ_delete";
+  if (ImGui::MenuItem(del.c_str()))
+    choice.verb = OccurrenceMenuChoice::Verb::Delete;
+  return choice;
+}
+
+bool ApplyOccurrenceMenu(AppState& state, const OccurrenceMenuChoice& choice) {
+  switch (choice.verb) {
+  case OccurrenceMenuChoice::Verb::Open:
+    SetActivePart(state, choice.slot);
+    return true;
+  case OccurrenceMenuChoice::Verb::Detach:
+    if (!state.assembly)
+      return false;
+    SnapshotAssembly(state);
+    if (Occurrence* d = state.assembly->FindById(choice.occurrenceId)) {
+      d->attachedTo = 0;
+      d->attachSeat = {}; // free: no parent, so no hole in it either
+      d->attachError.clear();
+      d->attachWarning.clear();
+    }
+    state.assembly->BumpVersion();
+    return false;
+  case OccurrenceMenuChoice::Verb::Delete:
+    DeleteSelection(state);
+    return true;
+  case OccurrenceMenuChoice::Verb::None:
+    break;
+  }
+  return false;
+}
+
+void DrawViewportOccurrenceMenu(AppState& state) {
+  AppState::OccurrenceMenuRequest& req = state.occurrenceMenu;
+  const char* id = "###viewport_occ_ctx";
+  if (req.open) {
+    ImGui::OpenPopup(id);
+    req.open = false;
+  }
+  if (!ImGui::BeginPopup(id))
+    return;
+  const Occurrence* live =
+      state.assembly ? state.assembly->FindById(req.occurrenceId) : nullptr;
+  if (live == nullptr) { // undone, deleted, or the tab changed under it
+    ImGui::CloseCurrentPopup();
+    ImGui::EndPopup();
+    return;
+  }
+  // Which part this is: the row menu has its row beside it, this has not.
+  ImGui::TextDisabled(
+      "%s", OccurrenceLabel(state, *state.assembly, req.occurrenceId).c_str());
+  ImGui::Separator();
+  const OccurrenceMenuChoice choice =
+      DrawOccurrenceMenu(state, req.occurrenceId);
+  ImGui::EndPopup();
+  ApplyOccurrenceMenu(state, choice);
+}
+
 // The occurrence list + properties editor, drawn in the "Model" panel (where a
 // part tab shows its feature tree) when an assembly tab is active. Edits
 // snapshot for undo; a drag is one undo step (snapshot on IsItemActivated).
@@ -1256,10 +1350,7 @@ void DrawOccurrencePanel(AppState& state) {
       occOrder.push_back(o.id);
     // What a row's menu asked for, applied after the loop: several of them
     // change the list (or the document) being walked.
-    enum class After { None, Open, Detach, Delete };
-    After after = After::None;
-    uint64_t afterId = 0;
-    size_t afterSlot = 0;
+    OccurrenceMenuChoice choice;
     for (const Occurrence& o : asmDoc.GetOccurrences()) {
       const std::string suffix = std::to_string(o.id);
       const bool isSub = o.refKind == OccurrenceRef::Assembly;
@@ -1291,41 +1382,10 @@ void DrawOccurrencePanel(AppState& state) {
                     (o.fixed ? "\nFixed (grounded)" : "") +
                     (o.visible ? "" : "\nHidden") + "\nDouble-click to edit";
       row.menuId = "###occ_ctx_" + suffix;
-      row.menu = [&, occId = o.id, isSub]() {
-        if (ImGui::MenuItem("Edit###occ_edit"))
-          EditAssemblyOccurrence(state, occId);
-        ListRowContext(state, SelectionItem::Kind::Occurrence, occId,
-                       /*ownKindOnly=*/true);
-        const Occurrence* live = asmDoc.FindById(occId);
-        const std::optional<size_t> slot =
-            live != nullptr ? RefSlotIndex(state, *live) : std::nullopt;
-        const std::string item = std::string("Open ") +
-                                 (isSub ? "assembly" : "part") + "###occ_open";
-        if (ImGui::MenuItem(item.c_str(), nullptr, false, slot.has_value())) {
-          after = After::Open;
-          afterSlot = *slot;
-        }
-        if (!slot && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-          ImGui::SetTooltip("%s", isSub ? "That assembly is not in this project"
-                                        : "That part is not in this project");
-        const size_t pickedVis = SelectedOccurrenceIds(state).size();
-        const std::string visItem =
-            RowActionLabel(SelectionWouldHide(state) ? "Hide" : "Show",
-                           pickedVis, "occurrence") +
-            "###occ_hide";
-        if (ImGui::MenuItem(visItem.c_str()))
-          ToggleSelectedOccurrencesVisible(state); // rows keep their places
-        if (live != nullptr && live->attachedTo != 0 &&
-            ImGui::MenuItem("Detach from its part###occ_detach")) {
-          after = After::Detach;
-          afterId = occId;
-        }
-        ImGui::Separator();
-        const std::string del =
-            DeleteLabel(SelectedOccurrenceIds(state).size(), "occurrence") +
-            "###occ_delete";
-        if (ImGui::MenuItem(del.c_str()))
-          after = After::Delete;
+      row.menu = [&, occId = o.id]() {
+        const OccurrenceMenuChoice c = DrawOccurrenceMenu(state, occId);
+        if (c.verb != OccurrenceMenuChoice::Verb::None)
+          choice = c;
       };
       const ListRowResult res = ListRow(row);
       if (res.clicked)
@@ -1337,32 +1397,14 @@ void DrawOccurrencePanel(AppState& state) {
         SetOccurrencesVisible(state, {o.id}, !o.visible);
       if (o.id == bringIntoView && !ImGui::IsItemVisible())
         ImGui::SetScrollHereY(0.5f);
-      if (after != After::None)
+      if (choice.verb != OccurrenceMenuChoice::Verb::None)
         break; // the list, or the document, is about to change
       if (o.flexible)
         DrawFlexibleChildren(state, o);
     }
-    switch (after) {
-    case After::Open:
-      SetActivePart(state, afterSlot);
+    if (ApplyOccurrenceMenu(state, choice)) {
       ImGui::End();
-      return; // the panel is now drawing a different document
-    case After::Detach:
-      SnapshotAssembly(state);
-      if (Occurrence* d = asmDoc.FindById(afterId)) {
-        d->attachedTo = 0;
-        d->attachSeat = {}; // free: no parent, so no hole in it either
-        d->attachError.clear();
-        d->attachWarning.clear();
-      }
-      asmDoc.BumpVersion();
-      break;
-    case After::Delete:
-      DeleteSelection(state);
-      ImGui::End();
-      return; // the list we were walking just changed under us
-    case After::None:
-      break;
+      return; // a different document, or the list we walked just changed
     }
   }
 

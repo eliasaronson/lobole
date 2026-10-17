@@ -457,7 +457,8 @@ void DrawControlsHelpOverlay(AppState& state) {
     ImGui::Separator();
     ImGui::BulletText("Click: select edge/face (again: cycle, Ctrl: multi)");
     ImGui::BulletText("Shift+Click: align camera to face");
-    ImGui::BulletText("Middle drag: rotate");
+    ImGui::BulletText("Middle or right drag: rotate");
+    ImGui::BulletText("Right-click a part (assembly): its menu");
     ImGui::BulletText("Ctrl+Middle: pan   Shift+Middle: zoom");
     ImGui::BulletText("Alt+Middle: roll   Scroll: zoom");
     ImGui::BulletText("Arrows: rotate (Shift: 90\xc2\xb0)   Z: zoom");
@@ -987,6 +988,7 @@ void DrawUI(AppState& state) {
   DispatchShortcuts(state);
 
   HandleViewportInput(state);
+  DrawViewportOccurrenceMenu(state); // what a right click there asked for
   // Renderer highlights are a projection of the Selection (U1b): one sync
   // point after input may have changed the set.
   SyncSelectionHighlights(state);

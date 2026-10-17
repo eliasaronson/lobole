@@ -106,6 +106,11 @@ The feature tree (`src/ui/FeatureTreePanel.cpp`):
   "held" when its configuration holds it). They are read-only: a part row
   selects that part, a mate row the part it moves, and the part then drags
   in the viewport. The rest of the unit folds into its own row.
+  Right-click: Edit, Open part (or assembly), Hide/Show, Detach from its
+  part (a rider), Delete. **The same menu opens on the part in the
+  viewport** (`DrawViewportOccurrenceMenu`, headed with its name): both draw
+  `DrawOccurrenceMenu` and apply it with `ApplyOccurrenceMenu`, so the two
+  cannot offer different verbs.
 - **Mates** — a glyph per type, then the mate's name or "A – B" (the two
   occurrences it joins), the type as a dim tail; red with the reason in the
   tooltip when it failed to solve. The mate list uses `clickClears`.

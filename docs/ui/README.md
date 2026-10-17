@@ -71,6 +71,9 @@ that size. The window title is the project name, `*` when dirty.
   Standard Views), and the **view cube** at the bottom right snaps to a
   clicked face, edge or corner, with a home button. View > Viewport Controls
   shows the mouse and trackpad cheat sheet.
+- The right button orbits when dragged and is a click when it is not: on an
+  assembly tab a right click on a part opens its menu
+  ([selection](selection.md)).
 - **A named view is an orientation, not a place.** The menu, the view cube,
   `Shift+1`..`7` and the palette all turn the camera about its own pivot
   (`StandardView` in `Commands.cpp`), so a part modelled away from the origin
