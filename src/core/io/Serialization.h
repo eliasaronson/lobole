@@ -174,11 +174,11 @@ MateDof MateDofFromString(const std::string& s);
 const char* FreewheelDrivesToString(int drives);
 int FreewheelDrivesFromString(const std::string& s);
 // An intermittent relation's `motion` (v174) and its `slots`, as the slot
-// count it stores: 0 for "uniform" and "table" (vNEXT), N >= 3 for
+// count it stores: 0 for "uniform" and "table" (v184), N >= 3 for
 // "geneva"; an unknown motion, a Geneva under 3 slots, and slots on any
 // other motion are refused.
 int IntermittentSlotsFor(const std::string& motion, int slots);
-// A `table` motion's points (vNEXT), [[driver fraction, step fraction],
+// A `table` motion's points (v184), [[driver fraction, step fraction],
 // ...]: refused, naming why, when it is not an array of pairs of numbers
 // or not a law (IntermittentTableError).
 std::vector<std::pair<double, double>>

@@ -415,7 +415,7 @@ struct Relation {
   // external Geneva's exact law over the window (step -360/slots, window
   // 180 - 360/slots, both derived); 0 is a uniform step, a gear-driven
   // carry. A pure function of a — the count is in a's turns, so nothing
-  // here is history. `table` (vNEXT), when not empty, is the law over the
+  // here is history. `table` (v184), when not empty, is the law over the
   // window as (driver fraction, step fraction) points from (0, 0) to
   // (1, 1), both monotone, linear between them: a follower that keeps to
   // a driver's face, as an escape wheel to its pallet's impulse face.

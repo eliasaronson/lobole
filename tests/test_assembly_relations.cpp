@@ -2101,7 +2101,7 @@ TEST_CASE("A table law follows its points, and a table that is not a law is "
 
   // The golden: the v174 carry, its law a table, counts the same digits.
   const fs::path golden = fs::path(TestSourceDir()) /
-                          "tests/golden/assembly/vNEXT-intermittent-table.json";
+                          "tests/golden/assembly/v184-intermittent-table.json";
   auto gd = DocumentIO::LoadAssembly(golden.string());
   REQUIRE(gd.has_value());
   const Relation& carry = (*gd)->GetRelations()[0];

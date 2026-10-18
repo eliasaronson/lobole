@@ -539,7 +539,7 @@ int IntermittentMotionFromJson(const json& j) {
   return IntermittentSlotsFor(j.at("motion").get<std::string>(),
                               j.value("slots", 0));
 }
-// A table motion's points (vNEXT); a table under any other motion is
+// A table motion's points (v184); a table under any other motion is
 // refused rather than dropped.
 std::vector<std::pair<double, double>> IntermittentTableOf(const json& j) {
   const bool table = j.at("motion").get<std::string>() == "table";
@@ -626,7 +626,7 @@ json RelationToJson(const Relation& r) {
                                       : "uniform";
     if (im.slots > 0)
       j["slots"] = im.slots;
-    if (!im.table.empty()) { // vNEXT
+    if (!im.table.empty()) { // v184
       json t = json::array();
       for (const auto& [f, st] : im.table)
         t.push_back({f, st});
