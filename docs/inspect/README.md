@@ -395,6 +395,12 @@ and is for questions asked over and over.
   a shaft has its box centre inside the shaft.
 - The mesh cache keys on placement (`CADShape::PlacementId`), not geometry:
   two occurrences of one part share a shape and sit in different places.
+  Each entry holds its shape as well as the mesh, because `PlacementId`
+  mixes the TShape's address and a freed address is reused by the next shape
+  allocated: an entry holding only the mesh served it for that next shape,
+  and the print check read two overlapping boxes as apart. As it doubles,
+  the cache drops the entries only it keeps alive, never one still in use,
+  which would remesh on a sweep's worker.
 - The triangle test uses the separating-axis theorem with the two face
   normals, the nine edge-edge crosses, **and** each triangle's in-plane edge
   normals. Without the last six, coplanar triangles have no separating axis

@@ -8,6 +8,9 @@
 #include <map>
 #include <mutex>
 
+#include <TopoDS_Shape.hxx>
+#include <TopoDS_TShape.hxx>
+
 namespace collide {
 namespace {
 
@@ -215,7 +218,36 @@ std::mutex g_mutex;
 // meshes in different places. Keying on GeometryId would hand the second
 // occurrence the first one's mesh — every pair would then be tested against
 // a body sitting somewhere else.
-std::map<uint64_t, std::shared_ptr<const Mesh>> g_cache;
+//
+// An entry HOLDS its shape as well as the mesh. PlacementId mixes the
+// TShape's address, and a freed TShape's address is handed to the next one
+// allocated: an entry that kept only the mesh served it for whatever shape
+// came next (the print check's overlapping pair read the meshes of a pair
+// 0.1 mm apart, called the surfaces apart and skipped its boolean). Holding
+// the shape reserves the address for as long as its key exists
+// (Measure.h's SectionCapCache, the same trap).
+struct Entry {
+  TopoDS_Shape source;
+  std::shared_ptr<const Mesh> mesh;
+};
+std::map<uint64_t, Entry> g_cache;
+// Held shapes would otherwise stay alive for the session, so the cache drops
+// the entries it alone keeps alive -- a shape nobody else holds can never be
+// asked about again -- whenever it doubles. Never an entry still in use: one
+// rebuilt would mesh on a sweep's worker, the race CachedMesh exists to stop.
+constexpr size_t kPruneFloor = 256;
+size_t g_pruneAt = kPruneFloor;
+
+void PruneUnheld() {
+  for (auto it = g_cache.begin(); it != g_cache.end();) {
+    const Handle(TopoDS_TShape) & t = it->second.source.TShape();
+    if (t.IsNull() || t->GetRefCount() == 1)
+      it = g_cache.erase(it);
+    else
+      ++it;
+  }
+  g_pruneAt = std::max(kPruneFloor, 2 * g_cache.size());
+}
 
 std::shared_ptr<const Mesh> CachedMesh(const CADShape& s) {
   const uint64_t key = s.PlacementId();
@@ -242,9 +274,11 @@ std::shared_ptr<const Mesh> CachedMesh(const CADShape& s) {
   std::lock_guard<std::mutex> lock(g_mutex);
   const auto it = g_cache.find(key);
   if (it != g_cache.end())
-    return it->second;
+    return it->second.mesh;
+  if (g_cache.size() >= g_pruneAt)
+    PruneUnheld();
   auto built = Mesh::Build(s);
-  g_cache[key] = built;
+  g_cache[key] = Entry{s.GetShape(), built};
   return std::shared_ptr<const Mesh>(built);
 }
 
@@ -671,6 +705,7 @@ size_t CacheSize() {
 void ClearCache() {
   std::lock_guard<std::mutex> lock(g_mutex);
   g_cache.clear();
+  g_pruneAt = kPruneFloor;
 }
 
 } // namespace collide

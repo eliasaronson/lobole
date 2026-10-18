@@ -107,6 +107,29 @@ TEST_CASE("The mesh cache keys on placement, not on geometry alone",
   CHECK(collide::CacheSize() == 2);
 }
 
+TEST_CASE("A freed shape's address never brings back its mesh", "[collide]") {
+  // The cache is keyed on PlacementId, which mixes the TShape's ADDRESS, and
+  // a freed TShape's address is handed to the next one allocated. An entry
+  // that kept only the mesh then served it for a different shape: the print
+  // check's overlapping pair read the meshes of the pair 0.1 mm apart made
+  // just before it, called the surfaces apart and skipped its boolean.
+  collide::ClearCache();
+  for (int i = 0; i < 200; ++i) {
+    const bool apart = i % 2 == 0;
+    const float x = apart ? 10.5f : 9.0f;
+    const CADShape a = Box({0, 0, 0}, {10, 10, 10});
+    const CADShape b = Box({x, 0, 0}, {x + 10, 10, 10});
+    const collide::Gap gap =
+        collide::Nearest(a, glm::dmat4(1.0), b, glm::dmat4(1.0), 2.0);
+    INFO("round " << i << ", the second box at x = " << x);
+    REQUIRE(gap.known);
+    CHECK((gap.distance > 0.0) == apart);
+  }
+  // Entries the cache alone keeps alive are dropped as it grows, so holding
+  // the shapes does not keep every one ever meshed.
+  CHECK(collide::CacheSize() < 400);
+}
+
 TEST_CASE("Mesh collision is far cheaper than the exact boolean",
           "[collide][slow]") {
   collide::ClearCache();
