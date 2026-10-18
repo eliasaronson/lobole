@@ -37,13 +37,6 @@ all drive. Linux first; Windows builds exist, macOS is untested.
 Each area is described in [docs/](docs/README.md); what is missing is in
 [docs/roadmap.md](docs/roadmap.md).
 
-| | | |
-|:---:|:---:|:---:|
-| [![Sketching on a face](docs/gallery/app-sketch.jpg)](docs/sketching/README.md) | [![A variable driving a part](docs/gallery/app-variables.jpg)](docs/variables/README.md) | [![An assembly in section](docs/gallery/app-assembly.jpg)](docs/assemblies/README.md) |
-| **Sketching** on a part's face | **Variables** drive the model | **Assemblies**, cut open |
-| [![A static study](docs/gallery/app-simulation.jpg)](docs/simulation/README.md) | [![A toolpath simulated](docs/gallery/app-cam.jpg)](docs/cam/README.md) | [![Version history](docs/gallery/app-history.jpg)](docs/versioning/README.md) |
-| **Simulation** in the part | **CAM**, the cut simulated | **History**, any version restored |
-
 ## Gallery
 
 Every model here is built by a generator — an ordinary Python program driving
