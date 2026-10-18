@@ -147,7 +147,7 @@ void WriteSide(json& j, const char* key, double value,
 // refused by the key's own name before anything reads it. Reading one
 // directly let nlohmann answer: `document: "Garden shed"` came back as "a
 // parameter has the wrong type -- type must be number, but is string", which
-// names neither the field nor what goes in it (generators/house/README.md).
+// names neither the field nor what goes in it.
 void ValidateTypes(const std::string& kind, const char* document,
                    const json& m) {
   const auto refuse = [&](const std::string& key, const std::string& takes) {

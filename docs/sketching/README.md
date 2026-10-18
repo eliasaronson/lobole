@@ -490,8 +490,9 @@ affine: pixel `(px, py)` maps to `origin + R(rotation)·(px, py)·unitsPerPixel`
   (`rotation` in radians or `rotation_deg`, never both) is about the centre
   in both: a `set` that turns or rescales the image with neither keeps the
   centre where it was. Both answer with the placement as `at` and `origin`.
-  Add once took only the centre and set only the corner, and the house
-  generator's plan landed half an image away from where it was put.
+  Add once took only the centre and set only the corner, and a plan placed
+  by one and adjusted by the other landed half an image away from where it
+  was put.
 
 ## Operations on the entity list
 

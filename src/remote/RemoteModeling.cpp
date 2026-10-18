@@ -1988,7 +1988,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // `origin` its (0, 0) pixel corner (what is stored), and a turn is about
     // the centre. add used to take only the centre and set only the corner,
     // so a script placing by one and adjusting by the other moved the image
-    // by half its turned extent (generators/house/README.md).
+    // by half its turned extent.
     // delete:    {sketch_id, image_id}
     size_t index = 0;
     Feature* f =

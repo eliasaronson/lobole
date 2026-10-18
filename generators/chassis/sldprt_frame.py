@@ -419,7 +419,7 @@ def main():
         w = walls[m["od"]]
         m["wall"] = max(set(w), key=w.count)
     out = {
-        "source": a.sldprt.rsplit("/", 1)[-1],
+        "source": "a SolidWorks frame part (SLDPRT)",
         "units": "mm; x rearward, z up, y across (the frame is mirrored "
                  "about y = 0)",
         "nodes": [[round(c, 2) for c in n["p"]] for n in nodes],
