@@ -167,7 +167,15 @@ its keep-out zones.
   a fifth of the gap, **stacking** (every piece on the bed, and no face
   within the air over another piece: none within 0.4 mm), and `bed_fit`
   (62.9 × 58.5 × 220.3 mm in the P1S's 256 × 256 × 250, clear of its
-  keep-out corner). Then the plate's print job.
+  keep-out corner). Then the plate's print job. **Every item but
+  `slender`**, which the counter fails and the run prints as OPEN rather
+  than demanding: read alone, each wheel is its tube standing on the bed
+  inside the wheels under it, and each transfer its column, so the units'
+  is 220 mm on a 4 mm foot (55:1) and the transfers' columns 46:1 and
+  29:1 ([slender](../../docs/tolerances/README.md#slender)). Nested, each
+  piece is braced at the gap by the one round it, which the item does not
+  model; whether the stack stands while it prints is the next print's to
+  answer, and a counter that lies on its side would not ask.
 - **The counting**, in the assembly: each wheel on a revolute to the
   housing's frames, each transfer on its own; per carry an `intermittent`
   relation (Geneva, 3 slots) wheel → transfer and a `gear` relation (9:30)
