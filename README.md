@@ -2,22 +2,47 @@
 
 [![CI](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml/badge.svg)](https://github.com/eliasaronson/Designer/actions/workflows/ci.yml)
 
-Project to build an open-source parametric 3D CAD application using Vulkan,
-ImGui and OpenCASCADE — working the way commercial parametric CAD applications
-do, with transformation checkpoints, global variables, git-based versioning,
-and an interface designed so that LLM assistants can use the same commands as
-human users.
+Open-source parametric CAD: B-Rep modeling on OpenCASCADE, a Vulkan
+viewport, and one command layer that the GUI, Python scripts and AI agents
+all drive. Linux first; Windows builds exist, macOS is untested.
 
-Scripting happens outside the process: the app serves a JSON-RPC interface,
-and a generated Python SDK (the `lobole` package, `python/lobole/`), an MCP server for agents
-and plain scripts all drive it (see
-[docs/scripting/README.md](docs/scripting/README.md)). An optional terminal
-panel runs a shell or an agent inside the app window, already pointed at that
-instance ([docs/ui/terminal.md](docs/ui/terminal.md)). There is no Python
-interpreter embedded in the app.
+## What it does
 
-See [docs/README.md](docs/README.md) for how each part of the program works, and
-[docs/roadmap.md](docs/roadmap.md) for what is not built yet.
+- **Parametric modeling** — a constraint sketcher, features that survive
+  upstream edits (stable topological naming), variables and expressions,
+  configurations, sheet metal, bent tube.
+- **Assemblies** — mates, sub-assemblies, motion studies with clash checks,
+  exploded views, a BOM, standard fasteners.
+- **Drawings** — sheets with projected views, dimensions and tables, out to
+  SVG and PDF.
+- **Simulation** — static and modal FEM, and topology optimization, on the
+  part itself.
+- **Manufacturing** — 2.5D, 3-axis and 4th-axis milling posted for Mach3,
+  LinuxCNC or GRBL, each file verified by simulating it; checks for 3D
+  printing.
+- **Versioning** — history, named versions, branches and merges, backed by
+  git.
+- **Scripting and agents** — JSON-RPC, a Python SDK and an MCP server reach
+  every command the GUI has; a terminal panel runs an agent inside the
+  window.
+- **Interchange** — STEP, STL and BREP in; those plus glTF, OBJ, PLY, DXF,
+  SVG and PDF out.
+
+> [!WARNING]
+> **CAM has cut real parts on one machine only**: a 6090 CNC router on
+> Mach3. The LinuxCNC and GRBL posts follow each controller's documentation
+> but have not run on hardware. Simulate and dry-run every file before
+> cutting.
+
+Each area is described in [docs/](docs/README.md); what is missing is in
+[docs/roadmap.md](docs/roadmap.md).
+
+| | | |
+|:---:|:---:|:---:|
+| [![Sketching on a face](docs/gallery/app-sketch.jpg)](docs/sketching/README.md) | [![A variable driving a part](docs/gallery/app-variables.jpg)](docs/variables/README.md) | [![An assembly in section](docs/gallery/app-assembly.jpg)](docs/assemblies/README.md) |
+| **Sketching** on a part's face | **Variables** drive the model | **Assemblies**, cut open |
+| [![A static study](docs/gallery/app-simulation.jpg)](docs/simulation/README.md) | [![A toolpath simulated](docs/gallery/app-cam.jpg)](docs/cam/README.md) | [![Version history](docs/gallery/app-history.jpg)](docs/versioning/README.md) |
+| **Simulation** in the part | **CAM**, the cut simulated | **History**, any version restored |
 
 ## Gallery
 
@@ -32,8 +57,6 @@ path tracer. See
 | **OM615 diesel** — every part down to the bearing shells, with its Bosch injection pump chained to the crank and timed | **Automatic watch** — a 3 Hz self-winding movement behind the dial: lever escapement, rotor winding, keyless works |
 | [![Bicycle](docs/gallery/bicycle.jpg)](generators/bike) | [![FPV quadcopter](docs/gallery/fpv-drone.jpg)](generators/fpv_drone) |
 | **Bicycle** — modelled from photographs: frame, wheels with laced spokes, chain drive | **5-inch FPV quadcopter** — 91 occurrences, fitted fasteners, FEM on the arms |
-| [![The Loböle mark branded into a pine log end](docs/gallery/lobole-log-end.jpg)](generators/logo) | [![The Loböle icon as a part](docs/gallery/lobole-badge.jpg)](generators/logo) |
-| **The logo, branded** — the mark read from its master SVG and burned into end grain | **The icon as a part** — the same mark, raised on the tile in the sketch colour |
 
 ## Installing
 

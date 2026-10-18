@@ -10,8 +10,8 @@ the icon.
     python3 generators/logo/build.py --port 8801 --only log_end --samples 1024
 
 Builds, each in a fresh project, and renders with the path tracer:
-- log_end: a pine log with the mark branded into its end grain -- the
-  README's hero (docs/gallery/lobole-log-end.jpg);
+- log_end: a pine log with the mark branded into its end grain
+  (docs/gallery/lobole-log-end.jpg);
 - badge: the app icon as a part, the tile in the viewport's colour and the
   mark raised in the sketch colour.
 
