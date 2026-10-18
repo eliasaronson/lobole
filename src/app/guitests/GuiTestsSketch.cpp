@@ -514,7 +514,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(s_App->sketchEdit.selected.size(), (size_t)2);
     IM_CHECK(!s_App->sketchEdit.mirrorAxisPhase);
 
-    // A tap in EMPTY SPACE continues to the axis step. +U,+V is the corner
+    // A tap in EMPTY SPACE continues to the axis step. -U,-V is the corner
     // away from the session window, which sits top-right of the viewport —
     // and the clearance is asserted, not assumed: this used to tap the other
     // corner with a comment claiming it was clear, and narrowing the camera's
@@ -522,7 +522,7 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     // under the window, where the tap went to the window and the phase never
     // advanced.
     const glm::vec2 t2 =
-        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(2, 2));
+        ui::SketchUVToScreen(*s_App, sk->plane, glm::vec2(-1, -1));
     const glm::vec4 win = s_App->toolWindowRect;
     ctx->LogInfo("tap at %.0f,%.0f; session window %.0f,%.0f..%.0f,%.0f", t2.x,
                  t2.y, win.x, win.y, win.z, win.w);
@@ -1010,6 +1010,38 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     // One cylinder's volume, not two (r=1, default distance 1 → pi).
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
     IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - M_PI) < 1e-2);
+  };
+
+  // A sketch opens the way it is read: +U to the right and, on Top, +V up --
+  // on the others the world's up stays up. Looking straight down, world up
+  // is the view axis, and the camera's fallback turned Top's sketch 180
+  // degrees: +X pointing left and +Y down.
+  t = IM_REGISTER_TEST(engine, "sketch", "a_base_plane_opens_the_right_way_up");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    for (int plane = 0; plane < 3; plane++) {
+      ctx->MenuClick("File/New");
+      ctx->Yield();
+      EnterSketchOnPlane(ctx, plane);
+      const SketchPlane p = ui::DefaultPlane(plane);
+      const glm::vec2 o = ui::SketchUVToScreen(*s_App, p, {0, 0});
+      const glm::vec2 u = ui::SketchUVToScreen(*s_App, p, {1, 0});
+      const glm::vec2 v = ui::SketchUVToScreen(*s_App, p, {0, 1});
+      ctx->LogInfo("plane %d: +U (%.1f, %.1f) +V (%.1f, %.1f)", plane,
+                   u.x - o.x, u.y - o.y, v.x - o.x, v.y - o.y);
+      const bool top =
+          std::abs(glm::dot(glm::vec3(p.GetNormal()), conv::kWorldUpF)) > 0.9f;
+      if (top) {
+        IM_CHECK_GT(u.x, o.x + 1.0f); // +U right
+        IM_CHECK_LT(v.y, o.y - 1.0f); // +V up (screen y grows downwards)
+      } else {
+        const ImVec2 up =
+            WorldToWindow(glm::vec3(p.GetOrigin()) + conv::kWorldUpF);
+        IM_CHECK_LT(up.y, WorldToWindow(glm::vec3(p.GetOrigin())).y - 1.0f);
+      }
+      ToolbarClick(ctx, "###tb_sk_finish");
+      ctx->Yield();
+    }
   };
 
   // A circle drawn inside an outline, picked by clicking inside it: its own

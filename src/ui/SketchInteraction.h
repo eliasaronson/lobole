@@ -26,6 +26,12 @@ SketchPlane DefaultPlane(int index);
 // issuing any index-based command against the sketch.
 SketchFeature* ResolveActiveSketch(AppState& state, size_t* outIndex = nullptr);
 
+// Turns the camera to look straight at a sketch plane, from its front. The
+// view keeps the world's up where that lies in the plane; on a plane facing
+// up or down it has none, and the sketch's own V is up -- so +U reads to the
+// right and +V upwards, rather than whatever the camera's fallback picks.
+void AlignCameraToSketch(AppState& state, const SketchPlane& plane);
+
 // Starts a new sketch on the given plane: pushes an AddFeatureCommand, enters
 // edit mode on it, and aligns the camera. Returns the new sketch's id.
 // `purpose` marks WHY the sketch exists (Hole = collecting hole centres for

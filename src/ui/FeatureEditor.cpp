@@ -54,6 +54,7 @@
 #include "core/sketch/SketchProfile.h"
 #include "render/Camera.h"
 #include "ui/CreateActions.h"
+#include "ui/SketchInteraction.h"
 #include "ui/SketchOverlay.h"
 #include "ui/ViewActions.h" // BodyProducers
 
@@ -1824,8 +1825,7 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
       state.sketchEdit = SketchEditState{};
       state.sketchEdit.activeSketchId = sk->GetId();
       state.measure = MeasureState{}; // sketch mode replaces the measure tool
-      if (state.camera)
-        state.camera->AlignToFace(sk->plane.GetOrigin(), sk->plane.GetNormal());
+      AlignCameraToSketch(state, sk->plane);
     }
   } else if (auto* dp = dynamic_cast<DatumPlaneFeature*>(&feature)) {
     DrawDatumPlaneParams(state, *dp, index, commit);

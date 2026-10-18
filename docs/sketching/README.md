@@ -658,6 +658,15 @@ the sketch's first consumer so solids built from it are out of the way
 (`SyncSketchViewRollback`, `ProjectActions.cpp`) — transient, never saved,
 never dirties the document.
 
+Entering a sketch turns the camera to face the plane from its front
+(`AlignCameraToSketch`, `SketchTools.cpp`). The world's up stays up where it
+lies in the plane; a plane facing up or down has no such direction, and there
+the sketch's own +V is up, so Top reads +X right and +Y up. Without that the
+camera fell back to an arbitrary up and Top opened turned 180°
+(`sketch/a_base_plane_opens_the_right_way_up`). Front's normal is +Y, which
+faces away from the front view, so its sketch is seen from behind: the world
+is upright but +U reads to the left.
+
 **Tools** (`SketchTool`): Select, Point, Line, Circle, Rectangle,
 RectangleCenter, Arc (centre→start→end), ArcThreePoint (start→end→through),
 Ellipse (centre→major end→minor), EllipseArc (5 clicks), Spline (click poles,

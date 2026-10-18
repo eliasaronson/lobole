@@ -4,6 +4,7 @@
 #include "app/GuiTests.h"
 #include "app/guitests/GuiTestsCommon.h"
 
+#include "cad/CADMaterials.h"
 #include "core/Literals.h"
 #include "core/io/GitVault.h"
 #include "imgui_te_utils.h" // ImOsPOpen
@@ -404,8 +405,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     // Zoomed so a 40 mm block fills about half the view: an empty
     // document's sketch view is a few millimetres across.
     for (int i = 0; i < 4; i++) {
-      // Its absolute size: on Top the sketch's +U points left on screen.
-      const float px = std::abs(at({20, 0}).x - at({-20, 0}).x);
+      const float px = at({20, 0}).x - at({-20, 0}).x;
       if (px <= 1.0f)
         break;
       s_App->camera->SetDistance(s_App->camera->GetDistance() * px /
@@ -497,16 +497,37 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     ctx->Yield(2);
     Hold(ctx, 1.0);
     const double v1 = Doc()->GetBodies().at(0).shape.Volume();
-    ctx->ItemInputValue(field, "5");
+    ctx->ItemInputValue(field, "15");
     ctx->Yield(2);
     Hold(ctx, 1.0);
     const double v2 = Doc()->GetBodies().at(0).shape.Volume();
+
+    // The renderer's turn: the block in a few materials, from the body's own
+    // menu, turning a little under each.
+    ShowPanel(ctx, ui::kPanelModel);
+    const std::string bodyRow =
+        "//###Model/**/" + Doc()->GetBodies().at(0).name + "##body";
+    // The menu is long: the pointer crosses it at twice its pace.
+    const float mouseSpeed = ctx->EngineIO->MouseSpeed;
+    ctx->EngineIO->MouseSpeed = 2.0f * mouseSpeed;
+    for (const char* material : {"Brass", "Walnut", "Carbon Fibre"}) {
+      ctx->ItemClick(bodyRow.c_str(), ImGuiMouseButton_Right);
+      ctx->Yield();
+      ctx->MenuClick((std::string("//$FOCUSED/Material/") + material).c_str());
+      ctx->Yield(2);
+      IM_CHECK_STR_EQ(
+          CADMaterials::MaterialLibrary::GetMaterialOrDefault(
+              Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetMaterial())
+              .name.c_str(),
+          material);
+      OrbitFor(ctx, 25.0, 1.2);
+    }
+    ctx->EngineIO->MouseSpeed = mouseSpeed;
     EndScene(ctx);
-    // 40 x 25 x 10 = 10000 mm3; three times as tall, then half.
+    // 40 x 25 x 10 = 10000 mm3; three times as tall, then one and a half.
     IM_CHECK_LT(std::abs(v0 - 10000.0), 1e-3);
     IM_CHECK_LT(std::abs(v1 / v0 - 3.0), 1e-6);
-    IM_CHECK_LT(std::abs(v2 / v0 - 0.5), 1e-6);
-    ShowPanel(ctx, ui::kPanelModel);
+    IM_CHECK_LT(std::abs(v2 / v0 - 1.5), 1e-6);
   };
 
   // A version named, the part changed and saved, the named version restored:

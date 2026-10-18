@@ -471,11 +471,20 @@ static uint64_t BeginSketch(AppState& state, std::unique_ptr<SketchFeature> sk,
     state.sketchEdit.tool = SketchTool::Point; // the session's only job
   state.measure = MeasureState{}; // sketch mode replaces the measure tool
   SelectFeature(state, id);
-  if (state.camera) {
-    state.camera->AlignToFace(plane.GetOrigin(), plane.GetNormal());
-  }
+  AlignCameraToSketch(state, plane);
   LOG_INFO("Started {} (id {})", name, id);
   return id;
+}
+
+void AlignCameraToSketch(AppState& state, const SketchPlane& plane) {
+  if (!state.camera)
+    return;
+  const glm::vec3 n(plane.GetNormal());
+  const glm::vec3 up =
+      std::abs(glm::dot(glm::normalize(n), conv::kWorldUpF)) > 0.9f
+          ? glm::vec3(plane.GetVAxis())
+          : conv::kWorldUpF;
+  state.camera->AlignToFace(plane.GetOrigin(), n, 0.0f, up);
 }
 
 uint64_t BeginSketchOnPlane(AppState& state, const SketchPlane& plane,

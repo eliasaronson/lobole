@@ -404,9 +404,7 @@ void DrawFeatureTreePanel(AppState& state) {
           state.sketchEdit = SketchEditState{};
           state.sketchEdit.activeSketchId = sketchFeat->GetId();
           state.measure = MeasureState{}; // sketch mode replaces measure
-          if (state.camera)
-            state.camera->AlignToFace(sketchFeat->plane.GetOrigin(),
-                                      sketchFeat->plane.GetNormal());
+          AlignCameraToSketch(state, sketchFeat->plane);
         } else if (ImGui::IsMouseDoubleClicked(0)) {
           // U7e: editing a committed feature is explicit — the Tool window.
           OpenFeatureEditor(state, feature->GetId());
