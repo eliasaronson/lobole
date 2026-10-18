@@ -1,0 +1,12 @@
+# Third-party actions are pinned to a commit, not a tag (a moved tag cannot
+# swap the code a workflow runs); this proposes the update when a new release
+# is tagged, with the hash and the version both changed.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
