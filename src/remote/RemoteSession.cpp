@@ -62,9 +62,11 @@
 #include "ui/ViewActions.h"
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <string_view>
 
 #include "imgui.h"
 #ifdef HAVE_TEST_ENGINE
@@ -141,6 +143,28 @@ namespace {
 // features) is about a dozen levels, and the hostile sweep sends values 64
 // deep that must still reach their handlers.
 constexpr int kMaxRequestDepth = 256;
+
+// A line that is HTTP, not JSON-RPC: a request line ("POST / HTTP/1.1") or a
+// Host header. A web page can POST to localhost without asking anyone, and
+// the server used to refuse the header lines one by one and then RUN the JSON
+// in the body: any site open in a browser could drive an instance that reads
+// and writes files. The request line always comes first, so hanging up on it
+// leaves nothing of the request behind (tests/http_on_rpc_port_smoke.py).
+bool LooksLikeHttp(std::string_view line) {
+  static constexpr std::string_view kMethods[] = {
+      "GET ",     "POST ",  "PUT ",     "DELETE ", "HEAD ",
+      "OPTIONS ", "PATCH ", "CONNECT ", "TRACE "};
+  for (std::string_view m : kMethods)
+    if (line.starts_with(m))
+      return line.find(" HTTP/") != std::string_view::npos;
+  static constexpr std::string_view kHost = "host:";
+  if (line.size() < kHost.size())
+    return false;
+  for (size_t i = 0; i < kHost.size(); ++i)
+    if (std::tolower(static_cast<unsigned char>(line[i])) != kHost[i])
+      return false;
+  return true;
+}
 } // namespace
 
 // True when the executable this process is running has been replaced or
@@ -322,11 +346,18 @@ void RemoteServer::ClientThread(int client, uint64_t connection) {
     buffer.append(chunk, static_cast<size_t>(n));
 
     size_t pos;
+    bool hangUp = false;
     while ((pos = buffer.find('\n')) != std::string::npos) {
       std::string line = buffer.substr(0, pos);
       buffer.erase(0, pos + 1);
       if (line.empty())
         continue;
+      if (LooksLikeHttp(line)) {
+        LOG_WARN("Remote control: an HTTP request on the JSON-RPC port, "
+                 "refused and closed (a web page reaching localhost?)");
+        hangUp = true;
+        break;
+      }
 
       Request request;
       request.client = client;
@@ -361,6 +392,8 @@ void RemoteServer::ClientThread(int client, uint64_t connection) {
       if (m_wake)
         m_wake();
     }
+    if (hangUp)
+      break;
   }
   SockClose(client);
   {

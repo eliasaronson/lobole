@@ -15,6 +15,9 @@ server and the test suites drive. Know what it is before you run it:
   binds every interface. That flag exists for a container with its own
   network namespace (the headless image uses it). On a shared machine, other
   local users can still reach a loopback port.
+- **A web page cannot drive it.** Browsers can send requests to localhost,
+  but only as HTTP, and the server closes the connection at an HTTP request
+  line or a `Host:` header, before the request's body is read.
 - A running instance announces its port in
   `~/.local/state/lobole/instances/`.
 
