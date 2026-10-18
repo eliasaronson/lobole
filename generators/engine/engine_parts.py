@@ -38,6 +38,7 @@ FLIP_X = q_axis((1, 0, 0), 180.0)         # turned over about X
 X_UP = q_axis((0, 1, 0), -90.0)           # +X up (-X on the bed)
 X_DOWN = q_axis((0, 1, 0), 90.0)          # +X on the bed
 Y_DOWN = q_axis((1, 0, 0), 90.0)          # -Y on the bed
+Y_FLIP = q_axis((1, 0, 0), -90.0)         # +Y on the bed
 PRINT = {}
 
 
@@ -171,9 +172,9 @@ TPU_PRINT = {"timing belt": {"walls": 3, "top_layers": 5, "bottom_layers": 3,
              "valve spring": {"walls": 3}}
 
 
-# A part's own settings over those: the camshaft stands about 200 mm tall
-# on a bar's end, so it prints with a brim to hold it down.
-PART_PRINT = {"camshaft": {"brim": "outer"}}
+# A part's own settings over those: none. (The camshaft stood 204 mm tall
+# on a bar's end with a brim; it prints as two halves lying, camshaft_half.)
+PART_PRINT = {}
 
 
 class Part:
@@ -744,9 +745,9 @@ def camshaft(d, s, proc):
     origin): a round bar, the eight lobes on it, each lobe's underside a
     TAPERED extrude of its own outline leaning in at 45 degrees down to
     the bar (docs/modeling/README.md#tapered-extrudes), and a D flat where
-    the pulley and the collar are pressed. It prints standing, front end
-    down (+X up), so each underside faces down at 45 and the lobes need no
-    pressing on: their angles are the model's."""
+    the pulley and the collar are pressed. The assembly turns it whole; it
+    prints as two halves lying (camshaft_half), its lobes' angles the
+    model's. Its +X up is how it stood, which the tapers were cut for."""
     p = Part(d, "camshaft", proc, print_q=X_UP)
     p.cyl_x("bar", s.x_cam0, s.x_cam1, s.r_bar, mode="new_body")
     for lb in s.lobes:
@@ -763,6 +764,49 @@ def camshaft(d, s, proc):
     p.frame("axis", (0, 0, 0), z=(1, 0, 0), x=(0, 0, 1))
     p.finish()
     p.press(s.d_bar)
+    return p
+
+
+CAM_HALVES = (("camshaft +Y half", 1.0, Y_DOWN),
+              ("camshaft -Y half", -1.0, Y_FLIP))
+
+
+def camshaft_half(d, s, proc, name, side, q):
+    """One half of the camshaft for the bed: the camshaft (a Derived copy)
+    cut along its axis at Y = 0, keeping `side` (+1 or -1), and the key
+    holes for the dowels in its end lobes. It lies on its cut, which every
+    face of it looks up or sideways from; the -Y half carries the pulley's
+    and the collar's D flats. Glued and keyed, the halves are the
+    camshaft the assembly turns."""
+    src = {pp["name"]: pp["id"] for pp in d.call("list_parts")["parts"]
+           if pp["type"] == "part"}["camshaft"]
+    p = Part(d, name, proc, print_q=q)
+    check(d.call("add_feature", feature={
+        "type": "Derived", "name": p._name("camshaft"), "source_part": src,
+        "reference": False}), f"{name}: the camshaft")
+    big = 2.0 * s.r_lobe + 1.0
+    x0, x1 = s.x_cam0 - 1.0, s.x_cam1 + 1.0
+    if side > 0:
+        p.box("other half", (x0, -big, -big), (x1, 0.0, big), mode="cut")
+    else:
+        p.box("other half", (x0, 0.0, -big), (x1, big, big), mode="cut")
+    for lb in (s.lobes[0], s.lobes[-1]):
+        p.extrude("key hole", p_y(-s.key_depth),
+                  [circle((lb["x"], 0.0), s.d_dw / 2.0)],
+                  2.0 * s.key_depth, mode="cut")
+    p.finish()
+    p.press(s.d_dw)
+    return p
+
+
+def cam_key(d, s, proc):
+    """A dowel keying the camshaft's halves in an end lobe, along Z:
+    pressed into both. It prints standing."""
+    p = Part(d, "cam key", proc)
+    p.extrude("cam key", p_z(-s.l_key / 2.0), [circle((0, 0), s.d_dw / 2.0)],
+              s.l_key, mode="new_body")
+    p.finish()
+    p.press(s.d_dw)
     return p
 
 

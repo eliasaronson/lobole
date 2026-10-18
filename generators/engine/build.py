@@ -4,8 +4,8 @@
 
 """A printed inline four: a flat-plane crank in a split block, rods with
 lapped caps on pressed pins, pistons on pressed wrist pins, a single
-overhead camshaft printed in one piece, its lobes' undersides tapered to
-45 degrees, on bucket followers, eight valves closed by
+overhead camshaft printed in two halves split along its axis, each lying
+on its cut, on bucket followers, eight valves closed by
 TPU bellows springs, a printed TPU toothed belt at 2:1, a flywheel with
 TDC marks and a hand crank. Everything printed, nothing bought.
 
@@ -36,6 +36,7 @@ sys.path.insert(0, os.path.dirname(HERE))
 import engine_parts as P  # noqa: E402
 import engine_spec as S  # noqa: E402
 from _lib import (PRINT_ITEMS, bed_zones, check, check_print,  # noqa: E402
+                  slender_ratio,
                   export_print_job, fresh_project, job_receipt,
                   pin_strength, print_item_line, print_receipt)
 from lobole.sdk import SdkError, connect  # noqa: E402
@@ -103,6 +104,9 @@ def build_parts(d, s, proc, tpu_proc):
     add(P.crank_arm(d, s, proc))
     add(P.handle(d, s, proc))
     add(P.dowel(d, s, proc))
+    for name, side, q in P.CAM_HALVES:
+        add(P.camshaft_half(d, s, proc, name, side, q))
+    add(P.cam_key(d, s, proc))
     sp, n, dz, dr = P.spring(d, s, s.l_free, "valve spring", tpu_proc)
     s.spring_turns = n
     s.spring_dz = dz
@@ -522,7 +526,8 @@ PLA_PIECES = [("block", 1), ("bedplate", 1), ("sump", 1), ("head", 1),
               ("cam cover", 1), ("crankshaft", 1), ("rod", 4),
               ("rod cap", 4), ("cap pin", 8), ("piston", 4),
               ("wrist pin", 4), ("valve", 8), ("bucket", 8),
-              ("camshaft", 1), ("cam pulley", 1), ("crank pulley", 1),
+              ("camshaft +Y half", 1), ("camshaft -Y half", 1),
+              ("cam key", 2), ("cam pulley", 1), ("crank pulley", 1),
               ("cam collar", 1), ("flywheel", 1), ("crank arm", 1), ("handle", 1), ("dowel", 16)]
 TPU_PIECES = [("timing belt", 1), ("valve spring", 8)]
 
@@ -585,7 +590,9 @@ ORIENT = {
     "its throws)", "rod": "flat, lap tongues down", "rod cap": "flat, lap "
     "tongues down", "cap pin": "standing", "piston": "crown down",
     "wrist pin": "standing", "valve": "head down", "bucket": "crown down",
-    "camshaft": "standing, front end down, with a brim",
+    "camshaft +Y half": "lying on its cut (Y = 0)",
+    "camshaft -Y half": "lying on its cut (Y = 0), its D flats up",
+    "cam key": "standing",
     "cam pulley": "flange down",
     "crank pulley": "flange down", "cam collar": "flat",
     "flywheel": "marked face up", "crank arm": "flat",
@@ -697,7 +704,8 @@ then at the top of its exhaust stroke, both valves just open (overlap).
 ## Print
 
 PLA plates on {profile}, TPU (95A) on its own. 0.2 mm layers, no supports,
-no brim but the camshaft's (it stands on a bar's end). The PLA parts at
+no brim. The camshaft prints as two halves, split along its axis, each lying
+on its cut (stood on end it was 204 mm on a bar's end). The PLA parts at
 Bambu Studio's 0.20 mm Standard (2 walls, 5/3 shells, 15 % grid). The springs and the belt in TPU: 3 walls, 100 %
 rectilinear infill on the belt (it is all walls at this size). The print
 jobs carry every one of those per object: `engine_job.3mf` (the PLA
@@ -722,9 +730,11 @@ plates) and `engine_tpu_job.3mf` (the TPU plate, a spool of its own).
    its dowels.
 4. Valves up through their seats; a spring over each stem into its bucket
    bore; press a bucket on each stem. The head on the deck's dowels.
-5. The camshaft into the head's saddles (one piece, its lobes printed
-   on it), the collar on its rear end, the cam pulley on its front, each
-   on its flat. The cover on its dowels.
+5. The camshaft: press the two cam keys into the end lobes of one half,
+   glue the cuts (CA) and close the other half on the keys, the lobes'
+   outlines meeting. Into the head's saddles, the collar on its rear end,
+   the cam pulley on its front, each on its flat (on the -Y half). The
+   cover on its dowels.
 6. Crank pulley on the nose, the crankshaft at the `1 4` mark, the belt
    over both pulleys with the cam's lobes 1 and 2 (cylinder 1) both shut.
    The hand crank on the nose, the flywheel on the tail.
@@ -820,13 +830,14 @@ def main():
     with phase("sizes"):
         if args.bore is None:
             bore, n_plates, why, tried = S.search_bore(
-                allow, layer, bed, zones=bed_zones(prof))
+                allow, layer, bed, slender_ratio(prof),
+                zones=bed_zones(prof))
             print(f"engine: bore {bore} mm, {n_plates} PLA plates: {why}")
             for b, n, note in tried[:12]:
                 print(f"  bore {b}: {n if n else '-'} plates ({note})")
         else:
             bore, why, tried = args.bore, "as asked", []
-        s = S.solve(bore, allow, layer)
+        s = S.solve(bore, allow, layer, slender_ratio(prof))
         s.g_side_min = min(allow("gap", dd) for dd in (s.d_s, s.d_bk)) / 2.0
         n_est = S.plates_needed(s, bed, bed_zones(prof))
         print(f"  bore {s.bore:g} x stroke {s.S:g}, rod {s.L:.1f}, pitch "

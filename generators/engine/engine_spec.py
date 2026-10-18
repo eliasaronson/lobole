@@ -220,11 +220,15 @@ class Spec:
     pass
 
 
-def solve(bore, allow, layer):
+def solve(bore, allow, layer, slender, d_stem=None, stem_tries=0):
     """Every size from the bore `bore` (mm), the profile's allowances
     (`allow(kind, size)`, diametral) and its layer height. Raises
-    ValueError when the bore is too small for a size to print."""
+    ValueError when the bore is too small for a size to print. `slender`
+    is check_print's slender limit (the profile's, _lib.slender_ratio): a
+    valve stands on its head, so its stem is thick enough for the height
+    over it -- solved again with that stem when the first is not."""
     s = Spec()
+    s.stem_tries = stem_tries
     s.bore = B = float(bore)
     s.layer = layer
 
@@ -315,7 +319,8 @@ def solve(bore, allow, layer):
     s.d_v = 0.36 * B                          # DESIGN: valve head
     s.r_v = s.d_v / 2.0
     s.lift = 0.25 * s.d_v                     # RULE: L/D 0.25 (curtain = throat)
-    s.d_s = at_least("valve stem", 0.3 * s.d_v, lines(8))
+    s.d_s = at_least("valve stem", max(0.3 * s.d_v, d_stem or 0.0),
+                     lines(8))
     s.r_s = s.d_s / 2.0
     s.t_e = at_least("valve head edge", 0.08 * s.d_v, layers(5))
     s.g_seat = side(s.d_v)
@@ -457,6 +462,13 @@ def solve(bore, allow, layer):
     s.d_dw = at_least("dowel", 0.1 * B, lines(8))
     s.dw_depth = 1.5 * s.d_dw
     s.l_dw = 2.0 * s.dw_depth - layer
+    # The camshaft prints as two halves split along its axis (Y = 0), each
+    # lying on its cut: stood on end it is 204 mm on a bar's end, and its
+    # lobes cannot lie whole (a flat under them cuts into every direction
+    # some lobe lifts in). A dowel in the end lobes keys the halves, as
+    # deep into each as leaves three lines over it in the base circle.
+    s.key_depth = s.r_base - lines(3)
+    s.l_key = 2.0 * s.key_depth - layer
     s.y_dw_deck = s.w_barrel / 2.0 - s.d_dw / 2.0 - lines(4)
     s.y_dw_split = s.y_case + s.t_wall - s.d_dw / 2.0 - lines(3)
     if s.y_dw_split - s.d_dw / 2.0 < s.r_jb + lines(3):
@@ -548,6 +560,25 @@ def solve(bore, allow, layer):
         if seg == 2 and s.phase2 is None:
             s.phase2 = ang
     sweep_check(s)
+    # The valve prints standing on its head: over the stem's foot (the top
+    # of the head's cone) stands the rest of it, which the stem carries.
+    s.slender = slender
+    s.z_stem0 = s.t_e + s.r_v - s.r_s
+    # check_print reads the stem's width off its tessellation, a chord's
+    # sagitta inside the round: a fiftieth over the limit's.
+    need = 1.02 * (s.hz_tip - s.z_stem0) / slender
+    if s.d_s < need - 1e-9:
+        # A thicker stem lengthens the valve a little (the port floor
+        # stands two stems over the guide's foot): solved again, in tenths,
+        # until the stem carries what stands over it.
+        tries = getattr(s, "stem_tries", 0)
+        if tries >= 20:
+            raise ValueError(f"the valve stem stays slender: Ø{s.d_s:.2f} "
+                             f"under {s.hz_tip - s.z_stem0:.1f} mm")
+        t = solve(bore, allow, layer, slender,
+                  max(math.ceil(need * 10.0) / 10.0, s.d_s + 0.1),
+                  tries + 1)
+        return t
     return s
 
 
@@ -635,7 +666,8 @@ def print_footprints(s):
         ("wrist pin", (s.d_wp, s.d_wp), 4),
         ("valve", (s.d_v, s.d_v), 8),
         ("bucket", (s.d_bk, s.d_bk), 8),
-        ("camshaft", (2 * s.r_lobe, 2 * s.r_lobe), 1),
+        ("camshaft half", (s.x_cam1 - s.x_cam0, 2 * s.r_lobe), 2),
+        ("cam key", (s.d_dw, s.d_dw), 2),
         ("cam pulley", (2 * (s.r_p2 + s.belt_t), 2 * (s.r_p2 + s.belt_t)),
          1),
         ("crank pulley", (2 * (s.r_p1 + s.belt_t), 2 * (s.r_p1 + s.belt_t)),
@@ -736,7 +768,7 @@ def plates_needed(s, bed, zones=()):
     return len(pack(items, bed, spacing(s), zones))
 
 
-def search_bore(table, layer, bed, lo=20, hi=60, zones=()):
+def search_bore(table, layer, bed, slender, lo=20, hi=60, zones=()):
     """The default bore: the largest whole millimetre at which the PLA
     pieces pack into two beds and every size still prints (solve() does
     not refuse it), else the largest that packs into three. Returns (bore,
@@ -745,7 +777,7 @@ def search_bore(table, layer, bed, lo=20, hi=60, zones=()):
     best = {}
     for b in range(hi, lo - 1, -1):
         try:
-            s = solve(b, table, layer)
+            s = solve(b, table, layer, slender)
             n = plates_needed(s, bed, zones)
         except ValueError as exc:
             tried.append((b, None, str(exc)))
