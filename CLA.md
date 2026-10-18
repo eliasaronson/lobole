@@ -1,14 +1,8 @@
-# Contributor License Agreement — DRAFT
+# Contributor License Agreement
 
-**Status: draft, not in force. Do not ask anyone to sign this until it has been
-reviewed by a Swedish IP lawyer.** Nothing here is legal advice. The notes in
-[Provenance and decisions](#provenance-and-decisions) exist so that review is a
-check on fit rather than an audit of novel drafting — every operative clause is
-adapted from an existing, published instrument, and the notes say which.
-
-Signing is wired up (`.github/workflows/cla.yml`) and switched off until the
-review is done: it asks nobody anything while the repository variable
-`CLA_IN_FORCE` is unset.
+You sign this once, by a comment on your first pull request, which the CLA
+check asks for. The notes in [Provenance and decisions](#provenance-and-decisions)
+say which published instrument each clause is adapted from.
 
 ---
 
@@ -176,8 +170,7 @@ of that would make this Agreement inaccurate in any respect.
 
 ## Provenance and decisions
 
-Each operative clause is adapted from a published instrument, so review can
-check fit rather than audit new drafting.
+Each operative clause is adapted from a published instrument.
 
 | Clause | Taken from | Why |
 |---|---|---|
@@ -210,17 +203,11 @@ possibility, and before many people have signed.
   destroy the licensing option this agreement exists to preserve, and no legal
   clause prevents it. That is enforced in the build — see `THIRD_PARTY.md` and
   the linkage check in `tests/test_conventions.cpp`.
-- **The maintainer.** Sole copyright holder at the date of this draft; signs
+- **The maintainer.** Sole copyright holder when this agreement came into force; signs
   nothing.
 
-### Before this goes into force
+### How signing works
 
-1. Swedish IP counsel reviews it, with this table as the brief — including
-   whether an entity version (Harmony HA-CLA-E) is needed for §3(b)'s "Your
-   employer has signed this agreement".
-2. Remove the draft banner at the top.
-3. Create the `cla-signatures` branch (`git push origin main:cla-signatures`),
-   then set the repository variable `CLA_IN_FORCE` to `true`. From then on
-   `.github/workflows/cla.yml` asks the author of each pull request to sign
-   once, by a comment, and keeps the signatures on the `cla-signatures`
-   branch.
+`.github/workflows/cla.yml` asks the author of each pull request to sign once,
+by a comment, and keeps the signatures on the `cla-signatures` branch. It runs
+while the repository variable `CLA_IN_FORCE` is `true`.

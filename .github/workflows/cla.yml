@@ -4,9 +4,8 @@
 # the `cla-signatures` branch, so there is no outside service to trust or
 # lose.
 #
-# OFF until the agreement is in force: every step is skipped while the
-# repository variable CLA_IN_FORCE is not `true`, because CLA.md is a draft
-# that nobody may be asked to sign before it has been reviewed.
+# Switched by the repository variable CLA_IN_FORCE: every step is skipped
+# unless it is `true`.
 #
 # pull_request_target runs with this repository's token on a fork's pull
 # request. That is safe here only because nothing checks out or runs the pull
