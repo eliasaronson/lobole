@@ -807,7 +807,8 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
           const std::vector<unsigned char>* bytes = doc.GetAsset(name);
           if (!bytes || bytes->empty())
             continue;
-          if (!WriteBytesAtomic(assetDir / name, *bytes, error))
+          if (!WriteBytesAtomic(assetDir / CheckedAssetName(name), *bytes,
+                                error))
             return false;
         }
         for (const auto& entry : fs::directory_iterator(assetDir, ec))
@@ -1050,7 +1051,8 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // Reference-image bytes (v49) from assets/ into the doc store (absent dir ⇒
     // nothing to do). Only assets an image references are loaded.
     for (const std::string& name : ReferencedAssets(*doc)) {
-      std::ifstream ain(fs::path(dirPath) / "assets" / name, std::ios::binary);
+      std::ifstream ain(fs::path(dirPath) / "assets" / CheckedAssetName(name),
+                        std::ios::binary);
       if (ain) {
         std::string data((std::istreambuf_iterator<char>(ain)),
                          std::istreambuf_iterator<char>());
@@ -1774,7 +1776,8 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     // Derived feature reads its B-Reps from it during Execute.
     if (j.contains("assets"))
       for (const auto& [name, b64] : j.at("assets").items())
-        doc->SetAsset(name, Base64Decode(b64.get<std::string>()));
+        doc->SetAsset(CheckedAssetName(name),
+                      Base64Decode(b64.get<std::string>()));
     {
       Document::BulkEdit bulk(*doc); // one regeneration, not one per feature
       for (const auto& fj : j.at("features")) {

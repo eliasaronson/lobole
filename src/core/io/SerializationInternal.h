@@ -16,7 +16,9 @@
 #include <glm/gtc/quaternion.hpp>
 #include <nlohmann/json.hpp>
 
+#include <algorithm>
 #include <cstdint>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -51,6 +53,24 @@ inline constexpr int kVersionNEXT3 = kVersionLanded + 3;
 // sketch plane at z = 13.4 read through float lands 0.4 um below a face at
 // 13.4 (docs/sketching/README.md#plane). A float field takes the narrowing
 // where it is assigned.
+// An asset name from a document becomes a file in the project's assets/
+// directory, so it must be one plain file name. A shared project could name
+// "../../.bashrc", or an absolute path (which `dir / name` returns as it is),
+// and opening it read that file into the document while saving it wrote its
+// bytes there. Refused, never cleaned up into something else. Empty passes: an
+// image may have no asset.
+inline const std::string& CheckedAssetName(const std::string& name) {
+  const bool plain =
+      name != "." && name != ".." &&
+      name.find_first_of("/\\:") == std::string::npos &&
+      std::none_of(name.begin(), name.end(),
+                   [](unsigned char c) { return c < 0x20 || c == 0x7f; });
+  if (!plain)
+    throw std::runtime_error("asset name '" + name +
+                             "' is not a plain file name");
+  return name;
+}
+
 inline nlohmann::json Vec3ToJson(const glm::dvec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});
 }

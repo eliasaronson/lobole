@@ -14,6 +14,7 @@
 
 #include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 
 using Catch::Matchers::WithinAbs;
@@ -271,4 +272,82 @@ TEST_CASE("Reference image show_always round-trips, omitted when off",
   REQUIRE(loaded != nullptr);
   CHECK(FirstSketch(*loaded)->images.at(0).showAlways);
   fs::remove(path);
+}
+
+namespace {
+
+// Every "asset" equal to `from`, anywhere in `j`, and every key of an
+// "assets" map, renamed to `to`: what a hand-edited project file can say.
+void RenameAsset(nlohmann::json& j, const std::string& from,
+                 const std::string& to) {
+  if (j.is_object()) {
+    if (j.contains("asset") && j["asset"] == from)
+      j["asset"] = to;
+    if (j.contains("assets") && j["assets"].is_object() &&
+        j["assets"].contains(from)) {
+      j["assets"][to] = j["assets"][from];
+      j["assets"].erase(from);
+    }
+    for (auto& [key, value] : j.items())
+      RenameAsset(value, from, to);
+  } else if (j.is_array()) {
+    for (auto& value : j)
+      RenameAsset(value, from, to);
+  }
+}
+
+nlohmann::json ReadJson(const fs::path& p) {
+  std::ifstream in(p);
+  return nlohmann::json::parse(in);
+}
+
+void WriteJson(const fs::path& p, const nlohmann::json& j) {
+  std::ofstream(p) << j.dump(1);
+}
+
+} // namespace
+
+// An asset name becomes a file under the project's assets/ directory. A shared
+// project could name "../x" or an absolute path, and opening it read that file
+// into the document while saving it wrote the file's bytes there.
+TEST_CASE("A project naming an asset outside its directory is refused",
+          "[reference-image][serialization][security]") {
+  const fs::path tmp = fs::temp_directory_path() / "refimg_hostile";
+  fs::remove_all(tmp);
+  fs::create_directories(tmp);
+  const fs::path secret = tmp / "secret.txt";
+  std::ofstream(secret) << "not for the document";
+  auto doc = MakeDocWithImage(nullptr);
+
+  for (const std::string& name :
+       {secret.string(), std::string("../secret.txt"),
+        std::string("..\\secret.txt"), std::string("..")}) {
+    INFO(name);
+    // The single-file form carries the bytes; a save in the directory form
+    // would have written them to `name`.
+    const fs::path single = tmp / "single.json";
+    REQUIRE(testio::Save(*doc, single.string()));
+    nlohmann::json j = ReadJson(single);
+    RenameAsset(j, "underlay.png", name);
+    WriteJson(single, j);
+    auto r = DocumentIO::Load(single.string());
+    REQUIRE_FALSE(r.has_value());
+    CHECK(r.error().find("not a plain file name") != std::string::npos);
+
+    // The directory form reads assets/<name>: an absolute name read any file.
+    const fs::path dir = tmp / "project.dsgn";
+    fs::remove_all(dir);
+    REQUIRE(testio::Save(*doc, dir.string()));
+    for (const auto& e : fs::recursive_directory_iterator(dir)) {
+      if (e.path().extension() != ".json")
+        continue;
+      nlohmann::json fj = ReadJson(e.path());
+      RenameAsset(fj, "underlay.png", name);
+      WriteJson(e.path(), fj);
+    }
+    auto rd = DocumentIO::Load(dir.string());
+    REQUIRE_FALSE(rd.has_value());
+    CHECK(rd.error().find("not a plain file name") != std::string::npos);
+  }
+  fs::remove_all(tmp);
 }

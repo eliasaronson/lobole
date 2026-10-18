@@ -2303,7 +2303,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     for (const auto& ij : j.value("images", json::array())) { // v49 underlays
       sketch::ReferenceImage img;
       img.id = ij.value("id", uint32_t{0});
-      img.asset = ij.value("asset", std::string{});
+      img.asset = CheckedAssetName(ij.value("asset", std::string{}));
       img.origin = Vec2FromJson(ij.at("origin"));
       img.rotation = ij.value("rotation", 0.0);
       img.unitsPerPixel = ij.value("units_per_pixel", 1.0);
@@ -2490,7 +2490,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       d->sourceChainHash = snap.value("source_chain_hash", size_t{0});
       for (const json& bj : snap.value("bodies", json::array())) {
         DerivedBody b;
-        b.asset = bj.at("asset").get<std::string>();
+        b.asset = CheckedAssetName(bj.at("asset").get<std::string>());
         b.name = bj.value("name", std::string{});
         b.material = bj.value("material", std::string{});
         b.sourceCreatedBy = bj.value("source_created_by", uint64_t{0});
