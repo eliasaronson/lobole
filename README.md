@@ -42,7 +42,7 @@ the API; [generators/README.md](generators/README.md) lists them all.
 | | |
 |:---:|:---:|
 | [![OM615 diesel with its injection pump](docs/gallery/om615-engine.jpg)](generators/om615) | [![Automatic watch](docs/gallery/automatic-watch.jpg)](generators/watch) |
-| **OM615 diesel** (Opus 5.5): every part down to the bearing shells, with its injection pump chained to the crank and timed | **Automatic watch** (Opus 5, one shot): a 3 Hz self-winding movement behind the dial, with lever escapement, rotor winding and keyless works |
+| **OM615 diesel** (Opus 5.5): every part down to the bearing shells, with its injection pump chained to the crank and timed | **Automatic watch** (Opus 5, one shot): a 3 Hz self-winding movement, with lever escapement, rotor winding and keyless works |
 | [![Bicycle](docs/gallery/bicycle.jpg)](generators/bike) | [![FPV quadcopter](docs/gallery/fpv-drone.jpg)](generators/fpv_drone) |
 | **Bicycle** (Opus 5.5, one shot): modelled from photographs | **5-inch FPV quadcopter** (Opus 5, one shot): 91 occurrences, fitted fasteners, FEM on the arms |
 
