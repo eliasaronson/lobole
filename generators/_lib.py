@@ -296,7 +296,10 @@ def export_print_job(d, plates, path, filament, name=None):
         params["slicer_config"] = cfg
     if name:
         params["name"] = name
-    r = d.call("export_print_job", **params)
+    # A plate of many labelled pieces takes minutes to write.
+    r = (d.request("export_print_job", params, timeout=1800)
+         if isinstance(d, Client) else
+         d.call("export_print_job", _timeout=1800, **params))
     objs = sum(len(p["objects"]) for p in r["plates"])
     print(f"  print job {os.path.basename(path)}: {len(r['plates'])} "
           f"plate(s), {objs} objects, {r['filament']}, {r['form']} form")

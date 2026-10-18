@@ -34,6 +34,9 @@ Output goes to `scratch/strandbeest/` (or `--out`):
   no supports and no brim. The walker's is a Bambu project of its plates
   when `$LOBOLE_SLICER_CONFIGS` holds `pla.json` (`tools/bambu-config.py`),
   and is not written without one, the receipt saying why;
+- `strandbeest_card.md`, the test card: the look-alikes, every piece's
+  label and each stage's assembly order, made from the layer table and the
+  joints ([below](#labels-look-alikes-and-the-assembly-order));
 - `strandbeest.json`, the receipt: every size, the layers, the
   allowances it was built with, every check, the controls, the
   predictions and the jobs.
@@ -264,6 +267,87 @@ either passes.
 - **The front k bar in the BCD triangle's layer.** The clash check finds k
   against BCD at 25 samples, from 168°.
 
+## Labels, look-alikes and the assembly order
+
+- **Every piece carries its name**, engraved two layers deep on its top
+  face, a face that is neither on the bed nor one a joint turns on: a bar
+  or a triangle its name (`F c`, `B BCD`: F front, B back) along its
+  longest run and each hole's joint letter beside it along the bar; a
+  joint pin `FC`, `BE` on its head's top, round the shaft; a plate and a
+  disc their kind (`plate first`, `disc middle`); the crank pin `A` on its
+  crown in the slab's one layer no crank bar turns in; the handle `H`.
+  The text is as large as its face holds: 0.4 of a bar's width on a bar.
+  A pocket in an upward face has no face that looks down, so the plates'
+  `check_print`, the clash study and the layers' air are as before. The
+  throws' pieces are the same pieces in every throw, so a label names no
+  throw. The caps are all one piece and carry none. The pins and the crank
+  pin are studied before their labels go on (Netgen meshes a letter's
+  faces badly); the pockets leave every factor above 9.
+- **Look-alikes.** Every printed piece is described by its volume and
+  its principal radii of gyration as built, before its label. Two that
+  agree to 1e-6 are the same piece in either place (a back bar is the front
+  one turned over); two different pieces within 1 % on the volume and 1 mm
+  (or 1 %) on every radius are look-alikes, named in the receipt and the
+  card, a report and not a stop, since the labels tell them apart. At
+  15 mm: **c and f** (0.23 % in volume, 0.03 mm in their radii; 39.3 against
+  39.4 mm hole to hole), and **plate first and plate middle** (the middle
+  plate's sockets).
+- **The assembly order** is made from the layer table and the joints:
+  bottom up, a layer at a time, front before back within a layer. A pin
+  goes in from below with its lowest bar, its head under it, and the bars
+  over it slide on; the front and back legs interleave on the crank pin
+  (back j layer 1, front j 2, front k 4, back k 5) and on nothing else.
+  The crank is turned before any cap goes on. A cap goes on over its pin's
+  highest bar, with the crank where no bar in a layer above covers it: the
+  back frame pivot's at 15°, since the back k passes over it. For the leg
+  pair at 15 mm, as the run writes it:
+
+1. Press the handle into the first disc's arm. Stand the first plate on the
+    bench, its pivots up; put the first disc in its hole, flange under, and
+    press a crank pin into the disc's top socket, its flat toward the axis.
+2. layer 1: F BCD -- its B hole over the plate's front frame pivot; pin FC
+    up through its C hole from below, head under; pin FD up through its D
+    hole from below, head under
+3. layer 1: B j -- its A hole over the crank pin; pin BC up through its C
+    hole from below, head under
+4. layer 2: F j -- its A hole over the crank pin; its C hole down over pin
+    FC
+5. layer 2: F c -- its B hole over the plate's front frame pivot; pin FE up
+    through its E hole from below, head under
+6. layer 2: F f -- its D hole down over pin FD; pin FF up through its F hole
+    from below, head under
+7. layer 2: B BCD -- its B hole over the plate's back frame pivot; its C
+    hole down over pin BC; pin BD up through its D hole from below, head
+    under
+8. layer 3: F EFG -- its E hole down over pin FE; its F hole down over pin
+    FF
+9. layer 3: B c -- its B hole over the plate's back frame pivot; pin BE up
+    through its E hole from below, head under
+10. layer 3: B f -- its D hole down over pin BD; pin BF up through its F
+    hole from below, head under
+11. layer 4: F k -- its A hole over the crank pin; its E hole down over pin
+    FE
+12. layer 4: B EFG -- its E hole down over pin BE; its F hole down over pin
+    BF
+13. layer 5: B k -- its A hole over the crank pin; its E hole down over pin
+    BE
+14. TURN the crank a full turn by hand before capping: every joint must turn
+    freely, nothing may catch.
+15. a cap pressed onto pin BC, over its layer 2 bar, down to its shoulder
+16. a cap pressed onto pin FC, over its layer 2 bar, down to its shoulder
+17. a cap pressed onto pin FD, over its layer 2 bar, down to its shoulder
+18. a cap pressed onto the plate's front frame pivot B, over its layer 2
+    bar, down to its shoulder
+19. a cap pressed onto pin BD, over its layer 3 bar, down to its shoulder
+20. a cap pressed onto pin FF, over its layer 3 bar, down to its shoulder
+21. a cap pressed onto the plate's back frame pivot B, over its layer 3 bar,
+    down to its shoulder, the crank turned to 15 deg so no bar is over it
+22. a cap pressed onto pin BF, over its layer 4 bar, down to its shoulder
+23. a cap pressed onto pin FE, over its layer 4 bar, down to its shoulder
+24. a cap pressed onto pin BE, over its layer 5 bar, down to its shoulder
+25. The last disc over the last crank pin, its socket on it, flange up; the
+    last plate over it and onto the standoffs' stubs.
+
 ## What it predicts, and the test card
 
 The walker stands on its lowest feet, and they carry it. At every sample it
@@ -280,12 +364,15 @@ walker weighs 500 g in PLA.
 
 **Test card (stage 1, then stage 2):**
 
-1. Print `stage1_plate.stl`. Press each of the press row's five caps (the
-   notches count which) onto its pin. Keep the smallest interference that
-   holds by hand and does not split:
+1. Print `stage1_plate.stl`. Press each of the press row's six caps (the
+   notches count which) onto its pin: three steps 0.1 mm apart on the
+   diameter, two caps at each, 1 and 2 the tightest. Keep the smallest
+   step whose two caps both hold by hand and do not split; a pair that
+   disagrees is the print's scatter, and the next step is the one to trust:
    `print_coupon.py --record --profile "K5 PLA on P1S" --press-side MM`.
    Then rebuild: the caps are modelled at the recorded press.
-2. Assemble the leg pair. Turn the crank by hand: every joint must turn
+2. Assemble the leg pair in the card's order (above). Turn the crank by
+   hand before capping: every joint must turn
    freely, and no cap may come off.
 3. Hold the frame level over a ruler and turn the crank. The front foot
    should touch down, run flat for **44.8 mm**, and lift **22.5 mm**.
@@ -299,24 +386,24 @@ For K5 PLA on a P1S at 15 mm, every plate passes every `check_print` item:
 
 | plate | pieces |
 |---|---|
-| stage 1 | one leg pair (12 bodies), 8 pins, 10 caps, the first and last plates and discs, the crank pin, the handle, and the press row (a plate of five pins and five caps): 37 pieces, 42 solids |
+| stage 1 | one leg pair (12 bodies), 8 pins, 10 caps, the first and last plates and discs, the crank pin, the handle, and the press row (a plate of six pins and six caps): 37 pieces, 43 solids |
 | stage 2, 1 | first, last and 3 middle plates; first and last discs; the 6 crank pins; 3 front k, 2 front EFG |
 | stage 2, 2 | 2 middle plates; 6 back EFG, 4 front EFG, 3 front k, 2 back k, 1 front j |
 | stage 2, 3 | 4 middle discs, the handle; 6 front and 6 back BCD, 4 back k, 3 front j; 5 pins |
 | stage 2, 4 | 1 middle disc; 6 front and 6 back c, 6 front and 6 back f, 6 back j, 2 front j; 43 pins, 60 caps |
 
-Bambu's slice of the jobs: stage 1 in 2.4 h and 81 g; the walker's four
-plates in 10.0 h and 319 g (2.7, 2.1, 2.2 and 3.0 h).
+Bambu's slice of the jobs: stage 1 in 2.7 h and 83 g; the walker's four
+plates in 11.4 h and 324 g (2.9, 2.5, 2.6 and 3.4 h).
 
-**Stage 1 against the plate printed on 2026-10-16**
-(`scratch/strandbeest/old-2026-10-17/stage1`): the bars, the joint pins,
-the caps, both plates and the press row are the same parts, volume and
-box. Four pieces change, all in the crank: the **first disc** (its crank
-pin and key are gone, a D-socket in its top face takes the new pin, and
-its handle bore is Ø4.95 at the press, not Ø3.22), the **last disc** (its
-socket is the crank pin's D, Ø4.95, not a round Ø3.22 for a key), the
-**handle** (its stub is Ø4.95, not Ø3.22), and a new **crank pin**, printed
-lying down. Reprint those four.
+**Stage 1 against the leg pair printed and assembled**
+(`scratch/strandbeest/old-2026-10-17d/stage1`): **every stage-1 piece
+changes but the caps.** Every bar and triangle (front and back j, k, c, f,
+BCD and EFG), every joint pin (front and back C, D, E and F), both plates,
+both discs, the crank pin and the handle now carry their engraved labels;
+their shapes are otherwise the same, and a pair already assembled works as
+it is. The press row is new: six pins in three steps of 0.1 mm, two caps a
+step. The caps are the same parts. Reprint the press row to find the press;
+reprint the rest for the labels.
 
 The assignment comes from a MaxRects packing of each piece's box, turned to
 its tightest, half a bar apart. At 12 mm, three plates hold the walker.

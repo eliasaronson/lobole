@@ -76,9 +76,11 @@ give one that states no bed the P1S's.
 
 `--press-only` prints the PRESS row (docs/tolerances/README.md#press-allowance):
 pins of Ø`size` on shoulders on a plate, and a loose cap for each on the bed
-in front of it, its bore stepped `step` on the diameter either side of the
-table's `press` allowance. The pins are numbered on the plate and each cap
-carries as many notches in its rim. Press each cap down its pin onto the
+in front of it, its bore stepped `--press-step` (0.1 mm at least) on the
+diameter either side of the table's `press` allowance, TWO caps at every
+step: a step larger than a print's scatter between caps, and the scatter
+shown by the pair. The pins are numbered on the plate, 1 the tightest, and
+each cap carries as many notches in its rim. Press each cap down its pin onto the
 shoulder: the smallest interference that holds by hand and does not split
 is the press, which `--record --press-side MM` keeps (the interference a
 side, as modelled) as the profile's `press` row.
@@ -587,34 +589,59 @@ def press_sizes(size, cap_d=None, cap_t=None):
             "digit": 0.45 * pitch, "engrave": 0.1 * size}
 
 
-def press_row(d, proc, size, steps, step, name, cap_d=None, cap_t=None):
-    """A part of its own: a row of 2 * steps + 1 pins on a plate and a cap
-    for each, loose on the bed in front of it, the caps' bores stepped
-    `step` on the diameter either side of the table's press allowance
-    (print_allowance kind `press`). Pin and cap are numbered 1.. from the
-    left: the digit engraved on the plate behind the pin, as many notches
-    in the cap's rim. Push each cap down its pin onto the shoulder: the
-    smallest interference that holds by hand and does not split is the
-    press (`--record --press-side`). Returns the row's report."""
+# A press row's step and its repeats. The Strandbeest's first row stepped
+# 0.05 mm on a Ø3.22 stub, and its caps came out of order: the tightest as
+# modelled went on, the loosest would not. The scatter between two printed
+# caps is the printer's, about as large in mm at any size, so a larger pin
+# does not shrink it -- and the press a part needs is the one at ITS size,
+# so the row stays at the size it is for. What reads is a step past the
+# scatter, and two caps at each step, so the scatter itself shows.
+PRESS_MIN_STEP = 0.1
+PRESS_PER_STEP = 2
+
+
+def press_row(d, proc, size, steps, step, name, cap_d=None, cap_t=None,
+              one_row=False):
+    """A part of its own: 2 * steps + 1 steps, each a PAIR of pins on a
+    plate and a cap for each, loose on the bed in front of it, the caps'
+    bores stepped `step` (PRESS_MIN_STEP at least) on the diameter either
+    side of the table's press allowance (print_allowance kind `press`).
+    Pin and cap are numbered 1.. from the left, 1 the tightest: the digit
+    engraved on the plate behind the pin, as many notches in the cap's rim.
+    Push each cap down its pin onto the shoulder: the step whose two caps
+    both hold by hand and do not split is the press (`--record
+    --press-side`, the interference a side of that step). Returns the row's
+    report."""
+    if step < PRESS_MIN_STEP - 1e-9:
+        raise SystemExit(f"print_coupon: a press step of {fmt(step)} mm is "
+                         f"under a print's scatter between caps; "
+                         f"{fmt(PRESS_MIN_STEP)} mm at least")
     press = d.call("print_allowance", kind="press", size_mm=size, **proc)
     z = press_sizes(size, cap_d, cap_t)
-    n = 2 * steps + 1
+    n = (2 * steps + 1) * PRESS_PER_STEP
     pitch = z["pitch"]
-    width, depth = n * pitch, pitch
+    # A column a step, its two pins one behind the other: the first's cap
+    # on the bed in front of the plate, the second's behind it. Or, with
+    # `one_row`, every pin in one row and every cap in front: the shape a
+    # packed plate takes best.
+    rows = 1 if one_row else PRESS_PER_STEP
+    cols = n // rows
+    width, depth = cols * pitch, rows * pitch
     d.call("add_part", name=name)
     d.call("set_print_process", **proc)
     check(d.call("add_feature", feature={
         "type": "Box", "name": "Plate", "on": "Top", "centered": False,
         "offset": [0, 0], "width": width, "depth": depth,
         "height": z["plate_t"]}), "press plate")
-    xs = [pitch * (i + 0.5) for i in range(n)]
-    y_pin = 0.4 * depth
-    y_cap = -0.5 * pitch - z["cap_d"] / 2.0
+    at = [(pitch * (i // rows + 0.5), pitch * (i % rows + 0.4))
+          for i in range(n)]
+    cap_ys = [-0.5 * pitch - z["cap_d"] / 2.0,
+              depth + 0.5 * pitch + z["cap_d"] / 2.0][:rows]
     top = Plane.xy(z["plate_t"]).json()
     check(d.call("add_feature", feature={
         "type": "Sketch", "name": "Shoulders", "plane": top,
-        "entities": [circle((x, y_pin), z["shoulder_d"] / 2.0)
-                     for x in xs]}), "shoulder sketch")
+        "entities": [circle(p, z["shoulder_d"] / 2.0) for p in at]}),
+        "shoulder sketch")
     check(d.call("add_feature", feature={
         "type": "Extrude", "name": "Shoulders up", "mode": "add",
         "sketch_id": feature_id(d, "Shoulders"),
@@ -622,7 +649,7 @@ def press_row(d, proc, size, steps, step, name, cap_d=None, cap_t=None):
     check(d.call("add_feature", feature={
         "type": "Sketch", "name": "Press pins",
         "plane": Plane.xy(z["plate_t"] + z["shoulder_h"]).json(),
-        "entities": [circle((x, y_pin), size / 2.0) for x in xs]}),
+        "entities": [circle(p, size / 2.0) for p in at]}),
         "press pin sketch")
     check(d.call("add_feature", feature={
         "type": "Extrude", "name": "Press pins up", "mode": "add",
@@ -630,8 +657,8 @@ def press_row(d, proc, size, steps, step, name, cap_d=None, cap_t=None):
         "distance": z["cap_t"]}), "press pins")
     check(d.call("add_feature", feature={
         "type": "Sketch", "name": "Press digits", "plane": top,
-        "entities": [text(str(i + 1), (x, depth - 0.05 * pitch),
-                          z["digit"]) for i, x in enumerate(xs)]}),
+        "entities": [text(str(i + 1), (x, y + 0.55 * pitch), z["digit"])
+                     for i, (x, y) in enumerate(at)]}),
         "digit sketch")
     check(d.call("add_feature", feature={
         "type": "Extrude", "name": "Engrave press digits", "mode": "cut",
@@ -639,8 +666,9 @@ def press_row(d, proc, size, steps, step, name, cap_d=None, cap_t=None):
         "distance": z["engrave"], "reversed": True}), "engrave digits")
     caps = []
     report = []
-    for i, x in enumerate(xs):
-        k = i - steps
+    for i, (x, y_pin) in enumerate(at):
+        y_cap = cap_ys[i % rows]
+        k = i // PRESS_PER_STEP - steps
         allow = round(press["allowance_mm"] + k * step, 4)
         bore = round(size + allow, 4)
         if bore <= 0.0:
@@ -657,7 +685,7 @@ def press_row(d, proc, size, steps, step, name, cap_d=None, cap_t=None):
             cx, cy = x + r * math.cos(a), y_cap + r * math.sin(a)
             ents.append(circle((cx, cy), nw / 2.0))
         caps.append(ents)
-        report.append({"index": i + 1, "pin_mm": size,
+        report.append({"index": i + 1, "step": k, "pin_mm": size,
                        "bore_mm": bore, "allowance_mm": allow,
                        "interference_side_mm": round(-allow / 2.0, 4) + 0.0,
                        "offset_mm": round(k * step, 4), "table": k == 0,
@@ -683,7 +711,8 @@ def press_row(d, proc, size, steps, step, name, cap_d=None, cap_t=None):
     return {"kind": "press", "sizes": z, "allowance_mm": press["allowance_mm"],
             "from": press.get("from"), "source": press["source"],
             "note": press.get("note"), "step_mm": step, "caps": report,
-            "part": name}
+            "per_step": PRESS_PER_STEP, "width_mm": width, "depth_mm": depth,
+            "cap_y_mm": cap_ys, "part": name}
 
 
 # The coupon's own part stands at the origin, in the bed's keep-out corner
@@ -729,7 +758,7 @@ def press_coupon(d, args, proc):
     name = args.name or ("coupon_" + (
         args.profile.lower().replace(" ", "_") if args.profile else
         f"{args.process}_{args.material}") + f"_{fmt(args.size)}_press")
-    row = press_row(d, proc, args.size, args.steps, args.step, name)
+    row = press_row(d, proc, args.size, args.steps, args.press_step, name)
     gap = d.call("print_allowance", kind="gap", size_mm=args.size, **proc)
     # Every piece on the bed, nothing closer than the caps' half pitch to
     # the plate, the notches and digits clean: every item.
@@ -758,8 +787,9 @@ def press_coupon(d, args, proc):
         print(f"  {c['index']}: bore Ø{fmt(c['bore_mm'])} on a "
               f"Ø{fmt(c['pin_mm'])} pin, {c['interference_side_mm']:+g} a "
               f"side" + ("  (the table's)" if c["table"] else ""))
-    print("  press each cap onto its pin; --record --press-side MM the "
-          "smallest that holds by hand and does not split")
+    print(f"  {PRESS_PER_STEP} caps a step of {fmt(row['step_mm'])}: press "
+          "each onto its pin; --record --press-side MM the smallest step "
+          "whose caps both hold by hand and do not split")
     if row.get("note"):
         print(f"  {row['note']}")
     return 0
@@ -790,6 +820,9 @@ def main():
     ap.add_argument("--z-gap-layers", type=int, default=None,
                     help="--record: the fewest layers of air whose ring "
                          "turned cleanly (the air row)")
+    ap.add_argument("--press-step", type=float, default=PRESS_MIN_STEP,
+                    help="mm on the diameter between the press row's steps "
+                         f"(two caps a step; {PRESS_MIN_STEP:g} at least)")
     ap.add_argument("--press-side", type=float, default=None,
                     help="--record: the smallest interference a side, as "
                          "modelled, whose cap held by hand and did not "

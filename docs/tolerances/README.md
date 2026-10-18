@@ -568,11 +568,17 @@ modelled much under the pin splits a thin cap.
   others from the start.
 - **The coupon's press row** (`print_coupon.py --press-only --size D`): pins
   of Ø`D` on shoulders on a plate, and a loose cap for each on the bed in
-  front of it, its bore stepped `--step` on the diameter either side of the
-  table's press. Pins are numbered on the plate, and each cap carries as
-  many notches in its rim. Press each cap down its pin onto the shoulder.
-  The smallest interference that holds by hand and does not split is the
-  answer. `--record --press-side MM` keeps it (the interference a side, as
+  front of it, its bore stepped `--press-step` on the diameter either side
+  of the table's press, two caps at every step. Pins are numbered on the
+  plate, 1 the tightest, and each cap carries as many notches in its rim.
+  Press each cap down its pin onto the shoulder. The smallest step whose
+  two caps both hold by hand and do not split is the answer. A step is at
+  least 0.1 mm (`PRESS_MIN_STEP`, a smaller one refused): the scatter
+  between two printed caps is larger than 0.05 mm, a Strandbeest row at
+  that step read out of order, and the pair at each step shows the
+  scatter. The scatter is the printer's, about as large in mm at any size,
+  so a larger reference pin would not shrink it, and the press a part
+  needs is the one at its own size: the row stays at the size it is for. `--record --press-side MM` keeps it (the interference a side, as
   modelled) as the profile's `press` row from Ø0 up. A generator that
   presses caps prints the row beside its first parts, at its own pin and
   cap (`press_row(d, proc, size, steps, step, name, cap_d, cap_t)`), as the

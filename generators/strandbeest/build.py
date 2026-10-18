@@ -386,6 +386,85 @@ def printed_press(d, what, dia, centres=None):
     return n
 
 
+# ---- labels ------------------------------------------------------------------
+# Every printed piece carries its name, engraved, so c and f (39.3 against
+# 39.4 mm hole to hole) are told apart at the bench: on a face that is
+# neither on the bed nor one a joint turns on, two layers deep, the text
+# as large as its face holds. An engraving in an upward face has no face
+# that looks down, so it leaves the overhang, the bridges, the clash study
+# and the layers' air as they were.
+
+LABEL_LAYERS = 2
+
+
+def side_letter(side):
+    return "F" if side == "front" else "B"
+
+
+def bar_label(side, bar):
+    return f"{side_letter(side)} {bar.upper() if len(bar) == 3 else bar}"
+
+
+def label_text(text, at, height, angle_deg=0.0):
+    return {"type": "text", "text": text, "font": "sans", "height": height,
+            "anchor": [float(at[0]), float(at[1])],
+            "angle_deg": float(angle_deg), "halign": "center",
+            "valign": "middle"}
+
+
+def engrave(d, s, part, z, labels, what="label"):
+    """Cut `labels` (label_text entities) down into the face at z of the
+    active part `part`, LABEL_LAYERS layers deep."""
+    if not labels:
+        return
+    sk = check(d.call("add_feature", feature={
+        "type": "Sketch", "name": f"{what} sketch",
+        "plane": Plane.xy(z).json(), "entities": labels}),
+        f"{part}: {what}")["id"]
+    check(d.call("add_feature", feature={
+        "type": "Extrude", "name": what, "sketch_id": sk,
+        "distance": LABEL_LAYERS * s["layer"], "mode": "cut",
+        "reversed": True}), f"{part}: {what}")
+
+
+def bar_labels(s, frames, side, bar):
+    """A bar's or a triangle's labels on its top face: its name on the
+    middle of its longest run, and each hole's joint letter along the bar
+    beside it where the run holds it."""
+    js = lk.BARS[bar]
+    pts = frames[bar]
+    h = 0.4 * s["w"]
+    out = []
+    edges = [(js[i], js[(i + 1) % len(js)]) for i in range(len(js))]
+    if len(js) == 2:
+        edges = edges[:1]
+    lengths = {e: math.dist(pts[e[0]], pts[e[1]]) for e in edges}
+    longest = max(edges, key=lambda e: lengths[e])
+    name = bar_label(side, bar)
+    name_len = 0.65 * h * len(name)
+    near = s["hole"] / 2.0 + s["gz"] + 0.5 * h  # a letter's centre off a hole
+    for e in edges:
+        a, b = pts[e[0]], pts[e[1]]
+        ang = math.degrees(math.atan2(b[1] - a[1], b[0] - a[0]))
+        if 90.0 < ang <= 270.0 or -270.0 <= ang < -90.0:
+            ang -= 180.0  # read left to right
+        ux, uy = (b[0] - a[0]) / lengths[e], (b[1] - a[1]) / lengths[e]
+        need = 2.0 * (near + 0.5 * h) + (name_len + h if e == longest else 0)
+        letters = lengths[e] >= need
+        for j, p, sgn in ((e[0], a, 1.0), (e[1], b, -1.0)):
+            if j == "G" or not letters:
+                continue
+            # A triangle's vertex is on two edges: one letter, on the first.
+            if len(js) == 3 and e != next(x for x in edges if j in x):
+                continue
+            out.append(label_text(j, (p[0] + sgn * near * ux,
+                                      p[1] + sgn * near * uy), h, ang))
+        if e == longest:
+            mid = ((a[0] + b[0]) / 2.0, (a[1] + b[1]) / 2.0)
+            out.append(label_text(name, mid, h, ang))
+    return out
+
+
 def build_bar(d, s, lay, frames, side, bar, proc, mat, name=None,
               layer=None):
     """One of the leg's six bodies, flat, its joint holes at the pin's gap;
@@ -661,11 +740,16 @@ def strength(d, s, lay, frames, throws, step_deg, hand_n, mu):
         return d.call("list_elements")["bodies"][0]["faces"]
 
     def rounds(fs, r, near=None):
-        return [f["name"] for f in fs if f["kind"] == "cylinder" and
+        # A label cut into a round leaves the round inside a letter's
+        # counter as a face of its own: a speck, not the round.
+        hits = [f for f in fs if f["kind"] == "cylinder" and
                 abs(f.get("radius", 0.0) - r) < 1e-6 and
                 (near is None or math.hypot(f["centroid"][0] - near[0],
                                             f["centroid"][1] - near[1])
                  < 1e-3)]
+        big = max((f.get("area_mm2", 0.0) for f in hits), default=0.0)
+        return [f["name"] for f in hits
+                if f.get("area_mm2", 0.0) >= 0.05 * big]
 
     st = out["studies"]
     # The crank pin, lying along x: torque between its discs. The pin is
@@ -1304,8 +1388,13 @@ def check_layer_clearance(d, s, lay, ids, r, step_deg, every):
     same leg pair a phase apart, and the samples cover the turn."""
     worst = None
     n = 0
+    t0 = time.perf_counter()
     for i in range(0, len(r["samples"]) - 1, every):
-        d.call("run_motion_study", study=r["study"], leave_at=i)
+        # Reused, not rerun; but its inputs are hashed first, every
+        # labelled piece's B-rep, which on the walker outlives the
+        # client's default minute.
+        d.request("run_motion_study", {"study": r["study"], "leave_at": i},
+                  timeout=1200)
         theta = math.radians(r["samples"][i]["value"])
         for a, b in adjacent_pairs(s, lay, theta):
             m = d.call("measure",
@@ -1316,9 +1405,11 @@ def check_layer_clearance(d, s, lay, ids, r, step_deg, every):
             if worst is None or dist < worst["min_mm"]:
                 worst = {"min_mm": dist, "sample": i,
                          "pair": [" ".join(a), " ".join(b)]}
-    d.call("run_motion_study", study=r["study"], leave_at="start")
+    d.request("run_motion_study", {"study": r["study"], "leave_at": "start"},
+              timeout=1200)
     worst = worst or {"min_mm": None}
     worst["pairs_measured"] = n
+    worst["seconds"] = time.perf_counter() - t0
     worst["required_mm"] = s["gz"]
     worst["ok"] = worst["min_mm"] is not None and \
         worst["min_mm"] >= s["gz"] - 1e-6
@@ -1355,10 +1446,11 @@ def footprint(s, lay, frames, part):
             c.append(((-s["arm"], 0.0), s["w"] / 2.0 + s["wall"]))
         return c
     if kind == "press":
-        w, h, cap_y = rest
+        w, h, *cap_ys = rest
         return [((0.0, 0.0), 0.0), ((w, 0.0), 0.0), ((0.0, h), 0.0),
-                ((w, h), 0.0), ((0.0, cap_y), s["dh"] / 2.0),
-                ((w, cap_y), s["dh"] / 2.0)]
+                ((w, h), 0.0)] + [p for y in cap_ys
+                                  for p in (((0.0, y), s["dh"] / 2.0),
+                                            ((w, y), s["dh"] / 2.0))]
     raise ValueError(kind)
 
 
@@ -1481,7 +1573,9 @@ def check_plate(d, name, proc, placed, out, bed, quiet=False):
     """check_geometry verified and check_print every item, every piece on
     the bed and inside it, then the STL."""
     d.call("set_active_part", part=name)
-    geo = d.call("check_geometry")
+    # A plate of labelled pieces is thousands of faces: every call on it
+    # waits as long as it takes.
+    geo = d.request("check_geometry", {}, timeout=1200)
     if geo["receipt"]["standing"] != "verified":
         raise SystemExit(f"strandbeest: {name} is not verified: "
                          f"{geo['receipt']['summary']}")
@@ -1499,7 +1593,7 @@ def check_plate(d, name, proc, placed, out, bed, quiet=False):
         raise SystemExit(f"strandbeest: {name} runs off the {bed[0]:g} x "
                          f"{bed[1]:g} mm bed: {lo} .. {hi}")
     stl = out / f"{name.replace(' ', '_')}.stl"
-    exp = d.call("export_stl", path=str(stl))
+    exp = d.request("export_stl", {"path": str(stl)}, timeout=1200)
     return {"part": name, "stl": str(stl), "shells": exp.get("shells"),
             "deflection_mm": exp.get("deflection_mm"),
             "bbox_mm": [lo, hi], "print": print_receipt(pr),
@@ -1517,8 +1611,149 @@ def material_of(d, proc):
     raise SystemExit(f"strandbeest: no print profile '{proc['profile']}'")
 
 
+# ---- look-alikes ----------------------------------------------------------------
+# Two different pieces that a hand cannot tell apart: c and f differ by a
+# tenth of a millimetre hole to hole. Each piece is described by its volume
+# and its principal radii of gyration (how its volume spreads, whatever way
+# it lies), as built before its label. Two that agree to 1e-6 are the SAME
+# piece and go in either place (a mirrored bar is the bar turned over); two
+# that are not, but agree within LOOKALIKE_REL (or LOOKALIKE_MM on a radius),
+# are look-alikes. Their labels tell them apart, so this is reported, not a
+# stop.
+
+LOOKALIKE_REL = 0.01
+LOOKALIKE_MM = 1.0
+
+
+def eig3(m):
+    """The eigenvalues of a symmetric 3x3, by Jacobi rotations."""
+    a = [list(r) for r in m]
+    for _ in range(50):
+        p, q = max(((0, 1), (0, 2), (1, 2)), key=lambda t: abs(a[t[0]][t[1]]))
+        if abs(a[p][q]) < 1e-15 * (abs(a[p][p]) + abs(a[q][q]) + 1e-300):
+            break
+        th = 0.5 * math.atan2(2 * a[p][q], a[q][q] - a[p][p])
+        c, sn = math.cos(th), math.sin(th)
+        for k in range(3):
+            akp, akq = a[k][p], a[k][q]
+            a[k][p], a[k][q] = c * akp - sn * akq, sn * akp + c * akq
+        for k in range(3):
+            apk, aqk = a[p][k], a[q][k]
+            a[p][k], a[q][k] = c * apk - sn * aqk, sn * apk + c * aqk
+    return sorted(a[i][i] for i in range(3))
+
+
+def shape_of(d, part):
+    mp = d.call("mass_properties", part=part)
+    b = mp["bodies"][0]
+    v = b["volume_mm3"]
+    radii = [math.sqrt(max(e, 0.0) / v) for e in eig3(b["inertia"])]
+    return {"volume_mm3": v, "radii_mm": radii}
+
+
+def look_alikes(d, parts):
+    """Every pair of different pieces among `parts` that look alike, with
+    how far apart they are; and the pairs that are the same piece."""
+    shapes = {p: shape_of(d, p) for p in parts}
+    alike, same = [], []
+    names = list(parts)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            sa, sb = shapes[a], shapes[b]
+            dv = abs(sa["volume_mm3"] - sb["volume_mm3"]) / max(
+                sa["volume_mm3"], sb["volume_mm3"])
+            dr = [abs(x - y) for x, y in zip(sa["radii_mm"], sb["radii_mm"])]
+            if dv < 1e-6 and all(x < 1e-6 * max(sa["radii_mm"]) for x in dr):
+                same.append([a, b])
+                continue
+            if dv <= LOOKALIKE_REL and all(
+                    x <= max(LOOKALIKE_MM, LOOKALIKE_REL * r)
+                    for x, r in zip(dr, sa["radii_mm"])):
+                alike.append({"a": a, "b": b,
+                              "volume_differs": dv,
+                              "radii_differ_mm": dr})
+    # A look-alike between two classes of the same piece is one finding:
+    # front c / front f stands for back c / back f too.
+    cls = {n: n for n in names}
+    for a, b in same:
+        root = cls[a]
+        for n in names:
+            if cls[n] == cls[b]:
+                cls[n] = root
+    seen, kept = set(), []
+    for x in alike:
+        key = frozenset((cls[x["a"]], cls[x["b"]]))
+        if key in seen:
+            continue
+        seen.add(key)
+        x["a_same_as"] = [n for n in names if cls[n] == cls[x["a"]]]
+        x["b_same_as"] = [n for n in names if cls[n] == cls[x["b"]]]
+        kept.append(x)
+    alike = kept
+    return {"tolerance": f"volume within {LOOKALIKE_REL:.0%} and every "
+                         f"principal radius of gyration within "
+                         f"{LOOKALIKE_MM:g} mm (or {LOOKALIKE_REL:.0%})",
+            "look_alikes": alike, "same_piece": same, "shapes": shapes}
+
+
+def label_parts(d, s, lay, frames, kinds, tops, step_deg):
+    """Engrave every printed piece's name (and a bar's joint letters) on
+    its free top face; returns what each carries."""
+    out = {}
+    h_pin = 0.8 * (s["dh"] - s["dp"]) / 2.0
+    rm = (s["dp"] + s["dh"]) / 4.0
+    for side in SIDES:
+        for bar in lk.BARS:
+            part = f"{side} {bar}"
+            d.call("set_active_part", part=part)
+            ents = bar_labels(s, frames[side], side, bar)
+            engrave(d, s, part, s["t"], ents)
+            out[part] = [e["text"] for e in ents]
+        for j in lk.PINS:
+            # On the head's top, round the shaft: the annulus a bar sits
+            # over, never one a joint turns on.
+            part = f"pin {side} {j}"
+            d.call("set_active_part", part=part)
+            t = f"{side_letter(side)}{j}"
+            engrave(d, s, part, s["th"], [label_text(t, (rm, 0.0), h_pin,
+                                                     90.0)])
+            out[part] = [t]
+    ring_r = s["rd"] + s["gap_disc"] / 2.0 + s["w"] / 2.0
+    for kind in kinds:
+        part = f"plate {kind}"
+        d.call("set_active_part", part=part)
+        t = f"plate {kind}"
+        engrave(d, s, part, s["tp"], [label_text(t, (-ring_r, 0.0),
+                                                 0.3 * s["w"], 90.0)])
+        out[part] = [t]
+        part = f"disc {kind}"
+        d.call("set_active_part", part=part)
+        t = f"disc {kind}"
+        engrave(d, s, part, tops[kind], [label_text(
+            t, (-0.55 * s["rd"], 0.0), 0.15 * s["rd"], 90.0)])
+        out[part] = [t]
+    # The crank pin lies on its flat; its top, in a layer no crank bar
+    # turns in, takes A.
+    used = {layer_of(lay, sd, b) for sd in SIDES for b in lk.JOINTS["A"]}
+    free = [ell for ell in range(1, lay["top"]) if ell not in used]
+    if free:
+        x = (s["socket"] - s["gz"]) + z_bottom(s, free[0]) + s["t"] / 2.0
+        d.call("set_active_part", part="crank pin")
+        engrave(d, s, "crank pin", s["crank_pin_h"] + s["dp"] / 2.0,
+                [label_text("A", (x, 0.0), 0.7 * s["dp"] / 2.0, 0.0)])
+        out["crank pin"] = ["A"]
+    d.call("set_active_part", part="handle")
+    engrave(d, s, "handle", s["handle_h"], [label_text(
+        "H", ((s["dp"] + s["handle_d"]) / 4.0, 0.0),
+        0.8 * (s["handle_d"] - s["dp"]) / 2.0, 90.0)])
+    out["handle"] = ["H"]
+    return out
+
+
 def build_print_parts(d, s, lay, frames, proc, mat, step_deg, throws):
-    """Every printed part, each in the attitude it prints in."""
+    """Every printed part, each in the attitude it prints in; then every
+    pair of pieces that look alike (label_parts labels them, after the
+    studies)."""
     t0 = time.perf_counter()
     for side in SIDES:
         for bar in lk.BARS:
@@ -1533,6 +1768,18 @@ def build_print_parts(d, s, lay, frames, proc, mat, step_deg, throws):
             for kind in kinds}
     build_handle(d, s, proc, mat)
     build_crank_pin(d, s, proc, mat)
+    pieces = ([f"{sd} {b}" for sd in SIDES for b in lk.BARS]
+              + [f"pin {sd} {j}" for sd in SIDES for j in lk.PINS]
+              + ["cap"] + [f"plate {k}" for k in kinds]
+              + [f"disc {k}" for k in kinds] + ["handle", "crank pin"])
+    s["look_alikes"] = look_alikes(d, pieces)
+    for la in s["look_alikes"]["look_alikes"]:
+        print(f"  look-alike: {' = '.join(la['a_same_as'])} and "
+              f"{' = '.join(la['b_same_as'])}, volume "
+              f"{la['volume_differs']:.2%} apart, radii of gyration "
+              + "/".join(f"{x:.2f}" for x in la["radii_differ_mm"])
+              + " mm: their labels tell them apart")
+    s["kinds"] = kinds
     print(f"  {12 + 8 + 1 + 2 * len(kinds) + 2} print parts "
           f"({time.perf_counter() - t0:.0f} s)")
     return pins, tops
@@ -1600,15 +1847,17 @@ def press_row_part(d, s, proc, mat):
     """The coupon's press row at this walker's stub and cap
     (print_coupon.press_row): a numbered pin per step and a notched cap for
     each, to find the press before twelve legs need it."""
-    step = s["gap_pin"] / 6.0
-    row = print_coupon.press_row(d, proc, s["ds"], 2, step,
-                                 "press row", cap_d=s["dh"], cap_t=s["tc"])
+    # Steps past a print's scatter, two caps each (print_coupon.press_row):
+    # at the stub's own size, since the press is the one it needs. Three
+    # steps, the table's and one either side: six caps, which the stage-1
+    # plate holds beside the leg pair (the coupon's own row has five).
+    step = print_coupon.PRESS_MIN_STEP
+    row = print_coupon.press_row(d, proc, s["ds"], 1, step,
+                                 "press row", cap_d=s["dh"], cap_t=s["tc"],
+                                 one_row=True)
     for b in d.call("list_elements")["bodies"]:
         d.call("set_material", feature_id=b["created_by"], material=mat)
-    z = row["sizes"]
-    n = len(row["caps"])
-    row["box"] = (n * z["pitch"], z["pitch"],
-                  -0.5 * z["pitch"] - z["cap_d"] / 2.0)
+    row["box"] = (row["width_mm"], row["depth_mm"]) + tuple(row["cap_y_mm"])
     return row
 
 
@@ -1664,6 +1913,160 @@ def control_one_layer(d, s, lay, frames, proc, mat, step_deg, samples,
             "clashing_samples": len(hits),
             "first_deg": hits[0], "failed": True,
             "pair": ["front k 0", "front bcd 0"]}
+
+
+# ---- the assembly order -------------------------------------------------------
+# Made from the layer table and the joints, never written by hand: bottom
+# up, a layer at a time, each bar put on where it goes. A pin goes in from
+# below WITH its lowest bar, its head under it, so the bars over it slide
+# on; the front and back legs interleave on the crank pin and on nothing
+# else. Every joint is turned before any cap goes on, and a cap only over a
+# pin's highest bar, which by then is on.
+
+def throw_steps(s, lay):
+    """One throw's leg pair, bottom up: a step per bar, the layer table's
+    order, front before back within a layer."""
+    steps = []
+    for ell in range(1, lay["top"]):
+        for side in SIDES:
+            for bar in lk.BARS:
+                if layer_of(lay, side, bar) != ell:
+                    continue
+                how = []
+                for j in lk.BARS[bar]:
+                    if j == "A":
+                        how.append("its A hole over the crank pin")
+                    elif j == "B":
+                        how.append(f"its B hole over the plate's {side} "
+                                   "frame pivot")
+                    elif j == "G":
+                        continue
+                    else:
+                        lo, _ = pin_span(lay, side, j)
+                        how.append(
+                            f"pin {side_letter(side)}{j} up through its {j} "
+                            "hole from below, head under" if lo == ell else
+                            f"its {j} hole down over pin "
+                            f"{side_letter(side)}{j}")
+                steps.append(f"layer {ell}: {bar_label(side, bar)} -- "
+                             + "; ".join(how))
+    return steps
+
+
+def cap_clear_deg(s, lay, side, j, samples=72):
+    """The crank angles, degrees, at which no bar in a layer over a joint's
+    cap is over the cap: a bar above the cap layer may pass the joint
+    (only the layers from head to cap are kept clear of it), so a cap goes
+    on with the crank where nothing covers it."""
+    L = s["lengths"]
+    _, hi = pin_span(lay, side, j)
+    over = [(sd, b) for sd in SIDES for b in lk.BARS
+            if layer_of(lay, sd, b) > hi + 1]
+    ok = []
+    for i in range(samples):
+        th = 2 * math.pi * i / samples
+        poses = {sd: lk.pose(L, th, sd == "back") for sd in SIDES}
+        pt = poses[side][j]
+        if all(lk.skel_dist([(pt, pt)], lk.edges([poses[sd][x]
+                                                  for x in lk.BARS[b]]))
+               >= s["w"] / 2.0 + s["dh"] / 2.0 for sd, b in over):
+            ok.append(360.0 * i / samples)
+    return ok
+
+
+def cap_steps(s, lay):
+    """A cap on every pin and frame pivot, each over its highest bar, the
+    crank turned to where no bar above covers it."""
+    out = []
+    for side in SIDES:
+        for j in ("B",) + tuple(lk.PINS):
+            lo, hi = pin_span(lay, side, j)
+            what = (f"the plate's {side} frame pivot B" if j == "B" else
+                    f"pin {side_letter(side)}{j}")
+            free = cap_clear_deg(s, lay, side, j)
+            if not free:
+                raise SystemExit(f"strandbeest: no crank angle leaves {what}"
+                                 f"'s cap uncovered")
+            at = ("" if 0.0 in free else
+                  f", the crank turned to {min(free, key=lambda a: min(a, 360 - a)):.0f} deg "
+                  "so no bar is over it")
+            out.append((hi, f"a cap pressed onto {what}, over its layer "
+                            f"{hi} bar, down to its shoulder{at}"))
+    return [t for _, t in sorted(out)]
+
+
+def assembly_order(s, lay, throws):
+    """The build sequence for a walker of `throws` throws, as numbered
+    lines."""
+    st = ["Press the handle into the first disc's arm. Stand the first "
+          "plate on the bench, its pivots up; put the first disc in its "
+          "hole, flange under, and press a crank pin into the disc's top "
+          "socket, its flat toward the axis."]
+    for p in range(throws):
+        if p > 0:
+            st.append(f"Throw {p + 1}: a middle disc over the crank pin, "
+                      "its underside socket on it; a middle plate over the "
+                      "disc and onto the standoffs' stubs; a crank pin "
+                      "pressed into the disc's top socket.")
+        pre = f"Throw {p + 1}, " if throws > 1 else ""
+        st += [pre + t for t in throw_steps(s, lay)]
+        st.append(pre + "TURN the crank a full turn by hand before "
+                  "capping: every joint must turn freely, nothing may "
+                  "catch.")
+        st += [pre + t for t in cap_steps(s, lay)]
+    st.append("The last disc over the last crank pin, its socket on it, "
+              "flange up; the last plate over it and onto the standoffs' "
+              "stubs.")
+    return [f"{i + 1}. {t}" for i, t in enumerate(st)]
+
+
+def check_order(steps, lay):
+    """The order holds what it is for, or the run stops: every pin goes in
+    (from below, head under) before any bar goes over it, every bar over a
+    pin before the turn, and every cap after the turn."""
+    turn = next(i for i, t in enumerate(steps) if "TURN the crank" in t)
+    bad = []
+    for side in SIDES:
+        for j in lk.PINS:
+            tag = f"pin {side_letter(side)}{j}"
+            ins = [i for i, t in enumerate(steps)
+                   if f"{tag} up through" in t]
+            over = [i for i, t in enumerate(steps)
+                    if f"over {tag}" in t and "cap" not in t]
+            cap = [i for i, t in enumerate(steps)
+                   if f"cap pressed onto {tag}" in t]
+            if len(ins) != 1 or len(cap) != 1 or \
+                    any(i < ins[0] or i > turn for i in over) or \
+                    cap[0] < turn:
+                bad.append(tag)
+    if bad:
+        raise SystemExit(f"strandbeest: the assembly order puts {bad} "
+                         "out of order")
+    return {"steps": len(steps), "turn_at": turn + 1, "ok": True}
+
+
+def write_card(out, s, stages):
+    """strandbeest_card.md: the look-alikes, every piece's label, and the
+    assembly order of each stage built."""
+    la = s["look_alikes"]
+    lines = ["# Strandbeest test card", "",
+             "Made by generators/strandbeest/build.py from the layer table "
+             "and the joints.", "", "## Look-alikes", "",
+             f"Pieces whose {la['tolerance']}, and which do not go in each "
+             "other's place. Their labels tell them apart.", ""]
+    lines += ([f"- **{' / '.join(x['a_same_as'])}** and "
+               f"**{' / '.join(x['b_same_as'])}**: volume "
+               f"{x['volume_differs']:.2%} apart, radii of gyration "
+               + "/".join(f"{v:.2f}" for v in x["radii_differ_mm"])
+               + " mm" for x in la["look_alikes"]] or ["- none"])
+    lines += ["", "## Labels", "",
+              "Each piece's top face carries its name (F front, B back) "
+              "and a bar's hole its joint letter:", ""]
+    lines += [f"- {k}: {', '.join(v)}" for k, v in s["labels"].items()]
+    for title, steps in stages:
+        lines += ["", f"## Assembly order, {title}", ""] + steps
+    out.mkdir(parents=True, exist_ok=True)
+    (out / "strandbeest_card.md").write_text("\n".join(lines) + "\n")
 
 
 def stage(d, s, lay, frames, parts, throws, step_deg, samples, name,
@@ -1839,10 +2242,21 @@ def main():
     press = press_row_part(d, s, proc, mat)
     strong = strength(d, s, lay, frames, throws, step_deg, args.hand_n,
                       args.mu)
+    # The labels go on after the pins are studied: a pocket two layers
+    # deep in a head's top or a crank pin's crown is not in a study's
+    # mesh (Netgen meshes a letter's faces badly), and the factors it
+    # leaves are above 10 (README "Labels").
+    s["labels"] = label_parts(d, s, lay, frames, s["kinds"], tops, step_deg)
+    want = 12 + 8 + 2 * len(s["kinds"]) + 2  # every piece but the cap
+    if len(s["labels"]) != want or not all(s["labels"].values()):
+        raise SystemExit(f"strandbeest: {len(s['labels'])} pieces labelled, "
+                         f"not {want}")
+    print(f"  {len(s['labels'])} pieces labelled, every one but the cap")
     receipt = {"size": args.size, "pairs": args.pairs, "process": proc,
                "strength": strong,
                "layer_mm": layer,
-               "sizes": {k: v for k, v in s.items() if k != "lengths"},
+               "sizes": {k: v for k, v in s.items()
+                         if k not in ("lengths", "look_alikes", "labels")},
                "lengths": L, "layers": {f"{a} {b}": v for (a, b), v in
                                         lay["layers"].items()},
                "pins": lay["pins"], "allowances": allowances,
@@ -1916,6 +2330,23 @@ def main():
             o2 / "strandbeest_job.3mf", "pla"))
         d.call("save_project", path=str(o2 / "strandbeest.dsgn"))
 
+    order = []
+    if args.stage in ("1", "all"):
+        order.append(("stage 1 (one leg pair)", assembly_order(s, lay, 1)))
+        for line_ in order[-1][1]:
+            print(f"  {line_}")
+        ck = check_order(order[-1][1], lay)
+        print(f"  assembly order: {ck['steps']} steps, every pin in under "
+              f"its bars, the turn at step {ck['turn_at']}, every cap after "
+              "it")
+    if args.stage in ("2", "all"):
+        order.append((f"stage 2 (the walker, {throws} throws)",
+                      assembly_order(s, lay, throws)))
+    receipt["assembly_order"] = {t: st for t, st in order}
+    receipt["look_alikes"] = {k: v for k, v in s["look_alikes"].items()
+                              if k != "shapes"}
+    receipt["labels"] = s["labels"]
+    write_card(out, s, order)
     receipt["seconds"] = time.perf_counter() - t_all
     out.mkdir(parents=True, exist_ok=True)
     (out / "strandbeest.json").write_text(json.dumps(receipt, indent=1,

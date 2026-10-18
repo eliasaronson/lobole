@@ -304,9 +304,20 @@ def profiles(d, port):
                                 f"{out.stdout}")
     row = json.load(open(os.path.join(tmp, "coupon_no_press_3_press.json")))
     bores = [c["bore_mm"] for c in row["caps"]]
-    expect(len(bores) == 5 and near(bores[2], 2.95)
-           and all(near(b - a, 0.05) for a, b in zip(bores, bores[1:])),
-           f"five caps stepped round the profile's press: {bores}")
+    # Five steps of 0.1, two caps each: a step past a print's scatter, and
+    # the scatter shown by the pair.
+    expect(len(bores) == 10 and near(bores[4], 2.95) and near(bores[5], 2.95)
+           and all(near(bores[2 * i], bores[2 * i + 1]) for i in range(5))
+           and all(near(bores[2 * i + 2] - bores[2 * i], 0.1)
+                   for i in range(4)),
+           f"five steps of two caps round the profile's press: {bores}")
+    out = subprocess.run(
+        [sys.executable, coupon, "--port", str(port), "--press-only",
+         "--profile", "No press", "--size", "3", "--press-step", "0.05",
+         "--out", tmp], capture_output=True, text=True, timeout=120)
+    expect(out.returncode != 0 and "0.1 mm at least" in
+           out.stdout + out.stderr,
+           f"a press step under the scatter is refused: {out.stderr}")
     expect(row["print"]["ok"] and row["print"]["stacking"]["status"]
            == "pass", f"the press row prints: {row['print']}")
     # --seed installs the two measured P1S profiles (and the TPU one).
