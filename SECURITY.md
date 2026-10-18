@@ -30,7 +30,7 @@ Other things to treat as code rather than data: generator scripts in
 Please report security problems **privately**, through GitHub's private
 vulnerability reporting: on the repository page, open the **Security** tab and
 choose **Report a vulnerability**
-(<https://github.com/eliasaronson/Designer/security/advisories/new>). There is
+(<https://github.com/eliasaronson/lobole/security/advisories/new>). There is
 no security email address.
 
 Include what you found, how to reproduce it, the Loböle version or commit

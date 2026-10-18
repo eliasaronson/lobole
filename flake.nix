@@ -199,7 +199,7 @@
                 "Parametric B-Rep CAD engine with a JSON-RPC interface; no GUI.";
               "org.opencontainers.image.licenses" = "AGPL-3.0-or-later";
               "org.opencontainers.image.source" =
-                "https://github.com/eliasaronson/Designer";
+                "https://github.com/eliasaronson/lobole";
             };
           };
         };

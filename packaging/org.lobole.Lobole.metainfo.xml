@@ -21,8 +21,8 @@
     </p>
   </description>
   <launchable type="desktop-id">org.lobole.Lobole.desktop</launchable>
-  <url type="homepage">https://github.com/eliasaronson/Designer</url>
-  <url type="bugtracker">https://github.com/eliasaronson/Designer/issues</url>
+  <url type="homepage">https://github.com/eliasaronson/lobole</url>
+  <url type="bugtracker">https://github.com/eliasaronson/lobole/issues</url>
   <releases>
     <release version="0.1.0" date="2026-07-24">
       <description>

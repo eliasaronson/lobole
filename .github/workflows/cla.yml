@@ -39,7 +39,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          path-to-document: https://github.com/eliasaronson/Designer/blob/main/CLA.md
+          path-to-document: https://github.com/eliasaronson/lobole/blob/main/CLA.md
           # A new version of CLA.md that needs signing again goes in a new
           # file (version2/), so a signature names what was signed.
           path-to-signatures: signatures/version1/cla.json

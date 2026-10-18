@@ -3,7 +3,7 @@
 Every Loböle release, with the locally modified PlaneGCS and libarea
 libraries, is available in source form at its tag, `v<version>`:
 
-<https://github.com/eliasaronson/Designer/tags>
+<https://github.com/eliasaronson/lobole/tags>
 
 The release source archive generated from that tag is the exact corresponding
 source for Loböle, `libplanegcs` and `libdesigner_adaptive`, including build
@@ -39,4 +39,4 @@ For at least three years after a Loböle binary release, a copy of the exact
 corresponding LGPL source will also be provided on request for no more than the
 reasonable physical cost of distribution. Requests may be filed at:
 
-<https://github.com/eliasaronson/Designer/issues>
+<https://github.com/eliasaronson/lobole/issues>
