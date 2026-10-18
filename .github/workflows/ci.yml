@@ -183,7 +183,11 @@ jobs:
             libocct-modeling-data-dev libocct-foundation-dev \
             libocct-ocaf-dev libocct-visualization-dev libtbb-dev \
             libvterm-dev \
-            python3-mypy python3-setuptools
+            python3-mypy python3-pip
+          # The wheel's build system wants setuptools>=77 (an SPDX license,
+          # PEP 639); 24.04's apt has 68. Into the user site, which python3
+          # reads ahead of the system's.
+          python3 -m pip install --user --break-system-packages 'setuptools>=77'
 
       # See the gui-suite job: the save half runs on failure too, so a red
       # test step still leaves a warm compile cache behind.

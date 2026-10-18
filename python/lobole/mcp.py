@@ -22,7 +22,9 @@ import os
 import sys
 import tempfile
 
-from mcp.server.fastmcp import FastMCP, Image
+# The wheel depends on the SDK, but the repo's own type check also runs where
+# it is absent (CI's apt mypy): ignored there, harmless where it is installed.
+from mcp.server.fastmcp import FastMCP, Image  # type: ignore[import-not-found,unused-ignore]
 
 from lobole.client import Client  # noqa: E402
 

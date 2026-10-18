@@ -10,7 +10,7 @@
 # In the repo itself nothing is installed: shell.nix and ctest put python/ on
 # PYTHONPATH, so `import lobole` works from every script and test.
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]  # 77: `license` as an SPDX expression (PEP 639)
 build-backend = "setuptools.build_meta"
 
 [project]

@@ -28,22 +28,59 @@ checked as far as importability allows. setuptools is a dev tool like mypy:
 without it this skips, and CI's build-and-test job installs it so it runs.
 """
 import configparser
+import importlib.metadata
 import importlib.util
+import itertools
 import pathlib
 import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import zipfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 SKIP = 77
 
 
+def _release(version):
+    """'80.9.0' -> (80, 9, 0); stops at the first non-numeric part."""
+    parts = []
+    for part in version.split("."):
+        digits = "".join(itertools.takewhile(str.isdigit, part))
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def _setuptools_floor():
+    """The `setuptools>=N` pyproject.toml's build system requires."""
+    with open(ROOT / "pyproject.toml", "rb") as f:
+        requires = tomllib.load(f)["build-system"]["requires"]
+    for req in requires:
+        name, sep, version = req.replace(" ", "").partition(">=")
+        if name == "setuptools" and sep:
+            return _release(version)
+    raise SystemExit("packaging_smoke: pyproject.toml's build-system names "
+                     f"no setuptools>= floor: {requires}")
+
+
 def main():
     if importlib.util.find_spec("setuptools") is None:
         print("packaging_smoke: SKIP — no setuptools for this interpreter "
               f"({sys.executable}). nix-shell has it; apt: python3-setuptools")
+        return SKIP
+    # Older than the build-system floor fails on pyproject's own schema (an
+    # SPDX `license` reads as a malformed table before 77) -- a build pip would
+    # never attempt, since it installs the floor first. Say which.
+    floor = _setuptools_floor()
+    have = importlib.metadata.version("setuptools")
+    if _release(have) < floor:
+        print(f"packaging_smoke: SKIP — setuptools {have} is older than "
+              f"pyproject.toml's >={'.'.join(map(str, floor))} "
+              f"({sys.executable}); pip install 'setuptools>="
+              f"{'.'.join(map(str, floor))}'")
         return SKIP
     failures = []
     with tempfile.TemporaryDirectory(prefix="lobole-wheel-") as tmp:

@@ -2955,7 +2955,8 @@ class Asm(_Tab):
                 off = max(gaps)
                 if off <= tol:
                     return m
-                nearest = off if nearest is None else min(nearest, off)
+                if nearest is None or off < nearest:
+                    nearest = off
                 # A residual along ONE axis is the frames' own depths, not a
                 # disagreement: a frame built from bores sits at their
                 # MIDPOINT, and two mating holes are rarely drilled the same
