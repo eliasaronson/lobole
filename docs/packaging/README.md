@@ -188,6 +188,36 @@ configured before the move: CMake keeps the library paths it found, so such
 a tree still links the GCC 15 OpenCASCADE and passes, and the next fresh
 configure is the one that crashes. The miscompile is not reported to GCC.
 
+## OpenCASCADE 7.6
+
+7.6 (Ubuntu 24.04's package) and 7.7 or newer all build; development is
+against 7.9.3. CI builds a stock `ubuntu:24.04` container on every push, so
+three differences on 7.6 stay known:
+
+- **PLY export is unavailable**: `RWPly_CafWriter` arrived in 7.7. glTF, GLB
+  and OBJ work; PLY refuses with a message naming the version.
+- **Two tests fail** on kernel behaviour that changed by 7.9: XCAF STEP
+  import placement (`Assembly import plan…`), and a shell that 7.6 refuses
+  outright where 7.9 completes as a no-op (`Shell that removes no
+  material…`). The features work; the assertions are what differ. Two
+  further failures turned out to be ours: a float rotation matrix made OCC
+  infer a scale of 0.99999998859 instead of 1, and `TopoDS_Shape::Moved()`
+  refuses a scaled location on 7.6 where 7.9 accepts it. Rigid placements
+  are now built from a normalized quaternion, so neither version has to
+  forgive it.
+- **Some booleans come out wrong**: a cylinder and a sphere standing on the
+  same plane, the sphere touching the cylinder's floor at one point,
+  intersect to nothing or to the whole sphere. `fuzz_seeds_smoke` names the
+  seeds 7.6 gets wrong, by the `occ` version `ping` reports, and requires
+  them to keep failing as they do, so its other seeds stay a full check. (A
+  shell 7.6 refused also wrote its own tolerance into the body it was
+  handed; that one was ours, and every shell now builds on a copy.)
+
+These are deterministic: the same answers on every run against 7.6.3, and
+none of them against 7.9. Nobody needs to build OpenCASCADE to work on
+Loböle; for full parity on an older release, use Ubuntu 26.04, Nix or the
+Flatpak.
+
 ## The headless AppImage
 
 `nix bundle --bundler github:ralismark/nix-appimage .#default` closure-packs
