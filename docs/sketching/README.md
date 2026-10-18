@@ -637,7 +637,10 @@ rendered characters only, so a space renumbers nothing
 ([naming](../modeling/toponaming.md)).
 
 A **region** is referenced by the sorted entity ids of its outer loop
-(`LoopEntityIds`). `SiblingRegions` expands a picked loop that belongs to a
+(`LoopEntityIds`). A click picks the innermost loop under it, a hole's
+included: picked on its own, a loop inside another extrudes as the island it
+bounds, so a circle inside a plate's outline can be the boss as well as the
+hole. `SiblingRegions` expands a picked loop that belongs to a
 linked pattern or mirror to every member, since a cut through one hole of a
 bolt circle but not its copies is almost never the intent. A label is one
 entity, so every glyph's loop has the same id set `{textId}`, and picking any

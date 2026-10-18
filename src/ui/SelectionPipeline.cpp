@@ -323,8 +323,12 @@ std::optional<Candidate> RegionCandidate(AppState& state, const Ray& ray) {
       innermostArea = a;
     }
   }
-  if (innermost == nullptr || containing % 2 == 0)
-    return std::nullopt; // empty space or inside a hole
+  // Empty space picks nothing. Inside a hole picks the hole's own loop,
+  // which extrudes on its own as the island it bounds: a circle drawn inside
+  // a plate's outline is a boss as often as it is a hole. Refused as "inside
+  // a hole", it could not be picked at all.
+  if (innermost == nullptr)
+    return std::nullopt;
   Candidate c;
   c.item = {
       SelectionItem::Kind::SketchRegion, 0,

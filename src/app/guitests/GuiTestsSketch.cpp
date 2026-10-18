@@ -1012,6 +1012,47 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - M_PI) < 1e-2);
   };
 
+  // A circle drawn inside an outline, picked by clicking inside it: its own
+  // region, extruded as a disc (a boss). The pick used to count the loops
+  // around the click and refuse an even count as "inside a hole", so the
+  // circle could not be picked at all.
+  t = IM_REGISTER_TEST(engine, "region", "a_circle_inside_an_outline_picks");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    auto sk =
+        std::make_unique<SketchFeature>("Profiles", SketchPlane(PlaneType::XY));
+    sk->AddRectangle({-4.0, -4.0}, {4.0, 4.0});
+    const uint32_t circle = sk->AddEntity(sketch::Circle{{0, 0}, 1.0});
+    Doc()->AddFeature(std::move(sk));
+    const uint64_t skId = Doc()->GetFeature(0)->GetId();
+    Doc()->AddFeature(std::make_unique<ExtrudeFeature>("Pad", skId, 2.0,
+                                                       ExtrudeMode::NewBody));
+    Doc()->Regenerate();
+    const uint64_t extId = Doc()->GetFeature(1)->GetId();
+    ui::OpenFeatureEditor(*s_App, extId);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f, 0.0f, 0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.5f, 30.0f));
+    ctx->Yield();
+    ctx->ItemClick("//Extrude###ToolWindow/###slot7");
+    IM_CHECK(s_App->slotPick.Active());
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(0.4f, 0.3f, 0.0f)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield();
+    auto* ext = dynamic_cast<ExtrudeFeature*>(Doc()->FindFeatureById(extId));
+    IM_CHECK(ext != nullptr);
+    IM_CHECK_EQ(ext->regions.size(), (size_t)1);
+    IM_CHECK(ext->regions[0] == std::vector<uint32_t>{circle});
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - 2.0 * M_PI) <
+             1e-2); // the disc, r 1 h 2 -- not the square around it
+    ctx->KeyPress(ImGuiKey_Escape); // disarm the slot
+    ctx->Yield();
+    IM_CHECK(!s_App->slotPick.Active());
+  };
+
   t = IM_REGISTER_TEST(engine, "region", "pick_one_of_two_regions");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");
