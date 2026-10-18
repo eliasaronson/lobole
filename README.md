@@ -384,6 +384,11 @@ Loböle is free software licensed under the **GNU Affero General Public License,
 version 3 or (at your option) any later version** (AGPL-3.0-or-later). See the
 [`LICENSE`](LICENSE) file for the full text.
 
+It comes **without any warranty** (sections 15 and 16 of the licence). Check
+simulation results by hand or by test before relying on them for anything
+that carries load, and dry-run every G-code file: what you build and cut with
+Loböle is your responsibility.
+
 In short: you may use, study, modify, and redistribute it, but any distributed
 or network-hosted derivative must also be released under the AGPL with its
 source available. This copyleft governs the *software only* — files you author

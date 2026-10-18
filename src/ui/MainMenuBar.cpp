@@ -407,7 +407,14 @@ void DrawAboutWindow(AppState& state) {
 
   ImGui::Text("Loböle %s", BuildInfo::Version().c_str());
   ImGui::TextUnformatted("Open-source parametric 3D CAD");
-  ImGui::TextUnformatted("Licensed under AGPL-3.0-or-later");
+  ImGui::TextUnformatted("Copyright © Elias Högbom Aronsson");
+  // The AGPL's "Appropriate Legal Notices" (section 0): the licence, where
+  // its text is, and that there is no warranty. A fork inherits this window,
+  // so the notice it owes its users is already here.
+  ImGui::TextWrapped(
+      "Free software under AGPL-3.0-or-later; see the LICENSE file. It "
+      "comes with ABSOLUTELY NO WARRANTY: check simulation results and "
+      "dry-run every toolpath before relying on them.");
   ImGui::Separator();
 
   // The block a bug report needs. Laid out as label/value rows rather than
