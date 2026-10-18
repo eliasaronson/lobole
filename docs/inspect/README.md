@@ -546,7 +546,9 @@ overhangs and bridges against the process, the gap between bodies, the
 STL's chords, stacking: every piece on the bed and none printed within
 the minimum air over another, and bed_fit: the plate inside the print
 profile's bed and, when it states keep-out zones, every piece clear of
-them — [../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).
+them, and slender: no piece standing taller than the limit times the
+least width it stands on ([slender](../tolerances/README.md#slender)) —
+[../tolerances/README.md#checking-a-print](../tolerances/README.md#checking-a-print).
 `export_print_job` then writes the plates as a 3MF the slicer opens with
 every piece's settings ([print jobs](../tolerances/README.md#print-jobs)).
 

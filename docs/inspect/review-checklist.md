@@ -37,7 +37,9 @@ reports done, a person before a review. Every box is one RPC call. The MCP
       overhang or bridge past the process, the gap between bodies, the STL's
       chords, every piece on the bed with no face within the minimum air
       over another (`stacking`), the plate inside the profile's bed
-      (`bed_fit`). A `skipped` item had no limit: declare the print
+      (`bed_fit`), no piece stood on end taller than the slender limit
+      times what it stands on (`slender`: lay a shaft down on a flat).
+      A `skipped` item had no limit: declare the print
       (`set_print_process`) or state it
       ([checking a print](../tolerances/README.md#checking-a-print)).
 
