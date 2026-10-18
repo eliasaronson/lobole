@@ -941,10 +941,11 @@ def counts(s, result):
     return out
 
 
-def hero(d, path):
-    """The plate cut through the stack's axis, seen from the cut: the
-    transfers' Genevas and pinions in orange beside the wheels, the housing
-    dark. Colours are appearance only; the bodies stay the profile's PLA."""
+def hero(d, path, at=(0.0, 0.0)):
+    """The plate cut through the stack's axis (at `at` on the bed), seen
+    from the cut: the transfers' Genevas and pinions in orange beside the
+    wheels, the housing dark. Colours are appearance only; the bodies stay
+    the profile's PLA."""
     d.call("set_active_part", part="counter print")
     for b_ in d.call("list_elements")["bodies"]:
         name = b_["name"]
@@ -953,9 +954,11 @@ def hero(d, path):
                   [0.70, 0.70, 0.68])
         d.call("set_appearance", feature_id=b_["created_by"], color=colour,
                roughness=0.5)
+    d.call("set_section", base_plane="xz", offset=at[1])  # keeps y <= axis
     d.call("view", name="iso")
-    d.call("set_camera", direction=[0.25, 1.0, 0.3])
+    d.call("set_camera", direction=[0.25, 1.0, 0.3])  # from the cut side
     d.call("render_still", path=str(path), width=1200, height=1300)
+    d.call("set_section", enabled=False)
 
 
 def fit_digits(s_of, digits, prof):
@@ -1215,7 +1218,7 @@ def main():
                          "check cannot see it")
 
     if not args.no_render:
-        hero(d, out / "counter.png")
+        hero(d, out / "counter.png", at)
 
     receipt = {"digit_height": args.digit_height, "digits": digits,
                "digits_asked": args.digits, "digits_why": fewer,
