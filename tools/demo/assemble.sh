@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
 # Joins the recorded demo scenes into the release video: the scenes in order,
 # a short crossfade between each, a caption over the start of each, and an
 # end card with the lockup and the repository's address. Writes two files:
