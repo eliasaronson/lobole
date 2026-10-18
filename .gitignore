@@ -86,7 +86,6 @@ uv.lock
 # configuration, not project source.
 .codex/
 .pi-subagents/
-AGENTS.md
 
 # tools/ci-local.sh build trees (one per container image)
 .ci-local/

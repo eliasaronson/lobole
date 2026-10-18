@@ -1,4 +1,4 @@
-# Loböle — working notes for Claude
+# Loböle — working notes for coding agents
 
 Parametric B-Rep CAD (C++23, Vulkan, OpenCASCADE 7.9, PlaneGCS, ImGui). Built
 and run inside `nix-shell`. Keep this file short — it loads into every session.
