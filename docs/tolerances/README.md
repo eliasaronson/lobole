@@ -505,7 +505,7 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   Studio's 0.20 mm Standard on a 0.4 mm nozzle; and to a profile of a
   seeded name that lacks the bed, the zones or the line width, those, the
   rest left as it is.
-- **The slender ratio** (vNEXT): `slender_ratio` with its
+- **The slender ratio** (v185): `slender_ratio` with its
   `slender_ratio_source`, the tallest a piece may stand over the least
   width it stands on, absent until a tower test states it: check_print's
   [slender](#slender) item, which without it judges by an unmeasured 8.
@@ -706,7 +706,7 @@ above any narrower section over that section's width, is past the limit:
 a bottle on a wide foot is as weak at its neck as a pin at the bed.
 
 - **The limit is not measured.** A profile states `slender_ratio` with its
-  `slender_ratio_source` (vNEXT; one without the other is refused), from a
+  `slender_ratio_source` (v185; one without the other is refused), from a
   tower test of pins of rising height. Without one the item judges by the
   built-in `printcheck::kSlenderRatio`, 8, and its `source` says so: FDM
   guides put a free-standing pin's safe height at a few to ten times its

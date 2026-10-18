@@ -302,6 +302,7 @@ here; the golden corpus and git history cover them.
 | 182 | A Derived feature's snapshot body may carry `fit_bands` [{`face` (the SOURCE's face name), `lower`, `upper` (mm on the diameter), `side`: `hole`\|`shaft`\|`either`, `label`, `allowance`? (mm, omitted at 0), `printed_press`? (true)}]: the size bands the source stamped on that body, as it read them (its tolerances under its print process, a bearing's rings), stamped on the copy under its own face names ([size bands on a copy](../modeling/derived.md#size-bands-on-a-copy)). An unknown `side` is refused on load. An older build reads the copy without its bands, so a press on the source is a clash on the copy. Golden `v182-derived-fit-bands` |
 | 183 | A Hole's `printed` (`round` \| `teardrop` \| `teardrop_flat`, absent = round): its roof pointed up the part's print direction; an Extrude's `taper_deg` (+`taper_expr`, absent = 0); a study load's `region` (`{normal, from_mm, to_mm}` or `{center_mm, radius_mm}`, absent = the whole face). Additive: an older file reads as before. Golden `v183-printed-features` |
 | 184 | An intermittent relation's `motion` may be `table`, with `table`: the law over the window as `[driver fraction, step fraction]` points from `[0, 0]` to `[1, 1]`, the driver's rising and the step's never falling, linear between them. A table that is not such a law, a `table` motion without one and a `table` under another motion are refused on load; an older build refuses the motion by name ([intermittent](../assemblies/relations.md#intermittent)). Golden `assembly/v184-intermittent-table` |
+| 185 | A print profile's `slender_ratio` (the tallest a piece stands over the least width it stands on: check_print's [slender](../tolerances/README.md#slender) limit) and `slender_ratio_source` (where it was read), both or neither, omitted when not stated, in the store and in a part's embedded copy; a ratio without its source, a source without its ratio or a ratio not above 0 is refused on load. An older build reads the profile without them, and judges by the built-in, unmeasured 8. Golden `v185-print-slender` |
 
 ## Pending changes
 
@@ -311,7 +312,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | A print profile's `slender_ratio` (the tallest a piece stands over the least width it stands on: check_print's [slender](../tolerances/README.md#slender) limit) and `slender_ratio_source` (where it was read), both or neither, omitted when not stated, in the store and in a part's embedded copy; a ratio without its source, a source without its ratio or a ratio not above 0 is refused on load. An older build reads the profile without them, and judges by the built-in, unmeasured 8. Golden `vNEXT-print-slender` |
 
 ## The directory form
 

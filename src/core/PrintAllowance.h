@@ -113,7 +113,7 @@ struct Profile {
   // loop's share of the shell the printed mass weighs solid
   // (core/PrintedMass.h).
   double lineWidthMm = 0.0;
-  // vNEXT: the tallest a piece stands over the least width it stands on
+  // v185: the tallest a piece stands over the least width it stands on
   // (check_print's slender item), with where that came from -- a tower
   // test, a data sheet; 0 = not stated, and the item judges by the
   // built-in, unmeasured printcheck::kSlenderRatio. A ratio needs its

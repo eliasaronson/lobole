@@ -1759,7 +1759,7 @@ json ProcessJson(const ui::AppState& state,
       j["bed_exclude_mm"] = p->profile->bedExcludeMm;
     if (p->profile->lineWidthMm > 0.0) // v181
       j["line_width_mm"] = p->profile->lineWidthMm;
-    if (p->profile->slenderRatio > 0.0) { // vNEXT
+    if (p->profile->slenderRatio > 0.0) { // v185
       j["slender_ratio"] = p->profile->slenderRatio;
       j["slender_ratio_source"] = p->profile->slenderSource;
     }

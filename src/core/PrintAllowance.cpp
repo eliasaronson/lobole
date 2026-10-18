@@ -361,7 +361,7 @@ std::string ValidateProfile(const Profile& p) {
            "line_width_mm (the slicer's wall line width) must be 0 (not "
            "stated) or a positive number of mm, not " +
            Mm(p.lineWidthMm);
-  // vNEXT: the slender limit, and where it came from.
+  // v185: the slender limit, and where it came from.
   if (!std::isfinite(p.slenderRatio) || p.slenderRatio < 0.0)
     return who +
            "slender_ratio (the tallest a piece stands over the least width "

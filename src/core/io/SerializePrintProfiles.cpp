@@ -71,7 +71,7 @@ json PrintProfileToJson(const printfit::Profile& p) {
     j["bed_exclude_mm"] = p.bedExcludeMm;
   if (p.lineWidthMm > 0.0) // v181
     j["line_width_mm"] = p.lineWidthMm;
-  if (p.slenderRatio > 0.0) { // vNEXT
+  if (p.slenderRatio > 0.0) { // v185
     j["slender_ratio"] = p.slenderRatio;
     j["slender_ratio_source"] = p.slenderSource;
   }
@@ -135,7 +135,7 @@ printfit::Profile PrintProfileFromJson(const json& j) {
                                "number of mm");
     p.lineWidthMm = j.at("line_width_mm").get<double>();
   }
-  if (j.contains("slender_ratio")) { // vNEXT
+  if (j.contains("slender_ratio")) { // v185
     if (!j.at("slender_ratio").is_number())
       throw std::runtime_error("print profile slender_ratio must be a "
                                "number: a height over a width");

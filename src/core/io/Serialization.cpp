@@ -223,7 +223,7 @@ void TubeToEnvelope(const std::optional<tube::TubeRules>& rules, json& j) {
 // (docs/tolerances/README.md#print-profiles). The copy is what the part
 // reads, whichever store opens it; a copy the profile rules refuse is
 // refused here too. v175: and the profile's `layer_height_mm` and
-// `z_gap_mm` when it states them. vNEXT: and its `slender_ratio` with its
+// `z_gap_mm` when it states them. v185: and its `slender_ratio` with its
 // `slender_ratio_source`.
 // v179: a tolerance's `printed`
 // (docs/tolerances/README.md#printed-press-fits). Only "press" is a printed

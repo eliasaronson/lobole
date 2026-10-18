@@ -1208,7 +1208,7 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
                   pe.at("bed_exclude_mm")[z][k].get<double>());
       }
       CHECK(pr.lineWidthMm == pe.value("line_width_mm", 0.0));
-      // vNEXT: the slender limit and its source. Dropped, check_print would
+      // v185: the slender limit and its source. Dropped, check_print would
       // judge a piece by the unmeasured default the profile replaced.
       CHECK(pr.slenderRatio == pe.value("slender_ratio", 0.0));
       CHECK(pr.slenderSource ==

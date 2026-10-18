@@ -867,7 +867,7 @@ void DrawPrintProfileForm(AppState& state, int index) {
   ImGui::SetItemTooltip("The slicer preset's wall line width: a printed "
                         "part's mass takes each wall loop as this thick.");
 
-  // vNEXT: the slender limit, which needs its source.
+  // v185: the slender limit, which needs its source.
   double slender = p.slenderRatio;
   FormLabel("Slender ratio (height : width, 0 = the unmeasured 8)");
   if (ExprInputDouble(state, "###prof_slender", &slender, "%.4g") &&
