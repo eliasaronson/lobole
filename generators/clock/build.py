@@ -743,26 +743,31 @@ def fem(d, s, weight_g, timeout_s):
     # band of the round in its plate. One round face carries all three, so
     # each is a REGION of it
     # (docs/simulation/README.md#loads-on-part-of-a-face): no step on the arbor makes the seat a face of its own. It is a
-    # printed pin standing on its back end, so its layers are across it:
+    # printed pin lying on its flat, so its layers run along it, up +X:
     # the interlayer factor is what the receipt states (_lib.pin_strength).
     z = s["z"]
     H, t = s["H"], s["t_plate"]
     fs = faces(d, "centre arbor")
     r = s["arbor_d"] / 2.0
-    rounds = [f["name"] for f in fs if f["kind"] == "cylinder" and
+    # Flatted on two sides (its D and the flat it lies on), the round is
+    # its two arcs, each a face: the seat and the pivots are bands of both,
+    # the pull shared by their areas.
+    rounds = [f for f in fs if f["kind"] == "cylinder" and
               abs(f.get("radius", 0) - r) < 1e-6]
-    if len(rounds) != 1:
-        raise SystemExit(f"clock: the arbor's round is {rounds}, not one "
-                         "face")
+    if not 1 <= len(rounds) <= 2:
+        raise SystemExit(f"clock: the arbor's round is "
+                         f"{[f['name'] for f in rounds]}, not its arcs")
+    areas = [f.get("area_mm2") or f.get("area") or 1.0 for f in rounds]
+    shares = [(f["name"], a / sum(areas)) for f, a in zip(rounds, areas)]
     band = lambda z0, z1: {"normal": [0.0, 0.0, 1.0], "from_mm": z0,  # noqa
                            "to_mm": z1}
     pull = weight_g / 1000.0 * S.G
     t0 = time.perf_counter()
     pin = pin_strength(
-        d, "centre arbor", rounds[0], pull, [0.0, -1.0, 0.0],
-        seat=[{"face": rounds[0], "region": band(z0, z1)}
-              for z0, z1 in ((-t, 0.0), (H, H + t))],
-        layer_normal=[0.0, 0.0, 1.0], region=band(*z["drum"]),
+        d, "centre arbor", shares, pull, [0.0, -1.0, 0.0],
+        seat=[{"face": f["name"], "region": band(z0, z1)}
+              for z0, z1 in ((-t, 0.0), (H, H + t)) for f in rounds],
+        layer_normal=P.LIE_UP, region=band(*z["drum"]),
         name="centre arbor under the weight", need=PIN_NEED,
         timeout_s=timeout_s)
     out["centre arbor"] = {
@@ -788,8 +793,12 @@ def bbox(d, part):
 
 
 def rot_quat(kind):
-    """The print orientation: as modelled, or stood on end (the rod's axis,
-    Y, up)."""
+    """The print orientation: as modelled; stood on end (the rod's axis,
+    Y, up); or lying (a shaft's axis, Z, along the bed's -X and its flat,
+    at -X, down: a quarter turn back about Y)."""
+    if kind == "lying":
+        h = math.radians(-90.0) / 2.0
+        return [0.0, math.sin(h), 0.0, math.cos(h)]
     if kind == "up":
         h = math.radians(90.0) / 2.0
         return [math.sin(h), 0.0, 0.0, math.cos(h)]
@@ -797,6 +806,8 @@ def rot_quat(kind):
 
 
 def rotated_box(lo, hi, kind):
+    if kind == "lying":    # (x, y, z) -> (-z, y, x)
+        return ([-hi[2], lo[1], lo[0]], [-lo[2], hi[1], hi[0]])
     if kind == "up":       # (x, y, z) -> (x, -z, y)
         return ([lo[0], -hi[2], lo[1]], [hi[0], -lo[2], hi[1]])
     return lo, hi
@@ -852,14 +863,31 @@ def pack(d, pieces, spacing):
              for b, x, y in bed["items"]] for bed in beds]
 
 
-def pendulum_bed(d):
+def pendulum_bed(d, shafts=(), spacing=0.0):
     """The rod corner to corner (it is longer than the bed), from the
     front right to the back left so it stays clear of the keep-out zone in
     the front-left corner, and the bob and the rating nut in the two
     corners it leaves: the bob at the back right, the nut at the front
-    left, past the zone."""
+    left, past the zone. `shafts` (part, label, kind) lie in rows in the
+    front-left half, above the nut and clear of the rod by `spacing`."""
     lo, hi = bbox(d, "pendulum rod")
     out = [("pendulum rod", "pendulum rod", "diag", None, (lo, hi))]
+    # The rod's centre line is the diagonal x + y = BED_MM; a point is
+    # clear of it by its distance to that line less the rod's half-width.
+    half_w = (hi[0] - lo[0]) / 2.0
+    rl, rh = rotated_box(*bbox(d, "rating nut"), "up")
+    y = BED_MARGIN + (rh[1] - rl[1]) + spacing
+    boxes = sorted(((part, label, kind) + rotated_box(*bbox(d, part), kind)
+                    for part, label, kind in shafts),
+                   key=lambda b: -(b[4][1] - b[3][1]))
+    for part, label, kind, blo, bhi in boxes:
+        w, h = bhi[0] - blo[0], bhi[1] - blo[1]
+        x = clear_x(BED_MARGIN, y, w, h, BED_ZONES, spacing)
+        if (BED_MM - (x + w) - (y + h)) / math.sqrt(2.0) < half_w + spacing:
+            raise SystemExit(f"clock: {label} does not fit beside the "
+                             "pendulum rod")
+        out.append((part, label, kind, (x, y), blo))
+        y += h + spacing
     for part, corner in (("bob", "top-right"), ("rating nut", "bottom-left")):
         rl, rh = rotated_box(*bbox(d, part), "up")
         w, h = rh[0] - rl[0], rh[1] - rl[1]
@@ -896,8 +924,9 @@ def make_bed(d, proc, name, items):
         else:
             q = rot_quat(kind)
             pos = [at[0] - lo[0], at[1] - lo[1], -lo[2]]
-            orient = ("stood on its lower end, the rod's axis up"
-                      if kind == "up" else "as modelled, its back face down")
+            orient = {"up": "stood on its lower end, the rod's axis up",
+                      "lying": "lying on its flat, its axis along the bed",
+                      "flat": "as modelled, its back face down"}[kind]
         r = d.call("add_feature", feature={
             "type": "Derived", "name": label, "source_part": ids[part],
             "reference": False,
@@ -909,30 +938,80 @@ def make_bed(d, proc, name, items):
     return rows
 
 
+# The pieces that moved off stage 1's plate 1 onto its plate 2, lying: the
+# card names them.
+MOVED = ("pillar 1", "pillar 2", "pillar 3", "pillar 4", "anchor arbor",
+         "escape arbor (stage 1)")
+
+
+def old_plate1(d, proc, pieces, sp):
+    """The negative control: stage 1's plate 1 as it was printed, the
+    pillars and arbors stood on end among the rest. check_print must fail
+    it on slender, on exactly those six, and pass every other item; the
+    plate is then dropped."""
+    beds = pack(d, pieces, sp)
+    if len(beds) != 1:
+        raise SystemExit(f"clock: the old plate 1 packs onto {len(beds)} "
+                         "plates")
+    name = "stage1 plate 1 (as printed, shafts standing)"
+    make_bed(d, proc, name, beds[0])
+    others = tuple(k for k in PRINT_ITEMS if k != "slender")
+    pr = check_print(d, f"  {name}", need=others, quiet=True)
+    sl = pr["slender"]
+    # A plate's bodies carry their sources' names; each is the Derived
+    # feature that placed it, by its label.
+    feats = {f["id"]: f["name"] for f in d.call("get_state")["features"]}
+    bodies = d.call("list_elements")["bodies"]
+
+    def label(p):
+        return feats[bodies[p["where"]["body"]]["created_by"]]
+    over = sorted(label(p) for p in sl["pieces"] if p["over"])
+    if sl["status"] != "fail" or over != sorted(MOVED):
+        raise SystemExit(f"clock: the old plate 1 should fail slender on "
+                         f"{sorted(MOVED)}, not {over}: {sl}")
+    worst = ", ".join(f"{label(p)} {p['worst_ratio']:.1f}:1"
+                      for p in sl["pieces"] if p["over"])
+    print(f"  negative control, {name}: slender fails on the six shafts "
+          f"({worst}), as it must; every other item passes")
+    d.call("delete_part", part=name)
+    return pr
+
+
 def print_plates(d, s, proc, out):
     """Every piece on a bed, stage 1's in stage1/ and what stage 2 adds in
     stage2/; every plate's check_print passes every item, then its STL."""
     sp = S.lines(10)
     stage1 = ([("back plate (stage 1)", "back plate (stage 1)", "flat"),
                ("front plate (stage 1)", "front plate (stage 1)", "flat")] +
-              [("pillar", f"pillar {k + 1}", "flat") for k in range(4)] +
               [("pillar nut", f"pillar nut {k + 1}", "flat")
                for k in range(8)] +
               [(p, p, "flat") for p in ("escape wheel", "anchor",
-                                        "anchor arbor",
-                                        "escape arbor (stage 1)",
                                         "drum (stage 1)")])
+    # The shafts print lying, on the pendulum's plate: stood on end, on
+    # plate 1 with the rest, they came off the bed. Plate 1 keeps every
+    # other piece where it was, so a stage 1 printed from the old plate 1
+    # is finished from plate 2 alone.
+    shafts1 = ([("pillar", f"pillar {k + 1}", "lying") for k in range(4)] +
+               [(p, p, "lying") for p in ("anchor arbor",
+                                          "escape arbor (stage 1)")])
+    old_plate1(d, proc, stage1 + [(p, lab, "flat")
+                                  for p, lab, _ in shafts1], sp)
     stage2 = ([(p, p, "flat") for p in (
-        "back plate", "front plate", "escape arbor", "third wheel",
-        "third arbor", "third spacer", "centre wheel", "centre arbor",
-        "centre spacer", "drum", "cannon pinion", "minute wheel",
-        "hour wheel", "minute hand", "hour hand", "dial ring")] +
-        [("dial spacer", f"dial spacer {k + 1}", "flat") for k in range(2)])
+        "back plate", "front plate", "third wheel", "third spacer",
+        "centre wheel", "centre spacer", "drum", "cannon pinion",
+        "minute wheel", "hour wheel", "minute hand", "hour hand",
+        "dial ring")] +
+        [("dial spacer", f"dial spacer {k + 1}", "flat") for k in range(2)] +
+        [(p, p, "lying") for p in ("escape arbor", "third arbor",
+                                   "centre arbor")])
     plates, jobs = {}, {}
     for stage, pieces in (("stage1", stage1), ("stage2", stage2)):
         beds = pack(d, pieces, sp)
         if stage == "stage1":
-            beds.append(pendulum_bed(d))
+            if len(beds) != 1:
+                raise SystemExit(f"clock: stage 1's frame takes {len(beds)} "
+                                 "plates, not the one it was printed on")
+            beds.append(pendulum_bed(d, shafts1, sp))
         (out / stage).mkdir(parents=True, exist_ok=True)
         names = []
         for k, items in enumerate(beds):
@@ -1018,6 +1097,13 @@ them by hand. 0.2 mm layers, no supports, no brim.
 | plate | piece | orientation |
 |---|---|---|
 {chr(10).join(rows)}
+
+**Moved since the first print (2026-10):** {", ".join(MOVED)} left stage 1's
+plate 1 for its plate 2, where they print lying on a flat along their length
+beside the pendulum (stood on end they came off the bed: {s['pillar_height']:.0f} mm on a
+Ø{2 * s['pillar_foot_r']:.2f} end). Plate 1 keeps every other piece it had, so a stage 1 whose
+plate 1 printed but for its shafts is finished from plate 2 alone. Each pillar thread
+keeps {100 * s['pillar']['thread_engaged']:.0f} % of its turn above the flat; stage 2's arbors lie too.
 
 ## Test
 

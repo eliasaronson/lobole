@@ -78,11 +78,23 @@ default 1 s, so a beat every half second) and the print profile, through
   two lines across (`cycloidal.tip_land`, the counter's and planetary's
   rule for printed teeth), every pair's contact ratio is at least 1.1, and
   every pinion's root leaves two lines round its pressed bore.
-- **Arbors** are twelve lines across, printed standing, D-flatted where a
-  wheel is pressed on (half the hole allowance over the arbor: a light
-  press, no angular play) and round in the plates' holes (the gap at the
-  arbor's size). The cannon pinion is pressed on a ROUND end: that is the
-  setting clutch.
+- **Arbors** are twelve lines across, D-flatted where a wheel is pressed
+  on (half the hole allowance over the arbor: a light press, no angular
+  play) and round in the plates' holes (the gap at the arbor's size). The
+  cannon pinion is pressed on a ROUND end: that is the setting clutch.
+- **The shafts print lying** (the arbors and the pillars): stood on end
+  they came off the bed (check_print's
+  [slender](../../docs/tolerances/README.md#slender) item fails them, 25:1
+  and more). Each lies on a flat cut along its whole length at -X
+  (`clock_parts.lie_flat`), whole layers deep and as deep as leaves the
+  round meeting it at 45° or steeper (`clock_spec.lie_depth`: 0.8 mm, four
+  layers, on an arbor), so nothing over it looks down past 45; an arbor's
+  D-flats, at +X, face up. The pillar's flat is cut from its threads'
+  root the same way, so each thread keeps 75 % of its turn; the standoff
+  and the thread reliefs, narrower than the flat likes, meet it under
+  46° chamfers (`lie_chamfers`). A wheel pressed on an arbor's D meets
+  the round less the flat, and the cannon pinion's clutch the round less
+  both flats.
 - **The plate spacing** is set by the weight: the jar must pass the bob,
   which hangs behind the back plate. The cord's rearmost turn stands the
   jar's radius, the bob's half-depth and that half-depth again in front of
@@ -150,13 +162,18 @@ for.
   pillar's (the jar's phase search);
 - static studies of the pendulum rod under its bob and nut, and of the
   centre arbor in its pivots under the jar full of sand, each once, with a
-  timeout. The arbor is a printed pin standing on its back end, so its
-  study is `_lib.pin_strength` (docs/simulation/README.md#printed-layers):
-  the cord's pull on the band of its round the drum turns on and the
-  pivots held on the bands in the plates, each a region of the one round
-  face (docs/simulation/README.md#loads-on-part-of-a-face), read across its
+  timeout. The arbor is a printed pin lying on its flat, its layers along
+  it, so its study is `_lib.pin_strength`
+  (docs/simulation/README.md#printed-layers): the cord's pull on the band
+  of its round the drum turns on and the pivots held on the bands in the
+  plates, each a region of the round's two faces (its arcs either side of
+  the flats, the pull shared by their areas;
+  docs/simulation/README.md#loads-on-part-of-a-face), read across its
   layers. Its interlayer factor goes in the receipt, and under 2 the run
   stops;
+- **negative control**: stage 1's plate 1 as it was first printed, the
+  pillars and arbors stood on end among the rest, must fail `check_print`'s
+  slender item on exactly those six and pass every other item;
 - every print plate's `check_print`, every item.
 
 `generator_clock` (generators/README.md#the-big-generators-as-tests) runs
@@ -197,28 +214,37 @@ torque and less run; the drum is the smallest that holds the cord.
 
 FEM, each study once: the rod under the bob and nut peaks at 0.08 MPa
 (0.04 mm of stretch); the centre arbor under the jar full of sand (3.1 N
-on the drum's band) at 2.2 MPa von Mises, a factor of safety of 22,
-0.04 mm of bending, and 2.24 MPa across its layers: **a factor of 7.6**
-against PLA's interlayer strength.
+on the drum's band) at 2.1 MPa von Mises, a factor of safety of 23,
+0.04 mm of bending, and 1.21 MPa across its layers: **a factor of 14**
+against PLA's interlayer strength (7.6 while it printed standing, its
+layers across the bend).
 
 ### Print plates
 
 Every piece prints the way it is modelled, its back face (the face towards
 the wall) on the bed, except the rod (flat, along the bed's diagonal from
 the front right to the back left, clear of the P1S's keep-out corner, its
-D-flatted thread on the bed) and the bob and rating nut (stood on end).
+D-flatted thread on the bed), the bob and rating nut (stood on end), and
+the arbors and pillars (lying on their flats, in rows in the bed's half in
+front of the rod on stage 1's plate 2).
 Every part but the pendulum states Bambu Studio's 0.20 mm Standard (2
 walls, 5/3 shells, 15 % grid; `clock_parts.FRAME_PRINT`). No supports, no
 brim; every plate passes every `check_print` item, its keep-out zone
-included. Printed, the clock weighs 329 g against 560 g solid (59 %);
-Bambu's own slice of the two jobs, 340 g.
+included, `slender` with it. Printed, the clock weighs 325 g against 550 g
+solid (59 %); Bambu's own slice of the two jobs, 335 g in 8.5 h.
+
+**Stage 1's shafts moved** (2026-10): the four pillars and the two stage-1
+arbors stood on plate 1 with the rest and came off the bed part-way up.
+They now lie on plate 2 beside the pendulum, and plate 1 keeps every other
+piece it had: a stage 1 whose plate 1 printed but for its shafts is
+finished from plate 2 alone, as the card says.
 
 | plate | pieces |
 |---|---|
-| `stage1/plate1.stl` | the stage-1 back and front plates, escape wheel, anchor, stage-1 drum, 4 pillars and 8 nuts (stage 2 uses them too), the anchor arbor and the stage-1 escape arbor |
-| `stage1/plate2.stl` | the pendulum rod, bob and rating nut |
-| `stage2/plate1.stl` | the back plate, third, hour and minute wheels, drum, cannon pinion, the two dial spacers, the third and centre spacers, the escape, third and centre arbors |
-| `stage2/plate2.stl` | the front plate and both hands |
+| `stage1/plate1.stl` | the stage-1 back and front plates, escape wheel, anchor, stage-1 drum and 8 nuts (stage 2 uses them too) |
+| `stage1/plate2.stl` | the pendulum rod, bob and rating nut, the 4 pillars (stage 2 uses them too), the anchor arbor and the stage-1 escape arbor, lying |
+| `stage2/plate1.stl` | the back plate, third, hour and minute wheels, drum, cannon pinion, the two dial spacers, the third and centre spacers |
+| `stage2/plate2.stl` | the front plate, both hands, and the escape, third and centre arbors, lying |
 | `stage2/plate3.stl` | the centre wheel |
 | `stage2/plate4.stl` | the dial ring |
 

@@ -156,7 +156,20 @@ def connect(port=None):
 # --- printing -----------------------------------------------------------------
 
 PRINT_ITEMS = ("bed", "shells", "overhang", "bridges", "clearance", "chords",
-               "stacking", "bed_fit")
+               "stacking", "bed_fit", "slender")
+
+# check_print's slender limit when the profile states none
+# (printcheck::kSlenderRatio, docs/tolerances/README.md#slender): a standing
+# piece's height over the least width it stands on. NOT MEASURED; a
+# generator that sizes a standing piece by it reads the profile's
+# slender_ratio first (slender_ratio).
+SLENDER_RATIO = 8.0
+
+
+def slender_ratio(prof):
+    """The slender limit a print profile (a list_print_profiles row) is
+    checked against: its own, else the built-in, unmeasured one."""
+    return float((prof or {}).get("slender_ratio") or SLENDER_RATIO)
 
 
 def _piece(names):
@@ -214,6 +227,28 @@ def print_item_line(name, item):
                        f"in keep-out zone {i['zone_mm']}")
                     for i in item.get("intrusions", [])[:3])
                 ) if "bed_mm" in item else ""
+    elif name == "slender":
+        def ratio(v):
+            return "on an edge" if v is None else f"{v:.1f}:1"
+        over = [p for p in item["pieces"] if p["over"]]
+        shown = over[:3] or item["pieces"][:1]
+        parts = []
+        for p in shown:
+            t = (f"{_piece(p['piece'])} {p['height_mm']:.1f} mm on "
+                 f"{p['footprint_mm']:.1f}"
+                 + (f" + {p['brim_mm']:g} brim" if p["brim_mm"] else "")
+                 + f", {ratio(p['ratio'])}")
+            if p.get("neck"):
+                n = p["neck"]
+                t += (f", neck {n['width_mm']:.1f} mm at {n['at_mm']:.1f} "
+                      f"under {n['above_mm']:.1f}, {ratio(n['ratio'])}")
+            if p["brim_holds"]:
+                t += " (the brim holds it)"
+            parts.append(t)
+        text = ("; ".join(parts)
+                + (f" (+{len(over) - len(shown)} more over)"
+                   if len(over) > len(shown) else "")
+                + f" against {item['limit']:g}:1 ({item['limit_from']})")
     else:
         text = (f"{item['deflection_mm']:g} mm against "
                 f"{item['limit_mm']:g} mm")
@@ -258,6 +293,9 @@ def print_receipt(r):
                   if key not in ("faces", "pairs", "note", "source")}
     out["clearance"]["closest"] = r["clearance"]["pairs"][:3]
     out["stacking"]["closest"] = r["stacking"]["pairs"][:3]
+    out["slender"]["worst"] = [
+        {k: v for k, v in p.items() if k != "where"}
+        for p in r["slender"]["pieces"][:3]]
     return out
 
 
@@ -369,7 +407,8 @@ def pin_strength(d, part, face, load_n, direction, seat, layer_normal,
     (docs/simulation/README.md#printed-layers): one static study of `part`
     as printed, held at `seat` (a face name, {face, region}, or a list of
     them), loaded with
-    `load_n` newtons along `direction` on `face` -- each optionally only on
+    `load_n` newtons along `direction` on `face` (a name, or [(name,
+    share)] shared over several) -- each optionally only on
     part of its face (`region`, `seat_region`: add_load's region,
     docs/simulation/README.md#loads-on-part-of-a-face) -- read with the
     build direction `layer_normal` in the part's frame. The hook's pattern
@@ -394,9 +433,13 @@ def pin_strength(d, part, face, load_n, direction, seat, layer_normal,
         kw = {"region": reg} if reg else {}
         d.call("add_load", study=sid, type="fixed", face=face_f, **kw)
     kw = {"region": region} if region else {}
-    d.call("add_load", study=sid, type="force", face=face,
-           magnitude=float(load_n), direction=[float(v) for v in direction],
-           **kw)
+    # One face, or [(face, share), ...] when the round the load acts on is
+    # several faces (a shaft flatted on two sides): each its share of it.
+    loads = [(face, 1.0)] if isinstance(face, str) else list(face)
+    for f, share in loads:
+        d.call("add_load", study=sid, type="force", face=f,
+               magnitude=float(load_n) * share,
+               direction=[float(v) for v in direction], **kw)
     if mesh_size:
         d.call("set_study", study=sid, mesh_size=float(mesh_size))
     reused = _run_static(d, sid, timeout_s)

@@ -54,8 +54,8 @@ RATING_TRAVEL = 0.02  # the rating nut's travel either way, a fraction of the
 #                       printed at a different infill from the rod
 ARM_LINES = 6        # the anchor's arms, in extrusion lines across
 WALL_LINES = 4       # a wall round a bore, in lines
-ARBOR_LINES = 12     # an arbor's diameter in lines: 4.8 mm, a rod that
-#                      stands up straight at the heights here
+ARBOR_LINES = 12     # an arbor's diameter in lines: 4.8 mm (it prints
+#                      lying on a flat: stood up, it came off the bed)
 
 
 def lines(n):
@@ -65,6 +65,13 @@ def lines(n):
 def up_to(mm, step):
     """mm rounded UP to whole steps (layers, lines, half millimetres)."""
     return step * math.ceil(mm / step - 1e-9)
+
+
+def lie_depth(r, layer):
+    """How deep a flat a round of radius `r` lies on is cut, from the
+    round: whole layers, and at least to where the round meets it at 45
+    degrees, so nothing over the flat faces down past 45."""
+    return up_to(r * (1.0 - math.cos(math.radians(45.0))), layer)
 
 
 def deg(r):
@@ -606,6 +613,11 @@ def solve(period_s, allow, layer, z_gap, weight_od, cord_mm):
     s["press_d"] = press_d
     s["run_d"] = d_a + 2.0 * g_small
     s["flat"] = lines(2)            # the D's flat, from the round
+    # A shaft prints LYING on a flat along its whole length: stood on end
+    # it came off the bed (check_print's slender item). The flat is cut
+    # whole layers deep, as deep as leaves the round over it at most 45
+    # degrees from vertical where the two meet.
+    s["lie_flat"] = lie_depth(d_a / 2.0, layer)
     s["hub_r"] = s["press_d"] / 2.0 + lines(WALL_LINES)
     assert e["hub_r"] == s["hub_r"]
     # Plates: a bearing as long as the arbor is thick.
@@ -835,12 +847,22 @@ def pillars(s):
     rear = (-s["t_plate"] - nut_h - th["pitch"], -cone - th["pitch"] / 2.0)
     front0 = s["H"] + (r_ext - r_rel) + th["pitch"] / 2.0
     front1 = (s["z"]["ring"][1] + nut_h + th["pitch"])
+    # It prints lying on a flat (clock_parts.build_pillar), cut from the
+    # thread's root as an arbor's is from its round: the thread keeps the
+    # rest of its turn, and the narrower runs (the standoff, the reliefs)
+    # meet the flat under 45-degree chamfers.
+    r_root = r_ext - th["depth"]
+    lie_y = r_root - lie_depth(r_root, lay)
+    s["pillar_foot_r"] = r_root - lines(2)    # the standoff's, its end
+    engaged = 1.0 - 2.0 * math.degrees(math.acos(lie_y / r_root)) / 360.0
     s["pillar"] = {"hole_d": hole_d, "shoulder_r": shoulder_r,
+                   "lie_y": lie_y, "thread_engaged": engaged,
                    "sink_r": shoulder_r, "pad_r": nut_od / 2.0 + lines(2),
                    "nut_h": nut_h, "nut_od": nut_od, "z_wall": z_wall,
                    "rear_thread": rear, "front_thread": (front0, front1),
                    "r_ext": r_ext}
     s["wall_z"] = z_wall
+    s["pillar_height"] = front1 - z_wall
 
 
 def _clear(p, circles, r):

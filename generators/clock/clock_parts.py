@@ -449,13 +449,55 @@ def build_drum(d, s, proc, name="drum", stage1=False):
 
 # --- arbors and spacers --------------------------------------------------------------
 
+# A shaft lies on a flat cut along it at -X: it prints up +X (the printed
+# mass reads its layers so), an arbor's D-flats, at +X, facing up. -X keeps
+# the flat off the seam its revolve leaves at +X, so the round stays one
+# face (the arbor's study loads bands of it).
+LIE_UP = [1.0, 0.0, 0.0]
+
+
+def _down(pts):
+    """(across, up) points of a shaft's section, as the part's (x, y): the
+    flat's up is the part's +X."""
+    return polygon([(v, u) for u, v in pts])
+
+
+def lie_flat(b, name, y, r_out, z0, z1):
+    """Everything below the flat `y` from the axis (towards -X) cut off over
+    z0..z1: the flat a shaft lies on."""
+    w = r_out + 1.0
+    return b.prism(name, _down([(-w, -y), (w, -y), (w, -w - 1.0),
+                                (-w, -w - 1.0)]), z0, z1, mode="cut")
+
+
+def lie_chamfers(b, name, y, r, z0, z1):
+    """Over z0..z1, a round of radius r narrower than the flat at `y` likes:
+    from a little inside the flat's ends, a chamfer each side rising 46
+    degrees (its face 44 from vertical) until it leaves the round above
+    where the round meets the flat, so no face there looks down past 45."""
+    c = math.sqrt(r * r - y * y) - 0.05
+    a = math.radians(46.0)
+    t = 3.0 * r
+    dx, dy = t * math.cos(a), t * math.sin(a)
+    return b.prism(name, _down([(-c, -y), (c, -y), (c + dx, -y + dy),
+                                (c + dx, -r - 2.0), (-c - dx, -r - 2.0),
+                                (-c - dx, -y + dy)]), z0, z1, mode="cut")
+
+
+def lie_down(d):
+    """The active part prints lying: up its +X."""
+    d.call("set_print_settings", direction=LIE_UP)
+
+
 def build_arbor(d, s, proc, name, z0, z1, d_ranges):
-    """A printed arbor standing on its back end: a rod of arbor_d with a D
-    flat over each of `d_ranges` (z0, z1), each D's upper end a 45-degree
-    ramp so it faces nothing down. What turns on it (the drum) runs at the
-    gap on the plain round; a study loads that band of it as a region
+    """A printed arbor, printed LYING on a flat along its length at -X: a
+    rod of arbor_d with a D flat at +X over each of `d_ranges` (z0, z1),
+    facing up as it prints, each D's upper end a 45-degree ramp.
+    What turns on it (the drum) runs at the gap on the plain round; a study
+    loads that band of it as a region
     (docs/simulation/README.md#loads-on-part-of-a-face)."""
     b = new_part(d, name, proc)
+    lie_down(d)
     r = s["arbor_d"] / 2.0
     prof = [(0.0, z0), (r, z0)]
     body = b.revolve(name, prof + [(r, z1), (0.0, z1)])
@@ -471,6 +513,8 @@ def build_arbor(d, s, proc, name, z0, z1, d_ranges):
             "sketch_id": b.sketch(f"{name} flat {k + 1} sketch", sk,
                                   polygon(pts)),
             "distance": 2.0 * (r + 1.0), "mode": "cut"}), name)["id"]
+    body = lie_flat(b, f"{name} lying flat", r - s["lie_flat"], r, z0 - 1.0,
+                    z1 + 1.0)
     return finish(d, body, "pla")
 
 
@@ -577,14 +621,18 @@ def build_plate(d, s, proc, name, fr, back):
 
 
 def build_pillar(d, s, proc):
-    """A pillar standing on its rear end: the standoff to the wall, the
-    back plate's thread (its nut clamps the plate on the pillar's 45-degree
-    cone, seated in the plate's countersink), the shoulder between the
-    plates, and the front thread that carries the front plate, the dial's
-    spacer and ring, and its nut."""
+    """A pillar, printed LYING on a flat along its length at -X: the
+    standoff to the wall, the back plate's thread (its nut clamps the plate
+    on the pillar's 45-degree cone, seated in the plate's countersink), the
+    shoulder between the plates, and the front thread that carries the
+    front plate, the dial's spacer and ring, and its nut. The flat is cut
+    from the threads' root (clock_spec.pillars), so each thread keeps
+    `thread_engaged` of its turn; the standoff and the reliefs, narrower,
+    meet it under chamfers."""
     pt = s["pillar"]
     th = s["pillar_thread"]
     b = new_part(d, "pillar", proc)
+    lie_down(d)
     r_ext = th["ext_d"] / 2.0
     r_root = r_ext - th["depth"]
     r_so = r_root - L(2)
@@ -606,6 +654,17 @@ def build_pillar(d, s, proc):
     body = b.revolve("pillar", prof)
     finish(d, body, "pla")
     thread_on(d, "pillar", r_ext, "pillar thread", th)
+    y = pt["lie_y"]
+    if not y < r_so:
+        raise SystemExit(f"clock: the pillar's flat at {y:.3f} misses its "
+                         f"standoff of radius {r_so:.3f}")
+    lie_flat(b, "pillar lying flat", y, r_sh, z_w - 1.0, zf1 + 1.0)
+    for k, (r, a0, a1) in enumerate((
+            (r_so, z_w - 1.0, zt0 - (r_ext - r_so)),
+            (r_rel, zt1, -cone),
+            (r_rel, H, zf0 - (r_ext - r_rel)))):
+        if y > r * math.cos(math.radians(45.0)):
+            lie_chamfers(b, f"pillar lying chamfers {k + 1}", y, r, a0, a1)
     return body
 
 

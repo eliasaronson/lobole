@@ -1,6 +1,6 @@
 {
   "order": 100,
-  "why": "The whole run but the stills: every part verified, the escapement's studies (a period at 2 deg, an escape-wheel turn at 4 samples a beat in both stages), the ratios, every mesh exact, the click, both negative controls failing, both FEM studies and every print plate's check_print. On the P1S's K5 profile seeded into the instance's own config: the period is the PRINTED pendulum's, which needs a profile that states a layer and a line width (the built-in table states neither), and the plates pack round its bed's keep-out zone.",
+  "why": "The whole run but the stills: every part verified, the escapement's studies (a period at 2 deg, an escape-wheel turn at 4 samples a beat in both stages), the ratios, every mesh exact, the click, both negative controls failing, stage 1's plate 1 as first printed (its shafts standing) failing slender on them alone, both FEM studies and every print plate's check_print. On the P1S's K5 profile seeded into the instance's own config: the period is the PRINTED pendulum's, which needs a profile that states a layer and a line width (the built-in table states neither), and the plates pack round its bed's keep-out zone.",
   "steps": [
     ["{python}", "-u", "{generators}/print_coupon.py", "--port", "{port}", "--seed"],
     ["{python}", "-u", "{generators}/clock/build.py", "--port", "{port}", "--profile", "K5 PLA on P1S", "--no-render", "--out", "{out}/clock"]
@@ -9,13 +9,14 @@
     "the swing: the impulse and the lock and .* lock\\(s\\) past them, the wheel following the pallets by a table",
     "negative control, pallets .* too deep: .*anchor",
     "teeth on the third wheel: fails, as it must",
+    "negative control, stage1 plate 1 \\(as printed, shafts standing\\): slender fails on the six shafts",
     "the period at the pendulum's walls 3, top/bottom 5/5, 100 % rectilinear",
     "clock: done"
   ],
   "instance": "headless",
   "budget_s": 600,
   "readme": {
-    "runs": "`print_coupon.py --seed`, then `clock/build.py --profile \"K5 PLA on P1S\" --no-render` (the period is the printed pendulum's, which needs a profile's layer and line width): every part verified, the escapement's studies in both stages with every beat's lock, the ratios, every mesh exact, the click, both negative controls failing, both FEM studies (the arbor's interlayer factor at least 2), every print plate's `check_print` and the period stated at the pendulum's infill",
+    "runs": "`print_coupon.py --seed`, then `clock/build.py --profile \"K5 PLA on P1S\" --no-render` (the period is the printed pendulum's, which needs a profile's layer and line width): every part verified, the escapement's studies in both stages with every beat's lock, the ratios, every mesh exact, the click, both negative controls failing, stage 1's plate 1 as first printed (its pillars and arbors standing) failing `check_print`'s slender item on exactly those six, both FEM studies (the arbor's interlayer factor at least 2), every print plate's `check_print` and the period stated at the pendulum's infill",
     "measured": "330 s"
   }
 }
