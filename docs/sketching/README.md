@@ -455,6 +455,10 @@ or the regeneration hash (`Document.cpp` erases `images` before hashing, so
 toggling one never rebuilds downstream features). Placement is a rigid 2D
 affine: pixel `(px, py)` maps to `origin + R(rotation)·(px, py)·unitsPerPixel`.
 
+- **PNG, JPEG or BMP, up to 16384 px a side**; anything else is refused,
+  naming what is accepted (`src/common/ImageLimits.h`). A project carries its
+  images, so opening someone else's decodes bytes they chose: stb_image is
+  compiled with only those decoders (and HDR, for the environment map).
 - **Bytes live on the document, not the feature** (`Document::SetAsset/
   GetAsset`, keyed by `asset`). Undo rebuilds features from JSON, which never
   carries the bytes, so storing them on the feature would lose them; and the

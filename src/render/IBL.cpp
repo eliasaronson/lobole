@@ -3,8 +3,17 @@
 
 #include "render/IBL.h"
 
+#include "common/ImageLimits.h"
 #include "common/Logger.h"
 
+// Only the decoders the app uses (common/ImageLimits.h says why): PNG, JPEG
+// and BMP for reference images and tiles, HDR for the environment map.
+#define STBI_ONLY_PNG
+#define STBI_ONLY_JPEG
+#define STBI_ONLY_BMP
+#define STBI_ONLY_HDR
+#define STBI_MAX_DIMENSIONS 16384
+static_assert(STBI_MAX_DIMENSIONS == kMaxImageSide);
 #define STB_IMAGE_IMPLEMENTATION
 #include "thirdparty/stb_image.h"
 

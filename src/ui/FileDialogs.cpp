@@ -508,7 +508,7 @@ void OpenReferenceImageDialog(AppState& state) {
     return;
   }
   nfdu8char_t* outPath = nullptr;
-  const nfdu8filteritem_t filters[] = {{"Images", "png,jpg,jpeg,bmp,tga,gif"}};
+  const nfdu8filteritem_t filters[] = {{"Images", "png,jpg,jpeg,bmp"}};
   nfdresult_t result =
       InDialog([&] { return NFD_OpenDialogU8(&outPath, filters, 1, nullptr); });
   if (result == NFD_OKAY) {

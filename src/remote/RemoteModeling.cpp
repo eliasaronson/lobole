@@ -35,6 +35,7 @@
 #include "ui/RendererSync.h"
 #include "ui/ToleranceActions.h" // PrintedThreadFor
 
+#include "common/ImageLimits.h"
 #include "thirdparty/stb_image.h" // stbi_info_from_memory (impl in IBL.cpp)
 
 #include <glm/glm.hpp>
@@ -420,7 +421,8 @@ static constexpr MethodDoc ModelingMethods[] = {
      "a sketch as live locked construction geometry.",
      "element, feature_id, kind, sketch_id", remote::NeedsPart},
     {"add_reference_image",
-     "Attach an image underlay to a sketch from an image file (`path`). "
+     "Attach an image underlay to a sketch from an image file (`path`: PNG, "
+     "JPEG or BMP, up to 16384 px a side; anything else is refused). "
      "Placement, the same in add and set_reference_image: `at` [u, v] puts "
      "the image's CENTRE there, `origin` [u, v] its (0, 0) pixel corner -- "
      "sketch mm, one of the two, never both (default: centred on the plane "
@@ -2063,11 +2065,16 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
 
       sketch::ReferenceImage img;
       int w = 0, h = 0, comp = 0;
-      if (stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()),
-                                &w, &h, &comp)) {
-        img.widthPx = w;
-        img.heightPx = h;
-      }
+      if (!stbi_info_from_memory(bytes.data(), static_cast<int>(bytes.size()),
+                                 &w, &h, &comp))
+        w = h = 0;
+      if (const char* problem = ImageSizeProblem(w, h))
+        throw std::runtime_error(std::string("cannot use image: ") + path +
+                                 " is " + problem +
+                                 " (accepted: " + kImageFormats + ", up to " +
+                                 std::to_string(kMaxImageSide) + " px a side)");
+      img.widthPx = w;
+      img.heightPx = h;
       // Default scale: make the image ~4 plane units wide so it lands visible,
       // unless the caller pins one. (Recalibrated to a real dimension next.)
       img.unitsPerPixel = unitsPerPixel.value_or(w > 0 ? 4.0 / w : 0.01);

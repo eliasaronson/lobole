@@ -415,6 +415,13 @@ add_test(NAME http_on_rpc_port_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(http_on_rpc_port_smoke PROPERTIES TIMEOUT 120)
 
+# A reference image is a PNG, JPEG or BMP up to 16384 px a side; anything else
+# is refused (src/common/ImageLimits.h).
+add_test(NAME reference_image_formats_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/reference_image_formats_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(reference_image_formats_smoke PROPERTIES TIMEOUT 120)
+
 # Two people, one shared project, NO NETWORK (F9): a bare repository in a temp
 # directory is a real remote as far as git is concerned, so two clones of it
 # are a real two-person scenario that runs anywhere, CI included. Two headless
