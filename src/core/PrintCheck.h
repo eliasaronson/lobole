@@ -14,7 +14,7 @@ struct Body;
 
 // Will this print? (docs/tolerances/README.md#checking-a-print): the one
 // printability check every printed part runs -- check_print, the Print
-// process section's Check print, and every print-in-place generator. Eight
+// process section's Check print, and every print-in-place generator. Nine
 // items, each a measured value against a limit:
 //
 //   bed        the lowest point along the print direction is on the bed
@@ -26,6 +26,8 @@ struct Body;
 //   stacking   every piece starts on the bed, and no face lies within the
 //              minimum air over another piece
 //   bed_fit    the plate fits the printer's build volume (v179)
+//   slender    no piece stands taller than the limit times the least width
+//              it stands on, nor over a narrower section of itself
 //
 // Measured on the B-Rep wherever the B-Rep can answer: the bed from an
 // optimal box without triangulation, every overhang angle from the surface
@@ -56,6 +58,13 @@ inline constexpr double kChordShare = 0.2;
 // An angle past a limit by less than this is AT the limit: a 45° cone's
 // normal evaluates to 45 within rounding.
 inline constexpr double kAngleEpsDeg = 1e-6;
+// The tallest a piece may stand over the least width it stands on, when the
+// print profile states no slender_ratio: NOT MEASURED. FDM guides put a
+// free-standing pin's safe height at a few to ten times its width; 8 is
+// inside that, and the clock's pillars, 24.5:1, came off the bed.
+inline constexpr double kSlenderRatio = 8.0;
+// The most sections the slender item reads a piece at, evenly up its height.
+inline constexpr int kSlenderSections = 256;
 
 struct Options {
   glm::dvec3 up{0.0, 0.0, 1.0}; // the print direction, unit; the bed is
@@ -79,6 +88,13 @@ struct Options {
   // POSITIONAL: the part's frame is the bed's, and every piece must lie on
   // it and clear of each zone.
   std::vector<std::array<double, 4>> bedExcludeMm;
+  // The slender item's limit: a piece's height over the least width of what
+  // it stands on, and over any narrower section, the height above that.
+  double slenderRatio = kSlenderRatio;
+  // Per body (an index into the bodies), what a brim adds to its footprint's
+  // width, both sides together, mm; empty or 0 = no brim. A piece's brim is
+  // the widest of its bodies'.
+  std::vector<double> brimMm;
 };
 
 // Where an item's worst value is: the body (an index into the bodies the
@@ -235,6 +251,42 @@ struct BedFit {
   std::string note;
 };
 
+// A section of a piece narrower than the footprint it stands on: what
+// carries everything above it, and breaks or sways first.
+struct Neck {
+  double atMm = 0.0;    // above the piece's lowest point
+  double widthMm = 0.0; // the section's least width (its convex hull's)
+  double aboveMm = 0.0; // the piece's height over it
+  double ratio = 0.0;   // aboveMm / widthMm
+};
+
+// One piece (the stacking item's: solids that touch), standing.
+struct SlenderPiece {
+  int piece = -1;
+  std::vector<int> bodies; // every body with a solid in it, in order
+  double heightMm = 0.0;   // its top over its lowest point
+  // The least width of the convex hull of its first-layer contact: the
+  // downward planar faces on its lowest point, as the bed item reads them.
+  // 0 when it touches the bed on an edge or a point.
+  double footprintMm = 0.0;
+  double brimMm = 0.0;      // what its brim adds to that width
+  double ratio = 0.0;       // heightMm / (footprintMm + brimMm)
+  std::optional<Neck> neck; // its worst section narrower than the footprint
+  double worstRatio = 0.0;  // the larger of ratio and the neck's
+  // Past the limit without its brim, within it with: the brim is what
+  // holds it.
+  bool brimHolds = false;
+  Where where; // the body, and the footprint's centre or the neck's
+};
+
+struct Slender {
+  Status status = Status::Skipped;
+  double limit = 0.0;
+  std::vector<SlenderPiece> pieces; // every piece, the worst first
+  int sections = 0;                 // sections read, all pieces together
+  std::string note;
+};
+
 // bed_fit alone, for `bodies` printed up `up` on a bed of `bedMm` with
 // `zonesMm` kept out (export_print_job checks every plate with it). Zones
 // with an `up` that is not +Z cannot be judged (the part's frame is not the
@@ -254,13 +306,15 @@ struct Report {
   Chords chords;
   Stacking stacking;
   BedFit bedFit;
+  Slender slender;
   // Every item that ran passed.
   [[nodiscard]] bool Ok() const;
 };
 
 // The check over `bodies`, as one print. Throws std::runtime_error on an
 // empty list, a body with no shape, or Options out of range (a zero `up`, a
-// limit not in its range): the caller refuses those before it gets here.
+// limit not in its range, a brim per body that is not one per body): the caller
+// refuses those before it gets here.
 [[nodiscard]] Report Check(const std::vector<const Body*>& bodies,
                            const Options& opts);
 

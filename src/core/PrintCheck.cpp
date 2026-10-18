@@ -64,9 +64,9 @@ const char* StatusName(Status s) {
 }
 
 bool Report::Ok() const {
-  for (Status s :
-       {bed.status, shells.status, overhang.status, bridges.status,
-        clearance.status, chords.status, stacking.status, bedFit.status})
+  for (Status s : {bed.status, shells.status, overhang.status, bridges.status,
+                   clearance.status, chords.status, stacking.status,
+                   bedFit.status, slender.status})
     if (s == Status::Fail)
       return false;
   return true;
@@ -1029,6 +1029,254 @@ void CheckStacking(const std::vector<const Body*>& bodies,
       "area is the leaves whose centre is under the limit";
 }
 
+// A convex hull in the plane (Andrew's monotone chain), counter-clockwise.
+std::vector<glm::dvec2> Hull2(std::vector<glm::dvec2> p) {
+  std::sort(p.begin(), p.end(), [](const glm::dvec2& a, const glm::dvec2& b) {
+    return a.x < b.x || (a.x == b.x && a.y < b.y);
+  });
+  p.erase(std::unique(p.begin(), p.end()), p.end());
+  if (p.size() < 3)
+    return p;
+  const auto cross = [](const glm::dvec2& o, const glm::dvec2& a,
+                        const glm::dvec2& b) {
+    return (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+  };
+  std::vector<glm::dvec2> h(2 * p.size());
+  size_t k = 0;
+  for (size_t i = 0; i < p.size(); ++i) {
+    while (k >= 2 && cross(h[k - 2], h[k - 1], p[i]) <= 0.0)
+      k--;
+    h[k++] = p[i];
+  }
+  for (size_t i = p.size() - 1, t = k + 1; i > 0; --i) {
+    while (k >= t && cross(h[k - 2], h[k - 1], p[i - 1]) <= 0.0)
+      k--;
+    h[k++] = p[i - 1];
+  }
+  h.resize(k - 1);
+  return h;
+}
+
+// The least width of a convex polygon: the narrowest of its extents across
+// each of its edges (one of them is the minimum, as calipers turn). 0 for a
+// segment or a point.
+double LeastWidth(const std::vector<glm::dvec2>& h) {
+  if (h.size() < 3)
+    return 0.0;
+  double best = std::numeric_limits<double>::infinity();
+  for (size_t i = 0; i < h.size(); ++i) {
+    const glm::dvec2 e = h[(i + 1) % h.size()] - h[i];
+    const double len = glm::length(e);
+    if (len < 1e-12)
+      continue;
+    const glm::dvec2 n(-e.y / len, e.x / len);
+    double w = 0.0;
+    for (const glm::dvec2& q : h)
+      w = std::max(w, std::abs(glm::dot(q - h[i], n)));
+    best = std::min(best, w);
+  }
+  return std::isfinite(best) ? best : 0.0;
+}
+
+glm::dvec2 Centroid(const std::vector<glm::dvec2>& h) {
+  glm::dvec2 c(0.0);
+  for (const glm::dvec2& q : h)
+    c += q;
+  return h.empty() ? c : c / static_cast<double>(h.size());
+}
+
+// The slender item (docs/tolerances/README.md#slender): each piece's
+// height over the least width it stands on -- the convex hull of its
+// downward planar faces on its lowest point, widened by its brim -- and,
+// at kSlenderSections heights up it, the height above each section that is
+// narrower than that footprint over the section's own least width. The
+// sections are cut through the tessellation CheckFaces made, a triangle's
+// crossing at a height its two points on the plane.
+void CheckSlender(const std::vector<const Body*>& bodies,
+                  const std::vector<TopoDS_Shape>& meshed,
+                  const std::vector<std::pair<int, int>>& unitBodySolid,
+                  const std::vector<int>& unitPiece, int pieces,
+                  const Options& o, Report& r) {
+  Slender& sl = r.slender;
+  sl.limit = o.slenderRatio;
+  const glm::dvec3 up = o.up;
+  // The bed's frame: x and y on it, z up the print direction.
+  glm::dvec3 bx = glm::dvec3(1, 0, 0) - up.x * up;
+  if (glm::length(bx) < 1e-6)
+    bx = glm::dvec3(0, 1, 0) - up.y * up;
+  bx = glm::normalize(bx);
+  const glm::dvec3 by = glm::cross(up, bx);
+  struct Tri {
+    glm::dvec3 p[3]; // bed frame
+  };
+  struct PieceData {
+    std::vector<int> bodies;
+    double low = std::numeric_limits<double>::infinity();
+    double top = -std::numeric_limits<double>::infinity();
+    double brim = 0.0;
+    std::vector<Tri> tris;
+    // Downward planar faces' nodes with their face's highest node.
+    std::vector<std::pair<std::vector<glm::dvec2>, double>> downs;
+  };
+  std::vector<PieceData> pd(pieces);
+  std::map<std::pair<int, int>, int> unitOf;
+  for (size_t u = 0; u < unitBodySolid.size(); ++u)
+    unitOf[unitBodySolid[u]] = static_cast<int>(u);
+  for (size_t bi = 0; bi < bodies.size(); ++bi) {
+    const double brim =
+        bi < o.brimMm.size() ? std::max(0.0, o.brimMm[bi]) : 0.0;
+    std::vector<TopoDS_Shape> solids;
+    for (TopExp_Explorer ex(meshed[bi], TopAbs_SOLID); ex.More(); ex.Next())
+      solids.push_back(ex.Current());
+    if (solids.empty())
+      solids.push_back(meshed[bi]);
+    for (size_t k = 0; k < solids.size(); ++k) {
+      const auto it = unitOf.find({static_cast<int>(bi), static_cast<int>(k)});
+      if (it == unitOf.end())
+        continue;
+      PieceData& P = pd[unitPiece[it->second]];
+      if (std::find(P.bodies.begin(), P.bodies.end(), static_cast<int>(bi)) ==
+          P.bodies.end())
+        P.bodies.push_back(static_cast<int>(bi));
+      P.brim = std::max(P.brim, brim);
+      P.low = std::min(P.low, LowestAlong(solids[k], up));
+      P.top = std::max(P.top, -LowestAlong(solids[k], -up));
+      for (TopExp_Explorer ex(solids[k], TopAbs_FACE); ex.More(); ex.Next()) {
+        const TopoDS_Face& face = TopoDS::Face(ex.Current());
+        TopLoc_Location loc;
+        const Handle(Poly_Triangulation) tri =
+            BRep_Tool::Triangulation(face, loc);
+        if (tri.IsNull())
+          continue;
+        const gp_Trsf tr = loc.Transformation();
+        const int nn = tri->NbNodes();
+        std::vector<glm::dvec3> nodes(nn);
+        for (int i = 1; i <= nn; ++i) {
+          const glm::dvec3 w = V(tri->Node(i).Transformed(tr));
+          nodes[i - 1] = {glm::dot(bx, w), glm::dot(by, w), glm::dot(up, w)};
+        }
+        for (int t = 1; t <= tri->NbTriangles(); ++t) {
+          int a, b, c;
+          tri->Triangle(t).Get(a, b, c);
+          P.tris.push_back({{nodes[a - 1], nodes[b - 1], nodes[c - 1]}});
+        }
+        BRepAdaptor_Surface surf(face);
+        if (surf.GetType() != GeomAbs_Plane || !tri->HasUVNodes())
+          continue;
+        const gp_Pnt2d uv = tri->UVNode(1);
+        BRepLProp_SLProps props(surf, uv.X(), uv.Y(), 1,
+                                Precision::Confusion());
+        if (!props.IsNormalDefined())
+          continue;
+        glm::dvec3 n = V(props.Normal());
+        if (face.Orientation() == TopAbs_REVERSED)
+          n = -n;
+        if (OverhangDeg(n, up) < 90.0 - kCeilingDeg)
+          continue;
+        std::vector<glm::dvec2> flat;
+        double hi = -std::numeric_limits<double>::infinity();
+        for (const glm::dvec3& q : nodes) {
+          flat.emplace_back(q.x, q.y);
+          hi = std::max(hi, q.z);
+        }
+        P.downs.emplace_back(std::move(flat), hi);
+      }
+    }
+  }
+  const auto world = [&](double x, double y, double z) {
+    return bx * x + by * y + up * z;
+  };
+  for (int pi = 0; pi < pieces; ++pi) {
+    PieceData& P = pd[pi];
+    if (P.bodies.empty())
+      continue;
+    SlenderPiece sp;
+    sp.piece = pi;
+    sp.bodies = P.bodies;
+    sp.heightMm = std::max(0.0, P.top - P.low);
+    std::vector<glm::dvec2> contact;
+    for (const auto& [pts, hi] : P.downs)
+      if (hi <= P.low + kBedTolMm)
+        contact.insert(contact.end(), pts.begin(), pts.end());
+    const std::vector<glm::dvec2> foot = Hull2(contact);
+    sp.footprintMm = LeastWidth(foot);
+    sp.brimMm = P.brim;
+    const double base = sp.footprintMm + sp.brimMm;
+    sp.ratio = base > 0.0 ? sp.heightMm / base
+                          : std::numeric_limits<double>::infinity();
+    const glm::dvec2 fc = Centroid(foot.empty() ? contact : foot);
+    sp.where = Where{P.bodies.front(), -1, world(fc.x, fc.y, P.low)};
+    // The sections, evenly up the piece; a triangle adds its crossing to
+    // each it spans.
+    const int ns = sp.heightMm > kBedTolMm ? kSlenderSections : 0;
+    std::vector<std::vector<glm::dvec2>> cut(ns);
+    const double H = sp.heightMm;
+    const auto at = [&](int j) { return P.low + H * (j + 0.5) / ns; };
+    for (const Tri& t : P.tris) {
+      double z0 = std::min({t.p[0].z, t.p[1].z, t.p[2].z});
+      double z1 = std::max({t.p[0].z, t.p[1].z, t.p[2].z});
+      if (ns == 0 || z1 - z0 < 1e-12)
+        continue;
+      const int j0 =
+          std::max(0, static_cast<int>(std::ceil((z0 - P.low) / H * ns - 0.5)));
+      const int j1 = std::min(
+          ns - 1, static_cast<int>(std::floor((z1 - P.low) / H * ns - 0.5)));
+      for (int j = j0; j <= j1; ++j) {
+        const double h = at(j);
+        for (int e = 0; e < 3; ++e) {
+          const glm::dvec3& a = t.p[e];
+          const glm::dvec3& b = t.p[(e + 1) % 3];
+          if ((a.z - h) * (b.z - h) > 0.0 || a.z == b.z)
+            continue;
+          const double s = (h - a.z) / (b.z - a.z);
+          cut[j].emplace_back(a.x + s * (b.x - a.x), a.y + s * (b.y - a.y));
+        }
+      }
+    }
+    sl.sections += ns;
+    // A section within a fiftieth of the footprint is the footprint (a
+    // uniform pin's every section is its foot, chord for chord).
+    const double narrower =
+        sp.footprintMm - std::max(kBedTolMm, 0.02 * sp.footprintMm);
+    for (int j = 0; j < ns; ++j) {
+      if (cut[j].size() < 3)
+        continue;
+      const std::vector<glm::dvec2> h = Hull2(std::move(cut[j]));
+      const double w = LeastWidth(h);
+      if (!(w < narrower) || w <= 0.0)
+        continue;
+      Neck nk{at(j) - P.low, w, P.top - at(j), (P.top - at(j)) / w};
+      if (!sp.neck || nk.ratio > sp.neck->ratio) {
+        sp.neck = nk;
+        const glm::dvec2 c = Centroid(h);
+        sp.where = Where{P.bodies.front(), -1, world(c.x, c.y, at(j))};
+      }
+    }
+    sp.worstRatio = std::max(sp.ratio, sp.neck ? sp.neck->ratio : 0.0);
+    const double bare = sp.footprintMm > 0.0
+                            ? sp.heightMm / sp.footprintMm
+                            : std::numeric_limits<double>::infinity();
+    sp.brimHolds = sp.brimMm > 0.0 && bare > o.slenderRatio &&
+                   sp.worstRatio <= o.slenderRatio;
+    sl.pieces.push_back(std::move(sp));
+  }
+  std::stable_sort(sl.pieces.begin(), sl.pieces.end(),
+                   [](const SlenderPiece& a, const SlenderPiece& b) {
+                     return a.worstRatio > b.worstRatio;
+                   });
+  bool over = false;
+  for (const SlenderPiece& sp : sl.pieces)
+    over = over || sp.worstRatio > o.slenderRatio + 1e-9;
+  sl.status = over ? Status::Fail : Status::Pass;
+  sl.note = "each piece's height over the least width of the convex hull of "
+            "its downward planar faces on its lowest point (its first "
+            "layer), a brim adding its width each side; and over every "
+            "section narrower than that, the height above it: " +
+            std::to_string(kSlenderSections) +
+            " sections a piece, cut through the tessellation, each the "
+            "least width of its convex hull";
+}
+
 } // namespace
 
 namespace {
@@ -1141,6 +1389,12 @@ Report Check(const std::vector<const Body*>& bodies, const Options& o) {
   for (const Body* b : bodies)
     if (b == nullptr || b->shape.GetShape().IsNull())
       throw std::runtime_error("a body has no shape");
+  if (!std::isfinite(o.slenderRatio) || o.slenderRatio < 0.0)
+    throw std::runtime_error("the slender ratio is not 0 (skip) or more");
+  if (!o.brimMm.empty() && o.brimMm.size() != bodies.size())
+    throw std::runtime_error(
+        "a brim per body, or none: " + std::to_string(o.brimMm.size()) +
+        " for " + std::to_string(bodies.size()) + " bodies");
   const glm::dvec3 up = glm::normalize(o.up);
   Options opts = o;
   opts.up = up;
@@ -1305,11 +1559,18 @@ Report Check(const std::vector<const Body*>& bodies, const Options& o) {
   r.shells.status =
       pieces == nu && r.shells.watertight ? Status::Pass : Status::Fail;
 
+  std::vector<std::pair<int, int>> unitBodySolid;
+  for (const Unit& u : units)
+    unitBodySolid.emplace_back(u.body, u.solid);
+  // Slender: every piece standing, against the ratio.
+  if (o.slenderRatio > 0.0) {
+    CheckSlender(bodies, meshed, unitBodySolid, unitPiece, pieces, opts, r);
+  } else {
+    r.slender.note = "no slender ratio to judge a standing piece by";
+  }
+
   // Stacking: the pieces again, against the minimum air.
   if (o.minAirMm) {
-    std::vector<std::pair<int, int>> unitBodySolid;
-    for (const Unit& u : units)
-      unitBodySolid.emplace_back(u.body, u.solid);
     CheckStacking(bodies, meshed, unitBodySolid, unitPiece, pieces, opts, bed,
                   r);
   } else {

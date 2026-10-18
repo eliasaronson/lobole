@@ -125,6 +125,10 @@ const std::vector<Brim>& AllBrims() {
 
 std::string BrimName(Brim b) { return RowOf(b).name; }
 
+double BrimWidening(Brim b) {
+  return b == Brim::Outer || b == Brim::Both ? 2.0 * kBrimWidthMm : 0.0;
+}
+
 std::optional<Brim> BrimFromName(const std::string& name) {
   for (const BrimRow& r : kBrims)
     if (name == r.name)
@@ -229,7 +233,12 @@ BambuObjectSettings(const Settings& s, double layerHeightMm) {
   if (s.infill)
     out.emplace_back("sparse_infill_pattern", BambuInfillName(*s.infill));
   out.emplace_back("enable_support", s.supports.value_or(false) ? "1" : "0");
-  out.emplace_back("brim_type", BambuBrimName(s.brim.value_or(Brim::None)));
+  const Brim brim = s.brim.value_or(Brim::None);
+  out.emplace_back("brim_type", BambuBrimName(brim));
+  // The width check_print's slender item counts (kBrimWidthMm), stated so
+  // a preset with another cannot print a narrower brim than was checked.
+  if (brim != Brim::None)
+    out.emplace_back("brim_width", Number(kBrimWidthMm));
   return out;
 }
 

@@ -1,0 +1,20 @@
+{
+  "features": 1,
+  "bodies": 1,
+  "volumes": [
+    1005.309649149
+  ],
+  "print": {
+    "process": "fdm",
+    "material": "pla",
+    "profile": "K5 PLA on P1S",
+    "rows": 3,
+    "gap_allowance_mm": 0.2,
+    "gap_to_mm": 50,
+    "stl_deflection_mm": 0.01,
+    "layer_height_mm": 0.2,
+    "z_gap_mm": 0.4,
+    "slender_ratio": 6,
+    "slender_ratio_source": "a tower test: Ø5 pins of rising height on the P1S, the first to come loose at 7:1"
+  }
+}

@@ -3,6 +3,8 @@
 
 #include "core/PrintAllowance.h"
 
+#include "core/PrintCheck.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -359,6 +361,19 @@ std::string ValidateProfile(const Profile& p) {
            "line_width_mm (the slicer's wall line width) must be 0 (not "
            "stated) or a positive number of mm, not " +
            Mm(p.lineWidthMm);
+  // vNEXT: the slender limit, and where it came from.
+  if (!std::isfinite(p.slenderRatio) || p.slenderRatio < 0.0)
+    return who +
+           "slender_ratio (the tallest a piece stands over the least width "
+           "it stands on) must be 0 (not stated) or a positive ratio, not " +
+           Mm(p.slenderRatio);
+  if (p.slenderRatio > 0.0 && p.slenderSource.empty())
+    return who + "a slender_ratio of " + Mm(p.slenderRatio) +
+           " needs its slender_ratio_source: the tower test or data sheet it "
+           "was read from";
+  if (p.slenderRatio <= 0.0 && !p.slenderSource.empty())
+    return who + "slender_ratio_source without the slender_ratio it is the "
+                 "source of";
   if (p.zGapMm > 0.0) {
     // A slicer ends air at a layer: air between layers is not air it can
     // print, so it is refused rather than rounded either way.
@@ -711,6 +726,34 @@ double MinAirMm(const Process& p) {
   if (p.profile && p.profile->layerHeightMm > 0.0)
     return layers(p.profile->layerHeightMm);
   return layers(kFdmLayerMm);
+}
+
+double SlenderRatio(const Process& p) {
+  if (p.profile && p.profile->slenderRatio > 0.0)
+    return p.profile->slenderRatio;
+  return p.process == "fdm" ? printcheck::kSlenderRatio : 0.0;
+}
+
+std::string SlenderFrom(const Process& p) {
+  if (p.profile && p.profile->slenderRatio > 0.0)
+    return "profile";
+  return p.process == "fdm" ? "default" : std::string();
+}
+
+std::string SlenderSource(const Process& p) {
+  const std::string from = SlenderFrom(p);
+  if (from == "profile")
+    return "the profile's slender_ratio, " + Mm(p.profile->slenderRatio) +
+           ": " + p.profile->slenderSource;
+  if (from == "default")
+    return "the built-in " + Mm(printcheck::kSlenderRatio) +
+           ":1, NOT MEASURED: FDM guides put a free-standing pin's safe "
+           "height at a few to ten times its width, and the clock's "
+           "pillars, 24.5:1, came off the bed. State slender_ratio (with "
+           "its slender_ratio_source) in the print profile once a tower "
+           "test says";
+  return "the process '" + p.process +
+         "' is not FDM: no slender limit is known for it";
 }
 
 std::string MinAirFrom(const Process& p) {

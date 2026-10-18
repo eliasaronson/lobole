@@ -505,12 +505,18 @@ printer, one filament, one slicer preset. The CAM machine store is the pattern
   Studio's 0.20 mm Standard on a 0.4 mm nozzle; and to a profile of a
   seeded name that lacks the bed, the zones or the line width, those, the
   rest left as it is.
+- **The slender ratio** (vNEXT): `slender_ratio` with its
+  `slender_ratio_source`, the tallest a piece may stand over the least
+  width it stands on, absent until a tower test states it: check_print's
+  [slender](#slender) item, which without it judges by an unmeasured 8.
+  `--seed` writes none. The Settings window edits both (`###prof_slender`,
+  `###prof_slender_source`).
 - **The built-in tables stay**, read-only, as what a profile starts from: a
   new profile is the built-in table of its pair, "the defaults, corrected".
 - **The document carries its numbers.** A part printed with a profile has
   `print {process, material, profile, conditions, stl_deflection_mm?,
   layer_height_mm?, z_gap_mm?, bed_mm?, bed_exclude_mm?, line_width_mm?,
-  rows}`:
+  slender_ratio?, slender_ratio_source?, rows}`:
   the name and an embedded copy, the way a CAM setup embeds its machine. The
   copy is what every lookup reads (`printfit::Find` resolves it before the
   built-in table), so a part opens anywhere with what it was modelled with —
@@ -619,7 +625,7 @@ print*, and every print-in-place generator through `generators/_lib.py`'s
 the limits from the part's print, so the button and the RPC cannot disagree;
 the core takes bodies and limits and no document. It answers over the
 part's non-reference bodies (or `bodies`) as one print along `direction`
-(default +Z; the bed is the plane below it through the origin). Eight
+(default +Z; the bed is the plane below it through the origin). Nine
 items, each `{status: pass | fail | skipped, measured, limit, note}`:
 
 | item | measured | limit | how |
@@ -632,6 +638,7 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
 | `chords` | the chord deviation `export_stl` meshes this print at | a fifth of the gap a side | `printfit::StlDeflectionMm`, as [the export](#exporting-a-printed-part) takes it, or `stl_deflection_mm` |
 | `stacking` | each piece's lowest point (`lifted`: the pieces that start above the print's lowest point, with their height and lowest face); per piece over ANOTHER piece, the area of its faces under the limit, the least vertical air and where (`pairs`) | on the bed within 1 µm; the minimum air (`printfit::MinAirMm`, or `min_air_mm`), passing down to a tenth under it | the pieces are the shells item's (solids within 1 µm); each lowest point exact, as the bed's. The samples are points of every downward face's own surface, off the bed, at UVs the overhang item's tessellation places and inside the face (a triangle's UV past a curved edge is the surface beyond the face, not a sample): a triangle is split while it is wider than four limits, or while its centroid and corners disagree and it is wider than a sixteenth of the limit. From each, a ray goes down along the direction to the nearest material within the limit: only a surface that faces up can be met first from outside, so the upward triangles of every solid's tessellation are binned on a grid across the direction, and the triangle a ray meets names the face and where on it; the air is then taken off that face's own surface, closed-form on a plane and by Newton from the triangle's UV on anything else, and a triangle whose surface puts the material outside the limit passes the ray on (a hollow's chord lies above its surface). A triangle on its face's boundary hands the ray to that face and every face across its edges, each intersected exactly (`IntCurvesFace`) and kept only where the ray meets it on the face, the least air of those: past a top's polygon the ray meets the flank's triangle, whose surface runs on above the top. So the air is exact up to a face's edge: the hinge box's cone pins read their modelled 0.4 mm on K5 to a micron. The exact intersections run on boundary triangles alone, which keeps a plate of thousands of faces to seconds. A face, or triangle, with no other piece's box within the limit under it is never sampled. Material of the sample's own piece first is the bridges item's; another piece's is air. The area is the leaves whose centroid is under the limit |
 | `bed_fit` | the plate's box: `extent_mm`, x along the bed's x (the world's x, or y when the direction is x), z up the direction; with keep-out zones, every piece where it is (`intrusions`) | the profile's `bed_mm`, with `shortfall_mm` per axis; and its `bed_exclude_mm` (`exclude_mm`) | `BRepBndLib::AddOptimal` of every body in the printer's frame. Without zones the extent, not a position: a slicer places the plate, so it fits when its box does. With zones (v181, `printcheck::FitOnBed`) the part's x and y ARE the bed's, printed up +Z: a piece whose footprint box leaves the bed, or which itself (`BRepExtrema` against the zone's prism, after the boxes meet) enters a zone, is an intrusion naming the zone. A piece laid along the bed's diagonal has a box over the whole bed and misses the corner. Another print direction with zones fails, saying the frame is not the bed's |
+| `slender` | per piece, its height over the least width of its first layer (`ratio`), and its worst section narrower than that (`neck`: the height above it over its width); `pieces` worst first, `over` how many are past the limit | `slender_ratio` of the profile, else the built-in 8, unmeasured ([slender](#slender)) | the pieces are the shells item's. The footprint is the convex hull of the piece's downward planar faces on its lowest point, its least width the narrowest extent across one of the hull's edges; a brim (the piece's [settings](#slicer-settings), `outer` or `both`) adds its width each side. The sections are cut through the overhang item's tessellation at 256 heights up the piece, each the least width of its convex hull; a section within a fiftieth of the footprint is the footprint, so a uniform pin has no neck |
 
 - **bed_fit is the printer's**, so it runs only on a part printed with a
   profile that states `bed_mm` (v179) and is skipped otherwise, its note
@@ -657,13 +664,14 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
   under a 45° head with three layers passes.
 - **Every limit can be stated** (`max_overhang_deg`,
   `overhang_allowance_mm2`, `max_bridge_mm`, `min_gap_mm`,
-  `stl_deflection_mm`, `min_air_mm`); each item says where its limit came
+  `stl_deflection_mm`, `min_air_mm`, `max_slender_ratio`); each item says
+  where its limit came
   from (`limit_from` / `required_from` / `deflection_from`: `asked`,
-  `process`, `profile`, `gap`, `material` (TPU's own chords), and for the
-  air `layers`), the process's
+  `process`, `profile`, `gap`, `material` (TPU's own chords), for the
+  air `layers`, and for slender `default`), the process's
   with its `source`. A process that is not FDM knows no air, so stacking
   is skipped, saying so. An **unprinted** part has no limit to take, so
-  overhang, bridges, clearance, chords and stacking are `skipped`, the note naming
+  overhang, bridges, clearance, chords, stacking and slender are `skipped`, the note naming
   `set_print_process` or the parameter, and the receipt is `unverified` —
   never judged against a number nobody chose. `ok` is every item that ran
   passing.
@@ -681,8 +689,42 @@ items, each `{status: pass | fail | skipped, measured, limit, note}`:
   `###print_check_stacking`), which selects the worst face so the viewport
   points at it: for stacking, the face with the least air over another
   piece, else the lowest face of the highest piece off the bed. The last
-  line, *fits the bed*, gives the plate's extent in the bed and, failing,
-  what it is over by.
+  line but one, *fits the bed*, gives the plate's extent in the bed and,
+  failing, what it is over by; the last, *slender*, the worst piece's
+  height on its footprint (and brim), its neck, and the ratio against the
+  limit.
+
+#### Slender
+
+A piece stood on end comes off the bed, or sways under the nozzle, once it
+is tall against what it stands on: the clock's four pillars (123 mm on a
+Ø5.0 end, 24.5:1) and two arbors (79 and 95 mm on Ø4.8) let go part-way up
+on the P1S, and the nozzle strung the rest of their layers into the air,
+while every other item passed the plate. The slender item fails a piece
+whose height over the least width of its first layer, or whose height
+above any narrower section over that section's width, is past the limit:
+a bottle on a wide foot is as weak at its neck as a pin at the bed.
+
+- **The limit is not measured.** A profile states `slender_ratio` with its
+  `slender_ratio_source` (vNEXT; one without the other is refused), from a
+  tower test of pins of rising height. Without one the item judges by the
+  built-in `printcheck::kSlenderRatio`, 8, and its `source` says so: FDM
+  guides put a free-standing pin's safe height at a few to ten times its
+  width. `limit_from` is `profile`, `default` or `asked`.
+- **A brim counts at the bed and nowhere else.** An `outer` or `both` brim
+  adds `printset::kBrimWidthMm` (5 mm, Bambu Studio's default) each side to
+  the footprint; `inner` adds nothing outside it, and `ears` grow only at
+  sharp corners, which a round foot has none of. A print job writes
+  `brim_width` on every object with a brim, so the slicer prints the width
+  the item counted. A piece past the limit on its own footprint and
+  within it with the brim says `brim_holds`: the brim is what keeps it
+  down. A neck is never widened by one.
+- **What passes is a shaft lying down.** A round lying on the bed has a
+  line for a first layer and its underside past 45°: the clock and the
+  engine lie theirs on a flat cut along the whole length, whole layers
+  deep and as deep as leaves the round meeting it at 45° or steeper
+  (`clock_spec.lie_depth`, the engine's `d_shape`), so the overhang item
+  passes the same piece.
 
 ### Slicer settings
 
@@ -798,7 +840,9 @@ x and y from its front-left corner, as a generator places them.
   `bottom_shell_layers` with their thickness floors zeroed so the count is
   what prints -- the preset's 1 mm `top_shell_thickness` would raise two
   layers to five -- `sparse_infill_density`, `sparse_infill_pattern`,
-  `enable_support` 0 and `brim_type` no_brim unless set); one `<plate>`
+  `enable_support` 0 and `brim_type` no_brim unless set, and with a brim
+  its `brim_width`, `printset::kBrimWidthMm`, the width the
+  [slender](#slender) item counts); one `<plate>`
   per plate, its objects placed at Bambu's plate grid (columns
   sqrt(n), one more when it rounds down, each plate a bed and a fifth
   on); and `Metadata/lobole_job.json`, the job as the answer gives it.
@@ -1105,7 +1149,8 @@ every item too, on K5 with its measured air.
   within a piece (a piece that starts off the bed is stacking's); no wall
   thickness; no overhang shading in the viewport.
 - In a print job: a second filament in one project (the CLI cannot slice
-  it), supports' and brim's own parameters (only on and off), the
+  it), supports' own parameters (only on and off) and a brim's other than
+  its width (which is the slender item's 5 mm), the
   slicer's per-object modifiers (a region of a part at another infill).
 - An inferred stack-up chain, and correlation between terms (needs tracking
   from measured geometry back to the variables that drove it).

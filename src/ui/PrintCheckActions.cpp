@@ -5,12 +5,14 @@
 
 #include "core/Document.h"
 #include "core/PrintAllowance.h"
+#include "core/PrintSettings.h"
+#include "ui/PrintJobActions.h"
 
 #include <stdexcept>
 
 namespace ui {
 
-PrintCheckRun RunPrintCheck(const Document& part,
+PrintCheckRun RunPrintCheck(AppState& state, const Document& part,
                             const std::set<uint64_t>* only,
                             const PrintCheckAsk& ask) {
   PrintCheckRun run;
@@ -120,6 +122,33 @@ PrintCheckRun RunPrintCheck(const Document& part,
                 "(set_print_process with a profile that states bed_mm)";
   }
 
+  // The slender limit: stated, else the profile's, else the built-in one,
+  // unmeasured and said so; a process that is not FDM has none.
+  bool slender = true;
+  if (ask.slenderRatio) {
+    o.slenderRatio = *ask.slenderRatio;
+    run.slenderFrom = "asked";
+  } else if (proc && printfit::SlenderRatio(*proc) > 0.0) {
+    o.slenderRatio = printfit::SlenderRatio(*proc);
+    run.slenderFrom = printfit::SlenderFrom(*proc);
+    run.slenderSource = printfit::SlenderSource(*proc);
+  } else if (proc) {
+    o.slenderRatio = 0.0;
+    run.slenderSource = printfit::SlenderSource(*proc);
+  } else {
+    // Unprinted: the built-in limit still says what a standing piece
+    // needs, but nothing chose to print it, so the item is skipped.
+    slender = false;
+  }
+  // Each body's brim as the print job writes it: a plate's copy carries its
+  // source part's settings.
+  o.brimMm.clear();
+  for (const Body* b : bodies) {
+    const printset::Settings st = PrintOf(state, part, *b).settings;
+    o.brimMm.push_back(
+        printset::BrimWidening(st.brim.value_or(printset::Brim::None)));
+  }
+
   run.report = printcheck::Check(bodies, o);
   const std::string unprinted =
       "the part has no print process: set_print_process, or state ";
@@ -139,6 +168,12 @@ PrintCheckRun RunPrintCheck(const Document& part,
   }
   if (!o.minAirMm)
     run.report.stacking.note = noAir.empty() ? unprinted + "min_air_mm" : noAir;
+  if (!slender) {
+    run.report.slender.status = printcheck::Status::Skipped;
+    run.report.slender.note = unprinted + "max_slender_ratio";
+  } else if (o.slenderRatio <= 0.0) {
+    run.report.slender.note = run.slenderSource + "; state max_slender_ratio";
+  }
   return run;
 }
 

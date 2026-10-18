@@ -113,6 +113,13 @@ struct Profile {
   // loop's share of the shell the printed mass weighs solid
   // (core/PrintedMass.h).
   double lineWidthMm = 0.0;
+  // vNEXT: the tallest a piece stands over the least width it stands on
+  // (check_print's slender item), with where that came from -- a tower
+  // test, a data sheet; 0 = not stated, and the item judges by the
+  // built-in, unmeasured printcheck::kSlenderRatio. A ratio needs its
+  // source: a limit nobody can trace is a guess with a number on it.
+  double slenderRatio = 0.0;
+  std::string slenderSource;
   bool operator==(const Profile&) const = default;
 };
 
@@ -296,6 +303,15 @@ inline constexpr double kFdmLayerMm = 0.2;
 [[nodiscard]] std::string MinAirFrom(const Process& p);
 // The sentence saying so.
 [[nodiscard]] std::string MinAirSource(const Process& p);
+
+// The slender item's limit (check_print, docs/tolerances/README.md#slender):
+// the profile's slender_ratio when it states one, else the built-in
+// printcheck::kSlenderRatio for FDM; 0 for a process that is not FDM.
+[[nodiscard]] double SlenderRatio(const Process& p);
+// "profile" or "default"; "" when there is none.
+[[nodiscard]] std::string SlenderFrom(const Process& p);
+// The sentence saying where it came from.
+[[nodiscard]] std::string SlenderSource(const Process& p);
 
 // Below this major diameter a printed thread is not reliable in this
 // process (the community's reading: printed threads work from M8 up); the

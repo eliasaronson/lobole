@@ -122,6 +122,22 @@ TEST_CASE("What the slicer gets for an object", "[print][settings]") {
   // Supports off and no brim unless set.
   CHECK(get("enable_support") == "0");
   CHECK(get("brim_type") == "no_brim");
+  CHECK(get("brim_width") == "<none>");
+  // A brim carries the width check_print's slender item counted.
+  s.brim = printset::Brim::Outer;
+  {
+    const auto with = printset::BambuObjectSettings(s, 0.2);
+    std::string w = "<none>";
+    for (const auto& [key, v] : with)
+      if (key == "brim_width")
+        w = v;
+    CHECK(w == "5");
+  }
+  CHECK(printset::BrimWidening(printset::Brim::Outer) ==
+        2.0 * printset::kBrimWidthMm);
+  CHECK(printset::BrimWidening(printset::Brim::Inner) == 0.0);
+  CHECK(printset::BrimWidening(printset::Brim::Ears) == 0.0);
+  s.brim.reset();
   s.infillPct = 100.0;
   s.infill = printset::Infill::Rectilinear;
   for (const auto& [key, v] : printset::BambuObjectSettings(s, 0.2))

@@ -18,6 +18,8 @@
 
 #include <imgui.h>
 
+#include <cmath>
+
 #include <cctype>
 #include <optional>
 #include <string>
@@ -431,7 +433,7 @@ void DrawPrintCheck(AppState& state, Document& doc) {
     state.printCheck.reset();
     state.printCheckError.clear();
     try {
-      state.printCheck = RunPrintCheck(doc, nullptr, {});
+      state.printCheck = RunPrintCheck(state, doc, nullptr, {});
       state.printCheckDoc = &doc;
       state.printCheckVersion = doc.Version();
     } catch (const std::exception& e) {
@@ -441,8 +443,9 @@ void DrawPrintCheck(AppState& state, Document& doc) {
   ImGui::SetItemTooltip("On the bed, one piece per body, overhangs, "
                         "bridges, the gap between bodies, the STL's "
                         "chords, every piece on the bed with the air "
-                        "over another, and the plate inside the printer's "
-                        "bed, against this print");
+                        "over another, the plate inside the printer's "
+                        "bed, and no piece standing too slender, against "
+                        "this print");
   const ImVec4 amber(0.95f, 0.80f, 0.40f, 1.0f);
   if (!state.printCheckError.empty()) {
     ImGui::PushStyleColor(ImGuiCol_Text, amber);
@@ -575,6 +578,28 @@ void DrawPrintCheck(AppState& state, Document& doc) {
                  (bf.status == printcheck::Status::Fail
                       ? ", over by " + xyz(bf.shortfallMm)
                       : std::string()));
+  // The tallest piece over what it stands on (the slender item).
+  const printcheck::Slender& sl = r.slender;
+  std::string slText = sl.note;
+  if (sl.status != printcheck::Status::Skipped && !sl.pieces.empty()) {
+    const printcheck::SlenderPiece& w = sl.pieces.front();
+    const auto ratio = [](double v) {
+      return std::isfinite(v) ? units::FormatNumber(v) + ":1"
+                              : std::string("on an edge");
+    };
+    slText =
+        units::FormatNumber(w.heightMm) + " mm on " +
+        units::FormatNumber(w.footprintMm) + " mm" +
+        (w.brimMm > 0.0 ? " + " + units::FormatNumber(w.brimMm) + " mm of brim"
+                        : std::string()) +
+        ", " + ratio(w.ratio) +
+        (w.neck ? ", a neck of " + units::FormatNumber(w.neck->widthMm) +
+                      " mm at " + units::FormatNumber(w.neck->atMm) + " mm, " +
+                      ratio(w.neck->ratio)
+                : std::string()) +
+        " against " + units::FormatNumber(sl.limit) + ":1";
+  }
+  line("slender", sl.status, slText);
 }
 
 } // namespace

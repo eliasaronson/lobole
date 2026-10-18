@@ -71,6 +71,10 @@ json PrintProfileToJson(const printfit::Profile& p) {
     j["bed_exclude_mm"] = p.bedExcludeMm;
   if (p.lineWidthMm > 0.0) // v181
     j["line_width_mm"] = p.lineWidthMm;
+  if (p.slenderRatio > 0.0) { // vNEXT
+    j["slender_ratio"] = p.slenderRatio;
+    j["slender_ratio_source"] = p.slenderSource;
+  }
   json rows = json::array();
   for (const printfit::Row& r : p.table.rows)
     rows.push_back(PrintRowToJson(r));
@@ -84,7 +88,7 @@ printfit::Profile PrintProfileFromJson(const json& j) {
         "a print profile is an object {name, process, "
         "material, conditions?, stl_deflection_mm?, "
         "layer_height_mm?, z_gap_mm?, bed_mm?, bed_exclude_mm?, "
-        "line_width_mm?, rows}");
+        "line_width_mm?, slender_ratio?, slender_ratio_source?, rows}");
   printfit::Profile p;
   p.name = j.value("name", std::string());
   p.table.process = j.value("process", std::string());
@@ -130,6 +134,18 @@ printfit::Profile PrintProfileFromJson(const json& j) {
       throw std::runtime_error("print profile line_width_mm must be a "
                                "number of mm");
     p.lineWidthMm = j.at("line_width_mm").get<double>();
+  }
+  if (j.contains("slender_ratio")) { // vNEXT
+    if (!j.at("slender_ratio").is_number())
+      throw std::runtime_error("print profile slender_ratio must be a "
+                               "number: a height over a width");
+    p.slenderRatio = j.at("slender_ratio").get<double>();
+  }
+  if (j.contains("slender_ratio_source")) {
+    if (!j.at("slender_ratio_source").is_string())
+      throw std::runtime_error("print profile slender_ratio_source must be "
+                               "a string: where the ratio was read");
+    p.slenderSource = j.at("slender_ratio_source").get<std::string>();
   }
   if (j.contains("rows")) {
     if (!j.at("rows").is_array())

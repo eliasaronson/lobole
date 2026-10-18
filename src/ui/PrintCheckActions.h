@@ -17,6 +17,7 @@
 #include <vector>
 
 class Document;
+struct AppState;
 
 namespace ui {
 
@@ -29,6 +30,7 @@ struct PrintCheckAsk {
   std::optional<double> minGapMm; // the gap a side
   std::optional<double> stlDeflectionMm;
   std::optional<double> minAirMm; // the air over another piece
+  std::optional<double> slenderRatio; // height over the least width
 };
 
 struct PrintCheckRun {
@@ -40,16 +42,20 @@ struct PrintCheckRun {
   // number), "profile" / "gap" (the print's chord deviation), "profile" /
   // "layers" (the minimum air: the profile's z_gap_mm or its layer height),
   // or "" when the item was skipped for want of one.
-  std::string overhangFrom, bridgeFrom, gapFrom, deflectionFrom, airFrom;
+  // The slender limit: "asked", "profile" (its slender_ratio) or "default"
+  // (printcheck::kSlenderRatio).
+  std::string overhangFrom, bridgeFrom, gapFrom, deflectionFrom, airFrom,
+      slenderFrom;
   // The process's, when used.
-  std::string overhangSource, bridgeSource, airSource;
+  std::string overhangSource, bridgeSource, airSource, slenderSource;
 };
 
 // The check over the part's non-reference bodies (only those created by a
-// feature in `only`, when given). An unprinted part with no stated limit
-// skips that item and says what would run it. Throws std::runtime_error
-// when there is nothing to check.
-[[nodiscard]] PrintCheckRun RunPrintCheck(const Document& part,
+// feature in `only`, when given), each body's brim read as a print job
+// prints it (PrintOf: a plate's copy carries its source's). An unprinted part
+// with no stated limit skips that item and says what would run it. Throws
+// std::runtime_error when there is nothing to check.
+[[nodiscard]] PrintCheckRun RunPrintCheck(AppState& state, const Document& part,
                                           const std::set<uint64_t>* only,
                                           const PrintCheckAsk& ask);
 

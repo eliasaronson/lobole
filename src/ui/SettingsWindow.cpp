@@ -867,6 +867,34 @@ void DrawPrintProfileForm(AppState& state, int index) {
   ImGui::SetItemTooltip("The slicer preset's wall line width: a printed "
                         "part's mass takes each wall loop as this thick.");
 
+  // vNEXT: the slender limit, which needs its source.
+  double slender = p.slenderRatio;
+  FormLabel("Slender ratio (height : width, 0 = the unmeasured 8)");
+  if (ExprInputDouble(state, "###prof_slender", &slender, "%.4g") &&
+      slender != p.slenderRatio) {
+    p.slenderRatio = slender;
+    edited = true;
+  }
+  ImGui::SetItemTooltip("The tallest a piece may stand over the least width "
+                        "it stands on: Check print's slender item. A ratio "
+                        "needs its source below.");
+  static char slenderBuf[512];
+  static int slenderFor = -1;
+  if (slenderFor != index || !ImGui::IsAnyItemActive()) {
+    std::snprintf(slenderBuf, sizeof(slenderBuf), "%s",
+                  p.slenderSource.c_str());
+    slenderFor = index;
+  }
+  FormLabel("Slender ratio source");
+  ImGui::SetNextItemWidth(-FLT_MIN);
+  ImGui::InputText("###prof_slender_source", slenderBuf, sizeof(slenderBuf));
+  if (ImGui::IsItemDeactivatedAfterEdit() && p.slenderSource != slenderBuf) {
+    p.slenderSource = slenderBuf;
+    edited = true;
+  }
+  ImGui::SetItemTooltip("Where the ratio was read: a tower test, a data "
+                        "sheet.");
+
   // The rows: kind, size range, allowance, source.
   ImGui::Spacing();
   ImGui::TextUnformatted("Allowances (mm on the diameter)");

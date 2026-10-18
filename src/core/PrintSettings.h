@@ -65,6 +65,15 @@ enum class Brim { None, Outer, Inner, Both, Ears };
 [[nodiscard]] std::string BrimName(Brim b);
 [[nodiscard]] std::optional<Brim> BrimFromName(const std::string& name);
 [[nodiscard]] const std::string& BrimNames();
+// The width of a brim round a piece, mm, each side: Bambu Studio's default
+// brim_width, which a print job writes on every object with a brim
+// (BambuObjectSettings) so the slicer prints the width check_print's
+// slender item counts.
+inline constexpr double kBrimWidthMm = 5.0;
+// What `b` adds to a footprint's width, both sides together: an outer brim
+// (outer, both) twice kBrimWidthMm; an inner one nothing outside, and ears
+// only at sharp corners, which a round foot has none of -- both 0.
+[[nodiscard]] double BrimWidening(Brim b);
 // Bambu Studio's `brim_type`.
 [[nodiscard]] const char* BambuBrimName(Brim b);
 

@@ -505,3 +505,131 @@ TEST_CASE("A plate over the bed fails bed_fit with its shortfall",
   CHECK(r.bedFit.status == printcheck::Status::Skipped);
   CHECK(r.bedFit.note == "print profile 'X' states no bed_mm");
 }
+
+namespace {
+
+Body Pin(double d, double h, glm::dvec3 at = glm::dvec3(0.0)) {
+  return Make(BRepPrimAPI_MakeCylinder(
+                  gp_Ax2(gp_Pnt(at.x, at.y, at.z), gp_Dir(0, 0, 1)), d / 2.0, h)
+                  .Shape(),
+              "pin");
+}
+
+} // namespace
+
+TEST_CASE("A pin stood on its end is slender past its ratio",
+          "[print][check][slender]") {
+  // The clock's pillar: 123 mm on a 5 mm end, 24.6:1.
+  printcheck::Report r = Run({Pin(5.0, 123.0)});
+  REQUIRE(r.slender.pieces.size() == 1);
+  const printcheck::SlenderPiece& p = r.slender.pieces[0];
+  CHECK(r.slender.status == printcheck::Status::Fail);
+  CHECK(r.slender.limit == Approx(printcheck::kSlenderRatio));
+  CHECK(p.heightMm == Approx(123.0));
+  // The first layer's hull of a tessellated circle: a chord short at most.
+  CHECK(p.footprintMm == Approx(5.0).margin(0.05));
+  CHECK(p.ratio == Approx(123.0 / 5.0).epsilon(0.01));
+  CHECK_FALSE(p.neck); // a uniform pin has no section narrower than its foot
+  CHECK_FALSE(p.brimHolds);
+  CHECK_FALSE(r.Ok());
+  // The same pin 30 mm tall stands: 6:1.
+  r = Run({Pin(5.0, 30.0)});
+  CHECK(r.slender.status == printcheck::Status::Pass);
+  CHECK(r.slender.pieces[0].worstRatio == Approx(6.0).epsilon(0.01));
+  CHECK(r.Ok());
+  // Laid on its side, the 123 mm pin is a box 123 x 5 x 5 on a face: not
+  // slender (the overhang item has its round underside to say).
+  r = Run(
+      {Make(BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), 123, 5, 5).Shape(), "bar")});
+  CHECK(r.slender.status == printcheck::Status::Pass);
+  CHECK(r.slender.pieces[0].footprintMm == Approx(5.0));
+  CHECK(r.slender.pieces[0].ratio == Approx(1.0));
+  // A ratio of 0 skips it.
+  printcheck::Options o;
+  o.slenderRatio = 0.0;
+  r = Run({Pin(5.0, 123.0)}, o);
+  CHECK(r.slender.status == printcheck::Status::Skipped);
+}
+
+TEST_CASE("A bottle fails at its neck, not its foot",
+          "[print][check][slender]") {
+  // A Ø30 x 5 base under a Ø4 x 40 stem: 45 over 30 at the bed, 1.5:1, but
+  // 40 over 4 at the stem, 10:1.
+  const TopoDS_Shape bottle =
+      BRepAlgoAPI_Fuse(
+          BRepPrimAPI_MakeCylinder(30.0 / 2.0, 5.0).Shape(),
+          BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, 5.0), gp_Dir(0, 0, 1)),
+                                   2.0, 40.0)
+              .Shape())
+          .Shape();
+  const printcheck::Report r = Run({Make(bottle, "bottle")});
+  REQUIRE(r.slender.pieces.size() == 1);
+  const printcheck::SlenderPiece& p = r.slender.pieces[0];
+  CHECK(p.footprintMm == Approx(30.0).margin(0.2));
+  CHECK(p.ratio == Approx(1.5).epsilon(0.01));
+  REQUIRE(p.neck);
+  CHECK(p.neck->widthMm == Approx(4.0).margin(0.05));
+  CHECK(p.neck->atMm > 5.0);
+  CHECK(p.neck->atMm < 5.0 + 45.0 / printcheck::kSlenderSections + 1e-6);
+  CHECK(p.neck->ratio == Approx(10.0).epsilon(0.02));
+  CHECK(p.worstRatio == Approx(p.neck->ratio));
+  CHECK(r.slender.status == printcheck::Status::Fail);
+  // The neck's point is on the stem's axis, just above the base.
+  CHECK(std::hypot(p.where.point.x, p.where.point.y) < 0.1);
+}
+
+TEST_CASE("A brim widens a pin's footprint and says it holds it",
+          "[print][check][slender]") {
+  // 45 on Ø5 is 9:1, over 8; a 5 mm brim each side makes it 45 on 15, 3:1.
+  printcheck::Options o;
+  printcheck::Report r = Run({Pin(5.0, 45.0)}, o);
+  CHECK(r.slender.status == printcheck::Status::Fail);
+  o.brimMm = {10.0};
+  r = Run({Pin(5.0, 45.0)}, o);
+  CHECK(r.slender.status == printcheck::Status::Pass);
+  const printcheck::SlenderPiece& p = r.slender.pieces[0];
+  CHECK(p.brimMm == 10.0);
+  CHECK(p.ratio == Approx(3.0).epsilon(0.01));
+  CHECK(p.brimHolds);
+  // A brim per body, or none.
+  o.brimMm = {10.0, 0.0};
+  CHECK_THROWS(Run({Pin(5.0, 45.0)}, o));
+}
+
+TEST_CASE("Two pins on one plate are two pieces, each judged",
+          "[print][check][slender]") {
+  const printcheck::Report r =
+      Run({Pin(5.0, 123.0), Pin(10.0, 20.0, {30.0, 0.0, 0.0})});
+  REQUIRE(r.slender.pieces.size() == 2);
+  // Worst first.
+  CHECK(r.slender.pieces[0].heightMm == Approx(123.0));
+  CHECK(r.slender.pieces[0].bodies == std::vector<int>{0});
+  CHECK(r.slender.pieces[1].worstRatio == Approx(2.0).epsilon(0.01));
+  CHECK(r.slender.pieces[1].bodies == std::vector<int>{1});
+}
+
+TEST_CASE("The slender ratio comes from the profile, else the unmeasured 8",
+          "[print][check][slender]") {
+  printfit::Process proc{"fdm", "pla", std::nullopt};
+  CHECK(printfit::SlenderRatio(proc) == printcheck::kSlenderRatio);
+  CHECK(printfit::SlenderFrom(proc) == "default");
+  CHECK(printfit::SlenderSource(proc).find("NOT MEASURED") !=
+        std::string::npos);
+  printfit::Profile prof = *printfit::ProfileFromBuiltin("K5", "fdm", "pla");
+  prof.slenderRatio = 6.0;
+  // A ratio needs its source.
+  CHECK(printfit::ValidateProfile(prof).find("slender_ratio_source") !=
+        std::string::npos);
+  prof.slenderSource = "a tower test on the P1S";
+  CHECK(printfit::ValidateProfile(prof).empty());
+  proc = printfit::FromProfile(prof);
+  CHECK(printfit::SlenderRatio(proc) == 6.0);
+  CHECK(printfit::SlenderFrom(proc) == "profile");
+  CHECK(printfit::SlenderSource(proc).find("a tower test on the P1S") !=
+        std::string::npos);
+  prof.slenderRatio = -1.0;
+  CHECK_FALSE(printfit::ValidateProfile(prof).empty());
+  proc.process = "sla";
+  proc.profile.reset();
+  CHECK(printfit::SlenderRatio(proc) == 0.0);
+}

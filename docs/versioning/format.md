@@ -311,6 +311,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A print profile's `slender_ratio` (the tallest a piece stands over the least width it stands on: check_print's [slender](../tolerances/README.md#slender) limit) and `slender_ratio_source` (where it was read), both or neither, omitted when not stated, in the store and in a part's embedded copy; a ratio without its source, a source without its ratio or a ratio not above 0 is refused on load. An older build reads the profile without them, and judges by the built-in, unmeasured 8. Golden `vNEXT-print-slender` |
 
 ## The directory form
 

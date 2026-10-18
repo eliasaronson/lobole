@@ -857,7 +857,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "source:string}[]"},
     {"check_print",
      "Will this PART print? (docs/tolerances/README.md#checking-a-print) "
-     "Eight items over its bodies (or `bodies`: names or creating-feature "
+     "Nine items over its bodies (or `bodies`: names or creating-feature "
      "ids) as ONE print along `direction` (default [0,0,1], the bed the "
      "plane below it through the origin), each {status: pass|fail|skipped, "
      "the measured value, the limit, note}: `bed` (the lowest point within "
@@ -887,7 +887,19 @@ static constexpr MethodDoc InspectionMethods[] = {
      "with keep-out zones (`bed_exclude_mm`) makes it positional: the part's "
      "x and y are the bed's from its front-left corner, printed up +Z, and "
      "`intrusions` names every piece whose footprint box is off the bed or "
-     "in a zone, with the zone; `exclude_mm` the zones). Every limit "
+     "in a zone, with the zone; `exclude_mm` the zones) and `slender` "
+     "(docs/tolerances/README.md#slender: each piece -- solids that touch -- "
+     "by its height over the least width of its first layer, the convex "
+     "hull of its downward planar faces on its lowest point, a brim (its "
+     "print settings', as the job prints it) adding its width each side; "
+     "and over every section narrower than that, the height above it: "
+     "`pieces` worst first, each {piece, height_mm, footprint_mm, brim_mm, "
+     "ratio, worst_ratio, over, brim_holds (past the limit without its brim, "
+     "within it with), neck? {at_mm, width_mm, above_mm, ratio}, on_edge?}, "
+     "`over` how many are past `limit`, a ratio: `max_slender_ratio`, else "
+     "the profile's slender_ratio, else a built-in 8 stated as unmeasured, "
+     "`limit_from` asked | profile | default; a process that is not FDM "
+     "skips it). Every limit "
      "defaults to the "
      "part's print process (set_print_process): the process's overhang and "
      "bridge, the profile's smallest gap a side and its STL deflection, and "
@@ -900,7 +912,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      "part?:string|int, bodies?:any[], direction?:number[3], "
      "max_overhang_deg?:number>0<90, overhang_allowance_mm2?:number>=0, "
      "max_bridge_mm?:number>0, min_gap_mm?:number>0, "
-     "stl_deflection_mm?:number>0, min_air_mm?:number>0",
+     "stl_deflection_mm?:number>0, min_air_mm?:number>0, "
+     "max_slender_ratio?:number>0",
      remote::NoFlags,
      "bed:{contact_area_mm2:number, lowest_mm:number, on_bed:string[], "
      "status:string, tol_mm:number}, bed_fit:{note:string, status:string, "
@@ -925,7 +938,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "joined:string[][], pieces:int, split:any[], status:string, "
      "watertight:bool}, stacking:{lifted:object[], limit_from:string, "
      "limit_mm:number, note:string, pairs:object[], pieces:int, "
-     "samples:int, status:string, tolerance_mm:number, source?:string}"},
+     "samples:int, status:string, tolerance_mm:number, source?:string}, "
+     "slender:{limit:number, limit_from:string, note:string, over:int, "
+     "pieces:object[], sections:int, status:string, source?:string}"},
     {"check_fit",
      "ISO 286 limits and fits. {hole:{class:\"H7\"}} alone gives that "
      "class's band; adding {shaft:{class:\"g6\"}} gives the fit between "
@@ -977,7 +992,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "bed_fit; absent when not stated), bed_exclude_mm? (the bed's "
      "keep-out rectangles [x0, y0, x1, y1] in mm, which make bed_fit "
      "positional), line_width_mm? (the slicer's wall line width, what the "
-     "printed mass takes a wall as), rows[]{kind, "
+     "printed mass takes a wall as), slender_ratio? and "
+     "slender_ratio_source? (check_print's slender limit and where it was "
+     "read; absent when not stated), rows[]{kind, "
      "from_mm, to_mm (absent = and up), allowance_mm, source}}. A printed "
      "part names one (set_print_process {profile}) and EMBEDS a copy. "
      "`defaults` are the built-in tables, read-only, that a new profile "
@@ -991,6 +1008,7 @@ static constexpr MethodDoc InspectionMethods[] = {
      "stl_deflection_mm:number, stl_deflection_stated:bool, "
      "layer_height_mm?:number, z_gap_mm?:number, bed_mm?:number[], "
      "bed_exclude_mm?:number[][], line_width_mm?:number, "
+     "slender_ratio?:number, slender_ratio_source?:string, "
      "conditions?:string}[]"},
     {"save_print_profile",
      "Write a print profile to your store {profile: {name, process, "
@@ -1000,7 +1018,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "build volume: what check_print's bed_fit fits a plate into), "
      "bed_exclude_mm? ([[x0, y0, x1, y1], ...] mm, the bed's keep-out "
      "zones in its own coordinates; needs bed_mm), line_width_mm? (the "
-     "slicer's wall line width), "
+     "slicer's wall line width), slender_ratio? (the tallest a piece "
+     "stands over the least width it stands on, check_print's slender "
+     "limit; needs slender_ratio_source, where it was read), "
      "rows?: [{kind: hole|shaft|"
      "internal_thread|external_thread|gap|press, from_mm?, to_mm? (absent "
      "= and up), allowance_mm (signed, on the DIAMETER; a gap's is the whole "
@@ -1739,6 +1759,10 @@ json ProcessJson(const ui::AppState& state,
       j["bed_exclude_mm"] = p->profile->bedExcludeMm;
     if (p->profile->lineWidthMm > 0.0) // v181
       j["line_width_mm"] = p->profile->lineWidthMm;
+    if (p->profile->slenderRatio > 0.0) { // vNEXT
+      j["slender_ratio"] = p->profile->slenderRatio;
+      j["slender_ratio_source"] = p->profile->slenderSource;
+    }
   }
   j["stl_deflection_mm"] = printfit::StlDeflectionMm(*p);
   return j;
@@ -4327,9 +4351,13 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         number("min_air_mm", p.contains("min_air_mm"), 1e-9, 1e12,
                "the vertical air in mm a face needs over another piece, "
                "more than 0");
+    ask.slenderRatio =
+        number("max_slender_ratio", p.contains("max_slender_ratio"), 1e-9, 1e12,
+               "the tallest a piece stands over the least width it stands "
+               "on, a ratio more than 0");
 
     const ui::PrintCheckRun run =
-        ui::RunPrintCheck(part, only ? &*only : nullptr, ask);
+        ui::RunPrintCheck(state, part, only ? &*only : nullptr, ask);
     const printcheck::Report& r = run.report;
     const auto& all = part.GetBodies();
     const auto bodyName = [&](int i) {
@@ -4485,6 +4513,47 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           {"note", r.chords.note}}},
         {"stacking", std::move(stacking)}};
     {
+      // The slender item: every piece standing, the worst first.
+      const printcheck::Slender& sl = r.slender;
+      const auto finite = [](double v) {
+        return std::isfinite(v) ? json(v) : json(nullptr);
+      };
+      json slPieces = json::array();
+      for (size_t i = 0; i < sl.pieces.size() && i < kListed; ++i) {
+        const printcheck::SlenderPiece& sp = sl.pieces[i];
+        json e{{"piece", names(sp.bodies)},
+               {"height_mm", sp.heightMm},
+               {"footprint_mm", sp.footprintMm},
+               {"brim_mm", sp.brimMm},
+               {"ratio", finite(sp.ratio)},
+               {"worst_ratio", finite(sp.worstRatio)},
+               {"over", sp.worstRatio > sl.limit + 1e-9},
+               {"brim_holds", sp.brimHolds},
+               {"where", where(sp.where)}};
+        if (sp.footprintMm <= 0.0)
+          e["on_edge"] = true;
+        if (sp.neck)
+          e["neck"] = {{"at_mm", sp.neck->atMm},
+                       {"width_mm", sp.neck->widthMm},
+                       {"above_mm", sp.neck->aboveMm},
+                       {"ratio", sp.neck->ratio}};
+        slPieces.push_back(std::move(e));
+      }
+      int over = 0;
+      for (const printcheck::SlenderPiece& sp : sl.pieces)
+        over += sp.worstRatio > sl.limit + 1e-9 ? 1 : 0;
+      json slender{{"status", status(sl.status)},
+                   {"limit", sl.limit},
+                   {"limit_from", run.slenderFrom},
+                   {"pieces", std::move(slPieces)},
+                   {"over", over},
+                   {"sections", sl.sections},
+                   {"note", sl.note}};
+      if (!run.slenderSource.empty())
+        slender["source"] = run.slenderSource;
+      out["slender"] = std::move(slender);
+    }
+    {
       const printcheck::BedFit& f = r.bedFit;
       json bedFit{{"status", status(f.status)}, {"note", f.note}};
       if (f.status != printcheck::Status::Skipped) {
@@ -4558,6 +4627,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       claim("the plate fits the printer's bed", r.bedFit.status,
             std::max({sf.x, sf.y, sf.z}), "mm", r.bedFit.note);
     }
+    claim("no piece stands too slender", r.slender.status,
+          r.slender.pieces.empty() ? 0.0 : r.slender.pieces.front().worstRatio,
+          "ratio", r.slender.note);
     AttachReceipt(out, rc);
     return out;
   }

@@ -260,6 +260,40 @@ def main():
         for k in ("overhang", "bridges", "clearance", "stacking"):
             expect(r[k]["status"] == "pass", f"{k} stated, run: {r[k]}")
 
+        # --- Slender: a pin stood on its end, and a brim under it ------------
+        d.call("add_part", name="pillar")
+        d.call("set_print_process", **PLA)
+        box(d, (0, 0, 0), (5, 5, 123), "Pin")
+        r = d.call("check_print")
+        sl = r["slender"]
+        expect(sl["status"] == "fail" and sl["over"] == 1 and
+               sl["limit"] == 8 and sl["limit_from"] == "default" and
+               "NOT MEASURED" in sl["source"],
+               f"a 123 mm pin on 5 mm is slender, by the unmeasured 8: {sl}")
+        p0 = sl["pieces"][0]
+        expect(abs(p0["height_mm"] - 123) < 1e-6 and
+               abs(p0["footprint_mm"] - 5.0) < 1e-6 and p0["over"] and
+               abs(p0["ratio"] - 123 / 5) < 1e-6,
+               f"with its height, footprint and ratio: {p0}")
+        expect(not r["ok"], "a slender piece does not print")
+        r = d.call("check_print", max_slender_ratio=30)
+        expect(r["slender"]["status"] == "pass" and
+               r["slender"]["limit_from"] == "asked",
+               f"a stated ratio: {r['slender']}")
+        d.call("add_part", name="short pillar")
+        d.call("set_print_process", **PLA)
+        box(d, (0, 0, 0), (5, 5, 45), "Pin")
+        r = d.call("check_print")
+        expect(r["slender"]["status"] == "fail",
+               f"45 on 5 is 9:1: {r['slender']}")
+        d.call("set_print_settings", brim="outer")
+        r = d.call("check_print")
+        p0 = r["slender"]["pieces"][0]
+        expect(r["slender"]["status"] == "pass" and p0["brim_mm"] == 10 and
+               p0["brim_holds"],
+               f"a 5 mm brim each side holds it, and says so: {p0}")
+        refused(d, "max_slender_ratio", max_slender_ratio=0)
+
         # --- Refusals --------------------------------------------------------
         refused(d, "direction", direction=[0, 0, 0])
         refused(d, "direction", direction=[0, 1])
