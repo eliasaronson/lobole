@@ -29,6 +29,30 @@ quality meant for video; `--draft` is for checking a scene's choreography.
 | `cam` | a plate pocketed, the cut simulated end to end |
 | `om615` | the OM615 with its injection pump turned once round, cut down the crank and run through two revolutions in section; a part right-clicked in the viewport and opened; a boss sketched on its largest flat face and extruded |
 
+## Joining them
+
+```
+tools/demo/assemble.sh                       # scratch/demo/*.mp4 -> scratch/demo/
+tools/demo/assemble.sh --scenes "om615 cam"  # these, in this order
+```
+
+`assemble.sh` joins the scenes -- `om615` first, then `parametric`,
+`history`, `fem`, `cam` -- with a 0.4 s crossfade between each, a caption
+over the first few seconds of each (its `CAPTION` table, in the app's own
+Roboto), and an end card: the dark lockup on the viewport's colour with the
+repository's address, taken from `origin` unless `--url` names another.
+Every scene starts and ends on a still view of the app, so a plain fade is
+all the joins need.
+
+It writes two files. `lobole-demo.mp4` is the master at the clips' size.
+`lobole-demo-1080p.mp4` is for the README: GitHub plays a video inline only
+when it is attached through its own editor (the file dropped into the
+README on github.com, which gives a `user-attachments` link), at most 10 MB
+on a free plan, so the cut is a two-pass encode at the bitrate that fits
+`--max-mb` for the video's length, and the script fails if it does not. A
+longer video means a lower bitrate: past about 90 s the interface's text
+starts to soften.
+
 ## The OM615 scene
 
 `om615` plays the generated engine, which lives in `scratch/` and is

@@ -45,6 +45,9 @@ script that records them, and the footage around them.
   the OM615 and planetary gearbox motion studies through
   `export_motion_video`, and the log end from `generators/logo/build.py` --
   on a scratch instance.
+- `tools/demo/assemble.sh` is built: the scenes joined with crossfades,
+  captions and the end card, as a master and a README cut. The rendered
+  shots join it as scenes once `footage.sh` makes them.
 - `tools/demo/README.md`: the shot list, what each clip is, and where the
   live agent segment and the edit come in.
 
