@@ -48,6 +48,13 @@ public:
   void Orbit(double deltaX, double deltaY);
   void Pan(double deltaX, double deltaY);
   void Zoom(double delta); // positive zooms out
+  // Zoom keeping the world `point` on the pixel it is on: the whole rig
+  // (position and pivot) scales about it by the factor the distance changes,
+  // so the camera stays on the line through the point and the orientation is
+  // untouched. Works for a point at any depth, not just the pivot's. The
+  // factor is the one left after the distance limits, so at a limit nothing
+  // moves rather than the view sliding sideways (docs/ui/README.md#viewport).
+  void ZoomAbout(double delta, const glm::vec3& point);
   void Roll(double delta); // rotate around the view axis
 
   // Camera properties. Position/target/up are a look-at view of the orbit

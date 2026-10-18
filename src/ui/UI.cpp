@@ -460,7 +460,7 @@ void DrawControlsHelpOverlay(AppState& state) {
     ImGui::BulletText("Middle or right drag: rotate");
     ImGui::BulletText("Right-click a part (assembly): its menu");
     ImGui::BulletText("Ctrl+Middle: pan   Shift+Middle: zoom");
-    ImGui::BulletText("Alt+Middle: roll   Scroll: zoom");
+    ImGui::BulletText("Alt+Middle: roll   Scroll: zoom at the cursor");
     ImGui::BulletText("Arrows: rotate (Shift: 90\xc2\xb0)   Z: zoom");
   }
   ImGui::End();

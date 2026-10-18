@@ -87,6 +87,7 @@ Each row says which tier it is, so a pending change is visible:
 |---|---|---|---|
 | Appearance | `ui_font_scale` | Live | 85 / 100 / 120 / 140 %; the font atlas is rebuilt between frames |
 | Appearance | `lock_lights_to_model` | Live | off: the light rig follows the camera; on: fixed in the world where it stands at the home view ([rendering](../rendering/README.md#the-light-rig)) |
+| Navigation | `zoom_to_cursor` | Live | on: the wheel zooms toward what the pointer is over; off: toward the centre of the view ([viewport](README.md#viewport)) |
 | Performance | `gpu_device` | Restart | `""` = automatic (prefers discrete) |
 | Performance | `shadows` | Live | |
 | Performance | `ssao` | Live | `off`, `half`, `full` |

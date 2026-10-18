@@ -71,6 +71,16 @@ that size. The window title is the project name, `*` when dirty.
   Standard Views), and the **view cube** at the bottom right snaps to a
   clicked face, edge or corner, with a home button. View > Viewport Controls
   shows the mouse and trackpad cheat sheet.
+- **Zoom heads for the cursor.** The wheel, and Shift+middle/right-drag
+  from where the button went down, zoom toward what the pointer is over,
+  and that point stays on its pixel. It is the surface under the cursor
+  (`FaceSelector::PickFace`, so a section cut is honoured) or, over empty
+  space, where the cursor's ray meets the plane through the pivot facing the
+  camera. `Camera::ZoomAbout` scales the whole rig (position and pivot) about
+  that point, so it holds at any depth and the orbit pivot moves with the
+  zoom; at a distance limit nothing moves rather than the view sliding.
+  Preferences > Navigation > Zoom to cursor (off) zooms at the centre
+  instead (`ZoomAnchor` in `ViewportInput.cpp`).
 - The right button orbits when dragged and is a click when it is not: on an
   assembly tab a right click on a part opens its menu
   ([selection](selection.md)).

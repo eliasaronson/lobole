@@ -91,6 +91,17 @@ const Field kFields[] = {
      {},
      0.0f,
      0.0f},
+    {"zoom_to_cursor",
+     "Navigation",
+     "Zoom to cursor",
+     "On, scrolling zooms toward whatever is under the pointer, which stays "
+     "where it is on screen. Off, it zooms toward the centre of the view.",
+     Tier::Live,
+     &Settings::zoomToCursor,
+     {},
+     {},
+     0.0f,
+     0.0f},
     {"gpu_device",
      "Performance",
      "Graphics device",
@@ -300,9 +311,9 @@ std::optional<json> ReadFile(const fs::path& path) {
 bool Settings::operator==(const Settings& other) const {
   return uiFontScale == other.uiFontScale &&
          lockLightsToModel == other.lockLightsToModel &&
-         gpuDevice == other.gpuDevice && shadows == other.shadows &&
-         ssao == other.ssao && shadowMap == other.shadowMap &&
-         idleThrottle == other.idleThrottle &&
+         zoomToCursor == other.zoomToCursor && gpuDevice == other.gpuDevice &&
+         shadows == other.shadows && ssao == other.ssao &&
+         shadowMap == other.shadowMap && idleThrottle == other.idleThrottle &&
          autosaveInterval == other.autosaveInterval && keys == other.keys;
 }
 

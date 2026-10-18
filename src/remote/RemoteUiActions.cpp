@@ -688,6 +688,7 @@ bool RemoteServer::QueueUiAction(const Request& request) {
     }
     m_uiAction = [chord](ImGuiTestContext* ctx) { ctx->KeyPress(chord); };
   } else if (m == "scroll") {
+    // rpc-params: x, y
     m_uiAction = [p](ImGuiTestContext* ctx) {
       if (p.contains("window")) {
         // V5: scroll a PANEL by {window, dy} pixels (dy > 0 = down) — the

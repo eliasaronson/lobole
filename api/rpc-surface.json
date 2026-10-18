@@ -251,7 +251,7 @@
   "save_project": ["force", "message", "path"],
   "save_template": ["comment", "comments", "dry_run", "feature_ids", "literals", "name", "rename", "replace", "strings"],
   "screenshot": ["fit", "path", "view"],
-  "scroll": ["amount", "dy", "window"],
+  "scroll": ["amount", "dy", "window", "x", "y"],
   "scroll_panel": ["to", "window"],
   "section": ["base_plane", "bodies", "enclosed", "loops", "normal", "offset", "origin", "part", "regions"],
   "select_face": ["element", "face", "mesh"],

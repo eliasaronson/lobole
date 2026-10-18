@@ -23,6 +23,8 @@
 
 #include "imgui.h"
 
+#include <optional>
+
 namespace ui {
 
 namespace {
@@ -79,6 +81,36 @@ void UpdateHandleHover(AppState& state, bool overViewport) {
       hit >= 0 ? state.viewportHandles[static_cast<size_t>(hit)].id : 0;
 }
 
+// The world point a zoom at screen position `mouse` should hold still
+// (docs/ui/README.md#viewport): the surface under it, or, over empty space,
+// where its ray meets the plane through the pivot facing the camera. nullopt
+// when zoom-to-cursor is off or there is no picker, and the zoom heads for the
+// pivot as it always did.
+std::optional<glm::vec3> ZoomAnchor(const AppState& state, ImVec2 mouse) {
+  if (!state.settings.zoomToCursor || !state.faceSelector)
+    return std::nullopt;
+  const Camera& cam = *state.camera;
+  const Ray ray = state.faceSelector->ScreenToWorldRay(
+      mouse.x - state.viewportPos.x, mouse.y - state.viewportPos.y,
+      static_cast<int>(state.viewportSize.x),
+      static_cast<int>(state.viewportSize.y), cam);
+  if (const RayHit hit = state.faceSelector->PickFace(ray); hit.hit)
+    return hit.point;
+  const glm::vec3 f = cam.GetForward();
+  const float along = glm::dot(ray.direction, f);
+  if (along <= 1e-6f)
+    return std::nullopt;
+  const float t = glm::dot(cam.GetTarget() - ray.origin, f) / along;
+  return ray.origin + ray.direction * t;
+}
+
+void ZoomAt(AppState& state, double delta, ImVec2 mouse) {
+  if (const auto p = ZoomAnchor(state, mouse))
+    state.camera->ZoomAbout(delta, *p);
+  else
+    state.camera->Zoom(delta);
+}
+
 } // namespace
 
 void HandleViewportInput(AppState& state) {
@@ -110,7 +142,8 @@ void HandleViewportInput(AppState& state) {
       if (io.MouseWheelH != 0.0f)
         state.camera->Pan(io.MouseWheelH * wheelPanPx, 0.0);
       if (io.MouseWheel != 0.0f)
-        state.camera->Zoom(-io.MouseWheel * 2.0); // gentler per-notch step
+        ZoomAt(state, -io.MouseWheel * 2.0,
+               io.MousePos); // gentler per-notch step
     }
   }
 
@@ -178,7 +211,10 @@ void HandleViewportInput(AppState& state) {
       state.camera->Pan(io.MouseDelta.x, io.MouseDelta.y);
       break;
     case ViewportDrag::Zoom:
-      state.camera->Zoom(io.MouseDelta.y * 0.05); // drag down = zoom out
+      // Anchored where the button went down: that point stays on its pixel,
+      // so the same position finds the same line every frame.
+      ZoomAt(state, io.MouseDelta.y * 0.05, // drag down = zoom out
+             io.MouseClickedPos[state.viewportDragButton]);
       break;
     case ViewportDrag::Roll:
       state.camera->Roll(io.MouseDelta.x);

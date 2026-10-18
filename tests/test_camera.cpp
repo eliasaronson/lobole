@@ -156,3 +156,45 @@ TEST_CASE("SnapToView cancels an in-flight animation", "[camera]") {
   CHECK_THAT(glm::dot(cam.GetForward(), glm::vec3(0, 0, -1)),
              WithinAbs(1.0f, 1e-4f));
 }
+
+namespace {
+glm::vec2 Pixel(const Camera& cam, const glm::vec3& p) {
+  const glm::vec4 clip = cam.GetViewProjectionMatrix() * glm::vec4(p, 1.0f);
+  return glm::vec2(clip) / clip.w;
+}
+} // namespace
+
+TEST_CASE("ZoomAbout keeps the point on its pixel at any depth", "[camera]") {
+  Camera cam;
+  cam.SetAspectRatio(1.6f);
+  // Off-centre, and nearer the camera than the pivot: a zoom that only held
+  // points at the pivot's depth would move it.
+  const glm::vec3 p = cam.GetTarget() + cam.GetRight() * 3.0f +
+                      cam.GetUp() * -2.0f - cam.GetForward() * 5.0f;
+  const glm::vec2 before = Pixel(cam, p);
+  const float d0 = cam.GetDistance();
+  for (const double delta : {-2.0, -2.0, 2.0, 5.0}) {
+    cam.ZoomAbout(delta, p);
+    CHECK_THAT(Pixel(cam, p).x, WithinAbs(before.x, 1e-4f));
+    CHECK_THAT(Pixel(cam, p).y, WithinAbs(before.y, 1e-4f));
+  }
+  CHECK(cam.GetDistance() != d0); // it did zoom
+}
+
+TEST_CASE("ZoomAbout at the distance limit leaves the view alone", "[camera]") {
+  Camera cam;
+  cam.SetDistance(0.0f); // pinned at the minimum
+  const glm::vec3 pivot = cam.GetTarget();
+  const float d = cam.GetDistance();
+  cam.ZoomAbout(-5.0, pivot + cam.GetRight() * 10.0f);
+  CHECK_THAT(cam.GetDistance(), WithinAbs(d, 1e-6f));
+  CHECK(glm::length(cam.GetTarget() - pivot) < 1e-5f);
+}
+
+TEST_CASE("ZoomAbout the pivot is a plain Zoom", "[camera]") {
+  Camera a, b;
+  a.ZoomAbout(-3.0, a.GetTarget());
+  b.Zoom(-3.0);
+  CHECK(glm::length(a.GetPosition() - b.GetPosition()) < 1e-4f);
+  CHECK(glm::length(a.GetTarget() - b.GetTarget()) < 1e-5f);
+}

@@ -12,7 +12,7 @@ namespace ui {
 // once per frame:
 //   Left click          select face (Ctrl+click also aligns the camera)
 //   Middle drag         rotate | +Ctrl pan | +Shift zoom | +Alt roll
-//   Scroll              zoom
+//   Scroll              zoom (toward the cursor; Preferences > Navigation)
 //   Arrows              rotate (Shift = 90°) | +Ctrl pan | +Alt roll
 //   Z / Shift+Z         zoom out / in
 //   (hover              face pre-highlight)

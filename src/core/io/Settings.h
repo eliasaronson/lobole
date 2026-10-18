@@ -41,6 +41,11 @@ struct Settings {
   // where it stands at the home view, and the shadows stay put as you orbit.
   bool lockLightsToModel = false;
 
+  // Navigation
+  // The wheel (and Shift-drag) zooms toward what the cursor is over, as other
+  // CAD programs do; off, toward the centre of the view (docs/ui/README.md).
+  bool zoomToCursor = true;
+
   // Performance
   std::string gpuDevice; // "" = automatic (prefer discrete)
   bool shadows = true;

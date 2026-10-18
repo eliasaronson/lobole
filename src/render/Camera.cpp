@@ -163,6 +163,15 @@ void Camera::Zoom(double deltaY) {
               (1.0f + static_cast<float>(deltaY) * m_zoomSensitivity));
 }
 
+void Camera::ZoomAbout(double delta, const glm::vec3& point) {
+  const float before = m_distance;
+  SetDistance(m_distance *
+              (1.0f + static_cast<float>(delta) * m_zoomSensitivity));
+  const float k = m_distance / before;
+  m_pivot = point + (m_pivot - point) * k;
+  UpdateViewMatrix();
+}
+
 void Camera::Roll(double delta) {
   const float angle = static_cast<float>(delta) * 0.01f;
   m_orientation =

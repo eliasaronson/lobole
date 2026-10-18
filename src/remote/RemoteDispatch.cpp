@@ -564,7 +564,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "idle_throttle:bool, keys:object, lock_lights_to_model:bool, "
      "path:string, settings_format:int, shadow_map:int, shadows:bool, "
      "ssao:string, terminal_panel:bool, ui_font_scale:number, "
-     "window:{h:int, maximized:bool, w:int, x:int, y:int}"},
+     "window:{h:int, maximized:bool, w:int, x:int, y:int}, "
+     "zoom_to_cursor:bool"},
     {"set_settings", "Change user preferences {key: value, ...}; persists.",
      "*", remote::NotInBatch},
     {"get_keymap",
@@ -671,8 +672,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "(x1, y1), the same 0-1 fractions of the viewport rect; the defaults "
      "drag from its centre a tenth of the way out.",
      "button, ctrl, shift, x0, x1, y0, y1", remote::UiAction},
-    {"scroll", "Scroll (zoom) the viewport.", "amount, dy, window",
-     remote::UiAction},
+    {"scroll",
+     "Scroll (zoom) the viewport at (x, y), 0-1 fractions of the viewport "
+     "rect (default its centre). The zoom heads for what is under that "
+     "point unless Preferences > Navigation > Zoom to cursor is off. With "
+     "`window`, scrolls that panel by dy pixels instead.",
+     "amount, dy, window, x, y", remote::UiAction},
 };
 
 // Every method's row, by name.
