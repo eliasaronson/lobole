@@ -108,8 +108,7 @@ derives the rest and refuses what will not print:
 - **The Geneva**: pin circle c · sin 60°, wheel radius c · cos 60°, the pin
   3 nozzle widths in radius. The lock disc is as large as leaves each horn
   of the Geneva 4 nozzle widths wide at its tip (r18.37), relieved where
-  the Geneva swings through it at mid-carry, the relief's roof a 45° cone
-  into the band.
+  the Geneva swings through it at mid-carry.
 - **The tubes**: each a wall of four lines, the gap from the next; the
   units' rod as thick as a column.
 - **The transfers** stand round the +X side 38.2° apart, what keeps one's
@@ -117,9 +116,11 @@ derives the rest and refuses what will not print:
 - **Heights**, bottom to top, each step the air: the thousands' band on the
   bed and its gear; for each wheel above, its pin disc cone, the air, the
   transfer's Geneva cone and working depth (0.4 of the digit height), the
-  air less the gap, the band's cone and face, then its gear, as tall as the
+  air less the gap, the band's cone (from two lines inside the deepest the
+  horns reach into the lock disc, so the band stands on the lock disc all
+  the way round, over the relief too) and face, then its gear, as tall as the
   pinion's slope, a mesh of 0.4 of the digit height, and both stacks' play
-  of the air each. The units' band carries the knob. 199.5 mm tall on K5.
+  of the air each. The units' band carries the knob. 220.3 mm tall on K5.
 - **If the digits do not fit the profile's bed** (its `bed_mm`, height
   included), the run says so and builds the most that do; four fit the
   P1S's 250 mm.
@@ -137,10 +138,20 @@ band keeps the stack from lifting out. The windows are teardrops on their
 side (`printed: teardrop_flat`,
 docs/modeling/holes-and-threads.md#printed-holes), point up.
 
-**The digits** are engraved into the band's face cut in and DOWN at 45°,
-so every wall of a glyph's pocket is a 45° face or one that looks up: cut
-straight in, a glyph's upper walls are ceilings over its pocket. The lean
-draws a glyph out along the axis by √2.
+**The digits** are seven-segment bars, gapped at the corners, engraved
+into the band's face cut in and DOWN at 45°, so every wall of a pocket is
+a 45° face or one that looks up: cut straight in, a glyph's upper walls
+are ceilings over its pocket. A font's 0, 4, 6, 8 and 9 close round a
+counter, and on a wall that counter is an island that starts in the air in
+some layer (Bambu Studio's "floating regions"); seven segments close round
+nothing. The lean draws a digit out along the axis by √2.
+
+**Nothing starts in the air.** `check_print` judges faces, not where a
+piece's layer first appears; the slicer does (Bambu Studio's "floating
+cantilever"). A band whose 45° underside rose from the lock disc's edge
+would hang over the relief, where the lock disc is cut away; it rises
+from inside the relief's reach instead, on the lock disc all the way
+round, and the job slices with no warning.
 
 The plate is placed in the middle of the profile's bed, moved along x past
 its keep-out zones.
@@ -155,7 +166,7 @@ its keep-out zones.
   (less the check's tenth: on K5 every pair 0.100–0.101), the STL's chords
   a fifth of the gap, **stacking** (every piece on the bed, and no face
   within the air over another piece: none within 0.4 mm), and `bed_fit`
-  (62.9 × 58.5 × 199.5 mm in the P1S's 256 × 256 × 250, clear of its
+  (62.9 × 58.5 × 220.3 mm in the P1S's 256 × 256 × 250, clear of its
   keep-out corner). Then the plate's print job.
 - **The counting**, in the assembly: each wheel on a revolute to the
   housing's frames, each transfer on its own; per carry an `intermittent`

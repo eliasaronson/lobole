@@ -244,6 +244,9 @@ def solve(h, digits, gap, layer, air):
     n_t = digits - 1
     s["transfer_az"] = [TRANSFER_SIDE_DEG + spread * (k_ - (n_t - 1) / 2.0)
                         for k_ in range(n_t)]
+    # The band's underside starts inside the deepest the horns go into the
+    # lock disc (the relief, c - r_g from the axis), two lines short.
+    s["r_band_foot"] = c - r_g - g - lines(2)
     layout(s)
     return s
 
@@ -275,11 +278,13 @@ def layout(s):
             z_s1 = z_s0 + s["h_lock"]
             w["geneva"] = (z_pd + a, z_s0, z_s1)
             w["pin"] = (z_pd, z_s1)
-            # The band over the Geneva: its 45-degree underside from the
-            # lock disc's edge, the air over the Geneva's arc there.
+            # The band over the Geneva: its 45-degree underside from inside
+            # the lock disc, short of where the Geneva's horns reach into
+            # it through the relief, so it stands on the lock disc all the
+            # way round, the relief too; the air over the Geneva.
             b0 = z_s1 + a - g
             w["lock"] = (z_pd, b0)
-            f0 = b0 + (rb - rl)
+            f0 = b0 + (rb - s["r_band_foot"])
             w["band"] = (b0, f0 + s["h_face"])
             w["face"] = (f0, f0 + s["h_face"])
         z = w["band"][1]
@@ -413,6 +418,51 @@ def gear_ents(s, z, phase_deg, centre=(0.0, 0.0)):
     return ents
 
 
+# Seven segments, each lit for the digits that use it: a top, b top right,
+# c bottom right, d bottom, e bottom left, f top left, g middle.
+SEGMENTS = {0: "abcdef", 1: "bc", 2: "abged", 3: "abgcd", 4: "fgbc",
+            5: "afgcd", 6: "afgedc", 7: "abc", 8: "abcdefg", 9: "abcdfg"}
+
+
+def digit_segments(dgt, height):
+    """A digit as seven-segment bars, `height` tall along the sketch's v and
+    0.55 of it wide along u, each bar a hexagon with gaps at the corners:
+    no glyph closes round a counter. A font's 0, 4, 6, 8 and 9 do, and
+    their counters, engraved on a wall, are islands that start in the air
+    in some layer -- a slicer's "floating regions"."""
+    H, W = height, 0.55 * height
+    t = max(0.14 * H, lines(3))   # a bar's thickness: three lines
+    gap = 0.5 * t
+    hw, hh = W / 2.0, H / 2.0
+
+    def bar(p, q):
+        # A hexagon from p to q (its ends pointed), t thick, shortened by
+        # the gap at both ends.
+        (x0, y0), (x1, y1) = p, q
+        L = math.hypot(x1 - x0, y1 - y0)
+        ux, uy = (x1 - x0) / L, (y1 - y0) / L
+        nx, ny = -uy, ux
+        a = (x0 + gap * ux, y0 + gap * uy)
+        b = (x1 - gap * ux, y1 - gap * uy)
+        h = t / 2.0
+        pts = [a, (a[0] + h * ux + h * nx, a[1] + h * uy + h * ny),
+               (b[0] - h * ux + h * nx, b[1] - h * uy + h * ny), b,
+               (b[0] - h * ux - h * nx, b[1] - h * uy - h * ny),
+               (a[0] + h * ux - h * nx, a[1] + h * uy - h * ny)]
+        return polygon(pts)
+    # In the sketch: u (x) across the digit, v (y) up it.
+    corners = {"tl": (-hw, hh), "tr": (hw, hh), "ml": (-hw, 0.0),
+               "mr": (hw, 0.0), "bl": (-hw, -hh), "br": (hw, -hh)}
+    ends = {"a": ("tl", "tr"), "b": ("tr", "mr"), "c": ("mr", "br"),
+            "d": ("bl", "br"), "e": ("ml", "bl"), "f": ("tl", "ml"),
+            "g": ("ml", "mr")}
+    ents = []
+    for seg in SEGMENTS[dgt]:
+        p, q = ends[seg]
+        ents += bar(corners[p], corners[q])
+    return ents
+
+
 def digit_text(label, height):
     return {"type": "text", "text": label, "font": "sans", "height": height,
             "anchor": [0.0, 0.0], "angle": 0.0, "halign": "center",
@@ -449,7 +499,7 @@ def build_wheel(b, s, j):
                               [circle(pin_c, s["r_pin"])], p0, p1))
         f0 = w["face"][0]
         bodies.append(b.cone_under(f"{wheel_name(j)} band underside", rb, f0,
-                                   rl))
+                                   s["r_band_foot"]))
         bodies.append(b.prism(f"{wheel_name(j)} band",
                               [circle((0, 0), rb)], f0, w["face"][1]))
     else:
@@ -473,22 +523,15 @@ def build_wheel(b, s, j):
     if j < n - 1:
         # The relief the Geneva's horns swing through at mid-carry: its
         # circle, where it stands when the pin is on the line of centres,
-        # through the lock disc to the air over the Geneva, then narrowing
-        # at 45 degrees into the band: a roof, not a ceiling. Only inside
-        # the lock disc's edge; past it the band's own underside clears.
+        # through the lock disc to the band. The band's underside, rising
+        # at 45 degrees from inside it, roofs it: no part of the band
+        # starts in the air over it.
         az = s["transfer_az"][j]
         centre = polar(s["c"], az - s["carry_centre_deg"])
-        z_top = w["geneva"][2] + s["air"]
-        rr = s["r_geneva"] + g
-        relief = b.revolve(f"{wheel_name(j)} relief", [
-            (0.0, w["lock"][0]), (rr, w["lock"][0]), (rr, z_top),
-            (0.0, z_top + rr)], centre=centre)
-        clip = b.prism(f"{wheel_name(j)} relief clip",
-                       [circle((0, 0), rl + g)], w["lock"][0], z_top + rr)
-        relief = b.boolean(f"{wheel_name(j)} relief inside", relief, clip,
-                           "intersect")
-        body = b.boolean(f"{wheel_name(j)} relieved", body, relief,
-                         "subtract")
+        l0, l1 = w["lock"]
+        body = b.extrude(f"{wheel_name(j)} relieved",
+                         plane_z(l0), [circle(centre, s["r_geneva"] + g)],
+                         l1 - l0, mode="cut")
     if j > 0:
         # The bore the tubes inside it turn in, through.
         body = b.prism(f"{wheel_name(j)} bore",
@@ -512,7 +555,7 @@ def build_wheel(b, s, j):
                  "normal": [k * nx, k * ny, k],
                  "uAxis": [-k * nx, -k * ny, k]}
         body = b.extrude(f"{wheel_name(j)} digit {dgt}", plane,
-                         [digit_text(str(dgt), s["digit_height"])],
+                         digit_segments(dgt, s["digit_height"]),
                          (out + s["engrave"] + sag) / k, mode="cut",
                          reversed=True)
     return body
