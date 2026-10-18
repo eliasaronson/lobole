@@ -215,8 +215,13 @@ captures, so an ordinary frame costs nothing.
 nothing, which is how it stays in the suite. The `demo` category is the
 release video's scenes, recorded by `tools/demo/record.sh`
 ([tools/demo/README.md](../../tools/demo/README.md)) at Cinematic speed in a
-window `--window-size` makes 1920x1080 -- a size only a run that asks gets,
-since the suite's layout tests assert what fits at 1280x720.
+window `--window-size` makes 3840x2160, with `--ui-scale 2` drawing a
+1920x1080 layout at HiDPI density -- a size and scale only a run that asks
+gets, since the suite's layout tests assert what fits at 1280x720 and 1.0.
+Mouse and scroll speeds scale with `--ui-scale`, and the recording keeps
+every window where it is (`ImGuiCaptureFlags_IncludeOtherWindows`): without
+it the capture tool hides and moves windows while it records, and a tool
+window's button had nothing under the mouse.
 
 ## Making a widget addressable
 

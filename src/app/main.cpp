@@ -1624,6 +1624,9 @@ void printUsage(const char* programName) {
   std::cout << "  --window-size <WxH>  Open the window at this size (e.g. "
                "1920x1080 for a recording)"
             << std::endl;
+  std::cout << "  --ui-scale <s>       Scale the interface by s, over the "
+               "display's (e.g. 2 at 3840x2160)"
+            << std::endl;
   std::cout << "  --capture-dir <dir>  Demo scenes record their clips here "
                "(needs ffmpeg on PATH)"
             << std::endl;
@@ -1697,6 +1700,11 @@ struct CommandLineArgs {
   // what fits at the default.
   int windowW = 0;
   int windowH = 0;
+  // --ui-scale S: the interface's scale, over what the display reports. A
+  // recording at 3840x2160 with 2 is a 1920x1080 layout drawn at HiDPI
+  // density; Xvfb reports 1.0, so without it a recording looked coarser than
+  // the app on the developer's own scaled display. 0 = the display's.
+  float uiScale = 0.0f;
   bool headless = false;
   bool offscreen = false;
   bool hidden = false;
@@ -1808,6 +1816,15 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       }
       args.windowW = w;
       args.windowH = h;
+    } else if (arg == "--ui-scale") {
+      char* end = nullptr;
+      const double s = i + 1 < argc ? std::strtod(argv[i + 1], &end) : 0.0;
+      if (end == nullptr || *end != '\0' || !(s >= 0.5 && s <= 4.0)) {
+        std::cerr << "--ui-scale takes a scale from 0.5 to 4" << std::endl;
+        exit(1);
+      }
+      args.uiScale = static_cast<float>(s);
+      ++i;
     } else if (arg == "--capture-dir") {
       if (i + 1 >= argc) {
         std::cerr << "--capture-dir requires a directory" << std::endl;
@@ -2661,8 +2678,11 @@ int main(int argc, char** argv) {
   // from a repeat: Wayland's wp_fractional_scale_v1 re-sends the preferred
   // scale on every configure, and treating "the callback fired" as "the scale
   // changed" rebuilt the whole font atlas each time the window was dragged.
-  static float s_contentScale = std::max(1.0f, std::max(scaleX, scaleY));
+  static float s_contentScale = args.uiScale > 0.0f
+                                    ? args.uiScale
+                                    : std::max(1.0f, std::max(scaleX, scaleY));
   static float s_pendingContentScale = 0.0f; // 0 = no change pending
+  static bool s_uiScaleFixed = args.uiScale > 0.0f;
   // How much the backend already magnifies ImGui's coordinates: the ratio of
   // the framebuffer GLFW draws into to the window's logical size. 1.0 on X11;
   // the display scale on Wayland, where GLFW scales the framebuffer itself.
@@ -2677,6 +2697,8 @@ int main(int argc, char** argv) {
   glfwSetWindowContentScaleCallback(
       window, [](GLFWwindow*, float sx, float sy) {
         const float s = std::max(1.0f, std::max(sx, sy));
+        if (s_uiScaleFixed)
+          return; // --ui-scale: the run's, whatever the display says
         if (s != s_contentScale)
           s_pendingContentScale = s;
       });
@@ -2983,10 +3005,22 @@ int main(int argc, char** argv) {
     std::snprintf(testEngineIO.VideoCaptureEncoderPath,
                   sizeof(testEngineIO.VideoCaptureEncoderPath), "%s",
                   ffmpeg.c_str());
+  // The engine's own parameters, at a quality for a video rather than a
+  // test log: the default (-preset ultrafast -crf 20) blurred thin interface
+  // text. The capture runs on the fixed clock, so a slower encoder only
+  // makes the recording take longer.
   std::snprintf(testEngineIO.VideoCaptureEncoderParams,
                 sizeof(testEngineIO.VideoCaptureEncoderParams), "%s",
-                IMGUI_CAPTURE_DEFAULT_VIDEO_PARAMS_FOR_FFMPEG);
+                "-hide_banner -loglevel error -r $FPS -f rawvideo -pix_fmt "
+                "rgba -s $WIDTHx$HEIGHT -i - -threads 0 -y -c:v libx264 "
+                "-preset medium -crf 14 -pix_fmt yuv420p $OUTPUT");
   SetGuiTestCaptureDir(args.captureDir);
+  // The engine moves the mouse and scrolls in pixels a second: at a larger
+  // interface scale the same gesture covers proportionally more pixels.
+  if (args.uiScale > 0.0f) {
+    testEngineIO.MouseSpeed *= args.uiScale;
+    testEngineIO.ScrollSpeed *= args.uiScale;
+  }
   testEngineIO.ConfigLogToTTY = args.runGuiTests;
   testEngineIO.ConfigWatchdogWarning = 60.0f;
   testEngineIO.ConfigWatchdogKillTest = 300.0f;

@@ -31,12 +31,12 @@ script that records them, and the footage around them.
 
 | # | scene | length | source |
 |---|---|---|---|
-| 1 | the OM615 turning over in section | 5 s | `export_motion_video` |
+| 1 | the OM615 turning over in section, rendered clean (no interface) | 5 s | `export_motion_video` |
 | 2 | a sketch, constrained, extruded; one variable changed and the part follows | 15 s | demo scene `parametric` |
 | 3 | the history panel: a checkpoint, a rollback, the diff of the text format | 10 s | demo scene `history` |
 | 4 | an agent builds a part from a prompt | 20 s | live recording |
 | 5 | an FEM study's stress plot; a CAM toolpath simulating its cut | 15 s | demo scenes `fem`, `cam` |
-| 6 | `check_print` on a print-in-place part; the printed part | 10 s | demo scene `print` + a photo |
+| 6 | the OM615 in the app: turned, cut open, run; a part opened from it and a boss added | 20 s | demo scene `om615` |
 | 7 | the log end, the lockup, the URL | 5 s | `generators/logo/`, `assets/brand/` |
 
 ## Files
