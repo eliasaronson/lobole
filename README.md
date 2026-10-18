@@ -23,13 +23,13 @@ See [docs/README.md](docs/README.md) for how each part of the program works, and
 
 Every model here is built by a generator — an ordinary Python program driving
 the same API the GUI and an LLM assistant use. The stills are Loböle's own
-path tracer; the animation is its motion-video export. See
+path tracer. See
 [generators/README.md](generators/README.md) for all of them.
 
 | | |
 |:---:|:---:|
-| [![OM615 diesel with its injection pump](docs/gallery/om615-engine.jpg)](generators/om615) | [![OM615 diesel turning over, in section](docs/gallery/om615-motion.gif)](generators/om615) |
-| **OM615 diesel** — every part down to the bearing shells, with its Bosch injection pump chained to the crank and timed | **Two revolutions, in section** — one crank drives the pistons and the valve train, clash-checked all the way round |
+| [![OM615 diesel with its injection pump](docs/gallery/om615-engine.jpg)](generators/om615) | [![Automatic watch](docs/gallery/automatic-watch.jpg)](generators/watch) |
+| **OM615 diesel** — every part down to the bearing shells, with its Bosch injection pump chained to the crank and timed | **Automatic watch** — a 3 Hz self-winding movement behind the dial: lever escapement, rotor winding, keyless works |
 | [![Bicycle](docs/gallery/bicycle.jpg)](generators/bike) | [![FPV quadcopter](docs/gallery/fpv-drone.jpg)](generators/fpv_drone) |
 | **Bicycle** — modelled from photographs: frame, wheels with laced spokes, chain drive | **5-inch FPV quadcopter** — 91 occurrences, fitted fasteners, FEM on the arms |
 | [![The Loböle mark branded into a pine log end](docs/gallery/lobole-log-end.jpg)](generators/logo) | [![The Loböle icon as a part](docs/gallery/lobole-badge.jpg)](generators/logo) |
