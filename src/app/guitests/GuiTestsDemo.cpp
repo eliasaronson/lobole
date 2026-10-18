@@ -130,6 +130,13 @@ static bool EndRecording(ImGuiTestContext* ctx) {
 
 // Recording a scene, when the run was given --capture-dir.
 static bool s_SceneRecording = false;
+// The pointer's glide while a scene records, against the engine's own. A
+// move shorter than one second of travel is already stretched to 0.5-1 s, so
+// a faster base leaves short, deliberate moves as they were and cuts only the
+// long crossings of the screen, which show nothing on the way.
+static constexpr float kSceneMouseSpeed = 2.5f;
+static float s_MouseSpeedBefore = 0.0f;
+
 static void BeginScene(ImGuiTestContext* ctx, const char* name) {
   s_SceneRecording = false;
   if (GuiTestCaptureDir().empty())
@@ -144,10 +151,14 @@ static void BeginScene(ImGuiTestContext* ctx, const char* name) {
   ctx->Yield();
   s_SceneRecording = BeginRecording(ctx, clip.string());
   IM_CHECK_NO_RET(s_SceneRecording);
+  s_MouseSpeedBefore = ctx->EngineIO->MouseSpeed;
+  ctx->EngineIO->MouseSpeed *= kSceneMouseSpeed;
 }
 static void EndScene(ImGuiTestContext* ctx) {
-  if (s_SceneRecording)
+  if (s_SceneRecording) {
     IM_CHECK_NO_RET(EndRecording(ctx));
+    ctx->EngineIO->MouseSpeed = s_MouseSpeedBefore;
+  }
   s_SceneRecording = false;
 }
 
@@ -163,8 +174,11 @@ static void Hold(ImGuiTestContext* ctx, double seconds) {
 }
 // The camera turned `degrees` about the world's vertical over `seconds`, a
 // turntable round the target: each frame's angle is an exact fraction of the
-// whole, so a full turn ends where it began. (Camera::Orbit is a trackball in
-// mouse pixels, about the camera's own up -- neither degrees nor a turntable.)
+// whole, so a full turn ends where it began. The horizon is held level every
+// frame: moving the eye alone keeps the camera's previous up, which is not
+// vertical when it looks down, and over a turn that tilt became a tumble.
+// (Camera::Orbit is a trackball in mouse pixels, about the camera's own up --
+// neither degrees nor a turntable.)
 static void OrbitFor(ImGuiTestContext* ctx, double degrees, double seconds) {
   const int n = SceneFrames(ctx, seconds);
   const glm::vec3 target = s_App->camera->GetTarget();
@@ -175,6 +189,7 @@ static void OrbitFor(ImGuiTestContext* ctx, double degrees, double seconds) {
     const glm::vec3 eye(c * eye0.x - sn * eye0.y, sn * eye0.x + c * eye0.y,
                         eye0.z);
     s_App->camera->SetPosition(target + eye);
+    s_App->camera->SetUp(conv::kWorldUpF);
     ctx->Yield();
   }
 }
@@ -507,9 +522,6 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     ShowPanel(ctx, ui::kPanelModel);
     const std::string bodyRow =
         "//###Model/**/" + Doc()->GetBodies().at(0).name + "##body";
-    // The menu is long: the pointer crosses it at twice its pace.
-    const float mouseSpeed = ctx->EngineIO->MouseSpeed;
-    ctx->EngineIO->MouseSpeed = 2.0f * mouseSpeed;
     for (const char* material : {"Brass", "Walnut", "Carbon Fibre"}) {
       ctx->ItemClick(bodyRow.c_str(), ImGuiMouseButton_Right);
       ctx->Yield();
@@ -522,7 +534,6 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
           material);
       OrbitFor(ctx, 25.0, 1.2);
     }
-    ctx->EngineIO->MouseSpeed = mouseSpeed;
     EndScene(ctx);
     // 40 x 25 x 10 = 10000 mm3; three times as tall, then one and a half.
     IM_CHECK_LT(std::abs(v0 - 10000.0), 1e-3);
@@ -727,6 +738,23 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
       ui::RunCommand(*s_App, "view.fit");
       ctx->Yield(2);
       s_App->camera->FinishAnimation();
+      // Lowered from the fit's iso to a little above the engine's middle,
+      // level: the turn then walks round it rather
+      // than looking down on its rocker cover.
+      {
+        const glm::vec3 target = s_App->camera->GetTarget();
+        const glm::vec3 eye = s_App->camera->GetPosition() - target;
+        // Closer than the fit, which leaves room for the iso's corners.
+        const float dist = 0.75f * glm::length(eye);
+        glm::vec2 flat(eye.x, eye.y);
+        flat = glm::length(flat) > 1e-6f ? glm::normalize(flat)
+                                         : glm::vec2(1.0f, -1.0f);
+        const float elev = glm::radians(12.0f);
+        s_App->camera->SetPosition(
+            target + dist * glm::vec3(std::cos(elev) * flat.x,
+                                      std::cos(elev) * flat.y, std::sin(elev)));
+        s_App->camera->SetUp(conv::kWorldUpF);
+      }
       ctx->Yield(3);
 
       // The motion's poses, ready before the camera rolls: the stored run
@@ -818,7 +846,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
 
       BeginScene(ctx, "om615");
       Hold(ctx, 0.6);
-      OrbitFor(ctx, 360.0, 9.0); // once round
+      OrbitFor(ctx, 360.0, 12.0); // once round, level
       Hold(ctx, 0.4);
       // The pose the part was found from, to come back to after the cut.
       const glm::vec3 homeEye = s_App->camera->GetPosition();

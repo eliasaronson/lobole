@@ -27,7 +27,7 @@ quality meant for video; `--draft` is for checking a scene's choreography.
 | `history` | a version named; a cylinder stood on the block's top face and added to it; saved; the named version restored, and the cylinder gone |
 | `fem` | a cantilever's static study run; von Mises, the deflection magnified 100x, then displacement |
 | `cam` | a plate pocketed, the cut simulated end to end |
-| `om615` | the OM615 with its injection pump turned once round, cut down the crank and run through two revolutions in section; a part right-clicked in the viewport and opened; a boss sketched on its largest flat face and extruded |
+| `om615` | the OM615 with its injection pump, seen level from a little above its middle, turned once round, cut down the crank and run through two revolutions in section; a part right-clicked in the viewport and opened; a boss sketched on its largest flat face and extruded |
 
 ## Joining them
 
@@ -74,11 +74,16 @@ python3 generators/om615/om615.py --port PORT --stage preview --no-export \
 
 A scene sets itself up off camera and records only what the video shows.
 
+- While a scene records, the pointer's base speed is 2.5 times the
+  engine's (`kSceneMouseSpeed`). The engine already stretches a move under
+  one second of travel to 0.5-1 s, so this cuts only the long crossings.
 - Waits are `Hold`, and camera moves `OrbitFor` and `FlyToBodies`: real
   time when recorded, one frame in the suite. Never mouse moves for timing
   -- they glide at Cinematic speed.
 - `OrbitFor` is a turntable about the world vertical in exact fractions of
-  the angle, so a full turn ends where it began. `Camera::Orbit` is a
+  the angle, so a full turn ends where it began, with the horizon held
+  level every frame (moving the eye alone keeps the camera's tilted up, and
+  over a turn the model tumbled). `Camera::Orbit` is a
   trackball in mouse pixels about the camera's own up: neither degrees nor
   a turntable, and a "full turn" with it leaves the camera elsewhere -- a
   point picked before it then lands on another part.
