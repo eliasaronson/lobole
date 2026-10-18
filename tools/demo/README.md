@@ -37,7 +37,9 @@ tools/demo/assemble.sh --scenes "om615 cam"  # these, in this order
 ```
 
 `assemble.sh` joins the scenes -- `om615` first, then `parametric`,
-`history`, `fem`, `cam` -- with a 0.4 s crossfade between each, a caption
+`history`, `fem`, `cam` -- played at 1.5x (`--speed`: the scenes are
+recorded at a pace a viewer can follow live, and a cut wants them quicker),
+with a 0.4 s crossfade between each, a caption
 over the first few seconds of each (its `CAPTION` table, in the app's own
 Roboto), and an end card: the dark lockup on the viewport's colour with the
 repository's address, taken from `origin` unless `--url` names another.

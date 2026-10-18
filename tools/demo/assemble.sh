@@ -12,6 +12,7 @@
 #   tools/demo/assemble.sh --in DIR --out DIR
 #   tools/demo/assemble.sh --scenes "om615 cam"  # these, in this order
 #   tools/demo/assemble.sh --url example.org/x   # the address on the end card
+#   tools/demo/assemble.sh --speed 1             # the scenes as recorded
 #
 # The captions are the CAPTION table below. The clips come from
 # tools/demo/record.sh (tools/demo/README.md).
@@ -23,6 +24,7 @@ OUT=""
 SCENES="om615 parametric history fem cam"
 URL=""
 MAX_MB=9.5     # GitHub's limit for a video attached on a free plan is 10 MB
+SPEED=1.5      # the scenes play this much faster than recorded
 FADE=0.4       # seconds of crossfade between two scenes
 CARD=4.0       # seconds the end card holds
 
@@ -41,6 +43,7 @@ while [[ $# -gt 0 ]]; do
     --scenes) SCENES="$2"; shift 2 ;;
     --url) URL="$2"; shift 2 ;;
     --max-mb) MAX_MB="$2"; shift 2 ;;
+    --speed) SPEED="$2"; shift 2 ;;
     -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     *) echo "assemble: unknown argument '$1' (see --help)" >&2; exit 2 ;;
   esac
@@ -98,10 +101,12 @@ inputs=() filters="" offset=0 i=0
 for s in "${LIST[@]}"; do
   printf '%s' "${CAPTION[$s]}" >"$TMP/cap$i.txt"
   d="$(probe "$IN/$s.mp4" format=duration)"
+  d="$(awk -v d="$d" -v s="$SPEED" 'BEGIN{printf "%.3f", d/s}')"
   inputs+=(-i "$IN/$s.mp4")
   # Caption in from 0.4 s, out by 3.6 s, fading 0.3 s each way.
   a="if(lt(t,0.4),0,if(lt(t,0.7),(t-0.4)/0.3,if(lt(t,3.3),1,if(lt(t,3.6),(3.6-t)/0.3,0))))"
-  filters+="[$i:v]fps=$FPS,scale=$W:$H,format=yuv420p,setsar=1,settb=AVTB,"
+  # Sped up before the caption, so the caption keeps its own pace.
+  filters+="[$i:v]setpts=PTS/$SPEED,fps=$FPS,scale=$W:$H,format=yuv420p,setsar=1,settb=AVTB,"
   filters+="drawtext=fontfile='$FONT':textfile='$TMP/cap$i.txt':fontsize=$FS"
   filters+=":fontcolor=white:alpha='$a':box=1:boxcolor=0x1b1d23@0.78"
   filters+=":boxborderw=$PAD:x=$MARGIN:y=h-th-$MARGIN-$PAD[v$i];"
