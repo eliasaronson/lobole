@@ -158,8 +158,11 @@ std::string OnLabel(AppState& state, const primitive::On& on) {
   case primitive::OnKind::WorldPlane:
     return SketchPlane::StandardPlaneName(on.world);
   case primitive::OnKind::Face: {
+    // Which feature's face, not its element name: that is a topological
+    // address ("2/g1;M78.1;...;M276") no user can read, and as long as it
+    // gets it stretched the tool window across the screen.
     const Feature* f = state.document->FindFeatureById(on.face.featureId);
-    return "face " + on.face.name + " of " +
+    return "a face of " +
            (f != nullptr ? f->GetName() : std::string("(missing)"));
   }
   case primitive::OnKind::PlaneFeature: {
