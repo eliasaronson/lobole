@@ -145,32 +145,16 @@ it here was a real bug.
 
 ### Sanitizers and static analysis
 
-Both are opt-in and live in their own build tree, so a normal build pays
-nothing:
-
 ```
 cmake -S . -B build-asan -G Ninja -DENABLE_SANITIZERS=ON   # ASan + UBSan
-ninja -C build-asan designer designer_tests
-
-tools/ci-local.sh --asan                # the whole headless suite
-tools/run-sanitized-tests.sh '[thread]' # one filter, in one process
-tools/run-sanitized-app.sh              # the windowed app (needs a display)
+tools/ci-local.sh --asan                # the headless suite, sanitized
+tools/run-sanitized-app.sh              # the windowed app
 ```
 
-`ci-local.sh --asan` runs the suite through `ctest -j`: minutes, against the
-half hour of one process. The workarounds our uninstrumented dependencies
-need are compiled into the sanitized binary
-(`src/common/SanitizerDefaults.cpp`), so it behaves the same however it is
-launched: `detect_container_overflow=0` for the std-container/OpenCASCADE
-boundary, UBSan pointed at `tools/ubsan-suppressions.txt`, and leak
-suppressions that name single frames, never a library. Any `*SAN_OPTIONS`
-variable still overrides them. Leak detection is on for the app too, which
-covers render, UI and interaction paths the headless tests never reach; GPU
-memory needs the Vulkan validation layers instead.
-
-`cmake -DENABLE_ANALYZER=ON` adds GCC's `-fanalyzer`, which finds null
-dereferences, use-after-free and leaks on paths no test runs. It is slow and
-noisy on dependency headers: an occasional audit build, not CI.
+The suppressions our uninstrumented dependencies need are compiled into the
+binary (`src/common/SanitizerDefaults.cpp`); any `*SAN_OPTIONS` overrides
+them. `-DENABLE_ANALYZER=ON` adds GCC's `-fanalyzer`: slow and noisy, an
+occasional audit rather than CI.
 
 ## Formatting and commits
 
