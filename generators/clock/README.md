@@ -82,6 +82,22 @@ default 1 s, so a beat every half second) and the print profile, through
   on (half the hole allowance over the arbor: a light press, no angular
   play) and round in the plates' holes (the gap at the arbor's size). The
   cannon pinion is pressed on a ROUND end: that is the setting clutch.
+- **Every part can be put where it is mated**
+  ([insertion](../../docs/inspect/README.md#insertion)). A press D runs
+  only under the part pressed on it -- a wheel's teeth and pinion, the end
+  it leads with, so its hub tube rides free -- and from there out through
+  the end the part goes on from the arbor is a **slide D**: the bore less
+  the running gap at the arbor's size, round and flat alike
+  (`clock_spec.arbor_plan`). Nothing round or pressed passes through a D
+  bore on the way. Everything goes on from the front but the pendulum rod,
+  the third and centre spacers and the centre wheel (whose arbor's front
+  carries the drum and the cannon pinion's round press); the stage-1 drum
+  is pressed on the slide D the escape wheel passes. A pivot that is a
+  slide D runs in a hole the gap over its own size, so the play is the
+  same at every pivot (`pivot_hole_d`). The insertion check is a
+  requirement on every pressed or slid pair of both stages, each from the
+  end `clock_spec.ENTRY` names (`INSERTIONS` in build.py), and the card
+  lists them in that order.
 - **The shafts print lying** (the arbors and the pillars): stood on end
   they came off the bed (check_print's
   [slender](../../docs/tolerances/README.md#slender) item fails them, 25:1
@@ -174,6 +190,16 @@ for.
 - **negative control**: stage 1's plate 1 as it was first printed, the
   pillars and arbors stood on end among the rest, must fail `check_print`'s
   slender item on exactly those six and pass every other item;
+- every pressed or slid pair of both stages (wheels, drums, spacers,
+  cannon pinion, hands and the pendulum rod on what carries them, the
+  front plate over the arbors' front pivots, each arbor into the back
+  plate) slid from clear to its seat from the end it goes on from: no
+  further under interference than its own press, as printed (the hole
+  allowance a side);
+- **negative control**: the stage-1 escape arbor as first printed
+  (`build_arbor_first`: round pivots, its D from the back plate's face to
+  the front) with the escape wheel must fail the insertion check from
+  either end, forced along more than the wheel's hub;
 - every print plate's `check_print`, every item.
 
 `generator_clock` (generators/README.md#the-big-generators-as-tests) runs
@@ -239,6 +265,16 @@ They now lie on plate 2 beside the pendulum, and plate 1 keeps every other
 piece it had: a stage 1 whose plate 1 printed but for its shafts is
 finished from plate 2 alone, as the card says.
 
+**Stage 1's reprint** (2026-10-18): the escape wheel's press-D bore could
+reach its D only forced over the escape arbor's round back pivot, and bound
+halfway through its hub; the anchor arbor had the same shape. The arbors
+were remade to go together (above), which changed four stage-1 pieces:
+both arbors, the stage-1 drum's bore (pressed on the slide D now) and the
+stage-1 front plate's escape and anchor pivot holes (the gap over the slide
+pivots). They print on `stage1_arbors/` and replace the pieces of their
+names; the wheels, the anchor, the back plate and the pendulum are as they
+were. The card lists them (`REPRINT1`).
+
 | plate | pieces |
 |---|---|
 | `stage1/plate1.stl` | the stage-1 back and front plates, escape wheel, anchor, stage-1 drum and 8 nuts (stage 2 uses them too) |
@@ -247,6 +283,7 @@ finished from plate 2 alone, as the card says.
 | `stage2/plate2.stl` | the front plate, both hands, and the escape, third and centre arbors, lying |
 | `stage2/plate3.stl` | the centre wheel |
 | `stage2/plate4.stl` | the dial ring |
+| `stage1_arbors/plate1.stl` | stage 1's reprint: the stage-1 escape arbor and the anchor arbor, lying, the stage-1 drum and the stage-1 front plate |
 
 ### Test
 

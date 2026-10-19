@@ -613,6 +613,17 @@ def solve(period_s, allow, layer, z_gap, weight_od, cord_mm):
     s["press_d"] = press_d
     s["run_d"] = d_a + 2.0 * g_small
     s["flat"] = lines(2)            # the D's flat, from the round
+    # What a press-D bore must slide over on its way to its seat: the
+    # bore less the running gap at the arbor's size, round and flat alike
+    # (docs/inspect/README.md#insertion). A press D runs only where its
+    # part sits; between there and the end the part goes on from, the
+    # arbor is this.
+    over = (press_d - d_a) / 2.0
+    s["slide_r"] = press_d / 2.0 - g_small
+    # How much nearer a bore's faces come as printed than as modelled, a
+    # side: the insertion check reads a gap under it as interference.
+    s["print_closing"] = hole_a / 2.0
+    s["slide_flat_x"] = d_a / 2.0 - s["flat"] + over - g_small
     # A shaft prints LYING on a flat along its whole length: stood on end
     # it came off the bed (check_print's slender item). The flat is cut
     # whole layers deep, as deep as leaves the round over it at most 45
@@ -654,6 +665,82 @@ def layers_z(s):
                    + t_w)
     z["third_pinion"] = (z["third"][1], z["centre"][1] + es)
     s["z"] = z
+
+
+# Which end each arbor's parts go on from, and so where each arbor is a press
+# D, a slide D or round (docs/inspect/README.md#insertion). Everything goes on
+# from the front but the centre wheel, whose front end carries the drum and
+# the cannon pinion's round press.
+ENTRY = {"escape wheel": "front",
+         "anchor": "front", "pendulum rod": "back", "third wheel": "front",
+         "third spacer": "back", "centre wheel": "back",
+         "centre spacer": "back", "drum": "front", "cannon pinion": "front",
+         "minute hand": "front", "hour wheel": "front", "hour hand": "front",
+         "minute wheel": "front", "front plate": "front"}
+
+
+def arbor_plan(s, rod_z, drum1_z):
+    """Each arbor as sections along it, (z0, z1, kind): `press` the D a
+    part is pressed on, only where the part sits; `slide` the D the running
+    gap under a press-D bore, from there out through the end the part goes
+    on from, so nothing round or pressed passes through a D bore; `round`
+    elsewhere. And each plate's pivot hole, the gap at the arbor's size
+    over the pivot that runs in it (a slide pivot is the smaller)."""
+    H, t, es, z = s["H"], s["t_plate"], s["end_shake"], s["z"]
+    rz0, rz1 = rod_z
+    # A press runs only under a part's teeth and pinion, the end it leads
+    # with, so it is pushed home no further than that: its hub tube on to
+    # the front plate rides the slide D. The escape wheel's and the
+    # anchor's (the anchor's hub is level with the wheel, its band the same
+    # length).
+    seat_w = (es, z["escape_pinion"][1])
+    third0 = z["third"][0]
+    third1 = z["third_pinion"][1]
+    if not (seat_w[1] < H - es and third1 < H - es):
+        raise SystemExit("clock: a press band runs past its hub")
+    c0, c1 = z["centre"]
+    plan = {
+        "escape arbor (stage 1)": (-t, drum1_z[1], [
+            (-t, seat_w[0], "round"), (*seat_w, "press"),
+            (seat_w[1], drum1_z[1], "slide")]),
+        "escape arbor": (-t, H + t, [
+            (-t, seat_w[0], "round"), (*seat_w, "press"),
+            (seat_w[1], H + t, "slide")]),
+        "anchor arbor": (rz0, H + t, [
+            (rz0, rz1, "press"), (rz1, seat_w[0], "round"),
+            (*seat_w, "press"), (seat_w[1], H + t, "slide")]),
+        "third arbor": (-t, H + t, [
+            (-t, third0, "round"), (third0, third1, "press"),
+            (third1, H + t, "slide")]),
+        "centre arbor": (-t, s["centre_arbor_top"], [
+            (-t, c0, "slide"), (c0, c1, "press"),
+            (c1, s["centre_arbor_top"], "round")]),
+    }
+    s["arbors"] = plan
+    r_of = {"round": s["arbor_d"] / 2.0, "press": s["arbor_d"] / 2.0,
+            "slide": s["slide_r"]}
+
+    def pivot_r(name, za, zb):
+        z0, z1, secs = plan[name]
+        rs = {r_of[k] for a, b, k in secs if a < zb - 1e-9 and b > za + 1e-9}
+        if len(rs) != 1:
+            raise SystemExit(f"clock: {name}'s pivot {za:g}..{zb:g} is not "
+                             f"one size: {sorted(rs)}")
+        return rs.pop()
+    holes = {}
+    for axis, name in (("escape", "escape arbor"), ("anchor", "anchor arbor"),
+                       ("third", "third arbor"), ("centre", "centre arbor")):
+        holes[axis] = {"back": 2.0 * pivot_r(name, -t, 0.0),
+                       "front": 2.0 * pivot_r(name, H, H + t)}
+    # Stage 1's escape arbor pivots as stage 2's does, in stage 1's plates.
+    for side, (za, zb) in (("back", (-t, 0.0)), ("front", (H, H + t))):
+        if abs(2.0 * pivot_r("escape arbor (stage 1)", za, zb)
+               - holes["escape"][side]) > 1e-9:
+            raise SystemExit("clock: the two escape arbors' pivots differ")
+    s["pivot_d"] = holes
+    s["pivot_hole_d"] = {a: {k: v + 2.0 * s["g_small"] for k, v in h.items()}
+                         for a, h in holes.items()}
+    return plan
 
 
 def layout(s):

@@ -100,6 +100,9 @@ def jar_weight(allow):
 
 # --- parts ----------------------------------------------------------------------
 
+FIRST_ESCAPE_ARBOR = "escape arbor (stage 1, first print)"
+
+
 def part_names(d):
     return {p["name"] for p in d.call("list_parts")["parts"]
             if p["type"] == "part"}
@@ -117,18 +120,20 @@ def build_parts(d, s, proc):
     P.build_drum(d, s, proc, name="drum (stage 1)", stage1=True)
     zd1 = s["drum1"]["z"]
     rz0, rz1 = P.rod_z(s)
-    P.build_arbor(d, s, proc, "escape arbor", -t, H + t, [(0.0, H)])
-    P.build_arbor(d, s, proc, "escape arbor (stage 1)", -t, zd1[1],
-                  [(0.0, H), zd1])
-    P.build_arbor(d, s, proc, "anchor arbor", rz0, H + t,
-                  [(rz0, rz1), (0.0, H)])
-    P.build_arbor(d, s, proc, "third arbor", -t, H + t, [(0.0, H)])
-    P.build_arbor(d, s, proc, "centre arbor", -t, s["centre_arbor_top"],
-                  [(0.0, z["centre"][1])])
+    S.arbor_plan(s, (rz0, rz1), zd1)
+    for name in s["arbors"]:
+        P.build_arbor(d, s, proc, name)
+    # The insertion check's negative control: the stage-1 escape arbor as
+    # it was first printed, its round back pivot in the way of the wheel's
+    # press D (docs/inspect/README.md#insertion).
+    P.build_arbor_first(d, s, proc, FIRST_ESCAPE_ARBOR, -t, zd1[1],
+                        [(0.0, H), zd1])
     P.build_third(d, s, proc)
     P.build_spacer(d, s, proc, "third spacer", es, z["third"][0])
     P.build_centre(d, s, proc)
-    P.build_spacer(d, s, proc, "centre spacer", es, z["centre"][0])
+    # On the centre arbor's slide D, which the centre wheel passes.
+    P.build_spacer(d, s, proc, "centre spacer", es, z["centre"][0],
+                   bore_d=2.0 * (s["slide_r"] + s["g_small"]))
     P.build_drum(d, s, proc)
     for stage, fr in (("", s["frame2"]), (" (stage 1)", s["frame1"])):
         P.build_plate(d, s, proc, f"back plate{stage}", fr, back=True)
@@ -546,6 +551,129 @@ def build_stage2(d, s, control=False):
     return a, nut_win
 
 
+# --- insertion -----------------------------------------------------------------
+
+# Every pressed or slid pair of a stage: (what goes on, what it goes on,
+# the mate whose axis it slides along; None for the one mate joining them).
+# Which end each goes on from is clock_spec.ENTRY's; an arbor goes into the
+# back plate from the front.
+INSERTIONS = {
+    "stage 1": [
+        ("escape wheel", "escape arbor", None),
+        ("drum", "escape arbor", "escape arbor on escape wheel"),
+        ("anchor", "anchor arbor", None),
+        ("pendulum rod", "anchor arbor", "anchor arbor on anchor"),
+        ("front plate", "escape arbor", "escape wheel axis"),
+        ("front plate", "anchor arbor", "anchor axis"),
+        ("escape arbor", "back plate", "escape wheel axis"),
+        ("anchor arbor", "back plate", "anchor axis"),
+    ],
+    "stage 2": [
+        ("escape wheel", "escape arbor", None),
+        ("anchor", "anchor arbor", None),
+        ("pendulum rod", "anchor arbor", "anchor arbor on anchor"),
+        ("third wheel", "third arbor", None),
+        ("third spacer", "third arbor", "third arbor on third wheel"),
+        ("centre wheel", "centre arbor", None),
+        ("centre spacer", "centre arbor", "centre arbor on centre wheel"),
+        ("drum", "centre arbor", "centre arbor on centre wheel"),
+        ("cannon pinion", "centre arbor", "centre arbor on centre wheel"),
+        ("minute hand", "cannon pinion", None),
+        ("hour wheel", "cannon pinion", "hour wheel axis"),
+        ("hour hand", "hour wheel", None),
+        ("minute wheel", "front plate", None),
+        ("front plate", "escape arbor", "escape wheel axis"),
+        ("front plate", "anchor arbor", "anchor axis"),
+        ("front plate", "third arbor", "third wheel axis"),
+        ("front plate", "centre arbor", "centre wheel axis"),
+        ("escape arbor", "back plate", "escape wheel axis"),
+        ("anchor arbor", "back plate", "anchor axis"),
+        ("third arbor", "back plate", "third wheel axis"),
+        ("centre arbor", "back plate", "centre wheel axis"),
+    ],
+}
+
+
+def entry_of(part):
+    """The side of the movement's +Z a part goes on from."""
+    side = S.ENTRY.get(part, "front")
+    return "positive" if side == "front" else "negative"
+
+
+def asm_id(d, name):
+    return next(p["id"] for p in d.call("list_parts")["parts"]
+                if p["type"] == "assembly" and p["name"] == name)
+
+
+def insertions(a, s):
+    """Every pressed or slid pair of the stage `a` slides from clear to its
+    seat from the end clock_spec.ENTRY says (docs/inspect/README.md
+    #insertion), stated once as requirements and checked; any that fails
+    stops the run, naming it."""
+    d = a.d
+    doc = asm_id(d, a.name)
+    ids, names = [], {}
+    for part, onto, mate in INSERTIONS[a.name]:
+        m = {"kind": "insertion", "document": doc, "a": a.occ[part],
+             "b": a.occ[onto], "entry": entry_of(part),
+             "allowance_mm": s["print_closing"]}
+        if mate:
+            m["mate"] = a.mates[mate]
+        name = f"{a.name}: {part} goes on {onto}"
+        r = d.call("add_requirement", name=name, measure=m,
+                   bound={"kind": "pass"},
+                   source="a part must be able to reach where it is mated "
+                          "(docs/inspect/README.md#insertion)")
+        ids.append(r["id"])
+        names[r["id"]] = (part, onto)
+    res = d.call("check_requirements", ids=ids, _timeout=3600)
+    out, bad = {}, []
+    for r in res["requirements"]:
+        part, onto = names[r["id"]]
+        det = (r.get("evidence") or {}).get("detail") or r.get("detail") or {}
+        row = {k: det.get(k) for k in ("pass", "entry", "rotation_deg",
+                                        "press_mm", "interfering_mm",
+                                        "excess_mm", "from_mm",
+                                        "worst_depth_mm")}
+        row["state"] = r.get("state")
+        out[f"{part} on {onto}"] = row
+        ok = r.get("state") == "pass"
+        print(f"  {'ok  ' if ok else 'FAIL'} {part} on {onto} from the "
+              f"{S.ENTRY.get(part, 'front')}: pressed "
+              f"{det.get('press_mm', 0):.2f} mm, forced "
+              f"{det.get('interfering_mm', 0):.2f} mm"
+              + ("" if ok else f" ({r.get('state')}: {det or r})"))
+        if not ok:
+            bad.append(f"{part} on {onto}")
+    if bad:
+        raise SystemExit(f"clock: {a.name} cannot be assembled: {bad}")
+    return out
+
+
+def first_arbor_control(d, s):
+    """The negative control: the stage-1 escape arbor as first printed,
+    with the escape wheel, must FAIL the insertion check from either end:
+    forced along more than the hub's length."""
+    a = Asm(d, "stage 1 escape (first print)")
+    a.fixed("escape wheel", "escape wheel")
+    a.on("escape wheel", FIRST_ESCAPE_ARBOR, "escape arbor")
+    r = d.call("check_insertion", a=a.occ["escape wheel"],
+               b=a.occ["escape arbor"], entry="either",
+               allowance_mm=s["print_closing"], _timeout=600)
+    hub = s["H"] - 2.0 * s["end_shake"]
+    print(f"  negative control, the stage-1 escape arbor as first printed: "
+          f"{'passes' if r['pass'] else 'fails'}, forced "
+          f"{r['interfering_mm']:.2f} mm from the {r['entry']} side against "
+          f"a press of {r['press_mm']:.2f} (hub {hub:.2f}), "
+          f"{r['worst_depth_mm']:.2f} mm deep")
+    if r["pass"] or r["interfering_mm"] <= hub + r["lead_in_mm"]:
+        raise SystemExit("clock: the first stage-1 escape arbor goes on: "
+                         "the insertion check cannot see a round pivot in "
+                         f"a D bore: {r}")
+    return {k: r[k] for k in ("pass", "entry", "press_mm", "interfering_mm",
+                              "excess_mm", "from_mm", "worst_depth_mm")}
+
+
 # --- motion -----------------------------------------------------------------------
 
 def run_motion(a, name, driver, from_deg, to_deg, samples, clash,
@@ -748,15 +876,28 @@ def fem(d, s, weight_g, timeout_s):
     z = s["z"]
     H, t = s["H"], s["t_plate"]
     fs = faces(d, "centre arbor")
-    r = s["arbor_d"] / 2.0
-    # Flatted on two sides (its D and the flat it lies on), the round is
-    # its two arcs, each a face: the seat and the pivots are bands of both,
-    # the pull shared by their areas.
-    rounds = [f for f in fs if f["kind"] == "cylinder" and
-              abs(f.get("radius", 0) - r) < 1e-6]
-    if not 1 <= len(rounds) <= 2:
-        raise SystemExit(f"clock: the arbor's round is "
-                         f"{[f['name'] for f in rounds]}, not its arcs")
+    # Flatted on two sides (its D and the flat it lies on), a round is its
+    # two arcs, each a face: the seat and the pivots are bands of them, the
+    # pull shared by their areas. The back pivot is the slide D the centre
+    # wheel passes (clock_spec.arbor_plan), a round of its own radius.
+    secs = s["arbors"]["centre arbor"][2]
+    radius = {"round": s["arbor_d"] / 2.0, "press": s["arbor_d"] / 2.0,
+              "slide": s["slide_r"]}
+
+    def rounds_at(z0, z1):
+        ks = {k for a, b, k in secs if a < z1 - 1e-9 and b > z0 + 1e-9}
+        rs = {radius[k] for k in ks}
+        if len(rs) != 1:
+            raise SystemExit(f"clock: the centre arbor over {z0:g}..{z1:g} "
+                             f"is not one round: {sorted(ks)}")
+        r = rs.pop()
+        out = [f for f in fs if f["kind"] == "cylinder" and
+               abs(f.get("radius", 0) - r) < 1e-6]
+        if not 1 <= len(out) <= 2:
+            raise SystemExit(f"clock: the arbor's round of radius {r:g} is "
+                             f"{[f['name'] for f in out]}, not its arcs")
+        return out
+    rounds = rounds_at(*z["drum"])
     areas = [f.get("area_mm2") or f.get("area") or 1.0 for f in rounds]
     shares = [(f["name"], a / sum(areas)) for f, a in zip(rounds, areas)]
     band = lambda z0, z1: {"normal": [0.0, 0.0, 1.0], "from_mm": z0,  # noqa
@@ -766,7 +907,8 @@ def fem(d, s, weight_g, timeout_s):
     pin = pin_strength(
         d, "centre arbor", shares, pull, [0.0, -1.0, 0.0],
         seat=[{"face": f["name"], "region": band(z0, z1)}
-              for z0, z1 in ((-t, 0.0), (H, H + t)) for f in rounds],
+              for z0, z1 in ((-t, 0.0), (H, H + t))
+              for f in rounds_at(z0, z1)],
         layer_normal=P.LIE_UP, region=band(*z["drum"]),
         name="centre arbor under the weight", need=PIN_NEED,
         timeout_s=timeout_s)
@@ -942,6 +1084,22 @@ def make_bed(d, proc, name, items):
 # card names them.
 MOVED = ("pillar 1", "pillar 2", "pillar 3", "pillar 4", "anchor arbor",
          "escape arbor (stage 1)")
+# Stage 1's pieces whose shape changed when its arbors were made assemblable
+# (2026-10-18, docs/inspect/README.md#insertion), and what changed: each
+# reprinted on stage1_arbors/ replaces the piece of that name.
+REPRINT1 = {
+    "escape arbor (stage 1)": "its press D only under the escape wheel's "
+    "teeth and pinion; a slide D from there out through the front, front "
+    "pivot and drum band included, so the wheel and the drum go on from the "
+    "front; round at the back pivot",
+    "anchor arbor": "its press D only under the anchor's hub; a slide D from "
+    "there out through the front pivot, so the anchor goes on from the "
+    "front; the pendulum rod's D at the back unchanged",
+    "drum (stage 1)": "its bore pressed on the escape arbor's slide D, the "
+    "light press it had on the D",
+    "front plate (stage 1)": "its escape and anchor pivot holes the gap "
+    "over the slide-D pivots, smaller",
+}
 
 
 def old_plate1(d, proc, pieces, sp):
@@ -1005,8 +1163,16 @@ def print_plates(d, s, proc, out):
         [(p, p, "lying") for p in ("escape arbor", "third arbor",
                                    "centre arbor")])
     plates, jobs = {}, {}
-    for stage, pieces in (("stage1", stage1), ("stage2", stage2)):
+    # What stage 1 reprints: every stage-1 piece whose shape changed when
+    # the arbors were made assemblable (REPRINT1), on a plate of its own.
+    reprint = [next(x for x in stage1 + shafts1 if x[1] == p)
+               for p in REPRINT1]
+    for stage, pieces in (("stage1", stage1), ("stage2", stage2),
+                          ("stage1_arbors", reprint)):
         beds = pack(d, pieces, sp)
+        if stage == "stage1_arbors" and len(beds) != 1:
+            raise SystemExit(f"clock: stage 1's reprint takes {len(beds)} "
+                             "plates, not one")
         if stage == "stage1":
             if len(beds) != 1:
                 raise SystemExit(f"clock: stage 1's frame takes {len(beds)} "
@@ -1047,7 +1213,27 @@ def print_plates(d, s, proc, out):
 
 # --- the test card ---------------------------------------------------------------------
 
-def card(s, pred, plates, profile):
+def assembly_lines(s, checks):
+    """The card's assembly steps: what goes on what, from which end, and
+    how far it is pressed, as the insertion check read it."""
+    out = []
+    for stage in ("stage 1", "stage 2"):
+        rows = checks.get(f"{stage} insertion") or {}
+        out.append(f"{chr(10) if out else ''}**{stage.capitalize()}:**"
+                   "\n")
+        for part, onto, _ in INSERTIONS[stage]:
+            r = rows.get(f"{part} on {onto}") or {}
+            # Pushed under interference this far at the end of its travel:
+            # a part only seated on a shoulder is pushed under none.
+            press = r.get("interfering_mm") or 0.0
+            how = (f"pressed home the last {press:.1f} mm" if press > 0.0
+                   else "slides on free")
+            out.append(f"- {part} onto {onto}, from the "
+                       f"{S.ENTRY.get(part, 'front')}: {how}")
+    return "\n".join(out)
+
+
+def card(s, pred, plates, profile, checks):
     c, e = s["counts"], s["escape"]
     pend = s["pend"]
     rows = []
@@ -1104,6 +1290,27 @@ beside the pendulum (stood on end they came off the bed: {s['pillar_height']:.0f
 Ø{2 * s['pillar_foot_r']:.2f} end). Plate 1 keeps every other piece it had, so a stage 1 whose
 plate 1 printed but for its shafts is finished from plate 2 alone. Each pillar thread
 keeps {100 * s['pillar']['thread_engaged']:.0f} % of its turn above the flat; stage 2's arbors lie too.
+
+**Reprint for stage 1 (2026-10-18):** a press-D bore could reach its D
+only forced over a round pivot (the escape wheel bound halfway through its
+hub). `stage1_arbors/` (`clock_stage1_arbors_job.3mf`) holds every stage-1
+piece that changed; each replaces the piece of its name, and nothing else
+of stage 1 changes:
+
+{chr(10).join(f"- **{p}**: {why}" for p, why in REPRINT1.items())}
+
+## Assembly
+
+Every pressed or slid pair is checked to go on from the end named, slid
+from clear to its seat (docs/inspect/README.md#insertion): each D a part is
+pressed on runs only under that part, and from there out through the end
+it goes on from the arbor is a D the running gap under the bore. Put each
+part on its arbor before the arbor goes into the plates; turn the part
+until its D meets the arbor's (it goes on no other way). Each arbor goes
+into the back plate from the front, and the front plate on over the
+arbors' front pivots.
+
+{assembly_lines(s, checks)}
 
 ## Test
 
@@ -1281,6 +1488,9 @@ def main():
         if r["clean"] or ("anchor", "escape wheel") not in bad:
             raise SystemExit("clock: a pallet set too deep does not clash: "
                              "the study cannot see the escapement")
+        checks["stage 1 insertion"] = insertions(a1, s)
+        checks["control: first stage-1 escape arbor"] = \
+            first_arbor_control(d, s)
 
     with phase("stage 2"):
         a2, w2 = build_stage2(d, s)
@@ -1315,6 +1525,7 @@ def main():
         checks["click"] = ck
         if bad:
             raise SystemExit(f"clock: the click: {bad}")
+        checks["stage 2 insertion"] = insertions(a2, s)
         # Negative control: one tooth wrong on the third wheel.
         rid = a2.rel["escape pinion drives the third wheel"]
         d.call("set_relation", id=rid, teeth_a=c["escape_pinion"],
@@ -1416,7 +1627,8 @@ def main():
     a2.activate()
     d.call("save_project", path=str(out / "clock.dsgn"))
     (out / "clock_card.md").write_text(card(s, pred, plates,
-                                            args.profile or args.material))
+                                            args.profile or args.material,
+                                            checks))
     spec = {k: v for k, v in s.items() if k not in ("gears",)}
     spec["gears"] = {k: {kk: vv for kk, vv in g.items()}
                      for k, g in s["gears"].items()}

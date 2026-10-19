@@ -406,7 +406,7 @@ def build_drum(d, s, proc, name="drum", stage1=False):
     """The cord drum. Stage 2: on the centre arbor at the gap, its back
     flange the ratchet the pawls drive, a sleeve forward to the cord's
     45-degree flanges. Stage 1: on the escape arbor in front of the front
-    plate, pressed on its D, with no ratchet."""
+    plate, pressed on its slide D, with no ratchet."""
     dr = s["drum"]
     b = new_part(d, name, proc)
     rc, cone, core = dr["r_core"], dr["cone"], dr["core"]
@@ -420,7 +420,12 @@ def build_drum(d, s, proc, name="drum", stage1=False):
                 (0.0, z0 + dr["t_flange"] + core + cone)]
         body = b.revolve(name, prof)
         z1 = prof[-1][1]
-        body = b.prism(f"{name} bore", press_d_bore(s), z0, z1, mode="cut")
+        # Pressed on the escape arbor's slide D, which the escape wheel
+        # passes on its way to its own D: the same light press over it.
+        over = (s["press_d"] - s["arbor_d"]) / 2.0
+        body = b.prism(f"{name} bore", d_bore(s["slide_r"] + over,
+                                              s["slide_flat_x"] + over),
+                       z0, z1, mode="cut")
         tie_r = rc + s["cord_mm"] / 2.0 + L(1)
         body = b.prism(f"{name} tie", [circle((tie_r, 0.0),
                                               s["cord_mm"] / 2.0 + L(1))],
@@ -489,10 +494,13 @@ def lie_down(d):
     d.call("set_print_settings", direction=LIE_UP)
 
 
-def build_arbor(d, s, proc, name, z0, z1, d_ranges):
-    """A printed arbor, printed LYING on a flat along its length at -X: a
-    rod of arbor_d with a D flat at +X over each of `d_ranges` (z0, z1),
-    facing up as it prints, each D's upper end a 45-degree ramp.
+def build_arbor_first(d, s, proc, name, z0, z1, d_ranges):
+    """The arbor as stage 1 was first printed, kept as the insertion
+    check's negative control (docs/inspect/README.md#insertion): LYING on
+    a flat along its length at -X, a rod of arbor_d with a D flat at +X over
+    each of `d_ranges` (z0, z1), each D's upper end a 45-degree ramp. Its
+    pivots are round, so a press-D bore can reach its D only forced over
+    one.
     What turns on it (the drum) runs at the gap on the plain round; a study
     loads that band of it as a region
     (docs/simulation/README.md#loads-on-part-of-a-face)."""
@@ -518,10 +526,61 @@ def build_arbor(d, s, proc, name, z0, z1, d_ranges):
     return finish(d, body, "pla")
 
 
-def build_spacer(d, s, proc, name, z0, z1):
+def build_arbor(d, s, proc, name):
+    """A printed arbor (clock_spec.arbor_plan), printed LYING on a flat
+    along its length at -X: along it, sections of arbor_d (round, or a
+    press D flatted at +X, facing up as it prints, where a part is pressed
+    on) and of the slide D, a running gap under a press-D bore all round,
+    from each press out through the end its part goes on from
+    (docs/inspect/README.md#insertion)."""
+    z0, z1, secs = s["arbors"][name]
+    b = new_part(d, name, proc)
+    lie_down(d)
+    r = s["arbor_d"] / 2.0
+    rad = {"round": r, "press": r, "slide": s["slide_r"]}
+    prof = [(0.0, z0)]
+    for a, c, kind in secs:
+        rk = rad[kind]
+        if prof[-1][0] != rk:
+            prof.append((rk, a))
+        prof.append((rk, c))
+    prof.append((0.0, z1))
+    # Consecutive points of one radius are one segment.
+    pts = [prof[0]]
+    for p in prof[1:]:
+        if len(pts) >= 2 and pts[-1][0] == p[0] == pts[-2][0]:
+            pts[-1] = p
+        else:
+            pts.append(p)
+    body = b.revolve(name, pts)
+    flat_x = {"press": r - s["flat"], "slide": s["slide_flat_x"]}
+    for k, (a, c, kind) in enumerate(secs):
+        if kind == "round":
+            continue
+        x0 = flat_x[kind]
+        # Past the arbor's own end where the D runs out through it.
+        a1 = a - 1.0 if abs(a - z0) < 1e-9 else a
+        c1 = c + 1.0 if abs(c - z1) < 1e-9 else c
+        sk = {"origin": [0.0, r + 1.0, 0.0], "normal": [0, -1, 0],
+              "uAxis": [1, 0, 0]}
+        body = check(d.call("add_feature", feature={
+            "type": "Extrude", "name": f"{name} {kind} flat {k + 1}",
+            "sketch_id": b.sketch(f"{name} {kind} flat {k + 1} sketch", sk,
+                                  polygon([(x0, a1), (r + 1.0, a1),
+                                           (r + 1.0, c1), (x0, c1)])),
+            "distance": 2.0 * (r + 1.0), "mode": "cut"}), name)["id"]
+    body = lie_flat(b, f"{name} lying flat", r - s["lie_flat"], r, z0 - 1.0,
+                    z1 + 1.0)
+    return finish(d, body, "pla")
+
+
+def build_spacer(d, s, proc, name, z0, z1, bore_d=None):
+    """A spacer at the gap over what it sits on (`bore_d`, else the
+    arbor's round)."""
     b = new_part(d, name, proc)
     body = b.prism(name, [circle((0, 0), s["hub_r"]),
-                          circle((0, 0), s["run_d"] / 2.0)], z0, z1)
+                          circle((0, 0), (bore_d or s["run_d"]) / 2.0)],
+                   z0, z1)
     return finish(d, body, "pla")
 
 
@@ -558,7 +617,8 @@ def plate_outline(circles, n=24):
 
 def build_plate(d, s, proc, name, fr, back):
     """A frame plate: the hull of its pillars' pads and its arbors' bosses,
-    a pivot hole per arbor at the gap, a clearance hole per pillar (on the
+    a pivot hole per arbor at the gap over the pivot that runs in it
+    (clock_spec.arbor_plan), a clearance hole per pillar (on the
     back plate countersunk at 45 degrees to seat the pillar's cone), and on
     the back plate a tab over the top with a keyhole to hang it by. The
     front plate carries the minute wheel's stud on its outer face."""
@@ -572,7 +632,9 @@ def build_plate(d, s, proc, name, fr, back):
         circles += fr.get("tab", [])
     outline = plate_outline(circles)
     plate = body = b.prism(name, polygon(outline), z0, z1)
-    holes = [circle(xy, s["run_d"] / 2.0) for xy in fr["axes"].values()]
+    side = "back" if back else "front"
+    holes = [circle(xy, s["pivot_hole_d"][axis][side] / 2.0)
+             for axis, xy in fr["axes"].items()]
     holes += [circle(xy, pt["hole_d"] / 2.0) for xy in fr["pillars"]]
     body = b.prism(f"{name} holes", holes, z0, z1, mode="cut")
     if back:
