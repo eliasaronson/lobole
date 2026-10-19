@@ -358,10 +358,17 @@ forces something through on the way.
   extrusion, a bore, a straight tooth band is one band whatever its
   length, its outline the B-rep's own planar section. Where a face is not
   along the axis -- a chamfer, a fillet, a helical flank -- the span is
-  sliced `slice_mm` thick (the travel over `samples`, 64 by default) on a
-  grid anchored at the seat, so the two sides' slices line up where the
-  part ends up; slices are cut from one fine triangulation (0.5 µm), as a
-  boolean section of a twisted flank is seconds a slice. Two bands
+  sliced `slice_mm` thick (the travel over `samples`, 64 by default, and
+  no thinner than 20 µm) on a grid anchored at the seat: only the grid
+  cuts such a span, and each slice is sectioned at its grid cell's middle
+  (or as near it as a span's end slice reaches), so the two sides compare
+  level sections where the part ends up. A slice's reading holds within
+  half a slice of where it lines up with the other side's, not over the
+  whole overlap of their spans. Where the faces are free-form (a twisted
+  flank, a modelled thread) the slices are cut from one triangulation of
+  the solid, 0.5 µm or coarser as the free-form area grows -- a boolean
+  section of a twisted flank is seconds a slice -- else from the B-rep's
+  own exact sections. Two bands
   interfere or not whatever the slide: one 2D polygon question (Clipper2)
   -- an overlap thicker than 1 µm, or, with `allowance_mm`, outlines
   nearer than how much they close up as made. A printed bore prints under
@@ -404,9 +411,18 @@ forces something through on the way.
   least distance says so too (`confirm` {`at_mm`, `expected_overlap`,
   `expected_gap`, `overlaps`, `volume_mm3`, `gap_mm`, `agrees`}). A pass
   the boolean does not agree with is not a pass.
+- **Bounded.** The mesh a solid is sliced from is refused past 6 M
+  triangles, a solid cut past 20 000 bands, and a check that would read
+  past 4 M band pairs -- each naming the ceiling -- and only the seat's
+  orientation and one other are kept at a time; the engine's 78-step
+  sequence peaks at 340 MB. Without these a whole-solid mesh at 0.5 µm
+  and every orientation's outlines kept took an instance to 22 GB.
 - **A threaded pair is refused**: when both sides carry modelled threads
-  the part goes on by turning along the helix, which a straight slide reads
-  as the flanks forced through each other the whole way (the jar's lid).
+  on the path the part goes on by turning along the helix, which a
+  straight slide reads as the flanks forced through each other the whole
+  way (the jar's lid). A thread elsewhere on either side -- a pillar's
+  beside an arbor's path -- does not count; a modelled thread, whose
+  marked face the helix replaced, is found by its helical faces.
   An [assembly sequence](../assemblies/README.md#assembly-sequences)'s
   step can say a part goes on by its thread, which judges the pair by the
   thread's own fit instead.

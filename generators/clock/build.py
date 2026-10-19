@@ -551,53 +551,72 @@ def build_stage2(d, s, control=False):
     return a, nut_win
 
 
-# --- insertion -----------------------------------------------------------------
+# --- the assembly sequence --------------------------------------------------------
 
-# Every pressed or slid pair of a stage: (what goes on, what it goes on,
-# the mate whose axis it slides along; None for the one mate joining them).
-# Which end each goes on from is clock_spec.ENTRY's; an arbor goes into the
-# back plate from the front.
-INSERTIONS = {
+# How each stage goes together, in order (docs/assemblies/README.md
+# #assembly-sequences): each step the occurrence and the way it moves going
+# home. The movement's front is +Z: from the front is FRONT, -Z. Every part
+# goes on from clock_spec.ENTRY's end relative to what it goes on; one put
+# on its arbor "from the back" (a spacer, the centre wheel) is placed first
+# and its arbor slides through it from the front, which is the same slide.
+# Each step is checked against everything placed before it.
+FRONT, BACK = [0.0, 0.0, -1.0], [0.0, 0.0, 1.0]
+ROD = "up the rod"  # the pendulum rod's own axis, read off its placement
+
+
+def step(occ, direction=None, **kw):
+    out = {"occurrence": occ}
+    if direction is not None:
+        out["direction"] = direction
+    out.update(kw)
+    return out
+
+
+SEQUENCE = {
     "stage 1": [
-        ("escape wheel", "escape arbor", None),
-        ("drum", "escape arbor", "escape arbor on escape wheel"),
-        ("anchor", "anchor arbor", None),
-        ("pendulum rod", "anchor arbor", "anchor arbor on anchor"),
-        ("front plate", "escape arbor", "escape wheel axis"),
-        ("front plate", "anchor arbor", "anchor axis"),
-        ("escape arbor", "back plate", "escape wheel axis"),
-        ("anchor arbor", "back plate", "anchor axis"),
-    ],
+        step("back plate", note="the base"),
+        *[step(f"pillar {i}", FRONT) for i in (1, 2, 3, 4)],
+        *[step(f"nut {i} rear", BACK, thread=True) for i in (1, 2, 3, 4)],
+        step("escape arbor", FRONT), step("escape wheel", FRONT),
+        step("anchor arbor", FRONT), step("anchor", FRONT),
+        step("pendulum rod", BACK),
+        step("front plate", FRONT),
+        # The drum rides the escape arbor in front of the front plate.
+        step("drum", FRONT),
+        *[step(f"nut {i} front", FRONT, thread=True) for i in (1, 2, 3, 4)],
+        step("bob", ROD), step("rating nut", ROD, thread=True)],
     "stage 2": [
-        ("escape wheel", "escape arbor", None),
-        ("anchor", "anchor arbor", None),
-        ("pendulum rod", "anchor arbor", "anchor arbor on anchor"),
-        ("third wheel", "third arbor", None),
-        ("third spacer", "third arbor", "third arbor on third wheel"),
-        ("centre wheel", "centre arbor", None),
-        ("centre spacer", "centre arbor", "centre arbor on centre wheel"),
-        ("drum", "centre arbor", "centre arbor on centre wheel"),
-        ("cannon pinion", "centre arbor", "centre arbor on centre wheel"),
-        ("minute hand", "cannon pinion", None),
-        ("hour wheel", "cannon pinion", "hour wheel axis"),
-        ("hour hand", "hour wheel", None),
-        ("minute wheel", "front plate", None),
-        ("front plate", "escape arbor", "escape wheel axis"),
-        ("front plate", "anchor arbor", "anchor axis"),
-        ("front plate", "third arbor", "third wheel axis"),
-        ("front plate", "centre arbor", "centre wheel axis"),
-        ("escape arbor", "back plate", "escape wheel axis"),
-        ("anchor arbor", "back plate", "anchor axis"),
-        ("third arbor", "back plate", "third wheel axis"),
-        ("centre arbor", "back plate", "centre wheel axis"),
-    ],
+        step("back plate", note="the base"),
+        *[step(f"pillar {i}", FRONT) for i in (1, 2, 3, 4)],
+        *[step(f"nut {i} rear", BACK, thread=True) for i in (1, 2, 3, 4)],
+        # The back of the train first: the third wheel's rim runs under the
+        # escape wheel's.
+        step("third spacer", FRONT), step("third arbor", FRONT),
+        step("third wheel", FRONT),
+        step("centre spacer", FRONT), step("centre wheel", FRONT),
+        step("centre arbor", FRONT), step("drum", FRONT),
+        step("escape arbor", FRONT), step("escape wheel", FRONT),
+        step("anchor arbor", FRONT), step("anchor", FRONT),
+        step("pendulum rod", BACK),
+        step("front plate", FRONT), step("cannon pinion", FRONT),
+        step("nut 3 front", FRONT, thread=True),
+        step("nut 4 front", FRONT, thread=True),
+        step("dial spacer 1", FRONT), step("dial spacer 2", FRONT),
+        step("minute wheel", FRONT), step("hour wheel", FRONT),
+        step("dial ring", FRONT),
+        step("nut 1 dial", FRONT, thread=True),
+        step("nut 2 dial", FRONT, thread=True),
+        step("hour hand", FRONT), step("minute hand", FRONT),
+        step("bob", ROD), step("rating nut", ROD, thread=True)],
 }
 
-
-def entry_of(part):
-    """The side of the movement's +Z a part goes on from."""
-    side = S.ENTRY.get(part, "front")
-    return "positive" if side == "front" else "negative"
+# The one step no straight path takes: stage 2's escape wheel, one printed
+# piece with its pinion, has matter behind the third wheel's teeth, and the
+# third wheel's rim passes under the escape wheel's -- each blocks the
+# other's way along its arbor, so the two go into the back plate together,
+# tilted into mesh. A sequence of straight paths cannot say that; the check
+# must find exactly this, against exactly that wheel, and nothing else.
+TOGETHER = {"stage 2": {"escape wheel": "third wheel"}}
 
 
 def asm_id(d, name):
@@ -605,49 +624,81 @@ def asm_id(d, name):
                 if p["type"] == "assembly" and p["name"] == name)
 
 
-def insertions(a, s):
-    """Every pressed or slid pair of the stage `a` slides from clear to its
-    seat from the end clock_spec.ENTRY says (docs/inspect/README.md
-    #insertion), stated once as requirements and checked; any that fails
-    stops the run, naming it."""
+def rod_up(d):
+    """The pendulum rod's own +Y in the assembly: the way up it, as the
+    pendulum hangs where the stage placed it."""
+    rod = next(o for o in d.call("list_occurrences")["occurrences"]
+               if o["name"] == "pendulum rod")
+    qx, qy, qz, qw = rod["transform"]["orientation"]
+    return [2 * (qx * qy - qz * qw), 1 - 2 * (qx * qx + qz * qz),
+            2 * (qy * qz + qx * qw)]
+
+
+def sequence(a, s):
+    """The stage's assembly sequence, stated on its assembly and checked:
+    every step goes home against everything placed before it, at the
+    print's closing. A stage that goes together (stage 1) states it as an
+    `assembly_sequence` requirement too; any step that fails stops the run,
+    naming it, but stage 2's escape wheel against the third wheel
+    (TOGETHER), which must fail just so."""
     d = a.d
-    doc = asm_id(d, a.name)
-    ids, names = [], {}
-    for part, onto, mate in INSERTIONS[a.name]:
-        m = {"kind": "insertion", "document": doc, "a": a.occ[part],
-             "b": a.occ[onto], "entry": entry_of(part),
-             "allowance_mm": s["print_closing"]}
-        if mate:
-            m["mate"] = a.mates[mate]
-        name = f"{a.name}: {part} goes on {onto}"
-        r = d.call("add_requirement", name=name, measure=m,
-                   bound={"kind": "pass"},
-                   source="a part must be able to reach where it is mated "
-                          "(docs/inspect/README.md#insertion)")
-        ids.append(r["id"])
-        names[r["id"]] = (part, onto)
-    res = d.call("check_requirements", ids=ids, _timeout=3600)
+    a.activate()
+    up = rod_up(d)
+    steps = [dict(x, direction=up) if x.get("direction") == ROD else x
+             for x in SEQUENCE[a.name]]
+    d.call("set_assembly_sequence", steps=steps,
+           allowance_mm=s["print_closing"])
+    t0 = time.time()
+    r = d.call("check_assembly_sequence", _timeout=3600)
+    secs = time.time() - t0
+    together = TOGETHER.get(a.name, {})
     out, bad = {}, []
-    for r in res["requirements"]:
-        part, onto = names[r["id"]]
-        det = (r.get("evidence") or {}).get("detail") or r.get("detail") or {}
-        row = {k: det.get(k) for k in ("pass", "entry", "rotation_deg",
-                                        "press_mm", "interfering_mm",
-                                        "excess_mm", "deeper_mm", "from_mm",
-                                        "worst_depth_mm")}
-        row["state"] = r.get("state")
-        out[f"{part} on {onto}"] = row
-        ok = r.get("state") == "pass"
-        print(f"  {'ok  ' if ok else 'FAIL'} {part} on {onto} from the "
-              f"{S.ENTRY.get(part, 'front')}: pressed "
-              f"{det.get('press_mm', 0):.2f} mm, forced "
-              f"{det.get('interfering_mm', 0):.2f} mm"
-              + ("" if ok else f" ({r.get('state')}: {det or r})"))
-        if not ok:
-            bad.append(f"{part} on {onto}")
+    for row in r["steps"]:
+        name = row["name"]
+        out[name] = {k: row.get(k) for k in (
+            "pass", "press_mm", "interfering_mm", "excess_mm", "deeper_mm",
+            "worst_depth_mm", "worst_against", "threads", "seconds")}
+        out[name]["moves"] = (row.get("path") or {}).get("moves")
+        if row["pass"]:
+            continue
+        if together.get(name) == row.get("worst_against"):
+            print(f"  {name}: goes in with the {row['worst_against']}, "
+                  f"tilted into mesh -- straight along its arbor it is "
+                  f"forced {row['interfering_mm']:.1f} mm, "
+                  f"{row['worst_depth_mm']:.2f} mm into the "
+                  f"{row['worst_against']}")
+            out[name]["together_with"] = row["worst_against"]
+            continue
+        bad.append(f"step {row['step']} {name}: "
+                   + (row.get("error") or
+                      f"forced {row.get('interfering_mm', 0):.2f} mm against "
+                      f"a press of {row.get('press_mm', 0):.2f}, worst "
+                      f"against {row.get('worst_against')}"))
+    if r["missing"]:
+        bad.append(f"no step places {r['missing']}")
+    missed = [n for n, w in together.items() if out.get(n, {}).get(
+        "together_with") != w]
+    if missed:
+        bad.append(f"{missed} went in alone: TOGETHER is stale")
+    print(f"  {a.name} assembly sequence: {len(r['steps'])} steps, "
+          f"checked against everything before each in {secs:.0f} s"
+          + ("" if bad else ", every one goes home"))
     if bad:
-        raise SystemExit(f"clock: {a.name} cannot be assembled: {bad}")
-    return out
+        raise SystemExit(f"clock: {a.name} cannot be put together: {bad}")
+    if not together:
+        doc = asm_id(d, a.name)
+        rid = d.call("add_requirement", name=f"{a.name} goes together",
+                     measure={"kind": "assembly_sequence", "document": doc},
+                     bound={"kind": "pass"},
+                     source="the order it is built in "
+                            "(docs/assemblies/README.md#assembly-sequences)"
+                     )["id"]
+        res = d.call("check_requirements", ids=[rid], _timeout=3600)
+        st = res["requirements"][0]["state"]
+        if st != "pass":
+            raise SystemExit(f"clock: {a.name}'s assembly_sequence "
+                             f"requirement is {st}")
+    return {"seconds": secs, "steps": out}
 
 
 def first_arbor_control(d, s):
@@ -1216,22 +1267,31 @@ def print_plates(d, s, proc, out):
 # --- the test card ---------------------------------------------------------------------
 
 def assembly_lines(s, checks):
-    """The card's assembly steps: what goes on what, from which end, and
-    how far it is pressed, as the insertion check read it."""
+    """The card's assembly steps: each stage's sequence, the way each part
+    goes on and how far it is pressed, as the sequence check read it."""
     out = []
     for stage in ("stage 1", "stage 2"):
-        rows = checks.get(f"{stage} insertion") or {}
+        rows = (checks.get(f"{stage} sequence") or {}).get("steps") or {}
         out.append(f"{chr(10) if out else ''}**{stage.capitalize()}:**"
                    "\n")
-        for part, onto, _ in INSERTIONS[stage]:
-            r = rows.get(f"{part} on {onto}") or {}
-            # Pushed under interference this far at the end of its travel:
-            # a part only seated on a shoulder is pushed under none.
-            press = r.get("interfering_mm") or 0.0
-            how = (f"pressed home the last {press:.1f} mm" if press > 0.0
-                   else "slides on free")
-            out.append(f"- {part} onto {onto}, from the "
-                       f"{S.ENTRY.get(part, 'front')}: {how}")
+        for x in SEQUENCE[stage]:
+            name = x["occurrence"]
+            r = rows.get(name) or {}
+            way = {str(FRONT): "from the front", str(BACK): "from the back",
+                   ROD: "up the rod"}.get(str(x.get("direction")),
+                                          "from the front")
+            if x.get("direction") is None:
+                out.append(f"- {name}: the base")
+                continue
+            if r.get("together_with"):
+                how = f"in together with the {r['together_with']}, tilted"
+            elif x.get("thread"):
+                how = "screwed on"
+            else:
+                press = r.get("interfering_mm") or 0.0
+                how = (f"pressed home the last {press:.1f} mm" if press > 0.0
+                       else "slides on free")
+            out.append(f"- {name}, {way}: {how}")
     return "\n".join(out)
 
 
@@ -1490,7 +1550,7 @@ def main():
         if r["clean"] or ("anchor", "escape wheel") not in bad:
             raise SystemExit("clock: a pallet set too deep does not clash: "
                              "the study cannot see the escapement")
-        checks["stage 1 insertion"] = insertions(a1, s)
+        checks["stage 1 sequence"] = sequence(a1, s)
         checks["control: first stage-1 escape arbor"] = \
             first_arbor_control(d, s)
 
@@ -1527,7 +1587,7 @@ def main():
         checks["click"] = ck
         if bad:
             raise SystemExit(f"clock: the click: {bad}")
-        checks["stage 2 insertion"] = insertions(a2, s)
+        checks["stage 2 sequence"] = sequence(a2, s)
         # Negative control: one tooth wrong on the third wheel.
         rid = a2.rel["escape pinion drives the third wheel"]
         d.call("set_relation", id=rid, teeth_a=c["escape_pinion"],

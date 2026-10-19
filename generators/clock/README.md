@@ -94,10 +94,23 @@ default 1 s, so a beat every half second) and the print profile, through
   carries the drum and the cannon pinion's round press); the stage-1 drum
   is pressed on the slide D the escape wheel passes. A pivot that is a
   slide D runs in a hole the gap over its own size, so the play is the
-  same at every pivot (`pivot_hole_d`). The insertion check is a
-  requirement on every pressed or slid pair of both stages, each from the
-  end `clock_spec.ENTRY` names (`INSERTIONS` in build.py), and the card
-  lists them in that order.
+  same at every pivot (`pivot_hole_d`). Each stage states its **assembly
+  sequence** (`SEQUENCE` in build.py,
+  [sequences](../../docs/assemblies/README.md#assembly-sequences)): the
+  back plate, the pillars and their rear nuts (screwed on, judged along
+  the thread's helix), the train from the back of it forward, the
+  pendulum rod from behind, the front plate, the cannon pinion and the
+  stage-1 drum in front of it, the front or dial nuts, the dial and the
+  hands, and the bob and rating nut up the rod -- every part going on
+  from the end `clock_spec.ENTRY` names relative to what carries it, and
+  checked against everything placed before it. Stage 1 states it as an
+  `assembly_sequence` requirement; the card lists the steps in order.
+  Stage 2's escape wheel and third wheel go into the back plate
+  **together**, tilted into mesh: the escape wheel, printed with its
+  pinion, has matter behind the third wheel's teeth, and the third
+  wheel's rim runs under the escape wheel's, so neither has a straight
+  way home past the other. The check finds exactly that (`TOGETHER`)
+  and nothing else; the run stops on any other failing step.
 - **The shafts print lying** (the arbors and the pillars): stood on end
   they came off the bed (check_print's
   [slender](../../docs/tolerances/README.md#slender) item fails them, 25:1
@@ -190,12 +203,11 @@ for.
 - **negative control**: stage 1's plate 1 as it was first printed, the
   pillars and arbors stood on end among the rest, must fail `check_print`'s
   slender item on exactly those six and pass every other item;
-- every pressed or slid pair of both stages (wheels, drums, spacers,
-  cannon pinion, hands and the pendulum rod on what carries them, the
-  front plate over the arbors' front pivots, each arbor into the back
-  plate) slid from clear to its seat from the end it goes on from: no
+- both stages' assembly sequences: every part slid (or screwed) from
+  clear to its seat in order, against everything placed before it, no
   further under interference than its own press, as printed (the hole
-  allowance a side);
+  allowance a side) -- stage 2's escape wheel found going in with the
+  third wheel and nothing else failing;
 - **negative control**: the stage-1 escape arbor as first printed
   (`build_arbor_first`: round pivots, its D from the back plate's face to
   the front) with the escape wheel must fail the insertion check from

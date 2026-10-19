@@ -592,10 +592,14 @@ and its **path**:
   where it starts (default: clear of everything placed before it);
   `turn_deg`: turned about the path over that distance, a bayonet, read
   step by step at the turn each step has; `thread`: it goes on by its
-  thread -- a thread of the part (a Thread feature or tapped Hole) meeting
-  one placed before it, coaxial with the path, is judged by the pair's own
-  fit (one external, one internal, the same major diameter and pitch), not
-  read as interference; with no such pair the step fails naming why.
+  thread. A **modelled** thread (`modeled` on its Thread feature) turns a
+  turn a pitch as it goes (right hand: clockwise seen from behind it) and
+  the sections judge its flanks along the helix, read at a 24th of a
+  turn; the thread it goes into must have its pitch and hand. A
+  cosmetic thread meeting one placed before it, coaxial with the path, is
+  judged by the pair's own fit (one external, one internal, the same
+  major diameter and pitch), not read as interference. With neither the
+  step fails naming why.
 
 `check_assembly_sequence` slides each step's occurrence home along its
 path against **every occurrence placed before it**, not only its mate
@@ -606,9 +610,14 @@ frame. A step that cannot be checked -- its occurrence gone or placing no
 matter, no mate to a placed part and no direction, no cylinder at its
 mate -- is refused naming it; an occurrence with matter that no step places
 is listed in `missing` and fails the sequence. The answer: `pass`, and per
-step `against` (what it was checked against), its `path` (`from`, `moves`,
-`origin_mm`, `either_way`), and the insertion's reading (`press_mm`,
-`interfering_mm`, `excess_mm`, `deeper_mm`, `confirm`, any `threads`). The
+step `against` (what it was checked against), `worst_against` (the one it
+meets worst), its `path` (`from`, `moves`, `origin_mm`, `either_way`), the
+insertion's reading (`press_mm`, `interfering_mm`, `excess_mm`,
+`deeper_mm`, `confirm`, any `threads`) and `seconds`. A path is one
+straight line: two parts that only go in together (the clock's stage-2
+escape and third wheels, tilted into mesh) or a part that needs a pose
+changed between steps (a Strandbeest cap put on with the crank turned)
+cannot be stated. The
 requirement kind `assembly_sequence` states it checked
 ([requirements](../requirements/README.md#measures)).
 
