@@ -59,6 +59,7 @@
   "check_fits": [],
   "check_frame": ["part"],
   "check_geometry": ["body"],
+  "check_insertion": ["a", "allowance_mm", "axis", "b", "entry", "lead_in_mm", "mate", "rotations", "samples"],
   "check_layout": ["job", "setup"],
   "check_literals": ["part"],
   "check_print": ["bodies", "direction", "max_bridge_mm", "max_overhang_deg", "max_slender_ratio", "min_air_mm", "min_gap_mm", "overhang_allowance_mm2", "part", "stl_deflection_mm"],

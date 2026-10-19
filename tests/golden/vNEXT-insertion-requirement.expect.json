@@ -1,0 +1,5 @@
+{"features": 2, "bodies": 1, "volumes": [72.0],
+ "requirements": [
+   {"name": "the escape wheel goes on its arbor", "kind": "insertion",
+    "bound": "pass", "revision": 1, "evidence": true}
+ ]}

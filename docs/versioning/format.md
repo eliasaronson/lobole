@@ -312,6 +312,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A requirement's measure kind `insertion` {`document` (an assembly), `a` (the occurrence slid on), `b` (the one it goes on), `entry`: `positive`\|`negative`\|`either`, `mate`? (the mate id whose frame's Z is the axis), `allowance_mm`?, `samples`?, `rotations`?, `lead_in_mm`?}: passes when `a` reaches its seat with no more travel under interference than its own press ([insertion](../inspect/README.md#insertion)). An unknown `entry` is refused on load; a build that does not know the kind refuses the file. Golden `vNEXT-insertion-requirement` |
 
 ## Paths in a project
 

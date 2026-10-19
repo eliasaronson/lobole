@@ -335,6 +335,60 @@ What it does not judge: whether the ring is pressed enough. It reports the
 overlap's depth and leaves the pressure to the material: no study models a
 25 % elastomer strain here, and a linear one would not be honest at it.
 
+### Insertion
+
+A part must be able to reach where it is mated. The motion studies start
+with every part already seated and the clash checks look at it there, so a
+wheel whose press-D bore could only reach its D by being forced over a
+round pivot -- the printed clock's escape wheel, which bound halfway
+through its hub -- passed every check. `check_insertion {a, b, entry}`
+(assembly tab, top-level occurrences by id or name) slides `a` along an
+axis from clear of `b` to where it is placed, and fails the slide that
+forces something through on the way.
+
+- **The axis** is the Z of a mate's frame: `mate` (an id or name; a
+  revolute, cylindrical, slider or fastened mate), else the one mate
+  joining `a` and `b`, else an explicit `axis {origin_mm, direction}`.
+  `entry` is the side `a` goes on from: `positive` (from the side the
+  axis points to), `negative`, or `either` (both tried, the better
+  reported). An unknown entry, a mate with no axis, a pair no mate joins
+  with no axis given, or both `mate` and `axis` is refused.
+- **Each step** (`samples`, 64 from seat to clear by default) asks whether
+  the two interfere: an overlap in the model, by the clash check's 1 µm
+  fuzzy, non-destructive boolean, or -- with `allowance_mm` -- faces nearer
+  than how much they close up as made. A printed bore prints under its
+  model (print_allowance's hole allowance, a side), so a light press
+  modelled 0.05 a side oversize is a press as printed, and a bore at the
+  running gap is not; `allowance_mm` 0 reads the model as modelled.
+- **The press** is the axial length over which the seated pair interferes,
+  read slice by slice a step thick. A part pressed on is pushed under
+  interference exactly that far; the check **fails** a slide whose travel
+  under interference is longer than its press plus `lead_in_mm` (two steps
+  by default, the sampling's own resolution). A round pivot passed through
+  a D bore, a press band that runs on past the seat, or a bore too small
+  for the whole shaft all fail; a press band that ends where the part goes
+  on, or a pivot at the running gap under the bore, passes.
+- **Rotation** about the axis is free while sliding: when the placed
+  orientation fails, `rotations` (12 by default) others are tried and the
+  best reported, as `rotation_deg` from the placed one (a keyway past a
+  lug). A turn either side is symmetric under is skipped, and one that
+  does not seat -- it interferes at the seat more than the placed part
+  does, a D turned off its flat -- is reported (`seats: false`) and never
+  chosen. A try that can no longer beat the best is abandoned.
+
+The answer: `pass`, the try reported (`entry`, `rotation_deg`,
+`travel_mm`, `interfering_mm`, `press_mm`, `excess_mm`, `from_mm` -- where
+the interference begins, from the seat -- `worst_depth_mm`, the most the
+faces must give with the allowance counted, and `worst_volume_mm3`), the
+step, lead-in and allowance, the axis and what gave it, and every try. It
+runs on the frame, a boolean a step: seconds on small parts. The
+requirement kind `insertion` ([requirements](../requirements/README.md#measures))
+states a pair once and runs off the frame.
+
+What it does not judge: the order parts go on in (each pair is slid alone,
+against the one part it goes on), the force a press takes, or a path that
+is not a straight slide along the axis.
+
 ### Designed overlaps
 
 Some solid in solid is meant: an engaged thread, a retaining ring gripping
@@ -670,7 +724,17 @@ running on any machine), `compare_smoke`,
 byte-identical reports). Seals: `test_measure_seal.cpp` (a skirt flat on a
 shoulder is a ring as wide as it lands, a notch opens it where it is, a
 pressed gasket is a ring with its interference, and two that do not touch
-are refused); the jar generator states two and fails a notched skirt. Designed overlaps: `test_thread.cpp`,
+are refused); the jar generator states two and fails a notched skirt.
+Insertion: `test_measure_insertion.cpp` (a D bore forced over a round
+pivot to a D that stops short of the end fails at every orientation, a D
+run out through the end the part goes on from passes pressed its own
+length, a pivot at the running gap under the bore slides through it, a
+plain press of its own length passes and the same bore mid-shaft fails by
+the shaft it is forced along, a keyway passes a lug only turned half round
+and says so) and `insertion_smoke` (the RPC's axis from the joining mate,
+a named mate and an explicit axis, the requirement passing and failing,
+and the refusals); the clock generator states one on every pressed or
+slid pair and fails its first stage-1 escape arbor. Designed overlaps: `test_thread.cpp`,
 `test_retaining_rings.cpp`, `test_press_fits.cpp` and `press_fit_smoke`
 ([press fits](../tolerances/README.md#tests)). GUI: the `measure/*` and `section/*` cases in the
 GUI suite, and the measure parity phase in `remote_smoke`.

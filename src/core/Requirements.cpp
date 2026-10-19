@@ -55,6 +55,12 @@ const std::vector<KindSpec>& Specs() {
        "assembly",
        {"document", "a", "b", "motion_study"},
        {"document", "a", "b"}},
+      {"insertion",
+       false,
+       "assembly",
+       {"document", "a", "b", "entry", "mate", "allowance_mm", "samples",
+        "rotations", "lead_in_mm"},
+       {"document", "a", "b", "entry"}},
       {"mass", true, "part|assembly", {"document"}, {"document"}},
       {"volume", true, "part|assembly", {"document"}, {"document"}},
       {"fit_class",
@@ -184,9 +190,13 @@ void ValidateTypes(const std::string& kind, const char* document,
   for (const char* k : {"allow_unverified", "allow_skipped"})
     if (m.contains(k) && !m.at(k).is_boolean())
       refuse(k, "true or false");
-  for (const char* k : {"offset", "resolution"})
+  for (const char* k : {"offset", "resolution", "allowance_mm", "lead_in_mm"})
     if (m.contains(k) && !m.at(k).is_number())
       refuse(k, "a number");
+  for (const char* k : {"samples", "rotations"})
+    if (m.contains(k) &&
+        !(m.at(k).is_number_integer() && m.at(k).get<int64_t>() >= 1))
+      refuse(k, "a whole number");
   for (const char* k : {"expression", "unit"})
     if (m.contains(k) && !m.at(k).is_string())
       refuse(k, "text");
@@ -249,9 +259,12 @@ void ValidateValues(const std::string& kind, const json& m) {
   } else if (kind == "study_result") {
     oneOf("quantity",
           {"max_displacement", "max_von_mises", "factor_of_safety"});
-  } else if (kind == "clearance" || kind == "contact" || kind == "seal") {
+  } else if (kind == "clearance" || kind == "contact" || kind == "seal" ||
+             kind == "insertion") {
     if (kind == "clearance")
       oneOf("mode", {"mesh", "exact"});
+    else if (kind == "insertion")
+      oneOf("entry", {"positive", "negative", "either"});
     else if (kind == "contact")
       oneOf("expect", {"clear", "touching", "not_clashing"});
     if (!m.at("a").is_number_integer() || !m.at("b").is_number_integer() ||

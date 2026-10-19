@@ -44,6 +44,7 @@ inline constexpr const char* kMeasureKinds[] = {
     "clearance",    // the gap between two occurrences (over a motion study)
     "contact",      // interference: clear | touching | not_clashing
     "seal",         // check_seal: the widest closed ring's least width, mm
+    "insertion",    // check_insertion: a can be slid onto b to its seat
     "mass",         // mass_properties, a part or the assembly
     "volume",       // mass_properties
     "fit_class",    // check_fits: one mate's fit is of a class

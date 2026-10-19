@@ -43,6 +43,7 @@ add_executable(designer_tests
     test_print_allowance.cpp
     test_print_check.cpp
     test_measure_seal.cpp
+    test_measure_insertion.cpp
     test_print_job.cpp
     test_serialization.cpp
     test_baked_geometry.cpp
@@ -746,6 +747,13 @@ add_test(NAME contact_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/contact_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(contact_smoke PROPERTIES TIMEOUT 120)
+
+# Insertion paths: check_insertion and the `insertion` requirement
+# (docs/inspect/README.md#insertion). Headless.
+add_test(NAME insertion_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/insertion_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(insertion_smoke PROPERTIES TIMEOUT 180)
 
 # The clash sweep runs its booleans on every core. A race in OpenCASCADE's
 # lazily-filled per-shape caches, or a `record` that stops running in plan

@@ -302,6 +302,11 @@ beside it and keyed by the run's inputs (below). A study may
 name the configuration it runs under (`configuration`: an id, 0 = base,
 omitted = whichever is active).
 
+A study starts with every part already seated, so it says nothing about
+whether a part could be put there: that is `check_insertion` and the
+`insertion` requirement ([insertion](../inspect/README.md#insertion)),
+which slide a part from clear to its seat along its mate's axis.
+
 - The range is stored in the DOF's own unit (radians / mm); the RPC takes
   degrees for a rotation and converts once.
 - The mesh check meshes each body at 0.2% of its bounding diagonal unless

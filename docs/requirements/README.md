@@ -45,6 +45,7 @@ and the call a person would make agree by construction.
 | `clearance` | assembly | the gap `interference` measures | mm | `a`, `b` (top-level occurrences), `mode?`: mesh \| exact, `motion_study?` |
 | `contact` | assembly | `interference` | verdict | `a`, `b`, `expect`: clear \| touching \| not_clashing |
 | `seal` | assembly | `check_seal` | mm, the widest closed ring's narrowest trace (0 when none closes) | `a`, `b` (top-level occurrences), `motion_study?` (the worst of its samples) |
+| `insertion` | assembly | `check_insertion` | verdict: `a` reaches its seat with no more travel under interference than its own press ([insertion](../inspect/README.md#insertion)) | `a` (the occurrence slid on), `b` (the one it goes on), `entry`: positive \| negative \| either, `mate?` (a mate id; else the one mate joining them), `allowance_mm?`, `samples?`, `rotations?`, `lead_in_mm?` |
 | `mass`, `volume` | part or assembly | `mass_properties` | g, mm3 | |
 | `fit_class` | assembly | `check_fits` | verdict | `mate`, `class`: clearance \| transition \| interference |
 | `check_fits` | assembly | `check_fits` | verdict | `allow_unverified?` |

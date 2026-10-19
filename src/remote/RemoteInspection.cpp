@@ -1394,6 +1394,47 @@ static constexpr MethodDoc InspectionMethods[] = {
      "curve:int, cut_length_mm:number, length_mm:number, name:string, "
      "outer_diameter_mm:number, path_length_mm:number, quantity:int, "
      "wall_mm:number, coped_off_mm?:number}[]"},
+    {"check_insertion",
+     "Whether occurrence `a` can be slid onto occurrence `b` to where it is "
+     "placed (docs/inspect/README.md#insertion) {a, b: top-level "
+     "occurrence ids or names; entry: positive|negative|either, the side "
+     "of the axis `a` goes on from (positive: from the axis direction's "
+     "side); mate?: the mate whose frame's Z is the axis (id or name; "
+     "revolute, cylindrical, slider or fastened), else axis?: {origin_mm, "
+     "direction} in the assembly's frame, else the one mate joining a and "
+     "b; allowance_mm?: how much nearer the faces come as made -- a "
+     "printed bore prints under its model, print_allowance's hole "
+     "allowance a side -- a gap under it counts as interference (default "
+     "0, the model as modelled); samples?: steps from seat to clear "
+     "(default 64); rotations?: orientations about the axis tried when the "
+     "placed one fails (default 12); lead_in_mm?: the excess allowed "
+     "(default two steps)}. `a` is swept from clear to its seat; at each "
+     "step the clash check's exact boolean (and, with an allowance, the "
+     "least distance) says whether the two interfere. FAILS when the "
+     "travel spent interfering is longer than the press at the seat (the "
+     "axial length the seated pair interferes over) plus the lead-in: "
+     "something forced through on the way, a round pivot through a D "
+     "bore. Answers {pass, entry, rotation_deg (the orientation reported, "
+     "from the placed one), travel_mm, interfering_mm, press_mm, "
+     "excess_mm, lead_in_mm, from_mm (where interference begins, from the "
+     "seat), worst_depth_mm (the most the faces must give, allowance "
+     "included), worst_volume_mm3, step_mm, samples, allowance_mm, "
+     "axis_point_mm, axis_dir, axis_from, tries[]{entry, rotation_deg, "
+     "seats, complete, pass, interfering_mm, excess_mm}}. An orientation "
+     "either side is symmetric under is skipped; one that does not seat "
+     "is reported, never chosen. Runs on the frame: a boolean a step, "
+     "seconds on small parts. The requirement kind `insertion` states it "
+     "once.",
+     "a:int|string, b:int|string, entry:'positive'|'negative'|'either', "
+     "mate?:int|string, axis?:object, allowance_mm?:number, samples?:int, "
+     "rotations?:int, lead_in_mm?:number",
+     remote::NoFlags,
+     "pass:bool, entry:string, rotation_deg:number, travel_mm:number, "
+     "interfering_mm:number, press_mm:number, excess_mm:number, "
+     "lead_in_mm:number, from_mm:number, worst_depth_mm:number, "
+     "worst_volume_mm3:number, step_mm:number, samples:int, "
+     "allowance_mm:number, axis_point_mm:number[], axis_dir:number[], "
+     "axis_from:string, tries:object[]"},
     {"check_seal",
      "Whether two occurrences' contact SEALS (docs/inspect/README.md#seals) "
      "{a, b: top-level occurrence ids or names}: where they overlap (a "
@@ -2460,6 +2501,172 @@ std::unique_ptr<Parking> ParkInspectionRequest(ui::AppState& state,
   }
 }
 
+namespace {
+const char* EntryName(bool positive) {
+  return positive ? "positive" : "negative";
+}
+} // namespace
+
+InsertionCall ReadInsertionCall(ui::AppState& state, const json& p, uint64_t a,
+                                uint64_t b) {
+  InsertionCall c;
+  if (state.assembly == nullptr)
+    throw std::runtime_error("check_insertion runs on an assembly: it slides "
+                             "one placed occurrence onto another");
+  const AssemblyDocument& asmDoc = *state.assembly;
+  if (!p.contains("entry") || !p.at("entry").is_string())
+    throw std::runtime_error(
+        "check_insertion needs `entry`, the side the part goes on from: "
+        "positive (from the axis direction's side), negative, or either");
+  const std::string entry = p.at("entry").get<std::string>();
+  if (entry == "positive")
+    c.opt.entry = Measure::InsertionEntry::Positive;
+  else if (entry == "negative")
+    c.opt.entry = Measure::InsertionEntry::Negative;
+  else if (entry == "either")
+    c.opt.entry = Measure::InsertionEntry::Either;
+  else
+    throw std::runtime_error("check_insertion: unknown entry '" + entry +
+                             "' (accepted: positive, negative, either)");
+  const auto number = [&](const char* key, double lo) -> std::optional<double> {
+    if (!p.contains(key))
+      return std::nullopt;
+    if (!p.at(key).is_number())
+      throw std::runtime_error(std::string("check_insertion: ") + key +
+                               " is a number, not " + p.at(key).dump());
+    const double v = p.at(key).get<double>();
+    if (!(v >= lo) || !std::isfinite(v))
+      throw std::runtime_error(std::string("check_insertion: ") + key +
+                               " is at least " + std::to_string(lo) + ", not " +
+                               p.at(key).dump());
+    return v;
+  };
+  if (auto v = number("allowance_mm", 0.0))
+    c.opt.allowanceMm = *v;
+  if (auto v = number("lead_in_mm", 0.0))
+    c.opt.leadInMm = *v;
+  for (const auto& [key, lo, out] :
+       {std::tuple{"samples", 2, &c.opt.samples},
+        std::tuple{"rotations", 1, &c.opt.rotations}}) {
+    if (!p.contains(key))
+      continue;
+    if (!p.at(key).is_number_integer() || p.at(key).get<int64_t>() < lo ||
+        p.at(key).get<int64_t>() > 4096)
+      throw std::runtime_error(std::string("check_insertion: ") + key +
+                               " is a whole number from " + std::to_string(lo) +
+                               " to 4096, not " + p.at(key).dump());
+    *out = static_cast<int>(p.at(key).get<int64_t>());
+  }
+  if (p.contains("mate") && p.contains("axis"))
+    throw std::runtime_error("check_insertion takes its axis from ONE of "
+                             "`mate` and `axis`, not both");
+  if (p.contains("axis")) {
+    const json& ax = p.at("axis");
+    const auto vec = [&](const char* key) {
+      if (!ax.is_object() || !ax.contains(key) || !ax.at(key).is_array() ||
+          ax.at(key).size() != 3 ||
+          !std::all_of(ax.at(key).begin(), ax.at(key).end(),
+                       [](const json& e) { return e.is_number(); }))
+        throw std::runtime_error(std::string("check_insertion: axis is "
+                                             "{origin_mm: [x, y, z], "
+                                             "direction: [x, y, z]} in the "
+                                             "assembly's frame; `") +
+                                 key + "` is missing or not three numbers");
+      return glm::dvec3(ax.at(key)[0].get<double>(),
+                        ax.at(key)[1].get<double>(),
+                        ax.at(key)[2].get<double>());
+    };
+    for (auto it = ax.begin(); ax.is_object() && it != ax.end(); ++it)
+      if (it.key() != "origin_mm" && it.key() != "direction")
+        throw std::runtime_error("check_insertion: unknown axis key '" +
+                                 it.key() +
+                                 "' (accepted: origin_mm, "
+                                 "direction)");
+    c.point = vec("origin_mm");
+    c.dir = vec("direction");
+    if (!(glm::length(c.dir) > 1e-9))
+      throw std::runtime_error("check_insertion: axis.direction has no "
+                               "length");
+    c.dir = glm::normalize(c.dir);
+    c.axisFrom = "axis";
+    return c;
+  }
+  const Mate* mate = nullptr;
+  if (p.contains("mate")) {
+    const json& v = p.at("mate");
+    if (v.is_number_integer())
+      mate = asmDoc.FindMateById(v.get<uint64_t>());
+    else if (v.is_string())
+      for (const Mate& m : asmDoc.GetMates())
+        if (m.name == v.get<std::string>())
+          mate = &m;
+    if (mate == nullptr)
+      throw std::runtime_error("check_insertion: no mate " + v.dump() +
+                               " (a mate id or name, see list_mates)");
+  } else {
+    // The one mate joining the two, when there is exactly one.
+    int n = 0;
+    for (const Mate& m : asmDoc.GetMates())
+      if ((m.a.occurrenceId == a && m.b.occurrenceId == b) ||
+          (m.a.occurrenceId == b && m.b.occurrenceId == a)) {
+        mate = &m;
+        n++;
+      }
+    if (n != 1)
+      throw std::runtime_error(
+          std::string("check_insertion: ") +
+          (n == 0 ? "no mate joins a and b" : "several mates join a and b") +
+          ", so name the axis: `mate` (an id or name) or `axis` "
+          "{origin_mm, direction}");
+  }
+  if (mate->type != MateType::Revolute && mate->type != MateType::Cylindrical &&
+      mate->type != MateType::Slider && mate->type != MateType::Fastened)
+    throw std::runtime_error("check_insertion: mate '" + mate->name +
+                             "' has no axis to slide along (accepted: "
+                             "revolute, cylindrical, slider, fastened -- "
+                             "the axis is its frame's Z)");
+  const auto frame = ui::ConnectorWorldFrame(state, mate->a);
+  if (!frame)
+    throw std::runtime_error("check_insertion: mate '" + mate->name +
+                             "' has no frame to read its axis from");
+  c.point = glm::dvec3((*frame)[3]);
+  c.dir = glm::normalize(glm::dvec3((*frame)[2]));
+  c.axisFrom = "mate '" + mate->name + "'";
+  return c;
+}
+
+json InsertionJson(const Measure::InsertionReport& r,
+                   const std::string& axisFrom) {
+  const Measure::InsertionTry& b = r.best;
+  json tries = json::array();
+  for (const Measure::InsertionTry& t : r.tries)
+    tries.push_back({{"entry", EntryName(t.positive)},
+                     {"rotation_deg", t.rotationDeg},
+                     {"seats", t.seats},
+                     {"complete", t.complete},
+                     {"pass", t.pass},
+                     {"interfering_mm", t.interferingMm},
+                     {"excess_mm", t.excessMm}});
+  return {{"pass", r.pass},
+          {"entry", EntryName(b.positive)},
+          {"rotation_deg", b.rotationDeg},
+          {"travel_mm", b.travelMm},
+          {"interfering_mm", b.interferingMm},
+          {"press_mm", b.pressMm},
+          {"excess_mm", b.excessMm},
+          {"lead_in_mm", r.leadInMm},
+          {"from_mm", b.fromMm},
+          {"worst_depth_mm", b.worstDepthMm},
+          {"worst_volume_mm3", b.worstVolumeMm3},
+          {"step_mm", r.stepMm},
+          {"samples", r.samples},
+          {"allowance_mm", r.allowanceMm},
+          {"axis_point_mm", {r.axisPoint.x, r.axisPoint.y, r.axisPoint.z}},
+          {"axis_dir", {r.axisDir.x, r.axisDir.y, r.axisDir.z}},
+          {"axis_from", axisFrom},
+          {"tries", tries}};
+}
+
 json SealJson(const Measure::SealReport& r) {
   json rings = json::array();
   for (const Measure::SealRing& g : r.rings)
@@ -2780,6 +2987,49 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       out["region_count"] = arr.size();
     }
     return out;
+  }
+  if (m == "check_insertion") {
+    // rpc-params: a, b, mate, axis, entry, allowance_mm, samples, rotations,
+    // lead_in_mm rpc-returns-from: src/remote/RemoteInspection.cpp
+    if (state.assembly == nullptr || doc != nullptr)
+      throw std::runtime_error("check_insertion runs on an assembly tab: it "
+                               "slides one placed occurrence onto another");
+    const auto side = [&](const char* key) -> uint64_t {
+      const json& v = p.at(key);
+      if (v.is_number_integer()) {
+        if (state.assembly->FindById(v.get<uint64_t>()) == nullptr)
+          throw std::runtime_error(std::string(key) + ": occurrence id " +
+                                   v.dump() +
+                                   " not found (see list_occurrences)");
+        return v.get<uint64_t>();
+      }
+      if (!v.is_string())
+        throw std::runtime_error(std::string(key) +
+                                 " is a top-level occurrence id or name");
+      for (const Occurrence& o : state.assembly->GetOccurrences())
+        if (o.name == v.get<std::string>())
+          return o.id;
+      throw std::runtime_error(std::string(key) +
+                               ": no top-level "
+                               "occurrence is called " +
+                               v.dump() + " (see list_occurrences)");
+    };
+    const uint64_t a = side("a"), b = side("b");
+    if (a == b)
+      throw std::runtime_error("a and b are the same occurrence");
+    json q = json::object();
+    for (const char* k : {"mate", "axis", "entry", "allowance_mm", "samples",
+                          "rotations", "lead_in_mm"})
+      if (p.contains(k))
+        q[k] = p.at(k);
+    const InsertionCall call = ReadInsertionCall(state, q, a, b);
+    const std::vector<Body> A = ui::OccurrenceSubtreeBodies(state, a),
+                            B = ui::OccurrenceSubtreeBodies(state, b);
+    const auto r = Measure::Insertion(A, glm::dmat4(1.0), B, glm::dmat4(1.0),
+                                      call.point, call.dir, call.opt);
+    if (!r)
+      throw std::runtime_error("check_insertion: " + r.error());
+    return InsertionJson(*r, call.axisFrom);
   }
   if (m == "check_seal") {
     // rpc-params: a, b

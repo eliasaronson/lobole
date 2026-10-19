@@ -84,7 +84,13 @@ const MethodDoc RequirementMethods[] = {
      "expect: clear|touching|not_clashing}, seal {document: assembly, a, "
      "b: occurrence ids, motion_study?: the worst of its samples} (mm: the "
      "widest ring a and b's contact closes round its axis, by its narrowest "
-     "-- 0 when none closes; check_seal), mass / volume {document: part "
+     "-- 0 when none closes; check_seal), insertion {document: assembly, a "
+     "(what is slid on), b (what it goes on): occurrence ids, entry: "
+     "positive|negative|either, mate?: the mate id whose frame's Z is the "
+     "axis (else the one mate joining them), allowance_mm?, samples?, "
+     "rotations?, lead_in_mm?} (pass: a reaches its seat with no more "
+     "travel under interference than its own press; check_insertion), "
+     "mass / volume {document: part "
      "or assembly}, fit_class {document, mate, class: clearance|transition|"
      "interference}, check_fits {document, allow_unverified?}, check_seat "
      "{document, occurrences: [bearing ids], allow_unverified?}, "
@@ -507,7 +513,8 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
               state.parts[*slot].name + "'";
       return s;
     };
-    if (kind == "clearance" || kind == "contact" || kind == "seal") {
+    if (kind == "clearance" || kind == "contact" || kind == "seal" ||
+        kind == "insertion") {
       if (!needOcc("a") || !needOcc("b"))
         return 0;
     }
@@ -518,7 +525,7 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
                 state.parts[*slot].name + "'";
           return 0;
         }
-    if (kind == "fit_class" &&
+    if ((kind == "fit_class" || (kind == "insertion" && m.contains("mate"))) &&
         a->FindMateById(m.at("mate").get<uint64_t>()) == nullptr) {
       why = "mate " + m.at("mate").dump() + " is gone from '" +
             state.parts[*slot].name + "'";
@@ -534,7 +541,8 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
     if (study) {
       h.U64(motion::InputKey(*a, ui::PartResolverFor(state),
                              ui::AssemblyResolverFor(state), *study));
-    } else if (kind == "clearance" || kind == "contact" || kind == "seal") {
+    } else if (kind == "clearance" || kind == "contact" || kind == "seal" ||
+               kind == "insertion") {
       // Only what the gap is between: each side's placement and what it
       // places. A part moved elsewhere in the assembly is not this answer's
       // business, and a key that said it was would cry wolf.
@@ -1293,6 +1301,58 @@ Taken MeasureSeal(ui::AppState& state, const json& m, const Ctx& ctx) {
   return t;
 }
 
+// An insertion (docs/inspect/README.md#insertion): a slid to its seat on b
+// with no more travel under interference than its own press.
+struct InsertionInputs {
+  std::vector<Body> A, B;
+  remote::InsertionCall call;
+  InsertionInputs() = default;
+  InsertionInputs(const InsertionInputs&) = delete;
+  InsertionInputs& operator=(const InsertionInputs&) = delete;
+};
+
+void InsertionOver(const InsertionInputs& in, Taken& t,
+                   const std::atomic<bool>& cancel,
+                   std::atomic<double>& fraction) {
+  const auto r = Measure::Insertion(in.A, glm::dmat4(1.0), in.B,
+                                    glm::dmat4(1.0), in.call.point, in.call.dir,
+                                    in.call.opt, &cancel, &fraction);
+  if (cancel.load())
+    throw std::runtime_error("cancelled");
+  if (!r)
+    throw std::runtime_error(r.error());
+  t.pass = r->pass;
+  t.detail = remote::InsertionJson(*r, in.call.axisFrom);
+}
+
+Taken MeasureInsertion(ui::AppState& state, const json& m, const Ctx& ctx) {
+  Taken t;
+  const uint64_t a = m.at("a").get<uint64_t>(), b = m.at("b").get<uint64_t>();
+  auto in = std::make_shared<InsertionInputs>();
+  in->call = remote::ReadInsertionCall(state, m, a, b);
+  for (const auto& [id, side] : {std::pair{a, &in->A}, std::pair{b, &in->B}})
+    for (const Body& body : ui::OccurrenceSubtreeBodies(state, id)) {
+      Body nb = body;
+      if (ctx.async)
+        nb.shape = body.shape.DetachedUnlocated().LocatedLike(body.shape);
+      side->push_back(std::move(nb));
+    }
+  if (in->A.empty() || in->B.empty())
+    throw std::runtime_error("one side places no visible matter (hidden, or a "
+                             "part with no bodies), so nothing slides");
+  if (ctx.async) {
+    t.work = [in](Taken& out, const std::atomic<bool>& cancel,
+                  std::atomic<double>& fraction) {
+      InsertionOver(*in, out, cancel, fraction);
+    };
+    return t;
+  }
+  std::atomic<bool> never{false};
+  std::atomic<double> fraction{0.0};
+  InsertionOver(*in, t, never, fraction);
+  return t;
+}
+
 Taken MeasureMass(ui::AppState& state, const json& m, bool mass) {
   Taken t;
   json params = json::object();
@@ -1678,6 +1738,8 @@ Taken MeasureOn(ui::AppState& state, const req::Requirement& r,
     return MeasureContact(state, m);
   if (kind == "seal")
     return MeasureSeal(state, m, ctx);
+  if (kind == "insertion")
+    return MeasureInsertion(state, m, ctx);
   if (kind == "mass" || kind == "volume")
     return MeasureMass(state, m, kind == "mass");
   if (kind == "fit_class")

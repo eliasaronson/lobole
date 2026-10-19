@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "core/MeasureInsertion.h"
 #include "remote/RemoteHelpers.h"
 #include "remote/RemoteParking.h"
 #include "remote/RpcParams.h"
@@ -63,5 +64,20 @@ nlohmann::json PrintedThreadJson(const ui::PrintedThread& t);
 // least_width_mm (the widest closed ring's narrowest; 0 when none closes),
 // rings[], open[] (arcs with no contact), the axis and how it was found.
 nlohmann::json SealJson(const Measure::SealReport& r);
+
+// check_insertion's reading of everything but its two sides
+// (docs/inspect/README.md#insertion), shared with the `insertion`
+// requirement: the axis (`mate`, `axis`, or the one mate joining a and b),
+// `entry`, and the options. Every parameter is checked before anything
+// runs; a refusal names what is accepted.
+struct InsertionCall {
+  glm::dvec3 point{0.0}, dir{0.0, 0.0, 1.0};
+  std::string axisFrom;
+  Measure::InsertionOptions opt;
+};
+InsertionCall ReadInsertionCall(ui::AppState& state, const nlohmann::json& p,
+                                uint64_t a, uint64_t b);
+nlohmann::json InsertionJson(const Measure::InsertionReport& r,
+                             const std::string& axisFrom);
 
 } // namespace remote

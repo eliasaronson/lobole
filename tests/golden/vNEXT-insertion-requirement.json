@@ -1,0 +1,32 @@
+{
+  "format": "designer-document",
+  "version": 186,
+  "parameters": [
+    {"name": "depth", "expression": "9"}
+  ],
+  "requirements": [
+    {"id": 1, "name": "the escape wheel goes on its arbor",
+     "source": "a part must be able to reach where it is mated",
+     "revision": 1,
+     "measure": {"kind": "insertion", "document": 4, "a": 12, "b": 14,
+                 "entry": "positive", "mate": 30, "allowance_mm": 0.1},
+     "bound": {"kind": "pass"},
+     "evidence": {"pass": true, "input_hash": "0x0123456789abcdef",
+                  "revision": 1, "checked_at": "2026-10-18T12:00:00Z",
+                  "detail": {"pass": true, "entry": "positive",
+                             "press_mm": 10.0, "interfering_mm": 9.8}}}
+  ],
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [4, 0]},
+       {"type": "line", "id": 2, "a": [4, 0], "b": [4, 2]},
+       {"type": "line", "id": 3, "a": [4, 2], "b": [0, 2]},
+       {"type": "line", "id": 4, "a": [0, 2], "b": [0, 0]}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 1.0, "distance_expr": "depth", "mode": "new_body"}
+  ]
+}

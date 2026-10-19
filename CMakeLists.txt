@@ -345,6 +345,7 @@ set(core_sources
     src/core/io/ImportAssembly.cpp
     src/core/Measure.cpp
     src/core/MeasureSeal.cpp
+    src/core/MeasureInsertion.cpp
     src/core/PrintSplit.cpp
     src/core/ThreadStandards.cpp
     src/core/FitStandards.cpp
