@@ -159,7 +159,9 @@ PairReading ReadPair(const Band& a, const Turned& at, const Band& b,
   Overlap(tree, area, thick);
   area /= kScale * kScale;
   thick /= kScale;
-  if (thick > kFuzz) {
+  // A mesh's slice is off the surface by up to its deflection, each side:
+  // an overlap no thicker than that is the meshes' noise.
+  if (thick > std::max(kFuzz, a.noiseMm + b.noiseMm)) {
     r.interfering = true;
     r.depthMm = allowance + thick;
     r.areaMm2 = area;
@@ -1039,8 +1041,13 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         c.gapMm = dist.Value();
         c.agrees = c.gapMm < opt.allowanceMm - kGapTol;
       }
-      if (!c.agrees) {
+      // The boolean finding matter where the sections read none fails the
+      // answer; the sections reading more than the boolean (a slice
+      // standing for a cone's whole span, a mesh's noise) is the safe side
+      // of it, and is only said.
+      if (c.overlaps && !c.expectedOverlap)
         rep.pass = false;
+      if (!c.agrees) {
         // Say what the sections read there, so a disagreement is looked at
         // rather than guessed at.
         LOG_WARN("insertion: the sections and the exact boolean disagree "

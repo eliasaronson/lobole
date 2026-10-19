@@ -74,7 +74,9 @@ struct InsertionTry {
 // nothing interferes on the way), where the sections' reading is set
 // against the clash check's own boolean: overlap in the model or not, and,
 // where the sections read only a gap under the allowance, the exact least
-// distance. A pass the boolean does not agree with is not a pass.
+// distance. A pass the boolean contradicts -- matter in matter where the
+// sections read none -- is not a pass; the sections reading more than the
+// boolean finds is the safe side, said (`agrees` false) but not failed.
 struct InsertionConfirm {
   bool ran = false;
   double atMm = 0.0;            // from the seat, along the try's entry

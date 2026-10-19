@@ -410,7 +410,10 @@ forces something through on the way.
   and where the sections read only a gap under the allowance the exact
   least distance says so too (`confirm` {`at_mm`, `expected_overlap`,
   `expected_gap`, `overlaps`, `volume_mm3`, `gap_mm`, `agrees`}). A pass
-  the boolean does not agree with is not a pass.
+  the boolean contradicts -- matter where the sections read none -- is
+  not a pass; the sections reading more than the boolean finds (a slice
+  standing for a chamfer's whole span) is the safe side, said in `agrees`
+  and the log but not failed.
 - **Bounded.** The mesh a solid is sliced from is refused past 6 M
   triangles, a solid cut past 20 000 bands, and a check that would read
   past 4 M band pairs -- each naming the ceiling -- and only the seat's

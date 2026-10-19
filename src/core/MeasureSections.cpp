@@ -687,6 +687,7 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
         for (size_t k = 0; k < sliced.size(); k++) {
           Band& b = spans[sliced[k]];
           b.region = std::move(cuts[k]);
+          b.noiseMm = deflection;
           if (!clip.empty() && !b.region.empty())
             b.region = Clipper2Lib::Intersect(b.region, clip,
                                               Clipper2Lib::FillRule::NonZero);

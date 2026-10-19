@@ -40,6 +40,7 @@ struct Band {
   double perimeterMm = 0.0;
   bool sliced = false; // a slice of a span whose section varies
   double zSection = 0.0; // where the section was cut
+  double noiseMm = 0.0;  // how far its outline may be off: a mesh's deflection
   int solid = 0;       // which solid of its side it came from
 };
 
