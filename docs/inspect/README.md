@@ -445,12 +445,15 @@ after (sections), on this machine -- `seconds` {`sections`, `pairs`,
 
 | pair | before | after |
 |---|---|---|
-| the counter's wheel 1 in its housing (allowance 0.1) | 33 s | 3.5 s |
-| a planetary planet in its herringbone ring (0.1) | 728 s | 8.7 s |
-| the clock's stage 2: its 21 insertion requirements | 23 s | 7.4 s |
+| the counter's wheel 1 in its housing (allowance 0.1) | 33 s | 1.1 s |
+| a planetary planet in its herringbone ring (0.1) | 728 s | 4.2 s |
+| the clock's stage 2: its 21 insertion requirements | 23 s | 4.6 s |
 
-The planet's 8.7 s is half the one confirming boolean of two herringbone
-solids; its sections are 1.9 s and its 2D tests 2 s.
+Most of the planet's 4.2 s is the one confirming boolean of two
+herringbone solids. A whole assembly sequence costs more: the clock's
+stage 1 (23 steps, eight of them nuts read along their threads at a 24th
+of a turn) is about 90 s, stage 2 about 400 s, the engine's 78 steps about
+460 s.
 
 The answer: `pass`, the try reported (`entry`, `rotation_deg`,
 `travel_mm`, `interfering_mm`, `press_mm`, `excess_mm`, `deeper_mm`,
