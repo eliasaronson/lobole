@@ -191,7 +191,8 @@ double PressAt(const Sides& s, const gp_Trsf& seat, double step,
   s.fixedBox.Get(bx0, by0, bz0, bx1, by1, bz1);
   const double x0 = std::min(ax0, bx0) - 1.0, x1 = std::max(ax1, bx1) + 1.0;
   const double y0 = std::min(ay0, by0) - 1.0, y1 = std::max(ay1, by1) + 1.0;
-  int hits = 0;
+  // Each slice counted by its own thickness: the last is a part one.
+  double pressed = 0.0;
   for (double z = lo; z < hi - 1e-9; z += step) {
     if (cancel && cancel->load())
       return 0.0;
@@ -205,9 +206,9 @@ double PressAt(const Sides& s, const gp_Trsf& seat, double step,
     if (VolumeOf(cut.Shape()) <= kVolumeTol)
       continue;
     if (Read(s, cut.Shape()).interfering)
-      hits++;
+      pressed += std::min(z + step, hi) - z;
   }
-  return hits * step;
+  return pressed;
 }
 
 } // namespace
@@ -321,7 +322,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     for (bool p : sides)
       longest = std::max(longest, travelOf(p));
     rep.stepMm = longest / opt.samples;
-    rep.leadInMm = opt.leadInMm >= 0.0 ? opt.leadInMm : 2.0 * rep.stepMm;
+    rep.leadInMm = opt.leadInMm >= 0.0 ? opt.leadInMm : rep.stepMm;
 
     // Every try's work, for the fraction: its slices and its steps.
     const double perTry =
@@ -378,6 +379,10 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       }
       t.pressMm = seated[side].pressMm;
       int hits = 0;
+      int deeper = 0;
+      // Forced deeper than the seat is pressed: a bind, however short.
+      const double seatDepth = seated[side].at.depthMm;
+      const double deeperTol = 0.5 * s.allowance + kFuzz;
       const int n = static_cast<int>(std::ceil(t.travelMm / step - 1e-9));
       for (int k = n; k >= 1; k--) {
         if (cancel && cancel->load())
@@ -391,6 +396,8 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         if (!r.interfering)
           continue;
         hits++;
+        if (r.depthMm > seatDepth + deeperTol)
+          deeper++;
         t.fromMm = std::max(t.fromMm, u);
         t.worstDepthMm = std::max(t.worstDepthMm, r.depthMm);
         t.worstVolumeMm3 = std::max(t.worstVolumeMm3, r.volumeMm3);
@@ -401,8 +408,10 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         }
       }
       t.interferingMm = hits * step;
+      t.deeperMm = deeper * step;
       t.excessMm = std::max(0.0, t.interferingMm - t.pressMm);
-      t.pass = t.complete && t.excessMm <= rep.leadInMm + 1e-9;
+      t.pass = t.complete && t.excessMm <= rep.leadInMm + 1e-9 &&
+               t.deeperMm <= rep.leadInMm + 1e-9;
       return t;
     };
     const auto consider = [&](const InsertionTry& t) {

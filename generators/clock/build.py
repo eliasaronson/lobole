@@ -633,7 +633,7 @@ def insertions(a, s):
         det = (r.get("evidence") or {}).get("detail") or r.get("detail") or {}
         row = {k: det.get(k) for k in ("pass", "entry", "rotation_deg",
                                         "press_mm", "interfering_mm",
-                                        "excess_mm", "from_mm",
+                                        "excess_mm", "deeper_mm", "from_mm",
                                         "worst_depth_mm")}
         row["state"] = r.get("state")
         out[f"{part} on {onto}"] = row
@@ -653,25 +653,27 @@ def insertions(a, s):
 def first_arbor_control(d, s):
     """The negative control: the stage-1 escape arbor as first printed,
     with the escape wheel, must FAIL the insertion check from either end:
-    forced along more than the hub's length."""
+    from the back its round pivot is forced through the wheel's D bore,
+    far deeper than the wheel is pressed at its seat."""
     a = Asm(d, "stage 1 escape (first print)")
     a.fixed("escape wheel", "escape wheel")
     a.on("escape wheel", FIRST_ESCAPE_ARBOR, "escape arbor")
     r = d.call("check_insertion", a=a.occ["escape wheel"],
                b=a.occ["escape arbor"], entry="either",
                allowance_mm=s["print_closing"], _timeout=600)
-    hub = s["H"] - 2.0 * s["end_shake"]
     print(f"  negative control, the stage-1 escape arbor as first printed: "
           f"{'passes' if r['pass'] else 'fails'}, forced "
           f"{r['interfering_mm']:.2f} mm from the {r['entry']} side against "
-          f"a press of {r['press_mm']:.2f} (hub {hub:.2f}), "
-          f"{r['worst_depth_mm']:.2f} mm deep")
-    if r["pass"] or r["interfering_mm"] <= hub + r["lead_in_mm"]:
+          f"a press of {r['press_mm']:.2f}, {r['deeper_mm']:.2f} mm of it "
+          f"{r['worst_depth_mm']:.2f} mm deep (its seat is pressed "
+          f"{s['print_closing'] - (s['press_d'] - s['arbor_d']) / 2.0:.2f})")
+    if r["pass"]:
         raise SystemExit("clock: the first stage-1 escape arbor goes on: "
                          "the insertion check cannot see a round pivot in "
                          f"a D bore: {r}")
     return {k: r[k] for k in ("pass", "entry", "press_mm", "interfering_mm",
-                              "excess_mm", "from_mm", "worst_depth_mm")}
+                              "excess_mm", "deeper_mm", "from_mm",
+                              "worst_depth_mm")}
 
 
 # --- motion -----------------------------------------------------------------------

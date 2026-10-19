@@ -363,11 +363,15 @@ forces something through on the way.
 - **The press** is the axial length over which the seated pair interferes,
   read slice by slice a step thick. A part pressed on is pushed under
   interference exactly that far; the check **fails** a slide whose travel
-  under interference is longer than its press plus `lead_in_mm` (two steps
-  by default, the sampling's own resolution). A round pivot passed through
+  under interference is longer than its press plus `lead_in_mm` (a step by
+  default, the sampling's own resolution; each slice of the press is
+  counted by its own thickness). A round pivot passed through
   a D bore, a press band that runs on past the seat, or a bore too small
   for the whole shaft all fail; a press band that ends where the part goes
-  on, or a pivot at the running gap under the bore, passes.
+  on, or a pivot at the running gap under the bore, passes. Travel spent
+  interfering **deeper** than the seat itself does (by more than half the
+  allowance) fails past the lead-in too: the part is forced harder than
+  the press it ends in, however long that press reads (`deeper_mm`).
 - **Rotation** about the axis is free while sliding: when the placed
   orientation fails, `rotations` (12 by default) others are tried and the
   best reported, as `rotation_deg` from the placed one (a keyway past a
@@ -388,7 +392,8 @@ forces something through on the way.
   about 30 s; a wheel on its arbor a second or two.
 
 The answer: `pass`, the try reported (`entry`, `rotation_deg`,
-`travel_mm`, `interfering_mm`, `press_mm`, `excess_mm`, `from_mm` -- where
+`travel_mm`, `interfering_mm`, `press_mm`, `excess_mm`, `deeper_mm`,
+`from_mm` -- where
 the interference begins, from the seat -- `worst_depth_mm`, the most the
 faces must give with the allowance counted, and `worst_volume_mm3`), the
 step, lead-in and allowance, the axis and what gave it, and every try. It

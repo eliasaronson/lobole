@@ -199,7 +199,8 @@ for.
 - **negative control**: the stage-1 escape arbor as first printed
   (`build_arbor_first`: round pivots, its D from the back plate's face to
   the front) with the escape wheel must fail the insertion check from
-  either end, forced along more than the wheel's hub;
+  either end: from the back its round pivot is forced through the wheel's
+  D bore far deeper than the wheel is pressed at its seat;
 - every print plate's `check_print`, every item.
 
 `generator_clock` (generators/README.md#the-big-generators-as-tests) runs
@@ -273,7 +274,12 @@ both arbors, the stage-1 drum's bore (pressed on the slide D now) and the
 stage-1 front plate's escape and anchor pivot holes (the gap over the slide
 pivots). They print on `stage1_arbors/` and replace the pieces of their
 names; the wheels, the anchor, the back plate and the pendulum are as they
-were. The card lists them (`REPRINT1`).
+were. The card lists them (`REPRINT1`). The first arbors are flatted twice
+as deep (their D at +X, the lying flat at -X, 0.8 mm each), so a wheel
+turned half round, its bore's flat on the lying flat, does pass the round
+pivot -- but under its light press the whole way, about 64 mm for a 60 mm
+hub; the check fails that too, and the reprinted arbors press only the
+last 7 mm.
 
 | plate | pieces |
 |---|---|

@@ -24,7 +24,9 @@ namespace Measure {
 // axial length over which the two interfere where the part ends up. A
 // press of its own length is pushed exactly that far; anything longer is
 // something forced through on the way -- a round pivot through a D bore,
-// a shaft through a bore too small for it -- and fails.
+// a shaft through a bore too small for it -- and fails. So does travel
+// spent interfering deeper than the seat itself does: forced harder than
+// the press it ends in, however short the stretch.
 //
 // Rotation about the axis is free while sliding, so a failing slide is
 // tried again at `rotations` orientations about the axis and the one that
@@ -47,6 +49,9 @@ struct InsertionTry {
   double pressMm = 0.0;        // the seat's own press length
   double excessMm = 0.0;       // interfering beyond the press, >= 0
   double fromMm = 0.0;         // where the interference begins, from the seat
+  // travel spent interfering deeper than the seat does (by more than half
+  // the allowance): something forced harder than the press it ends in
+  double deeperMm = 0.0;
   double worstDepthMm = 0.0;   // the most the faces must give (incl. allowance)
   double worstVolumeMm3 = 0.0; // the largest overlap in the model
   bool pass = false;
@@ -72,7 +77,7 @@ struct InsertionOptions {
   double allowanceMm = 0.0; // 0: the model as modelled
   int samples = 64;         // steps from seat to clear
   int rotations = 12;       // orientations tried when the seated one fails
-  double leadInMm = -1.0;   // < 0: two steps, the sampling's own resolution
+  double leadInMm = -1.0;   // < 0: one step, the sampling's own resolution
 };
 
 // A and B are placed by their matrices; the axis is in that same (world)

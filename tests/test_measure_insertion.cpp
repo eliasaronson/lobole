@@ -109,8 +109,12 @@ TEST_CASE("A D bore cannot be forced over a round pivot to a D that stops "
   CHECK(r.best.pressMm == Approx(10.0).margin(2 * r.stepMm));
   // Forced the whole hub's length and the pivot's past its press.
   CHECK(r.best.excessMm > 4.0);
-  // The round meets the bore's flat 0.75 deep, and the print's 0.1 on top.
+  // The round meets the bore's flat 0.75 deep, and the print's 0.1 on top:
+  // forced far deeper than the 0.05 the hub is pressed at its seat, the
+  // pivot's whole length. That alone fails it, however the press's own
+  // length reads.
   CHECK(r.best.worstDepthMm > 0.5);
+  CHECK(r.best.deeperMm > 4.0);
   // Every orientation was tried; none clears.
   CHECK(r.tries.size() == 12);
 }

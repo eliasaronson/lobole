@@ -1408,19 +1408,24 @@ static constexpr MethodDoc InspectionMethods[] = {
      "0, the model as modelled); samples?: steps from seat to clear "
      "(default 64); rotations?: orientations about the axis tried when the "
      "placed one fails (default 12); lead_in_mm?: the excess allowed "
-     "(default two steps)}. `a` is swept from clear to its seat; at each "
+     "(default one step)}. `a` is swept from clear to its seat; at each "
      "step the clash check's exact boolean (and, with an allowance, the "
      "least distance) says whether the two interfere. FAILS when the "
      "travel spent interfering is longer than the press at the seat (the "
      "axial length the seated pair interferes over) plus the lead-in: "
      "something forced through on the way, a round pivot through a D "
-     "bore. Answers {pass, entry, rotation_deg (the orientation reported, "
+     "bore -- and fails travel spent interfering deeper than the seat "
+     "does (by more than half the allowance) past the lead-in too: forced "
+     "harder than its own press. Answers {pass, entry, rotation_deg (the "
+     "orientation reported, "
      "from the placed one), travel_mm, interfering_mm, press_mm, "
-     "excess_mm, lead_in_mm, from_mm (where interference begins, from the "
+     "excess_mm, deeper_mm, lead_in_mm, from_mm (where interference "
+     "begins, from the "
      "seat), worst_depth_mm (the most the faces must give, allowance "
      "included), worst_volume_mm3, step_mm, samples, allowance_mm, "
      "axis_point_mm, axis_dir, axis_from, tries[]{entry, rotation_deg, "
-     "seats, complete, pass, interfering_mm, excess_mm}}. An orientation "
+     "seats, complete, pass, interfering_mm, excess_mm, deeper_mm}}. An "
+     "orientation "
      "either side is symmetric under is skipped; one that does not seat "
      "is reported, never chosen. Refused when both sides carry modelled "
      "threads: a screw goes on by turning. Runs on the frame: seconds on "
@@ -1432,7 +1437,8 @@ static constexpr MethodDoc InspectionMethods[] = {
      remote::NoFlags,
      "pass:bool, entry:string, rotation_deg:number, travel_mm:number, "
      "interfering_mm:number, press_mm:number, excess_mm:number, "
-     "lead_in_mm:number, from_mm:number, worst_depth_mm:number, "
+     "lead_in_mm:number, from_mm:number, deeper_mm:number, "
+     "worst_depth_mm:number, "
      "worst_volume_mm3:number, step_mm:number, samples:int, "
      "allowance_mm:number, axis_point_mm:number[], axis_dir:number[], "
      "axis_from:string, tries:object[]"},
@@ -2647,7 +2653,8 @@ json InsertionJson(const Measure::InsertionReport& r,
                      {"complete", t.complete},
                      {"pass", t.pass},
                      {"interfering_mm", t.interferingMm},
-                     {"excess_mm", t.excessMm}});
+                     {"excess_mm", t.excessMm},
+                     {"deeper_mm", t.deeperMm}});
   return {{"pass", r.pass},
           {"entry", EntryName(b.positive)},
           {"rotation_deg", b.rotationDeg},
@@ -2657,6 +2664,7 @@ json InsertionJson(const Measure::InsertionReport& r,
           {"excess_mm", b.excessMm},
           {"lead_in_mm", r.leadInMm},
           {"from_mm", b.fromMm},
+          {"deeper_mm", b.deeperMm},
           {"worst_depth_mm", b.worstDepthMm},
           {"worst_volume_mm3", b.worstVolumeMm3},
           {"step_mm", r.stepMm},
