@@ -2990,8 +2990,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     return out;
   }
   if (m == "check_insertion") {
-    // rpc-params: a, b, mate, axis, entry, allowance_mm, samples, rotations,
-    // lead_in_mm rpc-returns-from: src/remote/RemoteInspection.cpp
+    // rpc-params: a, b, mate, axis, entry, allowance_mm, samples, rotations
+    // rpc-params: lead_in_mm
+    // rpc-returns-from: src/remote/RemoteInspection.cpp
     if (state.assembly == nullptr || doc != nullptr)
       throw std::runtime_error("check_insertion runs on an assembly tab: it "
                                "slides one placed occurrence onto another");
@@ -3018,11 +3019,25 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     const uint64_t a = side("a"), b = side("b");
     if (a == b)
       throw std::runtime_error("a and b are the same occurrence");
-    json q = json::object();
-    for (const char* k : {"mate", "axis", "entry", "allowance_mm", "samples",
-                          "rotations", "lead_in_mm"})
-      if (p.contains(k))
-        q[k] = p.at(k);
+    // The row's own vocabulary for entry, read here as the shared reader
+    // (ReadInsertionCall, which the requirement uses too) reads it.
+    const std::string entry = p.at("entry").get<std::string>();
+    if (entry != "positive" && entry != "negative" && entry != "either")
+      throw std::runtime_error("check_insertion: unknown entry '" + entry +
+                               "' (accepted: positive, negative, either)");
+    json q = {{"entry", entry}};
+    if (p.contains("mate"))
+      q["mate"] = p.at("mate");
+    if (p.contains("axis"))
+      q["axis"] = p.at("axis");
+    if (p.contains("allowance_mm"))
+      q["allowance_mm"] = p.at("allowance_mm");
+    if (p.contains("samples"))
+      q["samples"] = p.at("samples");
+    if (p.contains("rotations"))
+      q["rotations"] = p.at("rotations");
+    if (p.contains("lead_in_mm"))
+      q["lead_in_mm"] = p.at("lead_in_mm");
     const InsertionCall call = ReadInsertionCall(state, q, a, b);
     const std::vector<Body> A = ui::OccurrenceSubtreeBodies(state, a),
                             B = ui::OccurrenceSubtreeBodies(state, b);
