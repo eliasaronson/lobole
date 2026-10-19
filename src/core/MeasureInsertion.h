@@ -62,6 +62,7 @@ struct InsertionTry {
   double worstDepthMm = 0.0;   // the most the faces must give (incl. allowance)
   double worstVolumeMm3 = 0.0; // the largest overlap in the model
   double worstAtMm = -1.0;     // the offset the worst depth was read at
+  int worstFixedBody = -1;     // and what it met: an index into `fixed`
   bool pass = false;
   bool complete = true; // false: abandoned once it could not beat the best
   // false: turned so, the part interferes at its seat more than it does

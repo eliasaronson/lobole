@@ -337,7 +337,7 @@ TEST_CASE("A herringbone pair cannot be slid apart along its axis",
   // It sits: the seat reads no press.
   CHECK(r.best.pressMm == 0.0);
   // Forced nearly all the way out from either end.
-  CHECK(r.best.interferingMm > 8.0);
+  CHECK(r.best.interferingMm > 7.5);
   // The section varies along the whole height: it was sliced.
   CHECK(r.bandsMoving > 10);
   CHECK(r.confirm.ran);

@@ -3009,10 +3009,13 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
       row["note"] = s.note;
     json against = json::array();
     std::vector<Body> fixed;
+    std::vector<size_t> stepOf; // fixed body -> the step that placed it
     for (size_t k : s.before) {
       against.push_back(c.steps[k].name);
-      for (const Body& b : c.bodies[k])
+      for (const Body& b : c.bodies[k]) {
         fixed.push_back(b);
+        stepOf.push_back(k);
+      }
     }
     row["against"] = against;
     if (s.base) {
@@ -3042,6 +3045,11 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
       const glm::dvec3 moved = r->best.positive ? s.moves : -s.moves;
       row["path"]["moves"] = {moved.x, moved.y, moved.z};
       row["pass"] = r->pass;
+      // What it meets worst on the way: the occurrence to look at.
+      if (r->best.worstFixedBody >= 0 &&
+          static_cast<size_t>(r->best.worstFixedBody) < stepOf.size())
+        row["worst_against"] =
+            c.steps[stepOf[static_cast<size_t>(r->best.worstFixedBody)]].name;
       for (const char* k : {"rotation_deg", "travel_mm", "interfering_mm",
                             "press_mm", "excess_mm", "deeper_mm", "from_mm",
                             "worst_depth_mm", "lead_in_mm", "confirm"})

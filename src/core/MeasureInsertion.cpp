@@ -4,6 +4,7 @@
 #include "core/MeasureInsertion.h"
 
 #include "cad/NonDestructiveBoolean.h"
+#include "common/Logger.h"
 #include "core/Feature.h"
 #include "core/Measure.h"
 #include "core/MeasureSections.h"
@@ -34,7 +35,10 @@
 #include <chrono>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <numbers>
+#include <optional>
+#include <unordered_map>
 
 namespace Measure {
 
@@ -226,15 +230,20 @@ struct Intervals {
 
 // The placed solids of a side, carried into the axis frame.
 std::vector<TopoDS_Shape> Solids(const std::vector<Body>& bodies,
-                                 const glm::dmat4& xf, const gp_Trsf& toAxis) {
+                                 const glm::dmat4& xf, const gp_Trsf& toAxis,
+                                 std::vector<int>* bodyOf = nullptr) {
   std::vector<TopoDS_Shape> out;
   const TopLoc_Location loc(toAxis * Rigid(xf));
-  for (const Body& b : bodies) {
+  for (size_t i = 0; i < bodies.size(); i++) {
+    const Body& b = bodies[i];
     if (b.reference || b.shape.GetShape().IsNull())
       continue;
     const TopoDS_Shape placed = b.shape.GetShape().Moved(loc);
-    for (TopExp_Explorer e(placed, TopAbs_SOLID); e.More(); e.Next())
+    for (TopExp_Explorer e(placed, TopAbs_SOLID); e.More(); e.Next()) {
       out.push_back(e.Current());
+      if (bodyOf)
+        bodyOf->push_back(static_cast<int>(i));
+    }
   }
   return out;
 }
@@ -334,15 +343,13 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
                            "nearer the faces come as made");
   // A thread goes on by turning along its helix, which a straight slide
   // reads as the flanks forced through each other the whole way.
-  const auto threaded = [](const std::vector<Body>& side) {
-    return std::any_of(side.begin(), side.end(), [](const Body& b) {
-      return !b.reference && (!b.threads.empty() || !b.threadRegions.empty());
-    });
+  // Only the fixed side's bodies within reach of the path count (below):
+  // a sequence's fixed side is everything placed before, threads and all.
+  const auto threadedBody = [](const Body& b) {
+    return !b.reference && (!b.threads.empty() || !b.threadRegions.empty());
   };
-  if (threaded(moving) && threaded(fixed) && !opt.screw)
-    return std::unexpected(
-        "both sides carry modelled threads: a threaded pair goes on by "
-        "turning, which a straight slide does not judge");
+  const bool movingThreaded =
+      std::any_of(moving.begin(), moving.end(), threadedBody);
   InsertionReport rep;
   rep.axisPoint = axisPoint;
   rep.axisDir = axisDir / len;
@@ -357,8 +364,10 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
                     gp_Dir(rep.axisDir.x, rep.axisDir.y, rep.axisDir.z));
     gp_Trsf toAxis;
     toAxis.SetTransformation(ax);
+    std::vector<int> bodyOfB;
     const std::vector<TopoDS_Shape> solidsA = Solids(moving, xfMoving, toAxis),
-                                    solidsB = Solids(fixed, xfFixed, toAxis);
+                                    solidsB = Solids(fixed, xfFixed, toAxis,
+                                                     &bodyOfB);
     if (solidsA.empty() || solidsB.empty())
       return std::unexpected("one side places no visible matter (hidden, or "
                              "a part with no bodies)");
@@ -379,7 +388,9 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     // A fixed solid whose box lies wholly outside that reach never comes
     // near: an assembly sequence's later steps have everything placed
     // before them on the fixed side, most of it nowhere near the path.
-    for (const TopoDS_Shape& s : solidsB) {
+    std::vector<int> keptBody; // prepB's bodies, in `fixed`
+    for (size_t k = 0; k < solidsB.size(); k++) {
+      const TopoDS_Shape& s = solidsB[k];
       Bnd_Box box;
       BRepBndLib::Add(s, box, Standard_True);
       if (!box.IsVoid()) {
@@ -391,8 +402,15 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
           continue;
       }
       prepB.push_back(sections::Prepare(s));
+      keptBody.push_back(bodyOfB[k]);
     }
     const double reachA = reachOf(prepB) + g;
+    if (movingThreaded && !opt.screw &&
+        std::any_of(keptBody.begin(), keptBody.end(),
+                    [&](int b) { return threadedBody(fixed[b]); }))
+      return std::unexpected(
+          "both sides carry modelled threads: a threaded pair goes on by "
+          "turning, which a straight slide does not judge");
     const auto spanOf = [](const std::vector<sections::Solid>& v, double reach,
                            double& lo, double& hi) {
       lo = std::numeric_limits<double>::infinity();
@@ -429,6 +447,16 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       double aLo, aHi, bLo, bHi;
     };
     std::vector<Engaged> engaged;
+    double screwPitch = 0.0; // a modelled thread's: it turns as it goes
+    bool screwRight = true;
+    std::string screwName;
+    const auto screwExternal = [](const std::vector<Body>& side) {
+      for (const Body& b : side)
+        for (const ThreadMark& m : b.threads)
+          if (m.modeled)
+            return m.external;
+      return true;
+    };
     if (opt.screw) {
       const auto ta = AxisThreads(moving, xfMoving, toAxis),
                  tb = AxisThreads(fixed, xfFixed, toAxis);
@@ -449,11 +477,41 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
           if (it.fits)
             engaged.push_back({x.lo, x.hi, y.lo, y.hi});
         }
+      // A modelled thread is its helix: the part turns at its pitch as it
+      // goes, and the sections judge the flanks.
+      if (rep.threads.empty()) {
+        for (const Body& b : moving)
+          for (const ThreadMark& m : b.threads)
+            if (m.modeled && m.pitch > 0.0) {
+              if (screwPitch > 0.0 && (std::abs(screwPitch - m.pitch) > 1e-9 ||
+                                       screwRight != m.rightHand))
+                return std::unexpected(
+                    "it goes on by its thread, but it carries modelled "
+                    "threads of more than one pitch or hand");
+              screwPitch = m.pitch;
+              screwRight = m.rightHand;
+              screwName = m.designation;
+            }
+        if (screwPitch > 0.0) {
+          InsertionThread it;
+          it.moving = screwName.empty() ? "modelled" : screwName;
+          it.fits = true;
+          for (int k : keptBody)
+            for (const ThreadMark& m : fixed[k].threads)
+              if (m.modeled && m.external != screwExternal(moving)) {
+                it.fixed = m.designation.empty() ? "modelled" : m.designation;
+                it.fits = std::abs(m.pitch - screwPitch) < 1e-9 &&
+                          m.rightHand == screwRight;
+              }
+          rep.threads.push_back(it);
+        }
+      }
       if (rep.threads.empty())
         return std::unexpected(
             "it goes on by its thread, but no thread of the moving side "
             "meets one of the fixed side on the path (a Thread feature or "
-            "a tapped Hole on each, coaxial with it)");
+            "a tapped Hole on each, coaxial with it, or a modelled thread on "
+            "it)");
     }
 
     std::vector<bool> sides;
@@ -473,7 +531,15 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       longest = std::max(longest, travelOf(p));
     rep.stepMm = longest / opt.samples;
     rep.leadInMm = opt.leadInMm >= 0.0 ? opt.leadInMm : rep.stepMm;
-    rep.sliceMm = rep.stepMm > 0.0 ? rep.stepMm : 1.0;
+    // Slices no thinner than 20 um: a short travel (a valve that only
+    // drops into its seat) would otherwise cut a block's fillets into a
+    // quarter of a million. A turned path keeps its slices a step thick,
+    // so every step lines the two sides' slices up.
+    constexpr double kMinSlice = 0.02;
+    rep.sliceMm = rep.stepMm <= 0.0 ? 1.0
+                  : (opt.turnDeg != 0.0 || opt.screw)
+                      ? rep.stepMm
+                      : std::max(rep.stepMm, kMinSlice);
 
     // The bands, both sides on one slice grid.
     using Clock = std::chrono::steady_clock;
@@ -510,38 +576,78 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     // Orientations tried, and every band pair's reading at each: a pair's
     // reading does not depend on the slide, only on the turn.
     std::vector<double> turns;
-    const bool turning = opt.turnDeg != 0.0;
+    // A modelled thread turns a turn a pitch: right hand, anticlockwise
+    // about the way it moves (clockwise seen from behind it).
+    double turnDeg = opt.turnDeg;
+    if (screwPitch > 0.0 && turnDeg == 0.0)
+      turnDeg = (screwRight ? 1.0 : -1.0) * 360.0 * longest / screwPitch;
+    const bool turning = turnDeg != 0.0;
     for (int k = 0; k < (turning ? 1 : opt.rotations); k++)
       turns.push_back(360.0 * k / opt.rotations);
     // A turned path's orientation at each of its steps, after the seat's.
     if (turning)
       for (int k = 1; k <= opt.samples; k++)
-        turns.push_back(opt.turnDeg * k / opt.samples);
+        turns.push_back(turnDeg * k / opt.samples);
     const size_t nA = bandsA.size(), nB = bandsB.size();
-    std::vector<std::vector<Turned>> turned(turns.size());
-    std::vector<std::vector<int8_t>> known(turns.size());
-    std::vector<std::vector<PairReading>> readings(turns.size());
-    const auto turnedAt = [&](size_t ti) -> const std::vector<Turned>& {
-      auto& v = turned[ti];
-      if (v.empty()) {
-        v.reserve(nA);
-        for (const Band& b : bandsA) {
-          Turned t;
-          t.region = sections::Rotated(b.region, turns[ti]);
-          t.box = C::GetBounds(t.region);
-          if (opt.allowanceMm > kGap2D) {
-            t.grown =
-                C::InflatePaths(t.region, (opt.allowanceMm - kGap2D) * kScale,
-                                C::JoinType::Round, C::EndType::Polygon, 2.0,
-                                0.25 * kGap2D * kScale);
-            t.grownBox = C::GetBounds(t.grown);
-          }
-          v.push_back(std::move(t));
-        }
-        known[ti].assign(nA * nB, 0);
-        readings[ti].resize(nA * nB);
+    // A moving band's outline at an orientation, made when first asked:
+    // the seat's orientation is kept, and one other at a time -- the tries
+    // and a turned path's steps go through them in order, and a part
+    // turned 64 ways at once is gigabytes on a long free-form solid.
+    std::map<size_t, std::vector<std::optional<Turned>>> turned;
+    const auto turnedAt = [&](size_t ti, size_t i) -> const Turned& {
+      auto it = turned.find(ti);
+      if (it == turned.end()) {
+        for (auto e = turned.begin(); e != turned.end();)
+          e = e->first != 0 ? turned.erase(e) : std::next(e);
+        it = turned.emplace(ti, std::vector<std::optional<Turned>>(nA)).first;
       }
-      return v;
+      std::optional<Turned>& slot = it->second[i];
+      if (!slot) {
+        Turned t;
+        t.region = sections::Rotated(bandsA[i].region, turns[ti]);
+        t.box = C::GetBounds(t.region);
+        if (opt.allowanceMm > kGap2D) {
+          t.grown = C::InflatePaths(
+              t.region, (opt.allowanceMm - kGap2D) * kScale, C::JoinType::Round,
+              C::EndType::Polygon, 2.0, 0.25 * kGap2D * kScale);
+          t.grownBox = C::GetBounds(t.grown);
+        }
+        slot = std::move(t);
+      }
+      return *slot;
+    };
+    // Every pair read, by orientation: a reading does not depend on the
+    // slide. Bounded, so a check that would read past it is refused rather
+    // than left to take the machine's memory.
+    constexpr size_t kPairCeiling = 4000000;
+    std::unordered_map<uint64_t, PairReading> readings;
+    // The slides at which a pair's reading holds: where their spans
+    // overlap, an open interval from the band ends -- exact for prismatic
+    // bands. Two slices compare two sections that stand for each other only
+    // near where they line up, so a slice against a slice holds within half
+    // a slice of that (the slices of the two sides tile the slide between
+    // them); `centre` is where they line up.
+    struct Window {
+      double lo, hi, centre;
+    };
+    const auto windowOf = [](const Band& a, const Band& b, bool positive) {
+      Window w;
+      const double ma = 0.5 * (a.z0 + a.z1), mb = 0.5 * (b.z0 + b.z1);
+      if (positive) {
+        w.lo = b.z0 - a.z1;
+        w.hi = b.z1 - a.z0;
+        w.centre = mb - ma;
+      } else {
+        w.lo = a.z0 - b.z1;
+        w.hi = a.z1 - b.z0;
+        w.centre = ma - mb;
+      }
+      if (a.sliced && b.sliced) {
+        const double half = 0.5 * std::max(a.z1 - a.z0, b.z1 - b.z0);
+        w.lo = std::max(w.lo, w.centre - half);
+        w.hi = std::min(w.hi, w.centre + half);
+      }
+      return w;
     };
     // A band of the screw's thread against one of the thread it goes into:
     // judged by the threads' fit, not read as interference.
@@ -552,17 +658,23 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       });
     };
     const auto pair = [&](size_t ti, size_t i, size_t j) -> const PairReading& {
-      const auto& t = turnedAt(ti);
-      const size_t k = i * nB + j;
-      if (!known[ti][k]) {
-        readings[ti][k] =
-            ByThread(bandsA[i], bandsB[j])
-                ? PairReading{}
-                : ReadPair(bandsA[i], t[i], bandsB[j], opt.allowanceMm);
-        known[ti][k] = 1;
+      const uint64_t k = (static_cast<uint64_t>(ti) * nA + i) * nB + j;
+      auto it = readings.find(k);
+      if (it == readings.end()) {
+        if (readings.size() >= kPairCeiling)
+          throw KernelError{
+              "the check would read more than " + std::to_string(kPairCeiling) +
+              " pairs of sections: give it a coarser resolution (fewer "
+              "samples, fewer rotations)"};
+        it = readings
+                 .emplace(k, ByThread(bandsA[i], bandsB[j])
+                                 ? PairReading{}
+                                 : ReadPair(bandsA[i], turnedAt(ti, i),
+                                            bandsB[j], opt.allowanceMm))
+                 .first;
         rep.pairsRead++;
       }
-      return readings[ti][k];
+      return it->second;
     };
 
     // The seat, at each orientation: what interferes where the part ends
@@ -586,6 +698,9 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
           const double lo = std::max(a.z0, b.z0), hi = std::min(a.z1, b.z1);
           if (hi - lo <= kZTol)
             continue; // apart, or a face on a face: a contact, not a press
+          const Window w = windowOf(a, b, true);
+          if (!(w.lo < 0.0 && w.hi > 0.0))
+            continue; // two slices that line up elsewhere
           const PairReading& r = pair(ti, i, j);
           if (!r.interfering)
             continue;
@@ -662,6 +777,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
               if (r.depthMm > t.worstDepthMm) {
                 t.worstDepthMm = r.depthMm;
                 worstAt = u;
+                t.worstFixedBody = keptBody[b.solid];
               }
               t.worstVolumeMm3 =
                   std::max(t.worstVolumeMm3, r.areaMm2 * (hi - lo));
@@ -676,24 +792,16 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         // that do it are one open interval, from the band ends.
         struct Cand {
           size_t i, j;
-          double lo, hi;
+          double lo, hi, centre;
         };
         std::vector<Cand> cands;
         for (size_t i = 0; i < nA; i++)
           for (size_t j = 0; j < nB; j++) {
-            const Band &a = bandsA[i], &b = bandsB[j];
-            double lo, hi;
-            if (positive) {
-              lo = b.z0 - a.z1;
-              hi = b.z1 - a.z0;
-            } else {
-              lo = a.z0 - b.z1;
-              hi = a.z1 - b.z0;
-            }
-            lo = std::max(lo, 0.0);
-            hi = std::min(hi, t.travelMm);
+            const Window w = windowOf(bandsA[i], bandsB[j], positive);
+            const double lo = std::max(w.lo, 0.0),
+                         hi = std::min(w.hi, t.travelMm);
             if (hi - lo > kZTol)
-              cands.push_back({i, j, lo, hi});
+              cands.push_back({i, j, lo, hi, w.centre});
           }
         // Nearest the seat first: what binds as it goes home is read first.
         std::sort(cands.begin(), cands.end(),
@@ -713,7 +821,11 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
             deeper.Add(c.lo, c.hi);
           if (r.depthMm > t.worstDepthMm) {
             t.worstDepthMm = r.depthMm;
-            worstAt = 0.5 * (c.lo + c.hi);
+            // Read where the two line up: a slice pair's own offset.
+            worstAt = bandsA[c.i].sliced && bandsB[c.j].sliced
+                          ? std::clamp(c.centre, c.lo, c.hi)
+                          : 0.5 * (c.lo + c.hi);
+            t.worstFixedBody = keptBody[bandsB[c.j].solid];
           }
           const Band &a = bandsA[c.i], &b = bandsB[c.j];
           t.worstVolumeMm3 = std::max(
@@ -807,6 +919,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       }
       // What the sections say there: every pair whose spans overlap at it.
       const double u = b.positive ? c.atMm : -c.atMm;
+      std::vector<std::string> why; // the interfering pairs, for the log
       for (size_t i = 0; i < nA; i++)
         for (size_t j = 0; j < nB; j++) {
           const Band &a = bandsA[i], &f = bandsB[j];
@@ -814,11 +927,22 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
                        hi = std::min(a.z1 + u, f.z1);
           if (hi - lo <= kZTol)
             continue;
+          if (!turning) {
+            const Window w = windowOf(a, f, b.positive);
+            if (c.atMm < w.lo - kZTol || c.atMm > w.hi + kZTol)
+              continue;
+          }
           const PairReading& r = pair(ti, i, j);
           if (r.areaMm2 > 0.0)
             c.expectedOverlap = true;
           else if (r.interfering)
             c.expectedGap = true;
+          if (r.interfering)
+            why.push_back(fmt::format(
+                "moving {:.3f}..{:.3f}{} against {:.3f}..{:.3f}{}: depth "
+                "{:.4f}, overlap {:.5f} mm2",
+                a.z0, a.z1, a.sliced ? " (slice)" : "", f.z0, f.z1,
+                f.sliced ? " (slice)" : "", r.depthMm, r.areaMm2));
         }
       if (c.expectedOverlap)
         c.expectedGap = false;
@@ -847,8 +971,21 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         c.gapMm = dist.Value();
         c.agrees = c.gapMm < opt.allowanceMm - kGapTol;
       }
-      if (!c.agrees)
+      if (!c.agrees) {
         rep.pass = false;
+        // Say what the sections read there, so a disagreement is looked at
+        // rather than guessed at.
+        LOG_WARN("insertion: the sections and the exact boolean disagree "
+                 "{:.3f} mm from the seat (sections: {}; boolean: {:.6f} mm3"
+                 ", gap {:.4f} mm)",
+                 c.atMm,
+                 c.expectedOverlap ? "overlap"
+                 : c.expectedGap   ? "a gap under the allowance"
+                                   : "clear",
+                 c.volumeMm3, c.gapMm);
+        for (size_t k = 0; k < why.size() && k < 8; k++)
+          LOG_WARN("insertion:   {}", why[k]);
+      }
       rep.confirmSeconds = since(t0);
     }
     if (fraction)

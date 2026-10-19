@@ -12,12 +12,14 @@
 #include <BRepBndLib.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepGProp.hxx>
 #include <BRepLProp_SLProps.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <GCPnts_TangentialDeflection.hxx>
+#include <GProp_GProps.hxx>
 #include <Poly_Triangulation.hxx>
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
@@ -50,6 +52,13 @@ using Clipper2Lib::Point64;
 constexpr double kEventTol = 1.0e-6;
 // A band thinner than this is a face meeting a face, not matter, mm.
 constexpr double kThinBand = 1.0e-5;
+// The triangles a slicing mesh aims at, and the most it may come to: a
+// bound on the memory one solid's slices take (a mesh is ~100 B a
+// triangle while it is built).
+constexpr double kMeshBudget = 1.5e6;
+constexpr size_t kMeshCeiling = 6000000;
+// The most bands one solid is cut into.
+constexpr size_t kBandCeiling = 20000;
 
 double BoxRadialMin(const Bnd_Box& b) {
   double x0, y0, z0, x1, y1, z1;
@@ -362,6 +371,20 @@ std::vector<Paths64> MeshSlices(const TopoDS_Shape& solid,
   const TopoDS_Shape own = BRepBuilderAPI_Copy(solid, Standard_True).Shape();
   BRepMesh_IncrementalMesh mesh(own, deflection, Standard_False, 0.2,
                                 Standard_True);
+  size_t triangles = 0;
+  for (TopExp_Explorer e(own, TopAbs_FACE); e.More(); e.Next()) {
+    TopLoc_Location loc;
+    const Handle(Poly_Triangulation) tri =
+        BRep_Tool::Triangulation(TopoDS::Face(e.Current()), loc);
+    if (!tri.IsNull())
+      triangles += static_cast<size_t>(tri->NbTriangles());
+  }
+  if (triangles > kMeshCeiling)
+    throw std::runtime_error(
+        "slicing a solid would take a mesh of " + std::to_string(triangles) +
+        " triangles, past the " + std::to_string(kMeshCeiling) +
+        " the insertion check allows: give the step a coarser resolution "
+        "(fewer samples)");
   std::vector<std::vector<std::pair<Point64, Point64>>> segs(zs.size());
   for (TopExp_Explorer e(own, TopAbs_FACE); e.More(); e.Next()) {
     TopLoc_Location loc;
@@ -542,6 +565,7 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
   // and the spans a face varies over.
   std::vector<double> events;
   std::vector<Span> varying;
+  double freeFormArea = 0.0; // mm2 of varying free-form faces in reach
   double zMin = std::numeric_limits<double>::infinity(), zMax = -zMin;
   const double half = solidIn.half;
   TopTools_IndexedMapOfShape faces;
@@ -556,8 +580,24 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
     events.push_back(pf.z1);
     for (TopExp_Explorer v(f, TopAbs_VERTEX); v.More(); v.Next())
       events.push_back(BRep_Tool::Pnt(TopoDS::Vertex(v.Current())).Z());
-    if (Classify(f, pf.z1 - pf.z0) == FaceKind::Varies)
+    if (Classify(f, pf.z1 - pf.z0) == FaceKind::Varies) {
       varying.push_back({pf.z0, pf.z1});
+      // A free-form face's planar section is a boolean of seconds; its
+      // slices come from a mesh, sized by how much of it there is.
+      switch (BRepAdaptor_Surface(f).GetType()) {
+      case GeomAbs_Plane:
+      case GeomAbs_Cylinder:
+      case GeomAbs_Cone:
+      case GeomAbs_Sphere:
+      case GeomAbs_Torus:
+        break;
+      default: {
+        GProp_GProps g;
+        BRepGProp::SurfaceProperties(f, g);
+        freeFormArea += std::max(0.0, g.Mass());
+      }
+      }
+    }
   }
   if (events.empty() || !(zMax > zMin))
     return {};
@@ -592,6 +632,12 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
   // each worker on its own deep copy of the solid -- a section is a boolean,
   // and a boolean reads lazily built caches on what it is given (Parallel.h).
   std::vector<Band> spans;
+  if (cuts.size() > kBandCeiling)
+    throw std::runtime_error(
+        "a solid would be cut into " + std::to_string(cuts.size()) +
+        " bands, past the " + std::to_string(kBandCeiling) +
+        " the insertion check allows: give it a coarser resolution (fewer "
+        "samples)");
   for (size_t i = 0; i + 1 < cuts.size(); i++) {
     Band b;
     b.z0 = cuts[i];
@@ -609,7 +655,7 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
     std::vector<size_t> sliced;
     std::vector<double> zs;
     for (size_t i = 0; i < spans.size(); i++)
-      if (spans[i].sliced) {
+      if (spans[i].sliced && freeFormArea > 0.0) {
         sliced.push_back(i);
         zs.push_back(0.5 * (spans[i].z0 + spans[i].z1));
       } else {
@@ -617,7 +663,12 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
       }
     if (!zs.empty()) {
       try {
-        std::vector<Paths64> cuts = MeshSlices(solid, zs, opt.meshDeflectionMm);
+        // About area / (4 d) triangles on a millimetre's curvature: the
+        // deflection grows with the free-form area so the mesh stays
+        // within its budget (a herringbone gear, a threaded rod: 0.5 um).
+        const double deflection =
+            std::max(opt.meshDeflectionMm, freeFormArea / (4.0 * kMeshBudget));
+        std::vector<Paths64> cuts = MeshSlices(solid, zs, deflection);
         for (size_t k = 0; k < sliced.size(); k++) {
           Band& b = spans[sliced[k]];
           b.region = std::move(cuts[k]);
