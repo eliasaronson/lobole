@@ -240,8 +240,8 @@ torque and less run; the drum is the smallest that holds the cord.
 
 FEM, each study once: the rod under the bob and nut peaks at 0.08 MPa
 (0.04 mm of stretch); the centre arbor under the jar full of sand (3.1 N
-on the drum's band) at 2.1 MPa von Mises, a factor of safety of 23,
-0.04 mm of bending, and 1.21 MPa across its layers: **a factor of 14**
+on the drum's band) at 2.3 MPa von Mises, a factor of safety of 20,
+0.04 mm of bending, and 1.06 MPa across its layers: **a factor of 16**
 against PLA's interlayer strength (7.6 while it printed standing, its
 layers across the bend).
 
@@ -257,7 +257,7 @@ Every part but the pendulum states Bambu Studio's 0.20 mm Standard (2
 walls, 5/3 shells, 15 % grid; `clock_parts.FRAME_PRINT`). No supports, no
 brim; every plate passes every `check_print` item, its keep-out zone
 included, `slender` with it. Printed, the clock weighs 325 g against 550 g
-solid (59 %); Bambu's own slice of the two jobs, 335 g in 8.5 h.
+solid (59 %); Bambu's own slice of the two jobs, 334 g in 9.1 h; of stage 1's reprint, 22.5 g in 0.7 h.
 
 **Stage 1's shafts moved** (2026-10): the four pillars and the two stage-1
 arbors stood on plate 1 with the rest and came off the bed part-way up.
