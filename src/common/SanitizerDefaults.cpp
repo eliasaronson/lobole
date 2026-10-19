@@ -60,6 +60,11 @@ const char* __lsan_default_suppressions() {
       // did. Reached from any STEP read or write.
       "leak:STEPControl_Controller\n"
       "leak:STEPCAFControl_Controller\n"
+      // The message StepFile_ReadData::AddError copies for each syntax error
+      // in a STEP file; the parser drops the last pointer to it (a direct
+      // leak, 80 B per error). Reached from any malformed STEP read
+      // (test_project_trust.cpp reads a text file as one).
+      "leak:StepFile_ReadData::AddError\n"
       // libdbus's per-connection registration state, from the GTK file
       // dialog (nativefiledialog → portal). One-time, per process, and the
       // connection is a library global we never see.
