@@ -314,6 +314,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | An assembly sequence's step names a **group** (`occurrences`: two or more ids, moved as one) or is a **pose** (`pose`: [{`mate`, `rotation_deg` \| `offset_mm`}], placing nothing) in place of its one `occurrence` ([assembly sequences](../assemblies/README.md#assembly-sequences)); a step states exactly one of the three. Golden `vNEXT-assembly-sequence-groups`. |
 
 ## Paths in a project
 

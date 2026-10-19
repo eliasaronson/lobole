@@ -360,7 +360,7 @@ Mate MateFromJson(const json& j) {
   return m;
 }
 
-// ---- The assembly sequence (v187) ----------------------------------------
+// ---- The assembly sequence (v187; groups and poses vNEXT) ----------------
 
 json AssemblySequenceToJson(const AssemblySequence& seq) {
   json j;
@@ -368,7 +368,20 @@ json AssemblySequenceToJson(const AssemblySequence& seq) {
     j["allowance_mm"] = seq.allowanceMm;
   j["steps"] = json::array();
   for (const SequenceStep& s : seq.steps) {
-    json sj{{"occurrence", s.occurrenceId}};
+    json sj = json::object();
+    if (s.IsPose()) {
+      json pose = json::array();
+      for (const SequencePose& p : s.pose)
+        pose.push_back(
+            {{"mate", p.mateId},
+             {p.dof == MateDof::Rotation ? "rotation_deg" : "offset_mm",
+              p.value}});
+      sj["pose"] = std::move(pose);
+    } else if (s.occurrences.size() == 1) {
+      sj["occurrence"] = s.occurrences[0];
+    } else {
+      sj["occurrences"] = s.occurrences;
+    }
     if (s.direction)
       sj["direction"] = {s.direction->x, s.direction->y, s.direction->z};
     if (s.origin)
@@ -409,18 +422,44 @@ AssemblySequence AssemblySequenceFromJson(const json& j) {
   };
   for (const json& sj : j.value("steps", json::array())) {
     for (auto it = sj.begin(); it != sj.end(); ++it) {
-      static const char* kKeys[] = {"occurrence", "direction",   "origin_mm",
-                                    "mate",       "distance_mm", "turn_deg",
-                                    "thread",     "note"};
+      static const char* kKeys[] = {
+          "occurrence", "occurrences", "pose",     "direction", "origin_mm",
+          "mate",       "distance_mm", "turn_deg", "thread",    "note"};
       if (std::none_of(std::begin(kKeys), std::end(kKeys),
                        [&](const char* k) { return it.key() == k; }))
         throw std::runtime_error(
             "unknown sequence step key '" + it.key() +
-            "' (accepted: occurrence, direction, origin_mm, mate, "
-            "distance_mm, turn_deg, thread, note)");
+            "' (accepted: occurrence, occurrences, pose, direction, "
+            "origin_mm, mate, distance_mm, turn_deg, thread, note)");
     }
     SequenceStep s;
-    s.occurrenceId = sj.at("occurrence").get<uint64_t>();
+    const int what = int(sj.contains("occurrence")) +
+                     int(sj.contains("occurrences")) + int(sj.contains("pose"));
+    if (what != 1)
+      throw std::runtime_error("a sequence step states one of occurrence, "
+                               "occurrences (a group) or pose");
+    if (sj.contains("occurrence"))
+      s.occurrences.push_back(sj.at("occurrence").get<uint64_t>());
+    if (sj.contains("occurrences"))
+      s.occurrences = sj.at("occurrences").get<std::vector<uint64_t>>();
+    if (sj.contains("pose")) {
+      for (const json& pj : sj.at("pose")) {
+        SequencePose p;
+        p.mateId = pj.at("mate").get<uint64_t>();
+        const bool rot = pj.contains("rotation_deg"),
+                   off = pj.contains("offset_mm");
+        if (rot == off || pj.size() != 2)
+          throw std::runtime_error("a pose value is {mate, rotation_deg} or "
+                                   "{mate, offset_mm}");
+        p.dof = rot ? MateDof::Rotation : MateDof::Offset;
+        p.value = pj.at(rot ? "rotation_deg" : "offset_mm").get<double>();
+        s.pose.push_back(p);
+      }
+      if (s.pose.empty())
+        throw std::runtime_error("a pose step sets at least one mate value");
+    }
+    if (s.occurrences.empty() && !sj.contains("pose"))
+      throw std::runtime_error("a group step names its occurrences");
     if (sj.contains("direction"))
       s.direction = vec(sj.at("direction"), "direction");
     if (sj.contains("origin_mm"))

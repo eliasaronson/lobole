@@ -2822,18 +2822,29 @@ std::string NoMatterWhy(ui::AppState& state, uint64_t occurrenceId) {
 }
 
 struct SequenceCheck {
+  // One occurrence's matter at one pose: copies, each body with its
+  // identity across poses and its placement there (the sections' cache
+  // moves a body's bands with its placement rather than re-slicing them).
+  struct Piece {
+    std::vector<Body> bodies;
+    std::vector<uint64_t> keys;
+    std::vector<glm::dmat4> places;
+  };
   struct Step {
-    uint64_t occurrence = 0;
+    std::vector<uint64_t> occurrences; // empty: a pose
+    std::vector<std::string> names;
     std::string name, note;
-    std::vector<size_t> bodies; // into `bodies`, this step's own
-    std::vector<size_t> before; // the steps placed before it
+    int pose = 0;                   // the pose it is checked at: 0 as placed
+    json posed;                     // a pose step's values, as answered
+    std::vector<std::string> moved; // a pose step: what it moved
+    std::vector<size_t> before;     // the placing steps before it
     bool base = false;          // nothing placed before it
     glm::dvec3 point{0.0}, moves{0.0, 0.0, 1.0};
     bool eitherWay = false; // the path's line only: both ways tried
     std::string pathFrom;
     Measure::InsertionOptions opt;
   };
-  std::vector<std::vector<Body>> bodies; // per step, copies
+  std::map<std::pair<int, uint64_t>, Piece> pieces; // (pose, occurrence)
   std::vector<Step> steps;
   std::vector<std::string> missing; // occurrences with matter not placed
   double allowanceMm = 0.0;
@@ -2887,36 +2898,176 @@ std::shared_ptr<const SequenceCheck> ReadSequenceCheck(ui::AppState& state) {
                              "one with set_assembly_sequence");
   auto c = std::make_shared<SequenceCheck>();
   c->allowanceMm = seq.allowanceMm;
+  const assembly::PartResolver parts = ui::PartResolverFor(state);
+  const assembly::AssemblyResolver assemblies = ui::AssemblyResolverFor(state);
+  // The assembly at the current pose: the document itself until a pose
+  // step, then a solved copy.
+  std::unique_ptr<AssemblyDocument> posedDoc;
+  const AssemblyDocument* cur = &asmDoc;
+  int pose = 0;
+  std::vector<assembly::FlatInstance> flat = ui::FlattenActiveAssembly(state);
+  // A body's identity across poses: its leaf and its index there.
+  std::map<std::tuple<uint64_t, std::vector<uint64_t>, size_t>, uint64_t> keyOf;
+  const auto pieceAt = [&](uint64_t occ) -> const SequenceCheck::Piece& {
+    auto [it, made] = c->pieces.try_emplace({pose, occ});
+    if (!made)
+      return it->second;
+    SequenceCheck::Piece& pc = it->second;
+    for (const assembly::FlatInstance& inst : flat) {
+      if (!inst.visible || inst.rootOccurrenceId != occ || !inst.part)
+        continue;
+      const auto& bodies = inst.part->GetBodies();
+      for (size_t k = 0; k < bodies.size(); k++) {
+        const Body& b = bodies[k];
+        if (b.reference)
+          continue;
+        Body nb = b;
+        const auto placed = b.shape.Transformed(inst.world);
+        nb.shape = placed.DetachedUnlocated().LocatedLike(placed);
+        pc.bodies.push_back(std::move(nb));
+        pc.keys.push_back(
+            keyOf.try_emplace({occ, inst.innerIds, k}, keyOf.size() + 1)
+                .first->second);
+        pc.places.push_back(inst.world);
+      }
+    }
+    return pc;
+  };
+  const auto connectorWorld =
+      [&](const Connector& con) -> std::optional<glm::dmat4> {
+    const auto local =
+        assembly::ConnectorLocalFrame(con, *cur, parts, nullptr, assemblies);
+    const Occurrence* o = cur->FindById(con.occurrenceId);
+    if (!local || o == nullptr)
+      return std::nullopt;
+    return ui::OccurrenceMatrix(*o) * *local;
+  };
   std::set<uint64_t> placed;
+  std::vector<size_t> placing; // the placing steps so far
   for (size_t i = 0; i < seq.steps.size(); i++) {
     const SequenceStep& st = seq.steps[i];
-    const Occurrence* o = asmDoc.FindById(st.occurrenceId);
-    if (o == nullptr)
-      throw std::runtime_error("step " + std::to_string(i + 1) +
-                               " places occurrence " +
-                               std::to_string(st.occurrenceId) +
-                               ", which is gone from the assembly");
     SequenceCheck::Step s;
-    s.occurrence = o->id;
-    s.name = o->name;
     s.note = st.note;
-    if (const std::string why = NoMatterWhy(state, o->id); !why.empty())
-      throw std::runtime_error(StepName(i, o->name) +
-                               " cannot be checked: " + why);
-    std::vector<Body> mine;
-    for (const Body& body : ui::OccurrenceSubtreeBodies(state, o->id)) {
-      Body nb = body;
-      nb.shape = body.shape.DetachedUnlocated().LocatedLike(body.shape);
-      mine.push_back(std::move(nb));
+    if (st.IsPose()) {
+      // Every value set, the assembly solved there: walked in strides so
+      // a linkage stays on the branch it is on, as a motion study does.
+      if (!posedDoc)
+        posedDoc = std::make_unique<AssemblyDocument>(*cur);
+      AssemblyDocument& doc = *posedDoc;
+      const std::string at = "step " + std::to_string(i + 1) + " (a pose)";
+      struct Leg {
+        Mate* mate;
+        MateDof dof;
+        double from, to;
+      };
+      std::vector<Leg> legs;
+      int strides = 1;
+      json posed = json::array();
+      for (const SequencePose& p : st.pose) {
+        Mate* m = doc.FindMateById(p.mateId);
+        if (m == nullptr)
+          throw std::runtime_error(at + ": mate " + std::to_string(p.mateId) +
+                                   " is gone from the assembly");
+        if (!assembly::MateHasDof(m->type, p.dof))
+          throw std::runtime_error(
+              at + ": mate '" + m->name + "' has no " +
+              (p.dof == MateDof::Rotation ? "rotation" : "offset") +
+              " to pose");
+        const bool rot = p.dof == MateDof::Rotation;
+        const double to = rot ? glm::radians(p.value) : p.value;
+        const double from = assembly::MateDofValue(*m, p.dof);
+        // Ten degrees, or two millimetres, a stride.
+        strides = std::max(strides, static_cast<int>(std::ceil(
+                                        std::abs(to - from) /
+                                        (rot ? glm::radians(10.0) : 2.0))));
+        legs.push_back({m, p.dof, from, to});
+        posed.push_back(
+            {{"mate", m->name}, {rot ? "rotation_deg" : "offset_mm", p.value}});
+      }
+      std::map<uint64_t, glm::dmat4> was;
+      for (const Occurrence& o : doc.GetOccurrences())
+        was[o.id] = ui::OccurrenceMatrix(o);
+      assembly::SolveReport rep;
+      for (int k = 1; k <= strides; k++) {
+        for (const Leg& l : legs)
+          assembly::SetMateDof(*l.mate, l.dof,
+                               l.from + (l.to - l.from) * k / strides);
+        assembly::PropagateRelations(doc, legs[0].mate->id, parts);
+        rep = assembly::Solve(doc, parts, assemblies,
+                              {legs[0].mate->id, legs[0].dof},
+                              /*diagnose=*/false);
+      }
+      std::string why;
+      for (const Mate& m : doc.GetMates())
+        if (!m.error.empty() && why.empty())
+          why = "mate '" + m.name + "': " + m.error;
+      if (rep.erroredMates > 0 || !rep.loopsClosed)
+        throw std::runtime_error(
+            at + ": the assembly does not solve with mate '" +
+            legs[0].mate->name + "' posed" +
+            (why.empty() ? std::string{} : " (" + why + ")"));
+      for (const Leg& l : legs)
+        if (std::abs(assembly::MateDofValue(*l.mate, l.dof) - l.to) > 1e-6)
+          throw std::runtime_error(
+              at + ": the solve moved mate '" + l.mate->name +
+              "' off its pose (a relation or a closed loop drives it): pose "
+              "the mate that drives it");
+      for (const Occurrence& o : doc.GetOccurrences()) {
+        const glm::dmat4 now = ui::OccurrenceMatrix(o);
+        double d = 0.0;
+        for (int r = 0; r < 4; r++)
+          for (int q = 0; q < 4; q++)
+            d = std::max(d, std::abs(now[r][q] - was[o.id][r][q]));
+        if (d > 1e-9)
+          s.moved.push_back(o.name);
+      }
+      cur = posedDoc.get();
+      pose++;
+      auto f = assembly::Flatten(doc, parts, assemblies);
+      if (!f)
+        throw std::runtime_error(
+            at + ": the posed assembly cannot be walked: " + f.error());
+      flat = std::move(*f);
+      s.pose = pose;
+      s.posed = std::move(posed);
+      s.name = "pose";
+      c->steps.push_back(std::move(s));
+      continue;
     }
-    for (size_t k = 0; k < i; k++)
-      s.before.push_back(k);
-    s.base = i == 0;
+    s.occurrences = st.occurrences;
+    s.pose = pose;
+    for (uint64_t id : st.occurrences) {
+      const Occurrence* o = asmDoc.FindById(id);
+      if (o == nullptr)
+        throw std::runtime_error("step " + std::to_string(i + 1) +
+                                 " places occurrence " + std::to_string(id) +
+                                 ", which is gone from the assembly");
+      s.names.push_back(o->name);
+    }
+    for (size_t k = 0; k < s.names.size(); k++)
+      s.name += (k ? " + " : "") + s.names[k];
+    for (size_t k = 0; k < st.occurrences.size(); k++)
+      if (const std::string why = NoMatterWhy(state, st.occurrences[k]);
+          !why.empty())
+        throw std::runtime_error(StepName(i, s.name) +
+                                 " cannot be checked: " + why);
+    std::vector<Body> mine;
+    for (uint64_t id : st.occurrences)
+      for (const Body& b : pieceAt(id).bodies)
+        mine.push_back(b);
+    for (size_t k : placing)
+      for (uint64_t id : c->steps[k].occurrences)
+        pieceAt(id);
+    s.before = placing;
+    s.base = placing.empty();
+    const bool group = st.occurrences.size() > 1;
     // The path.
     s.opt.allowanceMm = seq.allowanceMm;
     s.opt.travelMm = st.distanceMm;
     s.opt.turnDeg = st.turnDeg;
     s.opt.screw = st.thread;
+    if (group)
+      s.opt.rotations = 1; // a group goes in as it is assembled
     if (st.direction) {
       s.moves = glm::normalize(*st.direction);
       s.eitherWay = false;
@@ -2926,69 +3077,112 @@ std::shared_ptr<const SequenceCheck> ReadSequenceCheck(ui::AppState& state) {
       } else {
         glm::dvec3 lo, hi;
         if (!Measure::WorldBounds(mine, glm::dmat4(1.0), lo, hi))
-          throw std::runtime_error(StepName(i, o->name) +
+          throw std::runtime_error(StepName(i, s.name) +
                                    " cannot be checked: it has no extent");
         s.point = 0.5 * (lo + hi);
       }
       s.pathFrom = "the step's direction";
     } else if (!s.base) {
-      // The mate that seats it on something placed before it.
-      const Mate* mate = nullptr;
-      if (st.mateId != 0) {
-        mate = asmDoc.FindMateById(st.mateId);
-        if (mate == nullptr ||
-            (mate->a.occurrenceId != o->id && mate->b.occurrenceId != o->id))
-          throw std::runtime_error(StepName(i, o->name) + ": mate " +
-                                   std::to_string(st.mateId) +
-                                   " does not join it to anything");
-      } else {
-        int n = 0;
-        for (const Mate& m : asmDoc.GetMates()) {
-          const uint64_t other = m.a.occurrenceId == o->id   ? m.b.occurrenceId
-                                 : m.b.occurrenceId == o->id ? m.a.occurrenceId
+      // Each member's seat on something placed before it: the axis of its
+      // own cylinder at the mate that seats it. A group's is the one its
+      // seated members share.
+      struct Seat {
+        std::string name, mate;
+        glm::dvec3 point, dir;
+      };
+      std::vector<Seat> seats;
+      for (size_t m = 0; m < st.occurrences.size(); m++) {
+        const uint64_t id = st.occurrences[m];
+        const Mate* mate = nullptr;
+        if (st.mateId != 0) {
+          const Mate* named = asmDoc.FindMateById(st.mateId);
+          if (named == nullptr)
+            throw std::runtime_error(StepName(i, s.name) + ": mate " +
+                                     std::to_string(st.mateId) +
+                                     " is gone from the assembly");
+          if (named->a.occurrenceId == id || named->b.occurrenceId == id)
+            mate = named;
+          else if (group)
+            continue;
+          else
+            throw std::runtime_error(StepName(i, s.name) + ": mate '" +
+                                     named->name +
+                                     "' does not join it to anything");
+        } else {
+          int n = 0;
+          for (const Mate& mt : cur->GetMates()) {
+            const uint64_t other = mt.a.occurrenceId == id   ? mt.b.occurrenceId
+                                   : mt.b.occurrenceId == id ? mt.a.occurrenceId
                                                              : 0;
-          if (other != 0 && placed.contains(other)) {
-            mate = &m;
-            n++;
+            if (other != 0 && placed.contains(other)) {
+              mate = &mt;
+              n++;
+            }
           }
+          if (n == 0 && group)
+            continue; // seated on another member, not on what is placed
+          if (n != 1)
+            throw std::runtime_error(
+                StepName(i, s.name) + " cannot be checked: " +
+                (group ? "'" + s.names[m] + "': " : std::string{}) +
+                (n == 0 ? "no mate joins it to an occurrence placed before it"
+                        : "several mates join it to occurrences placed "
+                          "before it") +
+                ", so give the step its `direction` (or name its `mate`)");
         }
-        if (n != 1)
+        const Connector& con = mate->a.occurrenceId == id ? mate->a : mate->b;
+        const auto frame = connectorWorld(con);
+        if (!frame)
+          throw std::runtime_error(StepName(i, s.name) + ": mate '" +
+                                   mate->name + "' has no frame to read");
+        const std::vector<Body>& own = pieceAt(id).bodies;
+        glm::dvec3 lo, hi;
+        if (!Measure::WorldBounds(own, glm::dmat4(1.0), lo, hi))
+          throw std::runtime_error(StepName(i, s.name) +
+                                   " cannot be checked: '" + s.names[m] +
+                                   "' has no extent");
+        const double tol = std::max(0.5, 0.02 * glm::length(hi - lo));
+        const auto cyl = SeatedCylinder(own, glm::dvec3((*frame)[3]), tol);
+        if (!cyl)
           throw std::runtime_error(
-              StepName(i, o->name) + " cannot be checked: " +
-              (n == 0 ? "no mate joins it to an occurrence placed before it"
-                      : "several mates join it to occurrences placed before "
-                        "it") +
-              ", so give the step its `direction` (or name its `mate`)");
+              StepName(i, s.name) + " cannot be checked: no cylinder of " +
+              (group ? "'" + s.names[m] + "'" : std::string("its part")) +
+              " runs through mate '" + mate->name +
+              "''s seat to slide along, so give the step its `direction`");
+        seats.push_back({s.names[m], mate->name, cyl->first, cyl->second});
       }
-      const Connector& mine0 =
-          mate->a.occurrenceId == o->id ? mate->a : mate->b;
-      const auto frame = ui::ConnectorWorldFrame(state, mine0);
-      if (!frame)
-        throw std::runtime_error(StepName(i, o->name) + ": mate '" +
-                                 mate->name + "' has no frame to read");
-      glm::dvec3 lo, hi;
-      if (!Measure::WorldBounds(mine, glm::dmat4(1.0), lo, hi))
-        throw std::runtime_error(StepName(i, o->name) +
-                                 " cannot be checked: it has no extent");
-      const double tol = std::max(0.5, 0.02 * glm::length(hi - lo));
-      const auto cyl = SeatedCylinder(mine, glm::dvec3((*frame)[3]), tol);
-      if (!cyl)
-        throw std::runtime_error(StepName(i, o->name) +
-                                 " cannot be checked: no cylinder of its "
-                                 "part runs through mate '" +
-                                 mate->name +
-                                 "''s seat to slide "
-                                 "along, so give the step its `direction`");
-      s.point = cyl->first;
-      s.moves = cyl->second;
+      if (seats.empty())
+        throw std::runtime_error(
+            StepName(i, s.name) +
+            " cannot be checked: no member is mated to an occurrence placed "
+            "before it, so give the step its `direction`");
+      for (const Seat& x : seats)
+        if (glm::length(glm::cross(x.dir, seats[0].dir)) > 1e-6)
+          throw std::runtime_error(StepName(i, s.name) +
+                                   " cannot be checked: its members have no "
+                                   "common seat axis ('" +
+                                   seats[0].name + "' along " +
+                                   fmt::format("[{:.3f}, {:.3f}, {:.3f}]",
+                                               seats[0].dir.x, seats[0].dir.y,
+                                               seats[0].dir.z) +
+                                   ", '" + x.name + "' along " +
+                                   fmt::format("[{:.3f}, {:.3f}, {:.3f}]",
+                                               x.dir.x, x.dir.y, x.dir.z) +
+                                   "), so give the step its `direction`");
+      s.point = seats[0].point;
+      s.moves = seats[0].dir;
       s.eitherWay = true;
-      s.pathFrom = "the axis of its cylinder at mate '" + mate->name + "'";
+      s.pathFrom =
+          group ? "the axis its members' cylinders share at mate '" +
+                      seats[0].mate + "'"
+                : "the axis of its cylinder at mate '" + seats[0].mate + "'";
     }
     if (st.origin && !st.direction)
       s.point = *st.origin;
-    c->bodies.push_back(std::move(mine));
+    placing.push_back(c->steps.size());
     c->steps.push_back(std::move(s));
-    placed.insert(o->id);
+    for (uint64_t id : st.occurrences)
+      placed.insert(id);
   }
   for (const Occurrence& o : asmDoc.GetOccurrences())
     if (!placed.contains(o.id) && NoMatterWhy(state, o.id).empty())
@@ -3000,21 +3194,45 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
                       std::atomic<double>& fraction) {
   json steps = json::array();
   bool pass = c.missing.empty();
+  const auto piece = [&](int pose,
+                         uint64_t occ) -> const SequenceCheck::Piece& {
+    return c.pieces.at({pose, occ});
+  };
   for (size_t i = 0; i < c.steps.size(); i++) {
     if (cancel.load())
       throw std::runtime_error("check_assembly_sequence: cancelled");
     const SequenceCheck::Step& s = c.steps[i];
-    json row{{"step", i + 1}, {"occurrence", s.occurrence}, {"name", s.name}};
+    json row{{"step", i + 1}};
+    if (s.occurrences.empty()) {
+      row["pose"] = s.posed;
+      row["moved"] = s.moved;
+      row["pass"] = true;
+      if (!s.note.empty())
+        row["note"] = s.note;
+      steps.push_back(std::move(row));
+      continue;
+    }
+    if (s.occurrences.size() == 1)
+      row["occurrence"] = s.occurrences[0];
+    else
+      row["occurrences"] = s.occurrences;
+    row["name"] = s.name;
+    if (s.pose != 0)
+      row["at_pose"] = s.pose;
     if (!s.note.empty())
       row["note"] = s.note;
     json against = json::array();
-    std::vector<Body> fixed;
-    std::vector<size_t> stepOf; // fixed body -> the step that placed it
+    std::vector<Body> fixed, moving;
+    std::vector<std::string> nameOf; // fixed body -> its occurrence
     for (size_t k : s.before) {
-      against.push_back(c.steps[k].name);
-      for (const Body& b : c.bodies[k]) {
-        fixed.push_back(b);
-        stepOf.push_back(k);
+      const SequenceCheck::Step& b = c.steps[k];
+      for (size_t m = 0; m < b.occurrences.size(); m++) {
+        against.push_back(b.names[m]);
+        const SequenceCheck::Piece& pc = piece(s.pose, b.occurrences[m]);
+        for (const Body& body : pc.bodies) {
+          fixed.push_back(body);
+          nameOf.push_back(b.names[m]);
+        }
       }
     }
     row["against"] = against;
@@ -3024,6 +3242,9 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
       steps.push_back(std::move(row));
       continue;
     }
+    for (uint64_t id : s.occurrences)
+      for (const Body& body : piece(s.pose, id).bodies)
+        moving.push_back(body);
     Measure::InsertionOptions opt = s.opt;
     // The axis Insertion slides along points away from the way it moves:
     // `positive` comes from that side.
@@ -3032,7 +3253,7 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
     std::atomic<double> inner{0.0};
     const auto t0 = std::chrono::steady_clock::now();
     const auto r =
-        Measure::Insertion(c.bodies[i], glm::dmat4(1.0), fixed, glm::dmat4(1.0),
+        Measure::Insertion(moving, glm::dmat4(1.0), fixed, glm::dmat4(1.0),
                            s.point, -s.moves, opt, &cancel, &inner);
     row["seconds"] =
         std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
@@ -3051,9 +3272,9 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
       row["pass"] = r->pass;
       // What it meets worst on the way: the occurrence to look at.
       if (r->best.worstFixedBody >= 0 &&
-          static_cast<size_t>(r->best.worstFixedBody) < stepOf.size())
+          static_cast<size_t>(r->best.worstFixedBody) < nameOf.size())
         row["worst_against"] =
-            c.steps[stepOf[static_cast<size_t>(r->best.worstFixedBody)]].name;
+            nameOf[static_cast<size_t>(r->best.worstFixedBody)];
       for (const char* k :
            {"rotation_deg", "travel_mm", "interfering_mm", "press_mm",
             "excess_mm", "deeper_mm", "from_mm", "worst_depth_mm", "lead_in_mm",

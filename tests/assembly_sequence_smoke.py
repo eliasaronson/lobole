@@ -18,7 +18,14 @@ half-bore, and a cap over it:
   direction, an unknown step key and an occurrence named twice are refused;
 - the sequence is saved and opened again; the requirement kind
   `assembly_sequence` passes and fails as the RPC does; the check runs as
-  an `assembly_sequence` job.
+  an `assembly_sequence` job;
+- two wheels whose disks overlap in plan at two heights block each other
+  one at a time, and go home as a GROUP along their common seat axis; a
+  group whose members' seat axes are not parallel is refused; the groups
+  survive save and reopen;
+- a cap fastened on a crank's pin, lowered under a bar, fails with the
+  crank at rest and passes with it turned by a POSE step; a pose of a mate
+  with no such freedom is refused.
 
 Usage: assembly_sequence_smoke.py <path-to-designer-binary>
 """
@@ -65,6 +72,170 @@ def fastened(d, name, a, b):
 
 def check(d):
     return d.call("check_assembly_sequence")
+
+
+def frames(d, specs):
+    """Explicit frames, Z up: {name: origin}."""
+    for name, origin in specs.items():
+        d.call("add_feature", feature={
+            "type": "Frame", "name": name, "kind": "explicit",
+            "origin": list(origin), "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]})
+
+
+def frame_mate(d, kind, name, a, fa, b, fb):
+    return d.call("add_mate", type=kind, name=name,
+                  a={"occurrence": a, "frame": fa},
+                  b={"occurrence": b, "frame": fb}, flipped=False)["id"]
+
+
+def groups(d):
+    """Two wheels in a plate, each disk over the other's at another height:
+    one at a time each is blocked by the other, together they go home."""
+    d.call("add_part", name="gplate")
+    box(d, (-20, -20, -10), (60, 40, 10), "gplate")
+    cylinder(d, (0, 0, -11), "z", 3.2, 12, "hole a", mode="cut")
+    cylinder(d, (20, 0, -11), "z", 3.2, 12, "hole b", mode="cut")
+    frames(d, {"a": (0, 0, 0), "b": (20, 0, 0)})
+    d.call("add_feature", feature={
+        "type": "Frame", "name": "c", "kind": "explicit",
+        "origin": [0, 40, 20], "z_axis": [1, 0, 0], "x_axis": [0, 1, 0]})
+    d.call("add_part", name="wheel a")
+    cylinder(d, (0, 0, -10), "z", 3.0, 40, "arbor a")
+    cylinder(d, (0, 0, 20), "z", 14.0, 3, "disk a", mode="add")
+    frames(d, {"seat": (0, 0, 0)})
+    d.call("add_part", name="wheel b")
+    cylinder(d, (20, 0, -10), "z", 3.0, 40, "arbor b")
+    cylinder(d, (20, 0, 25), "z", 14.0, 3, "upper b", mode="add")
+    cylinder(d, (20, 0, 12), "z", 14.0, 3, "lower b", mode="add")
+    frames(d, {"seat": (20, 0, 0)})
+    d.call("add_part", name="crossbar")
+    cylinder(d, (-5, 40, 20), "x", 2.0, 10, "crossbar")
+    d.call("add_feature", feature={
+        "type": "Frame", "name": "seat", "kind": "explicit",
+        "origin": [0, 40, 20], "z_axis": [1, 0, 0], "x_axis": [0, 1, 0]})
+    d.call("add_assembly", name="wheels")
+    d.call("set_active_part", part="wheels")
+    pl = d.call("add_occurrence", part="gplate", name="gplate",
+                fixed=True)["id"]
+    wa = d.call("add_occurrence", part="wheel a", name="wheel a")["id"]
+    wb = d.call("add_occurrence", part="wheel b", name="wheel b")["id"]
+    cb = d.call("add_occurrence", part="crossbar", name="crossbar")["id"]
+    frame_mate(d, "revolute", "a in plate", pl, "a", wa, "seat")
+    frame_mate(d, "revolute", "b in plate", pl, "b", wb, "seat")
+    d.call("add_mate", type="fastened", name="crossbar on plate",
+           a={"occurrence": pl, "frame": "c"},
+           b={"occurrence": cb, "frame": "seat"}, flipped=False)
+    tail = {"occurrence": "crossbar", "direction": [0, 0, -1]}
+    for first, second in (("wheel a", "wheel b"), ("wheel b", "wheel a")):
+        d.call("set_assembly_sequence",
+               steps=[{"occurrence": "gplate"}, {"occurrence": first},
+                      {"occurrence": second}, tail])
+        r = check(d)
+        expect(r["steps"][1]["pass"], f"{first} alone goes in: {r}")
+        blocked = r["steps"][2]
+        expect(not r["pass"] and not blocked["pass"]
+               and blocked.get("worst_against") == first,
+               f"{second} after {first} is blocked by it: {blocked}")
+    d.call("set_assembly_sequence",
+           steps=[{"occurrence": "gplate"},
+                  {"occurrences": ["wheel a", "wheel b"],
+                   "note": "meshed, together"}, tail])
+    r = check(d)
+    g = r["steps"][1]
+    expect(r["pass"] and g["name"] == "wheel a + wheel b"
+           and g["against"] == ["gplate"] and "share" in g["path"]["from"]
+           and abs(abs(g["path"]["moves"][2]) - 1.0) < 1e-6,
+           f"together they go home along their common axis: {r}")
+    # The crossbar's seat axis is X: no axis is common to it and a wheel.
+    d.call("set_assembly_sequence",
+           steps=[{"occurrence": "gplate"},
+                  {"occurrences": ["wheel a", "crossbar"]},
+                  {"occurrence": "wheel b", "direction": [0, 0, -1]}])
+    refused(d, "check_assembly_sequence", "no common seat axis")
+    refused(d, "set_assembly_sequence", "a group of two or more",
+            steps=[{"occurrence": "gplate"}, {"occurrences": ["wheel a"]}])
+    refused(d, "set_assembly_sequence", "states one of",
+            steps=[{"occurrence": "gplate", "occurrences": ["wheel a"]}])
+    # Saved and opened again.
+    steps = [{"occurrence": "gplate"},
+             {"occurrences": ["wheel a", "wheel b"]}, tail]
+    d.call("set_assembly_sequence", steps=steps)
+    path = os.path.join(tempfile.mkdtemp(), "groups.dsgn")
+    d.call("save_project", path=path)
+    d.call("open_project", path=path)
+    d.call("set_active_part", part="wheels")
+    got = d.call("get_assembly_sequence")
+    expect(got["steps"][1].get("names") == ["wheel a", "wheel b"],
+           f"the group comes back: {got}")
+    expect(check(d)["pass"], "and still goes home")
+
+
+def poses(d):
+    """A crank with a pin, a cap fastened on the pin, and a bar over the pin
+    at rest: the cap lowered at rest hits the bar; with the crank turned a
+    quarter by a pose step it goes home."""
+    d.call("add_part", name="frame")
+    box(d, (-50, -50, -10), (110, 100, 10), "frame base")
+    box(d, (45, -10, 0), (10, 20, 35), "pillar", mode="add")
+    box(d, (20, -10, 30), (35, 20, 5), "bar", mode="add")
+    d.call("add_part", name="crank")
+    cylinder(d, (0, 0, 0), "z", 8.0, 5, "hub")
+    box(d, (0, -4, 0), (30, 8, 5), "arm", mode="add")
+    cylinder(d, (30, 0, 5), "z", 3.0, 10, "crank pin", mode="add")
+    d.call("add_part", name="pin cap")
+    cylinder(d, (30, 0, 15), "z", 5.0, 5, "pin cap")
+    d.call("add_assembly", name="cranked")
+    d.call("set_active_part", part="cranked")
+    fr = d.call("add_occurrence", part="frame", name="frame",
+                fixed=True)["id"]
+    cr = d.call("add_occurrence", part="crank", name="crank")["id"]
+    cp = d.call("add_occurrence", part="pin cap", name="cap")["id"]
+    d.call("add_mate", type="revolute", name="crank bearing",
+           a={"occurrence": fr, "origin": True},
+           b={"occurrence": cr, "origin": True}, flipped=False)
+    fastened(d, "cap on pin", cr, cp)
+    down = [0, 0, -1]
+    turned = {"pose": [{"mate": "crank bearing", "rotation_deg": 90.0}],
+              "note": "the crank a quarter turned"}
+    rest = {"pose": [{"mate": "crank bearing", "rotation_deg": 0.0}]}
+    d.call("set_assembly_sequence",
+           steps=[{"occurrence": "frame"}, turned,
+                  {"occurrence": "crank", "direction": down}, rest,
+                  {"occurrence": "cap", "direction": down}])
+    r = check(d)
+    cap = r["steps"][4]
+    expect(r["steps"][2]["pass"], f"the crank goes in turned: {r}")
+    expect(not r["pass"] and not cap["pass"]
+           and cap.get("worst_against") == "frame",
+           f"the cap at rest hits the bar: {cap}")
+    expect(r["steps"][1]["pose"][0]["mate"] == "crank bearing"
+           and "crank" in r["steps"][1]["moved"],
+           f"a pose step says what it moved: {r['steps'][1]}")
+    d.call("set_assembly_sequence",
+           steps=[{"occurrence": "frame"}, turned,
+                  {"occurrence": "crank", "direction": down},
+                  {"occurrence": "cap", "direction": down}])
+    r = check(d)
+    expect(r["pass"] and r["steps"][3].get("at_pose") == 1,
+           f"with the crank turned the cap goes home: {r}")
+    refused(d, "set_assembly_sequence", "has no rotation to pose",
+            steps=[{"occurrence": "frame"},
+                   {"pose": [{"mate": "cap on pin", "rotation_deg": 10.0}]}])
+    refused(d, "set_assembly_sequence", "has no `direction`",
+            steps=[{"occurrence": "frame"},
+                   {"pose": [{"mate": "crank bearing",
+                              "rotation_deg": 10.0}],
+                    "direction": down}])
+    # Saved and opened again, the pose is still there and still holds.
+    path = os.path.join(tempfile.mkdtemp(), "poses.dsgn")
+    d.call("save_project", path=path)
+    d.call("open_project", path=path)
+    d.call("set_active_part", part="cranked")
+    got = d.call("get_assembly_sequence")
+    expect(got["steps"][1]["pose"][0]["rotation_deg"] == 90.0
+           and got["steps"][1]["pose"][0]["mate_name"] == "crank bearing",
+           f"the pose comes back: {got}")
+    expect(check(d)["pass"], "and the cap still goes home at it")
 
 
 def main(binary):
@@ -217,6 +388,8 @@ def main(binary):
                        "note": "down its bolts"}])
         r = check(d)
         expect(r["pass"], f"the cap lowered along its bolts goes home: {r}")
+        groups(d)
+        poses(d)
         print("assembly sequence smoke: ok")
 
 

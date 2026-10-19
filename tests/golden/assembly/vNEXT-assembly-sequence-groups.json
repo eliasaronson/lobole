@@ -1,0 +1,153 @@
+{
+  "format": "designer-document",
+  "version": 188,
+  "kind": "assembly",
+  "occurrences": [
+    {
+      "type": "Occurrence",
+      "id": 1,
+      "name": "Block",
+      "part_id": 1,
+      "ref_kind": "part",
+      "configuration_id": 0,
+      "part_version": null,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "visible": true,
+      "fixed": true
+    },
+    {
+      "type": "Occurrence",
+      "id": 2,
+      "name": "Cap",
+      "part_id": 2,
+      "ref_kind": "part",
+      "configuration_id": 0,
+      "part_version": null,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "visible": true,
+      "fixed": false
+    },
+    {
+      "type": "Occurrence",
+      "id": 3,
+      "name": "Pin",
+      "part_id": 3,
+      "ref_kind": "part",
+      "configuration_id": 0,
+      "part_version": null,
+      "transform": {
+        "position": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "orientation": [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      },
+      "visible": true,
+      "fixed": false
+    }
+  ],
+  "mates": [
+    {
+      "type": "Mate",
+      "id": 4,
+      "name": "cap on block",
+      "mate_type": "fastened",
+      "a": {
+        "occurrence": 1,
+        "anchor": {
+          "origin": true
+        }
+      },
+      "b": {
+        "occurrence": 2,
+        "anchor": {
+          "origin": true
+        }
+      },
+      "flipped": false,
+      "offset": 0.0,
+      "rotation": 0.0
+    },
+    {
+      "type": "Mate",
+      "id": 5,
+      "name": "pin in block",
+      "mate_type": "revolute",
+      "a": {
+        "occurrence": 1,
+        "anchor": {
+          "origin": true
+        }
+      },
+      "b": {
+        "occurrence": 3,
+        "anchor": {
+          "origin": true
+        }
+      },
+      "flipped": false,
+      "offset": 0.0,
+      "rotation": 0.0
+    }
+  ],
+  "sequence": {
+    "allowance_mm": 0.1,
+    "steps": [
+      {
+        "occurrence": 1,
+        "note": "the base"
+      },
+      {
+        "pose": [
+          {
+            "mate": 5,
+            "rotation_deg": 90.0
+          }
+        ],
+        "note": "the pin's mate turned"
+      },
+      {
+        "occurrences": [
+          2,
+          3
+        ],
+        "direction": [
+          0.0,
+          0.0,
+          -1.0
+        ],
+        "note": "cap and pin together"
+      }
+    ]
+  }
+}

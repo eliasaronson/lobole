@@ -777,7 +777,7 @@ TEST_CASE("Frozen v187 assembly golden carries its sequence",
   const AssemblySequence& seq = asmDoc->GetSequence();
   REQUIRE(seq.steps.size() == 3);
   CHECK(seq.allowanceMm == 0.1);
-  CHECK(seq.steps[0].occurrenceId == 1);
+  CHECK(seq.steps[0].occurrences == std::vector<uint64_t>{1});
   CHECK(seq.steps[0].note == "the base");
   CHECK_FALSE(seq.steps[0].direction);
   const SequenceStep& cap = seq.steps[1];
@@ -806,4 +806,42 @@ TEST_CASE("Frozen v187 assembly golden carries its sequence",
   bad["steps"][0]["dir"] = {0, 0, 1};
   CHECK_THROWS_WITH(DocumentIO::AssemblySequenceFromJson(bad),
                     Catch::Matchers::ContainsSubstring("accepted"));
+}
+
+// The vNEXT golden: a sequence with a pose step and a group step
+// (docs/assemblies/README.md#assembly-sequences), round-tripped as written.
+TEST_CASE("Frozen vNEXT assembly golden carries groups and poses",
+          "[assembly][golden]") {
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
+                          "assembly" / "vNEXT-assembly-sequence-groups.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc);
+  const AssemblySequence& seq = asmDoc->GetSequence();
+  REQUIRE(seq.steps.size() == 3);
+  CHECK(seq.steps[0].occurrences == std::vector<uint64_t>{1});
+  const SequenceStep& pose = seq.steps[1];
+  CHECK(pose.IsPose());
+  REQUIRE(pose.pose.size() == 1);
+  CHECK(pose.pose[0].mateId == 5);
+  CHECK(pose.pose[0].dof == MateDof::Rotation);
+  CHECK(pose.pose[0].value == 90.0);
+  const SequenceStep& group = seq.steps[2];
+  CHECK(group.occurrences == std::vector<uint64_t>{2, 3});
+  REQUIRE(group.direction);
+  CHECK(group.direction->z == -1.0);
+
+  const fs::path out = fs::temp_directory_path() / "seq-groups-roundtrip.json";
+  REQUIRE(testio::SaveAssembly(*asmDoc, out.string()));
+  auto again = testio::LoadAssembly(out.string());
+  REQUIRE(again);
+  CHECK(DocumentIO::AssemblySequenceToJson(again->GetSequence()) ==
+        DocumentIO::AssemblySequenceToJson(seq));
+  fs::remove(out);
+
+  // A step stating two of occurrence, occurrences and pose is refused.
+  nlohmann::json bad = DocumentIO::AssemblySequenceToJson(seq);
+  bad["steps"][1]["occurrence"] = 1;
+  CHECK_THROWS_WITH(DocumentIO::AssemblySequenceFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("one of"));
 }

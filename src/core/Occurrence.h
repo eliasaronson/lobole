@@ -592,14 +592,27 @@ struct Result;
 // MotionResult).
 struct MotionResultCache;
 
+// One mate value a pose step sets
+// (docs/assemblies/README.md#assembly-sequences): a revolute's or cylindrical's
+// angle, a slider's or cylindrical's travel.
+struct SequencePose {
+  uint64_t mateId = 0;
+  MateDof dof = MateDof::Rotation;
+  double value = 0.0; // degrees for a rotation, mm for an offset
+};
+
 // One step of an assembly sequence
-// (docs/assemblies/README.md#assembly-sequences): the occurrence it places
-// and the path it goes home along. Checked against every occurrence placed
-// before it, not only its mate partner.
+// (docs/assemblies/README.md#assembly-sequences): the occurrences it places
+// and the path they go home along -- one, or a GROUP that moves as one
+// along one path -- or, with no occurrences, a POSE: mate values set, the
+// assembly solved there, and every later step checked at it. Checked
+// against every occurrence placed before it, not only its mate partner.
 struct SequenceStep {
-  uint64_t occurrenceId = 0;
+  std::vector<uint64_t> occurrences; // empty: a pose step
+  std::vector<SequencePose> pose;    // a pose step's values
   // The way it moves going home, in the assembly's frame (unit). Unset: the
-  // axis of the part's own cylinder that its mate seats, both ways tried.
+  // axis of the part's own cylinder that its mate seats, both ways tried
+  // (a group's: its members' common one).
   std::optional<glm::dvec3> direction;
   // A point on the path's line, assembly frame. Unset: the cylinder's axis,
   // or the part's centre with an explicit direction.
@@ -611,6 +624,7 @@ struct SequenceStep {
   double turnDeg = 0.0;     // turned about the path over it (a bayonet)
   bool thread = false;      // it goes on by its thread
   std::string note;         // what the step is, for a person
+  bool IsPose() const { return occurrences.empty(); }
 };
 
 struct AssemblySequence {
@@ -622,7 +636,8 @@ struct AssemblySequence {
 
 class AssemblyDocument {
 public:
-  // The order its parts go together in, and how (v187).
+  // The order its parts go together in, and how (v187; groups and poses
+  // vNEXT).
   const AssemblySequence& GetSequence() const { return m_sequence; }
   void SetSequence(AssemblySequence s) { m_sequence = std::move(s); }
 

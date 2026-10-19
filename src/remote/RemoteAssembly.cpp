@@ -699,7 +699,16 @@ static constexpr MethodDoc AssemblyMethods[] = {
     {"set_assembly_sequence",
      "State the order the active assembly goes together in, and how "
      "(docs/assemblies/README.md#assembly-sequences): {steps: [{occurrence: "
-     "a top-level occurrence id or name; direction?: [x, y, z] the way it "
+     "a top-level occurrence id or name -- or occurrences: two or more, a "
+     "GROUP that moves as one along one path, checked against what was "
+     "placed before it and not against itself, its default path its "
+     "members' common seat axis (refused when their axes are not "
+     "parallel) -- or pose: [{mate, rotation_deg | offset_mm}], a step "
+     "that places nothing: the assembly is solved with those mate values "
+     "(a revolute's or cylindrical's angle, a slider's or cylindrical's "
+     "travel) held, every part moves to it, and later steps are checked "
+     "there (a pose that does not solve is refused naming the mate); "
+     "direction?: [x, y, z] the way it "
      "moves going home, in the assembly's frame (default: the axis of its "
      "own cylinder that its mate seats, both ways tried); origin_mm?: a "
      "point on the path's line (default: that cylinder's axis, or the "
@@ -713,14 +722,16 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "made, as check_insertion's}. Replaces the sequence; an empty `steps` "
      "removes it. An unknown step key, an occurrence named twice or not in "
      "the assembly, a mate that does not join its step's occurrence, a "
-     "direction with no length or a negative distance is refused before "
+     "direction with no length, a negative distance, a pose of a mate "
+     "without that freedom or a pose step with a path is refused before "
      "anything changes. One undo step. check_assembly_sequence checks it; "
      "the requirement kind `assembly_sequence` states it checked.",
      "steps:object[], allowance_mm?:number", remote::NoFlags,
      "steps:object[], allowance_mm:number"},
     {"get_assembly_sequence",
      "The active assembly's sequence, as set_assembly_sequence states it, "
-     "each step with its occurrence's name (and its mate's).",
+     "each step with its occurrence's name (a group's `names`, a pose's "
+     "`mate_name`s, and its mate's).",
      "", remote::NoFlags, "steps:object[], allowance_mm:number"},
 };
 std::span<const MethodDoc> AssemblyMethodDocs() { return AssemblyMethods; }
@@ -730,10 +741,32 @@ namespace {
 json SequenceJson(const AssemblyDocument& a) {
   const AssemblySequence& seq = a.GetSequence();
   json steps = json::array();
+  const auto nameOf = [&](uint64_t id) {
+    const Occurrence* o = a.FindById(id);
+    return o ? o->name : std::string{};
+  };
   for (const SequenceStep& st : seq.steps) {
-    json j{{"occurrence", st.occurrenceId}};
-    if (const Occurrence* o = a.FindById(st.occurrenceId))
-      j["name"] = o->name;
+    json j = json::object();
+    if (st.IsPose()) {
+      json pose = json::array();
+      for (const SequencePose& p : st.pose) {
+        json pj{{"mate", p.mateId}};
+        if (const Mate* m = a.FindMateById(p.mateId))
+          pj["mate_name"] = m->name;
+        pj[p.dof == MateDof::Rotation ? "rotation_deg" : "offset_mm"] = p.value;
+        pose.push_back(std::move(pj));
+      }
+      j["pose"] = std::move(pose);
+    } else if (st.occurrences.size() == 1) {
+      j["occurrence"] = st.occurrences[0];
+      j["name"] = nameOf(st.occurrences[0]);
+    } else {
+      j["occurrences"] = st.occurrences;
+      json names = json::array();
+      for (uint64_t id : st.occurrences)
+        names.push_back(nameOf(id));
+      j["names"] = std::move(names);
+    }
     if (st.direction)
       j["direction"] = {st.direction->x, st.direction->y, st.direction->z};
     if (st.origin)
@@ -756,6 +789,16 @@ json SequenceJson(const AssemblyDocument& a) {
   return {{"steps", steps}, {"allowance_mm", seq.allowanceMm}};
 }
 
+const Mate* MateByRef(const AssemblyDocument& a, const json& mv) {
+  if (mv.is_number_unsigned())
+    return a.FindMateById(mv.get<uint64_t>());
+  if (mv.is_string())
+    for (const Mate& x : a.GetMates())
+      if (x.name == mv.get<std::string>())
+        return &x;
+  return nullptr;
+}
+
 // Every step read and checked before anything changes.
 AssemblySequence ReadSequence(const AssemblyDocument& a, const RpcParams& p) {
   AssemblySequence seq;
@@ -775,34 +818,118 @@ AssemblySequence ReadSequence(const AssemblyDocument& a, const RpcParams& p) {
     const std::string at = "step " + std::to_string(i + 1);
     if (!sj.is_object())
       throw std::runtime_error(at + " is an object {occurrence, ...}");
-    static const char* kKeys[] = {"occurrence", "direction",   "origin_mm",
-                                  "mate",       "distance_mm", "turn_deg",
-                                  "thread",     "note"};
+    static const char* kKeys[] = {
+        "occurrence", "occurrences", "pose",     "direction", "origin_mm",
+        "mate",       "distance_mm", "turn_deg", "thread",    "note"};
     for (auto it = sj.begin(); it != sj.end(); ++it)
       if (std::none_of(std::begin(kKeys), std::end(kKeys),
                        [&](const char* k) { return it.key() == k; }))
         throw std::runtime_error(
             at + ": unknown key '" + it.key() +
-            "' (accepted: occurrence, direction, origin_mm, mate, "
-            "distance_mm, turn_deg, thread, note)");
-    if (!sj.contains("occurrence"))
-      throw std::runtime_error(at + " needs `occurrence`, what it places");
+            "' (accepted: occurrence, occurrences, pose, direction, "
+            "origin_mm, mate, distance_mm, turn_deg, thread, note)");
+    const int what = int(sj.contains("occurrence")) +
+                     int(sj.contains("occurrences")) + int(sj.contains("pose"));
+    if (what != 1)
+      throw std::runtime_error(
+          at + (what == 0 ? " needs" : " states one of") +
+          " `occurrence` (what it places), `occurrences` (a group placed "
+          "as one) or `pose` (mate values set between steps)");
     SequenceStep st;
-    const json& ov = sj.at("occurrence");
-    const Occurrence* o = nullptr;
-    if (ov.is_number_unsigned())
-      o = a.FindById(ov.get<uint64_t>());
-    else if (ov.is_string())
-      for (const Occurrence& x : a.GetOccurrences())
-        if (x.name == ov.get<std::string>())
-          o = &x;
-    if (o == nullptr)
-      throw std::runtime_error(at + ": no top-level occurrence " + ov.dump() +
-                               " (an id or name, see list_occurrences)");
-    if (!seen.insert(o->id).second)
-      throw std::runtime_error(at + ": '" + o->name +
-                               "' is placed by an earlier step already");
-    st.occurrenceId = o->id;
+    if (sj.contains("note")) {
+      if (!sj.at("note").is_string())
+        throw std::runtime_error(at + ": note is a string");
+      st.note = sj.at("note").get<std::string>();
+    }
+    if (sj.contains("pose")) {
+      for (const char* k : {"direction", "origin_mm", "mate", "distance_mm",
+                            "turn_deg", "thread"})
+        if (sj.contains(k))
+          throw std::runtime_error(at +
+                                   ": a pose step places nothing, so it "
+                                   "has no `" +
+                                   std::string(k) +
+                                   "` (accepted with pose: note)");
+      const json& pv = sj.at("pose");
+      if (!pv.is_array() || pv.empty())
+        throw std::runtime_error(at + ": pose is a non-empty array of {mate, "
+                                      "rotation_deg | offset_mm}");
+      std::set<std::pair<uint64_t, int>> posed;
+      for (const json& e : pv) {
+        if (!e.is_object() || !e.contains("mate"))
+          throw std::runtime_error(at +
+                                   ": a pose value is {mate, "
+                                   "rotation_deg | offset_mm}, not " +
+                                   e.dump());
+        for (auto it = e.begin(); it != e.end(); ++it)
+          if (it.key() != "mate" && it.key() != "rotation_deg" &&
+              it.key() != "offset_mm")
+            throw std::runtime_error(at + ": unknown pose key '" + it.key() +
+                                     "' (accepted: mate, rotation_deg, "
+                                     "offset_mm)");
+        const Mate* mate = MateByRef(a, e.at("mate"));
+        if (mate == nullptr)
+          throw std::runtime_error(at + ": no mate " + e.at("mate").dump() +
+                                   " (an id or name, see list_mates)");
+        const bool rot = e.contains("rotation_deg"),
+                   off = e.contains("offset_mm");
+        if (rot == off)
+          throw std::runtime_error(
+              at + ": mate '" + mate->name +
+              "': a pose value sets one of rotation_deg or offset_mm");
+        SequencePose sp;
+        sp.mateId = mate->id;
+        sp.dof = rot ? MateDof::Rotation : MateDof::Offset;
+        const json& v = e.at(rot ? "rotation_deg" : "offset_mm");
+        if (!v.is_number() || !std::isfinite(v.get<double>()))
+          throw std::runtime_error(at + ": mate '" + mate->name + "': " +
+                                   (rot ? "rotation_deg" : "offset_mm") +
+                                   " is a number, not " + v.dump());
+        sp.value = v.get<double>();
+        if (!assembly::MateHasDof(mate->type, sp.dof))
+          throw std::runtime_error(
+              at + ": mate '" + mate->name + "' has no " +
+              (rot ? "rotation" : "offset") +
+              " to pose (a revolute's or a cylindrical's rotation_deg, a "
+              "slider's or a cylindrical's offset_mm)");
+        if (!posed.insert({mate->id, int(sp.dof)}).second)
+          throw std::runtime_error(at + ": mate '" + mate->name +
+                                   "' is posed twice");
+        st.pose.push_back(sp);
+      }
+      seq.steps.push_back(std::move(st));
+      continue;
+    }
+    // What it places: one occurrence, or a group.
+    const auto occurrenceOf = [&](const json& ov) {
+      const Occurrence* o = nullptr;
+      if (ov.is_number_unsigned())
+        o = a.FindById(ov.get<uint64_t>());
+      else if (ov.is_string())
+        for (const Occurrence& x : a.GetOccurrences())
+          if (x.name == ov.get<std::string>())
+            o = &x;
+      if (o == nullptr)
+        throw std::runtime_error(at + ": no top-level occurrence " + ov.dump() +
+                                 " (an id or name, see list_occurrences)");
+      if (!seen.insert(o->id).second)
+        throw std::runtime_error(at + ": '" + o->name +
+                                 "' is placed by an earlier step already");
+      st.occurrences.push_back(o->id);
+      return o;
+    };
+    if (sj.contains("occurrence")) {
+      occurrenceOf(sj.at("occurrence"));
+    } else {
+      const json& g = sj.at("occurrences");
+      if (!g.is_array() || g.size() < 2)
+        throw std::runtime_error(at +
+                                 ": occurrences is a group of two or "
+                                 "more (one goes in `occurrence`), not " +
+                                 g.dump());
+      for (const json& ov : g)
+        occurrenceOf(ov);
+    }
     const auto vec = [&](const char* key) {
       const json& v = sj.at(key);
       if (!v.is_array() || v.size() != 3 ||
@@ -822,20 +949,16 @@ AssemblySequence ReadSequence(const AssemblyDocument& a, const RpcParams& p) {
     if (sj.contains("origin_mm"))
       st.origin = vec("origin_mm");
     if (sj.contains("mate")) {
-      const json& mv = sj.at("mate");
-      const Mate* mate = nullptr;
-      if (mv.is_number_unsigned())
-        mate = a.FindMateById(mv.get<uint64_t>());
-      else if (mv.is_string())
-        for (const Mate& x : a.GetMates())
-          if (x.name == mv.get<std::string>())
-            mate = &x;
+      const Mate* mate = MateByRef(a, sj.at("mate"));
       if (mate == nullptr)
-        throw std::runtime_error(at + ": no mate " + mv.dump() +
+        throw std::runtime_error(at + ": no mate " + sj.at("mate").dump() +
                                  " (an id or name, see list_mates)");
-      if (mate->a.occurrenceId != o->id && mate->b.occurrenceId != o->id)
+      if (std::none_of(
+              st.occurrences.begin(), st.occurrences.end(), [&](uint64_t id) {
+                return mate->a.occurrenceId == id || mate->b.occurrenceId == id;
+              }))
         throw std::runtime_error(at + ": mate '" + mate->name +
-                                 "' does not join '" + o->name + "'");
+                                 "' does not join what the step places");
       st.mateId = mate->id;
     }
     if (sj.contains("distance_mm")) {
@@ -859,11 +982,6 @@ AssemblySequence ReadSequence(const AssemblyDocument& a, const RpcParams& p) {
         throw std::runtime_error(at + ": thread is true or false, not " +
                                  sj.at("thread").dump());
       st.thread = sj.at("thread").get<bool>();
-    }
-    if (sj.contains("note")) {
-      if (!sj.at("note").is_string())
-        throw std::runtime_error(at + ": note is a string");
-      st.note = sj.at("note").get<std::string>();
     }
     seq.steps.push_back(std::move(st));
   }
