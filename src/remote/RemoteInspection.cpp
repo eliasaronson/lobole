@@ -3030,9 +3030,13 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
     opt.entry = s.eitherWay ? Measure::InsertionEntry::Either
                             : Measure::InsertionEntry::Positive;
     std::atomic<double> inner{0.0};
+    const auto t0 = std::chrono::steady_clock::now();
     const auto r =
         Measure::Insertion(c.bodies[i], glm::dmat4(1.0), fixed, glm::dmat4(1.0),
                            s.point, -s.moves, opt, &cancel, &inner);
+    row["seconds"] =
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+            .count();
     row["path"] = {{"from", s.pathFrom},
                    {"origin_mm", {s.point.x, s.point.y, s.point.z}},
                    {"either_way", s.eitherWay}};
@@ -3050,10 +3054,11 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
           static_cast<size_t>(r->best.worstFixedBody) < stepOf.size())
         row["worst_against"] =
             c.steps[stepOf[static_cast<size_t>(r->best.worstFixedBody)]].name;
-      for (const char* k : {"rotation_deg", "travel_mm", "interfering_mm",
-                            "press_mm", "excess_mm", "deeper_mm", "from_mm",
-                            "worst_depth_mm", "lead_in_mm", "confirm"})
-        row[k] = d[k];
+      for (const char* k :
+           {"rotation_deg", "travel_mm", "interfering_mm", "press_mm",
+            "excess_mm", "deeper_mm", "from_mm", "worst_depth_mm", "lead_in_mm",
+            "confirm", "samples", "seconds", "bands", "pairs_read"})
+        row[k == std::string("seconds") ? "phases" : k] = d[k];
       if (!r->threads.empty()) {
         json th = json::array();
         for (const Measure::InsertionThread& t : r->threads)

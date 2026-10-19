@@ -39,6 +39,7 @@ struct Band {
   double rMin = 0.0, rMax = 0.0; // radial extent about the axis, mm
   double perimeterMm = 0.0;
   bool sliced = false; // a slice of a span whose section varies
+  double zSection = 0.0; // where the section was cut
   int solid = 0;       // which solid of its side it came from
 };
 

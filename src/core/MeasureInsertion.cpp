@@ -405,9 +405,55 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       keptBody.push_back(bodyOfB[k]);
     }
     const double reachA = reachOf(prepB) + g;
+    // A thread on the path: its face's box about the axis (a mark that does
+    // not resolve to a face counts, as it cannot be placed).
+    const gp_Trsf placeA = toAxis * Rigid(xfMoving),
+                  placeB = toAxis * Rigid(xfFixed);
+    const auto threadOnPath = [&](const Body& b, const gp_Trsf& place) {
+      if (b.reference)
+        return false;
+      if (!b.threadRegions.empty())
+        return true;
+      std::vector<TopoDS_Shape> order;
+      for (TopExp_Explorer e(b.shape.GetShape().Moved(TopLoc_Location(place)),
+                             TopAbs_FACE);
+           e.More(); e.Next())
+        order.push_back(e.Current());
+      for (const ThreadMark& m : b.threads) {
+        const auto index = b.elementMap.Resolve(m.face.name);
+        Bnd_Box box;
+        if (index && *index >= 0 && *index < static_cast<int>(order.size())) {
+          BRepBndLib::Add(order[*index], box, Standard_False);
+        } else {
+          // A modelled thread took its face: it is where the body's
+          // free-form (helical) faces are.
+          for (const TopoDS_Shape& f : order)
+            switch (BRepAdaptor_Surface(TopoDS::Face(f)).GetType()) {
+            case GeomAbs_Plane:
+            case GeomAbs_Cylinder:
+            case GeomAbs_Cone:
+            case GeomAbs_Sphere:
+            case GeomAbs_Torus:
+              break;
+            default:
+              BRepBndLib::Add(f, box, Standard_False);
+            }
+        }
+        if (box.IsVoid())
+          return true;
+        double x0, y0, z0, x1, y1, z1;
+        box.Get(x0, y0, z0, x1, y1, z1);
+        const double r = 0.25 * std::max(x1 - x0, y1 - y0);
+        if (std::hypot(0.5 * (x0 + x1), 0.5 * (y0 + y1)) <= std::max(1.0, r))
+          return true;
+      }
+      return false;
+    };
     if (movingThreaded && !opt.screw &&
+        std::any_of(moving.begin(), moving.end(),
+                    [&](const Body& b) { return threadOnPath(b, placeA); }) &&
         std::any_of(keptBody.begin(), keptBody.end(),
-                    [&](int b) { return threadedBody(fixed[b]); }))
+                    [&](int b) { return threadOnPath(fixed[b], placeB); }))
       return std::unexpected(
           "both sides carry modelled threads: a threaded pair goes on by "
           "turning, which a straight slide does not judge");
@@ -496,13 +542,21 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
           InsertionThread it;
           it.moving = screwName.empty() ? "modelled" : screwName;
           it.fits = true;
+          // The thread it goes into: a matching one within reach, else
+          // the first that is there, which does not fit.
+          bool matched = false;
           for (int k : keptBody)
-            for (const ThreadMark& m : fixed[k].threads)
-              if (m.modeled && m.external != screwExternal(moving)) {
+            for (const ThreadMark& m : fixed[k].threads) {
+              if (!m.modeled || m.external == screwExternal(moving) || matched)
+                continue;
+              const bool fits = std::abs(m.pitch - screwPitch) < 1e-9 &&
+                                m.rightHand == screwRight;
+              if (fits || it.fixed.empty()) {
                 it.fixed = m.designation.empty() ? "modelled" : m.designation;
-                it.fits = std::abs(m.pitch - screwPitch) < 1e-9 &&
-                          m.rightHand == screwRight;
+                it.fits = fits;
+                matched = fits;
               }
+            }
           rep.threads.push_back(it);
         }
       }
@@ -529,7 +583,15 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     double longest = 0.0;
     for (bool p : sides)
       longest = std::max(longest, travelOf(p));
-    rep.stepMm = longest / opt.samples;
+    // A modelled thread is read finer: a slice short at a thread's end is
+    // compared within a 24th of a turn of level.
+    int samples = opt.samples;
+    if (screwPitch > 0.0)
+      samples =
+          std::clamp(static_cast<int>(std::ceil(longest * 24.0 / screwPitch)),
+                     opt.samples, 4000);
+    rep.samples = samples;
+    rep.stepMm = longest / samples;
     rep.leadInMm = opt.leadInMm >= 0.0 ? opt.leadInMm : rep.stepMm;
     // Slices no thinner than 20 um: a short travel (a valve that only
     // drops into its seat) would otherwise cut a block's fillets into a
@@ -586,14 +648,15 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       turns.push_back(360.0 * k / opt.rotations);
     // A turned path's orientation at each of its steps, after the seat's.
     if (turning)
-      for (int k = 1; k <= opt.samples; k++)
-        turns.push_back(turnDeg * k / opt.samples);
+      for (int k = 1; k <= samples; k++)
+        turns.push_back(turnDeg * k / samples);
     const size_t nA = bandsA.size(), nB = bandsB.size();
     // A moving band's outline at an orientation, made when first asked:
     // the seat's orientation is kept, and one other at a time -- the tries
     // and a turned path's steps go through them in order, and a part
     // turned 64 ways at once is gigabytes on a long free-form solid.
     std::map<size_t, std::vector<std::optional<Turned>>> turned;
+    std::vector<std::optional<C::Paths64>> grownAt0(nA);
     const auto turnedAt = [&](size_t ti, size_t i) -> const Turned& {
       auto it = turned.find(ti);
       if (it == turned.end()) {
@@ -607,9 +670,14 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         t.region = sections::Rotated(bandsA[i].region, turns[ti]);
         t.box = C::GetBounds(t.region);
         if (opt.allowanceMm > kGap2D) {
-          t.grown = C::InflatePaths(
-              t.region, (opt.allowanceMm - kGap2D) * kScale, C::JoinType::Round,
-              C::EndType::Polygon, 2.0, 0.25 * kGap2D * kScale);
+          // An offset turns with what it offsets: grown once, turned after.
+          std::optional<C::Paths64>& g = grownAt0[i];
+          if (!g)
+            g = C::InflatePaths(bandsA[i].region,
+                                (opt.allowanceMm - kGap2D) * kScale,
+                                C::JoinType::Round, C::EndType::Polygon, 2.0,
+                                0.25 * kGap2D * kScale);
+          t.grown = sections::Rotated(*g, turns[ti]);
           t.grownBox = C::GetBounds(t.grown);
         }
         slot = std::move(t);
@@ -632,7 +700,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     };
     const auto windowOf = [](const Band& a, const Band& b, bool positive) {
       Window w;
-      const double ma = 0.5 * (a.z0 + a.z1), mb = 0.5 * (b.z0 + b.z1);
+      const double ma = a.zSection, mb = b.zSection;
       if (positive) {
         w.lo = b.z0 - a.z1;
         w.hi = b.z1 - a.z0;
@@ -755,9 +823,9 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       if (turning) {
         // Turned as it goes: the orientation changes along the path, so
         // the path is read step by step, each step counted a step long.
-        const double step = t.travelMm / opt.samples;
+        const double step = t.travelMm / samples;
         const double sgn = positive ? 1.0 : -1.0;
-        for (int k = opt.samples; k >= 1; k--) {
+        for (int k = samples; k >= 1; k--) {
           if (cancel && cancel->load())
             throw KernelError{"cancelled"};
           const double u = step * k;
@@ -910,8 +978,8 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       if (turning) {
         // The turn at that step of the path.
         if (b.travelMm > 0.0)
-          ti = static_cast<size_t>(
-              std::lround(c.atMm / (b.travelMm / opt.samples)));
+          ti =
+              static_cast<size_t>(std::lround(c.atMm / (b.travelMm / samples)));
       } else {
         for (size_t k = 0; k < turns.size(); k++)
           if (turns[k] == b.rotationDeg)

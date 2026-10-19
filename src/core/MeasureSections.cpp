@@ -602,15 +602,25 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
   if (events.empty() || !(zMax > zMin))
     return {};
   std::sort(events.begin(), events.end());
+  const double h = opt.sliceMm;
+  varying = Merged(std::move(varying));
+  // Inside a span that varies, only the grid cuts it: an event there would
+  // cut a slice short off the grid, to be compared with the other side's
+  // whole one by a section cut somewhere else.
+  const auto inVarying = [&](double z) {
+    return std::any_of(varying.begin(), varying.end(),
+                       [z](const Span& s) { return z > s.lo && z < s.hi; });
+  };
   std::vector<double> cuts;
   for (double z : events)
-    if (z >= zMin - kEventTol && z <= zMax + kEventTol &&
+    if (z >= zMin - kEventTol && z <= zMax + kEventTol && !inVarying(z) &&
         (cuts.empty() || z > cuts.back() + kEventTol))
       cuts.push_back(z);
-  varying = Merged(std::move(varying));
-  // Slice grid points within each varying span, anchored at the origin.
-  const double h = opt.sliceMm;
+  // Slice grid points within each varying span, anchored at the origin;
+  // its ends are grid points too.
   for (const Span& s : varying) {
+    cuts.push_back(s.lo);
+    cuts.push_back(s.hi);
     for (double k = std::ceil(s.lo / h); k * h < s.hi; k += 1.0)
       cuts.push_back(k * h);
   }
@@ -620,10 +630,6 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
                            return std::abs(a - b) <= kEventTol;
                          }),
              cuts.end());
-  const auto inVarying = [&](double z) {
-    return std::any_of(varying.begin(), varying.end(),
-                       [z](const Span& s) { return z > s.lo && z < s.hi; });
-  };
   const Paths64 clip =
       std::isfinite(opt.reachMm) && opt.reachMm < std::hypot(half, half)
           ? Paths64{Disk(opt.reachMm)}
@@ -645,6 +651,15 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
     if (b.z1 - b.z0 < kThinBand)
       continue;
     b.sliced = inVarying(0.5 * (b.z0 + b.z1));
+    b.zSection = 0.5 * (b.z0 + b.z1);
+    if (b.sliced) {
+      // Cut as near its grid cell's middle as it reaches, where the other
+      // side's slice in that cell is cut too: the span's end slices,
+      // short, compare with the other side's as nearly level as they can.
+      const double c = (std::floor(b.zSection / h) + 0.5) * h;
+      const double e = std::min(1.0e-3, 0.25 * (b.z1 - b.z0));
+      b.zSection = std::clamp(c, b.z0 + e, b.z1 - e);
+    }
     b.solid = solidIndex;
     spans.push_back(std::move(b));
   }
@@ -657,7 +672,7 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
     for (size_t i = 0; i < spans.size(); i++)
       if (spans[i].sliced && freeFormArea > 0.0) {
         sliced.push_back(i);
-        zs.push_back(0.5 * (spans[i].z0 + spans[i].z1));
+        zs.push_back(spans[i].zSection);
       } else {
         exact.push_back(i);
       }
@@ -697,8 +712,8 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
         if (cancel && cancel->load())
           return;
         Band& b = spans[exact[x]];
-        b.region = SectionAt(own, 0.5 * (b.z0 + b.z1), 2.0 * half + 1.0,
-                             opt.deflectionMm);
+        b.region =
+            SectionAt(own, b.zSection, 2.0 * half + 1.0, opt.deflectionMm);
         if (!clip.empty() && !b.region.empty())
           b.region = Clipper2Lib::Intersect(b.region, clip,
                                             Clipper2Lib::FillRule::NonZero);
