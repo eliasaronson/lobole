@@ -136,6 +136,10 @@ def groups(d):
         expect(not r["pass"] and not blocked["pass"]
                and blocked.get("worst_against") == first,
                f"{second} after {first} is blocked by it: {blocked}")
+        # The plate's sections were cut for the first wheel's step and
+        # moved to the second's path, not cut again.
+        expect(blocked["solids"]["reused"] > 0,
+               f"the plate's sections reused: {blocked}")
     d.call("set_assembly_sequence",
            steps=[{"occurrence": "gplate"},
                   {"occurrences": ["wheel a", "wheel b"],
@@ -146,6 +150,7 @@ def groups(d):
            and g["against"] == ["gplate"] and "share" in g["path"]["from"]
            and abs(abs(g["path"]["moves"][2]) - 1.0) < 1e-6,
            f"together they go home along their common axis: {r}")
+
     # The crossbar's seat axis is X: no axis is common to it and a wheel.
     d.call("set_assembly_sequence",
            steps=[{"occurrence": "gplate"},

@@ -18,6 +18,7 @@
 #include "core/MassProps.h"
 #include "core/Measure.h"
 #include "core/MeasureSeal.h"
+#include "core/MeasureSections.h"
 #include "core/MeshCollide.h"
 #include "core/Occurrence.h"
 #include "core/Parallel.h"
@@ -1459,18 +1460,25 @@ static constexpr MethodDoc InspectionMethods[] = {
     {"check_assembly_sequence",
      "Check the active assembly's sequence "
      "(docs/assemblies/README.md#assembly-sequences; set_assembly_sequence "
-     "states it): each step's occurrence slid home along its path -- a "
+     "states it): each step's occurrence (or group, as one) slid home "
+     "along its path -- a "
      "step's `direction`, else the axis of its own cylinder that its mate "
      "seats, both ways -- against EVERY occurrence placed before it, not "
      "only its mate partner, as check_insertion slides one pair (by "
-     "sections, one exact boolean confirming each step). The first step is "
+     "sections, one exact boolean confirming each step), at the pose the "
+     "pose steps before it set (a step's `at_pose`; a pose step's row says "
+     "what it `moved`). The first placing step is "
      "the base. A step that cannot be checked (gone, no matter, no mate to "
-     "a placed part and no direction, no cylinder at its mate) is refused "
+     "a placed part and no direction, no cylinder at its mate, a group "
+     "with no common seat axis, a pose that does not solve) is refused "
      "naming it; an occurrence with matter that no step places is listed "
-     "in `missing` and fails the sequence. Runs as an assembly_sequence "
-     "job, off the frame.",
+     "in `missing` and fails the sequence. A placed part's sections are cut "
+     "once per direction and moved to each later step's path (`sections`: "
+     "{reused, cut, evicted} solids; a step's `solids`). Runs as an "
+     "assembly_sequence job, off the frame.",
      "", remote::NoFlags,
-     "pass:bool, allowance_mm:number, steps:object[], missing:string[]"},
+     "pass:bool, allowance_mm:number, steps:object[], missing:string[], "
+     "seconds:number, sections:object"},
     {"check_seal",
      "Whether two occurrences' contact SEALS (docs/inspect/README.md#seals) "
      "{a, b: top-level occurrence ids or names}: where they overlap (a "
@@ -3198,6 +3206,10 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
                          uint64_t occ) -> const SequenceCheck::Piece& {
     return c.pieces.at({pose, occ});
   };
+  // A placed part's sections, cut once per direction and moved to each
+  // later step's path (MeasureSections.h, BandCache).
+  Measure::sections::BandCache cache;
+  const auto started = std::chrono::steady_clock::now();
   for (size_t i = 0; i < c.steps.size(); i++) {
     if (cancel.load())
       throw std::runtime_error("check_assembly_sequence: cancelled");
@@ -3224,13 +3236,17 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
     json against = json::array();
     std::vector<Body> fixed, moving;
     std::vector<std::string> nameOf; // fixed body -> its occurrence
+    Measure::InsertionOptions opt = s.opt;
+    opt.cache = &cache;
     for (size_t k : s.before) {
       const SequenceCheck::Step& b = c.steps[k];
       for (size_t m = 0; m < b.occurrences.size(); m++) {
         against.push_back(b.names[m]);
         const SequenceCheck::Piece& pc = piece(s.pose, b.occurrences[m]);
-        for (const Body& body : pc.bodies) {
-          fixed.push_back(body);
+        for (size_t x = 0; x < pc.bodies.size(); x++) {
+          fixed.push_back(pc.bodies[x]);
+          opt.fixedKeys.push_back(pc.keys[x]);
+          opt.fixedPlaces.push_back(pc.places[x]);
           nameOf.push_back(b.names[m]);
         }
       }
@@ -3242,10 +3258,14 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
       steps.push_back(std::move(row));
       continue;
     }
-    for (uint64_t id : s.occurrences)
-      for (const Body& body : piece(s.pose, id).bodies)
-        moving.push_back(body);
-    Measure::InsertionOptions opt = s.opt;
+    for (uint64_t id : s.occurrences) {
+      const SequenceCheck::Piece& pc = piece(s.pose, id);
+      for (size_t x = 0; x < pc.bodies.size(); x++) {
+        moving.push_back(pc.bodies[x]);
+        opt.movingKeys.push_back(pc.keys[x]);
+        opt.movingPlaces.push_back(pc.places[x]);
+      }
+    }
     // The axis Insertion slides along points away from the way it moves:
     // `positive` comes from that side.
     opt.entry = s.eitherWay ? Measure::InsertionEntry::Either
@@ -3270,6 +3290,7 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
       const glm::dvec3 moved = r->best.positive ? s.moves : -s.moves;
       row["path"]["moves"] = {moved.x, moved.y, moved.z};
       row["pass"] = r->pass;
+      row["solids"] = {{"reused", r->solidsReused}, {"cut", r->solidsCut}};
       // What it meets worst on the way: the occurrence to look at.
       if (r->best.worstFixedBody >= 0 &&
           static_cast<size_t>(r->best.worstFixedBody) < nameOf.size())
@@ -3297,7 +3318,14 @@ json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
   return {{"pass", pass},
           {"allowance_mm", c.allowanceMm},
           {"steps", steps},
-          {"missing", c.missing}};
+          {"missing", c.missing},
+          {"seconds", std::chrono::duration<double>(
+                          std::chrono::steady_clock::now() - started)
+                          .count()},
+          {"sections",
+           {{"reused", cache.stats.reused},
+            {"cut", cache.stats.cut},
+            {"evicted", cache.stats.evicted}}}};
 }
 
 json SealJson(const Measure::SealReport& r) {

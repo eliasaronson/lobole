@@ -10,6 +10,7 @@
 
 #include "core/Feature.h"
 #include "core/MeasureInsertion.h"
+#include "core/MeasureSections.h"
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -390,4 +391,100 @@ TEST_CASE("A part that goes on by its thread needs a thread on its path",
   const auto r = Measure::Insertion({ring}, I, {shaft}, I, O, Z, o);
   REQUIRE_FALSE(r);
   CHECK(r.error().find("no thread") != std::string::npos);
+}
+
+namespace {
+
+// `b` moved rigidly by `m` (a turn about Z by `deg`, then a shift).
+Body MovedBody(const Body& b, double deg, const glm::dvec3& shift,
+               glm::dmat4& m) {
+  gp_Trsf t;
+  t.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
+                deg * std::numbers::pi / 180.0);
+  gp_Trsf s;
+  s.SetTranslation(gp_Vec(shift.x, shift.y, shift.z));
+  const gp_Trsf all = s * t;
+  Body out = b;
+  out.shape = CADShape(b.shape.GetShape().Moved(TopLoc_Location(all)));
+  m = glm::dmat4(1.0);
+  for (int c = 0; c < 4; c++)
+    for (int r = 0; r < 3; r++)
+      m[c][r] = all.Value(r + 1, c + 1);
+  return out;
+}
+
+void Same(const Measure::InsertionReport& a,
+          const Measure::InsertionReport& b) {
+  CHECK(a.pass == b.pass);
+  CHECK(a.best.positive == b.best.positive);
+  CHECK(a.best.pressMm == Approx(b.best.pressMm).margin(1e-6));
+  CHECK(a.best.interferingMm ==
+        Approx(b.best.interferingMm).margin(a.stepMm + 1e-6));
+  CHECK(a.best.excessMm == Approx(b.best.excessMm).margin(a.stepMm + 1e-6));
+  CHECK(a.best.worstDepthMm == Approx(b.best.worstDepthMm).margin(0.02));
+}
+
+} // namespace
+
+// An assembly sequence's steps slide part after part past the same placed
+// ones: their bands are kept (MeasureSections.h, BandCache) and moved to a
+// later check's axis rather than cut again -- and the answer is the one a
+// fresh cut gives, also for parts since moved along or turned about the
+// path (a pose).
+TEST_CASE("Bands kept between checks are reused and answer as cut afresh",
+          "[measure][insertion]") {
+  const Body peg0 = Make(Herringbone(6.0, 10.0), "peg");
+  const Body block0 =
+      Make(BRepAlgoAPI_Cut(
+               BRepPrimAPI_MakeBox(gp_Pnt(-10, -10, 0), 20, 20, 10).Shape(),
+               Herringbone(6.8, 10.0))
+               .Shape(),
+           "block");
+  const auto check = [&](double deg, const glm::dvec3& shift,
+                         Measure::sections::BandCache* cache,
+                         const glm::dvec3& axis = Z) {
+    glm::dmat4 mp, mb;
+    const Body peg = MovedBody(peg0, deg, shift, mp);
+    const Body block = MovedBody(block0, deg, shift, mb);
+    Measure::InsertionOptions o;
+    o.entry = Measure::InsertionEntry::Either;
+    o.allowanceMm = kAllowance;
+    o.cache = cache;
+    o.movingKeys = {1};
+    o.fixedKeys = {2};
+    o.movingPlaces = {mp};
+    o.fixedPlaces = {mb};
+    auto r = Measure::Insertion({peg}, I, {block}, I, shift, axis, o);
+    REQUIRE(r.has_value());
+    return *r;
+  };
+  Measure::sections::BandCache cache;
+  const auto fresh = check(0.0, O, nullptr);
+  CHECK_FALSE(fresh.pass);
+  const auto first = check(0.0, O, &cache);
+  CHECK(first.solidsCut == 2);
+  CHECK(first.solidsReused == 0);
+  Same(first, fresh);
+  // The same again: nothing cut.
+  const auto again = check(0.0, O, &cache);
+  CHECK(again.solidsReused == 2);
+  CHECK(again.solidsCut == 0);
+  Same(again, fresh);
+  // Both turned about the axis and the axis moved across: moved, not cut.
+  const auto turned = check(30.0, glm::dvec3(5.0, 3.0, 0.0), &cache);
+  CHECK(turned.solidsReused == 2);
+  Same(turned, check(30.0, glm::dvec3(5.0, 3.0, 0.0), nullptr));
+  // Moved along it by a whole number of slices: moved. By a part of one:
+  // its slices would not line up with a fresh cut's, so it is cut again.
+  const double h = first.sliceMm;
+  const auto along = check(0.0, glm::dvec3(0.0, 0.0, 4.0 * h), &cache);
+  CHECK(along.solidsReused == 2);
+  Same(along, fresh);
+  const auto part = check(0.0, glm::dvec3(0.0, 0.0, 0.37 * h), &cache);
+  CHECK(part.solidsCut == 2);
+  Same(part, fresh);
+  // Along the reversed axis: the same cuts, mirrored.
+  const auto back = check(0.0, glm::dvec3(0.0, 0.0, 0.37 * h), &cache, -Z);
+  CHECK(back.solidsReused == 2);
+  Same(back, check(0.0, glm::dvec3(0.0, 0.0, 0.37 * h), nullptr, -Z));
 }

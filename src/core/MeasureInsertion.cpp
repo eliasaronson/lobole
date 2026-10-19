@@ -366,8 +366,9 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
                     gp_Dir(rep.axisDir.x, rep.axisDir.y, rep.axisDir.z));
     gp_Trsf toAxis;
     toAxis.SetTransformation(ax);
-    std::vector<int> bodyOfB;
-    const std::vector<TopoDS_Shape> solidsA = Solids(moving, xfMoving, toAxis),
+    std::vector<int> bodyOfA, bodyOfB;
+    const std::vector<TopoDS_Shape> solidsA = Solids(moving, xfMoving, toAxis,
+                                                     &bodyOfA),
                                     solidsB = Solids(fixed, xfFixed, toAxis,
                                                      &bodyOfB);
     if (solidsA.empty() || solidsB.empty())
@@ -390,7 +391,8 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     // A fixed solid whose box lies wholly outside that reach never comes
     // near: an assembly sequence's later steps have everything placed
     // before them on the fixed side, most of it nowhere near the path.
-    std::vector<int> keptBody; // prepB's bodies, in `fixed`
+    std::vector<int> keptBody;  // prepB's bodies, in `fixed`
+    std::vector<size_t> keptAt; // prepB's solids, in solidsB
     for (size_t k = 0; k < solidsB.size(); k++) {
       const TopoDS_Shape& s = solidsB[k];
       Bnd_Box box;
@@ -405,6 +407,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       }
       prepB.push_back(sections::Prepare(s));
       keptBody.push_back(bodyOfB[k]);
+      keptAt.push_back(k);
     }
     const double reachA = reachOf(prepB) + g;
     // A thread on the path: its face's box about the axis (a mark that does
@@ -604,6 +607,14 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
                   : (opt.turnDeg != 0.0 || opt.screw)
                       ? rep.stepMm
                       : std::max(rep.stepMm, kMinSlice);
+    // Kept between checks, the slices come from a ladder of thicknesses
+    // (20 um doubled), no thicker than the step: two steps with nearly the
+    // same travel then cut and reuse one set.
+    const bool kept = opt.cache != nullptr && opt.turnDeg == 0.0 && !opt.screw;
+    if (kept)
+      rep.sliceMm =
+          kMinSlice *
+          std::exp2(std::floor(std::log2(rep.sliceMm / kMinSlice) + 1e-9));
 
     // The bands, both sides on one slice grid.
     using Clock = std::chrono::steady_clock;
@@ -612,7 +623,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     };
     auto t0 = Clock::now();
     std::vector<Band> bandsA, bandsB;
-    {
+    if (!kept) {
       const size_t n = prepA.size() + prepB.size();
       size_t k = 0;
       for (auto [prep, out, reach] : {std::tuple{&prepA, &bandsA, reachA},
@@ -629,6 +640,126 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
           progress(0.5 * static_cast<double>(++k) / n);
         }
       }
+    } else {
+      // The direction's own frame: the axis through the world origin, along
+      // the direction or its reverse, whichever points to the positive
+      // side (the first component not zero) -- a direction and its reverse
+      // share their cuts. The check's axis frame is that frame turned
+      // (mirrored, when reversed) and shifted, so its bands are the ones
+      // cut there carried over, and every solid's slices -- cut there or
+      // carried -- lie on the one grid anchored at its origin.
+      glm::dvec3 dir = rep.axisDir;
+      for (int c = 0; c < 3; c++)
+        if (std::abs(dir[c]) > 1e-9) {
+          if (dir[c] < 0.0)
+            dir = -dir;
+          break;
+        }
+      gp_Trsf toDir;
+      toDir.SetTransformation(
+          gp_Ax3(gp_Pnt(0.0, 0.0, 0.0), gp_Dir(dir.x, dir.y, dir.z)));
+      const auto rotOf = [](const gp_Trsf& t) {
+        glm::dmat3 m(1.0);
+        for (int c = 0; c < 3; c++)
+          for (int r = 0; r < 3; r++)
+            m[c][r] = t.Value(r + 1, c + 1);
+        return m;
+      };
+      // World into the direction's frame, and into the check's axis frame.
+      const glm::dmat3 rot = rotOf(toDir), rotAxis = rotOf(toAxis);
+      const gp_XYZ ta = toAxis.TranslationPart();
+      const glm::dvec3 tAxis(ta.X(), ta.Y(), ta.Z());
+      // The direction's frame into the axis frame: q = L q' + tAxis.
+      const glm::dmat3 L = rotAxis * glm::transpose(rot);
+      const double zSign = L[2][2] < 0.0 ? -1.0 : 1.0;
+      const glm::dmat2 across(L[0][0], L[0][1], L[1][0], L[1][1]);
+      const gp_Trsf axisToDir = toDir * toAxis.Inverted();
+      const double h = rep.sliceMm = opt.cache->SliceFor(dir, rep.sliceMm);
+      const auto cutInDir = [&](const TopoDS_Shape& solidInAxis) {
+        sections::BandOptions bo;
+        bo.sliceMm = h;
+        return sections::SolidBands(
+            sections::Prepare(solidInAxis.Moved(TopLoc_Location(axisToDir))),
+            bo, 0, cancel);
+      };
+      const size_t n = prepA.size() + prepB.size();
+      size_t done = 0;
+      const auto side = [&](const std::vector<sections::Solid>& prep,
+                            const std::vector<uint64_t>& keys,
+                            const std::vector<glm::dmat4>& places,
+                            const glm::dmat4& xf, const auto& bodyOfSolid,
+                            double reach, std::vector<Band>& out) {
+        std::map<int, int> ordinal; // a body's solids, counted
+        for (size_t i = 0; i < prep.size(); i++) {
+          if (cancel && cancel->load())
+            throw KernelError{"cancelled"};
+          const int body = bodyOfSolid(i);
+          const int nth = ordinal[body]++;
+          const uint64_t key =
+              static_cast<size_t>(body) < keys.size() && keys[body] != 0
+                  ? (keys[body] << 12) | static_cast<uint64_t>(nth)
+                  : 0;
+          const glm::dmat4 place =
+              xf * (static_cast<size_t>(body) < places.size()
+                        ? places[body]
+                        : glm::dmat4(1.0));
+          std::vector<Band> inDir;
+          // How it has moved since it was cut, in the direction's frame.
+          glm::dmat2 turn(1.0);
+          glm::dvec3 moved(0.0);
+          bool have = false;
+          if (key != 0) {
+            if (const auto* e = opt.cache->Find(key, dir, h)) {
+              // Reusable when only turned about the axis and, with slices,
+              // moved along it a whole number of them.
+              const glm::dmat4 rel = place * glm::inverse(e->place);
+              const glm::dmat3 r = rot * glm::dmat3(rel) * glm::transpose(rot);
+              const glm::dvec3 t = rot * glm::dvec3(rel[3]);
+              const bool aboutAxis = std::abs(r[2][2] - 1.0) < 1e-9 &&
+                                     std::abs(r[0][2]) < 1e-9 &&
+                                     std::abs(r[1][2]) < 1e-9;
+              const bool sliced =
+                  std::any_of(e->bands.begin(), e->bands.end(),
+                              [](const Band& b) { return b.sliced; });
+              const double k = t.z / h;
+              if (aboutAxis &&
+                  (!sliced || std::abs(k - std::round(k)) < 1e-6)) {
+                turn = glm::dmat2(r[0][0], r[0][1], r[1][0], r[1][1]);
+                moved = t;
+                inDir = e->bands;
+                have = true;
+                opt.cache->stats.reused++;
+                rep.solidsReused++;
+              }
+            }
+          }
+          if (!have) {
+            sections::BandCache::Entry e;
+            e.place = place;
+            e.bands = cutInDir(prep[i].shape);
+            if (cancel && cancel->load())
+              throw KernelError{"cancelled"};
+            inDir = e.bands;
+            rep.solidsCut++;
+            opt.cache->stats.cut++;
+            if (key != 0)
+              opt.cache->Put(key, dir, h, std::move(e));
+          }
+          // q_axis = L (turn q + moved) + tAxis.
+          for (Band& b : sections::Moved(inDir, across * turn, zSign,
+                                         L * moved + tAxis, reach)) {
+            b.solid = static_cast<int>(i);
+            out.push_back(std::move(b));
+          }
+          progress(0.5 * static_cast<double>(++done) / n);
+        }
+      };
+      side(
+          prepA, opt.movingKeys, opt.movingPlaces, xfMoving,
+          [&](size_t i) { return bodyOfA[i]; }, reachA, bandsA);
+      side(
+          prepB, opt.fixedKeys, opt.fixedPlaces, xfFixed,
+          [&](size_t i) { return bodyOfB[keptAt[i]]; }, reachB, bandsB);
     }
     rep.sectionsSeconds = since(t0);
     t0 = Clock::now();

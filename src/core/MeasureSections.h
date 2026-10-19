@@ -23,8 +23,14 @@
 
 #include <TopoDS_Shape.hxx>
 
+#include <glm/glm.hpp>
+
 #include <atomic>
+#include <cstdint>
 #include <limits>
+#include <map>
+#include <mutex>
+#include <tuple>
 #include <vector>
 
 namespace Measure::sections {
@@ -55,6 +61,9 @@ struct BandOptions {
   // The same for a slice, which is cut from a triangulation of the solid
   // (a twisted flank's boolean section is seconds a slice).
   double meshDeflectionMm = 5.0e-4;
+  // Where the slice grid is anchored along the axis: grid points at
+  // gridOriginMm + k * sliceMm. Two solids sliced on one grid line up.
+  double gridOriginMm = 0.0;
 };
 
 // One solid, placed so the axis is the Z axis through the origin, with
@@ -87,9 +96,70 @@ Clipper2Lib::Paths64 Rotated(const Clipper2Lib::Paths64& p, double deg);
 // Box, radial extent and perimeter, recomputed from `region`.
 void Refresh(Band& b);
 
+// Bands carried into another frame of the same axis line: each point of a
+// region mapped by `across` (a turn about the axis, and a mirror where the
+// axis is reversed -- the regions' winding kept), z by `zSign` (+1 or -1,
+// the axis reversed), then shifted by `shift` (x, y across the axis, z
+// along it); and kept to `reachMm` of the axis -- clipped where they cross
+// it, dropped where they lie beyond, and two neighbouring prismatic bands
+// left with one section merged again. Each band's extent is recomputed.
+std::vector<Band> Moved(const std::vector<Band>& bands,
+                        const glm::dmat2& across, double zSign,
+                        const glm::dvec3& shift, double reachMm);
+
 // The least distance between two regions' boundaries, mm, looking only at
 // edges with a point within `window` (grown by `reachMm`); +inf if none.
 double BoundaryGap(const Clipper2Lib::Paths64& a, const Clipper2Lib::Paths64& b,
                    const Clipper2Lib::Rect64& window, double reachMm);
+
+// Bands kept between insertion checks (docs/inspect/README.md#insertion):
+// an assembly sequence slides one part after another along a handful of
+// directions past the same placed parts, and cutting those again for every
+// step was nearly all of its time. A solid is cut once per direction and
+// slice thickness, in that direction's own frame (the axis through the
+// origin, whole -- no reach), and a later check moves the bands to its axis
+// and its reach instead of cutting them again. A solid that has moved since
+// (a pose) is moved with them when it turned only about the axis and, if any
+// band is a slice, moved along it a whole number of slices; otherwise it is
+// cut again. A direction and its reverse share one set of cuts (the bands
+// mirrored), and checks along one direction share one slice thickness
+// where their travels allow (SliceFor). Bounded: past `kCachePointCeiling`
+// points of section the least recently used are dropped.
+inline constexpr size_t kCachePointCeiling = 40000000;
+
+class BandCache {
+public:
+  struct Entry {
+    glm::dmat4 place{1.0};   // the solid's placement when it was cut
+    std::vector<Band> bands; // in the direction's frame
+    size_t points = 0;
+    uint64_t used = 0;
+  };
+  // What a check found in it: bands reused (moved), and solids cut.
+  struct Stats {
+    int reused = 0, cut = 0, evicted = 0;
+  };
+  // The entry for solid `key` cut along `dir` `sliceMm` thick, if any; the
+  // pointer lives until the next Put.
+  const Entry* Find(uint64_t key, const glm::dvec3& dir, double sliceMm);
+  void Put(uint64_t key, const glm::dvec3& dir, double sliceMm, Entry e);
+  // The slice a check along `dir` that wants `sliceMm` (or finer) is cut
+  // at: the thickest one already cut along `dir` no thicker than it and no
+  // finer than a sixteenth of it, else `sliceMm` -- so steps with nearly the
+  // same travel share their cuts.
+  double SliceFor(const glm::dvec3& dir, double sliceMm);
+  Stats stats;
+  size_t Points() const { return m_points; }
+
+private:
+  using Key = std::tuple<uint64_t, int64_t, int64_t, int64_t, int64_t>;
+  static Key KeyOf(uint64_t key, const glm::dvec3& dir, double sliceMm);
+  std::map<Key, Entry> m_entries;
+  std::map<std::tuple<int64_t, int64_t, int64_t>, std::vector<double>>
+      m_slices; // by direction, the thicknesses cut along it
+  size_t m_points = 0;
+  uint64_t m_clock = 0;
+  std::mutex m_mutex;
+};
 
 } // namespace Measure::sections

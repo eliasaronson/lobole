@@ -13,6 +13,9 @@
 struct Body;
 
 namespace Measure {
+namespace sections {
+class BandCache;
+}
 
 // Can a part reach where it is mated (docs/inspect/README.md#insertion)?
 // Insertion() slides the moving set along an axis from clear of the fixed
@@ -106,6 +109,7 @@ struct InsertionReport {
   int samples = 0;
   int bandsMoving = 0, bandsFixed = 0; // sections each side was cut into
   int pairsRead = 0;                   // band pairs the 2D test ran on
+  int solidsReused = 0, solidsCut = 0; // with a cache: solids moved / cut
   // Where the time went: cutting the sections, the 2D tests, the boolean.
   double sectionsSeconds = 0.0, pairsSeconds = 0.0, confirmSeconds = 0.0;
   InsertionTry best;               // the passing try, else the least excess
@@ -133,6 +137,13 @@ struct InsertionOptions {
   // (InsertionThread), not read as interference. Without it a threaded
   // pair is refused, as a straight slide does not judge one.
   bool screw = false;
+  // Bands kept between checks (an assembly sequence's steps), with each
+  // body's identity (0: not kept) and placement, in the order of the
+  // bodies given; empty: none kept. A straight path only -- a turned or
+  // screwed one cuts its slices a step thick, its own.
+  sections::BandCache* cache = nullptr;
+  std::vector<uint64_t> movingKeys, fixedKeys;
+  std::vector<glm::dmat4> movingPlaces, fixedPlaces;
 };
 
 // A and B are placed by their matrices; the axis is in that same (world)

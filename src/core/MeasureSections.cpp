@@ -36,6 +36,7 @@
 #include <deque>
 #include <map>
 #include <numbers>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <tuple>
@@ -616,13 +617,14 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
     if (z >= zMin - kEventTol && z <= zMax + kEventTol && !inVarying(z) &&
         (cuts.empty() || z > cuts.back() + kEventTol))
       cuts.push_back(z);
-  // Slice grid points within each varying span, anchored at the origin;
+  // Slice grid points within each varying span, anchored at gridOriginMm;
   // its ends are grid points too.
+  const double g0 = opt.gridOriginMm;
   for (const Span& s : varying) {
     cuts.push_back(s.lo);
     cuts.push_back(s.hi);
-    for (double k = std::ceil(s.lo / h); k * h < s.hi; k += 1.0)
-      cuts.push_back(k * h);
+    for (double k = std::ceil((s.lo - g0) / h); g0 + k * h < s.hi; k += 1.0)
+      cuts.push_back(g0 + k * h);
   }
   std::sort(cuts.begin(), cuts.end());
   cuts.erase(std::unique(cuts.begin(), cuts.end(),
@@ -656,7 +658,7 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
       // Cut as near its grid cell's middle as it reaches, where the other
       // side's slice in that cell is cut too: the span's end slices,
       // short, compare with the other side's as nearly level as they can.
-      const double c = (std::floor(b.zSection / h) + 0.5) * h;
+      const double c = g0 + (std::floor((b.zSection - g0) / h) + 0.5) * h;
       const double e = std::min(1.0e-3, 0.25 * (b.z1 - b.z0));
       b.zSection = std::clamp(c, b.z0 + e, b.z1 - e);
     }
@@ -748,6 +750,140 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
     out.push_back(std::move(b));
   }
   return out;
+}
+
+std::vector<Band> Moved(const std::vector<Band>& bands,
+                        const glm::dmat2& across, double zSign,
+                        const glm::dvec3& shift, double reachMm) {
+  const double sx = shift.x * kScale, sy = shift.y * kScale;
+  const bool mirror = glm::determinant(across) < 0.0;
+  const bool identity = across == glm::dmat2(1.0);
+  const bool reach = std::isfinite(reachMm);
+  const double r2 = reachMm * kScale;
+  const Paths64 disk = reach ? Paths64{Disk(reachMm)} : Paths64{};
+  std::vector<Band> out;
+  out.reserve(bands.size());
+  const auto place = [&](const Band& in) -> std::optional<Band> {
+    Band b = in;
+    if (zSign < 0.0) {
+      b.z0 = -in.z1;
+      b.z1 = -in.z0;
+      b.zSection = -in.zSection;
+    }
+    b.z0 += shift.z;
+    b.z1 += shift.z;
+    b.zSection += shift.z;
+    for (Path64& path : b.region) {
+      for (Point64& v : path) {
+        const double x = static_cast<double>(v.x), y = static_cast<double>(v.y);
+        const glm::dvec2 q =
+            identity ? glm::dvec2(x, y) : across * glm::dvec2(x, y);
+        v = Point64(static_cast<int64_t>(std::llround(q.x + sx)),
+                    static_cast<int64_t>(std::llround(q.y + sy)));
+      }
+      if (mirror)
+        std::reverse(path.begin(), path.end());
+    }
+    if (reach) {
+      const Clipper2Lib::Rect64 box = Clipper2Lib::GetBounds(b.region);
+      // The box's nearest and furthest from the axis, along x and y.
+      const auto nearest = [](int64_t lo, int64_t hi) {
+        return lo > 0 ? static_cast<double>(lo)
+                      : (hi < 0 ? static_cast<double>(-hi) : 0.0);
+      };
+      const auto furthest = [](int64_t lo, int64_t hi) {
+        return std::max(std::abs(static_cast<double>(lo)),
+                        std::abs(static_cast<double>(hi)));
+      };
+      if (std::hypot(nearest(box.left, box.right),
+                     nearest(box.top, box.bottom)) > r2)
+        return std::nullopt; // wholly beyond reach
+      if (std::hypot(furthest(box.left, box.right),
+                     furthest(box.top, box.bottom)) > r2)
+        b.region = Clipper2Lib::Intersect(b.region, disk,
+                                          Clipper2Lib::FillRule::NonZero);
+    }
+    if (b.region.empty())
+      return std::nullopt;
+    Refresh(b);
+    return b;
+  };
+  const size_t n = bands.size();
+  for (size_t k = 0; k < n; k++) {
+    std::optional<Band> b = place(bands[zSign < 0.0 ? n - 1 - k : k]);
+    if (!b)
+      continue;
+    if (!b->sliced && !out.empty() && !out.back().sliced &&
+        std::abs(out.back().z1 - b->z0) <= kEventTol &&
+        out.back().region == b->region) {
+      out.back().z1 = b->z1;
+      continue;
+    }
+    out.push_back(std::move(*b));
+  }
+  return out;
+}
+
+BandCache::Key BandCache::KeyOf(uint64_t key, const glm::dvec3& dir,
+                                double sliceMm) {
+  const auto q = [](double v) {
+    return static_cast<int64_t>(std::llround(v * 1.0e9));
+  };
+  return {key, q(dir.x), q(dir.y), q(dir.z), q(sliceMm)};
+}
+
+const BandCache::Entry* BandCache::Find(uint64_t key, const glm::dvec3& dir,
+                                        double sliceMm) {
+  std::lock_guard lock(m_mutex);
+  auto it = m_entries.find(KeyOf(key, dir, sliceMm));
+  if (it == m_entries.end())
+    return nullptr;
+  it->second.used = ++m_clock;
+  return &it->second;
+}
+
+double BandCache::SliceFor(const glm::dvec3& dir, double sliceMm) {
+  std::lock_guard lock(m_mutex);
+  const Key k = KeyOf(0, dir, sliceMm);
+  std::vector<double>& cut =
+      m_slices[{std::get<1>(k), std::get<2>(k), std::get<3>(k)}];
+  double best = 0.0;
+  for (double h : cut)
+    if (h <= sliceMm * (1.0 + 1e-9) && h >= sliceMm / 16.0 * (1.0 - 1e-9))
+      best = std::max(best, h);
+  if (best > 0.0)
+    return best;
+  cut.push_back(sliceMm);
+  return sliceMm;
+}
+
+void BandCache::Put(uint64_t key, const glm::dvec3& dir, double sliceMm,
+                    Entry e) {
+  std::lock_guard lock(m_mutex);
+  e.points = 0;
+  for (const Band& b : e.bands)
+    for (const Path64& p : b.region)
+      e.points += p.size();
+  e.used = ++m_clock;
+  const Key k = KeyOf(key, dir, sliceMm);
+  if (auto it = m_entries.find(k); it != m_entries.end()) {
+    m_points -= it->second.points;
+    m_entries.erase(it);
+  }
+  // Too big to keep at all: not kept.
+  if (e.points > kCachePointCeiling)
+    return;
+  while (m_points + e.points > kCachePointCeiling && !m_entries.empty()) {
+    auto oldest = m_entries.begin();
+    for (auto it = m_entries.begin(); it != m_entries.end(); ++it)
+      if (it->second.used < oldest->second.used)
+        oldest = it;
+    m_points -= oldest->second.points;
+    m_entries.erase(oldest);
+    stats.evicted++;
+  }
+  m_points += e.points;
+  m_entries.emplace(k, std::move(e));
 }
 
 } // namespace Measure::sections
