@@ -15,12 +15,20 @@ shaft's end and one in its middle:
 - an `insertion` requirement passes and fails as the RPC does;
 - an unknown entry, a mate without an axis, a pair no mate joins with no
   axis given, an option out of range and a bad requirement key are
-  refused, naming what is accepted.
+  refused, naming what is accepted;
+- the check runs as an `insertion` job: the instance answers another
+  client while it runs, and the parked call answers as before;
+- a frames-only part (the planetary's kinematic carrier), saved and opened
+  again, still gives its frames to mate on, and a pair with it is refused
+  by name -- by the RPC and by the requirement -- not dropped.
 
 Usage: insertion_smoke.py <path-to-designer-binary>
 """
 import os
 import sys
+import tempfile
+import threading
+import time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -62,7 +70,11 @@ def ring(d, name, z0, bore_r):
 
 
 def main(binary):
-    with launch(binary) as app:
+    env = dict(os.environ)
+    # Holds each insertion job before it computes (tests only), so the
+    # smoke sees one running off the frame.
+    env["LOBOLE_TEST_INSERTION_MS"] = "1000"
+    with launch(binary, env=env) as app:
         d = Client(app.port, timeout=300)
         d.call("new_project")
         d.call("add_part", name="shaft")
@@ -152,6 +164,59 @@ def main(binary):
                 measure={"kind": "insertion", "document": asm,
                          "a": occ["end ring"], "b": shaft},
                 bound={"kind": "pass"})
+
+        # ---- Off the frame ----------------------------------------------
+        other = Client(app.port, timeout=60)
+        answer = {}
+        worker = threading.Thread(target=lambda: answer.update(d.call(
+            "check_insertion", a="end ring", b=shaft, entry="positive")))
+        worker.start()
+        kinds, slowest = set(), 0.0
+        while worker.is_alive():
+            t0 = time.monotonic()
+            for j in other.call("background_jobs")["jobs"]:
+                kinds.add(j["kind"])
+            slowest = max(slowest, time.monotonic() - t0)
+            time.sleep(0.05)
+        worker.join()
+        expect("insertion" in kinds,
+               f"check_insertion runs as an insertion job: {kinds}")
+        expect(slowest < 0.5,
+               f"and the instance answers while it runs ({slowest:.2f} s)")
+        expect(answer.get("pass") is True and answer.get("confirm", {})
+               .get("agrees") is True,
+               f"the parked call answers as before: {answer}")
+
+        # ---- A frames-only part, saved and opened again -----------------
+        d.call("add_part", name="carrier")
+        d.call("add_feature", feature={
+            "type": "Frame", "name": "pin", "kind": "explicit",
+            "origin": [0, 0, 0], "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]})
+        d.call("set_active_part", part="rig")
+        carrier = d.call("add_occurrence", part="carrier",
+                         name="carrier")["id"]
+        d.call("add_mate", type="revolute", name="ring on carrier",
+               a={"occurrence": carrier, "frame": "pin"},
+               b={"occurrence": occ["end ring"], "origin": True},
+               flipped=False)
+        path = os.path.join(tempfile.mkdtemp(), "carrier.dsgn")
+        d.call("save_project", path=path)
+        d.call("open_project", path=path)
+        d.call("set_active_part", part="rig")
+        mates = {m["name"] for m in d.call("list_mates")["mates"]}
+        expect("ring on carrier" in mates,
+               f"the carrier's frame still mates after opening: {mates}")
+        refused(d, "check_insertion", "'carrier' places no matter",
+                a="end ring", b="carrier", entry="either")
+        req = d.call("add_requirement", name="ring onto the carrier",
+                     measure={"kind": "insertion", "document": asm,
+                              "a": occ["end ring"], "b": carrier,
+                              "entry": "either"},
+                     bound={"kind": "pass"})["id"]
+        row = [r for r in d.call("check_requirements", ids=[req])
+               ["requirements"] if r["id"] == req][0]
+        expect(row["state"] != "pass" and "'carrier' places no matter"
+               in str(row), f"the requirement names the carrier: {row}")
         print("insertion smoke: ok")
 
 

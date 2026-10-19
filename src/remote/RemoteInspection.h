@@ -80,4 +80,10 @@ InsertionCall ReadInsertionCall(ui::AppState& state, const nlohmann::json& p,
 nlohmann::json InsertionJson(const Measure::InsertionReport& r,
                              const std::string& axisFrom);
 
+// Why a top-level occurrence places no matter to slide, naming it: it is
+// hidden, or its part has no bodies (a frames-only part -- the planetary's
+// kinematic carrier -- or one whose features build nothing). Empty when it
+// does place matter.
+std::string NoMatterWhy(ui::AppState& state, uint64_t occurrenceId);
+
 } // namespace remote

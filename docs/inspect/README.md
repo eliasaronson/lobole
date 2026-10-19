@@ -407,6 +407,15 @@ forces something through on the way.
 - **A threaded pair is refused**: when both sides carry modelled threads
   the part goes on by turning along the helix, which a straight slide reads
   as the flanks forced through each other the whole way (the jar's lid).
+- **A side with nothing to slide is refused by name**: a hidden
+  occurrence, or one whose part has no bodies -- a frames-only part like
+  the planetary's kinematic carrier, which still gives its frames to mate
+  on when the project is opened again. The RPC and the requirement both
+  say which side and why, rather than "no visible matter".
+- **Off the frame.** The call is read and refused on the frame, then runs
+  as an `insertion` job (`background_jobs`, cancellable, with a fraction)
+  while the call waits for it; the frame never waits on it, and the
+  instance answers other clients meanwhile (`insertion_smoke`).
 
 What it costs, before (an exact boolean a sample, every orientation) and
 after (sections), on this machine -- `seconds` {`sections`, `pairs`,

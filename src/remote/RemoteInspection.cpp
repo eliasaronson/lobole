@@ -2018,6 +2018,14 @@ struct OffFrameInterference {
 };
 thread_local OffFrameInterference* g_offFrame = nullptr;
 
+// check_insertion, read and checked on the frame and parked on a job
+// (ParkInspectionRequest): what the job runs, on copies of both sides.
+struct OffFrameInsertion {
+  std::function<json(const std::atomic<bool>&, std::atomic<double>&)> compute;
+  std::string label;
+};
+thread_local OffFrameInsertion* g_offFrameInsertion = nullptr;
+
 // The named-pair exact answer, from the pair's bodies: `base` carries what
 // the handler already knows (the mode, the sides' names). Pure, so a worker
 // may run it on deep copies; it forgets their meshes after.
@@ -2454,10 +2462,62 @@ private:
 
 } // namespace
 
+// A check_insertion, parked on an `insertion` job: the frame never waits on
+// it. Read and refused on the frame (a refused call starts no job).
+std::unique_ptr<Parking> ParkInsertionRequest(ui::AppState& state,
+                                              const std::string& m,
+                                              const RpcParams& p) {
+  OffFrameInsertion slot;
+  g_offFrameInsertion = &slot;
+  try {
+    (void)HandleInspectionRpc(state, state.document.get(), m, p);
+  } catch (...) {
+    g_offFrameInsertion = nullptr;
+    return nullptr; // the handler refuses it again, in its own words
+  }
+  g_offFrameInsertion = nullptr;
+  if (!slot.compute || !p.UnknownKeys().empty())
+    return nullptr;
+  auto run = std::make_shared<InterferenceWait::Run>();
+  auto bg = std::make_unique<ui::BackgroundJob>();
+  bg->kind = "insertion";
+  bg->label = "Insertion (" + slot.label + ")";
+  bg->cancellable = true;
+  bg->fraction.store(0.0);
+  ui::BackgroundJob* raw = bg.get();
+  // Holds the job before it computes (tests only), so a smoke can watch it
+  // run while the instance answers other calls.
+  int holdMs = 0;
+  if (const char* ms = std::getenv("LOBOLE_TEST_INSERTION_MS"))
+    holdMs = std::max(0, std::atoi(ms));
+  bg->thread =
+      std::thread([run, raw, holdMs, compute = std::move(slot.compute)]() {
+        ArmOccSignalHandlers();
+        if (holdMs > 0)
+          std::this_thread::sleep_for(std::chrono::milliseconds(holdMs));
+        try {
+          run->answer = compute(raw->cancel, raw->fraction);
+        } catch (const Standard_Failure& e) {
+          run->error = std::string("check_insertion failed: ") +
+                       (e.GetMessageString() ? e.GetMessageString()
+                                             : "OpenCASCADE failure");
+        } catch (const std::exception& e) {
+          run->error = e.what();
+        }
+        run->done.store(true, std::memory_order_release);
+        raw->done.store(true); // last
+      });
+  bg->finish = [](ui::AppState&) { return true; };
+  ui::StartBackgroundJob(state, std::move(bg));
+  return std::make_unique<InterferenceWait>(std::move(run));
+}
+
 std::unique_ptr<Parking> ParkInspectionRequest(ui::AppState& state,
                                                const std::string& m,
                                                const json& request,
                                                const RpcParams& p) {
+  if (m == "check_insertion")
+    return ParkInsertionRequest(state, m, p);
   if (m != "interference")
     return nullptr;
   try {
@@ -2703,6 +2763,42 @@ json InsertionJson(const Measure::InsertionReport& r,
                                                         : json(nullptr)},
                       {"agrees", r.confirm.agrees}}
                : json(nullptr)}};
+}
+
+std::string NoMatterWhy(ui::AppState& state, uint64_t occurrenceId) {
+  const Occurrence* o =
+      state.assembly ? state.assembly->FindById(occurrenceId) : nullptr;
+  const std::string name =
+      o ? "'" + o->name + "'" : "occurrence " + std::to_string(occurrenceId);
+  if (o && !o->visible)
+    return name + " is hidden: a hidden occurrence places no matter";
+  size_t leaves = 0, shown = 0, bodies = 0;
+  bool framesOnly = true;
+  for (const assembly::FlatInstance& inst : ui::FlattenActiveAssembly(state)) {
+    if (inst.rootOccurrenceId != occurrenceId || inst.part == nullptr)
+      continue;
+    leaves++;
+    if (!inst.visible)
+      continue;
+    shown++;
+    for (const Body& b : inst.part->GetBodies())
+      if (!b.reference)
+        bodies++;
+    for (const auto& f : inst.part->GetFeatures())
+      if (dynamic_cast<const FrameFeature*>(f.get()) == nullptr)
+        framesOnly = false;
+  }
+  if (bodies > 0)
+    return {};
+  if (leaves == 0)
+    return name + " places no part";
+  if (shown == 0)
+    return name + "'s parts are all hidden: it places no matter";
+  return name + " places no matter: its part has no bodies" +
+         (framesOnly ? std::string(" -- only frames (a kinematic part, like "
+                                   "the planetary's carrier), so nothing "
+                                   "slides onto or off it")
+                     : std::string(" -- its features build none"));
 }
 
 json SealJson(const Measure::SealReport& r) {
@@ -3076,13 +3172,43 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     if (p.contains("lead_in_mm"))
       q["lead_in_mm"] = p.at("lead_in_mm");
     const InsertionCall call = ReadInsertionCall(state, q, a, b);
-    const std::vector<Body> A = ui::OccurrenceSubtreeBodies(state, a),
-                            B = ui::OccurrenceSubtreeBodies(state, b);
-    const auto r = Measure::Insertion(A, glm::dmat4(1.0), B, glm::dmat4(1.0),
-                                      call.point, call.dir, call.opt);
-    if (!r)
-      throw std::runtime_error("check_insertion: " + r.error());
-    return InsertionJson(*r, call.axisFrom);
+    for (uint64_t id : {a, b})
+      if (const std::string why = NoMatterWhy(state, id); !why.empty())
+        throw std::runtime_error("check_insertion: " + why);
+    // Copies, so a job can read them while the frame goes on editing.
+    const auto copies = [&](uint64_t id) {
+      std::vector<Body> out;
+      for (const Body& body : ui::OccurrenceSubtreeBodies(state, id)) {
+        Body nb = body;
+        nb.shape = body.shape.DetachedUnlocated().LocatedLike(body.shape);
+        out.push_back(std::move(nb));
+      }
+      return out;
+    };
+    auto compute = [A = copies(a), B = copies(b),
+                    call](const std::atomic<bool>& cancel,
+                          std::atomic<double>& fraction) {
+      const auto r =
+          Measure::Insertion(A, glm::dmat4(1.0), B, glm::dmat4(1.0), call.point,
+                             call.dir, call.opt, &cancel, &fraction);
+      if (cancel.load())
+        throw std::runtime_error("check_insertion: cancelled");
+      if (!r)
+        throw std::runtime_error("check_insertion: " + r.error());
+      return InsertionJson(*r, call.axisFrom);
+    };
+    if (g_offFrameInsertion != nullptr) {
+      const auto nameOf = [&](uint64_t id) {
+        const Occurrence* o = state.assembly->FindById(id);
+        return o ? o->name : std::to_string(id);
+      };
+      g_offFrameInsertion->label = nameOf(a) + " onto " + nameOf(b);
+      g_offFrameInsertion->compute = std::move(compute);
+      return json::object(); // the parked request answers instead
+    }
+    std::atomic<bool> never{false};
+    std::atomic<double> fraction{0.0};
+    return compute(never, fraction);
   }
   if (m == "check_seal") {
     // rpc-params: a, b

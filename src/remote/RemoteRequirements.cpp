@@ -1330,6 +1330,11 @@ Taken MeasureInsertion(ui::AppState& state, const json& m, const Ctx& ctx) {
   const uint64_t a = m.at("a").get<uint64_t>(), b = m.at("b").get<uint64_t>();
   auto in = std::make_shared<InsertionInputs>();
   in->call = remote::ReadInsertionCall(state, m, a, b);
+  // A side with nothing to slide is refused by name: a frames-only part, a
+  // hidden one (docs/inspect/README.md#insertion).
+  for (uint64_t id : {a, b})
+    if (const std::string why = remote::NoMatterWhy(state, id); !why.empty())
+      throw std::runtime_error(why + ", so nothing slides");
   for (const auto& [id, side] : {std::pair{a, &in->A}, std::pair{b, &in->B}})
     for (const Body& body : ui::OccurrenceSubtreeBodies(state, id)) {
       Body nb = body;
