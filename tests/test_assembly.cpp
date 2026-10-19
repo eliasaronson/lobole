@@ -764,13 +764,13 @@ TEST_CASE("A part loader rejects an assembly and vice versa", "[assembly]") {
   fs::remove(path);
 }
 
-// A FROZEN golden for the assembly sequence (vNEXT,
+// A FROZEN golden for the assembly sequence (v187,
 // docs/assemblies/README.md#assembly-sequences): the steps in order, each
 // with what it states of its path, round-tripped as written.
-TEST_CASE("Frozen vNEXT assembly golden carries its sequence",
+TEST_CASE("Frozen v187 assembly golden carries its sequence",
           "[assembly][golden]") {
   const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
-                          "assembly" / "vNEXT-assembly-sequence.json";
+                          "assembly" / "v187-assembly-sequence.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc);

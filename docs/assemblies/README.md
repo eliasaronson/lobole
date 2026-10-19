@@ -574,7 +574,7 @@ capture in `src/app/main.cpp` (`ViewportFrameCapture`),
 
 How the parts go together, in order: a document object on the assembly
 (`set_assembly_sequence`, `get_assembly_sequence`; saved in the index from
-vNEXT, one undo step). Each step names the top-level occurrence it places
+v187, one undo step). Each step names the top-level occurrence it places
 and its **path**:
 
 - `direction`: the way it moves going home, in the assembly's frame. A part

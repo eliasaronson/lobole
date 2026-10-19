@@ -160,7 +160,7 @@ std::vector<std::string> RelationKindNames();
 nlohmann::json ExplodedViewToJson(const ExplodedView& view);
 ExplodedView ExplodedViewFromJson(const nlohmann::json& j);
 
-// An assembly's sequence (vNEXT, docs/assemblies/README.md#assembly-sequences):
+// An assembly's sequence (v187, docs/assemblies/README.md#assembly-sequences):
 // absent from a file when it has no steps. A step key it does not know, a
 // step with no occurrence or a direction that is not three numbers is
 // refused, naming what is accepted.

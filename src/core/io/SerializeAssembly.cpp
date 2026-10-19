@@ -360,7 +360,7 @@ Mate MateFromJson(const json& j) {
   return m;
 }
 
-// ---- The assembly sequence (vNEXT) ----------------------------------------
+// ---- The assembly sequence (v187) ----------------------------------------
 
 json AssemblySequenceToJson(const AssemblySequence& seq) {
   json j;

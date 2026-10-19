@@ -622,7 +622,7 @@ struct AssemblySequence {
 
 class AssemblyDocument {
 public:
-  // The order its parts go together in, and how (vNEXT).
+  // The order its parts go together in, and how (v187).
   const AssemblySequence& GetSequence() const { return m_sequence; }
   void SetSequence(AssemblySequence s) { m_sequence = std::move(s); }
 
