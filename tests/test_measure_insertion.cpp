@@ -13,12 +13,17 @@
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
+#include <TopoDS_Wire.hxx>
 #include <catch2/catch_approx.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <gp_Ax2.hxx>
 
+#include <cmath>
+#include <numbers>
 #include <optional>
 #include <vector>
 
@@ -227,4 +232,114 @@ TEST_CASE("The insertion check refuses what it cannot read",
   const auto r = Measure::Insertion({screw}, I, {nut}, I, O, Z, o);
   REQUIRE_FALSE(r);
   CHECK(r.error().find("turning") != std::string::npos);
+}
+
+TEST_CASE("A part seated on a shoulder touches it: a contact, not a press",
+          "[measure][insertion]") {
+  // A hub at the running gap over a Ø4.8 arbor, seated on the arbor's Ø8
+  // shoulder: its face on the shoulder's face. Faces that meet at a band's
+  // end have no length along the axis between them, however the allowance
+  // closes them up as printed.
+  const Body arbor = Shaft({{0.0, 10.0, 4.0}, {10.0, 30.0, kR}});
+  const Body hub = Hub(
+      10.0, 20.0, BRepPrimAPI_MakeCylinder(Up(9.0), kR + kGap, 12.0).Shape());
+  const auto r = Check(hub, arbor, Measure::InsertionEntry::Positive);
+  CHECK(r.pass);
+  CHECK(r.best.pressMm == 0.0);
+  CHECK(r.best.interferingMm == 0.0);
+  // The one exact boolean, at the seat, agrees that nothing interferes:
+  // the faces only touch.
+  CHECK(r.confirm.ran);
+  CHECK(r.confirm.agrees);
+}
+
+TEST_CASE("A press is measured to its own length, with no step",
+          "[measure][insertion]") {
+  // A bore 0.02 under the shaft over 7.3 mm at the shaft's end: the press
+  // and the travel spent pressing are both exactly 7.3, not the nearest
+  // multiple of a sampling step.
+  const Body shaft =
+      Make(BRepPrimAPI_MakeCylinder(Up(0), 4.0, 30.0).Shape(), "shaft");
+  const Body ring =
+      Make(BRepAlgoAPI_Cut(BRepPrimAPI_MakeCylinder(Up(22.7), 8.0, 7.3).Shape(),
+                           BRepPrimAPI_MakeCylinder(Up(20), 3.98, 12.0).Shape())
+               .Shape(),
+           "ring");
+  const auto r = Check(ring, shaft, Measure::InsertionEntry::Positive, 0.0);
+  CHECK(r.pass);
+  CHECK(r.best.pressMm == Approx(7.3).margin(1e-6));
+  CHECK(r.best.interferingMm == Approx(7.3).margin(1e-6));
+  CHECK(r.best.excessMm == Approx(0.0).margin(1e-6));
+  // The press is 0.02 thick, read from the sections.
+  CHECK(r.best.worstDepthMm == Approx(0.02).margin(1e-3));
+  // The exact boolean at the worst offset sees the overlap too.
+  CHECK(r.confirm.ran);
+  CHECK(r.confirm.expectedOverlap);
+  CHECK(r.confirm.overlaps);
+  CHECK(r.confirm.agrees);
+  // Seated 2.2 mm further along, it is forced exactly that far on the way.
+  const Body mid =
+      Make(BRepAlgoAPI_Cut(BRepPrimAPI_MakeCylinder(Up(20.5), 8.0, 7.3).Shape(),
+                           BRepPrimAPI_MakeCylinder(Up(19), 3.98, 12.0).Shape())
+               .Shape(),
+           "ring");
+  const auto f = Check(mid, shaft, Measure::InsertionEntry::Positive, 0.0);
+  CHECK(f.best.excessMm == Approx(2.2).margin(1e-6));
+  CHECK(f.best.fromMm == Approx(9.5).margin(1e-6));
+}
+
+namespace {
+
+// A square of side `s` turned by `deg` about Z, at height z.
+TopoDS_Wire Square(double s, double deg, double z) {
+  const double a = deg * std::numbers::pi / 180.0;
+  BRepBuilderAPI_MakePolygon p;
+  for (int k = 0; k < 4; k++) {
+    const double t = a + k * std::numbers::pi / 2.0 + std::numbers::pi / 4.0;
+    const double r = s / std::sqrt(2.0);
+    p.Add(gp_Pnt(r * std::cos(t), r * std::sin(t), z));
+  }
+  p.Close();
+  return p.Wire();
+}
+
+// A herringbone square: turned 30 degrees by mid-height, and back.
+TopoDS_Shape Herringbone(double side, double h) {
+  BRepOffsetAPI_ThruSections loft(Standard_True, Standard_False);
+  const int n = 10;
+  for (int k = 0; k <= n; k++) {
+    const double z = h * k / n;
+    const double t = 1.0 - std::abs(2.0 * k / n - 1.0);
+    loft.AddWire(Square(side, 30.0 * t, z));
+  }
+  loft.Build();
+  return loft.Shape();
+}
+
+} // namespace
+
+TEST_CASE("A herringbone pair cannot be slid apart along its axis",
+          "[measure][insertion]") {
+  // A herringbone peg in its own herringbone hole, 0.4 clear all round
+  // (a loft's sections bulge a little between the ones it was given):
+  // it sits, but slid along the axis its helix meets the hole's turned the
+  // other way at once. No turn of it clears either: every slice of it is
+  // turned against the hole's.
+  const Body peg = Make(Herringbone(6.0, 10.0), "peg");
+  const Body block =
+      Make(BRepAlgoAPI_Cut(
+               BRepPrimAPI_MakeBox(gp_Pnt(-10, -10, 0), 20, 20, 10).Shape(),
+               Herringbone(6.8, 10.0))
+               .Shape(),
+           "block");
+  const auto r = Check(peg, block, Measure::InsertionEntry::Either);
+  CHECK_FALSE(r.pass);
+  // It sits: the seat reads no press.
+  CHECK(r.best.pressMm == 0.0);
+  // Forced nearly all the way out from either end.
+  CHECK(r.best.interferingMm > 8.0);
+  // The section varies along the whole height: it was sliced.
+  CHECK(r.bandsMoving > 10);
+  CHECK(r.confirm.ran);
+  CHECK(r.confirm.agrees);
 }

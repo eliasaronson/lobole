@@ -5,17 +5,17 @@
 
 #include "cad/NonDestructiveBoolean.h"
 #include "core/Feature.h"
+#include "core/MeasureSections.h"
 
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
-#include <BRepPrimAPI_MakeBox.hxx>
-#include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRep_Builder.hxx>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
 #include <Standard_Failure.hxx>
+#include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
 #include <TopoDS_Compound.hxx>
 #include <gp_Ax3.hxx>
@@ -25,6 +25,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <limits>
 #include <numbers>
@@ -49,47 +50,9 @@ gp_Trsf Rigid(const glm::dmat4& m) {
   return t;
 }
 
-// One compound of a side's matter, placed and then carried into the
-// axis's frame (the axis is that frame's Z through its origin).
-TopoDS_Compound Side(const std::vector<Body>& bodies, const glm::dmat4& xf,
-                     const gp_Trsf& toAxis, bool& any) {
-  BRep_Builder bb;
-  TopoDS_Compound c;
-  bb.MakeCompound(c);
-  const TopLoc_Location loc(toAxis * Rigid(xf));
-  for (const Body& b : bodies)
-    if (!b.reference && !b.shape.GetShape().IsNull()) {
-      bb.Add(c, b.shape.GetShape().Moved(loc));
-      any = true;
-    }
-  return c;
-}
-
-Bnd_Box BoxOf(const TopoDS_Shape& s) {
-  Bnd_Box b;
-  BRepBndLib::Add(s, b, false);
-  return b;
-}
-
-struct Range {
-  double lo = 0.0, hi = 0.0;
-};
-
-Range ZOf(const Bnd_Box& b) {
-  double x0, y0, z0, x1, y1, z1;
-  b.Get(x0, y0, z0, x1, y1, z1);
-  return {z0, z1};
-}
-
 double VolumeOf(const TopoDS_Shape& s) {
   GProp_GProps p;
   BRepGProp::VolumeProperties(s, p);
-  return std::max(0.0, p.Mass());
-}
-
-double AreaOf(const TopoDS_Shape& s) {
-  GProp_GProps p;
-  BRepGProp::SurfaceProperties(s, p);
   return std::max(0.0, p.Mass());
 }
 
@@ -103,62 +66,6 @@ struct KernelError {
   std::string what;
 };
 
-// Do a and b interfere: overlap in the model, or (with an allowance) come
-// nearer than it. With an allowance the distance is asked first: apart, and
-// neither inside the other, they cannot overlap, and only faces that meet
-// need the boolean's volume.
-Reading Interferes(const TopoDS_Shape& a, const TopoDS_Shape& b,
-                   double allowance) {
-  Reading r;
-  if (allowance > 0.0) {
-    BRepExtrema_DistShapeShape dist;
-    dist.SetMultiThread(true);
-    dist.LoadS1(a);
-    dist.LoadS2(b);
-    dist.SetFlag(Extrema_ExtFlag_MIN);
-    if (!dist.Perform() || !dist.IsDone())
-      throw KernelError{"the distance query failed"};
-    const double gap = dist.Value();
-    if (gap > kFuzz && !dist.InnerSolution()) {
-      // A gap exactly the allowance is line to line as made, not a press:
-      // the distance query's own noise is kept on the free side of it.
-      if (gap < allowance - kGapTol) {
-        r.interfering = true;
-        r.depthMm = allowance - gap;
-      }
-      return r;
-    }
-  }
-  BRepAlgoAPI_Common common;
-  if (!cad::BuildNonDestructive(common, a, b, kFuzz) || common.Shape().IsNull())
-    throw KernelError{"the overlap boolean failed"};
-  const double v = VolumeOf(common.Shape());
-  if (v > kVolumeTol) {
-    r.interfering = true;
-    r.volumeMm3 = v;
-    // The overlap of a slide is a thin skin; twice its volume over its
-    // area is its thickness.
-    const double area = AreaOf(common.Shape());
-    r.depthMm = allowance + (area > 0.0 ? 2.0 * v / area : 0.0);
-  } else if (allowance > 0.0) {
-    // Faces on faces: no gap at all.
-    r.interfering = true;
-    r.depthMm = allowance;
-  }
-  return r;
-}
-
-struct Sides {
-  TopoDS_Shape moving, fixed;
-  Bnd_Box movingBox, fixedBox;
-  double allowance = 0.0;
-};
-
-// Does `a` (the moving side, placed) interfere with the fixed side?
-Reading Read(const Sides& s, const TopoDS_Shape& a) {
-  return Interferes(a, s.fixed, s.allowance);
-}
-
 gp_Trsf Pose(double u, double rotationDeg, bool positive) {
   gp_Trsf rot;
   rot.SetRotation(gp_Ax1(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)),
@@ -168,47 +75,171 @@ gp_Trsf Pose(double u, double rotationDeg, bool positive) {
   return tr * rot;
 }
 
-bool BoxesMeet(const Bnd_Box& a, const Bnd_Box& b, double gap) {
-  Bnd_Box g = a;
-  g.Enlarge(gap);
-  return !g.IsOut(b);
+namespace C = Clipper2Lib;
+using sections::Band;
+using sections::kScale;
+
+// The polygons' own noise on a gap: chords stand in for curves, mm.
+constexpr double kGap2D = 1.0e-3;
+// Two band ends nearer than this along the axis meet, not overlap, mm.
+constexpr double kZTol = 1.0e-6;
+
+int64_t Units(double mm) {
+  return static_cast<int64_t>(std::ceil(mm * kScale));
 }
 
-// The press at the seat: the axial length over which the seated part and
-// the fixed set interfere, read slice by slice (each `step` thick).
-double PressAt(const Sides& s, const gp_Trsf& seat, double step,
-               const std::atomic<bool>* cancel) {
-  const TopoDS_Shape a = s.moving.Moved(TopLoc_Location(seat));
-  const Bnd_Box ab = s.movingBox.Transformed(seat);
-  if (!BoxesMeet(ab, s.fixedBox, s.allowance))
-    return 0.0;
-  const Range za = ZOf(ab), zb = ZOf(s.fixedBox);
-  const double lo = std::max(za.lo, zb.lo), hi = std::min(za.hi, zb.hi);
-  if (hi <= lo)
-    return 0.0;
-  double ax0, ay0, az0, ax1, ay1, az1, bx0, by0, bz0, bx1, by1, bz1;
-  ab.Get(ax0, ay0, az0, ax1, ay1, az1);
-  s.fixedBox.Get(bx0, by0, bz0, bx1, by1, bz1);
-  const double x0 = std::min(ax0, bx0) - 1.0, x1 = std::max(ax1, bx1) + 1.0;
-  const double y0 = std::min(ay0, by0) - 1.0, y1 = std::max(ay1, by1) + 1.0;
-  // Each slice counted by its own thickness: the last is a part one.
-  double pressed = 0.0;
-  for (double z = lo; z < hi - 1e-9; z += step) {
-    if (cancel && cancel->load())
-      return 0.0;
-    const TopoDS_Shape slab =
-        BRepPrimAPI_MakeBox(gp_Pnt(x0, y0, z),
-                            gp_Pnt(x1, y1, std::min(z + step, hi)))
-            .Shape();
-    BRepAlgoAPI_Common cut;
-    if (!cad::BuildNonDestructive(cut, a, slab) || cut.Shape().IsNull())
-      throw KernelError{"slicing the seated part failed"};
-    if (VolumeOf(cut.Shape()) <= kVolumeTol)
-      continue;
-    if (Read(s, cut.Shape()).interfering)
-      pressed += std::min(z + step, hi) - z;
+C::Rect64 Grown(C::Rect64 r, int64_t g) {
+  r.left -= g;
+  r.top -= g;
+  r.right += g;
+  r.bottom += g;
+  return r;
+}
+
+bool Meet(const C::Rect64& a, const C::Rect64& b) {
+  return a.left <= b.right && b.left <= a.right && a.top <= b.bottom &&
+         b.top <= a.bottom;
+}
+
+// A moving band's region turned to one orientation, and grown by the
+// allowance (less the polygons' noise) for the gap test.
+struct Turned {
+  C::Paths64 region, grown;
+  C::Rect64 box{}, grownBox{};
+};
+
+struct PairReading {
+  bool interfering = false;
+  double depthMm = 0.0; // as Reading's
+  double areaMm2 = 0.0; // the regions' overlap in the model
+};
+
+// The thickest piece of an overlap: twice its area over its perimeter
+// (holes included), the 2D twin of the clash boolean's skin thickness.
+void Overlap(const C::PolyPath64& node, double& area, double& thick) {
+  for (const auto& outer : node) {
+    double a = C::Area(outer->Polygon());
+    double len = C::Length(outer->Polygon(), true);
+    for (const auto& hole : *outer) {
+      a += C::Area(hole->Polygon());
+      len += C::Length(hole->Polygon(), true);
+      Overlap(*hole, area, thick); // islands in the holes
+    }
+    a = std::abs(a);
+    area += a;
+    if (len > 0.0)
+      thick = std::max(thick, 2.0 * a / len);
   }
-  return pressed;
+}
+
+PairReading ReadPair(const Band& a, const Turned& at, const Band& b,
+                     double allowance) {
+  PairReading r;
+  const double reach = allowance + kFuzz;
+  if (a.rMax + reach < b.rMin || b.rMax + reach < a.rMin)
+    return r;
+  if (!Meet(Grown(at.box, Units(reach)), b.box))
+    return r;
+  C::Clipper64 clip;
+  clip.AddSubject(at.region);
+  clip.AddClip(b.region);
+  C::PolyTree64 tree;
+  clip.Execute(C::ClipType::Intersection, C::FillRule::NonZero, tree);
+  double area = 0.0, thick = 0.0;
+  Overlap(tree, area, thick);
+  area /= kScale * kScale;
+  thick /= kScale;
+  if (thick > kFuzz) {
+    r.interfering = true;
+    r.depthMm = allowance + thick;
+    r.areaMm2 = area;
+    return r;
+  }
+  if (!(allowance > 0.0))
+    return r;
+  if (area > 0.0) {
+    // Faces on faces: no gap at all.
+    r.interfering = true;
+    r.depthMm = allowance;
+    return r;
+  }
+  if (!Meet(at.grownBox, b.box))
+    return r;
+  const C::Paths64 lens =
+      C::Intersect(at.grown, b.region, C::FillRule::NonZero);
+  if (lens.empty())
+    return r;
+  const double gap =
+      sections::BoundaryGap(at.region, b.region, C::GetBounds(lens), allowance);
+  // A gap exactly the allowance is line to line as made, not a press: the
+  // polygons' noise is kept on the free side of it.
+  if (gap < allowance - kGap2D) {
+    r.interfering = true;
+    r.depthMm = allowance - gap;
+  }
+  return r;
+}
+
+// A union of open intervals of the slide, measured.
+struct Intervals {
+  std::vector<std::pair<double, double>> v;
+  void Add(double lo, double hi) {
+    if (hi > lo)
+      v.emplace_back(lo, hi);
+  }
+  std::vector<std::pair<double, double>> Merged() const {
+    auto s = v;
+    std::sort(s.begin(), s.end());
+    std::vector<std::pair<double, double>> out;
+    for (const auto& [lo, hi] : s)
+      if (!out.empty() && lo <= out.back().second)
+        out.back().second = std::max(out.back().second, hi);
+      else
+        out.emplace_back(lo, hi);
+    return out;
+  }
+  double Length() const {
+    double n = 0.0;
+    for (const auto& [lo, hi] : Merged())
+      n += hi - lo;
+    return n;
+  }
+  double Sup() const {
+    double s = 0.0;
+    for (const auto& [lo, hi] : v)
+      s = std::max(s, hi);
+    return s;
+  }
+  bool Covers(double lo, double hi) const {
+    for (const auto& [a, b] : Merged())
+      if (a <= lo && b >= hi)
+        return true;
+    return false;
+  }
+};
+
+// The placed solids of a side, carried into the axis frame.
+std::vector<TopoDS_Shape> Solids(const std::vector<Body>& bodies,
+                                 const glm::dmat4& xf, const gp_Trsf& toAxis) {
+  std::vector<TopoDS_Shape> out;
+  const TopLoc_Location loc(toAxis * Rigid(xf));
+  for (const Body& b : bodies) {
+    if (b.reference || b.shape.GetShape().IsNull())
+      continue;
+    const TopoDS_Shape placed = b.shape.GetShape().Moved(loc);
+    for (TopExp_Explorer e(placed, TopAbs_SOLID); e.More(); e.Next())
+      out.push_back(e.Current());
+  }
+  return out;
+}
+
+TopoDS_Compound Compound(const std::vector<TopoDS_Shape>& shapes) {
+  BRep_Builder bb;
+  TopoDS_Compound c;
+  bb.MakeCompound(c);
+  for (const TopoDS_Shape& s : shapes)
+    bb.Add(c, s);
+  return c;
 }
 
 } // namespace
@@ -245,56 +276,53 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
   rep.axisDir = axisDir / len;
   rep.allowanceMm = opt.allowanceMm;
   rep.samples = opt.samples;
+  const auto progress = [&](double f) {
+    if (fraction)
+      fraction->store(std::min(0.99, f));
+  };
   try {
     const gp_Ax3 ax(gp_Pnt(axisPoint.x, axisPoint.y, axisPoint.z),
                     gp_Dir(rep.axisDir.x, rep.axisDir.y, rep.axisDir.z));
     gp_Trsf toAxis;
     toAxis.SetTransformation(ax);
-    bool anyA = false, anyB = false;
-    Sides s;
-    s.moving = Side(moving, xfMoving, toAxis, anyA);
-    s.fixed = Side(fixed, xfFixed, toAxis, anyB);
-    if (!anyA || !anyB)
+    const std::vector<TopoDS_Shape> solidsA = Solids(moving, xfMoving, toAxis),
+                                    solidsB = Solids(fixed, xfFixed, toAxis);
+    if (solidsA.empty() || solidsB.empty())
       return std::unexpected("one side places no visible matter (hidden, or "
                              "a part with no bodies)");
-    s.movingBox = BoxOf(s.moving);
-    s.fixedBox = BoxOf(s.fixed);
-    s.allowance = opt.allowanceMm;
-    // Each side clipped, once, to what the other can ever come near: a
-    // cylinder about the axis as wide as the other reaches from it (and a
-    // millimetre more than the allowance), which a turn about the axis
-    // keeps. A housing round a wheel, a plate round an arbor, is then the
-    // part of it by the axis, and every step's boolean is on that.
-    {
-      const auto reach = [](const Bnd_Box& b) {
-        double x0, y0, z0, x1, y1, z1;
-        b.Get(x0, y0, z0, x1, y1, z1);
-        return std::hypot(std::max(std::abs(x0), std::abs(x1)),
-                          std::max(std::abs(y0), std::abs(y1)));
-      };
-      const Range a0 = ZOf(s.movingBox), b0 = ZOf(s.fixedBox);
-      const double g = opt.allowanceMm + 1.0;
-      const double lo = std::min(a0.lo, b0.lo), hi = std::max(a0.hi, b0.hi);
-      const double span = hi - lo;
-      const auto clip = [&](TopoDS_Shape& sh, Bnd_Box& box, double r) {
-        if (r >= reach(box))
-          return;
-        const TopoDS_Shape cyl =
-            BRepPrimAPI_MakeCylinder(
-                gp_Ax2(gp_Pnt(0, 0, lo - 2.0 * span - g), gp_Dir(0, 0, 1)), r,
-                5.0 * span + 2.0 * g)
-                .Shape();
-        BRepAlgoAPI_Common c;
-        if (!cad::BuildNonDestructive(c, sh, cyl) || c.Shape().IsNull())
-          throw KernelError{"clipping a side to the axis failed"};
-        sh = c.Shape();
-        box = BoxOf(sh);
-      };
-      const double ra = reach(s.movingBox) + g, rb = reach(s.fixedBox) + g;
-      clip(s.moving, s.movingBox, rb);
-      clip(s.fixed, s.fixedBox, ra);
-    }
-    if (s.movingBox.IsVoid() || s.fixedBox.IsVoid()) {
+    std::vector<sections::Solid> prepA, prepB;
+    for (const TopoDS_Shape& s : solidsA)
+      prepA.push_back(sections::Prepare(s));
+    for (const TopoDS_Shape& s : solidsB)
+      prepB.push_back(sections::Prepare(s));
+    // Each side kept, once, to what the other can ever come near: as wide
+    // about the axis as the other reaches from it (and a millimetre more
+    // than the allowance), which a turn about the axis keeps.
+    const auto reachOf = [](const std::vector<sections::Solid>& v) {
+      double r = 0.0;
+      for (const auto& s : v)
+        r = std::max(r, std::hypot(s.half, s.half));
+      return r;
+    };
+    const double g = opt.allowanceMm + 1.0;
+    const double reachA = reachOf(prepB) + g, reachB = reachOf(prepA) + g;
+    const auto spanOf = [](const std::vector<sections::Solid>& v, double reach,
+                           double& lo, double& hi) {
+      lo = std::numeric_limits<double>::infinity();
+      hi = -lo;
+      for (const auto& s : v) {
+        double a, b;
+        if (sections::ReachSpan(s, reach, a, b)) {
+          lo = std::min(lo, a);
+          hi = std::max(hi, b);
+        }
+      }
+      return hi > lo;
+    };
+    double za0, za1, zb0, zb1;
+    const bool nearA = spanOf(prepA, reachA, za0, za1),
+               nearB = spanOf(prepB, reachB, zb0, zb1);
+    const auto clear = [&] {
       // Nothing of either ever comes near the other.
       InsertionTry t;
       t.pass = true;
@@ -304,18 +332,18 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       if (fraction)
         fraction->store(1.0);
       return rep;
-    }
-    const Range za = ZOf(s.movingBox), zb = ZOf(s.fixedBox);
+    };
+    if (!nearA || !nearB)
+      return clear();
 
     std::vector<bool> sides;
     if (opt.entry != InsertionEntry::Negative)
       sides.push_back(true);
     if (opt.entry != InsertionEntry::Positive)
       sides.push_back(false);
-    // One step for every try, from the longer of the two travels, so the
-    // two sides read at one resolution.
+    // One resolution for every try, from the longer of the two travels.
     const auto travelOf = [&](bool positive) {
-      const double d = positive ? zb.hi - za.lo : za.hi - zb.lo;
+      const double d = positive ? zb1 - za0 : za1 - zb0;
       return std::max(0.0, d + opt.allowanceMm + kFuzz);
     };
     double longest = 0.0;
@@ -323,92 +351,210 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       longest = std::max(longest, travelOf(p));
     rep.stepMm = longest / opt.samples;
     rep.leadInMm = opt.leadInMm >= 0.0 ? opt.leadInMm : rep.stepMm;
+    rep.sliceMm = rep.stepMm > 0.0 ? rep.stepMm : 1.0;
 
-    // Every try's work, for the fraction: its slices and its steps.
-    const double perTry =
-        2.0 * opt.samples + 1.0; // a press read and a sweep, about as long
+    // The bands, both sides on one slice grid.
+    using Clock = std::chrono::steady_clock;
+    const auto since = [](Clock::time_point t) {
+      return std::chrono::duration<double>(Clock::now() - t).count();
+    };
+    auto t0 = Clock::now();
+    std::vector<Band> bandsA, bandsB;
+    {
+      const size_t n = prepA.size() + prepB.size();
+      size_t k = 0;
+      for (auto [prep, out, reach] : {std::tuple{&prepA, &bandsA, reachA},
+                                      std::tuple{&prepB, &bandsB, reachB}}) {
+        sections::BandOptions bo;
+        bo.sliceMm = rep.sliceMm;
+        bo.reachMm = reach;
+        for (size_t i = 0; i < prep->size(); i++) {
+          if (cancel && cancel->load())
+            throw KernelError{"cancelled"};
+          for (Band& b : sections::SolidBands((*prep)[i], bo,
+                                              static_cast<int>(i), cancel))
+            out->push_back(std::move(b));
+          progress(0.5 * static_cast<double>(++k) / n);
+        }
+      }
+    }
+    rep.sectionsSeconds = since(t0);
+    t0 = Clock::now();
+    rep.bandsMoving = static_cast<int>(bandsA.size());
+    rep.bandsFixed = static_cast<int>(bandsB.size());
+    if (bandsA.empty() || bandsB.empty())
+      return clear();
+
+    // Orientations tried, and every band pair's reading at each: a pair's
+    // reading does not depend on the slide, only on the turn.
+    std::vector<double> turns;
+    for (int k = 0; k < opt.rotations; k++)
+      turns.push_back(360.0 * k / opt.rotations);
+    const size_t nA = bandsA.size(), nB = bandsB.size();
+    std::vector<std::vector<Turned>> turned(turns.size());
+    std::vector<std::vector<int8_t>> known(turns.size());
+    std::vector<std::vector<PairReading>> readings(turns.size());
+    const auto turnedAt = [&](size_t ti) -> const std::vector<Turned>& {
+      auto& v = turned[ti];
+      if (v.empty()) {
+        v.reserve(nA);
+        for (const Band& b : bandsA) {
+          Turned t;
+          t.region = sections::Rotated(b.region, turns[ti]);
+          t.box = C::GetBounds(t.region);
+          if (opt.allowanceMm > kGap2D) {
+            t.grown =
+                C::InflatePaths(t.region, (opt.allowanceMm - kGap2D) * kScale,
+                                C::JoinType::Round, C::EndType::Polygon, 2.0,
+                                0.25 * kGap2D * kScale);
+            t.grownBox = C::GetBounds(t.grown);
+          }
+          v.push_back(std::move(t));
+        }
+        known[ti].assign(nA * nB, 0);
+        readings[ti].resize(nA * nB);
+      }
+      return v;
+    };
+    const auto pair = [&](size_t ti, size_t i, size_t j) -> const PairReading& {
+      const auto& t = turnedAt(ti);
+      const size_t k = i * nB + j;
+      if (!known[ti][k]) {
+        readings[ti][k] = ReadPair(bandsA[i], t[i], bandsB[j], opt.allowanceMm);
+        known[ti][k] = 1;
+        rep.pairsRead++;
+      }
+      return readings[ti][k];
+    };
+
+    // The seat, at each orientation: what interferes where the part ends
+    // up (the same whichever side it came from), how deep, how much, and
+    // over what length of the axis.
+    struct Seat {
+      bool done = false;
+      Reading at;
+      double pressMm = 0.0;
+    };
+    std::vector<Seat> seats(turns.size());
+    const auto seatAt = [&](size_t ti) -> const Seat& {
+      Seat& s = seats[ti];
+      if (s.done)
+        return s;
+      s.done = true;
+      Intervals press;
+      for (size_t i = 0; i < nA; i++)
+        for (size_t j = 0; j < nB; j++) {
+          const Band &a = bandsA[i], &b = bandsB[j];
+          const double lo = std::max(a.z0, b.z0), hi = std::min(a.z1, b.z1);
+          if (hi - lo <= kZTol)
+            continue; // apart, or a face on a face: a contact, not a press
+          const PairReading& r = pair(ti, i, j);
+          if (!r.interfering)
+            continue;
+          s.at.interfering = true;
+          s.at.depthMm = std::max(s.at.depthMm, r.depthMm);
+          s.at.volumeMm3 += r.areaMm2 * (hi - lo);
+          press.Add(lo, hi);
+        }
+      s.pressMm = press.Length();
+      return s;
+    };
+
+    const double perTry = 1.0;
     const double total =
-        perTry * static_cast<double>(sides.size() * opt.rotations);
+        perTry * static_cast<double>(sides.size() * turns.size());
     double done = 0.0;
     const auto advance = [&](double n) {
       done += n;
-      if (fraction)
-        fraction->store(std::min(0.99, done / total));
+      progress(0.5 + 0.5 * done / total);
     };
 
     bool haveBest = false;
-    // The seated press and reading, per side: a turned try is judged
-    // against the press where the part is placed, and seats only where it
-    // interferes there no more than the placed part does.
-    struct Seated {
-      double pressMm = 0.0;
-      Reading at;
-    };
-    std::vector<Seated> seated(sides.size());
-    const auto run = [&](size_t side, double rotationDeg) {
+    const auto run = [&](size_t side, size_t ti) {
       const bool positive = sides[side];
       InsertionTry t;
       t.positive = positive;
-      t.rotationDeg = rotationDeg;
+      t.rotationDeg = turns[ti];
       t.travelMm = travelOf(positive);
       if (rep.stepMm <= 0.0 || t.travelMm <= 0.0) {
         t.pass = true;
         return t;
       }
-      const double step = rep.stepMm;
-      if (rotationDeg == 0.0) {
-        // A seat that does not interfere at all has no press to read.
-        seated[side].at = Read(s, s.moving);
-        seated[side].pressMm =
-            seated[side].at.interfering
-                ? PressAt(s, Pose(0.0, 0.0, positive), step, cancel)
-                : 0.0;
-        advance(opt.samples);
-      } else {
-        const Reading r = Read(s, s.moving.Moved(TopLoc_Location(
-                                      Pose(0.0, rotationDeg, positive))));
-        const Reading& at = seated[side].at;
-        if (r.depthMm > at.depthMm + 1e-6 ||
-            r.volumeMm3 > at.volumeMm3 + 1e-6) {
+      const Seat& seat0 = seatAt(0);
+      if (ti != 0) {
+        // Turned so, does it still seat: interfere where it ends up no
+        // more than the placed part does?
+        const Seat& s = seatAt(ti);
+        if (s.at.depthMm > seat0.at.depthMm + kFuzz ||
+            s.at.volumeMm3 > seat0.at.volumeMm3 * (1.0 + 1e-3) + 1e-3) {
           t.seats = false;
-          t.worstDepthMm = r.depthMm;
-          t.worstVolumeMm3 = r.volumeMm3;
-          advance(perTry);
+          t.worstDepthMm = s.at.depthMm;
+          t.worstVolumeMm3 = s.at.volumeMm3;
           return t;
         }
       }
-      t.pressMm = seated[side].pressMm;
-      int hits = 0;
-      int deeper = 0;
+      t.pressMm = seat0.pressMm;
       // Forced deeper than the seat is pressed: a bind, however short.
-      const double seatDepth = seated[side].at.depthMm;
-      const double deeperTol = 0.5 * s.allowance + kFuzz;
-      const int n = static_cast<int>(std::ceil(t.travelMm / step - 1e-9));
-      for (int k = n; k >= 1; k--) {
+      const double deeperTol = 0.5 * opt.allowanceMm + kFuzz;
+      const double seatDepth = seat0.at.depthMm;
+      Intervals hit, deeper;
+      double worstAt = -1.0;
+      // Every pair whose spans overlap somewhere on the way: the slides
+      // that do it are one open interval, from the band ends.
+      struct Cand {
+        size_t i, j;
+        double lo, hi;
+      };
+      std::vector<Cand> cands;
+      for (size_t i = 0; i < nA; i++)
+        for (size_t j = 0; j < nB; j++) {
+          const Band &a = bandsA[i], &b = bandsB[j];
+          double lo, hi;
+          if (positive) {
+            lo = b.z0 - a.z1;
+            hi = b.z1 - a.z0;
+          } else {
+            lo = a.z0 - b.z1;
+            hi = a.z1 - b.z0;
+          }
+          lo = std::max(lo, 0.0);
+          hi = std::min(hi, t.travelMm);
+          if (hi - lo > kZTol)
+            cands.push_back({i, j, lo, hi});
+        }
+      // Nearest the seat first: what binds as it goes home is read first.
+      std::sort(cands.begin(), cands.end(),
+                [](const Cand& x, const Cand& y) { return x.lo < y.lo; });
+      for (const Cand& c : cands) {
         if (cancel && cancel->load())
           throw KernelError{"cancelled"};
-        const double u = k * step;
-        const gp_Trsf pose = Pose(u, rotationDeg, positive);
-        advance(1.0);
-        if (!BoxesMeet(s.movingBox.Transformed(pose), s.fixedBox, s.allowance))
+        // Nothing left to learn from a pair whose slides are already
+        // counted both as interfering and as deeper than the seat.
+        if (hit.Covers(c.lo, c.hi) && deeper.Covers(c.lo, c.hi))
           continue;
-        const Reading r = Read(s, s.moving.Moved(TopLoc_Location(pose)));
+        const PairReading& r = pair(ti, c.i, c.j);
         if (!r.interfering)
           continue;
-        hits++;
+        hit.Add(c.lo, c.hi);
         if (r.depthMm > seatDepth + deeperTol)
-          deeper++;
-        t.fromMm = std::max(t.fromMm, u);
-        t.worstDepthMm = std::max(t.worstDepthMm, r.depthMm);
-        t.worstVolumeMm3 = std::max(t.worstVolumeMm3, r.volumeMm3);
+          deeper.Add(c.lo, c.hi);
+        if (r.depthMm > t.worstDepthMm) {
+          t.worstDepthMm = r.depthMm;
+          worstAt = 0.5 * (c.lo + c.hi);
+        }
+        const Band &a = bandsA[c.i], &b = bandsB[c.j];
+        t.worstVolumeMm3 = std::max(
+            t.worstVolumeMm3, r.areaMm2 * std::min(a.z1 - a.z0, b.z1 - b.z0));
         // A try that cannot beat the best found is abandoned.
-        if (haveBest && hits * step - t.pressMm > rep.best.excessMm) {
+        if (haveBest && hit.Length() - t.pressMm > rep.best.excessMm) {
           t.complete = false;
           break;
         }
       }
-      t.interferingMm = hits * step;
-      t.deeperMm = deeper * step;
+      t.interferingMm = hit.Length();
+      t.deeperMm = deeper.Length();
+      t.fromMm = hit.Sup();
+      t.worstAtMm = worstAt;
       t.excessMm = std::max(0.0, t.interferingMm - t.pressMm);
       t.pass = t.complete && t.excessMm <= rep.leadInMm + 1e-9 &&
                t.deeperMm <= rep.leadInMm + 1e-9;
@@ -425,38 +571,103 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         rep.pass = true;
         rep.best = t;
       }
+      advance(perTry);
     };
     // Turned by `deg`, is either side the same matter again?
     const auto symmetric = [&](double deg) {
-      gp_Trsf rot = Pose(0.0, deg, true);
-      for (const TopoDS_Shape* sh : {&s.moving, &s.fixed}) {
-        const double v = VolumeOf(*sh);
-        BRepAlgoAPI_Common c;
-        if (!cad::BuildNonDestructive(c, *sh, sh->Moved(TopLoc_Location(rot)),
-                                      kFuzz) ||
-            c.Shape().IsNull())
-          throw KernelError{"the symmetry boolean failed"};
-        if (std::abs(VolumeOf(c.Shape()) - v) <= 1e-6 * std::max(1.0, v))
+      for (const std::vector<Band>* side : {&bandsA, &bandsB}) {
+        bool same = true;
+        for (const Band& b : *side) {
+          const C::Paths64 x = C::Xor(
+              b.region, sections::Rotated(b.region, deg), C::FillRule::NonZero);
+          double a = 0.0;
+          for (const auto& p : x)
+            a += C::Area(p);
+          // As thin as the polygons' noise along the whole outline.
+          if (std::abs(a) / (kScale * kScale) >
+              kGap2D * std::max(b.perimeterMm, 1e-9)) {
+            same = false;
+            break;
+          }
+        }
+        if (same)
           return true;
       }
       return false;
     };
     // The seated orientation first, from each side; then the others.
     for (size_t i = 0; i < sides.size() && !rep.pass; i++)
-      consider(run(i, 0.0));
-    for (int k = 1; k < opt.rotations && !rep.pass; k++) {
-      const double deg = 360.0 * k / opt.rotations;
-      if (symmetric(deg)) {
+      consider(run(i, 0));
+    for (size_t k = 1; k < turns.size() && !rep.pass; k++) {
+      if (symmetric(turns[k])) {
         advance(perTry * sides.size());
         continue;
       }
       for (size_t i = 0; i < sides.size() && !rep.pass; i++)
-        consider(run(i, deg));
+        consider(run(i, k));
+    }
+
+    rep.pairsSeconds = since(t0);
+    t0 = Clock::now();
+    // The one exact boolean: at the worst offset of the answer, or at the
+    // seat when nothing interferes on the way.
+    if (opt.confirm) {
+      const InsertionTry& b = rep.best;
+      InsertionConfirm& c = rep.confirm;
+      c.ran = true;
+      size_t ti = 0;
+      for (size_t k = 0; k < turns.size(); k++)
+        if (turns[k] == b.rotationDeg)
+          ti = k;
+      c.atMm = b.worstAtMm >= 0.0 ? b.worstAtMm : 0.0;
+      // What the sections say there: every pair whose spans overlap at it.
+      const double u = b.positive ? c.atMm : -c.atMm;
+      for (size_t i = 0; i < nA; i++)
+        for (size_t j = 0; j < nB; j++) {
+          const Band &a = bandsA[i], &f = bandsB[j];
+          const double lo = std::max(a.z0 + u, f.z0),
+                       hi = std::min(a.z1 + u, f.z1);
+          if (hi - lo <= kZTol)
+            continue;
+          const PairReading& r = pair(ti, i, j);
+          if (r.areaMm2 > 0.0)
+            c.expectedOverlap = true;
+          else if (r.interfering)
+            c.expectedGap = true;
+        }
+      if (c.expectedOverlap)
+        c.expectedGap = false;
+      const TopoDS_Shape placed = Compound(solidsA).Moved(
+          TopLoc_Location(Pose(c.atMm, b.rotationDeg, b.positive)));
+      const TopoDS_Compound f = Compound(solidsB);
+      BRepAlgoAPI_Common common;
+      if (!cad::BuildNonDestructive(common, placed, f, kFuzz) ||
+          common.Shape().IsNull())
+        throw KernelError{"the confirming boolean failed"};
+      c.volumeMm3 = VolumeOf(common.Shape());
+      c.overlaps = c.volumeMm3 > kVolumeTol;
+      c.agrees = c.overlaps == c.expectedOverlap;
+      if (c.agrees && c.expectedGap) {
+        BRepExtrema_DistShapeShape dist;
+        dist.SetMultiThread(true);
+        dist.LoadS1(placed);
+        dist.LoadS2(f);
+        dist.SetFlag(Extrema_ExtFlag_MIN);
+        if (!dist.Perform() || !dist.IsDone())
+          throw KernelError{"the confirming distance query failed"};
+        c.gapMm = dist.Value();
+        c.agrees = c.gapMm < opt.allowanceMm - kGapTol;
+      }
+      if (!c.agrees)
+        rep.pass = false;
+      rep.confirmSeconds = since(t0);
     }
     if (fraction)
       fraction->store(1.0);
   } catch (const KernelError& e) {
     return std::unexpected(e.what);
+  } catch (const std::runtime_error& e) {
+    return std::unexpected(e.what());
   } catch (const Standard_Failure& e) {
     return std::unexpected(std::string("the kernel failed: ") +
                            (e.GetMessageString() ? e.GetMessageString() : ""));

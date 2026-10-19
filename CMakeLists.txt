@@ -346,6 +346,7 @@ set(core_sources
     src/core/Measure.cpp
     src/core/MeasureSeal.cpp
     src/core/MeasureInsertion.cpp
+    src/core/MeasureSections.cpp
     src/core/PrintSplit.cpp
     src/core/ThreadStandards.cpp
     src/core/FitStandards.cpp
@@ -563,26 +564,32 @@ option(ENABLE_TERMINAL "Embedded terminal panel (libvterm)" ON)
 option(ENABLE_CAM_ADAPTIVE "Adaptive clearing (LGPL libarea, linked as a shared library)" ON)
 
 # Clipper2 (vendored, Boost licence): polygon offsetting for CAM toolpaths
-# (docs/cam/README.md). Vendored rather than found: it is packaged in nixpkgs
-# but not in Ubuntu, and three .cpp files are cheaper than an optional
-# dependency that silently drops a workstream on half the CI matrix.
+# (docs/cam/README.md), and the 2D sections the insertion check reads
+# (docs/inspect/README.md#insertion) -- which is why it is built whether or
+# not CAM is: the check is not optional. Vendored rather than found: it is
+# packaged in nixpkgs but not in Ubuntu, and three .cpp files are cheaper
+# than an optional dependency that silently drops a workstream on half the
+# CI matrix.
 set(CLIPPER2_DIR ${CMAKE_SOURCE_DIR}/deps/clipper2/CPP/Clipper2Lib)
+if(NOT EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
+    message(FATAL_ERROR "deps/clipper2 is missing: git submodule update --init")
+endif()
+add_library(clipper2 STATIC
+    ${CLIPPER2_DIR}/src/clipper.engine.cpp
+    ${CLIPPER2_DIR}/src/clipper.offset.cpp
+    ${CLIPPER2_DIR}/src/clipper.rectclip.cpp)
+target_include_directories(clipper2 SYSTEM PUBLIC ${CLIPPER2_DIR}/include)
+# USINGZ gives Point64 a `z` field and Clipper64 a SetZCallback, which
+# libarea's Adaptive relies on to track which input edge produced each
+# output vertex. It changes the LAYOUT of Point64, so it has to be PUBLIC:
+# one translation unit compiled without it and the two disagree about a
+# struct they both pass around.
+target_compile_definitions(clipper2 PUBLIC USINGZ)
+set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(NOT ENABLE_CAM)
     message(STATUS "CAM disabled (-DENABLE_CAM=OFF)")
-elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
+else()
     set(HAVE_CAM ON)
-    add_library(clipper2 STATIC
-        ${CLIPPER2_DIR}/src/clipper.engine.cpp
-        ${CLIPPER2_DIR}/src/clipper.offset.cpp
-        ${CLIPPER2_DIR}/src/clipper.rectclip.cpp)
-    target_include_directories(clipper2 SYSTEM PUBLIC ${CLIPPER2_DIR}/include)
-    # USINGZ gives Point64 a `z` field and Clipper64 a SetZCallback, which
-    # libarea's Adaptive relies on to track which input edge produced each
-    # output vertex. It changes the LAYOUT of Point64, so it has to be PUBLIC:
-    # one translation unit compiled without it and the two disagree about a
-    # struct they both pass around.
-    target_compile_definitions(clipper2 PUBLIC USINGZ)
-    set_target_properties(clipper2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     list(APPEND core_sources src/core/cam/CamGeometry.cpp
                              src/core/cam/CamDerive.cpp
                              src/core/cam/CamDropCutter.cpp
@@ -636,8 +643,6 @@ elseif(EXISTS ${CLIPPER2_DIR}/src/clipper.engine.cpp)
     # build" for the clearing, and the request/key/cache half
     # (docs/ui/long-operations.md) is plain C++ that every CAM build needs.
     list(APPEND core_sources src/core/cam/CamAdaptive.cpp)
-else()
-    message(STATUS "deps/clipper2 missing (submodule not initialised) - CAM disabled")
 endif()
 
 # libvterm: the terminal panel's VT emulation (docs/ui/terminal.md).
@@ -697,9 +702,9 @@ set_source_files_properties(src/common/BuildInfo.cpp PROPERTIES
     COMPILE_DEFINITIONS "${BUILD_INFO_DEFINITIONS}")
 target_include_directories(designer_core PUBLIC src)
 target_link_libraries(designer_core PUBLIC spdlog::spdlog nlohmann_json::nlohmann_json fem_mesher)
+target_link_libraries(designer_core PUBLIC clipper2)
 if(HAVE_CAM)
     target_compile_definitions(designer_core PUBLIC HAVE_CAM)
-    target_link_libraries(designer_core PUBLIC clipper2)
 endif()
 if(HAVE_CAM_ADAPTIVE)
     target_compile_definitions(designer_core PUBLIC HAVE_CAM_ADAPTIVE)

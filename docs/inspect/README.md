@@ -353,53 +353,83 @@ forces something through on the way.
   axis points to), `negative`, or `either` (both tried, the better
   reported). An unknown entry, a mate with no axis, a pair no mate joins
   with no axis given, or both `mate` and `axis` is refused.
-- **Each step** (`samples`, 64 from seat to clear by default) asks whether
-  the two interfere: an overlap in the model, by the clash check's 1 µm
-  fuzzy, non-destructive boolean, or -- with `allowance_mm` -- faces nearer
-  than how much they close up as made. A printed bore prints under its
-  model (print_allowance's hole allowance, a side), so a light press
+- **By sections.** Each side is cut into **bands** along the axis over
+  which its cross-section does not change (core/MeasureSections.h): an
+  extrusion, a bore, a straight tooth band is one band whatever its
+  length, its outline the B-rep's own planar section. Where a face is not
+  along the axis -- a chamfer, a fillet, a helical flank -- the span is
+  sliced `slice_mm` thick (the travel over `samples`, 64 by default) on a
+  grid anchored at the seat, so the two sides' slices line up where the
+  part ends up; slices are cut from one fine triangulation (0.5 µm), as a
+  boolean section of a twisted flank is seconds a slice. Two bands
+  interfere or not whatever the slide: one 2D polygon question (Clipper2)
+  -- an overlap thicker than 1 µm, or, with `allowance_mm`, outlines
+  nearer than how much they close up as made. A printed bore prints under
+  its model (print_allowance's hole allowance, a side), so a light press
   modelled 0.05 a side oversize is a press as printed, and a bore at the
-  running gap is not; `allowance_mm` 0 reads the model as modelled.
-- **The press** is the axial length over which the seated pair interferes,
-  read slice by slice a step thick. A part pressed on is pushed under
-  interference exactly that far; the check **fails** a slide whose travel
-  under interference is longer than its press plus `lead_in_mm` (a step by
-  default, the sampling's own resolution; each slice of the press is
-  counted by its own thickness). A round pivot passed through
-  a D bore, a press band that runs on past the seat, or a bore too small
-  for the whole shaft all fail; a press band that ends where the part goes
-  on, or a pivot at the running gap under the bore, passes. Travel spent
-  interfering **deeper** than the seat itself does (by more than half the
-  allowance) fails past the lead-in too: the part is forced harder than
-  the press it ends in, however long that press reads (`deeper_mm`).
+  running gap is not; `allowance_mm` 0 reads the model as modelled. The
+  allowance is a polygon offset **in the section's plane** -- how a
+  printer's XY closing acts on a part printed along its axis -- so a
+  helical or conical face's gap is its transverse one, wider than the
+  normal gap by 1/cos of its lean: the planetary's planet reads a 0.097
+  normal clearance to its ring as a transverse one at the 0.1 allowance.
+- **The slides** at which two bands' spans overlap are one open interval
+  from their ends, so the travel under interference is a union of
+  intervals: exact, with no step. Faces that meet end to end -- a hub on
+  its arbor's shoulder -- have no length between them: a **contact, not a
+  press**, however the allowance closes them up.
+- **The press** is the axial length over which the seated pair
+  interferes. A part pressed on is pushed under interference exactly that
+  far; the check **fails** a slide whose travel under interference is
+  longer than its press plus `lead_in_mm` (a step, the travel over
+  `samples`, by default). A round pivot passed through a D bore, a press
+  band that runs on past the seat, or a bore too small for the whole shaft
+  all fail; a press band that ends where the part goes on, or a pivot at
+  the running gap under the bore, passes. Travel spent interfering
+  **deeper** than the seat itself does (by more than half the allowance)
+  fails past the lead-in too: the part is forced harder than the press it
+  ends in, however long that press reads (`deeper_mm`).
 - **Rotation** about the axis is free while sliding: when the placed
   orientation fails, `rotations` (12 by default) others are tried and the
   best reported, as `rotation_deg` from the placed one (a keyway past a
-  lug). A turn either side is symmetric under is skipped, and one that
-  does not seat -- it interferes at the seat more than the placed part
-  does, a D turned off its flat -- is reported (`seats: false`) and never
-  chosen. A try that can no longer beat the best is abandoned.
-
+  lug). A turn is the outlines turned: no new section. A turn either side
+  is symmetric under is skipped, and one that does not seat -- it
+  interferes at the seat more than the placed part does, a D turned off
+  its flat -- is reported (`seats: false`) and never chosen. A try that
+  can no longer beat the best is abandoned.
+- **One exact boolean confirms it**: at the reported try's worst offset
+  (the seat when nothing interferes on the way), the clash check's 1 µm
+  fuzzy, non-destructive boolean says whether there is matter in matter,
+  and where the sections read only a gap under the allowance the exact
+  least distance says so too (`confirm` {`at_mm`, `expected_overlap`,
+  `expected_gap`, `overlaps`, `volume_mm3`, `gap_mm`, `agrees`}). A pass
+  the boolean does not agree with is not a pass.
 - **A threaded pair is refused**: when both sides carry modelled threads
   the part goes on by turning along the helix, which a straight slide reads
   as the flanks forced through each other the whole way (the jar's lid).
-- **What a step costs.** Each side is first clipped, once, to a cylinder
-  about the axis as wide as the other reaches (and a millimetre past the
-  allowance), which a turn keeps: a plate round an arbor is then the ring
-  of it by the hole. With an allowance the (multithreaded) distance is
-  asked first, and the boolean only where faces meet; a seat that does not
-  interfere has no press to slice. A wheel in a housing 220 mm tall is
-  about 30 s; a wheel on its arbor a second or two.
+
+What it costs, before (an exact boolean a sample, every orientation) and
+after (sections), on this machine -- `seconds` {`sections`, `pairs`,
+`confirm`} in the answer says where it went:
+
+| pair | before | after |
+|---|---|---|
+| the counter's wheel 1 in its housing (allowance 0.1) | 33 s | 3.5 s |
+| a planetary planet in its herringbone ring (0.1) | 728 s | 8.7 s |
+| the clock's stage 2: its 21 insertion requirements | 23 s | 7.4 s |
+
+The planet's 8.7 s is half the one confirming boolean of two herringbone
+solids; its sections are 1.9 s and its 2D tests 2 s.
 
 The answer: `pass`, the try reported (`entry`, `rotation_deg`,
 `travel_mm`, `interfering_mm`, `press_mm`, `excess_mm`, `deeper_mm`,
 `from_mm` -- where
 the interference begins, from the seat -- `worst_depth_mm`, the most the
 faces must give with the allowance counted, and `worst_volume_mm3`), the
-step, lead-in and allowance, the axis and what gave it, and every try. It
-runs on the frame: seconds on small parts. The
-requirement kind `insertion` ([requirements](../requirements/README.md#measures))
-states a pair once and runs off the frame.
+step, slice, lead-in and allowance, the bands each side was cut into and
+the pairs tested, the confirmation, the axis and what gave it, and every
+try. The requirement kind `insertion`
+([requirements](../requirements/README.md#measures)) states a pair once.
 
 What it does not judge: a screw (above), the order parts go on in (each pair is slid alone,
 against the one part it goes on), the force a press takes, or a path that

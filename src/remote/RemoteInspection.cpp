@@ -1405,12 +1405,21 @@ static constexpr MethodDoc InspectionMethods[] = {
      "b; allowance_mm?: how much nearer the faces come as made -- a "
      "printed bore prints under its model, print_allowance's hole "
      "allowance a side -- a gap under it counts as interference (default "
-     "0, the model as modelled); samples?: steps from seat to clear "
-     "(default 64); rotations?: orientations about the axis tried when the "
+     "0, the model as modelled); samples?: the travel's resolution, "
+     "travel over samples is step_mm (default 64); rotations?: "
+     "orientations about the axis tried when the "
      "placed one fails (default 12); lead_in_mm?: the excess allowed "
-     "(default one step)}. `a` is swept from clear to its seat; at each "
-     "step the clash check's exact boolean (and, with an allowance, the "
-     "least distance) says whether the two interfere. FAILS when the "
+     "(default one step)}. Read by SECTIONS: each side cut into bands "
+     "along the axis over which its cross-section does not change (sliced "
+     "slice_mm thick where a face is not along the axis), two bands' "
+     "outlines tested once in 2D (with an allowance, nearer than it "
+     "counts), the slides at which their spans overlap an interval from "
+     "the band ends -- exact for prismatic matter, no step; faces meeting "
+     "end to end are a contact, not a press. One exact boolean at the "
+     "worst offset (the seat when nothing interferes on the way) confirms "
+     "it: `confirm` {at_mm, expected_overlap, expected_gap, overlaps, "
+     "volume_mm3, gap_mm, agrees}; a pass it does not agree with is not "
+     "a pass. FAILS when the "
      "travel spent interfering is longer than the press at the seat (the "
      "axial length the seated pair interferes over) plus the lead-in: "
      "something forced through on the way, a round pivot through a D "
@@ -1428,9 +1437,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "orientation "
      "either side is symmetric under is skipped; one that does not seat "
      "is reported, never chosen. Refused when both sides carry modelled "
-     "threads: a screw goes on by turning. Runs on the frame: seconds on "
-     "small parts, half a minute on a wheel in a tall housing. The "
-     "requirement kind `insertion` states it once, off the frame.",
+     "threads: a screw goes on by turning. Runs as a job, off the frame "
+     "(seconds even on a herringbone pair); the requirement kind "
+     "`insertion` states it once.",
      "a:int|string, b:int|string, entry:'positive'|'negative'|'either', "
      "mate?:int|string, axis?:object, allowance_mm?:number, samples?:int, "
      "rotations?:int, lead_in_mm?:number",
@@ -1441,7 +1450,9 @@ static constexpr MethodDoc InspectionMethods[] = {
      "worst_depth_mm:number, "
      "worst_volume_mm3:number, step_mm:number, samples:int, "
      "allowance_mm:number, axis_point_mm:number[], axis_dir:number[], "
-     "axis_from:string, tries:object[]"},
+     "axis_from:string, tries:object[], slice_mm:number, "
+     "bands:{moving:int, fixed:int}, pairs_read:int, seconds:{sections:"
+     "number, pairs:number, confirm:number}, confirm:object"},
     {"check_seal",
      "Whether two occurrences' contact SEALS (docs/inspect/README.md#seals) "
      "{a, b: top-level occurrence ids or names}: where they overlap (a "
@@ -2673,7 +2684,25 @@ json InsertionJson(const Measure::InsertionReport& r,
           {"axis_point_mm", {r.axisPoint.x, r.axisPoint.y, r.axisPoint.z}},
           {"axis_dir", {r.axisDir.x, r.axisDir.y, r.axisDir.z}},
           {"axis_from", axisFrom},
-          {"tries", tries}};
+          {"tries", tries},
+          {"slice_mm", r.sliceMm},
+          {"bands", {{"moving", r.bandsMoving}, {"fixed", r.bandsFixed}}},
+          {"pairs_read", r.pairsRead},
+          {"seconds",
+           {{"sections", r.sectionsSeconds},
+            {"pairs", r.pairsSeconds},
+            {"confirm", r.confirmSeconds}}},
+          {"confirm",
+           r.confirm.ran
+               ? json{{"at_mm", r.confirm.atMm},
+                      {"expected_overlap", r.confirm.expectedOverlap},
+                      {"expected_gap", r.confirm.expectedGap},
+                      {"overlaps", r.confirm.overlaps},
+                      {"volume_mm3", r.confirm.volumeMm3},
+                      {"gap_mm", r.confirm.gapMm >= 0.0 ? json(r.confirm.gapMm)
+                                                        : json(nullptr)},
+                      {"agrees", r.confirm.agrees}}
+               : json(nullptr)}};
 }
 
 json SealJson(const Measure::SealReport& r) {
