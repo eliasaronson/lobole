@@ -362,11 +362,6 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     if (solidsA.empty() || solidsB.empty())
       return std::unexpected("one side places no visible matter (hidden, or "
                              "a part with no bodies)");
-    std::vector<sections::Solid> prepA, prepB;
-    for (const TopoDS_Shape& s : solidsA)
-      prepA.push_back(sections::Prepare(s));
-    for (const TopoDS_Shape& s : solidsB)
-      prepB.push_back(sections::Prepare(s));
     // Each side kept, once, to what the other can ever come near: as wide
     // about the axis as the other reaches from it (and a millimetre more
     // than the allowance), which a turn about the axis keeps.
@@ -377,7 +372,27 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       return r;
     };
     const double g = opt.allowanceMm + 1.0;
-    const double reachA = reachOf(prepB) + g, reachB = reachOf(prepA) + g;
+    std::vector<sections::Solid> prepA, prepB;
+    for (const TopoDS_Shape& s : solidsA)
+      prepA.push_back(sections::Prepare(s));
+    const double reachB = reachOf(prepA) + g;
+    // A fixed solid whose box lies wholly outside that reach never comes
+    // near: an assembly sequence's later steps have everything placed
+    // before them on the fixed side, most of it nowhere near the path.
+    for (const TopoDS_Shape& s : solidsB) {
+      Bnd_Box box;
+      BRepBndLib::Add(s, box, Standard_True);
+      if (!box.IsVoid()) {
+        double x0, y0, z0, x1, y1, z1;
+        box.Get(x0, y0, z0, x1, y1, z1);
+        const double dx = x0 > 0.0 ? x0 : (x1 < 0.0 ? -x1 : 0.0);
+        const double dy = y0 > 0.0 ? y0 : (y1 < 0.0 ? -y1 : 0.0);
+        if (std::hypot(dx, dy) > reachB)
+          continue;
+      }
+      prepB.push_back(sections::Prepare(s));
+    }
+    const double reachA = reachOf(prepB) + g;
     const auto spanOf = [](const std::vector<sections::Solid>& v, double reach,
                            double& lo, double& hi) {
       lo = std::numeric_limits<double>::infinity();
@@ -809,7 +824,11 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         c.expectedGap = false;
       const TopoDS_Shape placed = Compound(solidsA).Moved(
           TopLoc_Location(Pose(c.atMm, turns[ti], b.positive)));
-      const TopoDS_Compound f = Compound(solidsB);
+      // What can come near it: the fixed solids the reach kept.
+      std::vector<TopoDS_Shape> kept;
+      for (const sections::Solid& x : prepB)
+        kept.push_back(x.shape);
+      const TopoDS_Compound f = Compound(kept);
       BRepAlgoAPI_Common common;
       if (!cad::BuildNonDestructive(common, placed, f, kFuzz) ||
           common.Shape().IsNull())
