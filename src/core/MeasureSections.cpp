@@ -632,6 +632,19 @@ std::vector<Band> SolidBands(const Solid& solidIn, const BandOptions& opt,
                            return std::abs(a - b) <= kEventTol;
                          }),
              cuts.end());
+  // Only the window: its ends on the grid, so a slice it cuts is whole.
+  if (opt.zLo > zMin || opt.zHi < zMax) {
+    const double lo = std::max(zMin, g0 + std::floor((opt.zLo - g0) / h) * h),
+                 hi = std::min(zMax, g0 + std::ceil((opt.zHi - g0) / h) * h);
+    if (!(hi > lo + kThinBand))
+      return {};
+    std::vector<double> in{lo};
+    for (double z : cuts)
+      if (z > lo + kEventTol && z < hi - kEventTol)
+        in.push_back(z);
+    in.push_back(hi);
+    cuts = std::move(in);
+  }
   const Paths64 clip =
       std::isfinite(opt.reachMm) && opt.reachMm < std::hypot(half, half)
           ? Paths64{Disk(opt.reachMm)}

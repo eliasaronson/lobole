@@ -675,13 +675,25 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       const glm::dmat2 across(L[0][0], L[0][1], L[1][0], L[1][1]);
       const gp_Trsf axisToDir = toDir * toAxis.Inverted();
       const double h = rep.sliceMm = opt.cache->SliceFor(dir, rep.sliceMm);
-      const auto cutInDir = [&](const TopoDS_Shape& solidInAxis) {
+      const auto cutInDir = [&](const TopoDS_Shape& solidInAxis, double lo,
+                                double hi) {
         sections::BandOptions bo;
         bo.sliceMm = h;
+        bo.zLo = lo;
+        bo.zHi = hi;
         return sections::SolidBands(
             sections::Prepare(solidInAxis.Moved(TopLoc_Location(axisToDir))),
             bo, 0, cancel);
       };
+      // What the moving side can come near along the axis, either way it
+      // comes, a slice to spare: the window a fixed solid is cut over. In
+      // the direction's frame, z' = zSign (z - tAxis.z).
+      double wLo = za0 - h, wHi = za1 + h;
+      for (bool p : sides)
+        (p ? wHi : wLo) += (p ? 1.0 : -1.0) * travelOf(p);
+      const auto toDirZ = [&](double z) { return zSign * (z - tAxis.z); };
+      const double dLo = std::min(toDirZ(wLo), toDirZ(wHi)),
+                   dHi = std::max(toDirZ(wLo), toDirZ(wHi));
       const size_t n = prepA.size() + prepB.size();
       size_t done = 0;
       const auto side = [&](const std::vector<sections::Solid>& prep,
@@ -708,6 +720,19 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
           glm::dmat2 turn(1.0);
           glm::dvec3 moved(0.0);
           bool have = false;
+          // The solid's own span, the direction's frame: cut the window and
+          // as much again either side, or whole when that covers it.
+          double sLo = std::numeric_limits<double>::infinity(), sHi = -sLo;
+          for (const sections::Solid::Face& f : prep[i].faces) {
+            sLo = std::min({sLo, toDirZ(f.z0), toDirZ(f.z1)});
+            sHi = std::max({sHi, toDirZ(f.z0), toDirZ(f.z1)});
+          }
+          const double wl = dHi - dLo;
+          const bool whole = dLo - wl <= sLo && dHi + wl >= sHi;
+          const double cutLo = whole ? -std::numeric_limits<double>::infinity()
+                                     : dLo - wl,
+                       cutHi = whole ? std::numeric_limits<double>::infinity()
+                                     : dHi + wl;
           if (key != 0) {
             if (const auto* e = opt.cache->Find(key, dir, h)) {
               // Reusable when only turned about the axis and, with slices,
@@ -722,7 +747,10 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
                   std::any_of(e->bands.begin(), e->bands.end(),
                               [](const Band& b) { return b.sliced; });
               const double k = t.z / h;
-              if (aboutAxis &&
+              // Its stretch, where it now is, holds this check's window.
+              const bool covers =
+                  e->zLo + t.z <= dLo + 1e-9 && e->zHi + t.z >= dHi - 1e-9;
+              if (aboutAxis && covers &&
                   (!sliced || std::abs(k - std::round(k)) < 1e-6)) {
                 turn = glm::dmat2(r[0][0], r[0][1], r[1][0], r[1][1]);
                 moved = t;
@@ -736,7 +764,9 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
           if (!have) {
             sections::BandCache::Entry e;
             e.place = place;
-            e.bands = cutInDir(prep[i].shape);
+            e.zLo = cutLo;
+            e.zHi = cutHi;
+            e.bands = cutInDir(prep[i].shape, cutLo, cutHi);
             if (cancel && cancel->load())
               throw KernelError{"cancelled"};
             inDir = e.bands;

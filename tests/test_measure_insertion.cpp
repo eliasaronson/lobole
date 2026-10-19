@@ -488,3 +488,49 @@ TEST_CASE("Bands kept between checks are reused and answer as cut afresh",
   CHECK(back.solidsReused == 2);
   Same(back, check(0.0, glm::dvec3(0.0, 0.0, 0.37 * h), nullptr, -Z));
 }
+
+// A short part going a short way into a long solid: only the stretch of the
+// solid it can come near is cut (MeasureSections.h, BandCache), and a later
+// check whose part comes near elsewhere along it cuts again -- each answering
+// as a whole cut does.
+TEST_CASE("A short check into a long solid cuts only the stretch it reaches",
+          "[measure][insertion]") {
+  // A 100 long block with a herringbone hole near each end, a peg in each.
+  const TopoDS_Shape hole = Herringbone(6.8, 10.0);
+  gp_Trsf up;
+  up.SetTranslation(gp_Vec(0, 0, 90));
+  TopoDS_Shape block =
+      BRepPrimAPI_MakeBox(gp_Pnt(-10, -10, 0), 20, 20, 100).Shape();
+  block = BRepAlgoAPI_Cut(block, hole).Shape();
+  block = BRepAlgoAPI_Cut(block, hole.Moved(TopLoc_Location(up))).Shape();
+  const Body long0 = Make(block, "long block");
+  const Body low = Make(Herringbone(6.0, 10.0), "low peg");
+  const Body high =
+      Make(Herringbone(6.0, 10.0).Moved(TopLoc_Location(up)), "high peg");
+  const auto check = [&](const Body& peg, uint64_t pegKey,
+                         Measure::sections::BandCache* cache) {
+    Measure::InsertionOptions o;
+    o.entry = Measure::InsertionEntry::Positive;
+    o.travelMm = 3.0;
+    o.allowanceMm = kAllowance;
+    o.cache = cache;
+    o.movingKeys = {pegKey};
+    o.fixedKeys = {2};
+    o.movingPlaces = {I};
+    o.fixedPlaces = {I};
+    auto r = Measure::Insertion({peg}, I, {long0}, I, O, Z, o);
+    REQUIRE(r.has_value());
+    return *r;
+  };
+  Measure::sections::BandCache cache;
+  const auto a = check(low, 1, &cache);
+  // The block's bands: a stretch round the low peg, not its 100 mm.
+  CHECK(a.bandsFixed < check(low, 1, nullptr).bandsFixed);
+  Same(a, check(low, 1, nullptr));
+  // Again: reused.
+  CHECK(check(low, 1, &cache).solidsReused == 2);
+  // The high peg comes near the other end: the block is cut again there.
+  const auto b = check(high, 3, &cache);
+  CHECK(b.solidsCut == 2);
+  Same(b, check(high, 3, nullptr));
+}

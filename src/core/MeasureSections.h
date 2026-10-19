@@ -64,6 +64,10 @@ struct BandOptions {
   // Where the slice grid is anchored along the axis: grid points at
   // gridOriginMm + k * sliceMm. Two solids sliced on one grid line up.
   double gridOriginMm = 0.0;
+  // Only the bands over this span of the axis (its ends taken out to the
+  // grid); a band reaching past an end is cut short there.
+  double zLo = -std::numeric_limits<double>::infinity();
+  double zHi = std::numeric_limits<double>::infinity();
 };
 
 // One solid, placed so the axis is the Z axis through the origin, with
@@ -132,6 +136,11 @@ public:
   struct Entry {
     glm::dmat4 place{1.0};   // the solid's placement when it was cut
     std::vector<Band> bands; // in the direction's frame
+    // The span of the axis cut (BandOptions::zLo/zHi), the direction's
+    // frame: a check whose parts come no nearer than a short stretch of a
+    // long solid cuts only that stretch.
+    double zLo = -std::numeric_limits<double>::infinity();
+    double zHi = std::numeric_limits<double>::infinity();
     size_t points = 0;
     uint64_t used = 0;
   };
