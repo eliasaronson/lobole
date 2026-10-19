@@ -34,7 +34,7 @@ jobs:
   gui-suite:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
@@ -61,7 +61,7 @@ jobs:
       # the state where a warm cache is worth most. Saved straight after Build,
       # before the long test steps, since the compile cache is all it holds.
       - name: ccache (restore)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/ccache
           key: ccache-gui-${{ runner.os }}-${{ github.sha }}
@@ -94,7 +94,7 @@ jobs:
 
       - name: ccache (save)
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/ccache
           key: ccache-gui-${{ runner.os }}-${{ github.sha }}
@@ -158,7 +158,7 @@ jobs:
       # Re-recording is then a download and a commit, whatever the cause.
       - name: The render it actually produced
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: pixel-actual
           path: tests/golden/render/*.actual.png
@@ -167,7 +167,7 @@ jobs:
   build-and-test:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
@@ -195,7 +195,7 @@ jobs:
       # See the gui-suite job: the save half runs on failure too, so a red
       # test step still leaves a warm compile cache behind.
       - name: ccache (restore)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/ccache
           key: ccache-${{ runner.os }}-${{ github.sha }}
@@ -209,7 +209,7 @@ jobs:
 
       - name: ccache (save)
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/ccache
           key: ccache-${{ runner.os }}-${{ github.sha }}
@@ -325,7 +325,7 @@ jobs:
             libocct-modeling-data-dev libocct-foundation-dev libocct-ocaf-dev \
             libocct-visualization-dev libtbb-dev libvterm-dev
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
@@ -366,7 +366,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
 
@@ -390,7 +390,7 @@ jobs:
       # See the gui-suite job: the save half runs on failure too, so a red
       # test step still leaves a warm compile cache behind.
       - name: ccache (restore)
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/.cache/ccache
           key: ccache-asan-${{ runner.os }}-${{ github.sha }}
@@ -403,7 +403,7 @@ jobs:
 
       - name: ccache (save)
         if: always()
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/.cache/ccache
           key: ccache-asan-${{ runner.os }}-${{ github.sha }}
