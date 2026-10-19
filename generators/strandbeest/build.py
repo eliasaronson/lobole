@@ -869,13 +869,26 @@ def stand(p):
     return (p[0], -p[2], p[1])
 
 
-def derived(d, label, source, position, orientation=(0.0, 0.0, 0.0, 1.0)):
+def derived(d, label, source, position, orientation=(0.0, 0.0, 0.0, 1.0),
+            pieces=None):
+    """A Derived copy of `source` placed in the part. With `pieces` (a
+    list) it is recorded there and a frame `piece <label>` marks where it
+    sits, so the put-together assembly can fasten the piece by itself where
+    it is in the whole (put_together)."""
     check(d.call("add_feature", feature={
         "type": "Derived", "name": label, "source_part": part_id(d, source),
         "reference": False,
         "placement": {"position": [float(v) for v in position],
                       "orientation": [float(v) for v in orientation]}}),
         f"derived {label}")
+    if pieces is not None:
+        pieces.append((label, source, tuple(position), tuple(orientation)))
+        check(d.call("add_feature", feature={
+            "type": "Frame", "name": f"piece {label}", "kind": "explicit",
+            "origin": [float(v) for v in position],
+            "z_axis": list(q_rot(orientation, (0.0, 0.0, 1.0))),
+            "x_axis": list(q_rot(orientation, (1.0, 0.0, 0.0)))}),
+            f"the frame of {label}")
 
 
 _PART_IDS = {}
@@ -914,7 +927,7 @@ def throw_angle(p, step_deg):
     return math.radians(p * step_deg)
 
 
-def build_frame(d, s, lay, throws, proc, mat):
+def build_frame(d, s, lay, throws, proc, mat, pieces=None):
     """The frame as assembled: its plates where they stand. The pivots'
     caps are occurrences of their own, fastened on, their press a printed
     press the exact clash check relieves
@@ -925,7 +938,7 @@ def build_frame(d, s, lay, throws, proc, mat):
     for p in range(throws + 1):
         kind = "first" if p == 0 else "last" if p == throws else "middle"
         derived(d, f"plate {p}", f"plate {kind}",
-                (0.0, 0.0, slab_base(s, p) - s["tp"]))
+                (0.0, 0.0, slab_base(s, p) - s["tp"]), pieces=pieces)
     d.call("add_feature", feature={
         "type": "Frame", "name": "O", "kind": "explicit",
         "origin": [0, 0, 0], "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]})
@@ -948,7 +961,7 @@ def build_frame(d, s, lay, throws, proc, mat):
     return name
 
 
-def build_crankshaft(d, s, throws, step_deg, tops, proc):
+def build_crankshaft(d, s, throws, step_deg, tops, proc, pieces=None):
     """The crankshaft as assembled: the first disc on its hand crank, a
     middle disc per further throw turned to its phase, the end disc turned
     over, the handle pressed into the arm."""
@@ -956,14 +969,14 @@ def build_crankshaft(d, s, throws, step_deg, tops, proc):
     d.call("add_part", name=name)
     d.call("set_print_process", **proc)
     derived(d, "disc 0", "disc first",
-            (0.0, 0.0, -s["tp"] - s["gz"] - s["tf"]), q_z(0.0))
+            (0.0, 0.0, -s["tp"] - s["gz"] - s["tf"]), q_z(0.0), pieces)
     for p in range(1, throws):
         derived(d, f"disc {p}", "disc middle",
                 (0.0, 0.0, slab_base(s, p) - s["tp"]),
-                q_z(throw_angle(p, step_deg)))
+                q_z(throw_angle(p, step_deg)), pieces)
     derived(d, f"disc {throws}", "disc last",
             (0.0, 0.0, slab_base(s, throws) + s["gz"] + s["tf"]),
-            q_mul(q_z(throw_angle(throws - 1, step_deg)), Q_X180))
+            q_mul(q_z(throw_angle(throws - 1, step_deg)), Q_X180), pieces)
     # The crank pins, each standing in its slab between two discs' sockets,
     # its flat toward the crank axis as the sockets' D is.
     m = s["lengths"]["m"]
@@ -974,9 +987,10 @@ def build_crankshaft(d, s, throws, step_deg, tops, proc):
         q = mat_quat(((0.0, sn, c), (0.0, -c, sn), (1.0, 0.0, 0.0)))
         derived(d, f"crank pin {p}", "crank pin",
                 ((m - h) * c, (m - h) * sn,
-                 slab_base(s, p) - (s["socket"] - s["gz"])), q)
+                 slab_base(s, p) - (s["socket"] - s["gz"])), q, pieces)
     derived(d, "handle", "handle",
-            (-s["arm"], 0.0, -s["tp"] - s["gz"] - s["tf"] - s["handle_h"]))
+            (-s["arm"], 0.0, -s["tp"] - s["gz"] - s["tf"] - s["handle_h"]),
+            pieces=pieces)
     d.call("add_feature", feature={
         "type": "Frame", "name": "O", "kind": "explicit",
         "origin": [0, 0, 0], "z_axis": [0, 0, 1], "x_axis": [1, 0, 0]})
@@ -1792,9 +1806,12 @@ def assembled(d, s, lay, pins, tops, throws, step_deg, proc):
                       for bar in lk.BARS},
              "pins": {k: f"pin {k[0]} {k[1]}" for k in pins},
              "pin_info": pins}
-    parts["frame"] = build_frame(d, s, lay, throws, proc, None)
+    parts["pieces"] = {"frame": [], "crankshaft": []}
+    parts["frame"] = build_frame(d, s, lay, throws, proc, None,
+                                 parts["pieces"]["frame"])
     parts["crankshaft"] = build_crankshaft(d, s, throws, step_deg, tops,
-                                           proc)
+                                           proc,
+                                           parts["pieces"]["crankshaft"])
     return parts
 
 
@@ -1923,16 +1940,28 @@ def control_one_layer(d, s, lay, frames, proc, mat, step_deg, samples,
 # else. Every joint is turned before any cap goes on, and a cap only over a
 # pin's highest bar, which by then is on.
 
-def throw_steps(s, lay):
+# The walker's up -- the way its layers stack -- and down, in the
+# assembly's frame (`stand`): the way a piece moves going home.
+UP = stand((0.0, 0.0, 1.0))
+DOWN = stand((0.0, 0.0, -1.0))
+
+
+def throw_steps(s, lay, p=0):
     """One throw's leg pair, bottom up: a step per bar, the layer table's
-    order, front before back within a layer."""
+    order, front before back within a layer. Each step is its text and
+    what it puts on, in order -- (occurrence, the way it moves going
+    home). A pin goes up through its lowest bar from below in the hand,
+    and the two are laid on together: from below with the bar laid, a
+    pin over the plate (front C at 15) has the plate in its way. So each
+    such pin is lowered to its place, and the bar down over it -- the
+    same motion, pin against bar, as the pin pushed up through it."""
     steps = []
     for ell in range(1, lay["top"]):
         for side in SIDES:
             for bar in lk.BARS:
                 if layer_of(lay, side, bar) != ell:
                     continue
-                how = []
+                how, puts = [], []
                 for j in lk.BARS[bar]:
                     if j == "A":
                         how.append("its A hole over the crank pin")
@@ -1943,13 +1972,21 @@ def throw_steps(s, lay):
                         continue
                     else:
                         lo, _ = pin_span(lay, side, j)
+                        if lo == ell:
+                            puts.append((f"pin {side} {j} {p}", UP))
                         how.append(
                             f"pin {side_letter(side)}{j} up through its {j} "
                             "hole from below, head under" if lo == ell else
                             f"its {j} hole down over pin "
                             f"{side_letter(side)}{j}")
-                steps.append(f"layer {ell}: {bar_label(side, bar)} -- "
-                             + "; ".join(how))
+                if puts:
+                    how.append(("the pins" if len(puts) > 1 else "the pin")
+                               + " in first, the bar laid on with "
+                               + ("them" if len(puts) > 1 else "it"))
+                steps.append((f"layer {ell}: {bar_label(side, bar)} -- "
+                              + "; ".join(how),
+                              [(n, DOWN) for n, _ in puts]
+                              + [(f"{side} {bar} {p}", DOWN)]))
     return steps
 
 
@@ -1974,75 +2011,188 @@ def cap_clear_deg(s, lay, side, j, samples=72):
     return ok
 
 
-def cap_steps(s, lay):
+def cap_steps(s, lay, p=0, crank=0.0):
     """A cap on every pin and frame pivot, each over its highest bar, the
-    crank turned to where no bar above covers it."""
-    out = []
+    crank turned to where no bar above covers it: per cap its text, what
+    it puts on (the cap, pressed down) and the crank angle it goes on at,
+    degrees. The crank stays where a step leaves it, so a cap after one
+    put on with the crank turned goes on there when nothing covers it
+    there, and the card says so when it must be turned again."""
+    caps = []
     for side in SIDES:
         for j in ("B",) + tuple(lk.PINS):
             lo, hi = pin_span(lay, side, j)
             what = (f"the plate's {side} frame pivot B" if j == "B" else
                     f"pin {side_letter(side)}{j}")
-            free = cap_clear_deg(s, lay, side, j)
-            if not free:
-                raise SystemExit(f"strandbeest: no crank angle leaves {what}"
-                                 f"'s cap uncovered")
-            at = ("" if 0.0 in free else
-                  f", the crank turned to {min(free, key=lambda a: min(a, 360 - a)):.0f} deg "
-                  "so no bar is over it")
-            out.append((hi, f"a cap pressed onto {what}, over its layer "
-                            f"{hi} bar, down to its shoulder{at}"))
-    return [t for _, t in sorted(out)]
+            caps.append((hi, f"a cap pressed onto {what}, over its layer "
+                             f"{hi} bar, down to its shoulder", side, j,
+                         what))
+    out = []
+    for hi, text, side, j, what in sorted(caps, key=lambda c: c[:2]):
+        free = cap_clear_deg(s, lay, side, j)
+        if not free:
+            raise SystemExit(f"strandbeest: no crank angle leaves {what}"
+                             f"'s cap uncovered")
+        at = ""
+        if crank not in free:
+            crank = (0.0 if 0.0 in free else
+                     min(free, key=lambda a: min(a, 360 - a)))
+            at = (f", the crank turned to {crank:.0f} deg so no bar is "
+                  "over it" if crank != 0.0 else
+                  ", the crank turned back to 0 deg so no bar is over it")
+        out.append((text + at, [(f"cap {side} {j} {p}", DOWN)], crank))
+    return out, crank
+
+
+def assembly_plan(s, lay, throws):
+    """The build sequence for a walker of `throws` throws, a card step at a
+    time: its text, what it puts on -- (occurrence of the as-put-together
+    assembly, the way it moves going home; None for the base) -- and the
+    crank angle it is done at, degrees (None for the turn, which puts
+    nothing on: the motion study is its check)."""
+    st = [("Press the handle into the first disc's arm. Stand the first "
+           "plate on the bench, its pivots up; put the first disc in its "
+           "hole, flange under, and press a crank pin into the disc's top "
+           "socket, its flat toward the axis.",
+           # The disc is the base: the plate lowered over it is the disc
+           # put up into the plate's hole.
+           [("disc 0", None), ("handle", UP), ("plate 0", DOWN),
+            ("crank pin 0", DOWN)], 0.0)]
+    crank = 0.0
+    for p in range(throws):
+        if p > 0:
+            st.append((f"Throw {p + 1}: a middle disc over the crank pin, "
+                       "its underside socket on it; a middle plate over the "
+                       "disc and onto the standoffs' stubs; a crank pin "
+                       "pressed into the disc's top socket.",
+                       [(f"disc {p}", DOWN), (f"plate {p}", DOWN),
+                        (f"crank pin {p}", DOWN)], crank))
+        pre = f"Throw {p + 1}, " if throws > 1 else ""
+        st += [(pre + t, puts, crank) for t, puts in throw_steps(s, lay, p)]
+        st.append((pre + "TURN the crank a full turn by hand before "
+                   "capping: every joint must turn freely, nothing may "
+                   "catch.", [], None))
+        caps, crank = cap_steps(s, lay, p, crank)
+        st += [(pre + t, puts, at) for t, puts, at in caps]
+    # The plate before the disc: the disc's flange is over the plate, so
+    # the plate cannot go down over it.
+    st.append(("The last plate over the last crank pin and onto the "
+               "standoffs' stubs; the last disc down through it onto the "
+               "crank pin, its socket on it, flange up.",
+               [(f"plate {throws}", DOWN), (f"disc {throws}", DOWN)], crank))
+    return st
 
 
 def assembly_order(s, lay, throws):
     """The build sequence for a walker of `throws` throws, as numbered
     lines."""
-    st = ["Press the handle into the first disc's arm. Stand the first "
-          "plate on the bench, its pivots up; put the first disc in its "
-          "hole, flange under, and press a crank pin into the disc's top "
-          "socket, its flat toward the axis."]
-    for p in range(throws):
-        if p > 0:
-            st.append(f"Throw {p + 1}: a middle disc over the crank pin, "
-                      "its underside socket on it; a middle plate over the "
-                      "disc and onto the standoffs' stubs; a crank pin "
-                      "pressed into the disc's top socket.")
-        pre = f"Throw {p + 1}, " if throws > 1 else ""
-        st += [pre + t for t in throw_steps(s, lay)]
-        st.append(pre + "TURN the crank a full turn by hand before "
-                  "capping: every joint must turn freely, nothing may "
-                  "catch.")
-        st += [pre + t for t in cap_steps(s, lay)]
-    st.append("The last disc over the last crank pin, its socket on it, "
-              "flange up; the last plate over it and onto the standoffs' "
-              "stubs.")
-    return [f"{i + 1}. {t}" for i, t in enumerate(st)]
+    return [f"{i + 1}. {t}"
+            for i, (t, _, _) in enumerate(assembly_plan(s, lay, throws))]
 
 
-def check_order(steps, lay):
-    """The order holds what it is for, or the run stops: every pin goes in
-    (from below, head under) before any bar goes over it, every bar over a
-    pin before the turn, and every cap after the turn."""
-    turn = next(i for i, t in enumerate(steps) if "TURN the crank" in t)
+def q_rot(q, v):
+    """v turned by the quaternion q [x, y, z, w]."""
+    x, y, z, w = q
+    r = q_mul(q_mul(q, (v[0], v[1], v[2], 0.0)), (-x, -y, -z, w))
+    return r[:3]
+
+
+def put_together(d, s, lay, step_deg, parts, name):
+    """The leg pair as it is put together: the stage-1 assembly's
+    occurrences and mates (build_assembly), with the frame and the
+    crankshaft as the pieces they are pressed from -- plates, discs, crank
+    pins, the handle -- each fastened where it sits in its whole (the frame
+    `derived` marked), and the wholes hidden: they still carry the crank
+    and the pivots, so a pose turns the crank and every piece and bar on
+    it, but they place no matter of their own."""
+    ids = build_assembly(d, s, lay, 1, step_deg, name, parts)
+    calls = []
+    for whole in ("frame", "crankshaft"):
+        for label, source, pos, q in parts["pieces"][whole]:
+            at = q_rot(Q_STAND, pos)
+            occ = d.call("add_occurrence", part=source, name=label,
+                         transform={"position": list(at),
+                                    "orientation": list(q_mul(Q_STAND, q))}
+                         )["id"]
+            calls.append({"method": "add_mate", "params": {
+                "type": "fastened", "name": f"{label} in its {whole}",
+                "flipped": False,
+                "a": {"occurrence": ids[whole], "frame": f"piece {label}"},
+                "b": {"occurrence": occ, "origin": True}}})
+        d.call("set_occurrence_visible", id=ids[whole], visible=False)
+    r = d.request("batch", {"calls": calls}, timeout=3600)
+    if r.get("failed"):
+        raise SystemExit(f"strandbeest: {name}: a piece's mate was refused: "
+                         f"{r.get('failed')}")
+    rep = d.request("solve_assembly", {}, timeout=3600)
+    if rep.get("errored_mates") or not rep.get("loops_closed", True):
+        raise SystemExit(f"strandbeest: {name} does not assemble: "
+                         f"{rep.get('errored_mates')} errored mates")
+    return ids
+
+
+def check_sequence(d, s, lay, step_deg, parts, allowance):
+    """The stage-1 order, checked as it is done: the card's steps stated as
+    the assembly sequence of the leg pair put together piece by piece
+    (put_together) -- each piece slid home on its path against every piece
+    put on before it, and a cap the card puts on with the crank turned
+    checked with the crank there, a pose step turning it first. The turn
+    is the motion study's. Stops the run naming any step that does not go
+    on."""
+    def mm(v):
+        return "?" if v is None else f"{v:.2f}"
+    plan = assembly_plan(s, lay, 1)
+    t0 = time.perf_counter()
+    name = "leg pair, put together"
+    put_together(d, s, lay, step_deg, parts, name)
+    steps, card_of, crank = [], [], 0.0
+    for i, (text, puts, at) in enumerate(plan):
+        if at is None:
+            continue  # the turn: the study's
+        if at != crank:
+            steps.append({"pose": [{"mate": "crank", "rotation_deg": at}],
+                          "note": f"card step {i + 1}: the crank to {at:g} "
+                                  "deg"})
+            card_of.append(i)
+            crank = at
+        for n, way in puts:
+            st = {"occurrence": n, "note": f"card step {i + 1}"}
+            if way is not None:
+                st["direction"] = list(way)
+            steps.append(st)
+            card_of.append(i)
+    d.call("set_assembly_sequence", steps=steps, allowance_mm=allowance)
+    r = d.request("check_assembly_sequence", {}, timeout=3600)
     bad = []
-    for side in SIDES:
-        for j in lk.PINS:
-            tag = f"pin {side_letter(side)}{j}"
-            ins = [i for i, t in enumerate(steps)
-                   if f"{tag} up through" in t]
-            over = [i for i, t in enumerate(steps)
-                    if f"over {tag}" in t and "cap" not in t]
-            cap = [i for i, t in enumerate(steps)
-                   if f"cap pressed onto {tag}" in t]
-            if len(ins) != 1 or len(cap) != 1 or \
-                    any(i < ins[0] or i > turn for i in over) or \
-                    cap[0] < turn:
-                bad.append(tag)
+    if r.get("missing"):
+        bad.append(f"no step puts on {r['missing']}")
+    for row, i in zip(r["steps"], card_of):
+        if row["pass"]:
+            continue
+        bad.append(
+            f"card step {i + 1} ({row.get('name')}): "
+            f"{row.get('error') or ''}"
+            f"forced {mm(row.get('interfering_mm'))} mm against the "
+            f"press's {mm(row.get('press_mm'))} (deeper "
+            f"{mm(row.get('deeper_mm'))}), moving "
+            f"{row.get('path', {}).get('moves')}, worst against "
+            f"{row.get('worst_against')}")
+    out = {"card_steps": len(plan), "assembly": name,
+           "sequence_steps": len(steps),
+           "poses": sum(1 for x in steps if "pose" in x),
+           "seconds": time.perf_counter() - t0,
+           "check_seconds": r.get("seconds"),
+           "sections": r.get("sections"),
+           "rows": r["steps"]}
+    out["turn_at"] = next(i for i, (_, _, a) in enumerate(plan)
+                          if a is None) + 1
+    out["turned"] = {f"card step {i + 1}": a for i, (_, _, a)
+                     in enumerate(plan) if a not in (None, 0.0)}
     if bad:
-        raise SystemExit(f"strandbeest: the assembly order puts {bad} "
-                         "out of order")
-    return {"steps": len(steps), "turn_at": turn + 1, "ok": True}
+        raise SystemExit("strandbeest: the assembly order does not go "
+                         "together:\n  " + "\n  ".join(bad))
+    out["ok"] = True
+    return out
 
 
 def write_card(out, s, stages):
@@ -2268,9 +2418,14 @@ def main():
     receipt["bed_mm"] = prof["bed_mm"]
     if args.stage in ("1", "all"):
         one = assembled(d, s, lay, pins, tops, 1, step_deg, proc)
-        _, r1, chk1 = stage(d, s, lay, frames, one, 1, step_deg,
-                            args.samples, "leg pair", stability=False)
+        ids1, r1, chk1 = stage(d, s, lay, frames, one, 1, step_deg,
+                               args.samples, "leg pair", stability=False)
         receipt["stage1"] = chk1
+        # The card's order, put together piece by piece: as printed, a
+        # bore closes by the hole allowance a side.
+        seq1 = check_sequence(d, s, lay, step_deg, one,
+                              allow("hole", s["dp"]) / 2.0)
+        receipt["stage1"]["sequence"] = seq1
         o1 = out / "stage1"
         o1.mkdir(parents=True, exist_ok=True)
         items = print_items(s, lay, frames, 1, with_press=press)
@@ -2335,10 +2490,15 @@ def main():
         order.append(("stage 1 (one leg pair)", assembly_order(s, lay, 1)))
         for line_ in order[-1][1]:
             print(f"  {line_}")
-        ck = check_order(order[-1][1], lay)
-        print(f"  assembly order: {ck['steps']} steps, every pin in under "
-              f"its bars, the turn at step {ck['turn_at']}, every cap after "
-              "it")
+        print(f"  assembly order: {seq1['card_steps']} steps, "
+              f"{seq1['sequence_steps'] - seq1['poses']} pieces slid home "
+              "in that order against every piece before them on the leg "
+              f"pair put together ({seq1['poses']} poses of the crank "
+              "between), every pin in under its "
+              f"bars, the turn at step {seq1['turn_at']}, "
+              + "".join(f"{k} with the crank at {a:g} deg, "
+                        for k, a in seq1["turned"].items())
+              + f"every cap after it ({seq1['seconds']:.0f} s)")
     if args.stage in ("2", "all"):
         order.append((f"stage 2 (the walker, {throws} throws)",
                       assembly_order(s, lay, throws)))

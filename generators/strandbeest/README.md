@@ -294,37 +294,53 @@ either passes.
   plate's sockets).
 - **The assembly order** is made from the layer table and the joints:
   bottom up, a layer at a time, front before back within a layer. A pin
-  goes in from below with its lowest bar, its head under it, and the bars
-  over it slide on; the front and back legs interleave on the crank pin
-  (back j layer 1, front j 2, front k 4, back k 5) and on nothing else.
-  The crank is turned before any cap goes on. A cap goes on over its pin's
-  highest bar, with the crank where no bar in a layer above covers it: the
-  back frame pivot's at 15°, since the back k passes over it. For the leg
-  pair at 15 mm, as the run writes it:
+  goes in with its lowest bar, its head under it -- in first, lowered to
+  its place, and the bar laid on over it: pushed up from below with the
+  bar laid, pin FC is forced 6.2 mm through the plate under its hole --
+  and the bars over it slide on; the front and back legs interleave on
+  the crank pin (back j layer 1, front j 2, front k 4, back k 5) and on
+  nothing else. The crank is turned before any cap goes on. A cap goes on
+  over its pin's highest bar, with the crank where no bar in a layer above
+  covers it: the back frame pivot's at 15°, since the back k passes over
+  it. The last plate goes on before the last disc: the disc's flange is
+  over the plate, which is forced 7.6 mm going down over it.
+- **The order is checked as it is done** (`check_sequence`,
+  [sequences](../../docs/assemblies/README.md#assembly-sequences)): the
+  leg pair put together piece by piece (`put_together`: the stage-1
+  assembly with the frame and the crankshaft as the plates, discs, crank
+  pin and handle they are pressed from, each fastened where it sits in
+  its whole, the wholes hidden but still carrying the crank and the
+  pivots), and the card's steps stated as its sequence -- each piece slid
+  home on its path against every piece before it, the 15° caps after a
+  pose step turning the crank there. Any step that fails stops the run.
+  For the leg pair at 15 mm, as the run writes it:
 
 1. Press the handle into the first disc's arm. Stand the first plate on the
     bench, its pivots up; put the first disc in its hole, flange under, and
     press a crank pin into the disc's top socket, its flat toward the axis.
 2. layer 1: F BCD -- its B hole over the plate's front frame pivot; pin FC
     up through its C hole from below, head under; pin FD up through its D
-    hole from below, head under
+    hole from below, head under; the pins in first, the bar laid on with
+    them
 3. layer 1: B j -- its A hole over the crank pin; pin BC up through its C
-    hole from below, head under
+    hole from below, head under; the pin in first, the bar laid on with it
 4. layer 2: F j -- its A hole over the crank pin; its C hole down over pin
     FC
 5. layer 2: F c -- its B hole over the plate's front frame pivot; pin FE up
-    through its E hole from below, head under
+    through its E hole from below, head under; the pin in first, the bar
+    laid on with it
 6. layer 2: F f -- its D hole down over pin FD; pin FF up through its F hole
-    from below, head under
+    from below, head under; the pin in first, the bar laid on with it
 7. layer 2: B BCD -- its B hole over the plate's back frame pivot; its C
     hole down over pin BC; pin BD up through its D hole from below, head
-    under
+    under; the pin in first, the bar laid on with it
 8. layer 3: F EFG -- its E hole down over pin FE; its F hole down over pin
     FF
 9. layer 3: B c -- its B hole over the plate's back frame pivot; pin BE up
-    through its E hole from below, head under
+    through its E hole from below, head under; the pin in first, the bar
+    laid on with it
 10. layer 3: B f -- its D hole down over pin BD; pin BF up through its F
-    hole from below, head under
+    hole from below, head under; the pin in first, the bar laid on with it
 11. layer 4: F k -- its A hole over the crank pin; its E hole down over pin
     FE
 12. layer 4: B EFG -- its E hole down over pin BE; its F hole down over pin
@@ -345,8 +361,9 @@ either passes.
 22. a cap pressed onto pin BF, over its layer 4 bar, down to its shoulder
 23. a cap pressed onto pin FE, over its layer 4 bar, down to its shoulder
 24. a cap pressed onto pin BE, over its layer 5 bar, down to its shoulder
-25. The last disc over the last crank pin, its socket on it, flange up; the
-    last plate over it and onto the standoffs' stubs.
+25. The last plate over the last crank pin and onto the standoffs' stubs;
+    the last disc down through it onto the crank pin, its socket on it,
+    flange up.
 
 ## What it predicts, and the test card
 
