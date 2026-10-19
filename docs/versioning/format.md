@@ -313,6 +313,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | An assembly's **sequence** ([assembly sequences](../assemblies/README.md#assembly-sequences)): `sequence` {`steps`: [{`occurrence`, `direction?`, `origin_mm?`, `mate?`, `distance_mm?`, `turn_deg?`, `thread?`, `note?`}], `allowance_mm?`} in the assembly's index (and in a single-file assembly), absent when it has no steps. A step key the loader does not know is refused. Golden `vNEXT-assembly-sequence`. |
 
 ## Paths in a project
 

@@ -592,8 +592,40 @@ struct Result;
 // MotionResult).
 struct MotionResultCache;
 
+// One step of an assembly sequence
+// (docs/assemblies/README.md#assembly-sequences): the occurrence it places
+// and the path it goes home along. Checked against every occurrence placed
+// before it, not only its mate partner.
+struct SequenceStep {
+  uint64_t occurrenceId = 0;
+  // The way it moves going home, in the assembly's frame (unit). Unset: the
+  // axis of the part's own cylinder that its mate seats, both ways tried.
+  std::optional<glm::dvec3> direction;
+  // A point on the path's line, assembly frame. Unset: the cylinder's axis,
+  // or the part's centre with an explicit direction.
+  std::optional<glm::dvec3> origin;
+  // The mate whose seat gives the default path; 0: the one mate joining it
+  // to an occurrence placed before it.
+  uint64_t mateId = 0;
+  double distanceMm = -1.0; // from its seat to where it starts; < 0: clear
+  double turnDeg = 0.0;     // turned about the path over it (a bayonet)
+  bool thread = false;      // it goes on by its thread
+  std::string note;         // what the step is, for a person
+};
+
+struct AssemblySequence {
+  std::vector<SequenceStep> steps;
+  // How much nearer faces come as made (check_insertion's allowance_mm).
+  double allowanceMm = 0.0;
+  bool Empty() const { return steps.empty(); }
+};
+
 class AssemblyDocument {
 public:
+  // The order its parts go together in, and how (vNEXT).
+  const AssemblySequence& GetSequence() const { return m_sequence; }
+  void SetSequence(AssemblySequence s) { m_sequence = std::move(s); }
+
   // The units this assembly is READ in — same rule and same storage
   // invariant as Document::Units (core/Units.h). The BOM's masses are the
   // reason an assembly needs its own: it is where they are shown.
@@ -801,6 +833,7 @@ public:
 
 private:
   uint64_t m_edits = 0;
+  AssemblySequence m_sequence;
   std::vector<Occurrence> m_occurrences;
   units::System m_units;
   std::vector<Mate> m_mates;

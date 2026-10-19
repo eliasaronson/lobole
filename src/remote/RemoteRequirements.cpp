@@ -90,6 +90,9 @@ const MethodDoc RequirementMethods[] = {
      "axis (else the one mate joining them), allowance_mm?, samples?, "
      "rotations?, lead_in_mm?} (pass: a reaches its seat with no more "
      "travel under interference than its own press; check_insertion), "
+     "assembly_sequence {document: assembly} (pass: every step of its "
+     "sequence goes home against everything placed before it, and no "
+     "occurrence is missed; check_assembly_sequence), "
      "mass / volume {document: part "
      "or assembly}, fit_class {document, mate, class: clearance|transition|"
      "interference}, check_fits {document, allow_unverified?}, check_seat "
@@ -558,6 +561,10 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
           h.U64(PartKey(*d));
         }
       }
+    } else if (kind == "assembly_sequence") {
+      // Every placed part, and the sequence itself.
+      h.U64(AssemblyKey(state, *a));
+      h.Json(DocumentIO::AssemblySequenceToJson(a->GetSequence()));
     } else {
       h.U64(AssemblyKey(state, *a));
     }
@@ -1358,6 +1365,29 @@ Taken MeasureInsertion(ui::AppState& state, const json& m, const Ctx& ctx) {
   return t;
 }
 
+// An assembly sequence (docs/assemblies/README.md#assembly-sequences):
+// every step goes home against everything placed before it.
+Taken MeasureSequence(ui::AppState& state, const Ctx& ctx) {
+  Taken t;
+  auto check = remote::ReadSequenceCheck(state);
+  const auto over = [check](Taken& out, const std::atomic<bool>& cancel,
+                            std::atomic<double>& fraction) {
+    json r = remote::RunSequenceCheck(*check, cancel, fraction);
+    if (cancel.load())
+      throw std::runtime_error("cancelled");
+    out.pass = r.at("pass").get<bool>();
+    out.detail = std::move(r);
+  };
+  if (ctx.async) {
+    t.work = over;
+    return t;
+  }
+  std::atomic<bool> never{false};
+  std::atomic<double> fraction{0.0};
+  over(t, never, fraction);
+  return t;
+}
+
 Taken MeasureMass(ui::AppState& state, const json& m, bool mass) {
   Taken t;
   json params = json::object();
@@ -1745,6 +1775,8 @@ Taken MeasureOn(ui::AppState& state, const req::Requirement& r,
     return MeasureSeal(state, m, ctx);
   if (kind == "insertion")
     return MeasureInsertion(state, m, ctx);
+  if (kind == "assembly_sequence")
+    return MeasureSequence(state, ctx);
   if (kind == "mass" || kind == "volume")
     return MeasureMass(state, m, kind == "mass");
   if (kind == "fit_class")

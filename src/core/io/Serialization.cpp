@@ -1340,6 +1340,10 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
     }
     PruneCollection(asmStudyDir, wantedStudies);
 
+    // The sequence (vNEXT): in the index, absent when it has no steps.
+    if (!asmDoc.GetSequence().Empty())
+      index["sequence"] = AssemblySequenceToJson(asmDoc.GetSequence());
+
     // Configurations (v31): file-per-config + active id in the index; absent
     // when none so older assemblies stay byte-identical.
     if (asmDoc.ActiveConfiguration() != 0)
@@ -1626,6 +1630,8 @@ std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
     }
     asmDoc->SetActiveConfiguration(
         index.value("active_configuration", uint64_t{0}));
+    if (index.contains("sequence")) // vNEXT
+      asmDoc->SetSequence(AssemblySequenceFromJson(index.at("sequence")));
     asmDoc->SetUnits(UnitsFromEnvelope(index)); // v64
 
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
@@ -1845,6 +1851,8 @@ static bool SaveAssemblyImpl(const AssemblyDocument& asmDoc,
       for (const ClearanceAssertion& a : asmDoc.GetAssertions())
         j["assertions"].push_back(ClearanceAssertionToJson(a));
     }
+    if (!asmDoc.GetSequence().Empty()) // vNEXT
+      j["sequence"] = AssemblySequenceToJson(asmDoc.GetSequence());
     if (asmDoc.ActiveConfiguration() != 0) // v31
       j["active_configuration"] = asmDoc.ActiveConfiguration();
     if (!asmDoc.GetConfigurations().empty()) {
@@ -1919,6 +1927,8 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
       asmDoc->RestoreConfiguration(ConfigurationFromJson(cj));
     asmDoc->SetActiveConfiguration(
         j.value("active_configuration", uint64_t{0}));
+    if (j.contains("sequence")) // vNEXT
+      asmDoc->SetSequence(AssemblySequenceFromJson(j.at("sequence")));
     asmDoc->SetUnits(UnitsFromEnvelope(j)); // v64
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), path);

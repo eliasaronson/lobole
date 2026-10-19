@@ -755,6 +755,13 @@ add_test(NAME insertion_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(insertion_smoke PROPERTIES TIMEOUT 180)
 
+# Assembly sequences: each step slid home against everything placed before
+# it (docs/assemblies/README.md#assembly-sequences). Headless.
+add_test(NAME assembly_sequence_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_sequence_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(assembly_sequence_smoke PROPERTIES TIMEOUT 240)
+
 # The clash sweep runs its booleans on every core. A race in OpenCASCADE's
 # lazily-filled per-shape caches, or a `record` that stops running in plan
 # order, corrupts an ANSWER rather than crashing — so this diffs a

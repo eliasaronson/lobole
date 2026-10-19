@@ -61,6 +61,7 @@ const std::vector<KindSpec>& Specs() {
        {"document", "a", "b", "entry", "mate", "allowance_mm", "samples",
         "rotations", "lead_in_mm"},
        {"document", "a", "b", "entry"}},
+      {"assembly_sequence", false, "assembly", {"document"}, {"document"}},
       {"mass", true, "part|assembly", {"document"}, {"document"}},
       {"volume", true, "part|assembly", {"document"}, {"document"}},
       {"fit_class",

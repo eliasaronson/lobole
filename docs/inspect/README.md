@@ -407,6 +407,9 @@ forces something through on the way.
 - **A threaded pair is refused**: when both sides carry modelled threads
   the part goes on by turning along the helix, which a straight slide reads
   as the flanks forced through each other the whole way (the jar's lid).
+  An [assembly sequence](../assemblies/README.md#assembly-sequences)'s
+  step can say a part goes on by its thread, which judges the pair by the
+  thread's own fit instead.
 - **A side with nothing to slide is refused by name**: a hidden
   occurrence, or one whose part has no bodies -- a frames-only part like
   the planetary's kinematic carrier, which still gives its frames to mate
@@ -440,9 +443,10 @@ the pairs tested, the confirmation, the axis and what gave it, and every
 try. The requirement kind `insertion`
 ([requirements](../requirements/README.md#measures)) states a pair once.
 
-What it does not judge: a screw (above), the order parts go on in (each pair is slid alone,
-against the one part it goes on), the force a press takes, or a path that
-is not a straight slide along the axis.
+What it does not judge: a screw (above), the order parts go on in (each
+pair is slid alone, against the one part it goes on -- an [assembly
+sequence](../assemblies/README.md#assembly-sequences) puts them together in
+order, each against everything before it), or the force a press takes.
 
 ### Designed overlaps
 

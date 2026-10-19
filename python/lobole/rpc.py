@@ -41,6 +41,7 @@ COLUMNS: dict[str, str] = {
     'bom': '',
     'branch_list': '',
     'cancel_pending': '',
+    'check_assembly_sequence': '',
     'check_fasteners': '',
     'check_fits': '',
     'check_geometry': 'body?:int',
@@ -62,6 +63,7 @@ COLUMNS: dict[str, str] = {
     'export_print_job': 'path:string, plates:object[], slicer_config?:string|object, name?:string',
     'export_step': 'path:string, part?:string|int, body?:int',
     'frame': 'part?:string|int, frame?:string|int, feature_id?:int>=0, element?:string, occurrence?:string|int',
+    'get_assembly_sequence': '',
     'get_print_settings': 'part?:string|int',
     'get_settings': '',
     'get_state': 'part?:string|int',
@@ -109,6 +111,7 @@ COLUMNS: dict[str, str] = {
     'save_project': 'path:string, message?:string, force?:bool',
     'set_active_configuration': 'id?:int>=0',
     'set_active_part': 'part?:string|int, name?:string|int, index?:int>=0',
+    'set_assembly_sequence': 'steps:object[], allowance_mm?:number',
     'set_mate': 'id:int>=0, path?:int[]|null, name?:string, flipped?:bool, rotation_deg?:number, offset?:number, dx?:number, dy?:number, ball_rotation?:number[4]',
     'set_material': 'material?:string, feature_id?:int>=0, body?:int>=0, body_name?:string, expect_revision?:revision',
     'set_occurrence_transform': 'id?:int>=0, occurrence?:int>=0, transform:object',
@@ -324,6 +327,10 @@ class SetActivePartParams(TypedDict):
     part: NotRequired[str | int]
     name: NotRequired[str | int]
     index: NotRequired[int]
+
+class SetAssemblySequenceParams(TypedDict):
+    steps: Sequence[Mapping[str, Any]]
+    allowance_mm: NotRequired[float]
 
 class SetMateParams(TypedDict):
     id: int
@@ -1157,6 +1164,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'add_bearing': {'type': 'object', 'properties': {'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}}, 'required': ['occurrence', 'part'], 'additionalProperties': False},
     'add_job_fixture': {'type': 'object', 'properties': {'box': {'type': 'array', 'items': {'type': 'number'}}, 'enabled': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'pos': {'type': 'array', 'items': {'type': 'number'}}, 'rot_z': {'type': 'number'}, 'safe_z': {'type': 'number'}, 'setup': {'type': 'integer'}, 'part': {'type': 'integer'}}, 'required': ['enabled', 'id', 'name', 'pos', 'rot_z', 'safe_z', 'setup'], 'additionalProperties': False},
     'add_requirement': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'requirement': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'id': {'type': 'integer'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}}, 'required': ['bound', 'id', 'measure', 'name', 'note', 'revision', 'state'], 'additionalProperties': False}}, 'required': ['id', 'requirement'], 'additionalProperties': False},
+    'check_assembly_sequence': {'type': 'object', 'properties': {'pass': {'type': 'boolean'}, 'allowance_mm': {'type': 'number'}, 'steps': {'type': 'array', 'items': {'type': 'object'}}, 'missing': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['pass', 'allowance_mm', 'steps', 'missing'], 'additionalProperties': False},
     'check_drawing': {'type': 'object', 'properties': {'dims': {'type': 'integer'}, 'issues': {'type': 'array', 'items': {'type': 'object', 'properties': {'detail': {'type': 'string'}, 'kind': {'type': 'string'}, 'view': {'type': 'integer'}, 'other_view': {'type': 'integer'}, 'dim': {'type': 'integer'}, 'note': {'type': 'integer'}}, 'required': ['detail', 'kind'], 'additionalProperties': False}}, 'ok': {'type': 'boolean'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'views': {'type': 'integer'}}, 'required': ['dims', 'issues', 'ok', 'receipt', 'views'], 'additionalProperties': False},
     'check_fasteners': {'type': 'object', 'properties': {'examined': {'type': 'integer'}, 'findings': {'type': 'array', 'items': {'type': 'object', 'properties': {'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}, 'why': {'type': 'string'}}, 'required': ['occurrence', 'part', 'why'], 'additionalProperties': False}}, 'ok': {'type': 'boolean'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'skipped': {'type': 'integer'}}, 'required': ['examined', 'findings', 'ok', 'receipt', 'skipped'], 'additionalProperties': False},
     'check_fit': {'type': 'object', 'properties': {'hole': {'type': 'object', 'properties': {'class': {'type': 'string'}, 'it': {'type': 'number'}, 'it_grade': {'type': 'integer'}, 'lower': {'type': 'number'}, 'max': {'type': 'number'}, 'min': {'type': 'number'}, 'upper': {'type': 'number'}}, 'required': ['class', 'it', 'it_grade', 'lower', 'max', 'min', 'upper'], 'additionalProperties': False}, 'print': {'type': 'object', 'properties': {'hole': {'type': 'object'}, 'shaft': {'type': 'object'}}, 'required': [], 'additionalProperties': False}, 'print_notes': {'type': 'array', 'items': {'type': 'string'}}, 'size': {'type': 'number'}, 'size_from': {'type': 'string'}, 'measured': {'type': 'object', 'properties': {'hole': {'type': 'number'}, 'shaft': {'type': 'number'}}, 'required': [], 'additionalProperties': False}, 'intent': {'type': 'string'}, 'intent_ok': {'type': 'boolean'}, 'kind': {'type': 'string'}, 'max_clearance': {'type': 'number'}, 'min_clearance': {'type': 'number'}, 'note': {'type': 'string'}, 'shaft': {'type': 'object', 'properties': {'class': {'type': 'string'}, 'it': {'type': 'number'}, 'it_grade': {'type': 'integer'}, 'lower': {'type': 'number'}, 'max': {'type': 'number'}, 'min': {'type': 'number'}, 'upper': {'type': 'number'}}, 'required': ['class', 'it', 'it_grade', 'lower', 'max', 'min', 'upper'], 'additionalProperties': False}}, 'required': ['hole', 'size', 'size_from'], 'additionalProperties': False},
@@ -1178,6 +1186,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'extract_variables': {'type': 'object', 'properties': {'applied': {'type': 'boolean'}, 'left_alone': {'type': 'array', 'items': {'type': 'object', 'properties': {'feature': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'field': {'type': 'string'}, 'label': {'type': 'string'}, 'reason': {'type': 'string'}, 'value': {'type': 'number'}}, 'required': ['feature', 'feature_id', 'field', 'label', 'reason', 'value'], 'additionalProperties': False}}, 'scope': {'type': 'string'}, 'variables': {'type': 'array', 'items': {'type': 'object', 'properties': {'existing': {'type': 'boolean'}, 'expression': {'type': 'string'}, 'name': {'type': 'string'}, 'quantity': {'type': 'string'}, 'uses': {'type': 'array', 'items': {'type': 'object'}}, 'value': {'type': 'number'}}, 'required': ['existing', 'expression', 'name', 'quantity', 'uses', 'value'], 'additionalProperties': False}}, 'digest': {'type': 'object'}, 'regen': {'type': 'object'}}, 'required': ['applied', 'left_alone', 'scope', 'variables'], 'additionalProperties': False},
     'fit_bearing': {'type': 'object', 'properties': {'candidates': {'type': 'array', 'items': {'type': 'string'}}, 'designation': {'type': 'string'}, 'mate': {'type': 'integer'}, 'occurrence': {'type': 'integer'}, 'other_mate': {'type': 'integer'}, 'other_ring': {'type': 'object', 'properties': {'diameter_check': {'type': 'object'}, 'ring': {'type': 'string'}, 'seat': {'type': 'object'}}, 'required': ['diameter_check', 'ring', 'seat'], 'additionalProperties': False}, 'overhang_mm': {'type': 'number'}, 'seat_diameter_mm': {'type': 'number'}, 'shaft': {'type': 'boolean'}, 'shoulder': {'type': 'boolean'}, 'summary': {'type': 'string'}}, 'required': ['candidates', 'designation', 'mate', 'occurrence', 'other_mate', 'other_ring', 'overhang_mm', 'seat_diameter_mm', 'shaft', 'shoulder', 'summary'], 'additionalProperties': False},
     'fit_retaining_ring': {'type': 'object', 'properties': {'designation': {'type': 'string'}, 'groove_feature': {'type': 'integer'}, 'occurrence': {'type': 'integer'}, 'orientation': {'type': 'array', 'items': {'type': 'number'}}, 'parent': {'type': 'integer'}, 'part': {'type': 'string'}, 'position': {'type': 'array', 'items': {'type': 'number'}}, 'size_mm': {'type': 'number'}, 'standard': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['designation', 'groove_feature', 'occurrence', 'orientation', 'parent', 'part', 'position', 'size_mm', 'standard', 'summary'], 'additionalProperties': False},
+    'get_assembly_sequence': {'type': 'object', 'properties': {'steps': {'type': 'array', 'items': {'type': 'object'}}, 'allowance_mm': {'type': 'number'}}, 'required': ['steps', 'allowance_mm'], 'additionalProperties': False},
     'get_keymap': {'type': 'object', 'properties': {'active': {'type': 'string'}, 'bindings': {'type': 'array', 'items': {'type': 'object', 'properties': {'chord': {'type': 'string'}, 'context': {'type': 'string'}, 'custom': {'type': 'boolean'}, 'default': {'type': 'string'}, 'id': {'type': 'string'}, 'label': {'type': 'string'}, 'section': {'type': 'string'}, 'alt': {'type': 'string'}, 'hidden': {'type': 'boolean'}}, 'required': ['chord', 'context', 'custom', 'default', 'id', 'label', 'section'], 'additionalProperties': False}}, 'conflicts': {'type': 'array', 'items': {'type': 'object', 'properties': {'context': {'type': 'string'}, 'chord': {'type': 'string'}, 'commands': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['context', 'chord', 'commands'], 'additionalProperties': False}}, 'contexts': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['active', 'bindings', 'conflicts', 'contexts'], 'additionalProperties': False},
     'get_print_process': {'type': 'object', 'properties': {'confirm': {'type': 'string'}, 'print': {'anyOf': [{'type': 'object', 'properties': {'material': {'type': 'string'}, 'process': {'type': 'string'}, 'stl_deflection_mm': {'type': 'number'}, 'match': {'type': 'string'}, 'profile': {'type': 'string'}, 'conditions': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'bed_exclude_mm': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'line_width_mm': {'type': 'number'}}, 'required': ['material', 'process', 'stl_deflection_mm'], 'additionalProperties': False}, {'type': 'null'}]}, 'tables': {'type': 'array', 'items': {'type': 'object', 'properties': {'conditions': {'type': 'string'}, 'material': {'type': 'string'}, 'min_reliable_thread_mm': {'type': 'number'}, 'process': {'type': 'string'}, 'repeatability_mm': {'type': 'number'}, 'repeatability_source': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['conditions', 'material', 'min_reliable_thread_mm', 'process', 'repeatability_mm', 'repeatability_source', 'rows'], 'additionalProperties': False}}, 'threads': {'type': 'array', 'items': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'confirm': {'type': 'string'}, 'designation': {'type': 'string'}, 'failed': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'known': {'type': 'boolean'}, 'model_face': {'type': 'number'}, 'model_major': {'type': 'number'}, 'modeled': {'type': 'boolean'}, 'modelled_major': {'type': 'number'}, 'name': {'type': 'string'}, 'notes': {'type': 'array', 'items': {'type': 'string'}}, 'pitch': {'type': 'number'}, 'prints_major': {'type': 'number'}, 'sentence': {'type': 'string'}, 'side': {'type': 'string'}, 'want_major': {'type': 'number'}}, 'required': ['allowance_mm', 'confirm', 'designation', 'feature_id', 'known', 'modeled', 'modelled_major', 'name', 'notes', 'pitch', 'prints_major', 'sentence', 'side'], 'additionalProperties': False}}}, 'required': ['confirm', 'print', 'tables'], 'additionalProperties': False},
     'get_print_settings': {'type': 'object', 'properties': {'part': {'type': 'object'}, 'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'body': {'type': 'integer'}, 'name': {'type': 'string'}, 'created_by': {'type': 'integer'}, 'override': {'type': 'object'}, 'settings': {'type': 'object'}, 'described': {'type': 'string'}, 'source_part': {'type': 'string'}}, 'required': ['body', 'name', 'created_by', 'settings', 'described'], 'additionalProperties': False}}}, 'required': ['part', 'bodies'], 'additionalProperties': False},
@@ -1221,6 +1230,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'remove_requirement': {'type': 'object', 'properties': {'removed': {'type': 'integer'}}, 'required': ['removed'], 'additionalProperties': False},
     'save_print_profile': {'type': 'object', 'properties': {'conditions': {'type': 'string'}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'process': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object', 'properties': {'allowance_mm': {'type': 'number'}, 'from_mm': {'type': 'number'}, 'kind': {'type': 'string'}, 'source': {'type': 'string'}, 'to_mm': {'type': 'number'}}, 'required': ['allowance_mm', 'from_mm', 'kind'], 'additionalProperties': False}}, 'stl_deflection_mm': {'type': 'number'}, 'stl_deflection_stated': {'type': 'boolean'}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'bed_exclude_mm': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'line_width_mm': {'type': 'number'}}, 'required': ['material', 'name', 'process', 'rows', 'stl_deflection_mm', 'stl_deflection_stated'], 'additionalProperties': False},
     'save_template': {'type': 'object', 'properties': {'suggestions': {'type': 'object', 'properties': {'literals': {'type': 'array', 'items': {}}, 'references': {'type': 'array', 'items': {'type': 'string'}}, 'variables': {'type': 'array', 'items': {'type': 'string'}}}, 'required': ['literals', 'references', 'variables'], 'additionalProperties': False}, 'template': {'type': 'object', 'properties': {'features': {'type': 'array', 'items': {'type': 'object'}}, 'name': {'type': 'string'}, 'parameters': {'type': 'array', 'items': {'type': 'object'}}, 'revision': {'type': 'integer'}, 'comment': {'type': 'string'}}, 'required': ['features', 'name', 'parameters', 'revision'], 'additionalProperties': False}, 'instances_marked': {'type': 'array', 'items': {'type': 'object', 'properties': {'feature_id': {'type': 'integer'}, 'name': {'type': 'string'}, 'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'revision': {'type': 'integer'}, 'template_changed': {'type': 'boolean'}}, 'required': ['feature_id', 'name', 'part', 'part_id', 'revision', 'template_changed'], 'additionalProperties': False}}}, 'required': ['template'], 'additionalProperties': False},
+    'set_assembly_sequence': {'type': 'object', 'properties': {'steps': {'type': 'array', 'items': {'type': 'object'}}, 'allowance_mm': {'type': 'number'}}, 'required': ['steps', 'allowance_mm'], 'additionalProperties': False},
     'set_job_fixture': {'type': 'object', 'properties': {'enabled': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'part': {'type': 'integer'}, 'pos': {'type': 'array', 'items': {'type': 'number'}}, 'rot_z': {'type': 'number'}, 'safe_z': {'type': 'number'}, 'setup': {'type': 'integer'}, 'seat': {'type': 'object', 'properties': {'along_mm': {'type': 'number'}, 'edge': {'type': 'string'}, 'element': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'over_mm': {'type': 'number'}, 'spin_deg': {'type': 'number'}}, 'required': ['along_mm', 'edge', 'element', 'feature_id', 'over_mm', 'spin_deg'], 'additionalProperties': False}, 'box': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['enabled', 'id', 'name', 'pos', 'rot_z', 'safe_z', 'setup'], 'additionalProperties': False},
     'set_job_part': {'type': 'object', 'properties': {'configuration': {'type': 'integer'}, 'id': {'type': 'integer'}, 'moved': {'type': 'integer'}, 'configuration_name': {'type': 'string'}}, 'required': ['configuration', 'id', 'moved'], 'additionalProperties': False},
     'set_print_process': {'type': 'object', 'properties': {'print': {'type': 'object', 'properties': {'material': {'type': 'string'}, 'process': {'type': 'string'}, 'stl_deflection_mm': {'type': 'number'}, 'match': {'type': 'string'}, 'profile': {'type': 'string'}, 'conditions': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'bed_exclude_mm': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'line_width_mm': {'type': 'number'}}, 'required': ['material', 'process', 'stl_deflection_mm'], 'additionalProperties': False}, 'threads': {'type': 'array', 'items': {'type': 'object'}}, 'confirm': {'type': 'string'}}, 'required': ['print', 'threads'], 'additionalProperties': False},
@@ -1270,6 +1280,13 @@ AddRequirementResultRequirement = TypedDict('AddRequirementResultRequirement', {
 AddRequirementResult = TypedDict('AddRequirementResult', {
     'id': int,
     'requirement': AddRequirementResultRequirement,
+})
+
+CheckAssemblySequenceResult = TypedDict('CheckAssemblySequenceResult', {
+    'pass': bool,
+    'allowance_mm': float,
+    'steps': list[dict[str, Any]],
+    'missing': list[str],
 })
 
 CheckDrawingResultIssues = TypedDict('CheckDrawingResultIssues', {
@@ -2044,6 +2061,11 @@ FitRetainingRingResult = TypedDict('FitRetainingRingResult', {
     'size_mm': float,
     'standard': str,
     'summary': str,
+})
+
+GetAssemblySequenceResult = TypedDict('GetAssemblySequenceResult', {
+    'steps': list[dict[str, Any]],
+    'allowance_mm': float,
 })
 
 GetKeymapResultBindings = TypedDict('GetKeymapResultBindings', {
@@ -3021,6 +3043,11 @@ SaveTemplateResult = TypedDict('SaveTemplateResult', {
     'instances_marked': NotRequired[list[SaveTemplateResultInstancesMarked]],
 })
 
+SetAssemblySequenceResult = TypedDict('SetAssemblySequenceResult', {
+    'steps': list[dict[str, Any]],
+    'allowance_mm': float,
+})
+
 SetJobFixtureResultSeat = TypedDict('SetJobFixtureResultSeat', {
     'along_mm': float,
     'edge': str,
@@ -3294,6 +3321,9 @@ class RpcSurface:
     def cancel_pending(self, _timeout: float | None = None) -> dict[str, Any]:
         raise NotImplementedError
 
+    def check_assembly_sequence(self, _timeout: float | None = None) -> CheckAssemblySequenceResult:
+        raise NotImplementedError
+
     def check_drawing(self, _timeout: float | None = None, **params: Any) -> CheckDrawingResult:
         raise NotImplementedError
 
@@ -3397,6 +3427,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def frame(self, _timeout: float | None = None, **params: Unpack[FrameParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def get_assembly_sequence(self, _timeout: float | None = None) -> GetAssemblySequenceResult:
         raise NotImplementedError
 
     def get_keymap(self, _timeout: float | None = None, **params: Any) -> GetKeymapResult:
@@ -3592,6 +3625,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def set_active_part(self, _timeout: float | None = None, **params: Unpack[SetActivePartParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def set_assembly_sequence(self, _timeout: float | None = None, **params: Unpack[SetAssemblySequenceParams]) -> SetAssemblySequenceResult:
         raise NotImplementedError
 
     def set_job_fixture(self, _timeout: float | None = None, **params: Any) -> SetJobFixtureResult:

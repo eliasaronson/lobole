@@ -160,6 +160,13 @@ std::vector<std::string> RelationKindNames();
 nlohmann::json ExplodedViewToJson(const ExplodedView& view);
 ExplodedView ExplodedViewFromJson(const nlohmann::json& j);
 
+// An assembly's sequence (vNEXT, docs/assemblies/README.md#assembly-sequences):
+// absent from a file when it has no steps. A step key it does not know, a
+// step with no occurrence or a direction that is not three numbers is
+// refused, naming what is accepted.
+nlohmann::json AssemblySequenceToJson(const AssemblySequence& s);
+AssemblySequence AssemblySequenceFromJson(const nlohmann::json& j);
+
 // Single-relation (de)serialization (v83, docs/assemblies/relations.md);
 // same convention. An unknown kind or DOF name is refused naming the
 // accepted ones — never demoted to a default.

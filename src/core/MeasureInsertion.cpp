@@ -5,8 +5,11 @@
 
 #include "cad/NonDestructiveBoolean.h"
 #include "core/Feature.h"
+#include "core/Measure.h"
 #include "core/MeasureSections.h"
+#include "core/ThreadStandards.h"
 
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepBndLib.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
@@ -17,8 +20,11 @@
 #include <Standard_Failure.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 #include <gp_Ax3.hxx>
+#include <gp_Cylinder.hxx>
 #include <gp_Quaternion.hxx>
 #include <gp_Trsf.hxx>
 
@@ -242,6 +248,72 @@ TopoDS_Compound Compound(const std::vector<TopoDS_Shape>& shapes) {
   return c;
 }
 
+// A thread of a side, carried into the axis frame, when it lies on the
+// axis (a screw's along its path): its span along the axis.
+struct AxisThread {
+  std::string designation;
+  double majorDia = 0.0, pitch = 0.0;
+  bool external = false;
+  double lo = 0.0, hi = 0.0;
+};
+
+std::vector<AxisThread> AxisThreads(const std::vector<Body>& bodies,
+                                    const glm::dmat4& xf,
+                                    const gp_Trsf& toAxis) {
+  std::vector<AxisThread> out;
+  const gp_Trsf place = toAxis * Rigid(xf);
+  // On the axis: along it, and its line within a tenth of a millimetre.
+  const auto onAxis = [](const gp_Ax1& ax) {
+    return std::abs(ax.Direction().Z()) > 1.0 - 1e-6 &&
+           std::hypot(ax.Location().X(), ax.Location().Y()) < 0.1;
+  };
+  for (const Body& b : bodies) {
+    if (b.reference || b.shape.GetShape().IsNull())
+      continue;
+    for (const ThreadSpan& t : ThreadSpansOf(b, xf)) {
+      gp_Pnt p(t.start.x, t.start.y, t.start.z);
+      gp_Dir d(t.axis.x, t.axis.y, t.axis.z);
+      p.Transform(toAxis);
+      d.Transform(toAxis);
+      if (!onAxis(gp_Ax1(p, d)))
+        continue;
+      const double z1 = p.Z() + d.Z() * t.length;
+      out.push_back({t.spec.designation, t.spec.majorDia, t.spec.pitch,
+                     t.external, std::min(p.Z(), z1), std::max(p.Z(), z1)});
+    }
+    if (b.threads.empty())
+      continue;
+    const TopoDS_Shape placed =
+        b.shape.GetShape().Moved(TopLoc_Location(place));
+    std::vector<TopoDS_Shape> order;
+    for (TopExp_Explorer e(placed, TopAbs_FACE); e.More(); e.Next())
+      order.push_back(e.Current());
+    for (const ThreadMark& m : b.threads) {
+      const auto index = b.elementMap.Resolve(m.face.name);
+      if (!index || *index < 0 || *index >= static_cast<int>(order.size()))
+        continue;
+      BRepAdaptor_Surface surface(TopoDS::Face(order[*index]));
+      if (surface.GetType() != GeomAbs_Cylinder)
+        continue;
+      const gp_Cylinder cyl = surface.Cylinder();
+      if (!onAxis(cyl.Axis()))
+        continue;
+      double v0 = surface.FirstVParameter(), v1 = surface.LastVParameter();
+      if (v0 > v1)
+        std::swap(v0, v1);
+      if (m.length > 0.0)
+        v1 = std::min(v1, v0 + m.length);
+      const double dz = cyl.Axis().Direction().Z();
+      const double z0 = cyl.Location().Z() + dz * v0,
+                   z1 = cyl.Location().Z() + dz * v1;
+      out.push_back({m.designation,
+                     m.majorDia > 0.0 ? m.majorDia : 2.0 * cyl.Radius(),
+                     m.pitch, m.external, std::min(z0, z1), std::max(z0, z1)});
+    }
+  }
+  return out;
+}
+
 } // namespace
 
 std::expected<InsertionReport, std::string>
@@ -267,7 +339,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       return !b.reference && (!b.threads.empty() || !b.threadRegions.empty());
     });
   };
-  if (threaded(moving) && threaded(fixed))
+  if (threaded(moving) && threaded(fixed) && !opt.screw)
     return std::unexpected(
         "both sides carry modelled threads: a threaded pair goes on by "
         "turning, which a straight slide does not judge");
@@ -336,6 +408,39 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     if (!nearA || !nearB)
       return clear();
 
+    // Going on by its thread: each thread of the moving side meeting one of
+    // the fixed side on the path is that pair's own fit to judge.
+    struct Engaged {
+      double aLo, aHi, bLo, bHi;
+    };
+    std::vector<Engaged> engaged;
+    if (opt.screw) {
+      const auto ta = AxisThreads(moving, xfMoving, toAxis),
+                 tb = AxisThreads(fixed, xfFixed, toAxis);
+      for (const AxisThread& x : ta)
+        for (const AxisThread& y : tb) {
+          const double over = std::min(x.hi, y.hi) - std::max(x.lo, y.lo);
+          if (over <= kZTol)
+            continue;
+          InsertionThread it;
+          it.moving = x.designation;
+          it.fixed = y.designation;
+          it.engagedMm = over;
+          it.fits = x.external != y.external &&
+                    std::abs(x.majorDia - y.majorDia) < 1e-6 &&
+                    (x.pitch <= 0.0 || y.pitch <= 0.0 ||
+                     std::abs(x.pitch - y.pitch) < 1e-9);
+          rep.threads.push_back(it);
+          if (it.fits)
+            engaged.push_back({x.lo, x.hi, y.lo, y.hi});
+        }
+      if (rep.threads.empty())
+        return std::unexpected(
+            "it goes on by its thread, but no thread of the moving side "
+            "meets one of the fixed side on the path (a Thread feature or "
+            "a tapped Hole on each, coaxial with it)");
+    }
+
     std::vector<bool> sides;
     if (opt.entry != InsertionEntry::Negative)
       sides.push_back(true);
@@ -343,6 +448,8 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       sides.push_back(false);
     // One resolution for every try, from the longer of the two travels.
     const auto travelOf = [&](bool positive) {
+      if (opt.travelMm >= 0.0)
+        return opt.travelMm;
       const double d = positive ? zb1 - za0 : za1 - zb0;
       return std::max(0.0, d + opt.allowanceMm + kFuzz);
     };
@@ -388,8 +495,13 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     // Orientations tried, and every band pair's reading at each: a pair's
     // reading does not depend on the slide, only on the turn.
     std::vector<double> turns;
-    for (int k = 0; k < opt.rotations; k++)
+    const bool turning = opt.turnDeg != 0.0;
+    for (int k = 0; k < (turning ? 1 : opt.rotations); k++)
       turns.push_back(360.0 * k / opt.rotations);
+    // A turned path's orientation at each of its steps, after the seat's.
+    if (turning)
+      for (int k = 1; k <= opt.samples; k++)
+        turns.push_back(opt.turnDeg * k / opt.samples);
     const size_t nA = bandsA.size(), nB = bandsB.size();
     std::vector<std::vector<Turned>> turned(turns.size());
     std::vector<std::vector<int8_t>> known(turns.size());
@@ -416,11 +528,22 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       }
       return v;
     };
+    // A band of the screw's thread against one of the thread it goes into:
+    // judged by the threads' fit, not read as interference.
+    const auto ByThread = [&](const Band& a, const Band& b) {
+      return std::any_of(engaged.begin(), engaged.end(), [&](const Engaged& e) {
+        return a.z0 >= e.aLo - kZTol && a.z1 <= e.aHi + kZTol &&
+               b.z0 >= e.bLo - kZTol && b.z1 <= e.bHi + kZTol;
+      });
+    };
     const auto pair = [&](size_t ti, size_t i, size_t j) -> const PairReading& {
       const auto& t = turnedAt(ti);
       const size_t k = i * nB + j;
       if (!known[ti][k]) {
-        readings[ti][k] = ReadPair(bandsA[i], t[i], bandsB[j], opt.allowanceMm);
+        readings[ti][k] =
+            ByThread(bandsA[i], bandsB[j])
+                ? PairReading{}
+                : ReadPair(bandsA[i], t[i], bandsB[j], opt.allowanceMm);
         known[ti][k] = 1;
         rep.pairsRead++;
       }
@@ -499,56 +622,92 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       const double seatDepth = seat0.at.depthMm;
       Intervals hit, deeper;
       double worstAt = -1.0;
-      // Every pair whose spans overlap somewhere on the way: the slides
-      // that do it are one open interval, from the band ends.
-      struct Cand {
-        size_t i, j;
-        double lo, hi;
-      };
-      std::vector<Cand> cands;
-      for (size_t i = 0; i < nA; i++)
-        for (size_t j = 0; j < nB; j++) {
-          const Band &a = bandsA[i], &b = bandsB[j];
+      if (turning) {
+        // Turned as it goes: the orientation changes along the path, so
+        // the path is read step by step, each step counted a step long.
+        const double step = t.travelMm / opt.samples;
+        const double sgn = positive ? 1.0 : -1.0;
+        for (int k = opt.samples; k >= 1; k--) {
+          if (cancel && cancel->load())
+            throw KernelError{"cancelled"};
+          const double u = step * k;
+          bool any = false, deep = false;
+          for (size_t i = 0; i < nA; i++)
+            for (size_t j = 0; j < nB; j++) {
+              const Band &a = bandsA[i], &b = bandsB[j];
+              const double lo = std::max(a.z0 + sgn * u, b.z0),
+                           hi = std::min(a.z1 + sgn * u, b.z1);
+              if (hi - lo <= kZTol)
+                continue;
+              const PairReading& r = pair(static_cast<size_t>(k), i, j);
+              if (!r.interfering)
+                continue;
+              any = true;
+              deep = deep || r.depthMm > seatDepth + deeperTol;
+              if (r.depthMm > t.worstDepthMm) {
+                t.worstDepthMm = r.depthMm;
+                worstAt = u;
+              }
+              t.worstVolumeMm3 =
+                  std::max(t.worstVolumeMm3, r.areaMm2 * (hi - lo));
+            }
+          if (any)
+            hit.Add(u - step, u);
+          if (deep)
+            deeper.Add(u - step, u);
+        }
+      } else {
+        // Every pair whose spans overlap somewhere on the way: the slides
+        // that do it are one open interval, from the band ends.
+        struct Cand {
+          size_t i, j;
           double lo, hi;
-          if (positive) {
-            lo = b.z0 - a.z1;
-            hi = b.z1 - a.z0;
-          } else {
-            lo = a.z0 - b.z1;
-            hi = a.z1 - b.z0;
+        };
+        std::vector<Cand> cands;
+        for (size_t i = 0; i < nA; i++)
+          for (size_t j = 0; j < nB; j++) {
+            const Band &a = bandsA[i], &b = bandsB[j];
+            double lo, hi;
+            if (positive) {
+              lo = b.z0 - a.z1;
+              hi = b.z1 - a.z0;
+            } else {
+              lo = a.z0 - b.z1;
+              hi = a.z1 - b.z0;
+            }
+            lo = std::max(lo, 0.0);
+            hi = std::min(hi, t.travelMm);
+            if (hi - lo > kZTol)
+              cands.push_back({i, j, lo, hi});
           }
-          lo = std::max(lo, 0.0);
-          hi = std::min(hi, t.travelMm);
-          if (hi - lo > kZTol)
-            cands.push_back({i, j, lo, hi});
-        }
-      // Nearest the seat first: what binds as it goes home is read first.
-      std::sort(cands.begin(), cands.end(),
-                [](const Cand& x, const Cand& y) { return x.lo < y.lo; });
-      for (const Cand& c : cands) {
-        if (cancel && cancel->load())
-          throw KernelError{"cancelled"};
-        // Nothing left to learn from a pair whose slides are already
-        // counted both as interfering and as deeper than the seat.
-        if (hit.Covers(c.lo, c.hi) && deeper.Covers(c.lo, c.hi))
-          continue;
-        const PairReading& r = pair(ti, c.i, c.j);
-        if (!r.interfering)
-          continue;
-        hit.Add(c.lo, c.hi);
-        if (r.depthMm > seatDepth + deeperTol)
-          deeper.Add(c.lo, c.hi);
-        if (r.depthMm > t.worstDepthMm) {
-          t.worstDepthMm = r.depthMm;
-          worstAt = 0.5 * (c.lo + c.hi);
-        }
-        const Band &a = bandsA[c.i], &b = bandsB[c.j];
-        t.worstVolumeMm3 = std::max(
-            t.worstVolumeMm3, r.areaMm2 * std::min(a.z1 - a.z0, b.z1 - b.z0));
-        // A try that cannot beat the best found is abandoned.
-        if (haveBest && hit.Length() - t.pressMm > rep.best.excessMm) {
-          t.complete = false;
-          break;
+        // Nearest the seat first: what binds as it goes home is read first.
+        std::sort(cands.begin(), cands.end(),
+                  [](const Cand& x, const Cand& y) { return x.lo < y.lo; });
+        for (const Cand& c : cands) {
+          if (cancel && cancel->load())
+            throw KernelError{"cancelled"};
+          // Nothing left to learn from a pair whose slides are already
+          // counted both as interfering and as deeper than the seat.
+          if (hit.Covers(c.lo, c.hi) && deeper.Covers(c.lo, c.hi))
+            continue;
+          const PairReading& r = pair(ti, c.i, c.j);
+          if (!r.interfering)
+            continue;
+          hit.Add(c.lo, c.hi);
+          if (r.depthMm > seatDepth + deeperTol)
+            deeper.Add(c.lo, c.hi);
+          if (r.depthMm > t.worstDepthMm) {
+            t.worstDepthMm = r.depthMm;
+            worstAt = 0.5 * (c.lo + c.hi);
+          }
+          const Band &a = bandsA[c.i], &b = bandsB[c.j];
+          t.worstVolumeMm3 = std::max(
+              t.worstVolumeMm3, r.areaMm2 * std::min(a.z1 - a.z0, b.z1 - b.z0));
+          // A try that cannot beat the best found is abandoned.
+          if (haveBest && hit.Length() - t.pressMm > rep.best.excessMm) {
+            t.complete = false;
+            break;
+          }
         }
       }
       t.interferingMm = hit.Length();
@@ -607,6 +766,10 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         consider(run(i, k));
     }
 
+    // A thread that does not fit the one it goes into: no turning helps.
+    for (const InsertionThread& it : rep.threads)
+      if (!it.fits)
+        rep.pass = false;
     rep.pairsSeconds = since(t0);
     t0 = Clock::now();
     // The one exact boolean: at the worst offset of the answer, or at the
@@ -615,11 +778,18 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       const InsertionTry& b = rep.best;
       InsertionConfirm& c = rep.confirm;
       c.ran = true;
-      size_t ti = 0;
-      for (size_t k = 0; k < turns.size(); k++)
-        if (turns[k] == b.rotationDeg)
-          ti = k;
       c.atMm = b.worstAtMm >= 0.0 ? b.worstAtMm : 0.0;
+      size_t ti = 0;
+      if (turning) {
+        // The turn at that step of the path.
+        if (b.travelMm > 0.0)
+          ti = static_cast<size_t>(
+              std::lround(c.atMm / (b.travelMm / opt.samples)));
+      } else {
+        for (size_t k = 0; k < turns.size(); k++)
+          if (turns[k] == b.rotationDeg)
+            ti = k;
+      }
       // What the sections say there: every pair whose spans overlap at it.
       const double u = b.positive ? c.atMm : -c.atMm;
       for (size_t i = 0; i < nA; i++)
@@ -638,7 +808,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       if (c.expectedOverlap)
         c.expectedGap = false;
       const TopoDS_Shape placed = Compound(solidsA).Moved(
-          TopLoc_Location(Pose(c.atMm, b.rotationDeg, b.positive)));
+          TopLoc_Location(Pose(c.atMm, turns[ti], b.positive)));
       const TopoDS_Compound f = Compound(solidsB);
       BRepAlgoAPI_Common common;
       if (!cad::BuildNonDestructive(common, placed, f, kFuzz) ||

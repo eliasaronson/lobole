@@ -343,3 +343,51 @@ TEST_CASE("A herringbone pair cannot be slid apart along its axis",
   CHECK(r.confirm.ran);
   CHECK(r.confirm.agrees);
 }
+
+TEST_CASE("A part turned as it goes on is read at the turn of each step",
+          "[measure][insertion]") {
+  // A keyed hub on a shaft with a long lug at +X, its keyway at +X: slid
+  // straight it clears the lug the whole way. Turned 90 degrees over the
+  // way on, the keyway leaves the lug while the hub is still passing it.
+  TopoDS_Shape s = BRepPrimAPI_MakeCylinder(Up(0), kR, 30.0).Shape();
+  s = BRepAlgoAPI_Fuse(
+          s, BRepPrimAPI_MakeBox(gp_Pnt(kR - 0.4, -0.5, 15.0), 1.4, 1.0, 15.0)
+                 .Shape())
+          .Shape();
+  const Body shaft = Make(s, "shaft");
+  TopoDS_Shape bore = BRepPrimAPI_MakeCylinder(Up(-1), kR + kGap, 12.0).Shape();
+  bore = BRepAlgoAPI_Fuse(bore, BRepPrimAPI_MakeBox(gp_Pnt(0.0, -1.0, -1.0),
+                                                    kR + 1.4, 2.0, 12.0)
+                                    .Shape())
+             .Shape();
+  const Body hub = Hub(0.0, 10.0, bore);
+  Measure::InsertionOptions o;
+  o.entry = Measure::InsertionEntry::Positive;
+  o.allowanceMm = kAllowance;
+  o.rotations = 1;
+  const auto straight = Measure::Insertion({hub}, I, {shaft}, I, O, Z, o);
+  REQUIRE(straight);
+  CHECK(straight->pass);
+  o.turnDeg = 90.0;
+  const auto turned = Measure::Insertion({hub}, I, {shaft}, I, O, Z, o);
+  REQUIRE(turned);
+  CHECK_FALSE(turned->pass);
+  CHECK(turned->best.interferingMm > 5.0);
+  CHECK(turned->confirm.agrees);
+}
+
+TEST_CASE("A part that goes on by its thread needs a thread on its path",
+          "[measure][insertion]") {
+  const Body shaft =
+      Make(BRepPrimAPI_MakeCylinder(Up(0), 4.0, 30.0).Shape(), "shaft");
+  const Body ring =
+      Make(BRepAlgoAPI_Cut(BRepPrimAPI_MakeCylinder(Up(20), 8.0, 10.0).Shape(),
+                           BRepPrimAPI_MakeCylinder(Up(19), 4.2, 12.0).Shape())
+               .Shape(),
+           "ring");
+  Measure::InsertionOptions o;
+  o.screw = true;
+  const auto r = Measure::Insertion({ring}, I, {shaft}, I, O, Z, o);
+  REQUIRE_FALSE(r);
+  CHECK(r.error().find("no thread") != std::string::npos);
+}

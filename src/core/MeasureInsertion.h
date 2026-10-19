@@ -85,6 +85,15 @@ struct InsertionConfirm {
   bool agrees = false;
 };
 
+// A thread on the moving side meeting one on the fixed side, coaxial with
+// the path, when the part goes on by its thread (InsertionOptions::screw):
+// that pair is judged by the thread's own fit, not as interference.
+struct InsertionThread {
+  std::string moving, fixed; // their designations
+  bool fits = false;         // one external, one internal; same major and pitch
+  double engagedMm = 0.0;    // their spans' overlap along the axis, seated
+};
+
 struct InsertionReport {
   glm::dvec3 axisPoint{0.0}, axisDir{0.0, 0.0, 1.0};
   double allowanceMm = 0.0;
@@ -99,6 +108,7 @@ struct InsertionReport {
   InsertionTry best;               // the passing try, else the least excess
   std::vector<InsertionTry> tries; // in the order they ran
   InsertionConfirm confirm;
+  std::vector<InsertionThread> threads; // screw: the pairs judged by fit
   bool pass = false;
 };
 
@@ -109,12 +119,24 @@ struct InsertionOptions {
   int rotations = 12;       // orientations tried when the seated one fails
   double leadInMm = -1.0;   // < 0: one step, the sampling's own resolution
   bool confirm = true;      // run the one exact boolean
+  // The path's length from the seat, mm; < 0: from clear of the fixed side.
+  double travelMm = -1.0;
+  // Turned about the axis by this over the path, from where it starts to
+  // the seat (a bayonet): read at every step, `samples` of them, at the one
+  // orientation the turn gives -- no other is tried.
+  double turnDeg = 0.0;
+  // It goes on by its thread: a thread of the moving side meeting one of
+  // the fixed side coaxial with the path is judged by the pair's own fit
+  // (InsertionThread), not read as interference. Without it a threaded
+  // pair is refused, as a straight slide does not judge one.
+  bool screw = false;
 };
 
 // A and B are placed by their matrices; the axis is in that same (world)
 // frame. An error when either side is empty, the axis has no direction,
-// both sides carry modelled threads (a screw goes on by turning), or the
-// kernel fails; `cancel` is polled between steps and `fraction` (when
+// both sides carry modelled threads and `screw` is not set (a screw goes on
+// by turning), `screw` is set and no thread pair is coaxial with the path,
+// or the kernel fails; `cancel` is polled between steps and `fraction` (when
 // given) advances through the work.
 std::expected<InsertionReport, std::string>
 Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,

@@ -86,4 +86,16 @@ nlohmann::json InsertionJson(const Measure::InsertionReport& r,
 // does place matter.
 std::string NoMatterWhy(ui::AppState& state, uint64_t occurrenceId);
 
+// The active assembly's sequence, checked
+// (docs/assemblies/README.md#assembly-sequences): read on the frame -- every
+// step's path resolved, its bodies and everything placed before it copied,
+// and a step that cannot be checked refused naming why -- then run anywhere
+// (a job), each step slid home against every occurrence placed before it.
+struct SequenceCheck;
+std::shared_ptr<const SequenceCheck> ReadSequenceCheck(ui::AppState& state);
+// {pass, allowance_mm, steps[], missing[]}; `cancel` stops it between steps.
+nlohmann::json RunSequenceCheck(const SequenceCheck& c,
+                                const std::atomic<bool>& cancel,
+                                std::atomic<double>& fraction);
+
 } // namespace remote

@@ -48,6 +48,7 @@
 #include "ui/TemplateActions.h"
 #include "ui/ToleranceActions.h"
 #include "ui/ViewActions.h"
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepBndLib.hxx>
 #include <Bnd_Box.hxx>
 #include <Standard_Failure.hxx>
@@ -57,6 +58,8 @@
 #include <TopTools_DataMapOfShapeInteger.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
+#include <gp_Cylinder.hxx>
 #include <gp_Quaternion.hxx>
 #include <gp_Trsf.hxx>
 
@@ -1453,6 +1456,21 @@ static constexpr MethodDoc InspectionMethods[] = {
      "axis_from:string, tries:object[], slice_mm:number, "
      "bands:{moving:int, fixed:int}, pairs_read:int, seconds:{sections:"
      "number, pairs:number, confirm:number}, confirm:object"},
+    {"check_assembly_sequence",
+     "Check the active assembly's sequence "
+     "(docs/assemblies/README.md#assembly-sequences; set_assembly_sequence "
+     "states it): each step's occurrence slid home along its path -- a "
+     "step's `direction`, else the axis of its own cylinder that its mate "
+     "seats, both ways -- against EVERY occurrence placed before it, not "
+     "only its mate partner, as check_insertion slides one pair (by "
+     "sections, one exact boolean confirming each step). The first step is "
+     "the base. A step that cannot be checked (gone, no matter, no mate to "
+     "a placed part and no direction, no cylinder at its mate) is refused "
+     "naming it; an occurrence with matter that no step places is listed "
+     "in `missing` and fails the sequence. Runs as an assembly_sequence "
+     "job, off the frame.",
+     "", remote::NoFlags,
+     "pass:bool, allowance_mm:number, steps:object[], missing:string[]"},
     {"check_seal",
      "Whether two occurrences' contact SEALS (docs/inspect/README.md#seals) "
      "{a, b: top-level occurrence ids or names}: where they overlap (a "
@@ -2023,6 +2041,7 @@ thread_local OffFrameInterference* g_offFrame = nullptr;
 struct OffFrameInsertion {
   std::function<json(const std::atomic<bool>&, std::atomic<double>&)> compute;
   std::string label;
+  std::string kind = "insertion"; // the job's
 };
 thread_local OffFrameInsertion* g_offFrameInsertion = nullptr;
 
@@ -2480,8 +2499,9 @@ std::unique_ptr<Parking> ParkInsertionRequest(ui::AppState& state,
     return nullptr;
   auto run = std::make_shared<InterferenceWait::Run>();
   auto bg = std::make_unique<ui::BackgroundJob>();
-  bg->kind = "insertion";
-  bg->label = "Insertion (" + slot.label + ")";
+  bg->kind = slot.kind;
+  bg->label =
+      slot.kind == "insertion" ? "Insertion (" + slot.label + ")" : slot.label;
   bg->cancellable = true;
   bg->fraction.store(0.0);
   ui::BackgroundJob* raw = bg.get();
@@ -2516,7 +2536,7 @@ std::unique_ptr<Parking> ParkInspectionRequest(ui::AppState& state,
                                                const std::string& m,
                                                const json& request,
                                                const RpcParams& p) {
-  if (m == "check_insertion")
+  if (m == "check_insertion" || m == "check_assembly_sequence")
     return ParkInsertionRequest(state, m, p);
   if (m != "interference")
     return nullptr;
@@ -2799,6 +2819,251 @@ std::string NoMatterWhy(ui::AppState& state, uint64_t occurrenceId) {
                                    "the planetary's carrier), so nothing "
                                    "slides onto or off it")
                      : std::string(" -- its features build none"));
+}
+
+struct SequenceCheck {
+  struct Step {
+    uint64_t occurrence = 0;
+    std::string name, note;
+    std::vector<size_t> bodies; // into `bodies`, this step's own
+    std::vector<size_t> before; // the steps placed before it
+    bool base = false;          // nothing placed before it
+    glm::dvec3 point{0.0}, moves{0.0, 0.0, 1.0};
+    bool eitherWay = false; // the path's line only: both ways tried
+    std::string pathFrom;
+    Measure::InsertionOptions opt;
+  };
+  std::vector<std::vector<Body>> bodies; // per step, copies
+  std::vector<Step> steps;
+  std::vector<std::string> missing; // occurrences with matter not placed
+  double allowanceMm = 0.0;
+};
+
+namespace {
+
+std::string StepName(size_t i, const std::string& name) {
+  return "step " + std::to_string(i + 1) + " ('" + name + "')";
+}
+
+// The axis of the moving part's own cylinder that a mate seats: the
+// cylinder whose axis passes nearest the mate's frame origin on this side,
+// within `tol`. Not the frame's Z, which a fastened mate need not put along
+// the part (the engine's wrist pins and pulleys).
+std::optional<std::pair<glm::dvec3, glm::dvec3>>
+SeatedCylinder(const std::vector<Body>& bodies, const glm::dvec3& o,
+               double tol) {
+  std::optional<std::pair<glm::dvec3, glm::dvec3>> best;
+  double bestD = tol;
+  for (const Body& b : bodies)
+    for (TopExp_Explorer e(b.shape.GetShape(), TopAbs_FACE); e.More();
+         e.Next()) {
+      BRepAdaptor_Surface s(TopoDS::Face(e.Current()));
+      if (s.GetType() != GeomAbs_Cylinder)
+        continue;
+      const gp_Ax1 ax = s.Cylinder().Axis();
+      const glm::dvec3 l(ax.Location().X(), ax.Location().Y(),
+                         ax.Location().Z());
+      const glm::dvec3 d(ax.Direction().X(), ax.Direction().Y(),
+                         ax.Direction().Z());
+      const double dist = glm::length(glm::cross(o - l, d));
+      if (dist < bestD - 1e-9) {
+        bestD = dist;
+        best = std::make_pair(l + glm::dot(o - l, d) * d, d);
+      }
+    }
+  return best;
+}
+
+} // namespace
+
+std::shared_ptr<const SequenceCheck> ReadSequenceCheck(ui::AppState& state) {
+  if (state.assembly == nullptr)
+    throw std::runtime_error("an assembly sequence is checked on an assembly "
+                             "tab (set_active_part)");
+  const AssemblyDocument& asmDoc = *state.assembly;
+  const AssemblySequence& seq = asmDoc.GetSequence();
+  if (seq.Empty())
+    throw std::runtime_error("this assembly has no sequence to check: state "
+                             "one with set_assembly_sequence");
+  auto c = std::make_shared<SequenceCheck>();
+  c->allowanceMm = seq.allowanceMm;
+  std::set<uint64_t> placed;
+  for (size_t i = 0; i < seq.steps.size(); i++) {
+    const SequenceStep& st = seq.steps[i];
+    const Occurrence* o = asmDoc.FindById(st.occurrenceId);
+    if (o == nullptr)
+      throw std::runtime_error("step " + std::to_string(i + 1) +
+                               " places occurrence " +
+                               std::to_string(st.occurrenceId) +
+                               ", which is gone from the assembly");
+    SequenceCheck::Step s;
+    s.occurrence = o->id;
+    s.name = o->name;
+    s.note = st.note;
+    if (const std::string why = NoMatterWhy(state, o->id); !why.empty())
+      throw std::runtime_error(StepName(i, o->name) +
+                               " cannot be checked: " + why);
+    std::vector<Body> mine;
+    for (const Body& body : ui::OccurrenceSubtreeBodies(state, o->id)) {
+      Body nb = body;
+      nb.shape = body.shape.DetachedUnlocated().LocatedLike(body.shape);
+      mine.push_back(std::move(nb));
+    }
+    for (size_t k = 0; k < i; k++)
+      s.before.push_back(k);
+    s.base = i == 0;
+    // The path.
+    s.opt.allowanceMm = seq.allowanceMm;
+    s.opt.travelMm = st.distanceMm;
+    s.opt.turnDeg = st.turnDeg;
+    s.opt.screw = st.thread;
+    if (st.direction) {
+      s.moves = glm::normalize(*st.direction);
+      s.eitherWay = false;
+      s.opt.rotations = 1; // it goes on as it is placed
+      if (st.origin) {
+        s.point = *st.origin;
+      } else {
+        glm::dvec3 lo, hi;
+        if (!Measure::WorldBounds(mine, glm::dmat4(1.0), lo, hi))
+          throw std::runtime_error(StepName(i, o->name) +
+                                   " cannot be checked: it has no extent");
+        s.point = 0.5 * (lo + hi);
+      }
+      s.pathFrom = "the step's direction";
+    } else if (!s.base) {
+      // The mate that seats it on something placed before it.
+      const Mate* mate = nullptr;
+      if (st.mateId != 0) {
+        mate = asmDoc.FindMateById(st.mateId);
+        if (mate == nullptr ||
+            (mate->a.occurrenceId != o->id && mate->b.occurrenceId != o->id))
+          throw std::runtime_error(StepName(i, o->name) + ": mate " +
+                                   std::to_string(st.mateId) +
+                                   " does not join it to anything");
+      } else {
+        int n = 0;
+        for (const Mate& m : asmDoc.GetMates()) {
+          const uint64_t other = m.a.occurrenceId == o->id   ? m.b.occurrenceId
+                                 : m.b.occurrenceId == o->id ? m.a.occurrenceId
+                                                             : 0;
+          if (other != 0 && placed.contains(other)) {
+            mate = &m;
+            n++;
+          }
+        }
+        if (n != 1)
+          throw std::runtime_error(
+              StepName(i, o->name) + " cannot be checked: " +
+              (n == 0 ? "no mate joins it to an occurrence placed before it"
+                      : "several mates join it to occurrences placed before "
+                        "it") +
+              ", so give the step its `direction` (or name its `mate`)");
+      }
+      const Connector& mine0 =
+          mate->a.occurrenceId == o->id ? mate->a : mate->b;
+      const auto frame = ui::ConnectorWorldFrame(state, mine0);
+      if (!frame)
+        throw std::runtime_error(StepName(i, o->name) + ": mate '" +
+                                 mate->name + "' has no frame to read");
+      glm::dvec3 lo, hi;
+      if (!Measure::WorldBounds(mine, glm::dmat4(1.0), lo, hi))
+        throw std::runtime_error(StepName(i, o->name) +
+                                 " cannot be checked: it has no extent");
+      const double tol = std::max(0.5, 0.02 * glm::length(hi - lo));
+      const auto cyl = SeatedCylinder(mine, glm::dvec3((*frame)[3]), tol);
+      if (!cyl)
+        throw std::runtime_error(StepName(i, o->name) +
+                                 " cannot be checked: no cylinder of its "
+                                 "part runs through mate '" +
+                                 mate->name +
+                                 "''s seat to slide "
+                                 "along, so give the step its `direction`");
+      s.point = cyl->first;
+      s.moves = cyl->second;
+      s.eitherWay = true;
+      s.pathFrom = "the axis of its cylinder at mate '" + mate->name + "'";
+    }
+    if (st.origin && !st.direction)
+      s.point = *st.origin;
+    c->bodies.push_back(std::move(mine));
+    c->steps.push_back(std::move(s));
+    placed.insert(o->id);
+  }
+  for (const Occurrence& o : asmDoc.GetOccurrences())
+    if (!placed.contains(o.id) && NoMatterWhy(state, o.id).empty())
+      c->missing.push_back(o.name);
+  return c;
+}
+
+json RunSequenceCheck(const SequenceCheck& c, const std::atomic<bool>& cancel,
+                      std::atomic<double>& fraction) {
+  json steps = json::array();
+  bool pass = c.missing.empty();
+  for (size_t i = 0; i < c.steps.size(); i++) {
+    if (cancel.load())
+      throw std::runtime_error("check_assembly_sequence: cancelled");
+    const SequenceCheck::Step& s = c.steps[i];
+    json row{{"step", i + 1}, {"occurrence", s.occurrence}, {"name", s.name}};
+    if (!s.note.empty())
+      row["note"] = s.note;
+    json against = json::array();
+    std::vector<Body> fixed;
+    for (size_t k : s.before) {
+      against.push_back(c.steps[k].name);
+      for (const Body& b : c.bodies[k])
+        fixed.push_back(b);
+    }
+    row["against"] = against;
+    if (s.base) {
+      row["pass"] = true;
+      row["base"] = true;
+      steps.push_back(std::move(row));
+      continue;
+    }
+    Measure::InsertionOptions opt = s.opt;
+    // The axis Insertion slides along points away from the way it moves:
+    // `positive` comes from that side.
+    opt.entry = s.eitherWay ? Measure::InsertionEntry::Either
+                            : Measure::InsertionEntry::Positive;
+    std::atomic<double> inner{0.0};
+    const auto r =
+        Measure::Insertion(c.bodies[i], glm::dmat4(1.0), fixed, glm::dmat4(1.0),
+                           s.point, -s.moves, opt, &cancel, &inner);
+    row["path"] = {{"from", s.pathFrom},
+                   {"origin_mm", {s.point.x, s.point.y, s.point.z}},
+                   {"either_way", s.eitherWay}};
+    if (!r) {
+      row["pass"] = false;
+      row["error"] = r.error();
+      pass = false;
+    } else {
+      json d = InsertionJson(*r, s.pathFrom);
+      const glm::dvec3 moved = r->best.positive ? s.moves : -s.moves;
+      row["path"]["moves"] = {moved.x, moved.y, moved.z};
+      row["pass"] = r->pass;
+      for (const char* k : {"rotation_deg", "travel_mm", "interfering_mm",
+                            "press_mm", "excess_mm", "deeper_mm", "from_mm",
+                            "worst_depth_mm", "lead_in_mm", "confirm"})
+        row[k] = d[k];
+      if (!r->threads.empty()) {
+        json th = json::array();
+        for (const Measure::InsertionThread& t : r->threads)
+          th.push_back({{"moving", t.moving},
+                        {"fixed", t.fixed},
+                        {"fits", t.fits},
+                        {"engaged_mm", t.engagedMm}});
+        row["threads"] = th;
+      }
+      pass = pass && r->pass;
+    }
+    steps.push_back(std::move(row));
+    fraction.store(static_cast<double>(i + 1) / c.steps.size());
+  }
+  return {{"pass", pass},
+          {"allowance_mm", c.allowanceMm},
+          {"steps", steps},
+          {"missing", c.missing}};
 }
 
 json SealJson(const Measure::SealReport& r) {
@@ -3203,6 +3468,29 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         return o ? o->name : std::to_string(id);
       };
       g_offFrameInsertion->label = nameOf(a) + " onto " + nameOf(b);
+      g_offFrameInsertion->compute = std::move(compute);
+      return json::object(); // the parked request answers instead
+    }
+    std::atomic<bool> never{false};
+    std::atomic<double> fraction{0.0};
+    return compute(never, fraction);
+  }
+  if (m == "check_assembly_sequence") {
+    // rpc-params:
+    // rpc-returns-from: src/remote/RemoteInspection.cpp
+    if (state.assembly == nullptr || doc != nullptr)
+      throw std::runtime_error("check_assembly_sequence runs on an assembly "
+                               "tab (set_active_part)");
+    auto check = ReadSequenceCheck(state);
+    auto compute = [check](const std::atomic<bool>& cancel,
+                           std::atomic<double>& fraction) {
+      return RunSequenceCheck(*check, cancel, fraction);
+    };
+    if (g_offFrameInsertion != nullptr) {
+      g_offFrameInsertion->kind = "assembly_sequence";
+      g_offFrameInsertion->label = "Assembly sequence (" +
+                                   std::to_string(check->steps.size()) +
+                                   " steps)";
       g_offFrameInsertion->compute = std::move(compute);
       return json::object(); // the parked request answers instead
     }

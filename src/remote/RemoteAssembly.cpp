@@ -696,8 +696,181 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "Set the live explode factor (0..1); auto-activates the only view, "
      "errors if ambiguous. view: 0 deactivates.",
      "factor, view"},
+    {"set_assembly_sequence",
+     "State the order the active assembly goes together in, and how "
+     "(docs/assemblies/README.md#assembly-sequences): {steps: [{occurrence: "
+     "a top-level occurrence id or name; direction?: [x, y, z] the way it "
+     "moves going home, in the assembly's frame (default: the axis of its "
+     "own cylinder that its mate seats, both ways tried); origin_mm?: a "
+     "point on the path's line (default: that cylinder's axis, or the "
+     "part's centre with a direction); mate?: the mate (id or name) whose "
+     "seat gives the default path (default: the one mate joining it to an "
+     "occurrence placed before it); distance_mm?: from its seat to where it "
+     "starts (default: clear of everything placed before it); turn_deg?: "
+     "turned about the path over that distance, a bayonet; thread?: it "
+     "goes on by its thread, judged by the thread pair's own fit; note?: "
+     "what the step is}], allowance_mm?: how much nearer faces come as "
+     "made, as check_insertion's}. Replaces the sequence; an empty `steps` "
+     "removes it. An unknown step key, an occurrence named twice or not in "
+     "the assembly, a mate that does not join its step's occurrence, a "
+     "direction with no length or a negative distance is refused before "
+     "anything changes. One undo step. check_assembly_sequence checks it; "
+     "the requirement kind `assembly_sequence` states it checked.",
+     "steps:object[], allowance_mm?:number", remote::NoFlags,
+     "steps:object[], allowance_mm:number"},
+    {"get_assembly_sequence",
+     "The active assembly's sequence, as set_assembly_sequence states it, "
+     "each step with its occurrence's name (and its mate's).",
+     "", remote::NoFlags, "steps:object[], allowance_mm:number"},
 };
 std::span<const MethodDoc> AssemblyMethodDocs() { return AssemblyMethods; }
+
+namespace {
+
+json SequenceJson(const AssemblyDocument& a) {
+  const AssemblySequence& seq = a.GetSequence();
+  json steps = json::array();
+  for (const SequenceStep& st : seq.steps) {
+    json j{{"occurrence", st.occurrenceId}};
+    if (const Occurrence* o = a.FindById(st.occurrenceId))
+      j["name"] = o->name;
+    if (st.direction)
+      j["direction"] = {st.direction->x, st.direction->y, st.direction->z};
+    if (st.origin)
+      j["origin_mm"] = {st.origin->x, st.origin->y, st.origin->z};
+    if (st.mateId != 0) {
+      j["mate"] = st.mateId;
+      if (const Mate* m = a.FindMateById(st.mateId))
+        j["mate_name"] = m->name;
+    }
+    if (st.distanceMm >= 0.0)
+      j["distance_mm"] = st.distanceMm;
+    if (st.turnDeg != 0.0)
+      j["turn_deg"] = st.turnDeg;
+    if (st.thread)
+      j["thread"] = true;
+    if (!st.note.empty())
+      j["note"] = st.note;
+    steps.push_back(std::move(j));
+  }
+  return {{"steps", steps}, {"allowance_mm", seq.allowanceMm}};
+}
+
+// Every step read and checked before anything changes.
+AssemblySequence ReadSequence(const AssemblyDocument& a, const RpcParams& p) {
+  AssemblySequence seq;
+  if (p.contains("allowance_mm")) {
+    const json& v = p.at("allowance_mm");
+    if (!v.is_number() || !(v.get<double>() >= 0.0))
+      throw std::runtime_error("allowance_mm is a number, at least 0, not " +
+                               v.dump());
+    seq.allowanceMm = v.get<double>();
+  }
+  const json& steps = p.at("steps");
+  if (!steps.is_array())
+    throw std::runtime_error("steps is an array of {occurrence, ...}");
+  std::set<uint64_t> seen;
+  for (size_t i = 0; i < steps.size(); i++) {
+    const json& sj = steps[i];
+    const std::string at = "step " + std::to_string(i + 1);
+    if (!sj.is_object())
+      throw std::runtime_error(at + " is an object {occurrence, ...}");
+    static const char* kKeys[] = {"occurrence", "direction",   "origin_mm",
+                                  "mate",       "distance_mm", "turn_deg",
+                                  "thread",     "note"};
+    for (auto it = sj.begin(); it != sj.end(); ++it)
+      if (std::none_of(std::begin(kKeys), std::end(kKeys),
+                       [&](const char* k) { return it.key() == k; }))
+        throw std::runtime_error(
+            at + ": unknown key '" + it.key() +
+            "' (accepted: occurrence, direction, origin_mm, mate, "
+            "distance_mm, turn_deg, thread, note)");
+    if (!sj.contains("occurrence"))
+      throw std::runtime_error(at + " needs `occurrence`, what it places");
+    SequenceStep st;
+    const json& ov = sj.at("occurrence");
+    const Occurrence* o = nullptr;
+    if (ov.is_number_unsigned())
+      o = a.FindById(ov.get<uint64_t>());
+    else if (ov.is_string())
+      for (const Occurrence& x : a.GetOccurrences())
+        if (x.name == ov.get<std::string>())
+          o = &x;
+    if (o == nullptr)
+      throw std::runtime_error(at + ": no top-level occurrence " + ov.dump() +
+                               " (an id or name, see list_occurrences)");
+    if (!seen.insert(o->id).second)
+      throw std::runtime_error(at + ": '" + o->name +
+                               "' is placed by an earlier step already");
+    st.occurrenceId = o->id;
+    const auto vec = [&](const char* key) {
+      const json& v = sj.at(key);
+      if (!v.is_array() || v.size() != 3 ||
+          !std::all_of(v.begin(), v.end(),
+                       [](const json& e) { return e.is_number(); }))
+        throw std::runtime_error(at + ": " + key + " is [x, y, z], not " +
+                                 v.dump());
+      return glm::dvec3(v[0].get<double>(), v[1].get<double>(),
+                        v[2].get<double>());
+    };
+    if (sj.contains("direction")) {
+      const glm::dvec3 d = vec("direction");
+      if (!(glm::length(d) > 1e-9))
+        throw std::runtime_error(at + ": direction has no length");
+      st.direction = glm::normalize(d);
+    }
+    if (sj.contains("origin_mm"))
+      st.origin = vec("origin_mm");
+    if (sj.contains("mate")) {
+      const json& mv = sj.at("mate");
+      const Mate* mate = nullptr;
+      if (mv.is_number_unsigned())
+        mate = a.FindMateById(mv.get<uint64_t>());
+      else if (mv.is_string())
+        for (const Mate& x : a.GetMates())
+          if (x.name == mv.get<std::string>())
+            mate = &x;
+      if (mate == nullptr)
+        throw std::runtime_error(at + ": no mate " + mv.dump() +
+                                 " (an id or name, see list_mates)");
+      if (mate->a.occurrenceId != o->id && mate->b.occurrenceId != o->id)
+        throw std::runtime_error(at + ": mate '" + mate->name +
+                                 "' does not join '" + o->name + "'");
+      st.mateId = mate->id;
+    }
+    if (sj.contains("distance_mm")) {
+      const json& v = sj.at("distance_mm");
+      if (!v.is_number() || !(v.get<double>() >= 0.0))
+        throw std::runtime_error(at +
+                                 ": distance_mm is a number, at least "
+                                 "0, not " +
+                                 v.dump());
+      st.distanceMm = v.get<double>();
+    }
+    if (sj.contains("turn_deg")) {
+      const json& v = sj.at("turn_deg");
+      if (!v.is_number() || !std::isfinite(v.get<double>()))
+        throw std::runtime_error(at + ": turn_deg is a number, not " +
+                                 v.dump());
+      st.turnDeg = v.get<double>();
+    }
+    if (sj.contains("thread")) {
+      if (!sj.at("thread").is_boolean())
+        throw std::runtime_error(at + ": thread is true or false, not " +
+                                 sj.at("thread").dump());
+      st.thread = sj.at("thread").get<bool>();
+    }
+    if (sj.contains("note")) {
+      if (!sj.at("note").is_string())
+        throw std::runtime_error(at + ": note is a string");
+      st.note = sj.at("note").get<std::string>();
+    }
+    seq.steps.push_back(std::move(st));
+  }
+  return seq;
+}
+
+} // namespace
 
 namespace {
 
@@ -970,6 +1143,26 @@ json FlexibleRows(ui::AppState& state, const assembly::SolveReport& rep) {
 
 std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
                                       const RpcParams& p) {
+  if (m == "set_assembly_sequence") {
+    // rpc-params: steps, allowance_mm
+    if (!state.assembly)
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
+    AssemblySequence seq = ReadSequence(*state.assembly, p);
+    ui::SnapshotAssembly(state);
+    state.assembly->SetSequence(std::move(seq));
+    state.assembly->BumpVersion();
+    return SequenceJson(*state.assembly);
+  }
+  if (m == "get_assembly_sequence") {
+    // rpc-returns-from: src/remote/RemoteAssembly.cpp
+    if (!state.assembly)
+      throw std::runtime_error(
+          "the active document is not an assembly — switch tabs with "
+          "set_active_part (see list_parts)");
+    return SequenceJson(*state.assembly);
+  }
   if (m == "fit_fastener") {
     ui::RimPick rim;
     const auto& r = p.at("rim");

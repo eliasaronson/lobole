@@ -4,6 +4,7 @@
 #include "TestPaths.h"
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
 #include "core/AssemblySolve.h"
@@ -761,4 +762,48 @@ TEST_CASE("A part loader rejects an assembly and vice versa", "[assembly]") {
   CHECK_FALSE(asPart.has_value());
   CHECK_FALSE(asPart.error().empty());
   fs::remove(path);
+}
+
+// A FROZEN golden for the assembly sequence (vNEXT,
+// docs/assemblies/README.md#assembly-sequences): the steps in order, each
+// with what it states of its path, round-tripped as written.
+TEST_CASE("Frozen vNEXT assembly golden carries its sequence",
+          "[assembly][golden]") {
+  const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
+                          "assembly" / "vNEXT-assembly-sequence.json";
+  REQUIRE(fs::exists(golden));
+  auto asmDoc = testio::LoadAssembly(golden.string());
+  REQUIRE(asmDoc);
+  const AssemblySequence& seq = asmDoc->GetSequence();
+  REQUIRE(seq.steps.size() == 3);
+  CHECK(seq.allowanceMm == 0.1);
+  CHECK(seq.steps[0].occurrenceId == 1);
+  CHECK(seq.steps[0].note == "the base");
+  CHECK_FALSE(seq.steps[0].direction);
+  const SequenceStep& cap = seq.steps[1];
+  REQUIRE(cap.direction);
+  CHECK(cap.direction->z == -1.0);
+  REQUIRE(cap.origin);
+  CHECK(cap.origin->z == 5.0);
+  CHECK(cap.distanceMm == 20.0);
+  const SequenceStep& pin = seq.steps[2];
+  CHECK(pin.mateId == 5);
+  CHECK(pin.turnDeg == 90.0);
+  CHECK(pin.thread);
+  CHECK(pin.distanceMm < 0.0); // from clear
+
+  // Saved and loaded again, it is the same sequence.
+  const fs::path out = fs::temp_directory_path() / "seq-roundtrip.json";
+  REQUIRE(testio::SaveAssembly(*asmDoc, out.string()));
+  auto again = testio::LoadAssembly(out.string());
+  REQUIRE(again);
+  CHECK(DocumentIO::AssemblySequenceToJson(again->GetSequence()) ==
+        DocumentIO::AssemblySequenceToJson(seq));
+  fs::remove(out);
+
+  // A step key the loader does not know is refused, naming the accepted.
+  nlohmann::json bad = DocumentIO::AssemblySequenceToJson(seq);
+  bad["steps"][0]["dir"] = {0, 0, 1};
+  CHECK_THROWS_WITH(DocumentIO::AssemblySequenceFromJson(bad),
+                    Catch::Matchers::ContainsSubstring("accepted"));
 }

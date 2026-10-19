@@ -45,17 +45,18 @@ inline constexpr const char* kMeasureKinds[] = {
     "contact",      // interference: clear | touching | not_clashing
     "seal",         // check_seal: the widest closed ring's least width, mm
     "insertion",    // check_insertion: a can be slid onto b to its seat
-    "mass",         // mass_properties, a part or the assembly
-    "volume",       // mass_properties
-    "fit_class",    // check_fits: one mate's fit is of a class
-    "check_fits",   // check_fits passing
-    "check_seat",   // check_seat passing, both rings, every listed bearing
-    "bearing_bore", // the smallest bore of the listed bearings, mm
-    "section_area", // section: a cut's material or enclosed area, mm2
-    "check_fasteners", // check_fasteners: no finding but the allowed ones
-    "check_literals",  // check_literals clean
-    "motion_clean",    // run_motion_study: clean
-    "cam_verify",      // cam_verify: ok and complete
+    "assembly_sequence", // check_assembly_sequence: every step goes home
+    "mass",              // mass_properties, a part or the assembly
+    "volume",            // mass_properties
+    "fit_class",         // check_fits: one mate's fit is of a class
+    "check_fits",        // check_fits passing
+    "check_seat",        // check_seat passing, both rings, every listed bearing
+    "bearing_bore",      // the smallest bore of the listed bearings, mm
+    "section_area",      // section: a cut's material or enclosed area, mm2
+    "check_fasteners",   // check_fasteners: no finding but the allowed ones
+    "check_literals",    // check_literals clean
+    "motion_clean",      // run_motion_study: clean
+    "cam_verify",        // cam_verify: ok and complete
 };
 inline constexpr const char* kBoundKinds[] = {"at_most", "at_least", "within",
                                               "pass"};

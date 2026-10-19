@@ -360,6 +360,81 @@ Mate MateFromJson(const json& j) {
   return m;
 }
 
+// ---- The assembly sequence (vNEXT) ----------------------------------------
+
+json AssemblySequenceToJson(const AssemblySequence& seq) {
+  json j;
+  if (seq.allowanceMm != 0.0)
+    j["allowance_mm"] = seq.allowanceMm;
+  j["steps"] = json::array();
+  for (const SequenceStep& s : seq.steps) {
+    json sj{{"occurrence", s.occurrenceId}};
+    if (s.direction)
+      sj["direction"] = {s.direction->x, s.direction->y, s.direction->z};
+    if (s.origin)
+      sj["origin_mm"] = {s.origin->x, s.origin->y, s.origin->z};
+    if (s.mateId != 0)
+      sj["mate"] = s.mateId;
+    if (s.distanceMm >= 0.0)
+      sj["distance_mm"] = s.distanceMm;
+    if (s.turnDeg != 0.0)
+      sj["turn_deg"] = s.turnDeg;
+    if (s.thread)
+      sj["thread"] = true;
+    if (!s.note.empty())
+      sj["note"] = s.note;
+    j["steps"].push_back(std::move(sj));
+  }
+  return j;
+}
+
+AssemblySequence AssemblySequenceFromJson(const json& j) {
+  AssemblySequence seq;
+  if (!j.is_object())
+    throw std::runtime_error("an assembly sequence is an object {steps, "
+                             "allowance_mm?}");
+  for (auto it = j.begin(); it != j.end(); ++it)
+    if (it.key() != "steps" && it.key() != "allowance_mm")
+      throw std::runtime_error("unknown assembly sequence key '" + it.key() +
+                               "' (accepted: steps, allowance_mm)");
+  seq.allowanceMm = j.value("allowance_mm", 0.0);
+  const auto vec = [](const json& v, const char* key) {
+    if (!v.is_array() || v.size() != 3 ||
+        !std::all_of(v.begin(), v.end(),
+                     [](const json& e) { return e.is_number(); }))
+      throw std::runtime_error(std::string("a sequence step's ") + key +
+                               " is three numbers");
+    return glm::dvec3(v[0].get<double>(), v[1].get<double>(),
+                      v[2].get<double>());
+  };
+  for (const json& sj : j.value("steps", json::array())) {
+    for (auto it = sj.begin(); it != sj.end(); ++it) {
+      static const char* kKeys[] = {"occurrence", "direction",   "origin_mm",
+                                    "mate",       "distance_mm", "turn_deg",
+                                    "thread",     "note"};
+      if (std::none_of(std::begin(kKeys), std::end(kKeys),
+                       [&](const char* k) { return it.key() == k; }))
+        throw std::runtime_error(
+            "unknown sequence step key '" + it.key() +
+            "' (accepted: occurrence, direction, origin_mm, mate, "
+            "distance_mm, turn_deg, thread, note)");
+    }
+    SequenceStep s;
+    s.occurrenceId = sj.at("occurrence").get<uint64_t>();
+    if (sj.contains("direction"))
+      s.direction = vec(sj.at("direction"), "direction");
+    if (sj.contains("origin_mm"))
+      s.origin = vec(sj.at("origin_mm"), "origin_mm");
+    s.mateId = sj.value("mate", uint64_t{0});
+    s.distanceMm = sj.value("distance_mm", -1.0);
+    s.turnDeg = sj.value("turn_deg", 0.0);
+    s.thread = sj.value("thread", false);
+    s.note = sj.value("note", std::string{});
+    seq.steps.push_back(std::move(s));
+  }
+  return seq;
+}
+
 // ---- Exploded views (v27, A4) ---------------------------------------------
 
 json ExplodedViewToJson(const ExplodedView& v) {

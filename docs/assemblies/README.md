@@ -305,7 +305,9 @@ omitted = whichever is active).
 A study starts with every part already seated, so it says nothing about
 whether a part could be put there: that is `check_insertion` and the
 `insertion` requirement ([insertion](../inspect/README.md#insertion)),
-which slide a part from clear to its seat along its mate's axis.
+which slide a part from clear to its seat along its mate's axis, and the
+assembly's [sequence](#assembly-sequences), which puts the whole assembly
+together in order.
 
 - The range is stored in the DOF's own unit (radians / mm); the RPC takes
   degrees for a rotation and converts once.
@@ -568,6 +570,54 @@ capture in `src/app/main.cpp` (`ViewportFrameCapture`),
 `src/common/ChildProcess.{h,cpp}` (PATH lookup and a child fed on stdin:
 `posix_spawn`, or `_popen` on Windows).
 
+## Assembly sequences
+
+How the parts go together, in order: a document object on the assembly
+(`set_assembly_sequence`, `get_assembly_sequence`; saved in the index from
+vNEXT, one undo step). Each step names the top-level occurrence it places
+and its **path**:
+
+- `direction`: the way it moves going home, in the assembly's frame. A part
+  given one goes on as it is placed (no turn about the path is tried).
+  Without one the path is the axis of the part's **own cylinder** that its
+  mate seats -- the cylinder whose axis passes nearest the mate frame's
+  origin on its side (within 2 % of its size, half a millimetre at least)
+  -- not the mate frame's Z, which a fastened mate need not put along the
+  part (the engine's wrist pins and pulleys were swept the wrong way by
+  it); both ways along it are tried, and turns about it as
+  `check_insertion` tries them. The mate is `mate`, else the one mate
+  joining the occurrence to one placed before it.
+- `origin_mm`: a point on the path's line (default the cylinder's axis, or
+  the part's centre with a direction); `distance_mm`: from its seat to
+  where it starts (default: clear of everything placed before it);
+  `turn_deg`: turned about the path over that distance, a bayonet, read
+  step by step at the turn each step has; `thread`: it goes on by its
+  thread -- a thread of the part (a Thread feature or tapped Hole) meeting
+  one placed before it, coaxial with the path, is judged by the pair's own
+  fit (one external, one internal, the same major diameter and pitch), not
+  read as interference; with no such pair the step fails naming why.
+
+`check_assembly_sequence` slides each step's occurrence home along its
+path against **every occurrence placed before it**, not only its mate
+partner, by the insertion check's sections with one exact boolean
+confirming each step ([insertion](../inspect/README.md#insertion)). The
+first step is the base. It runs as an `assembly_sequence` job, off the
+frame. A step that cannot be checked -- its occurrence gone or placing no
+matter, no mate to a placed part and no direction, no cylinder at its
+mate -- is refused naming it; an occurrence with matter that no step places
+is listed in `missing` and fails the sequence. The answer: `pass`, and per
+step `against` (what it was checked against), its `path` (`from`, `moves`,
+`origin_mm`, `either_way`), and the insertion's reading (`press_mm`,
+`interfering_mm`, `excess_mm`, `deeper_mm`, `confirm`, any `threads`). The
+requirement kind `assembly_sequence` states it checked
+([requirements](../requirements/README.md#measures)).
+
+What `assembly_sequence_smoke` holds it to: a pin through a lug and a fork
+passes last, and put in before the fork the fork fails, blocked by the
+pin's head -- an earlier part, not its mate partner; a bearing cap slid
+along its bore is stopped by the shaft's collars, and lowered along its
+bolts goes home; a missed occurrence fails the sequence by name.
+
 ## Exploded views
 
 Named, persistent explode states: one world-space offset per occurrence,
@@ -788,6 +838,8 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
   `motion_video_status`.
 - Exploded views: `add_exploded_view`, `remove_exploded_view`,
   `list_exploded_views`, `set_explode_step`, `auto_explode`, `set_explode`.
+- Sequences: `set_assembly_sequence`, `get_assembly_sequence`;
+  `check_assembly_sequence` is in `src/remote/RemoteInspection.cpp`.
 - BOM and hardware: `bom`, `export_bom`, `add_fastener`, `fit_fastener`,
   `check_fasteners`.
 - Clearances: `add_assertion`, `list_assertions`, `remove_assertion`,
