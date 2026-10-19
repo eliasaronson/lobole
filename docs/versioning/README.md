@@ -263,7 +263,13 @@ diff, credential helpers and `uploadpack` on fetch, includes that pull in
 more. The app runs git on open (the conflicts scan) and on every save, so
 `GitVault` never trusts it:
 
-- every git call passes `-c core.fsmonitor=false -c core.hooksPath=/dev/null`;
+- every git call passes `-c core.fsmonitor=false -c core.hooksPath=/dev/null`,
+  and `-c protocol.ext.allow=never`: an `ext::` URL is a command, and a
+  person's own config could otherwise allow it for a shared repository's
+  remote;
+- a remote's name, a URL, a branch or a revision follows `--` or
+  `--end-of-options`, so one that starts with `-`
+  (`--upload-pack=<command>`) is a name and never an option;
 - before git runs in a project, `UntrustedReason` reads `.git/config` as a
   plain file (`git config --file … --list`, which runs nothing) and accepts
   only keys that run nothing (`HarmlessConfigKey`: core layout, user,

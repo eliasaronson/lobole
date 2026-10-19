@@ -49,10 +49,13 @@ std::string Quote(const std::string& s) {
 
 // Every git call starts with these: the two settings through which a
 // repository's own config runs a command on the commands this app uses
-// (diff, status, add, commit, merge), switched off whatever it says. The
-// rest of that config is checked before git runs at all (UntrustedReason).
+// (diff, status, add, commit, merge), switched off whatever it says, and the
+// `ext::` transport, whose URL is a command, refused even where a person's
+// own config allows it. The rest of a repository's config is checked before
+// git runs at all (UntrustedReason).
 constexpr const char* kSafe =
-    "-c core.fsmonitor=false -c core.hooksPath=" NULDEV;
+    "-c core.fsmonitor=false -c core.hooksPath=" NULDEV
+    " -c protocol.ext.allow=never";
 
 // Git runs only in a project folder holding a repository this app accepts:
 // never in one it does not, and never in a parent folder's, which git would
@@ -520,7 +523,7 @@ bool Tag(const std::string& dir, const std::string& name) {
   // records who named the version and when, which is the same question C1
   // answers for commits. The message is the person's prose.
   const std::string annotate =
-      IdentityArgs(dir) + " tag -a -m " + Quote(name) + " ";
+      IdentityArgs(dir) + " tag -a -m " + Quote(name) + " --end-of-options ";
   if (RunGit(dir, annotate + Quote(base)) == 0)
     return true;
   std::string head;
@@ -529,7 +532,8 @@ bool Tag(const std::string& dir, const std::string& name) {
   const std::string unique = base + "-" + FirstLine(head);
   // Already ours (naming the same state twice) is success, not a collision.
   std::string existing;
-  if (RunGit(dir, "rev-parse " + Quote(unique), &existing) == 0)
+  if (RunGit(dir, "rev-parse --end-of-options " + Quote(unique), &existing) ==
+      0)
     return true;
   return RunGit(dir, annotate + Quote(unique)) == 0;
 }
@@ -658,7 +662,8 @@ bool RestoreTo(const std::string& dir, const std::string& commit,
   // so restoring past the creation of a part left that part on disk and the
   // reopened project still listed it. read-tree sets index + working tree to
   // the tree and deletes what is not in it, without moving HEAD.
-  if (RunGit(dir, "read-tree --reset -u " + Quote(commit)) != 0) {
+  if (RunGit(dir, "read-tree --reset -u --end-of-options " + Quote(commit)) !=
+      0) {
     if (error)
       *error = "git read-tree failed (unknown commit?)";
     return false;
@@ -704,7 +709,7 @@ bool CreateBranch(const std::string& dir, const std::string& name,
     return false;
   }
   std::string out;
-  if (RunGitVerbose(dir, "branch " + Quote(name), &out) != 0) {
+  if (RunGitVerbose(dir, "branch --end-of-options " + Quote(name), &out) != 0) {
     if (error)
       *error = out.empty() ? "could not create that branch" : FirstLine(out);
     return false;
@@ -728,7 +733,8 @@ bool SwitchBranch(const std::string& dir, const std::string& name,
     return false;
   }
   std::string out;
-  if (RunGitVerbose(dir, "checkout -q " + Quote(name), &out) != 0) {
+  if (RunGitVerbose(dir, "checkout -q --end-of-options " + Quote(name), &out) !=
+      0) {
     if (error)
       *error = out.empty() ? "could not switch branch" : FirstLine(out);
     return false;
@@ -753,7 +759,9 @@ MergeStatus Merge(const std::string& dir, const std::string& branch,
   const std::string before = FirstLine(headBefore);
   std::string out;
   const int code = RunGitVerbose(
-      dir, IdentityArgs(dir) + " merge --no-edit " + Quote(branch), &out);
+      dir,
+      IdentityArgs(dir) + " merge --no-edit --end-of-options " + Quote(branch),
+      &out);
   if (code == 0) {
     std::string after;
     RunGit(dir, "rev-parse HEAD", &after);
@@ -798,7 +806,8 @@ bool ShowFile(const std::string& dir, const std::string& rev,
   if (!Available() || !IsRepo(dir))
     return false;
   std::string text;
-  if (RunGit(dir, "show " + Quote(rev + ":" + path), &text) != 0)
+  if (RunGit(dir, "show --end-of-options " + Quote(rev + ":" + path), &text) !=
+      0)
     return false;
   if (out)
     *out = text;
@@ -821,7 +830,7 @@ bool DiffNames(const std::string& dir, const std::string& from,
                const std::string& to, std::string* out) {
   if (!Available() || !IsRepo(dir))
     return false;
-  std::string args = "diff --name-status " + Quote(from);
+  std::string args = "diff --name-status --end-of-options " + Quote(from);
   if (!to.empty())
     args += " " + Quote(to);
   return RunGit(dir, args, out) == 0;
@@ -833,7 +842,8 @@ std::vector<std::string> ListTree(const std::string& dir,
   if (!Available() || !IsRepo(dir))
     return out;
   std::string text;
-  if (RunGit(dir, "ls-tree -r --name-only " + Quote(rev), &text) != 0)
+  if (RunGit(dir, "ls-tree -r --name-only --end-of-options " + Quote(rev),
+             &text) != 0)
     return out;
   return Lines(text);
 }
@@ -844,7 +854,8 @@ std::vector<std::string> Parents(const std::string& dir,
   if (!Available() || !IsRepo(dir))
     return out;
   std::string text;
-  if (RunGit(dir, "rev-list --parents -n 1 " + Quote(rev), &text) != 0)
+  if (RunGit(dir, "rev-list --parents -n 1 --end-of-options " + Quote(rev),
+             &text) != 0)
     return out;
   // "<commit> <parent>..." on one line — the first token is the commit.
   const std::string line = FirstLine(text);
@@ -922,7 +933,8 @@ std::string MergeBase(const std::string& dir, const std::string& a,
   if (!Available() || !IsRepo(dir))
     return "";
   std::string text;
-  if (RunGit(dir, "merge-base " + Quote(a) + " " + Quote(b), &text) != 0)
+  if (RunGit(dir, "merge-base --end-of-options " + Quote(a) + " " + Quote(b),
+             &text) != 0)
     return "";
   return FirstLine(text);
 }
@@ -1063,6 +1075,10 @@ std::vector<Remote> Remotes(const std::string& dir) {
   return out;
 }
 
+// A remote's name, a URL and a branch are typed, pasted or read from a
+// repository's config, and one starting with `-` would be read as an option
+// (`--upload-pack=<command>`). Each follows `--`, as a revision follows
+// `--end-of-options` everywhere above.
 bool AddRemote(const std::string& dir, const std::string& name,
                const std::string& url, std::string* error) {
   if (!Available() || !IsRepo(dir)) {
@@ -1071,7 +1087,7 @@ bool AddRemote(const std::string& dir, const std::string& name,
     return false;
   }
   std::string out;
-  if (RunGitVerbose(dir, "remote add " + Quote(name) + " " + Quote(url),
+  if (RunGitVerbose(dir, "remote add -- " + Quote(name) + " " + Quote(url),
                     &out) != 0) {
     if (error)
       *error = out.empty() ? "could not add that remote" : FirstLine(out);
@@ -1084,7 +1100,7 @@ bool RemoveRemote(const std::string& dir, const std::string& name,
                   std::string* error) {
   std::string out;
   if (!Available() || !IsRepo(dir) ||
-      RunGitVerbose(dir, "remote remove " + Quote(name), &out) != 0) {
+      RunGitVerbose(dir, "remote remove -- " + Quote(name), &out) != 0) {
     if (error)
       *error = out.empty() ? "could not remove that remote" : FirstLine(out);
     return false;
@@ -1134,7 +1150,8 @@ bool Fetch(const std::string& dir, const std::string& remote,
   std::string out;
   // --tags: a named version is a tag, and a teammate's names should arrive
   // with their commits (F9 C5).
-  if (RunGitNetwork(dir, "fetch --tags --quiet " + Quote(remote), &out) != 0) {
+  if (RunGitNetwork(dir, "fetch --tags --quiet -- " + Quote(remote), &out) !=
+      0) {
     if (error)
       *error = out.empty() ? "could not reach " + remote : FirstLine(out);
     return false;
@@ -1152,7 +1169,7 @@ PushResult Push(const std::string& dir, const std::string& remote,
   }
   std::string out;
   const std::string args = std::string("push --follow-tags --porcelain ") +
-                           (setUpstream ? "--set-upstream " : "") +
+                           (setUpstream ? "--set-upstream " : "") + "-- " +
                            Quote(remote) + " " + Quote(branch);
   const int code = RunGitNetwork(dir, args, &out);
   if (code == 0) {
@@ -1194,7 +1211,7 @@ bool Clone(const std::string& url, const std::string& dir, std::string* error) {
   std::filesystem::create_directories(target.parent_path(), ec);
   std::string out;
   if (RunGitNetwork(target.parent_path().string(),
-                    "clone --quiet " + Quote(url) + " " + Quote(dir),
+                    "clone --quiet -- " + Quote(url) + " " + Quote(dir),
                     &out) != 0) {
     if (error)
       *error = out.empty() ? "could not clone " + url : FirstLine(out);

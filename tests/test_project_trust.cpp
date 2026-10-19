@@ -235,3 +235,64 @@ TEST_CASE("A repository's hooks do not run on save", "[trust][git]") {
   CHECK_FALSE(fs::exists(marker));
   fs::remove_all(dir);
 }
+
+// A remote's name reaches git as an argument; `--upload-pack=<command>` was
+// read as an option, and fetching from the project's own remote ran it.
+TEST_CASE("A remote name is never read as an option", "[trust][git]") {
+  if (!GitVault::Available())
+    SKIP("git not on PATH");
+  const fs::path root = Scratch("optname");
+  const fs::path marker =
+      root.parent_path() / ("lobole-trust-opt-" + std::to_string(::getpid()));
+  fs::remove(marker);
+  const fs::path upstream = root / "upstream";
+  const fs::path proj = root / "proj";
+  fs::create_directories(upstream);
+  fs::create_directories(proj);
+  REQUIRE(GitVault::Init(upstream.string()));
+  std::ofstream(upstream / "a.txt") << "x";
+  std::string error;
+  REQUIRE(GitVault::CommitAll(upstream.string(), "x", &error));
+  REQUIRE(GitVault::Init(proj.string()));
+  REQUIRE(
+      GitVault::AddRemote(proj.string(), "origin", upstream.string(), &error));
+  CHECK_FALSE(GitVault::Fetch(
+      proj.string(), "--upload-pack=touch '" + marker.string() + "';false",
+      &error));
+  CHECK_FALSE(fs::exists(marker));
+  CHECK_FALSE(GitVault::Clone("--upload-pack=touch '" + marker.string() + "'",
+                              (root / "clone").string(), &error));
+  CHECK_FALSE(fs::exists(marker));
+  fs::remove_all(root);
+}
+
+// An `ext::` URL is a command. Git refuses it by default; a person's own
+// config can allow it, and a shared repository's remote then ran on fetch.
+TEST_CASE("An ext:: remote does not run, whatever the user's config says",
+          "[trust][git]") {
+  if (!GitVault::Available())
+    SKIP("git not on PATH");
+  const fs::path root = Scratch("ext");
+  const fs::path marker =
+      root.parent_path() / ("lobole-trust-ext-" + std::to_string(::getpid()));
+  fs::remove(marker);
+  const fs::path global = root / "gitconfig";
+  std::ofstream(global) << "[protocol \"ext\"]\n\tallow = always\n";
+  const char* was = std::getenv("GIT_CONFIG_GLOBAL");
+  const std::string saved = was ? was : "";
+  setenv("GIT_CONFIG_GLOBAL", global.string().c_str(), 1);
+  const fs::path proj = root / "proj";
+  fs::create_directories(proj);
+  REQUIRE(GitVault::Init(proj.string()));
+  std::string error;
+  REQUIRE(GitVault::AddRemote(proj.string(), "x",
+                              "ext::sh -c touch% " + marker.string(), &error));
+  CHECK_FALSE(GitVault::Fetch(proj.string(), "x", &error));
+  CHECK_FALSE(fs::exists(marker));
+  if (was)
+    setenv("GIT_CONFIG_GLOBAL", saved.c_str(), 1);
+  else
+    unsetenv("GIT_CONFIG_GLOBAL");
+  fs::remove(marker);
+  fs::remove_all(root);
+}
