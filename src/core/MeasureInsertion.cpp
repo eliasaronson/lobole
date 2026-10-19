@@ -11,6 +11,7 @@
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRep_Builder.hxx>
 #include <Bnd_Box.hxx>
 #include <GProp_GProps.hxx>
@@ -37,6 +38,8 @@ namespace {
 constexpr double kFuzz = 1.0e-3;
 // An overlap below this is the boolean's noise, not matter in matter.
 constexpr double kVolumeTol = 1.0e-9;
+// The distance query's noise on analytic faces, mm.
+constexpr double kGapTol = 1.0e-6;
 
 gp_Trsf Rigid(const glm::dmat4& m) {
   const glm::dquat q = glm::normalize(glm::quat_cast(glm::dmat3(m)));
@@ -101,10 +104,31 @@ struct KernelError {
 };
 
 // Do a and b interfere: overlap in the model, or (with an allowance) come
-// nearer than it.
+// nearer than it. With an allowance the distance is asked first: apart, and
+// neither inside the other, they cannot overlap, and only faces that meet
+// need the boolean's volume.
 Reading Interferes(const TopoDS_Shape& a, const TopoDS_Shape& b,
                    double allowance) {
   Reading r;
+  if (allowance > 0.0) {
+    BRepExtrema_DistShapeShape dist;
+    dist.SetMultiThread(true);
+    dist.LoadS1(a);
+    dist.LoadS2(b);
+    dist.SetFlag(Extrema_ExtFlag_MIN);
+    if (!dist.Perform() || !dist.IsDone())
+      throw KernelError{"the distance query failed"};
+    const double gap = dist.Value();
+    if (gap > kFuzz && !dist.InnerSolution()) {
+      // A gap exactly the allowance is line to line as made, not a press:
+      // the distance query's own noise is kept on the free side of it.
+      if (gap < allowance - kGapTol) {
+        r.interfering = true;
+        r.depthMm = allowance - gap;
+      }
+      return r;
+    }
+  }
   BRepAlgoAPI_Common common;
   if (!cad::BuildNonDestructive(common, a, b, kFuzz) || common.Shape().IsNull())
     throw KernelError{"the overlap boolean failed"};
@@ -116,17 +140,10 @@ Reading Interferes(const TopoDS_Shape& a, const TopoDS_Shape& b,
     // area is its thickness.
     const double area = AreaOf(common.Shape());
     r.depthMm = allowance + (area > 0.0 ? 2.0 * v / area : 0.0);
-    return r;
-  }
-  if (allowance <= 0.0)
-    return r;
-  BRepExtrema_DistShapeShape dist(a, b, Extrema_ExtFlag_MIN);
-  if (!dist.IsDone())
-    throw KernelError{"the distance query failed"};
-  const double gap = dist.Value();
-  if (gap < allowance) {
+  } else if (allowance > 0.0) {
+    // Faces on faces: no gap at all.
     r.interfering = true;
-    r.depthMm = allowance - gap;
+    r.depthMm = allowance;
   }
   return r;
 }
@@ -136,6 +153,11 @@ struct Sides {
   Bnd_Box movingBox, fixedBox;
   double allowance = 0.0;
 };
+
+// Does `a` (the moving side, placed) interfere with the fixed side?
+Reading Read(const Sides& s, const TopoDS_Shape& a) {
+  return Interferes(a, s.fixed, s.allowance);
+}
 
 gp_Trsf Pose(double u, double rotationDeg, bool positive) {
   gp_Trsf rot;
@@ -182,7 +204,7 @@ double PressAt(const Sides& s, const gp_Trsf& seat, double step,
       throw KernelError{"slicing the seated part failed"};
     if (VolumeOf(cut.Shape()) <= kVolumeTol)
       continue;
-    if (Interferes(cut.Shape(), s.fixed, s.allowance).interfering)
+    if (Read(s, cut.Shape()).interfering)
       hits++;
   }
   return hits * step;
@@ -206,6 +228,17 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
   if (opt.allowanceMm < 0.0)
     return std::unexpected("allowance_mm is not negative: it is how much "
                            "nearer the faces come as made");
+  // A thread goes on by turning along its helix, which a straight slide
+  // reads as the flanks forced through each other the whole way.
+  const auto threaded = [](const std::vector<Body>& side) {
+    return std::any_of(side.begin(), side.end(), [](const Body& b) {
+      return !b.reference && (!b.threads.empty() || !b.threadRegions.empty());
+    });
+  };
+  if (threaded(moving) && threaded(fixed))
+    return std::unexpected(
+        "both sides carry modelled threads: a threaded pair goes on by "
+        "turning, which a straight slide does not judge");
   InsertionReport rep;
   rep.axisPoint = axisPoint;
   rep.axisDir = axisDir / len;
@@ -226,6 +259,51 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     s.movingBox = BoxOf(s.moving);
     s.fixedBox = BoxOf(s.fixed);
     s.allowance = opt.allowanceMm;
+    // Each side clipped, once, to what the other can ever come near: a
+    // cylinder about the axis as wide as the other reaches from it (and a
+    // millimetre more than the allowance), which a turn about the axis
+    // keeps. A housing round a wheel, a plate round an arbor, is then the
+    // part of it by the axis, and every step's boolean is on that.
+    {
+      const auto reach = [](const Bnd_Box& b) {
+        double x0, y0, z0, x1, y1, z1;
+        b.Get(x0, y0, z0, x1, y1, z1);
+        return std::hypot(std::max(std::abs(x0), std::abs(x1)),
+                          std::max(std::abs(y0), std::abs(y1)));
+      };
+      const Range a0 = ZOf(s.movingBox), b0 = ZOf(s.fixedBox);
+      const double g = opt.allowanceMm + 1.0;
+      const double lo = std::min(a0.lo, b0.lo), hi = std::max(a0.hi, b0.hi);
+      const double span = hi - lo;
+      const auto clip = [&](TopoDS_Shape& sh, Bnd_Box& box, double r) {
+        if (r >= reach(box))
+          return;
+        const TopoDS_Shape cyl =
+            BRepPrimAPI_MakeCylinder(
+                gp_Ax2(gp_Pnt(0, 0, lo - 2.0 * span - g), gp_Dir(0, 0, 1)), r,
+                5.0 * span + 2.0 * g)
+                .Shape();
+        BRepAlgoAPI_Common c;
+        if (!cad::BuildNonDestructive(c, sh, cyl) || c.Shape().IsNull())
+          throw KernelError{"clipping a side to the axis failed"};
+        sh = c.Shape();
+        box = BoxOf(sh);
+      };
+      const double ra = reach(s.movingBox) + g, rb = reach(s.fixedBox) + g;
+      clip(s.moving, s.movingBox, rb);
+      clip(s.fixed, s.fixedBox, ra);
+    }
+    if (s.movingBox.IsVoid() || s.fixedBox.IsVoid()) {
+      // Nothing of either ever comes near the other.
+      InsertionTry t;
+      t.pass = true;
+      rep.best = t;
+      rep.tries.push_back(t);
+      rep.pass = true;
+      if (fraction)
+        fraction->store(1.0);
+      return rep;
+    }
     const Range za = ZOf(s.movingBox), zb = ZOf(s.fixedBox);
 
     std::vector<bool> sides;
@@ -278,14 +356,16 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       }
       const double step = rep.stepMm;
       if (rotationDeg == 0.0) {
+        // A seat that does not interfere at all has no press to read.
+        seated[side].at = Read(s, s.moving);
         seated[side].pressMm =
-            PressAt(s, Pose(0.0, 0.0, positive), step, cancel);
-        seated[side].at = Interferes(s.moving, s.fixed, s.allowance);
+            seated[side].at.interfering
+                ? PressAt(s, Pose(0.0, 0.0, positive), step, cancel)
+                : 0.0;
         advance(opt.samples);
       } else {
-        const Reading r = Interferes(
-            s.moving.Moved(TopLoc_Location(Pose(0.0, rotationDeg, positive))),
-            s.fixed, s.allowance);
+        const Reading r = Read(s, s.moving.Moved(TopLoc_Location(
+                                      Pose(0.0, rotationDeg, positive))));
         const Reading& at = seated[side].at;
         if (r.depthMm > at.depthMm + 1e-6 ||
             r.volumeMm3 > at.volumeMm3 + 1e-6) {
@@ -307,8 +387,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
         advance(1.0);
         if (!BoxesMeet(s.movingBox.Transformed(pose), s.fixedBox, s.allowance))
           continue;
-        const Reading r = Interferes(s.moving.Moved(TopLoc_Location(pose)),
-                                     s.fixed, s.allowance);
+        const Reading r = Read(s, s.moving.Moved(TopLoc_Location(pose)));
         if (!r.interfering)
           continue;
         hits++;

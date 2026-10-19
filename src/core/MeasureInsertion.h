@@ -76,8 +76,9 @@ struct InsertionOptions {
 };
 
 // A and B are placed by their matrices; the axis is in that same (world)
-// frame. An error when either side is empty, the axis has no direction, or
-// the kernel fails; `cancel` is polled between steps and `fraction` (when
+// frame. An error when either side is empty, the axis has no direction,
+// both sides carry modelled threads (a screw goes on by turning), or the
+// kernel fails; `cancel` is polled between steps and `fraction` (when
 // given) advances through the work.
 std::expected<InsertionReport, std::string>
 Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,

@@ -215,4 +215,12 @@ TEST_CASE("The insertion check refuses what it cannot read",
   CHECK_FALSE(Measure::Insertion({}, I, {shaft}, I, O, Z, o));
   o.allowanceMm = -0.1;
   CHECK_FALSE(Measure::Insertion({shaft}, I, {shaft}, I, O, Z, o));
+  // A screw on its nut goes on by turning, not by sliding.
+  o.allowanceMm = 0.0;
+  Body screw = shaft, nut = shaft;
+  screw.threads.push_back(ThreadMark{});
+  nut.threads.push_back(ThreadMark{});
+  const auto r = Measure::Insertion({screw}, I, {nut}, I, O, Z, o);
+  REQUIRE_FALSE(r);
+  CHECK(r.error().find("turning") != std::string::npos);
 }

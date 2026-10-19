@@ -376,16 +376,27 @@ forces something through on the way.
   does, a D turned off its flat -- is reported (`seats: false`) and never
   chosen. A try that can no longer beat the best is abandoned.
 
+- **A threaded pair is refused**: when both sides carry modelled threads
+  the part goes on by turning along the helix, which a straight slide reads
+  as the flanks forced through each other the whole way (the jar's lid).
+- **What a step costs.** Each side is first clipped, once, to a cylinder
+  about the axis as wide as the other reaches (and a millimetre past the
+  allowance), which a turn keeps: a plate round an arbor is then the ring
+  of it by the hole. With an allowance the (multithreaded) distance is
+  asked first, and the boolean only where faces meet; a seat that does not
+  interfere has no press to slice. A wheel in a housing 220 mm tall is
+  about 30 s; a wheel on its arbor a second or two.
+
 The answer: `pass`, the try reported (`entry`, `rotation_deg`,
 `travel_mm`, `interfering_mm`, `press_mm`, `excess_mm`, `from_mm` -- where
 the interference begins, from the seat -- `worst_depth_mm`, the most the
 faces must give with the allowance counted, and `worst_volume_mm3`), the
 step, lead-in and allowance, the axis and what gave it, and every try. It
-runs on the frame, a boolean a step: seconds on small parts. The
+runs on the frame: seconds on small parts. The
 requirement kind `insertion` ([requirements](../requirements/README.md#measures))
 states a pair once and runs off the frame.
 
-What it does not judge: the order parts go on in (each pair is slid alone,
+What it does not judge: a screw (above), the order parts go on in (each pair is slid alone,
 against the one part it goes on), the force a press takes, or a path that
 is not a straight slide along the axis.
 

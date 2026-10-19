@@ -1422,9 +1422,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "axis_point_mm, axis_dir, axis_from, tries[]{entry, rotation_deg, "
      "seats, complete, pass, interfering_mm, excess_mm}}. An orientation "
      "either side is symmetric under is skipped; one that does not seat "
-     "is reported, never chosen. Runs on the frame: a boolean a step, "
-     "seconds on small parts. The requirement kind `insertion` states it "
-     "once.",
+     "is reported, never chosen. Refused when both sides carry modelled "
+     "threads: a screw goes on by turning. Runs on the frame: seconds on "
+     "small parts, half a minute on a wheel in a tall housing. The "
+     "requirement kind `insertion` states it once, off the frame.",
      "a:int|string, b:int|string, entry:'positive'|'negative'|'either', "
      "mate?:int|string, axis?:object, allowance_mm?:number, samples?:int, "
      "rotations?:int, lead_in_mm?:number",
