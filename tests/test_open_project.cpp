@@ -72,8 +72,12 @@ fs::path GoldenProject(const char* name, size_t* parts) {
       continue;
     if (testio::Load(p.string()) == nullptr)
       continue; // not a part document on its own (it needs its project)
+    // Copied in: a project's documents are inside it, or it is refused
+    // (docs/versioning/format.md#paths-in-a-project).
+    fs::create_directories(proj / "golden");
+    fs::copy_file(p, proj / "golden" / file);
     docs.push_back({{"name", p.stem().string()},
-                    {"dir", p.string()}, // absolute: joins to itself
+                    {"dir", "golden/" + file},
                     {"type", "part"},
                     {"id", id++}});
   }
@@ -97,7 +101,7 @@ fs::path GoldenProject(const char* name, size_t* parts) {
     REQUIRE(testio::Save(doc, dir.string()));
     fs::remove_all(dir / "geometry"); // so it rebuilds, re-reading the STEP
     docs.push_back({{"name", "import" + std::to_string(i)},
-                    {"dir", dir.string()},
+                    {"dir", "parts/import" + std::to_string(i) + ".dsgn"},
                     {"type", "part"},
                     {"id", id++}});
   }

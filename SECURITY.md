@@ -25,6 +25,17 @@ So: **do not expose the remote port** to a network, a port forward, or a
 container port published beyond a network you trust. Without `--remote` (and
 with the terminal panel off, its default) no port is opened at all.
 
+## Opening someone else's project
+
+Opening a shared project or file should be safe, and a way it is not is a
+vulnerability. A project cannot name a path outside its own folder
+([docs/versioning/format.md](docs/versioning/format.md#paths-in-a-project)),
+and git never runs commands from a repository that came inside a project
+([docs/versioning/README.md](docs/versioning/README.md#a-shared-projects-history)).
+What remains is what any CAD program carries: its geometry is parsed by
+OpenCASCADE's readers, and its saved geometry can differ from what its
+feature history would rebuild.
+
 Other things to treat as code rather than data: generator scripts in
 `generators/`, and any Python you are handed to run against the app.
 

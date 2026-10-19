@@ -12,6 +12,7 @@
 #include "core/Parallel.h"
 #include "core/Units.h"
 #include "core/io/GeometryCache.h"
+#include "core/io/ProjectPaths.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
 #include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
 #include "ui/CamTool.h"            // RunCamVerification (job undo)
@@ -244,6 +245,16 @@ void AdoptStagedImports(AppState& state, const std::filesystem::path& dir) {
       // wstring on Windows, and "..foo" is not an escape from the staging dir.
       if (rel.empty() || *rel.begin() == "..")
         continue; // not staged: an original STEP, or already project-owned
+      // A path from a shared project: `<staging>/x/../../anything` passes the
+      // test above, and this moves the file it names, then deletes it. A
+      // staged import is a plain subfolder and a plain file, nothing else.
+      if (std::distance(rel.begin(), rel.end()) != 2 ||
+          std::any_of(rel.begin(), rel.end(), [](const fs::path& part) {
+            return part == "." || part == "..";
+          })) {
+        LOG_WARN("Not adopting import path '{}': not a staged file", imp->path);
+        continue;
+      }
       const fs::path dest = dir / "imported" / rel;
       fs::create_directories(dest.parent_path(), ec);
       ec.clear();
@@ -400,7 +411,9 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
                          : slot.kind == DocKind::Drawing ? "drawing"
                          : slot.kind == DocKind::Job     ? "job"
                                                          : "part";
-      const fs::path docDir = dir / sub / slot.name;
+      const std::string folder =
+          std::string(sub) + projectpaths::DocFolder(slot.name, slot.id);
+      const fs::path docDir = dir / folder;
       fs::create_directories(docDir);
       std::expected<void, std::string> r;
       switch (slot.kind) {
@@ -424,7 +437,7 @@ bool SaveProject(AppState& state, const std::string& path, std::string* error,
       }
       nlohmann::json entry = {{"id", slot.id},
                               {"name", slot.name},
-                              {"dir", std::string(sub) + slot.name},
+                              {"dir", folder},
                               {"type", type}};
       if (!slot.folder.empty()) // display grouping; omit at top level
         entry["folder"] = slot.folder;
@@ -491,7 +504,11 @@ ReadSlot(const nlohmann::json& entry, size_t i,
          const std::filesystem::path& root, std::string* rebuiltReason,
          const DocumentIO::ProjectScope& scope) {
   const std::string name = entry.at("name").get<std::string>();
-  const std::string dir = (root / entry.at("dir").get<std::string>()).string();
+  auto inside =
+      projectpaths::InsideProject(root, entry.at("dir").get<std::string>());
+  if (!inside)
+    return std::unexpected("document '" + name + "': " + inside.error());
+  const std::string dir = inside->string();
   const std::string type = entry.value("type", std::string("part"));
   PartSlot slot;
   slot.id = entry.value("id", static_cast<uint64_t>(i + 1)); // v1: 1..n
@@ -1073,7 +1090,7 @@ std::string SlotDir(const AppState& state, size_t i) {
                     : slot.kind == DocKind::Drawing ? "drawings/"
                     : slot.kind == DocKind::Job     ? "jobs/"
                                                     : "parts/";
-  return std::string(sub) + slot.name;
+  return std::string(sub) + projectpaths::DocFolder(slot.name, slot.id);
 }
 
 } // namespace

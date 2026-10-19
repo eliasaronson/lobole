@@ -3,6 +3,7 @@
 
 #include "core/io/ProjectMerge.h"
 #include "core/Angles.h"
+#include "core/io/ProjectPaths.h"
 
 #include "core/io/Serialization.h"
 
@@ -1317,8 +1318,13 @@ std::vector<Breakage> Verify(const std::string& projectDir) {
     for (const auto& entry : meta["documents"]) {
       if (!entry.is_object() || !entry.contains("dir"))
         continue;
-      targets.push_back({fs::path(projectDir) / entry.value("dir", ""),
-                         entry.value("name", ""), entry.value("type", "part")});
+      // A dir that leaves the project is not one of its documents.
+      auto inside =
+          projectpaths::InsideProject(projectDir, entry.value("dir", ""));
+      if (!inside)
+        continue;
+      targets.push_back(
+          {*inside, entry.value("name", ""), entry.value("type", "part")});
     }
   } else {
     const json index =

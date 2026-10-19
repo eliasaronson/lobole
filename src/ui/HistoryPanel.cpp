@@ -349,6 +349,16 @@ void DrawHistoryPanel(AppState& state) {
     ImGui::End();
     return;
   }
+  if (const std::string why = CanVersionProject(state)
+                                  ? GitVault::UntrustedReason(state.projectPath)
+                                  : std::string();
+      !why.empty()) {
+    // A project that came with its own repository, which git would have run
+    // commands from. Its files open and save; its history is not touched.
+    ImGui::TextWrapped("This project's history is not used: %s.", why.c_str());
+    ImGui::End();
+    return;
+  }
   if (!ProjectHasHistory(state)) {
     ImGui::TextWrapped(
         "This project is not stored as a .dsgn project folder, so it has no "

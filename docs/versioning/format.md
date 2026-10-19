@@ -313,6 +313,22 @@ into the history above, numbered, when the branch lands
 | v | Change |
 |---|--------|
 
+## Paths in a project
+
+A shared project is someone else's input, so no string in one is a path
+until `core/io/ProjectPaths.h` says so:
+
+- a document's folder is its name only when that is one plain file name
+  (no `/`, `\`, `:`, `.`, `..` or control character; `IsPlainComponent`),
+  otherwise `document-<id>`; a name from a STEP file or a script ("Bracket
+  1/2") stays a name;
+- a document's `dir` in `project.json` must resolve inside the project, even
+  through a symlink, or the project is refused (`InsideProject`);
+- an asset name, and a baked body's `brep` file, must be a plain file name,
+  or the document is refused (`CheckedAssetName`) or its baked geometry is
+  ignored;
+- an Import path is adopted from staging only as `<subfolder>/<file>`.
+
 ## The directory form
 
 A part saved to a `.dsgn` directory (the default for a new save) is:

@@ -55,6 +55,7 @@ add_executable(designer_tests
     test_screen_space_mapping.cpp
     test_recent_projects.cpp
     test_gitvault.cpp
+    test_project_trust.cpp
     test_projectmerge.cpp
     test_projectstamp.cpp
     test_settings.cpp

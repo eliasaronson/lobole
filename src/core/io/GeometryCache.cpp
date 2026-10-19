@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/io/GeometryCache.h"
+#include "core/io/ProjectPaths.h"
 #include "core/io/Serialization.h" // ElementMapToJson
 
 #include "common/Logger.h"
@@ -464,7 +465,15 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
     std::vector<Body> bodies;
     for (const json& bj : j.value("bodies", json::array())) {
       TopoDS_Shape shape;
-      const fs::path brep = geom / bj.at("brep").get<std::string>();
+      // A name from a shared project: a path out of geometry/ would read any
+      // file into OCC's binary reader (core/io/ProjectPaths.h).
+      const std::string file = bj.at("brep").get<std::string>();
+      if (!projectpaths::IsPlainComponent(file)) {
+        LOG_WARN("Ignoring baked geometry in {}: '{}' is not a file in it", dir,
+                 file);
+        return false;
+      }
+      const fs::path brep = geom / file;
       if (!BinTools::Read(shape, brep.string().c_str()) || shape.IsNull()) {
         LOG_INFO("Ignoring baked geometry in {}: {} is unreadable", dir,
                  brep.filename().string());

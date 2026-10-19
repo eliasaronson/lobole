@@ -50,9 +50,22 @@ struct LogEntry {
 // which is the right answer for anyone who has configured git.
 void SetPreferredIdentity(const std::string& name, const std::string& email);
 
-bool Available();                    // `git` on PATH
-bool IsRepo(const std::string& dir); // dir/.git exists
-bool Init(const std::string& dir);   // git init -q
+bool Available(); // `git` on PATH
+
+// A project's own repository is someone else's input once projects are
+// shared: a `.git` that arrives in a zip brings config that makes git run
+// commands (core.fsmonitor on any diff or status, filter and diff drivers,
+// credential helpers, includes) and a `.git` FILE points at another
+// repository. Git never runs in such a project. Empty when `dir` has no
+// repository or one this app will use; otherwise why not, naming the key
+// (docs/versioning/README.md#a-shared-projects-history).
+std::string UntrustedReason(const std::string& dir);
+
+// dir/.git is a directory whose config UntrustedReason accepts.
+bool IsRepo(const std::string& dir);
+// git init -q; refused where a .git already exists, so an untrusted one is
+// never reinitialized and used.
+bool Init(const std::string& dir);
 
 // Uncommitted changes in the working tree. False for a non-repo — "nothing
 // to commit" is the honest answer when there is nowhere to commit to.

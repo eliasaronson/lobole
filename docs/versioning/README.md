@@ -62,7 +62,9 @@ The loader says what is wrong rather than guessing:
   configurations, occurrences, mates, relations, assertions, motion studies,
   drawing views and dimensions;
 - a sketch with two entities sharing an id;
-- a document of another kind, or a version newer than `kVersion`.
+- a document of another kind, or a version newer than `kVersion`;
+- a name or a path that would reach outside the project
+  ([format.md](format.md#paths-in-a-project)).
 
 A save refuses an item with id 0 (see [format.md](format.md#stability-guarantees)).
 
@@ -251,6 +253,29 @@ projection: an autosave never writes one, and a recovered document's
 studies run again
 ([what a saved result keeps](../simulation/README.md#what-a-saved-result-keeps))
 and its drawing views project again.
+
+## A shared project's history
+
+A project folder that arrives with its own `.git` (in a zip, say) brings
+that repository's config, and config can make git run commands:
+`core.fsmonitor` on any diff or status, filter and diff drivers on add and
+diff, credential helpers and `uploadpack` on fetch, includes that pull in
+more. The app runs git on open (the conflicts scan) and on every save, so
+`GitVault` never trusts it:
+
+- every git call passes `-c core.fsmonitor=false -c core.hooksPath=/dev/null`;
+- before git runs in a project, `UntrustedReason` reads `.git/config` as a
+  plain file (`git config --file … --list`, which runs nothing) and accepts
+  only keys that run nothing (`HarmlessConfigKey`: core layout, user,
+  remotes' urls and refspecs, branch upstreams, a few more). Anything else,
+  or a `.git` that is a file, and git does not run there at all: `IsRepo` is
+  false, `Init` refuses to reinitialize, and the History panel says which
+  key and how to remove it;
+- git runs only in the project folder's own repository, never in a parent
+  folder's.
+
+A repository fetched with `git clone` carries no config or hooks, so a
+cloned project's history is used as it is.
 
 ## Saved results stay out of the history
 

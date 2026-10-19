@@ -6,9 +6,13 @@
 #include "common/Logger.h"
 #include "core/io/ProjectMerge.h"
 
+#include <algorithm>
 #include <nlohmann/json.hpp>
 
+#include <cctype>
 #include <map>
+#include <mutex>
+#include <set>
 
 #include <array>
 #include <cstdio>
@@ -43,10 +47,40 @@ std::string Quote(const std::string& s) {
   return out;
 }
 
+// Every git call starts with these: the two settings through which a
+// repository's own config runs a command on the commands this app uses
+// (diff, status, add, commit, merge), switched off whatever it says. The
+// rest of that config is checked before git runs at all (UntrustedReason).
+constexpr const char* kSafe =
+    "-c core.fsmonitor=false -c core.hooksPath=" NULDEV;
+
+// Git runs only in a project folder holding a repository this app accepts:
+// never in one it does not, and never in a parent folder's, which git would
+// otherwise find by searching upward (a project unpacked inside a crafted
+// folder). `init` is the one command for a folder with none.
+bool MayRun(const std::string& dir, const std::string& args,
+            std::string* output) {
+  if (args.starts_with("init"))
+    return true;
+  std::error_code ec;
+  const std::string why =
+      std::filesystem::is_directory(std::filesystem::path(dir) / ".git", ec)
+          ? UntrustedReason(dir)
+          : std::string("no repository here");
+  if (why.empty())
+    return true;
+  if (output)
+    *output = why;
+  return false;
+}
+
 // Runs `git -C <dir> <args>`, capturing stdout. Returns exit code.
 int RunGit(const std::string& dir, const std::string& args,
            std::string* output = nullptr) {
-  const std::string cmd = "git -C " + Quote(dir) + " " + args + " 2>" NULDEV;
+  if (!MayRun(dir, args, nullptr))
+    return 128;
+  const std::string cmd =
+      "git -C " + Quote(dir) + " " + kSafe + " " + args + " 2>" NULDEV;
   FILE* pipe = ::popen(cmd.c_str(), "r");
   if (!pipe)
     return -1;
@@ -66,7 +100,10 @@ int RunGit(const std::string& dir, const std::string& args,
 // discarding it would leave "it did not work".
 int RunGitVerbose(const std::string& dir, const std::string& args,
                   std::string* output) {
-  const std::string cmd = "git -C " + Quote(dir) + " " + args + " 2>&1";
+  if (!MayRun(dir, args, output))
+    return 128;
+  const std::string cmd =
+      "git -C " + Quote(dir) + " " + kSafe + " " + args + " 2>&1";
   FILE* pipe = ::popen(cmd.c_str(), "r");
   if (!pipe)
     return -1;
@@ -134,10 +171,14 @@ int CountTokens(const std::string& line) {
 // — which someone who understands git can act on.
 int RunGitNetwork(const std::string& dir, const std::string& args,
                   std::string* output) {
+  // A clone runs from the parent folder, into a new one; everything else in
+  // the project's own repository.
+  if (!args.starts_with("clone") && !MayRun(dir, args, output))
+    return 128;
   const std::string cmd = "GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= "
                           "GIT_SSH_COMMAND='ssh -o BatchMode=yes' "
                           "git -C " +
-                          Quote(dir) + " " + args + " 2>&1";
+                          Quote(dir) + " " + kSafe + " " + args + " 2>&1";
   FILE* pipe = ::popen(cmd.c_str(), "r");
   if (!pipe)
     return -1;
@@ -262,14 +303,144 @@ bool Available() {
   return available;
 }
 
+namespace {
+
+// The local config keys this app writes, git writes for it (init, clone,
+// remote add, a push that sets an upstream) or a person plausibly set by hand
+// — none of which makes the commands this app runs execute anything. A name
+// is matched whole, or by the prefix before its first or last dot.
+bool HarmlessConfigKey(const std::string& key) {
+  static const std::set<std::string> kExact = {"core.repositoryformatversion",
+                                               "core.filemode",
+                                               "core.bare",
+                                               "core.logallrefupdates",
+                                               "core.ignorecase",
+                                               "core.precomposeunicode",
+                                               "core.symlinks",
+                                               "core.autocrlf",
+                                               "core.safecrlf",
+                                               "core.eol",
+                                               "core.quotepath",
+                                               "core.untrackedcache",
+                                               "core.splitindex",
+                                               "core.commitgraph",
+                                               "core.multipackindex",
+                                               "core.compression",
+                                               "pull.rebase",
+                                               "pull.ff",
+                                               "push.default",
+                                               "push.autosetupremote",
+                                               "merge.ff",
+                                               "merge.conflictstyle",
+                                               "fetch.prune",
+                                               "fetch.fsckobjects",
+                                               "transfer.fsckobjects",
+                                               "receive.fsckobjects",
+                                               "gc.auto",
+                                               "commit.gpgsign",
+                                               "tag.gpgsign",
+                                               "gpg.format",
+                                               "init.defaultbranch",
+                                               "index.version",
+                                               "feature.manyfiles"};
+  if (kExact.contains(key))
+    return true;
+  const size_t first = key.find('.');
+  const size_t last = key.rfind('.');
+  const std::string section = key.substr(0, first);
+  const std::string variable = key.substr(last + 1);
+  if (section == "user" || section == "extensions" || section == "lfs" ||
+      section == "author" || section == "committer")
+    return true;
+  // remote.<name>.<variable>, branch.<name>.<variable>: the subsection is a
+  // name; the variable decides (`remote.x.uploadpack` runs a program).
+  if (section == "remote")
+    return variable == "url" || variable == "pushurl" || variable == "fetch" ||
+           variable == "push" || variable == "tagopt" || variable == "prune" ||
+           variable == "mirror";
+  if (section == "branch")
+    return variable == "remote" || variable == "merge" ||
+           variable == "rebase" || variable == "pushremote" ||
+           variable == "description";
+  return false;
+}
+
+struct TrustCache {
+  std::mutex mutex;
+  // dir -> (the config file's write time, the answer).
+  std::map<std::string, std::pair<std::filesystem::file_time_type, std::string>>
+      answers;
+};
+
+TrustCache& Trust() {
+  static TrustCache cache;
+  return cache;
+}
+
+} // namespace
+
+std::string UntrustedReason(const std::string& dir) {
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  const fs::path gitPath = fs::path(dir) / ".git";
+  if (!fs::exists(gitPath, ec))
+    return {};
+  if (!fs::is_directory(gitPath, ec))
+    return "its .git is a file, which points git at another repository";
+  const fs::path config = gitPath / "config";
+  const auto stamp = fs::last_write_time(config, ec);
+  {
+    std::lock_guard<std::mutex> lock(Trust().mutex);
+    auto it = Trust().answers.find(dir);
+    if (it != Trust().answers.end() && it->second.first == stamp)
+      return it->second.second;
+  }
+  // `--file` reads that one file as text: no include is followed, nothing
+  // runs, and no repository is set up.
+  std::string why;
+  const std::string cmd = "git config --file " + Quote(config.string()) +
+                          " --name-only --list 2>" NULDEV;
+  FILE* pipe = fs::exists(config, ec) ? ::popen(cmd.c_str(), "r") : nullptr;
+  if (pipe) {
+    std::array<char, 4096> chunk{};
+    std::string keys;
+    size_t n = 0;
+    while ((n = ::fread(chunk.data(), 1, chunk.size(), pipe)) > 0)
+      keys.append(chunk.data(), n);
+    if (::pclose(pipe) != 0)
+      why = "its .git/config cannot be read";
+    for (std::string key : Lines(keys)) {
+      if (!why.empty())
+        break;
+      std::transform(key.begin(), key.end(), key.begin(),
+                     [](unsigned char c) { return std::tolower(c); });
+      if (!HarmlessConfigKey(key))
+        why = "its .git/config sets '" + key +
+              "', which can make git run a command; remove it with `git "
+              "config --local --unset " +
+              key + "` if you trust it";
+    }
+  }
+  if (!why.empty())
+    LOG_WARN("Not using the history in {}: {}", dir, why);
+  std::lock_guard<std::mutex> lock(Trust().mutex);
+  Trust().answers[dir] = {stamp, why};
+  return why;
+}
+
 bool IsRepo(const std::string& dir) {
   std::error_code ec;
-  return std::filesystem::exists(std::filesystem::path(dir) / ".git", ec);
+  return std::filesystem::is_directory(std::filesystem::path(dir) / ".git",
+                                       ec) &&
+         UntrustedReason(dir).empty();
 }
 
 bool Init(const std::string& dir) {
   if (!Available())
     return false;
+  std::error_code ec;
+  if (std::filesystem::exists(std::filesystem::path(dir) / ".git", ec))
+    return false; // reinitializing would keep, and then use, its config
   const bool ok = RunGit(dir, "init -q") == 0;
   if (ok) {
     KeepResultsOutOfHistory(dir);
@@ -718,8 +889,15 @@ bool ExtractSubtree(const std::string& dir, const std::string& rev,
     std::string blob;
     if (!ShowFile(dir, rev, path, &blob))
       continue;
-    const std::filesystem::path out =
-        dest / std::filesystem::path(path.substr(prefix.size()));
+    // A tree from someone else's history can name `../x` or an absolute
+    // path; git's own checks are off by default (transfer.fsckObjects).
+    const std::filesystem::path rel(path.substr(prefix.size()));
+    if (rel.empty() || rel.is_absolute() || rel.has_root_name() ||
+        std::any_of(rel.begin(), rel.end(), [](const auto& part) {
+          return part == ".." || part == ".";
+        }))
+      continue;
+    const std::filesystem::path out = dest / rel;
     std::filesystem::create_directories(out.parent_path(), ec);
     std::ofstream file(out, std::ios::binary | std::ios::trunc);
     file << blob;

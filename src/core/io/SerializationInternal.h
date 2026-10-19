@@ -10,7 +10,8 @@
 // the file-local helpers resolve them unqualified); the heavier file/envelope
 // helpers stay defined in Serialization.cpp.
 
-#include "core/ElementMap.h" // ElementRef
+#include "core/ElementMap.h"      // ElementRef
+#include "core/io/ProjectPaths.h" // IsPlainComponent
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -49,28 +50,21 @@ inline constexpr int kVersionNEXT = kVersionLanded + 1;
 inline constexpr int kVersionNEXT2 = kVersionLanded + 2;
 inline constexpr int kVersionNEXT3 = kVersionLanded + 3;
 
-// Positions are read and written as doubles: a JSON number is one, and a
-// sketch plane at z = 13.4 read through float lands 0.4 um below a face at
-// 13.4 (docs/sketching/README.md#plane). A float field takes the narrowing
-// where it is assigned.
 // An asset name from a document becomes a file in the project's assets/
-// directory, so it must be one plain file name. A shared project could name
-// "../../.bashrc", or an absolute path (which `dir / name` returns as it is),
-// and opening it read that file into the document while saving it wrote its
-// bytes there. Refused, never cleaned up into something else. Empty passes: an
-// image may have no asset.
+// directory, so it must be one plain file name (core/io/ProjectPaths.h):
+// refused, never cleaned up into something else. Empty passes: an image may
+// have no asset.
 inline const std::string& CheckedAssetName(const std::string& name) {
-  const bool plain =
-      name != "." && name != ".." &&
-      name.find_first_of("/\\:") == std::string::npos &&
-      std::none_of(name.begin(), name.end(),
-                   [](unsigned char c) { return c < 0x20 || c == 0x7f; });
-  if (!plain)
+  if (!name.empty() && !projectpaths::IsPlainComponent(name))
     throw std::runtime_error("asset name '" + name +
                              "' is not a plain file name");
   return name;
 }
 
+// Positions are read and written as doubles: a JSON number is one, and a
+// sketch plane at z = 13.4 read through float lands 0.4 um below a face at
+// 13.4 (docs/sketching/README.md#plane). A float field takes the narrowing
+// where it is assigned.
 inline nlohmann::json Vec3ToJson(const glm::dvec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});
 }
