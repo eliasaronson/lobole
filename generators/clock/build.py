@@ -565,11 +565,20 @@ ROD = "up the rod"  # the pendulum rod's own axis, read off its placement
 
 
 def step(occ, direction=None, **kw):
-    out = {"occurrence": occ}
+    """One step: an occurrence, or a list of them -- a group that goes home
+    as one, along one path."""
+    out = ({"occurrences": list(occ)} if isinstance(occ, (list, tuple))
+           else {"occurrence": occ})
     if direction is not None:
         out["direction"] = direction
     out.update(kw)
     return out
+
+
+def step_name(x):
+    """A step's name as the sequence check answers it."""
+    return " + ".join(x["occurrences"]) if "occurrences" in x else \
+        x["occurrence"]
 
 
 SEQUENCE = {
@@ -589,13 +598,17 @@ SEQUENCE = {
         step("back plate", note="the base"),
         *[step(f"pillar {i}", FRONT) for i in (1, 2, 3, 4)],
         *[step(f"nut {i} rear", BACK, thread=True) for i in (1, 2, 3, 4)],
-        # The back of the train first: the third wheel's rim runs under the
-        # escape wheel's.
-        step("third spacer", FRONT), step("third arbor", FRONT),
-        step("third wheel", FRONT),
+        # The back of the train first. The third and escape arbors go into
+        # the back plate together, their wheels on them and meshed: the
+        # escape wheel, printed with its pinion, has matter behind the
+        # third wheel's teeth, and the third wheel's rim runs under the
+        # escape wheel's, so neither has a straight way home past the
+        # other alone.
+        step("third spacer", FRONT),
+        step(["third arbor", "third wheel", "escape arbor", "escape wheel"],
+             FRONT, note="both arbors with their wheels, meshed"),
         step("centre spacer", FRONT), step("centre wheel", FRONT),
         step("centre arbor", FRONT), step("drum", FRONT),
-        step("escape arbor", FRONT), step("escape wheel", FRONT),
         step("anchor arbor", FRONT), step("anchor", FRONT),
         step("pendulum rod", BACK),
         step("front plate", FRONT), step("cannon pinion", FRONT),
@@ -609,15 +622,6 @@ SEQUENCE = {
         step("hour hand", FRONT), step("minute hand", FRONT),
         step("bob", ROD), step("rating nut", ROD, thread=True)],
 }
-
-# The one step no straight path takes: stage 2's escape wheel, one printed
-# piece with its pinion, has matter behind the third wheel's teeth, and the
-# third wheel's rim passes under the escape wheel's -- each blocks the
-# other's way along its arbor, so the two go into the back plate together,
-# tilted into mesh. A sequence of straight paths cannot say that; the check
-# must find exactly this, against exactly that wheel, and nothing else.
-TOGETHER = {"stage 2": {"escape wheel": "third wheel"}}
-
 
 def asm_id(d, name):
     return next(p["id"] for p in d.call("list_parts")["parts"]
@@ -637,10 +641,8 @@ def rod_up(d):
 def sequence(a, s):
     """The stage's assembly sequence, stated on its assembly and checked:
     every step goes home against everything placed before it, at the
-    print's closing. A stage that goes together (stage 1) states it as an
-    `assembly_sequence` requirement too; any step that fails stops the run,
-    naming it, but stage 2's escape wheel against the third wheel
-    (TOGETHER), which must fail just so."""
+    print's closing, and the stage states it as an `assembly_sequence`
+    requirement too; any step that fails stops the run, naming it."""
     d = a.d
     a.activate()
     up = rod_up(d)
@@ -651,7 +653,6 @@ def sequence(a, s):
     t0 = time.time()
     r = d.call("check_assembly_sequence", _timeout=3600)
     secs = time.time() - t0
-    together = TOGETHER.get(a.name, {})
     out, bad = {}, []
     for row in r["steps"]:
         name = row["name"]
@@ -661,14 +662,6 @@ def sequence(a, s):
         out[name]["moves"] = (row.get("path") or {}).get("moves")
         if row["pass"]:
             continue
-        if together.get(name) == row.get("worst_against"):
-            print(f"  {name}: goes in with the {row['worst_against']}, "
-                  f"tilted into mesh -- straight along its arbor it is "
-                  f"forced {row['interfering_mm']:.1f} mm, "
-                  f"{row['worst_depth_mm']:.2f} mm into the "
-                  f"{row['worst_against']}")
-            out[name]["together_with"] = row["worst_against"]
-            continue
         bad.append(f"step {row['step']} {name}: "
                    + (row.get("error") or
                       f"forced {row.get('interfering_mm', 0):.2f} mm against "
@@ -676,28 +669,23 @@ def sequence(a, s):
                       f"against {row.get('worst_against')}"))
     if r["missing"]:
         bad.append(f"no step places {r['missing']}")
-    missed = [n for n, w in together.items() if out.get(n, {}).get(
-        "together_with") != w]
-    if missed:
-        bad.append(f"{missed} went in alone: TOGETHER is stale")
     print(f"  {a.name} assembly sequence: {len(r['steps'])} steps, "
           f"checked against everything before each in {secs:.0f} s"
           + ("" if bad else ", every one goes home"))
     if bad:
         raise SystemExit(f"clock: {a.name} cannot be put together: {bad}")
-    if not together:
-        doc = asm_id(d, a.name)
-        rid = d.call("add_requirement", name=f"{a.name} goes together",
-                     measure={"kind": "assembly_sequence", "document": doc},
-                     bound={"kind": "pass"},
-                     source="the order it is built in "
-                            "(docs/assemblies/README.md#assembly-sequences)"
-                     )["id"]
-        res = d.call("check_requirements", ids=[rid], _timeout=3600)
-        st = res["requirements"][0]["state"]
-        if st != "pass":
-            raise SystemExit(f"clock: {a.name}'s assembly_sequence "
-                             f"requirement is {st}")
+    doc = asm_id(d, a.name)
+    rid = d.call("add_requirement", name=f"{a.name} goes together",
+                 measure={"kind": "assembly_sequence", "document": doc},
+                 bound={"kind": "pass"},
+                 source="the order it is built in "
+                        "(docs/assemblies/README.md#assembly-sequences)"
+                 )["id"]
+    res = d.call("check_requirements", ids=[rid], _timeout=3600)
+    st = res["requirements"][0]["state"]
+    if st != "pass":
+        raise SystemExit(f"clock: {a.name}'s assembly_sequence "
+                         f"requirement is {st}")
     return {"seconds": secs, "steps": out}
 
 
@@ -1275,7 +1263,7 @@ def assembly_lines(s, checks):
         out.append(f"{chr(10) if out else ''}**{stage.capitalize()}:**"
                    "\n")
         for x in SEQUENCE[stage]:
-            name = x["occurrence"]
+            name = step_name(x)
             r = rows.get(name) or {}
             way = {str(FRONT): "from the front", str(BACK): "from the back",
                    ROD: "up the rod"}.get(str(x.get("direction")),
@@ -1283,8 +1271,8 @@ def assembly_lines(s, checks):
             if x.get("direction") is None:
                 out.append(f"- {name}: the base")
                 continue
-            if r.get("together_with"):
-                how = f"in together with the {r['together_with']}, tilted"
+            if "occurrences" in x:
+                how = "together, as one"
             elif x.get("thread"):
                 how = "screwed on"
             else:

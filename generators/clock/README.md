@@ -103,14 +103,15 @@ default 1 s, so a beat every half second) and the print profile, through
   stage-1 drum in front of it, the front or dial nuts, the dial and the
   hands, and the bob and rating nut up the rod -- every part going on
   from the end `clock_spec.ENTRY` names relative to what carries it, and
-  checked against everything placed before it. Stage 1 states it as an
-  `assembly_sequence` requirement; the card lists the steps in order.
-  Stage 2's escape wheel and third wheel go into the back plate
-  **together**, tilted into mesh: the escape wheel, printed with its
-  pinion, has matter behind the third wheel's teeth, and the third
-  wheel's rim runs under the escape wheel's, so neither has a straight
-  way home past the other. The check finds exactly that (`TOGETHER`)
-  and nothing else; the run stops on any other failing step.
+  checked against everything placed before it. Each stage states it as
+  an `assembly_sequence` requirement; the card lists the steps in order.
+  Stage 2's third and escape arbors go into the back plate **together**,
+  their wheels on them and meshed -- one group step, moved as one: the
+  escape wheel, printed with its pinion, has matter behind the third
+  wheel's teeth, and the third wheel's rim runs under the escape wheel's,
+  so neither has a straight way home past the other alone (lifted 3.1 mm
+  the escape piece overlaps the third wheel's teeth 1.88 mm). The run
+  stops on any failing step.
 - **The shafts print lying** (the arbors and the pillars): stood on end
   they came off the bed (check_print's
   [slender](../../docs/tolerances/README.md#slender) item fails them, 25:1
@@ -206,8 +207,8 @@ for.
 - both stages' assembly sequences: every part slid (or screwed) from
   clear to its seat in order, against everything placed before it, no
   further under interference than its own press, as printed (the hole
-  allowance a side) -- stage 2's escape wheel found going in with the
-  third wheel and nothing else failing;
+  allowance a side) -- stage 2's third and escape arbors as one group --
+  and each stage's `assembly_sequence` requirement passing;
 - **negative control**: the stage-1 escape arbor as first printed
   (`build_arbor_first`: round pivots, its D from the back plate's face to
   the front) with the escape wheel must fail the insertion check from
