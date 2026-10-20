@@ -740,10 +740,12 @@ which writes once the views have landed); the format is chosen by extension and 
   dimensions, dangling after an edit, cost reporting, `fast`, `hidden`,
   `budget_s`, export).
 - GUI: `drawing/a_slow_drawing_tab_does_not_stall_the_frame` (a spring's
-  sheet, never shown, clicked: no frame of the click or of the projection
-  costs 250 ms of main-thread time, the placeholder is drawn meanwhile, and
-  the view lands having cost a second or more -- on main the click itself
-  held the frame for the whole projection), `drawing/a_cancelled_projection_resumes`
+  sheet, never shown, clicked: the view is still projecting after the
+  click, no frame of the click or of the projection costs a quarter of the
+  projection's own time (measured under the same load, so a busy machine
+  moves both), the placeholder is drawn meanwhile, and the view lands having
+  cost a second or more -- on main the click itself held the frame for the
+  whole projection), `drawing/a_cancelled_projection_resumes`
   (the bar's Cancel, the placeholder kept with the error, Update views);
   `drawing/build_a_drawing_by_clicking`;
   `drawing/datum_and_frame_by_clicking` (a datum and the frames naming it
