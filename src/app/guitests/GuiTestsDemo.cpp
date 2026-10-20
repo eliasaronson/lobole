@@ -558,7 +558,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     ShowPanel(ctx, ui::kPanelModel);
     const std::string bodyRow =
         "//###Model/**/" + Doc()->GetBodies().at(0).name + "##body";
-    for (const char* material : {"Brass", "Walnut", "Carbon Fibre"}) {
+    for (const char* material : {"Copper", "Walnut", "Carbon Fibre"}) {
       ctx->ItemClick(bodyRow.c_str(), ImGuiMouseButton_Right);
       ctx->Yield();
       ctx->MenuClick((std::string("//$FOCUSED/Material/") + material).c_str());
