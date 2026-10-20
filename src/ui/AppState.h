@@ -1726,8 +1726,22 @@ struct AppState {
     uint32_t meshId = 0;
     uint64_t occurrenceId = 0; // 0 on a part tab
     size_t bodyIndex = 0;      // into the tab's bodies, as documentMeshes
+    size_t leaf = SIZE_MAX;    // its sectionCapLeaves entry (an assembly)
   };
   std::vector<SectionCapMesh> sectionCapMeshes;
+  // An assembly's leaves as their caps were cut: where each stood. A
+  // playback (motion or sequence) moves parts without a resync, and caps
+  // are baked in world space, so FollowPlaybackCaps moves a leaf's caps
+  // with it -- or cuts them again where a move does not keep the plane --
+  // and hides the caps of a part a sequence has not put in yet
+  // (docs/assemblies/README.md#playing-and-filming-a-sequence).
+  struct SectionCapLeaf {
+    uint64_t occurrenceId = 0;
+    std::vector<uint64_t> innerPath;
+    glm::dmat4 docLocal{1.0}; // the leaf inside its occurrence
+    glm::dmat4 world{1.0};    // where its caps were cut
+  };
+  std::vector<SectionCapLeaf> sectionCapLeaves;
   // Topology shape-guide ghost (TO4): a translucent render of a topology
   // study's optimized iso-surface, shown in the normal modeling workspace so
   // the user can re-model against it. `topoGhostStudyId` selects the study

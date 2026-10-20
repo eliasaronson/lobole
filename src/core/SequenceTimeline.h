@@ -90,6 +90,11 @@ std::optional<glm::dmat4> PoseAt(const Timeline& tl, uint64_t occurrence,
 glm::dmat4 HomeAt(const Timeline& tl, uint64_t occurrence,
                   const glm::dmat4& seat, double t);
 
+// What is moving at `t`: the occurrences of the step travelling home
+// (from appearing to seated), or those a pose step is turning or sliding
+// (shown by then, and moved by its solve). None between steps.
+std::vector<uint64_t> MovingAt(const Timeline& tl, double t);
+
 // How far from its seat a step's parts are at `t`, mm along the path (0
 // home, travelMm at the start).
 double RemainingAt(const TimelineStep& s, double t);

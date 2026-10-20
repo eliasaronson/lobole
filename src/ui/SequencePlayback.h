@@ -13,6 +13,7 @@
 #include <memory>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace ui {
 
@@ -65,6 +66,14 @@ struct SequenceShow {
   bool synced = false;  // the renderers have been resynced to show it
   double t = 0.0;       // seconds into the timeline
   double lastTick = -1.0;
+  // What is shown in the highlight (the step's moving parts) and the pace
+  // (a ratio: 2 plays the timeline twice as fast), as this showing has
+  // them: Play takes the panel's, a video its request's.
+  bool highlight = true;
+  double speed = 1.0;
+  // The panel's own, for the next Play.
+  bool playHighlight = true;
+  double playSpeed = 1.0;
   std::string refusal; // why the last Play could not play
 };
 
@@ -85,6 +94,13 @@ bool SequencePlaybackWorld(const AppState& state, uint64_t occurrenceId,
                            glm::dmat4& world);
 // A part not yet put in: hidden while playback shows the timeline.
 bool SequencePlaybackHides(const AppState& state, uint64_t occurrenceId);
+// The occurrences the step on show is moving -- travelling home, or turned
+// by a pose -- when the showing highlights them; else none.
+std::vector<uint64_t> SequenceHighlighted(const AppState& state);
+// Lights them (their meshes and section caps) in the selection's colour.
+// Part of the selection projection (SyncSelectionHighlights), and of a
+// video's frame, which the capture leaves untinted otherwise.
+void HighlightSequenceStep(AppState& state);
 
 // The assembly panel's sequence section: Play / Stop and a scrub.
 void DrawSequenceSection(AppState& state);

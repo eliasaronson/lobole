@@ -291,6 +291,7 @@ void SyncDocumentRenderers(AppState& state) {
   for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
     state.meshRenderer->RemoveMesh(cap.meshId);
   state.sectionCapMeshes.clear();
+  state.sectionCapLeaves.clear();
   // So are a job's fixtures.
   for (const uint32_t id : state.fixtureInstances)
     state.meshRenderer->RemoveInstance(id);
@@ -1270,6 +1271,166 @@ bool SectionPlaneInPartSpace(const glm::vec4& world, const glm::mat4& xf,
   return true;
 }
 
+namespace {
+
+// Where a leaf of `occ` is DRAWN: its document placement `docWorld` (the
+// flattened tree's), as the playbacks show it -- a motion run's pose or a
+// sequence's, a flexible unit's moving leaf on its own -- and offset by
+// the exploded view's steps. The raster sync and the caps that follow a
+// playback (FollowPlaybackCaps) both place by it.
+glm::dmat4 DrawnLeafWorld(AppState& state, const Occurrence& occ,
+                          const glm::dmat4& docWorld,
+                          const std::vector<uint64_t>& innerIds) {
+  // Motion playback swaps the unit's solved placement for the pose the
+  // run recorded — display-only. Only when playing, so every other frame
+  // is computed exactly as before (the pixel gate is byte-exact).
+  glm::dmat4 world =
+      glm::translate(glm::dmat4(1.0), ExplodeOffset(state, occ.id)) * docWorld;
+  glm::dmat4 played;
+  if (MotionPlaybackWorld(state, occ.id, played)) {
+    glm::dmat4 local = glm::inverse(OccurrenceMatrix(occ)) * docWorld;
+    glm::dmat4 leaf; // a moving leaf of a flexible placement (v129)
+    if (MotionPlaybackLocal(state, occ, innerIds, local, leaf))
+      local = leaf;
+    world = glm::translate(glm::dmat4(1.0), ExplodeOffset(state, occ.id)) *
+            played * local;
+  }
+  // A moving part of a flexible unit may explode on its own (v130), on top
+  // of the unit's step. Only when it has one: the pixel gate is byte-exact.
+  if (const glm::dvec3 inner = ExplodeInnerOffset(state, occ.id, innerIds);
+      inner != glm::dvec3(0.0))
+    world = glm::translate(glm::dmat4(1.0), inner) * world;
+  return world;
+}
+
+// Section caps (I3) of one leaf placed at `xf`, recorded against leaf
+// `leaf` (a sectionCapLeaves index). Without these an assembly section
+// shows the inside of hollow shells — the geometry is clipped by the
+// shader but the cut has no surface, which reads as "section view is
+// broken" rather than as a section. One call per LEAF instance: the plane
+// lands somewhere different in each part's own space, and a part nested
+// two levels down gets there through its composed world transform.
+void AddLeafCaps(AppState& state, const Document& part,
+                 const std::vector<SharedBody>& shared, const glm::mat4& xf,
+                 uint64_t occurrenceId, size_t leaf) {
+  const ClipPlaneArray planes = SectionPlanes(state);
+  std::vector<glm::vec3> capColors;
+  std::vector<float> capAlphas;
+  const size_t first = state.sectionCapMeshes.size();
+  for (size_t i = 0; i < planes.size(); i++) {
+    glm::vec3 localOrigin, localNormal;
+    if (!SectionPlaneInPartSpace(planes[i], xf, localOrigin, localNormal))
+      continue;
+    if (capColors.empty()) {
+      capColors.reserve(shared.size());
+      for (const SharedBody& sb : shared) {
+        capColors.push_back(sb.hasMaterial ? sb.albedo : sb.palette);
+        capAlphas.push_back(sb.alpha); // glass caps stay see-through
+      }
+    }
+    // The other sections, also in this part's space, trim this cap.
+    std::vector<glm::dvec4> trim;
+    for (size_t j = 0; j < planes.size(); j++) {
+      glm::vec3 to, tn;
+      if (j != i && SectionPlaneInPartSpace(planes[j], xf, to, tn))
+        trim.push_back(glm::vec4(tn, glm::dot(to, tn)));
+    }
+    // CACHED, and this is the path that pays: the plane is put into the
+    // PART's space, so a part that has not moved between two poses of a
+    // mechanism asks for the same cap of the same bodies about the same
+    // plane. Scrubbing the air-cooled engine with one section on cost
+    // 913 ms/step against 9.5 without — an OCC half-space boolean per
+    // body, every step, for 27 parts of which four move.
+    AppendCapMeshes(state,
+                    Measure::SectionCaps(part.GetBodies(), localOrigin,
+                                         localNormal, trim,
+                                         &state.sectionCapCache),
+                    capColors, xf, glm::normalize(glm::vec3(planes[i])),
+                    capAlphas, occurrenceId);
+  }
+  for (size_t c = first; c < state.sectionCapMeshes.size(); c++)
+    state.sectionCapMeshes[c].leaf = leaf;
+}
+
+// Does the rigid move `d` take every section plane onto itself? Then a cap
+// cut before it is the cap after it, moved by `d`: the plane in the part's
+// space is unchanged, so the cut is the same.
+bool KeepsPlanes(const glm::dmat4& d, const ClipPlaneArray& planes) {
+  for (const glm::vec4& p : planes) {
+    const glm::dvec3 n(p);
+    if (glm::length(n) < 1e-9)
+      continue;
+    const glm::dvec3 un = glm::normalize(n);
+    if (glm::length(glm::dmat3(d) * un - un) > 1e-7 ||
+        std::abs(glm::dot(un, glm::dvec3(d[3]))) > 1e-5)
+      return false;
+  }
+  return true;
+}
+
+} // namespace
+
+void FollowPlaybackCaps(AppState& state) {
+  if (!state.assembly || !state.meshRenderer || state.sectionCapLeaves.empty())
+    return;
+  const ClipPlaneArray planes = SectionPlanes(state);
+  if (planes != state.syncedSectionPlanes)
+    return; // the next resync cuts them all again
+  // Every leaf: its caps moved by how far it has moved since they were cut,
+  // or, where that move turns or slides it across a plane, cut again.
+  std::vector<size_t> recut;
+  std::vector<glm::dmat4> nowAt(state.sectionCapLeaves.size());
+  for (size_t i = 0; i < state.sectionCapLeaves.size(); i++) {
+    const AppState::SectionCapLeaf& leaf = state.sectionCapLeaves[i];
+    const Occurrence* occ = state.assembly->FindById(leaf.occurrenceId);
+    if (occ == nullptr)
+      continue;
+    nowAt[i] = DrawnLeafWorld(
+        state, *occ, OccurrenceMatrix(*occ) * leaf.docLocal, leaf.innerPath);
+    const glm::dmat4 d = nowAt[i] * glm::inverse(leaf.world);
+    if (!KeepsPlanes(d, planes)) {
+      recut.push_back(i);
+      continue;
+    }
+    for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+      if (cap.leaf == i)
+        state.meshRenderer->SetInstanceTransform(cap.meshId, glm::mat4(d));
+  }
+  if (!recut.empty() && state.partRenderCache) {
+    const PartRenderCacheStore& cache = *state.partRenderCache;
+    const std::vector<assembly::FlatInstance> flat =
+        FlattenActiveAssembly(state);
+    for (const size_t i : recut) {
+      std::erase_if(state.sectionCapMeshes,
+                    [&](const AppState::SectionCapMesh& cap) {
+                      if (cap.leaf != i)
+                        return false;
+                      state.meshRenderer->RemoveMesh(cap.meshId);
+                      return true;
+                    });
+      AppState::SectionCapLeaf& leaf = state.sectionCapLeaves[i];
+      for (const assembly::FlatInstance& inst : flat) {
+        if (inst.rootOccurrenceId != leaf.occurrenceId ||
+            inst.innerIds != leaf.innerPath || !inst.visible ||
+            inst.part == nullptr)
+          continue;
+        const auto it = cache.parts.find(
+            PartRenderKey{inst.partId, inst.configurationId, inst.material});
+        if (it == cache.parts.end())
+          break;
+        AddLeafCaps(state, *inst.part, it->second.bodies, glm::mat4(nowAt[i]),
+                    leaf.occurrenceId, i);
+        leaf.world = nowAt[i];
+        break;
+      }
+    }
+  }
+  // What a sequence has not put in yet has no cut face either.
+  for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+    state.meshRenderer->SetInstanceVisible(
+        cap.meshId, !SequencePlaybackHides(state, cap.occurrenceId));
+}
+
 void SyncAssemblyRenderers(AppState& state) {
   if (!state.partRenderCache)
     state.partRenderCache = std::make_shared<PartRenderCacheStore>();
@@ -1446,29 +1607,9 @@ void SyncAssemblyRenderers(AppState& state) {
 
     // The flattened world transform, offset by the TOP-LEVEL occurrence's
     // explode vector — exploding a sub-assembly moves the whole unit, not
-    // each of its parts to its own corner.
-    //
-    // Motion playback swaps the unit's solved placement for the pose the
-    // run recorded — display-only. Only when playing, so every other frame
-    // is computed exactly as before (the pixel gate is byte-exact).
-    glm::dmat4 world =
-        glm::translate(glm::dmat4(1.0), ExplodeOffset(state, occ.id)) *
-        inst.world;
-    glm::dmat4 played;
-    if (MotionPlaybackWorld(state, occ.id, played)) {
-      glm::dmat4 local = glm::inverse(OccurrenceMatrix(occ)) * inst.world;
-      glm::dmat4 leaf; // a moving leaf of a flexible placement (v129)
-      if (MotionPlaybackLocal(state, occ, inst.innerIds, local, leaf))
-        local = leaf;
-      world = glm::translate(glm::dmat4(1.0), ExplodeOffset(state, occ.id)) *
-              played * local;
-    }
-    // A moving part of a flexible unit may explode on its own (v130), on top
-    // of the unit's step. Only when it has one: the pixel gate is byte-exact.
-    if (const glm::dvec3 inner =
-            ExplodeInnerOffset(state, occ.id, inst.innerIds);
-        inner != glm::dvec3(0.0))
-      world = glm::translate(glm::dmat4(1.0), inner) * world;
+    // each of its parts to its own corner — and posed by a playback.
+    const glm::dmat4 world =
+        DrawnLeafWorld(state, occ, inst.world, inst.innerIds);
     // The model composes in double; the renderers take float, here.
     const glm::mat4 xf(world);
     for (size_t bi = 0; bi < it->second.bodies.size(); bi++) {
@@ -1521,45 +1662,20 @@ void SyncAssemblyRenderers(AppState& state) {
            inst.innerIds, sb.tess->edges, inst.configurationId});
     }
 
-    // Section caps (I3). Without these an assembly section shows the inside
-    // of hollow shells — the geometry is clipped by the shader but the cut
-    // has no surface, which reads as "section view is broken" rather than as
-    // a section. One call per LEAF instance: the plane lands somewhere
-    // different in each part's own space, and a part nested two levels down
-    // gets there through its composed world transform.
-    const ClipPlaneArray planes = SectionPlanes(state);
-    std::vector<glm::vec3> capColors;
-    std::vector<float> capAlphas;
-    for (size_t i = 0; i < planes.size(); i++) {
-      glm::vec3 localOrigin, localNormal;
-      if (!SectionPlaneInPartSpace(planes[i], xf, localOrigin, localNormal))
-        continue;
-      if (capColors.empty()) {
-        capColors.reserve(it->second.bodies.size());
-        for (const SharedBody& sb : it->second.bodies) {
-          capColors.push_back(sb.hasMaterial ? sb.albedo : sb.palette);
-          capAlphas.push_back(sb.alpha); // glass caps stay see-through
-        }
-      }
-      // The other sections, also in this part's space, trim this cap.
-      std::vector<glm::dvec4> trim;
-      for (size_t j = 0; j < planes.size(); j++) {
-        glm::vec3 to, tn;
-        if (j != i && SectionPlaneInPartSpace(planes[j], xf, to, tn))
-          trim.push_back(glm::vec4(tn, glm::dot(to, tn)));
-      }
-      // CACHED, and this is the path that pays: the plane is put into the
-      // PART's space, so a part that has not moved between two poses of a
-      // mechanism asks for the same cap of the same bodies about the same
-      // plane. Scrubbing the air-cooled engine with one section on cost
-      // 913 ms/step against 9.5 without — an OCC half-space boolean per
-      // body, every step, for 27 parts of which four move.
-      AppendCapMeshes(state,
-                      Measure::SectionCaps(part->GetBodies(), localOrigin,
-                                           localNormal, trim,
-                                           &state.sectionCapCache),
-                      capColors, xf, glm::normalize(glm::vec3(planes[i])),
-                      capAlphas, occ.id);
+    // Section caps (I3), recorded with where the leaf stood, so a playback
+    // can move them with it (FollowPlaybackCaps).
+    if (!SectionPlanes(state).empty()) {
+      const size_t leaf = state.sectionCapLeaves.size();
+      state.sectionCapLeaves.push_back(
+          {occ.id, inst.innerIds,
+           glm::inverse(OccurrenceMatrix(occ)) * inst.world, world});
+      const size_t firstCap = state.sectionCapMeshes.size();
+      AddLeafCaps(state, *part, it->second.bodies, xf, occ.id, leaf);
+      // A part a sequence has not put in yet has no cut face either.
+      if (SequencePlaybackHides(state, occ.id))
+        for (size_t c = firstCap; c < state.sectionCapMeshes.size(); c++)
+          state.meshRenderer->SetInstanceVisible(
+              state.sectionCapMeshes[c].meshId, false);
     }
   }
   // Land every upload this sync recorded before anything reads the assets.

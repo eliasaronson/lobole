@@ -13,6 +13,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJob.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/RendererSync.h" // FollowPlaybackCaps
 #include "ui/SequencePlayback.h"
 
 #include "cad/CADKernel.h" // ArmOccSignalHandlers
@@ -645,6 +646,7 @@ void PushAllLive(AppState& state) {
     return;
   for (const Occurrence& o : state.assembly->GetOccurrences())
     PushOccurrenceLive(state, o.id);
+  FollowPlaybackCaps(state); // a section's cut faces go with them
 }
 } // namespace
 

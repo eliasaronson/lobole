@@ -16,6 +16,7 @@
 #include "ui/ViewActions.h"
 
 #include "core/Literals.h"
+#include "render/MeshRenderer.h" // InstanceHighlightRanges (the step's)
 #include "render/StockRenderer.h" // Viewport(): what the capture restores
 #include "thirdparty/stb_image.h"
 #include "ui/ImportJob.h"
@@ -919,6 +920,36 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // The slider holds a float of seconds: within its step of the middle.
     IM_CHECK(std::abs(shown[3][2] - seat[3][2] - 10.0) < 0.05);
     IM_CHECK(ui::OccurrenceMatrix(*topNow) == seat); // nothing solved
+    // On its way it is lit, every mesh of it, and the base is not.
+    IM_CHECK(ui::SequenceHighlighted(*s_App) == std::vector<uint64_t>{topOcc});
+    const auto lit = [](uint64_t occ) {
+      bool any = false, all = true;
+      for (const ui::DocumentRenderMesh& m : s_App->documentMeshes)
+        if (m.occurrenceId == occ) {
+          const bool on =
+              !s_App->meshRenderer->InstanceHighlightRanges(m.meshId).empty();
+          any |= on;
+          all &= on;
+        }
+      return any && all;
+    };
+    IM_CHECK(lit(topOcc));
+    IM_CHECK(!lit(baseOcc));
+
+    // Played on from near its end at the panel's speed, it stops there,
+    // put together, and nothing is lit.
+    ctx->ItemInputValue("//Motion###ToolWindow/###sequence_speed", 4.0f);
+    ctx->ItemInputValue("//Motion###ToolWindow/###sequence_t",
+                        float(tl.seconds - 0.5));
+    ctx->ItemClick("//Motion###ToolWindow/###sequence_play");
+    IM_CHECK(WaitFor(ctx, "played to its end",
+                     [] { return !s_App->sequenceShow->playing; }));
+    IM_CHECK_EQ(s_App->sequenceShow->speed, 4.0);
+    IM_CHECK_EQ(s_App->sequenceShow->t, tl.seconds);
+    IM_CHECK(ui::ShownSequence(*s_App) != nullptr); // held, not looped
+    ctx->Yield(2);
+    IM_CHECK(ui::DisplayMatrixOf(*s_App, *topNow) == seat);
+    IM_CHECK(!lit(topOcc));
 
     ctx->ItemClick("//Motion###ToolWindow/###sequence_stop");
     ctx->Yield(2);

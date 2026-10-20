@@ -93,6 +93,38 @@ Timeline Time(std::vector<TimelineStep> steps, double sizeMm,
   return tl;
 }
 
+std::vector<uint64_t> MovingAt(const Timeline& tl, double t) {
+  std::vector<uint64_t> out;
+  for (const TimelineStep& s : tl.steps) {
+    if (!s.IsPose()) {
+      if (s.appear <= t && t < s.end)
+        out.insert(out.end(), s.occurrences.begin(), s.occurrences.end());
+      continue;
+    }
+    if (t < s.start || t >= s.end)
+      continue;
+    // What its solve moves, of what is shown by then.
+    for (const auto& [occ, first] : s.strides.front()) {
+      const auto shown = tl.stepOf.find(occ);
+      if (shown != tl.stepOf.end() && tl.steps[shown->second].appear > t)
+        continue;
+      for (size_t k = 1; k < s.strides.size(); k++) {
+        const auto it = s.strides[k].find(occ);
+        if (it == s.strides[k].end())
+          continue;
+        double moved = 0.0;
+        for (int c = 0; c < 4; c++)
+          moved = std::max(moved, glm::length(it->second[c] - first[c]));
+        if (moved > 1e-6) {
+          out.push_back(occ);
+          break;
+        }
+      }
+    }
+  }
+  return out;
+}
+
 double RemainingAt(const TimelineStep& s, double t) {
   if (s.base || s.travelMm <= 0.0 || t >= s.end)
     return 0.0;

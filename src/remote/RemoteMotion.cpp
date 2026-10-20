@@ -243,7 +243,8 @@ constexpr MethodDoc MotionMethods[] = {
      remote::NotInBatch},
     {"export_assembly_video",
      "Film the assembly SEQUENCE going together: {path, format?, width?, "
-     "height?, fps?, frames?, quality?, async?}, the request, the job "
+     "height?, fps?, frames?, quality?, speed?, highlight?, async?}, the "
+     "request, the job "
      "('motion-video') and the answer of export_motion_video. Each step's "
      "occurrences appear at its turn, still for a moment where they start, "
      "then travel home along the path the sequence CHECK took -- its line, "
@@ -259,8 +260,15 @@ constexpr MethodDoc MotionMethods[] = {
      "unchanged). A sequence that does not check is REFUSED, naming its "
      "first failing step (or what no step places). The assembly is not "
      "moved; the frames are the viewport's render from the current camera, "
-     "width x height PIXELS, `fps` frames per SECOND (60).",
-     "async, format, fps, frames, height, path, quality, width",
+     "width x height PIXELS, `fps` frames per SECOND (60). The step's "
+     "moving parts -- travelling home, or turned by a pose -- are drawn in "
+     "the selection's colour and go back to their own once home "
+     "(`highlight`, default true); `speed` is the pace, a RATIO of the "
+     "timeline's own (default 1; 2 films it in half the frames). Parts not "
+     "yet put in are hidden, their section caps too, and a section's caps "
+     "move with the parts they cut.",
+     "async, format, fps, frames, height, highlight, path, quality, speed, "
+     "width",
      remote::NotInBatch},
     {"motion_video_status",
      "The video export in progress, if any ({running, fraction}), and the "
@@ -1176,6 +1184,18 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error("frames must be at least 2");
     }
     req.quality = p.value("quality", std::string{});
+    if (sequence && p.contains("speed")) {
+      if (!p.at("speed").is_number() || !(p.at("speed").get<double>() > 0.0))
+        throw std::runtime_error("speed is a ratio of the timeline's own pace "
+                                 "(2 plays it twice as fast): a positive "
+                                 "number");
+      req.speed = p.at("speed").get<double>();
+    }
+    if (sequence && p.contains("highlight")) {
+      if (!p.at("highlight").is_boolean())
+        throw std::runtime_error("highlight is true or false");
+      req.highlight = p.at("highlight").get<bool>();
+    }
     // Read before the job starts: a mistyped `async` refused AFTER it would
     // leave a video rendering behind an error.
     const bool async = p.value("async", false);

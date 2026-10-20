@@ -134,6 +134,10 @@ struct MotionVideoRequest {
   double fps = 0.0;               // frames per second; 0 = derived
   int frames = 0;                 // 0 = derived
   std::string quality;            // empty = medium; not for png
+  // An assembly sequence's film only: its pace (a ratio of the timeline's
+  // own), and whether the step's moving parts are highlighted.
+  double speed = 1.0;
+  bool highlight = true;
 };
 
 // What an export will do, every default resolved.

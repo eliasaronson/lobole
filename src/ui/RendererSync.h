@@ -65,6 +65,14 @@ void SyncRenderersToDocument(AppState& state);
 // belonging to superseded geometry.
 bool RenderMeshesCurrent(AppState& state);
 
+// An assembly's section caps where a playback (motion or sequence) shows
+// its parts, between resyncs: a cap moved with its part when the move keeps
+// the section plane (a piston down a bore cut along it), cut again where
+// the part now stands when it does not (a crank turning across it), and
+// hidden while a sequence has not put its part in. The playbacks call it
+// after pushing their poses; with no section it does nothing.
+void FollowPlaybackCaps(AppState& state);
+
 // Show a boolean-diff result ON the model: `missing` (in the reference and
 // not in what you are looking at) in red, `extra` (beyond the reference) in
 // green, both translucent. This is compare_geometry's `materialize` and the

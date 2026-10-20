@@ -200,3 +200,29 @@ TEST_CASE("A pose that moves nothing shown yet takes no time", "[sequence]") {
   REQUIRE(home.has_value());
   CHECK_THAT((*home)[0][1], WithinAbs(1.0, 1e-9)); // +X turned onto +Y
 }
+
+TEST_CASE("What is moving: a step's parts on their way, a pose's turned",
+          "[sequence]") {
+  // The base, then a crank (1) turned a quarter by a pose, then a pin (2)
+  // put in: the pin is in the pose's solve but not out yet, so the pose
+  // moves the crank alone.
+  TimelineStep pose;
+  for (int k = 0; k <= 9; k++) {
+    const glm::dmat4 r = glm::rotate(glm::dmat4(1.0), glm::radians(10.0 * k),
+                                     glm::dvec3(0.0, 0.0, 1.0));
+    pose.strides.push_back({{1, r}, {2, r}, {3, glm::dmat4(1.0)}});
+  }
+  const auto tl =
+      sequence::Time({Base(3), Down({1}, 30.0), pose, Down({2}, 20.0)}, 200.0);
+  const auto at = [&](double t) { return sequence::MovingAt(tl, t); };
+  const TimelineStep &crank = tl.steps[1], &p = tl.steps[2], &pin = tl.steps[3];
+  // From appearing to seated, the step's own; nothing once home.
+  CHECK(at(crank.appear) == std::vector<uint64_t>{1});
+  CHECK(at(0.5 * (crank.start + crank.end)) == std::vector<uint64_t>{1});
+  // The pose: the crank, which it turns -- not the base, which it leaves
+  // where it is, nor the pin, which is not out yet.
+  REQUIRE(p.end > p.start);
+  CHECK(at(0.5 * (p.start + p.end)) == std::vector<uint64_t>{1});
+  CHECK(at(0.5 * (pin.start + pin.end)) == std::vector<uint64_t>{2});
+  CHECK(at(tl.seconds - 0.1).empty());
+}

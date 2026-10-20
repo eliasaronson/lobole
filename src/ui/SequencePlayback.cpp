@@ -22,9 +22,11 @@
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "remote/RemoteInspection.h" // the sequence check
+#include "render/MeshRenderer.h"
 #include "ui/AppState.h"
 #include "ui/AssemblyActions.h"
 #include "ui/PanelLayout.h"
+#include "ui/RendererSync.h" // FollowPlaybackCaps
 #include "ui/TextFit.h"
 #include "ui/Widgets.h"
 
@@ -189,6 +191,7 @@ void PushAll(AppState& state) {
     return;
   for (const Occurrence& o : state.assembly->GetOccurrences())
     PushOccurrenceLive(state, o.id);
+  FollowPlaybackCaps(state); // a section's cut faces go with them
 }
 
 SequenceShow& ShowOf(AppState& state) {
@@ -358,6 +361,26 @@ bool SequencePlaybackHides(const AppState& state, uint64_t occurrenceId) {
          state.sequenceShow->t < tl->steps[it->second].appear;
 }
 
+std::vector<uint64_t> SequenceHighlighted(const AppState& state) {
+  const sequence::Timeline* tl = ShownSequence(state);
+  if (tl == nullptr || !state.sequenceShow->highlight)
+    return {};
+  return sequence::MovingAt(*tl, state.sequenceShow->t);
+}
+
+void HighlightSequenceStep(AppState& state) {
+  if (!state.meshRenderer)
+    return;
+  for (const uint64_t occ : SequenceHighlighted(state)) {
+    for (const DocumentRenderMesh& m : state.documentMeshes)
+      if (m.occurrenceId == occ)
+        state.meshRenderer->HighlightInstance(m.meshId);
+    for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+      if (cap.occurrenceId == occ)
+        state.meshRenderer->HighlightInstance(cap.meshId);
+  }
+}
+
 bool StartSequencePlayback(AppState& state, std::string* why) {
   StopMotionPlayback(state); // both place the same occurrences
   SequenceShow& sh = ShowOf(state);
@@ -383,6 +406,8 @@ bool StartSequencePlayback(AppState& state, std::string* why) {
   sh.playing = true;
   sh.pinned = false;
   sh.synced = false;
+  sh.highlight = sh.playHighlight;
+  sh.speed = sh.playSpeed;
   sh.t = 0.0;
   sh.lastTick = -1.0;
   return true;
@@ -438,9 +463,13 @@ void TickSequencePlayback(AppState& state, double now) {
   const double seconds = sh->poses->timeline->seconds;
   if (sh->playing && sh->lastTick >= 0.0) {
     const double dt = std::clamp(now - sh->lastTick, 0.0, 0.25);
-    sh->t += dt;
-    if (sh->t > seconds) // round again, from the base
-      sh->t = seconds > 0.0 ? std::fmod(sh->t, seconds) : 0.0;
+    sh->t += dt * sh->speed;
+    // It ends put together, and stays so: an assembly does not go round
+    // like a mechanism, and a loop back to the base alone undid the film.
+    if (sh->t >= seconds) {
+      sh->t = seconds;
+      sh->playing = false;
+    }
   }
   sh->lastTick = sh->playing ? now : -1.0;
   PushAll(state);
@@ -478,6 +507,8 @@ void DrawSequenceSection(AppState& state) {
     if (tl && sh->playing) {
       sh->playing = false;
     } else if (tl) {
+      if (sh->t >= tl->seconds) // at the end: again from the base
+        sh->t = 0.0;
       sh->playing = true;
       sh->lastTick = -1.0;
     } else {
@@ -493,6 +524,27 @@ void DrawSequenceSection(AppState& state) {
     row.Next(ButtonWidth("Stop"));
     if (ImGui::SmallButton("Stop###sequence_stop"))
       StopSequencePlayback(state);
+  }
+  {
+    // The pace and the highlight: the panel's, taken by the next Play and
+    // by the one playing now.
+    SequenceShow& show = ShowOf(state);
+    LeftLabel("Speed");
+    float speed = static_cast<float>(show.playSpeed);
+    if (ImGui::SliderFloat("###sequence_speed", &speed, 0.25f, 8.0f, "%.2gx",
+                           ImGuiSliderFlags_Logarithmic)) {
+      show.playSpeed = std::clamp(static_cast<double>(speed), 0.25, 8.0);
+      if (!show.pinned)
+        show.speed = show.playSpeed;
+    }
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("How fast it plays: 2x puts it together in half the "
+                        "time. Each step's own pace (one speed from the "
+                        "assembly's size) is kept.");
+    if (ImGui::Checkbox("Highlight the moving part###sequence_highlight",
+                        &show.playHighlight) &&
+        !show.pinned)
+      show.highlight = show.playHighlight;
   }
   if (tl) {
     float t = static_cast<float>(sh->t);
@@ -522,15 +574,19 @@ namespace {
 // The sequence's timeline as the poses a video films.
 class SequenceVideoPoses final : public VideoPoses {
 public:
-  explicit SequenceVideoPoses(std::shared_ptr<SequencePoses> p)
-      : m_poses(std::move(p)) {}
+  SequenceVideoPoses(std::shared_ptr<SequencePoses> p, double speed,
+                     bool highlight)
+      : m_poses(std::move(p)), m_speed(speed), m_highlight(highlight) {}
   bool Ready() const override { return m_poses->done.load(); }
   std::string Refusal() const override {
     return m_poses->error.empty()
                ? std::string()
                : "the assembly sequence cannot be filmed: " + m_poses->error;
   }
-  double Seconds() const override { return m_poses->timeline->seconds; }
+  // The film's length: the timeline's at the pace asked.
+  double Seconds() const override {
+    return m_poses->timeline->seconds / m_speed;
+  }
   void Show(AppState& state, double fraction) override {
     SequenceShow& sh = ShowOf(state);
     if (sh.poses != m_poses || !sh.showing || !sh.pinned) {
@@ -541,8 +597,15 @@ public:
       sh.synced = true;
       state.syncedDocumentVersion = UINT64_MAX; // a full resync reads it too
     }
+    sh.highlight = m_highlight;
+    sh.speed = m_speed;
     sh.t = std::clamp(fraction, 0.0, 1.0) * m_poses->timeline->seconds;
     PushAll(state);
+    // The frame's tint is the step's alone: the capture shows no selection.
+    if (state.meshRenderer) {
+      state.meshRenderer->ClearFaceHighlight();
+      HighlightSequenceStep(state);
+    }
   }
   bool Release(AppState& state) override {
     m_poses->cancel.store(true);
@@ -554,6 +617,8 @@ public:
 
 private:
   std::shared_ptr<SequencePoses> m_poses;
+  double m_speed = 1.0;
+  bool m_highlight = true;
 };
 
 } // namespace
@@ -567,6 +632,9 @@ bool StartAssemblyVideo(AppState& state, const MotionVideoRequest& req,
   };
   if (const std::string no = VideoJobRunningRefusal(state); !no.empty())
     return fail(no);
+  if (!(req.speed > 0.0))
+    return fail("speed is a ratio of the timeline's own pace and must be "
+                "positive");
   if (!state.assembly)
     return fail("the active document is not an assembly");
   MotionVideoPlan plan;
@@ -592,7 +660,8 @@ bool StartAssemblyVideo(AppState& state, const MotionVideoRequest& req,
   if (planOut)
     *planOut = plan;
   return StartVideoJob(state, plan, req.frames,
-                       std::make_shared<SequenceVideoPoses>(std::move(poses)),
+                       std::make_shared<SequenceVideoPoses>(
+                           std::move(poses), req.speed, req.highlight),
                        "Assembly video '" + plan.studyName + "' to " +
                            std::filesystem::path(plan.path).filename().string(),
                        error);

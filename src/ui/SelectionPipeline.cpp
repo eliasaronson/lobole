@@ -11,10 +11,11 @@
 #include "ui/AppActionsInternal.h" // PartDocById, DisplayMatrix (assembly)
 #include "ui/CamTool.h"            // CamEngraveCurveAt (a job tab's sketches)
 #include "ui/DocumentSlots.h"
-#include "ui/FeatureEditor.h" // SlotPickClicked (U3)
+#include "ui/FeatureEditor.h"   // SlotPickClicked (U3)
 #include "ui/FlexibleActions.h" // a moving part of a flexible unit
-#include "ui/JobActions.h"    // JobPlacedBodies (a job tab's bodies)
+#include "ui/JobActions.h"      // JobPlacedBodies (a job tab's bodies)
 #include "ui/MeasureActions.h"
+#include "ui/SequencePlayback.h"
 #include "ui/SketchInteraction.h" // FaceElementRef
 #include "ui/SketchOverlay.h"     // EdgeElementRef, AppendPrimLine
 
@@ -799,6 +800,8 @@ void SyncSelectionHighlights(AppState& state) {
       }
     }
     AppendSimulationFaceTints(state);
+    // The step a sequence being played is putting in.
+    HighlightSequenceStep(state);
     return;
   }
   // Every Face item highlights — SetFaceHighlight is additive per instance

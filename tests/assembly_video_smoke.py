@@ -17,6 +17,13 @@ frames:
     (those differing from the frame before it appeared) have a top edge
     that only goes down the picture, and some way;
   - it stays home: the last frames are one picture;
+  - highlighted: mid-way the pin is redder than the same frame filmed with
+    `highlight: false`, and home it is not; `speed: 2` films it in half
+    the frames, and speed 0 is refused;
+  - in SECTION, cut down the pin's axis: the first frame is a film of the
+    lug alone (the pin's cut face is hidden with it), the last is the
+    screenshot of the assembly as it stands, and held at its start the pin
+    is the screenshot of it put there (its cut face goes with it);
   - the assembly is where it was; and with the pin put in before the fork
     the export is refused naming the step that fails (the fork);
   - a POSE step: a crank put in turned a quarter, then turned on to a
@@ -147,10 +154,10 @@ def cranked(d):
     fastened(d, "cap on pin", cr, cp)
 
 
-def film(d, root, name):
+def film(d, root, name, width=W, height=H, **kw):
     out = os.path.join(root, name)
-    r = d.call("export_assembly_video", path=out, format="png", width=W,
-               height=H, fps=FPS, _timeout=600)
+    r = d.call("export_assembly_video", path=out, format="png", width=width,
+               height=height, fps=FPS, _timeout=600, **kw)
     names = sorted(n for n in os.listdir(out) if n.endswith(".png"))
     expect(len(names) == r["frames"], f"{name}: {r['frames']} frames")
     return [rgb(os.path.join(out, n)) for n in names]
@@ -243,6 +250,88 @@ def main():
                f"({frames_dir})")
         expect(rows[-1] - rows[0] > 10,
                f"and some way: {rows[0]} px to {rows[-1]} px")
+
+        # --- the moving part highlighted, and the pace ----------------------
+        # Mid-way home the pin is drawn in the selection's amber: redder and
+        # less blue than the same frame filmed without the highlight. Home,
+        # it wears its own colour again: the last frames are the same.
+        plain = film(d, root, "plain", highlight=False)
+        expect(len(plain) == len(pix), "highlight off: the same frames")
+        mid = (runs[1][0] + runs[-1][0]) // 2
+
+        def warmth(frame, at):
+            vals = [frame[3 * (y * W + x)] - frame[3 * (y * W + x) + 2]
+                    for x, y in at]
+            return sum(vals) / max(len(vals), 1)
+        moving = differing(base, pix[mid])
+        lit, unlit = warmth(pix[mid], moving), warmth(plain[mid], moving)
+        expect(lit > unlit + 10,
+               f"the travelling pin is highlighted: red minus blue {lit:.0f} "
+               f"against {unlit:.0f} without")
+        expect(pix[-1] == plain[-1], "and home in its own colour")
+        fast = film(d, root, "fast", speed=2.0)
+        expect(abs(len(fast) - ((len(pix) - 1) / 2 + 1)) <= 1,
+               f"speed 2 films it in half the frames: {len(fast)} against "
+               f"{len(pix)}")
+        try:
+            d.call("export_assembly_video", path=os.path.join(root, "nope"),
+                   format="png", width=W, height=H, speed=0)
+            raise AssertionError("speed 0 filmed")
+        except AssertionError:
+            raise
+        except Exception as e:  # noqa: BLE001
+            expect("speed" in str(e), f"speed 0 is refused: {e}")
+
+        # --- in section -------------------------------------------------------
+        # Cut down the pin's axis. Before its step the pin is hidden, its
+        # cut face too: the first frame is the lug alone, as a film of the
+        # lug alone has it. And the cut face goes home with the pin: the
+        # film ends on the screenshot of the assembly as it stands.
+        d.call("set_section", base_plane="xz", offset=0)
+        cut = film(d, root, "cut", width=1280, height=720)
+        shot = os.path.join(root, "cut-shot.png")
+        d.call("screenshot", path=shot)  # the offscreen viewport: 1280 x 720
+        home = rgb(shot)
+        wide = [(i // 3) for i in range(0, len(home), 3)
+                if max(abs(home[i + c] - cut[-1][i + c])
+                       for c in range(3)) > 8]
+        expect(len(wide) < 0.001 * 1280 * 720,
+               f"the cut film ends on the screenshot: {len(wide)} pixels "
+               "differ")
+        # On its way, the cut face goes with the pin: held at its start,
+        # the film is the screenshot of the pin put there.
+        held = film(d, root, "cut-held", width=1280, height=720,
+                    highlight=False)
+        start = next(k for k, f in enumerate(held) if f != held[0])
+        rows = d.call("check_assembly_sequence")["steps"]
+        travel = rows[1]["travel_mm"]
+        # The pin put there for display alone: an exploded view.
+        view = d.call("add_exploded_view", name="up")
+        view = view.get("id", view.get("view"))
+        d.call("set_explode_step", view=view, occurrence=pin,
+               offset=[0, 0, travel])
+        d.call("set_explode", view=view, factor=1.0)
+        d.call("screenshot", path=shot)
+        up = rgb(shot)
+        off = [(i // 3) for i in range(0, len(up), 3)
+               if max(abs(up[i + c] - held[start][i + c])
+                      for c in range(3)) > 8]
+        expect(len(off) < 0.001 * 1280 * 720,
+               f"held at its start, the cut pin is the screenshot of it "
+               f"{travel:.0f} mm up: {len(off)} pixels differ ({shot}, "
+               f"frame {start} of {root}/cut-held)")
+        d.call("set_explode", view=0)
+        d.call("set_occurrence_visible", occurrence=pin, visible=False)
+        d.call("set_assembly_sequence", steps=[{"occurrence": "lug"}])
+        alone = film(d, root, "cut-alone", width=1280, height=720)
+        first = [(i // 3) for i in range(0, len(alone[0]), 3)
+                 if max(abs(alone[0][i + c] - cut[0][i + c])
+                        for c in range(3)) > 8]
+        expect(not first,
+               f"in section the first frame is the lug alone: {len(first)} "
+               "pixels differ (a part not yet put in drew its cut face)")
+        d.call("set_occurrence_visible", occurrence=pin, visible=True)
+        d.call("set_section", enabled=False)
 
         # --- a sequence that does not check ---------------------------------
         d.call("set_occurrence_visible", occurrence=fork, visible=True)
