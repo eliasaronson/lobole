@@ -574,8 +574,37 @@ capture in `src/app/main.cpp` (`ViewportFrameCapture`),
 
 How the parts go together, in order: a document object on the assembly
 (`set_assembly_sequence`, `get_assembly_sequence`; saved in the index from
-v187, one undo step). Each step names the top-level occurrence it places
-and its **path**:
+v187, groups and poses from vNEXT, one undo step). Each step is one of:
+
+- `occurrence`: the top-level occurrence it places, along its **path**
+  (below);
+- `occurrences`: a **group** of two or more that moves as one, rigidly,
+  along one path, checked against everything placed before it and never
+  against itself. Two parts that block each other one at a time go in
+  together this way -- the clock's stage-2 third and escape arbors with
+  their wheels meshed, the engine's piston, rod and wrist pin down a bore,
+  the jar's lid with its gasket in it. A group goes in as it is assembled
+  (no turn about the path is tried). Its default path is its members'
+  **common seat axis**: each member's own cylinder at its mate to
+  something placed before it (members seated only on each other give
+  none), refused by name when those axes are not parallel and no
+  `direction` is given;
+- `pose`: [{`mate`, `rotation_deg` | `offset_mm`}], a step that places
+  nothing. Those mate values (a revolute's or cylindrical's angle, a
+  slider's or cylindrical's travel: the mate's own value, as `set_mate`
+  sets it) are held and the assembly solved there by the mate solver,
+  walked in strides of 10° or 2 mm so a linkage stays on its branch; every
+  later step is checked at that pose (`at_pose` in its row; the pose
+  step's row says what it `moved`). Poses accumulate. A mate without that
+  freedom is refused when the sequence is set; a pose that does not
+  solve, or that the solve moves off (a relation or a closed loop drives
+  the mate), is refused naming the mate when it is checked. A mate has no
+  limits in the model, so there is none to refuse a value past. The
+  engine's cap pins for cylinders 1 and 4 go in with the crank turned half
+  a turn (at rest they are forced 26 mm through the block's bulkheads),
+  the Strandbeest's back pivot cap with the crank at 15°.
+
+A placing step's path:
 
 - `direction`: the way it moves going home, in the assembly's frame. A part
   given one goes on as it is placed (no turn about the path is tried).
@@ -592,40 +621,58 @@ and its **path**:
   where it starts (default: clear of everything placed before it);
   `turn_deg`: turned about the path over that distance, a bayonet, read
   step by step at the turn each step has; `thread`: it goes on by its
-  thread. A **modelled** thread (`modeled` on its Thread feature) turns a
-  turn a pitch as it goes (right hand: clockwise seen from behind it) and
-  the sections judge its flanks along the helix, read at a 24th of a
-  turn; the thread it goes into must have its pitch and hand. A
-  cosmetic thread meeting one placed before it, coaxial with the path, is
-  judged by the pair's own fit (one external, one internal, the same
-  major diameter and pitch), not read as interference. With neither the
-  step fails naming why.
+  thread. A **modelled** thread (`modeled` on its Thread feature) turns by
+  its helix as it goes -- a turn a pitch of its offset from the seat, from
+  whichever side it comes (right hand: clockwise seen from behind it) --
+  and the sections judge its flanks along it, read at a 24th of a turn;
+  the thread it goes into must have its pitch and hand. A cosmetic thread
+  meeting one placed before it, coaxial with the path, is judged by the
+  pair's own fit (one external, one internal, the same major diameter and
+  pitch), not read as interference. With neither the step fails naming
+  why.
 
-`check_assembly_sequence` slides each step's occurrence home along its
-path against **every occurrence placed before it**, not only its mate
-partner, by the insertion check's sections with one exact boolean
-confirming each step ([insertion](../inspect/README.md#insertion)). The
-first step is the base. It runs as an `assembly_sequence` job, off the
-frame. A step that cannot be checked -- its occurrence gone or placing no
-matter, no mate to a placed part and no direction, no cylinder at its
-mate -- is refused naming it; an occurrence with matter that no step places
-is listed in `missing` and fails the sequence. The answer: `pass`, and per
-step `against` (what it was checked against), `worst_against` (the one it
-meets worst), its `path` (`from`, `moves`, `origin_mm`, `either_way`), the
-insertion's reading (`press_mm`, `interfering_mm`, `excess_mm`,
-`deeper_mm`, `confirm`, any `threads`) and `seconds`. A path is one
-straight line: two parts that only go in together (the clock's stage-2
-escape and third wheels, tilted into mesh) or a part that needs a pose
-changed between steps (a Strandbeest cap put on with the crank turned)
-cannot be stated. The
-requirement kind `assembly_sequence` states it checked
+`check_assembly_sequence` slides each step's occurrence (or group) home
+along its path against **every occurrence placed before it**, not only
+its mate partner, at the pose the steps before it set, by the insertion
+check's sections with one exact boolean confirming each step
+([insertion](../inspect/README.md#insertion)). The first placing step is
+the base. It runs as an `assembly_sequence` job, off the frame. A step
+that cannot be checked -- its occurrence gone or placing no matter, no
+mate to a placed part and no direction, no cylinder at its mate, a group
+with no common seat axis, a pose that does not solve -- is refused naming
+it; an occurrence with matter that no step places is listed in `missing`
+and fails the sequence. A hidden occurrence places none: the
+Strandbeest's leg pair put together hides its whole frame and crankshaft,
+which still carry the crank and the pivots, and places the pieces they
+are pressed from, each fastened where it sits. The answer: `pass`,
+`seconds`, `sections`, and per step `against` (what it was checked
+against), `worst_against` (the occurrence it meets worst), its `path`
+(`from`, `moves`, `origin_mm`, `either_way`), the insertion's reading
+(`press_mm`, `interfering_mm`, `excess_mm`, `deeper_mm`, `confirm`, any
+`threads`), `solids` and `seconds`.
+
+**Sections are cut once a run** and moved between steps: a placed part's
+bands are kept per path direction (and its reverse) and slice thickness,
+and carried to each later step's axis and reach -- and with a pose, when
+it only turned about the path -- rather than cut again; a step that sweeps
+a short stretch of a long part cuts only that stretch
+([insertion](../inspect/README.md#insertion) says how; `sections`
+{`reused`, `cut`, `evicted`} solids in the answer, a step's `solids`).
+The requirement kind `assembly_sequence` states it checked
 ([requirements](../requirements/README.md#measures)).
 
 What `assembly_sequence_smoke` holds it to: a pin through a lug and a fork
 passes last, and put in before the fork the fork fails, blocked by the
 pin's head -- an earlier part, not its mate partner; a bearing cap slid
 along its bore is stopped by the shaft's collars, and lowered along its
-bolts goes home; a missed occurrence fails the sequence by name.
+bolts goes home; a missed occurrence fails the sequence by name. Two
+wheels whose disks overlap in plan at two heights each block the other
+one at a time and go home as a group along their common axis, the plate's
+sections reused from the first wheel's step; a group with a member seated
+along another axis is refused; a cap on a crank's pin under a bar fails
+with the crank at rest and goes home after a pose step turns it; a pose
+of a mate with no such freedom is refused; groups and poses survive
+saving and opening again.
 
 ## Exploded views
 

@@ -417,9 +417,17 @@ forces something through on the way.
 - **Bounded.** The mesh a solid is sliced from is refused past 6 M
   triangles, a solid cut past 20 000 bands, and a check that would read
   past 4 M band pairs -- each naming the ceiling -- and only the seat's
-  orientation and one other are kept at a time; the engine's 78-step
-  sequence peaks at 340 MB. Without these a whole-solid mesh at 0.5 µm
-  and every orientation's outlines kept took an instance to 22 GB.
+  orientation and one other are kept at a time; a sequence's kept
+  sections (below) stop at 40 M points of outline, the least recently used
+  dropped first. The engine's 68-step sequence peaks at 0.9 GB for the
+  whole instance. Without these a whole-solid mesh at 0.5 µm and every
+  orientation's outlines kept took an instance to 22 GB.
+- **A screw turns by its helix.** A part going on by a modelled thread
+  turns a turn a pitch of its offset from the seat, the other way about
+  the axis when it comes from the other side; its steps are one length on
+  both sides. (Spread over the longer side's travel and read along the
+  shorter, the jar's lid read 7.3 mm forced through the neck's flanks.)
+  A turned path has its one orientation and tries no other.
 - **A threaded pair is refused**: when both sides carry modelled threads
   on the path the part goes on by turning along the helix, which a
   straight slide reads as the flanks forced through each other the whole
@@ -450,10 +458,34 @@ after (sections), on this machine -- `seconds` {`sections`, `pairs`,
 | the clock's stage 2: its 21 insertion requirements | 23 s | 4.6 s |
 
 Most of the planet's 4.2 s is the one confirming boolean of two
-herringbone solids. A whole assembly sequence costs more: the clock's
-stage 1 (23 steps, eight of them nuts read along their threads at a 24th
-of a turn) is about 90 s, stage 2 about 400 s, the engine's 78 steps about
-460 s.
+herringbone solids.
+
+**An assembly sequence keeps its sections** (`MeasureSections.h`,
+`BandCache`): every step slides one part past mostly the same placed
+parts, along a handful of directions, and cutting them again for each
+step was nearly all of its time. A solid is cut once per direction and
+slice thickness, in that direction's own frame -- the axis through the
+origin, the reverse direction sharing the cut, mirrored -- and a later
+step moves its bands to that step's axis and reach instead (a 2D shift
+and turn, a clip to the reach). A part moved since by a pose is moved
+with them when it only turned about the path and, if any band is a
+slice, moved along it a whole number of slices; otherwise it is cut
+again. Steps along one direction share one slice thickness where their
+travels allow (from a ladder of 20 µm doubled, never thicker than the
+step's own). A step whose part sweeps a short stretch of a long solid
+cuts that stretch, three times what it sweeps, and a later step reuses it
+when its own stretch lies within. The same sequences, before and after,
+on this machine:
+
+| sequence | before | after |
+|---|---|---|
+| the engine's, as built (68 steps, a group a cylinder, two poses) | 559 s | 74 s |
+| the engine's first draft (78 steps) | 480 s | 97 s |
+| the clock's stage 2 (33 steps, one group) | 212 s (36 steps) | 163 s |
+| the Strandbeest's leg pair put together (37 steps, one pose) | 114 s | 19 s |
+
+The clock's stage 2 keeps most of its time: its rating nut (90 s) goes on
+by its thread, whose slices are its own steps and are not kept.
 
 The answer: `pass`, the try reported (`entry`, `rotation_deg`,
 `travel_mm`, `interfering_mm`, `press_mm`, `excess_mm`, `deeper_mm`,
