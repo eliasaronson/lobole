@@ -282,7 +282,13 @@ def solve(bore, allow, layer, slender, d_stem=None, stem_tries=0):
     s.d_cp = at_least("cap pin", 0.08 * B, lines(5))
     s.w_eye = at_least("big-end wall", 0.25 * s.r_jb, lines(5))
     s.r_be = s.r_jb + s.w_eye
-    s.y_cp = s.r_jb + lines(2) + s.d_cp / 2.0     # cap pins' centres
+    # The web's top, +Y: two lines round the pin. The cap pins' centres: a
+    # wall outside the bore, and far enough out that a pin pressed along X
+    # from the crank's nearer end passes every web and counterweight on its
+    # way, a line clear -- with a one-piece crank no order gets a pin past
+    # a web otherwise.
+    s.y_web = s.r_j + lines(2)
+    s.y_cp = max(s.r_jb + lines(2), s.y_web + lines(1)) + s.d_cp / 2.0
     s.y_ear = s.y_cp + s.d_cp / 2.0 + lines(2)    # the laps' outer edge
     s.z_lap = s.d_cp / 2.0 + lines(2)             # the lap band, a side
     s.d_wp = 0.25 * B                         # DESIGN: wrist pin
@@ -306,7 +312,6 @@ def solve(bore, allow, layer, slender, d_stem=None, stem_tries=0):
     # Crank webs: from the flat (-h_flat) up past the pin; ends at the pin
     # and the counterweight equally far out.
     s.r_web = s.r_j + lines(4)
-    s.y_web = s.r_j + lines(4)                # the web's top, +Y
     # Everything turning with the crank stays inside r_sweep.
     big_end = math.hypot(s.y_ear, s.z_lap)
     s.r_sweep = max(s.R + max(s.r_be, big_end),

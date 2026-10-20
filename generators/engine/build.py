@@ -302,6 +302,142 @@ def build_engine(d, s, name="engine"):
     return a, r
 
 
+# --- the order it goes together in ----------------------------------------------
+
+DOWN, UP = [0.0, 0.0, -1.0], [0.0, 0.0, 1.0]
+REARWARD, FORWARD = [1.0, 0.0, 0.0], [-1.0, 0.0, 0.0]  # +X is to the rear
+
+
+def assembly_steps(names):
+    """The engine's assembly sequence (docs/assemblies/README.md
+    #assembly-sequences) over its occurrence `names`: each step the
+    occurrence (or a group, moved as one) and the way it MOVES going home,
+    in the assembly's frame (Z up, +X to the rear), or a pose of the
+    crank. Every direction is stated: the default path, the part's own
+    cylinder at its mate, is the wrong one for most of them -- a rod's or
+    a piston's is its pin's axis, not its bore's; a fastened pin's or
+    pulley's mate sits at the crank's origin; and the bedplate, the block
+    and the head are joined by dowels, not by a cylinder of their own.
+
+    The card's order. The block is the base, and each piston goes DOWN
+    ITS BORE from the deck on its rod, the wrist pin already through both
+    -- one group: the crankcase between two bulkheads is narrower than a
+    piston, so no piston comes up into a bore from below, and the block
+    cannot be lowered over the pistons. The crank comes up into the mains
+    and the rods' big ends; each cap comes up under its pin while the
+    bedplate is off, and its pins are pressed along X from the crank's
+    nearer end, past the webs and counterweights of the throws on the way
+    -- a pin of an up throw would cross the block's bulkheads, so the
+    crank is turned half a turn while those go in. The bedplate goes up
+    with its split dowels pressed in. A valve stands in its seat before
+    the head goes down over it, as one pushed up through the head goes in
+    before the head is set on the block; its spring and its bucket go
+    down over its stem after."""
+    def n_of(prefix):
+        return sum(1 for nm in names if nm.startswith(prefix))
+    steps = [{"occurrence": "block", "note": "the upper block, deck up"}]
+
+    def go(occ, direction, note):
+        steps.append({"occurrence": occ, "direction": direction,
+                      "note": note})
+
+    def crank_at(deg, note):
+        steps.append({"pose": [{"mate": "crank", "rotation_deg": deg}],
+                      "note": note})
+    for c in (1, 2, 3, 4):
+        steps.append({"occurrences": [f"piston {c}", f"rod {c}",
+                                      f"wrist pin {c}"],
+                      "direction": DOWN,
+                      "note": "down its bore from the deck, the wrist pin "
+                              "pressed through piston and rod"})
+    go("crankshaft", UP, "up into the upper mains and the rods' big ends")
+    for c in (1, 2, 3, 4):
+        go(f"rod cap {c}", UP, "up under its pin, onto the rod's laps")
+
+    def cap_pins(cyls):
+        for c in cyls:
+            for j in (1, 2):
+                go(f"cap pin {c}.{j}", REARWARD if c <= 2 else FORWARD,
+                   "pressed through the laps from the crank's nearer end")
+    cap_pins((2, 3))  # their throws down, under the split
+    crank_at(180.0, "the crank half a turn: throws 1 and 4 down")
+    cap_pins((1, 4))
+    crank_at(0.0, "back to cylinder 1's firing TDC")
+    steps.append({"occurrences": ["bedplate"] + [
+                      f"split dowel {k + 1}"
+                      for k in range(n_of("split dowel "))],
+                  "direction": UP,
+                  "note": "up round the crank, its split dowels pressed in"})
+    for k in range(n_of("sump dowel ")):
+        go(f"sump dowel {k + 1}", UP, "pressed into the bedplate's foot")
+    go("sump", UP, "onto the sump dowels")
+    for k in range(n_of("deck dowel ")):
+        go(f"deck dowel {k + 1}", DOWN, "pressed into the deck")
+    n_valves = n_of("valve ")
+    for i in range(n_valves):
+        go(f"valve {i + 1}", DOWN, "stood in its seat")
+    go("head", DOWN, "down over the valves' stems, onto the deck dowels")
+    for i in range(n_valves):
+        go(f"spring {i + 1}", DOWN, "down its bucket bore round the stem")
+        go(f"bucket {i + 1}", DOWN, "pressed on the stem's tip")
+    go("camshaft", DOWN, "laid in the head's saddles, on the buckets")
+    for k in range(n_of("cover dowel ")):
+        go(f"cover dowel {k + 1}", DOWN, "pressed into the head")
+    go("cam cover", DOWN, "onto the cover dowels, over the cam")
+    go("cam collar", FORWARD, "pressed on the cam's rear D")
+    go("cam pulley", REARWARD, "pressed on the cam's front D")
+    go("timing belt", REARWARD, "round the cam pulley and the crank's nose")
+    go("crank pulley", REARWARD, "pressed on the nose, into the belt")
+    go("crank arm", REARWARD, "pressed on the nose in front of the pulley")
+    go("handle", REARWARD, "its pin pressed into the arm")
+    go("flywheel", FORWARD, "pressed on the tail")
+    return steps
+
+
+def sequence(d, a):
+    """The engine's sequence stated on its assembly and checked as an
+    `assembly_sequence` requirement (one run of the check): every step goes
+    home against everything placed before it, as modelled (the gaps in
+    the model are already the print's). Any step that fails stops the
+    run, naming it."""
+    a.activate()
+    names = [o["name"] for o in d.call("list_occurrences")["occurrences"]]
+    steps = assembly_steps(names)
+    d.call("set_assembly_sequence", steps=steps, allowance_mm=0.0)
+    rq = d.call("add_requirement", name="the engine goes together",
+                measure={"kind": "assembly_sequence", "document": a.id},
+                bound={"kind": "pass"},
+                source="the order it is built in "
+                       "(docs/assemblies/README.md#assembly-sequences)")
+    t0 = time.time()
+    res = d.call("check_requirements", ids=[rq["id"]], _timeout=3600)
+    secs = time.time() - t0
+    row = res["requirements"][0]
+    r = (row.get("evidence") or {}).get("detail") or row.get("detail") or {}
+    bad = []
+    for st in r.get("steps", []):
+        if st.get("pass"):
+            continue
+        bad.append(f"step {st['step']} {st.get('name')}: "
+                   + (st.get("error") or
+                      f"forced {st.get('interfering_mm', 0):.2f} mm against "
+                      f"a press of {st.get('press_mm', 0):.2f}, "
+                      f"{st.get('worst_depth_mm', 0):.2f} deep, worst "
+                      f"against {st.get('worst_against')}"))
+    if r.get("missing"):
+        bad.append(f"no step places {r['missing']}")
+    n = len(r.get("steps", []))
+    print(f"  assembly sequence: {n} steps, each checked against everything "
+          f"placed before it in {secs:.0f} s"
+          + ("" if bad or row.get("state") != "pass"
+             else ", every one goes home")
+          + f" (sections: {r.get('sections')})")
+    if bad or row.get("state") != "pass":
+        fail(f"the engine cannot be put together: {bad or row}")
+    return row, {"seconds": secs, "steps": n,
+                 "sections": r.get("sections")}
+
+
 # --- the motion study ---------------------------------------------------------------
 
 def traces(a, s):
@@ -722,14 +858,19 @@ plates) and `engine_tpu_job.3mf` (the TPU plate, a spool of its own).
 ## Assembly
 
 1. Press the wrist pins through the pistons with the rods' small ends
-   between the bosses. Drop the pistons into the bores from the deck.
-2. Lay the crankshaft in the block's upper mains (the block on its deck).
-   Close each rod's cap round its pin and press the two cap pins through
-   both laps.
+   between the bosses. Drop the pistons into the bores from the deck, rod
+   first (the crankcase is narrower than a piston: none goes in from
+   below).
+2. Lay the crankshaft in the block's upper mains (the block on its deck),
+   into the rods' big ends. Close each rod's cap round its pin and press
+   the two cap pins through both laps from the crank's nearer end, past
+   the webs: cylinders 2 and 3 first, then turn the crank half a turn so
+   1 and 4 are away from the block's bulkheads for theirs, and back.
 3. Press the dowels into the bedplate; press the bedplate on. The sump on
    its dowels.
-4. Valves up through their seats; a spring over each stem into its bucket
-   bore; press a bucket on each stem. The head on the deck's dowels.
+4. Valves up through their seats in the head; the head on the deck's
+   dowels; a spring over each stem into its bucket bore; press a bucket
+   on each stem.
 5. The camshaft: press the two cam keys into the end lobes of one half,
    glue the cuts (CA) and close the other half on the keys, the lobes'
    outlines meeting. Into the head's saddles, the collar on its rear end,
@@ -978,6 +1119,9 @@ def main():
         if not hits:
             fail("a rod 10 % long does not reach the head")
 
+    with phase("sequence"):
+        seq_row, checks["sequence"] = sequence(d, a)
+
     with phase("requirements"):
         req_ids = []
         for i, lb in enumerate(s.lobes):
@@ -1016,7 +1160,7 @@ def main():
                 fail(f"requirement {q.get('name')}: {q}")
             if isinstance(ev.get("value"), (int, float)):
                 vp.append(ev["value"])
-        checks["requirements"] = reqs
+        checks["requirements"] = reqs + [seq_row]
         checks["valve_piston_min_mm"] = min(vp) if vp else None
 
     with phase("predictions"):

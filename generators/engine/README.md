@@ -63,7 +63,12 @@ the profile's keep-out zone, and every piece is its own object in the job.
 - **Rods** with split big ends. Each side of the bore the rod and its cap
   overlap in a half lap, rod in one half of the thickness, cap in the
   other, and two pins pressed through both laps hold the cap (vertical as
-  each prints, since the laps print on the bed). Wrist pins are pressed
+  each prints, since the laps print on the bed). The pins sit a line
+  outside the webs' tops (`y_cp`, the webs two lines round the pin), so a
+  pin pressed along X from the crank's nearer end passes every web and
+  counterweight on its way: with a one-piece crank no order gets a pin
+  past a web otherwise, and the first sequence check found them 0.45 mm
+  into the webs. Wrist pins are pressed
   into the pistons through teardrop holes, a Hole feature's `printed:
   teardrop` (docs/modeling/holes-and-threads.md#printed-holes), pointing
   at the crown: the piston prints crown down, and every part states its
@@ -183,6 +188,19 @@ open, which errs safe for the valve-to-piston check.
 - **The belt**: the same 720° in the base configuration, belt and all,
   sampled at every crank pulley tooth, where both pulleys stand where the
   belt's teeth were modelled: clean.
+- **The assembly sequence** (`assembly_steps`,
+  [sequences](../../docs/assemblies/README.md#assembly-sequences)), the
+  card's order stated on the assembly and checked as an
+  `assembly_sequence` requirement: every part, as modelled, slid home on
+  its path against everything placed before it. The block is the base;
+  each piston goes down its bore from the deck with its rod and wrist pin
+  (one group: the crankcase between two bulkheads is 26 mm, a piston 37,
+  so no piston comes up into a bore from below -- the first check, the
+  block lowered over the pistons, was forced 98 mm); the crank up into the
+  mains and the big ends; the caps up; the cap pins along X, cylinders 2
+  and 3 first and then 1 and 4 with the crank turned half a turn by a pose
+  step (an up throw's pins would cross the block's bulkheads); the
+  bedplate up with its dowels; and so on to the flywheel.
 - **Requirements** in the project, checked last (after the controls, which
   move the assembly): each valve's least clearance to its piston over the
   720° study (`clearance` with `motion_study`, exact), at least `c_stack`;
@@ -233,17 +251,17 @@ stems, buckets 14.8, lobes 6.2 wide, springs 16.7 free; belt 103 teeth on
 
 | plate | pieces |
 |---|---|
-| `plate1.stl` | block, bedplate, sump, head, the camshaft's +Y half and its two keys, cam pulley and collar, the four caps, a valve, the handle, the four wrist pins, the sixteen dowels and eight cap pins (43 pieces, 101 mm tall: the block) |
-| `plate2.stl` | crankshaft, flywheel, cam cover, the camshaft's -Y half, the rods and pistons, crank arm and pulley, the eight buckets and seven valves (29) |
+| `plate1.stl` | block, bedplate, sump, head, the camshaft's +Y half and its two keys, cam pulley, the four caps, a valve, the handle, the four wrist pins, the sixteen dowels and eight cap pins (42 pieces, 101 mm tall: the block) |
+| `plate2.stl` | crankshaft, flywheel, cam cover, the camshaft's -Y half, the rods and pistons, crank arm and pulley, the cam collar, the eight buckets and seven valves (30) |
 | `plate_tpu.stl` | the belt and eight springs |
 
 Orientations, each piece's place on its plate and the assembly order are
 on the card. No supports, no brim. Modelled solid the
-two PLA plates are 1571 g of PLA (the block, head, bedplate and sump are
+two PLA plates are 1574 g of PLA (the block, head, bedplate and sump are
 most of it); printed at Bambu Studio's 0.20 mm Standard (2 walls, 5/3
 shells, 15 % grid, the settings every PLA part states) `mass_properties`
-weighs them 584 g, 37 % of solid, and Bambu's own slice of
-`engine_job.3mf` 615 g in 15.1 h (437 g and 10.3 h, 178 g and 4.9 h a
+weighs them 585 g, 37 % of solid, and Bambu's own slice of
+`engine_job.3mf` 616 g in 15.3 h (439 g and 10.4 h, 177 g and 4.9 h a
 plate); the TPU plate 12 g in 0.6 h. Not an evening's print, the plan's
 hope, but two long ones.
 
