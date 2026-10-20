@@ -807,12 +807,26 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     if (screwPitch > 0.0 && turnDeg == 0.0)
       turnDeg = (screwRight ? 1.0 : -1.0) * 360.0 * longest / screwPitch;
     const bool turning = turnDeg != 0.0;
-    for (int k = 0; k < (turning ? 1 : opt.rotations); k++)
+    // A screw turns by its helix: a turn a pitch of the offset from the seat,
+    // whichever side it comes from and however far -- so its steps are one
+    // length on both sides (the longer travel's), and from the other side
+    // it turns the other way about the axis. A bayonet's `turnDeg` is over
+    // each try's own travel.
+    const bool helix = screwPitch > 0.0 && opt.turnDeg == 0.0;
+    const size_t orientations = turning ? 1 : opt.rotations;
+    for (size_t k = 0; k < orientations; k++)
       turns.push_back(360.0 * k / opt.rotations);
-    // A turned path's orientation at each of its steps, after the seat's.
+    // A turned path's orientation at each of its steps, after the seat's;
+    // a helix's from the other side after those.
     if (turning)
       for (int k = 1; k <= samples; k++)
         turns.push_back(turnDeg * k / samples);
+    if (helix)
+      for (int k = 1; k <= samples; k++)
+        turns.push_back(-turnDeg * k / samples);
+    const auto turnAt = [&](bool positive, int k) -> size_t {
+      return static_cast<size_t>(helix && !positive && k > 0 ? samples + k : k);
+    };
     const size_t nA = bandsA.size(), nB = bandsB.size();
     // A moving band's outline at an orientation, made when first asked:
     // the seat's orientation is kept, and one other at a time -- the tries
@@ -946,7 +960,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
 
     const double perTry = 1.0;
     const double total =
-        perTry * static_cast<double>(sides.size() * turns.size());
+        perTry * static_cast<double>(sides.size() * orientations);
     double done = 0.0;
     const auto advance = [&](double n) {
       done += n;
@@ -986,9 +1000,13 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       if (turning) {
         // Turned as it goes: the orientation changes along the path, so
         // the path is read step by step, each step counted a step long.
-        const double step = t.travelMm / samples;
+        const double step = helix ? rep.stepMm : t.travelMm / samples;
         const double sgn = positive ? 1.0 : -1.0;
-        for (int k = samples; k >= 1; k--) {
+        const int last =
+            helix ? std::min(samples, static_cast<int>(
+                                          std::ceil(t.travelMm / step - 1e-9)))
+                  : samples;
+        for (int k = last; k >= 1; k--) {
           if (cancel && cancel->load())
             throw KernelError{"cancelled"};
           const double u = step * k;
@@ -1000,7 +1018,7 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
                            hi = std::min(a.z1 + sgn * u, b.z1);
               if (hi - lo <= kZTol)
                 continue;
-              const PairReading& r = pair(static_cast<size_t>(k), i, j);
+              const PairReading& r = pair(turnAt(positive, k), i, j);
               if (!r.interfering)
                 continue;
               any = true;
@@ -1115,7 +1133,8 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
     // The seated orientation first, from each side; then the others.
     for (size_t i = 0; i < sides.size() && !rep.pass; i++)
       consider(run(i, 0));
-    for (size_t k = 1; k < turns.size() && !rep.pass; k++) {
+    // (A turned path has the one orientation: its steps' are its own.)
+    for (size_t k = 1; k < orientations && !rep.pass; k++) {
       if (symmetric(turns[k])) {
         advance(perTry * sides.size());
         continue;
@@ -1141,8 +1160,10 @@ Insertion(const std::vector<Body>& moving, const glm::dmat4& xfMoving,
       if (turning) {
         // The turn at that step of the path.
         if (b.travelMm > 0.0)
-          ti =
-              static_cast<size_t>(std::lround(c.atMm / (b.travelMm / samples)));
+          ti = turnAt(
+              b.positive,
+              static_cast<int>(std::lround(
+                  c.atMm / (helix ? rep.stepMm : b.travelMm / samples))));
       } else {
         for (size_t k = 0; k < turns.size(); k++)
           if (turns[k] == b.rotationDeg)

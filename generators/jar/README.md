@@ -156,6 +156,13 @@ elastomer strain, and a linear one would not be honest at that strain.
   overlap with the jar is the one contact allowed, by its measured volume.
   Near misses are not raised, since the thread and the gasket's bore are
   running fits.
+- **It screws on** (an `assembly_sequence` requirement,
+  [sequences](../../docs/assemblies/README.md#assembly-sequences)): the
+  gasket pressed into the lid's groove, and the two screwed onto the neck
+  as one, turning a turn a pitch along the modelled threads, from clear to
+  the stop: pressed only the squeeze (0.5 mm), forced nothing past it.
+  (Read with the turn spread over the longer of the two ways' travels,
+  before the check followed the helix itself, it was forced 7.3 mm.)
 - **It unscrews.** A screw relation backed by the lid's Thread feature
   (its custom pitch and hand,
   docs/assemblies/relations.md) couples the lid's turn to its rise. A

@@ -614,6 +614,37 @@ def main():
         if r["state"] != "pass":
             raise SystemExit(f"jar: {r['name']} does not hold: {r}")
 
+    # How it goes together (docs/assemblies/README.md#assembly-sequences):
+    # the gasket pressed into the lid's groove first, and the two screwed
+    # onto the neck as one, along the thread's helix -- a turn a pitch --
+    # to the squeeze at the stop. Stated as a requirement.
+    jar.asm.activate()
+    app.set_assembly_sequence(steps=[
+        {"occurrence": "jar", "note": "the base"},
+        {"occurrences": ["lid", "gasket"], "mate": "lid on the neck",
+         "thread": True,
+         "note": "the gasket in the lid's groove, screwed on as one"}],
+        allowance_mm=0.0)
+    seq_id = app.require("the lid screws on", {"kind": "assembly_sequence",
+                                               "document": jar.asm.id},
+                         source="screwed onto the neck along its thread, "
+                                "the gasket in the lid")
+    got = app.verify_requirements(ids=[seq_id], raise_on_failure=False)
+    row = got["requirements"][0]
+    det = (row.get("evidence") or {}).get("detail") or row.get("detail") or {}
+    lid_row = next((x for x in det.get("steps", []) if "occurrences" in x),
+                   {})
+    checks["sequence"] = {"state": row["state"], "lid": {
+        k: lid_row.get(k) for k in ("press_mm", "interfering_mm",
+                                    "excess_mm", "worst_depth_mm",
+                                    "threads", "travel_mm")}}
+    print(f"  sequence: the lid and gasket screwed on as one: "
+          f"{row['state']}, pressed {lid_row.get('press_mm') or 0:.2f} mm "
+          f"(the squeeze), forced {lid_row.get('excess_mm') or 0:.2f} mm "
+          "past it")
+    if row["state"] != "pass":
+        raise SystemExit(f"jar: the lid does not screw on: {lid_row or row}")
+
     # Unscrewing: a screw relation backed by the lid's thread couples its
     # turn to its rise. From the turn where the gasket lets go, two turns
     # out, with a clash check fine enough to see the flank clearance.
