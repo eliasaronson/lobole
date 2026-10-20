@@ -18,6 +18,6 @@
   "budget_s": 3600,
   "readme": {
     "runs": "`print_coupon.py --seed`, then `strandbeest/build.py --profile \"K5 PLA on P1S\"` (the walker packs into the profile's bed): both stages, every check on the leg pair and the walker (solved, no branch jump and the knees, the exact clash with every cap's printed press listed, the layers' air, the feet, the stability), the stage-1 card's order checked piece by piece on the leg pair put together (a pose step turning the crank for the 15° caps), both negative controls failing, every print plate's `check_print` items, `bed_fit` among them, and every pin study at a factor of 2",
-    "measured": "2040 s"
+    "measured": "2157 s"
   }
 }

@@ -20,6 +20,6 @@
   "budget_s": 1200,
   "readme": {
     "runs": "`print_coupon.py --seed`, then `clock/build.py --profile \"K5 PLA on P1S\" --no-render` (the period is the printed pendulum's, which needs a profile's layer and line width): every part verified, the escapement's studies in both stages with every beat's lock, the ratios, every mesh exact, the click, both stages' assembly sequences (stage 2's third and escape arbors going in together, as one group), every part put on in order against everything placed before it and each stage's assembly_sequence requirement passing, the negative controls failing (the first stage-1 escape arbor's insertion among them), stage 1's plate 1 as first printed (its pillars and arbors standing) failing `check_print`'s slender item on exactly those six, both FEM studies (the arbor's interlayer factor at least 2), every print plate's `check_print` and the period stated at the pendulum's infill",
-    "measured": "641 s"
+    "measured": "941 s"
   }
 }
