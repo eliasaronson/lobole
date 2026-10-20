@@ -1010,6 +1010,42 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
       ctx->ItemClick("//###ToolWindow/###tw_accept");
       ctx->Yield(2);
       FlyToBodies(ctx, Doc(), 0.8, 1.6f);
+      Hold(ctx, 1.2);
+
+      // Nothing is final: the boss suppressed and back from the feature
+      // tree, then the rollback bar dragged above it and back to the end.
+      IM_CHECK_SILENT(Doc()->FeatureCount() == features + 2);
+      const auto row = [&](size_t i) {
+        return "//###Model/" + Doc()->GetFeature(i)->GetName() + "##" +
+               std::to_string(i);
+      };
+      const std::string boss = row(features + 1);
+      for (const char* verb : {"Suppress", "Unsuppress"}) {
+        ctx->ItemClick(boss.c_str(), ImGuiMouseButton_Right);
+        ctx->Yield();
+        Hold(ctx, 0.4);
+        ctx->ItemClick((std::string("//$FOCUSED/") + verb).c_str());
+        ctx->Yield(2);
+        IM_CHECK_SILENT(Doc()->GetFeature(features + 1)->IsSuppressed() ==
+                        (verb[0] == 'S'));
+        Hold(ctx, 1.0);
+      }
+      const ImRect sketchRow = ctx->ItemInfo(row(features).c_str()).RectFull;
+      const ImRect bossRow = ctx->ItemInfo(boss.c_str()).RectFull;
+      ctx->MouseMove("//###Model/##RollbackBar");
+      ctx->MouseDown(ImGuiMouseButton_Left);
+      ctx->MouseMoveToPos(ImVec2(sketchRow.GetCenter().x, sketchRow.Min.y));
+      ctx->MouseUp(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+      IM_CHECK_SILENT(Doc()->Rollback() == static_cast<int>(features));
+      Hold(ctx, 1.2);
+      ctx->MouseMove("//###Model/##RollbackBar");
+      ctx->MouseDown(ImGuiMouseButton_Left);
+      ctx->MouseMoveToPos(
+          ImVec2(bossRow.GetCenter().x, bossRow.Max.y + bossRow.GetHeight()));
+      ctx->MouseUp(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+      IM_CHECK_SILENT(Doc()->Rollback() == -1);
       Hold(ctx, 1.5);
       EndScene(ctx);
       IM_CHECK_GT(Doc()->FeatureCount(), features + 1); // sketch + extrude

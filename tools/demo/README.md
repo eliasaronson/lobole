@@ -28,7 +28,7 @@ quality meant for video; `--draft` is for checking a scene's choreography.
 | `history` | a version named; a cylinder stood on the block's top face and added to it; saved; the named version restored, and the cylinder gone |
 | `fem` | a cantilever's static study run; von Mises, the deflection magnified 100x, then displacement |
 | `cam` | a plate pocketed, the cut simulated end to end |
-| `om615` | the OM615 with its injection pump, seen level from a little above its middle, turned once round, cut down the crank and run through two revolutions in section; a part right-clicked in the viewport and opened; a boss sketched on its largest flat face and extruded |
+| `om615` | the OM615 with its injection pump, seen level from a little above its middle, turned once round, cut down the crank and run through two revolutions in section; a part right-clicked in the viewport and opened; a boss sketched on its largest flat face and extruded, then suppressed and back from the feature tree, and the rollback bar dragged above it and back |
 | `assembly` | the printed engine cut down its cylinders, its 68-step assembly sequence played in the Motion window at 1.5x from the block alone to the flywheel, each step's parts lit as they go home (the crank's half turn among them), ending put together |
 | `strandbeest` | (`film.sh`, not a window) the Strandbeest's leg pair put together piece by piece by `export_assembly_video`: each bar, plate, pin and cap lit as it goes home along the path its check took, the whole linkage lit as the crank turns 15° before the cap that goes on with it, ending put together |
 
