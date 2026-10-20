@@ -630,11 +630,7 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
                        .c_str());
     ctx->Yield();
     IM_CHECK_SILENT(s_App->primitive.spec.mode == ExtrudeMode::Add);
-    ctx->ItemInputValue("//###ToolWindow/Diameter/##Diameter",
-                        static_cast<float>(0.5 * (hi.x - lo.x)));
-    ctx->Yield();
-    ctx->ItemInputValue("//###ToolWindow/Height/##Height",
-                        static_cast<float>(0.6 * (hi.z - lo.z)));
+    // Its size is the tool's default, derived from the face it stands on.
     ctx->Yield(2);
     Hold(ctx, 0.6);
     ctx->ItemClick("//###ToolWindow/###tw_accept");
