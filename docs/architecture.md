@@ -94,7 +94,7 @@ and reported by the `ping` RPC's `features`:
 
 `features` also carries one thing that is not compiled in: `ffmpeg`, whether
 that program is on PATH now. It is run, never linked, by
-`export_motion_video` for its video formats
+`export_motion_video` and `export_assembly_video` for their video formats
 ([motion video](assemblies/README.md#motion-video)); a missing one refuses
 those formats by name.
 

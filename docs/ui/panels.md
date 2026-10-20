@@ -194,6 +194,14 @@ both open means nothing):
     (`###motion_video_cancel`); the last outcome is shown under it. GUI tests
     answer its dialog with `AppState::saveDialogAnswer` instead of opening
     the desktop portal.
+  - **Assembly sequence**, under the studies when the assembly has one
+    (`DrawSequenceSection`): **Play/Pause** (`###sequence_play`) checks the
+    sequence (a bar with Cancel, `###sequence_cancel`, while it runs) and
+    plays it going together, display-only; the **Time** scrub
+    (`###sequence_t`) holds it at a moment; **Stop** (`###sequence_stop`)
+    puts the display back. A sequence that does not check is shown as the
+    reason it was not played
+    ([playing and filming a sequence](../assemblies/README.md#playing-and-filming-a-sequence)).
 - **Simulation** (`###tb_asm_simulation`) — `DrawSimulationToolWindow` (in
   `StudyPanel.cpp`): the studies over `ui::StudyHost`, plus a participants
   table (each top-level occurrence's role: Ignored, Rigid, Meshed or Bonded;

@@ -1,63 +1,55 @@
-# Assembly animation: a sequence played, and filmed
+# Assembly animation: group and pose steps, and the Strandbeest's film
+
+What is built is in docs/assemblies/README.md#playing-and-filming-a-sequence:
+a sequence's timeline laid out from its check, Play / scrub / Stop in the
+Motion window, `export_assembly_video`, and the clock's stage-1 film
+(`--video`). What is left waits on group and pose steps
+(docs/plans/assembly-paths.md).
 
 ## The problem
 
-An assembly sequence (docs/assemblies/README.md#assembly-sequences) says
-the order an assembly goes together in and how each part moves home, and
-the check proves it does. Nothing shows it: the order lives as text on a
-generator's card, and a person building the clock or the Strandbeest has
-to picture each step. The data an animation needs — the steps, each
-step's parts, its path, its distance from clear, its turn, the poses
-between steps — is already in the sequence and already resolved by its
-check.
+A sequence step that places several occurrences together (the clock's
+stage-2 escape and third wheels) or that sets mate values between steps (a
+Strandbeest cap put on with the crank turned) cannot be played yet: the
+timeline reads one occurrence a step and refuses a step that sets mate
+values. So stage 2 of the clock and the Strandbeest have no film.
 
 ## The shape of the fix
 
-1. **Sequence poses.** One function turns a sequence into a timeline of
-   poses: at its step, each step's occurrences (one or a group) travel
-   from their start (seat + path × distance from clear, turned by the
-   step's turn; a thread step turns one turn per pitch) to their seat;
-   before its step a part is hidden; after it, it stays home. A pose step
-   moves the placed parts through the mate values it sets (solved at the
-   ends, interpolated between). Times come from the distances at one
-   speed derived from the assembly's size (its bbox), with a hold between
-   steps — never literal millimetres per second. The path and distances
-   are the ones the check resolved, so the film and the check cannot
-   disagree; a sequence that does not check is refused naming its first
-   failing step.
-2. **Play it in the app.** The assembly's sequence gets Play / scrub on
-   the same playback the Motion window uses; the display poses are
-   display-only (as an exploded view's offsets are) and never move the
-   solved occurrences.
-3. **Film it.** `export_assembly_video` — the same request and job as
-   `export_motion_video` (path, format, width, height, fps, quality,
-   async; the current camera), with the sequence's timeline as the pose
-   source. `MotionVideo.cpp`'s capture, encoder thread and job are reused,
-   not copied: the pose source becomes the thing that differs.
-4. **Generators.** The clock (both stages) and the Strandbeest write a
-   draft video of their sequence beside their card when asked (a flag,
-   off in their tests' default runs so the suites stay fast).
+1. **Group steps.** `StepOccurrences` in `src/ui/SequencePlayback.cpp`
+   returns the step's list instead of its one `occurrenceId`. The timeline
+   already moves a step's occurrences rigidly together
+   (`sequence::TimelineStep::occurrences`); the thread lookup there reads
+   the first occurrence's bodies, which stays right for a group going on by
+   one thread. If the check's answer for a group step moves its rows
+   (one row per step, `steps[i]` against `seq.steps[i]`), the row-to-step
+   mapping in `ResolveSequence`'s worker follows it.
+2. **Pose steps.** `StepMateValues` returns the step's mate values, and
+   `ResolveSequence` stops refusing them. A pose step becomes a
+   `TimelineStep` with no path and, instead, the placements of every placed
+   occurrence before and after it: solved on the frame with the mate solver
+   at both ends (a copy of the assembly, as the motion run does), stored on
+   the step, and blended between them over the step's time (position lerped,
+   orientation slerped, the motion playback's `Blend`); after it, the parts
+   it moved stand at the solved "after" placement in place of their seats.
+   Its duration comes from the largest angle or distance it moves through,
+   at the timeline's one speed. Unit test: a pose step reaches its mate
+   value at its end.
+3. **Films.** The clock films stage 2 as well with `--video`, and the
+   Strandbeest gets the same flag (`generators/strandbeest/build.py`,
+   off in its test's run).
 
 ## Files
 
-- A sequence-timeline module beside the sequence check (`src/core/`),
-  `src/ui/MotionVideo.cpp` and `MotionActions.cpp` (the pose source
-  split out), the assembly panel's sequence section for Play,
-  `src/remote/RemoteMotion.cpp` or `RemoteInspection.cpp` with its
-  `describe` row.
+- `src/ui/SequencePlayback.cpp` (the two accessors, the pose solve),
+  `src/core/SequenceTimeline.{h,cpp}` (a pose step's placements, `PoseAt`),
+  `tests/test_sequence_timeline.cpp`.
 - `generators/clock/build.py`, `generators/strandbeest/build.py`.
-- `docs/assemblies/README.md` (#assembly-sequences, #motion-video).
+- docs/assemblies/README.md#playing-and-filming-a-sequence.
 
 ## Verified by
 
-- Unit tests on the timeline: a part is hidden before its step and home
-  after it; at the step's midpoint it is half way along its path; a group
-  moves rigidly; a thread step's turn matches its pitch; a pose step
-  reaches its mate value; the speed scales with the assembly's size.
-- A smoke that films a two-step sequence to PNG frames and reads the
-  part's screen position move between frames; and a refused sequence
-  that does not check.
-- A GUI test: Play on the sequence moves the display, Stop restores it,
-  and the solved placements are unchanged.
-- The clock's stage-1 film made and looked at.
-- The headless, GUI and pygui suites.
+- The unit test above, and the timeline's existing ones.
+- `assembly_video_smoke.py` extended with a group step (two parts that
+  move together keep their relative placement on screen).
+- The clock's stage-2 and the Strandbeest's films made and looked at.

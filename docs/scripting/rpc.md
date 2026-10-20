@@ -240,6 +240,7 @@ A call that can take minutes takes `{async: true}` and answers at once with
 the id of a background job
 ([the registry](../ui/long-operations.md#the-registry)):
 `run_study`, `mesh_study`, `run_motion_study`, `export_motion_video`,
+`export_assembly_video`,
 `cam_toolpath`, `update_drawing`, `check_requirements` and `contact_report`.
 `background_jobs` lists every running job with its kind and `fraction`. Each
 domain has a status call that reports a running job and, once it has ended,

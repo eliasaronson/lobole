@@ -487,7 +487,10 @@ definition in the document for the window to show.
 
 `export_motion_video {study, path, format?, width?, height?, fps?, frames?,
 quality?, async?}` films a study: the file to put in a README, send to
-someone or attach to an issue.
+someone or attach to an issue. `export_assembly_video` films an assembly
+sequence the same way ([playing and filming a sequence](#playing-and-filming-a-sequence)):
+the capture, the encoder and the job are one, and only the poses differ
+(`VideoPoses`: a study's run, or a sequence's timeline).
 
 - **Formats.** `mp4` (H.264), `webm` (VP9) and `gif` (one palette for the
   whole animation, from ffmpeg's palette pass) are encoded by **ffmpeg**, run
@@ -673,6 +676,56 @@ along another axis is refused; a cap on a crank's pin under a bar fails
 with the crank at rest and goes home after a pose step turns it; a pose
 of a mate with no such freedom is refused; groups and poses survive
 saving and opening again.
+
+### Playing and filming a sequence
+
+A sequence is shown going together: in the Motion window (**Play**, a
+**Time** scrub, **Stop**, under the studies) and as a video,
+`export_assembly_video` -- `export_motion_video`'s request, job (kind
+`motion-video`, `motion_video_status`) and answer, with the sequence's
+timeline as what is filmed.
+
+- **What it shows comes from the check.** Play and the export run
+  `check_assembly_sequence` (on a worker; the panel shows it as a bar with
+  Cancel, the export inside its job) and lay the timeline out from its
+  answer: each step's line (`path.origin_mm`), its way home
+  (`path.moves`, the side the check found it goes on from) and its
+  distance from clear (`travel_mm`) -- so the film and the check cannot
+  disagree. A sequence that does not pass is **refused**, naming its first
+  failing step and what it was forced against, or what no step places.
+  The timeline is kept while the assembly and its parts are unchanged
+  (their versions), so Play again or an export after Play does not check
+  again; an edit ends playback.
+- **The timeline** (`core/SequenceTimeline.h`). Each step's occurrences
+  appear at its turn, stand where they start for 0.35 s, travel home in a
+  straight line along the path and stay there; the base is put in place.
+  A part not yet put in is hidden (the mesh and its outlines). A step's
+  `turn_deg` is turned over the path, right hand about the way it moves,
+  from where it starts to its seat; a step going on by its `thread` turns
+  a turn a pitch (its modelled thread's pitch and hand, else any thread
+  its part carries) -- the check's own rule for a modelled thread. One
+  speed for the whole film, from the assembly's size: its bounds'
+  diagonal in 3 s, a move at least 0.4 s so a short press is still seen,
+  a thread at most 3 turns a second; 1.5 s home at the end. A turned try
+  the check found (`rotation_deg`) is not shown: the part goes on as
+  placed.
+- **Display-only**, as motion playback is: `DisplayMatrix` and the
+  renderer sync read the pose (`SequencePlaybackWorld`,
+  `SequencePlaybackHides`), the solved placements never move, Stop puts
+  the display back, and the two playbacks stop each other. Play loops.
+- **The film** is the motion video's capture, encoder and job
+  ([motion video](#motion-video)) with a different pose source; its length
+  is the timeline's at the fps asked, known once the check has run (an
+  async answer says `frames: null` until then).
+
+What holds it: `test_sequence_timeline.cpp` (hidden before its step and
+home after, half way at its midpoint, a group moved rigidly, a thread's
+turn a turn a pitch, the speed scaling with the size);
+`assembly_video_smoke.py` (a pin films appearing after the lug alone,
+held at its start, travelling down the picture and staying home; the
+assembly unmoved; a sequence that does not check refused naming the
+fork); the GUI test `assembly/a_sequence_plays_and_stops`. The clock
+films its stage 1 with `--video` ([clock](../../generators/clock/README.md)).
 
 ## Exploded views
 
@@ -895,7 +948,8 @@ In `src/remote/RemoteAssembly.cpp` and `src/remote/RemoteMotion.cpp`; the
 - Exploded views: `add_exploded_view`, `remove_exploded_view`,
   `list_exploded_views`, `set_explode_step`, `auto_explode`, `set_explode`.
 - Sequences: `set_assembly_sequence`, `get_assembly_sequence`;
-  `check_assembly_sequence` is in `src/remote/RemoteInspection.cpp`.
+  `check_assembly_sequence` is in `src/remote/RemoteInspection.cpp`;
+  `export_assembly_video` in `src/remote/RemoteMotion.cpp`.
 - BOM and hardware: `bom`, `export_bom`, `add_fastener`, `fit_fastener`,
   `check_fasteners`.
 - Clearances: `add_assertion`, `list_assertions`, `remove_assertion`,
@@ -919,9 +973,11 @@ one.
 | `src/core/AssemblyFlexible.cpp` | flexible sub-assemblies: `ExpandFlexible`, `CollapseFlexible`, `FlexibleRefusal`, mates named `{path, mate}` |
 | `src/core/AssemblyLoopSolve.{h,cpp}` | the loop solve; `MateAdjustFor`, `DeriveMateDofs` |
 | `src/core/MotionStudy.{h,cpp}` | running a motion study |
+| `src/core/SequenceTimeline.{h,cpp}` | an assembly sequence's timeline: each step's parts in time along their path |
 | `src/core/io/SerializeAssembly.cpp`, `Serialization.cpp` | JSON and the directory layout |
 | `src/ui/AssemblyActions.{h,cpp}` | solve/undo/selection glue, staleness, in-context entry, explode |
 | `src/ui/MateActions.cpp`, `GizmoInput.cpp`, `OccurrencePanel.cpp`, `Bom.cpp`, `MotionActions.cpp`, `MotionVideo.cpp`, `FastenerActions.cpp` | GUI tools |
+| `src/ui/SequencePlayback.{h,cpp}` | a sequence's timeline resolved from its check, played (the Motion window's section) and filmed |
 | `src/ui/FlexibleActions.{h,cpp}` | flexible placements from the panel and the RPC alike: Flexible, the configuration, inner mates as choices, a moving part as a selection |
 | `src/ui/RendererSync.cpp` | instanced assembly render sync, in-context ghosts |
 | `src/remote/RemoteAssembly.cpp`, `RemoteMotion.cpp` | RPCs |
@@ -953,11 +1009,12 @@ one.
   products, a job part in a configuration, the refusals).
   `motion_video_smoke.py` (renderer, label
   `pygui`): every video format read back by ffprobe, the refusals including
-  a PATH without ffmpeg, the pose put back, an async cancel.
+  a PATH without ffmpeg, the pose put back, an async cancel;
+  `assembly_video_smoke.py` (the same label): a sequence filmed.
 - GUI (`src/app/guitests/GuiTestsAssembly.cpp`, category `assembly`): mate
   hover marker and snaps, re-pick connector, mate tool rotate, sub-assembly
   insert/open/drag, relation and mate rows, BOM through a sub-assembly, motion
-  scrub, and `motion_video_frames_are_the_view` (a filmed frame is the
+  scrub, a sequence played and stopped, and `motion_video_frames_are_the_view` (a filmed frame is the
   viewport, not the window). `GuiTestsFlexible.cpp` (category `flexible`):
   tick Flexible (and the refusal for a unit with nothing fixed), pick a
   configuration, a relation side and a study driver inside the unit and run
