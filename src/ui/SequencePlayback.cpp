@@ -15,7 +15,8 @@
 
 #include "ui/SequencePlayback.h"
 
-#include "core/Feature.h" // Body, ThreadMark
+#include "cad/CADKernel.h" // ArmOccSignalHandlers
+#include "core/Feature.h"  // Body, ThreadMark
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "remote/RemoteInspection.h" // the sequence check
@@ -204,6 +205,7 @@ std::shared_ptr<SequencePoses> ResolveSequence(AppState& state,
   p->steps = seq.steps.size();
   SequencePoses* raw = p.get();
   p->worker = std::thread([raw, check, extras = std::move(extras), size] {
+    ArmOccSignalHandlers(); // the check's kernel calls, as its job's are
     std::string error;
     std::shared_ptr<sequence::Timeline> tl;
     try {
