@@ -579,7 +579,10 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     // The click itself -- the press and the release, the mouse already on
     // the tab -- and what its frames COST (MainThreadCpuMs), not how long
     // they waited for a core. The projection inside one of them was the
-    // stall.
+    // stall. Each cost is judged against the projection's own, measured
+    // below on the same machine under the same load: a fixed 250 ms failed a
+    // click that cost 80 ms quiet and 300 under contended load, which the
+    // projection's cost scales with too.
     ctx->MouseMove(
         ("//##PartTabs/**/###part" + std::to_string(sheetIndex)).c_str());
     const double c0 = MainThreadCpuMs();
@@ -587,7 +590,8 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     const double clickMs = MainThreadCpuMs() - c0;
     IM_CHECK(s_App->drawing != nullptr);
     ctx->LogInfo("the tab switch cost %.1f ms of main-thread time", clickMs);
-    IM_CHECK(clickMs < 250.0);
+    // The work was handed off: after the click the view is still projecting.
+    IM_CHECK(ui::DrawingViewProjecting(*s_App, viewId));
 
     // Frames keep coming while the view projects, and none of them is held.
     int framesWhileRunning = 0;
@@ -605,7 +609,6 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
                  framesWhileRunning, worstMs);
     IM_CHECK(!ui::BackgroundJobRunning(*s_App, "drawing"));
     IM_CHECK(framesWhileRunning >= 2);
-    IM_CHECK(worstMs < 250.0);
     // The placeholder was drawn in the view's place while it projected.
     IM_CHECK(s_App->drawingProjections.placeholderFrames > placeholderBefore);
 
@@ -622,6 +625,9 @@ void RegisterDrawingGuiTests(ImGuiTestEngine* engine) {
     ctx->LogInfo("the view's own projection cost %.0f ms", projectedMs);
     IM_CHECK(projectedMs >= 1000.0);
     IM_CHECK(!ui::DrawingViewProjecting(*s_App, viewId));
+    // Inside a frame, the projection cost the frame at least all of itself.
+    IM_CHECK(clickMs < projectedMs / 4);
+    IM_CHECK(worstMs < projectedMs / 4);
   };
 
   // Cancel, from the drawing panel's bar: the view that had not landed keeps
