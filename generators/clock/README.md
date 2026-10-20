@@ -25,7 +25,11 @@ print plate and each stage's [print job](../../docs/tolerances/README.md#print-j
 (`clock_stage1_job.3mf`, `clock_stage2_job.3mf`: every piece its own
 object with its slicer settings, a Bambu project when
 `$LOBOLE_SLICER_CONFIGS` holds `pla.json`, else not written and the
-receipt says why).
+receipt says why). With `--video`, `stage1_sequence.mp4`: stage 1's
+[assembly sequence](../../docs/assemblies/README.md#playing-and-filming-a-sequence)
+filmed from the stills' camera, each part appearing at its step and going
+home along the path the check took (off by default, so the test stays
+fast; stage 2's waits on a step that places two parts together).
 
 | file | what |
 |---|---|

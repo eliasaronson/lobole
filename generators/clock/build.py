@@ -19,7 +19,8 @@ predicts: generators/clock/README.md.
 
 Output (generated, untracked): scratch/clock/ (or $LOBOLE_SCRATCH/clock,
 or --out) — clock.dsgn, clock.json (the receipt), clock_card.md (the test
-card), and stage1/ and stage2/, one STL per print plate.
+card), and stage1/ and stage2/, one STL per print plate; with --video,
+stage1_sequence.mp4, stage 1's assembly sequence filmed.
 """
 import argparse
 import importlib.util
@@ -1411,7 +1412,15 @@ def main():
     ap.add_argument("--no-render", action="store_true",
                     help="skip the stills (a --headless instance has no "
                          "renderer)")
+    ap.add_argument("--video", action="store_true",
+                    help="film stage 1's assembly sequence going together "
+                         "to stage1_sequence.mp4 beside the card "
+                         "(export_assembly_video; needs a renderer and "
+                         "ffmpeg)")
     args = ap.parse_args()
+    if args.video and args.no_render:
+        raise SystemExit("clock: --video films with the renderer, which "
+                         "--no-render says this instance has not")
     out = Path(args.out) if args.out else OUT
     out.mkdir(parents=True, exist_ok=True)
     t_start = time.perf_counter()
@@ -1673,6 +1682,20 @@ def main():
                        up=[0.0, 1.0, 0.0])
                 d.call("render_still", path=str(out / fn), width=1200,
                        height=1600)
+                if args.video and a is a1:
+                    # From the same side, fitted to the film's own size:
+                    # each part appears at its step and goes home along the
+                    # path the check took (docs/assemblies/README.md
+                    # #playing-and-filming-a-sequence). Stage 2 waits on a
+                    # step that places two parts together.
+                    d.call("fit_view", width=720, height=960)
+                    v = d.call("export_assembly_video",
+                               path=str(out / "stage1_sequence.mp4"),
+                               width=720, height=960, fps=30,
+                               _timeout=3600)
+                    print(f"  stage 1 sequence film: {v['frames']} frames, "
+                          f"{v['bytes'] / 1e6:.1f} MB in {v['seconds']:.0f} "
+                          f"s -> stage1_sequence.mp4")
 
     a2.activate()
     d.call("save_project", path=str(out / "clock.dsgn"))
