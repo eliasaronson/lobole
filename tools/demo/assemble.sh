@@ -17,13 +17,13 @@
 #   tools/demo/assemble.sh --speed 1             # the scenes as recorded
 #
 # The captions are the CAPTION table below. The clips come from
-# tools/demo/record.sh (tools/demo/README.md).
+# tools/demo/record.sh and tools/demo/film.sh (tools/demo/README.md).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IN="$ROOT/scratch/demo"
 OUT=""
-SCENES="om615 assembly parametric history fem cam"
+SCENES="om615 assembly strandbeest parametric history fem cam"
 URL=""
 MAX_MB=9.5     # GitHub's limit for a video attached on a free plan is 10 MB
 SPEED=1.5      # the scenes play this much faster than recorded
@@ -33,6 +33,7 @@ CARD=4.0       # seconds the end card holds
 declare -A CAPTION=(
   [om615]="Assemblies — turned, cut open and run"
   [assembly]="Assembly sequences — checked, then put together"
+  [strandbeest]="Filmed from the sequence — a walking linkage, piece by piece"
   [parametric]="Parametric — sketches, dimensions and variables"
   [history]="Versioned — every change kept in git"
   [fem]="Simulation — a static study, in the part"

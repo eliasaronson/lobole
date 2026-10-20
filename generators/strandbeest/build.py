@@ -2196,22 +2196,23 @@ def check_sequence(d, s, lay, step_deg, parts, allowance):
     return out
 
 
-def film_sequence(d, out):
+def film_sequence(d, out, size=(1280, 720), name="stage1_sequence.mp4"):
     """stage1_sequence.mp4: the leg pair put together, as check_sequence
     left it active -- each piece appearing at its step, lit while it goes
     home along the path the check took, the crank turned by the pose steps
     before the caps that go on with it turned
     (docs/assemblies/README.md#playing-and-filming-a-sequence). Seen from
     in front (the crank's axis is Y), to the right and above, fitted to the
-    film's size."""
-    w, h = 1280, 720
+    film's size (`size`, pixels: tools/demo/film.sh takes it at the demo's
+    3840x2160)."""
+    w, h = size
     look = [0.4, -1.0, 0.5]
     d.call("set_camera", direction=look, up=[0, 0, 1])
     d.call("fit_view", width=w, height=h)
     # The fit leaves room for the pieces' starts; a little closer.
     fit = d.call("set_camera", direction=look, up=[0, 0, 1])
     d.call("set_camera", distance=0.85 * fit["distance"])
-    path = out / "stage1_sequence.mp4"
+    path = out / name
     out.mkdir(parents=True, exist_ok=True)
     v = d.request("export_assembly_video",
                   {"path": str(path), "width": w, "height": h, "fps": 30},

@@ -9,6 +9,7 @@ nothing, so a UI change that breaks one fails the suite the day it lands.
 tools/demo/record.sh                  # every scene -> scratch/demo/<scene>.mp4
 tools/demo/record.sh parametric cam   # just these
 tools/demo/record.sh --draft om615    # 1920x1080 at scale 1: a quick look
+tools/demo/film.sh                    # the film scenes (strandbeest) -> scratch/demo/
 ```
 
 `record.sh` runs them at Cinematic speed (a visible cursor that glides and
@@ -29,6 +30,7 @@ quality meant for video; `--draft` is for checking a scene's choreography.
 | `cam` | a plate pocketed, the cut simulated end to end |
 | `om615` | the OM615 with its injection pump, seen level from a little above its middle, turned once round, cut down the crank and run through two revolutions in section; a part right-clicked in the viewport and opened; a boss sketched on its largest flat face and extruded |
 | `assembly` | the printed engine cut down its cylinders, its 68-step assembly sequence played in the Motion window at 1.5x from the block alone to the flywheel, each step's parts lit as they go home (the crank's half turn among them), ending put together |
+| `strandbeest` | (`film.sh`, not a window) the Strandbeest's leg pair put together piece by piece by `export_assembly_video`: each bar, plate, pin and cap lit as it goes home along the path its check took, the whole linkage lit as the crank turns 15° before the cap that goes on with it, ending put together |
 
 ## Joining them
 
@@ -37,7 +39,7 @@ tools/demo/assemble.sh                       # scratch/demo/*.mp4 -> scratch/dem
 tools/demo/assemble.sh --scenes "om615 cam"  # these, in this order
 ```
 
-`assemble.sh` joins the scenes -- `om615` first, then `assembly`, `parametric`,
+`assemble.sh` joins the scenes -- `om615` first, then `assembly`, `strandbeest`, `parametric`,
 `history`, `fem`, `cam` -- played at 1.5x (`--speed`: the scenes are
 recorded at a pace a viewer can follow live, and a cut wants them quicker),
 with a 0.4 s crossfade between each, a caption
@@ -89,6 +91,27 @@ runs on the interface's clock, which a recording fixes at 1/60 s a frame,
 so the clip shows the sequence at its own pace however slowly a 4K frame
 draws; and it stops at the end, put together, which is the scene's last
 still.
+
+## The film scenes
+
+`strandbeest` is not a window recording: `tools/demo/film.sh` opens a
+saved project in its own offscreen instance (a scratch port, under an 8 GB
+memory cap, stopped when the script exits) and films its assembly sequence
+with `export_assembly_video` at 3840x2160 (`--draft`: 1920x1080), through
+the generator's own `film_sequence` so the camera is the one the
+generator's `--video` uses. The film moves from its first frame and stops
+on its last, so `film.sh` holds the first frame 1 s and the last 2 s
+(ffmpeg's `tpad`): every scene starts and ends still, and the crossfades
+join it like the others. It films the saved stage 1 of a generator run,
+`scratch/strandbeest-film/stage1/strandbeest_stage1.dsgn`
+(`LOBOLE_DEMO_STRANDBEEST_SOURCE` for another), made with
+
+```
+python3 generators/strandbeest/build.py --port PORT --stage 1 --no-controls \
+    --out scratch/strandbeest-film
+```
+
+About two minutes at 4K; about 28 s of clip, under 20 s in the cut.
 
 ## Writing a scene
 
