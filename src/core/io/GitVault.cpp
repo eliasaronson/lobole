@@ -733,7 +733,9 @@ bool SwitchBranch(const std::string& dir, const std::string& name,
     return false;
   }
   std::string out;
-  if (RunGitVerbose(dir, "checkout -q --end-of-options " + Quote(name), &out) !=
+  // `switch`, not `checkout`: before git 2.44 checkout reads
+  // `--end-of-options` as a path.
+  if (RunGitVerbose(dir, "switch -q --end-of-options " + Quote(name), &out) !=
       0) {
     if (error)
       *error = out.empty() ? "could not switch branch" : FirstLine(out);
