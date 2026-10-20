@@ -12,6 +12,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/MotionActions.h"
 #include "ui/SelectionPipeline.h"
+#include "ui/SequencePlayback.h"
 #include "ui/ViewActions.h"
 
 #include "core/Literals.h"
@@ -845,6 +846,89 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
   // (cam/simulation_plays_and_gives_it_back is the same trap). PNG frames,
   // so the test needs no ffmpeg; the save dialog is answered by
   // `saveDialogAnswer`, since a portal dialog opens on the real desktop.
+  // An assembly sequence plays on the Motion window's playback
+  // (docs/assemblies/README.md#playing-and-filming-a-sequence): Play checks
+  // it and shows each part coming home along the path the check took, a
+  // part not yet put in hidden; Stop puts the display back; the solved
+  // placements never move.
+  t = IM_REGISTER_TEST(engine, "assembly", "a_sequence_plays_and_stops");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    ctx->Yield();
+    const uint64_t partId = s_App->parts[0].id;
+    glm::dvec3 lo, hi;
+    ui::PartDocById(*s_App, partId)
+        ->GetBodies()[0]
+        .shape.GetBoundingBox(lo, hi);
+    const size_t asmIdx = ui::AddAssembly(*s_App, "Stack");
+    ui::SetActivePart(*s_App, asmIdx);
+    Occurrence base;
+    base.name = "Base";
+    base.partId = partId;
+    base.fixed = true;
+    const uint64_t baseOcc = s_App->assembly->AddOccurrence(base);
+    Occurrence top;
+    top.name = "Top";
+    top.partId = partId;
+    top.fixed = true;
+    top.position = glm::vec3(0.0f, 0.0f, float(hi.z - lo.z) + 1.0f);
+    const uint64_t topOcc = s_App->assembly->AddOccurrence(top);
+    AssemblySequence seq;
+    SequenceStep s0;
+    s0.occurrenceId = baseOcc;
+    SequenceStep s1;
+    s1.occurrenceId = topOcc;
+    s1.direction = glm::dvec3(0.0, 0.0, -1.0); // lowered onto it
+    s1.distanceMm = 20.0;
+    seq.steps = {s0, s1};
+    s_App->assembly->SetSequence(seq);
+    s_App->assembly->BumpVersion();
+    ui::SolveActiveAssembly(*s_App);
+    ctx->Yield(3);
+    const Occurrence* topNow = s_App->assembly->FindById(topOcc);
+    const glm::dmat4 seat = ui::OccurrenceMatrix(*topNow);
+
+    ToolbarClick(ctx, "###tb_asm_motion");
+    ctx->Yield(2);
+    IM_CHECK(s_App->motionToolOpen);
+    ctx->ItemClick("//Motion###ToolWindow/###sequence_play");
+    IM_CHECK(WaitFor(ctx, "the sequence checked and playing",
+                     [] { return ui::ShownSequence(*s_App) != nullptr; }));
+    const sequence::Timeline& tl = *ui::ShownSequence(*s_App);
+    IM_CHECK_EQ(tl.steps.size(), (size_t)2);
+    const sequence::TimelineStep& step = tl.steps[1];
+    // The path the check took: the step's own direction and distance.
+    IM_CHECK(std::abs(step.moves.z + 1.0) < 1e-9);
+    IM_CHECK(std::abs(step.travelMm - 20.0) < 1e-9);
+    IM_CHECK(WaitFor(ctx, "playback to advance",
+                     [] { return s_App->sequenceShow->t > 0.1; }));
+
+    // Scrubbed back before its step: not drawn. Half way through its
+    // move: drawn 10 mm above its seat, while the document has it home.
+    ctx->ItemInputValue("//Motion###ToolWindow/###sequence_t", 0.0f);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->sequenceShow->playing);
+    IM_CHECK(ui::SequencePlaybackHides(*s_App, topOcc));
+    IM_CHECK(!ui::SequencePlaybackHides(*s_App, baseOcc));
+    const float mid = float(0.5 * (step.start + step.end));
+    ctx->ItemInputValue("//Motion###ToolWindow/###sequence_t", mid);
+    ctx->Yield(2);
+    IM_CHECK(!ui::SequencePlaybackHides(*s_App, topOcc));
+    const glm::dmat4 shown = ui::DisplayMatrixOf(*s_App, *topNow);
+    // The slider holds a float of seconds: within its step of the middle.
+    IM_CHECK(std::abs(shown[3][2] - seat[3][2] - 10.0) < 0.05);
+    IM_CHECK(ui::OccurrenceMatrix(*topNow) == seat); // nothing solved
+
+    ctx->ItemClick("//Motion###ToolWindow/###sequence_stop");
+    ctx->Yield(2);
+    IM_CHECK(ui::ShownSequence(*s_App) == nullptr);
+    IM_CHECK(!ui::SequencePlaybackHides(*s_App, topOcc));
+    IM_CHECK(ui::DisplayMatrixOf(*s_App, *topNow) == seat); // back home
+    IM_CHECK(ui::OccurrenceMatrix(*topNow) == seat);
+    s_App->motionToolOpen = false;
+  };
+
   t = IM_REGISTER_TEST(engine, "assembly", "motion_video_frames_are_the_view");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

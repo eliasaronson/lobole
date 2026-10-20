@@ -15,6 +15,7 @@
 #include "ui/OpenJob.h"
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h" // SelectFeature (the fixtures)
+#include "ui/SequencePlayback.h"
 #include "ui/TemplateActions.h"
 #include "ui/ViewActions.h"
 
@@ -180,6 +181,9 @@ void ResetAppForTest() {
   // same way: a rim pick and a section-arrow drag that hit a window instead.
   s_App->explodeToolOpen = false;
   s_App->motionToolOpen = false;
+  // An assembly sequence's playback and the timeline it keeps.
+  ui::StopSequencePlayback(*s_App);
+  s_App->sequenceShow.reset();
   s_App->camVerb = ui::AppState::CamVerb::None;
   s_App->camVerbOp = 0;
   s_App->camVerbTool = 0;

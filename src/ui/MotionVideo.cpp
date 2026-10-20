@@ -6,9 +6,11 @@
 // The shape: a job of kind "motion-video" with NO worker of its own on the
 // registry's side — showing a pose and capturing it need the renderers, a
 // main-thread thing — so its `finish` is the slice (the ImportJob's
-// materialize is the other one). The poses are the Motion window's Play: a
-// run's samples, interpolated at the playback's rate (PosesToPlay makes a
-// collision-free run when there is no fresh one to play). Each slice streams
+// materialize is the other one). The poses are a VideoPoses: the Motion
+// window's Play -- a run's samples, interpolated at the playback's rate
+// (PosesToPlay makes a collision-free run when there is no fresh one to
+// play) -- or an assembly sequence's timeline (ui/SequencePlayback.cpp); the
+// capture, the encoder and the job are one for both. Each slice streams
 // frames of the viewport's own render through a FrameCapture for a few
 // milliseconds; the frames go to an ENCODER thread, which hands them on — to
 // ffmpeg's stdin, or to a PNG file — so a slow encoder costs the frame loop
@@ -24,6 +26,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJob.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/SequencePlayback.h"
 
 #include "thirdparty/stb_image_write.h"
 
@@ -254,28 +257,60 @@ uint64_t OutputBytes(const MotionVideoPlan& p, int frames) {
   return total;
 }
 
+// A study's run as the poses to film: Play's poses at its rate.
+class StudyPoses final : public VideoPoses {
+public:
+  StudyPoses(uint64_t studyId, std::string name,
+             std::shared_ptr<MotionPoses> poses)
+      : m_studyId(studyId), m_name(std::move(name)), m_poses(std::move(poses)) {
+  }
+  bool Ready() const override { return m_poses->done.load(); }
+  std::string Refusal() const override {
+    return m_poses->error.empty()
+               ? std::string()
+               : "motion study '" + m_name +
+                     "' has no poses to film: " + m_poses->error;
+  }
+  double Seconds() const override {
+    return double(m_poses->result->samples.size() - 1) /
+           kPlaybackSamplesPerSecond;
+  }
+  void Show(AppState& s, double fraction) override {
+    const double span = double(m_poses->result->samples.size() - 1);
+    ShowMotionPoses(s, m_studyId, m_poses->result, span * fraction);
+  }
+  bool Release(AppState& s) override {
+    m_poses->cancel.store(true);
+    if (m_poses->result && s.motionPlaybackPinned == m_poses->result)
+      StopMotionPlayback(s);
+    return m_poses->done.load(); // its run stops at the next sample
+  }
+
+private:
+  uint64_t m_studyId;
+  std::string m_name;
+  std::shared_ptr<MotionPoses> m_poses;
+};
+
 // Everything one export carries between slices.
 struct VideoRun {
   MotionVideoPlan plan;
-  uint64_t studyId = 0;
+  int framesAsked = 0; // 0: as many as Play takes, once the poses are made
   const AssemblyDocument* ranAgainst = nullptr; // identity, never dereferenced
-  std::shared_ptr<MotionPoses> poses;
-  bool shown = false;       // the poses are pinned to the viewport
-  int next = 0;             // the next frame to submit
-  int collected = 0;        // frames read back (in order) so far
-  double samplesSpan = 0.0; // playback positions run 0 .. this
+  std::shared_ptr<VideoPoses> poses;
+  bool shown = false; // the poses are pinned to the viewport
+  int next = 0;       // the next frame to submit
+  int collected = 0;  // frames read back (in order) so far
   std::shared_ptr<Encoder> encoder;
   std::vector<std::string> warnings;
   std::string error; // the main side's (a capture, the poses, a tab switch)
   std::chrono::steady_clock::time_point started;
 };
 
-// Frame k's playback position, in samples: the study's whole range over the
-// frames, first frame on the first sample and last on the last.
+// Frame k's place in the poses: their whole span over the frames, the
+// first frame on the first pose and the last on the last.
 double FramePos(const VideoRun& run, int k) {
-  return run.plan.frames > 1
-             ? run.samplesSpan * double(k) / double(run.plan.frames - 1)
-             : 0.0;
+  return run.plan.frames > 1 ? double(k) / double(run.plan.frames - 1) : 0.0;
 }
 
 // One slice of frames: aim a capture at the video's size, submit frames as
@@ -325,7 +360,7 @@ bool StreamFrames(AppState& s, VideoRun& run) {
       ok = false;
       break;
     }
-    ShowMotionPoses(s, run.studyId, run.poses->result, FramePos(run, run.next));
+    run.poses->Show(s, FramePos(run, run.next));
     if (!cap->Submit(&err)) {
       run.error = "frame " + std::to_string(run.next) +
                   " could not be rendered: " + err;
@@ -345,24 +380,15 @@ bool StreamFrames(AppState& s, VideoRun& run) {
 
 std::string FfmpegPath() { return proc::FindOnPath("ffmpeg"); }
 
-bool PlanMotionVideo(AppState& state, const MotionVideoRequest& req,
-                     MotionVideoPlan* plan, std::string* error) {
+bool PlanVideoFile(AppState& state, const MotionVideoRequest& req,
+                   const std::string& rpc, double seconds,
+                   MotionVideoPlan* plan, std::string* error) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
     return false;
   };
-  if (!state.assembly)
-    return fail("the active document is not an assembly");
-  const MotionStudy* s = state.assembly->FindMotionStudyById(req.studyId);
-  if (!s)
-    return fail("no motion study with id " + std::to_string(req.studyId));
-  const std::string why =
-      motion::WhyNot(*state.assembly, *s, AssemblyResolverFor(state));
-  if (!why.empty())
-    return fail(why);
-  MotionVideoPlan p;
-  p.studyName = s->name;
+  MotionVideoPlan p = *plan; // what the caller has said of it (its name)
 
   // The format: said, or read off the path. Never guessed.
   if (req.path.empty())
@@ -412,24 +438,19 @@ bool PlanMotionVideo(AppState& state, const MotionVideoRequest& req,
     p.quality = "medium";
   }
 
-  // Timing: the study plays for as long as Play takes, at a display's rate,
-  // one frame per display frame — Play's own poses in between the samples.
-  if (s->samples < 2)
-    return fail("motion study '" + s->name + "' has " +
-                std::to_string(s->samples) +
-                " samples; a video needs at least 2 — set its samples "
-                "(set_motion_study)");
+  // Timing: the poses play for as long as Play takes, at a display's rate,
+  // one frame per display frame -- Play's own poses in between.
   if (req.frames < 0)
     return fail("frames must be positive (or omitted for as many as the "
-                "study's playback takes at fps)");
+                "playback takes at fps)");
   if (req.fps < 0.0 || !std::isfinite(req.fps))
     return fail("fps must be a positive number of frames per second");
   p.fps = req.fps > 0.0 ? req.fps : kMotionVideoFps;
-  const double seconds = (s->samples - 1) / kPlaybackSamplesPerSecond;
-  p.frames = req.frames > 0
-                 ? req.frames
-                 : static_cast<int>(std::lround(seconds * p.fps)) + 1;
-  if (p.frames < 2)
+  p.frames = req.frames > 0 ? req.frames
+             : seconds >= 0.0
+                 ? static_cast<int>(std::lround(seconds * p.fps)) + 1
+                 : 0; // once the poses are made
+  if (p.frames == 1 || (p.frames == 0 && seconds >= 0.0))
     return fail("a video needs at least 2 frames; pass frames, or a higher "
                 "fps");
 
@@ -473,7 +494,7 @@ bool PlanMotionVideo(AppState& state, const MotionVideoRequest& req,
   if (IsVideo(p.format)) {
     p.ffmpeg = FfmpegPath();
     if (p.ffmpeg.empty())
-      return fail("export_motion_video format " + p.format +
+      return fail(rpc + " format " + p.format +
                   " needs ffmpeg on PATH; install it, or use format png");
   }
   if (!state.beginFrameCapture)
@@ -483,27 +504,82 @@ bool PlanMotionVideo(AppState& state, const MotionVideoRequest& req,
   return true;
 }
 
-bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
-                      std::string* error, MotionVideoPlan* planOut) {
+bool PlanMotionVideo(AppState& state, const MotionVideoRequest& req,
+                     MotionVideoPlan* plan, std::string* error) {
   const auto fail = [&](const std::string& m) {
     if (error)
       *error = m;
     return false;
   };
+  if (!state.assembly)
+    return fail("the active document is not an assembly");
+  const MotionStudy* s = state.assembly->FindMotionStudyById(req.studyId);
+  if (!s)
+    return fail("no motion study with id " + std::to_string(req.studyId));
+  const std::string why =
+      motion::WhyNot(*state.assembly, *s, AssemblyResolverFor(state));
+  if (!why.empty())
+    return fail(why);
+  if (s->samples < 2)
+    return fail("motion study '" + s->name + "' has " +
+                std::to_string(s->samples) +
+                " samples; a video needs at least 2 — set its samples "
+                "(set_motion_study)");
+  MotionVideoPlan p;
+  p.studyName = s->name;
+  if (!PlanVideoFile(state, req, "export_motion_video",
+                     (s->samples - 1) / kPlaybackSamplesPerSecond, &p, error))
+    return false;
+  *plan = std::move(p);
+  return true;
+}
+
+std::string VideoJobRunningRefusal(AppState& state) {
   if (BackgroundJobRunning(state, "motion-video"))
-    return fail("a motion video is already being exported (background_jobs "
-                "lists it; cancel_background_job {kind: \"motion-video\"} "
-                "stops it)");
-  auto run = std::make_shared<VideoRun>();
-  if (!PlanMotionVideo(state, req, &run->plan, error))
+    return "a video is already being exported (background_jobs lists it; "
+           "cancel_background_job {kind: \"motion-video\"} stops it)";
+  return {};
+}
+
+bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
+                      std::string* error, MotionVideoPlan* planOut) {
+  if (const std::string no = VideoJobRunningRefusal(state); !no.empty()) {
+    if (error)
+      *error = no;
+    return false;
+  }
+  MotionVideoPlan plan;
+  if (!PlanMotionVideo(state, req, &plan, error))
     return false;
   if (planOut)
-    *planOut = run->plan;
+    *planOut = plan;
   // The poses first: a study that cannot be run is refused before a file
   // or an encoder exists.
-  run->poses = PosesToPlay(state, req.studyId, error);
-  if (!run->poses)
+  auto poses = PosesToPlay(state, req.studyId, error);
+  if (!poses)
     return false;
+  return StartVideoJob(state, plan, req.frames,
+                       std::make_shared<StudyPoses>(req.studyId, plan.studyName,
+                                                    std::move(poses)),
+                       "Motion video '" + plan.studyName + "' to " +
+                           fs::path(plan.path).filename().string(),
+                       error);
+}
+
+bool StartVideoJob(AppState& state, const MotionVideoPlan& plan,
+                   int framesAsked, std::shared_ptr<VideoPoses> poses,
+                   const std::string& label, std::string* error) {
+  const auto fail = [&](const std::string& m) {
+    if (error)
+      *error = m;
+    return false;
+  };
+  if (const std::string no = VideoJobRunningRefusal(state); !no.empty())
+    return fail(no);
+  auto run = std::make_shared<VideoRun>();
+  run->plan = plan;
+  run->framesAsked = framesAsked;
+  run->poses = std::move(poses);
   std::error_code ec;
   if (run->plan.format == "png") {
     fs::create_directories(run->plan.path, ec);
@@ -521,16 +597,15 @@ bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
   }
   run->encoder->thread = std::thread(EncoderLoop, run->encoder.get());
 
-  run->studyId = req.studyId;
   run->ranAgainst = state.assembly.get();
   run->started = std::chrono::steady_clock::now();
   // Playback moves the same renderers the frames are taken from.
   StopMotionPlayback(state);
+  StopSequencePlayback(state);
 
   auto bg = std::make_unique<BackgroundJob>();
   bg->kind = "motion-video";
-  bg->label = "Motion video '" + run->plan.studyName + "' to " +
-              fs::path(run->plan.path).filename().string();
+  bg->label = label;
   bg->cancellable = true;
   bg->fraction.store(0.0);
   // No worker on this side: `done` from the start, and `finish` is the
@@ -555,50 +630,57 @@ bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
     const bool stopping =
         e.cancel.load() || e.failed.load() || !run->error.empty();
 
-    if (!stopping && run->next < run->plan.frames) {
-      MotionPoses& poses = *run->poses;
-      if (!poses.done.load()) { // the run of the poses is still going
+    if (!stopping && (!run->shown || run->next < run->plan.frames)) {
+      VideoPoses& poses = *run->poses;
+      if (!poses.Ready()) { // the poses are still being made
         std::this_thread::sleep_for(std::chrono::milliseconds(5));
         return false;
       }
-      if (!poses.error.empty()) {
-        stop("motion study '" + run->plan.studyName +
-             "' has no poses to film: " + poses.error);
+      if (const std::string no = poses.Refusal(); !no.empty()) {
+        stop(no);
         return false;
       }
       if (!run->shown) {
+        if (run->framesAsked <= 0) {
+          // As many as Play takes, now that it is known how long.
+          const int frames =
+              static_cast<int>(std::lround(poses.Seconds() * run->plan.fps)) +
+              1;
+          if (frames < 2) {
+            stop("a video needs at least 2 frames; pass frames, or a "
+                 "higher fps");
+            return false;
+          }
+          run->plan.frames = frames;
+          std::lock_guard lock(e.m);
+          e.plan.frames = frames; // before any frame reaches it
+        }
         run->shown = true;
-        run->samplesSpan = double(poses.result->samples.size() - 1);
-        // Pinned before the first capture aims the renderers, so the
-        // resync that pinning asks for happens once, not every slice.
-        ShowMotionPoses(s, run->studyId, poses.result, 0.0);
+        // Shown before the first capture aims the renderers, so the resync
+        // that showing asks for happens once, not every slice.
+        poses.Show(s, 0.0);
         return false;
       }
       if (!StreamFrames(s, *run))
         stop(run->error);
       raw->fraction.store(0.5 *
                           (double(run->collected) + double(e.written.load())) /
-                          double(run->plan.frames));
+                          double(std::max(run->plan.frames, 1)));
       return false;
     }
 
     // Every frame captured (or the export stopped): the viewport goes back
     // to the document's placements, and no more frames come.
     if (run->poses) {
-      run->poses->cancel.store(true);
-      if (ours && s.motionPlaybackPinned == run->poses->result &&
-          run->poses->result)
-        StopMotionPlayback(s);
-      if (run->poses->done.load())
-        run->poses.reset();
-      else
-        return false; // its run stops at the next sample
+      if (!run->poses->Release(s))
+        return false; // what makes them stops at its next step
+      run->poses.reset();
       std::lock_guard lock(e.m);
       e.closing = true;
     }
     e.cv.notify_all();
     raw->fraction.store(0.5 + 0.5 * double(e.written.load()) /
-                                  double(run->plan.frames));
+                                  double(std::max(run->plan.frames, 1)));
     if (!e.finished.load()) {
       std::unique_lock lock(e.m);
       e.cv.wait_for(lock, std::chrono::milliseconds(5));
@@ -619,8 +701,8 @@ bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
                     : e.failed.load()   ? e.error
                     : result->cancelled ? "cancelled"
                                         : std::string();
-    result->ok =
-        result->error.empty() && result->framesWritten == run->plan.frames;
+    result->ok = result->error.empty() && run->plan.frames >= 2 &&
+                 result->framesWritten == run->plan.frames;
     if (result->error.empty() && !result->ok)
       result->error = "only " + std::to_string(result->framesWritten) + " of " +
                       std::to_string(run->plan.frames) + " frames were written";
@@ -632,12 +714,12 @@ bool StartMotionVideo(AppState& state, const MotionVideoRequest& req,
     result->bytes =
         result->ok ? OutputBytes(run->plan, result->framesWritten) : 0;
     if (result->ok)
-      LOG_INFO("Motion video written to {} ({} frames, {}x{}, {} fps, {} "
+      LOG_INFO("Video written to {} ({} frames, {}x{}, {} fps, {} "
                "bytes, {:.1f} s)",
                run->plan.path, result->framesWritten, run->plan.width,
                run->plan.height, run->plan.fps, result->bytes, result->seconds);
     else
-      LOG_WARN("Motion video to {} failed: {}", run->plan.path, result->error);
+      LOG_WARN("Video to {} failed: {}", run->plan.path, result->error);
     s.motionVideoLast = std::move(result);
     return true;
   };

@@ -346,6 +346,7 @@ set(core_sources
     src/core/Measure.cpp
     src/core/MeasureSeal.cpp
     src/core/MeasureInsertion.cpp
+    src/core/SequenceTimeline.cpp
     src/core/MeasureSections.cpp
     src/core/PrintSplit.cpp
     src/core/ThreadStandards.cpp
@@ -885,6 +886,7 @@ set(app_sources
     src/ui/FastenerActions.cpp
     src/ui/MotionActions.cpp
     src/ui/MotionVideo.cpp
+    src/ui/SequencePlayback.cpp
     src/ui/JobActions.cpp
     src/ui/MachineActions.cpp
     src/ui/PrintProfileActions.cpp

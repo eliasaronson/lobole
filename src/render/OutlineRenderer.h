@@ -98,6 +98,9 @@ public:
                   const std::vector<uint32_t>& indices);
   void RemoveMesh(uint32_t meshId);
   void SetMeshTransform(uint32_t meshId, const glm::mat4& transform);
+  // Drawn or not, keeping its buffers: a part an assembly sequence's
+  // playback has not put in yet (ui/SequencePlayback.h).
+  void SetMeshVisible(uint32_t meshId, bool visible);
 
   // Camera and rendering
   void UpdateCamera(const glm::mat4& view,
@@ -155,6 +158,7 @@ private:
   struct OutlineMesh {
     uint32_t assetId = 0;
     glm::mat4 transform = glm::mat4(1.0f);
+    bool visible = true;
 
     // Wireframe edge indices. CPU side: the asset's adjacency classified for
     // THIS instance's view direction, laid out [static feature/boundary

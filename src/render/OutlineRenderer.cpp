@@ -935,6 +935,11 @@ void OutlineRenderer::SetMeshTransform(uint32_t meshId,
   }
 }
 
+void OutlineRenderer::SetMeshVisible(uint32_t meshId, bool visible) {
+  if (meshId > 0 && meshId <= m_meshes.size() && m_meshes[meshId - 1])
+    m_meshes[meshId - 1]->visible = visible;
+}
+
 void OutlineRenderer::SetViewport(int32_t x, int32_t y, uint32_t width,
                                   uint32_t height) {
   m_viewportX = x;
@@ -1108,7 +1113,8 @@ void OutlineRenderer::RenderOutlines(VkCommandBuffer commandBuffer,
                           &m_outlineDescriptorSets[currentFrame], 0, nullptr);
 
   for (const auto& mesh : m_meshes) {
-    const OutlineAsset* asset = mesh ? AssetOf(*mesh) : nullptr;
+    const OutlineAsset* asset =
+        mesh && mesh->visible ? AssetOf(*mesh) : nullptr;
     if (asset && asset->vertexBuffer != VK_NULL_HANDLE &&
         asset->indexBuffer != VK_NULL_HANDLE) {
       vkCmdPushConstants(commandBuffer, m_outlinePipelineLayout,
@@ -1152,7 +1158,8 @@ void OutlineRenderer::RenderWireframes(VkCommandBuffer commandBuffer,
                           &m_wireframeDescriptorSets[currentFrame], 0, nullptr);
 
   for (const auto& mesh : m_meshes) {
-    const OutlineAsset* asset = mesh ? AssetOf(*mesh) : nullptr;
+    const OutlineAsset* asset =
+        mesh && mesh->visible ? AssetOf(*mesh) : nullptr;
     if (asset && asset->vertexBuffer != VK_NULL_HANDLE &&
         mesh->edgeIndexBuffers[currentFrame] != VK_NULL_HANDLE &&
         mesh->uploadedIndexCount[currentFrame] > 0) {

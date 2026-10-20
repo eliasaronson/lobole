@@ -23,6 +23,7 @@
 #include "ui/PanelTitles.h"
 #include "ui/PreviewFeature.h" // BeginToolWindowFrame (mate session window)
 #include "ui/SelectionPipeline.h"
+#include "ui/SequencePlayback.h"
 #include "ui/TextFit.h"
 #include "ui/Theme.h" // ElevatedWindowBorder
 #include "ui/ToleranceActions.h"
@@ -946,6 +947,9 @@ void DrawExplodeToolWindow(AppState& state) {
 void DrawMotionToolWindow(AppState& state) {
   BeginToolWindowFrame(state, "Motion");
   DrawMotionBody(state);
+  // The assembly sequence plays on the same playback
+  // (docs/assemblies/README.md#playing-and-filming-a-sequence).
+  DrawSequenceSection(state);
   ImGui::Separator();
   if (ImGui::Button("Close###motion_close"))
     state.motionToolOpen = false;

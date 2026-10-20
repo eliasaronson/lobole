@@ -6,6 +6,7 @@
 #include "ui/MotionActions.h"
 #include "ui/ProjectActions.h"
 #include "ui/SceneOverlays.h"
+#include "ui/SequencePlayback.h"
 #include "ui/ViewActions.h"
 
 #include "core/LightRig.h"
@@ -1508,6 +1509,12 @@ void SyncAssemblyRenderers(AppState& state) {
       // localXf: the leaf's place inside the unit. xf = DisplayMatrix(occ) *
       // localXf by construction, which is what lets the drag path recompose
       // it per frame without a resync.
+      // A part an assembly sequence being played has not put in yet.
+      if (SequencePlaybackHides(state, occ.id)) {
+        state.meshRenderer->SetInstanceVisible(meshId, false);
+        if (state.outlineRenderer && outlineId != 0)
+          state.outlineRenderer->SetMeshVisible(outlineId, false);
+      }
       state.documentMeshes.push_back(
           {meshId, outlineId, bi, occ.id,
            glm::inverse(OccurrenceMatrix(occ)) * inst.world, inst.partId,

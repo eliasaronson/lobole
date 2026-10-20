@@ -9,10 +9,11 @@
 #include "ui/CamTool.h" // RunCamVerification
 #include "ui/DocumentSlots.h"
 #include "ui/FlexibleActions.h" // a moving part of a flexible unit
-#include "ui/JobActions.h" // JobPlacedBodies
-#include "ui/MotionActions.h" // MotionPlaybackLocal
+#include "ui/JobActions.h"      // JobPlacedBodies
+#include "ui/MotionActions.h"   // MotionPlaybackLocal
 #include "ui/ProjectActions.h"
 #include "ui/SelectionPipeline.h"
+#include "ui/SequencePlayback.h"
 #include "ui/ViewActions.h"
 
 #include "ui/FeatureEditor.h" // PickSlot, kMateSessionSlot (U7c mate slots)
@@ -349,6 +350,10 @@ void PushOccurrenceLive(AppState& state, uint64_t occId) {
   if (!occ)
     return;
   const glm::dmat4 base = DisplayMatrix(state, *occ);
+  // A sequence being played hides what it has not put in yet; only then,
+  // so every other push is what it was.
+  const bool sequence = ShownSequence(state) != nullptr;
+  const bool hidden = sequence && SequencePlaybackHides(state, occId);
   for (const DocumentRenderMesh& m : state.documentMeshes) {
     if (m.occurrenceId != occId)
       continue;
@@ -371,6 +376,12 @@ void PushOccurrenceLive(AppState& state, uint64_t occId) {
       state.meshRenderer->SetInstanceTransform(m.meshId, glm::mat4(xf));
     if (state.outlineRenderer)
       state.outlineRenderer->SetMeshTransform(m.outlineId, glm::mat4(xf));
+    if (sequence) {
+      if (state.meshRenderer)
+        state.meshRenderer->SetInstanceVisible(m.meshId, !hidden);
+      if (state.outlineRenderer && m.outlineId != 0)
+        state.outlineRenderer->SetMeshVisible(m.outlineId, !hidden);
+    }
   }
 }
 

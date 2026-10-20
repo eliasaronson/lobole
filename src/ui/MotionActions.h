@@ -160,6 +160,44 @@ struct MotionVideoResult {
 // Every refusal, and every default, without starting anything.
 bool PlanMotionVideo(AppState& state, const MotionVideoRequest& req,
                      MotionVideoPlan* plan, std::string* error);
+
+// What a video films: a study's run, or an assembly sequence's timeline
+// (docs/assemblies/README.md#playing-and-filming-a-sequence). The poses may
+// still be being made (on a worker) when the job starts; each frame is one
+// shown in the viewport, display-only, and captured.
+class VideoPoses {
+public:
+  virtual ~VideoPoses() = default;
+  // Made, or refused (Refusal says why).
+  virtual bool Ready() const = 0;
+  virtual std::string Refusal() const = 0;
+  // How long Play takes them, seconds: the video's length at its fps
+  // unless `frames` was asked for. Read once Ready.
+  virtual double Seconds() const = 0;
+  // Show the pose at `fraction` of the way through (0 the first frame, 1
+  // the last) in the viewport. The document is not touched.
+  virtual void Show(AppState& state, double fraction) = 0;
+  // The viewport back to the document's placements, and a worker still
+  // making the poses told to stop. True once nothing of it is running.
+  virtual bool Release(AppState& state) = 0;
+};
+
+// The file side of a video -- path, format, quality, fps, size, ffmpeg, a
+// renderer -- as export_motion_video plans it; `rpc` names the method in a
+// refusal. `seconds` is how long Play takes the poses; < 0 when that is
+// known only once they are made, and `frames` is then left 0 unless asked.
+bool PlanVideoFile(AppState& state, const MotionVideoRequest& req,
+                   const std::string& rpc, double seconds,
+                   MotionVideoPlan* plan, std::string* error);
+// Start the job (kind "motion-video") that films `poses` to `plan`: the
+// capture, the encoder thread and the outcome in state.motionVideoLast are
+// one for every pose source. `framesAsked` 0: as many as Play takes at the
+// plan's fps, decided once the poses are made. `label` names the job.
+bool StartVideoJob(AppState& state, const MotionVideoPlan& plan,
+                   int framesAsked, std::shared_ptr<VideoPoses> poses,
+                   const std::string& label, std::string* error);
+// A video already being exported: why another is refused, or empty.
+std::string VideoJobRunningRefusal(AppState& state);
 // Start the job (kind "motion-video"). False, with `error`, for any refusal
 // PlanMotionVideo makes, a video already being exported, or an encoder that
 // cannot be started.

@@ -15,6 +15,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/MotionActions.h"
+#include "ui/SequencePlayback.h"
 
 #include <glm/gtc/quaternion.hpp>
 
@@ -239,6 +240,24 @@ constexpr MethodDoc MotionMethods[] = {
      "runs it as a background job ('motion-video' in background_jobs, "
      "cancellable) and motion_video_status reads the outcome.",
      "async, format, fps, frames, height, path, quality, study, width",
+     remote::NotInBatch},
+    {"export_assembly_video",
+     "Film the assembly SEQUENCE going together: {path, format?, width?, "
+     "height?, fps?, frames?, quality?, async?}, the request, the job "
+     "('motion-video') and the answer of export_motion_video. Each step's "
+     "occurrences appear at its turn, still for a moment where they start, "
+     "then travel home along the path the sequence CHECK took -- its line, "
+     "its way and its distance from clear, turned by the step's turn_deg "
+     "or, going on by a thread, a turn a pitch -- and stay home after. One "
+     "speed for the whole film, from the assembly's size (its bounds' "
+     "diagonal in 3 s), so its length (`frames`, null in an async answer "
+     "until then) is known once the check has run, which it does inside "
+     "the job (the timeline Play made is reused while the assembly is "
+     "unchanged). A sequence that does not check is REFUSED, naming its "
+     "first failing step (or what no step places). The assembly is not "
+     "moved; the frames are the viewport's render from the current camera, "
+     "width x height PIXELS, `fps` frames per SECOND (60).",
+     "async, format, fps, frames, height, path, quality, width",
      remote::NotInBatch},
     {"motion_video_status",
      "The video export in progress, if any ({running, fraction}), and the "
@@ -1118,11 +1137,15 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error(err);
     return json{{"path", path}, {"nodes", nodes}, {"frames", frames}};
   }
-  if (m == "export_motion_video") {
+  if (m == "export_motion_video" || m == "export_assembly_video") {
+    // One request and one job for both (docs/assemblies/README.md
+    // #motion-video): a study's run, or the assembly sequence's timeline.
+    const bool sequence = m == "export_assembly_video";
     AssemblyDocument& asmDoc = NeedAssembly(state);
-    const MotionStudy& s = NeedStudy(asmDoc, p);
     ui::MotionVideoRequest req;
-    req.studyId = s.id;
+    if (m == "export_motion_video") {
+      req.studyId = NeedStudy(asmDoc, p).id;
+    }
     req.path = p.at("path").get<std::string>();
     req.format = p.value("format", std::string{});
     if (p.contains("width") || p.contains("height")) {
@@ -1155,13 +1178,15 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     const bool async = p.value("async", false);
     ui::MotionVideoPlan plan;
     std::string err;
-    if (!ui::StartMotionVideo(state, req, &err, &plan))
+    if (!(sequence ? ui::StartAssemblyVideo(state, req, &err, &plan)
+                   : ui::StartMotionVideo(state, req, &err, &plan)))
       throw std::runtime_error(err);
     const auto planJson = [](const ui::MotionVideoPlan& pl) {
       return json{
           {"path", pl.path},
           {"format", pl.format},
-          {"frames", pl.frames},
+          // A sequence's length is known once its check has run.
+          {"frames", pl.frames > 0 ? json(pl.frames) : json(nullptr)},
           {"width", pl.width},
           {"height", pl.height},
           {"fps", pl.fps},
@@ -1178,7 +1203,7 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
     if (!last)
       throw std::runtime_error("the export ended without an outcome");
     if (!last->ok)
-      throw std::runtime_error("export_motion_video: " + last->error);
+      throw std::runtime_error(m + ": " + last->error);
     json out = planJson(last->plan);
     out["bytes"] = last->bytes;
     out["seconds"] = last->seconds;

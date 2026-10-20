@@ -104,6 +104,7 @@
   "edit_in_context": ["occurrence"],
   "enter_simulation": ["study"],
   "exit_simulation": [],
+  "export_assembly_video": ["async", "format", "fps", "frames", "height", "path", "quality", "width"],
   "export_bend_schedule": ["part", "path"],
   "export_bom": ["path"],
   "export_brep": ["body", "path"],

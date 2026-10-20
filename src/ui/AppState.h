@@ -729,6 +729,7 @@ public:
 
 // A motion video export's outcome (MotionActions.h).
 struct MotionVideoResult;
+struct SequenceShow;
 
 struct RenderJob {
   bool active = false;  // a render is in flight
@@ -1448,6 +1449,12 @@ struct AppState {
   // docs/assemblies/README.md#motion-video): what motion_video_status and the
   // panel report once the job is gone. Null until one has finished.
   std::shared_ptr<const MotionVideoResult> motionVideoLast;
+  // An assembly sequence played or filmed
+  // (docs/assemblies/README.md#playing-and-filming-a-sequence): its resolved
+  // timeline and where playback stands in it -- display-only, read by
+  // DisplayMatrix and the renderer sync as motion playback is. Null until
+  // one is asked for.
+  std::shared_ptr<SequenceShow> sequenceShow;
 
   // GUI tests: the answer the NEXT save dialog gives, without opening one. A
   // native dialog goes through the desktop portal, which draws on the user's

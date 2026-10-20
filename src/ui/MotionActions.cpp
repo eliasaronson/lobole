@@ -13,6 +13,7 @@
 #include "ui/AssemblyActions.h"
 #include "ui/BackgroundJob.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/SequencePlayback.h"
 
 #include "cad/CADKernel.h" // ArmOccSignalHandlers
 
@@ -735,6 +736,7 @@ bool StartMotionPlayback(AppState& state, uint64_t studyId, std::string* why) {
       *why = no;
     return false;
   }
+  StopSequencePlayback(state); // both place the same occurrences
   if (state.motionPlaybackStudy != studyId)
     state.motionPlaybackPos = 0.0; // a new study starts at its beginning
   state.motionPlaybackStudy = studyId;
@@ -756,6 +758,7 @@ void StopMotionPlayback(AppState& state) {
 }
 
 void TickMotionPlayback(AppState& state, double now) {
+  TickSequencePlayback(state, now);
   if (state.motionPlaybackStudy == 0)
     return;
   // Poses a video export is showing: it moves them itself, and they are not
@@ -787,6 +790,9 @@ void TickMotionPlayback(AppState& state, double now) {
 
 bool MotionPlaybackWorld(const AppState& state, uint64_t occurrenceId,
                          glm::dmat4& world) {
+  // An assembly sequence being played is the other pose playback shows.
+  if (SequencePlaybackWorld(state, occurrenceId, world))
+    return true;
   const motion::Result* r = nullptr;
   size_t i = 0;
   double f = 0.0;

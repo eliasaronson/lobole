@@ -65,6 +65,7 @@ add_executable(designer_tests
     test_units.cpp
     test_window_geometry.cpp
     test_assembly.cpp
+    test_sequence_timeline.cpp
     test_assembly_solve.cpp
     test_assembly_loops.cpp
     test_assembly_relations.cpp
@@ -972,6 +973,15 @@ add_test(NAME motion_video_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(motion_video_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300 SKIP_RETURN_CODE 77)
+
+# An assembly sequence filmed (docs/assemblies/README.md
+# #playing-and-filming-a-sequence): the parts appear in order and travel
+# home along their paths; a sequence that does not check is refused.
+add_test(NAME assembly_video_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/assembly_video_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(assembly_video_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300)
 
 add_test(NAME visual_export_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/visual_export_smoke.py
