@@ -554,7 +554,24 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
     const double v2 = Doc()->GetBodies().at(0).shape.Volume();
 
     // The renderer's turn: the block in a few materials, from the body's own
-    // menu, turning a little under each.
+    // menu, turning a little under each. Seen from 55 degrees up first: a
+    // polished flat face is a mirror, and from lower down the block's top
+    // reflects only the dull part of the studio, so a metal looked matte.
+    {
+      const glm::vec3 target = s_App->camera->GetTarget();
+      const glm::vec3 eye = s_App->camera->GetPosition() - target;
+      const float dist = glm::length(eye);
+      const glm::vec2 flat = glm::normalize(glm::vec2(eye.x, eye.y));
+      const float el = glm::radians(55.0f);
+      s_App->camera->AnimateToPosition(
+          target + dist * glm::vec3(flat * std::cos(el), std::sin(el)), target,
+          0.8f);
+      ctx->Yield();
+      if (ctx->EngineIO->ConfigRunSpeed == ImGuiTestRunSpeed_Fast)
+        s_App->camera->FinishAnimation();
+      Hold(ctx, 0.8);
+      s_App->camera->SetUp(conv::kWorldUpF);
+    }
     ShowPanel(ctx, ui::kPanelModel);
     const std::string bodyRow =
         "//###Model/**/" + Doc()->GetBodies().at(0).name + "##body";
