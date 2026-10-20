@@ -40,6 +40,13 @@ Output goes to `scratch/strandbeest/` (or `--out`):
 - `strandbeest.json`, the receipt: every size, the layers, the
   allowances it was built with, every check, the controls, the
   predictions and the jobs.
+- with `--video`, `stage1_sequence.mp4`: the leg pair's
+  [assembly sequence](../../docs/assemblies/README.md#playing-and-filming-a-sequence)
+  filmed (1280 x 720, 30 fps), every piece appearing at its card step and
+  lit while it goes home along the path the check took, the crank turned
+  to 15° by the pose step before the caps that go on there. Stage 2 has no
+  sequence. Off by default; it needs an instance with a renderer and
+  ffmpeg, and is refused on a `--headless` one before anything is built.
 
 `linkage.py` is the leg as plain numbers: the lengths, the joints at a crank
 angle by circle intersections, the foot curve and the layer search. The

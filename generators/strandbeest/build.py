@@ -37,7 +37,8 @@ What it builds (generators/strandbeest/README.md):
   bars on one layer.
 
 Output (generated, untracked): scratch/strandbeest/ -- stage1/ and stage2/
-with their STLs and .dsgn, and strandbeest.json, the receipt.
+with their STLs and .dsgn, and strandbeest.json, the receipt; with
+--video, stage1_sequence.mp4, the leg pair's assembly sequence filmed.
 """
 import argparse
 import json
@@ -2195,6 +2196,32 @@ def check_sequence(d, s, lay, step_deg, parts, allowance):
     return out
 
 
+def film_sequence(d, out):
+    """stage1_sequence.mp4: the leg pair put together, as check_sequence
+    left it active -- each piece appearing at its step, lit while it goes
+    home along the path the check took, the crank turned by the pose steps
+    before the caps that go on with it turned
+    (docs/assemblies/README.md#playing-and-filming-a-sequence). Seen from
+    in front (the crank's axis is Y), to the right and above, fitted to the
+    film's size."""
+    w, h = 1280, 720
+    look = [0.4, -1.0, 0.5]
+    d.call("set_camera", direction=look, up=[0, 0, 1])
+    d.call("fit_view", width=w, height=h)
+    # The fit leaves room for the pieces' starts; a little closer.
+    fit = d.call("set_camera", direction=look, up=[0, 0, 1])
+    d.call("set_camera", distance=0.85 * fit["distance"])
+    path = out / "stage1_sequence.mp4"
+    out.mkdir(parents=True, exist_ok=True)
+    v = d.request("export_assembly_video",
+                  {"path": str(path), "width": w, "height": h, "fps": 30},
+                  timeout=3600)
+    print(f"  stage 1 sequence film: {v['frames']} frames, "
+          f"{v['bytes'] / 1e6:.1f} MB in {v['seconds']:.0f} s -> {path}")
+    return {"path": str(path), "frames": v["frames"], "fps": v["fps"],
+            "seconds": v["seconds"]}
+
+
 def write_card(out, s, stages):
     """strandbeest_card.md: the look-alikes, every piece's label, and the
     assembly order of each stage built."""
@@ -2335,13 +2362,31 @@ def main():
                     help="start a new project first (an untitled scratch one is "
                          "discarded; a saved one with unsaved work refused)")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--video", action="store_true",
+                    help="film stage 1's assembly sequence going together "
+                         "to stage1_sequence.mp4 beside the card "
+                         "(export_assembly_video; needs an instance with a "
+                         "renderer, not --headless, and ffmpeg)")
     args = ap.parse_args()
     if args.pairs < 1:
         raise SystemExit("strandbeest: --pairs is 1 or more")
+    if args.video and args.stage == "2":
+        raise SystemExit("strandbeest: --video films stage 1's sequence "
+                         "(stage 2 has none); --stage 1 or all")
     out = Path(args.out) if args.out else OUT
     t_all = time.perf_counter()
 
     d = connect(args.port)
+    if args.video:
+        # Refused before anything is built, not an hour in.
+        ping = d.call("ping")
+        if not ping.get("gpu"):
+            raise SystemExit("strandbeest: --video films with the renderer, "
+                             "and this instance has none (--headless); "
+                             "start one with tools/headless-preview.sh")
+        if not ping.get("features", {}).get("ffmpeg"):
+            raise SystemExit("strandbeest: --video encodes with ffmpeg, "
+                             "which is not on the instance's PATH")
     if args.fresh:
         fresh_project(d)
     proc = ({"profile": args.profile} if args.profile else
@@ -2426,6 +2471,8 @@ def main():
         seq1 = check_sequence(d, s, lay, step_deg, one,
                               allow("hole", s["dp"]) / 2.0)
         receipt["stage1"]["sequence"] = seq1
+        if args.video:
+            receipt["stage1"]["film"] = film_sequence(d, out)
         o1 = out / "stage1"
         o1.mkdir(parents=True, exist_ok=True)
         items = print_items(s, lay, frames, 1, with_press=press)
