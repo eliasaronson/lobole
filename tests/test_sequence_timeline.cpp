@@ -143,3 +143,60 @@ TEST_CASE("The speed scales with the assembly's size", "[sequence]") {
   CHECK(press.steps[1].end - press.steps[1].start >=
         sequence::Timing{}.minMoveSeconds - 1e-12);
 }
+
+TEST_CASE("A pose step reaches its pose, and later parts go home to it",
+          "[sequence]") {
+  // A crank (occurrence 1) turned a quarter turn about Z in nine strides,
+  // then a pin (2) put in through it, going home to where the pose left
+  // its seat: the crank's eye, 50 mm out along the crank.
+  const auto turned = [](double deg) {
+    return glm::rotate(glm::dmat4(1.0), glm::radians(deg),
+                       glm::dvec3(0.0, 0.0, 1.0));
+  };
+  const glm::dmat4 pinSeat =
+      glm::translate(glm::dmat4(1.0), glm::dvec3(50.0, 0.0, 0.0));
+  TimelineStep pose;
+  for (int k = 0; k <= 9; k++)
+    pose.strides.push_back(
+        {{1, turned(10.0 * k)}, {2, turned(10.0 * k) * pinSeat}});
+  const auto tl = sequence::Time({Base(1), pose, Down({2}, 20.0)}, 200.0);
+  const TimelineStep& p = tl.steps[1];
+  REQUIRE(p.IsPose());
+  REQUIRE(p.end > p.start);
+  // A quarter turn at the pose rate, at the least.
+  CHECK(p.end - p.start >= 90.0 / sequence::Timing{}.poseDegPerSecond - 1e-9);
+  const glm::dmat4 crankSeat(1.0);
+  CHECK(Apart(*sequence::PoseAt(tl, 1, crankSeat, p.start), crankSeat) < 1e-12);
+  CHECK(Apart(*sequence::PoseAt(tl, 1, crankSeat, 0.5 * (p.start + p.end)),
+              turned(45.0)) < 1e-9);
+  // It reaches its pose, and stays there.
+  CHECK(Apart(*sequence::PoseAt(tl, 1, crankSeat, p.end), turned(90.0)) < 1e-9);
+  CHECK(Apart(*sequence::PoseAt(tl, 1, crankSeat, tl.seconds), turned(90.0)) <
+        1e-9);
+  // The pin is not out during the pose; after its step it is home at the
+  // posed eye, (0, 50, 0), not at its seat in the document.
+  CHECK_FALSE(
+      sequence::PoseAt(tl, 2, pinSeat, 0.5 * (p.start + p.end)).has_value());
+  const auto home = sequence::PoseAt(tl, 2, pinSeat, tl.seconds);
+  REQUIRE(home.has_value());
+  CHECK_THAT(Origin(*home).x, WithinAbs(0.0, 1e-9));
+  CHECK_THAT(Origin(*home).y, WithinAbs(50.0, 1e-9));
+  // ...and on its way, 20 mm above that.
+  const auto atStart = sequence::PoseAt(tl, 2, pinSeat, tl.steps[2].start);
+  CHECK_THAT(Origin(*atStart).y, WithinAbs(50.0, 1e-9));
+  CHECK_THAT(Origin(*atStart).z, WithinAbs(20.0, 1e-9));
+}
+
+TEST_CASE("A pose that moves nothing shown yet takes no time", "[sequence]") {
+  TimelineStep pose;
+  for (int k = 0; k <= 9; k++)
+    pose.strides.push_back(
+        {{2, glm::rotate(glm::dmat4(1.0), glm::radians(10.0 * k),
+                         glm::dvec3(0.0, 0.0, 1.0))}});
+  const auto tl = sequence::Time({Base(1), pose, Down({2}, 20.0)}, 200.0);
+  CHECK(tl.steps[1].end == tl.steps[1].start);
+  // ...and what comes after goes home to it all the same.
+  const auto home = sequence::PoseAt(tl, 2, glm::dmat4(1.0), tl.seconds);
+  REQUIRE(home.has_value());
+  CHECK_THAT((*home)[0][1], WithinAbs(1.0, 1e-9)); // +X turned onto +Y
+}

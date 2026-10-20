@@ -20,7 +20,8 @@ predicts: generators/clock/README.md.
 Output (generated, untracked): scratch/clock/ (or $LOBOLE_SCRATCH/clock,
 or --out) — clock.dsgn, clock.json (the receipt), clock_card.md (the test
 card), and stage1/ and stage2/, one STL per print plate; with --video,
-stage1_sequence.mp4, stage 1's assembly sequence filmed.
+stage1_sequence.mp4 and stage2_sequence.mp4, each stage's assembly sequence
+filmed.
 """
 import argparse
 import importlib.util
@@ -1413,8 +1414,9 @@ def main():
                     help="skip the stills (a --headless instance has no "
                          "renderer)")
     ap.add_argument("--video", action="store_true",
-                    help="film stage 1's assembly sequence going together "
-                         "to stage1_sequence.mp4 beside the card "
+                    help="film each stage's assembly sequence going "
+                         "together to stage1_sequence.mp4 and "
+                         "stage2_sequence.mp4 beside the card "
                          "(export_assembly_video; needs a renderer and "
                          "ffmpeg)")
     args = ap.parse_args()
@@ -1682,20 +1684,19 @@ def main():
                        up=[0.0, 1.0, 0.0])
                 d.call("render_still", path=str(out / fn), width=1200,
                        height=1600)
-                if args.video and a is a1:
+                if args.video:
                     # From the same side, fitted to the film's own size:
-                    # each part appears at its step and goes home along the
-                    # path the check took (docs/assemblies/README.md
-                    # #playing-and-filming-a-sequence). Stage 2 waits on a
-                    # step that places two parts together.
+                    # each part (stage 2's arbors as one group) appears at
+                    # its step and goes home along the path the check took
+                    # (docs/assemblies/README.md
+                    # #playing-and-filming-a-sequence).
                     d.call("fit_view", width=720, height=960)
-                    v = d.call("export_assembly_video",
-                               path=str(out / "stage1_sequence.mp4"),
-                               width=720, height=960, fps=30,
-                               _timeout=3600)
-                    print(f"  stage 1 sequence film: {v['frames']} frames, "
+                    film = fn.replace(".png", "_sequence.mp4")
+                    v = d.call("export_assembly_video", path=str(out / film),
+                               width=720, height=960, fps=30, _timeout=3600)
+                    print(f"  {a.name} sequence film: {v['frames']} frames, "
                           f"{v['bytes'] / 1e6:.1f} MB in {v['seconds']:.0f} "
-                          f"s -> stage1_sequence.mp4")
+                          f"s -> {film}")
 
     a2.activate()
     d.call("save_project", path=str(out / "clock.dsgn"))

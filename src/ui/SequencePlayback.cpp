@@ -9,14 +9,16 @@
 // step's path) and run on a worker (remote::RunSequenceCheck); each step's
 // way home, its line and its distance from clear are the row it answers.
 // So what is shown is what was checked, and nothing is re-derived here.
-// What a step MOVES and what it SETS are read through one accessor each
-// (StepOccurrences, StepMateValues), the two places a group step and a pose
-// step join in.
+// What a step MOVES (one occurrence or a group) and what it SETS (a pose's
+// mate values) are read through one accessor each (StepOccurrences,
+// StepMateValues); a pose is solved here, on a copy, as the check solves it,
+// since the check keeps its posed placements to itself.
 
 #include "ui/SequencePlayback.h"
 
 #include "cad/CADKernel.h" // ArmOccSignalHandlers
-#include "core/Feature.h"  // Body, ThreadMark
+#include "core/AssemblySolve.h"
+#include "core/Feature.h" // Body, ThreadMark
 #include "core/Measure.h"
 #include "core/Occurrence.h"
 #include "remote/RemoteInspection.h" // the sequence check
@@ -35,6 +37,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <limits>
+#include <map>
 
 namespace ui {
 namespace {
@@ -43,18 +46,68 @@ using nlohmann::json;
 
 // --- What a step moves and sets --------------------------------------------
 
-// The occurrences a step moves, rigidly together: one today.
-std::vector<uint64_t> StepOccurrences(const SequenceStep& st) {
-  return {st.occurrenceId};
+// The occurrences a step moves, rigidly together: one, or a group; none
+// for a pose.
+const std::vector<uint64_t>& StepOccurrences(const SequenceStep& st) {
+  return st.occurrences;
 }
 
-// The mate values a pose step sets (mate, value in the mate's own unit):
-// none, until a step can be a pose.
-struct StepMateValue {
-  uint64_t mate = 0;
-  double value = 0.0;
-};
-std::vector<StepMateValue> StepMateValues(const SequenceStep&) { return {}; }
+// The mate values a pose step sets: degrees for a rotation, mm for an
+// offset (SequencePose).
+const std::vector<SequencePose>& StepMateValues(const SequenceStep& st) {
+  return st.pose;
+}
+
+// Every top-level occurrence's placement in `doc`.
+std::map<uint64_t, glm::dmat4> Placements(const AssemblyDocument& doc) {
+  std::map<uint64_t, glm::dmat4> out;
+  for (const Occurrence& o : doc.GetOccurrences())
+    out[o.id] = OccurrenceMatrix(o);
+  return out;
+}
+
+// A pose step solved on `doc` (the assembly at the pose before it) the way
+// the sequence check solves it -- every value set in strides of ten
+// degrees or two millimetres, one solve each -- recording every
+// placement at each stride, the pose before it first.
+std::vector<std::map<uint64_t, glm::dmat4>>
+SolvePose(AppState& state, AssemblyDocument& doc,
+          const std::vector<SequencePose>& values) {
+  const assembly::PartResolver parts = PartResolverFor(state);
+  const assembly::AssemblyResolver assemblies = AssemblyResolverFor(state);
+  struct Leg {
+    Mate* mate;
+    MateDof dof;
+    double from, to;
+  };
+  std::vector<Leg> legs;
+  int strides = 1;
+  for (const SequencePose& p : values) {
+    Mate* m = doc.FindMateById(p.mateId);
+    if (m == nullptr) // the check refused it before this runs
+      continue;
+    const bool rot = p.dof == MateDof::Rotation;
+    const double to = rot ? glm::radians(p.value) : p.value;
+    const double from = assembly::MateDofValue(*m, p.dof);
+    strides = std::max(
+        strides, static_cast<int>(std::ceil(std::abs(to - from) /
+                                            (rot ? glm::radians(10.0) : 2.0))));
+    legs.push_back({m, p.dof, from, to});
+  }
+  std::vector<std::map<uint64_t, glm::dmat4>> out{Placements(doc)};
+  if (legs.empty())
+    return out;
+  for (int k = 1; k <= strides; k++) {
+    for (const Leg& l : legs)
+      assembly::SetMateDof(*l.mate, l.dof,
+                           l.from + (l.to - l.from) * k / strides);
+    assembly::PropagateRelations(doc, legs[0].mate->id, parts);
+    assembly::Solve(doc, parts, assemblies, {legs[0].mate->id, legs[0].dof},
+                    /*diagnose=*/false);
+    out.push_back(Placements(doc));
+  }
+  return out;
+}
 
 // --- Resolving ---------------------------------------------------------------
 
@@ -73,6 +126,7 @@ uint64_t ContentKey(const AppState& state) {
 // the turn it was given, and the thread it goes on by.
 struct StepExtra {
   std::vector<uint64_t> occurrences;
+  std::vector<std::map<uint64_t, glm::dmat4>> strides; // a pose step's
   double turnDeg = 0.0;
   bool thread = false;
   double pitch = 0.0; // the moving side's thread, mm; 0: none found
@@ -168,14 +222,21 @@ std::shared_ptr<SequencePoses> ResolveSequence(AppState& state,
   } catch (const std::exception& e) {
     return fail(e.what());
   }
-  // What each step moves and turns, read on the frame.
+  // What each step moves and turns, and each pose's strides, read on the
+  // frame. The poses are solved on a copy, one after another, as the
+  // check solves them.
+  std::unique_ptr<AssemblyDocument> posed;
   std::vector<StepExtra> extras;
   for (size_t i = 0; i < seq.steps.size(); i++) {
     const SequenceStep& st = seq.steps[i];
-    if (!StepMateValues(st).empty())
-      return fail("step " + std::to_string(i + 1) +
-                  " sets mate values, and a pose step is not played yet");
     StepExtra x;
+    if (!StepMateValues(st).empty()) {
+      if (!posed)
+        posed = std::make_unique<AssemblyDocument>(asmDoc);
+      x.strides = SolvePose(state, *posed, StepMateValues(st));
+      extras.push_back(std::move(x));
+      continue;
+    }
     x.occurrences = StepOccurrences(st);
     x.turnDeg = st.turnDeg;
     x.thread = st.thread;
@@ -224,6 +285,11 @@ std::shared_ptr<SequencePoses> ResolveSequence(AppState& state,
           const StepExtra& x = extras[i];
           sequence::TimelineStep s;
           s.occurrences = x.occurrences;
+          if (!x.strides.empty()) { // a pose: no path, its solve's strides
+            s.strides = x.strides;
+            steps.push_back(std::move(s));
+            continue;
+          }
           s.base = row.value("base", false);
           if (!s.base && row.contains("path") &&
               row["path"].contains("moves")) {

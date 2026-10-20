@@ -876,9 +876,9 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     const uint64_t topOcc = s_App->assembly->AddOccurrence(top);
     AssemblySequence seq;
     SequenceStep s0;
-    s0.occurrenceId = baseOcc;
+    s0.occurrences = {baseOcc};
     SequenceStep s1;
-    s1.occurrenceId = topOcc;
+    s1.occurrences = {topOcc};
     s1.direction = glm::dvec3(0.0, 0.0, -1.0); // lowered onto it
     s1.distanceMm = 20.0;
     seq.steps = {s0, s1};

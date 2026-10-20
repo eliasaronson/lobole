@@ -33,6 +33,14 @@ struct TimelineStep {
   // to its seat: a bayonet's turn, or a thread's turn a pitch.
   double turnDeg = 0.0;
 
+  // A POSE step (it moves nothing home; mate values are set and the
+  // assembly solved there): every occurrence's placement at each stride of
+  // the solve, the first the pose before it and the last its own. The parts
+  // shown follow them, blended between strides; later steps go home to
+  // the placements of the pose they come after.
+  std::vector<std::map<uint64_t, glm::dmat4>> strides;
+  bool IsPose() const { return !strides.empty(); }
+
   // Seconds, set by Time(): shown from `appear`, still until `start`,
   // moving until `end`, home after.
   double appear = 0.0, start = 0.0, end = 0.0;
@@ -49,6 +57,8 @@ struct Timing {
   double minMoveSeconds = 0.4;
   // A thread turns at most this many turns a second.
   double turnsPerSecond = 3.0;
+  // A pose turns its parts at most this fast.
+  double poseDegPerSecond = 120.0;
   // Home at the end, held this long.
   double endSeconds = 1.5;
 };
@@ -60,6 +70,7 @@ struct Timeline {
   double seconds = 0.0; // the whole of it, the end's hold included
   // occurrence -> its step
   std::map<uint64_t, size_t> stepOf;
+  std::vector<size_t> poses; // the pose steps, in order
 };
 
 // Lays the steps out in time: one speed for the whole film, `sizeMm` (the
@@ -68,10 +79,16 @@ Timeline Time(std::vector<TimelineStep> steps, double sizeMm,
               const Timing& timing = {});
 
 // Where `occurrence` stands at `t` seconds, given its seat (its solved
-// placement, assembly frame). Null: not shown yet. An occurrence no step
-// moves stands at its seat throughout.
+// placement, assembly frame, as the document has it). Null: not shown yet.
+// Home is the seat until a pose step, then where the poses so far put it;
+// an occurrence no step moves stands at home throughout.
 std::optional<glm::dmat4> PoseAt(const Timeline& tl, uint64_t occurrence,
                                  const glm::dmat4& seat, double t);
+
+// Where the poses before `t` put `occurrence`: `seat` before any, blended
+// between a pose's strides while it runs.
+glm::dmat4 HomeAt(const Timeline& tl, uint64_t occurrence,
+                  const glm::dmat4& seat, double t);
 
 // How far from its seat a step's parts are at `t`, mm along the path (0
 // home, travelMm at the start).

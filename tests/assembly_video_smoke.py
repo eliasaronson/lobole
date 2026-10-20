@@ -18,7 +18,11 @@ frames:
     that only goes down the picture, and some way;
   - it stays home: the last frames are one picture;
   - the assembly is where it was; and with the pin put in before the fork
-    the export is refused naming the step that fails (the fork).
+    the export is refused naming the step that fails (the fork);
+  - a POSE step: a crank put in turned a quarter, then turned on to a
+    half by a pose, then a cap put on its pin. The film's last frame is the
+    film of the same assembly SOLVED at the half turn (the cap gone home
+    to where the pose put the pin), and the document is not posed.
 
 Needs a renderer (it runs --offscreen).
 
@@ -116,6 +120,40 @@ def fastened(d, name, a, b):
     d.call("add_mate", type="fastened", name=name,
            a={"occurrence": a, "origin": True},
            b={"occurrence": b, "origin": True}, flipped=False)
+
+
+def cranked(d):
+    """The sequence check smoke's crank: a frame with a bar over the crank
+    pin at rest, the crank on a revolute, a cap fastened on its pin."""
+    d.call("add_part", name="frame")
+    box(d, (-50, -50, -10), (110, 100, 10), "frame base")
+    box(d, (45, -10, 0), (10, 20, 35), "pillar", mode="add")
+    box(d, (20, -10, 30), (35, 20, 5), "bar", mode="add")
+    d.call("add_part", name="crank")
+    cylinder(d, (0, 0, 0), "z", 8.0, 5, "hub")
+    box(d, (0, -4, 0), (30, 8, 5), "arm", mode="add")
+    cylinder(d, (30, 0, 5), "z", 3.0, 10, "crank pin", mode="add")
+    d.call("add_part", name="pin cap")
+    cylinder(d, (30, 0, 15), "z", 5.0, 5, "pin cap")
+    d.call("add_assembly", name="cranked")
+    d.call("set_active_part", part="cranked")
+    fr = d.call("add_occurrence", part="frame", name="frame",
+                fixed=True)["id"]
+    cr = d.call("add_occurrence", part="crank", name="crank")["id"]
+    cp = d.call("add_occurrence", part="pin cap", name="cap")["id"]
+    d.call("add_mate", type="revolute", name="crank bearing",
+           a={"occurrence": fr, "origin": True},
+           b={"occurrence": cr, "origin": True}, flipped=False)
+    fastened(d, "cap on pin", cr, cp)
+
+
+def film(d, root, name):
+    out = os.path.join(root, name)
+    r = d.call("export_assembly_video", path=out, format="png", width=W,
+               height=H, fps=FPS, _timeout=600)
+    names = sorted(n for n in os.listdir(out) if n.endswith(".png"))
+    expect(len(names) == r["frames"], f"{name}: {r['frames']} frames")
+    return [rgb(os.path.join(out, n)) for n in names]
 
 
 def placements(d):
@@ -225,6 +263,40 @@ def main():
                or not os.listdir(os.path.join(root, "no")),
                "and no frames were written")
         expect(placements(d) == before, "the assembly is still where it was")
+
+        # --- a pose step -----------------------------------------------------
+        cranked(d)
+        down = [0, 0, -1]
+        quarter = {"pose": [{"mate": "crank bearing", "rotation_deg": 90.0}]}
+        half = {"pose": [{"mate": "crank bearing", "rotation_deg": 180.0}]}
+        d.call("set_assembly_sequence",
+               steps=[{"occurrence": "frame"}, quarter,
+                      {"occurrence": "crank", "direction": down}, half,
+                      {"occurrence": "cap", "direction": down}])
+        expect(d.call("check_assembly_sequence")["pass"],
+               "the crank goes in turned a quarter, the cap at a half")
+        d.call("set_camera", direction=[0.3, -1.0, 0.8], up=[0, 0, 1])
+        d.call("fit_view", width=W, height=H)
+        rest = placements(d)
+        posed = film(d, root, "posed")
+        expect(placements(d) == rest, "the poses moved nothing in the document")
+        # The same assembly solved at the half turn, filmed without poses.
+        bearing = next(m["id"] for m in d.call("list_mates")["mates"]
+                       if m["name"] == "crank bearing")
+        d.call("set_mate", id=bearing, rotation_deg=180.0)
+        d.call("solve_assembly")
+        d.call("set_assembly_sequence",
+               steps=[{"occurrence": "frame"},
+                      {"occurrence": "crank", "direction": down},
+                      {"occurrence": "cap", "direction": down}])
+        solved = film(d, root, "solved")
+        off = len(differing(posed[-1], solved[-1]))
+        expect(off < 0.002 * W * H,
+               f"the posed film ends where the solve puts it: {off} pixels "
+               "differ")
+        expect(len(posed) > len(solved),
+               f"the pose takes its time: {len(posed)} frames against "
+               f"{len(solved)}")
     finally:
         app.terminate()
         try:

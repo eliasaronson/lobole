@@ -708,7 +708,14 @@ timeline as what is filmed.
   diagonal in 3 s, a move at least 0.4 s so a short press is still seen,
   a thread at most 3 turns a second; 1.5 s home at the end. A turned try
   the check found (`rotation_deg`) is not shown: the part goes on as
-  placed.
+  placed. A **group** moves as one, rigidly. A **pose** step is solved
+  on a copy of the assembly the way the check solves it (the same 10° /
+  2 mm strides, poses accumulating), every placement kept at each stride,
+  and played by blending between them (positions lerped, orientations
+  slerped); it takes as long as its largest turn of a part already shown
+  at 120° a second, or its largest slide at the one speed, and no time
+  when it moves nothing shown yet. Every later step goes home to where the
+  poses so far put its seat, as the check checked it there.
 - **Display-only**, as motion playback is: `DisplayMatrix` and the
   renderer sync read the pose (`SequencePlaybackWorld`,
   `SequencePlaybackHides`), the solved placements never move, Stop puts
@@ -720,12 +727,17 @@ timeline as what is filmed.
 
 What holds it: `test_sequence_timeline.cpp` (hidden before its step and
 home after, half way at its midpoint, a group moved rigidly, a thread's
-turn a turn a pitch, the speed scaling with the size);
+turn a turn a pitch, the speed scaling with the size, a pose reaching its
+value with a later part going home to the posed seat, a pose of nothing
+shown taking no time);
 `assembly_video_smoke.py` (a pin films appearing after the lug alone,
 held at its start, travelling down the picture and staying home; the
 assembly unmoved; a sequence that does not check refused naming the
-fork); the GUI test `assembly/a_sequence_plays_and_stops`. The clock
-films its stage 1 with `--video` ([clock](../../generators/clock/README.md)).
+fork; a crank put in turned a quarter, turned on to a half by a pose and
+capped, whose film ends pixel for pixel where the film of the assembly
+solved at the half turn ends); the GUI test
+`assembly/a_sequence_plays_and_stops`. The clock films both stages with
+`--video` ([clock](../../generators/clock/README.md)).
 
 ## Exploded views
 
