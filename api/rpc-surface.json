@@ -114,7 +114,7 @@
   "export_dxf": ["body", "mark", "part", "path"],
   "export_members": ["dir", "overwrite", "part"],
   "export_motion": ["path", "study"],
-  "export_motion_video": ["async", "format", "fps", "frames", "height", "path", "quality", "study", "width"],
+  "export_motion_video": ["async", "format", "fps", "frames", "height", "highlight", "path", "quality", "speed", "study", "width"],
   "export_print_job": ["name", "path", "plates", "slicer_config"],
   "export_setup_sheet": ["job", "path", "picture", "program", "setup"],
   "export_step": ["body", "part", "path"],

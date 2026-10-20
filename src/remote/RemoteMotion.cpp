@@ -238,8 +238,10 @@ constexpr MethodDoc MotionMethods[] = {
      "format, frames, width, height, fps, bytes, seconds, warnings?}, and "
      "refusing with ffmpeg's own last lines when it fails; {async: true} "
      "runs it as a background job ('motion-video' in background_jobs, "
-     "cancellable) and motion_video_status reads the outcome.",
-     "async, format, fps, frames, height, path, quality, study, width",
+     "cancellable) and motion_video_status reads the outcome. `speed` and "
+     "`highlight` are export_assembly_video's and are refused here.",
+     "async, format, fps, frames, height, highlight, path, quality, speed, "
+     "study, width",
      remote::NotInBatch},
     {"export_assembly_video",
      "Film the assembly SEQUENCE going together: {path, format?, width?, "
@@ -1184,6 +1186,10 @@ std::optional<json> HandleMotionRpc(ui::AppState& state, const std::string& m,
         throw std::runtime_error("frames must be at least 2");
     }
     req.quality = p.value("quality", std::string{});
+    if (!sequence && (p.contains("speed") || p.contains("highlight")))
+      throw std::runtime_error("speed and highlight film an assembly "
+                               "sequence (export_assembly_video); a study "
+                               "plays at its run's 24 samples a second");
     if (sequence && p.contains("speed")) {
       if (!p.at("speed").is_number() || !(p.at("speed").get<double>() > 0.0))
         throw std::runtime_error("speed is a ratio of the timeline's own pace "
