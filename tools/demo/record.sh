@@ -19,7 +19,11 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-OUT="$ROOT/scratch/demo"
+# scratch/ is untracked, so a git worktree has none of its own: the clips and
+# the generated models are the main checkout's.
+MAIN="$(cd "$(git -C "$ROOT" rev-parse --git-common-dir)/.." && pwd)"
+SCRATCH="$MAIN/scratch"
+OUT="$SCRATCH/demo"
 # 3840x2160 at an interface scale of 2: a 1920x1080 layout drawn at the
 # density of a HiDPI display (Xvfb reports a scale of 1).
 SIZE=3840x2160
@@ -35,17 +39,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 
-ALL=(parametric history fem cam om615)
+ALL=(parametric history fem cam om615 assembly)
 # om615 plays the generated OM615 (generators/om615/), opened from a COPY: the
 # scene edits a part of it. Generate it with the app as built, so its mates
 # name faces the way this build does (tools/demo/README.md):
 #   python3 generators/om615/om615.py --port PORT --stage preview --no-export \
 #       --out scratch/demo/om615-gen
-OM615="${LOBOLE_DEMO_OM615_SOURCE:-$ROOT/scratch/demo/om615-gen/om615-unchecked.dsgn}"
+OM615="${LOBOLE_DEMO_OM615_SOURCE:-$SCRATCH/demo/om615-gen/om615-unchecked.dsgn}"
+# assembly plays the printed engine's sequence (generators/engine/), from a
+# copy too:
+#   python3 generators/engine/build.py --port PORT --profile "K5 PLA on P1S"
+ENGINE="${LOBOLE_DEMO_ENGINE_SOURCE:-$SCRATCH/engine/engine.dsgn}"
 if [ ${#SCENES[@]} -eq 0 ]; then
   SCENES=("${ALL[@]}")
-  # Without the generated model, the rest still record.
-  [ -d "$OM615" ] || SCENES=("${SCENES[@]/om615}")
+  # Without the generated models, the rest still record.
+  [ -e "$OM615" ] || SCENES=("${SCENES[@]/om615}")
+  [ -e "$ENGINE" ] || SCENES=("${SCENES[@]/assembly}")
   read -r -a SCENES <<< "${SCENES[*]}"
 fi
 for s in "${SCENES[@]}"; do
@@ -74,6 +83,12 @@ case " ${SCENES[*]} " in
     [ -d "$OM615" ] || { echo "record: no OM615 project at $OM615 (generators/om615/om615.py builds it)" >&2; exit 1; }
     cp -r "$OM615" "$STATE/om615.dsgn"
     DEMO_ENV="LOBOLE_DEMO_OM615='$STATE/om615.dsgn'" ;;
+esac
+case " ${SCENES[*]} " in
+  *" assembly "*)
+    [ -e "$ENGINE" ] || { echo "record: no engine project at $ENGINE (generators/engine/ builds it)" >&2; exit 1; }
+    cp -r "$ENGINE" "$STATE/engine.dsgn"
+    DEMO_ENV="$DEMO_ENV LOBOLE_DEMO_ENGINE='$STATE/engine.dsgn'" ;;
 esac
 LOG="$OUT/record.log"
 

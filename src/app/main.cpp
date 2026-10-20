@@ -3306,7 +3306,11 @@ int main(int argc, char** argv) {
     ui::SyncFieldRenderer(g_App);
     ui::TickCamPlayback(g_App, glfwGetTime());
     ui::SyncCamPlayback(g_App);
-    ui::TickMotionPlayback(g_App, glfwGetTime());
+    // On the interface's clock, which is the wall clock -- except while a
+    // demo scene records, when the test engine fixes it at 1/60 s a frame:
+    // a played motion or sequence then runs at its own pace in the clip
+    // however long a 4K frame takes to render (tools/demo/README.md).
+    ui::TickMotionPlayback(g_App, ImGui::GetTime());
     // Per frame on purpose: the resyncs are version-gated and
     // picking a rim or ticking a washer bumps no version.
     ui::SyncFastenerGhost(g_App);

@@ -23,7 +23,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IN="$ROOT/scratch/demo"
 OUT=""
-SCENES="om615 parametric history fem cam"
+SCENES="om615 assembly parametric history fem cam"
 URL=""
 MAX_MB=9.5     # GitHub's limit for a video attached on a free plan is 10 MB
 SPEED=1.5      # the scenes play this much faster than recorded
@@ -32,6 +32,7 @@ CARD=4.0       # seconds the end card holds
 
 declare -A CAPTION=(
   [om615]="Assemblies — turned, cut open and run"
+  [assembly]="Assembly sequences — checked, then put together"
   [parametric]="Parametric — sketches, dimensions and variables"
   [history]="Versioned — every change kept in git"
   [fem]="Simulation — a static study, in the part"

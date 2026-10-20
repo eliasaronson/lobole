@@ -28,6 +28,7 @@ quality meant for video; `--draft` is for checking a scene's choreography.
 | `fem` | a cantilever's static study run; von Mises, the deflection magnified 100x, then displacement |
 | `cam` | a plate pocketed, the cut simulated end to end |
 | `om615` | the OM615 with its injection pump, seen level from a little above its middle, turned once round, cut down the crank and run through two revolutions in section; a part right-clicked in the viewport and opened; a boss sketched on its largest flat face and extruded |
+| `assembly` | the printed engine cut down its cylinders, its 68-step assembly sequence played in the Motion window at 1.5x from the block alone to the flywheel, each step's parts lit as they go home (the crank's half turn among them), ending put together |
 
 ## Joining them
 
@@ -36,7 +37,7 @@ tools/demo/assemble.sh                       # scratch/demo/*.mp4 -> scratch/dem
 tools/demo/assemble.sh --scenes "om615 cam"  # these, in this order
 ```
 
-`assemble.sh` joins the scenes -- `om615` first, then `parametric`,
+`assemble.sh` joins the scenes -- `om615` first, then `assembly`, `parametric`,
 `history`, `fem`, `cam` -- played at 1.5x (`--speed`: the scenes are
 recorded at a pace a viewer can follow live, and a cut wants them quicker),
 with a 0.4 s crossfade between each, a caption
@@ -69,6 +70,25 @@ python3 generators/om615/om615.py --port PORT --stage preview --no-export \
 ```
 
 `LOBOLE_DEMO_OM615_SOURCE` points `record.sh` at another copy.
+
+The clips and the generated models are the MAIN checkout's `scratch/`
+(`record.sh` finds it through git), so a scene recorded from a worktree
+lands beside the others.
+
+## The assembly scene
+
+`assembly` plays the printed engine's sequence
+([generators/engine](../../generators/engine/README.md)), registered only
+when `LOBOLE_DEMO_ENGINE` names it; `record.sh` sets it to a copy of
+`scratch/engine/engine.dsgn` (`LOBOLE_DEMO_ENGINE_SOURCE` for another). The
+sequence is checked off camera (about a minute and a half), the section is
+the XZ plane through the bores and the crank, the camera looks at the cut
+from in front, a little to the right and above, and Play runs at 1.5x
+(`kAssemblySceneSpeed`): about 40 s recorded, under 30 s in the cut. Play
+runs on the interface's clock, which a recording fixes at 1/60 s a frame,
+so the clip shows the sequence at its own pace however slowly a 4K frame
+draws; and it stops at the end, put together, which is the scene's last
+still.
 
 ## Writing a scene
 

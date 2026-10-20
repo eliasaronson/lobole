@@ -13,6 +13,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/MotionActions.h" // FfmpegPath
 #include "ui/ProjectActions.h"
+#include "ui/SequencePlayback.h"
 #include "ui/SketchInteraction.h"
 #include "ui/VariableActions.h"
 #include "ui/ViewActions.h"
@@ -137,6 +138,13 @@ static bool s_SceneRecording = false;
 static constexpr float kSceneMouseSpeed = 2.5f;
 static float s_MouseSpeedBefore = 0.0f;
 
+// The assembly scene's pace, eye and distance: a ratio of the sequence's
+// own pace; the direction the camera looks from; times the engine's
+// diagonal.
+static constexpr float kAssemblySceneSpeed = 1.5f;
+static const glm::vec3 kAssemblySceneEye(0.35f, -1.0f, 0.4f);
+static constexpr float kAssemblySceneDistance = 1.6f;
+
 static void BeginScene(ImGuiTestContext* ctx, const char* name) {
   s_SceneRecording = false;
   if (GuiTestCaptureDir().empty())
@@ -251,18 +259,11 @@ static void FlyToBodies(ImGuiTestContext* ctx, Document* doc, double seconds,
 // After FrameBodies: slide the camera sideways (target and eye together) so
 // the bodies' centre lands in the middle of the viewport left of `window` --
 // a floating tool window that would otherwise cover part of the model.
-static void CentreLeftOf(ImGuiTestContext* ctx, Document* doc,
-                         const char* window) {
+static void CentreLeftOf(ImGuiTestContext* ctx, const glm::dvec3& lo,
+                         const glm::dvec3& hi, const char* window) {
   ImGuiWindow* w = ctx->WindowInfo(window, ImGuiTestOpFlags_NoError).Window;
   if (w == nullptr)
     return;
-  glm::dvec3 lo(1e300), hi(-1e300);
-  for (const Body& b : doc->GetBodies()) {
-    glm::dvec3 l, h;
-    b.shape.GetBoundingBox(l, h);
-    lo = glm::min(lo, l);
-    hi = glm::max(hi, h);
-  }
   const glm::vec3 mid((lo + hi) * 0.5);
   const float left = s_App->viewportPos.x;
   const float right = std::min(w->Pos.x, left + s_App->viewportSize.x);
@@ -279,6 +280,41 @@ static void CentreLeftOf(ImGuiTestContext* ctx, Document* doc,
   s_App->camera->SetTarget(s_App->camera->GetTarget() + shift);
   s_App->camera->SetPosition(eye + shift);
   ctx->Yield(2);
+}
+static void CentreLeftOf(ImGuiTestContext* ctx, Document* doc,
+                         const char* window) {
+  glm::dvec3 lo(1e300), hi(-1e300);
+  for (const Body& b : doc->GetBodies()) {
+    glm::dvec3 l, h;
+    b.shape.GetBoundingBox(l, h);
+    lo = glm::min(lo, l);
+    hi = glm::max(hi, h);
+  }
+  CentreLeftOf(ctx, lo, hi, window);
+}
+
+// The active assembly's box: every shown leaf's bodies, placed.
+static bool AssemblyBox(glm::dvec3& lo, glm::dvec3& hi) {
+  lo = glm::dvec3(1e300);
+  hi = glm::dvec3(-1e300);
+  for (const assembly::FlatInstance& inst : ui::FlattenActiveAssembly(*s_App)) {
+    if (!inst.visible || inst.part == nullptr)
+      continue;
+    for (const Body& b : inst.part->GetBodies()) {
+      if (b.reference)
+        continue;
+      glm::dvec3 l, h;
+      b.shape.GetBoundingBox(l, h);
+      for (int c = 0; c < 8; c++) {
+        const glm::dvec3 p = glm::dvec3(
+            inst.world * glm::dvec4((c & 1) ? h.x : l.x, (c & 2) ? h.y : l.y,
+                                    (c & 4) ? h.z : l.z, 1.0));
+        lo = glm::min(lo, p);
+        hi = glm::max(hi, p);
+      }
+    }
+  }
+  return lo.x <= hi.x;
 }
 
 static void ShowPanel(ImGuiTestContext* ctx, const char* title) {
@@ -989,6 +1025,133 @@ static void RegisterDemoScenes(ImGuiTestEngine* engine) {
                    added, radius, depth, M_PI * radius * radius * depth);
       IM_CHECK_LT(std::abs(added - M_PI * radius * radius * depth),
                   0.05 * M_PI * radius * radius * depth);
+      ctx->SetRef("//##MainMenuBar");
+      ctx->MenuClick("File/New"); // leave the big model behind
+      ctx->Yield(2);
+    };
+  }
+
+  // The printed engine (generators/engine/) put together: cut down the
+  // cylinders, its assembly sequence played in the Motion window from the
+  // block alone to the flywheel, each step's parts lit as they go home.
+  // Registered only when LOBOLE_DEMO_ENGINE names the project (generated,
+  // in scratch/, which CI does not have): tools/demo/record.sh sets it to
+  // a copy.
+  if (const char* enginePath = std::getenv("LOBOLE_DEMO_ENGINE")) {
+    static std::string s_Engine;
+    s_Engine = enginePath;
+    t = IM_REGISTER_TEST(engine, "demo", "assembly");
+    t->TestFunc = [](ImGuiTestContext* ctx) {
+      std::string err;
+      const bool opened = ui::OpenProject(*s_App, s_Engine, &err);
+      if (!opened)
+        ctx->LogError("open %s: %s", s_Engine.c_str(), err.c_str());
+      IM_CHECK_SILENT(opened);
+      ui::MarkProjectOpened(*s_App, s_Engine);
+      IM_CHECK(WaitForOpen(ctx));
+      if (s_App->assembly == nullptr)
+        for (size_t i = 0; i < s_App->parts.size(); i++)
+          if (s_App->parts[i].kind == ui::DocKind::Assembly) {
+            ui::SetActivePart(*s_App, i);
+            break;
+          }
+      ctx->Yield(5);
+      IM_CHECK_SILENT(s_App->assembly != nullptr);
+      IM_CHECK_SILENT(!s_App->assembly->GetSequence().Empty());
+
+      // The sequence checked before the camera rolls (a minute and more):
+      // Play then shows the timeline it laid out.
+      std::string why;
+      if (!ui::StartSequencePlayback(*s_App, &why))
+        ctx->LogError("play: %s", why.c_str());
+      IM_CHECK_SILENT(why.empty());
+      IM_CHECK(WaitFor(
+          ctx, "the sequence checked",
+          [] {
+            const auto& sh = s_App->sequenceShow;
+            return sh && (!sh->poses || sh->poses->done.load());
+          },
+          280.0));
+      IM_CHECK_SILENT(s_App->sequenceShow->poses &&
+                      s_App->sequenceShow->poses->error.empty());
+      ui::StopSequencePlayback(*s_App);
+      ctx->Yield(2);
+
+      // Cut down the cylinders: the XZ plane through the bores and the
+      // crank, the camera's half (-Y) cut away: `reverse` keeps y >= 0.
+      ToolbarClick(ctx, "###tb_section");
+      ctx->Yield(3);
+      IM_CHECK_SILENT(!s_App->sections.empty());
+      s_App->sections[0].basePlane = 1;
+      s_App->sections[0].offset = 0.0f;
+      s_App->sections[0].reverse = true;
+      s_App->sectionToolOpen = false; // the cut outlives its tool window
+      ctx->Yield(3);
+      // The Motion window, its pace and its highlight.
+      ToolbarClick(ctx, "###tb_asm_motion");
+      ctx->Yield(2);
+      IM_CHECK_SILENT(s_App->motionToolOpen);
+      ctx->ItemInputValue("//Motion###ToolWindow/###sequence_speed",
+                          kAssemblySceneSpeed);
+      IM_CHECK_SILENT(s_App->sequenceShow->playSpeed > 1.0);
+      IM_CHECK_SILENT(s_App->sequenceShow->playHighlight);
+
+      // Looked at square to the cut from a little in front and above, the
+      // engine left of the Motion window.
+      glm::dvec3 lo, hi;
+      IM_CHECK_SILENT(AssemblyBox(lo, hi));
+      {
+        const glm::vec3 mid((lo + hi) * 0.5);
+        const float size = static_cast<float>(glm::length(hi - lo));
+        // Whatever the open and the tab switch flew to, landed first.
+        for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+          ctx->Yield();
+        s_App->camera->StopAnimation();
+        s_App->camera->SetTarget(mid);
+        s_App->camera->SetPosition(mid + glm::normalize(kAssemblySceneEye) *
+                                             (kAssemblySceneDistance * size));
+        s_App->camera->SetUp(conv::kWorldUpF); // level: after the eye
+        ctx->Yield(2);
+      }
+      CentreLeftOf(ctx, lo, hi, "Motion###ToolWindow");
+      s_App->camera->SetUp(conv::kWorldUpF);
+      ctx->Yield(2);
+      ctx->MouseMoveToPos(
+          ImVec2(s_App->viewportPos.x + 10.0f, s_App->viewportPos.y + 10.0f));
+      ctx->Yield(3);
+
+      BeginScene(ctx, "assembly");
+      Hold(ctx, 1.2);
+      ctx->ItemClick("//Motion###ToolWindow/###sequence_play");
+      ctx->Yield();
+      const sequence::Timeline* tl = ui::ShownSequence(*s_App);
+      IM_CHECK_SILENT(tl != nullptr);
+      const double seconds = tl->seconds;
+      // Out of the way while it plays: on the viewport's empty corner, so
+      // nothing it shows is hovered.
+      ctx->MouseMoveToPos(
+          ImVec2(s_App->viewportPos.x + 10.0f, s_App->viewportPos.y + 10.0f));
+      if (ctx->EngineIO->ConfigRunSpeed == ImGuiTestRunSpeed_Fast) {
+        // The suite: to the end at once.
+        ctx->ItemInputValue("//Motion###ToolWindow/###sequence_t",
+                            static_cast<float>(seconds));
+      } else {
+        // The interface's clock, which is the clip's: a 60th of a second
+        // a frame, however long a frame takes to draw.
+        const int most = SceneFrames(ctx, 2.0 * seconds) + 600;
+        for (int i = 0; i < most && s_App->sequenceShow->playing; i++)
+          ctx->Yield();
+      }
+      ctx->Yield(2);
+      IM_CHECK(!s_App->sequenceShow->playing);
+      IM_CHECK(ui::ShownSequence(*s_App) != nullptr); // put together
+      IM_CHECK(ui::SequenceHighlighted(*s_App).empty());
+      Hold(ctx, 2.0);
+      EndScene(ctx);
+
+      ui::StopSequencePlayback(*s_App);
+      ui::ClearSections(*s_App);
+      s_App->motionToolOpen = false;
       ctx->SetRef("//##MainMenuBar");
       ctx->MenuClick("File/New"); // leave the big model behind
       ctx->Yield(2);

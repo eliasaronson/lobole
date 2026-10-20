@@ -197,6 +197,9 @@ captures, so an ordinary frame costs nothing.
   Ending a video sets the engine's `ConfigFixedDeltaTime` to 0 (wall clock),
   so `EndRecording` (`guitests/GuiTestsDemo.cpp`) puts the suite's back --
   every test after it would otherwise judge double-clicks by machine load.
+  Motion and assembly-sequence playback tick on that clock
+  (`ImGui::GetTime()`), so Play in a scene runs at its own pace in the
+  clip; CAM playback still ticks on the wall clock.
 - **The speed.** While it records, the engine switches a Fast run to
   Cinematic: a mouse move glides and then pauses. Step a timed sequence with
   `ctx->Yield()`, one frame each, not with mouse moves --
