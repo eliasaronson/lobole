@@ -39,7 +39,7 @@ tools/demo/assemble.sh                       # scratch/demo/*.mp4 -> scratch/dem
 tools/demo/assemble.sh --scenes "om615 cam"  # these, in this order
 ```
 
-`assemble.sh` joins the scenes -- `om615` first, then `assembly`, `strandbeest`, `parametric`,
+`assemble.sh` joins the scenes -- `om615` first, then `strandbeest`, `parametric`,
 `history`, `fem`, `cam` -- played at 1.5x (`--speed`: the scenes are
 recorded at a pace a viewer can follow live, and a cut wants them quicker),
 with a 0.4 s crossfade between each, a caption
@@ -90,7 +90,8 @@ from in front, a little to the right and above, and Play runs at 1.5x
 runs on the interface's clock, which a recording fixes at 1/60 s a frame,
 so the clip shows the sequence at its own pace however slowly a 4K frame
 draws; and it stops at the end, put together, which is the scene's last
-still.
+still. The cut leaves it out by default (`strandbeest` shows a sequence
+instead); `--scenes` puts it back.
 
 ## The film scenes
 

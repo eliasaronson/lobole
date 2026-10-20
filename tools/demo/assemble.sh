@@ -23,7 +23,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IN="$ROOT/scratch/demo"
 OUT=""
-SCENES="om615 assembly strandbeest parametric history fem cam"
+SCENES="om615 strandbeest parametric history fem cam"
 URL=""
 MAX_MB=9.5     # GitHub's limit for a video attached on a free plan is 10 MB
 SPEED=1.5      # the scenes play this much faster than recorded
