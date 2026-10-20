@@ -699,7 +699,9 @@ timeline as what is filmed.
 - **The timeline** (`core/SequenceTimeline.h`). Each step's occurrences
   appear at its turn, stand where they start for 0.35 s, travel home in a
   straight line along the path and stay there; the base is put in place.
-  A part not yet put in is hidden (the mesh and its outlines). A step's
+  A part not yet put in is hidden: its mesh, its outlines and its section
+  caps (and so its shadow and its ambient occlusion, which draw the
+  visible set). A step's
   `turn_deg` is turned over the path, right hand about the way it moves,
   from where it starts to its seat; a step going on by its `thread` turns
   a turn a pitch (its modelled thread's pitch and hand, else any thread
@@ -719,24 +721,52 @@ timeline as what is filmed.
 - **Display-only**, as motion playback is: `DisplayMatrix` and the
   renderer sync read the pose (`SequencePlaybackWorld`,
   `SequencePlaybackHides`), the solved placements never move, Stop puts
-  the display back, and the two playbacks stop each other. Play loops.
+  the display back, and the two playbacks stop each other. Play stops at
+  the end, put together (an assembly does not go round as a mechanism
+  does); Play again starts from the base.
+- **In section.** Section caps are cut at a resync and baked in world
+  space, and a playback moves parts without one, so after each pose both
+  playbacks call `FollowPlaybackCaps`: a leaf's caps move with it when the
+  move keeps every section plane (a piston down a bore the cut runs
+  along), are cut again where it now stands when it does not (the crank's
+  half turn across the cut; the cap cache makes a repeated pose cheap), and
+  a part not yet put in has none.
+- **The moving part highlighted.** From appearing to seated, a step's
+  occurrences are drawn in the selection's amber (every mesh and cap of
+  them), and in their own colour once home; a pose step lights what its
+  solve moves of what is shown (`sequence::MovingAt`). Part of the
+  selection projection while Play shows it, and of each frame of the film,
+  whose capture otherwise draws no tint. On by default: the Motion
+  window's "Highlight the moving part", `highlight: false` on the export.
+- **Pace.** A speed, a ratio of the timeline's own (the Motion window's
+  Speed, 0.25x to 8x; `speed` on the export, which then takes that many
+  times fewer frames). The timeline's rule -- one speed from the
+  assembly's size -- is unchanged; the pace only plays it faster or
+  slower. Play runs on the interface's clock: the wall clock, except
+  while a demo scene records, when it is 1/60 s a frame.
 - **The film** is the motion video's capture, encoder and job
   ([motion video](#motion-video)) with a different pose source; its length
-  is the timeline's at the fps asked, known once the check has run (an
+  is the timeline's at the fps and pace asked, known once the check has run (an
   async answer says `frames: null` until then).
 
 What holds it: `test_sequence_timeline.cpp` (hidden before its step and
 home after, half way at its midpoint, a group moved rigidly, a thread's
 turn a turn a pitch, the speed scaling with the size, a pose reaching its
 value with a later part going home to the posed seat, a pose of nothing
-shown taking no time);
+shown taking no time, what is moving at each moment);
 `assembly_video_smoke.py` (a pin films appearing after the lug alone,
 held at its start, travelling down the picture and staying home; the
 assembly unmoved; a sequence that does not check refused naming the
 fork; a crank put in turned a quarter, turned on to a half by a pose and
 capped, whose film ends pixel for pixel where the film of the assembly
-solved at the half turn ends); the GUI test
-`assembly/a_sequence_plays_and_stops`. The clock films both stages with
+solved at the half turn ends; the moving pin redder than the same film
+with `highlight: false` and home in its own colour, `speed: 2` half the
+frames; in section, the first frame the lug alone, as a film of the lug
+alone has it, the pin held at its start the screenshot of it put there,
+and the last frame the screenshot of the assembly); the GUI test
+`assembly/a_sequence_plays_and_stops` (lit on its way, played on at the
+panel's speed it stops at the end, put together). The demo's `assembly`
+scene plays the printed engine's (tools/demo/README.md#the-assembly-scene). The clock films both stages with
 `--video` ([clock](../../generators/clock/README.md)).
 
 ## Exploded views
