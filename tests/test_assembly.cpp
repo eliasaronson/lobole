@@ -808,12 +808,12 @@ TEST_CASE("Frozen v187 assembly golden carries its sequence",
                     Catch::Matchers::ContainsSubstring("accepted"));
 }
 
-// The vNEXT golden: a sequence with a pose step and a group step
+// The v188 golden: a sequence with a pose step and a group step
 // (docs/assemblies/README.md#assembly-sequences), round-tripped as written.
-TEST_CASE("Frozen vNEXT assembly golden carries groups and poses",
+TEST_CASE("Frozen v188 assembly golden carries groups and poses",
           "[assembly][golden]") {
   const fs::path golden = fs::path(TestSourceDir()) / "tests" / "golden" /
-                          "assembly" / "vNEXT-assembly-sequence-groups.json";
+                          "assembly" / "v188-assembly-sequence-groups.json";
   REQUIRE(fs::exists(golden));
   auto asmDoc = testio::LoadAssembly(golden.string());
   REQUIRE(asmDoc);

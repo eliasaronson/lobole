@@ -305,6 +305,7 @@ here; the golden corpus and git history cover them.
 | 185 | A print profile's `slender_ratio` (the tallest a piece stands over the least width it stands on: check_print's [slender](../tolerances/README.md#slender) limit) and `slender_ratio_source` (where it was read), both or neither, omitted when not stated, in the store and in a part's embedded copy; a ratio without its source, a source without its ratio or a ratio not above 0 is refused on load. An older build reads the profile without them, and judges by the built-in, unmeasured 8. Golden `v185-print-slender` |
 | 186 | A requirement's measure kind `insertion` {`document` (an assembly), `a` (the occurrence slid on), `b` (the one it goes on), `entry`: `positive`\|`negative`\|`either`, `mate`? (the mate id whose frame's Z is the axis), `allowance_mm`?, `samples`?, `rotations`?, `lead_in_mm`?}: passes when `a` reaches its seat with no more travel under interference than its own press ([insertion](../inspect/README.md#insertion)). An unknown `entry` is refused on load; a build that does not know the kind refuses the file. Golden `v186-insertion-requirement` |
 | 187 | An assembly's **sequence** ([assembly sequences](../assemblies/README.md#assembly-sequences)): `sequence` {`steps`: [{`occurrence`, `direction?`, `origin_mm?`, `mate?`, `distance_mm?`, `turn_deg?`, `thread?`, `note?`}], `allowance_mm?`} in the assembly's index (and in a single-file assembly), absent when it has no steps. A step key the loader does not know is refused. Golden `v187-assembly-sequence`. |
+| 188 | An assembly sequence's step names a **group** (`occurrences`: two or more ids, moved as one) or is a **pose** (`pose`: [{`mate`, `rotation_deg` \| `offset_mm`}], placing nothing) in place of its one `occurrence` ([assembly sequences](../assemblies/README.md#assembly-sequences)); a step states exactly one of the three. Golden `v188-assembly-sequence-groups`. |
 
 ## Pending changes
 
@@ -314,7 +315,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | An assembly sequence's step names a **group** (`occurrences`: two or more ids, moved as one) or is a **pose** (`pose`: [{`mate`, `rotation_deg` \| `offset_mm`}], placing nothing) in place of its one `occurrence` ([assembly sequences](../assemblies/README.md#assembly-sequences)); a step states exactly one of the three. Golden `vNEXT-assembly-sequence-groups`. |
 
 ## Paths in a project
 

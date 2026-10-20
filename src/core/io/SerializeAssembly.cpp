@@ -360,7 +360,7 @@ Mate MateFromJson(const json& j) {
   return m;
 }
 
-// ---- The assembly sequence (v187; groups and poses vNEXT) ----------------
+// ---- The assembly sequence (v187; groups and poses v188) ----------------
 
 json AssemblySequenceToJson(const AssemblySequence& seq) {
   json j;
