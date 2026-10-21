@@ -498,7 +498,14 @@ find_package(nlohmann_json 3 REQUIRED)
 # PlaneGCS constraint solver (vendored from FreeCAD, LGPL-2.1). Optional:
 # needs Eigen3 + Boost headers. Gated by HAVE_PLANEGCS; SketchSolver falls
 # back to a no-op stub if unavailable.
-find_package(Eigen3 3.3 QUIET)
+# No version in find_package: Eigen's config accepts only its own major
+# version, so `Eigen3 3.3` turned Eigen 5 (Arch) away and silently switched
+# the sketch solver and FEM off. 3.3 is still the floor, checked here.
+find_package(Eigen3 QUIET)
+if(Eigen3_FOUND AND Eigen3_VERSION VERSION_LESS 3.3)
+    message(WARNING "Eigen ${Eigen3_VERSION} is older than 3.3: sketch solver and FEM off")
+    set(Eigen3_FOUND FALSE)
+endif()
 find_package(Boost QUIET)
 if(Eigen3_FOUND AND Boost_FOUND)
     set(PLANEGCS_SOURCES
