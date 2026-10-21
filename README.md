@@ -48,21 +48,25 @@ the API; [generators/README.md](generators/README.md) lists them all.
 
 ## Installing
 
-Each release on the GitHub releases page carries:
+From the [releases page](https://github.com/eliasaronson/lobole/releases):
 
-- **Nix / NixOS:** `nix run github:eliasaronson/lobole` runs the full app,
-  GUI included, from a binary cache Nix asks to use. Outside NixOS the GUI
-  needs [nixGL](https://github.com/nix-community/nixGL).
-- **Windows:** a zip and an installer, tested under Wine only and unsigned
-  (SmartScreen warns). No FEM.
-- **Linux, headless:** an AppImage running the engine and its JSON-RPC
-  interface without a window
-  ([caveats](docs/packaging/README.md#the-headless-appimage)). For the GUI
-  on other distributions, build from source.
-- **Container:** `ghcr.io/eliasaronson/lobole-headless`, the same headless
-  engine ([below](#container-headless)).
-- **Python:** `pip install lobole` gives the client, the SDK and the MCP
-  server (`lobole-mcp`) ([docs/scripting](docs/scripting/README.md)).
+- **Ubuntu 26.04:** `sudo apt install ./lobole_<version>-1_amd64.deb`, the
+  full GUI.
+- **Windows:** a zip or an installer. Tested under Wine only, unsigned
+  (SmartScreen warns), no FEM.
+- **Linux, headless:** an AppImage with the engine and its JSON-RPC
+  interface, no window ([caveats](docs/packaging/README.md#the-headless-appimage)).
+
+Elsewhere:
+
+- **Nix:** `nix run github:eliasaronson/lobole`, the full GUI. Outside
+  NixOS the GUI needs [nixGL](https://github.com/nix-community/nixGL).
+- **Container:** `ghcr.io/eliasaronson/lobole-headless`
+  ([below](#container-headless)).
+- **Python:** `pip install lobole`, the client, SDK and MCP server
+  ([docs/scripting](docs/scripting/README.md)).
+
+Other distributions: [build from source](#building).
 
 ## Requirements
 
@@ -74,8 +78,12 @@ sudo apt install git cmake ninja-build build-essential python3 \
     libspdlog-dev libgtk-3-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
     libocct-data-exchange-dev libocct-modeling-algorithms-dev libocct-modeling-data-dev \
     libocct-foundation-dev libocct-ocaf-dev libocct-visualization-dev \
-    libvterm-dev
+    libtbb-dev libvterm-dev
 ```
+
+**Ubuntu 26.04:** the same list, plus `libnglib-dev netgen python3-netgen
+libspectra-dev` for FEM meshing and modal analysis; CI installs that too. The last two are needed only because
+Ubuntu's Netgen CMake config checks for them.
 
 **Nix / NixOS:** `nix-shell` in the repo root pins everything. The Vulkan
 driver comes from your system (`hardware.graphics.enable = true`).

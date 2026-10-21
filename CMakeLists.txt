@@ -1485,6 +1485,42 @@ install(FILES
 install(DIRECTORY "${CMAKE_SOURCE_DIR}/LICENSES/"
         DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/lobole/LICENSES")
 
+# The Ubuntu 26.04 package (docs/packaging/README.md#the-debian-package): the
+# install layout above under /usr, built by `cpack` in a stock 26.04
+# container. Configure with -DCMAKE_INSTALL_PREFIX=/usr.
+option(LOBOLE_PACKAGE_DEB "Configure CPack to build a .deb" OFF)
+if(LOBOLE_PACKAGE_DEB)
+    set(CPACK_GENERATOR DEB)
+    set(CPACK_PACKAGE_NAME lobole)
+    set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+    set(CPACK_PACKAGE_VENDOR "Elias Högbom Aronsson")
+    set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+        "Parametric B-Rep CAD for parts, assemblies, drawings, and simulation")
+    string(CONCAT CPACK_PACKAGE_DESCRIPTION
+        "Loböle is a parametric CAD program: constrained sketches, solid,\n"
+        "sheet-metal and tube features, assemblies with mates and motion,\n"
+        "drawings, FEM studies and CAM toolpaths, on OpenCASCADE. A JSON-RPC\n"
+        "interface, a Python SDK and an MCP server drive the same command\n"
+        "layer the GUI uses.")
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER
+        "Elias Högbom Aronsson <elias.aronson@gmail.com>")
+    set(CPACK_DEBIAN_PACKAGE_SECTION graphics)
+    set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/eliasaronson/lobole")
+    set(CPACK_DEBIAN_PACKAGE_RELEASE 1)
+    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+    # Depends comes from what the binary links (dpkg-shlibdeps), so it cannot
+    # drift from the link line. What is run rather than linked is by hand:
+    # a Vulkan driver and git (project history) recommended; ffmpeg (motion
+    # video) and python3 (the bundled client and MCP server) suggested.
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    # Our own planegcs and designer_adaptive, found through RUNPATH.
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
+        "${CMAKE_BINARY_DIR}")
+    set(CPACK_DEBIAN_PACKAGE_RECOMMENDS "mesa-vulkan-drivers, git")
+    set(CPACK_DEBIAN_PACKAGE_SUGGESTS "ffmpeg, python3")
+    include(CPack)
+endif()
+
 
 # ---------------------------------------------------------------------------
 # What this build actually contains. Printed at the end of configure because

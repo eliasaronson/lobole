@@ -146,6 +146,72 @@ jobs:
           name: windows
           path: win/*
 
+  # The Ubuntu 26.04 package (docs/packaging/README.md#the-debian-package):
+  # built against the distribution's own libraries, with the full GUI.
+  deb:
+    needs: check
+    runs-on: ubuntu-24.04
+    container: ubuntu:26.04
+    steps:
+      # A bare image has no CA roots, and checkout needs them.
+      - name: Container prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends ca-certificates git
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      # The stock-ubuntu CI job's list, plus Netgen and Spectra (FEM meshing
+      # and modal analysis) and what cpack runs.
+      # `netgen` and `python3-netgen` only because Ubuntu's NetgenConfig.cmake
+      # checks every target's file (the netgen binary, the Python modules)
+      # and stops configure without them; the package links libnglib alone.
+      - name: Build dependencies
+        run: |
+          DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            cmake ninja-build build-essential python3 \
+            libvulkan-dev glslc libglfw3-dev libglm-dev \
+            libspdlog-dev libgtk-3-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
+            libocct-data-exchange-dev libocct-modeling-algorithms-dev \
+            libocct-modeling-data-dev libocct-foundation-dev libocct-ocaf-dev \
+            libocct-visualization-dev libtbb-dev libvterm-dev \
+            libnglib-dev netgen python3-netgen libspectra-dev dpkg-dev file
+      - name: Build the package
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr -DLOBOLE_PACKAGE_DEB=ON
+          cmake --build build -j"$(nproc)" --target designer
+          (cd build && cpack)
+          dpkg-deb --info build/lobole_*.deb
+      - uses: actions/upload-artifact@v7
+        with:
+          name: deb
+          path: build/lobole_*.deb
+
+  # Installed the way a user installs it, into an image that has never seen
+  # the build: apt resolves Depends, and a missing one fails here.
+  deb-smoke:
+    needs: [check, deb]
+    runs-on: ubuntu-24.04
+    container: ubuntu:26.04
+    steps:
+      - name: Container prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends ca-certificates python3
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: deb
+      - name: Install it
+        run: DEBIAN_FRONTEND=noninteractive apt-get install -y ./lobole_*.deb
+      - name: Smoke it
+        run: |
+          python3 tools/release-smoke.py --port 8437 \
+            --version "${{ needs.check.outputs.version }}" -- /usr/bin/lobole
+
   python:
     needs: check
     runs-on: ubuntu-24.04
@@ -171,7 +237,7 @@ jobs:
   # smoke above passed.
   github-release:
     if: github.ref_type == 'tag'
-    needs: [check, linux, windows, python]
+    needs: [check, linux, windows, deb-smoke, python]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -182,7 +248,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir files
-          cp linux/*.AppImage windows/* python/* files/
+          cp linux/*.AppImage windows/* deb/*.deb python/* files/
           (cd files && sha256sum -- * > SHA256SUMS)
           {
             cat notes/notes.md
@@ -191,6 +257,8 @@ jobs:
             echo "machine has run it yet, and the installer is not signed, so"
             echo "SmartScreen will warn. **AppImage:** headless only (the"
             echo "document engine and its JSON-RPC interface, no window)."
+            echo "**.deb:** Ubuntu 26.04 only, the full GUI; install it with"
+            echo "\`sudo apt install ./lobole_*_amd64.deb\`."
           } > body.md
           gh release create "$GITHUB_REF_NAME" files/* \
             --repo "$GITHUB_REPOSITORY" \

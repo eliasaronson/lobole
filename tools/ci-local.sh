@@ -89,7 +89,8 @@ for line in block.splitlines():
     if not collecting:
         collecting = "apt-get install" in line
         continue
-    pkgs += line.strip().rstrip("\\").split()
+    # ${{ matrix.extra_packages }} is per image, read with the matrix below.
+    pkgs += re.sub(r"\$\{\{.*?\}\}", "", line).strip().rstrip("\\").split()
     if not line.rstrip().endswith("\\"):
         break
 print("PACKAGES=" + " ".join(p for p in pkgs if p and not p.startswith("-")))
@@ -111,12 +112,13 @@ print("GUI_PACKAGES=" + " ".join(p for p in gpkgs if p and not p.startswith("-")
 # newer runner moves the local check with it.
 print("GUI_RUNS_ON=" + re.search(r"runs-on:\s*(\S+)", gui).group(1))
 
-# The matrix: image and the tests it excludes. "@@" separates them because
-# the exclusion is itself a |-alternation.
-for image, excl in re.findall(
-        r"- image:\s*(\S+)\s*\n(?:\s*#[^\n]*\n)*\s*exclude_tests:\s*\"([^\"]*)\"",
+# The matrix: image, the tests it excludes and its extra packages. "@@"
+# separates them because the exclusion is itself a |-alternation.
+for image, excl, extra in re.findall(
+        r"- image:\s*(\S+)\s*\n(?:\s*#[^\n]*\n)*\s*exclude_tests:\s*\"([^\"]*)\""
+        r"\s*\n(?:\s*#[^\n]*\n)*\s*extra_packages:\s*\"([^\"]*)\"",
         text):
-    print(f"MATRIX={image}@@{excl}")
+    print(f"MATRIX={image}@@{excl}@@{extra}")
 PY
 }
 
@@ -284,7 +286,9 @@ if [ "$run_containers" = 1 ]; then
   fi
   for entry in "${MATRIX[@]}"; do
     image="${entry%%@@*}"
-    exclude="${entry#*@@}"
+    rest="${entry#*@@}"
+    exclude="${rest%%@@*}"
+    extra="${rest#*@@}"
     [ -n "$only_image" ] && [ "$image" != "$only_image" ] && continue
     tag="designer-ci-${image//[:.]/-}"
     build_dir=".ci-local/${image//[:.]/-}"
@@ -294,7 +298,7 @@ if [ "$run_containers" = 1 ]; then
     # The image is the workflow's package list and nothing else — that is the
     # point of this job: it fails if the README's list is incomplete.
     printf 'FROM %s\nENV DEBIAN_FRONTEND=noninteractive\nRUN apt-get update && apt-get install -y --no-install-recommends ca-certificates %s && rm -rf /var/lib/apt/lists/*\n' \
-      "$image" "$PACKAGES" > "$build_dir/Dockerfile"
+      "$image" "$PACKAGES $extra" > "$build_dir/Dockerfile"
     docker build -q -t "$tag" "$build_dir" > /dev/null
     reclaim_tree "$tag" "$build_dir"
 

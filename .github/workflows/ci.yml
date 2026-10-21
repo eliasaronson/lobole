@@ -297,10 +297,15 @@ jobs:
         include:
           - image: ubuntu:26.04
             exclude_tests: ""
+            # Netgen and Spectra, so the FEM tests run against what the .deb
+            # ships with. netgen and python3-netgen only because Ubuntu's
+            # NetgenConfig.cmake checks for their files.
+            extra_packages: "libnglib-dev netgen python3-netgen libspectra-dev"
           - image: ubuntu:24.04
             # XCAF STEP import placement, and a shell 7.6 refuses where 7.9
             # makes a no-op. See the README's OpenCASCADE section.
             exclude_tests: "Assembly import plan|Shell that removes no material"
+            extra_packages: ""
     name: stock-ubuntu (${{ matrix.image }})
     runs-on: ubuntu-24.04
     container: ${{ matrix.image }}
@@ -323,7 +328,8 @@ jobs:
             libspdlog-dev libgtk-3-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
             libocct-data-exchange-dev libocct-modeling-algorithms-dev \
             libocct-modeling-data-dev libocct-foundation-dev libocct-ocaf-dev \
-            libocct-visualization-dev libtbb-dev libvterm-dev
+            libocct-visualization-dev libtbb-dev libvterm-dev \
+            ${{ matrix.extra_packages }}
 
       - uses: actions/checkout@v7
         with:

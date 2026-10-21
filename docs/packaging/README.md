@@ -47,6 +47,8 @@ metainfo release is missing or has no notes. It then builds, in parallel:
 - the container image (`.#dockerHeadless`);
 - the Windows portable zip and installer, cross-built against the flake's
   nixpkgs (`NIX_PATH` is pinned to it, rather than a channel);
+- the Ubuntu 26.04 `.deb` ([The Debian package](#the-debian-package)),
+  smoked after a clean `apt-get install` of it;
 - the Python sdist and wheel.
 
 **Every one is started before it is published.** `tools/release-smoke.py`
@@ -233,6 +235,34 @@ unprivileged user namespaces through AppArmor, it needs
 `sysctl kernel.apparmor_restrict_unprivileged_userns=0` — what the release
 workflow sets on its Ubuntu runner before the smoke. No Ubuntu desktop has
 run it yet.
+
+## The Debian package
+
+A `.deb` for **Ubuntu 26.04 only**, the first release whose OpenCASCADE
+(7.9.2) matches ours; 24.04's 7.6 has different library names and the
+faults [above](#opencascade-76). It is the [install layout](#the-install-layout)
+under `/usr`, built by CPack (`-DLOBOLE_PACKAGE_DEB=ON
+-DCMAKE_INSTALL_PREFIX=/usr`, then `cpack`) against Ubuntu's own libraries,
+so it uses the system's Vulkan driver and is the full GUI, FEM meshing
+and modal analysis included (Netgen and the header-only Spectra).
+
+- **Depends** comes from `dpkg-shlibdeps`, read off what the binary links,
+  so it cannot drift from the link line. By hand only what is run rather
+  than linked: Recommends `mesa-vulkan-drivers, git`; Suggests
+  `ffmpeg, python3`.
+- **Netgen** is Ubuntu's `libnglib-dev`. Its `NetgenConfig.cmake` checks
+  that every target's file exists, the `netgen` binary and the Python
+  modules included, and stops configure without them, so the build also
+  installs `netgen` and `python3-netgen`; the package links `libnglib`
+  and `libngcore` alone. The `ubuntu:26.04` CI job installs the same, so
+  the FEM tests run against the Netgen the package ships with.
+- A release builds it in one `ubuntu:26.04` container and installs it in
+  a fresh one with `apt-get install ./lobole_<version>-1_amd64.deb`, which
+  resolves Depends as a user's machine does, then runs
+  `tools/release-smoke.py` on `/usr/bin/lobole`.
+
+It is a download, not an apt repository: no updates arrive by themselves.
+A PPA or a repository of our own would be the next step.
 
 ## The Flatpak
 
@@ -428,5 +458,5 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
   trips SmartScreen) and a stripped bundle. A release cross-builds and
   smokes it under Wine; nothing builds it on a push.
 - macOS (MoltenVK; no ray tracing there, and the GPU path cannot be tested
-  off a Mac), and native deb / rpm / AUR packages (distributions ship older
-  OpenCASCADE than 7.9).
+  off a Mac), and rpm / AUR packages or a .deb for releases before Ubuntu
+  26.04 (their OpenCASCADE is older than 7.9).
