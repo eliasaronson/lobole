@@ -10,6 +10,8 @@ cmake_minimum_required(VERSION 3.14)
 # The one version number: VERSION, read by the flake, the Windows packaging
 # and pyproject.toml too (docs/packaging/README.md#one-version).
 file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" LOBOLE_VERSION_FILE LIMIT_COUNT 1)
+# Reconfigure when it changes, or an existing build keeps the old --version.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS VERSION)
 project(designer VERSION ${LOBOLE_VERSION_FILE} LANGUAGES C CXX)
 include(GNUInstallDirs)
 
