@@ -40,8 +40,16 @@ def main():
             bad.append(f"{path}: {url} is not on GitHub; pin it in flake.nix by hand")
             continue
         repo = f"{m.group(1)}/{m.group(2)}".lower()
-        tree = subprocess.run(["git", "-C", str(ROOT), "ls-tree", "HEAD", path],
-                              capture_output=True, text=True, check=True).stdout.split()
+        # safe.directory: CI's containers run as root over a checkout the
+        # runner's user owns, and git refuses to read it ("dubious
+        # ownership"). This only reads our own tree.
+        run = subprocess.run(["git", "-c", f"safe.directory={ROOT}", "-C",
+                              str(ROOT), "ls-tree", "HEAD", path],
+                             capture_output=True, text=True)
+        if run.returncode != 0:
+            print(f"FAIL: git ls-tree HEAD {path}: {run.stderr.strip()}")
+            return 1
+        tree = run.stdout.split()
         recorded = tree[2] if len(tree) >= 3 else None
         pinned = pins.get(repo)
         if pinned is None:
