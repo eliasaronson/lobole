@@ -186,8 +186,11 @@ jobs:
             python3-mypy python3-pip
           # The wheel's build system wants setuptools>=77 (an SPDX license,
           # PEP 639); 24.04's apt has 68. Into the user site, which python3
-          # reads ahead of the system's.
-          python3 -m pip install --user --break-system-packages 'setuptools>=77'
+          # reads ahead of the system's. packaging too: a current setuptools
+          # uses an installed packaging over its own, and needs 24.2 for the
+          # license check, where the runner's is older.
+          python3 -m pip install --user --break-system-packages \
+            'setuptools>=77' 'packaging>=24.2'
 
       # See the gui-suite job: the save half runs on failure too, so a red
       # test step still leaves a warm compile cache behind.
