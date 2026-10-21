@@ -36,6 +36,13 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Compound.hxx>
 
+// On Windows, OpenCASCADE's Standard_Mutex.hxx includes windows.h, whose
+// winbase.h defines `Yield()` as a macro and breaks every ctx->Yield(n)
+// below. Only the Windows build sees it (docs/packaging/README.md#windows).
+#ifdef Yield
+#undef Yield
+#endif
+
 #include <algorithm>
 #include <cstdio>
 #include <cstdlib>
