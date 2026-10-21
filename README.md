@@ -52,8 +52,8 @@ From the [releases page](https://github.com/eliasaronson/lobole/releases):
 
 - **Ubuntu 26.04:** `sudo apt install ./lobole_<version>-1_amd64.deb`, the
   full GUI.
-- **Windows:** a zip or an installer. Tested under Wine only, unsigned
-  (SmartScreen warns), no FEM.
+- **Windows:** a zip or an installer. Tested on Windows by hand and
+  under Wine on every release, unsigned (SmartScreen warns), no FEM.
 - **Other Linux:** `lobole-<version>-x86_64.AppImage`, the full GUI on
   glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later).
   `chmod +x` it and run it.

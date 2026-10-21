@@ -356,8 +356,8 @@ jobs:
           {
             cat notes/notes.md
             echo
-            echo "**Windows:** built and tested under Wine only; no Windows"
-            echo "machine has run it yet, and the installer is not signed, so"
+            echo "**Windows:** smoked under Wine for every release and tested"
+            echo "on Windows by hand; the installer is not signed, so"
             echo "SmartScreen will warn. **AppImage:** \`x86_64.AppImage\` is"
             echo "the full GUI for any distribution with glibc 2.39 or newer"
             echo "(Ubuntu 24.04, Debian 13, Fedora 40 and later);"

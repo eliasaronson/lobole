@@ -445,8 +445,9 @@ fuzzer's `tests/fuzz/cases/crash-153.jsonl` and `crash-181.jsonl` replay to
 the end (`python/lobole/replay.py`); `--stall-test` logs a main-thread
 stack that `symbolize-crash.py` names (`StallSelfTest`); and a Ctrl+C
 (`SIGINT` to the Wine process, which Wine turns into `CTRL_C_EVENT`) after a
-fillet stops headless and leaves no report. All of it runs under Wine; no
-real Windows machine has run it.
+fillet stops headless and leaves no report. All of it runs under Wine; the
+crash path has not run on real Windows, though the app has been tested
+there by hand.
 
 Rules for code, since nothing builds this target on a push (a release
 cross-builds it and runs `tools/release-smoke.py` on it under Wine):
@@ -525,7 +526,8 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
   the SVG icon, confirm the renderer on the runtime's Mesa / llvmpipe (only
   NVIDIA has run it), narrow `--filesystem=host` toward the portal, and
   submit.
-- Windows: Netgen, real-hardware QA, code signing (an unsigned installer
+- Windows: Netgen, regular real-hardware QA (it has been tested by hand,
+  not per release), code signing (an unsigned installer
   trips SmartScreen) and a stripped bundle. A release cross-builds and
   smokes it under Wine; nothing builds it on a push.
 - Publishing the AUR package (an AUR account, an SSH key, and a release
