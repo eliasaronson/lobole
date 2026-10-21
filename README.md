@@ -51,7 +51,8 @@ the API; [generators/README.md](generators/README.md) lists them all.
 Each release on the GitHub releases page carries:
 
 - **Nix / NixOS:** `nix run github:eliasaronson/lobole` runs the full app,
-  GUI included.
+  GUI included, from a binary cache Nix asks to use. Outside NixOS the GUI
+  needs [nixGL](https://github.com/nix-community/nixGL).
 - **Windows:** a zip and an installer, tested under Wine only and unsigned
   (SmartScreen warns). No FEM.
 - **Linux, headless:** an AppImage running the engine and its JSON-RPC

@@ -1,6 +1,17 @@
 {
   description = "Loböle — parametric B-Rep CAD (Vulkan, OpenCASCADE, PlaneGCS)";
 
+  # The binary cache a release fills (docs/packaging/README.md#the-nix-flake):
+  # the patched OpenCASCADE and Netgen are in no public cache, so without it
+  # a first `nix run` compiles both. Nix asks before using it, or
+  # --accept-flake-config does.
+  nixConfig = {
+    extra-substituters = [ "https://eliasaronson.cachix.org" ];
+    extra-trusted-public-keys = [
+      "eliasaronson.cachix.org-1:zWUh0oA6DvHSkYRaoxEYyXitv80CpwN4iAjS+6ES1dc="
+    ];
+  };
+
   # ---------------------------------------------------------------------------
   # Inputs
   #

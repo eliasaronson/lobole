@@ -161,10 +161,16 @@ Patching OpenCASCADE means nixpkgs' binary cache no longer has it: the first
 `nix-shell` on a machine compiles OpenCASCADE and netgen.
 
 On NixOS the loader finds the host driver through `/run/opengl-driver`.
-Without a binary cache, `nix run` builds OpenCASCADE and Netgen from source
-unless the user's store already has them; the release workflow fills one
-when it is configured ([Releasing](#releasing)), and the flake's
-`nixConfig` should then name it.
+Elsewhere a Nix-built Vulkan app cannot see the system's driver, so the
+window needs [nixGL](https://github.com/nix-community/nixGL)
+(`nixGL lobole`); headless runs anywhere.
+
+**The binary cache** is `eliasaronson.cachix.org`, which the flake's
+`nixConfig` names: Nix asks before using it, or `--accept-flake-config`
+skips the question. The release workflow fills it (the repository variable
+`CACHIX_CACHE` and the secret `CACHIX_AUTH_TOKEN`, [Releasing](#releasing)),
+so a released commit downloads in a minute; a later `main` still finds
+OpenCASCADE and Netgen there and builds only the app.
 
 ## GCC 16 and IPA-CP clones
 
@@ -414,9 +420,6 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
 
 ## Not done
 
-- The Cachix cache itself: create it once the repository is public, set
-  `CACHIX_CACHE` / `CACHIX_AUTH_TOKEN`, and add its substituter and public
-  key to the flake's `nixConfig` so `nix run` offers to use it.
 - Flathub: pin every source by `commit:` + `sha256`, re-enable metainfo and
   the SVG icon, confirm the renderer on the runtime's Mesa / llvmpipe (only
   NVIDIA has run it), narrow `--filesystem=host` toward the portal, and
