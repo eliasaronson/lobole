@@ -554,6 +554,12 @@ execute_process(COMMAND git -C ${CMAKE_CURRENT_SOURCE_DIR} rev-parse --short HEA
                 OUTPUT_VARIABLE LOBOLE_GIT_COMMIT
                 OUTPUT_STRIP_TRAILING_WHITESPACE
                 ERROR_QUIET)
+# A release's source tarball has no .git; tools/source-tarball.sh writes the
+# commit into it instead.
+if(NOT LOBOLE_GIT_COMMIT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.lobole-commit")
+    file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/.lobole-commit" LOBOLE_GIT_COMMIT
+         LIMIT_COUNT 1)
+endif()
 
 # Optional features that bring a dependency of their own. Both default ON
 # where the dependency is present, and both can be switched off outright —
