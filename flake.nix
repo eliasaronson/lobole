@@ -21,8 +21,8 @@
   # The four git submodules are pinned here as flake inputs (flake = false)
   # rather than relying on `?submodules=1`, so `nix build` is reproducible from
   # a plain flake ref. planegcs and deps/fonts are vendored in-tree (git-tracked)
-  # and come in with the main source. Keep these SHAs in sync with .gitmodules
-  # when the submodules are bumped (`git submodule status`).
+  # and come in with the main source. A submodule bumped without its input
+  # here fails tests/flake_submodules_gate.py.
   # ---------------------------------------------------------------------------
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";

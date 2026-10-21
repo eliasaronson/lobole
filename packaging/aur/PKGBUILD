@@ -1,0 +1,36 @@
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# Maintainer: Elias Högbom Aronsson <elias.aronson@gmail.com>
+#
+# The AUR package (docs/packaging/README.md#arch-linux-aur). Built from the
+# release's source tarball, which carries the submodules, so this names one
+# file and one checksum. A release updates pkgver and sha256sums; nothing
+# else here moves.
+pkgname=lobole
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Parametric B-Rep CAD for parts, assemblies, drawings, and simulation"
+arch=('x86_64')
+url="https://github.com/eliasaronson/lobole"
+license=('AGPL-3.0-or-later')
+depends=('opencascade' 'glfw' 'vulkan-icd-loader' 'spdlog' 'fmt' 'onetbb'
+         'libvterm' 'dbus' 'libx11' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja' 'shaderc' 'glm' 'nlohmann-json' 'eigen' 'boost'
+             'vulkan-headers' 'python')
+optdepends=('vulkan-driver: the GPU driver the window renders with'
+            'git: project history'
+            'ffmpeg: motion videos'
+            'python: the bundled client and MCP server')
+source=("$pkgname-$pkgver-src.tar.gz::$url/releases/download/v$pkgver/$pkgname-$pkgver-src.tar.gz")
+sha256sums=('SKIP')
+
+build() {
+  cmake -S "$pkgname-$pkgver" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+    -DLOBOLE_BUILD_TESTS=OFF
+  cmake --build build --target designer
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}

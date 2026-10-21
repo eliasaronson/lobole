@@ -180,7 +180,8 @@ jobs:
       - name: Build the package
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_INSTALL_PREFIX=/usr -DLOBOLE_PACKAGE_DEB=ON
+            -DCMAKE_INSTALL_PREFIX=/usr -DLOBOLE_PACKAGE_DEB=ON \
+            -DLOBOLE_BUILD_TESTS=OFF
           cmake --build build -j"$(nproc)" --target designer
           (cd build && cpack)
           dpkg-deb --info build/lobole_*.deb
@@ -212,6 +213,58 @@ jobs:
           python3 tools/release-smoke.py --port 8437 \
             --version "${{ needs.check.outputs.version }}" -- /usr/bin/lobole
 
+  # The complete source, submodules included, for packagers
+  # (docs/packaging/README.md#the-source-tarball).
+  source:
+    needs: check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - name: Make the tarball
+        run: tools/source-tarball.sh "${{ needs.check.outputs.version }}" dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: source
+          path: dist/*
+
+  # The AUR package, built from that tarball with makepkg the way an Arch
+  # user builds it, installed, and smoked (docs/packaging/README.md#arch-linux-aur).
+  aur:
+    needs: [check, source]
+    runs-on: ubuntu-24.04
+    container: archlinux:latest
+    steps:
+      - name: Container prerequisites
+        run: pacman -Syu --noconfirm --needed base-devel git python
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: source
+          path: aur
+      # makepkg refuses root.
+      - name: Build, install and smoke the package
+        run: |
+          version="${{ needs.check.outputs.version }}"
+          cp packaging/aur/PKGBUILD aur/
+          sum="$(sha256sum "aur/lobole-$version-src.tar.gz" | cut -d' ' -f1)"
+          sed -i "s/^pkgver=.*/pkgver=$version/; s/^sha256sums=.*/sha256sums=('$sum')/" aur/PKGBUILD
+          useradd -m builder
+          echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
+          chown -R builder aur
+          (cd aur && sudo -u builder makepkg -s --noconfirm \
+             && sudo -u builder sh -c 'makepkg --printsrcinfo > .SRCINFO')
+          pacman -U --noconfirm aur/lobole-*.pkg.tar.zst
+          python3 tools/release-smoke.py --port 8437 --version "$version" -- /usr/bin/lobole
+      - uses: actions/upload-artifact@v7
+        with:
+          name: aur
+          include-hidden-files: true  # .SRCINFO
+          path: |
+            aur/PKGBUILD
+            aur/.SRCINFO
+
   python:
     needs: check
     runs-on: ubuntu-24.04
@@ -237,7 +290,7 @@ jobs:
   # smoke above passed.
   github-release:
     if: github.ref_type == 'tag'
-    needs: [check, linux, windows, deb-smoke, python]
+    needs: [check, linux, windows, deb-smoke, source, aur, python]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -248,7 +301,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir files
-          cp linux/*.AppImage windows/* deb/*.deb python/* files/
+          cp linux/*.AppImage windows/* deb/*.deb source/* python/* files/
           (cd files && sha256sum -- * > SHA256SUMS)
           {
             cat notes/notes.md

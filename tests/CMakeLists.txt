@@ -992,6 +992,12 @@ set_tests_properties(visual_export_smoke PROPERTIES TIMEOUT 120)
 # Source-only (no app, no GPU, no display) — RpcParams knows a method's exact
 # vocabulary but only at runtime, after the handler has run, so the schema is
 # declared in MethodDoc and this keeps it honest in both directions.
+# flake.nix pins the submodules a second time, as flake inputs; this keeps
+# the two copies on the same commits.
+add_test(NAME flake_submodules_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/flake_submodules_gate.py)
+set_tests_properties(flake_submodules_gate PROPERTIES TIMEOUT 30)
+
 add_test(NAME rpc_params_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_params_gate.py)
 set_tests_properties(rpc_params_gate PROPERTIES TIMEOUT 60)

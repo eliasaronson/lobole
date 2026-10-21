@@ -49,6 +49,9 @@ metainfo release is missing or has no notes. It then builds, in parallel:
   nixpkgs (`NIX_PATH` is pinned to it, rather than a channel);
 - the Ubuntu 26.04 `.deb` ([The Debian package](#the-debian-package)),
   smoked after a clean `apt-get install` of it;
+- the source tarball ([The source tarball](#the-source-tarball)), and from
+  it the AUR package, built, installed and smoked in Arch
+  ([Arch Linux (AUR)](#arch-linux-aur));
 - the Python sdist and wheel.
 
 **Every one is started before it is published.** `tools/release-smoke.py`
@@ -130,8 +133,9 @@ nothing here can build or run it.
 
 `flake.nix` pins nixpkgs (`nixos-unstable`, OpenCASCADE 7.9.3) and the four
 git submodules (imgui, imgui_test_engine, nativefiledialog-extended, clipper2)
-as `flake = false` inputs, so `nix build` needs no `?submodules=1`. Keep those
-revisions in sync with `.gitmodules` when a submodule moves; a missing
+as `flake = false` inputs, so `nix build` needs no `?submodules=1`.
+`tests/flake_submodules_gate.py` fails when one of those revisions differs
+from the commit the repository records for the submodule; a missing
 clipper2 does not fail the build, it configures CAM off. PlaneGCS, libarea
 and the fonts are vendored in-tree.
 
@@ -263,6 +267,30 @@ and modal analysis included (Netgen and the header-only Spectra).
 
 It is a download, not an apt repository: no updates arrive by themselves.
 A PPA or a repository of our own would be the next step.
+
+## The source tarball
+
+`tools/source-tarball.sh <version> <dir>` writes
+`lobole-<version>-src.tar.gz`: the repository at HEAD with each submodule
+at the commit HEAD records for it, from `git archive` (never the working
+tree), gzipped without a timestamp, so one commit gives the same bytes. It
+has no `.git`, so it carries `.lobole-commit`, which CMake reads for About's
+build commit when git cannot answer. A release attaches it, so a packager
+names one file and one checksum instead of pinning every submodule again.
+
+## Arch Linux (AUR)
+
+`packaging/aur/PKGBUILD` builds the release's source tarball against Arch's
+own packages (OpenCASCADE 7.9 is in its repositories) with
+`-DLOBOLE_BUILD_TESTS=OFF`, as every packaging build does: the test tree
+would fetch Catch2 during the build. A release fills in `pkgver` and the
+tarball's checksum, builds it with `makepkg` in an `archlinux` container,
+installs it and runs `tools/release-smoke.py`, and keeps the `PKGBUILD` and
+`.SRCINFO` as the `aur` artifact. Arch has neither Netgen nor Spectra in its
+repositories, so the package has no FEM meshing or modal analysis.
+
+Publishing is pushing those two files to `aur.archlinux.org/lobole.git`
+from an AUR account with an SSH key; nothing does that yet.
 
 ## The Flatpak
 
@@ -457,6 +485,8 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
 - Windows: Netgen, real-hardware QA, code signing (an unsigned installer
   trips SmartScreen) and a stripped bundle. A release cross-builds and
   smokes it under Wine; nothing builds it on a push.
+- Publishing the AUR package (an AUR account, an SSH key, and a release
+  job that pushes the `aur` artifact).
 - macOS (MoltenVK; no ray tracing there, and the GPU path cannot be tested
-  off a Mac), and rpm / AUR packages or a .deb for releases before Ubuntu
-  26.04 (their OpenCASCADE is older than 7.9).
+  off a Mac), and rpm packages or a .deb for releases before Ubuntu 26.04
+  (their OpenCASCADE is older than 7.9).
