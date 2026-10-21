@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
+# SPDX-License-Identifier: AGPL-3.0-or-later
+
+# Build the GUI AppImage (docs/packaging/README.md#the-gui-appimage):
+#
+#   packaging/appimage/build.sh VERSION OUTDIR
+#
+# Runs as root in a fresh ubuntu:24.04 image, whose glibc is the oldest the
+# AppImage runs on. Installs the build dependencies, builds OpenCASCADE and
+# Netgen into $LOBOLE_DEPS (default /opt/lobole-deps) unless they are
+# already there, builds the app, and bundles every library except glibc and
+# the graphics stack, which come from the host. Writes
+# OUTDIR/lobole-VERSION-x86_64.AppImage.
+set -euo pipefail
+
+version="$1"
+mkdir -p "$2"
+out="$(realpath "$2")"
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo="$(cd "$here/../.." && pwd)"
+deps="${LOBOLE_DEPS:-/opt/lobole-deps}"
+jobs="${JOBS:-$(nproc)}"
+work="${LOBOLE_APPIMAGE_WORK:-$(mktemp -d)}"
+
+# The stock-ubuntu CI job's list without OpenCASCADE (24.04 has 7.6) and
+# GTK (the file dialogs use the portal), plus what deps.sh and OCC's glTF
+# reader need, Spectra, and the bundlers' own needs (file, the
+# desktop-file check).
+export DEBIAN_FRONTEND=noninteractive
+apt-get update
+apt-get install -y --no-install-recommends \
+  ca-certificates git curl file python3 desktop-file-utils \
+  cmake ninja-build build-essential \
+  libvulkan-dev glslc libglfw3-dev libglm-dev \
+  libspdlog-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
+  libtbb-dev libvterm-dev libdbus-1-dev libx11-dev \
+  libfreetype-dev libfontconfig-dev rapidjson-dev libspectra-dev \
+  libgl-dev libxi-dev libxmu-dev zlib1g-dev
+# CMake reads the commit with git, which refuses a checkout another user
+# owns ("dubious ownership"): CI's container runs as root over the runner's.
+git config --global --add safe.directory "$repo"
+
+[ -e "$deps/lib/libTKernel.so" ] || JOBS="$jobs" "$here/deps.sh" "$deps"
+
+cmake -S "$repo" -B "$work/build" -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr \
+  -DCMAKE_PREFIX_PATH="$deps" -DLOBOLE_BUILD_TESTS=OFF
+cmake --build "$work/build" -j"$jobs" --target designer
+rm -rf "$work/AppDir"
+DESTDIR="$work/AppDir" cmake --install "$work/build"
+
+# Pinned bundlers, checked, run extracted (a container has no FUSE).
+tool() {  # url sha256
+  local f="$work/$(basename "$1")"
+  [ -e "$f" ] || curl -fsSL -o "$f" "$1"
+  echo "$2  $f" | sha256sum -c --quiet
+  chmod +x "$f"
+  echo "$f"
+}
+linuxdeploy="$(tool https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage \
+  c20cd71e3a4e3b80c3483cef793cda3f4e990aca14014d23c544ca3ce1270b4d)"
+appimagetool="$(tool https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage \
+  ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0)"
+export APPIMAGE_EXTRACT_AND_RUN=1
+
+# linuxdeploy copies every library the binary needs and sets rpaths; its
+# excludelist leaves glibc, libGL, X11 and xcb to the host. The Vulkan
+# loader is the host's too, so it finds the host's drivers. So is D-Bus,
+# which every desktop has: bundled, it brought libsystemd and libgcrypt but
+# not the libgpg-error the excludelist keeps out, and Debian 13 failed.
+# linuxdeploy still copies an excluded library's own dependencies, so that
+# chain is named too; nothing else loads it.
+LD_LIBRARY_PATH="$deps/lib" "$linuxdeploy" --appdir "$work/AppDir" \
+  --executable "$work/AppDir/usr/bin/lobole" \
+  --desktop-file "$work/AppDir/usr/share/applications/org.lobole.Lobole.desktop" \
+  --icon-file "$work/AppDir/usr/share/icons/hicolor/256x256/apps/org.lobole.Lobole.png" \
+  --exclude-library 'libvulkan.so*' --exclude-library 'libdbus-1.so*' \
+  --exclude-library 'libsystemd.so*' --exclude-library 'libgcrypt.so*'
+
+ARCH=x86_64 VERSION="$version" "$appimagetool" --no-appstream "$work/AppDir" \
+  "$out/lobole-$version-x86_64.AppImage"

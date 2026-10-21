@@ -54,8 +54,11 @@ From the [releases page](https://github.com/eliasaronson/lobole/releases):
   full GUI.
 - **Windows:** a zip or an installer. Tested under Wine only, unsigned
   (SmartScreen warns), no FEM.
+- **Other Linux:** `lobole-<version>-x86_64.AppImage`, the full GUI on
+  glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later).
+  `chmod +x` it and run it.
 - **Linux, headless:** an AppImage with the engine and its JSON-RPC
-  interface, no window ([caveats](docs/packaging/README.md#the-headless-appimage)).
+  interface, no window, for servers ([caveats](docs/packaging/README.md#the-headless-appimage)).
 
 Elsewhere:
 

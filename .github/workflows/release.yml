@@ -213,6 +213,56 @@ jobs:
           python3 tools/release-smoke.py --port 8437 \
             --version "${{ needs.check.outputs.version }}" -- /usr/bin/lobole
 
+  # The GUI AppImage (docs/packaging/README.md#the-gui-appimage): built on
+  # Ubuntu 24.04's glibc, the oldest it runs on, with every library but glibc
+  # and the graphics stack inside. OpenCASCADE and Netgen are built from
+  # source and cached on the script that builds them.
+  appimage:
+    needs: check
+    runs-on: ubuntu-24.04
+    container: ubuntu:24.04
+    timeout-minutes: 180
+    steps:
+      - name: Container prerequisites
+        run: |
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends ca-certificates git zstd
+      - uses: actions/checkout@v7
+        with:
+          submodules: true
+      - uses: actions/cache@v6
+        with:
+          path: /opt/lobole-deps
+          key: appimage-deps-${{ hashFiles('packaging/appimage/deps.sh', 'nix/patches/occt-shell-cap-order.patch') }}
+      - name: Build the AppImage
+        run: packaging/appimage/build.sh "${{ needs.check.outputs.version }}" dist
+      - uses: actions/upload-artifact@v7
+        with:
+          name: appimage
+          path: dist/*.AppImage
+
+  # Run where it was not built: the oldest glibc it promises, and two other
+  # distributions, each with only what a desktop already has.
+  appimage-smoke:
+    needs: [check, appimage]
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        image: ["ubuntu:24.04", "debian:13", "fedora:latest"]
+    container: ${{ matrix.image }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          name: appimage
+      - name: Smoke it
+        run: |
+          chmod +x lobole-*.AppImage
+          packaging/appimage/smoke.sh lobole-*-x86_64.AppImage \
+            "${{ needs.check.outputs.version }}"
+
   # The complete source, submodules included, for packagers
   # (docs/packaging/README.md#the-source-tarball).
   source:
@@ -290,7 +340,7 @@ jobs:
   # smoke above passed.
   github-release:
     if: github.ref_type == 'tag'
-    needs: [check, linux, windows, deb-smoke, source, aur, python]
+    needs: [check, linux, appimage-smoke, windows, deb-smoke, source, aur, python]
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -301,15 +351,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           mkdir files
-          cp linux/*.AppImage windows/* deb/*.deb source/* python/* files/
+          cp linux/*.AppImage appimage/*.AppImage windows/* deb/*.deb source/* python/* files/
           (cd files && sha256sum -- * > SHA256SUMS)
           {
             cat notes/notes.md
             echo
             echo "**Windows:** built and tested under Wine only; no Windows"
             echo "machine has run it yet, and the installer is not signed, so"
-            echo "SmartScreen will warn. **AppImage:** headless only (the"
-            echo "document engine and its JSON-RPC interface, no window)."
+            echo "SmartScreen will warn. **AppImage:** \`x86_64.AppImage\` is"
+            echo "the full GUI for any distribution with glibc 2.39 or newer"
+            echo "(Ubuntu 24.04, Debian 13, Fedora 40 and later);"
+            echo "\`headless.AppImage\` is the document engine and its"
+            echo "JSON-RPC interface without a window, for servers."
             echo "**.deb:** Ubuntu 26.04 only, the full GUI; install it with"
             echo "\`sudo apt install ./lobole_*_amd64.deb\`."
           } > body.md

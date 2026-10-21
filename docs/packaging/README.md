@@ -8,6 +8,7 @@ ninja …"`) are in the repository's `CLAUDE.md` and `CONTRIBUTING.md`.
 |---|---|---|---|
 | Nix flake | Nix and NixOS users | `flake.nix` | yes |
 | Container image | CI, servers, agents | `flake.nix` `dockerHeadless` | no |
+| GUI AppImage | desktop users on glibc 2.39 or newer | `packaging/appimage/` | yes |
 | `nix bundle` AppImage | headless use on any distro | `nix bundle --bundler github:ralismark/nix-appimage .#default` | no |
 | Flatpak | desktop users on any distro | `packaging/flatpak/`, `tools/flatpak-build.sh` | yes |
 | Windows | Windows users | `packaging/windows/` (cross-compiled on Linux) | yes |
@@ -16,8 +17,8 @@ The Vulkan driver (ICD) is always the host's; no channel bundles one, and
 every channel needs a working Vulkan driver for the GUI.
 
 A release is built from one tag by `.github/workflows/release.yml`, which
-publishes the AppImage, the Windows zip and installer, the Python package
-and the container image ([Releasing](#releasing)). The flake and the
+publishes both AppImages, the Ubuntu `.deb`, the Windows zip and
+installer, the source tarball, the Python package and the container image ([Releasing](#releasing)). The flake and the
 Flatpak are built from the source.
 
 ## One version
@@ -44,6 +45,9 @@ metainfo release is missing or has no notes. It then builds, in parallel:
 
 - the headless AppImage from the flake (`nix bundle`, the bundler pinned by
   revision);
+- the GUI AppImage in `ubuntu:24.04` ([The GUI AppImage](#the-gui-appimage)),
+  then run in fresh Ubuntu 24.04, Debian 13 and Fedora images, windowed
+  as well as headless;
 - the container image (`.#dockerHeadless`);
 - the Windows portable zip and installer, cross-built against the flake's
   nixpkgs (`NIX_PATH` is pinned to it, rather than a channel);
@@ -215,6 +219,43 @@ Ubuntu 24.04 ships 7.6; development is against 7.9. CI builds a stock
 
 For full parity use Ubuntu 26.04, Nix or the Flatpak.
 
+## The GUI AppImage
+
+A conventional AppImage, not a Nix bundle: built on the oldest glibc it
+supports, with every library inside except glibc and the graphics stack,
+which come from the host. That is the split the [headless
+AppImage](#the-headless-appimage) cannot make, and why this one opens a
+window. It has no sandbox, so the terminal panel, git and ffmpeg are the
+user's own, unlike in the [Flatpak](#the-flatpak).
+
+- `packaging/appimage/build.sh VERSION OUTDIR` runs as root in a fresh
+  `ubuntu:24.04` (glibc 2.39, gcc 13). It runs on that glibc and newer:
+  Ubuntu 24.04+, Mint 22, Debian 13, Fedora 40+, Arch.
+- Everything comes from apt except OpenCASCADE (24.04 has 7.6) and Netgen,
+  which `packaging/appimage/deps.sh` builds into `/opt/lobole-deps`: OCC
+  `V7_9_3` with the patch in `nix/occt-overlay.nix`, Netgen `v6.2.2605`,
+  each checked against its commit, with the Flatpak manifest's flags. The
+  release caches that prefix on the two files.
+- linuxdeploy (a pinned release, checksum checked) copies the libraries and
+  sets rpaths; its excludelist leaves glibc, libGL, X11 and xcb to the host.
+  We also leave out the Vulkan loader, so the host's finds the host's
+  drivers, and D-Bus: bundled, it brought `libsystemd` and `libgcrypt`
+  without the `libgpg-error` the excludelist keeps out, and Debian 13 failed
+  to start it. appimagetool (pinned) packs it with the static runtime, so
+  the host needs FUSE but not `libfuse2`, and no user namespaces.
+- `packaging/appimage/smoke.sh APPIMAGE VERSION` installs only what a
+  desktop already has (the Vulkan loader with Mesa, X11, fontconfig,
+  D-Bus) plus Xvfb and python3, runs `tools/release-smoke.py`, then opens
+  the window on Xvfb for `app/boots_and_renders`. Containers have no FUSE,
+  so it runs with `APPIMAGE_EXTRACT_AND_RUN=1`.
+- NixOS runs no generic AppImage without `appimage-run`; Nix users have the
+  flake.
+
+To build one here: `docker run --rm -v "$PWD:/src:ro" -v "$PWD/dist:/out"
+ubuntu:24.04 /src/packaging/appimage/build.sh <version> /out` (about 20
+minutes, most of it OpenCASCADE; mount a directory at `/opt/lobole-deps`
+to keep that between runs).
+
 ## The headless AppImage
 
 `nix bundle --bundler github:ralismark/nix-appimage .#default` closure-packs
@@ -225,8 +266,10 @@ share one glibc in one process, and the bundle carries its own newer glibc.
 With the bundle's glibc in charge the host driver's `.so` cannot be found;
 with the host's, the bundle's own libraries fail on their newer glibc
 symbols. On NixOS the bundle's `/nix/store` mount also shadows
-`/run/opengl-driver`, so every ICD dangles. The Flatpak runtime is what owns
-that glibc-to-driver contract. A release builds it and smokes it headless
+`/run/opengl-driver`, so every ICD dangles. The [GUI
+AppImage](#the-gui-appimage) leaves glibc to the host instead. This one
+stays for where that one cannot run: a server with no Vulkan loader, or a
+glibc older than 2.39. A release builds it and smokes it headless
 ([Releasing](#releasing)).
 
 What it needs from the host, measured in a stock `ubuntu:24.04` container:
@@ -488,5 +531,4 @@ under `share/lobole/python/`, so the terminal panel can start the MCP server
 - Publishing the AUR package (an AUR account, an SSH key, and a release
   job that pushes the `aur` artifact).
 - macOS (MoltenVK; no ray tracing there, and the GPU path cannot be tested
-  off a Mac), and rpm packages or a .deb for releases before Ubuntu 26.04
-  (their OpenCASCADE is older than 7.9).
+  off a Mac), and rpm packages (the GUI AppImage covers Fedora meanwhile).
