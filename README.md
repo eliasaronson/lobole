@@ -32,7 +32,7 @@ all drive. Linux first; Windows builds exist, macOS is untested.
 > **CAM has cut real parts on one machine only**: a 6090 CNC router on
 > Mach3. Simulate and dry-run every file before cutting.
 
-https://github.com/user-attachments/assets/ac232b74-7f4d-4371-a852-b47f5414cd35
+https://github.com/user-attachments/assets/99e57644-9f8e-4515-8d65-cc3507e83352
 
 ## Gallery
 
