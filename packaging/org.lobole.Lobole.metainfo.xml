@@ -24,6 +24,14 @@
   <url type="homepage">https://github.com/eliasaronson/lobole</url>
   <url type="bugtracker">https://github.com/eliasaronson/lobole/issues</url>
   <releases>
+    <release version="0.1.2" date="2026-10-21">
+      <description>
+        <p>The MCP server starts the AppImage by itself.</p>
+        <ul>
+          <li>With nothing running, the MCP server now attaches to an app it started through an AppImage or a Flatpak, instead of giving up after a minute</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-10-21">
       <description>
         <p>The full application as an AppImage for most Linux distributions.</p>
