@@ -8,7 +8,9 @@
 #   packaging/windows/smoke.sh ZIP VERSION
 #
 # Needs wine, Xvfb, python3 and Mesa's lavapipe on the host (the release job
-# runs it in a `nix shell`; $LAVAPIPE_ICD names lavapipe's ICD file):
+# runs it in a `nix shell`, with Nix's Mesa at /run/opengl-driver as on
+# NixOS, which Nix's Xvfb and Wine need for GLX and Vulkan; $LAVAPIPE_ICD
+# names lavapipe's ICD file):
 #   - tools/release-smoke.py: it starts, models with OpenCASCADE, solves a
 #     sketch;
 #   - a GUI test (app/boots_and_renders) in a window on Xvfb, through
@@ -51,7 +53,7 @@ export VK_ICD_FILENAMES="$LAVAPIPE_ICD"
 if ! wine "$exe" --gui-tests --gui-test-filter boots_and_renders; then
   # Say why before failing: which Vulkan drivers the Windows loader (the
   # zip's vulkan-1.dll) was given, and what it and winevulkan made of them.
-  echo "windows-smoke: the window test failed; Vulkan as Wine sees it:" >&2
+  echo "windows-smoke: the window test failed; Vulkan in Wine, for when it is that:" >&2
   wine reg query 'HKLM\Software\Khronos\Vulkan\Drivers' >&2 || true
   VK_LOADER_DEBUG=error,warn,driver WINEDEBUG=err+all,warn+vulkan \
     wine "$exe" --gui-tests --gui-test-filter boots_and_renders 2>&1 \

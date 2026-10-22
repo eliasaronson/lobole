@@ -68,7 +68,9 @@ the release's. The two GUI builds also open a window and render one frame
 (`app/boots_and_renders`, on Xvfb with Mesa's lavapipe): the AppImage in
 fresh images (`packaging/appimage/smoke.sh`), the Windows zip under Wine
 from a folder named `Loböle`, as the installer names it
-(`packaging/windows/smoke.sh`). The wheel goes through `tests/packaging_smoke.py`, which
+(`packaging/windows/smoke.sh`). Nix's Xvfb and Wine look for GL and Vulkan
+drivers only at `/run/opengl-driver`, so on the runner that job links Nix's
+Mesa there, as NixOS does; without it Xvfb has no GLX and Wine no Vulkan. The wheel goes through `tests/packaging_smoke.py`, which
 builds it from the sdist, as pip does with a PyPI release.
 
 Only when all of that passes does the tag publish: a GitHub release with

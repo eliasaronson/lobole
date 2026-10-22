@@ -133,9 +133,14 @@ jobs:
       - name: Build the zip and the installer
         run: nix-build packaging/windows/installer.nix --cores 4 -o win
 
+      # Nix's Xvfb, Wine and GL find their drivers only at
+      # /run/opengl-driver, which NixOS provides and the runner does not:
+      # without it Xvfb has no GLX, Wine no Vulkan, and the window test fails
+      # with VK_ERROR_INCOMPATIBLE_DRIVER. Mesa there is what NixOS would put.
       - name: Smoke the portable zip under Wine
         run: |
           mesa="$(nix build --no-link --print-out-paths nixpkgs#mesa)"
+          sudo ln -sfn "$mesa" /run/opengl-driver
           export LAVAPIPE_ICD="$(ls "$mesa"/share/vulkan/icd.d/lvp_icd.*.json)"
           nix shell nixpkgs#wineWow64Packages.stable nixpkgs#xvfb \
             nixpkgs#python3 nixpkgs#unzip -c \
