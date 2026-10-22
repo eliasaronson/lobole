@@ -135,11 +135,12 @@ jobs:
 
       - name: Smoke the portable zip under Wine
         run: |
-          mkdir unpacked && (cd unpacked && unzip -q ../win/lobole-*-portable.zip)
-          nix shell nixpkgs#wineWow64Packages.stable -c \
-            python3 tools/release-smoke.py --port 8437 \
-              --version "${{ needs.check.outputs.version }}" \
-              -- wine unpacked/app/bin/lobole.exe
+          mesa="$(nix build --no-link --print-out-paths nixpkgs#mesa)"
+          export LAVAPIPE_ICD="$(ls "$mesa"/share/vulkan/icd.d/lvp_icd.*.json)"
+          nix shell nixpkgs#wineWow64Packages.stable nixpkgs#xvfb \
+            nixpkgs#python3 nixpkgs#unzip -c \
+            packaging/windows/smoke.sh win/lobole-*-portable.zip \
+              "${{ needs.check.outputs.version }}"
 
       - uses: actions/upload-artifact@v7
         with:

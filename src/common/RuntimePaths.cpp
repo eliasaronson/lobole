@@ -19,9 +19,11 @@ namespace RuntimePaths {
 
 std::filesystem::path ExecutableDir() {
 #if defined(_WIN32)
-  char result[MAX_PATH];
-  const DWORD count = GetModuleFileNameA(nullptr, result, sizeof(result));
-  if (count > 0 && count < sizeof(result))
+  // The wide API: the path is UTF-16 whatever the code page, and the
+  // install folder is "Loböle".
+  wchar_t result[MAX_PATH];
+  const DWORD count = GetModuleFileNameW(nullptr, result, MAX_PATH);
+  if (count > 0 && count < MAX_PATH)
     return std::filesystem::path(result).parent_path();
   return std::filesystem::current_path();
 #elif defined(__APPLE__)

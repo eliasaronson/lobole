@@ -1140,9 +1140,11 @@ endif()
 # Winsock for the RemoteServer JSON-RPC socket (Windows).
 if(WIN32)
     # The icon (assets/icons/org.lobole.Lobole.ico, made by
-    # generators/logo/brand.py), compiled into lobole.exe as a resource.
+    # generators/logo/brand.py) and the UTF-8 manifest, compiled into
+    # lobole.exe as resources.
     enable_language(RC)
     set(LOBOLE_WINDOWS_ICON "${CMAKE_SOURCE_DIR}/assets/icons/org.lobole.Lobole.ico")
+    set(LOBOLE_WINDOWS_MANIFEST "${CMAKE_SOURCE_DIR}/packaging/windows/lobole.manifest")
     configure_file("${CMAKE_SOURCE_DIR}/packaging/windows/lobole.rc.in"
                    "${CMAKE_BINARY_DIR}/lobole.rc" @ONLY)
     target_sources(designer PRIVATE "${CMAKE_BINARY_DIR}/lobole.rc")

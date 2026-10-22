@@ -3,3 +3,8 @@
 // for every window's class -- the title bar and the taskbar -- and, as the
 // executable's only icon, it is also the one Explorer and a shortcut show.
 GLFW_ICON ICON "@LOBOLE_WINDOWS_ICON@"
+
+// The application manifest (1 = CREATEPROCESS_MANIFEST_RESOURCE_ID, 24 =
+// RT_MANIFEST): it makes UTF-8 the process's code page; lobole.manifest
+// says why.
+1 24 "@LOBOLE_WINDOWS_MANIFEST@"

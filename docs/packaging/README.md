@@ -64,7 +64,11 @@ makes it model: a 4 mm box must be 64 mm³ (OpenCASCADE works) and a circle
 drawn at r 1 and constrained to r 2 must extrude to 8π mm³ (the sketch
 solver is linked; a build that loses Boost configures PlaneGCS off without
 a word). With `--version` it also checks that the binary's `--version` is
-the release's. The wheel goes through `tests/packaging_smoke.py`, which
+the release's. The two GUI builds also open a window and render one frame
+(`app/boots_and_renders`, on Xvfb with Mesa's lavapipe): the AppImage in
+fresh images (`packaging/appimage/smoke.sh`), the Windows zip under Wine
+from a folder named `Loböle`, as the installer names it
+(`packaging/windows/smoke.sh`). The wheel goes through `tests/packaging_smoke.py`, which
 builds it from the sdist, as pip does with a PyPI release.
 
 Only when all of that passes does the tag publish: a GitHub release with
@@ -450,14 +454,24 @@ crash path has not run on real Windows, though the app has been tested
 there by hand.
 
 Rules for code, since nothing builds this target on a push (a release
-cross-builds it and runs `tools/release-smoke.py` on it under Wine):
+cross-builds it and runs `packaging/windows/smoke.sh` on it under Wine):
+
+- **A narrow string is UTF-8.** libstdc++'s `std::filesystem` reads and
+  writes a narrow path as UTF-8 on Windows, and `lobole.manifest` makes
+  UTF-8 the process's code page too, so `getenv`, `fopen` and every `…A`
+  API agree with it. Without the manifest the install folder,
+  `C:\Program Files\Loböle`, came back from `GetModuleFileNameA` as
+  Windows-1252, and the first `path::string()` (the font, as the window
+  opened) threw. Headless never loads the font, which is why the smoke
+  runs the window from a folder with an "ö" in it. Where a wide API exists
+  (`GetModuleFileNameW`), use it anyway.
 
 - **Nothing in `src/` is named `near` or `far`.** `windows.h` defines both as
   empty macros, so `double far = -1.0;` becomes `double = -1.0;` on the one
   platform nothing tests; a central `#undef` does not survive the next
   include. `tests/test_conventions.cpp` scans for the names.
 - **Platform code is `#ifdef _WIN32`-guarded with the Linux path unchanged**:
-  `RuntimePaths` (`GetModuleFileNameA`, `%LOCALAPPDATA%`), `CrashHandler`
+  `RuntimePaths` (`GetModuleFileNameW`, `%LOCALAPPDATA%`), `CrashHandler`
   (`SetUnhandledExceptionFilter`, the stack walked with `RtlVirtualUnwind`,
   `MiniDumpWriteDump` from `dbghelp`), `common/Platform` (`LockFileEx`,
   `ShellExecuteW`), the remote server (Winsock), `GitVault` (`nul`,
