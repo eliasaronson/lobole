@@ -702,6 +702,25 @@ _autostart_enabled = os.environ.get(
     "LOBOLE_AUTOSTART", "").lower() not in ("0", "off", "no")
 
 
+def _descends_from(pid, ancestor):
+    """Whether `pid` is `ancestor` or runs under it. An AppImage's runtime
+    and `flatpak run` start the app as their CHILD, so the instance announces
+    a pid that is not the one we spawned. Linux reads /proc; elsewhere only
+    the pid itself matches."""
+    for _ in range(16):
+        if pid == ancestor:
+            return True
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                # The command name is in parentheses and may hold spaces.
+                pid = int(f.read().rsplit(")", 1)[1].split()[1])
+        except (OSError, ValueError, IndexError):
+            return False
+        if pid <= 1:
+            return False
+    return False
+
+
 def _stop_autostarted():
     global _autostarted
     proc = _autostarted
@@ -776,7 +795,7 @@ def _autostart():
         # The registry is the rendezvous: the child announces its kernel-
         # chosen port under its pid, so there is no port to race for.
         for info in _running_instances():
-            if int(info.get("pid", 0)) == proc.pid:
+            if _descends_from(int(info.get("pid", 0)), proc.pid):
                 print(f"lobole-mcp: autostarted `{' '.join(argv)} "
                       f"--offscreen` on port {info['port']} (it dies with "
                       "this server; disable with --no-autostart)",

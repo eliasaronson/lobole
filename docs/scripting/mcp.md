@@ -57,9 +57,11 @@ dropped connection, so registering it before the app is running is fine.
 ### Autostart
 
 With nothing running, the server spawns `lobole --offscreen --remote 0`,
-waits for the child to announce its kernel-chosen port under its pid, attaches
-to it, and kills it when the server exits. The binary is probed, not assumed:
-`build/lobole` beside the server, then `designer` on `PATH`, then the
+waits for the child to announce its kernel-chosen port under its pid, or a
+pid it started (an AppImage's runtime and `flatpak run` run the app as their
+own child), attaches to it, and kills it when the server exits. The binary is
+probed, not assumed:
+`build/lobole` beside the server, then `lobole` on `PATH`, then the
 flatpak `org.lobole.Lobole`. The conditions are what make it
 safe:
 

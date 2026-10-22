@@ -12,12 +12,19 @@ reports mode offscreen, and _stop_autostarted() leaves no process and no
 registry entry behind — an orphan sitting on a port forever is the failure
 the old autostart rejection named.
 
+Then the same through a wrapper that runs the app as its child, as an
+AppImage's runtime and `flatpak run` do: the instance announces the CHILD's
+pid, and autostart once waited for the wrapper's until it gave up and killed
+it.
+
 Skips (77) without the python mcp SDK (stock CI) or a usable Vulkan device
 (the spawned child dies; its log reaches the error message we key on).
 """
 import os
+import stat
 import sys
 import tempfile
+import time
 
 
 
@@ -60,8 +67,36 @@ def main():
     leftover = [i for i in Client.instances()
                 if int(i.get("pid", 0)) == child.pid]
     assert not leftover, f"no registry orphan remains ({leftover})"
+
+    # Through a wrapper. The trailing `exit` keeps the shell from exec'ing
+    # the app in its own place, so the app really is a child.
+    app = m._lobole_argv()
+    wrapper = os.path.join(tmp, "wrapped-lobole")
+    with open(wrapper, "w") as f:
+        f.write('#!/bin/sh\n"$@"\nexit $?\n')
+    os.chmod(wrapper, os.stat(wrapper).st_mode | stat.S_IEXEC)
+    m._lobole_argv = lambda: [wrapper] + app
+    wport = m._resolve_port()
+    wchild = m._autostarted
+    d = Client.wait_for(wport)
+    pong = d.request("ping")
+    d.close()
+    assert pong["mode"] == "offscreen", f"wrapped autostart ({pong})"
+    app_pid = [int(i["pid"]) for i in Client.instances()
+               if int(i["port"]) == wport]
+    assert app_pid and app_pid[0] != wchild.pid, \
+        f"the app ran as the wrapper's child ({app_pid} vs {wchild.pid})"
+    m._stop_autostarted()
+    # The app follows its own parent, the wrapper, out (ParentWatch.h).
+    end = time.monotonic() + 20
+    while time.monotonic() < end and any(
+            int(i["port"]) == wport for i in Client.instances()):
+        time.sleep(0.2)
+    assert not any(int(i["port"]) == wport for i in Client.instances()), \
+        "the wrapped app died with its wrapper"
+
     print(f"autostart: spawned on {port}, attached offscreen, "
-          "died with the server, registry clean")
+          "died with the server, registry clean; through a wrapper too")
     return 0
 
 
