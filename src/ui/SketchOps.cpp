@@ -29,6 +29,8 @@
 #include "imgui_internal.h" // GetInputTextState (re-read after a completion)
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <map>
 #include <optional>
@@ -46,7 +48,41 @@
 
 namespace ui {
 
-namespace {} // namespace
+namespace {
+// A dimension as a status names it, by what its label reads: "the 40
+// distance", "the R12 radius", "the 30.0° angle".
+std::string DimensionWords(const SketchFeature& sketch, size_t ci) {
+  using K = sketch::ConstraintKind;
+  const sketch::Constraint& c = sketch.constraints[ci];
+  const double v =
+      std::abs(c.driven ? sketch::MeasureDimension(sketch, ci).value_or(c.value)
+                        : c.value);
+  char buf[64];
+  switch (c.kind) {
+  case K::Radius:
+    snprintf(buf, sizeof(buf), "the R%.3g radius", v);
+    break;
+  case K::Diameter:
+    snprintf(buf, sizeof(buf), "the \xC3\x98%.3g diameter", v);
+    break;
+  case K::Angle:
+    snprintf(buf, sizeof(buf), "the %.1f\xC2\xB0 angle", v * 57.2957795);
+    break;
+  default:
+    snprintf(buf, sizeof(buf), "the %.3g distance", v);
+    break;
+  }
+  return buf;
+}
+
+bool SameConstraint(const sketch::Constraint& x, const sketch::Constraint& y) {
+  auto same = [](const sketch::PointRef& p, const sketch::PointRef& q) {
+    return p.entity == q.entity && p.which == q.which;
+  };
+  return x.kind == y.kind && x.driven == y.driven && same(x.a, y.a) &&
+         same(x.b, y.b) && same(x.c, y.c);
+}
+} // namespace
 
 // A newly created dimension is born with a legible label offset — pushed off
 // the measured geometry the way other CAD seeds placements — instead of at
@@ -347,6 +383,7 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   sketch::AddVerdict verdict =
       sketch::JudgeAddition(had, driving, *sketch, &solver);
   bool asDriven = false;
+  std::vector<size_t> replaces;
   if (!verdict.accepted) {
     const bool fallback = over == OverConstrained::AddDriven &&
                           verdict.unsupported == SIZE_MAX &&
@@ -356,6 +393,13 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
       state.sketchEdit.actionMsg = "Not added: " + verdict.reason;
       return false;
     }
+    // The driving dimensions that already fix what it measures: each one
+    // alone (the refusal's `involved`, for a repeat), named in the status
+    // and offered for replacement.
+    for (size_t k : verdict.involved)
+      if (sketch::IsDimension(sketch->constraints[k].kind) &&
+          !sketch->constraints[k].driven)
+        replaces.push_back(k);
     sketch->constraints.back().driven = true;
     verdict = sketch::JudgeAddition(had, driving, *sketch, &solver);
     asDriven = true;
@@ -369,10 +413,92 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
       std::make_unique<ModifyFeatureCommand>(index, before, after),
       *state.document);
   state.sketchEdit.selected.clear();
-  if (asDriven)
-    state.sketchEdit.actionMsg =
-        "That dimension would over-constrain the sketch, so it was added as a "
-        "driven (reference) dimension";
+  if (asDriven) {
+    // `sketch` is replaced by the command; the new one is read back.
+    const SketchFeature* now = ResolveActiveSketch(state);
+    std::string by;
+    for (size_t i = 0; now != nullptr && i < replaces.size(); i++)
+      by += (i == 0                     ? ""
+             : i + 1 == replaces.size() ? " or "
+                                        : ", ") +
+            DimensionWords(*now, replaces[i]);
+    SketchEditState& edit = state.sketchEdit;
+    edit.actionMsg =
+        (by.empty() ? std::string("That dimension would over-constrain the "
+                                  "sketch")
+                    : "That is already fixed by " + by) +
+        ", so it was added as a driven (reference) dimension";
+    if (now != nullptr && !replaces.empty()) {
+      SketchEditState::ReplaceOffer& o = edit.replaceOffer;
+      o.dim = static_cast<int>(now->constraints.size()) - 1;
+      o.old = replaces;
+      o.msg = edit.actionMsg;
+      o.count = now->constraints.size();
+      o.kept = {now->constraints.back()};
+      for (size_t k : replaces)
+        o.kept.push_back(now->constraints[k]);
+    }
+  }
+  return true;
+}
+
+const SketchEditState::ReplaceOffer* LiveReplaceOffer(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  SketchEditState::ReplaceOffer& o = edit.replaceOffer;
+  if (o.dim < 0)
+    return nullptr;
+  const SketchFeature* sketch = ResolveActiveSketch(state);
+  bool live = sketch != nullptr && edit.actionMsg == o.msg &&
+              sketch->constraints.size() == o.count &&
+              o.kept.size() == o.old.size() + 1 &&
+              SameConstraint(sketch->constraints[o.dim], o.kept[0]);
+  for (size_t i = 0; live && i < o.old.size(); i++)
+    live = SameConstraint(sketch->constraints[o.old[i]], o.kept[i + 1]);
+  if (!live)
+    o = {};
+  return live ? &o : nullptr;
+}
+
+bool ReplaceWithDrivenDimension(AppState& state) {
+  SketchEditState& edit = state.sketchEdit;
+  const SketchEditState::ReplaceOffer* o = LiveReplaceOffer(state);
+  if (o == nullptr || o->old.size() != 1) {
+    edit.actionMsg = "Not replaced: no single dimension to replace";
+    return false;
+  }
+  size_t index = 0;
+  SketchFeature* sketch = ResolveActiveSketch(state, &index);
+  const size_t dim = static_cast<size_t>(o->dim), old = o->old[0];
+  const nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+  // Without the old one, then the new one driving at what it measures: the
+  // judgement an addition gets, so this cannot over-constrain the sketch.
+  SketchFeature without = *sketch;
+  without.constraints.erase(without.constraints.begin() +
+                            static_cast<std::ptrdiff_t>(old));
+  const size_t made = dim > old ? dim - 1 : dim;
+  SketchFeature after = without;
+  sketch::Constraint& c = after.constraints[made];
+  c.value = sketch::MeasureDimension(after, made).value_or(c.value);
+  c.driven = false;
+  sketch::Solver solver;
+  const sketch::AddVerdict v = sketch::JudgeAddition(without, after, &solver);
+  if (!v.accepted) {
+    edit.actionMsg = "Not replaced: " + v.reason;
+    edit.replaceOffer = {};
+    return false;
+  }
+  sketch->constraints = after.constraints;
+  if (v.after.ok)
+    solver.WriteBack(sketch->entities);
+  state.document->Regenerate();
+  const nlohmann::json json = DocumentIO::FeatureToJson(*sketch);
+  state.commands->Execute(
+      std::make_unique<ModifyFeatureCommand>(index, before, json),
+      *state.document);
+  edit.replaceOffer = {};
+  edit.selectedConstraint = -1; // indices moved
+  edit.editingDim = -1;
+  edit.actionMsg.clear();
   return true;
 }
 

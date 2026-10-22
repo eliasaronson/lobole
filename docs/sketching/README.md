@@ -735,21 +735,30 @@ direction. Labels drag to reposition (`labelOffset`).
 **Driven dimensions in the GUI.** Dimensioning geometry the sketch already
 fixes reads it, as in every CAD tool: the Dimension tool
 (`CommitInferredDimension`, `OverConstrained::AddDriven`) adds a dimension
-that would over-constrain the sketch as a driven one, with the status "That
-dimension would over-constrain the sketch, so it was added as a driven
-(reference) dimension", and opens no inline editor. Its label reads the
+that would over-constrain the sketch as a driven one and opens no inline
+editor. The status names the driving dimensions that already fix it — each
+one alone, the refusal's `involved` — "That is already fixed by the 3
+distance, so it was added as a driven (reference) dimension" ("That dimension
+would over-constrain the sketch, …" when no dimension alone does), and
+outlines them on the canvas. Usually the new dimension is the one meant to
+stay: with exactly one in the way, **Use this one instead** under the status
+(`ReplaceWithDrivenDimension`, one undo step) deletes it and makes the new one
+driving at what it measures, judged by `JudgeAddition` like any addition, so
+it is refused ("Not replaced: …") rather than over-constrain the sketch. The
+offer (`SketchEditState::ReplaceOffer`) lapses once the status changes or the
+constraints it names do. Its label reads the
 measure in parentheses, "(40)", in `DrivenDimensionColor` (`Theme.h`, the
 dimension colour muted), and is never painted as conflicting.
 Double-clicking it opens nothing and says "A driven dimension measures the
 sketch; make it driving to edit it". A dimension typed right after drawing
 carries a value, which a driven one cannot, so that one is refused instead
 ("Not added: the sketch already fixes that (constraint 3)"). Right-clicking
-a label (a click that does not orbit the view) opens its menu, whose
-**Driven** item — like the Model panel's checkbox — toggles it
-(`SetConstraintDriven`, one undo step): made driving, it takes its measured
-value and goes through `JudgeAddition`, so one that would over-constrain the
-sketch stays driven with "Still driven: …"; made driven, it cannot
-over-constrain anything (a dimension driven by an expression is refused:
+a label (a click that does not orbit the view) opens its menu: **Delete**
+(as Delete on a selected label), and **Driven**, which — like the Model
+panel's checkbox — toggles it (`SetConstraintDriven`, one undo step): made
+driving, it takes its measured value and goes through `JudgeAddition`, so
+one that would over-constrain the sketch stays driven with "Still driven:
+…"; made driven, it cannot over-constrain anything (a dimension driven by an expression is refused:
 clear the expression first).
 
 **Generative tools** open a session in the floating Tool window

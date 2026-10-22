@@ -199,6 +199,18 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
 // sketch changed.
 bool SetConstraintDriven(AppState& state, size_t index, bool driven);
 
+// The sketch edit's replace offer when it still holds (see
+// SketchEditState::ReplaceOffer), else nullptr — an offer that has lapsed is
+// cleared.
+const SketchEditState::ReplaceOffer* LiveReplaceOffer(AppState& state);
+
+// "Use this one instead": deletes the one driving dimension the offer's
+// driven dimension repeats and makes that one driving at what it measures,
+// as one undoable edit judged like an addition. Refused (actionMsg "Not
+// replaced: …", nothing changed) without a live single-candidate offer or
+// when the result would over-constrain the sketch.
+bool ReplaceWithDrivenDimension(AppState& state);
+
 // Dimension-on-create: while a draw tool is live, typing a digit opens a
 // small value field near the cursor; Enter applies it as a driving dimension
 // on the entity just drawn (line length / circle-arc radius / rectangle

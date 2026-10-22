@@ -276,7 +276,15 @@ void DrawDimensions(AppState& state) {
   // toggle picked there: applied after the loop, since it replaces the
   // sketch feature (one undo step) and `sketch` would dangle.
   static int s_ctxDim = -1;
-  int toggleDriven = -1;
+  int toggleDriven = -1, toDelete = -1;
+  // The dimensions a driven one repeats, outlined while the status offers
+  // to replace them (docs/sketching/README.md#gui).
+  const SketchEditState::ReplaceOffer* offer = LiveReplaceOffer(state);
+  const auto offered = [&](int i) {
+    return offer != nullptr &&
+           std::find(offer->old.begin(), offer->old.end(),
+                     static_cast<size_t>(i)) != offer->old.end();
+  };
   auto scr = [&](glm::dvec2 uv) {
     glm::dvec2 s = SketchUVToScreen(state, sketch->plane, uv);
     return ImVec2(s.x, s.y);
@@ -585,6 +593,10 @@ void DrawDimensions(AppState& state) {
                 : con.driven    ? IM_COL32(96, 112, 128, 120)
                                 : IM_COL32(96, 150, 200, 150),
                 rounding, 0, selCon ? 2.2 : 1.2);
+    if (offered(i) && !selCon && !hot)
+      dl->AddRect(ImVec2(pmin.x - 3, pmin.y - 3),
+                  ImVec2(pmax.x + 3, pmax.y + 3), IM_COL32(255, 205, 120, 255),
+                  rounding + 3, 0, 2.0);
     dl->AddText(tp, (hot || selCon) ? IM_COL32(255, 240, 200, 255) : col,
                 shown.c_str());
 
@@ -645,7 +657,7 @@ void DrawDimensions(AppState& state) {
         edit.editingDim = i;
     }
     // Right-click (a release that did not orbit the view) opens the label's
-    // menu: the Driven toggle.
+    // menu: the Driven toggle and Delete.
     if (interactive && overLabel &&
         ImGui::IsMouseReleased(ImGuiMouseButton_Right)) {
       const ImVec2 d = io.MouseDragMaxDistanceAbs[ImGuiMouseButton_Right];
@@ -727,6 +739,8 @@ void DrawDimensions(AppState& state) {
       const bool driven = sketch->constraints[s_ctxDim].driven;
       if (ImGui::MenuItem("Driven", nullptr, driven))
         toggleDriven = s_ctxDim;
+      if (ImGui::MenuItem("Delete", "Del"))
+        toDelete = s_ctxDim;
     } else {
       ImGui::CloseCurrentPopup();
     }
@@ -736,6 +750,11 @@ void DrawDimensions(AppState& state) {
     const bool driven = sketch->constraints[toggleDriven].driven;
     SetConstraintDriven(state, static_cast<size_t>(toggleDriven), !driven);
     s_ctxDim = -1; // `sketch` is replaced: nothing below may touch it
+  } else if (toDelete >= 0) {
+    edit.selectedConstraint = -1; // indices shift
+    edit.editingDim = -1;
+    DeleteConstraint(state, static_cast<size_t>(toDelete));
+    s_ctxDim = -1; // same: `sketch` is replaced
   }
 }
 

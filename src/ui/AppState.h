@@ -381,6 +381,20 @@ struct SketchEditState {
   // conflicting/redundant.
   int dof = -1;
   std::vector<size_t> conflictingConstraints;
+  // The Dimension tool added dimension `dim` driven because the driving
+  // dimensions `old` already fix what it measures (ApplySketchConstraint's
+  // AddDriven fallback). They are outlined on the canvas, and with exactly
+  // one, "Use this one instead" swaps them (ReplaceWithDrivenDimension).
+  // LiveReplaceOffer drops it once `msg` is no longer the status or the
+  // sketch's constraint list is not the one it was made against (`count`,
+  // and `dim`/`old` as `kept`).
+  struct ReplaceOffer {
+    int dim = -1;
+    std::vector<size_t> old;
+    std::string msg;
+    size_t count = 0;
+    std::vector<sketch::Constraint> kept; // [dim, old...]
+  } replaceOffer;
   // Entities with free coordinates (PlaneGCS dependent-parameter diagnosis):
   // drawn in the base color; fully-defined geometry draws green.
   std::vector<uint32_t> underDefined;

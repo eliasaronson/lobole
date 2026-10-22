@@ -2220,6 +2220,128 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
   };
 
+  // The usual intent behind dimensioning what is already fixed: keep the
+  // NEW dimension. The status names the one in the way, "Use this one
+  // instead" swaps them in one undo step, and the label menu deletes one
+  // (docs/sketching/README.md#gui).
+  t = IM_REGISTER_TEST(engine, "dims", "replace_over_defining_dimension");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    for (int i = 0; i < 600 && s_App->camera->IsAnimating(); i++)
+      ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    using K = sketch::ConstraintKind;
+    // A fully defined 3 x 2 rectangle: corner fixed, sides H/V, two lengths.
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t bot = sk->AddEntity(sketch::Line{{-1.5, -1}, {1.5, -1}});
+    const uint32_t rgt = sk->AddEntity(sketch::Line{{1.5, -1}, {1.5, 1}});
+    const uint32_t top = sk->AddEntity(sketch::Line{{1.5, 1}, {-1.5, 1}});
+    const uint32_t lft = sk->AddEntity(sketch::Line{{-1.5, 1}, {-1.5, -1}});
+    sk->constraints.push_back({K::Coincident, {bot, 1}, {rgt, 0}});
+    sk->constraints.push_back({K::Coincident, {rgt, 1}, {top, 0}});
+    sk->constraints.push_back({K::Coincident, {top, 1}, {lft, 0}});
+    sk->constraints.push_back({K::Coincident, {lft, 1}, {bot, 0}});
+    sk->constraints.push_back({K::Horizontal, {bot, 0}, {}});
+    sk->constraints.push_back({K::Horizontal, {top, 0}, {}});
+    sk->constraints.push_back({K::Vertical, {rgt, 0}, {}});
+    sk->constraints.push_back({K::Vertical, {lft, 0}, {}});
+    sk->constraints.push_back({K::Fixed, {bot, 0}, {}});
+    sk->constraints.push_back({K::Distance, {bot, 0}, {bot, 1}, 3.0});
+    sk->constraints.push_back({K::Distance, {rgt, 0}, {rgt, 1}, 2.0});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    s_App->sketchEdit.autoConstrain = false;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f * LensScale()));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.dof, 0);
+
+    auto clickUV = [&](glm::vec2 uv) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, uv);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+    // The top side's length, which the bottom's dimension already fixes.
+    ctx->KeyPress(ImGuiKey_D);
+    ctx->Yield();
+    clickUV({0.5f, 1});
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({0.7f, 1.8f});
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)12);
+    IM_CHECK(sk->constraints.back().driven);
+    IM_CHECK_STR_EQ(s_App->sketchEdit.actionMsg.c_str(),
+                    "That is already fixed by the 3 distance, so it was added "
+                    "as a driven (reference) dimension");
+    const auto* offer = ui::LiveReplaceOffer(*s_App);
+    IM_CHECK(offer != nullptr);
+    IM_CHECK_EQ(offer->dim, 11);
+    IM_CHECK_EQ(offer->old.size(), (size_t)1);
+    IM_CHECK_EQ(offer->old[0], (size_t)9);
+
+    // The button under the status swaps them.
+    const size_t undoDepth = s_App->commands->UndoDepth();
+    ctx->ItemClick("//##dimreplace/Use this one instead");
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)11);
+    const sketch::Constraint& kept = sk->constraints.back();
+    IM_CHECK(kept.kind == K::Distance);
+    IM_CHECK(!kept.driven);
+    IM_CHECK_EQ(kept.a.entity, top);
+    IM_CHECK_LE(std::abs(kept.value - 3.0), 1e-9);
+    for (const sketch::Constraint& c : sk->constraints)
+      IM_CHECK(!(c.kind == K::Distance && c.a.entity == bot)); // gone
+    IM_CHECK_EQ(s_App->sketchEdit.dof, 0); // still fully defined
+    IM_CHECK(s_App->sketchEdit.conflictingConstraints.empty());
+    IM_CHECK(s_App->sketchEdit.actionMsg.empty());
+    IM_CHECK(ui::LiveReplaceOffer(*s_App) == nullptr);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undoDepth + 1); // one step
+
+    // One undo brings both back: the old driving, the new driven.
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("Edit/Undo");
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)12);
+    IM_CHECK(!sk->constraints[9].driven);
+    IM_CHECK(sk->constraints[11].driven);
+
+    // The label menu's Delete removes a dimension: the driven one here.
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+    s_App->sketchEdit.tool = ui::SketchTool::Select;
+    const glm::vec2 labelUV =
+        glm::vec2(0.0f, 1.0f) + glm::vec2(sk->constraints[11].labelOffset);
+    const glm::vec2 labelScr = ui::SketchUVToScreen(*s_App, sk->plane, labelUV);
+    ctx->MouseMoveToPos(ImVec2(labelScr.x, labelScr.y));
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.dimHot, 11);
+    ctx->MouseClick(ImGuiMouseButton_Right);
+    ctx->Yield();
+    IM_CHECK_SILENT(ctx->UiContext->OpenPopupStack.Size > 0);
+    ImGuiWindow* popup = ctx->UiContext->OpenPopupStack.back().Window;
+    IM_CHECK_SILENT(popup != nullptr);
+    ctx->ItemClick((std::string("//") + popup->Name + "/Delete").c_str());
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)11);
+    IM_CHECK(!sk->constraints[9].driven);
+    IM_CHECK_EQ(s_App->sketchEdit.dof, 0);
+    s_App->sketchEdit.autoConstrain = true; // restore the default
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield();
+  };
+
   // A relation the sketch already states is refused, nothing added, and the
   // status line says why.
   t = IM_REGISTER_TEST(engine, "constraints", "repeat_is_refused");

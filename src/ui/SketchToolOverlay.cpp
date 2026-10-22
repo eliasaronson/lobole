@@ -535,7 +535,41 @@ void DrawToolPrompt(AppState& state) {
     DrawPromptPill(state, y, std::to_string(edit.dof) + " degrees of freedom",
                    PromptPill::Status);
   DrawPromptPill(state, y, tp.text, PromptPill::Prompt);
+  const float statusY = y;
   DrawPromptPill(state, y, edit.actionMsg, PromptPill::Warning);
+  // A dimension added driven because another one already fixes it: beside
+  // the status that says so (below it when the row is full, where it can
+  // cover sketch labels), the swap most people meant
+  // (docs/sketching/README.md#gui).
+  const SketchEditState::ReplaceOffer* offer = LiveReplaceOffer(state);
+  if (offer == nullptr || offer->old.size() != 1)
+    return;
+  const char* kLabel = "Use this one instead";
+  const ImVec2 msg = ImGui::CalcTextSize(edit.actionMsg.c_str());
+  const glm::vec4 pill =
+      PromptPillRect(state, statusY, glm::vec2(msg.x, msg.y));
+  const float buttonW = ImGui::CalcTextSize(kLabel).x +
+                        2.0f * (ImGui::GetStyle().FramePadding.x +
+                                ImGui::GetStyle().WindowPadding.x);
+  if (pill.z + 6.0f + buttonW <= state.viewportPos.x + state.viewportSize.x)
+    ImGui::SetNextWindowPos(ImVec2(pill.z + 6.0f, (pill.y + pill.w) * 0.5f),
+                            ImGuiCond_Always, ImVec2(0.0f, 0.5f));
+  else
+    ImGui::SetNextWindowPos(ImVec2((pill.x + pill.z) * 0.5f, y),
+                            ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+  ImGui::SetNextWindowBgAlpha(0.85f);
+  const ImGuiWindowFlags flags =
+      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
+      ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+      ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoFocusOnAppearing;
+  if (ImGui::Begin("##dimreplace", nullptr, flags)) {
+    if (ImGui::SmallButton(kLabel))
+      ReplaceWithDrivenDimension(state);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Delete the outlined dimension and make the new one "
+                        "driving");
+  }
+  ImGui::End();
 }
 
 } // namespace ui
