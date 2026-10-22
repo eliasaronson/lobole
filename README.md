@@ -4,7 +4,8 @@
 
 Open-source parametric CAD: B-Rep modeling on OpenCASCADE, a Vulkan
 viewport, and one command layer that the GUI, Python scripts and AI agents
-all drive. Linux first; Windows builds exist, macOS is untested.
+all drive. Linux first; Windows builds exist, macOS is untested. Version
+0.1: a young project, so expect rough edges and file issues for them.
 
 ## What it does
 
@@ -50,13 +51,13 @@ the API; [generators/README.md](generators/README.md) lists them all.
 
 From the [releases page](https://github.com/eliasaronson/lobole/releases):
 
-- **Ubuntu 26.04:** `sudo apt install ./lobole_<version>-1_amd64.deb`, the
-  full GUI.
+- **Linux:** `lobole-<version>-x86_64.AppImage`, the full GUI on glibc
+  2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later). `chmod +x`
+  it and run it; linked onto your PATH as `lobole`, the MCP server can
+  start it by itself.
+- **Ubuntu 26.04:** `sudo apt install ./lobole_<version>-1_amd64.deb`.
 - **Windows:** a zip or an installer. Tested on Windows by hand and
   under Wine on every release, unsigned (SmartScreen warns), no FEM.
-- **Other Linux:** `lobole-<version>-x86_64.AppImage`, the full GUI on
-  glibc 2.39 or newer (Ubuntu 24.04, Debian 13, Fedora 40 and later).
-  `chmod +x` it and run it.
 - **Linux, headless:** an AppImage with the engine and its JSON-RPC
   interface, no window, for servers ([caveats](docs/packaging/README.md#the-headless-appimage)).
 
@@ -108,8 +109,8 @@ Clone with `--recurse-submodules` (or run `git submodule update --init
 `cmake` prints which optional features it compiled in. CAM and the terminal
 panel can be switched off (`-DENABLE_CAM=OFF`, `-DENABLE_TERMINAL=OFF`), and
 then they do not exist at all. Without **Netgen** there is no FEM meshing,
-and without **Spectra** no modal analysis; neither is in Ubuntu's repos, so
-for simulation use Nix or the Flatpak.
+and without **Spectra** no modal analysis; Ubuntu has both from 26.04 on,
+and every release download except Windows carries them.
 
 On OpenCASCADE 7.6 (Ubuntu 24.04), PLY export is missing and some booleans
 come out wrong ([details](docs/packaging/README.md#opencascade-76)).
@@ -141,10 +142,11 @@ The engine and its JSON-RPC interface, no GPU or display, with the full
 feature set (OpenCASCADE 7.9, Netgen, Spectra):
 
 ```
-nix build .#dockerHeadless && docker load < result
-docker run --rm -p 8437:8437 lobole-headless:latest
-PYTHONPATH=python python3 -m lobole.client 8437 get_state
+docker run --rm -p 8437:8437 ghcr.io/eliasaronson/lobole-headless
+lobole-remote 8437 get_state          # from pip install lobole
 ```
+
+`nix build .#dockerHeadless` builds the same image.
 
 > [!CAUTION]
 > The JSON-RPC interface is **unauthenticated and can read and write
@@ -162,8 +164,16 @@ More in [CONTRIBUTING.md](CONTRIBUTING.md#running-the-tests).
 
 ## Remote control
 
-Scripts and AI agents drive a live session over JSON-RPC (localhost only,
-opt-in):
+**With an AI agent:** install the MCP server and register it, e.g. with
+Claude Code. It attaches to a running Loböle, or starts one without a
+window if none is running:
+
+```
+uv tool install lobole            # or: pip install lobole
+claude mcp add lobole -- lobole-mcp
+```
+
+Scripts drive a live session over JSON-RPC (localhost only, opt-in):
 
 ```
 ./lobole --remote 8437     # or --headless --remote 8437, with no GPU
