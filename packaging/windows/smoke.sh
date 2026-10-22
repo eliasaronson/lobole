@@ -26,13 +26,20 @@ mkdir -p "$dir"
 exe="$dir/app/bin/lobole.exe"
 export WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d
 
-python3 "$repo/tools/release-smoke.py" --port 8437 --version "$version" \
-  -- wine "$exe"
-
+# The display comes first: the first wine command starts the wineserver and
+# its desktop process, which keep the display they were started with, so a
+# headless run without one left the window below unable to open
+# ("Failed to create helper window").
 Xvfb :99 -screen 0 1600x1000x24 &
 xvfb=$!
 trap 'kill $xvfb' EXIT
 for _ in $(seq 50); do [ -e /tmp/.X11-unix/X99 ] && break; sleep 0.2; done
-DISPLAY=:99 VK_ICD_FILENAMES="$LAVAPIPE_ICD" \
+export DISPLAY=:99
+unset WAYLAND_DISPLAY
+
+python3 "$repo/tools/release-smoke.py" --port 8437 --version "$version" \
+  -- wine "$exe"
+
+VK_ICD_FILENAMES="$LAVAPIPE_ICD" \
   wine "$exe" --gui-tests --gui-test-filter boots_and_renders
 echo "windows-smoke: the window opened and rendered from $dir"
