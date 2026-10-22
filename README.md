@@ -6,7 +6,7 @@ Open-source parametric CAD: B-Rep modeling on OpenCASCADE, a Vulkan
 viewport, and one command layer that the GUI, Python scripts and AI agents
 all drive. Linux first; Windows builds exist, macOS is untested.
 
-Version 0.1: so expect rough edges. Issues are welcome.
+Version 0.1: so expect some rough edges. Issues are welcome.
 
 ## What it does
 
