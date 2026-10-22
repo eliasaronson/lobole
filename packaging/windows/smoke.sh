@@ -46,6 +46,16 @@ wineserver --wait
 python3 "$repo/tools/release-smoke.py" --port 8437 --version "$version" \
   -- wine "$exe"
 
-VK_ICD_FILENAMES="$LAVAPIPE_ICD" \
-  wine "$exe" --gui-tests --gui-test-filter boots_and_renders
+[ -f "$LAVAPIPE_ICD" ] || { echo "LAVAPIPE_ICD is not a file: '$LAVAPIPE_ICD'" >&2; exit 1; }
+export VK_ICD_FILENAMES="$LAVAPIPE_ICD"
+if ! wine "$exe" --gui-tests --gui-test-filter boots_and_renders; then
+  # Say why before failing: which Vulkan drivers the Windows loader (the
+  # zip's vulkan-1.dll) was given, and what it and winevulkan made of them.
+  echo "windows-smoke: the window test failed; Vulkan as Wine sees it:" >&2
+  wine reg query 'HKLM\Software\Khronos\Vulkan\Drivers' >&2 || true
+  VK_LOADER_DEBUG=error,warn,driver WINEDEBUG=err+all,warn+vulkan \
+    wine "$exe" --gui-tests --gui-test-filter boots_and_renders 2>&1 \
+    | grep -v -E '^ ?>|xkbcomp' | tail -60 >&2 || true
+  exit 1
+fi
 echo "windows-smoke: the window opened and rendered from $dir"
