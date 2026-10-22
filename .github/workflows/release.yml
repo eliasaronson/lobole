@@ -182,7 +182,17 @@ jobs:
             libocct-data-exchange-dev libocct-modeling-algorithms-dev \
             libocct-modeling-data-dev libocct-foundation-dev libocct-ocaf-dev \
             libocct-visualization-dev libtbb-dev libvterm-dev \
-            libnglib-dev netgen python3-netgen libspectra-dev dpkg-dev file
+            libnglib-dev netgen python3-netgen libspectra-dev dpkg-dev file ccache
+      # A compile cache for the three jobs that build in a distribution's
+      # container (deb, appimage, aur): a tag's run finds the dry run's
+      # objects for the same commit, and a later release most of them. The
+      # save half runs on failure too.
+      - name: ccache (restore)
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-deb-${{ github.sha }}
+          restore-keys: ccache-deb-
       - name: Build the package
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -191,6 +201,12 @@ jobs:
           cmake --build build -j"$(nproc)" --target designer
           (cd build && cpack)
           dpkg-deb --info build/lobole_*.deb
+      - name: ccache (save)
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-deb-${{ github.sha }}
       - uses: actions/upload-artifact@v7
         with:
           name: deb
@@ -241,8 +257,24 @@ jobs:
         with:
           path: /opt/lobole-deps
           key: appimage-deps-${{ hashFiles('packaging/appimage/deps.sh', 'nix/patches/occt-shell-cap-order.patch') }}
+      - name: ccache (restore)
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-appimage-${{ github.sha }}
+          restore-keys: ccache-appimage-
+      # A fixed work directory, so the generated headers' paths, and with
+      # them the compile cache's keys, are the same on every run.
       - name: Build the AppImage
+        env:
+          LOBOLE_APPIMAGE_WORK: /opt/appimage-work
         run: packaging/appimage/build.sh "${{ needs.check.outputs.version }}" dist
+      - name: ccache (save)
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-appimage-${{ github.sha }}
       - uses: actions/upload-artifact@v7
         with:
           name: appimage
@@ -293,8 +325,14 @@ jobs:
     container: archlinux:latest
     steps:
       - name: Container prerequisites
-        run: pacman -Syu --noconfirm --needed base-devel git python
+        run: pacman -Syu --noconfirm --needed base-devel git python ccache
       - uses: actions/checkout@v7
+      - name: ccache (restore)
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-aur-${{ github.sha }}
+          restore-keys: ccache-aur-
       - uses: actions/download-artifact@v8
         with:
           name: source
@@ -309,10 +347,19 @@ jobs:
           useradd -m builder
           echo 'builder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/builder
           chown -R builder aur
-          (cd aur && sudo -u builder makepkg -s --noconfirm \
+          # The compile cache is root's home's; builder writes it.
+          export CCACHE_DIR="$HOME/.cache/ccache"
+          mkdir -p "$CCACHE_DIR" && chown -R builder "$CCACHE_DIR"
+          (cd aur && sudo --preserve-env=CCACHE_DIR -u builder makepkg -s --noconfirm \
              && sudo -u builder sh -c 'makepkg --printsrcinfo > .SRCINFO')
           pacman -U --noconfirm aur/lobole-*.pkg.tar.zst
           python3 tools/release-smoke.py --port 8437 --version "$version" -- /usr/bin/lobole
+      - name: ccache (save)
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-aur-${{ github.sha }}
       - uses: actions/upload-artifact@v7
         with:
           name: aur

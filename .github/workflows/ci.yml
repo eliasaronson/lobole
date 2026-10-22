@@ -335,10 +335,30 @@ jobs:
         with:
           submodules: true
 
+      # ccache is the CI's, not the README's: CMake uses it when it is there
+      # and builds the same without it. The save half runs on failure too, as
+      # in the gui-suite job.
+      - name: ccache
+        run: DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ccache
+
+      - name: ccache (restore)
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-stock-${{ matrix.image }}-${{ github.sha }}
+          restore-keys: ccache-stock-${{ matrix.image }}-
+
       - name: Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build -j"$(nproc)"
+
+      - name: ccache (save)
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-stock-${{ matrix.image }}-${{ github.sha }}
 
       - name: Test
         run: |

@@ -26,7 +26,7 @@ work="${LOBOLE_APPIMAGE_WORK:-$(mktemp -d)}"
 # The stock-ubuntu CI job's list without OpenCASCADE (24.04 has 7.6) and
 # GTK (the file dialogs use the portal), plus what deps.sh and OCC's glTF
 # reader need, Spectra, and the bundlers' own needs (file, the
-# desktop-file check).
+# desktop-file check), and ccache, which CMake uses when it is there.
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
@@ -36,7 +36,7 @@ apt-get install -y --no-install-recommends \
   libspdlog-dev nlohmann-json3-dev libeigen3-dev libboost-dev \
   libtbb-dev libvterm-dev libdbus-1-dev libx11-dev \
   libfreetype-dev libfontconfig-dev rapidjson-dev libspectra-dev \
-  libgl-dev libxi-dev libxmu-dev zlib1g-dev
+  libgl-dev libxi-dev libxmu-dev zlib1g-dev ccache
 # CMake reads the commit with git, which refuses a checkout another user
 # owns ("dubious ownership"): CI's container runs as root over the runner's.
 git config --global --add safe.directory "$repo"
