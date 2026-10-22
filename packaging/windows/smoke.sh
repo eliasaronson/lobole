@@ -24,7 +24,11 @@ dir="$(mktemp -d)/Loböle"
 mkdir -p "$dir"
 (cd "$dir" && unzip -q "$zip")
 exe="$dir/app/bin/lobole.exe"
-export WINEDEBUG=-all WINEDLLOVERRIDES=winedbg.exe=d
+# winedbg off, so a crash fails the smoke instead of waiting in Wine's
+# debugger; mscoree and mshtml off, so the new prefix does not offer to
+# install Wine Mono and Gecko in a dialog nobody will click (a cached
+# installer hides that on a developer's machine). The app needs neither.
+export WINEDEBUG=-all WINEDLLOVERRIDES="winedbg.exe=d;mscoree=;mshtml="
 
 # The display comes first: the first wine command starts the wineserver and
 # its desktop process, which keep the display they were started with, so a
@@ -36,6 +40,8 @@ trap 'kill $xvfb' EXIT
 for _ in $(seq 50); do [ -e /tmp/.X11-unix/X99 ] && break; sleep 0.2; done
 export DISPLAY=:99
 unset WAYLAND_DISPLAY
+wineboot --init
+wineserver --wait
 
 python3 "$repo/tools/release-smoke.py" --port 8437 --version "$version" \
   -- wine "$exe"
