@@ -124,6 +124,9 @@ origin that misses the body. Examples in the code:
   chain or curve that is not that profile.
 - Switching a Hole's type sizes the counterbore/countersink from the bore
   unless the user already set those numbers.
+- Fillet, Chamfer and Shell open at a tenth of the target body's thinnest
+  extent, rounded to 1/2/5 (`SizeFromBody`); the target is a pre-selected
+  element's body, else the newest (`defaults/blend_and_wall_scale_with_body`).
 - The placement rule (`src/ui/Placement.h`, `ClearOffset`) keeps a new item's
   span clear of the ones already taken, with a gap scaled to the item; the
   occurrence insert and drawing-view placement use it.

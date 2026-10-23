@@ -1568,6 +1568,44 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(hollow > 0.1 && hollow < solid - 1e-3);
   };
 
+  // Fillet, Chamfer and Shell open at a size taken from the body (a tenth of
+  // its thinnest extent, rounded to 1/2/5), not a literal: 0.5 mm was a
+  // near-invisible fillet on a 300 mm part and too big for a small one.
+  t = IM_REGISTER_TEST(engine, "defaults", "blend_and_wall_scale_with_body");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    struct Case {
+      double x, y, z, expect;
+    };
+    for (const Case c : {Case{300, 200, 50, 5.0}, Case{2, 2, 2, 0.2}}) {
+      ResetAppForTest();
+      ctx->Yield();
+      s_App->commands->Execute(
+          std::make_unique<AddFeatureCommand>(std::make_unique<BoxFeature>(
+              "Box", glm::vec3(0.0f), c.x, c.y, c.z)),
+          *Doc());
+      ctx->Yield(2);
+      for (const char* tb : {"###tb_fillet", "###tb_chamfer"}) {
+        ToolbarClick(ctx, tb);
+        ctx->Yield();
+        auto* fil = dynamic_cast<FilletFeature*>(
+            Doc()->FindFeatureById(s_App->pendingFeatureId));
+        IM_CHECK(fil != nullptr);
+        IM_CHECK(std::abs(fil->radius - c.expect) < 1e-9);
+        ui::CancelPendingFeature(*s_App);
+        ctx->Yield();
+      }
+      ToolbarClick(ctx, "###tb_shell");
+      ctx->Yield();
+      auto* sh = dynamic_cast<ShellFeature*>(
+          Doc()->FindFeatureById(s_App->pendingFeatureId));
+      IM_CHECK(sh != nullptr);
+      IM_CHECK(std::abs(sh->thickness - c.expect) < 1e-9);
+      ui::CancelPendingFeature(*s_App);
+      ctx->Yield();
+    }
+  };
+
   // Draft has no body slot, and nothing in the UI ever wrote bodyId — Execute
   // rejects faces whose ref does not match it, so the pick must set it.
   t = IM_REGISTER_TEST(engine, "draft", "face_pick_names_the_body");

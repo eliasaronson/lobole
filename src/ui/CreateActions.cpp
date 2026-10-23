@@ -12,7 +12,9 @@
 #include "ui/JobActions.h"
 
 #include "imgui.h" // IsAnyItemActive (the undo guard coalesces a drag)         // JobBodies / JobRenderVersion (a job tab)
+#include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <utility>
 
 #include "cad/CADMaterials.h"
@@ -385,6 +387,46 @@ void CreatePattern(AppState& state) {
 }
 
 namespace {
+// The body a body-op tool should default to: the most recent producer, as
+// Pattern/Boolean do. 0 when the document has none.
+uint64_t NewestBody(const AppState& state) {
+  auto producers =
+      BodyProducers(*state.document, state.document->FeatureCount());
+  return producers.empty() ? 0 : producers.back().first;
+}
+
+// The body a blend or shell will act on before anything is picked: the one a
+// pre-selected element of `kind` belongs to (the seed names it), else the
+// newest.
+uint64_t TargetBody(const AppState& state, SelectionItem::Kind kind) {
+  for (const SelectionItem& item : state.selection.items)
+    if (item.kind == kind && item.element.featureId != 0)
+      return item.element.featureId;
+  return NewestBody(state);
+}
+
+// A tenth of the body's thinnest extent, rounded down to 1, 2 or 5 x 10^n so
+// the field reads as a number a person would type. The thinnest extent bounds
+// what a blend or a wall can be on that body; a tenth leaves room for the
+// smaller faces it meets. `fallback` stands when there is no body to measure.
+double SizeFromBody(const AppState& state, uint64_t bodyId, double fallback) {
+  for (const Body& b : state.document->GetBodies()) {
+    if (b.createdBy != bodyId || !b.shape.IsValid())
+      continue;
+    glm::dvec3 lo, hi;
+    b.shape.GetBoundingBox(lo, hi);
+    const glm::dvec3 ext = hi - lo;
+    const double thinnest = std::min({ext.x, ext.y, ext.z});
+    if (!(thinnest > 0.0))
+      return fallback;
+    const double raw = thinnest / 10.0;
+    const double decade = std::pow(10.0, std::floor(std::log10(raw)));
+    const double mant = raw / decade;
+    return decade * (mant >= 5.0 ? 5.0 : mant >= 2.0 ? 2.0 : 1.0);
+  }
+  return fallback;
+}
+
 // Shared by CreateFillet/CreateChamfer: start the preview and arm the edge
 // slot so viewport clicks collect edges on the pending feature.
 void CreateEdgeBlend(AppState& state, EdgeBlendOp op) {
@@ -392,10 +434,12 @@ void CreateEdgeBlend(AppState& state, EdgeBlendOp op) {
     return; // the menu gates this, but guard anyway
   }
   const char* base = op == EdgeBlendOp::Chamfer ? "Chamfer" : "Fillet";
+  const double size =
+      SizeFromBody(state, TargetBody(state, SelectionItem::Kind::Edge), 0.5);
   // BeginPreviewFeature seeds pre-selected edges and arms the edge slot.
   BeginPreviewFeature(
       state, std::make_unique<FilletFeature>(
-                 NextName(state, base), std::vector<ElementRef>{}, 0.5, op));
+                 NextName(state, base), std::vector<ElementRef>{}, size, op));
 }
 } // namespace
 
@@ -430,24 +474,17 @@ void CreateThread(AppState& state) {
                                              ElementRef{}, "M8", 1.25));
 }
 
-namespace {
-// The body a body-op tool should default to: the most recent producer, as
-// Pattern/Boolean do. 0 when the document has none.
-uint64_t NewestBody(const AppState& state) {
-  auto producers =
-      BodyProducers(*state.document, state.document->FeatureCount());
-  return producers.empty() ? 0 : producers.back().first;
-}
-} // namespace
-
 void CreateShell(AppState& state) {
   if (!state.document || state.document->GetBodies().empty())
     return;
-  // 0.25 on the ~2-unit default scene scale: thin enough that OCC accepts the
-  // offset on a small body, which "1.0" (the field default) does not.
+  // The wall from the body's own size: thin enough that OCC accepts the
+  // offset on that body, at any scale. A pre-selected open face names the
+  // body (the seed overrides bodyId), so size from that one.
+  const uint64_t body = TargetBody(state, SelectionItem::Kind::Face);
   BeginPreviewFeature(state, std::make_unique<ShellFeature>(
                                  NextName(state, "Shell"), NewestBody(state),
-                                 std::vector<ElementRef>{}, 0.25));
+                                 std::vector<ElementRef>{},
+                                 SizeFromBody(state, body, 0.25)));
 }
 
 void CreateDraft(AppState& state) {
