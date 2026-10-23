@@ -107,7 +107,8 @@ document.
 Only what `describe` cannot express:
 
 - **References, not numbers.** `Face`, `Edge`, `Frame`, `Plane`, `Body`
-  carry `.center`, `.axis`, `.normal`, `.radius`, `.plane()`, `.ref`. A
+  carry `.center`, `.axis`, `.normal`, `.radius`, `.plane()`, `.ref` (and a
+  planar face its `.inside_point` and `.inset`, an edge `.smooth`). A
   position stays an object; it is never a float the caller reads off
   `list_elements` and types back in. `body.faces(kind=, normal=, radius=,
   where=)` and `body.edges(kind=, circular=, radius=, tol=)` filter;

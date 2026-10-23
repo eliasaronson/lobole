@@ -10,15 +10,26 @@
 #include "core/Measure.h"
 #include "core/MeshCollide.h"
 #include "core/features/BooleanFeature.h"
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAdaptor_Surface.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepClass_FaceClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
+#include <BRepFilletAPI_MakeFillet.hxx>
+#include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRep_Builder.hxx>
+#include <GProp_GProps.hxx>
+#include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+#include <TopoDS.hxx>
 #include <TopoDS_Shell.hxx>
 #include <TopoDS_Solid.hxx>
 #include <gp_Ax2.hxx>
@@ -1580,4 +1591,152 @@ TEST_CASE("Comparing two sets without the overlap measures everything else",
   CHECK(full->common > 0.0);
   CHECK(cheap->common == 0.0);
   CHECK(cheap->hasOverlap == false);
+}
+
+namespace {
+// The planar face of `shape` whose centre of mass is at height z.
+TopoDS_Face PlanarFaceAtZ(const TopoDS_Shape& shape, double z) {
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
+    const TopoDS_Face f = TopoDS::Face(ex.Current());
+    if (BRepAdaptor_Surface(f).GetType() != GeomAbs_Plane)
+      continue;
+    GProp_GProps props;
+    BRepGProp::SurfaceProperties(f, props);
+    if (std::abs(props.CentreOfMass().Z() - z) < 1e-9)
+      return f;
+  }
+  return {};
+}
+
+bool OnFace(const TopoDS_Face& face, const glm::dvec3& p) {
+  BRepClass_FaceClassifier c(face, gp_Pnt(p.x, p.y, p.z), 1e-7);
+  return c.State() == TopAbs_IN;
+}
+
+double PolygonDistance(const std::vector<glm::dvec2>& poly, glm::dvec2 p) {
+  double best = std::numeric_limits<double>::infinity();
+  for (size_t i = 0; i < poly.size(); i++) {
+    const glm::dvec2 a = poly[i], b = poly[(i + 1) % poly.size()];
+    const double t =
+        std::clamp(glm::dot(p - a, b - a) / glm::dot(b - a, b - a), 0.0, 1.0);
+    best = std::min(best, glm::length(p - (a + t * (b - a))));
+  }
+  return best;
+}
+} // namespace
+
+TEST_CASE("A face's inside point is on the face, and its inset is its "
+          "distance to the boundary",
+          "[measure][list_elements]") {
+  // An annulus: its centroid is the centre of its hole, off the face.
+  SECTION("annulus") {
+    const TopoDS_Shape outer = BRepPrimAPI_MakeCylinder(10.0, 2.0).Shape();
+    const TopoDS_Shape inner = BRepPrimAPI_MakeCylinder(4.0, 2.0).Shape();
+    const TopoDS_Shape ring = BRepAlgoAPI_Cut(outer, inner).Shape();
+    const TopoDS_Face top = PlanarFaceAtZ(ring, 2.0);
+    REQUIRE_FALSE(top.IsNull());
+    const auto in = Measure::FaceInsetOf(top);
+    REQUIRE(in.has_value());
+    REQUIRE(in->hasInset);
+    CHECK(OnFace(top, in->point));
+    CHECK_THAT(in->point.z, WithinAbs(2.0, 1e-9));
+    const double r = std::hypot(in->point.x, in->point.y);
+    // Its true distance to the boundary, the two circles.
+    CHECK_THAT(in->inset, WithinAbs(std::min(10.0 - r, r - 4.0), 1e-6));
+    // ...and near the best there is, the mid-radius (3 mm).
+    CHECK(in->inset > 2.9);
+  }
+  // An L: its centroid lies in the notch's corner region, which is off it.
+  SECTION("L") {
+    const std::vector<glm::dvec2> poly{{0, 0}, {20, 0}, {20, 6},
+                                       {6, 6}, {6, 20}, {0, 20}};
+    BRepBuilderAPI_MakePolygon mp;
+    for (const glm::dvec2& q : poly)
+      mp.Add(gp_Pnt(q.x, q.y, 0.0));
+    mp.Close();
+    const TopoDS_Face face = BRepBuilderAPI_MakeFace(mp.Wire(), true).Face();
+    const auto in = Measure::FaceInsetOf(face);
+    REQUIRE(in.has_value());
+    REQUIRE(in->hasInset);
+    CHECK(OnFace(face, in->point));
+    CHECK_THAT(
+        in->inset,
+        WithinAbs(PolygonDistance(poly, {in->point.x, in->point.y}), 1e-6));
+    CHECK(in->inset > 2.9); // the arms are 6 wide: 3 is the most there is
+  }
+}
+
+namespace {
+// Each edge of `shape` with its two faces, and whether EdgeIsSmooth says so.
+struct EdgeVerdict {
+  bool smooth;
+  bool bothPlanar;
+};
+std::vector<EdgeVerdict> Verdicts(const TopoDS_Shape& shape) {
+  TopTools_IndexedDataMapOfShapeListOfShape parents;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, parents);
+  std::vector<EdgeVerdict> out;
+  for (int i = 1; i <= parents.Extent(); i++) {
+    std::vector<TopoDS_Face> faces;
+    for (const TopoDS_Shape& f : parents(i))
+      if (std::none_of(faces.begin(), faces.end(),
+                       [&](const TopoDS_Face& g) { return g.IsSame(f); }))
+        faces.push_back(TopoDS::Face(f));
+    if (faces.size() != 2)
+      continue;
+    const bool planar =
+        BRepAdaptor_Surface(faces[0]).GetType() == GeomAbs_Plane &&
+        BRepAdaptor_Surface(faces[1]).GetType() == GeomAbs_Plane;
+    out.push_back({Measure::EdgeIsSmooth(TopoDS::Edge(parents.FindKey(i)),
+                                         faces[0], faces[1]),
+                   planar});
+  }
+  return out;
+}
+} // namespace
+
+TEST_CASE("An edge is smooth where its faces meet tangentially",
+          "[measure][list_elements]") {
+  const TopoDS_Shape box = BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape();
+  SECTION("a box rounded on every edge: every edge is a blend's, smooth") {
+    BRepFilletAPI_MakeFillet fillet(box);
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(box, TopAbs_EDGE, edges);
+    for (int i = 1; i <= edges.Extent(); i++)
+      fillet.Add(1.0, TopoDS::Edge(edges(i)));
+    const TopoDS_Shape rounded = fillet.Shape();
+    const auto v = Verdicts(rounded);
+    REQUIRE(v.size() > 12);
+    for (const EdgeVerdict& e : v)
+      CHECK(e.smooth);
+  }
+  SECTION("a box rounded on its four upright edges") {
+    BRepFilletAPI_MakeFillet fillet(box);
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(box, TopAbs_EDGE, edges);
+    int added = 0;
+    for (int i = 1; i <= edges.Extent(); i++) {
+      BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+      const gp_Pnt a = c.Value(c.FirstParameter()),
+                   b = c.Value(c.LastParameter());
+      if (std::abs(a.Z() - b.Z()) > 1.0) {
+        fillet.Add(1.0, TopoDS::Edge(edges(i)));
+        added++;
+      }
+    }
+    REQUIRE(added == 4);
+    const auto v = Verdicts(fillet.Shape());
+    int smooth = 0, planarPairs = 0;
+    for (const EdgeVerdict& e : v) {
+      if (e.bothPlanar) {
+        planarPairs++;
+        CHECK_FALSE(e.smooth); // a plane meets a plane at a corner
+      }
+      smooth += e.smooth ? 1 : 0;
+    }
+    CHECK(planarPairs == 8); // the straight runs round the top and bottom
+    // The eight lines where a blend meets a wall; the arcs where it meets
+    // the top or the bottom are square, not tangent.
+    CHECK(smooth == 8);
+  }
 }

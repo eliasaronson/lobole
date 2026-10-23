@@ -14,6 +14,9 @@
 #include <unordered_map>
 #include <vector>
 
+class TopoDS_Edge;
+class TopoDS_Face;
+
 // Measurement over stable element names (inspection I1, faces/edges v1):
 // resolve ElementRefs against the bodies' element maps, then ask OCC.
 namespace Measure {
@@ -104,6 +107,36 @@ std::optional<EdgeInfo> DescribeEdgeAt(const Body& body, int edgeIndex);
 std::optional<double> DistanceToElementAt(const Body& body, bool face,
                                           int index, const glm::dvec3& point,
                                           double cutoff);
+
+// A point ON a face, as far inside it as a sampling finds, and its distance
+// to the face's boundary (list_elements' `inside_point` and `inset_mm`). The
+// centroid is not that point: an annulus's lies in its hole and an L's off
+// its corner. Samples the face's UV box, keeps the samples the face's own
+// classifier puts IN, takes the one furthest from the boundary and refines
+// around it; `inset` is then the exact distance from that point to the
+// nearest boundary edge. Seams and degenerated edges are not boundary (a
+// cylinder's surface goes on across its seam). nullopt when no sample lands
+// inside; `hasInset` is false for a face with no boundary at all (a whole
+// sphere).
+struct FaceInset {
+  glm::dvec3 point{0.0};
+  double inset = 0.0; // mm
+  bool hasInset = false;
+};
+std::optional<FaceInset> FaceInsetOf(const TopoDS_Face& face);
+std::optional<FaceInset> FaceInsetAt(const Body& body, int faceIndex);
+
+// Nothing to blend: the two faces either side of `edge` meet tangentially
+// (G1, their outward normals agree along it), or it is a seam (the same face
+// both sides) or a degenerated edge. list_elements' `smooth`: a fillet on a
+// tangent edge has nothing to round, and OpenCASCADE says "no suitable
+// edges". Judged geometrically, to 1e-4 rad, at five points along the edge
+// (at one where both faces are planes).
+[[nodiscard]] bool EdgeIsSmooth(const TopoDS_Edge& edge, const TopoDS_Face& a,
+                                const TopoDS_Face& b);
+// EdgeIsSmooth for every edge of the body, in element-map edge order
+// (TopExp::MapShapes). An edge with more than two faces is not smooth.
+std::vector<bool> SmoothEdges(const Body& body);
 
 // Total pairwise intersection volume between two rigidly placed body sets
 // (I4 clash, assembly form): every body of A (placed by xfA) is intersected

@@ -637,6 +637,19 @@ every later measurement — `CADShape::IsValid` is only a null check.
   makes the list complete. A piece of a split face or edge carries `piece`
   {`of`, `bounded_by`, `ordinal`}, `ordinal: true` when its name is by
   position ([split pieces](../modeling/toponaming.md#split-pieces)).
+  An edge is `smooth` when there is nothing to blend there: its two faces'
+  outward normals agree at five points along it (G1, to 1e-4 rad; two planes
+  at one), or it is
+  a seam or degenerated (`Measure::EdgeIsSmooth`). A planar face carries
+  `inside_point`, a point ON it, and `inset_mm`, that point's exact distance
+  to the face's boundary (`Measure::FaceInsetOf`: an 8 x 8 sample of its UV
+  box, 32 x 32 when that finds nothing inside, refined three times about the
+  best, keeping the sample furthest from a
+  polyline of the boundary that the face's classifier puts inside; then the
+  exact distance to each boundary curve). The centroid is not such a point:
+  an annulus's lies in its hole, an L's off its corner. Other faces carry
+  neither: the sampling on a thread's spline faces cost more than the rest of
+  the listing.
 - `query_geometry` — declarative filters (`geometry_type`, `normal`/`axis`
   with `angle_tol_deg`, `radius` ± `radius_tol`, area and length bounds,
   `near_point`, `on_point`) and `expected_count`, which turns the query into

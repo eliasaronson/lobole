@@ -34,8 +34,10 @@
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepGProp.hxx>
+#include <BRepLProp_SLProps.hxx>
 #include <BRepPrimAPI_MakeHalfSpace.hxx>
 #include <BRepTools.hxx>
+#include <BRepTopAdaptor_FClass2d.hxx>
 #include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
@@ -43,7 +45,9 @@
 #include <ElCLib.hxx>
 #include <Extrema_ExtAlgo.hxx>
 #include <Extrema_ExtFlag.hxx>
+#include <Extrema_ExtPC.hxx>
 #include <GProp_GProps.hxx>
+#include <Geom2d_Curve.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomAbs_CurveType.hxx>
 #include <GeomAbs_SurfaceType.hxx>
@@ -66,6 +70,7 @@
 #include <TopoDS_Solid.hxx>
 #include <TopoDS_Vertex.hxx>
 #include <gp_Cylinder.hxx>
+#include <gp_Pnt2d.hxx>
 #include <gp_Quaternion.hxx>
 #include <gp_Trsf.hxx>
 
@@ -94,8 +99,18 @@ TopoDS_Shape FaceAt(const TopoDS_Shape& shape, int index) {
   return {};
 }
 TopoDS_Shape EdgeAt(const TopoDS_Shape& shape, int index) {
-  TopTools_IndexedMapOfShape edges;
-  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  // The map of the shape asked about last, per thread: list_elements asks
+  // for every edge of one body in turn, and building the map each time made
+  // describing a body's edges quadratic. The cache holds the shape itself,
+  // so the TShape it is keyed on cannot be freed and its address reused.
+  thread_local TopoDS_Shape last;
+  thread_local TopTools_IndexedMapOfShape edges;
+  if (last.IsNull() || !last.IsSame(shape) ||
+      last.Orientation() != shape.Orientation()) {
+    edges.Clear();
+    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+    last = shape;
+  }
   if (index >= 0 && index < edges.Extent())
     return edges(index + 1);
   return {};
@@ -336,6 +351,238 @@ std::optional<double> DistanceToElementAt(const Body& body, bool face,
                                    : "OpenCASCADE failure");
     return std::nullopt;
   }
+}
+
+namespace {
+
+double SegmentDistance(const gp_Pnt& p, const gp_Pnt& a, const gp_Pnt& b) {
+  const gp_Vec ab(a, b), ap(a, p);
+  const double len2 = ab.SquareMagnitude();
+  double t = len2 > 0.0 ? ap.Dot(ab) / len2 : 0.0;
+  t = std::clamp(t, 0.0, 1.0);
+  return p.Distance(a.Translated(ab * t));
+}
+
+// The outward normal of `face` (its adaptor `surf`) at parameter fraction
+// `t` along `edge`.
+std::optional<gp_Dir> NormalOnFaceAlong(const TopoDS_Edge& edge,
+                                        const TopoDS_Face& face,
+                                        const BRepAdaptor_Surface& surf,
+                                        double t) {
+  double f = 0.0, l = 0.0;
+  gp_Pnt2d uv;
+  const Handle(Geom2d_Curve) pc = BRep_Tool::CurveOnSurface(edge, face, f, l);
+  if (!pc.IsNull()) {
+    uv = pc->Value(f + (l - f) * t);
+  } else {
+    // No p-curve: project the 3-D point.
+    BRepAdaptor_Curve c(edge);
+    const gp_Pnt p = c.Value(c.FirstParameter() +
+                             (c.LastParameter() - c.FirstParameter()) * t);
+    const Handle(Geom_Surface) s = BRep_Tool::Surface(face);
+    if (s.IsNull())
+      return std::nullopt;
+    GeomAPI_ProjectPointOnSurf proj(p, s);
+    if (!proj.IsDone() || proj.NbPoints() < 1)
+      return std::nullopt;
+    double u = 0.0, v = 0.0;
+    proj.LowerDistanceParameters(u, v);
+    uv.SetCoord(u, v);
+  }
+  BRepLProp_SLProps props(surf, uv.X(), uv.Y(), 1, 1e-9);
+  if (!props.IsNormalDefined())
+    return std::nullopt;
+  gp_Dir n = props.Normal();
+  if (face.Orientation() == TopAbs_REVERSED)
+    n.Reverse();
+  return n;
+}
+
+constexpr double kSmoothAngle = 1e-4; // rad
+
+bool SmoothBetween(const TopoDS_Edge& edge, const TopoDS_Face& a,
+                   const BRepAdaptor_Surface& sa, const TopoDS_Face& b,
+                   const BRepAdaptor_Surface& sb) {
+  if (BRep_Tool::Degenerated(edge) || a.IsSame(b))
+    return true;
+  try {
+    // Two planes meet tangentially only where they are one plane.
+    if (sa.GetType() == GeomAbs_Plane && sb.GetType() == GeomAbs_Plane) {
+      const auto na = NormalOnFaceAlong(edge, a, sa, 0.5);
+      const auto nb = NormalOnFaceAlong(edge, b, sb, 0.5);
+      return na && nb && na->Angle(*nb) <= kSmoothAngle;
+    }
+    // Interior samples: an end of the edge is a vertex where a third face
+    // may meet and the normal there belongs to nobody in particular.
+    for (const double t : {0.1, 0.3, 0.5, 0.7, 0.9}) {
+      const auto na = NormalOnFaceAlong(edge, a, sa, t);
+      const auto nb = NormalOnFaceAlong(edge, b, sb, t);
+      if (!na || !nb || na->Angle(*nb) > kSmoothAngle)
+        return false;
+    }
+    return true;
+  } catch (const Standard_Failure&) {
+    return false;
+  }
+}
+
+// The exact distance from `p` to a bounded edge: the curve's interior
+// extrema and its two ends.
+double EdgeDistance(const gp_Pnt& p, const BRepAdaptor_Curve& c) {
+  const double f = c.FirstParameter(), l = c.LastParameter();
+  double best = std::min(p.Distance(c.Value(f)), p.Distance(c.Value(l)));
+  Extrema_ExtPC ext(p, c, f, l);
+  if (ext.IsDone())
+    for (int i = 1; i <= ext.NbExt(); i++)
+      best = std::min(best, std::sqrt(ext.SquareDistance(i)));
+  return best;
+}
+
+} // namespace
+
+bool EdgeIsSmooth(const TopoDS_Edge& edge, const TopoDS_Face& a,
+                  const TopoDS_Face& b) {
+  return SmoothBetween(edge, a, BRepAdaptor_Surface(a), b,
+                       BRepAdaptor_Surface(b));
+}
+
+std::vector<bool> SmoothEdges(const Body& body) {
+  const TopoDS_Shape& shape = body.shape.GetShape();
+  if (shape.IsNull())
+    return {};
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+  TopTools_IndexedDataMapOfShapeListOfShape parents;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, parents);
+  // One adaptor per face, not one per sample.
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(shape, TopAbs_FACE, faces);
+  std::vector<std::optional<BRepAdaptor_Surface>> adaptors(
+      static_cast<size_t>(faces.Extent()));
+  const auto adaptor = [&](const TopoDS_Face& f) -> const BRepAdaptor_Surface& {
+    auto& a = adaptors[static_cast<size_t>(faces.FindIndex(f) - 1)];
+    if (!a)
+      a.emplace(f);
+    return *a;
+  };
+  std::vector<bool> out(static_cast<size_t>(edges.Extent()), false);
+  for (int e = 1; e <= edges.Extent(); e++) {
+    const TopoDS_Edge& edge = TopoDS::Edge(edges(e));
+    const int at = parents.FindIndex(edge);
+    std::vector<TopoDS_Face> around;
+    if (at != 0)
+      for (const TopoDS_Shape& f : parents(at))
+        if (std::none_of(around.begin(), around.end(),
+                         [&](const TopoDS_Face& g) { return g.IsSame(f); }))
+          around.push_back(TopoDS::Face(f));
+    if (BRep_Tool::Degenerated(edge) || around.size() == 1)
+      out[e - 1] = true; // degenerated, or a seam
+    else if (around.size() == 2 && faces.Contains(around[0]) &&
+             faces.Contains(around[1]))
+      out[e - 1] = SmoothBetween(edge, around[0], adaptor(around[0]), around[1],
+                                 adaptor(around[1]));
+  }
+  return out;
+}
+
+std::optional<FaceInset> FaceInsetOf(const TopoDS_Face& face) {
+  try {
+    const Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+    if (surf.IsNull())
+      return std::nullopt;
+    // The boundary: every edge but a seam or a degenerated one, as a
+    // polyline for the search and as curves for the exact answer.
+    std::vector<std::pair<gp_Pnt, gp_Pnt>> segments;
+    std::vector<BRepAdaptor_Curve> boundary;
+    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+      const TopoDS_Edge& e = TopoDS::Edge(ex.Current());
+      if (BRep_Tool::Degenerated(e) || BRep_Tool::IsClosed(e, face))
+        continue;
+      const BRepAdaptor_Curve& c = boundary.emplace_back(e);
+      const double f = c.FirstParameter(), l = c.LastParameter();
+      const int n = c.GetType() == GeomAbs_Line ? 1 : 32;
+      gp_Pnt prev = c.Value(f);
+      for (int k = 1; k <= n; k++) {
+        const gp_Pnt p = c.Value(f + (l - f) * k / n);
+        segments.emplace_back(prev, p);
+        prev = p;
+      }
+    }
+    const bool any = !boundary.empty();
+    const auto nearest = [&](const gp_Pnt& p) {
+      double best = std::numeric_limits<double>::infinity();
+      for (const auto& [a, b] : segments)
+        best = std::min(best, SegmentDistance(p, a, b));
+      return best;
+    };
+    double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+    BRepTools::UVBounds(face, u0, u1, v0, v1);
+    BRepTopAdaptor_FClass2d inside(face, Precision::PConfusion());
+    bool found = false;
+    double bestU = 0.0, bestV = 0.0, bestD = -1.0;
+    const auto consider = [&](double u, double v) {
+      if (u < u0 || u > u1 || v < v0 || v > v1)
+        return;
+      // The distance first: it is cheap, and a sample no further from the
+      // boundary than the best so far need not be classified at all.
+      const double d = any ? nearest(surf->Value(u, v)) : 0.0;
+      if (found && d <= bestD)
+        return;
+      if (inside.Perform(gp_Pnt2d(u, v)) != TopAbs_IN)
+        return;
+      if (!found || d > bestD) {
+        found = true;
+        bestD = d;
+        bestU = u;
+        bestV = v;
+      }
+    };
+    // Coarse first; a sliver or a ring the coarse grid misses gets a fine
+    // one.
+    double du = 0.0, dv = 0.0;
+    for (const int grid : {8, 32}) {
+      du = (u1 - u0) / grid;
+      dv = (v1 - v0) / grid;
+      for (int i = 0; i < grid; i++)
+        for (int j = 0; j < grid; j++)
+          consider(u0 + (i + 0.5) * du, v0 + (j + 0.5) * dv);
+      if (found)
+        break;
+    }
+    if (!found)
+      return std::nullopt;
+    // Refine about the best sample: a 5 x 5 at half the spacing, three times.
+    for (int round = 0; round < 3 && any; round++) {
+      const double cu = bestU, cv = bestV;
+      du *= 0.5;
+      dv *= 0.5;
+      for (int i = -2; i <= 2; i++)
+        for (int j = -2; j <= 2; j++)
+          consider(cu + i * du, cv + j * dv);
+    }
+    FaceInset out;
+    const gp_Pnt p = surf->Value(bestU, bestV);
+    out.point = glm::dvec3(p.X(), p.Y(), p.Z());
+    if (any) {
+      double exact = std::numeric_limits<double>::infinity();
+      for (const BRepAdaptor_Curve& c : boundary)
+        exact = std::min(exact, EdgeDistance(p, c));
+      out.inset = exact;
+      out.hasInset = true;
+    }
+    return out;
+  } catch (const Standard_Failure&) {
+    return std::nullopt;
+  }
+}
+
+std::optional<FaceInset> FaceInsetAt(const Body& body, int faceIndex) {
+  if (body.shape.GetShape().IsNull())
+    return std::nullopt;
+  const TopoDS_Shape f = FaceAt(body.shape.GetShape(), faceIndex);
+  if (f.IsNull())
+    return std::nullopt;
+  return FaceInsetOf(TopoDS::Face(f));
 }
 
 // Boolean fuzz for contact checks, in millimetres. Big enough to swallow the

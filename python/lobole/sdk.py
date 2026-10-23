@@ -901,6 +901,13 @@ class Face(Element):
         self.normal = V(raw["normal"]) if "normal" in raw else None
         self.axis = V(raw["axis"]) if "axis" in raw else None
         self.radius = raw.get("radius")
+        # A point ON a planar face, well inside it, and its distance (mm) to
+        # the face's boundary: where a sketch on the face can be centred, and
+        # how big it may be. The centroid of an annulus lies in its hole.
+        # None on any other face.
+        self.inside_point = (V(raw["inside_point"]) if "inside_point" in raw
+                             else None)
+        self.inset = raw.get("inset_mm")
 
     @property
     def diameter(self) -> float | None:
@@ -925,6 +932,8 @@ class Edge(Element):
         # the names of the faces it joins
         self.faces = list(raw.get("faces", []))
         self.radius = raw.get("radius")
+        # Nothing to blend here: its faces meet tangentially, or it is a seam.
+        self.smooth = bool(raw.get("smooth", False))
 
     @property
     def center(self) -> V:

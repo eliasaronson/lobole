@@ -1357,7 +1357,13 @@ static constexpr MethodDoc InspectionMethods[] = {
      "{part, configuration: name|id} lists the part as it is in that "
      "configuration -- what a placement or a job part in it is made of. Each "
      "edge lists the `faces` it joins, by name: the edges where a top "
-     "meets its walls are the ones whose faces include one of each.",
+     "meets its walls are the ones whose faces include one of each. An edge "
+     "is `smooth` when there is nothing to blend there: its two faces meet "
+     "tangentially (G1), or it is a seam. A planar face carries "
+     "`inside_point`, a point ON it as far inside as a sampling finds (the "
+     "centroid of an annulus or an L lies off the face), and `inset_mm`, "
+     "that point's distance in mm to the face's boundary: a sketch on the "
+     "face centred there with a radius under it stays on the face.",
      "part?:string|int, configuration?:string|int, body?:int, entity?:int>=0, "
      "made_by?:string|int, role?:string, via?:string|int, max_faces?:int>=0",
      remote::NoFlags,
@@ -7089,12 +7095,28 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
           if (fi->hasAxis)
             f["axis"] = {fi->axis.x, fi->axis.y, fi->axis.z};
         }
+        // A point ON a planar face, and how far it is from the face's edge:
+        // what a sketch on the face is centred on and sized by. The
+        // centroid is neither -- an annulus's lies in its hole. Planar faces
+        // only: the search is a sampling, and on a thread's spline faces it
+        // cost more than the rest of the listing.
+        const auto in = f.value("kind", std::string{}) == "plane"
+                            ? Measure::FaceInsetAt(bodies[i], idx)
+                            : std::nullopt;
+        if (in) {
+          f["inside_point"] = {in->point.x, in->point.y, in->point.z};
+          if (in->hasInset)
+            f["inset_mm"] = in->inset;
+        }
         faces.push_back(f);
       }
       const std::vector<std::vector<std::string>> joins =
           bodies[i].elementMap.edgeNames.empty()
               ? std::vector<std::vector<std::string>>{}
               : EdgeFaceNames(bodies[i]);
+      const std::vector<bool> smooth = bodies[i].elementMap.edgeNames.empty()
+                                           ? std::vector<bool>{}
+                                           : Measure::SmoothEdges(bodies[i]);
       for (const auto& [idx, name] : bodies[i].elementMap.edgeNames) {
         const topo::ElementOrigin origin = topo::DecodeElementName(name);
         if (!filter.Matches(origin))
@@ -7108,6 +7130,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         // comes from whichever face named it first, so it cannot say.
         if (idx >= 0 && static_cast<size_t>(idx) < joins.size())
           e["faces"] = joins[static_cast<size_t>(idx)];
+        // Nothing to blend: the faces either side meet tangentially, or it
+        // is a seam. A fillet there is "no suitable edges", not a radius
+        // problem.
+        if (idx >= 0 && static_cast<size_t>(idx) < smooth.size())
+          e["smooth"] = static_cast<bool>(smooth[static_cast<size_t>(idx)]);
         if (const auto ei = Measure::DescribeEdgeAt(bodies[i], idx)) {
           e["kind"] = ei->kind;
           e["length_mm"] = ei->length;
