@@ -208,6 +208,7 @@ VkResult NoteResult(VkResult result) {
 }
 
 bool DeviceLostSeen() { return g_deviceLost.load(); }
+void ClearDeviceLost() { g_deviceLost.store(false); }
 
 VkResult EndSingleTimeCommands(VkDevice device, VkCommandPool pool,
                                VkQueue queue, VkCommandBuffer cb) {

@@ -413,7 +413,7 @@ void WalkDriver(AppState& state, const MotionStudy& s, double target) {
                               /*diagnose=*/false, // a motion sample
                               s.driverPath);
   }
-  state.syncedDocumentVersion = UINT64_MAX; // the placements changed
+  state.gpu.syncedDocumentVersion = UINT64_MAX; // the placements changed
 }
 
 } // namespace
@@ -482,7 +482,7 @@ bool ApplyMotionSample(AppState& state, uint64_t studyId,
   // between samples it is the single step the walk would have ended on.
   SolveActiveAssemblyDriven(state, s->driverMate, s->driverDof,
                             /*diagnose=*/false, s->driverPath);
-  state.syncedDocumentVersion = UINT64_MAX; // the placements changed
+  state.gpu.syncedDocumentVersion = UINT64_MAX; // the placements changed
   return true;
 }
 
@@ -703,7 +703,8 @@ void ShowMotionPoses(AppState& state, uint64_t studyId,
       state.motionPlaybackPinned != poses) {
     state.motionPlaybackStudy = studyId;
     state.motionPlaybackPinned = poses;
-    state.syncedDocumentVersion = UINT64_MAX; // a full resync reads them too
+    state.gpu.syncedDocumentVersion =
+        UINT64_MAX; // a full resync reads them too
   }
   state.motionPlaying = false; // the caller moves it
   state.motionPlaybackPos = pos;
@@ -744,7 +745,7 @@ bool StartMotionPlayback(AppState& state, uint64_t studyId, std::string* why) {
   state.motionPlaybackStudy = studyId;
   state.motionPlaying = true;
   state.motionPlaybackLastTick = -1.0;      // the first tick sets the clock
-  state.syncedDocumentVersion = UINT64_MAX; // pickers follow the pose
+  state.gpu.syncedDocumentVersion = UINT64_MAX; // pickers follow the pose
   return true;
 }
 
@@ -756,7 +757,7 @@ void StopMotionPlayback(AppState& state) {
   state.motionPlaying = false;
   state.motionPlaybackPos = 0.0;
   // Back to the document's own placements, and picking with them.
-  state.syncedDocumentVersion = UINT64_MAX;
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
 }
 
 void TickMotionPlayback(AppState& state, double now) {

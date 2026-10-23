@@ -122,6 +122,12 @@ uint32_t OutlineAssetFor(AppState& state, BodyTessellation& entry);
 void TrimTessellationCache(AppState& state);
 // Drops every entry and its assets (shutdown; ReleasePartRenderCache calls it).
 void ReleaseTessellationCache(AppState& state);
+// Forgets every entry's asset ids and keeps its CPU mesh: the renderers that
+// issued them are being, or have been, replaced
+// (docs/rendering/README.md#rebuilding-the-device). `release` first gives the
+// ids back to those renderers, while they still exist. The next lookup of an
+// entry uploads it again.
+void ForgetTessellationAssets(AppState& state, bool release);
 
 // One part body's tessellation, its two GPU assets, and the resolved look the
 // instances of it draw with. Shared by every occurrence of the part in one

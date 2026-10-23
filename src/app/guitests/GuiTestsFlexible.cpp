@@ -537,7 +537,7 @@ void RegisterFlexibleGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(view->steps[0].offset.z - 3.0f * r.height) < 1e-3f);
     // Only the crank's meshes moved; the housing's did not.
     int movedMeshes = 0, stillMeshes = 0;
-    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes) {
+    for (const ui::DocumentRenderMesh& m : s_App->gpu.documentMeshes) {
       if (m.occurrenceId != r.unitOcc)
         continue;
       const auto xf = s_App->meshRenderer->GetInstanceTransform(m.meshId);

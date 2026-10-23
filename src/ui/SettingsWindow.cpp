@@ -48,8 +48,6 @@ const char* TierNote(settings::Tier tier) {
     return nullptr; // no note: it already happened
   case settings::Tier::NextTime:
     return "takes effect next time";
-  case settings::Tier::Restart:
-    return "needs a restart";
   }
   return nullptr;
 }
@@ -1272,32 +1270,27 @@ void PageTitle(const PreferenceCategory& c) {
 }
 
 // One table row: the control, then the blurb (or, for the GPU, what is in
-// use and whether the choice is pending).
+// use, and why the chosen device is not it when it is not).
 bool DrawRow(AppState& state, const settings::Field& f) {
   const bool changed = DrawField(state, f);
-  // The GPU row says what is actually in use, and says so LOUDLY when the
-  // choice no longer matches it — "nothing happened" is the correct
-  // behaviour for a restart-tier setting, but only if the window admits it.
+  // The GPU row is Live: a change rebuilds the device in place at the next
+  // frame (docs/rendering/README.md#rebuilding-the-device), so the row says
+  // what is in use NOW, that a switch is waiting when a render holds it, and
+  // why the chosen device was not used when the ladder could not honour it.
   if (std::string(f.key) == "gpu_device" && !state.gpuName.empty()) {
     const std::string& want = state.settings.gpuDevice;
-    const bool pending =
-        !want.empty() && state.gpuName.find(want) == std::string::npos;
     const std::string inUse = "Rendering on: " + state.gpuName + ".";
     DrawBlurb(f, inUse.c_str());
-    if (!state.gpuPreferenceNote.empty() &&
-        state.gpuPreferenceNote.find(want) != std::string::npos) {
-      // Startup already tried and could not: promising a restart here
-      // would be a lie, and the user would take it.
-      ImGui::PushTextWrapPos(0.0f);
+    ImGui::PushTextWrapPos(0.0f);
+    if (state.renderer.preferenceWaiting) {
+      ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
+                         "Switches when the render finishes.");
+    } else if (!state.gpuPreferenceNote.empty() &&
+               state.gpuPreferenceNote.find(want) != std::string::npos) {
       ImGui::TextColored(ImVec4(0.95f, 0.55f, 0.45f, 1.0f), "%s",
                          state.gpuPreferenceNote.c_str());
-      ImGui::PopTextWrapPos();
-    } else if (pending) {
-      ImGui::PushTextWrapPos(0.0f);
-      ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f),
-                         "Restart Lobole to render on %s.", want.c_str());
-      ImGui::PopTextWrapPos();
     }
+    ImGui::PopTextWrapPos();
   } else {
     DrawBlurb(f);
   }

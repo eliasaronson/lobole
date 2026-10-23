@@ -164,9 +164,11 @@ enum MethodFlag : uint8_t {
   // coherent inside the frame.
   UiAction = 1u << 3,
   // Draws, or resolves through what the renderers hold (a capture, a still,
-  // a face picked by mesh). Once the graphics device is lost these are
-  // refused with diagnostic code `device_lost`, before anything runs, and
-  // every other method still answers (docs/rendering/README.md#a-lost-device).
+  // a face picked by mesh). Once the graphics device is lost and a rebuild
+  // in place could not save it (the backstop) these are refused with
+  // diagnostic code `device_lost`, before anything runs, and every other
+  // method still answers (docs/rendering/README.md#a-lost-device). While a
+  // rebuild is pending, requests wait in the queue instead.
   NeedsRenderer = 1u << 4,
 };
 

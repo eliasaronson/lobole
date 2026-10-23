@@ -54,6 +54,10 @@ void GpuTimer::Shutdown(VkDevice device) {
     vkDestroyQueryPool(device, m_pool, nullptr);
   m_pool = VK_NULL_HANDLE;
   m_supported = false;
+  // A pool made after this one (a rebuilt device) starts with every query
+  // uninitialized: no slot of it has been recorded.
+  m_slotUsed = {};
+  ResetSamples();
 }
 
 void GpuTimer::ResetSamples() {

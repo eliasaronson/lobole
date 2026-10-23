@@ -370,6 +370,14 @@ add_test(NAME render_pixel_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(render_pixel_smoke PROPERTIES LABELS slow TIMEOUT 300
                      SKIP_RETURN_CODE 77)
+# ...and across a device rebuild in place: the scene before and after it
+# byte-identical to each other and to the baseline
+# (docs/rendering/README.md#rebuilding-the-device).
+add_test(NAME render_pixel_rebuild_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/render_pixel_smoke.py
+                 $<TARGET_FILE:designer> --rebuild)
+set_tests_properties(render_pixel_rebuild_smoke PROPERTIES LABELS slow
+                     TIMEOUT 300 SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
 
 add_test(NAME mcp_autostart_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/mcp_autostart_smoke.py)
@@ -950,15 +958,35 @@ add_test(NAME startup_failure_smoke
 set_tests_properties(startup_failure_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300)
 
-# A lost graphics device is a state: the work autosaved at once, a report,
-# every drawing method refused as device_lost, the rest answering
-# (docs/rendering/README.md#a-lost-device), windowed and offscreen.
+# The backstop: a lost device a rebuild cannot save (a second loss within 60 s
+# of a rebuild, or LOBOLE_FAULT=rebuild) is a state: the work autosaved at
+# once, a report, every drawing method refused as device_lost, the rest
+# answering, and Restart (docs/rendering/README.md#a-lost-device), windowed
+# and offscreen.
 add_test(NAME device_loss_smoke
          COMMAND ${XVFB_EXEC} python3
                  ${CMAKE_CURRENT_SOURCE_DIR}/device_loss_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(device_loss_smoke PROPERTIES LABELS "gui;pygui"
                      TIMEOUT 300)
+
+# A lost device is rebuilt in place and the session goes on: screenshot,
+# select_face and a quick still answer on the new device, ping counts the
+# rebuild, and set_settings {gpu_device} answers with where it landed
+# (docs/rendering/README.md#rebuilding-the-device). The offscreen half carries
+# no gui label, so the headless and sanitized suites run it; it skips (77)
+# without a Vulkan device, like offscreen_smoke.
+add_test(NAME device_rebuild_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/device_rebuild_smoke.py
+                 $<TARGET_FILE:designer> offscreen)
+set_tests_properties(device_rebuild_smoke PROPERTIES TIMEOUT 300
+                     SKIP_RETURN_CODE 77 RESOURCE_LOCK gpu)
+add_test(NAME device_rebuild_windowed_smoke
+         COMMAND ${XVFB_EXEC} python3
+                 ${CMAKE_CURRENT_SOURCE_DIR}/device_rebuild_smoke.py
+                 $<TARGET_FILE:designer> windowed)
+set_tests_properties(device_rebuild_windowed_smoke PROPERTIES
+                     LABELS "gui;pygui" TIMEOUT 300)
 
 # An app a test launched dies with the test, SIGKILL included: smoke_app arms
 # LOBOLE_EXIT_WITH_PARENT for every launch (src/app/ParentWatch.h).

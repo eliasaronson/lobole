@@ -36,7 +36,7 @@ Includes are relative to `src/` (`#include "core/Document.h"`).
 | `src/render/` | the Vulkan renderers, `VulkanCommon` (the shared buffer/memory/shader helpers), camera, screenshot, IBL |
 | `src/ui/` | `AppState` and the actions layer, one file per subject (below), plus the panels |
 | `src/remote/` | the JSON-RPC server: one `Remote<Domain>.cpp` per domain plus the dispatcher (below) |
-| `src/app/` | entry points: `main.cpp` (window, Vulkan setup, frame loop), `HeadlessMain.cpp`, `CrashHandler.cpp`, and the ImGui Test Engine GUI suite under `app/guitests/`, one file per domain |
+| `src/app/` | entry points: `main.cpp` (window, frame loop, captures), `GpuOwners.cpp` (the Vulkan device and every renderer, as one table of owners, and its rebuild in place), `HeadlessMain.cpp`, `CrashHandler.cpp`, and the ImGui Test Engine GUI suite under `app/guitests/`, one file per domain |
 | `src/femgpu/` | the Vulkan-compute topology solver |
 | `src/shaders/` | GLSL, compiled to SPIR-V at build time |
 
@@ -58,7 +58,7 @@ stays GPU-free.
 |---|---|---|
 | `designer_core` | `core/`, `cad/`, `common/`, `remote/InstanceRegistry.cpp` | the unit-testable target; carries OpenCASCADE, PlaneGCS, Eigen/Spectra, Netgen (via `fem_mesher`) |
 | `designer_app` | `ui/`, `render/`, `remote/`, the GUI suite, ImGui | everything the app is except its entry points, so `designer_tests` can link the actions layer |
-| `designer` | `main.cpp`, `HeadlessMain.cpp`, `CrashHandler.cpp` | links `designer_app`, `designer_core` and (when built) `fem_gpu` |
+| `designer` | `main.cpp`, `GpuOwners.cpp`, `HeadlessMain.cpp`, `CrashHandler.cpp` | links `designer_app`, `designer_core` and (when built) `fem_gpu` |
 | `fem_gpu` | `src/femgpu/` | Vulkan compute; `LOBOLE_ENABLE_FEM_GPU` |
 | `designer_tests`, `femgpu_tests` | Catch2 | see [Tests](#tests) |
 
@@ -362,8 +362,10 @@ by the same name drift apart without any test noticing:
 - The RPC `MethodDoc` rows and their flags (above).
 - The named views and world axes (`core/Conventions.h`); the light rig's
   placement (`core/LightRig.h`).
-- Scene renderers: `RegisterSceneRenderers()`/`ShutdownSceneRenderers()` in
-  `main.cpp`; icons: `ui/Icons.cpp`; tool sessions: the tool-session registry
+- The GPU owners: `kRows` in `app/GpuOwners.cpp`, every object made on the
+  device, built forward and torn down backward by the start, the exit and a
+  rebuild alike, and `RegisterSceneRenderers()` beside it for the draw
+  order ([rendering](rendering/README.md#rebuilding-the-device)); icons: `ui/Icons.cpp`; tool sessions: the tool-session registry
   that `ViewportInput.cpp` asks through `ToolSessionFor`. Each is checked by
   `test_conventions.cpp`.
 
@@ -521,8 +523,11 @@ by the same name drift apart without any test noticing:
   state dir and checks each of the above.
 - **A lost graphics device writes a report too**, while the process lives:
   `crash::ReportThisSession` makes the same folder a dead session's would
-  (log tail, autosave copies), reason `graphics device lost: …`, and the
-  restart it asks for makes it the next start's notice
+  (log tail, autosave copies). A loss rebuilt in place writes it under
+  `graphics device recovered: …`, evidence the next start never offers as a
+  notice ([rendering](rendering/README.md#rebuilding-the-device)); one that
+  reaches the backstop writes `graphics device lost: …`, and the restart it
+  asks for makes it the next start's notice
   ([rendering](rendering/README.md#a-lost-device)).
 - **A stall** — the main thread not coming round its loop — is reported by
   the frame watchdog (`src/common/Watchdog.{h,cpp}`). Each loop (windowed,
@@ -569,7 +574,7 @@ a desktop launch — which has no terminal — can read it, and exits; it does
 not abort:
 
 - **A startup failure is a value.** Every startup Vulkan call goes through
-  `CheckStartup(step, VkResult)` (`src/app/main.cpp`), which throws a
+  `CheckStartup(step, VkResult)` (`src/app/GpuOwners.cpp`), which throws a
   `startup::StartupError` (`src/app/StartupReport.h`) carrying the step in
   words ("create the Vulkan instance", "set up the swapchain"), the
   result's NAME, the devices seen and each device tried and how it failed;
@@ -614,7 +619,8 @@ not abort:
   `LOBOLE_SAFE_MODE=1` do.
 - **The environment is refused, not guessed**: `LOBOLE_RENDERER`
   (`software|hardware`), `LOBOLE_SAFE_MODE` and `LOBOLE_NO_DIALOG` (`0|1`),
-  and `LOBOLE_FAULT` (`device_create`, `swapchain`,
+  and `LOBOLE_FAULT` (`device_create`, `swapchain`, `rebuild` (a device
+  rebuild in place fails on every rung: the backstop),
   `renderer_init:<mesh|outline|sketch|underlay|field|stock|raytracing>`,
   honoured only with `LOBOLE_ALLOW_DEBUG_CRASH=1`) are each checked at start
   and anything else is exit 2 naming what is accepted. `LOBOLE_FAULT` is how
@@ -671,7 +677,8 @@ not abort:
   `tools/fuzz.py` builds random designs and checks each against a rebuild
   from nothing, a reopen, undo and redo and the Boolean identities
   ([modeling](modeling/README.md#random-designs)).
-- `src/render/` and `app/main.cpp` have no unit tests; they are verified by
+- `src/render/`, `app/main.cpp` and `app/GpuOwners.cpp` have no unit tests;
+  they are verified by
   the GUI suite, the pixel gate and screenshots. Low line coverage there is
   expected.
 

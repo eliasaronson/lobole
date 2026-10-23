@@ -98,10 +98,12 @@ class InternalError(Refused):
 
 
 class DeviceLost(Refused):
-    """The app's graphics device was lost, so a method that draws (a
-    screenshot, a still, a face picked by mesh, a UI action) is refused.
-    The document is intact and every other method still answers; the app
-    asks its user to restart (docs/rendering/README.md#a-lost-device)."""
+    """The app's graphics device was lost and a rebuild in place could not
+    save it (the rebuild failed, or it was lost again within 60 s), so a
+    method that draws (a screenshot, a still, a face picked by mesh, a UI
+    action) is refused. While a rebuild runs, requests wait instead. The
+    document is intact and every other method still answers; the app asks
+    its user to restart (docs/rendering/README.md#a-lost-device)."""
     CODE = "device_lost"
 
 

@@ -3237,7 +3237,7 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("no such exploded view");
     if (state.activeExplodedView == id) {
       state.activeExplodedView = 0;
-      state.syncedDocumentVersion = UINT64_MAX;
+      state.gpu.syncedDocumentVersion = UINT64_MAX;
     }
     state.assembly->BumpVersion();
     return json::object();
@@ -3382,7 +3382,8 @@ std::optional<json> HandleAssemblyRpc(ui::AppState& state, const std::string& m,
       }
       state.explodeFactor = factor;
     }
-    state.syncedDocumentVersion = UINT64_MAX; // display change: force resync
+    state.gpu.syncedDocumentVersion =
+        UINT64_MAX; // display change: force resync
     return json{{"active", state.activeExplodedView},
                 {"factor", state.explodeFactor}};
   }

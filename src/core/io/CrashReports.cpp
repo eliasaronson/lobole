@@ -470,7 +470,8 @@ fs::path LastGoodStartFile(const fs::path& stateDir) {
   return stateDir / "last-good-start";
 }
 
-std::optional<Report> ReportThisSession(const std::string& reason) {
+std::optional<Report> ReportThisSession(const std::string& reason,
+                                        bool recovered) {
   std::lock_guard guard(g_mutex);
   if (!g_session)
     return std::nullopt;
@@ -502,10 +503,16 @@ std::optional<Report> ReportThisSession(const std::string& reason) {
   const std::string collected = Format(std::time(nullptr), "%Y-%m-%d %H:%M:%S");
   WriteFile(dir / "report.txt",
             ReportText(r, "", false, collected,
-                       "There is no stack: the process did not crash. It\n"
-                       "wrote this report when it happened, saved what was\n"
-                       "unsaved, and asked to restart. The tail of\n"
-                       "session.log is what it was doing.\n"));
+                       recovered
+                           ? "There is no stack: the process did not crash. "
+                             "It\nsaved what was unsaved, rebuilt its "
+                             "graphics device in\nplace and carried on; "
+                             "this report is the evidence.\nThe tail of "
+                             "session.log is what it was doing.\n"
+                           : "There is no stack: the process did not crash. "
+                             "It\nwrote this report when it happened, saved "
+                             "what was\nunsaved, and asked to restart. The "
+                             "tail of\nsession.log is what it was doing.\n"));
   WriteFile(dir / "report.json", ToJson(r).dump(2) + "\n");
   PruneReports(stateDir, kKeepReports);
   LOG_WARN("This session's report ({}) is in {}", reason, dir.string());
@@ -522,7 +529,8 @@ size_t EarlyDeathsInARow(const std::vector<Report>& reports,
       break;
     // A device loss is reported by a session that drew; a report of ours
     // that is not a death does not count either way.
-    if (r.reason.rfind(kDeviceLostReason, 0) == 0)
+    if (r.reason.rfind(kDeviceLostReason, 0) == 0 ||
+        r.reason.rfind(kDeviceRecoveredReason, 0) == 0)
       break;
     ++count;
   }

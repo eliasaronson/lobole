@@ -2065,7 +2065,7 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
     host.Require(id);
     const bool on = p.value("on", true);
     state.topoGhostStudyId = on ? id : 0;
-    state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
+    state.gpu.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
     return json{{"study", id}, {"on", on}};
   }
   if (m == "export_topo_stl") {

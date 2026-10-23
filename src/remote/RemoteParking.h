@@ -16,6 +16,9 @@
 
 #include <nlohmann/json.hpp>
 
+#include <memory>
+#include <string>
+
 namespace ui {
 struct AppState;
 }
@@ -39,5 +42,12 @@ public:
   virtual Next Poll(ui::AppState& state, const RpcParams& params,
                     nlohmann::json& answer) = 0;
 };
+
+// set_settings {gpu_device} on an instance that renders: applied, then
+// answered once the frame boundary has rebuilt the device onto it (or found
+// it need not). remote/RemoteDispatch.cpp.
+std::unique_ptr<Parking> ParkSettingsRequest(ui::AppState& state,
+                                             const std::string& method,
+                                             RpcParams& params);
 
 } // namespace remote

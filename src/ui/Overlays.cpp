@@ -145,7 +145,7 @@ void DrawElementNameOverlay(AppState& state) {
     return;
 
   // Resolve the mesh back to its Body, then that face's element name.
-  const auto& meshes = state.documentMeshes;
+  const auto& meshes = state.gpu.documentMeshes;
   const auto it = std::find_if(
       meshes.begin(), meshes.end(),
       [&](const DocumentRenderMesh& m) { return m.meshId == face->meshId; });

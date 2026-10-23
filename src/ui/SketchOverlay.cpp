@@ -414,7 +414,7 @@ std::optional<ElementRef> EdgeElementRef(AppState& state, uint32_t meshId,
                                          uint32_t edgeIndex) {
   if (!state.document) // edge picking is a part-only flow; assembly tab: no-op
     return std::nullopt;
-  const auto& meshes = state.documentMeshes;
+  const auto& meshes = state.gpu.documentMeshes;
   const auto it = std::find_if(
       meshes.begin(), meshes.end(),
       [&](const DocumentRenderMesh& m) { return m.meshId == meshId; });
@@ -462,7 +462,7 @@ std::optional<ElementRef> RefOnBlendInput(AppState& state,
   // The displayed edge's interior midpoint anchors the geometric fallback — an
   // arc-length midpoint, NOT poly[size/2] (an endpoint for a 2-point straight
   // edge; see PolylineArcMidpoint).
-  const auto& meshes = state.documentMeshes;
+  const auto& meshes = state.gpu.documentMeshes;
   const auto mit = std::find_if(
       meshes.begin(), meshes.end(),
       [&](const DocumentRenderMesh& m) { return m.meshId == meshId; });
@@ -553,7 +553,7 @@ void AppendEdgePickPrimitives(AppState& state, std::vector<PrimVertex>& out) {
           ? state.document->CachedBodiesAfter(filletIndex - 1)
           : nullptr;
 
-  for (const DocumentRenderMesh& m : state.documentMeshes) {
+  for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
     for (size_t e = 0; e < m.edgePolylines.size(); e++) {
       const auto& poly = m.edgePolylines[e];
       if (poly.size() < 2)

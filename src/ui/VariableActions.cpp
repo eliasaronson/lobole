@@ -127,7 +127,8 @@ void SyncProjectScope(AppState& state) {
       fem::RestampByInputs(*d);
     }
   }
-  state.syncedDocumentVersion = UINT64_MAX; // a cross-tab edit; force resync
+  state.gpu.syncedDocumentVersion =
+      UINT64_MAX; // a cross-tab edit; force resync
 }
 
 const Parameter* FindProjectParameter(const AppState& state,

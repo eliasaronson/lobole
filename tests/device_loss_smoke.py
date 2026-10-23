@@ -2,14 +2,18 @@
 # SPDX-FileCopyrightText: Elias Högbom Aronsson and Loböle contributors
 # SPDX-License-Identifier: AGPL-3.0-or-later
 
-"""A lost graphics device is a state, not an abort
-(docs/rendering/README.md#a-lost-device).
+"""The backstop: a lost graphics device that a rebuild cannot save is a state,
+not an abort (docs/rendering/README.md#a-lost-device).
 
-`debug_fault {kind: "device_lost"}` marks the device lost as the frame loop
-does on VK_ERROR_DEVICE_LOST. Then, in the windowed app (--hidden, on the
-display tools/xvfb-exec.sh gives) and in --offscreen, each in its own scratch
-XDG_STATE_HOME (the autosave and the report are the point) with
-LOBOLE_NO_DIALOG=1 so the Restart / Quit box is not shown:
+A loss is first rebuilt in place
+(docs/rendering/README.md#rebuilding-the-device; tests/device_rebuild_smoke.py). This judges what happens when that is
+not enough: a SECOND `debug_fault {kind: "device_lost"}` within 60 s of the
+rebuild (a device that dies again on its first frames), and a rebuild that
+fails (LOBOLE_FAULT=rebuild fails its device creation on every rung). In the
+windowed app (--hidden, on the display tools/xvfb-exec.sh gives) and in
+--offscreen, each in its own scratch XDG_STATE_HOME (the autosave and the
+report are the point) with LOBOLE_NO_DIALOG=1 so the Restart / Quit box is
+not shown:
 
   - the edit made before it is on disk in the autosave, at once, though the
     interval is an hour;
@@ -18,8 +22,11 @@ LOBOLE_NO_DIALOG=1 so the Restart / Quit box is not shown:
   - every other method still answers: get_state, ping (renderer.lost and its
     reason), an edit;
   - crash_reports lists a report whose reason is "graphics device lost",
-    holding that autosave;
+    holding that autosave (and, after a rebuild, one "graphics device
+    recovered");
   - the process is alive, and a SIGTERM still ends it cleanly (no marker).
+
+Then the box's Restart, reached through LOBOLE_FAULT=rebuild.
 
 Usage: device_loss_smoke.py <path-to-designer-binary>
 """
@@ -56,9 +63,13 @@ def refused_as_lost(call, what):
     raise AssertionError(f"{what} was not refused")
 
 
-def one(binary, mode):
-    print(f"device loss, {mode}:", flush=True)
+def one(binary, mode, how):
+    """`how`: "twice" (a rebuild, then a second loss inside the window) or
+    "fault" (LOBOLE_FAULT=rebuild: the rebuild itself fails)."""
+    print(f"device loss, {mode}, {how}:", flush=True)
     env = dict(os.environ, LOBOLE_ALLOW_DEBUG_CRASH="1", LOBOLE_NO_DIALOG="1")
+    if how == "fault":
+        env["LOBOLE_FAULT"] = "rebuild"
     # smoke_app's own scratch dirs, never an inherited real one: the autosave
     # and the report land there.
     env.pop("XDG_STATE_HOME", None)
@@ -75,6 +86,11 @@ def one(binary, mode):
             "width": 10, "depth": 10, "height": 10})
         sidecar = os.path.join(state, "unsaved.autosave.json")
         expect(not os.path.exists(sidecar), "nothing autosaved yet (1 h)")
+        if how == "twice":
+            d.call("debug_fault", kind="device_lost")
+            ping = d.call("ping")["renderer"]
+            expect(ping["rebuilds"] == 1 and not ping["lost"],
+                   "the first loss is rebuilt in place")
         r = d.call("debug_fault", kind="device_lost")
         expect(r["lost"], "debug_fault marks the device lost")
 
@@ -100,6 +116,10 @@ def one(binary, mode):
         expect(ping["renderer"]["lost"] and
                "debug_fault" in ping["renderer"]["lost_reason"],
                "ping says the renderer is lost, and why")
+        why = ping["renderer"]["lost_reason"]
+        expect(("lost again" in why) if how == "twice"
+               else ("rebuilding the device failed" in why),
+               f"and why the rebuild did not save it: {why}")
         expect(len(d.call("get_state")["features"]) >= 1,
                "get_state still answers")
         d.call("add_feature", feature={
@@ -113,6 +133,10 @@ def one(binary, mode):
         lost = [x for x in reports
                 if x["reason"].startswith("graphics device lost")]
         expect(len(lost) == 1, f"one report of the loss ({len(reports)})")
+        recovered = [x for x in reports
+                     if x["reason"].startswith("graphics device recovered")]
+        expect(len(recovered) == (1 if how == "twice" else 0),
+               f"{len(recovered)} report(s) of a recovered loss")
         copy = os.path.join(lost[0]["path"], "autosave",
                             "unsaved.autosave.json")
         expect(os.path.exists(copy) and "BeforeTheLoss" in read(copy),
@@ -139,6 +163,7 @@ def restart(binary):
         f.write(f"#!/bin/sh\nprintf '%s\\n' \"$@\" > '{asked}'\nexit 0\n")
     os.chmod(os.path.join(bindir, "zenity"), 0o755)
     env = dict(os.environ, LOBOLE_ALLOW_DEBUG_CRASH="1", LOBOLE_NO_DIALOG="0",
+               LOBOLE_FAULT="rebuild",  # straight to the backstop
                PATH=bindir)  # the stand-in alone: no real box on the display
     env.pop("XDG_STATE_HOME", None)
     env.pop("XDG_CONFIG_HOME", None)
@@ -174,9 +199,11 @@ def restart(binary):
 
 def main():
     binary = sys.argv[1]
-    one(binary, "offscreen")
+    one(binary, "offscreen", "twice")
+    one(binary, "offscreen", "fault")
     if os.environ.get("DISPLAY"):
-        one(binary, "windowed")
+        one(binary, "windowed", "twice")
+        one(binary, "windowed", "fault")
         restart(binary)
     else:
         print("  skip: the windowed half needs a display (tools/xvfb-exec.sh)")

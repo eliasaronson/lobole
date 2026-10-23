@@ -376,8 +376,13 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "reason (which, and how), forced (LOBOLE_RENDERER: software|hardware, "
      "or empty), ray_tracing (the path-traced still is available), missing "
      "(renderers whose initialization failed), lost (the graphics device "
-     "was lost: every method that draws is refused as device_lost), "
-     "lost_reason}. `safe_mode` is true in a window started in safe mode. "
+     "was lost and stays lost -- the rebuild in place failed, or it died "
+     "again within 60 s of the last one: every method that draws is refused "
+     "as device_lost), lost_reason, rebuilds (how often the device was "
+     "rebuilt in place this session: a lost device, or a gpu_device change; "
+     "docs/rendering/README.md#rebuilding-the-device), last_rebuild "
+     "({reason: device_lost|gpu_preference, from, to, ms}, or null)}. "
+     "`safe_mode` is true in a window started in safe mode. "
      "`occ` is the "
      "OpenCASCADE version this build was compiled against. `features` "
      "is what this BUILD contains (cam, cam_adaptive, fem, mesher) and "
@@ -428,8 +433,11 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "{this_thread, worker_thread}, each the failure it became, where a "
      "crash would mean the scope did not catch it), or device_lost (marks "
      "the graphics device lost as the frame loop does on "
-     "VK_ERROR_DEVICE_LOST: the work is autosaved, a report written, and "
-     "every method that draws refused as device_lost; answers {lost, "
+     "VK_ERROR_DEVICE_LOST: the next frame boundary rebuilds the device in "
+     "place -- requests wait meanwhile, and ping's renderer.rebuilds counts "
+     "it -- unless it is the second loss within 60 s or the rebuild fails "
+     "(LOBOLE_FAULT=rebuild), when the work is autosaved, a report written, "
+     "and every method that draws refused as device_lost; answers {lost, "
      "lost_reason}). Refused unless the app "
      "was started with LOBOLE_ALLOW_DEBUG_CRASH=1 in its environment.",
      "kind:'out_of_range'|'json_out_of_range'|'bad_optional_access'|"
@@ -598,7 +606,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "zoom_to_cursor:bool"},
     {"set_settings",
      "Change user preferences {key: value, ...}; persists (in safe mode, "
-     "for the session only: settings.json is not written).",
+     "for the session only: settings.json is not written). A gpu_device "
+     "that moves the first rung of the device ladder rebuilds the device in "
+     "place (docs/rendering/README.md#rebuilding-the-device): the answer "
+     "waits until that has run -- after a path-traced render or a motion "
+     "video in flight -- and carries `renderer` (ping's) saying where it "
+     "landed.",
      "*", remote::NotInBatch},
     {"get_keymap",
      "The keyboard bindings (docs/ui/keybindings.md): every command with "
@@ -884,6 +897,100 @@ json FaultInOccScope() {
   std::thread([&] { worker = fault(); }).join();
   out["worker_thread"] = worker;
   return out;
+}
+
+// ping's `renderer`, which set_settings {gpu_device} answers with too.
+json RendererJson(const ui::AppState& state) {
+  const ui::AppState::RendererStatus& r = state.renderer;
+  json last = nullptr;
+  if (r.rebuilds > 0)
+    last = {{"reason", r.lastRebuildReason},
+            {"from", r.lastRebuildFrom},
+            {"to", r.lastRebuildTo},
+            {"ms", r.lastRebuildMs}};
+  return {{"device", r.device},
+          {"type", r.type},
+          {"software", r.software},
+          {"fallback", r.fallback},
+          {"reason", r.reason},
+          {"forced", r.forced},
+          {"ray_tracing", r.rayTracing},
+          {"missing", r.missing},
+          // `lost` is the lost STATE: a loss being rebuilt is not one, and no
+          // request is answered while it is (the queue waits).
+          {"lost", r.lost && r.backstop},
+          {"lost_reason", r.lost ? r.lostReason : std::string()},
+          {"rebuilds", r.rebuilds},
+          {"last_rebuild", last}};
+}
+
+// set_settings, applied: validated first, so a rejected value leaves
+// nothing half-applied, and saved before it is applied.
+json ApplySettingsRequest(ui::AppState& state, const json& raw) {
+  const settings::Settings before = state.settings;
+  std::string error;
+  if (!settings::ApplyJson(state.settings, raw, &error))
+    throw std::runtime_error(error);
+  // Persist NOW rather than arming the window's debounce: that debounce is
+  // pumped by the GUI main loop, which a --headless instance does not run,
+  // so a scripted change would apply and then never reach the file. And
+  // BEFORE applying: a save that fails is refused, and a refused call
+  // leaves the preferences as they were, not changed for this session only.
+  if (!settings::Save(state.settings, state.settingsSaved, &error)) {
+    state.settings = before;
+    throw std::runtime_error("could not save settings: " + error);
+  }
+  ui::ApplySettings(state);
+  // The font atlas is rebuilt between frames, on request: ApplySettings
+  // only moves the number, so a scripted font size changed nothing on
+  // screen until something else asked.
+  if (before.uiFontScale != state.settings.uiFontScale)
+    state.fontRebuildRequested = true;
+  state.settingsSaved = state.settings;
+  state.settingsDirtyAt = -1.0;
+  return settings::ToJson(state.settings);
+}
+
+namespace {
+// set_settings {gpu_device} on an instance that renders: applied at once,
+// and answered once the frame boundary has acted on it -- rebuilt onto the
+// device the ladder now puts first, found it is the same device, or (a
+// rebuild that failed) reached the backstop
+// (docs/rendering/README.md#rebuilding-the-device).
+class SettingsParking final : public Parking {
+public:
+  explicit SettingsParking(json answer) : m_answer(std::move(answer)) {}
+  Next Poll(ui::AppState& state, const RpcParams& params,
+            json& answer) override {
+    (void)params.raw(); // every key was read when it was applied
+    const ui::AppState::RendererStatus& r = state.renderer;
+    if (!r.backstop && (r.appliedPreference != state.settings.gpuDevice ||
+                        r.preferenceWaiting || r.lost))
+      return Next::Wait;
+    answer = m_answer;
+    answer["renderer"] = RendererJson(state);
+    return Next::Answer;
+  }
+
+private:
+  json m_answer;
+};
+} // namespace
+
+std::unique_ptr<Parking> ParkSettingsRequest(ui::AppState& state,
+                                             const std::string& method,
+                                             RpcParams& params) {
+  if (method != "set_settings" || state.renderer.device.empty() ||
+      !params.raw().is_object() || !params.raw().contains("gpu_device"))
+    return nullptr;
+  // A value the handler would refuse is left to it: nothing parks, nothing
+  // changes, and the refusal is its.
+  settings::Settings probe = state.settings;
+  std::string error;
+  if (!settings::ApplyJson(probe, params.raw(), &error))
+    return nullptr;
+  return std::make_unique<SettingsParking>(
+      ApplySettingsRequest(state, params.raw()));
 }
 } // namespace remote
 
@@ -1429,17 +1536,7 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // (docs/rendering/README.md#the-device-ladder): a fallback, a
             // software device, a renderer missing, a lost device are each
             // the first thing to know about a picture that looks wrong.
-            {"renderer",
-             {{"device", state.renderer.device},
-              {"type", state.renderer.type},
-              {"software", state.renderer.software},
-              {"fallback", state.renderer.fallback},
-              {"reason", state.renderer.reason},
-              {"forced", state.renderer.forced},
-              {"ray_tracing", state.renderer.rayTracing},
-              {"missing", state.renderer.missing},
-              {"lost", state.renderer.lost},
-              {"lost_reason", state.renderer.lostReason}}},
+            {"renderer", remote::RendererJson(state)},
             {"safe_mode", state.safeMode.active},
             // Which OpenCASCADE answers, for the same reason: the kernel
             // behind a wrong Boolean is the first question about it, and a
@@ -1590,17 +1687,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       return remote::FaultInOccScope();
     if (kind == "device_lost") {
       // Marks the device lost as the frame loop does on
-      // VK_ERROR_DEVICE_LOST; the loop that sees it next saves the work,
-      // writes the report and asks to restart
-      // (docs/rendering/README.md#a-lost-device).
+      // VK_ERROR_DEVICE_LOST; the frame boundary that sees it next rebuilds
+      // the device in place, or reaches the backstop
+      // (docs/rendering/README.md#rebuilding-the-device).
       if (state.renderer.device.empty())
         throw std::runtime_error("debug_fault device_lost needs a renderer: "
                                  "this instance is --headless");
-      if (!state.renderer.lost) {
-        state.renderer.lost = true;
-        state.renderer.lostReason =
-            "VK_ERROR_DEVICE_LOST from debug_fault, on purpose";
-      }
+      ui::InjectDeviceLoss(state, "debug_fault");
       return {{"lost", true}, {"lost_reason", state.renderer.lostReason}};
     }
     if (kind == "nonfinite")
@@ -1787,8 +1880,8 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       // so an index would read back a plausible id for superseded geometry —
       // select_face would then pick a real face that is not this one. An
       // absent key is a loud failure; a wrong id is a silent one.
-      if (renderMeshesCurrent && i < state.documentMeshes.size()) {
-        entry["mesh"] = state.documentMeshes[i].meshId;
+      if (renderMeshesCurrent && i < state.gpu.documentMeshes.size()) {
+        entry["mesh"] = state.gpu.documentMeshes[i].meshId;
       }
       bodies.push_back(entry);
     }
@@ -2397,29 +2490,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     return j;
   }
   if (m == "set_settings") {
-    // Validates first: a rejected value leaves nothing half-applied.
-    const settings::Settings before = state.settings;
-    std::string error;
-    if (!settings::ApplyJson(state.settings, p.raw(), &error))
-      throw std::runtime_error(error);
-    // Persist NOW rather than arming the window's debounce: that debounce is
-    // pumped by the GUI main loop, which a --headless instance does not run,
-    // so a scripted change would apply and then never reach the file. And
-    // BEFORE applying: a save that fails is refused, and a refused call
-    // leaves the preferences as they were, not changed for this session only.
-    if (!settings::Save(state.settings, state.settingsSaved, &error)) {
-      state.settings = before;
-      throw std::runtime_error("could not save settings: " + error);
-    }
-    ui::ApplySettings(state);
-    // The font atlas is rebuilt between frames, on request: ApplySettings
-    // only moves the number, so a scripted font size changed nothing on
-    // screen until something else asked.
-    if (before.uiFontScale != state.settings.uiFontScale)
-      state.fontRebuildRequested = true;
-    state.settingsSaved = state.settings;
-    state.settingsDirtyAt = -1.0;
-    return settings::ToJson(state.settings);
+    // rpc-params: opaque
+    // Not parked: --headless, or no gpu_device in it (ParkSettingsRequest).
+    return remote::ApplySettingsRequest(state, p.raw());
   }
   if (m == "get_keymap") {
     const keymap::Keymap& keys = state.settings.keys;
@@ -2560,9 +2633,9 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
         for (const auto& [idx, name] : bodies[i].elementMap.names) {
           if (name != el)
             continue;
-          if (i >= state.documentMeshes.size())
+          if (i >= state.gpu.documentMeshes.size())
             throw std::runtime_error("body has no render mesh yet");
-          mesh = state.documentMeshes[i].meshId;
+          mesh = state.gpu.documentMeshes[i].meshId;
           face = static_cast<uint32_t>(idx);
           found = true;
           break;

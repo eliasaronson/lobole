@@ -20,7 +20,8 @@ Topic pages:
 
 | what | where |
 |---|---|
-| Vulkan instance/device, the device ladder, swapchain, render pass, frame loop (and its lost-device state), construction and teardown of every renderer, `--offscreen` loop, screenshot and quick-render capture | `src/app/main.cpp` |
+| Vulkan instance/device, the device ladder, swapchain, render pass, construction and teardown of every renderer (the owner table), the rebuild in place and its backstop | `src/app/GpuOwners.{h,cpp}` |
+| frame loop (and its lost state), swapchain recreate, `--offscreen` loop, screenshot and quick-render capture | `src/app/main.cpp` |
 | the ladder's order, the startup failure's words and native box, the restart | `src/app/StartupReport.{h,cpp}` |
 | shared Vulkan helpers (`vkutil::CreateBuffer`, `CreateReadbackBuffer`, `LoadShaderModule`, single-time commands, allocation count) | `src/render/VulkanCommon.{h,cpp}` |
 | the per-frame contract | `src/render/SceneRenderer.h` |
@@ -35,15 +36,16 @@ Topic pages:
 | picking | `src/cad/FaceSelector.*`, `src/ui/SelectionPipeline.cpp` |
 | shaders | `src/shaders/*.{vert,frag,glsl}`, compiled by glslc at build time |
 
-There is no `VulkanContext` object: the device, queue and pools are globals in
-`main.cpp`. Every buffer and image takes its own `vkAllocateMemory` (no
+There is no `VulkanContext` object: the device, queue and pools are globals
+defined in `app/GpuOwners.cpp` and declared in its header, which `main.cpp`
+reads them through. Every buffer and image takes its own `vkAllocateMemory` (no
 sub-allocator); the startup log prints the device's
 `maxMemoryAllocationCount` beside the selected GPU because the Vulkan floor
 for it is 4096.
 
 ## The device ladder
 
-`main.cpp` scores every physical device: discrete 2, integrated 1, other 0,
+`app/GpuOwners.cpp` scores every physical device: discrete 2, integrated 1, other 0,
 and -1 for a device that cannot present to the window (asked through a
 throwaway surface, because `glfwGetPhysicalDevicePresentationSupport` can
 answer yes for a device that then fails). `startup::DeviceLadder`
@@ -51,8 +53,12 @@ answer yes for a device that then fails). `startup::DeviceLadder`
 the `gpu_device` preference names (by substring; Preferences,
 `set_settings`) or else the best score, then the other hardware by score,
 then the software devices (`VK_PHYSICAL_DEVICE_TYPE_CPU`: Mesa's lavapipe,
-llvmpipe). Each rung is tried in turn: `vkCreateDevice`, and in the window
-its surface and swapchain (`SetupVulkanWindow`). A rung that fails is logged with its
+llvmpipe). Each rung is tried in turn: the owner table's rung rows,
+`vkCreateDevice` and, in the window, its surface and swapchain
+(`SetupVulkanWindow`). A rebuild after a loss puts the lost device on the
+first rung and then the usual order (`DeviceLadder`'s `first`), since the
+spec's lost state belongs to the logical device and the physical one is
+usually fine. A rung that fails is logged with its
 result (`Rendering: NVIDIA …: VK_ERROR_INITIALIZATION_FAILED at device
 creation; trying the next device`), taken down, and the next tried; when no
 rung holds, start-up ends with exit code 3 and the report of
@@ -65,7 +71,8 @@ once, at the first frame ("Rendering in software (llvmpipe)", with which
 device failed and how), a lasting notice at the right of the menu bar
 (`Software rendering` or `Fallback renderer`, the reason in its tooltip),
 rows in Help ▸ About, and `ping`'s `renderer` (`{device, type, software,
-fallback, reason, forced, ray_tracing, missing, lost, lost_reason}`). A
+fallback, reason, forced, ray_tracing, missing, lost, lost_reason, rebuilds,
+last_rebuild}`). A
 machine whose only usable device IS a software one (CI, a VM, a desktop on
 Xvfb) is not a fallback: the menu bar says `Software rendering`, and there
 is no modal. A preference that cannot be honoured is said in the log and in
@@ -94,11 +101,19 @@ device either way.
 ## A lost device
 
 `VK_ERROR_DEVICE_LOST` (a Windows TDR, a driver reset, an eGPU unplugged)
-is a state, not an abort: `AppState::renderer.lost`, set by the frame loop's acquire, fence, submit
-and present (`FrameOk`), by ImGui's own calls, and by every one-shot submit
-in the renderers, which pass their results through `vkutil::NoteResult`
-(`src/render/VulkanCommon.h`) and leave the loss
-for the loop to see (`vkutil::DeviceLostSeen`). From then on:
+is a state, not an abort: `AppState::renderer.lost`, set by
+`ui::MarkDeviceLost` alone -- from the frame loop's acquire, fence, submit
+and present (`FrameOk`), from ImGui's own calls (`check_vk_result`), from a
+failed swapchain recreate, and from every one-shot submit in the renderers,
+which pass their results through `vkutil::NoteResult`
+(`src/render/VulkanCommon.h`) and leave the loss for the loop to see
+(`vkutil::DeviceLostSeen`). Nothing is recorded, submitted or presented
+after it, and the next frame boundary [rebuilds the device in
+place](#rebuilding-the-device). What follows here is the **backstop**, the
+state a loss ends in when the rebuild cannot save it: the rebuild fails (no
+rung holds, the mesh renderer will not start, it throws), or the device dies
+again within 60 s of the last rebuild (`startup::JudgeLoss`). Then
+`renderer.backstop`, and:
 
 - nothing is recorded, submitted or presented, and no renderer is called
   (`ui::SyncRenderersToDocument` returns at once);
@@ -111,8 +126,9 @@ for the loop to see (`vkutil::DeviceLostSeen`). From then on:
 - the document is CPU state and intact, so every dirty document is
   autosaved at once, whatever the interval (or with autosave off), and a
   report folder is written for this session (`crash::ReportThisSession`,
-  reason `graphics device lost: VK_ERROR_DEVICE_LOST at the frame fence`,
-  with the log tail and the autosave copies);
+  reason `graphics device lost: VK_ERROR_DEVICE_LOST at the frame fence; it
+  was lost again 3 s after the last rebuild`, with the log tail and the
+  autosave copies);
 - the window shows a native box (`startup::Question`: zenity, kdialog or
   `MessageBoxW`, on its own process or thread so the remote goes on): what
   happened, that the work is saved, **Restart** or **Quit**. Restart
@@ -120,11 +136,9 @@ for the loop to see (`vkutil::DeviceLostSeen`). From then on:
   its arguments plus `--after-device-loss`, after letting go of the port and
   the session marker; the new start makes that report the crash notice,
   which reads "Loböle restarted after its graphics device stopped working"
-  and offers Recover unsaved work. The device is never rebuilt in place: a
-  restart is the one recovery path, and it is the start path every launch
-  already exercises. Under `LOBOLE_NO_DIALOG=1`, or with a terminal on
-  stderr, there is no box: the message goes to stderr and the app serves on
-  until its window is closed.
+  and offers Recover unsaved work. Under `LOBOLE_NO_DIALOG=1`, or with a
+  terminal on stderr, there is no box: the message goes to stderr and the
+  app serves on until its window is closed.
 
 `--offscreen` has no window to restart: it saves the work, writes the
 report, and serves on with every capture refused; `ping` says
@@ -136,9 +150,139 @@ meanwhile. Any other negative result in the frame loop still aborts — a
 crash report, with the result's name on stderr.
 
 `debug_fault {kind: "device_lost"}` (with `LOBOLE_ALLOW_DEBUG_CRASH=1`)
-marks the device lost as the frame loop would; `tests/device_loss_smoke.py`
-checks the autosave, the refusals, the report and the restart through it,
-windowed and offscreen.
+marks the device lost as the frame loop would (`ui::InjectDeviceLoss`);
+`LOBOLE_FAULT=rebuild` fails the rebuild's device creation on every rung.
+`tests/device_loss_smoke.py` reaches the backstop both ways -- a second
+loss inside the window, and the fault -- and checks the autosave, the
+refusals, the report and the restart, windowed and offscreen.
+
+## Rebuilding the device
+
+The document is CPU state and survives a loss intact; only the Vulkan
+objects are gone, and they are made again in place. The spec's [Lost
+Device](https://registry.khronos.org/vulkan/specs/latest/html/vkspec.html#devsandqueues-lost-device)
+section is what makes that sound: the lost state belongs to the logical
+device; the commands that wait indefinitely return in finite time on it;
+destroying objects and freeing memory remain valid; and `vkCreateDevice`
+answering `VK_ERROR_DEVICE_LOST` means the physical device is lost too.
+
+**One owner table.** The device and everything made on it are rows of
+`kRows` in `src/app/GpuOwners.cpp`, `{name, mode, rung, create, destroy}` in
+creation order: the logical device with its queue and pools; the window's
+surface, swapchain, depth and MSAA images and depth render pass, or
+`--offscreen`'s render pass; ImGui's backends; `IBLTextures`;
+`ShadowRenderer`; `GpuTimer`; `SSAORenderer`; the six scene renderers;
+`FaceSelector` (no Vulkan handle, but its pick data is keyed on mesh ids);
+`RayTracingRenderer`; the sky's maps. `gpuowners::Build` walks it forward
+-- the rung rows along [the device ladder](#the-device-ladder), then the
+rest -- and `gpuowners::Teardown` walks back what was made; the start and
+the exit are those two walks, and a rebuild is the two back to back, so the
+rebuild path is the start path. The instance and its debug-report callback
+stay unless the instance can no longer list a device, which remakes them.
+
+ImGui's GLFW backend is in the same row as its Vulkan backend: the Vulkan
+backend's `Shutdown` destroys every viewport's platform data, the main
+viewport's GLFW window among them (`DestroyPlatformWindows`), so the two go
+and come back together. The ImGui context, its windows, docking, the font
+atlas's CPU data and the test engine are never touched. The test engine
+restores a test's whole `ImGuiIO` when the test ends, backend pointers
+included, so `gpuowners::KeepImGuiBackends` points them back at the current
+backends before each frame records (a rebuild inside a GUI test or a remote
+`ui_action` would otherwise draw through freed ones).
+
+**Two triggers, and only two.** `RequestDeviceRebuild` is called with
+`DeviceLost`, when `renderer.lost` is set, or `GpuPreference`, when the
+`gpu_device` preference puts another device on the ladder's first rung.
+Nothing else rebuilds: not a lost surface, not a failed swapchain recreate
+(each retried, as above), not out-of-memory, a renderer that fails to
+initialise, a slow frame or a watchdog stall.
+
+**At a frame boundary**, `gpuowners::AtFrameBoundary`, called by the
+windowed loop after the previous present and before `glfwPollEvents` and
+`ImGui_ImplVulkan_NewFrame`, and by the `--offscreen` tick before its
+requests. A loss seen inside a frame only sets the flag; that frame's ImGui
+CPU side finishes and nothing is submitted. Remote requests wait in the
+queue meanwhile (`RemoteServer::ProcessPending` holds it while
+`renderer.lost` and not the backstop), so a caller never sees `device_lost`
+from a loss that is being rebuilt. A minimised window, which cannot make a
+swapchain, waits until it has an extent. The rebuild, in order, under the
+watchdog label "rebuilding the graphics device":
+
+1. the autosave flushed (`gpuowners::FlushAutosaveNow`);
+2. a path-traced render in flight ended, "the graphics device was rebuilt;
+   run it again" (`ui::EndRendersForRebuild`); a motion video ends itself on
+   `renderer.rebuilds`; a quick still's encode, CAM and FEM jobs are CPU
+   work and carry on;
+3. the tessellation caches' assets released against the old renderers
+   (`ui::ReleaseGpuProjection`; their CPU meshes stay, the next sync
+   uploads them again) and every `AppState` pointer into the renderers
+   nulled;
+4. `vkDeviceWaitIdle`, its `VK_ERROR_DEVICE_LOST` expected and ignored (as
+   every wait during teardown is: `g_CollectVkErrors`), and the table
+   backward;
+5. the physical devices enumerated again and the ladder walked, the lost
+   device first for `DeviceLost`, the usual order for `GpuPreference`; the
+   table forward; `ui::ForgetGpuProjection` (`state.gpu = {}` and the
+   pointers of the new `RendererSet`, through the function the start uses);
+   the renderers sized from the framebuffer (`Boundary::afterBuild`, which
+   the start runs too); the outline mode carried over.
+
+Landing below the first rung is announced as the start announces it: the
+fallback modal again, the menu bar, About. `ping`'s `renderer` gains
+`rebuilds` and `last_rebuild {reason, from, to, ms}`; the menu bar says
+"Graphics device restarted" for 20 s; About lists the rebuilds. A recovered
+loss writes its report under the reason `graphics device recovered`, which
+the next start never offers as a recovery notice.
+
+**Every belief about the GPU is forgotten.** The `AppState` fields that name
+something a renderer holds are one struct, `AppState::GpuProjection gpu`:
+`syncedDocumentVersion`, `documentMeshes`, the section caps, the topology
+ghost and iso-surface, the fixtures, the geometry-delta overlay, the
+fastener and bearing ghosts and their keys, the field overlay's hidden
+bodies and key, the CAM stock's drawn revision and age and the cutter's
+instance, the ray-traced scene's bounds. `ForgetGpuProjection` is
+`state.gpu = {}`; the document is then projected again the way it always is
+-- the windowed loop on its next frame, `--offscreen` lazily, because
+`RenderMeshesCurrent` answers false. Underlay textures, the CAM stock mesh
+and the FEM field are rebuilt from their CPU sources by the same stamps; the
+render-quality targets (shadow-map size, SSAO tier) and the lights by the
+per-frame code that applies them. `MeshRenderer` and `OutlineRenderer` start
+their ids above every id an earlier renderer in the process handed out
+(`s_idFloor`), so an id the gate below missed names nothing in the new
+renderers -- a no-op, never an alias -- and a client that kept a
+`bodies[].mesh` from before the rebuild reads `get_state` again.
+
+**The backstop.** A rebuild that finds no rung, whose mesh renderer fails,
+or that throws, and a second `DeviceLost` within 60 s of the last rebuild
+(a device that dies again on its first frames), become [the lost
+state](#a-lost-device). `LOBOLE_FAULT=rebuild` fails the rebuild's device
+creation on every rung, so it is testable.
+
+**The preference is a rebuild.** `gpu_device` is a Live setting
+([settings](../ui/settings.md#the-gpu-choice)). A change rebuilds only when
+the ladder's first rung differs from the device in use, and waits while a
+path-traced render, a motion video or a test-engine capture holds the
+device (`renderer.preferenceWaiting`; the Preferences row says "Switches
+when the render finishes"). `set_settings {gpu_device}` holds its answer
+(a parked request, `remote::ParkSettingsRequest`) until the boundary has
+acted on it, and answers with `renderer` saying where it landed.
+
+**The compute device is not the render device.** femgpu's `ComputeContext`
+makes its own `VkDevice` per run and is outside the table: it never
+triggers or waits for a render rebuild. Its losses are its own
+([topopt](../topopt/README.md#the-gpu-solver)).
+
+The gates, in `tests/test_conventions.cpp`: `RequestDeviceRebuild` has
+exactly the two calls; `MarkDeviceLost` is called only beside a
+`VK_ERROR_DEVICE_LOST` test or `DeviceLostSeen` (and from
+`InjectDeviceLoss`, whose callers are `debug_fault` and the GUI tests);
+every file that calls `vkCreate*`, `vkAllocate*` or `ImGui_ImplVulkan_*` is a
+row's file or a named transient user (`Screenshot.cpp`, `FrameStream.cpp`
+behind the one-slice `ViewportFrameCapture`, `VulkanCommon`'s helpers, and
+`main.cpp`'s frame loop, which remakes the window row's swapchain in place);
+every scene renderer has a row; and an instance, mesh-id or "drawn" field in
+`AppState.h` outside `GpuProjection` fails. `src/femgpu/` is outside it by
+name: its own instance and device.
 
 ## A frame
 
@@ -177,7 +321,8 @@ implement it: `MeshRenderer`, `FieldRenderer`, `StockRenderer`,
 (`ShadowRenderer`, `SSAORenderer`) and the path tracer are not scene
 renderers.
 
-`main.cpp` holds two lists and nothing else enumerates renderers:
+`app/GpuOwners.cpp` holds the two lists and nothing else enumerates
+renderers:
 
 - **`RegisterSceneRenderers()`** fills `g_Scene` (mirrored as
   `AppState::sceneRenderers`) **in draw order**: mesh, field, stock, outline,
@@ -187,20 +332,23 @@ renderers.
   duty — viewport, camera, clip planes, and the three render blocks (the
   windowed frame, the windowed screenshot, the offscreen capture) — loops
   over this list.
-- **`ShutdownSceneRenderers()`** resets every renderer before the device is
-  destroyed. A renderer still alive at `CleanupVulkan` crashes at exit.
+- **`kRows`**, [the owner table](#rebuilding-the-device): one row per
+  renderer, its construction and its teardown, for both modes (a renderer
+  that starts at the window's size or the offscreen 1280x720 is told so by
+  the row). The table is walked back before the device is destroyed, so no
+  renderer outlives it; one that did crashed at exit.
 
-A renderer that one construction path (windowed or `--offscreen`) never
-built is skipped with a `LOG_WARN` naming it ("was never constructed in this
-mode"), so the two paths cannot silently disagree.
+A renderer whose row failed to initialise is null, named in
+`renderer.missing`, and skipped.
 
-**Adding a renderer**: derive from `SceneRenderer`, construct it in both
-paths, add it to both lists. `tests/test_conventions.cpp` fails if a class
-deriving `: public SceneRenderer` is missing from either function. The gate
-exists because a renderer missing from the viewport loop draws full-window at
-the wrong scale and offset — invisible under `--offscreen`, where the 3D
-viewport *is* the whole framebuffer — and one missing from teardown crashes
-at exit.
+**Adding a renderer**: derive from `SceneRenderer`, give it a row in
+`kRows`, add it to `RegisterSceneRenderers` in draw order.
+`tests/test_conventions.cpp` fails if a class deriving `: public
+SceneRenderer` is missing from either. The gate exists because a renderer
+missing from the viewport loop draws full-window at the wrong scale and
+offset — invisible under `--offscreen`, where the 3D viewport *is* the
+whole framebuffer — and one missing from teardown crashes at exit, or
+outlives a rebuild holding the old device's handles.
 
 The typed pointers in `AppState` (`meshRenderer`, `outlineRenderer`,
 `fieldRenderer`, …) stay: the `ui/` layer uses them for content (`AddMesh`,
@@ -275,8 +423,8 @@ visibility toggle is a full resync through this cache.
 
 ## Outlines
 
-`OutlineRenderer` draws edges over the solids. The default mode (set in
-`main.cpp`) is WIREFRAME: static edges plus view-dependent silhouettes.
+`OutlineRenderer` draws edges over the solids. The default mode (set in its row
+of the owner table, `app/GpuOwners.cpp`) is WIREFRAME: static edges plus view-dependent silhouettes.
 
 - **Static edges** — boundary edges and feature edges (adjacent-face normal
   dot below 0.5, i.e. a dihedral over 60°) — come from
@@ -541,8 +689,9 @@ which pulls for itself.
 edits with nothing looking produce none, the next capture exactly one, of the
 current document; a second phase pins the omitted `bodies[].mesh`.
 
-A new scene renderer is wired in `RegisterSceneRenderers()` /
-`ShutdownSceneRenderers()` and nowhere else, for both modes.
+A new scene renderer is wired in its `kRows` row and
+`RegisterSceneRenderers()` (`app/GpuOwners.cpp`) and nowhere else, for both
+modes.
 
 ## Screenshots
 
@@ -592,7 +741,9 @@ renderer, and by looking at the pictures.
   llvmpipe: `tools/ci-local.sh --pixel` checks it and `--pixel-record` writes
   it. **Run it after anything touching `RendererSync.cpp` or a renderer.**
   Its scene assigns no materials, so a change in shared shader code shows
-  here.
+  here. `--rebuild` (ctest `render_pixel_rebuild_smoke`) renders the scene,
+  rebuilds the device in place and renders it again: byte-identical to each
+  other and to the baseline.
 - **`tests/render_ao_smoke.py`** — a scene whose correct AO is confined to
   one place, asserting none appears anywhere else (catches any mapping error
   between the AO buffer and the viewport sub-rect), plus a bound between the
@@ -612,14 +763,30 @@ renderer, and by looking at the pictures.
   with `LOBOLE_ALLOW_DEBUG_CRASH=1`): landing on the next device with
   `ping`'s fallback and reason, a missing renderer named, the mesh
   renderer's failure ending the start, `LOBOLE_RENDERER=software` with its
-  path-traced still refused by name; **`tests/device_loss_smoke.py`** — a
-  lost device, above. The fallback modal is the GUI test
+  path-traced still refused by name; **`tests/device_loss_smoke.py`** — the
+  backstop, above. The fallback modal is the GUI test
   `app/renderer_fallback_and_safe_mode_say_so`.
+- **A rebuild in place**: `tests/device_rebuild_smoke.py` (ctest
+  `device_rebuild_smoke` offscreen, with no gui label so the sanitized suite
+  runs it, and `device_rebuild_windowed_smoke`): an edit, `debug_fault
+  device_lost`, then `screenshot`, `select_face` and a quick `render_still`
+  answer with no `device_lost` seen, `ping` counts the rebuild, and
+  `set_settings {gpu_device}` answers with the device it landed on and back.
+  `--validate` runs it under the Khronos validation layer (synchronization
+  and GPU-assisted, as `DEV_WATCH_VALIDATE=1`) and fails on any validation
+  message in the log. GUI: `app/device_rebuild_keeps_the_session` (a
+  show-always reference image, a FEM field, a face picked by click and a
+  quick still across a loss, the undo stack and tabs unchanged, then the
+  preference onto another device and back where one can present, skipped by
+  name otherwise) and `cam/a_device_rebuild_keeps_the_playback` (the cut
+  stock and the cutter drawn again, the playback where it was). Unit: the
+  ladder with the lost device first and `JudgeLoss` (`test_startup_report`).
 - Unit: `test_light_rig` (the key left of and above the view from any
   camera, the rig the same in camera coordinates from every viewpoint,
   the lock, the setting), `test_outline_edges`, `test_faceselector`, `test_frame_timer`,
   `test_frame_pacer`, `test_ibl`, `test_still_outlines`, `test_materials`.
-- **`tests/test_conventions.cpp`** — the scene-renderer registration gate.
+- **`tests/test_conventions.cpp`** — the scene-renderer and owner-table
+  gates, the two rebuild triggers, and `GpuProjection` (above).
 
 ## What it does not do yet
 

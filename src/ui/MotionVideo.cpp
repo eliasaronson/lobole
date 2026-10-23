@@ -305,6 +305,9 @@ struct VideoRun {
   std::vector<std::string> warnings;
   std::string error; // the main side's (a capture, the poses, a tab switch)
   std::chrono::steady_clock::time_point started;
+  // The device rebuilds before the first frame: one after it ends the video
+  // (docs/rendering/README.md#rebuilding-the-device).
+  int rebuilds = 0;
 };
 
 // Frame k's place in the poses: their whole span over the frames, the
@@ -599,6 +602,7 @@ bool StartVideoJob(AppState& state, const MotionVideoPlan& plan,
 
   run->ranAgainst = state.assembly.get();
   run->started = std::chrono::steady_clock::now();
+  run->rebuilds = state.renderer.rebuilds;
   // Playback moves the same renderers the frames are taken from.
   StopMotionPlayback(state);
   StopSequencePlayback(state);
@@ -623,6 +627,10 @@ bool StartVideoJob(AppState& state, const MotionVideoPlan& plan,
     };
     if (!ours)
       stop("the assembly tab changed during the export");
+    // Its frames so far came from renderers that are gone, and the poses it
+    // pinned were pinned in them.
+    if (s.renderer.rebuilds != run->rebuilds)
+      stop("the graphics device was rebuilt; run it again");
     if (raw->cancel.load()) {
       e.cancel.store(true);
       e.cv.notify_all();

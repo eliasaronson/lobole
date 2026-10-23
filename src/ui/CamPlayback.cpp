@@ -102,10 +102,10 @@ void Tip(const char* text) {
 }
 
 void DropToolInstance(AppState& state) {
-  if (state.meshRenderer && state.camToolInstance != 0)
-    state.meshRenderer->RemoveMesh(state.camToolInstance);
-  state.camToolInstance = 0;
-  state.camToolInstanceFor = -1;
+  if (state.meshRenderer && state.gpu.camToolInstance != 0)
+    state.meshRenderer->RemoveMesh(state.gpu.camToolInstance);
+  state.gpu.camToolInstance = 0;
+  state.gpu.camToolInstanceFor = -1;
 }
 
 // Where a playback's stock starts: what the job's EARLIER setups left, read
@@ -262,7 +262,7 @@ bool ArmPlayback(AppState& state, const cam::Setup& setup, StartWork& w) {
   state.measure = MeasureState{};
   state.sectionToolOpen = false;
   state.camPlaying = false;
-  state.camStockDrawnRevision = 0;
+  state.gpu.camStockDrawnRevision = 0;
   return true;
 }
 
@@ -480,13 +480,13 @@ void EndCamPlayback(AppState& state) {
     state.stockRenderer->SetModel(glm::mat4(1.0f));
   state.camPlaybackGcode.clear();
   state.camCursor = {0, 0.0};
-  state.camStockDrawnRevision = 0;
+  state.gpu.camStockDrawnRevision = 0;
   if (state.stockRenderer)
     state.stockRenderer->Clear();
   DropToolInstance(state);
   // The bodies were ghosted in place; a resync puts their real materials
   // back. Same move ExitSimulation makes, for the same reason.
-  state.syncedDocumentVersion = UINT64_MAX;
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
 }
 
 void SeekCamPlayback(AppState& state, cam::SimCursor to) {
@@ -572,12 +572,12 @@ void SyncCamPlayback(AppState& state) {
   const bool rotary = state.camTimeline.rotary;
   const uint64_t revision =
       rotary ? state.camRotarySim.Revision() : state.camStockSim.Revision();
-  const bool stale = revision != state.camStockDrawnRevision;
-  const bool allowed =
-      !state.camPlaying || now - state.camStockDrawnAt >= kStockRedrawSeconds;
+  const bool stale = revision != state.gpu.camStockDrawnRevision;
+  const bool allowed = !state.camPlaying ||
+                       now - state.gpu.camStockDrawnAt >= kStockRedrawSeconds;
   if (stale && allowed) {
-    state.camStockDrawnAt = now;
-    state.camStockDrawnRevision = revision;
+    state.gpu.camStockDrawnAt = now;
+    state.gpu.camStockDrawnRevision = revision;
     cam::StockMesh mesh;
     if (rotary) {
       mesh = cam::BuildRotaryStockMesh(state.camRotarySim.Stock());
@@ -615,7 +615,7 @@ void SyncCamPlayback(AppState& state) {
              : glm::mat4(1.0f);
   state.stockRenderer->SetModel(partTurn);
   if (state.meshRenderer)
-    for (const DocumentRenderMesh& m : state.documentMeshes) {
+    for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
       state.meshRenderer->SetInstanceGhost(m.meshId, 0.22f);
       if (rotary) {
         state.meshRenderer->SetMeshTransform(m.meshId, partTurn);
@@ -632,12 +632,12 @@ void SyncCamPlayback(AppState& state) {
     DropToolInstance(state);
     return;
   }
-  if (state.camToolInstanceFor != tool->number) {
+  if (state.gpu.camToolInstanceFor != tool->number) {
     DropToolInstance(state);
     const cam::StockMesh mesh = cam::BuildToolMesh(*tool);
-    state.camToolInstance =
+    state.gpu.camToolInstance =
         state.meshRenderer->AddMesh(ToMeshVertices(mesh), mesh.indices);
-    state.camToolInstanceFor = tool->number;
+    state.gpu.camToolInstanceFor = tool->number;
     // MATTE, deliberately. This was metallic 0.9 / roughness 0.25 — a
     // near-mirror, so what you saw on the holder was mostly the environment
     // map reflected in it. A reflection slides across a curved surface as the
@@ -646,13 +646,14 @@ void SyncCamPlayback(AppState& state) {
     // thin and mostly buried in material, so it did not show the effect and
     // "behaved correctly". A tool glyph is an instrument for reading where
     // the cutter is; a mirror finish costs that reading to gain nothing.
-    state.meshRenderer->SetMeshMaterial(state.camToolInstance,
+    state.meshRenderer->SetMeshMaterial(state.gpu.camToolInstance,
                                         glm::vec3(0.78f, 0.79f, 0.82f),
                                         glm::vec4(0.0f, 0.65f, 0.3f, 0.04f));
   }
   const glm::dvec3 at = state.camTimeline.PositionAt(state.camCursor);
   state.meshRenderer->SetMeshTransform(
-      state.camToolInstance, glm::translate(glm::mat4(1.0f), glm::vec3(at)));
+      state.gpu.camToolInstance,
+      glm::translate(glm::mat4(1.0f), glm::vec3(at)));
 }
 
 bool CamPlaybackDrawsPath(const AppState& state) {

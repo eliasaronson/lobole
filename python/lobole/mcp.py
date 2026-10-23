@@ -1723,7 +1723,8 @@ _reference("get_settings", "Read the user's preferences: GPU device, font size, 
 _reference("set_settings", "Change user preferences, e.g. "
           "{\"ssao\": \"full\", \"ui_font_scale\": 1.2}. Validates first "
           "— a bad value changes nothing and names itself — then applies and "
-          "writes the file. The viewport GPU needs a restart; everything else "
+          "writes the file. A gpu_device change rebuilds the viewport's device "
+          "in place and answers after it, with `renderer`; everything else "
           "is immediate.")
 
 

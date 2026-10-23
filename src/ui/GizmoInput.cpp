@@ -354,7 +354,7 @@ void PushOccurrenceLive(AppState& state, uint64_t occId) {
   // so every other push is what it was.
   const bool sequence = ShownSequence(state) != nullptr;
   const bool hidden = sequence && SequencePlaybackHides(state, occId);
-  for (const DocumentRenderMesh& m : state.documentMeshes) {
+  for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
     if (m.occurrenceId != occId)
       continue;
     // A5: compose the leaf's place INSIDE the unit. Pushing the occurrence

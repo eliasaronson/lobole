@@ -114,8 +114,10 @@ from is gone -- and kills nothing.
 
 `ping` reports `port`, `mode`, `ui_actions`, `project`, `dirty`, `gpu`,
 `renderer` (how start-up got to that device — software, a fallback and
-why, renderers missing, a lost device:
-[rendering](../rendering/README.md#the-device-ladder)), `safe_mode`,
+why, renderers missing, a device lost for good, and `rebuilds` /
+`last_rebuild` for rebuilds in place:
+[rendering](../rendering/README.md#the-device-ladder),
+[rebuilding](../rendering/README.md#rebuilding-the-device)), `safe_mode`,
 `occ` (the OpenCASCADE version it was built against), `features` (optional subsystems compiled in, e.g. `cam`) and
 `binary_replaced` — true when the executable on disk was rebuilt after this
 process started, so the instance is serving old code.

@@ -12,6 +12,7 @@
 #include "ui/AppState.h"
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
@@ -34,6 +35,58 @@ struct Ray;          // defined in FaceSelector.h
 // docs/architecture.md#the-ui-actions-layer.
 
 namespace ui {
+
+// --- the renderers a device holds -------------------------------------------
+// (docs/rendering/README.md#rebuilding-the-device)
+
+// Every non-owning pointer AppState holds into what a device was built with.
+// main.cpp's owner table (app/GpuOwners.cpp) fills one after every build --
+// the start's and each rebuild's -- and hands it to ForgetGpuProjection. An
+// empty one is "no renderers": a failed rebuild, or the moment before one.
+struct RendererSet {
+  MeshRenderer* mesh = nullptr;
+  OutlineRenderer* outline = nullptr;
+  SketchRenderer* sketch = nullptr;
+  UnderlayRenderer* underlay = nullptr;
+  FieldRenderer* field = nullptr;
+  StockRenderer* stock = nullptr;
+  std::vector<SceneRenderer*> scene; // in draw order
+  RayTracingRenderer* rayTracer = nullptr;
+  FaceSelector* faceSelector = nullptr;
+  IBLTextures* ibl = nullptr;
+  std::function<IBLTextures*(double, double)> skyEnvironment;
+};
+
+// The ONE place AppState is pointed at renderers, at start-up and after a
+// rebuild: `state.gpu = {}` -- every instance id and upload stamp the state
+// holds is forgotten, so the next sync projects the document again the way it
+// always does -- plus the pointers in `set`, and the tessellation caches'
+// asset ids (their CPU meshes stay; the next sync uploads them again).
+void ForgetGpuProjection(AppState& state, const RendererSet& set);
+
+// Before the renderers go: the tessellation caches' assets released against
+// the renderers that issued them (a destroy is valid on a lost device), the
+// CPU tessellations kept. Then ForgetGpuProjection(state, {}) leaves nothing
+// pointing at what is about to be destroyed.
+void ReleaseGpuProjection(AppState& state);
+
+// The device is lost: a state, not an abort
+// (docs/rendering/README.md#a-lost-device). Called only where a Vulkan result
+// IS VK_ERROR_DEVICE_LOST, or vkutil::DeviceLostSeen() says one was, and by
+// InjectDeviceLoss; tests/test_conventions.cpp holds every caller to that.
+// The frame boundary that sees it next rebuilds the device or, failing that,
+// stops drawing (app/GpuOwners.h).
+void MarkDeviceLost(AppState& state, const std::string& where);
+// debug_fault {kind: "device_lost"} and the GUI test of a rebuild: a loss on
+// purpose, which the frame boundary handles as it handles a real one.
+void InjectDeviceLoss(AppState& state, const std::string& who);
+
+// A rebuild is about to run: a path-traced render in flight is ended (its
+// scene lives in the ray tracer about to be destroyed) with "the graphics
+// device was rebuilt; run it again". A motion video ends itself on the
+// rebuild count (MotionVideo.cpp). CAM and FEM run on CPU workers and carry
+// on.
+void EndRendersForRebuild(AppState& state);
 
 // Mirrors document bodies into the renderers when the document version
 // changed (edit, undo, redo). Call once per frame before drawing.

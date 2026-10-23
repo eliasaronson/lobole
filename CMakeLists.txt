@@ -799,6 +799,7 @@ endif()
 # Application: windowing, rendering, UI.
 set(app_sources
     src/app/main.cpp
+    src/app/GpuOwners.cpp
     src/app/FramePacer.cpp
     src/app/StartupReport.cpp
     src/render/VulkanCommon.cpp
@@ -1029,6 +1030,7 @@ endif()
 set(app_lib_sources ${app_sources})
 list(REMOVE_ITEM app_lib_sources
      src/app/main.cpp
+     src/app/GpuOwners.cpp
      src/app/HeadlessMain.cpp
      src/app/CrashHandler.cpp
      src/app/ParentWatch.cpp)
@@ -1120,6 +1122,7 @@ endif()
 
 add_executable(designer ${SANITIZER_DEFAULTS_SRC}
     src/app/main.cpp
+    src/app/GpuOwners.cpp
     src/app/HeadlessMain.cpp
     src/app/CrashHandler.cpp
     src/app/ParentWatch.cpp)

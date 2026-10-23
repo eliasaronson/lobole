@@ -133,7 +133,7 @@ public:
 
   bool IsInitialized() const { return m_isInitialized; }
   // The widest line this device rasterizes (1 without the wideLines
-  // feature, which main.cpp enables wherever it is supported).
+  // feature, which app/GpuOwners.cpp enables wherever it is supported).
   [[nodiscard]] float MaxLineWidth() const { return m_maxLineWidth; }
 
 private:
@@ -256,7 +256,16 @@ private:
   // Mesh data
   std::vector<std::unique_ptr<OutlineMesh>> m_meshes;
   std::vector<std::unique_ptr<OutlineAsset>> m_assets;
+  // Both counters start above every id an earlier renderer in this process
+  // handed out (docs/rendering/README.md#rebuilding-the-device), so an id kept
+  // across a device rebuild names nothing here: a lookup misses, a no-op.
+  static uint32_t s_idFloor;
+  // Ids are m_idBase + a 1-based slot in m_assets / m_meshes.
+  uint32_t m_idBase = 0;
   uint32_t m_nextAssetId = 1;
+  size_t SlotOf(uint32_t id, size_t count) const;
+  size_t AssetSlot(uint32_t id) const { return SlotOf(id, m_assets.size()); }
+  size_t MeshSlot(uint32_t id) const { return SlotOf(id, m_meshes.size()); }
   // Open only between BeginAssetBatch/EndAssetBatch (see MeshRenderer).
   std::unique_ptr<vkutil::StagingBatch> m_assetBatch;
   [[nodiscard]] OutlineAsset* AssetOf(const OutlineMesh& mesh);

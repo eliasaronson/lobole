@@ -231,7 +231,7 @@ void ReplaceDocument(AppState& state, std::unique_ptr<Document> doc) {
   state.explodeToolOpen = false;
   state.motionToolOpen = false;
   // Force a resync even if the version counters happen to collide
-  state.syncedDocumentVersion = UINT64_MAX;
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
 }
 
 namespace {
@@ -375,7 +375,7 @@ void ResetActiveTabUiState(AppState& state) {
     state.focusPanel = "CAM";
     state.focusPanelFrames = 60;
   }
-  state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
+  state.gpu.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
 }
 
 void EnsureParts(AppState& state, const std::string& firstName) {
@@ -635,7 +635,7 @@ bool UndoDrawing(AppState& state) {
   state.drawingHistory.undoStamps.pop_back();
   RestoreDrawing(state, std::move(state.drawingHistory.undo.back()));
   state.drawingHistory.undo.pop_back();
-  state.syncedDocumentVersion = UINT64_MAX;
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
   return true;
 }
 
@@ -649,7 +649,7 @@ bool RedoDrawing(AppState& state) {
   state.drawingHistory.redoStamps.pop_back();
   RestoreDrawing(state, std::move(state.drawingHistory.redo.back()));
   state.drawingHistory.redo.pop_back();
-  state.syncedDocumentVersion = UINT64_MAX;
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
   return true;
 }
 
@@ -683,7 +683,7 @@ void RestoreJob(AppState& state, cam::JobDocument restored) {
   state.camActiveSetup = 0; // re-resolved: the setup may be gone
   state.camGhostOp = 0;
   state.camVerbOp = 0;
-  state.syncedDocumentVersion = UINT64_MAX;
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
   RefreshCamToolpaths(state);
   RunCamVerification(state);
 }

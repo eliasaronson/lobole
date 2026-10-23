@@ -107,7 +107,7 @@ bool PickAssemblyFace(AppState& state, const Ray& ray, AssemblyFacePick& out) {
   // meshId → the occurrence + which of its part's bodies was hit (both carried
   // on the render mesh precisely so an assembly pick can be named).
   const DocumentRenderMesh* rm = nullptr;
-  for (const DocumentRenderMesh& m : state.documentMeshes)
+  for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
     if (m.meshId == hit.meshId) {
       rm = &m;
       break;

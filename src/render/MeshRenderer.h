@@ -444,10 +444,20 @@ private:
   VkDescriptorPool m_descriptorPool = VK_NULL_HANDLE;
   std::vector<VkDescriptorSet> m_descriptorSets;
 
-  // Assets + instances. Ids are 1-based slot indices; removal leaves a null
-  // hole so later ids stay stable.
+  // Assets + instances. Ids are m_idBase + a 1-based slot index; removal
+  // leaves a null hole so later ids stay stable.
   std::vector<std::unique_ptr<MeshAsset>> m_assets;
   std::vector<std::unique_ptr<MeshInstance>> m_instances;
+  // Above every id an earlier renderer in this process handed out
+  // (docs/rendering/README.md#rebuilding-the-device): a rebuilt device's
+  // renderer cannot mistake an id kept from the last one for its own, and
+  // such an id is a logged no-op.
+  uint32_t m_idBase = 0;
+  static uint32_t s_idFloor; // the highest id handed out by a dead renderer
+  bool m_staleIdLogged = false;
+  size_t m_assetsIssued = 0, m_instancesIssued = 0; // survive Shutdown
+  // The slot of `id` in a vector of `count`, or SIZE_MAX (not ours).
+  size_t SlotOf(uint32_t id, size_t count) const;
 
   // IBL texture handles (owned by IBLTextures; bound into descriptor sets).
   VkImageView m_iblIrradiance = VK_NULL_HANDLE;

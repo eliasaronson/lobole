@@ -551,7 +551,8 @@ glm::dmat4 DisplayMatrixOf(const AppState& state, const Occurrence& o);
 // Drops every cached part tessellation and releases the GPU assets it holds
 // (AppState::partRenderCache). MUST run while the renderers are still alive —
 // the cache stores asset ids, and the release is what frees their buffers —
-// so main.cpp calls it immediately before ShutdownSceneRenderers().
+// so main.cpp calls it immediately before gpuowners::Teardown(). A rebuild
+// in place keeps the CPU meshes instead (ui::ReleaseGpuProjection).
 void ReleasePartRenderCache(AppState& state);
 
 } // namespace ui

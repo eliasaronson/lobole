@@ -151,10 +151,10 @@ std::string GhostKey(const std::vector<PlannedPart>& plan) {
 
 void ClearFastenerGhost(AppState& state) {
   if (state.meshRenderer)
-    for (const uint32_t id : state.fastenerGhostInstances)
+    for (const uint32_t id : state.gpu.fastenerGhostInstances)
       state.meshRenderer->RemoveInstance(id);
-  state.fastenerGhostInstances.clear();
-  state.fastenerGhostKey.clear();
+  state.gpu.fastenerGhostInstances.clear();
+  state.gpu.fastenerGhostKey.clear();
 }
 
 } // namespace
@@ -164,12 +164,12 @@ void SyncFastenerGhost(AppState& state) {
   const bool wanted =
       tool.open && tool.ok && !tool.plan.empty() && state.meshRenderer;
   if (!wanted) {
-    if (!state.fastenerGhostInstances.empty())
+    if (!state.gpu.fastenerGhostInstances.empty())
       ClearFastenerGhost(state);
     return;
   }
   const std::string key = GhostKey(tool.plan);
-  if (key == state.fastenerGhostKey)
+  if (key == state.gpu.fastenerGhostKey)
     return; // nothing moved; the every-frame path does nothing, as designed
   ClearFastenerGhost(state);
 
@@ -199,9 +199,9 @@ void SyncFastenerGhost(AppState& state) {
     const uint32_t id = state.meshRenderer->AddInstance(asset, xf);
     state.meshRenderer->SetInstanceColor(id, kGhostTint);
     state.meshRenderer->SetInstanceGhost(id, 0.55f); // after colour: sets alpha
-    state.fastenerGhostInstances.push_back(id);
+    state.gpu.fastenerGhostInstances.push_back(id);
   }
-  state.fastenerGhostKey = key;
+  state.gpu.fastenerGhostKey = key;
 }
 
 void DrawFastenerToolWindow(AppState& state) {

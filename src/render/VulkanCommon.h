@@ -100,9 +100,9 @@ bool AllocateImageMemory(VkDevice device, VkPhysicalDevice physicalDevice,
 // them, and the sub-allocator that finding implied is not needed.
 //
 // The counter stays because it is what settled that, and because a driver
-// reporting the spec floor is exactly what a port would meet: main.cpp logs
-// the limit beside the device name, so a machine that DOES impose one says so
-// on the first line of its log rather than at the allocation that fails.
+// reporting the spec floor is exactly what a port would meet: app/GpuOwners.cpp
+// logs the limit beside the device name, so a machine that DOES impose one says
+// so on the first line of its log rather than at the allocation that fails.
 //
 // Monotonic on purpose. A live count would need every `vkFreeMemory` site to
 // route through one place, and a counter that drifts is worse than none. The
@@ -123,12 +123,16 @@ VkResult EndSingleTimeCommands(VkDevice device, VkCommandPool pool,
 
 // Every one-shot submit and wait in the renderers passes its result through
 // here, and VK_ERROR_DEVICE_LOST is remembered: the frame loop reads it
-// (DeviceLostSeen) and treats the device as lost from then on
-// (docs/rendering/README.md#a-lost-device). They used to ignore the result,
-// so a loss there passed in silence and the frame loop aborted later.
-// Thread-safe. Returns `result`.
+// (DeviceLostSeen), marks the device lost, and the next frame boundary
+// rebuilds it in place (docs/rendering/README.md#rebuilding-the-device). They
+// used to ignore the result, so a loss there passed in silence and the frame
+// loop aborted later. Thread-safe. Returns `result`.
 VkResult NoteResult(VkResult result);
 [[nodiscard]] bool DeviceLostSeen();
+// The loss is behind us: the device was rebuilt in place
+// (docs/rendering/README.md#rebuilding-the-device), and a loss seen from now on
+// is the new device's.
+void ClearDeviceLost();
 
 // Staging copy: begin, vkCmdCopyBuffer, end + wait. False if the command
 // buffer could not be allocated.

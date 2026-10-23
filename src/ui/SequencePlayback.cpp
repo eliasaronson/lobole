@@ -372,10 +372,11 @@ void HighlightSequenceStep(AppState& state) {
   if (!state.meshRenderer)
     return;
   for (const uint64_t occ : SequenceHighlighted(state)) {
-    for (const DocumentRenderMesh& m : state.documentMeshes)
+    for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
       if (m.occurrenceId == occ)
         state.meshRenderer->HighlightInstance(m.meshId);
-    for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+    for (const AppState::GpuProjection::SectionCapMesh& cap :
+         state.gpu.sectionCapMeshes)
       if (cap.occurrenceId == occ)
         state.meshRenderer->HighlightInstance(cap.meshId);
   }
@@ -418,7 +419,7 @@ void StopSequencePlayback(AppState& state) {
   if (sh == nullptr)
     return;
   if (sh->showing)
-    state.syncedDocumentVersion = UINT64_MAX; // back to the placements
+    state.gpu.syncedDocumentVersion = UINT64_MAX; // back to the placements
   sh->showing = false;
   sh->playing = false;
   sh->pinned = false;
@@ -457,7 +458,7 @@ void TickSequencePlayback(AppState& state, double now) {
   if (!sh->synced) {
     // Once: pickers and the parts not put in yet follow it.
     sh->synced = true;
-    state.syncedDocumentVersion = UINT64_MAX;
+    state.gpu.syncedDocumentVersion = UINT64_MAX;
     sh->lastTick = -1.0;
   }
   const double seconds = sh->poses->timeline->seconds;
@@ -595,7 +596,8 @@ public:
       sh.pinned = true;
       sh.playing = false;
       sh.synced = true;
-      state.syncedDocumentVersion = UINT64_MAX; // a full resync reads it too
+      state.gpu.syncedDocumentVersion =
+          UINT64_MAX; // a full resync reads it too
     }
     sh.highlight = m_highlight;
     sh.speed = m_speed;

@@ -316,6 +316,10 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
   bg->owner = jobStart ? jobStart->owner : 0;
   BackgroundJob* raw = bg.get();
   TopoJob* j = job.get(); // the shared_ptr below outlives the thread
+  // Its device waits are cut into slices that ask this: a GPU that never
+  // answers still lets the run be cancelled.
+  if (j->solver)
+    j->solver->SetCancel([raw] { return raw->cancel.load(); });
   bg->thread = std::thread([j, job, raw]() {
     std::string err;
     auto res = fem::TopologyOptimize(
@@ -353,7 +357,8 @@ bool StartTopologyRun(AppState& state, Document& doc, uint64_t studyId,
         rt.solvedAtVersion = target->Version();
         rt.inputHash = inputHash;
         // Name the solver that actually did the work: TopologyOptimize drops
-        // an external solver that fails mid-run and finishes on the CPU, and
+        // an external solver that fails mid-run (on a device that was not
+        // lost) and finishes on the CPU, and
         // a result labelled with the GPU it started on would be a lie.
         rt.solver = j.result->solverFallback.empty()
                         ? j.solverName
@@ -1191,7 +1196,7 @@ void EnterSimulation(AppState& state) {
     }
     if (!asmDoc->FindStudy(state.simulation.activeStudyId))
       state.simulation.activeStudyId = asmDoc->GetStudies().front().id;
-    state.syncedDocumentVersion = UINT64_MAX;
+    state.gpu.syncedDocumentVersion = UINT64_MAX;
     return;
   }
   // Drop the measure tool: it owns the viewport while active, and the
@@ -1212,16 +1217,16 @@ void EnterSimulation(AppState& state) {
       !doc->GetStudies().empty())
     state.simulation.activeStudyId = doc->GetStudies().front().id;
   // Drop the modeling-mode shape-guide ghost while in simulation mode.
-  state.syncedDocumentVersion = UINT64_MAX;
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
 }
 void ResetSimulationDisplay(AppState& state) {
   // Restore any body instances the field overlay hid, and drop the topology
   // iso-surface instance.
   if (state.meshRenderer) {
-    for (uint32_t meshId : state.simulation.hiddenMeshes)
+    for (uint32_t meshId : state.gpu.hiddenMeshes)
       state.meshRenderer->SetInstanceVisible(meshId, true);
-    if (state.simulation.topoIsoInstance)
-      state.meshRenderer->RemoveMesh(state.simulation.topoIsoInstance);
+    if (state.gpu.topoIsoInstance)
+      state.meshRenderer->RemoveMesh(state.gpu.topoIsoInstance);
   }
   if (state.fieldRenderer)
     state.fieldRenderer->SetMesh({}, {});
@@ -1230,7 +1235,7 @@ void ResetSimulationDisplay(AppState& state) {
 void ExitSimulation(AppState& state) {
   ResetSimulationDisplay(state);
   state.simulationToolOpen = false;
-  state.syncedDocumentVersion = UINT64_MAX; // force a clean renderer resync
+  state.gpu.syncedDocumentVersion = UINT64_MAX; // force a clean renderer resync
 }
 void SyncFieldRenderer(AppState& state) {
   if (!state.fieldRenderer || !state.meshRenderer)
@@ -1252,15 +1257,15 @@ void SyncFieldRenderer(AppState& state) {
   const bool bondedGroup = solvedOccs.size() > 1;
 
   auto restoreBodies = [&]() {
-    for (uint32_t meshId : sim.hiddenMeshes)
+    for (uint32_t meshId : state.gpu.hiddenMeshes)
       state.meshRenderer->SetInstanceVisible(meshId, true);
-    sim.hiddenMeshes.clear();
+    state.gpu.hiddenMeshes.clear();
   };
   auto removeIso = [&]() {
-    if (sim.topoIsoInstance)
-      state.meshRenderer->RemoveMesh(sim.topoIsoInstance);
-    sim.topoIsoInstance = 0;
-    sim.topoIsoKey = 0;
+    if (state.gpu.topoIsoInstance)
+      state.meshRenderer->RemoveMesh(state.gpu.topoIsoInstance);
+    state.gpu.topoIsoInstance = 0;
+    state.gpu.topoIsoKey = 0;
   };
   // Hide the studied bodies' normal render so the overlay stands in for them.
   // Recomputed EVERY sync: mesh ids change on every regeneration (e.g. a
@@ -1271,7 +1276,7 @@ void SyncFieldRenderer(AppState& state) {
   auto hideBodies = [&](const fem::StudyRuntime* rt) {
     std::vector<uint32_t> want;
     for (const fem::StudyBodyResult& b : rt->bodies)
-      for (const DocumentRenderMesh& m : state.documentMeshes) {
+      for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
         if (bondedGroup) {
           // The group's field mesh covers every solved occurrence.
           for (uint64_t occ : solvedOccs)
@@ -1284,10 +1289,11 @@ void SyncFieldRenderer(AppState& state) {
           want.push_back(m.meshId);
       }
     for (uint32_t id : want)
-      if (std::find(sim.hiddenMeshes.begin(), sim.hiddenMeshes.end(), id) ==
-          sim.hiddenMeshes.end())
+      if (std::find(state.gpu.hiddenMeshes.begin(),
+                    state.gpu.hiddenMeshes.end(),
+                    id) == state.gpu.hiddenMeshes.end())
         state.meshRenderer->SetInstanceVisible(id, false);
-    sim.hiddenMeshes = std::move(want);
+    state.gpu.hiddenMeshes = std::move(want);
   };
 
   const fem::StudyRuntime* rt =
@@ -1296,12 +1302,12 @@ void SyncFieldRenderer(AppState& state) {
   const bool show = sim.IsActive() &&
                     sim.field != SimulationState::Field::None && rt != nullptr;
   if (!show) {
-    if (sim.fieldBuiltKey != 0 || sim.topoIsoInstance != 0 ||
-        !sim.hiddenMeshes.empty()) {
+    if (state.gpu.fieldBuiltKey != 0 || state.gpu.topoIsoInstance != 0 ||
+        !state.gpu.hiddenMeshes.empty()) {
       restoreBodies();
       removeIso();
       state.fieldRenderer->SetMesh({}, {});
-      sim.fieldBuiltKey = 0;
+      state.gpu.fieldBuiltKey = 0;
     }
     return;
   }
@@ -1323,16 +1329,16 @@ void SyncFieldRenderer(AppState& state) {
     restoreBodies();
     removeIso();
     state.fieldRenderer->SetMesh({}, {});
-    sim.fieldBuiltKey = 0;
+    state.gpu.fieldBuiltKey = 0;
     return;
   }
 
   // --- Topology "Shape": the optimized iso-surface as a grey MeshRenderer
   // body.
   if (topo && sim.field == SimulationState::Field::Shape) {
-    if (sim.fieldBuiltKey != 0) {
+    if (state.gpu.fieldBuiltKey != 0) {
       state.fieldRenderer->SetMesh({}, {});
-      sim.fieldBuiltKey = 0;
+      state.gpu.fieldBuiltKey = 0;
     }
     // Re-extract only when the study, results, or threshold changes.
     const uint64_t tq = static_cast<uint64_t>(
@@ -1340,7 +1346,7 @@ void SyncFieldRenderer(AppState& state) {
     const uint64_t key =
         (sim.activeStudyId * 1000003ull + host.ResultsEpoch()) * 100003ull +
         tq + 1;
-    if (key != sim.topoIsoKey) {
+    if (key != state.gpu.topoIsoKey) {
       std::vector<glm::vec3> pos, nrm;
       std::vector<uint32_t> idx;
       for (const fem::StudyBodyResult& b : rt->bodies) {
@@ -1356,14 +1362,14 @@ void SyncFieldRenderer(AppState& state) {
         verts[i].position = pos[i];
         verts[i].normal = nrm[i];
       }
-      if (sim.topoIsoInstance == 0) {
-        sim.topoIsoInstance = state.meshRenderer->AddMesh(verts, idx);
-        state.meshRenderer->SetMeshColor(sim.topoIsoInstance,
+      if (state.gpu.topoIsoInstance == 0) {
+        state.gpu.topoIsoInstance = state.meshRenderer->AddMesh(verts, idx);
+        state.meshRenderer->SetMeshColor(state.gpu.topoIsoInstance,
                                          glm::vec3(0.72f, 0.72f, 0.75f));
       } else {
-        state.meshRenderer->UpdateMesh(sim.topoIsoInstance, verts, idx);
+        state.meshRenderer->UpdateMesh(state.gpu.topoIsoInstance, verts, idx);
       }
-      sim.topoIsoKey = key;
+      state.gpu.topoIsoKey = key;
     }
     hideBodies(rt);
     return;
@@ -1385,7 +1391,7 @@ void SyncFieldRenderer(AppState& state) {
        (modal ? static_cast<uint64_t>(sim.activeMode) + 1 : 0)) *
           1000003ull +
       static_cast<uint64_t>(caseIdx + 1);
-  if (key == sim.fieldBuiltKey) {
+  if (key == state.gpu.fieldBuiltKey) {
     hideBodies(rt);
     return;
   }
@@ -1459,7 +1465,7 @@ void SyncFieldRenderer(AppState& state) {
   }
   state.fieldRenderer->SetMesh(std::move(verts), std::move(indices));
   hideBodies(rt);
-  sim.fieldBuiltKey = key;
+  state.gpu.fieldBuiltKey = key;
 }
 
 } // namespace ui

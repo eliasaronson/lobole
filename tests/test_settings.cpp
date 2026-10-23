@@ -370,6 +370,24 @@ TEST_CASE("every preference is on exactly one page", "[settings]") {
       CHECK(c.library);
 }
 
+// The device is rebuilt in place
+// (docs/rendering/README.md#rebuilding-the-device), so nothing waits for a
+// restart: the tier that said so is gone, and the one row that was in it lands
+// live.
+TEST_CASE("gpu_device is a live setting", "[settings]") {
+  bool saw = false;
+  for (const settings::Field& f : settings::Fields()) {
+    INFO(f.key);
+    CHECK(
+        (f.tier == settings::Tier::Live || f.tier == settings::Tier::NextTime));
+    if (std::string(f.key) == "gpu_device") {
+      saw = true;
+      CHECK(f.tier == settings::Tier::Live);
+    }
+  }
+  CHECK(saw);
+}
+
 // A row with a section nobody has used yet is a new page, in table order and
 // before the hand-written ones, without a change to the window.
 TEST_CASE("a new section is a new preferences page", "[settings]") {

@@ -32,6 +32,7 @@
 #ifdef HAVE_CAM
 #include "render/StockRenderer.h"
 #include "ui/CamPlayback.h"
+#include "ui/RendererSync.h" // InjectDeviceLoss
 #endif
 
 #ifdef HAVE_CAM
@@ -701,11 +702,11 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::BeginCamPlayback(*s_App));
     ui::SeekCamPlayback(*s_App, s_App->camTimeline.End());
     ctx->Yield(4); // SyncCamPlayback runs per frame
-    IM_CHECK(s_App->camToolInstance != 0);
+    IM_CHECK(s_App->gpu.camToolInstance != 0);
     IM_CHECK(s_App->meshRenderer != nullptr);
 
     const std::optional<glm::mat4> m =
-        s_App->meshRenderer->GetInstanceTransform(s_App->camToolInstance);
+        s_App->meshRenderer->GetInstanceTransform(s_App->gpu.camToolInstance);
     IM_CHECK(m.has_value());
     // The glyph is revolved about ITS OWN +Z (CamStockMesh::BuildToolMesh),
     // so column 2 of the model matrix is where the tool points in the world.
@@ -732,13 +733,13 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // its near one, which is what made the glyph read as a shape lying on its
     // side that half-followed the camera. `ghost` used to be sticky across
     // SetInstanceMaterial, so anything ever ghosted stayed that way.
-    IM_CHECK(!s_App->meshRenderer->IsInstanceGhost(s_App->camToolInstance));
-    s_App->meshRenderer->SetInstanceGhost(s_App->camToolInstance, 0.3f);
-    IM_CHECK(s_App->meshRenderer->IsInstanceGhost(s_App->camToolInstance));
-    s_App->meshRenderer->SetMeshMaterial(s_App->camToolInstance,
+    IM_CHECK(!s_App->meshRenderer->IsInstanceGhost(s_App->gpu.camToolInstance));
+    s_App->meshRenderer->SetInstanceGhost(s_App->gpu.camToolInstance, 0.3f);
+    IM_CHECK(s_App->meshRenderer->IsInstanceGhost(s_App->gpu.camToolInstance));
+    s_App->meshRenderer->SetMeshMaterial(s_App->gpu.camToolInstance,
                                          glm::vec3(0.8f),
                                          glm::vec4(0.0f, 0.6f, 0.3f, 0.04f));
-    IM_CHECK(!s_App->meshRenderer->IsInstanceGhost(s_App->camToolInstance));
+    IM_CHECK(!s_App->meshRenderer->IsInstanceGhost(s_App->gpu.camToolInstance));
 
     ui::EndCamPlayback(*s_App);
     ctx->Yield(2);
@@ -1620,10 +1621,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
 
     // The part, TURNED by exactly that angle about the rotary axis: a point
     // at +Y must land where R_x(A) puts it.
-    IM_CHECK(!s_App->documentMeshes.empty());
+    IM_CHECK(!s_App->gpu.documentMeshes.empty());
     const std::optional<glm::mat4> xf =
         s_App->meshRenderer->GetInstanceTransform(
-            s_App->documentMeshes[0].meshId);
+            s_App->gpu.documentMeshes[0].meshId);
     IM_CHECK(xf.has_value());
     const glm::vec3 got = glm::vec3((*xf) * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
     const float ar = glm::radians(static_cast<float>(a));
@@ -1664,10 +1665,10 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::EndCamPlayback(*s_App);
     ctx->Yield(4);
     IM_CHECK(!s_App->camPlaybackOpen);
-    IM_CHECK(!s_App->documentMeshes.empty());
+    IM_CHECK(!s_App->gpu.documentMeshes.empty());
     const std::optional<glm::mat4> back =
         s_App->meshRenderer->GetInstanceTransform(
-            s_App->documentMeshes[0].meshId);
+            s_App->gpu.documentMeshes[0].meshId);
     IM_CHECK(back.has_value());
     const glm::vec3 still =
         glm::vec3((*back) * glm::vec4(0.0f, 1.0f, 0.0f, 0.0f));
@@ -2736,7 +2737,7 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     // reference image to rot.
     IM_CHECK(s_App->stockRenderer != nullptr);
     IM_CHECK(s_App->stockRenderer->HasMesh());
-    IM_CHECK(s_App->camToolInstance != 0);
+    IM_CHECK(s_App->gpu.camToolInstance != 0);
 
     // And it is aimed at the SAME rectangle as the rest of the scene. The 3D
     // view is a sub-region between the docked panels; a renderer left out of
@@ -2794,13 +2795,71 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!s_App->camPlaybackOpen);
     IM_CHECK(!s_App->camPlaying);
     IM_CHECK(s_App->camTimeline.Empty());
-    IM_CHECK_EQ(s_App->camToolInstance, (uint32_t)0);
+    IM_CHECK_EQ(s_App->gpu.camToolInstance, (uint32_t)0);
     if (s_App->stockRenderer != nullptr)
       IM_CHECK(!s_App->stockRenderer->HasMesh());
     // The backplot is back to the plain one.
     std::vector<PrimVertex> after;
     ui::AppendCamToolpathOverlay(*s_App, after);
     IM_CHECK(!after.empty());
+  };
+
+  // A device rebuilt in place under an open playback
+  // (docs/rendering/README.md#rebuilding-the-device): the cut stock and the
+  // cutter are rebuilt from the simulation's CPU height map by the same
+  // stamps, and the playback stays where it was.
+  t = IM_REGISTER_TEST(engine, "cam", "a_device_rebuild_keeps_the_playback");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    s_App->renderer.lastRebuildAt = -1.0; // the 60 s window is real losses
+    CamPart()->AddFeature(
+        std::make_unique<BoxFeature>("Plate", glm::vec3(0, 0, 0), 60, 40, 12));
+    ctx->Yield(2);
+    cam::Setup& setup = MakeJob()->AddSetup("Job");
+    setup.safeZ = 20.0;
+    s_App->camActiveSetup = setup.id;
+    ctx->Yield(2);
+    ImGuiWindow* camWin = ImGui::FindWindowByName(ui::kPanelCam);
+    IM_CHECK(camWin != nullptr && camWin->DockNode != nullptr);
+    ctx->ItemClick(camWin->TabId);
+    ctx->Yield(2);
+    ctx->SetRef("//CAM###CamPanel");
+    CamSetupMenu(ctx, setup.id, "###cam_add_op");
+    ToolbarClick(ctx, "###tb_job_generate");
+    ctx->Yield(2);
+    s_App->camGenerateOpen = false;
+    ctx->Yield(2);
+    IM_CHECK(!s_App->camToolpaths.empty());
+    ToolbarClick(ctx, "###tb_job_simulate");
+    ctx->Yield(3);
+    IM_CHECK(s_App->camPlaybackOpen);
+    ui::SeekCamPlayback(*s_App, s_App->camTimeline.CursorAtDistance(
+                                    s_App->camTimeline.totalDistance * 0.5));
+    ctx->Yield(3);
+    IM_CHECK(s_App->stockRenderer != nullptr &&
+             s_App->stockRenderer->HasMesh());
+    IM_CHECK(s_App->gpu.camToolInstance != 0);
+    const cam::SimCursor at = s_App->camCursor;
+    const double removed = s_App->camStockSim.RemovedVolume();
+
+    const int rebuilds = s_App->renderer.rebuilds;
+    ui::InjectDeviceLoss(*s_App, "a GUI test");
+    IM_CHECK(WaitFor(ctx, "the device rebuilt", [rebuilds] {
+      return s_App->renderer.rebuilds == rebuilds + 1 && !s_App->renderer.lost;
+    }));
+    IM_CHECK(WaitFor(ctx, "the stock and the cutter drawn again", [] {
+      return s_App->stockRenderer != nullptr &&
+             s_App->stockRenderer->HasMesh() && s_App->gpu.camToolInstance != 0;
+    }));
+    IM_CHECK(s_App->camPlaybackOpen);
+    IM_CHECK(!(at < s_App->camCursor) && !(s_App->camCursor < at));
+    IM_CHECK(s_App->camStockSim.RemovedVolume() == removed);
+
+    ui::EndCamPlayback(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(!s_App->camPlaybackOpen);
+    s_App->rendererRestartedNoticeUntil = -1.0;
+    s_App->renderer.lastRebuildAt = -1.0;
   };
 
   // docs/cam/gui.md#the-cam-panel: one Add menu per section, and
@@ -3324,9 +3383,9 @@ void RegisterCamGuiTests(ImGuiTestEngine* engine) {
     ui::SeekCamPlayback(*s_App, s_App->camTimeline.CursorAtDistance(
                                     s_App->camTimeline.totalDistance * 0.5));
     ctx->Yield(2);
-    IM_CHECK(s_App->camToolInstance != 0);
+    IM_CHECK(s_App->gpu.camToolInstance != 0);
     const std::optional<glm::mat4> toolXf =
-        s_App->meshRenderer->GetInstanceTransform(s_App->camToolInstance);
+        s_App->meshRenderer->GetInstanceTransform(s_App->gpu.camToolInstance);
     IM_CHECK(toolXf.has_value());
     const glm::vec3 drawnAt = glm::vec3((*toolXf)[3]);
     const glm::vec3 cursorAt(s_App->camTimeline.PositionAt(s_App->camCursor));

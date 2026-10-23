@@ -10,9 +10,10 @@
 
 // Which GPU to use, as a pure decision so both device-picking sites agree and
 // the rule is testable without a Vulkan instance. There are two sites: the
-// renderer builds its device once at startup (main.cpp) and the FEM compute
-// context builds one per run (femgpu/ComputeContext.cpp) — which is why the
-// same preference is "restart" for the viewport and immediate for simulation.
+// renderer builds its device at start and on every rebuild in place
+// (app/GpuOwners.cpp: a change switches the viewport at the next frame
+// boundary) and the FEM compute context builds one per run
+// (femgpu/ComputeContext.cpp: a change applies on the next run).
 //
 // Header-only on purpose: the FEM compute library does not link
 // designer_core, and one shared rule beats two that drift.

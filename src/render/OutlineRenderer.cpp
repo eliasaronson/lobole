@@ -20,9 +20,24 @@
 #include <stdexcept>
 #include <unistd.h>
 
-OutlineRenderer::OutlineRenderer() {}
+uint32_t OutlineRenderer::s_idFloor = 0;
 
-OutlineRenderer::~OutlineRenderer() { Shutdown(); }
+OutlineRenderer::OutlineRenderer()
+    : m_idBase(s_idFloor), m_nextAssetId(s_idFloor + 1),
+      m_nextMeshId(s_idFloor + 1) {}
+
+OutlineRenderer::~OutlineRenderer() {
+  Shutdown();
+  // The next renderer starts above everything this one handed out.
+  s_idFloor = std::max({s_idFloor, m_nextAssetId - 1, m_nextMeshId - 1});
+}
+
+size_t OutlineRenderer::SlotOf(uint32_t id, size_t count) const {
+  if (id <= m_idBase) // 0, or a renderer's before the last device rebuild
+    return SIZE_MAX;
+  const size_t slot = static_cast<size_t>(id - m_idBase - 1);
+  return slot < count ? slot : SIZE_MAX;
+}
 
 bool OutlineRenderer::Initialize(VkDevice device,
                                  VkPhysicalDevice physicalDevice,
@@ -39,7 +54,7 @@ bool OutlineRenderer::Initialize(VkDevice device,
   m_commandPool = commandPool;
 
   // Wide lines: a quick still draws its lines k times wider at k times the
-  // size. main.cpp enables the feature wherever the device has it.
+  // size. app/GpuOwners.cpp enables the feature wherever the device has it.
   VkPhysicalDeviceFeatures features{};
   vkGetPhysicalDeviceFeatures(physicalDevice, &features);
   VkPhysicalDeviceProperties props{};
@@ -714,9 +729,9 @@ uint32_t OutlineRenderer::CreateAsset(const std::vector<Vertex3D>& vertices,
 
 uint32_t OutlineRenderer::AddInstance(uint32_t assetId,
                                       const glm::mat4& transform) {
-  if (assetId == 0 || assetId > m_assets.size() || !m_assets[assetId - 1])
+  if (AssetSlot(assetId) == SIZE_MAX || !m_assets[AssetSlot(assetId)])
     return 0;
-  OutlineAsset& asset = *m_assets[assetId - 1];
+  OutlineAsset& asset = *m_assets[AssetSlot(assetId)];
 
   auto mesh = std::make_unique<OutlineMesh>();
   mesh->assetId = assetId;
@@ -765,16 +780,16 @@ size_t OutlineRenderer::MeshCount() const {
 
 OutlineRenderer::OutlineAsset*
 OutlineRenderer::AssetOf(const OutlineMesh& mesh) {
-  if (mesh.assetId == 0 || mesh.assetId > m_assets.size())
+  if (AssetSlot(mesh.assetId) == SIZE_MAX)
     return nullptr;
-  return m_assets[mesh.assetId - 1].get();
+  return m_assets[AssetSlot(mesh.assetId)].get();
 }
 
 const OutlineRenderer::OutlineAsset*
 OutlineRenderer::AssetOf(const OutlineMesh& mesh) const {
-  if (mesh.assetId == 0 || mesh.assetId > m_assets.size())
+  if (AssetSlot(mesh.assetId) == SIZE_MAX)
     return nullptr;
-  return m_assets[mesh.assetId - 1].get();
+  return m_assets[AssetSlot(mesh.assetId)].get();
 }
 
 void OutlineRenderer::UpdateCamera(const glm::mat4& view,
@@ -871,15 +886,15 @@ void OutlineRenderer::EndAssetBatch() {
 }
 
 void OutlineRenderer::RetainAsset(uint32_t assetId) {
-  if (assetId == 0 || assetId > m_assets.size() || !m_assets[assetId - 1])
+  if (AssetSlot(assetId) == SIZE_MAX || !m_assets[AssetSlot(assetId)])
     return;
-  m_assets[assetId - 1]->refCount++;
+  m_assets[AssetSlot(assetId)]->refCount++;
 }
 
 void OutlineRenderer::ReleaseAsset(uint32_t assetId) {
-  if (assetId == 0 || assetId > m_assets.size() || !m_assets[assetId - 1])
+  if (AssetSlot(assetId) == SIZE_MAX || !m_assets[AssetSlot(assetId)])
     return;
-  OutlineAsset& asset = *m_assets[assetId - 1];
+  OutlineAsset& asset = *m_assets[AssetSlot(assetId)];
   if (asset.refCount <= 0)
     return;
   if (--asset.refCount <= 0) {
@@ -889,14 +904,14 @@ void OutlineRenderer::ReleaseAsset(uint32_t assetId) {
     vkutil::DestroyBuffer(m_device, asset.vertexBuffer,
                           asset.vertexBufferMemory);
     vkutil::DestroyBuffer(m_device, asset.indexBuffer, asset.indexBufferMemory);
-    m_assets[assetId - 1].reset();
+    m_assets[AssetSlot(assetId)].reset();
   }
 }
 
 void OutlineRenderer::RemoveMesh(uint32_t meshId) {
-  if (meshId == 0 || meshId > m_meshes.size())
+  if (MeshSlot(meshId) == SIZE_MAX)
     return;
-  OutlineMesh* mesh = m_meshes[meshId - 1].get();
+  OutlineMesh* mesh = m_meshes[MeshSlot(meshId)].get();
   if (!mesh)
     return;
 
@@ -911,7 +926,7 @@ void OutlineRenderer::RemoveMesh(uint32_t meshId) {
                           asset->vertexBufferMemory);
     vkutil::DestroyBuffer(m_device, asset->indexBuffer,
                           asset->indexBufferMemory);
-    m_assets[mesh->assetId - 1].reset();
+    m_assets[AssetSlot(mesh->assetId)].reset();
   }
   for (int f = 0; f < MAX_FRAMES_IN_FLIGHT; ++f) {
     if (mesh->edgeIndexBuffers[f] != VK_NULL_HANDLE) {
@@ -920,14 +935,14 @@ void OutlineRenderer::RemoveMesh(uint32_t meshId) {
                             &mesh->edgeIndexMapped[f]);
     }
   }
-  m_meshes[meshId - 1].reset();
+  m_meshes[MeshSlot(meshId)].reset();
 }
 
 void OutlineRenderer::SetMeshTransform(uint32_t meshId,
                                        const glm::mat4& transform) {
-  if (meshId > 0 && meshId <= m_meshes.size() && m_meshes[meshId - 1]) {
-    if (m_meshes[meshId - 1]->transform != transform) {
-      m_meshes[meshId - 1]->transform = transform;
+  if (MeshSlot(meshId) != SIZE_MAX && m_meshes[MeshSlot(meshId)]) {
+    if (m_meshes[MeshSlot(meshId)]->transform != transform) {
+      m_meshes[MeshSlot(meshId)]->transform = transform;
       // Silhouettes are classified in mesh-local space against a transformed
       // camera, so a moved occurrence needs a fresh pass.
       m_silhouettesDirty = true;
@@ -936,8 +951,8 @@ void OutlineRenderer::SetMeshTransform(uint32_t meshId,
 }
 
 void OutlineRenderer::SetMeshVisible(uint32_t meshId, bool visible) {
-  if (meshId > 0 && meshId <= m_meshes.size() && m_meshes[meshId - 1])
-    m_meshes[meshId - 1]->visible = visible;
+  if (MeshSlot(meshId) != SIZE_MAX && m_meshes[MeshSlot(meshId)])
+    m_meshes[MeshSlot(meshId)]->visible = visible;
 }
 
 void OutlineRenderer::SetViewport(int32_t x, int32_t y, uint32_t width,

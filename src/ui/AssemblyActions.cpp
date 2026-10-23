@@ -127,7 +127,7 @@ bool UndoAssembly(AppState& state) {
   state.assemblyHistory.undoStamps.pop_back();
   RestoreAssembly(state, std::move(state.assemblyHistory.undo.back()));
   state.assemblyHistory.undo.pop_back();
-  state.syncedDocumentVersion =
+  state.gpu.syncedDocumentVersion =
       UINT64_MAX; // restored state may share a version
   return true;
 }
@@ -142,7 +142,7 @@ bool RedoAssembly(AppState& state) {
   state.assemblyHistory.redoStamps.pop_back();
   RestoreAssembly(state, std::move(state.assemblyHistory.redo.back()));
   state.assemblyHistory.redo.pop_back();
-  state.syncedDocumentVersion = UINT64_MAX;
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
   return true;
 }
 

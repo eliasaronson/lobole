@@ -519,7 +519,7 @@ bool FaultFromString(std::string_view text, bool allowed, Fault* out,
   *out = Fault{};
   if (text.empty())
     return true;
-  std::string accepted = "device_create, swapchain, renderer_init:<";
+  std::string accepted = "device_create, swapchain, rebuild, renderer_init:<";
   for (size_t i = 0; i < std::size(kFaultRenderers); i++)
     accepted += (i ? "|" : "") + std::string(kFaultRenderers[i]);
   accepted += ">";
@@ -536,6 +536,10 @@ bool FaultFromString(std::string_view text, bool allowed, Fault* out,
   }
   if (text == "swapchain") {
     out->kind = Fault::Kind::Swapchain;
+    return true;
+  }
+  if (text == "rebuild") {
+    out->kind = Fault::Kind::Rebuild;
     return true;
   }
   constexpr std::string_view kInit = "renderer_init:";
@@ -556,7 +560,7 @@ bool FaultFromString(std::string_view text, bool allowed, Fault* out,
 
 std::vector<int> DeviceLadder(const std::vector<Device>& devices,
                               const std::string& preferred,
-                              RendererChoice choice) {
+                              RendererChoice choice, int first) {
   std::vector<std::string> names;
   std::vector<int> scores;
   for (const Device& d : devices) {
@@ -566,13 +570,22 @@ std::vector<int> DeviceLadder(const std::vector<Device>& devices,
     scores.push_back(wanted ? d.score : -1);
   }
   std::vector<int> ladder;
-  const int first = devicepref::Choose(names, scores, preferred);
-  if (first < 0)
+  const int chosen = devicepref::Choose(names, scores, preferred);
+  if (chosen < 0)
     return ladder;
-  ladder.push_back(first);
+  // The device asked for first, when it is still a rung at all; the usual
+  // order follows, without it.
+  const bool firstEligible = first >= 0 &&
+                             first < static_cast<int>(devices.size()) &&
+                             scores[static_cast<size_t>(first)] >= 0;
+  if (firstEligible)
+    ladder.push_back(first);
+  if (chosen != first || !firstEligible)
+    ladder.push_back(chosen);
   std::vector<int> rest;
   for (int i = 0; i < static_cast<int>(devices.size()); i++)
-    if (i != first && scores[static_cast<size_t>(i)] >= 0)
+    if (i != chosen && !(firstEligible && i == first) &&
+        scores[static_cast<size_t>(i)] >= 0)
       rest.push_back(i);
   std::stable_sort(rest.begin(), rest.end(), [&](int a, int b) {
     const Device& da = devices[static_cast<size_t>(a)];
@@ -583,6 +596,26 @@ std::vector<int> DeviceLadder(const std::vector<Device>& devices,
   });
   ladder.insert(ladder.end(), rest.begin(), rest.end());
   return ladder;
+}
+
+// ---------------------------------------------------------------------------
+// Rebuilding the device
+
+const char* RebuildReasonName(RebuildReason reason) {
+  switch (reason) {
+  case RebuildReason::DeviceLost:
+    return "device_lost";
+  case RebuildReason::GpuPreference:
+    return "gpu_preference";
+  }
+  return "device_lost";
+}
+
+LossVerdict JudgeLoss(double secondsSinceLastRebuild) {
+  if (secondsSinceLastRebuild >= 0.0 &&
+      secondsSinceLastRebuild < kRebuildRetryWindowSeconds)
+    return LossVerdict::Backstop;
+  return LossVerdict::Rebuild;
 }
 
 // ---------------------------------------------------------------------------

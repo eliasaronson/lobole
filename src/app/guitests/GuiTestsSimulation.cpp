@@ -436,7 +436,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     // part opened after it, in other projects too.
     s_App->simulation.field = ui::SimulationState::Field::Shape;
     ctx->Yield(3);
-    const uint32_t iso = s_App->simulation.topoIsoInstance;
+    const uint32_t iso = s_App->gpu.topoIsoInstance;
     IM_CHECK(iso != 0);
     IM_CHECK(s_App->meshRenderer->GetInstanceTransform(iso).has_value());
     ui::AddPart(*s_App, "Elsewhere");
@@ -766,7 +766,7 @@ void RegisterSimulationGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(contacts.size(), (size_t)1);
     IM_CHECK(!contacts[0].rigidFaces.empty());
     bool tinted = false, ghost = false, meshedGhost = false;
-    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes) {
+    for (const ui::DocumentRenderMesh& m : s_App->gpu.documentMeshes) {
       if (m.occurrenceId == lower) {
         ghost = ghost || s_App->meshRenderer->IsInstanceGhost(m.meshId);
         for (const glm::uvec2& r :

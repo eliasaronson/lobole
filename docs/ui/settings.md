@@ -79,10 +79,10 @@ Each row says which tier it is, so a pending change is visible:
 
 - **Live** — the next frame reads it.
 - **Next time** — the next save, new part or next run of the thing.
-- **Restart** — the render GPU: the swapchain and renderers are built once at
-  startup. The row shows the device in use beside the one chosen. The FEM
-  compute context is created per run, so the same choice applies there
-  immediately.
+
+Nothing waits for a restart: the one setting that did, the render GPU, now
+rebuilds the device in place ([the GPU choice](#the-gpu-choice)), and
+`test_settings.cpp` checks every row is one of the two.
 
 ## The current settings
 
@@ -91,7 +91,7 @@ Each row says which tier it is, so a pending change is visible:
 | Appearance | `ui_font_scale` | Live | 85 / 100 / 120 / 140 %; the font atlas is rebuilt between frames |
 | Appearance | `lock_lights_to_model` | Live | off: the light rig follows the camera; on: fixed in the world where it stands at the home view ([rendering](../rendering/README.md#the-light-rig)) |
 | Navigation | `zoom_to_cursor` | Live | on: the wheel zooms toward what the pointer is over; off: toward the centre of the view ([viewport](README.md#viewport)) |
-| Performance | `gpu_device` | Restart | `""` = automatic (prefers discrete) |
+| Performance | `gpu_device` | Live | `""` = automatic (prefers discrete); a change that moves the first rung rebuilds the device in place |
 | Performance | `shadows` | Live | |
 | Performance | `ssao` | Live | `off`, `half`, `full` |
 | Performance | `idle_throttle` | Live | rest at ~10 Hz when nothing is happening (docs/rendering) |
@@ -108,8 +108,8 @@ state (Show Planes, Show Element Names, Viewport Controls).
 
 Rendering and FEM compute pick their device through one rule
 (`common/DevicePreference.h`) that honours `gpu_device`. A device that cannot
-present to the window is scored ineligible at startup and skipped, with the
-reason recorded, and the row shows that reason instead of "restart to use it".
+present to the window is scored ineligible and skipped, with the reason
+recorded, and the row shows that reason under "Rendering on: <device>".
 Only `vkGetPhysicalDeviceSurfaceSupportKHR` against a real surface is
 trustworthy (`glfwGetPhysicalDevicePresentationSupport` asks the X server,
 which can say yes for a device the driver then refuses), so selection creates
@@ -117,6 +117,16 @@ a throwaway surface.
 The preferred device is the first rung of
 [the device ladder](../rendering/README.md#the-device-ladder): one that fails
 to start falls to the next, and the window says which and why.
+
+A change is Live: at the next frame boundary, when the ladder's first rung is
+another device than the one in use, the device is
+[rebuilt in place](../rendering/README.md#rebuilding-the-device) onto it --
+the document, the undo history and the open tabs carry on. A path-traced
+render, a motion video or a test-engine capture holds the device; the switch
+waits for it, and the row says "Switches when the render finishes".
+`set_settings {gpu_device}` answers once the switch has run, with `renderer`
+saying where it landed. The FEM compute context is created per run, so the
+same choice applies there on the next run.
 
 ## Safe mode
 
@@ -262,7 +272,9 @@ the JSON names above.
   (`every preference is on exactly one page`); a fixture table with a new
   section gets a new page (`a new section is a new preferences page`);
   `a section resets alone`.
-- GUI: `settings/a_restart_row_says_restart`,
+- GUI: `settings/the_gpu_row_switches_live`,
+  `app/device_rebuild_keeps_the_session` (the switch onto another device and
+  back, where one can show the window),
   `settings/a_change_reaches_the_renderer`,
   `settings/each_page_shows_its_own_rows` (each page's rows and no others, and
   no sideways scroll at 100 % and 150 %), `settings/search_finds_rows_on_any_page`,

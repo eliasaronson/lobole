@@ -65,7 +65,7 @@ std::optional<AssemblyElementHit>
 AssemblyElementAt(AppState& state, uint32_t meshId, uint32_t index, bool edge) {
   if (!state.assembly)
     return std::nullopt;
-  for (const DocumentRenderMesh& m : state.documentMeshes) {
+  for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
     if (m.meshId != meshId)
       continue;
     if (m.occurrenceId == 0)
@@ -99,7 +99,7 @@ const Body* BodyOfMesh(const AppState& state, uint32_t meshId) {
   // jobPartId -- which is what tells two parts sharing a feature id apart.
   const std::vector<Body>& bodies =
       ui::ViewportBodies(const_cast<AppState&>(state));
-  for (const DocumentRenderMesh& m : state.documentMeshes)
+  for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
     if (m.meshId == meshId && m.bodyIndex < bodies.size())
       return &bodies[m.bodyIndex];
   return nullptr;
@@ -186,7 +186,7 @@ std::vector<Candidate> Candidates(AppState& state, const Ray& ray,
   if (kinds & KindBit(SelectionItem::Kind::Occurrence)) {
     // Assembly tab: a face hit selects the whole occurrence it belongs to.
     if (face.hit) {
-      for (const DocumentRenderMesh& m : state.documentMeshes) {
+      for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
         if (m.meshId == face.meshId && m.occurrenceId != 0) {
           Candidate c{{SelectionItem::Kind::Occurrence, m.occurrenceId, {}},
                       face.meshId,
@@ -480,7 +480,7 @@ bool ResolveElementItem(const AppState& state, const SelectionItem& item,
   } else {
     return false;
   }
-  for (const DocumentRenderMesh& m : state.documentMeshes) {
+  for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
     if (m.occurrenceId != item.id || m.bodyIndex >= bodies->size())
       continue;
     const Body& body = (*bodies)[m.bodyIndex];
@@ -630,11 +630,12 @@ void HandleSelectionInput(AppState& state, bool overViewport,
       // face. Light the whole body and its caps, the way an assembly lights
       // a whole occurrence: pointing at a cut must show SOMETHING.
       const std::vector<Body>& bodies = ui::ViewportBodies(state);
-      for (const DocumentRenderMesh& m : state.documentMeshes) {
+      for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
         if (m.bodyIndex < bodies.size() &&
             bodies[m.bodyIndex].createdBy == top.item.id) {
           state.meshRenderer->HoverInstance(m.meshId);
-          for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+          for (const AppState::GpuProjection::SectionCapMesh& cap :
+               state.gpu.sectionCapMeshes)
             if (cap.occurrenceId == 0 && cap.bodyIndex == m.bodyIndex)
               state.meshRenderer->HoverInstance(cap.meshId);
         }
@@ -648,11 +649,12 @@ void HandleSelectionInput(AppState& state, bool overViewport,
         // mesh that belongs to it, the way selecting one does. The hit
         // face's range alone was a patch on a part and nothing at all on a
         // glass pane.
-        for (const DocumentRenderMesh& m : state.documentMeshes)
+        for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
           if (MeshIsOf(state, m, top.item))
             state.meshRenderer->HoverInstance(m.meshId);
         if (top.item.innerPath.empty())
-          for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+          for (const AppState::GpuProjection::SectionCapMesh& cap :
+               state.gpu.sectionCapMeshes)
             if (cap.occurrenceId == top.item.id)
               state.meshRenderer->HoverInstance(cap.meshId);
       } else {
@@ -763,14 +765,15 @@ void SyncSelectionHighlights(AppState& state) {
     for (const SelectionItem& it : state.selection.items) {
       if (it.kind != SelectionItem::Kind::Occurrence)
         continue;
-      for (const DocumentRenderMesh& m : state.documentMeshes)
+      for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
         if (MeshIsOf(state, m, it))
           state.meshRenderer->HighlightInstance(m.meshId);
       // Its section caps too: on a sectioned part the cut face is most of
       // what you can see of it, and leaving it unlit while the walls light
       // reads as the highlight landing on something else.
       if (it.innerPath.empty())
-        for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+        for (const AppState::GpuProjection::SectionCapMesh& cap :
+             state.gpu.sectionCapMeshes)
           if (cap.occurrenceId == it.id)
             state.meshRenderer->HighlightInstance(cap.meshId);
     }
@@ -781,10 +784,11 @@ void SyncSelectionHighlights(AppState& state) {
         // A whole OCCURRENCE lights every mesh that belongs to it, the way
         // selecting it would — there is no single face to shade.
         if (e.kind == MeasureState::Element::Kind::Occurrence) {
-          for (const DocumentRenderMesh& m : state.documentMeshes)
+          for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
             if (m.occurrenceId == e.occurrenceId)
               state.meshRenderer->HighlightInstance(m.meshId);
-          for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+          for (const AppState::GpuProjection::SectionCapMesh& cap :
+               state.gpu.sectionCapMeshes)
             if (cap.occurrenceId == e.occurrenceId)
               state.meshRenderer->HighlightInstance(cap.meshId);
           continue;
@@ -843,7 +847,7 @@ void AppendSelectionPrimitives(AppState& state, std::vector<PrimVertex>& out) {
 
   const auto drawEdge = [&](uint32_t meshId, uint32_t edgeIndex,
                             const glm::vec4& color) {
-    for (const DocumentRenderMesh& m : state.documentMeshes) {
+    for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
       if (m.meshId != meshId)
         continue;
       if (edgeIndex >= m.edgePolylines.size())

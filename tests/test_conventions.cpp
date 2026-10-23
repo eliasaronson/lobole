@@ -37,6 +37,7 @@
 
 #include <catch2/catch_test_macros.hpp>
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <filesystem>
@@ -601,46 +602,191 @@ TEST_CASE("every tool-session sentinel is in the registry", "[convention]") {
   }
 }
 
-TEST_CASE("every scene renderer is in the draw-order registry",
+// --- The owner table (docs/rendering/README.md#rebuilding-the-device) ------
+
+namespace {
+
+std::string ReadSource(const std::string& rel) {
+  std::ifstream f(fs::path(TestSourceDir()) / rel);
+  REQUIRE(f.good());
+  std::stringstream ss;
+  ss << f.rdbuf();
+  return ss.str();
+}
+
+// The code of `text`, with // and /* */ comments blanked (newlines kept, so
+// line numbers survive). String literals are left: none of the patterns
+// below can be spelled inside one by accident that matters.
+std::string CodeOnly(const std::string& text) {
+  std::string out = text;
+  bool inLine = false, inBlock = false, inString = false;
+  for (size_t i = 0; i < out.size(); ++i) {
+    const char c = out[i], n = i + 1 < out.size() ? out[i + 1] : '\0';
+    if (inLine) {
+      if (c == '\n')
+        inLine = false;
+      else
+        out[i] = ' ';
+    } else if (inBlock) {
+      if (c == '*' && n == '/') {
+        out[i] = out[i + 1] = ' ';
+        ++i;
+        inBlock = false;
+      } else if (c != '\n') {
+        out[i] = ' ';
+      }
+    } else if (inString) {
+      if (c == '\\')
+        ++i;
+      else if (c == '"' || c == '\n')
+        inString = false;
+    } else if (c == '/' && n == '/') {
+      inLine = true;
+      out[i] = ' ';
+    } else if (c == '/' && n == '*') {
+      inBlock = true;
+      out[i] = out[i + 1] = ' ';
+      ++i;
+    } else if (c == '"') {
+      inString = true;
+    }
+  }
+  return out;
+}
+
+// The text of the brace block that starts at the first '{' after `at`.
+std::string BlockAfter(const std::string& text, size_t at) {
+  const size_t open = text.find('{', at);
+  REQUIRE(open != std::string::npos);
+  int depth = 0;
+  for (size_t i = open; i < text.size(); ++i) {
+    if (text[i] == '{')
+      ++depth;
+    else if (text[i] == '}' && --depth == 0)
+      return text.substr(open, i - open + 1);
+  }
+  FAIL("unbalanced braces after " << text.substr(at, 40));
+  return {};
+}
+
+// Files (relative path -> code) that make a Vulkan object, ImGui's backend
+// included, and are neither a row's file nor a named transient user.
+std::vector<std::string>
+UnclassifiedVulkanOwners(const std::map<std::string, std::string>& code,
+                         const std::set<std::string>& rowFiles,
+                         const std::set<std::string>& transient) {
+  static const std::regex makes(
+      R"(\b(vkCreate\w*|vkAllocate\w*|ImGui_ImplVulkan\w*)\s*\()");
+  std::vector<std::string> out;
+  for (const auto& [rel, text] : code)
+    if (std::regex_search(text, makes) && !rowFiles.contains(rel) &&
+        !transient.contains(rel))
+      out.push_back(rel);
+  return out;
+}
+
+// Lines of `code` calling `fn(` whose own line and the three before it name
+// none of `beside`.
+std::vector<int> CallsNotBeside(const std::string& code, const std::string& fn,
+                                const std::vector<std::string>& beside) {
+  std::vector<std::string> lines;
+  std::stringstream ss(code);
+  for (std::string l; std::getline(ss, l);)
+    lines.push_back(l);
+  const std::regex call("\\b" + fn + "\\s*\\(");
+  std::vector<int> out;
+  for (size_t i = 0; i < lines.size(); ++i) {
+    if (!std::regex_search(lines[i], call))
+      continue;
+    bool ok = false;
+    for (size_t k = i >= 3 ? i - 3 : 0; k <= i && !ok; ++k)
+      for (const std::string& b : beside)
+        ok = ok || lines[k].find(b) != std::string::npos;
+    if (!ok)
+      out.push_back(static_cast<int>(i + 1));
+  }
+  return out;
+}
+
+// AppState.h's fields that name something a renderer holds -- an instance or
+// mesh id, a "drawn" stamp -- declared outside AppState::GpuProjection.
+std::vector<std::string> GpuBeliefsOutsideProjection(const std::string& code) {
+  const size_t at = code.find("struct GpuProjection");
+  const std::string inside =
+      at == std::string::npos ? std::string() : BlockAfter(code, at);
+  const size_t insideAt =
+      at == std::string::npos ? std::string::npos : code.find(inside, at);
+  // The element type of GpuProjection::documentMeshes, declared at namespace
+  // scope because the pick and the selection pipeline name it.
+  const size_t elemAt = code.find("struct DocumentRenderMesh {");
+  const std::string elem =
+      elemAt == std::string::npos ? std::string() : BlockAfter(code, elemAt);
+  const size_t elemPos =
+      elemAt == std::string::npos ? std::string::npos : code.find(elem, elemAt);
+  // Names that match and are not the renderers': sketch entity ids, and a
+  // document's own identity.
+  static const std::set<std::string> notGpu = {"lastDrawnStage",
+                                               "sourceInstance"};
+  static const std::regex decl(
+      R"(^\s*(?:const\s+|static\s+|mutable\s+)*[\w:]+(?:<[^;]*>)?\s+([^;(){}]*);)");
+  static const std::regex gpu(
+      R"(\b(\w*Instances?|meshId|outlineId|\w*Drawn[A-Z]\w*)\b)");
+  std::vector<std::string> out;
+  size_t lineStart = 0;
+  while (lineStart < code.size()) {
+    size_t lineEnd = code.find('\n', lineStart);
+    if (lineEnd == std::string::npos)
+      lineEnd = code.size();
+    const std::string line = code.substr(lineStart, lineEnd - lineStart);
+    const bool inProjection = insideAt != std::string::npos &&
+                              lineStart >= insideAt &&
+                              lineStart < insideAt + inside.size();
+    const bool inElement = elemPos != std::string::npos &&
+                           lineStart >= elemPos &&
+                           lineStart < elemPos + elem.size();
+    std::smatch m;
+    if (!inProjection && !inElement && std::regex_search(line, m, decl)) {
+      const std::string names = m[1];
+      for (std::sregex_iterator it(names.begin(), names.end(), gpu), end;
+           it != end; ++it)
+        if (!notGpu.contains((*it)[1].str()))
+          out.push_back((*it)[1].str());
+    }
+    lineStart = lineEnd + 1;
+  }
+  return out;
+}
+
+} // namespace
+
+TEST_CASE("every scene renderer has a row and a place in the draw order",
           "[convention]") {
-  // One list is left after the wiring refactor — `RegisterSceneRenderers` in
-  // main.cpp, which is the draw order — and everything per-frame loops over
-  // it. A renderer that implements the frame contract and is not in it draws
-  // nothing at all, in every mode, which is at least loud. Being missing from
-  // the OLD list was worse and is what this gate was written for: it drew
-  // full-window while the camera aspect was the sub-region between the
-  // panels, and shipped twice.
+  // `RegisterSceneRenderers` in app/GpuOwners.cpp is the draw order, and
+  // every per-frame duty loops over it. A renderer that implements the frame
+  // contract and is not in it draws nothing at all, in every mode, which is
+  // at least loud. Being missing from the OLD per-frame list was worse and is
+  // what this gate was written for: it drew full-window while the camera
+  // aspect was the sub-region between the panels, and shipped twice.
   //
   //   - 0346a8e, the FEM field: every field silently offset.
   //   - 4a3083d, the CAM stock: a workpiece not parallel to the part.
   //
-  // Neither was visible in review, because an `--offscreen` instance has no
-  // panels and there the sub-region IS the whole framebuffer.
+  // And a row in the owner table, which is its construction AND its
+  // teardown: the underlay was once missing from the teardown list and
+  // destructed at process exit on a freed device (a222bc8, "the
+  // long-standing shutdown crash"); one with no row would survive a device
+  // rebuild holding the old device's handles.
   //
-  // The discriminator is deriving from SceneRenderer — the frame contract
-  // itself. (It used to match `void SetViewport(int32_t`, which stopped
-  // working the moment the interface existed: SceneRenderer.h is a
-  // `*Renderer.h` declaring exactly that signature, so the gate demanded the
-  // abstract base be registered. Asking who IMPLEMENTS the contract cannot
-  // make that mistake.) The prepass renderers — shadow, SSAO, ray tracing —
-  // do not implement it and are correctly absent.
-  const std::string main = [] {
-    std::ifstream f(fs::path(TestSourceDir()) / "src/app/main.cpp");
-    std::stringstream ss;
-    ss << f.rdbuf();
-    return ss.str();
-  }();
-  const size_t at = main.find("void RegisterSceneRenderers()");
+  // The discriminator is deriving from SceneRenderer -- the frame contract
+  // itself. The prepass renderers (shadow, SSAO, ray tracing) do not
+  // implement it, and have rows of their own.
+  const std::string owners = CodeOnly(ReadSource("src/app/GpuOwners.cpp"));
+  const size_t at = owners.find("void RegisterSceneRenderers()");
   REQUIRE(at != std::string::npos);
-  const size_t end = main.find("\n}", at);
-  REQUIRE(end != std::string::npos);
-  const std::string body = main.substr(at, end - at);
-
-  const size_t tat = main.find("void ShutdownSceneRenderers()");
+  const std::string body = BlockAfter(owners, at);
+  const size_t tat = owners.find("const Row kRows[]");
   REQUIRE(tat != std::string::npos);
-  const size_t tend = main.find("\n}", tat);
-  REQUIRE(tend != std::string::npos);
-  const std::string teardown = main.substr(tat, tend - tat);
+  const std::string table = BlockAfter(owners, tat);
 
   int checked = 0;
   for (const SourceFile& f : SourcesUnder("src/render", ".h")) {
@@ -654,18 +800,217 @@ TEST_CASE("every scene renderer is in the draw-order registry",
             "never adds it — it will draw nothing. Add g_"
          << name << " in draw order.");
     CHECK(body.find("g_" + name) != std::string::npos);
-    // And the teardown side, which is the OTHER list this bug class has come
-    // out of: the underlay was missing from it and destructed at process exit
-    // on a freed device (a222bc8, "the long-standing shutdown crash").
-    INFO(Relative(f.path)
-         << " is never torn down — ShutdownSceneRenderers() must reset g_"
-         << name << " while the device is still alive.");
-    CHECK(teardown.find("g_" + name) != std::string::npos);
+    INFO(Relative(f.path) << " has no row in GpuOwners.cpp's kRows: it is "
+                             "neither built by a rebuild nor torn down "
+                             "while the device is alive. Add \"g_"
+                          << name << "\" with its create and destroy.");
+    CHECK(table.find("\"g_" + name + "\"") != std::string::npos);
     checked++;
   }
   // If the discriminator ever stops matching anything, this test would pass
   // by doing nothing at all.
   CHECK(checked >= 6);
+}
+
+TEST_CASE("every file that makes a Vulkan object is an owner's or named",
+          "[convention]") {
+  // A rebuild in place destroys every row and makes it again
+  // (docs/rendering/README.md#rebuilding-the-device). A Vulkan object made
+  // anywhere else outlives its device: a handle used after the rebuild, on a
+  // device that no longer exists. So a file that calls vkCreate*,
+  // vkAllocate* or ImGui's Vulkan backend is the file of a row, or a
+  // transient user whose objects live inside one call -- and a new one fails
+  // here until someone decides which.
+  const std::string owners = CodeOnly(ReadSource("src/app/GpuOwners.cpp"));
+  const std::string table =
+      BlockAfter(owners, owners.find("const Row kRows[]"));
+  std::set<std::string> rowFiles = {"src/app/GpuOwners.cpp"};
+  // A row named g_<Class> (or g_SkyIBL, more IBLTextures) is <Class>.cpp's.
+  std::map<std::string, std::string> code;
+  std::map<std::string, std::string> byStem;
+  for (const char* dir : {"src/render", "src/cad", "src/app", "src/ui",
+                          "src/remote", "src/core", "src/common"})
+    for (const std::string ext : {".cpp", ".h"})
+      for (const SourceFile& f : SourcesUnder(dir, ext)) {
+        const std::string rel = Relative(f.path);
+        code[rel] = CodeOnly(f.text);
+        if (ext == ".cpp")
+          byStem[f.path.stem().string()] = rel;
+      }
+  const std::regex rowName("\"g_(\\w+)\"");
+  int rows = 0;
+  for (std::sregex_iterator it(table.begin(), table.end(), rowName), end;
+       it != end; ++it, ++rows) {
+    const std::string cls =
+        (*it)[1] == "SkyIBL" ? std::string("IBLTextures") : (*it)[1].str();
+    INFO("row g_" << cls << " names no source file " << cls << ".cpp");
+    REQUIRE(byStem.contains(cls));
+    rowFiles.insert(byStem[cls]);
+    // A class's header is its own (inline helpers, function pointers).
+    std::string h = byStem[cls];
+    rowFiles.insert(h.substr(0, h.size() - 4) + ".h");
+  }
+  CHECK(rows >= 12);
+  // Transient users: what they make lives inside one call, or is a row's
+  // object remade in place by the frame.
+  const std::set<std::string> transient = {
+      // One capture each: its image, memory and command buffer go before it
+      // returns.
+      "src/render/Screenshot.cpp",
+      // A motion video's frames, behind ViewportFrameCapture, which lives
+      // for one slice of the frame loop.
+      "src/render/FrameStream.cpp",
+      // The helpers every renderer calls (a buffer, an image, a one-shot
+      // command buffer): the CALLER owns what they make.
+      "src/render/VulkanCommon.cpp",
+      "src/render/VulkanCommon.h",
+      // The frame loop: it recreates the window row's swapchain in place
+      // (ImGui_ImplVulkanH_CreateOrResizeWindow) and draws with ImGui's
+      // backend; it owns nothing.
+      "src/app/main.cpp",
+  };
+  const std::vector<std::string> unclassified =
+      UnclassifiedVulkanOwners(code, rowFiles, transient);
+  for (const std::string& f : unclassified)
+    INFO(f << " makes a Vulkan object but is neither a row's file in "
+              "GpuOwners.cpp nor a named transient user: a device rebuild "
+              "would leave its objects on the old device. Give it a row, or "
+              "name it here with why it owns nothing.");
+  CHECK(unclassified.empty());
+
+  // The gate fails on what it is for: a file that makes a buffer and is
+  // nobody's.
+  const std::map<std::string, std::string> planted = {
+      {"src/render/Stray.cpp", "void F() { vkCreateBuffer(d, &i, a, &b); }"},
+      {"src/ui/Thumb.cpp", "x = ImGui_ImplVulkan_AddTexture(s, v, l);"},
+      {"src/render/Quiet.cpp", "// vkCreateBuffer( in a comment only\n"},
+  };
+  std::map<std::string, std::string> plantedCode;
+  for (const auto& [k, v] : planted)
+    plantedCode[k] = CodeOnly(v);
+  CHECK(UnclassifiedVulkanOwners(plantedCode, rowFiles, transient) ==
+        std::vector<std::string>{"src/render/Stray.cpp", "src/ui/Thumb.cpp"});
+}
+
+TEST_CASE("a device rebuild has exactly the two triggers", "[convention]") {
+  // RequestDeviceRebuild has two reasons and two calls, both at the frame
+  // boundary (docs/rendering/README.md#rebuilding-the-device): a lost device,
+  // and a gpu_device change that moves the first rung. Nothing else rebuilds
+  // -- not a lost surface, not a failed swapchain recreate, not out of
+  // memory, a renderer that will not start, a slow frame or a stall -- or a
+  // problem a rebuild cannot fix becomes a rebuild every frame.
+  std::map<std::string, std::string> code;
+  for (const char* dir :
+       {"src/app", "src/ui", "src/remote", "src/render", "src/core", "src/cad"})
+    for (const std::string ext : {".cpp", ".h"})
+      for (const SourceFile& f : SourcesUnder(dir, ext))
+        code[Relative(f.path)] = CodeOnly(f.text);
+  const std::regex request(R"(\bRequestDeviceRebuild\s*\(([^)]*)\))");
+  std::vector<std::string> calls;
+  for (const auto& [rel, text] : code)
+    for (std::sregex_iterator it(text.begin(), text.end(), request), end;
+         it != end; ++it) {
+      const std::string args = (*it)[1];
+      if (args.find("startup::RebuildReason reason") != std::string::npos)
+        continue; // the definition
+      calls.push_back(rel + ": " + args);
+    }
+  std::sort(calls.begin(), calls.end());
+  CHECK(calls ==
+        std::vector<std::string>{
+            "src/app/GpuOwners.cpp: startup::RebuildReason::DeviceLost",
+            "src/app/GpuOwners.cpp: startup::RebuildReason::GpuPreference"});
+
+  // DeviceLost is set by MarkDeviceLost alone, beside the result that says
+  // so: VK_ERROR_DEVICE_LOST, or vkutil::DeviceLostSeen() for a one-shot
+  // submit's. InjectDeviceLoss is the one other caller, for debug_fault and
+  // the GUI test of a rebuild.
+  const std::vector<std::string> beside = {"VK_ERROR_DEVICE_LOST",
+                                           "DeviceLostSeen"};
+  for (const auto& [rel, text] : code) {
+    if (rel == "src/ui/RendererSync.h")
+      continue; // the declarations
+    std::string body = text;
+    if (rel == "src/ui/RendererSync.cpp") {
+      // Its definition, and InjectDeviceLoss's body, which calls it.
+      for (const char* fn :
+           {"void MarkDeviceLost(", "void InjectDeviceLoss("}) {
+        const size_t at = body.find(fn);
+        REQUIRE(at != std::string::npos);
+        const size_t end = body.find("\n}", at);
+        body.replace(
+            at, end - at,
+            std::string(static_cast<size_t>(std::count(
+                            body.begin() + at, body.begin() + end, '\n')),
+                        '\n'));
+      }
+    }
+    for (int line : CallsNotBeside(body, "MarkDeviceLost", beside))
+      FAIL_CHECK(rel << ":" << line
+                     << " calls MarkDeviceLost away from a "
+                        "VK_ERROR_DEVICE_LOST result or DeviceLostSeen(): a "
+                        "loss that is not one rebuilds a healthy device");
+    if (std::regex_search(text, std::regex(R"(\bInjectDeviceLoss\s*\()")) &&
+        rel != "src/ui/RendererSync.cpp" && rel != "src/ui/RendererSync.h" &&
+        rel != "src/remote/RemoteDispatch.cpp" &&
+        rel.rfind("src/app/guitests/", 0) != 0)
+      FAIL_CHECK(rel << " injects a device loss: only debug_fault and the "
+                        "GUI tests may");
+    // And nothing else sets the flag by hand.
+    if (std::regex_search(text, std::regex(R"(renderer\.lost\s*=\s*true)")) &&
+        rel != "src/ui/RendererSync.cpp" && rel != "src/app/GpuOwners.cpp")
+      FAIL_CHECK(rel << " sets renderer.lost itself: ui::MarkDeviceLost is "
+                        "the one way a loss is recorded");
+  }
+
+  // The gate sees what it is for.
+  CHECK(CallsNotBeside("if (r == VK_ERROR_OUT_OF_DATE_KHR)\n"
+                       "  ui::MarkDeviceLost(app, \"x\");\n",
+                       "MarkDeviceLost", beside) == std::vector<int>{2});
+  CHECK(CallsNotBeside("if (r == VK_ERROR_DEVICE_LOST) {\n"
+                       "  ui::MarkDeviceLost(app, \"x\");\n",
+                       "MarkDeviceLost", beside)
+            .empty());
+}
+
+TEST_CASE("every id a renderer holds is in AppState::GpuProjection",
+          "[convention]") {
+  // A rebuilt device makes new renderers that hold none of what the old
+  // ones did, and ui::ForgetGpuProjection forgets it all with `gpu = {}`
+  // (docs/rendering/README.md#rebuilding-the-device). An instance id, a mesh
+  // id or a "drawn" stamp declared anywhere else in AppState survives the
+  // rebuild and names something that no longer exists: the renderers' ids
+  // start above the last generation's, so it is a no-op rather than an alias,
+  // but the thing it stood for is then never drawn again.
+  const std::string appState = CodeOnly(ReadSource("src/ui/AppState.h"));
+  const std::vector<std::string> outside =
+      GpuBeliefsOutsideProjection(appState);
+  for (const std::string& f : outside)
+    INFO("AppState.h declares " << f
+                                << " outside GpuProjection: move it "
+                                   "into AppState::GpuProjection, which "
+                                   "a device rebuild forgets whole");
+  CHECK(outside.empty());
+  // DocumentRenderMesh is allowed only because GpuProjection holds it.
+  const std::string projection =
+      BlockAfter(appState, appState.find("struct GpuProjection"));
+  CHECK(projection.find("std::vector<DocumentRenderMesh>") !=
+        std::string::npos);
+  size_t uses = 0;
+  for (size_t at = appState.find("DocumentRenderMesh"); at != std::string::npos;
+       at = appState.find("DocumentRenderMesh", at + 1))
+    ++uses;
+  CHECK(uses == 2); // its definition, and documentMeshes
+
+  // The gate fails on what it is for.
+  CHECK(GpuBeliefsOutsideProjection("struct AppState {\n"
+                                    "  uint32_t thumbnailInstance = 0;\n"
+                                    "  uint64_t gizmoDrawnKey = 0;\n"
+                                    "  struct GpuProjection {\n"
+                                    "    uint32_t cutterInstance = 0;\n"
+                                    "  };\n"
+                                    "};\n") ==
+        std::vector<std::string>{"thumbnailInstance", "gizmoDrawnKey"});
 }
 
 // --- The binary you are testing is the source you are looking at -----------

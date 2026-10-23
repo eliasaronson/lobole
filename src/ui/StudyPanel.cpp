@@ -904,7 +904,7 @@ void DrawTopoResults(AppState& state, const fem::Study& s) {
   bool ghost = state.topoGhostStudyId == s.id;
   if (ImGui::Checkbox("Shape guide (modeling overlay)###topo_ghost", &ghost)) {
     state.topoGhostStudyId = ghost ? s.id : 0;
-    state.syncedDocumentVersion = UINT64_MAX; // rebuild renderers
+    state.gpu.syncedDocumentVersion = UINT64_MAX; // rebuild renderers
   }
 }
 
@@ -2133,7 +2133,7 @@ void AppendSimulationFaceTints(AppState& state) {
   // ExitSimulation's forced resync, so the ghosting needs no undo.
   for (const fem::Participant& pt : s->participants)
     if (pt.role == fem::ParticipantRole::Rigid)
-      for (const DocumentRenderMesh& m : state.documentMeshes)
+      for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
         if (m.occurrenceId == pt.occurrenceId &&
             !state.meshRenderer->IsInstanceGhost(m.meshId))
           state.meshRenderer->SetInstanceGhost(m.meshId, 0.35f);
@@ -2141,7 +2141,7 @@ void AppendSimulationFaceTints(AppState& state) {
   for (const fem::BondPatch& bond : SimulationBonds(state)) {
     const auto tintSide = [&](uint64_t occ, int body,
                               const std::vector<int>& faces) {
-      for (const DocumentRenderMesh& m : state.documentMeshes) {
+      for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
         if (m.occurrenceId != occ || static_cast<int>(m.bodyIndex) != body)
           continue;
         for (int face : faces) {
@@ -2167,7 +2167,7 @@ void AppendSimulationFaceTints(AppState& state) {
       wanted = wanted || load.contactWith == patch.rigidOccurrenceId;
     if (!wanted)
       continue;
-    for (const DocumentRenderMesh& m : state.documentMeshes) {
+    for (const DocumentRenderMesh& m : state.gpu.documentMeshes) {
       if (m.occurrenceId != patch.rigidOccurrenceId ||
           static_cast<int>(m.bodyIndex) != patch.rigidBody)
         continue;
@@ -2278,7 +2278,7 @@ void DrawSimulationLabels(AppState& state) {
         if (patch.rigidOccurrenceId != load.contactWith ||
             patch.rigidFaces.empty())
           continue;
-        for (const DocumentRenderMesh& m : state.documentMeshes)
+        for (const DocumentRenderMesh& m : state.gpu.documentMeshes)
           if (m.occurrenceId == patch.rigidOccurrenceId &&
               static_cast<int>(m.bodyIndex) == patch.rigidBody) {
             label(state.faceSelector->GetFaceCenter(

@@ -605,7 +605,8 @@ it in fields, a `diagnostic`:
 `code` is `missing_argument`, `unknown_argument`, `invalid_argument` (a
 type, an enum, a range or a shape) or `stale_revision`, plus the inspection
 methods' own (`stale_snapshot`, `budget_exceeded`, …), `device_lost` (a
-method that draws, once the graphics device is lost:
+method that draws, once the graphics device is lost and a rebuild in place
+could not save it -- while one is being rebuilt requests wait instead:
 [rendering](../rendering/README.md#a-lost-device)), and **`internal`**:
 the handler fell over rather than refused. That is any exception that is not
 a `std::runtime_error` (which every deliberate refusal throws) or nlohmann's

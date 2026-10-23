@@ -980,7 +980,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
       s_App->assembly->AddOccurrence(occ);
     }
     ctx->Yield(2);
-    IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)0);
+    IM_CHECK_EQ(s_App->gpu.sectionCapMeshes.size(), (size_t)0);
 
     // The toolbar button opens the tool AND seeds the first cut.
     ToolbarClick(ctx, "###tb_section");
@@ -996,7 +996,7 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(p0.w > glm::dot(bmin, n) && p0.w < glm::dot(bmax, n));
 
     // One cap per cut body per occurrence — the whole point.
-    IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)2);
+    IM_CHECK_EQ(s_App->gpu.sectionCapMeshes.size(), (size_t)2);
 
     // Reverse keeps the other side: same surface, opposite half-space.
     const uint64_t firstId = s_App->sections[0].id;
@@ -1006,20 +1006,20 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->sections[0].reverse);
     const glm::vec4 p1 = ui::SectionPlaneOf(*s_App, s_App->sections[0]);
     IM_CHECK(glm::dot(glm::vec3(p1), n) < 0.0f);            // flipped normal
-    IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)2); // still capped
+    IM_CHECK_EQ(s_App->gpu.sectionCapMeshes.size(), (size_t)2); // still capped
 
     // A second cut, which must intersect the first (and trim its caps).
     ctx->ItemClick("###add");
     ctx->Yield(3);
     IM_CHECK_EQ(s_App->sections.size(), (size_t)2);
     IM_CHECK(s_App->sections[1].id != firstId);
-    IM_CHECK_GT(s_App->sectionCapMeshes.size(), (size_t)0);
+    IM_CHECK_GT(s_App->gpu.sectionCapMeshes.size(), (size_t)0);
 
     // Deleting a row takes its cut with it.
     ctx->ItemClick("###clear");
     ctx->Yield(3);
     IM_CHECK_EQ(s_App->sections.size(), (size_t)0);
-    IM_CHECK_EQ(s_App->sectionCapMeshes.size(), (size_t)0);
+    IM_CHECK_EQ(s_App->gpu.sectionCapMeshes.size(), (size_t)0);
   };
 
   // A cut is a fragment discard, so the PICK has to be told about it too:
@@ -1270,8 +1270,8 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     // A rebuild removes and re-adds every mesh (and recomputes an OCC
     // half-space boolean per body), so mesh ids moving mid-drag IS the lag:
     // on an assembly that ran for every part, every frame.
-    IM_CHECK(!s_App->documentMeshes.empty());
-    const uint32_t meshIdBefore = s_App->documentMeshes[0].meshId;
+    IM_CHECK(!s_App->gpu.documentMeshes.empty());
+    const uint32_t meshIdBefore = s_App->gpu.documentMeshes[0].meshId;
 
     ctx->MouseDown(ImGuiMouseButton_Left);
     ctx->MouseMoveToPos(ImVec2(to.x, to.y));
@@ -1281,13 +1281,13 @@ void RegisterViewportGuiTests(ImGuiTestEngine* engine) {
     // Mid-drag: the cut previews through the shader clip, and NOTHING was
     // rebuilt. The caps settle on release, exactly as they already did for
     // the tool window's offset slider.
-    IM_CHECK_EQ(s_App->documentMeshes[0].meshId, meshIdBefore);
+    IM_CHECK_EQ(s_App->gpu.documentMeshes[0].meshId, meshIdBefore);
     ctx->MouseUp(ImGuiMouseButton_Left);
     ctx->Yield(3);
     IM_CHECK(std::abs(s_App->sections[0].offset - before) > 1e-3f);
     IM_CHECK(s_App->selection.Empty()); // the arrow took it, not the part
     // ...and on release the caps DO follow: the rebuild happened.
-    IM_CHECK(s_App->documentMeshes[0].meshId != meshIdBefore);
+    IM_CHECK(s_App->gpu.documentMeshes[0].meshId != meshIdBefore);
   };
 
   // Inserting a SUB-ASSEMBLY through the UI. Until this landed the only way

@@ -216,6 +216,10 @@ struct ToolCase {
 extern const ToolCase kToolCases[38];
 const ToolCase* FindToolCase(const char* testName);
 
+// A file under tests/fixtures/ in the source tree ("images/checker16x12.png").
+// Defined in GuiTestsSketch.cpp, the one file that knows the source dir.
+std::string SourceFixture(const std::string& rel);
+
 void EnterHoleSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);
 void EnterSketchOnPlane(ImGuiTestContext* ctx, int planeIdx);
 void AddRectSketch(ImGuiTestContext* ctx, int planeIdx, float half,

@@ -134,8 +134,8 @@ them:
 - An **MSAA setting** (the sample count is chosen automatically, capped at
   4x, and is baked into every pipeline).
 - **Real-time hybrid ray tracing** in the viewport; ray tracing is the offline
-  `render_still` path today. It needs `main.cpp`'s Vulkan setup factored into
-  a shared context first.
+  `render_still` path today. The device and renderers are one owner table
+  now (`app/GpuOwners.cpp`); it needs a TLAS kept current across edits.
 - Shaded fill of sketch regions.
 - Glass in the viewport: a per-body transmission override, and panes sorted
   back to front.
@@ -153,8 +153,9 @@ Split what the next feature extends, not as a standalone sweep:
   each, because its ordering is load-bearing and it has no headless coverage.
 - The per-tool state structs inside `ui/AppState.h` (sketch edit, measure,
   simulation, gizmo drag, …) could move beside the actions that own them.
-- `app/main.cpp` holds the window, Vulkan setup and frame loop in one file
-  with no unit tests; split it on its own, against the pixel gate.
+- `app/main.cpp` still holds the window, the frame loop and the captures in
+  one file with no unit tests (the device is `app/GpuOwners.cpp`'s); split
+  it on its own, against the pixel gate.
 - `tests/rpc_gate_smoke.py` still regex-parses handler bodies; it could read
   the `MethodDoc` flags alone.
 

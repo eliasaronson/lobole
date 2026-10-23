@@ -505,7 +505,7 @@ uint64_t BeginSketchOnDatum(AppState& state, const DatumPlaneFeature& datum,
 
 std::optional<ElementRef> FaceElementRef(AppState& state, uint32_t meshId,
                                          uint32_t faceIndex) {
-  const auto& meshes = state.documentMeshes;
+  const auto& meshes = state.gpu.documentMeshes;
   const auto it = std::find_if(
       meshes.begin(), meshes.end(),
       [&](const DocumentRenderMesh& m) { return m.meshId == meshId; });
@@ -540,7 +540,7 @@ bool ExactFacePlane(const AppState& state, uint32_t meshId, uint32_t faceIndex,
                     glm::dvec3& origin, glm::dvec3& normal, glm::dvec3& uAxis) {
   if (!state.document)
     return false;
-  const auto& meshes = state.documentMeshes;
+  const auto& meshes = state.gpu.documentMeshes;
   const auto it = std::find_if(
       meshes.begin(), meshes.end(),
       [&](const DocumentRenderMesh& m) { return m.meshId == meshId; });

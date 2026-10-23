@@ -45,9 +45,33 @@ Vertex3D::getAttributeDescriptions() {
 }
 
 // MeshRenderer implementation
-MeshRenderer::MeshRenderer() {}
+uint32_t MeshRenderer::s_idFloor = 0;
 
-MeshRenderer::~MeshRenderer() { Shutdown(); }
+MeshRenderer::MeshRenderer() : m_idBase(s_idFloor) {}
+
+MeshRenderer::~MeshRenderer() {
+  Shutdown();
+  // The next renderer starts above everything this one handed out.
+  s_idFloor =
+      std::max(s_idFloor, m_idBase + static_cast<uint32_t>(std::max(
+                                         m_assetsIssued, m_instancesIssued)));
+}
+
+size_t MeshRenderer::SlotOf(uint32_t id, size_t count) const {
+  if (id == 0)
+    return SIZE_MAX;
+  if (id <= m_idBase) {
+    if (!m_staleIdLogged) {
+      LOG_DEBUG("MeshRenderer: id {} belongs to a renderer before the last "
+                "device rebuild; ignored",
+                id);
+      const_cast<MeshRenderer*>(this)->m_staleIdLogged = true;
+    }
+    return SIZE_MAX;
+  }
+  const size_t slot = static_cast<size_t>(id - m_idBase - 1);
+  return slot < count ? slot : SIZE_MAX;
+}
 
 bool MeshRenderer::Initialize(VkDevice device, VkPhysicalDevice physicalDevice,
                               VkRenderPass renderPass, VkQueue graphicsQueue,
@@ -116,15 +140,13 @@ void MeshRenderer::Shutdown() {
 }
 
 MeshAsset* MeshRenderer::GetAsset(uint32_t assetId) {
-  if (assetId == 0 || assetId > m_assets.size())
-    return nullptr;
-  return m_assets[assetId - 1].get();
+  const size_t slot = SlotOf(assetId, m_assets.size());
+  return slot == SIZE_MAX ? nullptr : m_assets[slot].get();
 }
 
 MeshInstance* MeshRenderer::GetInstance(uint32_t instanceId) {
-  if (instanceId == 0 || instanceId > m_instances.size())
-    return nullptr;
-  return m_instances[instanceId - 1].get();
+  const size_t slot = SlotOf(instanceId, m_instances.size());
+  return slot == SIZE_MAX ? nullptr : m_instances[slot].get();
 }
 
 uint32_t MeshRenderer::CreateAsset(const std::vector<Vertex3D>& vertices,
@@ -138,7 +160,8 @@ uint32_t MeshRenderer::CreateAsset(const std::vector<Vertex3D>& vertices,
   }
 
   m_assets.push_back(std::move(asset));
-  return static_cast<uint32_t>(m_assets.size());
+  m_assetsIssued = m_assets.size();
+  return m_idBase + static_cast<uint32_t>(m_assets.size());
 }
 
 void MeshRenderer::UpdateAsset(uint32_t assetId,
@@ -170,7 +193,8 @@ uint32_t MeshRenderer::AddInstance(uint32_t assetId,
   asset->refCount++;
 
   m_instances.push_back(std::move(instance));
-  return static_cast<uint32_t>(m_instances.size());
+  m_instancesIssued = m_instances.size();
+  return m_idBase + static_cast<uint32_t>(m_instances.size());
 }
 
 void MeshRenderer::BeginAssetBatch() {
@@ -199,7 +223,7 @@ void MeshRenderer::ReleaseAsset(uint32_t assetId) {
   if (--asset->refCount == 0) {
     WaitDeviceIdleOnce();
     DestroyAssetBuffers(asset);
-    m_assets[assetId - 1].reset();
+    m_assets[SlotOf(assetId, m_assets.size())].reset();
   }
 }
 
@@ -216,9 +240,9 @@ void MeshRenderer::RemoveInstance(uint32_t instanceId) {
     // GPU device-lost) — once per batch, not once per asset.
     WaitDeviceIdleOnce();
     DestroyAssetBuffers(asset);
-    m_assets[instance->assetId - 1].reset();
+    m_assets[SlotOf(instance->assetId, m_assets.size())].reset();
   }
-  m_instances[instanceId - 1].reset();
+  m_instances[SlotOf(instanceId, m_instances.size())].reset();
 }
 
 void MeshRenderer::SetInstanceTransform(uint32_t instanceId,
@@ -232,16 +256,18 @@ std::optional<glm::mat4>
 MeshRenderer::GetInstanceTransform(uint32_t instanceId) const {
   // Same indexing as GetInstance: ids are 1-based slots, and a removed
   // instance leaves a null.
-  if (instanceId == 0 || instanceId > m_instances.size())
+  const size_t slot = SlotOf(instanceId, m_instances.size());
+  if (slot == SIZE_MAX)
     return std::nullopt;
-  const MeshInstance* inst = m_instances[instanceId - 1].get();
+  const MeshInstance* inst = m_instances[slot].get();
   return inst ? std::optional<glm::mat4>(inst->transform) : std::nullopt;
 }
 
 bool MeshRenderer::IsInstanceGhost(uint32_t instanceId) const {
-  if (instanceId == 0 || instanceId > m_instances.size())
+  const size_t slot = SlotOf(instanceId, m_instances.size());
+  if (slot == SIZE_MAX)
     return false;
-  const auto& instance = m_instances[instanceId - 1];
+  const auto& instance = m_instances[slot];
   return instance && instance->ghost;
 }
 
@@ -295,10 +321,10 @@ void MeshRenderer::SetInstanceLookRuns(uint32_t instanceId,
 
 std::vector<MeshLookRun>
 MeshRenderer::InstanceLookRuns(uint32_t instanceId) const {
-  if (instanceId == 0 || instanceId > m_instances.size() ||
-      !m_instances[instanceId - 1])
+  const size_t slot = SlotOf(instanceId, m_instances.size());
+  if (slot == SIZE_MAX || !m_instances[slot])
     return {};
-  return m_instances[instanceId - 1]->runs;
+  return m_instances[slot]->runs;
 }
 
 void MeshRenderer::SetInstanceGlass(uint32_t instanceId, float alpha) {
@@ -568,10 +594,10 @@ void MeshRenderer::SetFaceHighlight(uint32_t instanceId, uint32_t firstVertex,
 
 std::vector<glm::uvec2>
 MeshRenderer::InstanceHighlightRanges(uint32_t instanceId) const {
-  if (instanceId == 0 || instanceId > m_instances.size() ||
-      !m_instances[instanceId - 1])
+  const size_t slot = SlotOf(instanceId, m_instances.size());
+  if (slot == SIZE_MAX || !m_instances[slot])
     return {};
-  return m_instances[instanceId - 1]->selRanges;
+  return m_instances[slot]->selRanges;
 }
 
 void MeshRenderer::SetFaceHover(uint32_t instanceId, uint32_t firstVertex,

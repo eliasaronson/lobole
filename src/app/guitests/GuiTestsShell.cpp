@@ -3,8 +3,13 @@
 
 #include "app/FramePacer.h" // kCooldownSeconds
 #include "app/guitests/GuiTestsCommon.h"
+#include "cad/FaceSelector.h"
+#include "render/FieldRenderer.h"
+#include "render/UnderlayRenderer.h"
 #include "ui/DocumentSlots.h"
 #include "ui/Icons.h"
+#include "ui/ImportActions.h" // AddReferenceImageToSketch
+#include "ui/RendererSync.h"  // InjectDeviceLoss
 #include "ui/SimulationActions.h"
 
 #include <functional>
@@ -112,6 +117,186 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "app", "core_windows_exist");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     IM_CHECK(ctx->GetWindowByRef("//###Model") != nullptr);
+  };
+
+  // A lost device is rebuilt in place
+  // (docs/rendering/README.md#rebuilding-the-device): the document, its undo
+  // history and the open tabs carry on,
+  // and everything the renderers held is projected again -- a show-always
+  // reference image, a FEM field, the model a click picks from and a quick
+  // still renders. Then the same path by the GPU preference, onto another
+  // device and back, where one can show the window.
+  t = IM_REGISTER_TEST(engine, "app", "device_rebuild_keeps_the_session");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    // The retry window is about real losses in a row; this test's own are
+    // minutes apart as far as it is concerned.
+    s_App->renderer.lastRebuildAt = -1.0;
+    const int rebuildsBefore = s_App->renderer.rebuilds;
+
+    // A sketch with a reference image shown always...
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield(2);
+    const uint32_t image = ui::AddReferenceImageToSketch(
+        *s_App, SourceFixture("images/checker16x12.png"));
+    IM_CHECK(image != 0);
+    SketchFeature* sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr && sk->images.size() == 1);
+    sk->images[0].showAlways = true;
+    ToolbarClick(ctx, "###tb_sk_finish");
+    ctx->Yield(4);
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+    IM_CHECK(s_App->underlayRenderer != nullptr);
+    IM_CHECK_EQ(s_App->underlayRenderer->DrawCount(), (size_t)1);
+
+    // ...and a static study run, its field on the model.
+    BuildCantileverStudy(ctx, 10.0);
+    const uint64_t studyId = s_App->simulation.activeStudyId;
+    ctx->ItemClick("//###ToolWindow/###study_run");
+    IM_CHECK(WaitForStudyResult(ctx, studyId));
+    s_App->simulation.field = ui::SimulationState::Field::VonMises;
+    IM_CHECK(WaitFor(ctx, "the field on the model", [] {
+      return s_App->fieldRenderer != nullptr && s_App->fieldRenderer->HasMesh();
+    }));
+    // A click on the top face picks it, out of the study: before the
+    // rebuild, so the setup is known to allow it, and after.
+    const auto clickTop = [ctx]() -> bool {
+      ui::ExitSimulation(*s_App);
+      ctx->Yield(3);
+      glm::dvec3 lo(0.0), hi(0.0);
+      Doc()->GetBodies().back().shape.GetBoundingBox(lo, hi);
+      const glm::vec3 mid = (lo + hi) * 0.5;
+      const glm::vec3 size = hi - lo;
+      const float radius = glm::length(size) * 0.5f;
+      // As viewport/click_selects_facing_face frames it: a clean iso view,
+      // and the centre of the biggest face that view sees.
+      s_App->camera->StopAnimation();
+      s_App->camera->SetTarget(mid);
+      s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+      s_App->camera->SetPosition(
+          mid + glm::normalize(glm::vec3(1.0f, 1.0f, 1.0f)) * radius * 2.5f);
+      ctx->Yield(3);
+      glm::vec3 face(hi.x, mid.y, mid.z);
+      float area = size.y * size.z;
+      if (size.x * size.z > area) {
+        face = glm::vec3(mid.x, hi.y, mid.z);
+        area = size.x * size.z;
+      }
+      if (size.x * size.y > area)
+        face = glm::vec3(mid.x, mid.y, hi.z);
+      ctx->MouseMoveToPos(WorldToWindow(face));
+      ctx->Yield(2);
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+      const bool picked = s_App->faceSelector != nullptr &&
+                          s_App->faceSelector->GetSelectedFace() != nullptr;
+      // Empty space clears it again.
+      ctx->MouseMoveToPos(
+          ImVec2(s_App->viewportPos.x + 20.0f, s_App->viewportPos.y + 20.0f));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield(2);
+      return picked;
+    };
+    IM_CHECK(clickTop());
+    ui::EnterSimulation(*s_App);
+    s_App->simulation.field = ui::SimulationState::Field::VonMises;
+    IM_CHECK(WaitFor(ctx, "the field on the model again", [] {
+      return s_App->fieldRenderer != nullptr && s_App->fieldRenderer->HasMesh();
+    }));
+
+    const size_t underlays = s_App->underlayRenderer->DrawCount();
+    const size_t undoDepth = s_App->commands->UndoDepth();
+    const size_t tabs = s_App->parts.size();
+    const size_t activeTab = s_App->activePart;
+    const MeshRenderer* oldMesh = s_App->meshRenderer;
+
+    ui::InjectDeviceLoss(*s_App, "a GUI test");
+    IM_CHECK(WaitFor(ctx, "the device rebuilt", [rebuildsBefore] {
+      return s_App->renderer.rebuilds == rebuildsBefore + 1 &&
+             !s_App->renderer.lost;
+    }));
+    IM_CHECK(!s_App->renderer.backstop);
+    IM_CHECK_STR_EQ(s_App->renderer.lastRebuildReason.c_str(), "device_lost");
+    IM_CHECK(s_App->meshRenderer != nullptr);
+    // A new renderer, not the old one carried over. (The address may repeat;
+    // what the old one held may not.)
+    (void)oldMesh;
+    IM_CHECK(WaitFor(ctx, "the model projected again", [] {
+      return ui::RenderMeshesCurrent(*s_App) &&
+             !s_App->gpu.documentMeshes.empty();
+    }));
+    IM_CHECK(WaitFor(ctx, "the field projected again", [] {
+      return s_App->fieldRenderer != nullptr && s_App->fieldRenderer->HasMesh();
+    }));
+    IM_CHECK_EQ(s_App->underlayRenderer->DrawCount(), underlays);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undoDepth);
+    IM_CHECK_EQ(s_App->parts.size(), tabs);
+    IM_CHECK_EQ(s_App->activePart, activeTab);
+    // The menu bar says so, once.
+    ctx->Yield(2);
+    IM_CHECK(s_App->rendererRestartedNoticeUntil > ImGui::GetTime());
+
+    // Out of the study, a click picks a face of the model as it is drawn
+    // now -- the pick data was remade with the meshes.
+    IM_CHECK(clickTop());
+
+    // A quick still renders on the new device.
+    {
+      ui::AppState::RasterStill req;
+      req.width = 64;
+      req.height = 48;
+      req.supersample = 1;
+      ui::RasterFrame frame;
+      std::string error, warning;
+      IM_CHECK(s_App->captureRaster);
+      IM_CHECK(s_App->captureRaster(req, &frame, &error, &warning));
+      IM_CHECK(error.empty());
+      IM_CHECK_EQ(frame.rgb.size(), (size_t)64 * 48 * 3);
+    }
+
+    // The GPU preference runs the same path: onto another device, and back.
+    // Only a device that can show this window is a rung, and under Xvfb that
+    // is often one alone -- then this half is skipped, by name.
+    const std::string original = s_App->settings.gpuDevice;
+    const std::string start = s_App->renderer.device;
+    bool switched = false;
+    for (const std::string& other : s_App->gpuDevices) {
+      if (other == start)
+        continue;
+      const int before = s_App->renderer.rebuilds;
+      s_App->settings.gpuDevice = other;
+      IM_CHECK(WaitFor(ctx, "the preference acted on", [other] {
+        return s_App->renderer.appliedPreference == other &&
+               !s_App->renderer.preferenceWaiting;
+      }));
+      if (s_App->renderer.rebuilds == before)
+        continue; // not a rung here: the ladder kept the device
+      IM_CHECK_STR_EQ(s_App->renderer.device.c_str(), other.c_str());
+      IM_CHECK_STR_EQ(s_App->renderer.lastRebuildReason.c_str(),
+                      "gpu_preference");
+      IM_CHECK(WaitFor(ctx, "the model on the other device", [] {
+        return ui::RenderMeshesCurrent(*s_App) &&
+               !s_App->gpu.documentMeshes.empty();
+      }));
+      switched = true;
+      break;
+    }
+    s_App->settings.gpuDevice = original;
+    IM_CHECK(WaitFor(ctx, "the preference put back", [original] {
+      return s_App->renderer.appliedPreference == original &&
+             !s_App->renderer.preferenceWaiting;
+    }));
+    if (switched)
+      IM_CHECK_STR_EQ(s_App->renderer.device.c_str(), start.c_str());
+    else
+      ctx->LogInfo("skipped: the GPU-preference half -- only %s can show "
+                   "this window here",
+                   start.c_str());
+    IM_CHECK(!s_App->renderer.lost);
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undoDepth);
+    // Leave the menu bar as the next test expects it.
+    s_App->rendererRestartedNoticeUntil = -1.0;
+    s_App->renderer.lastRebuildAt = -1.0;
   };
 
   // Landing below the best device says so once, in a modal, and lastingly
@@ -686,28 +871,24 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->settings.shadows);
   };
 
-  // A restart-tier row must SAY so rather than pretending to apply: the
-  // swapchain and every renderer are built once, at startup.
-  t = IM_REGISTER_TEST(engine, "settings", "a_restart_row_says_restart");
+  // The GPU row is Live (docs/ui/settings.md#the-gpu-choice): a change
+  // rebuilds the device in place, so the row says what is in use rather
+  // than promising a restart.
+  t = IM_REGISTER_TEST(engine, "settings", "the_gpu_row_switches_live");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     s_App->settingsWindowOpen = true;
     ctx->Yield(2);
     bool sawGpuRow = false;
-    bool saidRestart = false;
     for (const settings::Field& f : settings::Fields()) {
       if (std::string(f.key) != "gpu_device")
         continue;
       sawGpuRow = true;
-      // The TIER is the contract: the window turns it into the "(needs a
-      // restart)" note. The blurb deliberately does NOT repeat the word —
-      // that read as "...the viewport needs a restart. (needs a restart)".
-      saidRestart = f.tier == settings::Tier::Restart;
-      // It does carry the asymmetry the note cannot: simulation builds its
-      // device per run, so the same setting lands immediately there.
+      IM_CHECK(f.tier == settings::Tier::Live);
+      // It carries the asymmetry the tier cannot: simulation builds its
+      // device per run, so the same setting lands there on the next one.
       IM_CHECK(strstr(f.blurb, "next run") != nullptr);
     }
     IM_CHECK(sawGpuRow);
-    IM_CHECK(saidRestart);
     ui::OpenPreferences(*s_App, "Performance");
     ctx->Yield(2);
     IM_CHECK(ctx->ItemExists("//###SettingsWindow/###set_gpu_device"));

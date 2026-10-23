@@ -127,6 +127,8 @@ TEST_CASE("LOBOLE_FAULT needs LOBOLE_ALLOW_DEBUG_CRASH and names its kinds",
   CHECK(f.kind == startup::Fault::Kind::DeviceCreate);
   CHECK(startup::FaultFromString("swapchain", true, &f, &error));
   CHECK(f.kind == startup::Fault::Kind::Swapchain);
+  CHECK(startup::FaultFromString("rebuild", true, &f, &error));
+  CHECK(f.kind == startup::Fault::Kind::Rebuild);
   CHECK(startup::FaultFromString("renderer_init:outline", true, &f, &error));
   CHECK(f.kind == startup::Fault::Kind::RendererInit);
   CHECK(f.renderer == "outline");
@@ -169,6 +171,50 @@ TEST_CASE("The device ladder: the choice first, hardware next, software last",
         std::vector<int>{1});
   CHECK(startup::DeviceLadder(xvfb, "", RendererChoice::Hardware).empty());
   CHECK(startup::DeviceLadder({}, "", RendererChoice::Automatic).empty());
+}
+
+TEST_CASE("A rebuild after a loss tries the lost device first, then the "
+          "usual order",
+          "[startup]") {
+  using startup::Device;
+  using startup::RendererChoice;
+  const std::vector<Device> devices = {
+      {"llvmpipe (LLVM 21)", true, 0},
+      {"Intel(R) Arc(tm) Graphics", false, 1},
+      {"NVIDIA GeForce RTX 4060", false, 2},
+  };
+  // Lost on the Arc (a preference put it there): the Arc again, then the
+  // usual order, which the NVIDIA heads, and the software device last.
+  CHECK(startup::DeviceLadder(devices, "", RendererChoice::Automatic, 1) ==
+        std::vector<int>{1, 2, 0});
+  // Lost on the usual first rung: the same order, the device once.
+  CHECK(startup::DeviceLadder(devices, "", RendererChoice::Automatic, 2) ==
+        std::vector<int>{2, 1, 0});
+  // Lost on the software device it had fallen back to: that first, then
+  // the hardware that failed before, which may hold now.
+  CHECK(startup::DeviceLadder(devices, "", RendererChoice::Automatic, 0) ==
+        std::vector<int>{0, 2, 1});
+  // A device that is no longer a rung (gone, or outside LOBOLE_RENDERER) is
+  // not put first.
+  CHECK(startup::DeviceLadder(devices, "", RendererChoice::Software, 2) ==
+        std::vector<int>{0});
+  CHECK(startup::DeviceLadder(devices, "", RendererChoice::Automatic, 7) ==
+        std::vector<int>{2, 1, 0});
+}
+
+TEST_CASE("A second loss inside the window ends at the backstop", "[startup]") {
+  using startup::LossVerdict;
+  CHECK(startup::JudgeLoss(-1.0) == LossVerdict::Rebuild); // the first one
+  CHECK(startup::JudgeLoss(0.5) == LossVerdict::Backstop); // its first frames
+  CHECK(startup::JudgeLoss(startup::kRebuildRetryWindowSeconds - 0.01) ==
+        LossVerdict::Backstop);
+  CHECK(startup::JudgeLoss(startup::kRebuildRetryWindowSeconds) ==
+        LossVerdict::Rebuild);
+  CHECK(startup::JudgeLoss(3600.0) == LossVerdict::Rebuild);
+  CHECK(std::string(startup::RebuildReasonName(
+            startup::RebuildReason::DeviceLost)) == "device_lost");
+  CHECK(std::string(startup::RebuildReasonName(
+            startup::RebuildReason::GpuPreference)) == "gpu_preference");
 }
 
 TEST_CASE("The device-loss box says what happened and that the work is saved",

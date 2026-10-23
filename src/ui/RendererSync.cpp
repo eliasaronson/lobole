@@ -151,7 +151,7 @@ void SetGeometryDelta(AppState& state, const CADShape& missing,
   state.deltaSummary = summary;
   state.deltaOwner = state.document.get();
   state.deltaVersion = state.document ? state.document->Version() : 0;
-  state.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
+  state.gpu.syncedDocumentVersion = UINT64_MAX; // force a renderer resync
 }
 
 void ClearGeometryDelta(AppState& state) {
@@ -162,7 +162,7 @@ void ClearGeometryDelta(AppState& state) {
   state.deltaSummary.clear();
   state.deltaOwner = nullptr;
   state.deltaVersion = 0;
-  state.syncedDocumentVersion = UINT64_MAX;
+  state.gpu.syncedDocumentVersion = UINT64_MAX;
 }
 
 void SyncGeometryDelta(AppState& state) {
@@ -172,7 +172,7 @@ void SyncGeometryDelta(AppState& state) {
   // topology ghost learned: an overlay tracked apart from documentMeshes
   // survives a tab switch and haunts a part it was never measured on.
   for (uint32_t* inst :
-       {&state.deltaMissingInstance, &state.deltaExtraInstance}) {
+       {&state.gpu.deltaMissingInstance, &state.gpu.deltaExtraInstance}) {
     if (*inst != 0) {
       state.meshRenderer->RemoveInstance(*inst);
       *inst = 0;
@@ -205,9 +205,9 @@ void SyncGeometryDelta(AppState& state) {
   // Pre-darkened for the bright lighting rig, the same lesson the wood
   // materials learned: a nominal 0.9 red renders as pale pink here, and a
   // delta you have to squint at is not an answer.
-  state.deltaMissingInstance =
+  state.gpu.deltaMissingInstance =
       add(state.deltaMissingShape, glm::vec3(0.45f, 0.02f, 0.02f));
-  state.deltaExtraInstance =
+  state.gpu.deltaExtraInstance =
       add(state.deltaExtraShape, glm::vec3(0.02f, 0.35f, 0.06f));
 }
 
@@ -234,7 +234,7 @@ bool RenderMeshesCurrent(AppState& state) {
   if (!state.meshRenderer)
     return false;
   const std::optional<uint64_t> active = ActiveRenderVersion(state);
-  return active && *active == state.syncedDocumentVersion;
+  return active && *active == state.gpu.syncedDocumentVersion;
 }
 
 void SyncDocumentRenderers(AppState& state) {
@@ -272,34 +272,35 @@ void SyncDocumentRenderers(AppState& state) {
   const bool interacting = state.anyWidgetActive || state.handleDrag.active;
   if (SectionPlanes(state) != state.syncedSectionPlanes && !interacting) {
     state.syncedSectionPlanes = SectionPlanes(state);
-    state.syncedDocumentVersion = UINT64_MAX; // force the rebuild below
+    state.gpu.syncedDocumentVersion = UINT64_MAX; // force the rebuild below
   }
-  if (activeVersion == state.syncedDocumentVersion)
+  if (activeVersion == state.gpu.syncedDocumentVersion)
     return;
-  state.syncedDocumentVersion = activeVersion;
+  state.gpu.syncedDocumentVersion = activeVersion;
 
-  for (const auto& m : state.documentMeshes) {
+  for (const auto& m : state.gpu.documentMeshes) {
     state.meshRenderer->RemoveMesh(m.meshId);
     if (state.outlineRenderer)
       state.outlineRenderer->RemoveMesh(m.outlineId);
     if (state.faceSelector)
       state.faceSelector->RemoveMesh(m.meshId);
   }
-  state.documentMeshes.clear();
+  state.gpu.documentMeshes.clear();
   // Section caps live outside documentMeshes (no outline/pick, and they must
   // not disturb the body↔index alignment); remove them on every resync.
-  for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+  for (const AppState::GpuProjection::SectionCapMesh& cap :
+       state.gpu.sectionCapMeshes)
     state.meshRenderer->RemoveMesh(cap.meshId);
-  state.sectionCapMeshes.clear();
-  state.sectionCapLeaves.clear();
+  state.gpu.sectionCapMeshes.clear();
+  state.gpu.sectionCapLeaves.clear();
   // So are a job's fixtures.
-  for (const uint32_t id : state.fixtureInstances)
+  for (const uint32_t id : state.gpu.fixtureInstances)
     state.meshRenderer->RemoveInstance(id);
-  state.fixtureInstances.clear();
+  state.gpu.fixtureInstances.clear();
   // The topology shape-guide ghost is likewise rebuilt each resync.
-  if (state.topoGhostInstance) {
-    state.meshRenderer->RemoveMesh(state.topoGhostInstance);
-    state.topoGhostInstance = 0;
+  if (state.gpu.topoGhostInstance) {
+    state.meshRenderer->RemoveMesh(state.gpu.topoGhostInstance);
+    state.gpu.topoGhostInstance = 0;
   }
 
   // A drawing tab has no 3D geometry — the meshes were just cleared and the
@@ -403,14 +404,14 @@ void SyncDocumentRenderers(AppState& state) {
                                   tess->triangleFaces, glm::mat4(1.0f),
                                   tess->edges, tess->solid);
     pickMs += msSince(pickStart);
-    state.documentMeshes.push_back({meshId,
-                                    outlineId,
-                                    bi,
-                                    /*occurrenceId=*/0,
-                                    glm::mat4(1.0f),
-                                    /*leafPartId=*/0,
-                                    {},
-                                    tess->edges});
+    state.gpu.documentMeshes.push_back({meshId,
+                                        outlineId,
+                                        bi,
+                                        /*occurrenceId=*/0,
+                                        glm::mat4(1.0f),
+                                        /*leafPartId=*/0,
+                                        {},
+                                        tess->edges});
   }
 
   // A job's fixtures: what holds the stock, drawn ghosted where they sit on
@@ -435,7 +436,7 @@ void SyncDocumentRenderers(AppState& state) {
               state.meshRenderer->AddInstance(tess->meshAsset, xf);
           state.meshRenderer->SetMeshColor(id, glm::vec3(0.62f, 0.62f, 0.66f));
           state.meshRenderer->SetInstanceGhost(id, f.enabled ? 0.45f : 0.2f);
-          state.fixtureInstances.push_back(id);
+          state.gpu.fixtureInstances.push_back(id);
         }
       }
     }
@@ -467,9 +468,9 @@ void SyncDocumentRenderers(AppState& state) {
   // The instance is tracked apart from documentMeshes, so remove any stale
   // one FIRST — otherwise it survives tab switches and haunts other parts
   // (whose documents can't resolve the study, so the re-add never runs).
-  if (state.topoGhostInstance != 0) {
-    state.meshRenderer->RemoveInstance(state.topoGhostInstance);
-    state.topoGhostInstance = 0;
+  if (state.gpu.topoGhostInstance != 0) {
+    state.meshRenderer->RemoveInstance(state.gpu.topoGhostInstance);
+    state.gpu.topoGhostInstance = 0;
   }
   // A job tab has no document of its own, and a topology study belongs to a
   // part -- nothing to ghost here.
@@ -490,10 +491,11 @@ void SyncDocumentRenderers(AppState& state) {
           gv[i].position = gpos[i];
           gv[i].normal = gnrm[i];
         }
-        state.topoGhostInstance = state.meshRenderer->AddMesh(gv, gidx);
-        state.meshRenderer->SetMeshColor(state.topoGhostInstance,
+        state.gpu.topoGhostInstance = state.meshRenderer->AddMesh(gv, gidx);
+        state.meshRenderer->SetMeshColor(state.gpu.topoGhostInstance,
                                          glm::vec3(0.45f, 0.75f, 1.0f));
-        state.meshRenderer->SetInstanceGhost(state.topoGhostInstance, 0.35f);
+        state.meshRenderer->SetInstanceGhost(state.gpu.topoGhostInstance,
+                                             0.35f);
       }
     }
   }
@@ -527,11 +529,67 @@ void SyncDocumentRenderers(AppState& state) {
              drawnBodies, totalMs, tessMs, uploadMs, pickMs);
 }
 
+void ForgetGpuProjection(AppState& state, const RendererSet& set) {
+  state.gpu = {};
+  state.meshRenderer = set.mesh;
+  state.outlineRenderer = set.outline;
+  state.sketchRenderer = set.sketch;
+  state.underlayRenderer = set.underlay;
+  state.fieldRenderer = set.field;
+  state.stockRenderer = set.stock;
+  state.sceneRenderers = set.scene;
+  state.rayTracer = set.rayTracer;
+  state.faceSelector = set.faceSelector;
+  state.ibl = set.ibl;
+  state.skyEnvironment = set.skyEnvironment;
+  // The caches' CPU meshes stay; their asset ids belong to renderers that
+  // are gone (or never existed: the start).
+  ForgetTessellationAssets(state, /*release=*/false);
+  // This frame's hover names a mesh of the old renderers; the next pick
+  // makes it again.
+  state.pick.edgeHover = false;
+  state.pick.edgeHoverMesh = 0;
+  state.pick.edgeHoverIndex = 0;
+}
+
+void ReleaseGpuProjection(AppState& state) {
+  ForgetTessellationAssets(state, /*release=*/true);
+  ForgetGpuProjection(state, {});
+}
+
+void MarkDeviceLost(AppState& state, const std::string& where) {
+  if (state.renderer.lost)
+    return;
+  state.renderer.lost = true;
+  state.renderer.lostReason = "VK_ERROR_DEVICE_LOST " + where;
+  LOG_ERROR("Rendering: the graphics device was lost ({})",
+            state.renderer.lostReason);
+}
+
+void InjectDeviceLoss(AppState& state, const std::string& who) {
+  MarkDeviceLost(state, "from " + who + ", on purpose");
+}
+
+void EndRendersForRebuild(AppState& state) {
+  RenderJob& job = state.renderJob;
+  // A quick still's capture is synchronous and its encode is CPU work: it
+  // carries on. A path trace keeps its scene in the ray tracer.
+  if (!job.active || job.quick)
+    return;
+  job.active = false;
+  job.started = false;
+  job.finished = true;
+  job.success = false;
+  job.error = "the graphics device was rebuilt; run it again";
+  job.resultPath.clear();
+  LOG_WARN("Render: ended, because the graphics device was rebuilt");
+}
+
 void SyncRenderersToDocument(AppState& state) {
-  // A lost device takes no more uploads
-  // (docs/rendering/README.md#a-lost-device): the document is CPU state and
-  // stays whole; the projection waits for a restart that will never use this
-  // device again.
+  // Nothing is uploaded to a lost device: the next frame boundary rebuilds
+  // it (docs/rendering/README.md#rebuilding-the-device), and `state.gpu = {}`
+  // makes the next sync project from scratch. Only the backstop waits for a
+  // restart.
   if (state.renderer.lost)
     return;
   SyncSketchViewRollback(state);
@@ -840,9 +898,9 @@ bool SyncRayTracingScene(AppState& state, bool groundPlane) {
   // What the ray tracer was given, for the still to size its ray limits from
   // (MakeStillDesc). Recorded before the ground plane, which is derived from
   // these bounds in turn.
-  state.rtSceneValid = bbMin.x <= bbMax.x;
-  state.rtSceneMin = state.rtSceneValid ? bbMin : glm::vec3(0.0f);
-  state.rtSceneMax = state.rtSceneValid ? bbMax : glm::vec3(0.0f);
+  state.gpu.rtSceneValid = bbMin.x <= bbMax.x;
+  state.gpu.rtSceneMin = state.gpu.rtSceneValid ? bbMin : glm::vec3(0.0f);
+  state.gpu.rtSceneMax = state.gpu.rtSceneValid ? bbMax : glm::vec3(0.0f);
 
   // Shadow-catcher ground plane: a large quad just under the scene so soft
   // shadows and AO have a surface to land on. The closest-hit shader renders it
@@ -913,11 +971,11 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
   desc.backdrop = background.backdrop;
   // Edges, colour and width all come from the renderer the viewport uses, so
   // the still cannot disagree with the screen about what an edge looks like.
-  // main.cpp runs it in WIREFRAME mode, which is why this reads wireframeColor
-  // and lineWidth rather than the outline pair.
-  // The live section cuts, from the same call main.cpp hands every raster
-  // renderer -- so a still and the viewport cut on the same planes or neither
-  // does. Applied by section.rahit, since closest-hit is too late to discard.
+  // Its row (app/GpuOwners.cpp) starts it in WIREFRAME mode, which is why this
+  // reads wireframeColor and lineWidth rather than the outline pair. The live
+  // section cuts, from the same call main.cpp hands every raster renderer -- so
+  // a still and the viewport cut on the same planes or neither does. Applied by
+  // section.rahit, since closest-hit is too late to discard.
   desc.clipPlanes = SectionPlanes(state);
   desc.outlines = outlines;
   if (state.outlineRenderer) {
@@ -943,9 +1001,10 @@ RTStillDesc MakeStillDesc(AppState& state, uint32_t width, uint32_t height,
   // 6 m dock (framed from ~11 m) rendered as pure environment, and AO at
   // 2.0 reached two millimetres of it. Call this AFTER
   // SyncRayTracingScene — it is the bounds of what that handed over.
-  if (state.rtSceneValid) {
-    const glm::vec3 centre = 0.5f * (state.rtSceneMin + state.rtSceneMax);
-    const float diag = glm::length(state.rtSceneMax - state.rtSceneMin);
+  if (state.gpu.rtSceneValid) {
+    const glm::vec3 centre =
+        0.5f * (state.gpu.rtSceneMin + state.gpu.rtSceneMax);
+    const float diag = glm::length(state.gpu.rtSceneMax - state.gpu.rtSceneMin);
     // Reach the far side of the scene from wherever the camera stands, plus
     // the shadow-catcher, which is itself 10 diagonals wide (so its far
     // corner is ~14 away); double it and nothing can fall off the end.
@@ -1087,8 +1146,8 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
   StillBackground studio;
   RTStillDesc desc = MakeStillDesc(state, width, height, seed,
                                    background ? *background : studio, outlines);
-  if (warning && state.rtSceneValid &&
-      !StillFramesGeometry(desc, state.rtSceneMin, state.rtSceneMax)) {
+  if (warning && state.gpu.rtSceneValid &&
+      !StillFramesGeometry(desc, state.gpu.rtSceneMin, state.gpu.rtSceneMax)) {
     *warning = "the camera framed no geometry — the still is the backdrop "
                "only (fit the view, then render again)";
   }
@@ -1241,8 +1300,9 @@ void PumpRenderJob(AppState& state) {
     // the frustum is a valid PNG of the backdrop, and the modal used to
     // report that as a plain success.
     job.warning.clear();
-    if (state.rtSceneValid &&
-        !StillFramesGeometry(desc, state.rtSceneMin, state.rtSceneMax)) {
+    if (state.gpu.rtSceneValid &&
+        !StillFramesGeometry(desc, state.gpu.rtSceneMin,
+                             state.gpu.rtSceneMax)) {
       job.warning = "the camera framed no geometry — this is the backdrop "
                     "only (Fit, then render again)";
     }
@@ -1346,7 +1406,7 @@ void AddLeafCaps(AppState& state, const Document& part,
   const ClipPlaneArray planes = SectionPlanes(state);
   std::vector<glm::vec3> capColors;
   std::vector<float> capAlphas;
-  const size_t first = state.sectionCapMeshes.size();
+  const size_t first = state.gpu.sectionCapMeshes.size();
   for (size_t i = 0; i < planes.size(); i++) {
     glm::vec3 localOrigin, localNormal;
     if (!SectionPlaneInPartSpace(planes[i], xf, localOrigin, localNormal))
@@ -1378,8 +1438,8 @@ void AddLeafCaps(AppState& state, const Document& part,
                     capColors, xf, glm::normalize(glm::vec3(planes[i])),
                     capAlphas, occurrenceId);
   }
-  for (size_t c = first; c < state.sectionCapMeshes.size(); c++)
-    state.sectionCapMeshes[c].leaf = leaf;
+  for (size_t c = first; c < state.gpu.sectionCapMeshes.size(); c++)
+    state.gpu.sectionCapMeshes[c].leaf = leaf;
 }
 
 // Does the rigid move `d` take every section plane onto itself? Then a cap
@@ -1401,7 +1461,8 @@ bool KeepsPlanes(const glm::dmat4& d, const ClipPlaneArray& planes) {
 } // namespace
 
 void FollowPlaybackCaps(AppState& state) {
-  if (!state.assembly || !state.meshRenderer || state.sectionCapLeaves.empty())
+  if (!state.assembly || !state.meshRenderer ||
+      state.gpu.sectionCapLeaves.empty())
     return;
   const ClipPlaneArray planes = SectionPlanes(state);
   if (planes != state.syncedSectionPlanes)
@@ -1409,9 +1470,10 @@ void FollowPlaybackCaps(AppState& state) {
   // Every leaf: its caps moved by how far it has moved since they were cut,
   // or, where that move turns or slides it across a plane, cut again.
   std::vector<size_t> recut;
-  std::vector<glm::dmat4> nowAt(state.sectionCapLeaves.size());
-  for (size_t i = 0; i < state.sectionCapLeaves.size(); i++) {
-    const AppState::SectionCapLeaf& leaf = state.sectionCapLeaves[i];
+  std::vector<glm::dmat4> nowAt(state.gpu.sectionCapLeaves.size());
+  for (size_t i = 0; i < state.gpu.sectionCapLeaves.size(); i++) {
+    const AppState::GpuProjection::SectionCapLeaf& leaf =
+        state.gpu.sectionCapLeaves[i];
     const Occurrence* occ = state.assembly->FindById(leaf.occurrenceId);
     if (occ == nullptr)
       continue;
@@ -1422,7 +1484,8 @@ void FollowPlaybackCaps(AppState& state) {
       recut.push_back(i);
       continue;
     }
-    for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+    for (const AppState::GpuProjection::SectionCapMesh& cap :
+         state.gpu.sectionCapMeshes)
       if (cap.leaf == i)
         state.meshRenderer->SetInstanceTransform(cap.meshId, glm::mat4(d));
   }
@@ -1431,14 +1494,15 @@ void FollowPlaybackCaps(AppState& state) {
     const std::vector<assembly::FlatInstance> flat =
         FlattenActiveAssembly(state);
     for (const size_t i : recut) {
-      std::erase_if(state.sectionCapMeshes,
-                    [&](const AppState::SectionCapMesh& cap) {
+      std::erase_if(state.gpu.sectionCapMeshes,
+                    [&](const AppState::GpuProjection::SectionCapMesh& cap) {
                       if (cap.leaf != i)
                         return false;
                       state.meshRenderer->RemoveMesh(cap.meshId);
                       return true;
                     });
-      AppState::SectionCapLeaf& leaf = state.sectionCapLeaves[i];
+      AppState::GpuProjection::SectionCapLeaf& leaf =
+          state.gpu.sectionCapLeaves[i];
       for (const assembly::FlatInstance& inst : flat) {
         if (inst.rootOccurrenceId != leaf.occurrenceId ||
             inst.innerIds != leaf.innerPath || !inst.visible ||
@@ -1456,7 +1520,8 @@ void FollowPlaybackCaps(AppState& state) {
     }
   }
   // What a sequence has not put in yet has no cut face either.
-  for (const AppState::SectionCapMesh& cap : state.sectionCapMeshes)
+  for (const AppState::GpuProjection::SectionCapMesh& cap :
+       state.gpu.sectionCapMeshes)
     state.meshRenderer->SetInstanceVisible(
         cap.meshId, !SequencePlaybackHides(state, cap.occurrenceId));
 }
@@ -1686,7 +1751,7 @@ void SyncAssemblyRenderers(AppState& state) {
         if (state.outlineRenderer && outlineId != 0)
           state.outlineRenderer->SetMeshVisible(outlineId, false);
       }
-      state.documentMeshes.push_back(
+      state.gpu.documentMeshes.push_back(
           {meshId, outlineId, bi, occ.id,
            glm::inverse(OccurrenceMatrix(occ)) * inst.world, inst.partId,
            inst.innerIds, sb.tess->edges, inst.configurationId});
@@ -1695,17 +1760,17 @@ void SyncAssemblyRenderers(AppState& state) {
     // Section caps (I3), recorded with where the leaf stood, so a playback
     // can move them with it (FollowPlaybackCaps).
     if (!SectionPlanes(state).empty()) {
-      const size_t leaf = state.sectionCapLeaves.size();
-      state.sectionCapLeaves.push_back(
+      const size_t leaf = state.gpu.sectionCapLeaves.size();
+      state.gpu.sectionCapLeaves.push_back(
           {occ.id, inst.innerIds,
            glm::inverse(OccurrenceMatrix(occ)) * inst.world, world});
-      const size_t firstCap = state.sectionCapMeshes.size();
+      const size_t firstCap = state.gpu.sectionCapMeshes.size();
       AddLeafCaps(state, *part, it->second.bodies, xf, occ.id, leaf);
       // A part a sequence has not put in yet has no cut face either.
       if (SequencePlaybackHides(state, occ.id))
-        for (size_t c = firstCap; c < state.sectionCapMeshes.size(); c++)
+        for (size_t c = firstCap; c < state.gpu.sectionCapMeshes.size(); c++)
           state.meshRenderer->SetInstanceVisible(
-              state.sectionCapMeshes[c].meshId, false);
+              state.gpu.sectionCapMeshes[c].meshId, false);
     }
   }
   // Land every upload this sync recorded before anything reads the assets.
@@ -1856,7 +1921,7 @@ void SyncInContextGhosts(AppState& state) {
       state.meshRenderer->SetInstanceGhost(meshId); // after color: sets alpha
       // Ghosts are never dragged, so their localXf is unused; keep it
       // honest anyway rather than leaving a lie in the record.
-      state.documentMeshes.push_back(
+      state.gpu.documentMeshes.push_back(
           {meshId, /*outlineId=*/0, bi, inst.rootOccurrenceId, inst.world, {}});
     }
   }

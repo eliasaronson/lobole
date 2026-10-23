@@ -673,7 +673,7 @@ void DrawFeatureTreePanel(AppState& state) {
           state.hiddenBodies.erase(createdBy);
         else
           state.hiddenBodies.insert(createdBy);
-        state.syncedDocumentVersion = UINT64_MAX; // force renderer resync
+        state.gpu.syncedDocumentVersion = UINT64_MAX; // force renderer resync
       }
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip(hidden ? "Show body" : "Hide body");
@@ -710,7 +710,7 @@ void DrawFeatureTreePanel(AppState& state) {
             state.hiddenBodies.erase(createdBy);
           else
             state.hiddenBodies.insert(createdBy);
-          state.syncedDocumentVersion = UINT64_MAX; // force renderer resync
+          state.gpu.syncedDocumentVersion = UINT64_MAX; // force renderer resync
         }
         if (ImGui::BeginMenu("Material")) {
           using CADMaterials::MaterialLibrary;
@@ -764,7 +764,7 @@ void DrawFeatureTreePanel(AppState& state) {
               }
               creator->SetAppearance(next);
               doc->Regenerate(); // cache hit: restamp + resync only
-              state.syncedDocumentVersion = UINT64_MAX;
+              state.gpu.syncedDocumentVersion = UINT64_MAX;
               committed = true; // bodies vector rebuilt: restart the loop
             };
             const auto endEdit = [&] {

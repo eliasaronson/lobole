@@ -80,17 +80,17 @@ void BearingSeatPicked(AppState& state, const SelectionItem& item) {
 
 namespace {
 void ClearBearingGhost(AppState& state) {
-  if (state.meshRenderer && state.bearingGhostInstance != 0)
-    state.meshRenderer->RemoveInstance(state.bearingGhostInstance);
-  state.bearingGhostInstance = 0;
-  state.bearingGhostKey.clear();
+  if (state.meshRenderer && state.gpu.bearingGhostInstance != 0)
+    state.meshRenderer->RemoveInstance(state.gpu.bearingGhostInstance);
+  state.gpu.bearingGhostInstance = 0;
+  state.gpu.bearingGhostKey.clear();
 }
 } // namespace
 
 void SyncBearingGhost(AppState& state) {
   const AppState::BearingTool& tool = state.bearingTool;
   if (!(tool.open && tool.ok && state.meshRenderer)) {
-    if (state.bearingGhostInstance != 0)
+    if (state.gpu.bearingGhostInstance != 0)
       ClearBearingGhost(state);
     return;
   }
@@ -101,7 +101,7 @@ void SyncBearingGhost(AppState& state) {
       std::to_string(tool.orientation.x) + "," +
       std::to_string(tool.orientation.y) + "," +
       std::to_string(tool.orientation.z);
-  if (key == state.bearingGhostKey)
+  if (key == state.gpu.bearingGhostKey)
     return;
   ClearBearingGhost(state);
   Document scratch;
@@ -121,8 +121,8 @@ void SyncBearingGhost(AppState& state) {
   // The fastener ghost's blue: a preview must not read as geometry.
   state.meshRenderer->SetInstanceColor(id, glm::vec3(0.35f, 0.62f, 1.0f));
   state.meshRenderer->SetInstanceGhost(id, 0.55f);
-  state.bearingGhostInstance = id;
-  state.bearingGhostKey = key;
+  state.gpu.bearingGhostInstance = id;
+  state.gpu.bearingGhostKey = key;
 }
 
 void DrawBearingToolWindow(AppState& state) {

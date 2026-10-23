@@ -694,16 +694,9 @@ struct SimulationState {
   int activeCase = 0;       // static with load cases: which case it shows
   // Topology iso-surface threshold in [0,1]; 0 = auto (volume-matched).
   float topoThreshold = 0.0f;
-  // The MeshRenderer instance holding the extracted iso-surface (0 = none), and
-  // the signature that gates its re-extraction.
-  uint32_t topoIsoInstance = 0;
-  uint64_t topoIsoKey = 0;
-  // Body render instances hidden while the field overlay replaces them, so
-  // ExitSimulation / field=None restores exactly those.
-  std::vector<uint32_t> hiddenMeshes;
-  // Signature of the last-built field overlay (field, study, results epoch);
-  // the vertex rebuild is skipped when unchanged. 0 = nothing built.
-  uint64_t fieldBuiltKey = 0;
+  // What the field overlay put in the renderers (the iso-surface instance,
+  // the bodies it hides, the key of the overlay built) is in
+  // AppState::GpuProjection, with every other id a renderer holds.
 
   bool IsActive() const { return active; }
 };
@@ -782,7 +775,8 @@ struct RenderJob {
 // All state the UI reads and writes, replacing main.cpp's globals. The
 // document and undo stack are owned here (they are swapped by File > New /
 // Open); everything else is a non-owning pointer to objects whose lifetime
-// main.cpp manages alongside the Vulkan context.
+// app/GpuOwners.cpp's owner table manages, replaced on every rebuild
+// (ui::ForgetGpuProjection).
 // The kind of document a project tab holds (A2/drawings/CAM jobs). A part is
 // a feature list that builds bodies; an assembly is an occurrence list that
 // places other parts; a drawing projects a part or assembly onto a 2D sheet;
@@ -1245,9 +1239,9 @@ struct AppState {
   IBLTextures* ibl = nullptr;
   // The procedural outdoor sky's maps for a sun at (azimuth, elevation)
   // degrees, built the first time a sky still asks and kept for the next one
-  // with the same sun (docs/rendering/still-render.md#the-sky). Installed by
-  // main.cpp next to `ibl`; null without a renderer, and the result is null
-  // when the maps cannot be built.
+  // with the same sun (docs/rendering/still-render.md#the-sky). Installed with
+  // `ibl` by ui::ForgetGpuProjection after every build; null without a
+  // renderer, and the result is null when the maps cannot be built.
   std::function<IBLTextures*(double sunAzimuthDeg, double sunElevationDeg)>
       skyEnvironment;
   GLFWwindow* window = nullptr;
@@ -1662,8 +1656,8 @@ struct AppState {
   // which is why About did nothing at all until 2026-08-19.
   bool showAbout = false;
   // What the renderer picked, for Help > About and bug reports. Filled in by
-  // main() after device selection; empty in headless builds, which have no
-  // renderer to report.
+  // app/GpuOwners.cpp after every build, the start's and each rebuild's; empty
+  // in headless builds, which have no renderer to report.
   std::string gpuName;
   std::string gpuApiVersion;
   // Key-light shadow map (S1) — View > Shadows; session state only (no file
@@ -1725,50 +1719,19 @@ struct AppState {
   bool sectionToolOpen = false;
   // Which row owns the viewport drag arrow (0 = the first section).
   uint64_t sectionActiveId = 0;
-  // Section cap fills (I3 v2, C4): the planes at the last cap rebuild, and
-  // the cap instance ids (separate from documentMeshes so body↔index
-  // alignment holds; removed on the next resync). A cap rebuild is triggered
-  // when the planes change and no widget is being dragged (so caps settle on
-  // release while the shader clip previews live).
+  // Section cap fills (I3 v2, C4): the planes at the last cap rebuild. A cap
+  // rebuild is triggered when the planes change and no widget is being
+  // dragged (so caps settle on release while the shader clip previews live).
   ClipPlaneArray syncedSectionPlanes = NoClipPlanes();
-  // A cap knows whose cut it is: selecting or hovering a part lights its cut
-  // faces with the rest of it. Without that the biggest surface you see of a
-  // sectioned part — the cap you are pointing at — stayed unlit while its
-  // walls highlighted, which reads as the highlight landing on the wrong
-  // thing (docs/ui/selection.md#picking-through-a-section).
-  struct SectionCapMesh {
-    uint32_t meshId = 0;
-    uint64_t occurrenceId = 0; // 0 on a part tab
-    size_t bodyIndex = 0;      // into the tab's bodies, as documentMeshes
-    size_t leaf = SIZE_MAX;    // its sectionCapLeaves entry (an assembly)
-  };
-  std::vector<SectionCapMesh> sectionCapMeshes;
-  // An assembly's leaves as their caps were cut: where each stood. A
-  // playback (motion or sequence) moves parts without a resync, and caps
-  // are baked in world space, so FollowPlaybackCaps moves a leaf's caps
-  // with it -- or cuts them again where a move does not keep the plane --
-  // and hides the caps of a part a sequence has not put in yet
-  // (docs/assemblies/README.md#playing-and-filming-a-sequence).
-  struct SectionCapLeaf {
-    uint64_t occurrenceId = 0;
-    std::vector<uint64_t> innerPath;
-    glm::dmat4 docLocal{1.0}; // the leaf inside its occurrence
-    glm::dmat4 world{1.0};    // where its caps were cut
-  };
-  std::vector<SectionCapLeaf> sectionCapLeaves;
+  // The caps themselves (their instances, and where each leaf's were cut) are
+  // in AppState::GpuProjection.
   // Topology shape-guide ghost (TO4): a translucent render of a topology
   // study's optimized iso-surface, shown in the normal modeling workspace so
   // the user can re-model against it. `topoGhostStudyId` selects the study
-  // (0 = off); `topoGhostInstance` is its MeshRenderer instance (rebuilt on
-  // resync, like the section caps).
+  // (0 = off); its instance is GpuProjection::topoGhostInstance (rebuilt on
+  // resync, like the section caps). A job tab's fixtures are drawn the same
+  // way (GpuProjection::fixtureInstances).
   uint64_t topoGhostStudyId = 0;
-  uint32_t topoGhostInstance = 0;
-  // A job tab's FIXTURES (docs/cam/gui.md#what-the-viewport-draws), drawn
-  // ghosted at their bed placement. Apart from documentMeshes for the same
-  // reason as the section caps: they are not the document's bodies, and must
-  // not shift the body<->index alignment picking relies on. Rebuilt every
-  // resync.
-  std::vector<uint32_t> fixtureInstances;
   // Geometry-delta overlay (compare_geometry's `materialize`, and F11's
   // "Compare shape"): the two boolean-diff solids drawn over the part, so
   // ONE look answers "where did it change?" instead of eyeballing a number
@@ -1784,7 +1747,7 @@ struct AppState {
   CADShape deltaMissingShape, deltaExtraShape;
   const Document* deltaOwner = nullptr;
   uint64_t deltaVersion = 0;
-  uint32_t deltaMissingInstance = 0, deltaExtraInstance = 0;
+  // (its two instances: GpuProjection::deltaMissingInstance/ExtraInstance)
   std::string deltaSummary; // what the comparison said, for the viewport hint
   // The units the ACTIVE document is read in (core/Units.h). An assembly tab
   // has no `document` at all — and the BOM, which is where masses are shown,
@@ -1994,11 +1957,7 @@ struct AppState {
   } fastenerTool;
 
   // The translucent preview of the joint about to be placed, and the key it
-  // was built from. Tracked APART from documentMeshes, like topoGhostInstance
-  // — a ghost left in that list survives a tab switch and haunts a document
-  // that cannot explain it.
-  std::vector<uint32_t> fastenerGhostInstances;
-  std::string fastenerGhostKey;
+  // was built from, are GpuProjection::fastenerGhostInstances/Key.
 
   // The bearing session (docs/parts/README.md#bearings): pick a seat, choose
   // among the bearings its diameter takes, place. Same shape as the fastener
@@ -2019,8 +1978,7 @@ struct AppState {
     glm::dquat orientation{1.0, 0.0, 0.0, 0.0};
     int placed = 0;
   } bearingTool;
-  uint32_t bearingGhostInstance = 0;
-  std::string bearingGhostKey;
+  // Its ghost: GpuProjection::bearingGhostInstance/Key.
 
   // The last "Check fasteners" answer, as the panel shows it (F1 p6 phase 4).
   // Kept here rather than in a static local inside the draw function: a
@@ -2379,17 +2337,8 @@ struct AppState {
   // is "mm of path per second of wall clock" scaled by the job's own feeds.
   float camPlaybackSpeed = 8.0f;
   double camPlaybackLastTick = 0.0;
-  // The StockSim revision the drawn mesh was built from, so a frame that
-  // changed nothing re-meshes nothing.
-  uint64_t camStockDrawnRevision = 0;
-  // ...and when it was last rebuilt, so a frame that changed a LITTLE does
-  // not re-mesh either. While playback runs the stock changes every frame, so
-  // the revision gate above correctly never fires and BuildStockMesh walks a
-  // ~700,000-cell height map at frame rate -- 95.8 ms of a 126 ms frame on
-  // the waveguide. The eye cannot use 60 surfaces a second; a capped rate
-  // gives back the frame and loses nothing a person can see. Paused, the
-  // next frame rebuilds immediately, so what you stop on is always exact.
-  double camStockDrawnAt = 0.0;
+  // The drawn stock's revision and age, and the cutter's instance, are in
+  // GpuProjection (camStockDrawnRevision/At, camToolInstance).
   // Why playback will not start, in words, where the button is.
   std::string camPlaybackRefusal;
   // What the playback's stock starts from: the names of the job's earlier
@@ -2399,12 +2348,6 @@ struct AppState {
   // (docs/cam/simulation.md#leftover-another-setup-removes).
   std::vector<std::string> camPlaybackSeededFrom;
   std::vector<std::string> camPlaybackNotSeeded;
-  // The cutter, drawn as a real solid through the mesh renderer (it is static
-  // geometry that MOVES, which is the one thing that renderer is good at).
-  // `camToolInstanceFor` is the T number it was built for; a tool change
-  // rebuilds it.
-  uint32_t camToolInstance = 0;
-  int camToolInstanceFor = -1;
 
   // The terminal panel (docs/ui/terminal.md). Off by default via
   // settings.terminalPanel; the state is created the first time it draws, so
@@ -2502,11 +2445,11 @@ struct AppState {
   // it.
   bool gpuStatsReset = false;
   // The swapchain's shape, as the driver actually gave it — pure data here,
-  // set by main.cpp at creation and on every resize. It belongs in the
-  // instrument because it is INVISIBLE otherwise and it decides the frame
-  // rate: two images with FIFO quantises every overrun to a whole refresh
-  // period (docs/rendering/frame-pacing.md#swapchain-and-present). 0 = no
-  // swapchain (headless, offscreen), which frame_stats reports rather than
+  // set by app/GpuOwners.cpp at creation and main.cpp on every resize. It
+  // belongs in the instrument because it is INVISIBLE otherwise and it decides
+  // the frame rate: two images with FIFO quantises every overrun to a whole
+  // refresh period (docs/rendering/frame-pacing.md#swapchain-and-present). 0 =
+  // no swapchain (headless, offscreen), which frame_stats reports rather than
   // guessing.
   uint32_t swapchainImages = 0;
   std::string presentMode; // "fifo" | "mailbox" | "immediate" | ...
@@ -2545,13 +2488,6 @@ struct AppState {
   // file; the recovery modal (DrawFileBrowser) resolves it.
   std::string recoveryOffer;
 
-  // The bounds of what SyncRayTracingScene last handed the ray tracer, so a
-  // still can size its ray limits from the scene instead of a literal.
-  // Valid only when rtSceneValid: an empty scene has no bounds to speak of.
-  glm::vec3 rtSceneMin{0.0f};
-  glm::vec3 rtSceneMax{0.0f};
-  bool rtSceneValid = false;
-
   // How far this document's geometry reaches from the world origin, which is
   // what every piece of reference geometry (base planes, datum quads, the
   // sketch grid) is sized from. Behind it is an OCC bounding box per body and
@@ -2561,9 +2497,103 @@ struct AppState {
   uint64_t sceneReachVersion = 0;
   float sceneReach = 0.0f;
 
-  // Document -> renderer sync bookkeeping
-  uint64_t syncedDocumentVersion = 0;
-  std::vector<DocumentRenderMesh> documentMeshes;
+  // EVERY belief this state holds about what the renderers hold
+  // (docs/rendering/README.md#rebuilding-the-device): instance and mesh ids,
+  // and the stamps that say "already uploaded". A rebuilt device makes new
+  // renderers that hold none of it, and ui::ForgetGpuProjection is
+  // `gpu = {}` — so an id kept anywhere else would survive into renderers
+  // that never issued it. tests/test_conventions.cpp fails on an instance,
+  // mesh-id or "drawn" field declared in this file outside this struct.
+  //
+  // The per-part and per-body tessellation caches keep their CPU meshes
+  // across a rebuild; only their asset ids are forgotten
+  // (ui::ReleaseGpuProjection), so they are not in here.
+  struct GpuProjection {
+    // Document -> renderer sync bookkeeping
+    uint64_t syncedDocumentVersion = 0;
+    std::vector<DocumentRenderMesh> documentMeshes;
+    // Section cap fills: the cap instance ids, separate from documentMeshes so
+    // body<->index alignment holds; removed on the next resync.
+    // A cap knows whose cut it is: selecting or hovering a part lights its cut
+    // faces with the rest of it. Without that the biggest surface you see of a
+    // sectioned part — the cap you are pointing at — stayed unlit while its
+    // walls highlighted, which reads as the highlight landing on the wrong
+    // thing (docs/ui/selection.md#picking-through-a-section).
+    struct SectionCapMesh {
+      uint32_t meshId = 0;
+      uint64_t occurrenceId = 0; // 0 on a part tab
+      size_t bodyIndex = 0;      // into the tab's bodies, as documentMeshes
+      size_t leaf = SIZE_MAX;    // its sectionCapLeaves entry (an assembly)
+    };
+    std::vector<SectionCapMesh> sectionCapMeshes;
+    // An assembly's leaves as their caps were cut: where each stood. A
+    // playback (motion or sequence) moves parts without a resync, and caps
+    // are baked in world space, so FollowPlaybackCaps moves a leaf's caps
+    // with it -- or cuts them again where a move does not keep the plane --
+    // and hides the caps of a part a sequence has not put in yet
+    // (docs/assemblies/README.md#playing-and-filming-a-sequence).
+    struct SectionCapLeaf {
+      uint64_t occurrenceId = 0;
+      std::vector<uint64_t> innerPath;
+      glm::dmat4 docLocal{1.0}; // the leaf inside its occurrence
+      glm::dmat4 world{1.0};    // where its caps were cut
+    };
+    std::vector<SectionCapLeaf> sectionCapLeaves;
+    // The topology shape-guide ghost's MeshRenderer instance
+    // (AppState::topoGhostStudyId says which study), rebuilt on resync.
+    uint32_t topoGhostInstance = 0;
+    // A job tab's FIXTURES (docs/cam/gui.md#what-the-viewport-draws), drawn
+    // ghosted at their bed placement. Apart from documentMeshes for the same
+    // reason as the section caps: they are not the document's bodies, and
+    // must not shift the body<->index alignment picking relies on. Rebuilt
+    // every resync.
+    std::vector<uint32_t> fixtureInstances;
+    // The geometry-delta overlay's two solids (AppState::deltaMissingShape).
+    uint32_t deltaMissingInstance = 0, deltaExtraInstance = 0;
+    // The translucent preview of the joint about to be placed, and the key it
+    // was built from. Tracked APART from documentMeshes, like
+    // topoGhostInstance — a ghost left in that list survives a tab switch and
+    // haunts a document that cannot explain it.
+    std::vector<uint32_t> fastenerGhostInstances;
+    std::string fastenerGhostKey;
+    // The bearing session's ghost, the same way.
+    uint32_t bearingGhostInstance = 0;
+    std::string bearingGhostKey;
+    // The FEM field overlay (SimulationState): the MeshRenderer instance
+    // holding the extracted iso-surface (0 = none) and the signature that
+    // gates its re-extraction; the body instances hidden while the overlay
+    // replaces them, so ExitSimulation / field=None restores exactly those;
+    // the signature of the last-built overlay (field, study, results epoch),
+    // whose vertex rebuild is skipped when unchanged (0 = nothing built).
+    uint32_t topoIsoInstance = 0;
+    uint64_t topoIsoKey = 0;
+    std::vector<uint32_t> hiddenMeshes;
+    uint64_t fieldBuiltKey = 0;
+    // The StockSim revision the drawn mesh was built from, so a frame that
+    // changed nothing re-meshes nothing.
+    uint64_t camStockDrawnRevision = 0;
+    // ...and when it was last rebuilt, so a frame that changed a LITTLE does
+    // not re-mesh either. While playback runs the stock changes every frame, so
+    // the revision gate above correctly never fires and BuildStockMesh walks a
+    // ~700,000-cell height map at frame rate -- 95.8 ms of a 126 ms frame on
+    // the waveguide. The eye cannot use 60 surfaces a second; a capped rate
+    // gives back the frame and loses nothing a person can see. Paused, the
+    // next frame rebuilds immediately, so what you stop on is always exact.
+    double camStockDrawnAt = 0.0;
+    // The cutter, drawn as a real solid through the mesh renderer (it is static
+    // geometry that MOVES, which is the one thing that renderer is good at).
+    // `camToolInstanceFor` is the T number it was built for; a tool change
+    // rebuilds it.
+    uint32_t camToolInstance = 0;
+    int camToolInstanceFor = -1;
+    // The bounds of what SyncRayTracingScene last handed the ray tracer, so a
+    // still can size its ray limits from the scene instead of a literal.
+    // Valid only when rtSceneValid: an empty scene has no bounds to speak of.
+    glm::vec3 rtSceneMin{0.0f};
+    glm::vec3 rtSceneMax{0.0f};
+    bool rtSceneValid = false;
+  };
+  GpuProjection gpu;
   // Tessellations + GPU assets kept per referenced part ACROSS assembly
   // resyncs, keyed on (part slot id, that part document's Version()). A
   // resync removes every instance and re-adds them, so without this every
@@ -2673,14 +2703,16 @@ struct AppState {
   // capture is armed every chord means "bind me", not "run something".
   std::string keyCaptureId;
   // Render devices this machine offers, for the Preferences combo. When the
-  // preferred one could not be honoured, startup records WHY here — the
-  // window must not promise that a restart will fix something a restart
-  // cannot fix (a device that cannot present to a window).
+  // preferred one could not be honoured, the ladder records WHY here (at
+  // start and whenever the preference is checked) — the window must not
+  // promise that a switch will happen that cannot (a device that cannot
+  // present to a window).
   std::vector<std::string> gpuDevices;
   std::string gpuPreferenceNote;
 
   // The device that draws, and how start-up got to it
-  // (docs/rendering/README.md#the-device-ladder). Filled in by main(); ping
+  // (docs/rendering/README.md#the-device-ladder). Filled in by
+  // app/GpuOwners.cpp after every build; ping
   // reports it as `renderer`, Help > About and the menu bar's notices show it.
   struct RendererStatus {
     std::string device; // == gpuName; empty under --headless
@@ -2700,12 +2732,38 @@ struct AppState {
     // Renderers whose Initialize failed: what the picture is missing.
     std::vector<std::string> missing;
     // The graphics device was lost (VK_ERROR_DEVICE_LOST in the frame loop
-    // or a one-shot submit, or debug_fault {kind: "device_lost"}). From then
-    // on nothing records, submits or presents, every renderer call is
-    // skipped, and an RPC that needs a renderer is refused as device_lost.
+    // or a one-shot submit, or debug_fault {kind: "device_lost"}; set only by
+    // ui::MarkDeviceLost). Nothing records, submits or presents, and every
+    // renderer call is skipped, until the next frame boundary rebuilds the
+    // device in place (docs/rendering/README.md#rebuilding-the-device) and
+    // clears it. The remote holds its queue meanwhile, as for any frame.
     bool lost = false;
     std::string lostReason; // "VK_ERROR_DEVICE_LOST at the frame fence"
+    // The loss stays: the rebuild failed (no rung held, the mesh renderer
+    // would not start, it threw), or the device died again within
+    // startup::kRebuildRetryWindowSeconds of the last rebuild. This is the
+    // lost state of docs/rendering/README.md#a-lost-device: an RPC that
+    // needs a renderer is refused as device_lost, the work is saved, a report
+    // written, and the window asks to Restart.
+    bool backstop = false;
+    // Rebuilds this session, and the last one: why ("device_lost" or
+    // "gpu_preference"), the device it left and the one it landed on, and
+    // what it cost. ping's renderer.rebuilds / last_rebuild.
+    int rebuilds = 0;
+    std::string lastRebuildReason, lastRebuildFrom, lastRebuildTo;
+    double lastRebuildMs = 0.0;
+    double lastRebuildAt = -1.0; // the frame boundary's clock, seconds
+    // The gpu_device preference the device in use was chosen under. A
+    // preference that differs from it is a change the frame boundary has
+    // not applied yet; `preferenceWaiting` while a render, a motion video
+    // or a test-engine capture holds the device ("switches when the render
+    // finishes").
+    std::string appliedPreference;
+    bool preferenceWaiting = false;
   } renderer;
+  // The menu bar's "Graphics device restarted" notice after a rebuild, said
+  // once: shown until this (ImGui) time.
+  double rendererRestartedNoticeUntil = -1.0;
   bool rendererFallbackNoticeShown = false;
 
   // Safe mode (docs/ui/settings.md#safe-mode): default settings that are

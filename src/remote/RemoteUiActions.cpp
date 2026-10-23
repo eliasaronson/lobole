@@ -965,6 +965,12 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
 
   // Serialize UI actions and screenshots: one at a time
   while (true) {
+    // A lost device is rebuilt at the next frame boundary
+    // (docs/rendering/README.md#rebuilding-the-device): requests wait for
+    // it, as they wait for any frame, rather than meet a device that is
+    // gone. Only the backstop refuses (below).
+    if (state.renderer.lost && !state.renderer.backstop)
+      return activity + 1;
     Request request;
     {
       std::lock_guard<std::mutex> lock(m_queueMutex);
@@ -1026,7 +1032,7 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       }
     }
 
-    // A lost device draws nothing again
+    // At the backstop nothing draws again
     // (docs/rendering/README.md#a-lost-device): a capture, a still, a face
     // picked by mesh — and a UI action, whose ImGui frame no longer runs and
     // would never answer — is refused by its code before it is queued, and
@@ -1076,6 +1082,9 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
         if (!parked->wait)
           parked->wait = remote::ParkRequirementsRequest(
               state, parked->request.method, parked->request.params);
+        if (!parked->wait)
+          parked->wait = remote::ParkSettingsRequest(
+              state, parked->request.method, *parked->params);
       } catch (...) {
         parked->wait = nullptr; // the handler says what went wrong
       }

@@ -1472,7 +1472,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // A material change touches PBR/albedo but not geometry, so the body meshes
     // are unchanged and SyncDocumentRenderers would skip the re-push. Force a
     // resync so the shaded body recolors immediately (no other edit needed).
-    state.syncedDocumentVersion = UINT64_MAX;
+    state.gpu.syncedDocumentVersion = UINT64_MAX;
     return json{{"regen", RegenSummaryJson(*doc)}};
   }
   if (m == "set_appearance") {
@@ -1559,7 +1559,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
         std::make_unique<ModifyFeatureCommand>(index, before, after), *doc);
     // Colors changed but no meshes did — force the renderer resync (the
     // same nudge set_material needs).
-    state.syncedDocumentVersion = UINT64_MAX;
+    state.gpu.syncedDocumentVersion = UINT64_MAX;
     json resp = {{"regen", RegenSummaryJson(*doc)}};
     resp["cleared"] = !ap.Any();
     if (p.contains("element")) {

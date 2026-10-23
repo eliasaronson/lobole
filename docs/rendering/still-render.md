@@ -171,7 +171,7 @@ deterministic: the same sun gives the same pixels.
 
 `IBLPrecompute::BuildFromImage` convolves it exactly as the HDRI is
 convolved (irradiance, prefilter chain, BRDF LUT), so the sky lights the
-model through the same split-sum IBL. `main.cpp`'s `SkyEnvironment`, reached
+model through the same split-sum IBL. `SkyEnvironment` (`app/GpuOwners.cpp`), reached
 as `AppState::skyEnvironment`, builds those maps the first time a sky still
 asks and keeps them for the next still with the same sun (rounded to a
 tenth of a degree, which the pixels then use too); a different sun replaces
@@ -246,7 +246,7 @@ straight; nothing is found in the image. Two things make that hold:
 - **Width.** The wireframe pipeline takes its line width per draw
   (`VK_DYNAMIC_STATE_LINE_WIDTH`, `OutlineSettings::rasterLineWidth`): 1 in
   the viewport, k x the line weight in a capture k times larger, so the
-  average down is the line weight. `main.cpp` enables the device's
+  average down is the line weight. `app/GpuOwners.cpp` enables the device's
   `wideLines` feature wherever it has one. A width past the device's widest
   line is clamped, with a note in the reply; one below its narrowest is drawn
   that wide at the alpha of the coverage the thinner line would have had.

@@ -16,8 +16,8 @@
 // (docs/architecture.md#when-the-renderer-cannot-start).
 //
 // Vulkan-free on purpose, like core: the unit tests check the text, the
-// parsers and the device ladder without an instance. main.cpp turns a
-// VkResult into its name (VkResultName) and hands that over.
+// parsers and the device ladder without an instance. app/GpuOwners.cpp
+// turns a VkResult into its name (VkResultName) and hands that over.
 namespace startup {
 
 // The exit code of a start that found no usable renderer. 1 is a bad flag
@@ -136,8 +136,12 @@ enum class RendererChoice { Automatic, Software, Hardware };
 //   device_create          the first device tried fails vkCreateDevice
 //   swapchain              the first device tried cannot set up a swapchain
 //   renderer_init:<name>   that renderer's Initialize fails (kFaultRenderers)
+//   rebuild                a device REBUILD fails device creation on every
+//                          rung (start-up is untouched), so a lost device
+//                          ends at the backstop (docs/rendering/README.md
+//                          #rebuilding-the-device)
 struct Fault {
-  enum class Kind { None, DeviceCreate, Swapchain, RendererInit };
+  enum class Kind { None, DeviceCreate, Swapchain, RendererInit, Rebuild };
   Kind kind = Kind::None;
   std::string renderer; // RendererInit only
 };
@@ -158,9 +162,33 @@ struct Device {
 // for `preferred` first, then the other hardware by score (first on a tie),
 // then the software ones. Ineligible devices are not rungs. `Software` keeps
 // only the CPU devices and `Hardware` only the rest.
+//
+// `first` >= 0 puts that device on the first rung whatever the preference
+// says, when it is eligible: a rebuild after a loss tries the device that
+// was lost again first (the spec's lost state belongs to the logical device;
+// the physical one is usually fine), then the usual order.
 std::vector<int> DeviceLadder(const std::vector<Device>& devices,
                               const std::string& preferred,
-                              RendererChoice choice);
+                              RendererChoice choice, int first = -1);
+
+// --- rebuilding the device ------------------------------------------------
+//
+// The two things that rebuild the device in place
+// (docs/rendering/README.md#rebuilding-the-device), and nothing else does:
+// a VK_ERROR_DEVICE_LOST (or debug_fault's), and a change of the gpu_device
+// preference that moves the first rung.
+enum class RebuildReason { DeviceLost, GpuPreference };
+const char* RebuildReasonName(RebuildReason reason); // "device_lost", ...
+
+// A device that dies again this soon after a rebuild is not one a second
+// rebuild will save.
+inline constexpr double kRebuildRetryWindowSeconds = 60.0;
+
+// Whether a loss is rebuilt in place or ends at the backstop (the lost
+// state, its report and Restart). `secondsSinceLastRebuild` < 0 = there has
+// been none.
+enum class LossVerdict { Rebuild, Backstop };
+LossVerdict JudgeLoss(double secondsSinceLastRebuild);
 
 // --- device loss ----------------------------------------------------------
 

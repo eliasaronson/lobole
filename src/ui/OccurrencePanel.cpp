@@ -860,7 +860,8 @@ void DrawExplodeBody(AppState& state) {
   // "None" + one selectable per view; the active one drives the display.
   if (ImGui::Selectable("None##explode", state.activeExplodedView == 0)) {
     state.activeExplodedView = 0;
-    state.syncedDocumentVersion = UINT64_MAX; // display change: force resync
+    state.gpu.syncedDocumentVersion =
+        UINT64_MAX; // display change: force resync
   }
   uint64_t deleteId = 0;
   for (ExplodedView& v : asmDoc.GetExplodedViews()) {
@@ -872,7 +873,7 @@ void DrawExplodeBody(AppState& state) {
                               "###explode_view_" + std::to_string(v.id);
     if (ImGui::Selectable(label.c_str(), active)) {
       state.activeExplodedView = v.id;
-      state.syncedDocumentVersion = UINT64_MAX;
+      state.gpu.syncedDocumentVersion = UINT64_MAX;
     }
   }
   if (ImGui::SmallButton("Add view###explode_add")) {
@@ -880,7 +881,7 @@ void DrawExplodeBody(AppState& state) {
     ExplodedView v;
     v.name = "Exploded " + std::to_string(asmDoc.GetExplodedViews().size() + 1);
     state.activeExplodedView = asmDoc.AddExplodedView(std::move(v));
-    state.syncedDocumentVersion = UINT64_MAX;
+    state.gpu.syncedDocumentVersion = UINT64_MAX;
   }
 
   if (ExplodedView* sel =
@@ -901,7 +902,7 @@ void DrawExplodeBody(AppState& state) {
                            1.0f))
       ApplyExplodeTransforms(state);
     if (ImGui::IsItemDeactivatedAfterEdit())
-      state.syncedDocumentVersion = UINT64_MAX;
+      state.gpu.syncedDocumentVersion = UINT64_MAX;
     // SameLine does not wrap, so "Delete view" was drawn past the panel edge
     // at the width the dock ships at.
     WrapRow row;
@@ -909,14 +910,14 @@ void DrawExplodeBody(AppState& state) {
     if (ImGui::SmallButton(
             "Auto-explode###explode_auto")) { // radial seed, then drag
       if (AutoExplode(state, sel->id))
-        state.syncedDocumentVersion = UINT64_MAX;
+        state.gpu.syncedDocumentVersion = UINT64_MAX;
     }
     row.Next(ButtonWidth("Delete view"));
     if (ImGui::SmallButton("Delete view###explode_delete")) {
       SnapshotAssembly(state);
       asmDoc.RemoveExplodedView(sel->id);
       state.activeExplodedView = 0;
-      state.syncedDocumentVersion = UINT64_MAX;
+      state.gpu.syncedDocumentVersion = UINT64_MAX;
       asmDoc.BumpVersion();
     }
     TextDisabledWrapped("Drag the gizmo to set an occurrence's offset.");

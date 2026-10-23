@@ -18,6 +18,10 @@
 // shard partition from the binary's own --gui-test-list and asserts every
 // listed test ran, so a case renamed or lost in the split fails the runner
 // loudly instead of silently disappearing.
+std::string SourceFixture(const std::string& rel) {
+  return std::string(LOBOLE_SOURCE_DIR) + "/tests/fixtures/" + rel;
+}
+
 void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
   ImGuiTest* t = nullptr;
   (void)t;

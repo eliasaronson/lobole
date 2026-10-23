@@ -1185,7 +1185,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     // the shape answers "where", which is the question people actually ask.
     ctx->Yield(2); // the resync that turns the shapes into instances
     IM_CHECK(s_App->HasGeometryDelta());
-    IM_CHECK(s_App->deltaExtraInstance != 0);
+    IM_CHECK(s_App->gpu.deltaExtraInstance != 0);
     IM_CHECK(s_App->deltaSummary.find("added") != std::string::npos);
 
     // And a version compared against itself is "same shape", not noise.
@@ -1211,7 +1211,7 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     ctx->ItemInputValue("//Box###ToolWindow/Width/##Width", 7.0f);
     ctx->Yield(3);
     IM_CHECK(!s_App->HasGeometryDelta());
-    IM_CHECK_EQ(s_App->deltaExtraInstance, 0u);
+    IM_CHECK_EQ(s_App->gpu.deltaExtraInstance, 0u);
   };
 
   // Clicking a diff row goes and finds the thing. The case that earns it is a
@@ -1671,10 +1671,10 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - servoVolume) <
              1e-6);
     // Drawn as a ghost (the in-context neighbour's look), no outline.
-    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)1);
-    IM_CHECK(
-        s_App->meshRenderer->IsInstanceGhost(s_App->documentMeshes[0].meshId));
-    IM_CHECK_EQ(s_App->documentMeshes[0].outlineId, 0u);
+    IM_CHECK_EQ(s_App->gpu.documentMeshes.size(), (size_t)1);
+    IM_CHECK(s_App->meshRenderer->IsInstanceGhost(
+        s_App->gpu.documentMeshes[0].meshId));
+    IM_CHECK_EQ(s_App->gpu.documentMeshes[0].outlineId, 0u);
     // Weightless: the mass report has no body in it.
     const auto mass = Measure::MassOfBodies(Doc()->GetBodies());
     IM_CHECK(mass.has_value());
@@ -1733,7 +1733,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)2);
     IM_CHECK(Doc()->GetBodies()[0].reference);
     IM_CHECK(!Doc()->GetBodies()[1].reference);
-    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)2); // its own tab: both
+    IM_CHECK_EQ(s_App->gpu.documentMeshes.size(),
+                (size_t)2); // its own tab: both
 
     // Placed in an assembly, only its own body is drawn — the servo is one
     // occurrence, not two.
@@ -1751,8 +1752,8 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     s_App->assembly->BumpVersion();
     ctx->Yield(3);
     // Two occurrences, one body each: the ghost adds nothing.
-    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)2);
-    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes)
+    IM_CHECK_EQ(s_App->gpu.documentMeshes.size(), (size_t)2);
+    for (const ui::DocumentRenderMesh& m : s_App->gpu.documentMeshes)
       IM_CHECK(!s_App->meshRenderer->IsInstanceGhost(m.meshId));
   };
 

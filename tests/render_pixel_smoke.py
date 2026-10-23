@@ -48,6 +48,13 @@ re-records deliberately.
     tests/render_pixel_smoke.py <designer>                  # compare, skip if unkeyed
     tests/render_pixel_smoke.py <designer> --require-baseline
     tests/render_pixel_smoke.py <designer> --record         # write the baseline
+    tests/render_pixel_smoke.py <designer> --rebuild        # and after one
+
+`--rebuild` renders the scene, rebuilds the graphics device in place
+(debug_fault device_lost; docs/rendering/README.md#rebuilding-the-device) and
+renders it again: the two must be byte-identical, and then the baseline is
+compared as usual. A rebuild that left any renderer state behind -- a
+viewport size, a shadow-map tier, the outline mode -- changes pixels here.
 
 CI's baseline belongs to CI's driver, so recording it on a developer GPU
 records a different file. `tools/ci-local.sh --pixel` runs this gate in a
@@ -143,6 +150,7 @@ def main():
     args = sys.argv[1:]
     record = "--record" in args
     require = "--require-baseline" in args
+    rebuild = "--rebuild" in args
     positional = [a for a in args if not a.startswith("--")]
     if not positional:
         print(__doc__)
@@ -154,6 +162,8 @@ def main():
     # touch the developer's autosaves, recent projects or preferences.
     env = dict(os.environ, XDG_STATE_HOME=scratch,
                XDG_CONFIG_HOME=os.path.join(scratch, "config"))
+    if rebuild:
+        env["LOBOLE_ALLOW_DEBUG_CRASH"] = "1"  # debug_fault
     # --offscreen, not --headless: this needs a real renderer, and offscreen
     # has one without a window or a display server.
     #
@@ -198,6 +208,28 @@ def main():
         d.call("screenshot", path=shot)
         d.call("screenshot", path=shot)
         actual = open(shot, "rb").read()
+
+        if rebuild:
+            d.call("debug_fault", kind="device_lost")
+            again = os.path.join(scratch, "rebuilt.png")
+            d.call("screenshot", path=again)  # the same warm-up, then the
+            d.call("screenshot", path=again)  # steady state
+            renderer = d.call("ping")["renderer"]
+            if renderer["rebuilds"] != 1 or renderer["lost"]:
+                print(f"render_pixel_smoke: the device was not rebuilt "
+                      f"({renderer})")
+                return 1
+            rebuilt = open(again, "rb").read()
+            if rebuilt != actual:
+                kept = os.path.join(BASELINE_DIR,
+                                    f"scene__{slug}.rebuilt.png")
+                shutil.copyfile(again, kept)
+                print(f"render_pixel_smoke: the render CHANGED across a "
+                      f"device rebuild ({len(actual)} -> {len(rebuilt)} "
+                      f"bytes); wrote {kept}")
+                return 1
+            print(f"  ok: {len(rebuilt)} bytes identical before and after a "
+                  f"device rebuild ({renderer['last_rebuild']['ms']:.0f} ms)")
 
         if record:
             os.makedirs(BASELINE_DIR, exist_ok=True)

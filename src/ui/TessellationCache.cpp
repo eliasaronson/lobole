@@ -219,6 +219,20 @@ void ReleaseTessellationCache(AppState& state) {
   state.tessellationCache->bytes = 0;
 }
 
+void ForgetTessellationAssets(AppState& state, bool release) {
+  if (!state.tessellationCache)
+    return;
+  for (const auto& [key, bucket] : state.tessellationCache->byShape)
+    for (const std::shared_ptr<BodyTessellation>& entry : bucket) {
+      if (release)
+        ReleaseTessellation(state, *entry);
+      entry->meshAsset = 0;
+      entry->outlineAsset = 0;
+      entry->bytes = 0;
+    }
+  state.tessellationCache->bytes = 0;
+}
+
 // The cache's own interface, at `ui` scope rather than file-static because
 // RendererSync.cpp is what consumes it: the sync asks for a prewarm, then
 // looks each body up as it walks the assembly. Declared in
@@ -360,6 +374,15 @@ LookupOrBuildTessellation(AppState& state, const CADShape& shape,
     if (!entry->shape.SameGeometryAs(shape))
       continue;
     entry->lastSerial = cache.serial;
+    // Kept across a device rebuild without its asset
+    // (ForgetTessellationAssets): the mesh is here, only the upload is not.
+    if (entry->meshAsset == 0) {
+      entry->meshAsset =
+          state.meshRenderer->CreateAsset(entry->vertices, entry->indices);
+      state.meshRenderer->RetainAsset(entry->meshAsset);
+      entry->bytes = TessellationBytes(*entry);
+      cache.bytes += entry->bytes;
+    }
     return entry;
   }
   auto entry = std::make_shared<BodyTessellation>();

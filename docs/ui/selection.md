@@ -112,7 +112,7 @@ still clip picks). `FaceSelector.h` takes a span of planes and stays free of
   a hit into a named element refuses it: the Face branch of `Candidates`,
   `PickAssemblyFace` (mate connectors), the sketch-plane pick and the Project
   tool. It is never silently replaced by the face the ray entered through.
-- **A cap lights with its body.** `AppState::sectionCapMeshes` records each
+- **A cap lights with its body.** `AppState::gpu.sectionCapMeshes` records each
   cap's `occurrenceId` and `bodyIndex`, and the hover/selection projection
   lights caps with the rest of their occurrence or body.
 

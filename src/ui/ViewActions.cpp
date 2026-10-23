@@ -794,7 +794,7 @@ namespace {
 // is nudged to the kept side (`-normal`) so the global shader clip doesn't
 // discard it, its winding is made consistent so back-face culling can't hide
 // it, and its normal faces the viewer for correct lighting. Cap instance ids
-// go in state.sectionCapMeshes (removed on the next resync).
+// go in state.gpu.sectionCapMeshes (removed on the next resync).
 } // namespace
 
 void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
@@ -863,7 +863,7 @@ void AppendCapMeshes(AppState& state, const std::vector<CADShape>& caps,
     // resets the alpha).
     if (bi < alphas.size() && alphas[bi] < 1.0f)
       state.meshRenderer->SetInstanceGlass(capId, alphas[bi]);
-    state.sectionCapMeshes.push_back({capId, occurrenceId, bi});
+    state.gpu.sectionCapMeshes.push_back({capId, occurrenceId, bi});
   }
 }
 

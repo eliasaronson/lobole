@@ -32,7 +32,6 @@ namespace settings {
 enum class Tier {
   Live,     // the next frame reads it
   NextTime, // takes effect on the next save / new part / next run of a thing
-  Restart,  // the swapchain and renderers are built once, at startup
 };
 
 struct Settings {

@@ -216,7 +216,7 @@ void DrawViewMenu(AppState& state) {
     // The translucent optimized-shape overlay a topology study leaves for
     // re-modeling; discoverable off-switch.
     state.topoGhostStudyId = 0;
-    state.syncedDocumentVersion = UINT64_MAX;
+    state.gpu.syncedDocumentVersion = UINT64_MAX;
   }
 
   // The standard views, discoverable (U5). Names, order and chords all come
@@ -450,6 +450,11 @@ void DrawAboutWindow(AppState& state) {
   }
   if (state.renderer.lost)
     row("Device", "lost: " + state.renderer.lostReason);
+  if (state.renderer.rebuilds > 0)
+    row("Rebuilt", std::to_string(state.renderer.rebuilds) +
+                       (state.renderer.rebuilds == 1 ? " time" : " times") +
+                       ", last " + state.renderer.lastRebuildFrom + " -> " +
+                       state.renderer.lastRebuildTo);
   if (state.safeMode.active)
     row("Safe mode", state.safeMode.why);
 
@@ -553,7 +558,7 @@ void DrawMenuBarNotices(const std::vector<MenuBarNotice>& notices) {
 // you can hit by accident: those live where they can be read first, the
 // History panel's banner and the modal the next save raises. "Geometry
 // rebuilt" is fixed by an ordinary save.
-void DrawNotices(const AppState& state) {
+void DrawNotices(AppState& state) {
   std::vector<MenuBarNotice> notices;
   std::string rebuiltTip;
   if (state.openRebuiltParts > 0) {
@@ -572,6 +577,25 @@ void DrawNotices(const AppState& state) {
   // (docs/rendering/README.md#the-device-ladder): lasting, where the
   // fallback modal is said once.
   std::string rendererTip;
+  std::string restartedTip;
+  // A rebuild in place (docs/rendering/README.md#rebuilding-the-device) is
+  // said once, for a while, and then is only in About and ping.
+  if (state.rendererRestartedNoticeUntil == -2.0)
+    state.rendererRestartedNoticeUntil = ImGui::GetTime() + 20.0;
+  if (!state.renderer.lost &&
+      ImGui::GetTime() < state.rendererRestartedNoticeUntil) {
+    restartedTip =
+        (state.renderer.lastRebuildReason == "gpu_preference"
+             ? "The graphics device was switched in place"
+             : "The graphics device stopped working and was restarted in "
+               "place") +
+        std::string(" (") + state.renderer.lastRebuildFrom + " -> " +
+        state.renderer.lastRebuildTo +
+        "). Nothing was lost: the document, the undo history and the open "
+        "tabs are as they were.";
+    notices.push_back({"Graphics device restarted###renderer_restarted_notice",
+                       restartedTip.c_str()});
+  }
   if (state.renderer.lost) {
     rendererTip = "The graphics device was lost (" + state.renderer.lostReason +
                   "). Nothing draws until Loböle restarts; the work was "

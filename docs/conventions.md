@@ -256,8 +256,9 @@ not fail the build. Beyond the cases above:
 - every boolean in `Measure.cpp` is built through `BuildQuery`
   (non-destructive; see [architecture.md](architecture.md#threading));
 - a background job is polled by `ui::PollBackgroundJobs`, never by a panel;
-- every tool-session sentinel is in the registry, and every scene renderer is
-  registered and torn down in `main.cpp`;
+- every tool-session sentinel is in the registry, and every scene renderer has
+  a row in the owner table and a place in `RegisterSceneRenderers()`
+  (`app/GpuOwners.cpp`);
 - the CAM op-type list in `add_cam_op`'s row matches the table, and the
   adaptive and surfacing cache keys cover every field their passes read;
 - a toolbar glyph means one thing, and a command's icon comes from

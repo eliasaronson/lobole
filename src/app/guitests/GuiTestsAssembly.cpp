@@ -228,7 +228,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
       s_App->assembly->AddOccurrence(o);
     }
     ctx->Yield(3);
-    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)3);
+    IM_CHECK_EQ(s_App->gpu.documentMeshes.size(), (size_t)3);
     IM_CHECK_EQ(s_App->outlineRenderer->MeshCount(), (size_t)3);
     IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)1);
 
@@ -309,7 +309,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!entry->second.bodies.empty());
     IM_CHECK_EQ(entry->second.bodies[0].tess->meshAsset, meshAsset);
     IM_CHECK_EQ(entry->second.bodies[0].tess->outlineAsset, outlineAsset);
-    IM_CHECK_EQ(s_App->documentMeshes.size(), (size_t)2);
+    IM_CHECK_EQ(s_App->gpu.documentMeshes.size(), (size_t)2);
     IM_CHECK_EQ(s_App->outlineRenderer->AssetCount(), (size_t)1);
 
     // Adding an unrelated body does NOT re-tessellate this one: the shape
@@ -924,7 +924,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(ui::SequenceHighlighted(*s_App) == std::vector<uint64_t>{topOcc});
     const auto lit = [](uint64_t occ) {
       bool any = false, all = true;
-      for (const ui::DocumentRenderMesh& m : s_App->documentMeshes)
+      for (const ui::DocumentRenderMesh& m : s_App->gpu.documentMeshes)
         if (m.occurrenceId == occ) {
           const bool on =
               !s_App->meshRenderer->InstanceHighlightRanges(m.meshId).empty();
@@ -1225,7 +1225,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(placed.partId == s_App->parts[unitIdx].id);
     // ...and it renders: the leaf inside it reaches the scene.
     ctx->Yield(2);
-    IM_CHECK_GT(s_App->documentMeshes.size(), (size_t)0);
+    IM_CHECK_GT(s_App->gpu.documentMeshes.size(), (size_t)0);
 
     // The assembly being edited is never offered — it cannot contain itself.
     ToolbarClick(ctx, "###tb_insert");
@@ -1321,7 +1321,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
 
     // Each leaf knows where it sits inside the unit — 0 and 500 apart.
     std::vector<float> localX;
-    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes)
+    for (const ui::DocumentRenderMesh& m : s_App->gpu.documentMeshes)
       localX.push_back(m.localXf[3].x);
     IM_CHECK_EQ(localX.size(), (size_t)2);
     IM_CHECK(std::abs(std::abs(localX[0] - localX[1]) - 500.0f) < 1e-3f);
@@ -1337,7 +1337,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // could do itself — the first version of this check recomputed
     // base * localXf and passed with the fix reverted.
     std::vector<float> worldX;
-    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes) {
+    for (const ui::DocumentRenderMesh& m : s_App->gpu.documentMeshes) {
       const auto xf = s_App->meshRenderer->GetInstanceTransform(m.meshId);
       IM_CHECK_SILENT(xf.has_value());
       worldX.push_back((*xf)[3].x);
@@ -1424,13 +1424,13 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     const ImVec2 at = WorldToWindow(mid);
     ctx->LogDebug("meshes %d, bounds (%.1f %.1f %.1f)-(%.1f %.1f %.1f), "
                   "viewport (%.0f %.0f)+(%.0f %.0f), at (%.0f %.0f)",
-                  (int)s_App->documentMeshes.size(), lo.x, lo.y, lo.z, hi.x,
+                  (int)s_App->gpu.documentMeshes.size(), lo.x, lo.y, lo.z, hi.x,
                   hi.y, hi.z, s_App->viewportPos.x, s_App->viewportPos.y,
                   s_App->viewportSize.x, s_App->viewportSize.y, at.x, at.y);
     ctx->MouseMoveToPos(at);
     ctx->Yield(2);
     size_t lit = 0;
-    for (const ui::DocumentRenderMesh& m : s_App->documentMeshes) {
+    for (const ui::DocumentRenderMesh& m : s_App->gpu.documentMeshes) {
       if (m.occurrenceId != occId)
         continue;
       const glm::uvec2 range =
@@ -2785,7 +2785,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK_STR_EQ(s_App->bearingTool.designation.c_str(), "6200");
     IM_CHECK(s_App->bearingTool.summary.find("shoulder") != std::string::npos);
     // The ghost stands where Place would put it.
-    IM_CHECK(s_App->bearingGhostInstance != 0);
+    IM_CHECK(s_App->gpu.bearingGhostInstance != 0);
 
     const size_t before = s_App->assembly->GetOccurrences().size();
     ctx->ItemClick("//Bearing###ToolWindow/###bearing_place");
@@ -2797,7 +2797,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->bearingTool.open);
     IM_CHECK(!s_App->bearingTool.seatElement.IsSet());
     IM_CHECK_EQ(s_App->slotPick.featureId, ui::kBearingToolSlot);
-    IM_CHECK_EQ(s_App->bearingGhostInstance, (uint32_t)0);
+    IM_CHECK_EQ(s_App->gpu.bearingGhostInstance, (uint32_t)0);
     const Occurrence& placed = s_App->assembly->GetOccurrences().back();
     IM_CHECK_STR_EQ(placed.name.c_str(), "ISO 15 6200");
     IM_CHECK(std::abs(placed.position.z - 10.0f) < 1e-4f);
@@ -2925,22 +2925,22 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // showing a bare screw while the checkboxes promise washers and a nut.
     ctx->Yield(2);
     IM_CHECK_EQ(s_App->fastenerTool.plan.size(), (size_t)2); // screw + nut
-    IM_CHECK_EQ(s_App->fastenerGhostInstances.size(),
+    IM_CHECK_EQ(s_App->gpu.fastenerGhostInstances.size(),
                 s_App->fastenerTool.plan.size());
     ctx->ItemClick("//Fastener###ToolWindow/###fastener_washer_head");
     ctx->Yield(3);
     IM_CHECK_EQ(s_App->fastenerTool.plan.size(), (size_t)3);
-    IM_CHECK_EQ(s_App->fastenerGhostInstances.size(), (size_t)3);
+    IM_CHECK_EQ(s_App->gpu.fastenerGhostInstances.size(), (size_t)3);
     ctx->ItemClick("//Fastener###ToolWindow/###fastener_washer_head");
     ctx->Yield(3);
-    IM_CHECK_EQ(s_App->fastenerGhostInstances.size(), (size_t)2);
+    IM_CHECK_EQ(s_App->gpu.fastenerGhostInstances.size(), (size_t)2);
 
     ctx->ItemClick("//Fastener###ToolWindow/###fastener_place");
     ctx->Yield(4);
     // Placing clears the pick and re-arms, so the preview goes with it —
     // a ghost still hanging in the hole next to the real screw would read
     // as a double-placement.
-    IM_CHECK(s_App->fastenerGhostInstances.empty());
+    IM_CHECK(s_App->gpu.fastenerGhostInstances.empty());
     // The screw and its nut, and the session is STILL OPEN with the rim
     // cleared and the pick re-armed: holes come in patterns.
     IM_CHECK_EQ(s_App->assembly->GetOccurrences().size(), before + 2);
@@ -2962,7 +2962,7 @@ void RegisterAssemblyGuiTests(ImGuiTestEngine* engine) {
     // And it goes when the session does — a ghost that outlives its tool
     // haunts whatever document you switch to next.
     ctx->Yield(2);
-    IM_CHECK(s_App->fastenerGhostInstances.empty());
+    IM_CHECK(s_App->gpu.fastenerGhostInstances.empty());
 
     // And the other half: a stack that moved under a placed screw has to be
     // ASKED about, because deriving a length from other documents' geometry

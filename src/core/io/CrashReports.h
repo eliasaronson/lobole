@@ -99,13 +99,21 @@ std::filesystem::path ReportsDir(const std::filesystem::path& stateDir);
 // starts with ("graphics device lost: VK_ERROR_DEVICE_LOST at the frame
 // fence"), so the next start can tell one from a crash.
 inline constexpr const char* kDeviceLostReason = "graphics device lost";
+// ...and for a loss the session recovered from by rebuilding the device in
+// place (docs/rendering/README.md#rebuilding-the-device): evidence kept, never
+// offered as a recovery notice, since nothing was lost.
+inline constexpr const char* kDeviceRecoveredReason =
+    "graphics device recovered";
 
 // A report folder for THIS session, while it runs: the same folder a dead
 // session's would be (session.log's tail, copies of the autosaves it wrote),
 // with `reason` as what happened. For a failure the process survives — a
 // lost graphics device — so the evidence does not wait for a crash that
 // never comes. The session carries on, and its clean exit leaves no marker.
-std::optional<Report> ReportThisSession(const std::string& reason);
+// `recovered`: the session carried on (a rebuilt device), and report.txt says
+// so instead of "asked to restart".
+std::optional<Report> ReportThisSession(const std::string& reason,
+                                        bool recovered = false);
 
 // How many windowed sessions in a row, newest first, died before their
 // first frame (`reports` newest first, as ListReports gives them). Other

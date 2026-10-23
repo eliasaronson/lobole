@@ -173,8 +173,10 @@ is what to read first; by what it names:
 Landing on a lesser device than the best one present is not a failure: the
 app says so once, keeps a notice in the menu bar, and Help ▸ About names the
 device. A device that stops working mid-session (a driver reset, an eGPU
-unplugged) saves the work, writes a report, and offers to restart
-(docs/rendering/README.md#a-lost-device).
+unplugged) is rebuilt in place and the session goes on
+(docs/rendering/README.md#rebuilding-the-device); only when that fails, or
+the device is lost again within 60 s, is the work saved, a report written
+and a restart offered (docs/rendering/README.md#a-lost-device).
 
 The release smokes check the first case on every package:
 `packaging/appimage/smoke.sh` and `packaging/windows/smoke.sh` start the app
