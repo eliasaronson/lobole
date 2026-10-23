@@ -137,8 +137,8 @@ surface) and stays separate; nothing here reads or writes it.
     `LOBOLE_TEST_*_MS` hooks, and a run that sees either says so in its
     record.
 
-When this lands, a `docs/performance/README.md` describes the harness, the
-workloads and how to read a compare. `tools/profile.sh` already cites
+When this lands, a README in a new `performance` docs area describes the
+harness, the workloads and how to read a compare. `tools/profile.sh` cites
 `docs/performance/`, which does not exist yet. The docs table and CLAUDE.md's
 profiling section each get a line. No measured number goes into any of them.
 
@@ -152,7 +152,7 @@ profiling section each get a line. No measured number goes into any of them.
   harness shares the one launcher.
 - `src/core/Document.cpp`: the two `LOBOLE_TEST_*` hooks.
 - `tests/bench_harness_smoke.py` (new), `tests/CMakeLists.txt`.
-- `docs/performance/README.md` (new), `docs/README.md`,
+- the new `performance` area's README, `docs/README.md`,
   `docs/architecture.md#tests`, `CLAUDE.md` (profiling section).
 
 ## Verified by

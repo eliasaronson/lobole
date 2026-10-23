@@ -261,9 +261,9 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   that resolves an element to a mesh), so `get_state` omits `bodies[].mesh`
   while the projection is behind rather than reporting the previous edit's id
   (docs/rendering/README.md#offscreen-mode-and-lazy-projection). A new scene renderer
-  goes in `RegisterSceneRenderers()`/`ShutdownSceneRenderers()` in main.cpp and
-  nowhere else; `test_conventions.cpp` fails if it is missing from either
-  (docs/rendering/README.md#scene-renderers).
+  is a row in `kRows` plus `RegisterSceneRenderers()`, both in
+  src/app/GpuOwners.cpp, and nowhere else; `test_conventions.cpp` fails if
+  either is missing (docs/rendering/README.md#scene-renderers).
   It also does NOT isolate `XDG_STATE_HOME`: its autosave lands in the user's
   real `~/.local/state/lobole/` and will overwrite an unsaved document's
   recovery copy. Export a scratch one when driving a job.
