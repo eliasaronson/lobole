@@ -2678,6 +2678,54 @@ struct AppState {
   // cannot fix (a device that cannot present to a window).
   std::vector<std::string> gpuDevices;
   std::string gpuPreferenceNote;
+
+  // The device that draws, and how start-up got to it
+  // (docs/rendering/README.md#the-device-ladder). Filled in by main(); ping
+  // reports it as `renderer`, Help > About and the menu bar's notices show it.
+  struct RendererStatus {
+    std::string device; // == gpuName; empty under --headless
+    // "discrete", "integrated", "virtual", "software" (a CPU device:
+    // lavapipe, llvmpipe) or "other".
+    std::string type;
+    bool software = false;
+    // A device ranked above this one was tried and failed, so this start
+    // landed lower than the best the machine has. `reason` says which and
+    // how ("NVIDIA GeForce RTX 4060: VK_ERROR_INITIALIZATION_FAILED at
+    // device creation"); the first frame says so once, in a modal.
+    bool fallback = false;
+    std::string reason;
+    // LOBOLE_RENDERER as given ("software", "hardware"); empty = automatic.
+    std::string forced;
+    bool rayTracing = false; // the path-traced still is available
+    // Renderers whose Initialize failed: what the picture is missing.
+    std::vector<std::string> missing;
+    // The graphics device was lost (VK_ERROR_DEVICE_LOST in the frame loop
+    // or a one-shot submit, or debug_fault {kind: "device_lost"}). From then
+    // on nothing records, submits or presents, every renderer call is
+    // skipped, and an RPC that needs a renderer is refused as device_lost.
+    bool lost = false;
+    std::string lostReason; // "VK_ERROR_DEVICE_LOST at the frame fence"
+  } renderer;
+  bool rendererFallbackNoticeShown = false;
+
+  // Safe mode (docs/ui/settings.md#safe-mode): default settings that are
+  // never written, the default layout in a scratch file, no ray tracing, no
+  // file opened. `why` is shown in its banner: "--safe-mode", or "the last 2
+  // starts crashed before the window drew".
+  struct SafeMode {
+    bool active = false;
+    std::string why;
+    std::string settingsPath; // the user's own, untouched
+    std::string layoutPath;
+  } safeMode;
+  // The banner's two ways out, set by main(): start again normally, or set
+  // the settings and layout aside (renamed *.bad-<stamp>) and then start
+  // again. Each ends this process.
+  std::function<void()> restartNormally;
+  std::function<void()> setAsideAndRestart;
+  // A settings file that could not be read and was set aside
+  // (settings::Load's note): shown once, then cleared.
+  std::string settingsNote;
 };
 
 } // namespace ui

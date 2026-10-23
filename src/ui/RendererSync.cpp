@@ -528,6 +528,12 @@ void SyncDocumentRenderers(AppState& state) {
 }
 
 void SyncRenderersToDocument(AppState& state) {
+  // A lost device takes no more uploads
+  // (docs/rendering/README.md#a-lost-device): the document is CPU state and
+  // stays whole; the projection waits for a restart that will never use this
+  // device again.
+  if (state.renderer.lost)
+    return;
   SyncSketchViewRollback(state);
   SyncDocumentRenderers(state);
   SyncFieldRenderer(state);
@@ -540,7 +546,8 @@ void SyncRenderersToDocument(AppState& state) {
 }
 
 bool SyncRayTracingScene(AppState& state, bool groundPlane) {
-  if (!state.rayTracer || !state.rayTracer->IsInitialized())
+  if (!state.rayTracer || !state.rayTracer->IsInitialized() ||
+      state.renderer.lost)
     return false;
   if (!state.document && !state.assembly)
     return false;
@@ -1028,6 +1035,29 @@ std::string StillTabRefusal(const AppState& state) {
          "one (set_active_part) first";
 }
 
+std::string PathTracerRefusal(const AppState& state) {
+  if (state.renderer.lost)
+    return "device_lost: the graphics device was lost (" +
+           state.renderer.lostReason +
+           "); nothing renders until Loböle restarts";
+  if (state.rayTracer && state.rayTracer->IsInitialized())
+    return {};
+  if (state.renderer.device.empty() && state.gpuName.empty())
+    return "ray tracing is not available: this instance has no renderer "
+           "(--headless)";
+  const std::string device =
+      state.renderer.device.empty() ? state.gpuName : state.renderer.device;
+  if (state.safeMode.active)
+    return "ray tracing is not available in safe mode; mode: quick renders "
+           "what the viewport draws";
+  if (state.renderer.software)
+    return "ray tracing is not available on " + device +
+           ", a software device: the path-traced still needs a GPU with "
+           "hardware ray tracing; mode: quick renders what the viewport draws";
+  return "ray tracing is not available on " + device +
+         "; mode: quick renders what the viewport draws";
+}
+
 namespace {
 // What a still that could not build its scene says: the tab when it is not
 // a model, else that the model is empty.
@@ -1047,8 +1077,8 @@ bool RenderStillBlocking(AppState& state, uint32_t width, uint32_t height,
       *error = m;
     return false;
   };
-  if (!state.rayTracer || !state.rayTracer->IsInitialized())
-    return fail("ray tracing not available");
+  if (const std::string why = PathTracerRefusal(state); !why.empty())
+    return fail(why);
   if (!SyncRayTracingScene(state, groundPlane))
     return fail(NoSceneReason(state));
   if (samples == 0)
@@ -1186,8 +1216,8 @@ void PumpRenderJob(AppState& state) {
     job.resultPath = ok ? job.outPath : std::string();
   };
 
-  if (!state.rayTracer || !state.rayTracer->IsInitialized()) {
-    finish(false, "ray tracing unavailable");
+  if (const std::string why = PathTracerRefusal(state); !why.empty()) {
+    finish(false, why);
     return;
   }
   if (job.cancel) {

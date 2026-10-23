@@ -242,7 +242,7 @@ constexpr MethodDoc MotionMethods[] = {
      "`highlight` are export_assembly_video's and are refused here.",
      "async, format, fps, frames, height, highlight, path, quality, speed, "
      "study, width",
-     remote::NotInBatch},
+     remote::NotInBatch | remote::NeedsRenderer},
     {"export_assembly_video",
      "Film the assembly SEQUENCE going together: {path, format?, width?, "
      "height?, fps?, frames?, quality?, speed?, highlight?, async?}, the "
@@ -271,7 +271,7 @@ constexpr MethodDoc MotionMethods[] = {
      "move with the parts they cut.",
      "async, format, fps, frames, height, highlight, path, quality, speed, "
      "width",
-     remote::NotInBatch},
+     remote::NotInBatch | remote::NeedsRenderer},
     {"motion_video_status",
      "The video export in progress, if any ({running, fraction}), and the "
      "last one to finish (`last`: the same shape export_motion_video answers, "

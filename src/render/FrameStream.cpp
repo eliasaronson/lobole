@@ -186,7 +186,8 @@ bool FrameStream::Submit(const Record& prepass, const Record& scene,
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &s.cb;
-  if (vkQueueSubmit(m_cfg.queue, 1, &submit, s.fence) != VK_SUCCESS) {
+  if (vkutil::NoteResult(vkQueueSubmit(m_cfg.queue, 1, &submit, s.fence)) !=
+      VK_SUCCESS) {
     if (error)
       *error = "frame capture: vkQueueSubmit failed";
     return false;
@@ -204,8 +205,8 @@ bool FrameStream::Collect(std::vector<uint8_t>* pixels, std::string* error) {
   }
   const uint32_t oldest = (m_next + kSlots - m_inFlight) % kSlots;
   Slot& s = m_slots[oldest];
-  if (vkWaitForFences(m_cfg.device, 1, &s.fence, VK_TRUE, UINT64_MAX) !=
-      VK_SUCCESS) {
+  if (vkutil::NoteResult(vkWaitForFences(m_cfg.device, 1, &s.fence, VK_TRUE,
+                                         UINT64_MAX)) != VK_SUCCESS) {
     if (error)
       *error = "frame capture: waiting for a frame failed (device lost?)";
     return false;

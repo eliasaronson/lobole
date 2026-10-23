@@ -34,6 +34,9 @@ set -eu
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 BIN="$ROOT/build/lobole"
 [ -x "$BIN" ] || { echo "headless-preview: no binary at $BIN — build it first." >&2; exit 1; }
+# An agent's instance: no native message box waits for a click
+# (app/StartupReport.h).
+export LOBOLE_NO_DIALOG="${LOBOLE_NO_DIALOG:-1}"
 
 # Only the --gui path needs a display server; resolve Xvfb lazily so the
 # default path works on a machine that has neither X nor xvfb-run.

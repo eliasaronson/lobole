@@ -60,6 +60,7 @@ add_executable(designer_tests
     test_projectmerge.cpp
     test_projectstamp.cpp
     test_settings.cpp
+    test_startup_report.cpp
     test_keymap.cpp
     test_golden.cpp
     test_units.cpp
@@ -937,6 +938,27 @@ add_test(NAME crash_report_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/crash_report_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(crash_report_smoke PROPERTIES TIMEOUT 120)
+
+# A start that cannot draw says why and exits 3; the device ladder, a missing
+# renderer, LOBOLE_RENDERER=software, and safe mode after two early crashes
+# (docs/architecture.md#when-the-renderer-cannot-start). The windowed half
+# needs the display tools/xvfb-exec.sh gives, hence pygui.
+add_test(NAME startup_failure_smoke
+         COMMAND ${XVFB_EXEC} python3
+                 ${CMAKE_CURRENT_SOURCE_DIR}/startup_failure_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(startup_failure_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300)
+
+# A lost graphics device is a state: the work autosaved at once, a report,
+# every drawing method refused as device_lost, the rest answering
+# (docs/rendering/README.md#a-lost-device), windowed and offscreen.
+add_test(NAME device_loss_smoke
+         COMMAND ${XVFB_EXEC} python3
+                 ${CMAKE_CURRENT_SOURCE_DIR}/device_loss_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(device_loss_smoke PROPERTIES LABELS "gui;pygui"
+                     TIMEOUT 300)
 
 # An app a test launched dies with the test, SIGKILL included: smoke_app arms
 # LOBOLE_EXIT_WITH_PARENT for every launch (src/app/ParentWatch.h).

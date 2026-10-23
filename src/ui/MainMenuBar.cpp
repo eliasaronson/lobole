@@ -427,12 +427,31 @@ void DrawAboutWindow(AppState& state) {
   row("Commit", BuildInfo::Commit() + "  (at configure time)");
   row("Build", BuildInfo::Configuration());
   row("Kernel", "OpenCASCADE " + BuildInfo::KernelVersion());
-  row("Renderer",
-      state.gpuName.empty()
-          ? std::string("(no renderer)")
-          : state.gpuName + (state.gpuApiVersion.empty()
+  row("Renderer", state.gpuName.empty()
+                      ? std::string("(no renderer)")
+                      : state.gpuName +
+                            (state.gpuApiVersion.empty()
                                  ? ""
-                                 : "  Vulkan " + state.gpuApiVersion));
+                                 : "  Vulkan " + state.gpuApiVersion) +
+                            (state.renderer.type.empty()
+                                 ? ""
+                                 : "  (" + state.renderer.type + ")"));
+  if (state.renderer.fallback)
+    row("Fallback", "a better device failed: " + state.renderer.reason);
+  if (!state.renderer.forced.empty())
+    row("Chosen by", "LOBOLE_RENDERER=" + state.renderer.forced);
+  if (!state.gpuName.empty() && !state.renderer.rayTracing)
+    row("Ray tracing", "not available (the quick still is)");
+  if (!state.renderer.missing.empty()) {
+    std::string missing;
+    for (const std::string& m : state.renderer.missing)
+      missing += (missing.empty() ? "" : ", ") + m;
+    row("Missing", missing);
+  }
+  if (state.renderer.lost)
+    row("Device", "lost: " + state.renderer.lostReason);
+  if (state.safeMode.active)
+    row("Safe mode", state.safeMode.why);
 
   ImGui::Separator();
   if (ImGui::TreeNode("Third-party components")) {
@@ -549,6 +568,51 @@ void DrawNotices(const AppState& state) {
     notices.push_back(
         {"Geometry rebuilt###rebuilt_notice", rebuiltTip.c_str()});
   }
+  // The device that draws, when it is not the machine's best or not whole
+  // (docs/rendering/README.md#the-device-ladder): lasting, where the
+  // fallback modal is said once.
+  std::string rendererTip;
+  if (state.renderer.lost) {
+    rendererTip = "The graphics device was lost (" + state.renderer.lostReason +
+                  "). Nothing draws until Loböle restarts; the work was "
+                  "saved for recovery.";
+    notices.push_back(
+        {"Graphics device lost###renderer_lost_notice", rendererTip.c_str()});
+  } else if (state.renderer.software || state.renderer.fallback) {
+    rendererTip =
+        (state.renderer.software ? "Rendering in software on "
+                                 : "Rendering on ") +
+        state.renderer.device +
+        (state.renderer.fallback
+             ? ", because a better device failed: " + state.renderer.reason
+         : !state.renderer.forced.empty()
+             ? " (LOBOLE_RENDERER=" + state.renderer.forced + ")"
+             : std::string(", the only device that can show this window")) +
+        "." +
+        (state.renderer.rayTracing
+             ? std::string()
+             : std::string("\nThe path-traced still is not available here; "
+                           "the quick still is."));
+    notices.push_back({state.renderer.software
+                           ? "Software rendering###renderer_software_notice"
+                           : "Fallback renderer###renderer_fallback_notice",
+                       rendererTip.c_str()});
+  }
+  std::string missingTip;
+  if (!state.renderer.missing.empty()) {
+    for (const std::string& m : state.renderer.missing)
+      missingTip += (missingTip.empty() ? "" : ", ") + m;
+    missingTip = "These renderers failed to start, so the picture is "
+                 "missing what they draw: " +
+                 missingTip + ". The log says why.";
+    notices.push_back(
+        {"Renderers missing###renderer_missing_notice", missingTip.c_str()});
+  }
+  if (state.safeMode.active)
+    notices.push_back({"Safe mode###safe_mode_notice",
+                       "Default settings and layout, written nowhere; no ray "
+                       "tracing; no file opened. The banner has the ways "
+                       "out."});
   if (state.diskChanged)
     notices.push_back(
         {"Changed on disk###disk_notice",

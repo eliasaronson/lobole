@@ -360,6 +360,10 @@ def _spawn(binary, extra_args, env, timeout, headless):
     # the registry from the client side — sets it itself, and setdefault
     # leaves that alone.
     e.setdefault("XDG_STATE_HOME", os.path.join(tmp, "state"))
+    # No native message box from a launch nobody is watching: a startup
+    # failure or a lost device would otherwise wait for a click that never
+    # comes (app/StartupReport.h). A test of the box itself sets "0".
+    e.setdefault("LOBOLE_NO_DIALOG", "1")
 
     log_path = os.path.join(tmp, "app.log")
     cmd = [binary]

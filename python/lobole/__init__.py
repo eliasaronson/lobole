@@ -14,14 +14,16 @@ either raises is a `LoboleError`; a refused call is a `Refused`
 (lobole.errors).
 """
 from lobole.client import Client
-from lobole.errors import (BudgetExceeded, ConnectionLost, InternalError,
-                           InvalidArgument, LoboleError, MissingArgument,
+from lobole.errors import (BudgetExceeded, ConnectionLost, DeviceLost,
+                           InternalError, InvalidArgument, LoboleError,
+                           MissingArgument,
                            NonFiniteError, Refused, SdkError, StaleRevision,
                            StaleSnapshot, UnknownArgument)
 from lobole.sdk import App, connect
 
 __all__ = [
-    "App", "BudgetExceeded", "Client", "ConnectionLost", "InternalError",
+    "App", "BudgetExceeded", "Client", "ConnectionLost", "DeviceLost",
+    "InternalError",
     "InvalidArgument", "LoboleError", "MissingArgument", "NonFiniteError",
     "Refused", "SdkError", "StaleRevision", "StaleSnapshot",
     "UnknownArgument", "connect"]

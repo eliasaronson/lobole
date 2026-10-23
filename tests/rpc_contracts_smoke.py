@@ -273,7 +273,8 @@ def check_error_classes():
     none, is still a Refused, so a newer app raises something catchable."""
     for cls in (MissingArgument, UnknownArgument, InvalidArgument,
                 errors.StaleRevision, errors.StaleSnapshot,
-                errors.BudgetExceeded, errors.InternalError):
+                errors.BudgetExceeded, errors.InternalError,
+                errors.DeviceLost):
         e = errors.refusal('x', {'code': cls.CODE})
         assert type(e) is cls and isinstance(e, errors.LoboleError), cls
     for diagnostic in ({'code': 'a_code_from_a_newer_app'}, {}, None):

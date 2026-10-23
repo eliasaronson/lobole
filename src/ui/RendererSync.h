@@ -132,6 +132,12 @@ inline constexpr double kDefaultSunElevationDeg = 40.0;
 // wrong place. Names the tab and its kind.
 std::string StillTabRefusal(const AppState& state);
 
+// Why the path-traced still cannot be made here, or "" when it can: no
+// renderer (--headless), a lost device, or a device with no ray tracing —
+// a software one (lavapipe) says so by name, since it is the machine and not
+// a setting. Quick stills are unaffected (docs/rendering/still-render.md).
+std::string PathTracerRefusal(const AppState& state);
+
 // Full synchronous offline still: sync the scene, build ASes, trace `samples`
 // samples, tonemap and write a PNG to `path`. Blocks until done. Returns false
 // (with *error set) on any failure. Used by the render_still RPC; the UI modal

@@ -28,8 +28,10 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <iostream>
 #include <iterator>
+#include <optional>
 
 #ifdef HAVE_NATIVEFILEDIALOG
 #include <nfd.h>
@@ -261,7 +263,12 @@ void DrawCrashNoticeModal(AppState& state) {
                               ImGuiWindowFlags_AlwaysAutoResize))
     return;
   const crash::Report& r = *notice;
-  ImGui::TextUnformatted("Loböle closed unexpectedly last time.");
+  // A lost device is not a crash: that session saved the work, wrote this
+  // report and restarted (docs/rendering/README.md#a-lost-device).
+  ImGui::TextUnformatted(
+      r.reason.rfind(crash::kDeviceLostReason, 0) == 0
+          ? "Loböle restarted after its graphics device stopped working."
+          : "Loböle closed unexpectedly last time.");
   ImGui::TextDisabled("%s", r.reason.c_str());
   ImGui::Spacing();
   ImGui::TextWrapped("A report was saved in\n%s\nIt stays on this computer: "
@@ -303,6 +310,112 @@ void DrawCrashNoticeModal(AppState& state) {
     ImGui::CloseCurrentPopup();
   }
   ImGui::EndPopup();
+}
+
+// The start-up notices after the crash notice, one at a time and only when
+// no other popup is up (two modals opened in one frame replace each other):
+// the last start found no renderer; the settings file could not be read and
+// was set aside; this start landed on a lower rung of the device ladder
+// (docs/rendering/README.md#the-device-ladder). Each is said once.
+void DrawStartupNotices(AppState& state) {
+  if (crash::Notice())
+    return; // the crash notice goes first
+  struct Notice {
+    const char* title;
+    std::string heading, body;
+    std::function<void()> dismiss;
+  };
+  std::optional<Notice> n;
+  if (const std::optional<std::string>& text = crash::StartupFailureNotice()) {
+    n = Notice{"Loböle could not start last time###StartupFailureNotice",
+               "The last start could not draw a window, and said why:", *text,
+               [] { crash::SetStartupFailureNotice(std::nullopt); }};
+  } else if (!state.settingsNote.empty()) {
+    n = Notice{"Settings set aside###SettingsNotice",
+               "Your settings could not be read.", state.settingsNote,
+               [&state] { state.settingsNote.clear(); }};
+  } else if (state.renderer.fallback && !state.rendererFallbackNoticeShown) {
+    n = Notice{"Rendering on a fallback device###RendererFallback",
+               (state.renderer.software ? "Rendering in software ("
+                                        : "Rendering on ") +
+                   state.renderer.device +
+                   (state.renderer.software ? ")" : "") + ".",
+               "A better graphics device on this machine failed: " +
+                   state.renderer.reason + ".\n\nEverything works, slower" +
+                   (state.renderer.rayTracing
+                        ? std::string(".")
+                        : std::string(", and the path-traced still is not "
+                                      "available here.")) +
+                   " Updating the graphics driver usually brings the "
+                   "device back; Help > About says which device draws.",
+               [&state] { state.rendererFallbackNoticeShown = true; }};
+  }
+  if (!n)
+    return;
+  if (!ImGui::IsPopupOpen(n->title)) {
+    if (ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopupId |
+                                   ImGuiPopupFlags_AnyPopupLevel))
+      return; // another popup is up: after it
+    ImGui::OpenPopup(n->title);
+  }
+  if (!ImGui::BeginPopupModal(n->title, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+  ImGui::TextUnformatted(n->heading.c_str());
+  ImGui::Spacing();
+  ImGui::PushTextWrapPos(ImGui::GetFontSize() * 40.0f);
+  ImGui::TextUnformatted(n->body.c_str());
+  ImGui::PopTextWrapPos();
+  ImGui::Spacing();
+  if (ImGui::Button("Copy###startup_notice_copy"))
+    ImGui::SetClipboardText((n->heading + "\n\n" + n->body).c_str());
+  ImGui::SameLine();
+  if (ImGui::Button("Dismiss###startup_notice_dismiss")) {
+    n->dismiss();
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
+// Safe mode's banner (docs/ui/settings.md#safe-mode): why, where the user's
+// own files are, and the two ways out. A small window of its own over the
+// top of the viewport, never docked, so the default layout under it is the
+// one being tried.
+void DrawSafeModeBanner(AppState& state) {
+  if (!state.safeMode.active)
+    return;
+  const ImGuiViewport* vp = ImGui::GetMainViewport();
+  ImGui::SetNextWindowPos(
+      ImVec2(vp->WorkPos.x + vp->WorkSize.x * 0.5f,
+             vp->WorkPos.y + ImGui::GetFrameHeight() * 2.0f),
+      ImGuiCond_Always, ImVec2(0.5f, 0.0f));
+  ImGui::SetNextWindowBgAlpha(0.95f);
+  if (!ImGui::Begin(
+          "Safe mode###SafeModeBanner", nullptr,
+          ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDocking |
+              ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+              ImGuiWindowFlags_NoFocusOnAppearing)) {
+    ImGui::End();
+    return;
+  }
+  ImGui::TextColored(ImVec4(0.95f, 0.75f, 0.35f, 1.0f), "Safe mode: %s.",
+                     state.safeMode.why.c_str());
+  ImGui::TextUnformatted("Default settings and layout, no ray tracing, no "
+                         "file opened. Nothing is written over yours:");
+  ImGui::TextDisabled("  %s", state.safeMode.settingsPath.c_str());
+  ImGui::TextDisabled("  %s", state.safeMode.layoutPath.c_str());
+  if (ImGui::Button("Restart normally###safe_restart") && state.restartNormally)
+    state.restartNormally();
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Start again with your own settings and layout.");
+  ImGui::SameLine();
+  if (ImGui::Button("Set them aside and restart###safe_set_aside") &&
+      state.setAsideAndRestart)
+    state.setAsideAndRestart();
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Rename both files *.bad-<date> (kept, not deleted), "
+                      "then start again on the defaults.");
+  ImGui::End();
 }
 
 // F8: a save was refused because the project moved on disk. The user pressed
@@ -462,6 +575,8 @@ bool NativeDialogsSafe() {
 void DrawFileBrowser(AppState& state) {
   DrawRecoveryModal(state);
   DrawCrashNoticeModal(state);
+  DrawStartupNotices(state);
+  DrawSafeModeBanner(state);
   DrawDiskChangeModal(state);
   DrawBrowserWindow(state);
 }

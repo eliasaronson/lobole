@@ -141,6 +141,10 @@ void DrawRenderModal(AppState& state) {
     if (ImGui::RadioButton("Path traced###render_mode_path", !quick))
       quick = false;
     ImGui::EndDisabled();
+    // Disabled says THAT; the tooltip says why — a software device has no
+    // ray tracing, and that is the machine, not a setting.
+    if (!rtReady && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      ImGui::SetTooltip("%s", PathTracerRefusal(state).c_str());
     if (!rtReady)
       quick = true;
 

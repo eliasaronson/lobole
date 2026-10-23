@@ -26,6 +26,10 @@ if [ "${LOBOLE_GUI_LOCKED:-}" != "1" ]; then
   exec flock "$LOCK" "$0" "$@"
 fi
 
+# Nothing run here is watched: a native message box (a startup failure, a
+# lost device; app/StartupReport.h) would wait for a click forever.
+export LOBOLE_NO_DIALOG="${LOBOLE_NO_DIALOG:-1}"
+
 if [ -n "${LOBOLE_NO_XVFB:-}" ]; then
   exec "$@" # opt out: run against whatever DISPLAY is set
 fi

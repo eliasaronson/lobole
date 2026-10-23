@@ -58,6 +58,8 @@ FAST_LIMIT=4.0
 # microseconds; a contended one waits its turn instead of corrupting both.
 # The shards below run under this one lock — they are one suite, not several.
 LOCK=/tmp/designer-gui-gpu.lock
+# No native message box from the shards (app/StartupReport.h): nobody clicks.
+export LOBOLE_NO_DIALOG="${LOBOLE_NO_DIALOG:-1}"
 if [ "${LOBOLE_GUI_LOCKED:-}" != "1" ]; then
   export LOBOLE_GUI_LOCKED=1
   exec flock "$LOCK" "$ROOT/tools/gui-tests-xvfb.sh" "$@"

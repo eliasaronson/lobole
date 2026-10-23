@@ -174,7 +174,8 @@ bool CaptureScreenshot(
   // buffer is re-recorded each pass (the pool carries
   // RESET_COMMAND_BUFFER_BIT, so beginning it again resets it).
   const uint32_t passes = std::max(1u, repeat);
-  for (uint32_t pass = 0; pass < passes; pass++) {
+  VkResult gpu = VK_SUCCESS; // the first submit or wait that failed
+  for (uint32_t pass = 0; pass < passes && gpu == VK_SUCCESS; pass++) {
     const bool last = pass + 1 == passes;
     VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
     begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
@@ -222,14 +223,16 @@ bool CaptureScreenshot(
     VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
     submit.commandBufferCount = 1;
     submit.pCommandBuffers = &cb;
-    vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-    vkQueueWaitIdle(queue);
+    gpu = vkutil::NoteResult(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
+    if (gpu == VK_SUCCESS)
+      gpu = vkutil::NoteResult(vkQueueWaitIdle(queue));
     if (afterEachSubmit)
       afterEachSubmit();
   }
 
-  // Measuring only: nothing to read back, nothing to encode.
-  if (!write) {
+  // Measuring only: nothing to read back, nothing to encode. Nor when the
+  // GPU failed it: what is in the buffer was never written.
+  if (!write || gpu != VK_SUCCESS) {
     vkFreeCommandBuffers(device, commandPool, 1, &cb);
     vkDestroyFramebuffer(device, framebuffer, nullptr);
     vkDestroyImageView(device, view, nullptr);
@@ -244,6 +247,10 @@ bool CaptureScreenshot(
       vkDestroyImage(device, msaaColorImage, nullptr);
     if (msaaColorMemory)
       vkFreeMemory(device, msaaColorMemory, nullptr);
+    if (gpu != VK_SUCCESS)
+      return fail(gpu == VK_ERROR_DEVICE_LOST
+                      ? "device_lost: the graphics device was lost"
+                      : "the GPU refused the capture's submit");
     return true;
   }
 

@@ -85,6 +85,7 @@ LoboleError
 ├── Refused             the call was not done, and nothing changed
 │   ├── MissingArgument, UnknownArgument, InvalidArgument
 │   ├── StaleRevision, StaleSnapshot, BudgetExceeded
+│   ├── DeviceLost      the graphics device is gone: nothing draws again
 │   └── InternalError   the handler fell over; rolled back all the same
 ├── NonFiniteError      the call ran, and its answer held NaN/inf
 └── SdkError            misuse the SDK caught without asking the app

@@ -166,8 +166,8 @@ static bool UploadImage(VkDevice device, VkPhysicalDevice phys, VkQueue queue,
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cb;
-  vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-  vkQueueWaitIdle(queue);
+  vkutil::NoteResult(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
+  vkutil::NoteResult(vkQueueWaitIdle(queue));
 
   vkFreeCommandBuffers(device, pool, 1, &cb);
   vkDestroyBuffer(device, staging, nullptr);

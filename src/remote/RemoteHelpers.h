@@ -163,6 +163,11 @@ enum MethodFlag : uint8_t {
   // Goes on the ImGui queue instead of running here: ImGui state is only
   // coherent inside the frame.
   UiAction = 1u << 3,
+  // Draws, or resolves through what the renderers hold (a capture, a still,
+  // a face picked by mesh). Once the graphics device is lost these are
+  // refused with diagnostic code `device_lost`, before anything runs, and
+  // every other method still answers (docs/rendering/README.md#a-lost-device).
+  NeedsRenderer = 1u << 4,
 };
 
 // A receipt on the wire. Attached by every RPC that returns a VERDICT, so a
@@ -523,5 +528,24 @@ inline void AttachRegen(nlohmann::json& out, const Document* doc) {
 // RemoteDispatch.cpp, which owns the tables; RemoteUiActions.cpp asks it
 // whether a method belongs on the ImGui queue.
 uint8_t MethodFlagsOf(const std::string& method);
+
+// The refusal of a NeedsRenderer method once the graphics device is lost
+// (`reason` as AppState::RendererStatus::lostReason says it), and its
+// diagnostic, code `device_lost` (docs/scripting/rpc.md#structured-errors).
+inline std::string DeviceLostMessage(const std::string& method,
+                                     const std::string& reason) {
+  return method + " is refused: device_lost — the graphics device was lost (" +
+         reason +
+         "), so nothing renders until Loböle restarts. The document is "
+         "intact and every method that does not draw still answers.";
+}
+inline nlohmann::json DeviceLostDiagnostic(const std::string& method,
+                                           const std::string& reason) {
+  return {{"operation", method},
+          {"code", "device_lost"},
+          {"path", ""},
+          {"expected", "a working graphics device"},
+          {"observed", reason}};
+}
 
 } // namespace remote

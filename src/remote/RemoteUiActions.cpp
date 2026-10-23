@@ -1026,6 +1026,22 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
       }
     }
 
+    // A lost device draws nothing again
+    // (docs/rendering/README.md#a-lost-device): a capture, a still, a face
+    // picked by mesh — and a UI action, whose ImGui frame no longer runs and
+    // would never answer — is refused by its code before it is queued, and
+    // everything else still answers.
+    if (state.renderer.lost && (remote::MethodFlagsOf(request.method) &
+                                (remote::NeedsRenderer | remote::UiAction))) {
+      Send(request.client,
+           {{"id", request.id},
+            {"error", remote::DeviceLostMessage(request.method,
+                                                state.renderer.lostReason)},
+            {"diagnostic", remote::DeviceLostDiagnostic(
+                               request.method, state.renderer.lostReason)}});
+      continue;
+    }
+
     // A request that would compute on the frame waits instead
     // (remote/RemoteParking.h): a CAM one on its passes, a drawing one on its
     // projection, an exact interference of two named sides on its boolean, a

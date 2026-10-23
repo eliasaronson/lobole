@@ -9,6 +9,7 @@
 #include "app/GuiTests.h"
 #include "app/HeadlessMain.h"
 #include "app/ParentWatch.h"
+#include "app/StartupReport.h"
 #include "cad/FaceSelector.h"
 #include "common/DesignerVersion.h"
 #include "common/DevicePreference.h"
@@ -284,16 +285,109 @@ static std::pair<long, long> g_SkyIBLKey{-1, -1};
 // non-owning pointers to the objects above once they exist)
 static ui::AppState g_App;
 
+// GLFW's last complaint, kept so a startup failure can quote it: glfwInit
+// and glfwCreateWindow say why only through this callback.
+static std::string g_GlfwLastError;
 static void glfw_error_callback(int error, const char* description) {
   fprintf(stderr, "GLFW Error %d: %s\n", error, description);
+  g_GlfwLastError = "GLFW said: " + std::string(description) + " (error " +
+                    std::to_string(error) + ")";
 }
+
+// LOBOLE_RENDERER and LOBOLE_FAULT, read once at start (app/StartupReport.h).
+static startup::RendererChoice g_RendererChoice =
+    startup::RendererChoice::Automatic;
+static startup::Fault g_Fault;
+// device_create and swapchain fail the FIRST device tried, once.
+static bool g_FaultSpent = false;
+static bool Faulted(startup::Fault::Kind kind) {
+  if (g_Fault.kind != kind || g_FaultSpent)
+    return false;
+  g_FaultSpent = true;
+  return true;
+}
+static bool FaultsRenderer(const char* name) {
+  return g_Fault.kind == startup::Fault::Kind::RendererInit &&
+         g_Fault.renderer == name;
+}
+
+// The device is lost: a state, not an abort
+// (docs/rendering/README.md#a-lost-device). The loop that sees it next stops
+// drawing and does the rest.
+static void MarkDeviceLost(const std::string& where) {
+  if (g_App.renderer.lost)
+    return;
+  g_App.renderer.lost = true;
+  g_App.renderer.lostReason = "VK_ERROR_DEVICE_LOST " + where;
+  LOG_ERROR("Rendering: the graphics device was lost ({})",
+            g_App.renderer.lostReason);
+}
+
+// ImGui's swapchain recreate reports through CheckVkResultFn, which used to
+// abort on any error. While a recreate runs, the first error is kept here
+// instead and the frame loop decides: retry next frame, rebuild the surface,
+// or treat the device as lost.
+static bool g_InSwapchainRecreate = false;
+static VkResult g_SwapchainRecreateError = VK_SUCCESS;
 
 static void check_vk_result(VkResult err) {
   if (err == VK_SUCCESS)
     return;
-  fprintf(stderr, "[vulkan] Error: VkResult = %d\n", err);
+  if (g_InSwapchainRecreate && err < 0) {
+    if (g_SwapchainRecreateError == VK_SUCCESS)
+      g_SwapchainRecreateError = err;
+    return;
+  }
+  fprintf(stderr, "[vulkan] Error: %s\n", startup::VkResultName(err).c_str());
+  if (err == VK_ERROR_DEVICE_LOST) {
+    MarkDeviceLost("in the interface renderer");
+    return;
+  }
   if (err < 0)
-    abort();
+    abort(); // still a crash report: the result's name is on stderr above
+}
+
+// What start-up has seen, for the failure's message.
+static std::vector<std::string> g_SeenDevices;
+
+// A startup Vulkan call: a failure becomes a StartupError naming the step
+// and the result, which main() turns into the report and exit code 3
+// (docs/architecture.md#when-the-renderer-cannot-start).
+static void CheckStartup(const char* step, VkResult r,
+                         const std::string& detail = "") {
+  if (r >= 0)
+    return;
+  startup::Failure f;
+  f.step = step;
+  f.result = startup::VkResultName(r);
+  f.detail = detail;
+  f.devices = g_SeenDevices;
+  throw startup::StartupError(std::move(f));
+}
+[[noreturn]] static void FailStartup(const char* step,
+                                     const std::string& detail,
+                                     const std::string& result = "") {
+  startup::Failure f;
+  f.step = step;
+  f.result = result;
+  f.detail = detail;
+  f.devices = g_SeenDevices;
+  throw startup::StartupError(std::move(f));
+}
+
+static const char* DeviceTypeName(VkPhysicalDeviceType t) {
+  switch (t) {
+  case VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU:
+    return "discrete";
+  case VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU:
+    return "integrated";
+  case VK_PHYSICAL_DEVICE_TYPE_VIRTUAL_GPU:
+    return "virtual";
+  case VK_PHYSICAL_DEVICE_TYPE_CPU:
+    return "software";
+  default:
+    return "other";
+  }
 }
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
@@ -322,14 +416,10 @@ IsExtensionAvailable(const ImVector<VkExtensionProperties>& properties,
   return false;
 }
 
-// `wsi` = this process will present to a window (swapchain device extension,
-// present-support probe). --offscreen passes false: it renders to images it
-// reads back, and enabling VK_KHR_swapchain without VK_KHR_surface on the
-// instance is a spec violation — WSI is all-or-nothing across the two levels.
-static void SetupVulkan(ImVector<const char*> instance_extensions,
-                        GLFWwindow* window, bool wsi) {
+// The Vulkan instance. Throws StartupError: a machine with no Vulkan driver
+// at all fails HERE, with VK_ERROR_INCOMPATIBLE_DRIVER.
+static void CreateInstance(ImVector<const char*> instance_extensions) {
   VkResult err;
-
   // Create Vulkan Instance
   {
     // Request Vulkan 1.2: it promotes VK_EXT_descriptor_indexing,
@@ -353,7 +443,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
     properties.resize(properties_count);
     err = vkEnumerateInstanceExtensionProperties(nullptr, &properties_count,
                                                  properties.Data);
-    check_vk_result(err);
+    CheckStartup(startup::step::kInstance, err);
 
     // Enable required extensions
     if (IsExtensionAvailable(
@@ -379,7 +469,11 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
     create_info.enabledExtensionCount = (uint32_t)instance_extensions.Size;
     create_info.ppEnabledExtensionNames = instance_extensions.Data;
     err = vkCreateInstance(&create_info, g_Allocator, &g_Instance);
-    check_vk_result(err);
+    CheckStartup(startup::step::kInstance, err,
+                 err == VK_ERROR_INCOMPATIBLE_DRIVER
+                     ? "No Vulkan driver loaded: the loader found no driver "
+                       "(ICD) for this machine's GPU, or none that works."
+                     : "");
 
 #ifdef APP_USE_VULKAN_DEBUG_REPORT
     auto f_vkCreateDebugReportCallbackEXT =
@@ -399,109 +493,84 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
     check_vk_result(err);
 #endif
   }
+}
 
-  // Select Physical Device (GPU). Prefer a discrete card — on this dual-GPU
-  // machine that is the RT-capable RTX 4060, not the Arc iGPU — unless the
-  // user named one in Preferences, which is why this no longer just calls
-  // ImGui_ImplVulkanH_SelectPhysicalDevice. Log it so a wrong pick (e.g. a
-  // headless llvmpipe) is obvious: RT needs the discrete GPU.
-  {
-    uint32_t count = 0;
-    vkEnumeratePhysicalDevices(g_Instance, &count, nullptr);
-    std::vector<VkPhysicalDevice> devices(count);
+// Every device the loader offers, scored as devicepref expects (< 0: cannot
+// present to `window`). Fills the Preferences combo and g_SeenDevices.
+struct DeviceCandidate {
+  VkPhysicalDevice device = VK_NULL_HANDLE;
+  std::string name;
+  VkPhysicalDeviceType type = VK_PHYSICAL_DEVICE_TYPE_OTHER;
+  int score = 0;
+};
+static std::vector<DeviceCandidate> EnumerateDevices(GLFWwindow* window) {
+  uint32_t count = 0;
+  vkEnumeratePhysicalDevices(g_Instance, &count, nullptr);
+  std::vector<VkPhysicalDevice> devices(count);
+  if (count > 0)
     vkEnumeratePhysicalDevices(g_Instance, &count, devices.data());
+  devices.resize(count);
 
-    // Throwaway surface, purely so each device can be asked whether it can
-    // present to THIS window. A device that cannot is ineligible however the
-    // user feels about it: choosing one aborts startup with "no WSI support
-    // on physical device 0", and the only way back would be hand-editing
-    // settings.json. Measured here — the Arc iGPU cannot present under Xvfb,
-    // and glfwGetPhysicalDevicePresentationSupport says it CAN (it asks the X
-    // server, which answers before Mesa finds no DRI3), so only the real
-    // surface query is trustworthy. The app's own surface does not exist
-    // until after device selection, hence this one.
-    VkSurfaceKHR probe = VK_NULL_HANDLE;
-    if (window == nullptr ||
-        glfwCreateWindowSurface(g_Instance, window, g_Allocator, &probe) !=
-            VK_SUCCESS)
-      probe = VK_NULL_HANDLE;
+  // Throwaway surface, purely so each device can be asked whether it can
+  // present to THIS window. A device that cannot is ineligible however the
+  // user feels about it: choosing one aborted startup with "no WSI support
+  // on physical device 0", and the only way back would be hand-editing
+  // settings.json. Measured here — the Arc iGPU cannot present under Xvfb,
+  // and glfwGetPhysicalDevicePresentationSupport says it CAN (it asks the X
+  // server, which answers before Mesa finds no DRI3), so only the real
+  // surface query is trustworthy. The app's own surface is made per rung of
+  // the ladder, hence this one.
+  VkSurfaceKHR probe = VK_NULL_HANDLE;
+  if (window == nullptr ||
+      glfwCreateWindowSurface(g_Instance, window, g_Allocator, &probe) !=
+          VK_SUCCESS)
+    probe = VK_NULL_HANDLE;
 
-    std::vector<std::string> names;
-    std::vector<int> scores;
-    for (VkPhysicalDevice pd : devices) {
-      VkPhysicalDeviceProperties props;
-      vkGetPhysicalDeviceProperties(pd, &props);
-      names.emplace_back(props.deviceName);
-      bool canPresent = probe == VK_NULL_HANDLE; // unknown: do not exclude
-      uint32_t families = 0;
-      vkGetPhysicalDeviceQueueFamilyProperties(pd, &families, nullptr);
-      std::vector<VkQueueFamilyProperties> qprops(families);
-      vkGetPhysicalDeviceQueueFamilyProperties(pd, &families, qprops.data());
-      for (uint32_t q = 0; q < families && !canPresent; q++) {
-        if (!(qprops[q].queueFlags & VK_QUEUE_GRAPHICS_BIT))
-          continue;
-        VkBool32 supported = VK_FALSE;
-        vkGetPhysicalDeviceSurfaceSupportKHR(pd, q, probe, &supported);
-        canPresent = supported == VK_TRUE;
-      }
-      scores.push_back(
-          !canPresent                                                  ? -1
-          : props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU   ? 2
-          : props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 1
-                                                                       : 0);
-    }
-    if (probe != VK_NULL_HANDLE)
-      vkDestroySurfaceKHR(g_Instance, probe, g_Allocator);
-    // The list is what the Preferences combo offers; the preference itself is
-    // matched by the shared rule both device-picking sites use.
-    g_App.gpuDevices = names;
-    const int pick =
-        devicepref::Choose(names, scores, g_App.settings.gpuDevice);
-    if (pick >= 0)
-      g_PhysicalDevice = devices[static_cast<size_t>(pick)];
-    // Say so rather than silently doing something else: a preference that
-    // cannot be honoured is exactly the case a user reads the log for.
-    if (!g_App.settings.gpuDevice.empty() && pick >= 0 &&
-        names[static_cast<size_t>(pick)].find(g_App.settings.gpuDevice) ==
-            std::string::npos) {
-      g_App.gpuPreferenceNote = "'" + g_App.settings.gpuDevice +
-                                "' cannot display a window on this system (or "
-                                "is not present), so it was not used.";
-      LOG_WARN("Preferred GPU '{}' cannot present here (or is absent); "
-               "rendering on {} instead.",
-               g_App.settings.gpuDevice, names[static_cast<size_t>(pick)]);
-    }
-  }
-  IM_ASSERT(g_PhysicalDevice != VK_NULL_HANDLE);
-  {
+  std::vector<DeviceCandidate> out;
+  g_SeenDevices.clear();
+  for (VkPhysicalDevice pd : devices) {
     VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(g_PhysicalDevice, &props);
-    // maxMemoryAllocationCount beside the device name, because every buffer
-    // and image takes its own vkAllocateMemory (no sub-allocator) and a
-    // 299-part assembly makes 1196 of them. Every device this project targets
-    // reports 4294967295 — no ceiling (measured 2026-09-01: NVIDIA, Intel Arc,
-    // llvmpipe). The Vulkan FLOOR is 4096 though, so a driver that imposes a
-    // real limit is a port away, and running out of handles looks nothing like
-    // running out of memory: the 51 MB those 1196 hold is unremarkable, and an
-    // external GPU monitor would show nothing wrong. Logging it means such a
-    // machine says so on its first line rather than at the allocation that
-    // fails.
-    LOG_INFO("Selected GPU: {} (type {}), max device allocations {}",
-             props.deviceName, static_cast<int>(props.deviceType),
-             props.limits.maxMemoryAllocationCount);
-    // Keep it for Help > About: which GPU answered is the first thing worth
-    // knowing about a rendering bug, and the log is gone by the time someone
-    // writes the report.
-    g_App.gpuName = props.deviceName;
-    g_App.gpuApiVersion =
-        std::to_string(VK_API_VERSION_MAJOR(props.apiVersion)) + "." +
-        std::to_string(VK_API_VERSION_MINOR(props.apiVersion)) + "." +
-        std::to_string(VK_API_VERSION_PATCH(props.apiVersion));
+    vkGetPhysicalDeviceProperties(pd, &props);
+    bool canPresent = probe == VK_NULL_HANDLE; // unknown: do not exclude
+    uint32_t families = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(pd, &families, nullptr);
+    std::vector<VkQueueFamilyProperties> qprops(families);
+    vkGetPhysicalDeviceQueueFamilyProperties(pd, &families, qprops.data());
+    for (uint32_t q = 0; q < families && !canPresent; q++) {
+      if (!(qprops[q].queueFlags & VK_QUEUE_GRAPHICS_BIT))
+        continue;
+      VkBool32 supported = VK_FALSE;
+      vkGetPhysicalDeviceSurfaceSupportKHR(pd, q, probe, &supported);
+      canPresent = supported == VK_TRUE;
+    }
+    DeviceCandidate c;
+    c.device = pd;
+    c.name = props.deviceName;
+    c.type = props.deviceType;
+    c.score = !canPresent                                                  ? -1
+              : props.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU   ? 2
+              : props.deviceType == VK_PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU ? 1
+                                                                           : 0;
+    g_SeenDevices.push_back(c.name + " (" + DeviceTypeName(c.type) +
+                            (canPresent ? "" : ", cannot show this window") +
+                            ")");
+    out.push_back(std::move(c));
   }
+  if (probe != VK_NULL_HANDLE)
+    vkDestroySurfaceKHR(g_Instance, probe, g_Allocator);
+  g_App.gpuDevices.clear();
+  for (const DeviceCandidate& c : out)
+    g_App.gpuDevices.push_back(c.name);
+  return out;
+}
 
-  // Select graphics queue family
+// The logical device on g_PhysicalDevice, its queue and pools. Throws
+// StartupError (step kDevice); whatever it made is left for DestroyDevice.
+static void CreateDevice(bool wsi) {
+  VkResult err;
   g_QueueFamily = ImGui_ImplVulkanH_SelectQueueFamilyIndex(g_PhysicalDevice);
-  IM_ASSERT(g_QueueFamily != (uint32_t)-1);
+  if (g_QueueFamily == (uint32_t)-1)
+    FailStartup(startup::step::kDevice, "it has no graphics queue");
 
   // Create Logical Device
   {
@@ -594,9 +663,13 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
     create_info.pQueueCreateInfos = queue_info;
     create_info.enabledExtensionCount = (uint32_t)device_extensions.Size;
     create_info.ppEnabledExtensionNames = device_extensions.Data;
-    err =
-        vkCreateDevice(g_PhysicalDevice, &create_info, g_Allocator, &g_Device);
-    check_vk_result(err);
+    err = Faulted(startup::Fault::Kind::DeviceCreate)
+              ? VK_ERROR_INITIALIZATION_FAILED
+              : vkCreateDevice(g_PhysicalDevice, &create_info, g_Allocator,
+                               &g_Device);
+    if (err != VK_SUCCESS)
+      g_Device = VK_NULL_HANDLE;
+    CheckStartup(startup::step::kDevice, err);
     vkGetDeviceQueue(g_Device, g_QueueFamily, 0, &g_Queue);
   }
 
@@ -616,7 +689,7 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
     pool_info.pPoolSizes = pool_sizes;
     err = vkCreateDescriptorPool(g_Device, &pool_info, g_Allocator,
                                  &g_DescriptorPool);
-    check_vk_result(err);
+    CheckStartup(startup::step::kDevice, err);
   }
 
   // Create Command Pool
@@ -627,8 +700,172 @@ static void SetupVulkan(ImVector<const char*> instance_extensions,
     pool_info.queueFamilyIndex = g_QueueFamily;
     err =
         vkCreateCommandPool(g_Device, &pool_info, g_Allocator, &g_CommandPool);
-    check_vk_result(err);
+    CheckStartup(startup::step::kDevice, err);
   }
+}
+
+static void DestroyDevice() {
+  if (g_Device != VK_NULL_HANDLE) {
+    vkDeviceWaitIdle(g_Device);
+    if (g_CommandPool != VK_NULL_HANDLE)
+      vkDestroyCommandPool(g_Device, g_CommandPool, g_Allocator);
+    if (g_DescriptorPool != VK_NULL_HANDLE)
+      vkDestroyDescriptorPool(g_Device, g_DescriptorPool, g_Allocator);
+    vkDestroyDevice(g_Device, g_Allocator);
+  }
+  g_CommandPool = VK_NULL_HANDLE;
+  g_DescriptorPool = VK_NULL_HANDLE;
+  g_Device = VK_NULL_HANDLE;
+  g_Queue = VK_NULL_HANDLE;
+  g_QueueFamily = (uint32_t)-1;
+}
+
+static std::string AtStep(const std::string& step) {
+  if (step == startup::step::kDevice)
+    return "at device creation";
+  if (step == startup::step::kSwapchain)
+    return "at swapchain setup";
+  if (step == startup::step::kSurface)
+    return "at the window surface";
+  return "when it tried to " + step;
+}
+
+// The device ladder (docs/rendering/README.md#the-device-ladder): the
+// instance, then each eligible device in startup::DeviceLadder's order until
+// one can be created and `onDevice` (the window's surface and swapchain)
+// succeeds on it; `onFailure` undoes what `onDevice` made before the next is
+// tried. Every rung that fails is logged with its result, and landing below
+// the first is recorded in g_App.renderer for the modal, the menu bar, About
+// and ping. Throws StartupError when no rung holds.
+//
+// `wsi` = this process will present to a window (swapchain device extension,
+// present-support probe). --offscreen passes false: it renders to images it
+// reads back, and enabling VK_KHR_swapchain without VK_KHR_surface on the
+// instance is a spec violation — WSI is all-or-nothing across the two levels.
+static void SetupVulkan(ImVector<const char*> instance_extensions,
+                        GLFWwindow* window, bool wsi,
+                        const std::function<void()>& onDevice = {},
+                        const std::function<void()>& onFailure = {}) {
+  CreateInstance(instance_extensions);
+
+  const std::vector<DeviceCandidate> candidates = EnumerateDevices(window);
+  if (candidates.empty())
+    FailStartup(startup::step::kNoDevice,
+                "The Vulkan loader runs, but it offered no device: there is "
+                "no Vulkan driver for this machine's GPU, or no GPU it can "
+                "use.");
+  std::vector<startup::Device> devices;
+  for (const DeviceCandidate& c : candidates)
+    devices.push_back({c.name, c.type == VK_PHYSICAL_DEVICE_TYPE_CPU, c.score});
+  const std::vector<int> ladder = startup::DeviceLadder(
+      devices, g_App.settings.gpuDevice, g_RendererChoice);
+  if (ladder.empty()) {
+    const bool anyCpu =
+        std::any_of(devices.begin(), devices.end(),
+                    [](const startup::Device& d) { return d.cpu; });
+    FailStartup(
+        startup::step::kNoDevice,
+        g_RendererChoice == startup::RendererChoice::Software
+            ? (anyCpu ? "LOBOLE_RENDERER=software, and the software device "
+                        "cannot show this window."
+                      : "LOBOLE_RENDERER=software, and there is no software "
+                        "device: install Mesa's Vulkan drivers (lavapipe).")
+        : g_RendererChoice == startup::RendererChoice::Hardware
+            ? "LOBOLE_RENDERER=hardware, and no hardware device can show "
+              "this window."
+            : "None of the devices can show this window.");
+  }
+
+  // Say so rather than silently doing something else: a preference that
+  // cannot be honoured is exactly the case a user reads the log for.
+  const std::string& first = candidates[static_cast<size_t>(ladder[0])].name;
+  if (!g_App.settings.gpuDevice.empty() &&
+      first.find(g_App.settings.gpuDevice) == std::string::npos) {
+    g_App.gpuPreferenceNote = "'" + g_App.settings.gpuDevice +
+                              "' cannot display a window on this system (or "
+                              "is not present), so it was not used.";
+    LOG_WARN("Preferred GPU '{}' cannot present here (or is absent); "
+             "rendering on {} instead.",
+             g_App.settings.gpuDevice, first);
+  }
+
+  std::vector<std::string> attempts;
+  std::optional<startup::Failure> last;
+  int landed = -1;
+  for (size_t rung = 0; rung < ladder.size() && landed < 0; rung++) {
+    const DeviceCandidate& c = candidates[static_cast<size_t>(ladder[rung])];
+    g_PhysicalDevice = c.device;
+    try {
+      CreateDevice(wsi);
+      if (onDevice)
+        onDevice();
+      landed = static_cast<int>(rung);
+    } catch (const startup::StartupError& e) {
+      const startup::Failure& f = e.failure();
+      const std::string why =
+          (f.result.empty() ? f.detail : f.result) + " " + AtStep(f.step);
+      attempts.push_back(c.name + ": " + why);
+      LOG_WARN("Rendering: {} failed ({}){}", c.name, why,
+               rung + 1 < ladder.size() ? "; trying the next device" : "");
+      last = f;
+      if (onFailure)
+        onFailure();
+      DestroyDevice();
+      g_PhysicalDevice = VK_NULL_HANDLE;
+    }
+  }
+  if (landed < 0) {
+    startup::Failure f = *last;
+    f.devices = g_SeenDevices;
+    f.attempts = attempts;
+    throw startup::StartupError(std::move(f));
+  }
+
+  const DeviceCandidate& used =
+      candidates[static_cast<size_t>(ladder[static_cast<size_t>(landed)])];
+  {
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(g_PhysicalDevice, &props);
+    // maxMemoryAllocationCount beside the device name, because every buffer
+    // and image takes its own vkAllocateMemory (no sub-allocator) and a
+    // 299-part assembly makes 1196 of them. Every device this project targets
+    // reports 4294967295 — no ceiling (measured 2026-09-01: NVIDIA, Intel Arc,
+    // llvmpipe). The Vulkan FLOOR is 4096 though, so a driver that imposes a
+    // real limit is a port away, and running out of handles looks nothing like
+    // running out of memory: the 51 MB those 1196 hold is unremarkable, and an
+    // external GPU monitor would show nothing wrong. Logging it means such a
+    // machine says so on its first line rather than at the allocation that
+    // fails.
+    LOG_INFO("Selected GPU: {} (type {}), max device allocations {}",
+             props.deviceName, static_cast<int>(props.deviceType),
+             props.limits.maxMemoryAllocationCount);
+    // Keep it for Help > About: which GPU answered is the first thing worth
+    // knowing about a rendering bug, and the log is gone by the time someone
+    // writes the report.
+    g_App.gpuName = props.deviceName;
+    g_App.gpuApiVersion =
+        std::to_string(VK_API_VERSION_MAJOR(props.apiVersion)) + "." +
+        std::to_string(VK_API_VERSION_MINOR(props.apiVersion)) + "." +
+        std::to_string(VK_API_VERSION_PATCH(props.apiVersion));
+  }
+  ui::AppState::RendererStatus& status = g_App.renderer;
+  status.device = used.name;
+  status.type = DeviceTypeName(used.type);
+  status.software = used.type == VK_PHYSICAL_DEVICE_TYPE_CPU;
+  status.fallback = landed > 0;
+  status.reason.clear();
+  for (const std::string& a : attempts)
+    status.reason += (status.reason.empty() ? "" : "; ") + a;
+  status.forced =
+      g_RendererChoice == startup::RendererChoice::Software   ? "software"
+      : g_RendererChoice == startup::RendererChoice::Hardware ? "hardware"
+                                                              : "";
+  if (status.fallback)
+    LOG_WARN("Rendering on {} ({}), lower than the best device here: {}",
+             used.name, status.type, status.reason);
+  else if (status.software)
+    LOG_INFO("Rendering in software on {}{}", used.name,
+             status.forced.empty() ? "" : " (LOBOLE_RENDERER=software)");
 }
 
 // Depth buffer. ImGui's swapchain render pass is color-only, so 3D solids
@@ -930,13 +1167,31 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
   // Decide the MSAA level once, before the render pass / pipelines are built.
   g_MSAASamples = GetMaxUsableSampleCount();
 
-  VkBool32 res;
-  vkGetPhysicalDeviceSurfaceSupportKHR(g_PhysicalDevice, g_QueueFamily,
-                                       wd->Surface, &res);
-  if (res != VK_TRUE) {
-    fprintf(stderr, "Error no WSI support on physical device 0\n");
-    exit(-1);
+  // Each of these used to be an exit(-1) or an abort; now it is a rung of
+  // the device ladder that failed, and the next device is tried.
+  VkBool32 res = VK_FALSE;
+  CheckStartup(startup::step::kSwapchain,
+               vkGetPhysicalDeviceSurfaceSupportKHR(
+                   g_PhysicalDevice, g_QueueFamily, wd->Surface, &res));
+  if (res != VK_TRUE)
+    FailStartup(startup::step::kSwapchain,
+                "its graphics queue cannot present to this window");
+  {
+    VkSurfaceCapabilitiesKHR probe{};
+    CheckStartup(startup::step::kSwapchain,
+                 vkGetPhysicalDeviceSurfaceCapabilitiesKHR(
+                     g_PhysicalDevice, wd->Surface, &probe));
+    uint32_t formats = 0;
+    CheckStartup(startup::step::kSwapchain,
+                 vkGetPhysicalDeviceSurfaceFormatsKHR(
+                     g_PhysicalDevice, wd->Surface, &formats, nullptr));
+    if (formats == 0)
+      FailStartup(startup::step::kSwapchain,
+                  "the window surface offers no image format");
   }
+  if (Faulted(startup::Fault::Kind::Swapchain))
+    FailStartup(startup::step::kSwapchain, "LOBOLE_FAULT=swapchain",
+                startup::VkResultName(VK_ERROR_INITIALIZATION_FAILED));
 
   const VkFormat requestSurfaceImageFormat[] = {
       VK_FORMAT_B8G8R8A8_UNORM, VK_FORMAT_R8G8B8A8_UNORM,
@@ -972,9 +1227,18 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
   }
 
   IM_ASSERT(g_MinImageCount >= 2);
+  // ImGui reports through CheckVkResultFn only once it is initialised, which
+  // is later: before that its errors vanish. Kept here instead, and the
+  // swapchain it built is checked for itself.
+  g_InSwapchainRecreate = true;
+  g_SwapchainRecreateError = VK_SUCCESS;
   ImGui_ImplVulkanH_CreateOrResizeWindow(g_Instance, g_PhysicalDevice, g_Device,
                                          wd, g_QueueFamily, g_Allocator, width,
                                          height, g_MinImageCount);
+  g_InSwapchainRecreate = false;
+  CheckStartup(startup::step::kSwapchain, g_SwapchainRecreateError);
+  if (wd->Swapchain == VK_NULL_HANDLE || wd->ImageCount == 0)
+    FailStartup(startup::step::kSwapchain, "no swapchain images");
   SetupDepthBuffer(wd);
   // Logged because a driver-dependent image count is exactly what made the
   // "camera shakes on Intel" report impossible to guess at: this NVIDIA
@@ -1003,6 +1267,34 @@ static void SetupVulkanWindow(ImGui_ImplVulkanH_Window* wd,
            caps.maxImageCount == 0 ? std::string("no limit")
                                    : std::to_string(caps.maxImageCount),
            render::kMaxFramesInFlight);
+}
+
+// The window's surface again, after VK_ERROR_SURFACE_LOST_KHR: the old
+// swapchain goes with the old surface (a new one may not name an old one
+// from another surface), and the frame loop's recreate builds on the new.
+// False when it could not be made; tried again next frame.
+static bool RebuildSurface(GLFWwindow* window) {
+  ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
+  vkDeviceWaitIdle(g_Device);
+  if (wd->Swapchain != VK_NULL_HANDLE) {
+    vkDestroySwapchainKHR(g_Device, wd->Swapchain, g_Allocator);
+    wd->Swapchain = VK_NULL_HANDLE;
+  }
+  if (wd->Surface != VK_NULL_HANDLE) {
+    vkDestroySurfaceKHR(g_Instance, wd->Surface, g_Allocator);
+    wd->Surface = VK_NULL_HANDLE;
+  }
+  VkSurfaceKHR surface = VK_NULL_HANDLE;
+  const VkResult r =
+      glfwCreateWindowSurface(g_Instance, window, g_Allocator, &surface);
+  if (r != VK_SUCCESS) {
+    LOG_WARN("Rendering: could not make the window surface again ({})",
+             startup::VkResultName(r));
+    return false;
+  }
+  wd->Surface = surface;
+  LOG_INFO("Rendering: the window surface was made again");
+  return true;
 }
 
 static void CleanupVulkan() {
@@ -1407,27 +1699,71 @@ BeginFrameCapture(const RasterTarget& t, uint32_t w, uint32_t h,
   return c;
 }
 
+// The frame loop's Vulkan results (docs/rendering/README.md#a-lost-device):
+// a lost device is a state, a lost surface is rebuilt, and anything else
+// still aborts through check_vk_result — a crash report, with the result's
+// name. False when the frame cannot go on.
+static bool g_SurfaceLost = false;
+static bool FrameOk(VkResult err, const char* where) {
+  if (err >= 0)
+    return true;
+  if (err == VK_ERROR_DEVICE_LOST) {
+    MarkDeviceLost(where);
+    return false;
+  }
+  if (err == VK_ERROR_SURFACE_LOST_KHR) {
+    LOG_WARN("Rendering: the window surface was lost ({}); rebuilding it",
+             where);
+    g_SurfaceLost = true;
+    g_SwapChainRebuild = true;
+    return false;
+  }
+  check_vk_result(err);
+  return false;
+}
+
+// The GPU waits take a finite timeout, in a loop under a watchdog label, so
+// a GPU that hangs without resetting is reported as "main thread stalled
+// (in waiting on the GPU: frame fence)" instead of a stack deep in a driver
+// (docs/architecture.md#crashes-and-stalls). A loss ends the wait.
+static constexpr uint64_t kGpuWaitSliceNs = 100'000'000; // 0.1 s
+
 static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
   VkSemaphore image_acquired_semaphore =
       wd->FrameSemaphores[wd->SemaphoreIndex].ImageAcquiredSemaphore;
   VkSemaphore render_complete_semaphore =
       wd->FrameSemaphores[wd->SemaphoreIndex].RenderCompleteSemaphore;
-  VkResult err = vkAcquireNextImageKHR(g_Device, wd->Swapchain, UINT64_MAX,
-                                       image_acquired_semaphore, VK_NULL_HANDLE,
-                                       &wd->FrameIndex);
+  VkResult err;
+  {
+    watchdog::Label label("waiting on the GPU: swapchain image");
+    do {
+      err = vkAcquireNextImageKHR(g_Device, wd->Swapchain, kGpuWaitSliceNs,
+                                  image_acquired_semaphore, VK_NULL_HANDLE,
+                                  &wd->FrameIndex);
+    } while (err == VK_TIMEOUT || err == VK_NOT_READY);
+  }
   if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR) {
     g_SwapChainRebuild = true;
     return;
   }
-  check_vk_result(err);
+  if (!FrameOk(err, "acquiring a swapchain image"))
+    return;
 
   ImGui_ImplVulkanH_Frame* fd = &wd->Frames[wd->FrameIndex];
   {
-    err = vkWaitForFences(g_Device, 1, &fd->Fence, VK_TRUE, UINT64_MAX);
-    check_vk_result(err);
+    {
+      watchdog::Label label("waiting on the GPU: frame fence");
+      do {
+        err =
+            vkWaitForFences(g_Device, 1, &fd->Fence, VK_TRUE, kGpuWaitSliceNs);
+      } while (err == VK_TIMEOUT);
+    }
+    if (!FrameOk(err, "at the frame fence"))
+      return;
 
     err = vkResetFences(g_Device, 1, &fd->Fence);
-    check_vk_result(err);
+    if (!FrameOk(err, "resetting the frame fence"))
+      return;
   }
   // The fence above completed this slot's PREVIOUS submission, so its query
   // results are ready to read without waiting — the GpuTimer contract.
@@ -1439,12 +1775,14 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
 
   {
     err = vkResetCommandPool(g_Device, fd->CommandPool, 0);
-    check_vk_result(err);
+    if (!FrameOk(err, "resetting the frame's command pool"))
+      return;
     VkCommandBufferBeginInfo info = {};
     info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     info.flags |= VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     err = vkBeginCommandBuffer(fd->CommandBuffer, &info);
-    check_vk_result(err);
+    if (!FrameOk(err, "beginning the frame's commands"))
+      return;
   }
   g_GpuTimer.BeginFrame(fd->CommandBuffer, wd->FrameIndex);
 
@@ -1488,16 +1826,19 @@ static void FrameRender(ImGui_ImplVulkanH_Window* wd, ImDrawData* draw_data) {
     info.pSignalSemaphores = &render_complete_semaphore;
 
     err = vkEndCommandBuffer(fd->CommandBuffer);
-    check_vk_result(err);
+    if (!FrameOk(err, "ending the frame's commands"))
+      return;
     err = vkQueueSubmit(g_Queue, 1, &info, fd->Fence);
-    check_vk_result(err);
+    if (!FrameOk(err, "submitting the frame"))
+      return;
   }
   g_App.frameTimer.Mark(render::FramePhase::Record, glfwGetTime());
 }
 
-static void FramePresent(ImGui_ImplVulkanH_Window* wd) {
-  if (g_SwapChainRebuild)
-    return;
+// True when the frame reached the screen.
+static bool FramePresent(ImGui_ImplVulkanH_Window* wd) {
+  if (g_SwapChainRebuild || g_App.renderer.lost)
+    return false;
   VkSemaphore render_complete_semaphore =
       wd->FrameSemaphores[wd->SemaphoreIndex].RenderCompleteSemaphore;
   VkPresentInfoKHR info = {};
@@ -1510,10 +1851,12 @@ static void FramePresent(ImGui_ImplVulkanH_Window* wd) {
   VkResult err = vkQueuePresentKHR(g_Queue, &info);
   if (err == VK_ERROR_OUT_OF_DATE_KHR || err == VK_SUBOPTIMAL_KHR) {
     g_SwapChainRebuild = true;
-    return;
+    return false;
   }
-  check_vk_result(err);
+  if (!FrameOk(err, "presenting the frame"))
+    return false;
   wd->SemaphoreIndex = (wd->SemaphoreIndex + 1) % wd->SemaphoreCount;
+  return true;
 }
 
 #ifdef HAVE_TEST_ENGINE
@@ -1667,6 +2010,20 @@ void printUsage(const char* programName) {
                "launch (also Ctrl+Shift+F, or the\n                       "
                "frame_stats RPC; off by default)"
             << std::endl;
+  std::cout << "  --safe-mode          Start the window on default settings "
+               "and the default layout,\n                       without ray "
+               "tracing or opening a file; writes neither\n                  "
+               "     settings.json nor imgui.ini (LOBOLE_SAFE_MODE=1 too)"
+            << std::endl;
+  std::cout << "  --after-device-loss  (Given by the restart after a lost "
+               "graphics device: offers\n                       that "
+               "session's unsaved work)"
+            << std::endl;
+  std::cout << "Environment:\n"
+               "  LOBOLE_RENDERER=software|hardware  Which kind of graphics "
+               "device to use\n"
+               "  LOBOLE_NO_DIALOG=1   Never show a native message box (tests, "
+               "CI)\n";
 }
 
 struct CommandLineArgs {
@@ -1717,6 +2074,12 @@ struct CommandLineArgs {
   double autosaveSeconds = 60.0;
   std::string recordPath;
   bool perfHud = false;
+  bool safeMode = false;        // --safe-mode
+  bool afterDeviceLoss = false; // --after-device-loss
+  // --crash-test: crashes once the session marker exists, so the next start
+  // collects it like any other crash (and a windowed one counts towards
+  // safe mode: it died before its first frame).
+  bool crashTest = false;
 };
 
 CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
@@ -1847,8 +2210,13 @@ CommandLineArgs parseCommandLineArgs(int argc, char** argv) {
       watchdog::RequestSelfTest();
     } else if (arg == "--crash-test") {
       // Hidden: exercise the fatal-signal backtrace end-to-end (Phase 0
-      // sanity). Installed handler prints the stack, then core-dumps.
-      CrashHandlerSelfTest();
+      // sanity). Installed handler prints the stack, then core-dumps. Not
+      // here but once the session has begun, so it leaves a report.
+      args.crashTest = true;
+    } else if (arg == "--safe-mode") {
+      args.safeMode = true;
+    } else if (arg == "--after-device-loss") {
+      args.afterDeviceLoss = true;
     } else if (arg == "--perf-hud") {
       args.perfHud = true;
     } else if (arg == "--hidden") {
@@ -1940,6 +2308,100 @@ static void RecordWindowGeometry(GLFWwindow* w) {
 // Lives here rather than beside RunHeadless because everything it drives —
 // SetupVulkan, the renderer globals, CleanupVulkan — is file-static in this
 // translation unit.
+// A renderer whose Initialize failed — or that LOBOLE_FAULT=renderer_init:
+// <name> says failed — is NAMED, in g_App.renderer.missing (the menu bar's
+// notice, About, ping), and dropped, so nothing draws through a half-built
+// one: every user of these pointers checks for null, and
+// RegisterSceneRenderers skips it. `init` is Initialize plus whatever must
+// follow a success.
+template <class R, class Init>
+static void InitRenderer(std::unique_ptr<R>& r, const char* name, Init&& init) {
+  const bool ok = !FaultsRenderer(name) && init(*r);
+  if (ok) {
+    LOG_INFO("Renderer {}: initialized", name);
+    return;
+  }
+  LOG_WARN("Renderer {}: initialization failed{} — the picture is missing "
+           "what it draws",
+           name, FaultsRenderer(name) ? " (LOBOLE_FAULT)" : "");
+  g_App.renderer.missing.push_back(name);
+  r.reset();
+}
+
+// The mesh renderer is the picture: without it there is nothing to show,
+// so its failure ends the start like a device that cannot be created.
+static void InitMeshRenderer(const std::function<bool()>& init) {
+  if (!FaultsRenderer("mesh") && init()) {
+    LOG_INFO("Renderer mesh: initialized");
+    return;
+  }
+  FailStartup(startup::step::kMeshRenderer,
+              FaultsRenderer("mesh")
+                  ? "LOBOLE_FAULT=renderer_init:mesh"
+                  : "Its pipelines could not be built on " + g_App.gpuName +
+                        " (the log says which); its shaders may be missing "
+                        "from the install.");
+}
+
+// The path tracer, where the device has one. Off in safe mode, and never on
+// a software device: Mesa's lavapipe does offer ray tracing now, but a
+// path-traced still on the CPU is hours of a frozen-looking app, so it is
+// refused by name (ui::PathTracerRefusal) and the quick still serves.
+static void InitRayTracing(bool safeMode) {
+  g_App.renderer.rayTracing = false;
+  if (safeMode) {
+    LOG_INFO("Ray tracing: off (safe mode)");
+    return;
+  }
+  if (g_App.renderer.software) {
+    LOG_INFO("Ray tracing: off on {}, a software device; the quick still "
+             "renders",
+             g_App.gpuName);
+    return;
+  }
+  g_RayTracingRenderer = std::make_unique<RayTracingRenderer>();
+  if (!FaultsRenderer("raytracing") &&
+      g_RayTracingRenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
+                                       g_QueueFamily, g_CommandPool)) {
+    g_App.renderer.rayTracing = true;
+    LOG_INFO("Ray tracing: initialization successful");
+    return;
+  }
+  // Not fatal: modeling, measurement and the quick still all serve, and
+  // render_still says why in its own response.
+  LOG_WARN("Ray tracing: unavailable on {}{} — the path-traced still will "
+           "refuse",
+           g_App.gpuName,
+           FaultsRenderer("raytracing") ? " (LOBOLE_FAULT)" : "");
+  g_RayTracingRenderer.reset();
+}
+
+// Autosave every dirty document NOW, whatever the interval says (and even
+// with autosave off): the device is gone and this is the copy a restart
+// recovers from. A fresh Autosaver has written nothing yet, so it writes
+// every document whose stamp differs from its last save.
+static int FlushAutosaveNow() {
+  Autosaver now(1.0);
+  now.Prime(-1.0e9);
+  return ui::AutosaveProject(g_App, now, 0.0);
+}
+
+// What a loss does at once, in any mode: the work saved for recovery, and a
+// report folder. Returns the report's folder, or empty.
+static std::filesystem::path SaveWorkAfterDeviceLoss(int* autosaved) {
+  *autosaved = FlushAutosaveNow();
+  LOG_WARN("Rendering: device lost; {} document(s) autosaved for recovery",
+           *autosaved);
+  const std::optional<crash::Report> report = crash::ReportThisSession(
+      std::string(crash::kDeviceLostReason) + ": " + g_App.renderer.lostReason);
+  return report ? report->dir : std::filesystem::path();
+}
+
+static std::string DeviceLostRefusal() {
+  return "device_lost: the graphics device was lost (" +
+         g_App.renderer.lostReason + "); nothing renders until Loböle restarts";
+}
+
 // Everything that has to be true of the renderers before --offscreen draws:
 // the document->renderer projection, plus the render-quality targets, the
 // section planes and the deform scale, which only matter to a frame.
@@ -1964,7 +2426,8 @@ static void SyncOffscreenScene() {
   }
   for (SceneRenderer* r : g_Scene)
     r->SetClipPlanes(ui::SectionPlanes(g_App));
-  g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
+  if (g_FieldRenderer)
+    g_FieldRenderer->SetDeformScale(g_App.simulation.deformScale);
 }
 
 static std::atomic<bool> g_OffscreenStopRequested{false};
@@ -2012,16 +2475,7 @@ static int RunOffscreen(const CommandLineArgs& args) {
     }
   }
 
-  g_RayTracingRenderer = std::make_unique<RayTracingRenderer>();
-  if (!g_RayTracingRenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
-                                        g_QueueFamily, g_CommandPool)) {
-    // Not fatal: modeling and measurement still serve; render_still reports
-    // "ray tracing not available" in its own response.
-    LOG_WARN("Offscreen: ray tracing unavailable on this device — "
-             "render_still will refuse");
-  } else {
-    LOG_INFO("Offscreen: ray tracing initialized");
-  }
+  InitRayTracing(/*safeMode=*/false);
 
   // The raster stack, mirrored from the GUI init at the fixed 1280x720 the
   // hidden/gui-test carve-out also uses (a host-derived size would make
@@ -2034,12 +2488,16 @@ static int RunOffscreen(const CommandLineArgs& args) {
       CreateOffscreenRenderPass(kOffFormat, g_MSAASamples);
   g_ShadowRenderer = std::make_unique<ShadowRenderer>();
   if (!g_ShadowRenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
-                                    g_QueueFamily, g_CommandPool))
+                                    g_QueueFamily, g_CommandPool)) {
     LOG_ERROR("Offscreen: ShadowRenderer initialization failed");
+    g_App.renderer.missing.push_back("shadow");
+  }
   g_SSAORenderer = std::make_unique<SSAORenderer>();
   if (!g_SSAORenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
-                                  g_QueueFamily, g_CommandPool, kOffW, kOffH))
+                                  g_QueueFamily, g_CommandPool, kOffW, kOffH)) {
     LOG_ERROR("Offscreen: SSAORenderer initialization failed");
+    g_App.renderer.missing.push_back("ssao");
+  }
   g_MeshRenderer = std::make_unique<MeshRenderer>();
   g_MeshRenderer->SetIBL(
       g_IBLTextures->IrradianceView(), g_IBLTextures->PrefilterView(),
@@ -2049,44 +2507,60 @@ static int RunOffscreen(const CommandLineArgs& args) {
                                g_ShadowRenderer->ShadowSampler());
   g_MeshRenderer->SetAOMap(g_SSAORenderer->AOView(),
                            g_SSAORenderer->AOSampler());
-  if (g_MeshRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
-                                 g_Queue, g_QueueFamily, g_CommandPool,
-                                 g_MSAASamples))
-    g_MeshRenderer->SetViewportSize(kOffW, kOffH);
-  else
-    LOG_ERROR("Offscreen: MeshRenderer initialization failed");
-  g_OutlineRenderer = std::make_unique<OutlineRenderer>();
-  if (g_OutlineRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
+  InitMeshRenderer([&] {
+    if (!g_MeshRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
                                     g_Queue, g_QueueFamily, g_CommandPool,
-                                    g_MSAASamples)) {
-    g_OutlineRenderer->SetViewportSize(kOffW, kOffH);
+                                    g_MSAASamples))
+      return false;
+    g_MeshRenderer->SetViewportSize(kOffW, kOffH);
+    return true;
+  });
+  g_OutlineRenderer = std::make_unique<OutlineRenderer>();
+  InitRenderer(g_OutlineRenderer, "outline", [&](OutlineRenderer& o) {
+    if (!o.Initialize(g_Device, g_PhysicalDevice, offscreenPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    o.SetViewportSize(kOffW, kOffH);
     // Same override as the GUI init: the struct's default is EDGES in bright
     // red at width 5 ("for testing"), which paints the whole part red at
     // this scale. WIREFRAME with the subtle styling is the product look.
-    OutlineSettings outline = g_OutlineRenderer->GetOutlineSettings();
+    OutlineSettings outline = o.GetOutlineSettings();
     outline.mode = OutlineMode::WIREFRAME;
-    g_OutlineRenderer->SetOutlineSettings(outline);
-  }
+    o.SetOutlineSettings(outline);
+    return true;
+  });
   g_SketchRenderer = std::make_unique<SketchRenderer>();
-  if (g_SketchRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
-                                   g_Queue, g_QueueFamily, g_CommandPool,
-                                   g_MSAASamples))
-    g_SketchRenderer->SetViewportSize(kOffW, kOffH);
+  InitRenderer(g_SketchRenderer, "sketch", [&](SketchRenderer& r) {
+    if (!r.Initialize(g_Device, g_PhysicalDevice, offscreenPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    r.SetViewportSize(kOffW, kOffH);
+    return true;
+  });
   g_UnderlayRenderer = std::make_unique<UnderlayRenderer>();
-  if (g_UnderlayRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
-                                     g_Queue, g_QueueFamily, g_CommandPool,
-                                     g_MSAASamples))
-    g_UnderlayRenderer->SetViewportSize(kOffW, kOffH);
+  InitRenderer(g_UnderlayRenderer, "underlay", [&](UnderlayRenderer& r) {
+    if (!r.Initialize(g_Device, g_PhysicalDevice, offscreenPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    r.SetViewportSize(kOffW, kOffH);
+    return true;
+  });
   g_FieldRenderer = std::make_unique<FieldRenderer>();
-  if (g_FieldRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
-                                  g_Queue, g_QueueFamily, g_CommandPool,
-                                  g_MSAASamples))
-    g_FieldRenderer->SetViewport(0, 0, kOffW, kOffH);
+  InitRenderer(g_FieldRenderer, "field", [&](FieldRenderer& r) {
+    if (!r.Initialize(g_Device, g_PhysicalDevice, offscreenPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    r.SetViewport(0, 0, kOffW, kOffH);
+    return true;
+  });
   g_StockRenderer = std::make_unique<StockRenderer>();
-  if (g_StockRenderer->Initialize(g_Device, g_PhysicalDevice, offscreenPass,
-                                  g_Queue, g_QueueFamily, g_CommandPool,
-                                  g_MSAASamples))
-    g_StockRenderer->SetViewport(0, 0, kOffW, kOffH);
+  InitRenderer(g_StockRenderer, "stock", [&](StockRenderer& r) {
+    if (!r.Initialize(g_Device, g_PhysicalDevice, offscreenPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    r.SetViewport(0, 0, kOffW, kOffH);
+    return true;
+  });
   g_FaceSelector = std::make_unique<FaceSelector>();
 
   g_App.meshRenderer = g_MeshRenderer.get();
@@ -2231,10 +2705,23 @@ static int RunOffscreen(const CommandLineArgs& args) {
 
   double last = seconds();
   double animatingSince = -1.0;
+  bool lossHandled = false;
   while (!g_OffscreenStopRequested) {
     watchdog::Beat();
     crash::NoteProject(g_App.projectPath);
     server.ProcessPending(g_App);
+    // A lost device (docs/rendering/README.md#a-lost-device): there is no
+    // window to restart, so this mode saves the work, writes the report, and
+    // serves on with every capture refused; ping says the renderer is lost.
+    if (vkutil::DeviceLostSeen())
+      MarkDeviceLost("in a one-shot submit");
+    if (g_App.renderer.lost && !lossHandled) {
+      lossHandled = true;
+      int autosaved = 0;
+      SaveWorkAfterDeviceLoss(&autosaved);
+      LOG_ERROR("Offscreen: the graphics device was lost; serving on without "
+                "renders (every capture is refused as device_lost)");
+    }
     if (g_App.gpuStatsReset) {
       g_App.gpuStatsReset = false;
       g_GpuTimer.ResetSamples();
@@ -2266,8 +2753,10 @@ static int RunOffscreen(const CommandLineArgs& args) {
       animatingSince = -1.0;
     }
     std::string shotPath;
-    if ((animatingSince < 0 || now - animatingSince > 5.0) &&
-        server.WantsScreenshot(shotPath)) {
+    if (g_App.renderer.lost && server.WantsScreenshot(shotPath)) {
+      server.ScreenshotDone(false, DeviceLostRefusal());
+    } else if ((animatingSince < 0 || now - animatingSince > 5.0) &&
+               server.WantsScreenshot(shotPath)) {
       SyncOffscreenScene();
       const glm::mat4 view = g_Camera->GetViewMatrix();
       const glm::mat4 proj = g_Camera->GetProjectionMatrix();
@@ -2362,6 +2851,25 @@ static int RunOffscreen(const CommandLineArgs& args) {
   return 0;
 }
 
+static int RunWindowed(CommandLineArgs& args, int argc, char** argv);
+
+// A start that found no renderer: said everywhere it can be read
+// (startup::ReportStartupFailure), the session ended as a clean exit ends it
+// — a start that explained itself has not crashed — and exit code 3. _Exit,
+// not a return: what was half built (a window, a device, renderers) is not
+// torn down by destructors that expect it whole.
+[[noreturn]] static void EndStartup(const startup::StartupError& e,
+                                    bool windowed) {
+  const crash::Session* session = crash::CurrentSession();
+  const int code = startup::ReportStartupFailure(
+      e.failure(), RuntimePaths::UserStateDir(),
+      session ? session->logFile.string() : std::string(), windowed);
+  crash::EndSession();
+  watchdog::Stop();
+  std::fflush(nullptr);
+  std::_Exit(code);
+}
+
 int main(int argc, char** argv) {
   InstallCrashHandler(); // fatal-signal backtraces in dev-watch logs
   CommandLineArgs args = parseCommandLineArgs(argc, argv);
@@ -2376,6 +2884,48 @@ int main(int argc, char** argv) {
   std::string watchdogError;
   if (!watchdog::ThresholdFromEnvironment(&watchdogSeconds, &watchdogError)) {
     std::cerr << watchdogError << std::endl;
+    return 2;
+  }
+  // The rest of the environment this start reads, refused the same way: a
+  // value that is not one of the accepted ones is said, never read as the
+  // nearest (app/StartupReport.h).
+  bool safeModeFromEnv = false;
+  {
+    const auto env = [](const char* name) {
+      const char* v = std::getenv(name);
+      return std::string_view(v ? v : "");
+    };
+    std::string error;
+    bool noDialog = false;
+    const char* allow = std::getenv("LOBOLE_ALLOW_DEBUG_CRASH");
+    if (!startup::RendererChoiceFromString(env("LOBOLE_RENDERER"),
+                                           &g_RendererChoice, &error) ||
+        !startup::ZeroOneFromString("LOBOLE_SAFE_MODE", env("LOBOLE_SAFE_MODE"),
+                                    &safeModeFromEnv, &error) ||
+        !startup::ZeroOneFromString("LOBOLE_NO_DIALOG", env("LOBOLE_NO_DIALOG"),
+                                    &noDialog, &error) ||
+        !startup::FaultFromString(env("LOBOLE_FAULT"),
+                                  allow != nullptr &&
+                                      std::string_view(allow) == "1",
+                                  &g_Fault, &error)) {
+      std::cerr << "Error: " << error << std::endl;
+      return 2;
+    }
+  }
+  // The GUI suite is never watched by anyone who could click a box.
+  if (args.runGuiTests) {
+#if defined(_WIN32)
+    _putenv_s("LOBOLE_NO_DIALOG", "1");
+#else
+    setenv("LOBOLE_NO_DIALOG", "1", 1);
+#endif
+  }
+  // Safe mode is the WINDOW on defaults; the other modes have no layout, and
+  // the GUI tests already run on defaults. Refused rather than ignored.
+  if (args.safeMode && (args.headless || args.offscreen || args.runGuiTests)) {
+    std::cerr << "Error: --safe-mode starts the window on defaults; it does "
+                 "not run with --headless, --offscreen or --gui-tests"
+              << std::endl;
     return 2;
   }
   InstallStallCapture(); // here: it records THIS thread as the one to ask
@@ -2422,25 +2972,81 @@ int main(int argc, char** argv) {
   struct SessionEnd {
     ~SessionEnd() { crash::EndSession(); } // a clean exit leaves no marker
   } sessionEnd;
+  const bool windowed = !args.runGuiTests && !args.headless && !args.offscreen;
   if (auto session =
           crash::BeginSession(RuntimePaths::UserStateDir(), sessionMode)) {
     SetCrashReportFiles(session->crashFile, session->dumpFile, session->marker);
+    // --crash-test: once there is a marker to leave behind, and before the
+    // first frame, so a windowed one counts towards safe mode.
+    if (args.crashTest)
+      CrashHandlerSelfTest();
     if (!args.runGuiTests) {
       std::vector<crash::Report> reports =
           crash::CollectDeadSessions(session->stateDir);
       // The windowed app says so; the others have the log line and the
       // crash_reports RPC.
-      if (!reports.empty() && !args.headless && !args.offscreen)
+      if (!reports.empty() && windowed)
         crash::SetNotice(std::move(reports.front()));
     }
+    if (windowed) {
+      // A restart after a lost device: the report that session wrote is the
+      // notice, with its autosaves to recover
+      // (docs/rendering/README.md#a-lost-device).
+      if (args.afterDeviceLoss) {
+        for (crash::Report& r : crash::ListReports(session->stateDir))
+          if (r.reason.rfind(crash::kDeviceLostReason, 0) == 0) {
+            LOG_INFO("Restarted after a lost graphics device ({})", r.reason);
+            crash::SetNotice(std::move(r));
+            break;
+          }
+      }
+      // The last start found no renderer: said once by the next window, as
+      // long as no window has drawn since (the stamp NoteFirstFrame writes).
+      namespace fs = std::filesystem;
+      std::error_code ec;
+      const fs::path failure = startup::FailureFile(session->stateDir);
+      const fs::path good = crash::LastGoodStartFile(session->stateDir);
+      if (fs::exists(failure, ec) &&
+          (!fs::exists(good, ec) ||
+           fs::last_write_time(failure, ec) > fs::last_write_time(good, ec))) {
+        LOG_WARN("The last start found no renderer ({}); this window says so "
+                 "once",
+                 failure.string());
+        std::ifstream in(failure, std::ios::binary);
+        crash::SetStartupFailureNotice(
+            std::string((std::istreambuf_iterator<char>(in)),
+                        std::istreambuf_iterator<char>()));
+      }
+      // Safe mode (docs/ui/settings.md#safe-mode): asked for, or because the
+      // last two windowed starts died before they drew.
+      const size_t early = crash::EarlyDeathsInARow(session->stateDir);
+      if (args.safeMode || safeModeFromEnv || early >= 2) {
+        g_App.safeMode.active = true;
+        g_App.safeMode.why = args.safeMode ? "it was started with --safe-mode"
+                             : safeModeFromEnv
+                                 ? "LOBOLE_SAFE_MODE=1 is set"
+                                 : "the last " + std::to_string(early) +
+                                       " starts crashed before the window drew";
+        LOG_WARN("Safe mode: {}", g_App.safeMode.why);
+      }
+    }
+  } else if (windowed && (args.safeMode || safeModeFromEnv)) {
+    g_App.safeMode.active = true;
+    g_App.safeMode.why = args.safeMode ? "it was started with --safe-mode"
+                                       : "LOBOLE_SAFE_MODE=1 is set";
   }
 
   // User preferences, before anything reads them: the GPU choice is consumed
   // by device selection below, and the font scale by the first theme apply.
   // GUI tests deliberately run on DEFAULTS — otherwise the developer's own
   // config decides whether a test passes, and CI and the desk disagree.
-  if (!args.runGuiTests) {
-    g_App.settings = settings::Load();
+  if (g_App.safeMode.active) {
+    // Defaults, and nothing written: the user's own file is what safe mode
+    // keeps out of the way, not what it rewrites.
+    settings::SetSessionOnly(true);
+    g_App.safeMode.settingsPath = settings::ConfigPath();
+  } else if (!args.runGuiTests) {
+    g_App.settings = settings::Load(&g_App.settingsNote);
     g_App.settingsSaved = g_App.settings;
   }
   // The machine store lives beside the settings and loads with them. Under
@@ -2498,7 +3104,11 @@ int main(int argc, char** argv) {
                 << std::endl;
       return 2;
     }
-    return RunOffscreen(args);
+    try {
+      return RunOffscreen(args);
+    } catch (const startup::StartupError& e) {
+      EndStartup(e, /*windowed=*/false);
+    }
   }
 
   // Headless: document engine + remote server, no GLFW/Vulkan/ImGui at all.
@@ -2522,6 +3132,16 @@ int main(int argc, char** argv) {
                        args.recordPath, args.remoteBindAll);
   }
 
+  try {
+    return RunWindowed(args, argc, argv);
+  } catch (const startup::StartupError& e) {
+    EndStartup(e, /*windowed=*/true);
+  }
+}
+
+// The windowed app: GLFW, Vulkan with its device ladder, ImGui and the frame
+// loop. A step that cannot start throws StartupError, which main() reports.
+static int RunWindowed(CommandLineArgs& args, int argc, char** argv) {
 #ifdef HAVE_NATIVEFILEDIALOG
   LOG_INFO("nativefiledialog available");
 #else
@@ -2530,7 +3150,7 @@ int main(int argc, char** argv) {
 
   glfwSetErrorCallback(glfw_error_callback);
   if (!glfwInit())
-    return 1;
+    FailStartup(startup::step::kGlfwInit, g_GlfwLastError);
 
   // Create the window hidden, then map it ourselves (ShowWindowNonBlocking).
   // A *visible* window makes glfwCreateWindow — and glfwShowWindow — block in
@@ -2582,7 +3202,7 @@ int main(int argc, char** argv) {
 
   GLFWwindow* window = glfwCreateWindow(
       geom.w, geom.h, "Loböle - 3D CAD Software", nullptr, nullptr);
-  if (window && rememberGeometry) {
+  if (window != nullptr && rememberGeometry) {
     // Position after creation: the hint-based route needs a monitor handle
     // and would make this fullscreen. Wayland refuses positioning outright --
     // the compositor places windows -- so there it is not attempted.
@@ -2591,13 +3211,18 @@ int main(int argc, char** argv) {
     if (g_App.settings.window.maximized)
       glfwMaximizeWindow(window);
   }
-  if (window && !args.hidden)
+  // A null window used to carry on into Vulkan with nothing to draw in.
+  if (window == nullptr)
+    FailStartup(startup::step::kWindow, g_GlfwLastError);
+  if (!args.hidden)
     ShowWindowNonBlocking(window);
 
-  if (!glfwVulkanSupported()) {
-    LOG_ERROR("GLFW: Vulkan not supported");
-    return 1;
-  }
+  if (!glfwVulkanSupported())
+    FailStartup(
+        startup::step::kVulkanLoader,
+        "No Vulkan loader could be loaded (libvulkan.so.1, "
+        "vulkan-1.dll), or it offers no way to draw in a window." +
+            (g_GlfwLastError.empty() ? std::string() : " " + g_GlfwLastError));
 
   ImVector<const char*> extensions;
   uint32_t extensions_count = 0;
@@ -2605,18 +3230,27 @@ int main(int argc, char** argv) {
       glfwGetRequiredInstanceExtensions(&extensions_count);
   for (uint32_t i = 0; i < extensions_count; i++)
     extensions.push_back(glfw_extensions[i]);
-  SetupVulkan(extensions, window, /*wsi=*/true);
-  RefreshCrashModules(); // the Vulkan driver is loaded now
-
-  VkSurfaceKHR surface;
-  VkResult err =
-      glfwCreateWindowSurface(g_Instance, window, g_Allocator, &surface);
-  check_vk_result(err);
-
-  int w, h;
-  glfwGetFramebufferSize(window, &w, &h);
   ImGui_ImplVulkanH_Window* wd = &g_MainWindowData;
-  SetupVulkanWindow(wd, surface, w, h);
+  // Each rung of the device ladder makes the window's surface and swapchain
+  // on its device; a rung that fails takes them down again before the next.
+  SetupVulkan(
+      extensions, window, /*wsi=*/true,
+      [&] {
+        VkSurfaceKHR surface = VK_NULL_HANDLE;
+        CheckStartup(
+            startup::step::kSurface,
+            glfwCreateWindowSurface(g_Instance, window, g_Allocator, &surface));
+        int w = 0, h = 0;
+        glfwGetFramebufferSize(window, &w, &h);
+        SetupVulkanWindow(wd, surface, w, h);
+      },
+      [&] {
+        if (wd->Surface != VK_NULL_HANDLE || wd->Swapchain != VK_NULL_HANDLE)
+          CleanupVulkanWindow(); // destroys the surface too
+        *wd = ImGui_ImplVulkanH_Window();
+      });
+  RefreshCrashModules(); // the Vulkan driver is loaded now
+  VkResult err = VK_SUCCESS;
 
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
@@ -2640,6 +3274,20 @@ int main(int argc, char** argv) {
   if (args.runGuiTests) {
     io.IniFilename = nullptr;
     g_App.buildDefaultDockLayout = true;
+  } else if (g_App.safeMode.active) {
+    // Safe mode: the default layout, kept in a scratch file of its own so
+    // the user's imgui.ini is neither read (a layout that trips a docking
+    // assert is one way a start crashes) nor written.
+    const std::filesystem::path scratch =
+        RuntimePaths::UserStateDir() / "safe-mode-imgui.ini";
+    std::error_code ec;
+    std::filesystem::create_directories(scratch.parent_path(), ec);
+    std::filesystem::remove(scratch, ec);
+    s_iniPath = scratch.string();
+    io.IniFilename = s_iniPath.c_str();
+    g_App.buildDefaultDockLayout = true;
+    g_App.safeMode.layoutPath =
+        (std::filesystem::path(::settings::ConfigDir()) / "imgui.ini").string();
   } else {
     const std::filesystem::path dir(::settings::ConfigDir());
     std::error_code ec;
@@ -2777,6 +3425,7 @@ int main(int argc, char** argv) {
   if (!g_ShadowRenderer->Initialize(g_Device, g_PhysicalDevice, g_Queue,
                                     g_QueueFamily, g_CommandPool)) {
     LOG_ERROR("ShadowRenderer initialization failed");
+    g_App.renderer.missing.push_back("shadow");
   } else {
     LOG_INFO("ShadowRenderer initialized successfully");
   }
@@ -2786,6 +3435,7 @@ int main(int argc, char** argv) {
                                   g_QueueFamily, g_CommandPool,
                                   (uint32_t)wd->Width, (uint32_t)wd->Height)) {
     LOG_ERROR("SSAORenderer initialization failed");
+    g_App.renderer.missing.push_back("ssao");
   } else {
     LOG_INFO("SSAORenderer initialized successfully");
   }
@@ -2800,15 +3450,14 @@ int main(int argc, char** argv) {
                                g_ShadowRenderer->ShadowSampler());
   g_MeshRenderer->SetAOMap(g_SSAORenderer->AOView(),
                            g_SSAORenderer->AOSampler());
-  bool meshRendererInitialized = g_MeshRenderer->Initialize(
-      g_Device, g_PhysicalDevice, wd->RenderPass, g_Queue, g_QueueFamily,
-      g_CommandPool, g_MSAASamples);
-  if (!meshRendererInitialized) {
-    LOG_ERROR("MeshRenderer initialization failed");
-  } else {
-    LOG_INFO("MeshRenderer initialized successfully");
+  InitMeshRenderer([&] {
+    if (!g_MeshRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
+                                    g_Queue, g_QueueFamily, g_CommandPool,
+                                    g_MSAASamples))
+      return false;
     g_MeshRenderer->SetViewportSize(1280, 720);
-  }
+    return true;
+  });
 
   // Initialize FaceSelector
   g_FaceSelector = std::make_unique<FaceSelector>();
@@ -2816,79 +3465,59 @@ int main(int argc, char** argv) {
 
   // Initialize OutlineRenderer
   g_OutlineRenderer = std::make_unique<OutlineRenderer>();
-  bool outlineInitialized = g_OutlineRenderer->Initialize(
-      g_Device, g_PhysicalDevice, wd->RenderPass, g_Queue, g_QueueFamily,
-      g_CommandPool, g_MSAASamples);
-  if (!outlineInitialized) {
-    LOG_WARN("OutlineRenderer initialization failed");
-  } else {
-    LOG_INFO("OutlineRenderer initialized successfully");
-    g_OutlineRenderer->SetViewportSize(1280, 720);
-
-    // Set default outline settings for visibility testing
-    OutlineSettings settings = g_OutlineRenderer->GetOutlineSettings();
-    LOG_DEBUG("Default outline mode: {}", std::to_underlying(settings.mode));
-    LOG_DEBUG("Default outline color: ({}, {}, {}, {})",
-              settings.outlineColor.r, settings.outlineColor.g,
-              settings.outlineColor.b, settings.outlineColor.a);
-    LOG_DEBUG("Default outline width: {}", settings.outlineWidth);
-
-    // Enable wireframe rendering with subtle appearance
+  InitRenderer(g_OutlineRenderer, "outline", [&](OutlineRenderer& o) {
+    if (!o.Initialize(g_Device, g_PhysicalDevice, wd->RenderPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    o.SetViewportSize(1280, 720);
+    // The struct's default is EDGES in bright red ("for testing");
+    // WIREFRAME with the subtle styling is the product look.
+    OutlineSettings settings = o.GetOutlineSettings();
     settings.mode = OutlineMode::WIREFRAME;
-    g_OutlineRenderer->SetOutlineSettings(settings);
-    LOG_DEBUG("Set outline mode to WIREFRAME with subtle styling");
-  }
+    o.SetOutlineSettings(settings);
+    return true;
+  });
 
-  // Initialize SketchRenderer
   g_SketchRenderer = std::make_unique<SketchRenderer>();
-  if (g_SketchRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
-                                   g_Queue, g_QueueFamily, g_CommandPool,
-                                   g_MSAASamples)) {
-    g_SketchRenderer->SetViewportSize(1280, 720);
-  } else {
-    LOG_WARN("SketchRenderer initialization failed");
-  }
+  InitRenderer(g_SketchRenderer, "sketch", [&](SketchRenderer& r) {
+    if (!r.Initialize(g_Device, g_PhysicalDevice, wd->RenderPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    r.SetViewportSize(1280, 720);
+    return true;
+  });
 
-  // Initialize UnderlayRenderer (sketch reference images)
+  // Sketch reference images
   g_UnderlayRenderer = std::make_unique<UnderlayRenderer>();
-  if (g_UnderlayRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
-                                     g_Queue, g_QueueFamily, g_CommandPool,
-                                     g_MSAASamples)) {
-    g_UnderlayRenderer->SetViewportSize(1280, 720);
-  } else {
-    LOG_WARN("UnderlayRenderer initialization failed");
-  }
+  InitRenderer(g_UnderlayRenderer, "underlay", [&](UnderlayRenderer& r) {
+    if (!r.Initialize(g_Device, g_PhysicalDevice, wd->RenderPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    r.SetViewportSize(1280, 720);
+    return true;
+  });
 
-  // Initialize FieldRenderer (FEM result overlay)
+  // FEM result overlay
   g_FieldRenderer = std::make_unique<FieldRenderer>();
-  if (g_FieldRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
-                                  g_Queue, g_QueueFamily, g_CommandPool,
-                                  g_MSAASamples)) {
-    g_FieldRenderer->SetViewport(0, 0, 1280, 720);
-  } else {
-    LOG_WARN("FieldRenderer initialization failed");
-  }
+  InitRenderer(g_FieldRenderer, "field", [&](FieldRenderer& r) {
+    if (!r.Initialize(g_Device, g_PhysicalDevice, wd->RenderPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    r.SetViewport(0, 0, 1280, 720);
+    return true;
+  });
 
-  // Initialize StockRenderer (CAM cutting simulation)
+  // CAM cutting simulation
   g_StockRenderer = std::make_unique<StockRenderer>();
-  if (g_StockRenderer->Initialize(g_Device, g_PhysicalDevice, wd->RenderPass,
-                                  g_Queue, g_QueueFamily, g_CommandPool,
-                                  g_MSAASamples)) {
-    g_StockRenderer->SetViewport(0, 0, 1280, 720);
-  } else {
-    LOG_WARN("StockRenderer initialization failed");
-  }
+  InitRenderer(g_StockRenderer, "stock", [&](StockRenderer& r) {
+    if (!r.Initialize(g_Device, g_PhysicalDevice, wd->RenderPass, g_Queue,
+                      g_QueueFamily, g_CommandPool, g_MSAASamples))
+      return false;
+    r.SetViewport(0, 0, 1280, 720);
+    return true;
+  });
 
-  // Initialize RayTracingRenderer
-  g_RayTracingRenderer = std::make_unique<RayTracingRenderer>();
-  bool rtInitialized = g_RayTracingRenderer->Initialize(
-      g_Device, g_PhysicalDevice, g_Queue, g_QueueFamily, g_CommandPool);
-  if (!rtInitialized) {
-    LOG_WARN(
-        "Ray Tracing: initialization failed, falling back to rasterization");
-  } else {
-    LOG_INFO("Ray Tracing: initialization successful");
-  }
+  InitRayTracing(g_App.safeMode.active);
 
   // Hand the UI layer its pointers now that everything exists
   g_App.meshRenderer = g_MeshRenderer.get();
@@ -2978,8 +3607,11 @@ int main(int argc, char** argv) {
     return true;
   };
 
-  // Load startup file if specified
-  if (!args.fileToLoad.empty()) {
+  // Load startup file if specified. Not in safe mode, which opens no file:
+  // the file may be what crashed the last start.
+  if (!args.fileToLoad.empty() && g_App.safeMode.active) {
+    LOG_WARN("Safe mode: not opening {}", args.fileToLoad);
+  } else if (!args.fileToLoad.empty()) {
     LOG_INFO("Loading startup file: {}", args.fileToLoad);
     ui::ImportAsFeature(g_App, args.fileToLoad);
   }
@@ -3163,6 +3795,59 @@ int main(int argc, char** argv) {
   Autosaver autosaver(args.runGuiTests ? 0.0 : args.autosaveSeconds);
   autosaver.Prime(glfwGetTime());
 
+  // Starting again: this process's own arguments, less the ones that must
+  // not repeat, plus `extra` — after letting go of what the new process
+  // will want (the port, the session marker, the terminal's child). The
+  // restart after a lost device and safe mode's two buttons both end here.
+  const auto relaunch = [&](const std::vector<std::string>& extra) {
+    std::vector<std::string> again;
+    for (int i = 1; i < argc; i++) {
+      const std::string a = argv[i];
+      if (a != "--safe-mode" && a != "--after-device-loss" &&
+          a != "--crash-test")
+        again.push_back(a);
+    }
+    again.insert(again.end(), extra.begin(), extra.end());
+    LOG_INFO("Restarting{}", extra.empty() ? "" : " with " + extra.front());
+    ui::ShutdownTerminal(g_App);
+    remoteServer.Stop();
+    crash::EndSession(); // asked to stop: not a crash
+    std::string error;
+    if (startup::Relaunch(again, &error)) {
+      std::fflush(nullptr);
+      std::_Exit(0); // the new process is started (Windows)
+    }
+    LOG_ERROR("Could not start Loböle again: {}; quitting", error);
+    glfwSetWindowShouldClose(window, GLFW_TRUE);
+  };
+  g_App.restartNormally = [&] {
+#if defined(_WIN32)
+    _putenv_s("LOBOLE_SAFE_MODE", "");
+#else
+    unsetenv("LOBOLE_SAFE_MODE");
+#endif
+    relaunch({});
+  };
+  g_App.setAsideAndRestart = [&] {
+    for (const std::string& file :
+         {g_App.safeMode.settingsPath, g_App.safeMode.layoutPath}) {
+      std::error_code ec;
+      if (file.empty() || !std::filesystem::exists(file, ec))
+        continue;
+      const std::filesystem::path kept = settings::SetAside(file, ec);
+      if (kept.empty())
+        LOG_ERROR("Could not set {} aside: {}", file, ec.message());
+      else
+        LOG_WARN("Set {} aside as {}", file, kept.string());
+    }
+    g_App.restartNormally();
+  };
+  // A lost device's question (startup::Question) while it is open.
+  std::unique_ptr<startup::Question> lossQuestion;
+  bool lossHandled = false;
+  bool firstFrameNoted = false;
+  bool recreateFailing = false;
+
   const ui::ClearColor vp = ui::ViewportClearColor();
   ImVec4 clear_color = ImVec4(vp.r, vp.g, vp.b, 1.00f);
 
@@ -3181,6 +3866,50 @@ int main(int argc, char** argv) {
       glfwWaitEventsTimeout(app::FramePacer::kIdleTimeoutSeconds);
     watchdog::Beat(); // per iteration: a minimized window finishes no frame
     crash::NoteProject(g_App.projectPath); // the marker names the project
+
+    // A lost device (docs/rendering/README.md#a-lost-device): nothing more
+    // is recorded, submitted or presented, and no renderer is called. The
+    // document is CPU state and intact, so the work is saved at once, the
+    // report written, and the user asked to restart — the one recovery
+    // path, and the start path every launch already exercises. Until then
+    // the remote keeps serving (a capture is refused as device_lost).
+    if (vkutil::DeviceLostSeen())
+      MarkDeviceLost("in a one-shot submit");
+    if (g_App.renderer.lost) {
+      if (!lossHandled) {
+        lossHandled = true;
+        int autosaved = 0;
+        const std::filesystem::path report =
+            SaveWorkAfterDeviceLoss(&autosaved);
+        const std::string text = startup::DeviceLossText(
+            g_App.renderer.lostReason, autosaved, report);
+        std::fprintf(stderr, "%s\n", text.c_str());
+        if (startup::DialogsWanted())
+          lossQuestion = std::make_unique<startup::Question>(
+              "Loböle lost its graphics device", text);
+        else
+          LOG_WARN("Rendering: no dialog (LOBOLE_NO_DIALOG=1, or a "
+                   "terminal reads stderr): close the window to quit, or "
+                   "start again with --after-device-loss to recover");
+      }
+      glfwWaitEventsTimeout(0.05);
+      remoteServer.ProcessPending(g_App);
+      if (std::string shot; remoteServer.WantsScreenshot(shot))
+        remoteServer.ScreenshotDone(false, DeviceLostRefusal());
+      ui::PollBackgroundJobs(g_App);
+      ui::AutosaveProject(g_App, autosaver, glfwGetTime());
+      if (lossQuestion) {
+        const startup::Question::Answer answer = lossQuestion->Poll();
+        if (answer == startup::Question::Answer::Restart) {
+          lossQuestion.reset();
+          relaunch({"--after-device-loss"});
+        } else if (answer == startup::Question::Answer::Quit) {
+          lossQuestion.reset();
+          glfwSetWindowShouldClose(window, GLFW_TRUE);
+        }
+      }
+      continue;
+    }
     g_App.frameTimer.BeginFrame(glfwGetTime());
     g_App.frameTimer.SetIdlePaced(paceIdle);
     const double frameCpuStartMs = ThreadCpuMs();
@@ -3207,45 +3936,79 @@ int main(int argc, char** argv) {
     if (fb_width > 0 && fb_height > 0 &&
         (g_SwapChainRebuild || g_MainWindowData.Width != fb_width ||
          g_MainWindowData.Height != fb_height)) {
-      ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
-      // ImGui's swapchain recreate destroys wd->RenderPass at its top. Since we
-      // point that at our shared g_DepthRenderPass, null it first so ImGui
-      // frees only its own (throwaway) pass and ours survives; SetupDepthBuffer
-      // reattaches it.
-      g_MainWindowData.RenderPass = VK_NULL_HANDLE;
-      ImGui_ImplVulkanH_CreateOrResizeWindow(
-          g_Instance, g_PhysicalDevice, g_Device, &g_MainWindowData,
-          g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount);
-      g_App.swapchainImages = g_MainWindowData.ImageCount;
-      SetupDepthBuffer(&g_MainWindowData);
-      g_MainWindowData.FrameIndex = 0;
-      g_SwapChainRebuild = false;
+      // A lost surface (the window's native surface went away under the
+      // driver) is made again first; the swapchain is rebuilt on it below.
+      if (g_SurfaceLost && RebuildSurface(window))
+        g_SurfaceLost = false;
+      // ImGui's recreate reports through check_vk_result, which aborted on
+      // any error: it is caught here instead, and a recreate that failed is
+      // logged once and tried again next frame (nothing renders meanwhile).
+      VkResult recreate = VK_ERROR_SURFACE_LOST_KHR;
+      if (!g_SurfaceLost) {
+        g_InSwapchainRecreate = true;
+        g_SwapchainRecreateError = VK_SUCCESS;
+        ImGui_ImplVulkan_SetMinImageCount(g_MinImageCount);
+        // ImGui's swapchain recreate destroys wd->RenderPass at its top.
+        // Since we point that at our shared g_DepthRenderPass, null it first
+        // so ImGui frees only its own (throwaway) pass and ours survives;
+        // SetupDepthBuffer reattaches it.
+        g_MainWindowData.RenderPass = VK_NULL_HANDLE;
+        ImGui_ImplVulkanH_CreateOrResizeWindow(
+            g_Instance, g_PhysicalDevice, g_Device, &g_MainWindowData,
+            g_QueueFamily, g_Allocator, fb_width, fb_height, g_MinImageCount);
+        g_InSwapchainRecreate = false;
+        recreate = g_SwapchainRecreateError;
+        if (recreate == VK_SUCCESS &&
+            (g_MainWindowData.Swapchain == VK_NULL_HANDLE ||
+             g_MainWindowData.ImageCount == 0))
+          recreate = VK_ERROR_INITIALIZATION_FAILED;
+      }
+      if (recreate != VK_SUCCESS) {
+        if (recreate == VK_ERROR_DEVICE_LOST)
+          MarkDeviceLost("recreating the swapchain");
+        else if (recreate == VK_ERROR_SURFACE_LOST_KHR)
+          g_SurfaceLost = true;
+        if (!recreateFailing)
+          LOG_WARN("Rendering: recreating the swapchain failed ({}); trying "
+                   "again each frame",
+                   startup::VkResultName(recreate));
+        recreateFailing = true;
+        g_SwapChainRebuild = true; // and nothing renders until it holds
+      } else {
+        if (recreateFailing)
+          LOG_INFO("Rendering: the swapchain is back");
+        recreateFailing = false;
+        g_App.swapchainImages = g_MainWindowData.ImageCount;
+        SetupDepthBuffer(&g_MainWindowData);
+        g_MainWindowData.FrameIndex = 0;
+        g_SwapChainRebuild = false;
 
-      // Update viewport sizes for renderers
-      if (g_MeshRenderer) {
-        g_MeshRenderer->SetViewportSize(fb_width, fb_height);
-      }
-      // SSAO targets are window-sized: recreate (waits for idle) and rebind
-      // the new AO view into the mesh renderer's descriptor sets.
-      if (g_SSAORenderer) {
-        g_SSAORenderer->Resize((uint32_t)fb_width, (uint32_t)fb_height);
-        if (g_MeshRenderer)
-          g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
-      }
-      // The framebuffer changed size. SetViewportSize is a DIFFERENT question
-      // from the scene viewport rect (which UI.cpp sets from the sub-region
-      // between the panels every frame) and only some renderers have it.
-      if (g_OutlineRenderer)
-        g_OutlineRenderer->SetViewportSize(fb_width, fb_height);
-      if (g_SketchRenderer)
-        g_SketchRenderer->SetViewportSize(fb_width, fb_height);
-      if (g_UnderlayRenderer)
-        g_UnderlayRenderer->SetViewportSize(fb_width, fb_height);
-      for (SceneRenderer* r : g_Scene)
-        r->SetViewport(0, 0, fb_width, fb_height);
-      if (g_Camera) {
-        g_Camera->SetAspectRatio(static_cast<float>(fb_width) /
-                                 static_cast<float>(fb_height));
+        // Update viewport sizes for renderers
+        if (g_MeshRenderer) {
+          g_MeshRenderer->SetViewportSize(fb_width, fb_height);
+        }
+        // SSAO targets are window-sized: recreate (waits for idle) and rebind
+        // the new AO view into the mesh renderer's descriptor sets.
+        if (g_SSAORenderer) {
+          g_SSAORenderer->Resize((uint32_t)fb_width, (uint32_t)fb_height);
+          if (g_MeshRenderer)
+            g_MeshRenderer->RebindAOMap(g_SSAORenderer->AOView());
+        }
+        // The framebuffer changed size. SetViewportSize is a DIFFERENT question
+        // from the scene viewport rect (which UI.cpp sets from the sub-region
+        // between the panels every frame) and only some renderers have it.
+        if (g_OutlineRenderer)
+          g_OutlineRenderer->SetViewportSize(fb_width, fb_height);
+        if (g_SketchRenderer)
+          g_SketchRenderer->SetViewportSize(fb_width, fb_height);
+        if (g_UnderlayRenderer)
+          g_UnderlayRenderer->SetViewportSize(fb_width, fb_height);
+        for (SceneRenderer* r : g_Scene)
+          r->SetViewport(0, 0, fb_width, fb_height);
+        if (g_Camera) {
+          g_Camera->SetAspectRatio(static_cast<float>(fb_width) /
+                                   static_cast<float>(fb_height));
+        }
       }
     }
     if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) {
@@ -3382,13 +4145,20 @@ int main(int argc, char** argv) {
     ImDrawData* draw_data = ImGui::GetDrawData();
     const bool is_minimized =
         (draw_data->DisplaySize.x <= 0.0f || draw_data->DisplaySize.y <= 0.0f);
-    if (!is_minimized) {
+    // Not while a swapchain recreate is failing: there is nothing to draw
+    // into until it holds.
+    if (!is_minimized && !g_SwapChainRebuild) {
       wd->ClearValue.color.float32[0] = clear_color.x * clear_color.w;
       wd->ClearValue.color.float32[1] = clear_color.y * clear_color.w;
       wd->ClearValue.color.float32[2] = clear_color.z * clear_color.w;
       wd->ClearValue.color.float32[3] = clear_color.w;
       FrameRender(wd, draw_data);
-      FramePresent(wd);
+      // The first frame on screen: this start did not die starting up
+      // (crash::NoteFirstFrame), which is what safe mode counts.
+      if (FramePresent(wd) && !firstFrameNoted && !args.runGuiTests) {
+        firstFrameNoted = true;
+        crash::NoteFirstFrame();
+      }
       // Before the uncapped-mode sleep below: the frame is over when the
       // image is presented, not when we have finished idling.
       g_App.frameTimer.EndFrame(glfwGetTime());
@@ -3488,6 +4258,11 @@ int main(int argc, char** argv) {
     }
 #endif
   }
+
+  // They hold references into this function's frame.
+  g_App.restartNormally = nullptr;
+  g_App.setAsideAndRestart = nullptr;
+  lossQuestion.reset();
 
   // Never orphan a child process: the panel's session dies with the app.
   ui::ShutdownTerminal(g_App);

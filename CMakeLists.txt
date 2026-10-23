@@ -800,6 +800,7 @@ endif()
 set(app_sources
     src/app/main.cpp
     src/app/FramePacer.cpp
+    src/app/StartupReport.cpp
     src/render/VulkanCommon.cpp
     src/render/GpuTimer.cpp
     src/app/CrashHandler.cpp
@@ -1044,6 +1045,23 @@ add_library(designer_app STATIC
     ${IMGUI_DIR}/imgui_widgets.cpp)
 target_include_directories(designer_app PUBLIC src)
 target_link_libraries(designer_app PUBLIC designer_core ${LIBRARIES})
+
+# The last rung of a startup failure's message box is a desktop notification
+# over D-Bus (app/StartupReport.cpp), through the libdbus the file-dialog
+# portal already links. Optional: without it the chain ends at the text file.
+if(UNIX AND NOT APPLE)
+    find_package(PkgConfig QUIET)
+    if(PKG_CONFIG_FOUND)
+        pkg_check_modules(LOBOLE_DBUS QUIET dbus-1)
+    endif()
+    if(LOBOLE_DBUS_FOUND)
+        set_property(SOURCE src/app/StartupReport.cpp APPEND PROPERTY
+                     COMPILE_DEFINITIONS HAVE_DBUS)
+        set_property(SOURCE src/app/StartupReport.cpp APPEND PROPERTY
+                     INCLUDE_DIRECTORIES ${LOBOLE_DBUS_INCLUDE_DIRS})
+        target_link_libraries(designer_app PUBLIC ${LOBOLE_DBUS_LINK_LIBRARIES})
+    endif()
+endif()
 
 # The vendored sources are compiled here too, and they must NOT get the PCH
 # below: ImGui's own .cpp files `#define IMGUI_DEFINE_MATH_OPERATORS` before

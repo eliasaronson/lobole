@@ -7,6 +7,8 @@
 #include "ui/Icons.h"
 #include "ui/SimulationActions.h"
 
+#include <functional>
+
 // Shell GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
 // Test names and categories are UNCHANGED: tools/gui-tests-xvfb.sh builds its
@@ -110,6 +112,59 @@ void RegisterShellGuiTests(ImGuiTestEngine* engine) {
   t = IM_REGISTER_TEST(engine, "app", "core_windows_exist");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     IM_CHECK(ctx->GetWindowByRef("//###Model") != nullptr);
+  };
+
+  // Landing below the best device says so once, in a modal, and lastingly
+  // in the menu bar and About (docs/rendering/README.md#the-device-ladder);
+  // safe mode's banner offers its two ways out (docs/ui/settings.md#safe-mode).
+  // Start-up decides both, so the test sets what it would have set.
+  t = IM_REGISTER_TEST(engine, "app", "renderer_fallback_and_safe_mode_say_so");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const ui::AppState::RendererStatus renderer = s_App->renderer;
+    const ui::AppState::SafeMode safeMode = s_App->safeMode;
+    const bool noticeShown = s_App->rendererFallbackNoticeShown;
+    const std::function<void()> restart = s_App->restartNormally;
+    const std::function<void()> setAside = s_App->setAsideAndRestart;
+
+    s_App->renderer.fallback = true;
+    s_App->renderer.software = true;
+    s_App->renderer.device = "llvmpipe (test)";
+    s_App->renderer.reason =
+        "Test GPU: VK_ERROR_INITIALIZATION_FAILED at device creation";
+    s_App->rendererFallbackNoticeShown = false;
+    ctx->Yield(3);
+    ImGuiWindow* modal = ctx->GetWindowByRef("//###RendererFallback");
+    IM_CHECK(modal != nullptr && modal->Active);
+    ctx->SetRef("//###RendererFallback");
+    ctx->ItemClick("Dismiss###startup_notice_dismiss");
+    ctx->Yield(3);
+    IM_CHECK(s_App->rendererFallbackNoticeShown); // said once
+    modal = ctx->GetWindowByRef("//###RendererFallback");
+    IM_CHECK(modal == nullptr || !modal->Active);
+    IM_CHECK(s_App->renderer.fallback); // the menu bar's notice stays
+
+    int restarts = 0, setAsides = 0;
+    s_App->safeMode.active = true;
+    s_App->safeMode.why = "a GUI test asked";
+    s_App->safeMode.settingsPath = "/nowhere/settings.json";
+    s_App->safeMode.layoutPath = "/nowhere/imgui.ini";
+    s_App->restartNormally = [&restarts] { ++restarts; };
+    s_App->setAsideAndRestart = [&setAsides] { ++setAsides; };
+    ctx->Yield(2);
+    ImGuiWindow* banner = ctx->GetWindowByRef("//###SafeModeBanner");
+    IM_CHECK(banner != nullptr && banner->Active);
+    ctx->SetRef("//###SafeModeBanner");
+    ctx->ItemClick("Restart normally###safe_restart");
+    ctx->ItemClick("Set them aside and restart###safe_set_aside");
+    IM_CHECK_EQ(restarts, 1);
+    IM_CHECK_EQ(setAsides, 1);
+
+    s_App->renderer = renderer;
+    s_App->safeMode = safeMode;
+    s_App->rendererFallbackNoticeShown = noticeShown;
+    s_App->restartNormally = restart;
+    s_App->setAsideAndRestart = setAside;
+    ctx->Yield(2);
   };
 
   t = IM_REGISTER_TEST(engine, "shortcuts", "undo_redo_keyboard");

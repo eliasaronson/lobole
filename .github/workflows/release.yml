@@ -23,6 +23,12 @@ on:
 permissions:
   contents: read
 
+
+# Nothing a runner starts is watched: a native message box (a startup
+# failure, a lost device; src/app/StartupReport.h) would wait for a click.
+env:
+  LOBOLE_NO_DIALOG: "1"
+
 jobs:
   # A tag that disagrees with what it builds is refused, not shipped.
   check:

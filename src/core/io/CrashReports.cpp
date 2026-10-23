@@ -31,6 +31,7 @@ nlohmann::json g_marker;
 std::string g_project;
 bool g_projectNoted = false;
 std::optional<Report> g_notice;
+std::optional<std::string> g_startupFailureNotice;
 
 std::tm LocalTime(std::time_t t) {
   std::tm out{};
@@ -185,7 +186,8 @@ std::string ReasonFrom(const std::string& crashText, bool* crashed) {
 }
 
 std::string ReportText(const Report& r, const std::string& crashText,
-                       bool hasDump, const std::string& collected) {
+                       bool hasDump, const std::string& collected,
+                       const std::string& explanation = "") {
   std::ostringstream o;
   o << "Loböle crash report\n\n"
        "This folder may hold your design (the copies in autosave/) and the\n"
@@ -213,7 +215,9 @@ std::string ReportText(const Report& r, const std::string& crashText,
   if (hasDump)
     row("Dump:", "crash.dmp");
   o << "\n";
-  if (crashText.empty()) {
+  if (!explanation.empty()) {
+    o << explanation;
+  } else if (crashText.empty()) {
 #if defined(_WIN32)
     o << "There is no stack: the process ended without running its crash\n"
          "handler, so it was ended from outside (Task Manager's End task,\n"
@@ -247,6 +251,9 @@ Report FromJson(const nlohmann::json& j, const fs::path& dir) {
   r.build = j.value("build", "");
   r.os = j.value("os", "");
   r.project = j.value("project", "");
+  r.startedEpoch = j.value("started_epoch", std::time_t{0});
+  r.startedMs = j.value("started_ms", int64_t{r.startedEpoch} * 1000);
+  r.firstFrame = j.value("first_frame", false);
   if (j.contains("autosaves") && j["autosaves"].is_array())
     for (const auto& a : j["autosaves"])
       if (a.is_string())
@@ -255,11 +262,19 @@ Report FromJson(const nlohmann::json& j, const fs::path& dir) {
 }
 
 nlohmann::json ToJson(const Report& r) {
-  return {{"stem", r.stem},       {"reason", r.reason},
-          {"crashed", r.crashed}, {"started", r.started},
-          {"mode", r.mode},       {"version", r.version},
-          {"build", r.build},     {"os", r.os},
-          {"project", r.project}, {"autosaves", r.autosaves}};
+  return {{"stem", r.stem},
+          {"reason", r.reason},
+          {"crashed", r.crashed},
+          {"started", r.started},
+          {"mode", r.mode},
+          {"version", r.version},
+          {"build", r.build},
+          {"os", r.os},
+          {"project", r.project},
+          {"autosaves", r.autosaves},
+          {"started_epoch", r.startedEpoch},
+          {"started_ms", r.startedMs},
+          {"first_frame", r.firstFrame}};
 }
 
 // One dead session into its report folder. `marker` is locked by us.
@@ -304,6 +319,9 @@ std::optional<Report> Collect(const fs::path& stateDir, const fs::path& marker,
   r.os = j.value("os", "");
   r.project = j.value("project", "");
   const std::time_t startedAt = j.value("started_epoch", std::time_t{0});
+  r.startedEpoch = startedAt;
+  r.startedMs = j.value("started_ms", int64_t{startedAt} * 1000);
+  r.firstFrame = j.value("first_frame", false);
 
   const std::string log = j.value("log", "");
   if (!log.empty())
@@ -380,6 +398,9 @@ std::optional<Session> BeginSession(const fs::path& stateDir,
       {"pid", platform::CurrentPid()},
       {"started", Format(t, "%Y-%m-%d %H:%M:%S")},
       {"started_epoch", t},
+      {"started_ms", std::chrono::duration_cast<std::chrono::milliseconds>(
+                         now.time_since_epoch())
+                         .count()},
       {"log", s.logFile.string()},
       {"project", ""},
       {"autosaves", AutosavesOf("")}};
@@ -431,6 +452,94 @@ void EndSession() {
   fs::remove(g_session->dumpFile, ec);
   g_lock.Release();
   g_session.reset();
+}
+
+void NoteFirstFrame() {
+  std::lock_guard guard(g_mutex);
+  if (!g_session || g_marker.value("first_frame", false))
+    return;
+  g_marker["first_frame"] = true;
+  if (!WriteMarker())
+    LOG_WARN("Could not update the session marker {}",
+             g_session->marker.string());
+  WriteFile(LastGoodStartFile(g_session->stateDir),
+            std::to_string(g_marker.value("started_ms", int64_t{0})) + "\n");
+}
+
+fs::path LastGoodStartFile(const fs::path& stateDir) {
+  return stateDir / "last-good-start";
+}
+
+std::optional<Report> ReportThisSession(const std::string& reason) {
+  std::lock_guard guard(g_mutex);
+  if (!g_session)
+    return std::nullopt;
+  std::error_code ec;
+  const fs::path& stateDir = g_session->stateDir;
+  fs::path dir = ReportsDir(stateDir) / g_session->stem;
+  for (int n = 2; fs::exists(dir, ec); ++n)
+    dir = ReportsDir(stateDir) / (g_session->stem + "-" + std::to_string(n));
+  fs::create_directories(dir, ec);
+  if (ec)
+    return std::nullopt;
+  Report r;
+  r.dir = dir;
+  r.stem = dir.filename().string();
+  r.reason = reason;
+  r.started = g_marker.value("started", "");
+  r.mode = g_marker.value("mode", "");
+  r.version = g_marker.value("version", "");
+  r.build = g_marker.value("build", "");
+  r.os = g_marker.value("os", "");
+  r.project = g_marker.value("project", "");
+  r.startedEpoch = g_marker.value("started_epoch", std::time_t{0});
+  r.startedMs = g_marker.value("started_ms", int64_t{r.startedEpoch} * 1000);
+  r.firstFrame = g_marker.value("first_frame", false);
+  const std::string log = g_marker.value("log", "");
+  if (!log.empty())
+    WriteFile(dir / "session.log", Tail(log, kLogTailLines));
+  r.autosaves = CopyAutosaves(g_marker, r.startedEpoch, dir / "autosave");
+  const std::string collected = Format(std::time(nullptr), "%Y-%m-%d %H:%M:%S");
+  WriteFile(dir / "report.txt",
+            ReportText(r, "", false, collected,
+                       "There is no stack: the process did not crash. It\n"
+                       "wrote this report when it happened, saved what was\n"
+                       "unsaved, and asked to restart. The tail of\n"
+                       "session.log is what it was doing.\n"));
+  WriteFile(dir / "report.json", ToJson(r).dump(2) + "\n");
+  PruneReports(stateDir, kKeepReports);
+  LOG_WARN("This session's report ({}) is in {}", reason, dir.string());
+  return r;
+}
+
+size_t EarlyDeathsInARow(const std::vector<Report>& reports,
+                         int64_t lastGoodStartMs) {
+  size_t count = 0;
+  for (const Report& r : reports) {
+    if (r.mode != "windowed")
+      continue;
+    if (r.firstFrame || (lastGoodStartMs > 0 && r.startedMs < lastGoodStartMs))
+      break;
+    // A device loss is reported by a session that drew; a report of ours
+    // that is not a death does not count either way.
+    if (r.reason.rfind(kDeviceLostReason, 0) == 0)
+      break;
+    ++count;
+  }
+  return count;
+}
+
+size_t EarlyDeathsInARow(const fs::path& stateDir) {
+  int64_t lastGood = 0;
+  std::error_code ec;
+  if (fs::exists(LastGoodStartFile(stateDir), ec)) {
+    try {
+      lastGood = std::stoll(ReadFile(LastGoodStartFile(stateDir)));
+    } catch (const std::exception&) {
+      lastGood = 0; // unreadable: as if there were none
+    }
+  }
+  return EarlyDeathsInARow(ListReports(stateDir), lastGood);
 }
 
 std::vector<Report> CollectDeadSessions(const fs::path& stateDir, size_t keep) {
@@ -504,6 +613,15 @@ void SetNotice(std::optional<Report> report) {
 const std::optional<Report>& Notice() {
   // Read on the main thread only (the GUI's modal), like SetNotice.
   return g_notice;
+}
+
+void SetStartupFailureNotice(std::optional<std::string> text) {
+  std::lock_guard guard(g_mutex);
+  g_startupFailureNotice = std::move(text);
+}
+
+const std::optional<std::string>& StartupFailureNotice() {
+  return g_startupFailureNotice; // main thread only, as Notice
 }
 
 } // namespace crash

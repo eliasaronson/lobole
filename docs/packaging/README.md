@@ -139,6 +139,50 @@ unstripped binary of the build the report's `Build:` line names (the mingw
 the POSIX handler and the dyld module table compile for it by design, but
 nothing here can build or run it.
 
+## When it will not start
+
+A start that cannot get a window and a graphics device says why, in words,
+and exits with code **3** (docs/architecture.md#when-the-renderer-cannot-start):
+on stderr, in the session log, in `last-startup-failure.txt` in the state
+directory above (`%LOCALAPPDATA%\Lobole\state\` on Windows), and — for a
+desktop launch, which has no terminal — in a native box: `MessageBoxW` on
+Windows; `zenity`, else `kdialog`, else a desktop notification naming the
+file on Linux. The next start that draws a window says it once. The message
+is what to read first; by what it names:
+
+- **"create the Vulkan instance", "load Vulkan", "find a graphics device"**:
+  no Vulkan driver works here. Install or update the GPU driver and the
+  Vulkan loader — Debian and Ubuntu `libvulkan1 mesa-vulkan-drivers`, Fedora
+  `vulkan-loader mesa-vulkan-drivers`, Arch `vulkan-icd-loader` and
+  `vulkan-intel`, `vulkan-radeon` or `nvidia-utils`; on Windows the driver
+  from the GPU's maker, since the one Windows installs often has no Vulkan.
+  In a virtual machine, turn on 3D acceleration.
+- **"create the graphics device", "set up the swapchain"**: every device was
+  tried and failed (the message lists each). A driver update usually fixes
+  it; `LOBOLE_RENDERER=software lobole` renders on Mesa's lavapipe where it
+  is installed (Linux only: nothing is bundled, and stock Windows has none).
+- **"start the windowing system", "open the main window"**: no desktop
+  session reached the app (`DISPLAY` / `WAYLAND_DISPLAY`).
+- **Anything that crashes before the window draws** — a preference, a
+  layout: `lobole --safe-mode` starts on default settings and layout and
+  writes neither, and two such crashes in a row start it by themselves
+  (docs/ui/settings.md#safe-mode).
+- **No window needed?** `lobole --headless --remote 0` serves the scripting
+  surface with no GPU at all; `--offscreen` renders without a window.
+
+Landing on a lesser device than the best one present is not a failure: the
+app says so once, keeps a notice in the menu bar, and Help ▸ About names the
+device. A device that stops working mid-session (a driver reset, an eGPU
+unplugged) saves the work, writes a report, and offers to restart
+(docs/rendering/README.md#a-lost-device).
+
+The release smokes check the first case on every package:
+`packaging/appimage/smoke.sh` and `packaging/windows/smoke.sh` start the app
+with `VK_ICD_FILENAMES=/nonexistent` and `LOBOLE_NO_DIALOG=1`, expecting
+exit 3 and the failure file; the AppImage smoke runs it once more without
+`LOBOLE_NO_DIALOG`, `zenity`, `kdialog` or a session bus, to show the chain
+ends at the file rather than a hang.
+
 ## The Nix flake
 
 `flake.nix` pins nixpkgs (`nixos-unstable`, OpenCASCADE 7.9.3) and the four

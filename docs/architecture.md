@@ -402,7 +402,9 @@ by the same name drift apart without any test noticing:
 - `--remote <port>` serves JSON-RPC (`--remote 0` binds a kernel-chosen
   port); every instance announces itself in
   `~/.local/state/lobole/instances/<port>.json`. `ping` reports the port,
-  the open project, the OpenCASCADE version (`occ`), the build's optional
+  the open project, the renderer and how start-up got to it (`renderer`,
+  [the device ladder](rendering/README.md#the-device-ladder)), `safe_mode`,
+  the OpenCASCADE version (`occ`), the build's optional
   `features`, and `binary_replaced`
   (Linux: the executable was rebuilt under a running instance).
 
@@ -422,8 +424,10 @@ by the same name drift apart without any test noticing:
   registers, stacks, no heap) beside the crash file. The default action is
   restored first and the signal re-raised last, so the process still dies
   and core-dumps as it would have. A stack overflow runs the handler on an
-  alternate stack. `lobole --crash-test` crashes before there are any
-  edits; the `debug_crash {kind: segv|abort|exception}` RPC crashes after
+  alternate stack. `lobole --crash-test` crashes once the session marker
+  exists and before there are any edits (or, windowed, a first frame: it is
+  how a test makes a start that dies starting up); the
+  `debug_crash {kind: segv|abort|exception}` RPC crashes after
   them, and is refused unless the app was started with
   `LOBOLE_ALLOW_DEBUG_CRASH=1`; so is `debug_fault {kind}`, which fails the
   ways a handler can without crashing, for the hostile sweep's self-test
@@ -472,7 +476,10 @@ by the same name drift apart without any test noticing:
   gone, however it died (a crash, the OOM killer, `kill -9`, a power cut); a
   pid check would not do, since pids are reused. The marker is locked under
   a temporary name and renamed into place, so another instance starting at
-  the same moment never sees it unlocked.
+  the same moment never sees it unlocked. A windowed session's marker gains
+  `first_frame` once its first frame is presented (`crash::NoteFirstFrame`,
+  which also stamps `<state>/last-good-start` with that session's start in
+  milliseconds): a session that dies without it died starting up.
 - **The next start collects it**, before the first frame and in every mode
   (not under `--gui-tests`, which run on defaults): each unlocked marker
   becomes `<state>/crashes/<started>-<pid>/` with `report.txt` (what
@@ -512,14 +519,22 @@ by the same name drift apart without any test noticing:
   table.
   `tests/crash_report_smoke.py` crashes a headless instance in a scratch
   state dir and checks each of the above.
+- **A lost graphics device writes a report too**, while the process lives:
+  `crash::ReportThisSession` makes the same folder a dead session's would
+  (log tail, autosave copies), reason `graphics device lost: …`, and the
+  restart it asks for makes it the next start's notice
+  ([rendering](rendering/README.md#a-lost-device)).
 - **A stall** — the main thread not coming round its loop — is reported by
   the frame watchdog (`src/common/Watchdog.{h,cpp}`). Each loop (windowed,
   `--offscreen`, `--headless`) beats it once per iteration; a monitor thread
   that sees no beat for 3 s logs `main thread stalled 3.0 s (in <label>)`,
   the main thread's stack, and later `main thread resumed after N s`, once
   per stall. The label says what was running when that is known: the RPC
-  being handled, or a native file dialog (reported without a stack — the
-  wait is the user). Every RPC, `ping` included, runs on the main thread, so
+  being handled, a native file dialog (reported without a stack — the
+  wait is the user), or the GPU: the frame loop's acquire and fence waits
+  take a 0.1 s timeout in a loop under `waiting on the GPU: swapchain
+  image` / `waiting on the GPU: frame fence`, so a GPU that hangs without
+  resetting is named as such instead of a stack deep in a driver. Every RPC, `ping` included, runs on the main thread, so
   a stall also silences the remote, and this log line is where it is
   explained. Nothing is watched before the first beat, so start-up is not
   reported.
@@ -546,6 +561,68 @@ by the same name drift apart without any test noticing:
   is refused at start-up. `lobole --stall-test` stalls the loop for 4 s once,
   and `tests/watchdog_smoke.py` checks the stall line, the label, the stack and
   the resume.
+
+### When the renderer cannot start
+
+A start that cannot get a window and a renderer says why, in words, where
+a desktop launch — which has no terminal — can read it, and exits; it does
+not abort:
+
+- **A startup failure is a value.** Every startup Vulkan call goes through
+  `CheckStartup(step, VkResult)` (`src/app/main.cpp`), which throws a
+  `startup::StartupError` (`src/app/StartupReport.h`) carrying the step in
+  words ("create the Vulkan instance", "set up the swapchain"), the
+  result's NAME, the devices seen and each device tried and how it failed;
+  `glfwInit` failing, a null window, no Vulkan loader, no device and the
+  mesh renderer failing raise the same, quoting GLFW's last error where it
+  has one. Within the [device ladder](rendering/README.md#the-device-ladder)
+  a failed rung is caught and the next tried; only the last failure reaches
+  `main`.
+- **`main` ends it through one place**, `EndStartup` →
+  `startup::ReportStartupFailure`: the message to stderr, to the session
+  log, and to `<state>/last-startup-failure.txt`; then exit code **3** (no
+  usable renderer; 1 is a bad flag or a taken port, 2 a refused environment
+  variable) by `_Exit`, since what was half built is not torn down. The
+  session marker is deleted first, as a clean exit's is: a start that said
+  why has not crashed, and leaves no crash report. The message says what
+  failed, what Vulkan answered, the devices, and what to try for that step:
+  the driver and the Vulkan loader by distribution (`libvulkan1` +
+  `mesa-vulkan-drivers`, `vulkan-loader`, `vulkan-icd-loader`), 3D
+  acceleration in a VM, `LOBOLE_RENDERER=software`, `--safe-mode`, and
+  `--offscreen` / `--headless` for the scripting surface without a window,
+  with a link to
+  [packaging's troubleshooting](packaging/README.md#when-it-will-not-start).
+- **The user sees it.** A windowed start whose stderr is not a terminal
+  shows it natively: `MessageBoxW` on Windows; on Linux `zenity --error`,
+  else `kdialog --error`, else a desktop notification over D-Bus
+  (`org.freedesktop.portal.Notification` inside the Flatpak,
+  `org.freedesktop.Notifications` outside; libdbus, which the file-dialog
+  portal already links) naming the text file, and with none of them the
+  file is where it ends — never a hang. **`LOBOLE_NO_DIALOG=1`** suppresses
+  every native box (this one and the lost device's): `tests/smoke_app.py`,
+  `tools/xvfb-exec.sh`, `tools/gui-tests-xvfb.sh`,
+  `tools/headless-preview.sh` and the CI workflows set it, and
+  `--gui-tests` sets it for itself. `--offscreen` never shows one.
+- **The next start says it once.** A windowed start finding
+  `last-startup-failure.txt` newer than `last-good-start` shows it in a
+  modal ("Loböle could not start last time"); `crash_reports` answers it as
+  `last_startup_failure` in every mode.
+- **Safe mode** follows a crash loop: two windowed starts in a row, newest
+  first, that died before their first frame (`crash::EarlyDeathsInARow`,
+  over the reports and `last-good-start`) make the third start
+  [safe mode](ui/settings.md#safe-mode), as `--safe-mode` or
+  `LOBOLE_SAFE_MODE=1` do.
+- **The environment is refused, not guessed**: `LOBOLE_RENDERER`
+  (`software|hardware`), `LOBOLE_SAFE_MODE` and `LOBOLE_NO_DIALOG` (`0|1`),
+  and `LOBOLE_FAULT` (`device_create`, `swapchain`,
+  `renderer_init:<mesh|outline|sketch|underlay|field|stock|raytracing>`,
+  honoured only with `LOBOLE_ALLOW_DEBUG_CRASH=1`) are each checked at start
+  and anything else is exit 2 naming what is accepted. `LOBOLE_FAULT` is how
+  `tests/startup_failure_smoke.py` makes the failures a machine cannot
+  produce on demand; the ones it can are real (`VK_ICD_FILENAMES=/nonexistent`
+  for no driver, `LOBOLE_RENDERER=software` on lavapipe), and a stand-in
+  `zenity` on `PATH` shows the box was asked. The words, the parsers and the
+  ladder's order are unit tests (`test_startup_report.cpp`).
 
 ## Tests
 

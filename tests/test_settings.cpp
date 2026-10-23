@@ -115,15 +115,62 @@ TEST_CASE("Settings: a corrupt file is kept, not overwritten", "[settings]") {
   ScratchConfig scratch("corrupt");
   scratch.WriteRaw("{ this is not json");
 
-  const settings::Settings s = settings::Load();
-  CHECK(s.uiFontScale == 1.0f); // defaults, no complaint to the user
+  std::string note;
+  const settings::Settings s = settings::Load(&note);
+  CHECK(s.uiFontScale == 1.0f); // defaults
 
-  // The one copy of a hand-edited config is not ours to destroy.
-  const fs::path bak = settings::ConfigPath() + ".bak";
-  REQUIRE(fs::exists(bak));
-  std::ifstream in(bak);
-  std::string kept((std::istreambuf_iterator<char>(in)), {});
-  CHECK(kept == "{ this is not json");
+  // The one copy of a hand-edited config is not ours to destroy: it is set
+  // aside as settings.json.bad-<stamp>, and the note names it.
+  std::vector<fs::path> kept;
+  for (const auto& e : fs::directory_iterator(settings::ConfigDir()))
+    if (e.path().filename().string().rfind("settings.json.bad-", 0) == 0)
+      kept.push_back(e.path());
+  REQUIRE(kept.size() == 1);
+  std::ifstream in(kept[0]);
+  CHECK(std::string((std::istreambuf_iterator<char>(in)), {}) ==
+        "{ this is not json");
+  CHECK(note.find(kept[0].string()) != std::string::npos);
+  CHECK(!fs::exists(settings::ConfigPath()));
+}
+
+TEST_CASE("Settings: setting a bad file aside never replaces an earlier one",
+          "[settings]") {
+  ScratchConfig scratch("aside");
+  // Twice within the same second: the stamp is the same, the names are not.
+  scratch.WriteRaw("{ first");
+  CHECK(settings::Load().uiFontScale == 1.0f);
+  scratch.WriteRaw("{ second");
+  std::string note;
+  CHECK(settings::Load(&note).uiFontScale == 1.0f);
+  std::set<std::string> contents;
+  size_t count = 0;
+  for (const auto& e : fs::directory_iterator(settings::ConfigDir())) {
+    if (e.path().filename().string().rfind("settings.json.bad-", 0) != 0)
+      continue;
+    ++count;
+    std::ifstream in(e.path());
+    contents.insert(std::string((std::istreambuf_iterator<char>(in)), {}));
+  }
+  CHECK(count == 2);
+  CHECK(contents == std::set<std::string>{"{ first", "{ second"});
+
+  // And SetAside refuses a file that is not there.
+  std::error_code ec;
+  CHECK(settings::SetAside(settings::ConfigPath(), ec).empty());
+  CHECK(ec);
+}
+
+TEST_CASE("Settings: a session-only save writes nothing", "[settings]") {
+  ScratchConfig scratch("session_only");
+  settings::Settings s;
+  s.uiFontScale = 1.4f;
+  settings::SetSessionOnly(true);
+  const bool saved = settings::Save(s);
+  settings::SetSessionOnly(false);
+  CHECK(saved);
+  CHECK(!fs::exists(settings::ConfigPath()));
+  CHECK(settings::Save(s));
+  CHECK(fs::exists(settings::ConfigPath()));
 }
 
 // Two instances run at once here (a windowed dev-watch plus headless agents).

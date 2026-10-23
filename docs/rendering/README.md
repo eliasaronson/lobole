@@ -20,7 +20,8 @@ Topic pages:
 
 | what | where |
 |---|---|
-| Vulkan instance/device, swapchain, render pass, frame loop, construction and teardown of every renderer, `--offscreen` loop, screenshot and quick-render capture | `src/app/main.cpp` |
+| Vulkan instance/device, the device ladder, swapchain, render pass, frame loop (and its lost-device state), construction and teardown of every renderer, `--offscreen` loop, screenshot and quick-render capture | `src/app/main.cpp` |
+| the ladder's order, the startup failure's words and native box, the restart | `src/app/StartupReport.{h,cpp}` |
 | shared Vulkan helpers (`vkutil::CreateBuffer`, `CreateReadbackBuffer`, `LoadShaderModule`, single-time commands, allocation count) | `src/render/VulkanCommon.{h,cpp}` |
 | the per-frame contract | `src/render/SceneRenderer.h` |
 | scene renderers | `src/render/{Mesh,Outline,Field,Stock,Underlay,Sketch}Renderer.*` |
@@ -40,17 +41,104 @@ sub-allocator); the startup log prints the device's
 `maxMemoryAllocationCount` beside the selected GPU because the Vulkan floor
 for it is 4096.
 
-## Device selection
+## The device ladder
 
 `main.cpp` scores every physical device: discrete 2, integrated 1, other 0,
 and -1 for a device that cannot present to the window (asked through a
 throwaway surface, because `glfwGetPhysicalDevicePresentationSupport` can
-answer yes for a device that then fails). The `gpu_device` preference
-(Preferences, `set_settings`) names a device by substring; one that cannot
-present is not used, and the app says so in the log and in Preferences. The
-log line `Selected GPU: …` names the choice. Ray tracing needs a device that
-exposes the RT extensions; without them the path tracer is unavailable and
-quick stills still work.
+answer yes for a device that then fails). `startup::DeviceLadder`
+(`src/app/StartupReport.cpp`) orders the eligible ones into rungs: the one
+the `gpu_device` preference names (by substring; Preferences,
+`set_settings`) or else the best score, then the other hardware by score,
+then the software devices (`VK_PHYSICAL_DEVICE_TYPE_CPU`: Mesa's lavapipe,
+llvmpipe). Each rung is tried in turn: `vkCreateDevice`, and in the window
+its surface and swapchain (`SetupVulkanWindow`). A rung that fails is logged with its
+result (`Rendering: NVIDIA …: VK_ERROR_INITIALIZATION_FAILED at device
+creation; trying the next device`), taken down, and the next tried; when no
+rung holds, start-up ends with exit code 3 and the report of
+[When the renderer cannot start](../architecture.md#when-the-renderer-cannot-start).
+The ladder never drops to `--offscreen` or `--headless` by itself; the
+report offers them.
+
+Landing below the first rung is a **fallback**, and is announced: a modal
+once, at the first frame ("Rendering in software (llvmpipe)", with which
+device failed and how), a lasting notice at the right of the menu bar
+(`Software rendering` or `Fallback renderer`, the reason in its tooltip),
+rows in Help ▸ About, and `ping`'s `renderer` (`{device, type, software,
+fallback, reason, forced, ray_tracing, missing, lost, lost_reason}`). A
+machine whose only usable device IS a software one (CI, a VM, a desktop on
+Xvfb) is not a fallback: the menu bar says `Software rendering`, and there
+is no modal. A preference that cannot be honoured is said in the log and in
+Preferences, as before.
+
+`LOBOLE_RENDERER=software` keeps only the software rungs and
+`LOBOLE_RENDERER=hardware` only the others; any other value is refused at
+start (exit 2), naming those two. The software rung is the host's own Mesa
+— the same lavapipe the CI GUI suite runs on — and nothing is bundled, so a
+machine without it, and every stock Windows system, ends at the report.
+
+The path tracer runs only on hardware: lavapipe now offers the ray-tracing
+extensions, but a path-traced still on the CPU is hours of a frozen-looking
+app, so on a software device (and in safe mode) the RT renderer is not
+built, and `render_still` and the Render dialog say why
+(`ui::PathTracerRefusal`: "ray tracing is not available on llvmpipe, a
+software device …"); quick stills work everywhere.
+
+A renderer whose `Initialize` fails is **named**: it is dropped (every user
+of its pointer checks for null, and `RegisterSceneRenderers` skips it), and
+listed in `renderer.missing`, the `Renderers missing` menu-bar notice and
+About. The mesh renderer is the picture, so its failure ends start-up like a
+device that cannot be created. The log line `Selected GPU: …` names the
+device either way.
+
+## A lost device
+
+`VK_ERROR_DEVICE_LOST` (a Windows TDR, a driver reset, an eGPU unplugged)
+is a state, not an abort: `AppState::renderer.lost`, set by the frame loop's acquire, fence, submit
+and present (`FrameOk`), by ImGui's own calls, and by every one-shot submit
+in the renderers, which pass their results through `vkutil::NoteResult`
+(`src/render/VulkanCommon.h`) and leave the loss
+for the loop to see (`vkutil::DeviceLostSeen`). From then on:
+
+- nothing is recorded, submitted or presented, and no renderer is called
+  (`ui::SyncRenderersToDocument` returns at once);
+- the remote keeps serving, and a method flagged `NeedsRenderer` in its
+  `MethodDoc` row (`screenshot`, `render_sheet`, `render_still`, `rt_build`,
+  `select_face`, `orient_to_face`, `frame_stats`, the motion videos) — and
+  any UI action, whose ImGui frame no longer runs — is refused with
+  diagnostic code `device_lost`, before anything runs; everything else
+  answers, edits included;
+- the document is CPU state and intact, so every dirty document is
+  autosaved at once, whatever the interval (or with autosave off), and a
+  report folder is written for this session (`crash::ReportThisSession`,
+  reason `graphics device lost: VK_ERROR_DEVICE_LOST at the frame fence`,
+  with the log tail and the autosave copies);
+- the window shows a native box (`startup::Question`: zenity, kdialog or
+  `MessageBoxW`, on its own process or thread so the remote goes on): what
+  happened, that the work is saved, **Restart** or **Quit**. Restart
+  re-executes the binary in place (`execv`; `CreateProcess` on Windows) with
+  its arguments plus `--after-device-loss`, after letting go of the port and
+  the session marker; the new start makes that report the crash notice,
+  which reads "Loböle restarted after its graphics device stopped working"
+  and offers Recover unsaved work. The device is never rebuilt in place: a
+  restart is the one recovery path, and it is the start path every launch
+  already exercises. Under `LOBOLE_NO_DIALOG=1`, or with a terminal on
+  stderr, there is no box: the message goes to stderr and the app serves on
+  until its window is closed.
+
+`--offscreen` has no window to restart: it saves the work, writes the
+report, and serves on with every capture refused; `ping` says
+`renderer.lost`. `VK_ERROR_SURFACE_LOST_KHR` is not a loss: the surface is
+made again (`RebuildSurface`) and the swapchain rebuilt on it. A swapchain
+recreate that fails (ImGui's errors are caught while it runs, instead of
+aborting) is logged once and tried again every frame, nothing drawing
+meanwhile. Any other negative result in the frame loop still aborts — a
+crash report, with the result's name on stderr.
+
+`debug_fault {kind: "device_lost"}` (with `LOBOLE_ALLOW_DEBUG_CRASH=1`)
+marks the device lost as the frame loop would; `tests/device_loss_smoke.py`
+checks the autosave, the refusals, the report and the restart through it,
+windowed and offscreen.
 
 ## A frame
 
@@ -519,6 +607,14 @@ renderer, and by looking at the pictures.
   ([still-render.md](still-render.md)).
 - `remote_smoke` — the windowed screenshot path, the idle throttle's RPC
   wake, and the spare swapchain image.
+- **`tests/startup_failure_smoke.py`** — the device ladder through
+  `LOBOLE_FAULT=device_create|swapchain|renderer_init:<name>` (honoured only
+  with `LOBOLE_ALLOW_DEBUG_CRASH=1`): landing on the next device with
+  `ping`'s fallback and reason, a missing renderer named, the mesh
+  renderer's failure ending the start, `LOBOLE_RENDERER=software` with its
+  path-traced still refused by name; **`tests/device_loss_smoke.py`** — a
+  lost device, above. The fallback modal is the GUI test
+  `app/renderer_fallback_and_safe_mode_say_so`.
 - Unit: `test_light_rig` (the key left of and above the view from any
   camera, the rig the same in camera coordinates from every viewpoint,
   the lock, the setting), `test_outline_edges`, `test_faceselector`, `test_frame_timer`,
@@ -543,3 +639,6 @@ renderer, and by looking at the pictures.
 - A **BVH for picking** (see [Picking](#picking)).
 - The path tracer builds one BLAS per body occurrence from pre-transformed
   geometry rather than sharing one per asset.
+- **A software device on Windows.** Nothing is bundled; the software rung is
+  the host's own Mesa, so a Windows machine without a Vulkan driver ends at
+  the message box ([the device ladder](#the-device-ladder)).

@@ -41,7 +41,10 @@ OS sweeps.
   windowed instance plus agents' scratch instances); without the merge the
   last writer would revert the other's preferences.
 - **Absent file = defaults.** **Corrupt file = defaults**, a log line, and the
-  bad file renamed to `.bak` rather than overwritten.
+  bad file set aside as `settings.json.bad-<YYYYmmdd-HHMMSS>` (never over an
+  earlier one: a `-2` is added) rather than overwritten; the windowed app
+  says so once, in a modal naming where it was kept (`settings::Load`'s
+  note).
 - **A newer `settings_format` is read, not refused.** Unknown keys survive and
   missing ones default, so refusing would only lock a user out of their own
   preferences. The number moves only if an existing key changes meaning.
@@ -111,6 +114,38 @@ Only `vkGetPhysicalDeviceSurfaceSupportKHR` against a real surface is
 trustworthy (`glfwGetPhysicalDevicePresentationSupport` asks the X server,
 which can say yes for a device the driver then refuses), so selection creates
 a throwaway surface.
+The preferred device is the first rung of
+[the device ladder](../rendering/README.md#the-device-ladder): one that fails
+to start falls to the next, and the window says which and why.
+
+## Safe mode
+
+A preference can be what crashes a start — a `gpu_device` whose driver dies,
+a font scale — and so can a layout that trips a docking assert in
+`imgui.ini`. Safe mode starts the window without either:
+
+- **default settings**, never written: `settings::SetSessionOnly` makes every
+  `Save` succeed without touching the disk, so Preferences and `set_settings`
+  work on as usual and last the session;
+- **the default dock layout**, in a scratch `<state>/safe-mode-imgui.ini`, so
+  the user's `imgui.ini` is neither read nor written;
+- no GPU preference (the defaults have none) and **no ray tracing**;
+- **no file opened** from the command line; the crash notice still offers
+  the autosaves.
+
+It is asked for with `--safe-mode` or `LOBOLE_SAFE_MODE=1` (`0` or `1`; any
+other value is refused), and entered **by itself** when the last two
+windowed starts died before their first frame
+([crashes and stalls](../architecture.md#when-the-renderer-cannot-start)).
+A banner over the viewport says why ("the last 2 starts crashed before the
+window drew"), where the user's own files are, and offers two ways out:
+**Restart normally**, and **Set them aside and restart**, which renames
+`settings.json` and `imgui.ini` to `*.bad-<stamp>` (kept, not deleted) and
+starts again on the defaults. A `Safe mode` notice sits at the right of the
+menu bar, `ping` answers `safe_mode: true`, and the path-traced still says
+it is off in safe mode. Never under `--gui-tests`, which already run on
+defaults, and refused with `--headless` and `--offscreen`, which have no
+layout.
 
 ## The window
 
@@ -213,7 +248,8 @@ the JSON names above.
 ## Tests
 
 - Headless: defaults → set → save → load is identical; unknown keys survive a
-  round trip; a corrupt file falls back and leaves a `.bak`.
+  round trip; a corrupt file falls back and is set aside, twice in a second
+  without one replacing the other; a session-only save writes nothing.
 - `ResetAppForTest` resets `settings` to defaults before every GUI test, so
   the developer's own config never decides whether a test passes.
 - Nothing a test runs may write the developer's real preferences, and

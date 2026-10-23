@@ -16,7 +16,9 @@
 #   - a GUI test (app/boots_and_renders) in a window on Xvfb, through
 #     winevulkan to lavapipe. Headless never loads the fonts, so it passed
 #     from C:\Program Files\Loböle while the window died there on the first
-#     non-ASCII path; the folder below is what catches that again.
+#     non-ASCII path; the folder below is what catches that again;
+#   - with no Vulkan driver, exit 3 and last-startup-failure.txt under
+#     %LOCALAPPDATA%\Lobole\state.
 set -euo pipefail
 
 zip="$(realpath "$1")"
@@ -61,3 +63,18 @@ if ! wine "$exe" --gui-tests --gui-test-filter boots_and_renders; then
   exit 1
 fi
 echo "windows-smoke: the window opened and rendered from $dir"
+
+# No usable renderer is exit 3 and a failure file, not a crash or a hang
+# (docs/packaging/README.md#when-it-will-not-start). The loader is the zip's
+# vulkan-1.dll, given no driver at all; LOBOLE_NO_DIALOG=1 keeps the
+# MessageBoxW nobody would click off the virtual display.
+code=0
+VK_ICD_FILENAMES=/nonexistent VK_DRIVER_FILES=/nonexistent LOBOLE_NO_DIALOG=1 \
+  timeout 180 wine "$exe" --hidden --autosave 0 || code=$?
+failure="$(find "${WINEPREFIX:-$HOME/.wine}/drive_c/users" -path '*Lobole/state/last-startup-failure.txt' 2>/dev/null | head -1)"
+if [ "$code" != 3 ] || [ -z "$failure" ]; then
+  echo "windows-smoke: with no Vulkan driver, expected exit 3 and" \
+    "%LOCALAPPDATA%\\Lobole\\state\\last-startup-failure.txt; got exit $code" >&2
+  exit 1
+fi
+echo "windows-smoke: no driver says why (exit 3, $failure)"

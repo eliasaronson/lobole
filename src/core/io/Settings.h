@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <filesystem>
+
 #include "core/io/Keymap.h"
 #include "core/io/WindowGeometry.h"
 
@@ -138,9 +140,23 @@ std::string ConfigDir();
 std::string ConfigPath();
 
 // Absent file = defaults, silently. Corrupt file = defaults, plus the bad
-// file renamed ".bak" — the one copy of a hand-edited config is not ours to
-// destroy. A newer settings_format is READ, not refused (see the doc).
-Settings Load();
+// file set aside as "settings.json.bad-<stamp>" (SetAside) — the one copy of
+// a hand-edited config is not ours to destroy — and `note`, when given, says
+// so in a sentence the windowed app shows once. A newer settings_format is
+// READ, not refused (see the doc).
+Settings Load(std::string* note = nullptr);
+
+// Renames `file` to "<file>.bad-<YYYYmmdd-HHMMSS>", never over an earlier
+// one (a "-2", "-3" is added instead). Returns the new path, or empty with
+// `ec` set when it could not (or `file` does not exist).
+std::filesystem::path SetAside(const std::filesystem::path& file,
+                               std::error_code& ec);
+
+// Safe mode (docs/ui/settings.md#safe-mode): this session's preferences live
+// only in memory. Save then writes nothing and answers success, so every
+// caller — the Preferences window, set_settings — works on as usual.
+void SetSessionOnly(bool sessionOnly);
+bool SessionOnly();
 
 // Atomic, and it re-reads first: two instances run at once here (a windowed
 // dev-watch plus headless agents), so a blind write would let one silently

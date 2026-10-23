@@ -115,9 +115,20 @@ bool AllocateImageMemory(VkDevice device, VkPhysicalDevice physicalDevice,
 VkCommandBuffer BeginSingleTimeCommands(VkDevice device, VkCommandPool pool);
 
 // End, submit, WAIT FOR IDLE, and free. Pairs with BeginSingleTimeCommands;
-// tolerates VK_NULL_HANDLE so the caller need not branch.
-void EndSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue,
-                           VkCommandBuffer cb);
+// tolerates VK_NULL_HANDLE so the caller need not branch. Returns the
+// submit's result, or the wait's when the submit succeeded (NoteResult has
+// seen both).
+VkResult EndSingleTimeCommands(VkDevice device, VkCommandPool pool,
+                               VkQueue queue, VkCommandBuffer cb);
+
+// Every one-shot submit and wait in the renderers passes its result through
+// here, and VK_ERROR_DEVICE_LOST is remembered: the frame loop reads it
+// (DeviceLostSeen) and treats the device as lost from then on
+// (docs/rendering/README.md#a-lost-device). They used to ignore the result,
+// so a loss there passed in silence and the frame loop aborted later.
+// Thread-safe. Returns `result`.
+VkResult NoteResult(VkResult result);
+[[nodiscard]] bool DeviceLostSeen();
 
 // Staging copy: begin, vkCmdCopyBuffer, end + wait. False if the command
 // buffer could not be allocated.

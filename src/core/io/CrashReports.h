@@ -4,6 +4,8 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
+#include <ctime>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -53,6 +55,11 @@ const Session* CurrentSession();
 void NoteProject(const std::string& projectPath);
 // Clean exit: delete the marker and release its lock.
 void EndSession();
+// The windowed app presented its first frame: the marker says so
+// (`first_frame`), and <state>/last-good-start is stamped with this
+// session's start. A session that dies WITHOUT it died starting up, which is
+// what counts towards safe mode (EarlyDeathsInARow).
+void NoteFirstFrame();
 
 // One report folder.
 struct Report {
@@ -65,6 +72,12 @@ struct Report {
   std::string started;  // local time, "2026-10-12 14:30:05"
   std::string mode, version, build, os;
   std::string project; // "" = a project never saved
+  std::time_t startedEpoch = 0;
+  // The same, in milliseconds: starts a second apart are ordered by it
+  // (EarlyDeathsInARow), where a crash loop's starts often share a second.
+  int64_t startedMs = 0;
+  // The session presented a frame before it ended (NoteFirstFrame).
+  bool firstFrame = false;
   // The copies under dir/autosave, relative to it: "Part.dsgn.autosave",
   // "Part.dsgn.autosave.d/parts/Stand.json", "unsaved.autosave.json".
   std::vector<std::string> autosaves;
@@ -82,9 +95,38 @@ std::vector<Report> CollectDeadSessions(const std::filesystem::path& stateDir,
 std::vector<Report> ListReports(const std::filesystem::path& stateDir);
 std::filesystem::path ReportsDir(const std::filesystem::path& stateDir);
 
+// The reason a report made by ReportThisSession for a lost graphics device
+// starts with ("graphics device lost: VK_ERROR_DEVICE_LOST at the frame
+// fence"), so the next start can tell one from a crash.
+inline constexpr const char* kDeviceLostReason = "graphics device lost";
+
+// A report folder for THIS session, while it runs: the same folder a dead
+// session's would be (session.log's tail, copies of the autosaves it wrote),
+// with `reason` as what happened. For a failure the process survives — a
+// lost graphics device — so the evidence does not wait for a crash that
+// never comes. The session carries on, and its clean exit leaves no marker.
+std::optional<Report> ReportThisSession(const std::string& reason);
+
+// How many windowed sessions in a row, newest first, died before their
+// first frame (`reports` newest first, as ListReports gives them). Other
+// modes are skipped; the run stops at a session that drew a frame, or that
+// started before `lastGoodStartMs` (milliseconds since the epoch; 0 =
+// none), since a start that drew in between broke the run. Two in a row
+// starts safe mode.
+size_t EarlyDeathsInARow(const std::vector<Report>& reports,
+                         int64_t lastGoodStartMs);
+size_t EarlyDeathsInARow(const std::filesystem::path& stateDir);
+std::filesystem::path LastGoodStartFile(const std::filesystem::path& stateDir);
+
 // The GUI's notice: the report start-up produced, shown once by the modal
 // ("Loböle closed unexpectedly last time").
 void SetNotice(std::optional<Report> report);
 const std::optional<Report>& Notice();
+
+// The other notice: the last start found no renderer and said so in
+// <state>/last-startup-failure.txt (app/StartupReport.h). Shown once by the
+// next windowed start that gets as far as a window.
+void SetStartupFailureNotice(std::optional<std::string> text);
+const std::optional<std::string>& StartupFailureNotice();
 
 } // namespace crash

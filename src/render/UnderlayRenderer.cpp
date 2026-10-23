@@ -341,8 +341,9 @@ bool UnderlayRenderer::UploadTexture(const unsigned char* rgba, int w, int h,
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cb;
-  vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE);
-  vkQueueWaitIdle(m_graphicsQueue);
+  vkutil::NoteResult(
+      vkQueueSubmit(m_graphicsQueue, 1, &submit, VK_NULL_HANDLE));
+  vkutil::NoteResult(vkQueueWaitIdle(m_graphicsQueue));
   vkFreeCommandBuffers(m_device, m_commandPool, 1, &cb);
   vkutil::DestroyBuffer(m_device, staging, stagingMem);
 

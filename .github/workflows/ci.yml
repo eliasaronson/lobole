@@ -13,6 +13,12 @@ on:
   # For the sanitizers job below, which is run by hand and never on a schedule.
   workflow_dispatch:
 
+
+# Nothing a runner starts is watched: a native message box (a startup
+# failure, a lost device; src/app/StartupReport.h) would wait for a click.
+env:
+  LOBOLE_NO_DIALOG: "1"
+
 jobs:
   # The GUI suite (./tools/gui-tests-xvfb.sh), on a runner with no GPU.
   #

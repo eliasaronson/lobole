@@ -363,11 +363,22 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "method?:string"},
     {"ping",
      "Liveness check; returns {ok, app, port, pid, mode, ui_actions, "
-     "project, dirty, gpu, occ, features, binary_replaced}. `pid` is this "
+     "project, dirty, gpu, renderer, safe_mode, occ, features, "
+     "binary_replaced}. `pid` is this "
      "process's id, so "
      "a launcher can tell its own instance from one already on the port. `gpu` "
      "is the device that answers "
-     "renders — empty under --headless, which has no renderer. `occ` is the "
+     "renders — empty under --headless, which has no renderer. `renderer` "
+     "says how start-up got to it "
+     "(docs/rendering/README.md#the-device-ladder): {device, type "
+     "(discrete|integrated|virtual|software|other), "
+     "software, fallback (a better device here was tried and failed), "
+     "reason (which, and how), forced (LOBOLE_RENDERER: software|hardware, "
+     "or empty), ray_tracing (the path-traced still is available), missing "
+     "(renderers whose initialization failed), lost (the graphics device "
+     "was lost: every method that draws is refused as device_lost), "
+     "lost_reason}. `safe_mode` is true in a window started in safe mode. "
+     "`occ` is the "
      "OpenCASCADE version this build was compiled against. `features` "
      "is what this BUILD contains (cam, cam_adaptive, fem, mesher) and "
      "whether ffmpeg is on PATH (ffmpeg: export_motion_video's mp4, webm "
@@ -383,10 +394,15 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "badly (docs/architecture.md#crashes-and-stalls). `reason` says how it "
      "ended (\"crashed: SIGSEGV\", or \"ended without a crash report\" for "
      "a kill, the OOM killer or a power cut); `autosaves` lists the copies "
-     "of that session's autosaves in the folder's autosave/. Read-only, and "
+     "of that session's autosaves in the folder's autosave/; a lost "
+     "graphics device writes one too, its reason \"graphics device lost: "
+     "...\". `last_startup_failure` is {path, text} when the last start "
+     "that found no renderer left its message "
+     "(last-startup-failure.txt), else null. Read-only, and "
      "nothing is ever sent anywhere.",
      "", remote::Deferrable,
-     "folder:string, reports:{autosaves:string[], build:string, "
+     "folder:string, last_startup_failure:{path:string, text:string}|null, "
+     "reports:{autosaves:string[], build:string, "
      "crashed:bool, mode:string, os:string, path:string, "
      "project:string, reason:string, started:string, stem:string, "
      "version:string}[]"},
@@ -410,11 +426,15 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "breaks on purpose) or occ_fault (a null write inside an "
      "OpenCASCADE signal scope, on this thread and on a new one: answers "
      "{this_thread, worker_thread}, each the failure it became, where a "
-     "crash would mean the scope did not catch it). Refused unless the app "
+     "crash would mean the scope did not catch it), or device_lost (marks "
+     "the graphics device lost as the frame loop does on "
+     "VK_ERROR_DEVICE_LOST: the work is autosaved, a report written, and "
+     "every method that draws refused as device_lost; answers {lost, "
+     "lost_reason}). Refused unless the app "
      "was started with LOBOLE_ALLOW_DEBUG_CRASH=1 in its environment.",
      "kind:'out_of_range'|'json_out_of_range'|'bad_optional_access'|"
      "'standard_failure'|'refusal'|'type_error'|'edit_then_out_of_range'|"
-     "'nonfinite'|'write_then_refuse'|'occ_fault'"},
+     "'nonfinite'|'write_then_refuse'|'occ_fault'|'device_lost'"},
     {"background_jobs",
      "Every long operation running off the frame, as {jobs: [{id, kind, label, "
      "fraction, cancellable, elapsed_seconds}]}. `fraction` is -1 when the "
@@ -496,22 +516,27 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "the roll, so it is refused within 1 degree of the view direction "
      "(eye to target), where it would fix none.",
      "direction, distance, eye, target, up"},
-    {"orient_to_face", "Look straight at the selected face.", ""},
+    {"orient_to_face",
+     "Look straight at the selected face. Refused as device_lost once the "
+     "graphics device is lost.",
+     "", remote::NeedsRenderer},
     {"select_face",
      "Select a face by {mesh, face} or stable {element}/{feature_id, "
-     "element}; returns normal/center.",
-     "element, face, mesh", remote::NeedsPart},
+     "element}; returns normal/center. Refused as device_lost once the "
+     "graphics device is lost.",
+     "element, face, mesh", remote::NeedsPart | remote::NeedsRenderer},
     {"screenshot",
      "Write the rendered viewport to {path} (needs a renderer "
-     "— not available under --headless).",
-     "fit, path, view", remote::NotInBatch},
+     "— not available under --headless; refused with diagnostic code "
+     "device_lost once the graphics device is lost).",
+     "fit, path, view", remote::NotInBatch | remote::NeedsRenderer},
     {"render_sheet",
      "One PNG: tiled named views (default iso/front/right/top, up to 6 via "
      "{views}) with a numeric footer — bbox, mass, volume, and on an "
      "assembly the contact_report summary. {focus: occurrence name|id} "
      "frames that one occurrence large in every view (close-ups without "
      "camera math). Needs a renderer.",
-     "focus, path, views", remote::NotInBatch},
+     "focus, path, views", remote::NotInBatch | remote::NeedsRenderer},
     {"render_still",
      "Path-traced still to {path} (ray tracing; needs GPU support). Defaults "
      "to 1920x1080 at 512 samples, the same as the GUI's Render dialog. "
@@ -534,11 +559,16 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "PIXELS of the output image, 0.25-4, default the viewport's (1) -- "
      "drawn k times wider at k times the size, so lines stay as dark as on "
      "screen at any supersample. The path tracer's samples/seed/ground/"
-     "backdrop are refused in quick mode.",
+     "backdrop are refused in quick mode. The path tracer needs a GPU with "
+     "ray tracing: on a software device (ping's renderer.software) or in "
+     "safe mode it answers ok: false with the reason, and mode: quick still "
+     "works; once the graphics device is lost both are refused as "
+     "device_lost.",
      "backdrop, fit, ground, height, line_weight, mode, outlines, path, "
      "samples, seed, sun_azimuth_deg, sun_elevation_deg, supersample, width",
-     remote::NotInBatch},
-    {"rt_build", "Build ray-tracing acceleration structures.", ""},
+     remote::NotInBatch | remote::NeedsRenderer},
+    {"rt_build", "Build ray-tracing acceleration structures.", "",
+     remote::NeedsRenderer},
     {"set_render_options", "Toggle shadows/SSAO/quality options.",
      "shadow_map, shadows, ssao"},
     {"frame_stats",
@@ -556,7 +586,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "frames back to back (saving nothing) and reports THOSE — which is how "
      "to measure a pass, since the encode between saved captures leaves the "
      "GPU idle enough to drop its clocks.",
-     "hud, renders, reset, window"},
+     "hud, renders, reset, window", remote::NeedsRenderer},
     {"get_settings", "Read the user preferences (docs/ui/settings.md).", "",
      remote::NoFlags,
      "autosave_interval:number, devices:string[], "
@@ -566,7 +596,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "ssao:string, terminal_panel:bool, ui_font_scale:number, "
      "window:{h:int, maximized:bool, w:int, x:int, y:int}, "
      "zoom_to_cursor:bool"},
-    {"set_settings", "Change user preferences {key: value, ...}; persists.",
+    {"set_settings",
+     "Change user preferences {key: value, ...}; persists (in safe mode, "
+     "for the session only: settings.json is not written).",
      "*", remote::NotInBatch},
     {"get_keymap",
      "The keyboard bindings (docs/ui/keybindings.md): every command with "
@@ -878,6 +910,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
   // "switch to a part tab" and sends the caller hunting a tab problem that
   // does not exist. Whether a method needs a part is only a sensible thing
   // to say about a method that exists.
+  // A lost device refuses what would draw, by its code, before anything runs
+  // — inside a batch too (docs/rendering/README.md#a-lost-device).
+  if (state.renderer.lost && (MethodFlags(m) & remote::NeedsRenderer))
+    throw remote::ContractError(
+        remote::DeviceLostMessage(m, state.renderer.lostReason),
+        remote::DeviceLostDiagnostic(m, state.renderer.lostReason));
+
   if (!doc && (MethodFlags(m) & remote::NeedsPart)) {
     // Named, every kind: the fall-through used to read "the active document
     // is not a part, not a part" on a CAM job's tab.
@@ -1386,6 +1425,22 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // report. It is also what lets a pixel baseline be keyed to the
             // device that produced it (tests/render_pixel_smoke.py).
             {"gpu", state.gpuName},
+            // How start-up got to that device, and whether it still draws
+            // (docs/rendering/README.md#the-device-ladder): a fallback, a
+            // software device, a renderer missing, a lost device are each
+            // the first thing to know about a picture that looks wrong.
+            {"renderer",
+             {{"device", state.renderer.device},
+              {"type", state.renderer.type},
+              {"software", state.renderer.software},
+              {"fallback", state.renderer.fallback},
+              {"reason", state.renderer.reason},
+              {"forced", state.renderer.forced},
+              {"ray_tracing", state.renderer.rayTracing},
+              {"missing", state.renderer.missing},
+              {"lost", state.renderer.lost},
+              {"lost_reason", state.renderer.lostReason}}},
+            {"safe_mode", state.safeMode.active},
             // Which OpenCASCADE answers, for the same reason: the kernel
             // behind a wrong Boolean is the first question about it, and a
             // distro build links whatever that distro ships (Ubuntu 24.04:
@@ -1457,8 +1512,23 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                          {"os", r.os},
                          {"project", r.project},
                          {"autosaves", r.autosaves}});
+    // The last start that found no renderer is not a crash and has no
+    // folder: it said why in this file (app/StartupReport.h).
+    json startupFailure = nullptr;
+    {
+      const std::filesystem::path f = stateDir / "last-startup-failure.txt";
+      std::error_code ec;
+      if (std::filesystem::exists(f, ec)) {
+        std::ifstream in(f, std::ios::binary);
+        startupFailure = {
+            {"path", f.string()},
+            {"text", std::string((std::istreambuf_iterator<char>(in)),
+                                 std::istreambuf_iterator<char>())}};
+      }
+    }
     return json{{"folder", crash::ReportsDir(stateDir).string()},
-                {"reports", reports}};
+                {"reports", reports},
+                {"last_startup_failure", startupFailure}};
   }
   if (m == "debug_crash") {
     const std::string kind = p.at("kind").get<std::string>();
@@ -1518,6 +1588,21 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     }
     if (kind == "occ_fault")
       return remote::FaultInOccScope();
+    if (kind == "device_lost") {
+      // Marks the device lost as the frame loop does on
+      // VK_ERROR_DEVICE_LOST; the loop that sees it next saves the work,
+      // writes the report and asks to restart
+      // (docs/rendering/README.md#a-lost-device).
+      if (state.renderer.device.empty())
+        throw std::runtime_error("debug_fault device_lost needs a renderer: "
+                                 "this instance is --headless");
+      if (!state.renderer.lost) {
+        state.renderer.lost = true;
+        state.renderer.lostReason =
+            "VK_ERROR_DEVICE_LOST from debug_fault, on purpose";
+      }
+      return {{"lost", true}, {"lost_reason", state.renderer.lostReason}};
+    }
     if (kind == "nonfinite")
       return {{"nan", std::numeric_limits<double>::quiet_NaN()},
               {"values", {1.0, std::numeric_limits<double>::infinity()}}};

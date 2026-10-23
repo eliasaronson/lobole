@@ -197,19 +197,34 @@ VkCommandBuffer BeginSingleTimeCommands(VkDevice device, VkCommandPool pool) {
   return cb;
 }
 
-void EndSingleTimeCommands(VkDevice device, VkCommandPool pool, VkQueue queue,
-                           VkCommandBuffer cb) {
+namespace {
+std::atomic<bool> g_deviceLost{false};
+} // namespace
+
+VkResult NoteResult(VkResult result) {
+  if (result == VK_ERROR_DEVICE_LOST && !g_deviceLost.exchange(true))
+    LOG_ERROR("Vulkan: VK_ERROR_DEVICE_LOST in a one-shot submit");
+  return result;
+}
+
+bool DeviceLostSeen() { return g_deviceLost.load(); }
+
+VkResult EndSingleTimeCommands(VkDevice device, VkCommandPool pool,
+                               VkQueue queue, VkCommandBuffer cb) {
   if (cb == VK_NULL_HANDLE)
-    return;
+    return VK_ERROR_INITIALIZATION_FAILED;
   vkEndCommandBuffer(cb);
 
   VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   submit.commandBufferCount = 1;
   submit.pCommandBuffers = &cb;
-  vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE);
-  vkQueueWaitIdle(queue);
+  VkResult result =
+      NoteResult(vkQueueSubmit(queue, 1, &submit, VK_NULL_HANDLE));
+  if (result == VK_SUCCESS)
+    result = NoteResult(vkQueueWaitIdle(queue));
 
   vkFreeCommandBuffers(device, pool, 1, &cb);
+  return result;
 }
 
 bool CopyBuffer(VkDevice device, VkCommandPool pool, VkQueue queue,
@@ -220,8 +235,7 @@ bool CopyBuffer(VkDevice device, VkCommandPool pool, VkQueue queue,
   VkBufferCopy region{};
   region.size = size;
   vkCmdCopyBuffer(cb, src, dst, 1, &region);
-  EndSingleTimeCommands(device, pool, queue, cb);
-  return true;
+  return EndSingleTimeCommands(device, pool, queue, cb) == VK_SUCCESS;
 }
 
 StagingBatch::StagingBatch(VkDevice device, VkPhysicalDevice physicalDevice,
@@ -289,12 +303,13 @@ bool StagingBatch::Flush() {
     return ok;
   }
   // ONE submit + ONE wait for everything recorded since construction.
-  EndSingleTimeCommands(m_device, m_pool, m_queue, m_cb);
+  const VkResult result =
+      EndSingleTimeCommands(m_device, m_pool, m_queue, m_cb);
   m_cb = VK_NULL_HANDLE;
   for (Staged& s : m_staging)
     DestroyBuffer(m_device, s.buffer, s.memory);
   m_staging.clear();
-  const bool ok = !m_failed;
+  const bool ok = !m_failed && result == VK_SUCCESS;
   m_failed = false;
   return ok;
 }

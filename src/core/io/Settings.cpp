@@ -12,6 +12,7 @@
 #include <array>
 #include <cmath>
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -337,7 +338,38 @@ std::string ConfigPath() {
   return (fs::path(ConfigDir()) / "settings.json").string();
 }
 
-Settings Load() {
+fs::path SetAside(const fs::path& file, std::error_code& ec) {
+  ec.clear();
+  if (!fs::exists(file, ec)) {
+    if (!ec)
+      ec = std::make_error_code(std::errc::no_such_file_or_directory);
+    return {};
+  }
+  const std::time_t now = std::time(nullptr);
+  std::tm tm{};
+#if defined(_WIN32)
+  localtime_s(&tm, &now);
+#else
+  localtime_r(&now, &tm);
+#endif
+  char stamp[32];
+  std::strftime(stamp, sizeof stamp, "%Y%m%d-%H%M%S", &tm);
+  const std::string base = file.string() + ".bad-" + stamp;
+  fs::path to = base;
+  for (int n = 2; fs::exists(to, ec); ++n)
+    to = base + "-" + std::to_string(n);
+  fs::rename(file, to, ec);
+  return ec ? fs::path() : to;
+}
+
+namespace {
+bool g_sessionOnly = false;
+} // namespace
+
+void SetSessionOnly(bool sessionOnly) { g_sessionOnly = sessionOnly; }
+bool SessionOnly() { return g_sessionOnly; }
+
+Settings Load(std::string* note) {
   Settings s;
   const fs::path path(ConfigPath());
   std::error_code ec;
@@ -347,11 +379,20 @@ Settings Load() {
   const std::optional<json> parsed = ReadFile(path);
   if (!parsed) {
     // Never overwrite it: the one copy of a hand-edited config is not ours to
-    // destroy, and a user who typo'd a brace deserves to get it back.
-    const fs::path bak = path.string() + ".bak";
-    fs::rename(path, bak, ec);
+    // destroy, and a user who typo'd a brace deserves to get it back. Never
+    // over an earlier one either: two bad starts used to leave only the
+    // second's ".bak".
+    const fs::path kept = SetAside(path, ec);
     LOG_WARN("Settings file unreadable; using defaults and keeping it at {}",
-             bak.string());
+             kept.empty() ? path.string() : kept.string());
+    if (note)
+      *note = kept.empty()
+                  ? "Your settings file " + path.string() +
+                        " could not be read, so this session runs on the "
+                        "defaults."
+                  : "Your settings file could not be read, so Loböle "
+                    "started with the defaults. It was kept as " +
+                        kept.string() + ".";
     return s;
   }
   for (auto it = parsed->begin(); it != parsed->end(); ++it) {
@@ -433,6 +474,8 @@ bool ApplyJson(Settings& s, const nlohmann::json& j, std::string* error) {
 }
 
 bool Save(const Settings& current, const Settings& before, std::string* error) {
+  if (g_sessionOnly)
+    return true; // safe mode: this session's preferences stay in memory
   std::error_code ec;
   fs::create_directories(ConfigDir(), ec);
   const fs::path path(ConfigPath());

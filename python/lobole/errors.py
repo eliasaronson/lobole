@@ -97,6 +97,14 @@ class InternalError(Refused):
     CODE = "internal"
 
 
+class DeviceLost(Refused):
+    """The app's graphics device was lost, so a method that draws (a
+    screenshot, a still, a face picked by mesh, a UI action) is refused.
+    The document is intact and every other method still answers; the app
+    asks its user to restart (docs/rendering/README.md#a-lost-device)."""
+    CODE = "device_lost"
+
+
 class NonFiniteError(LoboleError):
     """The answer held NaN or infinity, which JSON writes as null: the server
     listed where under `nonfinite`
@@ -119,7 +127,8 @@ class SdkError(LoboleError):
 _BY_CODE: dict[str, type[Refused]] = {
     cls.CODE: cls for cls in (
         MissingArgument, UnknownArgument, InvalidArgument, StaleRevision,
-        StaleSnapshot, BudgetExceeded, InternalError) if cls.CODE}
+        StaleSnapshot, BudgetExceeded, InternalError, DeviceLost)
+    if cls.CODE}
 
 
 def refusal(message: str, diagnostic: dict | None = None) -> Refused:

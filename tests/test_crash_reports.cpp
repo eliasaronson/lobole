@@ -13,11 +13,13 @@
 #include "core/io/CrashReports.h"
 
 #include <chrono>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -199,4 +201,72 @@ TEST_CASE("A session's own marker is held for its life and gone after",
   crash::EndSession();
   CHECK_FALSE(fs::exists(session->marker));
   CHECK(crash::CollectDeadSessions(s.dir).empty());
+}
+
+// Safe mode's trigger (docs/ui/settings.md#safe-mode): windowed sessions in a
+// row, newest first, that died before their first frame.
+TEST_CASE("Early deaths in a row count windowed sessions without a frame",
+          "[crash]") {
+  const auto report = [](const char* mode, int64_t started, bool firstFrame,
+                         const char* reason = "crashed") {
+    crash::Report r;
+    r.mode = mode;
+    r.startedMs = started;
+    r.firstFrame = firstFrame;
+    r.reason = reason;
+    return r;
+  };
+  // Two windowed deaths before a frame: safe mode's two.
+  CHECK(crash::EarlyDeathsInARow(
+            {report("windowed", 30, false), report("windowed", 20, false)},
+            0) == 2);
+  // A session that drew ends the run, however it ended.
+  CHECK(crash::EarlyDeathsInARow({report("windowed", 30, false),
+                                  report("windowed", 20, true),
+                                  report("windowed", 10, false)},
+                                 0) == 1);
+  // Other modes neither count nor break it.
+  CHECK(crash::EarlyDeathsInARow({report("windowed", 30, false),
+                                  report("headless", 25, false),
+                                  report("windowed", 20, false)},
+                                 0) == 2);
+  // A good start since (last-good-start) breaks it: a clean session leaves
+  // no report to stop at.
+  CHECK(crash::EarlyDeathsInARow(
+            {report("windowed", 30, false), report("windowed", 10, false)},
+            20) == 1);
+  // A lost device is a report a drawing session wrote, not an early death.
+  CHECK(crash::EarlyDeathsInARow(
+            {report("windowed", 30, false),
+             report("windowed", 20, false, "graphics device lost: x")},
+            0) == 1);
+  CHECK(crash::EarlyDeathsInARow({}, 0) == 0);
+}
+
+TEST_CASE("first_frame and the start time survive collection", "[crash]") {
+  ScratchDir s("lobole-crash-first-frame");
+  PlantMarker(s.dir, "20260101-000000-1",
+              {{"mode", "windowed"}, {"started_ms", 100000}});
+  PlantMarker(
+      s.dir, "20260101-000001-2",
+      {{"mode", "windowed"}, {"started_ms", 100500}, {"first_frame", true}});
+  const std::vector<crash::Report> reports = crash::CollectDeadSessions(s.dir);
+  REQUIRE(reports.size() == 2);
+  const std::vector<crash::Report> listed = crash::ListReports(s.dir);
+  REQUIRE(listed.size() == 2);
+  CHECK(listed[0].firstFrame);       // newest: drew
+  CHECK_FALSE(listed[1].firstFrame); // oldest: died early
+  CHECK(listed[1].startedMs == 100000);
+  // The newest drew, so the run is empty.
+  CHECK(crash::EarlyDeathsInARow(s.dir) == 0);
+
+  // last-good-start is a start in milliseconds; a run older than it does
+  // not count.
+  PlantMarker(s.dir, "20260101-000002-3",
+              {{"mode", "windowed"}, {"started_ms", 100900}});
+  crash::CollectDeadSessions(s.dir);
+  CHECK(crash::EarlyDeathsInARow(s.dir) == 1);
+  // Within the same second, still ordered: milliseconds.
+  Write(crash::LastGoodStartFile(s.dir), "100901\n");
+  CHECK(crash::EarlyDeathsInARow(s.dir) == 0);
 }

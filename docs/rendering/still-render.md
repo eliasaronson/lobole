@@ -4,8 +4,11 @@
 picture of the model at a chosen size, in one of two modes:
 
 - **path** (the default) — a path-traced still: soft shadows, AO, real
-  materials, environment reflections, refraction through glass. Needs a GPU
-  with the ray-tracing extensions.
+  materials, environment reflections, refraction through glass. Needs a
+  hardware GPU with the ray-tracing extensions: on a software device
+  (lavapipe), in safe mode, or without the extensions it answers `ok: false`
+  with the reason (`ui::PathTracerRefusal`,
+  [the device ladder](README.md#the-device-ladder)).
 - **quick** — the model as the viewport draws it (materials, the three
   lights, shadow map, SSAO, outlines), at the requested size, in about a
   second. Needs a renderer, not ray tracing.
@@ -89,7 +92,7 @@ and a Line weight slider (0.25-4 px of the still, starting at the viewport's
 width, disabled with Outlines off), path a sample slider (16-1024, default
 512) and the ground and backdrop choices. The dialog keeps its choices for
 the session. On a device without ray tracing it opens anyway, with "Path
-traced" disabled and quick forced.
+traced" disabled, its tooltip saying why, and quick forced.
 
 - **Path** runs as `AppState::renderJob`, pumped one batch (up to 32
   samples) per frame by `PumpRenderJob` from `ui::PollBackgroundJobs`, so the
