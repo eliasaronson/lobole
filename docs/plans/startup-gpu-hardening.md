@@ -91,8 +91,12 @@ always does it where nobody can see why.
    is not a fallback: the status bar states it, no modal. The ladder never
    drops to `--offscreen` or headless by itself; the report offers them.
    `LOBOLE_RENDERER=software|hardware` forces a rung; any other value is
-   refused at start, naming those two. Windows has no software Vulkan on a
-   stock system, so its ladder ends at the message box.
+   refused at start, naming those two. The software rung is the host's own
+   Mesa (the same lavapipe the CI GUI suite runs on); nothing is bundled, so
+   a machine without it, and every stock Windows system, ends at the message
+   box. A software device has no ray-tracing pipeline: the path-traced still
+   is unavailable there, and `render_still` and its menu entry say so rather
+   than rendering something else.
 4. **A renderer that fails to initialise is named.** Each failed
    `Initialize` appends to `g_App` a missing-renderer list shown in the same
    status entry and in `ping`; the mesh renderer failing is a
@@ -132,8 +136,9 @@ always does it where nobody can see why.
    native message box: what happened, that the work is saved for recovery,
    Restart or Quit. Restart re-executes the binary with its arguments plus
    `--after-device-loss`, so the new start offers the autosaves through the
-   existing recovery modal and says why it restarted. A second loss within
-   ten minutes restarts on the software rung, announced as in 3.
+   existing recovery modal and says why it restarted. The device is not
+   rebuilt in place: a restart is the one recovery path, and it is the start
+   path every launch already exercises.
    `VK_ERROR_SURFACE_LOST_KHR` recreates the surface and swapchain; a
    swapchain recreate that fails is logged and retried next frame instead of
    aborting. `--offscreen` has no window to restart: it keeps serving, its
