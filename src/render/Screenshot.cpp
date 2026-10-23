@@ -58,7 +58,8 @@ bool CaptureScreenshot(
     vkDestroyImage(device, image, nullptr);
     return fail("image memory allocation");
   }
-  vkBindImageMemory(device, image, imageMemory, 0);
+  // AllocateImageMemory binds it: a second bind is VUID-vkBindImageMemory-
+  // image-07460, which validation reported on every capture.
 
   VkImageViewCreateInfo viewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
   viewInfo.image = image;

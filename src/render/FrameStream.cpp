@@ -29,8 +29,7 @@ bool MakeImage(const FrameStream::Config& c, VkFormat format,
     return false;
   if (!vkutil::AllocateImageMemory(c.device, c.physicalDevice, image,
                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mem))
-    return false;
-  vkBindImageMemory(c.device, image, mem, 0);
+    return false; // bound by AllocateImageMemory, once
   VkImageViewCreateInfo v{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
   v.image = image;
   v.viewType = VK_IMAGE_VIEW_TYPE_2D;
