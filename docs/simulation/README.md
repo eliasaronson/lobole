@@ -410,6 +410,10 @@ shared with topology optimization), namespace `fem`, GUI-free. Gated
       ([../topopt/README.md](../topopt/README.md#the-gpu-solver)), from a
       cold start, through `TopoLinearSolver::SetupDomains` (each tet its
       domain's material) and `SolveStrict` (to 1e-7, or not an answer).
+    - A GPU that is lost mid-solve (`VK_ERROR_DEVICE_LOST`) fails the
+      run, "the GPU was lost during the solve; run it again", rather than
+      starting over on the CPU
+      ([../topopt/README.md](../topopt/README.md#the-gpu-solver)).
     - Otherwise, or when the GPU declines or falls short, on the CPU:
       preconditioned conjugate gradients with an incomplete-Cholesky
       preconditioner, to 1e-8, written out so it can be cancelled and so a

@@ -1111,6 +1111,56 @@ TEST_CASE("femgpu: TopologyOptimize lands on the CPU design via the GPU solver",
   CheckSameRun(*cpuRes, *gpuRes);
 }
 
+// A compute device lost mid-run (VK_ERROR_DEVICE_LOST) is not one that cannot
+// do the problem: the run fails, naming the loss and the iteration, instead
+// of finishing on the CPU path -- which can be hours
+// (docs/topopt/README.md#the-gpu-solver). The next run makes a new device, as
+// every run does, and completes.
+TEST_CASE("femgpu: a lost compute device fails the run, and the next one "
+          "completes",
+          "[femgpu][cg]") {
+  std::string gerr;
+  auto solver = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
+  if (!solver)
+    SKIP("no usable compute device: " << gerr);
+  INFO("device: " << solver->DeviceName());
+
+  fem::FemMesh mesh = GenerateBoxMesh(10, 4, 4, 100, 40, 40);
+  fem::Material steel{210000.0, 0.3};
+  const std::vector<int> fixed = NodesAtPlane(mesh, 0, 0.0, 1e-6);
+  fem::FaceLoad load;
+  load.type = fem::LoadType::Force;
+  load.tris = TrisAtPlane(mesh, 0, 100.0, 1e-6);
+  load.magnitude = 1000.0;
+  load.direction = glm::dvec3(0, 0, -1);
+  fem::TopoParams params;
+  params.filterRadius = 25.0;
+  params.maxIterations = 4;
+  params.connectivityFilter = false;
+
+  // Past Setup and the first solves: the loss lands inside the iterations.
+  solver->InjectDeviceLossForTest(/*after=*/40);
+  std::string err;
+  auto lost = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
+                                    {}, {}, solver.get());
+  INFO(err);
+  CHECK_FALSE(lost.has_value());
+  CHECK(err.find("the GPU was lost at iteration") != std::string::npos);
+  CHECK(err.find("run it again") != std::string::npos);
+  CHECK(solver->DeviceLost());
+
+  // A new run, a new device: it completes.
+  auto again = gpu::TopoGpuSolver::Create(/*allowSoftware=*/true, &gerr);
+  REQUIRE(again);
+  err.clear();
+  auto done = fem::TopologyOptimize(mesh, steel, fixed, {load}, params, &err,
+                                    {}, {}, again.get());
+  INFO(err);
+  REQUIRE(done.has_value());
+  CHECK(done->iterations >= 1);
+  CHECK(done->solverFallback.empty()); // the GPU finished it
+}
+
 // Several load cases (docs/topopt/README.md#load-cases): the GPU solver is
 // handed each case in turn on the same scales, so it must answer every case
 // as the CPU does -- the design and each case's own compliance.

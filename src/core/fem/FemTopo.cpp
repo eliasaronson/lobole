@@ -1055,6 +1055,15 @@ TopologyOptimize(const FemMesh& mesh, const Material& material,
           if (!u.allFinite())
             serr = "solver returned a non-finite displacement";
         }
+        if (!serr.empty() && solver->DeviceLost())
+          return fail("the GPU was lost at iteration " +
+                      std::to_string(iter + 1) + " (" + serr +
+                      "); run it again");
+        if (serr == "cancelled") { // a device wait abandoned
+          result.cancelled = true;
+          finish(result);
+          return result;
+        }
         if (!serr.empty()) {
           // The built-in path is the oracle and the documented fallback, so
           // a failed external solve DROPS the solver and finishes on the CPU

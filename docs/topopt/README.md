@@ -441,6 +441,22 @@ finishes the run on the CPU (`TopoResult::solverFallback`; `study_status`
 says so from that iteration). A zero displacement field would read
 downstream as a converged design. A dropped solver is not retried.
 
+A **lost compute device** is different: the CPU path is the fallback for a
+device that cannot do the problem, and taking it for one that went away
+(`VK_ERROR_DEVICE_LOST`, a driver reset) can cost hours. `ComputeContext`
+marks itself lost on that result (`TopoLinearSolver::DeviceLost`), and the
+run ends as failed, "the GPU was lost at iteration N (...); run it again";
+a static study's solve the same way ("the GPU was lost during the solve").
+The next run creates a new context, as every run does. This context is its
+own `VkDevice` on the same GPU, apart from the renderer's: it neither
+triggers nor waits for a [render device
+rebuild](../rendering/README.md#rebuilding-the-device). Every fence wait is
+cut into 0.1 s slices that poll the run's cancel (`SetCancel`; a static
+solve's comes in its control), so a driver that misses the spec's
+finite-time guarantee on a lost device still lets the run be cancelled.
+`femgpu: a lost compute device fails the run, and the next one completes`
+injects the loss (`InjectDeviceLossForTest`) inside the iterations.
+
 Measured on an RTX 4060 Laptop against the CPU path (Eigen CG-IC) and an
 exact fp64 factorization (`femgpu_tests [refinebench]`, a few SIMP
 iterations each; the GPU and CPU runs land on the same design, 0 flips):

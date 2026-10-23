@@ -16,6 +16,7 @@
 #include <vulkan/vulkan.h>
 
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -113,11 +114,29 @@ public:
   // Submits the recorded commands and waits for completion.
   bool SubmitBatch(std::string* error);
 
+  // A submit or a wait answered VK_ERROR_DEVICE_LOST: every later call
+  // fails, and the solver ends its run naming the loss
+  // (fem::TopoLinearSolver::DeviceLost). This context's own device, apart
+  // from the renderer's: it never triggers or waits for the render rebuild.
+  bool Lost() const { return m_lost; }
+  // Polled between the 0.1 s slices every fence wait is cut into: true
+  // abandons the wait ("cancelled"), so a driver that misses the spec's
+  // finite-time guarantee on a lost device still lets the run be cancelled.
+  void SetCancel(std::function<bool()> cancelled) {
+    m_cancel = std::move(cancelled);
+  }
+  // Tests: the submit `after` submits from now is answered as
+  // VK_ERROR_DEVICE_LOST (0 = the next one).
+  void InjectLossForTest(int after = 0) { m_lossCountdown = after + 1; }
+
 private:
   // Every batched command is preceded by a full compute/transfer memory
   // barrier — each CG kernel depends on its predecessor, so precision-scoped
   // barriers would buy nothing.
   void BatchBarrier();
+  // Submit `m_cmd` and wait on the fence in slices; false + *error on a
+  // failure, a loss (which sets m_lost) or a cancel.
+  bool SubmitAndWait(std::string* error);
   ComputeContext() = default;
 
   VkInstance m_instance = VK_NULL_HANDLE;
@@ -132,6 +151,10 @@ private:
   bool m_software = false;
   bool m_batchOpen = false;
   bool m_batchFirst = false; // no barrier before the batch's first command
+  bool m_lost = false;
+  bool m_abandoned = false; // a wait was cancelled: nothing more is submitted
+  int m_lossCountdown = 0;  // InjectLossForTest; 0 = none armed
+  std::function<bool()> m_cancel;
 };
 
 } // namespace gpu

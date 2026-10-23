@@ -120,6 +120,17 @@ public:
   virtual bool Solve(const std::vector<double>& scale,
                      const std::vector<double>& F, std::vector<double>& u,
                      std::string* error) = 0;
+  // The device it runs on was lost (VK_ERROR_DEVICE_LOST) in the call that
+  // just failed. The run then fails, naming it -- the CPU path is the
+  // fallback for a device that cannot do the problem, which can be hours,
+  // not for one that went away (docs/topopt/README.md#the-gpu-solver). The
+  // next run makes a new device, as every run does.
+  virtual bool DeviceLost() const { return false; }
+  // Polled while the solver waits on its device (in slices, never
+  // indefinitely): true abandons the wait, and the call fails "cancelled".
+  // A topology run's cancel; a strict solve's comes in its control.
+  virtual void SetCancel(std::function<bool()> cancelled) { (void)cancelled; }
+
   // Optional capability (GPU4): per-element strain energies at FULL modulus,
   // se_e = ue^T Ke0_e ue, for the reduced displacement `u` (size nFree,
   // fixed DOFs implicitly zero). Returning false (the default) makes the
@@ -186,7 +197,8 @@ struct TopoCase {
 // `solver`, if set, replaces the built-in Eigen CG-IC for the per-iteration
 // linear solves (see TopoLinearSolver above). A failed Setup fails the run;
 // a failed Solve drops the solver and finishes on the built-in CPU path,
-// recording why in TopoResult::solverFallback.
+// recording why in TopoResult::solverFallback -- except on a solver whose
+// device was lost (DeviceLost()), which fails the run naming the iteration.
 std::optional<TopoResult> TopologyOptimize(
     const FemMesh& mesh, const Material& material,
     const std::vector<int>& fixedNodes, const std::vector<FaceLoad>& loads,

@@ -371,16 +371,44 @@ bool ComputeContext::Dispatch(const Pipeline& p,
   vkCmdDispatch(m_cmd, gx, gy, 1);
   vkEndCommandBuffer(m_cmd);
 
+  const bool ok = SubmitAndWait(error);
+  vkDestroyDescriptorPool(m_device, pool, nullptr);
+  return ok;
+}
+
+bool ComputeContext::SubmitAndWait(std::string* error) {
+  if (m_lost)
+    return SetError(error, "the GPU was lost (VK_ERROR_DEVICE_LOST)");
+  if (m_abandoned)
+    return SetError(error, "cancelled");
   VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
   si.commandBufferCount = 1;
   si.pCommandBuffers = &m_cmd;
-  bool ok = vkQueueSubmit(m_queue, 1, &si, m_fence) == VK_SUCCESS;
-  if (ok)
-    ok = vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, UINT64_MAX) ==
-         VK_SUCCESS;
+  const bool injected = m_lossCountdown > 0 && --m_lossCountdown == 0;
+  VkResult r =
+      injected ? VK_ERROR_DEVICE_LOST : vkQueueSubmit(m_queue, 1, &si, m_fence);
+  // In 0.1 s slices, never UINT64_MAX: a cancel is seen between them.
+  constexpr uint64_t kSliceNs = 100'000'000;
+  bool cancelled = false;
+  if (r == VK_SUCCESS) {
+    do {
+      r = vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, kSliceNs);
+      if (r == VK_TIMEOUT && m_cancel && m_cancel())
+        cancelled = true;
+    } while (r == VK_TIMEOUT && !cancelled);
+  }
+  if (r == VK_ERROR_DEVICE_LOST) {
+    m_lost = true;
+    return SetError(error, "the GPU was lost (VK_ERROR_DEVICE_LOST)");
+  }
+  if (cancelled) {
+    // The submission may still be running: the fence is left as it is, and
+    // the context is not used again (a cancelled run ends).
+    m_abandoned = true;
+    return SetError(error, "cancelled");
+  }
   vkResetFences(m_device, 1, &m_fence);
-  vkDestroyDescriptorPool(m_device, pool, nullptr);
-  if (!ok)
+  if (r != VK_SUCCESS)
     return SetError(error, "compute submit/wait failed");
   return true;
 }
@@ -482,17 +510,7 @@ bool ComputeContext::SubmitBatch(std::string* error) {
     return SetError(error, "no batch is recording");
   m_batchOpen = false;
   vkEndCommandBuffer(m_cmd);
-  VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
-  si.commandBufferCount = 1;
-  si.pCommandBuffers = &m_cmd;
-  bool ok = vkQueueSubmit(m_queue, 1, &si, m_fence) == VK_SUCCESS;
-  if (ok)
-    ok = vkWaitForFences(m_device, 1, &m_fence, VK_TRUE, UINT64_MAX) ==
-         VK_SUCCESS;
-  vkResetFences(m_device, 1, &m_fence);
-  if (!ok)
-    return SetError(error, "batch submit/wait failed");
-  return true;
+  return SubmitAndWait(error);
 }
 
 } // namespace gpu

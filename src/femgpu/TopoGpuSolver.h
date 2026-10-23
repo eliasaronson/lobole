@@ -27,8 +27,8 @@ public:
   // admits llvmpipe-style software devices (tests); the app leaves it false —
   // a software "GPU" loses to the CPU Eigen path.
   // `preferredDevice` is the user's GPU preference (settings.gpu_device),
-  // honoured through the same rule the renderer uses. Unlike the viewport,
-  // this context is built per run, so a change takes effect immediately.
+  // honoured through the same rule the renderer uses. This context is
+  // built per run, so a change applies on the next run.
   static std::unique_ptr<TopoGpuSolver>
   Create(bool allowSoftware, std::string* error,
          const std::string& preferredDevice = "");
@@ -55,6 +55,11 @@ public:
   bool SolveStrict(const std::vector<double>& F, std::vector<double>& u,
                    fem::LinearSolveControl& control,
                    std::string* error) override;
+  bool DeviceLost() const override;
+  void SetCancel(std::function<bool()> cancelled) override;
+  // Tests: the submit `after` submits from now on this solver's device
+  // answers VK_ERROR_DEVICE_LOST (ComputeContext::InjectLossForTest).
+  void InjectDeviceLossForTest(int after = 0);
 
 private:
   TopoGpuSolver();

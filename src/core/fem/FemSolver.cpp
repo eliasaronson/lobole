@@ -359,6 +359,11 @@ SolveCases(const FemMesh& mesh, const std::vector<Material>& byDomain,
         report->iterations += control.iterations;
       if (options.cancelled && options.cancelled())
         return fail("cancelled");
+      // A device that went away is not one that cannot do the problem: the
+      // solve fails, naming it, rather than starting over on the CPU.
+      if (!ok && external->DeviceLost())
+        return fail("the GPU was lost during the solve (" + why +
+                    "); run it again");
       if (ok && static_cast<int>(uv.size()) == nFree) {
         u = Eigen::Map<const Eigen::VectorXd>(uv.data(), nFree);
       } else {

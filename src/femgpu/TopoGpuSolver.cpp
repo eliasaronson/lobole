@@ -296,9 +296,22 @@ bool TopoGpuSolver::SolveStrict(const std::vector<double>& F,
                                 std::vector<double>& u,
                                 fem::LinearSolveControl& control,
                                 std::string* error) {
-  // Full modulus everywhere: a static study's K.
+  // Full modulus everywhere: a static study's K. The control's cancel is
+  // the device waits' too.
+  if (control.cancelled)
+    m_impl->ctx->SetCancel(control.cancelled);
   const std::vector<double> ones(m_impl->scaleF.size(), 1.0);
   return Refine(ones, F, u, error, &control);
+}
+
+bool TopoGpuSolver::DeviceLost() const { return m_impl->ctx->Lost(); }
+
+void TopoGpuSolver::SetCancel(std::function<bool()> cancelled) {
+  m_impl->ctx->SetCancel(std::move(cancelled));
+}
+
+void TopoGpuSolver::InjectDeviceLossForTest(int after) {
+  m_impl->ctx->InjectLossForTest(after);
 }
 
 bool TopoGpuSolver::Refine(const std::vector<double>& scale,
