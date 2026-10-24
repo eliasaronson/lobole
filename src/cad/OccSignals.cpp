@@ -219,11 +219,37 @@ void occsig::SetConsoleControlHandler(int(__stdcall* handler)(unsigned long)) {
 }
 #endif
 
+#if !defined(_WIN32)
+namespace {
+// Whether the dispatcher still holds every fault signal. A sigaction is the
+// process's, and anything may put another over it after we armed: Catch2
+// puts its own in front of each test case and restores what it found when
+// the case ends, which dropped the dispatcher for every later case, so an
+// OCC fault inside RunCatchingOccSignals there killed designer_tests.
+bool DispatcherHeld() {
+  for (int sig : kFaults) {
+    struct sigaction now{};
+    sigaction(sig, nullptr, &now);
+    if (!(now.sa_flags & SA_SIGINFO) || now.sa_sigaction != Dispatch)
+      return false;
+  }
+  return true;
+}
+} // namespace
+#endif
+
 void ArmOccSignalHandlers() {
+#if defined(_WIN32)
   thread_local bool armed = false;
   if (armed)
     return;
   armed = true;
+#else
+  // Not once per thread but on every call (four sigaction reads): the
+  // handlers are the process's, and can be replaced under us.
+  if (DispatcherHeld())
+    return;
+#endif
   const std::lock_guard<std::mutex> lock(g_armMutex);
 #if defined(_WIN32)
   // What signal() has for the faults (the default, unless something set
