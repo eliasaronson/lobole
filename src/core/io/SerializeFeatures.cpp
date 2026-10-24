@@ -882,19 +882,27 @@ json DirectFaceToJson(const ElementRef& ref,
   return f;
 }
 
+// The writer writes both halves of the ref, so either missing -- or a key
+// it never writes -- is damage: read as a default, it named some other face
+// and the next save dropped what the file held.
 ElementRef DirectFaceFromJson(const json& f, directedit::Fingerprints& prints) {
-  if (!f.is_object())
-    throw std::runtime_error("a face is {feature_id, element}");
-  ElementRef ref{f.value("feature_id", uint64_t{0}),
-                 f.value("element", std::string{})};
+  readctx::RefuseUnknownKeys(f, {"feature_id", "element", "fingerprint"},
+                             "direct-edit face");
+  const json& element = f.at("element");
+  if (!element.is_string())
+    throw std::runtime_error("a face's element is a name, got " +
+                             element.dump().substr(0, 80));
+  ElementRef ref{IdField(f, "feature_id", true), element.get<std::string>()};
   if (f.contains("fingerprint")) {
     const json& p = f.at("fingerprint");
+    readctx::RefuseUnknownKeys(p, {"surface", "area_mm2", "centroid_mm"},
+                               "face fingerprint");
     directedit::FaceFingerprint print;
     print.surface = p.at("surface").get<std::string>();
     print.areaMm2 = p.at("area_mm2").get<double>();
+    if (!HasArrayOf(p, "centroid_mm", 3))
+      throw std::runtime_error("a face fingerprint has no centroid_mm");
     const json& c = p.at("centroid_mm");
-    if (!c.is_array() || c.size() != 3)
-      throw std::runtime_error("a face fingerprint's centroid_mm is [x, y, z]");
     print.centroid = {c[0].get<double>(), c[1].get<double>(),
                       c[2].get<double>()};
     prints[ref.name] = print;
@@ -3541,13 +3549,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(ho);
   } else if (type == "DeleteFace") { // v192
     auto del = std::make_unique<DeleteFaceFeature>(
-        name, j.at("body_id").get<uint64_t>(), std::vector<ElementRef>{});
+        name, IdField(j, "body_id", true), std::vector<ElementRef>{});
     del->faces =
         DirectFacesFromJson(j.value("faces", json::array()), del->fingerprints);
     out = std::move(del);
   } else if (type == "OffsetFace") { // v192
     auto off = std::make_unique<OffsetFaceFeature>(
-        name, j.at("body_id").get<uint64_t>(), std::vector<ElementRef>{},
+        name, IdField(j, "body_id", true), std::vector<ElementRef>{},
         j.value("distance_mm", 1.0));
     off->faces =
         DirectFacesFromJson(j.value("faces", json::array()), off->fingerprints);
@@ -3562,7 +3570,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       t = {v[0].get<double>(), v[1].get<double>(), v[2].get<double>()};
     }
     auto mv = std::make_unique<MoveFaceFeature>(
-        name, j.at("body_id").get<uint64_t>(), std::vector<ElementRef>{}, t);
+        name, IdField(j, "body_id", true), std::vector<ElementRef>{}, t);
     mv->faces =
         DirectFacesFromJson(j.value("faces", json::array()), mv->fingerprints);
     if (j.contains("translate_mm_expr")) {
@@ -3584,7 +3592,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
                                 ? DirectFaceFromJson(j.at("face"), prints)
                                 : ElementRef{};
     auto rp = std::make_unique<ReplaceFaceFeature>(
-        name, j.at("body_id").get<uint64_t>(), face);
+        name, IdField(j, "body_id", true), face);
     if (j.contains("target")) {
       const json& t = j.at("target");
       if (!t.is_object())
@@ -3592,13 +3600,25 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "ReplaceFace target is {kind: plane|sketch|face, ...}");
       const std::string kind = t.value("kind", std::string{});
       if (kind == "plane") {
+        // One or the other, as the writer writes it: with both, the save
+        // kept the datum and dropped the base plane with no word.
+        readctx::RefuseUnknownKeys(t, {"kind", "datum_id", "base_plane"},
+                                   "ReplaceFace plane target");
+        if (t.contains("datum_id") && t.contains("base_plane"))
+          throw std::runtime_error(
+              "ReplaceFace plane target names a datum_id and a base_plane; "
+              "it is one or the other");
         rp->targetKind = ReplaceTargetKind::Plane;
-        rp->targetId = t.value("datum_id", uint64_t{0});
+        rp->targetId = IdField(t, "datum_id", false);
         rp->basePlane = PlaneTypeFromString(t.value("base_plane", "xy"));
       } else if (kind == "sketch") {
+        readctx::RefuseUnknownKeys(t, {"kind", "sketch_id"},
+                                   "ReplaceFace sketch target");
         rp->targetKind = ReplaceTargetKind::Sketch;
-        rp->targetId = t.at("sketch_id").get<uint64_t>();
+        rp->targetId = IdField(t, "sketch_id", true);
       } else if (kind == "face") {
+        readctx::RefuseUnknownKeys(t, {"kind", "face"},
+                                   "ReplaceFace face target");
         rp->targetKind = ReplaceTargetKind::Face;
         rp->targetFace = DirectFaceFromJson(t.at("face"), prints);
       } else {

@@ -1,0 +1,9 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "input": "v192-replace-face.json",
+  "message": [
+    "v192-replace-face.json",
+    "direct-edit face: unknown key 'next_entity_id'"
+  ]
+}

@@ -655,6 +655,23 @@ TEST_CASE("Direct edits round-trip through the file, fingerprints and all",
       R"({"type":"ReplaceFace","name":"X","body_id":3,"face":{"feature_id":3,"element":"1/face5"},"target":{"kind":"surface"}})");
   CHECK_THROWS_WITH(DocumentIO::FeatureFromJson(bad),
                     Catch::Matchers::ContainsSubstring("plane, sketch, face"));
+  // A face ref or a target holding what the writer never writes is
+  // refused, not read as a default the next save would keep.
+  for (
+      const char* spec : {
+          // a renamed key: the element read as "", the save dropped it
+          R"({"type":"ReplaceFace","name":"X","body_id":3,"face":{"feature_id":3,"next_entity_id":"1/face5"},"target":{"kind":"plane","datum_id":7}})",
+          R"({"type":"DeleteFace","name":"X","body_id":3,"faces":[{"feature_id":3}]})",
+          R"({"type":"DeleteFace","name":"X","body_id":3,"faces":[{"feature_id":3,"element":5}]})",
+          R"({"type":"DeleteFace","name":"X","body_id":3,"faces":[{"feature_id":2.5,"element":"1/face5"}]})",
+          R"({"type":"DeleteFace","name":"X","body_id":3.5,"faces":[]})",
+          R"({"type":"DeleteFace","name":"X","body_id":3,"faces":[{"feature_id":3,"element":"1/face5","fingerprint":{"surface":"plane","area_mm2":1,"centroid_mm":[0,0,0],"normal":[0,0,1]}}]})",
+          R"({"type":"ReplaceFace","name":"X","body_id":3,"face":{"feature_id":3,"element":"1/face5"},"target":{"kind":"plane","datum_id":7,"base_plane":"yz"}})",
+          R"({"type":"ReplaceFace","name":"X","body_id":3,"face":{"feature_id":3,"element":"1/face5"},"target":{"kind":"sketch","sketch_id":4,"datum_id":7}})",
+      }) {
+    INFO(spec);
+    CHECK_THROWS(DocumentIO::FeatureFromJson(json::parse(spec)));
+  }
 }
 
 namespace {
