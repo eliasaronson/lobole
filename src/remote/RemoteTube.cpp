@@ -46,7 +46,7 @@ static constexpr MethodDoc TubeMethods[] = {
      "nothing.",
      "clear, former_radii_mm, material, max_thinning, min_straight_mm, "
      "tail_length_mm",
-     remote::NeedsPart},
+     remote::NeedsPart | remote::NotInBatch},
     {"get_tube_rules",
      "This part's tube rules (`min_straight` and `tail_length` in mm), with "
      "every derived value RESOLVED (so a caller "

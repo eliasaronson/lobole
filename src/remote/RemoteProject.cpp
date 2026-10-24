@@ -240,7 +240,7 @@ static constexpr MethodDoc ProjectMethods[] = {
      "g|kg|lb, angle?: deg|rad}. Display only — storage is always mm/g/deg, "
      "so this cannot move a vertex. Omitted keys keep their current value; "
      "an unrecognised one is refused, naming what is accepted.",
-     "angle, length, mass"},
+     "angle, length, mass", remote::NotInBatch},
     {"get_units", "The active document's display units.", "", remote::NoFlags,
      "angle:string, length:string, mass:string"},
     {"rename_variable",
@@ -259,8 +259,8 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"remote_add",
      "Give the project a remote {name?:origin, url}. A shared "
      "project stops committing built geometry.",
-     "name, url"},
-    {"remote_remove", "Forget a remote {name}.", "name"},
+     "name, url", remote::NotInBatch},
+    {"remote_remove", "Forget a remote {name}.", "name", remote::NotInBatch},
     {"fetch",
      "Bring down refs from {remote?:origin} without touching the "
      "working tree.",
@@ -292,22 +292,22 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"create_folder",
      "Create a bottom-tab-bar folder {folder}, empty. Display grouping only "
      "— ids, references and storage are unaffected. Idempotent.",
-     "folder"},
+     "folder", remote::NotInBatch},
     {"move_to_folder",
      "Put tabs in a folder: {part, folder}. `part` is a name/id/index or an "
      "ARRAY of them (parts, assemblies and drawings alike); folder \"\" "
      "moves them back to the top level. The folder must already exist, so a "
      "typo is an error instead of a new folder.",
-     "folder, part"},
+     "folder, part", remote::NotInBatch},
     {"rename_folder",
      "Rename folder {folder} to {new_name}, members and "
      "all. Renaming onto an existing folder MERGES them "
      "(reported as merged:true).",
-     "folder, new_name"},
+     "folder, new_name", remote::NotInBatch},
     {"dissolve_folder",
      "Remove folder {folder}; its tabs return to the top level. Documents "
      "are never deleted with their folder — see delete_part for that.",
-     "folder"},
+     "folder", remote::NotInBatch},
 };
 std::span<const MethodDoc> ProjectMethodDocs() { return ProjectMethods; }
 

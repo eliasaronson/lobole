@@ -421,7 +421,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "is 19.05), `size` is the thread "
      "designation (\"M6\", \"1/4-20\") rather than a measure, and "
      "`position` is model mm.",
-     "drive, length, orientation, position, size, standard"},
+     "drive, length, orientation, position, size, standard",
+     remote::NotInBatch},
     {"fit_fastener",
      "Derive a fastener from a picked hole RIM and place it "
      "(docs/parts/README.md). `rim` is a circular EDGE — the one the head sits "
@@ -476,7 +477,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "listed in "
      "`warnings`.",
      "drive, dry_run, far_end, nut, rim, size, standard, washer, "
-     "washer_under_head, washer_under_nut"},
+     "washer_under_head, washer_under_nut",
+     remote::NotInBatch},
     {"bom",
      "Bill of materials (aggregated part counts, masses): one row per (part, "
      "configuration, material) placed, carrying `configuration` (its name; "
@@ -516,7 +518,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "[x,y,z,w]} place it: the bearing's axis is its local +Z, side A on "
      "z = 0. `fit_bearing` derives all of that from a picked seat and is "
      "what you usually want.",
-     "designation, orientation, position", remote::NoFlags,
+     "designation, orientation, position", remote::NotInBatch,
      "occurrence:int, part:string"},
     {"list_bearings",
      "The ISO 15 table this build carries, before anything is placed "
@@ -554,7 +556,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "groove is a RetainingRingGroove feature on the part (add_feature). "
      "fit_retaining_ring puts one INTO its groove; this places one where "
      "told.",
-     "orientation, position, size, standard", remote::NoFlags,
+     "orientation, position, size, standard", remote::NotInBatch,
      "occurrence, part"},
     {"fit_retaining_ring",
      "Put the retaining ring a GROOVE takes into it "
@@ -575,7 +577,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "locating it. Refused: a face no groove made, a groove on several "
      "placements without `occurrence`, a groove that already holds a ring. "
      "`dry_run` works it out without placing.",
-     "dry_run, groove", remote::NoFlags,
+     "dry_run, groove", remote::NotInBatch,
      "designation:string, groove_feature:int, occurrence:int, "
      "orientation:number[], parent:int, part:string, position:number[], "
      "size_mm:number, standard:string, summary:string"},
@@ -618,7 +620,7 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "joint); with no seat found, other_mate is 0 and the summary says so. "
      "{dry_run: true} derives "
      "without placing.",
-     "designation, dry_run, mate_other, seat, series", remote::NoFlags,
+     "designation, dry_run, mate_other, seat, series", remote::NotInBatch,
      "candidates:string[], designation:string, mate:int, "
      "occurrence:int, other_mate:int, "
      "other_ring:{diameter_check:object, ring:string, seat:object}, "
@@ -672,7 +674,8 @@ static constexpr MethodDoc AssemblyMethods[] = {
      "column after `part`.",
      "path"},
     {"edit_in_context",
-     "Enter in-context editing of a part within the assembly.", "occurrence"},
+     "Enter in-context editing of a part within the assembly.", "occurrence",
+     remote::NotInBatch},
     {"add_exploded_view", "Add an exploded view.", "name"},
     {"remove_exploded_view", "Remove an exploded view.", "id"},
     {"list_exploded_views", "List exploded views.", "", remote::NoFlags,

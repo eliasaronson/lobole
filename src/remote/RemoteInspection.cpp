@@ -1724,14 +1724,15 @@ static constexpr MethodDoc InspectionMethods[] = {
      "Shorthand for one cut — add_section/update_section address several, "
      "and cut on a datum plane (plane_id) or tilted (tilt_u/tilt_v) for a "
      "plane that is not a base plane.",
-     "add, base_plane, enabled, offset, reverse"},
+     "add, base_plane, enabled, offset, reverse", remote::NotInBatch},
     {"add_section",
      "Add a section cut and return its id {base_plane: xy|xz|yz, plane_id? "
      "(a datum plane), offset?, tilt_u?, tilt_v? (degrees), reverse?}. Up to "
      "four; they persist with the project. Like set_section, the default "
      "keeps the half opposite the plane's normal (below: z <= offset for "
      "xy, y <= for xz, x <= for yz) and reverse keeps the other half.",
-     "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible"},
+     "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible",
+     remote::NotInBatch},
     {"list_sections",
      "Every section cut: id, source (base plane / datum / face, with "
      "resolved:false when a named datum/face is gone — such a cut stops "
@@ -1746,9 +1747,10 @@ static constexpr MethodDoc InspectionMethods[] = {
      "normal), tilt_u?, tilt_v? (degrees), reverse? (false keeps the half "
      "opposite the normal, true the half it points into), visible?}. Only "
      "the fields present are touched.",
-     "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible"},
+     "base_plane, id, offset, plane_id, reverse, tilt_u, tilt_v, visible",
+     remote::NotInBatch},
     {"remove_section", "Remove one cut {id}, or all of them with {all: true}.",
-     "all, id"},
+     "all, id", remote::NotInBatch},
     {"grow_faces",
      "The faces of the one feature some picked faces belong to {faces: "
      "[{feature_id, element}]} on one body -- the GUI's 'Add the feature' "

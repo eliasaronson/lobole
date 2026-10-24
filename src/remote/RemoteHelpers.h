@@ -153,9 +153,12 @@ enum MethodFlag : uint8_t {
   // act on the project, an assembly, a drawing or a job -- so this is stated
   // rather than assumed.
   NeedsPart = 1u << 0,
-  // Reaches outside the document (a file, a git tree, the window, the tab), so
+  // Reaches outside the document (a file, a git tree, the window, the tab), or
+  // makes an edit no undo history holds (units, a folder, a tab's name), so
   // a batch cannot roll it back: undoing the document would leave the world
-  // half-changed and the response would be a lie about it.
+  // half-changed and the response would be a lie about it. A method that
+  // does so only with some parameters is refused by those instead
+  // (BatchRefusalFor); tests/batch_rollback_gate.py finds the ones missed.
   NotInBatch = 1u << 1,
   // Its RESULT does not depend on freshly built geometry, so a batch can defer
   // the regeneration past it. Everything else flushes first, which is what

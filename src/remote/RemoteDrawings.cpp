@@ -36,7 +36,7 @@ namespace remote {
 static constexpr MethodDoc DrawingMethods[] = {
     {"create_drawing",
      "Add a drawing document (sheet size, title block) to the project.",
-     "name?:string, sheet?:object"},
+     "name?:string, sheet?:object", remote::NotInBatch},
     {"set_drawing_sheet",
      "Edit the active drawing's sheet {size?, landscape?, title_block?}.",
      "landscape, size, title_block"},

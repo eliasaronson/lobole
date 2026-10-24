@@ -124,7 +124,7 @@ constexpr MethodDoc kCamMethods[] = {
      "`job` (name or id) to say WHICH job it acts on; without one they act on "
      "whichever job tab is in front, which is fine interactively and is a "
      "trap in a script that switches tabs between calls.",
-     "configuration, name, part"},
+     "configuration, name, part", remote::NotInBatch},
     {"add_job_part",
      "Add a part to the open job {part: id or name, configuration?: name or "
      "id} -- another thing this job cuts, in that configuration of it (v135; "

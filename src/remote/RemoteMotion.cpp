@@ -206,7 +206,7 @@ constexpr MethodDoc MotionMethods[] = {
      "step, like the explode slider — a scrub is a look, not an edit — "
      "EXCEPT that a study naming a configuration first activates it (an "
      "undo step), since its poses only exist under it.",
-     "study, t"},
+     "study, t", remote::NotInBatch},
     {"export_motion",
      "Write the run as a GLB with a glTF animation {study, path}: one node "
      "per occurrence (and per moving occurrence inside a flexible "

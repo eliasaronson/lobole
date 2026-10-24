@@ -484,7 +484,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "Move the rollback bar: only features before it regenerate. Takes "
      "`feature_id` — the bar stops just BEFORE that feature — or `index` "
      "(features [0, index) regenerate; -1 = end).",
-     "feature_id, index", remote::NeedsPart},
+     "feature_id, index", remote::NeedsPart | remote::NotInBatch},
     {"suppress_feature",
      "Toggle suppression by feature_id; suppressed "
      "features are skipped but keep parameters.",

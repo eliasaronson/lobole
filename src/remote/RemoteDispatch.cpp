@@ -637,8 +637,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "Persists. Escape/Enter/Delete/arrows are fixed and have no command.",
      "chord, command, reset", remote::NotInBatch},
     {"reset_layout", "Reset the dock layout.", "", remote::NotInBatch},
-    {"add_part", "Add a new empty part tab.", "name?:string"},
-    {"add_assembly", "Add an assembly tab.", "name?:string"},
+    {"add_part", "Add a new empty part tab.", "name?:string",
+     remote::NotInBatch},
+    {"add_assembly", "Add an assembly tab.", "name?:string",
+     remote::NotInBatch},
     {"list_parts",
      "List project TABS — every one, with `type`: part | assembly | "
      "drawing | job. Not parts alone, whatever the name says: a sweep that "
@@ -648,7 +650,8 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "", remote::NoFlags,
      "active:int, active_id:int, parts:{id:int, index:int, name:string, "
      "type:string, folder?:string}[], folders?:string[]"},
-    {"rename_part", "Rename a part.", "new_name:string, part:string|int"},
+    {"rename_part", "Rename a part.", "new_name:string, part:string|int",
+     remote::NotInBatch},
     {"menu_click", "Drive a menu item by path, e.g. \"Edit/Undo\".", "path",
      remote::UiAction},
     {"menu_items",
@@ -804,6 +807,108 @@ static bool ContainsRef(const json& v) {
         return true;
   }
   return false;
+}
+
+// Why a batch refuses this call for what it is GIVEN, or "" when it does not.
+// NotInBatch refuses a whole method; these switch tabs, or make an edit no
+// undo history holds, only with some parameters, so the same verb on the
+// active tab stays batchable (docs/scripting/rpc.md#batch). A value a $ref
+// stands in for is judged when its call runs, with the value resolved.
+// tests/batch_rollback_gate.py reads the methods named here as covered.
+static std::string BatchRefusalFor(const ui::AppState& state,
+                                   const std::string& m, const json& params) {
+  if (!params.is_object())
+    return {};
+  const ui::PartSlot* active =
+      state.activePart >= 0 &&
+              state.activePart < static_cast<int>(state.parts.size())
+          ? &state.parts[static_cast<size_t>(state.activePart)]
+          : nullptr;
+  const auto switches = [&](const ui::PartSlot& slot,
+                            const char* what) -> std::string {
+    if (&slot == active)
+      return {};
+    return "names " + std::string(what) + " '" + slot.name +
+           "', which is not the active tab: it would switch to it, and a "
+           "batch's rollback cannot switch back";
+  };
+  // The tab `key` names, found as SelectJob/SelectDrawing find it: by stable
+  // id or by name. One they do not find is the handler's to refuse, and
+  // nothing has moved by then.
+  const auto otherTab = [&](const char* key, ui::DocKind kind,
+                            const char* what) -> std::string {
+    if (!params.contains(key) || ContainsRef(params.at(key)))
+      return {};
+    const json& which = params.at(key);
+    for (const ui::PartSlot& slot : state.parts)
+      if (slot.kind == kind &&
+          (which.is_number_integer() ? slot.id == which.get<uint64_t>()
+           : which.is_string()       ? slot.name == which.get<std::string>()
+                                     : false))
+        return switches(slot, what);
+    return {};
+  };
+  const auto declares = [](const remote::MethodDoc& row, const char* key) {
+    const std::vector<std::string> keys =
+        remote::contract::ParamNames(row.params);
+    return std::find(keys.begin(), keys.end(), key) != keys.end();
+  };
+  // Every verb of the CAM and drawing modules that takes the tab it acts on.
+  for (const remote::MethodDoc& row : remote::CamMethodDocs())
+    if (m == row.name)
+      return declares(row, "job") ? otherTab("job", ui::DocKind::Job, "job")
+                                  : std::string();
+  for (const remote::MethodDoc& row : remote::DrawingMethodDocs())
+    if (m == row.name)
+      return declares(row, "drawing")
+                 ? otherTab("drawing", ui::DocKind::Drawing, "drawing")
+                 : std::string();
+  // A component claimed, or an update applied, switches to its part's tab.
+  const bool applies = params.contains("apply") &&
+                       params.at("apply").is_boolean() &&
+                       params.at("apply").get<bool>();
+  if (m == "claim_component" || (m == "update_component" && applies)) {
+    if (!params.contains("part_id") ||
+        !params.at("part_id").is_number_integer())
+      return {};
+    const uint64_t id = params.at("part_id").get<uint64_t>();
+    for (const ui::PartSlot& slot : state.parts)
+      if (slot.id == id && slot.kind == ui::DocKind::Part)
+        return switches(slot, "part");
+    return {};
+  }
+  // A run is made on a copy; `leave_at` then poses the live assembly at one
+  // of its samples, writing placements and mate values with no snapshot,
+  // as set_motion_pose does.
+  if (m == "run_motion_study")
+    for (const char* key : {"leave_at", "leave_at_deg", "leave_at_mm"})
+      if (params.contains(key))
+        return "is given `" + std::string(key) +
+               "`, which poses the assembly with no undo snapshot, so a "
+               "batch's rollback cannot put it back";
+  // A part variable's rename rewrites the requirements reading it outside
+  // the part's command; a project variable's is a project-history entry,
+  // which the rollback unwinds. The scope is decided as the handler does.
+  if (m == "rename_variable") {
+    if (ContainsRef(params) || !params.contains("name") ||
+        !params.at("name").is_string())
+      return {};
+    const std::string name = params.at("name").get<std::string>();
+    std::string scope;
+    if (params.contains("scope") && params.at("scope").is_string())
+      scope = params.at("scope").get<std::string>();
+    else
+      scope = ui::FindProjectParameter(state, name) != nullptr ||
+                      !state.document ||
+                      state.document->FindParameter(name) == nullptr
+                  ? "project"
+                  : "part";
+    if (scope == "part")
+      return "renames the part variable '" + name +
+             "', and the requirements reading it are rewritten outside the "
+             "part's undo history, where a batch's rollback cannot reach";
+  }
+  return {};
 }
 
 json ActivePartRevision(ui::AppState& state) {
@@ -1070,10 +1175,11 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             "The document is unchanged.");
       if (MethodFlags(sub) & remote::NotInBatch)
         throw std::runtime_error(
-            "'" + sub +
-            "' cannot run inside a batch: a batch rolls the DOCUMENT back on "
-            "failure and this reaches outside it (a file, the git tree, the "
-            "window, or the active tab). Call it before or after the batch. "
+            "batch call " + std::to_string(i + 1) + ": '" + sub +
+            "' cannot run inside a batch: a batch rolls the document's undo "
+            "histories back on failure, and this reaches outside them (a "
+            "file, the git tree, the window, a tab, or an edit no undo "
+            "history holds). Call it on its own, before or after the batch. "
             "The document is unchanged.");
       if (IsUiAction(sub))
         throw std::runtime_error(
@@ -1113,6 +1219,12 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
                                           " The document is unchanged.",
                                       diagnostic);
         }
+        if (const std::string why = BatchRefusalFor(state, sub, sp);
+            !why.empty())
+          throw std::runtime_error(
+              "batch call " + std::to_string(i + 1) + ": '" + sub + "' " + why +
+              ". Call it on its own, before or after the batch. The "
+              "document is unchanged.");
       }
     }
 
@@ -1226,6 +1338,13 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
       }
       try {
         subParams = resolveRefs(subParams);
+        // Judged again with its $refs resolved, and against the document
+        // the earlier calls have made (a variable one of them added).
+        if (const std::string why = BatchRefusalFor(state, sub, subParams);
+            !why.empty())
+          throw std::runtime_error("'" + sub + "' " + why +
+                                   ". Call it on its own, before or after "
+                                   "the batch");
         bool subHandled = false;
         remote::RpcParams subP{subParams};
         Request subRequest;

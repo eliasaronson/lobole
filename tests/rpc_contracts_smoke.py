@@ -167,11 +167,13 @@ def check_uncontracted(raw):
     assert e.diagnostic['param'] == 'namespace', e.diagnostic
     # A batch pre-checks every call's values before the first one runs.
     e = refused(lambda: raw.call('batch', calls=[
-        {'method': 'add_part', 'params': {'name': 'never'}},
+        {'method': 'set_variable', 'params': {'name': 'never',
+                                              'expression': '1'}},
         {'method': 'add_mate', 'params': {'a': {}, 'b': {}, 'type': 'revolut'}}]),
         'invalid_argument')
     assert e.diagnostic['call'] == 2 and e.diagnostic['param'] == 'type'
-    assert 'never' not in [p['name'] for p in raw.call('list_parts')['parts']]
+    assert 'never' not in [v['name'] for v in
+                           raw.call('list_variables')['variables']]
     print('uncontracted: unknown and missing keys are structured; batch pre-checks')
 
 
