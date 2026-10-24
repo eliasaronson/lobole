@@ -8,8 +8,9 @@ cannot open.
 A file listing more is refused on load, naming the count and the limit
 (docs/versioning/README.md#what-a-load-refuses), so `add_feature` refuses
 the feature that would take a part past it -- in a batch too -- and the
-refused call changes nothing (docs/scripting/rpc.md#a-refused-call-changes-
-nothing). A part AT the limit saves and opens again.
+refused call changes nothing
+(docs/scripting/rpc.md#a-refused-call-changes-nothing). A part AT the limit
+saves and opens again.
 
 The part is 49 999 datum planes, which open in about a second.
 

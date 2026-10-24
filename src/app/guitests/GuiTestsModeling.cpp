@@ -15,6 +15,7 @@
 #include "core/features/MoveFaceFeature.h"
 #include "core/features/OffsetFaceFeature.h"
 #include "core/features/ReplaceFaceFeature.h"
+#include "core/io/ReadContext.h" // kMaxPartFeatures
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/FeatureEditor.h"
@@ -101,6 +102,36 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->MenuClick("Edit/Redo");
     ctx->Yield();
     IM_CHECK_EQ(Doc()->FeatureCount(), before + 2);
+  };
+
+  // A part holds at most kMaxPartFeatures, so the app never writes one it
+  // cannot open (docs/versioning/README.md#what-a-load-refuses): a tool
+  // that would take it past says so, and Accept does nothing.
+  t = IM_REGISTER_TEST(engine, "document",
+                       "accept_refused_past_the_feature_limit");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    {
+      Document::BulkEdit bulk(*Doc());
+      while (Doc()->FeatureCount() < readctx::kMaxPartFeatures)
+        Doc()->AddFeature(std::make_unique<DatumPlaneFeature>(
+            "P" + std::to_string(Doc()->FeatureCount() + 1)));
+    }
+    ctx->Yield();
+    const size_t undo = s_App->commands->UndoDepth();
+    ToolbarClick(ctx, "###tb_datum_plane");
+    ctx->Yield(2);
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    const ImGuiTestItemInfo accept =
+        ctx->ItemInfo("//###ToolWindow/###tw_accept", ImGuiTestOpFlags_NoError);
+    IM_CHECK(accept.ID != 0);
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+    ui::AcceptPendingFeature(*s_App); // the keyboard's path, past the button
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    IM_CHECK_EQ(s_App->commands->UndoDepth(), undo);
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->FeatureCount(), readctx::kMaxPartFeatures);
   };
 
   t = IM_REGISTER_TEST(engine, "document", "create_sphere_and_cylinder");
