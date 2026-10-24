@@ -161,6 +161,13 @@ modules:
       - -DUSE_FREETYPE=ON
       - -DBUILD_RELEASE_DISABLE_EXCEPTIONS=FALSE
       - -DCMAKE_POLICY_VERSION_MINIMUM=3.10
+    # The patches it carries, as nix/occt-overlay.nix lists them
+    # (src/cad/OccPatches.h reads the list).
+    post-install:
+      - mkdir -p /app/share/lobole
+      - printf '%s\n' occt-shell-cap-order.patch occt-fillet-reorder-faces-loop.patch
+        occt-draft-null-curve-and-parallel.patch occt-topopebrep-unclosed-wire-iterator.patch
+        > /app/share/lobole/occt-patches
     cleanup:
       - /bin
     sources:
