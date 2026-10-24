@@ -1152,6 +1152,15 @@ add_test(NAME rpc_units_gate
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/rpc_units_gate.py)
 set_tests_properties(rpc_units_gate PROPERTIES TIMEOUT 60)
 
+# A method whose effect a batch's rollback cannot undo -- a tab it creates or
+# switches to, an edit no undo history holds -- is kept out of a batch: its
+# row says NotInBatch, or the dispatcher refuses the parameters that do it
+# (docs/scripting/rpc.md#batch). Read from what the handlers call, and
+# checked against a planted handler every run.
+add_test(NAME batch_rollback_gate
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/batch_rollback_gate.py)
+set_tests_properties(batch_rollback_gate PROPERTIES TIMEOUT 60)
+
 # The RPC surface against its last published snapshot (api/rpc-surface.json):
 # a method or parameter that goes away needs kApiVersion raised once the
 # surface is released, and the snapshot refreshed either way, so a caller

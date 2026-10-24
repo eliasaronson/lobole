@@ -64,11 +64,13 @@ def literal(field):
 
 
 def method_docs(paths):
-    """{method: {"doc", "params", "returns", "since", "file"}}.
+    """{method: {"doc", "params", "flags", "returns", "since", "file"}}.
 
     `returns` is the fifth field where a row carries one, else "" — the
     response contract, which only the read family is required to state
-    (tests/rpc_returns_gate.py).
+    (tests/rpc_returns_gate.py). `flags` is the fourth as written, the
+    names it ORs together (`remote::` dropped), so `"NotInBatch" in flags`
+    asks what the dispatcher asks (tests/batch_rollback_gate.py).
     """
     out = {}
     for path in paths:
@@ -93,11 +95,15 @@ def method_docs(paths):
                 fields = split_fields(row)
                 doc = literal(fields[1]) if len(fields) > 1 else ""
                 rets = literal(fields[4]) if len(fields) > 4 else ""
+                flags = (set(re.findall(r'(?:remote::)?([A-Za-z]+)',
+                                        fields[3]))
+                         if len(fields) > 3 else set())
                 # The sixth field, MethodDoc::since; 1 when the row omits it.
                 since = (int(fields[5].strip()) if len(fields) > 5
                          and fields[5].strip().isdigit() else 1)
                 if len(fields) < 3:
                     out[nm.group(1)] = {"doc": doc, "params": None,
+                                        "flags": flags,
                                         "returns": rets, "since": since,
                                         "file": path}
                     continue
@@ -108,6 +114,7 @@ def method_docs(paths):
                     # The column as written: a typed one is the method's
                     # contract (rpc_contract.parse_column).
                     "column": ps,
+                    "flags": flags,
                     "returns": rets,
                     "since": since,
                     "file": path,

@@ -57,6 +57,141 @@ def boss_calls(n, r=2.0):
     return out
 
 
+def never_in_a_batch(d):
+    """What a rollback cannot take back is refused before the batch runs.
+
+    A batch rolls back the undo histories it marked. A call that creates or
+    switches a tab leaves the marked tab's history stashed where the rollback
+    does not reach it, and an edit no history records (units, the rollback
+    bar, a tab's name, a folder, a git remote) has nothing to roll back: a
+    batch that failed after one left it in place while saying the document
+    was as it was. So each is refused before the first call runs, naming it
+    (docs/scripting/rpc.md#batch).
+    """
+    cam = d.call("ping").get("features", {}).get("cam", True)
+    d.call("set_active_part", part="rig")
+
+    def world():
+        # Every tab's revision (an assembly's occurrences included), and the
+        # tabs themselves: which exist, which is active, their folders.
+        return d.call("validation_revision"), d.call("list_parts")
+
+    def refused_whole(calls, needles):
+        before = world()
+        err = refused(d, "batch", needles + ["unchanged"], calls=calls)
+        expect(world() == before,
+               f"a batch refused for {needles} changed nothing: {err}")
+        return err
+
+    never = ["add_part", "add_assembly", "create_drawing", "edit_in_context",
+             "add_fastener", "add_bearing", "add_retaining_ring",
+             "fit_fastener", "fit_bearing", "fit_retaining_ring",
+             "set_units", "set_tube_rules", "set_rollback", "rename_part",
+             "create_folder", "move_to_folder", "rename_folder",
+             "dissolve_folder", "remote_add", "remote_remove",
+             "set_motion_pose", "set_section", "add_section",
+             "update_section", "remove_section"]
+    if cam:
+        never.append("machine_part")
+    for method in never:
+        # A call that would have run first, so "unchanged" means the refusal
+        # came before ANY call, not merely before this one.
+        refused_whole([{"method": "add_occurrence",
+                        "params": {"part": "cube"}},
+                       {"method": method, "params": {}}],
+                      ["batch call 2", f"'{method}'", "on its own"])
+
+    # ---- A verb given ANOTHER tab switches to it: refused; the active one
+    # stays batchable. By name and by id.
+    d.call("create_drawing", name="D1")
+    d1 = d.call("list_parts")["active_id"]
+    d.call("create_drawing", name="D2")
+    for other in ("D1", d1):
+        refused_whole([{"method": "check_drawing",
+                        "params": {"drawing": other, "update": False}}],
+                      ["batch call 1", "'check_drawing'", "D1",
+                       "not the active tab"])
+    r = d.call("batch", calls=[{"method": "check_drawing",
+                                "params": {"drawing": "D2",
+                                           "update": False}}])
+    expect("failed" not in r, f"the active drawing by name is fine: {r}")
+    # A $ref is resolved when its call runs, and checked then.
+    r = d.call("batch", calls=[
+        {"method": "list_parts", "params": {}},
+        {"method": "check_drawing", "params": {
+            "drawing": {"$ref": 1, "key": "active_id"}, "update": False}}])
+    expect("failed" not in r, f"a $ref to the active drawing is fine: {r}")
+    if cam:
+        d.call("set_active_part", part="cube")
+        job = d.call("machine_part", part="cube", name="J")
+        expect(d.call("list_parts")["active_id"] == job["id"],
+               f"machine_part switched to its job: {job}")
+        r = d.call("batch", calls=[{"method": "list_cam_setups",
+                                    "params": {"job": "J"}}])
+        expect("failed" not in r, f"the active job by name is fine: {r}")
+        d.call("set_active_part", part="D2")
+        refused_whole([{"method": "list_cam_setups",
+                        "params": {"job": "J"}}],
+                      ["'list_cam_setups'", "not the active tab"])
+
+    # ---- A motion run told to leave the assembly at a pose: the pose is
+    # written with no snapshot. Without one the run is made on a copy.
+    for key, value in (("leave_at", "last"), ("leave_at_deg", 30.0),
+                       ("leave_at_mm", 5.0)):
+        refused_whole([{"method": "run_motion_study",
+                        "params": {"study": 1, key: value}}],
+                      ["'run_motion_study'", key])
+
+    # ---- A component claimed or updated on another part's tab ------------
+    d.call("set_active_part", part="rig")
+    cube = next(t for t in d.call("list_parts")["parts"]
+                if t["name"] == "cube")
+    refused_whole([{"method": "claim_component", "params": {
+        "part_id": cube["id"], "namespace": "n", "key": "k",
+        "fingerprint": "f", "expected_revision": "r"}}],
+        ["'claim_component'", "not the active tab"])
+    refused_whole([{"method": "update_component", "params": {
+        "part_id": cube["id"], "source_part_id": 1, "fingerprint": "f",
+        "expected_revision": "r", "source_revision": "r", "apply": True}}],
+        ["'update_component'", "not the active tab"])
+    # Without `apply` it is a preview, which switches nothing: whatever it
+    # says, it is not the batch's refusal.
+    try:
+        d.call("batch", calls=[{"method": "update_component", "params": {
+            "part_id": cube["id"], "source_part_id": 1, "fingerprint": "f",
+            "expected_revision": "r", "source_revision": "r"}}])
+    except RuntimeError as e:
+        expect("not the active tab" not in str(e),
+               f"a preview is not refused for its tab: {e}")
+
+    # ---- A part-scope rename_variable: the requirements it rewrites are
+    # not on the part's stack. Refused when the scope is stated, and when it
+    # is only known once an earlier call of the batch has run.
+    d.call("set_active_part", part="cube")
+    d.call("set_variable", name="w", expression="3", scope="part")
+    refused_whole([{"method": "rename_variable",
+                    "params": {"name": "w", "new_name": "w2",
+                               "scope": "part"}}],
+                  ["'rename_variable'", "part"])
+    refused_whole([{"method": "rename_variable",
+                    "params": {"name": "w", "new_name": "w2"}}],
+                  ["'rename_variable'", "part"])
+    names = {v["name"] for v in d.call("list_variables")["variables"]}
+    err = refused(d, "batch", ["rename_variable", "rolled back"], calls=[
+        {"method": "set_variable",
+         "params": {"name": "late", "expression": "1", "scope": "part"}},
+        {"method": "rename_variable",
+         "params": {"name": "late", "new_name": "late2"}}])
+    expect({v["name"] for v in d.call("list_variables")["variables"]}
+           == names, f"and the batch is rolled back whole: {err}")
+    # The project scope's rename is on the project history: batchable.
+    d.call("set_variable", name="pv", expression="2")
+    r = d.call("batch", calls=[{"method": "rename_variable",
+                                "params": {"name": "pv", "new_name": "pv2",
+                                           "scope": "project"}}])
+    expect("failed" not in r, f"a project rename runs in a batch: {r}")
+
+
 def main():
     binary = sys.argv[1]
     env = dict(os.environ)
@@ -385,6 +520,8 @@ def main():
             {"method": "add_occurrence", "params": {"part": "no-such-part"}}])
         expect(len(d.call("list_occurrences")["occurrences"]) == 1,
                "the assembly is as it was before the batch")
+
+        never_in_a_batch(d)
         print("batch_smoke: ok")
     finally:
         app.terminate()
