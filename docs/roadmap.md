@@ -94,6 +94,13 @@ them:
 - **Relations with two inputs:** a relation reads one mate; a delivery valve
   whose timing follows both the camshaft and the rack cannot be expressed.
 - **Springs** that stretch between two occurrences and follow the motion.
+- **Undo for project-level edits.** Units, tube rules, the rollback marker,
+  part renames and the folder verbs change the document with no undo step,
+  and placing a fastener, bearing or retaining ring takes no assembly
+  snapshot, so none of them can be undone, in the GUI or over RPC. A batch
+  refuses them for that reason
+  ([rpc.md](scripting/rpc.md#a-refused-call-changes-nothing)); giving each a
+  command would let a batch take them too.
 
 ## 4. Analysis
 
@@ -110,6 +117,11 @@ them:
 - **IGES export**, **PLY and glTF import**, and **3MF** import and a
   general 3MF export (a print job is written as
   one, [print jobs](tolerances/README.md#print-jobs)).
+- **Healing a STEP only when it needs it.** OpenCASCADE's read-time
+  repair (`ShapeProcess`) runs on every import and is most of a large file's
+  read time (about 0.6 s of 1.5 s on a 4.3 MB module). Running it only when a
+  validity check of the raw shapes fails could cut that, if the check is much
+  cheaper than the repair; that needs measuring first.
 
 ## 6. The agent interface
 
@@ -128,6 +140,18 @@ them:
   regeneration.
 - Benchmark tasks graded on relations (gears, racks, cams); mechanisms are
   graded only on their mates and a motion answer.
+- **Benchmark tasks that edit an existing part.** Every task builds from
+  nothing, so nothing measures whether an agent reads a part it did not build
+  correctly. If those tasks show it misreads them, a read-only
+  `describe_document` follows: the part as a short outline (its variables,
+  one line per feature saying what it does, references by intent such as
+  "the top face of Block"), with no promise that it reruns.
+- **The workflow prompt's claims, tested.** The MCP `modeling-workflow`
+  prompt states gotchas an agent should avoid; each should be backed by a
+  test that fails if the gotcha stops being true, or be removed.
+- **The prompt and the design sweep.** The prompt does not mention
+  `expression` requirements or `design_sweep`. Adding them changes what the
+  benchmark measures, so it waits on the benchmark.
 
 ## 7. Platform and presentation
 
@@ -168,3 +192,15 @@ Split what the next feature extends, not as a standalone sweep:
   [feature template](modeling/templates.md), which is data, and logic that
   computes geometry runs outside the app as a generator
   (`generators/gear.py`).
+- **Exporting a part's history as a replayable script.** The document is
+  already its history, and it rebuilds from it; a session replays with
+  `lobole.replay`; a part meant to be code is a generator. A script that
+  reran would have to translate every feature type and turn history names
+  back into intent, and rerunning it would renumber every element that
+  assemblies, drawings and jobs point at. What an agent would gain from it,
+  reading a part, is the outline above.
+- From the comparison with SolidCraft, deliberately not copied: a FreeCAD
+  oracle (it shares OpenCASCADE, so it agrees with our kernel's mistakes),
+  mutation testing of the code, heuristics that nudge a failing boolean,
+  contributor and merge-queue machinery, i18n, themes and a web build, and a
+  per-launch token on the control port.
