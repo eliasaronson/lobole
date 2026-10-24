@@ -171,6 +171,11 @@ def sample_designs(rows):
 
 
 # --- an instance ----------------------------------------------------------
+# {method: [calls, seconds]} for every RPC this process sent: each design's
+# meta holds its share (`rpc`), and `run --profile` adds them up.
+RPC_TIMES = {}
+
+
 class Instance:
     """One headless app: smoke_app's isolation (scratch XDG dirs,
     LOBOLE_EXIT_WITH_PARENT), autosave off, a per-call timeout."""
@@ -184,8 +189,16 @@ class Instance:
         self.port = self.app.port
 
     def request(self, method, params=None, timeout=None):
-        return self.client.request(method, params or {},
-                                   timeout=timeout or self.timeout)
+        t = time.time()
+        try:
+            return self.client.request(method, params or {},
+                                       timeout=timeout or self.timeout)
+        finally:
+            # Where a run's time goes, per RPC (`run --profile`): the
+            # matrix's own round trips are most of it.
+            c = RPC_TIMES.setdefault(method, [0, 0.0])
+            c[0] += 1
+            c[1] += time.time() - t
 
     def call(self, method, /, **params):
         return self.request(method, params)
@@ -862,10 +875,22 @@ def run_action(src, act, ctx):
         return (outcome("finding", "internal",
                         f"a check after {method} was refused: {e}"),
                 "rebuild")
-    # Give the part back.
+    # Give the part back. The undo answers with the bodies' digest, its
+    # feature count and the part's revision (an app before that is asked
+    # get_state): a full get_state per action was most of the matrix's own
+    # time.
     try:
-        src.request("undo", {})
-        st, after = bodies_of(src)
+        ans = src.request("undo", {})
+        ans = ans if isinstance(ans, dict) else {}
+        if "digest" in ans and "feature_count" in ans:
+            after = [{k: b.get(k) for k in ("created_by", "name",
+                                           "volume_mm3", "bbox_min",
+                                           "bbox_max")}
+                     for b in ans["digest"].get("bodies", [])]
+            st = {"features": [None] * ans["feature_count"],
+                  "revision": ans.get("revision") or {}}
+        else:
+            st, after = bodies_of(src)
     except TimeoutError as e:
         return outcome("finding", "hang", f"undo: {e}"), "restart"
     except (ConnectionError, OSError) as e:
@@ -1041,6 +1066,7 @@ class Worker:
             + ".jsonl")
         meta = {"design": row["design"], "units": {}, "skipped": None}
         rows = []
+        rpc_before = {m: list(v) for m, v in RPC_TIMES.items()}
         try:
             inst = self.instance()
             t = time.time()
@@ -1064,6 +1090,10 @@ class Worker:
                     meta["units"][unit] = {"skipped": f"instance died: {e}"}
                     self.stop()
         meta["seconds"] = round(time.time() - t0, 3)
+        meta["rpc"] = {m: [v[0] - rpc_before.get(m, [0, 0.0])[0],
+                           round(v[1] - rpc_before.get(m, [0, 0.0])[1], 3)]
+                       for m, v in RPC_TIMES.items()
+                       if v[0] != rpc_before.get(m, [0, 0.0])[0]}
         with open(path, "w") as f:
             f.write(json.dumps({"meta": meta}) + "\n")
             for r in rows:
@@ -1619,6 +1649,8 @@ def cmd_run(args):
     if lost:
         verdict[0].append(f"no result for {lost}: a worker died")
     report(out, metas, results, verdict, time.time() - started)
+    if args.profile:
+        profile(out, metas, results, time.time() - started)
     n = {o: sum(1 for r in results if r["outcome"] == o) for o in OUTCOMES}
     print(f"action_matrix: {len(results)} actions on {len(metas)} designs in "
           f"{time.time() - started:.1f} s: {n['pass']} pass, {n['refuse']} "
@@ -1663,6 +1695,65 @@ def cmd_bless(args):
         print(f"bless: {args.from_dir} holds no run*.json: not a run")
         return 1
     return bless(args.from_dir, corpus, occ)
+
+
+def profile(out, metas, results, seconds):
+    """Where a run's time went (`run --profile`): profile.md and
+    profile.json beside the report -- per action, per RPC, per design's
+    build, and the slowest single actions -- so the next slow class is
+    found from a measurement."""
+    by_action = {}
+    for r in results:
+        a = by_action.setdefault(r["action"], {"n": 0, "s": 0.0, "max": 0.0})
+        a["n"] += 1
+        a["s"] += r.get("seconds", 0.0)
+        a["max"] = max(a["max"], r.get("seconds", 0.0))
+    rpc = {}
+    prepare_s = {}
+    design_s = {}
+    for d, m in metas.items():
+        for method, (n, s_) in (m.get("rpc") or {}).items():
+            x = rpc.setdefault(method, [0, 0.0])
+            x[0] += n
+            x[1] += s_
+        if "prepare_s" in m:
+            prepare_s[d] = prepare_s.get(d, 0.0) + m["prepare_s"]
+        design_s[d] = design_s.get(d, 0.0) + m.get("seconds", 0.0)
+    slowest = sorted(results, key=lambda r: -r.get("seconds", 0.0))[:30]
+    data = {"wall_s": round(seconds, 1),
+            "actions_s": round(sum(a["s"] for a in by_action.values()), 1),
+            "prepare_s": round(sum(prepare_s.values()), 1),
+            "by_action": by_action, "rpc": rpc, "prepare": prepare_s,
+            "designs": design_s,
+            "slowest": [{k: r.get(k) for k in ("unit", "entity", "action",
+                                                "outcome", "seconds")}
+                        for r in slowest]}
+    with open(os.path.join(out, "profile.json"), "w") as f:
+        json.dump(data, f, indent=1)
+    lines = [f"# Action matrix profile", "",
+             f"{seconds:.0f} s wall; the actions {data['actions_s']:.0f} s "
+             f"and the designs' builds {data['prepare_s']:.0f} s, summed "
+             f"over workers.", "", "## By action", "",
+             "| action | n | total s | mean ms | max s |", "|---|---|---|---|---|"]
+    for a, v in sorted(by_action.items(), key=lambda kv: -kv[1]["s"]):
+        lines.append(f"| {a} | {v['n']} | {v['s']:.1f} | "
+                     f"{1000 * v['s'] / max(v['n'], 1):.0f} | {v['max']:.1f} |")
+    lines += ["", "## By RPC", "", "| method | calls | total s | mean ms |",
+              "|---|---|---|---|"]
+    for mth, (n, s_) in sorted(rpc.items(), key=lambda kv: -kv[1][1]):
+        lines.append(f"| {mth} | {n} | {s_:.1f} | {1000 * s_ / max(n, 1):.1f} |")
+    lines += ["", "## Building the designs (slowest 20)", "",
+              "| design | s |", "|---|---|"]
+    for d, s_ in sorted(prepare_s.items(), key=lambda kv: -kv[1])[:20]:
+        lines.append(f"| {d} | {s_:.1f} |")
+    lines += ["", "## Slowest actions", "",
+              "| unit | entity | action | outcome | s |", "|---|---|---|---|---|"]
+    for r in slowest:
+        lines.append(f"| {r['unit']} | {r['entity'][:60]} | {r['action']} | "
+                     f"{r['outcome']} | {r.get('seconds', 0):.1f} |")
+    with open(os.path.join(out, "profile.md"), "w") as f:
+        f.write("\n".join(lines) + "\n")
+    print(f"action_matrix: profile {os.path.join(out, 'profile.md')}")
 
 
 # --- determinism ----------------------------------------------------------
@@ -1849,8 +1940,15 @@ class Fake:
             self.state["features"] = self.state["features"][:1]
             self.state["bodies"] = [dict(BOX)]
             self.state["revision"]["version"] += 1
-            return {}
+            return self.undo_answer()
         raise AssertionError(f"the fake has no {method}")
+
+    def undo_answer(self):
+        """What the app's undo answers: the bodies' digest, the feature
+        count and the revision."""
+        return {"digest": {"bodies": [dict(b) for b in self.state["bodies"]]},
+                "feature_count": len(self.state["features"]),
+                "revision": dict(self.state["revision"])}
 
 
 BOX = {"created_by": 1, "name": "Box", "volume_mm3": 1000.0,
@@ -1911,6 +2009,15 @@ def self_test():
         return {}
     expect("an undo that did not restore", {"add_feature": accepted()},
            "finding", "undo", undo=bad_undo)
+
+    def bad_undo_digest(params, state):
+        state["features"] = state["features"][:1]
+        state["bodies"] = [dict(BOX, volume_mm3=990.0)]
+        return {"digest": {"bodies": [dict(b) for b in state["bodies"]]},
+                "feature_count": 1, "revision": dict(state["revision"])}
+    expect("an undo whose own digest says it did not restore",
+           {"add_feature": accepted()}, "finding", "undo",
+           undo=bad_undo_digest)
 
     def cut_adds(params, state):
         state["features"].append({"id": 2})
@@ -1988,6 +2095,7 @@ def main():
     r.add_argument("--out", default="")
     r.add_argument("--determinism", action="store_true")
     r.add_argument("--bless", action="store_true")
+    r.add_argument("--profile", action="store_true")
     b = sub.add_parser("bless")
     b.add_argument("--from", dest="from_dir", required=True)
     sub.add_parser("self-test")

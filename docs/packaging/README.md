@@ -36,9 +36,14 @@ the absence of a literal anywhere else.
    `<description>`. That description IS the release notes: software
    centres show it, and the GitHub release takes the same text
    (`tools/release-notes.py`).
-2. Run the release workflow by hand (`workflow_dispatch`): it builds and
+2. Run the full [action matrix](../modeling/README.md#action-matrix) here,
+   against the committed baseline (`tools/ctest -C action_matrix -L
+   action_matrix -j4`): CI runs only its sample, and a pass that became a
+   fail on any face of the corpus is a regression a release should not
+   carry. `tools/ci-local.sh --asan` belongs here too (CLAUDE.md).
+3. Run the release workflow by hand (`workflow_dispatch`): it builds and
    smokes everything and publishes nothing.
-3. Push the tag `v<VERSION>`.
+4. Push the tag `v<VERSION>`.
 
 On the tag, `release.yml` refuses a tag that is not `v` + `VERSION` or whose
 metainfo release is missing or has no notes. It then builds, in parallel:

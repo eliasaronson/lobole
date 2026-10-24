@@ -512,9 +512,16 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "selection:{mesh:int, face:int, normal:number[], "
      "center:number[]}|null, selection_items:{kind:string, id?:int, "
      "path?:int[], element?:object}[], view_rollback:int"},
-    {"undo", "Undo one step (assembly snapshot history on an assembly tab).",
+    {"undo",
+     "Undo one step (assembly snapshot history on an assembly tab). On a "
+     "part tab the answer carries the bodies' `digest` (as add_feature's: "
+     "each body's volume and bbox, and the delta), `feature_count` and the "
+     "part's `revision`, so what the step gave back needs no get_state.",
      "", remote::NotInBatch},
-    {"redo", "Redo one step.", "", remote::NotInBatch},
+    {"redo",
+     "Redo one step; on a part tab with the bodies' `digest`, "
+     "`feature_count` and `revision`, as undo.",
+     "", remote::NotInBatch},
     {"view",
      "Orient the camera to a named view {name: front|back|left|right|top|"
      "bottom|iso}.",
@@ -2351,15 +2358,37 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
     // only `can_undo`, so a script learned nothing about the state it had just
     // restored. `state.document` is re-read AFTER the undo: a tab switch is
     // undoable, so the active document may not be the one captured above.
+    //
+    // And the bodies' digest, as add_feature answers with: what the step
+    // gave back, in the call that gave it, so a caller checking an undo
+    // (tools/action_matrix.py) needs no get_state after it.
+    const json pre = state.document ? remote::BodyDigestJson(*state.document)
+                                    : json::array();
     ui::GlobalUndo(state);
     json out = {{"can_undo", ui::CanGlobalUndo(state)}};
     remote::AttachRegen(out, state.document.get());
+    if (state.document) {
+      out["digest"] = remote::DigestJson(pre, *state.document);
+      out["feature_count"] = state.document->FeatureCount();
+      for (const ui::PartSlot& slot : state.parts)
+        if (ui::PartDocById(state, slot.id) == state.document.get())
+          out["revision"] = remote::PartRevision(*state.document, slot.id);
+    }
     return out;
   }
   if (m == "redo") {
+    const json pre = state.document ? remote::BodyDigestJson(*state.document)
+                                    : json::array();
     ui::GlobalRedo(state);
     json out = {{"can_redo", ui::CanGlobalRedo(state)}};
     remote::AttachRegen(out, state.document.get());
+    if (state.document) {
+      out["digest"] = remote::DigestJson(pre, *state.document);
+      out["feature_count"] = state.document->FeatureCount();
+      for (const ui::PartSlot& slot : state.parts)
+        if (ui::PartDocById(state, slot.id) == state.document.get())
+          out["revision"] = remote::PartRevision(*state.document, slot.id);
+    }
     return out;
   }
   if (m == "list_parts") {

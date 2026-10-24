@@ -1283,7 +1283,7 @@ non-destructively, never on the cached shape itself.
 
     tools/action_matrix.py run [--sample] [--shard K/N] [--design PAT]
                                [--actions a,b] [--jobs N] [--out DIR]
-                               [--determinism] [--bless]
+                               [--determinism] [--bless] [--profile]
     tools/action_matrix.py bless --from DIR
     tools/action_matrix.py replay CASE.json [--timeout S]
     tools/action_matrix.py self-test
@@ -1301,6 +1301,16 @@ of them), so every shard builds it and takes the actions whose (part, family
 or entity) hashes to it. `replay CASE` builds a reproduction's design in a
 fresh instance, sends its one action and judges it (a JSONL row of a run is
 a case too).
+
+**Where the time goes.** `--profile` writes `profile.md` (and `.json`) beside
+the report: seconds per action, per RPC and per design's build, and the
+slowest single actions, so the next slow class is found from a measurement.
+An action is its call, the checks on its answer and an `undo`, whose answer
+carries the bodies' digest, the feature count and the revision: the check
+after the undo is held to that, with no `get_state` (a full one per action
+was a large share of the matrix's own time). A design is built in every
+shard that holds its units: the builds are about 1 % of a sweep (40 s of
+2,994 in the run that measured it), so they are not shared between shards.
 
 **Blessing.** `run --bless` rewrites the baseline from a whole run and
 refuses a partial one (`--sample`, `--design`, `--actions`, `--shard`);

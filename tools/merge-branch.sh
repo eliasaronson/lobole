@@ -6,7 +6,8 @@
 #
 #   tools/merge-branch.sh BRANCH            # test-fast after the build
 #   tools/merge-branch.sh BRANCH --full     # the headless suite, the big
-#                                           # generators and the GUI suite
+#                                           # generators, the GUI suite and
+#                                           # the full action matrix
 #   tools/merge-branch.sh BRANCH --pick-only  # pick and number, then stop:
 #                                           # no build, no suite, no removal
 #
@@ -167,6 +168,13 @@ if [ "$full" = 1 ]; then
   "$root/tools/gui-tests-xvfb.sh" |
     grep -E '^--- shard|test failed|Error |archived:|^GUI tests: [0-9]+/|^MISMATCH' |
     sed 's/\x1b\[[0-9;]*m//g'
+  # The full action matrix (docs/modeling/README.md#action-matrix) against
+  # the committed baseline: every ordinary action on every face, edge and
+  # body of the corpus, which the headless suite only samples. Last, and
+  # four shards at a time: each is an instance of its own.
+  "$root/tools/ctest" -C action_matrix -L action_matrix -j4 \
+    --output-on-failure 2>&1 | tee -a "$suite_log" |
+    grep -E 'tests passed|\(Failed\)|\(Timeout\)|^  - '
 else
   "$root/tools/test-fast.sh" 2>&1 | tee "$suite_log" |
     grep -E 'tests passed|\(Failed\)'
