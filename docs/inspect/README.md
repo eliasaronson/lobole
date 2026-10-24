@@ -232,7 +232,8 @@ source plane's in-plane axes), flip, and visibility.
   tab is shown.
 - The limit of four is the shadow pass's: it carries its planes in push
   constants beside a `mat4`, and four `vec4` planes fill Vulkan's guaranteed
-  128 bytes (`kMaxClipPlanes`, `src/render/ClipPlanes.h`).
+  128 bytes (`kMaxClipPlanes`, `src/render/ClipPlanes.h`). A `project.json`
+  listing more is refused on open: the app never writes one.
 
 RPCs: `add_section`, `list_sections`, `update_section`, `remove_section`
 (`{all: true}` clears), and `set_section` as the one-cut shorthand. The

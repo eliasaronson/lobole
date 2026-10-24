@@ -70,6 +70,20 @@ The loader refuses, naming it:
   the last and drops the first), or nests a value deeper than 256 levels
   (`kMaxJsonDepth`: nlohmann copies and prints a value recursively, and ten
   thousand nested brackets ran a copy off the stack);
+- a part listing more than 50 000 features (`kMaxPartFeatures`, beside
+  `kMaxJsonDepth` in `src/core/io/ReadContext.h`): "a part holds at most
+  50 000 features; this one lists 104 857". Both part loaders check the
+  `features` list (the single file's, the directory's index) before one
+  feature is built, so the refusal costs the parse and nothing more: a v1
+  box grown to 104 857 copies of its feature had rebuilt past 8 GB. It is
+  a sanity bound, not a default: the largest real part here holds a few
+  hundred, and one near the limit would take far too long to rebuild to
+  be used. An assembly's occurrences are not limited. So that the app
+  never writes a part it cannot open, `add_feature` (a `batch` too, and
+  `derive_occurrence`) refuses the feature that would take a part past it,
+  naming the limit, and the tool window shows the same refusal and keeps
+  Accept disabled. If real work ever reaches it, it is raised in that one
+  place;
 - a key no reader of that object knows, naming it and every key that is
   accepted (`readctx::RefuseUnknownKeys`, in every `…FromJson`, in the
   envelopes and in `project.json`). A newer build's keys come with a newer
@@ -94,22 +108,45 @@ The loader refuses, naming it:
   listed one a million times), and a CAM operation listing one target
   twice;
 - an asset an image or a Derived snapshot names and `assets/` (or the
-  single file's `assets` map) does not hold;
+  single file's `assets` map) does not hold, naming the feature file that
+  names it too (the damage may be in that name);
 - a document of another kind; in `project.json`, a document entry with no
   `type` or one this build does not know, a `dir` that is not there, an id
-  listed twice;
+  listed twice, more section cuts than the renderer carries
+  (`kMaxClipPlanes`, 4, which is all `AddSection` allows);
 - a name, a path or a symlink that would reach outside the project
   ([format.md](format.md#paths-in-a-project));
 - a value of the right type that a writer would not write back: a
-  fixed-size array of another size (`[x, y, z]` with a fourth number), half
-  an element reference, an element of no feature where the writer writes
-  only a set one, a constraint point ref out of its range, a leader that
-  points at nothing, an `fcf` frame on a note that is not one, a relation's
-  `ride` without its `teeth`, a flat mill with a `tip_angle`, tabs without a
-  count, an `active_configuration` the document does not have, a sketch
-  plane whose axis lies along its normal, a `rollback` past the last
-  feature, an instance or generation id in a Derived copy that is not a
-  whole number.
+  fixed-size array of another size (`[x, y, z]` with a fourth number, an
+  explode step's offset of four), half an element reference, an element of
+  no feature where the writer writes only a set one (a sketch's `face_ref`
+  with feature 0), a constraint point ref out of its range, a leader that
+  points at nothing, an `fcf` frame on a note that is not one, a flat mill
+  with a `tip_angle`, tabs without a count, an `active_configuration` the
+  document does not have, a sketch plane whose axis lies along its normal,
+  a `rollback` past the last feature, a Hole's `thread_depth` or
+  `drill_point_deg` below 0 (written only above it), an `angle_deg` or
+  `value_deg` past a full turn (written as radians, which the next read
+  would refuse), a print row's `to_mm` at or past the and-up sentinel, a
+  template instance's value naming no parameter of its definition;
+- an id that is not one: not a whole number (2^64 parses as a float and
+  read as 0, "none": an `active_configuration`, a CAM target's `part`, a
+  drawing view's `base_view`), 0 where the writer writes only a real one (a
+  relation ride's `mate` of -0), a sketch entity id past the 32 bits it is
+  stored in (2^53 + 1 narrowed to entity 1), an instance or generation id in
+  a Derived copy;
+- a key the writer writes only beside another, without it: a relation's
+  `ride` without its `teeth`, one of `teeth_a` / `teeth_b`, an occurrence's
+  `attach_offset`, `attach_rotation` or `attach_seat` without
+  `attached_to`, a CAM stock's `size` or `place` without mode `"fixed"`, a
+  `finish_stock` without its `finish_tool`, a clearance assertion's
+  `measured_mm`, `checked_key` or `note` without its `verdict`, an assembly
+  sequence without steps, a `name` beside a print envelope's `profile`
+  (which would write over it), and a key of another kind or analysis (a
+  spline Curve3D's `axis`, a static study's `num_modes` or topology keys);
+- a pre-v4 sketch listing one constraint twice: the migration drops a
+  constraint on a rigid rect, and a list grown to 155 344 copies of one
+  lost every copy.
 
 A save refuses an item with id 0 (see [format.md](format.md#stability-guarantees)).
 
@@ -560,7 +597,11 @@ line and the list.
   lost: changed, it changes the save (or is refused), which is how the
   harness tells it from a value the reader ignores. The saved copy must load
   and save again to the same bytes (geometry aside: a rebuilt body and one
-  read back write different B-Rep bytes). Item counts (features,
+  read back write different B-Rep bytes). A sketch's projected entities
+  (an external reference's `gen_ids`) are derived, like bodies: every
+  regeneration projects them again, so damage to the sketch the face came
+  from changes them as an edit would, and they are not counted. Item
+  counts (features,
   occurrences, views, setups, …) must be the original's unless a lossy drop
   was reported; bodies only where the damage cannot change the model;
 - budget: 2 s of CPU time a case (20 s under `ENABLE_SANITIZERS`), or four
@@ -608,8 +649,17 @@ contending `tools/with-cpu-load.sh` burners: its read takes about five times
 that in wall time, past the budget, and must pass.
 
 **By hand.** `tools/reader-fuzz.py run --seed S [--family F] [--only TEXT]`
-reruns the full sweep with another base seed (ctest's is fixed) and prints
-the failures; `LOBOLE_READER_FUZZ_OPS=a,b` narrows a run to operators.
+reruns the full sweep with another base seed (ctest's is fixed: a seed that
+moved would make the suite's result depend on the day) and prints the
+failures; `LOBOLE_READER_FUZZ_OPS=a,b` narrows a run to operators. Run it
+under `systemd-run --user --scope -p MemoryMax=8G`: nothing but ctest's
+`TIMEOUT` stops a case, and before `kMaxPartFeatures` one reached 23 GB.
+Every family takes about 25 minutes a seed. Seeds 1 to 3 over every family
+run clean; what they found is the refusals above and the cases in
+`tests/reader_cases/`, by kind: a number past an integer's range (2^64,
+2^53 + 1, -0) read into an id; a key the writer writes only beside
+another; a list longer than the app ever writes; a feature built on a
+sketch that failed, which spun a boolean for minutes.
 `tools/reader-fuzz.py case <id>` writes one case — the damaged file or tree,
 as bytes, not the id — to `tests/reader_cases/<name>/input/` with an
 `expect.json` (`refused` and the substrings its message holds, `loads` with
@@ -636,7 +686,9 @@ hidden `[.reader_corpus]` case over generator output under `scratch/`
 | `tests/test_command_modify.cpp` | a modified feature keeps its id; no id-0 item is written |
 | `tests/headless_smoke.py` | autosave across a SIGKILL, the disk guard end to end with `force` and Save As |
 | `tests/test_reader_fuzz.cpp` `[reader_fuzz]` | the mutation library's own test, the harness's planted readers, and the sweep ([reader fuzzing](#reader-fuzzing)) |
-| `tests/test_reader_cases.cpp` | every regression in `tests/reader_cases/` reads as its `expect.json` says |
+| `tests/test_reader_cases.cpp` | every regression in `tests/reader_cases/` reads as its `expect.json` says; a part past `kMaxPartFeatures` is refused before it is built, in seconds and under 100 MB, in either form |
+| `tests/feature_limit_smoke.py` | `add_feature` (and a batch) past `kMaxPartFeatures` is refused naming the limit, changing nothing; a part at the limit saves and opens |
+| GUI `document/accept_refused_past_the_feature_limit` | the tool window's Accept is disabled past the limit, and the keyboard's accept does nothing |
 | `tests/lossy_open_smoke.py` | `open_project` reports an unlisted feature file in `dropped`; `save_project` over it is refused until `overwrite_lossy`, and a save elsewhere is not |
 | GUI `disk/a_lossy_open_asks_before_saving_over` | Save raises the choice; Cancel keeps the file, Overwrite anyway saves over it (Save a copy… is not clicked: it opens the system dialog) |
 | GUI `autosave/recovers_every_document` | a multi-document project autosaves each dirty document and recovers all of them |

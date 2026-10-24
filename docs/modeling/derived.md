@@ -138,7 +138,8 @@ this part (`derived::WouldCycle`, naming the chain); from a part not in the
 project; a `bodies`/`body_names` filter the source does not satisfy; a
 `configuration` the source does not have, or one it fails to build in.
 `derive_occurrence` outside an in-context edit, or on an occurrence that is not
-a neighbour, is refused.
+a neighbour, is refused, and so is one that would take the part past 50 000
+features ([../versioning/README.md](../versioning/README.md#what-a-load-refuses)).
 
 ## Verbs
 

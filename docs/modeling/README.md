@@ -241,8 +241,10 @@ from sketches.
   that face ([../variables/README.md](../variables/README.md#literals-that-should-be-expressions)).
 - **A lost reference is the sketch's error**, never the world plane: a
   deleted or suppressed datum, sketch or frame ("the plane this sketch is on
-  ... is gone"), a face that no longer resolves. An Extrude or Revolve whose
-  sketch failed fails too, rather than building from the sketch's last plane.
+  ... is gone"), a face that no longer resolves. A feature whose sketch
+  failed (Extrude, Revolve, Loft, Rib, Hole, Normal Cut, Jog, Base Flange,
+  Sweep's profile) fails too, rather than building from the sketch's last
+  plane ([../sketching/README.md](../sketching/README.md)).
 
 The stored `BoxFeature`, `CylinderFeature` and `SphereFeature`
 (`src/core/Feature.h`) remain for two readers only: older documents that carry

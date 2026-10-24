@@ -462,7 +462,7 @@ static constexpr MethodDoc ModelingMethods[] = {
      "(OccMatrix(edited)^-1 * OccMatrix(neighbour)); {occurrence, name?, "
      "reference?: true, bodies?: [created_by ids], body_names?: [names]}. "
      "Returns {index, id, "
-     "regen, digest}.",
+     "regen, digest}. Refused past a part's 50 000 features.",
      "bodies, body_names, name, occurrence, reference", remote::NeedsPart},
     {"modify_feature",
      "Change a feature to `feature` JSON; one undo step; returns {regen} "

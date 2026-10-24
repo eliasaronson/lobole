@@ -96,6 +96,10 @@ For a feature preview the window shows the slot rows and parameters, then:
   `GetError()`, a regeneration failure) and is enforced by
   `AcceptPendingFeature` and by the `add_feature` RPC, so a script is refused
   exactly what the GUI refuses;
+- the feature-count refusal, Accept disabled, when accepting would take the
+  part past 50 000 features (`kMaxPartFeatures`,
+  [../versioning/README.md](../versioning/README.md#what-a-load-refuses)),
+  which `add_feature` refuses the same way;
 - "**Changes nothing - the model would be identical without this feature**"
   in amber, with **Accept left enabled**. It compares
   `CachedBodiesAfter(idx - 1)` with `CachedBodiesAfter(idx)` (a comparison,
