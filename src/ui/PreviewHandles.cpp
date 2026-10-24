@@ -13,6 +13,8 @@
 #include "core/Measure.h"
 #include "core/features/ExtrudeFeature.h"
 #include "core/features/FilletFeature.h"
+#include "core/features/MoveFaceFeature.h"
+#include "core/features/OffsetFaceFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/SketchFeature.h"
 #include "ui/DragMath.h"
@@ -109,6 +111,10 @@ enum class HandleParam : int {
   Twist,     // extrude twist, degrees
   Radius,    // fillet / chamfer
   Angle,     // revolve, degrees
+  Offset,    // Offset Face's distance, along the first face's normal
+  MoveX,     // Move Face's translation, one arrow per axis
+  MoveY,
+  MoveZ,
 };
 
 // What one of the pending feature's handles looks like this frame.
@@ -267,6 +273,74 @@ bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
     return true;
   }
 
+  // The direct edits: the faces resolve on the edit's INPUT body, which is
+  // where they were picked (the preview shows them already moved).
+  if (auto* off = dynamic_cast<OffsetFaceFeature*>(f)) {
+    if (!off->distanceExpr.empty() || off->faces.empty() || index == 0)
+      return false;
+    const std::vector<Body>* input = doc.CachedBodiesAfter(index - 1);
+    if (input == nullptr)
+      return false;
+    for (const Body& body : *input) {
+      if (body.createdBy != off->bodyId)
+        continue;
+      const auto at = body.elementMap.Resolve(off->faces.front().name);
+      if (!at)
+        return false;
+      const auto info = Measure::DescribeFaceAt(body, *at);
+      const auto in = Measure::FaceInsetAt(body, *at);
+      if (!info || glm::length(info->normal) < 1e-9)
+        return false;
+      const glm::dvec3 n = glm::normalize(info->normal);
+      const glm::dvec3 on = in ? in->point : info->centroid;
+      HandleSpec spec;
+      spec.param = HandleParam::Offset;
+      spec.anchor = on + n * off->distance; // rides on the moved face
+      spec.dir = n;
+      spec.value = off->distance;
+      out.push_back(spec);
+      return true;
+    }
+    return false;
+  }
+  if (auto* mv = dynamic_cast<MoveFaceFeature*>(f)) {
+    if (mv->faces.empty() || index == 0)
+      return false;
+    const std::vector<Body>* input = doc.CachedBodiesAfter(index - 1);
+    if (input == nullptr)
+      return false;
+    for (const Body& body : *input) {
+      if (body.createdBy != mv->bodyId)
+        continue;
+      glm::dvec3 sum(0.0);
+      double area = 0.0;
+      for (const ElementRef& r : mv->faces)
+        if (const auto at = body.elementMap.Resolve(r.name))
+          if (const auto info = Measure::DescribeFaceAt(body, *at)) {
+            sum += info->centroid * info->area;
+            area += info->area;
+          }
+      if (!(area > 0.0))
+        return false;
+      const glm::dvec3 centre = sum / area + mv->translate;
+      const HandleParam params[3] = {HandleParam::MoveX, HandleParam::MoveY,
+                                     HandleParam::MoveZ};
+      for (int a = 0; a < 3; a++) {
+        if (!mv->translateExpr[a].empty())
+          continue;
+        HandleSpec spec;
+        spec.param = params[a];
+        spec.anchor = centre;
+        spec.dir = glm::vec3(0.0f);
+        spec.dir[a] = 1.0f;
+        spec.value = mv->translate[a];
+        out.push_back(spec);
+      }
+      return !out.empty();
+    }
+    return false;
+  }
+
   if (auto* rev = dynamic_cast<RevolveFeature*>(f)) {
     if (!rev->angleExpr.empty())
       return false;
@@ -342,7 +416,17 @@ void ApplyHandleValue(AppState& state, Feature& f, HandleParam param,
   auto* ext = dynamic_cast<ExtrudeFeature*>(&f);
   auto* fil = dynamic_cast<FilletFeature*>(&f);
   auto* rev = dynamic_cast<RevolveFeature*>(&f);
-  if (ext && param == HandleParam::Distance)
+  auto* off = dynamic_cast<OffsetFaceFeature*>(&f);
+  auto* mv = dynamic_cast<MoveFaceFeature*>(&f);
+  if (off && param == HandleParam::Offset)
+    // Either way through the face, never onto it: zero offsets nothing.
+    off->distance =
+        std::abs(v) < kMinLength ? (v < 0 ? -kMinLength : kMinLength) : v;
+  else if (mv && (param == HandleParam::MoveX || param == HandleParam::MoveY ||
+                  param == HandleParam::MoveZ))
+    mv->translate[static_cast<int>(param) -
+                  static_cast<int>(HandleParam::MoveX)] = v;
+  else if (ext && param == HandleParam::Distance)
     ext->distance = std::max(v, kMinLength);
   else if (ext && param == HandleParam::Distance2)
     ext->distance2 = std::max(v, kMinLength);
@@ -366,6 +450,13 @@ double CurrentHandleValue(const Feature& f, HandleParam param) {
     return fil->radius;
   if (auto* rev = dynamic_cast<const RevolveFeature*>(&f))
     return rev->angleDeg;
+  if (auto* off = dynamic_cast<const OffsetFaceFeature*>(&f))
+    return off->distance;
+  if (auto* mv = dynamic_cast<const MoveFaceFeature*>(&f))
+    if (param == HandleParam::MoveX || param == HandleParam::MoveY ||
+        param == HandleParam::MoveZ)
+      return mv->translate[static_cast<int>(param) -
+                           static_cast<int>(HandleParam::MoveX)];
   return 0.0;
 }
 

@@ -137,6 +137,13 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
   static const std::set<std::string> kUnboundByDesign = {
       // Menu-only.
       "file.export",
+      // Direct edit (docs/modeling/README.md#direct-edit): four tools in one
+      // toolbar flyout, reached far less often than the features that make
+      // a part; a chord each would spend four mnemonics.
+      "part.delete_face",
+      "part.offset_face",
+      "part.move_face",
+      "part.replace_face",
       "view.reset_layout",
       "view.controls_help",
       // The sketch "more constraints" flyout: a constraint used once a month

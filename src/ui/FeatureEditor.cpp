@@ -15,6 +15,7 @@
 
 #include "cad/CADMaterials.h"
 #include "cad/SketchPlane.h"
+#include "core/DirectEdit.h"
 #include "core/Expression.h"
 #include "core/Feature.h"
 #include "core/ThreadStandards.h"
@@ -24,6 +25,7 @@
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/DeleteFaceFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
@@ -35,11 +37,14 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/JogFeature.h"
 #include "core/features/LoftFeature.h"
+#include "core/features/MoveFaceFeature.h"
 #include "core/features/NormalCutFeature.h"
+#include "core/features/OffsetFaceFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/features/RefineFeature.h"
 #include "core/features/RefoldFeature.h"
+#include "core/features/ReplaceFaceFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/ShellFeature.h"
@@ -201,6 +206,59 @@ void RefListRows(AppState& state, Feature& feature, size_t index, bool commit,
     ImGui::TextDisabled("%s", refs[e].name.c_str());
     ImGui::PopID();
   }
+}
+
+// "Add the feature" under a direct edit's face list
+// (docs/modeling/README.md#delete-face): grows the picks to the faces of the
+// one feature they belong to -- a hole's bore takes its floor -- on the
+// edit's INPUT body, and puts the result in the list, where the preview
+// shows it before anything is accepted. Never done silently: a set no loop
+// bounds stays as it was, and says why under the button.
+void AddTheFeatureRow(AppState& state, Feature& feature, size_t index,
+                      bool commit, std::vector<ElementRef>& faces) {
+  static std::string why;
+  static uint64_t whyFor = 0;
+  ImGui::BeginDisabled(faces.empty());
+  if (ImGui::Button("Add the feature###add_feature")) {
+    why.clear();
+    whyFor = feature.GetId();
+    const std::vector<Body>* input =
+        index > 0 ? state.document->CachedBodiesAfter(index - 1) : nullptr;
+    const Body* body = nullptr;
+    if (input != nullptr)
+      for (const Body& b : *input)
+        if (b.createdBy == faces.front().featureId)
+          body = &b;
+    std::vector<int> seeds;
+    for (const ElementRef& r : faces)
+      if (body != nullptr)
+        if (const auto at = body->elementMap.Resolve(r.name))
+          seeds.push_back(*at);
+    std::optional<std::vector<int>> grown;
+    if (body == nullptr || seeds.size() != faces.size())
+      why = "the picked faces are not on the edit's input body";
+    else
+      grown = directedit::FeatureFaces(*body, seeds, &why);
+    if (grown) {
+      nlohmann::json before = DocumentIO::FeatureToJson(feature);
+      std::vector<ElementRef> next;
+      for (const int i : *grown)
+        if (const std::string* n = body->elementMap.NameOf(i))
+          next.push_back({body->createdBy, *n});
+      if (next.size() == grown->size()) {
+        faces = std::move(next);
+        CommitDiscrete(state, feature, before, index, commit);
+      } else {
+        why = "a face of the feature has no name to pick it by";
+      }
+    }
+  }
+  ImGui::EndDisabled();
+  if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    ImGui::SetTooltip("Grow the picks to the whole hole, boss or pocket "
+                      "they belong to");
+  if (!why.empty() && whyFor == feature.GetId())
+    ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.3f, 1.0f), "%s", why.c_str());
 }
 
 constexpr uint32_t SlotKind(SelectionItem::Kind k) {
@@ -881,6 +939,24 @@ bool ToggleRefInList(std::vector<ElementRef>& v, const ElementRef& r) {
   return true;
 }
 
+// A direct edit's face list (docs/modeling/README.md#direct-edit): one body,
+// named by the first face, as Draft's is. A face picked afresh is
+// fingerprinted afresh, so re-picking a positional face that no longer
+// matches its print is the repair it should be.
+bool ToggleDirectFace(uint64_t& bodyId, std::vector<ElementRef>& faces,
+                      directedit::Fingerprints& prints,
+                      const SelectionItem& item) {
+  if (item.kind != SelectionItem::Kind::Face)
+    return false;
+  if (faces.empty())
+    bodyId = item.element.featureId;
+  else if (item.element.featureId != bodyId)
+    return false;
+  prints.erase(item.element.name);
+  ToggleRefInList(faces, item.element);
+  return true;
+}
+
 // Writes one picked item into the feature field `slot` names. Returns true
 // when the feature changed (the caller commits). The blend-edge case needs
 // the pick's render handles (meshId/index) for the input-body remap; other
@@ -930,6 +1006,72 @@ bool ApplySlotItem(AppState& state, Feature& f, PickSlot slot,
         th != nullptr && item.kind == SelectionItem::Kind::Face) {
       th->face = item.element;
       return true;
+    }
+    return false;
+  case PickSlot::DeleteFaceFaces:
+    if (auto* del = dynamic_cast<DeleteFaceFeature*>(&f))
+      return ToggleDirectFace(del->bodyId, del->faces, del->fingerprints, item);
+    return false;
+  case PickSlot::OffsetFaceFaces:
+    if (auto* off = dynamic_cast<OffsetFaceFeature*>(&f)) {
+      const bool first = off->faces.empty();
+      if (!ToggleDirectFace(off->bodyId, off->faces, off->fingerprints, item))
+        return false;
+      // The first face of a fresh tool derives the distance from itself.
+      if (first && !off->faces.empty() && off->distanceExpr.empty() &&
+          state.pendingFeatureId == f.GetId())
+        off->distance = SizeFromFace(state, off->faces.front(), off->distance);
+      return true;
+    }
+    return false;
+  case PickSlot::MoveFaceFaces:
+    if (auto* mv = dynamic_cast<MoveFaceFeature*>(&f)) {
+      const bool first = mv->faces.empty();
+      if (!ToggleDirectFace(mv->bodyId, mv->faces, mv->fingerprints, item))
+        return false;
+      const bool literal =
+          std::all_of(mv->translateExpr.begin(), mv->translateExpr.end(),
+                      [](const std::string& e) { return e.empty(); });
+      if (first && !mv->faces.empty() && literal &&
+          state.pendingFeatureId == f.GetId())
+        mv->translate = DefaultFaceMove(state, mv->faces);
+      return true;
+    }
+    return false;
+  case PickSlot::ReplaceFaceFace:
+    if (auto* rp = dynamic_cast<ReplaceFaceFeature*>(&f);
+        rp != nullptr && item.kind == SelectionItem::Kind::Face) {
+      rp->fingerprints.erase(rp->face.name);
+      rp->face = item.element;
+      rp->bodyId = item.element.featureId;
+      rp->fingerprints.erase(rp->face.name);
+      return true;
+    }
+    return false;
+  case PickSlot::ReplaceFaceTarget:
+    if (auto* rp = dynamic_cast<ReplaceFaceFeature*>(&f)) {
+      if (item.kind == SelectionItem::Kind::Face) {
+        rp->fingerprints.erase(rp->targetFace.name);
+        rp->targetKind = ReplaceTargetKind::Face;
+        rp->targetFace = item.element;
+        rp->fingerprints.erase(rp->targetFace.name);
+        return true;
+      }
+      if (item.kind == SelectionItem::Kind::Feature && state.document) {
+        const Feature* row = state.document->FindFeatureById(item.id);
+        if (dynamic_cast<const DatumPlaneFeature*>(row) != nullptr) {
+          rp->targetKind = ReplaceTargetKind::Plane;
+          rp->targetId = item.id;
+          rp->targetFace = {};
+          return true;
+        }
+        if (dynamic_cast<const SketchFeature*>(row) != nullptr) {
+          rp->targetKind = ReplaceTargetKind::Sketch;
+          rp->targetId = item.id;
+          rp->targetFace = {};
+          return true;
+        }
+      }
     }
     return false;
   case PickSlot::GearBlank:
@@ -1140,6 +1282,27 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
     return {{PickSlot::DraftFaces, "Faces", kFace, true,
              "Click side faces to taper (click again to remove)"}};
   }
+  if (dynamic_cast<const DeleteFaceFeature*>(&feature) != nullptr) {
+    return {{PickSlot::DeleteFaceFaces, "Faces", kFace, true,
+             "Click the faces to delete (click again to remove)"}};
+  }
+  if (dynamic_cast<const OffsetFaceFeature*>(&feature) != nullptr) {
+    return {{PickSlot::OffsetFaceFaces, "Faces", kFace, true,
+             "Click the faces to offset (click again to remove)"}};
+  }
+  if (dynamic_cast<const MoveFaceFeature*>(&feature) != nullptr) {
+    return {{PickSlot::MoveFaceFaces, "Faces", kFace, true,
+             "Click the faces of the hole or boss to move (click again to "
+             "remove)"}};
+  }
+  if (dynamic_cast<const ReplaceFaceFeature*>(&feature) != nullptr) {
+    constexpr uint32_t kRow = SlotKind(SelectionItem::Kind::Feature);
+    return {{PickSlot::ReplaceFaceFace, "Face", kFace, false,
+             "Pick the face to replace"},
+            {PickSlot::ReplaceFaceTarget, "Onto", kFace | kRow, false,
+             "Pick the face to put it onto, or a datum plane or sketch in "
+             "the tree"}};
+  }
   if (dynamic_cast<const RibFeature*>(&feature) != nullptr) {
     // Optional: bodyId 0 = nearest overlapping body.
     return {{PickSlot::RibBody, "Body", kBody, false,
@@ -1198,6 +1361,18 @@ std::vector<SlotSpec> SlotSpecsFor(const Feature& feature) {
              "Click edges to add or remove them"}};
   }
   return {};
+}
+
+std::optional<PickSlot> DirectEditFaceSlot(const Feature& feature) {
+  if (dynamic_cast<const DeleteFaceFeature*>(&feature) != nullptr)
+    return PickSlot::DeleteFaceFaces;
+  if (dynamic_cast<const OffsetFaceFeature*>(&feature) != nullptr)
+    return PickSlot::OffsetFaceFaces;
+  if (dynamic_cast<const MoveFaceFeature*>(&feature) != nullptr)
+    return PickSlot::MoveFaceFaces;
+  if (dynamic_cast<const ReplaceFaceFeature*>(&feature) != nullptr)
+    return PickSlot::ReplaceFaceFace;
+  return std::nullopt;
 }
 
 bool ArmSlot(AppState& state, const Feature& feature, PickSlot slot) {
@@ -1262,6 +1437,36 @@ bool SlotFilled(const Feature& feature, PickSlot slot) {
   case PickSlot::ThreadFace: {
     auto* th = dynamic_cast<const ThreadFeature*>(&feature);
     return th != nullptr && !th->face.name.empty();
+  }
+  case PickSlot::DeleteFaceFaces: {
+    auto* del = dynamic_cast<const DeleteFaceFeature*>(&feature);
+    return del != nullptr && !del->faces.empty();
+  }
+  case PickSlot::OffsetFaceFaces: {
+    auto* off = dynamic_cast<const OffsetFaceFeature*>(&feature);
+    return off != nullptr && !off->faces.empty();
+  }
+  case PickSlot::MoveFaceFaces: {
+    auto* mv = dynamic_cast<const MoveFaceFeature*>(&feature);
+    return mv != nullptr && !mv->faces.empty();
+  }
+  case PickSlot::ReplaceFaceFace: {
+    auto* rp = dynamic_cast<const ReplaceFaceFeature*>(&feature);
+    return rp != nullptr && !rp->face.name.empty();
+  }
+  case PickSlot::ReplaceFaceTarget: {
+    auto* rp = dynamic_cast<const ReplaceFaceFeature*>(&feature);
+    if (rp == nullptr)
+      return false;
+    switch (rp->targetKind) {
+    case ReplaceTargetKind::Face:
+      return !rp->targetFace.name.empty();
+    case ReplaceTargetKind::Sketch:
+      return rp->targetId != 0;
+    case ReplaceTargetKind::Plane:
+      return true; // a base plane (0) or a datum
+    }
+    return false;
   }
   case PickSlot::GearBlank: {
     if (auto* wo = dynamic_cast<const WormFeature*>(&feature))
@@ -1985,6 +2190,71 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
         state, feature, PickSlot::DraftFaces,
         dr->faces.empty() ? "" : std::to_string(dr->faces.size()) + " picked");
     RefListRows(state, feature, index, commit, dr->faces);
+  } else if (auto* del = dynamic_cast<DeleteFaceFeature*>(&feature)) {
+    PickSlotRow(state, feature, PickSlot::DeleteFaceFaces,
+                del->faces.empty()
+                    ? ""
+                    : std::to_string(del->faces.size()) + " picked");
+    AddTheFeatureRow(state, feature, index, commit, del->faces);
+    RefListRows(state, feature, index, commit, del->faces);
+  } else if (auto* off = dynamic_cast<OffsetFaceFeature*>(&feature)) {
+    ExprDim(state, feature, index, commit, "Distance", off->distanceExpr,
+            off->distance, /*minValue=*/-1e6);
+    if (off->distanceExpr.empty()) {
+      // Out adds material, in removes it: the one choice a number's sign
+      // hides.
+      if (ImGui::Button("Flip###offset_flip")) {
+        nlohmann::json before = DocumentIO::FeatureToJson(feature);
+        off->distance = -off->distance;
+        CommitDiscrete(state, feature, before, index, commit);
+      }
+      ImGui::SameLine();
+      ImGui::TextDisabled("%s", off->distance >= 0.0
+                                    ? "outward (adds material)"
+                                    : "inward (removes material)");
+    }
+    PickSlotRow(state, feature, PickSlot::OffsetFaceFaces,
+                off->faces.empty()
+                    ? ""
+                    : std::to_string(off->faces.size()) + " picked");
+    RefListRows(state, feature, index, commit, off->faces);
+  } else if (auto* mv = dynamic_cast<MoveFaceFeature*>(&feature)) {
+    ExprDim(state, feature, index, commit, "Move X", mv->translateExpr[0],
+            mv->translate.x, /*minValue=*/-1e6);
+    ExprDim(state, feature, index, commit, "Move Y", mv->translateExpr[1],
+            mv->translate.y, /*minValue=*/-1e6);
+    ExprDim(state, feature, index, commit, "Move Z", mv->translateExpr[2],
+            mv->translate.z, /*minValue=*/-1e6);
+    ExprDim(state, feature, index, commit, "Rotate (deg)", mv->rotateExpr,
+            mv->rotateDeg, /*minValue=*/-360.0);
+    if (mv->rotateDeg != 0.0 || !mv->rotateExpr.empty())
+      DrawAxisRefCombo(state, feature, mv->axis, index, commit,
+                       /*sketchIdForLines=*/0);
+    PickSlotRow(
+        state, feature, PickSlot::MoveFaceFaces,
+        mv->faces.empty() ? "" : std::to_string(mv->faces.size()) + " picked");
+    AddTheFeatureRow(state, feature, index, commit, mv->faces);
+    RefListRows(state, feature, index, commit, mv->faces);
+  } else if (auto* rp = dynamic_cast<ReplaceFaceFeature*>(&feature)) {
+    PickSlotRow(state, feature, PickSlot::ReplaceFaceFace, rp->face.name);
+    std::string onto;
+    switch (rp->targetKind) {
+    case ReplaceTargetKind::Face:
+      onto = rp->targetFace.name;
+      break;
+    case ReplaceTargetKind::Sketch:
+    case ReplaceTargetKind::Plane:
+      if (rp->targetId != 0) {
+        const Feature* row = state.document->FindFeatureById(rp->targetId);
+        onto = row != nullptr ? row->GetName() : "(missing)";
+      } else {
+        onto = rp->basePlane == PlaneType::XY   ? "XY plane"
+               : rp->basePlane == PlaneType::XZ ? "XZ plane"
+                                                : "YZ plane";
+      }
+      break;
+    }
+    PickSlotRow(state, feature, PickSlot::ReplaceFaceTarget, onto);
   } else if (auto* ho = dynamic_cast<HoleFeature*>(&feature)) {
     const char* kinds[] = {"Simple", "Counterbore", "Countersink"};
     int k = std::to_underlying(ho->kind);

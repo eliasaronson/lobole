@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <optional>
 #include <span>
 
 #include "ui/AppState.h"
@@ -70,6 +71,14 @@ enum class PickSlot : int {
   // A worm's or a worm wheel's blank: its cylindrical outside face
   // (docs/modeling/worm-gears.md).
   GearBlank,
+  // The direct edits (docs/modeling/README.md#direct-edit): the faces each
+  // takes on one body, and Replace Face's one face and its target (a face,
+  // or a datum plane's or a sketch's row in the tree).
+  DeleteFaceFaces,   // Face, multi
+  OffsetFaceFaces,   // Face, multi
+  MoveFaceFaces,     // Face, multi
+  ReplaceFaceFace,   // Face
+  ReplaceFaceTarget, // Face, or a Feature row (datum plane, sketch)
 };
 
 // SlotPickState.featureId sentinel for the mate session's connector slots —
@@ -149,6 +158,11 @@ struct SlotSpec {
 // end-face slot exists only in Up-to-face mode). Empty for features without
 // pick slots.
 std::vector<SlotSpec> SlotSpecsFor(const Feature& feature);
+
+// The slot holding a direct edit's faces -- Delete, Offset or Move Face's
+// list, Replace Face's one face -- or nullopt for any other feature: what
+// the tree's "Pick faces…" arms.
+std::optional<PickSlot> DirectEditFaceSlot(const Feature& feature);
 
 // Arms `slot` on the feature (kinds/prompt from SlotSpecsFor). Returns false
 // when the feature doesn't currently expose that slot.

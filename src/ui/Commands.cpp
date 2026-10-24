@@ -495,6 +495,11 @@ const std::vector<Command>& Table() {
     add("part.worm_wheel", IdleBody, [](AppState& s) { CreateWormWheel(s); });
     add("part.draft", IdleBody, [](AppState& s) { CreateDraft(s); });
     add("part.shell", IdleBody, [](AppState& s) { CreateShell(s); });
+    add("part.delete_face", IdleBody, [](AppState& s) { CreateDeleteFace(s); });
+    add("part.offset_face", IdleBody, [](AppState& s) { CreateOffsetFace(s); });
+    add("part.move_face", IdleBody, [](AppState& s) { CreateMoveFace(s); });
+    add("part.replace_face", IdleBody,
+        [](AppState& s) { CreateReplaceFace(s); });
     add("part.rib", IdleBody, [](AppState& s) { CreateRib(s); });
     add(
         "part.boolean",

@@ -591,6 +591,23 @@ void DrawModelToolbar(AppState& state) {
 
   Divider();
 
+  // Direct edit (docs/modeling/README.md#direct-edit): changing a body's
+  // faces where they are, the way an imported part has to be changed.
+  static int directTool = 0;
+  CommandGroup(
+      state, "direct", directTool,
+      {{"###tb_delete_face", "part.delete_face",
+        "Delete face (remove faces and heal the gap: a hole fills, a boss "
+        "levels, a fillet gives back its edge)"},
+       {"###tb_offset_face", "part.offset_face",
+        "Offset face (move faces along their own normals)"},
+       {"###tb_move_face", "part.move_face",
+        "Move face (move a hole, boss or pocket rigidly)"},
+       {"###tb_replace_face", "part.replace_face",
+        "Replace face (put a face onto a plane or another face)"}});
+
+  Divider();
+
   // Sheet metal, in one group: nine tools in a row is most of a toolbar.
   static int sheetTool = 0;
   CommandGroup(

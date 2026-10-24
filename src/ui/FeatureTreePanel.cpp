@@ -122,6 +122,10 @@ const char* FeatureIcon(const std::string& type) {
       {"Hole", "part.hole"},
       {"Shell", "part.shell"},
       {"Draft", "part.draft"},
+      {"DeleteFace", "part.delete_face"},
+      {"OffsetFace", "part.offset_face"},
+      {"MoveFace", "part.move_face"},
+      {"ReplaceFace", "part.replace_face"},
       {"Split", "part.split"},
       {"Refine", "part.refine"},
       {"BaseFlange", "part.sheet_base_flange"},
@@ -367,6 +371,14 @@ void DrawFeatureTreePanel(AppState& state) {
           state.slotPick.Active() &&
           state.slotPick.slot == static_cast<int>(PickSlot::PatternSource) &&
           cutExt != nullptr && cutExt->mode == ExtrudeMode::Cut;
+      // A replaced face's target can be a plane the tree holds: a datum
+      // plane's row or a sketch's row is the pick while that slot is armed.
+      const bool armedForPlaneTarget =
+          state.slotPick.Active() &&
+          state.slotPick.slot ==
+              static_cast<int>(PickSlot::ReplaceFaceTarget) &&
+          (dynamic_cast<DatumPlaneFeature*>(feature) != nullptr ||
+           dynamic_cast<SketchFeature*>(feature) != nullptr);
       // A plain click replaces the WHOLE selection (a feature row drops
       // picked faces, as it always has); Ctrl toggles, Shift ranges.
       if (ImGui::Selectable(
@@ -379,6 +391,10 @@ void DrawFeatureTreePanel(AppState& state) {
           // A Body item IS {createdBy, ""} — a feature id — so the cut's id
           // travels the same slot path a body pick does.
           SlotPickClicked(state, {SelectionItem::Kind::Body, feature->GetId()},
+                          /*meshId=*/0, /*index=*/0);
+        } else if (armedForPlaneTarget) {
+          SlotPickClicked(state,
+                          {SelectionItem::Kind::Feature, feature->GetId()},
                           /*meshId=*/0, /*index=*/0);
         } else if (datum && state.sketchEdit.pickingPlane &&
                    (state.sketchEdit.purpose == SketchPurpose::Primitive ||
@@ -600,6 +616,19 @@ void DrawFeatureTreePanel(AppState& state) {
         if (fil != nullptr) {
           if (ImGui::MenuItem("Pick edges…")) {
             ArmSlot(state, *fil, PickSlot::BlendEdges);
+          }
+        }
+        // A direct edit's faces likewise: the repair for a face gone
+        // upstream, or a positional one that is no longer the face picked
+        // (docs/modeling/README.md#direct-edit).
+        if (const auto slot = DirectEditFaceSlot(*feature)) {
+          if (ImGui::MenuItem(*slot == PickSlot::ReplaceFaceFace
+                                  ? "Pick face…###pick_faces"
+                                  : "Pick faces…###pick_faces")) {
+            // The editor too: its list is where a face gone upstream is
+            // removed ("x"), and the viewport where its successor is picked.
+            OpenFeatureEditor(state, feature->GetId());
+            ArmSlot(state, *feature, *slot);
           }
         }
         // The selection, not just this row: "Delete 3 features" when three

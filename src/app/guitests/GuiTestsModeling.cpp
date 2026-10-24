@@ -7,8 +7,11 @@
 #include "core/Measure.h"
 #include "core/Primitives.h"
 #include "core/SheetMetal.h"
+#include "core/features/BooleanFeature.h"
+#include "core/features/DeleteFaceFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/FlatPatternFeature.h"
+#include "core/features/OffsetFaceFeature.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
 #include "ui/FeatureTreePanel.h"
@@ -21,6 +24,7 @@
 #include "ui/SettingsWindow.h" // OpenPreferences
 #include "ui/TemplateActions.h"
 #include "ui/VariableActions.h"
+#include "ui/ViewportHandle.h"
 
 #include <unistd.h> // getpid: a scratch file per shard
 
@@ -1647,6 +1651,252 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     ctx->Yield();
     IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
     IM_CHECK(std::abs(Doc()->GetBodies()[0].shape.Volume() - before) > 1e-3);
+  };
+
+  // Direct edit (docs/modeling/README.md#direct-edit). The fixture box with
+  // a hole in it, drilled from the top: through, or `depth` deep.
+  struct Drilled {
+    uint64_t body = 0; // the Boolean's id: the drilled body's createdBy
+    glm::dvec3 lo{0.0}, hi{0.0};
+    double box = 0.0; // the undrilled volume
+  };
+  static const auto drill = [](ImGuiTestContext* ctx, double depth) {
+    AddFixtureBox(ctx);
+    ctx->Yield();
+    Drilled d;
+    const uint64_t boxId = Doc()->GetFeature(0)->GetId();
+    Doc()->GetBodies()[0].shape.GetBoundingBox(d.lo, d.hi, true);
+    d.box = Doc()->GetBodies()[0].shape.Volume();
+    const glm::dvec3 c = (d.lo + d.hi) * 0.5;
+    const double h = d.hi.z - d.lo.z;
+    const double through = depth <= 0.0;
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::make_unique<CylinderFeature>(
+            "Bore",
+            glm::dvec3(c.x, c.y, through ? d.lo.z - 0.5 : d.hi.z - depth),
+            glm::dvec3(0, 0, 1), 0.3 * h, through ? h + 1.0 : depth + 0.5)),
+        *Doc());
+    const uint64_t cylId = Doc()->GetFeature(1)->GetId();
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::make_unique<BooleanFeature>(
+            "Drill", boxId, cylId, BooleanOp::Subtract)),
+        *Doc());
+    ctx->Yield(2);
+    d.body = Doc()->GetFeature(2)->GetId();
+    return d;
+  };
+  // The name of the drilled body's face nearest `p`.
+  static const auto faceAt = [](const Drilled& d, const glm::dvec3& p) {
+    for (const Body& b : Doc()->GetBodies()) {
+      if (b.createdBy != d.body)
+        continue;
+      std::string best;
+      double bestD = 1e9;
+      for (const auto& [i, n] : b.elementMap.names)
+        if (const auto dist = Measure::DistanceToElementAt(b, true, i, p, 1e-3);
+            dist && *dist < bestD) {
+          bestD = *dist;
+          best = n;
+        }
+      return ElementRef{d.body, best};
+    }
+    return ElementRef{};
+  };
+  static const auto bodyVolume = [](uint64_t id) {
+    for (const Body& b : Doc()->GetBodies())
+      if (b.createdBy == id)
+        return b.shape.Volume();
+    return 0.0;
+  };
+
+  // A preselected bore, deleted and accepted: the block is whole again.
+  t = IM_REGISTER_TEST(engine, "direct", "delete_preselected_bore");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const Drilled d = drill(ctx, 0.0);
+    IM_CHECK(bodyVolume(d.body) < d.box - 1e-3);
+    const glm::dvec3 c = (d.lo + d.hi) * 0.5;
+    const double r = 0.3 * (d.hi.z - d.lo.z);
+    const ElementRef bore = faceAt(d, {c.x + r, c.y, c.z});
+    IM_CHECK(!bore.name.empty());
+    s_App->selection.Clear();
+    s_App->selection.items.push_back({ui::SelectionItem::Kind::Face, 0, bore});
+    ToolbarClick(ctx, "###tb_delete_face");
+    ctx->Yield();
+    auto* del = dynamic_cast<DeleteFaceFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(del != nullptr);
+    IM_CHECK_EQ(del->faces.size(), (size_t)1); // seeded from the selection
+    IM_CHECK_EQ(del->bodyId, d.body);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
+    IM_CHECK(std::abs(bodyVolume(d.body) - d.box) < 1e-9 * d.box);
+  };
+
+  // "Add the feature" grows a blind hole's bore to its floor, shown in the
+  // list before anything is accepted.
+  t = IM_REGISTER_TEST(engine, "direct", "add_the_feature_takes_the_floor");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const Drilled d = drill(ctx, 1.0);
+    const glm::dvec3 c = (d.lo + d.hi) * 0.5;
+    const double r = 0.3 * (d.hi.z - d.lo.z);
+    const ElementRef bore = faceAt(d, {c.x + r, c.y, d.hi.z - 0.5});
+    const ElementRef floor = faceAt(d, {c.x, c.y, d.hi.z - 1.0});
+    IM_CHECK(!bore.name.empty() && !floor.name.empty() &&
+             bore.name != floor.name);
+    s_App->selection.Clear();
+    s_App->selection.items.push_back({ui::SelectionItem::Kind::Face, 0, bore});
+    ToolbarClick(ctx, "###tb_delete_face");
+    ctx->Yield();
+    auto* del = dynamic_cast<DeleteFaceFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK(del != nullptr);
+    IM_CHECK_EQ(del->faces.size(), (size_t)1);
+    ctx->ItemClick("//###ToolWindow/**/###add_feature");
+    ctx->Yield();
+    del = dynamic_cast<DeleteFaceFeature*>(
+        Doc()->FindFeatureById(s_App->pendingFeatureId));
+    IM_CHECK_EQ(del->faces.size(), (size_t)2);
+    IM_CHECK(
+        std::any_of(del->faces.begin(), del->faces.end(),
+                    [&](const ElementRef& r) { return r.name == floor.name; }));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(std::abs(bodyVolume(d.body) - d.box) < 1e-9 * d.box);
+  };
+
+  // A delete the faces around cannot heal: Accept is disabled and the
+  // window names the face.
+  t = IM_REGISTER_TEST(engine, "direct", "refused_delete_names_the_face");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const Drilled d = drill(ctx, 0.0);
+    const ElementRef top = faceAt(d, {d.lo.x + 0.1, d.lo.y + 0.1, d.hi.z});
+    s_App->selection.Clear();
+    s_App->selection.items.push_back({ui::SelectionItem::Kind::Face, 0, top});
+    ToolbarClick(ctx, "###tb_delete_face");
+    ctx->Yield(2);
+    Feature* f = Doc()->FindFeatureById(s_App->pendingFeatureId);
+    IM_CHECK(f != nullptr);
+    IM_CHECK(f->GetError().find("`" + top.name + "`") != std::string::npos);
+    const ImGuiTestItemInfo accept =
+        ctx->ItemInfo("//###ToolWindow/###tw_accept");
+    IM_CHECK((accept.ItemFlags & ImGuiItemFlags_Disabled) != 0);
+    ui::CancelPendingFeature(*s_App);
+    ctx->Yield();
+  };
+
+  // Pick faces… on a direct edit whose face is gone: the editor opens with
+  // the slot armed, the dead ref goes with its "x", and a click in the
+  // viewport picks its successor.
+  t = IM_REGISTER_TEST(engine, "direct", "pick_faces_repairs_a_dangling_ref");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const Drilled d = drill(ctx, 0.0);
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::make_unique<DeleteFaceFeature>(
+            "Fill", d.body,
+            std::vector<ElementRef>{
+                ElementRef{d.body, std::to_string(d.body) + "/face99"}})),
+        *Doc());
+    ctx->Yield(2);
+    const size_t idx = Doc()->FeatureCount() - 1;
+    IM_CHECK(Doc()->GetFeature(idx)->GetError().find("no longer exists") !=
+             std::string::npos);
+
+    const glm::dvec3 c = (d.lo + d.hi) * 0.5;
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(c));
+    s_App->camera->SetUp(glm::vec3(0, 1, 0));
+    // From above and to the -X side: the bore's +X wall faces the camera
+    // through the opening.
+    s_App->camera->SetPosition(
+        glm::vec3(c) + glm::normalize(glm::vec3(-1.0f, 0.0f, 2.0f)) * 12.0f);
+    ctx->Yield(2);
+
+    ctx->ItemClick(("//###Model/Fill##" + std::to_string(idx)).c_str(),
+                   ImGuiMouseButton_Right);
+    ctx->ItemClick("//$FOCUSED/###pick_faces");
+    ctx->Yield();
+    IM_CHECK(s_App->slotPick.Active());
+    ctx->ItemClick("//###ToolWindow/**/x");
+    ctx->Yield();
+    auto* del = dynamic_cast<DeleteFaceFeature*>(Doc()->GetFeature(idx));
+    IM_CHECK(del != nullptr && del->faces.empty());
+    // A point on the bore's far (+X) wall, just below the rim.
+    const double r = 0.3 * (d.hi.z - d.lo.z);
+    ctx->MouseMoveToPos(WorldToWindow(glm::vec3(c.x + r, c.y, d.hi.z - 0.2)));
+    ctx->Yield();
+    ctx->MouseClick(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    del = dynamic_cast<DeleteFaceFeature*>(Doc()->GetFeature(idx));
+    IM_CHECK_EQ(del->faces.size(), (size_t)1);
+    IM_CHECK(del->GetError().empty());
+    IM_CHECK(std::abs(bodyVolume(d.body) - d.box) < 1e-9 * d.box);
+    s_App->editFeatureId = 0;
+    s_App->slotPick = {};
+  };
+
+  // Offset Face's handle: an arrow on the face, along its normal, that
+  // drags the distance.
+  t = IM_REGISTER_TEST(engine, "direct", "offset_handle_drags_the_distance");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    ctx->Yield();
+    const uint64_t boxId = Doc()->GetFeature(0)->GetId();
+    glm::dvec3 lo, hi;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi, true);
+    const Drilled box{boxId, lo, hi, 0.0};
+    const ElementRef side =
+        faceAt(box, {hi.x, (lo.y + hi.y) / 2, (lo.z + hi.z) / 2});
+    s_App->selection.Clear();
+    s_App->selection.items.push_back({ui::SelectionItem::Kind::Face, 0, side});
+    ToolbarClick(ctx, "###tb_offset_face");
+    ctx->Yield();
+    auto* off =
+        dynamic_cast<OffsetFaceFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(off != nullptr);
+    IM_CHECK_EQ(off->faces.size(), (size_t)1);
+    IM_CHECK(off->distance > 0.0); // derived from the face, outward
+
+    const glm::vec3 N(1.0f, 0.0f, 0.0f);
+    const glm::vec3 C((float)hi.x, (float)((lo.y + hi.y) / 2),
+                      (float)((lo.z + hi.z) / 2));
+    // Looking at the arrow from the side and above, the arrow mid-screen:
+    // clear of the tool window, and nowhere near parallel to the view.
+    const double d0 = off->distance;
+    const glm::vec3 look = C + N * static_cast<float>(d0 + 0.6);
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(look);
+    s_App->camera->SetUp(glm::vec3(0.0f, 0.0f, 1.0f));
+    s_App->camera->SetPosition(
+        look + glm::normalize(glm::vec3(0.3f, -1.0f, 0.5f)) * 12.0f);
+    ctx->Yield(2);
+    // The arrow as the frame published it: grab it mid-shaft.
+    IM_CHECK_EQ(s_App->viewportHandles.size(), (size_t)1);
+    const ui::ViewportHandle h = s_App->viewportHandles.front();
+    IM_CHECK(glm::length(h.dir - N) < 1e-4f);
+    IM_CHECK(glm::length(h.origin - (C + N * static_cast<float>(d0))) < 1e-3f);
+    const glm::vec3 grab = h.origin + N * (0.45f * h.length);
+    ctx->MouseMoveToPos(WorldToWindow(grab));
+    ctx->Yield(2);
+    IM_CHECK(s_App->hoveredHandle == h.id); // it highlights before the grab
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    // 0.9 out from 0.1: the drag lands on 1.0, which a length snaps to.
+    ctx->MouseMoveToPos(WorldToWindow(grab + N * static_cast<float>(1.0 - d0)));
+    ctx->Yield();
+    IM_CHECK(s_App->handleDrag.active);
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield();
+    off = dynamic_cast<OffsetFaceFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(off != nullptr);
+    IM_CHECK(std::abs(off->distance - 1.0) < 0.05);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
   };
 
   // Split's default knife is the XY plane at the body's mid-height, so the

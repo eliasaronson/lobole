@@ -62,11 +62,16 @@
 #include "render/RayTracingRenderer.h"
 #include "render/SketchRenderer.h"
 
+#include "core/DirectEdit.h"
+#include "core/features/DeleteFaceFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/LoftFeature.h"
+#include "core/features/MoveFaceFeature.h"
+#include "core/features/OffsetFaceFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/features/RefineFeature.h"
+#include "core/features/ReplaceFaceFeature.h"
 #include "core/features/RevolveFeature.h"
 #include "core/features/RibFeature.h"
 #include "core/features/ShellFeature.h"
@@ -494,6 +499,127 @@ void CreateDraft(AppState& state) {
   BeginPreviewFeature(
       state, std::make_unique<DraftFeature>(NextName(state, "Draft"), 0,
                                             std::vector<ElementRef>{}, 5.0));
+}
+
+namespace {
+
+// 1, 2 or 5 x 10^n at or below `raw` (> 0): a number a person would type.
+double RoundDown125(double raw) {
+  const double decade = std::pow(10.0, std::floor(std::log10(raw)));
+  const double mant = raw / decade;
+  return decade * (mant >= 5.0 ? 5.0 : mant >= 2.0 ? 2.0 : 1.0);
+}
+
+const Body* BodyCreatedBy(const AppState& state, uint64_t id) {
+  for (const Body& b : state.document->GetBodies())
+    if (b.createdBy == id && b.shape.IsValid())
+      return &b;
+  return nullptr;
+}
+
+// The faces the selection holds, in order: what a direct edit seeds from.
+std::vector<ElementRef> SelectedFaces(const AppState& state) {
+  std::vector<ElementRef> out;
+  for (const SelectionItem& item : state.selection.items)
+    if (item.kind == SelectionItem::Kind::Face && item.element.featureId != 0)
+      out.push_back(item.element);
+  return out;
+}
+
+} // namespace
+
+double SizeFromFace(const AppState& state, const ElementRef& face,
+                    double fallback) {
+  if (!state.document)
+    return fallback;
+  const Body* body = BodyCreatedBy(state, face.featureId);
+  if (body == nullptr)
+    return fallback;
+  const auto at = body->elementMap.Resolve(face.name);
+  double reach = directedit::ThinnestExtent(*body);
+  if (at)
+    if (const auto in = Measure::FaceInsetAt(*body, *at); in && in->hasInset)
+      reach = std::min(reach, in->inset);
+  if (!(reach > 0.0))
+    return fallback;
+  return RoundDown125(reach / 10.0);
+}
+
+glm::dvec3 DefaultFaceMove(const AppState& state,
+                           const std::vector<ElementRef>& faces) {
+  if (!state.document)
+    return glm::dvec3(0.0);
+  const uint64_t id = faces.empty()
+                          ? TargetBody(state, SelectionItem::Kind::Face)
+                          : faces.front().featureId;
+  const Body* body = BodyCreatedBy(state, id);
+  if (body == nullptr)
+    return glm::dvec3(0.0);
+  std::vector<int> indices;
+  for (const ElementRef& f : faces)
+    if (const auto at = body->elementMap.Resolve(f.name))
+      indices.push_back(*at);
+  const auto host = directedit::HostNormal(*body, indices);
+  glm::dvec3 lo, hi;
+  body->shape.GetBoundingBox(lo, hi, /*tight=*/true);
+  const glm::dvec3 ext = hi - lo;
+  int axis = -1;
+  for (int a = 0; a < 3; a++) {
+    // In the host's plane: an axis the host's normal is not along.
+    if (host && std::abs((*host)[a]) > 0.5)
+      continue;
+    if (axis < 0 || ext[a] > ext[axis])
+      axis = a;
+  }
+  if (axis < 0 || !(ext[axis] > 0.0))
+    return glm::dvec3(0.0);
+  glm::dvec3 out(0.0);
+  out[axis] = RoundDown125(ext[axis] / 10.0);
+  return out;
+}
+
+void CreateDeleteFace(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  // bodyId stays 0: the first face pick (or the seeded selection) names it.
+  BeginPreviewFeature(
+      state, std::make_unique<DeleteFaceFeature>(NextName(state, "Delete face"),
+                                                 0, std::vector<ElementRef>{}));
+}
+
+void CreateOffsetFace(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  // From the face when one is selected (the seed then re-derives it the
+  // same way), else from the body the tool will most likely act on.
+  const std::vector<ElementRef> pre = SelectedFaces(state);
+  const double size =
+      pre.empty()
+          ? SizeFromBody(state, TargetBody(state, SelectionItem::Kind::Face),
+                         1.0)
+          : SizeFromFace(state, pre.front(), 1.0);
+  BeginPreviewFeature(state, std::make_unique<OffsetFaceFeature>(
+                                 NextName(state, "Offset face"), 0,
+                                 std::vector<ElementRef>{}, size));
+}
+
+void CreateMoveFace(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  BeginPreviewFeature(state, std::make_unique<MoveFaceFeature>(
+                                 NextName(state, "Move face"), 0,
+                                 std::vector<ElementRef>{},
+                                 DefaultFaceMove(state, SelectedFaces(state))));
+}
+
+void CreateReplaceFace(AppState& state) {
+  if (!state.document || state.document->GetBodies().empty())
+    return;
+  // No numeric default: the target IS the parameter, and the tool refuses
+  // until one is picked.
+  BeginPreviewFeature(state,
+                      std::make_unique<ReplaceFaceFeature>(
+                          NextName(state, "Replace face"), 0, ElementRef{}));
 }
 
 void CreateBaseFlange(AppState& state) {

@@ -272,15 +272,25 @@ ImVec2 WorldToWindow(const glm::vec3& p) {
 // wildcard; the "###" id makes the match independent of the icon glyph.
 void ToolbarClick(ImGuiTestContext* ctx, const char* tbId) {
   ctx->SetRef("//##DockHost");
-  // The sheet-metal tools live in a flyout group: whichever was used last is
-  // on the bar and the rest are behind its caret. Every one still answers to
-  // its own "###tb_*" id — this opens the group when the one asked for is
-  // not the one showing, so a caller names the TOOL, not where it sits.
-  if (ctx->ItemInfo((std::string("**/") + tbId).c_str(),
-                    ImGuiTestOpFlags_NoError)
-          .ID == 0) {
-    ctx->ItemClick("**/sheet/###more");
+  // The sheet-metal and the direct-edit tools live in flyout groups:
+  // whichever was used last is on the bar and the rest are behind its caret.
+  // Every one still answers to its own "###tb_*" id — this opens each group
+  // in turn until the one asked for shows, so a caller names the TOOL, not
+  // where it sits.
+  const auto showing = [&] {
+    return ctx->ItemInfo((std::string("**/") + tbId).c_str(),
+                         ImGuiTestOpFlags_NoError)
+               .ID != 0;
+  };
+  for (const char* group : {"sheet", "direct"}) {
+    if (showing())
+      break;
+    ctx->ItemClick((std::string("**/") + group + "/###more").c_str());
     ctx->Yield();
+    if (!showing()) {
+      ctx->PopupCloseAll(); // not in this group (Esc would drop the selection)
+      ctx->Yield();
+    }
   }
   ctx->ItemClick((std::string("**/") + tbId).c_str());
   ctx->Yield();
@@ -517,7 +527,7 @@ bool WaitForStudyResult(ImGuiTestContext* ctx, uint64_t studyId) {
   return false;
 }
 
-const ToolCase kToolCases[38] = {
+const ToolCase kToolCases[42] = {
     // The primitives stand on something: each arms a face/plane pick, and
     // the Top plane of an empty part is enough for its defaults.
     {"box", "###tb_box", Needs::Nothing, Expect::PickThenChanges},
@@ -548,6 +558,13 @@ const ToolCase kToolCases[38] = {
     {"refine", "###tb_refine", Needs::Body, Expect::HarmlessNoOp},
     {"shell", "###tb_shell", Needs::Body, Expect::RefusesUntilPicked},
     {"draft", "###tb_draft", Needs::Body, Expect::RefusesUntilPicked},
+    {"delete_face", "###tb_delete_face", Needs::Body,
+     Expect::RefusesUntilPicked},
+    {"offset_face", "###tb_offset_face", Needs::Body,
+     Expect::RefusesUntilPicked},
+    {"move_face", "###tb_move_face", Needs::Body, Expect::RefusesUntilPicked},
+    {"replace_face", "###tb_replace_face", Needs::Body,
+     Expect::RefusesUntilPicked},
     {"fillet", "###tb_fillet", Needs::Body, Expect::RefusesUntilPicked},
     {"chamfer", "###tb_chamfer", Needs::Body, Expect::RefusesUntilPicked},
     {"thread", "###tb_thread", Needs::Body, Expect::RefusesUntilPicked},

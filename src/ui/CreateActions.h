@@ -94,6 +94,30 @@ void CreateShell(AppState& state);
 
 void CreateDraft(AppState& state);
 
+// The direct edits (docs/modeling/README.md#direct-edit): each opens its
+// preview with the faces seeded from the selection, and refuses until they
+// are picked. Offset's distance and Move's translation are derived from the
+// face or body they act on (SizeFromFace, DefaultFaceMove).
+void CreateDeleteFace(AppState& state);
+void CreateOffsetFace(AppState& state);
+void CreateMoveFace(AppState& state);
+void CreateReplaceFace(AppState& state);
+
+// A tenth of the smaller of the face's inset (list_elements' `inset_mm`: how
+// far its inside reaches from its boundary) and its body's thinnest extent,
+// rounded down to 1, 2 or 5 x 10^n: an offset that face can take. The face
+// is resolved on the document's current bodies; `fallback` when it is not
+// there.
+double SizeFromFace(const AppState& state, const ElementRef& face,
+                    double fallback);
+
+// Move Face's default: in the host face's plane (the face the picked ones
+// sit in), along the body's largest extent in that plane, a tenth of it,
+// rounded as SizeFromFace rounds. With no faces, along the body's largest
+// extent. Zero when there is no body.
+glm::dvec3 DefaultFaceMove(const AppState& state,
+                           const std::vector<ElementRef>& faces);
+
 void CreateSplit(AppState& state);
 
 // Sheet metal (docs/sheetmetal/README.md). Each opens the normal preview; the
