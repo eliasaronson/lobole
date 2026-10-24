@@ -615,6 +615,50 @@ class App(_RpcSurface):
                 for x in bad))
         return out
 
+    def sweep(self, variables=None, from_requirements=False, poll=0.5,
+              timeout=3600.0, **options) -> dict[str, Any]:
+        """Regenerate copies of the model over ranges of its variables and
+        wait for the answer (docs/requirements/README.md#design-sweep):
+
+            app.sweep({"cam_d": ("cam_d / 4", "cam_d")}, refine=3)
+            app.sweep(from_requirements=True)
+
+        `variables` is {name: (min, max)} -- each end a number or an
+        expression -- or design_sweep's own list of {name, min, max,
+        scope?}. `options` are design_sweep's: samples, corners, refine,
+        documents, max_points. Runs it as a job (design_sweep {async}),
+        follows it by id, and returns design_sweep_result's answer: the
+        table of points, `first_failure` and what was not swept. Nothing in
+        the document changes. A sweep that failed or was cancelled raises
+        SdkError saying so."""
+        params = dict(options)
+        if variables is not None:
+            if isinstance(variables, dict):
+                variables = [{"name": k, "min": v[0], "max": v[1]}
+                             for k, v in variables.items()]
+            params["variables"] = list(variables)
+        if from_requirements:
+            params["from_requirements"] = True
+        params["async"] = True
+        job = self.call("design_sweep", **params)["job"]
+        deadline = time.monotonic() + timeout
+        while True:
+            st = self.call("study_status", job=job)
+            if not st.get("running"):
+                break
+            if time.monotonic() > deadline:
+                self.call("cancel_study", job=job)
+                raise SdkError(f"design_sweep: not done in {timeout:g} s; "
+                               f"cancelled")
+            time.sleep(poll)
+        if st.get("outcome") == "failed":
+            raise SdkError(f"design_sweep failed: {st.get('error')}")
+        if st.get("outcome") != "done":
+            raise SdkError(f"design_sweep {st.get('outcome')}: "
+                           f"{st.get('cancel_reason', '')} (its points so far: "
+                           f"design_sweep_result {{job: {job}}})")
+        return self.call("design_sweep_result", job=job)
+
 
 def _open_tab(app, name, kind, create, reuse=False):
     if reuse and not create:

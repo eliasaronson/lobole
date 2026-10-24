@@ -46,14 +46,16 @@ static constexpr MethodDoc ConfigurationMethods[] = {
      "suppressed_relations [ids], mate_overrides [{mate, rotation (radians) "
      "| rotation_deg, offset (mm)}] — DOFs the configuration holds; an "
      "overlay, so leaving it restores the mates. Each list replaces; the "
-     "other kind's keys are refused. Editing the active one re-solves.",
+     "other kind's keys are refused. Editing the active one re-solves; an "
+     "expression requirement it moves answers in `requirements`.",
      "id, name, parameter_overrides, suppressed_features, "
      "unsuppressed_features, "
      "suppressed_occurrences, suppressed_mates, suppressed_relations, "
      "mate_overrides"},
     {"set_active_configuration",
      "Activate a configuration (0 = base) and regenerate (part) or re-solve "
-     "(assembly).",
+     "(assembly). An expression requirement the change moves answers in "
+     "`requirements` (docs/requirements/README.md#expression).",
      "id?:int>=0"},
 };
 std::span<const MethodDoc> ConfigurationMethodDocs() {

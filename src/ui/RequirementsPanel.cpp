@@ -6,6 +6,7 @@
 #include "core/Requirements.h"
 #include "ui/AppState.h"
 #include "ui/BackgroundJobs.h"
+#include "ui/DesignSweepPanel.h"
 #include "ui/DockLayout.h" // PanelHeading
 #include "ui/PanelTitles.h"
 #include "ui/Widgets.h" // DrawJobProgress
@@ -58,6 +59,13 @@ void SetRequirementsEngine(const RequirementsEngine& engine) {
   Engine() = engine;
 }
 
+const RequirementsEngine& GetRequirementsEngine() { return Engine(); }
+
+void RefreshRequirementsInPlace(AppState& state) {
+  if (Engine().refresh != nullptr && !state.requirements.empty())
+    Engine().refresh(state);
+}
+
 const RequirementRowDrawn* RequirementRowDrawnForTest(uint64_t id) {
   const auto it = Drawn().find(id);
   return it == Drawn().end() ? nullptr : &it->second;
@@ -105,6 +113,22 @@ void DrawRequirementsPanel(AppState& state) {
           "Measure every requirement that is not current. A study whose "
           "inputs are unchanged answers from its stored result.\nShift: "
           "measure and run everything again.");
+    // The ranges the requirements state, swept: offered when one bounds a
+    // bare variable (docs/requirements/README.md#design-sweep).
+    bool ranges = false;
+    for (const req::Requirement& r : state.requirements)
+      ranges = ranges || (r.Kind() == "expression" && r.bound.kind != "pass" &&
+                          ExpressionEngine::Default().IsValidParameterName(
+                              r.measure.value("expression", std::string())));
+    if (ranges) {
+      ImGui::SameLine();
+      if (ImGui::Button("Sweep the ranges###req_sweep"))
+        OpenDesignSweepFromRequirements(state);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Regenerate copies of the model over the ranges "
+                          "the requirements state, and find where it stops "
+                          "building or meeting them. Changes nothing.");
+    }
     ImGui::SameLine();
     ImGui::TextDisabled("%d pass, %d fail, %d stale, %d unresolved, %d "
                         "unchecked",
@@ -150,6 +174,18 @@ void DrawRequirementsPanel(AppState& state) {
           ImGuiSelectableFlags_SpanAllColumns);
       if (ImGui::IsItemHovered()) {
         std::string tip = row.at("measure").value("kind", std::string());
+        // An expression says what it reads and where.
+        if (tip == "expression") {
+          const nlohmann::json& m = row.at("measure");
+          tip += ": " + m.value("expression", std::string()) + "\nin " +
+                 (m.contains("document")
+                      ? "part " + m.at("document").dump() +
+                            (m.contains("configuration")
+                                 ? ", configuration " +
+                                       m.at("configuration").dump()
+                                 : std::string(" (its active configuration)"))
+                      : std::string("the project's variables"));
+        }
         if (row.contains("source"))
           tip += "\n" + row.at("source").get<std::string>();
         if (row.contains("note") && st != "unresolved")

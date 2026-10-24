@@ -105,6 +105,14 @@ const std::vector<KindSpec>& Specs() {
        "job",
        {"document", "setup", "resolution", "allow_uncut"},
        {"document", "setup"}},
+      // No document: the project's variables and tables. A part's: its
+      // variables as its features see them (docs/requirements/README.md#
+      // expression).
+      {"expression",
+       true,
+       "part",
+       {"expression", "unit", "document", "configuration"},
+       {"expression"}},
   };
   return specs;
 }
@@ -175,7 +183,9 @@ void ValidateTypes(const std::string& kind, const char* document,
       {"study", "a study id (list_studies)"},
       {"mate", "a mate id (list_mates)"},
       {"motion_study", "a motion study id (list_motion_studies)"},
-      {"setup", "a CAM setup id (list_cam_setups)"}};
+      {"setup", "a CAM setup id (list_cam_setups)"},
+      {"configuration", "a configuration id of the part (list_configurations "
+                        "{part}), 0 for the base"}};
   if (m.contains("document") && !id(m.at("document")))
     refuse("document", doc);
   for (const IdKey& k : ids)
@@ -438,6 +448,18 @@ void Validate(const json& measure, const Bound& bound) {
                                "` (it takes: " + Join(spec->keys) + ")");
   ValidateTypes(kind, spec->document, measure);
   ValidateValues(kind, measure);
+  if (kind == "expression") {
+    if (measure.at("expression").get<std::string>().empty())
+      throw std::runtime_error("measure expression: `measure.expression` is a "
+                               "formula over the variables (\"od - bore\"), "
+                               "not empty");
+    // A configuration belongs to a part: without one there is nothing to
+    // read it on.
+    if (measure.contains("configuration") && !measure.contains("document"))
+      throw std::runtime_error(
+          "measure expression: `configuration` names one of a PART's "
+          "configurations, so it needs `document` (the part's id)");
+  }
 
   bool knownBound = false;
   for (const char* b : kBoundKinds)
@@ -725,6 +747,27 @@ std::vector<std::string> FindingLines(const json& row) {
   if (st != "fail")
     return lines;
   const std::string unit = row.value("unit", std::string());
+  const json measure = row.value("measure", json::object());
+  if (measure.value("kind", std::string()) == "expression" &&
+      row.contains("value")) {
+    // "od - bore = 3 mm (od 18, bore 15), must be >= 4 mm": the formula,
+    // what it read, and the bound, so the failure needs no second look.
+    std::string inputs;
+    const json detail = row.value("detail", json::object());
+    const json read = detail.is_object()
+                          ? detail.value("inputs", json::object())
+                          : json::object();
+    for (const auto& [name, v] : read.items())
+      if (v.is_number())
+        inputs +=
+            (inputs.empty() ? "" : ", ") + name + " " + Num(v.get<double>());
+    lines.push_back(measure.value("expression", std::string()) + " = " +
+                    Num(row.at("value").get<double>()) +
+                    (unit.empty() ? "" : " " + unit) +
+                    (inputs.empty() ? "" : " (" + inputs + ")") + ", must be " +
+                    BoundText(row));
+    return lines;
+  }
   if (row.contains("value"))
     lines.push_back("measured " + Num(row.at("value").get<double>()) +
                     (unit.empty() ? "" : " " + unit) + ", must be " +
@@ -750,6 +793,139 @@ std::vector<std::string> FindingLines(const json& row) {
   if (lines.empty())
     lines.push_back("the verdict failed: " + detail.dump());
   return lines;
+}
+
+std::vector<std::string> ExpressionTexts(const Requirement& r) {
+  std::vector<std::string> out;
+  for (const std::string* t :
+       {&r.bound.valueExpr, &r.bound.minExpr, &r.bound.maxExpr})
+    if (!t->empty())
+      out.push_back(*t);
+  if (r.measure.contains("expression") &&
+      r.measure.at("expression").is_string())
+    out.push_back(r.measure.at("expression").get<std::string>());
+  return out;
+}
+
+std::set<std::string> IdentifiersOf(const std::string& text) {
+  const auto c = ExpressionEngine::Default().Compile(text);
+  return c ? (*c)->Dependencies() : std::set<std::string>{};
+}
+
+std::set<std::string> LookupTablesOf(const std::string& text) {
+  // The parser's own rule for a table: a quoted name right after lookup(.
+  std::set<std::string> out;
+  for (size_t at = text.find("lookup"); at != std::string::npos;
+       at = text.find("lookup", at + 1)) {
+    size_t i = at + 6;
+    while (i < text.size() && std::isspace(static_cast<unsigned char>(text[i])))
+      i++;
+    if (i >= text.size() || text[i] != '(')
+      continue;
+    i++;
+    while (i < text.size() && std::isspace(static_cast<unsigned char>(text[i])))
+      i++;
+    if (i >= text.size() || (text[i] != '"' && text[i] != '\''))
+      continue;
+    const size_t end = text.find(text[i], i + 1);
+    if (end != std::string::npos)
+      out.insert(text.substr(i + 1, end - i - 1));
+  }
+  return out;
+}
+
+bool ReadsName(const Requirement& r, const std::string& name) {
+  for (const std::string& t : ExpressionTexts(r))
+    if (IdentifiersOf(t).contains(name))
+      return true;
+  return false;
+}
+
+bool ReadsTable(const Requirement& r, const std::string& table) {
+  for (const std::string& t : ExpressionTexts(r))
+    if (LookupTablesOf(t).contains(table))
+      return true;
+  return false;
+}
+
+bool RenameIn(Requirement& r, const std::string& from, const std::string& to) {
+  const auto& engine = ExpressionEngine::Default();
+  bool changed = false;
+  const auto rename = [&](std::string& text) {
+    if (text.empty())
+      return;
+    std::string next = engine.RenameIdentifier(text, from, to);
+    if (next != text) {
+      text = std::move(next);
+      changed = true;
+    }
+  };
+  rename(r.bound.valueExpr);
+  rename(r.bound.minExpr);
+  rename(r.bound.maxExpr);
+  if (r.measure.contains("expression") &&
+      r.measure.at("expression").is_string()) {
+    std::string text = r.measure.at("expression").get<std::string>();
+    rename(text);
+    r.measure["expression"] = text;
+  }
+  return changed;
+}
+
+std::string ScopeRefusal(const std::string& text, const SymbolTable& scope,
+                         const std::string& what,
+                         const std::string& scopeName) {
+  const auto compiled = ExpressionEngine::Default().Compile(text);
+  if (!compiled)
+    return what + " '" + text + "' does not read: " + compiled.error().message +
+           " (at " + std::to_string(compiled.error().offset) + ")";
+  std::vector<std::string> unknown;
+  for (const std::string& name : (*compiled)->Dependencies())
+    if (!scope.contains(name))
+      unknown.push_back(name);
+  if (!unknown.empty()) {
+    std::vector<std::string> have;
+    for (const auto& [name, v] : scope)
+      if (!lookuptable::IsCellSymbol(name))
+        have.push_back(name);
+    std::sort(have.begin(), have.end());
+    return what + " '" + text + "' reads " +
+           (unknown.size() == 1 ? "'" + unknown[0] + "', which is"
+                                : "'" + Join(unknown) + "', which are") +
+           " not a variable of " + scopeName + " (its variables: " +
+           (have.empty() ? std::string("none") : Join(have)) + ")";
+  }
+  std::set<std::string> tables;
+  for (const auto& [name, v] : scope) {
+    std::string t, k, c;
+    if (lookuptable::SplitCellSymbol(name, t, k, c))
+      tables.insert(t);
+  }
+  for (const std::string& t : LookupTablesOf(text))
+    if (!tables.contains(t))
+      return what + " '" + text + "' looks up table '" + t + "', which " +
+             scopeName + " does not have (its tables: " +
+             (tables.empty() ? std::string("none")
+                             : Join(std::vector<std::string>(tables.begin(),
+                                                             tables.end()))) +
+             ")";
+  return {};
+}
+
+ExpressionReading EvaluateIn(const std::string& text,
+                             const SymbolTable& scope) {
+  ExpressionReading out;
+  for (const std::string& name : IdentifiersOf(text)) {
+    const auto it = scope.find(name);
+    if (it != scope.end())
+      out.inputs[name] = it->second;
+  }
+  const auto v = ExpressionEngine::Default().EvaluateText(text, scope);
+  if (v)
+    out.value = *v;
+  else
+    out.error = v.error().message;
+  return out;
 }
 
 } // namespace req

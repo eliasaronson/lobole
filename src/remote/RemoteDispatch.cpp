@@ -463,8 +463,12 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "set_drawing_view is waiting for), `interference` (an exact "
      "interference of two named sides: its boolean and distance, what the "
      "waiting call is waiting for), `contact` (contact_report with "
-     "`async`: the sweep over every pair, followed by contact_status). "
-     "Empty when nothing is running. Not the "
+     "`async`: the sweep over every pair, followed by contact_status), "
+     "`insertion` and `assembly_sequence` (what a waiting check_insertion "
+     "or check_assembly_sequence is waiting for), `design_sweep` "
+     "(design_sweep: the model regenerated over its variables' ranges on "
+     "copies, async or what a synchronous one is waiting for). Empty when "
+     "nothing is running. Not the "
      "CAM "
      "job document -- that is list_job_parts.",
      ""},
@@ -2791,6 +2795,15 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
 
 namespace remote {
 uint8_t MethodFlagsOf(const std::string& method) { return MethodFlags(method); }
+
+bool MayAttachRequirements(const std::string& method) {
+  const MethodDoc* d = FindMethod(method);
+  if (d == nullptr || d->returns == nullptr || d->returns[0] == '\0')
+    return true;
+  // A typed answer is closed: it carries `requirements` only when its row
+  // says so.
+  return std::string(d->returns).find("requirements") != std::string::npos;
+}
 } // namespace remote
 
 // The refusal for a request whose params the method's row does not take,

@@ -28,10 +28,14 @@
 // (src/remote/RemoteRequirements.cpp), through the RPCs that already compute
 // each quantity.
 
+#include "core/Expression.h" // SymbolTable
+
 #include <nlohmann/json.hpp>
 
 #include <cstdint>
+#include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -57,6 +61,7 @@ inline constexpr const char* kMeasureKinds[] = {
     "check_literals",    // check_literals clean
     "motion_clean",      // run_motion_study: clean
     "cam_verify",        // cam_verify: ok and complete
+    "expression",        // a formula over the variables, in its scope
 };
 inline constexpr const char* kBoundKinds[] = {"at_most", "at_least", "within",
                                               "pass"};
@@ -165,6 +170,50 @@ std::string StateOf(const Requirement& r, const std::string& unresolvedWhy,
 // shows these lines and the check logs them, so the two say the same.
 std::string BoundText(const nlohmann::json& row);
 std::vector<std::string> FindingLines(const nlohmann::json& row);
+
+// ---- The `expression` measure (docs/requirements/README.md#expression) ----
+//
+// A relation between variables ("od - bore >= 4") held as a requirement: its
+// reading is the expression evaluated in a scope -- the project's variables
+// and tables, or a part's as its features see them (in its active
+// configuration, or the one the measure names). Evaluated by the one
+// evaluator, ExpressionEngine::Default().
+
+// Every expression text the requirement holds: its bound's sides that are
+// expressions, and the measure's `expression` (expression and study_probe).
+std::vector<std::string> ExpressionTexts(const Requirement& r);
+
+// The identifiers `text` reads (none when it does not compile), and the
+// tables its lookups name.
+std::set<std::string> IdentifiersOf(const std::string& text);
+std::set<std::string> LookupTablesOf(const std::string& text);
+
+// Whether any of the requirement's expressions reads `name` / looks up table
+// `table`.
+[[nodiscard]] bool ReadsName(const Requirement& r, const std::string& name);
+[[nodiscard]] bool ReadsTable(const Requirement& r, const std::string& table);
+
+// Rewrites `from` into `to` in every expression the requirement holds (the
+// measure's and the bound's), as a variable rename rewrites a feature's.
+// Returns whether anything changed.
+bool RenameIn(Requirement& r, const std::string& from, const std::string& to);
+
+// Why `text` cannot be read in `scope`: it does not compile (the evaluator's
+// message and offset), or it names an identifier the scope does not hold
+// (naming the variables it does) or a table no lookup can read (naming the
+// tables). Empty when it can. `what` names the field ("measure.expression"),
+// `scopeName` the scope ("the project", "part 'Housing'").
+std::string ScopeRefusal(const std::string& text, const SymbolTable& scope,
+                         const std::string& what, const std::string& scopeName);
+
+// The expression evaluated in `scope`: the value, or the evaluator's error;
+// and every identifier it read with its value then.
+struct ExpressionReading {
+  std::optional<double> value;
+  std::string error;
+  std::map<std::string, double> inputs;
+};
+ExpressionReading EvaluateIn(const std::string& text, const SymbolTable& scope);
 
 // A file-name-safe slug of the name, as the other per-item files use.
 std::string Slug(const std::string& name);

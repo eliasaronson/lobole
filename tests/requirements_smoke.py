@@ -465,6 +465,40 @@ def unmeshed_part(d):
     expect(r["receipt"]["standing"] != "verified", r["receipt"])
 
 
+def expression(d):
+    """An expression requirement over the variables is measured where the
+    values move (docs/requirements/README.md#expression): the set_variable
+    that thins the wall answers it `fail` in its own response, the value
+    put back answers `pass`, and list_requirements agrees without a check.
+    """
+    d.call("set_variable", name="seat_od", expression="22")
+    d.call("set_variable", name="seat_bore", expression="15")
+    rid = add(d, "wall round the seat",
+              {"kind": "expression", "expression": "seat_od - seat_bore"},
+              {"kind": "at_least", "value": 4},
+              source="a wall of at least 4 mm round the bearing seat")
+    expect(state(d, "wall round the seat") == "pass",
+           rows(d)["wall round the seat"])
+    r = d.call("set_variable", name="seat_bore", expression="19")
+    moved = {m["id"]: m for m in r.get("requirements", [])}
+    expect(rid in moved and moved[rid]["state"] == "fail",
+           f"set_variable did not answer the wall failing: {r}")
+    expect(moved[rid]["value"] == 3.0, moved[rid])
+    expect("seat_od - seat_bore = 3 mm" in moved[rid].get("finding", ""),
+           moved[rid])
+    row = rows(d)["wall round the seat"]
+    expect(row["state"] == "fail" and row["value"] == 3.0,
+           f"list_requirements disagrees without a check: {row}")
+    r = d.call("set_variable", name="seat_bore", expression="15")
+    moved = {m["id"]: m for m in r.get("requirements", [])}
+    expect(rid in moved and moved[rid]["state"] == "pass", r)
+    expect(state(d, "wall round the seat") == "pass", "put back: pass")
+    # An edit that moves nothing it reads says nothing about it.
+    r = d.call("set_variable", name="seat_od", expression="23")
+    expect("requirements" not in r, f"pass to pass is no change: {r}")
+    d.call("remove_requirement", id=rid)
+
+
 def mesher_available(d):
     feats = d.call("ping").get("features", {})
     return bool(feats.get("fem") and feats.get("mesher"))
@@ -685,6 +719,7 @@ def main():
         fits(d)
         cam(d)
         section_area(d)
+        expression(d)
     print("requirements_smoke: ok")
     return 0
 

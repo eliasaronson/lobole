@@ -7,7 +7,13 @@ do over RPC with the same numbers, and every verdict says how it knows.
 
 Core code is `src/core/Measure.{h,cpp}` (measurement, contact, sections,
 comparison, geometry checks) and `src/core/MeshCollide.{h,cpp}` (triangle
-clash tests). The RPCs are in `src/remote/RemoteInspection.cpp`; the measure
+clash tests). A part's mass and the area a plane cuts through it are
+`src/core/PartMeasures.{h,cpp}` (`partmeasure::MassOf`,
+`partmeasure::SectionOf`, `partmeasure::ResolveBodies`), on a
+`const Document&`: `mass_properties` on a part and `section` answer with
+them, and a [requirement](../requirements/README.md#measures) and a
+[design sweep](../requirements/README.md#design-sweep)'s point read them,
+so the three agree. The RPCs are in `src/remote/RemoteInspection.cpp`; the measure
 tool's GUI in `src/ui/MeasureActions.cpp` and `src/ui/MeasureOverlay.{h,cpp}`.
 `describe {method}` is the authority for any RPC's parameters and response
 shape; this page is what they mean.

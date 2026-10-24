@@ -284,6 +284,13 @@ public:
   // (local shadows project), so a downstream read sees one table.
   const SymbolTable& Symbols() const { return m_symbols; }
 
+  // The effective scope as it would be in `configuration` (0 = base),
+  // whichever is active, without regenerating: the variables only, which is
+  // all an expression requirement reads
+  // (docs/requirements/README.md#expression). A configuration the document
+  // does not have reads as base; the caller checks FindConfiguration first.
+  SymbolTable SymbolsIn(uint64_t configuration) const;
+
   // Project-wide variables (docs/variables/README.md#concepts). A
   // Document keeps its own m_parameters as the PART-LOCAL scope and borrows a
   // non-owning pointer to the project scope's evaluated symbols; regeneration
@@ -780,6 +787,10 @@ private:
   // m_symbols. Failures (parse error, unknown name, cycle) set the affected
   // parameters' `error` and keep their last good values.
   void EvaluateParameters();
+  // EvaluateParameters' body: `params` evaluated into `out` under `cfg`
+  // (null = base), against this document's project scope and tables.
+  void EvaluateInto(const Configuration* cfg, std::vector<Parameter>& params,
+                    SymbolTable& out) const;
 
   std::vector<std::unique_ptr<Feature>> m_features;
   std::map<std::string, std::vector<unsigned char>>

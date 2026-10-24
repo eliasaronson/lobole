@@ -172,7 +172,12 @@ Only what `describe` cannot express:
   re-run states the same set); `app.verify_requirements()` checks them as a
   job, waits, and raises naming every one that is not `pass` (stale,
   unresolved and unchecked included), or returns the rows with
-  `raise_on_failure=False`.
+  `raise_on_failure=False`. `app.sweep({name: (min, max)},
+  from_requirements=, **options)` runs a
+  [design sweep](../requirements/README.md#design-sweep) as a job (each end
+  a number or an expression; `options` are `design_sweep`'s), waits, and
+  returns `design_sweep_result`'s answer, raising when it failed or was
+  cancelled.
 
 Rules the hand-written layer follows: every method is a composition of
 documented RPCs and never sends a field the RPC does not have; every method

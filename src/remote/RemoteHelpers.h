@@ -6,6 +6,7 @@
 #include <cstdint>
 
 #include "core/Document.h"
+#include "core/PartMeasures.h"
 #include "core/Receipt.h"
 #include "remote/RpcParams.h"
 
@@ -301,58 +302,13 @@ inline std::string KnownList(const std::vector<std::string>& known,
   return out;
 }
 
-// A part's bodies named by the caller: each entry a body NAME or the id of
-// the feature that created a body (its `created_by`), answered as the set of
-// creating-feature ids. Ids, not body indices, so the choice outlives a
-// regeneration that reorders bodies. A feature that created several bodies
-// names them all. An entry matching no body is refused naming the bodies
-// that exist -- a section or a sheet that silently left one out would look
-// right and be wrong. `what` is the parameter's name, for the message.
+// A part's bodies named by the caller, as body names or creating-feature ids
+// (partmeasure::ResolveBodies, in core so a design sweep's worker reads a
+// section_area requirement the way the RPC does).
 inline std::set<uint64_t> ResolvePartBodies(const Document& doc,
                                             const nlohmann::json& list,
                                             const char* what) {
-  if (!list.is_array() || list.empty())
-    throw std::runtime_error(std::string("`") + what +
-                             "` is a non-empty list of body names or the "
-                             "feature ids that created them");
-  const auto known = [&] {
-    std::vector<std::string> v;
-    for (const Body& b : doc.GetBodies())
-      v.push_back("'" + b.name + "' (" + std::to_string(b.createdBy) + ")");
-    return KnownList(v, 40);
-  };
-  std::set<uint64_t> out;
-  for (const nlohmann::json& e : list) {
-    bool hit = false;
-    if (e.is_number_unsigned()) {
-      const uint64_t id = e.get<uint64_t>();
-      for (const Body& b : doc.GetBodies())
-        if (b.createdBy == id) {
-          out.insert(id);
-          hit = true;
-        }
-      if (!hit)
-        throw std::runtime_error(std::string(what) +
-                                 ": no body was created "
-                                 "by feature " +
-                                 std::to_string(id) + "; bodies: " + known());
-    } else if (e.is_string()) {
-      const std::string name = e.get<std::string>();
-      for (const Body& b : doc.GetBodies())
-        if (b.name == name) {
-          out.insert(b.createdBy);
-          hit = true;
-        }
-      if (!hit)
-        throw std::runtime_error(std::string(what) + ": no body '" + name +
-                                 "'; bodies: " + known());
-    } else {
-      throw std::runtime_error(std::string(what) +
-                               " entries are body names or feature ids, not " +
-                               e.dump());
-    }
-  }
-  return out;
+  return partmeasure::ResolveBodies(doc, list, what);
 }
 
 // An integer parameter: a whole number in [lo, hi], else refused naming the

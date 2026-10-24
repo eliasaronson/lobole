@@ -13,7 +13,7 @@ registry, and the frame keeps drawing. The rule every job follows:
 | field | meaning |
 |---|---|
 | `id` | handed out by `StartBackgroundJob` from a session counter, never reused: the handle a study job is asked about and cancelled by |
-| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"`, `"contact"`, `"interference"` |
+| `kind` | `"cam"`, `"cam-verify"`, `"cam-simulate"`, `"sync"`, `"topo"`, `"study"`, `"check"`, `"mesh"`, `"requirements"`, `"import"`, `"motion"`, `"motion-video"`, `"open"`, `"job-warm"`, `"drawing"`, `"contact"`, `"interference"`, `"design_sweep"` |
 | `label` | shown as-is ("Clearing 'Pocket', pass 2 of 4") |
 | `fraction` | atomic; `< 0` is indeterminate (no bar) |
 | `cancel` | atomic request set by the main thread; a job may ignore it |
@@ -33,7 +33,9 @@ and `FinishedJobById` (the reap records how each job ended -- done,
 cancelled or failed -- and keeps the last 64 in `AppState::finishedJobs`).
 
 **One poll site.** `ui::PollBackgroundJobs` (`PumpRenderJob`, then
-`ReapBackgroundJobs`) is called once per iteration by each of the app's three
+`ReapBackgroundJobs`, then `ui::RefreshRequirementsInPlace`, which measures
+the [expression requirements](../requirements/README.md#expression) whose
+values moved -- not a job, and here for the same reason) is called once per iteration by each of the app's three
 loops: the windowed frame loop and the `--offscreen` loop in
 `src/app/main.cpp`, and the `--headless` pump in `src/app/HeadlessMain.cpp`.
 Where a job is reaped is therefore not a property of which panel is open: a
@@ -392,6 +394,23 @@ parked: the sweep (no pair; bounded by `deadline_s`), mesh mode, a call
 inside `batch` or carrying `expect_revision`, and a call whose keys the
 handler did not all read, which the server refuses before any job starts
 ([inspect](../inspect/README.md#threads)).
+
+## A design sweep
+
+`design_sweep` ([requirements](../requirements/README.md#design-sweep)) is
+a cancellable `design_sweep` job, one at a time. The main thread checks the
+request and writes each part the sweep rebuilds to its saved form in a
+temporary directory, with a copy of the project variables and tables; the
+sweep runs on a thread of the run's own (`SweepRun`), which reads them back
+on up to `parallel::Workers()` workers, as an open reads a project, so it
+shares no shape with the document. Like the requirements check, the job has
+no registry thread: its `finish` is called every frame, carries the run's
+progress (`label` "cam_d = 27.5 (7 of 15)", `fraction`) to the registry,
+hands a cancel on to the workers (read between points), and once the run
+has ended joins it and keeps its answer (the last eight, for
+`design_sweep_result`). A cancelled sweep keeps the points it measured. It
+is owned by the RPC connection that started it unless `outlive_client`; a
+synchronous call parks on it.
 
 ## What is not on the registry
 

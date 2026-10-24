@@ -2326,9 +2326,9 @@ TEST_CASE("every background job kind is in background_jobs' row",
   // look up (`contact`, contact_report's async sweep, was). Every kind a
   // job is given -- `->kind = "x"` or a `k...Kind = "x"` constant -- must be
   // named in the row as `x`.
-  const std::regex assigned(R"re(->kind = "([a-z-]+)";)re");
+  const std::regex assigned(R"re(->kind = "([a-z_-]+)";)re");
   const std::regex constant(
-      R"re(constexpr const char\* k\w*Kind = "([a-z-]+)";)re");
+      R"re(constexpr const char\* k\w*Kind = "([a-z_-]+)";)re");
   std::map<std::string, std::string> kinds; // kind -> where
   for (const char* dir : {"src/ui", "src/remote"})
     for (const SourceFile& f : SourcesUnder(dir, ".cpp"))

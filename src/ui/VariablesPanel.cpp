@@ -3,6 +3,7 @@
 
 #include "ui/VariablesPanel.h"
 #include "ui/CatalogActions.h"
+#include "ui/DesignSweepPanel.h"
 #include "ui/LiteralsPanel.h"
 #include "ui/SheetMetalActions.h"
 #include "ui/TablesPanel.h"
@@ -237,8 +238,9 @@ void DrawVariablesPanel(AppState& state) {
                               0.7f);
       ImGui::TableSetupColumn("Comment", ImGuiTableColumnFlags_WidthStretch,
                               1.0f);
+      // Sweep and delete, side by side.
       ImGui::TableSetupColumn("###del", ImGuiTableColumnFlags_WidthFixed,
-                              ImGui::GetFontSize() * 1.4f);
+                              ImGui::GetFontSize() * 3.2f);
       ImGui::TableHeadersRow(); // a header row of "N… E… V…" helps nobody
     }
 
@@ -318,12 +320,9 @@ void DrawVariablesPanel(AppState& state) {
               cellInput(i, 1, nameId.c_str(), p.name, nameWidth)) {
         const std::string newName = text;
         if (!newName.empty() && newName != p.name) {
-          const bool ok = r.isProject
-                              ? RenameProjectVariable(state, p.name, newName)
-                              : state.commands->Execute(
-                                    std::make_unique<RenameVariableCommand>(
-                                        p.name, newName),
-                                    *doc);
+          const bool ok =
+              r.isProject ? RenameProjectVariable(state, p.name, newName)
+                          : RenamePartVariable(state, *doc, p.name, newName);
           if (ok) {
             actionError.clear();
           } else {
@@ -352,7 +351,9 @@ void DrawVariablesPanel(AppState& state) {
       if (hasError) {
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.45f, 0.45f, 1.0f));
       }
-      const float exprWidth = wide ? -FLT_MIN : -SmallButtonReserve("x");
+      const float exprWidth =
+          wide ? -FLT_MIN
+               : -(SmallButtonReserve("x") + SmallButtonReserve("..."));
       if (const char* text =
               cellInput(i, 2, exprId.c_str(), p.expression, exprWidth,
                         /*complete=*/true)) {
@@ -377,18 +378,28 @@ void DrawVariablesPanel(AppState& state) {
         }
       }
 
-      // Delete — refused (with the referencing list) while referenced.
+      // Sweep — the design sweep over this variable's range
+      // (docs/requirements/README.md#design-sweep), on copies.
       cell(wide ? 5 : 9);
+      if (ImGui::SmallButton(("...###var_sweep" + rowId).c_str()))
+        OpenDesignSweepForVariable(
+            state, p.name,
+            r.isProject || state.activePart < 0
+                ? 0
+                : state.parts[static_cast<size_t>(state.activePart)].id);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Sweep... -- regenerate copies of the model over a "
+                          "range of '%s' and find where it breaks. Changes "
+                          "nothing.",
+                          p.name.c_str());
+      ImGui::SameLine();
+
+      // Delete — refused (with the referencing list) while referenced.
       if (ImGui::SmallButton(delId.c_str())) {
         std::vector<std::string> refs;
-        const bool ok =
-            r.isProject
-                ? RemoveProjectVariable(state, p.name, &refs)
-                : (refs = doc->FindParameterReferences(p.name),
-                   refs.empty() &&
-                       state.commands->Execute(
-                           std::make_unique<DeleteVariableCommand>(p.name),
-                           *doc));
+        const bool ok = r.isProject
+                            ? RemoveProjectVariable(state, p.name, &refs)
+                            : RemovePartVariable(state, *doc, p.name, &refs);
         if (ok) {
           actionError.clear();
         } else {

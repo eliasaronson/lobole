@@ -1163,7 +1163,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'add_assertion': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}}, 'required': ['id', 'name'], 'additionalProperties': False},
     'add_bearing': {'type': 'object', 'properties': {'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}}, 'required': ['occurrence', 'part'], 'additionalProperties': False},
     'add_job_fixture': {'type': 'object', 'properties': {'box': {'type': 'array', 'items': {'type': 'number'}}, 'enabled': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'pos': {'type': 'array', 'items': {'type': 'number'}}, 'rot_z': {'type': 'number'}, 'safe_z': {'type': 'number'}, 'setup': {'type': 'integer'}, 'part': {'type': 'integer'}}, 'required': ['enabled', 'id', 'name', 'pos', 'rot_z', 'safe_z', 'setup'], 'additionalProperties': False},
-    'add_requirement': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'requirement': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'id': {'type': 'integer'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}}, 'required': ['bound', 'id', 'measure', 'name', 'note', 'revision', 'state'], 'additionalProperties': False}}, 'required': ['id', 'requirement'], 'additionalProperties': False},
+    'add_requirement': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'requirement': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'id': {'type': 'integer'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}, 'checked_at': {'type': 'string'}, 'detail': {'type': 'object'}, 'evidence_revision': {'type': 'integer'}, 'input_hash': {'type': 'string'}, 'limit': {'type': 'number'}, 'limit_max': {'type': 'number'}, 'limit_min': {'type': 'number'}, 'unit': {'type': 'string'}, 'value': {'type': 'number'}}, 'required': ['bound', 'id', 'measure', 'name', 'revision', 'state'], 'additionalProperties': False}}, 'required': ['id', 'requirement'], 'additionalProperties': False},
     'check_assembly_sequence': {'type': 'object', 'properties': {'pass': {'type': 'boolean'}, 'allowance_mm': {'type': 'number'}, 'steps': {'type': 'array', 'items': {'type': 'object'}}, 'missing': {'type': 'array', 'items': {'type': 'string'}}, 'seconds': {'type': 'number'}, 'sections': {'type': 'object'}}, 'required': ['pass', 'allowance_mm', 'steps', 'missing', 'seconds', 'sections'], 'additionalProperties': False},
     'check_drawing': {'type': 'object', 'properties': {'dims': {'type': 'integer'}, 'issues': {'type': 'array', 'items': {'type': 'object', 'properties': {'detail': {'type': 'string'}, 'kind': {'type': 'string'}, 'view': {'type': 'integer'}, 'other_view': {'type': 'integer'}, 'dim': {'type': 'integer'}, 'note': {'type': 'integer'}}, 'required': ['detail', 'kind'], 'additionalProperties': False}}, 'ok': {'type': 'boolean'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'views': {'type': 'integer'}}, 'required': ['dims', 'issues', 'ok', 'receipt', 'views'], 'additionalProperties': False},
     'check_fasteners': {'type': 'object', 'properties': {'examined': {'type': 'integer'}, 'findings': {'type': 'array', 'items': {'type': 'object', 'properties': {'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}, 'why': {'type': 'string'}}, 'required': ['occurrence', 'part', 'why'], 'additionalProperties': False}}, 'ok': {'type': 'boolean'}, 'receipt': {'type': 'object', 'properties': {'claims': {'type': 'array', 'items': {'type': 'object'}}, 'schema': {'type': 'string'}, 'standing': {'type': 'string'}, 'summary': {'type': 'string'}}, 'required': ['claims', 'schema', 'standing', 'summary'], 'additionalProperties': False}, 'skipped': {'type': 'integer'}}, 'required': ['examined', 'findings', 'ok', 'receipt', 'skipped'], 'additionalProperties': False},
@@ -1182,6 +1182,8 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'contact_status': {'type': 'object', 'properties': {'cancel_requested': {'type': 'boolean'}, 'cancellable': {'type': 'boolean'}, 'elapsed_seconds': {'type': 'number'}, 'fraction': {'type': 'number'}, 'job': {'type': 'integer'}, 'kind': {'type': 'string'}, 'label': {'type': 'string'}, 'outlives_client': {'type': 'boolean'}, 'running': {'type': 'boolean'}, 'outcome': {'type': 'string'}, 'seconds': {'type': 'number'}, 'error': {'type': 'string'}, 'cancel_reason': {'type': 'string'}, 'report': {'type': 'object'}}, 'required': ['job', 'kind', 'running'], 'additionalProperties': False},
     'crash_reports': {'type': 'object', 'properties': {'folder': {'type': 'string'}, 'last_startup_failure': {'anyOf': [{'type': 'object', 'properties': {'path': {'type': 'string'}, 'text': {'type': 'string'}}, 'required': ['path', 'text'], 'additionalProperties': False}, {'type': 'null'}]}, 'reports': {'type': 'array', 'items': {'type': 'object', 'properties': {'autosaves': {'type': 'array', 'items': {'type': 'string'}}, 'build': {'type': 'string'}, 'crashed': {'type': 'boolean'}, 'mode': {'type': 'string'}, 'os': {'type': 'string'}, 'path': {'type': 'string'}, 'project': {'type': 'string'}, 'reason': {'type': 'string'}, 'started': {'type': 'string'}, 'stem': {'type': 'string'}, 'version': {'type': 'string'}}, 'required': ['autosaves', 'build', 'crashed', 'mode', 'os', 'path', 'project', 'reason', 'started', 'stem', 'version'], 'additionalProperties': False}}}, 'required': ['folder', 'last_startup_failure', 'reports'], 'additionalProperties': False},
     'curve_points': {'type': 'object', 'properties': {'at_mm': {'type': 'array', 'items': {'type': 'number'}}, 'curve': {'type': 'integer'}, 'kind': {'type': 'string'}, 'length_mm': {'type': 'number'}, 'name': {'type': 'string'}, 'points': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}}, 'required': ['at_mm', 'curve', 'kind', 'length_mm', 'name', 'points'], 'additionalProperties': False},
+    'design_sweep': {'type': 'object', 'properties': {'base': {'type': 'object'}, 'cancelled': {'type': 'boolean'}, 'cap': {'type': 'integer'}, 'first_failure': {'type': 'object'}, 'job': {'type': 'integer'}, 'kind': {'type': 'string'}, 'not_swept': {'type': 'array', 'items': {'type': 'object'}}, 'planned': {'type': 'integer'}, 'points': {'type': 'array', 'items': {'type': 'object'}}, 'seconds': {'type': 'number'}, 'started': {'type': 'boolean'}, 'variables': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['cap', 'job', 'planned', 'variables'], 'additionalProperties': False},
+    'design_sweep_result': {'type': 'object', 'properties': {'base': {'type': 'object'}, 'cancelled': {'type': 'boolean'}, 'cap': {'type': 'integer'}, 'first_failure': {'type': 'object'}, 'fraction': {'type': 'number'}, 'job': {'type': 'integer'}, 'label': {'type': 'string'}, 'not_swept': {'type': 'array', 'items': {'type': 'object'}}, 'planned': {'type': 'integer'}, 'points': {'type': 'array', 'items': {'type': 'object'}}, 'running': {'type': 'boolean'}, 'seconds': {'type': 'number'}, 'variables': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['job'], 'additionalProperties': False},
     'export_stl': {'type': 'object', 'properties': {'bodies': {'type': 'integer'}, 'deflection_from': {'type': 'string'}, 'deflection_mm': {'type': 'number'}, 'free_edges': {'type': 'integer'}, 'path': {'type': 'string'}, 'shells': {'type': 'integer'}, 'watertight': {'type': 'boolean'}, 'chord_share': {'type': 'number'}, 'smallest_gap_side_mm': {'type': 'number'}, 'warning': {'type': 'string'}}, 'required': ['bodies', 'deflection_from', 'deflection_mm', 'free_edges', 'path', 'shells', 'watertight'], 'additionalProperties': False},
     'extract_variables': {'type': 'object', 'properties': {'applied': {'type': 'boolean'}, 'left_alone': {'type': 'array', 'items': {'type': 'object', 'properties': {'feature': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'field': {'type': 'string'}, 'label': {'type': 'string'}, 'reason': {'type': 'string'}, 'value': {'type': 'number'}}, 'required': ['feature', 'feature_id', 'field', 'label', 'reason', 'value'], 'additionalProperties': False}}, 'scope': {'type': 'string'}, 'variables': {'type': 'array', 'items': {'type': 'object', 'properties': {'existing': {'type': 'boolean'}, 'expression': {'type': 'string'}, 'name': {'type': 'string'}, 'quantity': {'type': 'string'}, 'uses': {'type': 'array', 'items': {'type': 'object'}}, 'value': {'type': 'number'}}, 'required': ['existing', 'expression', 'name', 'quantity', 'uses', 'value'], 'additionalProperties': False}}, 'digest': {'type': 'object'}, 'regen': {'type': 'object'}}, 'required': ['applied', 'left_alone', 'scope', 'variables'], 'additionalProperties': False},
     'fit_bearing': {'type': 'object', 'properties': {'candidates': {'type': 'array', 'items': {'type': 'string'}}, 'designation': {'type': 'string'}, 'mate': {'type': 'integer'}, 'occurrence': {'type': 'integer'}, 'other_mate': {'type': 'integer'}, 'other_ring': {'type': 'object', 'properties': {'diameter_check': {'type': 'object'}, 'ring': {'type': 'string'}, 'seat': {'type': 'object'}}, 'required': ['diameter_check', 'ring', 'seat'], 'additionalProperties': False}, 'overhang_mm': {'type': 'number'}, 'seat_diameter_mm': {'type': 'number'}, 'shaft': {'type': 'boolean'}, 'shoulder': {'type': 'boolean'}, 'summary': {'type': 'string'}}, 'required': ['candidates', 'designation', 'mate', 'occurrence', 'other_mate', 'other_ring', 'overhang_mm', 'seat_diameter_mm', 'shaft', 'shoulder', 'summary'], 'additionalProperties': False},
@@ -1234,8 +1236,8 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'set_job_fixture': {'type': 'object', 'properties': {'enabled': {'type': 'boolean'}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'part': {'type': 'integer'}, 'pos': {'type': 'array', 'items': {'type': 'number'}}, 'rot_z': {'type': 'number'}, 'safe_z': {'type': 'number'}, 'setup': {'type': 'integer'}, 'seat': {'type': 'object', 'properties': {'along_mm': {'type': 'number'}, 'edge': {'type': 'string'}, 'element': {'type': 'string'}, 'feature_id': {'type': 'integer'}, 'over_mm': {'type': 'number'}, 'spin_deg': {'type': 'number'}}, 'required': ['along_mm', 'edge', 'element', 'feature_id', 'over_mm', 'spin_deg'], 'additionalProperties': False}, 'box': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['enabled', 'id', 'name', 'pos', 'rot_z', 'safe_z', 'setup'], 'additionalProperties': False},
     'set_job_part': {'type': 'object', 'properties': {'configuration': {'type': 'integer'}, 'id': {'type': 'integer'}, 'moved': {'type': 'integer'}, 'configuration_name': {'type': 'string'}}, 'required': ['configuration', 'id', 'moved'], 'additionalProperties': False},
     'set_print_process': {'type': 'object', 'properties': {'print': {'type': 'object', 'properties': {'material': {'type': 'string'}, 'process': {'type': 'string'}, 'stl_deflection_mm': {'type': 'number'}, 'match': {'type': 'string'}, 'profile': {'type': 'string'}, 'conditions': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'layer_height_mm': {'type': 'number'}, 'z_gap_mm': {'type': 'number'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'bed_exclude_mm': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'line_width_mm': {'type': 'number'}}, 'required': ['material', 'process', 'stl_deflection_mm'], 'additionalProperties': False}, 'threads': {'type': 'array', 'items': {'type': 'object'}}, 'confirm': {'type': 'string'}}, 'required': ['print', 'threads'], 'additionalProperties': False},
-    'set_requirement': {'type': 'object', 'properties': {'requirement': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'id': {'type': 'integer'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}}, 'required': ['bound', 'id', 'measure', 'name', 'note', 'revision', 'state'], 'additionalProperties': False}}, 'required': ['requirement'], 'additionalProperties': False},
-    'set_table': {'type': 'object', 'properties': {'regen': {'type': 'object', 'properties': {'failed': {'type': 'array', 'items': {}}, 'ok': {'type': 'boolean'}, 'warnings': {'type': 'array', 'items': {}}}, 'required': ['failed', 'ok', 'warnings'], 'additionalProperties': False}, 'table': {'type': 'object', 'properties': {'columns': {'type': 'array', 'items': {'type': 'string'}}, 'name': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'comment': {'type': 'string'}}, 'required': ['columns', 'name', 'rows'], 'additionalProperties': False}}, 'required': ['regen', 'table'], 'additionalProperties': False},
+    'set_requirement': {'type': 'object', 'properties': {'requirement': {'type': 'object', 'properties': {'bound': {'type': 'object'}, 'id': {'type': 'integer'}, 'measure': {'type': 'object'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'revision': {'type': 'integer'}, 'source': {'type': 'string'}, 'state': {'type': 'string'}, 'checked_at': {'type': 'string'}, 'detail': {'type': 'object'}, 'evidence_revision': {'type': 'integer'}, 'input_hash': {'type': 'string'}, 'limit': {'type': 'number'}, 'limit_max': {'type': 'number'}, 'limit_min': {'type': 'number'}, 'unit': {'type': 'string'}, 'value': {'type': 'number'}}, 'required': ['bound', 'id', 'measure', 'name', 'revision', 'state'], 'additionalProperties': False}}, 'required': ['requirement'], 'additionalProperties': False},
+    'set_table': {'type': 'object', 'properties': {'regen': {'type': 'object', 'properties': {'failed': {'type': 'array', 'items': {}}, 'ok': {'type': 'boolean'}, 'warnings': {'type': 'array', 'items': {}}}, 'required': ['failed', 'ok', 'warnings'], 'additionalProperties': False}, 'requirements': {'type': 'array', 'items': {'type': 'object'}}, 'table': {'type': 'object', 'properties': {'columns': {'type': 'array', 'items': {'type': 'string'}}, 'name': {'type': 'string'}, 'rows': {'type': 'array', 'items': {'type': 'object'}}, 'comment': {'type': 'string'}}, 'required': ['columns', 'name', 'rows'], 'additionalProperties': False}}, 'required': ['regen', 'table'], 'additionalProperties': False},
     'solve_assembly': {'type': 'object', 'properties': {'errored_mates': {'type': 'integer'}, 'mates': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'status': {'type': 'string'}, 'error': {'type': 'string'}, 'residual_mm': {'type': 'number'}}, 'required': ['id', 'name', 'status'], 'additionalProperties': False}}, 'occurrences': {'type': 'integer'}, 'placed': {'type': 'integer'}, 'placed_by_mates': {'type': 'integer'}, 'placed_by_transform': {'type': 'integer'}, 'dof': {'type': 'integer'}, 'loop_mates': {'type': 'integer'}, 'loops_closed': {'type': 'boolean'}, 'redundant_mates': {'type': 'array', 'items': {'type': 'integer'}}, 'residual_mm': {'type': 'number'}, 'flexible': {'type': 'array', 'items': {'type': 'object', 'properties': {'configuration_id': {'type': 'integer'}, 'mates': {'type': 'array', 'items': {'type': 'object'}}, 'name': {'type': 'string'}, 'occurrence': {'type': 'integer'}, 'placed_by_mates': {'type': 'integer'}, 'placed_by_transform': {'type': 'integer'}}, 'required': ['configuration_id', 'mates', 'name', 'occurrence', 'placed_by_mates', 'placed_by_transform'], 'additionalProperties': False}}, 'errored_attachments': {'type': 'integer'}, 'attachment_errors': {'type': 'array', 'items': {'type': 'object'}}, 'suspects': {'type': 'array', 'items': {'type': 'object', 'properties': {'closes': {'type': 'array', 'items': {'type': 'integer'}}, 'connector': {'type': 'string'}, 'mate': {'type': 'integer'}, 'name': {'type': 'string'}, 'sole': {'type': 'boolean'}, 'tilt_deg': {'type': 'number'}}, 'required': ['closes', 'connector', 'mate', 'name', 'sole', 'tilt_deg'], 'additionalProperties': False}}}, 'required': ['errored_mates', 'mates', 'occurrences', 'placed', 'placed_by_mates', 'placed_by_transform'], 'additionalProperties': False},
     'split_for_printing': {'type': 'object', 'properties': {'automatic': {'type': 'boolean'}, 'bed_mm': {'type': 'array', 'items': {'type': 'number'}}, 'body': {'type': 'string'}, 'cuts': {'type': 'array', 'items': {'type': 'object', 'properties': {'at_mm': {'type': 'number'}, 'axis': {'type': 'string'}}, 'required': ['at_mm', 'axis'], 'additionalProperties': False}}, 'fits_whole': {'type': 'boolean'}, 'part': {'type': 'string'}, 'pieces': {'type': 'array', 'items': {'type': 'object', 'properties': {'bbox_max': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min': {'type': 'array', 'items': {'type': 'number'}}, 'fits': {'type': 'boolean'}, 'index': {'type': 'integer'}, 'material': {'type': 'string'}, 'orientation': {'type': 'object'}, 'size_mm': {'type': 'array', 'items': {'type': 'number'}}, 'solids': {'type': 'integer'}, 'volume_mm3': {'type': 'number'}, 'part': {'type': 'string'}, 'part_id': {'type': 'integer'}}, 'required': ['bbox_max', 'bbox_min', 'fits', 'index', 'material', 'orientation', 'size_mm', 'solids', 'volume_mm3'], 'additionalProperties': False}}}, 'required': ['automatic', 'bed_mm', 'body', 'cuts', 'fits_whole', 'part', 'pieces'], 'additionalProperties': False},
     'topo_to_body': {'type': 'object', 'properties': {'part': {'type': 'string'}, 'part_id': {'type': 'integer'}, 'path': {'type': 'string'}, 'threshold': {'type': 'number'}, 'triangles': {'type': 'integer'}, 'valid': {'type': 'boolean'}, 'volume_mm3': {'type': 'number'}, 'watertight': {'type': 'boolean'}}, 'required': ['part', 'part_id', 'path', 'threshold', 'triangles', 'valid', 'volume_mm3', 'watertight'], 'additionalProperties': False},
@@ -1271,10 +1273,19 @@ AddRequirementResultRequirement = TypedDict('AddRequirementResultRequirement', {
     'id': int,
     'measure': dict[str, Any],
     'name': str,
-    'note': str,
+    'note': NotRequired[str],
     'revision': int,
     'source': NotRequired[str],
     'state': str,
+    'checked_at': NotRequired[str],
+    'detail': NotRequired[dict[str, Any]],
+    'evidence_revision': NotRequired[int],
+    'input_hash': NotRequired[str],
+    'limit': NotRequired[float],
+    'limit_max': NotRequired[float],
+    'limit_min': NotRequired[float],
+    'unit': NotRequired[str],
+    'value': NotRequired[float],
 })
 
 AddRequirementResult = TypedDict('AddRequirementResult', {
@@ -1996,6 +2007,37 @@ CurvePointsResult = TypedDict('CurvePointsResult', {
     'length_mm': float,
     'name': str,
     'points': list[list[float]],
+})
+
+DesignSweepResult = TypedDict('DesignSweepResult', {
+    'base': NotRequired[dict[str, Any]],
+    'cancelled': NotRequired[bool],
+    'cap': int,
+    'first_failure': NotRequired[dict[str, Any]],
+    'job': int,
+    'kind': NotRequired[str],
+    'not_swept': NotRequired[list[dict[str, Any]]],
+    'planned': int,
+    'points': NotRequired[list[dict[str, Any]]],
+    'seconds': NotRequired[float],
+    'started': NotRequired[bool],
+    'variables': list[dict[str, Any]],
+})
+
+DesignSweepResultResult = TypedDict('DesignSweepResultResult', {
+    'base': NotRequired[dict[str, Any]],
+    'cancelled': NotRequired[bool],
+    'cap': NotRequired[int],
+    'first_failure': NotRequired[dict[str, Any]],
+    'fraction': NotRequired[float],
+    'job': int,
+    'label': NotRequired[str],
+    'not_swept': NotRequired[list[dict[str, Any]]],
+    'planned': NotRequired[int],
+    'points': NotRequired[list[dict[str, Any]]],
+    'running': NotRequired[bool],
+    'seconds': NotRequired[float],
+    'variables': NotRequired[list[dict[str, Any]]],
 })
 
 ExportStlResult = TypedDict('ExportStlResult', {
@@ -3111,10 +3153,19 @@ SetRequirementResultRequirement = TypedDict('SetRequirementResultRequirement', {
     'id': int,
     'measure': dict[str, Any],
     'name': str,
-    'note': str,
+    'note': NotRequired[str],
     'revision': int,
     'source': NotRequired[str],
     'state': str,
+    'checked_at': NotRequired[str],
+    'detail': NotRequired[dict[str, Any]],
+    'evidence_revision': NotRequired[int],
+    'input_hash': NotRequired[str],
+    'limit': NotRequired[float],
+    'limit_max': NotRequired[float],
+    'limit_min': NotRequired[float],
+    'unit': NotRequired[str],
+    'value': NotRequired[float],
 })
 
 SetRequirementResult = TypedDict('SetRequirementResult', {
@@ -3136,6 +3187,7 @@ SetTableResultTable = TypedDict('SetTableResultTable', {
 
 SetTableResult = TypedDict('SetTableResult', {
     'regen': SetTableResultRegen,
+    'requirements': NotRequired[list[dict[str, Any]]],
     'table': SetTableResultTable,
 })
 
@@ -3408,6 +3460,12 @@ class RpcSurface:
         raise NotImplementedError
 
     def describe(self, _timeout: float | None = None, **params: Unpack[DescribeParams]) -> dict[str, Any]:
+        raise NotImplementedError
+
+    def design_sweep(self, _timeout: float | None = None, **params: Any) -> DesignSweepResult:
+        raise NotImplementedError
+
+    def design_sweep_result(self, _timeout: float | None = None, **params: Any) -> DesignSweepResultResult:
         raise NotImplementedError
 
     def exit_simulation(self, _timeout: float | None = None) -> dict[str, Any]:

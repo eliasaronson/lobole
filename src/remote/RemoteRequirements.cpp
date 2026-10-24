@@ -7,6 +7,7 @@
 
 #include "core/Angles.h"
 #include "core/AssemblySolve.h"
+#include "core/DesignSweep.h"
 #include "core/Expression.h"
 #include "core/InputHash.h"
 #include "core/Measure.h"
@@ -14,6 +15,7 @@
 #include "core/MeshCollide.h"
 #include "core/MotionStudy.h"
 #include "core/Occurrence.h"
+#include "core/PartMeasures.h"
 #include "core/Receipt.h"
 #include "core/Requirements.h"
 #include "core/fem/FemSolver.h"
@@ -33,6 +35,7 @@
 #include "ui/DocumentSlots.h"
 #include "ui/MotionActions.h"
 #include "ui/RequirementsPanel.h"
+#include "ui/VariableActions.h"
 
 #include <glm/glm.hpp>
 
@@ -41,6 +44,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdlib>
+#include <deque>
+#include <filesystem>
 #include <format>
 #include <functional>
 #include <limits>
@@ -50,6 +55,7 @@
 #include <thread>
 
 #include <Standard_Failure.hxx>
+#include <unistd.h> // getpid: a sweep's copies' directory
 
 using json = nlohmann::json;
 
@@ -107,18 +113,30 @@ const MethodDoc RequirementMethods[] = {
      "check_fasteners {document, allow?: [{part?, why?, max?}], "
      "allow_skipped?}, "
      "check_literals {document?: one part, or documents?: several, else "
-     "every part}, motion_clean "
+     "every part}, expression {expression: a formula over the variables "
+     "(\"od - bore\"), unit?: what it reads in (default mm; the formula is "
+     "in base units, mm and degrees), document?: a part, read as its "
+     "features see it (local variables over the project's, its active "
+     "configuration applied), configuration?: that part's configuration to "
+     "read instead (0 = base)} (measured in place wherever the values move: "
+     "the call that changes one answers `requirements` for each expression "
+     "requirement whose state it changed; an unknown name or a formula that "
+     "does not compile is refused naming the scope's variables), "
+     "motion_clean "
      "{document, study}, cam_verify {document: job, setup, resolution?, "
      "allow_uncut?: [what prefixes]}. A number is bounded at_most, at_least "
      "or within; a verdict is bounded pass. A bound value may be an "
      "expression over the project's variables. An unknown kind or key is "
      "refused naming the accepted ones; a document, study or occurrence "
      "that does not exist is refused. Units: mm, deg, MPa, g, mm2, mm3 as the "
-     "measure reports them.",
+     "measure reports them; an expression's as its `unit` says.",
      "bound, measure, name, source", NotInBatch,
      "id:int, requirement:{bound:object, id:int, measure:object, "
-     "name:string, note:string, revision:int, source?:string, "
-     "state:string}"},
+     "name:string, note?:string, revision:int, source?:string, "
+     "state:string, checked_at?:string, detail?:object, "
+     "evidence_revision?:int, input_hash?:string, limit?:number, "
+     "limit_max?:number, limit_min?:number, unit?:string, "
+     "value?:number}"},
     {"set_requirement",
      "Edit a requirement {id, name?, source?, measure?, bound?}. Any edit "
      "bumps its revision and DROPS its evidence: a check of the old "
@@ -126,7 +144,10 @@ const MethodDoc RequirementMethods[] = {
      "until checked again.",
      "bound, id, measure, name, source", NotInBatch,
      "requirement:{bound:object, id:int, measure:object, name:string, "
-     "note:string, revision:int, source?:string, state:string}"},
+     "note?:string, revision:int, source?:string, state:string, "
+     "checked_at?:string, detail?:object, evidence_revision?:int, "
+     "input_hash?:string, limit?:number, limit_max?:number, "
+     "limit_min?:number, unit?:string, value?:number}"},
     {"remove_requirement", "Remove a requirement {id}.", "id", NotInBatch,
      "removed:int"},
     {"list_requirements",
@@ -169,6 +190,56 @@ const MethodDoc RequirementMethods[] = {
      "reused?:int, summary:{fail:int, pass:int, stale:int, "
      "unchecked:int, unresolved:int}, checking?:int, job?:int, "
      "kind?:string, started?:bool"},
+    {"design_sweep",
+     "Regenerate the model over ranges of its variables, on copies, and say "
+     "where it stops building or meeting its requirements "
+     "(docs/requirements/README.md#design-sweep). {variables?: [{name, "
+     "min, max, scope?: project|part|<part id>}] (each end a number or an "
+     "expression, in the variable's base units: mm, or degrees for an "
+     "angle), from_requirements?: true (each range an expression "
+     "requirement states on one bare variable -- a within bound; a "
+     "one-sided one needs its other end in variables), samples?: per "
+     "variable, ends included, evenly spaced (default 5, 2..33; each "
+     "varied alone, the others at their values), corners?: true adds the "
+     "box's corners (up to 8 variables) and its centre, refine?: bisect "
+     "each failure's bracket (default 0, at most 8 times), documents?: [part "
+     "ids] (default: every part whose variables or features read a swept "
+     "one, directly or through others), max_points?: (default 64, at most "
+     "256), async?, outlive_client?}. A point records, per rebuilt part, "
+     "regen ok|broken with the broken features {feature_id, name, error}, "
+     "each sketch that does not solve or whose dof moved {feature_id, ok, "
+     "dof, conflicting}, volume_mm3 and mass_g; and every expression, mass, "
+     "volume and section_area requirement of a rebuilt part, measured as "
+     "the check measures it (the others are listed once in not_swept, with "
+     "why). first_failure {name: {below?, above?: {last_ok, failed, why}}} "
+     "is the failing value nearest the variable's own on each side. "
+     "Refused before anything starts: an unknown key, a variable not in "
+     "scope (naming those that are) or that nothing reads, one a rebuilt "
+     "part's active configuration overrides, min above max, a plan over "
+     "max_points (naming the count), a second sweep while one runs. Nothing "
+     "in the document changes and the format does not move. A job "
+     "(design_sweep): async answers with `job` (study_status {job} follows "
+     "it, cancel_study {job} stops it between points keeping what was "
+     "measured); otherwise the call waits. It is cancelled with its client "
+     "unless outlive_client. The last sweeps are kept in memory: "
+     "design_sweep_result.",
+     "async, corners, documents, from_requirements, max_points, "
+     "outlive_client, refine, samples, variables",
+     NotInBatch,
+     "base?:object, cancelled?:bool, cap:int, first_failure?:object, "
+     "job:int, kind?:string, not_swept?:object[], planned:int, "
+     "points?:object[], seconds?:number, started?:bool, "
+     "variables:object[]"},
+    {"design_sweep_result",
+     "A design sweep's answer {job?: the sweep's job, else the last one}: "
+     "what design_sweep answers once it has run (cancelled: true with the "
+     "points done when it was stopped), or {running: true, fraction, "
+     "label} while it runs. Refused naming the sweeps there are.",
+     "job", Deferrable,
+     "base?:object, cancelled?:bool, cap?:int, first_failure?:object, "
+     "fraction?:number, job:int, label?:string, not_swept?:object[], "
+     "planned?:int, points?:object[], running?:bool, seconds?:number, "
+     "variables?:object[]"},
     // The declared clearances (v97) are clearance requirements now
     // (docs/requirements/README.md#clearance-assertions). These four keep
     // their words for the scripts that use them.
@@ -316,6 +387,78 @@ std::optional<glm::dvec3> PointOf(const ui::AppState& state, const json& at) {
   return p;
 }
 
+// The scope an `expression` requirement reads
+// (docs/requirements/README.md#expression): the project's variables and
+// tables; a part's as its features see them (local over project, its active
+// configuration applied); or that part in the configuration the measure
+// names, whichever is active. `why` non-empty: it cannot be read now.
+struct ExprScope {
+  const SymbolTable* table = nullptr;
+  SymbolTable storage; // a configuration's, when `own`
+  bool own = false;
+  std::string name; // "the project", "part 'Housing'"
+  std::string why;
+  json detail = json::object(); // {scope, part?, configuration?}
+  const SymbolTable& Table() const { return own ? storage : *table; }
+};
+
+std::string ConfigurationList(const Document& doc) {
+  std::vector<std::string> v{"0 (base)"};
+  for (const Configuration& c : doc.GetConfigurations())
+    v.push_back(std::to_string(c.id) + " (" + c.name + ")");
+  return KnownList(v);
+}
+
+void ScopeOf(ui::AppState& state, const req::Requirement& r, ExprScope& s) {
+  const json& m = r.measure;
+  if (!m.contains("document")) {
+    s.table = &state.projectSymbols;
+    s.name = "the project";
+    s.detail = {{"scope", "project"}};
+    return;
+  }
+  const auto slot = DocSlot(state, r.Document(), "part", &s.why);
+  if (!slot)
+    return;
+  const Document* doc = ui::SlotDoc(state, *slot);
+  if (doc == nullptr) {
+    s.why = "document " + std::to_string(r.Document()) + " is not loaded";
+    return;
+  }
+  const std::string part = state.parts[*slot].name;
+  s.name = "part '" + part + "'";
+  s.detail = {{"scope", "part"}, {"part", part}};
+  if (!m.contains("configuration")) {
+    s.table = &doc->Symbols();
+    if (const Configuration* c = doc->ActiveConfig())
+      s.detail["configuration"] = c->name; // active: what its features see
+    return;
+  }
+  const uint64_t cfg = m.at("configuration").get<uint64_t>();
+  const Configuration* c = cfg == 0 ? nullptr : doc->FindConfiguration(cfg);
+  if (cfg != 0 && c == nullptr) {
+    s.why = "configuration " + std::to_string(cfg) + " is gone from '" + part +
+            "' (its configurations: " + ConfigurationList(*doc) + ")";
+    return;
+  }
+  s.storage = doc->SymbolsIn(cfg);
+  s.own = true;
+  const std::string cname = c ? c->name : std::string("base");
+  s.name += " in configuration '" + cname + "'";
+  s.detail["configuration"] = cname;
+}
+
+// Why an expression requirement's names cannot be read in its scope now: a
+// name that went anyway (a part deleted, a merge) is a reference gone,
+// never a 0.
+std::string MissingName(const req::Requirement& r, const ExprScope& s) {
+  for (const std::string& text : req::ExpressionTexts(r))
+    for (const std::string& name : req::IdentifiersOf(text))
+      if (!s.Table().contains(name))
+        return "variable '" + name + "' is not in " + s.name;
+  return {};
+}
+
 // ---- Input hashes
 // ------------------------------------------------------------
 
@@ -414,6 +557,47 @@ uint64_t CurrentHash(ui::AppState& state, const req::Requirement& r,
   const json& m = r.measure;
   inputhash::Hasher h;
   h.Str(kind);
+  if (kind == "expression") {
+    // The names and values the formula and its bound read, in the scope
+    // they read, the configuration it reads them in, and every cell of a
+    // table a lookup names: a cell edited makes it stale.
+    ExprScope scope;
+    ScopeOf(state, r, scope);
+    if (!scope.why.empty()) {
+      why = scope.why;
+      return 0;
+    }
+    if (const std::string missing = MissingName(r, scope); !missing.empty()) {
+      why = missing;
+      return 0;
+    }
+    h.Str(scope.name);
+    std::set<std::string> tables;
+    for (const std::string& text : req::ExpressionTexts(r)) {
+      h.Str(text);
+      for (const std::string& name : req::IdentifiersOf(text)) {
+        h.Str(name);
+        h.F64(scope.Table().at(name));
+      }
+      for (const std::string& t : req::LookupTablesOf(text))
+        tables.insert(t);
+    }
+    h.U64(m.value("configuration", uint64_t{0}));
+    for (const std::string& t : tables) {
+      std::map<std::string, double> cells;
+      for (const auto& [name, v] : scope.Table()) {
+        std::string tn, k, c;
+        if (lookuptable::SplitCellSymbol(name, tn, k, c) && tn == t)
+          cells[name] = v;
+      }
+      h.Str(t);
+      for (const auto& [name, v] : cells) {
+        h.Str(name);
+        h.F64(v);
+      }
+    }
+    return h.Digest();
+  }
   for (const std::string& name : ExpressionNames(r)) {
     h.Str(name);
     const auto it = state.projectSymbols.find(name);
@@ -652,7 +836,12 @@ json Summary(const json& rows) {
   return s;
 }
 
+json RefreshExpressions(ui::AppState& state); // below, beside CheckOne
+
 json RowsJson(ui::AppState& state, const std::vector<uint64_t>* only) {
+  // An expression requirement is measured wherever its values moved: a row
+  // read here is never stale for want of a Check.
+  RefreshExpressions(state);
   json rows = json::array();
   for (const req::Requirement& r : state.requirements)
     if (!only || std::find(only->begin(), only->end(), r.id) != only->end())
@@ -693,6 +882,30 @@ void MarkRequirementsEdited(ui::AppState& state) {
 void RefuseUnresolvable(ui::AppState& state, const req::Requirement& r) {
   const std::string kind = r.Kind();
   std::string why;
+  if (kind == "expression") {
+    ExprScope scope;
+    ScopeOf(state, r, scope);
+    if (!scope.why.empty())
+      throw std::runtime_error(
+          scope.why + (r.measure.contains("configuration")
+                           ? std::string()
+                           : ". Documents: " + DocumentCandidates(state)));
+    // Compiled and resolved now, so a typo is refused by name rather than
+    // saved as a requirement that is unresolved from its first breath.
+    const auto check = [&](const std::string& text, const char* what) {
+      if (text.empty())
+        return;
+      if (const std::string no =
+              req::ScopeRefusal(text, scope.Table(), what, scope.name);
+          !no.empty())
+        throw std::runtime_error(no);
+    };
+    check(r.measure.at("expression").get<std::string>(), "measure.expression");
+    check(r.bound.valueExpr, "bound.value");
+    check(r.bound.minExpr, "bound.min");
+    check(r.bound.maxExpr, "bound.max");
+    return;
+  }
   if (kind == "check_literals" && !r.measure.contains("document")) {
     CurrentHash(state, r, why);
     if (!why.empty())
@@ -1390,18 +1603,36 @@ Taken MeasureSequence(ui::AppState& state, const Ctx& ctx) {
 
 Taken MeasureMass(ui::AppState& state, const json& m, bool mass) {
   Taken t;
-  json params = json::object();
-  if (state.document)
-    params["part"] = m.at("document");
-  const json r = Call(state, "mass_properties", params);
-  const json& total = r.at("total");
+  double volume = 0.0;
+  std::optional<double> grams;
+  const auto slot = ui::SlotIndexById(state, m.at("document").get<uint64_t>());
+  if (slot && state.parts[*slot].kind == ui::DocKind::Part) {
+    // A part through the function mass_properties answers with, on a const
+    // Document, which a design sweep's point reads too.
+    const Document* doc = ui::SlotDoc(state, *slot);
+    if (doc == nullptr)
+      throw std::runtime_error("the part is not loaded");
+    const Measure::DocumentMass dm = partmeasure::MassOf(doc->GetBodies());
+    volume = dm.volume;
+    if (dm.massKnown)
+      grams = dm.massG;
+  } else {
+    json params = json::object();
+    if (state.document)
+      params["part"] = m.at("document");
+    const json r = Call(state, "mass_properties", params);
+    const json& total = r.at("total");
+    volume = total.at("volume_mm3").get<double>();
+    if (total.contains("mass_g") && !total.at("mass_g").is_null())
+      grams = total.at("mass_g").get<double>();
+  }
   if (mass) {
-    if (!total.contains("mass_g") || total.at("mass_g").is_null())
+    if (!grams)
       throw std::runtime_error("no mass: a body has no material density");
-    t.value = total.at("mass_g").get<double>();
+    t.value = *grams;
     t.unit = "g";
   } else {
-    t.value = total.at("volume_mm3").get<double>();
+    t.value = volume;
     t.unit = "mm3";
   }
   return t;
@@ -1527,20 +1758,15 @@ Taken MeasureBearingBore(ui::AppState& state, const json& m) {
 // anything saying so).
 Taken MeasureSectionArea(ui::AppState& state, const json& m) {
   Taken t;
-  json params{{"part", m.at("document")}};
-  for (const char* k : {"base_plane", "offset", "origin", "normal", "bodies"})
-    if (m.contains(k))
-      params[k] = m.at(k);
-  const bool enclosed = m.at("of").get<std::string>() == "enclosed";
-  if (enclosed)
-    params["enclosed"] = true;
-  const json r = Call(state, "section", params);
-  t.value = r.at(enclosed ? "enclosed_area_mm2" : "area_mm2").get<double>();
+  const auto slot = ui::SlotIndexById(state, m.at("document").get<uint64_t>());
+  const Document* doc = slot ? ui::SlotDoc(state, *slot) : nullptr;
+  if (doc == nullptr)
+    throw std::runtime_error("the part is not loaded");
+  const partmeasure::SectionReading r =
+      partmeasure::SectionAreaMeasure(*doc, m);
+  t.value = r.value;
   t.unit = "mm2";
-  if (enclosed)
-    t.detail["material_area"] = r.at("area_mm2");
-  if (r.contains("enclosed_note"))
-    t.detail["note"] = r.at("enclosed_note");
+  t.detail = r.detail;
   return t;
 }
 
@@ -1749,10 +1975,36 @@ Taken MeasureCamVerify(ui::AppState& state, const json& m, const Ctx& ctx) {
   return t;
 }
 
+// An `expression` requirement's reading: the formula in its scope, and
+// every identifier it read with its value then.
+Taken MeasureExpression(ui::AppState& state, const req::Requirement& r) {
+  Taken t;
+  ExprScope scope;
+  ScopeOf(state, r, scope);
+  if (!scope.why.empty())
+    throw std::runtime_error(scope.why);
+  const req::ExpressionReading reading = req::EvaluateIn(
+      r.measure.at("expression").get<std::string>(), scope.Table());
+  if (!reading.value)
+    throw std::runtime_error("'" +
+                             r.measure.at("expression").get<std::string>() +
+                             "': " + reading.error);
+  t.value = reading.value;
+  t.unit = r.measure.value("unit", std::string("mm"));
+  t.detail = scope.detail;
+  json inputs = json::object();
+  for (const auto& [name, v] : reading.inputs)
+    inputs[name] = v;
+  t.detail["inputs"] = inputs;
+  return t;
+}
+
 Taken MeasureOn(ui::AppState& state, const req::Requirement& r,
                 const Ctx& ctx) {
   const std::string kind = r.Kind();
   const json& m = r.measure;
+  if (kind == "expression")
+    return MeasureExpression(state, r); // reads values, visits no tab
   if (kind == "check_literals") {
     if (m.contains("document"))
       Activate(state, r.Document());
@@ -1818,12 +2070,29 @@ void Judge(ui::AppState& state, const req::Requirement& r, const Taken& t,
     throw std::runtime_error("the measure returned no value");
   const req::Bound& b = r.bound;
   double lim = b.value, lo = b.min, hi = b.max;
+  // An expression requirement's bound reads the scope its formula reads;
+  // every other bound reads the project's variables.
+  ExprScope scope;
+  if (r.Kind() == "expression") {
+    ScopeOf(state, r, scope);
+    if (!scope.why.empty())
+      throw std::runtime_error(scope.why);
+  }
+  const auto side = [&](const std::string& text, const char* what) {
+    if (r.Kind() != "expression")
+      return Evaluate(state, text, {}, what);
+    const req::ExpressionReading v = req::EvaluateIn(text, scope.Table());
+    if (!v.value)
+      throw std::runtime_error(std::string(what) + " '" + text +
+                               "': " + v.error);
+    return *v.value;
+  };
   if (!b.valueExpr.empty())
-    lim = Evaluate(state, b.valueExpr, {}, "bound");
+    lim = side(b.valueExpr, "bound");
   if (!b.minExpr.empty())
-    lo = Evaluate(state, b.minExpr, {}, "bound min");
+    lo = side(b.minExpr, "bound min");
   if (!b.maxExpr.empty())
-    hi = Evaluate(state, b.maxExpr, {}, "bound max");
+    hi = side(b.maxExpr, "bound max");
   if (b.kind == "within") {
     e.limitMin = lo;
     e.limitMax = hi;
@@ -1945,6 +2214,56 @@ bool Land(ui::AppState& state, Pending& p) {
   r->evidence = std::move(e);
   MarkRequirementsEdited(state);
   return true;
+}
+
+// The state the evidence alone says: what a row read before the values
+// moved.
+std::string EvidenceState(const req::Requirement& r) {
+  const req::Evidence& e = r.evidence;
+  if (!e.taken || e.revision != r.revision)
+    return "unchecked";
+  if (!e.error.empty())
+    return "unresolved";
+  return e.pass ? "pass" : "fail";
+}
+
+// Every `expression` requirement whose input hash moved, measured in place
+// (docs/requirements/README.md#expression): it costs microseconds, so it
+// never waits for a Check. Answers the rows whose state that changed, in
+// the shape a mutating call answers them: {id, name, state, value?, unit?,
+// bound, limit?, note?, finding?}.
+json RefreshExpressions(ui::AppState& state) {
+  json changed = json::array();
+  for (req::Requirement& r : state.requirements) {
+    if (r.Kind() != "expression")
+      continue;
+    std::string why;
+    const uint64_t hash = CurrentHash(state, r, why);
+    const req::Evidence& e = r.evidence;
+    if (e.taken && e.revision == r.revision && e.inputHash == hash &&
+        (why.empty() || e.error == why))
+      continue;
+    const std::string before = EvidenceState(r);
+    CheckOne(state, r, Ctx{});
+    if (EvidenceState(r) == before)
+      continue;
+    const json row = Row(state, r);
+    json out{{"id", r.id},
+             {"name", r.name},
+             {"state", row.at("state")},
+             {"bound", row.at("bound")}};
+    for (const char* k :
+         {"value", "unit", "limit", "limit_min", "limit_max", "note"})
+      if (row.contains(k))
+        out[k] = row.at(k);
+    std::string finding;
+    for (const std::string& line : req::FindingLines(row))
+      finding += (finding.empty() ? "" : "; ") + line;
+    if (!finding.empty())
+      out["finding"] = finding;
+    changed.push_back(std::move(out));
+  }
+  return changed;
 }
 
 bool Current(ui::AppState& state, const req::Requirement& r) {
@@ -2309,7 +2628,717 @@ json AddRequirement(ui::AppState& state, req::Requirement r) {
   r.evidence = {};
   state.requirements.push_back(std::move(r));
   MarkRequirementsEdited(state);
+  RefreshExpressions(state); // an expression is measured as it is stated
   return Row(state, state.requirements.back());
+}
+
+// ---- The design sweep (docs/requirements/README.md#design-sweep) ----------
+
+constexpr const char* kSweepKind = "design_sweep";
+
+// What design_sweep runs, checked before anything starts: the variables and
+// their ranges, the parts it rebuilds (slot indices), the requirements it
+// measures at every point, and those it does not, with why.
+struct SweepPlan {
+  sweep::Spec spec;
+  std::vector<size_t> slots;
+  std::vector<req::Requirement> measured;
+  json notSwept = json::array();
+  size_t planned = 0, cap = sweep::kDefaultMaxPoints;
+  json variables = json::array(); // as resolved, for the answer
+};
+
+// The sweeps kept in memory: their answers by job, newest last.
+struct SweepStore {
+  std::deque<std::pair<uint64_t, json>> answers;
+  uint64_t last = 0;
+};
+SweepStore& Sweeps() {
+  static SweepStore store;
+  return store;
+}
+void KeepSweep(uint64_t job, json answer) {
+  SweepStore& s = Sweeps();
+  s.answers.emplace_back(job, std::move(answer));
+  while (s.answers.size() > 8)
+    s.answers.pop_front();
+  s.last = job;
+}
+
+std::atomic<int> g_testSweepHoldMs{-1};
+int TestSweepHoldMs() {
+  int ms = g_testSweepHoldMs.load();
+  if (ms < 0) {
+    const char* env = std::getenv("LOBOLE_TEST_SWEEP_MS");
+    ms = env ? std::max(0, std::atoi(env)) : 0;
+    g_testSweepHoldMs.store(ms);
+  }
+  return ms;
+}
+
+// The project variables a variable reaches: itself and every one whose
+// expression reads it, directly or through others.
+std::set<std::string> Reached(const std::vector<Parameter>& params,
+                              const std::string& name) {
+  std::set<std::string> out{name};
+  for (bool grew = true; grew;) {
+    grew = false;
+    for (const Parameter& p : params) {
+      if (out.contains(p.name))
+        continue;
+      for (const std::string& d : req::IdentifiersOf(p.expression))
+        if (out.contains(d)) {
+          out.insert(p.name);
+          grew = true;
+          break;
+        }
+    }
+  }
+  return out;
+}
+
+// Whether part `doc` reads any of `names` -- its variables or features --
+// where they mean the project's (no local one of the name shadows it), or,
+// `local`, its own.
+bool PartReads(Document& doc, const std::set<std::string>& names, bool local) {
+  for (const std::string& n : names) {
+    if (!local && doc.FindParameter(n) != nullptr)
+      continue;
+    if (!doc.FindParameterReferences(n).empty())
+      return true;
+  }
+  return false;
+}
+
+double SweepEnd(const json& v, const SymbolTable& scope,
+                const std::string& what) {
+  double out = 0.0;
+  if (v.is_number()) {
+    out = v.get<double>();
+  } else if (v.is_string()) {
+    const auto r =
+        ExpressionEngine::Default().EvaluateText(v.get<std::string>(), scope);
+    if (!r)
+      throw std::runtime_error(what + " '" + v.get<std::string>() +
+                               "': " + r.error().message);
+    out = *r;
+  } else {
+    throw std::runtime_error(what +
+                             " is a number or an expression in the "
+                             "variable's base units (mm, degrees), not " +
+                             v.dump());
+  }
+  if (!std::isfinite(out))
+    throw std::runtime_error(what + " is not a finite number");
+  return out;
+}
+
+// design_sweep's request, read and refused before anything starts
+// (docs/scripting/rpc.md#a-refused-call-changes-nothing).
+SweepPlan PlanSweep(ui::AppState& state, const RpcParams& p) {
+  SweepPlan plan;
+  if (ui::BackgroundJob* running = ui::FindBackgroundJob(state, kSweepKind))
+    throw std::runtime_error(
+        "a design sweep is already running (job " +
+        std::to_string(running->id) +
+        "): study_status {job} follows it, cancel_study {job} stops it");
+  const auto whole = [&](const char* key, int fallback, int lo, int hi) {
+    if (!p.contains(key))
+      return fallback;
+    const json& v = p.at(key);
+    if (!v.is_number_integer() || v.get<int64_t>() < lo ||
+        v.get<int64_t>() > hi)
+      throw std::runtime_error(std::string("`") + key +
+                               "` is a whole number from " +
+                               std::to_string(lo) + " to " +
+                               std::to_string(hi) + ", not " + v.dump());
+    return static_cast<int>(v.get<int64_t>());
+  };
+  const auto flag = [&](const char* key) {
+    if (!p.contains(key))
+      return false;
+    if (!p.at(key).is_boolean())
+      throw std::runtime_error(std::string("`") + key +
+                               "` is true or false, not " + p.at(key).dump());
+    return p.at(key).get<bool>();
+  };
+  plan.spec.samples =
+      whole("samples", sweep::kDefaultSamples, 2, sweep::kMaxSamples);
+  plan.spec.refine = whole("refine", 0, 0, sweep::kMaxRefine);
+  plan.spec.corners = flag("corners");
+  plan.cap = static_cast<size_t>(
+      whole("max_points", static_cast<int>(sweep::kDefaultMaxPoints), 1,
+            static_cast<int>(sweep::kMaxPointsCeiling)));
+  const bool fromRequirements = flag("from_requirements");
+  (void)flag("async");
+  (void)flag("outlive_client");
+
+  Document* active = state.document.get();
+  const auto activeId = [&]() -> uint64_t {
+    return state.activePart >= 0 &&
+                   static_cast<size_t>(state.activePart) < state.parts.size()
+               ? state.parts[state.activePart].id
+               : 0;
+  };
+  // The variables there are, for a refusal: the project's and each part's.
+  const auto inScope = [&] {
+    std::vector<std::string> v;
+    for (const Parameter& q : state.projectParameters)
+      v.push_back(q.name);
+    for (size_t i = 0; i < state.parts.size(); i++)
+      if (const Document* d = ui::SlotDoc(state, i))
+        for (const Parameter& q : d->GetParameters())
+          v.push_back(q.name + " (part " + std::to_string(state.parts[i].id) +
+                      ", '" + state.parts[i].name + "')");
+    return KnownList(v, 40);
+  };
+  // A variable named in `scope` (absent: the project's, else the active
+  // part's local one): {part id or 0, the scope its ends read, its value}.
+  struct Found {
+    uint64_t part = 0;
+    const SymbolTable* scope = nullptr;
+    double value = 0.0;
+  };
+  const auto find = [&](const std::string& name, const json* scope) -> Found {
+    const Parameter* proj = ui::FindProjectParameter(state, name);
+    const auto local = [&](uint64_t partId) -> Found {
+      const auto slot = ui::SlotIndexById(state, partId);
+      Document* d = slot && state.parts[*slot].kind == ui::DocKind::Part
+                        ? ui::SlotDoc(state, *slot)
+                        : nullptr;
+      if (d == nullptr)
+        throw std::runtime_error(
+            "variable '" + name + "': part " + std::to_string(partId) +
+            " is not a part (documents: " + DocumentCandidates(state) + ")");
+      const Parameter* q = d->FindParameter(name);
+      if (q == nullptr)
+        throw std::runtime_error("part '" + state.parts[*slot].name +
+                                 "' has no variable '" + name +
+                                 "'; variables in scope: " + inScope());
+      return {partId, &d->Symbols(), q->value};
+    };
+    if (scope == nullptr) {
+      if (proj)
+        return {0, &state.projectSymbols, proj->value};
+      if (active && active->FindParameter(name))
+        return local(activeId());
+      throw std::runtime_error("no variable '" + name +
+                               "'; variables in scope: " + inScope());
+    }
+    if (scope->is_string() && scope->get<std::string>() == "project") {
+      if (!proj)
+        throw std::runtime_error("no project variable '" + name +
+                                 "'; variables in scope: " + inScope());
+      return {0, &state.projectSymbols, proj->value};
+    }
+    if (scope->is_string() && scope->get<std::string>() == "part") {
+      if (!active)
+        throw std::runtime_error("variable '" + name +
+                                 "': scope \"part\" is the active part's, and "
+                                 "the active tab is not a part; give the "
+                                 "part's id as `scope`");
+      return local(activeId());
+    }
+    if (scope->is_number_integer() && scope->get<int64_t>() >= 0)
+      return local(scope->get<uint64_t>());
+    throw std::runtime_error("variable '" + name +
+                             "': `scope` is \"project\", \"part\" (the active "
+                             "part's) or a part's id, not " +
+                             scope->dump());
+  };
+
+  struct Entry {
+    std::string name;
+    uint64_t part = 0;
+    double value = 0.0;
+    std::optional<double> min, max;
+    std::string minFrom, maxFrom; // the requirement that gave it
+  };
+  std::vector<Entry> entries;
+  const auto entryFor = [&](const std::string& name, uint64_t part) -> Entry* {
+    for (Entry& e : entries)
+      if (e.name == name && e.part == part)
+        return &e;
+    return nullptr;
+  };
+  if (p.contains("variables")) {
+    const json& vs = p.at("variables");
+    if (!vs.is_array())
+      throw std::runtime_error("`variables` is a list of {name, min, max, "
+                               "scope?}, not " +
+                               vs.dump());
+    for (const json& v : vs) {
+      if (!v.is_object() || !v.contains("name") || !v.at("name").is_string())
+        throw std::runtime_error("a swept variable is {name, min, max, "
+                                 "scope?}, not " +
+                                 v.dump());
+      for (const auto& [k, x] : v.items())
+        if (k != "name" && k != "min" && k != "max" && k != "scope")
+          throw std::runtime_error("variables: unknown key '" + k +
+                                   "' (accepted: name, min, max, scope)");
+      const std::string name = v.at("name").get<std::string>();
+      const Found f =
+          find(name, v.contains("scope") ? &v.at("scope") : nullptr);
+      if (entryFor(name, f.part) != nullptr)
+        throw std::runtime_error("variable '" + name + "' is listed twice");
+      Entry e{name, f.part, f.value, std::nullopt, std::nullopt, {}, {}};
+      if (v.contains("min"))
+        e.min = SweepEnd(v.at("min"), *f.scope, "'" + name + "' min");
+      if (v.contains("max"))
+        e.max = SweepEnd(v.at("max"), *f.scope, "'" + name + "' max");
+      entries.push_back(std::move(e));
+    }
+  }
+  if (fromRequirements) {
+    std::vector<std::string> looked;
+    size_t taken = 0;
+    for (const req::Requirement& r : state.requirements) {
+      if (r.Kind() != "expression")
+        continue;
+      std::string text = r.measure.at("expression").get<std::string>();
+      looked.push_back("'" + r.name + "' (" + text + ")");
+      const auto first = text.find_first_not_of(" \t");
+      const auto last = text.find_last_not_of(" \t");
+      text = first == std::string::npos ? ""
+                                        : text.substr(first, last - first + 1);
+      if (!ExpressionEngine::Default().IsValidParameterName(text) ||
+          r.bound.kind == "pass")
+        continue;
+      ExprScope scope;
+      ScopeOf(state, r, scope);
+      if (!scope.why.empty())
+        continue;
+      // The variable as the requirement reads it: its part's local one when
+      // the part has one, else the project's.
+      uint64_t part = 0;
+      if (r.measure.contains("document")) {
+        const auto slot = ui::SlotIndexById(state, r.Document());
+        const Document* d = slot ? ui::SlotDoc(state, *slot) : nullptr;
+        if (d && d->FindParameter(text))
+          part = r.Document();
+      }
+      if (part == 0 && !ui::FindProjectParameter(state, text))
+        continue;
+      Entry* e = entryFor(text, part);
+      if (e == nullptr) {
+        const json scopeJ = part == 0 ? json("project") : json(part);
+        const Found f = find(text, &scopeJ);
+        entries.push_back(
+            {text, part, f.value, std::nullopt, std::nullopt, {}, {}});
+        e = &entries.back();
+      }
+      const auto end = [&](const std::string& expr, double literal) {
+        if (expr.empty())
+          return literal;
+        const auto v = req::EvaluateIn(expr, scope.Table());
+        if (!v.value)
+          throw std::runtime_error("requirement '" + r.name + "': bound '" +
+                                   expr + "': " + v.error);
+        return *v.value;
+      };
+      // A range the call states itself wins: it is the one asked for.
+      if (r.bound.kind == "within" || r.bound.kind == "at_least")
+        if (!e->min) {
+          e->min = end(r.bound.kind == "within" ? r.bound.minExpr
+                                                : r.bound.valueExpr,
+                       r.bound.kind == "within" ? r.bound.min : r.bound.value);
+          e->minFrom = r.name;
+        }
+      if (r.bound.kind == "within" || r.bound.kind == "at_most")
+        if (!e->max) {
+          e->max = end(r.bound.kind == "within" ? r.bound.maxExpr
+                                                : r.bound.valueExpr,
+                       r.bound.kind == "within" ? r.bound.max : r.bound.value);
+          e->maxFrom = r.name;
+        }
+      taken++;
+    }
+    if (taken == 0)
+      throw std::runtime_error(
+          "from_requirements: no expression requirement bounds one bare "
+          "variable (an expression that is just its name, bounded within "
+          "{min, max}); looked at: " +
+          KnownList(looked));
+  }
+  if (entries.empty())
+    throw std::runtime_error("design_sweep needs `variables` [{name, min, "
+                             "max}] or from_requirements: true");
+  for (const Entry& e : entries) {
+    if (!e.min || !e.max) {
+      const std::string from = !e.minFrom.empty()   ? e.minFrom
+                               : !e.maxFrom.empty() ? e.maxFrom
+                                                    : "";
+      const char* missing = !e.min ? "min" : "max";
+      if (!from.empty())
+        throw std::runtime_error("requirement '" + from + "' bounds '" +
+                                 e.name + "' on one side only; give its " +
+                                 missing + " in variables [{" + "name: \"" +
+                                 e.name + "\", " + missing + ": ...}]");
+      throw std::runtime_error("variable '" + e.name +
+                               "' needs both `min` "
+                               "and `max`");
+    }
+    if (*e.min > *e.max)
+      throw std::runtime_error(
+          "variable '" + e.name + "': min " + std::format("{:.6g}", *e.min) +
+          " is above max " + std::format("{:.6g}", *e.max));
+    plan.spec.variables.push_back({e.name, *e.min, *e.max, e.part, e.value});
+  }
+  if (plan.spec.corners && plan.spec.variables.size() >
+                               static_cast<size_t>(sweep::kMaxCornerVariables))
+    throw std::runtime_error("corners: true takes up to " +
+                             std::to_string(sweep::kMaxCornerVariables) +
+                             " variables (2^n corners), not " +
+                             std::to_string(plan.spec.variables.size()));
+
+  // What each variable reaches: the project variables computed from it, or
+  // the part-local one alone.
+  std::vector<std::set<std::string>> reach;
+  for (const sweep::Variable& v : plan.spec.variables)
+    reach.push_back(v.part == 0 ? Reached(state.projectParameters, v.name)
+                                : std::set<std::string>{v.name});
+  // Whether requirement `r` reads variable k where it means it.
+  const auto reqReads = [&](const req::Requirement& r, size_t k) {
+    const sweep::Variable& v = plan.spec.variables[k];
+    const bool partScope =
+        r.Kind() == "expression" && r.measure.contains("document");
+    if (v.part != 0 && (!partScope || r.Document() != v.part))
+      return false;
+    if (v.part == 0 && partScope) {
+      const auto slot = ui::SlotIndexById(state, r.Document());
+      const Document* d = slot ? ui::SlotDoc(state, *slot) : nullptr;
+      if (d && d->FindParameter(v.name))
+        return false; // its part shadows the name
+    }
+    for (const std::string& n : reach[k])
+      if (req::ReadsName(r, n))
+        return true;
+    return false;
+  };
+
+  // The parts it rebuilds.
+  std::set<size_t> slots;
+  if (p.contains("documents")) {
+    const json& ds = p.at("documents");
+    if (!ds.is_array() || ds.empty())
+      throw std::runtime_error("`documents` is a non-empty list of part ids "
+                               "(list_parts)");
+    for (const json& id : ds) {
+      std::string why;
+      if (!id.is_number_integer() || id.get<int64_t>() < 0)
+        throw std::runtime_error("`documents` lists part ids (list_parts), "
+                                 "not " +
+                                 id.dump());
+      const auto slot = DocSlot(state, id.get<uint64_t>(), "part", &why);
+      if (!slot)
+        throw std::runtime_error("documents: " + why +
+                                 ". Documents: " + DocumentCandidates(state));
+      slots.insert(*slot);
+    }
+  } else {
+    for (size_t i = 0; i < state.parts.size(); i++) {
+      if (state.parts[i].kind != ui::DocKind::Part)
+        continue;
+      Document* d = ui::SlotDoc(state, i);
+      if (d == nullptr)
+        continue;
+      for (size_t k = 0; k < plan.spec.variables.size(); k++) {
+        const sweep::Variable& v = plan.spec.variables[k];
+        const bool reads = v.part != 0 ? v.part == state.parts[i].id
+                                       : PartReads(*d, reach[k], false);
+        bool reqOn = false;
+        for (const req::Requirement& r : state.requirements)
+          reqOn = reqOn ||
+                  (r.Kind() == "expression" && r.measure.contains("document") &&
+                   r.Document() == state.parts[i].id && reqReads(r, k));
+        if (reads || reqOn)
+          slots.insert(i);
+      }
+    }
+  }
+  plan.slots.assign(slots.begin(), slots.end());
+
+  // Each variable must reach something, and no rebuilt part may hold it at
+  // a configuration's value: the sweep would change nothing there, as a
+  // held DOF refuses a drag.
+  for (size_t k = 0; k < plan.spec.variables.size(); k++) {
+    const sweep::Variable& v = plan.spec.variables[k];
+    bool reached = false;
+    for (size_t i : plan.slots) {
+      Document* d = ui::SlotDoc(state, i);
+      if (v.part != 0 ? v.part == state.parts[i].id
+                      : PartReads(*d, reach[k], false))
+        reached = true;
+      if (v.part != 0 && v.part != state.parts[i].id)
+        continue;
+      if (const Configuration* c = d->ActiveConfig())
+        if (c->OverrideFor(v.name) != nullptr)
+          throw std::runtime_error(
+              "'" + state.parts[i].name + "' is in configuration '" + c->name +
+              "', which overrides '" + v.name +
+              "': the sweep would change nothing there. Activate its base "
+              "(set_active_configuration {id: 0}) or leave it out of "
+              "`documents`");
+    }
+    for (const req::Requirement& r : state.requirements)
+      if (r.Kind() == "expression" && reqReads(r, k))
+        reached = true;
+    if (!reached)
+      throw std::runtime_error(
+          "no part reads '" + v.name +
+          "' (directly or through other variables)" +
+          (p.contains("documents") ? std::string(" among `documents`")
+                                   : std::string()) +
+          ", and no expression requirement does: sweeping it changes "
+          "nothing");
+  }
+
+  // What it measures at every point, and what it does not.
+  std::set<uint64_t> rebuilt;
+  for (size_t i : plan.slots)
+    rebuilt.insert(state.parts[i].id);
+  for (const req::Requirement& r : state.requirements) {
+    const std::string kind = r.Kind();
+    std::string why;
+    if (kind == "expression") {
+      if (r.measure.contains("document") && !rebuilt.contains(r.Document()))
+        why = "its part is not rebuilt, so none of the swept variables "
+              "reaches it";
+    } else if (kind == "mass" || kind == "volume" || kind == "section_area") {
+      const auto slot = ui::SlotIndexById(state, r.Document());
+      if (slot && state.parts[*slot].kind == ui::DocKind::Assembly)
+        why = "an assembly reads every part it places; the sweep rebuilds "
+              "parts";
+      else if (!rebuilt.contains(r.Document()))
+        why = "its part is not rebuilt, so none of the swept variables "
+              "reaches it";
+    } else if (kind == "study_probe" || kind == "study_result" ||
+               kind == "motion_clean") {
+      why = "a study per point is minutes";
+    } else if (kind == "cam_verify") {
+      why = "a CAM job's verification per point is minutes";
+    } else if (kind == "check_literals") {
+      why = "it reads how the features are written, which a sweep does not "
+            "change";
+    } else {
+      why = "an assembly reads every part it places; the sweep rebuilds "
+            "parts";
+    }
+    if (why.empty())
+      plan.measured.push_back(r);
+    else
+      plan.notSwept.push_back(
+          {{"id", r.id}, {"name", r.name}, {"kind", kind}, {"why", why}});
+  }
+
+  plan.planned = sweep::PlannedCount(plan.spec);
+  if (plan.planned > plan.cap)
+    throw std::runtime_error(
+        "the sweep would run " + std::to_string(plan.planned) +
+        " points, over the cap of " + std::to_string(plan.cap) +
+        " (max_points, at most " + std::to_string(sweep::kMaxPointsCeiling) +
+        "); fewer samples or variables, no corners, less refine, or a "
+        "higher max_points");
+  for (const sweep::Variable& v : plan.spec.variables) {
+    json j{{"name", v.name},
+           {"min", v.min},
+           {"max", v.max},
+           {"value", v.value},
+           {"scope", v.part == 0 ? json("project") : json(v.part)}};
+    plan.variables.push_back(std::move(j));
+  }
+  return plan;
+}
+
+json PlanJson(const SweepPlan& plan) {
+  return json{{"planned", plan.planned},
+              {"cap", plan.cap},
+              {"variables", plan.variables},
+              {"not_swept", plan.notSwept}};
+}
+
+// The copies a sweep reads: each rebuilt part in its saved form, with the
+// project variables and tables as they are now. Written here, on the main
+// thread; read back on the workers.
+sweep::Inputs SweepInputs(ui::AppState& state, const SweepPlan& plan,
+                          const std::filesystem::path& dir) {
+  sweep::Inputs in;
+  in.spec = plan.spec;
+  in.projectParameters = state.projectParameters;
+  in.tables = state.projectTables;
+  in.requirements = plan.measured;
+  in.holdMs = TestSweepHoldMs();
+  std::error_code ec;
+  std::filesystem::create_directories(dir, ec);
+  for (size_t i : plan.slots) {
+    const Document* d = ui::SlotDoc(state, i);
+    sweep::PartCopy copy{
+        state.parts[i].id, state.parts[i].name,
+        dir / ("part-" + std::to_string(state.parts[i].id) + ".json")};
+    if (auto saved = DocumentIO::Save(*d, copy.file.string()); !saved)
+      throw std::runtime_error("the copy of '" + copy.name +
+                               "' could not be written: " + saved.error());
+    in.parts.push_back(std::move(copy));
+  }
+  return in;
+}
+
+std::filesystem::path SweepDir() {
+  static std::atomic<uint64_t> counter{0};
+  return std::filesystem::temp_directory_path() /
+         std::format("lobole-sweep-{}-{}", static_cast<long>(::getpid()),
+                     counter.fetch_add(1));
+}
+
+json AnswerOf(const SweepPlan& plan, json run, double seconds, uint64_t job) {
+  run["planned"] = plan.planned;
+  run["cap"] = plan.cap;
+  run["variables"] = plan.variables;
+  run["not_swept"] = plan.notSwept;
+  run["seconds"] = seconds;
+  run["job"] = job;
+  return run;
+}
+
+// A sweep on its job: the walk on a thread of its own, polled from the
+// job's `finish` on the main thread, which carries its progress to the
+// registry and keeps its answer when it ends.
+struct SweepRun {
+  SweepPlan plan;
+  sweep::Inputs inputs;
+  sweep::Progress progress;
+  std::filesystem::path dir;
+  std::thread thread;
+  std::atomic<bool> finished{false};
+  json answer;
+  std::string error;
+  std::chrono::steady_clock::time_point started;
+  SweepRun() = default;
+  SweepRun(const SweepRun&) = delete;
+  SweepRun& operator=(const SweepRun&) = delete;
+  ~SweepRun() {
+    progress.cancel.store(true);
+    if (thread.joinable())
+      thread.join();
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  }
+};
+
+uint64_t StartSweep(ui::AppState& state, SweepPlan plan, uint64_t owner) {
+  auto run = std::make_shared<SweepRun>();
+  run->dir = SweepDir();
+  run->inputs = SweepInputs(state, plan, run->dir);
+  run->plan = std::move(plan);
+  run->started = std::chrono::steady_clock::now();
+  auto job = std::make_unique<ui::BackgroundJob>();
+  job->kind = kSweepKind;
+  job->label = "Design sweep: reading the copies";
+  job->cancellable = true;
+  job->owner = owner;
+  job->fraction.store(0.0);
+  ui::BackgroundJob* raw = job.get();
+  job->finish = [run, raw](ui::AppState&) {
+    if (raw->cancel.load())
+      run->progress.cancel.store(true);
+    {
+      std::lock_guard lock(run->progress.mutex);
+      if (!run->progress.label.empty())
+        raw->label = "Design sweep: " + run->progress.label;
+    }
+    raw->fraction.store(std::min(
+        1.0, static_cast<double>(run->progress.done.load()) /
+                 static_cast<double>(std::max<size_t>(1, run->plan.planned))));
+    if (!run->finished.load(std::memory_order_acquire))
+      return false;
+    run->thread.join();
+    const double seconds = std::chrono::duration<double>(
+                               std::chrono::steady_clock::now() - run->started)
+                               .count();
+    if (!run->error.empty()) {
+      raw->error = run->error;
+      KeepSweep(raw->id, json{{"job", raw->id}, {"error", run->error}});
+    } else {
+      KeepSweep(raw->id,
+                AnswerOf(run->plan, std::move(run->answer), seconds, raw->id));
+    }
+    return true;
+  };
+  // No thread of the registry's: `finish` polls the run's own each frame,
+  // and the run joins it when it is dropped.
+  job->done.store(true);
+  const uint64_t id = ui::StartBackgroundJob(state, std::move(job)).id;
+  run->thread = std::thread([r = run.get()] {
+    try {
+      r->answer = sweep::Run(r->inputs, r->progress);
+    } catch (const std::exception& e) {
+      r->error = e.what();
+    }
+    r->finished.store(true, std::memory_order_release);
+  });
+  return id;
+}
+
+const json* KeptSweep(uint64_t job) {
+  for (const auto& [id, answer] : Sweeps().answers)
+    if (id == job)
+      return &answer;
+  return nullptr;
+}
+
+// A finished sweep's answer as design_sweep answers it: its refusal thrown
+// when it failed.
+json SweepAnswer(uint64_t job) {
+  const json* a = KeptSweep(job);
+  if (a == nullptr)
+    throw std::runtime_error("design sweep " + std::to_string(job) +
+                             " has no answer kept");
+  if (a->contains("error"))
+    throw std::runtime_error("the design sweep (job " + std::to_string(job) +
+                             ") failed: " + a->at("error").get<std::string>());
+  return *a;
+}
+
+// A synchronous design_sweep, parked on its job: answered with the sweep
+// once the job is reaped.
+class SweepWait : public Parking {
+public:
+  explicit SweepWait(uint64_t job) : m_job(job) {}
+  Next Poll(ui::AppState& state, const RpcParams& p, json& answer) override {
+    if (ui::FindBackgroundJobById(state, m_job))
+      return Next::Wait;
+    for (const char* k :
+         {"variables", "from_requirements", "samples", "corners", "refine",
+          "documents", "max_points", "async", "outlive_client"})
+      if (p.contains(k))
+        (void)p.at(k);
+    answer = SweepAnswer(m_job);
+    return Next::Answer;
+  }
+
+private:
+  uint64_t m_job;
+};
+
+json EnginePlan(ui::AppState& state, const json& params) {
+  return PlanJson(PlanSweep(state, RpcParams{params}));
+}
+
+uint64_t EngineStart(ui::AppState& state, const json& params) {
+  return StartSweep(state, PlanSweep(state, RpcParams{params}), 0);
+}
+
+json EngineResult(ui::AppState&, uint64_t job) {
+  const json* a = KeptSweep(job);
+  return a ? *a : json();
+}
+
+void EngineRefresh(ui::AppState& state) {
+  for (const req::Requirement& r : state.requirements)
+    if (r.Kind() == "expression") {
+      RefreshExpressions(state);
+      return;
+    }
 }
 
 // The dirty-free sum the panel caches its rows on: every document's save
@@ -2326,6 +3355,15 @@ uint64_t ContentStamp(ui::AppState& state) {
       s = j->SaveStamp() * 41 + 2;
     h = h * 1099511628211ull ^ (s + state.parts[i].id);
   }
+  // The project's values: a variable no part reads still moves a bound.
+  inputhash::Hasher values;
+  std::map<std::string, double> sorted(state.projectSymbols.begin(),
+                                       state.projectSymbols.end());
+  for (const auto& [name, v] : sorted) {
+    values.Str(name);
+    values.F64(v);
+  }
+  h ^= values.Digest();
   return h ^ static_cast<uint64_t>(state.activePart + 7);
 }
 
@@ -2345,7 +3383,8 @@ uint64_t PanelCheck(ui::AppState& state, bool recompute) {
 }
 
 [[maybe_unused]] const bool kEngineInstalled = [] {
-  ui::SetRequirementsEngine({&PanelRows, &PanelCheck});
+  ui::SetRequirementsEngine({&PanelRows, &PanelCheck, &EngineRefresh,
+                             &EnginePlan, &EngineStart, &EngineResult});
   return true;
 }();
 
@@ -2355,9 +3394,25 @@ std::span<const MethodDoc> RequirementMethodDocs() {
   return RequirementMethods;
 }
 
+bool IsRequirementsMethod(const std::string& method) {
+  for (const MethodDoc& d : RequirementMethods)
+    if (method == d.name)
+      return true;
+  return false;
+}
+
 json RequirementRows(ui::AppState& state) { return RowsJson(state, nullptr); }
 
 void SetTestRequirementHold(int ms) { g_testHoldMs.store(std::max(0, ms)); }
+
+void SetTestSweepHold(int ms) { g_testSweepHoldMs.store(std::max(0, ms)); }
+
+json RefreshExpressionRequirements(ui::AppState& state) {
+  for (const req::Requirement& r : state.requirements)
+    if (r.Kind() == "expression")
+      return RefreshExpressions(state);
+  return json::array();
+}
 
 uint64_t StartRequirementsCheck(ui::AppState& state, bool recompute) {
   if (ui::FindBackgroundJob(state, kJobKind))
@@ -2378,6 +3433,23 @@ uint64_t StartRequirementsCheck(ui::AppState& state, bool recompute) {
 std::unique_ptr<Parking> ParkRequirementsRequest(ui::AppState& state,
                                                  const std::string& m,
                                                  const json& request) {
+  // A synchronous design_sweep: its job, waited on off the frame. One the
+  // handler would refuse is left to it, in its own words.
+  if (m == "design_sweep" && request.is_object() &&
+      request.value("async", json(false)) == json(false)) {
+    try {
+      ui::ReapBackgroundJobs(state);
+      const RpcParams p{request};
+      SweepPlan plan = PlanSweep(state, p);
+      const bool outlive =
+          request.value("outlive_client", json(false)) == json(true);
+      const uint64_t job =
+          StartSweep(state, std::move(plan), outlive ? 0 : state.rpcConnection);
+      return std::make_unique<SweepWait>(job);
+    } catch (...) {
+      return nullptr;
+    }
+  }
   // A synchronous check with something to measure: the same job the async
   // form starts, waited on off the frame. Anything the handler would refuse
   // (a requirement that does not exist, a check already running) or answer
@@ -2453,6 +3525,7 @@ std::optional<json> HandleRequirementsRpc(ui::AppState& state,
     r.evidence = {};
     live = std::move(r);
     MarkRequirementsEdited(state);
+    RefreshExpressions(state);
     return json{{"requirement", Row(state, live)}};
   }
   if (m == "remove_requirement") {
@@ -2518,6 +3591,66 @@ std::optional<json> HandleRequirementsRpc(ui::AppState& state,
     out["reused"] = ids.size() - checked;
     AttachReceipt(out, ReceiptFor(out.at("requirements")));
     return out;
+  }
+
+  if (m == "design_sweep") {
+    // rpc-returns-from: src/remote/RemoteRequirements.cpp
+    // rpc-params: async, corners, documents, from_requirements, max_points
+    // rpc-params: outlive_client, refine, samples, variables
+    ui::ReapBackgroundJobs(state);
+    SweepPlan plan = PlanSweep(state, p);
+    const bool async = p.value("async", false);
+    const bool outlive = p.value("outlive_client", false);
+    if (async) {
+      json out = PlanJson(plan);
+      out["job"] =
+          StartSweep(state, std::move(plan), outlive ? 0 : state.rpcConnection);
+      out["kind"] = kSweepKind;
+      out["started"] = true;
+      return out;
+    }
+    // Not parked (a caller in-process, a test): run it here, on copies all
+    // the same.
+    const auto started = std::chrono::steady_clock::now();
+    const std::filesystem::path dir = SweepDir();
+    struct Cleanup {
+      std::filesystem::path dir;
+      ~Cleanup() {
+        std::error_code ec;
+        std::filesystem::remove_all(dir, ec);
+      }
+    } cleanup{dir};
+    const sweep::Inputs in = SweepInputs(state, plan, dir);
+    sweep::Progress progress;
+    json run = sweep::Run(in, progress);
+    const double seconds = std::chrono::duration<double>(
+                               std::chrono::steady_clock::now() - started)
+                               .count();
+    json out = AnswerOf(plan, std::move(run), seconds, 0);
+    KeepSweep(0, out);
+    return out;
+  }
+  if (m == "design_sweep_result") {
+    // rpc-returns-from: src/remote/RemoteRequirements.cpp
+    ui::ReapBackgroundJobs(state);
+    const uint64_t job =
+        p.contains("job") ? p.at("job").get<uint64_t>() : Sweeps().last;
+    if (ui::BackgroundJob* j = ui::FindBackgroundJobById(state, job);
+        j != nullptr && j->kind == kSweepKind)
+      return json{{"job", job},
+                  {"running", true},
+                  {"fraction", j->fraction.load()},
+                  {"label", j->label}};
+    if (KeptSweep(job) == nullptr) {
+      std::vector<std::string> have;
+      for (const auto& [id, a] : Sweeps().answers)
+        have.push_back(std::to_string(id));
+      throw std::runtime_error((p.contains("job")
+                                    ? "no design sweep " + std::to_string(job)
+                                    : std::string("no design sweep has run")) +
+                               "; the sweeps kept: " + KnownList(have));
+    }
+    return SweepAnswer(job);
   }
 
   // The declared clearances (v97), as clearance requirements.

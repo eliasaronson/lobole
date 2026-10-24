@@ -100,6 +100,8 @@
   "delete_variable": ["name", "scope"],
   "derive_occurrence": ["bodies", "body_names", "name", "occurrence", "reference"],
   "describe": ["method"],
+  "design_sweep": ["async", "corners", "documents", "from_requirements", "max_points", "outlive_client", "refine", "samples", "variables"],
+  "design_sweep_result": ["job"],
   "dissolve_folder": ["folder"],
   "edit_in_context": ["occurrence"],
   "enter_simulation": ["study"],

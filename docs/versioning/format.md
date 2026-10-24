@@ -315,6 +315,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | A requirement's measure kind `expression` {`expression` (a formula over the variables), `unit`?, `document`? (a part: read in its scope), `configuration`? (that part's configuration, 0 = base)} ([expression](../requirements/README.md#expression)); its evidence's `detail` carries `scope`, `part`?, `configuration`? and `inputs` {name: value}. A `configuration` without `document` is refused on load; a build that does not know the kind refuses the file. Golden `vNEXT-expression-requirement` |
 
 ## Paths in a project
 

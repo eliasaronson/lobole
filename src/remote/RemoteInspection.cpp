@@ -3593,31 +3593,19 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     } else {
       RequirePartDoc(sectionDoc, "section"); // the standard message
     }
-    const auto area = Measure::CrossSectionArea(*bodies, origin, normal);
-    if (!area)
-      throw std::runtime_error(
-          "section failed — the plane may cut no body at all; check the "
-          "bodies' bbox_min/bbox_max in get_state against the plane");
-    json out{{"area_mm2", *area}};
+    // The function a section_area requirement and a design sweep's point
+    // read (core/PartMeasures.h).
+    const partmeasure::Section cut = partmeasure::SectionOf(
+        *bodies, origin, normal, p.value("enclosed", false));
+    json out{{"area_mm2", cut.area}};
     if (derived)
       out["offset"] = usedOffset; // say where it chose to cut
     // The area the cut RINGS, not the area it crosses: the floor inside the
     // walls, the bore in the plate (docs/inspect/README.md#enclosed-area).
-    if (p.value("enclosed", false)) {
-      const auto enclosed =
-          Measure::SectionEnclosedArea(*bodies, origin, normal);
-      if (!enclosed)
-        throw std::runtime_error("enclosed area failed -- see the log");
-      out["enclosed_area_mm2"] = *enclosed;
-      // Zero with material cut is the ring not closing HERE, which is worth
-      // saying: a wall with a door or a window in it at this height is
-      // open, and a plane above the openings encloses the room.
-      if (*enclosed <= 0.0 && *area > 0.0)
-        out["enclosed_note"] =
-            "the cut material rings nothing at this plane: an opening (a "
-            "door, a window, a gap between bodies) breaks the ring. Cut "
-            "where it is whole, e.g. above the openings";
-    }
+    if (cut.enclosed)
+      out["enclosed_area_mm2"] = *cut.enclosed;
+    if (!cut.enclosedNote.empty())
+      out["enclosed_note"] = cut.enclosedNote;
     // The ISLANDS the cut crosses, biggest first. Off by default because the
     // total is what most callers want and this costs a second boolean.
     if (p.value("regions", false)) {
@@ -4948,16 +4936,10 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     std::vector<Body> subset;
     if (only >= 0)
       subset.push_back(bodies[only]);
-    std::string err;
-    const auto mass = Measure::MassOfBodies(only >= 0 ? subset : bodies, &err);
-    if (!mass)
-      throw std::runtime_error(err);
-    if (mass->bodies.empty())
-      throw std::runtime_error(
-          bodies.empty() ? "no bodies"
-                         : "only reference bodies (derived ghosts), which "
-                           "weigh nothing here; set reference: false on the "
-                           "Derived feature to count one");
+    // The function a requirement's mass and a design sweep's point read
+    // (core/PartMeasures.h), so the three agree by construction.
+    const std::optional<Measure::DocumentMass> mass =
+        partmeasure::MassOf(only >= 0 ? subset : bodies);
     // The bodies MassOfBodies weighed, in its order (it skips references),
     // and each one's index among the part's bodies: a reference body before
     // a real one shifts every row after it.

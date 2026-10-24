@@ -6,16 +6,19 @@
 #include "core/MassProps.h"
 #include "core/Requirements.h"
 #include "core/features/DerivedFeature.h"
+#include "core/features/FilletFeature.h"
 #include "core/io/CrashReports.h"
 #include "remote/RemoteRequirements.h"
 #include "ui/BackgroundJobs.h"
 #include "ui/DerivedActions.h"
+#include "ui/DesignSweepPanel.h"
 #include "ui/DocumentSlots.h"
 #include "ui/OpenJob.h"
 #include "ui/PanelTitles.h"
 #include "ui/ProjectActions.h"
 #include "ui/RequirementsPanel.h"
 #include "ui/SelectionPipeline.h"
+#include "ui/VariableActions.h"
 
 #include <chrono>
 
@@ -2185,5 +2188,149 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     }
     IM_CHECK(s_App->requirements.empty());
     ctx->Yield(2);
+  };
+
+  // An expression requirement is measured where the values move
+  // (docs/requirements/README.md#expression): a value typed into the
+  // Variables panel turns its row red with its finding, no Check pressed.
+  t = IM_REGISTER_TEST(engine, "requirements",
+                       "an_expression_fails_as_you_type");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    IM_CHECK(ui::SetProjectVariable(*s_App, "seat_od", "22", ""));
+    IM_CHECK(ui::SetProjectVariable(*s_App, "seat_bore", "15", ""));
+    const nlohmann::json request{
+        {"name", "wall round the seat"},
+        {"measure",
+         {{"kind", "expression"}, {"expression", "seat_od - seat_bore"}}},
+        {"bound", {{"kind", "at_least"}, {"value", 4}}}};
+    const remote::RpcParams add{request}; // holds a reference to it
+    const uint64_t id =
+        remote::HandleRequirementsRpc(*s_App, "add_requirement", add)
+            ->at("id")
+            .get<uint64_t>();
+    ctx->Yield(3);
+    const auto rowState = [id] {
+      for (const nlohmann::json& r :
+           remote::RequirementRows(*s_App).at("requirements"))
+        if (r.at("id") == id)
+          return r.at("state").get<std::string>();
+      return std::string("missing");
+    };
+    IM_CHECK_STR_EQ(rowState().c_str(), "pass");
+    const auto showPanel = [&](const char* title) {
+      ImGuiWindow* w = ImGui::FindWindowByName(title);
+      IM_CHECK_SILENT(w != nullptr && w->DockNode != nullptr);
+      ctx->ItemClick(w->TabId);
+      ctx->Yield(2);
+    };
+    showPanel(ui::kPanelVariables);
+    ctx->ItemInputValue(
+        "//###Variables/###vars_table/###var_expr_project_seat_bore", "19");
+    ctx->Yield(3);
+    IM_CHECK(!ui::BackgroundJobRunning(*s_App, "requirements")); // no Check
+    showPanel(ui::kPanelRequirements);
+    ctx->Yield(2);
+    const auto* drawn = ui::RequirementRowDrawnForTest(id);
+    IM_CHECK(drawn != nullptr);
+    IM_CHECK_STR_EQ(drawn->value.c_str(), "3 mm");
+    IM_CHECK_STR_EQ(
+        drawn->finding.c_str(),
+        "seat_od - seat_bore = 3 mm (seat_bore 19, seat_od 22), must be >= 4 "
+        "mm");
+    // Put back from the panel: green again, still without a Check.
+    showPanel(ui::kPanelVariables);
+    ctx->ItemInputValue(
+        "//###Variables/###vars_table/###var_expr_project_seat_bore", "15");
+    ctx->Yield(3);
+    IM_CHECK_STR_EQ(rowState().c_str(), "pass");
+    s_App->requirements.clear();
+    s_App->requirementsEdits++;
+    showPanel(ui::kPanelModel);
+  };
+
+  // The design sweep by clicking (docs/requirements/README.md#design-sweep):
+  // Sweep... on a variable's row opens it on half to twice the value, Run
+  // finds where the fillet breaks and says so above the table, the failing
+  // row in the fail colour; and Cancel on a held sweep ends it at once with
+  // the frames still coming and the points measured kept.
+  t = IM_REGISTER_TEST(engine, "requirements", "a_sweep_by_clicking");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield(2);
+    IM_CHECK(ui::SetProjectVariable(*s_App, "t", "10", "mm, the wall"));
+    IM_CHECK(ui::SetProjectVariable(*s_App, "r", "3", "mm, its edges"));
+    auto box = std::make_unique<BoxFeature>("Block", glm::dvec3(0.0), 20.0,
+                                            10.0, 20.0);
+    box->heightExpr = "t";
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::move(box)), *Doc());
+    IM_CHECK(Doc()->GetBodies().size() == 1);
+    const Body& body = Doc()->GetBodies()[0];
+    std::vector<ElementRef> edges;
+    const size_t n = body.shape.GenerateEdgePolylines().size();
+    for (size_t e = 0; e < n; e++)
+      if (const std::string* name =
+              body.elementMap.EdgeNameOf(static_cast<int>(e)))
+        edges.push_back({body.createdBy, *name});
+    auto fillet = std::make_unique<FilletFeature>("Edges round", edges, 3.0);
+    fillet->radiusExpr = "r";
+    s_App->commands->Execute(
+        std::make_unique<AddFeatureCommand>(std::move(fillet)), *Doc());
+    IM_CHECK(Doc()->GetFeature(1)->GetError().empty());
+    ctx->Yield(2);
+    const uint64_t version = Doc()->Version();
+
+    ImGuiWindow* vars = ImGui::FindWindowByName(ui::kPanelVariables);
+    IM_CHECK_SILENT(vars != nullptr && vars->DockNode != nullptr);
+    ctx->ItemClick(vars->TabId);
+    ctx->Yield(2);
+    ctx->ItemClick("//###Variables/###vars_table/###var_sweep_project_t");
+    ctx->Yield(3);
+    const ui::DesignSweepDrawn& drawn = ui::DesignSweepDrawnForTest();
+    IM_CHECK(drawn.open);
+    // 5 .. 20: half to twice t, derived from it.
+    IM_CHECK_STR_EQ(drawn.planned.c_str(), "5 points planned, cap 64");
+    ctx->SetRef("//###DesignSweep");
+    ctx->ItemClick("Run###sweep_run");
+    ctx->Yield();
+    IM_CHECK(WaitForJobs(ctx, "design_sweep"));
+    ctx->Yield(3);
+    IM_CHECK_EQ(drawn.points, 5);
+    IM_CHECK_EQ(drawn.failing, 1); // t = 5: thinner than two 3 mm fillets
+    IM_CHECK(drawn.firstFailures.size() == 1);
+    IM_CHECK(drawn.firstFailures[0].starts_with(
+        "t below: fails at 5 (good at 8.75): "));
+    IM_CHECK(drawn.firstFailures[0].find("Edges round") != std::string::npos);
+    IM_CHECK(drawn.firstFailingWhy.find("Edges round") != std::string::npos);
+    IM_CHECK_EQ(Doc()->Version(), version); // copies, not the document
+    IM_CHECK(s_App->projectSymbols.at("t") == 10.0);
+
+    // A held sweep: Cancel ends it at once, the frames keep coming, and
+    // what was measured stays.
+    {
+      struct Hold {
+        explicit Hold(int ms) { remote::SetTestSweepHold(ms); }
+        ~Hold() { remote::SetTestSweepHold(0); }
+      } hold(30000);
+      ctx->ItemClick("Run###sweep_run");
+      IM_CHECK(WaitFor(ctx, "the sweep's Cancel",
+                       [&] { return ctx->ItemExists("###sweep_cancel"); }));
+      const auto t0 = std::chrono::steady_clock::now();
+      ctx->ItemClick("###sweep_cancel");
+      IM_CHECK(WaitForJobs(ctx, "design_sweep"));
+      IM_CHECK_LT(
+          std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+              .count(),
+          15.0);
+    }
+    ctx->Yield(3);
+    IM_CHECK(drawn.cancelled);
+    IM_CHECK_EQ(Doc()->Version(), version);
+    ctx->WindowClose("//###DesignSweep");
+    ctx->Yield(2);
+    IM_CHECK(!ui::DesignSweepDrawnForTest().open);
   };
 }

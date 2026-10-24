@@ -209,6 +209,14 @@ the active tab never changed.
   that removed no material). A mutating RPC that leaves a feature broken says
   so in its own response, never only in a later `get_state` —
   `regen_honesty_smoke`. That includes `undo` and `set_active_configuration`.
+- **`requirements`** on any response whose call changed the state of an
+  [expression requirement](../requirements/README.md#expression) (a
+  `set_variable` that thins a wall below its stated minimum answers the row
+  `fail`): `[{id, name, state, value?, unit?, bound, limit?, note?,
+  finding?}]`, one per requirement whose state moved. The server attaches it
+  after the handler (`remote::RefreshExpressionRequirements`, in
+  `ProcessPending`), to every call whose answer is untyped or whose
+  `returns` row names it; the requirement verbs answer their own rows.
 - **`digest`** on every geometry-mutating response: per body `{name,
   created_by, volume_mm3, bbox_min, bbox_max, solids}`, and a `delta` against the
   state before the call: `{volume_mm3, added[], removed[]}`. Bodies key on
@@ -241,7 +249,8 @@ the id of a background job
 ([the registry](../ui/long-operations.md#the-registry)):
 `run_study`, `mesh_study`, `run_motion_study`, `export_motion_video`,
 `export_assembly_video`,
-`cam_toolpath`, `update_drawing`, `check_requirements` and `contact_report`.
+`cam_toolpath`, `update_drawing`, `check_requirements`, `design_sweep` and
+`contact_report`.
 `background_jobs` lists every running job with its kind and `fraction`. Each
 domain has a status call that reports a running job and, once it has ended,
 how (`done | cancelled | failed`) and its result: `study_status {job}` for
@@ -253,7 +262,7 @@ hand. The instance answers other calls while a job runs. Some calls run as
 jobs even without `async` and wait PARKED for theirs, answering as they
 always did while the frame and other connections carry on
 ([requests that wait](../architecture.md#requests-that-wait)): a
-synchronous `check_requirements` is one.
+synchronous `check_requirements` and a synchronous `design_sweep` are two.
 
 ## Refusals
 
@@ -549,6 +558,10 @@ nested arrays, `string[][]`.
   receipt's claims, a feature's per-type keys each have a shape of their
   own, which a row would otherwise copy and let drift.
 - A column still in prose (no `key:type` in it) is untyped.
+- The [`requirements`](#what-a-response-carries) the server attaches after
+  a handler goes on a typed answer only when its row lists it
+  (`requirements?:object[]`, as `set_table`'s does;
+  `remote::MayAttachRequirements`), so a closed answer stays closed.
 
 `tools/rpc_contract.py` reads the column (`parse_result_column`,
 `result_schema`); the server publishes it as written, in `returns`. From it

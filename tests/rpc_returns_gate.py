@@ -49,8 +49,10 @@ REMOTE = os.path.join(ROOT, "src", "remote")
 
 # Keys a SHARED response helper attaches, which therefore appear in no
 # branch: AttachReceipt puts `receipt` on every oracle's answer, and the
-# mutating verbs' `regen` arrives the same way.
-HELPER_KEYS = {"receipt", "regen"}
+# mutating verbs' `regen` arrives the same way -- as does `requirements`, the
+# expression requirements a call moved, which the server attaches after the
+# handler (docs/requirements/README.md#expression).
+HELPER_KEYS = {"receipt", "regen", "requirements"}
 
 # A branch whose response is BUILT somewhere else says so, the way a branch
 # whose params are read somewhere else says `// rpc-params:`. The named file

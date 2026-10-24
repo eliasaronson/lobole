@@ -5,6 +5,7 @@
 
 #include "ui/AppState.h"
 #include "ui/RendererSync.h"
+#include "ui/RequirementsPanel.h"
 #ifdef HAVE_CAM
 #include "ui/CamSetupSheet.h"
 #endif
@@ -38,6 +39,13 @@ void PollBackgroundJobs(AppState& state) {
   // solve started on a part tab was not reaped while an assembly tab was
   // active; phase 3 gave the job its part slot id instead.)
   ReapBackgroundJobs(state);
+
+  // Not a job, and here for the same reason the jobs are: an expression
+  // requirement measured in place must not depend on which panel is open
+  // (docs/requirements/README.md#expression). A value edited anywhere -- a
+  // panel, an undo, a configuration switched -- moves its row by the next
+  // frame. Microseconds a requirement, and nothing without one.
+  RefreshRequirementsInPlace(state);
 }
 
 // --- The registry ------------------------------------------------------------

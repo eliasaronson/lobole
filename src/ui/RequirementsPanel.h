@@ -20,8 +20,26 @@ struct AppState;
 struct RequirementsEngine {
   nlohmann::json (*rows)(AppState&) = nullptr;
   uint64_t (*check)(AppState&, bool recompute) = nullptr;
+  // Measures, in place, every `expression` requirement whose inputs moved
+  // (docs/requirements/README.md#expression): microseconds each, so it never
+  // waits for a Check.
+  void (*refresh)(AppState&) = nullptr;
+  // The design sweep (docs/requirements/README.md#design-sweep), with the
+  // parameters design_sweep takes: what it would run ({planned, cap,
+  // variables}, or throws the refusal the RPC would), starting it (the job
+  // id, or throws), and a finished sweep's answer (null while it runs or
+  // for a job that was not one).
+  nlohmann::json (*sweepPlan)(AppState&, const nlohmann::json&) = nullptr;
+  uint64_t (*sweepStart)(AppState&, const nlohmann::json&) = nullptr;
+  nlohmann::json (*sweepResult)(AppState&, uint64_t job) = nullptr;
 };
 void SetRequirementsEngine(const RequirementsEngine& engine);
+const RequirementsEngine& GetRequirementsEngine();
+
+// The engine's refresh, when one is installed: called once a loop iteration
+// (PollBackgroundJobs), so a value edited anywhere -- a panel, an undo, an
+// RPC -- turns an expression requirement's row without a Check.
+void RefreshRequirementsInPlace(AppState& state);
 
 // The Requirements panel (docs/requirements/README.md#the-panel): each
 // requirement's state, value and bound, the whole finding of one that does

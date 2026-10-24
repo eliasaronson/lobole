@@ -164,7 +164,10 @@ by `StartBackgroundJob` from a session counter and never reused. An async
 `run_study`, `run_motion_study` or `mesh_study`, and a `check_topology`
 that has something to solve, answers `job: <id>` (and `kind`); so does
 `check_requirements {async}`, whose job (kind `requirements`) runs studies
-of its own ([requirements](../requirements/README.md#checking-is-a-job)). `study_status {job}` reports a running job (kind, study, label,
+of its own ([requirements](../requirements/README.md#checking-is-a-job)),
+and `design_sweep {async}`, whose job (kind `design_sweep`) regenerates
+copies of the model ([design sweep](../requirements/README.md#design-sweep)).
+`study_status {job}` reports a running job (kind, study, label,
 fraction, elapsed, cancellable, whether it outlives its client) and, once
 it has ended, how: `outcome` done, cancelled or failed, with `error` or
 `cancel_reason`; the registry keeps the last 64 ended jobs for that

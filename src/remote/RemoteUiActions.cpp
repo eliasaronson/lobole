@@ -1171,6 +1171,17 @@ size_t RemoteServer::ProcessPending(ui::AppState& state) {
           continue;
         }
         marks.reset();
+        // An expression requirement the call moved answers in the call's
+        // own response, as `regen` reports a broken feature
+        // (docs/requirements/README.md#expression). The requirement verbs
+        // answer their rows themselves.
+        if (result.is_object() && !result.contains("requirements") &&
+            !remote::IsRequirementsMethod(request.method) &&
+            remote::MayAttachRequirements(request.method)) {
+          json moved = remote::RefreshExpressionRequirements(state);
+          if (!moved.empty())
+            result["requirements"] = std::move(moved);
+        }
         // Session recording (S4): successful semantic requests only — a
         // throwing call mutates nothing, so replay equivalence holds without
         // it (UI actions/screenshots are also skipped: not

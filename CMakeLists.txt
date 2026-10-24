@@ -421,6 +421,8 @@ set(core_sources
     src/core/LookupTable.cpp
     src/core/Literals.cpp
     src/core/Requirements.cpp
+    src/core/PartMeasures.cpp
+    src/core/DesignSweep.cpp
     src/core/Template.cpp
     src/core/catalog/Catalog.cpp
     src/core/io/GeometryCache.cpp
@@ -845,6 +847,7 @@ set(app_sources
     src/ui/TablesPanel.cpp
     src/ui/LiteralsPanel.cpp
     src/ui/RequirementsPanel.cpp
+    src/ui/DesignSweepPanel.cpp
     src/ui/LiteralActions.cpp
     src/ui/HistoryPanel.cpp
     src/ui/ConflictsPanel.cpp

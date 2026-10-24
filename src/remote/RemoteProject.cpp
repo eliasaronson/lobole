@@ -176,7 +176,9 @@ static constexpr MethodDoc ProjectMethods[] = {
     {"merge_abort", "Throw an in-progress merge away.", "", remote::NotInBatch},
     {"set_variable",
      "Add or redefine a variable {name, expression, comment?, "
-     "scope: project|part}; returns value + regen.",
+     "scope: project|part}; returns value + regen, and `requirements`: "
+     "each expression requirement whose state the edit changed "
+     "(docs/requirements/README.md#expression).",
      "name:string, expression:string|number, scope?:'project'|'part', "
      "comment?:string",
      remote::Deferrable},
@@ -194,11 +196,12 @@ static constexpr MethodDoc ProjectMethods[] = {
      "\"D\")). Cells are numbers in base units (mm, deg), like a "
      "variable. Names and columns are identifiers. Undoable with the "
      "project variables; every part re-evaluates. A malformed table is "
-     "refused saying what is wrong, never stored as a different one.",
+     "refused saying what is wrong, never stored as a different one. An "
+     "expression requirement the edit moves answers in `requirements`.",
      "columns, comment, name, rows", remote::Deferrable,
      "regen:{failed:any[], ok:bool, warnings:any[]}, "
-     "table:{columns:string[], name:string, rows:object[], "
-     "comment?:string}"},
+     "requirements?:object[], table:{columns:string[], name:string, "
+     "rows:object[], comment?:string}"},
     {"list_tables",
      "The project's tables {name?}: every one, or the one named (refused "
      "naming the tables there are).",
@@ -207,8 +210,8 @@ static constexpr MethodDoc ProjectMethods[] = {
      "comment?:string}[]"},
     {"delete_table",
      "Delete a project table {name}; refused while any expression reads it "
-     "(naming them), or when there is no such table (naming the ones "
-     "there are).",
+     "(a variable, a feature or a requirement, naming them), or when there "
+     "is no such table (naming the ones there are).",
      "name", remote::Deferrable},
     {"set_units",
      "The units the ACTIVE document is READ in {length?: mm|cm|m|in, mass?: "
@@ -220,11 +223,12 @@ static constexpr MethodDoc ProjectMethods[] = {
      "angle:string, length:string, mass:string"},
     {"rename_variable",
      "Rename a variable {name, new_name, scope?}, rewriting "
-     "every referencing expression.",
+     "every referencing expression, a requirement's included.",
      "name, new_name, scope", remote::Deferrable},
     {"delete_variable",
      "Delete a variable {name, scope?}; refused while "
-     "referenced.",
+     "referenced (by a feature, a variable or a requirement), naming what "
+     "reads it.",
      "name, scope", remote::Deferrable},
     {"remote_list",
      "The project's remotes, and how far ahead/behind this "
@@ -970,15 +974,13 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (scope == "part") {
       if (!haveLocal)
         throw std::runtime_error("no such variable: " + name);
-      std::vector<std::string> refs = doc->FindParameterReferences(name);
-      if (!refs.empty()) {
+      std::vector<std::string> refs;
+      if (!ui::RemovePartVariable(state, *doc, name, &refs)) {
         std::string msg = "variable is referenced by:";
         for (const std::string& r : refs)
           msg += " " + r + ";";
         throw std::runtime_error(msg);
       }
-      state.commands->Execute(std::make_unique<DeleteVariableCommand>(name),
-                              *doc);
       json out = json::object();
       AttachRegen(out, state.document.get());
       return out;
@@ -1011,8 +1013,7 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       throw std::runtime_error("scope must be \"project\" or \"part\", not \"" +
                                scope + "\"");
     if (scope == "part") {
-      if (!state.commands->Execute(
-              std::make_unique<RenameVariableCommand>(name, newName), *doc))
+      if (!ui::RenamePartVariable(state, *doc, name, newName))
         throw std::runtime_error(
             "rename failed: '" + name + "' -> '" + newName +
             "'. Either the source does not exist, the new name is not a "

@@ -269,6 +269,82 @@ def main():
                   {"name": "nope", "scope": "projct"}, needle="scope",
                   tab=part["name"])
 
+            # An expression requirement and a design sweep
+            # (docs/requirements/README.md#expression, #design-sweep): every
+            # refusal before anything is stored or started.
+            d.call("set_active_part", part=part["name"])
+            d.call("set_variable", name="seat_od", expression="22")
+            d.call("set_variable", name="seat_bore", expression="15")
+            d.call("set_variable", name="unread", expression="3")
+            d.call("add_requirement", name="wall",
+                   measure={"kind": "expression",
+                            "expression": "seat_od - seat_bore"},
+                   bound={"kind": "within", "min": 4, "max": 12})
+
+            def expr_req(expression, **measure):
+                return {"name": "x",
+                        "measure": dict(kind="expression",
+                                        expression=expression, **measure),
+                        "bound": {"kind": "at_least", "value": 1}}
+            check("expression unknown name", "add_requirement",
+                  expr_req("seat_od - seat_bor"),
+                  needle="not a variable of the project (its variables:",
+                  tab=part["name"])
+            check("expression malformed", "add_requirement",
+                  expr_req("seat_od -"), needle="does not read",
+                  tab=part["name"])
+            check("expression configuration without a part",
+                  "add_requirement", expr_req("seat_od", configuration=0),
+                  needle="needs `document`", tab=part["name"])
+            check("expression configuration the part lacks",
+                  "add_requirement",
+                  expr_req("seat_od", document=part["id"], configuration=99),
+                  needle="its configurations: 0 (base)", tab=part["name"])
+            check("delete a variable a requirement reads", "delete_variable",
+                  {"name": "seat_bore"}, needle="requirement 'wall'",
+                  tab=part["name"])
+            span = {"name": "seat_bore", "min": 10, "max": 20}
+            for label, params, needle in [
+                    ("not in scope",
+                     {"variables": [dict(span, name="seat_bor")]},
+                     "variables in scope:"),
+                    ("nothing reads it",
+                     {"variables": [dict(span, name="unread")]},
+                     "no part reads 'unread'"),
+                    ("min above max",
+                     {"variables": [dict(span, min=30)]}, "is above max"),
+                    ("an unknown key in a variable",
+                     {"variables": [dict(span, step=1)]},
+                     "unknown key 'step'"),
+                    ("samples", {"variables": [span], "samples": 99},
+                     "`samples` is a whole number from 2 to 33"),
+                    ("refine", {"variables": [span], "refine": 9},
+                     "`refine` is a whole number from 0 to 8"),
+                    ("over the cap",
+                     {"variables": [span], "samples": 33, "max_points": 10},
+                     "would run 33 points, over the cap of 10"),
+                    ("a cap over the ceiling",
+                     {"variables": [span], "max_points": 1000},
+                     "`max_points` is a whole number from 1 to 256"),
+                    ("documents not a part",
+                     {"variables": [span], "documents": [occ["id"] + 999]},
+                     "documents:"),
+                    ("an assembly as a document",
+                     {"variables": [span],
+                      "documents": [next(p["id"] for p in
+                                         d.call("list_parts")["parts"]
+                                         if p["name"] == "Asm")]},
+                     "this measure reads a part"),
+                    ("no variables", {}, "needs `variables`")]:
+                check(f"design_sweep {label}", "design_sweep", params,
+                      needle=needle, tab=part["name"])
+                check(f"design_sweep {label} (async)", "design_sweep",
+                      dict(params, **{"async": True}), needle=needle,
+                      tab=part["name"])
+            check("design_sweep_result of no sweep", "design_sweep_result",
+                  {"job": 987654}, needle="no design sweep 987654",
+                  tab=part["name"])
+
             # A table thread with another pitch is refused, never re-pitched
             # to the table's (docs/modeling/holes-and-threads.md#thread) --
             # added or modified, before anything is committed.

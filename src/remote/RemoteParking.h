@@ -12,7 +12,8 @@
 // requests wait on their toolpath passes (remote/RemoteCam.h), the drawing
 // ones on a projection (remote/RemoteDrawings.h), an exact interference of
 // two named sides on its boolean (remote/RemoteInspection.h), a synchronous
-// requirements check on its job (remote/RemoteRequirements.h).
+// requirements check or design sweep on its job
+// (remote/RemoteRequirements.h).
 
 #include <nlohmann/json.hpp>
 

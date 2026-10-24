@@ -130,6 +130,7 @@ add_executable(designer_tests
     test_lookup_table.cpp
     test_literals.cpp
     test_requirements.cpp
+    test_design_sweep.cpp
     test_variables.cpp
     test_datum.cpp
     test_primitives.cpp
@@ -707,6 +708,16 @@ add_test(NAME requirements_smoke
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/requirements_smoke.py
                  $<TARGET_FILE:designer>)
 set_tests_properties(requirements_smoke PROPERTIES TIMEOUT 240)
+
+# The design sweep (docs/requirements/README.md#design-sweep) on a generator
+# part: the pan/tilt head's camera swept over cam_d breaks where its grip
+# can no longer take its fillet, bracketed and named; the async form is a
+# job, cancel keeps the points done, and a sweep whose client leaves is
+# cancelled. Headless.
+add_test(NAME design_sweep_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/design_sweep_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(design_sweep_smoke PROPERTIES TIMEOUT 300)
 
 # Project tables and lookup() over RPC: both row forms, a variable and a
 # feature reading one, the refusals naming what exists, undo, and the tables

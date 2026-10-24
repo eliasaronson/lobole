@@ -331,9 +331,11 @@ drawings, on their views' projection, except on `--headless`, where the
 synchronous handler holds no frame
 ([drawings](drawings/README.md#requests-that-wait)); an exact
 `interference` of two named sides, on its boolean, in every mode
-([inspect](inspect/README.md#threads)); and a synchronous
+([inspect](inspect/README.md#threads)); a synchronous
 `check_requirements` with something to measure, on the check's job
-([requirements](requirements/README.md#checking-is-a-job)). The pump sets
+([requirements](requirements/README.md#checking-is-a-job)), and a
+synchronous `design_sweep`, on its job
+([design sweep](requirements/README.md#design-sweep)). The pump sets
 `AppState::rpcConnection` while it asks, so a job a parked request starts
 belongs to its client.
 A parked request holds only its OWN connection's later requests, so a

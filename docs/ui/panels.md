@@ -349,7 +349,10 @@ Variables (with the document's Units section), Configurations, History,
 Conflicts, Requirements ([the panel](../requirements/README.md#the-panel)),
 the CAM panel on a job tab, and the Terminal (right-hand node,
 [terminal.md](terminal.md)). Their titles and ids are in
-`src/ui/PanelTitles.h`.
+`src/ui/PanelTitles.h`. The Design sweep window
+(`src/ui/DesignSweepPanel.cpp`) opens from a variable's "..." in the
+Variables panel and from the Requirements panel's "Sweep the ranges"
+([design sweep](../requirements/README.md#design-sweep)).
 
 ## Not built
 

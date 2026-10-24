@@ -14,9 +14,11 @@
 #include "core/Occurrence.h"
 #include "core/Requirements.h"
 #include "core/io/Serialization.h"
+#include "remote/RemoteRequirements.h"
 #include "ui/AppState.h"
 #include "ui/DocumentSlots.h"
 #include "ui/ProjectActions.h"
+#include "ui/VariableActions.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_string.hpp>
@@ -342,4 +344,286 @@ TEST_CASE("an assembly's saved clearance assertions load as requirements",
   CHECK(state.requirements[1].id != r.id);
   CHECK(state.nextRequirementId > state.requirements[1].id);
   CHECK(state.projectMetaDirty);
+}
+
+// ---- The `expression` measure (docs/requirements/README.md#expression) ----
+
+namespace {
+
+struct ReqApp {
+  ui::AppState state;
+  ReqApp() {
+    state.document = std::make_unique<Document>();
+    state.commands = std::make_unique<CommandStack>();
+    ui::EnsureParts(state);
+  }
+  json Call(const std::string& method, const json& params) {
+    remote::RpcParams p{params};
+    auto r = remote::HandleRequirementsRpc(state, method, p);
+    REQUIRE(r.has_value());
+    return *r;
+  }
+  std::string Refusal(const std::string& method, const json& params) {
+    try {
+      Call(method, params);
+    } catch (const std::exception& e) {
+      return e.what();
+    }
+    return "";
+  }
+  json Row(uint64_t id) {
+    for (const json& r :
+         Call("list_requirements", json::object()).at("requirements"))
+      if (r.at("id") == id)
+        return r;
+    FAIL("no requirement " << id);
+    return {};
+  }
+  uint64_t Add(const std::string& name, const json& measure,
+               const json& bound) {
+    return Call("add_requirement",
+                {{"name", name}, {"measure", measure}, {"bound", bound}})
+        .at("id")
+        .get<uint64_t>();
+  }
+  uint64_t PartId() const { return state.parts[state.activePart].id; }
+};
+
+std::string Finding(const json& row) {
+  std::string out;
+  for (const std::string& l : req::FindingLines(row))
+    out += l + "\n";
+  return out;
+}
+
+} // namespace
+
+TEST_CASE("an expression requirement over the project's variables passes and "
+          "fails as the values move",
+          "[requirements]") {
+  ReqApp app;
+  REQUIRE(ui::SetProjectVariable(app.state, "od", "18", ""));
+  REQUIRE(ui::SetProjectVariable(app.state, "bore", "15", ""));
+  const uint64_t id =
+      app.Add("wall", {{"kind", "expression"}, {"expression", "od - bore"}},
+              {{"kind", "at_least"}, {"value", 4}});
+  // Measured as it is stated, no Check: microseconds.
+  json row = app.Row(id);
+  CHECK(row.at("state") == "fail");
+  CHECK(row.at("value") == 3.0);
+  CHECK(row.at("detail").at("inputs") == json{{"bore", 15.0}, {"od", 18.0}});
+  CHECK_THAT(
+      Finding(row),
+      ContainsSubstring("od - bore = 3 mm (bore 15, od 18), must be >= 4 mm"));
+  // The edit that thickens the wall moves it, and says so.
+  REQUIRE(ui::SetProjectVariable(app.state, "od", "20", ""));
+  const json moved = remote::RefreshExpressionRequirements(app.state);
+  REQUIRE(moved.size() == 1);
+  CHECK(moved[0].at("id") == id);
+  CHECK(moved[0].at("state") == "pass");
+  CHECK(moved[0].at("value") == 5.0);
+  CHECK(app.Row(id).at("state") == "pass");
+  // A bound may be an expression in the same scope.
+  const uint64_t rel =
+      app.Add("bore under od", {{"kind", "expression"}, {"expression", "bore"}},
+              {{"kind", "at_most"}, {"value", "od - 5"}});
+  CHECK(app.Row(rel).at("state") == "pass");
+  CHECK(app.Row(rel).at("limit") == 15.0);
+}
+
+TEST_CASE("a part-scope expression reads the part as its features see it, "
+          "configurations included",
+          "[requirements][configurations]") {
+  ReqApp app;
+  REQUIRE(ui::SetProjectVariable(app.state, "depth", "9", ""));
+  Document& doc = *app.state.document;
+  REQUIRE(doc.SetParameter("lip", "depth / 3"));
+  Configuration& deep = doc.AddConfiguration("Deep");
+  deep.parameterOverrides.push_back({"depth", "15"});
+  const uint64_t deepId = deep.id;
+  const uint64_t part = app.PartId();
+  const uint64_t inPart = app.Add(
+      "lip",
+      {{"kind", "expression"}, {"expression", "lip"}, {"document", part}},
+      {{"kind", "at_most"}, {"value", 4}});
+  const uint64_t inProject =
+      app.Add("depth", {{"kind", "expression"}, {"expression", "depth"}},
+              {{"kind", "at_most"}, {"value", 12}});
+  const uint64_t inDeep = app.Add("lip, deep",
+                                  {{"kind", "expression"},
+                                   {"expression", "lip"},
+                                   {"document", part},
+                                   {"configuration", deepId}},
+                                  {{"kind", "at_most"}, {"value", 4}});
+  CHECK(app.Row(inPart).at("value") == 3.0);
+  CHECK(app.Row(inDeep).at("value") == 5.0); // Deep, though base is active
+  CHECK(app.Row(inDeep).at("state") == "fail");
+  CHECK(app.Row(inDeep).at("detail").at("configuration") == "Deep");
+  // Deep active: the part sees its override, the project does not.
+  REQUIRE(doc.SetActiveConfiguration(deepId));
+  remote::RefreshExpressionRequirements(app.state);
+  CHECK(app.Row(inPart).at("value") == 5.0);
+  CHECK(app.Row(inPart).at("state") == "fail");
+  CHECK(app.Row(inProject).at("value") == 9.0);
+  // `configuration: 0` reads the base while Deep is active.
+  const uint64_t inBase = app.Add("lip, base",
+                                  {{"kind", "expression"},
+                                   {"expression", "lip"},
+                                   {"document", part},
+                                   {"configuration", 0}},
+                                  {{"kind", "at_most"}, {"value", 4}});
+  CHECK(app.Row(inBase).at("value") == 3.0);
+  // A configuration the part lacks is refused naming the ones it has.
+  CHECK_THAT(app.Refusal("add_requirement",
+                         {{"name", "x"},
+                          {"measure",
+                           {{"kind", "expression"},
+                            {"expression", "lip"},
+                            {"document", part},
+                            {"configuration", 999}}},
+                          {"bound", {{"kind", "at_most"}, {"value", 1}}}}),
+             ContainsSubstring("its configurations: 0 (base), " +
+                               std::to_string(deepId) + " (Deep)"));
+  CHECK_THAT(app.Refusal("add_requirement",
+                         {{"name", "x"},
+                          {"measure",
+                           {{"kind", "expression"},
+                            {"expression", "lip"},
+                            {"configuration", deepId}}},
+                          {"bound", {{"kind", "at_most"}, {"value", 1}}}}),
+             ContainsSubstring("needs `document`"));
+}
+
+TEST_CASE("a table cell edited makes a lookup's expression move",
+          "[requirements][variables]") {
+  ReqApp app;
+  lookuptable::Table t;
+  t.name = "bearings";
+  t.columns = {"d", "D"};
+  t.rows.push_back({"6002", {15, 32}});
+  REQUIRE(ui::SetProjectTable(app.state, t).empty());
+  REQUIRE(ui::SetProjectVariable(app.state, "od", "40", ""));
+  const uint64_t id =
+      app.Add("wall",
+              {{"kind", "expression"},
+               {"expression", "od - lookup(\"bearings\", 6002, \"D\")"}},
+              {{"kind", "at_least"}, {"value", 4}});
+  CHECK(app.Row(id).at("value") == 8.0);
+  t.rows[0].values[1] = 37;
+  REQUIRE(ui::SetProjectTable(app.state, t).empty());
+  const json moved = remote::RefreshExpressionRequirements(app.state);
+  REQUIRE(moved.size() == 1);
+  CHECK(moved[0].at("state") == "fail");
+  CHECK(app.Row(id).at("value") == 3.0);
+  // A table it reads cannot be deleted from under it.
+  CHECK_THAT(ui::RemoveProjectTable(app.state, "bearings"),
+             ContainsSubstring("requirement 'wall'"));
+  CHECK_THAT(app.Refusal("add_requirement",
+                         {{"name", "x"},
+                          {"measure",
+                           {{"kind", "expression"},
+                            {"expression", "lookup(\"screws\", 3, \"d\")"}}},
+                          {"bound", {{"kind", "at_most"}, {"value", 1}}}}),
+             ContainsSubstring("looks up table 'screws'"));
+}
+
+TEST_CASE("an expression's names are held to its scope",
+          "[requirements][variables]") {
+  ReqApp app;
+  REQUIRE(ui::SetProjectVariable(app.state, "od", "18", ""));
+  REQUIRE(ui::SetProjectVariable(app.state, "bore", "15", ""));
+  const json bound{{"kind", "at_least"}, {"value", 4}};
+  // Refused when stated: an unknown name names the variables there are, a
+  // formula that does not compile says where.
+  CHECK_THAT(
+      app.Refusal(
+          "add_requirement",
+          {{"name", "x"},
+           {"measure", {{"kind", "expression"}, {"expression", "od - bor"}}},
+           {"bound", bound}}),
+      ContainsSubstring("'bor', which is not a variable of the project "
+                        "(its variables: bore, od)"));
+  CHECK_THAT(app.Refusal("add_requirement",
+                         {{"name", "x"},
+                          {"measure",
+                           {{"kind", "expression"}, {"expression", "od - "}}},
+                          {"bound", bound}}),
+             ContainsSubstring("does not read"));
+  CHECK_THAT(
+      app.Refusal("add_requirement",
+                  {{"name", "x"},
+                   {"measure", {{"kind", "expression"}, {"expression", "od"}}},
+                   {"bound", {{"kind", "at_least"}, {"value", "odd"}}}}),
+      ContainsSubstring("bound.value 'odd' reads 'odd'"));
+
+  const uint64_t id = app.Add(
+      "wall", {{"kind", "expression"}, {"expression", "od - bore"}}, bound);
+  // A rename rewrites it; a delete is refused naming it.
+  REQUIRE(ui::RenameProjectVariable(app.state, "bore", "seat_d"));
+  CHECK(app.Row(id).at("measure").at("expression") == "od - seat_d");
+  CHECK(app.Row(id).at("state") == "fail");
+  REQUIRE(ui::UndoProjectVars(app.state));
+  CHECK(app.Row(id).at("measure").at("expression") == "od - bore");
+  std::vector<std::string> refs;
+  CHECK_FALSE(ui::RemoveProjectVariable(app.state, "bore", &refs));
+  REQUIRE(refs.size() == 1);
+  CHECK(refs[0] == "requirement 'wall'");
+  // A name that goes anyway (a merge) reads unresolved, naming it: never 0.
+  std::erase_if(app.state.projectParameters,
+                [](const Parameter& p) { return p.name == "bore"; });
+  ui::SyncProjectScope(app.state);
+  json row = app.Row(id);
+  CHECK(row.at("state") == "unresolved");
+  CHECK(row.at("note") == "variable 'bore' is not in the project");
+  // An evaluation error is unresolved with the evaluator's message.
+  REQUIRE(ui::SetProjectVariable(app.state, "bore", "0", ""));
+  const uint64_t ratio = app.Add(
+      "ratio", {{"kind", "expression"}, {"expression", "od / bore"}}, bound);
+  row = app.Row(ratio);
+  CHECK(row.at("state") == "unresolved");
+  CHECK_THAT(row.at("note").get<std::string>(),
+             ContainsSubstring("division by zero"));
+  CHECK_FALSE(row.contains("value"));
+}
+
+TEST_CASE("a part-local variable a requirement reads is renamed with it and "
+          "kept from deletion",
+          "[requirements][variables]") {
+  ReqApp app;
+  Document& doc = *app.state.document;
+  REQUIRE(doc.SetParameter("lip", "3"));
+  const uint64_t id = app.Add("lip",
+                              {{"kind", "expression"},
+                               {"expression", "lip * 2"},
+                               {"document", app.PartId()}},
+                              {{"kind", "at_most"}, {"value", 8}});
+  REQUIRE(ui::RenamePartVariable(app.state, doc, "lip", "rim"));
+  CHECK(app.Row(id).at("measure").at("expression") == "rim * 2");
+  std::vector<std::string> refs;
+  CHECK_FALSE(ui::RemovePartVariable(app.state, doc, "rim", &refs));
+  CHECK(refs == std::vector<std::string>{"requirement 'lip'"});
+  // The part removed: the requirement reads unresolved, saying why.
+  ui::AddPart(app.state, "Other");
+  REQUIRE(ui::DeletePart(app.state, 0));
+  CHECK(app.Row(id).at("state") == "unresolved");
+  CHECK_THAT(app.Row(id).at("note").get<std::string>(),
+             ContainsSubstring("is gone"));
+}
+
+TEST_CASE("the expression golden round-trips with its evidence",
+          "[requirements][serialization]") {
+  auto golden =
+      DocumentIO::Load((std::filesystem::path(TestSourceDir()) /
+                        "tests/golden/vNEXT-expression-requirement.json")
+                           .string());
+  REQUIRE(golden);
+  const auto list = req::ListFromJson((*golden)->GetRequirementsRaw());
+  REQUIRE(list.size() == 2);
+  CHECK(list[0].Kind() == "expression");
+  CHECK(list[0].evidence.detail.at("inputs").at("od") == 18.0);
+  CHECK(list[1].measure.at("configuration") == 7);
+  CHECK(list[1].bound.maxExpr == "od + 12");
+  CHECK(list[1].evidence.limitMax == 30.0);
+  for (const req::Requirement& r : list)
+    CHECK(req::ToJson(req::FromJson(req::ToJson(r))) == req::ToJson(r));
 }

@@ -142,6 +142,7 @@
   {"design": "golden/v183-printed-features", "kind": "golden", "source": "tests/golden/v183-printed-features.json"},
   {"design": "golden/v185-print-slender", "kind": "golden", "source": "tests/golden/v185-print-slender.json"},
   {"design": "golden/v186-insertion-requirement", "kind": "golden", "source": "tests/golden/v186-insertion-requirement.json"},
+  {"design": "golden/vNEXT-expression-requirement", "kind": "golden", "source": "tests/golden/vNEXT-expression-requirement.json"},
   {"design": "golden/v19-suppress", "kind": "golden", "source": "tests/golden/v19-suppress.json"},
   {"design": "golden/v20-loft", "kind": "golden", "source": "tests/golden/v20-loft.json"},
   {"design": "golden/v21-hole", "kind": "golden", "source": "tests/golden/v21-hole.json"},

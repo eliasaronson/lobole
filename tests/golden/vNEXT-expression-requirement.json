@@ -1,0 +1,49 @@
+{
+  "format": "designer-document",
+  "version": 189,
+  "parameters": [
+    {"name": "od", "expression": "18"},
+    {"name": "bore", "expression": "15"},
+    {"name": "depth", "expression": "9"}
+  ],
+  "configurations": [
+    {"id": 7, "name": "Deep",
+     "parameter_overrides": [{"name": "depth", "expression": "14"}]}
+  ],
+  "requirements": [
+    {"id": 1, "name": "a wall round the bearing seat",
+     "source": "at least 4 mm of material round the bore",
+     "revision": 1,
+     "measure": {"kind": "expression", "expression": "od - bore"},
+     "bound": {"kind": "at_least", "value": 4},
+     "evidence": {"pass": false, "value": 3.0, "unit": "mm", "limit": 4.0,
+                  "input_hash": "0x0123456789abcdef", "revision": 1,
+                  "checked_at": "2026-10-23T12:00:00Z",
+                  "detail": {"scope": "project",
+                             "inputs": {"bore": 15.0, "od": 18.0}}}},
+    {"id": 2, "name": "the deep variant's pad", "revision": 2,
+     "measure": {"kind": "expression", "expression": "depth * 2",
+                 "unit": "mm", "document": 1, "configuration": 7},
+     "bound": {"kind": "within", "min": 20, "max": "od + 12"},
+     "evidence": {"pass": true, "value": 28.0, "unit": "mm",
+                  "limit_min": 20.0, "limit_max": 30.0,
+                  "input_hash": "0xfedcba9876543210", "revision": 2,
+                  "checked_at": "2026-10-23T12:00:00Z",
+                  "detail": {"scope": "part", "part": "Pad",
+                             "configuration": "Deep",
+                             "inputs": {"depth": 14.0}}}}
+  ],
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5,
+     "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]},
+     "entities": [
+       {"type": "line", "id": 1, "a": [0, 0], "b": [4, 0]},
+       {"type": "line", "id": 2, "a": [4, 0], "b": [4, 2]},
+       {"type": "line", "id": 3, "a": [4, 2], "b": [0, 2]},
+       {"type": "line", "id": 4, "a": [0, 2], "b": [0, 0]}
+     ],
+     "constraints": []},
+    {"type": "Extrude", "name": "Pad", "id": 2, "sketch_id": 1,
+     "distance": 1.0, "distance_expr": "depth", "mode": "new_body"}
+  ]
+}

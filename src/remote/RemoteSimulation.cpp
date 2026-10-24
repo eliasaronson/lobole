@@ -70,7 +70,8 @@ uint64_t StudySubject(bool hasId, uint64_t id, bool hasStudy, uint64_t study) {
 
 bool IsStudyJobKind(const std::string& kind) {
   return kind == "motion" || kind == "topo" || kind == "study" ||
-         kind == "mesh" || kind == "check" || kind == "requirements";
+         kind == "mesh" || kind == "check" || kind == "requirements" ||
+         kind == "design_sweep";
 }
 
 // The study jobs there are to ask about: running, then recently ended.
@@ -527,8 +528,10 @@ static constexpr MethodDoc SimulationMethods[] = {
      "id?:int>=0, study?:int>=0, async?:bool, outlive_client?:bool, "
      "recompute?:bool"},
     {"cancel_study",
-     "Cancel a running study: {job} (the id run_study, run_motion_study or "
-     "mesh_study answered -- any study job, motion included) or `id` (or "
+     "Cancel a running study: {job} (the id run_study, run_motion_study, "
+     "mesh_study, check_requirements or design_sweep answered -- any study "
+     "job, motion included; a design sweep stops between points, keeping "
+     "them) or `id` (or "
      "`study`, the same thing here; a part or assembly study's running "
      "job). A topology run keeps the best shape so far; a static or modal "
      "run stops at its next boundary (after meshing, or within a few "

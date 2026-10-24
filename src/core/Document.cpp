@@ -1174,6 +1174,20 @@ void Document::SetPrintSettings(printset::PartSettings s) {
 }
 
 void Document::EvaluateParameters() {
+  EvaluateInto(ActiveConfig(), m_parameters, m_symbols);
+}
+
+SymbolTable Document::SymbolsIn(uint64_t configuration) const {
+  std::vector<Parameter> params = m_parameters;
+  SymbolTable out;
+  EvaluateInto(configuration == 0 ? nullptr : FindConfiguration(configuration),
+               params, out);
+  return out;
+}
+
+void Document::EvaluateInto(const Configuration* cfg,
+                            std::vector<Parameter>& params,
+                            SymbolTable& out) const {
   // Project variables (Phase V) seed the table as the outer scope, shadowed by
   // same-named local parameters. Tables this document carries itself (no app
   // took them into the project) join that scope as cells.
@@ -1185,9 +1199,8 @@ void Document::EvaluateParameters() {
     lookuptable::AddCellSymbols(m_tables, withTables);
     outer = &withTables;
   }
-  const Configuration* cfg = ActiveConfig();
   if (cfg == nullptr) {
-    EvaluateParameterTable(m_parameters, m_symbols, outer, {});
+    EvaluateParameterTable(params, out, outer, {});
     return;
   }
   // The active configuration overrides parameter VALUES for THIS document's
@@ -1198,9 +1211,9 @@ void Document::EvaluateParameters() {
   // injected as a synthetic local parameter so it shadows the project value in
   // this part alone, leaving the shared project scope and every other part
   // untouched.
-  std::vector<Parameter> augmented = m_parameters;
+  std::vector<Parameter> augmented = params;
   const auto isLocal = [&](const std::string& name) {
-    return std::any_of(m_parameters.begin(), m_parameters.end(),
+    return std::any_of(params.begin(), params.end(),
                        [&](const Parameter& p) { return p.name == name; });
   };
   bool overridesProject = false;
@@ -1230,12 +1243,12 @@ void Document::EvaluateParameters() {
         augmented.push_back({pp.name, pp.expression, "", pp.value, {}});
     }
   }
-  EvaluateParameterTable(
-      augmented, m_symbols, outer,
-      [cfg](const std::string& name) { return cfg->OverrideFor(name); });
+  EvaluateParameterTable(augmented, out, outer, [cfg](const std::string& name) {
+    return cfg->OverrideFor(name);
+  });
   // Copy the evaluated value/error back into the real local table (the
-  // synthetic project-override entries only needed to reach m_symbols).
-  for (Parameter& p : m_parameters) {
+  // synthetic project-override entries only needed to reach `out`).
+  for (Parameter& p : params) {
     for (const Parameter& a : augmented) {
       if (a.name == p.name) {
         p.value = a.value;

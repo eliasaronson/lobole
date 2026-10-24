@@ -139,6 +139,88 @@ const Parameter* FindProjectParameter(const AppState& state,
   return nullptr;
 }
 
+namespace {
+
+// The part slot whose document is `doc`, 0 when none is.
+uint64_t PartIdOf(const AppState& state, const Document& doc) {
+  for (size_t i = 0; i < state.parts.size(); i++)
+    if (SlotDoc(const_cast<AppState&>(state), i) == &doc)
+      return state.parts[i].id;
+  return 0;
+}
+
+// Whether requirement `r` reads variable `name` in the scope `part` names
+// (0: the project's). An `expression` requirement on a part reads that
+// part's scope, where a local variable shadows a project one; every other
+// expression a requirement holds (a bound) reads the project's.
+bool ReadsInScope(const AppState& state, const req::Requirement& r,
+                  const std::string& name, uint64_t part) {
+  const bool partScope =
+      r.Kind() == "expression" && r.measure.contains("document");
+  if (part != 0) {
+    if (!partScope || r.Document() != part)
+      return false;
+  } else if (partScope) {
+    const auto slot = SlotIndexById(state, r.Document());
+    const Document* d =
+        slot ? SlotDoc(const_cast<AppState&>(state), *slot) : nullptr;
+    if (d != nullptr && d->FindParameter(name) != nullptr)
+      return false; // its part's own variable of the name
+  }
+  return req::ReadsName(r, name);
+}
+
+// A variable renamed: every requirement reading it where it means it
+// follows, as a feature's expression does.
+void RewriteRequirements(AppState& state, const std::string& from,
+                         const std::string& to, uint64_t part) {
+  bool changed = false;
+  for (req::Requirement& r : state.requirements)
+    if (ReadsInScope(state, r, from, part))
+      changed = req::RenameIn(r, from, to) || changed;
+  if (changed) {
+    state.requirementsEdits++;
+    state.projectMetaDirty = true;
+  }
+}
+
+} // namespace
+
+std::vector<std::string> RequirementReferences(const AppState& state,
+                                               const std::string& name,
+                                               uint64_t part) {
+  std::vector<std::string> refs;
+  for (const req::Requirement& r : state.requirements)
+    if (ReadsInScope(state, r, name, part))
+      refs.push_back("requirement '" + r.name + "'");
+  return refs;
+}
+
+bool RenamePartVariable(AppState& state, Document& doc,
+                        const std::string& oldName,
+                        const std::string& newName) {
+  if (!state.commands->Execute(
+          std::make_unique<RenameVariableCommand>(oldName, newName), doc))
+    return false;
+  RewriteRequirements(state, oldName, newName, PartIdOf(state, doc));
+  return true;
+}
+
+bool RemovePartVariable(AppState& state, Document& doc, const std::string& name,
+                        std::vector<std::string>* outRefs) {
+  std::vector<std::string> refs = doc.FindParameterReferences(name);
+  for (std::string& r :
+       RequirementReferences(state, name, PartIdOf(state, doc)))
+    refs.push_back(std::move(r));
+  if (!refs.empty()) {
+    if (outRefs != nullptr)
+      *outRefs = std::move(refs);
+    return false;
+  }
+  return state.commands->Execute(std::make_unique<DeleteVariableCommand>(name),
+                                 doc);
+}
+
 std::vector<std::string> ProjectVarReferences(AppState& state,
                                               const std::string& name) {
   const auto& engine = ExpressionEngine::Default();
@@ -162,6 +244,10 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
     for (const std::string& r : d->FindParameterReferences(name))
       refs.push_back(state.parts[i].name + ": " + r);
   }
+  // A requirement that reads it: deleting the variable would leave the
+  // requirement unresolved, so it is refused like a feature's reference.
+  for (std::string& r : RequirementReferences(state, name, 0))
+    refs.push_back(std::move(r));
   return refs;
 }
 
@@ -204,6 +290,7 @@ void ApplyProjectVarSnapshot(AppState& state, const ProjectVarSnapshot& s) {
     for (size_t i = 0; i < state.parts.size(); i++)
       if (Document* d = SlotDoc(state, i))
         d->RewriteProjectVarRefs(s.docRefFrom, s.docRefTo);
+    RewriteRequirements(state, s.docRefFrom, s.docRefTo, 0);
   }
   state.projectParameters = s.params;
   state.projectTables = s.tables;
@@ -292,6 +379,7 @@ bool RenameProjectVariable(AppState& state, const std::string& oldName,
   for (size_t i = 0; i < state.parts.size(); i++)
     if (Document* d = SlotDoc(state, i))
       d->RewriteProjectVarRefs(oldName, newName);
+  RewriteRequirements(state, oldName, newName, 0);
   SyncProjectScope(state);
   return true;
 }
@@ -357,6 +445,9 @@ std::vector<std::string> ProjectTableReferences(AppState& state,
                        "'");
     }
   }
+  for (const req::Requirement& r : state.requirements)
+    if (req::ReadsTable(r, name))
+      refs.push_back("requirement '" + r.name + "'");
   return refs;
 }
 

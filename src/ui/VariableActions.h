@@ -61,6 +61,26 @@ std::vector<std::string> ProjectVarReferences(AppState& state,
 const Parameter* FindProjectParameter(const AppState& state,
                                       const std::string& name);
 
+// The requirements that read a variable
+// (docs/variables/README.md#rename-and-delete): an `expression` requirement's
+// formula and any requirement's bound expressions. `part` 0 asks about the
+// PROJECT variable (a requirement on a part that shadows the name with a local
+// one reads that one instead); a part's id asks about that part's local one.
+// Labels, for a delete refusal: "requirement 'wall round the seat'".
+std::vector<std::string> RequirementReferences(const AppState& state,
+                                               const std::string& name,
+                                               uint64_t part);
+
+// A part-LOCAL variable renamed / deleted, as the Variables panel and the
+// RPCs do it: the part's own command (undoable on its tab), plus the
+// requirements that read it -- rewritten by a rename, a refusal for a
+// delete. Rename returns false as RenameVariableCommand does; Remove
+// returns false with `outRefs` filled while anything reads it.
+bool RenamePartVariable(AppState& state, Document& doc,
+                        const std::string& oldName, const std::string& newName);
+bool RemovePartVariable(AppState& state, Document& doc, const std::string& name,
+                        std::vector<std::string>* outRefs);
+
 // Project tables (docs/variables/README.md#tables), on the same cross-tab
 // undo as the variables. Set adds or replaces the table of that name and
 // returns "" -- or the refusal (lookuptable::Validate's) and changes

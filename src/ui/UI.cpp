@@ -3,6 +3,7 @@
 
 #include "ui/UI.h"
 #include "ui/AssemblyActions.h"
+#include "ui/DesignSweepPanel.h"
 #include "ui/DrawingPanel.h"
 #include "ui/OccurrencePanel.h"
 #include "ui/Overlays.h"
@@ -972,6 +973,7 @@ void DrawUI(AppState& state) {
   DrawCamGenerateWindow(state);  // the run: generate, verify, save
   DrawSaveTemplateWindow(state); // selected features as a template
   DrawBomWindow(state);          // the assembly's bill of materials
+  DrawDesignSweepWindow(state);  // a variable's range, regenerated on copies
   DrawFileBrowser(state);
   DrawControlsHelpOverlay(state);
   DrawModelToolPrompt(state);

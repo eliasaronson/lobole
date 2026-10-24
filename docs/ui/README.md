@@ -274,8 +274,8 @@ every creation tool to it. The rule, its examples and the gate are in
 - **Panels:** `FeatureTreePanel.cpp`, `OccurrencePanel.cpp`, `CamPanel.cpp`,
   `CamGenerate.cpp`, `StudyPanel.cpp`, `DrawingPanel.cpp`,
   `VariablesPanel.cpp`, `ConfigurationsPanel.cpp`, `HistoryPanel.cpp`,
-  `ConflictsPanel.cpp`, `RequirementsPanel.cpp`, `TemplatePanel.cpp`,
-  `SettingsWindow.cpp`,
+  `ConflictsPanel.cpp`, `RequirementsPanel.cpp`, `DesignSweepPanel.cpp`,
+  `TemplatePanel.cpp`, `SettingsWindow.cpp`,
   `TerminalPanel.cpp`.
 - **Numbers:** `ExprInput.cpp`, `ExprComplete.cpp`.
 - **Jobs:** `BackgroundJob(s).h`, `CamJobs.cpp`, `DrawingJob.cpp`,

@@ -1,0 +1,7 @@
+{"features": 2, "bodies": 1, "volumes": [72.0],
+ "requirements": [
+   {"name": "a wall round the bearing seat", "kind": "expression",
+    "bound": "at_least", "revision": 1, "evidence": true},
+   {"name": "the deep variant's pad", "kind": "expression",
+    "bound": "within", "revision": 2, "evidence": true}
+ ]}

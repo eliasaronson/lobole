@@ -46,9 +46,10 @@ namespace ui {
 
 struct AppState;
 
-// Join whatever finished, apply it, advance whatever is sliced. Safe to call
-// with nothing running (it is, most frames) and safe on a tab with no
-// document.
+// Join whatever finished, apply it, advance whatever is sliced, and measure
+// the expression requirements whose inputs moved
+// (docs/requirements/README.md#expression). Safe to call with nothing
+// running (it is, most frames) and safe on a tab with no document.
 void PollBackgroundJobs(AppState& state);
 
 // --- The registry (docs/ui/long-operations.md#the-registry) ------------------
