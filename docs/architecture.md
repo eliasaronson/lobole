@@ -215,7 +215,10 @@ prefix. It runs on the calling thread.
   through `Feature::CopyDerivedState` (pure virtual), since the object may
   last have run in another history
   ([modeling](modeling/README.md#regeneration)). `LastRegenStats()` reports
-  `executed`/`cached`, and tests assert on it.
+  `executed`/`cached`, and tests assert on it; `tools/bench.py`'s
+  `history/om615-head` times it, and `LOBOLE_TEST_NO_REGEN_CACHE=1` caps it
+  at zero to show that the harness sees a miss
+  ([performance](performance/README.md#injected-slowdowns)).
 - **Everything a feature reads must be hash-visible.** A feature exposes its
   expressions through `VisitExprs` and its references to other features
   through `VisitFeatureRefs` (pure virtual, like `Clone`); a field missing
@@ -695,7 +698,10 @@ not abort:
   expected.
 
 Occasional audits, not in CI: `tools/coverage.sh` (reports the `src/core`
-functions nothing executed), `tools/profile.sh` (sampling profiler),
+functions nothing executed), `tools/bench.py` (the performance harness:
+fixed workloads timed on this machine and compared against its own history,
+[performance](performance/README.md); only its own working is tested, by
+`bench_harness_smoke`), `tools/profile.sh` (sampling profiler),
 `-DENABLE_SANITIZERS=ON` (ASan + UBSan, runtime options compiled in via
 `src/common/SanitizerDefaults.cpp`) and `-DENABLE_TSAN=ON` (ThreadSanitizer,
 a separate build; Netgen's own thread pool is suppressed in

@@ -43,6 +43,7 @@ sits beside it only where the README would be too long.
 | [simulation](simulation/README.md) | FEM studies |
 | [topopt](topopt/README.md) | topology optimization |
 | [drawings](drawings/README.md) | 2D drafting |
+| [performance](performance/README.md) | the performance harness: workloads, fixtures, the history, compare |
 
 Plans for work that is not built yet live in [plans/](plans/), one file per
 plan. Each generated model has its own page beside its code, indexed in
