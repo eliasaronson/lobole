@@ -164,7 +164,7 @@ int64_t StartedMs(const nlohmann::json& j, std::time_t epoch) {
 bool IsAutosavePath(const fs::path& p) {
   const std::string name = p.filename().string();
   return name.ends_with(".autosave") || name.ends_with(".autosave.d") ||
-         name == "unsaved.autosave.json";
+         Autosaver::IsUnsavedSlot(name);
 }
 
 std::vector<std::string> CopyAutosaves(const nlohmann::json& marker,
@@ -174,10 +174,11 @@ std::vector<std::string> CopyAutosaves(const nlohmann::json& marker,
   if (!marker.contains("autosaves") || !marker["autosaves"].is_array())
     return copied;
   std::error_code ec;
-  // To the second, with no slack: the unsaved slot is shared, and the
-  // previous session's last autosave can be a second or two older than the
-  // next one's start (seen under Wine, where a crash and a relaunch take
-  // that long). Both times are on this machine's clock.
+  // To the second, with no slack: a project's sidecar outlives the session
+  // that wrote it, and the previous session's last autosave can be a second
+  // or two older than the next one's start (seen under Wine, where a crash
+  // and a relaunch take that long). Both times are on this machine's clock.
+  // (The unsaved slot is the session's own, named by its stem: Autosaver.h.)
   const auto fresh = [&](const fs::path& p) {
     const auto t = fs::last_write_time(p, ec);
     return !ec && ToTimeT(t) >= started;
@@ -434,6 +435,8 @@ std::optional<Session> BeginSession(const fs::path& stateDir,
   s.crashFile = sessions / (s.stem + ".crash");
   s.dumpFile = sessions / (s.stem + ".dmp");
   s.logFile = stateDir / "logs" / (s.stem + ".log");
+  // Before the marker lists it: the unsaved slot is this session's.
+  Autosaver::SetInstanceTag(s.stem);
 
   std::string error;
   if (!logfile::Open(s.logFile, &error))
@@ -632,11 +635,14 @@ std::vector<Report> CollectDeadSessions(const fs::path& stateDir, size_t keep) {
     }
   }
   std::vector<fs::path> liveLogs;
+  std::vector<std::string> liveStems;
   for (const fs::path& marker : markers) {
     platform::FileLock lock;
     if (!lock.TryLock(marker, /*create=*/false)) {
-      // Somebody holds it: a live session (perhaps this one). Its log stays.
+      // Somebody holds it: a live session (perhaps this one). Its log and
+      // its unsaved slot stay.
       liveLogs.push_back(stateDir / "logs" / (marker.stem().string() + ".log"));
+      liveStems.push_back(marker.stem().string());
       continue;
     }
     if (auto r = Collect(stateDir, marker, lock)) {
@@ -653,6 +659,9 @@ std::vector<Report> CollectDeadSessions(const fs::path& stateDir, size_t keep) {
             [](const Report& a, const Report& b) { return a.stem > b.stem; });
   PruneReports(stateDir, keep);
   logfile::Prune(stateDir / "logs", kKeepLogs, liveLogs);
+  // After the reports have their copies: what is left of a dead session's
+  // unsaved slot is offered by nothing.
+  Autosaver::PruneUnsavedSlots(stateDir.string(), liveStems, kKeepUnsavedSlots);
   return out;
 }
 

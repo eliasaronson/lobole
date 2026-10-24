@@ -30,6 +30,10 @@ namespace crash {
 inline constexpr size_t kKeepReports = 20;
 inline constexpr size_t kKeepLogs = 10;
 inline constexpr size_t kLogTailLines = 2000;
+// Unsaved slots (core/io/Autosaver.h) no live session owns, kept anyway:
+// a dirty exit leaves one, which nothing offers again but a user may look
+// for by hand.
+inline constexpr size_t kKeepUnsavedSlots = 10;
 
 // This process's session: the names its files go by.
 struct Session {
@@ -79,13 +83,15 @@ struct Report {
   // The session presented a frame before it ended (NoteFirstFrame).
   bool firstFrame = false;
   // The copies under dir/autosave, relative to it: "Part.dsgn.autosave",
-  // "Part.dsgn.autosave.d/parts/Stand.json", "unsaved.autosave.json".
+  // "Part.dsgn.autosave.d/parts/Stand.json",
+  // "unsaved-<stem>.autosave.json" (the session's own unsaved slot).
   std::vector<std::string> autosaves;
 };
 
 // Every unlocked marker in `<stateDir>/sessions` becomes a report folder,
 // then the marker and its crash files are deleted; reports beyond `keep`
-// and logs beyond kKeepLogs (never a live session's) are removed. Returns
+// and logs beyond kKeepLogs (never a live session's) are removed, and so are
+// unsaved slots beyond kKeepUnsavedSlots that no live session owns. Returns
 // the new reports, newest first. A marker some live process holds is left
 // alone — including this process's own.
 std::vector<Report> CollectDeadSessions(const std::filesystem::path& stateDir,

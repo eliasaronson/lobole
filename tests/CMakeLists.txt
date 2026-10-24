@@ -998,6 +998,14 @@ add_test(NAME crash_report_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(crash_report_smoke PROPERTIES TIMEOUT 120)
 
+# Two instances on one state directory: one's autosave and save leave the
+# other's unsaved recovery copy alone
+# (docs/versioning/README.md#autosave-and-recovery).
+add_test(NAME autosave_instances_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/autosave_instances_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(autosave_instances_smoke PROPERTIES TIMEOUT 120)
+
 # A start that cannot draw says why and exits 3; the device ladder, a missing
 # renderer, LOBOLE_RENDERER=software, and safe mode after two early crashes
 # (docs/architecture.md#when-the-renderer-cannot-start). The windowed half

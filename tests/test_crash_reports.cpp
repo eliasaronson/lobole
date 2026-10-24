@@ -150,6 +150,33 @@ TEST_CASE("A crashed session's report holds its stack, log tail and "
   CHECK_FALSE(fs::exists(s.dir / "sessions" / (stem + ".json")));
 }
 
+// The unsaved slot is the session's own, named by its stem
+// (core/io/Autosaver.h): the report copies THAT one, a live session's stays
+// where it is, and a dead one's is left for the count to prune.
+TEST_CASE("A dead session's unsaved slot is its own", "[crash]") {
+  ScratchDir s("lobole-crash-unsaved");
+  const std::string dead = "20260103-000000-11";
+  const std::string live = "20260103-000000-12";
+  const fs::path deadSlot = s.dir / ("unsaved-" + dead + ".autosave.json");
+  const fs::path liveSlot = s.dir / ("unsaved-" + live + ".autosave.json");
+  Write(deadSlot, "{\"dead\": true}");
+  Write(liveSlot, "{\"live\": true}");
+  PlantMarker(s.dir, dead, {{"autosaves", {deadSlot.string()}}});
+  PlantMarker(s.dir, live, {{"autosaves", {liveSlot.string()}}});
+  platform::FileLock held;
+  REQUIRE(held.TryLock(s.dir / "sessions" / (live + ".json"), false));
+
+  const auto reports = crash::CollectDeadSessions(s.dir);
+  REQUIRE(reports.size() == 1);
+  CHECK(reports[0].autosaves ==
+        std::vector<std::string>{"unsaved-" + dead + ".autosave.json"});
+  CHECK(Read(reports[0].dir / "autosave" / deadSlot.filename()) ==
+        "{\"dead\": true}");
+  CHECK(Read(liveSlot) == "{\"live\": true}");
+  CHECK(fs::exists(deadSlot)); // one orphan: within kKeepUnsavedSlots
+  held.Release();
+}
+
 TEST_CASE("The 21st report deletes the oldest", "[crash]") {
   ScratchDir s("lobole-crash-retention");
   for (int i = 0; i < 20; ++i) {

@@ -250,9 +250,14 @@ bool RecoverFromReport(AppState& state, const crash::Report& report,
     MarkProjectRecovered(state, report.project);
     return true;
   }
-  const fs::path copy =
-      copies / fs::path(Autosaver::SidecarPath("")).filename();
-  if (!fs::exists(copy, ec)) {
+  // The dead session's own slot, by the name the report kept -- never this
+  // session's name for it, which is a different instance's (Autosaver.h).
+  fs::path copy;
+  for (const std::string& name : report.autosaves)
+    if (name.ends_with(".json") && name.find('/') == std::string::npos &&
+        Autosaver::IsUnsavedSlot(name))
+      copy = copies / name;
+  if (copy.empty() || !fs::exists(copy, ec)) {
     *error = "that session's project was never saved and had several "
              "documents, which cannot be reopened from their autosaves; "
              "they are in " +

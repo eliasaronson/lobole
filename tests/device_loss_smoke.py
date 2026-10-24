@@ -84,7 +84,14 @@ def one(binary, mode, how):
         d.call("add_feature", feature={
             "type": "Box", "name": "BeforeTheLoss", "on": "Top",
             "width": 10, "depth": 10, "height": 10})
-        sidecar = os.path.join(state, "unsaved.autosave.json")
+        # The unsaved slot is the session's own, named by its stem
+        # (core/io/Autosaver.h).
+        stems = [n[:-len(".json")]
+                 for n in os.listdir(os.path.join(state, "sessions"))
+                 if n.endswith(".json")]
+        expect(len(stems) == 1, f"one live session marker ({stems})")
+        slot = f"unsaved-{stems[0]}.autosave.json"
+        sidecar = os.path.join(state, slot)
         expect(not os.path.exists(sidecar), "nothing autosaved yet (1 h)")
         if how == "twice":
             d.call("debug_fault", kind="device_lost")
@@ -137,8 +144,7 @@ def one(binary, mode, how):
                      if x["reason"].startswith("graphics device recovered")]
         expect(len(recovered) == (1 if how == "twice" else 0),
                f"{len(recovered)} report(s) of a recovered loss")
-        copy = os.path.join(lost[0]["path"], "autosave",
-                            "unsaved.autosave.json")
+        copy = os.path.join(lost[0]["path"], "autosave", slot)
         expect(os.path.exists(copy) and "BeforeTheLoss" in read(copy),
                "the report holds the autosave")
         expect(app.proc.poll() is None, "the process is alive")

@@ -4,12 +4,17 @@
 #include "core/io/Autosaver.h"
 
 #include "common/Logger.h"
+#include "common/Platform.h"
 #include "common/RuntimePaths.h"
 #include "core/Document.h"
 #include "core/io/Serialization.h"
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
+#include <mutex>
+#include <string>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -17,9 +22,94 @@ std::string Autosaver::StateDir() {
   return RuntimePaths::UserStateDir().string();
 }
 
+namespace {
+
+std::mutex g_tagMutex;
+std::string g_tag; // "" until set: InstanceTag() then says "pid<pid>"
+
+constexpr const char* kUnsavedPrefix = "unsaved-";
+constexpr const char* kFileSuffix = ".autosave.json";
+constexpr const char* kDirSuffix = ".autosave.d";
+
+// The tag an unsaved slot's name carries; "" for the old shared slot.
+std::string TagOf(const std::string& name) {
+  std::string stem = name;
+  for (const char* suffix : {kFileSuffix, kDirSuffix})
+    if (stem.ends_with(suffix)) {
+      stem.resize(stem.size() - std::char_traits<char>::length(suffix));
+      break;
+    }
+  return stem.starts_with(kUnsavedPrefix)
+             ? stem.substr(std::char_traits<char>::length(kUnsavedPrefix))
+             : std::string();
+}
+
+} // namespace
+
+void Autosaver::SetInstanceTag(const std::string& tag) {
+  // A plain name: the tag becomes part of a file name in the state dir.
+  if (tag.empty() || tag == "." || tag == ".." ||
+      tag.find_first_of("/\\:") != std::string::npos) {
+    LOG_WARN("Autosaver: refusing instance tag '{}'", tag);
+    return;
+  }
+  std::lock_guard guard(g_tagMutex);
+  g_tag = tag;
+}
+
+std::string Autosaver::InstanceTag() {
+  std::lock_guard guard(g_tagMutex);
+  return g_tag.empty() ? "pid" + std::to_string(platform::CurrentPid()) : g_tag;
+}
+
+bool Autosaver::IsUnsavedSlot(const std::string& name) {
+  if (name == "unsaved.autosave.json" || name == "unsaved.autosave.d")
+    return true;
+  if (!name.starts_with(kUnsavedPrefix) ||
+      !(name.ends_with(kFileSuffix) || name.ends_with(kDirSuffix)))
+    return false;
+  return !TagOf(name).empty();
+}
+
+void Autosaver::PruneUnsavedSlots(const std::string& stateDir,
+                                  const std::vector<std::string>& live,
+                                  size_t keep) {
+  std::error_code ec;
+  const std::string mine = InstanceTag();
+  // Per tag, its file and directory together, aged by the newest of them.
+  std::map<std::string, std::pair<fs::file_time_type, std::vector<fs::path>>>
+      orphans;
+  for (const auto& e : fs::directory_iterator(stateDir, ec)) {
+    const std::string name = e.path().filename().string();
+    if (!IsUnsavedSlot(name))
+      continue;
+    const std::string tag = TagOf(name);
+    if (tag == mine || std::find(live.begin(), live.end(), tag) != live.end())
+      continue;
+    std::error_code tec;
+    const fs::file_time_type t = fs::last_write_time(e.path(), tec);
+    auto& [newest, paths] = orphans[tag];
+    if (paths.empty() || t > newest)
+      newest = t;
+    paths.push_back(e.path());
+  }
+  std::vector<std::pair<fs::file_time_type, std::vector<fs::path>>> byAge;
+  for (auto& [tag, entry] : orphans)
+    byAge.push_back(std::move(entry));
+  std::sort(byAge.begin(), byAge.end(),
+            [](const auto& a, const auto& b) { return a.first > b.first; });
+  for (size_t i = keep; i < byAge.size(); ++i)
+    for (const fs::path& p : byAge[i].second) {
+      std::error_code rm;
+      fs::remove_all(p, rm);
+    }
+}
+
 std::string Autosaver::SidecarPath(const std::string& projectPath) {
   if (projectPath.empty())
-    return (fs::path(StateDir()) / "unsaved.autosave.json").string();
+    return (fs::path(StateDir()) /
+            (kUnsavedPrefix + InstanceTag() + kFileSuffix))
+        .string();
   return projectPath + ".autosave";
 }
 
@@ -43,7 +133,9 @@ void Autosaver::Clear(const std::string& projectPath) {
 
 std::string Autosaver::SidecarDir(const std::string& projectPath) {
   if (projectPath.empty())
-    return (fs::path(StateDir()) / "unsaved.autosave.d").string();
+    return (fs::path(StateDir()) /
+            (kUnsavedPrefix + InstanceTag() + kDirSuffix))
+        .string();
   return projectPath + ".autosave.d";
 }
 

@@ -153,9 +153,9 @@ if [ "$MODE" = app ]; then
   fi
   #
   # Its config and state are private to the profile, and it never
-  # autosaves: an instance on the user's state directory writes its unsaved
-  # document's recovery copy over theirs (unsaved.autosave.json), and its
-  # opens land in their recently-opened list. Its port is still claimed
+  # autosaves: an instance on the user's state directory leaves its unsaved
+  # document's recovery copy beside theirs (unsaved-<session>.autosave.json),
+  # and its opens land in their recently-opened list. Its port is still claimed
   # machine-wide (/tmp/lobole-ports-<uid>), whatever its state directory.
   mkdir -p "$OUT/app-config" "$OUT/app-state"
   XDG_CONFIG_HOME="$OUT/app-config" XDG_STATE_HOME="$OUT/app-state" \

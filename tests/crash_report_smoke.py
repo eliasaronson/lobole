@@ -83,7 +83,14 @@ def main():
             "type": "Box", "name": "SecondBox", "on": "Top",
             "centered": False, "offset": [30, 0],
             "width": 5, "depth": 5, "height": 5})
-        sidecar = os.path.join(lobole, "unsaved.autosave.json")
+        # The unsaved slot is the session's own, named by its stem
+        # (core/io/Autosaver.h).
+        sessions = os.path.join(lobole, "sessions")
+        stem = [n[:-len(".json")] for n in os.listdir(sessions)
+                if n.endswith(".json")]
+        expect(len(stem) == 1, f"one live session marker ({stem})")
+        slot = f"unsaved-{stem[0]}.autosave.json"
+        sidecar = os.path.join(lobole, slot)
         deadline = time.time() + 20
         while time.time() < deadline and "SecondBox" not in (
                 read(sidecar) if os.path.exists(sidecar) else ""):
@@ -95,7 +102,6 @@ def main():
             pass  # no answer: that is the point
         code = wait_exit(app)
         expect(code == -signal.SIGSEGV, f"it died by SIGSEGV ({code})")
-        sessions = os.path.join(lobole, "sessions")
         expect(any(n.endswith(".crash") for n in os.listdir(sessions)),
                "the handler wrote a crash file beside the marker")
 
@@ -118,10 +124,9 @@ def main():
                "Add Extrude 'SecondBox'" in log,
                "session.log holds both edits")
         expect("rpc: debug_crash" in log, "and the call that crashed it")
-        expect(r["autosaves"] == ["unsaved.autosave.json"] and
-               "SecondBox" in read(os.path.join(r["path"], "autosave",
-                                                "unsaved.autosave.json")),
-               "autosave/ holds the sidecar")
+        expect(r["autosaves"] == [slot] and
+               "SecondBox" in read(os.path.join(r["path"], "autosave", slot)),
+               "autosave/ holds the session's own unsaved slot")
         expect(not os.path.exists(os.path.join(
             sessions, r["stem"] + ".crash")), "the crash file was consumed")
         first = r["path"]

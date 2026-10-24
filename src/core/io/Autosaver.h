@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -26,10 +27,39 @@ public:
   // interval in, not on the first dirty edit.
   void Prime(double now) { m_lastSaveTime = now; }
 
-  // The sidecar for a project path; "" = the unsaved-document slot under the
-  // XDG state dir (~/.local/state/lobole/unsaved.autosave.json). Used for a
-  // project that IS one document; see SidecarDir for the rest.
+  // The sidecar for a project path; "" = THIS instance's unsaved-document
+  // slot under the XDG state dir
+  // (~/.local/state/lobole/unsaved-<InstanceTag()>.autosave.json). Used for
+  // a project that IS one document; see SidecarDir for the rest.
   static std::string SidecarPath(const std::string& projectPath);
+
+  // What names this process's unsaved slot. Every instance on a machine
+  // shares the state dir -- the human's app and each agent's
+  // headless-preview instance -- and the slot used to be ONE file there, so
+  // one instance's autosave wrote over another's recovery copy and its save
+  // (which clears "the unsaved slot") deleted it.
+  //
+  // crash::BeginSession sets its session stem ("20261024-031500-4242"),
+  // before the session marker lists the slot: a crash report then copies
+  // the dead session's own slot, and CollectDeadSessions knows which slots
+  // belong to a live session. Until then, and in a process without a
+  // session, "pid<pid>". A tag that could leave the state dir is refused.
+  static void SetInstanceTag(const std::string& tag);
+  static std::string InstanceTag();
+
+  // Is this file name an unsaved slot -- any instance's, or the shared
+  // `unsaved.autosave.json` / `.d` builds before the tag wrote?
+  [[nodiscard]] static bool IsUnsavedSlot(const std::string& filename);
+
+  // Deletes the unsaved slots in `stateDir` that no live instance owns --
+  // tags not in `live` and not this process's -- beyond the newest `keep`.
+  // A dirty exit keeps its slot, and nothing offers it again, so without
+  // this every never-saved session would leave one behind for good. Called
+  // by crash::CollectDeadSessions AFTER it has copied the dead sessions'
+  // slots into their reports.
+  static void PruneUnsavedSlots(const std::string& stateDir,
+                                const std::vector<std::string>& live,
+                                size_t keep);
 
   // Where a multi-document project's sidecars live: one file per DIRTY
   // document, mirroring the layout project.json describes
@@ -59,7 +89,8 @@ public:
   // existing sidecar whose project file is missing or path is empty).
   static bool HasNewerAutosave(const std::string& projectPath);
 
-  // Remove the sidecar (clean save; clean exit when not dirty).
+  // Remove the sidecar (clean save; clean exit when not dirty). "" is this
+  // instance's unsaved slot, never another instance's.
   static void Clear(const std::string& projectPath);
 
   // Call regularly with a monotonic clock. Saves when enabled (interval > 0),

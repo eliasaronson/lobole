@@ -9,6 +9,7 @@
 #include "core/io/Autosaver.h"
 #include "core/io/Serialization.h"
 
+#include <chrono>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -42,8 +43,97 @@ Document MakeDoc() {
 
 TEST_CASE("Sidecar paths", "[autosave]") {
   CHECK(Autosaver::SidecarPath("/tmp/part.json") == "/tmp/part.json.autosave");
-  // The unsaved slot lives under the state dir, not next to anything.
-  CHECK(Autosaver::SidecarPath("").ends_with("unsaved.autosave.json"));
+  // The unsaved slot lives under the state dir, not next to anything, and
+  // carries this instance's tag.
+  CHECK(Autosaver::SidecarPath("").ends_with(
+      "unsaved-" + Autosaver::InstanceTag() + ".autosave.json"));
+  CHECK(Autosaver::IsUnsavedSlot("unsaved-20261024-031500-42.autosave.json"));
+  CHECK(Autosaver::IsUnsavedSlot("unsaved-pid42.autosave.d"));
+  CHECK(Autosaver::IsUnsavedSlot("unsaved.autosave.json")); // older builds
+  CHECK_FALSE(Autosaver::IsUnsavedSlot("unsaved-.autosave.json"));
+  CHECK_FALSE(Autosaver::IsUnsavedSlot("Part.dsgn.autosave"));
+  CHECK_FALSE(Autosaver::IsUnsavedSlot("recent-projects.json"));
+}
+
+// Every instance on a machine shares the state dir: the human's app and each
+// agent's headless-preview instance. One instance's save cleared "the unsaved
+// slot" -- one shared file -- and so deleted the human's recovery copy.
+TEST_CASE("Clear(\"\") clears this instance's unsaved slot, no other's",
+          "[autosave]") {
+  const fs::path state = TempDir("instances");
+  REQUIRE(::setenv("XDG_STATE_HOME", state.string().c_str(), 1) == 0);
+  Document doc = MakeDoc();
+
+  Autosaver::SetInstanceTag("20261024-030000-1");
+  const std::string theirs = Autosaver::SidecarPath("");
+  {
+    Autosaver saver(0.001);
+    saver.Prime(0.0);
+    REQUIRE(saver.MaybeSave(doc, "", doc.SaveStamp() - 1, 1.0));
+  }
+  Autosaver::SetInstanceTag("20261024-030100-2");
+  const std::string mine = Autosaver::SidecarPath("");
+  CHECK(mine != theirs);
+  {
+    Autosaver saver(0.001);
+    saver.Prime(0.0);
+    REQUIRE(saver.MaybeSave(doc, "", doc.SaveStamp() - 1, 1.0));
+  }
+  fs::create_directories(Autosaver::SidecarDir(""));
+  REQUIRE(fs::exists(theirs));
+  REQUIRE(fs::exists(mine));
+
+  Autosaver::Clear("");
+  CHECK_FALSE(fs::exists(mine));
+  CHECK_FALSE(fs::exists(Autosaver::SidecarDir("")));
+  CHECK(fs::exists(theirs));
+
+  // A tag that would name a file outside the state dir is refused.
+  Autosaver::SetInstanceTag("../escape");
+  CHECK(Autosaver::InstanceTag() == "20261024-030100-2");
+  fs::remove_all(state);
+}
+
+TEST_CASE("Unsaved slots no live instance owns are pruned beyond a count",
+          "[autosave]") {
+  const fs::path state = TempDir("prune");
+  Autosaver::SetInstanceTag("20261024-040000-9");
+  const auto plant = [&](const std::string& name, int hoursAgo) {
+    const fs::path p = state / name;
+    if (name.ends_with(".d"))
+      fs::create_directories(p);
+    else
+      std::ofstream(p) << "{}";
+    fs::last_write_time(p, fs::file_time_type::clock::now() -
+                               std::chrono::hours(hoursAgo));
+  };
+  plant("unsaved-20261024-040000-9.autosave.json", 50); // this process
+  plant("unsaved-live.autosave.json", 40);              // a live session
+  plant("unsaved-live.autosave.d", 40);
+  plant("unsaved-newest.autosave.json", 1); // orphans, newest first
+  plant("unsaved-newest.autosave.d", 30);
+  plant("unsaved-middle.autosave.json", 2);
+  plant("unsaved.autosave.json", 3); // the shared slot older builds wrote
+  plant("Part.dsgn.autosave", 60);   // not an unsaved slot at all
+  plant("recent-projects.json", 60);
+
+  Autosaver::PruneUnsavedSlots(state.string(), {"live"}, 2);
+  CHECK(fs::exists(state / "unsaved-20261024-040000-9.autosave.json"));
+  CHECK(fs::exists(state / "unsaved-live.autosave.json"));
+  CHECK(fs::exists(state / "unsaved-live.autosave.d"));
+  CHECK(fs::exists(state / "unsaved-newest.autosave.json"));
+  CHECK(fs::exists(state / "unsaved-newest.autosave.d"));
+  CHECK(fs::exists(state / "unsaved-middle.autosave.json"));
+  CHECK_FALSE(fs::exists(state / "unsaved.autosave.json"));
+  CHECK(fs::exists(state / "Part.dsgn.autosave"));
+  CHECK(fs::exists(state / "recent-projects.json"));
+
+  Autosaver::PruneUnsavedSlots(state.string(), {}, 0);
+  CHECK(fs::exists(state / "unsaved-20261024-040000-9.autosave.json"));
+  CHECK_FALSE(fs::exists(state / "unsaved-live.autosave.json"));
+  CHECK_FALSE(fs::exists(state / "unsaved-newest.autosave.d"));
+  CHECK_FALSE(fs::exists(state / "unsaved-middle.autosave.json"));
+  fs::remove_all(state);
 }
 
 TEST_CASE("MaybeSave fires only when dirty, changed, and due", "[autosave]") {
