@@ -824,11 +824,11 @@ lists its patches), and is refused only when every draw failed. On the
 patched kernel the first draw is nearly always the answer -- two shells of
 the action matrix's 1,800 still built only on a later one -- and an honest
 refusal (a wall too thick for the geometry) cost five draws for nothing, a
-fifth of a full sweep. Between the first draw and the rest the offset
-builder runs once in its Intersection mode (offset faces intersected over
-the whole solid, not only between neighbours): on the matrix's shells it
-built 106 the arc joins refused and refused 2 they built, so it is never
-the first try. Every draw shares one budget, the direct edits'
+fifth of a full sweep. The offset builder's Intersection mode (offset faces
+intersected over the whole solid, not only between neighbours) was measured
+as a further try: it built 106 of the matrix's shells the arc joins refused,
+but the shell it built on random design 33 left a body the next cut could
+not cut, so it is not used. Every draw shares one budget, the direct edits'
 (`directedit::BuilderBudgetS` by the body's faces): the builder stops at its
 progress checks, so a wall far too thin for a worm's flank gives up instead
 of running for minutes, though it overshoots to the end of whatever step it
