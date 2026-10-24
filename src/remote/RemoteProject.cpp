@@ -61,12 +61,24 @@ static constexpr MethodDoc ProjectMethods[] = {
      "Open a project {path} (.json file or .dsgn directory). Returns "
      "rebuilt_parts (parts whose saved geometry could not be used, so they "
      "were rebuilt from their features) and rebuild_reason when they share "
-     "one; saving re-bakes them, and the next open is a load.",
+     "one; saving re-bakes them, and the next open is a load. Returns "
+     "dropped[] {path, pointer, reason, derived}: what the load kept going "
+     "past -- a file the index does not list, a saved result that does not "
+     "read (derived: true, rebuilt). Empty for a project that loaded whole. "
+     "A damaged file is REFUSED, naming it; a drop is what loads around "
+     "(docs/versioning/README.md#a-lossy-load). While a drop that is not "
+     "derived stands, save_project to this same path is refused.",
      "path:string", remote::NotInBatch},
     {"save_project",
-     "Save the project to {path, message?, force?}. Refuses when the project "
-     "changed on disk since it was opened; {force:true} saves over it.",
-     "path:string, message?:string, force?:bool", remote::NotInBatch},
+     "Save the project to {path, message?, force?, overwrite_lossy?}. "
+     "Refuses when the project changed on disk since it was opened; "
+     "{force:true} saves over it. Refuses, too, a save back over a project "
+     "whose open_project reported a `dropped` entry that is not derived, "
+     "naming each: the save would lose it for good. {overwrite_lossy:true} "
+     "saves anyway and its reply carries `warning` listing what was lost. "
+     "A save to any other path is never refused for it.",
+     "path:string, message?:string, force?:bool, overwrite_lossy?:bool",
+     remote::NotInBatch},
     {"validation_revision",
      "Session revision of all model tabs, plus unresolved occurrence "
      "references. "
@@ -700,13 +712,26 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     // Every key read before the file is written: a `message` of the wrong
     // type used to be refused after the save had landed.
     const bool force = p.value("force", false);
+    const bool overwriteLossy = p.value("overwrite_lossy", false);
     const std::string message = p.value("message", std::string("save"));
+    // Said in the reply when the save goes over what the open lost: the
+    // caller asked for it, and the answer still names what is gone.
+    const bool losing = ui::SaveWouldLoseDrops(state, path);
+    const std::string lost = state.openDrops.Summary(/*lossyOnly=*/true);
     std::string error;
-    if (!ui::SaveProject(state, path, &error, force))
+    if (!ui::SaveProject(state, path, &error, force, overwriteLossy)) {
+      // A refusal here is the caller's to act on, not the GUI's to ask.
+      state.lossySaveBlocked = false;
       throw std::runtime_error(error);
+    }
     // Also clears the autosave sidecar and commits git-backed projects.
     ui::MarkProjectSaved(state, path, message);
-    return json::object();
+    json out = json::object();
+    if (losing)
+      out["warning"] = "saved over what the open could not keep, which is "
+                       "now gone from " +
+                       path + ":\n" + lost;
+    return out;
   }
   if (m == "open_project") {
     // autosave_available: a sidecar newer than this file exists (crash
@@ -729,6 +754,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     out["rebuilt_parts"] = state.openRebuiltParts;
     if (!state.openRebuildReason.empty())
       out["rebuild_reason"] = state.openRebuildReason;
+    // What the load kept going past (docs/versioning/README.md#a-lossy-load),
+    // said in ITS OWN reply rather than left for a later call to find.
+    out["dropped"] = state.openDrops.ToJson();
     AttachRegen(out, state.document.get());
     return out;
   }

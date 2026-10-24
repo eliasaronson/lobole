@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/Requirements.h"
+#include "core/io/ReadContext.h"
 
 #include "core/InputHash.h"
 
@@ -558,6 +559,11 @@ json EvidenceToJson(const Evidence& e) {
 }
 
 Evidence EvidenceFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j,
+                             {"pass", "input_hash", "revision", "value", "unit",
+                              "error", "limit", "limit_min", "limit_max",
+                              "detail", "checked_at"},
+                             "requirement evidence");
   Evidence e;
   e.taken = true;
   e.pass = j.value("pass", false);
@@ -566,8 +572,13 @@ Evidence EvidenceFromJson(const json& j) {
     throw std::runtime_error("requirement evidence: input_hash '" + hex +
                              "' is not 0x + 16 hex digits");
   e.revision = j.value("revision", 0);
-  if (j.contains("value") && j.at("value").is_number())
+  if (j.contains("value")) {
+    if (!j.at("value").is_number())
+      throw std::runtime_error("requirement evidence: value " +
+                               j.at("value").dump().substr(0, 40) +
+                               " is not a number");
     e.value = j.at("value").get<double>();
+  }
   e.unit = j.value("unit", std::string());
   e.error = j.value("error", std::string());
   if (j.contains("limit"))
@@ -598,6 +609,12 @@ json ToJson(const Requirement& r) {
 Requirement FromJson(const json& j) {
   Requirement r;
   try {
+    readctx::RefuseUnknownKeys(
+        j, {"id", "name", "source", "revision", "measure", "bound", "evidence"},
+        "requirement");
+    if (!j.at("id").is_number_unsigned() || j.at("id").get<uint64_t>() == 0)
+      throw std::runtime_error("its id " + j.at("id").dump() +
+                               " is not a whole number above 0");
     r.id = j.at("id").get<uint64_t>();
     r.name = j.at("name").get<std::string>();
     r.source = j.value("source", std::string());

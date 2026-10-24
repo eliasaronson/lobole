@@ -3,6 +3,7 @@
 
 #include "core/io/GeometryCache.h"
 #include "core/io/ProjectPaths.h"
+#include "core/io/ReadContext.h"
 #include "core/io/Serialization.h" // ElementMapToJson
 
 #include "common/Logger.h"
@@ -16,10 +17,12 @@
 #include <Standard_Version.hxx>
 #include <TopoDS_Shape.hxx>
 
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -56,6 +59,43 @@ namespace {
 // printed pin read its press as a clash, and a plate printed the copy at
 // the part's settings rather than the source body's.
 constexpr int kGeometryFormat = 6;
+
+// What the index's `content_hash` covers: the index itself without that key
+// (as nlohmann writes it: sorted, compact) and every blob it names, in its
+// order. The chain hash says which RECIPE the blob was built from; this
+// says the blob is still what was written. Without it a blob whose index
+// was edited by hand or damaged -- a body list grown, an element map
+// changed -- was adopted whole as long as the chain hash survived, and the
+// document loaded with bodies its recipe never made. Additive: a blob
+// without one (an older build's) is read as before, and an older build
+// ignores the key.
+std::string ContentHash(const json& index,
+                        const std::vector<std::string>& blobs) {
+  json without = index;
+  without.erase("content_hash");
+  uint64_t h = 1469598103934665603ull;
+  const auto mix = [&h](const std::string& bytes) {
+    for (unsigned char c : bytes) {
+      h ^= c;
+      h *= 1099511628211ull;
+    }
+    h ^= 0xff; // a separator, so two splits of one byte run differ
+    h *= 1099511628211ull;
+  };
+  mix(without.dump());
+  for (const std::string& b : blobs)
+    mix(b);
+  char text[19];
+  std::snprintf(text, sizeof text, "0x%016llx",
+                static_cast<unsigned long long>(h));
+  return text;
+}
+
+std::string FileBytes(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  return std::string((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+}
 
 // A bend record, whole. It is not document data — the features stamp it on
 // every regeneration — but a baked open regenerates nothing, so the blob has
@@ -401,6 +441,12 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
       index["bodies"].push_back(std::move(entry));
       wanted.push_back(file);
     }
+    {
+      std::vector<std::string> blobs;
+      for (const std::string& file : wanted)
+        blobs.push_back(FileBytes(geom / file));
+      index["content_hash"] = ContentHash(index, blobs);
+    }
     // The index is written LAST, so a torn save leaves an index that either
     // does not exist or does not match — never one that points at half a body
     // list. Same reasoning as the recipe's feature index.
@@ -443,11 +489,29 @@ bool SaveGeometry(const Document& doc, const std::string& dir,
 
 bool LoadGeometry(Document& doc, const std::string& dir) {
   const fs::path geom = GeometryDir(dir);
-  std::ifstream in(geom / "index.json");
-  if (!in)
+  std::error_code ec;
+  if (!fs::exists(geom / "index.json", ec))
     return false; // no blob: the document rebuilds, as it always did
+  // A blob that is there and cannot be used is DERIVED data dropped: the
+  // document rebuilds, and the load reports it (readctx::Dropped) rather
+  // than refusing over something nobody wrote.
+  const auto ignore = [&](const std::string& rel, const std::string& why) {
+    readctx::Dropped("", why + "; the part rebuilds", true, "geometry/" + rel);
+    return false;
+  };
+  // A blob reached through a link out of the document is not read.
+  const auto inside = [&](const fs::path& p) {
+    std::error_code e;
+    const fs::path base = fs::weakly_canonical(dir, e);
+    const fs::path full = fs::weakly_canonical(p, e);
+    const auto [b, f] =
+        std::mismatch(base.begin(), base.end(), full.begin(), full.end());
+    return b == base.end();
+  };
+  if (!inside(geom / "index.json"))
+    return ignore("index.json", "it is a link out of the project");
   try {
-    const json j = json::parse(in);
+    const json j = readctx::ParseStrict(FileBytes(geom / "index.json"));
     if (j.value("geometry_format", 0) != kGeometryFormat) {
       LOG_INFO("Ignoring baked geometry in {}: format {} (this build reads {})",
                dir, j.value("geometry_format", 0), kGeometryFormat);
@@ -462,23 +526,33 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
                "loading it as saved",
                dir, occ, OCC_VERSION_COMPLETE);
     }
-    std::vector<Body> bodies;
+    // Every blob's bytes first: what the content hash covers, and what the
+    // shapes are read from.
+    std::vector<std::string> files, blobs;
     for (const json& bj : j.value("bodies", json::array())) {
-      TopoDS_Shape shape;
       // A name from a shared project: a path out of geometry/ would read any
       // file into OCC's binary reader (core/io/ProjectPaths.h).
       const std::string file = bj.at("brep").get<std::string>();
-      if (!projectpaths::IsPlainComponent(file)) {
-        LOG_WARN("Ignoring baked geometry in {}: '{}' is not a file in it", dir,
-                 file);
-        return false;
-      }
-      const fs::path brep = geom / file;
-      if (!BinTools::Read(shape, brep.string().c_str()) || shape.IsNull()) {
-        LOG_INFO("Ignoring baked geometry in {}: {} is unreadable", dir,
-                 brep.filename().string());
-        return false;
-      }
+      if (!projectpaths::IsPlainComponent(file))
+        return ignore("index.json", "'" + file + "' is not a file in it");
+      if (!inside(geom / file))
+        return ignore(file, "it is a link out of the project");
+      files.push_back(file);
+      blobs.push_back(FileBytes(geom / file));
+    }
+    if (j.contains("content_hash") &&
+        j.at("content_hash").get<std::string>() != ContentHash(j, blobs))
+      return ignore("index.json",
+                    "it does not match its content hash (edited or damaged)");
+    std::vector<Body> bodies;
+    size_t i = 0;
+    for (const json& bj : j.value("bodies", json::array())) {
+      TopoDS_Shape shape;
+      std::istringstream bytes(blobs[i]);
+      const std::string& file = files[i++];
+      BinTools::Read(shape, bytes);
+      if (shape.IsNull())
+        return ignore(file, "it is unreadable");
       Body body;
       body.name = bj.value("name", std::string{});
       body.shape = CADShape(shape);
@@ -489,8 +563,8 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
       if (bj.contains("display_color")) {
         const auto& c = bj.at("display_color");
         body.hasDisplayColor = true;
-        body.displayColor = {c[0].get<float>(), c[1].get<float>(),
-                             c[2].get<float>()};
+        body.displayColor = {c.at(0).get<float>(), c.at(1).get<float>(),
+                             c.at(2).get<float>()};
       }
       body.reference = bj.value("reference", false);
       body.derivedFrom = bj.value("derived_from", uint64_t{0});
@@ -518,12 +592,10 @@ bool LoadGeometry(Document& doc, const std::string& dir) {
   } catch (const Standard_Failure& e) {
     // OCC signals a corrupt or foreign-version .brep by THROWING, not by
     // returning false — a truncated blob must still degrade to a rebuild.
-    LOG_INFO("Ignoring baked geometry in {}: {}", dir,
-             e.GetMessageString() ? e.GetMessageString() : "unreadable shape");
-    return false;
+    return ignore("index.json", e.GetMessageString() ? e.GetMessageString()
+                                                     : "unreadable shape");
   } catch (const std::exception& e) {
-    LOG_INFO("Ignoring baked geometry in {}: {}", dir, e.what());
-    return false;
+    return ignore("index.json", e.what());
   }
 }
 

@@ -20,7 +20,12 @@
 #include "ui/SelectionPipeline.h"
 #include "ui/VariableActions.h"
 
+#include <nlohmann/json.hpp>
+
+#include "common/Platform.h" // CurrentPid
+
 #include <chrono>
+#include <fstream>
 
 // Project GUI tests, carved out of the single 8,036-line RegisterGuiTests.
 //
@@ -918,6 +923,75 @@ void RegisterProjectGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(!ui::ProjectChangedOnDisk(*s_App));
     // A save is not a delete: an unrelated external file is still there.
     IM_CHECK(std::filesystem::exists(dir / "NOTES.txt"));
+  };
+
+  // A project whose open could not keep all of it (a feature file its index
+  // does not list) is not saved back over itself without asking
+  // (docs/versioning/README.md#a-lossy-load): Save raises the choice, with
+  // "Save a copy..." the default. Cancel leaves the file; Overwrite anyway
+  // saves and the drops go to the log. "Save a copy..." is not clicked: it
+  // opens the system's save dialog, which no test may show.
+  t = IM_REGISTER_TEST(engine, "disk", "a_lossy_open_asks_before_saving_over");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    const std::filesystem::path dir =
+        std::filesystem::temp_directory_path() /
+        ("designer_lossy_gui_" + std::to_string(platform::CurrentPid()) +
+         ".dsgn");
+    std::filesystem::remove_all(dir);
+
+    ctx->SetRef("//##MainMenuBar");
+    ctx->MenuClick("File/New");
+    ctx->Yield();
+    AddFixtureBox(ctx);
+    std::string err;
+    IM_CHECK(ui::SaveProject(*s_App, dir.string(), &err));
+    // A feature file the index does not list: what a hand edit or a sync
+    // leaves when it drops the index entry and keeps the file.
+    std::filesystem::path listed;
+    for (const auto& e : std::filesystem::directory_iterator(dir / "features"))
+      listed = e.path();
+    IM_CHECK(!listed.empty());
+    const std::filesystem::path orphan = dir / "features" / "999-box.json";
+    {
+      nlohmann::json j;
+      std::ifstream(listed) >> j;
+      j["id"] = 999;
+      std::ofstream(orphan) << j.dump(2) << "\n";
+    }
+    IM_CHECK(ui::OpenProject(*s_App, dir.string(), &err));
+    ui::MarkProjectOpened(*s_App, dir.string());
+    ctx->Yield(2);
+    IM_CHECK(s_App->openDrops.Lossy());
+
+    // Save asks; the file is untouched.
+    ui::SaveProjectAction(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(s_App->lossySaveBlocked);
+    IM_CHECK(std::filesystem::exists(orphan));
+    ctx->SetRef("//###lossy_save");
+    IM_CHECK(ctx->ItemExists("Save a copy...###lossy_copy"));
+    ctx->ItemClick("Cancel###lossy_cancel");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->lossySaveBlocked);
+    IM_CHECK(std::filesystem::exists(orphan));
+    IM_CHECK(s_App->openDrops.Lossy()); // still owed: nothing was saved
+
+    // Overwrite anyway saves over it: the file the open could not keep is
+    // gone from the project, and the drops with it.
+    ui::SaveProjectAction(*s_App);
+    ctx->Yield(3);
+    IM_CHECK(s_App->lossySaveBlocked);
+    ctx->SetRef("//###lossy_save");
+    ctx->ItemClick("Overwrite anyway###lossy_overwrite");
+    ctx->Yield(3);
+    IM_CHECK(!s_App->lossySaveBlocked);
+    IM_CHECK(!std::filesystem::exists(orphan));
+    IM_CHECK(s_App->openDrops.Empty());
+    // And a second save goes straight through.
+    ui::SaveProjectAction(*s_App);
+    ctx->Yield(2);
+    IM_CHECK(!s_App->lossySaveBlocked);
+    std::filesystem::remove_all(dir);
   };
 
   // The banner is the half that makes the refusal rarely the first news. It

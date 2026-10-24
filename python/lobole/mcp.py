@@ -1393,7 +1393,11 @@ def new_project() -> dict:
 
 
 @mcp.tool(description="Load a Loböle project (.json) from a path, "
-          "replacing the current document.")
+          "replacing the current document. A damaged file is refused, "
+          "naming it; `dropped` lists what the load kept going past (a file "
+          "the index does not list; a saved result that does not read, "
+          "`derived`), and while a drop that is not derived stands, "
+          "save_project to the same path is refused.")
 def open_project(path: str) -> dict:
     return _call("open_project", path=path)
 
@@ -1401,11 +1405,16 @@ def open_project(path: str) -> dict:
 @mcp.tool(description="Save the document. A .dsgn path (the default "
           "format) is a project DIRECTORY, git-backed: every save commits "
           "with `message`. A .json path is the single-file interchange "
-          "form.")
+          "form. A save back over a project whose open_project reported a "
+          "drop that is not derived is refused, naming it; "
+          "overwrite_lossy: true saves anyway and the reply's `warning` "
+          "says what was lost. A save to another path is never refused "
+          "for it.")
 def save_project(path: str, message: str = "save",
-                 force: bool | None = None) -> dict:
+                 force: bool | None = None,
+                 overwrite_lossy: bool | None = None) -> dict:
     return _call("save_project", path=path, message=message,
-                 **_given(force=force))
+                 **_given(force=force, overwrite_lossy=overwrite_lossy))
 
 
 @mcp.tool(description="Export to STEP, the exact B-Rep other CAD opens. "

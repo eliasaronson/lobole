@@ -78,12 +78,20 @@ bool NothingToSave(const AppState& state) {
 }
 
 // Load `path` (a project or a recovery sidecar) into the app.
-void OpenProjectFile(AppState& state, const std::string& path) {
+// A recovery sidecar opened as the document. False, with the loader's own
+// reason in `error`, when it does not load: the caller then recovers
+// nothing rather than marking the untouched project recovered.
+bool OpenProjectFile(AppState& state, const std::string& path,
+                     std::string* error) {
   if (auto loaded = DocumentIO::Load(path)) {
     ReplaceDocument(state, std::move(*loaded));
     FitCameraToDocument(state);
+    return true;
   } else {
     LOG_ERROR("Failed to open project: {}", loaded.error());
+    if (error)
+      *error = loaded.error();
+    return false;
   }
 }
 
@@ -195,8 +203,12 @@ void DrawRecoveryModal(AppState& state) {
         if (!RecoverProject(state, state.recoveryOffer, &error))
           LOG_ERROR("Could not recover the project: {}", error);
       } else {
-        OpenProjectFile(state, Autosaver::SidecarPath(state.recoveryOffer));
-        MarkProjectRecovered(state, state.recoveryOffer);
+        std::string error;
+        if (OpenProjectFile(state, Autosaver::SidecarPath(state.recoveryOffer),
+                            &error))
+          MarkProjectRecovered(state, state.recoveryOffer);
+        else
+          LOG_ERROR("Could not recover the autosave: {}", error);
       }
       state.recoveryOffer.clear();
       ImGui::CloseCurrentPopup();
@@ -232,7 +244,8 @@ bool RecoverFromReport(AppState& state, const crash::Report& report,
       *error = "the autosave of " + report.project + " is gone";
       return false;
     }
-    OpenProjectFile(state, from.string());
+    if (!OpenProjectFile(state, from.string(), error))
+      return false;
     MarkProjectRecovered(state, report.project);
     return true;
   }
@@ -245,7 +258,8 @@ bool RecoverFromReport(AppState& state, const crash::Report& report,
              copies.string();
     return false;
   }
-  OpenProjectFile(state, copy.string());
+  if (!OpenProjectFile(state, copy.string(), error))
+    return false;
   MarkProjectRecovered(state, "");
   return true;
 }
@@ -480,6 +494,67 @@ void DrawDiskChangeModal(AppState& state) {
   ImGui::EndPopup();
 }
 
+// A save back over a project whose open could not keep all of it
+// (AppState::openDrops) was refused: it would lose that content for good.
+// The safe answer is the default -- a copy elsewhere, leaving the original
+// as it is -- and overwriting is a choice made with the losses in front of
+// the user.
+void DrawLossySaveModal(AppState& state) {
+  if (!state.lossySaveBlocked)
+    return;
+  const char* title = "Save over an incomplete open?###lossy_save";
+  if (!ImGui::IsPopupOpen(title))
+    ImGui::OpenPopup(title);
+  if (!ImGui::BeginPopupModal(title, nullptr,
+                              ImGuiWindowFlags_AlwaysAutoResize))
+    return;
+  const std::string name =
+      std::filesystem::path(state.projectPath).filename().string();
+  ImGui::TextWrapped("%s opened without some of what is in it:", name.c_str());
+  ImGui::Spacing();
+  ImGui::Indent();
+  for (const readctx::Drop& d : state.openDrops.drops) {
+    if (d.derived)
+      continue;
+    ImGui::BulletText("%s%s%s: %s", d.path.c_str(),
+                      d.pointer.empty() ? "" : " ", d.pointer.c_str(),
+                      d.reason.c_str());
+  }
+  ImGui::Unindent();
+  ImGui::Spacing();
+  ImGui::TextWrapped("Saving over it would lose that for good. A copy "
+                     "elsewhere keeps the original as it is.");
+  ImGui::Spacing();
+  ImGui::SetItemDefaultFocus();
+  if (ImGui::Button("Save a copy...###lossy_copy")) {
+    state.lossySaveBlocked = false;
+    ImGui::CloseCurrentPopup();
+    SaveProjectDialog(state);
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Save to another project. The one on disk is kept.");
+  ImGui::SameLine();
+  if (ImGui::Button("Overwrite anyway###lossy_overwrite")) {
+    std::string error;
+    if (SaveProject(state, state.projectPath, &error, /*overwrite=*/false,
+                    /*overwriteLossy=*/true))
+      MarkProjectSaved(state, state.projectPath);
+    else
+      LOG_ERROR("Failed to save project: {}", error);
+    state.lossySaveBlocked = false;
+    ImGui::CloseCurrentPopup();
+  }
+  if (ImGui::IsItemHovered())
+    ImGui::SetTooltip("Replace the project on disk with what is open here. "
+                      "What it could not keep is listed in the log.");
+  ImGui::SameLine();
+  if (ImGui::Button("Cancel###lossy_cancel")) {
+    state.lossySaveBlocked = false;
+    ImGui::CloseCurrentPopup();
+  }
+  ImGui::EndPopup();
+}
+
 void DrawBrowserWindow(AppState& state) {
   if (!state.showFileBrowser)
     return;
@@ -578,6 +653,7 @@ void DrawFileBrowser(AppState& state) {
   DrawStartupNotices(state);
   DrawSafeModeBanner(state);
   DrawDiskChangeModal(state);
+  DrawLossySaveModal(state);
   DrawBrowserWindow(state);
 }
 

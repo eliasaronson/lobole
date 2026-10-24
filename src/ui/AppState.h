@@ -30,6 +30,7 @@
 #include "core/io/GitVault.h"
 #include "core/io/ProjectMerge.h"
 #include "core/io/ProjectStamp.h"
+#include "core/io/ReadContext.h"
 #include "core/io/Settings.h"
 #include "core/sketch/SketchInference.h"
 #include "core/sketch/SketchSolver.h"
@@ -2025,6 +2026,16 @@ struct AppState {
   // load. The RPC's open_project reports the same two.
   int openRebuiltParts = 0;
   std::string openRebuildReason;
+  // What the last open kept going past
+  // (docs/versioning/README.md#a-lossy-load): a file its index did not list, a
+  // saved result that did not read -- and the project it came from. While any
+  // drop is LOSSY (not derived data), a save back over `openDropsPath` is
+  // refused unless the caller says to overwrite anyway; `lossySaveBlocked` then
+  // owes the user the choice (DrawLossySaveModal). A save to any other path is
+  // never blocked.
+  readctx::LoadReport openDrops;
+  std::string openDropsPath;
+  bool lossySaveBlocked = false;
   // What the last one said, kept until the next one starts, so the panel has
   // something to show instead of the message flashing past.
   std::string syncMessage;

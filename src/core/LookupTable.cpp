@@ -115,6 +115,13 @@ std::optional<Table> FromJson(const nlohmann::json& j, std::string* why) {
                 "[...]}]}");
   Table t;
   t.name = j.at("name").get<std::string>();
+  // A key no table has is refused, naming the ones it has: read past, it
+  // was dropped by the next save.
+  for (auto it = j.begin(); it != j.end(); ++it)
+    if (it.key() != "name" && it.key() != "comment" && it.key() != "columns" &&
+        it.key() != "rows")
+      return fail("table '" + t.name + "': unknown key '" + it.key() +
+                  "' (accepted: columns, comment, name, rows)");
   t.comment = j.value("comment", std::string{});
   if (!j.contains("columns") || !j.at("columns").is_array())
     return fail("table '" + t.name + "' needs `columns`, a list of names");
@@ -126,7 +133,7 @@ std::optional<Table> FromJson(const nlohmann::json& j, std::string* why) {
   }
   for (const auto& rj : j.value("rows", nlohmann::json::array())) {
     if (!rj.is_object() || !rj.contains("key") || !rj.contains("values") ||
-        !rj.at("values").is_array())
+        !rj.at("values").is_array() || rj.size() != 2)
       return fail("table '" + t.name +
                   "': a row is {key, values: [one per column]}");
     std::string keyWhy;

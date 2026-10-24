@@ -218,6 +218,29 @@ fem::LoadRegion LoadRegionFromJson(const json& r, const std::string& who) {
 }
 
 fem::Study StudyFromJson(const json& j) {
+  readctx::RequireTag(j, "Study", "study");
+  readctx::RefuseUnknownKeys(j,
+                             {"type",
+                              "id",
+                              "name",
+                              "analysis",
+                              "num_modes",
+                              "gravity",
+                              "volume_fraction",
+                              "volume_fraction_expr",
+                              "filter_radius",
+                              "filter_radius_expr",
+                              "max_iterations",
+                              "keep_faces",
+                              "keep_outs",
+                              "load_cases",
+                              "shape_from",
+                              "mesh_size",
+                              "mesh_size_expr",
+                              "participants",
+                              "refinements",
+                              "loads"},
+                             "study");
   fem::Study s;
   s.id = j.at("id").get<uint64_t>();
   s.name = j.value("name", std::string{});
@@ -240,8 +263,11 @@ fem::Study StudyFromJson(const json& j) {
   s.filterRadius = j.value("filter_radius", 0.0);
   s.filterRadiusExpr = j.value("filter_radius_expr", std::string{});
   s.maxIterations = j.value("max_iterations", 60);
-  for (const json& fj : j.value("keep_faces", json::array()))
+  for (const json& fj : j.value("keep_faces", json::array())) {
+    readctx::RefuseUnknownKeys(fj, {"feature_id", "element"},
+                               "study keep face");
     s.keepFaces.push_back(ElementRefFromJson(fj));
+  }
   const auto vec3 = [](const json& v, const char* what) {
     if (!v.is_array() || v.size() != 3)
       throw std::runtime_error(std::string("keep-out ") + what +
@@ -250,6 +276,8 @@ fem::Study StudyFromJson(const json& j) {
                       v.at(2).get<double>());
   };
   for (const json& kj : j.value("keep_outs", json::array())) {
+    readctx::RefuseUnknownKeys(kj, {"body", "box_min", "box_max"},
+                               "study keep-out");
     fem::KeepOut k;
     if (kj.contains("body")) {
       k.body = kj.at("body").get<std::string>();
@@ -266,6 +294,8 @@ fem::Study StudyFromJson(const json& j) {
     s.keepOuts.push_back(std::move(k));
   }
   for (const json& cj : j.value("load_cases", json::array())) {
+    readctx::RefuseUnknownKeys(cj, {"name", "weight", "weight_expr"},
+                               "study load case");
     fem::LoadCase c;
     c.name = cj.at("name").get<std::string>();
     c.weight = cj.value("weight", 1.0);
@@ -274,6 +304,8 @@ fem::Study StudyFromJson(const json& j) {
   }
   if (j.contains("shape_from")) {
     const json& sj = j.at("shape_from");
+    readctx::RefuseUnknownKeys(sj, {"study", "whole", "threshold"},
+                               "study shape_from");
     s.shapeFrom.study = sj.at("study").get<uint64_t>();
     s.shapeFrom.whole = sj.value("whole", false);
     s.shapeFrom.threshold = sj.value("threshold", 0.0);
@@ -285,6 +317,9 @@ fem::Study StudyFromJson(const json& j) {
   s.meshSizeExpr = j.value("mesh_size_expr", std::string{});
 
   for (const json& pj : j.value("participants", json::array())) {
+    readctx::RefuseUnknownKeys(
+        pj, {"occurrence", "role", "mesh_size", "mesh_size_expr"},
+        "study participant");
     fem::Participant pt;
     pt.occurrenceId = pj.at("occurrence").get<uint64_t>();
     // A role that does not parse is refused, not defaulted to rigid: a
@@ -299,7 +334,11 @@ fem::Study StudyFromJson(const json& j) {
   }
 
   for (const json& rj : j.value("refinements", json::array())) {
+    readctx::RefuseUnknownKeys(rj, {"face", "occurrence", "size", "size_expr"},
+                               "study refinement");
     fem::Refinement r;
+    readctx::RefuseUnknownKeys(rj.at("face"), {"feature_id", "element"},
+                               "study refinement face");
     r.face = ElementRefFromJson(rj.at("face"));
     r.occurrenceId = rj.value("occurrence", uint64_t{0});
     r.size = rj.value("size", 0.0);
@@ -308,6 +347,12 @@ fem::Study StudyFromJson(const json& j) {
   }
 
   for (const json& lj : j.value("loads", json::array())) {
+    readctx::RefuseUnknownKeys(lj,
+                               {"id", "type", "magnitude", "magnitude_expr",
+                                "contact_with", "face", "occurrence",
+                                "direction", "axis_origin", "axis_dir", "point",
+                                "case", "region"},
+                               "study load");
     fem::Load l;
     l.id = lj.at("id").get<uint64_t>();
     const std::string loadStr = lj.value("type", std::string{"fixed"});
@@ -317,9 +362,11 @@ fem::Study StudyFromJson(const json& j) {
                                ")");
     l.contactWith = lj.value("contact_with", uint64_t{0});
     l.occurrenceId = lj.value("occurrence", uint64_t{0});
-    if (l.contactWith == 0)
+    if (l.contactWith == 0) {
+      readctx::RefuseUnknownKeys(lj.at("face"), {"feature_id", "element"},
+                                 "study load face");
       l.face = ElementRefFromJson(lj.at("face"));
-    else if (l.type != fem::LoadType::Fixed)
+    } else if (l.type != fem::LoadType::Fixed)
       throw std::runtime_error("load " + std::to_string(l.id) +
                                ": only a fixed support anchors on a contact");
     l.magnitude = lj.value("magnitude", 0.0);
@@ -335,6 +382,19 @@ fem::Study StudyFromJson(const json& j) {
     };
     if (lj.contains("direction"))
       l.direction = point("direction");
+    // What a load type does not use is not written back: one stated on
+    // another type would be dropped.
+    if (l.type != fem::LoadType::Torque &&
+        (lj.contains("axis_origin") || lj.contains("axis_dir")))
+      throw std::runtime_error("load " + std::to_string(l.id) +
+                               ": axis_origin and axis_dir are a torque's");
+    if (l.type != fem::LoadType::Force && l.type != fem::LoadType::Remote &&
+        lj.contains("direction"))
+      throw std::runtime_error("load " + std::to_string(l.id) +
+                               ": direction is a force's or a remote load's");
+    if (l.type != fem::LoadType::Remote && lj.contains("point"))
+      throw std::runtime_error("load " + std::to_string(l.id) +
+                               ": point is a remote load's");
     if (l.type == fem::LoadType::Torque &&
         (lj.contains("axis_origin") || lj.contains("axis_dir"))) {
       if (!lj.contains("axis_origin") || !lj.contains("axis_dir"))

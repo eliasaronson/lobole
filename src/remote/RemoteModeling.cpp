@@ -573,6 +573,15 @@ namespace {
 // type's params. This makes the two match.
 std::unique_ptr<Feature> FeatureFromJsonNamed(const nlohmann::json& j) {
   try {
+    // A get_state entry sent back carries what get_state stamps AROUND the
+    // dialect (index, error, ...): not the feature's, and FeatureFromJson
+    // refuses a key that is not, so they are dropped here first.
+    if (j.is_object()) {
+      nlohmann::json spec = j;
+      for (const char* k : DocumentIO::kFeatureEnvelopeKeys)
+        spec.erase(k);
+      return DocumentIO::FeatureFromJson(spec);
+    }
     return DocumentIO::FeatureFromJson(j);
   } catch (const nlohmann::json::out_of_range& e) {
     const std::string type = j.value("type", "");
@@ -1364,6 +1373,9 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     }
     json before = DocumentIO::FeatureToJson(*feature);
     json after = p.at("feature");
+    // Stored, and read back by the command: without get_state's envelope.
+    for (const char* k : DocumentIO::kFeatureEnvelopeKeys)
+      after.erase(k);
     // A sketch whose dimension VALUE changed is re-solved here, so the
     // geometry follows the number. A sketch with literal dimensions is not
     // re-solved at regeneration (only expression-driven ones are), so a

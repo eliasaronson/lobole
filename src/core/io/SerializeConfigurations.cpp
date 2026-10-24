@@ -56,12 +56,22 @@ json ConfigurationToJson(const Configuration& c) {
 }
 
 Configuration ConfigurationFromJson(const json& j) {
+  readctx::RequireTag(j, "Configuration", "configuration");
+  readctx::RefuseUnknownKeys(j,
+                             {"type", "id", "name", "parameter_overrides",
+                              "suppressed_features", "unsuppressed_features",
+                              "suppressed_mates", "suppressed_relations",
+                              "mate_overrides"},
+                             "configuration");
   Configuration c;
   c.id = j.at("id").get<uint64_t>();
   c.name = j.value("name", std::string{});
-  for (const json& oj : j.value("parameter_overrides", json::array()))
+  for (const json& oj : j.value("parameter_overrides", json::array())) {
+    readctx::RefuseUnknownKeys(oj, {"name", "expression"},
+                               "configuration parameter override");
     c.parameterOverrides.emplace_back(oj.value("name", std::string{}),
                                       oj.value("expression", std::string{}));
+  }
   c.suppressedFeatures =
       j.value("suppressed_features", std::vector<uint64_t>{});
   c.unsuppressedFeatures =
@@ -70,6 +80,8 @@ Configuration ConfigurationFromJson(const json& j) {
   c.suppressedRelations =
       j.value("suppressed_relations", std::vector<uint64_t>{});
   for (const json& oj : j.value("mate_overrides", json::array())) {
+    readctx::RefuseUnknownKeys(oj, {"mate", "rotation", "offset"},
+                               "configuration mate override");
     MateOverride o;
     o.mate = oj.at("mate").get<uint64_t>();
     if (oj.contains("rotation"))

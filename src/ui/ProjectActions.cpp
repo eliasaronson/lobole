@@ -13,6 +13,7 @@
 #include "core/Units.h"
 #include "core/io/GeometryCache.h"
 #include "core/io/ProjectPaths.h"
+#include "core/io/ReadContext.h"
 #include "ui/AppActionsInternal.h" // SharedBody / PartRenderCacheStore
 #include "ui/CamPanel.h"           // RefreshCamToolpaths (job undo)
 #include "ui/CamTool.h"            // RunCamVerification (job undo)
@@ -155,18 +156,17 @@ ReadRequirements(const std::filesystem::path& dir) {
       files.push_back(entry.path());
   std::set<uint64_t> ids;
   for (const fs::path& f : files) {
-    std::ifstream in(f);
-    nlohmann::json j;
-    try {
-      in >> j;
-    } catch (const std::exception& e) {
-      throw std::runtime_error("requirements/" + f.filename().string() + ": " +
-                               e.what());
-    }
-    out.push_back(req::FromJson(j));
-    if (!ids.insert(out.back().id).second)
-      throw std::runtime_error("two requirement files share id " +
-                               std::to_string(out.back().id));
+    readctx::InFile("requirements/" + f.filename().string(), [&] {
+      std::ifstream in(f, std::ios::binary);
+      if (!in)
+        throw std::runtime_error("cannot be read");
+      out.push_back(req::FromJson(
+          readctx::ParseStrict(std::string((std::istreambuf_iterator<char>(in)),
+                                           std::istreambuf_iterator<char>()))));
+      if (!ids.insert(out.back().id).second)
+        throw std::runtime_error("another requirement file has id " +
+                                 std::to_string(out.back().id));
+    });
   }
   std::sort(out.begin(), out.end(),
             [](const req::Requirement& a, const req::Requirement& b) {
@@ -274,9 +274,59 @@ void AdoptStagedImports(AppState& state, const std::filesystem::path& dir) {
 }
 } // namespace
 
+namespace {
+bool SamePath(const std::string& a, const std::string& b) {
+  if (a.empty() || b.empty())
+    return false;
+  std::error_code ec;
+  return std::filesystem::weakly_canonical(a, ec) ==
+         std::filesystem::weakly_canonical(b, ec);
+}
+} // namespace
+
+static bool SaveProjectUnguarded(AppState& state, const std::string& path,
+                                 std::string* error,
+                                 bool overwriteExternalChanges,
+                                 bool overwriteLossy);
+
+bool SaveWouldLoseDrops(const AppState& state, const std::string& path) {
+  return state.openDrops.Lossy() && SamePath(path, state.openDropsPath);
+}
+
 bool SaveProject(AppState& state, const std::string& path, std::string* error,
-                 bool overwriteExternalChanges) {
+                 bool overwriteExternalChanges, bool overwriteLossy) {
+  const bool saved = SaveProjectUnguarded(
+      state, path, error, overwriteExternalChanges, overwriteLossy);
+  // Written over the project the drops came from: they are gone from it
+  // now, and the log is where they are kept.
+  if (saved && SamePath(path, state.openDropsPath) &&
+      !state.openDrops.Empty()) {
+    LOG_WARN("Saved {} over what its open could not keep:\n{}", path,
+             state.openDrops.Summary());
+    state.openDrops = {};
+    state.openDropsPath.clear();
+  }
+  return saved;
+}
+
+static bool SaveProjectUnguarded(AppState& state, const std::string& path,
+                                 std::string* error,
+                                 bool overwriteExternalChanges,
+                                 bool overwriteLossy) {
   namespace fs = std::filesystem;
+  // The open kept going past content it could not keep (a file its index
+  // did not list, ...): saving back over that project would lose it for
+  // good, so the save is refused, naming each, unless the caller says to
+  // overwrite anyway. A Save As elsewhere is not this path, and goes on.
+  if (!overwriteLossy && SaveWouldLoseDrops(state, path)) {
+    state.lossySaveBlocked = true;
+    if (error)
+      *error = "this project opened without some of what is in it -- " +
+               state.openDrops.Summary(/*lossyOnly=*/true) +
+               " -- and saving over it would lose that for good: save a "
+               "copy elsewhere, or overwrite anyway";
+    return false;
+  }
   // F8: the project moved under us. Writing now would replace whatever landed
   // there — a `git checkout` in the terminal panel, another editor, a second
   // instance — with what happens to be in memory, silently. Only guards a
@@ -498,18 +548,30 @@ bool WasRebuilt(const Document& doc) {
   return doc.FeatureCount() > 0 && stats.cached == 0 && stats.executed > 0;
 }
 
-// One document of a project, read into a slot. Pure: no AppState.
+// One document of a project, read into a slot. Pure: no AppState. Every
+// refusal and every drop names its file relative to the project
+// ("parts/stand/features/7-fillet.json"): the document's directory is this
+// thread's context while it loads.
 std::expected<PartSlot, std::string>
 ReadSlot(const nlohmann::json& entry, size_t i,
          const std::filesystem::path& root, std::string* rebuiltReason,
          const DocumentIO::ProjectScope& scope) {
   const std::string name = entry.at("name").get<std::string>();
-  auto inside =
-      projectpaths::InsideProject(root, entry.at("dir").get<std::string>());
+  const std::string rel = entry.at("dir").get<std::string>();
+  auto inside = projectpaths::InsideProject(root, rel);
   if (!inside)
-    return std::unexpected("document '" + name + "': " + inside.error());
+    return std::unexpected(readctx::Named(
+        "document '" + name + "': " + inside.error(), "project.json"));
   const std::string dir = inside->string();
   const std::string type = entry.value("type", std::string("part"));
+  // Named here, at the entry that names it: a load of a directory that is
+  // not there would name only the file it then could not find in it.
+  std::error_code ec;
+  if (!std::filesystem::is_directory(*inside, ec))
+    return std::unexpected(readctx::Named("document '" + name + "': its dir '" +
+                                              rel + "' is not there",
+                                          "project.json"));
+  readctx::FileContext context(rel.ends_with("/") ? rel : rel + "/");
   PartSlot slot;
   slot.id = entry.value("id", static_cast<uint64_t>(i + 1)); // v1: 1..n
   slot.name = name;
@@ -532,7 +594,7 @@ ReadSlot(const nlohmann::json& entry, size_t i,
     if (!r)
       return std::unexpected(r.error());
     slot.job = std::move(*r);
-  } else {
+  } else if (type == "part") {
     slot.kind = DocKind::Part;
     const auto onDisk = DocumentIO::InspectGeometry(dir);
     auto r = DocumentIO::Load(dir, scope);
@@ -547,8 +609,122 @@ ReadSlot(const nlohmann::json& entry, size_t i,
     (*r)->SetProjectParameters(nullptr);
     slot.doc = std::move(*r);
     slot.commands = std::make_unique<CommandStack>();
+  } else {
+    // CheckProjectIndex refused it already; never read as a part.
+    return std::unexpected("document '" + name + "' has type '" + type + "'");
   }
   return slot;
+}
+
+// Each document's id once, a whole number above 0: two documents with one
+// id are one document to every reference that names it.
+void RefuseDocumentIds(const nlohmann::json& docs) {
+  std::set<uint64_t> seen;
+  for (const auto& d : docs) {
+    if (!d.is_object() || !d.contains("id"))
+      continue;
+    const nlohmann::json& id = d.at("id");
+    if (!id.is_number_unsigned() || id.get<uint64_t>() == 0 ||
+        !seen.insert(id.get<uint64_t>()).second)
+      throw std::runtime_error("document id " + id.dump() +
+                               (id.is_number_unsigned() && id.get<uint64_t>()
+                                    ? " is listed twice"
+                                    : " is not a whole number above 0"));
+  }
+}
+
+// project.json, checked whole BEFORE any document loads, so a refusal names
+// the key and nothing half-loads: every key known (the envelope is v2, and
+// a key this build does not know is refused like a document's), every
+// document entry, section, parameter and folder of the shape it is written
+// in.
+void CheckProjectIndex(const nlohmann::json& index) {
+  readctx::RefuseUnknownKeys(index,
+                             {"format", "version", "active", "catalogs",
+                              "tables", "templates", "parameters", "folders",
+                              "sections", "documents", "parts",
+                              "requirements_next_id"},
+                             "project");
+  if (index.contains("format") &&
+      index.at("format") != nlohmann::json("designer-project"))
+    throw std::runtime_error("not a Lobole project: its `format` is " +
+                             index.at("format").dump());
+  const nlohmann::json version = index.value("version", nlohmann::json(1));
+  if (!version.is_number_integer() || version.get<int64_t>() < 1)
+    throw std::runtime_error("project version " + version.dump() +
+                             " is not a version (1 or 2)");
+  if (version.get<int64_t>() > 2)
+    throw std::runtime_error("project version " + version.dump() +
+                             " is newer than this build reads (2)");
+  if (index.contains("active") && !(index.at("active").is_number_unsigned()))
+    throw std::runtime_error("`active` is " + index.at("active").dump() +
+                             ", not the index of a document");
+  const auto list = [&](const char* key) {
+    const nlohmann::json l = index.value(key, nlohmann::json::array());
+    if (!l.is_array())
+      throw std::runtime_error(std::string("`") + key + "` is a list, not " +
+                               l.type_name());
+    return l;
+  };
+  RefuseDocumentIds(list("documents"));
+  for (const auto& d : list("documents")) {
+    readctx::RefuseUnknownKeys(d, {"id", "name", "dir", "type", "folder"},
+                               "document entry");
+    // A v2 entry always says what it is: one without a type was a part only
+    // in v1, whose `parts` list had none.
+    if (!d.contains("type"))
+      throw std::runtime_error("document entry " +
+                               d.value("name", std::string("?")) +
+                               " has no type");
+    const std::string name = d.at("name").get<std::string>();
+    d.at("dir").get<std::string>();
+    // Refused, never read as a part: an entry a newer build wrote as some
+    // other kind of document would load as a part that is not one.
+    const std::string type = d.value("type", std::string("part"));
+    if (type != "part" && type != "assembly" && type != "drawing" &&
+        type != "job")
+      throw std::runtime_error("document '" + name + "' has type '" + type +
+                               "' (expected one of: part, assembly, drawing, "
+                               "job)");
+  }
+  for (const auto& p : list("parts")) // v1
+    readctx::RefuseUnknownKeys(p, {"name", "dir"}, "part entry");
+  std::set<std::string> names;
+  for (const auto& p : list("parameters")) {
+    readctx::RefuseUnknownKeys(p, {"name", "expression", "comment"},
+                               "project parameter");
+    if (!names.insert(p.at("name").get<std::string>()).second)
+      throw std::runtime_error("parameters: '" +
+                               p.at("name").get<std::string>() +
+                               "' is defined twice");
+  }
+  for (const auto& f : list("folders"))
+    if (!f.is_string() || f.get<std::string>().empty())
+      throw std::runtime_error("`folders` holds a name that is not one: " +
+                               f.dump());
+  for (const auto& s : list("sections")) {
+    readctx::RefuseUnknownKeys(s,
+                               {"base_plane", "offset", "reverse", "visible",
+                                "plane_id", "face", "tilt_u", "tilt_v"},
+                               "section");
+    if (s.contains("face"))
+      readctx::RefuseUnknownKeys(s.at("face"), {"feature_id", "element"},
+                                 "section face");
+    // Read the way the adopt reads them, so a wrong type is refused here.
+    (void)s.value("base_plane", 0);
+    (void)s.value("plane_id", 0ull);
+    (void)s.value("offset", 0.0f);
+    (void)s.value("tilt_u", 0.0f);
+    (void)s.value("tilt_v", 0.0f);
+    (void)s.value("reverse", false);
+    (void)s.value("visible", true);
+  }
+  (void)index.value("active", 0);
+  (void)index.value("requirements_next_id", uint64_t{1});
+  // What the adopt reads for keeps, read once here so it refuses here.
+  (void)catalog::Deserialize(index.value("catalogs", nlohmann::json::array()));
+  (void)lookuptable::ListFromJson(index.value("tables", nlohmann::json()));
+  (void)tmpl::LibraryFromJson(index.value("templates", nlohmann::json()));
 }
 
 } // namespace
@@ -559,10 +735,20 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
   LoadedProject out;
   out.path = path;
   const fs::path projFile = fs::path(path) / "project.json";
+  std::error_code existsEc;
+  if (!fs::exists(projFile) && fs::is_directory(path, existsEc) &&
+      !fs::exists(fs::path(path) / "index.json", existsEc))
+    // Neither form: a container whose project.json went (its documents'
+    // directories are still there), or no project at all.
+    return std::unexpected(readctx::Named(
+        "missing, and so is index.json: not a Lobole project "
+        "(a project of several documents keeps its list in project.json)",
+        "project.json"));
   if (!fs::exists(projFile)) {
     // Not a multi-document project: a single part.
     if (progress)
       progress->total.store(1);
+    readctx::CollectDrops drops;
     const auto onDisk = DocumentIO::InspectGeometry(path);
     auto loaded = DocumentIO::Load(path);
     if (!loaded)
@@ -572,13 +758,23 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
       out.rebuildReason = RebuildReason(onDisk);
     }
     out.single = std::move(*loaded);
+    out.drops = drops.Take();
     if (progress)
       progress->done.store(1);
     return out;
   }
   try {
     out.container = true;
-    std::ifstream(projFile) >> out.index;
+    readctx::InFile("project.json", [&] {
+      std::ifstream in(projFile, std::ios::binary);
+      if (!in)
+        throw std::runtime_error("cannot be read");
+      out.index =
+          readctx::ParseStrict(std::string((std::istreambuf_iterator<char>(in)),
+                                           std::istreambuf_iterator<char>()));
+      CheckProjectIndex(out.index);
+    });
+    (void)ReadRequirements(fs::path(path)); // refused here, kept by the adopt
     // v2 has a typed `documents` list; v1 had a flat `parts` list (all parts,
     // no ids/types). Normalize v1 into the same shape with defaulted reads.
     nlohmann::json docs;
@@ -586,7 +782,7 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
       docs = out.index.at("documents");
     } else {
       docs = nlohmann::json::array();
-      for (const auto& p : out.index.at("parts"))
+      for (const auto& p : out.index.value("parts", nlohmann::json::array()))
         docs.push_back(
             {{"name", p.at("name")}, {"dir", p.at("dir")}, {"type", "part"}});
     }
@@ -600,13 +796,15 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
     // king_h unknown, every feature on it failed, and each open rebuilt it
     // from scratch before the adopt put it right.
     std::vector<Parameter> projectParams;
-    for (const auto& pj :
-         out.index.value("parameters", nlohmann::json::array()))
-      projectParams.push_back({pj.at("name").get<std::string>(),
-                               pj.at("expression").get<std::string>(),
-                               pj.value("comment", std::string{}),
-                               0.0,
-                               {}});
+    readctx::InFile("project.json", [&] {
+      for (const auto& pj :
+           out.index.value("parameters", nlohmann::json::array()))
+        projectParams.push_back({pj.at("name").get<std::string>(),
+                                 pj.at("expression").get<std::string>(),
+                                 pj.value("comment", std::string{}),
+                                 0.0,
+                                 {}});
+    });
     SymbolTable projectSymbols;
     {
       // The tables first, for a variable that reads one. A malformed table
@@ -631,6 +829,7 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
     for (size_t i = 0; i < n; i++)
       slots.emplace_back(std::unexpected(std::string("cancelled")));
     std::vector<std::string> reasons(n);
+    std::vector<readctx::LoadReport> drops(n);
     parallel::For(n, [&](size_t i) {
       if (progress && progress->cancel && progress->cancel->load())
         return;
@@ -647,11 +846,14 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
         std::lock_guard lock(progress->mutex);
         progress->building.push_back(name);
       }
+      // This thread's own collector: a pool thread sees no other.
+      readctx::CollectDrops collect;
       try {
         slots[i] = ReadSlot(docs[i], i, fs::path(path), &reasons[i], scope);
       } catch (const std::exception& e) {
         slots[i] = std::unexpected(std::string(e.what()));
       }
+      drops[i] = collect.Take();
       if (progress) {
         {
           std::lock_guard lock(progress->mutex);
@@ -669,6 +871,7 @@ std::expected<LoadedProject, std::string> ReadProject(const std::string& path,
       if (!slots[i])
         return std::unexpected(slots[i].error());
       out.parts.push_back(std::move(*slots[i]));
+      out.drops.Append(drops[i]);
       if (!reasons[i].empty()) {
         out.rebuiltParts++;
         distinctReasons.insert(reasons[i]);
@@ -687,6 +890,11 @@ bool AdoptProject(AppState& state, LoadedProject&& loaded, std::string* error) {
   const std::string path = loaded.path;
   state.openRebuiltParts = loaded.rebuiltParts;
   state.openRebuildReason = loaded.rebuildReason;
+  // What the read kept going past, and where it came from: a save back over
+  // it is refused while any of it is lossy (SaveProject).
+  state.openDrops = loaded.drops;
+  state.openDropsPath = path;
+  state.lossySaveBlocked = false;
   // The previous project's cuts are not this one's. Cleared for BOTH branches
   // here; the container branch refills them from the index below.
   ClearSections(state);
@@ -1038,6 +1246,12 @@ void MarkProjectSaved(AppState& state, const std::string& path,
 
 void MarkProjectOpened(AppState& state, const std::string& path) {
   LOG_INFO("open: {}", path.empty() ? std::string("(new)") : path);
+  // A new project, or one opened without AdoptProject: the last open's
+  // drops were another project's.
+  if (path.empty() || !SamePath(path, state.openDropsPath)) {
+    state.openDrops = {};
+    state.openDropsPath.clear();
+  }
   state.projectPath = path;
   state.projectGeneration++;      // the autosaver's tracking no longer applies
   RecentProjects::Remember(path); // ignores "" (the unsaved slot)
@@ -1155,7 +1369,9 @@ GeometryChange CompareVersionGeometry(AppState& state,
   auto older = DocumentIO::Load(scratch.string());
   fs::remove_all(scratch, ec);
   if (!older) {
-    out.summary = "that version of this part does not load";
+    // The loader's own reason, naming the file in that version that it
+    // refused: "does not load" alone sent the user looking.
+    out.summary = "that version of this part does not load: " + older.error();
     return out;
   }
 
@@ -1242,8 +1458,19 @@ bool RecoverProject(AppState& state, const std::string& path,
     return false;
   MarkProjectOpened(state, path);
 
+  // Every sidecar is READ before any is laid over the project, so the
+  // recovery is all-or-nothing as it says, and one that does not load is
+  // refused with the loader's own reason, naming the sidecar -- it used to
+  // be skipped, and the rest recovered as if it had not been there.
   const fs::path dir(Autosaver::SidecarDir(path));
-  int recovered = 0;
+  struct Sidecar {
+    size_t slot;
+    std::unique_ptr<Document> part;
+    std::unique_ptr<AssemblyDocument> assembly;
+    std::unique_ptr<DrawingDocument> drawing;
+    std::unique_ptr<cam::JobDocument> job;
+  };
+  std::vector<Sidecar> read;
   for (const std::string& rel : Autosaver::RecoverableDocuments(path)) {
     // "parts/Stand" -> the slot of that kind and name.
     const size_t slash = rel.find('/');
@@ -1252,44 +1479,61 @@ bool RecoverProject(AppState& state, const std::string& path,
     const std::string folder = rel.substr(0, slash);
     const std::string name = rel.substr(slash + 1);
     const fs::path file = dir / (rel + ".json");
-
+    // The loader names the file it read; this names where it is.
+    readctx::FileContext where(dir.filename().string() + "/" + folder + "/");
     for (size_t i = 0; i < state.parts.size(); i++) {
-      PartSlot& slot = state.parts[i];
+      const PartSlot& slot = state.parts[i];
       if (slot.name != name)
         continue;
-      const bool active = static_cast<int>(i) == state.activePart;
+      Sidecar sc{i, {}, {}, {}, {}};
+      std::string failed;
       if (folder == "parts" && slot.kind == DocKind::Part) {
         auto loaded = DocumentIO::Load(file.string());
-        if (!loaded)
-          continue;
-        if (active)
-          ReplaceDocument(state, std::move(*loaded));
-        else
-          slot.doc = std::move(*loaded);
+        loaded ? void(sc.part = std::move(*loaded))
+               : void(failed = loaded.error());
       } else if (folder == "assemblies" && slot.kind == DocKind::Assembly) {
         auto loaded = DocumentIO::LoadAssembly(file.string());
-        if (!loaded)
-          continue;
-        (active ? state.assembly : slot.assembly) = std::move(*loaded);
+        loaded ? void(sc.assembly = std::move(*loaded))
+               : void(failed = loaded.error());
       } else if (folder == "drawings" && slot.kind == DocKind::Drawing) {
         auto loaded = DocumentIO::LoadDrawing(file.string());
-        if (!loaded)
-          continue;
-        (active ? state.drawing : slot.drawing) = std::move(*loaded);
+        loaded ? void(sc.drawing = std::move(*loaded))
+               : void(failed = loaded.error());
       } else if (folder == "jobs" && slot.kind == DocKind::Job) {
         auto loaded = DocumentIO::LoadJob(file.string());
-        if (!loaded)
-          continue;
-        (active ? state.job : slot.job) = std::move(*loaded);
+        loaded ? void(sc.job = std::move(*loaded))
+               : void(failed = loaded.error());
       } else {
         continue;
       }
-      recovered++;
+      if (!failed.empty()) {
+        if (error)
+          *error = "the autosave of " + rel + " does not load: " + failed;
+        LOG_ERROR("Could not recover {}: {}", path, failed);
+        return false;
+      }
+      read.push_back(std::move(sc));
       break;
     }
   }
-  if (recovered > 0) {
-    LOG_INFO("Recovered {} autosaved document(s) into {}", recovered, path);
+  for (Sidecar& sc : read) {
+    PartSlot& slot = state.parts[sc.slot];
+    const bool active = static_cast<int>(sc.slot) == state.activePart;
+    if (sc.part) {
+      if (active)
+        ReplaceDocument(state, std::move(sc.part));
+      else
+        slot.doc = std::move(sc.part);
+    } else if (sc.assembly) {
+      (active ? state.assembly : slot.assembly) = std::move(sc.assembly);
+    } else if (sc.drawing) {
+      (active ? state.drawing : slot.drawing) = std::move(sc.drawing);
+    } else if (sc.job) {
+      (active ? state.job : slot.job) = std::move(sc.job);
+    }
+  }
+  if (!read.empty()) {
+    LOG_INFO("Recovered {} autosaved document(s) into {}", read.size(), path);
     // Unsaved by definition: the sidecars were never a save.
     state.projectMetaDirty = true;
   }

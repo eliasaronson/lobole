@@ -436,6 +436,7 @@ set(core_sources
     src/core/io/Settings.cpp
     src/core/io/WindowGeometry.cpp
     src/core/io/Keymap.cpp
+    src/core/io/ReadContext.cpp
     src/core/io/Serialization.cpp
     src/core/io/SerializeFeatures.cpp
     src/core/io/SerializeStudies.cpp

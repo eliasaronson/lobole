@@ -91,6 +91,14 @@ json OccurrenceToJson(const Occurrence& o) {
 }
 
 Occurrence OccurrenceFromJson(const json& j) {
+  readctx::RequireTag(j, "Occurrence", "occurrence");
+  readctx::RefuseUnknownKeys(j,
+                             {"type", "id", "name", "part_id", "ref_kind",
+                              "part_version", "transform", "visible", "fixed",
+                              "attached_to", "attach_offset", "attach_rotation",
+                              "attach_seat", "configuration_id", "material",
+                              "flexible", "inner_poses", "inner_mate_dofs"},
+                             "occurrence");
   Occurrence o;
   o.id = j.at("id").get<uint64_t>();
   o.name = j.value("name", std::string{});
@@ -114,6 +122,8 @@ Occurrence OccurrenceFromJson(const json& j) {
   // key 'orientation' not found" (found by the scale round, writing exactly
   // that call).
   const json& t = j.at("transform");
+  readctx::RefuseUnknownKeys(t, {"position", "orientation"},
+                             "occurrence transform");
   if (t.contains("position"))
     o.position = Vec3FromJson(t.at("position"));
   if (t.contains("orientation"))
@@ -122,17 +132,19 @@ Occurrence OccurrenceFromJson(const json& j) {
   o.fixed = j.value("fixed", false);
   o.attachedTo = j.value("attached_to", uint64_t{0}); // v72
   if (const auto it = j.find("attach_offset");
-      it != j.end() && it->is_array() && it->size() == 3) {
+      HasArrayOf(j, "attach_offset", 3)) {
     o.attachOffset = glm::dvec3((*it)[0].get<double>(), (*it)[1].get<double>(),
                                 (*it)[2].get<double>());
   }
   if (const auto it = j.find("attach_rotation");
-      it != j.end() && it->is_array() && it->size() == 4) {
+      HasArrayOf(j, "attach_rotation", 4)) {
     o.attachRotation =
         glm::dquat((*it)[3].get<double>(), (*it)[0].get<double>(),
                    (*it)[1].get<double>(), (*it)[2].get<double>());
   }
   if (const auto it = j.find("attach_seat"); it != j.end()) { // v157
+    readctx::RefuseUnknownKeys(*it, {"face", "axis", "inner_path"},
+                               "occurrence attach_seat");
     // Both faces or nothing: a seat named by its face alone has no axis, and
     // reading it as "no seat" would quietly put the offset in the PART's
     // frame — the rider would load somewhere else and look placed.
@@ -144,6 +156,8 @@ Occurrence OccurrenceFromJson(const json& j) {
         throw std::runtime_error(
             "occurrence '" + o.name + "': attach_seat needs `" + key +
             "` as {feature_id, element}; it has " + it->dump());
+      readctx::RefuseUnknownKeys(*f, {"feature_id", "element"},
+                                 "occurrence attach_seat face");
       return ElementRef{f->at("feature_id").get<uint64_t>(),
                         f->at("element").get<std::string>()};
     };
@@ -159,6 +173,8 @@ Occurrence OccurrenceFromJson(const json& j) {
   }
   o.flexible = j.value("flexible", false); // v129
   for (const json& pj : j.value("inner_poses", json::array())) {
+    readctx::RefuseUnknownKeys(pj, {"occurrence", "position", "orientation"},
+                               "occurrence inner pose");
     InnerPose p;
     p.occurrence = pj.at("occurrence").get<uint64_t>();
     p.position = Vec3FromJson(pj.at("position"));
@@ -166,6 +182,9 @@ Occurrence OccurrenceFromJson(const json& j) {
     o.innerPoses.push_back(p);
   }
   for (const json& dj : j.value("inner_mate_dofs", json::array())) {
+    readctx::RefuseUnknownKeys(
+        dj, {"mate", "rotation", "offset", "dx", "dy", "ball_rotation"},
+        "occurrence inner mate dof");
     InnerMateDof d;
     d.mate = dj.at("mate").get<uint64_t>();
     d.rotation = dj.value("rotation", 0.0);
@@ -292,28 +311,49 @@ json ConnectorToJson(const Connector& c) {
 }
 
 Connector ConnectorFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j, {"occurrence", "inner_path", "anchor"},
+                             "mate connector");
   Connector c;
   c.occurrenceId = j.at("occurrence").get<uint64_t>();
   if (j.contains("inner_path"))
     c.innerPath = j.at("inner_path").get<std::vector<uint64_t>>();
   const json& a = j.at("anchor");
+  readctx::RefuseUnknownKeys(
+      a, {"frame", "origin", "face", "snap_edge", "snap_edge2"}, "mate anchor");
+  // An anchor is ONE of a frame, the origin or a face (with its snaps):
+  // the others beside it would be read past and dropped on save.
+  if ((a.contains("frame") && (a.contains("origin") || a.contains("face"))) ||
+      (a.contains("origin") && a.contains("face")) ||
+      (!a.contains("face") &&
+       (a.contains("snap_edge") || a.contains("snap_edge2"))))
+    throw std::runtime_error("mate anchor " + a.dump().substr(0, 120) +
+                             ": a frame, the origin, or a face with its "
+                             "snaps -- one of them");
   if (a.contains("frame")) { // v86
     c.anchor.frameId = a.at("frame").get<uint64_t>();
   } else if (a.value("origin", false)) {
     c.anchor.origin = true;
   } else if (a.contains("face")) {
     const json& f = a.at("face");
+    readctx::RefuseUnknownKeys(f, {"feature_id", "element"},
+                               "mate anchor face");
     c.anchor.face = ElementRef{f.value("feature_id", uint64_t{0}),
                                f.value("element", std::string{})};
     if (a.contains("snap_edge")) {
       const json& s = a.at("snap_edge");
+      readctx::RefuseUnknownKeys(s, {"feature_id", "element"},
+                                 "mate anchor snap_edge");
       c.anchor.snapEdge = ElementRef{s.value("feature_id", uint64_t{0}),
                                      s.value("element", std::string{})};
+      RequireSetOrEmpty(c.anchor.snapEdge, "mate anchor snap_edge");
     }
     if (a.contains("snap_edge2")) {
       const json& s2 = a.at("snap_edge2");
+      readctx::RefuseUnknownKeys(s2, {"feature_id", "element"},
+                                 "mate anchor snap_edge2");
       c.anchor.snapEdge2 = ElementRef{s2.value("feature_id", uint64_t{0}),
                                       s2.value("element", std::string{})};
+      RequireSetOrEmpty(c.anchor.snapEdge2, "mate anchor snap_edge2");
     }
   }
   return c;
@@ -344,6 +384,12 @@ json MateToJson(const Mate& m) {
 }
 
 Mate MateFromJson(const json& j) {
+  readctx::RequireTag(j, "Mate", "mate");
+  readctx::RefuseUnknownKeys(j,
+                             {"type", "id", "name", "mate_type", "a", "b",
+                              "flipped", "rotation", "offset", "dx", "dy",
+                              "ball_rotation"},
+                             "mate");
   Mate m;
   m.id = j.at("id").get<uint64_t>();
   m.name = j.value("name", std::string{});
@@ -444,6 +490,8 @@ AssemblySequence AssemblySequenceFromJson(const json& j) {
       s.occurrences = sj.at("occurrences").get<std::vector<uint64_t>>();
     if (sj.contains("pose")) {
       for (const json& pj : sj.at("pose")) {
+        readctx::RefuseUnknownKeys(pj, {"mate", "rotation_deg", "offset_mm"},
+                                   "sequence pose value");
         SequencePose p;
         p.mateId = pj.at("mate").get<uint64_t>();
         const bool rot = pj.contains("rotation_deg"),
@@ -493,10 +541,15 @@ json ExplodedViewToJson(const ExplodedView& v) {
 }
 
 ExplodedView ExplodedViewFromJson(const json& j) {
+  readctx::RequireTag(j, "ExplodedView", "explodedview");
+  readctx::RefuseUnknownKeys(j, {"type", "id", "name", "steps"},
+                             "exploded view");
   ExplodedView v;
   v.id = j.at("id").get<uint64_t>();
   v.name = j.value("name", std::string{});
   for (const json& sj : j.value("steps", json::array())) {
+    readctx::RefuseUnknownKeys(sj, {"occurrence", "offset", "path"},
+                               "explode step");
     ExplodeStep s;
     s.occurrenceId = sj.at("occurrence").get<uint64_t>();
     const auto& o = sj.at("offset");
@@ -787,6 +840,12 @@ json ClearanceAssertionToJson(const ClearanceAssertion& a) {
 }
 
 ClearanceAssertion ClearanceAssertionFromJson(const json& j) {
+  readctx::RequireTag(j, "ClearanceAssertion", "clearance assertion");
+  readctx::RefuseUnknownKeys(j,
+                             {"type", "id", "name", "a", "b", "min_mm", "mode",
+                              "why", "verdict", "measured_mm", "checked_key",
+                              "note"},
+                             "clearance assertion");
   ClearanceAssertion a;
   a.id = j.at("id").get<uint64_t>();
   a.name = j.value("name", std::string{});
@@ -834,6 +893,13 @@ json MotionStudyToJson(const MotionStudy& s) {
 }
 
 MotionStudy MotionStudyFromJson(const json& j) {
+  readctx::RequireTag(j, "MotionStudy", "motionstudy");
+  readctx::RefuseUnknownKeys(
+      j,
+      {"type", "id", "name", "driver_mate", "driver_dof", "driver_path", "from",
+       "to", "samples", "check_clash", "clash_mode", "clash_deflection_mm",
+       "configuration", "max_refine"},
+      "motion study");
   MotionStudy s;
   s.id = j.at("id").get<uint64_t>();
   s.name = j.value("name", std::string{});
@@ -871,7 +937,36 @@ MotionStudy MotionStudyFromJson(const json& j) {
   return s;
 }
 
+namespace {
+// A tooth count a relation states: written only when there is one, so one
+// that is there is a whole number above 0. A 0 or a -1 read as "no teeth"
+// and the save then dropped it.
+int TeethOf(const json& j, const char* key) {
+  if (!j.contains(key))
+    return 0;
+  const json& v = j.at(key);
+  if (!v.is_number_integer() || v.get<int64_t>() <= 0 ||
+      v.get<int64_t>() > 1000000)
+    throw std::runtime_error(std::string(key) + ": " + v.dump() +
+                             " is not a tooth count");
+  return static_cast<int>(v.get<int64_t>());
+}
+} // namespace
+
 Relation RelationFromJson(const json& j) {
+  readctx::RequireTag(j, "Relation", "relation");
+  readctx::RefuseUnknownKeys(j, {"type",        "id",          "name",
+                                 "kind",        "terms",       "constant",
+                                 "mate_a",      "mate_b",      "mate_a_path",
+                                 "mate_b_path", "dof_a",       "dof_b",
+                                 "ratio",       "teeth_a",     "teeth_b",
+                                 "internal",    "thread_part", "thread_feature",
+                                 "phase",       "lift",        "step",
+                                 "period_deg",  "start_deg",   "duration_deg",
+                                 "motion",      "slots",       "table",
+                                 "drives",      "lead",        "teeth",
+                                 "ride"},
+                             "relation");
   Relation r;
   r.id = j.at("id").get<uint64_t>();
   r.name = j.value("name", std::string{});
@@ -882,13 +977,15 @@ Relation RelationFromJson(const json& j) {
                                RelationKindToString(r.kind) +
                                " relation needs its `terms`");
     for (const json& tj : j.at("terms")) {
+      readctx::RefuseUnknownKeys(
+          tj, {"mate", "path", "dof", "coefficient", "teeth"}, "relation term");
       RelationTerm t;
       t.mate = tj.at("mate").get<uint64_t>();
       if (tj.contains("path"))
         t.path = tj.at("path").get<std::vector<uint64_t>>();
       t.dof = MateDofFromString(tj.at("dof").get<std::string>());
       t.coefficient = tj.at("coefficient").get<double>();
-      t.teeth = tj.value("teeth", 0);
+      t.teeth = TeethOf(tj, "teeth");
       r.terms.push_back(std::move(t));
     }
     r.phase = j.value("constant", 0.0);
@@ -904,8 +1001,8 @@ Relation RelationFromJson(const json& j) {
   r.dofA = MateDofFromString(j.at("dof_a").get<std::string>());
   r.dofB = MateDofFromString(j.at("dof_b").get<std::string>());
   r.ratio = j.at("ratio").get<double>();
-  r.teethA = j.value("teeth_a", 0); // v171
-  r.teethB = j.value("teeth_b", 0);
+  r.teethA = TeethOf(j, "teeth_a"); // v171
+  r.teethB = TeethOf(j, "teeth_b");
   r.internal = j.value("internal", false);
   if (r.internal && r.kind != RelationKind::Gear)
     throw std::runtime_error("`internal` is a gear relation's; this one is a " +
@@ -919,10 +1016,22 @@ Relation RelationFromJson(const json& j) {
           "a cam's lift table is [[angle_deg, lift_mm], ...]");
     r.lift.emplace_back(pt.at(0).get<double>(), pt.at(1).get<double>());
   }
+  // A ride is part of a toothed freewheel's statement: written only with
+  // its teeth, and refused without them -- read alone it was skipped, and
+  // the save dropped it.
+  if (j.contains("ride") && !(j.value("teeth", 0) > 0))
+    throw std::runtime_error("a relation's `ride` comes with its `teeth` "
+                             "(a whole number above 0)");
+  if (j.contains("teeth") &&
+      !(j.at("teeth").is_number_integer() && j.at("teeth").get<int64_t>() > 0))
+    throw std::runtime_error("teeth: " + j.at("teeth").dump() +
+                             " is not a whole number above 0");
   if (r.teeth > 0 || j.contains("teeth")) { // v105
     r.teeth = j.value("teeth", 0);
     if (j.contains("ride")) {
       const json& ride = j.at("ride");
+      readctx::RefuseUnknownKeys(ride, {"amount", "mate", "dof"},
+                                 "relation ride");
       r.rideAmount = ride.at("amount").get<double>();
       r.rideMate = ride.at("mate").get<uint64_t>();
       r.rideDof = MateDofFromString(ride.at("dof").get<std::string>());

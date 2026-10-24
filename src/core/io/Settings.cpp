@@ -5,6 +5,7 @@
 
 #include "common/Logger.h"
 #include "common/RuntimePaths.h"
+#include "core/io/ReadContext.h"   // ParseStrict
 #include "core/io/Serialization.h" // WriteTextAtomic
 
 #include <nlohmann/json.hpp>
@@ -15,6 +16,7 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <optional>
 
 namespace fs = std::filesystem;
@@ -46,16 +48,41 @@ nlohmann::json WindowToJson(const WindowGeometry& g) {
 }
 
 // A malformed entry loses the REMEMBERED RECT, not the settings file:
-// FitToMonitors treats an unremembered geometry as a first run.
-WindowGeometry WindowFromJson(const nlohmann::json& j) {
+// FitToMonitors treats an unremembered geometry as a first run. Each field
+// is checked before it is read, as ReadField checks a preference: a string
+// or a 1e400 where a coordinate goes used to throw out of Load, and so out
+// of main, before the window opened.
+WindowGeometry WindowFromJson(const nlohmann::json& j,
+                              std::string* why = nullptr) {
   WindowGeometry g;
+  const auto bad = [&](const std::string& reason) {
+    if (why)
+      *why = "window: " + reason;
+    return WindowGeometry{};
+  };
   if (!j.is_object())
-    return g;
-  g.x = j.value("x", 0);
-  g.y = j.value("y", 0);
-  g.w = j.value("w", 0);
-  g.h = j.value("h", 0);
-  g.maximized = j.value("maximized", false);
+    return bad("expected an object");
+  int* const ints[] = {&g.x, &g.y, &g.w, &g.h};
+  const char* const keys[] = {"x", "y", "w", "h"};
+  for (size_t i = 0; i < 4; i++) {
+    const auto it = j.find(keys[i]);
+    if (it == j.end())
+      continue;
+    if (!it->is_number_integer() ||
+        it->get<int64_t>() < std::numeric_limits<int>::min() ||
+        it->get<int64_t>() > std::numeric_limits<int>::max() ||
+        (it->is_number_unsigned() &&
+         it->get<uint64_t>() >
+             static_cast<uint64_t>(std::numeric_limits<int>::max())))
+      return bad(std::string(keys[i]) + " is " + it->dump() +
+                 ", not a whole number of pixels");
+    *ints[i] = it->get<int>();
+  }
+  if (const auto it = j.find("maximized"); it != j.end()) {
+    if (!it->is_boolean())
+      return bad("maximized is " + it->dump() + ", not true or false");
+    g.maximized = it->get<bool>();
+  }
   return g;
 }
 
@@ -293,13 +320,19 @@ json FieldValue(const Settings& s, const Field& f) {
 }
 
 // Parse the file, or nullopt when it is absent or unreadable-as-JSON.
+// The whole file, strictly: `in >> j` read the first value and stopped, so
+// a file with something after it -- written twice, or a second half from a
+// torn sync -- loaded its first half, and the next save dropped the rest
+// without a word. A key written twice is unreadable too
+// (readctx::ParseStrict).
 std::optional<json> ReadFile(const fs::path& path) {
-  std::ifstream in(path);
+  std::ifstream in(path, std::ios::binary);
   if (!in)
     return std::nullopt;
   try {
-    json j;
-    in >> j;
+    const json j =
+        readctx::ParseStrict(std::string((std::istreambuf_iterator<char>(in)),
+                                         std::istreambuf_iterator<char>()));
     if (!j.is_object())
       return std::nullopt;
     return j;
@@ -398,7 +431,10 @@ Settings Load(std::string* note) {
   }
   for (auto it = parsed->begin(); it != parsed->end(); ++it) {
     if (it.key() == kWindowKey) {
-      s.window = WindowFromJson(it.value());
+      std::string why;
+      s.window = WindowFromJson(it.value(), &why);
+      if (!why.empty())
+        LOG_WARN("Settings: ignoring {} ({})", why, path.string());
       continue;
     }
     if (it.key() == kKeysKey) {
@@ -450,7 +486,13 @@ bool ApplyJson(Settings& s, const nlohmann::json& j, std::string* error) {
     if (it.key() == kWindowKey) {
       // `candidate`, not `s`: this function's whole contract is that a
       // rejected value later in the object leaves nothing half-applied.
-      candidate.window = WindowFromJson(it.value());
+      std::string why;
+      candidate.window = WindowFromJson(it.value(), &why);
+      if (!why.empty()) {
+        if (error)
+          *error = why;
+        return false;
+      }
       continue;
     }
     if (it.key() == kKeysKey) {

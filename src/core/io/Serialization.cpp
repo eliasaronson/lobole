@@ -88,6 +88,7 @@ units::System UnitsFromEnvelope(const json& j) {
   if (!j.contains("units"))
     return sys;
   const json u = j.at("units");
+  readctx::RefuseUnknownKeys(u, {"length", "mass", "angle"}, "units");
   const auto refuse = [](const std::string& what, const std::string& got,
                          const std::vector<const char*>& accepted) {
     std::string list;
@@ -123,6 +124,11 @@ std::optional<sheet::SheetMetalRules> SheetMetalFromEnvelope(const json& j) {
   if (!j.contains("sheet_metal"))
     return std::nullopt;
   const json m = j.at("sheet_metal");
+  readctx::RefuseUnknownKeys(m,
+                             {"material", "gauge", "thickness", "bend_radius",
+                              "k_factor", "relief", "relief_width",
+                              "relief_depth"},
+                             "sheet_metal");
   sheet::SheetMetalRules r;
   r.material = m.value("material", std::string{});
   r.gauge = m.value("gauge", std::string{});
@@ -179,6 +185,10 @@ std::optional<tube::TubeRules> TubeFromEnvelope(const json& j) {
   if (!j.contains("tube"))
     return std::nullopt;
   const json m = j.at("tube");
+  readctx::RefuseUnknownKeys(m,
+                             {"material", "former_radii", "min_straight",
+                              "tail_length", "max_thinning"},
+                             "tube");
   tube::TubeRules r;
   r.material = m.value("material", std::string{});
   if (m.contains("former_radii")) {
@@ -247,6 +257,10 @@ std::optional<printfit::Process> PrintFromEnvelope(const json& j) {
   if (!j.contains("print"))
     return std::nullopt;
   const json& m = j.at("print");
+  // Without a profile the process is two keys; with one, the embedded
+  // profile's own (PrintProfileFromJson refuses the rest).
+  if (!m.contains("profile"))
+    readctx::RefuseUnknownKeys(m, {"process", "material"}, "print");
   printfit::Process p{m.value("process", std::string{}),
                       m.value("material", std::string{}), std::nullopt};
   if (m.contains("profile")) {
@@ -417,87 +431,6 @@ std::string LabelSlug(const std::string& label) {
   while (!out.empty() && out.back() == '-')
     out.pop_back();
   return out;
-}
-
-// Restores occurrences into `asm` in the given order and pins the id counter
-// past the highest restored id so future adds never collide.
-void LoadOccurrences(AssemblyDocument& asmDoc,
-                     const std::vector<json>& occJsons) {
-  uint64_t maxId = 0;
-  for (const json& oj : occJsons) {
-    Occurrence o = OccurrenceFromJson(oj);
-    maxId = std::max(maxId, o.id);
-    asmDoc.GetOccurrences().push_back(std::move(o));
-  }
-  asmDoc.EnsureNextIdAtLeast(maxId + 1);
-}
-
-// Restores mates into `asm` in the given order and pins the id counter past
-// the highest restored id. Mates share the id space with occurrences, so
-// pinning here (after LoadOccurrences) leaves the counter above both.
-void LoadMates(AssemblyDocument& asmDoc, const std::vector<json>& mateJsons) {
-  uint64_t maxId = 0;
-  for (const json& mj : mateJsons) {
-    Mate m = MateFromJson(mj);
-    maxId = std::max(maxId, m.id);
-    asmDoc.GetMates().push_back(std::move(m));
-  }
-  asmDoc.EnsureNextIdAtLeast(maxId + 1);
-}
-
-// Exploded views (v27) follow the same restore-and-pin discipline.
-void LoadExplodedViews(AssemblyDocument& asmDoc,
-                       const std::vector<json>& viewJsons) {
-  uint64_t maxId = 0;
-  for (const json& vj : viewJsons) {
-    ExplodedView v = ExplodedViewFromJson(vj);
-    maxId = std::max(maxId, v.id);
-    asmDoc.GetExplodedViews().push_back(std::move(v));
-  }
-  asmDoc.EnsureNextIdAtLeast(maxId + 1);
-}
-
-// Relations (v83) follow the same restore-and-pin discipline.
-void LoadRelations(AssemblyDocument& asmDoc,
-                   const std::vector<json>& relJsons) {
-  uint64_t maxId = 0;
-  for (const json& rj : relJsons) {
-    Relation r = RelationFromJson(rj);
-    maxId = std::max(maxId, r.id);
-    asmDoc.GetRelations().push_back(std::move(r));
-  }
-  asmDoc.EnsureNextIdAtLeast(maxId + 1);
-}
-
-// Clearance assertions (v97): the same again.
-void LoadAssertions(AssemblyDocument& asmDoc, const std::vector<json>& jsons) {
-  uint64_t maxId = 0;
-  for (const json& aj : jsons) {
-    ClearanceAssertion a = ClearanceAssertionFromJson(aj);
-    maxId = std::max(maxId, a.id);
-    asmDoc.GetAssertions().push_back(std::move(a));
-  }
-  asmDoc.EnsureNextIdAtLeast(maxId + 1);
-}
-
-// Motion studies (v87): the same again.
-void LoadMotionStudies(AssemblyDocument& asmDoc,
-                       const std::vector<json>& jsons) {
-  uint64_t maxId = 0;
-  for (const json& sj : jsons) {
-    MotionStudy s = MotionStudyFromJson(sj);
-    maxId = std::max(maxId, s.id);
-    asmDoc.GetMotionStudies().push_back(std::move(s));
-  }
-  asmDoc.EnsureNextIdAtLeast(maxId + 1);
-}
-
-// FEM studies on an assembly (v106): the same again, through RestoreStudy
-// so a load's id also raises the counter.
-void LoadAssemblyStudies(AssemblyDocument& asmDoc,
-                         const std::vector<json>& jsons) {
-  for (const json& sj : jsons)
-    asmDoc.RestoreStudy(StudyFromJson(sj));
 }
 
 // Binary sibling of WriteTextAtomic for reference-image pixel files (v49):
@@ -804,8 +737,11 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
         const fs::path assetDir = dir / "assets";
         fs::create_directories(assetDir);
         for (const std::string& name : wantedAssets) {
+          // An EMPTY asset is written too: the load refuses a document whose
+          // named asset is missing, so skipping it made a save that would
+          // not open.
           const std::vector<unsigned char>* bytes = doc.GetAsset(name);
-          if (!bytes || bytes->empty())
+          if (bytes == nullptr)
             continue;
           if (!WriteBytesAtomic(assetDir / CheckedAssetName(name), *bytes,
                                 error))
@@ -830,123 +766,438 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
 
 namespace {
 
-// "features/3-sketch.json", for messages: the bare filename is ambiguous
-// across features/, studies/, views/… and the absolute path is noise.
-std::string ProjectRelative(const std::filesystem::path& path) {
-  return (path.parent_path().filename() / path.filename()).string();
-}
+namespace fs = std::filesystem;
 
-// Reads and parses one project file, saying WHICH file when it cannot.
+// Reads and parses one project file. The caller names it
+// (readctx::InFile), so every refusal below arrives as
+// "features/3-sketch.json: <why>".
 //
 // nlohmann reports a line and column and no filename, and in a project that
 // is a git repository the usual cause is not a typo: a merge left conflict
 // markers in the file. The directory format merges well precisely so people
 // WILL merge these projects (one file per feature, one key per line), which
-// makes "unresolved markers" a first-class failure worth naming.
-json ParseProjectFile(const std::filesystem::path& path) {
-  std::ifstream in(path);
+// makes "unresolved markers" a first-class failure worth naming. A key
+// written twice -- which a merge also makes, and of which nlohmann would
+// silently keep the last -- is refused (readctx::ParseStrict).
+// A file of a document that resolves outside the document's directory -- a
+// symlink in a shared project pointing at the reader's own files -- is
+// refused, as a name that leaves the project is
+// (docs/versioning/format.md#paths-in-a-project).
+void RequireInside(const fs::path& root, const fs::path& path) {
+  std::error_code ec;
+  const fs::path base = fs::weakly_canonical(root, ec);
+  const fs::path full = fs::weakly_canonical(path, ec);
+  if (ec)
+    return; // nothing there: the read says so
+  const auto [b, f] =
+      std::mismatch(base.begin(), base.end(), full.begin(), full.end());
+  if (b != base.end())
+    throw std::runtime_error("is a link to " + full.string() +
+                             ", outside the project");
+}
+
+json ParseFileText(const fs::path& path, const fs::path* root = nullptr) {
+  if (root != nullptr)
+    RequireInside(*root, path);
+  std::ifstream in(path, std::ios::binary);
   if (!in)
-    throw std::runtime_error("cannot read " + ProjectRelative(path));
+    throw std::runtime_error("cannot be read");
   const std::string text((std::istreambuf_iterator<char>(in)),
                          std::istreambuf_iterator<char>());
   if (text.starts_with("<<<<<<<") ||
       text.find("\n<<<<<<<") != std::string::npos) {
     throw std::runtime_error(
-        ProjectRelative(path) +
-        " still has merge conflict markers — finish the merge (git status "
+        "still has merge conflict markers — finish the merge (git status "
         "shows what is unresolved), then open the project again");
   }
-  try {
-    return json::parse(text);
-  } catch (const std::exception& e) {
-    throw std::runtime_error(ProjectRelative(path) + ": " + e.what());
-  }
+  return readctx::ParseStrict(text);
+}
+
+// `rel` (relative to the document directory `dir`), read and parsed, named.
+json ParseProjectFile(const fs::path& dir, const std::string& rel) {
+  return readctx::InFile(rel, [&] { return ParseFileText(dir / rel, &dir); });
+}
+
+// The active configuration a document names, set: one it does not have is
+// refused -- it used to be skipped, and the save then wrote no active
+// configuration at all.
+template <class Doc> void SetActive(Doc& doc, const json& j) {
+  const uint64_t id = j.value("active_configuration", uint64_t{0});
+  if (!doc.SetActiveConfiguration(id) && id != 0)
+    throw std::runtime_error("active_configuration is " + std::to_string(id) +
+                             ", which is none of its configurations");
+}
+
+// The format, version and kind of a document's envelope, checked: each
+// refusal names the file it is in (the caller's context).
+void CheckEnvelope(const json& j, const char* kind) {
+  if (!j.is_object())
+    throw std::runtime_error(std::string("not a Lobole document: expected an "
+                                         "object, got ") +
+                             j.type_name());
+  if (!j.contains("format") || !j.at("format").is_string() ||
+      j.at("format").get<std::string>() != kFormat)
+    throw std::runtime_error(std::string("not a Lobole document (its "
+                                         "`format` is not \"") +
+                             kFormat + "\")");
+  if (j.contains("version") &&
+      (!j.at("version").is_number_integer() ||
+       j.at("version").get<int64_t>() > kVersion ||
+       (j.at("version").is_number_unsigned() &&
+        j.at("version").get<uint64_t>() > static_cast<uint64_t>(kVersion))))
+    throw std::runtime_error("format version " + j.at("version").dump() +
+                             (j.at("version").is_number_integer()
+                                  ? " is newer than this build reads (" +
+                                        std::to_string(kVersion) + ")"
+                                  : std::string(" is not a whole number")));
+  const int version = static_cast<int>(
+      std::max<int64_t>(j.value("version", int64_t{0}), int64_t{-1}));
+  if (version > kVersion)
+    throw std::runtime_error("format version " + std::to_string(version) +
+                             " is newer than this build reads (" +
+                             std::to_string(kVersion) + ")");
+  if (version < 1)
+    throw std::runtime_error("format version " + std::to_string(version) +
+                             " is not a version (the first is 1)");
+  const std::string got = j.value("kind", std::string("part"));
+  if (got != kind)
+    throw std::runtime_error("this is a " + got + ", not a " + kind);
+  // A version older than its kind of document: no build wrote one, and a
+  // load would run every migration since on a file that never needed them.
+  const int since = got == "assembly"  ? 23
+                    : got == "drawing" ? 30
+                    : got == "job"     ? 73
+                                       : 1;
+  if (version < since)
+    throw std::runtime_error(
+        "format version " + std::to_string(version) + " predates " + got +
+        " documents, which arrived in version " + std::to_string(since));
+}
+
+// Every feature a part holds arrived by the version its file claims: a
+// file saying it is older than a feature it holds is lying about its
+// version, and the migrations for that older version would rewrite
+// content that never needed them (a pre-v4 sketch's renumbering, a
+// pre-v19 rollback).
+void RequireFeaturesKnownAt(const Document& doc, int version) {
+  for (const auto& f : doc.GetFeatures())
+    for (const FeatureTypeInfo& info : FeatureTypes())
+      if (f->TypeName() == info.type && info.sinceVersion > version)
+        throw std::runtime_error(
+            "it holds a " + f->TypeName() + " (" + f->GetName() +
+            "), which arrived in format version " +
+            std::to_string(info.sinceVersion) + ", but it says it is version " +
+            std::to_string(version));
+}
+
+// The lists a writer writes whatever they hold, each from the version it
+// arrived in: absent from a file that version wrote, the list was deleted,
+// and reading it as empty would load the document without it.
+void RequireLists(const json& j,
+                  std::initializer_list<std::pair<const char*, int>> lists) {
+  const int version = j.value("version", 0);
+  for (const auto& [key, since] : lists)
+    if (version >= since && !j.contains(key))
+      throw std::runtime_error(std::string("has no `") + key +
+                               "` list, which every version since " +
+                               std::to_string(since) + " writes");
 }
 
 // A result beside its study (v154): the json, with its .result.bin read
 // back in as the binary value it was written from (WriteResultFiles). A v153
-// result holds its arrays inline and has no bin. nullopt, with a warning,
-// when the bin is missing or not the size the json says: a result is
-// derived, and one whose halves disagree (a torn save, a copy of one file)
-// is dropped and run again rather than read.
-std::optional<json> ReadResultFiles(const std::filesystem::path& path) {
-  json j = ParseProjectFile(path);
-  if (!j.contains("bin_bytes"))
-    return j;
-  const size_t want = j.at("bin_bytes").get<size_t>();
-  std::filesystem::path bin = path;
-  bin.replace_extension(".bin");
-  std::ifstream in(bin, std::ios::binary);
-  std::vector<unsigned char> bytes;
-  if (in)
-    bytes.assign(std::istreambuf_iterator<char>(in),
-                 std::istreambuf_iterator<char>());
-  if (!in.is_open() || bytes.size() != want) {
-    LOG_WARN("Dropping the saved result {}: its {} is {} (expected {} "
-             "bytes); the study runs again",
-             ProjectRelative(path), bin.filename().string(),
-             in.is_open() ? std::to_string(bytes.size()) + " bytes"
-                          : std::string("missing"),
-             want);
+// result holds its arrays inline and has no bin. A result is DERIVED: one
+// that does not read, or whose halves disagree (a torn save, a copy of one
+// file), is dropped and reported -- never a reason to refuse the document --
+// and the study runs again. nullopt then.
+std::optional<json> ReadResultFiles(const fs::path& dir,
+                                    const std::string& rel) {
+  try {
+    return readctx::InFile(rel, [&]() -> std::optional<json> {
+      json j = ParseFileText(dir / rel, &dir);
+      if (!j.is_object())
+        throw std::runtime_error(std::string("expected an object, got ") +
+                                 j.type_name());
+      if (!j.contains("bin_bytes"))
+        return j;
+      const size_t want = j.at("bin_bytes").get<size_t>();
+      fs::path bin = dir / rel;
+      bin.replace_extension(".bin");
+      RequireInside(dir, bin);
+      std::ifstream in(bin, std::ios::binary);
+      std::vector<unsigned char> bytes;
+      if (in)
+        bytes.assign(std::istreambuf_iterator<char>(in),
+                     std::istreambuf_iterator<char>());
+      if (!in.is_open() || bytes.size() != want)
+        throw std::runtime_error(
+            "its " + bin.filename().string() + " is " +
+            (in.is_open() ? std::to_string(bytes.size()) + " bytes"
+                          : std::string("missing")) +
+            " (expected " + std::to_string(want) + " bytes)");
+      j[kResultData] = json::binary(std::move(bytes));
+      return j;
+    });
+  } catch (const std::exception& e) {
+    const auto* named = dynamic_cast<const readctx::Error*>(&e);
+    readctx::Dropped("", named ? named->Reason() : e.what(), true, rel);
     return std::nullopt;
   }
-  j[kResultData] = json::binary(std::move(bytes));
-  return j;
 }
 
-// Records `path` under the id its filename starts with, REFUSING a second
-// file that claims the same id.
-//
-// This used to be `byId[std::stoull(name)] = path`, which silently kept the
-// last one. Two files never share an id when the app writes them — but a
-// merge makes it easily: git takes both "15-box.json" and "15-hole.json"
-// without a word when two people each added a feature offline and the id
-// counter handed them both 15. The overwrite then dropped one person's work
-// and left the document with two entries claiming one id, which every
-// reference (sketch_id, body ids, mates, configuration overrides) then
-// resolves ambiguously. Loudly refusing is the only safe answer; the fix in
-// the file is to renumber one of them.
-void InsertIdFile(std::map<uint64_t, std::filesystem::path>& byId,
-                  const std::filesystem::path& path, const char* what) {
-  const uint64_t id = std::stoull(path.filename().string());
-  const auto [it, inserted] = byId.emplace(id, path);
-  if (!inserted) {
-    throw std::runtime_error(
-        "two " + std::string(what) + " files claim id " + std::to_string(id) +
-        " (" + ProjectRelative(it->second) + " and " + ProjectRelative(path) +
-        ") — a merge kept both; renumber one of them (its \"id\" field and "
-        "its filename) and reopen");
+// Reads a derived file's json into a value; a failure is dropped and
+// reported like an unreadable result (ReadResultFiles).
+template <class T, class F>
+std::optional<T> ReadDerived(const std::string& rel, F&& fn) {
+  try {
+    return readctx::InFile(rel, [&] { return std::optional<T>(fn()); });
+  } catch (const std::exception& e) {
+    const auto* named = dynamic_cast<const readctx::Error*>(&e);
+    readctx::Dropped("", named ? named->Reason() : e.what(), true, rel);
+    return std::nullopt;
   }
 }
 
-// A study's result beside it: "<id>-<slug>.result.json".
-bool IsResultFile(const std::filesystem::path& path) {
+// One collection directory of a document (features/, studies/, views/...):
+// its item files and the derived files beside them, by the id their name
+// starts with.
+struct Collection {
+  std::string sub;                         // "features"
+  std::map<uint64_t, std::string> items;   // id -> "features/3-sketch.json"
+  std::map<uint64_t, std::string> derived; // id -> "studies/2-s.result.json"
+};
+
+// `<id>-<slug><suffix>.json`, the suffix (".result", ".projection") marking
+// a derived file beside its item.
+bool HasSuffix(const fs::path& path, const char* suffix) {
   const std::string stem = path.stem().string(); // strips ".json"
-  return stem.size() > 7 && stem.compare(stem.size() - 7, 7, ".result") == 0;
+  const size_t n = std::strlen(suffix);
+  return stem.size() > n && stem.compare(stem.size() - n, n, suffix) == 0;
 }
 
-// A drawing view's saved projection beside it (v162):
-// "<id>-<slug>.projection.json".
-bool IsProjectionFile(const std::filesystem::path& path) {
-  const std::string stem = path.stem().string(); // strips ".json"
-  return stem.size() > 11 &&
-         stem.compare(stem.size() - 11, 11, ".projection") == 0;
-}
-
-// The index lists the ids, in order. A duplicate there means the same file
-// loads twice — two features, one id — which is the other half of the merge
-// hazard above and just as ambiguous downstream.
-void CheckIndexIdsUnique(const json& ids, const char* what) {
-  std::set<uint64_t> seen;
-  for (const auto& idJson : ids) {
-    const uint64_t id = idJson.get<uint64_t>();
-    if (!seen.insert(id).second) {
-      throw std::runtime_error(
-          "index.json lists " + std::string(what) + " id " +
-          std::to_string(id) +
-          " twice — a merge kept both sides; keep one and reopen");
+// Scans <dir>/<sub>/. Two files claiming one id are REFUSED: this used to be
+// `byId[std::stoull(name)] = path`, which silently kept the last one. Two
+// files never share an id when the app writes them -- but a merge makes it
+// easily: git takes both "15-box.json" and "15-hole.json" without a word
+// when two people each added a feature offline and the id counter handed
+// them both 15. The overwrite then dropped one person's work. A .json whose
+// name starts with no id is nothing an index can list: a save would delete
+// it, so it is reported as dropped.
+Collection ScanCollection(const fs::path& dir, const std::string& sub,
+                          const char* what,
+                          const char* derivedSuffix = nullptr) {
+  Collection c;
+  c.sub = sub;
+  std::error_code ec;
+  for (const auto& entry : fs::directory_iterator(dir / sub, ec)) {
+    if (entry.path().extension() != ".json")
+      continue;
+    const std::string name = entry.path().filename().string();
+    const std::string rel = sub + "/" + name;
+    size_t digits = 0;
+    while (digits < name.size() &&
+           std::isdigit(static_cast<unsigned char>(name[digits])))
+      digits++;
+    uint64_t id = 0;
+    if (digits == 0 || digits > 19 ||
+        (digits < name.size() && name[digits] != '-' && name[digits] != '.') ||
+        (id = std::stoull(name.substr(0, digits))) == 0) {
+      readctx::Dropped("",
+                       "its name does not start with an id, so no index "
+                       "can list it; it was not loaded",
+                       false, rel);
+      continue;
     }
+    const bool isDerived =
+        derivedSuffix != nullptr && HasSuffix(entry.path(), derivedSuffix);
+    auto& into = isDerived ? c.derived : c.items;
+    const auto [it, inserted] = into.emplace(id, rel);
+    if (!inserted)
+      readctx::Refuse(
+          "two " + std::string(what) + (isDerived ? " result" : "") +
+          " files claim id " + std::to_string(id) + " (" + it->second +
+          " and " + rel +
+          ") — a merge kept both; renumber one of them (its \"id\" field "
+          "and its filename) and reopen");
   }
+  return c;
+}
+
+// The files the index lists under `key`, in its order. An id listed twice
+// means the same file loads twice -- two items, one id -- which is the
+// other half of the merge hazard above; an id with no file is a file lost.
+// Both are refused. A file the index does not list is dropped and reported:
+// it is not loaded, and a save would delete it.
+std::vector<std::pair<uint64_t, std::string>> ListedFiles(const json& index,
+                                                          const char* key,
+                                                          Collection& c,
+                                                          const char* what) {
+  std::vector<std::pair<uint64_t, std::string>> out;
+  readctx::InFile("index.json", [&] {
+    const json ids = index.value(key, json::array());
+    if (!ids.is_array())
+      throw std::runtime_error(std::string("`") + key +
+                               "` is a list of ids, not " + ids.type_name());
+    std::set<uint64_t> seen;
+    for (const json& idJson : ids) {
+      const uint64_t id = idJson.get<uint64_t>();
+      if (!seen.insert(id).second)
+        throw std::runtime_error(std::string("`") + key + "` lists " + what +
+                                 " id " + std::to_string(id) +
+                                 " twice — a merge kept both sides; keep one "
+                                 "and reopen");
+      const auto it = c.items.find(id);
+      if (it == c.items.end())
+        throw std::runtime_error(std::string("`") + key + "` lists " + what +
+                                 " " + std::to_string(id) + ", but " + c.sub +
+                                 "/ has no " + std::to_string(id) + "-*.json");
+      out.emplace_back(id, it->second);
+    }
+  });
+  for (const auto& [id, rel] : c.items)
+    if (std::none_of(out.begin(), out.end(),
+                     [id](const auto& p) { return p.first == id; }))
+      readctx::Dropped("",
+                       std::string("index.json `") + key +
+                           "` does not list it, so it was not loaded",
+                       false, rel);
+  // A derived file whose item is not listed is not loaded either.
+  for (const auto& [id, rel] : c.derived)
+    if (std::none_of(out.begin(), out.end(),
+                     [id](const auto& p) { return p.first == id; }))
+      readctx::Dropped("",
+                       std::string("no listed ") + what + " has id " +
+                           std::to_string(id) + ", so it was not loaded",
+                       true, rel);
+  return out;
+}
+
+// One item file, read and converted, named. Its "id", when it carries one,
+// must be the id its name starts with: the two disagree only when a hand or
+// a merge changed one, and every reference then resolves to the wrong one.
+template <class F>
+decltype(auto) ReadItem(const fs::path& dir, uint64_t id,
+                        const std::string& rel, F&& convert) {
+  return readctx::InFile(rel, [&]() -> decltype(auto) {
+    json j = ParseFileText(dir / rel, &dir);
+    // An item without its id would be given another, and saved under a
+    // name that is not this file's.
+    if (j.is_object() && !j.contains("id"))
+      throw std::runtime_error("it has no id (its file name says " +
+                               std::to_string(id) + ")");
+    if (j.is_object() && j.contains("id") &&
+        (!j.at("id").is_number_unsigned() || j.at("id").get<uint64_t>() != id))
+      throw std::runtime_error("its id is " + j.at("id").dump() +
+                               ", but its file name says " +
+                               std::to_string(id));
+    return convert(j);
+  });
+}
+
+} // namespace
+
+namespace {
+
+// What a part's envelope may hold, in either form; the single file adds its
+// inline collections and `assets`. Anything else is refused, naming the
+// key: a key this build does not know was written by something that meant
+// it, and loading the rest would save the document back without it.
+constexpr std::initializer_list<std::string_view> kPartEnvelopeKeys = {
+    "format",
+    "version",
+    "kind",
+    "generator",
+    "catalogs",
+    "tables",
+    "requirements",
+    "templates",
+    "rollback",
+    "commit_geometry",
+    "parameters",
+    "tolerances",
+    "active_configuration",
+    "units",
+    "sheet_metal",
+    "tube",
+    "print",
+    "print_settings",
+    "features",
+    "studies",
+    "configurations"};
+
+std::vector<std::string_view>
+WithKeys(std::initializer_list<std::string_view> base,
+         std::initializer_list<std::string_view> more) {
+  std::vector<std::string_view> out(base);
+  out.insert(out.end(), more);
+  return out;
+}
+
+// The part's envelope, read into `doc` BEFORE its features: the
+// parameters their expressions evaluate against, the sheet-metal rules a
+// flange reads during Execute.
+void ReadPartEnvelope(const json& j, Document& doc) {
+  doc.SetCommitGeometry(j.value("commit_geometry", true));
+  doc.SetCatalogsRaw(j.value("catalogs", json::array()));
+  doc.SetTablesRaw(lookuptable::ListFromJson(j.value("tables", json())));
+  // Refused, not dropped, when one names a measure this build does not
+  // know: the requirement would load as something it is not.
+  doc.SetRequirementsRaw(
+      req::ListToJson(req::ListFromJson(j.value("requirements", json()))));
+  doc.SetTemplatesRaw(tmpl::LibraryFromJson(j.value("templates", json())));
+  doc.SetGeneratorRaw(j.value("generator", json(nullptr)));
+  // A name twice is two definitions of one variable: the second would
+  // silently replace the first.
+  std::set<std::string> parameterNames;
+  for (const auto& pj : j.value("parameters", json::array())) {
+    readctx::RefuseUnknownKeys(pj, {"name", "expression", "comment"},
+                               "parameter");
+    if (!parameterNames.insert(pj.at("name").get<std::string>()).second)
+      throw std::runtime_error("parameters: '" +
+                               pj.at("name").get<std::string>() +
+                               "' is defined twice");
+    doc.SetParameter(pj.at("name").get<std::string>(),
+                     pj.at("expression").get<std::string>(),
+                     pj.value("comment", std::string{}));
+  }
+  // Tolerances (v98). They reference elements of features, but nothing
+  // about them is evaluated at load: a tolerance is design intent about a
+  // face, so a ref that no longer resolves stays recorded and is reported
+  // as unresolved when something LOOKS, rather than being dropped here.
+  for (const auto& tj : j.value("tolerances", json::array())) {
+    readctx::RefuseUnknownKeys(
+        tj,
+        {"id", "ref", "ref2", "class", "lower", "upper", "printed", "comment"},
+        "tolerance");
+    Tolerance t;
+    t.id = tj.value("id", uint64_t{0});
+    t.ref = ElementRefFromJson(tj.value("ref", nlohmann::json::object()));
+    t.ref2 = ElementRefFromJson(tj.value("ref2", nlohmann::json::object()));
+    t.isoClass = tj.value("class", std::string{});
+    t.lower = tj.value("lower", 0.0);
+    t.upper = tj.value("upper", 0.0);
+    t.printedPress = TolerancePrintedFromJson(tj);
+    t.comment = tj.value("comment", std::string{});
+    doc.RestoreTolerance(std::move(t));
+  }
+  // Sheet-metal rules (v108) BEFORE the features: a flange reads the
+  // gauge during Execute, and AddFeature regenerates.
+  doc.SetSheetMetal(SheetMetalFromEnvelope(j));
+  doc.SetTube(TubeFromEnvelope(j));
+  doc.SetPrintProcess(PrintFromEnvelope(j));
+  if (j.contains("print_settings")) // v181
+    doc.SetPrintSettings(
+        DocumentIO::PartPrintSettingsFromJson(j.at("print_settings")));
+}
+
+// Every asset an image or a Derived snapshot names must be in the store:
+// one that is not is REFUSED, naming it. It used to be skipped, and the
+// document loaded with an underlay or a snapshot body missing -- which the
+// next save then wrote without it.
+void RequireReferencedAssets(const Document& doc, const char* where) {
+  for (const std::string& name : ReferencedAssets(doc))
+    if (doc.GetAsset(name) == nullptr)
+      throw std::runtime_error(std::string(where) + " has no '" + name +
+                               "', which the document names");
 }
 
 } // namespace
@@ -955,110 +1206,54 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
                                   std::string* error,
                                   const ProjectScope& scope) {
   namespace fs = std::filesystem;
+  const fs::path dir(dirPath);
   try {
-    std::ifstream in(fs::path(dirPath) / "index.json");
-    if (!in) {
-      if (error)
-        *error = "Not a Lobole project directory: " + dirPath;
-      return nullptr;
-    }
-    json index = ParseProjectFile(fs::path(dirPath) / "index.json");
-    if (index.value("format", "") != kFormat) {
-      if (error)
-        *error = "Not a Lobole document: " + dirPath;
-      return nullptr;
-    }
-    if (index.value("version", 0) > kVersion) {
-      if (error)
-        *error = "Document version is newer than this build supports";
-      return nullptr;
-    }
-    if (index.value("kind", "part") != "part") {
-      if (error)
-        *error = "This is a " + index.value("kind", "part") +
-                 ", not a part: " + dirPath;
-      return nullptr;
-    }
-
+    std::error_code ec;
+    if (!fs::is_regular_file(dir / "index.json", ec))
+      readctx::Refuse("missing: this is not a Lobole document directory",
+                      "index.json");
+    const json index = ParseProjectFile(dir, "index.json");
     auto doc = std::make_unique<Document>();
     doc->SetProjectSymbols(scope.symbols);
     doc->SetProjectParameters(scope.parameters);
-    doc->SetCommitGeometry(index.value("commit_geometry", true));
-    doc->SetCatalogsRaw(index.value("catalogs", json::array()));
-    doc->SetTablesRaw(lookuptable::ListFromJson(index.value("tables", json())));
-    // Refused, not dropped, when one names a measure this build does not
-    // know: the requirement would load as something it is not.
-    doc->SetRequirementsRaw(req::ListToJson(
-        req::ListFromJson(index.value("requirements", json()))));
-    doc->SetTemplatesRaw(
-        tmpl::LibraryFromJson(index.value("templates", json())));
-    doc->SetGeneratorRaw(index.value("generator", json(nullptr)));
-    for (const auto& pj : index.value("parameters", json::array())) {
-      doc->SetParameter(pj.at("name").get<std::string>(),
-                        pj.at("expression").get<std::string>(),
-                        pj.value("comment", std::string{}));
-    }
-    // Tolerances (v98). They reference elements of features, but nothing
-    // about them is evaluated at load: a tolerance is design intent about a
-    // face, so a ref that no longer resolves stays recorded and is reported
-    // as unresolved when something LOOKS, rather than being dropped here.
-    for (const auto& tj : index.value("tolerances", json::array())) {
-      Tolerance t;
-      t.id = tj.value("id", uint64_t{0});
-      t.ref = ElementRefFromJson(tj.value("ref", nlohmann::json::object()));
-      t.ref2 = ElementRefFromJson(tj.value("ref2", nlohmann::json::object()));
-      t.isoClass = tj.value("class", std::string{});
-      t.lower = tj.value("lower", 0.0);
-      t.upper = tj.value("upper", 0.0);
-      t.printedPress = TolerancePrintedFromJson(tj);
-      t.comment = tj.value("comment", std::string{});
-      doc->RestoreTolerance(std::move(t));
-    }
-    // Sheet-metal rules (v108) BEFORE the features: a flange reads the
-    // gauge during Execute, and AddFeature below regenerates.
-    doc->SetSheetMetal(SheetMetalFromEnvelope(index));
-    doc->SetTube(TubeFromEnvelope(index));
-    doc->SetPrintProcess(PrintFromEnvelope(index));
-    if (index.contains("print_settings")) // v181
-      doc->SetPrintSettings(
-          DocumentIO::PartPrintSettingsFromJson(index.at("print_settings")));
+    readctx::InFile("index.json", [&] {
+      CheckEnvelope(index, "part");
+      readctx::RefuseUnknownKeys(index, kPartEnvelopeKeys, "part");
+      ReadPartEnvelope(index, *doc);
+    });
     // Feature files are found by their id prefix — the type suffix is
     // cosmetic and may lag a (hypothetical) rename.
-    std::map<uint64_t, fs::path> byId;
-    std::error_code ec;
-    for (const auto& entry :
-         fs::directory_iterator(fs::path(dirPath) / "features", ec)) {
-      if (entry.path().extension() != ".json")
-        continue;
-      InsertIdFile(byId, entry.path(), "feature");
-    }
+    Collection features = ScanCollection(dir, "features", "feature");
+    if (!index.contains("features"))
+      readctx::Refuse("has no `features` list", "index.json");
+    const auto featureFiles =
+        ListedFiles(index, "features", features, "feature");
     // One regeneration for the whole file, not one per feature (Document::
     // BulkEdit). The guard is released explicitly below — BEFORE the topology
     // results are stamped, since they must carry the settled version.
     auto bulk = std::make_optional<Document::BulkEdit>(*doc);
-    CheckIndexIdsUnique(index.at("features"), "feature");
-    for (const auto& idJson : index.at("features")) {
-      const uint64_t id = idJson.get<uint64_t>();
-      const auto it = byId.find(id);
-      if (it == byId.end()) {
-        if (error)
-          *error = "missing feature file for id " + std::to_string(id);
-        return nullptr;
-      }
-      std::ifstream fin(it->second);
-      doc->AddFeature(FeatureFromJson(ParseProjectFile(it->second)));
-    }
-    // Reference-image bytes (v49) from assets/ into the doc store (absent dir ⇒
-    // nothing to do). Only assets an image references are loaded.
+    for (const auto& [id, rel] : featureFiles)
+      doc->AddFeature(ReadItem(
+          dir, id, rel, [](const json& j) { return FeatureFromJson(j); }));
+    readctx::InFile("index.json", [&] {
+      RequireFeaturesKnownAt(*doc, index.value("version", 0));
+    });
+    // Reference-image bytes (v49) from assets/ into the doc store. Only
+    // assets an image references are loaded, and every one must be there.
     for (const std::string& name : ReferencedAssets(*doc)) {
-      std::ifstream ain(fs::path(dirPath) / "assets" / CheckedAssetName(name),
-                        std::ios::binary);
-      if (ain) {
+      readctx::InFile("assets/" + name, [&] {
+        RequireInside(dir, dir / "assets" / CheckedAssetName(name));
+        std::ifstream ain(dir / "assets" / CheckedAssetName(name),
+                          std::ios::binary);
+        if (!ain)
+          throw std::runtime_error(
+              "missing — the document names this asset, and a load "
+              "without it would save the document back without it");
         std::string data((std::istreambuf_iterator<char>(ain)),
                          std::istreambuf_iterator<char>());
         doc->SetAsset(name,
                       std::vector<unsigned char>(data.begin(), data.end()));
-      }
+      });
     }
     // Study results (v33, v153) loaded below but stored after the final
     // regen.
@@ -1066,69 +1261,41 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // FEM studies (v29): id-prefix files under studies/, index order. A pre-v29
     // document has no `studies` key ⇒ the loop is empty.
     {
-      std::map<uint64_t, fs::path> studyById, resultById;
-      for (const auto& entry :
-           fs::directory_iterator(fs::path(dirPath) / "studies", ec)) {
-        if (entry.path().extension() != ".json")
-          continue;
-        // A result file is "<id>-<slug>.result.json": route it to the
-        // result map, not the study-def map.
-        if (IsResultFile(entry.path()))
-          InsertIdFile(resultById, entry.path(), "study result");
-        else
-          InsertIdFile(studyById, entry.path(), "study");
-      }
-      CheckIndexIdsUnique(index.value("studies", json::array()), "study");
-      for (const auto& idJson : index.value("studies", json::array())) {
-        const uint64_t id = idJson.get<uint64_t>();
-        const auto it = studyById.find(id);
-        if (it == studyById.end()) {
-          if (error)
-            *error = "missing study file for id " + std::to_string(id);
-          return nullptr;
-        }
-        std::ifstream sin(it->second);
-        doc->RestoreStudy(StudyFromJson(ParseProjectFile(it->second)));
+      Collection studies = ScanCollection(dir, "studies", "study", ".result");
+      for (const auto& [id, rel] :
+           ListedFiles(index, "studies", studies, "study")) {
+        doc->RestoreStudy(ReadItem(
+            dir, id, rel, [](const json& j) { return StudyFromJson(j); }));
         // A persisted result loads into the transient runtime cache.
         // Defer storing it until after the final regeneration below so it can
         // be stamped with the settled document version (else the rollback /
         // active-config regen would leave it spuriously stale).
-        const auto rit = resultById.find(id);
-        if (rit != resultById.end())
-          if (auto rj = ReadResultFiles(rit->second))
-            pendingResults.emplace_back(id, StudyResultFromJson(*rj));
+        const auto rit = studies.derived.find(id);
+        if (rit == studies.derived.end())
+          continue;
+        if (auto rj = ReadResultFiles(dir, rit->second))
+          if (auto rt = ReadDerived<fem::StudyRuntime>(
+                  rit->second, [&] { return StudyResultFromJson(*rj); }))
+            pendingResults.emplace_back(id, std::move(*rt));
       }
     }
     // Configurations (v31): id-prefix files under configurations/, index order.
     {
-      std::map<uint64_t, fs::path> cfgById;
-      for (const auto& entry :
-           fs::directory_iterator(fs::path(dirPath) / "configurations", ec)) {
-        if (entry.path().extension() != ".json")
-          continue;
-        InsertIdFile(cfgById, entry.path(), "configuration");
-      }
-      CheckIndexIdsUnique(index.value("configurations", json::array()),
-                          "configuration");
-      for (const auto& idJson : index.value("configurations", json::array())) {
-        const auto it = cfgById.find(idJson.get<uint64_t>());
-        if (it == cfgById.end()) {
-          if (error)
-            *error = "missing configuration file for id " +
-                     std::to_string(idJson.get<uint64_t>());
-          return nullptr;
-        }
-        std::ifstream cin(it->second);
-        doc->RestoreConfiguration(
-            ConfigurationFromJson(ParseProjectFile(it->second)));
-      }
+      Collection configs =
+          ScanCollection(dir, "configurations", "configuration");
+      for (const auto& [id, rel] :
+           ListedFiles(index, "configurations", configs, "configuration"))
+        doc->RestoreConfiguration(ReadItem(dir, id, rel, [](const json& j) {
+          return ConfigurationFromJson(j);
+        }));
     }
-    doc->SetRollback(index.value("rollback", -1));
-    // Apply the active configuration last so the final regeneration reflects
-    // it.
-    doc->SetActiveConfiguration(
-        index.value("active_configuration", uint64_t{0}));
-    doc->SetUnits(UnitsFromEnvelope(index)); // v64
+    readctx::InFile("index.json", [&] {
+      doc->SetRollback(index.value("rollback", -1));
+      // Apply the active configuration last so the final regeneration
+      // reflects it.
+      SetActive(*doc, index);
+      doc->SetUnits(UnitsFromEnvelope(index)); // v64
+    });
     // Adopt the baked bodies BEFORE the regeneration below: it is that
     // regeneration which decides whether they still describe the recipe.
     LoadGeometry(*doc, dirPath);
@@ -1159,7 +1326,9 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     return doc;
   } catch (const std::exception& e) {
     if (error)
-      *error = e.what();
+      *error = dynamic_cast<const readctx::Error*>(&e) != nullptr
+                   ? std::string(e.what())
+                   : readctx::Named(e.what());
     LOG_ERROR("Failed to load project directory {}: {}", dirPath, e.what());
     return nullptr;
   }
@@ -1382,264 +1551,155 @@ bool SaveAssemblyDir(const AssemblyDocument& asmDoc, const std::string& dirPath,
   }
 }
 
+// What an assembly's envelope may hold, in either form (the single file
+// carries its collections inline). `exploded_views` is a key some v55-v57
+// files carry, always empty, that no build ever read.
+constexpr std::initializer_list<std::string_view> kAssemblyEnvelopeKeys = {
+    "format",
+    "version",
+    "kind",
+    "units",
+    "occurrences",
+    "mates",
+    "exploded",
+    "relations",
+    "motion",
+    "studies",
+    "assertions",
+    "configurations",
+    "active_configuration",
+    "sequence",
+    "exploded_views"};
+
+void CheckAssemblyEnvelope(const json& j) {
+  CheckEnvelope(j, "assembly");
+  readctx::RefuseUnknownKeys(j, kAssemblyEnvelopeKeys, "assembly");
+  RequireLists(j, {{"occurrences", 23}});
+  if (j.contains("exploded_views") &&
+      !(j.at("exploded_views").is_array() && j.at("exploded_views").empty()))
+    throw std::runtime_error("`exploded_views` is not read by any build "
+                             "(the exploded views are `exploded`), and this "
+                             "one is not empty");
+}
+
 std::unique_ptr<AssemblyDocument> LoadAssemblyDir(const std::string& dirPath,
                                                   std::string* error) {
   namespace fs = std::filesystem;
+  const fs::path dir(dirPath);
   try {
-    std::ifstream in(fs::path(dirPath) / "index.json");
-    if (!in) {
-      if (error)
-        *error = "Not a Lobole project directory: " + dirPath;
-      return nullptr;
-    }
-    json index = ParseProjectFile(fs::path(dirPath) / "index.json");
-    if (index.value("format", "") != kFormat) {
-      if (error)
-        *error = "Not a Lobole document: " + dirPath;
-      return nullptr;
-    }
-    if (index.value("version", 0) > kVersion) {
-      if (error)
-        *error = "Document version is newer than this build supports";
-      return nullptr;
-    }
-    if (index.value("kind", "part") != "assembly") {
-      if (error)
-        *error = "Not an assembly: " + dirPath;
-      return nullptr;
-    }
-
-    // Occurrence files are found by their id prefix — the label suffix is
-    // cosmetic and may lag a rename.
-    std::map<uint64_t, fs::path> byId;
     std::error_code ec;
-    for (const auto& entry :
-         fs::directory_iterator(fs::path(dirPath) / "occurrences", ec)) {
-      if (entry.path().extension() != ".json")
-        continue;
-      InsertIdFile(byId, entry.path(), "occurrence");
-    }
-    std::vector<json> occJsons;
-    CheckIndexIdsUnique(index.value("occurrences", json::array()),
-                        "occurrence");
-    for (const auto& idJson : index.value("occurrences", json::array())) {
-      const uint64_t id = idJson.get<uint64_t>();
-      const auto it = byId.find(id);
-      if (it == byId.end()) {
-        if (error)
-          *error = "missing occurrence file for id " + std::to_string(id);
-        return nullptr;
-      }
-      std::ifstream fin(it->second);
-      occJsons.push_back(ParseProjectFile(it->second));
-    }
+    if (!fs::is_regular_file(dir / "index.json", ec))
+      readctx::Refuse("missing: this is not a Lobole document directory",
+                      "index.json");
+    const json index = ParseProjectFile(dir, "index.json");
+    readctx::InFile("index.json", [&] { CheckAssemblyEnvelope(index); });
+
+    // Each collection's files are found by their id prefix — the label
+    // suffix is cosmetic and may lag a rename — and loaded in index order.
+    // A collection a version predates has no key, so its loop is empty.
+    // Each item converts inside its own file's context, so a refusal names
+    // the file: the json goes in with the name it came from.
+    const auto convertAll = [&](const char* sub, const char* key,
+                                const char* what, auto&& convert) {
+      Collection c = ScanCollection(dir, sub, what);
+      for (const auto& [id, rel] : ListedFiles(index, key, c, what))
+        ReadItem(dir, id, rel, [&](const json& j) {
+          convert(j);
+          return 0;
+        });
+    };
     auto asmDoc = std::make_unique<AssemblyDocument>();
-    LoadOccurrences(*asmDoc, occJsons);
-
-    // Mates (v24): found by id prefix under mates/, loaded in index order. A
-    // v23 assembly has no `mates` key ⇒ the loop is empty.
-    std::map<uint64_t, fs::path> mateById;
-    for (const auto& entry :
-         fs::directory_iterator(fs::path(dirPath) / "mates", ec)) {
-      if (entry.path().extension() != ".json")
-        continue;
-      InsertIdFile(mateById, entry.path(), "mate");
-    }
-    std::vector<json> mateJsons;
-    CheckIndexIdsUnique(index.value("mates", json::array()), "mate");
-    for (const auto& idJson : index.value("mates", json::array())) {
-      const uint64_t id = idJson.get<uint64_t>();
-      const auto it = mateById.find(id);
-      if (it == mateById.end()) {
-        if (error)
-          *error = "missing mate file for id " + std::to_string(id);
-        return nullptr;
-      }
-      std::ifstream fin(it->second);
-      mateJsons.push_back(ParseProjectFile(it->second));
-    }
-    LoadMates(*asmDoc, mateJsons);
-
-    // Exploded views (v27): id-prefix files under exploded/, index order. A
-    // pre-v27 assembly has no `exploded` key ⇒ the loop is empty.
-    std::map<uint64_t, fs::path> viewById;
-    for (const auto& entry :
-         fs::directory_iterator(fs::path(dirPath) / "exploded", ec)) {
-      if (entry.path().extension() != ".json")
-        continue;
-      InsertIdFile(viewById, entry.path(), "view");
-    }
-    std::vector<json> viewJsons;
-    for (const auto& idJson : index.value("exploded", json::array())) {
-      const uint64_t id = idJson.get<uint64_t>();
-      const auto it = viewById.find(id);
-      if (it == viewById.end()) {
-        if (error)
-          *error = "missing exploded-view file for id " + std::to_string(id);
-        return nullptr;
-      }
-      std::ifstream fin(it->second);
-      viewJsons.push_back(ParseProjectFile(it->second));
-    }
-    LoadExplodedViews(*asmDoc, viewJsons);
-
-    // Relations (v83): id-prefix files under relations/, index order.
+    uint64_t maxId = 0;
+    convertAll("occurrences", "occurrences", "occurrence", [&](const json& j) {
+      Occurrence o = OccurrenceFromJson(j);
+      maxId = std::max(maxId, o.id);
+      asmDoc->GetOccurrences().push_back(std::move(o));
+    });
+    // Mates (v24) share the id space with occurrences, as every collection
+    // below does: the counter is pinned past the highest of them all.
+    convertAll("mates", "mates", "mate", [&](const json& j) {
+      Mate m = MateFromJson(j);
+      maxId = std::max(maxId, m.id);
+      asmDoc->GetMates().push_back(std::move(m));
+    });
+    convertAll("exploded", "exploded", "exploded view", [&](const json& j) {
+      ExplodedView v = ExplodedViewFromJson(j);
+      maxId = std::max(maxId, v.id);
+      asmDoc->GetExplodedViews().push_back(std::move(v));
+    });
+    convertAll("relations", "relations", "relation", [&](const json& j) {
+      Relation r = RelationFromJson(j);
+      maxId = std::max(maxId, r.id);
+      asmDoc->GetRelations().push_back(std::move(r));
+    });
+    convertAll("assertions", "assertions", "assertion", [&](const json& j) {
+      ClearanceAssertion a = ClearanceAssertionFromJson(j);
+      maxId = std::max(maxId, a.id);
+      asmDoc->GetAssertions().push_back(std::move(a));
+    });
+    // Motion studies (v87); a result (v153) beside its study, read current
+    // or stale by the app, which can resolve the parts its input hash reads
+    // (ui::AdoptSavedMotionResults).
     {
-      std::map<uint64_t, fs::path> relById;
-      for (const auto& entry :
-           fs::directory_iterator(fs::path(dirPath) / "relations", ec)) {
-        if (entry.path().extension() != ".json")
+      Collection c = ScanCollection(dir, "motion", "motion study", ".result");
+      for (const auto& [id, rel] :
+           ListedFiles(index, "motion", c, "motion study")) {
+        ReadItem(dir, id, rel, [&](const json& j) {
+          MotionStudy s = MotionStudyFromJson(j);
+          maxId = std::max(maxId, s.id);
+          asmDoc->GetMotionStudies().push_back(std::move(s));
+          return 0;
+        });
+        const auto rit = c.derived.find(id);
+        if (rit == c.derived.end())
           continue;
-        InsertIdFile(relById, entry.path(), "relation");
+        if (auto rj = ReadResultFiles(dir, rit->second))
+          if (auto r = ReadDerived<motion::Result>(
+                  rit->second, [&] { return MotionResultFromJson(*rj); }))
+            asmDoc->StoreMotionResult(
+                id, std::make_shared<const motion::Result>(std::move(*r)));
       }
-      std::vector<json> relJsons;
-      for (const auto& idJson : index.value("relations", json::array())) {
-        const uint64_t id = idJson.get<uint64_t>();
-        const auto it = relById.find(id);
-        if (it == relById.end()) {
-          if (error)
-            *error = "missing relation file for id " + std::to_string(id);
-          return nullptr;
-        }
-        relJsons.push_back(ParseProjectFile(it->second));
-      }
-      LoadRelations(*asmDoc, relJsons);
     }
-
-    // Clearance assertions (v97): id-prefix files under assertions/.
+    asmDoc->EnsureNextIdAtLeast(maxId + 1);
+    // FEM studies (v106); a result (v153) beside its study, stale until the
+    // app, which can resolve the parts the input hash reads, finds it
+    // current (ui::AdoptStoredResults).
     {
-      std::map<uint64_t, fs::path> byId;
-      for (const auto& entry :
-           fs::directory_iterator(fs::path(dirPath) / "assertions", ec)) {
-        if (entry.path().extension() != ".json")
+      Collection c = ScanCollection(dir, "studies", "study", ".result");
+      for (const auto& [id, rel] : ListedFiles(index, "studies", c, "study")) {
+        asmDoc->RestoreStudy(ReadItem(
+            dir, id, rel, [](const json& j) { return StudyFromJson(j); }));
+        const auto rit = c.derived.find(id);
+        if (rit == c.derived.end())
           continue;
-        InsertIdFile(byId, entry.path(), "assertion");
-      }
-      std::vector<json> jsons;
-      for (const auto& idJson : index.value("assertions", json::array())) {
-        const uint64_t id = idJson.get<uint64_t>();
-        const auto it = byId.find(id);
-        if (it == byId.end()) {
-          if (error)
-            *error = "missing assertion file for id " + std::to_string(id);
-          return nullptr;
-        }
-        jsons.push_back(ParseProjectFile(it->second));
-      }
-      LoadAssertions(*asmDoc, jsons);
-    }
-
-    // Motion studies (v87): id-prefix files under motion/, index order; a
-    // result (v153) beside its study.
-    {
-      std::map<uint64_t, fs::path> byId, resultById;
-      for (const auto& entry :
-           fs::directory_iterator(fs::path(dirPath) / "motion", ec)) {
-        if (entry.path().extension() != ".json")
-          continue;
-        if (IsResultFile(entry.path()))
-          InsertIdFile(resultById, entry.path(), "motion result");
-        else
-          InsertIdFile(byId, entry.path(), "motion");
-      }
-      std::vector<json> jsons;
-      for (const auto& idJson : index.value("motion", json::array())) {
-        const uint64_t id = idJson.get<uint64_t>();
-        const auto it = byId.find(id);
-        if (it == byId.end()) {
-          if (error)
-            *error = "missing motion study file for id " + std::to_string(id);
-          return nullptr;
-        }
-        jsons.push_back(ParseProjectFile(it->second));
-      }
-      LoadMotionStudies(*asmDoc, jsons);
-      // Read current or stale by the app, which can resolve the parts its
-      // input hash reads (ui::AdoptSavedMotionResults).
-      for (const auto& [id, path] : resultById)
-        if (asmDoc->FindMotionStudyById(id) != nullptr)
-          if (auto rj = ReadResultFiles(path))
-            asmDoc->StoreMotionResult(id,
-                                      std::make_shared<const motion::Result>(
-                                          MotionResultFromJson(*rj)));
-    }
-
-    // FEM studies (v106): id-prefix files under studies/, index order; a
-    // result (v153) beside its study.
-    {
-      std::map<uint64_t, fs::path> byId, resultById;
-      for (const auto& entry :
-           fs::directory_iterator(fs::path(dirPath) / "studies", ec)) {
-        if (entry.path().extension() != ".json")
-          continue;
-        if (IsResultFile(entry.path()))
-          InsertIdFile(resultById, entry.path(), "study result");
-        else
-          InsertIdFile(byId, entry.path(), "study");
-      }
-      CheckIndexIdsUnique(index.value("studies", json::array()), "study");
-      std::vector<json> jsons;
-      for (const auto& idJson : index.value("studies", json::array())) {
-        const uint64_t id = idJson.get<uint64_t>();
-        const auto it = byId.find(id);
-        if (it == byId.end()) {
-          if (error)
-            *error = "missing study file for id " + std::to_string(id);
-          return nullptr;
-        }
-        jsons.push_back(ParseProjectFile(it->second));
-      }
-      LoadAssemblyStudies(*asmDoc, jsons);
-      // Stale until the app, which can resolve the parts the input hash
-      // reads, finds it current (ui::AdoptStoredResults).
-      for (const auto& [id, path] : resultById) {
-        if (asmDoc->FindStudy(id) == nullptr)
-          continue;
-        auto rj = ReadResultFiles(path);
-        if (!rj)
-          continue;
-        fem::StudyRuntime rt = StudyResultFromJson(*rj);
-        rt.solvedAtVersion = UINT64_MAX;
-        asmDoc->StoreStudyResults(id, std::move(rt));
+        if (auto rj = ReadResultFiles(dir, rit->second))
+          if (auto rt = ReadDerived<fem::StudyRuntime>(
+                  rit->second, [&] { return StudyResultFromJson(*rj); })) {
+            rt->solvedAtVersion = UINT64_MAX;
+            asmDoc->StoreStudyResults(id, std::move(*rt));
+          }
       }
     }
-
-    // Configurations (v31): id-prefix files under configurations/, index order.
-    {
-      std::map<uint64_t, fs::path> cfgById;
-      for (const auto& entry :
-           fs::directory_iterator(fs::path(dirPath) / "configurations", ec)) {
-        if (entry.path().extension() != ".json")
-          continue;
-        InsertIdFile(cfgById, entry.path(), "configuration");
-      }
-      CheckIndexIdsUnique(index.value("configurations", json::array()),
-                          "configuration");
-      for (const auto& idJson : index.value("configurations", json::array())) {
-        const auto it = cfgById.find(idJson.get<uint64_t>());
-        if (it == cfgById.end()) {
-          if (error)
-            *error = "missing configuration file for id " +
-                     std::to_string(idJson.get<uint64_t>());
-          return nullptr;
-        }
-        std::ifstream cin(it->second);
-        asmDoc->RestoreConfiguration(
-            ConfigurationFromJson(ParseProjectFile(it->second)));
-      }
-    }
-    asmDoc->SetActiveConfiguration(
-        index.value("active_configuration", uint64_t{0}));
-    if (index.contains("sequence")) // v187
-      asmDoc->SetSequence(AssemblySequenceFromJson(index.at("sequence")));
-    asmDoc->SetUnits(UnitsFromEnvelope(index)); // v64
+    // Configurations (v31).
+    convertAll("configurations", "configurations", "configuration",
+               [&](const json& j) {
+                 asmDoc->RestoreConfiguration(ConfigurationFromJson(j));
+               });
+    readctx::InFile("index.json", [&] {
+      SetActive(*asmDoc, index);
+      if (index.contains("sequence")) // v187
+        asmDoc->SetSequence(AssemblySequenceFromJson(index.at("sequence")));
+      asmDoc->SetUnits(UnitsFromEnvelope(index)); // v64
+    });
 
     LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
              asmDoc->OccurrenceCount(), asmDoc->MateCount(), dirPath);
     return asmDoc;
   } catch (const std::exception& e) {
     if (error)
-      *error = e.what();
+      *error = dynamic_cast<const readctx::Error*>(&e) != nullptr
+                   ? std::string(e.what())
+                   : readctx::Named(e.what());
     LOG_ERROR("Failed to load assembly directory {}: {}", dirPath, e.what());
     return nullptr;
   }
@@ -1678,7 +1738,7 @@ static bool SaveImpl(const Document& doc, const std::string& path,
       json assets = json::object();
       for (const std::string& name : ReferencedAssets(doc)) {
         const std::vector<unsigned char>* bytes = doc.GetAsset(name);
-        if (bytes && !bytes->empty())
+        if (bytes != nullptr) // an empty one too (see SaveDir)
           assets[name] = Base64Encode(*bytes);
       }
       if (!assets.empty())
@@ -1702,6 +1762,79 @@ static bool SaveImpl(const Document& doc, const std::string& path,
   }
 }
 
+namespace {
+
+// Converts one item of a single-file document's inline list, naming it in a
+// refusal: "features[3]: Fillet: radius: ...". The file is the caller's.
+template <class F> decltype(auto) AtItem(const char* key, size_t i, F&& fn) {
+  try {
+    return fn();
+  } catch (const readctx::Error&) {
+    throw;
+  } catch (const std::exception& e) {
+    throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
+                             "]: " + e.what());
+  }
+}
+
+// An inline list of a single-file document: absent is empty, anything but
+// an array is refused, and so is an id two of its items carry -- the
+// single-file half of the merge hazard the directory form refuses as two
+// files claiming one id (ScanCollection). Checked before any item is
+// built, so a list grown to a million copies of one item is refused at its
+// second.
+json InlineList(const json& j, const char* key) {
+  const json list = j.value(key, json::array());
+  if (!list.is_array())
+    throw std::runtime_error(std::string("`") + key + "` is a list, not " +
+                             list.type_name());
+  std::map<uint64_t, size_t> seen;
+  const bool v1Items = std::string_view(key) == "features";
+  for (size_t i = 0; i < list.size(); i++) {
+    const json& item = list[i];
+    // Only a v1 feature comes without an id (the document gives it one);
+    // any other item without one would be saved as id 0, which nothing
+    // can read back.
+    if (item.is_object() && !item.contains("id") && !v1Items)
+      throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
+                               "] has no id");
+    if (!item.is_object() || !item.contains("id"))
+      continue;
+    // A fraction or a negative id would read as another whole one (1.5 as
+    // 1), and two items could then share it.
+    if (!item.at("id").is_number_unsigned())
+      throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
+                               "]: its id " + item.at("id").dump() +
+                               " is not a whole number");
+    const uint64_t id = item.at("id").get<uint64_t>();
+    // A v1 feature has none, which reads as 0 and gets one; anything else
+    // with 0 lost its id, and every reference to it resolves to nothing.
+    if (id == 0) {
+      if (std::string_view(key) == "features")
+        continue;
+      throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
+                               "] has id 0, which no item has");
+    }
+    const auto [it, inserted] = seen.emplace(id, i);
+    if (!inserted)
+      throw std::runtime_error(
+          std::string(key) + "[" + std::to_string(i) + "] has id " +
+          std::to_string(id) + ", which " + key + "[" +
+          std::to_string(it->second) +
+          "] has too — a merge kept both; renumber one of them");
+  }
+  return list;
+}
+
+// The error a load returns: already named, or named here.
+std::string LoadError(const std::exception& e) {
+  return dynamic_cast<const readctx::Error*>(&e) != nullptr
+             ? std::string(e.what())
+             : readctx::Named(e.what());
+}
+
+} // namespace
+
 static std::unique_ptr<Document> LoadImpl(const std::string& path,
                                           std::string* error,
                                           const ProjectScope& scope) {
@@ -1710,101 +1843,70 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
     return LoadDir(normalized, error, scope);
   }
   try {
-    std::ifstream in(path);
-    if (!in) {
-      if (error)
-        *error = "Cannot open file: " + path;
-      return nullptr;
-    }
-    json j = ParseProjectFile(path);
-
-    if (j.value("format", "") != kFormat) {
-      if (error)
-        *error = "Not a Lobole document: " + path;
-      return nullptr;
-    }
-    if (j.value("version", 0) > kVersion) {
-      if (error)
-        *error = "Document version is newer than this build supports";
-      return nullptr;
-    }
-    if (j.value("kind", "part") != "part") {
-      if (error)
-        *error =
-            "This is a " + j.value("kind", "part") + ", not a part: " + path;
-      return nullptr;
-    }
-
-    auto doc = std::make_unique<Document>();
-    doc->SetProjectSymbols(scope.symbols);
-    doc->SetProjectParameters(scope.parameters);
-    doc->SetCommitGeometry(j.value("commit_geometry", true));
-    doc->SetCatalogsRaw(j.value("catalogs", json::array()));
-    doc->SetTablesRaw(lookuptable::ListFromJson(j.value("tables", json())));
-    // Refused, not dropped, when one names a measure this build does not
-    // know: the requirement would load as something it is not.
-    doc->SetRequirementsRaw(
-        req::ListToJson(req::ListFromJson(j.value("requirements", json()))));
-    doc->SetTemplatesRaw(tmpl::LibraryFromJson(j.value("templates", json())));
-    doc->SetGeneratorRaw(j.value("generator", json(nullptr)));
-    // Parameters first: features' expressions evaluate against them on the
-    // regeneration each AddFeature triggers.
-    for (const auto& pj : j.value("parameters", json::array())) {
-      doc->SetParameter(pj.at("name").get<std::string>(),
-                        pj.at("expression").get<std::string>(),
-                        pj.value("comment", std::string{}));
-    }
-    // Tolerances (v98). They reference elements of features, but nothing
-    // about them is evaluated at load: a tolerance is design intent about a
-    // face, so a ref that no longer resolves stays recorded and is reported
-    // as unresolved when something LOOKS, rather than being dropped here.
-    for (const auto& tj : j.value("tolerances", json::array())) {
-      Tolerance t;
-      t.id = tj.value("id", uint64_t{0});
-      t.ref = ElementRefFromJson(tj.value("ref", nlohmann::json::object()));
-      t.ref2 = ElementRefFromJson(tj.value("ref2", nlohmann::json::object()));
-      t.isoClass = tj.value("class", std::string{});
-      t.lower = tj.value("lower", 0.0);
-      t.upper = tj.value("upper", 0.0);
-      t.printedPress = TolerancePrintedFromJson(tj);
-      t.comment = tj.value("comment", std::string{});
-      doc->RestoreTolerance(std::move(t));
-    }
-    // Sheet-metal rules (v108) BEFORE the features, for the reason above.
-    doc->SetSheetMetal(SheetMetalFromEnvelope(j));
-    doc->SetTube(TubeFromEnvelope(j));
-    doc->SetPrintProcess(PrintFromEnvelope(j));
-    if (j.contains("print_settings")) // v181
-      doc->SetPrintSettings(
-          DocumentIO::PartPrintSettingsFromJson(j.at("print_settings")));
-    // Assets (v49 image bytes, v84 derived snapshots): decode the base64
-    // "assets" map into the doc store BEFORE the features regenerate — a
-    // Derived feature reads its B-Reps from it during Execute.
-    if (j.contains("assets"))
-      for (const auto& [name, b64] : j.at("assets").items())
-        doc->SetAsset(CheckedAssetName(name),
-                      Base64Decode(b64.get<std::string>()));
-    {
-      Document::BulkEdit bulk(*doc); // one regeneration, not one per feature
-      for (const auto& fj : j.at("features")) {
-        doc->AddFeature(FeatureFromJson(fj));
-      }
-    }
-    for (const auto& sj : j.value("studies", json::array())) { // v29
-      doc->RestoreStudy(StudyFromJson(sj));
-    }
-    for (const auto& cj : j.value("configurations", json::array())) { // v31
-      doc->RestoreConfiguration(ConfigurationFromJson(cj));
-    }
-    doc->SetRollback(j.value("rollback", -1)); // v19; absent = end
-    doc->SetActiveConfiguration(j.value("active_configuration", uint64_t{0}));
-    doc->SetUnits(UnitsFromEnvelope(j)); // v64
-    LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
-             path);
-    return doc;
+    return readctx::InFile(
+        std::filesystem::path(path).filename().string(), [&] {
+          const json j = ParseFileText(path);
+          CheckEnvelope(j, "part");
+          readctx::RefuseUnknownKeys(j, WithKeys(kPartEnvelopeKeys, {"assets"}),
+                                     "part");
+          auto doc = std::make_unique<Document>();
+          doc->SetProjectSymbols(scope.symbols);
+          doc->SetProjectParameters(scope.parameters);
+          // Parameters first: features' expressions evaluate against them
+          // on the regeneration each AddFeature triggers.
+          ReadPartEnvelope(j, *doc);
+          // Assets (v49 image bytes, v84 derived snapshots): decode the
+          // base64 "assets" map into the doc store BEFORE the features
+          // regenerate — a Derived feature reads its B-Reps from it during
+          // Execute.
+          if (j.contains("assets")) {
+            if (!j.at("assets").is_object())
+              throw std::runtime_error("`assets` maps a name to its bytes");
+            for (const auto& [name, b64] : j.at("assets").items())
+              doc->SetAsset(CheckedAssetName(name),
+                            Base64Decode(b64.get<std::string>()));
+          }
+          if (!j.contains("features"))
+            throw std::runtime_error("has no `features` list");
+          {
+            Document::BulkEdit bulk(*doc); // one regeneration, not one each
+            const json features = InlineList(j, "features");
+            for (size_t i = 0; i < features.size(); i++)
+              doc->AddFeature(AtItem(
+                  "features", i, [&] { return FeatureFromJson(features[i]); }));
+            RequireFeaturesKnownAt(*doc, j.value("version", 0));
+          }
+          RequireReferencedAssets(*doc, "`assets`");
+          // An asset nothing names is not written back: the save keeps
+          // only what an image or a snapshot names.
+          if (j.contains("assets")) {
+            const std::set<std::string> named = ReferencedAssets(*doc);
+            for (const auto& [name, b64] : j.at("assets").items())
+              if (!named.contains(name))
+                readctx::Dropped("/assets/" + name,
+                                 "no image or snapshot names this asset, so "
+                                 "a save does not keep it",
+                                 false);
+          }
+          const json studies = InlineList(j, "studies"); // v29
+          for (size_t i = 0; i < studies.size(); i++)
+            doc->RestoreStudy(AtItem(
+                "studies", i, [&] { return StudyFromJson(studies[i]); }));
+          const json configs = InlineList(j, "configurations"); // v31
+          for (size_t i = 0; i < configs.size(); i++)
+            doc->RestoreConfiguration(AtItem("configurations", i, [&] {
+              return ConfigurationFromJson(configs[i]);
+            }));
+          doc->SetRollback(j.value("rollback", -1)); // v19; absent = end
+          SetActive(*doc, j);
+          doc->SetUnits(UnitsFromEnvelope(j)); // v64
+          LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),
+                   path);
+          return doc;
+        });
   } catch (const std::exception& e) {
     if (error)
-      *error = e.what();
+      *error = LoadError(e);
     LOG_ERROR("Failed to load document from {}: {}", path, e.what());
     return nullptr;
   }
@@ -1885,57 +1987,69 @@ LoadAssemblyImpl(const std::string& path, std::string* error) {
     return LoadAssemblyDir(normalized, error);
   }
   try {
-    std::ifstream in(path);
-    if (!in) {
-      if (error)
-        *error = "Cannot open file: " + path;
-      return nullptr;
-    }
-    json j = ParseProjectFile(path);
-    if (j.value("format", "") != kFormat) {
-      if (error)
-        *error = "Not a Lobole document: " + path;
-      return nullptr;
-    }
-    if (j.value("version", 0) > kVersion) {
-      if (error)
-        *error = "Document version is newer than this build supports";
-      return nullptr;
-    }
-    if (j.value("kind", "part") != "assembly") {
-      if (error)
-        *error = "Not an assembly: " + path;
-      return nullptr;
-    }
-    auto asmDoc = std::make_unique<AssemblyDocument>();
-    LoadOccurrences(
-        *asmDoc,
-        j.value("occurrences", json::array()).get<std::vector<json>>());
-    LoadMates(*asmDoc,
-              j.value("mates", json::array()).get<std::vector<json>>());
-    LoadExplodedViews(
-        *asmDoc, j.value("exploded", json::array()).get<std::vector<json>>());
-    LoadRelations(*asmDoc,
-                  j.value("relations", json::array()).get<std::vector<json>>());
-    LoadMotionStudies(
-        *asmDoc, j.value("motion", json::array()).get<std::vector<json>>());
-    LoadAssemblyStudies(
-        *asmDoc, j.value("studies", json::array()).get<std::vector<json>>());
-    LoadAssertions(
-        *asmDoc, j.value("assertions", json::array()).get<std::vector<json>>());
-    for (const auto& cj : j.value("configurations", json::array())) // v31
-      asmDoc->RestoreConfiguration(ConfigurationFromJson(cj));
-    asmDoc->SetActiveConfiguration(
-        j.value("active_configuration", uint64_t{0}));
-    if (j.contains("sequence")) // v187
-      asmDoc->SetSequence(AssemblySequenceFromJson(j.at("sequence")));
-    asmDoc->SetUnits(UnitsFromEnvelope(j)); // v64
-    LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
-             asmDoc->OccurrenceCount(), asmDoc->MateCount(), path);
-    return asmDoc;
+    return readctx::InFile(
+        std::filesystem::path(path).filename().string(), [&] {
+          const json j = ParseFileText(path);
+          CheckAssemblyEnvelope(j);
+          auto asmDoc = std::make_unique<AssemblyDocument>();
+          uint64_t maxId = 0;
+          // Each list in the order the directory form loads them; every
+          // id shares one counter, pinned past the highest of them all.
+          const auto each = [&](const char* key, auto&& convert) {
+            const json list = InlineList(j, key);
+            for (size_t i = 0; i < list.size(); i++)
+              AtItem(key, i, [&] {
+                convert(list[i]);
+                return 0;
+              });
+          };
+          each("occurrences", [&](const json& x) {
+            Occurrence o = OccurrenceFromJson(x);
+            maxId = std::max(maxId, o.id);
+            asmDoc->GetOccurrences().push_back(std::move(o));
+          });
+          each("mates", [&](const json& x) {
+            Mate m = MateFromJson(x);
+            maxId = std::max(maxId, m.id);
+            asmDoc->GetMates().push_back(std::move(m));
+          });
+          each("exploded", [&](const json& x) {
+            ExplodedView v = ExplodedViewFromJson(x);
+            maxId = std::max(maxId, v.id);
+            asmDoc->GetExplodedViews().push_back(std::move(v));
+          });
+          each("relations", [&](const json& x) {
+            Relation r = RelationFromJson(x);
+            maxId = std::max(maxId, r.id);
+            asmDoc->GetRelations().push_back(std::move(r));
+          });
+          each("motion", [&](const json& x) {
+            MotionStudy s = MotionStudyFromJson(x);
+            maxId = std::max(maxId, s.id);
+            asmDoc->GetMotionStudies().push_back(std::move(s));
+          });
+          each("studies",
+               [&](const json& x) { asmDoc->RestoreStudy(StudyFromJson(x)); });
+          each("assertions", [&](const json& x) {
+            ClearanceAssertion a = ClearanceAssertionFromJson(x);
+            maxId = std::max(maxId, a.id);
+            asmDoc->GetAssertions().push_back(std::move(a));
+          });
+          asmDoc->EnsureNextIdAtLeast(maxId + 1);
+          each("configurations", [&](const json& x) { // v31
+            asmDoc->RestoreConfiguration(ConfigurationFromJson(x));
+          });
+          SetActive(*asmDoc, j);
+          if (j.contains("sequence")) // v187
+            asmDoc->SetSequence(AssemblySequenceFromJson(j.at("sequence")));
+          asmDoc->SetUnits(UnitsFromEnvelope(j)); // v64
+          LOG_INFO("Loaded assembly ({} occurrences, {} mates) from {}",
+                   asmDoc->OccurrenceCount(), asmDoc->MateCount(), path);
+          return asmDoc;
+        });
   } catch (const std::exception& e) {
     if (error)
-      *error = e.what();
+      *error = LoadError(e);
     LOG_ERROR("Failed to load assembly from {}: {}", path, e.what());
     return nullptr;
   }
@@ -1972,6 +2086,7 @@ json SheetJson(const Sheet& s) {
 }
 
 Sheet SheetFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j, {"size", "landscape", "title_block"}, "sheet");
   Sheet s;
   // Unknown here used to leave `s.size` at its default: an A2 sheet loaded
   // as A4 with no complaint, and every view's placement and scale was then
@@ -1984,6 +2099,10 @@ Sheet SheetFromJson(const json& j) {
                              "' (expected one of: a4, a3, a2, a1, a0, letter)");
   s.landscape = j.value("landscape", true);
   const json tb = j.value("title_block", json::object());
+  readctx::RefuseUnknownKeys(
+      tb,
+      {"project", "document", "author", "date", "notes", "material", "scale"},
+      "title_block");
   s.titleBlock.project = tb.value("project", std::string{});
   s.titleBlock.document = tb.value("document", std::string{});
   s.titleBlock.author = tb.value("author", std::string{});
@@ -2008,6 +2127,9 @@ json ProjRefJson(const ProjRef& r) {
 }
 
 ProjRef ProjRefFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(
+      j, {"view", "end", "occurrence", "edge", "sil_face", "extreme"},
+      "dimension ref");
   ProjRef r;
   r.viewId = j.value("view", uint64_t{0});
   r.occurrenceId = j.value("occurrence", uint64_t{0});
@@ -2018,9 +2140,20 @@ ProjRef ProjRefFromJson(const json& j) {
                              "' (expected left, right, top or bottom)");
   if (j.contains("edge"))
     r.edge = ElementRefFromJson(j.at("edge"));
+  RequireSetOrEmpty(r.edge, "dimension ref edge");
   if (j.contains("sil_face"))
     r.silFace = ElementRefFromJson(j.at("sil_face"));
+  RequireSetOrEmpty(r.silFace, "dimension ref sil_face");
   return r;
+}
+
+// What a drawing's envelope may hold, in either form.
+void CheckDrawingEnvelope(const json& j) {
+  CheckEnvelope(j, "drawing");
+  readctx::RefuseUnknownKeys(
+      j, {"format", "version", "kind", "sheet", "views", "dims", "notes"},
+      "drawing");
+  RequireLists(j, {{"views", 30}, {"dims", 30}});
 }
 
 json DrawingEnvelope() {
@@ -2066,6 +2199,12 @@ json DrawingViewToJson(const DrawingView& v) {
 }
 
 DrawingView DrawingViewFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j,
+                             {"id", "name", "source", "orientation", "scale",
+                              "position", "show_hidden", "quality", "hidden",
+                              "base_view", "scale_expr", "configuration",
+                              "rotation_deg", "section", "detail"},
+                             "drawing view");
   DrawingView v;
   v.id = j.value("id", uint64_t{0});
   v.name = j.value("name", std::string{});
@@ -2078,9 +2217,8 @@ DrawingView DrawingViewFromJson(const json& j) {
   v.baseViewId = j.value("base_view", uint64_t{0});
   v.scale = j.value("scale", 1.0);
   v.scaleExpr = j.value("scale_expr", std::string{});
-  const json p = j.value("position", json::array({0.0, 0.0}));
-  if (p.is_array() && p.size() == 2)
-    v.position = {p[0].get<double>(), p[1].get<double>()};
+  if (HasArrayOf(j, "position", 2))
+    v.position = Vec2FromJson(j.at("position"));
   v.showHidden = j.value("show_hidden", true);
   v.quality = j.value("quality", std::string("exact"));
   v.hidden = j.value("hidden", std::vector<uint64_t>{});
@@ -2088,6 +2226,7 @@ DrawingView DrawingViewFromJson(const json& j) {
   v.rotationDeg = j.value("rotation_deg", 0.0);
   if (j.contains("section")) {
     const json& sj = j.at("section");
+    readctx::RefuseUnknownKeys(sj, {"point", "label"}, "section");
     const json p = sj.value("point", json::array());
     if (!p.is_array() || p.size() != 3)
       throw std::runtime_error("a section view's point is [x, y, z]");
@@ -2098,6 +2237,8 @@ DrawingView DrawingViewFromJson(const json& j) {
   }
   if (j.contains("detail")) { // v151
     const json& dj = j.at("detail");
+    readctx::RefuseUnknownKeys(dj, {"view", "center", "radius_mm", "label"},
+                               "detail");
     const json c = dj.value("center", json::array());
     if (!c.is_array() || c.size() != 3)
       throw std::runtime_error("a detail view's center is [x, y, z]");
@@ -2142,24 +2283,40 @@ json DrawingNoteToJson(const DrawingNote& n) {
 }
 
 DrawingNote DrawingNoteFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(
+      j,
+      {"id", "text", "pos", "view", "leader", "table", "style", "fcf", "dim"},
+      "drawing note");
   DrawingNote n;
   n.id = j.value("id", uint64_t{0});
   n.text = j.value("text", std::string{});
-  if (j.contains("pos") && j.at("pos").is_array() && j.at("pos").size() == 2)
-    n.pos = {j.at("pos").at(0).get<double>(), j.at("pos").at(1).get<double>()};
+  if (HasArrayOf(j, "pos", 2))
+    n.pos = Vec2FromJson(j.at("pos"));
   n.viewId = j.value("view", uint64_t{0});
-  if (j.contains("leader"))
+  if (j.contains("leader")) {
     n.leader = ProjRefFromJson(j.at("leader"));
+    // A leader points at an edge or a silhouette; one that names neither
+    // is not written back.
+    if (!n.leader.edge.IsSet() && !n.leader.silFace.IsSet())
+      throw std::runtime_error("a note's leader names neither an edge nor a "
+                               "sil_face");
+  }
   const std::string table = j.value("table", std::string("none"));
   if (!NoteTableFromString(table, n.table))
     throw std::runtime_error(UnknownNoteTable(table));
   const std::string style = j.value("style", std::string("text"));
   if (!NoteStyleFromString(style, n.style))
     throw std::runtime_error(UnknownNoteStyle(style));
+  if (j.contains("fcf") && n.style != NoteStyle::Fcf)
+    throw std::runtime_error("`fcf` is an fcf note's frame; this note's "
+                             "style is " +
+                             std::string(NoteStyleToString(n.style)));
   if (n.style == NoteStyle::Fcf) { // v151
     if (!j.contains("fcf") || !j.at("fcf").is_object())
       throw std::runtime_error("an fcf note carries its frame in `fcf`");
     const json& f = j.at("fcf");
+    readctx::RefuseUnknownKeys(
+        f, {"symbol", "tolerance_mm", "datums", "diameter", "modifier"}, "fcf");
     const std::string symbol = f.value("symbol", std::string{});
     if (!GeoSymbolFromString(symbol, n.fcf.symbol))
       throw std::runtime_error(UnknownGeoSymbol(symbol));
@@ -2188,6 +2345,8 @@ json DrawingDimToJson(const DrawingDim& d) {
 }
 
 DrawingDim DrawingDimFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j, {"id", "kind", "view", "refs", "label_offset"},
+                             "drawing dimension");
   DrawingDim d;
   d.id = j.value("id", uint64_t{0});
   // An unknown kind string used to silently default to Distance — surface it
@@ -2199,9 +2358,8 @@ DrawingDim DrawingDimFromJson(const json& j) {
   d.viewId = j.value("view", uint64_t{0});
   for (const json& rj : j.value("refs", json::array()))
     d.refs.push_back(ProjRefFromJson(rj));
-  const json o = j.value("label_offset", json::array({0.0, 0.0}));
-  if (o.is_array() && o.size() == 2)
-    d.labelOffset = {o[0].get<double>(), o[1].get<double>()};
+  if (HasArrayOf(j, "label_offset", 2))
+    d.labelOffset = Vec2FromJson(j.at("label_offset"));
   return d;
 }
 
@@ -2284,100 +2442,66 @@ bool SaveDrawingDir(const DrawingDocument& dwg, const std::string& dirPath,
 std::unique_ptr<DrawingDocument> LoadDrawingDir(const std::string& dirPath,
                                                 std::string* error) {
   namespace fs = std::filesystem;
+  const fs::path dir(dirPath);
   try {
-    std::ifstream in(fs::path(dirPath) / "index.json");
-    if (!in) {
-      if (error)
-        *error = "Not a Lobole project directory: " + dirPath;
-      return nullptr;
-    }
-    json index = ParseProjectFile(fs::path(dirPath) / "index.json");
-    if (index.value("format", "") != kFormat) {
-      if (error)
-        *error = "Not a Lobole document: " + dirPath;
-      return nullptr;
-    }
-    if (index.value("version", 0) > kVersion) {
-      if (error)
-        *error = "Document version is newer than this build supports";
-      return nullptr;
-    }
-    if (index.value("kind", "part") != "drawing") {
-      if (error)
-        *error = "Not a drawing: " + dirPath;
-      return nullptr;
-    }
-
-    auto dwg = std::make_unique<DrawingDocument>();
-    dwg->GetSheet() = SheetFromJson(index.value("sheet", json::object()));
-
-    std::map<uint64_t, fs::path> viewById, projectionById;
     std::error_code ec;
-    for (const auto& entry :
-         fs::directory_iterator(fs::path(dirPath) / "views", ec)) {
-      if (entry.path().extension() != ".json")
-        continue;
-      if (IsProjectionFile(entry.path()))
-        InsertIdFile(projectionById, entry.path(), "view projection");
-      else
-        InsertIdFile(viewById, entry.path(), "view");
-    }
+    if (!fs::is_regular_file(dir / "index.json", ec))
+      readctx::Refuse("missing: this is not a Lobole document directory",
+                      "index.json");
+    const json index = ParseProjectFile(dir, "index.json");
+    auto dwg = std::make_unique<DrawingDocument>();
     uint64_t maxId = 0;
-    CheckIndexIdsUnique(index.value("views", json::array()), "view");
-    for (const auto& idJson : index.value("views", json::array())) {
-      const auto it = viewById.find(idJson.get<uint64_t>());
-      if (it == viewById.end())
-        continue;
-      std::ifstream vin(it->second);
-      DrawingView v = DrawingViewFromJson(ParseProjectFile(it->second));
+    readctx::InFile("index.json", [&] {
+      CheckDrawingEnvelope(index);
+      dwg->GetSheet() = SheetFromJson(index.value("sheet", json::object()));
+    });
+
+    // A view or a dimension the index lists and the directory lacks is
+    // REFUSED (ListedFiles): it used to be skipped, and the drawing loaded
+    // without it, to be saved back the same way.
+    Collection views = ScanCollection(dir, "views", "view", ".projection");
+    for (const auto& [id, rel] : ListedFiles(index, "views", views, "view")) {
+      DrawingView v = ReadItem(
+          dir, id, rel, [](const json& j) { return DrawingViewFromJson(j); });
       maxId = std::max(maxId, v.id);
       // Its saved projection (v162), a candidate until the projecting job
-      // hashes its inputs. One that does not read is dropped and the view
-      // projects: it is derived, and never a reason to refuse the drawing.
-      if (const auto pit = projectionById.find(v.id);
-          pit != projectionById.end()) {
-        try {
-          if (const auto pj = ReadResultFiles(pit->second))
+      // hashes its inputs. One that does not read is dropped and reported,
+      // and the view projects: it is derived, and never a reason to refuse
+      // the drawing.
+      if (const auto pit = views.derived.find(v.id); pit != views.derived.end())
+        if (const auto pj = ReadResultFiles(dir, pit->second))
+          if (auto p = ReadDerived<drawing::ViewProjection>(pit->second, [&] {
+                return ViewProjectionFromJson(*pj, pit->second);
+              }))
             dwg->SetSavedProjection(
                 v.id,
-                std::make_shared<const drawing::ViewProjection>(
-                    ViewProjectionFromJson(*pj, ProjectRelative(pit->second))));
-        } catch (const std::exception& e) {
-          LOG_WARN("Dropping the saved projection {}: {}; the view projects "
-                   "again",
-                   ProjectRelative(pit->second), e.what());
-        }
-      }
+                std::make_shared<const drawing::ViewProjection>(std::move(*p)));
       dwg->GetViews().push_back(std::move(v));
     }
-
-    std::map<uint64_t, fs::path> dimById;
-    for (const auto& entry :
-         fs::directory_iterator(fs::path(dirPath) / "dims", ec)) {
-      if (entry.path().extension() == ".json")
-        InsertIdFile(dimById, entry.path(), "dimension");
-    }
-    for (const auto& idJson : index.value("dims", json::array())) {
-      const auto it = dimById.find(idJson.get<uint64_t>());
-      if (it == dimById.end())
-        continue;
-      std::ifstream din(it->second);
-      DrawingDim d = DrawingDimFromJson(ParseProjectFile(it->second));
+    Collection dims = ScanCollection(dir, "dims", "dimension");
+    for (const auto& [id, rel] :
+         ListedFiles(index, "dims", dims, "dimension")) {
+      DrawingDim d = ReadItem(
+          dir, id, rel, [](const json& j) { return DrawingDimFromJson(j); });
       maxId = std::max(maxId, d.id);
       dwg->GetDims().push_back(std::move(d));
     }
-    for (const json& nj : index.value("notes", json::array())) {
-      DrawingNote n = DrawingNoteFromJson(nj);
-      maxId = std::max(maxId, n.id);
-      dwg->GetNotes().push_back(std::move(n));
-    }
+    readctx::InFile("index.json", [&] {
+      const json notes = InlineList(index, "notes");
+      for (size_t i = 0; i < notes.size(); i++) {
+        DrawingNote n =
+            AtItem("notes", i, [&] { return DrawingNoteFromJson(notes[i]); });
+        maxId = std::max(maxId, n.id);
+        dwg->GetNotes().push_back(std::move(n));
+      }
+    });
     dwg->EnsureNextIdAtLeast(maxId + 1);
     LOG_INFO("Loaded drawing ({} views, {} dims, {} notes) from {}",
              dwg->ViewCount(), dwg->DimCount(), dwg->NoteCount(), dirPath);
     return dwg;
   } catch (const std::exception& e) {
     if (error)
-      *error = e.what();
+      *error = LoadError(e);
     return nullptr;
   }
 }
@@ -2426,53 +2550,42 @@ static std::unique_ptr<DrawingDocument> LoadDrawingImpl(const std::string& path,
     return LoadDrawingDir(normalized, error);
   }
   try {
-    std::ifstream in(path);
-    if (!in) {
-      if (error)
-        *error = "Cannot open file: " + path;
-      return nullptr;
-    }
-    json j = ParseProjectFile(path);
-    if (j.value("format", "") != kFormat) {
-      if (error)
-        *error = "Not a Lobole document: " + path;
-      return nullptr;
-    }
-    if (j.value("version", 0) > kVersion) {
-      if (error)
-        *error = "Document version is newer than this build supports";
-      return nullptr;
-    }
-    if (j.value("kind", "part") != "drawing") {
-      if (error)
-        *error = "Not a drawing: " + path;
-      return nullptr;
-    }
-    auto dwg = std::make_unique<DrawingDocument>();
-    dwg->GetSheet() = SheetFromJson(j.value("sheet", json::object()));
-    uint64_t maxId = 0;
-    for (const json& vj : j.value("views", json::array())) {
-      DrawingView v = DrawingViewFromJson(vj);
-      maxId = std::max(maxId, v.id);
-      dwg->GetViews().push_back(std::move(v));
-    }
-    for (const json& dj : j.value("dims", json::array())) {
-      DrawingDim d = DrawingDimFromJson(dj);
-      maxId = std::max(maxId, d.id);
-      dwg->GetDims().push_back(std::move(d));
-    }
-    for (const json& nj : j.value("notes", json::array())) {
-      DrawingNote n = DrawingNoteFromJson(nj);
-      maxId = std::max(maxId, n.id);
-      dwg->GetNotes().push_back(std::move(n));
-    }
-    dwg->EnsureNextIdAtLeast(maxId + 1);
-    LOG_INFO("Loaded drawing ({} views, {} dims) from {}", dwg->ViewCount(),
-             dwg->DimCount(), path);
-    return dwg;
+    return readctx::InFile(
+        std::filesystem::path(path).filename().string(), [&] {
+          const json j = ParseFileText(path);
+          CheckDrawingEnvelope(j);
+          auto dwg = std::make_unique<DrawingDocument>();
+          dwg->GetSheet() = SheetFromJson(j.value("sheet", json::object()));
+          uint64_t maxId = 0;
+          const json views = InlineList(j, "views");
+          for (size_t i = 0; i < views.size(); i++) {
+            DrawingView v = AtItem(
+                "views", i, [&] { return DrawingViewFromJson(views[i]); });
+            maxId = std::max(maxId, v.id);
+            dwg->GetViews().push_back(std::move(v));
+          }
+          const json dims = InlineList(j, "dims");
+          for (size_t i = 0; i < dims.size(); i++) {
+            DrawingDim d =
+                AtItem("dims", i, [&] { return DrawingDimFromJson(dims[i]); });
+            maxId = std::max(maxId, d.id);
+            dwg->GetDims().push_back(std::move(d));
+          }
+          const json notes = InlineList(j, "notes");
+          for (size_t i = 0; i < notes.size(); i++) {
+            DrawingNote n = AtItem(
+                "notes", i, [&] { return DrawingNoteFromJson(notes[i]); });
+            maxId = std::max(maxId, n.id);
+            dwg->GetNotes().push_back(std::move(n));
+          }
+          dwg->EnsureNextIdAtLeast(maxId + 1);
+          LOG_INFO("Loaded drawing ({} views, {} dims) from {}",
+                   dwg->ViewCount(), dwg->DimCount(), path);
+          return dwg;
+        });
   } catch (const std::exception& e) {
     if (error)
-      *error = e.what();
+      *error = LoadError(e);
     LOG_ERROR("Failed to load drawing from {}: {}", path, e.what());
     return nullptr;
   }
@@ -2580,7 +2693,14 @@ json JobBodyJson(const cam::JobDocument& job) {
 std::unique_ptr<cam::JobDocument> JobFromBodyJson(const json& j) {
   auto job = std::make_unique<cam::JobDocument>();
   uint64_t maxId = 0;
-  for (const json& pj : j.value("parts", json::array())) {
+  const json parts = InlineList(j, "parts");
+  for (size_t i = 0; i < parts.size(); i++) {
+    const json& pj = parts[i];
+    AtItem("parts", i, [&] {
+      readctx::RefuseUnknownKeys(pj, {"id", "source", "name", "configuration"},
+                                 "job part");
+      return 0;
+    });
     cam::JobPart part;
     part.id = pj.value("id", uint64_t{0});
     part.sourceDocId = pj.value("source", uint64_t{0});
@@ -2590,8 +2710,10 @@ std::unique_ptr<cam::JobDocument> JobFromBodyJson(const json& j) {
     job->GetParts().push_back(std::move(part));
   }
   const int version = j.value("version", kVersion);
-  for (const json& cj : j.value("cam", json::array())) {
-    cam::Setup setup = CamSetupFromJson(cj);
+  const json setups = InlineList(j, "cam");
+  for (size_t i = 0; i < setups.size(); i++) {
+    cam::Setup setup =
+        AtItem("cam", i, [&] { return CamSetupFromJson(setups[i]); });
     // A rotary op reads its stepdown from v123, as the depth between layers.
     // Before that the derivation stored one on every op and a rotary op
     // ignored it -- so reading it now would re-cut every v122 rotary job in
@@ -2624,24 +2746,11 @@ std::unique_ptr<cam::JobDocument> JobFromBodyJson(const json& j) {
   return job;
 }
 
-bool CheckJobEnvelope(const json& j, const std::string& where,
-                      std::string* error) {
-  if (j.value("format", "") != kFormat) {
-    if (error)
-      *error = "Not a Lobole document: " + where;
-    return false;
-  }
-  if (j.value("version", 0) > kVersion) {
-    if (error)
-      *error = "Document version is newer than this build supports";
-    return false;
-  }
-  if (j.value("kind", "part") != "job") {
-    if (error)
-      *error = "This is a " + j.value("kind", "part") + ", not a job: " + where;
-    return false;
-  }
-  return true;
+void CheckJobEnvelope(const json& j) {
+  CheckEnvelope(j, "job");
+  readctx::RefuseUnknownKeys(j, {"format", "version", "kind", "parts", "cam"},
+                             "job");
+  RequireLists(j, {{"parts", 1}, {"cam", 1}});
 }
 
 bool SaveJobImpl(const cam::JobDocument& job, const std::string& path,
@@ -2670,24 +2779,26 @@ bool SaveJobImpl(const cam::JobDocument& job, const std::string& path,
 std::unique_ptr<cam::JobDocument> LoadJobImpl(const std::string& path,
                                               std::string* error) {
   const std::string normalized = NormalizeProjectPath(path);
+  const bool dirForm = IsDirFormatPath(normalized);
   const std::filesystem::path file =
-      IsDirFormatPath(normalized)
-          ? std::filesystem::path(normalized) / "index.json"
-          : std::filesystem::path(path);
+      dirForm ? std::filesystem::path(normalized) / "index.json"
+              : std::filesystem::path(path);
   try {
-    std::ifstream in(file);
-    if (!in) {
-      if (error)
-        *error = "Cannot open file: " + file.string();
-      return nullptr;
-    }
-    json j = ParseProjectFile(file);
-    if (!CheckJobEnvelope(j, file.string(), error))
-      return nullptr;
-    return JobFromBodyJson(j);
+    return readctx::InFile(
+        dirForm ? std::string("index.json") : file.filename().string(), [&] {
+          std::error_code ec;
+          if (!std::filesystem::is_regular_file(file, ec))
+            throw std::runtime_error(
+                dirForm ? "missing: this is not a Lobole document directory"
+                        : "cannot be read");
+          const std::filesystem::path root(normalized);
+          const json j = ParseFileText(file, dirForm ? &root : nullptr);
+          CheckJobEnvelope(j);
+          return JobFromBodyJson(j);
+        });
   } catch (const std::exception& e) {
     if (error)
-      *error = e.what();
+      *error = LoadError(e);
     LOG_ERROR("Failed to load job from {}: {}", file.string(), e.what());
     return nullptr;
   }

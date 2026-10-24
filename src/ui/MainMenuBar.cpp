@@ -573,6 +573,23 @@ void DrawNotices(AppState& state) {
     notices.push_back(
         {"Geometry rebuilt###rebuilt_notice", rebuiltTip.c_str()});
   }
+  // What the open kept going past (docs/versioning/README.md#a-lossy-load):
+  // lasting until a save over the project, which asks first when any of it
+  // is something the user wrote.
+  std::string droppedTip;
+  if (!state.openDrops.Empty()) {
+    droppedTip = std::string(state.openDrops.Lossy()
+                                 ? "Opening could not keep all of this "
+                                   "project; saving over it would lose "
+                                   "this for good, so Save asks first:\n"
+                                 : "Opening dropped derived data, which is "
+                                   "rebuilt:\n") +
+                 state.openDrops.Summary();
+    notices.push_back({state.openDrops.Lossy()
+                           ? "Opened incomplete###dropped_notice"
+                           : "Results dropped###derived_notice",
+                       droppedTip.c_str()});
+  }
   // The device that draws, when it is not the machine's best or not whole
   // (docs/rendering/README.md#the-device-ladder): lasting, where the
   // fallback modal is said once.

@@ -52,7 +52,9 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <limits>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 
@@ -187,6 +189,13 @@ double EllipseRadius(const json& j, bool major) {
 sketch::Entity EntityFromJson(const json& j) {
   const std::string type = j.at("type").get<std::string>();
   // Pre-v4 files have no "id"; leave it 0 so Load can detect and migrate.
+  // One that is there is a whole number above 0 that fits the id: a 0 read
+  // as "pre-v4" renumbered every entity of a modern sketch.
+  if (j.contains("id") &&
+      (!j.at("id").is_number_unsigned() || j.at("id").get<uint64_t>() == 0 ||
+       j.at("id").get<uint64_t>() > UINT32_MAX))
+    throw std::runtime_error("sketch entity id " + j.at("id").dump() +
+                             " is not a whole number above 0");
   const uint32_t id = j.value("id", uint32_t{0});
   // kSketchEntityTypes is the authority. Rejecting an untabled type BEFORE
   // the chain is what makes a branch-without-a-row unreachable, so an entity
@@ -247,6 +256,13 @@ sketch::Entity EntityFromJson(const json& j) {
                            j.at("end_param").get<double>()};
   } else if (type == "spline") { // v40
     sketch::BSpline bs;
+    // A pole is addressed as `which` (uint8_t): 255 at most, or a
+    // reference past that names another pole (and a million of them took
+    // minutes to solve).
+    if (j.at("poles").size() > 255)
+      throw std::runtime_error("a spline has at most 255 poles; this one "
+                               "has " +
+                               std::to_string(j.at("poles").size()));
     for (const auto& pj : j.at("poles"))
       bs.poles.push_back(Vec2FromJson(pj));
     bs.degree = j.value("degree", 3);
@@ -297,6 +313,37 @@ sketch::Entity EntityFromJson(const json& j) {
     // catches the other direction. test_serialization.cpp pins both.
     throw std::runtime_error("Sketch entity type \"" + type +
                              "\" is documented but has no branch for it");
+  }
+  {
+    // The keys every entity carries, its type's own, and any `_expr` key:
+    // FeatureFromJson's Sketch branch refuses an `_expr` this entity does
+    // not take, naming the ones it does.
+    std::vector<std::string_view> accepted = {"type", "id", "construction"};
+    static const std::map<std::string, std::vector<std::string_view>,
+                          std::less<>>
+        kEntityKeys = {
+            {"point", {"p"}},
+            {"line", {"a", "b"}},
+            {"circle", {"center", "radius"}},
+            {"arc",
+             {"center", "radius", "start_angle", "start_angle_deg", "end_angle",
+              "end_angle_deg"}},
+            {"ellipse",
+             {"center", "r_major", "r_minor", "rotation", "rotation_deg"}},
+            {"ellipse_arc",
+             {"center", "r_major", "r_minor", "rotation", "rotation_deg",
+              "start_param", "end_param"}},
+            {"spline", {"poles", "degree"}},
+            {"text",
+             {"text", "font", "height", "anchor", "angle", "angle_deg",
+              "halign", "valign", "spacing"}},
+        };
+    if (const auto it = kEntityKeys.find(type); it != kEntityKeys.end())
+      accepted.insert(accepted.end(), it->second.begin(), it->second.end());
+    for (auto it = j.begin(); it != j.end(); ++it)
+      if (it.key().ends_with("_expr"))
+        accepted.push_back(it.key());
+    readctx::RefuseUnknownKeys(j, accepted, "sketch entity '" + type + "'");
   }
   sketch::SetEntityId(e, id);
   sketch::SetConstruction(e, j.value("construction", false));
@@ -412,11 +459,27 @@ json ConstraintToJson(const sketch::Constraint& c) {
   return j;
 }
 
+// A constraint's point reference, [entity, which]: exactly that, each in the
+// range it is stored in. A third element, or a `which` of 300 read through
+// uint8_t as 44, was a different point with no word.
+sketch::PointRef PointRefFromJson(const json& r, const char* key) {
+  RequireArrayOf(r, 2, "[entity, which]");
+  if (!r[0].is_number_unsigned() || !r[1].is_number_unsigned() ||
+      r[0].get<uint64_t>() > UINT32_MAX || r[1].get<uint64_t>() > 255)
+    throw std::runtime_error(std::string(key) + ": " + r.dump() +
+                             " is not [entity id, point index 0-255]");
+  return {r[0].get<uint32_t>(), r[1].get<uint8_t>()};
+}
+
 sketch::Constraint ConstraintFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(
+      j,
+      {"kind", "a", "b", "c", "value", "value_deg", "expr", "label", "driven"},
+      "sketch constraint");
   sketch::Constraint c;
   c.kind = ConstraintKindFromString(j.at("kind").get<std::string>());
-  c.a = {j.at("a").at(0).get<uint32_t>(), j.at("a").at(1).get<uint8_t>()};
-  c.b = {j.at("b").at(0).get<uint32_t>(), j.at("b").at(1).get<uint8_t>()};
+  c.a = PointRefFromJson(j.at("a"), "a");
+  c.b = PointRefFromJson(j.at("b"), "b");
   // An angle takes `value` (RADIANS, what the file stores and the solver
   // works in) or `value_deg`, matching add_constraint and the arc parser
   // above. Input only — ConstraintToJson still writes `value` alone, so no
@@ -427,7 +490,7 @@ sketch::Constraint ConstraintFromJson(const json& j) {
                 : j.value("value", 0.0);
   c.valueExpr = j.value("expr", std::string{}); // absent (pre-v11) = literal
   if (j.contains("c"))
-    c.c = {j.at("c").at(0).get<uint32_t>(), j.at("c").at(1).get<uint8_t>()};
+    c.c = PointRefFromJson(j.at("c"), "c");
   if (j.contains("label"))
     c.labelOffset = Vec2FromJson(j.at("label"));
   // v177: a driven (reference) dimension. Only a dimension measures
@@ -531,9 +594,15 @@ sketch::ExternalKind ExternalKindFromString(const std::string& kind) {
 }
 
 sketch::DerivedOp DerivedOpFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j,
+                             {"kind", "source_sketch_id", "source_ids", "vec",
+                              "scalar", "count", "vec2", "count2",
+                              "axis_entity", "center_entity", "center_which",
+                              "instances"},
+                             "sketch derived op");
   sketch::DerivedOp op;
   op.kind = DerivedKindFromString(j.at("kind").get<std::string>());
-  op.sourceSketchId = j.value("source_sketch_id", uint64_t{0});
+  op.sourceSketchId = IdField(j, "source_sketch_id", false);
   for (const auto& s : j.at("source_ids"))
     op.sourceIds.push_back(s.get<uint32_t>());
   op.vec = Vec2FromJson(j.at("vec"));
@@ -545,10 +614,51 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
   op.axisEntity = j.value("axis_entity", uint32_t{0});     // v51
   op.centerEntity = j.value("center_entity", uint32_t{0}); // v51
   op.centerWhich = static_cast<uint8_t>(j.value("center_which", 0));
-  for (const auto& in : j.at("instances"))
+  for (const auto& in : j.at("instances")) {
+    readctx::RefuseUnknownKeys(in, {"source", "k", "gen"},
+                               "sketch derived op instance");
+    for (const auto& seen : op.instances)
+      if (seen.sourceId == in.at("source").get<uint32_t>() &&
+          seen.k == in.at("k").get<int>())
+        throw std::runtime_error("sketch derived op: copy " +
+                                 in.at("k").dump() + " of entity " +
+                                 in.at("source").dump() + " is listed twice");
     op.instances.push_back({in.at("source").get<uint32_t>(),
                             in.at("k").get<int>(),
                             in.at("gen").get<uint32_t>()});
+  }
+  // What the writer writes only beside something else, and the instances
+  // the op's own count makes: a file that disagrees with itself lost one
+  // half, and the regeneration would delete the copies past the count with
+  // no word (sketch::DerivedOp, SketchFeature::RegenerateDerived).
+  if (j.contains("source_sketch_id") && op.sourceSketchId == 0)
+    throw std::runtime_error("sketch derived op: source_sketch_id 0 names "
+                             "no sketch");
+  if (j.contains("center_which") && !j.contains("center_entity"))
+    throw std::runtime_error("sketch derived op: center_which without "
+                             "center_entity");
+  if (j.contains("vec2") != j.contains("count2") ||
+      (j.contains("count2") && op.count2 < 2))
+    throw std::runtime_error("sketch derived op: a grid's vec2 and count2 "
+                             "(above 1) come together");
+  if (op.count < 1 || op.count2 < 1)
+    throw std::runtime_error("sketch derived op: count " +
+                             std::to_string(op.count) + " is not a count");
+  if (!(op.kind == sketch::DerivedKind::LinkedCopy && op.sourceSketchId != 0)) {
+    const int total = op.kind == sketch::DerivedKind::LinearPattern
+                          ? op.count * op.count2
+                      : op.kind == sketch::DerivedKind::Mirror ? 2
+                                                               : op.count;
+    for (const auto& in : op.instances)
+      if (in.k < 1 || in.k >= total ||
+          std::find(op.sourceIds.begin(), op.sourceIds.end(), in.sourceId) ==
+              op.sourceIds.end())
+        throw std::runtime_error("sketch derived op: instance " +
+                                 std::to_string(in.genId) + " (copy " +
+                                 std::to_string(in.k) + " of entity " +
+                                 std::to_string(in.sourceId) +
+                                 ") is not one its count and sources make");
+  }
   return op;
 }
 
@@ -760,6 +870,14 @@ json AxisRefToJson(const AxisRef& axis) {
 AxisRef AxisRefFromJson(const json& j) {
   AxisRef axis;
   const std::string kind = j.at("kind").get<std::string>();
+  if (kind == "sketch_line")
+    readctx::RefuseUnknownKeys(j, {"kind", "sketch_id", "entity_id"}, "axis");
+  else if (kind == "datum_axis")
+    readctx::RefuseUnknownKeys(j, {"kind", "datum_axis_id"}, "axis");
+  else if (kind == "custom")
+    readctx::RefuseUnknownKeys(j, {"kind", "origin", "direction"}, "axis");
+  else
+    readctx::RefuseUnknownKeys(j, {"kind"}, "axis");
   if (kind == "x")
     axis.kind = AxisRef::Kind::X;
   else if (kind == "y")
@@ -768,11 +886,11 @@ AxisRef AxisRefFromJson(const json& j) {
     axis.kind = AxisRef::Kind::Z;
   else if (kind == "sketch_line") {
     axis.kind = AxisRef::Kind::SketchLine;
-    axis.sketchId = j.at("sketch_id").get<uint64_t>();
+    axis.sketchId = IdField(j, "sketch_id", true);
     axis.entityId = j.at("entity_id").get<uint32_t>();
   } else if (kind == "datum_axis") {
     axis.kind = AxisRef::Kind::DatumAxis;
-    axis.datumAxisId = j.at("datum_axis_id").get<uint64_t>();
+    axis.datumAxisId = IdField(j, "datum_axis_id", true);
   } else if (kind == "custom") {
     // A point and a direction, both written out: [x, y, z] in mm.
     axis.kind = AxisRef::Kind::Custom;
@@ -813,6 +931,7 @@ json ElementMapToJson(const ElementMap& map) {
 }
 
 ElementMap ElementMapFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j, {"faces", "edges"}, "element map");
   ElementMap map;
   const json faces = j.value("faces", json::object());
   const json edges = j.value("edges", json::object());
@@ -837,7 +956,7 @@ json AppearanceToJson(const Appearance& ap) {
 }
 Appearance AppearanceFromJson(const json& a) {
   Appearance ap;
-  if (a.contains("color")) {
+  if (HasArrayOf(a, "color", 3)) {
     const json& c = a.at("color");
     ap.color = glm::vec3(c.at(0).get<float>(), c.at(1).get<float>(),
                          c.at(2).get<float>());
@@ -2109,9 +2228,137 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
   }
 
+  // Every key a feature of this type may carry, in any format version: the
+  // ones every feature has, and its type's own. An unknown one is refused,
+  // naming these, rather than dropped
+  // (docs/versioning/README.md#what-a-load-refuses).
+  {
+    static const std::map<std::string, std::vector<std::string_view>,
+                          std::less<>>
+        kTypeKeys = {
+            {"Sketch",
+             {"plane", "plane_ref", "face_ref", "entities", "constraints",
+              "derived_ops", "external", "images", "next_image_id",
+              // ignored since ids are minted collision-resistantly; older
+              // files still carry it
+              "next_entity_id"}},
+            {"Extrude",
+             {"sketch_id", "distance", "distance_expr", "reversed", "mode",
+              "end_mode", "distance2", "distance2_expr", "end_target",
+              "regions", "twist_deg", "twist_expr", "herringbone", "taper_deg",
+              "taper_expr", "thin"}},
+            {"Box",
+             {"position", "width", "height", "depth", "width_expr",
+              "height_expr", "depth_expr"}},
+            {"Sphere", {"center", "radius", "radius_expr"}},
+            {"Cylinder",
+             {"center", "direction", "radius", "height", "radius_expr",
+              "height_expr"}},
+            {"Fastener",
+             {"standard", "size", "length", "length_expr", "drive"}},
+            {"Bearing", {"designation"}},
+            {"RetainingRing", {"standard", "size"}},
+            {"RetainingRingGroove",
+             {"face", "from", "offset", "offset_expr", "standard"}},
+            {"Import", {"path", "keep_origin", "units", "color"}},
+            {"Template",
+             {"template", "revision", "on", "parameters", "ids", "definition"}},
+            {"Derived",
+             {"source_part", "source_name", "configuration", "bodies",
+              "body_names", "placement", "reference", "snapshot"}},
+            {"DatumPlane",
+             {"kind", "parent_id", "base_plane", "offset", "offset_expr",
+              "flip", "axis", "angle_deg", "angle_expr", "points"}},
+            {"Revolve",
+             {"sketch_id", "axis", "angle_deg", "angle_expr", "symmetric",
+              "reversed", "mode", "regions"}},
+            {"DatumAxis", {"kind", "points", "sketch_id", "entity_id"}},
+            {"Frame",
+             {"kind", "origin", "origin_expr", "z_axis", "x_axis", "elements",
+              "flip", "parent_id", "offset", "offset_expr", "rotation_deg",
+              "rotation_expr"}},
+            {"Curve3D",
+             {"kind", "points", "degree", "closed", "radius", "radius_expr",
+              "origin", "axis", "pitch", "pitch_expr", "turns", "turns_expr",
+              "left_handed", "start_deg", "start_deg_expr"}},
+            {"Boolean", {"target_id", "tool_id", "op"}},
+            {"Split",
+             {"body_id", "knife", "face", "datum_id", "base_plane", "offset",
+              "offset_expr"}},
+            {"Refine", {"body_id"}},
+            {"Fillet", {"edges", "radius", "radius_expr"}},
+            {"Chamfer", {"edges", "radius", "radius_expr"}},
+            {"BaseFlange", {"sketch_id", "reversed", "regions"}},
+            {"EdgeFlange",
+             {"edges", "length", "length_expr", "angle_deg", "angle_deg_expr",
+              "radius", "radius_expr", "position", "length_mode",
+              "offset_start", "offset_start_expr", "offset_end",
+              "offset_end_expr", "relief", "corners"}},
+            {"FlatPattern", {"body_id", "fixed_face"}},
+            {"Unfold", {"body_id", "fixed_face", "bends"}},
+            {"Refold", {"unfold_id"}},
+            {"Hem",
+             {"edges", "length", "length_expr", "kind", "gap", "gap_expr",
+              "outside", "offset_start", "offset_start_expr", "offset_end",
+              "offset_end_expr"}},
+            {"Jog",
+             {"sketch_id", "height", "height_expr", "angle_deg",
+              "angle_deg_expr", "flip"}},
+            {"CornerRelief", {"body_id", "style", "size", "size_expr"}},
+            {"NormalCut", {"sketch_id", "body_id", "regions"}},
+            {"Shell", {"body_id", "thickness", "thickness_expr", "open_faces"}},
+            {"Loft", {"sketch_ids", "path_id", "guide_id", "mode"}},
+            {"Sweep", {"profile_id", "path_id", "guide_id", "mode", "frame"}},
+            {"Pipe",
+             {"path_id", "outer_diameter", "outer_diameter_expr",
+              "wall_thickness", "wall_thickness_expr", "mode"}},
+            {"Rib",
+             {"sketch_id", "thickness", "thickness_expr", "flip", "body_id"}},
+            {"Thread",
+             {"face", "designation", "pitch", "allow_engagement",
+              "minimum_engagement", "thread_class", "length", "length_expr",
+              "modeled", "hand", "flank_angle_deg"}},
+            {"Worm",
+             {"face", "module", "module_expr", "starts", "pressure_angle_deg",
+              "hand", "backlash", "length"}},
+            {"WormWheel",
+             {"face", "module", "module_expr", "teeth", "starts",
+              "worm_diameter", "pressure_angle_deg", "hand"}},
+            {"Hole",
+             {"sketch_id", "hole_kind", "diameter", "diameter_expr", "fit",
+              "depth", "depth_expr", "through", "drill_point_deg",
+              "thread_depth", "thread_depth_expr", "printed", "cb_diameter",
+              "cb_depth", "cs_diameter", "cs_depth"}},
+            {"Draft",
+             {"body_id", "angle_deg", "angle_expr", "neutral_plane", "faces"}},
+            {"Pattern",
+             {"kind", "source_id", "parent_id", "base_plane", "axis", "count",
+              "count_expr", "spacing", "spacing_expr", "angle_deg",
+              "angle_expr"}},
+            {"Cope", {"member_id", "against", "mitre", "gap", "gap_expr"}},
+        };
+    std::vector<std::string_view> accepted = {
+        "type",      "name", "id", "material", "appearance", "face_appearance",
+        "suppressed"};
+    const auto it = kTypeKeys.find(type);
+    if (it == kTypeKeys.end())
+      throw std::logic_error("feature type '" + type +
+                             "' has no row in FeatureFromJson's key table");
+    accepted.insert(accepted.end(), it->second.begin(), it->second.end());
+    readctx::RefuseUnknownKeys(j, accepted, type);
+  }
+  // {feature_id, element}: a face, an edge, a fixed face.
+  const auto refKeys = [](const json& rj, std::string_view what) {
+    readctx::RefuseUnknownKeys(rj, {"feature_id", "element"}, what);
+  };
+
   std::unique_ptr<Feature> out;
   if (type == "Sketch") {
     const json& pl = j.at("plane");
+    readctx::RefuseUnknownKeys(pl, {"origin", "normal", "uAxis"},
+                               "sketch plane");
+    RequirePlaneFrame(Vec3FromJson(pl.at("normal")),
+                      Vec3FromJson(pl.at("uAxis")), "sketch plane");
     SketchPlane plane(Vec3FromJson(pl.at("origin")),
                       Vec3FromJson(pl.at("normal")),
                       Vec3FromJson(pl.at("uAxis")));
@@ -2128,6 +2375,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         pendingEntityExprs;
     for (const auto& ej : j.value("entities", json::array())) {
       if (ej.value("type", "") == "rect") {
+        readctx::RefuseUnknownKeys(ej,
+                                   {"type", "id", "c1", "c2", "construction"},
+                                   "sketch entity 'rect'");
         glm::dvec2 c1 = Vec2FromJson(ej.at("c1"));
         glm::dvec2 c2 = Vec2FromJson(ej.at("c2"));
         sketch::Entity ph =
@@ -2184,6 +2434,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     // refs (default {0,0}) become {1,0} but are never read for their kind.
     const bool legacy =
         !sk->entities.empty() && sketch::EntityId(sk->entities[0]) == 0;
+    // A pre-v4 sketch has no ids at all; a later one has one on every
+    // entity. One without among ones with lost it, and would be saved as
+    // id 0, which nothing reads back.
+    for (const auto& e : sk->entities)
+      if ((sketch::EntityId(e) == 0) != legacy)
+        throw std::runtime_error(
+            "sketch '" + name +
+            "': some entities have ids and some do not (pre-v4 sketches "
+            "have none, later ones one on every entity)");
     if (legacy) {
       for (size_t i = 0; i < sk->entities.size(); i++)
         sketch::SetEntityId(sk->entities[i], static_cast<uint32_t>(i + 1));
@@ -2195,7 +2454,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     // No counter to advance any more: ids are minted collision-resistantly
     // (SketchFeature::MintEntityId), so a document written by an older build
     // simply keeps the small ids it has, and anything added later cannot
-    // collide with them. `next_entity_id` in such a file is ignored.
+    // collide with them. `next_entity_id` in such a file is ignored -- but
+    // has to be the count it was, not something a save would then drop.
+    readctx::RequireCount(j, "next_entity_id", "sketch");
     //
     // Two entities sharing an id is refused rather than loaded: a face's
     // stable name is "<feature>/g<entityId>", so a duplicate makes that name
@@ -2290,9 +2551,34 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     for (const auto& oj : j.value("derived_ops", json::array()))
       sk->derived.push_back(DerivedOpFromJson(oj));
+    // An op whose copies name a source or an axis the sketch does not have
+    // lost it: the regeneration would delete every such copy with no word.
+    for (const auto& op : sk->derived) {
+      if (op.kind == sketch::DerivedKind::LinkedCopy && op.sourceSketchId != 0)
+        continue;
+      const auto has = [&](uint32_t id) {
+        return sk->IndexOfEntity(id) != std::numeric_limits<size_t>::max();
+      };
+      for (const auto& inst : op.instances)
+        if (!has(inst.sourceId) || !has(inst.genId))
+          throw std::runtime_error(
+              "sketch '" + name + "': a derived copy names entity " +
+              std::to_string(has(inst.sourceId) ? inst.genId : inst.sourceId) +
+              ", which the sketch does not have");
+      if (op.kind == sketch::DerivedKind::Mirror && !op.instances.empty() &&
+          !sketch::IsDatum(op.axisEntity) && !has(op.axisEntity))
+        throw std::runtime_error("sketch '" + name +
+                                 "': its mirror's axis, "
+                                 "entity " +
+                                 std::to_string(op.axisEntity) +
+                                 ", is not in it");
+    }
     if (!sk->derived.empty())
       sk->RegenerateDerived(); // re-verify generated geometry (id-stable)
     for (const auto& ej : j.value("external", json::array())) { // v48
+      readctx::RefuseUnknownKeys(ej,
+                                 {"feature_id", "element", "kind", "gen_ids"},
+                                 "sketch external reference");
       sketch::ExternalGeom eg;
       eg.ref = ElementRef{ej.value("feature_id", uint64_t{0}),
                           ej.value("element", std::string{})};
@@ -2301,6 +2587,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       sk->external.push_back(std::move(eg));
     }
     for (const auto& ij : j.value("images", json::array())) { // v49 underlays
+      readctx::RefuseUnknownKeys(ij,
+                                 {"id", "asset", "origin", "rotation",
+                                  "units_per_pixel", "opacity", "width_px",
+                                  "height_px", "hidden", "show_always"},
+                                 "sketch image");
       sketch::ReferenceImage img;
       img.id = ij.value("id", uint32_t{0});
       img.asset = CheckedAssetName(ij.value("asset", std::string{}));
@@ -2327,6 +2618,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         j.value("plane_ref", uint64_t{0}); // absent (pre-v12) = baked
     if (j.contains("face_ref")) {          // v16: attached body face
       const json& fr = j.at("face_ref");
+      refKeys(fr, "face_ref");
       sk->faceRef = ElementRef{fr.value("feature_id", uint64_t{0}),
                                fr.value("element", std::string{})};
     }
@@ -2337,13 +2629,19 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     // the expr overwrites on regen, so an extrude authored with only
     // `distance_expr` still builds a body instead of erroring on a missing key.
     auto ext = std::make_unique<ExtrudeFeature>(
-        name, j.at("sketch_id").get<uint64_t>(), j.value("distance", 1.0),
+        name, IdField(j, "sketch_id", true), j.value("distance", 1.0),
         ExtrudeModeFromString(j.value("mode", "new_body")),
         j.value("reversed", false));
     ext->distanceExpr =
         j.value("distance_expr", std::string{}); // absent (pre-v11) = literal
     // End condition (v18); absent = blind.
     const std::string end = j.value("end_mode", "blind");
+    // An end this build does not know is refused, never read as blind.
+    if (end != "blind" && end != "symmetric" && end != "two_sided" &&
+        end != "up_to_face" && end != "through_all")
+      throw std::runtime_error("unknown extrude end_mode '" + end +
+                               "' (expected one of: blind, symmetric, "
+                               "two_sided, up_to_face, through_all)");
     ext->endMode = end == "symmetric"     ? ExtrudeEnd::Symmetric
                    : end == "two_sided"   ? ExtrudeEnd::TwoSided
                    : end == "up_to_face"  ? ExtrudeEnd::UpToFace
@@ -2359,12 +2657,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (j.contains("regions")) // v34
       ext->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
     if (j.contains("end_target")) {
+      refKeys(j["end_target"], "end_target");
       ext->endTarget =
           ElementRef{j["end_target"].value("feature_id", uint64_t{0}),
                      j["end_target"].value("element", std::string{})};
     }
     if (j.contains("thin")) { // v18
       const json& t = j["thin"];
+      readctx::RefuseUnknownKeys(t, {"thickness", "thickness_expr", "side"},
+                                 "thin");
       ext->thin = true;
       ext->thinThickness = t.value("thickness", 1.0);
       ext->thinThicknessExpr = t.value("thickness_expr", std::string{});
@@ -2408,6 +2709,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     // and requiring one here made them unreachable through add_feature while
     // the feature itself was perfectly able to build them. A screw without one
     // is still refused — by Execute, which knows which is which.
+    // Stated, it is above 0: the writer omits a nut's none, so a 0 or a
+    // -1 would not be written back.
+    if (j.contains("length") && !(j.at("length").get<double>() > 0.0))
+      throw std::runtime_error("Fastener '" + name + "': length " +
+                               j.at("length").dump() +
+                               " is not a length (a nut or a washer states "
+                               "none)");
     auto fastener = std::make_unique<FastenerFeature>(
         name, j.at("standard").get<std::string>(),
         j.at("size").get<std::string>(), j.value("length", 0.0));
@@ -2425,6 +2733,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "RetainingRingGroove") { // v156
     const auto ref = [&](const char* key) {
       const json& rj = j.at(key);
+      refKeys(rj, key);
       return ElementRef{rj.at("feature_id").get<uint64_t>(),
                         rj.at("element").get<std::string>()};
     };
@@ -2458,6 +2767,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     // the values against it. A saved instance carries both.
     auto tf = std::make_unique<TemplateFeature>(name);
     tf->templateName = j.value("template", std::string{});
+    // Written beside the definition, which carries its own; not read.
+    readctx::RequireCount(j, "revision", "Template");
     if (j.contains("definition")) {
       tf->definition = tmpl::FromJson(j.at("definition"));
       const json on = j.value("on", json());
@@ -2474,11 +2785,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     d->sourceName = j.value("source_name", std::string{});
     d->sourceConfiguration = j.value("configuration", uint64_t{0}); // v133
     if (j.contains("bodies"))
-      d->bodies = j.at("bodies").get<std::vector<uint64_t>>();
+      d->bodies = UniqueIds(j.at("bodies"), "bodies");
     if (j.contains("body_names")) // v85
       d->bodyNames = j.at("body_names").get<std::vector<std::string>>();
     if (j.contains("placement")) {
       const json& pl = j.at("placement");
+      readctx::RefuseUnknownKeys(pl, {"position", "orientation"}, "placement");
       if (pl.contains("position"))
         d->position = Vec3FromJson(pl.at("position"));
       if (pl.contains("orientation"))
@@ -2487,8 +2799,21 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     d->reference = j.value("reference", true);
     if (j.contains("snapshot")) {
       const json& snap = j.at("snapshot");
+      readctx::RefuseUnknownKeys(snap, {"source_chain_hash", "bodies"},
+                                 "snapshot");
       d->sourceChainHash = snap.value("source_chain_hash", size_t{0});
+      // A body written twice, whole, is a copy no source has (a damaged
+      // file grown to twenty thousand of one took seconds to read).
+      std::set<std::string> seenBodies;
       for (const json& bj : snap.value("bodies", json::array())) {
+        if (!seenBodies.insert(bj.dump()).second)
+          throw std::runtime_error("Derived '" + name +
+                                   "': its snapshot holds one body twice");
+        readctx::RefuseUnknownKeys(bj,
+                                   {"asset", "name", "material",
+                                    "source_created_by", "element_map",
+                                    "display_color", "fit_bands"},
+                                   "snapshot body");
         DerivedBody b;
         b.asset = CheckedAssetName(bj.at("asset").get<std::string>());
         b.name = bj.value("name", std::string{});
@@ -2501,6 +2826,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
           b.displayColor = Vec3FromJson(bj.at("display_color"));
         }
         for (const json& fj : bj.value("fit_bands", json::array())) { // v182
+          readctx::RefuseUnknownKeys(fj,
+                                     {"face", "lower", "upper", "side",
+                                      "allowance", "printed_press", "label"},
+                                     "fit band");
           FitBand f;
           f.face.name = fj.at("face").get<std::string>();
           f.lower = fj.at("lower").get<double>();
@@ -2526,7 +2855,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "DatumPlane") {
     auto dp = std::make_unique<DatumPlaneFeature>(
         name, DatumPlaneKindFromString(j.at("kind").get<std::string>()));
-    dp->parentId = j.value("parent_id", uint64_t{0});
+    dp->parentId = IdField(j, "parent_id", false);
     if (j.contains("base_plane"))
       dp->basePlane =
           PlaneTypeFromString(j.at("base_plane").get<std::string>());
@@ -2552,7 +2881,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(dp);
   } else if (type == "Revolve") {
     auto rev = std::make_unique<RevolveFeature>(
-        name, j.at("sketch_id").get<uint64_t>(), j.value("angle_deg", 360.0),
+        name, IdField(j, "sketch_id", true), j.value("angle_deg", 360.0),
         ExtrudeModeFromString(j.value("mode", "new_body")),
         j.value("reversed", false));
     rev->axis = AxisRefFromJson(j.at("axis"));
@@ -2572,7 +2901,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       break;
     }
     case DatumAxisKind::SketchLine:
-      da->sketchId = j.at("sketch_id").get<uint64_t>();
+      da->sketchId = IdField(j, "sketch_id", true);
       da->entityId = j.at("entity_id").get<uint32_t>();
       break;
     case DatumAxisKind::GlobalX:
@@ -2623,12 +2952,14 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         throw std::runtime_error(
             std::string("Frame '") + name +
             "' from_element needs elements: [{feature_id, element}, ...]");
-      for (const json& e : j.at("elements"))
+      for (const json& e : j.at("elements")) {
+        refKeys(e, "frame element");
         fr->elements.push_back(ElementRefFromJson(e));
+      }
       fr->flip = j.value("flip", false);
       break;
     case FrameKind::Offset:
-      fr->parentId = j.value("parent_id", uint64_t{0});
+      fr->parentId = IdField(j, "parent_id", false);
       triple("offset", fr->offset, /*required=*/false);
       exprTriple("offset_expr", fr->offsetExpr);
       triple("rotation_deg", fr->rotationDeg, /*required=*/false);
@@ -2669,12 +3000,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(cv);
   } else if (type == "Boolean") {
     out = std::make_unique<BooleanFeature>(
-        name, j.at("target_id").get<uint64_t>(),
-        j.at("tool_id").get<uint64_t>(),
+        name, IdField(j, "target_id", true), IdField(j, "tool_id", true),
         BooleanOpFromString(j.value("op", "union")));
   } else if (type == "Split") { // v39
-    auto sp =
-        std::make_unique<SplitFeature>(name, j.at("body_id").get<uint64_t>());
+    auto sp = std::make_unique<SplitFeature>(name, IdField(j, "body_id", true));
     // Refused, never read as a plane: "plne" or {"face": …} would otherwise
     // split along the XY plane and look like an answer.
     const json knifeJ = j.value("knife", json("plane"));
@@ -2684,11 +3013,12 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (knifeJ == "face") {
       sp->knife = SplitKnifeKind::Face;
       const json& fj = j.at("face");
+      refKeys(fj, "face");
       sp->face = ElementRef{fj.at("feature_id").get<uint64_t>(),
                             fj.at("element").get<std::string>()};
     } else {
       sp->knife = SplitKnifeKind::Plane;
-      sp->datumId = j.value("datum_id", uint64_t{0});
+      sp->datumId = IdField(j, "datum_id", false);
       if (j.contains("base_plane"))
         sp->basePlane =
             PlaneTypeFromString(j.at("base_plane").get<std::string>());
@@ -2697,11 +3027,11 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     out = std::move(sp);
   } else if (type == "Refine") { // v47
-    out =
-        std::make_unique<RefineFeature>(name, j.at("body_id").get<uint64_t>());
+    out = std::make_unique<RefineFeature>(name, IdField(j, "body_id", true));
   } else if (type == "Fillet" || type == "Chamfer") { // v17
     std::vector<ElementRef> refs;
     for (const auto& ej : j.value("edges", json::array())) {
+      refKeys(ej, "edge");
       refs.push_back(ElementRef{ej.value("feature_id", uint64_t{0}),
                                 ej.value("element", std::string{})});
     }
@@ -2712,15 +3042,17 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(fil);
   } else if (type == "BaseFlange") { // v109
     auto bf = std::make_unique<BaseFlangeFeature>(
-        name, j.at("sketch_id").get<uint64_t>(), j.value("reversed", false));
+        name, IdField(j, "sketch_id", true), j.value("reversed", false));
     if (j.contains("regions"))
       bf->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
     out = std::move(bf);
   } else if (type == "EdgeFlange") { // v109
     std::vector<ElementRef> picked;
-    for (const auto& ej : j.value("edges", json::array()))
+    for (const auto& ej : j.value("edges", json::array())) {
+      refKeys(ej, "edge");
       picked.push_back(ElementRef{ej.value("feature_id", uint64_t{0}),
                                   ej.value("element", std::string{})});
+    }
     auto ef = std::make_unique<EdgeFlangeFeature>(name, std::move(picked),
                                                   j.value("length", 10.0),
                                                   j.value("angle_deg", 90.0));
@@ -2765,32 +3097,35 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     out = std::move(ef);
   } else if (type == "FlatPattern") { // v110
-    auto fp = std::make_unique<FlatPatternFeature>(
-        name, j.at("body_id").get<uint64_t>());
+    auto fp =
+        std::make_unique<FlatPatternFeature>(name, IdField(j, "body_id", true));
     if (j.contains("fixed_face")) {
       const auto& fj = j.at("fixed_face");
+      refKeys(fj, "fixed_face");
       fp->fixedFace = ElementRef{fj.value("feature_id", uint64_t{0}),
                                  fj.value("element", std::string{})};
     }
     out = std::move(fp);
   } else if (type == "Unfold") { // v111
     auto uf =
-        std::make_unique<UnfoldFeature>(name, j.at("body_id").get<uint64_t>());
+        std::make_unique<UnfoldFeature>(name, IdField(j, "body_id", true));
     if (j.contains("fixed_face")) {
       const auto& fj = j.at("fixed_face");
+      refKeys(fj, "fixed_face");
       uf->fixedFace = ElementRef{fj.value("feature_id", uint64_t{0}),
                                  fj.value("element", std::string{})};
     }
     uf->bendFeatures = j.value("bends", std::vector<uint64_t>{});
     out = std::move(uf);
   } else if (type == "Refold") { // v111
-    out = std::make_unique<RefoldFeature>(name,
-                                          j.at("unfold_id").get<uint64_t>());
+    out = std::make_unique<RefoldFeature>(name, IdField(j, "unfold_id", true));
   } else if (type == "Hem") { // v112
     std::vector<ElementRef> picked;
-    for (const auto& ej : j.value("edges", json::array()))
+    for (const auto& ej : j.value("edges", json::array())) {
+      refKeys(ej, "edge");
       picked.push_back(ElementRef{ej.value("feature_id", uint64_t{0}),
                                   ej.value("element", std::string{})});
+    }
     auto hm = std::make_unique<HemFeature>(name, std::move(picked),
                                            j.value("length", 5.0));
     hm->lengthExpr = j.value("length_expr", std::string{});
@@ -2809,8 +3144,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     hm->offsetEndExpr = j.value("offset_end_expr", std::string{});
     out = std::move(hm);
   } else if (type == "Jog") { // v112
-    auto jg = std::make_unique<JogFeature>(
-        name, j.at("sketch_id").get<uint64_t>(), j.value("height", 5.0));
+    auto jg = std::make_unique<JogFeature>(name, IdField(j, "sketch_id", true),
+                                           j.value("height", 5.0));
     jg->heightExpr = j.value("height_expr", std::string{});
     jg->angleDeg = j.value("angle_deg", 90.0);
     jg->angleDegExpr = j.value("angle_deg_expr", std::string{});
@@ -2818,7 +3153,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(jg);
   } else if (type == "CornerRelief") { // v113
     auto cr = std::make_unique<CornerReliefFeature>(
-        name, j.at("body_id").get<uint64_t>());
+        name, IdField(j, "body_id", true));
     if (j.contains("style")) {
       const std::string v = j.at("style").get<std::string>();
       if (!CornerReliefStyleFromString(v, cr->style))
@@ -2830,20 +3165,22 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     cr->sizeExpr = j.value("size_expr", std::string{});
     out = std::move(cr);
   } else if (type == "NormalCut") { // v114
-    auto nc = std::make_unique<NormalCutFeature>(
-        name, j.at("sketch_id").get<uint64_t>());
-    nc->bodyId = j.value("body_id", uint64_t{0});
+    auto nc =
+        std::make_unique<NormalCutFeature>(name, IdField(j, "sketch_id", true));
+    nc->bodyId = IdField(j, "body_id", false);
     if (j.contains("regions"))
       nc->regions = j["regions"].get<std::vector<std::vector<uint32_t>>>();
     out = std::move(nc);
   } else if (type == "Shell") { // v20
     std::vector<ElementRef> faces;
-    for (const auto& ej : j.value("open_faces", json::array()))
+    for (const auto& ej : j.value("open_faces", json::array())) {
+      refKeys(ej, "open face");
       faces.push_back(ElementRef{ej.value("feature_id", uint64_t{0}),
                                  ej.value("element", std::string{})});
-    auto sh = std::make_unique<ShellFeature>(
-        name, j.at("body_id").get<uint64_t>(), std::move(faces),
-        j.value("thickness", 1.0));
+    }
+    auto sh = std::make_unique<ShellFeature>(name, IdField(j, "body_id", true),
+                                             std::move(faces),
+                                             j.value("thickness", 1.0));
     sh->thicknessExpr = j.value("thickness_expr", std::string{});
     out = std::move(sh);
   } else if (type == "Loft") { // v20
@@ -2853,23 +3190,26 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     auto lo = std::make_unique<LoftFeature>(
         name, std::move(ids),
         ExtrudeModeFromString(j.value("mode", "new_body")));
-    lo->pathId = j.value("path_id", uint64_t{0});   // v45
-    lo->guideId = j.value("guide_id", uint64_t{0}); // v45
+    lo->pathId = IdField(j, "path_id", false);   // v45
+    lo->guideId = IdField(j, "guide_id", false); // v45
     out = std::move(lo);
   } else if (type == "Sweep") { // v20
     auto sw = std::make_unique<SweepFeature>(
-        name, j.at("profile_id").get<uint64_t>(),
-        j.at("path_id").get<uint64_t>(),
+        name, IdField(j, "profile_id", true), IdField(j, "path_id", true),
         ExtrudeModeFromString(j.value("mode", "new_body")));
-    sw->guideId = j.value("guide_id", uint64_t{0});              // v44
+    sw->guideId = IdField(j, "guide_id", false);                 // v44
     const std::string fr = j.value("frame", "corrected_frenet"); // v43
+    if (fr != "frenet" && fr != "fixed" && fr != "corrected_frenet")
+      throw std::runtime_error("unknown sweep frame '" + fr +
+                               "' (expected one of: corrected_frenet, "
+                               "frenet, fixed)");
     sw->frame = fr == "frenet"  ? SweepFrame::Frenet
                 : fr == "fixed" ? SweepFrame::Fixed
                                 : SweepFrame::CorrectedFrenet;
     out = std::move(sw);
   } else if (type == "Pipe") { // v43
     auto pi = std::make_unique<PipeFeature>(
-        name, j.at("path_id").get<uint64_t>(), j.value("outer_diameter", 2.0),
+        name, IdField(j, "path_id", true), j.value("outer_diameter", 2.0),
         j.value("wall_thickness", 0.0),
         ExtrudeModeFromString(j.value("mode", "new_body")));
     pi->outerDiameterExpr = j.value("outer_diameter_expr", std::string{});
@@ -2877,12 +3217,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(pi);
   } else if (type == "Rib") { // v36
     auto rb = std::make_unique<RibFeature>(
-        name, j.at("sketch_id").get<uint64_t>(), j.value("thickness", 1.0),
-        j.value("flip", false), j.value("body_id", uint64_t{0}));
+        name, IdField(j, "sketch_id", true), j.value("thickness", 1.0),
+        j.value("flip", false), IdField(j, "body_id", false));
     rb->thicknessExpr = j.value("thickness_expr", std::string{});
     out = std::move(rb);
   } else if (type == "Thread") { // v36
     const json& fj = j.at("face");
+    refKeys(fj, "face");
     // An absent pitch is the table's for a table designation and NONE for a
     // custom one -- refused at regeneration, never a made-up 1.25. A given
     // one that is not the table's is refused there too, naming the row's
@@ -2924,6 +3265,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(th);
   } else if (type == "Worm" || type == "WormWheel") { // v146
     const json& fj = j.at("face");
+    refKeys(fj, "face");
     const ElementRef face{fj.at("feature_id").get<uint64_t>(),
                           fj.at("element").get<std::string>()};
     // A hand we do not know is refused, never read as right: a left worm
@@ -2971,9 +3313,9 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     };
     refuseOther("cb_", HoleKind::Counterbore, "counterbore");
     refuseOther("cs_", HoleKind::Countersink, "countersink");
-    auto ho = std::make_unique<HoleFeature>(
-        name, j.at("sketch_id").get<uint64_t>(), kind, j.value("diameter", 1.0),
-        j.value("depth", 1.0));
+    auto ho = std::make_unique<HoleFeature>(name, IdField(j, "sketch_id", true),
+                                            kind, j.value("diameter", 1.0),
+                                            j.value("depth", 1.0));
     ho->diameterExpr = j.value("diameter_expr", std::string{});
     ho->depthExpr = j.value("depth_expr", std::string{});
     ho->through = j.value("through", false);
@@ -2983,6 +3325,10 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     ho->csDepth = j.value("cs_depth", 0.5);
     if (j.contains("fit")) { // v71
       const auto& fit = j.at("fit");
+      readctx::RefuseUnknownKeys(fit, {"thread", "kind", "pitch"}, "fit");
+      // A fit is written with its thread; one without is not written back.
+      if (fit.value("thread", std::string{}).empty())
+        throw std::runtime_error("a hole's fit names its thread");
       ho->fitThread = fit.value("thread", std::string{});
       ho->fitKind = fit.value("kind", std::string("normal"));
       ho->fitPitch = fit.value("pitch", 0.0);
@@ -3004,35 +3350,36 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     out = std::move(ho);
   } else if (type == "Draft") { // v22
     std::vector<ElementRef> refs;
-    for (const auto& ej : j.value("faces", json::array()))
+    for (const auto& ej : j.value("faces", json::array())) {
+      refKeys(ej, "face");
       refs.push_back(ElementRef{ej.value("feature_id", uint64_t{0}),
                                 ej.value("element", std::string{})});
+    }
     auto dr = std::make_unique<DraftFeature>(
-        name, j.at("body_id").get<uint64_t>(), std::move(refs),
+        name, IdField(j, "body_id", true), std::move(refs),
         j.value("angle_deg", 5.0),
         PlaneTypeFromString(j.value("neutral_plane", "xy")));
     dr->angleExpr = j.value("angle_expr", std::string{});
     out = std::move(dr);
   } else if (type == "Cope") {
-    std::vector<uint64_t> against, mitre;
-    for (const auto& a : j.at("against"))
-      against.push_back(a.get<uint64_t>());
-    if (j.contains("mitre")) {
-      for (const auto& a : j.at("mitre"))
-        mitre.push_back(a.get<uint64_t>());
-    }
+    std::vector<uint64_t> against = UniqueIds(j.at("against"), "against");
+    std::vector<uint64_t> mitre;
+    if (j.contains("mitre"))
+      mitre = UniqueIds(j.at("mitre"), "mitre");
     auto cope =
-        std::make_unique<CopeFeature>(name, j.at("member_id").get<uint64_t>(),
+        std::make_unique<CopeFeature>(name, IdField(j, "member_id", true),
                                       std::move(against), std::move(mitre));
     cope->gap = j.value("gap", 0.0);
     cope->gapExpr = j.value("gap_expr", std::string{});
-    return cope;
+    // Through the common tail below like every other type: an early return
+    // here loaded a Cope without its id, material or appearance.
+    out = std::move(cope);
   } else if (type == "Pattern") {
     auto pat = std::make_unique<PatternFeature>(
         name, PatternKindFromString(j.at("kind").get<std::string>()),
-        j.at("source_id").get<uint64_t>());
+        IdField(j, "source_id", true));
     if (pat->kind == PatternKind::Mirror) {
-      pat->planeId = j.value("parent_id", uint64_t{0});
+      pat->planeId = IdField(j, "parent_id", false);
       if (j.contains("base_plane"))
         pat->basePlane =
             PlaneTypeFromString(j.at("base_plane").get<std::string>());
@@ -3063,11 +3410,16 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       j.value("id", uint64_t{0})); // v1 files have no id; Document assigns
   out->SetMaterial(
       j.value("material", std::string{})); // absent (pre-v10) = default
-  if (j.contains("appearance"))            // absent (pre-v54) = pure material
+  if (j.contains("appearance")) {          // absent (pre-v54) = pure material
+    readctx::RefuseUnknownKeys(
+        j.at("appearance"), {"color", "roughness", "metallic"}, "appearance");
     out->SetAppearance(AppearanceFromJson(j.at("appearance")));
+  }
   if (j.contains("face_appearance")) { // absent (pre-v164) = none
     std::vector<FaceAppearance> faces;
     for (const json& a : j.at("face_appearance")) {
+      readctx::RefuseUnknownKeys(
+          a, {"element", "color", "roughness", "metallic"}, "face_appearance");
       FaceAppearance fa{a.at("element").get<std::string>(),
                         AppearanceFromJson(a)};
       // An entry that sets nothing would be an override that is not one;

@@ -94,10 +94,17 @@ json TargetJson(const cam::Target& t) {
 }
 
 cam::Target TargetFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j, {"part", "feature_id", "element"},
+                             "cam target");
   cam::Target t;
   t.jobPartId = j.value("part", uint64_t{0});
+  // Both halves of the face, or neither: half of one is dropped on save.
+  if (j.contains("feature_id") != j.contains("element"))
+    throw std::runtime_error("cam target " + j.dump() +
+                             " needs both feature_id and element");
   t.ref.featureId = j.value("feature_id", uint64_t{0});
   t.ref.name = j.value("element", std::string());
+  RequireSetOrEmpty(t.ref, "cam target");
   return t;
 }
 
@@ -153,6 +160,13 @@ json ToolToJson(const cam::Tool& t) {
 }
 
 cam::Tool ToolFromJson(const json& tj) {
+  readctx::RefuseUnknownKeys(
+      tj,
+      {"number", "name", "diameter", "flutes", "flute_length", "feed_cut",
+       "feed_plunge", "spindle_rpm", "tool_type", "tip_angle", "chipload_min",
+       "chipload_max", "overall_length", "collar_diameter", "shank_diameter",
+       "tip_flat", "neck_diameter", "neck_length"},
+      "cam tool");
   cam::Tool t;
   t.number = tj.value("number", 1);
   t.name = tj.value("name", std::string());
@@ -163,6 +177,12 @@ cam::Tool ToolFromJson(const json& tj) {
   t.feedPlunge = tj.value("feed_plunge", 100.0);
   t.spindleRpm = tj.value("spindle_rpm", 10000.0);
   t.type = ToolTypeFromName(tj.value("tool_type", std::string("flat")));
+  // A flat mill has no tip angle: one stated on it is not written back.
+  if (t.type == cam::ToolType::Flat && tj.contains("tip_angle"))
+    throw std::runtime_error("cam tool " +
+                             std::to_string(tj.value("number", 1)) +
+                             ": tip_angle is for a tool with a point; this one "
+                             "is a flat mill");
   t.tipAngleDeg = tj.value("tip_angle", 90.0);
   t.chiploadMin = tj.value("chipload_min", 0.0);
   t.chiploadMax = tj.value("chipload_max", 0.0);
@@ -181,6 +201,8 @@ cam::Tool ToolFromJson(const json& tj) {
 // guess with the confidence of a statement
 // (docs/cam/rotary.md#how-the-rotary-is-installed).
 cam::RotaryMount RotaryMountFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j, {"along", "chuck_end", "word", "top_moves"},
+                             "machine rotary");
   cam::RotaryMount r;
   const auto str = [&](const char* key) {
     if (!j.contains(key))
@@ -222,6 +244,11 @@ cam::RotaryMount RotaryMountFromJson(const json& j) {
 }
 
 cam::RotaryHolding RotaryHoldingFromJson(const json& h) {
+  readctx::RefuseUnknownKeys(h,
+                             {"chuck_diameter_mm", "grip_mm", "tailstock",
+                              "centre_length_mm", "centre_diameter_mm",
+                              "tailstock_body_diameter_mm", "clearance_mm"},
+                             "machine holding");
   cam::RotaryHolding out;
   out.chuckDiameter = h.value("chuck_diameter_mm", 0.0);
   out.gripLength = h.value("grip_mm", 0.0);
@@ -295,6 +322,11 @@ json MachineToJson(const cam::Machine& m) {
 }
 
 cam::Machine MachineFromJson(const json& j) {
+  readctx::RefuseUnknownKeys(j,
+                             {"name", "post", "travel", "fit_arcs",
+                              "has_rotary_axis", "rapid_feed", "a_max_deg_min",
+                              "rotary", "holding", "tools"},
+                             "machine");
   cam::Machine m;
   m.name = j.value("name", std::string());
   m.post = j.value("post", std::string("mach3"));
@@ -306,6 +338,7 @@ cam::Machine MachineFromJson(const json& j) {
                              "'; this build accepts " + PostIdList());
   if (j.contains("travel")) {
     const json& t = j.at("travel");
+    readctx::RefuseUnknownKeys(t, {"min", "max"}, "machine travel");
     const auto vec = [&](const char* key) {
       const json& a = t.at(key);
       if (!a.is_array() || a.size() != 3)
@@ -343,11 +376,15 @@ std::vector<cam::Machine> LoadMachines(const std::string& dir,
     if (!entry.is_regular_file() || entry.path().extension() != ".json")
       continue;
     try {
-      std::ifstream in(entry.path());
-      const json j = json::parse(in);
-      out.push_back(MachineFromJson(j));
-      if (out.back().name.empty())
+      std::ifstream in(entry.path(), std::ios::binary);
+      cam::Machine m = MachineFromJson(
+          readctx::ParseStrict(std::string((std::istreambuf_iterator<char>(in)),
+                                           std::istreambuf_iterator<char>())));
+      // Checked before it is kept: a nameless one was named as unreadable
+      // AND loaded.
+      if (m.name.empty())
         throw std::runtime_error("a machine needs a name");
+      out.push_back(std::move(m));
     } catch (const std::exception& e) {
       // One broken file must not hide the others: say which, keep going.
       problems += (problems.empty() ? "" : "; ") +
@@ -589,6 +626,35 @@ json CamSetupToJson(const cam::Setup& setup) {
 }
 
 cam::Setup CamSetupFromJson(const json& j) {
+  // `post`, `has_rotary_axis` and `fit_arcs` are the setup's own keys before
+  // the machine was embedded (v73-v76).
+  readctx::RefuseUnknownKeys(j,
+                             {"id",
+                              "name",
+                              "safe_z",
+                              "rapid_feed",
+                              "top_face",
+                              "origin",
+                              "origin_at",
+                              "reach_offset",
+                              "frame",
+                              "rotation_a",
+                              "held_in",
+                              "grip_mm",
+                              "tailstock",
+                              "chuck",
+                              "machine",
+                              "post",
+                              "has_rotary_axis",
+                              "fit_arcs",
+                              "stock",
+                              "tools",
+                              "split_output",
+                              "order",
+                              "placements",
+                              "fixtures",
+                              "operations"},
+                             "cam setup");
   cam::Setup setup;
   setup.id = j.value("id", uint64_t{0});
   setup.name = j.value("name", std::string("Setup"));
@@ -606,7 +672,7 @@ cam::Setup CamSetupFromJson(const json& j) {
   }
   if (j.contains("top_face"))
     setup.topFace = TargetFromJson(j["top_face"]);
-  if (j.contains("origin") && j["origin"].is_array() && j["origin"].size() == 3)
+  if (HasArrayOf(j, "origin", 3))
     setup.origin = {j["origin"][0].get<double>(), j["origin"][1].get<double>(),
                     j["origin"][2].get<double>()};
   // An unknown corner is REFUSED, not read as the default: every coordinate
@@ -628,11 +694,10 @@ cam::Setup CamSetupFromJson(const json& j) {
           "'; this build accepts stock_min, stock_centre, model_min, "
           "stock_max");
   }
-  if (j.contains("reach_offset") && j["reach_offset"].is_array() &&
-      j["reach_offset"].size() == 2)
+  if (HasArrayOf(j, "reach_offset", 2))
     setup.reachOffset = glm::dvec2(j["reach_offset"][0].get<double>(),
                                    j["reach_offset"][1].get<double>());
-  if (j.contains("frame") && j["frame"].is_array() && j["frame"].size() == 4)
+  if (HasArrayOf(j, "frame", 4))
     setup.frame =
         glm::dquat(j["frame"][3].get<double>(), j["frame"][0].get<double>(),
                    j["frame"][1].get<double>(), j["frame"][2].get<double>());
@@ -668,10 +733,19 @@ cam::Setup CamSetupFromJson(const json& j) {
         j.value("has_rotary_axis", setup.rotationA != 0.0);
     setup.machine.fitArcs = j.value("fit_arcs", true);
   }
+  // The pre-v77 machine fields beside a `machine`: never written together,
+  // and the machine's would win while these were dropped.
+  if (j.contains("machine"))
+    for (const char* legacy : {"post", "has_rotary_axis", "fit_arcs"})
+      if (j.contains(legacy))
+        throw std::runtime_error(std::string("`") + legacy +
+                                 "` is the machine's, and this setup has a "
+                                 "`machine`");
   if (j.contains("stock")) {
     const json& sj = j["stock"];
-    if (sj.contains("margin") && sj["margin"].is_array() &&
-        sj["margin"].size() == 3)
+    readctx::RefuseUnknownKeys(
+        sj, {"margin", "bottom_margin", "mode", "size", "place"}, "cam stock");
+    if (HasArrayOf(sj, "margin", 3))
       setup.stock.margin = {sj["margin"][0].get<double>(),
                             sj["margin"][1].get<double>(),
                             sj["margin"][2].get<double>()};
@@ -686,12 +760,11 @@ cam::Setup CamSetupFromJson(const json& j) {
         throw std::runtime_error("unknown cam stock mode '" + mode +
                                  "'; this build accepts relative, fixed");
     }
-    if (sj.contains("size") && sj["size"].is_array() && sj["size"].size() == 3)
+    if (HasArrayOf(sj, "size", 3))
       setup.stock.size = {sj["size"][0].get<double>(),
                           sj["size"][1].get<double>(),
                           sj["size"][2].get<double>()};
-    if (sj.contains("place") && sj["place"].is_array() &&
-        sj["place"].size() == 3)
+    if (HasArrayOf(sj, "place", 3))
       setup.stock.place = {sj["place"][0].get<double>(),
                            sj["place"][1].get<double>(),
                            sj["place"][2].get<double>()};
@@ -701,38 +774,50 @@ cam::Setup CamSetupFromJson(const json& j) {
   setup.splitOutput = j.value("split_output", false);
   if (j.contains("order"))
     setup.order = OrderFromName(j.at("order").get<std::string>());
+  RefuseRepeatedIds(j.value("placements", json::array()), "placements", true);
   for (const json& pj : j.value("placements", json::array())) {
+    readctx::RefuseUnknownKeys(
+        pj, {"id", "part", "pos", "rot_z", "enabled", "frame"},
+        "cam placement");
     cam::Placement p;
     p.id = pj.value("id", uint64_t{0});
     p.jobPartId = pj.value("part", uint64_t{0});
-    if (pj.contains("pos") && pj["pos"].is_array() && pj["pos"].size() == 2)
+    if (HasArrayOf(pj, "pos", 2))
       p.pos = {pj["pos"][0].get<double>(), pj["pos"][1].get<double>()};
     p.rotZdeg = pj.value("rot_z", 0.0);
     p.enabled = pj.value("enabled", true);
-    if (pj.contains("frame") && pj["frame"].is_array() &&
-        pj["frame"].size() == 4)
+    if (HasArrayOf(pj, "frame", 4))
       p.frame = glm::dquat(
           pj["frame"][3].get<double>(), pj["frame"][0].get<double>(),
           pj["frame"][1].get<double>(), pj["frame"][2].get<double>());
     setup.placements.push_back(p);
   }
+  RefuseRepeatedIds(j.value("fixtures", json::array()), "fixtures", true);
   for (const json& fj : j.value("fixtures", json::array())) {
+    readctx::RefuseUnknownKeys(
+        fj, {"id", "part", "box", "name", "pos", "rot_z", "enabled", "seat"},
+        "cam fixture");
     cam::Fixture f;
     f.id = fj.value("id", uint64_t{0});
     f.sourceDocId = fj.value("part", uint64_t{0});
-    if (fj.contains("box") && fj["box"].is_array() && fj["box"].size() == 3)
+    if (HasArrayOf(fj, "box", 3))
       f.box = {fj["box"][0].get<double>(), fj["box"][1].get<double>(),
                fj["box"][2].get<double>()};
     f.name = fj.value("name", std::string{});
-    if (fj.contains("pos") && fj["pos"].is_array() && fj["pos"].size() == 3)
+    if (HasArrayOf(fj, "pos", 3))
       f.pos = {fj["pos"][0].get<double>(), fj["pos"][1].get<double>(),
                fj["pos"][2].get<double>()};
     f.rotZdeg = fj.value("rot_z", 0.0);
     f.enabled = fj.value("enabled", true);
     if (fj.contains("seat") && fj["seat"].is_object()) {
       const json& sj = fj["seat"];
+      readctx::RefuseUnknownKeys(
+          sj, {"face", "edge", "along_mm", "over_mm", "spin_deg"},
+          "fixture seat");
       cam::FixtureSeat seat;
       const json face = sj.value("face", json::object());
+      readctx::RefuseUnknownKeys(face, {"feature", "name"},
+                                 "fixture seat face");
       seat.face.featureId = face.value("feature", uint64_t{0});
       seat.face.name = face.value("name", std::string{});
       const std::string edge = sj.value("edge", std::string{});
@@ -748,7 +833,21 @@ cam::Setup CamSetupFromJson(const json& j) {
     }
     setup.fixtures.push_back(std::move(f));
   }
+  // An operation's keys: its own, and every row of the op-field table
+  // (tabs, finish_tool and finish_stock among them). `tool_number` is what
+  // the v73 goldens' ops carry beside `tool`; it was never read.
+  static const std::vector<std::string_view> kOpKeys = [] {
+    std::vector<std::string_view> keys = {"id",      "name",       "type",
+                                          "tool",    "top_z",      "bottom_z",
+                                          "targets", "tool_number"};
+    for (const cam::OpFieldRow& row : cam::OpFieldRows())
+      keys.push_back(row.key);
+    return keys;
+  }();
+  RefuseRepeatedIds(j.value("operations", json::array()), "operations", true);
   for (const json& oj : j.value("operations", json::array())) {
+    readctx::RefuseUnknownKeys(oj, kOpKeys, "cam operation");
+    readctx::RequireCount(oj, "tool_number", "cam operation");
     cam::Operation op;
     op.id = oj.value("id", uint64_t{0});
     op.name = oj.value("name", std::string());
@@ -767,6 +866,12 @@ cam::Setup CamSetupFromJson(const json& j) {
     op.finishTool = oj.value("finish_tool", 0);
     op.finishStock = oj.value("finish_stock", 0.0);
     if (oj.contains("tabs")) {
+      readctx::RefuseUnknownKeys(oj["tabs"], {"count", "width", "height"},
+                                 "cam tabs");
+      // Written with their count, which is never 0: tabs without one are
+      // not written back.
+      if (!(oj["tabs"].value("count", 0) > 0))
+        throw std::runtime_error("cam tabs need a count above 0");
       op.tabCount = oj["tabs"].value("count", 0);
       op.tabWidth = oj["tabs"].value("width", 6.0);
       op.tabHeight = oj["tabs"].value("height", 1.5);

@@ -8,6 +8,7 @@
 #include "core/ElementMap.h"               // ElementRef
 #include "core/drawing/DrawingDimension.h" // drawing::ResolvedDim
 #include "core/io/Autosaver.h"
+#include "core/io/ReadContext.h"
 #include "render/SketchRenderer.h" // Vertex3D, PrimVertex
 #include "ui/AppState.h"
 
@@ -48,8 +49,18 @@ namespace ui {
 // no way back — unless `overwriteExternalChanges` says to do it anyway.
 // Every save funnels through here: Ctrl+S, Save As, naming a version, and
 // the save_project RPC, so this is the one guard that covers them all.
+//
+// Refuses, too, a save back over a project whose open kept going past
+// something it could not keep (AppState::openDrops): the save would lose
+// that for good. `overwriteLossy` saves anyway, and the drops are logged
+// once more as it does. A save to any other path is never refused for it.
 bool SaveProject(AppState& state, const std::string& path, std::string* error,
-                 bool overwriteExternalChanges = false);
+                 bool overwriteExternalChanges = false,
+                 bool overwriteLossy = false);
+
+// Whether a save to `path` would be the one SaveProject refuses for a lossy
+// open, and the drops it would lose, one per line.
+bool SaveWouldLoseDrops(const AppState& state, const std::string& path);
 
 // Open `path` and lay every autosaved document over it (F10). The project
 // itself comes from disk; each document with a sidecar newer than its saved
@@ -140,6 +151,9 @@ struct LoadedProject {
   // build", "none saved", "the recipe changed since").
   int rebuiltParts = 0;
   std::string rebuildReason;
+  // What the load kept going past (docs/versioning/README.md#a-lossy-load):
+  // a file the index does not list, a saved result that does not read.
+  readctx::LoadReport drops;
 };
 
 // What the read publishes while it runs, for the progress bar. Written by

@@ -12,12 +12,14 @@
 
 #include "core/ElementMap.h"      // ElementRef
 #include "core/io/ProjectPaths.h" // IsPlainComponent
+#include "core/io/ReadContext.h"  // RefuseUnknownKeys, FileContext
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
@@ -68,9 +70,129 @@ inline const std::string& CheckedAssetName(const std::string& name) {
 inline nlohmann::json Vec3ToJson(const glm::dvec3& v) {
   return nlohmann::json::array({v.x, v.y, v.z});
 }
+// A fixed-size array, refused when it is any other size: a fourth number
+// would otherwise be dropped with no word, and a save would lose it.
+inline void RequireArrayOf(const nlohmann::json& j, size_t n,
+                           const char* shape) {
+  if (!j.is_array() || j.size() != n)
+    throw std::runtime_error(std::string("expected ") + shape + ", got " +
+                             j.dump());
+}
 inline glm::dvec3 Vec3FromJson(const nlohmann::json& j) {
+  RequireArrayOf(j, 3, "[x, y, z]");
   return glm::dvec3(j.at(0).get<double>(), j.at(1).get<double>(),
                     j.at(2).get<double>());
+}
+
+// A reference the writer writes only when it is set (a feature and an
+// element): one that names an element of no feature is refused, as the
+// writer would drop the element without a word.
+inline void RequireSetOrEmpty(const ElementRef& ref, const char* what) {
+  if (!ref.name.empty() && ref.featureId == 0)
+    throw std::runtime_error(std::string(what) + ": '" + ref.name +
+                             "' is an element of no feature");
+}
+
+// Whether `j` has `key`, as an array of `n` numbers. Absent is false; present
+// in any other shape is REFUSED, naming it: a size check that only skipped a
+// wrong one dropped the value with no word, and a save lost it for good.
+inline bool HasArrayOf(const nlohmann::json& j, const char* key, size_t n) {
+  const auto it = j.find(key);
+  if (it == j.end())
+    return false;
+  if (!it->is_array() || it->size() != n ||
+      !std::all_of(it->begin(), it->end(),
+                   [](const nlohmann::json& v) { return v.is_number(); }))
+    throw std::runtime_error(std::string(key) + ": expected " +
+                             std::to_string(n) + " numbers, got " +
+                             it->dump().substr(0, 80));
+  return true;
+}
+
+// An id a feature names (`sketch_id`, `path_id`, ...): a whole number, or
+// absent (0). A float -- 2^64 written as 1.8e19, a fraction -- read through
+// get<uint64_t>() became some other id, or 0 and the reference was dropped.
+inline uint64_t IdField(const nlohmann::json& j, const char* key,
+                        bool required) {
+  const auto it = j.find(key);
+  if (it == j.end()) {
+    if (required)
+      (void)j.at(key); // nlohmann's own "not found", which callers name
+    return 0;
+  }
+  if (!it->is_number_unsigned())
+    throw std::runtime_error(std::string(key) + ": " + it->dump() +
+                             " is not an id");
+  return it->get<uint64_t>();
+}
+
+// A list of items, refused when two carry one id or one carries an id that
+// is not a whole number above 0 (a fraction read as the whole one below it,
+// and two items then shared it). Items with no id are let through: a v1
+// feature has none.
+inline void RefuseRepeatedIds(const nlohmann::json& list, const char* key,
+                              bool required = false) {
+  if (!list.is_array())
+    return;
+  std::vector<std::pair<uint64_t, size_t>> seen;
+  for (size_t i = 0; i < list.size(); i++) {
+    const nlohmann::json& item = list[i];
+    // `required`: an item written without one would be saved as id 0.
+    if (required && item.is_object() && !item.contains("id"))
+      throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
+                               "] has no id");
+    if (!item.is_object() || !item.contains("id"))
+      continue;
+    const nlohmann::json& id = item.at("id");
+    if (!id.is_number_unsigned() || id.get<uint64_t>() == 0)
+      throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
+                               "]: its id " + id.dump() +
+                               " is not a whole number above 0");
+    for (const auto& [other, at] : seen)
+      if (other == id.get<uint64_t>())
+        throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
+                                 "] has id " + id.dump() + ", which " + key +
+                                 "[" + std::to_string(at) + "] has too");
+    seen.emplace_back(id.get<uint64_t>(), i);
+  }
+}
+
+// A list of ids, each once. An id listed twice means nothing it does not
+// mean once -- and a damaged file listing one a million times (a Cope's
+// `mitre`) was a million booleans. Refused, naming the id.
+inline std::vector<uint64_t> UniqueIds(const nlohmann::json& list,
+                                       const char* key) {
+  if (!list.is_array())
+    throw std::runtime_error(std::string(key) + ": expected a list of ids");
+  std::vector<uint64_t> out;
+  for (const nlohmann::json& v : list) {
+    if (!v.is_number_unsigned())
+      throw std::runtime_error(std::string(key) + ": " + v.dump() +
+                               " is not an id");
+    const uint64_t id = v.get<uint64_t>();
+    if (std::find(out.begin(), out.end(), id) != out.end())
+      throw std::runtime_error(std::string(key) + " lists " +
+                               std::to_string(id) + " twice");
+    out.push_back(id);
+  }
+  return out;
+}
+
+// A plane's normal and in-plane axis as a file states them, refused when
+// they make no frame: a zero or non-finite vector, or an axis along the
+// normal (the in-plane V would be zero, every point of the plane NaN, and
+// the save would write those NaNs as nulls it cannot read back).
+inline void RequirePlaneFrame(const glm::dvec3& normal, const glm::dvec3& u,
+                              const char* what) {
+  const auto finite = [](const glm::dvec3& v) {
+    return std::isfinite(v.x) && std::isfinite(v.y) && std::isfinite(v.z);
+  };
+  const double n = glm::length(normal);
+  if (!finite(normal) || !finite(u) || !(n > 1e-12) ||
+      !(glm::length(glm::cross(normal / n, u)) > 1e-9))
+    throw std::runtime_error(std::string(what) +
+                             ": its normal and its in-plane axis make no "
+                             "frame (one is zero, or they are parallel)");
 }
 
 // Quaternion as [x, y, z, w] (glm stores (w,x,y,z); JSON order matches the
@@ -79,6 +201,7 @@ inline nlohmann::json QuatToJson(const glm::dquat& q) {
   return nlohmann::json::array({q.x, q.y, q.z, q.w});
 }
 inline glm::dquat QuatFromJson(const nlohmann::json& j) {
+  RequireArrayOf(j, 4, "[x, y, z, w]");
   return glm::dquat(j.at(3).get<double>(), j.at(0).get<double>(),
                     j.at(1).get<double>(), j.at(2).get<double>()); // (w,x,y,z)
 }
@@ -87,6 +210,7 @@ inline nlohmann::json Vec2ToJson(const glm::dvec2& v) {
   return nlohmann::json::array({v.x, v.y});
 }
 inline glm::dvec2 Vec2FromJson(const nlohmann::json& j) {
+  RequireArrayOf(j, 2, "[x, y]");
   return glm::dvec2(j.at(0).get<double>(), j.at(1).get<double>());
 }
 
@@ -94,6 +218,12 @@ inline nlohmann::json ElementRefJson(const ElementRef& ref) {
   return nlohmann::json{{"feature_id", ref.featureId}, {"element", ref.name}};
 }
 inline ElementRef ElementRefFromJson(const nlohmann::json& j) {
+  readctx::RefuseUnknownKeys(j, {"feature_id", "element"}, "element ref");
+  // Half a reference names nothing, and the writer, which writes only a
+  // set one, would drop the half that is there.
+  if (j.contains("feature_id") != j.contains("element"))
+    throw std::runtime_error("element ref " + j.dump() +
+                             " needs both feature_id and element");
   return ElementRef{j.value("feature_id", uint64_t{0}),
                     j.value("element", std::string{})};
 }

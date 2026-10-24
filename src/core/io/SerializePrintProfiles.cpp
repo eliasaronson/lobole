@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/PrintAllowance.h"
+#include "core/io/ReadContext.h"   // RefuseUnknownKeys
 #include "core/io/Serialization.h" // WriteTextAtomic
 
 #include <algorithm>
@@ -35,6 +36,8 @@ printfit::Row PrintRowFromJson(const json& j) {
   if (!j.is_object())
     throw std::runtime_error("a print row is an object {kind, from_mm, "
                              "to_mm?, allowance_mm, source?}");
+  readctx::RefuseUnknownKeys(
+      j, {"kind", "from_mm", "to_mm", "allowance_mm", "source"}, "print row");
   printfit::Row r;
   const std::string kind = j.value("kind", std::string());
   const auto k = printfit::PrintedFromName(kind);
@@ -89,6 +92,12 @@ printfit::Profile PrintProfileFromJson(const json& j) {
         "material, conditions?, stl_deflection_mm?, "
         "layer_height_mm?, z_gap_mm?, bed_mm?, bed_exclude_mm?, "
         "line_width_mm?, slender_ratio?, slender_ratio_source?, rows}");
+  readctx::RefuseUnknownKeys(
+      j,
+      {"name", "process", "material", "conditions", "stl_deflection_mm",
+       "layer_height_mm", "z_gap_mm", "bed_mm", "bed_exclude_mm",
+       "line_width_mm", "slender_ratio", "slender_ratio_source", "rows"},
+      "print profile");
   printfit::Profile p;
   p.name = j.value("name", std::string());
   p.table.process = j.value("process", std::string());
@@ -171,8 +180,10 @@ std::vector<printfit::Profile> LoadPrintProfiles(const std::string& dir,
     if (!entry.is_regular_file() || entry.path().extension() != ".json")
       continue;
     try {
-      std::ifstream in(entry.path());
-      out.push_back(PrintProfileFromJson(json::parse(in)));
+      std::ifstream in(entry.path(), std::ios::binary);
+      out.push_back(PrintProfileFromJson(
+          readctx::ParseStrict(std::string((std::istreambuf_iterator<char>(in)),
+                                           std::istreambuf_iterator<char>()))));
     } catch (const std::exception& e) {
       // One broken file must not hide the others: say which, keep going.
       problems += (problems.empty() ? "" : "; ") +

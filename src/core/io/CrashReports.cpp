@@ -16,7 +16,11 @@
 #include <fstream>
 #include <mutex>
 #include <nlohmann/json.hpp>
+
+#include <limits>
+#include <set>
 #include <sstream>
+#include <type_traits>
 
 namespace fs = std::filesystem;
 
@@ -118,6 +122,51 @@ bool WriteMarker() { return g_lock.Replace(g_marker.dump(2) + "\n"); }
 // than the session itself, since a clean quit with unsaved changes leaves an
 // earlier session's sidecar in the same place. Returns the copies, relative
 // to `into`.
+// A field of a session marker or a report, or `def` when it is absent or
+// not the type it is written as. One field at a time, as the settings file
+// reads its rows: a damaged report.json, or a marker torn by the death it
+// records, loses that field -- `j.value()` threw out of the start instead,
+// before the window opened.
+template <class T> T Get(const nlohmann::json& j, const char* key, T def) {
+  if (!j.is_object())
+    return def;
+  const auto it = j.find(key);
+  if (it == j.end())
+    return def;
+  if constexpr (std::is_same_v<T, bool>) {
+    return it->is_boolean() ? it->get<bool>() : def;
+  } else if constexpr (std::is_same_v<T, std::string>) {
+    return it->is_string() ? it->get<std::string>() : def;
+  } else {
+    if (!it->is_number_integer())
+      return def;
+    if (it->is_number_unsigned() &&
+        it->get<uint64_t>() >
+            static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
+      return def;
+    return static_cast<T>(it->get<int64_t>());
+  }
+}
+
+// The start in milliseconds, from the marker's own or from its seconds --
+// never by a multiplication that overflows on a damaged one.
+int64_t StartedMs(const nlohmann::json& j, std::time_t epoch) {
+  const int64_t ms = Get<int64_t>(j, "started_ms", 0);
+  if (ms != 0 || !j.contains("started_epoch"))
+    return ms;
+  const int64_t limit = std::numeric_limits<int64_t>::max() / 1000;
+  return epoch > limit || epoch < -limit ? 0 : int64_t{epoch} * 1000;
+}
+
+// What a marker may name as an autosave: a sidecar or a sidecar directory
+// (Autosaver), never anything else. A damaged marker naming "/" would have
+// copied every file newer than its start into the report.
+bool IsAutosavePath(const fs::path& p) {
+  const std::string name = p.filename().string();
+  return name.ends_with(".autosave") || name.ends_with(".autosave.d") ||
+         name == "unsaved.autosave.json";
+}
+
 std::vector<std::string> CopyAutosaves(const nlohmann::json& marker,
                                        std::time_t started,
                                        const fs::path& into) {
@@ -133,10 +182,15 @@ std::vector<std::string> CopyAutosaves(const nlohmann::json& marker,
     const auto t = fs::last_write_time(p, ec);
     return !ec && ToTimeT(t) >= started;
   };
+  // Each once: a damaged marker listing one sidecar a million times copied
+  // it a million times.
+  std::set<std::string> seen;
   for (const auto& entry : marker["autosaves"]) {
-    if (!entry.is_string())
+    if (!entry.is_string() || !seen.insert(entry.get<std::string>()).second)
       continue;
     const fs::path source = entry.get<std::string>();
+    if (!IsAutosavePath(source))
+      continue;
     if (fs::is_regular_file(source, ec)) {
       if (!fresh(source))
         continue;
@@ -242,18 +296,18 @@ std::string ReportText(const Report& r, const std::string& crashText,
 Report FromJson(const nlohmann::json& j, const fs::path& dir) {
   Report r;
   r.dir = dir;
-  r.stem = j.value("stem", dir.filename().string());
-  r.reason = j.value("reason", "");
-  r.crashed = j.value("crashed", false);
-  r.started = j.value("started", "");
-  r.mode = j.value("mode", "");
-  r.version = j.value("version", "");
-  r.build = j.value("build", "");
-  r.os = j.value("os", "");
-  r.project = j.value("project", "");
-  r.startedEpoch = j.value("started_epoch", std::time_t{0});
-  r.startedMs = j.value("started_ms", int64_t{r.startedEpoch} * 1000);
-  r.firstFrame = j.value("first_frame", false);
+  r.stem = Get<std::string>(j, "stem", dir.filename().string());
+  r.reason = Get<std::string>(j, "reason", "");
+  r.crashed = Get<bool>(j, "crashed", false);
+  r.started = Get<std::string>(j, "started", "");
+  r.mode = Get<std::string>(j, "mode", "");
+  r.version = Get<std::string>(j, "version", "");
+  r.build = Get<std::string>(j, "build", "");
+  r.os = Get<std::string>(j, "os", "");
+  r.project = Get<std::string>(j, "project", "");
+  r.startedEpoch = Get<std::time_t>(j, "started_epoch", 0);
+  r.startedMs = StartedMs(j, r.startedEpoch);
+  r.firstFrame = Get<bool>(j, "first_frame", false);
   if (j.contains("autosaves") && j["autosaves"].is_array())
     for (const auto& a : j["autosaves"])
       if (a.is_string())
@@ -312,19 +366,22 @@ std::optional<Report> Collect(const fs::path& stateDir, const fs::path& marker,
   const std::string crashText =
       fs::exists(crashFile, ec) ? ReadFile(crashFile) : std::string();
   r.reason = ReasonFrom(crashText, &r.crashed);
-  r.started = j.value("started", "");
-  r.mode = j.value("mode", "");
-  r.version = j.value("version", "");
-  r.build = j.value("build", "");
-  r.os = j.value("os", "");
-  r.project = j.value("project", "");
-  const std::time_t startedAt = j.value("started_epoch", std::time_t{0});
+  r.started = Get<std::string>(j, "started", "");
+  r.mode = Get<std::string>(j, "mode", "");
+  r.version = Get<std::string>(j, "version", "");
+  r.build = Get<std::string>(j, "build", "");
+  r.os = Get<std::string>(j, "os", "");
+  r.project = Get<std::string>(j, "project", "");
+  const std::time_t startedAt = Get<std::time_t>(j, "started_epoch", 0);
   r.startedEpoch = startedAt;
-  r.startedMs = j.value("started_ms", int64_t{startedAt} * 1000);
-  r.firstFrame = j.value("first_frame", false);
+  r.startedMs = StartedMs(j, startedAt);
+  r.firstFrame = Get<bool>(j, "first_frame", false);
 
-  const std::string log = j.value("log", "");
-  if (!log.empty())
+  // The session's own log, which is in the state dir's logs/: a damaged
+  // marker naming any other file does not get it copied into a report.
+  const std::string log = Get<std::string>(j, "log", "");
+  if (!log.empty() && fs::weakly_canonical(fs::path(log).parent_path(), ec) ==
+                          fs::weakly_canonical(stateDir / "logs", ec))
     WriteFile(dir / "session.log", Tail(log, kLogTailLines));
   const bool hasDump = fs::exists(dumpFile, ec);
   if (hasDump)
@@ -334,7 +391,10 @@ std::optional<Report> Collect(const fs::path& stateDir, const fs::path& marker,
 
   const std::string collected = Format(std::time(nullptr), "%Y-%m-%d %H:%M:%S");
   WriteFile(dir / "report.txt", ReportText(r, crashText, hasDump, collected));
-  WriteFile(dir / "report.json", ToJson(r).dump(2) + "\n");
+  WriteFile(
+      dir / "report.json",
+      ToJson(r).dump(2, ' ', false, nlohmann::json::error_handler_t::replace) +
+          "\n");
 
   fs::remove(crashFile, ec);
   fs::remove(dumpFile, ec);
@@ -513,7 +573,10 @@ std::optional<Report> ReportThisSession(const std::string& reason,
                              "It\nwrote this report when it happened, saved "
                              "what was\nunsaved, and asked to restart. The "
                              "tail of\nsession.log is what it was doing.\n"));
-  WriteFile(dir / "report.json", ToJson(r).dump(2) + "\n");
+  WriteFile(
+      dir / "report.json",
+      ToJson(r).dump(2, ' ', false, nlohmann::json::error_handler_t::replace) +
+          "\n");
   PruneReports(stateDir, kKeepReports);
   LOG_WARN("This session's report ({}) is in {}", reason, dir.string());
   return r;

@@ -8,6 +8,8 @@
 
 #include <nlohmann/json.hpp>
 
+#include <limits>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdlib>
@@ -174,10 +176,28 @@ std::vector<InstanceInfo> LiveInstances() {
     try {
       std::ifstream in(entry.path());
       const json j = json::parse(in);
-      info.pid = j.value("pid", 0);
-      info.port = static_cast<uint16_t>(j.value("port", 0));
+      // Each field the type and the range it is written in, or the entry
+      // announces nothing: a pid of 1.5 read as 1 (init, alive forever), a
+      // pid of 0 or -1 asks kill() about a whole process group and answers
+      // alive, and a port of 65537 wrapped to 1.
+      const auto whole = [&](const char* key, int64_t lo, int64_t hi) {
+        const auto it = j.find(key);
+        if (it == j.end() || !it->is_number_integer() ||
+            (it->is_number_unsigned() &&
+             it->get<uint64_t>() > static_cast<uint64_t>(hi)) ||
+            it->get<int64_t>() < lo || it->get<int64_t>() > hi)
+          throw std::runtime_error(std::string(key) + " is not a " +
+                                   "whole number in range");
+        return it->get<int64_t>();
+      };
+      info.pid =
+          static_cast<int>(whole("pid", 1, std::numeric_limits<int>::max()));
+      info.port = static_cast<uint16_t>(whole("port", 1, 65535));
       info.mode = j.value("mode", std::string("headless"));
-      info.started = j.value("started", int64_t{0});
+      info.started =
+          j.contains("started")
+              ? whole("started", 0, std::numeric_limits<int64_t>::max())
+              : 0;
     } catch (const std::exception&) {
       fs::remove(entry.path(), ec); // unparseable: it announces nothing
       continue;

@@ -168,7 +168,14 @@ class Client:
                 directory.is_dir()) else []:
             try:
                 info = json.loads(path.read_text())
-                pid = int(info.get("pid", 0))
+                pid, port = info.get("pid"), info.get("port")
+                # A whole pid above 0 and a port in range, as the app reads
+                # them: kill(0) and kill(-1) ask about a whole process group
+                # and answer "alive".
+                if (not isinstance(pid, int) or isinstance(pid, bool)
+                        or pid <= 0 or not isinstance(port, int)
+                        or isinstance(port, bool) or not 0 < port < 65536):
+                    raise ValueError("not an announcement")
                 os.kill(pid, 0)  # liveness, not a signal
             except PermissionError:
                 pass  # someone else's process: alive, just not ours to poke
