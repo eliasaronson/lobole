@@ -1,0 +1,12 @@
+{
+  "format": "designer-document",
+  "version": 189,
+  "parameters": [
+    {"name": "lift", "expression": "5"}
+  ],
+  "features": [
+    {"type": "Sketch", "name": "Base", "id": 1, "next_entity_id": 5, "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1], "uAxis": [1, 0, 0]}, "entities": [{"type": "line", "id": 1, "a": [0, 0], "b": [40, 0]}, {"type": "line", "id": 2, "a": [40, 0], "b": [40, 30]}, {"type": "line", "id": 3, "a": [40, 30], "b": [0, 30]}, {"type": "line", "id": 4, "a": [0, 30], "b": [0, 0]}], "constraints": []},
+    {"type": "Extrude", "name": "Block", "id": 2, "sketch_id": 1, "distance": 20.0, "mode": "new_body"},
+    {"type": "OffsetFace", "name": "Raise", "id": 3, "body_id": 2, "faces": [{"feature_id": 2, "element": "2/cap1"}], "distance_mm": 1.0, "distance_mm_expr": "lift"}
+  ]
+}

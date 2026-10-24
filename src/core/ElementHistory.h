@@ -75,9 +75,23 @@ ElementMap NamesThroughHistory(const CADShape& target,
 // The same for an operation on ONE shape (Refine's UnifySameDomain): a face
 // it leaves alone keeps its name verbatim, so a refined body's bearing seat
 // is still the reference a study load, a fit or a mate made to it.
+//
+// `keepWholeFaces` false drops that last rule: a direct edit
+// (core/DirectEdit.h) MEANS the faces it reports modified -- a face
+// it offset, extended or trimmed is "<name>;M<tag>" even when one input face
+// became it whole, so what referenced the face sees that it moved.
 ElementMap NamesThroughHistory(const CADShape& input, const ElementMap& map,
                                const BRepTools_History& history,
-                               const CADShape& result, uint64_t featureTag);
+                               const CADShape& result, uint64_t featureTag,
+                               bool keepWholeFaces = true);
+
+// The names, in `map`, of the faces of `whole` that are also faces of `part`
+// (a builder's report naming some of its input's faces: a compound of them,
+// or one face), in index order. A face of `part` that is no face of `whole`
+// is left out.
+std::vector<std::string> FaceNamesIn(const TopoDS_Shape& part,
+                                     const TopoDS_Shape& whole,
+                                     const ElementMap& map);
 
 // Every face and edge of `shape`, as the argument list BRepTools_History's
 // template constructor needs to be built from a maker (handing it the solid

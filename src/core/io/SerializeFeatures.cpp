@@ -15,6 +15,7 @@
 #include "core/features/CurveFeature.h"
 #include "core/features/DatumAxisFeature.h"
 #include "core/features/DatumPlaneFeature.h"
+#include "core/features/DeleteFaceFeature.h"
 #include "core/features/DerivedFeature.h"
 #include "core/features/DraftFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
@@ -27,11 +28,14 @@
 #include "core/features/HoleFeature.h"
 #include "core/features/JogFeature.h"
 #include "core/features/LoftFeature.h"
+#include "core/features/MoveFaceFeature.h"
 #include "core/features/NormalCutFeature.h"
+#include "core/features/OffsetFaceFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
 #include "core/features/RefineFeature.h"
 #include "core/features/RefoldFeature.h"
+#include "core/features/ReplaceFaceFeature.h"
 #include "core/features/RetainingRingFeature.h"
 #include "core/features/RetainingRingGrooveFeature.h"
 #include "core/features/RevolveFeature.h"
@@ -863,6 +867,59 @@ PlaneType PlaneTypeFromString(const std::string& s) {
   throw std::runtime_error("Unknown base plane: " + s);
 }
 
+// A direct edit's face refs (docs/modeling/README.md#direct-edit): each
+// {feature_id, element} with the fingerprint of the face as it was picked,
+// when the name is an index into a file (vNEXT).
+json DirectFaceToJson(const ElementRef& ref,
+                      const directedit::Fingerprints& prints) {
+  json f = {{"feature_id", ref.featureId}, {"element", ref.name}};
+  if (const auto it = prints.find(ref.name); it != prints.end())
+    f["fingerprint"] = {{"surface", it->second.surface},
+                        {"area_mm2", it->second.areaMm2},
+                        {"centroid_mm",
+                         {it->second.centroid.x, it->second.centroid.y,
+                          it->second.centroid.z}}};
+  return f;
+}
+
+ElementRef DirectFaceFromJson(const json& f, directedit::Fingerprints& prints) {
+  if (!f.is_object())
+    throw std::runtime_error("a face is {feature_id, element}");
+  ElementRef ref{f.value("feature_id", uint64_t{0}),
+                 f.value("element", std::string{})};
+  if (f.contains("fingerprint")) {
+    const json& p = f.at("fingerprint");
+    directedit::FaceFingerprint print;
+    print.surface = p.at("surface").get<std::string>();
+    print.areaMm2 = p.at("area_mm2").get<double>();
+    const json& c = p.at("centroid_mm");
+    if (!c.is_array() || c.size() != 3)
+      throw std::runtime_error("a face fingerprint's centroid_mm is [x, y, z]");
+    print.centroid = {c[0].get<double>(), c[1].get<double>(),
+                      c[2].get<double>()};
+    prints[ref.name] = print;
+  }
+  return ref;
+}
+
+json DirectFacesToJson(const std::vector<ElementRef>& faces,
+                       const directedit::Fingerprints& prints) {
+  json arr = json::array();
+  for (const ElementRef& ref : faces)
+    arr.push_back(DirectFaceToJson(ref, prints));
+  return arr;
+}
+
+std::vector<ElementRef> DirectFacesFromJson(const json& arr,
+                                            directedit::Fingerprints& prints) {
+  if (!arr.is_array())
+    throw std::runtime_error("faces is a list of {feature_id, element}");
+  std::vector<ElementRef> out;
+  for (const json& f : arr)
+    out.push_back(DirectFaceFromJson(f, prints));
+  return out;
+}
+
 json AxisRefToJson(const AxisRef& axis) {
   switch (axis.kind) {
   case AxisRef::Kind::X:
@@ -1674,6 +1731,49 @@ json FeatureToJson(const Feature& feature) {
       j["cs_diameter"] = ho->csDiameter;
       j["cs_depth"] = ho->csDepth;
     }
+  } else if (auto* del = dynamic_cast<const DeleteFaceFeature*>(&feature)) {
+    j["body_id"] = del->bodyId;
+    j["faces"] = DirectFacesToJson(del->faces, del->fingerprints);
+  } else if (auto* off = dynamic_cast<const OffsetFaceFeature*>(&feature)) {
+    j["body_id"] = off->bodyId;
+    j["faces"] = DirectFacesToJson(off->faces, off->fingerprints);
+    j["distance_mm"] = off->distance;
+    if (!off->distanceExpr.empty())
+      j["distance_mm_expr"] = off->distanceExpr;
+  } else if (auto* mv = dynamic_cast<const MoveFaceFeature*>(&feature)) {
+    j["body_id"] = mv->bodyId;
+    j["faces"] = DirectFacesToJson(mv->faces, mv->fingerprints);
+    j["translate_mm"] = {mv->translate.x, mv->translate.y, mv->translate.z};
+    if (std::any_of(mv->translateExpr.begin(), mv->translateExpr.end(),
+                    [](const std::string& e) { return !e.empty(); }))
+      j["translate_mm_expr"] = mv->translateExpr;
+    if (mv->rotateDeg != 0.0 || !mv->rotateExpr.empty()) {
+      j["rotate_deg"] = mv->rotateDeg;
+      if (!mv->rotateExpr.empty())
+        j["rotate_deg_expr"] = mv->rotateExpr;
+      j["axis"] = AxisRefToJson(mv->axis);
+    }
+  } else if (auto* rp = dynamic_cast<const ReplaceFaceFeature*>(&feature)) {
+    j["body_id"] = rp->bodyId;
+    j["face"] = DirectFaceToJson(rp->face, rp->fingerprints);
+    json t;
+    switch (rp->targetKind) {
+    case ReplaceTargetKind::Plane:
+      t["kind"] = "plane";
+      if (rp->targetId != 0)
+        t["datum_id"] = rp->targetId;
+      else
+        t["base_plane"] = PlaneTypeToString(rp->basePlane);
+      break;
+    case ReplaceTargetKind::Sketch:
+      t = {{"kind", "sketch"}, {"sketch_id", rp->targetId}};
+      break;
+    case ReplaceTargetKind::Face:
+      t = {{"kind", "face"},
+           {"face", DirectFaceToJson(rp->targetFace, rp->fingerprints)}};
+      break;
+    }
+    j["target"] = std::move(t);
   } else if (auto* dr = dynamic_cast<const DraftFeature*>(&feature)) {
     j["body_id"] = dr->bodyId;
     j["angle_deg"] = dr->angleDeg;
@@ -2155,6 +2255,37 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "drill_point_deg?:number, thread_depth?:number, "
      "thread_depth_expr?:string, fit?:object, "
      "printed?:'round'|'teardrop'|'teardrop_flat'"},
+    {"DeleteFace", kVersionNEXT,
+     "body_id (the body's created_by), faces [{feature_id, element}] on it: "
+     "removed, and the gap healed by extending the faces around it (a hole "
+     "fills, a boss levels, a fillet or chamfer gives back its edge); a set "
+     "the faces around cannot close over is refused naming them",
+     "body_id:int>=0, faces:object[]"},
+    {"OffsetFace", kVersionNEXT,
+     "body_id, faces [{feature_id, element}], distance_mm (+_expr): each face "
+     "moved along its own normal, + outward (adds material); its neighbours "
+     "follow along their own surfaces (a cylinder changes radius). Refused: "
+     "an inward offset through the body, a face whose tangent neighbour (a "
+     "fillet) is not offset with it",
+     "body_id:int>=0, faces:object[], distance_mm?:number, "
+     "distance_mm_expr?:string"},
+    {"MoveFace", kVersionNEXT,
+     "body_id, faces [{feature_id, element}] forming one feature (a hole, "
+     "boss, pocket, slot), moved rigidly: translate_mm [x, y, z] (+_expr "
+     "each), rotate_deg (+_expr) about axis (Revolve's {kind: x|y|z|"
+     "sketch_line|datum_axis|custom}), rotated first; the body closes behind "
+     "it. Refused: a move out of the body, a face that does not lift out "
+     "(Offset Face moves those), a slide that changes nothing",
+     "body_id:int>=0, faces:object[], translate_mm?:number[3], "
+     "translate_mm_expr?:string[3], rotate_deg?:number, "
+     "rotate_deg_expr?:string, axis?:object"},
+    {"ReplaceFace", kVersionNEXT,
+     "body_id, face {feature_id, element}, target: {kind: \"plane\", "
+     "base_plane: xy|xz|yz or datum_id} | {kind: \"sketch\", sketch_id} | "
+     "{kind: \"face\", face {feature_id, element}} (any body's face; its "
+     "whole surface): the face put onto the target, its neighbours extended "
+     "or trimmed along their own surfaces to meet it",
+     "body_id:int>=0, face:object, target:object"},
     {"Draft", 22,
      "faces [{feature_id, element}], angle_deg (+_expr), "
      "neutral_plane, body_id?",
@@ -3401,6 +3532,76 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       ho->printed = *printed;
     }
     out = std::move(ho);
+  } else if (type == "DeleteFace") { // vNEXT
+    auto del = std::make_unique<DeleteFaceFeature>(
+        name, j.at("body_id").get<uint64_t>(), std::vector<ElementRef>{});
+    del->faces =
+        DirectFacesFromJson(j.value("faces", json::array()), del->fingerprints);
+    out = std::move(del);
+  } else if (type == "OffsetFace") { // vNEXT
+    auto off = std::make_unique<OffsetFaceFeature>(
+        name, j.at("body_id").get<uint64_t>(), std::vector<ElementRef>{},
+        j.value("distance_mm", 1.0));
+    off->faces =
+        DirectFacesFromJson(j.value("faces", json::array()), off->fingerprints);
+    off->distanceExpr = j.value("distance_mm_expr", std::string{});
+    out = std::move(off);
+  } else if (type == "MoveFace") { // vNEXT
+    glm::dvec3 t(0.0);
+    if (j.contains("translate_mm")) {
+      const json& v = j.at("translate_mm");
+      if (!v.is_array() || v.size() != 3)
+        throw std::runtime_error("MoveFace translate_mm is [x, y, z] in mm");
+      t = {v[0].get<double>(), v[1].get<double>(), v[2].get<double>()};
+    }
+    auto mv = std::make_unique<MoveFaceFeature>(
+        name, j.at("body_id").get<uint64_t>(), std::vector<ElementRef>{}, t);
+    mv->faces =
+        DirectFacesFromJson(j.value("faces", json::array()), mv->fingerprints);
+    if (j.contains("translate_mm_expr")) {
+      const json& e = j.at("translate_mm_expr");
+      if (!e.is_array() || e.size() != 3)
+        throw std::runtime_error(
+            "MoveFace translate_mm_expr is three expressions, \"\" for none");
+      for (int a = 0; a < 3; a++)
+        mv->translateExpr[a] = e[a].get<std::string>();
+    }
+    mv->rotateDeg = j.value("rotate_deg", 0.0);
+    mv->rotateExpr = j.value("rotate_deg_expr", std::string{});
+    if (j.contains("axis"))
+      mv->axis = AxisRefFromJson(j.at("axis"));
+    out = std::move(mv);
+  } else if (type == "ReplaceFace") { // vNEXT
+    directedit::Fingerprints prints;
+    const ElementRef face = j.contains("face")
+                                ? DirectFaceFromJson(j.at("face"), prints)
+                                : ElementRef{};
+    auto rp = std::make_unique<ReplaceFaceFeature>(
+        name, j.at("body_id").get<uint64_t>(), face);
+    if (j.contains("target")) {
+      const json& t = j.at("target");
+      if (!t.is_object())
+        throw std::runtime_error(
+            "ReplaceFace target is {kind: plane|sketch|face, ...}");
+      const std::string kind = t.value("kind", std::string{});
+      if (kind == "plane") {
+        rp->targetKind = ReplaceTargetKind::Plane;
+        rp->targetId = t.value("datum_id", uint64_t{0});
+        rp->basePlane = PlaneTypeFromString(t.value("base_plane", "xy"));
+      } else if (kind == "sketch") {
+        rp->targetKind = ReplaceTargetKind::Sketch;
+        rp->targetId = t.at("sketch_id").get<uint64_t>();
+      } else if (kind == "face") {
+        rp->targetKind = ReplaceTargetKind::Face;
+        rp->targetFace = DirectFaceFromJson(t.at("face"), prints);
+      } else {
+        throw std::runtime_error("ReplaceFace target kind \"" + kind +
+                                 "\" is not one; accepted: plane, sketch, "
+                                 "face");
+      }
+    }
+    rp->fingerprints = std::move(prints);
+    out = std::move(rp);
   } else if (type == "Draft") { // v22
     std::vector<ElementRef> refs;
     for (const auto& ej : j.value("faces", json::array())) {

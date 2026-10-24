@@ -472,10 +472,15 @@ ElementMap NamesThroughHistory(const CADShape& target,
 
 ElementMap NamesThroughHistory(const CADShape& input, const ElementMap& map,
                                const BRepTools_History& history,
-                               const CADShape& result, uint64_t featureTag) {
+                               const CADShape& result, uint64_t featureTag,
+                               bool keepWholeFaces) {
   ElementMap out =
       PropagateNames({{input.GetShape(), map}}, history, TopTools_ListOfShape(),
                      result.GetShape(), featureTag);
+  if (!keepWholeFaces) {
+    FinishNames(result.GetShape(), out);
+    return out;
+  }
   // A clean-up rebuilds every face whose boundary edges it merged, and
   // reports each as Modified -- so the end face of two boxes unioned and
   // refined came back "1/face0;M4", though it is the same face on the same
@@ -512,6 +517,25 @@ ElementMap NamesThroughHistory(const CADShape& input, const ElementMap& map,
     if (names.size() == 1)
       out.names[r] = *names.front();
   FinishNames(result.GetShape(), out);
+  return out;
+}
+
+std::vector<std::string> FaceNamesIn(const TopoDS_Shape& part,
+                                     const TopoDS_Shape& whole,
+                                     const ElementMap& map) {
+  TopTools_IndexedMapOfShape faces, mine;
+  TopExp::MapShapes(whole, TopAbs_FACE, faces);
+  TopExp::MapShapes(part, TopAbs_FACE, mine);
+  std::vector<int> found;
+  for (int i = 1; i <= mine.Extent(); i++)
+    if (const int at = faces.FindIndex(mine(i)) - 1; at >= 0)
+      found.push_back(at);
+  std::sort(found.begin(), found.end());
+  found.erase(std::unique(found.begin(), found.end()), found.end());
+  std::vector<std::string> out;
+  for (const int at : found)
+    if (const std::string* n = map.NameOf(at))
+      out.push_back(*n);
   return out;
 }
 

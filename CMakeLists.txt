@@ -481,6 +481,11 @@ set(core_sources
     src/core/BodyMode.cpp
     src/core/features/RevolveFeature.cpp
     src/core/features/ShellFeature.cpp
+    src/core/DirectEdit.cpp
+    src/core/features/DeleteFaceFeature.cpp
+    src/core/features/OffsetFaceFeature.cpp
+    src/core/features/MoveFaceFeature.cpp
+    src/core/features/ReplaceFaceFeature.cpp
     src/core/features/LoftFeature.cpp
     src/core/features/RibFeature.cpp
     src/core/features/ThreadFeature.cpp

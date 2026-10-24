@@ -327,6 +327,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | Direct edit: four feature types that change a body's faces in place — `DeleteFace` {body_id, faces}, `OffsetFace` {body_id, faces, distance_mm (+_expr)}, `MoveFace` {body_id, faces, translate_mm (+_expr each), rotate_deg (+_expr), axis} and `ReplaceFace` {body_id, face, target {kind: plane\|sketch\|face}}; each face ref may carry the `fingerprint` {surface, area_mm2, centroid_mm} of the face as picked (modeling/README.md#direct-edit). Goldens `vNEXT-delete-face`, `vNEXT-offset-face`, `vNEXT-move-face`, `vNEXT-replace-face` |
 
 ## Paths in a project
 
