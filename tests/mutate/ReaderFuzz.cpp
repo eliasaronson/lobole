@@ -136,12 +136,64 @@ struct Leaf {
 };
 using Leaves = std::map<std::string, Leaf>;
 
+// A sketch's projected entities -- the ones an `external` reference's
+// `gen_ids` names -- and those ids are derived: every regeneration projects
+// them again from the model, so damage that changes the model (a sketch
+// the projected face was extruded from) changes them, as an edit does.
+// Not content a reader could lose; left out of the leaves.
+std::set<uint64_t> ProjectedIds(const json& j) {
+  std::set<uint64_t> out;
+  if (!j.contains("external") || !j.at("external").is_array() ||
+      !j.contains("entities"))
+    return out;
+  for (const json& ext : j.at("external"))
+    if (ext.is_object() && ext.contains("gen_ids") &&
+        ext.at("gen_ids").is_array())
+      for (const json& g : ext.at("gen_ids"))
+        if (g.is_number_unsigned())
+          out.insert(g.get<uint64_t>());
+  return out;
+}
+
 void AddLeaves(const json& j, const std::string& file, const std::string& rel,
                const std::string& ptr, const std::string& shape,
                const std::string& concrete, Leaves& out) {
   if (j.is_object()) {
+    const std::set<uint64_t> projected = ProjectedIds(j);
     for (auto it = j.begin(); it != j.end(); ++it) {
       const std::string k = "/" + Escape(it.key());
+      if (!projected.empty() && it.key() == "entities" &&
+          it.value().is_array()) {
+        const json& list = it.value();
+        for (size_t i = 0; i < list.size(); i++) {
+          const json& e = list[i];
+          const bool item = e.is_object() && e.contains("id") &&
+                            e.at("id").is_number_unsigned() &&
+                            e.at("id").get<uint64_t>() != 0;
+          if (item && projected.contains(e.at("id").get<uint64_t>()))
+            continue;
+          AddLeaves(
+              e, file, rel,
+              ptr + k + "/" +
+                  (item ? "id=" + std::to_string(e.at("id").get<uint64_t>())
+                        : std::to_string(i)),
+              shape + k + "/*", concrete + k + "/" + std::to_string(i), out);
+        }
+        continue;
+      }
+      if (!projected.empty() && it.key() == "external" &&
+          it.value().is_array()) {
+        const json& list = it.value();
+        for (size_t i = 0; i < list.size(); i++) {
+          json ext = list[i];
+          if (ext.is_object())
+            ext.erase("gen_ids");
+          AddLeaves(ext, file, rel, ptr + k + "/" + std::to_string(i),
+                    shape + k + "/*", concrete + k + "/" + std::to_string(i),
+                    out);
+        }
+        continue;
+      }
       AddLeaves(it.value(), file, rel, ptr + k, shape + k, concrete + k, out);
     }
   } else if (j.is_array()) {
