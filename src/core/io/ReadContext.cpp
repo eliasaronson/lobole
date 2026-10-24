@@ -48,6 +48,31 @@ std::string Named(const std::string& reason, const std::string& rel) {
   return path.empty() ? reason : path + ": " + reason;
 }
 
+std::string GroupedCount(size_t n) {
+  std::string digits = std::to_string(n);
+  std::string out;
+  for (size_t i = 0; i < digits.size(); i++) {
+    if (i > 0 && (digits.size() - i) % 3 == 0)
+      out += ' ';
+    out += digits[i];
+  }
+  return out;
+}
+
+void RequirePartFeatureCount(size_t listed, const std::string& rel) {
+  if (listed > kMaxPartFeatures)
+    Refuse("a part holds at most " + GroupedCount(kMaxPartFeatures) +
+               " features; this one lists " + GroupedCount(listed),
+           rel);
+}
+
+std::string PartFeatureLimitRefusal(size_t have, size_t adding) {
+  if (have + adding <= kMaxPartFeatures)
+    return {};
+  return "a part holds at most " + GroupedCount(kMaxPartFeatures) +
+         " features, and this one has " + GroupedCount(have);
+}
+
 namespace {
 
 // A SAX pass that only tracks each object's keys, to refuse one written

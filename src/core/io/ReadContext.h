@@ -88,6 +88,22 @@ template <class F> decltype(auto) InFile(std::string segment, F&& fn) {
 inline constexpr size_t kMaxJsonDepth = 256;
 nlohmann::json ParseStrict(const std::string& text);
 
+// A part holds at most this many features. A sanity bound, not a default:
+// the largest real part holds a few hundred, one near the limit takes far
+// too long to rebuild to be used, and a file listing 110 000 copies of one
+// box rebuilt past 8 GB. Checked against a part's `features` list before a
+// single feature is built (RequirePartFeatureCount), and where a feature is
+// added (PartFeatureLimitRefusal), so the app does not write a part it
+// cannot open. An assembly's occurrences are not limited.
+inline constexpr size_t kMaxPartFeatures = 50000;
+// "110 412": a count as a refusal writes it, in groups of three.
+std::string GroupedCount(size_t n);
+// Refuses a part whose `features` list (or index) lists `listed` features,
+// past kMaxPartFeatures, naming the count and the limit, at Path() + `rel`.
+void RequirePartFeatureCount(size_t listed, const std::string& rel = {});
+// Why `adding` features cannot go into a part holding `have`, or "".
+std::string PartFeatureLimitRefusal(size_t have, size_t adding);
+
 // Refuses a key of `j` that is not in `accepted`, naming it and every key
 // that is accepted, and an `j` that is not an object at all. `what` names
 // the object in the message ("Fillet", "mate", "sketch entity 'arc'").

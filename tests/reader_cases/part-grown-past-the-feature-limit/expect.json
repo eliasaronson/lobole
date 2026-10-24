@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v01-plain-box.json:grow_array:0",
+  "input": "v01-plain-box.json",
+  "message": [
+    "v01-plain-box.json",
+    "a part holds at most 50 000 features; this one lists 104 857"
+  ],
+  "seed": 1
+}

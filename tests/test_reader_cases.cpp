@@ -36,6 +36,7 @@
 #include <nlohmann/json.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -202,4 +203,118 @@ TEST_CASE("Reader cases: a value nested past the limit is refused",
   } catch (const std::runtime_error& e) {
     CHECK(std::string(e.what()).find("nests deeper than") != std::string::npos);
   }
+}
+
+namespace {
+// This process's resident set now, and its peak since the last
+// ResetPeakRss, in kB (/proc/self/status: VmRSS, VmHWM).
+size_t StatusKb(const std::string& key) {
+  std::ifstream in("/proc/self/status");
+  std::string line;
+  while (std::getline(in, line))
+    if (line.rfind(key + ":", 0) == 0)
+      return std::stoul(line.substr(key.size() + 1));
+  return 0;
+}
+// Writing 5 to clear_refs resets the peak (VmHWM) to the resident set now.
+bool ResetPeakRss() {
+  std::ofstream out("/proc/self/clear_refs");
+  out << "5";
+  out.flush();
+  return static_cast<bool>(out);
+}
+} // namespace
+
+// A v1 box grown to 104 857 copies of its one feature was read, and its
+// rebuild ran past 8 GB (one attempt reached 23 GB before it was killed): a
+// file that takes the machine with it. A part holds at most
+// kMaxPartFeatures, and the count is checked before one feature is built,
+// so the refusal costs a parse and nothing more.
+TEST_CASE("Reader cases: a part past the feature limit is refused before it "
+          "is built",
+          "[reader_fuzz][serialization]") {
+  const fs::path input = fs::path(TestSourceDir()) / "tests" / "reader_cases" /
+                         "part-grown-past-the-feature-limit" / "input" /
+                         "v01-plain-box.json";
+  REQUIRE(fs::exists(input));
+  const size_t rssBefore = StatusKb("VmRSS");
+  const bool peakReset = ResetPeakRss();
+  const auto t0 = std::chrono::steady_clock::now();
+  const auto doc = DocumentIO::Load(input.string());
+  const double seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+          .count();
+  REQUIRE_FALSE(doc.has_value());
+  const std::string& error = doc.error();
+  INFO(error);
+  CHECK(error.find("v01-plain-box.json") != std::string::npos);
+  CHECK(error.find("a part holds at most 50 000 features; this one lists "
+                   "104 857") != std::string::npos);
+  // Milliseconds on an idle machine: a bound a rebuild could never meet.
+  CHECK(seconds < 5.0);
+  // The parse is what it costs: about 90 MB for 8 MB of JSON. Not under
+  // the sanitizers, whose allocator keeps what was freed.
+#ifndef LOBOLE_READER_FUZZ_SANITIZED
+  if (peakReset) {
+    const size_t peakKb = StatusKb("VmHWM");
+    const size_t grewKb = peakKb - std::min(rssBefore, peakKb);
+    INFO("peak grew " << grewKb / 1024 << " MB");
+    CHECK(grewKb < 100 * 1024);
+  }
+#else
+  (void)peakReset;
+  (void)rssBefore;
+#endif
+}
+
+// The directory form's index is checked the same way, before the
+// directory is scanned.
+TEST_CASE("Reader cases: a part index past the feature limit is refused",
+          "[reader_fuzz][serialization]") {
+  const fs::path dir =
+      fs::temp_directory_path() /
+      ("lobole-feature-limit-" + std::to_string(::getpid()) + ".dsgn");
+  fs::remove_all(dir);
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Box", glm::dvec3(0.0), 10.0, 10.0, 10.0));
+  REQUIRE(DocumentIO::Save(doc, dir.string()).has_value());
+  json index;
+  std::ifstream(dir / "index.json") >> index;
+  // At the limit it is not the count that refuses (the files are missing).
+  for (const size_t n :
+       {readctx::kMaxPartFeatures, readctx::kMaxPartFeatures + 1}) {
+    index["features"] = json::array();
+    for (size_t i = 1; i <= n; i++)
+      index["features"].push_back(i);
+    std::ofstream(dir / "index.json") << index.dump(2) << "\n";
+    const auto loaded = DocumentIO::Load(dir.string());
+    REQUIRE_FALSE(loaded.has_value());
+    const std::string& error = loaded.error();
+    INFO(error);
+    const bool countRefused =
+        error.find("a part holds at most 50 000 features") != std::string::npos;
+    CHECK(countRefused == (n > readctx::kMaxPartFeatures));
+    if (countRefused) {
+      CHECK(error.find("index.json") != std::string::npos);
+      CHECK(error.find("lists 50 001") != std::string::npos);
+    }
+  }
+  fs::remove_all(dir);
+}
+
+TEST_CASE("Reader cases: the feature limit refuses an add past it",
+          "[reader_fuzz][serialization]") {
+  CHECK(readctx::PartFeatureLimitRefusal(0, 1).empty());
+  CHECK(readctx::PartFeatureLimitRefusal(readctx::kMaxPartFeatures - 1, 1)
+            .empty());
+  CHECK(readctx::PartFeatureLimitRefusal(readctx::kMaxPartFeatures, 1) ==
+        "a part holds at most 50 000 features, and this one has 50 000");
+  CHECK_FALSE(readctx::PartFeatureLimitRefusal(readctx::kMaxPartFeatures - 1, 2)
+                  .empty());
+  CHECK(readctx::GroupedCount(0) == "0");
+  CHECK(readctx::GroupedCount(999) == "999");
+  CHECK(readctx::GroupedCount(1000) == "1 000");
+  CHECK(readctx::GroupedCount(104857) == "104 857");
+  CHECK(readctx::GroupedCount(1234567) == "1 234 567");
 }

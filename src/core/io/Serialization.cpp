@@ -1241,9 +1241,14 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     });
     // Feature files are found by their id prefix — the type suffix is
     // cosmetic and may lag a (hypothetical) rename.
-    Collection features = ScanCollection(dir, "features", "feature");
     if (!index.contains("features"))
       readctx::Refuse("has no `features` list", "index.json");
+    // Before the directory is scanned or one feature built: a part past the
+    // limit would rebuild for hours, or past the machine's memory.
+    if (index.at("features").is_array())
+      readctx::RequirePartFeatureCount(index.at("features").size(),
+                                       "index.json");
+    Collection features = ScanCollection(dir, "features", "feature");
     const auto featureFiles =
         ListedFiles(index, "features", features, "feature");
     // One regeneration for the whole file, not one per feature (Document::
@@ -1869,6 +1874,9 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
           CheckEnvelope(j, "part");
           readctx::RefuseUnknownKeys(j, WithKeys(kPartEnvelopeKeys, {"assets"}),
                                      "part");
+          // Before one feature is built (kMaxPartFeatures).
+          if (j.contains("features") && j.at("features").is_array())
+            readctx::RequirePartFeatureCount(j.at("features").size());
           auto doc = std::make_unique<Document>();
           doc->SetProjectSymbols(scope.symbols);
           doc->SetProjectParameters(scope.parameters);

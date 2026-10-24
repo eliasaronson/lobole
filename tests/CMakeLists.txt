@@ -908,6 +908,14 @@ add_test(NAME lossy_open_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(lossy_open_smoke PROPERTIES TIMEOUT 120)
 
+# A part holds at most kMaxPartFeatures: add_feature (and a batch) refuses
+# past it, changing nothing, and a part at the limit saves and opens
+# (docs/versioning/README.md#what-a-load-refuses). Headless.
+add_test(NAME feature_limit_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/feature_limit_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(feature_limit_smoke PROPERTIES TIMEOUT 180)
+
 # V4 compare_geometry: boolean-diff metrics, golden-file compare, diff-solid
 # export, occurrence compare. Headless.
 add_test(NAME compare_smoke

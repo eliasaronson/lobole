@@ -22,6 +22,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/features/ThreadFeature.h"
 #include "core/features/WormFeature.h"
+#include "core/io/ReadContext.h" // kMaxPartFeatures
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchSolver.h"
@@ -1302,6 +1303,15 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
   }
   if (m == "add_feature") {
     json fj = p.at("feature");
+    // A part holds at most kMaxPartFeatures, so the app never writes one it
+    // cannot open (a primitive adds its sketch too).
+    const bool twoFeatures =
+        fj.is_object() &&
+        primitive::KindFromName(fj.value("type", std::string{})).has_value();
+    if (const std::string why = readctx::PartFeatureLimitRefusal(
+            doc->FeatureCount(), twoFeatures ? 2 : 1);
+        !why.empty())
+      throw std::runtime_error(why);
     if (fj.is_object() &&
         primitive::KindFromName(fj.value("type", std::string{})))
       return AddPrimitive(state, *doc, fj);
@@ -1469,6 +1479,10 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
                                (neighbours.empty()
                                     ? " (there are none)"
                                     : "; the neighbours are: " + neighbours));
+    if (const std::string why =
+            readctx::PartFeatureLimitRefusal(doc->FeatureCount(), 1);
+        !why.empty())
+      throw std::runtime_error(why);
     auto d = std::make_unique<DerivedFeature>(
         p.value("name", pick->name + " (derived)"), 0);
     d->reference = p.value("reference", true);

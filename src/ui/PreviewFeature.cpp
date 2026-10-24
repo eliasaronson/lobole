@@ -22,6 +22,7 @@
 #include "core/features/DatumPlaneFeature.h"
 #include "core/features/FrameFeature.h"
 #include "core/features/SketchFeature.h" // occurrence names (measure rows)
+#include "core/io/ReadContext.h"         // kMaxPartFeatures
 #include "core/io/Serialization.h"       // ConfigurationToJson
 #include "ui/BearingTool.h"
 #include "ui/CamTool.h" // DrawCamToolWindow (CAM verbs)
@@ -97,6 +98,17 @@ Feature* ResolvePendingFeature(AppState& state, size_t* outIndex) {
 }
 
 namespace {
+// The pending feature, and a primitive's companion sketch, are in the
+// document already; past kMaxPartFeatures they cannot be accepted, or the
+// part would save as a file no build opens.
+std::string PastFeatureLimit(const AppState& state) {
+  if (!state.document)
+    return {};
+  const size_t pending = state.pendingCompanionId != 0 ? 2 : 1;
+  const size_t n = state.document->FeatureCount();
+  return readctx::PartFeatureLimitRefusal(n - std::min(n, pending), pending);
+}
+
 // A flat pattern REPLACES the folded shape rather than adding a body, so it is
 // authored suppressed and a configuration switches it on
 // (docs/sheetmetal/README.md#features): the base configuration stays the
@@ -150,7 +162,7 @@ void AcceptPendingFeature(AppState& state) {
   // A tool whose inputs are not there yet must not commit. The UI disables
   // Accept for the same reason (the slot gate), but keyboard paths, scripts
   // and future callers all land here.
-  if (!f->WhyIncomplete().empty())
+  if (!f->WhyIncomplete().empty() || !PastFeatureLimit(state).empty())
     return;
   // Nor one the bodies it acts on refuse (Feature::WhyRefusedOn), which
   // add_feature refuses with the same words: the GUI and the RPC refuse
@@ -741,7 +753,10 @@ void DrawToolWindow(AppState& state) {
   // does nothing in silence. Slot-less inputs (a Derived's source) only
   // have this channel.
   if (missing == nullptr) {
-    if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
+    std::string why = feature->WhyIncomplete();
+    if (why.empty() && feature->GetId() == state.pendingFeatureId)
+      why = PastFeatureLimit(state);
+    if (!why.empty()) {
       blocking = true;
       ImGui::PushTextWrapPos(0.0f);
       ImGui::TextColored(ImVec4(0.85f, 0.75f, 0.40f, 1.0f),
