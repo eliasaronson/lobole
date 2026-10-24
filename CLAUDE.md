@@ -331,6 +331,13 @@ the default hardware `cycles` event samples only one of them and returns a
 handful of samples — hence `-e cpu-clock`; and the tree is built without frame
 pointers, so `--call-graph dwarf` is the only mode with a usable stack.
 
+`tools/bench.py` finds the case `profile.sh` explains: fixed workloads timed
+on this machine against its own history (`run`, `compare`), or two builds
+A/B'd in alternating fresh instances, which holds on a busy machine
+(`compare --ab A B`); `run --profile WORKLOAD` hands one to `profile.sh
+--app`. It refuses a busy machine, and nothing it measures is committed
+(docs/performance/README.md).
+
 ## Crash debugging
 
 `main()` installs a `std::stacktrace` handler (CrashHandler.cpp) — SIGSEGV/ABRT
