@@ -44,7 +44,10 @@ bool RevolveFeature::Execute(RegenContext& ctx) {
     return false;
   }
   if (loops.empty()) {
-    SetError("sketch has no closed profile");
+    const std::string where =
+        sketch::OpenEndsWords(sketch::OpenEnds(sketch->entities));
+    SetError("sketch has no closed profile" +
+             (where.empty() ? std::string() : ": " + where));
     return false;
   }
   // Region selection (U2): keep only the chosen regions (+ their holes).

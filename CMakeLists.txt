@@ -502,6 +502,7 @@ set(core_sources
     src/core/features/FilletFeature.cpp
     src/core/features/PatternFeature.cpp
     src/core/sketch/SketchSolver.cpp
+    src/core/sketch/ConstraintEndCurvature.cpp
     src/core/fem/FemStudy.cpp
     src/core/fem/FemInputKey.cpp
     src/core/fem/AssemblyStudy.cpp

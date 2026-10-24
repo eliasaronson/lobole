@@ -12,6 +12,8 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 namespace sketch {
@@ -72,6 +74,24 @@ struct Loop {
 // curves and contributes nothing, silently — it is for engraving
 // (docs/sketching/README.md#text).
 std::vector<Loop> BuildLoops(const std::vector<Entity>& entities);
+
+// Where a profile fails to close (docs/sketching/README.md#open-ends): every
+// endpoint of the chainable non-construction edges (lines, arcs, elliptical
+// arcs, open splines), clustered with BuildLoops' tolerance and counted. An
+// end met once is OPEN; one met three or more times (a T, an overlap) also
+// stops a clean profile and is listed apart. Two open ends that are each
+// other's nearest, within 2% of the geometry's extent, are the usual "almost
+// closed" pair and come back as a gap too.
+struct OpenEndsResult {
+  std::vector<glm::dvec2> open;
+  std::vector<glm::dvec2> branched;
+  std::vector<std::pair<glm::dvec2, glm::dvec2>> gaps;
+  bool Empty() const { return open.empty() && branched.empty(); }
+};
+OpenEndsResult OpenEnds(const std::vector<Entity>& entities);
+// "2 open ends at (10, 0) and (10, 0.3)" -- what a refused extrude appends to
+// "sketch has no closed profile". Empty when there are none.
+std::string OpenEndsWords(const OpenEndsResult& ends);
 
 // The outer boundary wire of a single-profile sketch, in world space on the
 // plane — the section input for a loft (modeling M8). Null wire when the

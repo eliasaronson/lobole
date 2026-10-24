@@ -56,6 +56,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <memory>
 
 namespace sketch {
@@ -273,6 +274,119 @@ std::vector<Loop> BuildLoops(const std::vector<Entity>& entities) {
   }
 
   return loops;
+}
+
+OpenEndsResult OpenEnds(const std::vector<Entity>& entities) {
+  // The ends of every edge BuildLoops chains: the same entities, the same
+  // endpoints, the same tolerance -- but counted, not walked. The greedy walk
+  // can strand a closed chain as "open" when a branch sends it the wrong
+  // way; a count of how many edges meet at a point cannot.
+  std::vector<glm::dvec2> ends;
+  glm::dvec2 lo(INFINITY), hi(-INFINITY);
+  const auto add = [&](glm::dvec2 a, glm::dvec2 b) {
+    ends.push_back(a);
+    ends.push_back(b);
+    lo = glm::min(lo, glm::min(a, b));
+    hi = glm::max(hi, glm::max(a, b));
+  };
+  for (const Entity& entity : entities) {
+    if (IsConstruction(entity))
+      continue;
+    if (const auto* l = std::get_if<Line>(&entity)) {
+      add(l->a, l->b);
+    } else if (const auto* a = std::get_if<Arc>(&entity)) {
+      double st = a->startAngle, en = a->endAngle;
+      while (en <= st)
+        en += 2.0 * M_PI;
+      add(OnCircle(a->center, a->radius, st),
+          OnCircle(a->center, a->radius, en));
+    } else if (const auto* ea = std::get_if<EllipseArc>(&entity)) {
+      add(EllipseArcPointUV(*ea, 1), EllipseArcPointUV(*ea, 2));
+    } else if (const auto* bs = std::get_if<BSpline>(&entity)) {
+      if (bs->poles.size() < 2)
+        continue;
+      if (bs->poles.size() >= 3 && Near(bs->poles.front(), bs->poles.back()))
+        continue; // self-closed: a loop of its own
+      add(bs->poles.front(), bs->poles.back());
+    }
+  }
+  OpenEndsResult out;
+  // Cluster within the chaining tolerance (each end joins the first cluster
+  // it is near, as the walk would).
+  std::vector<glm::dvec2> at;
+  std::vector<int> count;
+  for (const glm::dvec2& p : ends) {
+    size_t k = 0;
+    while (k < at.size() && !Near(at[k], p))
+      k++;
+    if (k == at.size()) {
+      at.push_back(p);
+      count.push_back(0);
+    }
+    count[k]++;
+  }
+  for (size_t k = 0; k < at.size(); k++) {
+    if (count[k] == 1)
+      out.open.push_back(at[k]);
+    else if (count[k] >= 3)
+      out.branched.push_back(at[k]);
+  }
+  // "Almost closed": two open ends that are each other's nearest, within a
+  // fiftieth of the geometry's extent.
+  const double reach = 0.02 * glm::length(hi - lo);
+  const auto nearest = [&](size_t i) {
+    size_t best = i;
+    double bestD = INFINITY;
+    for (size_t j = 0; j < out.open.size(); j++) {
+      const double d = glm::length(out.open[j] - out.open[i]);
+      if (j != i && d < bestD)
+        bestD = d, best = j;
+    }
+    return std::pair{best, bestD};
+  };
+  for (size_t i = 0; i < out.open.size(); i++) {
+    const auto [j, d] = nearest(i);
+    if (j > i && d <= reach && nearest(j).first == i)
+      out.gaps.push_back({out.open[i], out.open[j]});
+  }
+  return out;
+}
+
+std::string OpenEndsWords(const OpenEndsResult& ends) {
+  if (ends.Empty())
+    return {};
+  const auto pt = [](glm::dvec2 p) {
+    char buf[64];
+    std::snprintf(buf, sizeof buf, "(%.4g, %.4g)",
+                  std::abs(p.x) < 5e-5 ? 0.0 : p.x,
+                  std::abs(p.y) < 5e-5 ? 0.0 : p.y);
+    return std::string(buf);
+  };
+  const auto list = [&](const std::vector<glm::dvec2>& pts) {
+    std::string s;
+    const size_t shown = std::min<size_t>(pts.size(), 4);
+    for (size_t i = 0; i < shown; i++)
+      s += (i == 0                                  ? ""
+            : i + 1 == shown && shown == pts.size() ? " and "
+                                                    : ", ") +
+           pt(pts[i]);
+    if (shown < pts.size())
+      s += ", ...";
+    return s;
+  };
+  std::string out;
+  if (!ends.open.empty())
+    out += std::to_string(ends.open.size()) +
+           (ends.open.size() == 1 ? " open end at " : " open ends at ") +
+           list(ends.open);
+  if (!ends.branched.empty())
+    out += std::string(out.empty() ? "" : "; ") +
+           std::to_string(ends.branched.size()) +
+           (ends.branched.size() == 1
+                ? " point where three or more edges meet, at "
+                : " points where three or more edges meet, at ") +
+           list(ends.branched);
+  return out;
 }
 
 namespace {

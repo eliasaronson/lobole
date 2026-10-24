@@ -549,7 +549,8 @@ namespace {
 // Radius are whole-entity on `a` only; the rest use both.
 bool UsesSecondRef(sketch::ConstraintKind k) {
   using K = sketch::ConstraintKind;
-  return k != K::Horizontal && k != K::Vertical && k != K::Radius;
+  return k != K::Horizontal && k != K::Vertical && k != K::Radius &&
+         k != K::Diameter && k != K::ArcLength;
 }
 // Coincident/Horizontal/Vertical are "trivial" — losing them to a delete isn't
 // worth warning the user about (matches SolveSpace's
@@ -748,30 +749,39 @@ bool SketchFeature::TrimLineAt(uint32_t id, glm::dvec2 clickUV) {
   return true;
 }
 
-bool SketchFeature::TrimCurveAt(uint32_t id, glm::dvec2 clickUV) {
-  const size_t idx = IndexOfEntity(id);
-  if (idx == std::numeric_limits<size_t>::max())
-    return false;
-
-  // Extract center/radius and the angular window (a full circle, or the arc's
-  // own sweep). Angles below are all measured relative to `base` so the window
-  // is the half-open interval [base, base + span).
-  glm::dvec2 center;
-  double radius, base, span;
-  const bool isCircle = std::holds_alternative<sketch::Circle>(entities[idx]);
+namespace {
+// What TrimCurveAt removes for a click on circle/arc `idx` at `clickUV`: the
+// curve's centre and radius, its angular window [base, base + span) (a full
+// circle, or the arc's own sweep), and the bracketed span [lo, hi] as offsets
+// from base (hi may pass 2 pi on a circle, the span wrapping through base).
+// `whole` = nothing brackets the click: the whole curve goes.
+struct CurveBracket {
+  glm::dvec2 center{0.0};
+  double radius = 0.0, base = 0.0, span = 0.0, lo = 0.0, hi = 0.0;
+  bool isCircle = false, whole = false;
+};
+std::optional<CurveBracket>
+BracketCurve(const std::vector<sketch::Entity>& entities, size_t idx,
+             glm::dvec2 clickUV) {
+  CurveBracket b;
+  const uint32_t id = sketch::EntityId(entities[idx]);
   if (auto* c = std::get_if<sketch::Circle>(&entities[idx])) {
-    center = c->center;
-    radius = c->radius;
-    base = 0.0;
-    span = 2.0 * M_PI;
+    b.center = c->center;
+    b.radius = c->radius;
+    b.base = 0.0;
+    b.span = 2.0 * M_PI;
+    b.isCircle = true;
   } else if (auto* ar = std::get_if<sketch::Arc>(&entities[idx])) {
-    center = ar->center;
-    radius = ar->radius;
-    base = ar->startAngle;
-    span = ar->endAngle - ar->startAngle;
+    b.center = ar->center;
+    b.radius = ar->radius;
+    b.base = ar->startAngle;
+    b.span = ar->endAngle - ar->startAngle;
   } else {
-    return false; // not a curve
+    return std::nullopt; // not a curve
   }
+  const glm::dvec2 center = b.center;
+  const double radius = b.radius, base = b.base, span = b.span;
+  const bool isCircle = b.isCircle;
 
   auto rel = [&](double ang) { // ang → offset in [0, 2π) from base
     double x = ang - base;
@@ -827,56 +837,204 @@ bool SketchFeature::TrimCurveAt(uint32_t id, glm::dvec2 clickUV) {
   const double click =
       rel(std::atan2(clickUV.y - center.y, clickUV.x - center.x));
 
-  const bool construction = sketch::IsConstruction(entities[idx]);
-  auto makeArc = [&](double offLo, double offHi) {
-    sketch::Entity e = sketch::Arc{center, radius, base + offLo, base + offHi};
-    sketch::SetConstruction(e, construction);
-    return e;
-  };
-
   if (isCircle) {
     if (cuts.size() < 2) { // not enough crossings to bracket a span
-      DeleteEntity(id);
-      return true;
+      b.whole = true;
+      b.lo = 0.0;
+      b.hi = 2.0 * M_PI;
+      return b;
     }
-    // Find the cyclic interval [cuts[i], cuts[i+1]] holding the click; keep its
-    // complement as one arc (from the upper cut CCW around to the lower cut).
+    // The cyclic interval [cuts[i], cuts[i+1]] holding the click.
     for (size_t i = 0; i < cuts.size(); i++) {
       double lo = cuts[i];
       double hi = (i + 1 < cuts.size()) ? cuts[i + 1] : cuts[0] + 2.0 * M_PI;
       if (click + (click < lo ? 2.0 * M_PI : 0.0) >= lo - 1e-6 &&
           click + (click < lo ? 2.0 * M_PI : 0.0) <= hi + 1e-6) {
-        entities[idx] = makeArc(hi, lo + 2.0 * M_PI); // complement, CCW
-        sketch::SetEntityId(entities[idx], id);
-        return true;
+        b.lo = lo;
+        b.hi = hi;
+        return b;
       }
     }
-    return false;
+    return std::nullopt;
   }
 
-  // Arc: bracket the click between adjacent cuts (which include the endpoints),
-  // drop that sub-span, and rebuild the surviving spans as arcs.
-  double lo = 0.0, hi = span;
+  // Arc: bracket the click between adjacent cuts (which include the
+  // endpoints).
+  b.lo = 0.0;
+  b.hi = span;
   for (size_t i = 0; i + 1 < cuts.size(); i++)
     if (click >= cuts[i] - 1e-6 && click <= cuts[i + 1] + 1e-6) {
-      lo = cuts[i];
-      hi = cuts[i + 1];
+      b.lo = cuts[i];
+      b.hi = cuts[i + 1];
       break;
     }
-  std::vector<std::pair<double, double>> survivors;
-  if (lo > 1e-4)
-    survivors.push_back({0.0, lo});
-  if (hi < span - 1e-4)
-    survivors.push_back({hi, span});
-  if (survivors.empty()) {
+  b.whole = b.lo <= 1e-4 && b.hi >= span - 1e-4;
+  return b;
+}
+} // namespace
+
+std::optional<sketch::Arc>
+SketchFeature::TrimCurveSpanAt(uint32_t id, glm::dvec2 clickUV) const {
+  const size_t idx = IndexOfEntity(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return std::nullopt;
+  const auto b = BracketCurve(entities, idx, clickUV);
+  if (!b)
+    return std::nullopt;
+  return sketch::Arc{b->center, b->radius, b->base + b->lo, b->base + b->hi};
+}
+
+bool SketchFeature::TrimCurveAt(uint32_t id, glm::dvec2 clickUV) {
+  const size_t idx = IndexOfEntity(id);
+  if (idx == std::numeric_limits<size_t>::max())
+    return false;
+  const auto b = BracketCurve(entities, idx, clickUV);
+  if (!b)
+    return false;
+  if (b->whole) {
     DeleteEntity(id);
     return true;
   }
+  const bool construction = sketch::IsConstruction(entities[idx]);
+  auto makeArc = [&](double offLo, double offHi) {
+    sketch::Entity e =
+        sketch::Arc{b->center, b->radius, b->base + offLo, b->base + offHi};
+    sketch::SetConstruction(e, construction);
+    return e;
+  };
+
+  if (b->isCircle) {
+    // Keep the complement as one arc (from the upper cut CCW around to the
+    // lower cut).
+    entities[idx] = makeArc(b->hi, b->lo + 2.0 * M_PI);
+    sketch::SetEntityId(entities[idx], id);
+    return true;
+  }
+
+  // Arc: drop the bracketed sub-span and rebuild the surviving spans as arcs.
+  std::vector<std::pair<double, double>> survivors;
+  if (b->lo > 1e-4)
+    survivors.push_back({0.0, b->lo});
+  if (b->hi < b->span - 1e-4)
+    survivors.push_back({b->hi, b->span});
   entities[idx] = makeArc(survivors[0].first, survivors[0].second);
   sketch::SetEntityId(entities[idx], id);
   for (size_t i = 1; i < survivors.size(); i++)
     AddEntity(makeArc(survivors[i].first, survivors[i].second));
   return true;
+}
+
+int SketchFeature::TrimAlongPath(const std::vector<glm::dvec2>& path,
+                                 std::vector<sketch::Entity>* removed) {
+  // Entities a trim must not touch: generated by a linked derived op
+  // (re-stamped from their source every regeneration) or projected.
+  std::set<uint32_t> owned;
+  for (const auto& op : derived)
+    for (const auto& in : op.instances)
+      owned.insert(in.genId);
+  for (const auto& ext : external)
+    owned.insert(ext.genIds.begin(), ext.genIds.end());
+  const auto trimmable = [&](const sketch::Entity& e) {
+    return (std::holds_alternative<sketch::Line>(e) ||
+            std::holds_alternative<sketch::Circle>(e) ||
+            std::holds_alternative<sketch::Arc>(e)) &&
+           !owned.count(sketch::EntityId(e));
+  };
+
+  // Every crossing of the path with a trimmable entity, in path order.
+  struct Crossing {
+    double s = 0.0; // segment index + parameter along it
+    glm::dvec2 p{0.0};
+    uint32_t id = 0;
+  };
+  std::vector<Crossing> crossings;
+  double extent = 1.0;
+  for (const auto& e : entities)
+    for (const glm::dvec2& q : sketch::TessellateEntity(e))
+      extent = std::max({extent, std::abs(q.x), std::abs(q.y)});
+  for (size_t i = 0; i + 1 < path.size(); i++) {
+    const glm::dvec2 p0 = path[i], d = path[i + 1] - path[i];
+    if (glm::dot(d, d) < 1e-24)
+      continue;
+    for (const auto& e : entities) {
+      if (!trimmable(e))
+        continue;
+      const uint32_t id = sketch::EntityId(e);
+      std::vector<double> ts;
+      if (const auto* l = std::get_if<sketch::Line>(&e)) {
+        if (const auto t =
+                sketch::SegmentIntersect(p0, path[i + 1], l->a, l->b))
+          ts.push_back(*t);
+      } else if (const auto* c = std::get_if<sketch::Circle>(&e)) {
+        ts = LineCircleParams(p0, d, c->center, c->radius);
+      } else if (const auto* a = std::get_if<sketch::Arc>(&e)) {
+        for (double t : LineCircleParams(p0, d, a->center, a->radius)) {
+          const glm::dvec2 q = p0 + t * d;
+          if (AngleInArc(std::atan2(q.y - a->center.y, q.x - a->center.x), *a))
+            ts.push_back(t);
+        }
+      }
+      for (double t : ts)
+        crossings.push_back({static_cast<double>(i) + t, p0 + t * d, id});
+    }
+  }
+  std::stable_sort(
+      crossings.begin(), crossings.end(),
+      [](const Crossing& x, const Crossing& y) { return x.s < y.s; });
+
+  // The entity a crossing lies on NOW: the one it was found on while that
+  // still passes through it, else whichever piece of the split does (a
+  // split keeps the id on its first piece). None: an earlier crossing has
+  // removed the span it was on.
+  const double tol = 1e-7 * extent;
+  const auto onEntity = [&](const sketch::Entity& e, glm::dvec2 p) {
+    if (const auto* l = std::get_if<sketch::Line>(&e)) {
+      const glm::dvec2 ab = l->b - l->a;
+      const double len2 = glm::dot(ab, ab);
+      if (len2 < 1e-24)
+        return false;
+      const double t = glm::dot(p - l->a, ab) / len2;
+      if (t < -1e-9 || t > 1.0 + 1e-9)
+        return false;
+      return glm::length(l->a + t * ab - p) < tol;
+    }
+    if (const auto* c = std::get_if<sketch::Circle>(&e))
+      return std::abs(glm::length(p - c->center) - c->radius) < tol;
+    if (const auto* a = std::get_if<sketch::Arc>(&e))
+      return std::abs(glm::length(p - a->center) - a->radius) < tol &&
+             AngleInArc(std::atan2(p.y - a->center.y, p.x - a->center.x), *a);
+    return false;
+  };
+  int count = 0;
+  for (const Crossing& x : crossings) {
+    uint32_t id = 0;
+    const size_t at = IndexOfEntity(x.id);
+    if (at != std::numeric_limits<size_t>::max() &&
+        onEntity(entities[at], x.p)) {
+      id = x.id;
+    } else {
+      for (const auto& e : entities)
+        if (trimmable(e) && onEntity(e, x.p)) {
+          id = sketch::EntityId(e);
+          break;
+        }
+    }
+    if (id == 0)
+      continue;
+    const sketch::Entity& e = entities[IndexOfEntity(id)];
+    const bool line = std::holds_alternative<sketch::Line>(e);
+    if (removed != nullptr) {
+      if (line) {
+        if (const auto span = TrimSpanAt(id, x.p))
+          removed->push_back(sketch::Line{span->first, span->second});
+      } else if (const auto arc = TrimCurveSpanAt(id, x.p)) {
+        removed->push_back(*arc);
+      }
+    }
+    if (line ? TrimLineAt(id, x.p) : TrimCurveAt(id, x.p))
+      count++;
+  }
+  return count;
 }
 
 std::vector<uint32_t>
@@ -1779,3 +1937,150 @@ bool HasUserGeometry(const SketchFeature& sketch) {
       return true;
   return false;
 }
+
+namespace sketch {
+
+RescaleOutcome RescaleForFirstDimension(SketchFeature& sk,
+                                        const Constraint& dim, double value,
+                                        size_t self) {
+  using K = ConstraintKind;
+  RescaleOutcome out;
+  if (!IsDimension(dim.kind) || dim.kind == K::Angle || dim.driven)
+    return out;
+  // The FIRST dimension only: no other driving one, nothing an expression
+  // drives (an expression is a number someone chose, not a rough drawing).
+  for (size_t k = 0; k < sk.constraints.size(); k++) {
+    if (k == self)
+      continue;
+    const Constraint& c = sk.constraints[k];
+    if ((IsDimension(c.kind) && !c.driven) || !c.valueExpr.empty())
+      return out;
+  }
+  for (const auto& [id, fields] : sk.entityExprs)
+    for (const auto& [field, expr] : fields)
+      if (!expr.empty())
+        return out;
+  const auto measured = MeasureDimension(sk.entities, dim);
+  if (!measured || !(std::abs(*measured) > 1e-9) || !(std::abs(value) > 0.0))
+    return out;
+  const double factor = std::abs(value) / std::abs(*measured);
+  if (std::abs(factor - 1.0) < 1e-12)
+    return out;
+
+  // A linked op with a millimetre parameter would not scale with its
+  // sources: refused rather than half-scaled.
+  for (const DerivedOp& op : sk.derived) {
+    const char* what = nullptr;
+    if (op.kind == DerivedKind::LinearPattern)
+      what = "a linear pattern's step";
+    else if (op.kind == DerivedKind::LinkedCopy)
+      what = "a linked copy's offset";
+    else if (op.kind == DerivedKind::CircularPattern && op.centerEntity == 0)
+      what = "a circular pattern's centre";
+    if (what != nullptr) {
+      out.why = std::string("not rescaled to the first dimension: ") + what +
+                " is in millimetres and would not follow";
+      return out;
+    }
+  }
+
+  // What the scale may not move: projected geometry and linked-copy outputs
+  // (owned by their sources).
+  std::set<uint32_t> held;
+  for (const ExternalGeom& ext : sk.external)
+    held.insert(ext.genIds.begin(), ext.genIds.end());
+  for (const DerivedOp& op : sk.derived)
+    if (op.kind == DerivedKind::LinkedCopy)
+      for (const auto& in : op.instances)
+        held.insert(in.genId);
+  const auto uvOf = [&](const PointRef& r) -> std::optional<glm::dvec2> {
+    if (IsDatum(r.entity))
+      return DatumPointUV(r.entity, r.which);
+    const size_t i = sk.IndexOfEntity(r.entity);
+    if (i == SIZE_MAX)
+      return std::nullopt;
+    return EntityPointUV(sk.entities[i], r.which);
+  };
+  const auto pinnedRef = [&](const PointRef& r) {
+    return IsDatum(r.entity) || held.count(r.entity) != 0;
+  };
+  // The points the sketch pins: a Fixed point, a point coincident with the
+  // origin or a datum, or with projected / linked geometry.
+  std::vector<glm::dvec2> pinned;
+  const auto pin = [&](std::optional<glm::dvec2> p) {
+    if (!p)
+      return;
+    for (const glm::dvec2& q : pinned)
+      if (glm::length(*p - q) < 1e-9 * (1.0 + glm::length(q)))
+        return;
+    pinned.push_back(*p);
+  };
+  bool onAxisX = false, onAxisY = false;
+  for (const Constraint& c : sk.constraints) {
+    if (c.kind == K::Fixed)
+      pin(uvOf(c.a));
+    else if (c.kind == K::Coincident && (pinnedRef(c.a) || pinnedRef(c.b)))
+      pin(uvOf(pinnedRef(c.a) ? c.a : c.b));
+    else if (c.kind == K::PointOnLine) {
+      onAxisX |= c.b.entity == kAxisX;
+      onAxisY |= c.b.entity == kAxisY;
+    }
+  }
+  if (pinned.size() >= 2) {
+    out.why = "not rescaled to the first dimension: " +
+              std::to_string(pinned.size()) +
+              " points are pinned, so no one scale keeps them all";
+    return out;
+  }
+
+  glm::dvec2 anchor(0.0);
+  if (pinned.size() == 1) {
+    anchor = pinned[0];
+  } else {
+    // The centre of what was drawn; on a datum axis when the drawing has a
+    // point held on it, so the scale keeps it there.
+    glm::dvec2 lo(INFINITY), hi(-INFINITY);
+    const auto grow = [&](bool constructionToo) {
+      for (const Entity& e : sk.entities) {
+        if (held.count(EntityId(e)) || (!constructionToo && IsConstruction(e)))
+          continue;
+        if (const auto* pt = std::get_if<Point>(&e)) {
+          lo = glm::min(lo, pt->p);
+          hi = glm::max(hi, pt->p);
+        }
+        for (const auto& poly : TessellateEntityPolylines(e))
+          for (const glm::dvec2& q : poly) {
+            lo = glm::min(lo, q);
+            hi = glm::max(hi, q);
+          }
+      }
+    };
+    grow(false);
+    if (!(lo.x <= hi.x))
+      grow(true);
+    if (!(lo.x <= hi.x))
+      return out;
+    anchor = 0.5 * (lo + hi);
+    if (onAxisX)
+      anchor.y = 0.0;
+    if (onAxisY)
+      anchor.x = 0.0;
+  }
+
+  for (Entity& e : sk.entities) {
+    const uint32_t id = EntityId(e);
+    if (held.count(id))
+      continue;
+    e = ScaleEntity(e, anchor, factor);
+    SetEntityId(e, id);
+  }
+  for (Constraint& c : sk.constraints)
+    if (IsDimension(c.kind))
+      c.labelOffset *= factor;
+  out.scaled = true;
+  out.factor = factor;
+  out.anchor = anchor;
+  return out;
+}
+
+} // namespace sketch

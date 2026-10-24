@@ -12,7 +12,8 @@ Nix builds are pinned by `flake.lock` and the submodule commits.
 - **Location:** `deps/planegcs`
 - **License:** LGPL-2.1-or-later
 - **Linkage:** separate shared library, `libplanegcs.so`
-- **Source:** copied from FreeCAD's `src/Mod/Sketcher/App/planegcs`
+- **Source:** copied from FreeCAD's `src/Mod/Sketcher/App/planegcs`, as of
+  FreeCAD commit `057d51f846` (2026-07-20)
 
 Loböle carries local standalone-build modifications while preserving the
 original per-file copyright headers:
@@ -26,6 +27,11 @@ original per-file copyright headers:
 - ordered a subsystem's unknowns, and the two-priority solve's, as they
   were declared instead of by address, so a solve's result does not depend
   on where the heap put its parameters.
+
+Constraints PlaneGCS does not have (the curvature half of a G2 joint) are
+`GCS::Constraint` subclasses in `src/core/sketch/` (`ConstraintEndCurvature`),
+added through the public `System::addConstraint`, so the vendored tree is not
+modified further for them.
 
 It is deliberately built as a shared library so users can relink or replace it.
 The modified source is included in every Loböle source release.

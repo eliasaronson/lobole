@@ -1,0 +1,227 @@
+{
+  "format": "designer-document",
+  "version": 190,
+  "features": [
+    {
+      "type": "Sketch",
+      "name": "Swoosh",
+      "id": 1,
+      "plane": {
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "entities": [
+        {
+          "type": "arc",
+          "id": 1,
+          "center": [
+            0,
+            0
+          ],
+          "radius": 5.0,
+          "start_angle": 0.0,
+          "end_angle": 1.4
+        },
+        {
+          "type": "spline",
+          "id": 2,
+          "degree": 3,
+          "poles": [
+            [
+              0.8498357145012052,
+              4.9272486499423005
+            ],
+            [
+              -2,
+              5.3
+            ],
+            [
+              -5,
+              4.2
+            ],
+            [
+              -7,
+              2
+            ],
+            [
+              -7,
+              -2
+            ]
+          ]
+        },
+        {
+          "type": "line",
+          "id": 3,
+          "a": [
+            -7,
+            -2
+          ],
+          "b": [
+            5,
+            -2
+          ]
+        },
+        {
+          "type": "line",
+          "id": 4,
+          "a": [
+            5,
+            -2
+          ],
+          "b": [
+            5,
+            0
+          ]
+        }
+      ],
+      "constraints": [
+        {
+          "kind": "fixed",
+          "a": [
+            1,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "value": 0.0
+        },
+        {
+          "kind": "fixed",
+          "a": [
+            1,
+            1
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "value": 0.0
+        },
+        {
+          "kind": "fixed",
+          "a": [
+            2,
+            3
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "value": 0.0
+        },
+        {
+          "kind": "fixed",
+          "a": [
+            2,
+            4
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "value": 0.0
+        },
+        {
+          "kind": "coincident",
+          "a": [
+            1,
+            2
+          ],
+          "b": [
+            2,
+            0
+          ],
+          "value": 0.0
+        },
+        {
+          "kind": "coincident",
+          "a": [
+            2,
+            4
+          ],
+          "b": [
+            3,
+            0
+          ],
+          "value": 0.0
+        },
+        {
+          "kind": "coincident",
+          "a": [
+            3,
+            1
+          ],
+          "b": [
+            4,
+            0
+          ],
+          "value": 0.0
+        },
+        {
+          "kind": "coincident",
+          "a": [
+            4,
+            1
+          ],
+          "b": [
+            1,
+            1
+          ],
+          "value": 0.0
+        },
+        {
+          "kind": "arc_length",
+          "a": [
+            1,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "value": 8.0,
+          "label": [
+            0.0,
+            1.5
+          ]
+        },
+        {
+          "kind": "curvature",
+          "a": [
+            2,
+            0
+          ],
+          "b": [
+            1,
+            0
+          ],
+          "value": 0.0
+        }
+      ]
+    },
+    {
+      "type": "Extrude",
+      "name": "Pad",
+      "id": 2,
+      "sketch_id": 1,
+      "distance": 2.0,
+      "mode": "new_body",
+      "reversed": false
+    }
+  ]
+}

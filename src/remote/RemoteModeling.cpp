@@ -256,7 +256,9 @@ ConstraintKindTable() {
       {"distance_x", sketch::ConstraintKind::DistanceX},
       {"distance_y", sketch::ConstraintKind::DistanceY},
       {"diameter", sketch::ConstraintKind::Diameter},
-      {"distance_pl", sketch::ConstraintKind::DistancePL}};
+      {"distance_pl", sketch::ConstraintKind::DistancePL},
+      {"curvature", sketch::ConstraintKind::Curvature},
+      {"arc_length", sketch::ConstraintKind::ArcLength}};
   return kinds;
 }
 
@@ -483,7 +485,8 @@ static constexpr MethodDoc ModelingMethods[] = {
     {"add_constraint",
      "Append one sketch constraint {sketch_id, kind, refs, value?/expr?}; "
      "kinds in constraint_kinds; solves once. `value` is MILLIMETRES for "
-     "distance/radius/diameter and RADIANS for angle (or pass value_deg, "
+     "distance/radius/diameter/arc_length (r x sweep of a circular arc) and "
+     "RADIANS for angle (or pass value_deg, "
      "never both — more than a full turn is refused as degrees). `expr` is "
      "an expression in the document's base units, where angles are DEGREES: "
      "\"45\", \"45deg\" and \"0.785rad\" all mean the same 45 degrees. "
@@ -491,13 +494,19 @@ static constexpr MethodDoc ModelingMethods[] = {
      "major-axis ends, 5/6 = minor-axis ends (a radius is a `distance` from "
      "0 to 3 or 5); a spline's k = pole k. A constraint the solver cannot "
      "represent (radius on an ellipse, tangent to a spline away from its "
-     "end) is refused naming what its kind takes. So is one that constrains "
-     "nothing -- the sketch already fixes it, or it contradicts the sketch "
-     "-- naming the constraints (indices) it repeats or contradicts. "
+     "end) is refused naming what its kind takes. `curvature` (G2) takes "
+     "two curves joined end to end by a coincident, at least one a spline, "
+     "and holds them tangent with equal curvature there. One that "
+     "constrains nothing -- the sketch already fixes it, or it contradicts "
+     "the sketch -- is refused too, naming the constraints (indices) it "
+     "repeats or contradicts. "
      "`driven: true` on a dimension kind, with no value/value_deg/expr, adds "
      "a DRIVEN (reference) dimension: no equation, its value is what the "
      "geometry measures, answered as `measured` (mm; radians for an angle). "
-     "Every answer gives the sketch's `dof` after the add.",
+     "Every answer gives the sketch's `dof` after the add. The geometry is "
+     "taken literally: unlike the GUI's first dimension, nothing is "
+     "rescaled. To drive a dimension by a NEW variable in one undo step, "
+     "batch set_variable and add_constraint with `expr` naming it.",
      "*", remote::NeedsPart},
     {"add_constraints",
      "Append MANY constraints in one solve+regen+undo step: "

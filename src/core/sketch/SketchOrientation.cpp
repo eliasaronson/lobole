@@ -284,6 +284,16 @@ std::optional<double> MeasureDimension(const std::vector<Entity>& entities,
       return std::nullopt;
     return c.kind == K::Diameter ? 2.0 * r : r;
   }
+  case K::ArcLength: {
+    const Entity* e = geo.Find(c.a.entity);
+    const auto* ar = e ? std::get_if<Arc>(e) : nullptr;
+    if (ar == nullptr)
+      return std::nullopt;
+    double sweep = std::fmod(ar->endAngle - ar->startAngle, 2.0 * M_PI);
+    if (sweep <= 0.0)
+      sweep += 2.0 * M_PI;
+    return ar->radius * sweep;
+  }
   case K::Angle: {
     // PlaneGCS's L2LAngle is met when line b is turned `value` from line a.
     const auto la = geo.LineEnds(c.a.entity);

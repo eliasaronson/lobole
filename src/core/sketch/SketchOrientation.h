@@ -56,7 +56,8 @@ std::vector<int> OrientationSigns(const std::vector<Orientation>& orientations,
                                   const std::vector<Entity>& entities);
 
 // The value a dimension has in the given geometry, with the solver's sign
-// conventions: Distance, DistancePL, Radius and Diameter unsigned; DistanceX/Y
+// conventions: Distance, DistancePL, Radius, Diameter and ArcLength (r x
+// sweep) unsigned; DistanceX/Y
 // b − a; Angle the turn from line a to line b, radians in (−π, π]. nullopt for
 // a constraint that is not a dimension or whose refs do not resolve.
 std::optional<double> MeasureDimension(const std::vector<Entity>& entities,

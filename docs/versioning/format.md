@@ -326,6 +326,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | Two sketch constraint kinds: `curvature` (G2 between two curves joined end to end, at least one a spline: tangent there with equal curvature) and `arc_length` (a dimension, mm: a circular arc's radius x sweep; driven like any dimension). An older build refuses the file on the unknown kind ([curvature continuity](../sketching/README.md#curvature-continuity), [arc length](../sketching/README.md#arc-length)). Golden `vNEXT-g2-arc-length` |
 
 ## Paths in a project
 

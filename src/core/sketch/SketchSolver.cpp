@@ -5,6 +5,7 @@
 
 #include "common/Logger.h"
 #include "core/Angles.h"
+#include "core/sketch/ConstraintEndCurvature.h"
 #include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchText.h"
 
@@ -67,6 +68,10 @@ const char* KindWord(ConstraintKind k) {
     return "diameter";
   case K::DistancePL:
     return "distance_pl";
+  case K::Curvature:
+    return "curvature";
+  case K::ArcLength:
+    return "arc_length";
   }
   return "?";
 }
@@ -110,6 +115,11 @@ const char* Accepts(ConstraintKind k) {
     return "a point";
   case K::Concentric:
     return "two of circle, arc, ellipse and elliptical arc";
+  case K::Curvature:
+    return "a spline and a line, an arc or another spline, joined end to end "
+           "by a coincident (tangent and equal curvature at that end)";
+  case K::ArcLength:
+    return "a circular arc";
   }
   return "";
 }
@@ -763,7 +773,6 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
   // tags map back to constraint indices; a constraint owns tags
   // [firstTag[k], firstTag[k+1]) (empty range = it added nothing). One that
   // adds nothing is REFUSED with its reason (UnsupportedConstraints).
-  int tag = 1;
   im.constraintFirstTag.assign(sketch.constraints.size() + 1, 0);
   im.constraints = sketch.constraints;
   im.valueSlots.assign(sketch.constraints.size(), {});
@@ -779,6 +788,56 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
                  std::holds_alternative<EllipseArc>(*e));
   };
   const auto isSpline = [&](uint32_t id) { return im.splineOf.count(id) != 0; };
+  // Tangency AT the end two curves share (a fillet, a slot, a spline running
+  // into a line), as the angle between them there -- 0 or pi, whichever
+  // they already make. The distance form (centre to line = radius) says the
+  // same thing as "the shared end is on the arc" to first order AT exact
+  // tangency, so the pair read as one redundant constraint and a free DOF --
+  // every fillet flagged, once the sketch held its geometry exactly. False
+  // when a curve has no tangent the solver can read (a rigid elliptical arc).
+  int tag = 1;
+  const auto addJointTangent = [&](const std::pair<PointRef, PointRef>& joint,
+                                   uint32_t eb) {
+    GCS::Curve* ca = im.TangentCurveAt(joint.first);
+    GCS::Curve* cb = im.TangentCurveAt(joint.second);
+    // The point the normals are read at: an (elliptical) arc's own end,
+    // whose normal depends on where it is; a line's does not.
+    const bool bCurved = isArc(eb) || im.ellArcOf.count(eb);
+    GCS::Point* p = im.Resolve(bCurved ? joint.second : joint.first);
+    if (!(ca && cb && p))
+      return false;
+    const double now = im.sys.calculateAngleViaPoint(*ca, *cb, *p);
+    im.params.push_back(
+        std::abs(std::remainder(now, 2.0 * M_PI)) < M_PI / 2.0 ? 0.0 : M_PI);
+    im.sys.addConstraintAngleViaPoint(*ca, *cb, *p, &im.params.back(), tag++);
+    return true;
+  };
+  // The three poles of spline `end.entity` nearest that end, end pole first,
+  // and the direction the curve leaves the end in (the first leg).
+  const auto endPoles = [&](const PointRef& end) {
+    GCS::BSpline& bs = *im.splineOf[end.entity];
+    const size_t n = bs.poles.size();
+    const bool first = end.which == 0;
+    return std::array<GCS::Point, 3>{bs.poles[first ? 0 : n - 1],
+                                     bs.poles[first ? 1 : n - 2],
+                                     bs.poles[first ? 2 : n - 3]};
+  };
+  const auto leg = [](const std::array<GCS::Point, 3>& p) {
+    return glm::dvec2(*p[1].x - *p[0].x, *p[1].y - *p[0].y);
+  };
+  // The direction a line or arc leaves the end `end` in.
+  const auto awayFrom = [&](const PointRef& end) -> glm::dvec2 {
+    if (isLine(end.entity)) {
+      const GCS::Line& l = im.lines[im.lineOf[end.entity]];
+      const GCS::Point& at = end.which == 0 ? l.p1 : l.p2;
+      const GCS::Point& to = end.which == 0 ? l.p2 : l.p1;
+      return {*to.x - *at.x, *to.y - *at.y};
+    }
+    const GCS::Arc& a = im.arcs[im.arcOf[end.entity]];
+    if (end.which == 1) // CCW from the start
+      return {-std::sin(*a.startAngle), std::cos(*a.startAngle)};
+    return {std::sin(*a.endAngle), -std::cos(*a.endAngle)}; // CW from the end
+  };
   for (size_t k = 0; k < sketch.constraints.size(); k++) {
     im.constraintFirstTag[k] = tag;
     const Constraint& con = sketch.constraints[k];
@@ -946,31 +1005,10 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
       if (!isLine(ea) && isLine(eb))
         std::swap(ea, eb);
       if (const auto joint = im.SharedEnd(sketch.constraints, ea, eb)) {
-        // The two curves meet at an end (a fillet, a slot, a spline running
-        // into a line): tangency AT that point, as the angle between them
-        // there -- 0 or pi, whichever they already make. The distance form
-        // (centre to line = radius) says the same thing as "the shared end
-        // is on the arc" to first order AT exact tangency, so the pair read
-        // as one redundant constraint and a free DOF -- every fillet
-        // flagged, once the sketch held its geometry exactly.
-        GCS::Curve* ca = im.TangentCurveAt(joint->first);
-        GCS::Curve* cb = im.TangentCurveAt(joint->second);
-        // The point the normals are read at: an (elliptical) arc's own end,
-        // whose normal depends on where it is; a line's does not.
-        const bool bCurved = isArc(eb) || im.ellArcOf.count(eb);
-        GCS::Point* p = im.Resolve(bCurved ? joint->second : joint->first);
-        if (isLine(ea) && isLine(eb)) {
+        if (isLine(ea) && isLine(eb))
           why = "two lines meeting at an end are not tangent; use collinear";
-        } else if (ca && cb && p) {
-          const double now = im.sys.calculateAngleViaPoint(*ca, *cb, *p);
-          im.params.push_back(
-              std::abs(std::remainder(now, 2.0 * M_PI)) < M_PI / 2.0 ? 0.0
-                                                                     : M_PI);
-          im.sys.addConstraintAngleViaPoint(*ca, *cb, *p, &im.params.back(),
-                                            tag++);
-        } else {
+        else if (!addJointTangent(*joint, eb))
           why = "a circle-shaped elliptical arc is rigid";
-        }
       } else if (isLine(ea) && (isCircle(eb) || isArc(eb))) {
         // The vendored PlaneGCS tangent is a *signed* point-to-line distance,
         // so pick the side the circle is already on and keep it there rather
@@ -1015,6 +1053,98 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
         else if (isEllipseShaped(ea) || isEllipseShaped(eb))
           why += "; an ellipse is tangent to a line, or at an end it shares "
                  "with another curve";
+      }
+      break;
+    }
+    case ConstraintKind::Curvature: {
+      // G2: tangent at the shared end, plus one curvature equation
+      // (docs/sketching/README.md#curvature-continuity). A spline first.
+      uint32_t ea = con.a.entity, eb = con.b.entity;
+      if (!isSpline(ea) && isSpline(eb))
+        std::swap(ea, eb);
+      const auto degree = [&](uint32_t id) {
+        return isSpline(id) ? im.splineOf[id]->degree : 0;
+      };
+      const auto curve = [&](uint32_t id) {
+        return isLine(id) || isArc(id) || isSpline(id);
+      };
+      const auto joint = im.SharedEnd(sketch.constraints, ea, eb);
+      if (ea == eb || !curve(ea) || !curve(eb)) {
+        why = "got " + describe({ea, 0}) + " and " + describe({eb, 0});
+      } else if (isLine(ea) && isLine(eb)) {
+        why = "two lines have no curvature to match; use collinear";
+      } else if (!isSpline(ea) && (isLine(ea) || isLine(eb))) {
+        why = "a line and an arc cannot meet in G2 -- the arc's radius would "
+              "have to be infinite; use tangent";
+      } else if (!isSpline(ea)) {
+        why = "two arcs in G2 are one circle (equal radius, one centre); use "
+              "tangent, or concentric and equal";
+      } else if (degree(ea) < 2 || (isSpline(eb) && degree(eb) < 2)) {
+        why = "a degree-1 spline is a polyline, with no curvature to match";
+      } else if (!joint) {
+        why = describe({ea, 0}) + " and " + describe({eb, 0}) +
+              " do not share an end; join them end to end with a coincident "
+              "first";
+      } else if (!addJointTangent(*joint, eb)) {
+        why = "the solver cannot read a tangent there";
+      } else {
+        const auto a3 = endPoles(joint->first);
+        const GCS::BSpline& sa = *im.splineOf[ea];
+        const double fa =
+            EndCurvatureFactor(static_cast<int>(sa.poles.size()), sa.degree,
+                               joint->first.which == 0);
+        if (isLine(eb)) {
+          // Zero curvature: with the tangent, the third pole on the line.
+          GCS::Point third = a3[2];
+          im.sys.addConstraintPointOnLine(third, im.lines[im.lineOf[eb]],
+                                          tag++);
+        } else {
+          // Smooth (the curves leave the joint in opposite directions): the
+          // curvatures, each read away from the joint, are opposite.
+          const glm::dvec2 ta = leg(a3);
+          if (isArc(eb)) {
+            const glm::dvec2 tb = awayFrom(joint->second);
+            const double s = glm::dot(ta, tb) < 0.0 ? -1.0 : 1.0;
+            const double e = joint->second.which == 1 ? 1.0 : -1.0;
+            auto* c = ConstraintEndCurvature::SplineArc(
+                a3, fa, im.arcs[im.arcOf[eb]].rad, s * e);
+            c->setTag(tag++);
+            im.sys.addConstraint(c);
+          } else {
+            const auto b3 = endPoles(joint->second);
+            const GCS::BSpline& sb = *im.splineOf[eb];
+            const double fb =
+                EndCurvatureFactor(static_cast<int>(sb.poles.size()), sb.degree,
+                                   joint->second.which == 0);
+            const glm::dvec2 tb = leg(b3);
+            const double s = glm::dot(ta, tb) < 0.0 ? -1.0 : 1.0;
+            const double length = 0.5 * (glm::length(ta) + glm::length(tb));
+            auto* c =
+                ConstraintEndCurvature::SplineSpline(a3, fa, b3, fb, s, length);
+            c->setTag(tag++);
+            im.sys.addConstraint(c);
+          }
+        }
+      }
+      break;
+    }
+    case ConstraintKind::ArcLength: {
+      const uint32_t id = con.a.entity;
+      if (isArc(id)) {
+        im.params.push_back(std::abs(con.value)); // driving value, fixed
+        im.sys.addConstraintArcLength(im.arcs[im.arcOf[id]], &im.params.back(),
+                                      tag++);
+      } else if (isLine(id)) {
+        why = "got " + describe(con.a) +
+              "; a line's length is a `distance` between its ends";
+      } else if (isCircle(id)) {
+        why = "got " + describe(con.a) +
+              "; a whole circle is sized by `diameter` (or `radius`)";
+      } else if (isEllipseShaped(id) || isSpline(id)) {
+        why = "got " + describe(con.a) +
+              ", which has no arc-length dimension; only a circular arc does";
+      } else {
+        why = "got " + describe(con.a);
       }
       break;
     }
@@ -1127,9 +1257,9 @@ void Solver::Impl::LoadFrom(const SketchFeature& sketch,
       // Each dimension case pushes its value last.
       using K = ConstraintKind;
       im.valueSlots[k].p = &im.params.back();
-      im.valueSlots[k].absolute = con.kind == K::Distance ||
-                                  con.kind == K::Radius ||
-                                  con.kind == K::Diameter;
+      im.valueSlots[k].absolute =
+          con.kind == K::Distance || con.kind == K::Radius ||
+          con.kind == K::Diameter || con.kind == K::ArcLength;
       im.valueSlots[k].scale = con.kind == K::Diameter ? 0.5 : 1.0;
     }
   }

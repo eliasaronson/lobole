@@ -393,6 +393,10 @@ const char* ConstraintKindToString(sketch::ConstraintKind k) {
     return "diameter";
   case K::DistancePL:
     return "distance_pl";
+  case K::Curvature: // vNEXT
+    return "curvature";
+  case K::ArcLength: // vNEXT
+    return "arc_length";
   }
   return "coincident";
 }
@@ -439,6 +443,10 @@ sketch::ConstraintKind ConstraintKindFromString(const std::string& s) {
     return K::Diameter;
   if (s == "distance_pl")
     return K::DistancePL;
+  if (s == "curvature")
+    return K::Curvature;
+  if (s == "arc_length")
+    return K::ArcLength;
   throw std::runtime_error("Unknown constraint kind: " + s);
 }
 
@@ -505,7 +513,8 @@ sketch::Constraint ConstraintFromJson(const json& j) {
     throw std::runtime_error(
         std::string("a ") + ConstraintKindToString(c.kind) +
         " constraint cannot be driven: only the dimension kinds can (distance, "
-        "distance_x, distance_y, distance_pl, radius, diameter, angle)");
+        "distance_x, distance_y, distance_pl, radius, diameter, angle, "
+        "arc_length)");
   if (c.driven && !c.valueExpr.empty())
     throw std::runtime_error(
         "a driven dimension measures the sketch, so it cannot carry an "
