@@ -108,7 +108,7 @@ are upper bounds on a loaded machine; the suites print their own counts.
 | the python `gui` ones | `tools/ctest -L pygui -j1` | ~110 s |
 | the big generators | `tools/ctest -C generators -L generators -j2` (generators/README.md#the-big-generators-as-tests) | ~6 min |
 | random designs | `tools/fuzz.py run --count 200` (docs/modeling/README.md#random-designs; background past 600 s) | ~1 min |
-| the action matrix | `tools/ctest -C action_matrix -L action_matrix -j4` (docs/modeling/README.md#action-matrix) | ~15 min |
+| the action matrix | `tools/ctest -C action_matrix -L action_matrix -j4` (docs/modeling/README.md#action-matrix; `tools/action_matrix.py run --profile` says where the time goes) | ~16 min |
 | damaged files at every reader | `tools/reader-fuzz.py run --seed S` (docs/versioning/README.md#reader-fuzzing) | slow; the sample is in the headless suite |
 
 `gui_smoke` is the SAME tests `gui-tests-xvfb.sh` runs, only serial and
@@ -130,8 +130,8 @@ by name, while you iterate on it.
 list kept elsewhere drifts.
 
 - Entering `nix-shell` costs ~5 s; `tools/nix-run 'cmd'` runs a command in
-  the same environment from a cache (`nix print-dev-env`, keyed on shell.nix
-  and nixpkgs) in ~0.1 s, and `tools/build.sh`, `tools/ctest` and
+  the same environment from a cache (what `nix-shell` adds, keyed on
+  shell.nix, the OpenCASCADE overlay and its patches, and nixpkgs) in ~0.1 s, and `tools/build.sh`, `tools/ctest` and
   `tools/test-fast.sh` use it. Where `nix-shell` is still used, batch
   commands into one invocation rather than one each. Run the full headless suite before committing.
 - GUI (real GPU on Xvfb): `./tools/gui-tests-xvfb.sh` — 4 parallel shards.
