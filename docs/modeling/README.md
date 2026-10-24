@@ -156,6 +156,7 @@ holds a spec to ([typed feature specs](../scripting/rpc.md#typed-feature-specs))
 | `Derived` | see [derived.md](derived.md) |
 | `Template` | an instance of a feature template; see [templates.md](templates.md) |
 | `Fastener` | a generated standard part; only in a part of its own, placed in an assembly (the parts area) |
+| `DeleteFace`, `OffsetFace`, `MoveFace`, `ReplaceFace` | change a body's faces where they are; see [Direct edit](#direct-edit) |
 
 Sheet-metal features (`BaseFlange`, `EdgeFlange`, `Hem`, `Jog`, `Unfold`,
 `Refold`, `FlatPattern`, `CornerRelief`, `NormalCut`) and `Cope` are
@@ -468,13 +469,221 @@ itself broken (a bent path edited into one that cannot be bent) the consumer
 names it and defers to its error, instead of claiming the path is the wrong
 kind of thing.
 
+## Direct edit
+
+A body changes by features added on top of it, and an imported STEP solid
+arrives as `Import` with every face `<import>/face<i>` and no history
+behind it: a hole in the wrong place, a cosmetic round in the way, a wall
+too thin. Four features change a body's faces where they are: `DeleteFace`,
+`OffsetFace`, `MoveFace` and `ReplaceFace`. Each is an ordinary history
+feature (edited, suppressed, rolled back and undone like any other), takes
+faces by `ElementRef` on ONE body named by its `createdBy` (as Shell does),
+and changes that body in place. One file pair each under
+`src/core/features/`; what they share is `src/core/DirectEdit.{h,cpp}`
+(`directedit::`), not under `features/`, where every header is a feature's
+(the `VisitFeatureRefs` convention scans them).
+
+What every one holds to:
+
+1. **It names through its builder's history** (`topo::NamesThroughHistory`
+   with `keepWholeFaces` false: [toponaming](toponaming.md#how-each-operation-names-its-output)). A
+   face it moves, extends, trims or stands in for is `<name>;M<id>`; a face
+   it leaves alone keeps its name exactly. Builders report faces they merely
+   rebuilt (a boolean of two bodies sharing every untouched face reports
+   each one modified), so `directedit::RestoreUntouched` gives a face its
+   name back when it is the input's face unchanged (surface kind, area and
+   centroid to 1e-9).
+2. **It refuses what it cannot do, naming the face**
+   (`directedit::CheckResult`): `Measure::InvalidReasons` empty, the solid
+   count the input's, every face asked for gone (Delete) or carrying
+   `;M<id>`, the volume moving the way the operation says, and the tight
+   bbox growing by no more than the operation allows. Builders run in
+   `occsig::RunCatchingOccSignals` (`directedit::Guarded`). A refusal is the
+   feature's error and reads "planar face `7/face12`, 120 mm²", the body left
+   as it was.
+3. **`add_feature` and `modify_feature` refuse one whose own Execute fails**
+   (`RefuseFailingDirectEdit`, `src/remote/RemoteModeling.cpp`): the edit is
+   built first on `Document::CopyWithGeometry` of the part (its bodies
+   reused, so only the edit and what follows it runs), and its error, when
+   it is its own and not after an earlier failure, is the call's: "DeleteFace
+   refused: … The document is unchanged". Built on a copy, the refusal
+   changes nothing, the revision included, inside a `batch` or out of one
+   ([a refused call changes nothing](../scripting/rpc.md#a-refused-call-changes-nothing)).
+   An upstream edit that later breaks a stored one is a broken feature,
+   named in that edit's `regen`.
+4. **A face gone upstream is an error, never skipped**
+   (`topo::UnresolvedReason`). The tree's context menu has **Pick faces…**
+   (Pick face… on a Replace), which opens the editor with the face slot
+   armed: the dead ref goes with its "x", its successor is picked in the
+   viewport.
+5. **An imported face's index is checked against what was picked.** A face
+   ref whose name `topo::DecodeElementName` calls positional AND whose seed
+   is an `Import` stores the face's `fingerprint` {surface, area_mm2,
+   centroid_mm} (`directedit::FaceFingerprint`), taken the first time the
+   edit sees the face. A changed file read again renumbers its faces; when
+   the face under the name is no longer the fingerprint's (to 1e-6
+   relative), the edit fails: "face `7/face12` is no longer the face that
+   was picked (was a plane of 120 mm² at …, now …); re-pick it". A pick in
+   the editor drops the old print. A primitive's `<id>/face<i>` is
+   positional too, but a box keeps its numbering whatever its size, and
+   names that say why a face exists are resized by upstream edits on
+   purpose, so neither is fingerprinted.
+6. **Faces belong to one body.** Refs on two are refused. Bodies that share
+   a `createdBy` (a multi-body import's `<id>/b<k>/…`, a split's pieces) are
+   told apart by the name: the edit acts on the body that holds its first
+   face (`directedit::BodyHolding`).
+
+### Delete Face
+
+`DeleteFace {body_id, faces[]}` removes the faces and heals the gap by
+extending the faces around it (`BRepAlgoAPI_Defeaturing`, history on,
+single-threaded, on a `BRepBuilderAPI_Copy`): a hole's bore and floor fill,
+a boss levels, a fillet or chamfer face gives back the sharp edge.
+Defeaturing reports a feature it could not remove as a WARNING
+(`BOPAlgo_AlertUnableToRemoveTheFeature`) and returns success with the
+feature still there, so any warning refuses, its shape mapped back to names
+(`topo::FaceNamesIn`): "Delete Face could not heal around `7/face12`: the
+faces around them do not meet when extended (parallel or tangent)". A set
+that takes every face of the body is refused before the builder runs, and so
+is one beside a freeform face (Measure's kind `other`: a modelled thread's
+flank, a spline), which healing would have to extend: Defeaturing's
+edge-face intersections on a thread ran for more than fifteen minutes on one
+face. Offset and Replace Face refuse the same way
+(`directedit::FreeformNeighbour`); pick the freeform faces with it, or edit
+the feature that made them.
+
+Every direct-edit builder (Defeaturing, the offset builder, MakerVolume) also
+runs under a deadline, `directedit::kBuilderBudgetS` (45 s), through a
+`Message_ProgressIndicator` whose `UserBreak` turns true once it has passed:
+past it the edit is refused ("gave up after 45 s …"). The builders check it
+only at their progress points, so a call can run well past the budget
+before it stops; it is a backstop, not a timer. The
+bbox may grow by no more than the deleted faces' own extent. Defeaturing
+trims the host face's own surface, so a pocket in an imported face whose
+edges lie 5e-5 mm off its plane fills and the host stays that plane
+(`test_direct_edit`).
+
+The editor's **Add the feature** (`###add_feature`) and the RPC
+`grow_faces {faces}` grow picks to the faces of the one feature they belong
+to (`directedit::FeatureFaces`): across edges to every face reachable
+without stepping onto a host, a face whose inner loop (a hole in it) the
+edge lies on. A through bore stays itself, a blind hole's bore takes its
+floor, a boss's side takes the boss; a set no inner loop bounds (a fillet
+runs on into the body) is refused, saying why, and the picks stay as they
+were. `grow_faces` also answers `host_normal`, the largest planar face the
+feature sits in.
+
+All 100 bores of SolidCraft's `plate_100_holes.step` delete in one feature
+in about 20 s here, nearly all of it Defeaturing; the test allows 60 s.
+
+### Offset Face
+
+`OffsetFace {body_id, faces[], distance_mm (+_expr)}` moves each face along
+its own normal, positive outward (adding material); its neighbours follow
+along their own surfaces, so a drafted wall stays drafted and a cylinder
+changes radius. `BRepOffset_MakeOffset` in skin mode with intersection
+joins, zero offset on the shape and `SetOffsetOnFace` per face, named
+through an adapter that reads the face the builder GENERATES from a picked
+one as that face modified. A shell offset that comes back unclosed is made a
+solid again (`BRepBuilderAPI_MakeSolid`). It takes Shell's guard for the
+unpatched apt OCCT: up to five draws on a copy when a result fails the
+checks, but none after a fault (a builder that long-jumped out of its frames
+is not run again on that heap).
+
+The offset builder also refuses planar faces it should move (a wall of an
+imported battery holder with cradles cut across it: no error, no shape). A
+set of planar faces then falls back to Replace Face's cells, one face at a
+time, each onto its own plane moved by the distance
+(`directedit::ReplaceOntoPlane`).
+
+Checks: outward never removes volume, inward never adds; the bbox grows by
+at most the distance; an inward offset through the body is refused
+("offsetting `4/cap1` by -20 mm consumes the body: it is 20 mm thick
+there", measured along the inward normal from the face's inside point,
+`directedit::ThicknessUnder`). A face with a tangent neighbour that is not
+picked is refused naming it ("… would tear it from cylindrical face `…`,
+which meets it tangentially (a fillet?): offset both together"): left to
+itself the builder offsets the whole tangent chain, faces nobody picked. A
+fillet is tangent to both faces it joins, so a top face, its round and the
+wall below go together.
+
+Default: a tenth of the smaller of the face's inset (list_elements'
+`inset_mm`, `Measure::FaceInsetAt`) and the body's thinnest extent, rounded
+down to 1, 2 or 5 × 10ⁿ, outward (`ui::SizeFromFace` beside
+`SizeFromBody`), derived again from the first face picked into an empty
+tool. The window has **Flip**; an arrow on the first face drags the
+distance (`HandleParam::Offset`, `src/ui/PreviewHandles.cpp`).
+
+### Move Face
+
+`MoveFace {body_id, faces[], translate_mm [x,y,z] (+_expr each),
+rotate_deg (+_expr), axis (AxisRef)}` moves a set of faces forming one
+feature (a hole, boss, pocket, slot) rigidly, rotated about the axis first,
+then translated; the body closes behind it and opens where it lands. Built
+from Delete Face and named booleans: `H` = the body `B` with the faces
+deleted; the feature's material `cut = H − B` (a hole's) and `add = B − H`
+(a boss's), through `topo::BooleanNamed`; the result `(H − T(cut)) ∪
+T(add)`, `T` the move as a location on the shape, so its faces keep their
+index order and names. The chain runs under the edit's one tag, so its
+repeated `;M<id>` steps collapse to one (`directedit::CollapseSteps`), and a
+moved wall the booleans left whole is given its `;M<id>`: each moved wall is
+`<original>;M<id>`, and a thread on a moved bore or a mate on a moved boss
+follows it.
+
+Checks: the volume unchanged to 1e-9; a moved hole that leaves the body is
+refused naming the faces it crosses and by how much ("moving `9/p3/bore` 27
+mm along X takes it 4 mm past `2/g1`"); a moved boss that sinks into the body
+likewise; one that floats off it changes the solid count. A face that does
+not lift out (a box's end face) fails Delete Face's heal and is refused
+pointing to Offset Face; a slide within the feature's own surfaces (a bore
+along its axis) changes nothing and is refused saying so.
+
+Default: in the host face's plane (`directedit::HostNormal`, the largest
+planar face the picked ones meet), along the body's largest extent in that
+plane, a tenth of it, rounded as Offset's is (`ui::DefaultFaceMove`); no
+rotation. Three arrows at the picked faces' centroid drag X, Y and Z
+(`HandleParam::MoveX/Y/Z`), the preview-handle drag the extrude's arrow
+uses. The occurrence gizmo (`GizmoInput.cpp`) is an assembly's and drives
+occurrences, not features, so it does not drive this.
+
+### Replace Face
+
+`ReplaceFace {body_id, face, target}` puts a face onto another surface, its
+neighbours extended or trimmed along their own surfaces to meet it.
+`target` is `{kind: "plane", base_plane | datum_id}`, `{kind: "sketch",
+sketch_id}` (the sketch's plane) or `{kind: "face", face}` (any body's face:
+its whole surface); an unknown `kind` is refused naming the three. A
+parallel planar target onto a planar face is Offset Face by the signed
+distance (refused when the face already lies on it). Otherwise
+`directedit::ReplaceOnto` hands `BOPAlgo_MakerVolume`:
+
+- the body's faces less the replaced one;
+- its neighbours extended past the target (`BRepLib::ExtendFace`, by the
+  body's bbox diagonal, across only the UV sides the edges they share with
+  the replaced face lie on: grown every way, a cradle's end wall ran on
+  through the bottom of the part);
+- the target surface bounded to twice that size: a plane as a square
+  centred on the body, a cylinder, cone or sphere all the way round, any
+  other surface `ExtendFace`d.
+
+The cells holding a point just inside the faces the edit leaves alone are
+kept; more than the body's solid count is refused ("leaves 2 separate
+pieces"). The new face is `<replaced>;M<id>`. Checks: every untouched face
+keeps its name (one the target cuts is refused naming it); the target is
+there (a target the extended neighbours do not reach is refused naming
+them); the bbox grows by at most the diagonal. The volume may go either
+way, or not move at all (a tilt about the face's middle). The target slot
+(`###slot` `ReplaceFaceTarget`) takes a face in the viewport, or a datum
+plane's or a sketch's row in the tree; there is no numeric default.
+
 ## Sizes past the model space are refused
 
 `kModelSpaceMm` (`src/core/ModelSpace.h`) is a kilometre: OpenCASCADE's
 confusion tolerance is 1e-7 mm and a double carries about 16 digits, so past
 about 1e9 mm a coordinate cannot tell two points apart and an algorithm loops
 or crashes instead of failing. A Hole's diameter and depth, a linear
-pattern's reach (spacing × (count − 1)) and a Shell's thickness are refused
+pattern's reach (spacing × (count − 1)), a Shell's thickness, an Offset
+Face's distance and each component of a Move Face's translation are refused
 past it, by name, and so are a sketch's plane origin and its entities'
 coordinates, sizes and angles (naming the entity), a 3D curve's points,
 axis, radius and pitch (and a helix of more than 10 000 turns), and a
@@ -485,8 +694,9 @@ thinnest extent or more, which leaves no cavity.
 
 ## A reshaping feature keeps only a valid solid
 
-A Fillet, Chamfer, Shell or Draft whose builder reports success on a solid
-that crosses itself is refused with `Measure::InvalidReasons` ("draft
+A Fillet, Chamfer, Shell, Draft or direct edit
+([`directedit::CheckResult`](#direct-edit)) whose builder reports success on
+a solid that crosses itself is refused with `Measure::InvalidReasons` ("draft
 produced an invalid solid (self-intersecting wire, unorientable shape)"),
 and the body is left as it was; check_geometry would have called it invalid.
 A Shell that reaches past the body's own measured outside — the offset
@@ -506,7 +716,7 @@ overlay in `nix/occt-overlay.nix` applies it, and netgen is built against
 the same patched library.
 
 The CI Ubuntu job links apt's OpenCASCADE, which is unpatched, so the Shell
-also keeps its own guard. Every such answer fails one of the checks above,
+also keeps its own guard (Offset Face, on the same builder, shares it). Every such answer fails one of the checks above,
 so a Shell that fails them is built again on a `BRepBuilderAPI_Copy` of its
 input (the same solid at new addresses, sub-shape for sub-shape, so its
 index-keyed names are the body's), up to five draws, and is refused only
@@ -530,8 +740,8 @@ handler: OCC's turns a signal into an exception only inside an
 `OCC_CATCH_SIGNALS` scope, and anywhere else prints "no catch was found" and
 calls `exit(1)`, so the handler that was there before stays for every fault
 outside one. That macro is empty in code not compiled with
-`OCC_CONVERT_SIGNALS`, which is all of ours, so the blend, shell and draft
-builders run inside `occsig::RunCatchingOccSignals` (`src/cad/OccSignals.h`),
+`OCC_CONVERT_SIGNALS`, which is all of ours, so the blend, shell, draft and
+direct-edit (`directedit::Guarded`) builders run inside `occsig::RunCatchingOccSignals` (`src/cad/OccSignals.h`),
 set up where the macro is real: a SIGSEGV in `BRepOffsetAPI_DraftAngle`
 becomes "draft failed inside OpenCASCADE (OSD_SIGSEGV …)" (on Windows
 `OSD_Exception_ACCESS_VIOLATION …`, converted by our own vectored handler:
@@ -698,6 +908,7 @@ pieces interfere fails outright.
 | `src/core/Feature.h` | `Feature`, `Body`, `RegenContext`, the stored (legacy) primitives, `ImportFeature` |
 | `src/core/Primitives.{h,cpp}` | the Box/Cylinder/Sphere tool: `on`, defaults, the sketch and solid it expands to |
 | `src/core/features/` | one file pair per feature type |
+| `src/core/DirectEdit.{h,cpp}` | what the direct edits share: resolving and fingerprinting faces, the checks, naming, Add the feature |
 | `src/core/BodyMode.{h,cpp}` | new-body/add/cut, pattern instance fusing |
 | `src/core/ElementMap.h`, `src/core/ElementHistory.{h,cpp}` | toponaming |
 | `src/core/sketch/SketchProfile.{h,cpp}` | loops, profile faces, named prism/revolve builders |
@@ -720,7 +931,9 @@ feature; a Boolean, pattern or Split's body continues its source's material:
 `extract_variables`
 ([../variables/README.md](../variables/README.md#literals-that-should-be-expressions));
 `list_elements`, `curve_points`,
-`tube_schedule` (`src/remote/RemoteInspection.cpp`). `get_state` lists each
+`tube_schedule` and `grow_faces` ([Delete Face](#delete-face))
+(`src/remote/RemoteInspection.cpp`). A direct edit that would not build is
+refused by `add_feature` and `modify_feature` ([Direct edit](#direct-edit)). `get_state` lists each
 feature with its error, warning, `suppressed` and, for a Derived, `stale`.
 
 ## GUI
@@ -729,8 +942,10 @@ The part toolbar (`DrawModelToolbar`, `src/ui/Toolbar.cpp`) has one
 `###tb_*` button per creation tool; each opens a preview with a tool window
 and Accept. The feature tree's context menu has Edit, Rename,
 Suppress/Unsuppress, Rollback to here / Roll to end, and, where they apply,
-Reattach face… (a face-attached sketch) and Pick edges… (a fillet or chamfer
-with a dangling edge). An errored feature is red with its message as the
+Reattach face… (a face-attached sketch), Pick edges… (a fillet or chamfer
+with a dangling edge) and Pick faces… (a direct edit). The four direct
+edits share one toolbar flyout, `direct` (`###tb_delete_face`,
+`###tb_offset_face`, `###tb_move_face`, `###tb_replace_face`). An errored feature is red with its message as the
 tooltip. View > Show Element Names labels the hovered face with its name.
 
 ## Random designs
@@ -877,27 +1092,35 @@ is not tried and not recorded:
 | | `face.frame` | Frame `from_element` |
 | cylindrical face | `curved.thread` | cosmetic Thread with the ISO coarse designation whose major diameter is within 5 % of the face's (none: not tried) |
 | | `curved.frame` | Frame `from_element` |
+| any face | `face.delete` | DeleteFace of that face alone |
+| planar or cylindrical face | `face.offset_out`, `face.offset_in` | OffsetFace by ± a tenth of the smaller of `r0` (a cylinder's radius) and `least`, rounded down to 1, 2 or 5 × 10ⁿ as the GUI's default is |
+| planar face | `face.replace` | a `through_points` DatumPlane parallel to the face, a twentieth of `size` past the body's farthest corner along the face's normal, and ReplaceFace onto it, in one `batch` |
+| a feature's faces | `face.delete_feature`, `face.move` | the face grown by `grow_faces` (Add the feature) to its hole or boss, one row per feature on its first face by name: DeleteFace of the set, and MoveFace of it a tenth of the body's largest extent (rounded) along that axis in the plane of `host_normal`. A face that does not grow plans `grow_faces` alone, which refuses |
 | body | `body.pattern_linear` | Pattern of the body's newest feature (the latest that made one of its faces), 2 along X, spacing 1.5 × its X extent |
 | | `body.pattern_circular`, `body.mirror` | 3 at 120° about Z; mirror about YZ |
 | | `body.split` | Split at the mid-plane square to its largest extent |
 
 The matrix copies no GUI literal (Fillet and Chamfer start at 0.5, Shell at
-0.25, in `CreateActions.cpp`).
+0.25, in `CreateActions.cpp`). On a body past 100 faces the direct edits,
+like the shell, take only the four planar faces whose names hash lowest. A
+direct edit is never in the fail class: it passes or it is refused.
 
 **An outcome.** Each action is one `add_feature`, or one `batch` for a
 sketch and its feature, then `undo`:
 
 - **pass**: the regeneration is clean with no warning (a cut that removed
   nothing warns), `check_geometry` is valid, `fuzz_design.check_step` holds
-  (finite positive volumes; a cut, Hole or Shell never adds and stays in the
-  measured box, an add never removes), and a sketch, Frame, cosmetic Thread
-  or Split leaves the part's volume as it was, to 1e-5 of it (a split's
+  (finite positive volumes; a cut, Hole, Shell or inward Offset Face never
+  adds and stays in the part's box as measured before the action, an add or
+  outward Offset Face never removes), and a sketch, Frame, cosmetic Thread,
+  Split or Move Face leaves the part's volume as it was, to 1e-5 of it (a split's
   pieces are integrated over new faces); a warning the part already carried
   is not the action's;
 - **refuse**: a structured error whose message states a condition
   (`fuzz_design.measured`), and nothing changed: the same revision for one
   call; for a batch, whose rollback is its edits and their undo, so its
-  revision moves, the same features and bodies;
+  revision moves, the same features and bodies, and the next call is judged
+  from the revision the rollback left;
 - **fail**: accepted, and the feature is broken, warns or fails a check, or
   a refusal changed the part. A broken feature is never a refusal;
 - **finding**: a crash or a hang (60 s an action; the instance is killed by
@@ -986,7 +1209,11 @@ Headless, one file per feature (`tests/test_extrude.cpp`,
 `test_datum`, `test_primitives`, `test_boolean`, `test_pattern`, `test_fillet`, `test_shell`,
 `test_draft`, `test_split`, `test_refine`, `test_rib`, `test_thread`,
 `test_hole`, `test_worm`, `test_curve3d`, `test_sweep`, `test_loft`, `test_pipe`,
-`test_derived`, `test_toponaming`); the boolean check in
+`test_derived`, `test_toponaming`, and `test_direct_edit` for the four
+[direct edits](#direct-edit), on a 40×30×20 block and on real STEP files in
+`tests/fixtures/step/`, each pair equal to the file with the edit made at its
+source, with `tests/direct_edit_step_smoke.py` deleting and offsetting every
+face of them); the boolean check in
 `tests/test_boolean_volume.cpp`, with the intake flange reduced to a block,
 two swept bores and the slot, and the same case over the RPC in
 `tests/regen_honesty_smoke.py`; regeneration semantics (cache stats,

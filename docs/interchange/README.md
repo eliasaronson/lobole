@@ -66,6 +66,13 @@ the recipe, and each regeneration reads it.
   (`ImportFeature::ContentHash`, cached by path + size + mtime), so moving a
   staged file into the project on save does not invalidate anything built on
   it.
+- **Editing an import.** An import has no history to edit, so it is changed
+  by the direct edits after it: Delete, Offset, Move and Replace Face
+  ([modeling](../modeling/README.md#direct-edit)) — a hole moved or filled,
+  a cosmetic round removed, a wall made thicker. Its face names are indices
+  into the file, so each such edit keeps the fingerprint of the face it was
+  given, and a changed file read again that puts another face under the
+  name fails the edit naming both, rather than editing the wrong face.
 - **One parse per import.** When the caller already parsed the file (the GUI
   worker does, to decide part vs assembly), the model is handed to the
   feature (`SeedGeometry`) and consumed by its first regeneration. It is not

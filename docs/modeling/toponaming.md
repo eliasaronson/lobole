@@ -183,11 +183,25 @@ and folds its `Modified`/`Generated`/`IsDeleted` reports into one
   `<tag>/b1`) and by features that rebuild topology wholesale — split, sweep,
   loft, pipe and rib tools, fasteners.
 - **Shell and draft** are named through their builder's own history
-  (`topo::HistoryArguments` + `topo::NamesThroughHistory`): a face left alone
-  keeps its name, a moved one takes `;M<tag>`, a shell's inner wall is
-  `<outer face>;G<tag>`. Index-order names numbered the faces in the order the
+  (`topo::HistoryArguments` + `topo::NamesThroughHistory`, the one-input
+  overload): a face left alone keeps its name, and so does a face one input
+  face became whole (Refine's rule, above) -- a drafted wall is still its
+  name; faces the builder splits or merges take `;M<tag>`, a shell's inner
+  wall is `<outer face>;G<tag>`. Index-order names numbered the faces in the order the
   builder handed them back, which changes from run to run, so a draft on a
   shelled body's inner wall picked another face after a rebuild.
+- **Direct edits** (Delete, Offset, Move and Replace Face,
+  [README](README.md#direct-edit)) are named through their builder's history
+  WITHOUT that rule (`NamesThroughHistory(..., keepWholeFaces=false)`): the
+  faces they move, extend, trim or stand in for are what the edit is about,
+  so each reads `<name>;M<tag>` even when one input face became it whole,
+  and whatever referenced it sees that it moved. A face the edit leaves
+  alone keeps its name verbatim, and one a builder merely rebuilt (reported
+  modified, the same surface, area and centroid to 1e-9) is given it back
+  (`directedit::RestoreUntouched`). Move Face's chain of named booleans runs
+  under its one tag, its repeated `;M<tag>` steps collapsed to one; a moved
+  wall is `<original>;M<tag>`. Offset Face reads a face the offset builder
+  GENERATES from a picked face as that face modified.
 - **A tapered extrude** keeps a straight one's names: the prism is named
   as ever and each wall's name moves to the face the draft made of it
   (`BRepOffsetAPI_DraftAngle::ModifiedShape`); the caps keep theirs and the
@@ -248,7 +262,11 @@ downstream never disturb them; only editing that feature or its ancestors
 exercises name stability. A name that no longer resolves is a feature error
 naming the element — never a silent snap to a neighbouring face. Repair is
 re-picking: Reattach face… for a face-attached sketch, Pick edges… for a
-blend.
+blend, Pick faces… (Pick face… on a Replace) for a direct edit. An import's
+`<id>/face<i>` is an index into the file: a direct edit keeps the
+fingerprint of the face it was given and fails, naming both, when a changed
+file puts another face under the name
+([modeling](README.md#direct-edit)).
 
 ### Resolving a name
 

@@ -237,7 +237,10 @@ drivable remotely, like a human would:
   `###tb_sk_finish`); every panel control the tests reach has a stable
   `###id` ([testing.md](testing.md#making-a-widget-addressable)).
 - A creation tool refused in the GUI is refused over RPC with the same
-  reason (`Feature::WhyIncomplete`, [tool-sessions.md](tool-sessions.md)).
+  reason (`Feature::WhyIncomplete`, [tool-sessions.md](tool-sessions.md)),
+  and a direct edit that would not build — its Accept disabled in the GUI —
+  is refused over RPC with its error
+  ([modeling](../modeling/README.md#direct-edit)).
 - A mutating RPC that leaves a feature broken says so in its own response.
 - Export and other file-dialog commands are disabled, with the reason, where
   no system dialog exists; scripts use the export RPCs directly.

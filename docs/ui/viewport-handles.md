@@ -5,7 +5,7 @@ test says which one is under the cursor, and one drawer draws them all.
 
 | owner | what it drags | grab payload | on release |
 |---|---|---|---|
-| preview handles (`src/ui/PreviewHandles.{h,cpp}`) | the pending feature's scalars: extrude distance (both of a two-sided one) and twist, fillet/chamfer radius, revolve angle | `AppState::handleDrag` | nothing: preview edits are not on the undo stack; Accept commits the feature as one step |
+| preview handles (`src/ui/PreviewHandles.{h,cpp}`) | the pending feature's scalars: extrude distance (both of a two-sided one) and twist, fillet/chamfer radius, revolve angle, Offset Face's distance, Move Face's X/Y/Z translation | `AppState::handleDrag` | nothing: preview edits are not on the undo stack; Accept commits the feature as one step |
 | section (same module) | the active section's offset — view state, no document | `handleDrag` | nothing |
 | gizmo (`src/ui/GizmoInput.cpp`) | an occurrence's transform, a mate DOF, an exploded-view offset, a CAM job part's placement | `AppState::gizmoDrag` | one snapshot per drag, then solve |
 | simulation force load (`StudyPanel.cpp`, `HandleLoadDragInput`) | the load's magnitude | `SimulationState::loadDrag` | one `ModifyStudyCommand` from a snapshot taken at grab |
@@ -53,7 +53,8 @@ off the viewport.
 
 One handle per draggable scalar of the pending preview, and only while the
 parameter is a plain number: an expression-driven field (`distanceExpr`,
-`distance2Expr`, `twistExpr`, `radiusExpr`, `angleExpr`) gets no handle,
+`distance2Expr`, `twistExpr`, `radiusExpr`, `angleExpr`, Offset Face's
+`distanceExpr`, one of Move Face's `translateExpr`) gets no handle,
 since a drag would silently overwrite the formula. `ComputeHandleSpecs`
 returns the list, and each handle's id is
 `HandleId(HandleOwner::Feature, param)`, where `param` (`HandleParam`) says
@@ -74,6 +75,13 @@ through the same `HitTestHandles` as hover.
 - **Fillet / chamfer**: at the midpoint of the first referenced edge, pulled
   away from the body.
 - **Revolve**: an arc about the resolved axis.
+- **Offset Face** (`HandleParam::Offset`): an arrow along the first picked
+  face's outward normal from its inside point (`FaceInsetAt`), riding on the
+  moved face; resolved on the edit's input body. It keeps its sign (an
+  inward offset is negative) and never lands on 0, clamped to ±0.01.
+- **Move Face** (`HandleParam::MoveX/Y/Z`): three world-axis arrows at the
+  picked faces' area-weighted centroid plus the translation, one per axis
+  that is not expression-driven.
 
 The handle and the tool window edit the same field, so the field updates live
 with no sync protocol. A length is clamped at the field minimum (0.01).
@@ -144,7 +152,8 @@ with no shaft to grab and are not draggable.
   `handles/revolve_arc_drag_sets_angle` (reads its grab point off the drawn
   handle, and drags negative because the default 360° is the clamp ceiling),
   `handles/a_preview_handle_snaps_unless_ctrl` (the same drag lands on 270
-  plain and near 272 with Ctrl).
+  plain and near 272 with Ctrl), `direct/offset_handle_drags_the_distance`
+  (the Offset Face arrow, hovered then dragged onto a snapped 1.0).
 - `fillet/fillet_body_edge_via_click` (a missed handle falls through to edge
   picking).
 - `section/offset_arrow_drags_the_cut`, `section/offset_arrow_drags_on_an_assembly`.

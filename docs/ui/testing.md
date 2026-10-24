@@ -10,8 +10,8 @@ behaviour is asserted.
 `src/app/guitests/GuiTests{Assembly,Cam,Drawing,Modeling,Project,Shell,Simulation,Sketch,Terminal,Viewport}.cpp`,
 registered with `IM_REGISTER_TEST(engine, "<category>", "<name>")` and
 compiled into the app. Shared helpers are in `GuiTestsCommon.{h,cpp}`:
-`ToolbarClick` (opens a flyout such as `**/sheet/###more` when the button is
-inside one), `ToolbarCreateAccept`, `WorldToWindow` (a world point to window
+`ToolbarClick` (opens the `sheet` and then the `direct` flyout,
+`**/<group>/###more`, until the button shows), `ToolbarCreateAccept`, `WorldToWindow` (a world point to window
 coordinates through the viewport rect, matching the picking math),
 `LensScale()` (pick tolerances are in pixels, so a test that pins a camera
 distance to land on a pixel scales it by the lens), and `kToolCases`, the
@@ -289,6 +289,10 @@ feature appeared.
 | Hole | `###tb_hole`, `###tb_sk_hole` | `hole/*` |
 | Shell | `###tb_shell` | `shell/open_face_pick_hollows_the_box` |
 | Draft | `###tb_draft` | `draft/face_pick_names_the_body` |
+| Delete Face | `###tb_delete_face` | `direct/delete_preselected_bore`, `direct/add_the_feature_takes_the_floor`, `direct/refused_delete_names_the_face`, `direct/pick_faces_repairs_a_dangling_ref` |
+| Offset Face | `###tb_offset_face` | `direct/offset_handle_drags_the_distance` |
+| Move Face | `###tb_move_face` | `direct/move_preselected_bore` |
+| Replace Face | `###tb_replace_face` | `direct/replace_top_onto_a_datum_row` (the target from the tree) |
 | Split / Refine | `###tb_split`, `###tb_refine` | `split/*`, `refine/merges_the_seam_left_by_a_union` |
 | Rib | `###tb_rib` | `rib/menu_rib_previews_and_adds_volume` |
 | Thread | `###tb_thread` | `thread/face_pick_fills_the_slot` |

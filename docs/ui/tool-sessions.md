@@ -39,7 +39,9 @@ docked Properties panel; editing is an explicit session.
 `PickSlot` (`src/ui/FeatureEditor.h`) enumerates every slot any tool has —
 extrude end face, boolean target and tool, blend edges, shell open faces,
 split knife, the CAM picks, fastener rims, sheet-metal edges, mate
-connectors. It is **append-only**: tests address slot rows as
+connectors, the direct edits' faces (`DeleteFaceFaces`, `OffsetFaceFaces`,
+`MoveFaceFaces`, `ReplaceFaceFace`) and Replace Face's target
+(`ReplaceFaceTarget`). It is **append-only**: tests address slot rows as
 `###slot<enum value>`. `SlotSpecsFor(feature)` returns the tool's slots as
 `SlotSpec {slot, label, kinds, multi, prompt, required}`; `SlotFilled` and
 `ApplySlotItem` complete the set. The three switches have no `default:`, so a
@@ -53,7 +55,8 @@ to the next unfilled required slot after a pick; a multi slot stays armed and
 toggles items until another row is clicked, Enter accepts, or Escape
 disarms. Every slot row is editable — per-item remove, click to re-pick — so a
 wrong seed is a one-click fix. The feature tree fills an armed pick too: body
-rows fill a Body slot, plane rows a plane pick.
+rows fill a Body slot, plane rows a plane pick, and a datum plane's or a
+sketch's row fills Replace Face's target (`ReplaceFaceTarget`).
 
 Conditional slots appear only in the mode that uses them (the extrude end
 face for Up-to-face, the split knife face for Face-knife mode).
@@ -127,6 +130,14 @@ origin that misses the body. Examples in the code:
 - Fillet, Chamfer and Shell open at a tenth of the target body's thinnest
   extent, rounded to 1/2/5 (`SizeFromBody`); the target is a pre-selected
   element's body, else the newest (`defaults/blend_and_wall_scale_with_body`).
+- Offset Face opens at a tenth of the smaller of the face's inset (how far
+  its inside reaches from its edges) and the body's thinnest extent, rounded
+  the same way, outward (`SizeFromFace`), derived again from the first face
+  picked into an empty tool. Move Face moves a tenth of the body's largest
+  extent in the plane of the face the picked ones sit in
+  (`DefaultFaceMove`). Delete and Replace Face have no number to default:
+  they refuse until their faces (and Replace's target) are picked
+  ([modeling](../modeling/README.md#direct-edit)).
 - The placement rule (`src/ui/Placement.h`, `ClearOffset`) keeps a new item's
   span clear of the ones already taken, with a gap scaled to the item; the
   occurrence insert and drawing-view placement use it.

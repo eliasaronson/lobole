@@ -29,10 +29,12 @@ the heading if it is not here yet.
   first body carrying it and looks the name up there.
 - **Where:** the body lookup in `src/core/features/FilletFeature.cpp`, and
   every feature that finds its body by `createdBy` the same way (Shell,
-  Boolean, Draft and the rest).
+  Boolean, Draft and the rest; not the direct edits, which take the body
+  that holds their first face's name, `directedit::BodyHolding`).
 - **Likely fix:** a body sub-ordinal on `Body` and `ElementRef` (a piece's
   names already differ: `…/b2/…`); short of that, resolve a named element
-  against every body sharing the id and refuse a name that two of them carry.
+  against every body sharing the id and refuse a name that two of them carry,
+  as `directedit::BodyHolding` (`src/core/DirectEdit.cpp`) does.
 
 ### A Draft or a Fillet can fault inside OpenCASCADE
 

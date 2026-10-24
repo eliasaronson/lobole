@@ -388,7 +388,9 @@ says which, and its shortest edge when that is under a micrometre: the usual
 cause, and one no picture and no BRepCheck shows: two faces meant to
 coincide that miss by a few micrometres leave a zero-area face bounded by
 edges that short (the pan/tilt yoke's arm and base did, while sketch planes
-were single precision). There is no defeaturing step: suppress cosmetic features before meshing.
+were single precision). There is no defeaturing step: suppress cosmetic features before meshing,
+or, on an imported part, remove them with Delete Face
+([modeling](../modeling/README.md#delete-face)).
 
 ## The solver
 

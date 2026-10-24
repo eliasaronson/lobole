@@ -78,7 +78,8 @@ The feature tree (`src/ui/FeatureTreePanel.cpp`):
   rolled past (`FeatureRowBadge`) — because two of those are dimmed and were
   otherwise indistinguishable. A failed row is red with the reason.
 - The base planes and datum planes are rows too: a click fills an armed
-  plane pick, a double-click starts a sketch on that plane.
+  plane pick, a double-click starts a sketch on that plane. A datum
+  plane's or a sketch's row also fills Replace Face's armed target.
 - Double-click opens the feature's editor in the tool window (a sketch's
   double-click enters the sketch). Right-click: Edit, Rename, Suppress,
   Rollback to here / Roll to end, the derived-part verbs, re-pick verbs,

@@ -338,6 +338,11 @@ its G-code and then answered "unknown parameter '_timeout'". So:
   moves the active tab (`add_part`, a CAM or drawing verb given another
   `job` or `drawing`) leaves the marked tab's stack stashed where the
   rollback does not unwind it.
+- **An edit that would not build is tried on a copy first.** `add_feature`
+  and `modify_feature` of a direct edit regenerate a copy of the part
+  (`RefuseFailingDirectEdit`, `Document::CopyWithGeometry`) and refuse with
+  the edit's own error: nothing has moved, the revision included
+  ([modeling](../modeling/README.md#direct-edit)).
 - **`NotInBatch` methods are not rolled back** — they reach outside the
   document (a file, a tab, the settings, the machine store, the print
   profile store, git), which no undo stack holds. They are the ones that must
@@ -460,7 +465,10 @@ as one transaction:
   refused with nothing undone leaves the project saved if it was: its
   deferred regeneration moves no history. With `false`, errors are
   reported in place and the rest run. A feature that fails to *build* is not
-  a failed call; it is reported in the final `regen`, as on its own.
+  a failed call; it is reported in the final `regen`, as on its own — except
+  a direct edit (Delete, Offset, Move or Replace Face), which `add_feature`
+  and `modify_feature` refuse when it would not build
+  ([modeling](../modeling/README.md#direct-edit)).
 - **`$ref`.** `{"$ref": n}` anywhere in a call's params is the result of the
   n-th call (1-based) — its `id` by default, `{"$ref": n, "key": "..."}` for
   another field — so a sketch and the extrude that names it go in one batch.

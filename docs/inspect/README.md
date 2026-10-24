@@ -628,7 +628,7 @@ midpoint of each inner shell classified against its outer skin ("a cavity
 reaches outside the body"): `BRepCheck_Analyzer` tests one sample point per
 shell, chosen by face order, so its verdict on a void that pokes through the
 wall followed an order the offset builder takes from shape addresses. A
-boolean or sweep feature runs the same check on its own
+boolean, sweep or direct-edit feature runs the same check on its own
 result and fails, naming the reasons, rather than handing an invalid solid to
 every later measurement — `CADShape::IsValid` is only a null check.
 
@@ -669,6 +669,10 @@ every later measurement — `CADShape::IsValid` is only a null check.
   how the [reference parts](../modeling/reference-parts.md) pick every edge
   and face. The two point filters read one `max_distance` two ways, so both
   at once are refused.
+- `grow_faces {faces}` — the faces of the one hole, boss or pocket the
+  given faces belong to, with the names it `added` and the `host_normal` of
+  the face it sits in; refused, saying why, when no inner loop bounds them.
+  Changes nothing ([Delete Face](../modeling/README.md#delete-face)).
 - `frame` — the origin and axes of a named datum frame, a face, a circular
   edge or an occurrence, in part space or (with `occurrence`) world space:
   exactly the frame a mate connector with the same spec uses.
