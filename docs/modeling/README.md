@@ -1207,7 +1207,7 @@ The tests (`tests/action_matrix_smoke.py`): `action_matrix_sample` (the
 headless suite and `test-fast.sh`), `action_matrix_full_0`..`7` and
 `action_matrix_determinism` (labelled `slow;action_matrix`, and registered
 only for the ctest configuration `action_matrix`, as the big generators are
-for theirs, so that no plain ctest runs some forty CPU-minutes: `tools/ctest
+for theirs, so that no plain ctest runs some two CPU-hours: `tools/ctest
 -C action_matrix -L action_matrix -j4`), and `action_matrix_selftest`, which
 feeds the classifier and the ratchet planted answers — a pass, a refusal, a
 refusal that moved the revision, a broken feature, a caught `OSD_SIGSEGV`, a
