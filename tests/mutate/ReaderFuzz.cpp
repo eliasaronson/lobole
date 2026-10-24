@@ -40,6 +40,8 @@
 #include <iostream>
 #include <set>
 #include <sstream>
+#include <sys/resource.h>
+#include <time.h>
 #include <unistd.h>
 
 namespace readerfuzz {
@@ -472,7 +474,8 @@ std::string Summary::Text() const {
   std::ostringstream s;
   s << "reader fuzz " << family << ": " << cases << " cases (" << refused
     << " refused, " << loaded << " loaded) in " << seconds << " s; slowest "
-    << slowest << " s (" << slowestId << "); " << failures.size() << " failed";
+    << slowest << " s CPU (" << slowestId << "), longest " << longestWall
+    << " s wall; " << failures.size() << " failed";
   return s.str();
 }
 
@@ -805,7 +808,49 @@ double Budget() {
 #endif
 }
 
+// Fifteen times the CPU budget: a read waiting for a core on a machine at
+// load 60 took 1.2x its budget in wall time, where a reader blocked for good
+// waits until ctest's TIMEOUT.
+double Backstop(double budget) { return 15.0 * budget; }
+
 namespace {
+
+// What a piece of work cost, in wall and CPU seconds. The CPU is the
+// PROCESS's, not the reading thread's: a document's regeneration can run
+// parallel::For workers (a worm gear's slices), and their time is the
+// read's. Plus the children it waited for -- the vault family's git
+// processes, whose CPU no clock of ours would see otherwise.
+struct Spent {
+  double wall = 0.0, cpu = 0.0;
+};
+
+class Stopwatch {
+public:
+  Stopwatch() : m_wall(std::chrono::steady_clock::now()), m_cpu(Cpu()) {}
+  Spent Elapsed() const {
+    return {
+        std::chrono::duration<double>(std::chrono::steady_clock::now() - m_wall)
+            .count(),
+        Cpu() - m_cpu};
+  }
+
+private:
+  static double Cpu() {
+    timespec ts{};
+    ::clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+    rusage ru{};
+    ::getrusage(RUSAGE_CHILDREN, &ru);
+    const auto tv = [](const timeval& t) {
+      return static_cast<double>(t.tv_sec) +
+             static_cast<double>(t.tv_usec) * 1e-6;
+    };
+    return static_cast<double>(ts.tv_sec) +
+           static_cast<double>(ts.tv_nsec) * 1e-9 + tv(ru.ru_utime) +
+           tv(ru.ru_stime);
+  }
+  std::chrono::steady_clock::time_point m_wall;
+  double m_cpu;
+};
 
 // An environment variable for as long as it lives.
 class ScopedEnv {
@@ -897,6 +942,31 @@ struct Sweep::Impl {
         return ok;
       };
     return l;
+  }
+
+  // Fails case `id` when `what` cost past `budget` CPU seconds, or past the
+  // wall backstop; either message names its clock and both times.
+  void Judge(const std::string& id, const std::string& what, const Spent& s,
+             double budget) {
+    if (s.cpu > summary.slowest) {
+      summary.slowest = s.cpu;
+      summary.slowestId = id;
+    }
+    summary.longestWall = std::max(summary.longestWall, s.wall);
+    const double backstop = planted != nullptr && planted->backstop > 0.0
+                                ? planted->backstop
+                                : Backstop(budget);
+    if (s.cpu > budget)
+      Fail(id, what + " used " + std::to_string(s.cpu) +
+                   " s of CPU time, past its budget of " +
+                   std::to_string(budget) + " s (wall time " +
+                   std::to_string(s.wall) + " s)");
+    else if (s.wall > backstop)
+      Fail(id, what + " took " + std::to_string(s.wall) +
+                   " s of wall time, past its backstop of " +
+                   std::to_string(backstop) + " s, with " +
+                   std::to_string(s.cpu) +
+                   " s of CPU time: blocked, on I/O or a lock");
   }
 
   void Fail(const std::string& id, const std::string& why) {
@@ -1056,7 +1126,7 @@ struct Sweep::Impl {
     std::map<std::string, long> lost; // shapes the round trip loses, net
     std::map<std::string, size_t> counts;
     std::map<std::string, std::string> saved;
-    double seconds = 0.0; // the read, and a read that rebuilds the geometry
+    double seconds = 0.0; // CPU: the read, and a read that rebuilds geometry
   };
 
   fs::path SaveTarget(const Input& in, const std::string& name) const {
@@ -1066,12 +1136,10 @@ struct Sweep::Impl {
 
   void RunDocument(const Input& in) {
     Note(in.corpus + ":original");
-    const auto t0 = std::chrono::steady_clock::now();
+    const Stopwatch t0;
     Loaded orig = Read(in.path);
     Baseline base;
-    base.seconds =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
-            .count();
+    base.seconds = t0.Elapsed().cpu;
     if (!orig.outcome.loaded) {
       Fail(in.corpus,
            "the unmutated input does not load: " + orig.outcome.message);
@@ -1108,12 +1176,9 @@ struct Sweep::Impl {
           blobs.push_back(e.path());
       for (const fs::path& b : blobs)
         fs::remove_all(b);
-      const auto r0 = std::chrono::steady_clock::now();
+      const Stopwatch r0;
       (void)Read(bare);
-      base.seconds = std::max(
-          base.seconds,
-          std::chrono::duration<double>(std::chrono::steady_clock::now() - r0)
-              .count());
+      base.seconds = std::max(base.seconds, r0.Elapsed().cpu);
       fs::remove_all(bare.parent_path());
     }
     // The work copy the cases damage, restored after each.
@@ -1266,15 +1331,9 @@ struct Sweep::Impl {
     else
       WriteBytes(work, c.bytes);
     Note(c.id);
-    const auto t0 = std::chrono::steady_clock::now();
+    const Stopwatch t0;
     Loaded l = Read(work);
-    const double took =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
-            .count();
-    if (took > summary.slowest) {
-      summary.slowest = took;
-      summary.slowestId = c.id;
-    }
+    const Spent took = t0.Elapsed();
     // And a second for every megabyte the damage wrote: a grown array is
     // 8 MB of honest parsing, which took 2-3 s with two suites beside it,
     // where a quadratic reader takes minutes.
@@ -1283,9 +1342,7 @@ struct Sweep::Impl {
       written += e.bytes.size();
     const double budget = std::max(Budget(), 4.0 * base.seconds) +
                           static_cast<double>(written >> 20) * (Budget() / 2.0);
-    if (took > budget)
-      Fail(c.id, "the read took " + std::to_string(took) +
-                     " s, past its budget of " + std::to_string(budget) + " s");
+    Judge(c.id, "the read", took, budget);
     if (!l.outcome.loaded) {
       summary.refused++;
       if (MeaningKept(c) && c.op != "reorder_keys")
@@ -1896,17 +1953,10 @@ void Sweep::Impl::RunOther() {
     std::vector<std::pair<std::string, std::optional<std::string>>> undo;
     Apply(c, work, undo);
     Note(c.id);
-    const auto t0 = std::chrono::steady_clock::now();
+    const Stopwatch t0;
     const std::string why = o.check(work, c);
-    const double took =
-        std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
-            .count();
-    if (took > summary.slowest) {
-      summary.slowest = took;
-      summary.slowestId = c.id;
-    }
-    if (took > Budget() * (family == Family::Vault ? 4.0 : 1.0))
-      Fail(c.id, "took " + std::to_string(took) + " s, past its budget");
+    Judge(c.id, "the check", t0.Elapsed(),
+          Budget() * (family == Family::Vault ? 4.0 : 1.0));
     if (!why.empty())
       Fail(c.id, why);
     summary.loaded++;

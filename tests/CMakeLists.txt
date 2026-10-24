@@ -288,6 +288,18 @@ catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
                      TEST_SPEC "[reader_fuzz]"
                      PROPERTIES TIMEOUT 1200 ENVIRONMENT
                      "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
+# The reader-fuzz budget is CPU time: this case's read is pinned to one CPU
+# with four contending burners, so it takes five times its CPU in wall time,
+# and must still pass. The CPU is the first the test may run on (a container
+# need not allow CPU 0).
+add_test(NAME reader_fuzz_budget_under_load
+         COMMAND bash -c "cpu=$(taskset -pc $$ | sed -E 's/.*: *([0-9]+).*/\\1/') && exec taskset -c \"$cpu\" \"$0\" -n 4 --contend -t 600 -- \"$1\" \"$2\""
+                 ${CMAKE_SOURCE_DIR}/tools/with-cpu-load.sh
+                 $<TARGET_FILE:designer_tests>
+                 "Reader fuzz: a loaded machine does not fail the CPU budget")
+set_tests_properties(reader_fuzz_budget_under_load PROPERTIES
+    LABELS reader_fuzz TIMEOUT 600 ENVIRONMENT
+    "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
 
 # Release metadata smoke: --version must exit before GLFW/Vulkan initialization,
 # so the packaged binary can be identified on a display-less machine.

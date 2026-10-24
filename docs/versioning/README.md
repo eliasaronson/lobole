@@ -556,12 +556,19 @@ single-file families damage every item's content.
   read back write different B-Rep bytes). Item counts (features,
   occurrences, views, setups, …) must be the original's unless a lossy drop
   was reported; bodies only where the damage cannot change the model;
-- budget: 2 s a case (20 s under `ENABLE_SANITIZERS`), or four times the
-  unmutated input's read when that is longer (a part that rebuilds its blob
-  takes its rebuild's time), plus half that for every megabyte the damage
-  wrote (a grown array is 8 MB of honest parsing; a quadratic reader takes
-  minutes on it). A reader that never returns is stopped by
-  ctest's `TIMEOUT` (1200 s), and the last-case file names it.
+- budget: 2 s of CPU time a case (20 s under `ENABLE_SANITIZERS`), or four
+  times the unmutated input's read when that is longer (a part that rebuilds
+  its blob takes its rebuild's time), plus half that for every megabyte the
+  damage wrote (a grown array is 8 MB of honest parsing; a quadratic reader
+  takes minutes on it). CPU time, not wall: a read on a machine at load 60
+  waits for a core (2.42 s of wall time against 2 s, three times in a
+  night), and a reader that hangs spinning or goes quadratic spends CPU
+  either way. It is the PROCESS's CPU, because a regeneration can run
+  `parallel::For` workers, plus the children it waited for (the vault's git
+  processes). A wall-time backstop of fifteen times the budget catches a
+  reader that waits instead -- on I/O or a lock -- and the failure names
+  which clock tripped, with both times. A reader that never returns is
+  stopped by ctest's `TIMEOUT` (1200 s), and the last-case file names it.
 
 The non-document families have rules of their own: settings never throw
 and a file that does not parse leaves a note naming it; a profile store
@@ -585,8 +592,12 @@ it) runs every operator once and an eighth of the rest, and the git vault
 runs a handful of operators, each case costing six git processes. Each
 prints its count and time.
 `Reader fuzz: the harness catches what it claims to` plants a reader that
-drops an unknown key, one that refuses without naming the file and one that
-sleeps, and each must fail its rule.
+drops an unknown key, one that refuses without naming the file, one that
+spins past its CPU budget and one that sleeps past a (shortened) wall
+backstop, and each must fail its rule. `reader_fuzz_budget_under_load`
+pins a reader spending half its budget in CPU to one core beside four
+contending `tools/with-cpu-load.sh` burners: its read takes about five times
+that in wall time, past the budget, and must pass.
 
 **By hand.** `tools/reader-fuzz.py run --seed S [--family F] [--only TEXT]`
 reruns the full sweep with another base seed (ctest's is fixed) and prints

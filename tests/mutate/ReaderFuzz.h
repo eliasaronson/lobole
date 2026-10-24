@@ -66,7 +66,9 @@ Outcome ReadAs(Family family, const std::filesystem::path& path);
 struct Summary {
   std::string family;
   size_t cases = 0, refused = 0, loaded = 0;
-  double seconds = 0.0, slowest = 0.0;
+  // `slowest` is CPU seconds (what a case is judged by), `longestWall` the
+  // longest wall time any case took.
+  double seconds = 0.0, slowest = 0.0, longestWall = 0.0;
   std::string slowestId;
   std::map<std::string, size_t> perOperator;
   std::vector<std::string> failures;
@@ -92,16 +94,24 @@ private:
 // The harness's own test: the first `limit` cases of one part file, read by
 // a planted reader instead of the real one, so the rules are seen to catch
 // what they claim (a reader that drops a key, one that refuses without
-// naming the file, one that sleeps past its budget).
+// naming the file, one that spins past its CPU budget, one that sleeps past
+// the wall backstop).
 struct Planted {
   // Reads a file: refused, or loaded with counts.
   std::function<Outcome(const std::filesystem::path&)> read;
   // Saves what the last read loaded to `to`.
   std::function<bool(const std::filesystem::path& to)> save;
+  // The wall backstop in seconds; 0 is the sweep's own (`Backstop`).
+  double backstop = 0.0;
 };
-// The seconds one read may take (at least; a heavy input gets four times
-// its undamaged read): larger in a sanitized build.
+// The CPU seconds one read may take (at least; a heavy input gets four
+// times its undamaged read): larger in a sanitized build. CPU, not wall: on
+// a loaded machine a read waits for a core, and only CPU time says whether
+// the READER hung or went quadratic.
 double Budget();
+// The WALL seconds a read with CPU budget `budget` may take before it fails
+// anyway -- a reader blocked on I/O or a lock spends no CPU.
+double Backstop(double budget);
 
 // `cases` (id, bytes), when given, are run in place of the generated ones.
 Summary

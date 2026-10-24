@@ -35,6 +35,7 @@
 #include <memory>
 #include <set>
 #include <thread>
+#include <time.h>
 #include <unistd.h>
 
 namespace fs = std::filesystem;
@@ -240,19 +241,18 @@ TEST_CASE("Mutate: a tree's directory operators", "[reader_fuzz]") {
 
 // ---- the harness's own test ------------------------------------------------
 
-TEST_CASE("Reader fuzz: the harness catches what it claims to",
-          "[reader_fuzz]") {
-  const fs::path golden =
-      fs::path(TestSourceDir()) / "tests" / "golden" / "v01-plain-box.json";
-  const std::string original = GoldenBytes("v01-plain-box.json");
-  const auto bytesOf = [](const fs::path& p) {
-    std::ifstream in(p, std::ios::binary);
-    return std::string((std::istreambuf_iterator<char>(in)),
-                       std::istreambuf_iterator<char>());
-  };
+namespace {
+
+std::string BytesOf(const fs::path& p) {
+  std::ifstream in(p, std::ios::binary);
+  return std::string((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+}
+
+// The real part reader, for the original and as the base of each plant.
+struct PlantedPart {
   std::shared_ptr<Document> last;
-  // The real reader, for the original and as the base of each plant.
-  const auto realRead = [&](const fs::path& p) {
+  readerfuzz::Outcome Read(const fs::path& p) {
     readerfuzz::Outcome o;
     auto r = DocumentIO::Load(p.string());
     if (!r) {
@@ -263,10 +263,38 @@ TEST_CASE("Reader fuzz: the harness catches what it claims to",
     o.loaded = true;
     o.counts = {{"features", last->FeatureCount()}};
     return o;
-  };
-  const auto realSave = [&](const fs::path& to) {
+  }
+  bool Save(const fs::path& to) {
     return DocumentIO::Save(*last, to.string()).has_value();
+  }
+};
+
+// Spends `seconds` of this thread's CPU time: a reader gone quadratic.
+void SpinCpu(double seconds) {
+  const auto now = [] {
+    timespec ts{};
+    ::clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+    return static_cast<double>(ts.tv_sec) +
+           static_cast<double>(ts.tv_nsec) * 1e-9;
   };
+  const double until = now() + seconds;
+  volatile unsigned sink = 0;
+  while (now() < until)
+    for (int i = 0; i < 10000; ++i)
+      sink = sink + static_cast<unsigned>(i);
+}
+
+} // namespace
+
+TEST_CASE("Reader fuzz: the harness catches what it claims to",
+          "[reader_fuzz]") {
+  const fs::path golden =
+      fs::path(TestSourceDir()) / "tests" / "golden" / "v01-plain-box.json";
+  const std::string original = GoldenBytes("v01-plain-box.json");
+  const auto bytesOf = BytesOf;
+  PlantedPart real;
+  const auto realRead = [&](const fs::path& p) { return real.Read(p); };
+  const auto realSave = [&](const fs::path& to) { return real.Save(to); };
 
   SECTION("a reader that drops a key fails the round trip") {
     // The tolerant reader this sweep exists to catch: a key it does not
@@ -313,19 +341,67 @@ TEST_CASE("Reader fuzz: the harness catches what it claims to",
           return f.find("does not name the file") != std::string::npos;
         }));
   }
-  SECTION("a reader that sleeps fails its budget") {
+  SECTION("a reader that spins fails its CPU budget") {
     readerfuzz::Planted p{[&](const fs::path& path) {
                             if (bytesOf(path) != original)
-                              std::this_thread::sleep_for(
-                                  std::chrono::duration<double>(
-                                      readerfuzz::Budget() + 0.3));
+                              SpinCpu(readerfuzz::Budget() + 0.3);
                             return realRead(path);
                           },
                           realSave};
     const auto s = readerfuzz::RunPlanted(golden, p, 1);
     CHECK(std::any_of(s.failures.begin(), s.failures.end(),
                       [](const std::string& f) {
-                        return f.find("past its budget") != std::string::npos;
+                        return f.find("s of CPU time, past its budget of") !=
+                                   std::string::npos &&
+                               f.find("wall time") != std::string::npos;
                       }));
   }
+  SECTION("a reader that sleeps past the wall backstop fails it") {
+    // Sleeping is waiting -- on a lock, on I/O -- and spends no CPU, so
+    // only the backstop sees it; a small one here keeps the test short.
+    readerfuzz::Planted p{[&](const fs::path& path) {
+                            if (bytesOf(path) != original)
+                              std::this_thread::sleep_for(
+                                  std::chrono::duration<double>(1.0));
+                            return realRead(path);
+                          },
+                          realSave, 0.5};
+    const auto s = readerfuzz::RunPlanted(golden, p, 1);
+    CHECK(std::any_of(s.failures.begin(), s.failures.end(),
+                      [](const std::string& f) {
+                        return f.find("s of wall time, past its backstop of") !=
+                                   std::string::npos &&
+                               f.find("s of CPU time") != std::string::npos;
+                      }));
+  }
+}
+
+// The budget is CPU time, so a machine at load 60 cannot fail a read that
+// waited for a core (it did, three times in one night: 2.42 s of wall time
+// against 2 s). Run ONLY under load: ctest's `reader_fuzz_budget_under_load`
+// pins it and four contending burners (tools/with-cpu-load.sh) to one CPU,
+// so this case's read takes about five times its CPU in wall time. The
+// read's CPU is under budget and must pass; its wall time is past the budget
+// and says the load was real.
+TEST_CASE("Reader fuzz: a loaded machine does not fail the CPU budget",
+          "[.reader_fuzz_loaded]") {
+  const fs::path golden =
+      fs::path(TestSourceDir()) / "tests" / "golden" / "v01-plain-box.json";
+  const std::string original = GoldenBytes("v01-plain-box.json");
+  PlantedPart real;
+  readerfuzz::Planted p{[&](const fs::path& path) {
+                          if (BytesOf(path) != original)
+                            SpinCpu(readerfuzz::Budget() * 0.5);
+                          return real.Read(path);
+                        },
+                        [&](const fs::path& to) { return real.Save(to); }};
+  const auto s = readerfuzz::RunPlanted(golden, p, 1);
+  std::string failures;
+  for (const std::string& f : s.failures)
+    failures += "\n" + f;
+  INFO(s.Text() << failures);
+  REQUIRE(s.cases == 1);
+  CHECK(s.slowest < readerfuzz::Budget());
+  CHECK(s.longestWall > readerfuzz::Budget());
+  CHECK(s.failures.empty());
 }
