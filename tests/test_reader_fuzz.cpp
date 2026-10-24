@@ -64,27 +64,30 @@ void Run(Family family, bool everyCase, int shard = 0, int shards = 1) {
 
 #define READER_FUZZ_FAMILY(name, family)                                       \
   TEST_CASE("Reader fuzz: " name, "[reader_fuzz]") { Run(family, false); }     \
-  TEST_CASE("Reader fuzz (every case): " name, "[reader_fuzz][slow]") {        \
+  TEST_CASE("Reader fuzz (every case): " name,                                 \
+            "[reader_fuzz][slow][asan_slow]") {                                \
     Run(family, true);                                                         \
   }
 
+// Every case is `asan_slow` as well: under ASan one family took over 20
+// minutes, and the sanitized suite runs the sample.
 // The two families whose every case takes minutes run as shards.
 #define READER_FUZZ_SHARDED(name, family, n)                                   \
   TEST_CASE("Reader fuzz: " name, "[reader_fuzz]") { Run(family, false); }     \
   TEST_CASE("Reader fuzz (every case): " name " 1/" #n,                        \
-            "[reader_fuzz][slow]") {                                           \
+            "[reader_fuzz][slow][asan_slow]") {                                \
     Run(family, true, 0, n);                                                   \
   }                                                                            \
   TEST_CASE("Reader fuzz (every case): " name " 2/" #n,                        \
-            "[reader_fuzz][slow]") {                                           \
+            "[reader_fuzz][slow][asan_slow]") {                                \
     Run(family, true, 1, n);                                                   \
   }                                                                            \
   TEST_CASE("Reader fuzz (every case): " name " 3/" #n,                        \
-            "[reader_fuzz][slow]") {                                           \
+            "[reader_fuzz][slow][asan_slow]") {                                \
     Run(family, true, 2, n);                                                   \
   }                                                                            \
   TEST_CASE("Reader fuzz (every case): " name " 4/" #n,                        \
-            "[reader_fuzz][slow]") {                                           \
+            "[reader_fuzz][slow][asan_slow]") {                                \
     Run(family, true, 3, n);                                                   \
   }
 

@@ -550,9 +550,10 @@ sidecar; an image decodes to the size its header states, or not at all.
 parallel. `[reader_fuzz]` is the fixed sample: every operator at least once
 per family, about 1/50 of the rest, over a sixth of the corpus (each input
 costs a load and a save before its first case) plus the inputs with side
-files; it is in `tools/test-fast.sh`. `[reader_fuzz][slow]` is every case
-of the whole corpus, in the headless suite and under `tools/ci-local.sh
---asan`; the part files and the part directories run as four shards each
+files; it is in `tools/test-fast.sh` and is what `tools/ci-local.sh --asan`
+runs. `[reader_fuzz][slow][asan_slow]` is every case of the whole corpus,
+in the headless suite (under ASan one family alone ran past ctest's 20
+minutes); the part files and the part directories run as four shards each
 (`… 1/4` to `4/4`, split by a hash of the input's name). Two exceptions keep
 it to minutes: an input whose own read takes a quarter second or more (a
 modeled thread, a worm, a text sketch — most of its damaged cases rebuild
