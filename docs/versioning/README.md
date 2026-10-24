@@ -67,7 +67,9 @@ The loader refuses, naming it:
 
 - a file that does not parse, holds git conflict markers (`<<<<<<<`), or
   writes one key twice in an object (`readctx::ParseStrict`; nlohmann keeps
-  the last and drops the first);
+  the last and drops the first), or nests a value deeper than 256 levels
+  (`kMaxJsonDepth`: nlohmann copies and prints a value recursively, and ten
+  thousand nested brackets ran a copy off the stack);
 - a key no reader of that object knows, naming it and every key that is
   accepted (`readctx::RefuseUnknownKeys`, in every `…FromJson`, in the
   envelopes and in `project.json`). A newer build's keys come with a newer
@@ -532,7 +534,7 @@ single-file families damage every item's content.
   read back write different B-Rep bytes). Item counts (features,
   occurrences, views, setups, …) must be the original's unless a lossy drop
   was reported; bodies only where the damage cannot change the model;
-- budget: 2 s a case (8 s under `ENABLE_SANITIZERS`), or four times the
+- budget: 2 s a case (20 s under `ENABLE_SANITIZERS`), or four times the
   unmutated input's read when that is longer (a part that rebuilds its blob
   takes its rebuild's time). A reader that never returns is stopped by
   ctest's `TIMEOUT` (1200 s), and the last-case file names it.

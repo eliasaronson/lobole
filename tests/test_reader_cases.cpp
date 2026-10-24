@@ -186,3 +186,20 @@ TEST_CASE("Reader cases: a save prunes a collection emptied since the last",
   CHECK(report.Empty());
   fs::remove_all(dir);
 }
+
+// nlohmann copies and prints a value recursively: ten thousand nested
+// brackets parsed, then ran the first copy off the stack under ASan. A
+// strict parse refuses past kMaxJsonDepth, before a DOM of it exists.
+TEST_CASE("Reader cases: a value nested past the limit is refused",
+          "[reader_fuzz][serialization]") {
+  const auto nest = [](size_t n) {
+    return "{\"a\":" + std::string(n, '[') + std::string(n, ']') + "}";
+  };
+  CHECK_NOTHROW(readctx::ParseStrict(nest(readctx::kMaxJsonDepth - 1)));
+  try {
+    (void)readctx::ParseStrict(nest(10000));
+    FAIL("a value ten thousand levels deep parsed");
+  } catch (const std::runtime_error& e) {
+    CHECK(std::string(e.what()).find("nests deeper than") != std::string::npos);
+  }
+}

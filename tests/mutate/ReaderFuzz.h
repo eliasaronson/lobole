@@ -99,6 +99,10 @@ struct Planted {
   // Saves what the last read loaded to `to`.
   std::function<bool(const std::filesystem::path& to)> save;
 };
+// The seconds one read may take (at least; a heavy input gets four times
+// its undamaged read): larger in a sanitized build.
+double Budget();
+
 // `cases` (id, bytes), when given, are run in place of the generated ones.
 Summary
 RunPlanted(const std::filesystem::path& file, const Planted& planted,

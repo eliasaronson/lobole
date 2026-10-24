@@ -793,15 +793,17 @@ std::string CaseFile(const Case& c) {
   return colon == std::string::npos ? c.id : c.id.substr(0, colon);
 }
 
+} // namespace
+
+// Under ASan a read of a grown array (a million-element list) took 10 s
+// with the suite running beside it; a hang is still minutes.
 double Budget() {
 #ifdef LOBOLE_READER_FUZZ_SANITIZED
-  return 8.0;
+  return 20.0;
 #else
   return 2.0;
 #endif
 }
-
-} // namespace
 
 namespace {
 

@@ -67,6 +67,7 @@ public:
   bool string(json::string_t&) { return Done(); }
   bool binary(json::binary_t&) { return Done(); }
   bool start_object(std::size_t) {
+    Deeper();
     m_frames.push_back({});
     return true;
   }
@@ -85,6 +86,7 @@ public:
     return Done();
   }
   bool start_array(std::size_t) {
+    Deeper();
     m_frames.push_back({true, 0, {}, {}});
     return true;
   }
@@ -105,6 +107,17 @@ private:
     std::string key;
     std::set<std::string> keys;
   };
+  // nlohmann parses and destroys a value without recursing, but copies
+  // and prints one recursively: a file of ten thousand nested brackets
+  // parsed, and its first copy ran off the stack (under ASan, whose
+  // frames are larger; deeper still, in any build). No document nests
+  // past a dozen levels.
+  void Deeper() const {
+    if (m_frames.size() >= kMaxJsonDepth)
+      throw std::runtime_error(
+          "the value at '" + Pointer(m_frames.size()) + "' nests deeper than " +
+          std::to_string(kMaxJsonDepth) + " levels, which no writer writes");
+  }
   bool Done() {
     if (!m_frames.empty() && m_frames.back().array)
       m_frames.back().index++;
@@ -123,10 +136,12 @@ private:
 } // namespace
 
 nlohmann::json ParseStrict(const std::string& text) {
-  nlohmann::json out = nlohmann::json::parse(text);
+  // The checking pass first, so a value nested too deep is refused before
+  // a DOM of it exists. A syntax error stops it quietly: the DOM parse
+  // below reports that, with its position.
   DuplicateKeys keys;
   nlohmann::json::sax_parse(text, &keys);
-  return out;
+  return nlohmann::json::parse(text);
 }
 
 namespace {

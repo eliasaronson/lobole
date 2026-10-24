@@ -82,9 +82,10 @@ template <class F> decltype(auto) InFile(std::string segment, F&& fn) {
 }
 
 // Parses `text` as JSON, REFUSING a key written twice in one object (the
-// last value would win, and the first would be gone with no word). The
-// message names the key and its JSON pointer; the file is the caller's
-// FileContext.
+// last value would win, and the first would be gone with no word) and a
+// value nested deeper than kMaxJsonDepth. The message names the key and
+// its JSON pointer; the file is the caller's FileContext.
+inline constexpr size_t kMaxJsonDepth = 256;
 nlohmann::json ParseStrict(const std::string& text);
 
 // Refuses a key of `j` that is not in `accepted`, naming it and every key

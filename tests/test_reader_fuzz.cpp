@@ -314,7 +314,8 @@ TEST_CASE("Reader fuzz: the harness catches what it claims to",
     readerfuzz::Planted p{[&](const fs::path& path) {
                             if (bytesOf(path) != original)
                               std::this_thread::sleep_for(
-                                  std::chrono::milliseconds(2300));
+                                  std::chrono::duration<double>(
+                                      readerfuzz::Budget() + 0.3));
                             return realRead(path);
                           },
                           realSave};
