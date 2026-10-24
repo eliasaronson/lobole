@@ -285,7 +285,9 @@ Three families of sketch tools share one interaction grammar:
 - **collect** tools (Mirror, Pattern, Offset): click toggles, drag
   box-selects, a tap in empty space or Enter continues;
 - **act-per-click** tools (Fillet, Trim): each click acts; a tap in empty
-  space or Enter finishes;
+  space or Enter finishes; Trim also takes a press-and-drag from empty space
+  that trims every span the path crosses, one undo step
+  ([trim](../sketching/README.md#trim));
 - **draw** tools chain until Escape.
 
 Applying returns to Select. A preselected sole construction line is the

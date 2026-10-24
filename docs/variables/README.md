@@ -375,9 +375,13 @@ Every numeric feature parameter also accepts an expression, as a
   and **Extract variables** plans on the selected features (every feature
   when none is) into project or part scope, listing the proposals until
   **Apply** or **Cancel**. GUI test `variables/literals_by_clicking`.
-- The inline sketch dimension editor accepts an expression in the same way.
-  It is covered by the GUI tests `dims/inline_editor_expression` and
-  `dims/inline_editor_completes_a_variable`.
+- The inline sketch dimension editor accepts an expression in the same way,
+  and `name = expr` there (or in the field typed while drawing) creates the
+  project variable and drives the dimension by it in one undo step that puts
+  the sketch back too ([a new variable](../ui/numeric-input.md#a-new-variable)).
+  It is covered by the GUI tests `dims/inline_editor_expression`,
+  `dims/inline_editor_completes_a_variable` and
+  `dims/name_equals_value_makes_a_variable`.
 
 ## Tests
 

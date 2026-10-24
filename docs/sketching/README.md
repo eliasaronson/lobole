@@ -12,10 +12,11 @@ in the file; the UI and expressions show degrees.
 
 | what | where |
 |---|---|
-| data model, entity ops (add/delete/split/trim/mirror/fillet/pattern/offset, derived ops, images) | `src/core/features/SketchFeature.{h,cpp}` |
+| data model, entity ops (add/delete/split/trim/trim along a path/mirror/fillet/pattern/offset, derived ops, images), the first-dimension rescale | `src/core/features/SketchFeature.{h,cpp}` |
 | PlaneGCS adapter, drag sessions, DOF diagnosis, value edits (continuation), `JudgeAddition` | `src/core/sketch/SketchSolver.{h,cpp}` |
+| the curvature equation of a G2 joint, a `GCS::Constraint` of our own | `src/core/sketch/ConstraintEndCurvature.{h,cpp}` |
 | orientations a value edit must keep, `MeasureDimension` (pure geometry) | `src/core/sketch/SketchOrientation.{h,cpp}` |
-| loops, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
+| loops, open ends, OCC wires/faces/prisms/revolves, offset, projection of model faces/edges | `src/core/sketch/SketchProfile.{h,cpp}` |
 | text labels: fonts, glyph layout, box corners | `src/core/sketch/SketchText.{h,cpp}`, the Hershey data `src/core/sketch/HersheyRomanSimplex.inc` |
 | snap/auto-constraint inference (pure, camera-free) | `src/core/sketch/SketchInference.{h,cpp}` |
 | box-select hit test (pure) | `src/core/sketch/SketchSelection.{h,cpp}` |
@@ -196,11 +197,13 @@ Kinds (JSON strings in brackets):
   [`vertical`], Parallel [`parallel`], Perpendicular [`perpendicular`], Equal
   [`equal`], Tangent [`tangent`], PointOnLine [`point_on_line`], Symmetric
   [`symmetric`], Midpoint [`midpoint`], Fixed [`fixed`], Concentric
-  [`concentric`], Collinear [`collinear`].
+  [`concentric`], Collinear [`collinear`], Curvature [`curvature`, G2:
+  [below](#curvature-continuity)].
 - Dimensions (`IsDimension`; carry `value`, an optional expression, and a
   label position): Distance [`distance`], DistanceX [`distance_x`], DistanceY
   [`distance_y`], DistancePL [`distance_pl`, point-to-line], Radius
-  [`radius`], Diameter [`diameter`], Angle [`angle`].
+  [`radius`], Diameter [`diameter`], Angle [`angle`], ArcLength
+  [`arc_length`, [below](#arc-length)].
 
 Notes on how they map to PlaneGCS (`Solver::Load`):
 
@@ -237,6 +240,47 @@ Notes on how they map to PlaneGCS (`Solver::Load`):
 
 An unknown kind string is refused on load (`ConstraintKindFromString`), never
 read as some default kind.
+
+#### Curvature continuity
+
+Curvature [`curvature`] (G2) joins two curves that a Coincident already
+joins end to end, at least one of them a spline, so the joint shows no kink
+in a reflection or in a fillet that follows it. It loads as the tangent at
+the shared end (the angle form above) plus ONE curvature equation:
+
+- **spline–line**: the spline's curvature at the end is zero, which with the
+  tangent puts its third pole on the line — `addConstraintPointOnLine`.
+- **spline–arc**: the spline's end curvature times the arc's radius is ±1.
+- **spline–spline**: the two end curvatures are equal.
+
+The sign is read from the geometry at load, as the tangent's 0 or π is: each
+curvature is taken reading away from the joint, opposite for curves that
+leave it in opposite directions (the smooth case) and equal for curves that
+leave it together. A clamped spline's signed curvature at an end is
+`κ = c (d0 × d1) / |d0|³` with `d0`, `d1` its first two legs from that end
+and `c` a constant of the knot spacing there (`EndCurvatureFactor`); the
+equation, with its analytic gradient, is `ConstraintEndCurvature`
+(`src/core/sketch/`), a `GCS::Constraint` of our own added through
+`System::addConstraint`, so the vendored PlaneGCS is not modified for it
+(`THIRD_PARTY.md`). It is refused, naming why, for two lines (use
+collinear), a line and an arc (G2 would need the arc's radius infinite), two
+arcs (they would be one circle), a degree-1 spline (a polyline has no
+curvature to match) and two curves that share no end. The GUI command sits
+beside Tangent in the "more constraints" flyout (`G2` glyph) and REPLACES a
+Tangent already between the same two curves, which it includes.
+
+#### Arc length
+
+ArcLength [`arc_length`] dimensions a circular arc by the length along it,
+r × sweep in mm, loaded with PlaneGCS's own `addConstraintArcLength`.
+`MeasureDimension` reports r × sweep, so value edits (with the flip guard),
+driven dimensions and the label work as for any dimension. It is refused,
+naming the right kind, on a line (a `distance` between its ends), a circle
+(`diameter`), an elliptical arc and a spline (no arc-length form). The
+Dimension tool infers it from where the label goes on an arc: outside the
+arc and within its sweep is the arc length, drawn as a dimension arc
+concentric with it across the sweep; inside the circle or past the arc's
+ends, the radius (`PlacedArcKind`).
 
 **Driven (reference) dimensions.** A dimension with `driven` set measures the
 sketch instead of driving it. It adds no equation: `Solver::Load` dispatches
@@ -620,6 +664,17 @@ All are `SketchFeature` methods; UI and RPC commits wrap them in one
   crossing the whole entity goes. A trimmed circle becomes the complementary
   arc (keeping the id); a trimmed arc becomes up to two arcs. `TrimSpanAt`
   gives the span for the hover preview.
+- **TrimAlongPath(path, removed)** — every span a UV polyline crosses, as
+  the click trims above, in path order: each crossing is resolved against
+  the CURRENT entities after every split (a split keeps the id on its first
+  piece, so a later crossing may lie on a piece with a new id, or on a span
+  already gone, which is skipped). Lines, circles and arcs; never an entity
+  a linked op generates or projected geometry. `removed` collects each span
+  (`TrimCurveSpanAt` gives a curve's) for the preview.
+- **ScaleEntity(e, centre, factor)** (free function, beside
+  `TranslateEntity`/`RotateEntity`) — lengths, radii and a label's height
+  and spacing scale; angles do not. `sketch::RescaleForFirstDimension` uses
+  it ([the first dimension](#the-first-dimension)).
 - **MirrorEntities(sources, axis, link)** — bake: reflected copies. Linked: a
   `Mirror` derived op.
 - **FilletCorner(line1, line2, r, whyNot)** — trims both lines to the tangent
@@ -757,6 +812,25 @@ matches a region). CAM likewise targets the entity (`g<textId>`), which
 survives editing the string.
 `BuildOpenPathWire` gives open chains for sweep paths.
 
+### Open ends
+
+`sketch::OpenEnds(entities)` says where a profile fails to close: it counts
+how many chainable non-construction edges (lines, arcs, elliptical arcs,
+open splines) meet at each endpoint, clustered with `BuildLoops`'
+tolerance. An end met once is **open**; one met three or more times (a T,
+a line drawn twice) also stops a clean profile and is listed apart. Two
+open ends that are each other's nearest, within 2% of the geometry's
+extent, are the usual "almost closed" pair and come back as a **gap**. It
+counts rather than walks, because `BuildLoops`' greedy walk can strand a
+closed figure as an open chain where a branch sends it the wrong way.
+While a sketch is edited the overlay marks them (red rings, an orange dot
+for a branch, a dashed line across a gap), recomputed only when the
+geometry changes (`SketchEditState::openEndsKey`). Extrude from a sketch
+with no closed profile is refused where it is asked: the sketch toolbar
+says "Not extruded: the sketch has no closed profile -- 2 open ends at
+(10, 0) and (10, 0.001)" (`OpenEndsWords`), and an Extrude or Revolve
+feature's error carries the same words.
+
 ## GUI
 
 Sketch editing is a mode of the part tab. `SketchEditState` (`AppState.h`)
@@ -792,11 +866,11 @@ shadowed while sketching; rebindable — `src/core/io/Keymap.cpp`):
 |---|---|---|---|
 | L line, C circle, Shift+C ellipse, G rectangle, Shift+G centre rectangle, A 3-point arc, Shift+A centre arc, Ctrl+Shift+A elliptic arc, S spline, `.` point, Shift+T text, X project, Shift+I reference image | M trim, O offset, Shift+F fillet, Shift+M mirror, P pattern, D dimension, Q construction, Delete delete | H horizontal, V vertical, N coincident, B parallel, Shift+B perpendicular, T tangent, E equal, Shift+N concentric | Space clear selection, Ctrl+C/V/Shift+V copy/paste/paste linked, Shift+S auto-constrain, Y constraint glyphs, F7 slice, Shift+E extrude, Shift+R revolve, Shift+H holes |
 
-Point-on-line, symmetric, midpoint, fixed and collinear are commands with no
-default key.
+Curvature (G2), point-on-line, symmetric, midpoint, fixed and collinear are
+commands with no default key.
 
 **Escape** backs out one level per press: an open dimension field → dimension
-placement → spline poles → pending clicks or a box → mirror axis phase →
+placement → a drag-trim path → spline poles → pending clicks or a box → mirror axis phase →
 op re-pick → op edit session → dimension targets → the tool (back to Select)
 → the selected constraint → the entity selection → a Hole session → leave the
 sketch.
@@ -820,7 +894,8 @@ sketch conflict, repeats what it says, or removes no DOF) is dropped.
 **Status and colour** (`UpdateSketchStatus`, `BuildActiveSketchPrimitives`):
 blue = under-defined, green = fully defined entity (all neutral when
 `dof == 0`), violet = solver-fixed (linked copy, expression-driven), red =
-touched by a conflicting/redundant constraint, dashed grey = construction.
+touched by a conflicting/redundant constraint, dashed grey = construction;
+red rings mark [open ends](#open-ends).
 A prompt pill shows "Fully defined" or the DOF count plus the active tool's
 step (`SketchToolPrompt`: "Name (Step k/n): …"). Constraint glyphs (Y) mark
 committed constraints; the Model panel's Constraints section lists them,
@@ -828,12 +903,46 @@ flags conflicts, deletes one, and switches a dimension between driving and
 driven (its **Driven** checkbox; a driven row reads "(distance)", muted).
 
 **Dimensions**: the Dimension tool accumulates targets and infers the kind;
-while placing, the cursor zone picks horizontal/vertical/aligned. Typing a
-digit right after drawing opens a dimension on the new entity
-(`DrawDimensionOnCreate`). Double-click a label to edit it inline
-(`ApplyDimensionEdit`); anything that is not a plain number is an expression,
-with variable completion; angles are typed in degrees; a negative value flips
-direction. Labels drag to reposition (`labelOffset`).
+while placing, the cursor zone picks horizontal/vertical/aligned (on an
+arc, radius or [arc length](#arc-length)). Typing a digit right after
+drawing opens a dimension on the new entity (`DrawDimensionOnCreate`).
+Double-click a label to edit it inline (`ApplyDimensionEdit`); anything that
+is not a plain number is an expression, with variable completion; angles
+are typed in degrees; a negative value flips direction; `name = value`
+makes a project variable and drives the dimension by it
+([numeric input](../ui/numeric-input.md#a-new-variable)). Labels drag to
+reposition (`labelOffset`).
+
+### The first dimension
+
+A sketch drawn by eye keeps its shape when its first length is given:
+`sketch::RescaleForFirstDimension` scales every movable entity by new ÷
+measured about an anchor, then the dimension applies with nothing left to
+move. It applies to a length dimension (any dimension kind but an angle)
+when the sketch has no other driving dimension and nothing an expression
+drives (a constraint's `expr` or an entity field's). **The anchor** is the
+one pinned point — on the origin or a datum, a `Fixed` point, a point of
+projected or linked-copy geometry — when there is exactly one; with none,
+the centre of the non-construction geometry's bounding box (moved onto a
+datum axis a point is held on). **What scales**: geometry, a label's height
+and spacing, and every dimension's label offset; not reference images (they
+are calibrated) and not projected or linked-copy geometry. Two or more
+pinned points, or a linked pattern or copy carrying a millimetre parameter
+(a linear step, a baked circular centre, a copy's offset), scale nothing:
+the edit runs as before and the status line says why. Both GUI paths take
+it in the same undo step: the inline editor (`ApplyDimensionEdit`) and the
+dimension typed while drawing (`ConstraintExtras::rescaleFirst`, inside
+`ApplySketchConstraint`'s before/after). Only the GUI rescales:
+`add_constraint` and `modify_feature` keep a script's geometry literal.
+
+### Trim
+
+Trim removes the span under a click, bounded by its crossings, previewed on
+hover. Pressed on empty space and dragged, it draws a path: every span the
+path crosses is previewed as it is crossed (`TrimAlongPath` on a copy), and
+the release trims them all on the sketch, one solve and one undo step.
+Escape drops the path; a press released without a drag still leaves the
+tool; Enter does too.
 
 **Driven dimensions in the GUI.** Dimensioning geometry the sketch already
 fixes reads it, as in every CAD tool: the Dimension tool
@@ -890,7 +999,7 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 |---|---|---|
 | `add_feature` | `feature` | a Sketch with `plane`, `entities`, `constraints`; returns `entity_ids` |
 | `modify_feature` | `feature, feature_id \| index` | replaces the whole sketch JSON; changed dimension values are re-solved from the sent geometry, and a value that cannot be met or would flip the sketch is refused ([Refusals](#refusals)); a driven dimension's value is ignored, and one switched to driving is judged like an addition and refused when it would over-constrain the sketch |
-| `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr \| driven` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm, or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. A constraint that constrains nothing is refused ([Refusals](#refusals)). `driven: true` on a dimension kind, with none of `value`/`value_deg`/`expr`, adds a [driven dimension](#constraints) and answers `measured` (mm; radians for an angle). Every answer carries the sketch's `dof` after the add. One solve, one undo step |
+| `add_constraint` | `sketch_id, kind, refs, value \| value_deg \| expr \| driven` | `refs` = `[[entity_id, which], …]` (a, b, c); `value` is mm (an `arc_length` too), or **radians** for an angle (`value_deg` instead, never both; more than a full turn is refused as degrees); `expr` is in base units, angles in degrees. A constraint that constrains nothing is refused ([Refusals](#refusals)). `driven: true` on a dimension kind, with none of `value`/`value_deg`/`expr`, adds a [driven dimension](#constraints) and answers `measured` (mm; radians for an angle). Every answer carries the sketch's `dof` after the add. One solve, one undo step. The geometry is taken literally: nothing is [rescaled](#the-first-dimension). A new variable driving a dimension is a `batch` of `set_variable` (`scope: "part"` keeps it one undo step; a project variable is undone on its own) and `add_constraint` with `expr` naming it |
 | `add_constraints` | `sketch_id, constraints[]` | many at once, each spec as `add_constraint`'s: one judgement, solve, regen, undo step; a refused spec adds nothing and is named by index; `measured` lists each spec's measure (null for a driving one) when any is driven |
 | `delete_entity` | `sketch_id, entity_id` | with the constraint cleanup above |
 | `fillet` | `sketch_id, line1, line2, radius` | returns `arc_id`; failures say why |
@@ -984,7 +1093,34 @@ link; `modify_feature` with an edited sketch JSON covers them.
   migrate), `v35-linked-copy`, `v38-entity-exprs`, `v40-spline`,
   `v46-ellipse-arc`, `v49-reference-image`, `v50-linear-pattern-2d`,
   `v51-mirror-and-center-ref`, `v137-text`, `v155-ellipse-axis-ends`,
-  `v166-underlay-show-always`, `v177-driven-dimension`.
+  `v166-underlay-show-always`, `v177-driven-dimension`,
+  `vNEXT-g2-arc-length` (a spline in G2 with an arc held to its length).
+- `tests/test_sketch_g2.cpp` `[g2]` `[arc_length]` — G2 between a spline and
+  a line, an arc (tangent alone shown to leave the curvature jumping) and
+  another spline, each read back through OCC on the built wire
+  (`BRepLProp_CLProps`: tangent directions, curvatures to 1e-6 relative and
+  one centre of curvature); every refused pair; a file round trip and
+  bit-identical solves on many threads (`[parallel]`); an arc-length
+  dimension against the edge's `GCPnts_AbscissaPoint` length, a value edit
+  past a half turn, driven, and the refusals naming the right kind.
+- `tests/test_sketch_edits.cpp` `[rescale]` `[open_ends]` `[trim]` — the
+  first-dimension rescale (every corner scaled about the anchor, the area
+  ratio kept, about the one pinned point; not for a second dimension, an
+  angle, an expression, two pinned points or a linear pattern), open ends
+  (a chain, an almost-closed gap, a T, an overlap, a bow tie the walk
+  strands, construction), and a path trimming three spans and a circle in
+  one call, or one span crossed twice once.
+- GUI: `dims/first_dimension_rescales`, `dims/typed_dimension_rescales_and_names`
+  (each one undo back), `dims/name_equals_value_makes_a_variable`,
+  `dims/refused_name_equals_value_makes_none`, `dims/arc_length_by_placement`,
+  `region/open_ends_are_marked` (the markers and the Extrude refusal's count),
+  `trim/drag_trims_every_crossed_span` (the preview mid-drag, one undo for
+  all three), `constraints/curvature_replaces_tangent`.
+- `tests/sketch_constraint_refusal_smoke.py` also refuses every G2 pair and
+  wrong arc-length target over the RPC with the sketch unchanged, holds an
+  arc to its length, shows `add_constraint` leaving the rest of a rough
+  sketch literal, and drives a dimension by a new variable in one batch and
+  one undo.
 - `tests/test_sketch_curves.cpp` `[ellipse]` `[spline]` `[refusal]` —
   ellipses, elliptical arcs and splines solved: DOF, radii by axis-end
   distance through an extrude and a revolve, tangency checked as directions
@@ -998,6 +1134,11 @@ link; `modify_feature` with an edited sketch JSON covers them.
   expression-driven entity fields (drive the distance to an axis end).
 - Spline weights and knots as unknowns (rational or non-uniform splines);
   continuity at a closed spline's seam beyond C0.
+- G2 with an ellipse or elliptical arc; an arc length on an elliptical arc
+  or a spline.
+- A first-dimension rescale over the RPC (deliberately: scripts' geometry
+  stays literal), or with a linked pattern's millimetre parameters scaled
+  along.
 - Linked copies across parts: a cross-part paste is always a plain copy.
 - Offset as a regenerating op (it bakes).
 - Transferring a dimension from a deleted entity onto a coincident survivor.

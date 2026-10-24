@@ -468,7 +468,12 @@ DATUM_AXIS_Y = 0xFFFFFF02  # sketch Y axis (the +V direction)
 CONSTRAINT_FORMATS = f"""Constraint kinds: coincident, horizontal, vertical,
 parallel, perpendicular, equal, distance, radius, angle, tangent,
 point_on_line, symmetric, midpoint, fixed, concentric, collinear,
-distance_x, distance_y, diameter, distance_pl.
+distance_x, distance_y, diameter, distance_pl, curvature, arc_length.
+
+curvature (G2) takes two curves already joined end to end by a coincident,
+at least one a spline: tangent there with equal curvature. It is refused for
+two lines, a line and an arc, two arcs, a degree-1 spline, and curves that
+share no end.
 
 refs is a list of [entity_id, which] pairs. `which` picks a point on the
 entity: line 0=a 1=b; circle 0=center; arc 0=center 1=start 2=end;
@@ -482,7 +487,8 @@ Datum references (usable as entity_id): {DATUM_ORIGIN} = sketch origin,
 {{"kind": "coincident", "refs": [[<line id>, 0], [{DATUM_ORIGIN}, 0]]}}.
 
 Dimensional kinds (distance, radius, angle, distance_x, distance_y, diameter,
-distance_pl) take value or expr (expression over document variables — prefer
+distance_pl, arc_length -- the length along a circular arc, r x sweep, refs =
+the arc) take value or expr (expression over document variables — prefer
 it: "width" beats 40). `value` is MILLIMETRES, except for angle, where it is
 RADIANS — pass value_deg for degrees, never both, and more than a full turn
 is refused as a degrees value in the radians field. `expr` is different and

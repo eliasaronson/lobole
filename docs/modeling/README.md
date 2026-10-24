@@ -1018,7 +1018,8 @@ reference case.
   `createdBy`, so a feature naming the second binds to the first, is a
   [known bug](../known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build).)
 - A thin extrude of an OPEN profile: `thin` walls every closed loop, and an
-  open polyline is refused as "sketch has no closed profile".
+  open polyline is refused as "sketch has no closed profile", naming its
+  [open ends](../sketching/README.md#open-ends).
 
 - A thread runout (DIN 76) or a faded end on a modelled thread, and a
   blind tapped hole's thread trimmed by its drill point: the ends are square.

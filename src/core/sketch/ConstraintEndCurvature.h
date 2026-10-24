@@ -3,8 +3,8 @@
 
 #pragma once
 
-// The curvature half of a G2 joint (docs/sketching/README.md#curvature-
-// continuity), as a PlaneGCS constraint of our own: added through the public
+// The curvature half of a G2 joint, as a PlaneGCS constraint of our own
+// (docs/sketching/README.md#curvature-continuity): added through the public
 // System::addConstraint, so the vendored solver is not modified
 // (THIRD_PARTY.md).
 //

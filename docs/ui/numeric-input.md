@@ -64,6 +64,29 @@ clears any expression.
   preferences. Giving CAM operations persisted expression slots would be a
   format change.
 
+## A new variable
+
+The sketch's two dimension fields -- the inline editor and the one typed
+while drawing -- take `name = expr`: the PROJECT variable `name` is created
+with the expression `expr` and the dimension is driven by `name`, in one
+undo step on the project-variable history (which puts the sketch back too:
+`PushProjectVarUndoWithFeatures`, the extract-variables recipe). The
+expression language has no `=` of its own, so the first one splits.
+
+- The name must be a valid parameter name, else the field stays open saying
+  so ("'2w' is not a variable name: a letter or _ first, …").
+- **A name already taken** (a project variable or any part's) is refused,
+  naming its value and pointing at plain `name` to use it -- never
+  silently redefined.
+- The dimension's own checks run first: a value the sketch refuses ("Not
+  changed: …", [solving](../sketching/README.md#solving)) creates no
+  variable.
+- An angle's `a = 30` stores 30, degrees, as angle expressions already are.
+
+Over the RPC there is no new call: a `batch` of `set_variable` and
+`add_constraint` with `expr` naming it does the same
+(`help('add_constraint')`).
+
 ## Completion
 
 `src/ui/ExprComplete.{h,cpp}` offers, for the identifier under the caret:
@@ -117,6 +140,10 @@ text), `properties/dimension_field_opens_on_double_click`,
 `properties/vector_row_takes_an_expression`,
 `properties/completion_row_can_be_clicked`,
 `dims/inline_editor_completes_a_variable`,
+`dims/name_equals_value_makes_a_variable` (the variable, the binding, one
+undo; a taken and a bad name refused with nothing changed),
+`dims/refused_name_equals_value_makes_none`,
+`dims/typed_dimension_rescales_and_names`,
 `configs/an_assembly_configuration_by_clicking` (an unbounded field).
 
 ## Not built

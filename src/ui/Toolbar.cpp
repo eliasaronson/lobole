@@ -798,7 +798,8 @@ void DrawSketchModeToolbar(AppState& state) {
   // click away. Always openable (so the menu is discoverable); each item
   // applies to the current selection and ApplySketchConstraint no-ops with a
   // hint if the combination doesn't fit. Dimensional constraints are NOT here —
-  // the Dimension tool covers distance / radius / diameter / angle. These are
+  // the Dimension tool covers distance / radius / diameter / angle /
+  // arc length. These are
   // the keymap's unbound-but-bindable rows: a constraint used once a month
   // gets a Preferences row rather than an invented mnemonic.
   if (ImGui::Button(ICON_FA_ELLIPSIS "###tb_sk_more_constraints"))
