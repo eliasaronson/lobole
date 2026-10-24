@@ -25,6 +25,8 @@
 #include "core/Document.h"
 #include "core/Feature.h"
 #include "core/io/GitVault.h"
+#include "core/io/ReadContext.h"
+#include "core/io/Serialization.h"
 #include "ui/AppState.h"
 #include "ui/DocumentSlots.h"
 #include "ui/ProjectActions.h"
@@ -155,5 +157,32 @@ TEST_CASE("Reader cases: comparing with a damaged version says why it does "
   CHECK(change.summary.find("does not load") != std::string::npos);
   CHECK(change.summary.find(feature.filename().string()) != std::string::npos);
   CHECK(change.summary.find("unknown key 'colour'") != std::string::npos);
+  fs::remove_all(dir);
+}
+
+// A save prunes a collection that became EMPTY, not only one that shrank:
+// the last configuration or study deleted left its file behind, and the
+// next open reported it as a file it could not place -- a lossy load of a
+// project nobody damaged (two scratch projects did this).
+TEST_CASE("Reader cases: a save prunes a collection emptied since the last",
+          "[reader_fuzz][serialization]") {
+  const fs::path dir =
+      fs::temp_directory_path() /
+      ("lobole-emptied-" + std::to_string(::getpid()) + ".dsgn");
+  fs::remove_all(dir);
+  Document doc;
+  doc.AddFeature(
+      std::make_unique<BoxFeature>("Box", glm::dvec3(0.0), 10.0, 10.0, 10.0));
+  const uint64_t cfg = doc.AddConfiguration("Long").id;
+  const uint64_t study = doc.AddStudy("Pull").id;
+  REQUIRE(DocumentIO::Save(doc, dir.string()).has_value());
+  REQUIRE(doc.RemoveConfiguration(cfg));
+  REQUIRE(doc.RemoveStudy(study));
+  REQUIRE(DocumentIO::Save(doc, dir.string()).has_value());
+  readctx::CollectDrops collect;
+  REQUIRE(DocumentIO::Load(dir.string()).has_value());
+  const readctx::LoadReport report = collect.Take();
+  INFO(report.Summary());
+  CHECK(report.Empty());
   fs::remove_all(dir);
 }

@@ -104,7 +104,9 @@ The loader refuses, naming it:
   points at nothing, an `fcf` frame on a note that is not one, a relation's
   `ride` without its `teeth`, a flat mill with a `tip_angle`, tabs without a
   count, an `active_configuration` the document does not have, a sketch
-  plane whose axis lies along its normal.
+  plane whose axis lies along its normal, a `rollback` past the last
+  feature, an instance or generation id in a Derived copy that is not a
+  whole number.
 
 A save refuses an item with id 0 (see [format.md](format.md#stability-guarantees)).
 
@@ -117,7 +119,9 @@ file it could not keep — `{path, pointer, reason, derived}` — collected by
 damage, rather than refusing:
 
 - a file in a collection directory that the index does not list, or whose
-  name starts with no id: not loaded, and a save would delete it;
+  name starts with no id: not loaded, and a save would delete it (a save
+  prunes every collection directory, an emptied one too, so the app does
+  not leave one behind itself);
 - an asset nothing names (the single file's `assets` map);
 - derived data, marked `derived`: a study or motion result that does not
   read (or whose `.bin` is not the size its json says), a drawing view's

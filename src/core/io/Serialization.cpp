@@ -679,11 +679,13 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
     // a pre-v29 document re-saves byte-identically (the exploded-views v27
     // discipline). Each result is written beside its study (topology v33,
     // static and modal v153), with the input hash that produced it.
+    // A collection emptied since the last save is pruned too: a file left
+    // behind is one the next load reports dropping.
+    const fs::path studyDir = dir / "studies";
+    std::set<std::string> wantedStudies;
     if (!doc.GetStudies().empty()) {
-      const fs::path studyDir = dir / "studies";
       fs::create_directories(studyDir);
       index["studies"] = json::array();
-      std::set<std::string> wantedStudies;
       for (const fem::Study& s : doc.GetStudies()) {
         const std::string base =
             std::to_string(IdForFile(s.id, "study", s.name)) + "-" +
@@ -702,16 +704,16 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
                               wantedStudies, error))
           return false;
       }
-      PruneCollection(studyDir, wantedStudies);
     }
+    PruneCollection(studyDir, wantedStudies);
     // Configurations (v31): file-per-config under configurations/, id list in
     // the index (the active id is in the envelope). Absent when none, so a
     // pre-v31 document re-saves byte-identically.
+    const fs::path cfgDir = dir / "configurations";
+    std::set<std::string> wantedConfigs;
     if (!doc.GetConfigurations().empty()) {
-      const fs::path cfgDir = dir / "configurations";
       fs::create_directories(cfgDir);
       index["configurations"] = json::array();
-      std::set<std::string> wantedConfigs;
       for (const Configuration& c : doc.GetConfigurations()) {
         const std::string file =
             std::to_string(IdForFile(c.id, "configuration", c.name)) + "-" +
@@ -722,12 +724,8 @@ bool SaveDir(const Document& doc, const std::string& dirPath,
         index["configurations"].push_back(c.id);
         wantedConfigs.insert(file);
       }
-      for (const auto& entry : fs::directory_iterator(cfgDir, ec)) {
-        if (entry.path().extension() == ".json" &&
-            !wantedConfigs.contains(entry.path().filename().string()))
-          fs::remove(entry.path(), ec);
-      }
     }
+    PruneCollection(cfgDir, wantedConfigs);
     // Reference-image pixel files (v49) under assets/, pruned like features/.
     // The dir stays absent when there are no images, so a pre-v49 document
     // re-saves byte-identically.
