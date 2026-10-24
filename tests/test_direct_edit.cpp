@@ -767,7 +767,7 @@ TEST_CASE("Offset Face thickens a STEP knob's stem", "[direct_edit]") {
 }
 
 TEST_CASE("Delete Face fills all 100 holes of a STEP plate in one feature",
-          "[direct_edit][slow]") {
+          "[direct_edit][slow][asan_slow]") {
   Document doc;
   const uint64_t imp = ImportStep(doc, "plate_100_holes.step");
   const Body& b = *BodyOf(doc, imp);

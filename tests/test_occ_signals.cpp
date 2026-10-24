@@ -96,6 +96,10 @@ static std::optional<std::string> OffsetBatteryHolderTop() {
   });
 }
 
+// Not in the sanitized build: the fault long-jumps past the offset
+// builder's destructors, and LeakSanitizer reports what they held. The null
+// writes above are its case.
+#if !defined(__SANITIZE_ADDRESS__)
 TEST_CASE("A kernel fault in a later run is that call's failure", "[occ]") {
   SECTION("a first run arms the handlers") { CHECK(FaultInScope()); }
   SECTION("the offset faults in the second") {
@@ -104,6 +108,7 @@ TEST_CASE("A kernel fault in a later run is that call's failure", "[occ]") {
     CHECK_THAT(*why, Catch::Matchers::ContainsSubstring("SIGSEGV"));
   }
 }
+#endif
 
 TEST_CASE("A later test case still catches a fault", "[occ]") {
   const auto why = FaultInScope();

@@ -411,11 +411,13 @@ SketchImportResult ImportSketch(AppState& state,
     for (sketch::Entity& e : drawing.entities)
       result.entityIds.push_back(target->AddEntity(std::move(e)));
     doc.Regenerate();
+    // Read before the command: it replaces the feature, and `target` is
+    // left pointing at the one it freed (ASan, regen_honesty_smoke).
+    result.sketchId = target->GetId();
     state.commands->Execute(
         std::make_unique<ModifyFeatureCommand>(
             targetIndex, before, DocumentIO::FeatureToJson(*target)),
         doc);
-    result.sketchId = target->GetId();
   } else {
     auto sk = std::make_unique<SketchFeature>(name, placement->plane);
     switch (on.kind) {
