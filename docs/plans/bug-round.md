@@ -21,8 +21,12 @@ They fall in two groups.
 3. **Two values accepted and then dropped on save:** `set_study` takes
    `num_modes` on a study that is not modal, and `add_cam_op` takes
    `finish_stock` without `finish_tool`. The reader now refuses both in a
-   file, so the app writes what it would refuse to read. They are refused
-   at the call, naming what makes them valid.
+   file, so a value the call said yes to vanishes on save. They are
+   refused at the call, naming what makes them valid ("num_modes applies to
+   a modal study; set type: modal"). A script sets `num_modes` and `type` in
+   one call, which works because `set_study` applies `type` first; a lone
+   `finish_stock` never reached a toolpath, since setting `finish_tool`
+   alone derives a fresh one.
 4. **The feature limit has paths around it.** `add_feature`, `batch`,
    `derive_occurrence` and the tool window refuse past 50 000 features, but
    beginning a sketch, DXF/SVG import into a sketch, inserting a template
