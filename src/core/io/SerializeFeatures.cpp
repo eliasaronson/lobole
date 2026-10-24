@@ -869,7 +869,7 @@ PlaneType PlaneTypeFromString(const std::string& s) {
 
 // A direct edit's face refs (docs/modeling/README.md#direct-edit): each
 // {feature_id, element} with the fingerprint of the face as it was picked,
-// when the name is an index into a file (vNEXT).
+// when the name is an index into a file (v192).
 json DirectFaceToJson(const ElementRef& ref,
                       const directedit::Fingerprints& prints) {
   json f = {{"feature_id", ref.featureId}, {"element", ref.name}};
@@ -2255,13 +2255,13 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "drill_point_deg?:number, thread_depth?:number, "
      "thread_depth_expr?:string, fit?:object, "
      "printed?:'round'|'teardrop'|'teardrop_flat'"},
-    {"DeleteFace", kVersionNEXT,
+    {"DeleteFace", 192,
      "body_id (the body's created_by), faces [{feature_id, element}] on it: "
      "removed, and the gap healed by extending the faces around it (a hole "
      "fills, a boss levels, a fillet or chamfer gives back its edge); a set "
      "the faces around cannot close over is refused naming them",
      "body_id:int>=0, faces:object[]"},
-    {"OffsetFace", kVersionNEXT,
+    {"OffsetFace", 192,
      "body_id, faces [{feature_id, element}], distance_mm (+_expr): each face "
      "moved along its own normal, + outward (adds material); its neighbours "
      "follow along their own surfaces (a cylinder changes radius). Refused: "
@@ -2269,7 +2269,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "fillet) is not offset with it",
      "body_id:int>=0, faces:object[], distance_mm?:number, "
      "distance_mm_expr?:string"},
-    {"MoveFace", kVersionNEXT,
+    {"MoveFace", 192,
      "body_id, faces [{feature_id, element}] forming one feature (a hole, "
      "boss, pocket, slot), moved rigidly: translate_mm [x, y, z] (+_expr "
      "each), rotate_deg (+_expr) about axis (Revolve's {kind: x|y|z|"
@@ -2279,7 +2279,7 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "body_id:int>=0, faces:object[], translate_mm?:number[3], "
      "translate_mm_expr?:string[3], rotate_deg?:number, "
      "rotate_deg_expr?:string, axis?:object"},
-    {"ReplaceFace", kVersionNEXT,
+    {"ReplaceFace", 192,
      "body_id, face {feature_id, element}, target: {kind: \"plane\", "
      "base_plane: xy|xz|yz or datum_id} | {kind: \"sketch\", sketch_id} | "
      "{kind: \"face\", face {feature_id, element}} (any body's face; its "
@@ -3532,13 +3532,13 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       ho->printed = *printed;
     }
     out = std::move(ho);
-  } else if (type == "DeleteFace") { // vNEXT
+  } else if (type == "DeleteFace") { // v192
     auto del = std::make_unique<DeleteFaceFeature>(
         name, j.at("body_id").get<uint64_t>(), std::vector<ElementRef>{});
     del->faces =
         DirectFacesFromJson(j.value("faces", json::array()), del->fingerprints);
     out = std::move(del);
-  } else if (type == "OffsetFace") { // vNEXT
+  } else if (type == "OffsetFace") { // v192
     auto off = std::make_unique<OffsetFaceFeature>(
         name, j.at("body_id").get<uint64_t>(), std::vector<ElementRef>{},
         j.value("distance_mm", 1.0));
@@ -3546,7 +3546,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         DirectFacesFromJson(j.value("faces", json::array()), off->fingerprints);
     off->distanceExpr = j.value("distance_mm_expr", std::string{});
     out = std::move(off);
-  } else if (type == "MoveFace") { // vNEXT
+  } else if (type == "MoveFace") { // v192
     glm::dvec3 t(0.0);
     if (j.contains("translate_mm")) {
       const json& v = j.at("translate_mm");
@@ -3571,7 +3571,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (j.contains("axis"))
       mv->axis = AxisRefFromJson(j.at("axis"));
     out = std::move(mv);
-  } else if (type == "ReplaceFace") { // vNEXT
+  } else if (type == "ReplaceFace") { // v192
     directedit::Fingerprints prints;
     const ElementRef face = j.contains("face")
                                 ? DirectFaceFromJson(j.at("face"), prints)
