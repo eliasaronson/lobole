@@ -614,7 +614,7 @@ TEST_CASE("the expression golden round-trips with its evidence",
           "[requirements][serialization]") {
   auto golden =
       DocumentIO::Load((std::filesystem::path(TestSourceDir()) /
-                        "tests/golden/vNEXT-expression-requirement.json")
+                        "tests/golden/v189-expression-requirement.json")
                            .string());
   REQUIRE(golden);
   const auto list = req::ListFromJson((*golden)->GetRequirementsRaw());

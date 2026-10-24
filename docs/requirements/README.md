@@ -561,7 +561,7 @@ delivering.
   its undo puts it back), a delete is refused naming it (a part-local one
   too), a name gone reads unresolved naming it, a part removed reads
   unresolved, a division by zero reads unresolved; the golden
-  `vNEXT-expression-requirement` round-trips with its evidence.
+  `v189-expression-requirement` round-trips with its evidence.
 - `tests/test_design_sweep.cpp` (`[design_sweep]`): a block of wall `t`,
   every edge filleted at `r`, swept over `t` breaks between the samples
   either side of `2 r` and names the fillet, and `refine` narrows that

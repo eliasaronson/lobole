@@ -3091,7 +3091,7 @@
    "face:1/face*": "curved.frame*1 curved.thread*1 face.draft*2 face.extrude_add*2 face.extrude_cut*2 face.frame*2 face.hole*2 face.shell*2 face.sketch*2",
    "face:5/face*": "face.draft*6 face.extrude_add*6 face.extrude_cut*6 face.frame*6 face.hole*6 face.shell*6 face.sketch*6"
   },
-  "golden/vNEXT-expression-requirement": {
+  "golden/v189-expression-requirement": {
    "body:2": "body.mirror body.pattern_circular body.pattern_linear body.split",
    "edge:2/*;U*": "edge.chamfer*12 edge.fillet*12",
    "face:2/cap0": "face.draft face.extrude_add face.extrude_cut face.frame face.hole face.shell face.sketch",
