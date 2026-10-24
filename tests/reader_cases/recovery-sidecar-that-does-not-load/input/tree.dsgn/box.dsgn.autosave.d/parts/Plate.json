@@ -1,0 +1,40 @@
+{
+  "features": [
+    {
+      "depth": 2.0,
+      "height": 2.0,
+      "id": 1,
+      "name": "Target",
+      "position": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "type": "Box",
+      "width": 2.0
+    },
+    {
+      "depth": 2.0,
+      "height": 2.0,
+      "id": 2,
+      "name": "Tool",
+      "position": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "type": "Box",
+      "width": 2.0
+    },
+    {
+      "id": 3,
+      "name": "Notch",
+      "op": "subtract",
+      "target_id": 1,
+      "tool_id": 2,
+      "type": "Boolean"
+    }
+  ],
+  "format": "designer-document",
+  "version": 188
+}

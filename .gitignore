@@ -99,3 +99,6 @@ uv.lock
 # Renders and screenshots dropped at the top level while working. A picture
 # the project keeps lives under docs/ or assets/.
 /*.png
+
+# Reader-fuzz cases hold whole trees, autosave sidecars (*.d) included.
+!tests/reader_cases/**/*.d
