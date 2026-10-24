@@ -48,6 +48,16 @@ arguments; a temporary XDG_CONFIG_HOME is set up by default so a suite run
 cannot rewrite the developer's own preferences (tests/fem_smoke.py learned
 that one the hard way).
 
+A SCOPE AND A CPU SET
+---------------------
+`scope=Scope(...)` runs the app in its own transient systemd scope
+(`systemd-run --user --scope`), with a memory cap, so one app cannot take
+the machine and the scope's `memory.peak` is that app's peak; `cpus=` pins
+it to a set of CPUs. tools/bench.py launches every measured instance this
+way (docs/performance/README.md#the-instance). The scope EXECS the app, so
+the pid launched is the app's and its parent is still this process, which
+keeps the death signal below working.
+
 THE APP DIES WITH ITS LAUNCHER
 ------------------------------
 Every launch sets LOBOLE_EXIT_WITH_PARENT to this process's pid, so the
@@ -63,6 +73,7 @@ processes die with its init anyway. The app's pid is printed to stderr — kill
 it by that, never by a pattern.
 """
 import contextlib
+import dataclasses
 import os
 import re
 import shutil
@@ -83,6 +94,31 @@ os.environ.setdefault("LOBOLE_REMOTE_STRICT", "1")
 # Both the windowed and the headless path log this; matching either means the
 # helper does not care which one it launched.
 PORT_RE = re.compile(r"(?:listening on 127\.0\.0\.1:|remote port )(\d+)")
+
+
+@dataclasses.dataclass
+class Scope:
+    """A transient systemd scope for one app: `unit` is its name (".scope"
+    is added), `memory_max` its MemoryMax. The unit name must be unused."""
+    unit: str
+    memory_max: str = "8G"
+
+    def argv(self):
+        return ["systemd-run", "--user", "--scope", "--quiet", "--collect",
+                f"--unit={self.unit}", "-p", f"MemoryMax={self.memory_max}",
+                "--"]
+
+
+def cgroup_dir(pid):
+    """The cgroup v2 directory a process lives in, or None."""
+    try:
+        with open(f"/proc/{pid}/cgroup") as f:
+            for line in f:
+                if line.startswith("0::"):
+                    return "/sys/fs/cgroup" + line[3:].strip()
+    except OSError:
+        pass
+    return None
 
 
 class LaunchedApp:
@@ -167,7 +203,8 @@ class AppProcess:
         return self._proc.pid
 
 
-def launch_app(binary, extra_args=(), env=None, timeout=30.0, headless=True):
+def launch_app(binary, extra_args=(), env=None, timeout=30.0, headless=True,
+               scope=None, cpus=None):
     """Start the app on a kernel-chosen port; returns an AppProcess.
 
     Also installs an excepthook that prints the app's log before an uncaught
@@ -177,7 +214,7 @@ def launch_app(binary, extra_args=(), env=None, timeout=30.0, headless=True):
     (fem_smoke, for months) showed an assertion and nothing about why.
     """
     proc, port, log_path, tmp = _spawn(binary, extra_args, env, timeout,
-                                       headless)
+                                       headless, scope, cpus)
     app = AppProcess(proc, port, log_path, tmp)
 
     previous = sys.excepthook
@@ -194,18 +231,24 @@ def launch_app(binary, extra_args=(), env=None, timeout=30.0, headless=True):
 
 
 @contextlib.contextmanager
-def launch(binary, extra_args=(), env=None, timeout=30.0, headless=True):
+def launch(binary, extra_args=(), env=None, timeout=30.0, headless=True,
+           scope=None, cpus=None, archive=True):
     """Start `binary`, wait for it to name its port, yield a LaunchedApp.
 
     Raises RuntimeError with the app's own log attached if it never reports a
     port — which is the case that used to present as a bare socket timeout.
+    `archive=False` neither prints the log nor keeps the evidence of an
+    exception raised inside: for a caller that records its own failures
+    (tools/bench.py) and must write nothing under the user's state.
     """
     proc, port, log_path, tmp = _spawn(binary, extra_args, env, timeout,
-                                       headless)
+                                       headless, scope, cpus)
     app = LaunchedApp(proc, port, log_path, tmp)
     try:
         yield app
     except BaseException:
+        if not archive:
+            raise
         # The whole point: say what the app said, before the traceback.
         said = app.log().strip()
         if said:
@@ -315,12 +358,15 @@ def _sweep_orphaned_scratch():
             shutil.rmtree(path, ignore_errors=True)
 
 
-def _spawn(binary, extra_args, env, timeout, headless):
+def _spawn(binary, extra_args, env, timeout, headless, scope=None,
+           cpus=None):
     """Launch, wait for the app to name its port, return (proc, port, log, tmp).
 
     `headless` is a tri-state: True runs --headless, False the windowed app,
     and the string "offscreen" runs --offscreen (real renderer, no window) —
-    which, like headless, must work with no display server at all.
+    which, like headless, must work with no display server at all. `scope`
+    (a Scope) runs it in a systemd scope of its own, `cpus` (a set of CPU
+    numbers) pins it there.
     """
     # The pid named below must be the parent the kernel watches, and that is
     # the forking THREAD: a worker thread that returns would take the app
@@ -372,9 +418,14 @@ def _spawn(binary, extra_args, env, timeout, headless):
     elif headless:
         cmd.append("--headless")
     cmd += ["--remote", "0", *extra_args]
+    if scope is not None:
+        cmd = scope.argv() + cmd
+    # The affinity is set in the child before it execs, so systemd-run and the
+    # app it becomes both inherit it.
+    pin = None if cpus is None else (lambda: os.sched_setaffinity(0, cpus))
     with open(log_path, "w") as log:
         proc = subprocess.Popen(cmd, env=e, stdout=log,
-                                stderr=subprocess.STDOUT)
+                                stderr=subprocess.STDOUT, preexec_fn=pin)
     # Who owns this directory, for the sweep in the next launch.
     with open(os.path.join(tmp, OWNER_FILE), "w") as f:
         f.write(f"{os.getpid()} {proc.pid}\n")
