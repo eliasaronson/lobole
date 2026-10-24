@@ -1055,6 +1055,13 @@ Relation RelationFromJson(const json& j) {
       readctx::RefuseUnknownKeys(ride, {"amount", "mate", "dof"},
                                  "relation ride");
       r.rideAmount = ride.at("amount").get<double>();
+      // A mate's id, whole and above 0: -0 read as 0, no ride, and the
+      // save dropped it.
+      if (!readctx::IsWhole(ride.at("mate")) ||
+          ride.at("mate").get<uint64_t>() == 0)
+        throw std::runtime_error("relation ride: mate " +
+                                 ride.at("mate").dump() +
+                                 " is not a mate's id");
       r.rideMate = ride.at("mate").get<uint64_t>();
       r.rideDof = MateDofFromString(ride.at("dof").get<std::string>());
     }

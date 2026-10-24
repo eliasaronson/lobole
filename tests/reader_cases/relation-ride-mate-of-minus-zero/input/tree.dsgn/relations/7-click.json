@@ -1,0 +1,14 @@
+{
+  "dof_a": "rotation",
+  "dof_b": "rotation",
+  "drives": "positive",
+  "id": 7,
+  "kind": "click",
+  "lead": 0.0,
+  "mate_a": 5,
+  "mate_b": 5,
+  "name": "click",
+  "phase": 0.0,
+  "ratio": 1.0,
+  "type": "Relation"
+}

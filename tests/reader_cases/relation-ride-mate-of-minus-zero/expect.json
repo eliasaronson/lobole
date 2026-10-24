@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "assembly-dir",
+  "id": "assembly-dir/v105-click-and-dogs/relations/6-dogs.json:json_liar:2",
+  "input": "tree.dsgn",
+  "message": [
+    "relations/6-dogs.json",
+    "relation ride: mate 0 is not a mate's id"
+  ],
+  "seed": 2
+}

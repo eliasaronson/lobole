@@ -1,0 +1,21 @@
+{
+  "a": {
+    "anchor": {
+      "origin": true
+    },
+    "occurrence": 1
+  },
+  "b": {
+    "anchor": {
+      "origin": true
+    },
+    "occurrence": 3
+  },
+  "flipped": false,
+  "id": 5,
+  "mate_type": "cylindrical",
+  "name": "",
+  "offset": 48.0,
+  "rotation": 0.0,
+  "type": "Mate"
+}

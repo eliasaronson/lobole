@@ -1,0 +1,20 @@
+{
+  "dof_a": "rotation",
+  "dof_b": "rotation",
+  "drives": "positive",
+  "id": 6,
+  "kind": "freewheel",
+  "lead": 0.0,
+  "mate_a": 4,
+  "mate_b": 5,
+  "name": "dogs",
+  "phase": 0.0,
+  "ratio": 1.0,
+  "ride": {
+    "amount": 0.3,
+    "dof": "offset",
+    "mate": -0
+  },
+  "teeth": 4,
+  "type": "Relation"
+}
