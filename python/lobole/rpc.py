@@ -77,7 +77,7 @@ COLUMNS: dict[str, str] = {
     'list_drawing_notes': '',
     'list_drawing_views': '',
     'list_drawings': '',
-    'list_elements': 'part?:string|int, configuration?:string|int, body?:int, entity?:int>=0, made_by?:string|int, role?:string, via?:string|int, max_faces?:int>=0',
+    'list_elements': 'part?:string|int, configuration?:string|int, body?:int, entity?:int>=0, made_by?:string|int, role?:string, via?:string|int, max_faces?:int>=0, walls?:bool',
     'list_exploded_views': '',
     'list_machines': '',
     'list_mates': '',
@@ -275,6 +275,7 @@ class ListElementsParams(TypedDict):
     role: NotRequired[str]
     via: NotRequired[str | int]
     max_faces: NotRequired[int]
+    walls: NotRequired[bool]
 
 class ListOccurrencesParams(TypedDict):
     bounds: NotRequired[bool]
@@ -1284,7 +1285,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'list_drawing_notes': {'type': 'object', 'properties': {'notes': {'type': 'array', 'items': {'type': 'object', 'properties': {'error': {'type': 'string'}, 'id': {'type': 'integer'}, 'leader_resolved': {'type': 'boolean'}, 'pos': {'type': 'array', 'items': {'type': 'number'}}, 'resolved': {'type': 'boolean'}, 'resolved_text': {'type': 'string'}, 'style': {'type': 'string'}, 'table': {'type': 'string'}, 'text': {'type': 'string'}, 'view': {'type': 'integer'}, 'fcf': {'type': 'object'}, 'dim': {'type': 'integer'}}, 'required': ['error', 'id', 'leader_resolved', 'pos', 'resolved', 'resolved_text', 'style', 'table', 'text', 'view'], 'additionalProperties': False}}}, 'required': ['notes'], 'additionalProperties': False},
     'list_drawing_views': {'type': 'object', 'properties': {'views': {'type': 'array', 'items': {'type': 'object', 'properties': {'base_view': {'type': 'integer'}, 'bbox': {'anyOf': [{'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, {'type': 'null'}]}, 'bend_lines': {'type': 'integer'}, 'configuration': {'type': 'integer'}, 'cost': {'type': 'object'}, 'curves': {'type': 'integer'}, 'has_geometry': {'type': 'boolean'}, 'hidden': {'type': 'array', 'items': {}}, 'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'orientation': {'type': 'string'}, 'position': {'type': 'array', 'items': {'type': 'number'}}, 'quality': {'type': 'string'}, 'scale': {'type': 'number'}, 'show_hidden': {'type': 'boolean'}, 'source_id': {'type': 'integer'}, 'stale': {'type': 'boolean'}, 'section': {'type': 'object'}, 'detail': {'type': 'object'}, 'warnings': {'type': 'array', 'items': {'type': 'string'}}, 'error': {'type': 'string'}}, 'required': ['base_view', 'bbox', 'configuration', 'curves', 'has_geometry', 'hidden', 'id', 'name', 'orientation', 'position', 'quality', 'scale', 'show_hidden', 'source_id', 'stale'], 'additionalProperties': False}}}, 'required': ['views'], 'additionalProperties': False},
     'list_drawings': {'type': 'object', 'properties': {'drawings': {'type': 'array', 'items': {'type': 'object', 'properties': {'dims': {'type': 'integer'}, 'id': {'type': 'integer'}, 'index': {'type': 'integer'}, 'name': {'type': 'string'}, 'views': {'type': 'integer'}}, 'required': ['dims', 'id', 'index', 'name', 'views'], 'additionalProperties': False}}}, 'required': ['drawings'], 'additionalProperties': False},
-    'list_elements': {'type': 'object', 'properties': {'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'body': {'type': 'integer'}, 'created_by': {'type': 'integer'}, 'edges': {'type': 'array', 'items': {'type': 'object'}}, 'faces': {'type': 'array', 'items': {'type': 'object'}}, 'job_part': {'type': 'integer'}, 'name': {'type': 'string'}, 'unnamed_faces': {'type': 'integer'}}, 'required': ['body', 'created_by', 'edges', 'faces', 'job_part', 'name', 'unnamed_faces'], 'additionalProperties': False}}, 'matched_edges': {'type': 'integer'}, 'matched_faces': {'type': 'integer'}, 'why': {'type': 'string'}}, 'required': ['bodies'], 'additionalProperties': False},
+    'list_elements': {'type': 'object', 'properties': {'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'body': {'type': 'integer'}, 'created_by': {'type': 'integer'}, 'edges': {'type': 'array', 'items': {'type': 'object'}}, 'faces': {'type': 'array', 'items': {'type': 'object'}}, 'job_part': {'type': 'integer'}, 'name': {'type': 'string'}, 'unnamed_faces': {'type': 'integer'}, 'thinnest_wall_mm': {'type': 'number'}}, 'required': ['body', 'created_by', 'edges', 'faces', 'job_part', 'name', 'unnamed_faces'], 'additionalProperties': False}}, 'matched_edges': {'type': 'integer'}, 'matched_faces': {'type': 'integer'}, 'why': {'type': 'string'}}, 'required': ['bodies'], 'additionalProperties': False},
     'list_exploded_views': {'type': 'object', 'properties': {'active': {'type': 'integer'}, 'factor': {'type': 'number'}, 'views': {'type': 'array', 'items': {'type': 'object', 'properties': {'id': {'type': 'integer'}, 'name': {'type': 'string'}, 'steps': {'type': 'array', 'items': {'type': 'object'}}, 'type': {'type': 'string'}}, 'required': ['id', 'name', 'steps', 'type'], 'additionalProperties': False}}}, 'required': ['active', 'factor', 'views'], 'additionalProperties': False},
     'list_job_parts': {'type': 'object', 'properties': {'parts': {'type': 'array', 'items': {'type': 'object', 'properties': {'configuration': {'type': 'integer'}, 'configuration_name': {'type': 'string'}, 'id': {'type': 'integer'}, 'missing': {'type': 'boolean'}, 'name': {'type': 'string'}, 'placements': {'type': 'array', 'items': {}}, 'source': {'type': 'integer'}, 'why': {'type': 'string'}}, 'required': ['configuration', 'id', 'missing', 'name', 'placements', 'source'], 'additionalProperties': False}}}, 'required': ['parts'], 'additionalProperties': False},
     'list_machines': {'type': 'object', 'properties': {'dir': {'type': 'string'}, 'machines': {'type': 'array', 'items': {'type': 'object', 'properties': {'name': {'type': 'string'}, 'post': {'type': 'string'}, 'travel': {'type': 'object'}, 'fit_arcs': {'type': 'boolean'}, 'has_rotary_axis': {'type': 'boolean'}, 'rapid_feed': {'type': 'number'}, 'a_max_deg_min': {'type': 'number'}, 'tools': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['name', 'post']}}}, 'required': ['dir', 'machines'], 'additionalProperties': False},
@@ -2700,6 +2701,7 @@ ListElementsResultBodies = TypedDict('ListElementsResultBodies', {
     'job_part': int,
     'name': str,
     'unnamed_faces': int,
+    'thinnest_wall_mm': NotRequired[float],
 })
 
 ListElementsResult = TypedDict('ListElementsResult', {

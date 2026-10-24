@@ -703,6 +703,66 @@ sizes: a file can hold any of them, and OpenCASCADE's loft crashes on a
 sketch at 2⁶⁴ mm. A Shell is also refused at a wall of half the body's
 thinnest extent or more, which leaves no cavity.
 
+## Refused on the bodies
+
+`add_feature`, `modify_feature` and the GUI's Accept refuse, with the
+document unchanged, a feature the bodies it would act on cannot take
+(`Feature::WhyRefusedOn`, given the tip's bodies for an add and the cached
+bodies before the feature for a modify; inside a `batch`, whose
+regeneration is deferred, it is left to the feature's own Execute, which
+runs the same checks and reports them as its error). The checks cost a
+look at the bodies and nothing like a build, and each names what would be
+accepted:
+
+- **The body an element is on** (`topo::FindOwningBody`,
+  `src/core/ElementHistory.h`). A pattern's copies and a split's pieces keep
+  the `createdBy` of the feature that made them, so an id alone does not say
+  which body: a reference lands on the one body with that id whose element
+  map names it. A name two of them carry is refused, naming both; a name on
+  none is the usual "no longer exists"; and a name given with the id of the
+  feature that MADE the element (its `made_by`, a Fillet's) rather than the
+  one that created its body is refused naming the id to use. Every ref of
+  one feature must land on one body. Fillet, Chamfer, Draft, Shell, Thread
+  and Split's face knife find their body this way; Boolean, Refine, Rib and
+  a plane Split name no element and take the first body with their id.
+- **A blend edge that starts no blend**: degenerated, a face on one side
+  only, or its two faces tangent by OpenCASCADE's own test
+  (`ChFi3d::IsTangentFaces`), when every picked edge is one ("There are no
+  suitable edges for chamfer or fillet" said it without saying which). One
+  among others may be blended on another's tangent chain; an edge the blend
+  builder then took into no contour fails the feature instead of being left
+  out in silence.
+- **A Draft face square to the pull.**
+- **A Shell wall that breaks through an open face**: under each open face
+  the body is as thick as a line from a point well inside it, along its
+  inward normal, runs before it leaves the solid
+  (`directedit::WallsUnder`), and the face it leaves through moves toward
+  the opening by the wall. Only under the open faces: where two kept faces
+  face each other across less than two walls the offset builder can still
+  make a valid shell (a bore beside the outside merges into the cavity).
+  The Shell tool's default wall is a tenth of the body's thinnest wall
+  (`ThinnestWall`, the least of those lines over every face), rounded down
+  to 1, 2 or 5 × 10ⁿ: a bounding box is not the wall of a body that is
+  already thin-walled.
+- **A Pattern or Mirror of a feature that made no body and swept no tool**
+  (a Fillet, a Shell): refused naming the body it changed and that body's
+  `created_by`, the source to give instead.
+
+## Kernel calls build on a copy of the cached body
+
+The body a feature acts on is the previous feature's cached result, which
+undo serves back and every later feature builds on. OpenCASCADE's booleans,
+splitter and blend, draft and offset builders write the p-curves and
+tolerances they compute onto their arguments, so a call that ran on the
+cached shape changed what every later call on it built: a split of random
+design 33 lost 5.6 mm³ on a fresh body and none after a fillet had been
+tried on it (plain OpenCASCADE does the same on the exported body). Booleans
+(target and tool copied together, so what they share stays shared), fillets,
+chamfers, drafts and shells therefore build on a topology copy
+(`BRepBuilderAPI_Copy`, the geometry shared, the explorer order and so every
+index-keyed name kept), and a split runs non-destructive (its pieces are
+named fresh).
+
 ## A reshaping feature keeps only a valid solid
 
 A Fillet, Chamfer, Shell, Draft or direct edit
@@ -1081,10 +1141,9 @@ the element map never named, and an edge `query_geometry` counts but
 row. Bodies that share a `created_by` (a pattern's copies, a split's pieces)
 cannot be named apart: they get no body actions, an element name two of them
 carry is not tried, and the rest of their elements are, keyed
-`<kind>@<body index>:<name>` where a name occurs twice in the part (most of
-them fail as [the second piece of a
-split](../known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build)
-does).
+`<kind>@<body index>:<name>` where a name occurs twice in the part. A
+feature naming an element of one of them binds to the body whose map names
+it ([refused on the bodies](#refused-on-the-bodies)).
 
 **The actions**, each default derived from what it acts on (`size` the
 body's largest bbox extent, `least` its smallest, `a` a face's √area, `r0`
@@ -1098,7 +1157,7 @@ is not tried and not recorded:
 | planar face | `face.sketch` | Sketch with `face_ref`, a circle at `inside_point` of radius ½ `r0`; it passes when the sketch's plane after regeneration is the face's frame (`CADShape::FacePlane`: the centroid, the outward normal, world Y projected as u, or X near Y) |
 | | `face.extrude_add`, `face.extrude_cut` | that sketch, Extrude `add` / blind `cut` (reversed, into the body), 5 % of `size`, in one `batch` |
 | | `face.hole` | a point sketch at `inside_point`, Hole `simple`, `through`, diameter `r0` |
-| | `face.shell` | Shell opening that face, 5 % of `least`; on a body past 100 faces only the four planar faces whose names hash lowest (a shell offsets the whole body: on the 195-face gear one takes 9-36 s) |
+| | `face.shell` | Shell opening that face, the Shell tool's default: a tenth of the body's thinnest wall (`list_elements {walls: true}`'s `thinnest_wall_mm`; its least extent where none measures), rounded down to 1, 2 or 5 × 10ⁿ; on a body past 100 faces only the four planar faces whose names hash lowest (a shell offsets the whole body: on the 195-face gear one takes 9-36 s) |
 | | `face.draft` | Draft of the adjacent faces square to it (planes, and cylinders along its normal), 2°, neutral plane the world plane square to the face (a face whose normal is not a world axis has none) |
 | | `face.frame` | Frame `from_element` |
 | cylindrical face | `curved.thread` | cosmetic Thread with the ISO coarse designation whose major diameter is within 5 % of the face's (none: not tried) |
@@ -1262,9 +1321,11 @@ reference case.
 
 ## Not built
 
-- Splitting by a sketch (sketch as knife). (That split pieces share one
-  `createdBy`, so a feature naming the second binds to the first, is a
-  [known bug](../known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build).)
+- Splitting by a sketch (sketch as knife).
+- A body sub-ordinal: split pieces and pattern copies share one `createdBy`,
+  and a reference finds its body by the name it carries
+  ([refused on the bodies](#refused-on-the-bodies)); a name two of them
+  carry is refused, not told apart.
 - A thin extrude of an OPEN profile: `thin` walls every closed loop, and an
   open polyline is refused as "sketch has no closed profile", naming its
   [open ends](../sketching/README.md#open-ends).

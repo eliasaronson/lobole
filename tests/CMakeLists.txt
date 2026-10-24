@@ -108,6 +108,7 @@ add_executable(designer_tests
     test_draft.cpp
     test_direct_edit.cpp
     test_occ_signals.cpp
+    test_refused_on.cpp
     test_autosaver.cpp
     test_save_stamp.cpp
     test_frame_timer.cpp

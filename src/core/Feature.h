@@ -313,6 +313,7 @@ struct Body {
 };
 
 class Feature;
+class Document;
 
 // What a feature sees while executing during regeneration: the bodies built
 // so far, and read access to the features strictly BEFORE it in the history
@@ -552,6 +553,22 @@ public:
   // preview is accepted and when `add_feature` arrives over the RPC — not
   // by Regenerate, because an empty tool must still be able to open.
   [[nodiscard]] virtual std::string WhyIncomplete() const { return {}; }
+
+  // Why this feature, complete, cannot act on `input` -- the bodies it
+  // would execute on (the tip, for a feature added at the end) -- naming
+  // what WOULD be accepted (empty = no objection). Checks that cost a look
+  // at the bodies and nothing like a build: the element on no body or on
+  // two, a fillet edge between tangent faces, a shell wall at least as thick
+  // as the body there, a pattern of a feature that made no body. The same
+  // checks guard Execute, which reports them as an error; `add_feature`,
+  // `modify_feature` and the GUI's accept refuse with the document
+  // unchanged instead of committing a feature that would only fail.
+  [[nodiscard]] virtual std::string WhyRefusedOn(const std::vector<Body>& input,
+                                                 const Document& doc) const {
+    (void)input;
+    (void)doc;
+    return {};
+  }
 
   // A DATUM: a feature whose output is not geometry — a plane, an axis, a
   // frame, a curve — but state computed in Execute and read afterwards (by

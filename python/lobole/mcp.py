@@ -1186,10 +1186,11 @@ def list_elements(body: int | None = None, part: str | int | None = None,
                   configuration: str | int | None = None,
                   made_by: str | int | None = None, role: str | None = None,
                   entity: int | None = None, via: str | int | None = None,
-                  max_faces: int | None = None) -> dict:
+                  max_faces: int | None = None,
+                  walls: bool | None = None) -> dict:
     return _call("list_elements", **_given(
         body=body, part=part, configuration=configuration, made_by=made_by,
-        role=role, entity=entity, via=via, max_faces=max_faces))
+        role=role, entity=entity, via=via, max_faces=max_faces, walls=walls))
 
 
 # ---------------------------------------------------------------------------

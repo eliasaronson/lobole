@@ -7,6 +7,8 @@
 #include "core/Feature.h"
 
 #include <cstdint>
+#include <optional>
+#include <string>
 #include <vector>
 
 // Hollows one body into a thin shell (modeling M8): the faces named by
@@ -38,6 +40,8 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+  [[nodiscard]] std::string WhyRefusedOn(const std::vector<Body>& input,
+                                         const Document& doc) const override;
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {
     visit(bodyId);
@@ -53,3 +57,10 @@ public:
   double thickness = 1.0;
   std::string thicknessExpr;
 };
+
+// The thinnest wall of `body`: from a point well inside each face, along its
+// inward normal, to where the line leaves the solid, the least over its
+// faces (directedit::WallsUnder). What a shell's default is derived from
+// (ui::CreateShell, tools/action_matrix.py): a bounding box is not the wall
+// of a body that is already thin-walled. nullopt when no face measures.
+std::optional<double> ThinnestWall(const Body& body);

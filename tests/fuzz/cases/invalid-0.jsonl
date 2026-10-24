@@ -23,8 +23,6 @@
 {"method":"undo","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
-{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g2;U1;G120;U2","feature_id":100}],"id":150,"name":"F5","radius":1.14,"type":"Fillet"}}}
-{"method":"undo","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
 {"method":"add_feature","params":{"feature":{"angle_deg":8.0,"body_id":100,"faces":[{"element":"100/g7;M120","feature_id":100}],"id":160,"name":"D6","neutral_plane":"xy","type":"Draft"}}}

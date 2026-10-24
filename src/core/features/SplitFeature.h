@@ -28,15 +28,12 @@ enum class SplitKnifeKind {
 // along its normal) or one of the body's own planar faces (an ElementRef,
 // extended to an unbounded plane).
 //
-// v1 identity limitation: every piece is stamped with this feature's id
-// (createdBy = GetId()), so a *later* feature that references "the body from
-// this split" (fillet/boolean/shell) binds to whichever piece is found first.
-// Fine when Split is terminal (the common splitPart case) and for
-// export/mass-props, which are per-body. Distinguishing the pieces for
-// downstream ops is a follow-up (a body sub-ordinal); see
-// docs/known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build.
-// Faces are still individually named per-piece ("<id>/bN/...") so each piece
-// stays selectable.
+// Every piece is stamped with this feature's id (createdBy = GetId()). A
+// later feature that names an element of a piece binds to the piece whose
+// map names it (topo::FindOwningBody); one that names only the body (a
+// Boolean, a Refine) takes the first piece. Faces are individually named
+// per piece ("<id>/bN/...") so each piece stays selectable
+// (docs/modeling/README.md#refused-on-the-bodies).
 //
 // Regeneration fails when the target body is missing, the knife plane does not
 // resolve, the face ref no longer resolves or is non-planar, or the cut yields

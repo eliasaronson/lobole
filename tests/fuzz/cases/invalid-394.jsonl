@@ -8,7 +8,7 @@
 {"method":"check_geometry","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
-{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g1988795846;M110;U1","feature_id":100},{"element":"100/g3960516380;U0","feature_id":100},{"element":"100/g2273335457;M110;U2","feature_id":100}],"id":120,"name":"C2","radius":4.43,"type":"Chamfer"}}}
+{"method":"add_feature","params":{"feature":{"edges":[{"element":"100/g3960516380;U0","feature_id":100},{"element":"100/g2273335457;M110;U2","feature_id":100}],"id":120,"name":"C2","radius":4.43,"type":"Chamfer"}}}
 {"method":"check_geometry","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}

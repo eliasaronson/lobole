@@ -34,9 +34,23 @@ SplitFeature::SplitFeature(const std::string& name, uint64_t bodyId)
 }
 
 bool SplitFeature::Execute(RegenContext& ctx) {
-  const auto body =
-      std::find_if(ctx.bodies.begin(), ctx.bodies.end(),
-                   [&](const Body& b) { return b.createdBy == bodyId; });
+  // By a face knife, the body that holds the face: a pattern's copies and a
+  // split's pieces share the createdBy, and the first of them is not always
+  // it. By a plane, the first body the feature made.
+  auto body = ctx.bodies.end();
+  if (knife == SplitKnifeKind::Face && face.featureId == bodyId) {
+    std::string why;
+    Body* holding = topo::FindOwningBody(ctx, face, topo::ElementKind::Face,
+                                         "the knife face", &why);
+    if (holding == nullptr) {
+      SetError(why);
+      return false;
+    }
+    body = ctx.bodies.begin() + (holding - ctx.bodies.data());
+  } else {
+    body = std::find_if(ctx.bodies.begin(), ctx.bodies.end(),
+                        [&](const Body& b) { return b.createdBy == bodyId; });
+  }
   if (body == ctx.bodies.end()) {
     SetError("the body to split no longer exists");
     return false;
@@ -59,11 +73,6 @@ bool SplitFeature::Execute(RegenContext& ctx) {
       return false;
     }
     const auto idx = body->elementMap.Resolve(face.name);
-    if (!idx) {
-      SetError(topo::UnresolvedReason(ctx, face, topo::ElementKind::Face,
-                                      "the knife face"));
-      return false;
-    }
     glm::dvec3 uAxis;
     if (!body->shape.FacePlane(*idx, origin, normal, uAxis)) {
       SetError("the knife face is not planar");

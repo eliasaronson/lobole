@@ -665,7 +665,10 @@ def plane_actions(f, b, faces, cb, size, least, add, ref, feature,
                 "type": "Hole", "name": "AM hole", "hole_kind": "simple",
                 "sketch_id": {"$ref": 1}, "diameter": round(r0, 6),
                 "through": True})], "cut")
-    t = round(0.05 * least, 6)
+    # The Shell tool's default (ui::SizeFromWall): a tenth of the body's
+    # thinnest wall, else of its least extent, rounded down to 1, 2 or 5.
+    wall = b.get("thinnest_wall_mm") or least
+    t = round125(0.1 * wall) if wall and wall > 0 else 0
     if t > 0 and shell:
         add("face", f, "face.shell", [feature({
             "type": "Shell", "name": "AM shell", "body_id": cb,
@@ -1074,8 +1077,8 @@ class Worker:
         if part is not None:
             inst.call("set_active_part", part=part)
         t = time.time()
-        els = inst.request("list_elements", {"max_faces": 1000000},
-                           timeout=300)
+        els = inst.request("list_elements", {"max_faces": 1000000,
+                                             "walls": True}, timeout=300)
         ctx = Context(inst)
         plan, info = plan_actions(
             els, ctx.state,
@@ -1694,7 +1697,8 @@ def cmd_determinism(args, corpus):
                     if part is not None:
                         inst.call("set_active_part", part=part)
                     els = inst.request("list_elements",
-                                       {"max_faces": 1000000}, timeout=300)
+                                       {"max_faces": 1000000,
+                                        "walls": True}, timeout=300)
                     ctx = Context(inst)
                     plan, _ = plan_actions(
                         els, ctx.state,

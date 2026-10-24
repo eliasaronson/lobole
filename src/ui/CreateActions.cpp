@@ -432,6 +432,25 @@ double SizeFromBody(const AppState& state, uint64_t bodyId, double fallback) {
   return fallback;
 }
 
+// A shell's wall from the body's thinnest wall (ThinnestWall), a tenth of
+// it rounded down to 1, 2 or 5 x 10^n: on a body already thin-walled the
+// bounding box is not the wall, and a tenth of the box broke through it.
+// SizeFromBody where no wall measures.
+double SizeFromWall(const AppState& state, uint64_t bodyId, double fallback) {
+  for (const Body& b : state.document->GetBodies()) {
+    if (b.createdBy != bodyId || !b.shape.IsValid())
+      continue;
+    const auto wall = ThinnestWall(b);
+    if (!wall || !(*wall > 0.0))
+      break;
+    const double raw = *wall / 10.0;
+    const double decade = std::pow(10.0, std::floor(std::log10(raw)));
+    const double mant = raw / decade;
+    return decade * (mant >= 5.0 ? 5.0 : mant >= 2.0 ? 2.0 : 1.0);
+  }
+  return SizeFromBody(state, bodyId, fallback);
+}
+
 // Shared by CreateFillet/CreateChamfer: start the preview and arm the edge
 // slot so viewport clicks collect edges on the pending feature.
 void CreateEdgeBlend(AppState& state, EdgeBlendOp op) {
@@ -482,14 +501,15 @@ void CreateThread(AppState& state) {
 void CreateShell(AppState& state) {
   if (!state.document || state.document->GetBodies().empty())
     return;
-  // The wall from the body's own size: thin enough that OCC accepts the
-  // offset on that body, at any scale. A pre-selected open face names the
-  // body (the seed overrides bodyId), so size from that one.
+  // The wall from the body's own thinnest wall: thin enough that OCC
+  // accepts the offset on that body, at any scale and on a body already
+  // hollow. A pre-selected open face names the body (the seed overrides
+  // bodyId), so size from that one.
   const uint64_t body = TargetBody(state, SelectionItem::Kind::Face);
   BeginPreviewFeature(state, std::make_unique<ShellFeature>(
                                  NextName(state, "Shell"), NewestBody(state),
                                  std::vector<ElementRef>{},
-                                 SizeFromBody(state, body, 0.25)));
+                                 SizeFromWall(state, body, 0.25)));
 }
 
 void CreateDraft(AppState& state) {

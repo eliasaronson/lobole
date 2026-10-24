@@ -21,8 +21,6 @@
 {"method":"mass_properties","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
-{"method":"add_feature","params":{"feature":{"body_id":100,"id":130,"name":"Sh3","open_faces":[{"element":"100/g2197111050","feature_id":100}],"thickness":3.55,"type":"Shell"}}}
-{"method":"undo","params":{}}
 {"method":"list_elements","params":{}}
 {"method":"get_state","params":{}}
 {"method":"add_feature","params":{"feature":{"angle_deg":8.0,"body_id":100,"faces":[{"element":"100/g936629783;G120","feature_id":100}],"id":140,"name":"D4","neutral_plane":"xy","type":"Draft"}}}

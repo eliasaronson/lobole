@@ -706,7 +706,21 @@ class Runner:
                     raise Failure("generator", f.message, k)
             else:
                 params = resolve(params, {"bodies": []})
-            answer = self.call(c["method"], params, k)
+            try:
+                answer = self.call(c["method"], params, k)
+            except Failure as f:
+                # A fillet, chamfer, shell, draft or hole the bodies refuse
+                # before it is committed (Feature::WhyRefusedOn) is the
+                # limit its failed build used to be, said earlier: undo what
+                # this step sent and go on, as below.
+                kind = (params.get("feature") or {}).get("type") \
+                    if c["method"] == "add_feature" else None
+                if (f.cls == "generator" and kind in LIMIT_TYPES
+                        and measured(f.message)):
+                    for _ in sent:
+                        self.call("undo", {}, k)
+                    return [], before, f.message
+                raise
             sent.append({"method": c["method"], "params": params})
         regen = answer.get("regen", {}) if isinstance(answer, dict) else {}
         failed = regen.get("failed", [])

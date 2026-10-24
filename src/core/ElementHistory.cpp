@@ -662,8 +662,23 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
         for (int idx : edgeIndices)
           mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
       });
-      if (!why)
+      if (!why) {
+        // An edge the builder took into no contour -- its faces tangent,
+        // or a face on one side only, and on no other edge's tangent
+        // chain -- was left out and the rest built, saying nothing.
+        for (int idx : edgeIndices) {
+          if (mk.Contour(TopoDS::Edge(edges(idx + 1))) != 0)
+            continue;
+          if (error) {
+            const std::string* n = bodyMap.EdgeNameOf(idx);
+            *error = "edge '" + (n != nullptr ? *n : std::to_string(idx)) +
+                     "' starts no blend (its two faces meet tangentially, "
+                     "or it has a face on one side only): leave it out";
+          }
+          return false;
+        }
         return true;
+      }
       if (error) {
         if (why->find("tangent chain runs into a loop") != std::string::npos)
           *error = "the edges tangent to this one run into a loop that does "
@@ -912,6 +927,117 @@ std::string UnresolvedReason(const RegenContext& ctx, const ElementRef& ref,
             return f->GetName() + " (" + std::to_string(id) + ")";
         return "feature " + std::to_string(id);
       });
+}
+
+namespace {
+
+bool Resolves(const Body& b, const std::string& name, ElementKind kind) {
+  return kind == ElementKind::Face ? b.elementMap.Resolve(name).has_value()
+                                   : b.elementMap.ResolveEdge(name).has_value();
+}
+
+std::string BodyLabel(const Body& b) { return "'" + b.name + "'"; }
+
+std::function<std::string(uint64_t)> ContextLabel(const RegenContext& ctx) {
+  return [&ctx](uint64_t id) -> std::string {
+    for (const auto& f : ctx.features)
+      if (f && f->GetId() == id)
+        return f->GetName() + " (" + std::to_string(id) + ")";
+    return "feature " + std::to_string(id);
+  };
+}
+
+} // namespace
+
+const Body* FindOwningBody(const std::vector<Body>& bodies,
+                           const ElementRef& ref, ElementKind kind,
+                           const std::string& what, std::string* why,
+                           const std::function<std::string(uint64_t)>& label) {
+  const auto featureLabel = [&](uint64_t id) {
+    return label ? label(id) : "feature " + std::to_string(id);
+  };
+  std::vector<const Body*> withId, resolving;
+  for (const Body& b : bodies) {
+    if (b.createdBy != ref.featureId)
+      continue;
+    withId.push_back(&b);
+    if (Resolves(b, ref.name, kind))
+      resolving.push_back(&b);
+  }
+  if (resolving.size() == 1)
+    return resolving.front();
+  if (resolving.size() > 1) {
+    if (why)
+      *why = what + " '" + ref.name + "' is on " +
+             std::to_string(resolving.size()) + " bodies made by " +
+             featureLabel(ref.featureId) + " (" + BodyLabel(*resolving[0]) +
+             " and " + BodyLabel(*resolving[1]) +
+             "), so the reference cannot say which: pick it on a body "
+             "whose names are its own";
+    return nullptr;
+  }
+  if (withId.empty()) {
+    // Named by the feature that MADE the element rather than the one that
+    // created its body (an element's made_by): say which id it is on.
+    for (const Body& b : bodies)
+      if (b.createdBy != 0 && Resolves(b, ref.name, kind)) {
+        if (why)
+          *why =
+              what + " '" + ref.name + "' is on the body " + BodyLabel(b) +
+              ", created by " + featureLabel(b.createdBy) +
+              ", not on a body of " + featureLabel(ref.featureId) +
+              ": reference it as {feature_id: " + std::to_string(b.createdBy) +
+              "} (its body's created_by)";
+        return nullptr;
+      }
+    if (why)
+      *why = "the body of " + what + " '" + ref.name + "' (created by " +
+             featureLabel(ref.featureId) +
+             ") no longer exists: that feature made no body, or a later one "
+             "consumed it";
+    return nullptr;
+  }
+  if (why)
+    *why = UnresolvedReason(bodies, ref, kind, what, label);
+  return nullptr;
+}
+
+Body* FindOwningBody(RegenContext& ctx, const ElementRef& ref, ElementKind kind,
+                     const std::string& what, std::string* why) {
+  return const_cast<Body*>(
+      FindOwningBody(ctx.bodies, ref, kind, what, why, ContextLabel(ctx)));
+}
+
+const Body*
+FindOwningBodyOfAll(const std::vector<Body>& bodies,
+                    const std::vector<ElementRef>& refs, ElementKind kind,
+                    const std::string& what, std::string* why,
+                    const std::function<std::string(uint64_t)>& label) {
+  const Body* first = nullptr;
+  const ElementRef* firstRef = nullptr;
+  for (const ElementRef& ref : refs) {
+    const Body* b = FindOwningBody(bodies, ref, kind, what, why, label);
+    if (b == nullptr)
+      return nullptr;
+    if (first == nullptr) {
+      first = b;
+      firstRef = &ref;
+    } else if (b != first) {
+      if (why)
+        *why = "every " + what + " must be on one body: '" + firstRef->name +
+               "' is on " + BodyLabel(*first) + " and '" + ref.name + "' on " +
+               BodyLabel(*b);
+      return nullptr;
+    }
+  }
+  return first;
+}
+
+Body* FindOwningBodyOfAll(RegenContext& ctx,
+                          const std::vector<ElementRef>& refs, ElementKind kind,
+                          const std::string& what, std::string* why) {
+  return const_cast<Body*>(FindOwningBodyOfAll(ctx.bodies, refs, kind, what,
+                                               why, ContextLabel(ctx)));
 }
 
 } // namespace topo

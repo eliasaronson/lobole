@@ -170,7 +170,7 @@
   "list_drawing_notes": [],
   "list_drawing_views": [],
   "list_drawings": [],
-  "list_elements": ["body", "configuration", "entity", "made_by", "max_faces", "part", "role", "via"],
+  "list_elements": ["body", "configuration", "entity", "made_by", "max_faces", "part", "role", "via", "walls"],
   "list_exploded_views": [],
   "list_job_parts": ["job"],
   "list_machines": [],

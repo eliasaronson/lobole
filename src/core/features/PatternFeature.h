@@ -40,6 +40,8 @@ public:
   }
 
   bool Execute(RegenContext& ctx) override;
+  [[nodiscard]] std::string WhyRefusedOn(const std::vector<Body>& input,
+                                         const Document& doc) const override;
   uint64_t MaterialSource() const override { return sourceId; }
 
   void VisitFeatureRefs(const RefVisitor& visit) const override {

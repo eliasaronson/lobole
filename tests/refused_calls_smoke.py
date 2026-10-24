@@ -437,6 +437,40 @@ def main():
                    "feature": dict(m6, designation="M8", pitch=1.0)},
                   needle="M8x1", tab=part["name"])
 
+            # What the bodies refuse (Feature::WhyRefusedOn), before the
+            # feature is committed (docs/modeling/README.md#refused-on-the-bodies):
+            # an element named by the feature that MADE it rather than the
+            # one that created its body, and a pattern of a feature that
+            # made no body.
+            d.call("set_active_part", part=part["name"])
+            plate = next(b for b in d.call("list_elements")["bodies"]
+                         if b["name"] == "Plate")
+            rim = next(e["name"] for e in plate["edges"]
+                       if not e.get("smooth"))
+            rounded = d.call("add_feature", feature={
+                "type": "Fillet", "name": "Round",
+                "edges": [{"feature_id": plate["created_by"],
+                           "element": rim}], "radius": 1.0})["id"]
+            plate = next(b for b in d.call("list_elements")["bodies"]
+                         if b["name"] == "Plate")
+            by_round = next(e["name"] for e in plate["edges"]
+                            if e.get("made_by") == rounded
+                            and not e.get("smooth"))
+            check("fillet named by made_by", "add_feature",
+                  {"feature": {"type": "Fillet", "name": "Again",
+                               "edges": [{"feature_id": rounded,
+                                          "element": by_round}],
+                               "radius": 0.5}},
+                  needle=f"reference it as {{feature_id: "
+                         f"{plate['created_by']}}}", tab=part["name"])
+            check("pattern of a fillet", "add_feature",
+                  {"feature": {"type": "Pattern", "name": "Row",
+                               "kind": "linear", "source_id": rounded,
+                               "count": 2, "spacing": 100,
+                               "axis": {"kind": "x"}}},
+                  needle=f"source_id: {plate['created_by']}",
+                  tab=part["name"])
+
             # The single-call rollback: a handler that edited and THEN
             # refused leaves nothing behind -- part, job.
             d.call("set_active_part", part=part["name"])

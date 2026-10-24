@@ -125,6 +125,21 @@ void ShowTheBlank(AppState& state, uint64_t flatId, size_t mark) {
 }
 } // namespace
 
+namespace {
+// Feature::WhyRefusedOn against the pending feature's input: the bodies the
+// regen cache holds from before it.
+std::string PendingRefusal(const AppState& state, const Feature& f,
+                           size_t idx) {
+  static const std::vector<Body> kNone;
+  if (!state.document)
+    return {};
+  const std::vector<Body>* input =
+      idx == 0 ? &kNone : state.document->CachedBodiesAfter(idx - 1);
+  return input != nullptr ? f.WhyRefusedOn(*input, *state.document)
+                          : std::string();
+}
+} // namespace
+
 void AcceptPendingFeature(AppState& state) {
   size_t idx = 0;
   Feature* f = ResolvePendingFeature(state, &idx);
@@ -136,6 +151,13 @@ void AcceptPendingFeature(AppState& state) {
   // Accept for the same reason (the slot gate), but keyboard paths, scripts
   // and future callers all land here.
   if (!f->WhyIncomplete().empty())
+    return;
+  // Nor one the bodies it acts on refuse (Feature::WhyRefusedOn), which
+  // add_feature refuses with the same words: the GUI and the RPC refuse
+  // the same things. Execute runs the same checks, so the dialog already
+  // shows the reason as the preview's error and disables Accept; this is
+  // for the paths that reach here without it (keyboard, scripts).
+  if (!PendingRefusal(state, *f, idx).empty())
     return;
   // Remove (id preserved) then re-add through a command, so accept is a single
   // undoable action and downstream id references stay valid.

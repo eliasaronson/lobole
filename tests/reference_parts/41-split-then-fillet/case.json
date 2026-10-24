@@ -1,7 +1,6 @@
 {
   "title": "Box split at mid-length, an edge of the second piece filleted r2",
   "exercises": "a Fillet on the second piece of a Split, whose pieces share one `created_by`",
-  "known_failure": "docs/known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build",
   "steps": [
     {
       "method": "add_feature",

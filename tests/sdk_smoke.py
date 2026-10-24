@@ -295,7 +295,10 @@ def check_bad_blend_refuses(app):
     spokes.polyline([(-12, -160), (12, -160), (12, 160), (-12, 160)])
     part.extrude(spokes.add(), distance=16.0, mode="add", name="spokes")
 
-    edges = [e for e in part.body().edges(kind="line") if e.length > 15.0]
+    # Edges where two faces meet at an angle: one between tangent faces has
+    # nothing to round, and is refused before the kernel sees it.
+    edges = [e for e in part.body().edges(kind="line")
+             if e.length > 15.0 and not e.smooth]
     expect(len(edges) > 20, f"the test needs a big blend set: {len(edges)}")
     part.fillet(edges, r=8.0, name="doomed")
     # Still answering, which is the whole point of the test.

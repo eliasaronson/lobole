@@ -161,6 +161,32 @@ std::string UnresolvedReason(const std::vector<Body>& bodies,
                              const ElementRef& ref, ElementKind kind,
                              const std::string& what);
 
+// The body a reference lands on. Pattern copies and split pieces keep the
+// createdBy of the feature that made them, so an id alone does not say which
+// body: this is the ONE body with `ref.featureId` whose map resolves
+// `ref.name`. Null with `why` set when none does (UnresolvedReason; or, when
+// no body has that id but another resolves the name -- a ref naming the
+// feature that MADE the element rather than the one that created its body
+// -- the id to use instead) or when two do (both named). `what` is the
+// element's role in the error ("edge", "face to draft"); `label` names a
+// feature by id ("Slot (4)"), "feature 4" without one.
+const Body*
+FindOwningBody(const std::vector<Body>& bodies, const ElementRef& ref,
+               ElementKind kind, const std::string& what, std::string* why,
+               const std::function<std::string(uint64_t)>& label = {});
+Body* FindOwningBody(RegenContext& ctx, const ElementRef& ref, ElementKind kind,
+                     const std::string& what, std::string* why);
+// FindOwningBody for every ref of one feature, which must all land on the
+// same body: null with `why` naming the two bodies when they do not.
+const Body*
+FindOwningBodyOfAll(const std::vector<Body>& bodies,
+                    const std::vector<ElementRef>& refs, ElementKind kind,
+                    const std::string& what, std::string* why,
+                    const std::function<std::string(uint64_t)>& label = {});
+Body* FindOwningBodyOfAll(RegenContext& ctx,
+                          const std::vector<ElementRef>& refs, ElementKind kind,
+                          const std::string& what, std::string* why);
+
 // 0-based index of `edge` within `shape`'s deduplicated edge order
 // (TopExp::MapShapes(TopAbs_EDGE) first-appearance order) — the edgeIndex
 // convention ElementMap::edgeNames uses. -1 if absent.

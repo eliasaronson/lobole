@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/features/PatternFeature.h"
+#include "core/Document.h"
 
 #include "core/ModelSpace.h"
 
@@ -181,6 +182,39 @@ bool PatternFeature::PatternInRange(int n) {
     return false;
   }
   return true;
+}
+
+std::string PatternFeature::WhyRefusedOn(const std::vector<Body>& input,
+                                         const Document& doc) const {
+  if (sourceId == 0)
+    return {};
+  for (const Body& b : input)
+    if (b.createdBy == sourceId)
+      return {};
+  const Feature* src = doc.FindFeatureById(sourceId);
+  if (src != nullptr && src->ToolShape() != nullptr &&
+      src->ToolShape()->IsValid())
+    return {};
+  const char* what = kind == PatternKind::Mirror ? "mirror" : "pattern";
+  const std::string label =
+      src != nullptr ? src->GetName() + " (" + std::to_string(sourceId) + ")"
+                     : "feature " + std::to_string(sourceId);
+  std::string out = std::string("cannot ") + what + " " + label +
+                    ": it made no body of its own and swept no tool to repeat";
+  // A Fillet, a Shell, a Draft changes the body another feature created:
+  // that feature's id is the body's, and the one to pattern.
+  for (const Body& b : input)
+    for (const auto& [index, name] : b.elementMap.names) {
+      (void)index;
+      if (topo::DecodeElementName(name).madeBy != sourceId)
+        continue;
+      return out + "; it changed the body '" + b.name + "', created by " +
+             "feature " + std::to_string(b.createdBy) + ": " + what +
+             " that body with {source_id: " + std::to_string(b.createdBy) + "}";
+    }
+  return src == nullptr ? std::string(what) + " source feature " +
+                              std::to_string(sourceId) + " does not exist"
+                        : out;
 }
 
 bool PatternFeature::Execute(RegenContext& ctx) {

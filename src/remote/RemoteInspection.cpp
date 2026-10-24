@@ -31,6 +31,7 @@
 #include "core/features/FrameFeature.h"
 #include "core/features/PatternFeature.h"
 #include "core/features/PipeFeature.h"
+#include "core/features/ShellFeature.h" // ThinnestWall
 #include "core/features/ThreadFeature.h"
 #include "core/io/Serialization.h"
 #include "core/tube/CutList.h"
@@ -1365,12 +1366,18 @@ static constexpr MethodDoc InspectionMethods[] = {
      "`inside_point`, a point ON it as far inside as a sampling finds (the "
      "centroid of an annulus or an L lies off the face), and `inset_mm`, "
      "that point's distance in mm to the face's boundary: a sketch on the "
-     "face centred there with a radius under it stays on the face.",
+     "face centred there with a radius under it stays on the face. "
+     "walls: true adds each body's `thinnest_wall_mm`: from a point well "
+     "inside each face, along its inward normal, to where the line leaves "
+     "the solid, the least over its faces -- what the Shell tool's default "
+     "wall is a tenth of (docs/modeling/README.md#refused-on-the-bodies).",
      "part?:string|int, configuration?:string|int, body?:int, entity?:int>=0, "
-     "made_by?:string|int, role?:string, via?:string|int, max_faces?:int>=0",
+     "made_by?:string|int, role?:string, via?:string|int, max_faces?:int>=0, "
+     "walls?:bool",
      remote::NoFlags,
      "bodies:{body:int, created_by:int, edges:object[], faces:object[], "
-     "job_part:int, name:string, unnamed_faces:int}[], "
+     "job_part:int, name:string, unnamed_faces:int, "
+     "thinnest_wall_mm?:number}[], "
      "matched_edges?:int, matched_faces?:int, why?:string"},
     {"curve_points",
      "The polyline a Curve3D actually BUILT, sampled to `deflection_mm` "
@@ -7095,6 +7102,7 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
     // bodies. A part holding a derived 197-body camera has 17,186 faces:
     // the call took 172 s, when `body` would have made it instant.
     const size_t maxFaces = p.value("max_faces", size_t{4000});
+    const bool walls = p.value("walls", false);
     size_t faceCount = 0, describedBodies = 0;
     for (size_t i = 0; i < bodies.size(); i++) {
       if (only >= 0 && i != static_cast<size_t>(only))
@@ -7223,6 +7231,9 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
            {"unnamed_faces",
             std::max(0, shapeFaces - static_cast<int>(
                                          bodies[i].elementMap.names.size()))}});
+      if (walls)
+        if (const auto w = ThinnestWall(bodies[i]))
+          out.back()["thinnest_wall_mm"] = *w;
     }
     json result{{"bodies", out}};
     if (filter.Any()) {

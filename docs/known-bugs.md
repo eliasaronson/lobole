@@ -11,31 +11,6 @@ the heading if it is not here yet.
 
 ## Modeling
 
-### A fillet on the second piece of a split does not build
-
-- **Symptom:** split a body, pick an edge of the second piece
-  (`query_geometry` hands back `{feature_id: <its created_by>, element}`)
-  and fillet it: the fillet fails with "edge '…' no longer exists". The
-  reference the app gave out is one it cannot resolve.
-  `tests/reference_parts/41-split-then-fillet` is the case. A pattern's or a
-  mirror's copies share their body's `createdBy` too: the
-  [action matrix](modeling/README.md#action-matrix)'s fillets, chamfers,
-  shells and drafts fail this way on elements of the other bodies of
-  `reference/40-split`, `golden/v39-split`, `golden/v17-full`,
-  `golden/v15-pattern` and random design 11, which are `!` entries in its
-  baseline.
-- **Cause:** every piece of a split keeps the split body's `createdBy`, and an
-  `ElementRef` names a body by that id alone, so the feature binds to the
-  first body carrying it and looks the name up there.
-- **Where:** the body lookup in `src/core/features/FilletFeature.cpp`, and
-  every feature that finds its body by `createdBy` the same way (Shell,
-  Boolean, Draft and the rest; not the direct edits, which take the body
-  that holds their first face's name, `directedit::BodyHolding`).
-- **Likely fix:** a body sub-ordinal on `Body` and `ElementRef` (a piece's
-  names already differ: `…/b2/…`); short of that, resolve a named element
-  against every body sharing the id and refuse a name that two of them carry,
-  as `directedit::BodyHolding` (`src/core/DirectEdit.cpp`) does.
-
 ### A Draft or a Fillet can fault inside OpenCASCADE
 
 - **Symptom:** a Draft of the faces square to a planar face, 2° about the

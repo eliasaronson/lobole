@@ -50,15 +50,50 @@ glm::dvec3 PlaneNormal(PlaneType t) {
 }
 } // namespace
 
-bool DraftFeature::Execute(RegenContext& ctx) {
-  const auto body =
-      std::find_if(ctx.bodies.begin(), ctx.bodies.end(),
-                   [&](const Body& b) { return b.createdBy == bodyId; });
-  if (body == ctx.bodies.end()) {
-    SetError("the body to draft no longer exists");
-    return false;
+// A face square to the pull (its normal along it) cannot be tapered about
+// the neutral plane: DraftAngle silently no-ops it. Refused before the
+// kernel sees it, by WhyRefusedOn and Execute alike.
+static std::string PerpendicularFace(const Body& body,
+                                     const std::vector<int>& idx,
+                                     const std::vector<ElementRef>& faces,
+                                     const glm::dvec3& n) {
+  for (size_t k = 0; k < idx.size(); k++) {
+    glm::dvec3 fc, fn, fu;
+    if (body.shape.FacePlane(idx[k], fc, fn, fu) &&
+        std::abs(glm::dot(glm::normalize(fn), n)) > 0.99)
+      return "the drafted face '" + faces[k].name +
+             "' is perpendicular to the pull direction (pick a side face, "
+             "or a different neutral plane)";
   }
+  return {};
+}
+
+std::string DraftFeature::WhyRefusedOn(const std::vector<Body>& input,
+                                       const Document& doc) const {
+  (void)doc;
+  if (faces.empty())
+    return {};
+  for (const ElementRef& ref : faces)
+    if (ref.featureId != bodyId)
+      return "all drafted faces must belong to the same body";
+  std::string why;
+  const Body* body = topo::FindOwningBodyOfAll(
+      input, faces, topo::ElementKind::Face, "drafted face", &why);
+  if (body == nullptr)
+    return why;
+  std::vector<int> idx;
+  for (const ElementRef& ref : faces)
+    idx.push_back(*body->elementMap.Resolve(ref.name));
+  return PerpendicularFace(*body, idx, faces, PlaneNormal(neutralPlane));
+}
+
+bool DraftFeature::Execute(RegenContext& ctx) {
   if (faces.empty()) {
+    if (std::none_of(ctx.bodies.begin(), ctx.bodies.end(),
+                     [&](const Body& b) { return b.createdBy == bodyId; })) {
+      SetError("the body to draft no longer exists");
+      return false;
+    }
     return true; // previewing: no faces picked yet
   }
   for (const ElementRef& ref : faces) {
@@ -67,18 +102,26 @@ bool DraftFeature::Execute(RegenContext& ctx) {
       return false;
     }
   }
+  // The body that holds the faces: a pattern's copies and a split's pieces
+  // share the createdBy, and the first of them is not always it.
+  std::string why;
+  Body* const body = topo::FindOwningBodyOfAll(
+      ctx, faces, topo::ElementKind::Face, "drafted face", &why);
+  if (body == nullptr) {
+    SetError(why);
+    return false;
+  }
 
   // Resolve face names -> current indices -> TopoDS_Face (TopExp_Explorer
   // 0-based order, the ElementMap convention).
   std::vector<int> idx;
-  for (const ElementRef& ref : faces) {
-    const auto i = body->elementMap.Resolve(ref.name);
-    if (!i) {
-      SetError(topo::UnresolvedReason(ctx, ref, topo::ElementKind::Face,
-                                      "drafted face"));
-      return false;
-    }
-    idx.push_back(*i);
+  for (const ElementRef& ref : faces)
+    idx.push_back(*body->elementMap.Resolve(ref.name));
+  if (std::string no =
+          PerpendicularFace(*body, idx, faces, PlaneNormal(neutralPlane));
+      !no.empty()) {
+    SetError(no);
+    return false;
   }
 
   // On a copy, topology only, as Shell's and the blend's are: the body is
@@ -111,15 +154,6 @@ bool DraftFeature::Execute(RegenContext& ctx) {
     for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next(), i++) {
       if (std::find(idx.begin(), idx.end(), i) == idx.end())
         continue;
-      // A face perpendicular to the pull (normal parallel to it) can't be
-      // tapered — DraftAngle silently no-ops it, so reject it up front.
-      glm::dvec3 fc, fn, fu;
-      if (body->shape.FacePlane(i, fc, fn, fu) &&
-          std::abs(glm::dot(glm::normalize(fn), n)) > 0.99) {
-        SetError("a drafted face is perpendicular to the pull direction "
-                 "(pick a side face, or a different neutral plane)");
-        return false;
-      }
       {
         // The face's span along the pull axis, from its own bounding box.
         Bnd_Box fbox;

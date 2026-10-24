@@ -188,43 +188,57 @@ struct OffsetHistory {
 
 } // namespace
 
-std::optional<double> ThicknessUnder(const Body& body, int faceIndex) {
+std::vector<std::optional<WallUnder>>
+WallsUnder(const Body& body, const std::vector<int>& faceIndices) {
+  std::vector<std::optional<WallUnder>> out(faceIndices.size());
   const TopoDS_Shape& shape = body.shape.GetShape();
-  const TopoDS_Face face = FaceAt(shape, faceIndex);
-  if (face.IsNull())
-    return std::nullopt;
-  const auto inset = Measure::FaceInsetOf(face);
-  if (!inset)
-    return std::nullopt;
-  const Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
-  if (surf.IsNull())
-    return std::nullopt;
-  const gp_Pnt p(inset->point.x, inset->point.y, inset->point.z);
-  GeomAPI_ProjectPointOnSurf proj(p, surf);
-  if (!proj.IsDone() || proj.NbPoints() == 0)
-    return std::nullopt;
-  double u = 0.0, v = 0.0;
-  proj.LowerDistanceParameters(u, v);
-  GeomLProp_SLProps props(surf, u, v, 1, Precision::Confusion());
-  if (!props.IsNormalDefined())
-    return std::nullopt;
-  gp_Dir n = props.Normal();
-  if (face.Orientation() == TopAbs_REVERSED)
-    n.Reverse();
-  // Inward: against the outward normal.
-  const gp_Lin line(p, n.Reversed());
+  if (shape.IsNull())
+    return out;
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(shape, TopAbs_FACE, faces);
   IntCurvesFace_ShapeIntersector hit;
   hit.Load(shape, Precision::Confusion());
-  hit.Perform(line, 1e-6, Precision::Infinite());
-  if (!hit.IsDone())
-    return std::nullopt;
-  std::optional<double> nearest;
-  for (int i = 1; i <= hit.NbPnt(); i++) {
-    const double w = hit.WParameter(i);
-    if (w > 1e-5 && (!nearest || w < *nearest))
-      nearest = w;
+  for (size_t k = 0; k < faceIndices.size(); k++) {
+    const TopoDS_Face face = FaceAt(shape, faceIndices[k]);
+    if (face.IsNull())
+      continue;
+    const auto inset = Measure::FaceInsetOf(face);
+    if (!inset)
+      continue;
+    const Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+    if (surf.IsNull())
+      continue;
+    const gp_Pnt p(inset->point.x, inset->point.y, inset->point.z);
+    GeomAPI_ProjectPointOnSurf proj(p, surf);
+    if (!proj.IsDone() || proj.NbPoints() == 0)
+      continue;
+    double u = 0.0, v = 0.0;
+    proj.LowerDistanceParameters(u, v);
+    GeomLProp_SLProps props(surf, u, v, 1, Precision::Confusion());
+    if (!props.IsNormalDefined())
+      continue;
+    gp_Dir n = props.Normal();
+    if (face.Orientation() == TopAbs_REVERSED)
+      n.Reverse();
+    // Inward: against the outward normal.
+    const gp_Lin line(p, n.Reversed());
+    hit.Perform(line, 1e-6, Precision::Infinite());
+    if (!hit.IsDone())
+      continue;
+    for (int i = 1; i <= hit.NbPnt(); i++) {
+      const double w = hit.WParameter(i);
+      if (w > 1e-5 && (!out[k] || w < out[k]->thickness))
+        out[k] = WallUnder{w, faces.FindIndex(hit.Face(i)) - 1};
+    }
   }
-  return nearest;
+  return out;
+}
+
+std::optional<double> ThicknessUnder(const Body& body, int faceIndex) {
+  const auto w = WallsUnder(body, {faceIndex});
+  if (!w.front())
+    return std::nullopt;
+  return w.front()->thickness;
 }
 
 std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,

@@ -197,20 +197,16 @@ bool ThreadFeature::Execute(RegenContext& ctx) {
     return false;
   }
 
-  const auto body =
-      std::find_if(ctx.bodies.begin(), ctx.bodies.end(), [&](const Body& b) {
-        return b.createdBy == face.featureId;
-      });
-  if (body == ctx.bodies.end()) {
-    SetError("the threaded body no longer exists");
+  // The body that holds the face: a pattern's copies and a split's pieces
+  // share the createdBy, and the first of them is not always it.
+  std::string why;
+  Body* const body = topo::FindOwningBody(ctx, face, topo::ElementKind::Face,
+                                          "threaded face", &why);
+  if (body == nullptr) {
+    SetError(why);
     return false;
   }
   const auto idx = body->elementMap.Resolve(face.name);
-  if (!idx) {
-    SetError(topo::UnresolvedReason(ctx, face, topo::ElementKind::Face,
-                                    "threaded face"));
-    return false;
-  }
   TopoDS_Face occFace;
   int i = 0;
   for (TopExp_Explorer ex(body->shape.GetShape(), TopAbs_FACE); ex.More();

@@ -154,6 +154,38 @@ void RefuseFailingDirectEdit(const Document& doc, const Feature& f,
                              ". The document is unchanged");
 }
 
+// What a feature says about the bodies it would act on (Feature::WhyRefusedOn):
+// an element on no body or on two, a blend edge with nothing to round, a
+// shell wall the body cannot take, a pattern of a feature that made no body.
+// Refused here with the document unchanged, where it used to be committed as
+// a feature that could only fail. `at` is the index a modify replaces; the
+// input is then the cached bodies before it (unknown: not checked), and for
+// an add the tip, unless the rollback bar stops short of it.
+void RefuseOnInput(const Document& doc, const Feature& f,
+                   std::optional<size_t> at) {
+  // Inside a batch the regeneration is deferred, and the bodies are the
+  // batch's start: the feature's own Execute runs the same checks, and the
+  // batch refuses what it leaves broken.
+  if (doc.InBulkEdit())
+    return;
+  static const std::vector<Body> kNone;
+  const std::vector<Body>* input = nullptr;
+  if (!at) {
+    if (doc.Rollback() < 0 ||
+        static_cast<size_t>(doc.Rollback()) >= doc.FeatureCount())
+      input = &doc.GetBodies();
+  } else if (*at == 0) {
+    input = &kNone;
+  } else {
+    input = doc.CachedBodiesAfter(*at - 1);
+  }
+  if (input == nullptr)
+    return;
+  if (const std::string why = f.WhyRefusedOn(*input, doc); !why.empty())
+    throw std::runtime_error(f.TypeName() + " refused: " + why +
+                             ". The document is unchanged");
+}
+
 // V2 strict inputs: the feature dialect used to IGNORE unknown fields — a
 // Box with mode:"add" was accepted and the mode silently dropped (the dock
 // dogfooding round's silent-failure class). Rather than maintain a per-type
@@ -1315,6 +1347,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     if (const std::string why = feature->WhyIncomplete(); !why.empty()) {
       throw std::runtime_error(feature->TypeName() + " is incomplete: " + why);
     }
+    RefuseOnInput(*doc, *feature, std::nullopt);
     RefuseFailingDirectEdit(*doc, *feature, std::nullopt);
     const json preDigest = BodyDigestJson(*doc);
     state.commands->Execute(
@@ -1498,6 +1531,7 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
       const auto probe = FeatureFromJsonNamed(p.at("feature"));
       RejectUnknownFeatureFields(p.at("feature"), *probe);
       RefuseThread(*probe);
+      RefuseOnInput(*doc, *probe, index);
       RefuseFailingDirectEdit(*doc, *probe, index);
     }
     json before = DocumentIO::FeatureToJson(*feature);

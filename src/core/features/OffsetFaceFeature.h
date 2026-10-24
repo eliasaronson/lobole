@@ -68,4 +68,13 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
 // solid. nullopt when it cannot be measured.
 std::optional<double> ThicknessUnder(const Body& body, int faceIndex);
 
+// ThicknessUnder for each of `faceIndices` at once (the solid loaded into
+// one intersector), with the face where each line leaves the solid.
+struct WallUnder {
+  double thickness = 0.0;
+  int exitFace = -1; // 0-based explorer index
+};
+std::vector<std::optional<WallUnder>>
+WallsUnder(const Body& body, const std::vector<int>& faceIndices);
+
 } // namespace directedit
