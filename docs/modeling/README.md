@@ -1114,7 +1114,9 @@ is not tried and not recorded:
 The matrix copies no GUI literal (Fillet and Chamfer start at 0.5, Shell at
 0.25, in `CreateActions.cpp`). On a body past 100 faces the direct edits,
 like the shell, take only the four planar faces whose names hash lowest. A
-direct edit is never in the fail class: it passes or it is refused.
+direct edit passes or is refused, except where it takes away a painted face
+(golden `v164-face-appearance`): the document then warns that the face
+appearance names no face any more, and a new warning is a fail.
 
 **An outcome.** Each action is one `add_feature`, or one `batch` for a
 sketch and its feature, then `undo`:
