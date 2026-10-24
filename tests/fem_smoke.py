@@ -464,6 +464,31 @@ def main():
             expect(not loads, f"remove_load by id took it away: {loads}")
             d.call("remove_study", id=made["id"])
 
+            # num_modes is a modal study's: on a static one the save dropped
+            # it (and the reader refuses it in a file), so the call refuses
+            # it, naming the type that takes it -- and changes nothing. In
+            # ONE call with type: modal it is accepted, type applied first.
+            plain = d.call("add_study", type="static", name="Plain")["id"]
+
+            def listed(sid):
+                return [x for x in d.call("list_studies")["studies"]
+                        if x["id"] == sid][0]
+            was = listed(plain)
+            try:
+                d.call("set_study", id=plain, name="Renamed", num_modes=4)
+                raise AssertionError("set_study took num_modes on a static "
+                                     "study")
+            except RuntimeError as e:
+                expect("num_modes applies to a modal study" in str(e)
+                       and "type: modal" in str(e),
+                       f"the refusal names what makes it valid: {e}")
+            expect(listed(plain) == was,
+                   f"a refused set_study changed the study: {listed(plain)}")
+            d.call("set_study", id=plain, type="modal", num_modes=4)
+            expect(listed(plain)["type"] == "modal",
+                   f"type and num_modes in one call: {listed(plain)}")
+            d.call("remove_study", id=plain)
+
             assembly_study(d)
 
             print("fem_smoke: OK")

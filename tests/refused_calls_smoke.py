@@ -518,6 +518,25 @@ def main():
                 note("Renamed" not in names,
                      f"set_cam_setup renamed the setup under a refusal: "
                      f"{names}")
+                # finish_stock is left FOR a finishing pass: without a
+                # finish_tool the save dropped it (the reader refuses it in
+                # a file), so the call refuses it, naming what it needs.
+                ops = [o for s in d.call("list_cam_setups")["setups"]
+                       if s["id"] == setup for o in s["operations"]]
+                check("finish_stock without finish_tool", "add_cam_op",
+                      {"setup": setup, "type": "profile", "top_z": 21.0,
+                       "bottom_z": 0.0, "finish_stock": 0.3},
+                      needle="set finish_tool", tab="Job")
+                check("finish_stock without finish_tool on set_cam_op",
+                      "set_cam_op",
+                      {"id": ops[0]["id"], "name": "Restocked",
+                       "finish_stock": 0.3},
+                      needle="set finish_tool", tab="Job")
+                after = [o for s in d.call("list_cam_setups")["setups"]
+                         if s["id"] == setup for o in s["operations"]]
+                note(after == ops,
+                     f"a refused finish_stock changed the operations: "
+                     f"{ops} -> {after}")
 
             if problems:
                 print("refused_calls_smoke: FAILED")

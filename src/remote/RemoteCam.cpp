@@ -416,7 +416,8 @@ constexpr MethodDoc kCamMethods[] = {
      "(rough with `tool` "
      "leaving finish_stock -- derived as a tenth of its diameter -- then "
      "take the wall in one full-depth pass with this tool; two toolpaths "
-     "from one operation), finish_stock?, side?: "
+     "from one operation), finish_stock? (only beside a finish_tool: "
+     "refused on an operation without one), side?: "
      "outside|inside|on, climb?, "
      "stepover?, stock_to_leave?, tabs?: {count, width, height}, targets?: "
      "[{feature_id, element, part?}]}; EVERY target is cut -- five holes "
@@ -503,7 +504,9 @@ constexpr MethodDoc kCamMethods[] = {
      "follows the new one (every derived number is a fraction of the "
      "cutter), one you typed is kept, and a tool this setup does not have is "
      "refused. The tool's reach is checked as add_cam_op checks it: refused "
-     "when the shank would be driven into a wall, `warnings` otherwise.",
+     "when the shank would be driven into a wall, `warnings` otherwise. "
+     "finish_stock is refused on an operation with no finish_tool (set one "
+     "in the same call).",
      "bottom_z, climb, corner_relief, cut_angle_deg, cutter_comp, depth_mm, "
      "edge_size, "
      "enabled, finish_stock, finish_tool, id, index_a_deg, lead_arcs, "
@@ -886,8 +889,17 @@ void ApplyOpFields(ui::AppState& state, const cam::Setup& setup,
       if (const cam::Tool* rough = setup.FindTool(op.toolNumber))
         op.finishStock = cam::DefaultFinishStock(*rough);
   }
-  if (p.contains("finish_stock"))
+  // The stock is left FOR a finishing pass: without one the save drops it
+  // and the reader refuses it in a file, so it is refused here, where it is
+  // said.
+  if (p.contains("finish_stock")) {
+    if (op.finishTool == 0)
+      throw std::runtime_error(
+          "finish_stock is what a finishing pass takes off, and this "
+          "operation has none; set finish_tool (another tool in the setup's "
+          "table) with it");
     op.finishStock = p.at("finish_stock").get<double>();
+  }
   // An engraving's groove is ONE statement, its width or its depth
   // (docs/cam/operations.md#engrave): stating one clears the other, and the
   // bottom follows it. A groove the tool cannot cut -- a width past a V-bit's

@@ -31,14 +31,6 @@ the heading if it is not here yet.
 
 ## Modeling
 
-### Two values a call accepts are dropped on save
-
-- **Symptom:** `set_study` accepts `num_modes` on a study that is not modal,
-  and `add_cam_op` accepts `finish_stock` without `finish_tool`; the save
-  drops both, and the reader refuses them in a file.
-- **Where:** the `set_study` and `add_cam_op` handlers.
-- **Likely fix:** refuse them at the call, naming what makes them valid.
-
 ### Some add paths ignore the feature limit
 
 - **Symptom:** beginning a sketch, DXF/SVG import into a sketch, inserting a

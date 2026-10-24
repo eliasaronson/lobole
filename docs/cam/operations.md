@@ -592,7 +592,10 @@ rough's bottom is lowered by the finish stock to cancel it; a bore helixes to
 its own bottom and an edge break sizes itself from its depth, so theirs is
 left alone (lowered, a bore was roughed 0.2 mm under its floor). One operation with two tools rather than two operations that must agree
 about a boundary; tool ordering groups the two toolpaths. The panel's
-operation settings offer "finish with T<n>".
+operation settings offer "finish with T<n>". `add_cam_op` and `set_cam_op`
+refuse a `finish_stock` on an operation with no `finish_tool`: the stock is
+saved only beside its pass, so it would vanish on save (and the reader
+refuses it in a file); setting `finish_tool` alone derives the stock.
 
 ## Tolerance bands
 

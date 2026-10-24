@@ -703,7 +703,7 @@ verb that names a study for context (`add_load`, `add_refinement`,
 |---|---|
 | `add_study {type?, name?}` | `type`: static \| modal \| topology (`kind` accepted) |
 | `remove_study`, `list_studies` | list reports type, mesh size, loads, `has_results`, `stale`, participants |
-| `set_study` | `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes`, `participants`, `load_cases`, `shape_from`, topology parameters |
+| `set_study` | `mesh_size`, `type`, `gravity` [x,y,z] m/s², `num_modes` (a modal study's: refused on another unless the same call sets `type: modal`, which is applied first), `participants`, `load_cases`, `shape_from`, topology parameters |
 | `add_load {study, type, face \| contact_with, occurrence?, magnitude?, direction?, case?, region?}` | returns the load id; `type` torque takes `torque_nmm` and `axis_origin_mm` + `axis_dir` (omitted on a cylinder), remote takes `force_n`, `direction?` and `point_mm` ([torque and remote loads](#torque-and-remote-loads)); `region` puts it on part of its face ([loads on part of a face](#loads-on-part-of-a-face)) |
 | `remove_load {study, id}` | by load id |
 | `add_refinement {study, face, size, occurrence?}`, `remove_refinement` | local element size, mm |

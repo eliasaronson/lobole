@@ -401,7 +401,9 @@ static constexpr MethodDoc SimulationMethods[] = {
      "threshold? (0..1, 0 = the volume-matched level)} or {study, whole: "
      "true} (every tet of its design domain, the solid reference); null "
      "clears it "
-     "(docs/topopt/README.md#a-static-study-of-the-optimised-shape).",
+     "(docs/topopt/README.md#a-static-study-of-the-optimised-shape). "
+     "`num_modes` is a modal study's: refused on another type unless the "
+     "same call sets type: modal (type is applied first).",
      "filter_radius, gravity, id, load_cases, max_iterations, mesh_size, "
      "name, num_modes, participants, shape_from, study, type, "
      "volume_fraction"},
@@ -1002,8 +1004,18 @@ std::optional<json> HandleSimulationRpc(ui::AppState& state, Document* doc,
           s.participants.push_back(std::move(pt));
         }
       }
-      if (p.contains("num_modes"))
+      // A modal study's alone: on another the save drops it, and the reader
+      // refuses it in a file, so it is refused here, where it is said.
+      // After `type`, so one call can make a study modal and size it.
+      if (p.contains("num_modes")) {
+        if (s.type != fem::AnalysisType::Modal)
+          throw std::runtime_error(
+              std::string("num_modes applies to a modal study, and this one "
+                          "is ") +
+              fem::AnalysisTypeToString(s.type) +
+              "; set type: modal (in this call or before it)");
         s.numModes = IntParam(p.at("num_modes"), "num_modes");
+      }
       if (p.contains("gravity")) {
         s.gravity = remote::Vec3Param(p.at("gravity"), "gravity");
       }
