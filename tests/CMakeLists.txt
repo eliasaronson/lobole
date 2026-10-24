@@ -1499,9 +1499,9 @@ set_tests_properties(hostile_params_selftest PROPERTIES TIMEOUT 120)
 # exist only under a configuration: no plain ctest (the headless suite, CI)
 # sees them, and
 #   tools/ctest -C action_matrix -L action_matrix -j4
-# runs them. A shard is up to 1200 s on a quiet machine (shard 0, which holds
-# the gear train's wheel) since the direct edits joined, and past 1800 s
-# beside two others on a loaded one.
+# runs them. With -j4 the whole run took 967 s on this machine after the
+# matrix fixes (the longest shard 480 s, the determinism check 308 s); a
+# loaded machine takes longer, hence the shards' 3000 s.
 add_test(NAME action_matrix_sample
          COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/action_matrix_smoke.py
                  $<TARGET_FILE:designer> --sample)

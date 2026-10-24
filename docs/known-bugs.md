@@ -49,6 +49,23 @@ the heading if it is not here yet.
   it a progress check in our OCC patches or refuse a wall that thin for a
   worm's flank before the builder starts.
 
+### A Shell's answer can still follow memory addresses on the patched kernel
+
+- **Symptom:** a Shell of 0.1 mm opening `9/cap1;M12[12/g3;M12]` of the
+  toolmaker's clamp's M3 retaining screw (`generator/toolmakers_clamp`)
+  builds in a full action-matrix sweep and is refused ("shell produced an
+  invalid solid (invalid geometry)") in that sweep's shard 3 and in a fresh
+  replay. In a fresh instance two, and five, draws on copies all fail; ten
+  build. `action_matrix_full_3` reads it as a pass that became a fail.
+- **Cause:** the offset builder still orders its work by shape address
+  where `occt-shell-cap-order.patch` does not reach (it fixes which way the
+  shell's faces point, not the order: upstream's OCCT#1600), and on this
+  body the order decides whether the result is valid.
+- **Where:** `ShellFeature::Execute`
+  (`src/core/features/ShellFeature.cpp`), `BRepOffset_MakeOffset`.
+- **Likely fix:** carry OCCT#1600 in `nix/patches/`, then measure whether
+  any draw beyond the first still changes an answer.
+
 ### A small sphere cut beside a fillet keeps a face inside the sphere
 
 - **Symptom:** a half revolve (a 10 x 20 section through 180 degrees),

@@ -1758,6 +1758,20 @@ def profile(out, metas, results, seconds):
 
 
 # --- determinism ----------------------------------------------------------
+def same_family(xa, xb):
+    """Each (outcome, class, digest) of one family's members matched by one
+    of the other's, as a multiset: the second instance runs the actions in
+    reverse, so members with one outcome come back in another order."""
+    left = list(xb)
+    for o, c, d in xa:
+        hit = next((i for i, (o2, c2, d2) in enumerate(left)
+                    if (o, c) == (o2, c2) and same_digest(d, d2)), None)
+        if hit is None:
+            return False
+        left.pop(hit)
+    return not left
+
+
 def cmd_determinism(args, corpus):
     """The sample's designs at one action in eight, each design built in two
     fresh instances, and every action run twice in each (add, undo, add):
@@ -1844,8 +1858,8 @@ def cmd_determinism(args, corpus):
             for key in sorted(set(sa) | set(sb)):
                 xa = sorted(sa.get(key, []), key=lambda t: (t[0], t[1]))
                 xb = sorted(sb.get(key, []), key=lambda t: (t[0], t[1]))
-                if [t[:2] for t in xa] != [t[:2] for t in xb] or not all(
-                        same_digest(p[2], q[2]) for p, q in zip(xa, xb)):
+                if [t[:2] for t in xa] != [t[:2] for t in xb] or \
+                        not same_family(xa, xb):
                     problems.append(
                         f"{unit} {key[0]} {key[1]}: two fresh instances "
                         f"answered {[t[:2] for t in xa]} and "
