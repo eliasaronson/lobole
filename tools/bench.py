@@ -737,7 +737,7 @@ class Runner:
             return res
         for path in wl.inputs:
             res["inputs"][path] = sha256_file(os.path.expanduser(path))
-        work = tempfile.mkdtemp(prefix="lobole-bench-")
+        work = workdir("run")
         ctx = Ctx(self, wl, work)
         if wl.fixture:
             fx = W.FIXTURES[wl.fixture]
@@ -810,6 +810,25 @@ class Runner:
         if ctx.failures and res["status"] == "ok":
             res["status"] = "failed"
         return res
+
+
+def workdir(what):
+    """A working directory for one workload, named for this process, so the
+    next run can remove the ones a killed run left (a copy of a fixture
+    each): /tmp/lobole-bench-<pid>-<what>-*. Its own are removed as it
+    goes."""
+    root = tempfile.gettempdir()
+    for path in glob.glob(os.path.join(root, "lobole-bench-*-*")):
+        m = re.match(r"lobole-bench-(\d+)-", os.path.basename(path))
+        if not m or int(m.group(1)) == os.getpid():
+            continue
+        try:
+            os.kill(int(m.group(1)), 0)
+        except ProcessLookupError:
+            shutil.rmtree(path, ignore_errors=True)
+        except PermissionError:
+            pass
+    return tempfile.mkdtemp(prefix=f"lobole-bench-{os.getpid()}-{what}-")
 
 
 def wl_mode(kind):
@@ -1255,7 +1274,7 @@ def ab_one(runners, wl):
     if skip:
         return {"status": "skipped", "reason": skip}
     n = runners[0].repeats or wl.repeats
-    works = [tempfile.mkdtemp(prefix="lobole-bench-ab-") for _ in runners]
+    works = [workdir("ab") for _ in runners]
     ctxs = [Ctx(r, wl, w) for r, w in zip(runners, works)]
     if wl.fixture:
         fx = W.FIXTURES[wl.fixture]
@@ -1315,7 +1334,7 @@ def profile_body(name, port, scale):
     body, against an instance somebody else launched (no log, no scope)."""
     wl = next(w for w in W.workloads("all") if w.name == name)
     runner = Runner(DEFAULT_BINARY, False, None, scale, 1)
-    work = tempfile.mkdtemp(prefix="lobole-bench-profile-")
+    work = workdir("profile")
     ctx = Ctx(runner, wl, work)
     try:
         ctx.client = Client.wait_for(port)

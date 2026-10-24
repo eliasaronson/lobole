@@ -77,9 +77,10 @@ MemoryMax=8G`:
 - **It dies with the harness**, SIGKILL included (`LOBOLE_EXIT_WITH_PARENT`):
   the scope execs the app in place, so its parent is the harness. The app
   takes the signal between requests, so one killed in the middle of a long
-  call (an `open/rebuild` of om615) exits when that call returns. A failed
-  workload's evidence is kept in the record, never archived under the
-  user's state.
+  call (an `open/rebuild` of om615) exits when that call returns. Its
+  working directory, `/tmp/lobole-bench-<pid>-…`, is removed by the next
+  run once that pid is gone. A failed workload's evidence is kept in the
+  record, never archived under the user's state.
 
 The harness holds `build/`'s lock shared for the run, as `tools/ctest` does,
 so a build or a merge cannot relink the binary under it.
