@@ -115,8 +115,7 @@ tangent neighbour (a fillet) is refused naming it and suggesting both be
 offset together.
 
 Default: a tenth of the smaller of the face's `inset_mm` (the
-`list_elements` field of docs/plans/action-matrix.md item 3, added here if
-that has not landed) and the body's thinnest extent,
+`list_elements` field, docs/inspect/README.md) and the body's thinnest extent,
 rounded 1/2/5, outward (`SizeFromFace` beside `SizeFromBody`). The window
 has a flip button; a viewport handle on the face drags the distance.
 
@@ -184,7 +183,7 @@ Format: `vNEXT`, golden `vNEXT-replace-face`.
   `rpc-surface.json` are remade.
 - Its `VisitFeatureRefs` (the body and every face) and `VisitExprs` (each
   `_expr`), so the regen cache sees an edit, and `CopyDerivedState`.
-- Its action-matrix rows (docs/plans/action-matrix.md item 4), at the
+- Its action-matrix rows (docs/modeling/README.md#action-matrix), at the
   derived defaults: every face `face.delete` and `face.delete_feature`
   (grown by Add the feature); every face whose kind offsets
   `face.offset_out`, `face.offset_in`; each such set `face.move`; every
