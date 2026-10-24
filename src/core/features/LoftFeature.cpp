@@ -38,6 +38,12 @@ bool LoftFeature::Execute(RegenContext& ctx) {
       SetError("loft profile sketch is missing (or suppressed)");
       return false;
     }
+    // A section whose sketch failed is not built from what it left behind.
+    if (!sk->GetError().empty()) {
+      SetError("loft section '" + sk->GetName() +
+               "' failed: " + sk->GetError());
+      return false;
+    }
     const auto loops = sketch::BuildLoops(sk->entities);
     const TopoDS_Wire wire = sketch::BuildProfileWire(sk->plane, loops);
     if (wire.IsNull()) {

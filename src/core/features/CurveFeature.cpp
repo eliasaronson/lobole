@@ -3,6 +3,7 @@
 
 #include "core/features/CurveFeature.h"
 #include "core/HelicalSweep.h"
+#include "core/ModelSpace.h"
 
 #include "common/Logger.h"
 #include "core/Angles.h"
@@ -260,6 +261,24 @@ bool CurveFeature::Execute(RegenContext& ctx) {
   m_edgeShape = CADShape();
   m_bends.clear();
   m_length = 0.0;
+
+  // Outside the model space (core/ModelSpace.h) a curve is refused by name,
+  // as a sketch is: a point at 2^53 mm made a sweep along it take seconds.
+  // A helix of more turns than that space holds coils of a micrometre is
+  // refused the same way.
+  const auto inSpace = [](const glm::dvec3& v) {
+    return InModelSpace(v.x) && InModelSpace(v.y) && InModelSpace(v.z);
+  };
+  if (!std::all_of(points.begin(), points.end(), inSpace) ||
+      !inSpace(axisOrigin) || !inSpace(axisDir) || !InModelSpace(radius) ||
+      !InModelSpace(pitch) || !InModelSpace(pitch * turns) ||
+      !(std::abs(turns) <= 1e4)) {
+    SetError("a point, the axis, the radius, the pitch or the turns are "
+             "outside the " +
+             std::to_string(static_cast<long>(kModelSpaceMm)) +
+             " mm model space (core/ModelSpace.h; at most 10000 turns)");
+    return false;
+  }
 
   try {
     TopoDS_Edge edge;

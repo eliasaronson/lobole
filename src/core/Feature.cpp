@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/Feature.h"
+#include "core/ModelSpace.h"
 
 #include <algorithm>
 
@@ -77,7 +78,26 @@ BoxFeature::BoxFeature(const std::string& name, const glm::dvec3& position,
   m_name = name;
 }
 
+namespace {
+// A stored primitive outside the model space (core/ModelSpace.h) is refused
+// by name, as a Hole or a Sketch is: a cylinder at 2^53 mm reached a
+// thread's geometry and took seconds, where it should have taken nothing.
+bool InSpace(const glm::dvec3& v) {
+  return InModelSpace(v.x) && InModelSpace(v.y) && InModelSpace(v.z);
+}
+std::string OutsideSpace(const char* what) {
+  return std::string(what) + " is outside the " +
+         std::to_string(static_cast<long>(kModelSpaceMm)) +
+         " mm model space (core/ModelSpace.h)";
+}
+} // namespace
+
 bool BoxFeature::Execute(RegenContext& ctx) {
+  if (!InSpace(position) || !InModelSpace(width) || !InModelSpace(height) ||
+      !InModelSpace(depth)) {
+    SetError(OutsideSpace("its position or a size"));
+    return false;
+  }
   auto& bodies = ctx.bodies;
   CADShape shape = CADKernel::Instance().CreateBox(width, height, depth);
   if (!shape.IsValid()) {
@@ -100,6 +120,10 @@ SphereFeature::SphereFeature(const std::string& name, const glm::dvec3& center,
 }
 
 bool SphereFeature::Execute(RegenContext& ctx) {
+  if (!InSpace(center) || !InModelSpace(radius)) {
+    SetError(OutsideSpace("its centre or its radius"));
+    return false;
+  }
   auto& bodies = ctx.bodies;
   CADShape shape = CADKernel::Instance().CreateSphere(center, radius);
   if (!shape.IsValid()) {
@@ -122,6 +146,11 @@ CylinderFeature::CylinderFeature(const std::string& name,
 }
 
 bool CylinderFeature::Execute(RegenContext& ctx) {
+  if (!InSpace(center) || !InSpace(direction) || !InModelSpace(radius) ||
+      !InModelSpace(height)) {
+    SetError(OutsideSpace("its centre, axis, radius or height"));
+    return false;
+  }
   auto& bodies = ctx.bodies;
   CADShape shape =
       CADKernel::Instance().CreateCylinder(center, direction, radius, height);

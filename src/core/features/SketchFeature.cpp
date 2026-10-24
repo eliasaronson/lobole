@@ -3,6 +3,7 @@
 
 #include "core/features/SketchFeature.h"
 #include "core/ElementHistory.h"
+#include "core/ModelSpace.h"
 
 #include "common/Logger.h"
 #include "core/Angles.h"
@@ -1274,6 +1275,66 @@ std::optional<SketchPlane> ResolveFacePlane(const RegenContext& ctx,
   return std::nullopt;
 }
 
+namespace {
+
+// What of a sketch lies outside the model space (core/ModelSpace.h): its
+// plane's origin, or a coordinate, size or angle of an entity. A sketch at
+// 2^64 mm reached OpenCASCADE's loft and crashed it (a damaged file found
+// it: docs/versioning/README.md#reader-fuzzing); it is refused here
+// instead, naming the value, as a Hole or a Pattern refuses one.
+std::string OutsideModelSpace(const SketchPlane& plane,
+                              const std::vector<sketch::Entity>& entities) {
+  const auto vec = [](const glm::dvec3& v) {
+    return InModelSpace(v.x) && InModelSpace(v.y) && InModelSpace(v.z);
+  };
+  if (!vec(plane.GetOrigin()))
+    return "its plane's origin";
+  for (const sketch::Entity& e : entities) {
+    std::vector<double> values;
+    const auto uv = [&](const glm::dvec2& p) {
+      values.push_back(p.x);
+      values.push_back(p.y);
+    };
+    std::visit(
+        [&](const auto& x) {
+          using T = std::decay_t<decltype(x)>;
+          if constexpr (std::is_same_v<T, sketch::Point>) {
+            uv(x.p);
+          } else if constexpr (std::is_same_v<T, sketch::Line>) {
+            uv(x.a);
+            uv(x.b);
+          } else if constexpr (std::is_same_v<T, sketch::Circle>) {
+            uv(x.center);
+            values.push_back(x.radius);
+          } else if constexpr (std::is_same_v<T, sketch::Arc>) {
+            uv(x.center);
+            values.insert(values.end(), {x.radius, x.startAngle, x.endAngle});
+          } else if constexpr (std::is_same_v<T, sketch::Ellipse>) {
+            uv(x.center);
+            values.insert(values.end(), {x.rMajor, x.rMinor, x.rotation});
+          } else if constexpr (std::is_same_v<T, sketch::EllipseArc>) {
+            uv(x.center);
+            values.insert(values.end(), {x.rMajor, x.rMinor, x.rotation,
+                                         x.startParam, x.endParam});
+          } else if constexpr (std::is_same_v<T, sketch::BSpline>) {
+            for (const glm::dvec2& p : x.poles)
+              uv(p);
+          } else if constexpr (std::is_same_v<T, sketch::Text>) {
+            uv(x.anchor);
+            values.insert(values.end(), {x.height, x.angle, x.spacing});
+          }
+        },
+        e);
+    for (double v : values)
+      if (!InModelSpace(v))
+        return "entity " + std::to_string(sketch::EntityId(e)) + " (" +
+               std::to_string(v) + ")";
+  }
+  return "";
+}
+
+} // namespace
+
 bool SketchFeature::Execute(RegenContext& ctx) {
   if (faceRef.IsSet()) {
     const auto p = ResolveFacePlane(ctx, faceRef);
@@ -1310,6 +1371,14 @@ bool SketchFeature::Execute(RegenContext& ctx) {
                ref->TypeName() + ", not a DatumPlane, Sketch or Frame");
       return false;
     }
+  }
+
+  if (const std::string where = OutsideModelSpace(plane, entities);
+      !where.empty()) {
+    SetError(where + " is outside the " +
+             std::to_string(static_cast<long>(kModelSpaceMm)) +
+             " mm model space (core/ModelSpace.h)");
+    return false;
   }
 
   // Cross-sketch linked copies re-sync from their (already executed) source.

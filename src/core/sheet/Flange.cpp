@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cmath>
 #include <optional>
+#include <set>
 
 namespace sheet {
 namespace {
@@ -305,9 +306,19 @@ bool ResolveEdgeFrame(const Body& body, const ElementRef& ref, double thickness,
 }
 
 std::string ApplyFlanges(std::vector<Body>& bodies,
-                         const std::vector<ElementRef>& edges,
+                         const std::vector<ElementRef>& picked,
                          const FlangeSpec& spec, const SheetMetalRules& rules,
                          uint64_t featureId, double miterGap) {
+  // An edge picked twice is flanged once, as a fillet blends it once: a
+  // generator's edge filter can name one twice, and a damaged file named
+  // one two hundred thousand times, which took minutes edge by edge.
+  std::vector<ElementRef> edges;
+  {
+    std::set<std::pair<uint64_t, std::string>> seen;
+    for (const ElementRef& ref : picked)
+      if (seen.emplace(ref.featureId, ref.name).second)
+        edges.push_back(ref);
+  }
   const double t = rules.thickness;
   const double R = spec.radius;
   ArmOccSignalHandlers();
