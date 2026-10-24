@@ -448,6 +448,10 @@ def main():
         # Importing a broken STL (zero triangles) names the file and format
         # instead of a generic regeneration failure. (Valid STLs import as
         # sewn shells/solids — covered in the interchange section below.)
+        # 84 bytes is under a one-facet binary STL, so OpenCASCADE reads it
+        # as ASCII and prints "Error: premature end of file" to the app's
+        # log: this file's doing, every run, and the log is shown only when
+        # the smoke fails for some other reason.
         stl_path = os.path.join(tmp, "mesh.stl")
         with open(stl_path, "wb") as fh:
             fh.write(b"\0" * 84)

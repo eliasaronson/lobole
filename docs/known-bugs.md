@@ -31,14 +31,6 @@ the heading if it is not here yet.
 
 ## Modeling
 
-### OpenCASCADE reported "premature end of file" in `headless_smoke`
-
-- **Symptom:** once, during the import-formats work, `headless_smoke`'s
-  import phase printed OCC's "Error: premature end of file". Not reproduced
-  since.
-- **Where:** the import phase of `tests/headless_smoke.py`.
-- **Likely fix:** first reproduce it (the phase in a loop under load); a
-  file read while still being written is the first suspect.
 
 ### A thin Shell of the worm runs past the matrix's minute
 
