@@ -160,7 +160,12 @@ the flat body's blank as R12 ASCII in millimetres (`$INSUNITS 4`): the outline
 and every hole on `CUT` as LINE / ARC / CIRCLE with arcs kept as arcs, each
 crease on `BEND_UP` or `BEND_DOWN` (dashed, UP as seen from the side the first
 flange was picked on), and `mark` as a TEXT entity on `MARK` inside the blank
-for the laser to etch. The body must BE flat — activate the configuration
+for the laser to etch. The outline is the boundary of every face in the
+blank's plane, not of its largest face alone: an unfolded part's side is the
+base, each bend's strip and each wall as separate coplanar faces, and an edge
+two of them share is a seam inside the blank, not a cut (writing the largest
+face's wires cut the base out and dropped every flange; reading our own DXF
+back in found it, `tests/test_sketch_import.cpp`). The body must BE flat — activate the configuration
 that unsuppresses its FlatPattern first. R12 has no ELLIPSE, so a curve that
 is neither line nor circle (an angled cylinder's trace) is written as line
 segments.

@@ -9,9 +9,12 @@
 #include "core/SheetMetal.h"
 #include "core/features/BaseFlangeFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
+#include "core/features/ExtrudeFeature.h"
 #include "core/features/FlatPatternFeature.h"
 #include "core/features/SketchFeature.h"
 #include "core/io/ExportDxf.h"
+#include "core/io/ImportDxf.h"
+#include "core/io/SketchImport.h"
 #include "core/sheet/Unfold.h"
 
 #include <BRepAdaptor_Curve.hxx>
@@ -345,6 +348,26 @@ TEST_CASE("up and down are seen from a side of the blank",
   };
   CHECK(count("LINE\n8\nBEND_UP\n") == 2);
   CHECK(count("LINE\n8\nBEND_DOWN\n") == 1);
+
+  // Read back, the CUT layer is the WHOLE blank — base, bend strips and
+  // walls — closed, and its area is the flat body's volume over the gauge.
+  // It used to be the base alone: the largest face's wires.
+  dxfimport::Options cut;
+  cut.layers = {"CUT"};
+  auto back = dxfimport::Read(path.string(), cut);
+  sketchimport::SnapEndpoints(back.entities, sketchimport::kChainTol);
+  CHECK(sketchimport::OpenEnds(back.entities, sketchimport::kChainTol).empty());
+  Document again;
+  auto sk =
+      std::make_unique<SketchFeature>("Blank", SketchPlane(PlaneType::XY));
+  for (const auto& e : back.entities)
+    sk->AddEntity(e);
+  again.AddFeature(std::move(sk));
+  again.AddFeature(std::make_unique<ExtrudeFeature>(
+      "Cut", again.GetFeature(0)->GetId(), 1.0, ExtrudeMode::NewBody));
+  REQUIRE(again.GetBodies().size() == 1);
+  CHECK_THAT(again.GetBodies()[0].shape.Volume(),
+             WithinRel(flat.shape.Volume() / kT, 1e-5));
   std::filesystem::remove(path);
 }
 

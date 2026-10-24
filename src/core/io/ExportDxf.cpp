@@ -10,6 +10,7 @@
 #include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
 #include <BRep_Tool.hxx>
 #include <Bnd_Box.hxx>
 #include <GCPnts_QuasiUniformDeflection.hxx>
@@ -17,8 +18,11 @@
 #include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
+#include <TopTools_ListIteratorOfListOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Wire.hxx>
 #include <gp_Pln.hxx>
@@ -317,12 +321,43 @@ std::string WriteFlatPattern(const FlatDrawing& drawing,
     o.P(0, std::string("SECTION"));
     o.P(2, std::string("ENTITIES"));
 
-    // The outline and every hole: the face's own wires, outer and inner
-    // alike. A hole is a closed loop on the same layer, which is exactly what
-    // a cutter wants — it decides pierce order itself.
-    for (TopExp_Explorer wx(face, TopAbs_WIRE); wx.More(); wx.Next())
-      for (TopExp_Explorer ex(wx.Current(), TopAbs_EDGE); ex.More(); ex.Next())
-        WriteEdge(o, frame, "CUT", TopoDS::Edge(ex.Current()));
+    // The outline and every hole: the boundary of the blank's side, outer
+    // and inner alike. A hole is a closed loop on the same layer, which is
+    // exactly what a cutter wants — it decides pierce order itself.
+    //
+    // The side is EVERY face in the largest face's plane, not that face
+    // alone: an unfolded part's side is the base, each bend's strip and each
+    // wall as separate coplanar faces, and writing the largest one's wires
+    // cut the base out and dropped every flange (found by reading our own
+    // DXF back in, docs/sketching/README.md#importing-dxf-and-svg). An edge
+    // two of those faces share is a seam inside the blank, not a cut.
+    BRep_Builder builder;
+    TopoDS_Compound blankSide;
+    builder.MakeCompound(blankSide);
+    for (TopExp_Explorer fx(drawing.body.GetShape(), TopAbs_FACE); fx.More();
+         fx.Next()) {
+      const TopoDS_Face f = TopoDS::Face(fx.Current());
+      if (BRepAdaptor_Surface(f).GetType() != GeomAbs_Plane)
+        continue;
+      bool onPlane = true;
+      for (TopExp_Explorer vx(f, TopAbs_VERTEX); vx.More() && onPlane;
+           vx.Next())
+        onPlane = plane.Distance(BRep_Tool::Pnt(TopoDS::Vertex(vx.Current()))) <
+                  1e-6 * std::max(1.0, longest);
+      if (onPlane)
+        builder.Add(blankSide, f);
+    }
+    TopTools_IndexedDataMapOfShapeListOfShape edgeFaces;
+    TopExp::MapShapesAndAncestors(blankSide, TopAbs_EDGE, TopAbs_FACE,
+                                  edgeFaces);
+    for (int i = 1; i <= edgeFaces.Extent(); i++) {
+      TopTools_IndexedMapOfShape faces;
+      for (TopTools_ListIteratorOfListOfShape it(edgeFaces(i)); it.More();
+           it.Next())
+        faces.Add(it.Value());
+      if (faces.Extent() == 1)
+        WriteEdge(o, frame, "CUT", TopoDS::Edge(edgeFaces.FindKey(i)));
+    }
 
     // The bend lines, each on the layer its direction says — as seen by
     // whoever reads the file, looking down the frame's normal.
@@ -342,7 +377,7 @@ std::string WriteFlatPattern(const FlatDrawing& drawing,
     // something a machine can actually draw.
     if (!drawing.mark.empty()) {
       Bnd_Box box;
-      BRepBndLib::Add(face, box);
+      BRepBndLib::Add(blankSide, box);
       if (!box.IsVoid()) {
         double x0, y0, z0, x1, y1, z1;
         box.Get(x0, y0, z0, x1, y1, z1);
