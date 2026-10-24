@@ -565,13 +565,22 @@ ReadSlot(const nlohmann::json& entry, size_t i,
   const std::string dir = inside->string();
   const std::string type = entry.value("type", std::string("part"));
   // Named here, at the entry that names it: a load of a directory that is
-  // not there would name only the file it then could not find in it.
+  // not there would name only the file it then could not find in it. (A
+  // document in the single-file form is a file, and loads as one.)
   std::error_code ec;
-  if (!std::filesystem::is_directory(*inside, ec))
+  if (!std::filesystem::is_directory(*inside, ec) &&
+      !std::filesystem::is_regular_file(*inside, ec))
     return std::unexpected(readctx::Named("document '" + name + "': its dir '" +
                                               rel + "' is not there",
                                           "project.json"));
-  readctx::FileContext context(rel.ends_with("/") ? rel : rel + "/");
+  // A single file names itself in what it refuses: the context is only
+  // the directory it is in.
+  const bool isFile = std::filesystem::is_regular_file(*inside, ec);
+  const std::string parent =
+      std::filesystem::path(rel).parent_path().generic_string();
+  readctx::FileContext context(isFile ? (parent.empty() ? "" : parent + "/")
+                               : rel.ends_with("/") ? rel
+                                                    : rel + "/");
   PartSlot slot;
   slot.id = entry.value("id", static_cast<uint64_t>(i + 1)); // v1: 1..n
   slot.name = name;
@@ -624,10 +633,10 @@ void RefuseDocumentIds(const nlohmann::json& docs) {
     if (!d.is_object() || !d.contains("id"))
       continue;
     const nlohmann::json& id = d.at("id");
-    if (!id.is_number_unsigned() || id.get<uint64_t>() == 0 ||
+    if (!readctx::IsWhole(id) || id.get<uint64_t>() == 0 ||
         !seen.insert(id.get<uint64_t>()).second)
       throw std::runtime_error("document id " + id.dump() +
-                               (id.is_number_unsigned() && id.get<uint64_t>()
+                               (readctx::IsWhole(id) && id.get<uint64_t>()
                                     ? " is listed twice"
                                     : " is not a whole number above 0"));
   }
@@ -656,7 +665,7 @@ void CheckProjectIndex(const nlohmann::json& index) {
   if (version.get<int64_t>() > 2)
     throw std::runtime_error("project version " + version.dump() +
                              " is newer than this build reads (2)");
-  if (index.contains("active") && !(index.at("active").is_number_unsigned()))
+  if (index.contains("active") && !readctx::IsWhole(index.at("active")))
     throw std::runtime_error("`active` is " + index.at("active").dump() +
                              ", not the index of a document");
   const auto list = [&](const char* key) {

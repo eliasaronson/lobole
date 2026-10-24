@@ -192,7 +192,7 @@ sketch::Entity EntityFromJson(const json& j) {
   // One that is there is a whole number above 0 that fits the id: a 0 read
   // as "pre-v4" renumbered every entity of a modern sketch.
   if (j.contains("id") &&
-      (!j.at("id").is_number_unsigned() || j.at("id").get<uint64_t>() == 0 ||
+      (!readctx::IsWhole(j.at("id")) || j.at("id").get<uint64_t>() == 0 ||
        j.at("id").get<uint64_t>() > UINT32_MAX))
     throw std::runtime_error("sketch entity id " + j.at("id").dump() +
                              " is not a whole number above 0");
@@ -464,7 +464,7 @@ json ConstraintToJson(const sketch::Constraint& c) {
 // uint8_t as 44, was a different point with no word.
 sketch::PointRef PointRefFromJson(const json& r, const char* key) {
   RequireArrayOf(r, 2, "[entity, which]");
-  if (!r[0].is_number_unsigned() || !r[1].is_number_unsigned() ||
+  if (!readctx::IsWhole(r[0]) || !readctx::IsWhole(r[1]) ||
       r[0].get<uint64_t>() > UINT32_MAX || r[1].get<uint64_t>() > 255)
     throw std::runtime_error(std::string(key) + ": " + r.dump() +
                              " is not [entity id, point index 0-255]");
@@ -620,7 +620,7 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
     // Entity ids and a copy index, whole: a gen of 1.5 read as 1 made a
     // copy of the source its own copy.
     for (const char* key : {"source", "k", "gen"})
-      if (!in.at(key).is_number_unsigned() ||
+      if (!readctx::IsWhole(in.at(key)) ||
           in.at(key).get<uint64_t>() > UINT32_MAX ||
           (std::string_view(key) != "k" && in.at(key).get<uint64_t>() == 0))
         throw std::runtime_error(
@@ -2352,8 +2352,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
         "suppressed"};
     const auto it = kTypeKeys.find(type);
     if (it == kTypeKeys.end())
-      throw std::logic_error("feature type '" + type +
-                             "' has no row in FeatureFromJson's key table");
+      throw std::runtime_error("feature type '" + type +
+                               "' has no row in FeatureFromJson's key table");
     accepted.insert(accepted.end(), it->second.begin(), it->second.end());
     readctx::RefuseUnknownKeys(j, accepted, type);
   }

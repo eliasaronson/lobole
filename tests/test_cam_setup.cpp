@@ -1182,7 +1182,7 @@ TEST_CASE("cam job: an unknown cutting order is refused", "[cam][job]") {
   // an order other than the one it names is a broken cutter, and every
   // plausible substitute produces a file that looks right.
   const std::string bad = R"({"format":"designer-document","version":75,
-    "kind":"job","cam":[{"id":1,"name":"J","order":"fixture"}]})";
+    "kind":"job","parts":[],"cam":[{"id":1,"name":"J","order":"fixture"}]})";
   const std::filesystem::path path =
       std::filesystem::temp_directory_path() / "cam_bad_order.json";
   std::ofstream(path) << bad;

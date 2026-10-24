@@ -183,6 +183,7 @@ std::vector<std::string> FromScratch(const Document& doc, const fs::path& tmp) {
   if (const auto it = g_scratch.find(text); it != g_scratch.end())
     return it->second;
   auto loaded = DocumentIO::Load(tmp.string());
+  INFO((loaded ? std::string() : loaded.error()));
   REQUIRE(loaded.has_value());
   (*loaded)->ClearRegenCache();
   (*loaded)->Regenerate();

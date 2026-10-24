@@ -120,7 +120,7 @@ inline uint64_t IdField(const nlohmann::json& j, const char* key,
       (void)j.at(key); // nlohmann's own "not found", which callers name
     return 0;
   }
-  if (!it->is_number_unsigned())
+  if (!readctx::IsWhole(*it))
     throw std::runtime_error(std::string(key) + ": " + it->dump() +
                              " is not an id");
   return it->get<uint64_t>();
@@ -144,7 +144,7 @@ inline void RefuseRepeatedIds(const nlohmann::json& list, const char* key,
     if (!item.is_object() || !item.contains("id"))
       continue;
     const nlohmann::json& id = item.at("id");
-    if (!id.is_number_unsigned() || id.get<uint64_t>() == 0)
+    if (!readctx::IsWhole(id) || id.get<uint64_t>() == 0)
       throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
                                "]: its id " + id.dump() +
                                " is not a whole number above 0");
@@ -166,7 +166,7 @@ inline std::vector<uint64_t> UniqueIds(const nlohmann::json& list,
     throw std::runtime_error(std::string(key) + ": expected a list of ids");
   std::vector<uint64_t> out;
   for (const nlohmann::json& v : list) {
-    if (!v.is_number_unsigned())
+    if (!readctx::IsWhole(v))
       throw std::runtime_error(std::string(key) + ": " + v.dump() +
                                " is not an id");
     const uint64_t id = v.get<uint64_t>();

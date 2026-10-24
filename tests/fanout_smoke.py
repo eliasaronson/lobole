@@ -95,6 +95,11 @@ def main():
                     continue
                 shutil.copytree(src, os.path.join(merged, "parts",
                                                   doc["name"]))
+                # Each agent's project numbered its documents from 1; a
+                # merge gives the newcomer an id of its own (a project with
+                # one id twice is refused, as branch_merge refuses it).
+                doc = dict(doc, id=1 + max(
+                    e["id"] for e in index["documents"]))
                 index["documents"].append(doc)
                 have.add(doc["name"])
         with open(index_path, "w") as f:

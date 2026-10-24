@@ -178,7 +178,7 @@ void RequireTag(const nlohmann::json& j, std::string_view tag,
 void RequireCount(const nlohmann::json& j, std::string_view key,
                   std::string_view what) {
   const auto it = j.find(std::string(key));
-  if (it != j.end() && !it->is_number_unsigned())
+  if (it != j.end() && !IsWhole(*it))
     throw std::runtime_error(std::string(what) + ": " + std::string(key) +
                              " is " + it->dump().substr(0, 80) +
                              ", not a whole number");

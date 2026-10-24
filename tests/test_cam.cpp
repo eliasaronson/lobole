@@ -2956,11 +2956,12 @@ TEST_CASE("cam: a clearing operation keeps its side across a save", "[cam]") {
     CHECK(op.side == cam::Side::Inside);
   std::filesystem::remove(path);
 
-  // And a document written BEFORE the key was saved at all: the default
-  // depends on the type, so those files repair themselves rather than asking
-  // anyone to re-make a job. (tests/golden/v60-cam-arcs.json is a real one.)
-  const std::string old = R"({"format":"designer-document","version":61,
-    "kind":"job",
+  // And an operation written without the key: the default depends on the
+  // type, so such a file repairs itself rather than asking anyone to re-make
+  // a job. (The key has been written since v62, before jobs were their own
+  // documents at v73, so only a hand-written job omits it.)
+  const std::string old = R"({"format":"designer-document","version":73,
+    "kind":"job","parts":[],
     "cam":[{"id":2,"name":"J","operations":[
       {"id":3,"type":"adaptive","tool":1,"top_z":10,"bottom_z":4},
       {"id":4,"type":"profile","tool":1,"top_z":10,"bottom_z":0}]}]})";

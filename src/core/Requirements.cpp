@@ -612,7 +612,7 @@ Requirement FromJson(const json& j) {
     readctx::RefuseUnknownKeys(
         j, {"id", "name", "source", "revision", "measure", "bound", "evidence"},
         "requirement");
-    if (!j.at("id").is_number_unsigned() || j.at("id").get<uint64_t>() == 0)
+    if (!readctx::IsWhole(j.at("id")) || j.at("id").get<uint64_t>() == 0)
       throw std::runtime_error("its id " + j.at("id").dump() +
                                " is not a whole number above 0");
     r.id = j.at("id").get<uint64_t>();

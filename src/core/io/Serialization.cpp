@@ -334,7 +334,10 @@ json DocumentEnvelope(const Document& doc) {
   if (!doc.GetTemplates().empty())
     j["templates"] = tmpl::LibraryToJson(doc.GetTemplates());
   j["version"] = kVersion;
-  if (doc.Rollback() >= 0) {
+  // A bar left past the last feature (one removed after it was parked) is
+  // the end, which is no `rollback` at all.
+  if (doc.Rollback() >= 0 &&
+      doc.Rollback() < static_cast<int>(doc.FeatureCount())) {
     j["rollback"] = doc.Rollback();
   }
   // Omitted at the default (true) so existing projects re-save byte-identically
@@ -818,13 +821,15 @@ json ParseProjectFile(const fs::path& dir, const std::string& rel) {
 
 // The rollback bar a document names, set: one past its features (or not a
 // whole number) is refused -- it used to be dropped, and the document
-// opened with every feature built that the file had rolled back.
+// opened with every feature built that the file had rolled back. A bar AT
+// the end (as many as it has) is the end: an older writer wrote one left
+// there after the feature past it was deleted.
 void SetRollbackOf(Document& doc, const json& j) {
   if (!j.contains("rollback"))
     return;
   const json& r = j.at("rollback");
   if (!r.is_number_integer() || r.get<int64_t>() < -1 ||
-      r.get<int64_t>() >= static_cast<int64_t>(doc.FeatureCount()))
+      r.get<int64_t>() > static_cast<int64_t>(doc.FeatureCount()))
     throw std::runtime_error("rollback " + r.dump() +
                              " is not a feature index (it has " +
                              std::to_string(doc.FeatureCount()) + " features)");
@@ -1098,7 +1103,7 @@ decltype(auto) ReadItem(const fs::path& dir, uint64_t id,
       throw std::runtime_error("it has no id (its file name says " +
                                std::to_string(id) + ")");
     if (j.is_object() && j.contains("id") &&
-        (!j.at("id").is_number_unsigned() || j.at("id").get<uint64_t>() != id))
+        (!readctx::IsWhole(j.at("id")) || j.at("id").get<uint64_t>() != id))
       throw std::runtime_error("its id is " + j.at("id").dump() +
                                ", but its file name says " +
                                std::to_string(id));
@@ -1815,7 +1820,7 @@ json InlineList(const json& j, const char* key) {
       continue;
     // A fraction or a negative id would read as another whole one (1.5 as
     // 1), and two items could then share it.
-    if (!item.at("id").is_number_unsigned())
+    if (!readctx::IsWhole(item.at("id")))
       throw std::runtime_error(std::string(key) + "[" + std::to_string(i) +
                                "]: its id " + item.at("id").dump() +
                                " is not a whole number");
@@ -2763,7 +2768,7 @@ void CheckJobEnvelope(const json& j) {
   CheckEnvelope(j, "job");
   readctx::RefuseUnknownKeys(j, {"format", "version", "kind", "parts", "cam"},
                              "job");
-  RequireLists(j, {{"parts", 1}, {"cam", 1}});
+  RequireLists(j, {{"parts", 73}, {"cam", 73}});
 }
 
 bool SaveJobImpl(const cam::JobDocument& job, const std::string& path,

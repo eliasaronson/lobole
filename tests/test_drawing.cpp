@@ -1318,7 +1318,7 @@ TEST_CASE("a drawing refuses an unknown sheet size or view orientation",
   };
 
   const std::string head = R"({"format":"designer-document","version":)" + ver +
-                           R"(,"kind":"drawing",)";
+                           R"(,"kind":"drawing","dims":[],)";
 
   // A legitimate A2 sheet still loads.
   REQUIRE(

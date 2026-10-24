@@ -99,6 +99,14 @@ void RefuseUnknownKeys(const nlohmann::json& j,
                        const std::vector<std::string_view>& accepted,
                        std::string_view what);
 
+// A whole number >= 0, as an id or a count is. A file parsed from text
+// holds one as unsigned, but JSON built in code (a test, an RPC handler
+// assembling a feature) holds `1` as a signed integer: both are whole.
+inline bool IsWhole(const nlohmann::json& v) {
+  return v.is_number_unsigned() ||
+         (v.is_number_integer() && v.get<int64_t>() >= 0);
+}
+
 // A key a reader accepts and does not use -- a written type tag
 // ("type": "Mate"), a counter an older build kept -- still has to be what
 // it says: anything else in it would be dropped on the next save with no

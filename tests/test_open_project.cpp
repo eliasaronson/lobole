@@ -128,6 +128,7 @@ TEST_CASE("A project's parts load the same on one thread and on many",
     serial = ui::ReadProject(proj.string());
     again = ui::ReadProject(proj.string());
   }
+  INFO((serial ? std::string() : serial.error()));
   REQUIRE(serial.has_value());
   REQUIRE(again.has_value());
   ui::OpenProgress progress;
