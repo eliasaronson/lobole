@@ -1757,9 +1757,12 @@ static constexpr MethodDoc InspectionMethods[] = {
      "whose inner loop (a hole in it) the edge lies on, so a blind hole's "
      "bore takes its floor and a boss's side takes the boss. Refused, saying "
      "why, when no such loop bounds them (a fillet runs on into the body). "
-     "Nothing is changed.",
+     "`host_normal` is the outward normal of the largest planar face the "
+     "feature sits in (null when none is planar): the plane a Move Face of "
+     "it stays in. Nothing is changed.",
      "faces", remote::NeedsPart,
-     "faces:{feature_id:int, element:string}[], added:string[]"},
+     "faces:{feature_id:int, element:string}[], added:string[], "
+     "host_normal:number[]|null"},
 };
 std::span<const MethodDoc> InspectionMethodDocs() { return InspectionMethods; }
 
@@ -6992,13 +6995,12 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
         throw std::runtime_error("each face is {feature_id, element}");
       const ElementRef ref{r.at("feature_id").get<uint64_t>(),
                            r.at("element").get<std::string>()};
-      if (body != nullptr && body->createdBy != ref.featureId)
-        throw std::runtime_error(
-            "faces on two bodies (" + std::to_string(body->createdBy) +
-            " and " + std::to_string(ref.featureId) + "): a feature is on one");
-      for (const Body& b : part.GetBodies())
-        if (b.createdBy == ref.featureId)
-          body = &b;
+      const Body* holding =
+          directedit::BodyHolding(part.GetBodies(), ref.featureId, ref.name);
+      if (body != nullptr && holding != body)
+        throw std::runtime_error("`" + ref.name + "` and `" + given.front() +
+                                 "` are on two bodies: a feature is on one");
+      body = holding;
       if (body == nullptr)
         throw std::runtime_error("no body is created by feature " +
                                  std::to_string(ref.featureId));
@@ -7024,7 +7026,11 @@ std::optional<json> HandleInspectionRpc(ui::AppState& state, Document* docIn,
       if (std::find(given.begin(), given.end(), *n) == given.end())
         added.push_back(*n);
     }
-    return json{{"faces", faces}, {"added", added}};
+    // The face the feature sits in: the plane a move of it stays in.
+    json host = nullptr;
+    if (const auto n = directedit::HostNormal(*body, *grown))
+      host = {n->x, n->y, n->z};
+    return json{{"faces", faces}, {"added", added}, {"host_normal", host}};
   }
   if (m == "list_elements") {
     // Stable element names (topological naming) for each body's faces and

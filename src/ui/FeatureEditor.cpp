@@ -224,11 +224,11 @@ void AddTheFeatureRow(AppState& state, Feature& feature, size_t index,
     whyFor = feature.GetId();
     const std::vector<Body>* input =
         index > 0 ? state.document->CachedBodiesAfter(index - 1) : nullptr;
-    const Body* body = nullptr;
-    if (input != nullptr)
-      for (const Body& b : *input)
-        if (b.createdBy == faces.front().featureId)
-          body = &b;
+    const Body* body =
+        input == nullptr
+            ? nullptr
+            : directedit::BodyHolding(*input, faces.front().featureId,
+                                      faces.front().name);
     std::vector<int> seeds;
     for (const ElementRef& r : faces)
       if (body != nullptr)

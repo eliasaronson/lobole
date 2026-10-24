@@ -5,6 +5,7 @@
 
 #include "common/Logger.h"
 #include "core/ElementHistory.h"
+#include "core/Measure.h"
 
 #include <BOPAlgo_Alerts.hxx>
 #include <BRepAlgoAPI_Defeaturing.hxx>
@@ -13,6 +14,8 @@
 #include <Bnd_Box.hxx>
 #include <Message_Report.hxx>
 #include <TopExp.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopoDS_AlertWithShape.hxx>
 
@@ -37,18 +40,29 @@ std::string DeleteAndHeal(const Picked& picked, Healed& out,
     if (static_cast<int>(picked.indices.size()) >= all.Extent())
       return op + " of every face of the body leaves no closed solid";
   }
+  // Healing extends the faces round the gap until they meet.
+  if (std::string why = FreeformNeighbour(picked, op, "heals by extending");
+      !why.empty())
+    return why;
   const Copied copy = CopyFor(body, picked.indices);
   out.input = copy.shape;
   BRepAlgoAPI_Defeaturing df;
+  const Handle(Message_ProgressIndicator) deadline =
+      MakeDeadline(kBuilderBudgetS);
   const std::string why = Guarded(op, [&] {
     df.SetShape(copy.shape);
     df.AddFacesToRemove(copy.faces);
     df.SetRunParallel(false);
     df.SetToFillHistory(true);
-    df.Build();
+    df.Build(deadline->Start());
   });
   if (!why.empty())
     return why;
+  if (Expired(deadline))
+    return op + " gave up after " + std::to_string(int(kBuilderBudgetS)) +
+           " s healing around " + NameList(picked.names) +
+           ": the faces around them are too costly to extend (a modelled "
+           "thread's flanks, freeform faces)";
   // A feature it could not remove is a WARNING with the feature's faces as
   // its shape, and the result then still has them: refuse, naming them.
   if (df.HasWarnings() || df.HasErrors()) {

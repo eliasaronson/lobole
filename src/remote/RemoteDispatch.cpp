@@ -350,7 +350,9 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "refuses anything whose effect a rollback could not take back "
      "(screenshots, exports, project and git verbs, UI actions), naming it. "
      "A feature that fails to BUILD is not a failed call: it is reported in "
-     "the final regen, exactly as it would be on its own. `expect_revision` "
+     "the final regen, exactly as it would be on its own -- except a direct "
+     "edit (DeleteFace, OffsetFace, MoveFace, ReplaceFace), which "
+     "add_feature and modify_feature refuse. `expect_revision` "
      "(a part revision, as get_state reports it) is checked once before the "
      "first call and refused as stale_revision if the part has moved.",
      "calls:object[], stop_on_error?:bool, expect_revision?:revision"},

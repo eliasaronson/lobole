@@ -238,6 +238,8 @@ std::string ReplaceOnto(
   }
 
   BOPAlgo_MakerVolume maker;
+  const Handle(Message_ProgressIndicator) deadline =
+      MakeDeadline(kBuilderBudgetS);
   std::string why = Guarded("Replace Face", [&] {
     TopTools_ListOfShape args;
     for (TopExp_Explorer ex(input, TopAbs_FACE); ex.More(); ex.Next())
@@ -245,8 +247,12 @@ std::string ReplaceOnto(
     maker.SetArguments(args);
     maker.SetRunParallel(Standard_False);
     maker.SetIntersect(Standard_True);
-    maker.Perform();
+    maker.Perform(deadline->Start());
   });
+  if (why.empty() && Expired(deadline))
+    why = "Replace Face of " + described + " onto " + label +
+          " gave up after " + std::to_string(int(kBuilderBudgetS)) +
+          " s: the faces around it are too costly to intersect";
   if (why.empty() && maker.HasErrors())
     why = "Replace Face of " + described + " onto " + label +
           " did not build: the faces do not close a volume";
@@ -434,6 +440,12 @@ bool ReplaceFaceFeature::Execute(RegenContext& ctx) {
   if (targetKind == ReplaceTargetKind::Face && targetFace.featureId == bodyId &&
       targetFace.name == face.name) {
     SetError("Replace Face: `" + face.name + "` is its own target");
+    return false;
+  }
+  if (std::string why = directedit::FreeformNeighbour(picked, "Replace Face",
+                                                      "extends or trims");
+      !why.empty()) {
+    SetError(why);
     return false;
   }
   const Body& body = *picked.body;

@@ -182,6 +182,9 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
   // tangent chain instead -- faces nobody picked.
   if (std::string tear = TangentNeighbour(picked); !tear.empty())
     return tear;
+  if (std::string why = FreeformNeighbour(picked, op, "moves along");
+      !why.empty())
+    return why;
   if (distance < 0.0) {
     for (size_t k = 0; k < picked.indices.size(); k++) {
       const auto t = ThicknessUnder(body, picked.indices[k]);
@@ -205,6 +208,8 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
   for (int attempt = 0; attempt < kAttempts; attempt++) {
     const Copied copy = CopyFor(body, picked.indices);
     BRepOffset_MakeOffset maker;
+    const Handle(Message_ProgressIndicator) deadline =
+        MakeDeadline(kBuilderBudgetS);
     error = Guarded(op, [&] {
       maker.Initialize(copy.shape, 0.0, Precision::Confusion(), BRepOffset_Skin,
                        /*Intersection=*/Standard_True,
@@ -213,8 +218,14 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
                        /*RemoveIntEdges=*/Standard_False);
       for (const TopoDS_Shape& f : copy.faces)
         maker.SetOffsetOnFace(TopoDS::Face(f), distance);
-      maker.MakeOffsetShape();
+      maker.MakeOffsetShape(deadline->Start());
     });
+    if (error.empty() && Expired(deadline)) {
+      error = op + " of " + NameList(picked.names) + " gave up after " +
+              std::to_string(int(kBuilderBudgetS)) +
+              " s: the faces around them are too costly to offset";
+      return error; // a draw again would cost as much
+    }
     // A fault is not drawn again: the builder long-jumped out of its own
     // frames, and running it once more on that heap is how a caught fault
     // becomes an uncaught one (tests/test_direct_edit.cpp's battery holder).

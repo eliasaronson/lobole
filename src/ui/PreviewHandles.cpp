@@ -9,6 +9,7 @@
 
 #include "cad/FaceSelector.h"
 #include "core/AxisRef.h"
+#include "core/DirectEdit.h"
 #include "core/Document.h"
 #include "core/Measure.h"
 #include "core/features/ExtrudeFeature.h"
@@ -281,9 +282,9 @@ bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
     const std::vector<Body>* input = doc.CachedBodiesAfter(index - 1);
     if (input == nullptr)
       return false;
-    for (const Body& body : *input) {
-      if (body.createdBy != off->bodyId)
-        continue;
+    if (const Body* held = directedit::BodyHolding(*input, off->bodyId,
+                                                   off->faces.front().name)) {
+      const Body& body = *held;
       const auto at = body.elementMap.Resolve(off->faces.front().name);
       if (!at)
         return false;
@@ -309,9 +310,9 @@ bool ComputeHandleSpecs(AppState& state, std::vector<HandleSpec>& out) {
     const std::vector<Body>* input = doc.CachedBodiesAfter(index - 1);
     if (input == nullptr)
       return false;
-    for (const Body& body : *input) {
-      if (body.createdBy != mv->bodyId)
-        continue;
+    if (const Body* held = directedit::BodyHolding(*input, mv->bodyId,
+                                                   mv->faces.front().name)) {
+      const Body& body = *held;
       glm::dvec3 sum(0.0);
       double area = 0.0;
       for (const ElementRef& r : mv->faces)

@@ -851,6 +851,15 @@ add_test(NAME regen_honesty_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(regen_honesty_smoke PROPERTIES TIMEOUT 120)
 
+# The direct edits on real STEP files (docs/modeling/README.md#direct-edit):
+# every face of tests/fixtures/step's parts deleted alone and offset out and
+# in at its derived default, each kept or refused naming a face with nothing
+# changed -- never stored broken. Headless.
+add_test(NAME direct_edit_step_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/direct_edit_step_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(direct_edit_step_smoke PROPERTIES TIMEOUT 300)
+
 # add_constraint refuses a constraint that constrains nothing (repeats or
 # contradicts the sketch), names what it runs into and changes nothing;
 # `driven: true` adds a reference dimension that answers `measured`. Headless.

@@ -12,6 +12,7 @@
 #include "core/ElementMap.h"
 #include "core/Feature.h"
 
+#include <Message_ProgressIndicator.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
@@ -53,6 +54,13 @@ std::string DescribeFace(const Body& body, int faceIndex,
                          const std::string& name);
 // "`a`, `b` and `c`".
 std::string NameList(const std::vector<std::string>& names);
+
+// The body `createdBy` made that holds the face `name`: bodies can share a
+// createdBy (a multi-body import's "<tag>/b<k>/...", a split's pieces), and
+// the name says which. The first such body when none holds it; null when
+// there is none at all.
+const Body* BodyHolding(const std::vector<Body>& bodies, uint64_t createdBy,
+                        const std::string& name);
 
 // The faces a direct edit was given, resolved on its body.
 struct Picked {
@@ -144,6 +152,28 @@ std::optional<std::vector<int>> FeatureFaces(const Body& body,
 // boss sits in. nullopt when none is planar.
 std::optional<glm::dvec3> HostNormal(const Body& body,
                                      const std::vector<int>& faces);
+
+// How long one direct-edit builder may run before it is given up, s. The
+// builders stop at their progress checks (Message_ProgressIndicator::
+// UserBreak); without one, deleting a face of a modelled thread ran
+// Defeaturing's edge-face intersections for more than fifteen minutes. The
+// 100 bores of plate_100_holes.step delete in about 20 s, half of this.
+inline constexpr double kBuilderBudgetS = 45.0;
+
+// A progress indicator that asks its builder to stop once `seconds` have
+// passed (`Expired` then says so). Handed to a builder as `Start()`.
+Handle(Message_ProgressIndicator) MakeDeadline(double seconds);
+bool Expired(const Handle(Message_ProgressIndicator) & deadline);
+
+// A direct edit extends or intersects the faces around the ones it is given.
+// A freeform face there (Measure's kind "other": a modelled thread's flank,
+// a spline) is one the builders extend and intersect at a cost past any
+// budget -- deleting one face of a thread ran for more than fifteen minutes
+// -- so the edit is refused before it runs, naming both faces. Empty when
+// every neighbour is analytic. `does` says what the edit does to them
+// ("heals by extending").
+std::string FreeformNeighbour(const Picked& picked, const std::string& op,
+                              const std::string& does);
 
 // The body's thinnest bounding-box extent, mm.
 double ThinnestExtent(const Body& body);

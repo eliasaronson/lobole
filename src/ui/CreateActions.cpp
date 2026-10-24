@@ -510,11 +510,11 @@ double RoundDown125(double raw) {
   return decade * (mant >= 5.0 ? 5.0 : mant >= 2.0 ? 2.0 : 1.0);
 }
 
-const Body* BodyCreatedBy(const AppState& state, uint64_t id) {
-  for (const Body& b : state.document->GetBodies())
-    if (b.createdBy == id && b.shape.IsValid())
-      return &b;
-  return nullptr;
+const Body* BodyCreatedBy(const AppState& state, uint64_t id,
+                          const std::string& face) {
+  const Body* b =
+      directedit::BodyHolding(state.document->GetBodies(), id, face);
+  return b != nullptr && b->shape.IsValid() ? b : nullptr;
 }
 
 // The faces the selection holds, in order: what a direct edit seeds from.
@@ -532,7 +532,7 @@ double SizeFromFace(const AppState& state, const ElementRef& face,
                     double fallback) {
   if (!state.document)
     return fallback;
-  const Body* body = BodyCreatedBy(state, face.featureId);
+  const Body* body = BodyCreatedBy(state, face.featureId, face.name);
   if (body == nullptr)
     return fallback;
   const auto at = body->elementMap.Resolve(face.name);
@@ -552,7 +552,8 @@ glm::dvec3 DefaultFaceMove(const AppState& state,
   const uint64_t id = faces.empty()
                           ? TargetBody(state, SelectionItem::Kind::Face)
                           : faces.front().featureId;
-  const Body* body = BodyCreatedBy(state, id);
+  const Body* body =
+      BodyCreatedBy(state, id, faces.empty() ? "" : faces.front().name);
   if (body == nullptr)
     return glm::dvec3(0.0);
   std::vector<int> indices;

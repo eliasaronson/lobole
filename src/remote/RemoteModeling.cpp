@@ -347,7 +347,10 @@ static constexpr MethodDoc ModelingMethods[] = {
      "(docs/modeling/README.md#primitives). A Thread on a PRINTED part "
      "(set_print_process) "
      "also returns `print`: what the print wants it modelled at, since the "
-     "basic profile it cuts prints tight (docs/tolerances/README.md).",
+     "basic profile it cuts prints tight (docs/tolerances/README.md). A "
+     "DeleteFace, OffsetFace, MoveFace or ReplaceFace that would not build "
+     "is refused with its error, the document unchanged "
+     "(docs/modeling/README.md#direct-edit).",
      "feature:object, expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},
     {"import_sketch",
@@ -434,7 +437,9 @@ static constexpr MethodDoc ModelingMethods[] = {
      "A Sketch whose dimension values changed is re-solved from its current "
      "geometry; a value that cannot be met, or that would mirror a triangle "
      "of distances or turn an arc inside out, is refused naming the "
-     "dimension, and the document is unchanged.",
+     "dimension, and the document is unchanged; a direct edit (DeleteFace, "
+     "OffsetFace, MoveFace, ReplaceFace) that would not build is refused "
+     "with its error, the document unchanged.",
      "feature:object, feature_id?:int>=0, index?:int>=0, "
      "expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},

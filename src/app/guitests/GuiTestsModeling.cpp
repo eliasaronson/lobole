@@ -8,12 +8,16 @@
 #include "core/Primitives.h"
 #include "core/SheetMetal.h"
 #include "core/features/BooleanFeature.h"
+#include "core/features/DatumPlaneFeature.h"
 #include "core/features/DeleteFaceFeature.h"
 #include "core/features/EdgeFlangeFeature.h"
 #include "core/features/FlatPatternFeature.h"
+#include "core/features/MoveFaceFeature.h"
 #include "core/features/OffsetFaceFeature.h"
+#include "core/features/ReplaceFaceFeature.h"
 #include "ui/DocumentSlots.h"
 #include "ui/DrawingActions.h"
+#include "ui/FeatureEditor.h"
 #include "ui/FeatureTreePanel.h"
 #include "ui/FileDialogs.h" // ExportActiveDocument
 #include "ui/MeasureActions.h"
@@ -1837,6 +1841,92 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(std::abs(bodyVolume(d.body) - d.box) < 1e-9 * d.box);
     s_App->editFeatureId = 0;
     s_App->slotPick = {};
+  };
+
+  // Move Face with its derived default: a preselected bore moves in the
+  // plane of the face it sits in, the volume kept.
+  t = IM_REGISTER_TEST(engine, "direct", "move_preselected_bore");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const Drilled d = drill(ctx, 0.0);
+    const double before = bodyVolume(d.body);
+    const glm::dvec3 c = (d.lo + d.hi) * 0.5;
+    const double r = 0.3 * (d.hi.z - d.lo.z);
+    const ElementRef bore = faceAt(d, {c.x + r, c.y, c.z});
+    s_App->selection.Clear();
+    s_App->selection.items.push_back({ui::SelectionItem::Kind::Face, 0, bore});
+    ToolbarClick(ctx, "###tb_move_face");
+    ctx->Yield();
+    auto* mv =
+        dynamic_cast<MoveFaceFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(mv != nullptr);
+    IM_CHECK_EQ(mv->faces.size(), (size_t)1);
+    // In the top's plane: no Z, and some X or Y.
+    IM_CHECK(std::abs(mv->translate.z) < 1e-12);
+    IM_CHECK(glm::length(mv->translate) > 0.0);
+    const glm::dvec3 shift = mv->translate;
+    const uint64_t id = mv->GetId();
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
+    IM_CHECK(std::abs(bodyVolume(d.body) - before) < 1e-9 * before);
+    // The bore, by its moved name, where it was moved to.
+    for (const Body& b : Doc()->GetBodies()) {
+      if (b.createdBy != d.body)
+        continue;
+      const auto at =
+          b.elementMap.Resolve(bore.name + ";M" + std::to_string(id));
+      IM_CHECK(at.has_value());
+      const auto info = Measure::DescribeFaceAt(b, *at);
+      IM_CHECK(info.has_value());
+      IM_CHECK(glm::length(glm::dvec3(info->centroid.x, info->centroid.y, 0) -
+                           glm::dvec3(c.x + shift.x, c.y + shift.y, 0)) < 1e-6);
+    }
+  };
+
+  // Replace Face's target from the tree: the top put onto a datum plane's
+  // row, half a unit above it.
+  t = IM_REGISTER_TEST(engine, "direct", "replace_top_onto_a_datum_row");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    AddFixtureBox(ctx);
+    ctx->Yield();
+    const uint64_t boxId = Doc()->GetFeature(0)->GetId();
+    glm::dvec3 lo, hi;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(lo, hi, true);
+    auto dp =
+        std::make_unique<DatumPlaneFeature>("Ceiling", DatumPlaneKind::Offset);
+    dp->basePlane = PlaneType::XY;
+    dp->offset = hi.z + 0.5;
+    s_App->commands->Execute(std::make_unique<AddFeatureCommand>(std::move(dp)),
+                             *Doc());
+    ctx->Yield(2);
+    const Drilled box{boxId, lo, hi, 0.0};
+    const ElementRef top =
+        faceAt(box, {(lo.x + hi.x) / 2, (lo.y + hi.y) / 2, hi.z});
+    s_App->selection.Clear();
+    s_App->selection.items.push_back({ui::SelectionItem::Kind::Face, 0, top});
+    ToolbarClick(ctx, "###tb_replace_face");
+    ctx->Yield();
+    auto* rp =
+        dynamic_cast<ReplaceFaceFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(rp != nullptr);
+    IM_CHECK_STR_EQ(rp->face.name.c_str(), top.name.c_str());
+    // The face seeded, the target is what the window waits for.
+    IM_CHECK(s_App->slotPick.Active());
+    IM_CHECK_EQ(s_App->slotPick.slot,
+                static_cast<int>(ui::PickSlot::ReplaceFaceTarget));
+    ctx->ItemClick("//###Model/Ceiling##1");
+    ctx->Yield(2);
+    rp = dynamic_cast<ReplaceFaceFeature*>(ui::ResolvePendingFeature(*s_App));
+    IM_CHECK(rp != nullptr);
+    IM_CHECK(rp->targetKind == ReplaceTargetKind::Plane);
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK(Doc()->GetFeature(Doc()->FeatureCount() - 1)->GetError().empty());
+    const glm::dvec3 e = hi - lo;
+    IM_CHECK(std::abs(bodyVolume(boxId) - e.x * e.y * (e.z + 0.5)) <
+             1e-9 * e.x * e.y * e.z);
   };
 
   // Offset Face's handle: an arrow on the face, along its normal, that

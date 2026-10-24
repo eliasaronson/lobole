@@ -21,6 +21,7 @@
 #include <TopoDS_Wire.hxx>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <set>
@@ -94,14 +95,30 @@ std::string NameList(const std::vector<std::string>& names) {
   return out;
 }
 
+const Body* BodyHolding(const std::vector<Body>& bodies, uint64_t createdBy,
+                        const std::string& name) {
+  const Body* first = nullptr;
+  for (const Body& b : bodies) {
+    if (b.createdBy != createdBy)
+      continue;
+    if (first == nullptr)
+      first = &b;
+    if (!name.empty() && b.elementMap.Resolve(name))
+      return &b;
+  }
+  return first;
+}
+
 std::string ResolvePicked(RegenContext& ctx, uint64_t bodyId,
                           const std::vector<ElementRef>& faces,
                           Fingerprints& prints, const std::string& what,
                           Picked& out, const std::vector<std::string>* keep) {
   out = {};
-  const auto body =
-      std::find_if(ctx.bodies.begin(), ctx.bodies.end(),
-                   [&](const Body& b) { return b.createdBy == bodyId; });
+  const Body* holding =
+      BodyHolding(ctx.bodies, bodyId, faces.empty() ? "" : faces.front().name);
+  const auto body = holding == nullptr
+                        ? ctx.bodies.end()
+                        : ctx.bodies.begin() + (holding - ctx.bodies.data());
   if (bodyId == 0 || body == ctx.bodies.end())
     return "the body to edit (created by feature " + std::to_string(bodyId) +
            ") no longer exists";
@@ -425,6 +442,73 @@ std::optional<glm::dvec3> HostNormal(const Body& body,
     }
   }
   return best;
+}
+
+std::string FreeformNeighbour(const Picked& picked, const std::string& op,
+                              const std::string& does) {
+  const Body& body = *picked.body;
+  TopTools_IndexedMapOfShape all;
+  TopExp::MapShapes(body.shape.GetShape(), TopAbs_FACE, all);
+  TopTools_IndexedDataMapOfShapeListOfShape parents;
+  TopExp::MapShapesAndAncestors(body.shape.GetShape(), TopAbs_EDGE, TopAbs_FACE,
+                                parents);
+  for (size_t k = 0; k < picked.indices.size(); k++) {
+    for (TopExp_Explorer ex(all(picked.indices[k] + 1), TopAbs_EDGE); ex.More();
+         ex.Next()) {
+      const int at = parents.FindIndex(ex.Current());
+      if (at == 0)
+        continue;
+      for (const TopoDS_Shape& g : parents(at)) {
+        const int n = all.FindIndex(g) - 1;
+        if (n < 0 || std::find(picked.indices.begin(), picked.indices.end(),
+                               n) != picked.indices.end())
+          continue;
+        const auto info = Measure::DescribeFaceAt(body, n);
+        if (info && info->kind == "other") {
+          const std::string* name = body.elementMap.NameOf(n);
+          return op + " " + does + " the faces around " +
+                 NameList({picked.names[k]}) + ", and " +
+                 DescribeFace(body, n, name ? *name : "face") +
+                 " beside it is freeform (a thread's flank, a spline), "
+                 "which it does not extend; pick it with them, or edit the "
+                 "feature that made them";
+        }
+      }
+    }
+  }
+  return {};
+}
+
+namespace {
+
+class Deadline : public Message_ProgressIndicator {
+public:
+  explicit Deadline(double seconds)
+      : m_end(std::chrono::steady_clock::now() +
+              std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                  std::chrono::duration<double>(seconds))) {}
+  Standard_Boolean UserBreak() override {
+    if (!m_expired && std::chrono::steady_clock::now() > m_end)
+      m_expired = true;
+    return m_expired;
+  }
+  void Show(const Message_ProgressScope&, const Standard_Boolean) override {}
+  bool expired() const { return m_expired; }
+
+private:
+  std::chrono::steady_clock::time_point m_end;
+  bool m_expired = false;
+};
+
+} // namespace
+
+Handle(Message_ProgressIndicator) MakeDeadline(double seconds) {
+  return new Deadline(seconds);
+}
+
+bool Expired(const Handle(Message_ProgressIndicator) & deadline) {
+  const Handle(Deadline) d = Handle(Deadline)::DownCast(deadline);
+  return !d.IsNull() && d->expired();
 }
 
 double ThinnestExtent(const Body& body) {
