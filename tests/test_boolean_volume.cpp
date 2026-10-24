@@ -14,6 +14,7 @@
 #include "core/Measure.h"
 
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRep_Builder.hxx>
@@ -263,12 +264,15 @@ TEST_CASE("Two spokes crossing 8 um apart are united by the fuzzy retry",
   }
 }
 
-TEST_CASE("The fuzzy retry leaves its operands as it found them", "[boolean]") {
+TEST_CASE("A boolean leaves its operands as it found them", "[boolean]") {
   // An OpenCASCADE boolean writes the p-curves it computes onto its
-  // arguments' edges unless it is built non-destructively, and the retry
-  // runs on the document's own bodies. Counted here as the curve
-  // representations on the operands' edges, which the exact (destructive)
-  // boolean is seen to add to — so the count can see a write.
+  // arguments' edges unless it is built non-destructively, and both the
+  // exact boolean and its fuzzy retry run on the document's own bodies: the
+  // previous feature's cached results, whose next feature then built on
+  // what this one had written (a split of random design 33, test_split).
+  // Counted here as the curve representations on the operands' edges, which
+  // a plain destructive union is seen to add to -- so the count can see a
+  // write.
   const auto reps = [](const CADShape& s) {
     int n = 0;
     TopTools_IndexedMapOfShape edges;
@@ -277,8 +281,8 @@ TEST_CASE("The fuzzy retry leaves its operands as it found them", "[boolean]") {
       n += Handle(BRep_TEdge)::DownCast(edges(i).TShape())->Curves().Extent();
     return n;
   };
-  // Two blocks sharing a face: the exact union computes where each one's
-  // edges lie on the other's face, and writes it onto them.
+  // Two blocks sharing a face: the union computes where each one's edges
+  // lie on the other's face.
   const CADShape a = Box(0, 0, 0, 10, 10, 10);
   const CADShape b = Box(10, 2, 2, 10, 6, 6);
   const int before = reps(a) + reps(b);
@@ -292,7 +296,14 @@ TEST_CASE("The fuzzy retry leaves its operands as it found them", "[boolean]") {
   const CADShape exact =
       topo::BooleanNamed(BooleanOp::Union, a, {}, b, {}, 9, map);
   REQUIRE(exact.IsValid());
-  CHECK(reps(a) + reps(b) > before);
+  CHECK(reps(a) + reps(b) == before);
+
+  const CADShape c = Box(0, 0, 0, 10, 10, 10);
+  const CADShape d = Box(10, 2, 2, 10, 6, 6);
+  const int plain = reps(c) + reps(d);
+  BRepAlgoAPI_Fuse destructive(c.GetShape(), d.GetShape());
+  REQUIRE(destructive.IsDone());
+  CHECK(reps(c) + reps(d) > plain);
 }
 
 TEST_CASE("A cut that shares a bore's cylinder is refused, not kept wrong",

@@ -98,6 +98,12 @@ bool SplitFeature::Execute(RegenContext& ctx) {
     tools.Append(knifeShape);
     splitter.SetArguments(args);
     splitter.SetTools(tools);
+    // The body is the previous feature's cached result: a destructive split
+    // writes p-curves and tolerances onto it, and the same split built again
+    // on that body gave other pieces (random design 33: 5.6 mm3 lighter the
+    // first time than the second), so its outcome hung on what had run
+    // before.
+    splitter.SetNonDestructive(Standard_True);
     splitter.Build();
     if (!splitter.IsDone()) {
       SetError("split operation failed");

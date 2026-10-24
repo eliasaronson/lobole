@@ -10,6 +10,7 @@
 #include "core/ElementHistory.h"
 
 #include <BRepBndLib.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepOffsetAPI_DraftAngle.hxx>
 #include <BRepTools_History.hxx>
 #include <Bnd_Box.hxx>
@@ -80,7 +81,13 @@ bool DraftFeature::Execute(RegenContext& ctx) {
     idx.push_back(*i);
   }
 
-  const TopoDS_Shape& shape = body->shape.GetShape();
+  // On a copy, topology only, as Shell's and the blend's are: the body is
+  // the previous feature's cached result, which the draft builder writes its
+  // p-curves and tolerances onto, and a draft that faulted part-way left it
+  // half-written for undo to serve. A copy keeps the explorer order, and
+  // with it every index-keyed name.
+  const TopoDS_Shape shape =
+      BRepBuilderAPI_Copy(body->shape.GetShape(), false, false).Shape();
   const glm::dvec3 n = PlaneNormal(neutralPlane);
   const gp_Dir pull(n.x, n.y, n.z);
   // Neutral plane at the body's bbox min along the pull axis: the base stays
@@ -205,8 +212,8 @@ bool DraftFeature::Execute(RegenContext& ctx) {
       const Handle(BRepTools_History) history =
           new BRepTools_History(args, draft);
       if (!history.IsNull())
-        map = topo::NamesThroughHistory(body->shape, body->elementMap, *history,
-                                        result, GetId());
+        map = topo::NamesThroughHistory(CADShape(shape), body->elementMap,
+                                        *history, result, GetId());
       else
         topo::NamePrimitiveElements(result, std::to_string(GetId()), map);
     }

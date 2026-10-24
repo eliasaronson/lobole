@@ -6,12 +6,22 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 
 #include "TestIO.h"
+#include "TestPaths.h"
 #include "core/Document.h"
+#include "core/ElementHistory.h"
 #include "core/Feature.h"
 #include "core/features/SplitFeature.h"
 #include "core/io/Serialization.h"
 
+#include <BRepTools.hxx>
+#include <BRep_Builder.hxx>
+#include <BRep_TEdge.hxx>
+#include <TopExp.hxx>
+#include <TopTools_IndexedMapOfShape.hxx>
+
 #include <filesystem>
+#include <utility>
+#include <vector>
 
 using Catch::Matchers::WithinRel;
 namespace fs = std::filesystem;
@@ -193,4 +203,67 @@ TEST_CASE("A face-knife split round-trips through JSON", "[split]") {
   CHECK(sp->face.featureId == bId); // ref preserved
   CHECK(sp->face.name == "someface");
   fs::remove(path);
+}
+
+namespace {
+
+// How many curve representations (3D curves, p-curves, polygons) the edges
+// of `s` carry, with their tolerances: what an OpenCASCADE boolean writes
+// onto its arguments unless it runs non-destructive.
+std::pair<int, std::vector<double>> EdgeState(const TopoDS_Shape& s) {
+  int curves = 0;
+  std::vector<double> tol;
+  TopTools_IndexedMapOfShape edges;
+  TopExp::MapShapes(s, TopAbs_EDGE, edges);
+  for (int i = 1; i <= edges.Extent(); i++) {
+    const auto te = Handle(BRep_TEdge)::DownCast(edges(i).TShape());
+    curves += te->Curves().Extent();
+    tol.push_back(te->Tolerance());
+  }
+  return {curves, tol};
+}
+
+} // namespace
+
+// Random design 33's base (tests/fixtures/fuzz33_base.brep: a body with a
+// B-spline face and edges at 0.14 mm tolerance), split at its mid-plane. The
+// splitter wrote p-curves and tolerances onto the body it was handed -- the
+// previous feature's cached result -- so the same split built again on that
+// body gave other pieces: 5.6 mm3 lighter the first time, right the second.
+// The action matrix's verdict on it hung on whatever had run before
+// (fuzz/33 body.split).
+TEST_CASE("A split leaves its input as it found it and builds the same twice",
+          "[split]") {
+  TopoDS_Shape shape;
+  BRep_Builder builder;
+  REQUIRE(BRepTools::Read(
+      shape,
+      (fs::path(TestSourceDir()) / "tests/fixtures/fuzz33_base.brep")
+          .string()
+          .c_str(),
+      builder));
+  Body base;
+  base.name = "Base";
+  base.createdBy = 1;
+  base.shape = CADShape(shape);
+  topo::NamePrimitiveElements(base.shape, "1", base.elementMap);
+  const auto before = EdgeState(shape);
+  std::vector<std::unique_ptr<Feature>> none;
+  std::vector<std::vector<double>> volumes;
+  for (int run = 0; run < 2; run++) {
+    std::vector<Body> bodies{base}; // the same TShape: a cached body
+    SplitFeature split("Split", 1);
+    split.knife = SplitKnifeKind::Plane;
+    split.basePlane = PlaneType::YZ;
+    RegenContext ctx{bodies, none, 0};
+    REQUIRE(split.Execute(ctx));
+    std::vector<double> v;
+    for (const Body& b : bodies)
+      v.push_back(b.shape.Volume());
+    volumes.push_back(v);
+    CHECK(EdgeState(shape) == before);
+  }
+  REQUIRE(volumes[0].size() == volumes[1].size());
+  for (size_t i = 0; i < volumes[0].size(); i++)
+    CHECK(volumes[0][i] == volumes[1][i]);
 }

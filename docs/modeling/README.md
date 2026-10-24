@@ -1171,8 +1171,16 @@ is a hang, so a loaded machine does not turn a 22 s extrude into one.
 
 **Determinism.** `--determinism` takes the sample's designs at one action in
 eight, builds each in two fresh instances and runs every action twice in
-each (add, undo, add): the entity names, each family's outcomes and each
-result's bodies (volume and bbox to 1e-9) must agree.
+each (add, undo, add), the second instance in the reverse order: the entity
+names, each family's outcomes and each result's bodies (volume and bbox to
+1e-9) must agree. The reverse order is for an action whose answer hangs on
+what ran on the part before it: a kernel call that writes the p-curves and
+tolerances it computes onto the cached body it was handed changes what every
+later call on that body builds. A split of random design 33 lost 5.6 mm³ on
+a fresh body and none after a fillet had been tried on it, so the full sweep
+recorded a pass that a replay could not repeat. Booleans, splits, blends,
+drafts and shells therefore build on a copy of the body (topology only) or
+non-destructively, never on the cached shape itself.
 
     tools/action_matrix.py run [--sample] [--shard K/N] [--design PAT]
                                [--actions a,b] [--jobs N] [--out DIR]

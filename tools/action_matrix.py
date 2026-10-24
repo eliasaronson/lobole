@@ -1666,7 +1666,10 @@ def cmd_bless(args):
 def cmd_determinism(args, corpus):
     """The sample's designs at one action in eight, each design built in two
     fresh instances, and every action run twice in each (add, undo, add):
-    the same build must give the same names, outcomes and results."""
+    the same build must give the same names, outcomes and results. The second
+    instance takes the actions in the reverse order, so an action whose answer
+    hangs on what ran on the part before it (a kernel call writing onto the
+    cached body it was handed) answers differently there."""
     rows = select_designs(corpus, args)
     out = args.out or tempfile.mkdtemp(prefix="action_matrix_det_")
     started = time.time()
@@ -1699,7 +1702,7 @@ def cmd_determinism(args, corpus):
                             "grow_faces", {"faces": refs}))
                     names = sorted({a["entity"] for a in plan})
                     seen = {}
-                    for act in plan:
+                    for act in (plan if attempt == 0 else plan[::-1]):
                         key = act["family"] or act["entity"]
                         if not in_scope(unit, act["action"], key,
                                         DETERMINISM_EVERY, None, w.slow):
@@ -1759,7 +1762,8 @@ def cmd_determinism(args, corpus):
             print(f"  - {p}")
         return 1
     print(f"action_matrix determinism: {n_actions} actions on {len(rows)} "
-          f"designs agree across two fresh instances and when run twice "
+          f"designs agree across two fresh instances, in either order, and "
+          f"when run twice "
           f"({secs:.0f} s)")
     return 0
 

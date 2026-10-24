@@ -14,14 +14,17 @@
 #include <BRepAlgoAPI_Common.hxx>
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
+#include <BRepBuilderAPI_Copy.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepTools_History.hxx>
+#include <BRep_Builder.hxx>
 #include <TopExp.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
 #include <TopTools_IndexedMapOfShape.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <TopoDS.hxx>
+#include <TopoDS_Compound.hxx>
 
 #include <algorithm>
 #include <cfloat>
@@ -390,10 +393,32 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
     return CADShape();
   }
   try {
+    // On copies of both operands, topology only (the geometry is shared):
+    // the target is the previous feature's cached body, and a boolean writes
+    // the p-curves and tolerances it computes onto its arguments' edges, so
+    // every later feature's result on that body depended on what had run on
+    // it before -- a split of random design 33 lost 5.6 mm3 on a fresh body
+    // and none after a cut had been tried on it. Not SetNonDestructive: that
+    // reports the faces it copied as modified, and the names a saved document
+    // cites ('4/g1') moved. A copy keeps the explorer order, and with it every
+    // index-keyed name of the operands' maps. The two are copied as one
+    // compound, so what they share they still share: two pieces of one body
+    // (a Jog's halves) fused share their untouched edges, and copied apart
+    // each of those came back modified.
+    TopoDS_Shape targetIn, toolIn;
+    {
+      TopoDS_Compound both;
+      BRep_Builder bb;
+      bb.MakeCompound(both);
+      bb.Add(both, target.GetShape());
+      bb.Add(both, tool.GetShape());
+      BRepBuilderAPI_Copy copy(both, false, false);
+      targetIn = copy.ModifiedShape(target.GetShape());
+      toolIn = copy.ModifiedShape(tool.GetShape());
+    }
     std::unique_ptr<BRepAlgoAPI_BooleanOperation> mk;
     if (fuzzy > 0.0) {
-      // The retry: built by hand so the fuzzy value and the non-destructive
-      // flag are both set before it runs.
+      // The retry: built by hand so the fuzzy value is set before it runs.
       switch (op) {
       case BooleanOp::Union:
         mk = std::make_unique<BRepAlgoAPI_Fuse>();
@@ -405,20 +430,17 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
         mk = std::make_unique<BRepAlgoAPI_Common>();
         break;
       }
-      cad::BuildNonDestructive(*mk, target.GetShape(), tool.GetShape(), fuzzy);
+      cad::BuildNonDestructive(*mk, targetIn, toolIn, fuzzy);
     } else {
       switch (op) {
       case BooleanOp::Union:
-        mk = std::make_unique<BRepAlgoAPI_Fuse>(target.GetShape(),
-                                                tool.GetShape());
+        mk = std::make_unique<BRepAlgoAPI_Fuse>(targetIn, toolIn);
         break;
       case BooleanOp::Subtract:
-        mk = std::make_unique<BRepAlgoAPI_Cut>(target.GetShape(),
-                                               tool.GetShape());
+        mk = std::make_unique<BRepAlgoAPI_Cut>(targetIn, toolIn);
         break;
       case BooleanOp::Intersect:
-        mk = std::make_unique<BRepAlgoAPI_Common>(target.GetShape(),
-                                                  tool.GetShape());
+        mk = std::make_unique<BRepAlgoAPI_Common>(targetIn, toolIn);
         break;
       }
     }
@@ -431,8 +453,8 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
 
     // Normalize the maker's reports onto BRepTools_History (T1 prereq 5).
     TopTools_ListOfShape args;
-    AppendSubshapeArgs(target.GetShape(), args);
-    AppendSubshapeArgs(tool.GetShape(), args);
+    AppendSubshapeArgs(targetIn, args);
+    AppendSubshapeArgs(toolIn, args);
     BRepTools_History hist(args, *mk);
     // The clean-up, composed onto the boolean's history: inputs -> result.
     if (refine) {
@@ -444,9 +466,8 @@ CADShape BooleanNamed(BooleanOp op, const CADShape& target,
       }
     }
 
-    out = PropagateNames(
-        {{target.GetShape(), targetMap}, {tool.GetShape(), toolMap}}, hist,
-        mk->SectionEdges(), result, featureTag);
+    out = PropagateNames({{targetIn, targetMap}, {toolIn, toolMap}}, hist,
+                         mk->SectionEdges(), result, featureTag);
     FinishNames(result, out);
     return CADShape(result);
   } catch (const Standard_Failure& e) {
@@ -614,7 +635,14 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
   // The blend builder segfaults on a set it cannot build rather than
   // reporting a faulty contour; RunEdgeBlend builds it in a signal scope.
   try {
-    const TopoDS_Shape& shape = body.GetShape();
+    // On a copy, topology only: the body is the previous feature's cached
+    // result, and the blend builder writes the p-curves and tolerances it
+    // computes onto its input, so a later split of the same body built other
+    // pieces after a fillet had been tried on it (random design 33), and a
+    // build that faulted part-way left it half-written for undo to serve. A
+    // copy keeps the explorer order, and with it every index-keyed name.
+    const TopoDS_Shape shape =
+        BRepBuilderAPI_Copy(body.GetShape(), false, false).Shape();
     TopTools_IndexedMapOfShape edges;
     TopExp::MapShapes(shape, TopAbs_EDGE, edges);
     for (int idx : edgeIndices) {
@@ -625,18 +653,39 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
         return CADShape();
       }
     }
+    // Adding an edge walks the chain of edges tangent to it, which is where
+    // the builder went round a tangent loop forever (patched in our OCC,
+    // nix/patches/occt-fillet-tangent-loop.patch: it refuses the chain) --
+    // so in the signal scope too, not only the build.
+    const auto addAll = [&](auto& mk) -> bool {
+      const auto why = occsig::RunCatchingOccSignals([&] {
+        for (int idx : edgeIndices)
+          mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
+      });
+      if (!why)
+        return true;
+      if (error) {
+        if (why->find("tangent chain runs into a loop") != std::string::npos)
+          *error = "the edges tangent to this one run into a loop that does "
+                   "not come back to it; pick an edge on the loop, or one "
+                   "past a sharp corner";
+        else
+          *error = "the blend builder failed inside OpenCASCADE while "
+                   "collecting the edges (" +
+                   *why + ")";
+      }
+      return false;
+    };
 
     if (op == EdgeBlendOp::Chamfer) {
       BRepFilletAPI_MakeChamfer mk(shape);
-      for (int idx : edgeIndices) {
-        mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
-      }
+      if (!addAll(mk))
+        return CADShape();
       return RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
     }
     BRepFilletAPI_MakeFillet mk(shape);
-    for (int idx : edgeIndices) {
-      mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
-    }
+    if (!addAll(mk))
+      return CADShape();
     CADShape result = RunEdgeBlend(mk, shape, bodyMap, featureTag, out, error);
     if (!result.IsValid() && error && mk.NbFaultyContours() > 0) {
       *error = "the fillet failed on " + std::to_string(mk.NbFaultyContours()) +
