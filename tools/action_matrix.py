@@ -8,7 +8,8 @@ over the RPC, each outcome held to a committed baseline.
 
     tools/action_matrix.py run [--sample] [--shard K/N] [--design PAT]
                                [--actions a,b] [--jobs N] [--out DIR]
-                               [--determinism] [--bless] [--binary B]
+                               [--determinism] [--bless] [--profile]
+                               [--binary B]
     tools/action_matrix.py bless --from DIR    # merge shard outputs
     tools/action_matrix.py replay CASE.json    # one action, judged
     tools/action_matrix.py self-test

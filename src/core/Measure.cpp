@@ -597,8 +597,9 @@ constexpr double kContactFuzz = 1.0e-3;
 //
 //   - A boolean MODIFIES its arguments. It writes the p-curves it computes
 //     onto the input edges (BRep_Builder::UpdateEdge). A modelling feature
-//     can afford that, because it consumes its operands; a measurement
-//     cannot, because the operands are the document. Two sweep threads
+//     builds on a copy of its cached operands instead (topo::BooleanNamed);
+//     a measurement must not write either, because the operands are the
+//     document. Two sweep threads
 //     asking about two pairs that SHARE a body then write to the same TEdge
 //     at once — which is NOT the lazy-cache hazard core/Parallel.h describes
 //     and is not fixed by the warm-up the sweeps do, because what gets

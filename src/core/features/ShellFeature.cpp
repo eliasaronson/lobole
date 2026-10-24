@@ -294,7 +294,7 @@ bool ShellFeature::Execute(RegenContext& ctx) {
   // OCC -- CI's Ubuntu job, apt's -- still draws. Every bad answer is caught
   // by the checks below, so a failed attempt is retried on a copy of the
   // input -- the same solid at new addresses -- and a shell is refused only
-  // when every draw failed. kAttempts bounds what an honest refusal (a wall
+  // when every draw failed. `attempts` bounds what an honest refusal (a wall
   // too thick for the geometry) costs.
   //
   // The first attempt is on a copy too. The offset builder WRITES to its

@@ -240,7 +240,9 @@ drivable remotely, like a human would:
   reason (`Feature::WhyIncomplete`, [tool-sessions.md](tool-sessions.md)),
   and a direct edit that would not build — its Accept disabled in the GUI —
   is refused over RPC with its error
-  ([modeling](../modeling/README.md#direct-edit)).
+  ([modeling](../modeling/README.md#direct-edit)); a feature the bodies
+  cannot take (`Feature::WhyRefusedOn`) is refused by Accept and by
+  `add_feature` alike ([modeling](../modeling/README.md#refused-on-the-bodies)).
 - A mutating RPC that leaves a feature broken says so in its own response.
 - Export and other file-dialog commands are disabled, with the reason, where
   no system dialog exists; scripts use the export RPCs directly.

@@ -634,7 +634,8 @@ every later measurement — `CADShape::IsValid` is only a null check.
 
 ## Finding and naming geometry
 
-- `list_elements {body?, part?, max_faces?, made_by?, role?, entity?, via?}`
+- `list_elements {body?, part?, max_faces?, made_by?, role?, entity?, via?, walls?}`
+  (`walls: true` adds each body's `thinnest_wall_mm`)
   — stable face and edge names per body, the handles `measure`, fillets and
   mates use, each with the feature that made it (`made_by`) and its `role`;
   the filters ask for a feature's faces in a role (a pocket's floor), and an
@@ -757,9 +758,10 @@ prompt points agents at it.
 
 An OpenCASCADE boolean modifies its arguments. Computing an intersection
 computes p-curves, and by default OCC stores them on the input edges
-(`BRep_Builder::UpdateEdge`) instead of on a copy. For a modelling feature that
-is the right default, because a boolean consumes its operands. For a
-measurement it is a write to the document.
+(`BRep_Builder::UpdateEdge`) instead of on a copy. A modelling feature builds on
+a copy of its cached operands
+([modeling](../modeling/README.md#kernel-calls-build-on-a-copy-of-the-cached-body)).
+For a measurement it is a write to the document.
 
 The clash sweeps run pairs on worker threads, and one body appears in many
 pairs, so two threads asking "does A touch B?" and "does A touch C?" both

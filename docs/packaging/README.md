@@ -220,10 +220,17 @@ and the fonts are vendored in-tree.
 OpenCASCADE is built with the patches in `nix/patches/`, through the
 overlay in `nix/occt-overlay.nix` that `shell.nix` and the flake both
 apply, so netgen links the same patched library. The Flatpak manifest and
-`packaging/windows/occ-cross.nix` apply the same files; a new patch goes in
-all three. The one carried today makes a Shell's result independent of
-memory addresses
-([modeling](../modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid)).
+`packaging/windows/occ-cross.nix` apply the same files, and
+`packaging/appimage/deps.sh` too; a new patch goes in all four, and into
+the list each writes to the install's `share/lobole/occt-patches` (what
+`occpatch::Carries` and `ping`'s `occ_patches` read). One makes a Shell's
+result independent of memory addresses
+([modeling](../modeling/README.md#a-reshaping-feature-keeps-only-a-valid-solid));
+the other three turn a fillet that never returned and three faults inside
+the kernel into ordinary failures
+([modeling](../modeling/README.md#a-caught-kernel-fault)), each written up
+for upstream in `nix/patches/upstream/`. The Debian package builds against
+Ubuntu's own OpenCASCADE and carries none.
 Patching OpenCASCADE means nixpkgs' binary cache no longer has it: the first
 `nix-shell` on a machine compiles OpenCASCADE and netgen.
 
@@ -290,9 +297,9 @@ user's own, unlike in the [Flatpak](#the-flatpak).
   Ubuntu 24.04+, Mint 22, Debian 13, Fedora 40+, Arch.
 - Everything comes from apt except OpenCASCADE (24.04 has 7.6) and Netgen,
   which `packaging/appimage/deps.sh` builds into `/opt/lobole-deps`: OCC
-  `V7_9_3` with the patch in `nix/occt-overlay.nix`, Netgen `v6.2.2605`,
+  `V7_9_3` with the patches in `nix/occt-overlay.nix`, Netgen `v6.2.2605`,
   each checked against its commit, with the Flatpak manifest's flags. The
-  release caches that prefix on the two files.
+  release caches that prefix on `deps.sh` and the patches.
 - linuxdeploy (a pinned release, checksum checked) copies the libraries and
   sets rpaths; its excludelist leaves glibc, libGL, X11 and xcb to the host.
   We also leave out the Vulkan loader, so the host's finds the host's

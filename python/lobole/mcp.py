@@ -1411,7 +1411,9 @@ _reference("set_rollback", "Move the rollback bar: regeneration executes only "
 
 
 @mcp.tool(description="Undo the last document edit. Prefer this over "
-          "compensating edits when a step went wrong.")
+          "compensating edits when a step went wrong. On a part tab the "
+          "answer carries the bodies' digest, feature_count and revision, "
+          "so what it gave back needs no get_state.")
 def undo() -> dict:
     return _call("undo")
 

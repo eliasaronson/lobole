@@ -597,7 +597,7 @@ joins, zero offset on the shape, `SetOffsetOnFace` per face): one face at a
 time, a moved face no longer meets its unmoved tangent neighbour at all. It
 is named through an adapter that reads the face the builder GENERATES from a
 picked one as that face modified; a shell that comes back unclosed is made
-a solid again. It takes Shell's guard for the unpatched apt OCCT (up to five
+a solid again. It takes a guard like Shell's for the unpatched apt OCCT (up to five
 draws on a copy when a result fails the checks, under one deadline), but
 none after a fault: a builder that long-jumped out of its frames is not run
 again on that heap. The builder is not used elsewhere because elsewhere it
@@ -781,7 +781,8 @@ Loböle restarted. The calls build on a copy of the body
 damages only throwaway topology.
 
 The faults the [action matrix](#action-matrix) found are OpenCASCADE's, and
-patched in every build we make (`nix/patches/`, written up for upstream with
+patched in every build we make but the Debian package, which links
+Ubuntu's own (`nix/patches/`, written up for upstream with
 their reproducers in `nix/patches/upstream/`, the bodies in
 `tests/fixtures/occ/`): a draft past a sphere's pole dereferenced a missing
 curve, a draft whose edge runs parallel to a face read an extremum's absent
@@ -809,13 +810,15 @@ process or a second time in the same one. `MakeShells` quilts the offset
 faces in the order of a map hashed on shape addresses, the split of a cap
 that the offset extends (a bore's floor) is oriented against them, and the
 quilt keeps the orientation of whichever face comes first. Every build here
-(nix, the Flatpak, the Windows cross build) carries
+(nix, the Flatpak, the AppImage, the Windows cross build; not the Debian
+package) carries
 `nix/patches/occt-shell-cap-order.patch`, which quilts the caps last; the
 overlay in `nix/occt-overlay.nix` applies it, and netgen is built against
 the same patched library.
 
 The CI Ubuntu job links apt's OpenCASCADE, which is unpatched, so the Shell
-also keeps its own guard (Offset Face, on the same builder, shares it). Every such answer fails one of the checks above,
+also keeps its own guard (Offset Face, on the same builder, has one like it:
+five draws whatever the kernel, under one deadline). Every such answer fails one of the checks above,
 so a Shell that fails them is built again on a `BRepBuilderAPI_Copy` of its
 input (the same solid at new addresses, sub-shape for sub-shape, so its
 index-keyed names are the body's), up to five draws on apt's kernel and two
@@ -1325,10 +1328,13 @@ headless suite and `test-fast.sh`), `action_matrix_full_0`..`7` and
 `action_matrix_determinism` (labelled `slow;action_matrix`, and registered
 only for the ctest configuration `action_matrix`, as the big generators are
 for theirs, so that no plain ctest runs some two CPU-hours: `tools/ctest
--C action_matrix -L action_matrix -j4`), and `action_matrix_selftest`, which
+-C action_matrix -L action_matrix -j4`; `tools/merge-branch.sh --full`
+ends with it, and so does the release checklist,
+[packaging](../packaging/README.md#releasing)), and `action_matrix_selftest`, which
 feeds the classifier and the ratchet planted answers — a pass, a refusal, a
 refusal that moved the revision, a broken feature, a caught `OSD_SIGSEGV`, a
-silent message, a hole that added, an undo that did not restore, two ordinal
+silent message, a hole that added, an undo that did not restore (asked
+with `get_state`, and as its own digest says), two ordinal
 pieces that swapped, a family that lost its pass and an unknown finding — and
 must judge each.
 

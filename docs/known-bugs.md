@@ -9,8 +9,6 @@ yet".
 Entries are grouped by area. Add a new one under its area's heading, creating
 the heading if it is not here yet.
 
-## Modeling
-
 ## Inspection
 
 ### `interference` reports a phantom clash at an exactly symmetric pose

@@ -159,9 +159,10 @@ bool SplitFeature::Execute(RegenContext& ctx) {
         m_material.empty() ? body->material : m_material;
     ctx.bodies.erase(body);
 
-    // Every piece is stamped with this feature's id (the v1 identity
-    // limitation); the "<id>/bN" element-name prefix still keeps each piece's
-    // faces individually resolvable, as multi-body import does.
+    // Every piece is stamped with this feature's id; the "<id>/bN"
+    // element-name prefix keeps each piece's faces individually resolvable,
+    // as multi-body import does, and a ref finds its piece by them
+    // (topo::FindOwningBody).
     int n = 0;
     for (CADShape& piece : pieces) {
       n++;

@@ -1577,8 +1577,9 @@ void RegisterModelingGuiTests(ImGuiTestEngine* engine) {
   };
 
   // Fillet, Chamfer and Shell open at a size taken from the body (a tenth of
-  // its thinnest extent, rounded to 1/2/5), not a literal: 0.5 mm was a
-  // near-invisible fillet on a 300 mm part and too big for a small one.
+  // its thinnest extent, the Shell of its thinnest wall -- on this box the
+  // same -- rounded to 1/2/5), not a literal: 0.5 mm was a near-invisible
+  // fillet on a 300 mm part and too big for a small one.
   t = IM_REGISTER_TEST(engine, "defaults", "blend_and_wall_scale_with_body");
   t->TestFunc = [](ImGuiTestContext* ctx) {
     ctx->SetRef("//##MainMenuBar");

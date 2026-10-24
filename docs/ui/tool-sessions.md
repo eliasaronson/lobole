@@ -127,9 +127,12 @@ origin that misses the body. Examples in the code:
   chain or curve that is not that profile.
 - Switching a Hole's type sizes the counterbore/countersink from the bore
   unless the user already set those numbers.
-- Fillet, Chamfer and Shell open at a tenth of the target body's thinnest
-  extent, rounded to 1/2/5 (`SizeFromBody`); the target is a pre-selected
-  element's body, else the newest (`defaults/blend_and_wall_scale_with_body`).
+- Fillet and Chamfer open at a tenth of the target body's thinnest extent,
+  rounded to 1/2/5 (`SizeFromBody`); Shell at a tenth of its thinnest wall
+  (`SizeFromWall`, `ThinnestWall`: on a body already hollow the extent is
+  not the wall), the extent where no wall measures. The target is a
+  pre-selected element's body, else the newest
+  (`defaults/blend_and_wall_scale_with_body`).
 - Offset Face opens at a tenth of the smaller of the face's inset (how far
   its inside reaches from its edges) and the body's thinnest extent, rounded
   the same way, outward (`SizeFromFace`), derived again from the first face

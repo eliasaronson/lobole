@@ -28,9 +28,10 @@
 # boolean's refusal check crashed (docs/packaging/README.md#gcc-16-and-ipa-cp-clones).
 #
 # The install lists the patches it carries in share/lobole/occt-patches, one
-# name a line: the tests that need a patched kernel read it at configure time
-# (tests/CMakeLists.txt) and skip where it is not there -- CI's stock Ubuntu
-# jobs build against apt's unpatched OpenCASCADE.
+# name a line, which CMakeLists.txt reads at configure time
+# (src/cad/OccPatches.h): the Shell draws less on a patched kernel, ping
+# reports the list, and the tests of what a patch fixes skip where it is not
+# there -- CI's stock Ubuntu jobs build against apt's unpatched OpenCASCADE.
 final: prev:
 let
   ours = [

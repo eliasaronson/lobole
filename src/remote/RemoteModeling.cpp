@@ -164,8 +164,8 @@ void RefuseFailingDirectEdit(const Document& doc, const Feature& f,
 void RefuseOnInput(const Document& doc, const Feature& f,
                    std::optional<size_t> at) {
   // Inside a batch the regeneration is deferred, and the bodies are the
-  // batch's start: the feature's own Execute runs the same checks, and the
-  // batch refuses what it leaves broken.
+  // batch's start: the feature's own Execute runs the same checks, and a
+  // feature they fail is reported in the batch's `regen`, as any other.
   if (doc.InBulkEdit())
     return;
   static const std::vector<Body> kNone;
@@ -382,7 +382,13 @@ static constexpr MethodDoc ModelingMethods[] = {
      "basic profile it cuts prints tight (docs/tolerances/README.md). A "
      "DeleteFace, OffsetFace, MoveFace or ReplaceFace that would not build "
      "is refused with its error, the document unchanged "
-     "(docs/modeling/README.md#direct-edit).",
+     "(docs/modeling/README.md#direct-edit); so is a feature the bodies "
+     "cannot take, naming what they would: an element on no body or on two, "
+     "or named by the feature that made it rather than its body's "
+     "created_by; a blend whose edges start no blend; a Draft face square "
+     "to the pull; a Shell wall that breaks through an open face; a Pattern "
+     "or Mirror of a feature that made no body "
+     "(docs/modeling/README.md#refused-on-the-bodies).",
      "feature:object, expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},
     {"import_sketch",
@@ -471,7 +477,9 @@ static constexpr MethodDoc ModelingMethods[] = {
      "of distances or turn an arc inside out, is refused naming the "
      "dimension, and the document is unchanged; a direct edit (DeleteFace, "
      "OffsetFace, MoveFace, ReplaceFace) that would not build is refused "
-     "with its error, the document unchanged.",
+     "with its error, the document unchanged, and so is a feature the "
+     "bodies before it cannot take, as add_feature says "
+     "(docs/modeling/README.md#refused-on-the-bodies).",
      "feature:object, feature_id?:int>=0, index?:int>=0, "
      "expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},

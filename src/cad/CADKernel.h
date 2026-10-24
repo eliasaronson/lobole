@@ -19,13 +19,14 @@
 #include <utility>
 #include <vector>
 
-// Turn OCC's SIGSEGV and friends into catchable Standard_Failure exceptions,
-// once PER THREAD. Floating-point traps stay unarmed.
-//
-// Per thread, not once: OSD::SetSignal also sets thread-local state (the FPE
-// mask; on Windows the SE translator), and the mesher's pool arms every
-// worker (ui/TessellationCache.cpp). A `call_once` would arm whichever thread
-// arrived first and leave the guard off everywhere else.
+// Turn OCC's SIGSEGV and friends into catchable Standard_Failure exceptions.
+// Floating-point traps stay unarmed. Call it on every thread that runs such an
+// algorithm (the mesher's pool arms every worker, ui/TessellationCache.cpp):
+// on Windows the arming is per thread (OSD::SetSignal sets the SE translator
+// and the FPE mask there), so a `call_once` would leave the guard off on
+// every thread but the first. On POSIX the handlers are the process's, and
+// each call checks they are still ours and arms again if not: Catch2 puts its
+// own in front of every test case and puts back what it found afterwards.
 //
 // Call it before any OCC algorithm known to fall over rather than fail.
 // Exact HLR has needed it for a long time; so does the fillet builder, which

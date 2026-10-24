@@ -121,7 +121,10 @@ why, renderers missing, a device lost for good, and `rebuilds` /
 `last_rebuild` for rebuilds in place:
 [rendering](../rendering/README.md#the-device-ladder),
 [rebuilding](../rendering/README.md#rebuilding-the-device)), `safe_mode`,
-`occ` (the OpenCASCADE version it was built against), `features` (optional subsystems compiled in, e.g. `cam`) and
+`occ` (the OpenCASCADE version it was built against), `occ_patches` (our
+kernel patches it carries), `kernel_faults` (faults inside OpenCASCADE caught
+this session: [modeling](../modeling/README.md#a-caught-kernel-fault)),
+`features` (optional subsystems compiled in, e.g. `cam`) and
 `binary_replaced` — true when the executable on disk was rebuilt after this
 process started, so the instance is serving old code.
 

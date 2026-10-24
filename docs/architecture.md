@@ -164,7 +164,8 @@ The numbers were measured on this 22-core, 30 GB machine.
 - **Trees share one ccache** ([precompiled headers](#precompiled-headers)): a
   fresh worktree builds in about 2 minutes, where it took 11.5.
 - **`tools/nix-run`** runs a command with what `nix-shell` adds to the
-  environment, cached and keyed on `shell.nix` and nixpkgs: ~0.1 s against
+  environment, cached and keyed on `shell.nix`, the OpenCASCADE overlay and
+  its patches, and nixpkgs: ~0.1 s against
   ~5 s to enter. It caches `nix-shell`'s own additions, because `nix
   print-dev-env` resolved a different nixpkgs, and it keeps the caller's
   `TMPDIR` and `DISPLAY`. It captures them from a clean environment: a
@@ -411,8 +412,9 @@ by the same name drift apart without any test noticing:
   `~/.local/state/lobole/instances/<port>.json`. `ping` reports the port,
   the open project, the renderer and how start-up got to it (`renderer`,
   [the device ladder](rendering/README.md#the-device-ladder)), `safe_mode`,
-  the OpenCASCADE version (`occ`), the build's optional
-  `features`, and `binary_replaced`
+  the OpenCASCADE version (`occ`) and the patches it carries
+  (`occ_patches`), the kernel faults caught (`kernel_faults`), the build's
+  optional `features`, and `binary_replaced`
   (Linux: the executable was rebuilt under a running instance).
 
 ## Crashes and stalls
