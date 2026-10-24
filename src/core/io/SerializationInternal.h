@@ -41,9 +41,9 @@ inline constexpr const char* kFormat = "designer-document";
 // (docs/versioning/format.md#a-bump-takes-its-number-when-it-lands). Keep a
 // line between the two: a landing that moves one and a branch that raises
 // the other then never conflict.
-inline constexpr int kVersionLanded = 189;
+inline constexpr int kVersionLanded = 190;
 
-inline constexpr int kVersionPending = 1;
+inline constexpr int kVersionPending = 0;
 inline constexpr int kVersion = kVersionLanded + kVersionPending;
 
 // What a branch's loader migration compares against, `if (version <
@@ -54,7 +54,7 @@ inline constexpr int kVersionNEXT3 = kVersionLanded + 3;
 
 // A saved feature as this build reads it: what changed in meaning between
 // `version` and now, applied to its JSON before FeatureFromJson. An Import
-// before vNEXT stays where it was (`up_axis` none), where a new one decides
+// before v190 stays where it was (`up_axis` none), where a new one decides
 // from the file's header (SerializeFeatures.cpp).
 [[nodiscard]] nlohmann::json MigratedFeatureJson(nlohmann::json j, int version);
 

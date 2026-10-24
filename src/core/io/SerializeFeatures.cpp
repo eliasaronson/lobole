@@ -929,10 +929,10 @@ AxisRef AxisRefFromJson(const json& j) {
 } // namespace
 
 json MigratedFeatureJson(json j, int version) {
-  // An Import before vNEXT had no up axis: it stood as the file was. The
+  // An Import before v190 had no up axis: it stood as the file was. The
   // default is now `auto`, which would turn a saved SolidWorks part on
   // reload — so an older one says `none`, and no saved part moves.
-  if (version < kVersionNEXT && j.is_object() &&
+  if (version < 190 && j.is_object() &&
       j.value("type", std::string{}) == "Import" && !j.contains("up_axis"))
     j["up_axis"] = "none";
   return j;
@@ -1199,10 +1199,10 @@ json FeatureToJson(const Feature& feature) {
       j["units"] = units::ToString(import->lengthUnit);
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
       j["color"] = Vec3ToJson(import->color);
-    // vNEXT; absent = auto (a file older than vNEXT is migrated to none)
+    // v190; absent = auto (a file older than v190 is migrated to none)
     if (import->upAxis != interchange::UpAxis::Auto)
       j["up_axis"] = interchange::ToString(import->upAxis);
-    if (import->turnDeg != 0.0) // vNEXT; absent = no turn
+    if (import->turnDeg != 0.0) // v190; absent = no turn
       j["turn_deg"] = import->turnDeg;
   } else if (auto* tf = dynamic_cast<const TemplateFeature*>(&feature)) {
     // v161 (docs/modeling/templates.md). The definition rides in full, so
@@ -2790,7 +2790,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
       imp->hasColor = true;
       imp->color = Vec3FromJson(j.at("color"));
     }
-    if (j.contains("up_axis")) { // vNEXT; refused, never read as auto
+    if (j.contains("up_axis")) { // v190; refused, never read as auto
       const json& u = j.at("up_axis");
       if (!u.is_string() ||
           !interchange::UpAxisFromString(u.get<std::string>(), imp->upAxis))
@@ -2798,7 +2798,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "Import: unknown up_axis " + u.dump() +
             ". Accepted: " + interchange::AcceptedUpAxes());
     }
-    if (j.contains("turn_deg")) { // vNEXT
+    if (j.contains("turn_deg")) { // v190
       if (!j.at("turn_deg").is_number() ||
           !std::isfinite(j.at("turn_deg").get<double>()))
         throw std::runtime_error("Import: turn_deg is a number of degrees");

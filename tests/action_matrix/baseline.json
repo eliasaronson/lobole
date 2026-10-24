@@ -3656,7 +3656,7 @@
   "golden/v93-bearing-catalog": "no body",
   "golden/v94-generated-component": "no body",
   "golden/v97-import-keep-origin": "regen not clean: Neighbour part: failed to read 'neighbour_in_its_own_frame.step' as STEP",
-  "golden/vNEXT-import-up-axis": "regen not clean: SolidWorks bracket: failed to read 'bracket_from_solidworks.step' as STEP",
+  "golden/v190-import-up-axis": "regen not clean: SolidWorks bracket: failed to read 'bracket_from_solidworks.step' as STEP",
   "reference/41-split-then-fillet": "known_failure: docs/known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build"
  },
  "slow": {

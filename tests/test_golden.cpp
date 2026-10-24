@@ -1280,8 +1280,8 @@ void AssertMatchesExpect(const Document& doc, const nlohmann::json& expect) {
     CHECK(std::string(units::ToString(imp->lengthUnit)) ==
           expect.at("import_units").get<std::string>());
   }
-  // vNEXT: which axis of an imported file is up, and the turn after it. An
-  // Import saved before vNEXT reloads as `none` (golden v97, v103): the
+  // v190: which axis of an imported file is up, and the turn after it. An
+  // Import saved before v190 reloads as `none` (golden v97, v103): the
   // default is now `auto`, and reading an old SolidWorks part as auto would
   // stand it up on reload.
   if (expect.contains("import_up_axis") || expect.contains("import_turn_deg")) {

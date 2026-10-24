@@ -144,7 +144,7 @@
   {"design": "golden/v186-insertion-requirement", "kind": "golden", "source": "tests/golden/v186-insertion-requirement.json"},
   {"design": "golden/v189-expression-requirement", "kind": "golden", "source": "tests/golden/v189-expression-requirement.json"},
   {"design": "golden/v19-suppress", "kind": "golden", "source": "tests/golden/v19-suppress.json"},
-  {"design": "golden/vNEXT-import-up-axis", "kind": "golden", "source": "tests/golden/vNEXT-import-up-axis.json"},
+  {"design": "golden/v190-import-up-axis", "kind": "golden", "source": "tests/golden/v190-import-up-axis.json"},
   {"design": "golden/v20-loft", "kind": "golden", "source": "tests/golden/v20-loft.json"},
   {"design": "golden/v21-hole", "kind": "golden", "source": "tests/golden/v21-hole.json"},
   {"design": "golden/v28-units", "kind": "golden", "source": "tests/golden/v28-units.json"},

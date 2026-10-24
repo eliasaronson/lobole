@@ -316,6 +316,7 @@ here; the golden corpus and git history cover them.
 | 187 | An assembly's **sequence** ([assembly sequences](../assemblies/README.md#assembly-sequences)): `sequence` {`steps`: [{`occurrence`, `direction?`, `origin_mm?`, `mate?`, `distance_mm?`, `turn_deg?`, `thread?`, `note?`}], `allowance_mm?`} in the assembly's index (and in a single-file assembly), absent when it has no steps. A step key the loader does not know is refused. Golden `v187-assembly-sequence`. |
 | 188 | An assembly sequence's step names a **group** (`occurrences`: two or more ids, moved as one) or is a **pose** (`pose`: [{`mate`, `rotation_deg` \| `offset_mm`}], placing nothing) in place of its one `occurrence` ([assembly sequences](../assemblies/README.md#assembly-sequences)); a step states exactly one of the three. Golden `v188-assembly-sequence-groups`. |
 | 189 | A requirement's measure kind `expression` {`expression` (a formula over the variables), `unit`?, `document`? (a part: read in its scope), `configuration`? (that part's configuration, 0 = base)} ([expression](../requirements/README.md#expression)); its evidence's `detail` carries `scope`, `part`?, `configuration`? and `inputs` {name: value}. A `configuration` without `document` is refused on load; a build that does not know the kind refuses the file. Golden `v189-expression-requirement` |
+| 190 | An Import's `up_axis` (which axis OF THE FILE is up: `auto`, `none`, `+x`, `-x`, `+y`, `-y`, `-z`; absent = `auto`) and `turn_deg` (a turn about world Z after it; absent = 0) ([up axis](../interchange/README.md#up-axis)). An unknown `up_axis` is refused on load. An Import saved before v190 loads as `none`, so no saved part moves. Golden `v190-import-up-axis` |
 
 ## Pending changes
 
@@ -325,7 +326,6 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
-| vNEXT | An Import's `up_axis` (which axis OF THE FILE is up: `auto`, `none`, `+x`, `-x`, `+y`, `-y`, `-z`; absent = `auto`) and `turn_deg` (a turn about world Z after it; absent = 0) ([up axis](../interchange/README.md#up-axis)). An unknown `up_axis` is refused on load. An Import saved before vNEXT loads as `none`, so no saved part moves. Golden `vNEXT-import-up-axis` |
 
 ## Paths in a project
 

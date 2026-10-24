@@ -816,7 +816,7 @@ public:
   // Whether `lengthUnit` means anything for this path: .stl, .obj or .brep,
   // any case.
   static bool TakesUnits(const std::string& path);
-  // Which axis OF THE FILE is up (vNEXT, `up_axis`), and a turn about world Z
+  // Which axis OF THE FILE is up (v190, `up_axis`), and a turn about world Z
   // applied after it (`turn_deg`). `Auto` decides from the file's header
   // (interchange::DecideUpAxis): a SolidWorks STEP, written Y up, stands up
   // on our Z. Applied as a placement about the file origin before the
