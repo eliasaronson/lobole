@@ -198,13 +198,15 @@ std::string CheckResult(const Body& before, const Picked& picked,
                         uint64_t tag, const Expect& expect,
                         const std::string& op) {
   if (!result.IsValid() || result.GetShape().IsNull())
-    return op + " produced no shape";
+    return op + " of " + NameList(picked.names) + " produced no shape";
   if (const std::string bad = Measure::InvalidReasons(result); !bad.empty())
-    return op + " produced an invalid solid (" + bad + ")";
+    return op + " of " + NameList(picked.names) +
+           " produced an invalid solid (" + bad + ")";
   const int solidsBefore = before.shape.SolidCount();
   const int solidsAfter = result.SolidCount();
   if (solidsAfter != solidsBefore)
-    return op + " left " + std::to_string(solidsAfter) + " solid" +
+    return op + " of " + NameList(picked.names) + " left " +
+           std::to_string(solidsAfter) + " solid" +
            (solidsAfter == 1 ? "" : "s") + " where there " +
            (solidsBefore == 1 ? "was " : "were ") +
            std::to_string(solidsBefore);

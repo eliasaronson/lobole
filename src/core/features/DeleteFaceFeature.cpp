@@ -38,7 +38,8 @@ std::string DeleteAndHeal(const Picked& picked, Healed& out,
     TopTools_IndexedMapOfShape all;
     TopExp::MapShapes(body.shape.GetShape(), TopAbs_FACE, all);
     if (static_cast<int>(picked.indices.size()) >= all.Extent())
-      return op + " of every face of the body leaves no closed solid";
+      return op + " of " + NameList(picked.names) +
+             ", every face of the body, leaves no closed solid";
   }
   // Healing extends the faces round the gap until they meet.
   if (std::string why = FreeformNeighbour(picked, op, "heals by extending");
@@ -49,7 +50,7 @@ std::string DeleteAndHeal(const Picked& picked, Healed& out,
   BRepAlgoAPI_Defeaturing df;
   const Handle(Message_ProgressIndicator) deadline =
       MakeDeadline(kBuilderBudgetS);
-  const std::string why = Guarded(op, [&] {
+  const std::string why = Guarded(op + " of " + NameList(picked.names), [&] {
     df.SetShape(copy.shape);
     df.AddFacesToRemove(copy.faces);
     df.SetRunParallel(false);

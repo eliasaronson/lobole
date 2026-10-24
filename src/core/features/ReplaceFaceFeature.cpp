@@ -240,7 +240,7 @@ std::string ReplaceOnto(
   BOPAlgo_MakerVolume maker;
   const Handle(Message_ProgressIndicator) deadline =
       MakeDeadline(kBuilderBudgetS);
-  std::string why = Guarded("Replace Face", [&] {
+  std::string why = Guarded("Replace Face of " + described, [&] {
     TopTools_ListOfShape args;
     for (TopExp_Explorer ex(input, TopAbs_FACE); ex.More(); ex.Next())
       args.Append(ex.Current());

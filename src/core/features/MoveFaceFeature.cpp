@@ -116,7 +116,8 @@ bool MoveFaceFeature::Execute(RegenContext& ctx) {
   const std::string what = directedit::NameList(picked.names);
   if (!InModelSpace(translate.x) || !InModelSpace(translate.y) ||
       !InModelSpace(translate.z) || !std::isfinite(rotateDeg)) {
-    SetError("Move Face: the move is not a finite distance in model space");
+    SetError("Move Face of " + what +
+             ": the move is not a finite distance in model space");
     return false;
   }
   if (glm::length(translate) < 1e-9 && std::abs(rotateDeg) < 1e-9) {
@@ -129,7 +130,7 @@ bool MoveFaceFeature::Execute(RegenContext& ctx) {
   if (std::abs(rotateDeg) > 0.0) {
     glm::dvec3 o, d;
     if (!ResolveAxis(ctx, axis, o, d)) {
-      SetError("Move Face: the rotation axis does not resolve");
+      SetError("Move Face of " + what + ": the rotation axis does not resolve");
       return false;
     }
     trsf.SetRotation(gp_Ax1(gp_Pnt(o.x, o.y, o.z), gp_Dir(d.x, d.y, d.z)),

@@ -210,7 +210,7 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
     BRepOffset_MakeOffset maker;
     const Handle(Message_ProgressIndicator) deadline =
         MakeDeadline(kBuilderBudgetS);
-    error = Guarded(op, [&] {
+    error = Guarded(op + " of " + NameList(picked.names), [&] {
       maker.Initialize(copy.shape, 0.0, Precision::Confusion(), BRepOffset_Skin,
                        /*Intersection=*/Standard_True,
                        /*SelfInter=*/Standard_False, GeomAbs_Intersection,
