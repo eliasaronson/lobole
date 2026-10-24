@@ -1036,6 +1036,14 @@ add_test(NAME exit_with_parent_smoke
                  $<TARGET_FILE:designer>)
 set_tests_properties(exit_with_parent_smoke PROPERTIES TIMEOUT 90)
 
+# The performance harness itself works: it launches, runs two cut-down
+# workloads, records, compares and refuses (docs/performance/README.md). It
+# asserts no duration, and writes nothing of the user's.
+add_test(NAME bench_harness_smoke
+         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/bench_harness_smoke.py
+                 $<TARGET_FILE:designer>)
+set_tests_properties(bench_harness_smoke PROPERTIES LABELS bench TIMEOUT 300)
+
 # The quick still: the raster renderers into an image of exactly W x H, path
 # parameters refused, the viewport left as it was
 # (docs/rendering/still-render.md#quick-mode). A renderer, not ray tracing.
