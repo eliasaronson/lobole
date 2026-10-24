@@ -1,0 +1,59 @@
+{
+  "features": [
+    {
+      "center": [
+        0,
+        0,
+        0
+      ],
+      "direction": [
+        0,
+        0,
+        1
+      ],
+      "height": 40,
+      "id": 1,
+      "name": "Shaft",
+      "radius": 10,
+      "type": "Cylinder"
+    },
+    {
+      "depth": 10,
+      "height": 40,
+      "name": "Plate",
+      "position": [
+        50,
+        0,
+        0
+      ],
+      "type": "Box",
+      "width": 40
+    }
+  ],
+  "format": "designer-document",
+  "tolerances": [
+    {
+      "class": "g6",
+      "id": 3,
+      "ref": {
+        "element": "1/face0",
+        "feature_id": 1
+      }
+    },
+    {
+      "comment": "plate width",
+      "id": 4,
+      "lower": -0.1,
+      "ref": {
+        "element": "2/face0",
+        "feature_id": 2
+      },
+      "ref2": {
+        "element": "2/face1",
+        "feature_id": -0
+      },
+      "upper": 0.1
+    }
+  ],
+  "version": 99
+}

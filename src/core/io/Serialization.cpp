@@ -1208,6 +1208,12 @@ void ReadPartEnvelope(const json& j, Document& doc) {
     t.id = tj.value("id", uint64_t{0});
     t.ref = ElementRefFromJson(tj.value("ref", nlohmann::json::object()));
     t.ref2 = ElementRefFromJson(tj.value("ref2", nlohmann::json::object()));
+    // A distance tolerance's second face, written only when set: one of no
+    // feature would be dropped by the save, and the tolerance would become
+    // a size one.
+    if (tj.contains("ref2") && !t.ref2.IsSet())
+      throw std::runtime_error("tolerance " + std::to_string(t.id) + ": ref2 " +
+                               tj.at("ref2").dump() + " names no feature");
     t.isoClass = tj.value("class", std::string{});
     t.lower = tj.value("lower", 0.0);
     t.upper = tj.value("upper", 0.0);

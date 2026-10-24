@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v99-distance-tolerance.json:json_liar:3",
+  "input": "v99-distance-tolerance.json",
+  "message": [
+    "v99-distance-tolerance.json",
+    "tolerance 4: ref2",
+    "names no feature"
+  ],
+  "seed": 3
+}
