@@ -16,10 +16,13 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <chrono>
+#include <cstdlib>
 #include <deque>
 #include <functional>
 #include <set>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -82,12 +85,46 @@ static bool DescendsByModification(const std::string& name,
   return d == topo::Descent::Modified || d == topo::Descent::Split;
 }
 
+// Injected slowdowns, for verifying the performance harness and never for
+// anything else (docs/performance/README.md#injected-slowdowns): a slowdown
+// planted on purpose is how `tools/bench.py compare` is shown to see one.
+// LOBOLE_TEST_REGEN_DELAY_MS sleeps that long per executed feature;
+// LOBOLE_TEST_NO_REGEN_CACHE=1 caps the regen cache at zero, so only the
+// current chain survives an eviction and an undo re-executes. Read once; the
+// log says when either is on, and the harness records it.
+static int TestRegenDelayMs() {
+  static const int ms = [] {
+    const char* env = std::getenv("LOBOLE_TEST_REGEN_DELAY_MS");
+    const int v = env ? std::max(0, std::atoi(env)) : 0;
+    if (v > 0)
+      LOG_WARN("LOBOLE_TEST_REGEN_DELAY_MS: every executed feature sleeps "
+               "{} ms (a planted slowdown)",
+               v);
+    return v;
+  }();
+  return ms;
+}
+
+static bool TestNoRegenCache() {
+  static const bool on = [] {
+    const char* env = std::getenv("LOBOLE_TEST_NO_REGEN_CACHE");
+    const bool v = env != nullptr && env[0] != '\0' && std::string(env) != "0";
+    if (v)
+      LOG_WARN("LOBOLE_TEST_NO_REGEN_CACHE: the regen cache is capped at zero "
+               "(a planted slowdown)");
+    return v;
+  }();
+  return on;
+}
+
 // Runs a feature, and warns on it when a reference it holds resolved BY
 // POSITION: a split piece's ".<i>" name saved before pieces were named by
 // what bounds them (docs/modeling/toponaming.md#resolving-a-name). It still
 // means what it meant, but a reorder of the pieces would move it.
 static bool ExecuteNoting(Feature& feature, RegenContext& ctx) {
   PositionalLookups positional;
+  if (const int ms = TestRegenDelayMs(); ms > 0)
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
   const bool ok = feature.Execute(ctx);
   if (ok && !positional.Names().empty()) {
     std::set<std::string> seen;
@@ -800,6 +837,8 @@ bool Document::Regenerate() {
 // passed through (bodies are shared shapes), so this bounds memory at a few
 // times one full chain.
 size_t Document::RegenCacheCap() const {
+  if (TestNoRegenCache())
+    return 0;
   return std::max<size_t>(256, 3 * m_features.size());
 }
 
