@@ -1,0 +1,149 @@
+{
+  "title": "Box 60×40×20, its top put onto a plane tilted 10° about its centre line along Y",
+  "exercises": "Replace Face onto a datum plane that crosses the face: the sides extend on one side and trim on the other",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Plate",
+          "plane": {
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "uAxis": [
+              1,
+              0,
+              0
+            ]
+          },
+          "entities": [
+            {
+              "type": "line",
+              "id": 1,
+              "a": [
+                0,
+                0
+              ],
+              "b": [
+                60,
+                0
+              ]
+            },
+            {
+              "type": "line",
+              "id": 2,
+              "a": [
+                60,
+                0
+              ],
+              "b": [
+                60,
+                40
+              ]
+            },
+            {
+              "type": "line",
+              "id": 3,
+              "a": [
+                60,
+                40
+              ],
+              "b": [
+                0,
+                40
+              ]
+            },
+            {
+              "type": "line",
+              "id": 4,
+              "a": [
+                0,
+                40
+              ],
+              "b": [
+                0,
+                0
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Plate",
+          "sketch_id": {
+            "$ref": 1
+          },
+          "distance": 20,
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "DatumPlane",
+          "name": "Tilt",
+          "kind": "through_points",
+          "points": [
+            [
+              30,
+              0,
+              20
+            ],
+            [
+              30,
+              40,
+              20
+            ],
+            [
+              31,
+              0,
+              20.176326980708
+            ]
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "ReplaceFace",
+          "name": "Onto the tilt",
+          "body_id": {
+            "$ref": 2
+          },
+          "face": {
+            "$pick": "face",
+            "at": [
+              10,
+              10,
+              20
+            ]
+          },
+          "target": {
+            "kind": "plane",
+            "datum_id": {
+              "$ref": 3
+            }
+          }
+        }
+      }
+    }
+  ]
+}

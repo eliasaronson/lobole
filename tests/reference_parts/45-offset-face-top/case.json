@@ -1,0 +1,119 @@
+{
+  "title": "Box 60×40×20, its top offset 5 out",
+  "exercises": "Offset Face of a planar face: the sides follow it up",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Plate",
+          "plane": {
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "uAxis": [
+              1,
+              0,
+              0
+            ]
+          },
+          "entities": [
+            {
+              "type": "line",
+              "id": 1,
+              "a": [
+                0,
+                0
+              ],
+              "b": [
+                60,
+                0
+              ]
+            },
+            {
+              "type": "line",
+              "id": 2,
+              "a": [
+                60,
+                0
+              ],
+              "b": [
+                60,
+                40
+              ]
+            },
+            {
+              "type": "line",
+              "id": 3,
+              "a": [
+                60,
+                40
+              ],
+              "b": [
+                0,
+                40
+              ]
+            },
+            {
+              "type": "line",
+              "id": 4,
+              "a": [
+                0,
+                40
+              ],
+              "b": [
+                0,
+                0
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Plate",
+          "sketch_id": {
+            "$ref": 1
+          },
+          "distance": 20,
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "OffsetFace",
+          "name": "Raise",
+          "body_id": {
+            "$ref": 2
+          },
+          "faces": [
+            {
+              "$pick": "face",
+              "at": [
+                30,
+                20,
+                20
+              ]
+            }
+          ],
+          "distance_mm": 5
+        }
+      }
+    }
+  ]
+}

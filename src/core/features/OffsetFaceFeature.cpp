@@ -7,6 +7,7 @@
 #include "core/ElementHistory.h"
 #include "core/Measure.h"
 #include "core/ModelSpace.h"
+#include "core/features/ReplaceFaceFeature.h"
 
 #include <BRepBuilderAPI_Copy.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -214,8 +215,14 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
         maker.SetOffsetOnFace(TopoDS::Face(f), distance);
       maker.MakeOffsetShape();
     });
-    if (!error.empty())
+    // A fault is not drawn again: the builder long-jumped out of its own
+    // frames, and running it once more on that heap is how a caught fault
+    // becomes an uncaught one (tests/test_direct_edit.cpp's battery holder).
+    if (!error.empty()) {
+      if (error.find("inside OpenCASCADE") != std::string::npos)
+        break;
       continue;
+    }
     if (!maker.IsDone() || maker.Shape().IsNull()) {
       error = op + " of " + NameList(picked.names) + " by " + Mm(distance) +
               " mm did not build (OpenCASCADE offset error " +
@@ -252,7 +259,56 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
       return {};
     }
   }
-  return error;
+  // The offset builder refuses some faces it should move (a wall of an
+  // imported holder with cradles cut across it: no error, no shape). A
+  // planar face offset is that face put onto its own plane moved by the
+  // distance, which Replace Face's cells build without it: one face at a
+  // time, each onto its moved plane.
+  const bool allPlanar =
+      std::all_of(picked.indices.begin(), picked.indices.end(), [&](int i) {
+        const auto info = Measure::DescribeFaceAt(body, i);
+        return info && info->kind == "plane";
+      });
+  if (!allPlanar)
+    return error;
+  Body step = body;
+  for (size_t k = 0; k < picked.names.size(); k++) {
+    // An earlier step may have trimmed it: then it reads ";M<tag>".
+    std::string name = picked.names[k];
+    auto at = step.elementMap.Resolve(name);
+    if (!at) {
+      name += ";M" + std::to_string(tag);
+      at = step.elementMap.Resolve(name);
+    }
+    const auto info = at ? Measure::DescribeFaceAt(step, *at) : std::nullopt;
+    if (!info)
+      return error;
+    const glm::dvec3 n = glm::normalize(info->normal);
+    CADShape next;
+    ElementMap names;
+    const std::string why = ReplaceOntoPlane(
+        step, *at, name, info->centroid + n * distance, n,
+        "its plane moved " + Mm(distance) + " mm", tag, next, names);
+    if (!why.empty())
+      return error + "; built face by face instead: " + why;
+    step.shape = next;
+    step.elementMap = names;
+  }
+  // Each face moved once, under this edit's tag; the faces a later step
+  // trimmed again read one ";M<tag>", and an earlier step's moved face is
+  // still its own name.
+  for (auto& [i, n] : step.elementMap.names)
+    n = CollapseSteps(n, tag);
+  for (auto& [i, n] : step.elementMap.edgeNames)
+    n = CollapseSteps(n, tag);
+  RestoreUntouched(body, step.shape, step.elementMap, tag, picked.names);
+  if (std::string bad = CheckResult(body, picked, step.shape, step.elementMap,
+                                    tag, expect, op);
+      !bad.empty())
+    return error + "; built face by face instead: " + bad;
+  out = step.shape;
+  map = step.elementMap;
+  return {};
 }
 
 } // namespace directedit

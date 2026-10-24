@@ -8,6 +8,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/matchers/catch_matchers_floating_point.hpp>
 
+#include "TestPaths.h"
 #include "core/Document.h"
 #include "core/ElementOrigin.h"
 #include "core/Feature.h"
@@ -38,8 +39,10 @@
 #include <nlohmann/json.hpp>
 #include <unistd.h>
 
+#include <chrono>
 #include <cmath>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -652,4 +655,122 @@ TEST_CASE("Direct edits round-trip through the file, fingerprints and all",
       R"({"type":"ReplaceFace","name":"X","body_id":3,"face":{"feature_id":3,"element":"1/face5"},"target":{"kind":"surface"}})");
   CHECK_THROWS_WITH(DocumentIO::FeatureFromJson(bad),
                     Catch::Matchers::ContainsSubstring("plane, sketch, face"));
+}
+
+namespace {
+
+// tests/fixtures/step/ (LICENSES.txt there says where each came from),
+// imported where the file put it.
+uint64_t ImportStep(Document& doc, const std::string& name) {
+  auto imp = std::make_unique<ImportFeature>(
+      "Part", std::string(TestSourceDir()) + "/tests/fixtures/step/" + name);
+  imp->keepOrigin = true;
+  doc.AddFeature(std::move(imp));
+  REQUIRE(Last(doc)->GetError().empty());
+  return Last(doc)->GetId();
+}
+
+// The faces of `body` that `want` says yes to, as refs.
+std::vector<ElementRef>
+FacesWhere(const Body& body,
+           const std::function<bool(const Measure::FaceInfo&)>& want) {
+  std::vector<ElementRef> out;
+  for (const auto& [i, n] : body.elementMap.names)
+    if (const auto info = Measure::DescribeFaceAt(body, i); info && want(*info))
+      out.push_back({body.createdBy, n});
+  return out;
+}
+
+// The edited import against the file that has the edit made at its source:
+// the same volume and the same number of faces, read by the same importer.
+void SameAsFile(const Document& doc, uint64_t body, const std::string& file) {
+  Document gt;
+  const uint64_t g = ImportStep(gt, file);
+  const Body& a = *BodyOf(doc, body);
+  const Body& b = *BodyOf(gt, g);
+  CHECK_THAT(a.shape.Volume(), WithinRel(b.shape.Volume(), 1e-6));
+  CHECK(a.shape.FaceCount() == b.shape.FaceCount());
+  glm::dvec3 lo0, hi0, lo1, hi1;
+  a.shape.GetBoundingBox(lo0, hi0, true);
+  b.shape.GetBoundingBox(lo1, hi1, true);
+  CHECK(glm::length(lo0 - lo1) < 1e-4);
+  CHECK(glm::length(hi0 - hi1) < 1e-4);
+}
+
+} // namespace
+
+TEST_CASE("Delete Face takes a STEP knob's axial hole out", "[direct_edit]") {
+  Document doc;
+  const uint64_t imp =
+      ImportStep(doc, "topup_ball_knob_axial_hole_rev_orig.step");
+  const auto bore =
+      FacesWhere(*BodyOf(doc, imp), [](const Measure::FaceInfo& f) {
+        return f.kind == "cylinder" && f.hasRadius &&
+               std::abs(f.radius - 3.0) < 1e-6;
+      });
+  REQUIRE_FALSE(bore.empty());
+  doc.AddFeature(std::make_unique<DeleteFaceFeature>("Fill", imp, bore));
+  INFO(Last(doc)->GetError());
+  REQUIRE(Last(doc)->GetError().empty());
+  SameAsFile(doc, imp, "topup_ball_knob_axial_hole_rev_gt.step");
+}
+
+TEST_CASE("Offset Face widens a STEP battery holder", "[direct_edit]") {
+  // 30 wide to 39, about its centre: both Y walls 4.5 out.
+  Document doc;
+  const uint64_t imp = ImportStep(doc, "battery_holder_box_y_f130_orig.step");
+  const auto walls =
+      FacesWhere(*BodyOf(doc, imp), [](const Measure::FaceInfo& f) {
+        return f.kind == "plane" && std::abs(std::abs(f.normal.y) - 1) < 1e-9 &&
+               std::abs(std::abs(f.centroid.y) - 15.0) < 1e-6;
+      });
+  REQUIRE(walls.size() == 2);
+  doc.AddFeature(std::make_unique<OffsetFaceFeature>("Wider", imp, walls, 4.5));
+  INFO(Last(doc)->GetError());
+  REQUIRE(Last(doc)->GetError().empty());
+  SameAsFile(doc, imp, "battery_holder_box_y_f130_gt.step");
+}
+
+TEST_CASE("Offset Face thickens a STEP knob's stem", "[direct_edit]") {
+  // The stem's radius 4.5 x 1.3: its round face 1.35 out.
+  Document doc;
+  const uint64_t imp =
+      ImportStep(doc, "ball_knob_cylinder_radius_f130_orig.step");
+  const auto stem =
+      FacesWhere(*BodyOf(doc, imp), [](const Measure::FaceInfo& f) {
+        return f.kind == "cylinder" && f.hasRadius &&
+               std::abs(f.radius - 4.5) < 1e-6;
+      });
+  REQUIRE_FALSE(stem.empty());
+  doc.AddFeature(
+      std::make_unique<OffsetFaceFeature>("Thicker", imp, stem, 1.35));
+  INFO(Last(doc)->GetError());
+  REQUIRE(Last(doc)->GetError().empty());
+  SameAsFile(doc, imp, "ball_knob_cylinder_radius_f130_gt.step");
+}
+
+TEST_CASE("Delete Face fills all 100 holes of a STEP plate in one feature",
+          "[direct_edit][slow]") {
+  Document doc;
+  const uint64_t imp = ImportStep(doc, "plate_100_holes.step");
+  const Body& b = *BodyOf(doc, imp);
+  const auto bores = FacesWhere(
+      b, [](const Measure::FaceInfo& f) { return f.kind == "cylinder"; });
+  REQUIRE(bores.size() >= 100);
+  glm::dvec3 lo, hi;
+  b.shape.GetBoundingBox(lo, hi, true);
+  const auto t0 = std::chrono::steady_clock::now();
+  doc.AddFeature(std::make_unique<DeleteFaceFeature>("Fill", imp, bores));
+  const double s =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - t0)
+          .count();
+  INFO(Last(doc)->GetError());
+  REQUIRE(Last(doc)->GetError().empty());
+  const glm::dvec3 e = hi - lo;
+  CHECK_THAT(VolumeOf(doc, imp), WithinRel(e.x * e.y * e.z, 1e-9));
+  CHECK(BodyOf(doc, imp)->shape.FaceCount() == 6);
+  // The budget docs/modeling/README.md#delete-face states: about 20 s here,
+  // nearly all of it BRepAlgoAPI_Defeaturing; three times that loaded.
+  INFO("100 holes deleted in " << s << " s");
+  CHECK(s < 60.0);
 }

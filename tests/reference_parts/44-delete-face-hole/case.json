@@ -1,0 +1,127 @@
+{
+  "title": "Plate 60×40×20 with a hole r6, the hole's face deleted",
+  "exercises": "Delete Face healing a through bore: the plate is whole again",
+  "steps": [
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Sketch",
+          "name": "Plate",
+          "plane": {
+            "origin": [
+              0,
+              0,
+              0
+            ],
+            "normal": [
+              0,
+              0,
+              1
+            ],
+            "uAxis": [
+              1,
+              0,
+              0
+            ]
+          },
+          "entities": [
+            {
+              "type": "line",
+              "id": 1,
+              "a": [
+                0,
+                0
+              ],
+              "b": [
+                60,
+                0
+              ]
+            },
+            {
+              "type": "line",
+              "id": 2,
+              "a": [
+                60,
+                0
+              ],
+              "b": [
+                60,
+                40
+              ]
+            },
+            {
+              "type": "line",
+              "id": 3,
+              "a": [
+                60,
+                40
+              ],
+              "b": [
+                0,
+                40
+              ]
+            },
+            {
+              "type": "line",
+              "id": 4,
+              "a": [
+                0,
+                40
+              ],
+              "b": [
+                0,
+                0
+              ]
+            },
+            {
+              "type": "circle",
+              "id": 5,
+              "center": [
+                20,
+                15
+              ],
+              "radius": 6
+            }
+          ]
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "Extrude",
+          "name": "Plate",
+          "sketch_id": {
+            "$ref": 1
+          },
+          "distance": 20,
+          "mode": "new_body"
+        }
+      }
+    },
+    {
+      "method": "add_feature",
+      "params": {
+        "feature": {
+          "type": "DeleteFace",
+          "name": "Fill",
+          "body_id": {
+            "$ref": 2
+          },
+          "faces": [
+            {
+              "$pick": "face",
+              "at": [
+                26,
+                15,
+                10
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

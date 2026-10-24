@@ -8,7 +8,10 @@
 #include "core/ElementMap.h"
 #include "core/Feature.h"
 
+#include <TopoDS_Face.hxx>
+
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -68,3 +71,24 @@ public:
   ElementRef targetFace; // Face: on any body
   directedit::Fingerprints fingerprints;
 };
+
+namespace directedit {
+
+// Replace Face's general case, for one face of `body`: the body's faces
+// less that one, its neighbours extended past the target, and `makeOnto`'s
+// face (the target's surface, bounded to `half` around `centre`) handed to
+// BOPAlgo_MakerVolume, keeping the cell on the inner side of the faces left
+// alone. `out` and `map` on success, else why not, naming the faces.
+std::string ReplaceOnto(
+    const Body& body, int index, const std::string& name,
+    const std::function<TopoDS_Face(const glm::dvec3&, double)>& makeOnto,
+    const std::string& label, uint64_t tag, CADShape& out, ElementMap& map);
+
+// The same onto the plane through `origin` square to `normal`: what Offset
+// Face falls back to for a planar face the offset builder will not move.
+std::string ReplaceOntoPlane(const Body& body, int index,
+                             const std::string& name, const glm::dvec3& origin,
+                             const glm::dvec3& normal, const std::string& label,
+                             uint64_t tag, CADShape& out, ElementMap& map);
+
+} // namespace directedit
