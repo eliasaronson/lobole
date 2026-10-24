@@ -91,7 +91,8 @@ The loader refuses, naming it:
   feature with no id;
 - a sketch with two entities sharing an id; a parameter defined twice; a
   Cope's or a Derived feature's id list naming one id twice (a damaged file
-  listed one a million times);
+  listed one a million times), and a CAM operation listing one target
+  twice;
 - an asset an image or a Derived snapshot names and `assets/` (or the
   single file's `assets` map) does not hold;
 - a document of another kind; in `project.json`, a document entry with no

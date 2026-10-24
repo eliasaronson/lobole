@@ -1,0 +1,85 @@
+{
+  "cam": [
+    {
+      "id": 3,
+      "name": "Sheet",
+      "operations": [
+        {
+          "bottom_z": -1.0,
+          "id": 4,
+          "name": "Cut the bracket out",
+          "side": "outside",
+          "targets": [
+            {
+              "element": "1/face0",
+              "feature_id": 1,
+              "part": 1
+            },
+            {
+              "element": "1/face0",
+              "feature_id": 1,
+              "part": 1
+            }
+          ],
+          "tool": 1,
+          "top_z": 12.0,
+          "type": "profile"
+        },
+        {
+          "bottom_z": -1.0,
+          "id": 5,
+          "name": "Cut the spacer out",
+          "side": "outside",
+          "targets": [
+            {
+              "element": "1/face0",
+              "feature_id": 1,
+              "part": 2
+            }
+          ],
+          "tool": 1,
+          "top_z": 12.0,
+          "type": "profile"
+        }
+      ],
+      "placements": [
+        {
+          "id": 10,
+          "part": 1
+        },
+        {
+          "id": 11,
+          "part": 2,
+          "pos": [
+            200.0,
+            0.0
+          ],
+          "rot_z": 90.0
+        }
+      ],
+      "safe_z": 21.0,
+      "tools": [
+        {
+          "diameter": 6.0,
+          "name": "6 mm flat",
+          "number": 1
+        }
+      ]
+    }
+  ],
+  "format": "designer-document",
+  "kind": "job",
+  "parts": [
+    {
+      "id": 1,
+      "name": "Bracket",
+      "source": 2
+    },
+    {
+      "id": 2,
+      "name": "Spacer",
+      "source": 3
+    }
+  ],
+  "version": 74
+}

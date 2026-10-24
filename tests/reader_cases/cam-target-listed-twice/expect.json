@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "job",
+  "id": "job/v74-cam-two-parts.json:grow_array:1",
+  "input": "v74-cam-two-parts.json",
+  "message": [
+    "v74-cam-two-parts.json",
+    "cam[0]: cam operation 4 lists the target",
+    "twice"
+  ],
+  "seed": 0
+}

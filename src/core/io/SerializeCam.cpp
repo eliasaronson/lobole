@@ -15,6 +15,9 @@
 #include <filesystem>
 
 #include <algorithm>
+#include <set>
+#include <string>
+#include <tuple>
 
 // CAM setups (v58, docs/cam/README.md). Small enough to live inline in the
 // document rather than file-per-setup as studies do — a setup is a few
@@ -876,8 +879,17 @@ cam::Setup CamSetupFromJson(const json& j) {
       op.tabWidth = oj["tabs"].value("width", 6.0);
       op.tabHeight = oj["tabs"].value("height", 1.5);
     }
-    for (const json& rj : oj.value("targets", json::array()))
+    // A target listed twice cuts nothing more than once, and a damaged
+    // file listing one 182 000 times was a 1.5 s read (24 s under ASan)
+    // before any derive walked them all.
+    std::set<std::tuple<uint64_t, uint64_t, std::string>> seenTargets;
+    for (const json& rj : oj.value("targets", json::array())) {
       op.targets.push_back(TargetFromJson(rj));
+      const cam::Target& t = op.targets.back();
+      if (!seenTargets.emplace(t.jobPartId, t.ref.featureId, t.ref.name).second)
+        throw std::runtime_error("cam operation " + std::to_string(op.id) +
+                                 " lists the target " + rj.dump() + " twice");
+    }
     setup.operations.push_back(std::move(op));
   }
   return setup;
