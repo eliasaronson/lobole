@@ -310,7 +310,7 @@ Where it goes:
 |---|---|
 | one document | `<project>.autosave`, a single file |
 | several documents | `<project>.autosave.d/<dir>.json`, one file per DIRTY document, mirroring `project.json`'s `dir` (`parts/Stand.json`) |
-| never saved | `unsaved.autosave.json` / `unsaved.autosave.d/` in the user state dir |
+| never saved | `unsaved-<instance>.autosave.json` / `unsaved-<instance>.autosave.d/` in the user state dir |
 
 The user state dir is `RuntimePaths::UserStateDir()`: `$XDG_STATE_HOME/lobole`
 or `~/.local/state/lobole`, and `%LOCALAPPDATA%\Lobole\state` on Windows.
@@ -323,7 +323,28 @@ Unchanged documents are not rewritten. `ui::AutosaveProject` owns the loop
 over documents, because only the UI layer knows what documents a project has;
 assemblies, drawings and jobs autosave as well as parts.
 
-A clean save clears every sidecar (and the unsaved slot). Recovery:
+### Every instance has its own unsaved slot
+
+Every instance on a machine shares the state dir — the user's app, and each
+agent instance `headless-preview.sh` starts — so the never-saved slot is
+named per instance: `<instance>` is the session's stem
+(`20261024-031500-4242`, the name of its crash-report marker,
+`crash::BeginSession` → `Autosaver::SetInstanceTag`), or `pid<pid>` in a
+process without a session. It was one shared `unsaved.autosave.json`: one
+instance's autosave wrote over another's recovery copy, and any instance's
+save, or clean exit with nothing open, deleted it. Naming it by the session
+is what keeps crash recovery working: the session marker lists the slot by
+its full name, so the next start copies exactly the dead session's slot
+into its report.
+
+A slot outlives its session after a dirty exit, and nothing offers it
+again. `crash::CollectDeadSessions`, after copying the dead sessions'
+slots into their reports, prunes the slots no live session owns beyond the
+newest ten (`kKeepUnsavedSlots`; the shared slot older builds left counts as
+one of them) — never a live session's, never its own.
+
+A clean save clears every sidecar of the project it saved, and this
+instance's unsaved slot — never another instance's. Recovery:
 
 - GUI: on open, a "Recover autosave?" modal names how many documents have
   newer work; accepting lays every recovered document over the project
@@ -587,7 +608,8 @@ hidden `[.reader_corpus]` case over generator output under `scratch/`
 | `format_version_gate` (`tools/format-version.py check`) | `kVersion` is `kVersionLanded` + `kVersionPending`; the pending rows, golden names and `vNEXT` placeholders agree with it |
 | `tests/test_serialization.cpp` `[io]` | round trips, directory form; duplicate id files, duplicate index ids and conflict markers refused; unknown feature, entity and mate types refused by name |
 | `tests/test_baked_geometry.cpp` `[baked]` | a baked open executes nothing; a recipe edited behind the app's back and a broken blob rebuild; a failed model is not baked; datums, warnings and bends survive a baked open; `commit_geometry` off |
-| `tests/test_autosaver.cpp` `[autosave]` | sidecar paths, fires only when dirty + changed + due, a replaced document at the same version still autosaves |
+| `tests/test_autosaver.cpp` `[autosave]` | sidecar paths, fires only when dirty + changed + due, a replaced document at the same version still autosaves; `Clear("")` takes this instance's unsaved slot and no other's; orphaned slots pruned beyond the count, never a live one |
+| `tests/autosave_instances_smoke.py` | two instances on one state dir: each autosaves its own unsaved slot, and one's save leaves the other's alone |
 | `tests/test_save_stamp.cpp` `[savestamp]` | each kind of saved edit that regenerates nothing (tolerance, units, tube, print process, configuration, study, asset; assembly units and undo; drawing undo; a job's GUI and RPC edits and undo) reads dirty and clean after a save; a study run is not an edit; autosave writes them |
 | `tests/test_conventions.cpp` | every `Document` mutator regenerates or marks the edit; no new mutable accessor |
 | `tests/unsaved_edits_smoke.py` | the same edits over the RPC read `ping.dirty` until saved; reading the model does not |

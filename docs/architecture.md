@@ -496,7 +496,8 @@ by the same name drift apart without any test noticing:
   `session.log` (the last 2000 lines of that session's log, taken only from
   the state dir's `logs/`), `crash.dmp` where there is one, and `autosave/`
   (copies of the autosaves that session wrote: nothing older than it, each
-  once, and only a sidecar path — a damaged marker naming another file gets
+  once — its unsaved slot is its own, named by its stem
+  ([versioning](versioning/README.md#every-instance-has-its-own-unsaved-slot)) — and only a sidecar path — a damaged marker naming another file gets
   nothing copied). A marker's or a report's fields are read one by one: a
   damaged one loses that field, never the start. Twenty reports are kept. Nothing is sent
   anywhere, and `report.txt` says at the top that the folder may hold the

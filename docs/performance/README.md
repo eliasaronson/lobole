@@ -64,9 +64,7 @@ MemoryMax=8G`:
 - **A private config and state directory**, as every smoke's. The user's
   preferences (tessellation quality, render options) change no number; and
   an instance on the user's state directory would put the fixtures in their
-  recently-opened list, and its first save would delete the recovery copy
-  of whatever unsaved document their own instance holds (a save clears the
-  unsaved slot, `Autosaver::Clear("")`). The port is still claimed
+  recently-opened list and leave its own recovery copies there. The port is still claimed
   machine-wide in `/tmp/lobole-ports-<uid>`, which `tools/scratch_port.py`
   reads whatever an instance's state directory, so no other agent is handed
   it; and an instance missing from the registry is one no agent finds and

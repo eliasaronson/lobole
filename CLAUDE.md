@@ -267,8 +267,9 @@ The app must own a real renderer to screenshot; true `--headless` has none.
   src/app/GpuOwners.cpp, and nowhere else; `test_conventions.cpp` fails if
   either is missing (docs/rendering/README.md#scene-renderers).
   It also does NOT isolate `XDG_STATE_HOME`: its autosave lands in the user's
-  real `~/.local/state/lobole/` and will overwrite an unsaved document's
-  recovery copy. Export a scratch one when driving a job.
+  real `~/.local/state/lobole/`, beside theirs (each instance has its own
+  unsaved slot: docs/versioning/README.md#every-instance-has-its-own-unsaved-slot),
+  and its opens land in their recent list. Export a scratch one when driving a job.
   Use a scratch port (`tools/scratch_port.py` picks one that is free and
   unclaimed, and never the human's). One-shot:
   `headless-preview.sh --render PROJECT OUT.png <port>`. Only `ui_action`
