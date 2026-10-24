@@ -86,6 +86,14 @@ bool JogFeature::Execute(RegenContext& ctx) {
              ") is not earlier in the history");
     return false;
   }
+  // A sketch that failed this regeneration still holds its last plane and
+  // profile; building from those puts the feature where the reference used
+  // to be (a rib on a plane 9e15 mm out spun a boolean for minutes).
+  if (!sketch->GetError().empty()) {
+    SetError("the jog's sketch '" + sketch->GetName() +
+             "' failed: " + sketch->GetError());
+    return false;
+  }
   const sketch::Line* line = nullptr;
   int lines = 0;
   for (const sketch::Entity& ent : sketch->entities)

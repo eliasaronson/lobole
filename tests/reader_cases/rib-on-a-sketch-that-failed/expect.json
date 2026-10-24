@@ -1,0 +1,14 @@
+{
+  "counts": {
+    "bodies": 2,
+    "configurations": 0,
+    "failed": 2,
+    "features": 5,
+    "studies": 0
+  },
+  "expect": "loads",
+  "family": "part",
+  "id": "part/v36-thread-rib.json:json_liar:1",
+  "input": "v36-thread-rib.json",
+  "seed": 3
+}

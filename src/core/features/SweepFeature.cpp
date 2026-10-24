@@ -127,6 +127,14 @@ bool SweepFeature::Execute(RegenContext& ctx) {
     SetError("sweep needs a profile sketch (missing or suppressed)");
     return false;
   }
+  // A sketch that failed this regeneration still holds its last plane and
+  // profile; building from those puts the feature where the reference used
+  // to be (a rib on a plane 9e15 mm out spun a boolean for minutes).
+  if (!prof->GetError().empty()) {
+    SetError("profile sketch '" + prof->GetName() +
+             "' failed: " + prof->GetError());
+    return false;
+  }
 
   const auto loops = sketch::BuildLoops(prof->entities);
   const TopoDS_Wire profileWire = sketch::BuildProfileWire(prof->plane, loops);

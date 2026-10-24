@@ -1,0 +1,93 @@
+{
+  "features": [
+    {
+      "depth": 10,
+      "height": 10,
+      "id": 1,
+      "name": "Base",
+      "position": [
+        0,
+        0,
+        0
+      ],
+      "type": "Box",
+      "width": 10
+    },
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            -3,
+            0
+          ],
+          "b": [
+            3,
+            0
+          ],
+          "id": 1,
+          "type": "line"
+        }
+      ],
+      "id": 2,
+      "name": "RibProfile",
+      "next_entity_id": 2,
+      "plane": {
+        "normal": [
+          0,
+          0,
+          -1
+        ],
+        "origin": [
+          5,
+          9007199254740993,
+          15
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "id": 3,
+      "name": "Rib",
+      "sketch_id": 2,
+      "thickness": 1.0,
+      "type": "Rib"
+    },
+    {
+      "center": [
+        30,
+        0,
+        0
+      ],
+      "direction": [
+        0,
+        0,
+        1
+      ],
+      "height": 20.0,
+      "id": 4,
+      "name": "Boss",
+      "radius": 4.0,
+      "type": "Cylinder"
+    },
+    {
+      "designation": "M8",
+      "face": {
+        "element": "4/face0",
+        "feature_id": 4
+      },
+      "id": 5,
+      "length": 8.0,
+      "name": "M8",
+      "pitch": 1.25,
+      "type": "Thread"
+    }
+  ],
+  "format": "designer-document",
+  "version": 36
+}

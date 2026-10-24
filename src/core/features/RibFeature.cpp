@@ -65,6 +65,14 @@ bool RibFeature::Execute(RegenContext& ctx) {
     SetError("rib needs a profile sketch (missing or suppressed)");
     return false;
   }
+  // A sketch that failed this regeneration still holds its last plane and
+  // profile; building from those puts the feature where the reference used
+  // to be (a rib on a plane 9e15 mm out spun a boolean for minutes).
+  if (!sk->GetError().empty()) {
+    SetError("profile sketch '" + sk->GetName() +
+             "' failed: " + sk->GetError());
+    return false;
+  }
   if (thickness <= 1e-9) {
     SetError("rib thickness must be positive");
     return false;

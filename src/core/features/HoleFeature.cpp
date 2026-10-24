@@ -236,6 +236,13 @@ bool HoleFeature::Execute(RegenContext& ctx) {
         "hole needs a sketch of points or circles (missing or suppressed)");
     return false;
   }
+  // A sketch that failed this regeneration still holds its last plane and
+  // profile; building from those puts the feature where the reference used
+  // to be (a rib on a plane 9e15 mm out spun a boolean for minutes).
+  if (!sk->GetError().empty()) {
+    SetError("hole sketch '" + sk->GetName() + "' failed: " + sk->GetError());
+    return false;
+  }
   // A recorded fit DERIVES the diameter
   // (docs/modeling/holes-and-threads.md#hole). Done here rather than at the
   // call site so it survives everything that rebuilds a feature — undo, a
