@@ -320,16 +320,24 @@ its G-code and then answered "unknown parameter '_timeout'". So:
   making the directory; `compare_geometry` reads both diff paths before
   writing either; `set_reference_image` edits a copy of the image.
 - **An edit that refuses is rolled back.** While a semantic handler runs,
-  `ProcessPending` holds marks on the active tab's histories (`EditMarks`:
-  the part's command stack, the assembly's, drawing's and job's snapshot
-  stacks). If the handler throws — a type error on its fifth key, a check
+  `ProcessPending` holds marks on the histories (`EditMarks`: the active
+  part's command stack, the assembly's, drawing's and job's snapshot
+  stacks, every other part tab's stashed command stack — an edit that names
+  its `part` lands there — and the project scope's cross-tab history of
+  variables, tables and templates, redo included). The part's commands and
+  the project's edits unwind together, newest first by the action clock
+  both are stamped from. If the handler throws — a type error on its fifth key, a check
   after the edit it guards — or a key it was sent went unread, everything
   pushed since the marks is undone, dropped from redo, and the project's
-  saved state is put back; the refusal says so ("The call was rolled back
-  (1 edit(s) undone), so the document is as it was."). `batch` uses the
-  same marks. It covers what goes through those histories: an edit made
-  outside them (a field set directly on a feature) is the handler's to make
-  only after its checks.
+  saved state is put back — every tab saved before the call, since a
+  project edit regenerates them all; the refusal says so ("The call was
+  rolled back (1 edit(s) undone and the project variables restored), so the
+  document is as it was."). `batch` uses the same marks. It covers what goes
+  through those histories: an edit made outside them (a field set directly
+  on a feature) is the handler's to make only after its checks. A call that
+  moves the active tab (`add_part`, a CAM or drawing verb given another
+  `job` or `drawing`) leaves the marked tab's stack stashed where the
+  rollback does not unwind it.
 - **`NotInBatch` methods are not rolled back** — they reach outside the
   document (a file, a tab, the settings, the machine store, the print
   profile store, git), which no undo stack holds. They are the ones that must
@@ -438,10 +446,13 @@ as one transaction:
   it is added: a Box and a Cylinder on its face build in one batch as they
   do one call at a time. `regenerations` in the response counts the flushes.
 - **One undo step.** The calls' commands are coalesced into one ("Batch of N
-  calls"); on an assembly tab, one snapshot.
+  calls"); on an assembly tab, one snapshot. A project-scope edit
+  (`set_variable` at project scope, `set_table`) stays its own step on the
+  cross-tab history.
 - **Rollback.** With `stop_on_error` (default), a call that throws rolls the
-  whole batch back — the part's commands and the assembly's, drawing's and
-  job's snapshots, through the same `EditMarks` a single call uses
+  whole batch back — the part's commands, the assembly's, drawing's and
+  job's snapshots, another part's edits and the project's variables and
+  tables, through the same `EditMarks` a single call uses
   ([above](#a-refused-call-changes-nothing)) — and the refusal names the
   call, the reason, what was undone and how many later calls did not run.
   Every exception counts, a kernel `Standard_Failure` included; a call that
@@ -473,7 +484,7 @@ as one transaction:
 The gain is largest for edits early in a long history, where each separate
 call would rebuild everything after it; appends are already incremental.
 `batch_smoke` gates the regeneration count, the single undo step, rollback on
-a failed call, a rejected key refused before any call runs, `stop_on_error: false`, `$ref` and its
+a failed call (the project scope and another part's stack included), a rejected key refused before any call runs, `stop_on_error: false`, `$ref` and its
 refusals, a mid-batch query seeing current geometry, and an assembly batch.
 
 ## Typed contracts
