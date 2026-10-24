@@ -112,7 +112,8 @@ The loader refuses, naming it:
   names it too (the damage may be in that name);
 - a document of another kind; in `project.json`, a document entry with no
   `type` or one this build does not know, a `dir` that is not there, an id
-  listed twice, more section cuts than the renderer carries
+  listed twice, no documents at all (it crashed the open), more section
+  cuts than the renderer carries
   (`kMaxClipPlanes`, 4, which is all `AddSection` allows);
 - a name, a path or a symlink that would reach outside the project
   ([format.md](format.md#paths-in-a-project));
@@ -120,7 +121,7 @@ The loader refuses, naming it:
   fixed-size array of another size (`[x, y, z]` with a fourth number, an
   explode step's offset of four), half an element reference, an element of
   no feature where the writer writes only a set one (a sketch's `face_ref`
-  with feature 0), a constraint point ref out of its range, a leader that
+  or a distance tolerance's `ref2` with feature 0), a constraint point ref out of its range, a leader that
   points at nothing, an `fcf` frame on a note that is not one, a flat mill
   with a `tip_angle`, tabs without a count, an `active_configuration` the
   document does not have, a sketch plane whose axis lies along its normal,
