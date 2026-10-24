@@ -36,6 +36,9 @@
 #include <glm/glm.hpp>
 
 #include <algorithm>
+#include <cctype>
+#include <cmath>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -101,15 +104,22 @@ static constexpr MethodDoc ProjectMethods[] = {
      "part_id, source_part_id, fingerprint, expected_revision, "
      "source_revision, apply"},
     {"import_step",
-     "Import a STEP, STL or BREP file into the current project (STEP via "
-     "XCAF: names, colors, real assemblies). `units` is the length unit an "
-     "STL or BREP was drawn in — mm (default), cm, m, in — since neither "
-     "format carries one; refused for STEP, which declares its own. "
-     "`keep_origin` keeps the file's OWN coordinates; without it the import "
-     "is centred on its bounding box, which loses the placement a bought "
-     "part was exported at and stacks every one of them on the origin — and "
-     "the reply's `recentred_by` [x, y, z] (mm) says by how much.",
-     "as_assembly, keep_origin, path, units",
+     "Import a STEP, IGES, STL, OBJ or BREP file into the current project "
+     "(STEP and IGES via XCAF: names, colors, real assemblies; IGES surfaces "
+     "are sewn into solids, and what stays open is named in the feature's "
+     "warning). `units` is the length unit an STL, OBJ or BREP was drawn in "
+     "— mm (default), cm, m, in — since none of them carries one; refused "
+     "for STEP and IGES, which declare their own. `keep_origin` keeps the "
+     "file's OWN coordinates; without it the import is centred on its "
+     "bounding box, which loses the placement a bought part was exported at "
+     "and stacks every one of them on the origin — and the reply's "
+     "`recentred_by` [x, y, z] (mm) says by how much. `up_axis` is which "
+     "axis OF THE FILE is up: auto (default) reads the header — a SolidWorks "
+     "file is +y and stands up on our Z — or none, +x, -x, +y, -y, -z; "
+     "`turn_deg` turns about world Z after it. The reply's `up_axis` "
+     "{requested, applied, turn_deg, because, system} says what was applied "
+     "and why (docs/interchange/README.md#up-axis).",
+     "as_assembly, keep_origin, path, turn_deg, units, up_axis",
      remote::NeedsPart | remote::NotInBatch},
     {"export_step",
      "Export to STEP {path}: the active part (or {part}, from any tab), or — "
@@ -1603,11 +1613,45 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
                 {"folders", FolderList(state)}};
   }
   if (m == "import_step") {
+    // Every parameter is checked before anything is read or created: a
+    // refused call changes nothing.
+    const std::string path = p.at("path").get<std::string>();
+    std::string ext = std::filesystem::path(path).extension().string();
+    for (char& c : ext)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    const bool structured =
+        ext == ".step" || ext == ".stp" || ext == ".igs" || ext == ".iges";
+    if (!structured && ext != ".stl" && ext != ".obj" && ext != ".brep")
+      throw std::runtime_error(
+          "path: '" + path +
+          "' is not a file import_step reads (accepted: .step/.stp, "
+          ".igs/.iges, .stl, .obj, .brep; a .dxf or .svg goes into a sketch "
+          "with import_sketch)");
+    if (p.value("as_assembly", false) && !structured)
+      throw std::runtime_error("as_assembly: an assembly import reads STEP or "
+                               "IGES, which carry product structure");
+    interchange::UpAxis up = interchange::UpAxis::Auto;
+    if (p.contains("up_axis") && (!p.at("up_axis").is_string() ||
+                                  !interchange::UpAxisFromString(
+                                      p.at("up_axis").get<std::string>(), up)))
+      throw std::runtime_error("up_axis: unknown " + p.at("up_axis").dump() +
+                               ". Accepted: " + interchange::AcceptedUpAxes());
+    double turnDeg = 0.0;
+    if (p.contains("turn_deg")) {
+      if (!p.at("turn_deg").is_number() ||
+          !std::isfinite(p.at("turn_deg").get<double>()))
+        throw std::runtime_error("turn_deg: a number of degrees about world "
+                                 "Z");
+      turnDeg = p.at("turn_deg").get<double>();
+    }
     units::Length unit = units::Length::Millimetre;
     if (p.contains("units")) {
-      if (p.value("as_assembly", false))
-        throw std::runtime_error("units: an assembly import reads STEP, which "
-                                 "declares its own unit");
+      if (structured)
+        throw std::runtime_error(
+            "units: '" + path + "' is " +
+            (ext == ".igs" || ext == ".iges" ? "IGES" : "STEP") +
+            ", which declares its own unit — `units` is for STL, OBJ and "
+            "BREP");
       const std::string u = p.at("units").get<std::string>();
       if (!units::LengthFromString(u, unit)) {
         std::string accepted;
@@ -1621,8 +1665,9 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       // Product structure → part tabs + an assembly (interchange I2).
       const size_t tabsBefore = state.parts.size();
       std::string error;
-      if (!ui::ImportStepAsAssembly(state, p.at("path").get<std::string>(),
-                                    &error)) {
+      interchange::UpDecision decided;
+      if (!ui::ImportStepAsAssembly(state, path, &error, up, turnDeg,
+                                    &decided)) {
         throw std::runtime_error(error);
       }
       json occs = json::array();
@@ -1650,7 +1695,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
       json out{{"assembly_index", state.activePart},
                {"occurrences", occs},
                {"parts", partTabs},
-               {"ok", failed.empty()}};
+               {"ok", failed.empty()},
+               {"up_axis", interchange::ToJson(decided)}};
       if (!failed.empty())
         out["failed"] = failed;
       return out;
@@ -1658,8 +1704,8 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     const size_t before = doc->GetBodies().size();
     const json preDigest = BodyDigestJson(*doc);
     std::string error;
-    if (!ui::ImportAsFeature(state, p.at("path").get<std::string>(), nullptr,
-                             &error, unit, p.value("keep_origin", false)))
+    if (!ui::ImportAsFeature(state, path, nullptr, &error, unit,
+                             p.value("keep_origin", false), up, turnDeg))
       throw std::runtime_error(error);
     json out = {{"bodies", doc->GetBodies().size() - before},
                 {"regen", RegenSummaryJson(*doc)},
@@ -1670,9 +1716,15 @@ std::optional<json> HandleProjectRpc(ui::AppState& state, const std::string& m,
     if (doc->FeatureCount() > 0)
       if (const auto* imp = dynamic_cast<const ImportFeature*>(
               doc->GetFeature(doc->FeatureCount() - 1));
-          imp != nullptr && imp->Shift() != glm::dvec3(0.0))
-        out["recentred_by"] =
-            json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
+          imp != nullptr) {
+        if (imp->Shift() != glm::dvec3(0.0))
+          out["recentred_by"] =
+              json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
+        out["up_axis"] = interchange::ToJson(imp->UpApplied());
+        // What the reader left out or sewed, in the call that did it.
+        if (!imp->GetWarning().empty())
+          out["warning"] = imp->GetWarning();
+      }
     return out;
   }
   return std::nullopt;

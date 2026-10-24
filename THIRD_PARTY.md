@@ -67,7 +67,7 @@ functional but cannot generate FEM meshes.
 - **Source:** <https://github.com/Open-Cascade-SAS/OCCT>
 
 OpenCASCADE supplies B-Rep modeling, topology, tessellation, mass properties,
-and STEP/STL/BREP interchange. The OCCT exception is reproduced in
+and STEP/IGES/STL/OBJ/BREP interchange. The OCCT exception is reproduced in
 `LICENSES/OpenCASCADE-exception.txt`.
 
 See [`LICENSES/SOURCE-OFFER.md`](LICENSES/SOURCE-OFFER.md) for exact source

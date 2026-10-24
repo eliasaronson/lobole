@@ -296,8 +296,14 @@ void ApplyExplodeTransforms(AppState& state);
 // <project>/imported, or the staging area before the first save),
 // occurrences placed from the file's instance tree. Not undoable (creates
 // documents, like Open).
+//
+// `up`/`turnDeg` stand the whole import up (interchange::DecideUpAxis);
+// `decided`, when given, receives what was applied and why.
 bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
-                          std::string* error);
+                          std::string* error,
+                          interchange::UpAxis up = interchange::UpAxis::Auto,
+                          double turnDeg = 0.0,
+                          interchange::UpDecision* decided = nullptr);
 
 // Same, for a caller that already parsed the file (the GUI import worker in
 // ui/ImportJob.cpp probes the structure to choose this path). `stepPath` names
@@ -306,7 +312,10 @@ bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
 // re-read the file.
 bool ImportStepAsAssembly(AppState& state,
                           const CADKernel::ImportedModel& model,
-                          const std::string& stepPath, std::string* error);
+                          const std::string& stepPath, std::string* error,
+                          interchange::UpAxis up = interchange::UpAxis::Auto,
+                          double turnDeg = 0.0,
+                          interchange::UpDecision* decided = nullptr);
 
 // The two halves of materializing a plan, in order: a part tab per planned
 // part, then the assembly that places them. Split out of ImportStepAsAssembly

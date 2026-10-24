@@ -265,7 +265,7 @@ tractions, and a shape that is not the document's).
 
 ## Import
 
-A STEP import's worker reads and plans; its `finish` is first called once
+A STEP or IGES import's worker reads and plans; its `finish` is first called once
 after the join to read the verdict (a feature import, a failure, a cancel, or
 "materialize"), then once per poll, materializing a slice of parts per frame
 and returning `false` until the last. When the materialize starts it turns

@@ -12,6 +12,7 @@
 #include "ui/AppState.h"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -33,6 +34,9 @@ struct Ray;          // defined in FaceSelector.h
 // docs/architecture.md#the-ui-actions-layer.
 
 #include "core/Units.h"
+#include "core/io/ImportUpAxis.h"
+
+#include <nlohmann/json.hpp>
 
 namespace ui {
 
@@ -52,10 +56,58 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
 // `keepOrigin` keeps the file's own coordinates instead of centring the
 // import on its bounding box — what a neighbour part or a fixture needs,
 // and the only way a file's placement survives the round trip.
+// `up` and `turnDeg` are ImportFeature::upAxis / turnDeg: which axis of the
+// file is up (auto reads its header) and a turn about world Z after it. An
+// import that `auto` turned says so in a viewport pill (state.importNote).
 bool ImportAsFeature(AppState& state, const std::string& filename,
                      CADKernel::ImportedModel* parsed, std::string* error,
                      units::Length unit = units::Length::Millimetre,
-                     bool keepOrigin = false);
+                     bool keepOrigin = false,
+                     interchange::UpAxis up = interchange::UpAxis::Auto,
+                     double turnDeg = 0.0);
+
+// A DXF or SVG into a sketch: the import_sketch RPC and File > Import share
+// it. `sketchId` (non-zero) adds to that sketch; else a new Sketch on `plane`
+// (a primitive `on`: "Top" | {feature_id, element} | {feature_id}; null =
+// Top). The file is parsed and every parameter checked before anything is
+// created, and the change is one undo step. Throws std::runtime_error with
+// the refusal.
+struct SketchImportRequest {
+  std::string path;
+  uint64_t sketchId = 0;
+  nlohmann::json plane; // null = Top
+  std::string units;    // "" = the file's, else the default
+  std::vector<std::string> layers;
+  std::vector<std::string> constructionLayers;
+  bool keepOrigin = false;
+};
+struct SketchImportResult {
+  uint64_t sketchId = 0;
+  std::vector<uint32_t> entityIds;
+  std::map<std::string, int> imported;    // by sketch entity type
+  std::map<std::string, int> notImported; // by the file's kind
+  std::vector<std::string> notes;
+  std::string unit, unitSource;
+  bool recentred = false;
+  glm::dvec2 recentredBy{0.0};
+  std::vector<glm::dvec2> openEnds; // sketch UV, after the centring
+};
+SketchImportResult ImportSketch(AppState& state,
+                                const SketchImportRequest& req);
+// One line for a pill: what came in, its unit and where that came from, what
+// was left out, and whether it is open.
+std::string SketchImportSummary(const SketchImportResult& r,
+                                const std::string& path);
+
+// A DXF or SVG into a sketch (docs/sketching/README.md#importing-dxf-and-svg)
+// from File > Import: into the sketch being edited, else a new sketch on the
+// preselected plane or face, else Top. One undo step; the pill says what came
+// in and what did not. False (with *error) when the file was refused, which
+// changes nothing.
+bool ImportSketchFile(AppState& state, const std::string& filename,
+                      std::string* error);
+// Whether File > Import sends `filename` to ImportSketchFile (.dxf, .svg).
+bool IsSketchImportFile(const std::string& filename);
 
 // Reference-image underlays (v49). Add reads/decodes the file and centres it on
 // the active sketch's plane; Calibrate scales it so p1..p2 spans `distance`

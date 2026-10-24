@@ -26,6 +26,7 @@
 #include "core/Feature.h"
 #include "core/MassProps.h"
 #include "core/Measure.h"
+#include "core/Primitives.h"
 #include "core/drawing/DrawingDimension.h"
 #include "core/drawing/DrawingExport.h"
 #include "core/drawing/DrawingProjection.h"
@@ -40,9 +41,12 @@
 #include "core/fem/FemTopo.h"
 #include "core/io/Autosaver.h"
 #include "core/io/GitVault.h"
+#include "core/io/ImportDxf.h"
+#include "core/io/ImportSvg.h"
 #include "core/io/ProjectStamp.h"
 #include "core/io/RecentProjects.h"
 #include "core/io/Serialization.h"
+#include "core/io/SketchImport.h"
 #include "render/Camera.h"
 #include "render/FieldRenderer.h"
 #include "render/IBLTextures.h"
@@ -216,7 +220,8 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
 
 bool ImportAsFeature(AppState& state, const std::string& filename,
                      CADKernel::ImportedModel* parsed, std::string* error,
-                     units::Length unit, bool keepOrigin) {
+                     units::Length unit, bool keepOrigin,
+                     interchange::UpAxis up, double turnDeg) {
   if (!state.document || !state.commands) {
     if (error)
       *error = "no active part document";
@@ -228,6 +233,8 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
   auto feature = std::make_unique<ImportFeature>(name, filename);
   feature->lengthUnit = unit;
   feature->keepOrigin = keepOrigin;
+  feature->upAxis = up;
+  feature->turnDeg = turnDeg;
   // The import worker already read this file to decide it was a single
   // product; hand that over rather than parse it again (ImportFeature::
   // SeedGeometry). Only the first Execute uses it.
@@ -248,8 +255,249 @@ bool ImportAsFeature(AppState& state, const std::string& filename,
     LOG_ERROR("Import of '{}': {}", filename, why);
     return false;
   }
+  // A part `auto` turned says so where the user is looking: a model that
+  // arrives standing differently from the file is a surprise unless it is
+  // explained, and the editor is where it is undone.
+  if (const size_t n = state.document->FeatureCount())
+    if (const auto* imp = dynamic_cast<const ImportFeature*>(
+            state.document->GetFeature(n - 1));
+        imp != nullptr &&
+        imp->UpApplied().requested == interchange::UpAxis::Auto &&
+        imp->UpApplied().applied != interchange::UpAxis::None) {
+      state.importNote =
+          "Stood up (" +
+          std::string(interchange::ToString(imp->UpApplied().applied)) +
+          " was up in the file): " + imp->UpApplied().because +
+          ". Change it in the import's editor.";
+      state.importNoteWarn = false;
+      state.importNoteUntil = -1.0;
+    }
   FitCameraToDocument(state);
   return true;
+}
+
+namespace {
+
+std::string LowerExt(const std::string& path) {
+  std::string ext = std::filesystem::path(path).extension().string();
+  for (char& c : ext)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  return ext;
+}
+
+const char* EntityKind(const sketch::Entity& e) {
+  return std::visit(
+      [](const auto& x) -> const char* {
+        using T = std::decay_t<decltype(x)>;
+        if constexpr (std::is_same_v<T, sketch::Point>)
+          return "point";
+        else if constexpr (std::is_same_v<T, sketch::Line>)
+          return "line";
+        else if constexpr (std::is_same_v<T, sketch::Circle>)
+          return "circle";
+        else if constexpr (std::is_same_v<T, sketch::Arc>)
+          return "arc";
+        else if constexpr (std::is_same_v<T, sketch::Ellipse>)
+          return "ellipse";
+        else if constexpr (std::is_same_v<T, sketch::EllipseArc>)
+          return "ellipse_arc";
+        else if constexpr (std::is_same_v<T, sketch::BSpline>)
+          return "spline";
+        else
+          return "text";
+      },
+      e);
+}
+
+} // namespace
+
+bool IsSketchImportFile(const std::string& filename) {
+  const std::string ext = LowerExt(filename);
+  return ext == ".dxf" || ext == ".svg";
+}
+
+SketchImportResult ImportSketch(AppState& state,
+                                const SketchImportRequest& req) {
+  if (!state.document || !state.commands)
+    throw std::runtime_error("no active part document");
+  Document& doc = *state.document;
+
+  // Everything is read and checked before anything is created: the file is
+  // parsed whole (a refusal names what it refused), the target resolved.
+  const std::string ext = LowerExt(req.path);
+  sketchimport::Drawing drawing;
+  if (ext == ".dxf") {
+    dxfimport::Options opt;
+    if (!req.units.empty()) {
+      units::Length u;
+      if (!units::LengthFromString(req.units, u)) {
+        std::string accepted;
+        for (const char* n : units::LengthNames())
+          accepted += (accepted.empty() ? "" : ", ") + std::string(n);
+        throw std::runtime_error("units: unknown '" + req.units +
+                                 "' for a DXF. Accepted: " + accepted);
+      }
+      opt.units = u;
+    }
+    opt.layers = req.layers;
+    opt.constructionLayers = req.constructionLayers;
+    drawing = dxfimport::Read(req.path, opt);
+  } else if (ext == ".svg") {
+    if (!req.layers.empty() || !req.constructionLayers.empty())
+      throw std::runtime_error("layers: an SVG has no layers this reader "
+                               "takes; they are for a DXF");
+    svgimport::Options opt;
+    opt.units = req.units;
+    drawing = svgimport::Read(req.path, opt);
+  } else {
+    throw std::runtime_error("path: '" + req.path +
+                             "' is not a drawing import_sketch reads "
+                             "(accepted: .dxf, .svg; a 3D file goes in with "
+                             "import_step)");
+  }
+  if (drawing.entities.empty())
+    throw std::runtime_error("'" + req.path + "' has nothing to import" +
+                             (drawing.notImported.empty()
+                                  ? std::string()
+                                  : std::string(" (only annotation, which is "
+                                                "left out)")));
+
+  SketchFeature* target = nullptr;
+  size_t targetIndex = 0;
+  std::optional<primitive::Placement> placement;
+  primitive::On on;
+  if (req.sketchId != 0) {
+    target = dynamic_cast<SketchFeature*>(
+        doc.FindFeatureById(req.sketchId, &targetIndex));
+    if (target == nullptr)
+      throw std::runtime_error("sketch_id: " + std::to_string(req.sketchId) +
+                               " is not a sketch in this part");
+  } else {
+    on = primitive::OnFromJson(req.plane.is_null() ? nlohmann::json("Top")
+                                                   : req.plane);
+    auto resolved = primitive::Resolve(doc, on);
+    if (!resolved)
+      throw std::runtime_error("plane: " + resolved.error());
+    placement = *resolved;
+  }
+
+  // Centred on the sketch origin unless the file's coordinates are wanted.
+  SketchImportResult result;
+  glm::dvec2 lo, hi;
+  if (!req.keepOrigin && sketchimport::Bounds(drawing.entities, lo, hi)) {
+    const glm::dvec2 shift = -0.5 * (lo + hi);
+    if (shift != glm::dvec2(0.0)) {
+      const sketchimport::Affine2 move{glm::dmat2(1.0), shift};
+      for (sketch::Entity& e : drawing.entities)
+        e = sketchimport::TransformEntity(e, move);
+      result.recentredBy = shift;
+      result.recentred = true;
+    }
+  }
+  sketchimport::SnapEndpoints(drawing.entities, sketchimport::kChainTol);
+  result.openEnds =
+      sketchimport::OpenEnds(drawing.entities, sketchimport::kChainTol);
+  for (const sketch::Entity& e : drawing.entities)
+    result.imported[EntityKind(e)]++;
+  result.notImported = drawing.notImported;
+  result.notes = drawing.notes;
+  result.unit = drawing.unit;
+  result.unitSource = drawing.unitSource;
+
+  // One undo step either way.
+  const std::string name = std::filesystem::path(req.path).stem().string();
+  if (target != nullptr) {
+    const nlohmann::json before = DocumentIO::FeatureToJson(*target);
+    for (sketch::Entity& e : drawing.entities)
+      result.entityIds.push_back(target->AddEntity(std::move(e)));
+    doc.Regenerate();
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(
+            targetIndex, before, DocumentIO::FeatureToJson(*target)),
+        doc);
+    result.sketchId = target->GetId();
+  } else {
+    auto sk = std::make_unique<SketchFeature>(name, placement->plane);
+    switch (on.kind) {
+    case primitive::OnKind::Face:
+      sk->faceRef = on.face;
+      break;
+    case primitive::OnKind::PlaneFeature:
+      sk->planeRef = on.featureId;
+      break;
+    case primitive::OnKind::WorldPlane:
+      break;
+    }
+    for (sketch::Entity& e : drawing.entities)
+      result.entityIds.push_back(sk->AddEntity(std::move(e)));
+    state.commands->Execute(std::make_unique<AddFeatureCommand>(std::move(sk)),
+                            doc);
+    result.sketchId = doc.GetFeature(doc.FeatureCount() - 1)->GetId();
+  }
+  return result;
+}
+
+std::string SketchImportSummary(const SketchImportResult& r,
+                                const std::string& path) {
+  size_t total = 0;
+  for (const auto& [kind, n] : r.imported)
+    total += static_cast<size_t>(n);
+  std::string out = "Imported " + std::to_string(total) + " entities from " +
+                    std::filesystem::path(path).filename().string() + " (" +
+                    r.unit + ", from " + r.unitSource + ")";
+  if (!r.notImported.empty()) {
+    std::string left;
+    for (const auto& [kind, n] : r.notImported)
+      left += (left.empty() ? "" : ", ") + std::to_string(n) + " " + kind;
+    out += "; left out: " + left;
+  }
+  if (!r.openEnds.empty())
+    out += "; " + std::to_string(r.openEnds.size()) +
+           " open ends, so it will not extrude as it is";
+  return out;
+}
+
+bool ImportSketchFile(AppState& state, const std::string& filename,
+                      std::string* error) {
+  SketchImportRequest req;
+  req.path = filename;
+  // Into the sketch being edited, else onto the preselected face or datum
+  // plane, else Top.
+  if (state.sketchEdit.IsEditing()) {
+    req.sketchId = state.sketchEdit.activeSketchId;
+  } else if (const SelectionItem* item =
+                 state.selection.First(SelectionItem::Kind::Face)) {
+    uint32_t meshId = 0, faceIndex = 0;
+    if (ResolveFaceItem(state, *item, meshId, faceIndex))
+      if (const auto ref = FaceElementRef(state, meshId, faceIndex))
+        req.plane = primitive::OnToJson(
+            {primitive::OnKind::Face, PlaneType::XY, *ref, 0});
+  } else if (auto* datum =
+                 dynamic_cast<DatumPlaneFeature*>(SelectedFeature(state))) {
+    req.plane = nlohmann::json{{"feature_id", datum->GetId()}};
+  }
+  try {
+    const SketchImportResult r = ImportSketch(state, req);
+    const std::string summary = SketchImportSummary(r, filename);
+    if (state.sketchEdit.IsEditing())
+      state.sketchEdit.actionMsg = summary;
+    state.importNote = summary;
+    state.importNoteWarn = !r.openEnds.empty();
+    state.importNoteUntil = -1.0;
+    return true;
+  } catch (const std::exception& e) {
+    const std::string why =
+        "Import of " + std::filesystem::path(filename).filename().string() +
+        " refused: " + e.what();
+    if (error)
+      *error = why;
+    if (state.sketchEdit.IsEditing())
+      state.sketchEdit.actionMsg = why;
+    state.importNote = why;
+    state.importNoteWarn = true;
+    state.importNoteUntil = -1.0;
+    return false;
+  }
 }
 
 } // namespace ui

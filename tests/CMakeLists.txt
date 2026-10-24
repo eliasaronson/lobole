@@ -29,6 +29,7 @@ add_executable(designer_tests
     test_face_appearance.cpp
     test_cam_workholding.cpp
     test_cadkernel.cpp
+    test_sketch_import.cpp
     test_sketch.cpp
     test_document.cpp
     test_document_copy.cpp

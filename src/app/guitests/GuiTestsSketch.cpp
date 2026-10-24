@@ -5,6 +5,7 @@
 #include "core/sketch/SketchOrientation.h"
 #include "render/UnderlayRenderer.h"
 #include "ui/ImportActions.h"
+#include "ui/ImportJob.h"
 #include "ui/ProjectActions.h"
 #include "ui/SceneOverlays.h"
 #include "ui/SelectionPipeline.h"
@@ -2595,6 +2596,106 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(litCounts().second > 0);  // the point itself is highlighted
     IM_CHECK_EQ(litCounts().first, 0); // and no line is
     s_App->sketchEdit.selected.clear();
+  };
+
+  // Import formats (docs/interchange/README.md#up-axis): a SolidWorks STEP
+  // arrives standing up, the viewport says why, and the Import's editor lays
+  // it back down as one undoable modify. File > Import opens a native dialog
+  // the engine cannot drive, so the action behind it is called with the
+  // fixture and everything after it is clicked.
+  t = IM_REGISTER_TEST(engine, "import",
+                       "solidworks_part_stands_up_and_lies_down");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    const size_t before = Doc()->FeatureCount();
+    std::string error;
+    IM_CHECK(ui::StartImport(
+        *s_App, SourceFixture("import/box-solidworks.step"), &error));
+    IM_CHECK(WaitFor(ctx, "the import to land",
+                     [] { return !ui::ImportRunning(*s_App); }));
+    IM_CHECK(s_App->importError.empty());
+    IM_CHECK_EQ(Doc()->FeatureCount(), before + 1);
+    auto* imp = dynamic_cast<ImportFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(imp != nullptr);
+    IM_CHECK(imp->UpApplied().applied == interchange::UpAxis::PosY);
+    const auto height = [] {
+      glm::dvec3 mn, mx;
+      Doc()->GetBodies().back().shape.GetBoundingBox(mn, mx);
+      return mx.z - mn.z;
+    };
+    IM_CHECK(std::abs(height() - 30.0) < 1e-6);
+    // The pill: the note is set by the import and its clock started by the
+    // frame that drew it.
+    ctx->Yield(2);
+    IM_CHECK(s_App->importNote.find("Stood up") != std::string::npos);
+    IM_CHECK(s_App->importNote.find("SolidWorks") != std::string::npos);
+    IM_CHECK(s_App->importNoteUntil > 0.0);
+
+    // The editor: the axis, the turn and why.
+    ui::OpenFeatureEditor(*s_App, imp->GetId());
+    ctx->Yield(2);
+    ctx->SetRef("//###ToolWindow");
+    ctx->ComboClick("###Up axis/none");
+    ctx->Yield(3);
+    imp = dynamic_cast<ImportFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(imp->upAxis == interchange::UpAxis::None);
+    IM_CHECK(std::abs(height() - 20.0) < 1e-6);
+    IM_CHECK(s_App->commands->CanUndo());
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(3);
+    imp = dynamic_cast<ImportFeature*>(Doc()->GetFeature(before));
+    IM_CHECK(imp->upAxis == interchange::UpAxis::Auto);
+    IM_CHECK(std::abs(height() - 30.0) < 1e-6);
+  };
+
+  // A DXF into the sketch being edited: one undo step of baked entities,
+  // which close and extrude like any others.
+  t = IM_REGISTER_TEST(engine, "import", "dxf_into_open_sketch_extrudes");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield(2);
+    SketchFeature* sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK(sk != nullptr);
+    const size_t had = sk->entities.size();
+    std::string error;
+    IM_CHECK(
+        ui::StartImport(*s_App, SourceFixture("import/unitless.dxf"), &error));
+    ctx->Yield(2);
+    sk = ui::ResolveActiveSketch(*s_App);
+    IM_CHECK_EQ(sk->entities.size(), had + 4);
+    IM_CHECK(s_App->sketchEdit.actionMsg.find("Imported 4 entities") !=
+             std::string::npos);
+    // One undo step takes the whole drawing back out, and redo puts it in.
+    ui::GlobalUndo(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(ui::ResolveActiveSketch(*s_App)->entities.size(), had);
+    ui::GlobalRedo(*s_App);
+    ctx->Yield(2);
+    IM_CHECK_EQ(ui::ResolveActiveSketch(*s_App)->entities.size(), had + 4);
+
+    ToolbarClick(ctx, "###tb_sk_finish");
+    ctx->Yield();
+    IM_CHECK(!s_App->sketchEdit.IsEditing());
+    ToolbarClick(ctx, "###tb_extrude");
+    ctx->Yield();
+    IM_CHECK(ui::HasPendingFeature(*s_App));
+    ui::AcceptPendingFeature(*s_App);
+    ctx->Yield();
+    IM_CHECK_EQ(Doc()->GetBodies().size(), (size_t)1);
+    // 40 x 25 mm (the file declares no unit: mm).
+    glm::dvec3 mn, mx;
+    Doc()->GetBodies()[0].shape.GetBoundingBox(mn, mx);
+    IM_CHECK(std::abs((mx.x - mn.x) - 40.0) < 1e-6);
+    IM_CHECK(std::abs((mx.y - mn.y) - 25.0) < 1e-6);
+
+    // A refused file changes nothing and says why in the viewport.
+    const size_t features = Doc()->FeatureCount();
+    IM_CHECK(!ui::StartImport(
+        *s_App, SourceFixture("import/refuse-mixed-z.dxf"), &error));
+    IM_CHECK(error.find("mixed elevations") != std::string::npos);
+    IM_CHECK_EQ(Doc()->FeatureCount(), features);
+    IM_CHECK(s_App->importNoteWarn);
   };
 
   // Sketch reference images (v49) — the first test to touch them at all.

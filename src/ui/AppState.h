@@ -2103,6 +2103,14 @@ struct AppState {
   std::string exportNote;
   bool exportNoteFailed = false;
   double exportNoteUntil = 0.0;
+  // What the last import decided that nobody asked for -- a part stood up
+  // because its header names SolidWorks, a DXF read in inches, entities a
+  // sketch import left out -- as a viewport pill. Set where the import runs
+  // (which may have no ImGui context), so `importNoteUntil` < 0 means "not
+  // shown yet": the first frame that draws it starts its clock.
+  std::string importNote;
+  bool importNoteWarn = false;
+  double importNoteUntil = 0.0;
   // The CAM panel's setup step on a job with no setup yet (M3): which
   // machine, and whether the stock is a sheet you own or a wrap of the parts.
   struct CamNewSetup {

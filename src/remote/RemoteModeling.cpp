@@ -30,6 +30,7 @@
 #include "ui/AssemblyActions.h" // PartDocById
 #include "ui/DerivedActions.h"
 #include "ui/DocumentSlots.h"
+#include "ui/ImportActions.h" // ImportSketch
 #include "ui/LiteralActions.h"
 #include "ui/PreviewFeature.h"
 #include "ui/RendererSync.h"
@@ -305,6 +306,34 @@ static constexpr MethodDoc ModelingMethods[] = {
      "basic profile it cuts prints tight (docs/tolerances/README.md).",
      "feature:object, expect_revision?:revision",
      remote::NeedsPart | remote::Deferrable},
+    {"import_sketch",
+     "Read a 2D drawing — a DXF (R12 to R2018, ASCII) or an SVG — into a "
+     "sketch as ordinary, editable entities "
+     "(docs/sketching/README.md#importing-dxf-and-svg): into `sketch_id`, "
+     "else a new Sketch on `plane` (\"Top\" | \"Front\" | \"Right\" | "
+     "{feature_id, element} a flat face | {feature_id} a datum plane; Top "
+     "when absent), centred on the sketch origin unless `keep_origin`. "
+     "`units` is the drawing's unit when the file declares none: a DXF "
+     "takes mm (default), cm, m, in and refuses one that contradicts its "
+     "$INSUNITS; an SVG takes mm, cm, m, in, px (default, 1/96 in), pt and "
+     "refuses it when its root width/height fix the scale. `layers` keeps "
+     "only those DXF layers, `construction_layers` brings those in as "
+     "construction (a flat pattern's BEND_*); an unknown layer is refused, "
+     "listing the file's. The file is read whole or refused whole, naming "
+     "the entity (kind and handle, or the element id) — a rational spline, "
+     "a polyline with width, an extrusion off +/-Z, mixed elevations, an "
+     "SVG clip-path or mask — and nothing is created. Annotation (TEXT, "
+     "DIMENSION, HATCH, ...; an SVG's text, image and hidden elements) is "
+     "left out and counted in `not_imported`. One undo step. `open_ends` "
+     "(sketch UV, mm) are endpoints joining nothing: why an outline will "
+     "not extrude.",
+     "path:string, sketch_id?:int>=0, plane?:any, units?:string, "
+     "layers?:string[], construction_layers?:string[], keep_origin?:bool",
+     remote::NeedsPart | remote::NotInBatch,
+     "sketch_id:int, entity_ids:int[], imported:object, "
+     "not_imported:object, units:{unit:string, source:string}, "
+     "recentred_by?:number[], open_ends:number[][], notes?:string[], "
+     "regen:object, digest:object"},
     {"split_for_printing",
      "Cut a body into pieces that fit a printer's bed, each piece its own "
      "part {bed_mm: [x, y, z], body?, part?, cuts?: [{axis: x|y|z, at_mm}], "
@@ -1137,6 +1166,42 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     ui::CancelPendingFeature(state);
     return json::object();
   }
+  if (m == "import_sketch") {
+    ui::SketchImportRequest req;
+    req.path = p.at("path").get<std::string>();
+    req.sketchId = p.value("sketch_id", uint64_t{0});
+    if (p.contains("plane")) {
+      if (req.sketchId != 0)
+        throw std::runtime_error("plane: a sketch_id already says where the "
+                                 "drawing goes; give one or the other");
+      req.plane = p.at("plane");
+    }
+    req.units = p.value("units", std::string{});
+    if (p.contains("layers"))
+      req.layers = p.at("layers").get<std::vector<std::string>>();
+    if (p.contains("construction_layers"))
+      req.constructionLayers =
+          p.at("construction_layers").get<std::vector<std::string>>();
+    req.keepOrigin = p.value("keep_origin", false);
+    const json preDigest = BodyDigestJson(*doc);
+    const ui::SketchImportResult r = ui::ImportSketch(state, req);
+    json ends = json::array();
+    for (const glm::dvec2& e : r.openEnds)
+      ends.push_back({e.x, e.y});
+    json out = {{"sketch_id", r.sketchId},
+                {"entity_ids", r.entityIds},
+                {"imported", r.imported},
+                {"not_imported", r.notImported},
+                {"units", {{"unit", r.unit}, {"source", r.unitSource}}},
+                {"open_ends", ends},
+                {"regen", RegenSummaryJson(*doc)},
+                {"digest", DigestJson(preDigest, *doc)}};
+    if (r.recentred)
+      out["recentred_by"] = {r.recentredBy.x, r.recentredBy.y};
+    if (!r.notes.empty())
+      out["notes"] = r.notes;
+    return out;
+  }
   if (m == "add_feature") {
     json fj = p.at("feature");
     if (fj.is_object() &&
@@ -1212,9 +1277,13 @@ std::optional<json> HandleModelingRpc(ui::AppState& state, Document& document,
     // otherwise discovers the move by measuring, and reads the result as an
     // interference rather than a placement.
     if (auto* imp = dynamic_cast<const ImportFeature*>(doc->GetFeature(index));
-        imp != nullptr && imp->Shift() != glm::dvec3(0.0))
-      resp["recentred_by"] =
-          json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
+        imp != nullptr) {
+      if (imp->Shift() != glm::dvec3(0.0))
+        resp["recentred_by"] =
+            json::array({imp->Shift().x, imp->Shift().y, imp->Shift().z});
+      // Which axis was up, and how the import knows (auto reads the header).
+      resp["up_axis"] = interchange::ToJson(imp->UpApplied());
+    }
     // A worm or a wheel says what it built, in the call that built it.
     if (auto* w = dynamic_cast<const WormFeature*>(doc->GetFeature(index)))
       if (json rep = w->ReportJson(); !rep.is_null())

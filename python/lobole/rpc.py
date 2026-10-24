@@ -68,6 +68,7 @@ COLUMNS: dict[str, str] = {
     'get_settings': '',
     'get_state': 'part?:string|int',
     'get_units': '',
+    'import_sketch': 'path:string, sketch_id?:int>=0, plane?:any, units?:string, layers?:string[], construction_layers?:string[], keep_origin?:bool',
     'interference': "a?:string|int, b?:string|int, mode?:'exact'|'mesh', max_pairs?:int>=0, deadline_s?:number, touch_tol?:number",
     'list_assertions': '',
     'list_catalogs': '',
@@ -245,6 +246,15 @@ class GetPrintSettingsParams(TypedDict):
 class GetStateParams(TypedDict):
     part: NotRequired[str | int]
 
+class ImportSketchParams(TypedDict):
+    path: str
+    sketch_id: NotRequired[int]
+    plane: NotRequired[Any]
+    units: NotRequired[str]
+    layers: NotRequired[Sequence[str]]
+    construction_layers: NotRequired[Sequence[str]]
+    keep_origin: NotRequired[bool]
+
 class InterferenceParams(TypedDict):
     a: NotRequired[str | int]
     b: NotRequired[str | int]
@@ -405,7 +415,7 @@ FEATURE_SCHEMAS: dict[str, dict[str, Any]] = {
     'Jog': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Jog']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'height': {'type': 'number'}, 'height_expr': {'type': 'string'}, 'angle_deg': {'type': 'number'}, 'angle_deg_expr': {'type': 'string'}, 'flip': {'type': 'boolean'}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
     'CornerRelief': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['CornerRelief']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'style': {'type': 'string', 'enum': ['circular', 'rectangular']}, 'size': {'type': 'number'}, 'size_expr': {'type': 'string'}}, 'required': ['type', 'body_id'], 'additionalProperties': False},
     'NormalCut': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['NormalCut']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'sketch_id': {'type': 'integer', 'minimum': 0.0}, 'body_id': {'type': 'integer', 'minimum': 0.0}, 'regions': {'type': 'array', 'items': {}}}, 'required': ['type', 'sketch_id'], 'additionalProperties': False},
-    'Import': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Import']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'path': {'type': 'string'}, 'units': {'type': 'string', 'enum': ['mm', 'cm', 'm', 'in']}, 'keep_origin': {'type': 'boolean'}, 'color': {}}, 'required': ['type', 'path'], 'additionalProperties': False},
+    'Import': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Import']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'path': {'type': 'string'}, 'units': {'type': 'string', 'enum': ['mm', 'cm', 'm', 'in']}, 'keep_origin': {'type': 'boolean'}, 'color': {}, 'up_axis': {'type': 'string', 'enum': ['auto', 'none', '+x', '-x', '+y', '-y', '-z']}, 'turn_deg': {'type': 'number'}}, 'required': ['type', 'path'], 'additionalProperties': False},
     'Derived': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Derived']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'source_part': {'type': 'integer', 'minimum': 0.0}, 'configuration': {'anyOf': [{'type': 'integer'}, {'type': 'string'}]}, 'bodies': {'type': 'array', 'items': {'type': 'integer'}}, 'body_names': {'type': 'array', 'items': {'type': 'string'}}, 'placement': {'type': 'object'}, 'reference': {'type': 'boolean'}, 'snapshot': {}, 'source_name': {'type': 'string'}}, 'required': ['type', 'source_part'], 'additionalProperties': False},
     'Template': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['Template']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'template': {'type': 'string'}, 'parameters': {'type': 'object'}, 'on': {'anyOf': [{'type': 'string'}, {'type': 'object'}]}, 'definition': {'type': 'object'}, 'ids': {'type': 'array', 'items': {}}, 'revision': {'type': 'integer'}}, 'required': ['type', 'template'], 'additionalProperties': False},
     'DatumPlane': {'type': 'object', 'properties': {'type': {'type': 'string', 'enum': ['DatumPlane']}, 'name': {'type': 'string'}, 'id': {'type': 'integer', 'minimum': 0.0}, 'material': {'type': 'string'}, 'appearance': {'type': 'object'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'suppressed': {'type': 'boolean'}, 'kind': {'type': 'string', 'enum': ['offset', 'angled', 'through_points']}, 'base_plane': {'type': 'string', 'enum': ['xy', 'xz', 'yz']}, 'parent_id': {'type': 'integer', 'minimum': 0.0}, 'offset': {'type': 'number'}, 'offset_expr': {'type': 'string'}, 'flip': {'type': 'boolean'}, 'axis': {'type': 'object'}, 'angle_deg': {'type': 'number'}, 'angle_expr': {'type': 'string'}, 'points': {'type': 'array', 'items': {}}}, 'required': ['type', 'kind'], 'additionalProperties': False},
@@ -781,6 +791,8 @@ ImportSpec = TypedDict('ImportSpec', {
     'units': NotRequired[Literal['mm', 'cm', 'm', 'in']],
     'keep_origin': NotRequired[bool],
     'color': NotRequired[Any],
+    'up_axis': NotRequired[Literal['auto', 'none', '+x', '-x', '+y', '-y', '-z']],
+    'turn_deg': NotRequired[float],
 })
 
 DerivedSpec = TypedDict('DerivedSpec', {
@@ -1198,6 +1210,7 @@ RESULT_SCHEMAS: dict[str, dict[str, Any]] = {
     'get_state': {'type': 'object', 'properties': {'bodies': {'type': 'array', 'items': {'type': 'object', 'properties': {'bbox_max': {'type': 'array', 'items': {'type': 'number'}}, 'bbox_min': {'type': 'array', 'items': {'type': 'number'}}, 'created_by': {'type': 'integer'}, 'material': {'type': 'string'}, 'name': {'type': 'string'}, 'volume_mm3': {'type': 'number'}, 'reference': {'type': 'boolean'}, 'mesh': {'type': 'integer'}, 'face_appearance': {'type': 'array', 'items': {'type': 'object'}}, 'appearance': {'type': 'object'}}, 'required': ['bbox_max', 'bbox_min', 'created_by', 'material', 'name', 'volume_mm3'], 'additionalProperties': False}}, 'camera': {'type': 'object', 'properties': {'aspect': {'type': 'number'}, 'distance': {'type': 'number'}, 'fov_deg': {'type': 'number'}, 'position': {'type': 'array', 'items': {'type': 'number'}}, 'target': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['aspect', 'distance', 'fov_deg', 'position', 'target'], 'additionalProperties': False}, 'can_redo': {'type': 'boolean'}, 'can_undo': {'type': 'boolean'}, 'features': {'type': 'array', 'items': {'type': 'object'}}, 'pending_feature_id': {'type': 'integer'}, 'regen': {'type': 'object', 'properties': {'cached': {'type': 'integer'}, 'executed': {'type': 'integer'}, 'failed': {'type': 'array', 'items': {'type': 'object'}}, 'ok': {'type': 'boolean'}, 'warnings': {'type': 'array', 'items': {'type': 'object'}}}, 'required': ['cached', 'executed', 'failed', 'ok', 'warnings'], 'additionalProperties': False}, 'revision': {'type': 'object', 'properties': {'instance': {'type': 'integer'}, 'part_id': {'type': 'integer'}, 'session': {'type': 'string'}, 'version': {'type': 'integer'}}, 'required': ['instance', 'part_id', 'session', 'version'], 'additionalProperties': False}, 'rollback': {'type': 'integer'}, 'selected_feature': {'type': 'integer'}, 'selection': {'anyOf': [{'type': 'object', 'properties': {'mesh': {'type': 'integer'}, 'face': {'type': 'integer'}, 'normal': {'type': 'array', 'items': {'type': 'number'}}, 'center': {'type': 'array', 'items': {'type': 'number'}}}, 'required': ['mesh', 'face', 'normal', 'center'], 'additionalProperties': False}, {'type': 'null'}]}, 'selection_items': {'type': 'array', 'items': {'type': 'object', 'properties': {'kind': {'type': 'string'}, 'id': {'type': 'integer'}, 'path': {'type': 'array', 'items': {'type': 'integer'}}, 'element': {'type': 'object'}}, 'required': ['kind'], 'additionalProperties': False}}, 'view_rollback': {'type': 'integer'}}, 'required': ['bodies', 'camera', 'can_redo', 'can_undo', 'features', 'pending_feature_id', 'regen', 'revision', 'rollback', 'selected_feature', 'selection', 'selection_items', 'view_rollback'], 'additionalProperties': False},
     'get_tube_rules': {'type': 'object', 'properties': {'rules': {'anyOf': [{'type': 'object', 'properties': {'material': {'type': 'string'}, 'max_thinning': {'type': 'number'}, 'former_radii_mm': {'type': 'array', 'items': {'type': 'number'}}, 'min_straight': {'anyOf': [{'type': 'number'}, {'type': 'string'}]}, 'tail_length': {'anyOf': [{'type': 'number'}, {'type': 'string'}]}}, 'required': ['material', 'max_thinning', 'former_radii_mm', 'min_straight', 'tail_length'], 'additionalProperties': False}, {'type': 'null'}]}, 'stocked': {'type': 'object'}}, 'required': ['rules'], 'additionalProperties': False},
     'get_units': {'type': 'object', 'properties': {'angle': {'type': 'string'}, 'length': {'type': 'string'}, 'mass': {'type': 'string'}}, 'required': ['angle', 'length', 'mass'], 'additionalProperties': False},
+    'import_sketch': {'type': 'object', 'properties': {'sketch_id': {'type': 'integer'}, 'entity_ids': {'type': 'array', 'items': {'type': 'integer'}}, 'imported': {'type': 'object'}, 'not_imported': {'type': 'object'}, 'units': {'type': 'object', 'properties': {'unit': {'type': 'string'}, 'source': {'type': 'string'}}, 'required': ['unit', 'source'], 'additionalProperties': False}, 'recentred_by': {'type': 'array', 'items': {'type': 'number'}}, 'open_ends': {'type': 'array', 'items': {'type': 'array', 'items': {'type': 'number'}}}, 'notes': {'type': 'array', 'items': {'type': 'string'}}, 'regen': {'type': 'object'}, 'digest': {'type': 'object'}}, 'required': ['sketch_id', 'entity_ids', 'imported', 'not_imported', 'units', 'open_ends', 'regen', 'digest'], 'additionalProperties': False},
     'layout_balloons': {'type': 'object', 'properties': {'crossings': {'type': 'integer'}, 'placed': {'type': 'array', 'items': {'type': 'object', 'properties': {'item': {'type': 'integer'}, 'note': {'type': 'integer'}, 'occurrence': {'type': 'integer'}, 'part': {'type': 'string'}, 'position': {'type': 'array', 'items': {'type': 'number'}}, 'view': {'type': 'integer'}}, 'required': ['item', 'note', 'occurrence', 'part', 'position', 'view'], 'additionalProperties': False}}, 'unplaced': {'type': 'array', 'items': {}}}, 'required': ['crossings', 'placed', 'unplaced'], 'additionalProperties': False},
     'list_assertions': {'type': 'object', 'properties': {'assertions': {'type': 'array', 'items': {'type': 'object', 'properties': {'a': {'type': 'integer'}, 'b': {'type': 'integer'}, 'id': {'type': 'integer'}, 'min_mm': {'type': 'number'}, 'mode': {'type': 'string'}, 'name': {'type': 'string'}, 'note': {'type': 'string'}, 'standing': {'type': 'string'}, 'why': {'type': 'string'}, 'last_verdict': {'type': 'string'}, 'measured_mm': {'type': 'number'}}, 'required': ['a', 'b', 'id', 'min_mm', 'mode', 'name', 'standing', 'why'], 'additionalProperties': False}}}, 'required': ['assertions'], 'additionalProperties': False},
     'list_bearings': {'type': 'object', 'properties': {'bearings': {'type': 'array', 'items': {'type': 'object', 'properties': {'B_mm': {'type': 'number'}, 'D_a_max_mm': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'D_mm': {'type': 'number'}, 'd_a_max_mm': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'd_a_min_mm': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'd_mm': {'type': 'number'}, 'designation': {'type': 'string'}, 'r_a_max_mm': {'anyOf': [{'type': 'number'}, {'type': 'null'}]}, 'r_min_mm': {'type': 'number'}, 'series': {'type': 'string'}}, 'required': ['B_mm', 'D_a_max_mm', 'D_mm', 'd_a_max_mm', 'd_a_min_mm', 'd_mm', 'designation', 'r_a_max_mm', 'r_min_mm', 'series'], 'additionalProperties': False}}}, 'required': ['bearings'], 'additionalProperties': False},
@@ -2342,6 +2355,24 @@ GetUnitsResult = TypedDict('GetUnitsResult', {
     'angle': str,
     'length': str,
     'mass': str,
+})
+
+ImportSketchResultUnits = TypedDict('ImportSketchResultUnits', {
+    'unit': str,
+    'source': str,
+})
+
+ImportSketchResult = TypedDict('ImportSketchResult', {
+    'sketch_id': int,
+    'entity_ids': list[int],
+    'imported': dict[str, Any],
+    'not_imported': dict[str, Any],
+    'units': ImportSketchResultUnits,
+    'recentred_by': NotRequired[list[float]],
+    'open_ends': list[list[float]],
+    'notes': NotRequired[list[str]],
+    'regen': dict[str, Any],
+    'digest': dict[str, Any],
 })
 
 LayoutBalloonsResultPlaced = TypedDict('LayoutBalloonsResultPlaced', {
@@ -3521,6 +3552,9 @@ class RpcSurface:
         raise NotImplementedError
 
     def get_units(self, _timeout: float | None = None) -> GetUnitsResult:
+        raise NotImplementedError
+
+    def import_sketch(self, _timeout: float | None = None, **params: Unpack[ImportSketchParams]) -> ImportSketchResult:
         raise NotImplementedError
 
     def interference(self, _timeout: float | None = None, **params: Unpack[InterferenceParams]) -> dict[str, Any]:

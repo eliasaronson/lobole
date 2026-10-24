@@ -135,7 +135,7 @@ holds a spec to ([typed feature specs](../scripting/rpc.md#typed-feature-specs))
 | type | what it does |
 |---|---|
 | `Box`, `Sphere`, `Cylinder` | a tool, not a stored type: `add_feature` expands one into a Sketch and an Extrude or Revolve ([Primitives](#primitives)) |
-| `Import` | STEP/STL/BREP bodies; centred on their bbox unless `keep_origin` |
+| `Import` | STEP/IGES/STL/OBJ/BREP bodies; centred on their bbox unless `keep_origin`, stood up by `up_axis` ([interchange](../interchange/README.md#up-axis)) |
 | `Sketch` | 2D profile on a base plane, a `DatumPlane`, another `Sketch`'s plane or a `Frame` (`planeRef`), or a body face (`face_ref`); see the sketching area |
 | `Extrude` | see [Extrude](#extrude) |
 | `Revolve` | profile about an `AxisRef` (`x`, `y`, `z` through the world origin, `sketch_line`, `datum_axis`, `custom {origin, direction}`); `angle_deg`, `symmetric`, `reversed`. The axis must lie in the sketch plane and the profile must not cross it; a joint within 1e-4 mm of it is ON it, so an arc may end on the axis |

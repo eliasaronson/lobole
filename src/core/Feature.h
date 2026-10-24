@@ -8,6 +8,7 @@
 #include "core/Expression.h"
 #include "core/SheetMetal.h"
 #include "core/Units.h"
+#include "core/io/ImportUpAxis.h"
 
 #include <cstdint>
 #include <functional>
@@ -779,8 +780,9 @@ public:
   // does. The compiler cannot write this one — m_seed is an owning pointer.
   ImportFeature(const ImportFeature& other)
       : Feature(other), path(other.path), keepOrigin(other.keepOrigin),
-        lengthUnit(other.lengthUnit), hasColor(other.hasColor),
-        color(other.color), m_shift(other.m_shift) {}
+        lengthUnit(other.lengthUnit), upAxis(other.upAxis),
+        turnDeg(other.turnDeg), hasColor(other.hasColor), color(other.color),
+        m_shift(other.m_shift), m_up(other.m_up) {}
 
   std::string TypeName() const override { return "Import"; }
 
@@ -792,6 +794,7 @@ public:
   void CopyDerivedState(const Feature& executed) override {
     CopyRegenStatus(executed);
     m_shift = static_cast<const ImportFeature&>(executed).m_shift;
+    m_up = static_cast<const ImportFeature&>(executed).m_up;
   }
 
   bool Execute(RegenContext& ctx) override;
@@ -799,8 +802,8 @@ public:
   // Names no other feature: an import's input is a file on disk.
   void VisitFeatureRefs(const RefVisitor&) const override {}
 
-  // .step/.stp (structured), .brep (exact sidecar), or .stl (triangle mesh,
-  // sewn to a shell/solid).
+  // .step/.stp (structured), .igs/.iges (structured, surfaces sewn), .brep
+  // (exact sidecar), .stl or .obj (triangle meshes, sewn to a shell/solid).
   std::string path;
   // Keep the file's own coordinates instead of centring the import (v97).
   bool keepOrigin = false;
@@ -810,9 +813,18 @@ public:
   // small. STEP declares its own unit and REFUSES this. Storage stays mm: the
   // shape is scaled once, as it is read.
   units::Length lengthUnit = units::Length::Millimetre;
-  // Whether `lengthUnit` means anything for this path: .stl or .brep, any
-  // case.
+  // Whether `lengthUnit` means anything for this path: .stl, .obj or .brep,
+  // any case.
   static bool TakesUnits(const std::string& path);
+  // Which axis OF THE FILE is up (vNEXT, `up_axis`), and a turn about world Z
+  // applied after it (`turn_deg`). `Auto` decides from the file's header
+  // (interchange::DecideUpAxis): a SolidWorks STEP, written Y up, stands up
+  // on our Z. Applied as a placement about the file origin before the
+  // centring, so it changes no topology.
+  interchange::UpAxis upAxis = interchange::UpAxis::Auto;
+  double turnDeg = 0.0;
+  // What the last Execute decided and why — the reply's `up_axis`.
+  const interchange::UpDecision& UpApplied() const { return m_up; }
   // What the last Execute translated the shapes by — zero when keepOrigin.
   // Reported by the RPC so a caller never has to discover the move by
   // measuring a bounding box.
@@ -849,6 +861,7 @@ public:
 
 private:
   glm::dvec3 m_shift{0.0}; // what the last Execute centred by
+  interchange::UpDecision m_up; // what the last Execute turned it by
 
   std::unique_ptr<CADKernel::ImportedModel> m_seed;
 

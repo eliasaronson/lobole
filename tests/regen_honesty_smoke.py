@@ -404,6 +404,26 @@ def main():
         expect(len(d.call("get_state")["features"]) == count,
                "and the part is as it was")
 
+        # --- a drawing imported into a sketch something is built on ------
+        # import_sketch is one undo step of baked entities; when they break
+        # the extrude on that sketch (a rectangle overlapping its outline),
+        # its own reply says which feature and why.
+        fx = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "fixtures", "import")
+        d.call("new_project")
+        sk = d.call("import_sketch", path=os.path.join(fx, "unitless.dxf"))
+        healthy(sk, "a closed outline imported")
+        healthy(d.call("add_feature", feature={
+            "type": "Extrude", "name": "E", "sketch_id": sk["sketch_id"],
+            "distance": 5, "mode": "new_body"}), "and extruded")
+        over = d.call("import_sketch", path=os.path.join(fx, "px-default.svg"),
+                      sketch_id=sk["sketch_id"], keep_origin=True)
+        reg = over["regen"]
+        expect(reg["ok"] is False and
+               [f for f in reg["failed"] if f["name"] == "E"],
+               f"import_sketch names the extrude it broke: {reg}")
+        healthy(d.call("undo"), "one undo takes the drawing back out")
+
         print("regen_honesty_smoke: OK")
     finally:
         app.terminate()

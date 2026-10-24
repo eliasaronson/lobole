@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "cad/CADKernel.h"
+#include "common/DesignerVersion.h"
 
 #include <array>
 #include <cmath>
+#include <cstdio>
 #include <deque>
 #include <filesystem>
 #include <functional>
@@ -84,10 +86,22 @@
 #include <algorithm>
 #include <limits>
 
+#include <APIHeaderSection_MakeHeader.hxx>
+#include <BRepBuilderAPI_MakeShapeOnMesh.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <IGESCAFControl_Reader.hxx>
+#include <IGESData_GlobalSection.hxx>
+#include <IGESData_IGESModel.hxx>
+#include <RWObj_CafReader.hxx>
+#include <StepData_StepModel.hxx>
+#include <TCollection_HAsciiString.hxx>
+#include <TopoDS_Shell.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_ColorTool.hxx>
 #include <XCAFDoc_DocumentTool.hxx>
 #include <XCAFDoc_ShapeTool.hxx>
+#include <XCAFDoc_VisMaterial.hxx>
+#include <XCAFDoc_VisMaterialTool.hxx>
 #include <gp_Ax1.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
@@ -1500,6 +1514,169 @@ private:
   uint64_t m_ticks = 0;
 };
 
+// A mesh reader (OBJ, RWMesh) colours through a visual material, not the
+// colour tool.
+bool VisColor(const Handle(XCAFDoc_VisMaterialTool) & materials,
+              const TDF_Label& def, Quantity_Color& out) {
+  if (materials.IsNull())
+    return false;
+  Handle(XCAFDoc_VisMaterial) mat = materials->GetShapeMaterial(def);
+  if (mat.IsNull())
+    mat = materials->GetShapeMaterial(XCAFDoc_ShapeTool::GetShape(def));
+  if (!mat.IsNull()) {
+    out = mat->BaseColor().GetRGB();
+    return true;
+  }
+  // RWObj puts the `usemtl` material on each face's sub-shape label: the
+  // part's colour when they agree.
+  bool found = false;
+  for (TopExp_Explorer ex(XCAFDoc_ShapeTool::GetShape(def), TopAbs_FACE);
+       ex.More(); ex.Next()) {
+    const Handle(XCAFDoc_VisMaterial) m =
+        materials->GetShapeMaterial(ex.Current());
+    if (m.IsNull())
+      continue;
+    const Quantity_Color c = m->BaseColor().GetRGB();
+    if (found && !c.IsEqual(out))
+      return false;
+    out = c;
+    found = true;
+  }
+  return found;
+}
+
+// IGES colours each surface rather than the part: the product's colour when
+// every face that carries one agrees (a face painted apart is not the part's
+// colour).
+bool FaceColor(const Handle(XCAFDoc_ShapeTool) & shapes,
+               const Handle(XCAFDoc_ColorTool) & colors, const TDF_Label& def,
+               Quantity_Color& out) {
+  bool found = false;
+  for (TopExp_Explorer ex(shapes->GetShape(def), TopAbs_FACE); ex.More();
+       ex.Next()) {
+    Quantity_Color c;
+    if (!colors->GetColor(ex.Current(), XCAFDoc_ColorSurf, c) &&
+        !colors->GetColor(ex.Current(), XCAFDoc_ColorGen, c))
+      continue;
+    if (found && !c.IsEqual(out))
+      return false;
+    out = c;
+    found = true;
+  }
+  return found;
+}
+
+// The product tree of an XCAF document, flattened to leaf products with
+// composed placements: what STEP, IGES and OBJ all read through.
+void ModelFromXcaf(XcafDocument& docGuard, CADKernel::ImportedModel& out) {
+  Handle(TDocStd_Document) & doc = docGuard.Get();
+  Handle(XCAFDoc_VisMaterialTool) materials =
+      XCAFDoc_DocumentTool::VisMaterialTool(doc->Main());
+  Handle(XCAFDoc_ShapeTool) shapes =
+      XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+  Handle(XCAFDoc_ColorTool) colors =
+      XCAFDoc_DocumentTool::ColorTool(doc->Main());
+
+  // One product entry per unique definition label, keyed by its entry
+  // string — 100 identical screws stay 1 product + 100 instances.
+  std::map<std::string, size_t> productIndex;
+  auto productOf = [&](const TDF_Label& def) -> size_t {
+    TCollection_AsciiString entry;
+    TDF_Tool::Entry(def, entry);
+    const std::string key(entry.ToCString());
+    auto it = productIndex.find(key);
+    if (it != productIndex.end())
+      return it->second;
+
+    CADKernel::ImportedShape p;
+    p.shape = CADShape(shapes->GetShape(def));
+    p.name = XcafLabelName(def);
+    Quantity_Color qc;
+    if (colors->GetColor(def, XCAFDoc_ColorSurf, qc) ||
+        colors->GetColor(def, XCAFDoc_ColorGen, qc) ||
+        colors->GetColor(shapes->GetShape(def), XCAFDoc_ColorSurf, qc) ||
+        colors->GetColor(shapes->GetShape(def), XCAFDoc_ColorGen, qc) ||
+        VisColor(materials, def, qc) || FaceColor(shapes, colors, def, qc)) {
+      p.hasColor = true;
+      p.color = glm::vec3(static_cast<float>(qc.Red()),
+                          static_cast<float>(qc.Green()),
+                          static_cast<float>(qc.Blue()));
+    }
+    productIndex.emplace(key, out.products.size());
+    out.products.push_back(std::move(p));
+    return out.products.size() - 1;
+  };
+
+  // Walk the instance tree, composing locations down to leaf products.
+  std::function<void(const TDF_Label&, const gp_Trsf&, const std::string&)>
+      visit = [&](const TDF_Label& label, const gp_Trsf& parent,
+                  const std::string& instName) {
+        TDF_Label def = label;
+        XCAFDoc_ShapeTool::GetReferredShape(label, def); // no-op if plain
+        const gp_Trsf here =
+            parent * XCAFDoc_ShapeTool::GetLocation(label).Transformation();
+        if (XCAFDoc_ShapeTool::IsAssembly(def)) {
+          TDF_LabelSequence comps;
+          XCAFDoc_ShapeTool::GetComponents(def, comps);
+          for (Standard_Integer i = 1; i <= comps.Length(); i++) {
+            std::string childName = XcafLabelName(comps.Value(i));
+            if (childName.empty()) {
+              TDF_Label childDef = comps.Value(i);
+              XCAFDoc_ShapeTool::GetReferredShape(comps.Value(i), childDef);
+              childName = XcafLabelName(childDef);
+            }
+            visit(comps.Value(i), here, childName);
+          }
+        } else {
+          CADKernel::ImportedInstance inst;
+          inst.product = productOf(def);
+          inst.transform = TrsfToMat4(here);
+          inst.name =
+              !instName.empty() ? instName : out.products[inst.product].name;
+          out.instances.push_back(std::move(inst));
+        }
+      };
+
+  TDF_LabelSequence roots;
+  shapes->GetFreeShapes(roots);
+  for (Standard_Integer i = 1; i <= roots.Length(); i++)
+    visit(roots.Value(i), gp_Trsf(), XcafLabelName(roots.Value(i)));
+}
+
+std::string HString(const Handle(TCollection_HAsciiString) & h) {
+  if (h.IsNull())
+    return {};
+  std::string s(h->ToCString());
+  // Trim: IGES pads Hollerith strings, STEP leaves '' as the empty string.
+  while (!s.empty() && (s.back() == ' ' || s.back() == '\0'))
+    s.pop_back();
+  while (!s.empty() && s.front() == ' ')
+    s.erase(s.begin());
+  return s;
+}
+
+CADKernel::FileHeader StepHeader(const Handle(StepData_StepModel) & model) {
+  CADKernel::FileHeader h;
+  h.format = "STEP";
+  if (model.IsNull())
+    return h;
+  APIHeaderSection_MakeHeader header(model);
+  if (!header.IsDone())
+    return h;
+  h.fields.push_back(
+      {"FILE_NAME originating_system", HString(header.OriginatingSystem())});
+  h.fields.push_back({"FILE_NAME preprocessor_version",
+                      HString(header.PreprocessorVersion())});
+  std::string description;
+  for (Standard_Integer i = 1; i <= header.NbDescription(); i++) {
+    const std::string d = HString(header.DescriptionValue(i));
+    if (!d.empty())
+      description += (description.empty() ? "" : "; ") + d;
+  }
+  h.fields.push_back({"FILE_DESCRIPTION", description});
+  return h;
+}
+
 } // namespace
 
 bool CADKernel::LoadSTEPStructured(const std::string& filename,
@@ -1535,75 +1712,260 @@ bool CADKernel::LoadSTEPStructured(const std::string& filename,
     return false;
   }
 
-  Handle(XCAFDoc_ShapeTool) shapes =
-      XCAFDoc_DocumentTool::ShapeTool(doc->Main());
-  Handle(XCAFDoc_ColorTool) colors =
-      XCAFDoc_DocumentTool::ColorTool(doc->Main());
+  // The header names the writer, which is how `auto` knows which axis is up
+  // (interchange::DecideUpAxis).
+  out.origin = StepHeader(reader.Reader().StepModel());
+  ModelFromXcaf(doc, out);
+  return !out.instances.empty();
+}
 
-  // One product entry per unique definition label, keyed by its entry
-  // string — 100 identical screws stay 1 product + 100 instances.
-  std::map<std::string, size_t> productIndex;
-  auto productOf = [&](const TDF_Label& def) -> size_t {
-    TCollection_AsciiString entry;
-    TDF_Tool::Entry(def, entry);
-    const std::string key(entry.ToCString());
-    auto it = productIndex.find(key);
-    if (it != productIndex.end())
-      return it->second;
+namespace {
 
-    ImportedShape p;
-    p.shape = CADShape(shapes->GetShape(def));
-    p.name = XcafLabelName(def);
-    Quantity_Color qc;
-    if (colors->GetColor(def, XCAFDoc_ColorSurf, qc) ||
-        colors->GetColor(def, XCAFDoc_ColorGen, qc) ||
-        colors->GetColor(shapes->GetShape(def), XCAFDoc_ColorSurf, qc) ||
-        colors->GetColor(shapes->GetShape(def), XCAFDoc_ColorGen, qc)) {
-      p.hasColor = true;
-      p.color = glm::vec3(static_cast<float>(qc.Red()),
-                          static_cast<float>(qc.Green()),
-                          static_cast<float>(qc.Blue()));
+std::string FormatMm(double v) {
+  char buf[32];
+  std::snprintf(buf, sizeof buf, "%.3g", v);
+  return buf;
+}
+
+bool ShellClosed(const TopoDS_Shell& shell) {
+  BRepCheck_Shell check(shell);
+  return check.Closed() == BRepCheck_NoError;
+}
+
+// A closed shell as a solid with its material inside, or nullopt.
+std::optional<TopoDS_Solid> SolidOf(const TopoDS_Shell& shell) {
+  if (!ShellClosed(shell))
+    return std::nullopt;
+  BRepBuilderAPI_MakeSolid make(shell);
+  if (!make.IsDone())
+    return std::nullopt;
+  TopoDS_Solid solid = make.Solid();
+  if (!BRepLib::OrientClosedSolid(solid))
+    return std::nullopt;
+  return solid;
+}
+
+struct Sewn {
+  TopoDS_Shape shape;
+  int solids = 0;
+  int openShells = 0;
+  int freeEdges = 0;
+};
+
+Sewn SewAt(const TopoDS_Shape& faces, double tolerance) {
+  Sewn out;
+  BRepBuilderAPI_Sewing sew(tolerance);
+  sew.Add(faces);
+  sew.Perform();
+  out.freeEdges = sew.NbFreeEdges();
+  const TopoDS_Shape sewn = sew.SewedShape();
+  BRep_Builder builder;
+  TopoDS_Compound compound;
+  builder.MakeCompound(compound);
+  int parts = 0;
+  TopoDS_Shape last;
+  for (TopExp_Explorer ex(sewn, TopAbs_SHELL); ex.More(); ex.Next()) {
+    const TopoDS_Shell shell = TopoDS::Shell(ex.Current());
+    if (const auto solid = SolidOf(shell)) {
+      last = *solid;
+      out.solids++;
+    } else {
+      last = shell;
+      out.openShells++;
     }
-    productIndex.emplace(key, out.products.size());
-    out.products.push_back(std::move(p));
-    return out.products.size() - 1;
-  };
+    builder.Add(compound, last);
+    parts++;
+  }
+  // Faces sewing left on their own are an open surface too.
+  for (TopExp_Explorer ex(sewn, TopAbs_FACE, TopAbs_SHELL); ex.More();
+       ex.Next()) {
+    last = ex.Current();
+    builder.Add(compound, last);
+    out.openShells++;
+    parts++;
+  }
+  out.shape = parts == 1 ? last : TopoDS_Shape(compound);
+  return out;
+}
 
-  // Walk the instance tree, composing locations down to leaf products.
-  std::function<void(const TDF_Label&, const gp_Trsf&, const std::string&)>
-      visit = [&](const TDF_Label& label, const gp_Trsf& parent,
-                  const std::string& instName) {
-        TDF_Label def = label;
-        XCAFDoc_ShapeTool::GetReferredShape(label, def); // no-op if plain
-        const gp_Trsf here =
-            parent * XCAFDoc_ShapeTool::GetLocation(label).Transformation();
-        if (XCAFDoc_ShapeTool::IsAssembly(def)) {
-          TDF_LabelSequence comps;
-          XCAFDoc_ShapeTool::GetComponents(def, comps);
-          for (Standard_Integer i = 1; i <= comps.Length(); i++) {
-            std::string childName = XcafLabelName(comps.Value(i));
-            if (childName.empty()) {
-              TDF_Label childDef = comps.Value(i);
-              XCAFDoc_ShapeTool::GetReferredShape(comps.Value(i), childDef);
-              childName = XcafLabelName(childDef);
-            }
-            visit(comps.Value(i), here, childName);
-          }
-        } else {
-          ImportedInstance inst;
-          inst.product = productOf(def);
-          inst.transform = TrsfToMat4(here);
-          inst.name =
-              !instName.empty() ? instName : out.products[inst.product].name;
-          out.instances.push_back(std::move(inst));
-        }
-      };
+// Surfaces become bodies, or are counted (docs/interchange/README.md#iges):
+// a product with faces but no solid is sewn at `resolution`, the tolerance
+// the file itself declares. When that leaves it open, it is sewn again at a
+// tolerance taken from the part's size (1/10000 of its box's diagonal) —
+// real files' gaps are wider than the resolution they claim — and the note
+// says which closed it. A shell that stays open stays a shell.
+void SewProduct(CADKernel::ImportedShape& product, double resolution,
+                std::vector<std::string>& notes) {
+  const TopoDS_Shape& shape = product.shape.GetShape();
+  if (shape.IsNull())
+    return;
+  if (TopExp_Explorer(shape, TopAbs_SOLID).More())
+    return; // a solid already: nothing to sew
+  int faces = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next())
+    faces++;
+  if (faces == 0)
+    return;
+  const std::string who = product.name.empty() ? std::string("the surfaces")
+                                               : "\"" + product.name + "\"";
+  Sewn sewn = SewAt(shape, resolution);
+  std::string at = FormatMm(resolution) + " mm (the file's resolution)";
+  bool widened = false;
+  if (sewn.openShells > 0) {
+    Bnd_Box box;
+    BRepBndLib::Add(shape, box);
+    const double diagonal = box.IsVoid() ? 0.0 : std::sqrt(box.SquareExtent());
+    const double sized = diagonal * 1e-4;
+    if (sized > resolution) {
+      Sewn wider = SewAt(shape, sized);
+      if (wider.openShells < sewn.openShells) {
+        sewn = std::move(wider);
+        widened = true;
+        at = FormatMm(sized) + " mm (1/10000 of its size; the file's " +
+             FormatMm(resolution) + " mm resolution left it open)";
+      }
+    }
+  }
+  product.shape = CADShape(sewn.shape);
+  // Sewn shut at the file's own resolution is what the file meant: nothing
+  // to say. A wider tolerance, or a shell left open, is.
+  if (sewn.openShells == 0 && !widened)
+    return;
+  if (sewn.openShells == 0)
+    notes.push_back(who + ": " + std::to_string(faces) + " faces sewn into " +
+                    std::to_string(sewn.solids) +
+                    (sewn.solids == 1 ? " solid" : " solids") + " at " + at);
+  else
+    notes.push_back(who + ": " + std::to_string(faces) + " faces sewn at " +
+                    at + " leave " + std::to_string(sewn.openShells) +
+                    " open " + (sewn.openShells == 1 ? "shell" : "shells") +
+                    " (" + std::to_string(sewn.freeEdges) +
+                    " free edges), kept as a surface, not a solid");
+}
 
-  TDF_LabelSequence roots;
-  shapes->GetFreeShapes(roots);
-  for (Standard_Integer i = 1; i <= roots.Length(); i++)
-    visit(roots.Value(i), gp_Trsf(), XcafLabelName(roots.Value(i)));
+} // namespace
 
+bool CADKernel::LoadIGESStructured(const std::string& filename,
+                                   ImportedModel& out,
+                                   ImportProgress* progress) {
+  out = {};
+  if (!std::filesystem::exists(filename))
+    return false;
+
+  std::scoped_lock exchange(DataExchangeMutex()); // XcafDocument.h
+  XcafDocument doc;
+  IGESCAFControl_Reader reader;
+  reader.SetNameMode(Standard_True);
+  reader.SetColorMode(Standard_True);
+  reader.SetLayerMode(Standard_True);
+  if (progress != nullptr)
+    progress->OnPhase(ImportProgress::Phase::ReadingFile, -1.0);
+  if (reader.ReadFile(filename.c_str()) != IFSelect_RetDone)
+    return false;
+  if (progress != nullptr && progress->Cancelled())
+    return false;
+
+  // The global section: who wrote it, and the resolution it promises (field
+  // 19, in file units; UnitValue is millimetres per file unit).
+  double resolution = 1e-3;
+  out.origin.format = "IGES";
+  if (const Handle(IGESData_IGESModel) model = reader.IGESModel();
+      !model.IsNull()) {
+    const IGESData_GlobalSection& g = model->GlobalSection();
+    out.origin.fields.push_back(
+        {"global section native system ID", HString(g.SystemId())});
+    out.origin.fields.push_back(
+        {"global section preprocessor version", HString(g.InterfaceVersion())});
+    const double r = g.Resolution() * g.UnitValue();
+    if (std::isfinite(r) && r > 0.0)
+      resolution = r;
+  }
+  try {
+    Handle(ProgressBridge) bridge = new ProgressBridge(progress);
+    Message_ProgressScope scope(bridge->Start(), nullptr, 1);
+    if (!reader.Transfer(doc, scope.Next()))
+      return false;
+    if (progress != nullptr && progress->Cancelled())
+      return false;
+  } catch (const Standard_Failure&) {
+    return false;
+  }
+  ModelFromXcaf(doc, out);
+  for (ImportedShape& product : out.products) {
+    // The IGES translator names an unnamed entity by its shape type; that
+    // is not a name anyone gave it.
+    static const char* kTypeNames[] = {"COMPOUND", "COMPSOLID", "SOLID",
+                                       "SHELL", "FACE"};
+    for (const char* t : kTypeNames)
+      if (product.name == t)
+        product.name.clear();
+    SewProduct(product, resolution, out.notes);
+  }
+  return !out.instances.empty();
+}
+
+bool CADKernel::LoadOBJStructured(const std::string& filename,
+                                  ImportedModel& out) {
+  out = {};
+  if (!std::filesystem::exists(filename))
+    return false;
+  std::scoped_lock exchange(DataExchangeMutex()); // XcafDocument.h
+  XcafDocument doc;
+  RWObj_CafReader reader;
+  reader.SetDocument(doc.Get());
+  // No unit and no axis conversion: an OBJ has neither, the import scales
+  // by the unit it is told and turns by its up axis.
+  reader.SetSystemLengthUnit(0.001);
+  reader.SetFileLengthUnit(0.001);
+  try {
+    if (!reader.Perform(TCollection_AsciiString(filename.c_str()),
+                        Message_ProgressRange()))
+      return false;
+  } catch (const Standard_Failure&) {
+    return false;
+  }
+  out.origin.format = "OBJ";
+  ModelFromXcaf(doc, out);
+  // Each object's triangles become planar faces (one per triangle, as
+  // LoadSTL makes), sewn and promoted to a solid when they close.
+  for (ImportedShape& product : out.products) {
+    const TopoDS_Shape& mesh = product.shape.GetShape();
+    if (mesh.IsNull())
+      continue;
+    BRep_Builder builder;
+    TopoDS_Compound faces;
+    builder.MakeCompound(faces);
+    int pieces = 0;
+    for (TopExp_Explorer ex(mesh, TopAbs_FACE); ex.More(); ex.Next()) {
+      TopLoc_Location loc;
+      const Handle(Poly_Triangulation) tri =
+          BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), loc);
+      if (tri.IsNull())
+        continue;
+      BRepBuilderAPI_MakeShapeOnMesh make(tri);
+      make.Build();
+      if (!make.IsDone() || make.Shape().IsNull())
+        continue;
+      builder.Add(faces, make.Shape().Moved(loc));
+      pieces++;
+    }
+    if (pieces == 0) {
+      product.shape = CADShape();
+      continue;
+    }
+    // Sewn tight: the vertices of one OBJ are shared by index, so the
+    // triangles meet exactly; the tolerance only has to absorb rounding.
+    Bnd_Box box;
+    BRepBndLib::Add(faces, box);
+    const double diagonal = box.IsVoid() ? 1.0 : std::sqrt(box.SquareExtent());
+    Sewn sewn = SewAt(faces, diagonal * 1e-7);
+    product.shape = CADShape(sewn.shape);
+    if (sewn.openShells > 0)
+      out.notes.push_back((product.name.empty() ? std::string("a mesh")
+                                                : "\"" + product.name + "\"") +
+                          " is not closed (" + std::to_string(sewn.freeEdges) +
+                          " free edges): kept as a surface, not a solid");
+  }
   return !out.instances.empty();
 }
 
@@ -1879,6 +2241,11 @@ bool CADKernel::SaveSTEPModel(const std::string& filename,
   try {
     if (!writer.Transfer(doc, STEPControl_AsIs))
       return fail("the STEP translator refused the model");
+    // Our own files name us, so a round trip says why `auto` left it alone
+    // (interchange::DecideUpAxis reads this back).
+    APIHeaderSection_MakeHeader header(writer.ChangeWriter().Model());
+    header.SetOriginatingSystem(
+        new TCollection_HAsciiString("Lob\xc3\xb6le " LOBOLE_VERSION));
     if (writer.Write(filename.c_str()) != IFSelect_RetDone)
       return fail("could not write " + filename);
   } catch (const Standard_Failure& e) {

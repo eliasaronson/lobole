@@ -928,6 +928,16 @@ AxisRef AxisRefFromJson(const json& j) {
 
 } // namespace
 
+json MigratedFeatureJson(json j, int version) {
+  // An Import before vNEXT had no up axis: it stood as the file was. The
+  // default is now `auto`, which would turn a saved SolidWorks part on
+  // reload — so an older one says `none`, and no saved part moves.
+  if (version < kVersionNEXT && j.is_object() &&
+      j.value("type", std::string{}) == "Import" && !j.contains("up_axis"))
+    j["up_axis"] = "none";
+  return j;
+}
+
 namespace DocumentIO {
 
 json ElementMapToJson(const ElementMap& map) {
@@ -1189,6 +1199,11 @@ json FeatureToJson(const Feature& feature) {
       j["units"] = units::ToString(import->lengthUnit);
     if (import->hasColor) // only when set: pre-I2 files stay byte-identical
       j["color"] = Vec3ToJson(import->color);
+    // vNEXT; absent = auto (a file older than vNEXT is migrated to none)
+    if (import->upAxis != interchange::UpAxis::Auto)
+      j["up_axis"] = interchange::ToString(import->upAxis);
+    if (import->turnDeg != 0.0) // vNEXT; absent = no turn
+      j["turn_deg"] = import->turnDeg;
   } else if (auto* tf = dynamic_cast<const TemplateFeature*>(&feature)) {
     // v161 (docs/modeling/templates.md). The definition rides in full, so
     // the chain hash covers what the instance expands and a part rebuilds
@@ -1936,16 +1951,20 @@ static constexpr FeatureTypeInfo kFeatureTypes[] = {
      "slanted to the metal on a bend or a leaning wall",
      "sketch_id:int>=0, body_id?:int>=0, regions?:any[]"},
     {"Import", 1,
-     "path (STEP/STL/BREP file); units?: the length unit an STL or BREP was "
-     "drawn in — mm (default), cm, m, in — since neither format carries one "
-     "(a metre mesh read as mm is 1000x too small); refused on STEP, which "
-     "declares its own; keep_origin?: the import is CENTRED on its "
-     "combined bounding box by default — pass true to keep the file's own "
-     "coordinates, which is what a neighbour part, a fixture in a shared "
-     "frame, or a re-import of your own export needs. The applied shift is "
-     "reported as `recentred_by`",
+     "path (STEP/IGES/STL/OBJ/BREP file); units?: the length unit an STL, "
+     "OBJ or BREP was drawn in — mm (default), cm, m, in — since none of "
+     "them carries one (a metre mesh read as mm is 1000x too small); refused "
+     "on STEP and IGES, which declare their own; keep_origin?: the import is "
+     "CENTRED on its combined bounding box by default — pass true to keep "
+     "the file's own coordinates, which is what a neighbour part, a fixture "
+     "in a shared frame, or a re-import of your own export needs. The "
+     "applied shift is reported as `recentred_by`. up_axis?: which axis OF "
+     "THE FILE is up — auto (default: from the header; a SolidWorks STEP is "
+     "+y), none, +x, -x, +y, -y, -z — and turn_deg?: a turn about world Z "
+     "after it; the reply's `up_axis` says what was applied and why",
      "path:string, units?:'mm'|'cm'|'m'|'in', keep_origin?:bool, "
-     "color?:any"},
+     "color?:any, up_axis?:'auto'|'none'|'+x'|'-x'|'+y'|'-y'|'-z', "
+     "turn_deg?:number"},
     {"Derived", 84,
      "source_part (a part slot id), configuration?: the source's "
      "configuration to copy, an id (or its name, which add_feature resolves) "
@@ -2270,7 +2289,8 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             {"RetainingRing", {"standard", "size"}},
             {"RetainingRingGroove",
              {"face", "from", "offset", "offset_expr", "standard"}},
-            {"Import", {"path", "keep_origin", "units", "color"}},
+            {"Import",
+             {"path", "keep_origin", "units", "color", "up_axis", "turn_deg"}},
             {"Template",
              {"template", "revision", "on", "parameters", "ids", "definition"}},
             {"Derived",
@@ -2769,6 +2789,20 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     if (j.contains("color")) {
       imp->hasColor = true;
       imp->color = Vec3FromJson(j.at("color"));
+    }
+    if (j.contains("up_axis")) { // vNEXT; refused, never read as auto
+      const json& u = j.at("up_axis");
+      if (!u.is_string() ||
+          !interchange::UpAxisFromString(u.get<std::string>(), imp->upAxis))
+        throw std::runtime_error(
+            "Import: unknown up_axis " + u.dump() +
+            ". Accepted: " + interchange::AcceptedUpAxes());
+    }
+    if (j.contains("turn_deg")) { // vNEXT
+      if (!j.at("turn_deg").is_number() ||
+          !std::isfinite(j.at("turn_deg").get<double>()))
+        throw std::runtime_error("Import: turn_deg is a number of degrees");
+      imp->turnDeg = j.at("turn_deg").get<double>();
     }
     out = std::move(imp);
   } else if (type == "Template") {

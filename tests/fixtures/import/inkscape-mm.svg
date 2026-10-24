@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Shaped like Inkscape 1.x's output: mm with a viewBox, a namedview, a
+     layer group with a transform. Written by make_fixtures.py. -->
+<svg
+   width="100mm"
+   height="60mm"
+   viewBox="0 0 100 60"
+   version="1.1"
+   id="svg1"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns:xlink="http://www.w3.org/1999/xlink"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview id="namedview1" pagecolor="#ffffff"
+     inkscape:document-units="mm" />
+  <defs id="defs1">
+    <symbol id="hole">
+      <circle cx="0" cy="0" r="2" />
+    </symbol>
+  </defs>
+  <title id="title1">plate</title>
+  <g inkscape:label="Layer 1" inkscape:groupmode="layer" id="layer1"
+     transform="translate(5,5)">
+    <rect id="outline" x="0" y="0" width="90" height="50" rx="5"
+       style="fill:none;stroke:#000000;stroke-width:0.26" />
+    <path id="curves" style="fill:none;stroke:#000000;stroke-width:0.26"
+       d="M 10,40 C 15,30 25,30 30,40 S 45,50 50,40 Q 55,30 60,40 T 70,40 A 5,5 0 0 1 80,40 L 80,45 H 10 Z" />
+    <circle id="bore" cx="20" cy="15" r="6" />
+    <ellipse id="slot" cx="45" cy="15" rx="8" ry="4" />
+    <circle id="skewed" cx="0" cy="0" r="3"
+       transform="translate(70,15) skewX(20)" />
+    <polygon id="tri" points="10,25 16,25 13,20" />
+    <use xlink:href="#hole" x="85" y="45" id="use1" />
+    <text id="label" x="40" y="48">PLATE</text>
+    <image id="photo" x="0" y="0" width="10" height="10" xlink:href="data:," />
+    <path id="ghost" d="M 0,0 L 5,5" style="display:none" />
+  </g>
+</svg>

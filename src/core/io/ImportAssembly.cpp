@@ -8,6 +8,7 @@
 #include <glm/gtc/matrix_transform.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include <cctype>
 #include <filesystem>
 #include <set>
 
@@ -28,22 +29,40 @@ std::string SanitizeStem(const std::string& name) {
 
 } // namespace
 
+bool LoadStructured(const std::string& path, CADKernel::ImportedModel& out,
+                    CADKernel::ImportProgress* progress) {
+  std::string ext = std::filesystem::path(path).extension().string();
+  for (char& c : ext)
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  if (ext == ".igs" || ext == ".iges")
+    return CADKernel::Instance().LoadIGESStructured(path, out, progress);
+  if (ext == ".step" || ext == ".stp")
+    return CADKernel::Instance().LoadSTEPStructured(path, out, progress);
+  return false;
+}
+
 AssemblyImportPlan BuildAssemblyImportPlan(const std::string& stepPath,
-                                           const std::string& destDir) {
+                                           const std::string& destDir,
+                                           UpAxis up, double turnDeg) {
   CADKernel::ImportedModel model;
-  if (!CADKernel::Instance().LoadSTEPStructured(stepPath, model)) {
+  if (!LoadStructured(stepPath, model)) {
     AssemblyImportPlan plan;
-    plan.error = "could not read '" + stepPath + "' as STEP";
+    plan.error = "could not read '" + stepPath + "' as STEP or IGES";
     return plan;
   }
-  return BuildAssemblyImportPlan(model, stepPath, destDir);
+  return BuildAssemblyImportPlan(model, stepPath, destDir, nullptr, up,
+                                 turnDeg);
 }
 
 AssemblyImportPlan
 BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
                         const std::string& stepPath, const std::string& destDir,
-                        const ExtractionProgress& onProduct) {
+                        const ExtractionProgress& onProduct, UpAxis up,
+                        double turnDeg) {
   AssemblyImportPlan plan;
+  plan.up = DecideUpAxis(up, model.origin, turnDeg);
+  const glm::dmat4 R = UpAxisRotation(plan.up.applied, turnDeg);
+  const bool turned = R != glm::dmat4(1.0);
 
   if (model.instances.empty()) {
     plan.error = "no importable shapes in '" + stepPath + "'";
@@ -90,7 +109,10 @@ BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
       return plan;
     }
     productUsable[i] = true;
-    plan.parts.push_back({name, brep, product.hasColor, product.color});
+    // The part tab turns itself (the .brep is in the file's axes) and keeps
+    // the .brep's origin when it does, so the placement below is exact.
+    plan.parts.push_back({name, brep, product.hasColor, product.color,
+                          plan.up.applied, turnDeg, turned});
     if (onProduct && !onProduct(i + 1, model.products.size())) {
       plan.error = "import cancelled";
       return plan;
@@ -111,9 +133,13 @@ BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
     if (inst.product >= partOf.size() || partOf[inst.product] == SIZE_MAX)
       continue;
     // Part geometry is centered, so the placement composes the instance
-    // transform with the centering offset: world = M * T(center).
+    // transform with the centering offset: world = M * T(center). The part
+    // tab holds R * (centred geometry), and the whole file is turned by R,
+    // so the occurrence is R * M * T(center) * R^-1.
     const glm::dmat4 placed =
-        inst.transform * glm::translate(glm::dmat4(1.0), centers[inst.product]);
+        R * inst.transform *
+        glm::translate(glm::dmat4(1.0), centers[inst.product]) *
+        glm::inverse(R);
     PlannedOccurrence occ;
     occ.part = partOf[inst.product];
     occ.name = !inst.name.empty() ? inst.name : plan.parts[occ.part].name;

@@ -306,7 +306,8 @@ Not driven by a click: **Import** (File > Import, Ctrl+I), because its first
 step is the desktop's file dialog — an xdg portal process outside ImGui and
 outside the test engine, which also means a stray click on a file-dialog
 button during a test opens a real picker on the developer's desktop. The
-importer itself is covered headlessly. Also the sketch toolbar's reference
+`import/*` tests call the action behind it (`ui::StartImport`) with a
+fixture and click everything after; the readers are covered headlessly. Also the sketch toolbar's reference
 image button and its display toggles (`###tb_sk_image`, `###tb_sk_autocon`,
 `###tb_sk_glyphs`).
 

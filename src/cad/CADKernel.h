@@ -15,6 +15,8 @@
 #include <gp_Vec.hxx>
 #include <memory>
 #include <optional>
+#include <string>
+#include <utility>
 #include <vector>
 
 // Turn OCC's SIGSEGV and friends into catchable Standard_Failure exceptions,
@@ -411,9 +413,22 @@ public:
     glm::dmat4 transform{1.0}; // composed placement (world of the file)
     std::string name;          // instance label name ("" when unnamed)
   };
+  // What a file says about who wrote it, for deciding which axis is up
+  // (interchange::DecideUpAxis, docs/interchange/README.md#up-axis). Each
+  // field is labelled as a person would find it in the file: {"FILE_NAME
+  // originating_system", "SolidWorks 2024"}. A format without a header (STL,
+  // BREP, OBJ) leaves `fields` empty.
+  struct FileHeader {
+    std::string format; // "STEP", "IGES", "STL", "BREP", "OBJ"
+    std::vector<std::pair<std::string, std::string>> fields;
+  };
   struct ImportedModel {
     std::vector<ImportedShape> products; // deduped unique geometry
     std::vector<ImportedInstance> instances;
+    FileHeader origin;
+    // What the reader did that the caller should say: faces sewn into a
+    // solid, a shell left open. One sentence each.
+    std::vector<std::string> notes;
   };
   // How a long STEP read reports itself and how it is stopped. Both hooks are
   // called ON THE READING THREAD, so an implementation that a UI thread also
@@ -438,6 +453,19 @@ public:
   // read returns false with `out` empty, exactly like a failed one.
   bool LoadSTEPStructured(const std::string& filename, ImportedModel& out,
                           ImportProgress* progress = nullptr);
+  // IGES through XCAF (IGESCAFControl_Reader): names, colours and layers come
+  // through as for STEP, and the header's native system ID and preprocessor
+  // version land on `origin`. IGES is often trimmed surfaces rather than
+  // solids (entity 144): each product's faces are sewn at the resolution the
+  // file's global section declares, a closed shell becomes a solid and an
+  // open one stays a shell, and `notes` says which.
+  bool LoadIGESStructured(const std::string& filename, ImportedModel& out,
+                          ImportProgress* progress = nullptr);
+  // Wavefront OBJ through XCAF (RWObj_CafReader): each object is a product
+  // named as the file names it, coloured by its `usemtl` material, and its
+  // triangles become planar faces sewn and promoted to a solid as in LoadSTL.
+  // Read as millimetres; the caller scales by the unit it was drawn in.
+  bool LoadOBJStructured(const std::string& filename, ImportedModel& out);
   // STEP export as another CAD system wants it
   // (docs/interchange/README.md#exporting-step): named, coloured products,
   // placed by reference, nested the way the assembly is. A part occurring

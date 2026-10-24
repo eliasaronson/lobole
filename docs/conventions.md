@@ -37,7 +37,10 @@ app exchanges files with.
   rotation.
 - At the file boundaries: glTF/GLB export converts to glTF's Y-up and metres
   (`RWMesh_CoordinateSystemConverter` in `cad/MeshExport.cpp`); STEP, STL,
-  BREP, OBJ and PLY are written in world coordinates.
+  BREP, OBJ and PLY are written in world coordinates. An import is turned
+  into the world by its `up_axis`, read from the file's header when `auto`
+  (a SolidWorks STEP or IGES is Y up;
+  [interchange](interchange/README.md#up-axis)).
 
 **Gate: `tests/test_world_up.cpp`.** It calls the real consumers and checks
 them against the constants: the basis is orthonormal and right-handed, the

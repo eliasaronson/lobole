@@ -325,6 +325,7 @@ into the history above, numbered, when the branch lands
 
 | v | Change |
 |---|--------|
+| vNEXT | An Import's `up_axis` (which axis OF THE FILE is up: `auto`, `none`, `+x`, `-x`, `+y`, `-y`, `-z`; absent = `auto`) and `turn_deg` (a turn about world Z after it; absent = 0) ([up axis](../interchange/README.md#up-axis)). An unknown `up_axis` is refused on load. An Import saved before vNEXT loads as `none`, so no saved part moves. Golden `vNEXT-import-up-axis` |
 
 ## Paths in a project
 

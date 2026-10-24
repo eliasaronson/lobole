@@ -31,6 +31,7 @@ in the file; the UI and expressions show degrees.
 | key bindings | `src/core/io/Keymap.cpp` (`kDefaults`), `src/ui/Commands.cpp` |
 | RPCs | `src/remote/RemoteModeling.cpp` |
 | reference-image import/actions, renderer | `src/ui/ImportActions.{h,cpp}`, `src/render/UnderlayRenderer.{h,cpp}`, `src/shaders/underlay.{vert,frag}` |
+| DXF and SVG into a sketch: the readers, the shared affine/snap layer, the action | `src/core/io/ImportDxf.{h,cpp}`, `src/core/io/ImportSvg.{h,cpp}`, `src/core/io/SketchImport.{h,cpp}`, `ui::ImportSketch` in `src/ui/ImportActions.cpp` |
 
 ## Data model
 
@@ -500,6 +501,106 @@ affine: pixel `(px, py)` maps to `origin + R(rotation)·(px, py)·unitsPerPixel`
   by one and adjusted by the other landed half an image away from where it
   was put.
 
+## Importing DXF and SVG
+
+A DXF or an SVG becomes ordinary, editable sketch entities: **baked**, not a
+linked file, so there is no format change and nothing reads the file again.
+`ui::ImportSketch` (`src/ui/ImportActions.cpp`) serves the `import_sketch`
+RPC and File > Import alike.
+
+**The shared layer** (`src/core/io/SketchImport.{h,cpp}`): a reader hands
+back entities in millimetres in the drawing's own frame (Y up), what it left
+out by kind and count, and where its unit came from. Every transform goes
+through one 2D affine that keeps a conic exact (`ConicEntity`): an affine
+image of a circle is an Ellipse, of an arc an EllipseArc, and a mirror
+reverses an arc into the CCW-always model. Endpoints within the profile
+builder's `kChainTol` (1e-4 mm) are snapped onto one point, lines and spline
+ends onto arc ends (an arc's end is where its geometry puts it).
+
+**DXF** (`src/core/io/ImportDxf.{h,cpp}`) is our own reader with no
+dependency: ASCII code/value line pairs, R12 to R2018, CRLF or LF, numbers
+by `std::from_chars` (never the locale). A binary DXF is refused.
+
+| DXF entity | sketch |
+|---|---|
+| LINE | Line |
+| CIRCLE | Circle |
+| ARC | Arc (degrees CCW → radians) |
+| LWPOLYLINE, 2D POLYLINE/VERTEX | Lines, and an Arc per non-zero bulge (sweep 4·atan(bulge), negative = clockwise, stored reversed); flag 70 bit 1 closes it |
+| ELLIPSE | Ellipse when the parameters span a full turn, else EllipseArc; rMinor = ratio·\|major axis\| |
+| SPLINE, non-rational | BSpline: as is when the knots are clamped-uniform (and ≤ 255 poles), else one Bézier piece per knot span by knot insertion, each exact |
+| POINT | Point |
+| INSERT | its BLOCK expanded with position, rotation and scale (a negative scale mirrors), nested up to 16 deep; a block's layer-0 entities take the INSERT's layer |
+
+**Refused whole, naming the kind and handle** (a plate missing one curve
+cuts wrong), importing nothing: a rational spline (weights that differ; equal
+weights are the non-rational curve), a spline given only by fit points, a
+polyline with width, an INSERT scaled unevenly over a curve (a line or spline
+under one is exact and allowed), an MINSERT array, an extrusion other than
+±Z (−Z, the mirrored OCS, is mapped: OCS x is −X), mixed Z elevations, 3D
+polylines and polygon meshes, and any type in neither list (3DFACE, MESH,
+REGION, ...). **Left out, listed by kind and count** (annotation, no
+outline): TEXT, MTEXT, DIMENSION, LEADER, MLEADER, HATCH, SOLID, IMAGE,
+VIEWPORT, and ATTDEF/ATTRIB (a block's attribute text).
+
+**DXF units.** `$INSUNITS` 1 (in), 4 (mm), 5 (cm), 6 (m) are read; any other
+code is refused naming the four. A `units` contradicting a declared unit is
+refused. With none declared, `units` applies (mm, cm, m, in), mm by default,
+and the reply says it came from the default. **Layers:** `layers` keeps only
+those, `construction_layers` brings those in as construction (a flat
+pattern's `BEND_UP`/`BEND_DOWN`); a name the file does not have is refused,
+listing its layers.
+
+**SVG** (`src/core/io/ImportSvg.{h,cpp}`) parses with OpenCASCADE's
+`LDOMParser` (TKCDF), so nothing is vendored. It walks `svg`, `g`, `a`,
+`switch`, `use`/`symbol`, `path`, `line`, `polyline`, `polygon`, `rect`
+(rounded corners as quarter ellipses), `circle` and `ellipse`, composing
+every `transform` (matrix, translate, scale, rotate, skewX, skewY) with a
+final Y flip, so a skewed circle is an Ellipse.
+
+| path command | sketch |
+|---|---|
+| M m, L l, H h, V v, Z z | Lines (Z closes to the subpath start) |
+| C c, S s | cubic BSpline, 4 poles (S reflects the previous control) |
+| Q q, T t | quadratic BSpline, 3 poles |
+| A a | an Arc when the transformed radii are equal and unskewed, else an EllipseArc; endpoint-to-centre and the radius scale-up as SVG 1.1 F.6.5–F.6.6 define them; a zero radius is a Line |
+
+Elements that draw nothing are passed over: `defs`, `title`, `desc`,
+`metadata`, `style`, gradients, patterns, markers, filters, the `clipPath`
+and `mask` definitions, and any other namespace's element (an editor's
+`sodipodi:namedview`). **Left out, listed:** `text`, `image` (the reply
+notes `add_reference_image`), hidden elements (`display:none`,
+`visibility:hidden`). **Refused, naming the element and its id:** an element
+with a `clip-path` or `mask` (the cut would not be the picture), a `use` of
+a `symbol` with a viewBox, a length with a unit inside the drawing, and any
+other element. A stroke imports as its centreline; stroked shapes are
+counted in a note, since a logo of thick strokes needs "stroke to path" in
+its own program first.
+
+**SVG units.** A root `width`/`height` in mm, cm, in, pt or pc with a
+`viewBox` fixes the scale (`preserveAspectRatio` xMidYMid meet by default),
+and `units` is refused. Otherwise user units are CSS px (1/96 in), times the
+viewBox's scaling to a unitless or px root size, unless `units` (mm, cm, m,
+in, px, pt) says what they are; the reply states the unit and its source.
+
+**The call.** `import_sketch {path, sketch_id? | plane?, units?, layers?,
+construction_layers?, keep_origin?}` (NeedsPart, NotInBatch). Without
+`sketch_id` it makes a Sketch on `plane` (a primitive's `on`: `"Top"`,
+`"Front"`, `"Right"`, `{feature_id, element}` a flat face or
+`{feature_id}` a datum plane; Top when absent), named after the file. The
+drawing is centred on the sketch origin unless `keep_origin`. The file is
+parsed and every parameter checked before anything is created, and the
+change is one undo step. The reply: `{sketch_id, entity_ids, imported (by
+entity type), not_imported (by the file's kind), units {unit, source},
+recentred_by?, open_ends, notes?, regen, digest}`. `open_ends` (sketch UV,
+mm) are endpoints that join nothing: why an outline will not extrude.
+
+**In the GUI**, File > Import takes `.dxf` and `.svg`: into the sketch being
+edited, else a new one on the preselected face or datum plane, else Top. A
+pill (the sketch's message line while editing) says what came in, its unit
+and where that came from, what was left out, and the open ends; a refusal
+says why and changes nothing.
+
 ## Operations on the entity list
 
 All are `SketchFeature` methods; UI and RPC commits wrap them in one
@@ -801,6 +902,7 @@ In `src/remote/RemoteModeling.cpp` (`describe` lists `sketch_entity_types`,
 | `set_reference_image` | `sketch_id, image_id, opacity?, hidden?, show_always?, at? \| origin?, units_per_pixel?, rotation \| rotation_deg` | returns `at`, `origin`; a turn keeps the centre |
 | `calibrate_reference_image` | `sketch_id, image_id, p1, p2, distance, align?` | `distance` in sketch mm |
 | `delete_reference_image` | `sketch_id, image_id` | |
+| `import_sketch` | `path, sketch_id? \| plane?, units?, layers?, construction_layers?, keep_origin?` | a DXF or SVG as baked entities ([Importing DXF and SVG](#importing-dxf-and-svg)); returns `sketch_id`, `entity_ids`, `imported`, `not_imported`, `units`, `open_ends` |
 
 In entity JSON an arc's angles are `start_angle`/`end_angle` (radians) or the
 `_deg` pair; `ellipse` takes `rotation` or `rotation_deg`; an `ellipse_arc`'s
@@ -815,6 +917,16 @@ link; `modify_feature` with an edited sketch JSON covers them.
 
 ## Tests
 
+- `tests/test_sketch_import.cpp` `[import]` — the conic image (similarity,
+  mirror, skew) exact; each DXF mapping row's entity and geometry (a bulge
+  arc's radius and side; a non-uniform spline's Bézier pieces equal to it at
+  sampled parameters within 1e-9, an unclamped one too); the ezdxf plate
+  (inches, nested rotated INSERT, layers, construction, CRLF); units from
+  `$INSUNITS`, the caller, the default, and the refusals; every refused DXF
+  and SVG naming its handle or element; the mirrored OCS; our own
+  flat-pattern DXF extruding to the blank's area; the Inkscape- and
+  Illustrator-shaped SVGs; snapping and open ends. The fixtures are
+  `tests/fixtures/import/` ([interchange](../interchange/README.md#tests)).
 - `tests/test_sketch_solver.cpp` `[solver]` `[arc]` `[drag]` `[delete]`
   `[flip]` — constraint kinds, arcs, datum references, drag sessions,
   conflict mapping, delete-time coincidence repair; value edits that one

@@ -375,11 +375,16 @@ typed `contract`: every field, its type and its enum values.
 - Refold (fold an Unfold's bends back up): {{"type": "Refold", "name": str,
   "unfold_id": <the Unfold's id>}} — through-cuts made in between are
   wrapped onto the bend; a partial-depth cut across a crease is refused.
-- Import (STEP, STL, BREP): {{"type": "Import", "name": str, "path": str,
-  "units"?: "mm"|"cm"|"m"|"in" (what an STL or BREP was drawn in; refused
-  on STEP, which declares its own), "keep_origin"?: bool (default false:
-  the import is centred on its bounding box; true keeps the file's
-  coordinates)}}
+- Import (STEP, IGES, STL, OBJ, BREP): {{"type": "Import", "name": str,
+  "path": str, "units"?: "mm"|"cm"|"m"|"in" (what an STL, OBJ or BREP was
+  drawn in; refused on STEP and IGES, which declare their own),
+  "keep_origin"?: bool (default false: the import is centred on its
+  bounding box; true keeps the file's coordinates), "up_axis"?:
+  "auto"|"none"|"+x"|"-x"|"+y"|"-y"|"-z" (which axis OF THE FILE is up;
+  default auto reads the header: a SolidWorks file is +y), "turn_deg"?:
+  number (about world Z, after the axis)}} — the reply's `up_axis` says
+  what was applied and why. A DXF or SVG goes into a sketch with
+  rpc('import_sketch', ...).
 - Derived (a copy of another part's bodies, to draw on): {{"type":
   "Derived", "name": str, "source_part": <part slot id from
   list_parts>, "configuration"?: <the source's configuration, id or
@@ -1664,13 +1669,18 @@ _reference("export_bom", "Write the active assembly's bill of materials to a "
           "column after `part`).")
 
 
-_reference("import_step", "Import a STEP, STL or BREP file's bodies as an "
-          "Import feature. `units` is the length unit an STL/BREP was drawn "
-          "in (mm default, cm, m, in) — those formats carry none; a STEP "
-          "declares its own and refuses it. keep_origin=True keeps the "
-          "file's OWN coordinates: without it the import is centred on its "
-          "bounding box, so a bought part loses the placement it was "
-          "exported at and every one of them lands on the origin.")
+_reference("import_step", "Import a STEP, IGES, STL, OBJ or BREP file's "
+          "bodies as an Import feature (any other extension is refused; a "
+          "DXF or SVG goes into a sketch with import_sketch). `units` is the "
+          "length unit an STL/OBJ/BREP was drawn in (mm default, cm, m, in) "
+          "— those formats carry none; a STEP or IGES declares its own and "
+          "refuses it. keep_origin=True keeps the file's OWN coordinates: "
+          "without it the import is centred on its bounding box, so a bought "
+          "part loses the placement it was exported at and every one of them "
+          "lands on the origin. up_axis (default auto: read from the file's "
+          "header, a SolidWorks file is +y) says which axis of the FILE is "
+          "up, and turn_deg turns it about world Z after; the reply's "
+          "`up_axis` says what was applied and why.")
 
 
 _reference("checkpoint_create", "Save the WHOLE project and name this state a "

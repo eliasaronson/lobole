@@ -1251,8 +1251,10 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
     // results are stamped, since they must carry the settled version.
     auto bulk = std::make_optional<Document::BulkEdit>(*doc);
     for (const auto& [id, rel] : featureFiles)
-      doc->AddFeature(ReadItem(
-          dir, id, rel, [](const json& j) { return FeatureFromJson(j); }));
+      doc->AddFeature(ReadItem(dir, id, rel, [&](const json& j) {
+        return FeatureFromJson(
+            MigratedFeatureJson(j, index.value("version", 0)));
+      }));
     readctx::InFile("index.json", [&] {
       RequireFeaturesKnownAt(*doc, index.value("version", 0));
     });
@@ -1890,8 +1892,10 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
             Document::BulkEdit bulk(*doc); // one regeneration, not one each
             const json features = InlineList(j, "features");
             for (size_t i = 0; i < features.size(); i++)
-              doc->AddFeature(AtItem(
-                  "features", i, [&] { return FeatureFromJson(features[i]); }));
+              doc->AddFeature(AtItem("features", i, [&] {
+                return FeatureFromJson(
+                    MigratedFeatureJson(features[i], j.value("version", 0)));
+              }));
             RequireFeaturesKnownAt(*doc, j.value("version", 0));
           }
           RequireReferencedAssets(*doc, "`assets`");

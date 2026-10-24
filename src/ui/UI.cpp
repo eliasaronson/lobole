@@ -121,6 +121,17 @@ void DrawModelToolPrompt(AppState& state) {
                    state.exportNoteFailed ? PromptPill::Warning
                                           : PromptPill::StatusGood);
 
+  // What an import decided on its own (a part stood up, a DXF's unit), for
+  // a few seconds from the first frame that shows it.
+  if (!state.importNote.empty()) {
+    if (state.importNoteUntil < 0.0)
+      state.importNoteUntil = ImGui::GetTime() + 8.0;
+    if (ImGui::GetTime() < state.importNoteUntil)
+      DrawPromptPill(state, y, state.importNote,
+                     state.importNoteWarn ? PromptPill::Warning
+                                          : PromptPill::Status);
+  }
+
   const char* prompt = ArmedPrompt(state);
   // Plane/face picking has no armed CONTEXT (it is not a pick slot), so it
   // never had a pill — name the step, especially for the Hole tool whose

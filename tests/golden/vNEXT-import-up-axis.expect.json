@@ -1,0 +1,9 @@
+{
+  "features": 2,
+  "bodies": 1,
+  "volumes": [
+    1000.0
+  ],
+  "import_up_axis": "+y",
+  "import_turn_deg": 30.0
+}

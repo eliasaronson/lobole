@@ -71,11 +71,11 @@ void Run(ImportJob* job, BackgroundJob* bg) {
   try {
     JobProgress progress(job, bg);
     CADKernel::ImportedModel model;
-    if (!CADKernel::Instance().LoadSTEPStructured(job->stepPath, model,
-                                                  &progress)) {
-      job->error = bg->cancel.load()
-                       ? "" // cancelled: not an error, and reported as none
-                       : "could not read '" + job->stepPath + "' as STEP";
+    if (!interchange::LoadStructured(job->stepPath, model, &progress)) {
+      job->error =
+          bg->cancel.load()
+              ? "" // cancelled: not an error, and reported as none
+              : "could not read '" + job->stepPath + "' as STEP or IGES";
       return;
     }
 
@@ -188,6 +188,16 @@ bool Finish(AppState& state, const std::shared_ptr<ImportJob>& jobPtr) {
 
   MaterializeImportedAssembly(state, job->plan, job->assemblyName,
                               job->partIds);
+  if (job->plan.up.requested == interchange::UpAxis::Auto &&
+      job->plan.up.applied != interchange::UpAxis::None) {
+    state.importNote =
+        "Stood up (" +
+        std::string(interchange::ToString(job->plan.up.applied)) +
+        " was up in the file): " + job->plan.up.because +
+        ". Re-import with another up axis to change it.";
+    state.importNoteWarn = false;
+    state.importNoteUntil = -1.0;
+  }
   LOG_INFO("Imported '{}' as assembly: {} parts, {} occurrences", job->stepPath,
            job->plan.parts.size(), job->plan.occurrences.size());
   state.importError.clear();
@@ -211,12 +221,15 @@ bool StartImport(AppState& state, const std::string& path, std::string* error) {
   if (ImportRunning(state))
     return fail("an import is already running");
 
-  // Only STEP is slow enough to be worth a thread: a .brep or .stl of any
-  // realistic size reads in milliseconds, and routing them through the job
-  // would put a progress modal in front of an instant operation.
+  // Only STEP and IGES are slow enough to be worth a thread: a .brep, .stl
+  // or .obj of any realistic size reads in milliseconds, and routing them
+  // through the job would put a progress modal in front of an instant
+  // operation. A DXF or SVG goes into a sketch, not a feature.
   std::string ext = std::filesystem::path(path).extension().string();
   std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-  if (ext != ".step" && ext != ".stp")
+  if (IsSketchImportFile(path))
+    return ImportSketchFile(state, path, error);
+  if (ext != ".step" && ext != ".stp" && ext != ".igs" && ext != ".iges")
     return ImportAsFeature(state, path, error);
 
   const std::string stepPath = path;

@@ -27,8 +27,8 @@ Version 0.1: so expect some rough edges. Issues are welcome.
 - **Scripting and agents:** JSON-RPC, a Python SDK and an MCP server reach
   every command the GUI has; a terminal panel runs an agent inside the
   window.
-- **Interchange:** STEP, STL and BREP in; those plus glTF, OBJ, PLY, DXF,
-  SVG and PDF out.
+- **Interchange:** STEP, IGES, STL, OBJ and BREP in, and DXF and SVG into a
+  sketch; STEP, STL, BREP, glTF, OBJ, PLY, DXF, SVG and PDF out.
 
 > [!WARNING]
 > **CAM has cut real parts on one machine only**: a 6090 CNC router on

@@ -1694,6 +1694,94 @@ def main():
         except RuntimeError:
             pass
 
+        phase("Import formats")
+        # Every fixture of tests/fixtures/import/ through the RPC, the reply
+        # read for what it says (docs/interchange/README.md#up-axis,
+        # docs/sketching/README.md#importing-dxf-and-svg).
+        fx = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                          "fixtures", "import")
+        for name, applied, because in [
+                ("box-solidworks.step", "+y", "SolidWorks writes Y up"),
+                ("box-autodesk.step", "none", "not a writer known"),
+                ("box-lobole.step", "none", "writes Z up"),
+                ("box-solid.igs", "none", "not a writer known"),
+                ("box-surfaces.igs", "none", "not a writer known"),
+                ("box-solidworks.igs", "+y", "SolidWorks writes Y up"),
+                ("two-cubes.obj", "none", "usually Y up")]:
+            d.call("new_project")
+            rep = d.call("import_step", path=os.path.join(fx, name))
+            up = rep.get("up_axis", {})
+            expect(up.get("applied") == applied and
+                   because in up.get("because", ""),
+                   f"{name}: up_axis {up}")
+            expect(rep["regen"]["ok"] and rep["bodies"] >= 1,
+                   f"{name} imports: {rep}")
+            bodies = d.call("get_state")["bodies"]
+            heights = [b["bbox_max"][2] - b["bbox_min"][2] for b in bodies]
+            if name.startswith("box-"):
+                want = 30.0 if applied == "+y" else 20.0
+                expect(abs(heights[0] - want) < 1e-6,
+                       f"{name} stands {heights[0]} tall, want {want}")
+        d.call("new_project")
+        rep = d.call("import_step", path=os.path.join(fx, "box-solidworks.step"),
+                     up_axis="none", turn_deg=90)
+        expect(rep["up_axis"]["requested"] == "none" and
+               rep["up_axis"]["turn_deg"] == 90, rep["up_axis"])
+        rep = d.call("add_feature", feature={
+            "type": "Import", "name": "Again",
+            "path": os.path.join(fx, "box-solidworks.step"), "up_axis": "-z"})
+        expect(rep["up_axis"]["applied"] == "-z", rep)
+        expect_error(d, "add_feature", "must be one of", feature={
+            "type": "Import", "name": "Bad",
+            "path": os.path.join(fx, "box-solidworks.step"),
+            "up_axis": "sideways"})
+        rep = d.call("import_step", path=os.path.join(fx, "box-solidworks.step"),
+                     as_assembly=True)
+        expect(rep["up_axis"]["applied"] == "+y", rep)
+        for name, kinds in [
+                ("plate-ezdxf.dxf", {"arc": 1, "circle": 3, "ellipse": 1,
+                                     "line": 3, "spline": 3}),
+                ("flat-pattern.dxf", {"circle": 1, "line": 9}),
+                ("mirrored-ocs.dxf", {"arc": 1}),
+                ("unitless.dxf", {"line": 4}),
+                ("inkscape-mm.svg", {"arc": 5, "circle": 2, "ellipse": 2,
+                                     "line": 10, "spline": 4}),
+                ("illustrator-pt.svg", {"arc": 2, "line": 6, "spline": 4}),
+                ("px-default.svg", {"line": 4})]:
+            d.call("new_project")
+            rep = d.call("import_sketch", path=os.path.join(fx, name))
+            expect(rep["imported"] == kinds,
+                   f"{name} imported {rep['imported']}, want {kinds}")
+            expect(len(rep["entity_ids"]) == sum(kinds.values()), rep)
+            expect(rep["regen"]["ok"], f"{name}: {rep['regen']}")
+            expect(rep["units"]["unit"] and rep["units"]["source"], rep)
+        # The plate's outline and holes close; its engraving, alone on its
+        # layer, comes in as construction; text is counted, not drawn.
+        d.call("new_project")
+        rep = d.call("import_sketch", path=os.path.join(fx, "plate-ezdxf.dxf"),
+                     construction_layers=["ENGRAVE"])
+        expect(rep["open_ends"] == [] and
+               rep["not_imported"] == {"MTEXT": 1, "TEXT": 1}, rep)
+        expect(rep["units"] == {"unit": "in", "source": "$INSUNITS 1"}, rep)
+        ext = d.call("add_feature", feature={
+            "type": "Extrude", "name": "Plate", "sketch_id": rep["sketch_id"],
+            "distance": 3, "mode": "new_body"})
+        expect(ext["regen"]["ok"], ext)
+        vol = d.call("get_state")["bodies"][0]["volume_mm3"]
+        # 3 x 2 in plus a 1 in half-disc, less a hole, an ellipse, two bolts.
+        sq = 25.4 ** 2
+        area = (6.0 + math.pi / 2 - math.pi * 0.25 ** 2
+                - math.pi * 0.4 * 0.2 - 2 * math.pi * 0.1 ** 2) * sq
+        expect(abs(vol - 3 * area) / (3 * area) < 1e-6,
+               f"the plate extrudes to {vol}, want {3 * area}")
+        # Into an existing sketch, keeping the file's coordinates.
+        rep2 = d.call("import_sketch", path=os.path.join(fx, "unitless.dxf"),
+                      sketch_id=rep["sketch_id"], keep_origin=True)
+        expect(rep2["sketch_id"] == rep["sketch_id"] and
+               "recentred_by" not in rep2, rep2)
+        expect_error(d, "import_sketch", "Accepted: 1 (in), 4 (mm)",
+                     path=os.path.join(fx, "refuse-insunits.dxf"))
+
         phase("Checkpoints")
         # Checkpoints (F4): create, list, mutate, restore, and error paths
         d.call("new_project")  # fresh document: no project path yet

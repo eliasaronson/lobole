@@ -5,20 +5,23 @@ project format are in [../versioning/README.md](../versioning/README.md).
 
 | format | import | export |
 |---|---|---|
-| STEP (`.step`, `.stp`) | names, colours, product structure; a part or a whole assembly | named, coloured products placed per occurrence, nested sub-assemblies, millimetres |
+| STEP (`.step`, `.stp`) | names, colours, product structure; a part or a whole assembly; stood up by its [header](#up-axis) | named, coloured products placed per occurrence, nested sub-assemblies, millimetres, `Loböle` as the originating system |
+| IGES (`.igs`, `.iges`) | as STEP, and trimmed surfaces [sewn into solids](#iges) | — |
 | BREP (`.brep`) | exact | exact; one shape (a part's bodies fused, or one body) |
 | STL (`.stl`) | sewn triangles: a solid when closed, a shell when open | binary, re-meshed at a chord tolerance; one shape |
+| OBJ (`.obj`) | [each object a named, coloured body](#obj), sewn as an STL | visual meshes (below) |
 | glTF (`.glb`, `.gltf`), OBJ, PLY | — | visual meshes with PBR materials, part or assembly, instanced |
-| DXF | — | a sheet-metal flat pattern (see [../sheetmetal/README.md](../sheetmetal/README.md)) |
-| SVG, PDF | — | drawing sheets (see [../drawings/README.md](../drawings/README.md)) |
+| DXF | into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) | a sheet-metal flat pattern (see [../sheetmetal/README.md](../sheetmetal/README.md)) |
+| SVG | into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) | drawing sheets (see [../drawings/README.md](../drawings/README.md)) |
+| PDF | — | drawing sheets |
 
 Native SolidWorks files are not read: their feature tree is undocumented and
 their geometry is Parasolid. From SolidWorks, save as STEP AP242 and import
 that.
 
-All OpenCASCADE data exchange (the STEP readers and writers, the XCAF
-document) runs under one process-wide lock, `DataExchangeMutex()` in
-`src/cad/XcafDocument.h`.
+All OpenCASCADE data exchange (the STEP, IGES and OBJ readers, the STEP
+writer, the XCAF document) runs under one process-wide lock,
+`DataExchangeMutex()` in `src/cad/XcafDocument.h`.
 
 ## Importing into a part
 
@@ -31,21 +34,30 @@ the recipe, and each regeneration reads it.
   placed leaves. Each placed leaf becomes a body named after its product (not
   the writer's instance name, `Widget` rather than `Widget:1`), coloured by
   the product's STEP colour unless a material is assigned. Colour is display
-  only; it is not a simulation material.
+  only; it is not a simulation material. The label walk is one
+  `ModelFromXcaf` that IGES and OBJ share, and the reader also returns the
+  file's header (`ImportedModel::origin`) for the [up axis](#up-axis).
+- **IGES** and **OBJ**: see [IGES](#iges) and [OBJ](#obj).
 - **STL** becomes one planar face per triangle, sewn: a closed mesh arrives
   as a solid, an open one as a shell. Every triangle is a face, so organic
   meshes are heavy.
 - **BREP** is read as is.
+- **What is skipped is named.** A placed shape with no volume (a lone
+  surface) cannot be a body; the feature's warning names each one ("skipped
+  1 of 3: \"Lid\" (a surface, not a solid)"), and when nothing is left the
+  error does. It used to vanish without a word.
+- **The extension decides the reader**, case-blind; any other is refused,
+  naming `.step/.stp, .igs/.iges, .brep, .stl, .obj`.
 - **Placement.** By default the combined bounding box is centred on the
   origin, keeping the shapes' relative placement. `keep_origin` keeps the
   file's own coordinates, which is what an import whose coordinates mean
   something needs (a neighbour part, a fixture, a re-import of our own
   export). `add_feature` reports the shift it applied as `recentred_by`.
-- **Units.** STEP declares its own unit. STL and BREP carry none, so the
-  feature's `units` (`mm` default, `cm`, `m`, `in`) scales the shape once as
-  it is read; it is refused on a STEP and an unknown string is refused. An
-  STL or BREP that comes out under 1 mm across gets a warning naming the
-  fix.
+- **Units.** STEP and IGES declare their own unit (OpenCASCADE converts to
+  mm). STL, OBJ and BREP carry none, so the feature's `units` (`mm` default,
+  `cm`, `m`, `in`) scales the shape once as it is read; it is refused on a
+  STEP or IGES and an unknown string is refused. An STL, OBJ or BREP that
+  comes out under 1 mm across gets a warning naming the fix.
 - **At most 500 shapes** are imported from one file, with a log line when
   capped; the cap guards against pathological files only.
 - **Face names** carry the body ordinal (`<id>/b<N>/…`), because every body
@@ -60,9 +72,103 @@ the recipe, and each regeneration reads it.
   serialized and not sticky: later regenerations re-read the path, so editing
   the source file still updates the part.
 
+## Up axis
+
+Our world is Z-up ([conventions](../conventions.md#world-axes)); SolidWorks,
+among others, writes Y up, so its parts arrived lying on their backs. An
+`Import` carries `up_axis`, which axis OF THE FILE is up, and `turn_deg`, a
+turn about world Z after it (`src/core/io/ImportUpAxis.{h,cpp}`):
+
+| `up_axis` | turn applied |
+|---|---|
+| `auto` (default) | decided from the file's header, below |
+| `none` | the file as it is |
+| `+y` | +90° about X (SolidWorks' front, +Z, lands on our front, −Y) |
+| `-y` | −90° about X |
+| `+x` | −90° about Y |
+| `-x` | +90° about Y |
+| `-z` | 180° about X |
+
+Any other string is refused, naming the seven (`UpAxisFromString`).
+
+**`auto` says how it knows.** `interchange::DecideUpAxis` reads the header
+the reader returned: STEP's `FILE_NAME` originating_system and
+preprocessor_version and its `FILE_DESCRIPTION`, IGES's global-section
+native system ID and preprocessor version. SolidWorks named in any of them
+(case-blind) is `+y`; Loböle is `none`; any other writer is `none`, *because
+it is not one known to write Y up*. A row of that table is added only with a
+real file's header in its test (`tests/fixtures/import/make_fixtures.py`
+copies them). STL, BREP and OBJ have no header: `auto` is `none`, and says
+so (for an OBJ, that one is usually Y up). Our own STEP export writes
+`Loböle <version>` as its originating system, so a round trip says why it
+stayed `none`.
+
+**Applied as a placement.** `Execute` turns every placed shape about the
+FILE origin before the centring, so `keep_origin` keeps the file's
+coordinates, turned. The turn changes no topology: face names are the same,
+and a sketch on an imported face follows an axis change. What was decided is
+derived state beside the shift (`ImportFeature::UpApplied()`).
+
+**The reply says what was applied.** `import_step` and `add_feature` of an
+Import return `up_axis: {requested, applied, turn_deg, because, system}`,
+e.g. `because: "FILE_NAME originating_system 'SolidWorks 2024': SolidWorks
+writes Y up"`.
+
+**In the GUI** the Import's feature editor shows the axis, the turn and the
+reason under them; a change is one undoable modify, like the units. An
+import that `auto` turned says so in a viewport pill (`AppState::importNote`).
+
+**Saved files.** `up_axis` and `turn_deg` are written when they are not the
+defaults (vNEXT, [format](../versioning/format.md#pending-changes)). An
+Import saved before them loads as `none` (`MigratedFeatureJson`), so no
+saved part moves.
+
+## IGES
+
+`CADKernel::LoadIGESStructured` reads through `IGESCAFControl_Reader` (name,
+colour and layer modes) into the same `ModelFromXcaf` walk as STEP, so
+names, colours and instances come through alike. IGES colours each surface
+rather than the part; a product whose coloured faces all agree takes that
+colour.
+
+**Surfaces become bodies, or are counted.** IGES is often trimmed surfaces
+(entity 144). Each product with faces and no solid is sewn at the
+resolution the file's global section declares (field 19, converted to mm);
+when that leaves it open it is sewn again at 1/10000 of the product's box
+diagonal, since real files' gaps are wider than the resolution they claim. A
+closed shell becomes a solid, as in `LoadSTL`; an open one stays a shell.
+The feature's warning says when the tolerance was widened or a shell stayed
+open, with how many free edges; a product that sewed shut at the file's own
+resolution says nothing. OpenCASCADE's translator names an unnamed entity by
+its shape type ("COMPOUND"); that is not taken as a name.
+
+Units come from the global section, so `units` is refused on IGES. The up
+axis reads the global section as above. `.igs`/`.iges` go through
+`import_step`, the Import feature, File > Import and the in-app browser, and
+a GUI import runs on the background `ImportJob` like STEP (a file of several
+placed instances becomes an assembly).
+
+**Linking.** OCCT 7.8+ has the IGES reader in `TKDEIGES`; 7.6/7.7 (stock
+Ubuntu's `libocct-data-exchange-dev`) in `TKIGES` and `TKXDEIGES`. The
+`CMakeLists.txt` branch that picks `TKDESTEP` picks the matching pair.
+
+## OBJ
+
+`CADKernel::LoadOBJStructured` reads through `RWObj_CafReader` into XCAF:
+each `o` object is a product named as the file names it, coloured by its
+`usemtl` material (a visual material on its faces). Each triangulation
+becomes planar faces (`BRepBuilderAPI_MakeShapeOnMesh`), sewn and promoted
+to a solid when closed, as in `LoadSTL`; an open one is a shell and the
+warning says so. `units` applies, as for STL. No axis or unit conversion is
+asked of the reader: the import's `units` and `up_axis` do both, and `auto`
+is `none`.
+
+glTF and 3MF are not read: OpenCASCADE's glTF reader needs RapidJSON, which
+the Windows cross build turns off, and it reads no 3MF.
+
 ## Importing an assembly
 
-A STEP with several placed instances becomes an assembly
+A STEP or IGES with several placed instances becomes an assembly
 (`src/core/io/ImportAssembly.{h,cpp}`, `ui::ImportStepAsAssembly` in
 `src/ui/AssemblyActions.cpp`):
 
@@ -79,11 +185,19 @@ A STEP with several placed instances becomes an assembly
   project has been saved, to `<user state dir>/import-staging/<name>/`. The
   first save into a directory moves staged files into the project and
   repoints the features, so a saved project is self-contained.
+- **Up axis.** The plan takes the resolved turn R (`plan.up`): each part's
+  Import of its `.brep` carries the axis explicitly (a `.brep` has no
+  header), keeping the `.brep`'s origin when turned, so a part tab stands
+  alone; and each placement P becomes R·P·R⁻¹, composed with the centring,
+  so occurrences stay where the file put them, turned. To change it,
+  re-import with another `up_axis`.
 - It is not undoable; like Open, it creates documents.
 
-**In the GUI**, File > Import (Ctrl+I, `file.import`) accepts STEP, STL and
-BREP. STL and BREP import straight into the active part. A STEP runs as a
-background job (`src/ui/ImportJob.{h,cpp}`) with a progress modal: the
+**In the GUI**, File > Import (Ctrl+I, `file.import`) accepts STEP, IGES,
+STL, OBJ, BREP, DXF and SVG. STL, OBJ and BREP import straight into the
+active part; DXF and SVG go into a sketch
+([sketching](../sketching/README.md#importing-dxf-and-svg)). A STEP or
+IGES runs as a background job (`src/ui/ImportJob.{h,cpp}`) with a progress modal: the
 worker reads the file (no progress available from OpenCASCADE), transfers
 it (a real percentage), and, when it has more than one placed instance,
 extracts the `.brep` files; the main thread then creates the tabs and
@@ -94,14 +208,17 @@ placed instance becomes an `Import` feature in the active part. The
 progress callback is sampled, not read per tick: OpenCASCADE's transfer
 reports hundreds of thousands of times on a large file.
 
-**Over RPC**, `import_step {path, as_assembly?, keep_origin?, units?}`:
-without `as_assembly` it adds an `Import` feature to the active part and
-returns `{bodies, regen, digest}`; with it, it returns `{assembly_index,
-occurrences, parts, ok}` plus `failed` naming every part whose feature did
-not build. `units` is refused with `as_assembly`.
+**Over RPC**, `import_step {path, as_assembly?, keep_origin?, units?,
+up_axis?, turn_deg?}`: without `as_assembly` it adds an `Import` feature to
+the active part and returns `{bodies, regen, digest, up_axis,
+recentred_by?, warning?}`; with it, it returns `{assembly_index,
+occurrences, parts, ok, up_axis}` plus `failed` naming every part whose
+feature did not build. Every parameter is checked before anything is read:
+an unknown extension (a DXF or SVG is pointed at `import_sketch`), `units`
+on STEP or IGES (and so with `as_assembly`), an unknown `up_axis`.
 
-The part tab's feature editor exposes the import's file units; `keep_origin`
-is reachable over RPC and in the feature JSON only.
+The part tab's feature editor exposes the import's file units, up axis and
+turn; `keep_origin` is reachable over RPC and in the feature JSON only.
 
 ## Exporting STEP
 
@@ -203,23 +320,28 @@ on an assembly tab, and unknown extensions, are refused by name.
 
 | RPC | module | does |
 |---|---|---|
-| `import_step {path, as_assembly?, keep_origin?, units?}` | RemoteProject | STEP / STL / BREP into the part, or a STEP as parts + an assembly |
+| `import_step {path, as_assembly?, keep_origin?, units?, up_axis?, turn_deg?}` | RemoteProject | STEP / IGES / STL / OBJ / BREP into the part, or a STEP or IGES as parts + an assembly; replies `up_axis` |
+| `import_sketch {path, sketch_id? \| plane?, units?, layers?, construction_layers?, keep_origin?}` | RemoteModeling | a DXF or SVG into a sketch ([sketching](../sketching/README.md#importing-dxf-and-svg)) |
 | `export_step {path, part?, body?}` | RemoteProject | structured STEP of a part or the assembly |
 | `export_stl {path, body?, stl_deflection_mm?}`, `export_brep {path, body?}` | RemoteProject | one shape of the active part |
 | `export_visual {path, deflection?}` | RemoteProject | glTF / OBJ / PLY of the part or assembly |
 | `export_members {dir}` | RemoteTube | one STEP per tube member |
 | `export_dxf` | RemoteSheetMetal | a flat pattern as R12 DXF |
 | `export_print_job {path, plates, slicer_config?, name?}` | RemotePrint | a print job, one 3MF of plates for Bambu Studio ([print jobs](../tolerances/README.md#print-jobs)) |
-| `add_feature` with `type: "Import"` | RemoteModeling | the feature directly; reports `recentred_by` |
+| `add_feature` with `type: "Import"` | RemoteModeling | the feature directly; reports `recentred_by` and `up_axis` |
 
 ## Tests
 
 | where | covers |
 |---|---|
 | `tests/test_step_export.cpp` | an assembly exports as its tree (each part once per configuration and material, placed by reference, sub-assemblies nested, hidden occurrences left out); a part is one named product of its bodies; a one-solid compound keeps its name and colour; a face painted apart is a colour on that face in the STEP and its own primitive and material in glTF; visual export colours every occurrence as the screen does; an assembly tab writes STEP and refuses STL by name |
-| `tests/test_cadkernel.cpp` `[kernel]` | structured STEP import (names, colours, instances); STL units; the assembly import plan (centred parts, placed occurrences); no XCAF document left open |
+| `tests/test_cadkernel.cpp` `[kernel]` | structured STEP import (names, colours, instances); STL units; the assembly import plan (centred parts, placed occurrences); no XCAF document left open; each `auto` decision and its reason; each axis puts the 30 mm along Z and SolidWorks' front on −Y; a sketch on an imported face follows an axis change; R·P·R⁻¹; an older Import reloads unmoved; IGES names and colours as STEP's, surfaces sewn, a skipped one named; OBJ objects, colours and units; our STEP names Loböle |
+| `tests/fixtures/import/` | the fixtures and `make_fixtures.py` / `make_iges.cpp`, which wrote them: our box under real SolidWorks 2024 and Autodesk headers, IGES as a solid, as surfaces and with a SolidWorks system ID, ezdxf DXFs, SVGs, an OBJ |
+| `tests/golden/vNEXT-import-up-axis.json` | `up_axis` and `turn_deg` round-trip; v97 and v103 reload as `none` |
 | `tests/test_assembly_flatten.cpp` | `Flatten`'s levels compose to exactly its world placement |
-| `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly` |
+| `tests/headless_smoke.py` | STEP / STL / BREP round trips, `keep_origin`, `as_assembly`; every import fixture through `import_step` / `import_sketch` with its reply read |
+| `tests/refused_calls_smoke.py` | an unknown `up_axis`, `units` on IGES, a drawing given to `import_step`, each changing nothing |
+| GUI `import/solidworks_part_stands_up_and_lies_down` | the pill, the editor's axis combo, undo |
 | `tests/visual_export_smoke.py` | parses the binary glTF: meshes, materials, instancing |
 | `tests/part_configuration_smoke.py` | one part placed in two configurations and two materials exports as two products |
 
@@ -229,14 +351,15 @@ benchmark's `reference.py`, `negative_controls.py` and `villain.py` too
 
 ## Not done
 
-- IGES import or export.
+- IGES export.
+- glTF and 3MF import (see [OBJ](#obj)).
+- A SolidWorks IGES header from a real file: the IGES row of the `auto`
+  table rests on the STEP files' and a modelled global section.
 - 3MF as an export of a part or an assembly (OpenCASCADE has no writer).
   A print job is a 3MF of Loböle's own writing
   ([print jobs](../tolerances/README.md#print-jobs)).
-- DXF of a drawing, and DXF import.
+- DXF of a drawing.
 - Mesh bodies: an STL arrives as sewn B-Rep faces, not as a lightweight
   reference mesh.
 - STEP PMI / AP242 GD&T.
 - Fusion 360 (no server-side feature API) and native SolidWorks.
-- `import_step` on a part does not report the centring shift the way
-  `add_feature` does.

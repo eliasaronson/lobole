@@ -4,5 +4,6 @@
   "volumes": [
     1000.0
   ],
-  "import_units": "in"
+  "import_units": "in",
+  "import_up_axis": "none"
 }

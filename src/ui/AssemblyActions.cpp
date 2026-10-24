@@ -390,20 +390,24 @@ std::vector<MeshExport::Item> BuildVisualExportItems(AppState& state) {
 }
 
 bool ImportStepAsAssembly(AppState& state, const std::string& stepPath,
-                          std::string* error) {
+                          std::string* error, interchange::UpAxis up,
+                          double turnDeg, interchange::UpDecision* decided) {
   CADKernel::ImportedModel model;
-  if (!CADKernel::Instance().LoadSTEPStructured(stepPath, model)) {
+  if (!interchange::LoadStructured(stepPath, model)) {
     if (error)
-      *error = "could not read '" + stepPath + "' as STEP";
-    LOG_WARN("Assembly import: could not read '{}' as STEP", stepPath);
+      *error = "could not read '" + stepPath + "' as STEP or IGES";
+    LOG_WARN("Assembly import: could not read '{}' as STEP or IGES", stepPath);
     return false;
   }
-  return ImportStepAsAssembly(state, model, stepPath, error);
+  return ImportStepAsAssembly(state, model, stepPath, error, up, turnDeg,
+                              decided);
 }
 
 bool ImportStepAsAssembly(AppState& state,
                           const CADKernel::ImportedModel& model,
-                          const std::string& stepPath, std::string* error) {
+                          const std::string& stepPath, std::string* error,
+                          interchange::UpAxis up, double turnDeg,
+                          interchange::UpDecision* decided) {
   const auto fail = [&](const std::string& msg) {
     if (error)
       *error = msg;
@@ -426,9 +430,12 @@ bool ImportStepAsAssembly(AppState& state,
   for (int n = 2; std::filesystem::exists(destDir); n++)
     destDir = importRoot / (asmName + "-" + std::to_string(n));
   const interchange::AssemblyImportPlan plan =
-      interchange::BuildAssemblyImportPlan(model, stepPath, destDir.string());
+      interchange::BuildAssemblyImportPlan(model, stepPath, destDir.string(),
+                                           nullptr, up, turnDeg);
   if (!plan.error.empty())
     return fail(plan.error);
+  if (decided != nullptr)
+    *decided = plan.up;
 
   // Materialize: one part tab per product, then the assembly. Split into the
   // two steps below so the BACKGROUND import (ui/ImportJob.cpp) can run them a
@@ -457,6 +464,9 @@ uint64_t MaterializeImportedPart(AppState& state,
   auto feature = std::make_unique<ImportFeature>(p.name, p.brepPath);
   feature->hasColor = p.hasColor;
   feature->color = p.color;
+  feature->upAxis = p.upAxis; // explicit: a .brep has no header to read
+  feature->turnDeg = p.turnDeg;
+  feature->keepOrigin = p.keepOrigin;
   state.document->AddFeature(std::move(feature));
   return slot.id;
 }

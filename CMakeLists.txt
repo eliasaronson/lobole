@@ -235,21 +235,28 @@ if(OPENCASCADE_FOUND)
         # outlines) live here. Named explicitly -- it used to arrive only
         # transitively, through TKVCAF (docs/sketching/README.md#text).
         TKService
+        # LDOMParser, which reads an SVG into a sketch
+        # (src/core/io/ImportSvg.cpp). It arrived through TKLCAF; named so
+        # the dependency is stated.
+        TKCDF
     )
 
     # STEP/STL data-exchange libraries were renamed in OCCT 7.8
     # (TKSTEP*/TKSTL -> TKDESTEP/TKDESTL)
     find_library(OCCT_TKDESTEP TKDESTEP)
     if(TARGET TKDESTEP OR OCCT_TKDESTEP)
-        list(APPEND OPENCASCADE_LIBS TKDESTEP TKDESTL TKDEGLTF TKDEOBJ TKDEPLY)
+        list(APPEND OPENCASCADE_LIBS TKDESTEP TKDESTL TKDEGLTF TKDEOBJ TKDEPLY
+                                     TKDEIGES)
     else()
         # TKXDESTEP carries the XCAF-aware STEP reader/writer
         # (STEPCAFControl_*, the named/coloured import path) through 7.7; in
         # 7.8 it folded into TKDESTEP. Omitting it linked fine until the
         # importer started using XCAF, then failed only on the older OCC —
         # which is Ubuntu's, so nobody building here saw it.
+        # IGES (IGESCAFControl_Reader) is TKIGES + TKXDEIGES here, the 7.6
+        # layout stock Ubuntu's libocct-data-exchange-dev ships.
         list(APPEND OPENCASCADE_LIBS TKSTEP TKSTEPBase TKSTEPAttr TKSTEP209
-                                     TKXDESTEP TKSTL)
+                                     TKXDESTEP TKSTL TKIGES TKXDEIGES)
     endif()
 
     add_definitions(-DHAVE_OPENCASCADE)
@@ -345,6 +352,10 @@ set(core_sources
     src/core/io/ProjectMerge.cpp
     src/core/io/ProjectStamp.cpp
     src/core/io/ImportAssembly.cpp
+    src/core/io/ImportUpAxis.cpp
+    src/core/io/ImportDxf.cpp
+    src/core/io/ImportSvg.cpp
+    src/core/io/SketchImport.cpp
     src/core/Measure.cpp
     src/core/MeasureSeal.cpp
     src/core/MeasureInsertion.cpp

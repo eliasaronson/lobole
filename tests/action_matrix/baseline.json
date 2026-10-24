@@ -3655,7 +3655,8 @@
   "golden/v103-import-stl-units": "regen not clean: Scanned bracket: failed to read 'bracket_drawn_in_inches.stl' as STL",
   "golden/v93-bearing-catalog": "no body",
   "golden/v94-generated-component": "no body",
-  "golden/v97-import-keep-origin": "regen not clean: Neighbour part: failed to read 'neighbour_in_its_own_frame.step' as STEP (expected .step/.stp, .brep, or .stl)",
+  "golden/v97-import-keep-origin": "regen not clean: Neighbour part: failed to read 'neighbour_in_its_own_frame.step' as STEP",
+  "golden/vNEXT-import-up-axis": "regen not clean: SolidWorks bracket: failed to read 'bracket_from_solidworks.step' as STEP",
   "reference/41-split-then-fillet": "known_failure: docs/known-bugs.md#a-fillet-on-the-second-piece-of-a-split-does-not-build"
  },
  "slow": {

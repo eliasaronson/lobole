@@ -269,6 +269,40 @@ def main():
                   {"name": "nope", "scope": "projct"}, needle="scope",
                   tab=part["name"])
 
+            # Imports (docs/interchange/README.md#up-axis,
+            # docs/sketching/README.md#importing-dxf-and-svg): every one read
+            # and checked before a feature, a sketch or a tab exists.
+            fx = os.path.join(HERE, "fixtures", "import")
+            for label, method, params, needle in [
+                    ("import_step unknown up_axis", "import_step",
+                     {"path": os.path.join(fx, "box-solidworks.step"),
+                      "up_axis": "y"}, "Accepted: auto, none, +x"),
+                    ("import_step units on IGES", "import_step",
+                     {"path": os.path.join(fx, "box-solid.igs"),
+                      "units": "in"}, "IGES, which declares its own unit"),
+                    ("import_step a drawing", "import_step",
+                     {"path": os.path.join(fx, "unitless.dxf")},
+                     "import_sketch"),
+                    ("import_sketch unit contradicting $INSUNITS",
+                     "import_sketch",
+                     {"path": os.path.join(fx, "plate-ezdxf.dxf"),
+                      "units": "mm"}, "declares $INSUNITS 1"),
+                    ("import_sketch rational spline", "import_sketch",
+                     {"path": os.path.join(fx, "refuse-rational-spline.dxf")},
+                     "rational spline"),
+                    ("import_sketch unknown layer", "import_sketch",
+                     {"path": os.path.join(fx, "plate-ezdxf.dxf"),
+                      "layers": ["OUTLINE", "NOPE"]},
+                     "no layer 'NOPE'. Its layers:"),
+                    ("import_sketch clip-path", "import_sketch",
+                     {"path": os.path.join(fx, "refuse-clip.svg")},
+                     "is clipped"),
+                    ("import_sketch sketch_id and plane", "import_sketch",
+                     {"path": os.path.join(fx, "unitless.dxf"),
+                      "sketch_id": 1, "plane": "Top"}, "one or the other")]:
+                check(label, method, params, needle=needle,
+                      tab=part["name"])
+
             # An expression requirement and a design sweep
             # (docs/requirements/README.md#expression, #design-sweep): every
             # refusal before anything is stored or started.

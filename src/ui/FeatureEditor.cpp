@@ -1806,6 +1806,32 @@ void DrawFeatureParamWidgets(AppState& state, Feature& feature, size_t index,
           units::LengthFromString(names[sel], import->lengthUnit))
         CommitDiscrete(state, feature, before, index, commit);
     }
+    // Which axis of the FILE is up (docs/interchange/README.md#up-axis):
+    // auto reads the header, and the line under it says what that decided
+    // and why, so a part that arrived standing differently from the file is
+    // explained where it is changed. One undoable modify, like the units.
+    {
+      static const char* kAxes[] = {"auto", "none", "+x", "-x",
+                                    "+y",   "-y",   "-z"};
+      int sel = 0;
+      for (int i = 0; i < 7; i++)
+        if (std::string(kAxes[i]) == interchange::ToString(import->upAxis))
+          sel = i;
+      const nlohmann::json before = DocumentIO::FeatureToJson(*import);
+      if (LabeledCombo("Up axis", &sel, kAxes, 7) &&
+          interchange::UpAxisFromString(kAxes[sel], import->upAxis))
+        CommitDiscrete(state, feature, before, index, commit);
+      LeftLabel("Turn");
+      static const double tmin = -360.0, tmax = 360.0;
+      HandleEdit(state, feature,
+                 ExprDragDouble(state, "##Turn", &import->turnDeg, 0.5f, tmin,
+                                tmax, "%.1f deg"),
+                 index, commit);
+      const interchange::UpDecision& up = import->UpApplied();
+      if (!up.because.empty())
+        ImGui::TextWrapped("Applied %s: %s", interchange::ToString(up.applied),
+                           up.because.c_str());
+    }
   } else if (auto* d = dynamic_cast<DerivedFeature*>(&feature)) {
     DrawDerivedParams(state, *d, index, commit);
   } else if (auto* tf = dynamic_cast<TemplateFeature*>(&feature)) {

@@ -4,6 +4,7 @@
 #pragma once
 
 #include "cad/CADKernel.h"
+#include "core/io/ImportUpAxis.h"
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -24,6 +25,13 @@ struct PlannedPart {
   std::string brepPath; // extracted geometry, CENTERED at the part origin
   bool hasColor = false;
   glm::vec3 color{0.0f};
+  // The import's resolved up axis, carried explicitly: a .brep has no header,
+  // so the part tab stands up on its own. With a turn the part also keeps
+  // the .brep's origin (`keepOrigin`), which is what the occurrence's
+  // R·P·R⁻¹ placement assumes.
+  UpAxis upAxis = UpAxis::None;
+  double turnDeg = 0.0;
+  bool keepOrigin = false;
 };
 
 struct PlannedOccurrence {
@@ -37,6 +45,7 @@ struct AssemblyImportPlan {
   std::vector<PlannedPart> parts;
   std::vector<PlannedOccurrence> occurrences;
   std::string error; // non-empty = the plan failed; nothing was extracted
+  UpDecision up;     // what the whole import was turned by, and why
 };
 
 // Extracts one centered .brep per unique product of an ALREADY-PARSED model
@@ -56,15 +65,28 @@ struct AssemblyImportPlan {
 // `onProduct(done, total)` is called after each product is extracted; return
 // false from it to abort (the plan then comes back with an error). Null by
 // default — the synchronous callers want neither progress nor cancellation.
+//
+// `up` and `turnDeg` turn the whole assembly (DecideUpAxis against the
+// model's header): R is applied to every part in its own tab, and each
+// placement P becomes R·P·R⁻¹, so occurrences stay where the file put them,
+// turned.
 using ExtractionProgress = std::function<bool(size_t done, size_t total)>;
 AssemblyImportPlan
 BuildAssemblyImportPlan(const CADKernel::ImportedModel& model,
                         const std::string& stepPath, const std::string& destDir,
-                        const ExtractionProgress& onProduct = nullptr);
+                        const ExtractionProgress& onProduct = nullptr,
+                        UpAxis up = UpAxis::Auto, double turnDeg = 0.0);
 
-// Convenience overload: parse `stepPath`, then the above. For callers that do
-// not already hold the model.
+// Convenience overload: parse `stepPath` (STEP or IGES, by extension), then
+// the above. For callers that do not already hold the model.
 AssemblyImportPlan BuildAssemblyImportPlan(const std::string& stepPath,
-                                           const std::string& destDir);
+                                           const std::string& destDir,
+                                           UpAxis up = UpAxis::Auto,
+                                           double turnDeg = 0.0);
+
+// Reads a STEP or IGES file by its extension (.step/.stp, .igs/.iges) into
+// `out`; false when it is neither or cannot be read.
+bool LoadStructured(const std::string& path, CADKernel::ImportedModel& out,
+                    CADKernel::ImportProgress* progress = nullptr);
 
 } // namespace interchange

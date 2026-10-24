@@ -185,7 +185,7 @@ std::string LowerExtension(const std::string& path) {
 
 bool ImportFeature::TakesUnits(const std::string& path) {
   const std::string ext = LowerExtension(path);
-  return ext == ".stl" || ext == ".brep";
+  return ext == ".stl" || ext == ".brep" || ext == ".obj";
 }
 
 size_t ImportFeature::ContentHash() const {
@@ -225,12 +225,23 @@ bool ImportFeature::Execute(RegenContext& ctx) {
   CADKernel::ImportedModel model;
   const std::string ext = LowerExtension(path);
   const auto hasExt = [&](const char* e) { return ext == e; };
-  // A STEP says what unit it is in, and the reader converts; a unit given on
-  // top would be applied twice or contradict the file.
+  const bool isStep = hasExt(".step") || hasExt(".stp");
+  const bool isIges = hasExt(".igs") || hasExt(".iges");
+  // Refused, naming what is read: a file with another extension was read as
+  // STEP, and failed as one, which named the wrong problem.
+  if (!isStep && !isIges && !hasExt(".stl") && !hasExt(".brep") &&
+      !hasExt(".obj")) {
+    SetError("'" + path + "' is not a file the import reads (" +
+             "accepted: .step/.stp, .igs/.iges, .brep, .stl, .obj)");
+    return false;
+  }
+  // STEP and IGES say what unit they are in, and the reader converts; a unit
+  // given on top would be applied twice or contradict the file.
   const bool takesUnits = TakesUnits(path);
   if (!takesUnits && lengthUnit != units::Length::Millimetre) {
-    SetError("'" + path + "' is STEP, which declares its own unit — `units` " +
-             "is for STL and BREP, which carry none");
+    SetError("'" + path + "' is " + (isIges ? "IGES" : "STEP") +
+             ", which declares its own unit — `units` is for STL, OBJ and "
+             "BREP, which carry none");
     return false;
   }
   const double scale = units::MmPerLength(lengthUnit);
@@ -254,6 +265,7 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       shape.Scale(scale);
     model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
     model.instances.push_back({0, glm::dmat4(1.0), ""});
+    model.origin.format = "STL";
   } else if (hasExt(".brep")) {
     // Native BREP sidecar (assembly import extracts per-part geometry as
     // .brep, I2): one anonymous product at identity.
@@ -267,29 +279,82 @@ bool ImportFeature::Execute(RegenContext& ctx) {
       shape.Scale(scale);
     model.products.push_back({std::move(shape), "", false, glm::vec3(0.0f)});
     model.instances.push_back({0, glm::dmat4(1.0), ""});
+    model.origin.format = "BREP";
+  } else if (hasExt(".obj")) {
+    if (!CADKernel::Instance().LoadOBJStructured(path, model)) {
+      SetError("failed to read '" + path + "' as OBJ");
+      LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
+      return false;
+    }
+    if (scale != 1.0)
+      for (auto& product : model.products)
+        if (product.shape.IsValid())
+          product.shape.Scale(scale);
+  } else if (isIges) {
+    if (!CADKernel::Instance().LoadIGESStructured(path, model)) {
+      SetError("failed to read '" + path + "' as IGES");
+      LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
+      return false;
+    }
   } else if (!CADKernel::Instance().LoadSTEPStructured(path, model)) {
-    SetError("failed to read '" + path +
-             "' as STEP (expected .step/.stp, .brep, or .stl)");
+    SetError("failed to read '" + path + "' as STEP");
     LOG_ERROR("ImportFeature '{}': failed to load '{}'", m_name, path);
     return false;
   }
 
-  // Placed shapes first, so centering covers the assembled positions.
+  // Which axis of the file is up, decided from its header (or as asked) and
+  // applied as a turn about the FILE origin, before the centring: the shift
+  // below then centres the part as it stands. A placement, so it changes no
+  // topology and a sketch on an imported face follows an axis change.
+  m_up = interchange::DecideUpAxis(upAxis, model.origin, turnDeg);
+  const glm::dmat4 turn = interchange::UpAxisRotation(m_up.applied, turnDeg);
+
+  // Placed shapes first, so centering covers the assembled positions. What
+  // is skipped is NAMED: a surface IGES (or an open mesh) used to vanish
+  // here without a word, and the import looked complete.
   struct Placed {
     CADShape shape;
     size_t product;
     std::string name;
   };
   std::vector<Placed> placed;
+  std::vector<std::string> skipped;
   for (const auto& inst : model.instances) {
     const CADShape& src = model.products[inst.product].shape;
-    if (!src.IsValid())
+    const std::string& label = !model.products[inst.product].name.empty()
+                                   ? model.products[inst.product].name
+                                   : inst.name;
+    const std::string who =
+        label.empty()
+            ? "shape " + std::to_string(skipped.size() + placed.size() + 1)
+            : "\"" + label + "\"";
+    if (!src.IsValid()) {
+      skipped.push_back(who + " (no geometry)");
       continue;
-    CADShape moved = src.Transformed(inst.transform);
-    if (!moved.IsValid() || moved.Volume() <= 1e-6)
+    }
+    CADShape moved = src.Transformed(turn * inst.transform);
+    if (!moved.IsValid()) {
+      skipped.push_back(who + " (could not be placed)");
       continue;
+    }
+    if (moved.Volume() <= 1e-6) {
+      skipped.push_back(who + " (a surface, not a solid)");
+      continue;
+    }
     placed.push_back({std::move(moved), inst.product, inst.name});
   }
+  std::string warning;
+  for (const std::string& note : model.notes)
+    warning += (warning.empty() ? "" : "; ") + note;
+  if (!skipped.empty()) {
+    std::string list;
+    for (const std::string& s : skipped)
+      list += (list.empty() ? "" : ", ") + s;
+    warning += (warning.empty() ? "" : "; ") + std::string("skipped ") +
+               std::to_string(skipped.size()) + " of " +
+               std::to_string(model.instances.size()) + ": " + list;
+  }
+  SetWarning(warning);
 
   // Combined bounding box over valid shapes, so the whole import is centered
   // as one unit and shapes keep their relative placement.
@@ -303,6 +368,8 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     haveBounds = true;
   }
   if (!haveBounds) {
+    SetError("no solid in '" + path + "'" +
+             (warning.empty() ? std::string() : ": " + warning));
     LOG_ERROR("ImportFeature '{}': no valid shapes in '{}'", m_name, path);
     return false;
   }
@@ -320,10 +387,10 @@ bool ImportFeature::Execute(RegenContext& ctx) {
     if (largest < 1.0) {
       char across[32];
       std::snprintf(across, sizeof across, "%.3g", largest);
-      SetWarning(std::string("only ") + across + " mm across, read as " +
-                 units::ToString(lengthUnit) +
-                 " — an STL or BREP carries no unit; if it was drawn in "
-                 "metres or inches, set the import's units (m, in, cm)");
+      SetWarning((warning.empty() ? std::string() : warning + "; ") + "only " +
+                 across + " mm across, read as " + units::ToString(lengthUnit) +
+                 " — an STL, OBJ or BREP carries no unit; if it was drawn "
+                 "in metres or inches, set the import's units (m, in, cm)");
     }
   }
   // Centre on the combined box, unless the caller asked to keep the file's

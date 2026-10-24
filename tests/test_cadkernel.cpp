@@ -1139,3 +1139,492 @@ TEST_CASE("FacePlane's normal points out of the solid on a revolve's ends",
   }
   CHECK(planar == 2);
 }
+
+// ---------------------------------------------------------------------------
+// Import formats (docs/interchange/README.md#up-axis, #iges, #obj): which
+// axis is up, IGES and OBJ. The fixtures are tests/fixtures/import/, made by
+// its make_fixtures.py and make_iges.cpp.
+// ---------------------------------------------------------------------------
+
+#include "TestPaths.h"
+#include "core/Document.h"
+#include "core/Feature.h"
+#include "core/Measure.h"
+#include "core/features/ExtrudeFeature.h"
+#include "core/features/SketchFeature.h"
+#include "core/io/ImportUpAxis.h"
+
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <IGESCAFControl_Writer.hxx>
+#include <IGESControl_Controller.hxx>
+#include <IGESControl_Writer.hxx>
+#include <Quantity_Color.hxx>
+#include <TDataStd_Name.hxx>
+#include <TopExp_Explorer.hxx>
+#include <TopoDS.hxx>
+#include <XCAFApp_Application.hxx>
+#include <XCAFDoc_ColorTool.hxx>
+#include <XCAFDoc_DocumentTool.hxx>
+#include <XCAFDoc_ShapeTool.hxx>
+
+namespace {
+
+std::string ImportFixture(const char* name) {
+  return std::string(TestSourceDir()) + "/tests/fixtures/import/" + name;
+}
+
+// One Import of `path` in a fresh part, regenerated.
+std::unique_ptr<Document>
+ImportOne(const std::string& path,
+          interchange::UpAxis up = interchange::UpAxis::Auto,
+          double turnDeg = 0.0, bool keepOrigin = false) {
+  auto doc = std::make_unique<Document>();
+  auto f = std::make_unique<ImportFeature>("imp", path);
+  f->upAxis = up;
+  f->turnDeg = turnDeg;
+  f->keepOrigin = keepOrigin;
+  doc->AddFeature(std::move(f));
+  return doc;
+}
+
+glm::dvec3 Extent(const Document& doc) {
+  glm::dvec3 lo(1e300), hi(-1e300);
+  for (const Body& b : doc.GetBodies()) {
+    glm::dvec3 mn, mx;
+    b.shape.GetBoundingBox(mn, mx);
+    lo = glm::min(lo, mn);
+    hi = glm::max(hi, mx);
+  }
+  return hi - lo;
+}
+
+const ImportFeature& TheImport(const Document& doc) {
+  return *dynamic_cast<const ImportFeature*>(doc.GetFeature(0));
+}
+
+} // namespace
+
+TEST_CASE("auto reads which axis is up from the file's header, and says why",
+          "[kernel][import]") {
+  using interchange::UpAxis;
+  CADKernel& k = CADKernel::Instance();
+  struct Row {
+    const char* file;
+    UpAxis applied;
+    const char* inBecause;
+  };
+  // Each row with a real writer's header: SolidWorks 2024's and Autodesk's
+  // are copied from real files (make_fixtures.py), ours is what
+  // SaveSTEPModel writes.
+  for (const Row& r : {
+           Row{"box-solidworks.step", UpAxis::PosY,
+               "FILE_NAME originating_system 'SolidWorks 2024': "
+               "SolidWorks writes Y up"},
+           Row{"box-autodesk.step", UpAxis::None,
+               "not a writer known to write Y up"},
+           Row{"box-lobole.step", UpAxis::None, "writes Z up"},
+       }) {
+    INFO(r.file);
+    CADKernel::ImportedModel m;
+    REQUIRE(k.LoadSTEPStructured(ImportFixture(r.file), m));
+    CHECK(m.origin.format == "STEP");
+    const interchange::UpDecision d =
+        interchange::DecideUpAxis(UpAxis::Auto, m.origin);
+    INFO(d.because);
+    CHECK(d.applied == r.applied);
+    CHECK(d.because.find(r.inBecause) != std::string::npos);
+  }
+  // IGES: the global section's native system ID feeds the same table.
+  CADKernel::ImportedModel ig;
+  REQUIRE(k.LoadIGESStructured(ImportFixture("box-solidworks.igs"), ig));
+  CHECK(interchange::DecideUpAxis(UpAxis::Auto, ig.origin).applied ==
+        UpAxis::PosY);
+  CADKernel::ImportedModel plain;
+  REQUIRE(k.LoadIGESStructured(ImportFixture("box-solid.igs"), plain));
+  CHECK(interchange::DecideUpAxis(UpAxis::Auto, plain.origin).applied ==
+        UpAxis::None);
+  // No header at all: none, and it says that is why.
+  for (const char* fmt : {"STL", "BREP", "OBJ"}) {
+    CADKernel::FileHeader h;
+    h.format = fmt;
+    const auto d = interchange::DecideUpAxis(UpAxis::Auto, h);
+    CHECK(d.applied == UpAxis::None);
+    CHECK(d.because.find("no header") != std::string::npos);
+  }
+  // Asked for, applied as asked whatever the header says.
+  CADKernel::ImportedModel sw;
+  REQUIRE(k.LoadSTEPStructured(ImportFixture("box-solidworks.step"), sw));
+  CHECK(interchange::DecideUpAxis(UpAxis::None, sw.origin).applied ==
+        UpAxis::None);
+  CHECK(interchange::DecideUpAxis(UpAxis::NegX, sw.origin).applied ==
+        UpAxis::NegX);
+  // An unknown name is refused, never read as a default.
+  UpAxis u = UpAxis::Auto;
+  CHECK_FALSE(interchange::UpAxisFromString("y", u));
+  CHECK_FALSE(interchange::UpAxisFromString("+Y", u));
+  CHECK(interchange::UpAxisFromString("-z", u));
+  CHECK(u == UpAxis::NegZ);
+}
+
+TEST_CASE("each up axis stands the 30 mm along Z, and SolidWorks' front on -Y",
+          "[kernel][import]") {
+  using interchange::UpAxis;
+  CADKernel& k = CADKernel::Instance();
+  // A box 10 x 20 x 30 with the 30 along the axis the file calls up, and
+  // the file written by us (auto = none), the axis asked for explicitly.
+  struct Row {
+    UpAxis up;
+    glm::dvec3 size;
+  };
+  for (const Row& r :
+       {Row{UpAxis::PosX, {30, 10, 20}}, Row{UpAxis::NegX, {30, 10, 20}},
+        Row{UpAxis::PosY, {10, 30, 20}}, Row{UpAxis::NegY, {10, 30, 20}},
+        Row{UpAxis::NegZ, {10, 20, 30}}}) {
+    INFO(interchange::ToString(r.up));
+    CADKernel::ImportedModel m;
+    m.products.push_back(
+        {k.CreateBox(glm::dvec3(0.0), r.size), "Box", false, glm::vec3(0)});
+    m.instances.push_back({0, glm::dmat4(1.0), "Box"});
+    const auto path =
+        std::filesystem::temp_directory_path() /
+        ("lobole_up_" + std::string(interchange::ToString(r.up)) + ".step");
+    REQUIRE(k.SaveSTEPStructured(path.string(), m));
+    const auto doc = ImportOne(path.string(), r.up);
+    REQUIRE(doc->GetBodies().size() == 1);
+    CHECK_THAT(Extent(*doc).z, WithinAbs(30.0, 1e-6));
+    CHECK(TheImport(*doc).UpApplied().applied == r.up);
+    // The table's turn exactly: the up axis lands on +Z.
+    const glm::dmat4 R = interchange::UpAxisRotation(r.up, 0.0);
+    glm::dvec3 upVec(0.0);
+    switch (r.up) {
+    case UpAxis::PosX:
+      upVec = {1, 0, 0};
+      break;
+    case UpAxis::NegX:
+      upVec = {-1, 0, 0};
+      break;
+    case UpAxis::PosY:
+      upVec = {0, 1, 0};
+      break;
+    case UpAxis::NegY:
+      upVec = {0, -1, 0};
+      break;
+    default:
+      upVec = {0, 0, -1};
+      break;
+    }
+    CHECK(glm::dvec3(R * glm::dvec4(upVec, 0.0)) == glm::dvec3(0, 0, 1));
+    std::filesystem::remove(path);
+  }
+
+  // The SolidWorks fixture: x 0..10, y 0..30 (up), z 0..20 (its front).
+  // auto stands it up, and with the file's coordinates kept the front half
+  // of the box is on OUR front, -Y.
+  const auto sw = ImportOne(ImportFixture("box-solidworks.step"), UpAxis::Auto,
+                            0.0, /*keepOrigin=*/true);
+  REQUIRE(sw->GetBodies().size() == 1);
+  glm::dvec3 mn, mx;
+  sw->GetBodies()[0].shape.GetBoundingBox(mn, mx);
+  CHECK_THAT(mn.z, WithinAbs(0.0, 1e-6));
+  CHECK_THAT(mx.z, WithinAbs(30.0, 1e-6));
+  CHECK_THAT(mn.y, WithinAbs(-20.0, 1e-6));
+  CHECK_THAT(mx.y, WithinAbs(0.0, 1e-6));
+  CHECK_THAT(mn.x, WithinAbs(0.0, 1e-6));
+  CHECK_THAT(mx.x, WithinAbs(10.0, 1e-6));
+
+  // turn_deg turns about world Z after the axis.
+  const auto turned =
+      ImportOne(ImportFixture("box-solidworks.step"), UpAxis::Auto, 90.0);
+  CHECK_THAT(Extent(*turned).x, WithinAbs(20.0, 1e-6));
+  CHECK_THAT(Extent(*turned).y, WithinAbs(10.0, 1e-6));
+  CHECK_THAT(Extent(*turned).z, WithinAbs(30.0, 1e-6));
+  // none leaves the file as it is.
+  const auto none =
+      ImportOne(ImportFixture("box-solidworks.step"), UpAxis::None);
+  CHECK_THAT(Extent(*none).y, WithinAbs(30.0, 1e-6));
+}
+
+TEST_CASE("a sketch on an imported face follows an up-axis change",
+          "[kernel][import]") {
+  using interchange::UpAxis;
+  Document doc;
+  doc.AddFeature(std::make_unique<ImportFeature>(
+      "sw", ImportFixture("box-solidworks.step")));
+  REQUIRE(doc.GetBodies().size() == 1);
+  // Stood up (+y): the top face is the file's +Y face.
+  const Body& body = doc.GetBodies()[0];
+  std::string top;
+  for (const auto& [index, name] : body.elementMap.names) {
+    const auto info = Measure::DescribeFaceAt(body, index);
+    if (info && info->normal.z > 0.99)
+      top = name;
+  }
+  REQUIRE(!top.empty());
+  const uint64_t importId = doc.GetFeature(0)->GetId();
+  auto sk =
+      std::make_unique<SketchFeature>("On top", SketchPlane(PlaneType::XY));
+  sk->faceRef = ElementRef{importId, top};
+  sk->AddRectangle({-2, -2}, {2, 2});
+  doc.AddFeature(std::move(sk));
+  const uint64_t skId = doc.GetFeature(1)->GetId();
+  doc.AddFeature(std::make_unique<ExtrudeFeature>("Boss", skId, 3.0,
+                                                  ExtrudeMode::NewBody));
+  REQUIRE(doc.Regenerate());
+  REQUIRE(doc.GetBodies().size() == 2);
+  glm::dvec3 mn, mx;
+  doc.GetBodies()[1].shape.GetBoundingBox(mn, mx);
+  CHECK_THAT(mn.z, WithinAbs(15.0, 1e-4)); // on the top of a centred 30
+
+  // Laid back down: the same face is now the file's +Y side, and the boss
+  // follows it there — the turn is a placement, the face keeps its name.
+  dynamic_cast<ImportFeature*>(doc.GetFeature(0))->upAxis = UpAxis::None;
+  REQUIRE(doc.Regenerate());
+  for (const auto& f : doc.GetFeatures())
+    CHECK(f->GetError().empty());
+  REQUIRE(doc.GetBodies().size() == 2);
+  doc.GetBodies()[1].shape.GetBoundingBox(mn, mx);
+  CHECK_THAT(mn.y, WithinAbs(15.0, 1e-4));
+  CHECK_THAT(mx.y - mn.y, WithinAbs(3.0, 1e-4));
+}
+
+TEST_CASE("an assembly import turns every placement as R·P·R⁻¹",
+          "[kernel][import][assembly]") {
+  using interchange::UpAxis;
+  CADKernel& k = CADKernel::Instance();
+  CADKernel::ImportedModel model;
+  model.products.push_back({k.CreateBox(glm::dvec3(0.0), glm::dvec3(2, 4, 6)),
+                            "Block", false, glm::vec3(0)});
+  const glm::dmat4 P =
+      glm::translate(glm::dmat4(1.0), glm::dvec3(10, 5, -3)) *
+      glm::rotate(glm::dmat4(1.0), glm::radians(30.0), glm::dvec3(0, 0, 1));
+  model.instances.push_back({0, glm::dmat4(1.0), "A"});
+  model.instances.push_back({0, P, "B"});
+  const auto dir =
+      std::filesystem::temp_directory_path() / "lobole_up_asm_plan";
+  std::filesystem::remove_all(dir);
+  const auto plan = interchange::BuildAssemblyImportPlan(
+      model, "rig.step", dir.string(), nullptr, UpAxis::PosY, 15.0);
+  REQUIRE(plan.error.empty());
+  CHECK(plan.up.applied == UpAxis::PosY);
+  REQUIRE(plan.parts.size() == 1);
+  // The part tab turns itself (a .brep has no header) and keeps the
+  // .brep's origin, which the placement assumes.
+  CHECK(plan.parts[0].upAxis == UpAxis::PosY);
+  CHECK(plan.parts[0].turnDeg == 15.0);
+  CHECK(plan.parts[0].keepOrigin);
+  REQUIRE(plan.occurrences.size() == 2);
+  const glm::dmat4 R = interchange::UpAxisRotation(UpAxis::PosY, 15.0);
+  const glm::dvec3 c(1, 2, 3); // the block's centre in the file
+  // Each part-tab point x (= R·(file point − c)) lands at R·P·(file point).
+  CADShape part;
+  REQUIRE(k.LoadBREP(plan.parts[0].brepPath, part));
+  for (size_t i = 0; i < 2; i++) {
+    const glm::dmat4 Pi = model.instances[i].transform;
+    const auto& o = plan.occurrences[i];
+    const glm::dmat4 O = glm::translate(glm::dmat4(1.0), o.position) *
+                         glm::mat4_cast(o.orientation);
+    for (const glm::dvec3 fileP :
+         {glm::dvec3(0, 0, 0), glm::dvec3(2, 4, 6), glm::dvec3(2, 0, 6)}) {
+      const glm::dvec3 inTab = glm::dvec3(R * glm::dvec4(fileP - c, 1.0));
+      const glm::dvec3 world = glm::dvec3(O * glm::dvec4(inTab, 1.0));
+      const glm::dvec3 want = glm::dvec3(R * Pi * glm::dvec4(fileP, 1.0));
+      CHECK_THAT(glm::length(world - want), WithinAbs(0.0, 1e-9));
+    }
+  }
+  std::filesystem::remove_all(dir);
+}
+
+TEST_CASE("IGES reads names and colours as STEP does, and sews surfaces",
+          "[kernel][import]") {
+  CADKernel& k = CADKernel::Instance();
+  // One XCAF document, written both ways: a named, coloured box.
+  Handle(TDocStd_Document) doc;
+  XCAFApp_Application::GetApplication()->NewDocument("BinXCAF", doc);
+  Handle(XCAFDoc_ShapeTool) shapes =
+      XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+  Handle(XCAFDoc_ColorTool) colors =
+      XCAFDoc_DocumentTool::ColorTool(doc->Main());
+  const TDF_Label label =
+      shapes->AddShape(BRepPrimAPI_MakeBox(4.0, 5.0, 6.0).Shape(), false);
+  TDataStd_Name::Set(label, "Widget");
+  colors->SetColor(label, Quantity_Color(0.9, 0.1, 0.1, Quantity_TOC_RGB),
+                   XCAFDoc_ColorSurf);
+  const auto igs = std::filesystem::temp_directory_path() / "lobole_named.igs";
+  {
+    IGESControl_Controller::Init();
+    IGESCAFControl_Writer writer;
+    REQUIRE(writer.Transfer(doc));
+    REQUIRE(writer.Write(igs.string().c_str()));
+  }
+  XCAFApp_Application::GetApplication()->Close(doc);
+  CADKernel::ImportedModel fromIges;
+  REQUIRE(k.LoadIGESStructured(igs.string(), fromIges));
+  REQUIRE(fromIges.products.size() == 1);
+  CHECK(fromIges.products[0].name == "Widget");
+  REQUIRE(fromIges.products[0].hasColor);
+  CHECK_THAT(fromIges.products[0].color.r, WithinAbs(0.9, 0.02));
+  CHECK_THAT(fromIges.products[0].color.g, WithinAbs(0.1, 0.02));
+  CHECK_THAT(fromIges.products[0].shape.Volume(), WithinRel(120.0, 1e-6));
+  std::filesystem::remove(igs);
+
+  // Trimmed surfaces (entity 144), the way IGES usually arrives: sewn at
+  // the file's resolution into a solid.
+  CADKernel::ImportedModel surfaces;
+  REQUIRE(k.LoadIGESStructured(ImportFixture("box-surfaces.igs"), surfaces));
+  REQUIRE(surfaces.products.size() == 1);
+  CHECK(surfaces.products[0].shape.SolidCount() == 1);
+  CHECK_THAT(surfaces.products[0].shape.Volume(), WithinRel(6000.0, 1e-6));
+  CHECK(surfaces.notes.empty()); // closed at its own resolution: nothing to say
+  CADKernel::ImportedModel solid;
+  REQUIRE(k.LoadIGESStructured(ImportFixture("box-solid.igs"), solid));
+  CHECK_THAT(solid.products[0].shape.Volume(), WithinRel(6000.0, 1e-6));
+
+  // An open surface stays a shell, and says so; a lone face has no volume
+  // and is skipped, named, rather than dropped without a word.
+  const auto open = std::filesystem::temp_directory_path() / "lobole_open.igs";
+  {
+    const TopoDS_Shape box = BRepPrimAPI_MakeBox(10.0, 10.0, 10.0).Shape();
+    BRepBuilderAPI_Sewing five;
+    int n = 0;
+    for (TopExp_Explorer ex(box, TopAbs_FACE); ex.More(); ex.Next())
+      if (n++ < 5)
+        five.Add(ex.Current());
+    five.Perform();
+    IGESControl_Controller::Init();
+    IGESControl_Writer writer("MM", 0);
+    writer.AddShape(five.SewedShape());
+    writer.ComputeModel();
+    REQUIRE(writer.Write(open.string().c_str()));
+  }
+  CADKernel::ImportedModel shell;
+  REQUIRE(k.LoadIGESStructured(open.string(), shell));
+  REQUIRE(shell.notes.size() == 1);
+  CHECK(shell.notes[0].find("open shell") != std::string::npos);
+  const auto doc2 = ImportOne(open.string());
+  CHECK(doc2->GetFeature(0)->GetWarning().find("open shell") !=
+        std::string::npos);
+  std::filesystem::remove(open);
+  const auto lone = std::filesystem::temp_directory_path() / "lobole_face.igs";
+  {
+    IGESControl_Controller::Init();
+    IGESControl_Writer writer("MM", 0);
+    writer.AddShape(
+        TopExp_Explorer(BRepPrimAPI_MakeBox(5.0, 5.0, 5.0).Shape(), TopAbs_FACE)
+            .Current());
+    writer.ComputeModel();
+    REQUIRE(writer.Write(lone.string().c_str()));
+  }
+  const auto doc3 = ImportOne(lone.string());
+  CHECK(doc3->GetBodies().empty());
+  const std::string why = doc3->GetFeature(0)->GetError();
+  INFO(why);
+  CHECK(why.find("skipped 1 of 1") != std::string::npos);
+  CHECK(why.find("a surface, not a solid") != std::string::npos);
+  std::filesystem::remove(lone);
+}
+
+TEST_CASE("an IGES import refuses `units`, which the file declares",
+          "[kernel][import]") {
+  auto doc = std::make_unique<Document>();
+  auto f =
+      std::make_unique<ImportFeature>("igs", ImportFixture("box-solid.igs"));
+  f->lengthUnit = units::Length::Inch;
+  doc->AddFeature(std::move(f));
+  CHECK(doc->GetBodies().empty());
+  CHECK(doc->GetFeature(0)->GetError().find("IGES, which declares its own") !=
+        std::string::npos);
+  // And an extension no reader takes is refused, naming the ones that are.
+  const auto bad = ImportOne(ImportFixture("plate-ezdxf.dxf"));
+  CHECK(bad->GetFeature(0)->GetError().find("accepted: .step/.stp") !=
+        std::string::npos);
+}
+
+TEST_CASE(
+    "an OBJ imports as named, coloured solids in the unit it was drawn in",
+    "[kernel][import]") {
+  const auto doc = ImportOne(ImportFixture("two-cubes.obj"));
+  REQUIRE(doc->GetBodies().size() == 2);
+  std::map<std::string, const Body*> byName;
+  for (const Body& b : doc->GetBodies())
+    byName[b.name] = &b;
+  REQUIRE(byName.contains("Red"));
+  REQUIRE(byName.contains("Blue"));
+  CHECK_THAT(byName["Red"]->shape.Volume(), WithinRel(1000.0, 1e-6));
+  CHECK_THAT(byName["Blue"]->shape.Volume(), WithinRel(216.0, 1e-6));
+  REQUIRE(byName["Red"]->hasDisplayColor);
+  CHECK(byName["Red"]->displayColor.r > byName["Red"]->displayColor.b);
+  REQUIRE(byName["Blue"]->hasDisplayColor);
+  CHECK(byName["Blue"]->displayColor.b > byName["Blue"]->displayColor.r);
+  // `auto` is none for an OBJ, and the reason names the usual Y up.
+  CHECK(TheImport(*doc).UpApplied().because.find("usually Y up") !=
+        std::string::npos);
+  // Drawn in cm: ten times a side.
+  auto cm = std::make_unique<Document>();
+  auto f =
+      std::make_unique<ImportFeature>("cm", ImportFixture("two-cubes.obj"));
+  f->lengthUnit = units::Length::Centimetre;
+  cm->AddFeature(std::move(f));
+  REQUIRE(cm->GetBodies().size() == 2);
+  double total = 0.0;
+  for (const Body& b : cm->GetBodies())
+    total += b.shape.Volume();
+  CHECK_THAT(total, WithinRel(1216.0 * 1000.0, 1e-6));
+}
+
+TEST_CASE("our own STEP names Loböle as its writer", "[kernel][import]") {
+  CADKernel& k = CADKernel::Instance();
+  CADKernel::ImportedModel m;
+  m.products.push_back({k.CreateBox(1.0, 1.0, 1.0), "B", false, glm::vec3(0)});
+  m.instances.push_back({0, glm::dmat4(1.0), "B"});
+  const auto path = std::filesystem::temp_directory_path() / "lobole_own.step";
+  REQUIRE(k.SaveSTEPStructured(path.string(), m));
+  CADKernel::ImportedModel back;
+  REQUIRE(k.LoadSTEPStructured(path.string(), back));
+  REQUIRE(!back.origin.fields.empty());
+  CHECK(back.origin.fields[0].first == "FILE_NAME originating_system");
+  CHECK(back.origin.fields[0].second.rfind("Lob\xc3\xb6le ", 0) == 0);
+  const auto d =
+      interchange::DecideUpAxis(interchange::UpAxis::Auto, back.origin);
+  CHECK(d.applied == interchange::UpAxis::None);
+  CHECK(d.because.find("Lob\xc3\xb6le writes Z up") != std::string::npos);
+  std::filesystem::remove(path);
+}
+
+#include "TestIO.h"
+
+#include <fstream>
+#include <nlohmann/json.hpp>
+
+TEST_CASE("an Import saved before up_axis existed reloads unmoved",
+          "[kernel][import][io]") {
+  const int now = DocumentIO::DocumentFormatVersion();
+  const auto write = [&](int version) {
+    const nlohmann::json j = {
+        {"format", "designer-document"},
+        {"version", version},
+        {"features",
+         {{{"type", "Import"},
+           {"name", "Bought part"},
+           {"id", 1},
+           {"path", ImportFixture("box-solidworks.step")}}}}};
+    const auto path = std::filesystem::temp_directory_path() /
+                      ("lobole_up_v" + std::to_string(version) + ".json");
+    std::ofstream(path) << j.dump();
+    return path;
+  };
+  // Saved before the field: `none`, exactly where it was (30 along Y).
+  const auto old = write(now - 1);
+  const auto before = testio::Load(old.string());
+  REQUIRE(before != nullptr);
+  CHECK(TheImport(*before).upAxis == interchange::UpAxis::None);
+  CHECK_THAT(Extent(*before).y, WithinAbs(30.0, 1e-6));
+  // The same feature written now without the field is `auto`, and stands.
+  const auto fresh = write(now);
+  const auto after = testio::Load(fresh.string());
+  REQUIRE(after != nullptr);
+  CHECK(TheImport(*after).upAxis == interchange::UpAxis::Auto);
+  CHECK_THAT(Extent(*after).z, WithinAbs(30.0, 1e-6));
+  std::filesystem::remove(old);
+  std::filesystem::remove(fresh);
+}

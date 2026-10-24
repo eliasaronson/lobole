@@ -145,7 +145,8 @@ void UpdateDirectoryContents(AppState& state) {
           std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
 
           if (ext == ".step" || ext == ".stp" || ext == ".stl" ||
-              ext == ".brep") {
+              ext == ".brep" || ext == ".igs" || ext == ".iges" ||
+              ext == ".obj" || ext == ".dxf" || ext == ".svg") {
             state.directoryContents.push_back("[CAD] " + filename);
           } else {
             state.directoryContents.push_back(filename);
@@ -671,9 +672,10 @@ void ImportFileDialog(AppState& state) {
     return;
   }
   nfdu8char_t* outPath = nullptr;
-  // No IGES: ImportFeature reads STEP/BREP/STL only (listing .iges here
-  // used to just defer the failure to regeneration).
-  const nfdu8filteritem_t filters[] = {{"CAD files", "step,stp,stl,brep"}};
+  // Exactly what an import reads: STEP, IGES, BREP, STL and OBJ become an
+  // Import feature, DXF and SVG a sketch (StartImport routes by extension).
+  const nfdu8filteritem_t filters[] = {
+      {"CAD files", "step,stp,igs,iges,stl,obj,brep,dxf,svg"}};
 
   nfdresult_t result =
       InDialog([&] { return NFD_OpenDialogU8(&outPath, filters, 1, nullptr); });
