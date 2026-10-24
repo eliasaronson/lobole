@@ -66,7 +66,7 @@ The flags are stated only where they differ from the default:
 | flag | meaning |
 |---|---|
 | `NeedsPart` | refuses unless the active tab is a part ("the active document is an assembly, not a part; switch to a part tab") |
-| `NotInBatch` | reaches outside the document (a file, the git tree, the window, the tab), so a batch rollback could not take it back; refused inside `batch` |
+| `NotInBatch` | reaches outside the document (a file, the git tree, the window, a tab), or makes an edit no undo history holds, so a batch rollback could not take it back; refused inside `batch` ([what that covers](#batch)) |
 | `Deferrable` | its result does not depend on freshly built geometry, so `batch` may defer the regeneration past it |
 | `UiAction` | goes on the ImGui queue instead of running here |
 
@@ -337,7 +337,8 @@ its G-code and then answered "unknown parameter '_timeout'". So:
   on a feature) is the handler's to make only after its checks. A call that
   moves the active tab (`add_part`, a CAM or drawing verb given another
   `job` or `drawing`) leaves the marked tab's stack stashed where the
-  rollback does not unwind it.
+  rollback does not unwind it, which is why a batch refuses such calls
+  ([batch](#batch)).
 - **An edit that would not build is tried on a copy first.** `add_feature`
   and `modify_feature` of a direct edit regenerate a copy of the part
   (`RefuseFailingDirectEdit`, `Document::CopyWithGeometry`) and refuse with
@@ -479,13 +480,52 @@ as one transaction:
   of its entry as the call alone answers it. Each call's own `regen` and `digest` are stripped: under a
   deferred regeneration they would describe a document that has not been
   rebuilt. Geometry is answered once, by the batch's `regen`.
-- **Refused inside a batch:** another `batch`, any `NotInBatch` method
-  (screenshots, exports, project and git verbs, `undo`/`redo`), UI actions,
-  unknown methods, a key outside a call's row, and — under
+- **Refused inside a batch:** another `batch`, any `NotInBatch` method,
+  UI actions, unknown methods, a key outside a call's row, and — under
   `stop_on_error` — a value a call's [contract](#typed-contracts) refuses,
   unless a `$ref` stands in it (that call is checked when it runs). Each is
   checked before anything runs, so the document is unchanged, and the
-  refusal's diagnostic names the `call`.
+  refusal names the call by its number and says to make it on its own,
+  before or after the batch.
+- **What the rollback cannot undo stays out.** The rollback unwinds the
+  histories it marked; two kinds of call are beyond them, and a batch that
+  failed after one would leave it in place while answering that nothing
+  changed. So both are `NotInBatch`:
+  - *a call that creates, deletes or switches a tab*, which leaves the marked
+    tab's history stashed where the rollback does not reach it and the new
+    tab behind: `add_part`, `add_assembly`, `create_drawing`, `machine_part`,
+    `edit_in_context`, `set_active_part`, `delete_part`, and `add_fastener`,
+    `add_bearing`, `add_retaining_ring` with their `fit_*` forms (which make
+    the standard part's tab and folder the first time a spec is placed, and
+    place without an assembly snapshot every time);
+  - *an edit no undo history holds*: `set_units`, `set_tube_rules`,
+    `set_rollback` (saved, and set outside a command), `rename_part` and the
+    folder verbs (`create_folder`, `move_to_folder`, `rename_folder`,
+    `dissolve_folder`: tab names and folders live in project.json with no
+    undo), the section cuts (`set_section`, `add_section`, `update_section`,
+    `remove_section`, saved the same way), `set_motion_pose` (a scrub writes
+    the driver's mate value and the poses with no snapshot), the requirement
+    verbs, and the git verbs `remote_add` and `remote_remove` besides the
+    file and project verbs (screenshots, exports, `undo`/`redo`).
+
+  Some calls do either only with some parameters, and are refused only
+  then (`BatchRefusalFor` in RemoteDispatch.cpp): a CAM verb given a `job`,
+  or a drawing verb given a `drawing`, other than the active tab (by name or
+  id; on the active one it stays batchable); `claim_component`, and
+  `update_component` with `apply`, on a part other than the active one; a
+  `rename_variable` whose scope is the part (its rewrite of the
+  requirements is outside the part's command — a project rename is a
+  project-history entry and stays batchable); and `run_motion_study` given
+  `leave_at`, `leave_at_deg` or `leave_at_mm` (the run is on a copy; the
+  pose it leaves is written like a scrub). A `$ref` in such a parameter is
+  judged when its call runs, as is a scope an earlier call of the batch
+  decides (a part variable it added): refused then, the batch rolls back.
+  A script that builds a part calls `add_part` and then batches the edits.
+  `batch_rollback_gate` reads the handlers for what they call — the tab
+  switches, the project.json writes, the document setters outside a
+  command, the motion poses, the git writes — and fails a method that
+  reaches one without the flag or the per-call check; it plants one each
+  run to show it would.
 - **Guarded.** `expect_revision` on the batch is checked once, before the
   first call ([the revision guard](#the-revision-guard)).
 
@@ -493,7 +533,9 @@ The gain is largest for edits early in a long history, where each separate
 call would rebuild everything after it; appends are already incremental.
 `batch_smoke` gates the regeneration count, the single undo step, rollback on
 a failed call (the project scope and another part's stack included), a rejected key refused before any call runs, `stop_on_error: false`, `$ref` and its
-refusals, a mid-batch query seeing current geometry, and an assembly batch.
+refusals, a mid-batch query seeing current geometry, an assembly batch, and
+each call above refused before anything runs (the per-call ones on another
+tab, and accepted on the active one).
 
 ## Typed contracts
 

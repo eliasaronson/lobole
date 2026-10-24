@@ -296,8 +296,8 @@ RPC handlers keep their own poll so they answer from a finished result.
   `check_*`).
 - **The `flags` column is the gate**, stated on the row rather than kept in a
   list apart from the handler: `NeedsPart` (refuses unless a part tab is
-  active), `NotInBatch` (reaches outside the document, so a `batch` cannot
-  roll it back), `Deferrable` (its result does not need fresh geometry, so a
+  active), `NotInBatch` (reaches outside the document, or makes an edit no
+  undo history holds, so a `batch` cannot roll it back), `Deferrable` (its result does not need fresh geometry, so a
   batch may defer the regeneration past it), `UiAction` (runs on the ImGui
   queue). An unknown method has no row and no flags, so a typo is answered
   "unknown method" rather than "switch to a part tab".
