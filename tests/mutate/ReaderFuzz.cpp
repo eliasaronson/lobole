@@ -1134,6 +1134,52 @@ struct Sweep::Impl {
            (in.tree ? std::string("doc.dsgn") : in.path.filename().string());
   }
 
+  // The count rule above sees a whole item go missing only when the damage
+  // breaks the file's JSON as well: the writer's layout (dump(2)) puts an
+  // item over several lines, so one dropped line is a syntax error, or a key
+  // gone, which the reader refuses. A file laid out by hand with a whole
+  // feature on one line loses it to drop_line and stays valid JSON: a smaller
+  // document, which no single-file reader can tell from damage. Such an
+  // input would fail the sweep on its layout, not on a reader, so it is
+  // refused up front, naming the line: lay it out as the writer saves it.
+  void CheckLayout(const Input& in,
+                   const std::map<std::string, size_t>& counts) {
+    const std::string text = ReadBytes(in.path);
+    const nlohmann::json whole = nlohmann::json::parse(text, nullptr, false);
+    if (!whole.is_object())
+      return;
+    std::vector<std::string> lists; // the counted lists the file holds
+    for (const auto& [what, n] : counts)
+      if (const auto it = whole.find(what);
+          it != whole.end() && it->is_array() && !it->empty())
+        lists.push_back(what);
+    if (lists.empty())
+      return;
+    size_t start = 0;
+    for (size_t line = 1; start < text.size(); line++) {
+      size_t end = text.find('\n', start);
+      end = end == std::string::npos ? text.size() : end + 1;
+      const std::string without = text.substr(0, start) + text.substr(end);
+      const nlohmann::json j = nlohmann::json::parse(without, nullptr, false);
+      if (j.is_object())
+        for (const std::string& what : lists) {
+          const auto it = j.find(what);
+          if (it != j.end() && it->is_array() &&
+              it->size() < whole.at(what).size()) {
+            Fail(in.corpus,
+                 "line " + std::to_string(line) + " holds a whole item of `" +
+                     what +
+                     "`: without it the file is still valid JSON, one item "
+                     "short, which the sweep cannot tell from a smaller "
+                     "document; lay the file out as the writer saves it "
+                     "(dump(2))");
+            return;
+          }
+        }
+      start = end;
+    }
+  }
+
   void RunDocument(const Input& in) {
     Note(in.corpus + ":original");
     const Stopwatch t0;
@@ -1149,6 +1195,8 @@ struct Sweep::Impl {
       Fail(in.corpus, "the unmutated input loads with drops: " +
                           orig.outcome.drops.Summary());
     base.counts = orig.outcome.counts;
+    if (!in.tree)
+      CheckLayout(in, base.counts);
     {
       const fs::path o1 = SaveTarget(in, "o1");
       fs::remove_all(o1.parent_path());

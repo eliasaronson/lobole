@@ -341,6 +341,30 @@ TEST_CASE("Reader fuzz: the harness catches what it claims to",
           return f.find("does not name the file") != std::string::npos;
         }));
   }
+  SECTION("an input with a whole feature on one line is refused") {
+    // Dropping that line leaves valid JSON one feature short, which no
+    // reader can tell from a smaller part: the sweep would blame the reader.
+    const auto layoutFailure = [](const readerfuzz::Summary& s) {
+      return std::any_of(s.failures.begin(), s.failures.end(),
+                         [](const std::string& f) {
+                           return f.find("line 5 holds a whole item of "
+                                         "`features`") != std::string::npos;
+                         });
+    };
+    const fs::path oneLine = fs::temp_directory_path() /
+                             ("lobole-planted-" + std::to_string(::getpid())) /
+                             golden.filename();
+    fs::create_directories(oneLine.parent_path());
+    const nlohmann::json j = nlohmann::json::parse(original);
+    std::ofstream(oneLine) << "{\n  \"format\": \"designer-document\",\n"
+                           << "  \"version\": 1,\n  \"features\": [\n    "
+                           << j.at("features").at(0).dump() << "\n  ]\n}\n";
+    const readerfuzz::Planted p{realRead, realSave};
+    const auto bad = readerfuzz::RunPlanted(oneLine, p, 1);
+    fs::remove_all(oneLine.parent_path());
+    CHECK(layoutFailure(bad));
+    CHECK_FALSE(layoutFailure(readerfuzz::RunPlanted(golden, p, 1)));
+  }
   SECTION("a reader that spins fails its CPU budget") {
     readerfuzz::Planted p{[&](const fs::path& path) {
                             if (bytesOf(path) != original)

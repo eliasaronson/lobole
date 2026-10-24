@@ -537,6 +537,13 @@ and the underlay's decode. A tree's own file damage runs on every file that
 is no collection's item and on one item of each kind per directory; the
 single-file families damage every item's content.
 
+A single-file input must be laid out as the writer saves it (`dump(2)`),
+so one dropped line breaks the JSON or takes a key. A golden written by
+hand with a whole feature, occurrence or view on one line loses it to
+`drop_line` and stays valid: a smaller document, which no reader can tell
+from damage. The sweep refuses such an input before its cases, naming the
+line and the list.
+
 **The rules** for every case:
 
 - crash: the process dies, or ASan / UBSan reports. Before each case its id
@@ -594,7 +601,8 @@ prints its count and time.
 `Reader fuzz: the harness catches what it claims to` plants a reader that
 drops an unknown key, one that refuses without naming the file, one that
 spins past its CPU budget and one that sleeps past a (shortened) wall
-backstop, and each must fail its rule. `reader_fuzz_budget_under_load`
+backstop, and each must fail its rule; a part with its feature on one line
+must be refused as an input, and the golden it was taken from must not. `reader_fuzz_budget_under_load`
 pins a reader spending half its budget in CPU to one core beside four
 contending `tools/with-cpu-load.sh` burners: its read takes about five times
 that in wall time, past the budget, and must pass.
