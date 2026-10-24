@@ -881,6 +881,12 @@ cam::Setup CamSetupFromJson(const json& j) {
       op.side = cam::Side::Inside;
     op.finishTool = oj.value("finish_tool", 0);
     op.finishStock = oj.value("finish_stock", 0.0);
+    // The stock is written only beside its pass: without one, the next save
+    // would drop it.
+    if (op.finishTool == 0 && oj.contains("finish_stock"))
+      throw std::runtime_error("cam operation " + std::to_string(op.id) +
+                               ": finish_stock without a finish_tool (the "
+                               "finishing pass it is left for)");
     if (oj.contains("tabs")) {
       readctx::RefuseUnknownKeys(oj["tabs"], {"count", "width", "height"},
                                  "cam tabs");

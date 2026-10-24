@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "job",
+  "id": "job/v96-cam-drilled-bores.json:drop_line:1",
+  "input": "v96-cam-drilled-bores.json",
+  "message": [
+    "v96-cam-drilled-bores.json",
+    "finish_stock without a finish_tool"
+  ],
+  "seed": 2
+}

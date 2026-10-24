@@ -1,0 +1,94 @@
+{
+  "features": [
+    {
+      "constraints": [
+        {
+          "a": [
+            0,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            0,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            0,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        }
+      ],
+      "entities": [
+        {
+          "c1": [
+            0,
+            0
+          ],
+          "c2": [
+            4,
+            2
+          ],
+          "type": "rect"
+        },
+        {
+          "center": [
+            2,
+            1
+          ],
+          "radius": 0.5,
+          "type": "circle"
+        }
+      ],
+      "id": 1,
+      "name": "Sketch 1",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 2.0,
+      "id": 2,
+      "name": "Pad",
+      "sketch_id": 1,
+      "type": "Extrude"
+    }
+  ],
+  "format": "designer-document",
+  "version": 3
+}

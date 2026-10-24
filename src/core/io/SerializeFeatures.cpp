@@ -2654,6 +2654,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
             "': some entities have ids and some do not (pre-v4 sketches "
             "have none, later ones one on every entity)");
     if (legacy) {
+      // The migration below drops a constraint on a rigid rect (a solver
+      // no-op). One listed twice is damage, not two constraints, and every
+      // copy would go with no word (a list grown to 100 000 of one).
+      std::set<std::string> seenConstraints;
+      for (const auto& cj : j.value("constraints", json::array()))
+        if (!seenConstraints.insert(cj.dump()).second)
+          throw std::runtime_error("sketch '" + name +
+                                   "' (pre-v4) lists the constraint " +
+                                   cj.dump() + " twice");
       for (size_t i = 0; i < sk->entities.size(); i++)
         sketch::SetEntityId(sk->entities[i], static_cast<uint32_t>(i + 1));
       for (auto& c : sk->constraints) {

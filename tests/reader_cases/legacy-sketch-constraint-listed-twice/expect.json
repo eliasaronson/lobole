@@ -1,0 +1,13 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v03-legacy-sketch.json:grow_array:0",
+  "input": "v03-legacy-sketch.json",
+  "message": [
+    "v03-legacy-sketch.json",
+    "(pre-v4) lists the constraint",
+    "twice"
+  ],
+  "note": "the grown list cut to its first three copies",
+  "seed": 2
+}
