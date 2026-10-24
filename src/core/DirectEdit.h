@@ -153,12 +153,16 @@ std::optional<std::vector<int>> FeatureFaces(const Body& body,
 std::optional<glm::dvec3> HostNormal(const Body& body,
                                      const std::vector<int>& faces);
 
-// How long one direct-edit builder may run before it is given up, s. The
-// builders stop at their progress checks (Message_ProgressIndicator::
-// UserBreak); without one, deleting a face of a modelled thread ran
-// Defeaturing's edge-face intersections for more than fifteen minutes. The
-// 100 bores of plate_100_holes.step delete in about 20 s, half of this.
-inline constexpr double kBuilderBudgetS = 45.0;
+// How long a direct edit's builders may run before it is given up, s: a
+// minute and half a second more for each face it was given. The builders
+// stop at their progress checks (Message_ProgressIndicator::UserBreak);
+// without one, deleting a face of a modelled thread ran Defeaturing's
+// edge-face intersections for more than fifteen minutes. It is a backstop
+// against a frozen app, not a test of speed: an answer that depends on the
+// machine's load is not one to rely on, so it sits far past any edit that
+// builds (the 100 bores of plate_100_holes.step take about 20 s; they get
+// 110 s).
+inline double BuilderBudgetS(size_t faces) { return 60.0 + 0.5 * faces; }
 
 // A progress indicator that asks its builder to stop once `seconds` have
 // passed (`Expired` then says so). Handed to a builder as `Start()`.

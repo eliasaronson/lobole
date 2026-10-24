@@ -82,13 +82,25 @@ namespace directedit {
 std::string ReplaceOnto(
     const Body& body, int index, const std::string& name,
     const std::function<TopoDS_Face(const glm::dvec3&, double)>& makeOnto,
-    const std::string& label, uint64_t tag, CADShape& out, ElementMap& map);
+    const std::string& label, uint64_t tag, CADShape& out, ElementMap& map,
+    const std::string& op = "Replace Face");
+
+// The same onto the whole surface `surface` is a face of (a cylinder all the
+// way round, a freeform surface extended past its edges): what Offset Face
+// puts a face that is not a plane onto, its own surface offset.
+std::string ReplaceOntoSurfaceOf(const Body& body, int index,
+                                 const std::string& name,
+                                 const TopoDS_Face& surface,
+                                 const std::string& label, uint64_t tag,
+                                 CADShape& out, ElementMap& map,
+                                 const std::string& op = "Replace Face");
 
 // The same onto the plane through `origin` square to `normal`: what Offset
 // Face falls back to for a planar face the offset builder will not move.
 std::string ReplaceOntoPlane(const Body& body, int index,
                              const std::string& name, const glm::dvec3& origin,
                              const glm::dvec3& normal, const std::string& label,
-                             uint64_t tag, CADShape& out, ElementMap& map);
+                             uint64_t tag, CADShape& out, ElementMap& map,
+                             const std::string& op = "Replace Face");
 
 } // namespace directedit

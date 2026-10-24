@@ -49,7 +49,7 @@ std::string DeleteAndHeal(const Picked& picked, Healed& out,
   out.input = copy.shape;
   BRepAlgoAPI_Defeaturing df;
   const Handle(Message_ProgressIndicator) deadline =
-      MakeDeadline(kBuilderBudgetS);
+      MakeDeadline(BuilderBudgetS(picked.names.size()));
   const std::string why = Guarded(op + " of " + NameList(picked.names), [&] {
     df.SetShape(copy.shape);
     df.AddFacesToRemove(copy.faces);
@@ -60,7 +60,8 @@ std::string DeleteAndHeal(const Picked& picked, Healed& out,
   if (!why.empty())
     return why;
   if (Expired(deadline))
-    return op + " gave up after " + std::to_string(int(kBuilderBudgetS)) +
+    return op + " gave up after " +
+           std::to_string(int(BuilderBudgetS(picked.names.size()))) +
            " s healing around " + NameList(picked.names) +
            ": the faces around them are too costly to extend (a modelled "
            "thread's flanks, freeform faces)";

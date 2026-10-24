@@ -553,12 +553,15 @@ face. Offset and Replace Face refuse the same way
 the feature that made them.
 
 Every direct-edit builder (Defeaturing, the offset builder, MakerVolume) also
-runs under a deadline, `directedit::kBuilderBudgetS` (45 s), through a
-`Message_ProgressIndicator` whose `UserBreak` turns true once it has passed:
-past it the edit is refused ("gave up after 45 s …"). The builders check it
-only at their progress points, so a call can run well past the budget
-before it stops; it is a backstop, not a timer. The
-bbox may grow by no more than the deleted faces' own extent. Defeaturing
+runs under a deadline, `directedit::BuilderBudgetS` (a minute and 0.5 s a
+face), through a `Message_ProgressIndicator` whose `UserBreak` turns true
+once it has passed: past it the edit is refused ("gave up after 60 s …").
+The builders check it only at their progress points, so a call can run
+past the budget before it stops. It is a backstop against a frozen app, far
+past any edit that builds, not a timer whose answer could depend on the
+machine's load.
+
+The bbox may grow by no more than the deleted faces' own extent. Defeaturing
 trims the host face's own surface, so a pocket in an imported face whose
 edges lie 5e-5 mm off its plane fills and the host stays that plane
 (`test_direct_edit`).
@@ -574,27 +577,35 @@ were. `grow_faces` also answers `host_normal`, the largest planar face the
 feature sits in.
 
 All 100 bores of SolidCraft's `plate_100_holes.step` delete in one feature
-in about 20 s here, nearly all of it Defeaturing; the test allows 60 s.
+in about 20 s on a quiet machine (nearly 40 s on a loaded one), nearly all of
+it Defeaturing; the test allows 90 s.
 
 ### Offset Face
 
 `OffsetFace {body_id, faces[], distance_mm (+_expr)}` moves each face along
 its own normal, positive outward (adding material); its neighbours follow
 along their own surfaces, so a drafted wall stays drafted and a cylinder
-changes radius. `BRepOffset_MakeOffset` in skin mode with intersection
-joins, zero offset on the shape and `SetOffsetOnFace` per face, named
-through an adapter that reads the face the builder GENERATES from a picked
-one as that face modified. A shell offset that comes back unclosed is made a
-solid again (`BRepBuilderAPI_MakeSolid`). It takes Shell's guard for the
-unpatched apt OCCT: up to five draws on a copy when a result fails the
-checks, but none after a fault (a builder that long-jumped out of its frames
-is not run again on that heap).
+changes radius. Each face is put onto its own surface offset by the distance
+-- a plane moved, a cylinder of another radius (`Geom_OffsetSurface`, its
+canonical surface where it has one) -- by Replace Face's cells
+(`directedit::ReplaceOnto`), one face at a time, its neighbours extended or
+trimmed to meet it; a face a later step trims again keeps one `;M<id>`.
 
-The offset builder also refuses planar faces it should move (a wall of an
-imported battery holder with cradles cut across it: no error, no shape). A
-set of planar faces then falls back to Replace Face's cells, one face at a
-time, each onto its own plane moved by the distance
-(`directedit::ReplaceOntoPlane`).
+A set whose faces meet one another tangentially (a top, its round and the
+wall below) goes to `BRepOffset_MakeOffset` instead (skin mode, intersection
+joins, zero offset on the shape, `SetOffsetOnFace` per face): one face at a
+time, a moved face no longer meets its unmoved tangent neighbour at all. It
+is named through an adapter that reads the face the builder GENERATES from a
+picked one as that face modified; a shell that comes back unclosed is made
+a solid again. It takes Shell's guard for the unpatched apt OCCT (up to five
+draws on a copy when a result fails the checks, under one deadline), but
+none after a fault: a builder that long-jumped out of its frames is not run
+again on that heap. The builder is not used elsewhere because elsewhere it
+was the problem: it refused planar walls it should move (an imported
+battery holder with cradles cut across it: no error, no shape), faulted in
+`BRepOffset_Inter2d` and ran its 3D intersections past any budget on the
+action matrix's fuzz designs, where the cells answer in a fraction of a
+second.
 
 Checks: outward never removes volume, inward never adds; the bbox grows by
 at most the distance; an inward offset through the body is refused

@@ -86,12 +86,17 @@ std::string DescribeFace(const Body& body, int faceIndex,
 }
 
 std::string NameList(const std::vector<std::string>& names) {
+  // Six named, the rest counted: a hundred bores is not a sentence.
+  constexpr size_t kListed = 6;
+  const size_t shown = std::min(names.size(), kListed);
   std::string out;
-  for (size_t i = 0; i < names.size(); i++) {
+  for (size_t i = 0; i < shown; i++) {
     if (i > 0)
-      out += i + 1 == names.size() ? " and " : ", ";
+      out += i + 1 == shown && shown == names.size() ? " and " : ", ";
     out += "`" + names[i] + "`";
   }
+  if (names.size() > shown)
+    out += " and " + std::to_string(names.size() - shown) + " more";
   return out;
 }
 

@@ -118,7 +118,8 @@ namespace directedit {
 std::string ReplaceOnto(
     const Body& body, int replaced, const std::string& faceName,
     const std::function<TopoDS_Face(const glm::dvec3&, double)>& makeOnto,
-    const std::string& label, uint64_t tag, CADShape& out, ElementMap& map) {
+    const std::string& label, uint64_t tag, CADShape& out, ElementMap& map,
+    const std::string& op) {
   const std::string described = DescribeFace(body, replaced, faceName);
   // Otherwise: the cells of the untouched faces, the neighbours extended and
   // the target, and the one on the untouched faces' inner side.
@@ -201,12 +202,12 @@ std::string ReplaceOnto(
           uMin = uMax = vMin = vMax = true;
       }
       TopoDS_Face ext;
-      const std::string why = Guarded("Replace Face", [&] {
+      const std::string why = Guarded(op, [&] {
         BRepLib::ExtendFace(f, diag, uMin, uMax, vMin, vMax, ext);
       });
       if (!why.empty() || ext.IsNull()) {
-        return "Replace Face could not extend " +
-               DescribeFace(body, i, nameOf(i)) + " to meet " + label;
+        return op + " could not extend " + DescribeFace(body, i, nameOf(i)) +
+               " to meet " + label;
       }
       builder.Add(input, ext);
       named.emplace_back(ext, nameOf(i));
@@ -219,7 +220,7 @@ std::string ReplaceOnto(
   }
   const TopoDS_Face onto = makeOnto(centre, 2.0 * diag);
   if (onto.IsNull()) {
-    return "Replace Face could not build the surface of " + label;
+    return op + " could not build the surface of " + label;
   }
   builder.Add(input, onto);
   named.emplace_back(onto, faceName);
@@ -239,8 +240,8 @@ std::string ReplaceOnto(
 
   BOPAlgo_MakerVolume maker;
   const Handle(Message_ProgressIndicator) deadline =
-      MakeDeadline(kBuilderBudgetS);
-  std::string why = Guarded("Replace Face of " + described, [&] {
+      MakeDeadline(BuilderBudgetS(1));
+  std::string why = Guarded(op + " of " + described, [&] {
     TopTools_ListOfShape args;
     for (TopExp_Explorer ex(input, TopAbs_FACE); ex.More(); ex.Next())
       args.Append(ex.Current());
@@ -250,11 +251,11 @@ std::string ReplaceOnto(
     maker.Perform(deadline->Start());
   });
   if (why.empty() && Expired(deadline))
-    why = "Replace Face of " + described + " onto " + label +
-          " gave up after " + std::to_string(int(kBuilderBudgetS)) +
+    why = op + " of " + described + " onto " + label + " gave up after " +
+          std::to_string(int(BuilderBudgetS(1))) +
           " s: the faces around it are too costly to intersect";
   if (why.empty() && maker.HasErrors())
-    why = "Replace Face of " + described + " onto " + label +
+    why = op + " of " + described + " onto " + label +
           " did not build: the faces do not close a volume";
   if (!why.empty()) {
     return why;
@@ -298,13 +299,13 @@ std::string ReplaceOnto(
   };
   if (cells.empty()) {
     const auto miss = unreached();
-    return "Replace Face of " + described + " onto " + label +
+    return op + " of " + described + " onto " + label +
            (miss.empty()
                 ? std::string(" closes no volume")
                 : ": " + NameList(miss) + ", extended, do not reach it");
   }
   if (static_cast<int>(cells.size()) != body.shape.SolidCount()) {
-    return "Replace Face of " + described + " onto " + label + " leaves " +
+    return op + " of " + described + " onto " + label + " leaves " +
            std::to_string(cells.size()) + " separate pieces of the body";
   }
   TopoDS_Shape resultShape = cells.front();
@@ -328,7 +329,7 @@ std::string ReplaceOnto(
       have.insert(n);
     for (const int i : untouched)
       if (!have.count(nameOf(i))) {
-        return "Replace Face of " + described + " onto " + label + " cuts " +
+        return op + " of " + described + " onto " + label + " cuts " +
                DescribeFace(body, i, nameOf(i)) +
                ", which it should leave alone";
       }
@@ -339,7 +340,7 @@ std::string ReplaceOnto(
         });
     if (!landed) {
       const auto miss = unreached();
-      return "Replace Face of " + described + " onto " + label +
+      return op + " of " + described + " onto " + label +
              (miss.empty()
                   ? std::string(": the target does not bound the "
                                 "body there")
@@ -350,10 +351,27 @@ std::string ReplaceOnto(
   return {};
 }
 
+std::string ReplaceOntoSurfaceOf(const Body& body, int index,
+                                 const std::string& name,
+                                 const TopoDS_Face& surface,
+                                 const std::string& label, uint64_t tag,
+                                 CADShape& out, ElementMap& map,
+                                 const std::string& op) {
+  Target target;
+  target.face = surface;
+  return ReplaceOnto(
+      body, index, name,
+      [&](const glm::dvec3& centre, double half) {
+        return TargetFace(target, centre, half);
+      },
+      label, tag, out, map, op);
+}
+
 std::string ReplaceOntoPlane(const Body& body, int index,
                              const std::string& name, const glm::dvec3& origin,
                              const glm::dvec3& normal, const std::string& label,
-                             uint64_t tag, CADShape& out, ElementMap& map) {
+                             uint64_t tag, CADShape& out, ElementMap& map,
+                             const std::string& op) {
   const gp_Pln pln(gp_Pnt(origin.x, origin.y, origin.z),
                    gp_Dir(normal.x, normal.y, normal.z));
   return ReplaceOnto(
@@ -361,7 +379,7 @@ std::string ReplaceOntoPlane(const Body& body, int index,
       [&](const glm::dvec3& centre, double half) {
         return BoundedPlane(pln, centre, half);
       },
-      label, tag, out, map);
+      label, tag, out, map, op);
 }
 
 } // namespace directedit

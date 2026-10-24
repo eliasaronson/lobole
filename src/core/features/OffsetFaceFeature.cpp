@@ -10,16 +10,20 @@
 #include "core/features/ReplaceFaceFeature.h"
 
 #include <BRepBuilderAPI_Copy.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepLib.hxx>
 #include <BRepOffset_MakeOffset.hxx>
+#include <BRepTools.hxx>
 #include <BRepTools_History.hxx>
 #include <BRep_Tool.hxx>
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <GeomLProp_SLProps.hxx>
+#include <Geom_OffsetSurface.hxx>
 #include <Geom_Surface.hxx>
 #include <IntCurvesFace_ShapeIntersector.hxx>
 #include <Precision.hxx>
+#include <Standard_Failure.hxx>
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopTools_IndexedDataMapOfShapeListOfShape.hxx>
@@ -57,6 +61,58 @@ TopoDS_Face FaceAt(const TopoDS_Shape& shape, int index) {
     if (i == index)
       return TopoDS::Face(ex.Current());
   return {};
+}
+
+// Whether two of the picked faces meet tangentially along an edge.
+bool TangentAmongPicked(const Picked& picked) {
+  const TopoDS_Shape& shape = picked.body->shape.GetShape();
+  TopTools_IndexedMapOfShape faces;
+  TopExp::MapShapes(shape, TopAbs_FACE, faces);
+  TopTools_IndexedDataMapOfShapeListOfShape parents;
+  TopExp::MapShapesAndAncestors(shape, TopAbs_EDGE, TopAbs_FACE, parents);
+  for (const int i : picked.indices) {
+    const TopoDS_Face face = FaceAt(shape, i);
+    for (TopExp_Explorer ex(face, TopAbs_EDGE); ex.More(); ex.Next()) {
+      const int at = parents.FindIndex(ex.Current());
+      if (at == 0)
+        continue;
+      for (const TopoDS_Shape& other : parents(at)) {
+        const int oi = faces.FindIndex(other) - 1;
+        if (other.IsSame(face) ||
+            std::find(picked.indices.begin(), picked.indices.end(), oi) ==
+                picked.indices.end())
+          continue;
+        if (Measure::EdgeIsSmooth(TopoDS::Edge(ex.Current()), face,
+                                  TopoDS::Face(other)))
+          return true;
+      }
+    }
+  }
+  return false;
+}
+
+// A face on `face`'s surface offset by `distance` along its outward normal
+// (the canonical surface where there is one: a cylinder of another radius),
+// over the face's own UV box; null when the surface does not offset.
+TopoDS_Face OffsetSurfaceFace(const TopoDS_Face& face, double distance) {
+  const Handle(Geom_Surface) surf = BRep_Tool::Surface(face);
+  if (surf.IsNull())
+    return {};
+  const double sign = face.Orientation() == TopAbs_REVERSED ? -1.0 : 1.0;
+  Handle(Geom_Surface) moved;
+  try {
+    const Handle(Geom_OffsetSurface) off =
+        new Geom_OffsetSurface(surf, sign * distance);
+    moved = off->Surface();
+    if (moved.IsNull())
+      moved = off;
+    double u0, u1, v0, v1;
+    BRepTools::UVBounds(face, u0, u1, v0, v1);
+    BRepBuilderAPI_MakeFace mk(moved, u0, u1, v0, v1, 1e-7);
+    return mk.IsDone() ? mk.Face() : TopoDS_Face();
+  } catch (const Standard_Failure&) {
+    return {};
+  }
 }
 
 // A picked face whose neighbour across an edge meets it tangentially and is
@@ -199,89 +255,93 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
   expect.faces = Expect::Faces::Modified;
   expect.bboxGrowth = std::max(0.0, distance);
 
-  // The offset builder quilts its faces in an order that follows addresses
-  // (MakeShells; patched in our OCC, nix/patches/occt-shell-cap-order.patch,
-  // not in apt's): a result that fails the checks is built again on a fresh
-  // copy, as Shell's is, and refused only when every draw failed.
-  constexpr int kAttempts = 5;
-  std::string error;
-  for (int attempt = 0; attempt < kAttempts; attempt++) {
-    const Copied copy = CopyFor(body, picked.indices);
-    BRepOffset_MakeOffset maker;
+  // A face offset is that face put onto its own surface offset by the
+  // distance -- a plane moved, a cylinder of another radius -- which Replace
+  // Face's cells build exactly (directedit::ReplaceOnto), one face at a time.
+  // The offset builder is kept for a set whose faces meet tangentially (a
+  // top, its round and the wall below): one face at a time, a moved face no
+  // longer meets its unmoved tangent neighbour at all. Elsewhere it refused
+  // walls it should move (an imported holder with cradles cut across it: no
+  // error, no shape), faulted inside BRepOffset_Inter2d and ran past any
+  // budget in its 3D intersections (tools/action_matrix.py's fuzz designs),
+  // where the cells do not.
+  if (TangentAmongPicked(picked)) {
+    // The offset builder quilts its faces in an order that follows addresses
+    // (MakeShells; patched in our OCC, nix/patches/occt-shell-cap-order.patch,
+    // not in apt's): a result that fails the checks is built again on a fresh
+    // copy, as Shell's is, and refused only when every draw failed.
+    constexpr int kAttempts = 5;
+    // One budget for every draw: five of them at the full budget each is
+    // how an honest refusal became a hang.
     const Handle(Message_ProgressIndicator) deadline =
-        MakeDeadline(kBuilderBudgetS);
-    error = Guarded(op + " of " + NameList(picked.names), [&] {
-      maker.Initialize(copy.shape, 0.0, Precision::Confusion(), BRepOffset_Skin,
-                       /*Intersection=*/Standard_True,
-                       /*SelfInter=*/Standard_False, GeomAbs_Intersection,
-                       /*Thickening=*/Standard_False,
-                       /*RemoveIntEdges=*/Standard_False);
-      for (const TopoDS_Shape& f : copy.faces)
-        maker.SetOffsetOnFace(TopoDS::Face(f), distance);
-      maker.MakeOffsetShape(deadline->Start());
-    });
-    if (error.empty() && Expired(deadline)) {
-      error = op + " of " + NameList(picked.names) + " gave up after " +
-              std::to_string(int(kBuilderBudgetS)) +
-              " s: the faces around them are too costly to offset";
-      return error; // a draw again would cost as much
-    }
-    // A fault is not drawn again: the builder long-jumped out of its own
-    // frames, and running it once more on that heap is how a caught fault
-    // becomes an uncaught one (tests/test_direct_edit.cpp's battery holder).
-    if (!error.empty()) {
-      if (error.find("inside OpenCASCADE") != std::string::npos)
-        break;
-      continue;
-    }
-    if (!maker.IsDone() || maker.Shape().IsNull()) {
-      error = op + " of " + NameList(picked.names) + " by " + Mm(distance) +
-              " mm did not build (OpenCASCADE offset error " +
-              std::to_string(static_cast<int>(maker.Error())) + ")";
-      continue;
-    }
-    TopoDS_Shape shape = maker.Shape();
-    // Skin mode hands back the offset SHELL where it could not close it into
-    // a solid itself (a bore offset into its block): a closed shell is the
-    // solid's boundary, made one again, its faces the same.
-    if (!TopExp_Explorer(shape, TopAbs_SOLID).More()) {
-      TopExp_Explorer shell(shape, TopAbs_SHELL);
-      if (shell.More()) {
-        BRepBuilderAPI_MakeSolid solid(TopoDS::Shell(shell.Current()));
-        if (solid.IsDone()) {
-          TopoDS_Solid made = solid.Solid();
-          BRepLib::OrientClosedSolid(made);
-          shape = made;
+        MakeDeadline(BuilderBudgetS(picked.names.size()));
+    std::string error;
+    for (int attempt = 0; attempt < kAttempts; attempt++) {
+      const Copied copy = CopyFor(body, picked.indices);
+      BRepOffset_MakeOffset maker;
+      error = Guarded(op + " of " + NameList(picked.names), [&] {
+        maker.Initialize(copy.shape, 0.0, Precision::Confusion(),
+                         BRepOffset_Skin,
+                         /*Intersection=*/Standard_True,
+                         /*SelfInter=*/Standard_False, GeomAbs_Intersection,
+                         /*Thickening=*/Standard_False,
+                         /*RemoveIntEdges=*/Standard_False);
+        for (const TopoDS_Shape& f : copy.faces)
+          maker.SetOffsetOnFace(TopoDS::Face(f), distance);
+        maker.MakeOffsetShape(deadline->Start());
+      });
+      if (error.empty() && Expired(deadline)) {
+        error = op + " of " + NameList(picked.names) + " gave up after " +
+                std::to_string(int(BuilderBudgetS(picked.names.size()))) +
+                " s: the faces around them are too costly to offset";
+        return error; // a draw again would cost as much
+      }
+      // A fault is not drawn again: the builder long-jumped out of its own
+      // frames, and running it once more on that heap is how a caught fault
+      // becomes an uncaught one (tests/test_direct_edit.cpp's battery holder).
+      if (!error.empty()) {
+        if (error.find("inside OpenCASCADE") != std::string::npos)
+          break;
+        continue;
+      }
+      if (!maker.IsDone() || maker.Shape().IsNull()) {
+        error = op + " of " + NameList(picked.names) + " by " + Mm(distance) +
+                " mm did not build (OpenCASCADE offset error " +
+                std::to_string(static_cast<int>(maker.Error())) + ")";
+        continue;
+      }
+      TopoDS_Shape shape = maker.Shape();
+      // Skin mode hands back the offset SHELL where it could not close it into
+      // a solid itself (a bore offset into its block): a closed shell is the
+      // solid's boundary, made one again, its faces the same.
+      if (!TopExp_Explorer(shape, TopAbs_SOLID).More()) {
+        TopExp_Explorer shell(shape, TopAbs_SHELL);
+        if (shell.More()) {
+          BRepBuilderAPI_MakeSolid solid(TopoDS::Shell(shell.Current()));
+          if (solid.IsDone()) {
+            TopoDS_Solid made = solid.Solid();
+            BRepLib::OrientClosedSolid(made);
+            shape = made;
+          }
         }
       }
+      OffsetHistory adapter{maker, {}};
+      BRepTools_History history(topo::HistoryArguments(copy.shape), adapter);
+      ElementMap names =
+          NameThrough(copy.shape, body.elementMap, history, shape, tag);
+      const CADShape result(shape);
+      RestoreUntouched(body, result, names, tag, picked.names);
+      error = CheckResult(body, picked, result, names, tag, expect, op);
+      if (error.empty()) {
+        if (attempt > 0)
+          LOG_INFO("{}: built on attempt {} of {}", op, attempt + 1, kAttempts);
+        out = result;
+        map = names;
+        return {};
+      }
     }
-    OffsetHistory adapter{maker, {}};
-    BRepTools_History history(topo::HistoryArguments(copy.shape), adapter);
-    ElementMap names =
-        NameThrough(copy.shape, body.elementMap, history, shape, tag);
-    const CADShape result(shape);
-    RestoreUntouched(body, result, names, tag, picked.names);
-    error = CheckResult(body, picked, result, names, tag, expect, op);
-    if (error.empty()) {
-      if (attempt > 0)
-        LOG_INFO("{}: built on attempt {} of {}", op, attempt + 1, kAttempts);
-      out = result;
-      map = names;
-      return {};
-    }
-  }
-  // The offset builder refuses some faces it should move (a wall of an
-  // imported holder with cradles cut across it: no error, no shape). A
-  // planar face offset is that face put onto its own plane moved by the
-  // distance, which Replace Face's cells build without it: one face at a
-  // time, each onto its moved plane.
-  const bool allPlanar =
-      std::all_of(picked.indices.begin(), picked.indices.end(), [&](int i) {
-        const auto info = Measure::DescribeFaceAt(body, i);
-        return info && info->kind == "plane";
-      });
-  if (!allPlanar)
     return error;
+  }
   Body step = body;
   for (size_t k = 0; k < picked.names.size(); k++) {
     // An earlier step may have trimmed it: then it reads ";M<tag>".
@@ -293,15 +353,28 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
     }
     const auto info = at ? Measure::DescribeFaceAt(step, *at) : std::nullopt;
     if (!info)
-      return error;
-    const glm::dvec3 n = glm::normalize(info->normal);
+      return op + " of " + NameList(picked.names) + ": `" + picked.names[k] +
+             "` is gone after the faces before it moved";
     CADShape next;
     ElementMap names;
-    const std::string why = ReplaceOntoPlane(
-        step, *at, name, info->centroid + n * distance, n,
-        "its plane moved " + Mm(distance) + " mm", tag, next, names);
+    std::string why;
+    if (info->kind == "plane") {
+      const glm::dvec3 n = glm::normalize(info->normal);
+      why = ReplaceOntoPlane(step, *at, name, info->centroid + n * distance, n,
+                             "its plane moved " + Mm(distance) + " mm", tag,
+                             next, names, op);
+    } else {
+      const TopoDS_Face moved =
+          OffsetSurfaceFace(FaceAt(step.shape.GetShape(), *at), distance);
+      if (moved.IsNull())
+        return op + " of " + DescribeFace(step, *at, name) +
+               ": its surface does not offset by " + Mm(distance) + " mm";
+      why = ReplaceOntoSurfaceOf(step, *at, name, moved,
+                                 "its surface offset " + Mm(distance) + " mm",
+                                 tag, next, names, op);
+    }
     if (!why.empty())
-      return error + "; built face by face instead: " + why;
+      return why;
     step.shape = next;
     step.elementMap = names;
   }
@@ -316,7 +389,7 @@ std::string OffsetFaces(const Picked& picked, double distance, uint64_t tag,
   if (std::string bad = CheckResult(body, picked, step.shape, step.elementMap,
                                     tag, expect, op);
       !bad.empty())
-    return error + "; built face by face instead: " + bad;
+    return bad;
   out = step.shape;
   map = step.elementMap;
   return {};
