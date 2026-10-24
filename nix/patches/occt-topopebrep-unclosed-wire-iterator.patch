@@ -1,0 +1,33 @@
+--- a/src/TopOpeBRepBuild/TopOpeBRepBuild_Merge.cxx
++++ b/src/TopOpeBRepBuild/TopOpeBRepBuild_Merge.cxx
+@@ -128,8 +128,13 @@ static void CorrectEdgeOrientation(TopoDS_Shape& aWire)
+ static void CorrectUnclosedWire(TopoDS_Shape& aWire)
+ {
+   //  std::cout << "-------CorrectUnclosedWire" << std::endl;
+-  BRep_Builder    BB;
+-  TopoDS_Iterator tdi(aWire, Standard_False, Standard_False);
++  BRep_Builder BB;
++  // The edges to remove are collected first: removing one from the wire
++  // while a TopoDS_Iterator walks the wire's own list freed the node the
++  // iterator stood on, and its Next() faulted (a Fillet whose blend went
++  // through this repair, SIGSEGV at a non-null address).
++  TopTools_ListOfShape aBadEdges;
++  TopoDS_Iterator      tdi(aWire, Standard_False, Standard_False);
+   for (; tdi.More(); tdi.Next())
+   {
+     const TopoDS_Shape& ed  = tdi.Value();
+@@ -137,9 +142,13 @@ static void CorrectUnclosedWire(TopoDS_Shape& aWire)
+     if (nbv <= 1)
+     {
+       //      std::cout << "Remove bad edge" << std::endl;
+-      BB.Remove(aWire, ed);
++      aBadEdges.Append(ed);
+     }
+   }
++  for (TopTools_ListIteratorOfListOfShape itb(aBadEdges); itb.More(); itb.Next())
++  {
++    BB.Remove(aWire, itb.Value());
++  }
+ 
+   TopTools_IndexedDataMapOfShapeListOfShape VElists;
+   VElists.Clear();

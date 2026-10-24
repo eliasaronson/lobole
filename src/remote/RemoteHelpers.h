@@ -473,6 +473,11 @@ inline nlohmann::json RegenSummaryJson(const Document& doc) {
         {"index", i}, {"name", f->GetName()}, {"error", f->GetError()}};
     if (f->ErrorAfterEarlierFailure())
       entry["after_earlier_failure"] = true;
+    // The error was a fault the kernel's signal scope caught: the process
+    // went on, but save and restart
+    // (docs/modeling/README.md#a-caught-kernel-fault).
+    if (doc.KernelFaulted(f->GetId()))
+      entry["kernel_fault"] = true;
     failed.push_back(std::move(entry));
   }
   return {{"ok", failed.empty()},

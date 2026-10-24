@@ -262,7 +262,7 @@ jobs:
       - uses: actions/cache@v6
         with:
           path: /opt/lobole-deps
-          key: appimage-deps-${{ hashFiles('packaging/appimage/deps.sh', 'nix/patches/occt-shell-cap-order.patch') }}
+          key: appimage-deps-${{ hashFiles('packaging/appimage/deps.sh', 'nix/patches/occt-*.patch') }}
       - name: ccache (restore)
         uses: actions/cache/restore@v6
         with:

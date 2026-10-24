@@ -5,7 +5,7 @@
 # Build what the GUI AppImage needs and Ubuntu 24.04 lacks, into PREFIX:
 # OpenCASCADE 7.9 (24.04 has 7.6) and Netgen, which must link that OCC
 # (docs/packaging/README.md#the-gui-appimage). Flags as in the Flatpak
-# manifest, the OCC patch as in nix/occt-overlay.nix.
+# manifest, the OCC patches as in nix/occt-overlay.nix.
 #
 #   packaging/appimage/deps.sh /opt/lobole-deps
 #
@@ -29,7 +29,12 @@ fetch() {  # url tag commit dir
 
 fetch https://github.com/Open-Cascade-SAS/OCCT.git V7_9_3 \
   a016080bf6738d6aeae020badee4e888ad1540a5 "$work/occt"
-git -C "$work/occt" apply "$repo/nix/patches/occt-shell-cap-order.patch"
+patches="occt-shell-cap-order occt-fillet-reorder-faces-loop
+         occt-draft-null-curve-and-parallel
+         occt-topopebrep-unclosed-wire-iterator"
+for patch in $patches; do
+  git -C "$work/occt" apply "$repo/nix/patches/$patch.patch"
+done
 # Exceptions stay on: OCC turns them off in Release, which breaks the
 # error paths a refused feature takes.
 cmake -S "$work/occt" -B "$work/occt-build" -G Ninja \
@@ -41,6 +46,10 @@ cmake -S "$work/occt" -B "$work/occt-build" -G Ninja \
   -DBUILD_RELEASE_DISABLE_EXCEPTIONS=FALSE
 cmake --build "$work/occt-build" -j"$jobs"
 cmake --install "$work/occt-build"
+# The patches it carries, as the nix overlay lists them.
+mkdir -p "$prefix/share/lobole"
+for patch in $patches; do echo "$patch.patch"; done \
+  > "$prefix/share/lobole/occt-patches"
 
 fetch https://github.com/NGSolve/netgen.git v6.2.2605 \
   6070897b4a3df45244cb8230c2e8354a4d49c1ab "$work/netgen"

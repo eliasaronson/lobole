@@ -18,6 +18,10 @@
 #   tools/fix-stale-nix-cache.sh build        # just this one
 #   tools/fix-stale-nix-cache.sh --dry-run
 #
+# It also unsets an entry naming an older build of a package shell.nix now
+# resolves elsewhere (a patched OpenCASCADE): that tree would still build,
+# against the old one.
+#
 # The pkg-config half is the part worth knowing: pkg_check_modules
 # short-circuits on a cached <PREFIX>_FOUND, so clearing only the stale
 # pkgcfg_lib_<PREFIX>_<lib> leaves the module "found" with NO libraries to
@@ -45,8 +49,18 @@ if [ ${#dirs[@]} -eq 0 ]; then
   done
 fi
 
+# The store paths shell.nix resolves to now. A cache entry naming another
+# build of the same package (the same name after the hash) is stale too:
+# nothing was collected, but the package moved -- an OpenCASCADE patch added
+# to nix/occt-overlay.nix gives a new opencascade-occt beside the old one,
+# and a tree still configured against the old one builds without the patch.
+current_store="$(mktemp)"
+trap 'rm -f "$current_store"' EXIT
+"$root/tools/nix-run" 'env' 2>/dev/null |
+  grep -o '/nix/store/[a-z0-9]\{32\}-[^/:;" ]*' | sort -u > "$current_store" || true
+
 stale_vars() {
-  python3 - "$1" <<'PY'
+  python3 - "$1" "$current_store" <<'PY'
 import os, re, sys
 pat = re.compile(r'/nix/store/[a-z0-9]{32}-[^;:"\s]*')
 entries = []
@@ -56,8 +70,19 @@ for line in open(sys.argv[1]):
         continue
     entries.append((line.split(':', 1)[0], line.split('=', 1)[1]))
 
+# name after the hash -> the hash shell.nix resolves it to now
+current = {}
+for p in open(sys.argv[2]).read().split():
+    base = p.split('/')[3]
+    current.setdefault(base[33:], set()).add(base[:32])
+
+def moved(base):
+    name, h = base[33:], base[:32]
+    return name in current and h not in current[name]
+
 stale = [n for n, v in entries
-         if any(not os.path.exists('/nix/store/' + m.split('/')[3])
+         if any(not os.path.exists('/nix/store/' + m.split('/')[3]) or
+                moved(m.split('/')[3])
                 for m in pat.findall(v))]
 
 # Take the whole pkg-config prefix with any stale entry of it (see header).

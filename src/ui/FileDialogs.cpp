@@ -10,6 +10,7 @@
 #include "ui/StlExport.h"
 
 #include "cad/CADKernel.h"
+#include "cad/OccSignals.h"
 #include "common/Logger.h"
 #include "common/Platform.h"
 #include "common/Watchdog.h"
@@ -336,7 +337,9 @@ void DrawCrashNoticeModal(AppState& state) {
 // no other popup is up (two modals opened in one frame replace each other):
 // the last start found no renderer; the settings file could not be read and
 // was set aside; this start landed on a lower rung of the device ladder
-// (docs/rendering/README.md#the-device-ladder). Each is said once.
+// (docs/rendering/README.md#the-device-ladder); and, not at start-up, a
+// fault inside OpenCASCADE was caught
+// (docs/modeling/README.md#a-caught-kernel-fault). Each is said once.
 void DrawStartupNotices(AppState& state) {
   if (crash::Notice())
     return; // the crash notice goes first
@@ -369,6 +372,15 @@ void DrawStartupNotices(AppState& state) {
                    " Updating the graphics driver usually brings the "
                    "device back; Help > About says which device draws.",
                [&state] { state.rendererFallbackNoticeShown = true; }};
+  } else if (occsig::FaultCount() > 0 && !state.kernelFaultNoticeShown) {
+    n = Notice{"OpenCASCADE faulted###KernelFaultNotice",
+               "A feature failed with a fault inside OpenCASCADE.",
+               "The kernel crashed inside a feature's build, and Loböle "
+               "caught it as that feature's error (its row in the tree says "
+               "which). The app went on, but the fault may have written "
+               "somewhere in memory first: save your work and restart "
+               "Loböle before going on.",
+               [&state] { state.kernelFaultNoticeShown = true; }};
   }
   if (!n)
     return;

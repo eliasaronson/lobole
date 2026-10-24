@@ -69,7 +69,10 @@ functional but cannot generate FEM meshes.
 - **Version used by the current Nix build:** 7.9.3
 - **License:** LGPL-2.1 with the Open CASCADE exception
 - **Linkage:** external shared libraries, built with the patches in
-  `nix/patches/` (one: `occt-shell-cap-order.patch`)
+  `nix/patches/` (`occt-shell-cap-order.patch`,
+  `occt-fillet-reorder-faces-loop.patch`,
+  `occt-draft-null-curve-and-parallel.patch`,
+  `occt-topopebrep-unclosed-wire-iterator.patch`)
 - **Source:** <https://github.com/Open-Cascade-SAS/OCCT>
 
 OpenCASCADE supplies B-Rep modeling, topology, tessellation, mass properties,

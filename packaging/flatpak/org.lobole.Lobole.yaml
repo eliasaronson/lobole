@@ -170,6 +170,12 @@ modules:
       # The kernel patches every build carries (nix/occt-overlay.nix).
       - type: patch
         path: ../../nix/patches/occt-shell-cap-order.patch
+      - type: patch
+        path: ../../nix/patches/occt-fillet-reorder-faces-loop.patch
+      - type: patch
+        path: ../../nix/patches/occt-draft-null-curve-and-parallel.patch
+      - type: patch
+        path: ../../nix/patches/occt-topopebrep-unclosed-wire-iterator.patch
 
   # ---- Netgen (FEM tet mesher; nglib/ngcore, LGPL) -------------------------
   # MPI/GUI/Python all off — we only link nglib + ngcore against OCC. Matches

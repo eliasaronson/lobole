@@ -1,0 +1,40 @@
+--- a/src/ChFi3d/ChFi3d_Builder_1.cxx
++++ b/src/ChFi3d/ChFi3d_Builder_1.cxx
+@@ -24,6 +24,7 @@
+ #include <BRepTopAdaptor_TopolTool.hxx>
+ #include <ChFi3d.hxx>
+ #include <ChFi3d_Builder.hxx>
++#include <TopTools_MapOfShape.hxx>
+ #include <ChFi3d_Builder_0.hxx>
+ #include <ChFiDS_ErrorStatus.hxx>
+ #include <ChFiDS_FilSpine.hxx>
+@@ -78,13 +79,24 @@ static void ReorderFaces(TopoDS_Face&         theF1,
+     return;
+   }
+ 
+-  // Loop until find <theF1> or <theF2>
+-  TopoDS_Edge PrevEdge = thePrevEdge;
+-  TopoDS_Edge CurEdge;
+-  TopoDS_Face PrevFace = theFirstFace;
+-  TopoDS_Face CurFace;
++  // Loop until find <theF1> or <theF2>.
++  // Each step goes on from an edge the walk has not left from yet: round a
++  // seam (whose two sides are one face) or a fan that does not reach <theF1>
++  // or <theF2>, it went from edge to edge of the same faces for ever, inside
++  // BRepFilletAPI_MakeFillet::Add (and the chamfer's).
++  TopoDS_Edge         PrevEdge = thePrevEdge;
++  TopoDS_Edge         CurEdge;
++  TopoDS_Face         PrevFace = theFirstFace;
++  TopoDS_Face         CurFace;
++  TopTools_MapOfShape aLeftFrom;
+   for (;;)
+   {
++    if (!aLeftFrom.Add(PrevEdge))
++    {
++      throw Standard_ConstructionError(
++        "ChFi3d_Builder::PerformElement: the faces round a vertex of the tangent "
++        "chain do not lead to the next edge's faces");
++    }
+     TopTools_IndexedDataMapOfShapeListOfShape aVertexEdgeMap;
+     TopExp::MapShapesAndAncestors(PrevFace, TopAbs_VERTEX, TopAbs_EDGE, aVertexEdgeMap);
+     for (const auto& anEdge : aVertexEdgeMap.FindFromKey(theCommonVertex))

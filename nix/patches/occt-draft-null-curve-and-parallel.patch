@@ -1,0 +1,33 @@
+--- a/src/Draft/Draft_Modification_1.cxx
++++ b/src/Draft/Draft_Modification_1.cxx
+@@ -824,6 +824,14 @@ void Draft_Modification::Perform()
+       Standard_Real        f, l;
+       TopLoc_Location      L;
+       C = BRep_Tool::Curve(theEdge, L, f, l);
++      // An edge with no 3D curve (a degenerated one: the pole of a sphere
++      // cut into the body) was dereferenced here, a SIGSEGV at address 0.
++      if (C.IsNull())
++      {
++        errStat  = Draft_EdgeRecomputation;
++        badShape = theEdge;
++        return;
++      }
+       C = Handle(Geom_Curve)::DownCast(C->Transformed(L.Transformation()));
+ 
+       if (Einf.NewGeometry() && Einf.Geometry().IsNull())
+@@ -1521,6 +1529,15 @@ void Draft_Modification::Perform()
+           badShape = TVV;
+           return;
+         }
++        // A curve parallel to the surface has a distance and no points
++        // (Extrema_ExtCS::Points threw Standard_OutOfRange from inside
++        // Perform): the vertex cannot be placed again from this pair.
++        if (extr.IsParallel())
++        {
++          errStat  = Draft_VertexRecomputation;
++          badShape = TVV;
++          return;
++        }
+ 
+         Standard_Real    disref = RealLast();
+         Standard_Integer iref   = 0;

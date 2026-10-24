@@ -763,6 +763,34 @@ chamfers, drafts and shells therefore build on a topology copy
 index-keyed name kept), and a split runs non-destructive (its pieces are
 named fresh).
 
+## A caught kernel fault
+
+The few kernel calls known to fault rather than fail -- a blend, a draft, a
+shell, an offset -- run in OpenCASCADE's signal scope
+(`occsig::RunCatchingOccSignals`, `src/cad/OccSignals.h`), where a SIGSEGV
+becomes that feature's error. The scope is re-armed whenever something
+replaced its handlers (Catch2 does, around every test case). A caught fault
+is a process event, not only the call's failure: the long jump skipped
+destructors, and a wild address may have written somewhere first. So
+`occsig::FaultCount()` counts them; the regeneration that saw one drops the
+whole regen cache and does not cache the faulted evaluation; the feature's
+`regen.failed` entry carries `kernel_fault: true`; `ping` reports
+`kernel_faults`; and the GUI says once that the work should be saved and
+Loböle restarted. The calls build on a copy of the body
+([above](#kernel-calls-build-on-a-copy-of-the-cached-body)), so a fault
+damages only throwaway topology.
+
+The faults the [action matrix](#action-matrix) found are OpenCASCADE's, and
+patched in every build we make (`nix/patches/`, written up for upstream with
+their reproducers in `nix/patches/upstream/`, the bodies in
+`tests/fixtures/occ/`): a draft past a sphere's pole dereferenced a missing
+curve, a draft whose edge runs parallel to a face read an extremum's absent
+point, a fillet through the old boolean's wire repair freed the list it was
+walking, and a fillet beside a bore's seam walked round its vertex for ever
+inside `BRepFilletAPI_MakeFillet::Add`. Each is now an ordinary failed
+feature (`tests/test_occ_patches.cpp`, skipped on a kernel without the patch
+-- CI's apt OpenCASCADE).
+
 ## A reshaping feature keeps only a valid solid
 
 A Fillet, Chamfer, Shell, Draft or direct edit

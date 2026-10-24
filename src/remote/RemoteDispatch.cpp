@@ -366,7 +366,7 @@ static constexpr remote::MethodDoc kServerMethods[] = {
     {"ping",
      "Liveness check; returns {ok, app, port, pid, mode, ui_actions, "
      "project, dirty, gpu, renderer, safe_mode, occ, features, "
-     "binary_replaced}. `pid` is this "
+     "binary_replaced, kernel_faults}. `pid` is this "
      "process's id, so "
      "a launcher can tell its own instance from one already on the port. `gpu` "
      "is the device that answers "
@@ -390,6 +390,10 @@ static constexpr remote::MethodDoc kServerMethods[] = {
      "is what this BUILD contains (cam, cam_adaptive, fem, mesher) and "
      "whether ffmpeg is on PATH (ffmpeg: export_motion_video's mp4, webm "
      "and gif). "
+     "`kernel_faults` counts the faults inside OpenCASCADE this process "
+     "caught as a feature's error (a SIGSEGV in a draft builder): above "
+     "zero, save and restart -- the fault may have written somewhere first "
+     "(docs/modeling/README.md#a-caught-kernel-fault). "
      "`binary_replaced` is true when this process is running an executable "
      "that has since been rebuilt on disk: it will keep serving the OLD "
      "code, which is indistinguishable from a missing feature or a "
@@ -1668,6 +1672,10 @@ json RemoteServer::HandleSemantic(const Request& request, ui::AppState& state,
             // distro build links whatever that distro ships (Ubuntu 24.04:
             // 7.6.3). tests/fuzz_seeds_smoke.py keys its expectations on it.
             {"occ", OCC_VERSION_COMPLETE},
+            // Faults inside OpenCASCADE this process caught and went on
+            // from (occsig::FaultCount): above zero, its heap may hold what
+            // a wild write left, and a save and a restart are worth it.
+            {"kernel_faults", occsig::FaultCount()},
             // What this BUILD contains. Optional subsystems are compile-time
             // (`cmake -DENABLE_CAM=OFF`), so a method can be absent for a
             // reason that has nothing to do with the document or the tab, and

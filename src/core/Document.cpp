@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 #include "core/Document.h"
+#include "cad/OccSignals.h"
 
 #include "core/ElementOrigin.h"
 #include "core/FitBands.h"
@@ -760,6 +761,7 @@ bool Document::Regenerate() {
       m_bodiesBlobSource.clear();
       f.ClearError();
       f.ClearWarning();
+      bool faulted = false;
       if (!suppressed) {
         RegenContext ctx{m_bodies,  m_features,
                          i,         &m_symbols,
@@ -768,7 +770,22 @@ bool Document::Regenerate() {
         ctx.print = m_print ? &*m_print : nullptr;
         ctx.printUp = PrintUp(m_printSettings);
         m_lastStats.executed++;
-        if (!ExecuteNoting(f, ctx)) {
+        const unsigned faultsBefore = occsig::FaultCount();
+        const bool ok = ExecuteNoting(f, ctx);
+        faulted = occsig::FaultCount() != faultsBefore;
+        if (faulted) {
+          // A fault long-jumped out of the kernel's frames: what the cache
+          // holds was built on the same heap. Drop it all, and do not cache
+          // this evaluation either.
+          m_kernelFaulted.insert(f.GetId());
+          m_cache.clear();
+          LOG_WARN("Feature '{}': a kernel fault was caught ({} this "
+                   "session); the regen cache is dropped",
+                   f.GetName(), occsig::FaultCount());
+        } else {
+          m_kernelFaulted.erase(f.GetId());
+        }
+        if (!ok) {
           if (f.GetError().empty()) {
             f.SetError("regeneration failed");
           }
@@ -786,12 +803,13 @@ bool Document::Regenerate() {
         FollowModifiedFaces(m_bodies);
       }
       f.SetDerivedFor(h);
-      m_cache.insert_or_assign(
-          h, RegenCacheEntry{m_bodies, true,
-                             suppressed
-                                 ? nullptr
-                                 : std::shared_ptr<const Feature>(f.Clone()),
-                             ++m_regenClock});
+      if (!faulted)
+        m_cache.insert_or_assign(
+            h, RegenCacheEntry{m_bodies, true,
+                               suppressed
+                                   ? nullptr
+                                   : std::shared_ptr<const Feature>(f.Clone()),
+                               ++m_regenClock});
     }
     if (!restart && input != nullptr) {
       if (input != &m_bodies)

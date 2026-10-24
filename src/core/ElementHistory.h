@@ -99,6 +99,14 @@ std::vector<std::string> FaceNamesIn(const TopoDS_Shape& part,
 // a shell, a draft -- named through NamesThroughHistory above.
 TopTools_ListOfShape HistoryArguments(const TopoDS_Shape& shape);
 
+// What the blend builder says when the edges are only added, not built
+// (EdgeBlendNamed's first half, on a copy): the tangent-chain walk failing,
+// or an edge it took into no contour. Empty when it took them all. Cheap
+// beside the build: Feature::WhyRefusedOn asks it.
+std::string EdgeBlendRefusal(const CADShape& body, const ElementMap& bodyMap,
+                             const std::vector<int>& edgeIndices,
+                             EdgeBlendOp op, double radiusOrDistance);
+
 // Constant-radius fillet or chamfer of the given edges (edgeIndex space,
 // the ElementMap convention). Blend faces are named
 // "<spineEdgeName>;G<featureTag>" via the maker's Generated (the spine edge

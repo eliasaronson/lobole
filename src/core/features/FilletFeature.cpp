@@ -107,7 +107,15 @@ std::string FilletFeature::WhyRefusedOn(const std::vector<Body>& input,
     indices.push_back(*body->elementMap.ResolveEdge(ref.name));
     names.push_back(ref.name);
   }
-  return EdgeObjection(*body, indices, names, what);
+  if (std::string no = EdgeObjection(*body, indices, names, what); !no.empty())
+    return no;
+  if (!(radius > 1e-9))
+    return std::string(what) + " radius must be positive";
+  // The edges added to the blend builder, not built: its tangent-chain walk
+  // and the contours it takes them into, in milliseconds where the build
+  // can take seconds (the fuzz/30 chain it could not follow round a seam).
+  return topo::EdgeBlendRefusal(body->shape, body->elementMap, indices, op,
+                                radius);
 }
 
 bool FilletFeature::Execute(RegenContext& ctx) {

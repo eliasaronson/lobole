@@ -7,7 +7,19 @@
 { cross }:
 cross.opencascade-occt.overrideAttrs (old: {
   # The same kernel patches as the Linux overlay (nix/occt-overlay.nix).
-  patches = (old.patches or [ ]) ++ [ ../../nix/patches/occt-shell-cap-order.patch ];
+  patches = (old.patches or [ ]) ++ [
+    ../../nix/patches/occt-shell-cap-order.patch
+    ../../nix/patches/occt-fillet-reorder-faces-loop.patch
+    ../../nix/patches/occt-draft-null-curve-and-parallel.patch
+    ../../nix/patches/occt-topopebrep-unclosed-wire-iterator.patch
+  ];
+  # The patches it carries, as the Linux overlay lists them.
+  postInstall = (old.postInstall or "") + ''
+    mkdir -p $out/share/lobole
+    printf '%s\n' occt-shell-cap-order.patch occt-fillet-reorder-faces-loop.patch \
+      occt-draft-null-curve-and-parallel.patch \
+      occt-topopebrep-unclosed-wire-iterator.patch > $out/share/lobole/occt-patches
+  '';
   buildInputs = [ ];                       # drop tcl tk libglvnd glu libx* rapidjson
   cmakeFlags = [
     "-DCMAKE_BUILD_TYPE=Release"

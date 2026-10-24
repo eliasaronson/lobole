@@ -12,10 +12,13 @@
 #include "cad/CADKernel.h"
 
 #include <OSD.hxx>
+#include <OSD_Exception.hxx>
+#include <OSD_Signal.hxx>
 #include <Standard_ErrorHandler.hxx>
 #include <Standard_Failure.hxx>
 #include <Standard_Type.hxx>
 
+#include <atomic>
 #include <mutex>
 
 #if defined(_WIN32)
@@ -306,6 +309,12 @@ void ArmOccSignalHandlers() {
 
 namespace occsig {
 
+namespace {
+std::atomic<unsigned> g_faults{0};
+} // namespace
+
+unsigned FaultCount() { return g_faults.load(std::memory_order_relaxed); }
+
 bool CallCatchingSignals(void (*fn)(void*), void* ctx, std::string* why) {
   ArmOccSignalHandlers();
   try {
@@ -322,6 +331,12 @@ bool CallCatchingSignals(void (*fn)(void*), void* ctx, std::string* why) {
       sigaddset(&faults, sig);
     pthread_sigmask(SIG_UNBLOCK, &faults, nullptr);
 #endif
+    // A signal OCC turned into an exception (OSD_SIGSEGV and the rest; on
+    // Windows OSD_Exception_ACCESS_VIOLATION and the rest), not a failure
+    // the algorithm threw itself.
+    if (e.IsKind(STANDARD_TYPE(OSD_Signal)) ||
+        e.IsKind(STANDARD_TYPE(OSD_Exception)))
+      g_faults.fetch_add(1, std::memory_order_relaxed);
     if (why != nullptr) {
       const char* said = e.GetMessageString();
       *why = std::string(e.DynamicType()->Name()) +

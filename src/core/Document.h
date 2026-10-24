@@ -26,6 +26,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -723,6 +724,15 @@ public:
   size_t RegenCacheSize() const { return m_cache.size(); }
   size_t RegenCacheCap() const;
 
+  // Whether the feature's last execution ended in a fault OpenCASCADE's
+  // signal scope caught (occsig::FaultCount moved during it): its error is
+  // an ordinary one, and `regen` marks it `kernel_fault`. The regeneration
+  // that saw it dropped the regen cache, and does not cache the result, so
+  // nothing built on a heap the fault may have written is served again.
+  bool KernelFaulted(uint64_t featureId) const {
+    return m_kernelFaulted.count(featureId) != 0;
+  }
+
   // The body list as it stood after feature `index` executed, from the regen
   // cache — i.e. feature `index + 1`'s input. Valid for the chain the last
   // Regenerate covered; null when the cache doesn't reach `index`. Used by
@@ -852,6 +862,7 @@ private:
   size_t m_bodiesFromBlob = 0;    // see BodiesAreBlob()
   std::string m_bodiesBlobSource; // see BodiesAreBlob()
   bool m_commitGeometry = true;
+  std::set<uint64_t> m_kernelFaulted; // see KernelFaulted()
 
   // Regeneration cache (R3): one entry per feature EVALUATION, keyed on the
   // chain hash of everything up to and including that feature, so an entry

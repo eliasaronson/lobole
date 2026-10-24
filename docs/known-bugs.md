@@ -11,49 +11,6 @@ the heading if it is not here yet.
 
 ## Modeling
 
-### A Draft or a Fillet can fault inside OpenCASCADE
-
-- **Symptom:** a Draft of the faces square to a planar face, 2° about the
-  world plane square to it, faults inside OpenCASCADE with a SIGSEGV at
-  address 0 on some faces (the [action matrix](modeling/README.md#action-matrix)
-  finds a dozen: four on `reference/38-subtract-sphere`, others on random
-  designs 13, 24, 31 and 38). `RunCatchingOccSignals` turns the fault into an
-  `OSD_SIGSEGV`, and the Draft fails like any other ("draft failed inside
-  OpenCASCADE (OSD_SIGSEGV: SIGSEGV 'segmentation violation' detected.
-  Address 0.)"). A Fillet of one piece of the end cap's edge on
-  `reference/25-modelled-thread` faults the same way in the blend builder, at
-  a non-null address. The app goes on, but the fault long-jumped out of the
-  kernel's frames without their destructors, and a wild address may have
-  written somewhere first.
-- **Cases:** `tests/action_matrix/open/draft-caught-sigsegv.json` and
-  `fillet-caught-sigsegv.json` (`tools/action_matrix.py replay` one); the
-  baseline's `known` rows name every entity.
-- **Cause:** not known: inside `BRepOffsetAPI_DraftAngle` and
-  `BRepFilletAPI_MakeFillet` on these inputs.
-- **Where:** `DraftFeature::Execute` (`src/core/features/DraftFeature.cpp`)
-  and `topo::EdgeBlendNamed` (`src/core/ElementHistory.cpp`), which call the
-  kernel through `src/cad/OccSignals.cpp`.
-- **Likely fix:** replay a case against the sanitized build to find the
-  faulting frame, then refuse that input before the kernel sees it.
-
-### A Fillet of one edge of random design 30 never returns
-
-- **Symptom:** on random design 30 (generator 1), a Fillet of r0.125 (or a
-  Chamfer) of the edge `120/p2/bore;U3`: `add_feature` has not returned after
-  400 s, one core busy. The frame watchdog's stack is in
-  `ChFi3d_Builder::PerformElement` under `BRepFilletAPI_MakeFillet::Add`,
-  called from `topo::EdgeBlendNamed`.
-- **Case:** `tests/action_matrix/open/fillet-hang.json`. The edge's name is a
-  `U` name, numbered in an order that follows shape addresses
-  ([below](#a-blend-faces-edge-names-depend-on-what-the-process-did-before)),
-  so in another process the name can land on a sibling edge.
-- **Cause:** not known: the blend builder's spine walk does not end on that
-  edge.
-- **Where:** `topo::EdgeBlendNamed` in `src/core/ElementHistory.cpp`.
-- **Likely fix:** find what about the edge makes `PerformElement` loop and
-  refuse it before `Add`; a regeneration cannot abandon a kernel call once it
-  is in one.
-
 ## Inspection
 
 ### `interference` reports a phantom clash at an exactly symmetric pose

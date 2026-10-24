@@ -36,6 +36,15 @@ namespace occsig {
 void SetConsoleControlHandler(int(__stdcall* handler)(unsigned long));
 #endif
 
+// How many faults (a signal turned into an OSD_ failure) the signal scopes
+// of this process have caught. A caught fault is a process event, not only
+// the call's failure: the long jump skipped destructors and a wild address
+// may have written somewhere first. Document::Regenerate drops its cache
+// when this moves under a feature, `regen` marks that feature
+// `kernel_fault`, `ping` reports the count, and the GUI recommends saving
+// and restarting.
+unsigned FaultCount();
+
 // Runs fn(ctx) in an OCC signal scope; false with `why` set when a signal or
 // a Standard_Failure ended it.
 bool CallCatchingSignals(void (*fn)(void*), void* ctx, std::string* why);

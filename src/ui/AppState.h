@@ -2800,6 +2800,9 @@ struct AppState {
   // once: shown until this (ImGui) time.
   double rendererRestartedNoticeUntil = -1.0;
   bool rendererFallbackNoticeShown = false;
+  // A fault inside OpenCASCADE was caught as a feature's error
+  // (occsig::FaultCount): said once, recommending a save and a restart.
+  bool kernelFaultNoticeShown = false;
 
   // Safe mode (docs/ui/settings.md#safe-mode): default settings that are
   // never written, the default layout in a scratch file, no ray tracing, no

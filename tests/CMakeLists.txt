@@ -108,6 +108,7 @@ add_executable(designer_tests
     test_draft.cpp
     test_direct_edit.cpp
     test_occ_signals.cpp
+    test_occ_patches.cpp
     test_refused_on.cpp
     test_autosaver.cpp
     test_save_stamp.cpp
@@ -204,6 +205,24 @@ if(ENABLE_SANITIZERS)
     target_compile_definitions(designer_tests PRIVATE
                                LOBOLE_READER_FUZZ_SANITIZED)
 endif()
+# The OpenCASCADE patches the kernel carries (nix/occt-overlay.nix writes the
+# list into its install; packaging/appimage/deps.sh too). A test of what a
+# patch fixed skips without it: CI's stock Ubuntu jobs link apt's OCC, where
+# the fuzz/30 fillet still never returns. LOBOLE_OCC_PATCHES is the names,
+# ';'-separated, each with its .patch.
+set(LOBOLE_OCC_PATCHES "")
+if(OpenCASCADE_INCLUDE_DIR)
+    get_filename_component(_occ_prefix "${OpenCASCADE_INCLUDE_DIR}/../.."
+                           ABSOLUTE)
+    if(EXISTS "${_occ_prefix}/share/lobole/occt-patches")
+        file(STRINGS "${_occ_prefix}/share/lobole/occt-patches"
+             LOBOLE_OCC_PATCHES)
+    endif()
+endif()
+string(REPLACE ";" "," _occ_patches "${LOBOLE_OCC_PATCHES}")
+message(STATUS "OpenCASCADE patches: ${_occ_patches}")
+target_compile_definitions(designer_tests PRIVATE
+                           LOBOLE_OCC_PATCHES="${_occ_patches}")
 # What the build option promised, stated apart from the define the app's
 # library carries, so a test can hold the one to the other.
 if(HAVE_FEM_GPU)
@@ -280,7 +299,7 @@ file(MAKE_DIRECTORY "${LOBOLE_TEST_HOME}/state" "${LOBOLE_TEST_HOME}/config")
 # property name — and the whole thing is silently dropped. It generated tests
 # with no ENVIRONMENT at all, which looked exactly like it had worked.
 catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
-                     TEST_SPEC "~[reader_fuzz]"
+                     TEST_SPEC "~[reader_fuzz]~[occ]"
                      PROPERTIES ENVIRONMENT
                      "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
 # The reader-fuzz families (docs/versioning/README.md#reader-fuzzing) with a
@@ -302,6 +321,14 @@ add_test(NAME reader_fuzz_budget_under_load
 set_tests_properties(reader_fuzz_budget_under_load PROPERTIES
     LABELS reader_fuzz TIMEOUT 600 ENVIRONMENT
     "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
+
+# The kernel's own failures (tests/test_occ_patches.cpp): a call that used to
+# never return (the fuzz/30 fillet) is stopped in a minute, not the default
+# 25, where a kernel without the patch still has it.
+catch_discover_tests(designer_tests ADD_TAGS_AS_LABELS
+                     TEST_SPEC "[occ]"
+                     PROPERTIES TIMEOUT 60 ENVIRONMENT
+                     "XDG_STATE_HOME=${LOBOLE_TEST_HOME}/state\;XDG_CONFIG_HOME=${LOBOLE_TEST_HOME}/config")
 
 # Release metadata smoke: --version must exit before GLFW/Vulkan initialization,
 # so the packaged binary can be identified on a display-less machine.

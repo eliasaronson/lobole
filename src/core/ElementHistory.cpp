@@ -622,7 +622,78 @@ std::string FaultyContourPlaces(BRepFilletAPI_MakeFillet& mk) {
   return out.empty() ? out : " — near " + out;
 }
 
+// Adds the edges to a blend maker (OCC's tangent-chain walk). Adding an
+// edge walks the chain of edges tangent to it, which is where the builder
+// went round a vertex beside a seam for ever (patched in our OCC,
+// nix/patches/occt-fillet-reorder-faces-loop.patch: it throws) -- so in the
+// signal scope too, not only the build. False with `error` set when the walk
+// failed, or when an edge started no contour: its faces tangent, or a face
+// on one side only, and on no other edge's tangent chain -- OCC left it out
+// and built the rest, saying nothing.
+template <typename Maker>
+bool AddBlendEdges(Maker& mk, const TopTools_IndexedMapOfShape& edges,
+                   const std::vector<int>& edgeIndices, double radiusOrDistance,
+                   const ElementMap& bodyMap, std::string* error) {
+  const auto why = occsig::RunCatchingOccSignals([&] {
+    for (int idx : edgeIndices)
+      mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
+  });
+  if (!why) {
+    for (int idx : edgeIndices) {
+      if (mk.Contour(TopoDS::Edge(edges(idx + 1))) != 0)
+        continue;
+      if (error) {
+        const std::string* n = bodyMap.EdgeNameOf(idx);
+        *error = "edge '" + (n != nullptr ? *n : std::to_string(idx)) +
+                 "' starts no blend (its two faces meet tangentially, "
+                 "or it has a face on one side only): leave it out";
+      }
+      return false;
+    }
+    return true;
+  }
+  if (error) {
+    if (why->find("do not lead to the next edge's faces") != std::string::npos)
+      *error = "the blend builder cannot follow the tangent chain of "
+               "these edges round one of its vertices (a seam meets it "
+               "there); pick another edge, or one past a sharp corner";
+    else
+      *error = "the blend builder failed inside OpenCASCADE while "
+               "collecting the edges (" +
+               *why + ")";
+  }
+  return false;
+}
+
 } // namespace
+
+std::string EdgeBlendRefusal(const CADShape& body, const ElementMap& bodyMap,
+                             const std::vector<int>& edgeIndices,
+                             EdgeBlendOp op, double radiusOrDistance) {
+  if (!body.IsValid() || edgeIndices.empty())
+    return {};
+  try {
+    const TopoDS_Shape shape =
+        BRepBuilderAPI_Copy(body.GetShape(), false, false).Shape();
+    TopTools_IndexedMapOfShape edges;
+    TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+    for (int idx : edgeIndices)
+      if (idx < 0 || idx + 1 > edges.Extent())
+        return "edge index out of range";
+    std::string error;
+    if (op == EdgeBlendOp::Chamfer) {
+      BRepFilletAPI_MakeChamfer mk(shape);
+      AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, bodyMap, &error);
+    } else {
+      BRepFilletAPI_MakeFillet mk(shape);
+      AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, bodyMap, &error);
+    }
+    return error;
+  } catch (const Standard_Failure& e) {
+    return std::string("the blend builder refused the edges: ") +
+           e.GetMessageString();
+  }
+}
 
 CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
                         const std::vector<int>& edgeIndices, EdgeBlendOp op,
@@ -653,43 +724,9 @@ CADShape EdgeBlendNamed(const CADShape& body, const ElementMap& bodyMap,
         return CADShape();
       }
     }
-    // Adding an edge walks the chain of edges tangent to it, which is where
-    // the builder went round a tangent loop forever (patched in our OCC,
-    // nix/patches/occt-fillet-tangent-loop.patch: it refuses the chain) --
-    // so in the signal scope too, not only the build.
-    const auto addAll = [&](auto& mk) -> bool {
-      const auto why = occsig::RunCatchingOccSignals([&] {
-        for (int idx : edgeIndices)
-          mk.Add(radiusOrDistance, TopoDS::Edge(edges(idx + 1)));
-      });
-      if (!why) {
-        // An edge the builder took into no contour -- its faces tangent,
-        // or a face on one side only, and on no other edge's tangent
-        // chain -- was left out and the rest built, saying nothing.
-        for (int idx : edgeIndices) {
-          if (mk.Contour(TopoDS::Edge(edges(idx + 1))) != 0)
-            continue;
-          if (error) {
-            const std::string* n = bodyMap.EdgeNameOf(idx);
-            *error = "edge '" + (n != nullptr ? *n : std::to_string(idx)) +
-                     "' starts no blend (its two faces meet tangentially, "
-                     "or it has a face on one side only): leave it out";
-          }
-          return false;
-        }
-        return true;
-      }
-      if (error) {
-        if (why->find("tangent chain runs into a loop") != std::string::npos)
-          *error = "the edges tangent to this one run into a loop that does "
-                   "not come back to it; pick an edge on the loop, or one "
-                   "past a sharp corner";
-        else
-          *error = "the blend builder failed inside OpenCASCADE while "
-                   "collecting the edges (" +
-                   *why + ")";
-      }
-      return false;
+    const auto addAll = [&](auto& mk) {
+      return AddBlendEdges(mk, edges, edgeIndices, radiusOrDistance, bodyMap,
+                           error);
     };
 
     if (op == EdgeBlendOp::Chamfer) {
