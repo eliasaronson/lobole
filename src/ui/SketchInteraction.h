@@ -186,10 +186,25 @@ enum class OverConstrained { Refuse, AddDriven };
 // dimension label there instead of the seeded default (the placement-stage
 // path). With AddDriven, a fallback leaves the new constraint driven and
 // actionMsg saying so.
+//
+// `extras` (optional), the dimension typed while drawing:
+//  - `rescaleFirst`: a length dimension that is the sketch's first scales
+//    the drawn geometry to it first (sketch::RescaleForFirstDimension), in
+//    the same undo step (docs/sketching/README.md#the-first-dimension);
+//  - `newVariable`: `name = value` -- the project variable `name` is created
+//    with `newVariableExpr` and `valueExpr` (which names it) drives the
+//    dimension, one undo step on the project-variable history. The caller
+//    has checked the name is valid and free.
+struct ConstraintExtras {
+  bool rescaleFirst = false;
+  std::string newVariable;
+  std::string newVariableExpr;
+};
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
                            double value, const std::string& valueExpr = {},
                            const glm::dvec2* labelOffset = nullptr,
-                           OverConstrained over = OverConstrained::Refuse);
+                           OverConstrained over = OverConstrained::Refuse,
+                           const ConstraintExtras* extras = nullptr);
 
 // Switches dimension `index` of the active sketch between driving and
 // driven, as one undoable edit. Made driving, it takes its measured value

@@ -84,6 +84,7 @@
 #include <cfloat>
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
@@ -406,6 +407,66 @@ std::vector<PrimVertex> BuildActiveSketchPrimitives(AppState& state,
     AppendPrimLine(sk->plane.PlaneToWorld(edit.trimPreviewA),
                    sk->plane.PlaneToWorld(edit.trimPreviewB), 3.4f, trim,
                    prims);
+  }
+  // Trim by dragging: every span the path has crossed, and the path itself.
+  if (edit.trimPathActive) {
+    for (const sketch::Entity& e : edit.trimPathPreview) {
+      const std::vector<glm::dvec2> poly = sketch::TessellateEntity(e);
+      for (size_t i = 0; i + 1 < poly.size(); i++)
+        AppendPrimLine(sk->plane.PlaneToWorld(poly[i]),
+                       sk->plane.PlaneToWorld(poly[i + 1]), 3.4f, trim, prims);
+    }
+    for (size_t i = 0; i + 1 < edit.trimPath.size(); i++)
+      AppendPrimDashedLine(sk->plane.PlaneToWorld(edit.trimPath[i]),
+                           sk->plane.PlaneToWorld(edit.trimPath[i + 1]), 1.2f,
+                           hov, prims);
+  }
+
+  // Where the profile fails to close (docs/sketching/README.md#open-ends),
+  // read again only when the geometry changes: an open end as a ring, a
+  // point three or more edges meet at as a square-ish heavier dot, and an
+  // almost-closed pair joined by a dashed line.
+  {
+    uint64_t key = 1469598103934665603ull ^ sk->GetId();
+    const auto mix = [&](double v) {
+      uint64_t bits = 0;
+      std::memcpy(&bits, &v, sizeof bits);
+      key = (key ^ bits) * 1099511628211ull;
+    };
+    for (const sketch::Entity& e : sk->entities) {
+      mix(static_cast<double>(e.index()) +
+          (sketch::IsConstruction(e) ? 0.5 : 0.0));
+      for (uint8_t w = 0; w < 3; w++) {
+        const glm::dvec2 p = sketch::EntityPointUV(e, w);
+        mix(p.x);
+        mix(p.y);
+      }
+      if (const auto* bs = std::get_if<sketch::BSpline>(&e)) {
+        mix(static_cast<double>(bs->poles.size()));
+        mix(bs->poles.empty() ? 0.0 : bs->poles.back().x);
+        mix(bs->poles.empty() ? 0.0 : bs->poles.back().y);
+      }
+    }
+    SketchEditState& live = state.sketchEdit;
+    if (key != live.openEndsKey) {
+      const sketch::OpenEndsResult ends = sketch::OpenEnds(sk->entities);
+      live.openEndsKey = key;
+      live.openEnds = ends.open;
+      live.branchedEnds = ends.branched;
+      live.openGaps = ends.gaps;
+    }
+    const glm::vec4 openCol(1.00f, 0.32f, 0.32f, 1.0f);
+    const glm::vec4 branchCol(1.00f, 0.60f, 0.20f, 1.0f);
+    for (const auto& [a, b] : live.openGaps)
+      AppendPrimDashedLine(sk->plane.PlaneToWorld(a), sk->plane.PlaneToWorld(b),
+                           1.6f, openCol, prims);
+    for (const glm::dvec2& p : live.openEnds) {
+      AppendPrimDot(sk->plane.PlaneToWorld(p), 7.5f, openCol, prims);
+      AppendPrimDot(sk->plane.PlaneToWorld(p), 4.5f,
+                    glm::vec4(0.10f, 0.10f, 0.12f, 1.0f), prims);
+    }
+    for (const glm::dvec2& p : live.branchedEnds)
+      AppendPrimDot(sk->plane.PlaneToWorld(p), 7.0f, branchCol, prims);
   }
   return prims;
 }

@@ -3012,4 +3012,435 @@ void RegisterSketchGuiTests(ImGuiTestEngine* engine) {
     IM_CHECK(s_App->sketchSlice);
     IM_CHECK(!ui::SketchSlicePlane(*s_App).has_value());
   };
+  // docs/sketching/README.md#the-first-dimension: a sketch drawn by eye,
+  // given its first length in the inline editor, keeps its drawn shape at
+  // the new size -- every corner is the old one scaled about the anchor --
+  // and ONE undo puts the drawn size back.
+  t = IM_REGISTER_TEST(engine, "dims", "first_dimension_rescales");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const std::vector<glm::dvec2> drawn = {
+        {-1.1, -0.9}, {1.3, -0.8}, {0.2, 1.1}};
+    std::vector<uint32_t> ids;
+    for (size_t i = 0; i < 3; i++)
+      ids.push_back(sk->AddEntity(sketch::Line{drawn[i], drawn[(i + 1) % 3]}));
+    for (size_t i = 0; i < 3; i++)
+      sk->constraints.push_back({sketch::ConstraintKind::Coincident,
+                                 {ids[i], 1},
+                                 {ids[(i + 1) % 3], 0}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    // The Dimension tool's commit: the measured value, then the editor.
+    const double measured = glm::length(drawn[1] - drawn[0]);
+    s_App->sketchEdit.selected = {{ids[0], 0}, {ids[0], 1}};
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Distance,
+                                       measured));
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    s_App->sketchEdit.editingDim = static_cast<int>(sk->constraints.size()) - 1;
+    ctx->Yield(2);
+    for (int i = 0; i < 12; i++)
+      ctx->KeyPress(ImGuiKey_Backspace);
+    ctx->KeyChars("30");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const double f = 30.0 / measured;
+    const glm::dvec2 anchor(0.5 * (-1.1 + 1.3), 0.5 * (-0.9 + 1.1));
+    for (size_t i = 0; i < 3; i++) {
+      const auto& l = std::get<sketch::Line>(sk->entities[i]);
+      IM_CHECK_LE(glm::length(l.a - (anchor + (drawn[i] - anchor) * f)), 1e-6);
+    }
+    IM_CHECK_LE(std::abs(sk->constraints.back().value - 30.0), 1e-9);
+    // One undo: the drawn size again.
+    ui::GlobalUndo(*s_App);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    for (size_t i = 0; i < 3; i++) {
+      const auto& l = std::get<sketch::Line>(sk->entities[i]);
+      IM_CHECK_LE(glm::length(l.a - drawn[i]), 1e-9);
+    }
+    IM_CHECK_LE(std::abs(sk->constraints.back().value - measured), 1e-9);
+  };
+
+  // docs/ui/numeric-input.md#a-new-variable: `w = 40` in the inline editor
+  // makes the project variable and drives the dimension by it, one undo
+  // step. A taken name and a bad one are refused with the editor open and
+  // nothing changed; an edit the sketch refuses makes no variable.
+  t = IM_REGISTER_TEST(engine, "dims", "name_equals_value_makes_a_variable");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    const size_t varsBefore = s_App->projectParameters.size();
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t l0 = sk->AddEntity(sketch::Line{{-1.5, -0.5}, {1.5, -0.5}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    s_App->sketchEdit.selected = {{l0, 0}, {l0, 1}};
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, sketch::ConstraintKind::Distance,
+                                       3.0));
+    ctx->Yield();
+    const auto type = [&](const char* text) {
+      s_App->sketchEdit.editingDim = 0;
+      ctx->Yield(2);
+      for (int i = 0; i < 16; i++)
+        ctx->KeyPress(ImGuiKey_Backspace);
+      ctx->KeyChars(text);
+      ctx->KeyPress(ImGuiKey_Enter);
+      ctx->Yield(2);
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    };
+    const auto length = [&] {
+      const auto& l = std::get<sketch::Line>(sk->entities[0]);
+      return glm::length(l.b - l.a);
+    };
+
+    type("gap_w = 40");
+    IM_CHECK_EQ(s_App->sketchEdit.editingDim, -1);
+    const Parameter* w = ui::FindProjectParameter(*s_App, "gap_w");
+    IM_CHECK(w != nullptr);
+    IM_CHECK_STR_EQ(w->expression.c_str(), "40");
+    IM_CHECK_STR_EQ(sk->constraints[0].valueExpr.c_str(), "gap_w");
+    IM_CHECK_LE(std::abs(length() - 40.0), 1e-6);
+    // One undo takes the variable AND the dimension's binding back.
+    ui::GlobalUndo(*s_App);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(ui::FindProjectParameter(*s_App, "gap_w") == nullptr);
+    IM_CHECK(sk->constraints[0].valueExpr.empty());
+    IM_CHECK_LE(std::abs(length() - 3.0), 1e-6);
+
+    // A taken name: refused, naming its value, the editor kept open.
+    IM_CHECK(ui::SetProjectVariable(*s_App, "taken_w", "7", ""));
+    ctx->Yield();
+    const nlohmann::json sketchBefore = DocumentIO::FeatureToJson(*sk);
+    type("taken_w = 9");
+    IM_CHECK_EQ(s_App->sketchEdit.editingDim, 0);
+    IM_CHECK_STR_EQ(
+        ui::FindProjectParameter(*s_App, "taken_w")->expression.c_str(), "7");
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(DocumentIO::FeatureToJson(*sk) == sketchBefore);
+    // Not a name: refused the same way.
+    type("2w = 9");
+    IM_CHECK_EQ(s_App->sketchEdit.editingDim, 0);
+    IM_CHECK(ui::FindProjectParameter(*s_App, "2w") == nullptr);
+    ctx->KeyPress(ImGuiKey_Escape);
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->projectParameters.size(), varsBefore + 1);
+    std::vector<std::string> refs;
+    IM_CHECK(ui::RemoveProjectVariable(*s_App, "taken_w", &refs));
+    ctx->Yield();
+  };
+
+  // The dimension's own checks run first: an edit the sketch refuses (a
+  // radius smaller than half the chord its fixed ends span) makes no
+  // variable.
+  t = IM_REGISTER_TEST(engine, "dims", "refused_name_equals_value_makes_none");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    const double r0 = std::sqrt(1.36);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t arc = sk->AddEntity(sketch::Arc{
+        {0, -0.6}, r0, std::atan2(0.6, 1.0), std::atan2(0.6, -1.0)});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    using CK = sketch::ConstraintKind;
+    for (uint8_t end : {1, 2}) {
+      s_App->sketchEdit.selected = {{arc, end}};
+      IM_CHECK(ui::ApplySketchConstraint(*s_App, CK::Fixed, 0.0));
+    }
+    s_App->sketchEdit.selected = {{arc, 0}};
+    IM_CHECK(ui::ApplySketchConstraint(*s_App, CK::Radius, r0));
+    ctx->Yield();
+    const size_t vars = s_App->projectParameters.size();
+    s_App->sketchEdit.editingDim = 2;
+    ctx->Yield(2);
+    for (int i = 0; i < 16; i++)
+      ctx->KeyPress(ImGuiKey_Backspace);
+    ctx->KeyChars("too_small = 0.9");
+    ctx->KeyPress(ImGuiKey_Enter);
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.actionMsg.rfind("Not changed: ", 0) == 0);
+    IM_CHECK_EQ(s_App->projectParameters.size(), vars);
+    IM_CHECK(ui::FindProjectParameter(*s_App, "too_small") == nullptr);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk->constraints[2].valueExpr.empty());
+  };
+
+  // docs/sketching/README.md#open-ends: the ends of a profile that does not
+  // close are marked while the sketch is edited, and Extrude refused says
+  // how many and where.
+  t = IM_REGISTER_TEST(engine, "region", "open_ends_are_marked");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    sk->AddEntity(sketch::Line{{-1, -1}, {1, -1}});
+    sk->AddEntity(sketch::Line{{1, -1}, {1, 1}});
+    sk->AddEntity(sketch::Line{{1, 1}, {-1, 1}});
+    sk->AddEntity(sketch::Line{{-1, 1}, {-1, -0.99}}); // almost closed
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    IM_CHECK_EQ(s_App->sketchEdit.openEnds.size(), (size_t)2);
+    IM_CHECK_EQ(s_App->sketchEdit.openGaps.size(), (size_t)1);
+    const size_t features = Doc()->FeatureCount();
+    IM_CHECK(ui::RunCommand(*s_App, "sketch.extrude"));
+    ctx->Yield();
+    IM_CHECK(s_App->sketchEdit.IsEditing()); // refused: still sketching
+    IM_CHECK_EQ(Doc()->FeatureCount(), features);
+    IM_CHECK(s_App->sketchEdit.actionMsg.find("2 open ends") !=
+             std::string::npos);
+    // Closing it takes the markers away.
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    before = DocumentIO::FeatureToJson(*sk);
+    std::get<sketch::Line>(sk->entities[3]).b = {-1, -1};
+    after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield(2);
+    IM_CHECK(s_App->sketchEdit.openEnds.empty());
+  };
+
+  // docs/sketching/README.md#trim: pressed on empty space and dragged, the
+  // Trim tool previews every span the path crosses; the release trims them
+  // all, and one undo puts all of them back.
+  t = IM_REGISTER_TEST(engine, "trim", "drag_trims_every_crossed_span");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    for (float x : {-1.0f, 0.0f, 1.0f})
+      sk->AddEntity(sketch::Line{{x, -1.5f}, {x, 1.5f}});
+    sk->AddEntity(sketch::Line{{-2, 0}, {2, 0}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    const nlohmann::json untrimmed = DocumentIO::FeatureToJson(*sk);
+    s_App->sketchEdit.tool = ui::SketchTool::Trim;
+    const auto at = [&](glm::vec2 uv) {
+      const glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, uv);
+      return ImVec2(p.x, p.y);
+    };
+    ctx->MouseMoveToPos(at({-1.6f, 0.8f}));
+    ctx->Yield();
+    ctx->MouseDown(ImGuiMouseButton_Left);
+    ctx->Yield();
+    for (float x = -1.4f; x <= 1.61f; x += 0.2f) {
+      ctx->MouseMoveToPos(at({x, 0.8f}));
+      ctx->Yield();
+    }
+    IM_CHECK(s_App->sketchEdit.trimPathActive);
+    IM_CHECK_EQ(s_App->sketchEdit.trimPathPreview.size(), (size_t)3);
+    IM_CHECK_EQ(sk->entities.size(), (size_t)4); // the preview is a copy
+    ctx->MouseUp(ImGuiMouseButton_Left);
+    ctx->Yield(2);
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(!s_App->sketchEdit.trimPathActive);
+    IM_CHECK(s_App->sketchEdit.tool == ui::SketchTool::Trim); // still trimming
+    int verticals = 0;
+    for (const auto& e : sk->entities)
+      if (const auto* l = std::get_if<sketch::Line>(&e))
+        if (std::abs(l->a.x - l->b.x) < 1e-6) {
+          verticals++;
+          IM_CHECK_LE(std::max(l->a.y, l->b.y), 1e-6); // upper half gone
+        }
+    IM_CHECK_EQ(verticals, 3);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(DocumentIO::FeatureToJson(*sk) == untrimmed);
+  };
+
+  // docs/sketching/README.md#arc-length: the Dimension tool on an arc reads
+  // where its label goes -- outside the arc along its sweep is the arc
+  // length, inside it the radius.
+  t = IM_REGISTER_TEST(engine, "dims", "arc_length_by_placement");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    s_App->sketchEdit.autoConstrain = false;
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t arc =
+        sk->AddEntity(sketch::Arc{{0, 0}, 1.0, 0.25 * M_PI, 0.75 * M_PI});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    s_App->sketchEdit.tool = ui::SketchTool::Dimension;
+    const auto clickUV = [&](glm::vec2 uv) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      const glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, uv);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+    clickUV({0.0f, 1.0f}); // the arc's body
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({0.1f, 1.6f}); // outside, along the sweep
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)1);
+    IM_CHECK(sk->constraints[0].kind == sketch::ConstraintKind::ArcLength);
+    IM_CHECK_EQ(sk->constraints[0].a.entity, arc);
+    IM_CHECK_LE(std::abs(sk->constraints[0].value - 0.5 * M_PI), 1e-6);
+    ctx->KeyPress(ImGuiKey_Escape); // close the inline editor
+    ctx->Yield(2);
+    s_App->sketchEdit.editingDim = -1;
+    clickUV({0.0f, 1.0f});
+    IM_CHECK(s_App->sketchEdit.dimPlacing);
+    clickUV({0.1f, 0.4f}); // inside the circle: the radius
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk->constraints.back().kind == sketch::ConstraintKind::Radius);
+  };
+
+  // docs/sketching/README.md#curvature-continuity: the G2 command on a
+  // spline and the arc it runs out of replaces their tangent with G2.
+  t = IM_REGISTER_TEST(engine, "constraints", "curvature_replaces_tangent");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t arc =
+        sk->AddEntity(sketch::Arc{{0, 0}, 1.0, 0.0, 0.5 * M_PI});
+    const uint32_t sp = sk->AddEntity(
+        sketch::BSpline{{{0, 1}, {-0.6, 1.1}, {-1.1, 0.8}, {-1.4, 0.4}}});
+    using CK = sketch::ConstraintKind;
+    sk->constraints.push_back({CK::Coincident, {arc, 2}, {sp, 0}});
+    sk->constraints.push_back({CK::Tangent, {sp, 0}, {arc, 0}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    s_App->sketchEdit.selected = {{sp, sketch::kWholeEntity},
+                                  {arc, sketch::kWholeEntity}};
+    IM_CHECK(ui::RunCommand(*s_App, "sketch.constraint_curvature"));
+    ctx->Yield();
+    sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK_EQ(sk->constraints.size(), (size_t)2);
+    IM_CHECK(sk->constraints[0].kind == CK::Coincident);
+    IM_CHECK(sk->constraints[1].kind == CK::Curvature);
+    // The joint holds: the spline's first leg along the arc's end tangent.
+    const auto& s = std::get<sketch::BSpline>(sk->entities[1]);
+    const auto& a = std::get<sketch::Arc>(sk->entities[0]);
+    const glm::dvec2 leg = glm::normalize(s.poles[1] - s.poles[0]);
+    const glm::dvec2 tangent(-std::sin(a.endAngle), std::cos(a.endAngle));
+    IM_CHECK_LE(std::abs(leg.x * tangent.y - leg.y * tangent.x), 1e-6);
+  };
+  // The dimension typed while drawing takes both: the first one rescales
+  // what was drawn by eye, and `name = value` makes the variable -- each one
+  // undo step (docs/sketching/README.md#the-first-dimension).
+  t = IM_REGISTER_TEST(engine, "dims", "typed_dimension_rescales_and_names");
+  t->TestFunc = [](ImGuiTestContext* ctx) {
+    ctx->SetRef("//##MainMenuBar");
+    EnterSketchOnPlane(ctx, 0);
+    ctx->Yield();
+    s_App->camera->StopAnimation();
+    s_App->camera->SetTarget(glm::vec3(0.0f));
+    s_App->camera->SetUp(glm::vec3(0.0f, 1.0f, 0.0f));
+    s_App->camera->SetPosition(glm::vec3(0.0f, 0.0f, 8.0f));
+    ctx->Yield(2);
+    auto* sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    IM_CHECK(sk != nullptr);
+    s_App->sketchEdit.autoConstrain = false;
+    nlohmann::json before = DocumentIO::FeatureToJson(*sk);
+    const uint32_t rough = sk->AddEntity(sketch::Line{{-1.5, -1}, {0.5, -1}});
+    nlohmann::json after = DocumentIO::FeatureToJson(*sk);
+    s_App->commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(0, before, after), *Doc());
+    ctx->Yield();
+    const auto clickUV = [&](glm::vec2 uv) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      const glm::vec2 p = ui::SketchUVToScreen(*s_App, sk->plane, uv);
+      ctx->MouseMoveToPos(ImVec2(p.x, p.y));
+      ctx->MouseClick(ImGuiMouseButton_Left);
+      ctx->Yield();
+    };
+    const auto lengthOf = [&](uint32_t id) {
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+      const auto& l =
+          std::get<sketch::Line>(sk->entities[sk->IndexOfEntity(id)]);
+      return glm::length(l.b - l.a);
+    };
+    const auto typeValue = [&](const char* text) {
+      ctx->KeyChars("1");
+      ctx->Yield(2);
+      IM_CHECK(s_App->sketchEdit.dimOnCreateOpen);
+      for (int i = 0; i < 4; i++)
+        ctx->KeyPress(ImGuiKey_Backspace);
+      ctx->KeyChars(text);
+      ctx->KeyPress(ImGuiKey_Enter);
+      ctx->Yield(2);
+      sk = dynamic_cast<SketchFeature*>(Doc()->GetFeature(0));
+    };
+
+    ctx->KeyPress(ImGuiKey_L);
+    ctx->Yield();
+    clickUV({1.0f, 0.0f});
+    clickUV({1.0f, 1.0f});
+    IM_CHECK_EQ(s_App->sketchEdit.lastDrawn.size(), (size_t)1);
+    const uint32_t drawn = s_App->sketchEdit.lastDrawn[0];
+    const double drawnLen = lengthOf(drawn);
+    typeValue("3");
+    // The new line is 3, and the rough one drawn before it grew with it.
+    IM_CHECK_LE(std::abs(lengthOf(drawn) - 3.0), 1e-6);
+    IM_CHECK_LE(std::abs(lengthOf(rough) - 2.0 * 3.0 / drawnLen), 1e-6);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield();
+    IM_CHECK_LE(std::abs(lengthOf(rough) - 2.0), 1e-9);
+    IM_CHECK_LE(std::abs(lengthOf(drawn) - drawnLen), 1e-9);
+
+    // Another line, and `seg = 4`: a variable, the rescale, one undo.
+    const size_t vars = s_App->projectParameters.size();
+    clickUV({-1.0f, 0.5f});
+    clickUV({-1.0f, 1.5f});
+    IM_CHECK_EQ(s_App->sketchEdit.lastDrawn.size(), (size_t)1);
+    const uint32_t second = s_App->sketchEdit.lastDrawn[0];
+    const double secondLen = lengthOf(second);
+    typeValue("seg = 4");
+    IM_CHECK(ui::FindProjectParameter(*s_App, "seg") != nullptr);
+    IM_CHECK_STR_EQ(sk->constraints.back().valueExpr.c_str(), "seg");
+    IM_CHECK_LE(std::abs(lengthOf(second) - 4.0), 1e-6);
+    IM_CHECK_LE(std::abs(lengthOf(rough) - 2.0 * 4.0 / secondLen), 1e-6);
+    ui::GlobalUndo(*s_App);
+    ctx->Yield();
+    IM_CHECK(ui::FindProjectParameter(*s_App, "seg") == nullptr);
+    IM_CHECK_EQ(s_App->projectParameters.size(), vars);
+    IM_CHECK_LE(std::abs(lengthOf(rough) - 2.0), 1e-9);
+  };
 }

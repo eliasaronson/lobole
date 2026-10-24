@@ -12,6 +12,7 @@
 #include "core/features/SketchFeature.h"
 #include "core/io/Serialization.h"
 #include "core/sketch/SketchInference.h"
+#include "core/sketch/SketchOrientation.h"
 #include "core/sketch/SketchProfile.h"
 #include "core/sketch/SketchSelection.h"
 #include "core/sketch/SketchSolver.h"
@@ -202,13 +203,22 @@ void CommitPlacedDimension(AppState& state, const SketchFeature& sketch,
                             &p->labelOffset);
     return;
   }
-  const glm::dvec2 off = FixedPlacementLabelOffset(
-      sketch, edit.dimPlaceKind, edit.dimPlaceA, edit.dimPlaceB, cursor);
+  // An arc's label outside it, along its sweep, is its arc length.
+  const sketch::ConstraintKind kind =
+      PlacedArcKind(sketch, edit.dimPlaceKind, edit.dimPlaceA, cursor);
+  const glm::dvec2 off = FixedPlacementLabelOffset(sketch, kind, edit.dimPlaceA,
+                                                   edit.dimPlaceB, cursor);
   std::vector<sketch::PointRef> refs = {edit.dimPlaceA};
-  if (edit.dimPlaceKind == sketch::ConstraintKind::DistancePL)
+  if (kind == sketch::ConstraintKind::DistancePL)
     refs.push_back(edit.dimPlaceB);
-  CommitInferredDimension(state, edit.dimPlaceKind, edit.dimPlaceValue, refs,
-                          &off);
+  double value = edit.dimPlaceValue;
+  if (kind == sketch::ConstraintKind::ArcLength) {
+    sketch::Constraint probe;
+    probe.kind = kind;
+    probe.a = edit.dimPlaceA;
+    value = sketch::MeasureDimension(sketch.entities, probe).value_or(value);
+  }
+  CommitInferredDimension(state, kind, value, refs, &off);
 }
 
 // One Dimension-tool click (target-accumulation stage): accumulate the pick
@@ -317,6 +327,29 @@ void HandleDimensionClick(AppState& state, const SketchFeature& sketch,
   ResolveAccumulatedTargets(state, sketch);
 }
 
+sketch::ConstraintKind PlacedArcKind(const SketchFeature& sk,
+                                     sketch::ConstraintKind kind,
+                                     const sketch::PointRef& a,
+                                     glm::dvec2 cursor) {
+  using K = sketch::ConstraintKind;
+  if (kind != K::Radius && kind != K::ArcLength)
+    return kind;
+  const size_t ci = sk.IndexOfEntity(a.entity);
+  const auto* arc =
+      ci == SIZE_MAX ? nullptr : std::get_if<sketch::Arc>(&sk.entities[ci]);
+  if (arc == nullptr)
+    return K::Radius;
+  const glm::dvec2 d = cursor - arc->center;
+  if (glm::length(d) <= arc->radius)
+    return K::Radius;
+  double off = std::atan2(d.y, d.x) - arc->startAngle;
+  off -= 2.0 * M_PI * std::floor(off / (2.0 * M_PI));
+  double sweep = std::fmod(arc->endAngle - arc->startAngle, 2.0 * M_PI);
+  if (sweep <= 0.0)
+    sweep += 2.0 * M_PI;
+  return off <= sweep ? K::ArcLength : K::Radius;
+}
+
 // Label offset that puts a fixed-kind placement's label at (or nearest to)
 // the cursor, per that kind's rendering geometry.
 glm::dvec2 FixedPlacementLabelOffset(const SketchFeature& sk,
@@ -342,6 +375,18 @@ glm::dvec2 FixedPlacementLabelOffset(const SketchFeature& sk,
       dir = {(std::cos(midA)), (std::sin(midA))};
     }
     return cursor - center - dir * radius; // label lands exactly at cursor
+  }
+  if (kind == K::ArcLength) {
+    // Radial from the arc's middle, so the dimension arc passes through the
+    // cursor's distance from the centre.
+    const size_t ci = sk.IndexOfEntity(a.entity);
+    const auto* arc =
+        ci == SIZE_MAX ? nullptr : std::get_if<sketch::Arc>(&sk.entities[ci]);
+    if (arc == nullptr)
+      return {0.0, 0.0};
+    const double mid = 0.5 * (arc->startAngle + arc->endAngle);
+    return glm::dvec2(std::cos(mid), std::sin(mid)) *
+           (glm::length(cursor - arc->center) - arc->radius);
   }
   if (kind == K::DistancePL) {
     // The label slides along the line's direction (the item-5 axis).

@@ -358,6 +358,22 @@ struct SketchEditState {
   bool hasTrimPreview = false;
   glm::dvec2 trimPreviewA{0.0};
   glm::dvec2 trimPreviewB{0.0};
+  // Trim by dragging (docs/sketching/README.md#trim): pressed on empty space
+  // and dragged, the path in plane UV, and the spans it crosses so far --
+  // what the release trims (SketchFeature::TrimAlongPath on a copy), drawn
+  // as the preview. Escape drops the path.
+  bool trimPathActive = false;
+  std::vector<glm::dvec2> trimPath;
+  std::vector<sketch::Entity> trimPathPreview;
+
+  // Where the edited sketch's profile fails to close
+  // (docs/sketching/README.md#open-ends): sketch::OpenEnds' points, drawn
+  // as markers, recomputed only when `openEndsKey` (a hash of the sketch's
+  // id and geometry) changes.
+  uint64_t openEndsKey = 0;
+  std::vector<glm::dvec2> openEnds;
+  std::vector<glm::dvec2> branchedEnds;
+  std::vector<std::pair<glm::dvec2, glm::dvec2>> openGaps;
 
   // Auto-constraint inference (snap + constrain while drawing). Toggle in the
   // toolbar; hold Ctrl to suppress for one click.

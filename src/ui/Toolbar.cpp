@@ -821,6 +821,9 @@ void DrawSketchModeToolbar(AppState& state) {
     };
     conItem("Tangent", "sketch.constraint_tangent",
             "Tangent (line/curve + curve)");
+    conItem("Curvature (G2)", "sketch.constraint_curvature",
+            "Curvature continuity: tangent with equal curvature, where a "
+            "spline meets a line, an arc or another spline end to end");
     conItem("Equal", "sketch.constraint_equal",
             "Equal size (2 curves, or 2 lines)");
     conItem("Concentric", "sketch.constraint_concentric",

@@ -141,6 +141,7 @@ TEST_CASE("every command ships bound, or is on the list", "[keymap]") {
       "view.controls_help",
       // The sketch "more constraints" flyout: a constraint used once a month
       // earns a Preferences row, not an invented mnemonic.
+      "sketch.constraint_curvature",
       "sketch.constraint_point_on_line",
       "sketch.constraint_symmetric",
       "sketch.constraint_midpoint",

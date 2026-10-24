@@ -240,6 +240,11 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
   edit.hasHover = false;
   edit.hasTrimPreview = false;
   edit.hasCurrentSnap = false;
+  if (edit.tool != SketchTool::Trim && edit.trimPathActive) {
+    edit.trimPathActive = false; // the tool changed under a drag
+    edit.trimPath.clear();
+    edit.trimPathPreview.clear();
+  }
 
   if (ImGui::IsKeyPressed(ImGuiKey_Escape)) {
     // Back out one level per press: close the inline dimension editor →
@@ -250,6 +255,10 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
       // frame) consumes it.
     } else if (edit.tool == SketchTool::Dimension && edit.dimPlacing) {
       edit.dimPlacing = false; // back to target accumulation (targets kept)
+    } else if (edit.trimPathActive) {
+      edit.trimPathActive = false; // drop the drag-trim path, trim nothing
+      edit.trimPath.clear();
+      edit.trimPathPreview.clear();
     } else if (edit.tool == SketchTool::Spline && !edit.splinePoles.empty()) {
       edit.splinePoles.clear(); // cancel the in-progress spline
     } else if (edit.hasPendingPoint || edit.hasPendingPoint2 ||
@@ -537,6 +546,45 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
         state, *sketch, glm::vec2(mousePos.x, mousePos.y), kSketchBodyTolPx);
     edit.hasHover = false; // whole-entity highlight suppressed in Trim
     edit.hasTrimPreview = false;
+    // Pressed on empty space and dragged: a path, and every span it crosses
+    // goes on release, one solve and one undo step
+    // (docs/sketching/README.md#trim). A press released where it began is
+    // the click that leaves the tool.
+    if (edit.trimPathActive) {
+      if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+        const float ppu = PixelsPerUV(state, sketch->plane, uv);
+        if (glm::length(uv - edit.trimPath.back()) * ppu >= 2.0f) {
+          edit.trimPath.push_back(uv);
+          SketchFeature trial = *sketch;
+          edit.trimPathPreview.clear();
+          trial.TrimAlongPath(edit.trimPath, &edit.trimPathPreview);
+        }
+        return true;
+      }
+      const std::vector<glm::dvec2> path = std::move(edit.trimPath);
+      edit.trimPathActive = false;
+      edit.trimPath.clear();
+      edit.trimPathPreview.clear();
+      const float moved = ImGui::GetIO().MouseDragMaxDistanceSqr[0];
+      if (path.size() < 2 || moved < 16.0f) {
+        edit.tool = SketchTool::Select; // a plain click: done trimming
+        return true;
+      }
+      nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
+      if (sketch->TrimAlongPath(path) > 0) {
+        sketch::Solver solver;
+        solver.Load(*sketch);
+        if (solver.Solve().ok)
+          solver.WriteBack(sketch->entities);
+        sketch->RegenerateDerived();
+        state.document->Regenerate();
+        nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+        state.commands->Execute(
+            std::make_unique<ModifyFeatureCommand>(index, before, after),
+            *state.document);
+      }
+      return true;
+    }
     if (hover.hit) {
       if (auto span = sketch->TrimSpanAt(hover.ref.entity, uv)) {
         edit.hasTrimPreview = true;
@@ -579,9 +627,13 @@ bool HandleSketchViewport(AppState& state, const glm::vec2& mousePos,
             *state.document);
       }
     }
-    // A tap in empty space or Enter finishes the tool (Escape = abort).
-    if ((ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !hover.hit) ||
-        ImGui::IsKeyPressed(ImGuiKey_Enter)) {
+    // A press in empty space starts a path (a tap there, released without
+    // a drag, still finishes the tool); Enter finishes it (Escape = abort).
+    if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !hover.hit) {
+      edit.trimPathActive = true;
+      edit.trimPath = {uv};
+      edit.trimPathPreview.clear();
+    } else if (ImGui::IsKeyPressed(ImGuiKey_Enter)) {
       edit.tool = SketchTool::Select;
     }
     return true;

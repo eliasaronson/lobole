@@ -449,7 +449,10 @@ ToolPrompt SketchToolPrompt(const SketchEditState& edit) {
             : "click for more poles (Enter or double-click to finish)");
     break;
   case T::Trim:
-    set("Trim", 0, 0, "click a segment to remove it");
+    set("Trim", 0, 0,
+        edit.trimPathActive
+            ? "release to remove every span the path crosses (Esc drops it)"
+            : "click a segment to remove it, or drag across several");
     break;
   case T::Text:
     set("Text", 0, 0,

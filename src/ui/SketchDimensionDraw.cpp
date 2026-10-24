@@ -19,11 +19,13 @@
 #include "render/Camera.h"
 #include "render/MeshRenderer.h" // LineVertex3D
 #include "ui/DocumentSlots.h"
-#include "ui/ExprComplete.h" // variable completion in the dim editors
+#include "ui/ExprComplete.h"   // variable completion in the dim editors
+#include "ui/LiteralActions.h" // TakenVariableNames (name = value)
 #include "ui/SceneOverlays.h"
-#include "ui/SketchOverlay.h" // SelectFeature
-#include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (Shift+E/R)
-#include "ui/Theme.h"         // DimensionColor, DrivenDimensionColor
+#include "ui/SketchOverlay.h"   // SelectFeature
+#include "ui/SketchToolbar.h"   // BeginSketchExtrude/Revolve (Shift+E/R)
+#include "ui/Theme.h"           // DimensionColor, DrivenDimensionColor
+#include "ui/VariableActions.h" // name = value: a project variable
 
 #include "imgui.h"
 #include "imgui_internal.h" // GetInputTextState (re-read after a completion)
@@ -73,6 +75,17 @@ glm::dvec2 ConstrainLabelOffset(const SketchFeature& sk,
       return off;
     const glm::dvec2 d = glm::normalize(*lb - *la);
     return d * glm::dot(off, d);
+  }
+  case K::ArcLength: {
+    // Radial from the arc's middle: the dimension arc stays concentric.
+    const size_t ci = sk.IndexOfEntity(con.a.entity);
+    const auto* arc =
+        ci == SIZE_MAX ? nullptr : std::get_if<sketch::Arc>(&sk.entities[ci]);
+    if (arc == nullptr)
+      return off;
+    const double mid = 0.5 * (arc->startAngle + arc->endAngle);
+    const glm::dvec2 d(std::cos(mid), std::sin(mid));
+    return d * std::max(glm::dot(off, d), -0.9 * arc->radius);
   }
   case K::DistanceX:
     return {0.0, off.y}; // the dimension line only moves vertically
@@ -138,9 +151,16 @@ bool ReflectPLPoint(SketchFeature& sk, const sketch::Constraint& con) {
 // DistancePL's side pin re-derives from geometry each solve, so the flip
 // seeds the solve on the other side by reflecting the point. Unsigned kinds
 // (Distance, Radius, Diameter) have no direction: |v|, silently.
+//
+// The sketch's FIRST length dimension scales the drawing to it before the
+// edit applies (sketch::RescaleForFirstDimension), in the same undo step.
+// `newVariable` non-empty (`name = value`): the project variable is created
+// with `newVariableExpr` and drives the dimension (`expr` names it), one
+// undo step on the project-variable history; a refused edit creates none.
 void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
-                        int dimIdx, double value,
-                        const std::string& expr = {}) {
+                        int dimIdx, double value, const std::string& expr = {},
+                        const std::string& newVariable = {},
+                        const std::string& newVariableExpr = {}) {
   if (dimIdx < 0 || dimIdx >= (int)sketch.constraints.size())
     return;
   if (sketch.constraints[dimIdx].driven) {
@@ -150,7 +170,8 @@ void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
   }
   nlohmann::json before = DocumentIO::FeatureToJson(sketch);
   sketch::Constraint& con = sketch.constraints[dimIdx];
-  const sketch::Constraint oldCon = con; // a refused edit restores it
+  // A refused edit restores them (the rescale scales every label offset).
+  const std::vector<sketch::Constraint> oldConstraints = sketch.constraints;
   const std::vector<sketch::Entity> oldEntities = sketch.entities;
   using K = sketch::ConstraintKind;
   if (value < 0.0) {
@@ -174,32 +195,92 @@ void ApplyDimensionEdit(AppState& state, SketchFeature& sketch, size_t index,
       break; // expression: raw value; the solver clamps unsigned kinds
     }
   }
+  // A sketch drawn by eye keeps its shape at the size its first length
+  // dimension gives it (docs/sketching/README.md#the-first-dimension).
+  const sketch::RescaleOutcome rescale = sketch::RescaleForFirstDimension(
+      sketch, con, value, static_cast<size_t>(dimIdx));
   // The orientations are read from this seed -- after the ref swap and the
   // reflection -- so a flip the user asked for is the side that is kept.
+  const double oldValue = oldConstraints[dimIdx].value;
   const auto from = sketch::MeasureDimension(sketch.entities, con);
   con.value = value;
   con.valueExpr = expr;
   sketch::Solver solver;
   solver.Load(sketch);
   const sketch::EditOutcome edit = solver.SolveValueEdit(
-      {{static_cast<size_t>(dimIdx), from.value_or(oldCon.value), value}});
+      {{static_cast<size_t>(dimIdx), from.value_or(oldValue), value}});
   if (!edit.Accepted()) {
     // Refused: the old value, expression, refs and geometry, and no undo
     // record (docs/sketching/README.md#solving).
-    con = oldCon;
+    sketch.constraints = oldConstraints;
     sketch.entities = oldEntities;
     state.sketchEdit.actionMsg = "Not changed: " + edit.refusal;
     return;
   }
   solver.WriteBack(sketch.entities);
   sketch.RegenerateDerived();
-  state.document->Regenerate();
-  nlohmann::json after = DocumentIO::FeatureToJson(sketch);
-  // Already applied to the live object — record only. Execute would
-  // ReplaceFeature with an identical copy, dangling the caller's pointer
-  // (DrawDimensions keeps iterating this sketch's constraints).
-  state.commands->PushApplied(
-      std::make_unique<ModifyFeatureCommand>(index, before, after));
+  if (!newVariable.empty()) {
+    // The variable and the dimension it drives: one entry on the
+    // project-variable history, which puts the sketch back too (the
+    // extract-variables recipe, LiteralActions.cpp). Edited in place, so
+    // the caller's pointer stays good.
+    PushProjectVarUndoWithFeatures(
+        state, {{state.parts[static_cast<size_t>(state.activePart)].id,
+                 sketch.GetId(), before}});
+    state.projectParameters.push_back(
+        {newVariable, newVariableExpr, "made by a sketch dimension", 0.0, {}});
+    SyncProjectScope(state); // regenerates every part against it
+  } else {
+    state.document->Regenerate();
+    nlohmann::json after = DocumentIO::FeatureToJson(sketch);
+    // Already applied to the live object — record only. Execute would
+    // ReplaceFeature with an identical copy, dangling the caller's pointer
+    // (DrawDimensions keeps iterating this sketch's constraints).
+    state.commands->PushApplied(
+        std::make_unique<ModifyFeatureCommand>(index, before, after));
+  }
+  if (!rescale.why.empty())
+    state.sketchEdit.actionMsg = rescale.why;
+}
+
+// `name = expr` typed in a dimension field: the name and the expression,
+// or nullopt when there is no `=`. The expression language has no `=` of
+// its own, so the first one splits.
+struct NamedValue {
+  std::string name, expr;
+};
+std::optional<NamedValue> SplitNamedValue(const std::string& text) {
+  const size_t eq = text.find('=');
+  if (eq == std::string::npos)
+    return std::nullopt;
+  const auto trim = [](std::string t) {
+    const size_t a = t.find_first_not_of(" \t");
+    const size_t b = t.find_last_not_of(" \t");
+    return a == std::string::npos ? std::string() : t.substr(a, b - a + 1);
+  };
+  return NamedValue{trim(text.substr(0, eq)), trim(text.substr(eq + 1))};
+}
+
+// Why `name = ...` cannot make the variable `name`: not a name, or one that
+// is taken (never silently redefined). Empty when it can.
+std::string NewVariableRefusal(AppState& state, const std::string& name) {
+  if (!ExpressionEngine::Default().IsValidParameterName(name))
+    return "'" + name +
+           "' is not a variable name: a letter or _ first, then letters, "
+           "digits or _, and not a unit or a built-in name";
+  if (!TakenVariableNames(state).contains(name))
+    return {};
+  double v = 0.0;
+  if (const Parameter* p = FindProjectParameter(state, name))
+    v = p->value;
+  else if (state.document != nullptr)
+    for (const Parameter& p : state.document->GetParameters())
+      if (p.name == name)
+        v = p.value;
+  char buf[64];
+  std::snprintf(buf, sizeof buf, "%g", v);
+  return "'" + name + "' already exists (= " + buf + "); type " + name +
+         " alone to use it";
 }
 } // namespace
 
@@ -328,10 +409,14 @@ void DrawDimensions(AppState& state) {
       }
     } else {
       sketch::Constraint g;
-      g.kind = edit.dimPlaceKind;
+      g.kind = PlacedArcKind(*sketch, edit.dimPlaceKind, edit.dimPlaceA,
+                             edit.hoverPoint);
       g.a = edit.dimPlaceA;
       g.b = edit.dimPlaceB;
-      g.value = edit.dimPlaceValue;
+      g.value = g.kind == sketch::ConstraintKind::ArcLength
+                    ? sketch::MeasureDimension(sketch->entities, g)
+                          .value_or(edit.dimPlaceValue)
+                    : edit.dimPlaceValue;
       g.labelOffset =
           FixedPlacementLabelOffset(*sketch, g.kind, g.a, g.b, edit.hoverPoint);
       ghost = g;
@@ -494,6 +579,55 @@ void DrawDimensions(AppState& state) {
         labelPos =
             scr(inter + glm::dvec2(std::cos(aMid), std::sin(aMid)) * rUV);
       }
+    } else if (con.kind == K::ArcLength) {
+      // A dimension line parallel to the arc: concentric, through the label,
+      // across the arc's sweep, with radial extension lines from its ends.
+      size_t ci = sketch->IndexOfEntity(con.a.entity);
+      const auto* arc = ci == SIZE_MAX
+                            ? nullptr
+                            : std::get_if<sketch::Arc>(&sketch->entities[ci]);
+      if (arc == nullptr)
+        continue;
+      if (glm::length(effOff) < 1e-4)
+        effOff = SeedLabelOffset(*sketch, con);
+      const double a0 = arc->startAngle;
+      double sweep = std::fmod(arc->endAngle - arc->startAngle, 2.0 * M_PI);
+      if (sweep <= 0.0)
+        sweep += 2.0 * M_PI;
+      const double mid = a0 + 0.5 * sweep;
+      const glm::dvec2 dirMid(std::cos(mid), std::sin(mid));
+      const double rDim = std::max(
+          0.05 * arc->radius, glm::length(arc->center + dirMid * arc->radius +
+                                          effOff - arc->center));
+      const auto at = [&](double ang, double r) {
+        return scr(arc->center + glm::dvec2(std::cos(ang), std::sin(ang)) * r);
+      };
+      const int kSegs = std::max(8, static_cast<int>(48 * sweep / M_PI));
+      ImVec2 prev = at(a0, rDim);
+      for (int k = 1; k <= kSegs; k++) {
+        const ImVec2 p = at(a0 + sweep * k / kSegs, rDim);
+        dl->AddLine(prev, p, col, 1.4);
+        prev = p;
+      }
+      for (const double ang : {a0, a0 + sweep}) {
+        const double beyond =
+            rDim + (rDim > arc->radius ? 1.0 : -1.0) * 0.04 * arc->radius;
+        dl->AddLine(at(ang, arc->radius), at(ang, beyond), col, 1.0);
+      }
+      // Arrowheads at both ends, along the dimension arc and outward.
+      const auto arcArrow = [&](double ang, double outSign) {
+        const ImVec2 ps = at(ang, rDim);
+        const ImVec2 qs = at(ang + outSign * 1e-3, rDim);
+        const glm::dvec2 d(qs.x - ps.x, qs.y - ps.y);
+        if (glm::length(d) > 1e-6)
+          Arrow(dl, ps, glm::normalize(d), col);
+      };
+      arcArrow(a0, -1.0);
+      arcArrow(a0 + sweep, 1.0);
+      // A plain number, as a distance's: the concentric dimension arc says
+      // what it measures (the UI font has no arc symbol, U+2312).
+      snprintf(label, sizeof(label), "%.3g", std::abs(conValue));
+      labelPos = at(mid, rDim);
     } else { // Distance / DistanceX / DistanceY / DistancePL (points a, b)
       auto a = RefUV(*sketch, con.a), b = RefUV(*sketch, con.b);
       if (con.kind == K::DistancePL && a) {
@@ -695,7 +829,31 @@ void DrawDimensions(AppState& state) {
         ImGui::TextColored(ImVec4(0.95, 0.45, 0.45, 1.0), "%s",
                            editError.c_str());
       ImGui::End();
-      if (commit) {
+      const auto named = commit ? SplitNamedValue(buf) : std::nullopt;
+      if (named) {
+        // `name = expr`: a new project variable drives the dimension
+        // (docs/ui/numeric-input.md#a-new-variable). A taken or invalid
+        // name keeps the editor open with the reason.
+        editError = NewVariableRefusal(state, named->name);
+        std::optional<double> ev;
+        if (editError.empty()) {
+          const auto evaluated = ExpressionEngine::Default().EvaluateText(
+              named->expr, state.document->Symbols());
+          if (evaluated.has_value())
+            ev = *evaluated;
+          else
+            editError = evaluated.error().message;
+        }
+        if (!ev) {
+          commit = false;
+        } else {
+          const double v = con.kind == K::Angle ? glm::radians(*ev) : *ev;
+          ApplyDimensionEdit(state, *sketch, index, i, v, named->name,
+                             named->name, named->expr);
+          edit.editingDim = -1;
+          lastEditing = -1;
+        }
+      } else if (commit) {
         // A plain number stays a literal; anything else is an expression
         // over the document's variables (angles speak degrees, stored as
         // radians). Invalid expressions keep the editor open with the error.
@@ -844,6 +1002,33 @@ void DrawDimensionOnCreate(AppState& state) {
     ImGui::TextColored(ImVec4(0.95, 0.45, 0.45, 1.0), "%s", editError.c_str());
   ImGui::End();
 
+  ConstraintExtras extras;
+  extras.rescaleFirst = true; // the first dimension keeps the drawn shape
+  if (const auto named = commit ? SplitNamedValue(buf) : std::nullopt) {
+    // `name = expr`: a new project variable drives the dimension.
+    editError = NewVariableRefusal(state, named->name);
+    if (editError.empty()) {
+      const auto evaluated = ExpressionEngine::Default().EvaluateText(
+          named->expr, state.document->Symbols());
+      if (!evaluated.has_value()) {
+        editError = evaluated.error().message;
+      } else {
+        extras.newVariable = named->name;
+        extras.newVariableExpr = named->expr;
+        edit.dimOnCreateOpen = false;
+        edit.selected = refs;
+        // Replaces nothing (edited in place) but regenerates every part.
+        ApplySketchConstraint(state, kind, std::abs(*evaluated), named->name,
+                              nullptr, OverConstrained::Refuse, &extras);
+        if (rect)
+          edit.lastDrawnStage++;
+        else
+          edit.lastDrawn.clear();
+        return;
+      }
+    }
+    commit = false; // stay open, show why
+  }
   if (commit) {
     // A plain number stays a literal; anything else is an expression over
     // the document's variables (the inline dim editor's convention). The
@@ -876,7 +1061,8 @@ void DrawDimensionOnCreate(AppState& state) {
       edit.selected = refs;
       // Replaces the sketch feature through the command system — the local
       // pointer is dead after this call.
-      ApplySketchConstraint(state, kind, v, expr);
+      ApplySketchConstraint(state, kind, v, expr, nullptr,
+                            OverConstrained::Refuse, &extras);
       if (rect)
         edit.lastDrawnStage++; // width applied → height next (then done)
       else
@@ -947,6 +1133,9 @@ void DrawConstraintGlyphs(AppState& state) {
       break;
     case K::Tangent:
       badge(i, c.a.entity, "T");
+      break;
+    case K::Curvature:
+      badge(i, c.a.entity, "G2");
       break;
     case K::Symmetric:
       badge(i, c.c.entity, "sym");

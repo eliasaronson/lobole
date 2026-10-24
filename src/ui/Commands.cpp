@@ -659,6 +659,7 @@ const std::vector<Command>& Table() {
     constraint("sketch.constraint_parallel", K::Parallel);
     constraint("sketch.constraint_perpendicular", K::Perpendicular);
     constraint("sketch.constraint_tangent", K::Tangent);
+    constraint("sketch.constraint_curvature", K::Curvature);
     constraint("sketch.constraint_equal", K::Equal);
     constraint("sketch.constraint_concentric", K::Concentric);
     constraint("sketch.constraint_point_on_line", K::PointOnLine);

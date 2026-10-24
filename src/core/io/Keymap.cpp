@@ -288,6 +288,8 @@ const Binding kDefaults[] = {
     // The "more constraints" flyout: bindable, unbound by default. Inventing
     // a mnemonic for a constraint used once a month is worse than a row in
     // Preferences that says "—" and takes one click to fill in.
+    {"sketch.constraint_curvature", Context::Sketch,
+     "Curvature (G2: tangent, equal curvature)", "Constrain", ""},
     {"sketch.constraint_point_on_line", Context::Sketch, "Point on line",
      "Constrain", ""},
     {"sketch.constraint_symmetric", Context::Sketch, "Symmetric", "Constrain",

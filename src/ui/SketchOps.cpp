@@ -24,6 +24,7 @@
 #include "ui/SceneOverlays.h"
 #include "ui/SketchOverlay.h" // SelectFeature
 #include "ui/SketchToolbar.h" // BeginSketchExtrude/Revolve (Shift+E/R)
+#include "ui/VariableActions.h" // name = value: a project variable
 
 #include "imgui.h"
 #include "imgui_internal.h" // GetInputTextState (re-read after a completion)
@@ -67,6 +68,9 @@ std::string DimensionWords(const SketchFeature& sketch, size_t ci) {
     break;
   case K::Angle:
     snprintf(buf, sizeof(buf), "the %.1f\xC2\xB0 angle", v * 57.2957795);
+    break;
+  case K::ArcLength:
+    snprintf(buf, sizeof(buf), "the %.3g arc length", v);
     break;
   default:
     snprintf(buf, sizeof(buf), "the %.3g distance", v);
@@ -128,6 +132,18 @@ glm::dvec2 SeedLabelOffset(const SketchFeature& sk,
     }
     return dir * (0.25 * radius + 0.7);
   }
+  case K::ArcLength: {
+    // Radially out from the arc's middle: the dimension arc runs concentric
+    // with it, a little outside.
+    const size_t ci = sk.IndexOfEntity(c.a.entity);
+    if (ci == SIZE_MAX)
+      return {0.0, 0.0};
+    const auto* arc = std::get_if<sketch::Arc>(&sk.entities[ci]);
+    if (arc == nullptr)
+      return {0.0, 0.0};
+    const double mid = 0.5 * (arc->startAngle + arc->endAngle);
+    return glm::dvec2(std::cos(mid), std::sin(mid)) * (0.25 * arc->radius);
+  }
   case K::Angle: {
     // Along the lines' bisector so the arc lands between them.
     const auto a0 = RefUV(sk, {c.a.entity, 0}), a1 = RefUV(sk, {c.a.entity, 1});
@@ -147,8 +163,8 @@ glm::dvec2 SeedLabelOffset(const SketchFeature& sk,
 
 bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
                            double value, const std::string& valueExpr,
-                           const glm::dvec2* labelOffset,
-                           OverConstrained over) {
+                           const glm::dvec2* labelOffset, OverConstrained over,
+                           const ConstraintExtras* extras) {
   size_t index = 0;
   SketchFeature* sketch = ResolveActiveSketch(state, &index);
   if (!sketch)
@@ -361,12 +377,50 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
     c.a = {sel[0].entity, 0};
     c.b = {sel[1].entity, 0};
     break;
+  case K::Curvature:
+    // Two curves, either order; which pairs can be G2 (and why not) is the
+    // solver's call, refused below with its reason.
+    if (sel.size() < 2 || !isAnyCurve(sel[0]) || !isAnyCurve(sel[1]) ||
+        sel[0].entity == sel[1].entity)
+      return false;
+    c.a = {sel[0].entity, 0};
+    c.b = {sel[1].entity, 0};
+    break;
+  case K::ArcLength:
+    // An arc; anything else goes through to the solver, whose refusal
+    // names the kind that measures it.
+    if (sel.empty() || !(isAnyCurve(sel[0])))
+      return false;
+    c.a = {sel[0].entity, 0};
+    break;
   }
 
   nlohmann::json before = DocumentIO::FeatureToJson(*sketch);
   if (sketch::IsDimension(kind))
     c.labelOffset =
         labelOffset != nullptr ? *labelOffset : SeedLabelOffset(*sketch, c);
+  // What the steps below change before the verdict, put back on a refusal.
+  const std::vector<sketch::Constraint> constraintsBefore = sketch->constraints;
+  const std::vector<sketch::Entity> entitiesBefore = sketch->entities;
+  const auto restore = [&] {
+    sketch->constraints = constraintsBefore;
+    sketch->entities = entitiesBefore;
+  };
+  // G2 includes the tangent at the joint: a Tangent already there between
+  // the same two curves is replaced, not left to repeat it.
+  if (kind == K::Curvature)
+    std::erase_if(sketch->constraints, [&](const sketch::Constraint& t) {
+      return t.kind == K::Tangent &&
+             ((t.a.entity == c.a.entity && t.b.entity == c.b.entity) ||
+              (t.a.entity == c.b.entity && t.b.entity == c.a.entity));
+    });
+  // The first length dimension of a sketch drawn by eye: scale the drawing
+  // to it, so the shape is kept (docs/sketching/README.md#the-first-dimension).
+  sketch::RescaleOutcome rescale;
+  if (extras != nullptr && extras->rescaleFirst)
+    rescale = sketch::RescaleForFirstDimension(*sketch, c, value);
+  if (rescale.scaled)
+    c.labelOffset *= rescale.factor;
   sketch::Solver solver;
   solver.Load(*sketch);
   const sketch::SolveResult had = solver.Solve();
@@ -389,7 +443,7 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
                           verdict.unsupported == SIZE_MAX &&
                           sketch::IsDimension(kind) && valueExpr.empty();
     if (!fallback) {
-      sketch->constraints.pop_back();
+      restore();
       state.sketchEdit.actionMsg = "Not added: " + verdict.reason;
       return false;
     }
@@ -407,12 +461,29 @@ bool ApplySketchConstraint(AppState& state, sketch::ConstraintKind kind,
   if (verdict.after.ok)
     solver.WriteBack(sketch->entities);
 
-  state.document->Regenerate();
-  nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
-  state.commands->Execute(
-      std::make_unique<ModifyFeatureCommand>(index, before, after),
-      *state.document);
+  if (extras != nullptr && !extras->newVariable.empty() && !asDriven) {
+    // `name = value`: the variable and the dimension it drives, ONE undo
+    // step on the project-variable history, which puts the sketch back too
+    // (the extract-variables recipe, LiteralActions.cpp).
+    PushProjectVarUndoWithFeatures(
+        state, {{state.parts[static_cast<size_t>(state.activePart)].id,
+                 sketch->GetId(), before}});
+    state.projectParameters.push_back({extras->newVariable,
+                                       extras->newVariableExpr,
+                                       "made by a sketch dimension",
+                                       value,
+                                       {}});
+    SyncProjectScope(state); // regenerates every part against it
+  } else {
+    state.document->Regenerate();
+    nlohmann::json after = DocumentIO::FeatureToJson(*sketch);
+    state.commands->Execute(
+        std::make_unique<ModifyFeatureCommand>(index, before, after),
+        *state.document);
+  }
   state.sketchEdit.selected.clear();
+  if (!rescale.why.empty())
+    state.sketchEdit.actionMsg = rescale.why;
   if (asDriven) {
     // `sketch` is replaced by the command; the new one is read back.
     const SketchFeature* now = ResolveActiveSketch(state);

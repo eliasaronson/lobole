@@ -71,6 +71,15 @@ void EndDragSession(AppState& state, SketchFeature& sketch);
 std::vector<std::pair<uint8_t, glm::dvec2>>
 EntityPoints(const sketch::Entity& e);
 
+// A circle/arc placement's kind by where its label goes: on an arc, a label
+// placed outside it and within its sweep is the ARC LENGTH; anywhere else
+// (inside the circle, or past the arc's ends) the radius
+// (docs/sketching/README.md#arc-length). Any other placement: `kind`.
+sketch::ConstraintKind PlacedArcKind(const SketchFeature& sk,
+                                     sketch::ConstraintKind kind,
+                                     const sketch::PointRef& a,
+                                     glm::dvec2 cursor);
+
 glm::dvec2 FixedPlacementLabelOffset(const SketchFeature& sk,
                                      sketch::ConstraintKind kind,
                                      const sketch::PointRef& a,

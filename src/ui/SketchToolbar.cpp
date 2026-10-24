@@ -77,6 +77,10 @@ const char* ConstraintKindName(sketch::ConstraintKind k) {
     return "diameter";
   case K::DistancePL:
     return "distance-pl";
+  case K::Curvature:
+    return "curvature (G2)";
+  case K::ArcLength:
+    return "arc length";
   }
   return "?";
 }
@@ -881,8 +885,18 @@ SketchFeature* ClosedProfileSketch(AppState& state) {
 void BeginSketchExtrude(AppState& state) {
   SketchEditState& edit = state.sketchEdit;
   SketchFeature* sketch = ResolveActiveSketch(state);
-  if (sketch == nullptr || sketch::BuildLoops(sketch->entities).empty())
+  if (sketch == nullptr)
     return;
+  if (sketch::BuildLoops(sketch->entities).empty()) {
+    // Refused where the user is looking: the open ends are already marked
+    // (docs/sketching/README.md#open-ends).
+    const std::string where =
+        sketch::OpenEndsWords(sketch::OpenEnds(sketch->entities));
+    edit.actionMsg =
+        "Not extruded: the sketch has no closed profile" +
+        (where.empty() ? std::string() : " -- " + where + ", marked in red");
+    return;
+  }
   auto regions = RegionsFromSelection(*sketch, edit.selected);
   SketchFeature& sk = *sketch;
   edit = SketchEditState{}; // exit sketch mode so the solid + dialog show
