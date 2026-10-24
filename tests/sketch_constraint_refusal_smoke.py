@@ -217,6 +217,97 @@ def main():
                      refs=[[wl, 0], [wl, 1]], driven=True, expr="w")
         expect(sketch_json(d, wide["id"]) == wj,
                "a dimension a configuration drives stayed driving")
+
+        # G2 (curvature) and arc_length: what each cannot hold is refused,
+        # naming why, and the sketch is left as it was
+        # (docs/sketching/README.md#curvature-continuity).
+        g2 = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Curves",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [
+                {"type": "line", "a": [0, 0], "b": [5, 0]},
+                {"type": "line", "a": [5, 0], "b": [9, 1]},
+                {"type": "arc", "center": [9, 4], "radius": 3.0,
+                 "start_angle": -math.pi / 2, "end_angle": 0.0},
+                {"type": "arc", "center": [15, 4], "radius": 3.0,
+                 "start_angle": math.pi, "end_angle": 1.5 * math.pi},
+                {"type": "spline", "degree": 1,
+                 "poles": [[0, 0], [-2, 3], [-4, 0]]},
+                {"type": "spline", "degree": 3,
+                 "poles": [[20, 0], [21, 2], [23, 2], [24, 0]]},
+                {"type": "circle", "center": [30, 0], "radius": 2.0}]})
+        gid = g2["id"]
+        l1, l2, a1, a2, poly, loose, circ = g2["entity_ids"]
+        d.call("add_constraints", sketch_id=gid, constraints=[
+            {"kind": "coincident", "refs": [[l1, 1], [l2, 0]]},
+            {"kind": "coincident", "refs": [[l2, 1], [a1, 1]]},
+            {"kind": "coincident", "refs": [[a1, 2], [a2, 1]]},
+            {"kind": "coincident", "refs": [[l1, 0], [poly, 0]]}])
+        g2_before = sketch_json(d, gid)
+        for a, b, why in ((l1, l2, "collinear"), (l2, a1, "infinite"),
+                          (a1, a2, "one circle"), (poly, l1, "degree-1"),
+                          (loose, l1, "do not share an end")):
+            expect_error(d, "add_constraint",
+                         ["curvature takes a spline", why],
+                         sketch_id=gid, kind="curvature",
+                         refs=[[a, 0], [b, 0]])
+        for ref, why in ((l1, "`distance`"), (circ, "`diameter`"),
+                         (loose, "no arc-length dimension")):
+            expect_error(d, "add_constraint", ["arc_length takes", why],
+                         sketch_id=gid, kind="arc_length", refs=[[ref, 0]],
+                         value=5)
+        expect(sketch_json(d, gid) == g2_before,
+               "every refused G2 and arc length left the sketch as it was")
+        # On an arc, arc_length is millimetres along it.
+        d.call("add_constraint", sketch_id=gid, kind="arc_length",
+               refs=[[a2, 0]], value=6.0)
+        arc = next(e for e in sketch_json(d, gid)["entities"]
+                   if e["id"] == a2)
+        sweep = arc["end_angle"] - arc["start_angle"]
+        expect(abs(arc["radius"] * sweep - 6.0) < 1e-9,
+               f"the arc is 6 mm long: {arc}")
+
+        # add_constraint takes the geometry literally: the first dimension
+        # of a sketch drawn by eye does NOT rescale it over the RPC (the GUI
+        # does; docs/sketching/README.md#the-first-dimension).
+        rough = d.call("add_feature", feature={
+            "type": "Sketch", "name": "Rough",
+            "plane": {"origin": [0, 0, 0], "normal": [0, 0, 1],
+                      "uAxis": [1, 0, 0]},
+            "entities": [{"type": "line", "a": [0, 0], "b": [3, 0]},
+                         {"type": "line", "a": [0, 1], "b": [2, 1]}]})
+        ra, rb = rough["entity_ids"]
+        d.call("add_constraint", sketch_id=rough["id"], kind="distance",
+               refs=[[ra, 0], [ra, 1]], value=30)
+        other = next(e for e in sketch_json(d, rough["id"])["entities"]
+                     if e["id"] == rb)
+        expect(other["a"] == [0, 1] and other["b"] == [2, 1],
+               f"the other line is as it was drawn: {other}")
+
+        # `name = value` over the RPC: a batch of set_variable and
+        # add_constraint naming it. With scope "part" both land on the
+        # part's history, one undo step (a project variable has a history
+        # of its own: two).
+        before_rough = sketch_json(d, rough["id"])
+        r = d.call("batch", calls=[
+            {"method": "set_variable",
+             "params": {"name": "gap", "expression": "12",
+                        "scope": "part"}},
+            {"method": "add_constraint",
+             "params": {"sketch_id": rough["id"], "kind": "distance",
+                        "refs": [[rb, 0], [rb, 1]], "expr": "gap"}}])
+        expect("failed" not in r, f"the batch ran: {r}")
+        line = next(e for e in sketch_json(d, rough["id"])["entities"]
+                    if e["id"] == rb)
+        expect(abs(math.dist(line["a"], line["b"]) - 12.0) < 1e-9,
+               f"gap drives the line: {line}")
+        d.call("undo")
+        expect(sketch_json(d, rough["id"]) == before_rough,
+               "one undo takes the batch back")
+        expect(all(v["name"] != "gap"
+                   for v in d.call("list_variables")["variables"]),
+               "and the variable with it")
         print("sketch_constraint_refusal_smoke: OK")
     finally:
         app.terminate()

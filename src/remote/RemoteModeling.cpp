@@ -505,8 +505,10 @@ static constexpr MethodDoc ModelingMethods[] = {
      "geometry measures, answered as `measured` (mm; radians for an angle). "
      "Every answer gives the sketch's `dof` after the add. The geometry is "
      "taken literally: unlike the GUI's first dimension, nothing is "
-     "rescaled. To drive a dimension by a NEW variable in one undo step, "
-     "batch set_variable and add_constraint with `expr` naming it.",
+     "rescaled. To drive a dimension by a NEW variable, batch set_variable "
+     "and add_constraint with `expr` naming it: one undo step with "
+     "set_variable's scope \"part\"; a project variable is undone on its "
+     "own, a second step.",
      "*", remote::NeedsPart},
     {"add_constraints",
      "Append MANY constraints in one solve+regen+undo step: "
