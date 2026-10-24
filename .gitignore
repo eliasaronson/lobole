@@ -102,3 +102,4 @@ uv.lock
 
 # Reader-fuzz cases hold whole trees, autosave sidecars (*.d) included.
 !tests/reader_cases/**/*.d
+!tests/fixtures/**/*.obj
