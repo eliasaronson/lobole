@@ -676,6 +676,12 @@ void CheckProjectIndex(const nlohmann::json& index) {
                                l.type_name());
     return l;
   };
+  // A project holds at least one document (EnsureParts), and the save
+  // writes every one: a list that lost them all had nothing to open, and
+  // the adopt activated a tab that was not there.
+  if (list("documents").empty() && list("parts").empty())
+    throw std::runtime_error("lists no documents (`documents`, or a v1 "
+                             "`parts`); a project holds at least one");
   RefuseDocumentIds(list("documents"));
   for (const auto& d : list("documents")) {
     readctx::RefuseUnknownKeys(d, {"id", "name", "dir", "type", "folder"},

@@ -1,0 +1,12 @@
+{
+  "check_clash": true,
+  "clash_mode": "exact",
+  "driver_dof": "rotation",
+  "driver_mate": 4,
+  "from": 0.0,
+  "id": 5,
+  "name": "crank",
+  "samples": 49,
+  "to": 6.283185307179586,
+  "type": "MotionStudy"
+}

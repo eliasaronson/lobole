@@ -1,0 +1,23 @@
+{
+  "active": 0,
+  "folders": [
+    "Group"
+  ],
+  "format": "designer-project",
+  "parameters": [
+    {
+      "expression": "10",
+      "name": "w"
+    }
+  ],
+  "requirements_next_id": 2,
+  "sections": [
+    {
+      "base_plane": 0,
+      "offset": 1.5,
+      "reverse": false,
+      "visible": true
+    }
+  ],
+  "version": 2
+}
