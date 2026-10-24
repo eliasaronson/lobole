@@ -818,6 +818,21 @@ json ParseProjectFile(const fs::path& dir, const std::string& rel) {
   return readctx::InFile(rel, [&] { return ParseFileText(dir / rel, &dir); });
 }
 
+// The rollback bar a document names, set: one past its features (or not a
+// whole number) is refused -- it used to be dropped, and the document
+// opened with every feature built that the file had rolled back.
+void SetRollbackOf(Document& doc, const json& j) {
+  if (!j.contains("rollback"))
+    return;
+  const json& r = j.at("rollback");
+  if (!r.is_number_integer() || r.get<int64_t>() < -1 ||
+      r.get<int64_t>() >= static_cast<int64_t>(doc.FeatureCount()))
+    throw std::runtime_error("rollback " + r.dump() +
+                             " is not a feature index (it has " +
+                             std::to_string(doc.FeatureCount()) + " features)");
+  doc.SetRollback(r.get<int>());
+}
+
 // The active configuration a document names, set: one it does not have is
 // refused -- it used to be skipped, and the save then wrote no active
 // configuration at all.
@@ -1290,7 +1305,7 @@ std::unique_ptr<Document> LoadDir(const std::string& dirPath,
         }));
     }
     readctx::InFile("index.json", [&] {
-      doc->SetRollback(index.value("rollback", -1));
+      SetRollbackOf(*doc, index);
       // Apply the active configuration last so the final regeneration
       // reflects it.
       SetActive(*doc, index);
@@ -1897,7 +1912,7 @@ static std::unique_ptr<Document> LoadImpl(const std::string& path,
             doc->RestoreConfiguration(AtItem("configurations", i, [&] {
               return ConfigurationFromJson(configs[i]);
             }));
-          doc->SetRollback(j.value("rollback", -1)); // v19; absent = end
+          SetRollbackOf(*doc, j); // v19; absent = end
           SetActive(*doc, j);
           doc->SetUnits(UnitsFromEnvelope(j)); // v64
           LOG_INFO("Loaded document ({} features) from {}", doc->FeatureCount(),

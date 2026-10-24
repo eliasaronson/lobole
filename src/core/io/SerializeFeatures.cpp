@@ -617,6 +617,16 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
   for (const auto& in : j.at("instances")) {
     readctx::RefuseUnknownKeys(in, {"source", "k", "gen"},
                                "sketch derived op instance");
+    // Entity ids and a copy index, whole: a gen of 1.5 read as 1 made a
+    // copy of the source its own copy.
+    for (const char* key : {"source", "k", "gen"})
+      if (!in.at(key).is_number_unsigned() ||
+          in.at(key).get<uint64_t>() > UINT32_MAX ||
+          (std::string_view(key) != "k" && in.at(key).get<uint64_t>() == 0))
+        throw std::runtime_error(
+            "sketch derived op instance: " + std::string(key) + " " +
+            in.at(key).dump() + " is not " +
+            (std::string_view(key) == "k" ? "a copy index" : "an entity id"));
     for (const auto& seen : op.instances)
       if (seen.sourceId == in.at("source").get<uint32_t>() &&
           seen.k == in.at("k").get<int>())
