@@ -7,8 +7,9 @@
 # An occasional audit tool, like tools/coverage.sh and ci-local.sh --asan: NOT
 # part of CI, and not something to run after every edit.
 #
-# Why it exists. Every performance result in docs/performance/ was found by
-# hand-placing std::chrono::steady_clock around a phase somebody already
+# Why it exists. Every slow case found before the harness
+# (docs/performance/README.md) was found by hand-placing
+# std::chrono::steady_clock around a phase somebody already
 # suspected — the 259 s open, the 5.9 s assembly resync, the STEP file parsed
 # twice, the 7 s adaptive pocket. That works, and where the suspicion was
 # right it left behind a permanent breakdown worth keeping (SyncAssemblyRenderers
@@ -150,8 +151,17 @@ if [ "$MODE" = app ]; then
   else
     echo "profile: no setpriv — a SIGKILLed profile.sh would leave perf running"
   fi
-  "${PDEATH[@]}" "${PERF_RECORD[@]}" -- \
-    "$BIN" --headless --remote "$PORT" --exit-with-parent &
+  #
+  # Its config and state are private to the profile, and it never
+  # autosaves: an instance on the user's state directory writes its unsaved
+  # document's recovery copy over theirs (unsaved.autosave.json), and its
+  # opens land in their recently-opened list. Its port is still claimed
+  # machine-wide (/tmp/lobole-ports-<uid>), whatever its state directory.
+  mkdir -p "$OUT/app-config" "$OUT/app-state"
+  XDG_CONFIG_HOME="$OUT/app-config" XDG_STATE_HOME="$OUT/app-state" \
+    LOBOLE_NO_DIALOG=1 \
+    "${PDEATH[@]}" "${PERF_RECORD[@]}" -- \
+    "$BIN" --headless --remote "$PORT" --exit-with-parent --autosave 0 &
   RECORD_PID=$!
   APP_PID=""
   stop_app() {
@@ -216,7 +226,10 @@ echo
 echo "=== hottest symbols, SELF time (>=0.5%) ===================="
 # Truncated: a C++ template symbol runs to hundreds of characters and wraps the
 # preview into unreadability. The untruncated names are in flat.txt.
-grep -v '^#' "$OUT/flat.txt" | grep -v '^$' | head -25 | cut -c1-140
+# awk, not head: head exits after 25 lines, grep dies of SIGPIPE writing
+# the rest, and under pipefail the script ended there with 141 on a
+# profile that had worked, before printing where the reports are.
+grep -v '^#' "$OUT/flat.txt" | grep -v '^$' | awk 'NR <= 25' | cut -c1-140
 echo
 echo "full reports:"
 echo "  $OUT/flat.txt      what burns cycles"
