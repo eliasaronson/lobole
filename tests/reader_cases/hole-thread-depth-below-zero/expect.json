@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v149-hole-point.json:liar_number:1",
+  "input": "v149-hole-point.json",
+  "message": [
+    "v149-hole-point.json",
+    "Hole thread_depth",
+    "is below 0"
+  ],
+  "seed": 1
+}

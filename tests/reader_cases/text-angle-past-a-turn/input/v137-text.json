@@ -1,0 +1,117 @@
+{
+  "features": [
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "a": [
+            0,
+            0
+          ],
+          "b": [
+            40,
+            0
+          ],
+          "id": 1,
+          "type": "line"
+        },
+        {
+          "a": [
+            40,
+            0
+          ],
+          "b": [
+            40,
+            20
+          ],
+          "id": 2,
+          "type": "line"
+        },
+        {
+          "a": [
+            40,
+            20
+          ],
+          "b": [
+            0,
+            20
+          ],
+          "id": 3,
+          "type": "line"
+        },
+        {
+          "a": [
+            0,
+            20
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "id": 4,
+          "type": "line"
+        },
+        {
+          "anchor": [
+            20,
+            10
+          ],
+          "angle": 0.0,
+          "font": "sans",
+          "halign": "center",
+          "height": 8.0,
+          "id": 5,
+          "text": "Rook",
+          "type": "text",
+          "valign": "middle"
+        },
+        {
+          "anchor": [
+            2,
+            2
+          ],
+          "angle_deg": 9007199254740993,
+          "font": "hershey",
+          "halign": "left",
+          "height": 3.0,
+          "id": 6,
+          "spacing": 0.5,
+          "text": "a1",
+          "type": "text",
+          "valign": "baseline"
+        }
+      ],
+      "id": 1,
+      "name": "Plate",
+      "plane": {
+        "normal": [
+          0,
+          0,
+          1
+        ],
+        "origin": [
+          0,
+          0,
+          0
+        ],
+        "uAxis": [
+          1,
+          0,
+          0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 3.0,
+      "id": 2,
+      "mode": "new_body",
+      "name": "Pad",
+      "reversed": false,
+      "sketch_id": 1,
+      "type": "Extrude"
+    }
+  ],
+  "format": "designer-document",
+  "version": 137
+}

@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v137-text.json:json_liar:0",
+  "input": "v137-text.json",
+  "message": [
+    "v137-text.json",
+    "angle_deg 9007199254740993 is more than a full turn"
+  ],
+  "seed": 1
+}

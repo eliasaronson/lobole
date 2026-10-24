@@ -168,6 +168,11 @@ double AngleRadians(const json& j, const char* radKey, const char* degKey,
     throw std::runtime_error(
         std::string(radKey) + " is RADIANS and " + std::to_string(rad) +
         " is more than a full turn — pass " + degKey + " to say degrees");
+  // In degrees too: the writer writes radians, and more than a full turn
+  // would be refused by the next read of the document's own save.
+  if (!angles::IsPlausibleSweep(rad))
+    throw std::runtime_error(std::string(degKey) + " " + j.at(degKey).dump() +
+                             " is more than a full turn");
   return rad;
 }
 
@@ -471,6 +476,15 @@ json ConstraintToJson(const sketch::Constraint& c) {
   return j;
 }
 
+// A sketch entity id, read into the uint32_t it is stored in: whole and in
+// range. nlohmann narrows 2^53 + 1 to 1 with no word, which named another
+// entity (a mirror's axis read as entity 1).
+uint32_t EntityIdFromJson(const json& v, const std::string& what) {
+  if (!readctx::IsWhole(v) || v.get<uint64_t>() > UINT32_MAX)
+    throw std::runtime_error(what + " " + v.dump() + " is not an entity id");
+  return v.get<uint32_t>();
+}
+
 // A constraint's point reference, [entity, which]: exactly that, each in the
 // range it is stored in. A third element, or a `which` of 300 read through
 // uint8_t as 44, was a different point with no word.
@@ -617,15 +631,26 @@ sketch::DerivedOp DerivedOpFromJson(const json& j) {
   op.kind = DerivedKindFromString(j.at("kind").get<std::string>());
   op.sourceSketchId = IdField(j, "source_sketch_id", false);
   for (const auto& s : j.at("source_ids"))
-    op.sourceIds.push_back(s.get<uint32_t>());
+    op.sourceIds.push_back(EntityIdFromJson(s, "sketch derived op source_ids"));
   op.vec = Vec2FromJson(j.at("vec"));
   op.scalar = j.at("scalar").get<double>();
   op.count = j.at("count").get<int>();
   if (j.contains("vec2")) // v50: 2D linear grid
     op.vec2 = Vec2FromJson(j.at("vec2"));
   op.count2 = j.value("count2", 1);
-  op.axisEntity = j.value("axis_entity", uint32_t{0});     // v51
-  op.centerEntity = j.value("center_entity", uint32_t{0}); // v51
+  // v51
+  if (j.contains("axis_entity"))
+    op.axisEntity =
+        EntityIdFromJson(j.at("axis_entity"), "sketch derived op axis_entity");
+  if (j.contains("center_entity"))
+    op.centerEntity = EntityIdFromJson(j.at("center_entity"),
+                                       "sketch derived op center_entity");
+  if (j.contains("center_which") &&
+      (!readctx::IsWhole(j.at("center_which")) ||
+       j.at("center_which").get<uint64_t>() > 255))
+    throw std::runtime_error("sketch derived op center_which " +
+                             j.at("center_which").dump() +
+                             " is not a point index 0-255");
   op.centerWhich = static_cast<uint8_t>(j.value("center_which", 0));
   for (const auto& in : j.at("instances")) {
     readctx::RefuseUnknownKeys(in, {"source", "k", "gen"},
@@ -971,7 +996,7 @@ AxisRef AxisRefFromJson(const json& j) {
   else if (kind == "sketch_line") {
     axis.kind = AxisRef::Kind::SketchLine;
     axis.sketchId = IdField(j, "sketch_id", true);
-    axis.entityId = j.at("entity_id").get<uint32_t>();
+    axis.entityId = EntityIdFromJson(j.at("entity_id"), "axis entity_id");
   } else if (kind == "datum_axis") {
     axis.kind = AxisRef::Kind::DatumAxis;
     axis.datumAxisId = IdField(j, "datum_axis_id", true);
@@ -2970,6 +2995,25 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     readctx::RequireCount(j, "revision", "Template");
     if (j.contains("definition")) {
       tf->definition = tmpl::FromJson(j.at("definition"));
+      // A value names a parameter of the definition (a number's `_expr`
+      // beside it); any other key would be read by nothing and dropped by
+      // the next save.
+      if (j.contains("parameters") && j.at("parameters").is_object())
+        for (const auto& [key, v] : j.at("parameters").items()) {
+          const tmpl::Param* p = tf->definition.FindParam(key);
+          if (p == nullptr && key.ends_with("_expr"))
+            p = tf->definition.FindParam(key.substr(0, key.size() - 5));
+          if (p == nullptr) {
+            std::string names;
+            for (const tmpl::Param& q : tf->definition.params)
+              names += (names.empty() ? "" : ", ") + q.name;
+            throw std::runtime_error(
+                "Template '" + name + "': parameters names '" + key +
+                "', which template '" + tf->templateName +
+                "' does not have (it has: " +
+                (names.empty() ? std::string("none") : names) + ")");
+          }
+        }
       const json on = j.value("on", json());
       tf->values = tmpl::ValuesFromJson(
           tf->definition, j.value("parameters", json::object()), &on);
@@ -3101,7 +3145,7 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     case DatumAxisKind::SketchLine:
       da->sketchId = IdField(j, "sketch_id", true);
-      da->entityId = j.at("entity_id").get<uint32_t>();
+      da->entityId = EntityIdFromJson(j.at("entity_id"), "DatumAxis entity_id");
       break;
     case DatumAxisKind::GlobalX:
     case DatumAxisKind::GlobalY:
@@ -3169,6 +3213,30 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
   } else if (type == "Curve3D") { // v42
     auto cv = std::make_unique<CurveFeature>(
         name, Curve3DKindFromString(j.at("kind").get<std::string>()));
+    // The key table is every kind's; a key of another kind is refused, or
+    // it would be read by nothing and dropped by the next save (a spline's
+    // `closed` turned into `axis` loaded open).
+    {
+      std::vector<const char*> foreign;
+      if (cv->kind == Curve3DKind::Helix)
+        foreign = {"points", "degree", "closed"};
+      else
+        foreign = {"origin",      "axis",      "pitch",
+                   "pitch_expr",  "turns",     "turns_expr",
+                   "left_handed", "start_deg", "start_deg_expr"};
+      if (cv->kind != Curve3DKind::ControlPoly)
+        foreign.push_back("degree");
+      if (cv->kind == Curve3DKind::FitSpline ||
+          cv->kind == Curve3DKind::ControlPoly) {
+        foreign.push_back("radius");
+        foreign.push_back("radius_expr");
+      }
+      for (const char* key : foreign)
+        if (j.contains(key))
+          throw std::runtime_error("Curve3D '" + name + "' of kind " +
+                                   j.at("kind").dump() + " takes no `" + key +
+                                   "`");
+    }
     switch (cv->kind) {
     case Curve3DKind::FitSpline:
     case Curve3DKind::ControlPoly:
@@ -3534,6 +3602,15 @@ std::unique_ptr<Feature> FeatureFromJson(const json& j) {
     }
     // v148: the drill's point and a tapped fit's thread depth. Absent is
     // derived; a value Execute cannot use is its error, not a substitute.
+    // Each is written only when it is above 0 (0 is absent): a negative
+    // one would be dropped by the next save, and the hole would take the
+    // derived value with no word.
+    for (const char* key : {"drill_point_deg", "thread_depth"})
+      if (j.contains(key) && j.at(key).get<double>() < 0.0)
+        throw std::runtime_error(std::string("Hole ") + key + " " +
+                                 j.at(key).dump() +
+                                 " is below 0; leave it out to have it "
+                                 "derived");
     ho->pointAngleDeg = j.value("drill_point_deg", 0.0);
     ho->threadDepth = j.value("thread_depth", 0.0);
     ho->threadDepthExpr = j.value("thread_depth_expr", std::string{});

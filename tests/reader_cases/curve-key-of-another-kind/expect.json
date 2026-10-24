@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v42-curve3d.json:replace_word:5",
+  "input": "v42-curve3d.json",
+  "message": [
+    "v42-curve3d.json",
+    "takes no `axis`"
+  ],
+  "seed": 1
+}

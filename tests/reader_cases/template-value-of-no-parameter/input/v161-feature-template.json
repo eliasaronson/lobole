@@ -1,0 +1,491 @@
+{
+  "features": [
+    {
+      "constraints": [
+        {
+          "a": [
+            2332286846,
+            1
+          ],
+          "b": [
+            3946754885,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3946754885,
+            1
+          ],
+          "b": [
+            2427278173,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            2427278173,
+            1
+          ],
+          "b": [
+            1086707288,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            1086707288,
+            1
+          ],
+          "b": [
+            2332286846,
+            0
+          ],
+          "kind": "coincident",
+          "value": 0.0
+        },
+        {
+          "a": [
+            2332286846,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            2427278173,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "horizontal",
+          "value": 0.0
+        },
+        {
+          "a": [
+            3946754885,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        },
+        {
+          "a": [
+            1086707288,
+            0
+          ],
+          "b": [
+            0,
+            0
+          ],
+          "kind": "vertical",
+          "value": 0.0
+        },
+        {
+          "a": [
+            4294967040,
+            0
+          ],
+          "b": [
+            2332286846,
+            0
+          ],
+          "kind": "distance_x",
+          "value": -30.0
+        },
+        {
+          "a": [
+            4294967040,
+            0
+          ],
+          "b": [
+            2332286846,
+            0
+          ],
+          "kind": "distance_y",
+          "value": -20.0
+        },
+        {
+          "a": [
+            2332286846,
+            0
+          ],
+          "b": [
+            2332286846,
+            1
+          ],
+          "kind": "distance_x",
+          "value": 60.0
+        },
+        {
+          "a": [
+            3946754885,
+            0
+          ],
+          "b": [
+            3946754885,
+            1
+          ],
+          "kind": "distance_y",
+          "value": 40.0
+        }
+      ],
+      "entities": [
+        {
+          "a": [
+            -30.0,
+            -20.0
+          ],
+          "b": [
+            30.0,
+            -20.0
+          ],
+          "id": 2332286846,
+          "type": "line"
+        },
+        {
+          "a": [
+            30.0,
+            -20.0
+          ],
+          "b": [
+            30.0,
+            20.0
+          ],
+          "id": 3946754885,
+          "type": "line"
+        },
+        {
+          "a": [
+            30.0,
+            20.0
+          ],
+          "b": [
+            -30.0,
+            20.0
+          ],
+          "id": 2427278173,
+          "type": "line"
+        },
+        {
+          "a": [
+            -30.0,
+            20.0
+          ],
+          "b": [
+            -30.0,
+            -20.0
+          ],
+          "id": 1086707288,
+          "type": "line"
+        }
+      ],
+      "id": 1,
+      "name": "Plate sketch",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "uAxis": [
+          1.0,
+          0.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 20.0,
+      "id": 2,
+      "mode": "new_body",
+      "name": "Plate",
+      "reversed": false,
+      "sketch_id": 1,
+      "type": "Extrude"
+    },
+    {
+      "constraints": [],
+      "entities": [
+        {
+          "center": [
+            0.0,
+            0.0
+          ],
+          "id": 1,
+          "r_expr": "D / 2",
+          "radius": 10.0,
+          "type": "circle"
+        }
+      ],
+      "face_ref": {
+        "element": "2/cap1",
+        "feature_id": 2
+      },
+      "id": 3,
+      "name": "Seat",
+      "plane": {
+        "normal": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "origin": [
+          -3.608224830031759e-16,
+          7.105427357601002e-16,
+          20.0
+        ],
+        "uAxis": [
+          0.0,
+          1.0,
+          0.0
+        ]
+      },
+      "type": "Sketch"
+    },
+    {
+      "distance": 6.0,
+      "distance_expr": "B",
+      "id": 4,
+      "mode": "cut",
+      "name": "Seat",
+      "reversed": true,
+      "sketch_id": 3,
+      "type": "Extrude"
+    },
+    {
+      "definition": {
+        "bindings": [
+          {
+            "feature": 1,
+            "param": "on",
+            "path": "attach"
+          }
+        ],
+        "comment": "a bearing's seat: its outside diameter D, B deep",
+        "features": [
+          {
+            "constraints": [],
+            "entities": [
+              {
+                "center": [
+                  0.0,
+                  0.0
+                ],
+                "cx_expr": "u",
+                "id": 1,
+                "r_expr": "D / 2",
+                "radius": 10.0,
+                "type": "circle"
+              }
+            ],
+            "id": 1,
+            "name": "Seat",
+            "plane": {
+              "normal": [
+                0.0,
+                0.0,
+                1.0
+              ],
+              "origin": [
+                -3.608224830031759e-16,
+                7.105427357601002e-16,
+                20.0
+              ],
+              "uAxis": [
+                0.0,
+                1.0,
+                0.0
+              ]
+            },
+            "type": "Sketch"
+          },
+          {
+            "distance": 6.0,
+            "distance_expr": "B",
+            "id": 2,
+            "mode": "cut",
+            "name": "Seat",
+            "reversed": true,
+            "sketch_id": 1,
+            "type": "Extrude"
+          }
+        ],
+        "name": "bearing seat",
+        "parameters": [
+          {
+            "example": 0.0,
+            "kind": "length",
+            "name": "u"
+          },
+          {
+            "example": 20.0,
+            "kind": "length",
+            "name": "D"
+          },
+          {
+            "example": 6.0,
+            "kind": "length",
+            "name": "B"
+          },
+          {
+            "example": {
+              "element": "2/cap1",
+              "feature_id": 2
+            },
+            "kind": "reference",
+            "name": "on"
+          }
+        ],
+        "revision": 1
+      },
+      "id": 7,
+      "ids": [
+        [
+          1,
+          5
+        ],
+        [
+          2,
+          6
+        ]
+      ],
+      "name": "Lower seat",
+      "on": {
+        "element": "2/cap0",
+        "feature_id": 2
+      },
+      "parameters": {
+                "id": 1,
+        "D": 16.0,
+        "D_expr": "D - 4",
+        "u": 6.0
+      },
+      "revision": 1,
+      "template": "bearing seat",
+      "type": "Template"
+    }
+  ],
+  "format": "designer-document",
+  "parameters": [
+    {
+      "expression": "20",
+      "name": "D"
+    },
+    {
+      "expression": "6",
+      "name": "B"
+    }
+  ],
+  "templates": [
+    {
+      "bindings": [
+        {
+          "feature": 1,
+          "param": "on",
+          "path": "attach"
+        }
+      ],
+      "comment": "a bearing's seat: its outside diameter D, B deep",
+      "features": [
+        {
+          "constraints": [],
+          "entities": [
+            {
+              "center": [
+                0.0,
+                0.0
+              ],
+              "cx_expr": "u",
+              "id": 1,
+              "r_expr": "D / 2",
+              "radius": 10.0,
+              "type": "circle"
+            }
+          ],
+          "id": 1,
+          "name": "Seat",
+          "plane": {
+            "normal": [
+              0.0,
+              0.0,
+              1.0
+            ],
+            "origin": [
+              -3.608224830031759e-16,
+              7.105427357601002e-16,
+              20.0
+            ],
+            "uAxis": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "type": "Sketch"
+        },
+        {
+          "distance": 6.0,
+          "distance_expr": "B",
+          "id": 2,
+          "mode": "cut",
+          "name": "Seat",
+          "reversed": true,
+          "sketch_id": 1,
+          "type": "Extrude"
+        }
+      ],
+      "name": "bearing seat",
+      "parameters": [
+        {
+          "example": 0.0,
+          "kind": "length",
+          "name": "u"
+        },
+        {
+          "example": 20.0,
+          "kind": "length",
+          "name": "D"
+        },
+        {
+          "example": 6.0,
+          "kind": "length",
+          "name": "B"
+        },
+        {
+          "example": {
+            "element": "2/cap1",
+            "feature_id": 2
+          },
+          "kind": "reference",
+          "name": "on"
+        }
+      ],
+      "revision": 1
+    }
+  ],
+  "version": 161
+}

@@ -1,0 +1,11 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v51-mirror-and-center-ref.json:liar_number:3",
+  "input": "v51-mirror-and-center-ref.json",
+  "message": [
+    "v51-mirror-and-center-ref.json",
+    "axis_entity 9007199254740993 is not an entity id"
+  ],
+  "seed": 1
+}

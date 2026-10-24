@@ -1,0 +1,12 @@
+{
+  "expect": "refused",
+  "family": "part",
+  "id": "part/v161-feature-template.json:replace_line:2",
+  "input": "v161-feature-template.json",
+  "message": [
+    "v161-feature-template.json",
+    "parameters names 'id'",
+    "does not have"
+  ],
+  "seed": 1
+}
