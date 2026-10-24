@@ -153,16 +153,19 @@ std::optional<std::vector<int>> FeatureFaces(const Body& body,
 std::optional<glm::dvec3> HostNormal(const Body& body,
                                      const std::vector<int>& faces);
 
-// How long a direct edit's builders may run before it is given up, s: a
-// minute and half a second more for each face it was given. The builders
-// stop at their progress checks (Message_ProgressIndicator::UserBreak);
-// without one, deleting a face of a modelled thread ran Defeaturing's
-// edge-face intersections for more than fifteen minutes. It is a backstop
-// against a frozen app, not a test of speed: an answer that depends on the
-// machine's load is not one to rely on, so it sits far past any edit that
+// How long a direct edit's builders may run before it is given up, s: 30 s
+// and half a second more for each face it was given. The builders stop at
+// their progress checks (Message_ProgressIndicator::UserBreak); without one,
+// deleting a face of a modelled thread ran Defeaturing's edge-face
+// intersections for more than fifteen minutes. It is a backstop against a
+// frozen app, not a test of speed -- an answer that depends on the
+// machine's load is not one to rely on -- so it sits far past any edit that
 // builds (the 100 bores of plate_100_holes.step take about 20 s; they get
-// 110 s).
-inline double BuilderBudgetS(size_t faces) { return 60.0 + 0.5 * faces; }
+// 83 s), while a refusal it forces on one face, overshoot and all, still
+// answers inside the action matrix's minute (random design 33's face
+// `100/g4;U1;G110;M120` stopped at 67 s under a 60 s budget, 50 s under
+// 40 s).
+inline double BuilderBudgetS(size_t faces) { return 30.0 + 0.5 * faces; }
 
 // A progress indicator that asks its builder to stop once `seconds` have
 // passed (`Expired` then says so). Handed to a builder as `Start()`.

@@ -553,9 +553,9 @@ face. Offset and Replace Face refuse the same way
 the feature that made them.
 
 Every direct-edit builder (Defeaturing, the offset builder, MakerVolume) also
-runs under a deadline, `directedit::BuilderBudgetS` (a minute and 0.5 s a
+runs under a deadline, `directedit::BuilderBudgetS` (30 s and 0.5 s a
 face), through a `Message_ProgressIndicator` whose `UserBreak` turns true
-once it has passed: past it the edit is refused ("gave up after 60 s …").
+once it has passed: past it the edit is refused ("gave up after 30 s …").
 The builders check it only at their progress points, so a call can run
 past the budget before it stops. It is a backstop against a frozen app, far
 past any edit that builds, not a timer whose answer could depend on the
